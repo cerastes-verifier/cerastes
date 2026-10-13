@@ -1,0 +1,14 @@
+routine sq plain body @ L10:12
+  returns int
+  param 1 v: int
+routine dot plain body @ L12:5
+  returns int
+  param 1 a: const struct point *
+  param 2 b: const struct point *
+routine extern_decl plain nobody @ L16:5
+  returns int
+  param 1 n: int
+  param 2 c: char
+routine use plain body @ L18:5
+  returns int
+end walk: 4 routines reported, 0 routines with bodies in non-system files outside the primary file

@@ -1,0 +1,61 @@
+routine p1 plain body @ L12:5
+  returns int
+  param 1 x: int
+  attr [[cerastes::r1(1)]] on routine @ L10:3
+  attr [[cerastes::r2(2)]] on routine @ L11:3
+routine p2 prototype body @ L15:25
+  returns T
+  param 1 x: T
+  attr [[cerastes::r3(3)]] on routine @ L13:25
+  attr [[cerastes::r4(4)]] on routine @ L14:25
+routine p2 instance body @ L15:25
+  returns int
+  param 1 x: int
+  template p2 args <T=int>
+  attr [[cerastes::r3(3)]] on routine @ L13:25
+  attr [[cerastes::r4(4)]] on routine @ L14:25
+routine S::operator= plain implicit nobody @ L16:8
+  returns S &
+  param 1 _: S &&
+routine S::operator= plain implicit nobody @ L16:8
+  returns S &
+  param 1 _: const S &
+routine S::m plain body @ L17:28
+  returns int
+  param 1 x: int
+  attr [[cerastes::r5(5)]] on routine @ L16:14
+  attr [[cerastes::r6(6)]] on routine @ L17:3
+routine use plain body @ L18:5
+  returns int
+end walk: 7 routines reported, 0 routines with bodies in non-system files outside the primary file
+--- stderr ---
+"tests/il/inventory/attr_prefix_redecl.cpp", line 10: warning: attribute
+          namespace "cerastes" is unrecognized
+  [[cerastes::r1(1)]] int p1(int x);
+    ^
+
+"tests/il/inventory/attr_prefix_redecl.cpp", line 11: warning: attribute
+          namespace "cerastes" is unrecognized
+  [[cerastes::r2(2)]] int p1(int x);
+    ^
+
+"tests/il/inventory/attr_prefix_redecl.cpp", line 13: warning: attribute
+          namespace "cerastes" is unrecognized
+  template <typename T> [[cerastes::r3(3)]] T p2(T x);
+                          ^
+
+"tests/il/inventory/attr_prefix_redecl.cpp", line 14: warning: attribute
+          namespace "cerastes" is unrecognized
+  template <typename T> [[cerastes::r4(4)]] T p2(T x);
+                          ^
+
+"tests/il/inventory/attr_prefix_redecl.cpp", line 16: warning: attribute
+          namespace "cerastes" is unrecognized
+  struct S { [[cerastes::r5(5)]] int m(int x); };
+               ^
+
+"tests/il/inventory/attr_prefix_redecl.cpp", line 17: warning: attribute
+          namespace "cerastes" is unrecognized
+  [[cerastes::r6(6)]] int S::m(int x) { return x; }
+    ^
+

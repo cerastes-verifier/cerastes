@@ -1,0 +1,8 @@
+routine unused prototype body @ L10:3
+  returns T
+  param 1 v: T
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L11:12
+routine plain_user plain body @ L14:5
+  returns int
+  param 1 x: int
+end walk: 2 routines reported, 0 routines with bodies in non-system files outside the primary file

@@ -1,0 +1,62 @@
+routine inc prototype body @ L9:3
+  returns T
+  param 1 v: T
+  constraint type-constraint T std::__1::integral
+  op eok_cast type_kind=tk_template_param type=T @ L9:27
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L9:33
+routine inc instance body @ L9:3
+  returns int
+  param 1 v: int
+  template inc args <T=int>
+routine plus_local prototype body @ L12:3
+  returns T
+  param 1 v: T
+  constraint type-constraint T std::__1::integral
+  op eok_cast type_kind=tk_template_param type=auto @ L12:38
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L12:38
+  op eok_cast type_kind=tk_template_param type=T @ L12:50
+routine plus_local instance body @ L12:3
+  returns int
+  param 1 v: int
+  template plus_local args <T=int>
+routine const_cast_c prototype body @ L15:3
+  returns T
+  constraint type-constraint T std::__1::integral
+  tconst tpck_expression type=T @ L15:27
+  op eok_cast type_kind=tk_unknown type=T @ L15:27
+routine const_cast_c instance body @ L15:3
+  returns int
+  template const_cast_c args <T=int>
+routine static_cast_v prototype body @ L18:3
+  returns T
+  param 1 v: T
+  constraint type-constraint T std::__1::integral
+  op eok_cast type_kind=tk_template_param type=T @ L18:37
+routine static_cast_v instance body @ L18:3
+  returns int
+  param 1 v: int
+  template static_cast_v args <T=int>
+routine less10 prototype body @ L21:6
+  returns bool
+  param 1 v: T
+  constraint type-constraint T std::__1::integral
+  op eok_lt type_kind=tk_template_param type=<tptk_unknown> @ L21:35
+routine less10 instance body @ L21:6
+  returns bool
+  param 1 v: int
+  template less10 args <T=int>
+routine sum2 prototype body @ L24:3
+  returns T
+  param 1 a: T
+  param 2 b: T
+  constraint type-constraint T std::__1::integral
+  op eok_cast type_kind=tk_template_param type=T @ L24:39
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L24:45
+routine sum2 instance body @ L24:3
+  returns int
+  param 1 a: int
+  param 2 b: int
+  template sum2 args <T=int>
+routine use plain body @ L26:5
+  returns int
+end walk: 13 routines reported, 0 routines with bodies in non-system files outside the primary file

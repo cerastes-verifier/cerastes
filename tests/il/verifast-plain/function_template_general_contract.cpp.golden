@@ -1,0 +1,70 @@
+routine ShortPoint::ShortPoint plain implicit nobody @ L7:8
+  returns void
+  param 1 _: const ShortPoint &
+routine ShortPoint::operator= plain implicit nobody @ L7:8
+  returns ShortPoint &
+  param 1 _: const ShortPoint &
+routine ShortPoint::ShortPoint plain body @ L12:3
+  returns void
+  param 1 x: short
+  param 2 y: short
+routine ShortPoint::~ShortPoint plain body @ L17:3
+  returns void
+routine IntPoint::IntPoint plain implicit nobody @ L23:8
+  returns void
+  param 1 _: const IntPoint &
+routine IntPoint::operator= plain implicit nobody @ L23:8
+  returns IntPoint &
+  param 1 _: const IntPoint &
+routine IntPoint::IntPoint plain body @ L28:3
+  returns void
+  param 1 x: int
+  param 2 y: int
+routine IntPoint::~IntPoint plain body @ L33:3
+  returns void
+routine swap prototype body @ L40:6
+  returns void
+  param 1 a: T *
+  param 2 b: T *
+  op eok_indirect type_kind=tk_pointer type=T @ L44:12
+  op eok_assign type_kind=tk_template_param type=<tptk_unknown> @ L45:6
+  op eok_indirect type_kind=tk_pointer type=T @ L45:3
+  op eok_indirect type_kind=tk_pointer type=T @ L45:8
+  op eok_assign type_kind=tk_template_param type=<tptk_unknown> @ L46:6
+  op eok_indirect type_kind=tk_pointer type=T @ L46:3
+routine swap instance body @ L40:6
+  returns void
+  param 1 a: int *
+  param 2 b: int *
+  template swap args <T=int>
+routine swap instance body @ L40:6
+  returns void
+  param 1 a: short *
+  param 2 b: short *
+  template swap args <T=short>
+routine mirror prototype body @ L50:6
+  returns void
+  param 1 t: T *
+  op eok_call type_kind=tk_unknown type=<tptk_unknown> @ L54:7
+  tconst tpck_unknown_function type=<tptk_unknown> @ L54:3
+  tconst tpck_expression type=<tptk_unknown> @ L54:8
+  op eok_address_of type_kind=tk_pointer type=<tptk_unknown> @ L54:8
+  op eok_points_to_static type_kind=tk_unknown type=<tptk_unknown> @ L54:10
+  op eok_lvalue type_kind=tk_template_param type=<tptk_unknown> @ -
+  tconst tpck_member type=<tptk_unknown> @ L54:12
+  tconst tpck_expression type=<tptk_unknown> @ L54:17
+  op eok_address_of type_kind=tk_pointer type=<tptk_unknown> @ L54:17
+  op eok_points_to_static type_kind=tk_unknown type=<tptk_unknown> @ L54:19
+  op eok_lvalue type_kind=tk_template_param type=<tptk_unknown> @ -
+  tconst tpck_member type=<tptk_unknown> @ L54:21
+routine mirror instance body @ L50:6
+  returns void
+  param 1 t: IntPoint *
+  template mirror args <T=IntPoint>
+routine mirror instance body @ L50:6
+  returns void
+  param 1 t: ShortPoint *
+  template mirror args <T=ShortPoint>
+routine main plain body @ L57:5
+  returns int
+end walk: 15 routines reported, 0 routines with bodies in non-system files outside the primary file

@@ -1,0 +1,45 @@
+routine f1 prototype body @ L9:30
+  returns T
+  param 1 x: T
+  constraint type-constraint T std::__1::integral
+routine f1 instance body @ L9:30
+  returns int
+  param 1 x: int
+  template f1 args <T=int>
+routine f2 prototype body @ L12:51
+  returns T
+  param 1 x: T
+  constraint requires std::__1::integral<T>
+routine f2 instance body @ L12:51
+  returns int
+  param 1 x: int
+  template f2 args <T=int>
+routine f3 prototype body @ L15:25
+  returns T
+  param 1 x: T
+  constraint trailing std::__1::integral<T>
+routine f3 instance body @ L15:25
+  returns int
+  param 1 x: int
+  template f3 args <T=int>
+routine f4 prototype body @ L18:6
+  returns auto
+  param 1 x: std::__1::integral auto
+  constraint abbreviated #0 std::__1::integral
+routine f4 instance body @ L18:6
+  returns int
+  param 1 x: int
+  template f4 args <#0=int>
+routine f5 prototype body @ L22:3
+  returns T
+  param 1 x: T
+  param 2 _: U
+  constraint requires std::__1::integral<T> && std::__1::integral<U>
+routine f5 instance body @ L22:3
+  returns int
+  param 1 x: int
+  param 2 _: int
+  template f5 args <T=int, U=int>
+routine use plain body @ L24:5
+  returns int
+end walk: 11 routines reported, 0 routines with bodies in non-system files outside the primary file

@@ -1,0 +1,64 @@
+routine logic prototype body @ L7:33
+  returns bool
+  param 1 a: T
+  param 2 b: T
+  constraint type-constraint T std::__1::integral
+  op eok_land type_kind=tk_integer type=<tptk_unknown> @ L7:67
+  tconst tpck_expression type=<tptk_unknown> @ L7:58
+  op eok_not type_kind=tk_template_param type=<tptk_unknown> @ L7:58
+  op eok_lt type_kind=tk_template_param type=<tptk_unknown> @ L7:62
+  op eok_lor type_kind=tk_integer type=<tptk_unknown> @ L7:78
+  op eok_eq type_kind=tk_template_param type=<tptk_unknown> @ L7:73
+  op eok_gt type_kind=tk_template_param type=<tptk_unknown> @ L7:83
+routine logic instance body @ L7:33
+  returns bool
+  param 1 a: int
+  param 2 b: int
+  template logic args <T=int>
+routine cond prototype body @ L9:30
+  returns T
+  param 1 a: T
+  param 2 b: T
+  constraint type-constraint T std::__1::integral
+  op eok_question type_kind=tk_unknown type=<tptk_unknown> @ L9:60
+  op eok_bool_cast type_kind=tk_template_param type=bool @ L9:54
+  op eok_lt type_kind=tk_template_param type=<tptk_unknown> @ L9:56
+routine cond instance body @ L9:30
+  returns int
+  param 1 a: int
+  param 2 b: int
+  template cond args <T=int>
+routine dflt prototype body @ L11:30
+  returns T
+  param 1 a: T
+  param 2 b: T
+  constraint type-constraint T std::__1::integral
+  tconst tpck_expression type=T @ L11:46
+  op eok_cast type_kind=tk_unknown type=T @ L11:46
+  op eok_cast type_kind=tk_template_param type=T @ L11:61
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L11:67
+routine dflt instance body @ L11:30
+  returns int
+  param 1 a: int
+  param 2 b: int
+  template dflt args <T=int>
+routine deref prototype body @ L13:25
+  returns T
+  param 1 p: T *
+  param 2 r: T &
+  tconst tpck_expression type=T * @ L13:52
+  op eok_cast type_kind=tk_unknown type=T * @ L13:52
+  tconst tpck_expression type=<tptk_unknown> @ L13:52
+  op eok_address_of type_kind=tk_pointer type=<tptk_unknown> @ L13:52
+  op eok_ref_indirect type_kind=tk_pointer type=T @ L13:53
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L13:66
+  op eok_indirect type_kind=tk_pointer type=T @ L13:63
+  op eok_indirect type_kind=tk_pointer type=T @ L13:68
+routine deref instance body @ L13:25
+  returns int
+  param 1 p: int *
+  param 2 r: int &
+  template deref args <T=int>
+routine use plain body @ L14:5
+  returns int
+end walk: 9 routines reported, 0 routines with bodies in non-system files outside the primary file

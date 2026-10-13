@@ -1,0 +1,10 @@
+routine plain plain body @ L14:5
+  returns int
+  param 1 x: int
+routine tmpl prototype body @ L17:3
+  returns T
+  param 1 v: T
+  op eok_cast type_kind=tk_template_param type=T @ L18:11
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L18:11
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L19:12
+end walk: 2 routines reported, 0 routines with bodies in non-system files outside the primary file

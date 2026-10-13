@@ -1,0 +1,51 @@
+routine copy_through_locals prototype body @ L11:3
+  returns T
+  param 1 x: T
+  op eok_assign type_kind=tk_template_param type=<tptk_unknown> @ L17:5
+routine copy_through_locals instance body @ L11:3
+  returns int
+  param 1 x: int
+  template copy_through_locals args <T=int>
+routine copy_through_locals instance body @ L11:3
+  returns long
+  param 1 x: long
+  template copy_through_locals args <T=long>
+routine second prototype body @ L24:3
+  returns U
+  param 1 x: T
+  param 2 y: U
+  op eok_call type_kind=tk_unknown type=int @ L29:30
+routine second instance body @ L24:3
+  returns char
+  param 1 x: int
+  param 2 y: char
+  template second args <T=int, U=char>
+routine declared_first prototype body @ L40:3
+  returns T
+  param 1 x: T
+routine declared_first instance body @ L40:3
+  returns unsigned int
+  param 1 x: unsigned int
+  template declared_first args <T=unsigned int>
+routine assign prototype body @ L48:6
+  returns void
+  param 1 r: T &
+  param 2 v: T
+  op eok_assign type_kind=tk_template_param type=<tptk_unknown> @ L52:5
+  op eok_ref_indirect type_kind=tk_pointer type=T @ L52:3
+routine assign instance body @ L48:6
+  returns void
+  param 1 r: int &
+  param 2 v: int
+  template assign args <T=int>
+routine same_ref prototype body @ L56:4
+  returns T &
+  param 1 r: T &
+  op eok_ref_indirect type_kind=tk_pointer type=T @ L60:10
+routine same_ref instance body @ L56:4
+  returns int &
+  param 1 r: int &
+  template same_ref args <T=int>
+routine main plain body @ L63:5
+  returns int
+end walk: 12 routines reported, 0 routines with bodies in non-system files outside the primary file

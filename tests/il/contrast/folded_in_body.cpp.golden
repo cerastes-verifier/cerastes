@@ -1,0 +1,24 @@
+routine fold prototype body @ L18:3
+  returns T
+  param 1 v: T
+  op eok_add type_kind=tk_integer type=int @ L19:13
+  op eok_shiftl type_kind=tk_integer type=int @ L20:13
+  op eok_subtract type_kind=tk_integer type=unsigned int @ L21:19
+  op eok_multiply type_kind=tk_integer type=int @ L22:13
+  op eok_divide type_kind=tk_integer type=int @ L23:15
+  op eok_negate type_kind=tk_integer type=int @ L24:11
+  tconst tpck_expression type=unsigned long @ L25:21
+  op eok_multiply type_kind=tk_integer type=unsigned long @ L25:31
+  tconst tpck_sizeof type=unsigned long @ L25:21
+  op eok_cast type_kind=tk_integer type=unsigned long @ L25:33
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L26:46
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L26:42
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L26:38
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L26:34
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L26:25
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L26:21
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L26:17
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L26:12
+  op eok_cast type_kind=tk_integer type=int @ L26:27
+  op eok_cast type_kind=tk_integer type=int @ L26:48
+end walk: 1 routines reported, 0 routines with bodies in non-system files outside the primary file

@@ -1,0 +1,38 @@
+routine never_used prototype body @ L10:3
+  returns T
+  param 1 v: T
+  constraint type-constraint T std::__1::integral
+  tconst tpck_expression type=T @ L11:11
+  op eok_cast type_kind=tk_unknown type=T @ L11:11
+  tconst tpck_expression type=T @ L12:14
+  op eok_cast type_kind=tk_unknown type=T @ L12:14
+  op eok_bool_cast type_kind=tk_template_param type=bool @ L12:17
+  op eok_lt type_kind=tk_template_param type=<tptk_unknown> @ L12:19
+  op eok_bool_cast type_kind=tk_template_param type=bool @ L13:9
+  op eok_lt type_kind=tk_template_param type=<tptk_unknown> @ L13:11
+  op eok_assign type_kind=tk_template_param type=<tptk_unknown> @ L13:21
+  op eok_cast type_kind=tk_template_param type=T @ L13:23
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L13:31
+  op eok_assign type_kind=tk_template_param type=<tptk_unknown> @ L14:14
+  op eok_cast type_kind=tk_template_param type=T @ L14:16
+  op eok_subtract type_kind=tk_template_param type=<tptk_unknown> @ L14:24
+  tconst tpck_expression type=<tptk_unknown> @ L12:24
+  op eok_pre_incr type_kind=tk_template_param type=<tptk_unknown> @ L12:24
+routine used prototype body @ L20:3
+  returns T
+  param 1 v: T
+  constraint type-constraint T std::__1::integral
+  tconst tpck_expression type=T @ L21:11
+  op eok_cast type_kind=tk_unknown type=T @ L21:11
+  op eok_bool_cast type_kind=tk_template_param type=bool @ L22:10
+  op eok_lt type_kind=tk_template_param type=<tptk_unknown> @ L22:14
+  op eok_assign type_kind=tk_template_param type=<tptk_unknown> @ L22:23
+  op eok_cast type_kind=tk_template_param type=T @ L22:25
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L22:33
+routine used instance body @ L20:3
+  returns int
+  param 1 v: int
+  template used args <T=int>
+routine main plain body @ L26:5
+  returns int
+end walk: 4 routines reported, 0 routines with bodies in non-system files outside the primary file

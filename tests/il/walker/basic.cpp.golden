@@ -1,0 +1,76 @@
+routine outer::inner::twice plain body @ L7:5
+  returns int
+  param 1 x: int
+routine outer::inner::twice plain body @ L8:6
+  returns long
+  param 1 x: long
+routine outer::helper plain body @ L11:12
+  returns int
+  param 1 a: int
+  param 2 b: int
+routine declared_only plain nobody @ L14:5
+  returns int
+  param 1 x: int
+  param 2 s: const char *
+routine Counter::operator= plain implicit nobody @ L16:8
+  returns Counter &
+  param 1 _: Counter &&
+routine Counter::operator= plain implicit nobody @ L16:8
+  returns Counter &
+  param 1 _: const Counter &
+routine Counter::next plain body @ L18:7
+  returns int
+routine Counter::get plain body @ L19:7
+  returns int
+routine Counter::zero plain body @ L20:14
+  returns int
+routine Pair::Pair plain implicit nobody @ L23:8
+  returns void
+  param 1 _: Pair &&
+routine Pair::Pair plain implicit nobody @ L23:8
+  returns void
+  param 1 _: const Pair &
+routine Pair::operator= plain implicit nobody @ L23:8
+  returns Pair &
+  param 1 _: Pair &&
+routine Pair::operator= plain implicit nobody @ L23:8
+  returns Pair &
+  param 1 _: const Pair &
+routine Pair::Pair plain body @ L26:3
+  returns void
+routine Pair::Pair plain body @ L27:3
+  returns void
+  param 1 x: int
+  param 2 y: int
+routine Holder::Holder plain implicit body @ L30:8
+  returns void
+routine Holder::Holder plain implicit nobody @ L30:8
+  returns void
+  param 1 _: Holder &&
+routine Holder::Holder plain implicit nobody @ L30:8
+  returns void
+  param 1 _: const Holder &
+routine Holder::operator= plain implicit nobody @ L30:8
+  returns Holder &
+  param 1 _: Holder &&
+routine Holder::operator= plain implicit nobody @ L30:8
+  returns Holder &
+  param 1 _: const Holder &
+routine use plain body @ L34:5
+  returns int
+  param 1 v: int
+routine <lambda@L38:14>::<unnamed> plain implicit nobody @ L38:14
+  returns void
+routine <lambda@L38:14>::<unnamed> plain implicit nobody @ L38:14
+  returns void
+  param 1 _: <lambda@L38:14> &&
+routine <lambda@L38:14>::<unnamed> plain implicit nobody @ L38:14
+  returns void
+  param 1 _: const <lambda@L38:14> &
+routine <lambda@L38:14>::operator= plain implicit nobody @ L38:14
+  returns <lambda@L38:14> &
+  param 1 _: const <lambda@L38:14> &
+routine <lambda@L38:14>::operator() plain body @ L38:17
+  returns int
+  param 1 w: int
+end walk: 26 routines reported, 0 routines with bodies in non-system files outside the primary file

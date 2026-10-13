@@ -1,0 +1,14 @@
+routine add plain body @ L10:5
+  returns int
+  param 1 a: int
+  param 2 b: int
+routine widen plain body @ L12:6
+  returns long
+  param 1 s: short
+routine narrow plain body @ L14:10
+  returns unsigned int
+  param 1 v: long
+routine count_down plain body @ L22:5
+  returns int
+  param 1 n: int
+end walk: 4 routines reported, 0 routines with bodies in non-system files outside the primary file

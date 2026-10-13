@@ -1,0 +1,155 @@
+routine f plain nobody @ L24:36
+  returns int
+  param 1 x: int
+  attr [[cerastes::a1(x > 0 , y + 1)]] on routine @ L24:3
+routine g plain body @ L28:5
+  returns int
+  param 1 x: int
+  attr [[cerastes::a2(x > 0 , x + 1)]] on type @ L28:16
+  stmt stmk_while @ L30:3 attr [[cerastes::a3(i < x , i + 2)]]
+  stmt stmk_for @ L31:3 attr [[cerastes::a4(i <= x)]]
+  stmt stmk_empty @ L32:3 attr [[cerastes::a5(i > 0)]]
+routine h plain nobody @ L36:36
+  returns int
+  param 1 x: int
+  attr [[cerastes::b0(x > 0 , y + 1)]] on routine @ L36:3
+routine tmpl prototype body @ L45:3
+  returns T
+  param 1 x: T
+  attr [[cerastes::b1(x > 0 , x + 1)]] on routine @ L39:3
+  tconst tpck_expression type=T @ L46:9
+  op eok_cast type_kind=tk_unknown type=T @ L46:9
+  stmt stmk_while @ L47:3 attr [[cerastes::b3(i < x , i + 2)]]
+  op eok_bool_cast type_kind=tk_template_param type=bool @ L47:41
+  op eok_lt type_kind=tk_template_param type=<tptk_unknown> @ L47:43
+  tconst tpck_expression type=<tptk_unknown> @ L47:50
+  op eok_pre_incr type_kind=tk_template_param type=<tptk_unknown> @ L47:50
+  stmt stmk_for @ L48:3 attr [[cerastes::b4(i <= x)]]
+  tconst tpck_expression type=T @ L48:39
+  op eok_cast type_kind=tk_unknown type=T @ L48:39
+  op eok_bool_cast type_kind=tk_template_param type=bool @ L48:42
+  op eok_lt type_kind=tk_template_param type=<tptk_unknown> @ L48:44
+  tconst tpck_expression type=<tptk_unknown> @ L48:56
+  op eok_pre_incr type_kind=tk_template_param type=<tptk_unknown> @ L48:56
+  tconst tpck_expression type=<tptk_unknown> @ L48:49
+  op eok_pre_incr type_kind=tk_template_param type=<tptk_unknown> @ L48:49
+  stmt stmk_empty @ L49:3 attr [[cerastes::b5(i > 0)]]
+routine tmpl instance body @ L45:3
+  returns int
+  param 1 x: int
+  template tmpl args <T=int>
+  attr [[cerastes::b1(x > 0 , x + 1)]] on routine @ L39:3
+  stmt stmk_while @ L47:3 attr [[cerastes::b3(i < x , i + 2)]]
+  stmt stmk_for @ L48:3 attr [[cerastes::b4(i <= x)]]
+  stmt stmk_empty @ L49:3 attr [[cerastes::b5(i > 0)]]
+routine Box<int>::operator= plain implicit nobody @ L54:8
+  returns Box<int> &
+  param 1 _: Box<int> &&
+routine Box<int>::operator= plain implicit nobody @ L54:8
+  returns Box<int> &
+  param 1 _: const Box<int> &
+routine Box<T>::get prototype body @ L56:5
+  returns T
+  param 1 x: T
+  attr [[cerastes::c1(x > 0 , x + 1)]] on type @ L56:16
+  tconst tpck_expression type=T @ L57:11
+  op eok_cast type_kind=tk_unknown type=T @ L57:11
+  stmt stmk_while @ L58:5 attr [[cerastes::c2(i < x)]]
+  op eok_bool_cast type_kind=tk_template_param type=bool @ L58:36
+  op eok_lt type_kind=tk_template_param type=<tptk_unknown> @ L58:38
+  tconst tpck_expression type=<tptk_unknown> @ L58:45
+  op eok_pre_incr type_kind=tk_template_param type=<tptk_unknown> @ L58:45
+  stmt stmk_empty @ L59:5 attr [[cerastes::c3(i > 0)]]
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L60:14
+  op eok_points_to_field type_kind=tk_unknown type=T @ L60:16
+routine Box<int>::get instance body @ L56:5
+  returns int
+  param 1 x: int
+  template Box<T>::get args <none>
+  attr [[cerastes::c1(x > 0 , x + 1)]] on type @ L56:16
+  stmt stmk_while @ L58:5 attr [[cerastes::c2(i < x)]]
+  stmt stmk_empty @ L59:5 attr [[cerastes::c3(i > 0)]]
+routine use plain body @ L64:5
+  returns int
+end walk: 10 routines reported, 0 routines with bodies in non-system files outside the primary file
+--- stderr ---
+"tests/il/g1/check5_attributes.cpp", line 24: warning: attribute namespace
+          "cerastes" is unrecognized
+  [[cerastes::a1(x > 0, y + 1)]] int f(int x);
+    ^
+
+"tests/il/g1/check5_attributes.cpp", line 26: warning: attribute namespace
+          "cerastes" is unrecognized
+  int g(int x) [[cerastes::a2(x > 0, x + 1)]];
+                 ^
+
+"tests/il/g1/check5_attributes.cpp", line 28: warning: attribute namespace
+          "cerastes" is unrecognized
+  int g(int x) [[cerastes::a2(x > 0, x + 1)]] {
+                 ^
+
+"tests/il/g1/check5_attributes.cpp", line 30: warning: attribute namespace
+          "cerastes" is unrecognized
+    [[cerastes::a3(i < x, i + 2)]] while (i < x) { ++i; }
+      ^
+
+"tests/il/g1/check5_attributes.cpp", line 31: warning: attribute namespace
+          "cerastes" is unrecognized
+    [[cerastes::a4(i <= x)]] for (int j = 0; j < x; ++j) { ++i; }
+      ^
+
+"tests/il/g1/check5_attributes.cpp", line 32: warning: attribute namespace
+          "cerastes" is unrecognized
+    [[cerastes::a5(i > 0)]];
+      ^
+
+"tests/il/g1/check5_attributes.cpp", line 36: warning: attribute namespace
+          "cerastes" is unrecognized
+  [[cerastes::b0(x > 0, y + 1)]] int h(int x);
+    ^
+
+"tests/il/g1/check5_attributes.cpp", line 39: warning: attribute namespace
+          "cerastes" is unrecognized
+  [[cerastes::b1(x > 0, x + 1)]] T tmpl(T x);
+    ^
+
+"tests/il/g1/check5_attributes.cpp", line 42: warning: attribute namespace
+          "cerastes" is unrecognized
+  T tmpl(T x) [[cerastes::b2(x > 0, x + 1)]];
+                ^
+
+"tests/il/g1/check5_attributes.cpp", line 45: warning: attribute namespace
+          "cerastes" is unrecognized
+  T tmpl(T x) [[cerastes::b2(x > 0, x + 1)]] {
+                ^
+
+"tests/il/g1/check5_attributes.cpp", line 47: warning: attribute namespace
+          "cerastes" is unrecognized
+    [[cerastes::b3(i < x, i + 2)]] while (i < x) { ++i; }
+      ^
+
+"tests/il/g1/check5_attributes.cpp", line 48: warning: attribute namespace
+          "cerastes" is unrecognized
+    [[cerastes::b4(i <= x)]] for (T j = 0; j < x; ++j) { ++i; }
+      ^
+
+"tests/il/g1/check5_attributes.cpp", line 49: warning: attribute namespace
+          "cerastes" is unrecognized
+    [[cerastes::b5(i > 0)]];
+      ^
+
+"tests/il/g1/check5_attributes.cpp", line 56: warning: attribute namespace
+          "cerastes" is unrecognized
+    T get(T x) [[cerastes::c1(x > 0, x + 1)]] {
+                 ^
+
+"tests/il/g1/check5_attributes.cpp", line 58: warning: attribute namespace
+          "cerastes" is unrecognized
+      [[cerastes::c2(i < x)]] while (i < x) { ++i; }
+        ^
+
+"tests/il/g1/check5_attributes.cpp", line 59: warning: attribute namespace
+          "cerastes" is unrecognized
+      [[cerastes::c3(i > 0)]];
+        ^
+

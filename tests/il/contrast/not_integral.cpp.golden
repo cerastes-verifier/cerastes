@@ -1,0 +1,30 @@
+routine only_floats prototype body @ L17:3
+  returns T
+  param 1 v: T
+  constraint type-constraint T std::__1::floating_point
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L17:31
+routine only_small prototype body @ L20:3
+  returns T
+  param 1 v: T
+  constraint type-constraint T Small
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L20:30
+routine free_for_all prototype body @ L23:3
+  returns T
+  param 1 v: T
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L23:32
+routine req_float prototype body @ L27:3
+  returns T
+  param 1 v: T
+  constraint requires std::__1::floating_point<T>
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L27:29
+routine trailing_float prototype body @ L30:3
+  returns T
+  param 1 v: T
+  constraint trailing Small<T>
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L30:52
+routine abbrev prototype body @ L32:6
+  returns auto
+  param 1 v: std::__1::floating_point auto
+  constraint abbreviated #0 std::__1::floating_point
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L32:52
+end walk: 6 routines reported, 0 routines with bodies in non-system files outside the primary file

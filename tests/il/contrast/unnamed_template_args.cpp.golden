@@ -1,0 +1,20 @@
+routine <unnamed>::operator= plain implicit nobody @ L11:8
+  returns struct <unnamed> &
+  param 1 _: const struct <unnamed> &
+routine <unnamed>::operator= plain implicit nobody @ L11:8
+  returns struct <unnamed> &
+  param 1 _: struct <unnamed> &&
+routine pick prototype body @ L15:3
+  returns T
+  param 1 v: T
+routine pick instance body @ L15:3
+  returns enum <unnamed>
+  param 1 v: enum <unnamed>
+  template pick args <T=enum <unnamed>>
+routine pick instance body @ L15:3
+  returns struct <unnamed>
+  param 1 v: struct <unnamed>
+  template pick args <T=struct <unnamed>>
+routine use plain body @ L17:5
+  returns int
+end walk: 6 routines reported, 0 routines with bodies in non-system files outside the primary file

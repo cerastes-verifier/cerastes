@@ -1,0 +1,45 @@
+routine stat prototype body @ L13:3
+  returns T
+  param 1 v: T
+  op eok_subtract type_kind=tk_integer type=int @ L16:26
+  op eok_cast type_kind=tk_integer type=int @ L15:19
+  tconst tpck_expression type=unsigned long @ L15:19
+  op eok_add type_kind=tk_integer type=unsigned long @ L15:29
+  tconst tpck_sizeof type=unsigned long @ L15:19
+  op eok_cast type_kind=tk_integer type=unsigned long @ L15:31
+  op eok_cast type_kind=tk_integer type=int @ -
+  tconst tpck_expression type=unsigned long @ -
+  tconst tpck_expression type=int @ L15:19
+  tconst tpck_expression type=T @ L14:17
+  op eok_cast type_kind=tk_template_param type=T @ L14:17
+  tconst tpck_expression type=<tptk_unknown> @ L14:17
+  op eok_multiply type_kind=tk_template_param type=<tptk_unknown> @ L14:22
+  tconst tpck_expression type=T @ L14:17
+  op eok_cast type_kind=tk_unknown type=T @ L14:17
+  op eok_subtract type_kind=tk_integer type=int @ L21:29
+  op eok_cast type_kind=tk_integer type=int @ L20:22
+  tconst tpck_expression type=unsigned long @ L20:22
+  op eok_add type_kind=tk_integer type=unsigned long @ L20:32
+  tconst tpck_sizeof type=unsigned long @ L20:22
+  op eok_cast type_kind=tk_integer type=unsigned long @ L20:34
+  op eok_cast type_kind=tk_integer type=int @ -
+  tconst tpck_expression type=unsigned long @ -
+  tconst tpck_expression type=int @ L20:22
+  tconst tpck_expression type=T @ L19:20
+  op eok_cast type_kind=tk_template_param type=T @ L19:20
+  tconst tpck_expression type=<tptk_unknown> @ L19:20
+  op eok_multiply type_kind=tk_template_param type=<tptk_unknown> @ L19:25
+  tconst tpck_expression type=T @ L19:20
+  op eok_cast type_kind=tk_unknown type=T @ L19:20
+  op eok_cast type_kind=tk_template_param type=T @ L17:20
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L17:20
+  op eok_cast type_kind=tk_template_param type=T @ L22:23
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L22:23
+  op eok_assign type_kind=tk_template_param type=<tptk_unknown> @ L23:9
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L23:26
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L23:21
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L23:15
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L25:22
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L25:18
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L25:13
+end walk: 1 routines reported, 0 routines with bodies in non-system files outside the primary file

@@ -1,0 +1,126 @@
+routine f1 plain body @ L17:5
+  returns int
+  param 1 x: int
+  stmt stmk_empty @ L17:17 attr [[cerastes::n1(x)]]
+routine f2 plain body @ L18:5
+  returns int
+  param 1 x: int
+  stmt stmk_empty @ L18:19 attr [[cerastes::n2(x)]]
+routine f3 plain body @ L19:5
+  returns int
+  param 1 x: int
+  stmt stmk_empty @ L19:28 attr [[cerastes::n3(y)]]
+routine f4 plain body @ L20:5
+  returns int
+  param 1 x: int
+  stmt stmk_empty @ L20:22 attr [[cerastes::n4(x)]]
+routine f5 plain body @ L21:5
+  returns int
+  param 1 x: int
+  stmt stmk_empty @ L21:32 attr [[cerastes::n5(x)]]
+routine f6 plain body @ L22:5
+  returns int
+  param 1 x: int
+  stmt stmk_empty @ L22:22 attr [[cerastes::n6a(x)]]
+  stmt stmk_empty @ L22:44 attr [[cerastes::n6b(x)]]
+routine f7 plain body @ L23:5
+  returns int
+  param 1 x: int
+  stmt stmk_empty @ L23:17 attr [[cerastes::n7a(x)]]
+  stmt stmk_empty @ L23:39 attr [[cerastes::n7b(x)]]
+routine f8 plain body @ L24:5
+  returns int
+  param 1 x: int
+  stmt stmk_empty @ L24:33 attr [[cerastes::n8(x)]]
+routine f9 plain body @ L25:5
+  returns int
+  param 1 x: int
+  stmt stmk_empty @ L25:26 attr [[cerastes::n9(x)]]
+routine t1 prototype body @ L26:25
+  returns T
+  param 1 x: T
+  stmt stmk_empty @ L26:35 attr [[cerastes::n10(x)]]
+routine t1 instance body @ L26:25
+  returns int
+  param 1 x: int
+  template t1 args <T=int>
+  stmt stmk_empty @ L26:35 attr [[cerastes::n10(x)]]
+routine t2 prototype body @ L27:25
+  returns T
+  param 1 x: T
+  op eok_assign type_kind=tk_template_param type=<tptk_unknown> @ L27:37
+  stmt stmk_empty @ L27:42 attr [[cerastes::n11(x)]]
+routine t2 instance body @ L27:25
+  returns int
+  param 1 x: int
+  template t2 args <T=int>
+  stmt stmk_empty @ L27:42 attr [[cerastes::n11(x)]]
+routine use plain body @ L28:5
+  returns int
+end walk: 14 routines reported, 0 routines with bodies in non-system files outside the primary file
+--- stderr ---
+"tests/il/inventory/attr_null_stmt.cpp", line 17: warning: attribute namespace
+          "cerastes" is unrecognized
+  int f1(int x) { [[cerastes::n1(x)]]; return x; }
+                    ^
+
+"tests/il/inventory/attr_null_stmt.cpp", line 18: warning: attribute namespace
+          "cerastes" is unrecognized
+  int f2(int x) { { [[cerastes::n2(x)]]; } return x; }
+                      ^
+
+"tests/il/inventory/attr_null_stmt.cpp", line 19: warning: attribute namespace
+          "cerastes" is unrecognized
+  int f3(int x) { int y = x; [[cerastes::n3(y)]]; return y; }
+                               ^
+
+"tests/il/inventory/attr_null_stmt.cpp", line 20: warning: attribute namespace
+          "cerastes" is unrecognized
+  int f4(int x) { x++; [[cerastes::n4(x)]]; return x; }
+                         ^
+
+"tests/il/inventory/attr_null_stmt.cpp", line 21: warning: attribute namespace
+          "cerastes" is unrecognized
+  int f5(int x) { x++; return x; [[cerastes::n5(x)]]; }
+                                   ^
+
+"tests/il/inventory/attr_null_stmt.cpp", line 22: warning: attribute namespace
+          "cerastes" is unrecognized
+  int f6(int x) { x++; [[cerastes::n6a(x)]]; [[cerastes::n6b(x)]]; return x; }
+                         ^
+
+"tests/il/inventory/attr_null_stmt.cpp", line 22: warning: attribute namespace
+          "cerastes" is unrecognized
+  int f6(int x) { x++; [[cerastes::n6a(x)]]; [[cerastes::n6b(x)]]; return x; }
+                                               ^
+
+"tests/il/inventory/attr_null_stmt.cpp", line 23: warning: attribute namespace
+          "cerastes" is unrecognized
+  int f7(int x) { [[cerastes::n7a(x)]]; [[cerastes::n7b(x)]]; return x; }
+                    ^
+
+"tests/il/inventory/attr_null_stmt.cpp", line 23: warning: attribute namespace
+          "cerastes" is unrecognized
+  int f7(int x) { [[cerastes::n7a(x)]]; [[cerastes::n7b(x)]]; return x; }
+                                          ^
+
+"tests/il/inventory/attr_null_stmt.cpp", line 24: warning: attribute namespace
+          "cerastes" is unrecognized
+  int f8(int x) { while (x > 0) { [[cerastes::n8(x)]]; --x; } return x; }
+                                    ^
+
+"tests/il/inventory/attr_null_stmt.cpp", line 25: warning: attribute namespace
+          "cerastes" is unrecognized
+  int f9(int x) { if (x) { [[cerastes::n9(x)]]; } return x; }
+                             ^
+
+"tests/il/inventory/attr_null_stmt.cpp", line 26: warning: attribute namespace
+          "cerastes" is unrecognized
+  template <typename T> T t1(T x) { [[cerastes::n10(x)]]; return x; }
+                                      ^
+
+"tests/il/inventory/attr_null_stmt.cpp", line 27: warning: attribute namespace
+          "cerastes" is unrecognized
+  template <typename T> T t2(T x) { x = x; [[cerastes::n11(x)]]; return x; }
+                                             ^
+

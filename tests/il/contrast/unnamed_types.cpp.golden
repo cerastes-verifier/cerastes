@@ -1,0 +1,27 @@
+routine <unnamed>::operator= plain implicit nobody @ L9:8
+  returns struct <unnamed> &
+  param 1 _: const struct <unnamed> &
+routine <unnamed>::operator= plain implicit nobody @ L9:8
+  returns struct <unnamed> &
+  param 1 _: struct <unnamed> &&
+routine TS::operator= plain implicit nobody @ L11:16
+  returns TS &
+  param 1 _: TS &&
+routine TS::operator= plain implicit nobody @ L11:16
+  returns TS &
+  param 1 _: const TS &
+routine take_s plain body @ L13:5
+  returns int
+  param 1 s: struct <unnamed>
+routine take_e plain body @ L14:5
+  returns int
+  param 1 e: enum <unnamed>
+routine give_e plain body @ L15:18
+  returns enum <unnamed>
+routine give_s plain body @ L16:18
+  returns struct <unnamed>
+routine take_ts plain body @ L17:5
+  returns int
+  param 1 t: TS
+  param 2 tp: TS *
+end walk: 9 routines reported, 0 routines with bodies in non-system files outside the primary file

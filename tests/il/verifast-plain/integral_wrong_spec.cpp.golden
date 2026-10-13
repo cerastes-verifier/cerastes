@@ -1,0 +1,33 @@
+routine inc prototype body @ L15:3
+  returns T
+  param 1 v: T
+  constraint type-constraint T std::__1::integral
+  op eok_cast type_kind=tk_template_param type=T @ L19:10
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L19:16
+routine dec prototype body @ L24:3
+  returns T
+  param 1 v: T
+  constraint type-constraint T std::__1::integral
+  op eok_cast type_kind=tk_template_param type=T @ L28:10
+  op eok_subtract type_kind=tk_template_param type=<tptk_unknown> @ L28:16
+routine square prototype body @ L33:3
+  returns T
+  param 1 v: T
+  constraint type-constraint T std::__1::integral
+  op eok_cast type_kind=tk_template_param type=T @ L37:10
+  op eok_multiply type_kind=tk_template_param type=<tptk_unknown> @ L37:16
+routine negative_one prototype body @ L42:6
+  returns void
+  param 1 v: T
+  constraint type-constraint T std::__1::integral
+routine two_hundred prototype body @ L51:3
+  returns T
+  param 1 v: T
+  constraint type-constraint T std::__1::integral
+  tconst tpck_expression type=T @ L55:10
+  op eok_cast type_kind=tk_unknown type=T @ L55:10
+routine consistent prototype body @ L60:6
+  returns void
+  param 1 v: T
+  constraint type-constraint T std::__1::integral
+end walk: 6 routines reported, 0 routines with bodies in non-system files outside the primary file

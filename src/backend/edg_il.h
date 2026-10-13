@@ -1,0 +1,49 @@
+// Part of cerastes, under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// The single place where EDG's IL headers are included.
+//
+// Rules for any translation unit that includes EDG headers:
+//  1. It must link the `edg_config` CMake target.  That target is the only
+//     place the EDG configuration macros (BACK_END_IS_*_GEN_BE,
+//     DO_IL_LOWERING, PROTOTYPE_INSTANTIATIONS_IN_IL, ...) are defined; the
+//     IL struct layouts depend on them, so a mismatch silently misreads the IL.
+//  2. It must include "basics.h" BEFORE any other EDG header (il_def.h alone
+//     fails with "unknown type name BEGIN_EDG_NAMESPACE").  Include this
+//     header instead of the EDG ones.
+//  3. EDG is built with USE_EDG_NAMESPACE effectively off here: all EDG names
+//     (il_header, a_routine_ptr, ...) are global.
+#pragma once
+
+// fe_common.h is what every EDG translation unit includes first; it pulls in
+// basics.h, il_def.h, il.h, il_to_str.h, mem_tables.h, types.h, ...  Including
+// the individual headers by hand misses prerequisites (check_assertion,
+// a_string_view, ...).
+#include "basic_hdrs.h"   // first: basics.h, lang_feat.h, host_envir.h (rule 2)
+#include "fe_common.h"
+#include "il_walk.h"
+
+// Mechanical guard of the configuration (decision 0002).  Each macro below is
+// either set in cmake/EdgFrontEnd.cmake's edg_config or derived from it; if
+// this TU was compiled without edg_config, or the derivation changed with a new
+// EDG pin, the IL layout or content would silently differ.  The same values
+// are checked on the built binary by scripts/check_edg_config.sh.
+#define CERASTES_REQUIRE_(macro, value) \
+  static_assert((macro) == (value), #macro " must be " #value " (see cmake/EdgFrontEnd.cmake)")
+CERASTES_REQUIRE_(BACK_END_IS_C_GEN_BE, 0);
+CERASTES_REQUIRE_(BACK_END_IS_CP_GEN_BE, 0);
+CERASTES_REQUIRE_(DO_IL_LOWERING, 0);
+CERASTES_REQUIRE_(IL_SHOULD_BE_WRITTEN_TO_FILE, 0);
+CERASTES_REQUIRE_(PROTOTYPE_INSTANTIATIONS_IN_IL, 1);
+CERASTES_REQUIRE_(ALL_TEMPLATE_INFO_IN_IL, 1);
+CERASTES_REQUIRE_(RECORD_UNRECOGNIZED_ATTRIBUTES, 1);
+CERASTES_REQUIRE_(EXTRA_SOURCE_POSITIONS_IN_IL, 1);
+CERASTES_REQUIRE_(INSTANTIATE_TEMPLATES_EVERYWHERE_USED, 1);
+CERASTES_REQUIRE_(DEFAULT_REMOVE_UNNEEDED_ENTITIES, 0);
+CERASTES_REQUIRE_(MAINTAIN_NEEDED_FLAGS, 1);
+CERASTES_REQUIRE_(SAME_REPR_INTS_INTERCHANGEABLE_IN_IL, 0);
+// Derived:
+CERASTES_REQUIRE_(AUTOMATIC_TEMPLATE_INSTANTIATION, 0);
+CERASTES_REQUIRE_(FUNCTION_PROTOTYPE_INSTANTIATION_DEFERRAL_ALLOWED, 0);
+static_assert(DEFAULT_INSTANTIATION_MODE == tim_used, "DEFAULT_INSTANTIATION_MODE must be tim_used");
+#undef CERASTES_REQUIRE_

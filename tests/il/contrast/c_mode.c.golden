@@ -1,0 +1,11 @@
+routine make_point plain body @ L16:14
+  returns struct point
+  param 1 x: int
+  param 2 y: int
+routine manhattan plain body @ L21:5
+  returns int
+  param 1 p: struct point
+routine sum_to plain body @ L27:5
+  returns int
+  param 1 n: int
+end walk: 3 routines reported, 0 routines with bodies in non-system files outside the primary file

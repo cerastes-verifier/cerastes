@@ -1,0 +1,15 @@
+routine next_color plain body @ L13:12
+  returns enum color
+  param 1 c: enum color
+routine swap_pt plain body @ L15:11
+  returns struct pt
+  param 1 p: struct pt
+routine pass_un plain body @ L20:10
+  returns union un
+  param 1 v: union un
+routine tag_sum plain body @ L22:5
+  returns int
+  param 1 c: enum color
+  param 2 p: struct pt
+  param 3 v: union un
+end walk: 4 routines reported, 0 routines with bodies in non-system files outside the primary file

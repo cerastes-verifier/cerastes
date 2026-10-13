@@ -1,0 +1,26 @@
+routine checked plain nobody @ L16:19
+  returns int
+  param 1 n: int
+  attr [[nodiscard]] on routine @ L16:3
+routine fast plain body @ L18:35
+  returns int
+  param 1 n: int
+  attr [[gnu::always_inline]] on routine @ L18:3
+routine mixed plain nobody @ L20:5
+  returns int
+  param 1 n: int
+  param 2 m: int
+  attr [[maybe_unused]] on param 1 @ L20:13
+  attr [[cerastes::x(n > 0)]] on type @ L20:44
+routine branches plain body @ L22:5
+  returns int
+  param 1 n: int
+  attr [[maybe_unused]] on variable unused_local @ L26:5
+  stmt stmk_block @ L23:25 attr [[likely]]
+end walk: 4 routines reported, 0 routines with bodies in non-system files outside the primary file
+--- stderr ---
+"tests/il/contrast/ordinary_attributes.cpp", line 20: warning: attribute
+          namespace "cerastes" is unrecognized
+  int mixed([[maybe_unused]] int n, int m) [[cerastes::x(n > 0)]];
+                                             ^
+

@@ -1,0 +1,76 @@
+routine in_plain plain body @ L15:5
+  returns int
+  param 1 x: int
+  stmt stmk_empty @ L16:3 attr [[cerastes::a_plain(x)]]
+routine <lambda@L18:14>::<unnamed> plain implicit body @ L18:14
+  returns void
+  param 1 _: <lambda@L18:14> &&
+routine <lambda@L18:14>::<unnamed> plain implicit nobody @ L18:14
+  returns void
+  param 1 _: const <lambda@L18:14> &
+routine <lambda@L18:14>::operator= plain implicit nobody @ L18:14
+  returns <lambda@L18:14> &
+  param 1 _: const <lambda@L18:14> &
+routine <lambda@L18:14>::_FUN plain implicit nobody @ L18:16
+  returns int
+  param 1 v: int
+routine <lambda@L18:14>::operator int (*)(int) plain implicit body @ L18:16
+  returns int (*)(int)
+routine <lambda@L18:14>::operator() plain body @ L18:16
+  returns int
+  param 1 v: int
+  stmt stmk_empty @ L19:5 attr [[cerastes::a_plain_lambda(v)]]
+routine Local::operator= plain implicit nobody @ L22:10
+  returns Local &
+  param 1 _: Local &&
+routine Local::operator= plain implicit nobody @ L22:10
+  returns Local &
+  param 1 _: const Local &
+routine Local::member plain body @ L23:9
+  returns int
+  param 1 w: int
+  stmt stmk_empty @ L24:7 attr [[cerastes::a_local_member(w)]]
+routine in_tmpl prototype body @ L32:3
+  returns T
+  param 1 x: T
+  stmt stmk_empty @ L33:3 attr [[cerastes::a_tmpl(x)]]
+  op eok_cast type_kind=tk_template_param type=T @ L34:11
+  op eok_multiply type_kind=tk_template_param type=<tptk_unknown> @ L34:11
+  op eok_cast type_kind=tk_unknown type=auto @ L35:14
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L39:17
+  op eok_call type_kind=tk_unknown type=<tptk_unknown> @ L39:13
+routine <lambda@L35:14>::operator= prototype implicit nobody @ L35:14
+  returns <lambda@L35:14> &
+  param 1 _: const <lambda@L35:14> &
+routine <lambda@L35:14>::operator() prototype body @ L35:16
+  returns auto
+  param 1 v: T
+  stmt stmk_empty @ L36:5 attr [[cerastes::a_tmpl_lambda(v)]]
+  op eok_subtract type_kind=tk_template_param type=<tptk_unknown> @ L37:14
+end walk: 13 routines reported, 0 routines with bodies in non-system files outside the primary file
+--- stderr ---
+"tests/il/contrast/lambda_bodies.cpp", line 16: warning: attribute namespace
+          "cerastes" is unrecognized
+    [[cerastes::a_plain(x)]];
+      ^
+
+"tests/il/contrast/lambda_bodies.cpp", line 19: warning: attribute namespace
+          "cerastes" is unrecognized
+      [[cerastes::a_plain_lambda(v)]];
+        ^
+
+"tests/il/contrast/lambda_bodies.cpp", line 24: warning: attribute namespace
+          "cerastes" is unrecognized
+        [[cerastes::a_local_member(w)]];
+          ^
+
+"tests/il/contrast/lambda_bodies.cpp", line 33: warning: attribute namespace
+          "cerastes" is unrecognized
+    [[cerastes::a_tmpl(x)]];
+      ^
+
+"tests/il/contrast/lambda_bodies.cpp", line 36: warning: attribute namespace
+          "cerastes" is unrecognized
+      [[cerastes::a_tmpl_lambda(v)]];
+        ^
+

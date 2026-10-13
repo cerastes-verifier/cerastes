@@ -4,6 +4,135 @@ Session handoff log, newest first. Each entry says what is done, what is not,
 any surprises, the decision records added and the exact first step for the
 next session.
 
+## M1 — EDG IL inventory and integration spike (2026-10-13): done, Gate G1 PASS
+
+Read `docs/handoff.md` next. It has the re-look list, the friction log and
+what M1.5, M2 and M4 inherit.
+
+**Done**
+- **Integration (decision 0002, accepted).** cerastes compiles EDG's
+  front-end sources itself, in the "cerastes configuration", and links an
+  in-process `back_end()`. Nothing in `third_party/edg` changes; the pin is
+  still `9847356d`.
+  - The configuration: no lowering, `ALL_TEMPLATE_INFO_IN_IL`,
+    `RECORD_UNRECOGNIZED_ATTRIBUTES`, `EXTRA_SOURCE_POSITIONS_IN_IL`, used
+    templates instantiated in the TU, and no removal of unneeded entities.
+  - The build:
+    - top-level `CMakeLists.txt`, `cmake/EdgFrontEnd.cmake`;
+    - the `edg_config` interface target, the only place the EDG macros are
+      defined;
+    - `edg_fe`, compiled with stock cpfe's exact flags;
+    - `src/backend/`, `src/driver/`.
+  - The output is `build/cerastes-fe`, built by `scripts/bootstrap.sh` and
+    run with `scripts/cerastes-fe.sh`.
+  - Guards: `static_assert`s in `src/backend/edg_il.h`, and
+    `scripts/check_edg_config.sh` as a `check.sh` step.
+- **IL walker** (`--cerastes_walk`). It prints a deterministic listing:
+  - routines (plain, prototype, instance, specialization), with body or
+    nobody;
+  - signatures, template arguments and constraints;
+  - every unrecognized or `cerastes::` attribute with its owner;
+  - attributed statements;
+  - the operations and template-parameter constants in prototype bodies,
+    including those nested in `tpck_expression` constants;
+  - a final `end walk:` line that the harness requires;
+  - cross-check warnings for G1 regressions (`--cerastes_walk_selftest`
+    proves two of the three can fire; the third covers pruned bodies, and
+    `back_end()` refuses to run in the pruning mode).
+- **Harness.** New things in `scripts/run_tests.py`:
+  - the `// expect: golden` kind, which compares stdout plus a stderr
+    section;
+  - `--update-golden`, which `check.sh` never runs, enforced by a self-test;
+  - orphan-golden detection;
+  - a `.harness-skip` marker, allowed only in `tests/differential/verifast`;
+  - `CERASTES_REQUIRE_E2E=1` in `check.sh`, so end-to-end self-tests fail
+    instead of skipping.
+
+  `scripts/test_run_tests.py` has grown from 23 to 140 self-tests,
+  including mutation twins for every harness check.
+- **Tests (`tests/il/`).**
+  - G1 probes `g1/check{1..5}`.
+  - Annotation-free copies of the six VeriFast template tests,
+    `verifast-plain/`.
+  - Inventory probes `inventory/`.
+  - Walker smoke tests `walker/`.
+  - Contrast probes `contrast/`, which rule out vacuous passes.
+
+  All are golden tests. Each golden was checked against `il_display` before
+  it was cut, by an agent other than the walker's author: il-analyst for g1,
+  verifast-plain, inventory and walker; test-mutator for contrast. The
+  auditor independently matched every prototype's `op` lines in all goldens,
+  and the attribute lines of the g1, inventory and sampled contrast goldens. The VeriFast
+  originals are byte-identical in `tests/differential/verifast/` (generic2
+  `0fb63506`) and skipped by the harness.
+- **`docs/il-inventory.md`.**
+  - The five G1 checks, with `il_display` evidence.
+  - Every Clang query used by VeriFast's `GenericFunctionChecker`,
+    `collectIntegralTypeParams`, `usesGenericProof` and the call-site and
+    specialization code (74 rows), mapped to its EDG IL field.
+  - The gotchas for M2 and M4.
+- **Agents.**
+  - `.claude/agents/edg-backend.md` and `il-analyst.md` are new, Sonnet.
+  - `soundness-auditor` is now Opus, read-only, and also reviews gate
+    evidence and harness changes.
+  - `test-mutator` is now Sonnet, owns the harness, and is told that golden
+    files are expectations.
+
+**Gate G1: PASS.** Proceed to M2.
+- Check 1 PASS: `v + 1` is `eok_add` with `type_kind tk_template_param`, and
+  `(T)` is its own `eok_cast`.
+- Check 2 PASS: a template that is never instantiated has a prototype
+  routine with a full body.
+- Check 3 PASS: instances carry `assoc_template` and deduced or explicit
+  `template_arg_list`.
+- Check 4 PASS: `std::integral` is reachable from all four constraint
+  locations.
+- Check 5 PASS for every placement the plan lists: prefix on a function
+  declaration, loop statements and null statements, each plain, in a
+  function-template prototype and in its instance.
+- The placement after the parameter list, where M2 puts `requires`/`ensures`,
+  is not carried reliably by the unrecognized path. It lands on the function
+  type and is lost on redeclarations. So M2 takes plan.md's "check 5 fails"
+  branch for that placement and registers the attributes explicitly. The Opus
+  auditor reproduced the evidence and agreed with this verdict in review
+  passes 2, 3, 3b, 3c and 3d. Decision 0003 is not needed.
+
+**Acceptance (all met):** see "M1 acceptance" in `docs/handoff.md` for the
+commands and their results.
+
+**Not done / deferred**
+- VeriFast is still not built (0001); M4 decides.
+- The walker reports only the primary source file. Code in user headers is
+  counted, not shown, and M3 needs a policy for it.
+- No `doc/` page. M1 adds no user-visible behaviour; `cerastes-fe` is a
+  developer tool.
+
+**Surprises**
+- Turning off EDG's back ends silently turns on automatic template
+  instantiation (`.ti` files, `tim_none`). The stock `cmake_defines.h` also
+  pre-empts `host_envir.h`'s derived defaults. So every load-bearing macro is
+  pinned, including `DEFAULT_REMOVE_UNNEEDED_ENTITIES=0`, without which
+  templates that are never instantiated could be pruned.
+- `il_display` does not print attributes attached to statements, or some
+  template-parameter constants. A grep of it once produced a false "attribute
+  lost" report.
+- `(T)100` is not an `eok_cast`. It is a `tpck_expression` constant wrapping
+  a `tk_unknown` cast, which M4's fail-closed rule must special-case
+  narrowly.
+- Class-template members do keep unrecognized attributes, despite
+  `attribute.c:10906`.
+- New `.claude/agents` types are only loaded at session start.
+
+**Decision records added:** 0002-backend-integration (accepted).
+
+**First step for the next session (M1.5, by plan order).** Read `CLAUDE.md`,
+the M1.5 section of `plan.md`, this file, `docs/handoff.md` §4 and
+`docs/decisions/`. Then write `docs/decisions/0004-docs-site.md` (0003 stays
+unused because G1 passed). If the owner wants M2 first, do this instead:
+open the EDG fork branch `cerastes` and start the upstream PR cycle for
+registering the `cerastes::` attributes (handoff §5). Nothing in M2 can
+depend on that registration until it is upstream.
+
 ## Plan update (2026-10-13): user documentation with Antora
 
 Added **M1.5 — User documentation site (Antora)** to `plan.md`. User docs are

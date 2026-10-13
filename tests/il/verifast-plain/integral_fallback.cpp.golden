@@ -1,0 +1,27 @@
+routine inc prototype body @ L15:3
+  returns T
+  param 1 v: T
+  constraint type-constraint T std::__1::integral
+  op eok_cast type_kind=tk_template_param type=T @ L19:10
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L19:16
+routine inc instance body @ L15:3
+  returns int
+  param 1 v: int
+  template inc args <T=int>
+routine inc instance body @ L15:3
+  returns long
+  param 1 v: long
+  template inc args <T=long>
+routine twice prototype body @ L25:3
+  returns T
+  param 1 v: T
+  constraint type-constraint T std::__1::integral
+  op eok_cast type_kind=tk_template_param type=T @ L29:10
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L29:16
+routine twice instance body @ L25:3
+  returns int
+  param 1 v: int
+  template twice args <T=int>
+routine main plain body @ L32:5
+  returns int
+end walk: 6 routines reported, 0 routines with bodies in non-system files outside the primary file

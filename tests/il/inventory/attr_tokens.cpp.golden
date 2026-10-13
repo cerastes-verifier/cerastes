@@ -1,0 +1,13 @@
+routine tok plain nobody @ L5:63
+  returns int
+  param 1 x: int
+  attr [[cerastes::t1(0x1f , 9U , (1.5) , (1000.0) , 'a' , "s" , 0x7 , 10UL)]] on routine @ L5:3
+routine use plain body @ L6:5
+  returns int
+end walk: 2 routines reported, 0 routines with bodies in non-system files outside the primary file
+--- stderr ---
+"tests/il/inventory/attr_tokens.cpp", line 5: warning: attribute namespace
+          "cerastes" is unrecognized
+  [[cerastes::t1(0x1F, 9u, 1.50, 1E3, 'a', "s", 07, 10UL)]] int tok(int x);
+    ^
+

@@ -1,0 +1,26 @@
+routine ident prototype body @ L7:25
+  returns T
+  param 1 x: T
+routine ident instance body @ L7:25
+  returns int
+  param 1 x: int
+  template ident args <T=int>
+routine ident specialization body @ L8:18
+  returns char
+  param 1 x: char
+  template ident args <T=char>
+routine twice prototype body @ L9:25
+  returns T
+  param 1 x: T
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L9:47
+routine twice instance body @ L9:25
+  returns int
+  param 1 x: int
+  template twice args <T=int>
+routine twice instance body @ L9:25
+  returns long
+  param 1 x: long
+  template twice args <T=long>
+routine use plain body @ L11:5
+  returns int
+end walk: 7 routines reported, 0 routines with bodies in non-system files outside the primary file

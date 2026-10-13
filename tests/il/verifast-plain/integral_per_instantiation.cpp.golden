@@ -1,0 +1,46 @@
+routine same prototype body @ L16:3
+  returns T
+  param 1 v: T
+  constraint type-constraint T std::__1::integral
+routine same instance body @ L16:3
+  returns bool
+  param 1 v: bool
+  template same args <T=bool>
+routine same instance body @ L16:3
+  returns int
+  param 1 v: int
+  template same args <T=int>
+routine add prototype body @ L25:3
+  returns T
+  param 1 v: T
+  param 2 n: int
+  constraint type-constraint T std::__1::integral
+  op eok_cast type_kind=tk_template_param type=T @ L29:10
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L29:16
+routine add instance body @ L25:3
+  returns long
+  param 1 v: long
+  param 2 n: int
+  template add args <T=long>
+routine low_bit prototype body @ L34:3
+  returns T
+  param 1 v: T
+  constraint type-constraint T std::__1::integral
+  op eok_cast type_kind=tk_template_param type=T @ L38:10
+  op eok_and type_kind=tk_template_param type=<tptk_unknown> @ L38:16
+routine low_bit instance body @ L34:3
+  returns int
+  param 1 v: int
+  template low_bit args <T=int>
+routine inc prototype body @ L43:3
+  returns T
+  param 1 v: T
+  constraint type-constraint T std::__1::integral
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L47:12
+routine inc instance body @ L43:3
+  returns int
+  param 1 v: int
+  template inc args <T=int>
+routine main plain body @ L50:5
+  returns int
+end walk: 10 routines reported, 0 routines with bodies in non-system files outside the primary file
