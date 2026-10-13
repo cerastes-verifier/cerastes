@@ -1,0 +1,92 @@
+// expect: error assert:assertion.false @ L31
+// expect: error postcondition:assertion.false @ L35
+// expect: error precondition:assertion.false @ L42
+// expect: error precondition:assertion.false @ L47
+// expect: error invariant-entry:assertion.false @ L54
+// expect: error invariant-preserved:assertion.false @ L62
+// expect: error assignment:division.by.zero @ L69
+// expect: error assignment:insufficient.permission @ L75
+// expect: error fold:insufficient.permission @ L80
+// expect: error unfold:insufficient.permission @ L85
+// expect: error exhale:insufficient.permission @ L91
+//
+// Pins scripts/run_tests.py's table of Silicon error messages to the pinned
+// Silicon: one failure of each common kind, each in its own method.  If a
+// Silicon update changes a message, this test fails with "unrecognized
+// error" rather than letting a test pass or fail for the wrong reason.
+
+field f: Int
+
+predicate P(r: Ref) { acc(r.f) }
+
+function pos(x: Int): Int
+  requires x > 0
+{ x }
+
+method callee(x: Int)
+  requires x > 0
+
+method k_assert(x: Int)
+{
+  assert x > 0
+}
+
+method k_postcondition(x: Int) returns (r: Int)
+  ensures r > x
+{
+  r := x
+}
+
+method k_call_precondition(x: Int)
+{
+  callee(x)
+}
+
+method k_app_precondition(x: Int) returns (r: Int)
+{
+  r := pos(x)
+}
+
+method k_invariant_entry(n: Int)
+{
+  var i: Int := n
+  while (i < 10)
+    invariant i >= 0
+  { i := i + 1 }
+}
+
+method k_invariant_preserved()
+{
+  var i: Int := 0
+  while (i < 10)
+    invariant i < 10
+  { i := i + 1 }
+}
+
+method k_division(n: Int, d: Int)
+{
+  var q: Int
+  q := n \ d
+}
+
+method k_permission(r: Ref)
+{
+  var v: Int
+  v := r.f
+}
+
+method k_fold(r: Ref)
+{
+  fold P(r)
+}
+
+method k_unfold(r: Ref)
+{
+  unfold P(r)
+}
+
+method k_exhale(r: Ref)
+  requires acc(r.f, 1/2)
+{
+  exhale acc(r.f)
+}

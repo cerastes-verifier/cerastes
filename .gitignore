@@ -1,0 +1,11 @@
+# Build outputs: EDG build tree, pinned tools, build/env.sh, logs
+/build/
+
+# Python
+__pycache__/
+*.pyc
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store

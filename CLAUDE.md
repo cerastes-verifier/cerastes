@@ -1,0 +1,42 @@
+# cerastes — C/C++ verifier (EDG → Viper/Silicon → Z3)
+
+Plan: @plan.md   Status: @docs/status.md   Annotations: docs/annotations.md (from M2)
+
+## Commands
+- Bootstrap: scripts/bootstrap.sh   (idempotent; macOS on Apple silicon)
+- Everything: scripts/check.sh   (must be green before ending a session)
+- Tests only: python3 scripts/run_tests.py [file|dir ...]   (-v shows tool output)
+- Harness self-test: python3 scripts/test_run_tests.py
+- EDG front end: scripts/cpfe.sh --c++20 [cpfe options] <file>   (adds system headers)
+- Pinned tools in your shell: . build/env.sh   (Z3_EXE, SILICON_JAR, CERASTES_JAVA, CPFE)
+- Mutants: python3 scripts/mutate.py <dir>   (from M3)
+- Verify one file: build/cerastes verify <file> --keep-vpr   (from M3)
+
+## Invariants (non-negotiable)
+1. Never edit an `expect:` line to make a test pass; stop and ask instead.
+2. Every encoding rule: ≥1 must-verify and ≥1 must-fail test.
+3. Unsupported constructs are rejected with a diagnostic, never approximated.
+4. No inhale/assume in emitted Viper without `// cerastes:inhale-ok <reason>`.
+5. third_party/edg pins upstream edgcpp/compiler only; EDG edits are small
+   commits with tests on a `cerastes` fork branch, upstreamed before the pin moves.
+6. Non-obvious semantics → docs/decisions/NNNN-*.md before code.
+7. Errors shown to users point at C++ source lines.
+
+## Layout
+src/backend (EDG IL → VIR) · src/vir · src/viper (VIR → .vpr + pos map) ·
+src/driver · include/cerastes.h · tests/<area>/ · docs/ · scripts/ ·
+third_party/edg (EDG, upstream) · third_party/silicon (Silicon + silver)
+
+## Toolchain
+- Pins and the reasons for them: docs/decisions/0001-toolchain-pins.md.
+  scripts/bootstrap.sh is the executable form; change a pin in both.
+- EDG builds out of tree into build/edg; never build inside third_party/edg.
+- Silicon needs JDK 17 (its sbt 1.6.2 cannot run on newer JDKs); use
+  $CERASTES_JAVA, not the java on PATH.
+- Z3 is the pinned 4.16.0 in build/tools, not Homebrew's z3.
+
+## Conventions
+- C++20 for tool code; EDG code follows EDG's own style in third_party/edg.
+- Test files start with `// expect:` lines; grammar and categories in
+  tests/README.md (see also plan.md §0).
+- Annotation names: never `assert` (macro collision); use `check`.

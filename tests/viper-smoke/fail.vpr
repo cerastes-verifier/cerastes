@@ -1,0 +1,15 @@
+// expect: error postcondition:assertion.false @ L12
+//
+// Smoke test: Silicon reports a violated postcondition, with its reason, at
+// the line of that postcondition.  scripts/test_run_tests.py also runs
+// mutated copies of this file to check that a wrong line or a wrong category
+// is reported as a mismatch.
+
+method decrement(x: Int) returns (r: Int)
+  requires x > 0
+  ensures r >= 0
+  ensures r < x
+  ensures r == x - 2
+{
+  r := x - 1
+}

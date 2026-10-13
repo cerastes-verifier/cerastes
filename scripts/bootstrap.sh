@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+# Part of cerastes, under the Apache License v2.0 with LLVM Exceptions.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# Idempotent macOS (Apple silicon) bootstrap: installs prerequisites, checks
+# out the submodules, builds EDG and Silicon, fetches the pinned Z3 and writes
+# build/env.sh.  Every pin is recorded in docs/decisions/0001-toolchain-pins.md;
+# change a pin here and there together.
+#
+# Usage: scripts/bootstrap.sh [--build-only] [--force-silicon]
+#   --build-only     skip Homebrew and downloads; only (re)build and rewrite
+#                    build/env.sh.  Used by scripts/check.sh.
+#   --force-silicon  rebuild silicon.jar even if the build stamp is current.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BUILD="$ROOT/build"
+TOOLS="$BUILD/tools"
+
+# ---- Pins -------------------------------------------------------------------
+EDG_PRESET=macos-arm-clang-debug
+JDK_FORMULA=openjdk@17          # sbt 1.6.2 (pinned by Silicon) fails on JDK 27
+Z3_VERSION=4.16.0               # the version Silicon's CI tests against
+Z3_ASSET=z3-4.16.0-arm64-osx-15.7.3
+Z3_SHA256=41828fa07d5cb77bfaee326e8e6dac074f26329c09c633f9e66012bb917cf8ae
+Z3_URL="https://github.com/Z3Prover/z3/releases/download/z3-$Z3_VERSION/$Z3_ASSET.zip"
+
+BUILD_ONLY=0
+FORCE_SILICON=0
+for arg in "$@"; do
+  case "$arg" in
+    --build-only) BUILD_ONLY=1 ;;
+    --force-silicon) FORCE_SILICON=1 ;;
+    -h|--help) sed -n '5,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "bootstrap.sh: unknown option: $arg" >&2; exit 2 ;;
+  esac
+done
+
+log() { printf '==> %s\n' "$*"; }
+warn() { printf 'warning: %s\n' "$*" >&2; }
+die() { printf 'bootstrap.sh: error: %s\n' "$*" >&2; exit 1; }
+
+[[ "$(uname -s)" == Darwin ]] || die "only macOS is supported"
+[[ "$(uname -m)" == arm64 ]] || die "only Apple silicon is supported (EDG preset $EDG_PRESET)"
+
+mkdir -p "$BUILD" "$TOOLS"
+
+# ---- 1. Homebrew prerequisites ----------------------------------------------
+if [[ $BUILD_ONLY -eq 0 ]]; then
+  command -v brew >/dev/null || die "Homebrew is required: https://brew.sh"
+  xcode-select -p >/dev/null 2>&1 || die "Xcode Command Line Tools are required: xcode-select --install"
+  # cmake, ninja, python and shellcheck are satisfied by any copy on PATH; sbt
+  # and the JDK must be the Homebrew ones because env.sh points at them.
+  for tool in cmake ninja python3 shellcheck; do
+    if ! command -v "$tool" >/dev/null; then
+      formula=$tool; [[ $tool == python3 ]] && formula=python
+      log "brew install $formula"
+      brew install "$formula"
+    fi
+  done
+  for formula in sbt "$JDK_FORMULA"; do
+    if ! brew list --formula --versions "$formula" >/dev/null; then
+      log "brew install $formula"
+      brew install "$formula"
+    fi
+  done
+fi
+JAVA_HOME="$(brew --prefix "$JDK_FORMULA")/libexec/openjdk.jdk/Contents/Home"
+[[ -x "$JAVA_HOME/bin/java" ]] || die "JDK not found at $JAVA_HOME (brew install $JDK_FORMULA)"
+export JAVA_HOME
+
+# ---- 2. Submodules ------------------------------------------------------------
+# Initialize missing submodules, but never move one that is already checked
+# out: a developer may have EDG work in progress there.
+ensure_submodules() {
+  local repo="$1" prefix="$2" line state path
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    state="${line:0:1}"
+    path="$(awk '{print $2}' <<<"${line:1}")"
+    case "$state" in
+      -) log "git submodule update --init $prefix$path"
+         git -C "$repo" submodule update --init -- "$path" ;;
+      +) warn "$prefix$path is not at the pinned commit (left as is)" ;;
+      U) die "$prefix$path has merge conflicts" ;;
+    esac
+    ensure_submodules "$repo/$path" "$prefix$path/"
+  done < <(git -C "$repo" submodule status)
+}
+ensure_submodules "$ROOT" ""
+
+# ---- 3. EDG ---------------------------------------------------------------------
+EDG_SRC="$ROOT/third_party/edg"
+EDG_BUILD="$BUILD/edg"
+if [[ ! -f "$EDG_BUILD/build.ninja" ]]; then
+  log "cmake --preset $EDG_PRESET (out of tree: build/edg)"
+  cmake -S "$EDG_SRC" --preset "$EDG_PRESET" -B "$EDG_BUILD" > "$BUILD/edg-configure.log" 2>&1 \
+    || { tail -20 "$BUILD/edg-configure.log"; die "EDG configure failed (build/edg-configure.log)"; }
+fi
+log "ninja -C build/edg"
+ninja -C "$EDG_BUILD" > "$BUILD/edg-build.log" 2>&1 \
+  || { tail -30 "$BUILD/edg-build.log"; die "EDG build failed (build/edg-build.log)"; }
+[[ -x "$EDG_BUILD/bin/cpfe" ]] || die "EDG build produced no build/edg/bin/cpfe"
+
+# ---- 4. Silicon -----------------------------------------------------------------
+SILICON_SRC="$ROOT/third_party/silicon"
+find_silicon_jar() {
+  find "$SILICON_SRC/target" -maxdepth 2 -path '*/scala-*/silicon.jar' -print -quit 2>/dev/null || true
+}
+SILICON_JAR="$(find_silicon_jar)"
+silicon_stamp() {
+  # The jar is current when both checkouts are clean and at the stamped commits.
+  printf 'silicon %s\nsilver %s\ndirty %s\njdk %s\n' \
+    "$(git -C "$SILICON_SRC" rev-parse HEAD)" \
+    "$(git -C "$SILICON_SRC/silver" rev-parse HEAD)" \
+    "$(git -C "$SILICON_SRC" status --porcelain --ignore-submodules=none | wc -l | tr -d ' ')" \
+    "$JDK_FORMULA"
+}
+STAMP_FILE="$BUILD/silicon.stamp"
+if [[ $FORCE_SILICON -eq 1 || -z "$SILICON_JAR" || ! -f "$STAMP_FILE" \
+      || "$(silicon_stamp)" != "$(cat "$STAMP_FILE")" ]]; then
+  log "sbt assembly (third_party/silicon, JDK: $JDK_FORMULA)"
+  (cd "$SILICON_SRC" && sbt --batch assembly) > "$BUILD/silicon-build.log" 2>&1 \
+    || { tail -30 "$BUILD/silicon-build.log"; die "Silicon build failed (build/silicon-build.log)"; }
+  SILICON_JAR="$(find_silicon_jar)"
+  [[ -n "$SILICON_JAR" ]] || die "sbt assembly produced no silicon.jar"
+  silicon_stamp > "$STAMP_FILE"
+else
+  log "silicon.jar is current (${SILICON_JAR#"$ROOT"/})"
+fi
+
+# ---- 5. Z3 ----------------------------------------------------------------------
+Z3_DIR="$TOOLS/$Z3_ASSET"
+Z3_EXE="$Z3_DIR/bin/z3"
+if [[ ! -x "$Z3_EXE" ]]; then
+  [[ $BUILD_ONLY -eq 0 ]] || die "pinned Z3 is missing; run scripts/bootstrap.sh"
+  log "downloading Z3 $Z3_VERSION"
+  zip="$TOOLS/$Z3_ASSET.zip"
+  curl --fail --silent --show-error --location "$Z3_URL" --output "$zip.part"
+  echo "$Z3_SHA256  $zip.part" | shasum -a 256 -c --status \
+    || { rm -f "$zip.part"; die "Z3 download failed its SHA-256 check"; }
+  mv "$zip.part" "$zip"
+  rm -rf "$Z3_DIR"
+  unzip -q "$zip" -d "$TOOLS"
+  rm -f "$zip"
+fi
+"$Z3_EXE" --version | grep -q "Z3 version $Z3_VERSION" || die "$Z3_EXE is not Z3 $Z3_VERSION"
+
+# ---- 6. build/env.sh --------------------------------------------------------------
+# EDG has no standard library of its own on macOS; it parses the system libc++
+# and SDK headers while emulating the installed clang.
+SCRAPE="$EDG_SRC/dev_tools/bin/edg-scrape-compiler"
+EDG_CLANG_INCL_SCRAPE="$(python3 "$SCRAPE" clang --lang c++ includes)"
+EDG_CLANG_CINCL_SCRAPE="$(python3 "$SCRAPE" clang --lang c includes)"
+EDG_CLANG_VER_SCRAPE="$(python3 "$SCRAPE" clang version)"
+# EDG_BASE as chosen by EDG's CMake (its host default for the preset).
+EDG_BASE="$(sed -n 's/^export EDG_BASE="\(.*\)"$/\1/p' "$EDG_BUILD/environment.sh")"
+[[ -d "$EDG_BASE" ]] || die "cannot determine EDG_BASE from build/edg/environment.sh"
+
+cat > "$BUILD/env.sh" <<EOF
+# Generated by scripts/bootstrap.sh; do not edit.  Source it to use the
+# pinned toolchain: . build/env.sh
+export CERASTES_ROOT="$ROOT"
+export CERASTES_JAVA="$JAVA_HOME/bin/java"
+export SILICON_JAR="$SILICON_JAR"
+export Z3_EXE="$Z3_EXE"
+export EDG_BUILD_DIR="$EDG_BUILD"
+export CPFE="$EDG_BUILD/bin/cpfe"
+export EDG_BASE="$EDG_BASE"
+export EDG_CLANG_INCL_SCRAPE="$EDG_CLANG_INCL_SCRAPE"
+export EDG_CLANG_CINCL_SCRAPE="$EDG_CLANG_CINCL_SCRAPE"
+export EDG_CLANG_VER_SCRAPE="$EDG_CLANG_VER_SCRAPE"
+EOF
+
+log "toolchain ready; source build/env.sh to use it"
+printf '    %-8s %s\n' \
+  java "$("$JAVA_HOME/bin/java" -version 2>&1 | head -1)" \
+  z3 "$("$Z3_EXE" --version)" \
+  cpfe "${EDG_BUILD#"$ROOT"/}/bin/cpfe" \
+  silicon "${SILICON_JAR#"$ROOT"/}"
