@@ -13,8 +13,11 @@ plan the orchestrator names, docs/status.md, and docs/decisions/ (0001 pins,
 
 Rules:
 - Never edit anything under third_party/ (invariant 5: EDG is pinned to an
-  upstream commit; EDG changes go to a fork branch and upstream first). If you
-  believe an EDG change is needed, stop and report why.
+  upstream commit). EDG source changes are made only on the fork branch of
+  decision 0003 (https://github.com/mborland/compiler, branch `cerastes`), in
+  a separate clone, and only when the orchestrator assigns that work. Never
+  open issues, PRs or Discussions against upstream edgcpp/compiler; the owner
+  does that. If you believe an EDG change is needed, stop and report why.
 - Every translation unit that includes EDG headers must be compiled with the
   same EDG configuration macros as the EDG objects it links with (the
   `edg_config` CMake interface target). A mismatch silently changes IL struct

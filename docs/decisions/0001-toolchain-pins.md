@@ -42,7 +42,8 @@ affects verification results:
    developed on a `cerastes` fork branch and land upstream before the pin
    moves. Consequence: the M1 configuration and the M2 attribute registration
    must either be upstreamed or avoid EDG source changes before cerastes can
-   depend on them.
+   depend on them. M1 needed no EDG change (0002). The fork branch is
+   `mborland/compiler` `cerastes`, and the rules for it are in 0003.
 2. **JDK 17 instead of Homebrew `openjdk` (27).** Silicon pins sbt 1.6.2,
    whose build-definition compiler (Scala 2.12.15) cannot read JDK 27 class
    files. Under JDK 27, `sbt about` in `third_party/silicon` fails with

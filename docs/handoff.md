@@ -162,8 +162,9 @@ M1.5 depends only on M0 and does not use anything M1 built. M1 added no
 user-visible behaviour: `cerastes-fe` is a developer tool, so it gets no
 `doc/` page. Its owner steps (create `cerastes-verifier/doc`, enable Pages,
 add the dispatch token, add the website link) are outward-facing and stay
-with the owner. Decision 0003 was not written (G1 passed), so M1.5 writes
-**0004-docs-site.md**, as the plan says. `check.sh` gains a docs step. Keep it
+with the owner. M1.5 writes **0004-docs-site.md**, as the plan says. 0003 is
+now the EDG fork-branch record: G1 passed, so the fallback record that plan.md
+reserved that number for was never written. `check.sh` gains a docs step. Keep it
 after the tests step, or make sure `run_tests.py`'s discovery (now with a skip
 allowlist and orphan-golden detection) also covers
 `doc/modules/ROOT/examples/` as plan.md asks.
@@ -174,15 +175,26 @@ allowlist and orphan-golden detection) also covers
   Registering `cerastes::requires/ensures/invariant/check/…` in `attribute.c`'s
   descriptor table, and adding `cerastes` to the known namespaces
   (`attribute.c:970-980`), changes `third_party/edg`. Under invariant 5 that
-  means:
-  1. small commits with tests on a `cerastes` branch of the fork
-     (`mborland/compiler`);
-  2. an upstream PR to `edgcpp/compiler`;
+  means (decision 0003):
+  1. small commits with tests on branch `cerastes` of
+     https://github.com/mborland/compiler, which the owner created on
+     2026-10-13;
+  2. an upstream issue, then a PR to `edgcpp/compiler`, following EDG's
+     `CONTRIBUTING.md`;
   3. only then a pin move.
 
-  Start that PR cycle at the very beginning of M2, and ask the owner how
-  upstream review will be scheduled. cerastes code cannot depend on the
-  registration until it is upstream.
+  **Before its first commit, the branch needs a fast-forward.** It was
+  created from the fork's old `main` (`90b66472`), 22 commits behind the pin
+  `9847356d` (see question 1 below).
+  - Sessions may commit and push to the fork branch.
+  - Sessions never open upstream issues, PRs or Discussions: the owner files
+    them. Write the proposed issue and PR text into this file for them.
+  - Prepare the EDG series at the very start of M2, so the owner can open the
+    upstream issue early.
+  - cerastes code cannot depend on the registration until it is upstream. Prefer a general
+  mechanism that upstream will want, such as declaring extra attribute
+  namespaces and descriptors from a back end or an option, over hard-coding
+  `cerastes` into `attribute.c`.
 - **Why the unrecognized-attribute path is not enough for contracts**
   (inventory check 5c). An attribute after the parameter list lands on the
   function type (`al_post_func`), not on the routine. It is lost when the
@@ -269,3 +281,62 @@ From the inventory's gotchas; each is evidenced there.
 | 7 | `git -C third_party/edg status --porcelain`; `git submodule status` | empty; EDG still at `9847356d`, Silicon at `6b540aa4` |
 | 8 | clean clone of the M1 commit: `scripts/bootstrap.sh && scripts/check.sh` | green in 1 min 47 s for `b1e3d41`. The run fetched the submodules from GitHub; built EDG (stock), `build/cerastes-fe` and Silicon; downloaded Z3; and ran `check.sh`: 140 self-tests OK, 44 passed, 1 skipped. It left no `.ti` or other stray files, and the tree was clean afterwards. The Homebrew and sbt caches were already warm. |
 | 9 | `docs/il-inventory.md` | evidence on every G1 check and table row, or the row is marked derived/UNCLEAR with the reason. G1 verdict recorded. The final soundness audit passes (3, 3b, 3c, 3d) found nothing blocking; the remaining notes are tracked in §2 and in the inventory's "Walker gaps". |
+
+## 8. Questions for the owner
+
+Every open decision from this session is here, with a recommended answer, so
+they can all be answered at once. Future handoffs keep this section.
+
+1. **The fork branch needs a fast-forward, and sessions can't push yet.**
+   `cerastes` on https://github.com/mborland/compiler is at `90b66472`, 22
+   commits behind the pin. Decision 0003 lets sessions push to it, but this
+   session had no GitHub credentials: no SSH key, and no keychain entry
+   visible to it. Please run:
+   ```
+   cd ~/Documents/compiler && git fetch edgcpp && git checkout cerastes
+   git merge --ff-only 9847356d461d2bef846bf133e16821f0e8b69749 && git push origin cerastes
+   ```
+   How should future sessions push?
+   - (a) Give the session credentials, e.g. a fine-grained token limited to
+     `mborland/compiler` contents.
+   - (b) Sessions commit in a local clone of the fork, outside this repo,
+     and you push.
+
+   *Recommended: (b) until you decide otherwise.*
+2. **Can a topic branch of this repository temporarily record a fork
+   submodule pointer?** *Recommended: no, as 0003 says.* Develop against fork
+   commits by checking them out in the submodule working tree, without
+   committing the pointer.
+3. **Next milestone.** plan.md order is M1.5 (docs), then M2. M2's critical
+   path is upstream review of the EDG attribute registration, which you
+   file. *Recommended: run M1.5 next. Its session also drafts the text of
+   the upstream Discussion or issue for attribute registration (design only,
+   no EDG code), so you can file it while M1.5 runs.*
+4. **M1.5 owner steps.** M1.5's acceptance (`curl -sI
+   https://cerastes.dev/doc/` returns 200, and a docs-only commit appears
+   with no manual step) needs four things done first:
+   - create `cerastes-verifier/doc`;
+   - enable Pages;
+   - add the dispatch-token secret to this repo;
+   - add the "Documentation" link on cerastes.dev.
+
+   *Recommended: do them before the M1.5 session. Otherwise it ends with
+   those acceptance items open.*
+5. **What CI runs.** M1.5 adds CI that builds the docs. The IL goldens
+   depend on the macOS SDK and libc++ (`std::__1::…`, which headers EDG can
+   parse), so `check.sh` on a GitHub macOS runner would likely show golden
+   diffs. *Recommended: CI runs only the docs build in M1.5. Running
+   `check.sh` in CI needs a decision record on pinning the SDK first.*
+6. **The libc++ headers EDG cannot parse** (`<algorithm>`, `<utility>`,
+   `<iostream>`, `<string>`, `<vector>` from SDK 27.0). These will matter for
+   M3+ tests. *Recommended: in M2, a session writes a reduced reproduction
+   (under 100 lines, with `--dump_configuration`, as `CONTRIBUTING.md` asks)
+   into this file for you to file upstream.*
+7. **Committing in this repository.** Should sessions commit to local `main`
+   at the end of the session, as plan.md's closing prompt says, and after
+   each change you ask for, without asking first? Never pushing. *Recommended:
+   yes.* This session committed its last change on that basis.
+8. **VeriFast for M4** (0001): a native macOS build, a container for the
+   Linux binary, or recording its outcomes once? Not urgent until M4.
+   *Recommended: try the native build at the start of M4, and fall back to
+   recorded outcomes.*

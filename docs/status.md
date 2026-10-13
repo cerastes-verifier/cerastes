@@ -4,6 +4,35 @@ Session handoff log, newest first. Each entry says what is done, what is not,
 any surprises, the decision records added and the exact first step for the
 next session.
 
+## Decision 0003 (2026-10-13): EDG fork branch
+
+The owner created branch `cerastes` on the fork
+https://github.com/mborland/compiler. `docs/decisions/0003-edg-fork-branch.md`
+records how it is used:
+- every EDG source change is made there, never in `third_party/edg`;
+- the submodule only ever pins upstream `main` commits, and no commit of this
+  repository records a fork pointer;
+- the branch is based on the pinned upstream commit, and is separate from
+  the `cir` branch;
+- each commit follows EDG's `CONTRIBUTING.md` checklist, and general
+  mechanisms are preferred to cerastes-specific code inside EDG;
+- cerastes code that needs an unmerged EDG change waits until the pin moves.
+
+**Owner rules (2026-10-13):** sessions may commit and push to the fork's
+`cerastes` branch. Sessions never open issues, PRs or Discussions against
+upstream; the owner files them from text drafted in `docs/handoff.md`.
+Recorded in 0003 item 6, CLAUDE.md and the `edg-backend` agent.
+
+**Not done:** the branch tip is `90b66472`, the fork's old `main`, 22 commits
+behind the pin `9847356d`. It must be fast-forwarded before its first commit.
+This session had no GitHub push credentials, so that is handoff question 1.
+From now on, every handoff ends with a "Questions for the owner" section
+(`docs/handoff.md` §8).
+
+**Decision records added:** 0003-edg-fork-branch (accepted). G1 passed, so
+the fallback record plan.md had reserved 0003 for was never written. A
+fallback needed after a later pin move takes the next free number.
+
 ## M1 — EDG IL inventory and integration spike (2026-10-13): done, Gate G1 PASS
 
 Read `docs/handoff.md` next. It has the re-look list, the friction log and
@@ -95,7 +124,7 @@ what M1.5, M2 and M4 inherit.
   type and is lost on redeclarations. So M2 takes plan.md's "check 5 fails"
   branch for that placement and registers the attributes explicitly. The Opus
   auditor reproduced the evidence and agreed with this verdict in review
-  passes 2, 3, 3b, 3c and 3d. Decision 0003 is not needed.
+  passes 2, 3, 3b, 3c and 3d. The front-end fallback record is not needed.
 
 **Acceptance (all met):** see "M1 acceptance" in `docs/handoff.md` for the
 commands and their results.
@@ -127,10 +156,11 @@ commands and their results.
 
 **First step for the next session (M1.5, by plan order).** Read `CLAUDE.md`,
 the M1.5 section of `plan.md`, this file, `docs/handoff.md` §4 and
-`docs/decisions/`. Then write `docs/decisions/0004-docs-site.md` (0003 stays
-unused because G1 passed). If the owner wants M2 first, do this instead:
-open the EDG fork branch `cerastes` and start the upstream PR cycle for
-registering the `cerastes::` attributes (handoff §5). Nothing in M2 can
+`docs/decisions/`. Then write `docs/decisions/0004-docs-site.md` (0003 is
+the EDG fork-branch record; see the entry above). If the owner wants M2
+first, do this instead: once the fork branch `cerastes` has been
+fast-forwarded to the pin, start the upstream issue and PR cycle for
+registering the `cerastes::` attributes (decision 0003, handoff §5). Nothing in M2 can
 depend on that registration until it is upstream.
 
 ## Plan update (2026-10-13): user documentation with Antora

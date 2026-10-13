@@ -422,8 +422,9 @@ soundness-auditor reproduced the evidence and agreed in review passes 2 and 3.
 | 4. `std::integral` is reachable from all four constraint locations | PASS | `g1/check4_constraints.cpp.golden`, `contrast/not_integral.cpp.golden` |
 | 5. Unrecognized `[[cerastes::…]]` attributes survive with namespace, name, raw tokens and positions | PASS for every placement plan.md lists (5a, 5a-redecl, 5b, 5b-null) | `g1/check5_attributes.cpp.golden`, `inventory/attr_*.golden` |
 
-Checks 1 and 2 pass, so the fallback (decision 0003, a Clang front end) is not
-triggered.
+Checks 1 and 2 pass, so the Clang front-end fallback (the record plan.md
+names `0003-frontend-fallback.md`) is not triggered and was not written.
+Decision number 0003 went to the EDG fork branch instead.
 
 Check 5 passes as specified:
 - prefix on a function declaration, including across redeclarations;

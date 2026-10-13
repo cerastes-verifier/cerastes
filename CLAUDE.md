@@ -46,6 +46,11 @@ third_party/edg (EDG, upstream) · third_party/silicon (Silicon + silver)
   TU that includes EDG headers links it (IL layout depends on them). EDG IL
   facts we rely on: docs/il-inventory.md.
 - EDG builds out of tree into build/edg; never build inside third_party/edg.
+- EDG source changes: fork https://github.com/mborland/compiler, branch
+  `cerastes` (decision 0003). Never pin the fork; never commit a fork pointer.
+  Sessions may commit and push to that branch. NEVER open issues, PRs or
+  Discussions against upstream edgcpp/compiler; the owner files them (draft
+  the text in docs/handoff.md).
 - Silicon needs JDK 17 (its sbt 1.6.2 cannot run on newer JDKs); use
   $CERASTES_JAVA, not the java on PATH.
 - Z3 is the pinned 4.16.0 in build/tools, not Homebrew's z3.
