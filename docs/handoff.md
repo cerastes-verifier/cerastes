@@ -267,5 +267,5 @@ From the inventory's gotchas; each is evidenced there.
 | 5 | `python3 scripts/test_run_tests.py` (also with `CERASTES_REQUIRE_E2E=1`) | 140 tests OK, 0 skipped |
 | 6 | `scripts/check.sh` | green in about 13 s: 44 passed, 0 failed, 1 skipped (`tests/differential/verifast`) |
 | 7 | `git -C third_party/edg status --porcelain`; `git submodule status` | empty; EDG still at `9847356d`, Silicon at `6b540aa4` |
-| 8 | clean clone of the M1 commit: `scripts/bootstrap.sh && scripts/check.sh` | CLEAN_CLONE_RESULT |
+| 8 | clean clone of the M1 commit: `scripts/bootstrap.sh && scripts/check.sh` | green in 1 min 47 s for `b1e3d41`. The run fetched the submodules from GitHub; built EDG (stock), `build/cerastes-fe` and Silicon; downloaded Z3; and ran `check.sh`: 140 self-tests OK, 44 passed, 1 skipped. It left no `.ti` or other stray files, and the tree was clean afterwards. The Homebrew and sbt caches were already warm. |
 | 9 | `docs/il-inventory.md` | evidence on every G1 check and table row, or the row is marked derived/UNCLEAR with the reason. G1 verdict recorded. The final soundness audit passes (3, 3b, 3c, 3d) found nothing blocking; the remaining notes are tracked in §2 and in the inventory's "Walker gaps". |
