@@ -36,11 +36,13 @@ VIR exists so the encoder does not depend on EDG's IL directly. If Gate G1 fails
 Cerastes/
   CLAUDE.md                 # always-loaded rules (template in Appendix A)
   plan.md                   # this file
-  docs/
+  doc/                      # user documentation: Antora component, published at https://cerastes.dev/doc/ (M1.5+)
+    antora.yml  local-playbook.yml  package.json  ui/
+    modules/ROOT/           # nav.adoc, pages/, examples/ (every example is a test), images/
+  docs/                     # developer documentation (not published)
     status.md               # session handoff log (updated every session)
     decisions/NNNN-*.md     # one record per non-obvious decision
     il-inventory.md         # M1 output
-    annotations.md          # user-facing annotation reference (M2+)
     encoding.md             # C/C++ → Viper encoding spec (grows each milestone)
     differential.md         # agreement table vs VeriFast (M4+)
     soundness/              # arguments the encoder relies on
@@ -58,7 +60,7 @@ Cerastes/
     annotations/  scalar/  templates/  concepts/  memory/
     differential/verifast/  # original //@ versions from the VeriFast PRs
   scripts/
-    bootstrap.sh  check.sh  run_tests.py  mutate.py  lint_viper.py
+    bootstrap.sh  check.sh  run_tests.py  mutate.py  lint_viper.py  build_docs.sh
   .claude/agents/           # subagents (Appendix B)
 ```
 
@@ -87,6 +89,7 @@ Every test file starts with expectation lines that `scripts/run_tests.py` checks
 6. **Every non-obvious semantic choice gets a decision record** (integer conversions, parameter meaning in postconditions, memory model, …).
 7. **User-facing errors point at C++ source,** never at `.vpr` lines.
 8. **`scripts/check.sh` must be green at the end of every session.**
+9. **User-visible behavior is documented in `doc/` in the milestone that adds it** (annotations, CLI options, diagnostics, supported and rejected constructs), and every code example in `doc/` is a test with `expect:` lines that `check.sh` runs.
 
 ---
 
@@ -162,6 +165,52 @@ Every test file starts with expectation lines that `scripts/run_tests.py` checks
 
 ---
 
+## M1.5 — User documentation site (Antora)
+
+**Goal:** user documentation written in AsciiDoc in this repo, built with Antora, checked by `check.sh` and published at https://cerastes.dev/doc/. From here on, every milestone documents what it makes user-visible (invariant 9). This milestone depends only on M0. Run it before M2, which writes the first reference page.
+
+**Hosting** (decision record `0004-docs-site.md`)
+- **Default:** a dedicated org repo `cerastes-verifier/doc` with GitHub Pages (source: GitHub Actions). The org site `cerastes-verifier.github.io` owns the custom domain `cerastes.dev`, and GitHub serves an org's project sites under that domain. A repo named `doc` therefore publishes at `https://cerastes.dev/doc/` with no proxy rules and no change to the website's deployment.
+- That repo holds only the publishing playbook and workflow:
+  - The playbook pulls content from this repo (`url: https://github.com/cerastes-verifier/cerastes`, `start_path: doc`) and sets `site.url: https://cerastes.dev/doc`.
+  - The workflow runs on `repository_dispatch` (sent by this repo's CI when a push to `main` touches `doc/`), on `workflow_dispatch`, and nightly as a backstop.
+- **Alternative to weigh in the record:** the website's own workflow builds Antora into `dist/doc/`. That is one deployment, but every docs change would redeploy the website, and the two repos' build tooling would be coupled.
+- **Owner steps** (outward-facing, not done by Claude): create the repo, enable Pages, add the dispatch token as a secret in this repo, and add a "Documentation" link on cerastes.dev.
+
+**Tasks**
+- Create the Antora component in `doc/`, in the same shape as the owner's other Antora projects (for example Boost.Int128's `doc/`):
+  - `antora.yml` with `name: ROOT` and `version: ~` until the first tagged release;
+  - `modules/ROOT/{nav.adoc,pages/,examples/,images/}`;
+  - `package.json` with exact pins for Antora 3.x and `@antora/lunr-extension`, plus a committed `package-lock.json`;
+  - `local-playbook.yml`, which builds the working tree into `build/doc/`.
+- Give the site a UI that matches cerastes.dev. Use the default Antora UI plus supplemental UI files in `doc/ui/` (logo, Ink/Sand palette, Archivo, favicon), taken from the brand kit and the website's `src/assets/`. Do not use the Boost UI bundle. Pin the UI bundle with a versioned URL or a vendored zip with a checksum, never a moving `latest`.
+- Write the first pages, describing only what exists:
+  - Overview: what cerastes is, the pipeline, and current status.
+  - Installation: building from source with `scripts/bootstrap.sh` on macOS with Apple silicon.
+  - No placeholder pages for future features.
+- **Examples are tests.**
+  - Files under `doc/modules/ROOT/examples/` carry `expect:` headers.
+  - Pages include them through tagged regions, leaving the header out.
+  - `run_tests.py` discovers them by default alongside `tests/`.
+- Add `scripts/build_docs.sh`, which runs the local playbook with `--log-failure-level=warn` so that broken xrefs, includes or attributes fail the build.
+  - `check.sh` gains a docs step.
+  - `bootstrap.sh` installs Node (Homebrew) and runs `npm ci` in `doc/`.
+  - Record the Node and Antora pins in 0001.
+- Add a CI workflow in this repo that builds the docs on pull requests and, on pushes to `main` that touch `doc/`, sends the `repository_dispatch` to the doc repo.
+- `docs/` stays developer-only and unpublished. The user-facing annotation reference goes in `doc/` (written in M2).
+
+**Acceptance**
+- `scripts/check.sh` builds the docs with zero Antora warnings and runs every doc example as a test.
+- `curl -sI https://cerastes.dev/doc/` returns 200, search works, and the site matches cerastes.dev's branding (screenshot referenced in the status entry).
+- A docs-only commit to `main` appears at https://cerastes.dev/doc/ with no manual step.
+
+**Out of scope:**
+- pages for unimplemented features;
+- versioned docs (added at the first tagged release);
+- API docs for the tool's internal code.
+
+---
+
 ## M2 — Annotation layer
 
 **Goal:** EDG parses and type-checks `[[cerastes::...]]` contracts as C++ expressions, and `<cerastes.h>` makes the same source build cleanly with ordinary compilers.
@@ -191,12 +240,13 @@ There is deliberately no user-facing `assume`.
   - wrong placement,
   - ill-typed predicate,
   - `cerastes::` attribute on an unsupported entity.
-- Write `docs/annotations.md`: the user-facing reference, with examples.
+- Write the user-facing annotation reference as `doc/modules/ROOT/pages/annotations.adoc`, plus a page on building annotated code with ordinary compilers through `<cerastes.h>`. Every example is an included test (see M1.5).
 
 **Acceptance**
 - `tests/annotations/` positive cases: `il_display` golden output shows each attribute attached to the right entity with a typed expression tree, and inside templates the expressions are dependent.
 - Negative cases produce the specific EDG diagnostic.
 - The same files compile with Apple clang (and GCC if installed) using `-std=c++20 -Wall -Wextra -Werror`, without `__CERASTES__`, and with zero warnings.
+- The annotation reference is published at https://cerastes.dev/doc/, and each of its examples runs in `check.sh`.
 
 **Out of scope:** verification.
 
@@ -224,12 +274,18 @@ There is deliberately no user-facing `assume`.
 - Driver: `cerastes verify file.cpp [-I…] [--std=c++20|c23] [--keep-vpr]`. It maps Silicon's errors to `file:line: error: <category>: <source-level message>`.
 - `scripts/lint_viper.py` enforces invariant 4.
 - `scripts/mutate.py`: flip relational operators, ±1 constants, drop a conjunct, swap `&&`/`||`, delete a statement. Each mutant must fail verification or appear in a reviewed `tests/mutants-equivalent.txt`.
+- User docs:
+  - "Verifying a program": `cerastes verify`, its options, exit codes and `--keep-vpr`.
+  - "Error messages": one section per category, each with a must-fail example, what the error means and how to fix it.
+  - "Integer semantics": overflow, modular unsigned arithmetic, narrowing, division and shifts, summarizing the decision records in user terms.
+  - Installation gains a walkthrough of a first verification.
 
 **Acceptance**
 - `tests/scalar/` has at least 30 must-verify/must-fail pairs, run in both modes where the code is valid C.
 - Mutation run: zero unexplained surviving mutants.
 - Lint clean.
 - Errors report C++ lines for every failure category.
+- Every error category the driver can emit has a section with a must-fail example on the error-message page.
 
 ---
 
@@ -249,6 +305,11 @@ There is deliberately no user-facing `assume`.
 - **Call sites:** instance routine → `assoc_template`. Use the generic proof when every integral argument is a builtin integer type other than `bool`; otherwise verify the instance with the M3 encoder.
 - **Fallback:** if the generic proof fails, verify per instantiation for the types actually instantiated, and report which templates fell back.
 - Write `docs/soundness/prototype-correspondence.md`: for every construct the checker accepts, the prototype parse and every real instantiation's parse agree. This is the lemma Clang gave for free.
+- User docs: a "Generic templates" page covering:
+  - when a template is verified once;
+  - the eligibility rules in user terms;
+  - what falls back to per-instantiation verification, and how that is reported;
+  - the model of an integral `T`.
 
 **Gate G2:** the six tests, ported to `[[cerastes::]]` syntax, plus their mutants reproduce VeriFast's outcomes, recorded in `docs/differential.md`. That includes `integral_fallback`, where the proof holds for `int` but not `signed char` and only `int` is instantiated. Any disagreement is either explained in a decision record or blocks M5.
 
@@ -279,6 +340,8 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
 - An overload whose selection depends on scope or ADL, where the obligation must be checked against the overload actually chosen.
 - A hidden friend, overloads differing only in constraints, and a requirement satisfied by a builtin operator.
 
+**Docs:** a "Concept requirement contracts" page with the syntax chosen in 0005 and how obligation failures are reported.
+
 **Acceptance:** all pairs pass; the mutation run is clean; the error messages name the requirement, the selected overload and the instantiation site.
 
 ---
@@ -301,6 +364,10 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
 
 **Self-framing diagnostics** use source terms, e.g. "reads `c->val` without owning it".
 
+**Docs:**
+- A "Memory and ownership" page covering `owns`/`reads`/`old`, predicates and pure functions, `fold`/`unfold`, arrays and `owns_range`, and `forall`.
+- The list of rejected constructs with their diagnostics.
+
 **Acceptance:** pass/fail pairs for swap, struct field update, linked list (push/pop/length with a recursive predicate), array sum/max with a quantifier, and an aliasing trap that must fail. Run differential checks against VeriFast where the fragments overlap.
 
 ---
@@ -313,6 +380,7 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
 - **Metrics:**
   - Using the ISO standard drafts and CppReference inventory the language features and then annotate which we support and which we do not. Store this in an MD file for future milestones
   - Assess the relative difficulty of unimplemented features. E.g. which require compiler changes, which require viper changes, or which we can handle locally in future sessions
+- **User docs:** publish a "Language support" page in `doc/` from the inventory. It shows what is supported and unsupported, by standard. The difficulty assessment stays in the planning file.
 
 **Acceptance:** complete records of features that are and are not implemented with annotated difficulty sorted by language standard.
 
@@ -375,7 +443,7 @@ next session. Commit with a message referencing M<k>.
 ```markdown
 # cerastes — C/C++ verifier (EDG → Viper/Silicon → Z3)
 
-Plan: @plan.md   Status: @docs/status.md   Annotations: @docs/annotations.md
+Plan: @plan.md   Status: @docs/status.md   User docs: doc/ (Antora → https://cerastes.dev/doc/)
 
 ## Commands
 - Bootstrap: scripts/bootstrap.sh
@@ -383,6 +451,7 @@ Plan: @plan.md   Status: @docs/status.md   Annotations: @docs/annotations.md
 - Tests only: python3 scripts/run_tests.py [dir]
 - Mutants: python3 scripts/mutate.py <dir>
 - Verify one file: build/cerastes verify <file> --keep-vpr
+- User docs: scripts/build_docs.sh   (builds doc/ into build/doc; fails on warnings)
 
 ## Invariants (non-negotiable)
 1. Never edit an `expect:` line to make a test pass; stop and ask instead.
@@ -392,10 +461,12 @@ Plan: @plan.md   Status: @docs/status.md   Annotations: @docs/annotations.md
 5. third_party/edg pins upstream edgcpp/compiler only; EDG edits are small commits with tests on a `cerastes` fork branch, upstreamed before the pin moves.
 6. Non-obvious semantics → docs/decisions/NNNN-*.md before code.
 7. Errors shown to users point at C++ source lines.
+8. User-visible behavior lands with its page in doc/; every doc example is a test.
 
 ## Layout
 src/backend (EDG IL → VIR) · src/vir · src/viper (VIR → .vpr + pos map) ·
-src/driver · include/cerastes.h · tests/<area>/ · docs/
+src/driver · include/cerastes.h · tests/<area>/ · doc/ (user, Antora) ·
+docs/ (developer)
 
 ## Conventions
 - C++20 for tool code; EDG code follows EDG's own style in third_party/edg.

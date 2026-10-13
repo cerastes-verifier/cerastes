@@ -1,6 +1,7 @@
 # cerastes — C/C++ verifier (EDG → Viper/Silicon → Z3)
 
-Plan: @plan.md   Status: @docs/status.md   Annotations: docs/annotations.md (from M2)
+Plan: @plan.md   Status: @docs/status.md
+User docs: doc/ (Antora, from M1.5) → https://cerastes.dev/doc/
 
 ## Commands
 - Bootstrap: scripts/bootstrap.sh   (idempotent; macOS on Apple silicon)
@@ -11,6 +12,7 @@ Plan: @plan.md   Status: @docs/status.md   Annotations: docs/annotations.md (fro
 - Pinned tools in your shell: . build/env.sh   (Z3_EXE, SILICON_JAR, CERASTES_JAVA, CPFE)
 - Mutants: python3 scripts/mutate.py <dir>   (from M3)
 - Verify one file: build/cerastes verify <file> --keep-vpr   (from M3)
+- User docs: scripts/build_docs.sh   (from M1.5; builds doc/ into build/doc, fails on warnings)
 
 ## Invariants (non-negotiable)
 1. Never edit an `expect:` line to make a test pass; stop and ask instead.
@@ -21,10 +23,13 @@ Plan: @plan.md   Status: @docs/status.md   Annotations: docs/annotations.md (fro
    commits with tests on a `cerastes` fork branch, upstreamed before the pin moves.
 6. Non-obvious semantics → docs/decisions/NNNN-*.md before code.
 7. Errors shown to users point at C++ source lines.
+8. User-visible behavior lands with its page in doc/ in the same milestone;
+   every code example in doc/ is a test with `expect:` lines (from M1.5).
 
 ## Layout
 src/backend (EDG IL → VIR) · src/vir · src/viper (VIR → .vpr + pos map) ·
-src/driver · include/cerastes.h · tests/<area>/ · docs/ · scripts/ ·
+src/driver · include/cerastes.h · tests/<area>/ · scripts/ ·
+doc/ (user docs, Antora, published) · docs/ (developer docs, not published) ·
 third_party/edg (EDG, upstream) · third_party/silicon (Silicon + silver)
 
 ## Toolchain

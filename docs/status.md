@@ -4,6 +4,19 @@ Session handoff log, newest first. Each entry says what is done, what is not,
 any surprises, the decision records added and the exact first step for the
 next session.
 
+## Plan update (2026-10-13): user documentation with Antora
+
+Added **M1.5 — User documentation site (Antora)** to `plan.md`. User docs are
+an Antora component in `doc/`, published at https://cerastes.dev/doc/. The
+default hosting is an org repo named `doc`, whose GitHub Pages project site
+GitHub serves under the org's `cerastes.dev` domain; it is recorded in
+decision 0004 when M1.5 runs. New global invariant 9 (CLAUDE.md invariant 8):
+user-visible behavior is documented in `doc/` in the milestone that adds it,
+and every doc example is a test. M2–M7 each gained a docs task. The
+annotation reference moves from the planned `docs/annotations.md` to `doc/`.
+M1 is unaffected. M1.5 depends only on M0 and must run before M2. Creating
+the `doc` repo, enabling Pages and adding the dispatch token are owner steps.
+
 ## M0 — Bootstrap and toolchain (2026-10-13): done
 
 **Done**
