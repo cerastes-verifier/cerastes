@@ -379,6 +379,9 @@ them inline, as last time.
    *Recommended: read §1–§6, then file it as a Discussion
    (`CONTRIBUTING.md` says feature requests start there). Keep Appendix A in
    the post, so the breadth is visible.*
+
+No. Add unstaged to my branch of the compiler what exactly is needed for us to upstream in EDG. That way our branch works, and then I can discuss with the EDG maintainers what we need.
+
 2. **Fork branch and pin.** The fork's `cerastes` branch is still at
    `90b66472`, 22 commits behind our pin `9847356d`. Upstream `main` is
    `034385ba`, 8 commits past the pin: CI, tests and `doc/source` only,
@@ -391,25 +394,45 @@ them inline, as last time.
    cd ~/Documents/compiler && git fetch edgcpp && git checkout cerastes
    git merge --ff-only <new pin> && git push origin cerastes
    ```
+   
+I have updated the location of the branch to be level with main on upstream. YOu can update the pin.
+
 3. **Link colour.** On white, Sand fails contrast for text (2.2:1), and Sand
    Deep is 2.9:1. The docs use a new token, Sand Ink `#7f5f2d` (5.9:1).
    *Recommended: accept it, and add it to BRAND.md as the text colour for
    Sand on light grounds.*
+
+ACCEPT
+
 4. **Which lockup is canonical?** The loose
    `brand/cerastes-lockup-on-dark.svg` differs from the copy in the kit zip
    and on the website; the docs use the kit/website copy. *Recommended: the
    kit's. Replace the loose file.*
+
+Use the kit's  
+
 5. **The "Documentation" link on cerastes.dev** (website repo, your step).
    *Recommended: link to https://cerastes.dev/cerastes/doc/.*
+
+ACCEPT RECOMMENDATION
+
 6. **The `github-pages` environment.** Please confirm that Settings →
    Environments → `github-pages` allows deployments only from `main`. The
    workflow already deploys only from `main`, but the environment rule is the
    second lock, and sessions cannot see it.
+
+GitHub pages is deployed from GitHub Actions, and the doc site is currently live.
+
 7. **CI for the rest of the repository.** You asked for it soon.
    *Recommended: a short session before M3 writes a decision record. Try a
    macOS runner with a pinned Xcode first; if the IL goldens drift, use x64
    Docker as you suggested. Then add `check.sh` to CI.*
+
+ACCEPT RECOMMENDATION
+
 8. **Dependabot for the pinned Actions?** The workflow pins four actions by
    commit SHA. Dependabot (as in the website repo) would open PRs to bump
    them. *Recommended: yes, `github-actions` ecosystem only, weekly. It opens
    PRs on GitHub, so it's your call.*
+
+Yes, use dependabot. Here's a template I've use elsewhere https://github.com/boostorg/int128/blob/develop/.github/dependabot.yml
