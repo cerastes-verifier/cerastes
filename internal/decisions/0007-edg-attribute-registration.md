@@ -44,7 +44,7 @@ EDG tests that fail on its parent and pass on it, a `src/Changes` entry and a
 | A | `attribute_namespace_is_recognized` compares names by exact length. Today a prefix of a known namespace (`cl`, `gn`, `g`) counts as recognized. |
 | B | `register_attribute_namespace()` and new kind `ak_registered`. |
 | C | Statement properties in target strings: `s:+n` (null statement), `s:+i` (iteration statement). |
-| D | Flag `RAF_ENTITY_ATTACHED`: after a parameter list, the attribute goes on the routine and accumulates. |
+| D | Flags `RAF_ENTITY_ATTACHED` (after a parameter list, the attribute goes on the routine, not the type) and `RAF_MUST_MATCH` (the contracts of a function's declarations must match: item 4). Unflagged attributes accumulate. |
 | E | Signature code `R`: an optional leading result name. |
 | F | Substitution of attribute arguments on out-of-class definitions of class-template members and member templates (CP2a issue 3); may be merged into D if small. |
 
@@ -91,8 +91,8 @@ EDG tests that fail on its parent and pass on it, a `src/Changes` entry and a
      The flagged attributes of a declaration form a list. The first
      declaration that has a non-empty list attaches it to the routine.
    - Each later declaration with a non-empty list is compared with it
-     element by element: the same name, and equivalent arguments, with
-     parameters by position. EDG's own equivalence of expressions is used,
+     element by element, and the two lists must have the same length: the
+     same name, and equivalent arguments, with parameters by position. EDG's own equivalence of expressions is used,
      which also handles dependent expressions in templates.
      - Equal: the later copies are not attached, so there are no duplicates.
      - Different: an error at the later declaration.
@@ -194,7 +194,10 @@ EDG tests that fail on its parent and pass on it, a `src/Changes` entry and a
      encoder rejects calls to anything that is not `pure`, `predicate` or a
      spec function;
    - `fold`/`unfold` arguments being calls to predicates;
-   - combining accumulated contracts;
+   - conjoining the several `requires` (or `ensures`) of the one contract
+     that EDG attached;
+   - contract consistency across translation units (0006 item 6), which EDG
+     cannot see;
    - choosing between prototype and instance, and treating explicit
      specializations, which carry their own contracts (M4);
    - near-miss namespaces. `[[ceraste::ensures(…)]]` is only an EDG warning
@@ -207,12 +210,12 @@ The namespace is `cerastes`, closed.
 
 | Attribute | `sig` | `target` | Flags |
 |---|---|---|---|
-| `requires` | `(Xb)` | `r` | entity-attached |
-| `ensures` | `(R,Xb)` | `r` | entity-attached |
+| `requires` | `(Xb)` | `r` | entity-attached, must-match |
+| `ensures` | `(R,Xb)` | `r` | entity-attached, must-match |
 | `invariant` | `(Xb)` | `s:+i!` | |
 | `check` | `(Xb)` | `s:+n!` | |
 | `fold`, `unfold` | `(X)` | `s:+n!` | |
-| `predicate`, `pure` | `""` | `r` | entity-attached |
+| `predicate`, `pure` | `""` | `r` | entity-attached (they accumulate) |
 
 **Cut from the proposal for this series:**
 - per-descriptor policies other than accumulate and must-match;

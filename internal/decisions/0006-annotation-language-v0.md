@@ -120,10 +120,20 @@ summarized here):
      verified one at a time. If a definition could add `requires(x > 10)` to
      the header's `requires(x > 0)`, callers in other translation units would
      be checked against less than the body assumes. That is unsound.
-   - **Across translation units,** the shared header gives every unit the
-     same contract. A unit that declares a function without its contract
-     cannot rely on one: M3 rejects a call to a function that has no visible
-     contract (and no body to verify in the same unit).
+   - **Across translation units,** EDG enforces the rule only within one
+     unit, so consistency between units is an explicit assumption of a
+     per-unit result.
+     - Example of what it rules out: unit A defines `f` with
+       `requires(x > 10)`, unit B declares `f` itself with `requires(x > 0)`
+       and calls `f(5)`.
+     - The shared header normally gives every unit the same contract.
+     - A unit that declares a function without its contract cannot rely on
+       one: M3 rejects a call to a function that has no visible contract (and
+       no body to verify in the same unit).
+     - M3's driver records each function's contract per unit (a contract
+       manifest, as VeriFast keeps). A multi-unit verification fails when two
+       units disagree. Until that check exists, a result for one unit says
+       that it assumes this consistency.
 7. **Templates.** Contracts and statement attributes in a template are
    type-checked in the template definition, with dependent arguments, as in
    any template code. They are checked again, with substituted types, in
@@ -182,7 +192,9 @@ summarized here):
         built-in assignment, compound assignment, `++`/`--`, `new`/`delete`
         and `throw`. This includes the bodies of lambdas written in the
         argument, so that `[&]{ x = 1; return true; }()` in a `check` is
-        rejected, and reads or writes of `volatile` objects.
+        rejected, and reads or writes of `volatile` objects. GNU statement
+        expressions (`({ … })`) are rejected outright in annotation
+        arguments.
 
         Calls are left to M3. That covers explicit calls to functions that
         are not `pure`, `predicate` or spec functions, and implicit ones:
