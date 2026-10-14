@@ -13,7 +13,7 @@ in both places.
 
 | Component | Pin | Obtained by |
 |---|---|---|
-| EDG front end | `edgcpp/compiler` `9847356d461d2bef846bf133e16821f0e8b69749` (`git describe`: `7.0-25-g9847356d46`), upstream `main` head on 2026-10-13: "Move the prototype instantiation IL documentation to ALL_TEMPLATE_INFO_IN_IL. [GH #81]" | submodule `third_party/edg`; stock preset `macos-arm-clang-debug`, built out of tree in `build/edg` |
+| EDG front end | `edgcpp/compiler` `034385ba0a6d08578aa3215fda6f674f2efb0c77` (`git describe`: `7.0-33-g034385ba0a`), upstream `main` head on 2026-10-14: "Fix Python 3.6 compatibility issues []" (committed 2026-10-13T22:23:48Z). Moved from `9847356d` (`7.0-25`) in M2; see "Pin history" | submodule `third_party/edg`; stock preset `macos-arm-clang-debug`, built out of tree in `build/edg` |
 | Silicon | `viperproject/silicon` tag `v.26.08-release` = `6b540aa45e5af214f4727b7be463ce84b328fabd` | submodule `third_party/silicon`; `sbt assembly` → `target/scala-2.13/silicon.jar` |
 | Silver | `viperproject/silver` `f02e7010639f314447d74732146644565aa8d135` (`v.26.08-release`, the commit Silicon's tag records) | nested submodule `third_party/silicon/silver` |
 | Z3 | 4.16.0, `z3-4.16.0-arm64-osx-15.7.3.zip`, SHA-256 `41828fa07d5cb77bfaee326e8e6dac074f26329c09c633f9e66012bb917cf8ae` | downloaded from the Z3 GitHub release into `build/tools/`, checksum verified |
@@ -133,6 +133,27 @@ binary in a container and checks its outcomes against the recorded ones
    `VerificationError.scala`.
 3. Update the tables above with the new SHAs and `--version` output.
 
+## Pin history
+
+- **EDG `9847356d` → `034385ba` (M2, 2026-10-14).** The owner's answer to
+  M1.5 handoff question 2. The 8 upstream commits in between (`4e739c28`,
+  `7a0533db`, `b971e940`, `0d49bfb9`, `d05f214f`, `996d67fa`, `435b7d16`,
+  `034385ba`) touch CI, `dev_tools/`, `doc/source/testing.rst`,
+  `util/eccp.sh` and `tests/expectations/`, nothing under `src/`
+  (`git log 9847356d..034385ba -- src` is empty). `ninja` rebuilt nothing,
+  `scripts/check.sh` was green and every golden was byte-identical. The
+  version string below is unchanged because the binaries were not rebuilt;
+  `git describe` is the record of the commit.
+
+## Dependabot
+
+`.github/dependabot.yml` (owner, M1.5 handoff question 8) opens weekly
+grouped pull requests for the SHA-pinned GitHub Actions and for the npm
+packages in `doc/`. Both are pinned in the tables above, so a Dependabot pull
+request must update this record in the same change (step 3 of "Changing a
+pin"), and after an npm update `scripts/bootstrap.sh` must be re-run so that
+`doc/node_modules` matches the lockfile.
+
 ## Raw version output (2026-10-13)
 
 ```
@@ -159,7 +180,7 @@ Apple clang version 21.0.0 (clang-2100.3.34.2)
 Target: arm64-apple-darwin27.0.0
 
 $ git submodule status --recursive
- 9847356d461d2bef846bf133e16821f0e8b69749 third_party/edg (7.0-25-g9847356d46)
+ 034385ba0a6d08578aa3215fda6f674f2efb0c77 third_party/edg (7.0-33-g034385ba0a)   # since 2026-10-14; was 9847356d (7.0-25)
  6b540aa45e5af214f4727b7be463ce84b328fabd third_party/silicon (v.26.08-release)
  f02e7010639f314447d74732146644565aa8d135 third_party/silicon/silver (v.26.08-release)
 ```

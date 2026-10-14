@@ -17,7 +17,7 @@ file maps every such query to the EDG IL field that answers it, with
 
 ## Setup
 
-- EDG pin: `third_party/edg` at `9847356d` (upstream `edgcpp/compiler`).
+- EDG pin: `third_party/edg` at `9847356d` (upstream `edgcpp/compiler`) when the evidence was produced. The pin moved to `034385ba` on 2026-10-14 (M2); nothing under `src/` changed and every golden was byte-identical (0001, "Pin history").
 - Configuration: the cerastes configuration of decision
   [0002](decisions/0002-backend-integration.md): `DO_IL_LOWERING=0`,
   `PROTOTYPE_INSTANTIATIONS_IN_IL=1`, `ALL_TEMPLATE_INFO_IN_IL=1`,
