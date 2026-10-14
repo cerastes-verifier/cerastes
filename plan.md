@@ -49,7 +49,7 @@ Cerastes/
   third_party/
     edg/                    # submodule: edgcpp/compiler, pinned to head commit
     silicon/                # submodule: viperproject/silicon (recursive), pinned
-  include/cerastes.h        # spec functions + VF_* macros
+  include/cerastes.h        # spec functions + CERASTES_* macros
   src/
     backend/                # EDG back end: IL walk → VIR
     vir/                    # VIR definitions + checks
@@ -234,10 +234,11 @@ There is deliberately no user-facing `assume`.
 **`<cerastes.h>`**
 - Spec functions in `namespace cerastes`: `owns`, `reads`, `old`, `forall` (lambda-bound), `owns_range`.
 - Decision: are spec functions declared-only or trivially defined? Either way, `predicate`/`pure` functions must never be emitted or called at runtime.
-- `VF_REQUIRES(...)`, `VF_ENSURES(...)`, etc. expand to the attribute only when the driver defines `__CERASTES__`, and to nothing otherwise.
+- `CERASTES_REQUIRES(...)`, `CERASTES_ENSURES(...)`, etc. expand to the attribute only when the driver defines `__CERASTES__`, and to nothing otherwise. (Named `VF_*` until M2; the owner chose `CERASTES_*` on 2026-10-14, decision 0008.)
 
 **Tasks**
 - Register the attributes in `attribute.c`'s descriptor table under the `cerastes` namespace, one commit per attribute on the `cerastes` branch. Write application functions for binder injection and deferred parsing.
+  > **Superseded by decision 0007 (2026-10-14):** EDG gets a general registration mechanism (no `cerastes` string in EDG; 0003 item 7), developed as a local commit series on the fork's `cerastes` branch, one commit per phase. cerastes registers its table from its own driver and builds against the fork on the topic branch `m2-annotations` (decision 0005).
 - Diagnostics:
   - binder shadows a parameter,
   - wrong placement,
@@ -322,7 +323,7 @@ There is deliberately no user-facing `assume`.
 
 **Goal:** contracts attach to concept requirements; a generic body is verified once against those contracts only; each instantiation discharges an obligation that the overload actually selected satisfies the requirement's contract.
 
-**Step 1 — syntax decision** (`0005-requirement-contracts.md`). Spike each option against EDG before choosing:
+**Step 1 — syntax decision** (`NNNN-requirement-contracts.md`, the next free decision number when M5 starts; 0005–0008 were taken by M2). Spike each option against EDG before choosing:
 - **(a)** Attributes on compound requirements inside the requires-expression, if EDG's grammar accepts and records them.
 - **(b)** Requirement-spec declarations: `[[cerastes::requirement_of(Addable)]] T add_spec(T a, T b) [[cerastes::ensures(r, r == a + b)]];`
 - **(c)** One attribute on the concept declaration listing requirement contracts.
@@ -343,7 +344,7 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
 - An overload whose selection depends on scope or ADL, where the obligation must be checked against the overload actually chosen.
 - A hidden friend, overloads differing only in constraints, and a requirement satisfied by a builtin operator.
 
-**Docs:** a "Concept requirement contracts" page with the syntax chosen in 0005 and how obligation failures are reported.
+**Docs:** a "Concept requirement contracts" page with the syntax chosen in that record and how obligation failures are reported.
 
 **Acceptance:** all pairs pass; the mutation run is clean; the error messages name the requirement, the selected overload and the instantiation site.
 
