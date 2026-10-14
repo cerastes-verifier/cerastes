@@ -258,6 +258,6 @@ the owner to raise with them).
 - **Testing the series.** The targeted EDG suites (`changes`, `regressions`,
   `edg`) are run under amd64 emulation for each commit. The full `all` run
   on the x86-64 box is the owner's step before going upstream.
-- **Merging.** Nothing that depends on this series merges into cerastes
-  `main` until the pin moves to an upstream commit that contains it (0003
-  item 8, 0005 item 6).
+- **Merging.** *(Superseded by decision 0009.)* cerastes pins the fork's
+  `cerastes` branch, so code that depends on this series lands on `main` once
+  the pin includes the series.

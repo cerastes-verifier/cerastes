@@ -85,7 +85,7 @@ Every test file starts with expectation lines that `scripts/run_tests.py` checks
 2. **Every encoding rule lands with at least one must-verify and one must-fail test.**
 3. **Unsupported constructs are rejected with a diagnostic, never approximated.**
 4. **No `inhale`/`assume` in emitted Viper outside tagged contexts.** Every one carries `// cerastes:inhale-ok <reason>`, and `scripts/lint_viper.py` fails the build otherwise. These are the points where an encoder becomes unsound.
-5. **`third_party/edg` only ever pins an upstream `edgcpp/compiler` commit,** so anyone can build the tool without a fork. EDG changes are developed as small commits, each with a test, on a `cerastes` branch of a fork, and land upstream before the pin moves. Keep the CIR work on its own branch.
+5. **`third_party/edg` pins the owner's fork** (`mborland/compiler`, branch `cerastes`: upstream `main` plus the cerastes series; decision 0009, owner 2026-10-14, superseding "upstream only"). EDG changes are developed as small commits, each with a test, kept upstreamable, and offered upstream by the owner. Keep the CIR work on its own branch.
 6. **Every non-obvious semantic choice gets a decision record** (integer conversions, parameter meaning in postconditions, memory model, …).
 7. **User-facing errors point at C++ source,** never at `.vpr` lines.
 8. **`scripts/check.sh` must be green at the end of every session.**
@@ -462,7 +462,7 @@ Plan: @plan.md   Status: @internal/status.md   User docs: doc/ (Antora → https
 2. Every encoding rule: ≥1 must-verify and ≥1 must-fail test.
 3. Unsupported constructs are rejected with a diagnostic, never approximated.
 4. No inhale/assume in emitted Viper without `// cerastes:inhale-ok <reason>`.
-5. third_party/edg pins upstream edgcpp/compiler only; EDG edits are small commits with tests on a `cerastes` fork branch, upstreamed before the pin moves.
+5. third_party/edg pins the owner's fork, branch `cerastes` (decision 0009); EDG edits are small commits with tests on that branch, kept upstreamable.
 6. Non-obvious semantics → internal/decisions/NNNN-*.md before code.
 7. Errors shown to users point at C++ source lines.
 8. User-visible behavior lands with its page in doc/; every doc example is a test.

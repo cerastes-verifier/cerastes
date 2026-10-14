@@ -27,8 +27,9 @@ User docs: doc/ (Antora) → https://cerastes.dev/cerastes/doc/ (decision 0004)
 2. Every encoding rule: ≥1 must-verify and ≥1 must-fail test.
 3. Unsupported constructs are rejected with a diagnostic, never approximated.
 4. No inhale/assume in emitted Viper without `// cerastes:inhale-ok <reason>`.
-5. third_party/edg pins upstream edgcpp/compiler only; EDG edits are small
-   commits with tests on a `cerastes` fork branch, upstreamed before the pin moves.
+5. third_party/edg pins the owner's fork (mborland/compiler, branch `cerastes`:
+   upstream main + our series; decision 0009). EDG edits are small commits with
+   tests on that branch, kept upstreamable; never edit EDG in third_party/edg.
 6. Non-obvious semantics → internal/decisions/NNNN-*.md before code.
 7. Errors shown to users point at C++ source lines.
 8. User-visible behavior lands with its page in doc/ in the same milestone;
@@ -50,11 +51,15 @@ third_party/edg (EDG, upstream) · third_party/silicon (Silicon + silver)
   facts we rely on: internal/il-inventory.md.
 - EDG builds out of tree into build/edg; never build inside third_party/edg.
 - EDG source changes: fork https://github.com/mborland/compiler, branch
-  `cerastes` (decision 0003). Never pin the fork; never commit a fork pointer;
-  never check fork commits out in third_party/edg (use CERASTES_EDG_SRC, 0005).
-  Sessions may commit to that branch in a local fork clone; the owner
-  pushes. NEVER open issues, PRs or Discussions against upstream
-  edgcpp/compiler; the owner files them (draft the text in internal/handoff.md).
+  `cerastes` (decisions 0003, 0009), committed in the local clone
+  ~/Documents/compiler; the owner pushes. The submodule pins that branch; an
+  unpushed pin is fetched via the `fork-local` remote and reported NOT YET
+  PUSHED (handoff: push the fork before cerastes). Uncommitted EDG work: build
+  with CERASTES_EDG_SRC (0005). At session start, bring the fork's `cerastes`
+  up to date with upstream main by fast-forward or merge (never rebase or
+  force-push: old cerastes commits pin fork commits), then move the pin.
+  NEVER open issues, PRs or Discussions against upstream edgcpp/compiler; the
+  owner files them (draft the text in internal/handoff.md).
 - Silicon needs JDK 17 (its sbt 1.6.2 cannot run on newer JDKs); use
   $CERASTES_JAVA, not the java on PATH.
 - Z3 is the pinned 4.16.0 in build/tools, not Homebrew's z3.

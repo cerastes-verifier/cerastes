@@ -1,6 +1,6 @@
 # 0003 — EDG fork branch for cerastes changes
 
-- **Status:** accepted
+- **Status:** accepted; items 2, 3 and 8 superseded by decision 0009 (2026-10-14: cerastes pins the fork)
 - **Milestone:** after M1 (2026-10-13), ahead of M2
 
 ## Context
