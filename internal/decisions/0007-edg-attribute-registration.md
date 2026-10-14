@@ -177,8 +177,17 @@ EDG tests that fail on its parent and pass on it, a `src/Changes` entry and a
    - `s:+i` accepts `while`, `do`, `for` and range-`for`.
    - `s:+n` accepts only the null statement.
    - A loop attribute is scanned before a `for` init-statement, so variables
-     declared there are not in scope. The owner chose to keep invariants
-     prefix-only in M2 and document this (2026-10-14).
+     declared there are not in scope, and their names are looked up outside
+     the loop: an outer variable of the same name is found instead. The owner
+     chose to keep invariants prefix-only in M2 and document this
+     (2026-10-14). cerastes rejects the shadowing case (0006 item 10).
+   - **No silent drops anywhere.** EDG keeps an account of every registered
+     attribute scanned in the translation unit. At the end it errors on any
+     that was neither applied nor already diagnosed. The CP3 audit found
+     several Clang/GNU-mode paths that dropped attributes with only a warning:
+     decl-specifier positions, `static_assert`, alias templates, inheriting
+     constructors. The account closes that class of bug, not just those
+     sites.
 8. **What EDG leaves to cerastes:**
    - the meaning of every attribute;
    - that a `requires`/`ensures` has `syntactic_location == al_post_func`

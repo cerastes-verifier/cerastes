@@ -74,6 +74,11 @@ summarized here):
      attribute before a `for` init-statement, so variables declared there are
      not in scope: declare the counter before the loop. A placement on the
      loop body may follow later.
+   - Worse, such a name silently binds to an outer variable of the same name.
+     In `int i = 5; [[cerastes::invariant(i <= n)]] for (int i = 0; …)` the
+     invariant is about the outer `i` (CP3 audit). cerastes therefore rejects
+     an `invariant` that names a variable with the same name as one declared
+     in the loop's init-statement or range-`for` declaration.
 3. **Names in scope.**
    - **Contracts:** the parameters, `this` in members (not in a class's
      members declared later: an attribute is not a complete-class context),
@@ -201,6 +206,14 @@ summarized here):
         overloaded operators, conversion functions, constructors and
         destructors. M3's encoder rejects them;
       - a registered attribute in a namespace other than `cerastes`;
+      - an `invariant` that names a variable shadowed by the loop's own
+        init-statement or range-`for` declaration (item 2);
+      - a cerastes attribute on a lambda (`[] [[cerastes::requires(…)]] () {}`
+        attaches to the closure's `operator()`) or on a deduction guide, since
+        neither can carry a contract in v0;
+      - C++20 modules (`import`, module units): contracts on imported entities
+        are not carried through module files, so they are rejected until that
+        is checked (invariant 3);
       - a `fold`/`unfold` argument that is not a call to a `predicate`
         function;
       - a `predicate` that does not return `bool`, or a `pure` function that
