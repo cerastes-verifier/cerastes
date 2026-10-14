@@ -1,35 +1,35 @@
 routine place plain body @ L16:5
   returns int
   param 1 x: int
-  stmt stmk_if @ L18:3 attr [[cerastes::s_if(x > 0)]]
-  stmt stmk_end_test_while @ L20:3 attr [[cerastes::s_do(y < 10)]]
-  stmt stmk_switch @ L22:3 attr [[cerastes::s_switch(x)]]
-  stmt stmk_block @ L27:32 attr [[cerastes::s_block(y > 0)]]
-  stmt stmk_expr @ L29:3 attr [[cerastes::s_expr(y > 0)]]
+  stmt stmk_if @ L18:3 attr [[unreg_ns::s_if(x > 0)]]
+  stmt stmk_end_test_while @ L20:3 attr [[unreg_ns::s_do(y < 10)]]
+  stmt stmk_switch @ L22:3 attr [[unreg_ns::s_switch(x)]]
+  stmt stmk_block @ L27:32 attr [[unreg_ns::s_block(y > 0)]]
+  stmt stmk_expr @ L29:3 attr [[unreg_ns::s_expr(y > 0)]]
 end walk: 1 routines reported, 0 routines with bodies in non-system files outside the primary file
 --- stderr ---
 "tests/il/contrast/stmt_attr_placement.cpp", line 18: warning: attribute
-          namespace "cerastes" is unrecognized
-    [[cerastes::s_if(x > 0)]] if (x > 0) { y = 1; }
+          namespace "unreg_ns" is unrecognized
+    [[unreg_ns::s_if(x > 0)]] if (x > 0) { y = 1; }
       ^
 
 "tests/il/contrast/stmt_attr_placement.cpp", line 20: warning: attribute
-          namespace "cerastes" is unrecognized
-    [[cerastes::s_do(y < 10)]] do { y = y + 2; } while (y < 10);
+          namespace "unreg_ns" is unrecognized
+    [[unreg_ns::s_do(y < 10)]] do { y = y + 2; } while (y < 10);
       ^
 
 "tests/il/contrast/stmt_attr_placement.cpp", line 22: warning: attribute
-          namespace "cerastes" is unrecognized
-    [[cerastes::s_switch(x)]] switch (x) {
+          namespace "unreg_ns" is unrecognized
+    [[unreg_ns::s_switch(x)]] switch (x) {
       ^
 
 "tests/il/contrast/stmt_attr_placement.cpp", line 27: warning: attribute
-          namespace "cerastes" is unrecognized
-    [[cerastes::s_block(y > 0)]] { y = y + 7; }
+          namespace "unreg_ns" is unrecognized
+    [[unreg_ns::s_block(y > 0)]] { y = y + 7; }
       ^
 
 "tests/il/contrast/stmt_attr_placement.cpp", line 29: warning: attribute
-          namespace "cerastes" is unrecognized
-    [[cerastes::s_expr(y > 0)]] y = y + 9;
+          namespace "unreg_ns" is unrecognized
+    [[unreg_ns::s_expr(y > 0)]] y = y + 9;
       ^
 

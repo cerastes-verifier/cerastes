@@ -11,7 +11,7 @@ routine mixed plain nobody @ L20:5
   param 1 n: int
   param 2 m: int
   attr [[maybe_unused]] on param 1 @ L20:13
-  attr [[cerastes::x(n > 0)]] on type @ L20:44
+  attr [[unreg_ns::x(n > 0)]] on type @ L20:44
 routine branches plain body @ L22:5
   returns int
   param 1 n: int
@@ -20,7 +20,7 @@ routine branches plain body @ L22:5
 end walk: 4 routines reported, 0 routines with bodies in non-system files outside the primary file
 --- stderr ---
 "tests/il/contrast/ordinary_attributes.cpp", line 20: warning: attribute
-          namespace "cerastes" is unrecognized
-  int mixed([[maybe_unused]] int n, int m) [[cerastes::x(n > 0)]];
+          namespace "unreg_ns" is unrecognized
+  int mixed([[maybe_unused]] int n, int m) [[unreg_ns::x(n > 0)]];
                                              ^
 

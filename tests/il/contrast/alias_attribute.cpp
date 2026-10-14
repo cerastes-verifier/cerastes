@@ -8,9 +8,9 @@
 // that the fix for aliases does not drop attributes that really are on a
 // routine's type.
 
-using FT2 [[cerastes::al(1)]] = int(int);
+using FT2 [[unreg_ns::al(1)]] = int(int);
 
 FT2 g;
 FT2 h;
 
-int real(int x) [[cerastes::post(x > 0)]];
+int real(int x) [[unreg_ns::post(x > 0)]];

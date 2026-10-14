@@ -1,38 +1,38 @@
-attr [[cerastes::m3(1)]] on type Box<T> @ L12:10
-attr [[cerastes::m3(1)]] on type Box<int> @ L12:10
+attr [[unreg_ns::m3(1)]] on type Box<T> @ L12:10
+attr [[unreg_ns::m3(1)]] on type Box<int> @ L12:10
 routine Box<int>::operator= plain implicit nobody @ L12:28
   returns Box<int> &
   param 1 _: Box<int> &&
 routine Box<int>::operator= plain implicit nobody @ L12:28
   returns Box<int> &
   param 1 _: const Box<int> &
-attr [[cerastes::m2(2)]] on field Box<T>::v @ L13:5
-attr [[cerastes::m2(2)]] on field Box<int>::v @ L13:5
+attr [[unreg_ns::m2(2)]] on field Box<T>::v @ L13:5
+attr [[unreg_ns::m2(2)]] on field Box<int>::v @ L13:5
 routine Box<T>::get1 prototype body @ L14:29
   returns T
   param 1 x: T
-  attr [[cerastes::m1(x > 0)]] on routine @ L14:5
+  attr [[unreg_ns::m1(x > 0)]] on routine @ L14:5
 routine Box<int>::get1 instance body @ L14:29
   returns int
   param 1 x: int
   template Box<T>::get1 args <none>
-  attr [[cerastes::m1(x > 0)]] on routine @ L14:5
+  attr [[unreg_ns::m1(x > 0)]] on routine @ L14:5
 routine use plain body @ L16:5
   returns int
 end walk: 5 routines reported, 0 routines with bodies in non-system files outside the primary file
 --- stderr ---
 "tests/il/inventory/attr_classtmpl.cpp", line 12: warning: attribute namespace
-          "cerastes" is unrecognized
-  struct [[cerastes::m3(1)]] Box {
+          "unreg_ns" is unrecognized
+  struct [[unreg_ns::m3(1)]] Box {
            ^
 
 "tests/il/inventory/attr_classtmpl.cpp", line 13: warning: attribute namespace
-          "cerastes" is unrecognized
-    [[cerastes::m2(2)]] T v;
+          "unreg_ns" is unrecognized
+    [[unreg_ns::m2(2)]] T v;
       ^
 
 "tests/il/inventory/attr_classtmpl.cpp", line 14: warning: attribute namespace
-          "cerastes" is unrecognized
-    [[cerastes::m1(x > 0)]] T get1(T x) { return x; }
+          "unreg_ns" is unrecognized
+    [[unreg_ns::m1(x > 0)]] T get1(T x) { return x; }
       ^
 

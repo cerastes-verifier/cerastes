@@ -1,10 +1,10 @@
 // expect: golden
-// Gate G1 check 5: unrecognized [[cerastes::...]] attributes survive in the
+// Gate G1 check 5: unrecognized [[unreg_ns::...]] attributes survive in the
 // IL with namespace, name, raw tokens and position.
-// PASS means each name below is reported with its namespace "cerastes", its
+// PASS means each name below is reported with its namespace "unreg_ns", its
 // own name, its raw argument tokens and its position, attached to the entity
 // or statement named here. Warning #2803 (unrecognized namespace) is expected
-// for every cerastes:: attribute before M2.
+// for every unreg_ns:: attribute before M2.
 //   a1  prefix of the non-template declaration of f
 //   a2  after the parameter list of g (declaration and definition)
 //   a3  on the while loop in g;  a4 on the for loop in g;  a5 on the null
@@ -21,42 +21,42 @@
 // Whether each placement survives is the question; the golden records the
 // answer, it does not assume it.
 
-[[cerastes::a1(x > 0, y + 1)]] int f(int x);
+[[unreg_ns::a1(x > 0, y + 1)]] int f(int x);
 
-int g(int x) [[cerastes::a2(x > 0, x + 1)]];
+int g(int x) [[unreg_ns::a2(x > 0, x + 1)]];
 
-int g(int x) [[cerastes::a2(x > 0, x + 1)]] {
+int g(int x) [[unreg_ns::a2(x > 0, x + 1)]] {
   int i = 0;
-  [[cerastes::a3(i < x, i + 2)]] while (i < x) { ++i; }
-  [[cerastes::a4(i <= x)]] for (int j = 0; j < x; ++j) { ++i; }
-  [[cerastes::a5(i > 0)]];
+  [[unreg_ns::a3(i < x, i + 2)]] while (i < x) { ++i; }
+  [[unreg_ns::a4(i <= x)]] for (int j = 0; j < x; ++j) { ++i; }
+  [[unreg_ns::a5(i > 0)]];
   return i;
 }
 
-[[cerastes::b0(x > 0, y + 1)]] int h(int x);
+[[unreg_ns::b0(x > 0, y + 1)]] int h(int x);
 
 template <typename T>
-[[cerastes::b1(x > 0, x + 1)]] T tmpl(T x);
+[[unreg_ns::b1(x > 0, x + 1)]] T tmpl(T x);
 
 template <typename T>
-T tmpl(T x) [[cerastes::b2(x > 0, x + 1)]];
+T tmpl(T x) [[unreg_ns::b2(x > 0, x + 1)]];
 
 template <typename T>
-T tmpl(T x) [[cerastes::b2(x > 0, x + 1)]] {
+T tmpl(T x) [[unreg_ns::b2(x > 0, x + 1)]] {
   T i = 0;
-  [[cerastes::b3(i < x, i + 2)]] while (i < x) { ++i; }
-  [[cerastes::b4(i <= x)]] for (T j = 0; j < x; ++j) { ++i; }
-  [[cerastes::b5(i > 0)]];
+  [[unreg_ns::b3(i < x, i + 2)]] while (i < x) { ++i; }
+  [[unreg_ns::b4(i <= x)]] for (T j = 0; j < x; ++j) { ++i; }
+  [[unreg_ns::b5(i > 0)]];
   return i;
 }
 
 template <typename T>
 struct Box {
   T v;
-  T get(T x) [[cerastes::c1(x > 0, x + 1)]] {
+  T get(T x) [[unreg_ns::c1(x > 0, x + 1)]] {
     T i = 0;
-    [[cerastes::c2(i < x)]] while (i < x) { ++i; }
-    [[cerastes::c3(i > 0)]];
+    [[unreg_ns::c2(i < x)]] while (i < x) { ++i; }
+    [[unreg_ns::c3(i > 0)]];
     return i + v;
   }
 };

@@ -4,14 +4,14 @@ routine S1::operator= plain implicit nobody @ L9:28
 routine S1::operator= plain implicit nobody @ L9:28
   returns S1 &
   param 1 _: const S1 &
-attr [[cerastes::X2(2)]] on variable s2var @ L10:3
+attr [[unreg_ns::X2(2)]] on variable s2var @ L10:3
 routine S2::operator= plain implicit nobody @ L10:28
   returns S2 &
   param 1 _: S2 &&
 routine S2::operator= plain implicit nobody @ L10:28
   returns S2 &
   param 1 _: const S2 &
-attr [[cerastes::X3(3)]] on type S3 @ L11:10
+attr [[unreg_ns::X3(3)]] on type S3 @ L11:10
 routine S3::operator= plain implicit nobody @ L11:28
   returns S3 &
   param 1 _: S3 &&
@@ -23,22 +23,22 @@ routine use plain body @ L13:5
 end walk: 7 routines reported, 0 routines with bodies in non-system files outside the primary file
 --- stderr ---
 "tests/il/inventory/attr_class_prefix.cpp", line 9: warning: attribute
-          namespace "cerastes" is unrecognized
-  [[cerastes::X1(1)]] struct S1 { int a; };
+          namespace "unreg_ns" is unrecognized
+  [[unreg_ns::X1(1)]] struct S1 { int a; };
     ^
 
 "tests/il/inventory/attr_class_prefix.cpp", line 10: warning: attribute
-          namespace "cerastes" is unrecognized
-  [[cerastes::X2(2)]] struct S2 { int a; } s2var;
+          namespace "unreg_ns" is unrecognized
+  [[unreg_ns::X2(2)]] struct S2 { int a; } s2var;
     ^
 
 "tests/il/inventory/attr_class_prefix.cpp", line 11: warning: attribute
-          namespace "cerastes" is unrecognized
-  struct [[cerastes::X3(3)]] S3 { int a; };
+          namespace "unreg_ns" is unrecognized
+  struct [[unreg_ns::X3(3)]] S3 { int a; };
            ^
 
 "tests/il/inventory/attr_class_prefix.cpp", line 12: warning: attribute
-          namespace "cerastes" is unrecognized
-  [[cerastes::X4(4)]] enum E4 { e4 };
+          namespace "unreg_ns" is unrecognized
+  [[unreg_ns::X4(4)]] enum E4 { e4 };
     ^
 

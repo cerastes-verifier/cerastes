@@ -9,10 +9,10 @@
 //   p4  function template, declaration only
 //   p5, p6  function template declared with p5, then redeclared and defined
 //       with p6 (the redeclaration case of check5's tmpl)
-int s1(int x) [[cerastes::p1(x > 0)]];
-int s2(int x) [[cerastes::p2(x > 0)]] { return x; }
-template <typename T> T s3(T x) [[cerastes::p3(x > 0)]] { return x; }
-template <typename T> T s4(T x) [[cerastes::p4(x > 0)]];
-template <typename T> T s5(T x) [[cerastes::p5(x > 0)]];
-template <typename T> T s5(T x) [[cerastes::p6(x > 1)]] { return x; }
+int s1(int x) [[unreg_ns::p1(x > 0)]];
+int s2(int x) [[unreg_ns::p2(x > 0)]] { return x; }
+template <typename T> T s3(T x) [[unreg_ns::p3(x > 0)]] { return x; }
+template <typename T> T s4(T x) [[unreg_ns::p4(x > 0)]];
+template <typename T> T s5(T x) [[unreg_ns::p5(x > 0)]];
+template <typename T> T s5(T x) [[unreg_ns::p6(x > 1)]] { return x; }
 int use() { return s2(1) + s3(2) + s5(3); }

@@ -1,4 +1,4 @@
-attr [[cerastes::al(1)]] on typedef FT2 @ L11:13
+attr [[unreg_ns::al(1)]] on typedef FT2 @ L11:13
 routine g plain nobody @ L13:5
   returns int
   param 1 _: int
@@ -8,16 +8,16 @@ routine h plain nobody @ L14:5
 routine real plain nobody @ L16:5
   returns int
   param 1 x: int
-  attr [[cerastes::post(x > 0)]] on type @ L16:19
+  attr [[unreg_ns::post(x > 0)]] on type @ L16:19
 end walk: 3 routines reported, 0 routines with bodies in non-system files outside the primary file
 --- stderr ---
 "tests/il/contrast/alias_attribute.cpp", line 11: warning: attribute namespace
-          "cerastes" is unrecognized
-  using FT2 [[cerastes::al(1)]] = int(int);
+          "unreg_ns" is unrecognized
+  using FT2 [[unreg_ns::al(1)]] = int(int);
               ^
 
 "tests/il/contrast/alias_attribute.cpp", line 16: warning: attribute namespace
-          "cerastes" is unrecognized
-  int real(int x) [[cerastes::post(x > 0)]];
+          "unreg_ns" is unrecognized
+  int real(int x) [[unreg_ns::post(x > 0)]];
                     ^
 

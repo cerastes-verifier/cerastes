@@ -1,38 +1,38 @@
-attr [[cerastes::n1(1)]] on namespace ns @ L11:13
+attr [[unreg_ns::n1(1)]] on namespace ns @ L11:13
 routine ns::inside plain body @ L12:7
   returns int
   param 1 x: int
-attr [[cerastes::c1(2)]] on type Point @ L15:10
+attr [[unreg_ns::c1(2)]] on type Point @ L15:10
 routine Point::operator= plain implicit nobody @ L15:28
   returns Point &
   param 1 _: Point &&
 routine Point::operator= plain implicit nobody @ L15:28
   returns Point &
   param 1 _: const Point &
-attr [[cerastes::f1(3)]] on field Point::x @ L16:5
+attr [[unreg_ns::f1(3)]] on field Point::x @ L16:5
 routine use plain body @ L20:5
   returns int
   param 1 a: int
-  attr [[cerastes::v1(a > 0)]] on variable local @ L21:5
+  attr [[unreg_ns::v1(a > 0)]] on variable local @ L21:5
 end walk: 4 routines reported, 0 routines with bodies in non-system files outside the primary file
 --- stderr ---
 "tests/il/contrast/variable_attributes.cpp", line 11: warning: attribute
-          namespace "cerastes" is unrecognized
-  namespace [[cerastes::n1(1)]] ns {
+          namespace "unreg_ns" is unrecognized
+  namespace [[unreg_ns::n1(1)]] ns {
               ^
 
 "tests/il/contrast/variable_attributes.cpp", line 15: warning: attribute
-          namespace "cerastes" is unrecognized
-  struct [[cerastes::c1(2)]] Point {
+          namespace "unreg_ns" is unrecognized
+  struct [[unreg_ns::c1(2)]] Point {
            ^
 
 "tests/il/contrast/variable_attributes.cpp", line 16: warning: attribute
-          namespace "cerastes" is unrecognized
-    [[cerastes::f1(3)]] int x;
+          namespace "unreg_ns" is unrecognized
+    [[unreg_ns::f1(3)]] int x;
       ^
 
 "tests/il/contrast/variable_attributes.cpp", line 21: warning: attribute
-          namespace "cerastes" is unrecognized
-    [[cerastes::v1(a > 0)]] int local = a + 1;
+          namespace "unreg_ns" is unrecognized
+    [[unreg_ns::v1(a > 0)]] int local = a + 1;
       ^
 

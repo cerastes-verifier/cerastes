@@ -7,12 +7,12 @@
 //           instantiated by use()
 //   r5, r6  member function declared in the class with r5, defined outside
 //           the class with r6
-[[cerastes::r1(1)]] int p1(int x);
-[[cerastes::r2(2)]] int p1(int x);
+[[unreg_ns::r1(1)]] int p1(int x);
+[[unreg_ns::r2(2)]] int p1(int x);
 int p1(int x) { return x; }
-template <typename T> [[cerastes::r3(3)]] T p2(T x);
-template <typename T> [[cerastes::r4(4)]] T p2(T x);
+template <typename T> [[unreg_ns::r3(3)]] T p2(T x);
+template <typename T> [[unreg_ns::r4(4)]] T p2(T x);
 template <typename T> T p2(T x) { return x; }
-struct S { [[cerastes::r5(5)]] int m(int x); };
-[[cerastes::r6(6)]] int S::m(int x) { return x; }
+struct S { [[unreg_ns::r5(5)]] int m(int x); };
+[[unreg_ns::r6(6)]] int S::m(int x) { return x; }
 int use() { S s; return p1(1) + p2(2) + s.m(3); }

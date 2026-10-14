@@ -13,15 +13,15 @@
 // lambda closures and the local class is recorded in the golden, not assumed.
 
 int in_plain(int x) {
-  [[cerastes::a_plain(x)]];
+  [[unreg_ns::a_plain(x)]];
   int y = x * 3;
   auto lam = [](int v) {
-    [[cerastes::a_plain_lambda(v)]];
+    [[unreg_ns::a_plain_lambda(v)]];
     return v - 7;
   };
   struct Local {
     int member(int w) {
-      [[cerastes::a_local_member(w)]];
+      [[unreg_ns::a_local_member(w)]];
       return w << 1;
     }
   };
@@ -30,10 +30,10 @@ int in_plain(int x) {
 
 template <typename T>
 T in_tmpl(T x) {
-  [[cerastes::a_tmpl(x)]];
+  [[unreg_ns::a_tmpl(x)]];
   T y = x * 3;
   auto lam = [](T v) {
-    [[cerastes::a_tmpl_lambda(v)]];
+    [[unreg_ns::a_tmpl_lambda(v)]];
     return v - 7;
   };
   return lam(y) + x;

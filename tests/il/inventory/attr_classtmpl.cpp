@@ -9,8 +9,8 @@
 //   m2  prefix of the data member v
 //   m3  after the class-key of the class template itself
 template <typename T>
-struct [[cerastes::m3(1)]] Box {
-  [[cerastes::m2(2)]] T v;
-  [[cerastes::m1(x > 0)]] T get1(T x) { return x; }
+struct [[unreg_ns::m3(1)]] Box {
+  [[unreg_ns::m2(2)]] T v;
+  [[unreg_ns::m1(x > 0)]] T get1(T x) { return x; }
 };
 int use() { Box<int> b{1}; return b.get1(2); }

@@ -30,6 +30,18 @@ file maps every such query to the EDG IL field that answers it, with
   scripts/cerastes-fe.sh --c++20 --il_display <probe>
   ```
 
+- Attribute namespace in the probes (M2): the probes whose made-up attribute
+  names exercise EDG's unrecognized-attribute path
+  (`tests/il/g1/check5_attributes.cpp`, `tests/il/inventory/attr_*.cpp|.c`,
+  `tests/il/contrast/{alias_attribute,lambda_bodies,ordinary_attributes,stmt_attr_placement,variable_attributes}.cpp`,
+  and their goldens) used `[[cerastes::...]]` when this inventory was written.
+  M2 registers `cerastes` as a closed attribute namespace, which would turn
+  those made-up names into errors, so since M2 the probes use `[[unreg_ns::...]]`
+  (a namespace nobody registers). The change is a same-length substitution
+  `cerastes` to `unreg_ns`; every line of every source and golden is otherwise
+  byte-identical. The excerpts in this file keep the original `cerastes::`
+  spelling; read `cerastes::x` there as `unreg_ns::x` in the current probes and
+  goldens. (`tests/il/contrast/line_directive.cpp` is not renamed.)
 - VeriFast source: `~/Documents/verifast`, branch `generic2`, commit
   `0fb63506a51cae559ae92348eb54ba7f7be0bf6d`. File names below are relative to
   `src/cxx_frontend/ast_exporter/`.
