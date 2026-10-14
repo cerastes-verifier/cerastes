@@ -24,6 +24,7 @@ fail: a missing front end must not silently turn them off.
 """
 
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -455,7 +456,8 @@ class EndWalkLineTests(unittest.TestCase):
 # line.  Directives: `// silent` suppresses the first three lines and the end
 # line (stdout empty unless `// out:` lines exist); `// noend` omits the end
 # line; `// end: <text>` prints <text> as the end line; `// after: <text>`
-# prints <text> after the end line.
+# prints <text> after the end line; `// crash` kills the process with SIGKILL;
+# `// sleep` sleeps for 30 s (for timeout tests).
 FAKE_FE = '''\
 import os, sys
 ROOT = {root!r}
@@ -463,6 +465,11 @@ args = sys.argv[1:]
 with open(args[-1]) as f:  # relative paths are relative to the root
     lines = f.read().splitlines(keepends=True)
 code = 0
+if "// crash\\n" in lines:
+    os.kill(os.getpid(), 9)
+if "// sleep\\n" in lines:
+    import time
+    time.sleep(30)
 END = ("end walk: 1 routines reported, 0 routines with bodies in non-system files "
        "outside the primary file\\n")
 if "// silent\\n" not in lines:
@@ -505,11 +512,29 @@ class FakeFrontEndCase(unittest.TestCase):
         old_cwd = os.getcwd()
         os.chdir(base)
         self.addCleanup(os.chdir, old_cwd)
+        # The tree-consistency check reads the real build/env.sh and the shell's
+        # CERASTES_EDG_SRC; here it is out of the picture (TreeConsistencyTests
+        # cover it), but a test can make it fail through `self.tree_mock`.
+        tree_patch = mock.patch.object(rt, "edg_tree_problem", return_value=None)
+        # build/env.sh is authoritative for the variables it defines, so the
+        # fake front end and the other fixtures are named in a fixture env file
+        # (`set_env`), not in the environment of the process.
+        self.env_file = base / "env.sh"
+        self.env_values = {"CERASTES_FE": str(fake), "EDG_CLANG_VER_SCRAPE": "0",
+                           "CPFE": "/nonexistent/cpfe"}
+        self.set_env()
         for patcher in (mock.patch.object(rt, "FE_COMMAND", [sys.executable, str(fake)]),
-                        mock.patch.dict(os.environ, {"CERASTES_FE": str(fake),
-                                                     "EDG_CLANG_VER_SCRAPE": "0"})):
+                        mock.patch.object(rt, "ENV_SH", self.env_file),
+                        tree_patch):
             patcher.start()
             self.addCleanup(patcher.stop)
+        self.tree_mock = rt.edg_tree_problem
+
+    def set_env(self, **values):
+        """Define (or change) variables of the fixture build/env.sh."""
+        self.env_values.update(values)
+        self.env_file.write_text("".join(f'export {k}="{v}"\n'
+                                         for k, v in self.env_values.items()))
 
     def allow(self, *dirs):
         """Permit skip markers in `dirs` (the real allowlist has one entry)."""
@@ -2767,6 +2792,20 @@ def check_sh_problems(text):
     html = index(r"check_doc_examples\.py\s+--html\s+build/doc\s*$", "the --html check")
     if None not in (lint, build, html) and not lint < build < html:
         problems.append("order must be: doc lint, docs build, --html check")
+    # decision 0005: the EDG tree is checked before anything is built, and the
+    # binary under test is verified against the tree after the tests ran
+    edg = index(r"^\s*python3 scripts/edg_tree\.py check\s*$", "the EDG tree guard")
+    boot = index(r"^\s*scripts/bootstrap\.sh --build-only\s*$", "the build step")
+    tests = index(r"^\s*python3 scripts/run_tests\.py\s*$", "the test run")
+    verify = index(r"^\s*python3 scripts/edg_tree\.py describe --verify-build\s*$",
+                   "the build verification")
+    green = index(r"all green", "the final green line")
+    if None not in (edg, boot) and not edg < boot:
+        problems.append("the EDG tree guard must run before the build")
+    if None not in (tests, verify, green) and not tests < verify < green:
+        problems.append("order must be: tests, build verification, final green line")
+    elif None not in (verify, green) and not verify < green:
+        problems.append("the build verification must run before the final green line")
     return problems
 
 
@@ -2815,11 +2854,18 @@ class WiringCheckTests(unittest.TestCase):
     SH = """\
 #!/usr/bin/env bash
 set -euo pipefail
+step "edg tree"
+python3 scripts/edg_tree.py check
+step "build"
+scripts/bootstrap.sh --build-only
 python3 scripts/check_doc_examples.py
+step "tests"
+python3 scripts/run_tests.py
 step "docs"
 scripts/build_docs.sh
 python3 scripts/check_doc_examples.py --html build/doc
-printf 'done\\n'
+python3 scripts/edg_tree.py describe --verify-build
+printf '\\ncheck.sh: all green\\n'
 """
     YML = """\
 jobs:
@@ -2875,6 +2921,50 @@ jobs:
                 self.assertNotEqual(text, self.SH, "mutation did not apply")
                 self.assertTrue(check_sh_problems(text), what)
 
+    def test_edg_tree_wiring_mutations_are_found(self):
+        guard = "python3 scripts/edg_tree.py check\n"
+        verify = "python3 scripts/edg_tree.py describe --verify-build\n"
+        green = "printf '\\ncheck.sh: all green\\n'\n"
+        boot = "scripts/bootstrap.sh --build-only\n"
+        tests = "python3 scripts/run_tests.py\n"
+        mutations = {
+            "guard commented out": self.SH.replace(guard, "# " + guard),
+            "guard removed": self.SH.replace(guard, ""),
+            "guard || true": self.SH.replace(guard, guard[:-1] + " || true\n"),
+            "guard ; true": self.SH.replace(guard, guard[:-1] + "; true\n"),
+            "guard in the background": self.SH.replace(guard, guard[:-1] + " &\n"),
+            "guard without the subcommand": self.SH.replace(guard, "python3 scripts/edg_tree.py\n"),
+            "guard describes instead": self.SH.replace(guard, "python3 scripts/edg_tree.py describe\n"),
+            "guard after the build": self.SH.replace(guard, "").replace(boot, boot + guard),
+            "build commented out": self.SH.replace(boot, "# " + boot),
+            "build without --build-only": self.SH.replace(boot, "scripts/bootstrap.sh\n"),
+            "verify commented out": self.SH.replace(verify, "# " + verify),
+            "verify removed": self.SH.replace(verify, ""),
+            "verify || true": self.SH.replace(verify, verify[:-1] + " || true\n"),
+            "verify ; true": self.SH.replace(verify, verify[:-1] + "; true\n"),
+            "verify in the background": self.SH.replace(verify, verify[:-1] + " &\n"),
+            "verify without the flag": self.SH.replace(verify, "python3 scripts/edg_tree.py describe\n"),
+            "verify before the tests": self.SH.replace(verify, "").replace(tests, verify + tests),
+            "verify after the green line": self.SH.replace(verify, "").replace(green, green + verify),
+            "no final green line": self.SH.replace(green, "printf 'done\\n'\n"),
+            "tests removed": self.SH.replace(tests, ""),
+            "tests commented out": self.SH.replace(tests, "# " + tests),
+            "tests with a path": self.SH.replace(tests, "python3 scripts/run_tests.py tests/il\n"),
+        }
+        for what, text in mutations.items():
+            with self.subTest(what):
+                self.assertNotEqual(text, self.SH, "mutation did not apply")
+                self.assertTrue(check_sh_problems(text), what)
+
+    def test_the_edg_tree_lines_sit_between_the_right_neighbours(self):
+        lines = [l for l in active_lines(self.SH) if l.strip()]
+        guard = lines.index("python3 scripts/edg_tree.py check")
+        self.assertLess(guard, lines.index("scripts/bootstrap.sh --build-only"))
+        self.assertLess(lines.index("python3 scripts/run_tests.py"),
+                        lines.index("python3 scripts/edg_tree.py describe --verify-build"))
+        self.assertLess(lines.index("python3 scripts/edg_tree.py describe --verify-build"),
+                        len(lines) - 1)
+
     def test_workflow_mutations_are_found(self):
         mutations = {
             "lint commented out": self.YML.replace(
@@ -2915,6 +3005,274 @@ jobs:
     def test_no_build_job_is_a_problem(self):
         self.assertEqual(workflow_problems("jobs:\n  other:\n    steps: []\n"),
                          ["no `build` job"])
+
+
+GOLDEN_EXAMPLE = ("// expect: golden\n// tag::body[]\nint f(int x) { return x + 1; }\n"
+                  "// end::body[]\n")
+GOLDEN_TEXT = ("routine f plain body @ L3:5\n  param 1 x: int\n  returns int\n"
+               "end walk: 1 routines reported, 0 routines with bodies in non-system files "
+               "outside the primary file\n")
+LISTING_PAGE = page_with("[source,cpp]", "----", "include::example$a.cpp[tag=body]", "----",
+                         "", "[source,text]", "----", "include::example$a.cpp.golden[]", "----")
+
+
+class GoldenListingLintTests(DocLintCase):
+    """Rule g: a walker listing on a page is the golden file of a golden test
+    that the same page shows, and nothing else looks like one."""
+
+    def setUp(self):
+        super().setUp()
+        self.example("a.cpp", GOLDEN_EXAMPLE)
+        (self.component / "examples" / "a.cpp.golden").write_text(GOLDEN_TEXT)
+        self.page("p.adoc", LISTING_PAGE)
+
+    def golden(self, text, name="a.cpp.golden"):
+        (self.component / "examples" / name).write_text(text)
+
+    def test_the_listing_next_to_its_code_is_clean(self):
+        report = self.check()
+        self.assertEqual(report.problems, [])
+        self.assertEqual((report.golden_blocks, report.blocks, report.includes), (1, 1, 2))
+
+    def test_modes_have_their_own_golden_files(self):
+        self.example("a.cpp", "// mode: c++20, c23\n" + GOLDEN_EXAMPLE)
+        self.golden(GOLDEN_TEXT, "a.cpp.c23.golden")
+        self.golden(GOLDEN_TEXT, "a.cpp.c++20.golden")
+        (self.component / "examples" / "a.cpp.golden").unlink()
+        self.page("p.adoc", LISTING_PAGE.replace("a.cpp.golden", "a.cpp.c23.golden"))
+        self.assertEqual(self.messages(), [])
+        # a single-mode test has `a.cpp.golden`, not a golden per mode
+        self.example("a.cpp", GOLDEN_EXAMPLE)
+        self.assertTrue(any("no `golden` test of this directory has it" in p
+                            for p in self.messages()), self.messages())
+
+    def test_only_a_text_block_may_hold_it(self):
+        for language in ("console", "sh", "cpp", "c", "vpr", "python", "bash"):
+            with self.subTest(language):
+                self.page("p.adoc", LISTING_PAGE.replace("[source,text]", f"[source,{language}]"))
+                self.lint("a golden file may be included only as the whole body")
+
+    def test_it_must_be_the_whole_body(self):
+        for body in (("Output:", "include::example$a.cpp.golden[]"),
+                     ("include::example$a.cpp.golden[]", "more"),
+                     ("include::example$a.cpp.golden[]", "include::example$a.cpp.golden[]")):
+            with self.subTest(body):
+                self.page("p.adoc", page_with(
+                    "[source,cpp]", "----", "include::example$a.cpp[tag=body]", "----", "",
+                    "[source,text]", "----", *body, "----"))
+                self.lint("a golden file may be included only as the whole body")
+
+    def test_not_in_prose_tables_or_open_blocks(self):
+        base = ("[source,cpp]", "----", "include::example$a.cpp[tag=body]", "----", "")
+        for what, lines in (
+                ("prose", ("include::example$a.cpp.golden[]",)),
+                ("table", ("|===", "a|", "include::example$a.cpp.golden[]", "|===")),
+                ("listing without a language", ("----", "include::example$a.cpp.golden[]",
+                                                "----")),
+                ("literal block", ("....", "include::example$a.cpp.golden[]", "....")),
+                ("list item", ("* item", "+", "include::example$a.cpp.golden[]"))):
+            with self.subTest(what):
+                self.page("p.adoc", page_with(*base, *lines))
+                self.lint("a golden file may be included only as the whole body")
+
+    def test_no_attributes(self):
+        for attrs in ("tag=x", "lines=1..2", "indent=0", "opts=optional", "leveloffset=+1",
+                      "tags=a;b"):
+            with self.subTest(attrs):
+                self.page("p.adoc", LISTING_PAGE.replace("golden[]", f"golden[{attrs}]"))
+                self.lint("a golden include takes no attributes")
+        self.page("p.adoc", LISTING_PAGE.replace("golden[]", "golden[ ]"))
+        self.assertEqual(self.messages(), [])
+
+    def test_it_must_be_the_golden_of_a_golden_test(self):
+        self.example("b.cpp", "// expect: frontend-ok\n// tag::t[]\nint g();\n// end::t[]\n")
+        self.golden(GOLDEN_TEXT, "b.cpp.golden")  # the test is not a golden test
+        self.page("p.adoc", LISTING_PAGE + "\n" + "\n".join(
+            ["[source,cpp]", "----", "include::example$b.cpp[tag=t]", "----", "",
+             "[source,text]", "----", "include::example$b.cpp.golden[]", "----"]))
+        self.lint("is not a `golden` test")
+        self.example("c.cpp", "// no header\nint g();\n")
+        self.golden(GOLDEN_TEXT, "c.cpp.golden")
+        self.page("p.adoc", LISTING_PAGE.replace("a.cpp.golden", "c.cpp.golden"))
+        self.lint("has a bad header")
+        self.golden(GOLDEN_TEXT, "stray.golden")  # no test at all
+        self.page("p.adoc", LISTING_PAGE.replace("a.cpp.golden", "stray.golden"))
+        self.lint("no `golden` test of this directory has it")
+        self.page("p.adoc", LISTING_PAGE.replace("a.cpp.golden", "missing.cpp.golden"))
+        self.lint("does not exist")
+
+    def test_the_test_must_be_on_the_same_page(self):
+        self.page("p.adoc", page_with("[source,text]", "----", "include::example$a.cpp.golden[]",
+                                      "----"))
+        self.lint("is not included on this page", "orphan example")
+        # included by another page does not do
+        self.page("q.adoc", block_of("include::example$a.cpp[tag=body]"))
+        problems = self.lint("is not included on this page")
+        self.assertFalse(any("orphan" in p for p in problems), problems)
+        # an include inside a comment block does not count
+        self.page("q.adoc", "= Q\n")
+        self.page("p.adoc", page_with(
+            "////", "include::example$a.cpp[tag=body]", "////", "",
+            "[source,text]", "----", "include::example$a.cpp.golden[]", "----"))
+        self.lint("is not included on this page")
+        # in either order on the page it is fine
+        self.page("p.adoc", page_with(
+            "[source,text]", "----", "include::example$a.cpp.golden[]", "----", "",
+            "[source,cpp]", "----", "include::example$a.cpp[tag=body]", "----"))
+        self.assertEqual(self.messages(), [])
+
+    def test_a_golden_that_is_unsafe_to_embed(self):
+        for what, text in (("callout", "routine f @ L1:1 <1>\n" + GOLDEN_TEXT),
+                           ("callout with spaces", "a <12>  \n" + GOLDEN_TEXT),
+                           ("empty", "  \n")):
+            with self.subTest(what):
+                self.golden(text)
+                self.lint(count=1)
+        # what is safe: angle brackets inside a line, ampersands, a stderr section,
+        # directives (Antora shows them verbatim: see the end-to-end twin)
+        self.golden("include::x.adoc[]\nifdef::a[]\n// tag::x[]\n" + GOLDEN_TEXT)
+        self.assertEqual(self.messages(), [])
+        self.golden("routine f<T=int> & g @ L1:1 <tptk_unknown> x\n--- stderr ---\n" + GOLDEN_TEXT)
+        self.assertEqual(self.messages(), [])
+
+    def test_hand_written_walker_output_is_refused(self):
+        lines = {
+            "end walk": "end walk: 1 routines reported, 0 routines with bodies in non-system "
+                        "files outside the primary file",
+            "routine": "routine f plain body @ L3:5",
+            "indented routine": "  routine g instance body @ L3:5",
+            "attribute": "    attr [[cerastes::requires]] on routine @ L5:16",
+            "statement": "stmt stmk_empty @ L3:3 attr [[cerastes::check]] @ L3:5",
+        }
+        for language in ("text", "console", "sh"):
+            for what, line in lines.items():
+                with self.subTest(language=language, what=what):
+                    self.page("p.adoc", page_with("[source,cpp]", "----",
+                                                  "include::example$a.cpp[tag=body]", "----", "",
+                                                  f"[source,{language}]", "----", "plain", line,
+                                                  "----"))
+                    self.lint("walker output must be included from the golden file", count=1)
+
+    def test_walker_output_next_to_a_real_listing_is_refused_too(self):
+        self.page("p.adoc", LISTING_PAGE + "\n[source,text]\n----\nroutine f plain @ L3:5\n----\n")
+        self.lint("walker output must be included", count=1)
+
+    def test_ordinary_output_is_fine(self):
+        for body in ("$ scripts/cerastes-fe.sh --c++20 --cerastes_walk x.cpp", "routine",
+                     "the routine f is reported", "a.cpp:3:5: error: no", "walk: not at the start",
+                     "attr [x] is not walker output", "  end walk of the dog"):
+            with self.subTest(body):
+                self.page("p.adoc", LISTING_PAGE + f"\n[source,text]\n----\n{body}\n----\n")
+                self.assertEqual(self.messages(), [])
+
+    def test_walker_output_in_a_comment_is_not_a_block(self):
+        self.page("p.adoc", LISTING_PAGE + "\n////\nroutine f @ L1:1\n////\n")
+        self.assertEqual(self.messages(), [])
+
+    def test_a_golden_include_in_a_comment_is_not_checked(self):
+        self.page("p.adoc", page_with("////", "[source,console]", "----",
+                                      "include::example$a.cpp.golden[tag=x]", "----", "////",
+                                      "", "[source,cpp]", "----",
+                                      "include::example$a.cpp[tag=body]", "----"))
+        self.assertEqual(self.messages(), [])
+
+    def test_the_command_line(self):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(cde.main(["--root", str(self.root)]), 0, out.getvalue())
+        self.page("p.adoc", LISTING_PAGE.replace("[source,text]", "[source,console]"))
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(cde.main(["--root", str(self.root)]), 1)
+        self.assertIn("a golden file may be included only as the whole body", out.getvalue())
+
+
+TEXT_PAGE = """<!DOCTYPE html><html><body>
+<div class="listingblock"><div class="content">
+<pre class="highlightjs highlight"><code class="language-text hljs" data-lang="text">{code}</code></pre>
+</div></div>
+<div class="listingblock"><div class="content">
+<pre class="highlightjs highlight"><code class="language-cpp hljs" data-lang="cpp">int f(int x) {{ return x + 1; }}</code></pre>
+</div></div>
+</body></html>
+"""
+
+
+class GoldenListingHtmlTests(DocLintCase):
+    """--html: a block with walker output equals a golden file, whatever the
+    sources look like, and the pages' golden includes are all found."""
+
+    ESCAPED = (GOLDEN_TEXT.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+    def setUp(self):
+        super().setUp()
+        self.example("a.cpp", GOLDEN_EXAMPLE)
+        (self.component / "examples" / "a.cpp.golden").write_text(GOLDEN_TEXT)
+        self.page("p.adoc", LISTING_PAGE)
+        self.out = self.root / "site"
+        self.out.mkdir()
+
+    def site(self, code, template=TEXT_PAGE, name="p.html"):
+        (self.out / name).write_text(template.format(code=code))
+
+    def run_html(self):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            status = cde.main(["--root", str(self.root), "--html", str(self.out)])
+        return status, out.getvalue(), err.getvalue()
+
+    def test_the_golden_text_passes(self):
+        self.site(self.ESCAPED)
+        status, out, err = self.run_html()
+        self.assertEqual(status, 0, (out, err))
+
+    def test_whitespace_differences_pass(self):
+        self.site("\n" + self.ESCAPED.replace("\n", "  \n") + "\n")
+        self.assertEqual(self.run_html()[0], 0)
+
+    def test_a_listing_that_is_not_a_golden_file_fails(self):
+        for what, code in (
+                ("one changed character", self.ESCAPED.replace("param 1", "param 2")),
+                ("a line dropped", self.ESCAPED.replace("  returns int\n", "")),
+                ("a line added", self.ESCAPED + "routine g plain body @ L9:1\n"),
+                ("an invented listing", "routine h plain body @ L1:1\nend walk: 1 routines "
+                                        "reported, 0 routines with bodies in non-system files "
+                                        "outside the primary file\n"),
+                ("only part of it", "routine f plain body @ L3:5\n  param 1 x: int")):
+            with self.subTest(what):
+                self.site(code)
+                status, out, _ = self.run_html()
+                self.assertEqual(status, 1, out)
+                self.assertIn("with walker output", out)
+                self.assertIn("does not equal any golden file", out)
+
+    def test_a_golden_file_of_a_test_that_is_gone_does_not_vouch(self):
+        (self.component / "examples" / "b.cpp.golden").write_text("routine z @ L1:1\n")
+        self.site("routine z @ L1:1")  # equals a golden file with no test
+        status, out, _ = self.run_html()
+        self.assertEqual(status, 1, out)
+
+    def test_other_text_blocks_are_untouched(self):
+        self.site("$ scripts/cerastes-fe.sh --c++20 x.cpp\nplain output")
+        status, out, err = self.run_html()
+        # the page sources declare a golden listing that the site does not show
+        self.assertEqual(status, 1, out)
+        self.assertIn("found 0 walker listings equal to a golden file but the pages' sources "
+                      "include 1", out)
+        self.assertNotIn("with walker output", out)
+
+    def test_the_count_cannot_be_dodged(self):
+        # two includes in the sources, one listing on the site
+        self.page("q.adoc", LISTING_PAGE)
+        self.site(self.ESCAPED)
+        status, out, _ = self.run_html()
+        self.assertEqual(status, 1, out)
+        self.assertIn("found 1 walker listings equal to a golden file but the pages' sources "
+                      "include 2", out)
+
+    def test_a_site_without_golden_includes_needs_none(self):
+        self.page("p.adoc", block_of("include::example$a.cpp[tag=body]"))
+        self.site("plain text output", template=TEXT_PAGE)
+        self.assertEqual(self.run_html()[0], 0)
 
 
 class RealDocTreeTests(unittest.TestCase):
@@ -3016,7 +3374,8 @@ class E2EGateTests(unittest.TestCase):
         self.assertNotIn("unittest." + "skipUnless", source)
         for name in ("FakeGoldenRelativePathTests", "EndToEndTests",
                      "RealFrontEndGoldenTests", "WalkerSelfTestHookTests",
-                     "DocBuildWarningsTests"):
+                     "DocBuildWarningsTests", "TreeScriptTwinTests", "EdgTreeToolTests",
+                     "RealTagTableTests", "RealDiagnosticTests", "RealNativeTests"):
             self.assertRegex(source, rf"@e2e_gate\([^@]*?\)\nclass {name}\b", name)
 
 
@@ -3448,6 +3807,77 @@ class DocBuildWarningsTests(unittest.TestCase):
             self.probe(what, {self.PAGE: self.GOOD + text}, html_needle, lint_needle, 1, site,
                        base)
 
+    LISTING_EXAMPLE = "doc/modules/ROOT/examples/e2e/walk.cpp"
+    LISTING_GOLDEN = ("routine f<T=int> & g @ L3:5 <tptk_unknown> \\x\n"
+                      "  attr [[cerastes::requires]] on routine @ L3:9\n"
+                      "end walk: 1 routines reported, 0 routines with bodies in non-system "
+                      "files outside the primary file\n--- stderr ---\nw: <b> & </pre>\n")
+
+    def listing_page(self, golden=LISTING_GOLDEN):
+        self.write(self.LISTING_EXAMPLE, GOLDEN_EXAMPLE)
+        self.write(self.LISTING_EXAMPLE + ".golden", golden)
+        self.write(self.PAGE, self.GOOD + "\n[source,cpp]\n----\n"
+                   "include::example$e2e/walk.cpp[tag=body]\n----\n\n[source,text]\n----\n"
+                   "include::example$e2e/walk.cpp.golden[]\n----\n")
+        self.commit("walker listing")
+
+    def test_walker_listings_render_from_golden_files_and_are_checked(self):
+        """Rule g against a real build: a golden file with angle brackets, an
+        ampersand, a closing pre and a backslash renders verbatim and passes
+        --html; changing the golden file, or a listing typed into the page,
+        fails it; a golden with a line the include would change (a callout) is
+        refused by the lint, for good reason."""
+        self.listing_page()
+        status, out = self.build()
+        self.assertEqual(status, 0, out)
+        site = self.tmp / "out"
+        status, out = self.run_check("--html", site)
+        self.assertEqual(status, 0, out)
+        self.assertEqual(self.run_check()[0], 0)
+        (page,) = site.rglob("e2e-twin.html")
+        self.assertIn("w: &lt;b&gt; &amp; &lt;/pre&gt;", page.read_text())
+        # the site is checked against the golden files as they are now
+        golden = self.repo / (self.LISTING_EXAMPLE + ".golden")
+        golden.write_text(self.LISTING_GOLDEN.replace("L3:9", "L3:8"))
+        status, out = self.run_check("--html", site)
+        self.assertEqual(status, 1, out)
+        self.assertIn("with walker output", out)
+        golden.write_text(self.LISTING_GOLDEN)
+        self.assertEqual(self.run_check("--html", site)[0], 0)
+        # a listing typed into the page: the lint refuses it, and so does --html
+        typed = self.LISTING_GOLDEN.replace("L3:9", "L3:8")
+        self.write(self.PAGE, self.GOOD + "\n[source,cpp]\n----\n"
+                   "include::example$e2e/walk.cpp[tag=body]\n----\n\n[source,text]\n----\n"
+                   + typed.split("--- stderr ---")[0] + "----\n")
+        self.commit("typed listing")
+        status, out = self.build()
+        self.assertEqual(status, 0, out)  # Antora accepts it
+        status, out = self.run_check("--html", site)
+        self.assertEqual(status, 1, out)
+        self.assertIn("with walker output", out)
+        status, out = self.run_check()
+        self.assertEqual(status, 1, out)
+        self.assertIn("walker output must be included from the golden file", out)
+
+    def test_golden_lines_that_an_include_would_change(self):
+        """Why the lint refuses a callout marker in a golden: in a real build the
+        page does not show the golden file's text.  (Preprocessor directives and
+        tag directives, probed the same way, are shown verbatim by Antora, so
+        the lint leaves them alone.)"""
+        for what, line, needle in (("callout", "x <1>", "callout marker"),):
+            with self.subTest(what):
+                self.listing_page(self.LISTING_GOLDEN + line + "\n")
+                status, out = self.run_check()
+                self.assertEqual(status, 1, out)
+                self.assertIn(needle, out)
+                status, build_out = self.build()
+                if status == 0:  # Antora accepted it: but the page must then differ
+                    (page,) = (self.tmp / "out").rglob("e2e-twin.html")
+                    shown = line.replace("<", "&lt;").replace(">", "&gt;")
+                    self.assertNotIn(shown, page.read_text(),
+                                     (what, "the include changed nothing: the rule is not needed"))
+                self.git("reset", "-q", "--hard", "HEAD~1")
+
     def test_a_single_formatting_mark_or_plusplus_renders_fine(self):
         """The reality that the rules are matched to (a real build): one `__` or
         `++` in a paragraph is left alone, two garble it, `+...+` protects the
@@ -3479,5 +3909,2858 @@ class DocBuildWarningsTests(unittest.TestCase):
                 self.assertEqual(status, 0, out)
                 (page,) = (self.tmp / "out").rglob("e2e-twin.html")
                 self.assertIn(rendered, page.read_text())
+# ---------------------------------------------------------------------------
+# Front-end diagnostics: `frontend-error` / `frontend-warning`
+# ---------------------------------------------------------------------------
+
+# Real output of scripts/cerastes-fe.sh --c++20 --brief_diagnostics
+# --display_error_number --no_colors (run in a directory holding the files, so
+# the paths are relative), recorded on the pinned front end.  The tags are the
+# ones in the generated err_data.h: 20 undefined_identifier, 2803
+# attribute_namespace_unrecognized, 29 exp_primary_expr, 1105 warning_directive,
+# 135 not_a_member, 161 unrecognized_pragma, 304 no_matching_function, 3326
+# nonviable_because_arg_mismatch, 1574 static_assert, 3453 comparison_details,
+# 65 exp_semicolon, 177 declared_but_not_referenced, 68 integer_sign_change,
+# 1696 cannot_open_file, 571 cl_invalid_option.
+REAL_THREE_ERRORS = '''\
+"x.cpp", line 2 (col. 10): error #20: identifier "zzz" is undefined
+"x.cpp", line 4 (col. 3): warning #2803-D: attribute namespace "unreg_ns" is unrecognized
+"x.cpp", line 5 (col. 19): error #29: expected an expression
+"x.cpp", line 6 (col. 2): warning #1105-D: #warning directive: "hello"
+"x.cpp", line 8 (col. 19): error #135: class "S" has no member "y"
+3 errors detected in the compilation of "x.cpp".
+'''
+# Notes, continuation lines, a diagnostic in an included header, a context line.
+REAL_NOTES = '''\
+"inc/h.h", line 1 (col. 19): error #20: identifier "qqq" is undefined
+"inc/h.h", line 2 (col. 9): warning #161-D: unrecognized #pragma
+"n.cpp", line 5 (col. 12): error #304: no instance of overloaded function "f" matches the argument list
+            argument types are: (A)
+"n.cpp", line 3 (col. 6): note #3326-D: function "f(double)" does not match because argument #1 does not match parameter
+"n.cpp", line 2 (col. 6): note #3326-D: function "f(int)" does not match because argument #1 does not match parameter
+"n.cpp", line 6 (col. 30): error #1574: static assertion failed with "big"
+"n.cpp", line 6 (col. 54): note #3453-D: the final comparison was 4 > 100
+          detected during instantiation of class "B<T> [with T=int]" at line 7
+"n.cpp", line 8 (col. 30): error #65: expected a ";"
+"n.cpp", line 8 (col. 18): warning #177-D: variable "x" was declared but never referenced
+4 errors detected in the compilation of "n.cpp".
+'''
+REAL_CATASTROPHIC = '''\
+"c.cpp", line 1 (col. 25): catastrophic error #1696: cannot open source file "nonexistent.h"
+1 catastrophic error detected in the compilation of "c.cpp".
+Compilation terminated.
+'''
+REAL_WARNINGS_ONLY = '''\
+"r.cpp", line 1 (col. 33): warning #68-D: integer conversion resulted in a change of sign
+"r.cpp", line 1 (col. 18): warning #177-D: variable "unused" was declared but never referenced
+"r.cpp", line 2 (col. 9): warning #161-D: unrecognized #pragma
+'''
+REAL_COMMAND_LINE = '''\
+Command-line error #571: invalid option: --bogus_opt
+1 catastrophic error detected in this compilation.
+Compilation terminated.
+'''
+REAL_ERROR_LIMIT = '''\
+"x.cpp", line 2 (col. 10): error #20: identifier "zzz" is undefined
+Error limit reached.
+1 error detected in the compilation of "x.cpp".
+Compilation terminated.
+'''
+# tag -> number, for a fixture of the generated headers (all real).
+FIXTURE_TAGS = {
+    "undefined_identifier": 20, "attribute_namespace_unrecognized": 2803,
+    "exp_primary_expr": 29, "warning_directive": 1105, "not_a_member": 135,
+    "unrecognized_pragma": 161, "no_matching_function": 304,
+    "nonviable_because_arg_mismatch": 3326, "static_assert": 1574,
+    "comparison_details": 3453, "exp_semicolon": 65,
+    "declared_but_not_referenced": 177, "integer_sign_change": 68,
+    "cannot_open_file": 1696, "cl_invalid_option": 571,
+}
+
+
+def write_gen(directory, tags=None, drop_entries=0, count=None):
+    """Write err_codes.h and err_data.h in the format of EDG's generated headers
+    (mk_errinfo) for `tags` (tag -> number); the tag table is sorted by tag,
+    like the real one.  `drop_entries` cuts entries from the table without
+    changing the declared count; `count` overrides the declared count."""
+    tags = FIXTURE_TAGS if tags is None else tags
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    top = max(tags.values()) + 1
+    codes = {0: "ec_no_error"}
+    codes.update({n: f"ec_{t}" for t, n in tags.items()})
+    lines = ["/*\n\nDO NOT UPDATE THIS FILE!\n\n*/\n", "enum an_error_code {"]
+    lines += [f"  {codes[n]} /* = {n} */," for n in sorted(codes)]
+    lines += [f"  ec_last /* = {top} */", "};", ""]
+    (directory / "err_codes.h").write_text("\n".join(lines))
+    entries = sorted(tags)
+    table = [f'  {{ "{t}", ec_{t} }}' for t in entries]
+    table = table[:len(table) - drop_entries] if drop_entries else table
+    data = ["static a_const_char *message_text[(int)ec_last + 1] = {",
+            "  /* ec_no_error */", '  "unknown error",', "  /* ec_last */",
+            "  (a_const_char *)NULL", "};",
+            f"#define NUMBER_OF_ERROR_TAGS {len(entries) if count is None else count}",
+            "static an_error_tag_entry error_tags[NUMBER_OF_ERROR_TAGS]", "#ifndef _lint",
+            "= {", ",\n".join(table), "}", "#else /* ifdef _lint */", "#endif", ";", ""]
+    (directory / "err_data.h").write_text("\n".join(data))
+    return directory
+
+
+class ExpectDiagHeaderTests(unittest.TestCase):
+    def parse(self, text, suffix=".cpp"):
+        return rt.parse_header(text, suffix)
+
+    def test_grammar(self):
+        exp = self.parse("// expect: frontend-error undefined_identifier @ L5\n"
+                         "// expect: frontend-error undefined_identifier @ L5\n"
+                         "// expect: frontend-warning attribute_namespace_unrecognized @ L7\n"
+                         "// expect: frontend-error cerastes-some_tag @ L9\n"
+                         "// expect: frontend-error 3rd_arg_of_assume_aligned_must_be_integral "
+                         "@ L10\n"
+                         "// expect: frontend-error UCN_names_basic_char @ L11\n")
+        self.assertEqual(exp.kind, "frontend-diag")
+        self.assertEqual(exp.diags, [
+            rt.ExpectedDiag("error", "undefined_identifier", 5),
+            rt.ExpectedDiag("error", "undefined_identifier", 5),
+            rt.ExpectedDiag("warning", "attribute_namespace_unrecognized", 7),
+            rt.ExpectedDiag("error", "cerastes-some_tag", 9),
+            rt.ExpectedDiag("error", "3rd_arg_of_assume_aligned_must_be_integral", 10),
+            rt.ExpectedDiag("error", "UCN_names_basic_char", 11)])
+        self.assertEqual(exp.modes, ["c++20"])
+        self.assertEqual(str(exp.diags[0]), "undefined_identifier @ L5")
+
+    def test_only_warnings_is_a_test(self):
+        exp = self.parse("// expect: frontend-warning unrecognized_pragma @ L3\n")
+        self.assertEqual(exp.kind, "frontend-diag")
+
+    def test_modes_apply(self):
+        exp = self.parse("// expect: frontend-error undefined_identifier @ L3\n"
+                         "// mode: c++20, c23\n", ".c")
+        self.assertEqual(exp.modes, ["c++20", "c23"])
+        self.assertEqual(self.parse("// expect: frontend-warning a @ L3\n", ".c").modes, ["c23"])
+
+    def test_bad_headers(self):
+        err = "// expect: frontend-error undefined_identifier @ L5\n"
+        bad = {
+            "with golden": err + "// expect: golden\n",
+            "with verified": err + "// expect: verified\n",
+            "with a viper error": err + "// expect: error assert @ L3\n",
+            "with rejected": err + "// expect: rejected unsupported-union\n",
+            "with frontend-ok": err + "// expect: frontend-ok\n",
+            "no line": "// expect: frontend-error undefined_identifier\n",
+            "line zero": "// expect: frontend-error undefined_identifier @ L0\n",
+            "no tag": "// expect: frontend-error @ L3\n",
+            "tag with a dash": "// expect: frontend-error undefined-identifier @ L3\n",
+            "tag with a space": "// expect: frontend-error undefined identifier @ L3\n",
+            "bare cerastes-": "// expect: frontend-error cerastes- @ L3\n",
+            "upper case cerastes tag": "// expect: frontend-error cerastes-Tag @ L3\n",
+            "severity typo": "// expect: frontend-warn undefined_identifier @ L3\n",
+            "remark": "// expect: frontend-remark undefined_identifier @ L3\n",
+            "after code": "int x;\n" + err,
+            "reason syntax": "// expect: frontend-error undefined_identifier:foo @ L3\n",
+        }
+        for what, text in bad.items():
+            with self.subTest(what), self.assertRaises(rt.HeaderError):
+                self.parse(text)
+
+    def test_not_for_vpr(self):
+        with self.assertRaises(rt.HeaderError):
+            self.parse("// expect: frontend-error undefined_identifier @ L3\n", ".vpr")
+
+
+class NativeOkHeaderTests(unittest.TestCase):
+    def parse(self, text, suffix=".cpp"):
+        return rt.parse_header(text, suffix)
+
+    def test_accompanies_an_outcome(self):
+        for outcome, kind in (("golden", "golden"), ("verified", "verified"),
+                              ("frontend-ok", "frontend-ok"),
+                              ("frontend-error undefined_identifier @ L3", "frontend-diag"),
+                              ("frontend-warning unrecognized_pragma @ L3", "frontend-diag"),
+                              ("error assert @ L3", "error"),
+                              ("rejected unsupported-union", "rejected")):
+            for order in (("{o}", "native-ok"), ("native-ok", "{o}")):
+                with self.subTest(outcome=outcome, order=order):
+                    text = "".join(f"// expect: {l.format(o=outcome)}\n" for l in order)
+                    exp = self.parse(text)
+                    self.assertEqual((exp.kind, exp.native_ok), (kind, True))
+
+    def test_default_is_not_native(self):
+        self.assertFalse(self.parse("// expect: golden\n").native_ok)
+
+    def test_alone_is_not_a_test(self):
+        with self.assertRaises(rt.HeaderError) as ctx:
+            self.parse("// expect: native-ok\n")
+        self.assertIn("accompanies an outcome", str(ctx.exception))
+
+    def test_twice(self):
+        with self.assertRaises(rt.HeaderError) as ctx:
+            self.parse("// expect: golden\n// expect: native-ok\n// expect: native-ok\n")
+        self.assertIn("more than one", str(ctx.exception))
+
+    def test_not_in_viper(self):
+        with self.assertRaises(rt.HeaderError):
+            self.parse("// expect: verified\n// expect: native-ok\n", ".vpr")
+
+    def test_sole_kinds_still_stand_alone(self):
+        for text in ("// expect: golden\n// expect: golden\n// expect: native-ok\n",
+                     "// expect: verified\n// expect: verified\n// expect: native-ok\n",
+                     "// expect: golden\n// expect: verified\n// expect: native-ok\n",
+                     "// expect: frontend-ok\n// expect: golden\n// expect: native-ok\n"):
+            with self.subTest(text), self.assertRaises(rt.HeaderError):
+                self.parse(text)
+
+    def test_native_ok_must_be_in_the_header(self):
+        with self.assertRaises(rt.HeaderError):
+            self.parse("// expect: golden\nint x;\n// expect: native-ok\n")
+
+    def test_misspellings(self):
+        for body in ("native_ok", "native-ok x", "native", "ordinary-ok", "Native-ok"):
+            with self.subTest(body), self.assertRaises(rt.HeaderError):
+                self.parse(f"// expect: golden\n// expect: {body}\n")
+
+
+class TwinHeaderTests(unittest.TestCase):
+    def test_syntax(self):
+        exp = rt.parse_header("// expect: frontend-error a @ L3\n"
+                              "// twin: tests/annotations/ok.cpp\n", ".cpp")
+        self.assertEqual(exp.twin, "tests/annotations/ok.cpp")
+        self.assertIsNone(rt.parse_header("// expect: golden\n", ".cpp").twin)
+        bad = {
+            "absolute": "// twin: /tests/ok.cpp\n",
+            "dot dot": "// twin: tests/../ok.cpp\n",
+            "not a test suffix": "// twin: tests/ok.txt\n",
+            "header suffix": "// twin: tests/ok.h\n",
+            "empty": "// twin:\n",
+            "spaces": "// twin: tests/a b.cpp\n",
+            "two": "// twin: a.cpp\n// twin: b.cpp\n",
+            "after code": "int x;\n// twin: a.cpp\n",
+        }
+        for what, text in bad.items():
+            with self.subTest(what), self.assertRaises(rt.HeaderError):
+                rt.parse_header("// expect: frontend-error a @ L3\n" + text, ".cpp")
+
+    def test_not_for_viper(self):
+        with self.assertRaises(rt.HeaderError):
+            rt.parse_header("// expect: verified\n// twin: a.cpp\n", ".vpr")
+
+
+class RootedCase(unittest.TestCase):
+    """A temporary repository root that rt.ROOT points at."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name).resolve()
+        patcher = mock.patch.object(rt, "ROOT", self.root)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def put(self, rel, text):
+        path = self.root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+        return path
+
+    def header(self, rel, text):
+        return rt.read_header(self.put(rel, text))
+
+
+class NativePolicyTests(RootedCase):
+    POSITIVE = "// expect: golden\nint f();\n"
+    NATIVE = "// expect: golden\n// expect: native-ok\nint f();\n"
+
+    def test_the_policy_directories_are_pinned(self):
+        # Dropping a directory would let its tests skip the ordinary compilers.
+        self.assertEqual(
+            [str(d) for d in rt.NATIVE_POLICY_DIRS],
+            ["tests/annotations", "doc/modules/ROOT/examples/annotations",
+             "doc/modules/ROOT/examples/ordinary-compilers"])
+        self.assertEqual(rt.POSITIVE_KINDS, ("golden", "verified"))
+
+    def test_a_positive_test_in_a_policy_directory_needs_native_ok(self):
+        for directory in ("tests/annotations", "tests/annotations/sub/deeper",
+                          "doc/modules/ROOT/examples/annotations",
+                          "doc/modules/ROOT/examples/ordinary-compilers/x"):
+            with self.subTest(directory):
+                missing = self.header(f"{directory}/a.cpp", self.POSITIVE)
+                self.assertIsInstance(missing, rt.HeaderError)
+                self.assertIn("native-ok", str(missing))
+                self.assertIsInstance(self.header(f"{directory}/b.cpp", self.NATIVE),
+                                      rt.Expectation)
+
+    def test_verified_counts_as_positive(self):
+        err = self.header("tests/annotations/v.cpp", "// expect: verified\n")
+        self.assertIsInstance(err, rt.HeaderError)
+        ok = self.header("tests/annotations/w.cpp", "// expect: verified\n// expect: native-ok\n")
+        self.assertIsInstance(ok, rt.Expectation)
+
+    def test_other_places_are_free(self):
+        for rel in ("tests/il/a.cpp", "tests/annotationsX/a.cpp", "tests/a.cpp",
+                    "doc/modules/ROOT/examples/other/a.cpp",
+                    "doc/modules/ROOT/examples/annotations_old/a.cpp"):
+            with self.subTest(rel):
+                self.assertIsInstance(self.header(rel, self.POSITIVE), rt.Expectation)
+
+    def test_negative_tests_are_not_positive(self):
+        exp = self.header("tests/annotations/a.cpp",
+                          "// expect: frontend-error undefined_identifier @ L3\n")
+        self.assertIsInstance(exp, rt.Expectation)
+        exp = self.header("tests/annotations/b.cpp", "// expect: error assert @ L3\n")
+        self.assertIsInstance(exp, rt.Expectation)
+
+    def test_including_cerastes_h_needs_native_ok_anywhere(self):
+        for include in ('#include <cerastes.h>', '#include "cerastes.h"',
+                        '  #  include   <cerastes.h>', '#include<cerastes.h>',
+                        '\t#include "cerastes.h"  // spec functions'):
+            with self.subTest(include):
+                text = f"// expect: golden\n{include}\nint f();\n"
+                err = self.header("tests/il/h.cpp", text)
+                self.assertIsInstance(err, rt.HeaderError)
+                self.assertIn("cerastes.h", str(err))
+                ok = self.header("tests/il/h2.cpp", text.replace(
+                    "golden\n", "golden\n// expect: native-ok\n"))
+                self.assertIsInstance(ok, rt.Expectation)
+
+    def test_other_includes_and_comments_are_free(self):
+        for line in ('// #include <cerastes.h>', '#include <cerastes_extra.h>',
+                     '#include <my/cerastes.h>', '#include "xcerastes.h"',
+                     '/* #include <cerastes.h> */'):
+            with self.subTest(line):
+                text = f"// expect: golden\n{line}\nint f();\n"
+                self.assertIsInstance(self.header("tests/il/h.cpp", text), rt.Expectation)
+
+    def test_cerastes_h_in_a_negative_test_is_free(self):
+        text = ("// expect: frontend-error undefined_identifier @ L4\n"
+                '#include <cerastes.h>\nint f() { return zzz; }\n')
+        self.assertIsInstance(self.header("tests/il/h.cpp", text), rt.Expectation)
+
+    def test_check_headers_reports_the_policy(self):
+        self.put("tests/annotations/a.cpp", self.POSITIVE)
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            status = rt.main(["--check-headers", str(self.root / "tests")])
+        self.assertEqual(status, 1, out.getvalue())
+        self.assertIn("a positive test under tests/annotations/", out.getvalue())
+        self.assertIn("0 of 1 headers ok", out.getvalue())
+
+
+class TwinRuleTests(RootedCase):
+    NEG = "tests/annotations/negative"
+    POSITIVE = "// expect: golden\n// expect: native-ok\nint f();\n"
+
+    def setUp(self):
+        super().setUp()
+        self.put("tests/annotations/ok.cpp", self.POSITIVE)
+
+    def neg(self, name, twin, outcome="frontend-error undefined_identifier @ L4"):
+        lines = [f"// expect: {outcome}"]
+        if twin is not None:
+            lines.append(f"// twin: {twin}")
+        return self.header(f"{self.NEG}/{name}", "\n".join(lines) + "\nint g();\n")
+
+    def test_the_negative_directory_is_pinned(self):
+        self.assertEqual(str(rt.NEGATIVE_DIR), "tests/annotations/negative")
+
+    def test_a_valid_twin_passes(self):
+        exp = self.neg("a.cpp", "tests/annotations/ok.cpp")
+        self.assertIsInstance(exp, rt.Expectation)
+        self.assertEqual(exp.twin, "tests/annotations/ok.cpp")
+
+    def test_a_verified_twin_passes(self):
+        self.put("tests/scalar/v.cpp", "// expect: verified\n")
+        self.assertIsInstance(self.neg("b.cpp", "tests/scalar/v.cpp"), rt.Expectation)
+
+    def test_every_negative_test_needs_a_twin(self):
+        err = self.neg("a.cpp", None)
+        self.assertIsInstance(err, rt.HeaderError)
+        self.assertIn("needs `// twin:", str(err))
+        # in a subdirectory of negative/ too
+        err = self.header(f"{self.NEG}/deep/er/x.cpp",
+                          "// expect: frontend-error undefined_identifier @ L3\n")
+        self.assertIsInstance(err, rt.HeaderError)
+
+    def test_every_must_fail_kind_needs_a_twin_in_negative(self):
+        for outcome in ("error assert @ L3", "rejected unsupported-union",
+                        "frontend-error undefined_identifier @ L3"):
+            with self.subTest(outcome):
+                err = self.neg("x.cpp", None, outcome)
+                self.assertIsInstance(err, rt.HeaderError)
+                self.assertIn("needs `// twin:", str(err))
+                self.assertIsInstance(self.neg("y.cpp", "tests/annotations/ok.cpp", outcome),
+                                      rt.Expectation)
+
+    def test_negative_tests_must_fail(self):
+        # A test under negative/ that expects no error is not a must-fail test,
+        # whatever its twin is (the rule of invariant 2 would be vacuous).
+        for what, text in (
+                ("golden", "// expect: golden\n// expect: native-ok\n"),
+                ("verified", "// expect: verified\n"),
+                ("frontend-ok", "// expect: frontend-ok\n"),
+                ("warnings only", "// expect: frontend-warning unrecognized_pragma @ L3\n"),
+                ("two warnings", "// expect: frontend-warning unrecognized_pragma @ L3\n"
+                                 "// expect: frontend-warning unrecognized_pragma @ L4\n")):
+            with self.subTest(what):
+                err = self.header(f"{self.NEG}/{what.replace(' ', '_')}.cpp",
+                                  text + "// twin: tests/annotations/ok.cpp\n")
+                self.assertIsInstance(err, rt.HeaderError)
+                self.assertIn("must expect at least one error", str(err))
+        # the same tests are fine outside negative/
+        for name, text in (("g.cpp", "// expect: golden\n// expect: native-ok\n"),
+                           ("w.cpp", "// expect: frontend-warning unrecognized_pragma @ L3\n")):
+            self.assertIsInstance(self.header(f"tests/annotations/warnings/{name}", text),
+                                  rt.Expectation)
+        # one error among warnings is enough
+        mixed = ("// expect: frontend-warning unrecognized_pragma @ L3\n"
+                 "// expect: frontend-error undefined_identifier @ L4\n"
+                 "// twin: tests/annotations/ok.cpp\n")
+        self.assertIsInstance(self.header(f"{self.NEG}/mixed.cpp", mixed), rt.Expectation)
+
+    def test_negative_tests_cannot_be_twin_exempt(self):
+        err = self.header(f"{self.NEG}/e.cpp", "// expect: frontend-error undefined_identifier "
+                          "@ L3\n// twin-exempt: because\n")
+        self.assertIsInstance(err, rt.HeaderError)
+
+    def test_a_dangling_twin(self):
+        err = self.neg("a.cpp", "tests/annotations/nope.cpp")
+        self.assertIsInstance(err, rt.HeaderError)
+        self.assertIn("does not exist", str(err))
+
+    def test_a_twin_in_negative_is_refused(self):
+        self.put(f"{self.NEG}/other.cpp",
+                 "// expect: frontend-error undefined_identifier @ L3\n"
+                 "// twin: tests/annotations/ok.cpp\n")
+        err = self.neg("a.cpp", f"{self.NEG}/other.cpp")
+        self.assertIsInstance(err, rt.HeaderError)
+        self.assertIn("is itself under", str(err))
+
+    def test_a_non_positive_twin_is_refused(self):
+        for name, text in (("fe.cpp", "// expect: frontend-error undefined_identifier @ L3\n"),
+                           ("w.cpp", "// expect: frontend-warning unrecognized_pragma @ L3\n"),
+                           ("e.vpr", "// expect: error assert @ L3\n"),
+                           ("o.cpp", "// expect: frontend-ok\n"),
+                           ("r.cpp", "// expect: rejected unsupported-union\n"),
+                           ("x.cpp", "// expect: error assert @ L3\n")):
+            with self.subTest(name):
+                self.put(f"tests/annotations/{name}", text)
+                if name.endswith(".vpr"):
+                    continue  # a .vpr twin is a different case, below
+                err = self.neg("a.cpp", f"tests/annotations/{name}")
+                self.assertIsInstance(err, rt.HeaderError)
+                self.assertIn("not a positive test", str(err))
+
+    def test_a_twin_with_a_bad_header(self):
+        self.put("tests/annotations/bad.cpp", "// no expectation here\n")
+        err = self.neg("a.cpp", "tests/annotations/bad.cpp")
+        self.assertIsInstance(err, rt.HeaderError)
+        self.assertIn("bad header", str(err))
+
+    def test_a_twin_that_breaks_the_native_policy_is_a_bad_twin(self):
+        self.put("tests/annotations/nonative.cpp", "// expect: golden\nint f();\n")
+        err = self.neg("a.cpp", "tests/annotations/nonative.cpp")
+        self.assertIsInstance(err, rt.HeaderError)
+        self.assertIn("bad header", str(err))
+
+    def test_a_test_cannot_be_its_own_twin(self):
+        path = self.put("tests/annotations/self.cpp",
+                        "// expect: golden\n// expect: native-ok\n"
+                        "// twin: tests/annotations/self.cpp\n")
+        err = rt.read_header(path)
+        self.assertIsInstance(err, rt.HeaderError)
+        self.assertIn("own twin", str(err))
+
+    def test_twins_are_checked_outside_negative_too(self):
+        # A `twin:` that nothing would check is an ignored expectation.
+        err = self.header("tests/scalar/t.cpp",
+                          "// expect: verified\n// twin: tests/annotations/missing.cpp\n")
+        self.assertIsInstance(err, rt.HeaderError)
+        ok = self.header("tests/scalar/t2.cpp",
+                         "// expect: verified\n// twin: tests/annotations/ok.cpp\n")
+        self.assertIsInstance(ok, rt.Expectation)
+
+    def test_check_headers_reports_a_missing_twin(self):
+        self.put(f"{self.NEG}/a.cpp", "// expect: frontend-error undefined_identifier @ L3\n")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()), \
+                mock.patch.object(rt, "check_diag_headers"):
+            status = rt.main(["--check-headers", str(self.root / "tests")])
+        self.assertEqual(status, 1, out.getvalue())
+        self.assertIn("needs `// twin:", out.getvalue())
+
+
+class TwinExemptHeaderTests(unittest.TestCase):
+    def test_syntax(self):
+        exp = rt.parse_header("// expect: golden\n// twin-exempt: a smoke test of the header\n",
+                              ".cpp")
+        self.assertEqual(exp.twin_exempt, "a smoke test of the header")
+        self.assertIsNone(rt.parse_header("// expect: golden\n", ".cpp").twin_exempt)
+        bad = {
+            "empty reason": "// expect: golden\n// twin-exempt:\n",
+            "blank reason": "// expect: golden\n// twin-exempt:    \n",
+            "twice": "// expect: golden\n// twin-exempt: a\n// twin-exempt: b\n",
+            "with a twin": "// expect: golden\n// twin: tests/a.cpp\n// twin-exempt: why\n",
+            "after code": "// expect: golden\nint x;\n// twin-exempt: why\n",
+            "not positive: frontend-error":
+                "// expect: frontend-error undefined_identifier @ L3\n// twin-exempt: why\n",
+            "not positive: frontend-ok": "// expect: frontend-ok\n// twin-exempt: why\n",
+        }
+        for what, text in bad.items():
+            with self.subTest(what), self.assertRaises(rt.HeaderError):
+                rt.parse_header(text, ".cpp")
+        with self.assertRaises(rt.HeaderError):
+            rt.parse_header("// expect: verified\n// twin-exempt: why\n", ".vpr")
+        # a twin-exempt line is not a twin line
+        self.assertIsNone(rt.parse_header("// expect: golden\n// twin-exempt: why\n",
+                                          ".cpp").twin)
+
+
+class PositiveNeedsATwinTests(RootedCase):
+    """The twin rule in the other direction (invariant 2)."""
+
+    POSITIVE = "// expect: golden\n// expect: native-ok\nint f();\n"
+    NEG = ("// expect: frontend-error undefined_identifier @ L4\n"
+           "// twin: tests/annotations/{twin}\nint g();\n")
+
+    def problems(self):
+        return {str(f.relative_to(self.root)): m for f, m in rt.cross_file_problems()}
+
+    def test_no_annotation_tests_no_problems(self):
+        self.assertEqual(rt.cross_file_problems(), [])
+        self.put("tests/il/a.cpp", self.POSITIVE)
+        self.assertEqual(rt.cross_file_problems(), [])
+
+    def test_a_positive_test_without_a_must_fail_twin_is_a_problem(self):
+        self.put("tests/annotations/contracts/a.cpp", self.POSITIVE)
+        self.put("tests/annotations/contracts/b.cpp", "// expect: verified\n")
+        found = self.problems()
+        self.assertEqual(sorted(found), ["tests/annotations/contracts/a.cpp",
+                                         "tests/annotations/contracts/b.cpp"])
+        self.assertIn("must be the `twin:` of a test under tests/annotations/negative/",
+                      found["tests/annotations/contracts/a.cpp"])
+        self.assertIn("twin-exempt", found["tests/annotations/contracts/a.cpp"])
+
+    def test_a_negative_test_naming_it_clears_it(self):
+        self.put("tests/annotations/contracts/a.cpp", self.POSITIVE)
+        self.put("tests/annotations/negative/n1.cpp",
+                 self.NEG.format(twin="contracts/a.cpp"))
+        self.assertEqual(self.problems(), {})
+        # one negative per positive is enough; several are fine
+        self.put("tests/annotations/negative/n2.cpp", self.NEG.format(twin="contracts/a.cpp"))
+        self.assertEqual(self.problems(), {})
+
+    def test_a_negative_test_naming_another_positive_does_not(self):
+        self.put("tests/annotations/contracts/a.cpp", self.POSITIVE)
+        self.put("tests/annotations/contracts/b.cpp", self.POSITIVE)
+        self.put("tests/annotations/negative/n.cpp", self.NEG.format(twin="contracts/a.cpp"))
+        self.assertEqual(list(self.problems()), ["tests/annotations/contracts/b.cpp"])
+
+    def test_only_tests_under_negative_count(self):
+        self.put("tests/annotations/contracts/a.cpp", self.POSITIVE)
+        self.put("tests/annotations/warnings/w.cpp",
+                 "// expect: frontend-warning unrecognized_pragma @ L4\n"
+                 "// twin: tests/annotations/contracts/a.cpp\nint g();\n")
+        self.put("tests/annotations/other/o.cpp",
+                 "// expect: frontend-error undefined_identifier @ L4\n"
+                 "// twin: tests/annotations/contracts/a.cpp\nint g();\n")
+        self.assertEqual(list(self.problems()), ["tests/annotations/contracts/a.cpp"])
+
+    def test_twin_exempt_clears_it(self):
+        self.put("tests/annotations/header/h.cpp",
+                 "// expect: golden\n// expect: native-ok\n"
+                 "// twin-exempt: the header test has no meaningful misuse\nint f();\n")
+        self.assertEqual(self.problems(), {})
+        # an empty reason is a header error, and the test is still a problem
+        self.put("tests/annotations/header/h2.cpp",
+                 "// expect: golden\n// expect: native-ok\n// twin-exempt:\nint f();\n")
+        self.assertIsInstance(rt.read_header(self.root / "tests/annotations/header/h2.cpp"),
+                              rt.HeaderError)
+        self.assertEqual(list(self.problems()), [])  # reported through its own header error
+
+    def test_negative_and_warning_tests_are_not_positive(self):
+        self.put("tests/annotations/negative/n.cpp", self.NEG.format(twin="contracts/a.cpp"))
+        self.put("tests/annotations/warnings/w.cpp",
+                 "// expect: frontend-warning unrecognized_pragma @ L4\n")
+        self.put("tests/annotations/contracts/a.cpp", self.POSITIVE)
+        self.assertEqual(self.problems(), {})
+
+    def test_check_headers_and_runs_report_it(self):
+        self.put("tests/annotations/contracts/a.cpp", self.POSITIVE)
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            status = rt.main(["--check-headers", str(self.root / "tests")])
+        self.assertEqual(status, 1, out.getvalue())
+        self.assertIn("tests/annotations/contracts/a.cpp: bad header: a positive test under "
+                      "tests/annotations/ must be the `twin:` of a test under", out.getvalue())
+        self.assertIn("1 of 1 headers ok", out.getvalue())
+        self.assertIn("1 positive tests without a must-fail twin", out.getvalue())
+
+    def test_a_partial_selection_still_checks_the_whole_tree(self):
+        self.put("tests/annotations/contracts/a.cpp", self.POSITIVE)
+        self.put("tests/annotations/contracts/b.cpp", self.POSITIVE)
+        self.put("tests/annotations/negative/n.cpp", self.NEG.format(twin="contracts/a.cpp"))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            status = rt.main(["--check-headers", str(self.root / "tests/annotations/contracts/a.cpp")])
+        self.assertEqual(status, 1, out.getvalue())
+        self.assertIn("contracts/b.cpp: bad header", out.getvalue())
+
+    def test_selections_elsewhere_are_not_blamed(self):
+        self.put("tests/annotations/contracts/a.cpp", self.POSITIVE)
+        self.put("tests/il/i.cpp", "// expect: golden\nint f();\n")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            status = rt.main(["--check-headers", str(self.root / "tests/il")])
+        self.assertEqual(status, 0, out.getvalue())
+
+
+# ---------------------------------------------------------------------------
+# The tag tables
+# ---------------------------------------------------------------------------
+
+class TagRegistryTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.gen = Path(tmp.name)
+
+    def test_parse_the_fixture(self):
+        write_gen(self.gen)
+        reg = rt.TagRegistry.load(self.gen)
+        self.assertEqual(reg.numbers["undefined_identifier"], 20)
+        self.assertEqual(reg.tags[2803], "attribute_namespace_unrecognized")
+        self.assertEqual(len(reg.numbers), len(FIXTURE_TAGS))
+        self.assertEqual(reg.tags[1105], "warning_directive")
+
+    def test_a_truncated_table_is_an_error(self):
+        write_gen(self.gen, drop_entries=1)
+        with self.assertRaises(rt.UsageError) as ctx:
+            rt.TagRegistry.load(self.gen)
+        self.assertIn("were parsed", str(ctx.exception))
+
+    def test_a_wrong_declared_count_is_an_error(self):
+        write_gen(self.gen, count=len(FIXTURE_TAGS) + 1)
+        with self.assertRaises(rt.UsageError):
+            rt.TagRegistry.load(self.gen)
+
+    def test_a_tag_without_a_number_is_an_error(self):
+        write_gen(self.gen)
+        text = (self.gen / "err_codes.h").read_text()
+        (self.gen / "err_codes.h").write_text(
+            text.replace("  ec_undefined_identifier /* = 20 */,\n", ""))
+        with self.assertRaises(rt.UsageError) as ctx:
+            rt.TagRegistry.load(self.gen)
+        self.assertIn("ec_undefined_identifier", str(ctx.exception))
+
+    def test_a_duplicate_tag_is_an_error(self):
+        write_gen(self.gen)
+        text = (self.gen / "err_data.h").read_text()
+        (self.gen / "err_data.h").write_text(text.replace(
+            '  { "exp_semicolon", ec_exp_semicolon }',
+            '  { "exp_semicolon", ec_exp_semicolon },\n  { "exp_semicolon", ec_exp_semicolon }')
+            .replace(f"TAGS {len(FIXTURE_TAGS)}", f"TAGS {len(FIXTURE_TAGS) + 1}"))
+        with self.assertRaises(rt.UsageError) as ctx:
+            rt.TagRegistry.load(self.gen)
+        self.assertIn("twice", str(ctx.exception))
+
+    def test_unrecognized_headers_are_an_error(self):
+        write_gen(self.gen)
+        (self.gen / "err_data.h").write_text("// an unknown format\n")
+        with self.assertRaises(rt.UsageError):
+            rt.TagRegistry.load(self.gen)
+        write_gen(self.gen)
+        (self.gen / "err_codes.h").write_text("enum { };\n")
+        with self.assertRaises(rt.UsageError):
+            rt.TagRegistry.load(self.gen)
+
+    def test_missing_files_and_variable(self):
+        with self.assertRaises(rt.UsageError) as ctx:
+            rt.TagRegistry.load(self.gen / "nowhere")
+        self.assertIn("scripts/bootstrap.sh", str(ctx.exception))
+        with self.assertRaises(rt.UsageError) as ctx:
+            rt.load_registry({})
+        self.assertIn("CERASTES_EDG_GEN not set", str(ctx.exception))
+        with self.assertRaises(rt.UsageError):
+            rt.load_registry({"CERASTES_EDG_GEN": str(self.gen / "nowhere")})
+
+    def test_the_cache_follows_the_files(self):
+        write_gen(self.gen, {"undefined_identifier": 20})
+        env = {"CERASTES_EDG_GEN": str(self.gen)}
+        self.assertEqual(set(rt.load_registry(env).numbers), {"undefined_identifier"})
+        write_gen(self.gen, {"exp_semicolon": 65})
+        self.assertEqual(set(rt.load_registry(env).numbers), {"exp_semicolon"})
+
+    def test_cerastes_tags_file(self):
+        missing = self.gen / "diagnostics.def"
+        self.assertIsNone(rt.load_cerastes_tags(missing))
+        missing.write_text("// diagnostics\nCERASTES_DIAG(contract_not_boolean, error, \"x\")\n"
+                           "  CERASTES_DIAG( \"binder_shadows_parameter\" , error, \"y\")\n"
+                           "CERASTES_DIAG_LAST(end)\n#define X 1\n")
+        self.assertEqual(rt.load_cerastes_tags(missing),
+                         {"contract_not_boolean", "binder_shadows_parameter", "end"})
+        missing.write_text("")
+        self.assertEqual(rt.load_cerastes_tags(missing), set())
+
+
+class ValidateTagsTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        write_gen(tmp.name)
+        self.reg = rt.TagRegistry.load(tmp.name)
+
+    def exp(self, *tags):
+        return rt.Expectation("frontend-diag", [], None, ["c++20"],
+                              [rt.ExpectedDiag("error", t, 3) for t in tags])
+
+    def test_known_tags_pass(self):
+        self.assertIsNone(rt.validate_diag_tags(
+            self.exp("undefined_identifier", "exp_semicolon"), self.reg, None))
+
+    def test_an_unknown_tag_is_a_header_error_with_a_hint(self):
+        err = rt.validate_diag_tags(self.exp("undefined_identifer"), self.reg, None)
+        self.assertIsInstance(err, rt.HeaderError)
+        self.assertIn("unknown EDG diagnostic tag `undefined_identifer`", str(err))
+        self.assertIn("did you mean undefined_identifier", str(err))
+
+    def test_the_second_unknown_tag_is_found_too(self):
+        err = rt.validate_diag_tags(self.exp("undefined_identifier", "nope"), self.reg, None)
+        self.assertIn("`nope`", str(err))
+
+    def test_a_number_is_not_a_tag(self):
+        self.assertIsInstance(rt.validate_diag_tags(self.exp("20"), self.reg, None),
+                              rt.HeaderError)
+
+    def test_cerastes_tags_before_any_are_defined(self):
+        err = rt.validate_diag_tags(self.exp("cerastes-contract_not_boolean"), self.reg, None)
+        self.assertIsInstance(err, rt.HeaderError)
+        self.assertIn("no cerastes diagnostics are defined yet", str(err))
+
+    def test_cerastes_tags_once_defined(self):
+        known = {"contract_not_boolean"}
+        self.assertIsNone(rt.validate_diag_tags(
+            self.exp("cerastes-contract_not_boolean"), self.reg, known))
+        err = rt.validate_diag_tags(self.exp("cerastes-other"), self.reg, known)
+        self.assertIn("unknown cerastes diagnostic `cerastes-other`", str(err))
+        # an EDG tag is not a cerastes tag, nor the other way round
+        self.assertIsInstance(rt.validate_diag_tags(
+            self.exp("cerastes-undefined_identifier"), self.reg, known), rt.HeaderError)
+        self.assertIsInstance(rt.validate_diag_tags(
+            self.exp("contract_not_boolean"), self.reg, known), rt.HeaderError)
+
+    def test_check_diag_headers_replaces_bad_expectations(self):
+        good = rt.Expectation("golden", [], None, ["c++20"])
+        headers = {Path("a.cpp"): good, Path("b.cpp"): self.exp("nope"),
+                   Path("c.cpp"): self.exp("exp_semicolon"),
+                   Path("d.cpp"): rt.HeaderError("already bad")}
+        with tempfile.TemporaryDirectory() as tmp:
+            write_gen(tmp)
+            rt.check_diag_headers(headers, {"CERASTES_EDG_GEN": tmp})
+        self.assertIs(headers[Path("a.cpp")], good)
+        self.assertIsInstance(headers[Path("b.cpp")], rt.HeaderError)
+        self.assertIsInstance(headers[Path("c.cpp")], rt.Expectation)
+
+    def test_no_diagnostic_tests_need_no_tables(self):
+        headers = {Path("a.cpp"): rt.Expectation("golden", [], None, ["c++20"])}
+        rt.check_diag_headers(headers, {})  # no CERASTES_EDG_GEN, and no error
+
+
+# ---------------------------------------------------------------------------
+# Parsing EDG's diagnostics
+# ---------------------------------------------------------------------------
+
+class FeDiagnosticParseTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        write_gen(tmp.name)
+        self.reg = rt.TagRegistry.load(tmp.name)
+
+    def summary(self, text):
+        parsed = rt.parse_fe_diagnostics(text)
+        return [(d.severity, d.tag(self.reg), d.file, d.line, d.col) for d in parsed.diags]
+
+    def test_three_errors_and_two_warnings(self):
+        parsed = rt.parse_fe_diagnostics(REAL_THREE_ERRORS)
+        self.assertEqual(parsed.problems, [])
+        self.assertEqual(parsed.summary_errors, 3)
+        self.assertEqual(self.summary(REAL_THREE_ERRORS), [
+            ("error", "undefined_identifier", "x.cpp", 2, 10),
+            ("warning", "attribute_namespace_unrecognized", "x.cpp", 4, 3),
+            ("error", "exp_primary_expr", "x.cpp", 5, 19),
+            ("warning", "warning_directive", "x.cpp", 6, 2),
+            ("error", "not_a_member", "x.cpp", 8, 19)])
+        self.assertTrue(all(d.discretionary for d in rt.parse_fe_diagnostics(
+            REAL_THREE_ERRORS).diags if d.severity == "warning"))
+
+    def test_notes_and_continuation_lines_attach_and_do_not_count(self):
+        parsed = rt.parse_fe_diagnostics(REAL_NOTES)
+        self.assertEqual(parsed.problems, [])
+        self.assertEqual(parsed.summary_errors, 4)
+        kinds = [(d.severity, d.tag(self.reg), d.file, d.line) for d in parsed.diags]
+        self.assertEqual(kinds, [
+            ("error", "undefined_identifier", "inc/h.h", 1),
+            ("warning", "unrecognized_pragma", "inc/h.h", 2),
+            ("error", "no_matching_function", "n.cpp", 5),
+            ("note", "nonviable_because_arg_mismatch", "n.cpp", 3),
+            ("note", "nonviable_because_arg_mismatch", "n.cpp", 2),
+            ("error", "static_assert", "n.cpp", 6),
+            ("note", "comparison_details", "n.cpp", 6),
+            ("error", "exp_semicolon", "n.cpp", 8),
+            ("warning", "declared_but_not_referenced", "n.cpp", 8)])
+
+    def test_only_warnings_have_no_summary(self):
+        parsed = rt.parse_fe_diagnostics(REAL_WARNINGS_ONLY)
+        self.assertEqual((parsed.problems, parsed.summary_errors), ([], None))
+        self.assertEqual(len(parsed.diags), 3)
+
+    def test_empty_output(self):
+        parsed = rt.parse_fe_diagnostics("")
+        self.assertEqual((parsed.diags, parsed.problems, parsed.summary_errors), ([], [], None))
+
+    def test_catastrophic_and_termination(self):
+        parsed = rt.parse_fe_diagnostics(REAL_CATASTROPHIC)
+        self.assertEqual([d.severity for d in parsed.diags], ["catastrophic error"])
+        self.assertEqual(parsed.summary_errors, 0)
+        self.assertEqual(len(parsed.problems), 1)
+        self.assertIn("terminated", parsed.problems[0])
+
+    def test_command_line_error_has_no_position(self):
+        parsed = rt.parse_fe_diagnostics(REAL_COMMAND_LINE)
+        (d,) = parsed.diags
+        self.assertEqual((d.severity, d.file, d.line, d.tag(self.reg)),
+                         ("command-line error", None, None, "cl_invalid_option"))
+        self.assertEqual(d.where(), "(no position)")
+
+    def test_error_limit_and_aborted(self):
+        parsed = rt.parse_fe_diagnostics(REAL_ERROR_LIMIT)
+        self.assertTrue(any("error limit" in p for p in parsed.problems), parsed.problems)
+        parsed = rt.parse_fe_diagnostics("Compilation aborted.\n")
+        self.assertTrue(any("aborted" in p for p in parsed.problems))
+
+    def test_an_unnumbered_cerastes_diagnostic(self):
+        text = '"x.cpp", line 7 (col. 3): error #cerastes-contract_not_boolean: bad\n' \
+               '"x.cpp", line 8: warning #cerastes-unused_binder-D: x\n' \
+               '1 error detected in the compilation of "x.cpp".\n'
+        parsed = rt.parse_fe_diagnostics(text)
+        self.assertEqual(parsed.problems, [])
+        self.assertEqual([(d.severity, d.tag(self.reg), d.line, d.col, d.discretionary)
+                          for d in parsed.diags],
+                         [("error", "cerastes-contract_not_boolean", 7, 3, False),
+                          ("warning", "cerastes-unused_binder", 8, None, True)])
+
+    def test_unknown_numbers_have_no_tag(self):
+        text = '"x.cpp", line 7 (col. 3): error #9999: new\n'
+        (d,) = rt.parse_fe_diagnostics(text).diags
+        self.assertEqual(d.tag(self.reg), "#9999")
+
+    def test_unrecognized_column_zero_lines_are_problems(self):
+        for line in ("garbage", 'x.cpp:3:4: error: gcc style', '"x.cpp", line 2: boom',
+                     '"x.cpp", line 2 (col. 10): fatal error #20: x',
+                     '"x.cpp", line 2 (col. 10): error 20: no hash sign',
+                     'In file included from "a.h", line 1:',
+                     "3 errors detected", "Segmentation fault"):
+            with self.subTest(line):
+                parsed = rt.parse_fe_diagnostics(REAL_THREE_ERRORS + line + "\n")
+                self.assertTrue(any(line in p for p in parsed.problems), (line, parsed.problems))
+
+    def test_a_second_summary_is_a_problem(self):
+        parsed = rt.parse_fe_diagnostics(
+            REAL_THREE_ERRORS + '1 error detected in the compilation of "x.cpp".\n')
+        self.assertTrue(parsed.problems)
+
+    def test_summary_variants(self):
+        for text, errors in (('1 error detected in the compilation of "a b.cpp".\n', 1),
+                             ('12 errors detected in the compilation of "x".\n', 12),
+                             ('2 errors and 1 catastrophic error detected in the compilation '
+                              'of "x".\n', 2),
+                             ('1 catastrophic error detected in this compilation.\n', 0)):
+            with self.subTest(text):
+                parsed = rt.parse_fe_diagnostics(text)
+                self.assertEqual((parsed.problems, parsed.summary_errors), ([], errors))
+
+    def test_blank_and_indented_lines_never_make_a_diagnostic(self):
+        text = ('\n   "x.cpp", line 2 (col. 10): error #20: indented, so a continuation\n'
+                '\t"x.cpp", line 3 (col. 1): error #20: tab\n')
+        self.assertEqual(rt.parse_fe_diagnostics(text).diags, [])
+
+    def test_crlf_is_not_hidden(self):
+        # A carriage return at the end must not let a line match silently.
+        parsed = rt.parse_fe_diagnostics('"x.cpp", line 2 (col. 10): error #20: m\r\n')
+        self.assertEqual(len(parsed.diags), 1)  # the message keeps the \r
+
+
+class CompareDiagsTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        write_gen(tmp.name)
+        self.reg = rt.TagRegistry.load(tmp.name)
+        self.diags = rt.parse_fe_diagnostics(REAL_THREE_ERRORS).diags
+
+    def compare(self, *expected, file="x.cpp"):
+        return rt.compare_diags(list(expected), self.diags, self.reg, file)
+
+    def exp(self, sev, tag, line):
+        return rt.ExpectedDiag(sev, tag, line)
+
+    def good(self):
+        return [self.exp("error", "undefined_identifier", 2),
+                self.exp("warning", "attribute_namespace_unrecognized", 4),
+                self.exp("error", "exp_primary_expr", 5),
+                self.exp("warning", "warning_directive", 6),
+                self.exp("error", "not_a_member", 8)]
+
+    def test_exact(self):
+        self.assertEqual(self.compare(*self.good()), [])
+
+    def test_order_does_not_matter(self):
+        self.assertEqual(self.compare(*reversed(self.good())), [])
+
+    def test_wrong_line(self):
+        g = self.good()
+        g[0] = self.exp("error", "undefined_identifier", 3)
+        (problem,) = self.compare(*g)
+        self.assertIn("wrong line: expected error undefined_identifier @ L3, got "
+                      "undefined_identifier @ L2:10", problem)
+        self.assertIn('identifier "zzz" is undefined', problem)
+
+    def test_wrong_diagnostic_at_the_line(self):
+        g = self.good()
+        g[2] = self.exp("error", "exp_semicolon", 5)
+        (problem,) = self.compare(*g)
+        self.assertIn("wrong diagnostic at this line: expected error exp_semicolon @ L5, "
+                      "got exp_primary_expr @ L5:19", problem)
+
+    def test_missing(self):
+        g = self.good() + [self.exp("error", "exp_semicolon", 20)]
+        (problem,) = self.compare(*g)
+        self.assertEqual(problem, "missing error: expected exp_semicolon @ L20")
+        g = self.good() + [self.exp("warning", "unrecognized_pragma", 20)]
+        self.assertEqual(self.compare(*g), ["missing warning: expected unrecognized_pragma @ L20"])
+
+    def test_unexpected(self):
+        (problem,) = self.compare(*self.good()[1:])
+        self.assertIn("unexpected error: undefined_identifier @ L2:10", problem)
+        (problem,) = self.compare(*(self.good()[:1] + self.good()[2:]))
+        self.assertIn("unexpected warning: attribute_namespace_unrecognized @ L4:3", problem)
+
+    def test_a_warning_is_not_an_error(self):
+        g = self.good()
+        g[1] = self.exp("error", "attribute_namespace_unrecognized", 4)
+        problems = self.compare(*g)
+        self.assertEqual(len(problems), 2, problems)
+        self.assertTrue(any("missing error" in p for p in problems))
+        self.assertTrue(any("unexpected warning" in p for p in problems))
+
+    def test_multiplicity(self):
+        g = self.good() + [self.exp("error", "undefined_identifier", 2)]
+        self.assertEqual(len(self.compare(*g)), 1)  # expected twice, reported once
+        dup = rt.parse_fe_diagnostics(REAL_THREE_ERRORS).diags
+        dup = dup + [dup[0]]
+        problems = rt.compare_diags(self.good(), dup, self.reg, "x.cpp")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("unexpected error", problems[0])
+        self.assertEqual(rt.compare_diags(self.good() + [self.good()[0]], dup, self.reg,
+                                          "x.cpp"), [])
+
+    def test_other_files_are_unexpected_whatever_they_are(self):
+        notes = rt.parse_fe_diagnostics(REAL_NOTES).diags
+        problems = rt.compare_diags([
+            self.exp("error", "no_matching_function", 5), self.exp("error", "static_assert", 6),
+            self.exp("error", "exp_semicolon", 8),
+            self.exp("warning", "declared_but_not_referenced", 8)], notes, self.reg, "n.cpp")
+        self.assertEqual(len(problems), 2, problems)
+        self.assertTrue(all("in inc/h.h" in p for p in problems), problems)
+        self.assertTrue(any("undefined_identifier" in p for p in problems))
+        self.assertTrue(any("unrecognized_pragma" in p for p in problems))
+
+    def test_the_file_must_be_the_test_file(self):
+        problems = self.compare(*self.good(), file="y.cpp")
+        self.assertEqual(len(problems), 5 + 5)  # unexpected in x.cpp, and missing
+
+    def test_notes_and_remarks_never_count(self):
+        notes = rt.parse_fe_diagnostics(REAL_NOTES).diags
+        problems = rt.compare_diags(
+            [self.exp("error", "no_matching_function", 5), self.exp("error", "static_assert", 6),
+             self.exp("error", "exp_semicolon", 8),
+             self.exp("warning", "declared_but_not_referenced", 8)],
+            [d for d in notes if d.file == "n.cpp"], self.reg, "n.cpp")
+        self.assertEqual(problems, [])
+        remark = rt.FeDiag("remark", "20", "x.cpp", 9, 1, "r")
+        self.assertEqual(rt.compare_diags(self.good(), self.diags + [remark], self.reg, "x.cpp"),
+                         [])
+
+
+class EvaluateDiagsTests(unittest.TestCase):
+    """The pass/fail verdict of one run, with a fake `ToolRun`."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        write_gen(tmp.name)
+        self.reg = rt.TagRegistry.load(tmp.name)
+
+    def run_of(self, stderr, code, stdout=""):
+        return rt.ToolRun(code, stdout, stderr)
+
+    def exp(self, *diags):
+        return rt.Expectation("frontend-diag", [], None, ["c++20"], list(diags))
+
+    GOOD = [rt.ExpectedDiag("error", "undefined_identifier", 2),
+            rt.ExpectedDiag("warning", "attribute_namespace_unrecognized", 4),
+            rt.ExpectedDiag("error", "exp_primary_expr", 5),
+            rt.ExpectedDiag("warning", "warning_directive", 6),
+            rt.ExpectedDiag("error", "not_a_member", 8)]
+
+    def evaluate(self, stderr, code, *diags, stdout="", file="x.cpp"):
+        return rt.evaluate_diags(self.run_of(stderr, code, stdout), self.exp(*diags),
+                                 self.reg, file)
+
+    def test_a_real_run_passes(self):
+        self.assertEqual(self.evaluate(REAL_THREE_ERRORS, 2, *self.GOOD), [])
+
+    def test_warnings_only(self):
+        warn = [rt.ExpectedDiag("warning", "integer_sign_change", 1),
+                rt.ExpectedDiag("warning", "declared_but_not_referenced", 1),
+                rt.ExpectedDiag("warning", "unrecognized_pragma", 2)]
+        self.assertEqual(self.evaluate(REAL_WARNINGS_ONLY, 0, *warn, file="r.cpp"), [])
+
+    def test_exit_status_must_be_two_when_errors_are_expected(self):
+        for code in (0, 1, 4):
+            with self.subTest(code):
+                problems = self.evaluate(REAL_THREE_ERRORS, code, *self.GOOD)
+                self.assertTrue(any("expected 2 (errors expected)" in p for p in problems),
+                                problems)
+
+    def test_exit_status_must_be_zero_for_warnings_only(self):
+        warn = [rt.ExpectedDiag("warning", "integer_sign_change", 1),
+                rt.ExpectedDiag("warning", "declared_but_not_referenced", 1),
+                rt.ExpectedDiag("warning", "unrecognized_pragma", 2)]
+        problems = self.evaluate(REAL_WARNINGS_ONLY, 2, *warn, file="r.cpp")
+        self.assertTrue(any("expected 0 (no errors expected)" in p for p in problems),
+                        problems)
+
+    def test_stdout_must_be_empty(self):
+        problems = self.evaluate(REAL_THREE_ERRORS, 2, *self.GOOD, stdout="routine f\n")
+        self.assertTrue(any("printed on stdout" in p for p in problems), problems)
+
+    def test_the_summary_must_agree(self):
+        problems = self.evaluate(REAL_THREE_ERRORS.replace("3 errors", "4 errors"), 2,
+                                 *self.GOOD)
+        self.assertTrue(any("the summary says 4 errors but 3 were parsed" in p
+                            for p in problems), problems)
+        problems = self.evaluate(REAL_THREE_ERRORS.replace("3 errors", "2 errors"), 2,
+                                 *self.GOOD)
+        self.assertTrue(any("the summary says 2" in p for p in problems), problems)
+
+    def test_a_missing_summary_with_errors_is_a_problem(self):
+        text = REAL_THREE_ERRORS.rsplit("3 errors", 1)[0]
+        problems = self.evaluate(text, 2, *self.GOOD)
+        self.assertTrue(any("no `N errors detected` summary" in p for p in problems), problems)
+
+    def test_a_summary_without_errors_is_a_problem(self):
+        problems = self.evaluate(REAL_WARNINGS_ONLY + '2 errors detected in the compilation '
+                                 'of "r.cpp".\n', 0, rt.ExpectedDiag(
+                                     "warning", "integer_sign_change", 1), file="r.cpp")
+        self.assertTrue(any("the summary says 2 errors but 0 were parsed" in p
+                            for p in problems), problems)
+
+    def test_fatal_diagnostics_always_fail(self):
+        problems = self.evaluate(REAL_CATASTROPHIC, 4)
+        self.assertTrue(any("catastrophic error always fails" in p for p in problems), problems)
+        self.assertTrue(any("terminated" in p for p in problems), problems)
+        problems = self.evaluate(REAL_COMMAND_LINE, 4)
+        self.assertTrue(any("command-line error always fails" in p for p in problems), problems)
+        problems = self.evaluate('"x.cpp", line 3 (col. 1): internal error #1: oops\n'
+                                 "Compilation aborted.\n", 4)
+        self.assertTrue(any("internal error always fails" in p for p in problems), problems)
+
+    def test_the_error_limit_fails(self):
+        problems = self.evaluate(REAL_ERROR_LIMIT, 4, rt.ExpectedDiag(
+            "error", "undefined_identifier", 2))
+        self.assertTrue(any("error limit" in p for p in problems), problems)
+
+    def test_unrecognized_output_fails_even_when_everything_else_matches(self):
+        problems = self.evaluate(REAL_THREE_ERRORS + "internal compiler log: stuff\n", 2,
+                                 *self.GOOD)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("unrecognized front-end output", problems[0])
+
+    def test_crash_and_timeout(self):
+        problems = rt.evaluate_diags(rt.ToolRun(-9, "", REAL_THREE_ERRORS),
+                                     self.exp(*self.GOOD), self.reg, "x.cpp")
+        self.assertTrue(any("crashed (signal 9)" in p for p in problems), problems)
+        problems = rt.evaluate_diags(rt.ToolRun(None, error="timed out after 1s"),
+                                     self.exp(*self.GOOD), self.reg, "x.cpp")
+        self.assertEqual(problems, ["cerastes-fe timed out after 1s"])
+
+    def test_silence_does_not_satisfy_an_expected_error(self):
+        problems = self.evaluate("", 0, rt.ExpectedDiag("error", "undefined_identifier", 2))
+        self.assertTrue(any("missing error" in p for p in problems), problems)
+        self.assertTrue(any("expected 2" in p for p in problems), problems)
+
+    def test_an_unexpected_warning_fails(self):
+        problems = self.evaluate(REAL_THREE_ERRORS, 2, *[g for g in self.GOOD
+                                                         if g.tag != "warning_directive"])
+        self.assertEqual(len(problems), 1)
+        self.assertIn("unexpected warning: warning_directive @ L6:2", problems[0])
+
+
+class DiagCommandTests(unittest.TestCase):
+    def test_the_options(self):
+        self.assertEqual(rt.DIAG_OPTIONS,
+                         ["--brief_diagnostics", "--display_error_number", "--no_colors"])
+        for forbidden in ("--no_code_gen", "--cerastes_walk"):
+            self.assertNotIn(forbidden, rt.DIAG_OPTIONS)
+            self.assertNotIn(forbidden, rt.diag_command(Path("x.cpp"), "c++20"))
+        cmd = rt.diag_command(Path("tests/x.cpp"), "c23")
+        self.assertEqual(cmd[-5:], ["--c23", "--brief_diagnostics", "--display_error_number",
+                                    "--no_colors", str(Path("tests/x.cpp"))])
+        self.assertEqual(rt.EDG_ERRORS_STATUS, 2)
+
+
+class DiagRunCase(FakeFrontEndCase):
+    """rt.main() on frontend-error tests with a fake front end that prints the
+    test file's `// err:` lines, against a fixture of the tag tables."""
+
+    def setUp(self):
+        super().setUp()
+        self.gen = write_gen(self.dir.parent / "gen")
+        self.set_env(CERASTES_EDG_GEN=str(self.gen))
+
+    def diag_test(self, name, expects, err_text, *directives, suffix_lines=()):
+        header = "\n".join(f"// expect: {e}" for e in expects)
+        err = [f"// err: {l}" for l in err_text.splitlines(keepends=False)]
+        return self.write(name, *err, "// silent", *directives, *suffix_lines, header=header)
+
+    def run_diag(self, name, expects, err_text, *directives, args=()):
+        t = self.diag_test(name, expects, err_text, *directives)
+        return t, *self.run_harness(*args, t)
+
+
+def err_lines(text, file):
+    """`text` (a recorded run of x.cpp or n.cpp) with the file name replaced."""
+    return text.replace('"x.cpp"', f'"{file}"').replace('"n.cpp"', f'"{file}"') \
+        .replace('"r.cpp"', f'"{file}"')
+
+
+class DiagRunTests(DiagRunCase):
+    GOOD = ["frontend-error undefined_identifier @ L2",
+            "frontend-warning attribute_namespace_unrecognized @ L4",
+            "frontend-error exp_primary_expr @ L5",
+            "frontend-warning warning_directive @ L6",
+            "frontend-error not_a_member @ L8"]
+
+    def three_errors(self, name="x.cpp"):
+        # the diagnostics name the test file the way the harness passes it
+        return err_lines(REAL_THREE_ERRORS, rt.rel(self.dir / name))
+
+    def run_good(self, expects=None, text=None, *directives, name="x.cpp"):
+        return self.run_diag(name, self.GOOD if expects is None else expects,
+                             self.three_errors(name) if text is None else text,
+                             "// exit: 2", *directives)
+
+    def test_a_real_run_passes(self):
+        t, status, out, _ = self.run_good()
+        self.assertEqual(status, 0, out)
+        self.assertIn(f"PASS  {rt.rel(t)} [c++20]", out)
+        self.assertEqual(self.summary(out), "1 passed, 0 failed, 0 skipped")
+
+    def test_wrong_line_fails_and_names_both(self):
+        expects = list(self.GOOD)
+        expects[0] = "frontend-error undefined_identifier @ L3"
+        t, status, out, _ = self.run_good(expects)
+        self.assertEqual(status, 1, out)
+        self.assertIn("wrong line: expected error undefined_identifier @ L3, got "
+                      "undefined_identifier @ L2:10", out)
+        self.assertIn('identifier "zzz" is undefined', out)
+
+    def test_wrong_tag_fails(self):
+        expects = list(self.GOOD)
+        expects[2] = "frontend-error exp_semicolon @ L5"
+        _, status, out, _ = self.run_good(expects)
+        self.assertEqual(status, 1, out)
+        self.assertIn("wrong diagnostic at this line", out)
+
+    def test_missing_unexpected_and_severity_swaps_fail(self):
+        for what, expects, needle in (
+                ("missing", self.GOOD + ["frontend-error exp_semicolon @ L9"], "missing error"),
+                ("unexpected error", self.GOOD[1:], "unexpected error: undefined_identifier"),
+                ("unexpected warning", self.GOOD[:1] + self.GOOD[2:],
+                 "unexpected warning: attribute_namespace_unrecognized"),
+                ("warning declared as error",
+                 ["frontend-error attribute_namespace_unrecognized @ L4"] + self.GOOD[:1]
+                 + self.GOOD[2:], "missing error")):
+            with self.subTest(what):
+                _, status, out, _ = self.run_good(expects, name=f"{what.replace(' ', '_')}.cpp",
+                                                  text=None)
+                self.assertEqual(status, 1, out)
+                self.assertIn(needle, out)
+
+    def test_exit_status_is_checked(self):
+        t = self.diag_test("a.cpp", self.GOOD, self.three_errors("a.cpp"), "// exit: 0")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("exited with status 0, expected 2", out)
+        self.assertNotIn("missing", out)  # the diagnostics themselves matched
+        t = self.diag_test("b.cpp", ["frontend-warning unrecognized_pragma @ L2"],
+                           err_lines(REAL_WARNINGS_ONLY, rt.rel(self.dir / "b.cpp")).splitlines()[2],
+                           "// exit: 2")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("expected 0", out)
+
+    def test_warnings_only_passes_with_status_zero(self):
+        name = "w.cpp"
+        text = err_lines(REAL_WARNINGS_ONLY, rt.rel(self.dir / name))
+        t, status, out, _ = self.run_diag(
+            name, ["frontend-warning integer_sign_change @ L1",
+                   "frontend-warning declared_but_not_referenced @ L1",
+                   "frontend-warning unrecognized_pragma @ L2"], text)
+        self.assertEqual(status, 0, out)
+
+    def test_notes_do_not_count_and_other_files_do(self):
+        n = self.dir / "n.cpp"
+        header = rt.rel(n)
+        text = err_lines(REAL_NOTES, header)
+        # `inc/h.h` diagnostics are in another file: unexpected
+        expects = ["frontend-error no_matching_function @ L5", "frontend-error static_assert @ L6",
+                   "frontend-error exp_semicolon @ L8",
+                   "frontend-warning declared_but_not_referenced @ L8"]
+        _, status, out, _ = self.run_diag("n.cpp", expects, text, "// exit: 2")
+        self.assertEqual(status, 1, out)
+        self.assertIn("unexpected error (in inc/h.h)", out)
+        self.assertIn("unexpected warning (in inc/h.h)", out)
+        only_ours = "\n".join(l for l in text.splitlines() if not l.startswith('"inc/'))
+        only_ours = only_ours.replace("4 errors", "3 errors")
+        _, status, out, _ = self.run_diag("m.cpp", expects, only_ours.replace(
+            rt.rel(n), rt.rel(self.dir / "m.cpp")), "// exit: 2")
+        self.assertEqual(status, 0, out)
+
+    def test_catastrophic_and_unrecognized_output_fail(self):
+        for what, text, code, needle in (
+                ("catastrophic", REAL_CATASTROPHIC, 4, "catastrophic error always fails"),
+                ("command_line", REAL_COMMAND_LINE, 4, "command-line error always fails"),
+                ("garbage", self.three_errors("garbage.cpp") + "something odd\n", 2,
+                 "unrecognized front-end output: something odd"),
+                ("limit", REAL_ERROR_LIMIT, 4, "error limit")):
+            with self.subTest(what):
+                expects = self.GOOD if what == "garbage" else ["frontend-error "
+                                                               "undefined_identifier @ L2"]
+                t = self.diag_test(f"{what}.cpp", expects,
+                                   err_lines(text, rt.rel(self.dir / f"{what}.cpp")),
+                                   f"// exit: {code}")
+                status, out, _ = self.run_harness(t)
+                self.assertEqual(status, 1, out)
+                self.assertIn(needle, out)
+
+    def test_stdout_must_be_empty(self):
+        t = self.diag_test("o.cpp", self.GOOD, self.three_errors("o.cpp"), "// exit: 2",
+                           "// out: routine f")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("printed on stdout", out)
+
+    def test_crash_and_timeout_fail(self):
+        t = self.diag_test("c.cpp", self.GOOD, self.three_errors("c.cpp"), "// exit: 2",
+                           "// crash")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("crashed (signal 9)", out)
+        t = self.diag_test("s.cpp", self.GOOD, self.three_errors("s.cpp"), "// exit: 2",
+                           "// sleep")
+        with mock.patch.object(rt, "FRONTEND_TIMEOUT_S", 1):
+            status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("timed out after 1s", out)
+
+    def test_the_command_line_and_the_directory(self):
+        # Not silenced: the fake prints its arguments, which fails the test
+        # (stdout must be empty) and shows them with -v.
+        t = self.write("c.cpp", header="// expect: frontend-warning unrecognized_pragma @ L1")
+        status, out, _ = self.run_harness("-v", t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("printed on stdout", out)
+        self.assertIn("options --c++20 --brief_diagnostics --display_error_number "
+                      "--no_colors\n", out)
+        self.assertIn(f"path {rt.rel(t)}\n", out)
+        self.assertIn("cwd root\n", out)
+        self.assertNotIn("--cerastes_walk", out)
+        self.assertNotIn("--no_code_gen", out)
+
+    def test_modes_are_separate_runs(self):
+        t = self.diag_test("m.cpp", self.GOOD, self.three_errors("m.cpp"), "// exit: 2",
+                           "// mode: c++20, c23")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+        self.assertEqual(self.summary(out), "2 passed, 0 failed, 0 skipped")
+        self.assertIn(f"PASS  {rt.rel(t)} [c23]", out)
+
+    def test_an_unknown_tag_is_a_bad_header_not_a_failed_run(self):
+        t = self.diag_test("u.cpp", ["frontend-error undefined_identifer @ L2"],
+                           self.three_errors("u.cpp"), "// exit: 2")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("bad header: unknown EDG diagnostic tag `undefined_identifer`", out)
+        status, out, _ = self.run_harness("--check-headers", t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("0 of 1 headers ok", out)
+
+    def test_cerastes_tags_before_any_are_defined(self):
+        t = self.diag_test("k.cpp", ["frontend-error cerastes-contract_not_boolean @ L2"],
+                           self.three_errors("k.cpp"), "// exit: 2")
+        with mock.patch.object(rt, "CERASTES_DIAGNOSTICS_DEF", Path("src/nowhere.def")):
+            status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("no cerastes diagnostics are defined yet", out)
+
+    def test_a_cerastes_diagnostic_from_the_back_end_matches(self):
+        name = "cb.cpp"
+        file = rt.rel(self.dir / name)
+        text = f'"{file}", line 3 (col. 5): error #cerastes-contract_not_boolean: bad\n' \
+               f'1 error detected in the compilation of "{file}".\n'
+        t = self.diag_test(name, ["frontend-error cerastes-contract_not_boolean @ L3"], text,
+                           "// exit: 2")
+        with mock.patch.object(rt, "load_cerastes_tags",
+                               return_value={"contract_not_boolean"}):
+            status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+        wrong = self.diag_test("cb2.cpp", ["frontend-error cerastes-contract_not_boolean @ L4"],
+                               text.replace(name, "cb2.cpp"), "// exit: 2")
+        with mock.patch.object(rt, "load_cerastes_tags",
+                               return_value={"contract_not_boolean"}):
+            status, out, _ = self.run_harness(wrong)
+        self.assertEqual(status, 1, out)
+        self.assertIn("wrong line", out)
+
+    def test_missing_tables_are_an_environment_error(self):
+        t = self.diag_test("e.cpp", self.GOOD, self.three_errors("e.cpp"), "// exit: 2")
+        self.set_env(CERASTES_EDG_GEN=str(self.dir / "nowhere"))
+        status, out, err = self.run_harness(t)
+        self.assertEqual(status, 2, out)
+        self.assertIn("scripts/bootstrap.sh", err)
+        with mock.patch.object(rt, "load_env", return_value={
+                "CERASTES_FE": "x", "EDG_CLANG_VER_SCRAPE": "0"}):
+            status, out, err = self.run_harness(t)
+        self.assertEqual(status, 2, out)
+        self.assertIn("CERASTES_EDG_GEN", err)
+
+    def test_update_golden_leaves_these_tests_alone(self):
+        t = self.diag_test("g.cpp", self.GOOD, self.three_errors("g.cpp"), "// exit: 2")
+        status, out, _ = self.run_harness("--update-golden", t)
+        self.assertEqual(status, 0, out)
+        self.assertFalse((self.dir / "g.cpp.golden").exists())
+
+    def test_the_files_next_to_the_test_are_not_touched(self):
+        t = self.diag_test("f.cpp", self.GOOD, self.three_errors("f.cpp"), "// exit: 2")
+        before = sorted(p.name for p in self.dir.iterdir())
+        self.run_harness(t)
+        self.assertEqual(sorted(p.name for p in self.dir.iterdir()), before)
+
+
+# ---------------------------------------------------------------------------
+# Ordinary compilers: `expect: native-ok`
+# ---------------------------------------------------------------------------
+
+# A stand-in for a C or C++ compiler.  It logs its arguments (and SDKROOT) to
+# $FAKE_LOG; for `--version` it prints a banner ($FAKE_BANNER_<family> or the
+# default); otherwise it fails when the source holds `unused` or a
+# `// native-fail` directive (`// native-fail: gcc` for one family), prints
+# noise on stderr for `// native-noise`, on stdout for `// native-stdout`.
+# $FAKE_REJECT_ALL_<family> makes it fail every compile, $FAKE_ACCEPT_ALL_<family>
+# makes it accept every compile (a vacuous compiler).
+FAKE_COMPILER = '''#!{python}
+import os, sys
+FAMILY = {family!r}
+BANNER = {banner!r}
+args = sys.argv[1:]
+log = os.environ.get("FAKE_LOG")
+if log:
+    with open(log, "a") as f:
+        f.write(" ".join([os.path.basename(sys.argv[0]),
+                          "SDKROOT=" + os.environ.get("SDKROOT", "-")] + args) + "\\n")
+if args == ["--version"]:
+    print(os.environ.get("FAKE_BANNER_" + FAMILY, BANNER))
+    sys.exit(0)
+src = open(args[-1]).read()
+def has(directive):
+    return ("// " + directive + "\\n") in src or ("// " + directive + ": " + FAMILY + "\\n") in src
+if os.environ.get("FAKE_REJECT_ALL_" + FAMILY):
+    print("fake: error: rejects everything", file=sys.stderr)
+    sys.exit(1)
+if os.environ.get("FAKE_ACCEPT_ALL_" + FAMILY):
+    sys.exit(0)
+if "unreg_ns" in src and not os.environ.get("FAKE_ACCEPT_ATTR_" + FAMILY):
+    print("fake: error: unknown attribute", file=sys.stderr)
+    sys.exit(1)
+if "unused" in src or has("native-fail"):
+    print("fake: error: unused variable", file=sys.stderr)
+    sys.exit(1)
+if has("native-noise"):
+    print("fake: warning: noise", file=sys.stderr)
+if has("native-stdout"):
+    print("fake: stdout noise")
+sys.exit(0)
+'''
+
+REAL_BANNERS = {
+    "Apple clang": "Apple clang version 21.0.0 (clang-2100.3.34.2)\nTarget: arm64-apple-darwin27.0.0\n",
+    "GCC": "g++-16 (Homebrew GCC 16.2.0) 16.2.0\nCopyright (C) 2026 Free Software Foundation, Inc.\n",
+}
+
+
+class BannerTests(unittest.TestCase):
+    def test_real_banners(self):
+        self.assertIsNone(rt.banner_problem("Apple clang", REAL_BANNERS["Apple clang"]))
+        self.assertIsNone(rt.banner_problem("GCC", REAL_BANNERS["GCC"]))
+        self.assertIsNone(rt.banner_problem("GCC", "gcc (GCC) 14.1.0\n"))
+        self.assertIsNone(rt.banner_problem("GCC", "gcc (Ubuntu 13.2.0-23ubuntu4) 13.2.0 GCC\n"))
+
+    def test_the_wrong_family(self):
+        self.assertIn("does not say Apple clang", rt.banner_problem(
+            "Apple clang", "clang version 18.1.8 (Homebrew)\n"))
+        self.assertIn("does not say Apple clang", rt.banner_problem(
+            "Apple clang", REAL_BANNERS["GCC"]))
+        # /usr/bin/gcc on macOS is Apple clang
+        self.assertIn("does not say GCC", rt.banner_problem("GCC", REAL_BANNERS["Apple clang"]))
+        self.assertIn("does not say GCC", rt.banner_problem(
+            "GCC", "Apple clang version 21 (GCC compatible)\n"))
+        self.assertIn("does not say", rt.banner_problem("GCC", ""))
+        self.assertIn("does not say", rt.banner_problem("Apple clang", "\n"))
+
+    def test_only_the_first_line_counts(self):
+        self.assertIsNotNone(rt.banner_problem("GCC", "tool 1.0\nbuilt with GCC\n"))
+
+
+class NativeCommandTests(unittest.TestCase):
+    def test_the_flags(self):
+        cmd = rt.native_command("/x/clang++", "c++", "c++20", "/inc", "t/a.cpp")
+        self.assertEqual(cmd, ["/x/clang++", "-x", "c++", "-std=c++20", "-Wall", "-Wextra",
+                               "-Werror", "-U__CERASTES__", "-I", "/inc", "-c", "-o",
+                               "/dev/null", "t/a.cpp"])
+        cmd = rt.native_command("/x/clang", "c", "c23", "/inc", "t/a.c")
+        self.assertEqual(cmd[1:4], ["-x", "c", "-std=c23"])
+
+    def test_the_canary_snippets(self):
+        # valid C and C++; one of them is rejected only by the warning flags
+        self.assertIn("unused", rt.CANARY_FAIL)
+        self.assertNotIn("unused", rt.CANARY_PASS)
+
+
+class NativeCase(FakeFrontEndCase):
+    """rt.main() on native-ok tests with fake compilers and a fake front end."""
+
+    FAMILIES = (("clang", "Apple clang version 99 (fake)"), ("gcc", "fake-g++ (GCC) 99.0"))
+
+    def setUp(self):
+        super().setUp()
+        bin_dir = self.dir.parent / "bin"
+        bin_dir.mkdir()
+        self.bin = {}
+        for family, banner in self.FAMILIES:
+            for kind in ("cc", "cxx"):
+                exe = bin_dir / f"fake_{family}_{kind}"
+                exe.write_text(FAKE_COMPILER.format(python=sys.executable, family=family,
+                                                    banner=banner))
+                exe.chmod(0o755)
+                self.bin[family, kind] = str(exe)
+        self.log = self.dir.parent / "compiler.log"
+        self.set_env(CERASTES_CLANG_CC=self.bin["clang", "cc"],
+                     CERASTES_CLANG_CXX=self.bin["clang", "cxx"],
+                     CERASTES_GCC_CC=self.bin["gcc", "cc"],
+                     CERASTES_GCC_CXX=self.bin["gcc", "cxx"],
+                     CERASTES_INCLUDE_DIR="/fake/include")
+        # (the FAKE_* switches of the fake compilers are not env.sh variables)
+        patcher = mock.patch.dict(os.environ, {"FAKE_LOG": str(self.log)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop("SDKROOT", None)
+        for family in ("clang", "gcc"):
+            for name in ("BANNER", "ACCEPT_ALL", "REJECT_ALL", "ACCEPT_ATTR"):
+                os.environ.pop(f"FAKE_{name}_{family}", None)
+        sdk = mock.patch.object(rt, "sdk_root", return_value="/fake/sdk")
+        sdk.start()
+        self.addCleanup(sdk.stop)
+
+    def native_test(self, name, *lines, extra="// expect: native-ok",
+                    outcome="// expect: golden"):
+        t = self.write(name, *lines, header=f"{outcome}\n{extra}")
+        before = self.calls()
+        status, out, _ = self.run_harness("--update-golden", t)
+        self.assertEqual(status, 0, out)
+        self.assertEqual(self.calls(), before, "--update-golden must not run the compilers")
+        return t
+
+    def calls(self):
+        if not self.log.exists():
+            return []
+        return self.log.read_text().splitlines()
+
+    def compiles_of(self, t):
+        return [c for c in self.calls() if c.endswith(" " + rt.rel(t))]
+
+
+class NativeRunTests(NativeCase):
+    def test_flags_files_and_both_compilers(self):
+        t = self.native_test("a.cpp", "int f();")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+        self.assertIn(f"PASS  {rt.rel(t)} [c++20] native-ok: Apple clang", out)
+        self.assertIn(f"PASS  {rt.rel(t)} [c++20] native-ok: GCC", out)
+        self.assertTrue(self.summary(out).endswith("native-ok runs: Apple clang 1, GCC 1"),
+                        self.summary(out))
+        flags = ("-x c++ -std=c++20 -Wall -Wextra -Werror -U__CERASTES__ -I /fake/include "
+                 f"-c -o /dev/null {rt.rel(t)}")
+        self.assertEqual(self.compiles_of(t), [
+            f"fake_clang_cxx SDKROOT=/fake/sdk {flags}", f"fake_gcc_cxx SDKROOT=- {flags}"])
+
+    def test_c_files_use_the_c_compilers_and_c23(self):
+        t = self.native_test("a.c", "int f(void);")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+        flags = ("-x c -std=c23 -Wall -Wextra -Werror -U__CERASTES__ -I /fake/include "
+                 f"-c -o /dev/null {rt.rel(t)}")
+        self.assertEqual(self.compiles_of(t), [
+            f"fake_clang_cc SDKROOT=/fake/sdk {flags}", f"fake_gcc_cc SDKROOT=- {flags}"])
+        self.assertIn("native-ok: Apple clang", out)
+
+    def test_each_mode_is_compiled_in_its_language(self):
+        t = self.native_test("m.cpp", "int f();", extra="// expect: native-ok\n// mode: c++20, c23")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+        calls = self.compiles_of(t)
+        self.assertEqual(len(calls), 4, calls)
+        self.assertEqual(sum("-x c++ -std=c++20" in c for c in calls), 2)
+        self.assertEqual(sum("-x c -std=c23" in c for c in calls), 2)
+        self.assertTrue(self.summary(out).endswith("native-ok runs: Apple clang 2, GCC 2"))
+
+    def test_a_rejected_file_fails_only_that_compiler(self):
+        t = self.native_test("g.cpp", "int f();", "// native-fail: gcc")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn(f"FAIL  {rt.rel(t)} [c++20] native-ok: GCC", out)
+        self.assertIn(f"PASS  {rt.rel(t)} [c++20] native-ok: Apple clang", out)
+        self.assertIn("GCC rejected the file (exit status 1)", out)
+        self.assertIn("fake: error: unused variable", out)
+        self.assertIn(f"PASS  {rt.rel(t)} [c++20]\n", out)  # the golden itself still passes
+
+    def test_both_reject(self):
+        t = self.native_test("b.cpp", "int f();", "// native-fail")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertEqual(out.count("FAIL  "), 2)
+
+    def test_noise_on_a_zero_exit_fails(self):
+        t = self.native_test("n.cpp", "int f();", "// native-noise: clang")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("Apple clang printed diagnostics", out)
+        self.assertIn("fake: warning: noise", out)
+        self.assertIn(f"PASS  {rt.rel(t)} [c++20] native-ok: GCC", out)
+
+    def test_stdout_noise_fails_too(self):
+        t = self.native_test("s.cpp", "int f();", "// native-stdout: gcc")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("GCC printed diagnostics", out)
+        self.assertIn("fake: stdout noise", out)
+
+    def test_it_accompanies_a_front_end_diagnostic_test(self):
+        gen = write_gen(self.dir.parent / "gen")
+        self.set_env(CERASTES_EDG_GEN=str(gen))
+        if True:
+            t = self.write("d.cpp", "// err: x", "// silent",
+                           header="// expect: frontend-warning unrecognized_pragma @ L1\n"
+                                  "// expect: native-ok")
+            # the fake prints a diagnostic naming the file the way the harness passes it
+            t.write_text(t.read_text().replace(
+                "// err: x", f'// err: "{rt.rel(t)}", line 1 (col. 9): warning #161-D: '
+                            'unrecognized #pragma'))
+            status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+        self.assertIn("native-ok: GCC", out)
+
+    def test_a_failing_outcome_still_runs_the_native_check(self):
+        t = self.native_test("o.cpp", "int f();", "// native-fail: gcc")
+        (self.dir / "o.cpp.golden").write_text("different\n")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn(f"FAIL  {rt.rel(t)} [c++20]\n", out)
+        self.assertIn("native-ok: GCC", out)
+
+    def test_no_native_tests_no_compilers(self):
+        t = self.write("p.cpp", "int f();")
+        self.run_harness("--update-golden", t)
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+        self.assertEqual(self.calls(), [])
+        self.assertNotIn("native-ok", out)
+        self.assertNotIn("canary", out)
+
+    def test_check_headers_runs_no_compiler(self):
+        t = self.native_test("h.cpp", "int f();")
+        status, out, _ = self.run_harness("--check-headers", t)
+        self.assertEqual(status, 0, out)
+        self.assertEqual(self.calls(), [])
+
+    def test_a_bad_header_is_not_compiled(self):
+        t = self.write("bad.cpp", "int f();", header="// expect: native-ok")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("bad header", out)
+        self.assertEqual(self.calls(), [])
+
+    def test_update_golden_runs_no_compiler(self):
+        t = self.write("u.cpp", "int f();", header="// expect: golden\n// expect: native-ok")
+        status, out, _ = self.run_harness("--update-golden", t)
+        self.assertEqual(status, 0, out)
+        self.assertNotIn("canary", out)
+        self.assertEqual(self.calls(), [])
+
+    def test_sdkroot(self):
+        t = self.native_test("k.cpp", "int f();")
+        self.run_harness(t)
+        calls = self.compiles_of(t)
+        self.assertTrue(calls[0].startswith("fake_clang_cxx SDKROOT=/fake/sdk "), calls)
+        self.assertTrue(calls[1].startswith("fake_gcc_cxx SDKROOT=- "), calls)
+        self.log.unlink()
+        with mock.patch.dict(os.environ, {"SDKROOT": "/user/sdk"}):
+            self.run_harness(t)
+        calls = self.compiles_of(t)
+        self.assertTrue(calls[0].startswith("fake_clang_cxx SDKROOT=/user/sdk "), calls)
+        self.assertTrue(calls[1].startswith("fake_gcc_cxx SDKROOT=/user/sdk "), calls)
+
+
+class NativeCanaryTests(NativeCase):
+    def test_canaries_run_once_per_compiler_and_language(self):
+        a = self.native_test("a.cpp", "int f();")
+        b = self.native_test("b.cpp", "int f();")
+        status, out, _ = self.run_harness(a, b)
+        self.assertEqual(status, 0, out)
+        self.assertIn("PASS  canary native-ok [Apple clang, c++]", out)
+        self.assertIn("PASS  canary native-ok [GCC, c++]", out)
+        self.assertNotIn("[Apple clang, c]", out)  # no C test, no C canary
+        calls = self.calls()
+        self.assertEqual(sum(c.endswith(" --version") for c in calls), 2)
+        # per compiler: a clean snippet and one with an unused variable
+        self.assertEqual(sum("canary_pass.cpp" in c for c in calls), 2)
+        self.assertEqual(sum("canary_fail.cpp" in c for c in calls), 2)
+        self.assertEqual(sum("canary_attribute.cpp" in c for c in calls), 2)
+        self.assertEqual(sum("--version" in c for c in calls), 2)
+        self.assertEqual(len(self.compiles_of(a)) + len(self.compiles_of(b)), 4)
+        self.assertTrue(out.index("canary native-ok [Apple clang") < out.index(rt.rel(a)))
+
+    def test_a_c_test_adds_the_c_canary(self):
+        t = self.native_test("c.c", "int f(void);")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+        self.assertIn("PASS  canary native-ok [Apple clang, c]", out)
+        self.assertIn("canary_fail.c ", " ".join(self.calls()) + " ")
+
+    def canary_failure(self, env, family_label, needle):
+        t = self.native_test("v.cpp", "int f();")
+        self.set_env(**{k: v for k, v in env.items() if k.startswith("CERASTES_")})
+        with mock.patch.dict(os.environ, {k: v for k, v in env.items()
+                                          if not k.startswith("CERASTES_")}):
+            status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn(f"FAIL  canary native-ok [{family_label}, c++]", out)
+        self.assertIn(needle, out)
+        # the file's own native result is not trusted
+        self.assertIn(f"FAIL  {rt.rel(t)} [c++20] native-ok: {family_label}", out)
+        self.assertIn(f"the {family_label} canary failed", out)
+        return out
+
+    def test_a_banner_of_the_wrong_family(self):
+        self.canary_failure({"FAKE_BANNER_clang": "clang version 18 (Homebrew)"},
+                            "Apple clang", "does not say Apple clang")
+        self.canary_failure({"FAKE_BANNER_gcc": "Apple clang version 21 (clang-2100)"},
+                            "GCC", "does not say GCC")
+
+    def test_a_compiler_that_accepts_everything(self):
+        out = self.canary_failure({"FAKE_ACCEPT_ALL_gcc": "1"}, "GCC",
+                                  "an unused variable was not rejected")
+        self.assertIn("PASS  canary native-ok [Apple clang, c++]", out)
+        self.canary_failure({"FAKE_ACCEPT_ALL_clang": "1"}, "Apple clang",
+                            "an unused variable was not rejected")
+
+    def test_a_compiler_that_accepts_an_unknown_attribute(self):
+        # -Werror must reject [[unreg_ns::x]]; one that does not would let a
+        # `[[cerastes::...]]` left in a file pass as ordinary code
+        out = self.canary_failure({"FAKE_ACCEPT_ATTR_gcc": "1"}, "GCC",
+                                  "an unknown scoped attribute ([[unreg_ns::x]]) was not rejected")
+        self.assertIn("PASS  canary native-ok [Apple clang, c++]", out)
+        self.canary_failure({"FAKE_ACCEPT_ATTR_clang": "1"}, "Apple clang",
+                            "an unknown scoped attribute")
+
+    def test_the_c_canary_has_the_attribute_snippet_too(self):
+        t = self.native_test("c.c", "int f(void);")
+        self.run_harness(t)
+        self.assertTrue(any("canary_attribute.c " in c + " " for c in self.calls()))
+        os.environ["FAKE_ACCEPT_ATTR_clang"] = "1"
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("FAIL  canary native-ok [Apple clang, c]", out)
+
+    def test_a_compiler_that_rejects_everything(self):
+        self.canary_failure({"FAKE_REJECT_ALL_clang": "1"}, "Apple clang",
+                            "a clean snippet did not compile")
+
+    def test_a_compiler_that_cannot_be_run(self):
+        gone = str(self.dir.parent / "bin" / "nope")
+        self.canary_failure({"CERASTES_CLANG_CXX": gone}, "Apple clang", "could not be run")
+
+    def test_a_broken_compiler_never_makes_a_failing_file_pass(self):
+        # An accept-everything GCC would let this file through; the canary
+        # catches the compiler, so the run still fails.
+        t = self.native_test("w.cpp", "int f();", "// native-fail: gcc")
+        with mock.patch.dict(os.environ, {"FAKE_ACCEPT_ALL_gcc": "1"}):
+            status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("FAIL  canary native-ok [GCC, c++]", out)
+
+    def test_a_good_canary_hides_nothing(self):
+        t = self.native_test("x.cpp", "int f();", "// native-fail: gcc")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("PASS  canary native-ok [GCC, c++]", out)
+        self.assertIn(f"FAIL  {rt.rel(t)} [c++20] native-ok: GCC", out)
+
+
+class NativeEnvironmentTests(NativeCase):
+    def test_gcc_not_installed_is_one_note(self):
+        a = self.native_test("a.cpp", "int f();")
+        b = self.native_test("b.cpp", "int f();")
+        self.set_env(CERASTES_GCC_CC="", CERASTES_GCC_CXX="")
+        status, out, _ = self.run_harness(a, b)
+        self.assertEqual(status, 0, out)
+        self.assertEqual(out.count("native-ok: GCC not installed; Apple clang only"), 1)
+        self.assertTrue(self.summary(out).endswith("native-ok runs: Apple clang 2"),
+                        self.summary(out))
+        self.assertNotIn("GCC", out.replace("native-ok: GCC not installed", ""))
+        self.assertFalse(any(c.startswith("fake_gcc") for c in self.calls()))
+        self.assertEqual(rt.GCC_MISSING_NOTE, "native-ok: GCC not installed; Apple clang only")
+
+    def test_a_named_gcc_that_is_missing_fails(self):
+        t = self.native_test("a.cpp", "int f();")
+        gone = str(self.dir.parent / "bin" / "nope")
+        self.set_env(CERASTES_GCC_CC=gone, CERASTES_GCC_CXX=gone)
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertNotIn("GCC not installed", out)
+        self.assertIn("FAIL  canary native-ok [GCC, c++]", out)
+        self.assertIn(f"FAIL  {rt.rel(t)} [c++20] native-ok: GCC", out)
+        self.assertIn(f"PASS  {rt.rel(t)} [c++20] native-ok: Apple clang", out)
+
+    def run_with_env(self, env):
+        t = self.native_test("e.cpp", "int f();")
+        with mock.patch.object(rt, "load_env", return_value=env):
+            return self.run_harness(t)
+
+    def base_env(self):
+        return {"CERASTES_FE": self.env_values["CERASTES_FE"], "EDG_CLANG_VER_SCRAPE": "0",
+                "CERASTES_CLANG_CC": self.bin["clang", "cc"],
+                "CERASTES_CLANG_CXX": self.bin["clang", "cxx"],
+                "CERASTES_GCC_CC": "", "CERASTES_GCC_CXX": "",
+                "CERASTES_INCLUDE_DIR": "/fake/include"}
+
+    def test_the_complete_environment_works(self):
+        status, out, _ = self.run_with_env(self.base_env())
+        self.assertEqual(status, 0, out)
+
+    def test_missing_variables_are_environment_errors(self):
+        for name in ("CERASTES_CLANG_CC", "CERASTES_CLANG_CXX", "CERASTES_INCLUDE_DIR",
+                     "CERASTES_GCC_CC", "CERASTES_GCC_CXX"):
+            with self.subTest(name):
+                env = self.base_env()
+                del env[name]
+                status, out, err = self.run_with_env(env)
+                self.assertEqual(status, 2, out)
+                self.assertIn(name, err)
+                self.assertEqual(self.calls(), [])
+
+    def test_empty_clang_is_an_environment_error(self):
+        env = self.base_env()
+        env["CERASTES_CLANG_CXX"] = ""
+        status, out, err = self.run_with_env(env)
+        self.assertEqual(status, 2, out)
+        self.assertIn("CERASTES_CLANG_CXX not set", err)
+
+    def test_half_a_gcc_is_an_environment_error(self):
+        for half in ("CERASTES_GCC_CC", "CERASTES_GCC_CXX"):
+            with self.subTest(half):
+                env = self.base_env()
+                env[half] = self.bin["gcc", "cxx"]
+                status, out, err = self.run_with_env(env)
+                self.assertEqual(status, 2, out)
+                self.assertIn("both be set or both empty", err)
+
+
+# ---------------------------------------------------------------------------
+# The EDG tree (decision 0005)
+# ---------------------------------------------------------------------------
+
+class TreeConsistencyTests(RootedCase):
+    def setUp(self):
+        super().setUp()
+        self.pin = self.root / "third_party" / "edg"
+        self.pin.mkdir(parents=True)
+        self.other = self.root / "other-edg"
+        self.other.mkdir()
+
+    def env_sh(self, active):
+        lines = ["# Generated by scripts/bootstrap.sh; do not edit.",
+                 'export CERASTES_JAVA="/x/java"']
+        if active is not None:
+            lines.append(f'export CERASTES_EDG_SRC_ACTIVE="{active}"')
+        self.put("build/env.sh", "\n".join(lines) + "\n")
+
+    def problem(self, caller):
+        return rt.edg_tree_problem(self.root / "build" / "env.sh", caller)
+
+    def test_the_pin(self):
+        self.env_sh(self.pin)
+        self.assertIsNone(self.problem({}))
+        self.assertIsNone(self.problem({"CERASTES_EDG_SRC": ""}))
+        self.assertIsNone(self.problem({"CERASTES_EDG_SRC": str(self.pin)}))
+
+    def test_a_relative_selection_is_refused(self):
+        for value in ("rel/edg", "./edg", "../edg", "~/edg", "edg"):
+            with self.subTest(value):
+                self.env_sh(self.pin)
+                msg = self.problem({"CERASTES_EDG_SRC": value})
+                self.assertEqual(msg, f"CERASTES_EDG_SRC={value} is a relative path; use an "
+                                      "absolute path (decision 0005)")
+        # refused even where there is no env.sh to compare with
+        (self.root / "build" / "env.sh").unlink()
+        self.assertIn("is a relative path", self.problem({"CERASTES_EDG_SRC": "rel"}))
+        self.assertIsNone(self.problem({"CERASTES_EDG_SRC": "/abs"}))
+
+    def test_an_override(self):
+        self.env_sh(self.other)
+        self.assertIsNone(self.problem({"CERASTES_EDG_SRC": str(self.other)}))
+
+    def test_a_disagreement_is_reported_in_the_contract_words(self):
+        self.env_sh(self.pin)
+        msg = self.problem({"CERASTES_EDG_SRC": str(self.other)})
+        self.assertEqual(msg, f"build/env.sh is for {self.pin} but CERASTES_EDG_SRC selects "
+                              f"{self.other}; run scripts/bootstrap.sh")
+        self.env_sh(self.other)
+        msg = self.problem({})
+        self.assertEqual(msg, f"build/env.sh is for {self.other} but CERASTES_EDG_SRC selects "
+                              f"{self.pin}; run scripts/bootstrap.sh")
+        self.assertEqual(self.problem({"CERASTES_EDG_SRC": ""}), msg)
+        self.assertIsNotNone(self.problem({"CERASTES_EDG_SRC": str(self.pin)}))
+
+    def test_paths_are_compared_by_realpath(self):
+        self.env_sh(self.other)
+        link = self.root / "link"
+        link.symlink_to(self.other)
+        self.assertIsNone(self.problem({"CERASTES_EDG_SRC": str(link)}))
+        self.assertIsNone(self.problem({"CERASTES_EDG_SRC": f"{self.other}/"}))
+        self.assertIsNone(self.problem({"CERASTES_EDG_SRC": f"{self.other}/../{self.other.name}"}))
+        # and an env.sh written with a link in it
+        self.env_sh(link)
+        self.assertIsNone(self.problem({"CERASTES_EDG_SRC": str(self.other)}))
+        self.assertIsNotNone(self.problem({}))
+
+    def test_a_prefix_is_not_the_same_tree(self):
+        self.env_sh(self.other)
+        self.assertIsNotNone(self.problem({"CERASTES_EDG_SRC": f"{self.other}-2"}))
+        self.assertIsNotNone(self.problem({"CERASTES_EDG_SRC": str(self.other.parent)}))
+
+    def test_an_env_sh_that_does_not_name_its_tree(self):
+        self.env_sh(None)
+        msg = self.problem({})
+        self.assertIn("does not name its EDG tree", msg)
+        self.assertIn("scripts/bootstrap.sh", msg)
+        self.env_sh("")
+        self.assertIn("does not name its EDG tree", self.problem({}))
+
+    def test_no_env_sh_is_left_to_the_other_checks(self):
+        self.assertIsNone(self.problem({"CERASTES_EDG_SRC": str(self.other)}))
+
+    def test_the_default_arguments_read_the_shell_and_the_root(self):
+        self.env_sh(self.pin)
+        with mock.patch.dict(os.environ, {"CERASTES_EDG_SRC": str(self.other)}):
+            self.assertIn("CERASTES_EDG_SRC selects", rt.edg_tree_problem())
+        env = {k: v for k, v in os.environ.items() if k != "CERASTES_EDG_SRC"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertIsNone(rt.edg_tree_problem())
+
+    def test_the_caller_selects_not_env_sh(self):
+        # `CERASTES_EDG_SRC` exported by env.sh itself must not hide a mismatch.
+        self.put("build/env.sh", f'export CERASTES_EDG_SRC_ACTIVE="{self.pin}"\n'
+                                 f'export CERASTES_EDG_SRC="{self.pin}"\n')
+        self.assertIsNotNone(self.problem({"CERASTES_EDG_SRC": str(self.other)}))
+
+
+class TreeGateTests(FakeFrontEndCase):
+    """rt.main() stops with status 2 before running anything when the tree
+    does not match, but only for tests that run tools built from the tree."""
+
+    def test_a_mismatch_stops_a_golden_run(self):
+        t = self.write("x.cpp", "// out: a")
+        self.tree_mock.return_value = ("build/env.sh is for /a but CERASTES_EDG_SRC selects "
+                                       "/b; run scripts/bootstrap.sh")
+        status, out, err = self.run_harness(t)
+        self.assertEqual(status, 2, out)
+        self.assertIn("run_tests.py: build/env.sh is for /a but CERASTES_EDG_SRC selects /b", err)
+        self.assertEqual(out, "")
+        self.assertFalse((self.dir / "x.cpp.golden").exists())
+        status, out, err = self.run_harness("--update-golden", t)
+        self.assertEqual(status, 2, out)
+
+    def test_it_stops_other_front_end_tests_too(self):
+        self.tree_mock.return_value = "mismatch"
+        t = self.write("f.cpp", header="// expect: frontend-ok")
+        self.assertEqual(self.run_harness(t)[0], 2)
+        gen = write_gen(self.dir.parent / "gen")
+        self.set_env(CERASTES_EDG_GEN=str(gen))
+        d = self.write("d.cpp", header="// expect: frontend-warning unrecognized_pragma @ L1")
+        self.assertEqual(self.run_harness(d)[0], 2)
+
+    def test_a_matching_tree_runs(self):
+        t = self.write("x.cpp", "// out: a")
+        self.run_harness("--update-golden", t)
+        self.tree_mock.return_value = None
+        self.assertEqual(self.run_harness(t)[0], 0)
+        self.assertTrue(self.tree_mock.called)
+
+    def test_header_checks_never_need_the_tree(self):
+        t = self.write("x.cpp", "// out: a")
+        self.run_harness("--update-golden", t)
+        self.tree_mock.reset_mock()
+        self.tree_mock.return_value = "mismatch"
+        status, out, _ = self.run_harness("--check-headers", t)
+        self.assertEqual(status, 0, out)
+        self.assertFalse(self.tree_mock.called)
+
+    def test_needs_edg_tools(self):
+        def exp(kind):
+            return rt.Expectation(kind, [], None, ["c++20"])
+        for kind in ("golden", "frontend-ok", "frontend-diag"):
+            self.assertTrue(rt.needs_edg_tools({Path("a.cpp"): exp(kind)}), kind)
+        for kind in ("verified", "error", "rejected"):
+            self.assertFalse(rt.needs_edg_tools({Path("a.cpp"): exp(kind)}), kind)
+        self.assertFalse(rt.needs_edg_tools({Path("a.cpp"): rt.HeaderError("x")}))
+        self.assertFalse(rt.needs_edg_tools({}))
+
+
+def _env_sh_names_its_tree():
+    env_sh = REAL_ROOT / "build" / "env.sh"
+    return (env_sh.is_file() and "CERASTES_EDG_SRC_ACTIVE=" in env_sh.read_text()
+            and (REAL_ROOT / "scripts" / "cerastes-fe.sh").is_file())
+
+
+@e2e_gate(_env_sh_names_its_tree(),
+          "build/env.sh missing or too old (no CERASTES_EDG_SRC_ACTIVE); run scripts/bootstrap.sh")
+class TreeScriptTwinTests(unittest.TestCase):
+    """The real scripts refuse a tree other than the one build/env.sh is for:
+    cerastes-fe.sh, cpfe.sh and run_tests.py exit 2 with the message, and the
+    same command with the matching selection is not refused."""
+
+    def setUp(self):
+        text = (REAL_ROOT / "build" / "env.sh").read_text()
+        self.active = re.search(r'^export CERASTES_EDG_SRC_ACTIVE="(.*)"$', text, re.M).group(1)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.elsewhere = str(Path(tmp.name).resolve())
+
+    def run_script(self, args, selection):
+        env = {k: v for k, v in os.environ.items() if k != "CERASTES_EDG_SRC"}
+        if selection is not None:
+            env["CERASTES_EDG_SRC"] = selection
+        return subprocess.run(args, cwd=REAL_ROOT, env=env, capture_output=True, text=True,
+                              timeout=300)
+
+    def test_scripts_refuse_a_different_tree(self):
+        hello = "tests/edg-smoke/hello.cpp"
+        for args in ([str(REAL_ROOT / "scripts" / "cerastes-fe.sh"), "--c++20", hello],
+                     [str(REAL_ROOT / "scripts" / "cpfe.sh"), "--c++20", "--no_code_gen",
+                      hello]):
+            with self.subTest(args[0]):
+                run = self.run_script(args, self.elsewhere)
+                self.assertEqual(run.returncode, 2, run.stderr)
+                self.assertIn("CERASTES_EDG_SRC selects", run.stderr)
+                self.assertIn(self.elsewhere, run.stderr)
+                self.assertIn("scripts/bootstrap.sh", run.stderr)
+                # the matching selection is accepted (twin: the check is not vacuous)
+                run = self.run_script(args, self.active)
+                self.assertEqual((run.returncode, run.stderr), (0, ""), run)
+
+    def test_scripts_refuse_a_relative_selection(self):
+        hello = "tests/edg-smoke/hello.cpp"
+        for args in ([str(REAL_ROOT / "scripts" / "cerastes-fe.sh"), "--c++20", hello],
+                     [str(REAL_ROOT / "scripts" / "cpfe.sh"), "--c++20", "--no_code_gen", hello],
+                     [str(REAL_ROOT / "scripts" / "bootstrap.sh"), "--build-only"],
+                     [sys.executable, str(REAL_ROOT / "scripts" / "run_tests.py"), hello],
+                     [sys.executable, str(REAL_ROOT / "scripts" / "edg_tree.py"), "check"],
+                     [sys.executable, str(REAL_ROOT / "scripts" / "edg_tree.py"), "resolve"]):
+            with self.subTest(Path(args[0]).name + " " + Path(args[-1]).name):
+                run = self.run_script(args, "third_party/edg")
+                self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+                self.assertIn("relative path", run.stderr)
+                self.assertIn("absolute", run.stderr)
+
+    def test_run_tests_refuses_a_different_tree(self):
+        cmd = [sys.executable, str(REAL_ROOT / "scripts" / "run_tests.py"),
+               "tests/edg-smoke/hello.cpp"]
+        run = self.run_script(cmd, self.elsewhere)
+        self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+        self.assertIn("run_tests.py: build/env.sh is for", run.stderr)
+        self.assertIn("CERASTES_EDG_SRC selects", run.stderr)
+        run = self.run_script(cmd, self.active)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        # header checks do not need the tree
+        run = self.run_script([sys.executable, str(REAL_ROOT / "scripts" / "run_tests.py"),
+                               "--check-headers", "tests/edg-smoke"], self.elsewhere)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+
+
+# ---------------------------------------------------------------------------
+# scripts/edg_tree.py against its command-line contract (decision 0005)
+# ---------------------------------------------------------------------------
+
+EDG_TREE = REAL_ROOT / "scripts" / "edg_tree.py"
+EDG_URL = "https://github.com/edgcpp/compiler.git"
+
+
+@e2e_gate(shutil.which("git") is not None and EDG_TREE.is_file(),
+          "git or scripts/edg_tree.py missing")
+class EdgTreeToolTests(unittest.TestCase):
+    """Runs `python3 scripts/edg_tree.py --root DIR <command>` on temporary
+    repositories: a root with a nested repository at third_party/edg and a fake
+    gitlink, and override trees.  Each case is a twin of a guard."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name).resolve()
+        self.root = self.tmp / "repo"
+        self.sub = self.root / "third_party" / "edg"
+        self.override = self.tmp / "override"
+        self.env = {k: v for k, v in os.environ.items()
+                    if k not in ("CERASTES_EDG_SRC", "GIT_DIR", "GIT_WORK_TREE")}
+        self.env.update({"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull,
+                         "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
+                         "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"})
+        self.git(self.root, "init", "-q", "-b", "main")
+        self.write(self.root / ".gitmodules",
+                   f'[submodule "third_party/edg"]\n\tpath = third_party/edg\n\turl = {EDG_URL}\n')
+        self.write(self.root / "README", "root\n")
+        self.git(self.root, "add", ".gitmodules", "README")
+        self.git(self.root, "commit", "-q", "-m", "root")
+        self.git(self.sub, "init", "-q", "-b", "main")
+        self.git(self.sub, "remote", "add", "origin", EDG_URL)
+        self.write(self.sub / "src" / "il_def.h", "// il\n")
+        self.git(self.sub, "add", "-A")
+        self.git(self.sub, "commit", "-q", "-m", "pin")
+        self.pin = self.git(self.sub, "rev-parse", "HEAD")
+        # what the submodule last fetched: the pin is an upstream commit
+        self.git(self.sub, "update-ref", "refs/remotes/origin/main", self.pin)
+        self.write(self.root / "cmake" / "EdgFrontEnd.cmake", "# cerastes configuration\n")
+        self.write(self.root / "src" / "backend" / "edg_il.h", "// il layout guards\n")
+        self.git(self.root, "update-index", "--add", "--cacheinfo",
+                 f"160000,{self.pin},third_party/edg")
+        # an override tree: the pin plus two commits, on a topic branch
+        self.git(self.tmp, "clone", "-q", str(self.sub), str(self.override))
+        self.git(self.override, "switch", "-q", "-c", "cerastes")
+        for n in (1, 2):
+            self.write(self.override / "src" / f"x{n}.c", f"{n}\n")
+            self.git(self.override, "add", "-A")
+            self.git(self.override, "commit", "-q", "-m", f"c{n}")
+
+    def write(self, path, text):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+
+    def git(self, cwd, *args):
+        cwd.mkdir(parents=True, exist_ok=True)
+        run = subprocess.run(["git", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
+                              *args], cwd=cwd, env=self.env, capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, (args, run.stderr))
+        return run.stdout.strip()
+
+    def tool(self, *args, override=None, extra_env=None):
+        env = dict(self.env)
+        env.update(extra_env or {})
+        if override is not None:
+            env["CERASTES_EDG_SRC"] = str(override)
+        run = subprocess.run([sys.executable, str(EDG_TREE), "--root", str(self.root), *args],
+                             env=env, capture_output=True, text=True, timeout=120)
+        return run.returncode, run.stdout, run.stderr
+
+    def topic(self):
+        self.git(self.root, "switch", "-q", "-c", "topic")
+
+    def check_fails(self, needle, override=None):
+        status, out, err = self.tool("check", override=override)
+        self.assertEqual(status, 1, (out, err))
+        self.assertIn("error: ", err)
+        self.assertIn(needle, err)
+        self.assertEqual(out, "")
+
+    # --- check: the pin ---
+
+    def test_a_clean_pin_passes_and_reports(self):
+        status, out, err = self.tool("check")
+        self.assertEqual((status, err), (0, ""), out)
+        self.assertEqual(out, f"EDG tree: upstream third_party/edg @ {self.pin[:8]} "
+                              "(gitlink, clean)\n")
+
+    def test_a_modified_tracked_file_fails(self):
+        self.write(self.sub / "src" / "il_def.h", "// changed\n")
+        self.check_fails("third_party/edg is not clean")
+
+    def test_an_untracked_file_fails(self):
+        self.write(self.sub / "src" / "new.c", "x\n")
+        self.check_fails("third_party/edg is not clean")
+
+    def test_an_ignored_file_is_not_dirt_that_git_reports(self):
+        # `--untracked-files=all` reports untracked files, not ignored ones
+        self.write(self.sub / ".gitignore", "*.o\n")
+        self.git(self.sub, "add", ".gitignore")
+        self.git(self.sub, "commit", "-q", "-m", "ignore")
+        head = self.git(self.sub, "rev-parse", "HEAD")
+        self.git(self.sub, "update-ref", "refs/remotes/origin/main", head)
+        self.git(self.root, "update-index", "--cacheinfo", f"160000,{head},third_party/edg")
+        self.write(self.sub / "a.o", "x\n")
+        status, out, err = self.tool("check")
+        self.assertEqual(status, 0, (out, err))
+
+    def test_another_commit_fails(self):
+        self.write(self.sub / "src" / "il_def.h", "// next\n")
+        self.git(self.sub, "commit", "-q", "-am", "next")
+        self.check_fails("third_party/edg is at")
+        # a staged pin move to a commit that only exists locally (a fork commit,
+        # or an origin/main that is stale) fails and says how to fix it ...
+        head = self.git(self.sub, "rev-parse", "HEAD")
+        self.git(self.root, "update-index", "--cacheinfo", f"160000,{head},third_party/edg")
+        self.check_fails("not contained in its origin/main")
+        self.check_fails("git -C third_party/edg fetch origin")
+        # ... and passes once that commit is upstream (an ancestor of origin/main)
+        self.git(self.sub, "update-ref", "refs/remotes/origin/main", head)
+        status, out, err = self.tool("check")
+        self.assertEqual((status, err), (0, ""), out)
+        self.assertIn(head[:8], out)
+
+    def test_a_fork_commit_as_the_gitlink_fails_even_when_checked_out(self):
+        self.write(self.sub / "src" / "il_def.h", "// fork\n")
+        self.git(self.sub, "commit", "-q", "-am", "fork-only")
+        fork = self.git(self.sub, "rev-parse", "HEAD")
+        self.git(self.root, "update-index", "--cacheinfo", f"160000,{fork},third_party/edg")
+        status, out, err = self.tool("check")  # HEAD == gitlink, clean, but not upstream
+        self.assertEqual(status, 1, (out, err))
+        self.assertIn(f"the gitlink {fork[:8]} of third_party/edg is not contained in its "
+                      "origin/main", err)
+        # an older upstream commit is fine: origin/main only has to contain it
+        self.git(self.sub, "update-ref", "refs/remotes/origin/main", fork)
+        self.assertEqual(self.tool("check")[0], 0)
+        self.git(self.root, "update-index", "--cacheinfo", f"160000,{self.pin},third_party/edg")
+        self.git(self.sub, "checkout", "-q", self.pin)
+        self.assertEqual(self.tool("check")[0], 0)
+
+    def test_a_missing_origin_main_fails(self):
+        self.git(self.sub, "update-ref", "-d", "refs/remotes/origin/main")
+        self.check_fails("fetch origin")
+
+    def test_a_wrong_url_in_gitmodules_fails(self):
+        self.write(self.root / ".gitmodules", (self.root / ".gitmodules").read_text().replace(
+            "edgcpp/compiler", "mborland/compiler"))
+        self.check_fails(".gitmodules URL of third_party/edg is")
+
+    def test_a_missing_gitmodules_entry_fails(self):
+        (self.root / ".gitmodules").write_text("")
+        self.check_fails(".gitmodules URL of third_party/edg is <missing>")
+
+    def test_a_wrong_origin_fails(self):
+        self.git(self.sub, "remote", "set-url", "origin", "https://github.com/mborland/compiler.git")
+        self.check_fails("remote.origin.url of third_party/edg is")
+
+    def test_no_origin_fails(self):
+        self.git(self.sub, "remote", "remove", "origin")
+        self.check_fails("remote.origin.url of third_party/edg is <missing>")
+
+    def test_all_violations_are_listed(self):
+        self.write(self.sub / "stray", "x\n")
+        self.git(self.sub, "remote", "set-url", "origin", "https://example.invalid/x.git")
+        status, out, err = self.tool("check")
+        self.assertEqual(status, 1)
+        self.assertEqual(sum(l.startswith("error: ") for l in err.splitlines()), 2, err)
+
+    def test_the_pin_is_checked_with_an_override_too(self):
+        self.topic()
+        self.write(self.sub / "stray", "x\n")
+        self.check_fails("third_party/edg is not clean", override=self.override)
+
+    # --- check: the override ---
+
+    def test_an_override_on_main_fails(self):
+        self.check_fails("CERASTES_EDG_SRC is set on branch main; check.sh on main runs "
+                         "against the upstream pin", override=self.override)
+
+    def test_an_override_on_a_topic_branch_is_reported(self):
+        self.topic()
+        status, out, err = self.tool("check", override=self.override)
+        self.assertEqual((status, err), (0, ""), out)
+        head = self.git(self.override, "rev-parse", "HEAD")[:8]
+        self.assertEqual(out, f"EDG tree: OVERRIDE {self.override} @ {head} (branch cerastes, "
+                              f"2 commits on top of pin {self.pin[:8]}, 0 modified, "
+                              "0 untracked)\n")
+
+    def test_the_report_counts_modified_and_untracked(self):
+        self.topic()
+        self.write(self.override / "src" / "x1.c", "edited\n")
+        self.write(self.override / "src" / "n1.c", "n\n")
+        self.write(self.override / "src" / "n2.c", "n\n")
+        status, out, err = self.tool("check", override=self.override)
+        self.assertEqual(status, 0, (out, err))
+        self.assertIn("1 modified, 2 untracked)", out)
+
+    def test_an_unrelated_override_warns(self):
+        self.topic()
+        other = self.tmp / "unrelated"
+        self.git(other, "init", "-q", "-b", "cerastes")
+        self.write(other / "src" / "il_def.h", "x\n")
+        self.git(other, "add", "-A")
+        self.git(other, "commit", "-q", "-m", "u")
+        status, out, err = self.tool("check", override=other)
+        self.assertEqual(status, 0, (out, err))
+        self.assertIn("warning: the pin", err)
+        self.assertIn("not an ancestor", err)
+
+    def test_an_override_that_is_the_submodule_fails(self):
+        self.topic()
+        self.check_fails("is, or is inside", override=self.sub)
+
+    def test_an_override_inside_the_submodule_fails(self):
+        self.topic()
+        inner = self.sub / "vendor" / "edg"
+        self.git(inner, "init", "-q", "-b", "cerastes")
+        self.write(inner / "src" / "il_def.h", "x\n")
+        self.check_fails("is, or is inside", override=inner)
+
+    def test_a_missing_override_fails(self):
+        self.topic()
+        self.check_fails("is not a directory", override=self.tmp / "nowhere")
+
+    def test_an_override_without_il_def_fails(self):
+        self.topic()
+        bare = self.tmp / "bare"
+        self.git(bare, "init", "-q")
+        self.check_fails("has no src/il_def.h", override=bare)
+
+    def test_an_override_that_is_not_a_repository_fails(self):
+        self.topic()
+        plain = self.tmp / "plain"
+        self.write(plain / "src" / "il_def.h", "x\n")
+        self.check_fails("is not the root of a git work tree", override=plain)
+
+    def test_a_subdirectory_of_a_repository_is_not_a_tree_root(self):
+        self.topic()
+        sub = self.override / "nested"
+        self.write(sub / "src" / "il_def.h", "x\n")
+        self.check_fails("is not the root of a git work tree", override=sub)
+
+    def test_an_override_with_a_detached_head_fails(self):
+        self.git(self.root, "switch", "-q", "--detach")
+        self.check_fails("CERASTES_EDG_SRC is set with a detached HEAD", override=self.override)
+        # the upstream pin has no such requirement
+        self.assertEqual(self.tool("check")[0], 0)
+
+    def test_a_relative_override_is_refused_everywhere(self):
+        self.topic()
+        relative = os.path.relpath(self.override, os.getcwd())
+        for command in (("resolve",), ("check",), ("describe",), ("describe", "--verify-build")):
+            with self.subTest(command):
+                status, out, err = self.tool(*command, override=relative)
+                self.assertEqual(status, 2, (out, err))
+                self.assertIn("is a relative path", err)
+                self.assertEqual(out, "")
+        # the same directory by absolute path is fine
+        self.assertEqual(self.tool("check", override=self.override)[0], 0)
+        status, out, err = self.tool("resolve", override="~/x")
+        self.assertEqual(status, 2, (out, err))
+
+    def test_git_redirecting_variables_are_ignored(self):
+        self.topic()
+        decoy = self.tmp / "decoy"
+        self.git(decoy, "init", "-q", "-b", "other")
+        self.write(decoy / "src" / "il_def.h", "decoy\n")
+        self.git(decoy, "add", "-A")
+        self.git(decoy, "commit", "-q", "-m", "decoy")
+        poison = {"GIT_DIR": str(decoy / ".git"), "GIT_WORK_TREE": str(decoy),
+                  "GIT_INDEX_FILE": str(decoy / ".git" / "index"),
+                  "GIT_OBJECT_DIRECTORY": str(decoy / ".git" / "objects"),
+                  "GIT_COMMON_DIR": str(decoy / ".git")}
+        stamp_file = self.root / "build" / "override" / "edg" / "edg-tree.stamp"
+        self.write(stamp_file, self.stamp())
+        for command, override in ((("check",), None), (("check",), self.override),
+                                  (("resolve",), self.override), (("stamp", str(self.override)),
+                                                                  None),
+                                  (("describe", "--verify-build"), self.override)):
+            with self.subTest(command=command, override=override):
+                clean = self.tool(*command, override=override)
+                poisoned = self.tool(*command, override=override, extra_env=poison)
+                self.assertEqual(poisoned, clean)
+                self.assertEqual(clean[0], 0, clean)
+
+    def test_an_empty_override_means_the_pin(self):
+        status, out, err = self.tool("check", override="")
+        self.assertEqual(status, 0, (out, err))
+        self.assertIn("EDG tree: upstream", out)
+
+    # --- resolve ---
+
+    def test_resolve(self):
+        status, out, err = self.tool("resolve")
+        self.assertEqual((status, out, err), (0, f"upstream {self.sub}\n", ""))
+        status, out, err = self.tool("resolve", override=self.override)
+        self.assertEqual((status, out, err), (0, f"override {self.override}\n", ""))
+        link = self.tmp / "link"
+        link.symlink_to(self.override)
+        status, out, _ = self.tool("resolve", override=link)
+        self.assertEqual((status, out), (0, f"override {self.override}\n"))
+
+    def test_resolve_refuses_a_bad_override(self):
+        bare = self.tmp / "bare"
+        self.git(bare, "init", "-q")
+        plain = self.tmp / "plain"
+        self.write(plain / "src" / "il_def.h", "x\n")
+        for what, path, needle in (("missing", self.tmp / "nowhere", "is not a directory"),
+                                   ("no il_def.h", bare, "has no src/il_def.h"),
+                                   ("not a repository", plain, "not the root of a git work tree"),
+                                   ("the submodule", self.sub, "is, or is inside")):
+            with self.subTest(what):
+                status, out, err = self.tool("resolve", override=path)
+                self.assertEqual(status, 2, (out, err))
+                self.assertEqual(out, "")
+                self.assertIn(needle, err)
+
+    # --- stamp ---
+
+    STAMP_RE = re.compile(r"^tree (?P<tree>/.+)\nhead (?P<head>[0-9a-f]{40})\n"
+                          r"branch (?P<branch>.+)\ndirty (?P<count>\d+) (?P<hash>[0-9a-f]{64})\n"
+                          r"config (?P<config>[0-9a-f]{64})\n$")
+
+    def stamp(self, tree=None):
+        status, out, err = self.tool("stamp", str(tree or self.override))
+        self.assertEqual((status, err), (0, ""), out)
+        return out
+
+    def test_the_stamp_format(self):
+        out = self.stamp()
+        m = self.STAMP_RE.match(out)
+        self.assertIsNotNone(m, out)
+        self.assertEqual(m.group("tree"), str(self.override))
+        self.assertEqual(m.group("head"), self.git(self.override, "rev-parse", "HEAD"))
+        self.assertEqual((m.group("branch"), m.group("count")), ("cerastes", "0"))
+        self.assertEqual(len(out.splitlines()), 5)
+        self.assertEqual(m.group("config"), self.config_digest())
+
+    def config_digest(self):
+        h = hashlib.sha256()
+        for name in ("cmake/EdgFrontEnd.cmake", "src/backend/edg_il.h"):
+            h.update((self.root / name).read_bytes())
+        return h.hexdigest()
+
+    def test_the_stamp_covers_the_cerastes_configuration(self):
+        before = self.stamp()
+        for name in ("cmake/EdgFrontEnd.cmake", "src/backend/edg_il.h"):
+            with self.subTest(name):
+                path = self.root / name
+                original = path.read_text()
+                path.write_text(original + "// changed\n")
+                changed = self.stamp()
+                self.assertNotEqual(changed, before)
+                self.assertEqual(changed.splitlines()[:4], before.splitlines()[:4])
+                self.assertEqual(changed.splitlines()[4], "config " + self.config_digest())
+                path.write_text(original)
+                self.assertEqual(self.stamp(), before)
+        # the same for the pin's stamp, and a file that disappears counts
+        path = self.root / "src" / "backend" / "edg_il.h"
+        path.unlink()
+        self.assertNotEqual(self.stamp(self.sub).splitlines()[4], before.splitlines()[4])
+
+    def test_a_binary_built_under_an_older_configuration_does_not_verify(self):
+        stamp_file = self.root / "build" / "edg" / "edg-tree.stamp"
+        self.write(stamp_file, self.stamp(self.sub))
+        self.assertEqual(self.tool("describe", "--verify-build")[0], 0)
+        config = self.root / "cmake" / "EdgFrontEnd.cmake"
+        config.write_text(config.read_text() + "# a macro changed\n")
+        status, out, err = self.tool("describe", "--verify-build")
+        self.assertEqual(status, 1, (out, err))
+        self.assertIn("built from a different EDG tree state", err)
+        # a stamp in the old four-line format never verifies either
+        stamp_file.write_text("".join(self.stamp(self.sub).splitlines(True)[:4]))
+        config.write_text("# cerastes configuration\n")
+        self.assertEqual(self.tool("describe", "--verify-build")[0], 1)
+
+    def test_equal_state_equal_stamp(self):
+        self.assertEqual(self.stamp(), self.stamp())
+        self.write(self.override / "src" / "n.c", "n\n")
+        self.assertEqual(self.stamp(), self.stamp())
+
+    def test_the_stamp_records_the_realpath(self):
+        link = self.tmp / "link"
+        link.symlink_to(self.override)
+        self.assertEqual(self.stamp(link), self.stamp())
+        self.assertTrue(self.stamp(link).startswith(f"tree {self.override}\n"))
+
+    def test_a_new_commit_changes_the_stamp(self):
+        before = self.stamp()
+        self.write(self.override / "src" / "x3.c", "3\n")
+        self.git(self.override, "add", "-A")
+        self.git(self.override, "commit", "-q", "-m", "c3")
+        after = self.stamp()
+        self.assertNotEqual(before, after)
+        self.assertNotEqual(before.splitlines()[1], after.splitlines()[1])
+        # same tree contents, other commit: the head line alone tells them apart
+        self.git(self.override, "commit", "-q", "--allow-empty", "-m", "empty")
+        self.assertNotEqual(after, self.stamp())
+
+    def test_a_tracked_edit_changes_the_stamp_and_the_count(self):
+        before = self.stamp()
+        self.write(self.override / "src" / "x1.c", "edited\n")
+        edited = self.stamp()
+        self.assertNotEqual(before, edited)
+        self.assertEqual(before.splitlines()[:3], edited.splitlines()[:3])
+        self.assertTrue(edited.splitlines()[3].startswith("dirty 1 "))
+        self.write(self.override / "src" / "x1.c", "edit_!\n")  # same length, other bytes
+        self.assertNotEqual(edited, self.stamp())
+
+    def test_an_untracked_file_changes_the_stamp(self):
+        before = self.stamp()
+        self.write(self.override / "src" / "new.c", "a\n")
+        added = self.stamp()
+        self.assertNotEqual(before, added)
+        self.assertTrue(added.splitlines()[3].startswith("dirty 1 "))
+        self.write(self.override / "src" / "new.c", "b\n")
+        self.assertNotEqual(added, self.stamp())
+        (self.override / "src" / "new.c").unlink()
+        self.assertEqual(before, self.stamp())
+
+    def test_an_ignored_file_does_not(self):
+        self.write(self.override / ".gitignore", "*.o\n")
+        self.git(self.override, "add", ".gitignore")
+        self.git(self.override, "commit", "-q", "-m", "ignore")
+        before = self.stamp()
+        self.write(self.override / "build.o", "x\n")
+        self.assertEqual(before, self.stamp())
+
+    def test_a_detached_head(self):
+        self.git(self.override, "checkout", "-q", "--detach")
+        self.assertIn("\nbranch (detached)\n", self.stamp())
+
+    # --- describe ---
+
+    def test_describe_reports_without_verifying(self):
+        status, out, err = self.tool("describe")
+        self.assertEqual((status, out, err),
+                         (0, f"EDG tree: upstream third_party/edg @ {self.pin[:8]} "
+                             "(gitlink, clean)\n", ""))
+        status, out, _ = self.tool("describe", override=self.override)
+        self.assertEqual(status, 0)
+        self.assertIn("EDG tree: OVERRIDE", out)
+
+    def test_describe_with_a_bad_override_fails(self):
+        status, out, err = self.tool("describe", override=self.tmp / "nowhere")
+        self.assertEqual(status, 2, (out, err))
+        self.assertIn("is not a directory", err)
+
+    def test_verify_build_needs_the_stamp(self):
+        status, out, err = self.tool("describe", "--verify-build")
+        self.assertEqual(status, 1, (out, err))
+        self.assertIn("edg-tree.stamp is missing", err)
+        self.assertIn("EDG tree: upstream", out)  # the report line is still printed
+
+    def test_verify_build_compares_the_stamp_with_the_tree_now(self):
+        stamp_file = self.root / "build" / "edg" / "edg-tree.stamp"
+        self.write(stamp_file, self.stamp(self.sub))
+        status, out, err = self.tool("describe", "--verify-build")
+        self.assertEqual((status, err), (0, ""), out)
+        self.write(self.sub / "src" / "il_def.h", "// changed\n")
+        status, out, err = self.tool("describe", "--verify-build")
+        self.assertEqual(status, 1, (out, err))
+        self.assertIn("built from a different EDG tree state", err)
+        self.write(self.sub / "src" / "il_def.h", "// il\n")
+        self.assertEqual(self.tool("describe", "--verify-build")[0], 0)
+        self.write(self.sub / "src" / "extra.c", "x\n")  # untracked
+        self.assertEqual(self.tool("describe", "--verify-build")[0], 1)
+
+    def test_the_override_has_its_own_stamp(self):
+        upstream = self.root / "build" / "edg" / "edg-tree.stamp"
+        self.write(upstream, self.stamp(self.sub))
+        status, out, err = self.tool("describe", "--verify-build", override=self.override)
+        self.assertEqual(status, 1, (out, err))
+        self.assertIn("build/override/edg/edg-tree.stamp is missing", err)
+        self.write(self.root / "build" / "override" / "edg" / "edg-tree.stamp", self.stamp())
+        status, out, err = self.tool("describe", "--verify-build", override=self.override)
+        self.assertEqual((status, err), (0, ""), out)
+        self.write(self.override / "src" / "x1.c", "edited\n")
+        self.assertEqual(self.tool("describe", "--verify-build", override=self.override)[0], 1)
+        # and the upstream stamp does not vouch for the override
+        self.write(self.override / "src" / "x1.c", "1\n")
+        upstream.write_text(self.stamp())
+        (self.root / "build" / "override" / "edg" / "edg-tree.stamp").unlink()
+        self.assertEqual(self.tool("describe", "--verify-build", override=self.override)[0], 1)
+
+    def test_a_stamp_of_another_tree_does_not_verify(self):
+        stamp_file = self.root / "build" / "edg" / "edg-tree.stamp"
+        self.write(stamp_file, self.stamp(self.override))  # a different tree
+        self.assertEqual(self.tool("describe", "--verify-build")[0], 1)
+
+
+# ---------------------------------------------------------------------------
+# The real front end and the real compilers
+# ---------------------------------------------------------------------------
+
+def _real_tables_available():
+    gen = rt.load_env().get("CERASTES_EDG_GEN")
+    return bool(gen) and (Path(gen) / "err_data.h").is_file() and (
+        Path(gen) / "err_codes.h").is_file()
+
+
+@e2e_gate(_real_tables_available(),
+          "CERASTES_EDG_GEN (EDG's generated err_data.h/err_codes.h) missing; "
+          "run scripts/bootstrap.sh")
+class RealTagTableTests(unittest.TestCase):
+    """The parser against the generated headers of the active build.  The
+    numbers are the ones EDG prints with --display_error_number."""
+
+    def test_the_real_tables(self):
+        reg = rt.load_registry(rt.load_env())
+        self.assertGreater(len(reg.numbers), 3000)
+        for tag, number in (("undefined_identifier", 20), ("exp_primary_expr", 29),
+                            ("not_a_member", 135), ("unrecognized_pragma", 161),
+                            ("declared_but_not_referenced", 177),
+                            ("no_matching_function", 304), ("cannot_open_file", 1696),
+                            ("attribute_namespace_unrecognized", 2803),
+                            ("unrecognized_attribute", 1097), ("warning_directive", 1105)):
+            with self.subTest(tag):
+                self.assertEqual(reg.numbers[tag], number)
+                self.assertEqual(reg.tags[number], tag)
+        # the encoding that the parser relies on: a tag is its code name without `ec_`
+        data = (Path(rt.load_env()["CERASTES_EDG_GEN"]) / "err_data.h").read_text()
+        self.assertIn('{ "undefined_identifier", ec_undefined_identifier }', data)
+        self.assertIn("#define NUMBER_OF_ERROR_TAGS " + str(len(reg.numbers)), data)
+
+    def test_every_number_a_real_run_prints_has_a_tag(self):
+        reg = rt.load_registry(rt.load_env())
+        for text in (REAL_THREE_ERRORS, REAL_NOTES, REAL_WARNINGS_ONLY, REAL_CATASTROPHIC,
+                     REAL_COMMAND_LINE):
+            for d in rt.parse_fe_diagnostics(text).diags:
+                self.assertFalse(d.tag(reg).startswith("#"), d)
+
+
+@e2e_gate(_real_front_end_available() and _real_tables_available(),
+          "CERASTES_FE, scripts/cerastes-fe.sh or the generated headers missing; "
+          "run scripts/bootstrap.sh")
+class RealDiagnosticTests(unittest.TestCase):
+    """frontend-error/-warning tests through the real front end: an undeclared
+    identifier passes with its real tag at the right line and fails at the
+    wrong one; an unregistered attribute namespace is a warning with a tag."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name).resolve()
+
+    def run_test(self, name, text, *args):
+        path = self.dir / name
+        path.write_text(text)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            status = rt.main([*args, str(path)])
+        return status, out.getvalue()
+
+    UNDECLARED = ("// expect: frontend-error undefined_identifier @ L{line}\n"
+                  "int f() {{\n  return zzz + 1;\n}}\n")
+
+    def test_an_undeclared_identifier_at_the_right_line(self):
+        status, out = self.run_test("a.cpp", self.UNDECLARED.format(line=3))
+        self.assertEqual(status, 0, out)
+        self.assertIn("PASS  ", out)
+
+    def test_and_at_the_wrong_line(self):
+        for line in (2, 4):
+            with self.subTest(line):
+                status, out = self.run_test(f"w{line}.cpp", self.UNDECLARED.format(line=line))
+                self.assertEqual(status, 1, out)
+                self.assertIn(f"wrong line: expected error undefined_identifier @ L{line}, "
+                              "got undefined_identifier @ L3:10", out)
+
+    def test_the_wrong_tag(self):
+        status, out = self.run_test("t.cpp", self.UNDECLARED.format(line=3).replace(
+            "undefined_identifier", "not_a_member"))
+        self.assertEqual(status, 1, out)
+        self.assertIn("wrong diagnostic at this line", out)
+
+    def test_no_error_where_one_is_expected(self):
+        status, out = self.run_test("n.cpp", "// expect: frontend-error undefined_identifier "
+                                             "@ L2\nint f() { return 1; }\n")
+        self.assertEqual(status, 1, out)
+        self.assertIn("missing error", out)
+        self.assertIn("expected 2", out)
+
+    def test_an_unregistered_attribute_namespace_is_a_warning(self):
+        status, out = self.run_test(
+            "u.cpp", "// expect: frontend-warning attribute_namespace_unrecognized @ L2\n"
+                     "[[unreg_ns::x]] int g();\n")
+        self.assertEqual(status, 0, out)
+        # warnings are not errors: declaring it an error fails
+        status, out = self.run_test(
+            "u2.cpp", "// expect: frontend-error attribute_namespace_unrecognized @ L2\n"
+                      "[[unreg_ns::x]] int g();\n")
+        self.assertEqual(status, 1, out)
+        # and a missing expectation for the warning fails
+        status, out = self.run_test("u3.cpp", "// expect: frontend-warning unrecognized_pragma "
+                                              "@ L2\n[[unreg_ns::x]] int g();\n")
+        self.assertEqual(status, 1, out)
+
+    def test_error_and_warning_together_and_two_modes(self):
+        text = ("// expect: frontend-error undefined_identifier @ L5\n"
+                "// expect: frontend-warning attribute_namespace_unrecognized @ L7\n"
+                "// mode: c++20, c23\n"
+                "int f(void) {\n  return zzz + 1;\n}\n"
+                "[[unreg_ns::x]] int g(void);\n")
+        status, out = self.run_test("m.c", text)
+        self.assertEqual(status, 0, out)
+        self.assertIn("PASS  ", out)
+        self.assertIn("[c23]", out)
+        self.assertIn("[c++20]", out)
+        self.assertIn("2 passed, 0 failed", out)
+
+    def test_a_native_error_is_not_a_pass(self):
+        # an error in a header and a missing include are never accepted
+        status, out = self.run_test("c.cpp", '// expect: frontend-error undefined_identifier '
+                                             '@ L2\n#include "no_such_header.h"\n')
+        self.assertEqual(status, 1, out)
+        self.assertIn("catastrophic error always fails", out)
+
+    def test_a_cerastes_tag_is_refused_until_diagnostics_exist(self):
+        with mock.patch.object(rt, "CERASTES_DIAGNOSTICS_DEF", Path("src/nowhere.def")):
+            status, out = self.run_test("k.cpp", "// expect: frontend-error "
+                                                 "cerastes-contract_not_boolean @ L2\nint x;\n")
+        self.assertEqual(status, 1, out)
+        self.assertIn("no cerastes diagnostics are defined yet", out)
+
+    def test_an_unknown_edg_tag_is_refused(self):
+        status, out = self.run_test("z.cpp", "// expect: frontend-error undefined_identifer "
+                                             "@ L2\nint x;\n")
+        self.assertEqual(status, 1, out)
+        self.assertIn("unknown EDG diagnostic tag", out)
+        status, out = self.run_test("z2.cpp", "// expect: frontend-error undefined_identifer "
+                                              "@ L2\nint x;\n", "--check-headers")
+        self.assertEqual(status, 1, out)
+
+
+def _native_compilers_available():
+    env = rt.load_env()
+    return all(env.get(n) and Path(env[n]).is_file()
+               for n in ("CERASTES_CLANG_CC", "CERASTES_CLANG_CXX")) \
+        and bool(env.get("CERASTES_INCLUDE_DIR")) and "CERASTES_GCC_CC" in env
+
+
+@e2e_gate(_native_compilers_available() and _real_front_end_available(),
+          "CERASTES_CLANG_*, CERASTES_GCC_* or CERASTES_FE missing; run scripts/bootstrap.sh")
+class RealNativeTests(unittest.TestCase):
+    """The ordinary-compiler checks with the compilers of build/env.sh."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name).resolve()
+        self.env = rt.load_env()
+
+    def families(self):
+        out = ["Apple clang"]
+        if self.env.get("CERASTES_GCC_CC"):
+            out.append("GCC")
+        return out
+
+    def run_test(self, name, body, header="// expect: golden\n// expect: native-ok\n"):
+        path = self.dir / name
+        path.write_text(header + body)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            status = rt.main(["--update-golden", str(path)])
+            self.assertEqual(status, 0, out.getvalue())
+            out.truncate(0)
+            out.seek(0)
+            status = rt.main([str(path)])
+        return status, out.getvalue()
+
+    def test_the_real_canaries_pass(self):
+        setup = rt.NativeSetup(self.env["CERASTES_INCLUDE_DIR"], [])
+        for comp, lang, mode in (
+                (rt.NativeCompiler("Apple clang", self.env["CERASTES_CLANG_CC"],
+                                   self.env["CERASTES_CLANG_CXX"]), "c++", "c++20"),
+                (rt.NativeCompiler("Apple clang", self.env["CERASTES_CLANG_CC"],
+                                   self.env["CERASTES_CLANG_CXX"]), "c", "c23")):
+            self.assertEqual(rt.native_canary(comp, lang, mode, self.env, setup.include_dir), [])
+        if self.env.get("CERASTES_GCC_CC"):
+            gcc = rt.NativeCompiler("GCC", self.env["CERASTES_GCC_CC"], self.env["CERASTES_GCC_CXX"])
+            for lang, mode in (("c++", "c++20"), ("c", "c23")):
+                self.assertEqual(rt.native_canary(gcc, lang, mode, self.env,
+                                                  setup.include_dir), [])
+
+    def test_an_ordinary_file_passes_with_every_installed_compiler(self):
+        status, out = self.run_test("ok.cpp", "#include <cstdio>\n"
+                                              "int add1(int x) { return x + 1; }\n")
+        self.assertEqual(status, 0, out)
+        for family in self.families():
+            self.assertIn(f"native-ok: {family}", out)
+            self.assertIn(f"canary native-ok [{family}, c++]", out)
+        self.assertTrue(out.rstrip().endswith(", ".join(f"{f} 1" for f in self.families())),
+                        out)
+
+    def test_an_inherited_empty_gcc_does_not_drop_gcc(self):
+        # build/env.sh is authoritative: the blind spot the CP1 audit reproduced
+        if not self.env.get("CERASTES_GCC_CC"):
+            self.skipTest("this build/env.sh names no GCC")
+        with mock.patch.dict(os.environ, {"CERASTES_GCC_CC": "", "CERASTES_GCC_CXX": ""}):
+            status, out = self.run_test("g.cpp", "int add1(int x) { return x + 1; }\n")
+        self.assertEqual(status, 0, out)
+        self.assertIn("native-ok: GCC", out)
+        self.assertNotIn("GCC not installed", out)
+
+    def test_a_c_file_in_c23(self):
+        status, out = self.run_test("ok.c", "#include <stdio.h>\nint add1(int x) { return x + 1; }\n")
+        self.assertEqual(status, 0, out)
+        self.assertIn("native-ok: Apple clang", out)
+
+    def test_a_warning_fails_every_compiler(self):
+        status, out = self.run_test("w.cpp", "int f() { int unused = 0; return 1; }\n")
+        self.assertEqual(status, 1, out)
+        for family in self.families():
+            self.assertIn(f"FAIL  {self.dir / 'w.cpp'} [c++20] native-ok: {family}", out)
+        self.assertIn("-Wunused", out)
+
+    def test_an_unregistered_attribute_namespace_is_rejected_by_both(self):
+        # why the il probes use unreg_ns and are not native-ok: ordinary
+        # compilers warn about unknown namespaced attributes, and -Werror
+        status, out = self.run_test("a.cpp", "[[unreg_ns::x]] int g();\n")
+        self.assertEqual(status, 1, out)
+        for family in self.families():
+            self.assertIn(f"FAIL  {self.dir / 'a.cpp'} [c++20] native-ok: {family}", out)
+
+    def test_the_cerastes_macro_stays_undefined(self):
+        # __CERASTES__ stays undefined (the annotation macros of <cerastes.h>
+        # must expand to nothing for ordinary compilers)
+        status, out = self.run_test(
+            "d.cpp", "#ifdef __CERASTES__\n#error __CERASTES__ is defined\n#endif\n"
+                     "int f() { return 0; }\n")
+        self.assertEqual(status, 0, out)
+
+
+class EnvironmentAuthorityTests(DiagRunCase):
+    """build/env.sh is authoritative for the variables it defines: an inherited
+    value that differs is ignored (with one note), so the shell cannot silently
+    drop GCC, swap the tag tables or the include directory."""
+
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.object(rt, "_ignored_inherited", set())
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def load(self, inherited):
+        err = io.StringIO()
+        with mock.patch.dict(os.environ, inherited), contextlib.redirect_stderr(err):
+            env = rt.load_env()
+        return env, err.getvalue()
+
+    def test_the_file_wins_and_says_so_once(self):
+        self.set_env(CERASTES_GCC_CC="/real/gcc", CERASTES_INCLUDE_DIR="/real/include")
+        env, err = self.load({"CERASTES_GCC_CC": "", "CERASTES_INCLUDE_DIR": "/foreign"})
+        self.assertEqual((env["CERASTES_GCC_CC"], env["CERASTES_INCLUDE_DIR"]),
+                         ("/real/gcc", "/real/include"))
+        self.assertIn("ignoring the inherited CERASTES_GCC_CC=''", err)
+        self.assertIn("ignoring the inherited CERASTES_INCLUDE_DIR='/foreign'", err)
+        self.assertIn("authoritative", err)
+        _, again = self.load({"CERASTES_GCC_CC": ""})
+        self.assertEqual(again, "")  # one note per variable and process
+
+    def test_an_equal_inherited_value_is_silent(self):
+        self.set_env(CERASTES_GCC_CC="/real/gcc")
+        env, err = self.load({"CERASTES_GCC_CC": "/real/gcc"})
+        self.assertEqual((env["CERASTES_GCC_CC"], err), ("/real/gcc", ""))
+
+    def test_variables_the_file_does_not_define_are_inherited(self):
+        env, err = self.load({"SDKROOT": "/my/sdk", "FAKE_LOG": "/log"})
+        self.assertEqual((env["SDKROOT"], env["FAKE_LOG"], err), ("/my/sdk", "/log", ""))
+
+    def test_without_a_file_the_environment_is_all_there_is(self):
+        with mock.patch.object(rt, "ENV_SH", self.dir.parent / "no-such-env.sh"):
+            env, err = self.load({"CERASTES_GCC_CC": "/inherited"})
+        self.assertEqual((env["CERASTES_GCC_CC"], err), ("/inherited", ""))
+
+    def test_an_inherited_tag_table_does_not_replace_the_files(self):
+        other = write_gen(self.dir.parent / "other-gen", {"exp_semicolon": 65})
+        name = rt.rel(self.dir / "a.cpp")
+        t = self.diag_test("a.cpp", ["frontend-error undefined_identifier @ L2"],
+                           err_lines(REAL_THREE_ERRORS, name).splitlines()[0] + "\n"
+                           f'1 error detected in the compilation of "{name}".', "// exit: 2")
+        with mock.patch.dict(os.environ, {"CERASTES_EDG_GEN": str(other)}):
+            for first, args in ((True, ("--check-headers",)), (False, ())):
+                status, out, err = self.run_harness(*args, t)
+                self.assertEqual(status, 0, out)  # validated against env.sh's table
+                if first:
+                    self.assertIn("ignoring the inherited CERASTES_EDG_GEN", err)
+            rt._ignored_inherited.clear()
+            self.set_env(CERASTES_EDG_GEN=str(other))  # the file now names the other table
+            status, out, _ = self.run_harness("--check-headers", t)
+            self.assertEqual(status, 1, out)
+            self.assertIn("unknown EDG diagnostic tag `undefined_identifier`", out)
+
+
+class NativeEnvironmentAuthorityTests(NativeCase):
+    def test_an_empty_inherited_gcc_does_not_drop_gcc(self):
+        t = self.native_test("a.cpp", "int f();")
+        with mock.patch.dict(os.environ, {"CERASTES_GCC_CC": "", "CERASTES_GCC_CXX": ""}):
+            status, out, err = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+        self.assertNotIn("GCC not installed", out)
+        self.assertIn(f"PASS  {rt.rel(t)} [c++20] native-ok: GCC", out)
+        self.assertTrue(self.summary(out).endswith("Apple clang 1, GCC 1"), self.summary(out))
+        self.assertIn("ignoring the inherited CERASTES_GCC_CC", err)
+
+    def test_a_foreign_include_directory_is_ignored(self):
+        t = self.native_test("a.cpp", "int f();")
+        with mock.patch.dict(os.environ, {"CERASTES_INCLUDE_DIR": "/foreign/include"}):
+            self.run_harness(t)
+        calls = self.compiles_of(t)
+        self.assertTrue(calls and all("-I /fake/include " in c for c in calls), calls)
+        self.assertFalse(any("/foreign" in c for c in self.calls()))
+
+    def test_a_foreign_compiler_is_ignored(self):
+        t = self.native_test("a.cpp", "int f();")
+        with mock.patch.dict(os.environ, {"CERASTES_CLANG_CXX": "/bin/false"}):
+            status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+        self.assertTrue(self.compiles_of(t)[0].startswith("fake_clang_cxx "))
+
+
+class DocumentationTests(unittest.TestCase):
+    """tests/README.md describes every kind and rule of this harness."""
+
+    def test_the_readme_documents_the_extensions(self):
+        text = (REAL_ROOT / "tests" / "README.md").read_text()
+        for needle in ("twin-exempt", "tests/annotations/warnings", "authoritative",
+                       "relative path", "origin/main", "unreg_ns::x", "config <sha256",
+                       "frontend-error", "frontend-warning", "native-ok", "// twin:",
+                       "tests/annotations/negative", "CERASTES_EDG_SRC", "CERASTES_EDG_GEN",
+                       "diagnostics.def", "--brief_diagnostics", "--display_error_number",
+                       "-U__CERASTES__", "-Werror", "canary", "NATIVE_POLICY_DIRS",
+                       "err_data.h", "cerastes-<tag>", "scripts/edg_tree.py",
+                       "GCC not installed; Apple clang only"):
+            with self.subTest(needle):
+                self.assertIn(needle, text)
+        for directory in rt.NATIVE_POLICY_DIRS:
+            self.assertIn(str(directory), text)
+
+
 if __name__ == "__main__":
     unittest.main()

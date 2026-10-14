@@ -28,6 +28,19 @@ doc/modules/ROOT/nav.adoc, pages/**/*.adoc and partials/**/*.adoc and reports
      `m|` cell styles and `cols` with l or m, `++++` passthrough blocks,
      `pass:[...]` with `<` (raw HTML), a `:source-language:` entry, and a
      `source-language` attribute in doc/antora.yml or a playbook in doc/.
+  g. Walker listings (golden files).  The listing the IL walker prints for an
+     example is the example's `.golden` file, so it is tested.  An
+     `include::example$<test>.golden[]` is allowed only as the whole body of a
+     `[source,text]` block (`----` delimiters), with an empty attribute list, for
+     the golden of a `golden` test under examples/ that the same page includes
+     (a listing only appears next to the code that produced it), and the
+     golden must be safe to embed (no line ending in a callout marker `<1>`,
+     which Asciidoctor turns into a callout; a build showed that includes,
+     conditionals and tag directives inside an included file are left alone).  Any other include of a golden file is an error.  And a
+     sh/console/text block with a line that looks like walker output
+     (`end walk:`, `routine ... @ L<n>:<c>`, `attr [[`, `stmt ... @ L<n>`) that
+     is not such an include is an error: a listing nobody tested could not be
+     told from a tested one.
   b. an `include::example$...[...]` without `tag=` or `tags=`, with `lines=`
      (which takes precedence over the tags and would show the header), with an
      empty tag, or with a tag that is not a plain name (`*`, `**` and `!x`
@@ -70,7 +83,10 @@ classifies every `<pre>` (and every `<code>` with a language class or
     doc/modules/ROOT/examples/ (tag lines dropped), and there must be at least
     as many such blocks as the page sources declare (so a UI class-name change
     cannot make the check vacuous);
-  - sh, console and text are fine;
+  - sh, console and text are fine, except that a block with walker output
+    (see rule g) must equal, after the same normalisation, a golden file under
+    doc/modules/ROOT/examples/, and there must be at least as many of those as
+    the page sources have golden includes;
   - anything else is an error: a `<pre>` without `<code>` (literal, verse, raw
     HTML), a `<code>` without a language, another language.
 No page chrome is exempt (the default UI's own pages have no `<pre>`; a future
@@ -141,6 +157,12 @@ BARE_CPP_MESSAGE = "write C++ as pass:[C++] (a bare C++ opens an AsciiDoc passth
 TAG_DIRECTIVE_RE = re.compile(r"\b(?:tag|(e)nd)::(\S+?)\[\](?=$|[ \r])")
 TAG_NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
 # `[ROOT:]family$path`; only these families are accepted in an include.
+# What the IL walker prints (tests/il, internal/il-inventory.md): the last line,
+# routine and statement headers, and the attribute lines of registered attributes.
+WALKER_OUTPUT_RE = re.compile(
+    r"^\s*(?:end walk: |routine \S+ .*@ L\d+:\d+|attr \[\[|stmt \S+ .*@ L\d+)")
+GOLDEN_SUFFIX = rt.GOLDEN_SUFFIX
+CALLOUT_RE = re.compile(r"<\d+>\s*$")
 TARGET_RE = re.compile(r"^(?P<prefix>(?:ROOT:)?)(?P<family>[a-z]+)\$(?P<path>.+)$")
 
 
@@ -160,6 +182,7 @@ class Include:
     target: str
     attrs: str
     in_comment: bool
+    golden_block: bool = False  # the whole body of a [source,text] block (rule g)
 
 
 @dataclasses.dataclass
@@ -167,6 +190,7 @@ class PageScan:
     problems: list[tuple[int, str]] = dataclasses.field(default_factory=list)
     includes: list[Include] = dataclasses.field(default_factory=list)
     blocks: int = 0  # source blocks in a cerastes language, checked
+    golden_blocks: int = 0  # [source,text] blocks that include a golden file
 
 
 # ---------------------------------------------------------------------------
@@ -624,6 +648,32 @@ class PageScanner:
                     or PASS_RE.match(line) or OTHER_DELIM_RE.match(line)
                     or FENCE_RE.match(line))
 
+    def check_output_body(self, language: str, body: list[tuple[int, str]],
+                          skip_comments: bool) -> None:
+        """Rule g on a sh/console/text block: a golden include is the whole body
+        of a [source,text] block, and walker output is nothing else."""
+        lines = [(n, l) for n, l in body
+                 if l.strip() and not (skip_comments and COMMENT_LINE_RE.match(l))]
+        golden = [(n, m) for n, l in lines if (m := INCLUDE_RE.match(l))
+                  and m.group(1).endswith(GOLDEN_SUFFIX)]
+        if len(lines) == 1 and len(golden) == 1 and language == "text":
+            n, m = golden[0]
+            for inc in self.scan.includes:
+                if inc.line == n:
+                    inc.golden_block = True
+            self.scan.golden_blocks += 1
+            return
+        for n, m in golden:
+            self.problem(n, "a golden file may be included only as the whole body of a "
+                         f"[source,text] block (this is a {language} block"
+                         + (" with other lines)" if len(lines) > 1 else ")"))
+        for n, l in lines:
+            if not INCLUDE_RE.match(l) and WALKER_OUTPUT_RE.match(l):
+                self.problem(n, "walker output must be included from the golden file of a "
+                             "tested example (include::example$<test>.golden[] as the whole "
+                             "body of a [source,text] block), not written by hand")
+                break
+
     def check_body(self, language: str | None, body: list[tuple[int, str]],
                    skip_comments: bool, language_line: int = 0) -> None:
         """Rule a: the body of a cerastes-language block is exactly one
@@ -634,6 +684,8 @@ class PageScanner:
                          "use one of " + ", ".join(sorted(OUTPUT_LANGUAGES)) + ", or include a "
                          "tested example in a cerastes language (OUTPUT_LANGUAGES in "
                          "scripts/check_doc_examples.py)")
+        if language in OUTPUT_LANGUAGES:
+            self.check_output_body(language, body, skip_comments)
         if not is_cerastes_language(language):
             return
         self.scan.blocks += 1
@@ -743,6 +795,7 @@ class Report:
     blocks: int = 0
     includes: int = 0
     examples: int = 0
+    golden_blocks: int = 0
 
 
 def resolve(base: Path, path: str) -> Path | None:
@@ -755,8 +808,70 @@ def resolve(base: Path, path: str) -> Path | None:
     return full
 
 
+def golden_test_of(golden: Path) -> tuple[Path | None, str]:
+    """The golden test whose golden file `golden` is, and why not if it is none."""
+    name = golden.name[:-len(GOLDEN_SUFFIX)]
+    candidates = [golden.with_name(name)]
+    stem, dot, mode = name.rpartition(".")
+    if dot and mode in rt.MODE_OPTIONS:
+        candidates.append(golden.with_name(stem))
+    for test in candidates:
+        if test.suffix not in rt.TEST_SUFFIXES or not test.is_file():
+            continue
+        exp = rt.read_header(test)
+        if isinstance(exp, rt.HeaderError):
+            return None, f"its test `{test.name}` has a bad header: {exp}"
+        if exp.kind != "golden":
+            return None, f"its test `{test.name}` is not a `golden` test"
+        if any(rt.golden_path(test, m, exp.modes).resolve() == golden.resolve()
+               for m in exp.modes):
+            return test, ""
+    return None, "no `golden` test of this directory has it as its golden file"
+
+
+def resolve_example(target: str, component: Path) -> Path | None:
+    m = TARGET_RE.match(target)
+    if not m or m.group("family") != "example" or "{" in target:
+        return None
+    return resolve(component / "examples", m.group("path"))
+
+
+def check_golden_include(inc: Include, full: Path, page: str, root: Path, report: Report,
+                         page_includes: list[Include]) -> None:
+    """Rule g for one include of a `.golden` file."""
+    def problem(message: str) -> None:
+        report.problems.append(Problem(page, inc.line, message))
+
+    if not inc.golden_block:
+        problem("a golden file may be included only as the whole body of a [source,text] "
+                "block (`----`, one include, nothing else)")
+        return
+    if inc.attrs.strip():
+        problem("a golden include takes no attributes (`[]`): the whole file is shown, with "
+                "no tags, lines, indent or optional")
+    test, why = golden_test_of(full)
+    if test is None:
+        problem(f"`{inc.target}` is not the golden file of a golden test: {why}")
+        return
+    component = root / COMPONENT
+    same_page = any(not other.in_comment and other is not inc
+                    and resolve_example(other.target, component) == test.resolve()
+                    for other in page_includes)
+    if not same_page:
+        problem(f"the test `{test.name}` of `{inc.target}` is not included on this page: a "
+                "listing may appear only next to the code that produced it (include a tagged "
+                "region of the test on the same page)")
+    text = rt.read_exact(full)
+    if not text.strip():
+        problem(f"`{inc.target}` is empty")
+    for lineno, line in enumerate(text.split("\n"), start=1):
+        if CALLOUT_RE.search(line):
+            problem(f"`{inc.target}` line {lineno} ends in a callout marker (`<N>`): "
+                    "Asciidoctor would turn it into a callout")
+
+
 def check_include(inc: Include, page: str, root: Path, report: Report,
-                  used: set[Path]) -> None:
+                  used: set[Path], page_includes: list[Include] | None = None) -> None:
     def problem(message: str) -> None:
         report.problems.append(Problem(page, inc.line, message))
 
@@ -784,6 +899,10 @@ def check_include(inc: Include, page: str, root: Path, report: Report,
     if family == "partial":
         return
     report.includes += 1
+    if full.name.endswith(GOLDEN_SUFFIX):
+        if not inc.in_comment:
+            check_golden_include(inc, full, page, root, report, page_includes or [])
+        return
     if not inc.in_comment:
         used.add(full)
 
@@ -1034,10 +1153,11 @@ def check_tree(root: Path) -> Report:
         report.pages += 1
         scan = scan_page(rt.read_exact(page))
         report.blocks += scan.blocks
+        report.golden_blocks += scan.golden_blocks
         for line, message in scan.problems:
             report.problems.append(Problem(rel, line, message))
         for inc in scan.includes:
-            check_include(inc, rel, root, report, used)
+            check_include(inc, rel, root, report, used, scan.includes)
 
     check_component_files(root, report)
     if (root / COMPONENT.parent).is_dir():
@@ -1228,9 +1348,15 @@ class HtmlReport:
     problems: list[Problem] = dataclasses.field(default_factory=list)
     files: int = 0
     blocks: int = 0  # code blocks in a cerastes language
+    golden_blocks: int = 0  # text blocks that equal a golden file
 
 
-def classify_block(block: Block, expected: set[str]) -> str | None:
+def has_walker_output(text: str) -> bool:
+    return any(WALKER_OUTPUT_RE.match(line) for line in text.split("\n"))
+
+
+def classify_block(block: Block, expected: set[str],
+                   goldens: frozenset[str] | set[str] = frozenset()) -> str | None:
     """The problem with one code block of the site, or None."""
     langs = [l.lower() for l in block.languages]
     if not block.has_code:
@@ -1247,6 +1373,11 @@ def classify_block(block: Block, expected: set[str]) -> str | None:
                     "page must be included from a tested example)")
         return None
     if all(l in OUTPUT_LANGUAGES for l in langs):
+        if has_walker_output(block.text) and normalize_code(block.text) not in goldens:
+            first = next((l.strip() for l in block.text.split("\n") if l.strip()), "")
+            return (f"{block.languages[0]} block with walker output `{first[:60]}` does not "
+                    "equal any golden file under doc/modules/ROOT/examples/ (a listing on a "
+                    "page must be included from a golden file)")
         return None
     return (f"code block in language `{block.languages[0]}`, which is not one of "
             + ", ".join(sorted(OUTPUT_LANGUAGES)) + " or a cerastes language")
@@ -1266,11 +1397,14 @@ def check_html(root: Path, html_dir: Path) -> HtmlReport:
       error.
     """
     expected: set[str] = set()
+    goldens: set[str] = set()
     examples = root / COMPONENT / "examples"
     if examples.is_dir():
         for f in sorted(examples.rglob("*")):
             if f.is_file() and f.suffix in rt.TEST_SUFFIXES:
                 expected |= region_texts(rt.read_exact(f))
+            elif f.is_file() and f.name.endswith(GOLDEN_SUFFIX) and golden_test_of(f)[0]:
+                goldens.add(normalize_code(rt.read_exact(f)))
     report = HtmlReport()
     try:
         source = check_tree(root)
@@ -1288,8 +1422,17 @@ def check_html(root: Path, html_dir: Path) -> HtmlReport:
         for block in scanner.blocks:
             if any(l.lower() in CERASTES_LANGUAGES for l in block.languages):
                 report.blocks += 1
-            if message := classify_block(block, expected):
+            if (all(l.lower() in OUTPUT_LANGUAGES for l in block.languages) and block.has_code
+                    and has_walker_output(block.text)
+                    and normalize_code(block.text) in goldens):
+                report.golden_blocks += 1
+            if message := classify_block(block, expected, goldens):
                 report.problems.append(Problem(rel, block.line, message))
+    if report.golden_blocks < source.golden_blocks:
+        report.problems.append(Problem(
+            str(html_dir), 0, f"found {report.golden_blocks} walker listings equal to a golden "
+            f"file but the pages' sources include {source.golden_blocks}: the check cannot "
+            "see them (the UI changed its class names?) or a page shows another text"))
     need = max(source.blocks, 1 if source.includes else 0)
     if report.blocks < need:
         report.problems.append(Problem(

@@ -25,28 +25,32 @@ fail, so a missing build cannot silently switch them off.
 | `differential/verifast/` | Nothing yet: unmodified reference copies of VeriFast's template tests, with no `expect:` headers. Skipped (`.harness-skip`) | none |
 | `../doc/modules/ROOT/examples/` | The code examples of the user documentation, which are ordinary tests (not under `tests/`, but run by default with it) | by the example's `expect:` kind |
 
-Later milestones add `annotations/`, `scalar/`, `templates/`, `concepts/`
-and `memory/`, and the differential tests against VeriFast in M4 (see
-plan.md).
+Later milestones add `annotations/` (with `annotations/negative/`: the
+must-fail twins, see [Twins](#twins)), `scalar/`, `templates/`, `concepts/` and
+`memory/`, and the differential tests against VeriFast in M4 (see plan.md).
 
 ## Header format
 
 Every test file starts with a block of `//` comment lines. The `expect:` and
 `mode:` lines in that block are the test's expectations; other comment lines
-describe the test. An `expect:` or `mode:` line after the first line of code
-is an error, so an expectation can never be silently ignored.
+describe the test. An `expect:`, `mode:` or `twin:` line after the first
+line of code is an error, so an expectation can never be silently ignored.
 
 ```
 // expect: verified
 // expect: error <category>[:<reason>] @ L<line>
 // expect: rejected <tag>
 // expect: frontend-ok
+// expect: frontend-error <diag> @ L<line>
+// expect: frontend-warning <diag> @ L<line>
 // expect: golden
+// expect: native-ok
 // mode: c++20 | c23
+// twin: <repo-relative path of a test>
 ```
 
 - **`verified`**: verification succeeds with no errors. It must be the only
-  `expect:` line.
+  outcome line (`native-ok` may accompany it).
 - **`error <category>[:<reason>] @ L<line>`**: one line per expected error.
   The test passes only if the reported errors are exactly these: each one
   with that category, at that line, and with that reason if one is given,
@@ -56,9 +60,20 @@ is an error, so an expectation can never be silently ignored.
   tag (for example `unsupported-union`). Needs the driver (M3).
 - **`frontend-ok`**: the EDG front end accepts the file with exit status 0
   and prints nothing. For front-end smoke tests only.
+- **`frontend-error <diag> @ L<line>`** and **`frontend-warning <diag> @ L<line>`**:
+  the front end prints exactly these errors and warnings, each with that
+  diagnostic at that line. `<diag>` is an EDG diagnostic tag or
+  `cerastes-<tag>`. Any number of lines; not mixed with the other outcome
+  kinds; `.c` and `.cpp` only. See [Front-end diagnostics](#front-end-diagnostics).
 - **`golden`**: the IL walker's output equals the test's golden file, byte
-  for byte. It must be the only `expect:` line, and it applies to `.c` and
-  `.cpp` files only. See [Golden tests](#golden-tests).
+  for byte. It must be the only outcome line (`native-ok` may accompany it),
+  and it applies to `.c` and `.cpp` files only. See [Golden tests](#golden-tests).
+- **`native-ok`**: Apple clang, and GCC when installed, also accept the file
+  with `-Wall -Wextra -Werror` and without `__CERASTES__`. It accompanies an
+  outcome line and is a header error alone, twice or in a `.vpr` file. See
+  [Ordinary compilers](#ordinary-compilers-native-ok).
+- **`twin: <path>`**: the positive test a must-fail test was derived from.
+  See [Twins](#twins).
 - **`mode:`**: the language modes to run a C or C++ test in, comma-separated
   or on several lines. Each mode is a separate test run. The default is
   `c++20` for `.cpp` and `c23` for `.c`. Not allowed in `.vpr` files.
@@ -131,6 +146,187 @@ the diff line by line, and state the reason in the commit message. Never
 regenerate a golden file to make a test pass. `scripts/check.sh` never uses
 `--update-golden`, and the harness self-test fails if a script does.
 
+## Front-end diagnostics
+
+`frontend-error` and `frontend-warning` tests check what the EDG front end,
+with the cerastes back end behind it, says about a file. For each mode the
+harness runs, from the repository root,
+
+```
+scripts/cerastes-fe.sh <mode option> --brief_diagnostics --display_error_number --no_colors <test path relative to the root>
+```
+
+(never `--cerastes_walk`, never `--no_code_gen`: the back end has to run, or its
+own diagnostics could never appear). The test passes only if stdout is empty and
+the diagnostics on stderr are exactly the expected ones.
+
+**The diagnostic names.** `<diag>` is the tag of EDG's diagnostic, the name in
+`error_msg.txt` without its `ec_` prefix (`undefined_identifier`,
+`attribute_namespace_unrecognized`), not its number. Tags are validated, so a
+misspelling is a header error with a suggestion, not a test that fails
+mysteriously. The tables are EDG's generated `err_data.h` (the tag table, lines
+`{ "tag", ec_name }`, `NUMBER_OF_ERROR_TAGS` of them) and `err_codes.h` (the
+number of each `ec_name /* = N */`) in `$CERASTES_EDG_GEN`, the stock build of the
+*active* EDG tree (decision 0005): they are generated from that tree's own
+`error_msg.txt`, so a fork that adds diagnostics brings its own tags. The
+harness refuses tables that it cannot read completely (a declared count that
+differs from the entries parsed, a tag whose code has no number, a repeated
+tag). `cerastes-<tag>` names a diagnostic of the cerastes back end, which prints
+`#cerastes-<tag>` where EDG prints the number; it is validated against
+`src/backend/diagnostics.def` (lines `MACRO(tag, ...)`). Until that file exists,
+a `cerastes-` tag is a header error ("no cerastes diagnostics are defined
+yet").
+
+**What is compared.** Primary diagnostic lines start in column 0:
+
+```
+"file", line N (col. C): error #NNNN[-D]: message
+"file", line N (col. C): warning #NNNN-D: message
+```
+
+(`-D` marks a discretionary diagnostic and is ignored.) `note` and `remark`
+lines, and the indented lines that continue a diagnostic (argument lists,
+instantiation contexts), belong to the previous diagnostic and do not count.
+The harness compares the multisets of (tag, line) for errors and for warnings
+separately, so a repeated line expects a repeated diagnostic. It says whether a
+miss was the *wrong line* (same tag elsewhere), a *wrong diagnostic at this
+line*, a *missing* one or an *unexpected* one, with the message text and column
+of what was printed. A diagnostic in another file (a header the test includes)
+is unexpected, whatever it is.
+
+**Always a failure**, whatever the test expects: a catastrophic, command-line or
+internal error, `Compilation terminated.`/`aborted.`, `Error limit reached.`, a
+crash, a timeout, anything on stdout, and any other line starting in column 0 (a
+format the parser does not know, reported as "unrecognized front-end output").
+The `N errors detected in the compilation of ...` summary must agree with the
+number of errors parsed (and is required when there are errors). The exit
+status must be 2 when at least one error is expected and 0 otherwise.
+
+**Limitation.** EDG's errors stop the back end, so a test cannot expect an EDG
+error and a back-end diagnostic together. Write two tests.
+
+`--update-golden` leaves these tests alone. They need `CERASTES_FE`,
+`CERASTES_EDG_GEN` and `EDG_CLANG_VER_SCRAPE` from `build/env.sh`.
+
+## Ordinary compilers (`native-ok`)
+
+A test with `// expect: native-ok` is also compiled, for each of its modes and
+by each compiler, with
+
+```
+<compiler> -x c++ -std=c++20 -Wall -Wextra -Werror -U__CERASTES__ -I <include dir> -c -o /dev/null <file>
+<compiler> -x c   -std=c23   ...        (mode c23)
+```
+
+and passes only if the compiler exits with status 0 and prints nothing on
+stdout and stderr. `-U__CERASTES__` is what makes `<cerastes.h>` expand its
+annotations to nothing. The compilers come from `build/env.sh`, which is
+[authoritative](#the-environment): `CERASTES_CLANG_CC`/`CERASTES_CLANG_CXX`
+(Apple clang, found with `xcrun`; run by its real path the harness sets
+`SDKROOT` for it if it is not set) and `CERASTES_GCC_CC`/`CERASTES_GCC_CXX` (the
+highest-numbered `gcc-NN`/`g++-NN` found, or empty strings; an empty value
+exported by the shell cannot switch GCC off). Without a GCC the run prints one note,
+`native-ok: GCC not installed; Apple clang only`; a GCC that `env.sh` names but
+that cannot be run fails the run. The summary line ends with the per-compiler counts
+(`native-ok runs: Apple clang 6, GCC 6`). A native run happens even when the
+test's own outcome fails; `--update-golden` and `--check-headers` never compile.
+
+An unknown namespaced attribute is a warning for both compilers, so with
+`-Werror` a file with `[[unreg_ns::x]]` is never native-ok; that is why
+the annotation layer's positive tests spell their attributes through the macros
+of `<cerastes.h>`.
+
+**Anti-vacuity canaries.** Once per compiler and language per run, before any
+test, the harness checks that the compiler can vouch for a file: its
+`--version` banner says Apple clang (resp. GCC, and not clang), a snippet that
+is fine compiles silently with the same flags, and both a snippet with an unused
+variable and one with an unknown scoped attribute (`[[unreg_ns::x]] int v;`) are
+rejected by them. A canary prints as `canary native-ok [<compiler>,
+<language>]`; when it fails, every native run of that compiler fails with it,
+so a compiler that accepts everything cannot make files pass.
+
+**Policy.** `native-ok` is required (a header error, also with
+`--check-headers`) of every positive test (`golden`, later `verified`) in the
+directories listed in `NATIVE_POLICY_DIRS` in `scripts/run_tests.py`:
+`tests/annotations`, `doc/modules/ROOT/examples/annotations` and
+`doc/modules/ROOT/examples/ordinary-compilers` (with their subdirectories), and
+of every positive test, wherever it is, whose source has an
+`#include <cerastes.h>` (or `"cerastes.h"`) line. Negative tests are exempt.
+
+## The environment
+
+`scripts/run_tests.py` reads `build/env.sh` the way the scripts do, by sourcing
+it: **the file is authoritative**. Every variable it defines (`CERASTES_FE`,
+`CERASTES_EDG_GEN`, `CERASTES_INCLUDE_DIR`, `CERASTES_GCC_CC`, ...) takes its
+value from the file, whatever the shell exported. An inherited value that
+differs is ignored, with one note per variable on stderr (`ignoring the inherited
+NAME=... ; build/env.sh defines NAME=...`), so that a stray variable cannot
+silently drop GCC, swap the tag tables used to validate `frontend-error` tests,
+or change the include directory. Variables the file does not define (`PATH`,
+`SDKROOT`, ...) are inherited. The one exception is the selection of the EDG
+tree: `CERASTES_EDG_SRC` is read from the shell, and checked against what
+`env.sh` was written for (see [The EDG tree](#the-edg-tree-decision-0005)). The
+harness self-test points the harness at fixture env files, not at the process
+environment.
+
+## Twins
+
+Every test under `tests/annotations/negative/` (`NEGATIVE_DIR`, with its
+subdirectories) is the must-fail twin of a positive test and names it:
+`// twin: tests/annotations/<name>.cpp`, a repository-relative path. A missing
+`twin:` line is a header error, and so is a twin that does not exist, is itself
+under `negative/`, is the test itself, has a bad header, or has an outcome other
+than `golden` or `verified`. A `twin:` line in any other test is checked the
+same way. The harness does not compare the two files; the line records, and
+checks the existence of, the pair that the must-fail twin rule asks for.
+
+A test under `negative/` must be a must-fail test: it expects at least one
+error (`frontend-error`, `error` or `rejected`). `golden`, `verified`,
+`frontend-ok` and warning-only tests are header errors there; tests that
+document a warning live in `tests/annotations/warnings/`.
+
+The rule also runs the other way (invariant 2: every encoding rule has a
+must-fail test). Every positive test (`golden` or `verified`) under
+`tests/annotations/` outside `negative/` must be named as the `twin:` of at
+least one test under `negative/`, or say why not with
+`// twin-exempt: <reason>` (a non-empty reason; not allowed together with
+`twin:`, on a test that is not positive or under `negative/`). A positive test
+that no negative test names is reported as a header error (`bad header:`),
+also by `--check-headers`, whatever subset of the tests was selected: the
+check reads the whole `tests/annotations/` tree whenever a selected test is in
+it.
+
+## The EDG tree (decision 0005)
+
+Tests that run a tool built from the EDG tree (`frontend-ok`, `golden`,
+`frontend-error`/`-warning`) first check that `build/env.sh` was written for the
+tree that `CERASTES_EDG_SRC` of the current shell selects (`third_party/edg` when
+it is unset or empty), compared by real path, and stop with exit status 2 and
+`build/env.sh is for <X> but CERASTES_EDG_SRC selects <Y>; run
+scripts/bootstrap.sh` when it does not. `scripts/cerastes-fe.sh` and
+`scripts/cpfe.sh` do the same. `--check-headers` does not need the tree. A
+relative path in `CERASTES_EDG_SRC` is refused with exit status 2 and a message
+(`... is a relative path; use an absolute path`) by `run_tests.py`,
+`cerastes-fe.sh`, `cpfe.sh`, `bootstrap.sh` and `edg_tree.py`.
+`scripts/edg_tree.py` (`resolve`, `stamp`, `check`, `describe --verify-build`)
+implements the guards that `scripts/check.sh` runs first and last; the harness
+self-test runs it on temporary repositories (a nested repository at
+`third_party/edg` with a fake gitlink and a fake `origin/main`, override trees)
+and checks that `check.sh` runs both guards as active, ordered steps that
+cannot be ignored. The guards, beyond a clean `third_party/edg` at its gitlink
+with the upstream URL:
+- the gitlink must be an ancestor of the submodule's `refs/remotes/origin/main`
+  (never a fork commit; a stale `origin/main` fails with `git -C
+  third_party/edg fetch origin`);
+- an override needs an absolute path, a git work tree root with `src/il_def.h`,
+  not the submodule or inside it, and HEAD of the repository must be a named
+  branch other than `main` (not detached);
+- the build stamp has five lines (`tree`, `head`, `branch`, `dirty`, and
+  `config <sha256 of cmake/EdgFrontEnd.cmake and src/backend/edg_il.h>`), so a
+  binary built under an older cerastes configuration does not verify;
+- every git command runs without `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`
+  and the other variables that redirect git.
+
 ## Documentation examples
 
 Every code example in the user documentation (`doc/`, Antora; invariant 8) is a
@@ -201,6 +397,21 @@ a module other than `ROOT`; `--root DIR` checks another tree). It reads
   (a continued `#define` would hold it). A raw string literal (`R"`) anywhere in
   an example, and a `//` comment ending in a backslash, are errors too: they
   can hide a tag directive in code that is not compiled;
+- walker listings (rule g). The listing the IL walker prints for an example
+  is the example's `.golden` file, so it can be shown and tested. An
+  `include::example$<test>.golden[]` is allowed only as the whole body of a
+  `[source,text]` block (`----`, nothing else in it), with an empty attribute
+  list (no `tag=`, `lines=`, `indent=`, `opts=`), for the golden file of a
+  `golden` test under `examples/` (`<test>.golden`, or `<test>.<mode>.golden`
+  for a test with several modes) whose test the **same page** includes through
+  a tagged region: a listing only appears next to the code that produced it.
+  The golden must not have a line ending in a callout marker (`<1>`), which
+  Asciidoctor would turn into a callout (a real build shows it; includes,
+  conditionals and tag directives inside an included file are left alone).
+  Any other include of a golden file is an error, and so is a line that looks
+  like walker output (`end walk: ...`, `routine ... @ L<n>:<c>`, `attr [[`,
+  `stmt ... @ L<n>`) in a `text`, `console` or `sh` block that is not such an
+  include: a listing written by hand could not be told from a tested one;
 - a file under `doc/modules/*/examples/` that is not a test or its `.golden`
   file, and any C/C++/Viper source file (by suffix) elsewhere under
   `doc/modules/` (`partials/`, `attachments/`, `pages/`...);
@@ -235,7 +446,10 @@ generated HTML (and every `<code>` with a `language-X`, `lang-X` or `data-lang`)
   around the code are ignored), and the site must have at least as many such
   blocks as the page sources declare (so a UI change that renames the class
   cannot make the check pass without looking at anything);
-- a block in `sh`, `console` or `text` is fine;
+- a block in `sh`, `console` or `text` is fine, except that a block with
+  walker output (as in rule g) must equal a golden file of a golden test under
+  `examples/` after the same normalisation, and the site must have at least
+  as many such blocks as the page sources have golden includes;
 - anything else is an error: a `<pre>` without `<code>` (a literal block, verse,
   raw HTML), a `<code>` without a language class, any other language, `lang-cpp`
   and so on. Page chrome is not exempt (the default UI's own pages have no
