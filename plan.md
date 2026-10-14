@@ -170,6 +170,9 @@ Every test file starts with expectation lines that `scripts/run_tests.py` checks
 **Goal:** user documentation written in AsciiDoc in this repo, built with Antora, checked by `check.sh` and published at https://cerastes.dev/doc/. From here on, every milestone documents what it makes user-visible (invariant 9). This milestone depends only on M0. Run it before M2, which writes the first reference page.
 
 **Hosting** (decision record `0004-docs-site.md`)
+
+> **Superseded by decision 0004 (owner, 2026-10-13):** there is no docs-only repo. The docs are this repository's own GitHub Pages site, deployed by its Actions workflow, at the interim address https://cerastes.dev/cerastes/; the owner fixes the final address later. The text below is the original plan.
+
 - **Default:** a dedicated org repo `cerastes-verifier/doc` with GitHub Pages (source: GitHub Actions). The org site `cerastes-verifier.github.io` owns the custom domain `cerastes.dev`, and GitHub serves an org's project sites under that domain. A repo named `doc` therefore publishes at `https://cerastes.dev/doc/` with no proxy rules and no change to the website's deployment.
 - That repo holds only the publishing playbook and workflow:
   - The playbook pulls content from this repo (`url: https://github.com/cerastes-verifier/cerastes`, `start_path: doc`) and sets `site.url: https://cerastes.dev/doc`.

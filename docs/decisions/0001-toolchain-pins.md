@@ -93,6 +93,10 @@ local tree `~/Documents/verifast` is on `generic2` at the pin above. Its
 M4 decides between a native macOS build, running that binary in a container,
 or option (b). Bootstrap does not depend on VeriFast.
 
+**Owner decision (handoff question 8, 2026-10-13):** M4 runs the Linux
+binary in a container and checks its outcomes against the recorded ones
+(option (b)) as well.
+
 ## Changing a pin
 
 1. Move the submodule (`git -C third_party/<x> checkout <rev>`, then

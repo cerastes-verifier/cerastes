@@ -1,7 +1,7 @@
 # cerastes — C/C++ verifier (EDG → Viper/Silicon → Z3)
 
 Plan: @plan.md   Status: @docs/status.md
-User docs: doc/ (Antora, from M1.5) → https://cerastes.dev/doc/
+User docs: doc/ (Antora) → https://cerastes.dev/cerastes/ (interim address, decision 0004)
 
 ## Commands
 - Bootstrap: scripts/bootstrap.sh   (idempotent; macOS on Apple silicon)
@@ -48,14 +48,16 @@ third_party/edg (EDG, upstream) · third_party/silicon (Silicon + silver)
 - EDG builds out of tree into build/edg; never build inside third_party/edg.
 - EDG source changes: fork https://github.com/mborland/compiler, branch
   `cerastes` (decision 0003). Never pin the fork; never commit a fork pointer.
-  Sessions may commit and push to that branch. NEVER open issues, PRs or
-  Discussions against upstream edgcpp/compiler; the owner files them (draft
-  the text in docs/handoff.md).
+  Sessions may commit to that branch in a local fork clone; the owner
+  pushes. NEVER open issues, PRs or Discussions against upstream
+  edgcpp/compiler; the owner files them (draft the text in docs/handoff.md).
 - Silicon needs JDK 17 (its sbt 1.6.2 cannot run on newer JDKs); use
   $CERASTES_JAVA, not the java on PATH.
 - Z3 is the pinned 4.16.0 in build/tools, not Homebrew's z3.
 
 ## Conventions
+- Commit to local `main` without asking (end of session, and after each
+  change the owner asks for). Never push; the owner pushes.
 - C++20 for tool code; EDG code follows EDG's own style in third_party/edg.
 - Test files start with `// expect:` lines; grammar and categories in
   tests/README.md (see also plan.md §0).

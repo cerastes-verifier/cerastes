@@ -302,16 +302,23 @@ they can all be answered at once. Future handoffs keep this section.
    - (b) Sessions commit in a local clone of the fork, outside this repo,
      and you push.
 
-   *Recommended: (b) until you decide otherwise.*
+B
+
 2. **Can a topic branch of this repository temporarily record a fork
    submodule pointer?** *Recommended: no, as 0003 says.* Develop against fork
    commits by checking them out in the submodule working tree, without
    committing the pointer.
+
+No, but if EDG is slow to merge, we will re-evaluate.
+
 3. **Next milestone.** plan.md order is M1.5 (docs), then M2. M2's critical
    path is upstream review of the EDG attribute registration, which you
    file. *Recommended: run M1.5 next. Its session also drafts the text of
    the upstream Discussion or issue for attribute registration (design only,
    no EDG code), so you can file it while M1.5 runs.*
+
+Run M1.5 next.
+
 4. **M1.5 owner steps.** M1.5's acceptance (`curl -sI
    https://cerastes.dev/doc/` returns 200, and a docs-only commit appears
    with no manual step) needs four things done first:
@@ -322,21 +329,38 @@ they can all be answered at once. Future handoffs keep this section.
 
    *Recommended: do them before the M1.5 session. Otherwise it ends with
    those acceptance items open.*
+
+I don't like having a docs-only repo. Use the repo specific .github.io page, and then we will fix the specific address later.
+I have enabled pages on the repo and given the source as GitHub Actions.
+
 5. **What CI runs.** M1.5 adds CI that builds the docs. The IL goldens
    depend on the macOS SDK and libc++ (`std::__1::…`, which headers EDG can
    parse), so `check.sh` on a GitHub macOS runner would likely show golden
    diffs. *Recommended: CI runs only the docs build in M1.5. Running
    `check.sh` in CI needs a decision record on pinning the SDK first.*
+
+CI for doc builds is fine for now. We need to add CI for the rest of the repo soon. If mac doesn't work we can always use a local x64 docker, and run on x64 in CI
+
+
 6. **The libc++ headers EDG cannot parse** (`<algorithm>`, `<utility>`,
    `<iostream>`, `<string>`, `<vector>` from SDK 27.0). These will matter for
    M3+ tests. *Recommended: in M2, a session writes a reduced reproduction
    (under 100 lines, with `--dump_configuration`, as `CONTRIBUTING.md` asks)
    into this file for you to file upstream.*
+
+Use a local x64 docker, or the SSH x64 machine if macOS isn't working.
+I will work with the EDG team on specific macOS and libc++ issues.
+
 7. **Committing in this repository.** Should sessions commit to local `main`
    at the end of the session, as plan.md's closing prompt says, and after
    each change you ask for, without asking first? Never pushing. *Recommended:
    yes.* This session committed its last change on that basis.
+
+YES
+
 8. **VeriFast for M4** (0001): a native macOS build, a container for the
    Linux binary, or recording its outcomes once? Not urgent until M4.
    *Recommended: try the native build at the start of M4, and fall back to
    recorded outcomes.*
+
+Run a container for the Linux binary and double check against recorded outcomes.

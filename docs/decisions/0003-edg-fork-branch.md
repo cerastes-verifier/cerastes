@@ -47,10 +47,9 @@ On 2026-10-13 the owner created the branch.
    - Before its first commit, fast-forward the branch to the pin
      (`git merge --ff-only 9847356d` on `cerastes`, then push). Rebase it
      onto upstream `main` whenever the pin moves.
-   - Under item 6 a session may push this fast-forward. On 2026-10-13 the
-     session had no GitHub push credentials (no SSH key, no keychain
-     entry), so the owner pushes it. See the questions in
-     `docs/handoff.md`.
+   - The owner pushes this fast-forward (item 6). On 2026-10-14 the branch
+     was still at `90b66472`, and upstream `main` had moved on to
+     `4e739c28`.
 4. **Kept apart from the CIR work.** The ClangIR back end lives on the fork's
    `cir` branch (`BACK_END_TYPE`, the ECIL writer). Nothing from `cir` is
    merged into `cerastes`, and vice versa. cerastes does not depend on
@@ -68,10 +67,14 @@ On 2026-10-13 the owner created the branch.
    where `edg-docker-test` works. The x86-64 box used for the CIR work is one
    such place.
 6. **Who does what.**
-   - Claude sessions may commit to the fork's `cerastes` branch and push to
-     it. This is a standing permission from the owner (2026-10-13). It
-     satisfies EDG's `AGENTS.md` rule ("never commit or push unless asked")
-     for this branch only, not for `cir` or any other branch.
+   - Claude sessions may commit to the fork's `cerastes` branch. This is a
+     standing permission from the owner (2026-10-13). It satisfies EDG's
+     `AGENTS.md` rule ("never commit or push unless asked") for this branch
+     only, not for `cir` or any other branch.
+   - **The owner pushes** (answer to handoff question 1, 2026-10-13). A
+     session commits in a local clone of the fork, outside this repository
+     (for example `~/Documents/compiler`), and names the commits to push in
+     `docs/handoff.md`. Sessions have no push credentials for the fork.
    - **Claude never opens issues, pull requests or Discussions against
      upstream `edgcpp/compiler`. The owner does all of that.** A session
      that has an upstreamable series ready writes the proposed issue and PR
@@ -114,12 +117,12 @@ On 2026-10-13 the owner created the branch.
   passed (`docs/il-inventory.md`), so this record takes 0003. A fallback
   record needed after a future pin move takes the next free number.
 
-## Open questions
+## Settled questions
 
-Tracked in `docs/handoff.md`, "Questions for the owner":
-- whether a topic branch of this repository may ever temporarily record a
-  fork submodule pointer (this record says no);
-- how sessions authenticate pushes to the fork.
-
-Settled on 2026-10-13: the owner files every upstream issue, Discussion and
-PR (item 6).
+- **Upstream interaction.** The owner files every upstream issue, Discussion
+  and PR (item 6, 2026-10-13).
+- **Pushes to the fork.** The owner pushes; sessions commit in a local clone
+  of the fork (item 6; handoff question 1, answer B, 2026-10-13).
+- **No fork pointer, on any branch** (item 2; handoff question 2,
+  2026-10-13). The owner will re-evaluate this if upstream EDG review turns
+  out to be slow.
