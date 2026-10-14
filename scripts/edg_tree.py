@@ -198,17 +198,26 @@ def config_digest(root: str = DEFAULT_ROOT) -> str:
     return h.hexdigest()
 
 
-def stamp(tree: str, root: str = DEFAULT_ROOT) -> str:
+def tree_state(tree: str) -> Tuple[List[str], List[str]]:
+    """(modified tracked paths, untracked non-ignored paths) of `tree`.  Listing
+    the untracked files of EDG's 110,000-file tree takes about a second, so
+    `describe` asks once and hands the answer to `report` and `stamp`."""
     real = os.path.realpath(tree)
+    return modified_paths(real), untracked_paths(real)
+
+
+def stamp(tree: str, root: str = DEFAULT_ROOT,
+          state: Optional[Tuple[List[str], List[str]]] = None) -> str:
+    real = os.path.realpath(tree)
+    modified, untracked = tree_state(real) if state is None else state
     head = git_out(["rev-parse", "HEAD"], real)
     diff = git(["diff", "--binary", "--no-ext-diff", "--no-textconv", "HEAD"], real).stdout
     h = hashlib.sha256()
     h.update(diff)
-    untracked = untracked_paths(real)
     for rel in untracked:
         h.update(b"\0untracked " + rel.encode(errors="surrogateescape") + b" "
                  + file_digest(os.path.join(real, rel)).encode() + b"\n")
-    count = len(modified_paths(real)) + len(untracked)
+    count = len(modified) + len(untracked)
     return "tree %s\nhead %s\nbranch %s\ndirty %d %s\nconfig %s\n" % (
         real, head, branch_of(real), count, h.hexdigest(), config_digest(root))
 
@@ -296,12 +305,14 @@ def guard_pin(root: str) -> List[str]:
     return errors
 
 
-def report(root: str, kind: str, tree: str) -> Tuple[str, List[str]]:
+def report(root: str, kind: str, tree: str,
+           state: Optional[Tuple[List[str], List[str]]] = None) -> Tuple[str, List[str]]:
     """(report line, warnings)."""
     warnings: List[str] = []
     head = short(git_out(["rev-parse", "HEAD"], tree))
+    modified_list, untracked_list = tree_state(tree) if state is None else state
     if kind == "upstream":  # the kind's name; the pin is a commit of the fork
-        dirty = bool(git_out(["status", "--porcelain", "--untracked-files=all"], tree))
+        dirty = bool(modified_list or untracked_list)
         local = pin_state(root) == "local"
         if local:
             warnings.append(NOT_PUSHED_WARNING % head)
@@ -309,7 +320,7 @@ def report(root: str, kind: str, tree: str) -> Tuple[str, List[str]]:
                 % (head, "DIRTY" if dirty else "clean",
                    ", NOT YET PUSHED to origin/cerastes" if local else "")), warnings
     branch = branch_of(tree)
-    modified, untracked = len(modified_paths(tree)), len(untracked_paths(tree))
+    modified, untracked = len(modified_list), len(untracked_list)
     try:
         link = gitlink(root)
     except TreeError:
@@ -373,7 +384,8 @@ def describe(root: str = DEFAULT_ROOT, verify_build: bool = False,
         kind, tree = resolve(root, env)
     except TreeError as exc:
         return 2, [], ["error: %s" % exc]
-    line, warnings = report(root, kind, tree)
+    state = tree_state(tree)
+    line, warnings = report(root, kind, tree, state)
     err = ["warning: " + w for w in warnings]
     if verify_build:
         path = stamp_file(root, kind)
@@ -382,7 +394,7 @@ def describe(root: str = DEFAULT_ROOT, verify_build: bool = False,
                 recorded = f.read()
         except OSError:
             return 1, [line], err + ["error: %s is missing; run scripts/bootstrap.sh" % path]
-        if recorded != stamp(tree, root):
+        if recorded != stamp(tree, root, state):
             return 1, [line], err + [
                 "error: the binary under test was built from a different EDG tree state than "
                 "the active one (%s differs from the stamp of %s); run scripts/bootstrap.sh"

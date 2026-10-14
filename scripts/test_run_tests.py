@@ -42,6 +42,33 @@ import check_doc_examples as cde  # noqa: E402
 import run_tests as rt  # noqa: E402
 
 REAL_ROOT = rt.ROOT  # before any test patches it
+_REAL_EDG_STAMP_PROBLEM = rt.edg_stamp_problem  # before any test patches it
+_real_stamp_memo: list = []
+
+
+def memoised_real_stamp_problem(*args, **kwargs):
+    """rt.edg_stamp_problem for the real tree, computed once per process.  It
+    takes ~2.5 s (git status of EDG's 110,000 files), and every real end-to-end
+    harness run calls it; the tree does not change during the self-test.  Calls
+    with arguments (the fixture trees) are never memoised."""
+    if args or kwargs:
+        return _REAL_EDG_STAMP_PROBLEM(*args, **kwargs)
+    if not _real_stamp_memo:
+        _real_stamp_memo.append(_REAL_EDG_STAMP_PROBLEM())
+    return _real_stamp_memo[0]
+
+
+class MemoisedStamp:
+    """Mixin for the end-to-end classes that run rt.main on the real tree: the
+    stamp check is memoised for the class (see memoised_real_stamp_problem).
+    TreeScriptTwinTests and TreeGateTests keep exercising the real function."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        patcher = mock.patch.object(rt, "edg_stamp_problem", memoised_real_stamp_problem)
+        patcher.start()
+        cls.addClassCleanup(patcher.stop)
 
 
 def e2e_required(environ=None):
@@ -3441,7 +3468,7 @@ def _real_front_end_available():
 
 @e2e_gate(_real_front_end_available(),
           "CERASTES_FE or scripts/cerastes-fe.sh missing; run scripts/bootstrap.sh")
-class RealFrontEndGoldenTests(unittest.TestCase):
+class RealFrontEndGoldenTests(MemoisedStamp, unittest.TestCase):
     """Golden tests through the real scripts/cerastes-fe.sh.  These depend only
     on the walker printing routine names, not on the rest of its format."""
 
@@ -5707,6 +5734,37 @@ class NativeEnvironmentTests(NativeCase):
 # The EDG tree (decision 0005)
 # ---------------------------------------------------------------------------
 
+class MemoisedStampTests(unittest.TestCase):
+    """The memo that the real end-to-end classes use never hides a call that has
+    arguments (the fixture trees), and computes the real answer only once."""
+
+    def test_the_real_answer_is_computed_once_and_calls_with_arguments_never_are_memoised(self):
+        calls = []
+
+        def original(*args, **kwargs):
+            calls.append((args, kwargs))
+            return f"answer {len(calls)}"
+
+        with mock.patch.object(sys.modules[__name__], "_REAL_EDG_STAMP_PROBLEM", original), \
+                mock.patch.object(sys.modules[__name__], "_real_stamp_memo", []):
+            self.assertEqual(memoised_real_stamp_problem(), "answer 1")
+            self.assertEqual(memoised_real_stamp_problem(), "answer 1")
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(memoised_real_stamp_problem("root", {}), "answer 2")
+            self.assertEqual(memoised_real_stamp_problem("root", {}), "answer 3")
+            self.assertEqual(memoised_real_stamp_problem(root="r"), "answer 4")
+            self.assertEqual(memoised_real_stamp_problem(), "answer 1")
+
+    def test_only_the_real_end_to_end_classes_use_it(self):
+        source = Path(__file__).read_text()
+        users = re.findall(r"^class (\w+)\(MemoisedStamp, ", source, re.M)
+        self.assertEqual(sorted(users), ["RealDiagnosticTests", "RealFrontEndGoldenTests",
+                                         "RealNativeTests"])
+        # the classes that check the stamp itself run the real function
+        for name in ("TreeScriptTwinTests", "TreeGateTests", "EdgTreeToolTests"):
+            self.assertNotRegex(source, rf"class {name}\(MemoisedStamp")
+
+
 class TreeConsistencyTests(RootedCase):
     def setUp(self):
         super().setUp()
@@ -5982,43 +6040,82 @@ class EdgTreeToolTests(unittest.TestCase):
     repositories: a root with a nested repository at third_party/edg and a fake
     gitlink, and override trees.  Each case is a twin of a guard."""
 
+    @staticmethod
+    def make_env():
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("CERASTES_EDG_SRC", "GIT_DIR", "GIT_WORK_TREE")}
+        env.update({"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull,
+                    "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
+                    "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"})
+        return env
+
+    @classmethod
+    def build_fixture(cls, base):
+        """The pristine fixture: a root with a nested repository at
+        third_party/edg and a fake gitlink, and an override tree.  Built once per
+        class and copied for each test (a copy is a few ms; the 17 git calls that
+        build it are most of what a test cost)."""
+        def git(cwd, *args):
+            cwd.mkdir(parents=True, exist_ok=True)
+            run = subprocess.run(["git", "-c", "commit.gpgsign=false", "-c",
+                                  "core.hooksPath=/dev/null", *args], cwd=cwd, env=cls.env,
+                                 capture_output=True, text=True)
+            assert run.returncode == 0, (args, run.stderr)
+            return run.stdout.strip()
+
+        def write(path, text):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+
+        root, sub, override = base / "repo", base / "repo" / "third_party" / "edg", base / "override"
+        git(root, "init", "-q", "-b", "main")
+        write(root / ".gitmodules",
+              f'[submodule "third_party/edg"]\n\tpath = third_party/edg\n\turl = {EDG_URL}\n')
+        write(root / "README", "root\n")
+        git(root, "add", ".gitmodules", "README")
+        git(root, "commit", "-q", "-m", "root")
+        git(sub, "init", "-q", "-b", "main")
+        git(sub, "remote", "add", "origin", EDG_URL)
+        write(sub / "src" / "il_def.h", "// il\n")
+        git(sub, "add", "-A")
+        git(sub, "commit", "-q", "-m", "pin")
+        pin = git(sub, "rev-parse", "HEAD")
+        # what the submodule last fetched: the pin is a commit of the fork's branch
+        git(sub, "update-ref", PUSHED, pin)
+        write(root / "cmake" / "EdgFrontEnd.cmake", "# cerastes configuration\n")
+        write(root / "src" / "backend" / "edg_il.h", "// il layout guards\n")
+        git(root, "update-index", "--add", "--cacheinfo", f"160000,{pin},third_party/edg")
+        # an override tree: the pin plus two commits, on a topic branch
+        git(base, "clone", "-q", str(sub), str(override))
+        git(override, "switch", "-q", "-c", "cerastes")
+        for n in (1, 2):
+            write(override / "src" / f"x{n}.c", f"{n}\n")
+            git(override, "add", "-A")
+            git(override, "commit", "-q", "-m", f"c{n}")
+        return pin
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._template_tmp = tempfile.TemporaryDirectory()
+        cls.template = Path(cls._template_tmp.name).resolve()
+        cls.env = cls.make_env()
+        cls.pin = cls.build_fixture(cls.template)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._template_tmp.cleanup()
+        super().tearDownClass()
+
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.tmp = Path(tmp.name).resolve()
+        shutil.copytree(self.template, self.tmp, symlinks=True, dirs_exist_ok=True)
         self.root = self.tmp / "repo"
         self.sub = self.root / "third_party" / "edg"
         self.override = self.tmp / "override"
-        self.env = {k: v for k, v in os.environ.items()
-                    if k not in ("CERASTES_EDG_SRC", "GIT_DIR", "GIT_WORK_TREE")}
-        self.env.update({"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull,
-                         "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
-                         "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"})
-        self.git(self.root, "init", "-q", "-b", "main")
-        self.write(self.root / ".gitmodules",
-                   f'[submodule "third_party/edg"]\n\tpath = third_party/edg\n\turl = {EDG_URL}\n')
-        self.write(self.root / "README", "root\n")
-        self.git(self.root, "add", ".gitmodules", "README")
-        self.git(self.root, "commit", "-q", "-m", "root")
-        self.git(self.sub, "init", "-q", "-b", "main")
-        self.git(self.sub, "remote", "add", "origin", EDG_URL)
-        self.write(self.sub / "src" / "il_def.h", "// il\n")
-        self.git(self.sub, "add", "-A")
-        self.git(self.sub, "commit", "-q", "-m", "pin")
-        self.pin = self.git(self.sub, "rev-parse", "HEAD")
-        # what the submodule last fetched: the pin is an upstream commit
-        self.git(self.sub, "update-ref", PUSHED, self.pin)
-        self.write(self.root / "cmake" / "EdgFrontEnd.cmake", "# cerastes configuration\n")
-        self.write(self.root / "src" / "backend" / "edg_il.h", "// il layout guards\n")
-        self.git(self.root, "update-index", "--add", "--cacheinfo",
-                 f"160000,{self.pin},third_party/edg")
-        # an override tree: the pin plus two commits, on a topic branch
-        self.git(self.tmp, "clone", "-q", str(self.sub), str(self.override))
-        self.git(self.override, "switch", "-q", "-c", "cerastes")
-        for n in (1, 2):
-            self.write(self.override / "src" / f"x{n}.c", f"{n}\n")
-            self.git(self.override, "add", "-A")
-            self.git(self.override, "commit", "-q", "-m", f"c{n}")
+        self.env = dict(self.__class__.env)
 
     def write(self, path, text):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -6456,6 +6553,29 @@ class EdgTreeToolTests(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertIn("EDG tree: OVERRIDE", out)
 
+    def test_describe_labels_a_dirty_pin(self):
+        status, out, _ = self.tool("describe")
+        self.assertIn("(gitlink, clean)", out)
+        self.write(self.sub / "src" / "il_def.h", "// edited\n")
+        status, out, _ = self.tool("describe")
+        self.assertEqual(status, 0)
+        self.assertIn("(gitlink, DIRTY)", out)
+        self.write(self.sub / "src" / "il_def.h", "// il\n")
+        self.write(self.sub / "src" / "untracked.c", "x\n")  # untracked alone is dirt too
+        status, out, _ = self.tool("describe")
+        self.assertIn("(gitlink, DIRTY)", out)
+        status, out, _ = self.tool("describe", "--verify-build")
+        self.assertIn("(gitlink, DIRTY)", out)
+
+    def test_describe_counts_an_override_s_changes(self):
+        self.topic()
+        self.write(self.override / "src" / "x1.c", "edited\n")
+        self.write(self.override / "src" / "n1.c", "n\n")
+        self.write(self.override / "src" / "n2.c", "n\n")
+        for command in (("describe",), ("describe", "--verify-build")):
+            status, out, _ = self.tool(*command, override=self.override)
+            self.assertIn("1 modified, 2 untracked)", out, command)
+
     def test_describe_with_a_bad_override_fails(self):
         status, out, err = self.tool("describe", override=self.tmp / "nowhere")
         self.assertEqual(status, 2, (out, err))
@@ -6587,7 +6707,7 @@ class RealTagTableTests(unittest.TestCase):
 @e2e_gate(_real_front_end_available() and _real_tables_available(),
           "CERASTES_FE, scripts/cerastes-fe.sh or the generated headers missing; "
           "run scripts/bootstrap.sh")
-class RealDiagnosticTests(unittest.TestCase):
+class RealDiagnosticTests(MemoisedStamp, unittest.TestCase):
     """frontend-error/-warning tests through the real front end: an undeclared
     identifier passes with its real tag at the right line and fails at the
     wrong one; an unregistered attribute namespace is a warning with a tag."""
@@ -6695,7 +6815,7 @@ def _native_compilers_available():
 
 @e2e_gate(_native_compilers_available() and _real_front_end_available(),
           "CERASTES_CLANG_*, CERASTES_GCC_* or CERASTES_FE missing; run scripts/bootstrap.sh")
-class RealNativeTests(unittest.TestCase):
+class RealNativeTests(MemoisedStamp, unittest.TestCase):
     """The ordinary-compiler checks with the compilers of build/env.sh."""
 
     def setUp(self):
