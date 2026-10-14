@@ -56,9 +56,10 @@ rebuilds Silicon when its stamp is out of date, which can make sbt fetch
 dependencies. A missing or out-of-date `doc/node_modules` is an error that
 tells you to run `scripts/bootstrap.sh`.
 
-In the project's own measurement, a clean clone with Homebrew and sbt caches
-already warm took 1 minute 45 seconds to bootstrap and check. A first run on
-a new machine takes longer.
+In the project's own measurement (2026-10-14), a clean clone with the
+Homebrew, sbt and npm caches already warm took 2 minutes 13 seconds to
+bootstrap and check, including building this documentation. A first run on a
+new machine takes longer.
 
 The Silicon build needs JDK 17, because the sbt version Silicon pins cannot
 run on newer JDKs, and Silicon is tested against Z3 4.16.0. So the script
