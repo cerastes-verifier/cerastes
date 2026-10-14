@@ -15,6 +15,9 @@ User docs: doc/ (Antora) → https://cerastes.dev/cerastes/doc/ (decision 0004)
 - Golden tests: python3 scripts/run_tests.py --update-golden <test>   (a golden is
   an expectation: invariant 1 applies; review the diff, give the reason)
 - Pinned tools in your shell: . build/env.sh   (Z3_EXE, SILICON_JAR, CERASTES_JAVA, CPFE, CERASTES_FE)
+- Build against the EDG fork (topic branches only; check.sh refuses it on main; decision 0005):
+  CERASTES_EDG_SRC=~/Documents/compiler scripts/bootstrap.sh, then the same
+  variable for check.sh and run_tests.py (builds in build/override/)
 - Mutants: python3 scripts/mutate.py <dir>   (from M3)
 - Verify one file: build/cerastes verify <file> --keep-vpr   (from M3)
 - User docs: scripts/build_docs.sh   (from M1.5; builds doc/ into build/doc, fails on warnings)
@@ -47,7 +50,8 @@ third_party/edg (EDG, upstream) · third_party/silicon (Silicon + silver)
   facts we rely on: internal/il-inventory.md.
 - EDG builds out of tree into build/edg; never build inside third_party/edg.
 - EDG source changes: fork https://github.com/mborland/compiler, branch
-  `cerastes` (decision 0003). Never pin the fork; never commit a fork pointer.
+  `cerastes` (decision 0003). Never pin the fork; never commit a fork pointer;
+  never check fork commits out in third_party/edg (use CERASTES_EDG_SRC, 0005).
   Sessions may commit to that branch in a local fork clone; the owner
   pushes. NEVER open issues, PRs or Discussions against upstream
   edgcpp/compiler; the owner files them (draft the text in internal/handoff.md).

@@ -9,7 +9,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FE="$ROOT/build/cerastes-fe"
+[[ -f "$ROOT/build/env.sh" ]] || { echo "check_edg_config.sh: run scripts/bootstrap.sh first" >&2; exit 2; }
+# shellcheck source=/dev/null
+. "$ROOT/build/env.sh"
+FE="$CERASTES_FE"   # the binary of the active EDG tree (decision 0005)
 [[ -x "$FE" ]] || { echo "check_edg_config.sh: $FE missing; run scripts/bootstrap.sh" >&2; exit 2; }
 
 config="$("$FE" --dump_configuration 2>&1)"
@@ -36,6 +39,8 @@ require DEFAULT_INSTANTIATION_MODE tim_used
 require DEFAULT_REMOVE_UNNEEDED_ENTITIES 0
 require MAINTAIN_NEEDED_FLAGS 1
 require SAME_REPR_INTS_INTERCHANGEABLE_IN_IL 0
+require FULLY_RESOLVED_MACRO_POSITIONS 1
+require INCLUDE_EDG_TEST_ATTRIBUTES 0
 require AUTOMATIC_TEMPLATE_INSTANTIATION 0
 require FUNCTION_PROTOTYPE_INSTANTIATION_DEFERRAL_ALLOWED 0
 

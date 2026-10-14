@@ -14,8 +14,21 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 [[ -f "$ROOT/build/env.sh" ]] || { echo "cerastes-fe.sh: run scripts/bootstrap.sh first" >&2; exit 2; }
+# The tree the caller asks for (decision 0005) must be the one build/env.sh was
+# written for; read it before sourcing env.sh.
+requested="${CERASTES_EDG_SRC:-}"
+if [[ -n "$requested" && "$requested" != /* ]]; then
+  echo "cerastes-fe.sh: CERASTES_EDG_SRC=$requested is a relative path; use an absolute path (decision 0005)" >&2
+  exit 2
+fi
+[[ -n "$requested" ]] || requested="$ROOT/third_party/edg"
+requested_real="$(cd "$requested" 2>/dev/null && pwd -P || printf '%s' "$requested")"
 # shellcheck source=/dev/null
 . "$ROOT/build/env.sh"
+if [[ "$requested_real" != "$CERASTES_EDG_SRC_ACTIVE" ]]; then
+  echo "cerastes-fe.sh: build/env.sh is for $CERASTES_EDG_KIND $CERASTES_EDG_SRC_ACTIVE but CERASTES_EDG_SRC selects $requested_real; run scripts/bootstrap.sh" >&2
+  exit 2
+fi
 
 includes="$EDG_CLANG_INCL_SCRAPE"
 for arg in "$@"; do

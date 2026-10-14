@@ -6,16 +6,43 @@
 # layout depends on these macros (decision 0002, "Layout safety").
 # edg_fe: EDG's front-end sources (the ones that make up cpfe) as a library.
 
-set(EDG_SRC "${CMAKE_SOURCE_DIR}/third_party/edg/src")
-set(EDG_GEN "${CMAKE_SOURCE_DIR}/build/edg/src/includes")
+# The EDG tree to compile and the stock build that generated its headers.  The
+# defaults are the pinned submodule and build/edg; scripts/bootstrap.sh passes
+# the CERASTES_EDG_SRC override explicitly (decision 0005).
+set(CERASTES_EDG_SRC "${CMAKE_SOURCE_DIR}/third_party/edg" CACHE PATH
+    "Root of the EDG checkout (the directory that contains src/)")
+set(CERASTES_EDG_GEN "${CMAKE_SOURCE_DIR}/build/edg/src/includes" CACHE PATH
+    "Generated headers (err_codes.h, err_data.h, cmake_defines.h) of a stock build of CERASTES_EDG_SRC")
+set(EDG_SRC "${CERASTES_EDG_SRC}/src")
+set(EDG_GEN "${CERASTES_EDG_GEN}")
+
+if(NOT EXISTS "${EDG_SRC}/il_def.h")
+  message(FATAL_ERROR "CERASTES_EDG_SRC=${CERASTES_EDG_SRC} has no src/il_def.h")
+endif()
 
 foreach(f cmake_defines.h err_codes.h err_data.h)
   if(NOT EXISTS "${EDG_GEN}/${f}")
     message(FATAL_ERROR
       "missing ${EDG_GEN}/${f}: run scripts/bootstrap.sh (it builds the stock "
-      "EDG in build/edg, which generates the headers cerastes reuses)")
+      "EDG, which generates the headers cerastes reuses)")
   endif()
 endforeach()
+
+# The generated headers must come from a stock build of this very tree: a
+# fork may add diagnostics, and a mismatch would silently misnumber them.
+set(_gen_cache "${EDG_GEN}/../../CMakeCache.txt")
+if(NOT EXISTS "${_gen_cache}")
+  message(FATAL_ERROR "${EDG_GEN} is not inside a stock EDG build (no ${_gen_cache})")
+endif()
+file(STRINGS "${_gen_cache}" _gen_home REGEX "^CMAKE_HOME_DIRECTORY:INTERNAL=")
+string(REGEX REPLACE "^CMAKE_HOME_DIRECTORY:INTERNAL=" "" _gen_home "${_gen_home}")
+file(REAL_PATH "${_gen_home}" _gen_home_real)
+file(REAL_PATH "${CERASTES_EDG_SRC}" _edg_src_real)
+if(NOT _gen_home_real STREQUAL _edg_src_real)
+  message(FATAL_ERROR
+    "${EDG_GEN} was generated from ${_gen_home_real}, but CERASTES_EDG_SRC is "
+    "${_edg_src_real}; run scripts/bootstrap.sh (decision 0005)")
+endif()
 
 add_library(edg_config INTERFACE)
 target_include_directories(edg_config SYSTEM INTERFACE "${EDG_SRC}" "${EDG_GEN}")
@@ -37,6 +64,12 @@ target_compile_definitions(edg_config INTERFACE
   DEFAULT_REMOVE_UNNEEDED_ENTITIES=0
   MAINTAIN_NEEDED_FLAGS=1
   SAME_REPR_INTS_INTERCHANGEABLE_IN_IL=0
+  # M2 (0002 amendment): diagnostics inside CERASTES_* macro arguments point at
+  # the argument's own line (layout-affecting: adds orig_seq/orig_column), and
+  # EDG's test attributes (a registered edg:: namespace once 0007 lands) stay
+  # out of the cerastes front end.
+  FULLY_RESOLVED_MACRO_POSITIONS=1
+  INCLUDE_EDG_TEST_ATTRIBUTES=0
   EDG_MAIN=edg_main
   USE_CMAKE_DEFINES)
 

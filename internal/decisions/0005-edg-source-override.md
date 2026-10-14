@@ -55,9 +55,9 @@ Facts that shape the mechanism (checked 2026-10-14):
 1. **The override.** The environment variable `CERASTES_EDG_SRC` names the
    root of an EDG checkout (the directory that contains `src/`).
    - Unset or empty: the active tree is `third_party/edg` (kind `upstream`).
-   - Set: the active tree is its real path (kind `override`). It must exist,
-     contain `src/il_def.h`, be a git work tree, and not be, or be inside,
-     `third_party/edg`.
+   - Set: the active tree is its real path (kind `override`). It must be an
+     absolute path, exist, contain `src/il_def.h`, be the root of a git work
+     tree, and not be, or be inside, `third_party/edg`.
    - It is only ever an environment variable: never read from a file, never
      set in CI, never recorded in a commit.
 2. **Separate build directories per kind**, so that switching never mixes
@@ -77,8 +77,13 @@ Facts that shape the mechanism (checked 2026-10-14):
    real path, HEAD, branch, and a hash of its uncommitted state (tracked
    changes and untracked, non-ignored files).
    - A different tree path wipes that kind's build directories.
-   - A different HEAD or uncommitted state re-runs configure and an
-     incremental build.
+   - Otherwise bootstrap always re-runs the cerastes configure step and an
+     incremental `ninja` of both builds. A different HEAD or uncommitted
+     state is picked up by ninja's dependency tracking.
+   - The stamp also records a hash of the cerastes configuration
+     (`cmake/EdgFrontEnd.cmake` and `src/backend/edg_il.h`). Then
+     `describe --verify-build` rejects a binary built under an older
+     `edg_config` (CP1 audit).
 4. **`build/env.sh` names its tree** (`CERASTES_EDG_KIND`,
    `CERASTES_EDG_SRC_ACTIVE`, `CERASTES_EDG_GEN`). `cerastes-fe.sh`,
    `cpfe.sh` and `run_tests.py` stop with exit status 2 when the
@@ -92,7 +97,11 @@ Facts that shape the mechanism (checked 2026-10-14):
      --untracked-files=all`), is not at the commit its gitlink records in the
      index, or its URL (in `.gitmodules` or the submodule's `origin`) is not
      `https://github.com/edgcpp/compiler.git` (this implements 0003 item 1);
-   - `CERASTES_EDG_SRC` is set and the current branch is `main` (0003 item 8:
+   - the gitlink is not an ancestor of the submodule's `origin/main` (0003
+     item 2: never a fork commit). A stale `origin/main` fails with "fetch
+     origin" (CP1 audit);
+   - `CERASTES_EDG_SRC` is set and HEAD is not a named branch other than
+     `main`. That covers `main` itself and a detached HEAD (0003 item 8:
      `check.sh` on `main` runs against the upstream pin);
    - the override fails the checks of item 1.
 

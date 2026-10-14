@@ -12,6 +12,9 @@ cd "$ROOT"
 
 step() { printf '\n==== %s\n' "$*"; }
 
+step "edg tree"
+python3 scripts/edg_tree.py check
+
 step "build"
 scripts/bootstrap.sh --build-only
 
@@ -40,4 +43,5 @@ step "docs"
 scripts/build_docs.sh
 python3 scripts/check_doc_examples.py --html build/doc
 
+python3 scripts/edg_tree.py describe --verify-build
 printf '\ncheck.sh: all green\n'

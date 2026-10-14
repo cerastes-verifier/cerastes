@@ -87,6 +87,8 @@ file changes.
    | `SAME_REPR_INTS_INTERCHANGEABLE_IN_IL` | 0 | Integer types of the same representation (e.g. `long` and `long long`) stay distinct in the IL; M3's per-type range checks need the declared type. Inherited, now pinned. |
    | `EDG_MAIN` | `edg_main` | Makes the front end callable (`basics.h:232-237`). Our `main` handles our options and calls `edg_main`. |
    | `USE_CMAKE_DEFINES` | 1 | As in EDG's own build: include the generated `cmake_defines.h` |
+   | `FULLY_RESOLVED_MACRO_POSITIONS` | 1 | *M2 amendment.* Diagnostics for text from a macro argument point at the argument's own line and column, not at the start of the invocation (invariant 7; contracts are written through `CERASTES_*` macros, decision 0008). It adds `orig_seq` and `orig_column` to `a_source_position`, so it is layout-affecting and must reach every TU. The probe (M2 Phase 1) showed identical stdout, stderr and exit status on all 42 existing test files. |
+   | `INCLUDE_EDG_TEST_ATTRIBUTES` | 0 | *M2 amendment.* The debug base configuration turns on EDG's own test attributes. With attribute registration (0007) they would include a closed, registered `edg` namespace, whose attributes must never reach the cerastes back end. The setting also changes `an_attribute_kind`'s values, so it is pinned with the rest. |
 
    **`INSTANTIATE_TEMPLATES_EVERYWHERE_USED`.** Turning off both EDG back ends
    also turns on automatic template instantiation (`host_envir.h:960-971`,
@@ -144,7 +146,12 @@ file changes.
    fields) are identical under C++14 and C++20 with these macros. EDG's
    optional softfloat library is linked only when
    `EDG_SOFTFLOAT_LIB_BASE_PATH` is set, and it is not needed here.
-5. **Warning #2803.** EDG always warns "attribute namespace "cerastes" is
+5. *(Amended in M2: once EDG can register attribute namespaces (0007), cerastes
+   registers `cerastes` as a closed namespace, and the M1 probes that used
+   made-up `cerastes::` names were moved to the unregistered namespace
+   `unreg_ns`, byte-identical apart from the name. The text below is the M1
+   state.)*
+   **Warning #2803.** EDG always warns "attribute namespace "cerastes" is
    unrecognized", even when unrecognized attributes are recorded
    (`attribute.c:1108-1121`; known namespaces are hard-coded at `:970-980`).
    cerastes does not suppress it globally: a misspelled namespace such as

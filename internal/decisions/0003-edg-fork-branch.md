@@ -91,7 +91,9 @@ On 2026-10-13 the owner created the branch.
 
    M2 records the exact design in its own decision record before writing the
    code (invariant 6).
-8. **Until a change is upstream.**
+8. **Until a change is upstream.** *(Amended by decision 0005, 2026-10-14:
+   build against the fork with `CERASTES_EDG_SRC`; never check fork commits
+   out inside `third_party/edg`. The first bullet below is superseded.)*
    - To develop or test against an unmerged fork commit locally, add the
      fork as a remote inside `third_party/edg` and check the commit out
      there. `scripts/bootstrap.sh` leaves a submodule that is not at the
