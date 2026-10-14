@@ -23,6 +23,7 @@ command -v shellcheck >/dev/null || { echo "check.sh: shellcheck missing; run sc
 shellcheck scripts/*.sh
 python3 -m py_compile scripts/*.py
 python3 scripts/run_tests.py --check-headers
+python3 scripts/check_doc_examples.py
 
 step "edg configuration"
 scripts/check_edg_config.sh
@@ -34,5 +35,9 @@ python3 scripts/test_run_tests.py
 
 step "tests"
 python3 scripts/run_tests.py
+
+step "docs"
+scripts/build_docs.sh
+python3 scripts/check_doc_examples.py --html build/doc
 
 printf '\ncheck.sh: all green\n'

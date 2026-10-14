@@ -1,0 +1,145 @@
+= Installation
+
+cerastes is built from source. There is no binary release. The only
+supported platform is macOS on Apple silicon: `scripts/bootstrap.sh` stops
+with an error on any other system.
+
+== Requirements
+
+* macOS on Apple silicon (`arm64`).
+* https://brew.sh[Homebrew].
+* The Xcode Command Line Tools (`xcode-select --install`). EDG parses the
+  system pass:[C++] library and SDK headers that they provide, and the build uses
+  their compiler.
+* A network connection on the first run. It clones the submodules, downloads
+  the pinned Z3 release, fetches Silicon's dependencies through sbt and
+  installs the documentation tools from the npm registry.
+* Disk space. A bootstrapped tree takes about 5.3 GB: the `third_party/`
+  checkouts take 4.3 GB (2.8 GB of that is EDG's own test suite), their git
+  objects 0.3 GB, `build/` 0.55 GB and `doc/node_modules` 0.04 GB. The
+  Homebrew packages and the sbt caches add about 0.6 GB. Allow 7 GB.
+
+Everything else is installed by the bootstrap script.
+
+== Build the toolchain
+
+[source,sh]
+----
+git clone https://github.com/cerastes-verifier/cerastes
+cd cerastes
+scripts/bootstrap.sh
+----
+
+`scripts/bootstrap.sh`:
+
+. installs any missing prerequisite with Homebrew: CMake, Ninja, Python,
+  ShellCheck (if they are not already on your `PATH`), Node (if `node` or
+  `npm` is not on your `PATH`), and `sbt` and `openjdk@17`;
+. initializes the git submodules (EDG and Silicon, which carries Silver) that
+  are not yet checked out, and leaves a submodule that is already checked out
+  where it is;
+. builds EDG's stock front end, `cpfe`, in `build/edg`;
+. builds `build/cerastes-fe`, EDG's front end in the configuration cerastes
+  needs, with cerastes's own back end linked in;
+. builds Silicon with `sbt assembly`, unless a stamp shows the jar is current;
+. downloads Z3 4.16.0 into `build/tools` and checks its SHA-256;
+. runs `npm ci` in `doc/` to install the tools that build this documentation,
+  unless the installed packages already match `doc/package-lock.json`;
+. writes `build/env.sh`, which sets, among others, `Z3_EXE`, `SILICON_JAR`,
+  `CERASTES_JAVA`, `CPFE` and `CERASTES_FE` for the pinned tools.
+
+The script is idempotent: running it again changes nothing that is already
+current. `scripts/bootstrap.sh --build-only`, which `scripts/check.sh` uses,
+skips Homebrew, the Z3 download and `npm ci`, rebuilds what is out of date and
+rewrites `build/env.sh`. It still initializes a submodule that is missing, and
+rebuilds Silicon when its stamp is out of date, which can make sbt fetch
+dependencies. A missing or out-of-date `doc/node_modules` is an error that
+tells you to run `scripts/bootstrap.sh`.
+
+In the project's own measurement, a clean clone with Homebrew and sbt caches
+already warm took 1 minute 45 seconds to bootstrap and check. A first run on
+a new machine takes longer.
+
+The Silicon build needs JDK 17, because the sbt version Silicon pins cannot
+run on newer JDKs, and Silicon is tested against Z3 4.16.0. So the script
+uses exactly those, not whatever Homebrew has newest. To run the pinned tools
+by hand, load them into your shell:
+
+[source,sh]
+----
+. build/env.sh
+"$Z3_EXE" --version
+----
+
+The output is `Z3 version 4.16.0 - 64 bit`. The versions of every pinned tool
+are in the
+https://github.com/cerastes-verifier/cerastes/blob/main/docs/decisions/0001-toolchain-pins.md[toolchain pin record].
+
+== Check the installation
+
+[source,sh]
+----
+scripts/check.sh
+----
+
+This builds anything out of date, lints the scripts, checks the EDG
+configuration, runs the test harness's own self-test, runs every test under
+`tests/` and the code examples in this documentation, and finally builds this
+documentation. It ends with `check.sh: all green` when everything passes.
+
+== Try the front end
+
+The front end parses this program, from
+`doc/modules/ROOT/examples/installation/hello.cpp`:
+
+[source,cpp]
+----
+include::example$installation/hello.cpp[tag=hello]
+----
+
+Run EDG's stock front end on it in pass:[C++]20 mode:
+
+[source,sh]
+----
+scripts/cpfe.sh --c++20 --no_code_gen doc/modules/ROOT/examples/installation/hello.cpp
+----
+
+The script finds `build/env.sh` itself, so you do not need to load it first.
+It adds the system header paths and the `--clang_version` that EDG needs.
+When the file is accepted there is no output and the exit status is 0.
+
+`--no_code_gen` matters. Without it, EDG's stock front end also writes its
+translation of the program to a file in the current directory (here,
+`hello.int.c`).
+
+A syntax error is reported as an `error:` message that quotes the source line
+and marks the position, and the exit status is 2.
+
+== Build this documentation
+
+[source,sh]
+----
+scripts/build_docs.sh
+----
+
+The site is written to `build/doc/`; open `build/doc/index.html` in a
+browser. The build fails on any warning, such as a broken cross-reference or
+include. The code examples on these pages are test files, which
+`scripts/check.sh` runs.
+
+== Known limitations
+
+* *macOS on Apple silicon only.* `scripts/bootstrap.sh` refuses to run
+  elsewhere.
+* *Some standard headers do not parse.* With the macOS SDK 27.0 that was
+  checked, the front end reports errors for `<iostream>`, `<string>`,
+  `<vector>`, `<algorithm>` and `<utility>`. There are three causes: Apple's
+  block syntax in the SDK's `_stdlib.h` (all five), pass:[libc++]'s `+__algorithm+`
+  headers, and two undefined `+__GCC_*_SIZE+` macros in pass:[libc++]'s
+  `+__new/interference_size.h+` (all but `<utility>`). `<cstdio>`, `<cstdint>`, `<concepts>`,
+  `<type_traits>` and `<limits>` parse cleanly, which is why the example
+  above uses `<cstdio>`. This is a limitation of the EDG front end at the
+  pinned commit, not of cerastes itself.
+* *The system headers are not pinned.* EDG reads the headers of the Command
+  Line Tools that are installed on your machine, so a different SDK version
+  can change what parses.

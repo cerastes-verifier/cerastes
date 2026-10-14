@@ -5,8 +5,12 @@ Contracts are written as `[[cerastes::...]]` attributes. The EDG front end
 parses them, and the program is encoded into Viper and verified with Silicon
 and Z3. Errors are reported against the C/C++ source.
 
-Status: toolchain and test harness only (milestone M0). See `plan.md` for the
-roadmap and `docs/status.md` for where things stand.
+Status: toolchain, test harness and EDG front-end integration (milestones M0
+to M1.5); nothing is verified yet. See `plan.md` for the roadmap and
+`docs/status.md` for where things stand.
+
+User documentation: https://cerastes.dev/cerastes/doc/ (source in `doc/`;
+build it locally with `scripts/build_docs.sh`).
 
 ## Getting started (macOS on Apple silicon)
 

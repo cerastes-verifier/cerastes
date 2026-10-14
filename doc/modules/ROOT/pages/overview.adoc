@@ -1,0 +1,73 @@
+= Overview
+
+cerastes is a deductive verifier for C and pass:[C++]. It is in development, and
+*it does not verify any program yet*. This page says what it is meant to be
+and what exists today.
+
+== Design
+
+You will write contracts (preconditions, postconditions, loop invariants and
+assertions) as `+[[cerastes::...]]+` attributes in your C or pass:[C++] source. The
+EDG front end parses them as ordinary pass:[C++] expressions. cerastes translates the
+program and its contracts into Viper, a verification language. The Silicon
+verifier, which uses the Z3 solver, then checks them, and cerastes reports
+every failure against a line of your C or pass:[C++] source, not against generated
+code.
+
+The distinguishing goal is to verify templates generically. A function
+template is meant to be proved once, against the properties that its template
+parameters are required to have, and the result is meant to hold for every
+instantiation that meets those requirements. None of this works yet.
+
+== Pipeline
+
+The pipeline is described below. The marks show what exists today.
+
+[source,text]
+----
+C/C++ source + contracts
+        |
+        v
+  EDG front end            built, in the cerastes configuration; parses
+        |                  C and C++, no contract syntax yet
+        v
+  IL walk (back end)       a developer listing of EDG's IL only; no
+        |                  verification IR yet
+        v
+  Viper text (.vpr)        not built
+        |
+        v
+  Silicon, Z3              installed; run only on hand-written Viper test
+        |                  files by the test harness
+        v
+  Errors at C/C++ lines    not built
+----
+
+== Current status
+
+Nothing is verified yet. What exists is:
+
+* A bootstrap script that builds the whole toolchain on macOS with Apple
+  silicon (xref:installation.adoc[Installation]).
+* A test harness that runs hand-written Viper files through Silicon and
+  checks the errors it reports, and that runs the front end on C and pass:[C++]
+  files.
+* The EDG front end, built in the configuration cerastes needs, with an
+  in-process back end that prints a listing of EDG's intermediate language.
+  It is developer tooling: it exists to show that EDG's representation of
+  templates carries what generic verification needs.
+
+There is no annotation syntax and no `cerastes verify` command yet.
+
+== Following progress
+
+* Source: https://github.com/cerastes-verifier/cerastes
+* The roadmap is
+  https://github.com/cerastes-verifier/cerastes/blob/main/plan.md[`plan.md`].
+* The latest state, with what is done and what is not, is
+  https://github.com/cerastes-verifier/cerastes/blob/main/docs/status.md[`docs/status.md`].
+
+== License
+
+Apache License v2.0 with LLVM Exceptions. The submodules under `third_party/`
+carry their own licenses.

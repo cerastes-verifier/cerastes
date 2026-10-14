@@ -28,19 +28,33 @@ Facts checked on 2026-10-13:
 - The org site `cerastes-verifier.github.io` has the custom domain
   `cerastes.dev`. GitHub therefore serves the org's project sites under that
   domain: `https://cerastes-verifier.github.io/cerastes/` answers
-  `301 → http://cerastes.dev/cerastes/`.
+  `301 → https://cerastes.dev/cerastes/`. That much is GitHub's default; what
+  appears below `/cerastes/` is whatever the deployed Pages artifact
+  contains.
+- On 2026-10-13 `https://cerastes.dev` served GitHub's `*.github.io`
+  certificate: `www` was proxied by Cloudflare, which blocks GitHub's
+  certificate issuance. The owner fixed the DNS and enabled "Enforce HTTPS"
+  on 2026-10-14, and the domain now has its own Let's Encrypt certificate.
 
 ## Decision
 
-1. **Hosting.** The docs are this repository's GitHub Pages project site,
-   deployed by GitHub Actions from this repository. The published address is
-   **`https://cerastes.dev/cerastes/`**. It is interim: the owner fixes the
-   final address later.
-   - `site.url` is set in one place, `doc/local-playbook.yml`.
-   - Antora writes relative links, so moving the site means changing that one
-     value, plus the URL lines in `CLAUDE.md` and `README.md`. Possible
-     targets include a custom domain on this repo, a rename, or a path the
-     website serves.
+1. **Hosting.** The docs are part of this repository's GitHub Pages project
+   site, deployed by GitHub Actions from this repository, at
+   **`https://cerastes.dev/cerastes/doc/`**.
+   - **Org convention** (owner, 2026-10-14). Every repository of the
+     organization serves its user docs at `https://cerastes.dev/<repo>/doc/`.
+     GitHub supplies `/<repo>/`, which is where it serves the repository's
+     project site under the org's custom domain. The `/doc/` part is a layout
+     each repository builds into its Pages artifact. Here, the workflow
+     stages the Antora output at `doc/` in the artifact, and adds a root
+     `index.html` that redirects `/cerastes/` to `doc/`.
+   - **Where the address is set.** `site.url` is set in one place,
+     `doc/local-playbook.yml`. Local builds still go to `build/doc/`. Antora
+     writes relative links in ordinary pages, so they work under any prefix.
+     `site.url` feeds the sitemap, the canonical links and `404.html`, whose
+     links are root-absolute (`/cerastes/doc/_/…`). GitHub Pages serves a
+     custom 404 page only from the site root, so the workflow also copies
+     `404.html` to the artifact root, where those links still resolve.
 2. **Rejected alternatives.**
    - A docs-only repo: the owner does not want one. It would also have
      needed a cross-repo dispatch token and a nightly backstop.
@@ -57,14 +71,26 @@ Facts checked on 2026-10-13:
      The build runs with `--log-failure-level=warn`, so a broken xref, include
      or attribute fails it.
 4. **CI and triggers** (`.github/workflows/docs.yml`).
-   - Pull requests touching `doc/**`, `scripts/build_docs.sh` or the workflow
-     run the docs build only.
-   - Pushes to `main` that touch the same paths build and deploy, and so does
-     `workflow_dispatch`.
+   - Pull requests touching `doc/**`, `scripts/build_docs.sh`,
+     `scripts/check_doc_examples.py`, `scripts/run_tests.py` (which the lint
+     imports) or the workflow run the source lint, the docs build and the
+     rendered-HTML lint (item 7), but do not deploy.
+   - Pushes to `main` that touch the same paths do the same, then deploy, and
+     so does `workflow_dispatch`.
    - Only the deploy job gets `pages: write` and `id-token: write`;
-     everything else is `contents: read`.
-   - CI runs only the docs build (owner, question 5). The doc examples run as
-     tests in `check.sh`, which needs the EDG and Silicon toolchain. CI for the
+     everything else is `contents: read`, and checkout does not keep its
+     credentials.
+   - Actions are pinned to full commit SHAs, with the release in a comment,
+     and the runner is `ubuntu-24.04`. `npm ci` runs with `--ignore-scripts`.
+   - Concurrency is set for the whole workflow. Runs that deploy (pushes and
+     dispatches on `main`) share one group and do not cancel a running deploy.
+     GitHub keeps at most one pending run per group, so a newer push replaces
+     an older pending one, and deploys land in order with the newest last. All
+     other runs cancel their own superseded runs and never queue behind a
+     deploy.
+   - CI runs only the docs: the lints and the build (owner, question 5). The
+     doc examples run as tests in `check.sh`, which needs the EDG and Silicon
+     toolchain. CI for the
      rest of the repository is follow-up work. If macOS runners cannot
      reproduce the toolchain-tied goldens, the owner's fallback is x64 in
      Docker.
@@ -74,8 +100,9 @@ Facts checked on 2026-10-13:
      and the favicons. They are taken unchanged from the brand kit and the
      website.
    - The bundle is a vendored zip in `doc/ui/`. Its SHA-256 is recorded in
-     0001 and in `doc/ui/README.md`, and `scripts/build_docs.sh` checks it
-     before every build. The default UI has no versioned release URL (its
+     0001 and in `doc/ui/README.md`. `scripts/build_docs.sh` checks it before
+     every build and passes it to Antora with `--ui-bundle-url`, so a
+     playbook cannot substitute another bundle. The default UI has no versioned release URL (its
      published URL follows `HEAD`) and no npm package, so vendoring is the
      only pin that cannot move.
    - The Boost UI bundle is not used.
@@ -90,9 +117,50 @@ Facts checked on 2026-10-13:
      shows the expectation header.
    - **Example files are ordinary tests.** They have `// expect:` headers,
      and `scripts/run_tests.py` discovers them by default alongside `tests/`.
-   - **Lint.** `scripts/check_doc_examples.py` rejects an inline C/C++/Viper
-     block, an untagged include, an include of a file that is not a valid
-     test, and an example no page uses.
+   - **Two checks, in `check.sh` and in CI.**
+     - *Source lint.* `scripts/check_doc_examples.py` reads the pages. A
+       C/C++/Viper block may hold exactly one line,
+       `include::example$<test>[tag(s)=…]`. It rejects, among others
+       (`tests/README.md` has the full list):
+       - inline code, `partial$` and attachment includes, and untagged
+         includes;
+       - tags that are not plain `// tag::x[]` line comments, or that sit in
+         dead code (`#if 0`, comments, raw strings, macro arguments, `\`
+         continuations);
+       - an example that no page uses, and any file under `examples/`
+         that is not a test or a golden;
+       - C/C++/Viper source anywhere else under `doc/modules/`;
+       - a module other than `ROOT`;
+       - a block whose language is undeclared or not allowed, and a
+         component-wide `source-language`;
+       - literal and verse blocks, indented paragraphs, `l`/`m` table cells,
+         passthrough blocks, raw HTML in `pass:[…]`, and `subs=` overrides.
+       It is a best-effort reader, not an AsciiDoc parser.
+     - *Rendered check (the backstop).* After the build,
+       `scripts/check_doc_examples.py --html build/doc` classifies every
+       preformatted block (`<pre>`) in the built pages:
+       - a block in a cerastes language (C, C++, Viper) must equal a tagged
+         region of a test under `examples/`;
+       - a `sh`, `console` or `text` block is allowed;
+       - anything else is an error: no language, another language, or raw
+         HTML.
+
+       It also fails if the site has fewer cerastes-language blocks than the
+       pages declare, and on rendered text that shows broken inline markup.
+       Together with the source lint's ban on raw HTML (`++++`,
+       `pass:[<…]`, `subs=`), this means that code the reader sees in a block
+       is code the harness runs, unless it is written into an explicitly
+       non-code listing. That case is left to review (below), as is raw HTML
+       that evades both checks, which needs deliberate effort that review
+       would see.
+     - *Inline markup.* Some broken markup leaves well-formed HTML (a
+       `libc++` pair that swallows text, a stray `**` pair), so the source
+       lint is the only guard for it. Any `++` in prose must be inside
+       `pass:[…]` (C++ is written `pass:[C++]`). A doubled `__`, `**` or `##`
+       in one paragraph must be inside a literal span (`+…+`). Only the
+       languages above may be declared on a block.
+     - *What review still owns.* Content of a `text` block (C++ written there
+       is not tested), and inline code spans in prose.
    - **Shell command listings** (`scripts/bootstrap.sh`, …) are not examples.
      They must name commands and options that exist, and review checks them,
      as it checks every claim on a page.
@@ -102,9 +170,9 @@ Facts checked on 2026-10-13:
 
 ## Consequences
 
-- **Address.** The address in plan.md and the M1.5 acceptance
-  (`https://cerastes.dev/doc/`) is replaced by `https://cerastes.dev/cerastes/`
-  until the owner fixes the final address.
+- **Address.** The address in plan.md and the M1.5 acceptance,
+  `https://cerastes.dev/doc/`, becomes `https://cerastes.dev/cerastes/doc/`.
+  plan.md is updated to match.
 - **Owner steps that remain.** Of plan.md's four:
   - the `doc` repo and the dispatch token are no longer needed;
   - enabling Pages is done;

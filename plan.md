@@ -36,7 +36,7 @@ VIR exists so the encoder does not depend on EDG's IL directly. If Gate G1 fails
 Cerastes/
   CLAUDE.md                 # always-loaded rules (template in Appendix A)
   plan.md                   # this file
-  doc/                      # user documentation: Antora component, published at https://cerastes.dev/doc/ (M1.5+)
+  doc/                      # user documentation: Antora component, published at https://cerastes.dev/cerastes/doc/ (M1.5+)
     antora.yml  local-playbook.yml  package.json  ui/
     modules/ROOT/           # nav.adoc, pages/, examples/ (every example is a test), images/
   docs/                     # developer documentation (not published)
@@ -167,11 +167,11 @@ Every test file starts with expectation lines that `scripts/run_tests.py` checks
 
 ## M1.5 — User documentation site (Antora)
 
-**Goal:** user documentation written in AsciiDoc in this repo, built with Antora, checked by `check.sh` and published at https://cerastes.dev/doc/. From here on, every milestone documents what it makes user-visible (invariant 9). This milestone depends only on M0. Run it before M2, which writes the first reference page.
+**Goal:** user documentation written in AsciiDoc in this repo, built with Antora, checked by `check.sh` and published at https://cerastes.dev/cerastes/doc/. From here on, every milestone documents what it makes user-visible (invariant 9). This milestone depends only on M0. Run it before M2, which writes the first reference page.
 
 **Hosting** (decision record `0004-docs-site.md`)
 
-> **Superseded by decision 0004 (owner, 2026-10-13):** there is no docs-only repo. The docs are this repository's own GitHub Pages site, deployed by its Actions workflow, at the interim address https://cerastes.dev/cerastes/; the owner fixes the final address later. The text below is the original plan.
+> **Superseded by decision 0004 (owner, 2026-10-13):** there is no docs-only repo. The docs are this repository's own GitHub Pages site, deployed by its Actions workflow, at https://cerastes.dev/cerastes/doc/ (the org convention is `cerastes.dev/<repo>/doc/`). The text below is the original plan; its other mentions of the address have been updated.
 
 - **Default:** a dedicated org repo `cerastes-verifier/doc` with GitHub Pages (source: GitHub Actions). The org site `cerastes-verifier.github.io` owns the custom domain `cerastes.dev`, and GitHub serves an org's project sites under that domain. A repo named `doc` therefore publishes at `https://cerastes.dev/doc/` with no proxy rules and no change to the website's deployment.
 - That repo holds only the publishing playbook and workflow:
@@ -204,8 +204,8 @@ Every test file starts with expectation lines that `scripts/run_tests.py` checks
 
 **Acceptance**
 - `scripts/check.sh` builds the docs with zero Antora warnings and runs every doc example as a test.
-- `curl -sI https://cerastes.dev/doc/` returns 200, search works, and the site matches cerastes.dev's branding (screenshot referenced in the status entry).
-- A docs-only commit to `main` appears at https://cerastes.dev/doc/ with no manual step.
+- `curl -sI https://cerastes.dev/cerastes/doc/` returns 200, search works, and the site matches cerastes.dev's branding (screenshot referenced in the status entry).
+- A docs-only commit to `main` appears at https://cerastes.dev/cerastes/doc/ with no manual step.
 
 **Out of scope:**
 - pages for unimplemented features;
@@ -249,7 +249,7 @@ There is deliberately no user-facing `assume`.
 - `tests/annotations/` positive cases: `il_display` golden output shows each attribute attached to the right entity with a typed expression tree, and inside templates the expressions are dependent.
 - Negative cases produce the specific EDG diagnostic.
 - The same files compile with Apple clang (and GCC if installed) using `-std=c++20 -Wall -Wextra -Werror`, without `__CERASTES__`, and with zero warnings.
-- The annotation reference is published at https://cerastes.dev/doc/, and each of its examples runs in `check.sh`.
+- The annotation reference is published at https://cerastes.dev/cerastes/doc/, and each of its examples runs in `check.sh`.
 
 **Out of scope:** verification.
 
@@ -446,7 +446,7 @@ next session. Commit with a message referencing M<k>.
 ```markdown
 # cerastes — C/C++ verifier (EDG → Viper/Silicon → Z3)
 
-Plan: @plan.md   Status: @docs/status.md   User docs: doc/ (Antora → https://cerastes.dev/doc/)
+Plan: @plan.md   Status: @docs/status.md   User docs: doc/ (Antora → https://cerastes.dev/cerastes/doc/)
 
 ## Commands
 - Bootstrap: scripts/bootstrap.sh

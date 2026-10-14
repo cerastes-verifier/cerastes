@@ -4,6 +4,115 @@ Session handoff log, newest first. Each entry says what is done, what is not,
 any surprises, the decision records added and the exact first step for the
 next session.
 
+## M1.5 — User documentation site (2026-10-14): done locally; live deploy pending the owner's push
+
+Read `docs/handoff.md` next.
+
+**Owner decisions this session**
+- **Q1–Q8.** The answers to the M1 handoff questions are folded into
+  0001, 0003, CLAUDE.md and plan.md (commit `78c8010`).
+- **No docs-only repo** (Q4). The docs are this repository's own Pages site.
+- **The address** is **https://cerastes.dev/cerastes/doc/**. The org
+  convention is `cerastes.dev/<repo>/doc/` (decision 0004).
+- **C++ in AsciiDoc prose** is written `pass:[C++]`.
+- **Developer docs** move from the `docs` directory to `internal` (a
+  separate mechanical commit after the M1.5 commit).
+- **Scope for the EDG proposal.** VeriFast parity and beyond, with specs in
+  C++ grammar inside `[[cerastes::…]]` and no new EDG grammar.
+
+**Done**
+- **Antora component in `doc/`.**
+  - `antora.yml` (`ROOT`, unversioned);
+  - `local-playbook.yml` (builds the worktree into `build/doc/`, fails on
+    warnings, lunr search);
+  - `package.json` and its lockfile (Antora 3.2.1 and lunr 1.0.0-alpha.13,
+    exact pins);
+  - `.node-version` (26).
+- **UI.** The default Antora UI, vendored as `doc/ui/antora-ui-default.zip`
+  (SHA-256 checked, and forced with `--ui-bundle-url`), plus supplemental
+  files in `doc/ui/supplemental/`:
+  - an Ink navbar with the lockup;
+  - Archivo;
+  - the favicons;
+  - Sand used only as a graphic on light grounds;
+  - links in a docs-only `#7f5f2d`.
+
+  The assets are byte-identical copies from the brand kit and the website.
+  Provenance is in `doc/ui/README.md`.
+- **Pages.** Overview (what cerastes is, the pipeline, honest status) and
+  Installation (requirements, bootstrap, check, trying the front end,
+  building the docs, known limitations). Every claim was checked: a claims
+  ledger by il-analyst, then re-verification by the auditor.
+- **Examples are tests.**
+  - `doc/modules/ROOT/examples/installation/hello.cpp` (`frontend-ok`).
+  - `run_tests.py` discovers `doc/modules/ROOT/examples/` by default, and a
+    missing default directory is an error.
+  - `scripts/check_doc_examples.py` is the source lint. Its rules (a)–(e) and
+    their extensions are in `tests/README.md`.
+  - `--html build/doc` is the rendered backstop.
+- **Scripts.**
+  - `scripts/build_docs.sh [PLAYBOOK]` is new.
+  - `bootstrap.sh` installs Homebrew `node` and runs `npm ci --ignore-scripts`
+    in `doc/`, behind a stamp of the lockfile and `package.json` that is
+    checked against `node_modules/.package-lock.json`. With `--build-only`, a
+    stale install is an error.
+  - `check.sh` adds the source lint to its lint step, and a final docs step:
+    the build, then `--html`.
+- **CI** (`.github/workflows/docs.yml`).
+  - Pull requests run the lint, the build and `--html`.
+  - Pushes to `main` that touch `doc/**` or the doc scripts do the same, then
+    deploy to Pages. The Antora site is staged at `doc/` in the artifact, with
+    a root redirect and a root `404.html`.
+  - Actions are pinned to commit SHAs, on `ubuntu-24.04`. Deploys share a
+    concurrency group, so they land in order. Least privilege, and checkout
+    does not keep its credentials.
+- **Self-tests** went from 140 to 305. Each new check has a twin. The
+  end-to-end twins build real Antora sites and show three things:
+  - warnings fail `build_docs.sh`, but not bare Antora;
+  - lint-evading pages (q1–q18, e1/e2/e5) fail the source lint, `--html`,
+    or both;
+  - the `check.sh` and CI wiring cannot be weakened (`|| true`, comments,
+    `continue-on-error`).
+- **Upstream draft for the owner.** `docs/upstream/attribute-registration.md`
+  plus 16 probes (handoff §5).
+- **Decision records.**
+  - 0004-docs-site (accepted).
+  - 0001 gains the docs pins and the GitHub Actions SHAs, and corrects the
+    libc++ limitation: `<utility>` fails too, and there are three causes.
+  - 0003 records the owner's push and pointer answers.
+
+**Acceptance.** See "M1.5 acceptance" in `docs/handoff.md`.
+- **Met locally:** zero-warning docs build in `check.sh`; every doc example
+  runs as a test; branding matches cerastes.dev. The screenshots are
+  `docs/images/m1.5-docs-overview.png`, served under `/cerastes/doc/`, and
+  `docs/images/m1.5-website-reference.png`.
+- **Pending the owner's push:** the live URL returns 200, search works live,
+  and a docs-only commit appears with no manual step.
+
+**Not done / deferred**
+- CI for the rest of the repository; the owner wants it soon, on x64 Docker
+  if macOS runners cannot reproduce the goldens. It needs a decision record.
+- The "Documentation" link on cerastes.dev (website repo, owner).
+- Fast-forwarding the fork branch (owner).
+
+**Surprises**
+- `https://cerastes.dev` had no certificate for the custom domain (a
+  Cloudflare-proxied `www`); `.dev` is HSTS-preloaded. The owner fixed it.
+- Antora resolves non-`./` playbook paths against the current directory.
+- A bare `C++` in AsciiDoc swallows text silently.
+- `<utility>` was misreported as parsing in M0.
+- The default Antora UI hard-codes its colours, so `cerastes.css` overrides
+  selectors.
+
+**Decision records added:** 0004-docs-site.
+
+**First step for the next session (M2).** Read `CLAUDE.md`, the M2 section
+of `plan.md`, this file, `docs/handoff.md` §5 and the upstream draft
+`docs/upstream/attribute-registration.md`. Check whether the owner has
+fast-forwarded the fork branch and filed the Discussion (handoff §8). Then
+write M2's decision record for the attribute design (invariant 6), sized for
+the full scope in the draft.
+
 ## Decision 0003 (2026-10-13): EDG fork branch
 
 The owner created branch `cerastes` on the fork

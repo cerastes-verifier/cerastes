@@ -1,0 +1,32 @@
+{{!--
+  Replaces the default UI's header: the default has a placeholder menu
+  (Products, Services, Download).  Kept from the default: the lunr search
+  box, which is shown when env.SITE_SEARCH_PROVIDER is set by
+  @antora/lunr-extension, and the burger button.
+--}}
+<header class="header">
+  <nav class="navbar">
+    <div class="navbar-brand">
+      <a class="navbar-item brand" href="{{{siteRootPath}}}/index.html" aria-label="cerastes documentation home">
+        <img src="{{{uiRootPath}}}/img/cerastes-lockup-on-dark.svg" alt="cerastes" width="180" height="40">
+      </a>
+      {{#if env.SITE_SEARCH_PROVIDER}}
+      <div class="navbar-item search hide-for-print">
+        <div id="search-field" class="field">
+          <input id="search-input" type="text" placeholder="Search the docs"{{#if page.home}} autofocus{{/if}}>
+        </div>
+      </div>
+      {{/if}}
+      <button class="navbar-burger" aria-controls="topbar-nav" aria-expanded="false" aria-label="Toggle main menu">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+    </div>
+    <div id="topbar-nav" class="navbar-menu">
+      <div class="navbar-end">
+        <a class="navbar-item" href="https://github.com/cerastes-verifier/cerastes">GitHub</a>
+      </div>
+    </div>
+  </nav>
+</header>

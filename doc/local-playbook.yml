@@ -1,0 +1,40 @@
+# Builds the user documentation (doc/) from the working tree into build/doc/.
+# Used by scripts/build_docs.sh, scripts/check.sh and .github/workflows/docs.yml.
+# Decision record: docs/decisions/0004-docs-site.md.
+#
+# In Antora, a path that starts with ./ (the UI bundle, supplemental files)
+# resolves against this file's directory; other relative paths (the content
+# url, output dir, cache dir) resolve against the current directory.
+# scripts/build_docs.sh therefore runs Antora from this file's directory, and
+# passes --ui-bundle-url so that the checksummed zip is always the one used.
+site:
+  title: cerastes
+  # Interim address (decision 0004); this is the only place it is set.
+  url: https://cerastes.dev/cerastes/doc
+  start_page: ROOT::overview.adoc
+content:
+  sources:
+    - url: ..
+      start_path: doc
+      # HEAD: the checked-out branch.  For a local repository Antora reads the
+      # worktree of that branch, so uncommitted edits are built; in CI it is
+      # the commit that was checked out.
+      branches: HEAD
+      edit_url: 'https://github.com/cerastes-verifier/cerastes/edit/main/{path}'
+ui:
+  bundle:
+    # Vendored, checksummed copy of the Antora default UI (doc/ui/README.md).
+    url: ./ui/antora-ui-default.zip
+    snapshot: false
+  supplemental_files: ./ui/supplemental
+output:
+  dir: ../build/doc
+  clean: true
+runtime:
+  cache_dir: ../build/antora-cache
+  fetch: false
+  log:
+    failure_level: warn
+antora:
+  extensions:
+    - '@antora/lunr-extension'

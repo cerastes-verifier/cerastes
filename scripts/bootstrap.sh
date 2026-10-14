@@ -4,13 +4,18 @@
 #
 # Idempotent macOS (Apple silicon) bootstrap: installs prerequisites, checks
 # out the submodules, builds EDG (stock, for scripts/cpfe.sh, and the cerastes
-# configuration, build/cerastes-fe), builds Silicon, fetches the pinned Z3 and
-# writes build/env.sh.  Every pin is recorded in docs/decisions/0001-toolchain-pins.md;
+# configuration, build/cerastes-fe), builds Silicon, fetches the pinned Z3,
+# installs the documentation tool chain (Node, `npm ci` in doc/) and writes
+# build/env.sh.  Every pin is recorded in docs/decisions/0001-toolchain-pins.md;
 # change a pin here and there together.
 #
 # Usage: scripts/bootstrap.sh [--build-only] [--force-silicon]
-#   --build-only     skip Homebrew and downloads; only (re)build and rewrite
-#                    build/env.sh.  Used by scripts/check.sh.
+#   --build-only     skip Homebrew, the Z3 download and `npm ci`.  It still
+#                    initializes missing submodules, rebuilds EDG, cerastes-fe
+#                    and (when its stamp is stale) Silicon, where sbt may fetch
+#                    dependencies, and rewrites build/env.sh.  Stale or missing
+#                    documentation dependencies (doc/node_modules) are an
+#                    error that points here.  Used by scripts/check.sh.
 #   --force-silicon  rebuild silicon.jar even if the build stamp is current.
 
 set -euo pipefail
@@ -27,13 +32,15 @@ Z3_ASSET=z3-4.16.0-arm64-osx-15.7.3
 Z3_SHA256=41828fa07d5cb77bfaee326e8e6dac074f26329c09c633f9e66012bb917cf8ae
 Z3_URL="https://github.com/Z3Prover/z3/releases/download/z3-$Z3_VERSION/$Z3_ASSET.zip"
 
+DOC_NODE_VERSION_FILE="$ROOT/doc/.node-version"   # Node major; CI reads it too
+
 BUILD_ONLY=0
 FORCE_SILICON=0
 for arg in "$@"; do
   case "$arg" in
     --build-only) BUILD_ONLY=1 ;;
     --force-silicon) FORCE_SILICON=1 ;;
-    -h|--help) sed -n '5,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '5,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "bootstrap.sh: unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -60,6 +67,11 @@ if [[ $BUILD_ONLY -eq 0 ]]; then
       brew install "$formula"
     fi
   done
+  # Node builds the documentation (doc/, Antora); any node and npm on PATH do.
+  if ! command -v node >/dev/null || ! command -v npm >/dev/null; then
+    log "brew install node"
+    brew install node
+  fi
   for formula in sbt "$JDK_FORMULA"; do
     if ! brew list --formula --versions "$formula" >/dev/null; then
       log "brew install $formula"
@@ -162,6 +174,56 @@ if [[ ! -x "$Z3_EXE" ]]; then
 fi
 "$Z3_EXE" --version | grep -q "Z3 version $Z3_VERSION" || die "$Z3_EXE is not Z3 $Z3_VERSION"
 
+# ---- 5b. Documentation dependencies (doc/node_modules) ------------------------
+# `npm ci` installs exactly what doc/package-lock.json pins.  The stamp records
+# package.json, the lockfile and the node major it was installed with; the
+# installed tree is also compared with the lockfile (see doc_modules_match_lock).
+DOC_DIR="$ROOT/doc"
+DOC_STAMP="$BUILD/doc-npm.stamp"
+command -v node >/dev/null || die "node is missing; run scripts/bootstrap.sh"
+NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
+WANT_NODE_MAJOR="$(tr -d '[:space:]' < "$DOC_NODE_VERSION_FILE")"
+if [[ "$NODE_MAJOR" != "$WANT_NODE_MAJOR" ]]; then
+  warn "node $(node -v) found; doc/.node-version asks for $WANT_NODE_MAJOR (CI uses it)"
+fi
+doc_stamp() {
+  # package.json and the lockfile, plus the node major.
+  printf 'lock %s\npackage %s\nnode %s\n' \
+    "$(shasum -a 256 "$DOC_DIR/package-lock.json" | awk '{print $1}')" \
+    "$(shasum -a 256 "$DOC_DIR/package.json" | awk '{print $1}')" "$NODE_MAJOR"
+}
+# npm writes node_modules/.package-lock.json when it installs; it equals the
+# lockfile's content for the installed tree only if nothing was changed by hand
+# (compared on the "packages" map, which both files carry).
+doc_modules_match_lock() {
+  [[ -f "$DOC_DIR/node_modules/.package-lock.json" ]] || return 1
+  node -e '
+    const fs = require("fs");
+    const lock = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).packages;
+    const hidden = JSON.parse(fs.readFileSync(process.argv[2], "utf8")).packages;
+    // The hidden lockfile has no root entry ("") and omits packages that are not installed.
+    for (const [k, v] of Object.entries(hidden)) {
+      const l = lock[k];
+      if (!l || l.version !== v.version || l.resolved !== v.resolved || l.integrity !== v.integrity) process.exit(1);
+    }
+    for (const [k, l] of Object.entries(lock)) {
+      if (k !== "" && !l.optional && !l.peer && !hidden[k]) process.exit(1);
+    }
+  ' "$DOC_DIR/package-lock.json" "$DOC_DIR/node_modules/.package-lock.json"
+}
+if [[ -d "$DOC_DIR/node_modules" && -f "$DOC_STAMP" && "$(doc_stamp)" == "$(cat "$DOC_STAMP")" ]] \
+   && doc_modules_match_lock; then
+  log "doc dependencies are current (doc/node_modules)"
+else
+  [[ $BUILD_ONLY -eq 0 ]] || die "doc/node_modules is missing or stale; run scripts/bootstrap.sh"
+  log "npm ci (doc/)"
+  (cd "$DOC_DIR" && npm ci --ignore-scripts --no-audit --no-fund) > "$BUILD/doc-npm.log" 2>&1 \
+    || { tail -20 "$BUILD/doc-npm.log"; die "npm ci failed (build/doc-npm.log)"; }
+  doc_stamp > "$DOC_STAMP"
+fi
+ANTORA_VERSION="$(cd "$DOC_DIR" && npx --no-install antora --version 2>/dev/null | head -1 | sed 's/^@antora\/cli: //')" \
+  || die "antora is not runnable from doc/node_modules"
+
 # ---- 6. build/env.sh --------------------------------------------------------------
 # EDG has no standard library of its own on macOS; it parses the system libc++
 # and SDK headers while emulating the installed clang.
@@ -195,4 +257,6 @@ printf '    %-8s %s\n' \
   z3 "$("$Z3_EXE" --version)" \
   cpfe "${EDG_BUILD#"$ROOT"/}/bin/cpfe" \
   cerastes-fe "build/cerastes-fe" \
-  silicon "${SILICON_JAR#"$ROOT"/}"
+  silicon "${SILICON_JAR#"$ROOT"/}" \
+  node "$(node -v), npm $(npm -v)" \
+  antora "$ANTORA_VERSION"

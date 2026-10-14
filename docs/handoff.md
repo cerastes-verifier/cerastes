@@ -1,24 +1,89 @@
-# Handoff after M1 (2026-10-13)
+# Handoff after M1.5 (2026-10-14)
 
 The next session reads this file after `CLAUDE.md`, its own milestone in
 `plan.md`, `docs/status.md` and `docs/decisions/`. `status.md` has the formal
-M1 entry. This file adds what a cold start would otherwise have to rediscover:
-what to look at again, where the friction was, and what M1.5, M2 and M4
-inherit.
+M1.5 entry. This file adds what a cold start would otherwise have to
+rediscover. The M1 material that is still open (§3 and §6) is carried over
+from the M1 handoff unchanged.
 
 ## 1. State in one paragraph
 
-Gate G1 passed (`docs/il-inventory.md`, "Gate G1 verdict"). EDG's prototype IL
-carries the generic bodies, the instance links, the constraints and the
-`[[cerastes::…]]` attributes the plan needs. cerastes compiles EDG's front end
-itself, with its own configuration, and links an in-process `back_end()`
-(decision 0002). It does this without touching `third_party/edg`.
-`build/cerastes-fe` is that front end. `--cerastes_walk` prints a
-deterministic listing of the IL, and `--il_display` prints EDG's own dump.
-Every G1 fact is checked by golden tests in `tests/il/`. A pin move that
-breaks one fails `check.sh`. `check.sh` is green in about 13 s.
+Gate G1 passed in M1. M1.5 added the user documentation:
+- an Antora component in `doc/`, published from this repository's GitHub
+  Pages at **https://cerastes.dev/cerastes/doc/**. The org convention is
+  `cerastes.dev/<repo>/doc/` (decision 0004);
+- two pages, Overview and Installation, describing only what exists;
+- a branded UI (vendored default UI plus supplemental files);
+- lunr search;
+- a CI workflow that lints, builds and deploys.
 
-## 2. Things to look at again
+Every C/C++/Viper code block on a page is a tested example. Two checks
+enforce it:
+- a source lint;
+- a rendered-HTML backstop, which requires every code block to equal a tagged
+  region of a test.
+
+`check.sh` builds the docs and fails on any Antora warning. It is green in
+about 32 s (305 self-tests, 45 tests).
+
+Developer docs moved from the `docs` directory to `internal` at the end of
+M1.5 (owner: two folders named `doc` and `docs` were confusing).
+
+## 2. M1.5: things to look at again
+
+1. **The rendered-HTML check is the real guarantee.**
+   - `scripts/check_doc_examples.py` reads AsciiDoc line by line. It is
+     best-effort, not a parser. Its known gaps are in `tests/README.md`:
+     nested tables, an indented paragraph in a list continuation, and a
+     `++++` pass block with raw HTML.
+   - `--html build/doc` catches any of those in the built site.
+   - Neither check can tell that a block shows a region of the *wrong*
+     example file, only that it equals some tested region.
+   - One include per code block (`tags=a;b` to combine).
+2. **Antora path resolution.**
+   - In a playbook, `./`-prefixed paths resolve against the playbook's
+     directory; everything else, including `..`, resolves against the current
+     directory. `scripts/build_docs.sh` therefore changes into the playbook's
+     directory first.
+   - It forces the checksummed UI bundle with `--ui-bundle-url`, so no
+     playbook can substitute another.
+3. **`site.url` matters for `404.html`.**
+   - Ordinary pages use relative links. `404.html` uses root-absolute
+     `/cerastes/doc/_/…` links, which come from `site.url`.
+   - The workflow copies `404.html` to the root of the Pages artifact, the
+     only place GitHub serves a custom 404 page from, and writes a root
+     `index.html` that redirects to `doc/`.
+   - If the address changes, change `site.url` (`doc/local-playbook.yml`), the
+     staging step's canonical link in `.github/workflows/docs.yml`, and the URL
+     lines in `CLAUDE.md` and `README.md`.
+4. **The npm stamp checks metadata only.** `bootstrap.sh` compares
+   `doc/node_modules/.package-lock.json` with the lockfile (versions,
+   resolved URLs, integrity) and hashes `package.json`. Files edited in place
+   inside `node_modules` are not detected.
+5. **`--build-only` is not offline.** It skips Homebrew, the Z3 download and
+   `npm ci`. It still initializes a missing submodule and rebuilds Silicon on
+   a stale stamp, which can make sbt fetch dependencies. This is deliberate:
+   `check.sh` must rebuild after a pin move. The help text and the
+   Installation page say so.
+6. **Node is pinned by major only** (`doc/.node-version` = 26, read by CI).
+   Bootstrap installs Homebrew's floating `node`. Versioned `node@NN`
+   formulae exist if the floating major ever breaks Antora.
+7. **`pass:[C++]`.** In AsciiDoc prose a bare `C++` opens a passthrough that
+   silently swallows text, and Antora does not warn. The owner's rule is to
+   write `pass:[C++]`, and the lint enforces it (rule e).
+8. **The headers EDG cannot parse have three causes, not one.** The
+   correction is in 0001:
+   - `_stdlib.h` block syntax, which also breaks `<utility>`;
+   - `__algorithm/find.h`;
+   - `__new/interference_size.h`.
+
+   M0 had listed `<utility>` as clean.
+9. **The docs-only link colour.** Sand fails contrast as text on white, and
+   Sand Deep is 2.9:1. Links therefore use a new token, `--cerastes-sand-ink`
+   `#7f5f2d` (5.9:1), in `doc/ui/supplemental/css/cerastes.css`. It is not in
+   the brand kit (question 3).
+
+## 3. Things to look at again (from M1, still open)
 
 These held up for M1 but are compromises or open questions.
 
@@ -116,118 +181,130 @@ These held up for M1 but are compromises or open questions.
    `tptk_unknown` placeholder and prints as `<tptk_unknown>`. EDG itself calls
    it `<unnamed>`.
 
-## 3. Friction (process and tooling)
+## 4. Friction (process and tooling)
 
-- **New agent types load only at session start.** `edg-backend` and
-  `il-analyst` were written into `.claude/agents/` during M1, so they could not
-  be spawned by type. They ran as `general-purpose` agents (model `sonnet`)
-  with their definition file as the first instruction. From M1.5 on they are
-  real types. The team was:
-  - `edg-backend`: build, configuration and walker;
-  - `il-analyst`: evidence, inventory and golden checking;
-  - `test-mutator`: harness, twins and contrast probes;
-  - `soundness-auditor` (Opus, read-only): three passes (configuration, walker and
-    harness; full review with the G1 verdict; pre-commit).
+- **The team, with the agent types loaded from session start.** M1's friction
+  is solved: `edg-backend`, `il-analyst`, `test-mutator` (Sonnet) and
+  `soundness-auditor` (Opus) all ran as real types. Ownership was:
+  - `edg-backend`: build, CI and UI;
+  - `test-mutator`: harness and lint;
+  - `il-analyst`: pages, then the upstream draft.
 
-  File ownership was disjoint, so all four worked in one tree without
-  conflicts.
-- **The auditor paid for itself.** Pass 1 found two blocking walker defects
-  that the goldens had already frozen:
-  - lambda and local-class routines were shown their enclosing function's
-    body;
-  - operations inside template-parameter constants, such as the
-    `tk_unknown` cast in `(T)100` and `++i`, were invisible.
+  File ownership was disjoint, and resuming agents with `SendMessage` kept
+  their context through two rounds of fixes.
+- **The audit paid for itself again.** Pass 1 found two blocking holes in
+  "every example is a test" that the self-tests had enshrined:
+  - partials and non-test files could be included;
+  - table-cell, extra-module and component-wide `source-language` forms
+    rendered as C++ but were never linted.
 
-  It also found the inherited `DEFAULT_REMOVE_UNNEEDED_ENTITIES` hazard.
-  Keep the order "walker → independent golden check → audit" for anything
-  that turns IL into facts.
-- **Read compile flags from the right target.** I first told the build agent
-  that EDG compiles as `gnu++14`. That came from the first `FLAGS` line in
-  `build/edg/build.ninja`, which belongs to a `util/` tool. Stock cpfe uses
-  `-std=c++14 -pedantic -Werror=shadow -Wconversion …`, and `edg_fe` now
-  mirrors that exactly.
-- **EDG cannot parse `<algorithm>`, `<utility>`, `<iostream>`, `<string>` or
-  `<vector>` from the macOS SDK 27.0 libc++** (status M0). That kept probes
-  away from `std::min` and the like. `<concepts>`, `<cstdint>`, `<limits>`
-  and `<type_traits>` work. It is still worth an upstream EDG issue.
-- **Each subagent has a large context.** Resuming agents with `SendMessage`
-  (instead of fresh spawns) kept their findings. The il-analyst's comparator,
-  which re-derives walker facts from `il_display` dumps, lives only in this
-  session's scratchpad. If M2/M4 need it, have `il-analyst` rebuild it in
-  `scripts/` as a tool.
+  The fix that holds is the rendered-HTML backstop, not more parser rules.
+  Keep the order: implement → independent check → audit.
+- **Agents left stray files in the tree.**
+  - Running stock `cpfe` without `--no_code_gen` wrote `hello.int.c` into the
+    repository root.
+  - `sed -i -E` on macOS left `*.adoc-E` backups.
 
-## 4. For M1.5 (next by plan order)
-
-M1.5 depends only on M0 and does not use anything M1 built. M1 added no
-user-visible behaviour: `cerastes-fe` is a developer tool, so it gets no
-`doc/` page. Its owner steps (create `cerastes-verifier/doc`, enable Pages,
-add the dispatch token, add the website link) are outward-facing and stay
-with the owner. M1.5 writes **0004-docs-site.md**, as the plan says. 0003 is
-now the EDG fork-branch record: G1 passed, so the fallback record that plan.md
-reserved that number for was never written. `check.sh` gains a docs step. Keep it
-after the tests step, or make sure `run_tests.py`'s discovery (now with a skip
-allowlist and orphan-golden detection) also covers
-`doc/modules/ROOT/examples/` as plan.md asks.
+  Both were caught and removed. Tell agents to run probes only in the
+  scratchpad, and check `git status --porcelain --untracked-files=all`
+  before each commit.
+- **An agent rewrote a file from its own copy** and dropped a line the
+  orchestrator had added (`docs.yml`). Don't edit agent-owned files while the
+  agent is active. When the orchestrator must, tell the agent to edit in
+  place.
+- **Global replaces need review.** A blanket `cerastes.dev/doc/` →
+  `cerastes.dev/cerastes/doc/` replace also rewrote the superseded plan text
+  where the old address was correct. It was caught and reverted.
+- **cerastes.dev had no TLS certificate for the custom domain** on
+  2026-10-13. `www` was proxied by Cloudflare, which blocks GitHub's
+  Let's Encrypt issuance, and `.dev` is HSTS-preloaded, so browsers could not
+  open the site at all. The owner fixed the DNS and enabled "Enforce HTTPS"
+  on 2026-10-14.
+- **Headless Chrome works for screenshots.** Serve over `python3 -m
+  http.server` (`file://` breaks root-absolute paths), and run Chrome with
+  `--headless=new --screenshot` and a scratchpad `--user-data-dir`.
 
 ## 5. For M2 (annotation layer)
 
-- **Critical path: registering the attributes is an EDG source change.**
-  Registering `cerastes::requires/ensures/invariant/check/…` in `attribute.c`'s
-  descriptor table, and adding `cerastes` to the known namespaces
-  (`attribute.c:970-980`), changes `third_party/edg`. Under invariant 5 that
-  means (decision 0003):
-  1. small commits with tests on branch `cerastes` of
-     https://github.com/mborland/compiler, which the owner created on
-     2026-10-13;
-  2. an upstream issue, then a PR to `edgcpp/compiler`, following EDG's
-     `CONTRIBUTING.md`;
-  3. only then a pin move.
+Updated for M1.5. The upstream proposal is drafted and its scope was set by
+the owner.
 
-  **Before its first commit, the branch needs a fast-forward.** It was
-  created from the fork's old `main` (`90b66472`), 22 commits behind the pin
-  `9847356d` (see question 1 below).
-  - Sessions may commit and push to the fork branch.
-  - Sessions never open upstream issues, PRs or Discussions: the owner files
-    them. Write the proposed issue and PR text into this file for them.
-  - Prepare the EDG series at the very start of M2, so the owner can open the
-    upstream issue early.
-  - cerastes code cannot depend on the registration until it is upstream. Prefer a general
-  mechanism that upstream will want, such as declaring extra attribute
-  namespaces and descriptors from a back end or an option, over hard-coding
+- **The upstream Discussion is drafted:**
+  `docs/upstream/attribute-registration.md`, with 16 probes in
+  `docs/upstream/attribute-registration-probes/`. Re-run any of them with
+  `scripts/cerastes-fe.sh --c++20 --cerastes_walk <probe>`.
+  - **Scope (owner, 2026-10-14).** cerastes aims for all of VeriFast's
+    functionality and more. Specifications are **C++ grammar inside
+    `[[cerastes::…]]`**, using spec functions from `<cerastes.h>`
+    (`owns`, `old`, `forall`…), never VeriFast's `|->`/`&*&`/`?x`. The owner's
+    canonical example is `bump()` in §3 of the draft. EDG is asked for no new
+    tokens, operators or expression grammar.
+  - **Requirements R1–R8.** Registration; placement on every entity and
+    statement; redeclaration merging; typed arguments; scopes and binders
+    (result binder); template-aware IL; spec-only entities (ghost fields
+    need a layout exclusion); diagnostics.
+  - **The design** is phased in five steps. M2's eight attributes are the
+    first use, not the scope.
+  - **Appendix A** inventories VeriFast's annotation language (about 45
+    features), each with one possible C++ form. The forms are illustrative
+    unless plan.md fixes them.
+  - **Open cerastes design points** (not EDG's): pattern binders (`?x`),
+    predicate input/output parameters, inductive types with `switch`,
+    fractions, lemmas, ghost assignment, function-pointer chunks.
+    Concurrency and shared boxes are outside plan.md. M7's inventory owns the
+    full list.
+  - **The owner files it** (decision 0003 item 6). Sessions never open
+    upstream issues, PRs or Discussions.
+- **Measured facts M2 builds on** (from the probes; draft §5):
+  - **After the parameter list, the IL keeps at most one declaration's
+    attribute, on the function type, not the routine.** For non-templates and
+    out-of-class members it keeps the defining declaration's; if the
+    definition has none, none survives. For templates it keeps the first
+    declaration's. (This refines inventory check 5c.)
+  - Prefix attributes and GNU-style postfix attributes accumulate across
+    redeclarations.
+  - Expression-signature attributes (`enable_if`, `assume`) are parsed and
+    type-checked at the attribute's line. `this` and lambdas work. Prototypes
+    keep dependent expressions, and instances get substituted ones.
+  - Attributes are recorded on 17 entity kinds. They are rejected on
+    template parameters, around the word `concept`, and inside
+    requires-expressions; that matters for M5.
+  - An attributed field still takes storage.
+- **The fork branch is still not fast-forwarded** (question 2). It is at
+  `90b66472`, 22 commits behind the pin `9847356d`. Upstream `main` is now
+  `034385ba`, 8 commits past the pin; none of them touches `src/`.
+  Sessions commit in a local clone of the fork (`~/Documents/compiler`), and
+  **the owner pushes** (0003 item 6, answer B).
+- **cerastes code cannot depend on the registration until it is upstream**
+  (0003 item 8). Prefer the general mechanism in the draft over hard-coding
   `cerastes` into `attribute.c`.
-- **Why the unrecognized-attribute path is not enough for contracts**
-  (inventory check 5c). An attribute after the parameter list lands on the
-  function type (`al_post_func`), not on the routine. It is lost when the
-  function is redeclared. For a function template declared more than once,
-  neither copy survives. Registered attributes are applied while the
-  declaration is processed, which should fix this. That is an expectation,
-  not a verified fact (inventory check 5c). M2 must test contracts on a
-  declaration plus a redeclaration, on a template declaration plus its
-  definition, and on a member defined outside its class.
 - **Ill-formed placements become silent once the namespace is registered.**
   `[[cerastes::x]] struct S {};` (a leading attribute with no declarator)
   appertains to nothing and is not in the IL. Today only #2803 betrays it;
-  after M2 registers `cerastes`, nothing will. Give it a diagnostic or a
+  after registration, nothing will. Give it a diagnostic (draft R8) or a
   must-fail test.
 - **What the unrecognized path does carry reliably:**
   - prefix attributes on function declarations (plain, function template
     prototype and instance, class-template members);
   - attributes on `while`/`for`/`if`/`switch`/`do`/compound/expression
     statements;
-  - attributes on null statements in every position tried (first in a block,
-    after a label, in C and C++).
+  - attributes on null statements in every position tried.
 
   So `check(p)` on a null statement and `invariant(p)` on loops are safe
   placements.
-- **Class-level annotations go after the class-key** (`struct [[x]] S`). A
-  prefix `[[x]] struct S {…};` appertains to no entity and is not in the IL.
-- **What M2's golden tests should compare.** plan.md asks for
-  "`il_display` golden output". `il_display` prints addresses and omits
-  statement attributes, so golden-compare walker output instead. Extend
-  `--cerastes_walk` to print the typed expression tree of each `cerastes::`
-  attribute argument once EDG parses them.
+- **Class-level annotations go after the class-key** (`struct [[x]] S`).
+- **Golden tests.** Compare walker output, not `il_display`, which prints
+  addresses and omits statement attributes. Extend `--cerastes_walk` to print
+  the typed expression tree of each `cerastes::` attribute argument.
+- **M2's user docs.** The annotation reference (`doc/…/annotations.adoc`)
+  and the page on building with ordinary compilers through `<cerastes.h>`.
+  - Every C/C++ block is an `include::example$<test>[tag=…]` of a test under
+    `doc/modules/ROOT/examples/`. Golden tests work there too: the `.golden`
+    goes next to the example.
+  - Write C++ in prose as `pass:[C++]`.
+  - Both lints run in `check.sh` and in CI.
 
-## 6. For M4 (generic templates)
+## 6. For M4 (generic templates; unchanged from M1)
 
 From the inventory's gotchas; each is evidenced there.
 
@@ -268,99 +345,69 @@ From the inventory's gotchas; each is evidenced there.
   original). VeriFast still has to be built or recorded (0001 §VeriFast); it
   is a Linux binary here.
 
-## 7. M1 acceptance (commands and results, 2026-10-13)
+## 7. M1.5 acceptance (commands and results, 2026-10-14)
 
 | # | Command | Result |
 |---|---|---|
-| 1 | `scripts/bootstrap.sh --build-only` | builds `build/cerastes-fe`; a re-run is a no-op (0.9 s) |
-| 2 | `build/cerastes-fe --dump_configuration \| grep -E '#define (PROTOTYPE_INSTANTIATIONS_IN_IL\|ALL_TEMPLATE_INFO_IN_IL\|RECORD_UNRECOGNIZED_ATTRIBUTES\|EXTRA_SOURCE_POSITIONS_IN_IL\|BACK_END_IS_(C\|CP)_GEN_BE\|DO_IL_LOWERING) '` | 1, 1, 1, 1, 0/0, 0. `scripts/check_edg_config.sh` checks 15 values in `check.sh`, and it fails (exit 1, naming the macros) against a corrupted dump. |
-| 3 | `scripts/cerastes-fe.sh --c++20 --il_display tests/il/verifast-plain/integral.cpp` | `Intermediate language for memory region 41 (function "uninstantiated")`; the walker shows `routine uninstantiated prototype body @ L102:3` |
-| 4 | `python3 scripts/run_tests.py tests/il` | 39 golden tests pass (g1 5, verifast-plain 6, inventory 9, walker 2, contrast 17) |
-| 5 | `python3 scripts/test_run_tests.py` (also with `CERASTES_REQUIRE_E2E=1`) | 140 tests OK, 0 skipped |
-| 6 | `scripts/check.sh` | green in about 13 s: 44 passed, 0 failed, 1 skipped (`tests/differential/verifast`) |
-| 7 | `git -C third_party/edg status --porcelain`; `git submodule status` | empty; EDG still at `9847356d`, Silicon at `6b540aa4` |
-| 8 | clean clone of the M1 commit: `scripts/bootstrap.sh && scripts/check.sh` | green in 1 min 47 s for `b1e3d41`. The run fetched the submodules from GitHub; built EDG (stock), `build/cerastes-fe` and Silicon; downloaded Z3; and ran `check.sh`: 140 self-tests OK, 44 passed, 1 skipped. It left no `.ti` or other stray files, and the tree was clean afterwards. The Homebrew and sbt caches were already warm. |
-| 9 | `docs/il-inventory.md` | evidence on every G1 check and table row, or the row is marked derived/UNCLEAR with the reason. G1 verdict recorded. The final soundness audit passes (3, 3b, 3c, 3d) found nothing blocking; the remaining notes are tracked in §2 and in the inventory's "Walker gaps". |
+| 1 | `scripts/bootstrap.sh`, twice | the first run does `npm ci (doc/)`; the second prints `doc dependencies are current`. With `doc/node_modules` moved aside, or its `.package-lock.json` tampered with (4 ways), `--build-only` fails: `doc/node_modules is missing or stale; run scripts/bootstrap.sh` (edg-backend) |
+| 2 | `scripts/build_docs.sh` | exit 0, zero warnings; `build/doc/` has `index.html`, `overview.html`, `installation.html`, `404.html`, `search-index.js` and `_/` with the brand assets. Lunr search tested in headless Chrome ("pipeline": 2 results), including under a `/cerastes/doc/` prefix |
+| 3 | `python3 scripts/run_tests.py` | `PASS doc/modules/ROOT/examples/installation/hello.cpp [c++20]`; 45 passed, 0 failed, 1 skipped |
+| 4 | `python3 scripts/check_doc_examples.py`; `… --html build/doc`; `CERASTES_REQUIRE_E2E=1 python3 scripts/test_run_tests.py` | OK; OK (4 html files, 1 code block); 305 tests OK, 0 skipped. The e2e twins build real Antora sites: warnings fail `build_docs.sh` but not bare Antora; the lint-evading pages q1–q18 and e1/e2/e5 fail |
+| 5 | `scripts/check.sh` | green in 31.5 s; `git status` shows no stray files |
+| 6 | shallow clean clone (`git clone --depth 1`) of the M1.5 state: `scripts/bootstrap.sh && scripts/check.sh` | pending: runs right after the M1.5 commit |
+| 7 | branding | `docs/images/m1.5-docs-overview.png` (local build served under `/cerastes/doc/`) next to `docs/images/m1.5-website-reference.png`: Ink navbar with the lockup, Sand rules and markers, Archivo, favicon |
+| 8 | soundness audit | pass 1: 2 blocking (examples could be included or rendered without being tested). Pass 2: 2 blocking (`<pre>` without a language; garbled `libc++` on the page). Pass 3: nothing blocking. Its three follow-ups (`subs=`, the tag-directive form, per-item counting) are fixed with twins and are covered by the green self-test, not re-audited |
+| 9 | after the owner's push: the Actions run, `curl -sI https://cerastes.dev/cerastes/doc/`, live search | pending the owner's push |
+| 10 | docs-only commit pushed by the owner | pending the owner's push |
+| 11 | `git -C third_party/edg status --porcelain`; `git submodule status` | empty; EDG still at `9847356d`, Silicon at `6b540aa4` |
 
 ## 8. Questions for the owner
 
-Every open decision from this session is here, with a recommended answer, so
-they can all be answered at once. Future handoffs keep this section.
+Every open decision from this session, each with a recommended answer. Answer
+them inline, as last time.
 
-1. **The fork branch needs a fast-forward, and sessions can't push yet.**
-   `cerastes` on https://github.com/mborland/compiler is at `90b66472`, 22
-   commits behind the pin. Decision 0003 lets sessions push to it, but this
-   session had no GitHub credentials: no SSH key, and no keychain entry
-   visible to it. Please run:
+1. **File the upstream Discussion?** The draft is
+   `docs/upstream/attribute-registration.md`.
+   - §1–§9 are the post; Appendix A is the VeriFast inventory; "For the owner"
+     is not part of it.
+   - It follows your two scope corrections: VeriFast parity and beyond, and
+     C++ grammar inside the attributes, with `bump()` as the lead example.
+   - The auditor reproduced its probes.
+
+   *Recommended: read §1–§6, then file it as a Discussion
+   (`CONTRIBUTING.md` says feature requests start there). Keep Appendix A in
+   the post, so the breadth is visible.*
+2. **Fork branch and pin.** The fork's `cerastes` branch is still at
+   `90b66472`, 22 commits behind our pin `9847356d`. Upstream `main` is
+   `034385ba`, 8 commits past the pin: CI, tests and `doc/source` only,
+   nothing under `src/`.
+
+   *Recommended: at the start of M2, move the pin to the upstream head
+   (`check.sh` re-checks every golden), then fast-forward the fork branch to
+   the same commit:*
    ```
    cd ~/Documents/compiler && git fetch edgcpp && git checkout cerastes
-   git merge --ff-only 9847356d461d2bef846bf133e16821f0e8b69749 && git push origin cerastes
+   git merge --ff-only <new pin> && git push origin cerastes
    ```
-   How should future sessions push?
-   - (a) Give the session credentials, e.g. a fine-grained token limited to
-     `mborland/compiler` contents.
-   - (b) Sessions commit in a local clone of the fork, outside this repo,
-     and you push.
-
-B
-
-2. **Can a topic branch of this repository temporarily record a fork
-   submodule pointer?** *Recommended: no, as 0003 says.* Develop against fork
-   commits by checking them out in the submodule working tree, without
-   committing the pointer.
-
-No, but if EDG is slow to merge, we will re-evaluate.
-
-3. **Next milestone.** plan.md order is M1.5 (docs), then M2. M2's critical
-   path is upstream review of the EDG attribute registration, which you
-   file. *Recommended: run M1.5 next. Its session also drafts the text of
-   the upstream Discussion or issue for attribute registration (design only,
-   no EDG code), so you can file it while M1.5 runs.*
-
-Run M1.5 next.
-
-4. **M1.5 owner steps.** M1.5's acceptance (`curl -sI
-   https://cerastes.dev/doc/` returns 200, and a docs-only commit appears
-   with no manual step) needs four things done first:
-   - create `cerastes-verifier/doc`;
-   - enable Pages;
-   - add the dispatch-token secret to this repo;
-   - add the "Documentation" link on cerastes.dev.
-
-   *Recommended: do them before the M1.5 session. Otherwise it ends with
-   those acceptance items open.*
-
-I don't like having a docs-only repo. Use the repo specific .github.io page, and then we will fix the specific address later.
-I have enabled pages on the repo and given the source as GitHub Actions.
-
-5. **What CI runs.** M1.5 adds CI that builds the docs. The IL goldens
-   depend on the macOS SDK and libc++ (`std::__1::…`, which headers EDG can
-   parse), so `check.sh` on a GitHub macOS runner would likely show golden
-   diffs. *Recommended: CI runs only the docs build in M1.5. Running
-   `check.sh` in CI needs a decision record on pinning the SDK first.*
-
-CI for doc builds is fine for now. We need to add CI for the rest of the repo soon. If mac doesn't work we can always use a local x64 docker, and run on x64 in CI
-
-
-6. **The libc++ headers EDG cannot parse** (`<algorithm>`, `<utility>`,
-   `<iostream>`, `<string>`, `<vector>` from SDK 27.0). These will matter for
-   M3+ tests. *Recommended: in M2, a session writes a reduced reproduction
-   (under 100 lines, with `--dump_configuration`, as `CONTRIBUTING.md` asks)
-   into this file for you to file upstream.*
-
-Use a local x64 docker, or the SSH x64 machine if macOS isn't working.
-I will work with the EDG team on specific macOS and libc++ issues.
-
-7. **Committing in this repository.** Should sessions commit to local `main`
-   at the end of the session, as plan.md's closing prompt says, and after
-   each change you ask for, without asking first? Never pushing. *Recommended:
-   yes.* This session committed its last change on that basis.
-
-YES
-
-8. **VeriFast for M4** (0001): a native macOS build, a container for the
-   Linux binary, or recording its outcomes once? Not urgent until M4.
-   *Recommended: try the native build at the start of M4, and fall back to
-   recorded outcomes.*
-
-Run a container for the Linux binary and double check against recorded outcomes.
+3. **Link colour.** On white, Sand fails contrast for text (2.2:1), and Sand
+   Deep is 2.9:1. The docs use a new token, Sand Ink `#7f5f2d` (5.9:1).
+   *Recommended: accept it, and add it to BRAND.md as the text colour for
+   Sand on light grounds.*
+4. **Which lockup is canonical?** The loose
+   `brand/cerastes-lockup-on-dark.svg` differs from the copy in the kit zip
+   and on the website; the docs use the kit/website copy. *Recommended: the
+   kit's. Replace the loose file.*
+5. **The "Documentation" link on cerastes.dev** (website repo, your step).
+   *Recommended: link to https://cerastes.dev/cerastes/doc/.*
+6. **The `github-pages` environment.** Please confirm that Settings →
+   Environments → `github-pages` allows deployments only from `main`. The
+   workflow already deploys only from `main`, but the environment rule is the
+   second lock, and sessions cannot see it.
+7. **CI for the rest of the repository.** You asked for it soon.
+   *Recommended: a short session before M3 writes a decision record. Try a
+   macOS runner with a pinned Xcode first; if the IL goldens drift, use x64
+   Docker as you suggested. Then add `check.sh` to CI.*
+8. **Dependabot for the pinned Actions?** The workflow pins four actions by
+   commit SHA. Dependabot (as in the website repo) would open PRs to bump
+   them. *Recommended: yes, `github-actions` ecosystem only, weekly. It opens
+   PRs on GitHub, so it's your call.*

@@ -1,7 +1,7 @@
 # cerastes — C/C++ verifier (EDG → Viper/Silicon → Z3)
 
 Plan: @plan.md   Status: @docs/status.md
-User docs: doc/ (Antora) → https://cerastes.dev/cerastes/ (interim address, decision 0004)
+User docs: doc/ (Antora) → https://cerastes.dev/cerastes/doc/ (decision 0004)
 
 ## Commands
 - Bootstrap: scripts/bootstrap.sh   (idempotent; macOS on Apple silicon)

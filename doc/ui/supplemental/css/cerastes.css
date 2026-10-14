@@ -1,0 +1,144 @@
+/*
+ * cerastes docs theme: brand tokens and a small set of overrides on top of the
+ * Antora default UI (vendored, doc/ui/README.md).  Tokens and contrast rules
+ * come from the brand guide, BRAND.md.  The default UI hard-codes its colours,
+ * so the overrides below are selector-based and deliberately few.
+ *
+ * Contrast (BRAND.md): Sand on white is 2.2:1.  Sand is therefore never text
+ * on a light ground here; it appears only as a graphic (borders, underlines,
+ * markers).  Text on white is Ink; links use --cerastes-sand-ink.
+ */
+:root {
+  --cerastes-ink: #161c2e;
+  --cerastes-sand: #d9a44e;
+  --cerastes-sand-light: #e8c895;
+  --cerastes-sand-deep: #bd8f44;
+  --cerastes-pale: #f4ebda;
+  --cerastes-muted: #9aa3b5;
+  --cerastes-font: 'Archivo', 'Helvetica Neue', sans-serif;
+  /*
+   * Docs-only token, not part of the brand kit: Sand scaled to about 59%, in
+   * the way BRAND.md derives Sand Deep.  5.9:1 on white and 5.6:1 on the
+   * #fafafa code background, so it passes WCAG AA for link text.
+   */
+  --cerastes-sand-ink: #7f5f2d;
+}
+
+body {
+  font-family: var(--cerastes-font);
+  font-weight: 400;
+  color: var(--cerastes-ink);
+}
+
+/* Archivo for the UI chrome and headings; code keeps the UI's Roboto Mono. */
+.navbar,
+.nav-container,
+.toolbar,
+.toc,
+.footer,
+.doc,
+.doc h1,
+.doc h2,
+.doc h3,
+.doc h4,
+.doc h5,
+.doc h6 {
+  font-family: var(--cerastes-font);
+}
+
+.doc h1,
+.doc h2,
+.doc h3,
+.doc h4,
+.doc h5,
+.doc h6 {
+  color: var(--cerastes-ink);
+  font-weight: 600;
+}
+
+.doc h2:not(.discrete) {
+  border-bottom: 2px solid var(--cerastes-sand);
+}
+
+.doc a {
+  color: var(--cerastes-sand-ink);
+}
+
+.doc a:hover,
+.doc a:focus {
+  color: var(--cerastes-ink);
+}
+
+/* Navbar: Ink ground, Pale text, lockup as the home link. */
+.navbar {
+  background: var(--cerastes-ink);
+  color: var(--cerastes-pale);
+  border-bottom: 2px solid var(--cerastes-sand);
+}
+
+.navbar-brand .navbar-item {
+  color: var(--cerastes-pale);
+}
+
+.navbar-brand .navbar-item.brand {
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
+}
+
+/* BRAND.md: never set a lockup below 32px tall. */
+.navbar-brand .navbar-item.brand img {
+  display: block;
+  height: 2.5rem;
+  width: auto;
+}
+
+.navbar-burger span {
+  background-color: var(--cerastes-pale);
+}
+
+.navbar .search #search-input,
+.navbar .search input {
+  font-family: var(--cerastes-font);
+}
+
+/* Side navigation and page TOC: Sand as a graphic only. */
+.nav-menu .nav-link:hover,
+.nav-menu .is-current-page > .nav-link {
+  color: var(--cerastes-ink);
+}
+
+.nav-menu .is-current-page > .nav-link {
+  border-left: 3px solid var(--cerastes-sand);
+  margin-left: -3px;
+  font-weight: 600;
+}
+
+.toc .toc-menu a.is-active {
+  border-left-color: var(--cerastes-sand);
+  color: var(--cerastes-ink);
+}
+
+.toc .toc-menu a:hover {
+  color: var(--cerastes-sand-ink);
+}
+
+/* Footer: Ink ground, Pale text, Muted secondary text, Sand links (on Ink). */
+footer.footer {
+  background: var(--cerastes-ink);
+  border-top: 2px solid var(--cerastes-sand);
+  color: var(--cerastes-muted);
+  padding: 1rem 1.5rem;
+  font-size: 0.83333rem;
+}
+
+footer.footer p {
+  margin: 0;
+}
+
+footer.footer a {
+  color: var(--cerastes-sand);
+}
+
+footer.footer a:hover {
+  color: var(--cerastes-sand-light);
+}

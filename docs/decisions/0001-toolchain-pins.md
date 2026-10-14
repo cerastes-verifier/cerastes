@@ -21,6 +21,10 @@ in both places.
 | sbt | 1.6.2 (Silicon's `project/build.properties`), started by the Homebrew `sbt` 2.0.10 launcher | `brew install sbt` |
 | Scala | 2.13.18 (silver's `build.sbt`) | fetched by sbt |
 | VeriFast (differential tests, M4) | `mborland/verifast` branch `generic2` = `0fb63506a51cae559ae92348eb54ba7f7be0bf6d`: upstream `master` plus `a18da574` (generic templates) and `0fb63506` (concepts) | not built by bootstrap; see below |
+| Antora (user docs, M1.5) | `antora`, `@antora/cli`, `@antora/site-generator` 3.2.1; `@antora/lunr-extension` 1.0.0-alpha.13 | exact pins in `doc/package.json`, locked by `doc/package-lock.json`; `npm ci` in `doc/` by bootstrap |
+| Antora default UI (user docs) | `antora-ui-default` `master` at `0e38223adfd81eb74d4b1779e158f8ad05ff8923` (GitLab job 15385706035), zip SHA-256 `e0ac81aad26961a9cd3cf9bce692a598eff4a1bd2822ce73c9cdc13a15a1e70d` | vendored as `doc/ui/antora-ui-default.zip`; `scripts/build_docs.sh` checks the SHA-256 before every build (`doc/ui/README.md`) |
+| GitHub Actions (docs CI) | `actions/checkout` v7.0.1 `3d3c42e5aac5ba805825da76410c181273ba90b1`, `actions/setup-node` v7.1.0 `949feb2413d6458794dcd2491c4babbbce0c15c1`, `actions/upload-pages-artifact` v5.0.0 `fc324d3547104276b827a68afc52ff2a11cc49c9`, `actions/deploy-pages` v5.0.1 `368f82528645a54fb793d4d04e342629a3f51346`; runner `ubuntu-24.04` | full commit SHAs in `.github/workflows/docs.yml` (from `git ls-remote`; all four are lightweight tags) |
+| Node.js (user docs) | major 26 (`doc/.node-version`; CI's `setup-node` reads it); 26.9.0 / npm 11.19.1 locally | Homebrew `node`; bootstrap warns when the major differs |
 
 Recorded but not pinned, because any recent version works and none of them
 affects verification results:
@@ -32,6 +36,12 @@ affects verification results:
 | Python | 3.14.7 (the scripts need 3.9 or later) |
 | ShellCheck | 0.11.0 |
 | Homebrew | 7.0.9 |
+
+Node is pinned only by its major version: nothing Antora produces depends on
+the minor version, and CI uses the same major through `doc/.node-version`.
+Bootstrap installs Homebrew's unversioned `node`, which floats. Homebrew also
+has versioned `node@NN` formulae; switch to one if the floating major ever
+breaks the build.
 
 ## Departures from plan.md
 
@@ -80,9 +90,24 @@ which are not pinned.
 headers that include `<__algorithm/find.h>`, so `<iostream>`, `<string>`,
 `<vector>` and `<algorithm>` fail with 10 to 17 errors in
 `__algorithm/find.h` and `__algorithm/simd_utils.h`. `<cstdio>`, `<cstdint>`,
-`<concepts>`, `<type_traits>`, `<utility>` and `<limits>` parse cleanly. The
-hello-world smoke test therefore uses `<cstdio>`. This is an upstream EDG
-issue and is out of scope for M0 (no EDG modifications).
+`<concepts>`, `<type_traits>` and `<limits>` parse cleanly. The hello-world
+smoke test therefore uses `<cstdio>`. This is an upstream EDG issue and is out
+of scope for M0 (no EDG modifications).
+
+**Correction (M1.5, 2026-10-14):** `<utility>` does not parse either. M0 listed
+it as clean, but `scripts/cpfe.sh --c++20 --no_code_gen` on a file that only
+includes it exits 2 with 8 errors in the SDK's `_stdlib.h`, at lines 298 (3),
+308, 345, 352, 360 and 368. Each is a parameter in Apple's block syntax (`^`),
+for example `atexit_b`'s. There are three independent causes:
+1. `_stdlib.h`'s block syntax, in all five failing headers (8 errors);
+2. `__algorithm/find.h`, with notes in `simd_utils.h` (7 errors);
+3. `__new/interference_size.h:23-24`, where `__GCC_DESTRUCTIVE_SIZE` and
+   `__GCC_CONSTRUCTIVE_SIZE` are undefined (2 errors).
+
+`<iostream>`, `<string>`, `<vector>` and `<algorithm>` have all three (17
+errors); `<utility>` has only the first. Same Command Line Tools as M0 (SDK
+27.0, CLT 27.0.0.0.1788430756). The owner raises these with the EDG team
+(handoff, question 6).
 
 ## VeriFast
 

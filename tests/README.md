@@ -1,7 +1,12 @@
 # Tests
 
 Run everything with `python3 scripts/run_tests.py` (or a list of files and
-directories). `scripts/check.sh` runs it after the harness self-test
+directories). With no arguments it runs the default paths, `tests/` and the
+user-documentation examples in `doc/modules/ROOT/examples/` (see
+[Documentation examples](#documentation-examples)); paths named on the command
+line replace them. A default directory that does not exist is an error (exit
+2) that names it, so a deleted examples directory cannot silently drop the doc
+tests. `scripts/check.sh` runs the harness after its self-test
 (`scripts/test_run_tests.py`). `-v` prints full diffs and tool output for
 failing tests. The exit status is 0 when every selected test passes, 1 when
 any fails and 2 on usage or environment errors, including when nothing is
@@ -18,6 +23,7 @@ fail, so a missing build cannot silently switch them off.
 | `edg-smoke/` | The pinned EDG front end parses C++20 and C23 against the system headers | `scripts/cpfe.sh` |
 | `il/` | Golden tests of the IL walker (`--cerastes_walk`): the Gate G1 probes (`g1/`), annotation-free copies of the VeriFast tests (`verifast-plain/`), contrast probes that expose a vacuous pass (`contrast/`) and walker smoke tests | `scripts/cerastes-fe.sh` |
 | `differential/verifast/` | Nothing yet: unmodified reference copies of VeriFast's template tests, with no `expect:` headers. Skipped (`.harness-skip`) | none |
+| `../doc/modules/ROOT/examples/` | The code examples of the user documentation, which are ordinary tests (not under `tests/`, but run by default with it) | by the example's `expect:` kind |
 
 Later milestones add `annotations/`, `scalar/`, `templates/`, `concepts/`
 and `memory/`, and the differential tests against VeriFast in M4 (see
@@ -125,6 +131,139 @@ the diff line by line, and state the reason in the commit message. Never
 regenerate a golden file to make a test pass. `scripts/check.sh` never uses
 `--update-golden`, and the harness self-test fails if a script does.
 
+## Documentation examples
+
+Every code example in the user documentation (`doc/`, Antora; invariant 8) is a
+test. The examples live in `doc/modules/ROOT/examples/` (subdirectories are
+fine) as ordinary `.c`, `.cpp` and `.vpr` files with the usual `// expect:`
+header, and `scripts/run_tests.py` discovers them by default (`DEFAULT_PATHS`),
+with the same rules as `tests/`: skip markers are not allowed there, a source
+file with a non-test suffix and an orphan golden file are errors, and a bad
+header fails.
+
+A page shows an example only through an include of a tagged region, so the
+expectation header never appears on the page. The block holds exactly one
+include and nothing else:
+
+```
+[source,cpp]
+----
+include::example$installation/hello.cpp[tag=hello]
+----
+```
+
+The example has the tag lines after its header, written as comments:
+`// tag::hello[]` and `// end::hello[]`. Put them outside `#if`, `#ifdef`,
+`#ifndef` and `/* */`, or the page could show code that is compiled out.
+
+Two checks guard this. They are complementary, because a line-based reader
+cannot know every AsciiDoc form:
+
+**1. The source lint**, `python3 scripts/check_doc_examples.py` (a
+`scripts/check.sh` step, and a step of the CI build job before the build; exit
+0 clean, 1 problems, 2 when the doc component is missing or `doc/modules/` has
+a module other than `ROOT`; `--root DIR` checks another tree). It reads
+`nav.adoc`, `pages/**/*.adoc` and `partials/**/*.adoc` line by line and reports
+`<file>:<line>: <message>` for:
+
+- a source block in a language cerastes reads (`c`, `cpp`, `c++`, `cxx`, `h`,
+  `hpp`, `vpr`, `viper`, case-insensitive, with a few other spellings) whose
+  body is anything but one `include::example$<file>[tag=...]` line, where the
+  file has a test suffix (`.c`, `.cpp`, `.vpr`). A `partial$`, an attachment, a
+  non-test file or inline code is an error. The forms recognised are:
+  `[source,cpp]`, `[,cpp]`, `language=cpp`, `----`, `--`, fenced blocks, the
+  paragraph form without delimiters, blocks that start on a table cell line
+  (`a|[source,cpp]`), with a title, anchor or blank line before the block. This
+  is a best-effort line reader, not an AsciiDoc parser; the `--html` check
+  below is the backstop for the forms it cannot see;
+- code or text shown without a declared language, which is how code could hide
+  from the check above: a `----` listing, fenced block or source paragraph that
+  does not declare `[source,<language>]` (the language must be a cerastes one,
+  included from a test, or one of `sh`, `console`, `text`: `OUTPUT_LANGUAGES`,
+  extended only by a reviewed change); a literal block (`....`); a paragraph
+  that starts indented (a literal block, also after a list `+` continuation,
+  in a description list or in a table cell; an indented list item is fine); the
+  `[verse]` and `[pass]` styles; any `subs=` on a block attribute line (it
+  can switch off escaping and emit raw HTML); `l|` and `m|` table cell styles and `cols`
+  specs with `l` or `m`; a `++++` passthrough block; a `pass:[...]` whose
+  content has `<` (raw HTML); a `:source-language:` entry, and a
+  `source-language` attribute in `doc/antora.yml` or a playbook in `doc/`;
+- an `include::example$...` without `tag=` or `tags=`, with `lines=` (which
+  wins over the tags and shows the header), with an empty tag, or with a tag
+  that is not a plain name (`*`, `**` and `!x` select untagged lines);
+- an include whose target does not exist, is not `example$` (or `partial$`),
+  is not a valid test (bad or missing header, or not a test suffix), uses a tag
+  that the file does not define, has a tagged region that contains an
+  `// expect:` or `// mode:` line, or has a tag directive inside an `#if`,
+  `#ifdef`, `#ifndef`, a `/* */` comment or unclosed parentheses (a macro
+  call's arguments). A tag directive must be a `// tag::x[]` or `// end::x[]`
+  line comment alone on its line, and not follow a line ending in a backslash
+  (a continued `#define` would hold it). A raw string literal (`R"`) anywhere in
+  an example, and a `//` comment ending in a backslash, are errors too: they
+  can hide a tag directive in code that is not compiled;
+- a file under `doc/modules/*/examples/` that is not a test or its `.golden`
+  file, and any C/C++/Viper source file (by suffix) elsewhere under
+  `doc/modules/` (`partials/`, `attachments/`, `pages/`...);
+- an orphan: a test under `examples/` that no page includes (an include inside
+  a `////` comment block does not count);
+- a `++` in text outside `pass:[...]`. It opens an AsciiDoc passthrough that
+  silently swallows text up to the next `++`, and Antora gives no warning. A
+  real build (tested in the harness self-test) shows that one alone is left
+  alone, two garble the paragraph (`libc++`, `g++` and `-std=c++20` too, in
+  backticks too), `+...+` does not protect them, and `pass:[...]` does. So write
+  `pass:[C++]` (and `pass:[C++]20` for a version), `pass:[libc++]`,
+  `` `pass:[--c++20]` ``. It applies to prose, titles, headings, list items,
+  table cells, inline code, link text and attribute entries, not to `----` and
+  fenced blocks, source or listing paragraphs, `////` blocks, `//` comments and
+  include lines. A block attribute line is checked, but its language
+  (`[source,c++]`) is not;
+- a doubled formatting mark (`__`, `**`, `##`) that occurs twice in a paragraph
+  outside `pass:[...]` and `+...+` literal spans (counted per paragraph, per
+  list item or description-list entry and per table cell): the pair formats what
+  is between them, across code spans (two `` `__algorithm` `` spans on a line render
+  as an italic run). One alone is safe (tested against a real build). Wrap it:
+  `` `+__algorithm+` ``.
+
+**2. The built-site check**, `python3 scripts/check_doc_examples.py --html
+build/doc`, run after `scripts/build_docs.sh` (in `check.sh` and in the CI
+build job). It does not read the pages: it classifies every `<pre>` of the
+generated HTML (and every `<code>` with a `language-X`, `lang-X` or `data-lang`):
+
+- a block in a cerastes language must, after unescaping, equal a tagged region
+  of a test under `examples/` (the lines of the chosen tags in file order, tag
+  lines dropped; whitespace at line ends, common indentation and blank lines
+  around the code are ignored), and the site must have at least as many such
+  blocks as the page sources declare (so a UI change that renames the class
+  cannot make the check pass without looking at anything);
+- a block in `sh`, `console` or `text` is fine;
+- anything else is an error: a `<pre>` without `<code>` (a literal block, verse,
+  raw HTML), a `<code>` without a language class, any other language, `lang-cpp`
+  and so on. Page chrome is not exempt (the default UI's own pages have no
+  `<pre>`; a future one would need a precise rule and a test);
+- broken markup is an error: a backtick in the text outside `<pre>` (a code
+  span that was not rendered) and an inline element closed while one inside it
+  is still open (what two `__` code spans render to).
+
+Code that the source lint misreads usually fails here, but not always:
+`--html` cannot see raw HTML that looks like text (a `[subs=none]` paragraph
+with a `<div style="white-space:pre">`), a `++` pair that eats text, or `**`
+pairs (they render as well-formed HTML). Only the source lint catches those,
+so the two checks are both required.
+
+`check.sh` runs the examples as tests, both checks, and the docs build; CI
+(the docs workflow) runs the source lint, `scripts/build_docs.sh` (which fails
+on any Antora warning) and the `--html` check, but not the examples as tests,
+because those need the EDG and Silicon toolchain. The harness self-test has a
+twin for each rule; it checks that `check.sh` and the workflow run the checks
+as active, ordered steps that cannot be ignored (`|| true`, `set +e`,
+`continue-on-error`, a comment); and an end-to-end twin builds a temporary copy
+of `doc/` with Antora to show that a broken xref or include tag fails the
+build, that pages which evade the source lint (a partial in a cpp block, a
+non-test include, a table cell, another module, a component-wide
+`source-language`, `++++` or `[verse]` or `l|` or an indented literal showing a
+`<pre>`, `pass:[<pre>]`, ...) still fail `--html`, and which markup garbles a
+page in a real build.
+
 ## Files that are not tests
 
 Under a scanned directory, a file whose suffix says C, C++ or Viper source
@@ -145,7 +284,7 @@ an empty or multi-line marker is an error.
 
 A marker is permitted only in the directories listed in `SKIP_ALLOWED` in
 `scripts/run_tests.py`, which is currently `tests/differential/verifast`
-alone. A marker anywhere else, including `tests/il`, is an error (exit 2) that
+alone (never a documentation example directory). A marker anywhere else, including `tests/il`, is an error (exit 2) that
 names the marker file, so that nobody can turn a directory of real tests green
 by adding one. Adding a directory to the list is a reviewed change; the
 harness self-test checks that the real tree has no other marker.

@@ -1,6 +1,9 @@
 # Build outputs: EDG build tree, pinned tools, build/env.sh, logs
 /build/
 
+# Documentation tool chain (npm ci in doc/)
+doc/node_modules/
+
 # Python
 __pycache__/
 *.pyc

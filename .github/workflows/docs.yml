@@ -1,0 +1,115 @@
+# User documentation (doc/, Antora): build on pull requests, build and deploy
+# to GitHub Pages on pushes to main.  Decision record: docs/decisions/0004-docs-site.md.
+#
+# CI builds the docs and lints the doc examples (scripts/check_doc_examples.py,
+# source and rendered HTML).  It does not run the examples as tests: those need
+# the EDG and Silicon toolchain, so scripts/check.sh runs them (0004 item 4).
+#
+# Actions are pinned to full commit SHAs (the comment gives the release);
+# change them deliberately, never through a moving tag.
+name: Docs
+
+on:
+  pull_request:
+    paths:
+      - 'doc/**'
+      - 'scripts/build_docs.sh'
+      - 'scripts/check_doc_examples.py'
+      - 'scripts/run_tests.py'
+      - '.github/workflows/docs.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'doc/**'
+      - 'scripts/build_docs.sh'
+      - 'scripts/check_doc_examples.py'
+      - 'scripts/run_tests.py'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Deploys (pushes and dispatches on main) share one group and never cancel
+# each other.  GitHub keeps at most one pending run per group, so the newest
+# push waits and wins, and deploys cannot land out of order.  Every other run
+# (pull requests, dispatches on other branches) has a group per ref and
+# cancels its own superseded runs, so it never queues behind a deploy.
+concurrency:
+  group: ${{ (github.ref == 'refs/heads/main' && github.event_name != 'pull_request') && 'pages' || format('docs-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' || github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: doc/.node-version
+          cache: npm
+          cache-dependency-path: doc/package-lock.json
+      - name: Install Antora
+        run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: doc
+      - name: Lint the doc examples (source)
+        run: python3 scripts/check_doc_examples.py
+      - name: Build the docs (fails on any Antora warning)
+        run: scripts/build_docs.sh
+      - name: Lint the doc examples (rendered HTML)
+        run: python3 scripts/check_doc_examples.py --html build/doc
+      # Convention (decision 0004): every org repo serves its docs at
+      # https://cerastes.dev/<repo>/doc/.  GitHub serves this repository's
+      # Pages site at /cerastes/, so the artifact root holds a redirect and the
+      # Antora site lives in doc/ below it.  site.url in doc/local-playbook.yml
+      # is https://cerastes.dev/cerastes/doc to match.
+      - name: Stage the Pages artifact (site in doc/)
+        if: github.event_name != 'pull_request'
+        run: |
+          rm -rf build/pages
+          mkdir -p build/pages
+          cp -R build/doc build/pages/doc
+          # GitHub Pages serves a custom 404 page only from the site root.
+          # Antora's 404.html uses root-absolute /cerastes/doc/... links (from
+          # site.url), so it works unchanged there.
+          cp build/doc/404.html build/pages/404.html
+          cat > build/pages/index.html <<'HTML'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+          <meta charset="utf-8">
+          <title>cerastes</title>
+          <link rel="canonical" href="https://cerastes.dev/cerastes/doc/">
+          <meta http-equiv="refresh" content="0; url=doc/">
+          </head>
+          <body>
+          <p><a href="doc/">cerastes documentation</a></p>
+          </body>
+          </html>
+          HTML
+      - name: Upload the site
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: build/pages
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

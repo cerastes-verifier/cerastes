@@ -52,6 +52,15 @@ is not a test suffix (.cc, .cxx, .c++, .CPP, .C, .hpp, .h, ...) would never
 run, and is an error in normal runs and with --check-headers.  A `*.golden` file that no golden test
 uses is an orphan and an error (in normal runs and with --check-headers).
 
+With no path arguments the harness runs DEFAULT_PATHS: tests/ and the
+documentation examples in doc/modules/ROOT/examples/ (every code example in
+doc/ is a test; see tests/README.md).  Everything above, skip markers, orphan
+goldens, unrecognized suffixes and header errors, applies to the doc examples
+exactly as to tests/ (SKIP_ALLOWED has no doc path).  A default path that does
+not exist is an error (exit 2) that names it, so a vanished examples directory
+cannot silently drop the doc tests.  Paths named on the command line replace
+the defaults.
+
 The exit status is 1 if any test fails and 2 on usage or environment errors
 (including when no test is selected).
 """
@@ -82,6 +91,10 @@ SKIP_MARKER = ".harness-skip"
 # real tests green by dropping a file into it.  Adding a directory here is a
 # reviewed change (and needs a reason in the commit).
 SKIP_ALLOWED = [Path("tests/differential/verifast")]
+# What a run with no path arguments covers, relative to ROOT.  Documentation
+# examples are tests: dropping the second entry would silently stop running
+# them, so the harness self-test pins this constant and a run without paths.
+DEFAULT_PATHS = (Path("tests"), Path("doc/modules/ROOT/examples"))
 SILICON_TIMEOUT_S = 600
 FRONTEND_TIMEOUT_S = 120
 
@@ -816,6 +829,22 @@ def skipping_directory(path: Path) -> Path | None:
     return None
 
 
+def default_paths() -> list[str]:
+    """DEFAULT_PATHS under the repository root; one that is missing is an error.
+
+    A missing default (a deleted examples directory, say) must not shrink the
+    run quietly, so it is a usage error naming the path.
+    """
+    paths = []
+    for p in DEFAULT_PATHS:
+        full = ROOT / p
+        if not full.is_dir():
+            raise UsageError(f"default test directory {p} is missing (looked for "
+                             f"{full}); restore it, or name the tests to run")
+        paths.append(str(full))
+    return paths
+
+
 def discover(paths: list[str]) -> Selection:
     """The tests and golden files under `paths`, minus skipped directories."""
     sel = Selection()
@@ -915,8 +944,10 @@ def print_outcome(o: Outcome, verbose: bool) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("paths", nargs="*", default=[str(ROOT / "tests")],
-                        help="test files or directories (default: tests/)")
+    parser.add_argument("paths", nargs="*",
+                        help="test files or directories (default: "
+                             + " and ".join(f"{p}/" for p in DEFAULT_PATHS)
+                             + "; a missing default directory is an error)")
     parser.add_argument("-j", "--jobs", type=int,
                         default=max(1, (os.cpu_count() or 2) // 2))
     parser.add_argument("-v", "--verbose", action="store_true",
@@ -931,7 +962,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        sel = discover(args.paths)
+        sel = discover(args.paths or default_paths())
     except UsageError as err:
         print(f"run_tests.py: {err}", file=sys.stderr)
         return 2
