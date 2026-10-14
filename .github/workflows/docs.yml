@@ -102,7 +102,10 @@ jobs:
     needs: build
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # Longer than deploy-pages' own timeout (below), so a stuck deployment is
+    # cancelled by the action, which logs the last Pages status, instead of
+    # the runner killing the job silently.  A deploy normally takes < 1 min.
+    timeout-minutes: 15
     permissions:
       pages: write
       id-token: write
@@ -113,3 +116,5 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        with:
+          timeout: 600000   # ms; the action's default, stated so the job limit above stays longer
