@@ -35,7 +35,7 @@ Override the bundle's files of the same path.
 | `partials/head-icons.hbs` | Brand favicons and `theme-color #161C2E`. |
 | `partials/head-styles.hbs` | Archivo from Google Fonts (the website's URL), `site.css`, then `cerastes.css`. |
 | `partials/footer-content.hbs` | cerastes, license, repository link. |
-| `css/cerastes.css` | BRAND.md tokens and the overrides. Sand is never text on a light ground (BRAND.md contrast table); links use `--cerastes-sand-ink` (`#7f5f2d`, Sand scaled to about 59%, 5.9:1 on white), a docs-only token that is not in the brand kit. |
+| `css/cerastes.css` | BRAND.md tokens and the overrides. Sand is never text on a light ground (BRAND.md contrast table); links use `--cerastes-sand-ink` (`#7f5f2d`, Sand scaled to about 59%, 5.9:1 on white), the brand's Sand Ink. It was introduced here and added to BRAND.md on 2026-10-14 (owner, M1.5 handoff question 3). |
 
 Code blocks keep the default UI's Roboto Mono; BRAND.md names Archivo as the
 only typeface for brand text, and has no monospace.
@@ -54,6 +54,6 @@ checked to be identical to the kit's copy.
 | `favicon.svg` | website `public/favicon.svg` (= kit `web/`) | `34cbe30319de898494d43140169b355196ed917e103f7fd5ff239b6468da805e` |
 | `apple-touch-icon.png` | website `public/apple-touch-icon.png` (= kit `web/`) | `96527ca81684e3ff23bd947b8f24b136e4a0c0632ec5492febb36d22df182233` |
 
-Note: the loose `brand/cerastes-lockup-on-dark.svg` next to the kit zip has a
-different SHA-256 (`63a313f7...`) from the kit's and the website's copy; the
-website's and the kit's copy are used.
+The kit's copy is canonical (owner, M1.5 handoff question 4). The loose
+`brand/cerastes-lockup-on-dark.svg` next to the kit zip used to differ
+(`63a313f7...`); it was replaced with the kit's copy on 2026-10-14.

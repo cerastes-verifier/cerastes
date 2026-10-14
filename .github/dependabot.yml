@@ -1,0 +1,34 @@
+# Dependabot version updates (owner's answer to M1.5 handoff question 8).
+#
+# Every update is pinned elsewhere too, so a Dependabot pull request must also
+# update the tables in internal/decisions/0001-toolchain-pins.md:
+# - github-actions: the commit SHAs in .github/workflows/*.yml (0001, "GitHub
+#   Actions"). Keep the release comment after each SHA in step.
+# - npm: the exact Antora pins in doc/package.json and doc/package-lock.json
+#   (0001, "Documentation"). The docs workflow builds the site on the pull
+#   request; after merging, run scripts/bootstrap.sh so doc/node_modules
+#   matches the lockfile again.
+
+version: 2
+updates:
+  # SHA-pinned actions in .github/workflows.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      all-actions:
+        # Groups all updates into a single PR
+        patterns:
+          - "*"
+
+  # Antora and its extensions for the user documentation.
+  - package-ecosystem: "npm"
+    directory: "/doc"
+    schedule:
+      interval: "weekly"
+    groups:
+      all-dependencies:
+        # Groups all updates into a single PR
+        patterns:
+          - "*"
