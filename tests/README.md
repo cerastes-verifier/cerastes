@@ -43,6 +43,8 @@ line of code is an error, so an expectation can never be silently ignored.
 // expect: frontend-ok
 // expect: frontend-error <diag> @ L<line>
 // expect: frontend-warning <diag> @ L<line>
+// expect: frontend-refused <substring>
+// cerastes-fe-options: <options>
 // expect: golden
 // expect: native-ok
 // mode: c++20 | c23
@@ -65,6 +67,9 @@ line of code is an error, so an expectation can never be silently ignored.
   diagnostic at that line. `<diag>` is an EDG diagnostic tag or
   `cerastes-<tag>`. Any number of lines; not mixed with the other outcome
   kinds; `.c` and `.cpp` only. See [Front-end diagnostics](#front-end-diagnostics).
+- **`frontend-refused <substring>`** with **`cerastes-fe-options: <options>`**:
+  the driver refuses these command-line options. See
+  [Refused options](#refused-options).
 - **`golden`**: the IL walker's output equals the test's golden file, byte
   for byte. It must be the only outcome line (`native-ok` may accompany it),
   and it applies to `.c` and `.cpp` files only. See [Golden tests](#golden-tests).
@@ -207,6 +212,41 @@ error and a back-end diagnostic together. Write two tests.
 
 `--update-golden` leaves these tests alone. They need `CERASTES_FE`,
 `CERASTES_EDG_GEN` and `EDG_CLANG_VER_SCRAPE` from `build/env.sh`.
+
+## Refused options
+
+The driver refuses some options (`--remove_unneeded_entities`; later GNU
+emulation and C modes older than C23) before EDG runs, with exit status 2 and a
+single line, not with a diagnostic at a line of the file. A `frontend-refused`
+test says so:
+
+```
+// expect: frontend-refused is not supported
+// cerastes-fe-options: --remove_unneeded_entities
+```
+
+The harness runs, from the root, `scripts/cerastes-fe.sh <options> <test path>`:
+the options of `cerastes-fe-options:` (shell-style words, each starting with
+`-`) **replace** the mode option, and nothing else is added. One run, whatever
+the file's suffix. The test passes only if the run is one of two shapes, and
+the message contains the substring:
+
+- **the driver's refusal**: exit status 2, nothing on stdout, and exactly one
+  non-empty line on stderr, which starts in column 0 with `cerastes-fe: error: `
+  (`REFUSAL_PREFIX`; src/driver/main.cpp prints it for every refusal);
+- **EDG's own command-line error** (an unknown option): exit status 4, nothing
+  on stdout, and exactly `Command-line error: <message>` (or `Command-line
+  error #N: ...`), `1 catastrophic error detected in this compilation.` and
+  `Compilation terminated.`.
+
+Anything else fails: a run that compiles (status 0), an ordinary compilation
+with errors (also status 2, but not one line with the prefix), another status,
+a crash, a timeout, anything on stdout, an extra stderr line. The expected
+substring is matched in the message, not in the prefix. The kind is not
+combined with other outcome kinds, `golden`, `native-ok` or `mode:`;
+`cerastes-fe-options:` is valid only with it; `.c` and `.cpp` only. It counts as
+a must-fail test (it can live under `negative/`), runs the EDG-built front end
+(so the tree and stamp checks apply), and `--update-golden` leaves it alone.
 
 ## Ordinary compilers (`native-ok`)
 

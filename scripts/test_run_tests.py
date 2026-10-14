@@ -3404,7 +3404,8 @@ class E2EGateTests(unittest.TestCase):
         for name in ("FakeGoldenRelativePathTests", "EndToEndTests",
                      "RealFrontEndGoldenTests", "WalkerSelfTestHookTests",
                      "DocBuildWarningsTests", "TreeScriptTwinTests", "EdgTreeToolTests",
-                     "RealTagTableTests", "RealDiagnosticTests", "RealNativeTests"):
+                     "RealTagTableTests", "RealDiagnosticTests", "RealNativeTests",
+                     "RealRefusedTests"):
             self.assertRegex(source, rf"@e2e_gate\([^@]*?\)\nclass {name}\b", name)
 
 
@@ -5759,7 +5760,7 @@ class MemoisedStampTests(unittest.TestCase):
         source = Path(__file__).read_text()
         users = re.findall(r"^class (\w+)\(MemoisedStamp, ", source, re.M)
         self.assertEqual(sorted(users), ["RealDiagnosticTests", "RealFrontEndGoldenTests",
-                                         "RealNativeTests"])
+                                         "RealNativeTests", "RealRefusedTests"])
         # the classes that check the stamp itself run the real function
         for name in ("TreeScriptTwinTests", "TreeGateTests", "EdgTreeToolTests"):
             self.assertNotRegex(source, rf"class {name}\(MemoisedStamp")
@@ -7271,12 +7272,308 @@ class BootstrapGitEnvironmentTests(unittest.TestCase):
                                 calls)  # (GIT_EDITOR and the like are not redirects)
 
 
+# ---------------------------------------------------------------------------
+# frontend-refused: the driver refuses the options
+# ---------------------------------------------------------------------------
+
+DRIVER_REFUSAL = ("cerastes-fe: error: --remove_unneeded_entities is not supported: cerastes "
+                  "needs the unpruned IL (unused templates and entities)\n")
+
+
+class RefusedHeaderTests(unittest.TestCase):
+    def parse(self, text, suffix=".cpp"):
+        return rt.parse_header(text, suffix)
+
+    def test_grammar(self):
+        exp = self.parse("// expect: frontend-refused is not supported\n"
+                         "// cerastes-fe-options: --c11 --gnu_version=130000\n")
+        self.assertEqual((exp.kind, exp.refused, exp.fe_options, exp.modes),
+                         ("frontend-refused", "is not supported",
+                          ["--c11", "--gnu_version=130000"], []))
+        # the options are split like a shell would, and may be quoted
+        exp = self.parse("// expect: frontend-refused x\n// cerastes-fe-options: --a=\"b c\" -d\n")
+        self.assertEqual(exp.fe_options, ["--a=b c", "-d"])
+        # in a .c file too, and the mode is not defaulted
+        self.assertEqual(self.parse("// cerastes-fe-options: --c11\n"
+                                    "// expect: frontend-refused c11\n", ".c").modes, [])
+
+    def test_bad_headers(self):
+        refused = "// expect: frontend-refused refused\n"
+        options = "// cerastes-fe-options: --c11\n"
+        bad = {
+            "no options": refused,
+            "options alone": options + "// expect: golden\n",
+            "options with another kind": options + "// expect: frontend-ok\n",
+            "options with an error kind": options + "// expect: frontend-error a @ L3\n",
+            "empty options": refused + "// cerastes-fe-options:\n",
+            "an argument is not an option": refused + "// cerastes-fe-options: --c11 x.cpp\n",
+            "a file name only": refused + "// cerastes-fe-options: x.cpp\n",
+            "two option lines": refused + options + options,
+            "two refused lines": refused + refused + options,
+            "no substring": "// expect: frontend-refused\n" + options,
+            "with golden": refused + options + "// expect: golden\n",
+            "with frontend-error": refused + options + "// expect: frontend-error a @ L3\n",
+            "with rejected": refused + options + "// expect: rejected x\n",
+            "with native-ok": refused + options + "// expect: native-ok\n",
+            "with a mode": refused + options + "// mode: c23\n",
+            "options after code": refused + "int x;\n" + options,
+            "unbalanced quote": refused + '// cerastes-fe-options: --a="b\n',
+        }
+        for what, text in bad.items():
+            with self.subTest(what), self.assertRaises(rt.HeaderError):
+                self.parse(text)
+        with self.assertRaises(rt.HeaderError):
+            self.parse(refused + options, ".vpr")
+
+    def test_a_refusal_is_a_must_fail_test(self):
+        exp = self.parse("// expect: frontend-refused x\n// cerastes-fe-options: --c11\n")
+        self.assertTrue(rt.expects_failure(exp))
+        self.assertTrue(rt.needs_edg_tools({Path("a.cpp"): exp}))
+        self.assertIn("CERASTES_FE", rt.required_env({Path("a.cpp"): exp}))
+
+
+class EvaluateRefusedTests(unittest.TestCase):
+    EXP = rt.Expectation("frontend-refused", [], None, [], refused="is not supported",
+                         fe_options=["--remove_unneeded_entities"])
+
+    def evaluate(self, stderr, code, stdout="", exp=None):
+        return rt.evaluate_refused(rt.ToolRun(code, stdout, stderr), exp or self.EXP)
+
+    def test_the_drivers_refusal(self):
+        self.assertEqual(self.evaluate(DRIVER_REFUSAL, 2), [])
+        self.assertEqual(rt.REFUSAL_PREFIX, "cerastes-fe: error: ")
+
+    def test_edgs_command_line_error(self):
+        exp = rt.Expectation("frontend-refused", [], None, [], refused="invalid option",
+                             fe_options=["--bogus_opt"])
+        self.assertEqual(self.evaluate(REAL_COMMAND_LINE, 4, exp=exp), [])
+        # without --display_error_number EDG prints no number (what the real run shows)
+        self.assertEqual(self.evaluate(REAL_COMMAND_LINE.replace(" #571", ""), 4, exp=exp), [])
+
+    def test_the_substring_must_be_in_the_message(self):
+        problems = self.evaluate(DRIVER_REFUSAL, 2, exp=rt.Expectation(
+            "frontend-refused", [], None, [], refused="something else", fe_options=["--x"]))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("does not contain `something else`", problems[0])
+        # the prefix is not the message
+        self.assertTrue(self.evaluate(DRIVER_REFUSAL, 2, exp=rt.Expectation(
+            "frontend-refused", [], None, [], refused="error: --remove", fe_options=["--x"]))
+            == [])
+
+    def test_the_exit_status_must_fit_the_shape(self):
+        for code in (0, 1, 3, 5, 139):
+            with self.subTest(code):
+                self.assertTrue(self.evaluate(DRIVER_REFUSAL, code), code)
+        # EDG's shape with the driver's status, and the reverse
+        self.assertTrue(self.evaluate(REAL_COMMAND_LINE, 2))
+        self.assertTrue(self.evaluate(DRIVER_REFUSAL, 4))
+
+    def test_nothing_on_stdout(self):
+        problems = self.evaluate(DRIVER_REFUSAL, 2, stdout="routine f\n")
+        self.assertTrue(any("printed on stdout" in p for p in problems), problems)
+
+    def test_exactly_one_line(self):
+        for stderr in (DRIVER_REFUSAL + DRIVER_REFUSAL, DRIVER_REFUSAL + "more\n",
+                       "warning: x\n" + DRIVER_REFUSAL, "", "\n\n"):
+            with self.subTest(stderr):
+                self.assertTrue(self.evaluate(stderr, 2), stderr)
+
+    def test_an_ordinary_compilation_with_errors_is_not_a_refusal(self):
+        # exit status 2 is EDG's status for errors too
+        problems = self.evaluate(REAL_THREE_ERRORS, 2)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("may be an ordinary compilation with errors", problems[0])
+        self.assertTrue(self.evaluate("scripts/x.sh: some other message\n", 2))
+        self.assertTrue(self.evaluate("cerastes-fe.sh: build/env.sh is for /a but ...\n", 2))
+        # a one-line message with the right words but not the driver's prefix
+        for line in ("some tool: --remove_unneeded_entities is not supported\n",
+                     "cerastes-fe: --remove_unneeded_entities is not supported\n",
+                     "cerastes-fe: warning: --remove_unneeded_entities is not supported\n",
+                     " cerastes-fe: error: --remove_unneeded_entities is not supported\n"):
+            with self.subTest(line):
+                self.assertTrue(self.evaluate(line, 2), line)
+
+    def test_edgs_shape_is_strict(self):
+        exp = rt.Expectation("frontend-refused", [], None, [], refused="invalid", fe_options=["--x"])
+        for stderr in (REAL_COMMAND_LINE.replace("Command-line error #571", "error #571"),
+                       REAL_COMMAND_LINE.split("\n", 1)[0] + "\n",
+                       REAL_COMMAND_LINE + "extra\n",
+                       REAL_COMMAND_LINE.replace("1 catastrophic error detected in this "
+                                                 "compilation.", "1 error detected in this "
+                                                 "compilation."),
+                       REAL_COMMAND_LINE.replace("Compilation terminated.", "Done."),
+                       REAL_CATASTROPHIC, ""):
+            with self.subTest(stderr):
+                self.assertTrue(self.evaluate(stderr, 4, exp=exp), stderr)
+
+    def test_crash_timeout_and_never_run(self):
+        self.assertIn("crashed", self.evaluate(DRIVER_REFUSAL, -9)[0])
+        self.assertEqual(rt.evaluate_refused(rt.ToolRun(None, error="timed out after 1s"),
+                                             self.EXP), ["cerastes-fe timed out after 1s"])
+
+
+class RefusedRunTests(FakeFrontEndCase):
+    """rt.main() on frontend-refused tests with the fake front end, which prints
+    the test file's `// err:` lines and exits with its `// exit:` line."""
+
+    OPTIONS = "--remove_unneeded_entities"
+
+    def refused_test(self, name, *lines, expect="frontend-refused is not supported",
+                     options=OPTIONS):
+        header = f"// expect: {expect}\n// cerastes-fe-options: {options}"
+        return self.write(name, *lines, header=header)
+
+    def test_a_refusal_passes(self):
+        t = self.refused_test("a.cpp", "// silent", "// err: " + DRIVER_REFUSAL.rstrip("\n"),
+                              "// exit: 2")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+        self.assertIn(f"PASS  {rt.rel(t)}\n", out)
+        self.assertEqual(self.summary(out), "1 passed, 0 failed, 0 skipped")
+
+    def test_edgs_command_line_error_passes(self):
+        text = "\n".join("// err: " + l for l in REAL_COMMAND_LINE.splitlines())
+        t = self.refused_test("b.cpp", "// silent", text, "// exit: 4",
+                              expect="frontend-refused invalid option")
+        self.assertEqual(self.run_harness(t)[0], 0)
+
+    def test_a_run_that_is_accepted_fails(self):
+        for what, lines in (("exit 0, nothing printed", ["// silent"]),
+                            ("exit 0, refusal text", ["// silent", "// err: " + DRIVER_REFUSAL.rstrip()]),
+                            ("diagnostics, exit 2", ["// silent", "// err: " + REAL_THREE_ERRORS.splitlines()[0], "// exit: 2"])):
+            with self.subTest(what):
+                t = self.refused_test(f"c{abs(hash(what))}.cpp", *lines)
+                status, out, _ = self.run_harness(t)
+                self.assertEqual(status, 1, out)
+
+    def test_the_message_must_contain_the_substring(self):
+        t = self.refused_test("d.cpp", "// silent", "// err: " + DRIVER_REFUSAL.rstrip("\n"),
+                              "// exit: 2", expect="frontend-refused not in the message")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("the refusal does not contain `not in the message`", out)
+
+    def test_stdout_must_be_empty(self):
+        t = self.refused_test("e.cpp", "// err: " + DRIVER_REFUSAL.rstrip("\n"), "// exit: 2",
+                              "// out: routine f", "// silent")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("printed on stdout", out)
+
+    def test_crash_and_timeout_fail(self):
+        t = self.refused_test("f.cpp", "// silent", "// crash")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("crashed (signal 9)", out)
+        t = self.refused_test("g.cpp", "// silent", "// sleep")
+        with mock.patch.object(rt, "FRONTEND_TIMEOUT_S", 1):
+            status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("timed out after 1s", out)
+
+    def test_the_options_replace_the_mode_option(self):
+        # the fake prints its arguments on stdout, which fails a refusal and
+        # shows them with -v
+        t = self.refused_test("h.cpp", options="--c11 --foo=bar")
+        status, out, _ = self.run_harness("-v", t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("options --c11 --foo=bar\n", out)
+        self.assertIn(f"path {rt.rel(t)}\n", out)
+        self.assertIn("cwd root\n", out)
+        for forbidden in ("--c++20", "--c23", "--brief_diagnostics", "--cerastes_walk"):
+            self.assertNotIn(forbidden, out)
+
+    def test_one_run_whatever_the_suffix(self):
+        t = self.refused_test("i.c", "// silent", "// err: " + DRIVER_REFUSAL.rstrip("\n"),
+                              "// exit: 2", options="--c11")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+        self.assertEqual(self.summary(out), "1 passed, 0 failed, 0 skipped")
+
+    def test_update_golden_leaves_it_alone_and_the_tree_is_checked(self):
+        t = self.refused_test("j.cpp", "// silent", "// err: " + DRIVER_REFUSAL.rstrip("\n"),
+                              "// exit: 2")
+        status, out, _ = self.run_harness("--update-golden", t)
+        self.assertEqual(status, 0, out)
+        self.assertFalse((self.dir / "j.cpp.golden").exists())
+        # a test that would fail is not run at all by --update-golden
+        bad = self.refused_test("j2.cpp", "// silent")
+        status, out, _ = self.run_harness("--update-golden", bad)
+        self.assertEqual((status, self.summary(out)),
+                         (0, "0 passed, 0 failed, 0 skipped, 0 goldens updated, 0 unchanged"))
+        self.assertEqual(self.run_harness(bad)[0], 1)
+        self.tree_mock.return_value = "mismatch"
+        self.assertEqual(self.run_harness(t)[0], 2)
+        self.tree_mock.return_value = None
+        self.stamp_mock.return_value = "stale"
+        self.assertEqual(self.run_harness(t)[0], 2)
+
+    def test_check_headers_validates_it(self):
+        t = self.write("k.cpp", header="// expect: frontend-refused x")  # no options
+        status, out, _ = self.run_harness("--check-headers", t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("needs a `// cerastes-fe-options:` line", out)
+
+
+@e2e_gate(_real_front_end_available(),
+          "CERASTES_FE or scripts/cerastes-fe.sh missing; run scripts/bootstrap.sh")
+class RealRefusedTests(MemoisedStamp, unittest.TestCase):
+    """frontend-refused through the real driver: it refuses
+    --remove_unneeded_entities itself (exit 2, one line, the prefix) and EDG
+    refuses an unknown option (exit 4, three lines)."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name).resolve()
+
+    def run_test(self, name, expect, options, body="int f() { return 0; }\n"):
+        path = self.dir / name
+        path.write_text(f"// expect: {expect}\n// cerastes-fe-options: {options}\n{body}")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            status = rt.main(["-v", str(path)])
+        return status, out.getvalue()
+
+    def test_the_drivers_own_refusal(self):
+        status, out = self.run_test("a.cpp", "frontend-refused --remove_unneeded_entities is not "
+                                    "supported", "--remove_unneeded_entities")
+        self.assertEqual(status, 0, out)
+        self.assertEqual(rt.REFUSAL_PREFIX, "cerastes-fe: error: ")
+
+    def test_a_wrong_substring_fails(self):
+        status, out = self.run_test("b.cpp", "frontend-refused will never appear",
+                                    "--remove_unneeded_entities")
+        self.assertEqual(status, 1, out)
+        self.assertIn("the refusal does not contain", out)
+
+    def test_edgs_command_line_error(self):
+        status, out = self.run_test("c.cpp", "frontend-refused invalid option", "--bogus_option")
+        self.assertEqual(status, 0, out)
+
+    def test_an_option_that_is_accepted_is_not_a_refusal(self):
+        # the driver does not refuse these today: the run compiles, so the test
+        # must fail (twin: the check is not vacuous)
+        for options in ("--c++20", "--c++20 --brief_diagnostics", "--c11"):
+            with self.subTest(options):
+                status, out = self.run_test("d.cpp", "frontend-refused anything", options)
+                self.assertEqual(status, 1, out)
+                self.assertIn("a refusal is status 2 (the driver) or 4", out)
+
+    def test_an_ordinary_compilation_with_errors_is_not_a_refusal(self):
+        status, out = self.run_test("e.cpp", "frontend-refused undefined", "--c++20",
+                                    "int f() { return zzz; }\n")
+        self.assertEqual(status, 1, out)
+        self.assertIn("may be an ordinary compilation with errors", out)
+
+
 class DocumentationTests(unittest.TestCase):
     """tests/README.md describes every kind and rule of this harness."""
 
     def test_the_readme_documents_the_extensions(self):
         text = (REAL_ROOT / "tests" / "README.md").read_text()
-        for needle in ("frontend-ok` is a header error", "switch its own check off",
+        for needle in ("frontend-refused", "cerastes-fe-options", "cerastes-fe: error: ",
+                       "frontend-ok` is a header error", "switch its own check off",
                        "inline code", "verifies the active kind's build stamp",
                        "GIT_REDIRECTS", "twin-exempt", "tests/annotations/warnings", "authoritative",
                        "relative path", "origin/cerastes", "fork-local", "NOT YET PUSHED", "unreg_ns::x", "config <sha256",

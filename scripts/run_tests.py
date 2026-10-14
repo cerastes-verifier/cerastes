@@ -12,6 +12,8 @@ expectations (grammar in tests/README.md):
     // expect: frontend-ok
     // expect: frontend-error <diag> @ L<line>           (one line per diagnostic)
     // expect: frontend-warning <diag> @ L<line>
+    // expect: frontend-refused <substring>              (needs cerastes-fe-options)
+    // cerastes-fe-options: <options>                    (only with frontend-refused)
     // expect: golden
     // expect: native-ok                                 (accompanies an outcome)
     // mode: c++20 | c23                                 (C and C++ only)
@@ -31,6 +33,9 @@ expectations need the cerastes driver, which lands in M3.
 `--brief_diagnostics --display_error_number --no_colors` and compare the
 multisets of (EDG diagnostic tag, line) it prints; the tag table is the
 generated err_data.h/err_codes.h of the active EDG build ($CERASTES_EDG_GEN).
+`frontend-refused` tests run the cerastes front end with the options of
+`// cerastes-fe-options:` instead of a mode option and require that the driver
+refuses them: see tests/README.md.
 `native-ok` also compiles the file with Apple clang and, when installed, GCC,
 with -Wall -Wextra -Werror and no __CERASTES__; each compiler has an
 anti-vacuity canary.  `// twin:` ties a must-fail test under
@@ -89,6 +94,7 @@ import difflib
 import functools
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -184,6 +190,8 @@ class Expectation:
     native_ok: bool = False
     twin: str | None = None
     twin_exempt: str | None = None  # the reason, for a positive test with no must-fail twin
+    refused: str | None = None  # frontend-refused: a substring of the refusal message
+    fe_options: list[str] = dataclasses.field(default_factory=list)  # cerastes-fe-options
 
 
 # Kinds that stand alone: each must be the only outcome line of its test
@@ -194,6 +202,8 @@ _EXPECT_RE = re.compile(r"^//\s*expect:\s*(.*?)\s*$")
 _MODE_RE = re.compile(r"^//\s*mode:\s*(.*?)\s*$")
 _TWIN_RE = re.compile(r"^//\s*twin:\s*(.*?)\s*$")
 _TWIN_EXEMPT_RE = re.compile(r"^//\s*twin-exempt:\s*(.*?)\s*$")
+_FE_OPTIONS_RE = re.compile(r"^//\s*cerastes-fe-options:\s*(.*?)\s*$")
+_REFUSED_FE_RE = re.compile(r"^frontend-refused\s+(?P<substring>\S.*)$")
 _ERROR_RE = re.compile(
     r"^error\s+(?P<category>[a-z][a-z0-9-]*)(?::(?P<reason>[a-z][a-z0-9.]*))?"
     r"\s+@\s+L(?P<line>[1-9][0-9]*)$")
@@ -227,6 +237,7 @@ def parse_header(text: str, suffix: str) -> Expectation:
     expects: list[tuple[int, str]] = []
     twins: list[tuple[int, str]] = []
     exempts: list[tuple[int, str]] = []
+    fe_options_lines: list[tuple[int, str]] = []
     modes: list[str] = []
     in_header = True
     for lineno, raw in enumerate(text.splitlines(), start=1):
@@ -240,12 +251,14 @@ def parse_header(text: str, suffix: str) -> Expectation:
                 twins.append((lineno, m.group(1)))
             elif m := _TWIN_EXEMPT_RE.match(line):
                 exempts.append((lineno, m.group(1)))
+            elif m := _FE_OPTIONS_RE.match(line):
+                fe_options_lines.append((lineno, m.group(1)))
             continue
         in_header = False
         if (_EXPECT_RE.match(line) or _MODE_RE.match(line) or _TWIN_RE.match(line)
-                or _TWIN_EXEMPT_RE.match(line)):
-            raise HeaderError(f"L{lineno}: expect:/mode:/twin:/twin-exempt: lines must be in "
-                              "the leading comment block")
+                or _TWIN_EXEMPT_RE.match(line) or _FE_OPTIONS_RE.match(line)):
+            raise HeaderError(f"L{lineno}: expect:/mode:/twin:/twin-exempt:/"
+                              "cerastes-fe-options: lines must be in the leading comment block")
 
     if not expects:
         raise HeaderError("no `// expect:` line in the leading comment block")
@@ -254,6 +267,7 @@ def parse_header(text: str, suffix: str) -> Expectation:
     diags: list[ExpectedDiag] = []
     kinds: set[str] = set()
     rejected = None
+    refused = None
     native_ok = False
     for lineno, body in expects:
         if body == "native-ok":
@@ -280,6 +294,11 @@ def parse_header(text: str, suffix: str) -> Expectation:
             kinds.add("frontend-diag")
             diags.append(ExpectedDiag(m.group("severity"), m.group("tag"),
                                       int(m.group("line"))))
+        elif m := _REFUSED_FE_RE.match(body):
+            kinds.add("frontend-refused")
+            if refused is not None:
+                raise HeaderError(f"L{lineno}: more than one `frontend-refused` line")
+            refused = m.group("substring")
         elif m := _REJECTED_RE.match(body):
             kinds.add("rejected")
             if rejected is not None:
@@ -311,6 +330,33 @@ def parse_header(text: str, suffix: str) -> Expectation:
                               "path of a test file (" + ", ".join(sorted(TEST_SUFFIXES))
                               + ") without `..`")
 
+    fe_options: list[str] = []
+    if fe_options_lines:
+        if kind != "frontend-refused":
+            raise HeaderError(f"L{fe_options_lines[0][0]}: `cerastes-fe-options:` is only valid "
+                              "with `expect: frontend-refused`")
+        if len(fe_options_lines) != 1:
+            raise HeaderError(f"L{fe_options_lines[1][0]}: more than one `cerastes-fe-options:` "
+                              "line")
+        lineno, text = fe_options_lines[0]
+        try:
+            fe_options = shlex.split(text)
+        except ValueError as err:
+            raise HeaderError(f"L{lineno}: cannot read the options: {err}") from None
+        if not fe_options or any(not o.startswith("-") for o in fe_options):
+            raise HeaderError(f"L{lineno}: `cerastes-fe-options:` takes one or more options "
+                              "(each starting with `-`; the test file is added by the harness)")
+    if kind == "frontend-refused":
+        if not fe_options_lines:
+            raise HeaderError("`expect: frontend-refused` needs a `// cerastes-fe-options:` line")
+        if native_ok:
+            raise HeaderError("`expect: frontend-refused` cannot be combined with `native-ok`")
+        if modes:
+            raise HeaderError("`mode:` does not apply to `expect: frontend-refused` (the "
+                              "options replace the mode option)")
+        if suffix == ".vpr":
+            raise HeaderError("`expect: frontend-refused` does not apply to .vpr files")
+
     twin_exempt = None
     if exempts:
         if len(exempts) != 1:
@@ -339,8 +385,9 @@ def parse_header(text: str, suffix: str) -> Expectation:
                                   + ", ".join(MODE_OPTIONS) + ")")
         if len(set(modes)) != len(modes):
             raise HeaderError("a mode is listed twice")
-        modes = modes or DEFAULT_MODES[suffix]
-    return Expectation(kind, errors, rejected, modes, diags, native_ok, twin, twin_exempt)
+        modes = [] if kind == "frontend-refused" else (modes or DEFAULT_MODES[suffix])
+    return Expectation(kind, errors, rejected, modes, diags, native_ok, twin, twin_exempt,
+                       refused, fe_options)
 
 
 def _under(path: Path, directory: Path) -> bool:
@@ -378,7 +425,7 @@ def policy_problem(path: Path, text: str, exp: Expectation) -> str | None:
 
 def expects_failure(exp: Expectation) -> bool:
     """Whether the test expects at least one error (not only warnings)."""
-    return (exp.kind in ("error", "rejected")
+    return (exp.kind in ("error", "rejected", "frontend-refused")
             or (exp.kind == "frontend-diag" and any(d.severity == "error" for d in exp.diags)))
 
 
@@ -853,6 +900,16 @@ DIAG_OPTIONS = ["--brief_diagnostics", "--display_error_number", "--no_colors"]
 CERASTES_DIAGNOSTICS_DEF = Path("src/backend/diagnostics.def")
 # EDG's exit status for a compilation with errors; with only warnings it is 0.
 EDG_ERRORS_STATUS = 2
+# A refusal of the cerastes driver (src/driver/main.cpp), before EDG runs: this
+# prefix, one line on stderr, exit status 2.  EDG's own command-line error is the
+# other accepted shape: three lines and exit status 4 (REFUSED_EDG_LINES).
+REFUSAL_PREFIX = "cerastes-fe: error: "
+REFUSAL_STATUS = 2
+# `Command-line error #N: message` with --display_error_number, else `Command-line error: message`
+EDG_CMDLINE_RE = re.compile(r"^Command-line error(?: #\d+)?: \S")
+EDG_CMDLINE_STATUS = 4
+EDG_CMDLINE_TRAILER = ("1 catastrophic error detected in this compilation.",
+                       "Compilation terminated.")
 
 _CODES_RE = re.compile(r"^\s*(ec_\w+) /\* = (\d+) \*/", re.MULTILINE)
 _TAGS_START_RE = re.compile(r"error_tags\[NUMBER_OF_ERROR_TAGS\]")
@@ -1098,6 +1155,57 @@ def compare_diags(expected: list[ExpectedDiag], diags: list[FeDiag], registry: T
                 problems.append(f"missing {severity}: expected {e}")
         for d in remaining:
             problems.append(f"unexpected {severity}: {_describe(d, registry, filename)}")
+    return problems
+
+
+def evaluate_refused(run: ToolRun, exp: Expectation) -> list[str]:
+    """Problems with one `frontend-refused` run; empty when the driver refused
+    the options as the test says.
+
+    Two shapes count as a refusal, nothing else:
+    - the driver's: exit status 2, nothing on stdout, exactly one non-empty line
+      on stderr, starting in column 0 with `cerastes-fe: error: `;
+    - EDG's command-line error: exit status 4, nothing on stdout, and the three
+      lines `Command-line error: <message>` (or `Command-line error #N: ...`),
+      `1 catastrophic error detected in this compilation.` and `Compilation
+      terminated.`.
+    The expected substring must appear in the message line.  A run that is
+    accepted (status 0 or 2 with diagnostics), crashes or times out, or prints
+    anything else fails.
+    """
+    if run.returncode is None:
+        return [f"cerastes-fe {run.error}"]
+    if run.returncode < 0:
+        return [f"cerastes-fe crashed (signal {-run.returncode})"]
+    problems = []
+    if run.stdout:
+        problems.append("cerastes-fe printed on stdout (a refusal prints nothing there): "
+                        f"{run.stdout.strip().splitlines()[0]}")
+    lines = [l for l in run.stderr.split("\n") if l.strip()]
+    if run.returncode == REFUSAL_STATUS:
+        if len(lines) != 1 or not lines[0].startswith(REFUSAL_PREFIX):
+            problems.append(f"exit status {REFUSAL_STATUS} but stderr is not exactly one line "
+                            f"starting with `{REFUSAL_PREFIX}` (it may be an ordinary "
+                            "compilation with errors): "
+                            + (" | ".join(lines)[:300] or "(empty)"))
+            return problems
+        message = lines[0]
+    elif run.returncode == EDG_CMDLINE_STATUS:
+        if (len(lines) != 3 or not EDG_CMDLINE_RE.match(lines[0])
+                or tuple(lines[1:]) != EDG_CMDLINE_TRAILER):
+            problems.append(f"exit status {EDG_CMDLINE_STATUS} but stderr is not EDG's "
+                            "command-line error (`Command-line error: ...` and its two "
+                            "closing lines): " + (" | ".join(lines)[:300] or "(empty)"))
+            return problems
+        message = lines[0]
+    else:
+        return problems + [
+            f"cerastes-fe exited with status {run.returncode}; a refusal is status "
+            f"{REFUSAL_STATUS} (the driver) or {EDG_CMDLINE_STATUS} (EDG's command-line error)"
+            + (": " + " | ".join(lines)[:300] if lines else "")]
+    assert exp.refused is not None
+    if exp.refused not in message:
+        problems.append(f"the refusal does not contain `{exp.refused}`: {message}")
     return problems
 
 
@@ -1513,6 +1621,20 @@ def run_diags(path: Path, exp: Expectation, env: dict[str, str],
     return outcomes
 
 
+def refused_command(path: Path, exp: Expectation) -> list[str]:
+    """The cerastes-fe command for a frontend-refused test: its own options in
+    place of a mode option (from the repository root)."""
+    return [*FE_COMMAND, *exp.fe_options, rel(path)]
+
+
+def run_refused(path: Path, exp: Expectation, env: dict[str, str],
+                opts: RunOptions) -> list[Outcome]:
+    if opts.update_golden:
+        return []  # not a golden test: nothing to update
+    run = run_tool(refused_command(path, exp), env, FRONTEND_TIMEOUT_S)
+    return [Outcome(rel(path), evaluate_refused(run, exp), run.stdout + run.stderr)]
+
+
 def walk_command(path: Path, mode: str) -> list[str]:
     """The cerastes-fe command for a golden test (run from the repo root)."""
     return [*FE_COMMAND, MODE_OPTIONS[mode], WALK_OPTION, rel(path)]
@@ -1557,6 +1679,8 @@ def run_one(path: Path, exp: Expectation | HeaderError, env: dict[str, str],
         outcomes = run_golden(path, exp, env, opts)
     elif exp.kind == "frontend-diag":
         outcomes = run_diags(path, exp, env, opts)
+    elif exp.kind == "frontend-refused":
+        outcomes = run_refused(path, exp, env, opts)
     else:
         outcomes = run_frontend(path, exp, env)
     if exp.native_ok and opts.native is not None and not opts.update_golden:
@@ -1746,13 +1870,15 @@ def required_env(headers: dict[Path, Expectation | HeaderError]) -> list[str]:
             names += ["CERASTES_FE", "EDG_CLANG_VER_SCRAPE"]
         elif exp.kind == "frontend-diag":
             names += ["CERASTES_FE", "EDG_CLANG_VER_SCRAPE", "CERASTES_EDG_GEN"]
+        elif exp.kind == "frontend-refused":
+            names += ["CERASTES_FE", "EDG_CLANG_VER_SCRAPE"]
     return list(dict.fromkeys(names))
 
 
 def needs_edg_tools(headers: dict[Path, Expectation | HeaderError]) -> bool:
     """Whether a selected test runs a tool built from the EDG tree."""
     return any(isinstance(e, Expectation) and e.kind in ("frontend-ok", "golden",
-                                                         "frontend-diag")
+                                                         "frontend-diag", "frontend-refused")
                for e in headers.values())
 
 
