@@ -207,8 +207,15 @@ EDG tests that fail on its parent and pass on it, a `src/Changes` entry and a
      that EDG attached;
    - contract consistency across translation units (0006 item 6), which EDG
      cannot see;
-   - choosing between prototype and instance, and treating explicit
-     specializations, which carry their own contracts (M4);
+   - choosing between prototype and instance (M4). Explicit specializations
+     follow must-match with the primary template (0006 item 6), which EDG
+     enforces in any declaration order;
+   - the language mode. cerastes runs C++ in Clang emulation and C as C23.
+     GNU emulation (`--gnu_version`) is refused by the driver, because there
+     `extern "C"` redeclarations in different namespaces can become separate
+     routines that escape must-match (CP3), unless EDG fixes that. Pre-C23 C
+     is refused too: identifier-list declarators could bind a contract's
+     names to globals;
    - near-miss namespaces. `[[ceraste::ensures(…)]]` is only an EDG warning
      (#2803), and the back end still runs. The M3 driver makes unrecognized
      attribute namespaces and names errors in verify mode. M2's walker shows

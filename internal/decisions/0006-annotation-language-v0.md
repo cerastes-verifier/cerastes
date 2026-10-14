@@ -119,6 +119,22 @@ summarized here):
    declaration (EDG, 0007 item 4).
    - The usual style is to write the contract once, on the declaration in
      the header. Repeating it on the definition is allowed.
+   - **What "equivalent" can see** (CP3 audit). The comparison is EDG's
+     expression equivalence, so two cases are reported as mismatches even
+     though they mean the same thing:
+     - `this->a > x` against `a > y`;
+     - anything containing a lambda, because lambdas compare by identity.
+       That includes every `forall`.
+
+     Such a contract must be written once, not repeated.
+   - **Explicit specializations** must match the primary template's contract
+     (orchestrator, extending the owner's rule). A specialization may repeat
+     the contract or carry none, in which case it has the primary's, but it
+     may not differ, whatever the declaration order. The reason: callers,
+     and a generic proof of the template (M4), rely on the primary's
+     contract, but a call with those arguments runs the specialization.
+     Letting a specialization have its own, compatible contract would need a
+     behavioural-subtyping obligation (M5-style). That can be added later.
    - Within one declaration, several `requires` (or `ensures`) are conjoined
      in source order, and so are several `invariant`s on one loop.
    - **Why not accumulate** (the CP1 audit found this). Translation units are
