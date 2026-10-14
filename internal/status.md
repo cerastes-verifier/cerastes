@@ -6,7 +6,7 @@ next session.
 
 ## M1.5 — User documentation site (2026-10-14): done locally; live deploy pending the owner's push
 
-Read `docs/handoff.md` next.
+Read `internal/handoff.md` next.
 
 **Owner decisions this session**
 - **Q1–Q8.** The answers to the M1 handoff questions are folded into
@@ -73,7 +73,7 @@ Read `docs/handoff.md` next.
     or both;
   - the `check.sh` and CI wiring cannot be weakened (`|| true`, comments,
     `continue-on-error`).
-- **Upstream draft for the owner.** `docs/upstream/attribute-registration.md`
+- **Upstream draft for the owner.** `internal/upstream/attribute-registration.md`
   plus 16 probes (handoff §5).
 - **Decision records.**
   - 0004-docs-site (accepted).
@@ -81,11 +81,11 @@ Read `docs/handoff.md` next.
     libc++ limitation: `<utility>` fails too, and there are three causes.
   - 0003 records the owner's push and pointer answers.
 
-**Acceptance.** See "M1.5 acceptance" in `docs/handoff.md`.
+**Acceptance.** See "M1.5 acceptance" in `internal/handoff.md`.
 - **Met locally:** zero-warning docs build in `check.sh`; every doc example
   runs as a test; branding matches cerastes.dev. The screenshots are
-  `docs/images/m1.5-docs-overview.png`, served under `/cerastes/doc/`, and
-  `docs/images/m1.5-website-reference.png`.
+  `internal/images/m1.5-docs-overview.png`, served under `/cerastes/doc/`, and
+  `internal/images/m1.5-website-reference.png`.
 - **Pending the owner's push:** the live URL returns 200, search works live,
   and a docs-only commit appears with no manual step.
 
@@ -107,8 +107,8 @@ Read `docs/handoff.md` next.
 **Decision records added:** 0004-docs-site.
 
 **First step for the next session (M2).** Read `CLAUDE.md`, the M2 section
-of `plan.md`, this file, `docs/handoff.md` §5 and the upstream draft
-`docs/upstream/attribute-registration.md`. Check whether the owner has
+of `plan.md`, this file, `internal/handoff.md` §5 and the upstream draft
+`internal/upstream/attribute-registration.md`. Check whether the owner has
 fast-forwarded the fork branch and filed the Discussion (handoff §8). Then
 write M2's decision record for the attribute design (invariant 6), sized for
 the full scope in the draft.
@@ -116,7 +116,7 @@ the full scope in the draft.
 ## Decision 0003 (2026-10-13): EDG fork branch
 
 The owner created branch `cerastes` on the fork
-https://github.com/mborland/compiler. `docs/decisions/0003-edg-fork-branch.md`
+https://github.com/mborland/compiler. `internal/decisions/0003-edg-fork-branch.md`
 records how it is used:
 - every EDG source change is made there, never in `third_party/edg`;
 - the submodule only ever pins upstream `main` commits, and no commit of this
@@ -129,14 +129,14 @@ records how it is used:
 
 **Owner rules (2026-10-13):** sessions may commit and push to the fork's
 `cerastes` branch. Sessions never open issues, PRs or Discussions against
-upstream; the owner files them from text drafted in `docs/handoff.md`.
+upstream; the owner files them from text drafted in `internal/handoff.md`.
 Recorded in 0003 item 6, CLAUDE.md and the `edg-backend` agent.
 
 **Not done:** the branch tip is `90b66472`, the fork's old `main`, 22 commits
 behind the pin `9847356d`. It must be fast-forwarded before its first commit.
 This session had no GitHub push credentials, so that is handoff question 1.
 From now on, every handoff ends with a "Questions for the owner" section
-(`docs/handoff.md` §8).
+(`internal/handoff.md` §8).
 
 **Decision records added:** 0003-edg-fork-branch (accepted). G1 passed, so
 the fallback record plan.md had reserved 0003 for was never written. A
@@ -144,7 +144,7 @@ fallback needed after a later pin move takes the next free number.
 
 ## M1 — EDG IL inventory and integration spike (2026-10-13): done, Gate G1 PASS
 
-Read `docs/handoff.md` next. It has the re-look list, the friction log and
+Read `internal/handoff.md` next. It has the re-look list, the friction log and
 what M1.5, M2 and M4 inherit.
 
 **Done**
@@ -203,7 +203,7 @@ what M1.5, M2 and M4 inherit.
   and the attribute lines of the g1, inventory and sampled contrast goldens. The VeriFast
   originals are byte-identical in `tests/differential/verifast/` (generic2
   `0fb63506`) and skipped by the harness.
-- **`docs/il-inventory.md`.**
+- **`internal/il-inventory.md`.**
   - The five G1 checks, with `il_display` evidence.
   - Every Clang query used by VeriFast's `GenericFunctionChecker`,
     `collectIntegralTypeParams`, `usesGenericProof` and the call-site and
@@ -235,7 +235,7 @@ what M1.5, M2 and M4 inherit.
   auditor reproduced the evidence and agreed with this verdict in review
   passes 2, 3, 3b, 3c and 3d. The front-end fallback record is not needed.
 
-**Acceptance (all met):** see "M1 acceptance" in `docs/handoff.md` for the
+**Acceptance (all met):** see "M1 acceptance" in `internal/handoff.md` for the
 commands and their results.
 
 **Not done / deferred**
@@ -264,8 +264,8 @@ commands and their results.
 **Decision records added:** 0002-backend-integration (accepted).
 
 **First step for the next session (M1.5, by plan order).** Read `CLAUDE.md`,
-the M1.5 section of `plan.md`, this file, `docs/handoff.md` §4 and
-`docs/decisions/`. Then write `docs/decisions/0004-docs-site.md` (0003 is
+the M1.5 section of `plan.md`, this file, `internal/handoff.md` §4 and
+`internal/decisions/`. Then write `internal/decisions/0004-docs-site.md` (0003 is
 the EDG fork-branch record; see the entry above). If the owner wants M2
 first, do this instead: once the fork branch `cerastes` has been
 fast-forwarded to the pin, start the upstream issue and PR cycle for
@@ -281,7 +281,7 @@ GitHub serves under the org's `cerastes.dev` domain; it is recorded in
 decision 0004 when M1.5 runs. New global invariant 9 (CLAUDE.md invariant 8):
 user-visible behavior is documented in `doc/` in the milestone that adds it,
 and every doc example is a test. M2–M7 each gained a docs task. The
-annotation reference moves from the planned `docs/annotations.md` to `doc/`.
+annotation reference moves from the planned `internal/annotations.md` to `doc/`.
 M1 is unaffected. M1.5 depends only on M0 and must run before M2. Creating
 the `doc` repo, enabling Pages and adding the dispatch token are owner steps.
 
@@ -290,8 +290,8 @@ the `doc` repo, enabling Pages and adding the dispatch token are owner steps.
 **Done**
 - Repository skeleton: `LICENSE.txt` (Apache-2.0 WITH LLVM-exception),
   `.gitignore`, `README.md`, `CLAUDE.md`, `.claude/agents/`
-  (`soundness-auditor`, `test-mutator`), `docs/status.md`,
-  `docs/decisions/0001-toolchain-pins.md`, `tests/README.md`.
+  (`soundness-auditor`, `test-mutator`), `internal/status.md`,
+  `internal/decisions/0001-toolchain-pins.md`, `tests/README.md`.
 - Placeholders renamed in `plan.md`: `vcpp` → `cerastes`,
   `[[verifier::…]]` → `[[cerastes::…]]`, `<verifier.h>` → `<cerastes.h>`,
   `namespace verifier` → `namespace cerastes`, `__VCPP__` → `__CERASTES__`.
@@ -362,7 +362,7 @@ the `doc` repo, enabling Pages and adding the dispatch token are owner steps.
 **Decision records added:** 0001-toolchain-pins.
 
 **First step for M1:** read `CLAUDE.md`, the M1 section of `plan.md`, this
-file and `docs/decisions/`. Then decide where the cerastes EDG configuration
+file and `internal/decisions/`. Then decide where the cerastes EDG configuration
 lives. Under the upstream-only pin, prefer a configuration that needs no EDG
 source change (for example a macro-conf or defines block kept in this repo
 and passed to EDG's CMake); otherwise upstream it first. Then copy the six

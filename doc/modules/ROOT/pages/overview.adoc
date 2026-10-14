@@ -65,7 +65,7 @@ There is no annotation syntax and no `cerastes verify` command yet.
 * The roadmap is
   https://github.com/cerastes-verifier/cerastes/blob/main/plan.md[`plan.md`].
 * The latest state, with what is done and what is not, is
-  https://github.com/cerastes-verifier/cerastes/blob/main/docs/status.md[`docs/status.md`].
+  https://github.com/cerastes-verifier/cerastes/blob/main/internal/status.md[`internal/status.md`].
 
 == License
 

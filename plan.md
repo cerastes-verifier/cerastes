@@ -2,7 +2,7 @@
 
 Working name in this plan: **`cerastes`** (we used verifier and vcpp as a placeholder which you need to replace everywhere it is used)
 
-One Claude Code session per milestone. Each session starts from `CLAUDE.md`, this file (its own milestone only), `docs/status.md`, and the decision records, and ends by leaving the repo green and `docs/status.md` updated so the next session can start cold.
+One Claude Code session per milestone. Each session starts from `CLAUDE.md`, this file (its own milestone only), `internal/status.md`, and the decision records, and ends by leaving the repo green and `internal/status.md` updated so the next session can start cold.
 
 ---
 
@@ -39,7 +39,7 @@ Cerastes/
   doc/                      # user documentation: Antora component, published at https://cerastes.dev/cerastes/doc/ (M1.5+)
     antora.yml  local-playbook.yml  package.json  ui/
     modules/ROOT/           # nav.adoc, pages/, examples/ (every example is a test), images/
-  docs/                     # developer documentation (not published)
+  internal/                     # developer documentation (not published)
     status.md               # session handoff log (updated every session)
     decisions/NNNN-*.md     # one record per non-obvious decision
     il-inventory.md         # M1 output
@@ -108,7 +108,7 @@ Every test file starts with expectation lines that `scripts/run_tests.py` checks
 
 **Tasks**
 - Initialize the repo and add the submodules: EDG (upstream `edgcpp/compiler`, pinned to its head commit), and Silicon cloned recursively, since it carries `silver` as a submodule.
-- Pin every tool version and record the SHAs and `--version` outputs in `docs/decisions/0001-toolchain-pins.md`.
+- Pin every tool version and record the SHAs and `--version` outputs in `internal/decisions/0001-toolchain-pins.md`.
 - Write `scripts/bootstrap.sh` so it is idempotent on macOS:
   - Homebrew: `cmake ninja python openjdk sbt z3`.
   - Build EDG with the stock `macos-arm-clang-debug` preset.
@@ -120,7 +120,7 @@ Every test file starts with expectation lines that `scripts/run_tests.py` checks
   - Exits non-zero on any mismatch, including "failed for the wrong reason or at the wrong line".
 - Add `tests/viper-smoke/ok.vpr` (must verify) and `fail.vpr` (must fail with a known error at a known line).
 - Write `scripts/check.sh` to run build, lint and tests.
-- Write `CLAUDE.md` (Appendix A), `.claude/agents/` (Appendix B) and `docs/status.md`.
+- Write `CLAUDE.md` (Appendix A), `.claude/agents/` (Appendix B) and `internal/status.md`.
 
 **Acceptance**
 - On a clean clone, `scripts/bootstrap.sh && scripts/check.sh` is green.
@@ -142,7 +142,7 @@ Every test file starts with expectation lines that `scripts/run_tests.py` checks
   - `EXTRA_SOURCE_POSITIONS_IN_IL TRUE`
   - `GENERATE_SOURCE_SEQUENCE_LISTS`, only if needed.
 - Copy the six tests from `mborland/verifast@generic2:tests/cxx/templates/` into `tests/differential/verifast/` unchanged: `generic_body`, `integral`, `integral_fallback`, `integral_per_instantiation`, `integral_wrong_spec`, `function_template_general_contract`. Make annotation-free copies for IL inspection.
-- Run `--parse_templates --il_display` on each. Write `docs/il-inventory.md` as a table mapping every Clang query used by `GenericFunctionChecker`, `collectIntegralTypeParams` and the call-site code to its EDG IL field, with `il_display` excerpts as evidence.
+- Run `--parse_templates --il_display` on each. Write `internal/il-inventory.md` as a table mapping every Clang query used by `GenericFunctionChecker`, `collectIntegralTypeParams` and the call-site code to its EDG IL field, with `il_display` excerpts as evidence.
 - **Required checks** (each one is pass or fail, with evidence):
   1. **`inc`:** what `type_kind` the `v + 1` operation has (`tk_template_param` vs `tk_unknown`), and whether the `(T)` cast is its own node.
   2. **Never-instantiated templates:** a template with no instantiation still has a prototype routine with a full body.
@@ -200,7 +200,7 @@ Every test file starts with expectation lines that `scripts/run_tests.py` checks
   - `bootstrap.sh` installs Node (Homebrew) and runs `npm ci` in `doc/`.
   - Record the Node and Antora pins in 0001.
 - Add a CI workflow in this repo that builds the docs on pull requests and, on pushes to `main` that touch `doc/`, sends the `repository_dispatch` to the doc repo.
-- `docs/` stays developer-only and unpublished. The user-facing annotation reference goes in `doc/` (written in M2).
+- `internal/` stays developer-only and unpublished. The user-facing annotation reference goes in `doc/` (written in M2).
 
 **Acceptance**
 - `scripts/check.sh` builds the docs with zero Antora warnings and runs every doc example as a test.
@@ -307,14 +307,14 @@ There is deliberately no user-facing `assume`.
   - Bitwise operators rejected; `bool` excluded. Keep the axioms linear.
 - **Call sites:** instance routine → `assoc_template`. Use the generic proof when every integral argument is a builtin integer type other than `bool`; otherwise verify the instance with the M3 encoder.
 - **Fallback:** if the generic proof fails, verify per instantiation for the types actually instantiated, and report which templates fell back.
-- Write `docs/soundness/prototype-correspondence.md`: for every construct the checker accepts, the prototype parse and every real instantiation's parse agree. This is the lemma Clang gave for free.
+- Write `internal/soundness/prototype-correspondence.md`: for every construct the checker accepts, the prototype parse and every real instantiation's parse agree. This is the lemma Clang gave for free.
 - User docs: a "Generic templates" page covering:
   - when a template is verified once;
   - the eligibility rules in user terms;
   - what falls back to per-instantiation verification, and how that is reported;
   - the model of an integral `T`.
 
-**Gate G2:** the six tests, ported to `[[cerastes::]]` syntax, plus their mutants reproduce VeriFast's outcomes, recorded in `docs/differential.md`. That includes `integral_fallback`, where the proof holds for `int` but not `signed char` and only `int` is instantiated. Any disagreement is either explained in a decision record or blocks M5.
+**Gate G2:** the six tests, ported to `[[cerastes::]]` syntax, plus their mutants reproduce VeriFast's outcomes, recorded in `internal/differential.md`. That includes `integral_fallback`, where the proof holds for `int` but not `signed char` and only `int` is instantiated. Any disagreement is either explained in a decision record or blocks M5.
 
 ---
 
@@ -399,7 +399,7 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
   - annotation overhead (spec lines / code lines),
   - mutation score,
   - agreement with VeriFast.
-- **Artifacts:** `scripts/eval.sh` regenerates every table from a clean clone; results go in `docs/eval/`.
+- **Artifacts:** `scripts/eval.sh` regenerates every table from a clean clone; results go in `internal/eval/`.
 - **Out of scope for Claude Code:** usability-study design and IRB materials.
 
 ---
@@ -420,8 +420,8 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
 **Opening prompt** (paste at the start of each milestone session):
 
 ```
-Read CLAUDE.md, the "M<k>" section of plan.md, docs/status.md, and all of
-docs/decisions/. Use plan mode: propose a task breakdown for M<k>, list the
+Read CLAUDE.md, the "M<k>" section of plan.md, internal/status.md, and all of
+internal/decisions/. Use plan mode: propose a task breakdown for M<k>, list the
 exact acceptance commands you will run, and name any decision records you
 expect to write. Do not modify files until I approve the plan.
 ```
@@ -434,7 +434,7 @@ expect to write. Do not modify files until I approve the plan.
 **Closing prompt:**
 
 ```
-Run scripts/check.sh. Then update docs/status.md with: what is done, what is
+Run scripts/check.sh. Then update internal/status.md with: what is done, what is
 not, surprises, any decision records added, and the exact first step for the
 next session. Commit with a message referencing M<k>.
 ```
@@ -446,7 +446,7 @@ next session. Commit with a message referencing M<k>.
 ```markdown
 # cerastes — C/C++ verifier (EDG → Viper/Silicon → Z3)
 
-Plan: @plan.md   Status: @docs/status.md   User docs: doc/ (Antora → https://cerastes.dev/cerastes/doc/)
+Plan: @plan.md   Status: @internal/status.md   User docs: doc/ (Antora → https://cerastes.dev/cerastes/doc/)
 
 ## Commands
 - Bootstrap: scripts/bootstrap.sh
@@ -462,14 +462,14 @@ Plan: @plan.md   Status: @docs/status.md   User docs: doc/ (Antora → https://c
 3. Unsupported constructs are rejected with a diagnostic, never approximated.
 4. No inhale/assume in emitted Viper without `// cerastes:inhale-ok <reason>`.
 5. third_party/edg pins upstream edgcpp/compiler only; EDG edits are small commits with tests on a `cerastes` fork branch, upstreamed before the pin moves.
-6. Non-obvious semantics → docs/decisions/NNNN-*.md before code.
+6. Non-obvious semantics → internal/decisions/NNNN-*.md before code.
 7. Errors shown to users point at C++ source lines.
 8. User-visible behavior lands with its page in doc/; every doc example is a test.
 
 ## Layout
 src/backend (EDG IL → VIR) · src/vir · src/viper (VIR → .vpr + pos map) ·
 src/driver · include/cerastes.h · tests/<area>/ · doc/ (user, Antora) ·
-docs/ (developer)
+internal/ (developer)
 
 ## Conventions
 - C++20 for tool code; EDG code follows EDG's own style in third_party/edg.

@@ -73,7 +73,7 @@ by hand, load them into your shell:
 
 The output is `Z3 version 4.16.0 - 64 bit`. The versions of every pinned tool
 are in the
-https://github.com/cerastes-verifier/cerastes/blob/main/docs/decisions/0001-toolchain-pins.md[toolchain pin record].
+https://github.com/cerastes-verifier/cerastes/blob/main/internal/decisions/0001-toolchain-pins.md[toolchain pin record].
 
 == Check the installation
 

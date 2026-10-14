@@ -1,6 +1,6 @@
 # Builds the user documentation (doc/) from the working tree into build/doc/.
 # Used by scripts/build_docs.sh, scripts/check.sh and .github/workflows/docs.yml.
-# Decision record: docs/decisions/0004-docs-site.md.
+# Decision record: internal/decisions/0004-docs-site.md.
 #
 # In Antora, a path that starts with ./ (the UI bundle, supplemental files)
 # resolves against this file's directory; other relative paths (the content

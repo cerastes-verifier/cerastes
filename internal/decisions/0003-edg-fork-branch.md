@@ -17,10 +17,10 @@ M1 needed no EDG change (decision 0002). M2 does. Registering the
 arguments as C++ expressions, means changing `src/attribute.c`. The
 attribute descriptor table and the hard-coded list of known attribute
 namespaces are both there (`attribute.c:970-980`). The M1 inventory
-(`docs/il-inventory.md`, check 5c) showed why the unrecognized-attribute
+(`internal/il-inventory.md`, check 5c) showed why the unrecognized-attribute
 path cannot carry contracts written after the parameter list: they land on
 the function type and are lost on redeclaration. So M2 cannot avoid the
-change, and the upstream cycle is M2's critical path (`docs/handoff.md` §5).
+change, and the upstream cycle is M2's critical path (`internal/handoff.md` §5).
 
 On 2026-10-13 the owner created the branch.
 
@@ -74,12 +74,12 @@ On 2026-10-13 the owner created the branch.
    - **The owner pushes** (answer to handoff question 1, 2026-10-13). A
      session commits in a local clone of the fork, outside this repository
      (for example `~/Documents/compiler`), and names the commits to push in
-     `docs/handoff.md`. Sessions have no push credentials for the fork.
+     `internal/handoff.md`. Sessions have no push credentials for the fork.
    - **Claude never opens issues, pull requests or Discussions against
      upstream `edgcpp/compiler`. The owner does all of that.** A session
      that has an upstreamable series ready writes the proposed issue and PR
      text, with the `CONTRIBUTING.md` checklist filled in, into
-     `docs/handoff.md` for the owner to file. Until the owner has opened the
+     `internal/handoff.md` for the owner to file. Until the owner has opened the
      issue, commits carry `[GH #?]` placeholders in place of the issue
      number.
 7. **Prefer mechanisms upstream can accept.** EDG upstream has to want the
@@ -114,7 +114,7 @@ On 2026-10-13 the owner created the branch.
   a reviewed golden diff.
 - **Numbering.** plan.md had reserved 0003 for a front-end fallback record
   (`0003-frontend-fallback.md`), to be written only if Gate G1 failed. G1
-  passed (`docs/il-inventory.md`), so this record takes 0003. A fallback
+  passed (`internal/il-inventory.md`), so this record takes 0003. A fallback
   record needed after a future pin move takes the next free number.
 
 ## Settled questions

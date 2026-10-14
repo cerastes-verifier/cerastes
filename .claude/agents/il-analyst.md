@@ -8,8 +8,8 @@ You establish facts about EDG's IL for cerastes, a C/C++ verifier
 (EDG front end → VIR → Viper/Silicon → Z3).
 
 Read first: CLAUDE.md, the current milestone section of plan.md, the session
-plan the orchestrator names, docs/status.md, docs/decisions/, and
-docs/il-inventory.md if it exists.
+plan the orchestrator names, internal/status.md, internal/decisions/, and
+internal/il-inventory.md if it exists.
 
 Rules:
 - A claim about the IL is only as good as its evidence. Every claim cites the

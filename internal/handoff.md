@@ -1,7 +1,7 @@
 # Handoff after M1.5 (2026-10-14)
 
 The next session reads this file after `CLAUDE.md`, its own milestone in
-`plan.md`, `docs/status.md` and `docs/decisions/`. `status.md` has the formal
+`plan.md`, `internal/status.md` and `internal/decisions/`. `status.md` has the formal
 M1.5 entry. This file adds what a cold start would otherwise have to
 rediscover. The M1 material that is still open (§3 and §6) is carried over
 from the M1 handoff unchanged.
@@ -59,7 +59,9 @@ M1.5 (owner: two folders named `doc` and `docs` were confusing).
 4. **The npm stamp checks metadata only.** `bootstrap.sh` compares
    `doc/node_modules/.package-lock.json` with the lockfile (versions,
    resolved URLs, integrity) and hashes `package.json`. Files edited in place
-   inside `node_modules` are not detected.
+   inside `node_modules` are not detected. Any edit to `doc/package.json`,
+   even its description, makes `check.sh` stop with "run
+   scripts/bootstrap.sh" (the rename to `internal` did exactly that).
 5. **`--build-only` is not offline.** It skips Homebrew, the Z3 download and
    `npm ci`. It still initializes a missing submodule and rebuilds Silicon on
    a stale stamp, which can make sbt fetch dependencies. This is deliberate:
@@ -230,8 +232,8 @@ Updated for M1.5. The upstream proposal is drafted and its scope was set by
 the owner.
 
 - **The upstream Discussion is drafted:**
-  `docs/upstream/attribute-registration.md`, with 16 probes in
-  `docs/upstream/attribute-registration-probes/`. Re-run any of them with
+  `internal/upstream/attribute-registration.md`, with 16 probes in
+  `internal/upstream/attribute-registration-probes/`. Re-run any of them with
   `scripts/cerastes-fe.sh --c++20 --cerastes_walk <probe>`.
   - **Scope (owner, 2026-10-14).** cerastes aims for all of VeriFast's
     functionality and more. Specifications are **C++ grammar inside
@@ -355,7 +357,7 @@ From the inventory's gotchas; each is evidenced there.
 | 4 | `python3 scripts/check_doc_examples.py`; `… --html build/doc`; `CERASTES_REQUIRE_E2E=1 python3 scripts/test_run_tests.py` | OK; OK (4 html files, 1 code block); 305 tests OK, 0 skipped. The e2e twins build real Antora sites: warnings fail `build_docs.sh` but not bare Antora; the lint-evading pages q1–q18 and e1/e2/e5 fail |
 | 5 | `scripts/check.sh` | green in 31.5 s; `git status` shows no stray files |
 | 6 | shallow clean clone (`git clone --depth 1`) of the M1.5 state: `scripts/bootstrap.sh && scripts/check.sh` | pending: runs right after the M1.5 commit |
-| 7 | branding | `docs/images/m1.5-docs-overview.png` (local build served under `/cerastes/doc/`) next to `docs/images/m1.5-website-reference.png`: Ink navbar with the lockup, Sand rules and markers, Archivo, favicon |
+| 7 | branding | `internal/images/m1.5-docs-overview.png` (local build served under `/cerastes/doc/`) next to `internal/images/m1.5-website-reference.png`: Ink navbar with the lockup, Sand rules and markers, Archivo, favicon |
 | 8 | soundness audit | pass 1: 2 blocking (examples could be included or rendered without being tested). Pass 2: 2 blocking (`<pre>` without a language; garbled `libc++` on the page). Pass 3: nothing blocking. Its three follow-ups (`subs=`, the tag-directive form, per-item counting) are fixed with twins and are covered by the green self-test, not re-audited |
 | 9 | after the owner's push: the Actions run, `curl -sI https://cerastes.dev/cerastes/doc/`, live search | pending the owner's push |
 | 10 | docs-only commit pushed by the owner | pending the owner's push |
@@ -367,7 +369,7 @@ Every open decision from this session, each with a recommended answer. Answer
 them inline, as last time.
 
 1. **File the upstream Discussion?** The draft is
-   `docs/upstream/attribute-registration.md`.
+   `internal/upstream/attribute-registration.md`.
    - §1–§9 are the post; Appendix A is the VeriFast inventory; "For the owner"
      is not part of it.
    - It follows your two scope corrections: VeriFast parity and beyond, and

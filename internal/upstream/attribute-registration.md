@@ -9,7 +9,7 @@ the post. Nothing here is EDG code; no fork commit exists for it.
 Evidence conventions: every command was run against EDG
 `9847356d461d2bef846bf133e16821f0e8b69749` (`7.0-25-g9847356d46`, the cerastes
 pin), built in the cerastes configuration (5.1). Line numbers are for that
-commit. Probes are in `docs/upstream/attribute-registration-probes/`; the
+commit. Probes are in `internal/upstream/attribute-registration-probes/`; the
 commands below are run from the cerastes repository root. Source-line
 references to VeriFast are to `mborland/verifast` branch `generic2`
 (`0fb63506a51cae559ae92348eb54ba7f7be0bf6d`), read only.
@@ -300,7 +300,7 @@ $ scripts/cerastes-fe.sh --c++20 --cerastes_walk spec_calls_fail.cpp     # exit 
 2 errors detected in the compilation of "spec_calls_fail.cpp".
 ```
 
-(Paths in the real output are prefixed `docs/upstream/attribute-registration-probes/`.)
+(Paths in the real output are prefixed `internal/upstream/attribute-registration-probes/`.)
 
 The same redeclaration behaviour shows for `enable_if` (`enable_if.cpp`): for
 the non-template `g` the attribute of the defining declaration (line 2) is kept,
@@ -776,7 +776,7 @@ into the session scratchpad, not into `third_party/edg`.
 
 ### O.4 Probes
 
-`docs/upstream/attribute-registration-probes/` holds the probes. Re-run any of
+`internal/upstream/attribute-registration-probes/` holds the probes. Re-run any of
 them with `scripts/cerastes-fe.sh --c++20 --cerastes_walk <probe>` (or
 `--il_display`; `--c++23` for `assume_stmt.cpp`).
 
@@ -797,6 +797,6 @@ them with `scripts/cerastes-fe.sh --c++20 --cerastes_walk <probe>` (or
 | `ghost_field_layout.cpp` | 5.4, R7 | `sizeof(S)`: `8 == 4` |
 | `prefix_ns.cpp` | question 10 | no warning for `cl`, `gn`, `g` |
 
-They are evidence for this draft, not tests: the harness does not scan `docs/`.
+They are evidence for this draft, not tests: the harness does not scan `internal/`.
 If any should become a regression test, test-mutator writes it under `tests/`
 with a reviewed golden (invariant 1).

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 """Lint the user documentation so that every code example is a test.
 
-Invariant 8 (docs/decisions/0004-docs-site.md, item 7): a code example in
+Invariant 8 (internal/decisions/0004-docs-site.md, item 7): a code example in
 doc/ is a source block in a language cerastes reads (C, C++ or Viper), and it
 is an include of a test file under doc/modules/ROOT/examples/ through a tagged
 region, so the page never shows the expectation header.  This script reads

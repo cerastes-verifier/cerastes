@@ -7,7 +7,7 @@ and Z3. Errors are reported against the C/C++ source.
 
 Status: toolchain, test harness and EDG front-end integration (milestones M0
 to M1.5); nothing is verified yet. See `plan.md` for the roadmap and
-`docs/status.md` for where things stand.
+`internal/status.md` for where things stand.
 
 User documentation: https://cerastes.dev/cerastes/doc/ (source in `doc/`;
 build it locally with `scripts/build_docs.sh`).
@@ -22,7 +22,7 @@ scripts/check.sh       # build, lint, harness self-test, tests
 ```
 
 Bootstrap needs Homebrew and the Xcode Command Line Tools. It is idempotent.
-The tool versions it pins are listed in `docs/decisions/0001-toolchain-pins.md`.
+The tool versions it pins are listed in `internal/decisions/0001-toolchain-pins.md`.
 
 ## License
 

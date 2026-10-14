@@ -1,7 +1,7 @@
 {
   "name": "cerastes-doc",
   "private": true,
-  "description": "Build tooling for the cerastes user documentation (Antora). Pins: docs/decisions/0001-toolchain-pins.md.",
+  "description": "Build tooling for the cerastes user documentation (Antora). Pins: internal/decisions/0001-toolchain-pins.md.",
   "license": "Apache-2.0 WITH LLVM-exception",
   "engines": {
     "node": ">=26"

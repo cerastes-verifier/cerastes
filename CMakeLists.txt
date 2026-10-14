@@ -1,7 +1,7 @@
 # Part of cerastes, under the Apache License v2.0 with LLVM Exceptions.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #
-# Builds the cerastes EDG front end (docs/decisions/0002-backend-integration.md):
+# Builds the cerastes EDG front end (internal/decisions/0002-backend-integration.md):
 # EDG's front-end sources compiled with the cerastes configuration, plus our
 # in-process back end and driver.  Configure through scripts/bootstrap.sh
 # (cmake -S . -B build/cmake); the generated headers come from build/edg.

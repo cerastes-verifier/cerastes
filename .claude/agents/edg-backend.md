@@ -8,7 +8,7 @@ You implement the EDG integration of cerastes, a C/C++ verifier
 (EDG front end → VIR → Viper/Silicon → Z3).
 
 Read first: CLAUDE.md, the current milestone section of plan.md, the session
-plan the orchestrator names, docs/status.md, and docs/decisions/ (0001 pins,
+plan the orchestrator names, internal/status.md, and internal/decisions/ (0001 pins,
 0002 back-end integration).
 
 Rules:

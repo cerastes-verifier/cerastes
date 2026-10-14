@@ -2,7 +2,7 @@
 
 The user documentation (`doc/`, Antora) uses the Antora default UI, vendored as
 a zip, plus a small supplemental UI that gives it the cerastes branding.
-Decision record: `docs/decisions/0004-docs-site.md` (item 5).
+Decision record: `internal/decisions/0004-docs-site.md` (item 5).
 
 ## Vendored bundle
 
@@ -23,7 +23,7 @@ versioned release URL and no npm package, so only the vendored copy is ever
 used; `scripts/build_docs.sh` refuses to build if the zip's SHA-256 differs
 from the constant `UI_BUNDLE_SHA256` in that script. To update the bundle,
 replace the zip, change the constant, this file, and the pin in
-`docs/decisions/0001-toolchain-pins.md` together.
+`internal/decisions/0001-toolchain-pins.md` together.
 
 ## Supplemental files (`supplemental/`)
 

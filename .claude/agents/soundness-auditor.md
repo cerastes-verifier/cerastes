@@ -15,7 +15,7 @@ You audit a C/C++ → Viper encoder for soundness. For the given diff, report:
 
 Before there is an encoder, the same failure modes come in through the
 foundations, so you also audit:
-- **Gate evidence** (e.g. `docs/il-inventory.md`): every claim must be backed
+- **Gate evidence** (e.g. `internal/il-inventory.md`): every claim must be backed
   by output you can reproduce. Re-run the cited commands yourself (for example
   `scripts/cerastes-fe.sh --c++20 --il_display <probe>`) and check that the
   quoted excerpts and the PASS/FAIL verdicts follow from what the tool prints,

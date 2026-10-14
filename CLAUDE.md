@@ -1,6 +1,6 @@
 # cerastes — C/C++ verifier (EDG → Viper/Silicon → Z3)
 
-Plan: @plan.md   Status: @docs/status.md
+Plan: @plan.md   Status: @internal/status.md
 User docs: doc/ (Antora) → https://cerastes.dev/cerastes/doc/ (decision 0004)
 
 ## Commands
@@ -26,7 +26,7 @@ User docs: doc/ (Antora) → https://cerastes.dev/cerastes/doc/ (decision 0004)
 4. No inhale/assume in emitted Viper without `// cerastes:inhale-ok <reason>`.
 5. third_party/edg pins upstream edgcpp/compiler only; EDG edits are small
    commits with tests on a `cerastes` fork branch, upstreamed before the pin moves.
-6. Non-obvious semantics → docs/decisions/NNNN-*.md before code.
+6. Non-obvious semantics → internal/decisions/NNNN-*.md before code.
 7. Errors shown to users point at C++ source lines.
 8. User-visible behavior lands with its page in doc/ in the same milestone;
    every code example in doc/ is a test with `expect:` lines (from M1.5).
@@ -34,23 +34,23 @@ User docs: doc/ (Antora) → https://cerastes.dev/cerastes/doc/ (decision 0004)
 ## Layout
 src/backend (EDG IL → VIR) · src/vir · src/viper (VIR → .vpr + pos map) ·
 src/driver · include/cerastes.h · tests/<area>/ · scripts/ ·
-doc/ (user docs, Antora, published) · docs/ (developer docs, not published) ·
+doc/ (user docs, Antora, published) · internal/ (developer docs, not published) ·
 third_party/edg (EDG, upstream) · third_party/silicon (Silicon + silver)
 
 ## Toolchain
-- Pins and the reasons for them: docs/decisions/0001-toolchain-pins.md.
+- Pins and the reasons for them: internal/decisions/0001-toolchain-pins.md.
   scripts/bootstrap.sh is the executable form; change a pin in both.
 - EDG twice: stock build in build/edg (cpfe, edg-smoke tests) and the cerastes
   configuration compiled by our CMake into build/cerastes-fe (build/cmake;
   decision 0002). The EDG macros live only in the `edg_config` target; every
   TU that includes EDG headers links it (IL layout depends on them). EDG IL
-  facts we rely on: docs/il-inventory.md.
+  facts we rely on: internal/il-inventory.md.
 - EDG builds out of tree into build/edg; never build inside third_party/edg.
 - EDG source changes: fork https://github.com/mborland/compiler, branch
   `cerastes` (decision 0003). Never pin the fork; never commit a fork pointer.
   Sessions may commit to that branch in a local fork clone; the owner
   pushes. NEVER open issues, PRs or Discussions against upstream
-  edgcpp/compiler; the owner files them (draft the text in docs/handoff.md).
+  edgcpp/compiler; the owner files them (draft the text in internal/handoff.md).
 - Silicon needs JDK 17 (its sbt 1.6.2 cannot run on newer JDKs); use
   $CERASTES_JAVA, not the java on PATH.
 - Z3 is the pinned 4.16.0 in build/tools, not Homebrew's z3.

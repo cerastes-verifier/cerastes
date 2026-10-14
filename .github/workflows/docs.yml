@@ -1,5 +1,5 @@
 # User documentation (doc/, Antora): build on pull requests, build and deploy
-# to GitHub Pages on pushes to main.  Decision record: docs/decisions/0004-docs-site.md.
+# to GitHub Pages on pushes to main.  Decision record: internal/decisions/0004-docs-site.md.
 #
 # CI builds the docs and lints the doc examples (scripts/check_doc_examples.py,
 # source and rendered HTML).  It does not run the examples as tests: those need

@@ -6,7 +6,7 @@
 # out the submodules, builds EDG (stock, for scripts/cpfe.sh, and the cerastes
 # configuration, build/cerastes-fe), builds Silicon, fetches the pinned Z3,
 # installs the documentation tool chain (Node, `npm ci` in doc/) and writes
-# build/env.sh.  Every pin is recorded in docs/decisions/0001-toolchain-pins.md;
+# build/env.sh.  Every pin is recorded in internal/decisions/0001-toolchain-pins.md;
 # change a pin here and there together.
 #
 # Usage: scripts/bootstrap.sh [--build-only] [--force-silicon]

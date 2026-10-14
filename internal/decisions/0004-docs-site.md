@@ -17,7 +17,7 @@ appears at `https://cerastes.dev/doc/`. The alternative plan.md asked us to
 weigh was building Antora inside the website's own workflow, into
 `dist/doc/`.
 
-The owner rejected the docs-only repo (`docs/handoff.md` after M1,
+The owner rejected the docs-only repo (`internal/handoff.md` after M1,
 question 4, 2026-10-13): "Use the repo specific .github.io page, and then we
 will fix the specific address later." They enabled GitHub Pages on
 `cerastes-verifier/cerastes`, with GitHub Actions as the source.
