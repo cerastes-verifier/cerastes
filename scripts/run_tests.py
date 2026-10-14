@@ -356,6 +356,14 @@ def policy_problem(path: Path, text: str, exp: Expectation) -> str | None:
     """The native-ok policy: positive tests of the annotation layer, and every
     positive test that includes <cerastes.h>, must compile with ordinary
     compilers (`// expect: native-ok`).  None when `path` complies."""
+    if exp.kind == "frontend-ok" and path.suffix != ".vpr":
+        # stock cpfe does not define __CERASTES__, so the annotations in such a
+        # test are not even parsed: it would pass for nothing
+        for directory in NATIVE_POLICY_DIRS:
+            if _under(path, directory):
+                return (f"`expect: frontend-ok` is not allowed under {directory}/: stock cpfe "
+                        "does not define __CERASTES__, so the annotations are not parsed "
+                        "(use golden, frontend-error or frontend-warning)")
     if exp.kind not in POSITIVE_KINDS or exp.native_ok or path.suffix == ".vpr":
         return None
     for directory in NATIVE_POLICY_DIRS:
@@ -401,6 +409,24 @@ def cross_file_problems() -> list[tuple[Path, str]]:
             for f in positives if f.resolve() not in named]
 
 
+# What would neutralise the ordinary-compiler check from inside the file: a
+# pragma that ignores or downgrades diagnostics (or marks the file a system
+# header), and defining __CERASTES__ (`#undef` stays fine: it is what the
+# header test of the off switch does).
+_NEUTRALISE_RE = re.compile(
+    r"^[ \t]*#[ \t]*(?:pragma[ \t]+(?:(?:clang|GCC)[ \t]+diagnostic[ \t]+(?:ignored|warning)\b"
+    r"|(?:clang|GCC)[ \t]+system_header\b)|define[ \t]+__CERASTES__\b)", re.MULTILINE)
+
+
+def native_neutralised(text: str) -> str | None:
+    """The offending line of a native-ok test that switches its own check off."""
+    m = _NEUTRALISE_RE.search(text)
+    if not m:
+        return None
+    end = text.find("\n", m.end())
+    return text[m.start():None if end < 0 else end].strip()
+
+
 def twin_problem(path: Path, exp: Expectation) -> str | None:
     """The `twin:` rules: required under tests/annotations/negative/, and the
     twin must be an existing test outside it with a positive outcome."""
@@ -437,6 +463,11 @@ def read_header(path: Path) -> Expectation | HeaderError:
     try:
         text = path.read_text()
         exp = parse_header(text, path.suffix)
+        neutralised = native_neutralised(text) if exp.native_ok else None
+        if neutralised:
+            raise HeaderError(f"a native-ok test cannot switch its own check off: "
+                              f"`{neutralised}` (a diagnostic pragma or a definition of "
+                              "__CERASTES__)")
         for problem in (twin_problem(path, exp), policy_problem(path, text, exp)):
             if problem:
                 raise HeaderError(problem)
@@ -1288,6 +1319,27 @@ def run_native(path: Path, exp: Expectation, env: dict[str, str],
 # The EDG tree (decision 0005)
 # ---------------------------------------------------------------------------
 
+def edg_stamp_problem(root: Path | None = None,
+                      caller: dict[str, str] | None = None) -> str | None:
+    """Why the EDG tools were not built from the active tree as it is now, or
+    None: the same test as `edg_tree.py describe --verify-build` (the stamp of
+    the active kind equals the stamp of the tree and of the cerastes
+    configuration now), so a stale binary cannot run the tests."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    try:
+        import edg_tree
+    finally:
+        sys.path.pop(0)
+    status, _out, err = edg_tree.describe(
+        str(ROOT if root is None else root), verify_build=True,
+        env=dict(os.environ) if caller is None else caller)
+    if status == 0:
+        return None
+    problems = [l[len("error: "):] if l.startswith("error: ") else l
+                for l in err if not l.startswith("warning: ")]
+    return "; ".join(problems) or "the EDG tree check failed"
+
+
 def edg_tree_problem(env_sh: Path | None = None,
                      caller: dict[str, str] | None = None) -> str | None:
     """Why the tools of build/env.sh are not for the tree `CERASTES_EDG_SRC`
@@ -1789,7 +1841,9 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         require(env, *required_env(headers))
-        if needs_edg_tools(headers) and (problem := edg_tree_problem()) is not None:
+        if needs_edg_tools(headers) and (
+                (problem := edg_tree_problem()) is not None
+                or (problem := edg_stamp_problem()) is not None):
             raise UsageError(problem)
     except UsageError as err:
         print(f"run_tests.py: {err}", file=sys.stderr)

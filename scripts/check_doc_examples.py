@@ -40,7 +40,11 @@ doc/modules/ROOT/nav.adoc, pages/**/*.adoc and partials/**/*.adoc and reports
      sh/console/text block with a line that looks like walker output
      (`end walk:`, `routine ... @ L<n>:<c>`, `attr [[`, `stmt ... @ L<n>`) that
      is not such an include is an error: a listing nobody tested could not be
-     told from a tested one.
+     told from a tested one.  A line "looks like walker output" when it is, or
+     contains, any kind of walker line (a ` @ L<n>:<n>` position, `type_kind=`,
+     `op eok_...`, `tconst`, ..., or `returns T`, `param N x: T`, `template F
+     args`, `constraint ...` at its start after a prefix such as `out> `);
+     inline code in prose is checked the same way.
   b. an `include::example$...[...]` without `tag=` or `tags=`, with `lines=`
      (which takes precedence over the tags and would show the header), with an
      empty tag, or with a tag that is not a plain name (`*`, `**` and `!x`
@@ -157,10 +161,38 @@ BARE_CPP_MESSAGE = "write C++ as pass:[C++] (a bare C++ opens an AsciiDoc passth
 TAG_DIRECTIVE_RE = re.compile(r"\b(?:tag|(e)nd)::(\S+?)\[\](?=$|[ \r])")
 TAG_NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
 # `[ROOT:]family$path`; only these families are accepted in an include.
-# What the IL walker prints (tests/il, internal/il-inventory.md): the last line,
-# routine and statement headers, and the attribute lines of registered attributes.
-WALKER_OUTPUT_RE = re.compile(
-    r"^\s*(?:end walk: |routine \S+ .*@ L\d+:\d+|attr \[\[|stmt \S+ .*@ L\d+)")
+# What the IL walker prints: every kind of line of the listing (tests/il goldens,
+# internal/il-inventory.md, the typed tree of the annotations).  Found anywhere
+# in a line (a prefix such as `out> ` or `| ` does not hide it):
+#   - a source position ` @ L<n>:<n>` (or ` @ -`), `type_kind=`, `end walk:`, an
+#     `op eok_...`, `stmt stmk_...`, `tconst tp...`, `node enk_...` or
+#     `attr [[ns::...` item, a `const V type=T` leaf;
+# and at the start of a line (after an optional prefix), the kinds that carry no
+# position: `routine NAME plain|prototype|instance|specialization`, `returns T`,
+# `param N NAME: T`, `template NAME args`, `constraint KIND`, `field Q: T`,
+# `binder N: T`, `this: T`, `body return|N statements`, `arg N binder|const|@`.
+WALKER_ANYWHERE_RE = re.compile(
+    r" @ L\d+:\d+| @ -(?:\s|$)|\btype_kind=|\bend walk: \d+ routines|\bop eok_\w+"
+    r"|\bstmt stmk_\w+|\btconst tp\w+|\bnode enk_\w+|\battr \[\[\w+::|\bconst \S+ type=\S")
+_WALKER_PREFIX = r"^[^\w\n]*(?:\w{1,8}>[ \t]*)?"
+WALKER_LEAD_RE = re.compile(
+    _WALKER_PREFIX + r"(?:routine \S+ (?:plain|prototype|instance|specialization)\b"
+    r"|returns (?:(?:const|volatile|unsigned|signed|struct|class|union|enum|long|short) )*"
+    r"(?:[\w:]+|<[^>]*>)(?:<[^>]*>)?[*&\s]*$"
+    r"|returns [^\n]*[(*&<\[][^\n]*$"
+    r"|param \d+ \S+: |template \S+ args |constraint (?:type-constraint|requires|trailing|abbreviated)\b"
+    r"|field [\w:]+: |binder \w+: |this: \S|body (?:return|\d+ statements?)$"
+    r"|arg \d+ (?:binder|const|@)"
+    r"|warning: (?:line directive in the primary file|template \S+ has no prototype|"
+    r"instance \S+ has no assoc_template|attribute \[\[))")
+
+
+def walker_line(line: str) -> bool:
+    """Whether `line` is, or contains, a line of the walker's listing."""
+    return bool(WALKER_ANYWHERE_RE.search(line) or WALKER_LEAD_RE.match(line))
+
+
+INLINE_CODE_RE = re.compile(r"`+([^`]+)`+|\+([^+\s][^+]*)\+")
 GOLDEN_SUFFIX = rt.GOLDEN_SUFFIX
 CALLOUT_RE = re.compile(r"<\d+>\s*$")
 TARGET_RE = re.compile(r"^(?P<prefix>(?:ROOT:)?)(?P<family>[a-z]+)\$(?P<path>.+)$")
@@ -417,6 +449,12 @@ class PageScanner:
             if pass_with_markup(text):
                 self.problem(lineno, "pass:[...] with markup (<) is not allowed: it can "
                              "emit raw HTML, including code that nothing tests")
+            for span in INLINE_CODE_RE.finditer(PASS_SPAN_RE.sub("", text)):
+                if walker_line(span.group(1) or span.group(2) or ""):
+                    self.problem(lineno, "walker output in inline code: a listing must be "
+                                 "included from the golden file of a tested example, not "
+                                 "written by hand (even an excerpt)")
+                    break
         if self.in_table:
             scopes = [[(n, seg)] for n, text in items for seg in text.split("|")]
             for scope in scopes:
@@ -668,7 +706,7 @@ class PageScanner:
                          f"[source,text] block (this is a {language} block"
                          + (" with other lines)" if len(lines) > 1 else ")"))
         for n, l in lines:
-            if not INCLUDE_RE.match(l) and WALKER_OUTPUT_RE.match(l):
+            if not INCLUDE_RE.match(l) and walker_line(l):
                 self.problem(n, "walker output must be included from the golden file of a "
                              "tested example (include::example$<test>.golden[] as the whole "
                              "body of a [source,text] block), not written by hand")
@@ -1261,10 +1299,12 @@ class SiteScanner(html.parser.HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.blocks: list[Block] = []
+        self.inline_codes: list[Block] = []  # `<code>` in prose (no language class)
         self.problems: list[tuple[int, str]] = []
         self._skip = 0  # inside <script> or <style>
         self._pre: dict | None = None
         self._solo: dict | None = None  # a language-classed <code> outside <pre>
+        self._inline: dict | None = None  # any other <code> outside <pre>
         self._stack: list[tuple[str, int]] = []  # open inline elements
 
     def _code_start(self, attrs):
@@ -1286,6 +1326,10 @@ class SiteScanner(html.parser.HTMLParser):
                 self._solo["depth"] += 1
             elif language_tokens(attrs):
                 self._solo = self._code_start(attrs)
+            elif self._inline is not None:
+                self._inline["depth"] += 1
+            else:
+                self._inline = self._code_start(attrs)
         if tag in INLINE_TAGS and tag not in VOID_TAGS:
             self._stack.append((tag, self.getpos()[0]))
 
@@ -1321,6 +1365,12 @@ class SiteScanner(html.parser.HTMLParser):
                     solo, self._solo = self._solo, None
                     self.blocks.append(Block(solo["line"], True, solo["languages"],
                                              "".join(solo["text"])))
+            elif self._inline is not None:
+                self._inline["depth"] -= 1
+                if self._inline["depth"] == 0:
+                    inline, self._inline = self._inline, None
+                    self.inline_codes.append(Block(inline["line"], True, [],
+                                                   "".join(inline["text"])))
         elif tag == "pre" and self._pre is not None:
             pre, self._pre = self._pre, None
             code = pre["code"]
@@ -1337,6 +1387,8 @@ class SiteScanner(html.parser.HTMLParser):
         else:
             if self._solo is not None:
                 self._solo["text"].append(data)
+            elif self._inline is not None:
+                self._inline["text"].append(data)
             if "`" in data:
                 self.problems.append((self.getpos()[0], "a literal backtick in the text "
                                       "(outside <pre>): a code span was not rendered, so "
@@ -1352,7 +1404,7 @@ class HtmlReport:
 
 
 def has_walker_output(text: str) -> bool:
-    return any(WALKER_OUTPUT_RE.match(line) for line in text.split("\n"))
+    return any(walker_line(line) for line in text.split("\n"))
 
 
 def classify_block(block: Block, expected: set[str],
@@ -1419,6 +1471,11 @@ def check_html(root: Path, html_dir: Path) -> HtmlReport:
         scanner.close()
         for line, message in scanner.problems:
             report.problems.append(Problem(rel, line, message))
+        for inline in scanner.inline_codes:
+            if has_walker_output(inline.text):
+                report.problems.append(Problem(
+                    rel, inline.line, f"inline code with walker output `{inline.text[:60]}`: a "
+                    "listing, even an excerpt, must be included from a golden file"))
         for block in scanner.blocks:
             if any(l.lower() in CERASTES_LANGUAGES for l in block.languages):
                 report.blocks += 1

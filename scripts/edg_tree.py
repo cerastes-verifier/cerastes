@@ -3,6 +3,14 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 """Which EDG tree is cerastes built from?  (decision 0005)
 
+The pin is a commit of the owner's fork (decision 0009): third_party/edg has the
+URL https://github.com/mborland/compiler.git and `check` requires the gitlink
+to be contained in `refs/remotes/origin/cerastes` (pushed) or, failing that, in
+`refs/remotes/fork-local/cerastes` (the local clone, not yet pushed: the report
+line says NOT YET PUSHED and a warning names the push).  The kind label
+`upstream` (resolve output, CERASTES_EDG_KIND, build/ directory names) is kept
+as the name of "the pinned tree"; the report line says `fork`.
+
 Subcommands (all print to stdout; diagnostics go to stderr):
 
   resolve                    print `upstream <abs path>` or `override <abs
@@ -58,7 +66,11 @@ import sys
 from typing import List, Optional, Tuple
 
 DEFAULT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-EDG_URL = "https://github.com/edgcpp/compiler.git"
+EDG_URL = "https://github.com/mborland/compiler.git"  # the owner's fork (decision 0009)
+# Where the pin must be: pushed (origin) or only in the local clone's branch
+# (the `fork-local` remote that a session adds, pointing at ~/Documents/compiler).
+PUSHED_REF = "refs/remotes/origin/cerastes"
+LOCAL_REF = "refs/remotes/fork-local/cerastes"
 SUBMODULE = "third_party/edg"
 ENV_VAR = "CERASTES_EDG_SRC"
 
@@ -223,9 +235,29 @@ def submodule_gitmodules_url(root: str) -> Optional[str]:
     return None
 
 
+def pin_state(root: str) -> str:
+    """Where the gitlink of third_party/edg is: "pushed" (contained in
+    origin/cerastes), "local" (only in fork-local/cerastes) or "none"."""
+    try:
+        link = gitlink(root)
+    except TreeError:
+        return "none"
+    sub = upstream_path(root)
+    for ref, state in ((PUSHED_REF, "pushed"), (LOCAL_REF, "local")):
+        proc = git(["merge-base", "--is-ancestor", link, ref], sub, check=False)
+        if proc.returncode == 0:
+            return state
+    return "none"
+
+
+NOT_PUSHED_WARNING = ("the pin %s is contained only in fork-local/cerastes: the owner must push "
+                      "the fork's cerastes branch before cerastes main (decision 0009)")
+
+
 def guard_pin(root: str) -> List[str]:
-    """Item 5, first bullet: third_party/edg is clean, at its gitlink, with the
-    upstream URL.  Always checked."""
+    """Decision 0005 item 5 and 0009 item 4: third_party/edg is clean, at its
+    gitlink, with the fork URL, and the gitlink is a commit of the fork's
+    cerastes branch (pushed, or at least in the local clone).  Always checked."""
     errors: List[str] = []
     sub = upstream_path(root)
     if not os.path.isdir(sub) or own_toplevel(sub) is None:
@@ -245,17 +277,13 @@ def guard_pin(root: str) -> List[str]:
     if link and head != link:
         errors.append("third_party/edg is at %s but the index records %s for it"
                       % (short(head), short(link)))
-    if link:
-        # 0003 item 2: the pin is an upstream commit, never a fork commit.
-        # origin/main is what the submodule last fetched; a stale one fails
-        # too, with the way out.
-        up = git(["merge-base", "--is-ancestor", link, "refs/remotes/origin/main"], sub,
-                 check=False)
-        if up.returncode != 0:
-            errors.append("the gitlink %s of third_party/edg is not contained in its "
-                          "origin/main (a fork commit, or a stale origin/main: run `git -C "
-                          "third_party/edg fetch origin`); the pin is only ever an upstream "
-                          "commit (decision 0003)" % short(link))
+    if link and pin_state(root) == "none":
+        errors.append("the gitlink %s of third_party/edg is not contained in origin/cerastes "
+                      "or in fork-local/cerastes: the pin is a commit of the fork's cerastes "
+                      "branch (decision 0009); run `git -C third_party/edg fetch origin` (the "
+                      "pushed branch) or `git -C third_party/edg fetch fork-local` (the local "
+                      "clone, added with `git -C third_party/edg remote add fork-local "
+                      "<clone>`)" % short(link))
     url = submodule_gitmodules_url(root)
     if url != EDG_URL:
         errors.append(".gitmodules URL of third_party/edg is %s, expected %s"
@@ -272,10 +300,14 @@ def report(root: str, kind: str, tree: str) -> Tuple[str, List[str]]:
     """(report line, warnings)."""
     warnings: List[str] = []
     head = short(git_out(["rev-parse", "HEAD"], tree))
-    if kind == "upstream":
+    if kind == "upstream":  # the kind's name; the pin is a commit of the fork
         dirty = bool(git_out(["status", "--porcelain", "--untracked-files=all"], tree))
-        return ("EDG tree: upstream third_party/edg @ %s (gitlink, %s)"
-                % (head, "DIRTY" if dirty else "clean")), warnings
+        local = pin_state(root) == "local"
+        if local:
+            warnings.append(NOT_PUSHED_WARNING % head)
+        return ("EDG tree: fork third_party/edg @ %s (gitlink, %s%s)"
+                % (head, "DIRTY" if dirty else "clean",
+                   ", NOT YET PUSHED to origin/cerastes" if local else "")), warnings
     branch = branch_of(tree)
     modified, untracked = len(modified_paths(tree)), len(untracked_paths(tree))
     try:
@@ -314,10 +346,10 @@ def check(root: str = DEFAULT_ROOT, env: Optional[dict] = None) -> Tuple[int, Li
         branch = proc.stdout.decode(errors="replace").strip() if proc.returncode == 0 else ""
         if branch == "main":
             errors.append("CERASTES_EDG_SRC is set on branch main; check.sh on main runs against "
-                          "the upstream pin (decisions 0003, 0005)")
+                          "the pin (decisions 0005, 0009)")
         elif not branch:
             errors.append("CERASTES_EDG_SRC is set with a detached HEAD; check.sh needs a "
-                          "named topic branch other than main (decisions 0003, 0005)")
+                          "named topic branch other than main (decisions 0005, 0009)")
     if errors:
         err.extend("error: " + e for e in errors)
         return 1, out, err

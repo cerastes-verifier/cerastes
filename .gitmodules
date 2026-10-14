@@ -1,6 +1,6 @@
 [submodule "third_party/edg"]
 	path = third_party/edg
-	url = https://github.com/edgcpp/compiler.git
+	url = https://github.com/mborland/compiler.git
 [submodule "third_party/silicon"]
 	path = third_party/silicon
 	url = https://github.com/viperproject/silicon.git

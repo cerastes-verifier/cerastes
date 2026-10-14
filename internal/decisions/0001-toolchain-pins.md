@@ -13,7 +13,7 @@ in both places.
 
 | Component | Pin | Obtained by |
 |---|---|---|
-| EDG front end | `edgcpp/compiler` `034385ba0a6d08578aa3215fda6f674f2efb0c77` (`git describe`: `7.0-33-g034385ba0a`), upstream `main` head on 2026-10-14: "Fix Python 3.6 compatibility issues []" (committed 2026-10-13T22:23:48Z). Moved from `9847356d` (`7.0-25`) in M2; see "Pin history" | submodule `third_party/edg`; stock preset `macos-arm-clang-debug`, built out of tree in `build/edg` |
+| EDG front end | the owner's fork `mborland/compiler`, branch `cerastes` (decision 0009, since 2026-10-14; submodule URL https://github.com/mborland/compiler.git), currently at upstream `edgcpp/compiler` `034385ba0a6d08578aa3215fda6f674f2efb0c77` (`git describe`: `7.0-33-g034385ba0a`), upstream `main` head on 2026-10-14: "Fix Python 3.6 compatibility issues []" (committed 2026-10-13T22:23:48Z). Moved from `9847356d` (`7.0-25`) in M2; see "Pin history" | submodule `third_party/edg`; stock preset `macos-arm-clang-debug`, built out of tree in `build/edg` |
 | Silicon | `viperproject/silicon` tag `v.26.08-release` = `6b540aa45e5af214f4727b7be463ce84b328fabd` | submodule `third_party/silicon`; `sbt assembly` → `target/scala-2.13/silicon.jar` |
 | Silver | `viperproject/silver` `f02e7010639f314447d74732146644565aa8d135` (`v.26.08-release`, the commit Silicon's tag records) | nested submodule `third_party/silicon/silver` |
 | Z3 | 4.16.0, `z3-4.16.0-arm64-osx-15.7.3.zip`, SHA-256 `41828fa07d5cb77bfaee326e8e6dac074f26329c09c633f9e66012bb917cf8ae` | downloaded from the Z3 GitHub release into `build/tools/`, checksum verified |
@@ -144,6 +144,11 @@ binary in a container and checks its outcomes against the recorded ones
   `scripts/check.sh` was green and every golden was byte-identical. The
   version string below is unchanged because the binaries were not rebuilt;
   `git describe` is the record of the commit.
+
+- **Submodule URL → the fork (M2, 2026-10-14; decision 0009).** Same pin
+  `034385ba`, now fetched from `https://github.com/mborland/compiler.git`.
+  Pins that are not yet pushed are fetched through the `fork-local` remote
+  (`git -C third_party/edg remote add fork-local ~/Documents/compiler`).
 
 ## Dependabot
 

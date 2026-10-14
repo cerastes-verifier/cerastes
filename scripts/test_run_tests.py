@@ -516,6 +516,7 @@ class FakeFrontEndCase(unittest.TestCase):
         # CERASTES_EDG_SRC; here it is out of the picture (TreeConsistencyTests
         # cover it), but a test can make it fail through `self.tree_mock`.
         tree_patch = mock.patch.object(rt, "edg_tree_problem", return_value=None)
+        stamp_patch = mock.patch.object(rt, "edg_stamp_problem", return_value=None)
         # build/env.sh is authoritative for the variables it defines, so the
         # fake front end and the other fixtures are named in a fixture env file
         # (`set_env`), not in the environment of the process.
@@ -525,10 +526,11 @@ class FakeFrontEndCase(unittest.TestCase):
         self.set_env()
         for patcher in (mock.patch.object(rt, "FE_COMMAND", [sys.executable, str(fake)]),
                         mock.patch.object(rt, "ENV_SH", self.env_file),
-                        tree_patch):
+                        tree_patch, stamp_patch):
             patcher.start()
             self.addCleanup(patcher.stop)
         self.tree_mock = rt.edg_tree_problem
+        self.stamp_mock = rt.edg_stamp_problem
 
     def set_env(self, **values):
         """Define (or change) variables of the fixture build/env.sh."""
@@ -4338,7 +4340,6 @@ class TwinRuleTests(RootedCase):
         for name, text in (("fe.cpp", "// expect: frontend-error undefined_identifier @ L3\n"),
                            ("w.cpp", "// expect: frontend-warning unrecognized_pragma @ L3\n"),
                            ("e.vpr", "// expect: error assert @ L3\n"),
-                           ("o.cpp", "// expect: frontend-ok\n"),
                            ("r.cpp", "// expect: rejected unsupported-union\n"),
                            ("x.cpp", "// expect: error assert @ L3\n")):
             with self.subTest(name):
@@ -4348,6 +4349,12 @@ class TwinRuleTests(RootedCase):
                 err = self.neg("a.cpp", f"tests/annotations/{name}")
                 self.assertIsInstance(err, rt.HeaderError)
                 self.assertIn("not a positive test", str(err))
+
+    def test_a_frontend_ok_twin_is_not_positive(self):
+        self.put("tests/il/o.cpp", "// expect: frontend-ok\n")
+        err = self.neg("a.cpp", "tests/il/o.cpp")
+        self.assertIsInstance(err, rt.HeaderError)
+        self.assertIn("not a positive test", str(err))
 
     def test_a_twin_with_a_bad_header(self):
         self.put("tests/annotations/bad.cpp", "// no expectation here\n")
@@ -5836,6 +5843,38 @@ class TreeGateTests(FakeFrontEndCase):
         self.assertEqual(status, 0, out)
         self.assertFalse(self.tree_mock.called)
 
+    def test_a_stale_build_stops_the_run_too(self):
+        t = self.write("x.cpp", "// out: a")
+        self.run_harness("--update-golden", t)
+        self.stamp_mock.reset_mock()
+        self.stamp_mock.return_value = ("the binary under test was built from a different EDG "
+                                        "tree state than the active one; run "
+                                        "scripts/bootstrap.sh")
+        for args in ((t,), ("--update-golden", t)):
+            status, out, err = self.run_harness(*args)
+            self.assertEqual(status, 2, out)
+            self.assertIn("run_tests.py: the binary under test was built from a different EDG "
+                          "tree state", err)
+            self.assertIn("run scripts/bootstrap.sh", err)
+        self.assertTrue(self.stamp_mock.called)
+        # headers need no binary
+        self.stamp_mock.reset_mock()
+        self.assertEqual(self.run_harness("--check-headers", t)[0], 0)
+        self.assertFalse(self.stamp_mock.called)
+        # a run that needs no EDG tool does not look at the stamp (a .vpr-only
+        # selection has none here: the gate is needs_edg_tools)
+        self.stamp_mock.return_value = None
+        self.assertEqual(self.run_harness(t)[0], 0)
+
+    def test_the_tree_problem_comes_before_the_stamp_problem(self):
+        t = self.write("x.cpp", "// out: a")
+        self.tree_mock.return_value = "tree mismatch"
+        self.stamp_mock.return_value = "stale stamp"
+        status, out, err = self.run_harness(t)
+        self.assertEqual(status, 2, out)
+        self.assertIn("tree mismatch", err)
+        self.assertNotIn("stale stamp", err)
+
     def test_needs_edg_tools(self):
         def exp(kind):
             return rt.Expectation(kind, [], None, ["c++20"])
@@ -5903,6 +5942,9 @@ class TreeScriptTwinTests(unittest.TestCase):
                 self.assertIn("relative path", run.stderr)
                 self.assertIn("absolute", run.stderr)
 
+    def test_the_real_build_verifies(self):
+        self.assertIsNone(rt.edg_stamp_problem())
+
     def test_run_tests_refuses_a_different_tree(self):
         cmd = [sys.executable, str(REAL_ROOT / "scripts" / "run_tests.py"),
                "tests/edg-smoke/hello.cpp"]
@@ -5910,7 +5952,11 @@ class TreeScriptTwinTests(unittest.TestCase):
         self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
         self.assertIn("run_tests.py: build/env.sh is for", run.stderr)
         self.assertIn("CERASTES_EDG_SRC selects", run.stderr)
-        run = self.run_script(cmd, self.active)
+        # the matching selection: the pin is selected by leaving the variable unset
+        # (the stamp check goes through edg_tree.py, which refuses an explicit
+        # CERASTES_EDG_SRC that names third_party/edg itself)
+        pin = os.path.realpath(REAL_ROOT / "third_party" / "edg")
+        run = self.run_script(cmd, None if self.active == pin else self.active)
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
         # header checks do not need the tree
         run = self.run_script([sys.executable, str(REAL_ROOT / "scripts" / "run_tests.py"),
@@ -5923,7 +5969,10 @@ class TreeScriptTwinTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 EDG_TREE = REAL_ROOT / "scripts" / "edg_tree.py"
-EDG_URL = "https://github.com/edgcpp/compiler.git"
+EDG_URL = "https://github.com/mborland/compiler.git"  # the owner's fork (decision 0009)
+EDGCPP_URL = "https://github.com/edgcpp/compiler.git"  # upstream: no longer the pin
+PUSHED = "refs/remotes/origin/cerastes"
+LOCAL = "refs/remotes/fork-local/cerastes"
 
 
 @e2e_gate(shutil.which("git") is not None and EDG_TREE.is_file(),
@@ -5958,7 +6007,7 @@ class EdgTreeToolTests(unittest.TestCase):
         self.git(self.sub, "commit", "-q", "-m", "pin")
         self.pin = self.git(self.sub, "rev-parse", "HEAD")
         # what the submodule last fetched: the pin is an upstream commit
-        self.git(self.sub, "update-ref", "refs/remotes/origin/main", self.pin)
+        self.git(self.sub, "update-ref", PUSHED, self.pin)
         self.write(self.root / "cmake" / "EdgFrontEnd.cmake", "# cerastes configuration\n")
         self.write(self.root / "src" / "backend" / "edg_il.h", "// il layout guards\n")
         self.git(self.root, "update-index", "--add", "--cacheinfo",
@@ -6006,7 +6055,7 @@ class EdgTreeToolTests(unittest.TestCase):
     def test_a_clean_pin_passes_and_reports(self):
         status, out, err = self.tool("check")
         self.assertEqual((status, err), (0, ""), out)
-        self.assertEqual(out, f"EDG tree: upstream third_party/edg @ {self.pin[:8]} "
+        self.assertEqual(out, f"EDG tree: fork third_party/edg @ {self.pin[:8]} "
                               "(gitlink, clean)\n")
 
     def test_a_modified_tracked_file_fails(self):
@@ -6023,7 +6072,7 @@ class EdgTreeToolTests(unittest.TestCase):
         self.git(self.sub, "add", ".gitignore")
         self.git(self.sub, "commit", "-q", "-m", "ignore")
         head = self.git(self.sub, "rev-parse", "HEAD")
-        self.git(self.sub, "update-ref", "refs/remotes/origin/main", head)
+        self.git(self.sub, "update-ref", PUSHED, head)
         self.git(self.root, "update-index", "--cacheinfo", f"160000,{head},third_party/edg")
         self.write(self.sub / "a.o", "x\n")
         status, out, err = self.tool("check")
@@ -6033,50 +6082,93 @@ class EdgTreeToolTests(unittest.TestCase):
         self.write(self.sub / "src" / "il_def.h", "// next\n")
         self.git(self.sub, "commit", "-q", "-am", "next")
         self.check_fails("third_party/edg is at")
-        # a staged pin move to a commit that only exists locally (a fork commit,
-        # or an origin/main that is stale) fails and says how to fix it ...
+        # a staged pin move to a commit that is on neither branch fails and says
+        # how to get it ...
         head = self.git(self.sub, "rev-parse", "HEAD")
         self.git(self.root, "update-index", "--cacheinfo", f"160000,{head},third_party/edg")
-        self.check_fails("not contained in its origin/main")
+        self.check_fails("not contained in origin/cerastes or in fork-local/cerastes")
         self.check_fails("git -C third_party/edg fetch origin")
-        # ... and passes once that commit is upstream (an ancestor of origin/main)
-        self.git(self.sub, "update-ref", "refs/remotes/origin/main", head)
+        self.check_fails("git -C third_party/edg fetch fork-local")
+        # ... and passes, cleanly, once it is on origin/cerastes
+        self.git(self.sub, "update-ref", PUSHED, head)
         status, out, err = self.tool("check")
         self.assertEqual((status, err), (0, ""), out)
         self.assertIn(head[:8], out)
+        self.assertNotIn("NOT YET PUSHED", out)
 
-    def test_a_fork_commit_as_the_gitlink_fails_even_when_checked_out(self):
-        self.write(self.sub / "src" / "il_def.h", "// fork\n")
+    def new_commit(self):
+        self.write(self.sub / "src" / "il_def.h", "// fork-only\n")
         self.git(self.sub, "commit", "-q", "-am", "fork-only")
-        fork = self.git(self.sub, "rev-parse", "HEAD")
-        self.git(self.root, "update-index", "--cacheinfo", f"160000,{fork},third_party/edg")
-        status, out, err = self.tool("check")  # HEAD == gitlink, clean, but not upstream
-        self.assertEqual(status, 1, (out, err))
-        self.assertIn(f"the gitlink {fork[:8]} of third_party/edg is not contained in its "
-                      "origin/main", err)
-        # an older upstream commit is fine: origin/main only has to contain it
-        self.git(self.sub, "update-ref", "refs/remotes/origin/main", fork)
-        self.assertEqual(self.tool("check")[0], 0)
+        commit = self.git(self.sub, "rev-parse", "HEAD")
+        self.git(self.root, "update-index", "--cacheinfo", f"160000,{commit},third_party/edg")
+        return commit
+
+    def test_a_commit_only_in_the_local_clone_passes_with_a_warning(self):
+        commit = self.new_commit()
+        self.check_fails("not contained in origin/cerastes or in fork-local/cerastes")
+        self.git(self.sub, "update-ref", LOCAL, commit)
+        status, out, err = self.tool("check")
+        self.assertEqual(status, 0, (out, err))
+        self.assertEqual(out, f"EDG tree: fork third_party/edg @ {commit[:8]} (gitlink, clean, "
+                              "NOT YET PUSHED to origin/cerastes)\n")
+        self.assertIn(f"warning: the pin {commit[:8]} is contained only in fork-local/cerastes: "
+                      "the owner must push the fork's cerastes branch before cerastes main", err)
+        # describe reports it too
+        status, out, err = self.tool("describe")
+        self.assertEqual(status, 0, (out, err))
+        self.assertIn("NOT YET PUSHED to origin/cerastes", out)
+        self.assertIn("must push", err)
+
+    def test_pushed_wins_over_local(self):
+        commit = self.new_commit()
+        self.git(self.sub, "update-ref", LOCAL, commit)
+        self.git(self.sub, "update-ref", PUSHED, commit)
+        status, out, err = self.tool("check")
+        self.assertEqual((status, err), (0, ""), out)
+        self.assertNotIn("NOT YET PUSHED", out)
+
+    def test_an_older_pin_is_fine_on_either_branch(self):
+        commit = self.new_commit()
+        self.git(self.sub, "update-ref", PUSHED, commit)
         self.git(self.root, "update-index", "--cacheinfo", f"160000,{self.pin},third_party/edg")
         self.git(self.sub, "checkout", "-q", self.pin)
-        self.assertEqual(self.tool("check")[0], 0)
+        status, out, err = self.tool("check")
+        self.assertEqual((status, err), (0, ""), out)
+        self.git(self.sub, "update-ref", "-d", PUSHED)
+        self.git(self.sub, "update-ref", LOCAL, commit)
+        status, out, err = self.tool("check")
+        self.assertEqual(status, 0, (out, err))
+        self.assertIn("NOT YET PUSHED", out)
 
-    def test_a_missing_origin_main_fails(self):
-        self.git(self.sub, "update-ref", "-d", "refs/remotes/origin/main")
+    def test_origin_main_and_other_branches_do_not_count(self):
+        # the pin has to be a commit of the cerastes branch: upstream main is
+        # not good enough any more, nor is any other branch of the fork
+        self.git(self.sub, "update-ref", "-d", PUSHED)
+        self.git(self.sub, "update-ref", "refs/remotes/origin/main", self.pin)
+        self.git(self.sub, "update-ref", "refs/remotes/fork-local/other", self.pin)
+        self.git(self.sub, "update-ref", "refs/remotes/origin/other", self.pin)
+        self.check_fails("not contained in origin/cerastes or in fork-local/cerastes")
+
+    def test_missing_refs_fail(self):
+        self.git(self.sub, "update-ref", "-d", PUSHED)
         self.check_fails("fetch origin")
+        self.check_fails("fetch fork-local")
 
     def test_a_wrong_url_in_gitmodules_fails(self):
+        # upstream's URL is not the pin any more
         self.write(self.root / ".gitmodules", (self.root / ".gitmodules").read_text().replace(
-            "edgcpp/compiler", "mborland/compiler"))
+            "mborland/compiler", "edgcpp/compiler"))
         self.check_fails(".gitmodules URL of third_party/edg is")
+        self.check_fails(EDG_URL)
 
     def test_a_missing_gitmodules_entry_fails(self):
         (self.root / ".gitmodules").write_text("")
         self.check_fails(".gitmodules URL of third_party/edg is <missing>")
 
     def test_a_wrong_origin_fails(self):
-        self.git(self.sub, "remote", "set-url", "origin", "https://github.com/mborland/compiler.git")
+        self.git(self.sub, "remote", "set-url", "origin", EDGCPP_URL)
         self.check_fails("remote.origin.url of third_party/edg is")
+        self.check_fails(EDG_URL)
 
     def test_no_origin_fails(self):
         self.git(self.sub, "remote", "remove", "origin")
@@ -6098,7 +6190,7 @@ class EdgTreeToolTests(unittest.TestCase):
 
     def test_an_override_on_main_fails(self):
         self.check_fails("CERASTES_EDG_SRC is set on branch main; check.sh on main runs "
-                         "against the upstream pin", override=self.override)
+                         "against the pin", override=self.override)
 
     def test_an_override_on_a_topic_branch_is_reported(self):
         self.topic()
@@ -6166,7 +6258,7 @@ class EdgTreeToolTests(unittest.TestCase):
     def test_an_override_with_a_detached_head_fails(self):
         self.git(self.root, "switch", "-q", "--detach")
         self.check_fails("CERASTES_EDG_SRC is set with a detached HEAD", override=self.override)
-        # the upstream pin has no such requirement
+        # the pin has no such requirement
         self.assertEqual(self.tool("check")[0], 0)
 
     def test_a_relative_override_is_refused_everywhere(self):
@@ -6209,7 +6301,7 @@ class EdgTreeToolTests(unittest.TestCase):
     def test_an_empty_override_means_the_pin(self):
         status, out, err = self.tool("check", override="")
         self.assertEqual(status, 0, (out, err))
-        self.assertIn("EDG tree: upstream", out)
+        self.assertIn("EDG tree: fork", out)
 
     # --- resolve ---
 
@@ -6358,7 +6450,7 @@ class EdgTreeToolTests(unittest.TestCase):
     def test_describe_reports_without_verifying(self):
         status, out, err = self.tool("describe")
         self.assertEqual((status, out, err),
-                         (0, f"EDG tree: upstream third_party/edg @ {self.pin[:8]} "
+                         (0, f"EDG tree: fork third_party/edg @ {self.pin[:8]} "
                              "(gitlink, clean)\n", ""))
         status, out, _ = self.tool("describe", override=self.override)
         self.assertEqual(status, 0)
@@ -6373,7 +6465,7 @@ class EdgTreeToolTests(unittest.TestCase):
         status, out, err = self.tool("describe", "--verify-build")
         self.assertEqual(status, 1, (out, err))
         self.assertIn("edg-tree.stamp is missing", err)
-        self.assertIn("EDG tree: upstream", out)  # the report line is still printed
+        self.assertIn("EDG tree: fork", out)  # the report line is still printed
 
     def test_verify_build_compares_the_stamp_with_the_tree_now(self):
         stamp_file = self.root / "build" / "edg" / "edg-tree.stamp"
@@ -6405,6 +6497,44 @@ class EdgTreeToolTests(unittest.TestCase):
         upstream.write_text(self.stamp())
         (self.root / "build" / "override" / "edg" / "edg-tree.stamp").unlink()
         self.assertEqual(self.tool("describe", "--verify-build", override=self.override)[0], 1)
+
+    def stamp_problem(self, override=None):
+        caller = {"CERASTES_EDG_SRC": str(override)} if override else {}
+        return rt.edg_stamp_problem(self.root, caller)
+
+    def test_the_harness_checks_the_stamp_like_describe(self):
+        # no stamp: the build never finished (or never ran)
+        problem = self.stamp_problem()
+        self.assertIn("edg-tree.stamp is missing", problem)
+        self.assertIn("scripts/bootstrap.sh", problem)
+        stamp_file = self.root / "build" / "edg" / "edg-tree.stamp"
+        self.write(stamp_file, self.stamp(self.sub))
+        self.assertIsNone(self.stamp_problem())
+        # the tree changed since the build
+        self.write(self.sub / "src" / "il_def.h", "// changed\n")
+        self.assertIn("built from a different EDG tree state", self.stamp_problem())
+        self.write(self.sub / "src" / "il_def.h", "// il\n")
+        self.assertIsNone(self.stamp_problem())
+        self.write(self.sub / "src" / "extra.c", "x\n")
+        self.assertIn("different EDG tree state", self.stamp_problem())
+        (self.sub / "src" / "extra.c").unlink()
+        # the cerastes configuration changed since the build
+        config = self.root / "cmake" / "EdgFrontEnd.cmake"
+        config.write_text(config.read_text() + "# a macro\n")
+        self.assertIn("different EDG tree state", self.stamp_problem())
+
+    def test_the_harness_checks_the_stamp_of_the_active_kind(self):
+        self.topic()
+        self.write(self.root / "build" / "edg" / "edg-tree.stamp", self.stamp(self.sub))
+        self.assertIn("build/override/edg/edg-tree.stamp is missing",
+                      self.stamp_problem(self.override))
+        self.write(self.root / "build" / "override" / "edg" / "edg-tree.stamp", self.stamp())
+        self.assertIsNone(self.stamp_problem(self.override))
+        self.write(self.override / "src" / "x1.c", "edited\n")
+        self.assertIn("different EDG tree state", self.stamp_problem(self.override))
+        # a bad override is a problem too, never a pass
+        self.assertIn("is not a directory", self.stamp_problem(self.tmp / "nowhere"))
+        self.assertIn("relative path", self.stamp_problem("rel/edg"))
 
     def test_a_stamp_of_another_tree_does_not_verify(self):
         stamp_file = self.root / "build" / "edg" / "edg-tree.stamp"
@@ -6743,13 +6873,293 @@ class NativeEnvironmentAuthorityTests(NativeCase):
         self.assertTrue(self.compiles_of(t)[0].startswith("fake_clang_cxx "))
 
 
+class NativePolicyHardeningTests(RootedCase):
+    """frontend-ok in the annotation directories, and a native-ok test that
+    switches its own check off, are header errors (CP1b audit N5, N6)."""
+
+    def test_frontend_ok_is_refused_in_the_annotation_directories(self):
+        for directory in ("tests/annotations", "tests/annotations/contracts",
+                          "tests/annotations/warnings",
+                          "doc/modules/ROOT/examples/annotations",
+                          "doc/modules/ROOT/examples/ordinary-compilers/x"):
+            for extra in ("", "// expect: native-ok\n"):
+                with self.subTest(directory=directory, native=bool(extra)):
+                    err = self.header(f"{directory}/f.cpp", "// expect: frontend-ok\n" + extra)
+                    self.assertIsInstance(err, rt.HeaderError)
+                    self.assertIn("`expect: frontend-ok` is not allowed under", str(err))
+                    self.assertIn("does not define __CERASTES__", str(err))
+
+    def test_frontend_ok_is_refused_in_negative_too(self):
+        # (there the must-fail rule says so first)
+        err = self.header("tests/annotations/negative/f.cpp",
+                          "// expect: frontend-ok\n// twin: tests/annotations/ok.cpp\n")
+        self.assertIsInstance(err, rt.HeaderError)
+
+    def test_frontend_ok_stays_fine_elsewhere(self):
+        for rel in ("tests/edg-smoke/hello.cpp", "tests/il/f.cpp", "tests/annotationsX/f.cpp",
+                    "doc/modules/ROOT/examples/installation/hello.cpp",
+                    "doc/modules/ROOT/examples/annotations_old/f.cpp"):
+            with self.subTest(rel):
+                self.assertIsInstance(self.header(rel, "// expect: frontend-ok\n"),
+                                      rt.Expectation)
+
+    def native(self, body, native_ok=True, rel="tests/il/n.cpp"):
+        head = "// expect: golden\n" + ("// expect: native-ok\n" if native_ok else "")
+        return self.header(rel, head + body)
+
+    def test_a_native_ok_test_cannot_switch_the_check_off(self):
+        for what, line in (
+                ("GCC ignored", '#pragma GCC diagnostic ignored "-Wunused-variable"'),
+                ("clang ignored", '#pragma clang diagnostic ignored "-Wunused"'),
+                ("GCC warning", '#pragma GCC diagnostic warning "-Wunused-variable"'),
+                ("clang warning", '#pragma clang diagnostic warning "-Wunused"'),
+                ("spaced", '  #  pragma   GCC   diagnostic   ignored "-Wall"'),
+                ("GCC system header", "#pragma GCC system_header"),
+                ("clang system header", "#pragma clang system_header"),
+                ("define", "#define __CERASTES__"),
+                ("define 1", "#define __CERASTES__ 1"),
+                ("spaced define", "# define   __CERASTES__ 1")):
+            with self.subTest(what):
+                err = self.native(line + "\nint f();\n")
+                self.assertIsInstance(err, rt.HeaderError)
+                self.assertIn("a native-ok test cannot switch its own check off", str(err))
+                self.assertIn(line.strip(), str(err))
+                # the same file is fine when it is not native-ok
+                self.assertIsInstance(self.native(line + "\nint f();\n", native_ok=False),
+                                      rt.Expectation)
+
+    def test_what_stays_allowed(self):
+        for line in ("#undef __CERASTES__", "#ifdef __CERASTES__", "#if defined(__CERASTES__)",
+                     "#pragma clang diagnostic push", "#pragma GCC diagnostic pop",
+                     '#pragma GCC diagnostic error "-Wunused"',
+                     '#pragma clang diagnostic fatal "-Wunused"',
+                     "#define __CERASTES_OTHER__ 1", "#define CERASTES_REQUIRES(x)",
+                     '// #pragma GCC diagnostic ignored "-Wall"', "// #define __CERASTES__",
+                     "#pragma once", "#pragma pack(push, 1)"):
+            with self.subTest(line):
+                self.assertIsInstance(self.native(line + "\nint f();\n"), rt.Expectation)
+
+    def test_the_check_runs_in_every_policy_directory_too(self):
+        err = self.native('#pragma GCC diagnostic ignored "-Wall"\nint f();\n',
+                          rel="tests/annotations/contracts/p.cpp")
+        self.assertIn("cannot switch its own check off", str(err))
+
+
+class WalkerFingerprintTests(DocLintCase):
+    """Rule g covers every kind of walker line, anywhere in a line, in blocks
+    and in inline code (CP1b audit N1)."""
+
+    def setUp(self):
+        super().setUp()
+        self.example("a.cpp", GOLDEN_EXAMPLE)
+        (self.component / "examples" / "a.cpp.golden").write_text(GOLDEN_TEXT)
+
+    def page_with_block(self, language, *body):
+        self.page("p.adoc", page_with("[source,cpp]", "----", "include::example$a.cpp[tag=body]",
+                                      "----", "", f"[source,{language}]", "----", *body, "----"))
+
+    EXCERPTS = (
+        "op eok_add type_kind=tk_integer type=int",
+        "op eok_cast type_kind=tk_template_param type=T @ L9:27",
+        "param 1 x: int",
+        "param 2 y: T @ L5:3",
+        "returns int", "returns T", "returns long long", "returns struct <unnamed> &",
+        "returns std::size_t", "returns const int*", "returns vector<int>&",
+        "template inc args <T=int>",
+        "constraint type-constraint T std::integral",
+        "constraint requires std::integral<T>", "constraint trailing std::integral<T>",
+        "tconst tpck_expression type=T @ -", "tconst tpck_unknown_function type=<tptk_unknown>",
+        "stmt stmk_while", "stmt stmk_empty @ L3:3 attr [[cerastes::check]] @ L3:5",
+        "attr [[cerastes::requires]] on routine @ L5:16",
+        "arg 1 @ L5:35", "arg 1 binder r: int @ L5:64", "arg 2 const 0 type=int",
+        "binder r: int @ L5:67", "this: counter * @ L7:3",
+        "const 0 type=int @ L5:39", "const 0 type=int", "const 3 type=unsigned long",
+        "field val: int", "node enk_x type=int",
+        "body return", "body 3 statements",
+        "end walk: 1 routines reported, 0 routines with bodies in non-system files "
+        "outside the primary file",
+    )
+
+    def test_an_excerpt_of_any_line_kind_is_refused(self):
+        for line in self.EXCERPTS:
+            with self.subTest(line):
+                self.page_with_block("text", line)
+                self.lint("walker output must be included from the golden file", count=1)
+
+    def test_prefixed_and_embedded_lines_are_refused(self):
+        for line in ("out> routine f plain body @ L3:5", "> param 1 x: int", "$ returns int",
+                     "| op eok_add type_kind=tk_integer type=int", "// returns int",
+                     "# template inc args <T=int>", "    ->  routine g prototype body @ L1:1",
+                     "stdout: routine f plain body @ L3:5", "walk> constraint requires C",
+                     "the walker printed op eok_add and more", "x @ L3:5 trailing",
+                     "see end walk: 1 routines reported"):
+            for language in ("text", "console", "sh"):
+                with self.subTest(line=line, language=language):
+                    self.page_with_block(language, line)
+                    self.lint("walker output must be included", count=1)
+
+    def test_inline_code_in_prose_is_checked_too(self):
+        for span in ("`routine f plain body @ L3:5`", "`type_kind=tk_integer`",
+                     "`op eok_add`", "+op eok_add+", "`end walk: 1 routines reported`",
+                     "`param 1 x: int`", "`returns int`", "`stmt stmk_empty`",
+                     "`template inc args <T=int>`", "`x @ L3:5`", "``a b @ L1:1``"):
+            for where in ("{}", "* item {}", "|===\n|{}\n|===", "== Heading {}",
+                          ".Title {}", "text before {} and after"):
+                with self.subTest(span=span, where=where):
+                    self.page("p.adoc", LISTING_PAGE + "\n" + where.format(span) + "\n")
+                    self.lint("walker output in inline code")
+
+    def test_ordinary_inline_code_and_output_are_fine(self):
+        for span in ("`scripts/cerastes-fe.sh --cerastes_walk x.cpp`", "`returns`",
+                     "`param`", "`routine`", "`@ L3`", "`L3:5`", "`op`", "`template <class T>`",
+                     "`constraint`", "`const int x`", "`type=int`", "`attr`", "`this`",
+                     "`int f(int x) { return x; }`", "`returns the value`"):
+            with self.subTest(span):
+                self.page("p.adoc", LISTING_PAGE + "\n" + f"Use {span} here.\n")
+                self.assertEqual(self.messages(), [])
+        for body in ("returns the value", "param: foo", "template <class T> struct S;",
+                     "the function returns 3", "const x = 1;", "x.cpp:3:5: error: nope",
+                     "arg parsing failed", "this is fine", "binder"):
+            with self.subTest(body):
+                self.page("p.adoc", LISTING_PAGE + f"\n[source,text]\n----\n{body}\n----\n")
+                self.assertEqual(self.messages(), [])
+
+    def test_the_real_documentation_has_no_false_positives(self):
+        report = cde.check_tree(REAL_ROOT)
+        self.assertEqual([str(p) for p in report.problems], [])
+
+    def test_every_line_of_every_real_golden_is_recognised(self):
+        # the fingerprint must know the walker: every line of the real goldens
+        # that is part of the walk (not the stderr section, source echoes or
+        # carets) is recognised
+        seen = 0
+        for golden in sorted((REAL_ROOT / "tests" / "il").rglob("*.golden")):
+            text = rt.read_exact(golden)
+            walk = text.split("\n" + rt.STDERR_MARKER + "\n")[0]
+            for line in walk.split("\n"):
+                if not line.strip():
+                    continue
+                seen += 1
+                self.assertTrue(cde.walker_line(line), (golden.name, line))
+        self.assertGreater(seen, 500)
+
+
+class WalkerFingerprintHtmlTests(GoldenListingHtmlTests):
+    """--html: excerpts and inline code with walker output fail, whatever the
+    sources say."""
+
+    INLINE_PAGE = """<!DOCTYPE html><html><body>
+<p>See <code>{code}</code> for more.</p>
+</body></html>
+"""
+
+    def test_an_excerpt_block_is_refused(self):
+        for line in ("op eok_add type_kind=tk_integer type=int", "param 1 x: int",
+                     "returns int", "template inc args &lt;T=int&gt;"):
+            with self.subTest(line):
+                self.site(line)
+                status, out, _ = self.run_html()
+                self.assertEqual(status, 1, out)
+                self.assertIn("with walker output", out)
+
+    def test_inline_code_with_walker_output_is_refused(self):
+        self.site(self.ESCAPED)
+        for code in ("routine f plain body @ L3:5", "op eok_add", "type_kind=tk_integer",
+                     "returns int", "end walk: 1 routines reported",
+                     "<em>param 1 x: int</em>"):
+            with self.subTest(code):
+                self.site(code, template=self.INLINE_PAGE, name="q.html")
+                status, out, _ = self.run_html()
+                self.assertEqual(status, 1, out)
+                self.assertIn("q.html:2: inline code with walker output", out)
+        (self.out / "q.html").unlink()
+
+    def test_ordinary_inline_code_is_fine(self):
+        self.site(self.ESCAPED)
+        for code in ("scripts/cerastes-fe.sh", "returns", "int f()", "param"):
+            with self.subTest(code):
+                self.site(code, template=self.INLINE_PAGE, name="q.html")
+                self.assertEqual(self.run_html()[0], 0)
+
+    def test_nested_inline_code_is_collected_once(self):
+        self.site(self.ESCAPED)
+        self.site("a <code>b</code> op eok_add", template=self.INLINE_PAGE, name="q.html")
+        status, out, _ = self.run_html()
+        self.assertEqual(status, 1, out)
+        self.assertEqual(out.count("inline code with walker output"), 1, out)
+
+
+def _bootstrap_available():
+    return (REAL_ROOT / "build" / "env.sh").is_file() and shutil.which("git") is not None
+
+
+@e2e_gate(_bootstrap_available(), "build/env.sh or git missing; run scripts/bootstrap.sh")
+class BootstrapGitEnvironmentTests(unittest.TestCase):
+    """bootstrap.sh runs every git command, its own and edg_tree.py's, without
+    the variables that redirect git (CP1b audit N7).  A stub `git` in front of
+    the real one logs the GIT_* variables of every call."""
+
+    @staticmethod
+    def edg_tree():
+        sys.path.insert(0, str(REAL_ROOT / "scripts"))
+        try:
+            import edg_tree
+        finally:
+            sys.path.pop(0)
+        return edg_tree
+
+    def test_the_list_is_the_one_of_edg_tree(self):
+        edg_tree = self.edg_tree()
+        lines = [l for l in active_lines((REAL_ROOT / "scripts" / "bootstrap.sh").read_text())
+                 if l.startswith("unset ")]
+        self.assertEqual(len(lines), 1, lines)
+        self.assertEqual(set(lines[0].split()[1:]), set(edg_tree.GIT_REDIRECTS))
+
+    def test_no_git_call_sees_a_redirecting_variable(self):
+        # bootstrap.sh writes build/ of the tree it lives in: never run it from a
+        # copy of scripts/ whose build/ belongs to another tree (it would
+        # reconfigure that build for the copy's path)
+        if (REAL_ROOT / "build").resolve().parent != REAL_ROOT.resolve():
+            self.skipTest("build/ is not this tree's own (a scratch copy of scripts/)")
+        edg_tree = self.edg_tree()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp).resolve()
+            log = tmp / "git.log"
+            real_git = shutil.which("git")
+            stub = tmp / "bin" / "git"
+            stub.parent.mkdir()
+            stub.write_text(f'#!/bin/sh\nenv | grep "^GIT_" >> "{log}"\n'
+                            f'echo "-- $*" >> "{log}"\nexec "{real_git}" "$@"\n')
+            stub.chmod(0o755)
+            decoy = tmp / "decoy"
+            subprocess.run([real_git, "init", "-q", str(decoy)], check=True,
+                           capture_output=True)
+            env = dict(os.environ)
+            env.pop("CERASTES_EDG_SRC", None)
+            env["PATH"] = f"{stub.parent}:{env['PATH']}"
+            env.update({"GIT_DIR": str(decoy / ".git"), "GIT_WORK_TREE": str(decoy),
+                        "GIT_INDEX_FILE": str(decoy / ".git" / "index"),
+                        "GIT_OBJECT_DIRECTORY": str(decoy / ".git" / "objects"),
+                        "GIT_COMMON_DIR": str(decoy / ".git"), "GIT_NAMESPACE": "x"})
+            run = subprocess.run([str(REAL_ROOT / "scripts" / "bootstrap.sh"), "--build-only"],
+                                 cwd=REAL_ROOT, env=env, capture_output=True, text=True,
+                                 timeout=900)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            calls = log.read_text()
+            self.assertGreater(calls.count("-- "), 3, calls)  # the stub was used
+            self.assertNotRegex(calls, r"(?m)^(?:" + "|".join(edg_tree.GIT_REDIRECTS) + ")=",
+                                calls)  # (GIT_EDITOR and the like are not redirects)
+
+
 class DocumentationTests(unittest.TestCase):
     """tests/README.md describes every kind and rule of this harness."""
 
     def test_the_readme_documents_the_extensions(self):
         text = (REAL_ROOT / "tests" / "README.md").read_text()
-        for needle in ("twin-exempt", "tests/annotations/warnings", "authoritative",
-                       "relative path", "origin/main", "unreg_ns::x", "config <sha256",
+        for needle in ("frontend-ok` is a header error", "switch its own check off",
+                       "inline code", "verifies the active kind's build stamp",
+                       "GIT_REDIRECTS", "twin-exempt", "tests/annotations/warnings", "authoritative",
+                       "relative path", "origin/cerastes", "fork-local", "NOT YET PUSHED", "unreg_ns::x", "config <sha256",
                        "frontend-error", "frontend-warning", "native-ok", "// twin:",
                        "tests/annotations/negative", "CERASTES_EDG_SRC", "CERASTES_EDG_GEN",
                        "diagnostics.def", "--brief_diagnostics", "--display_error_number",

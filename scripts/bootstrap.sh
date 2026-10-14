@@ -21,6 +21,11 @@
 
 set -euo pipefail
 
+# Variables that point git at another repository would make every git call below
+# (submodule status and update, the tree checks) look at the wrong one.  The same
+# list as GIT_REDIRECTS in scripts/edg_tree.py (the harness self-test compares).
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_NAMESPACE GIT_PREFIX GIT_INTERNAL_SUPER_PREFIX GIT_QUARANTINE_PATH GIT_REPLACE_REF_BASE
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD="$ROOT/build"
 TOOLS="$BUILD/tools"

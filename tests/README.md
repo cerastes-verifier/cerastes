@@ -245,13 +245,21 @@ rejected by them. A canary prints as `canary native-ok [<compiler>,
 <language>]`; when it fails, every native run of that compiler fails with it,
 so a compiler that accepts everything cannot make files pass.
 
+**A native-ok test cannot switch its own check off.** A `#pragma clang|GCC
+diagnostic ignored|warning`, a `#pragma clang|GCC system_header` or a
+`#define __CERASTES__` in a native-ok test is a header error (`#undef
+__CERASTES__`, `diagnostic push|pop|error` stay allowed).
+
 **Policy.** `native-ok` is required (a header error, also with
 `--check-headers`) of every positive test (`golden`, later `verified`) in the
 directories listed in `NATIVE_POLICY_DIRS` in `scripts/run_tests.py`:
 `tests/annotations`, `doc/modules/ROOT/examples/annotations` and
 `doc/modules/ROOT/examples/ordinary-compilers` (with their subdirectories), and
 of every positive test, wherever it is, whose source has an
-`#include <cerastes.h>` (or `"cerastes.h"`) line. Negative tests are exempt.
+`#include <cerastes.h>` (or `"cerastes.h"`) line. Negative tests are exempt. `expect: frontend-ok` is a header error in these
+directories (stock cpfe does not define `__CERASTES__`, so the annotations
+would not even be parsed, and the test would escape both the twin rule and
+native-ok).
 
 ## The environment
 
@@ -304,20 +312,34 @@ tree that `CERASTES_EDG_SRC` of the current shell selects (`third_party/edg` whe
 it is unset or empty), compared by real path, and stop with exit status 2 and
 `build/env.sh is for <X> but CERASTES_EDG_SRC selects <Y>; run
 scripts/bootstrap.sh` when it does not. `scripts/cerastes-fe.sh` and
-`scripts/cpfe.sh` do the same. `--check-headers` does not need the tree. A
+`scripts/cpfe.sh` do the same. Before such a test runs, the harness also
+verifies the active kind's build stamp against the tree and the cerastes
+configuration as they are now, as `edg_tree.py describe --verify-build` does,
+and stops with exit status 2 (`run scripts/bootstrap.sh`) when the binary is
+stale. `--check-headers` does not need the tree. A
 relative path in `CERASTES_EDG_SRC` is refused with exit status 2 and a message
 (`... is a relative path; use an absolute path`) by `run_tests.py`,
 `cerastes-fe.sh`, `cpfe.sh`, `bootstrap.sh` and `edg_tree.py`.
 `scripts/edg_tree.py` (`resolve`, `stamp`, `check`, `describe --verify-build`)
 implements the guards that `scripts/check.sh` runs first and last; the harness
 self-test runs it on temporary repositories (a nested repository at
-`third_party/edg` with a fake gitlink and a fake `origin/main`, override trees)
+`third_party/edg` with a fake gitlink and fake `origin/cerastes` and
+`fork-local/cerastes` branches, override trees)
 and checks that `check.sh` runs both guards as active, ordered steps that
 cannot be ignored. The guards, beyond a clean `third_party/edg` at its gitlink
-with the upstream URL:
-- the gitlink must be an ancestor of the submodule's `refs/remotes/origin/main`
-  (never a fork commit; a stale `origin/main` fails with `git -C
-  third_party/edg fetch origin`);
+with the fork's URL (`https://github.com/mborland/compiler.git`, in
+`.gitmodules` and as the submodule's `origin`; upstream's URL fails):
+- the pin is a commit of the owner's fork (decision 0009): the gitlink must be
+  an ancestor of the submodule's `refs/remotes/origin/cerastes` (pushed; the
+  report line is `EDG tree: fork third_party/edg @ <8> (gitlink, clean)`) or of
+  `refs/remotes/fork-local/cerastes` (the local clone, added by a session as the
+  remote `fork-local`; the report line then says `NOT YET PUSHED to
+  origin/cerastes` and a warning says the owner must push the fork's `cerastes`
+  branch before cerastes `main`). A commit on neither, or missing refs, fails
+  with `git -C third_party/edg fetch origin` / `fetch fork-local`; `origin/main`
+  and other branches do not count. The kind label `upstream` (the
+  `resolve` output, `CERASTES_EDG_KIND`, the `build/` layout) is kept as the
+  name of the pinned tree; only the report line says `fork`;
 - an override needs an absolute path, a git work tree root with `src/il_def.h`,
   not the submodule or inside it, and HEAD of the repository must be a named
   branch other than `main` (not detached);
@@ -325,7 +347,9 @@ with the upstream URL:
   `config <sha256 of cmake/EdgFrontEnd.cmake and src/backend/edg_il.h>`), so a
   binary built under an older cerastes configuration does not verify;
 - every git command runs without `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`
-  and the other variables that redirect git.
+  and the other variables that redirect git (`bootstrap.sh` unsets the same
+  list, `GIT_REDIRECTS`, which the self-test compares; a stub `git` logs what
+  each call of a real `bootstrap.sh --build-only` saw).
 
 ## Documentation examples
 
@@ -409,9 +433,19 @@ a module other than `ROOT`; `--root DIR` checks another tree). It reads
   Asciidoctor would turn into a callout (a real build shows it; includes,
   conditionals and tag directives inside an included file are left alone).
   Any other include of a golden file is an error, and so is a line that looks
-  like walker output (`end walk: ...`, `routine ... @ L<n>:<c>`, `attr [[`,
-  `stmt ... @ L<n>`) in a `text`, `console` or `sh` block that is not such an
-  include: a listing written by hand could not be told from a tested one;
+  like walker output in a `text`, `console` or `sh` block that is not such an
+  include, or in inline code (`` `...` ``, `+...+`) in prose: a listing written
+  by hand, even an excerpt, could not be told from a tested one. A line looks
+  like walker output when it contains, anywhere (so a prefix such as `out> `
+  does not hide it), a source position (` @ L<n>:<c>`, ` @ -`), `type_kind=`,
+  `end walk:`, `op eok_...`, `stmt stmk_...`, `tconst tp...`, `node enk_...`,
+  `attr [[ns::...` or a `const V type=T` leaf; or when it starts, after such a
+  prefix, with a line kind that has no position (`routine F plain|prototype|
+  instance|specialization`, `returns T`, `param N x: T`, `template F args`,
+  `constraint <kind>`, `field Q: T`, `binder N: T`, `this: T`, `body return`,
+  `arg N binder|const|@`, or one of the walker's `warning:` lines). The
+  self-test checks that every line of every walk in `tests/il/*.golden` is
+  recognised;
 - a file under `doc/modules/*/examples/` that is not a test or its `.golden`
   file, and any C/C++/Viper source file (by suffix) elsewhere under
   `doc/modules/` (`partials/`, `attachments/`, `pages/`...);
@@ -449,7 +483,8 @@ generated HTML (and every `<code>` with a `language-X`, `lang-X` or `data-lang`)
 - a block in `sh`, `console` or `text` is fine, except that a block with
   walker output (as in rule g) must equal a golden file of a golden test under
   `examples/` after the same normalisation, and the site must have at least
-  as many such blocks as the page sources have golden includes;
+  as many such blocks as the page sources have golden includes, and inline
+  `<code>` with walker output is an error;
 - anything else is an error: a `<pre>` without `<code>` (a literal block, verse,
   raw HTML), a `<code>` without a language class, any other language, `lang-cpp`
   and so on. Page chrome is not exempt (the default UI's own pages have no
