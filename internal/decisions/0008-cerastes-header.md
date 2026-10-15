@@ -43,7 +43,20 @@ Probe facts (M2 Phase 1):
    - The macros are variadic, so commas inside lambdas and `forall` calls need
      no extra parentheses.
 2. **Expansion.**
-   - **When `__CERASTES__` is defined:** each macro expands to exactly its
+   - **What decides** (amended after the CP6 audit): the header expands the
+     attributes when `__has_cpp_attribute(cerastes::requires)` (C++) or
+     `__has_c_attribute(cerastes::requires)` (C23) is non-zero. That is true
+     only in the cerastes front end, where the namespace is registered, and
+     0 in clang and GCC.
+     - An `#undef __CERASTES__` therefore cannot drop contracts.
+     - The front end still defines `__CERASTES__` for user code, and
+       reports any source-level change of it (`cerastes_macro_changed`,
+       0006 item 10).
+     - There is no `#error` for tampering: an EDG `#error` would stop the
+       run before the back end could report the positioned diagnostic.
+     - Redefining the `CERASTES_*` macros themselves, or defining
+       `CERASTES_H` before the include, is unsupported and not detected.
+   - **When the attributes are available:** each macro expands to exactly its
      attribute (0006). `CERASTES_PREDICATE` expands to
      `[[cerastes::predicate]] inline` and `CERASTES_PURE` to
      `[[cerastes::pure]] inline`.

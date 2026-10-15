@@ -323,9 +323,15 @@ summarized here):
       there; CP6.) In a template that is never
       instantiated, these constructs are not checked in M2. M4's eligibility
       checker must fail closed on them.
-    - **Spec functions are identified by entity,** never by spelling: the
-      `cerastes::` declarations from `<cerastes.h>`, whether reached
-      qualified, through `using`, or as a template-id (`old<T>`).
+    - **Spec functions are identified by entity,** never by spelling.
+      - **Resolved calls** (instances, non-templates) are recognized by the
+        `cerastes::` declarations from `<cerastes.h>`.
+      - **Dependent calls** in templates are recognized by name only when
+        the name was found in namespace `cerastes` (qualified, or through
+        an alias), or when a using-directive or using-declaration that
+        brings it in is visible at that point.
+      - A user's `algo::forall` or `mine::old`, or an unqualified `old(x)`
+        found by argument-dependent lookup, is ordinary code (CP6).
     - **No file is exempt.** Every routine, statement and body that carries
       a `cerastes::` attribute is checked, in whatever file it is, including
       a header marked as a system header, a linemarker, a `--sys_include`
