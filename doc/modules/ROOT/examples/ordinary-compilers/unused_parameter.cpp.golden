@@ -1,0 +1,11 @@
+routine first plain body @ L7:5
+  returns int
+  param 1 a: const int *
+  param 2 n: int
+  attr [[maybe_unused]] on param 2 @ L7:27
+  attr [[cerastes::requires]] on routine @ L7:49
+    arg 1 @ L7:67
+      op eok_gt type_kind=tk_integer type=bool @ L7:69
+        param 2 n: int @ L7:67
+        const 0 type=int @ L7:71
+end walk: 1 routines reported, 0 routines with bodies in non-system files outside the primary file

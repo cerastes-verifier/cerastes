@@ -1,0 +1,19 @@
+routine bump plain body @ L9:5
+  returns int
+  param 1 z: int
+  attr [[cerastes::requires]] on routine @ L7:17
+    arg 1 @ L7:35
+      op eok_land type_kind=tk_integer type=bool @ L7:41
+        op eok_gt type_kind=tk_integer type=bool @ L7:37
+          param 1 z: int @ L7:35
+          const 0 type=int @ L7:39
+        op eok_lt type_kind=tk_integer type=bool @ L7:46
+          param 1 z: int @ L7:44
+          const 100 type=int @ L7:48
+  attr [[cerastes::ensures]] on routine @ L7:53
+    arg 1 binder r: int @ L7:70
+    arg 2 @ L7:73
+      op eok_gt type_kind=tk_integer type=bool @ L7:75
+        binder r: int @ L7:73
+        param 1 z: int @ L7:77
+end walk: 1 routines reported, 0 routines with bodies in non-system files outside the primary file

@@ -1,0 +1,737 @@
+= Annotations
+
+You write the specification of a function, a loop or a program point as an
+annotation in your C or pass:[C++] source. This page describes the annotations
+that exist today, where each may be written, and what each means.
+
+[IMPORTANT]
+====
+cerastes parses these annotations, type-checks them as pass:[C++] expressions
+and places them on the function or statement they belong to. It also rejects
+the mistakes listed under <<not-allowed>>. It does *not* verify anything
+yet: a program with a contract that its code violates is accepted. The meaning
+of the annotations (what a contract promises and what a verifier must prove)
+is stated here so that you can write them now. A later milestone checks them.
+====
+
+Everything on this page is a test. Each example is compiled by cerastes's
+front end, and the listing it produces is compared with a stored copy. The
+examples marked as accepted by ordinary compilers are also built with Apple
+clang and GCC, as described in xref:ordinary-compilers.adoc[Building annotated
+code with ordinary compilers].
+
+== Writing annotations
+
+There are eight annotations. You write them with macros from `<cerastes.h>`:
+
+[cols="2,3,3"]
+|===
+| Macro | Written | Meaning
+
+| `CERASTES_REQUIRES(p)`
+| after a function's parameter list
+| precondition: `p` holds when the function is called
+
+| `CERASTES_ENSURES(p)` or `CERASTES_ENSURES(r, p)`
+| after a function's parameter list
+| postcondition: `p` holds when the function returns; `r` names the result
+
+| `CERASTES_INVARIANT(p)`
+| before a `while`, `do`, `for` or range-based `for` statement
+| `p` holds every time control reaches the loop test
+
+| `CERASTES_CHECK(p)`
+| as a statement
+| `p` holds at this point
+
+| `CERASTES_FOLD(e)`, `CERASTES_UNFOLD(e)`
+| as a statement
+| exchange a predicate for its meaning, and back
+
+| `CERASTES_PREDICATE`, `CERASTES_PURE`
+| first in a function declaration
+| the function is specification, not program
+|===
+
+Include the header once, with `#include <cerastes.h>`. The first example below
+shows a function with a precondition and a postcondition. The condition `p` is
+an ordinary pass:[C++] expression. In `CERASTES_ENSURES(r, p)` the name `r` is
+the function's result.
+
+[source,cpp]
+----
+include::example$annotations/contract.cpp[tag=contract]
+----
+
+Each macro expands to a standard attribute in the namespace `cerastes`, for
+example `+[[cerastes::requires(x >= 0)]]+`, when cerastes reads the file. The
+cerastes front end defines the macro `+__CERASTES__+` itself, so you do not, and
+an `+#undef+` or a redefinition of it, on the command line or in the source, is an
+error (`cerastes-cerastes_macro_changed`). For any other compiler the contract macros expand to nothing, so the same file
+builds as before (see xref:ordinary-compilers.adoc[Building annotated code with
+ordinary compilers]). You may write the attribute by hand, guarded in the same
+way:
+
+[source,cpp]
+----
+include::example$annotations/spelled_out.cpp[tag=attr]
+----
+
+The namespace is closed. A name that cerastes does not define, such as
+`+[[cerastes::assert(x > 0)]]+`, is an error, and there is deliberately no
+`assume`. The statement annotation is `check`, not `assert`, because
+`<cassert>` expands `assert` as a macro.
+
+== Contracts: requires and ensures
+
+A contract is a list of `requires` and `ensures` annotations on a function,
+member function, constructor or destructor. They are written after the
+parameter list, and after any `const`, `&` or `noexcept` that follows it. They
+may not be written on a variable, a class, a typedef, a lambda or a function
+pointer.
+
+=== requires
+
+`requires(p)` is a precondition. The expression is not evaluated; it is
+type-checked, and it must convert to `bool`. It sees the function's
+parameters, `this` and the members declared before it in a member function, and
+the names visible at the declaration.
+
+[source,cpp]
+----
+include::example$annotations/requires.cpp[tag=single]
+----
+
+Several annotations on one declaration are all part of the contract, as a
+conjunction, in the order written:
+
+[source,cpp]
+----
+include::example$annotations/requires.cpp[tag=several]
+----
+
+=== ensures
+
+`ensures(p)` is a postcondition. `ensures(r, p)` also names the function's
+result `r`, with the declared return type, for use in `p`:
+
+[source,cpp]
+----
+include::example$annotations/ensures.cpp[tag=plain]
+----
+
+[source,cpp]
+----
+include::example$annotations/ensures.cpp[tag=binder]
+----
+
+The first argument is a result name exactly when it is a lone identifier
+followed by a comma. A result name is an error when:
+
+* it is the name of a parameter;
+* the function returns `void`, or is a constructor or a destructor;
+* the return type is deduced (`auto`, `decltype(auto)`) or written as a
+  trailing return type. This is a limit of the present version.
+
+`ensures(p)` without a result name is always allowed, including for those
+functions.
+
+=== What a parameter means in ensures
+
+In `ensures`, a parameter named `x` means the value that was passed in. A
+function may assign to its by-value parameters, but the postcondition still
+talks about the argument:
+
+[source,cpp]
+----
+include::example$annotations/entry_values.cpp[tag=by_value]
+----
+
+State that the function can change and that its caller can see is different:
+the object behind a pointer or a reference, a field, a global.
+`cerastes::old(e)` is the value of `e` when the function was entered. A
+reference parameter `x` always denotes the same object, so in `ensures`, `x`
+is that object's value when the function returns and `cerastes::old(x)` is its
+value on entry. A pointer works the same way through `*p`:
+
+[source,cpp]
+----
+include::example$annotations/entry_values.cpp[tag=by_reference]
+----
+
+[source,cpp]
+----
+include::example$annotations/entry_values.cpp[tag=by_pointer]
+----
+
+Writing `old(x)` for a by-value parameter `x` is allowed and means `x`. `old`
+is meaningful only in `ensures`; using it anywhere else is an error.
+
+=== Declarations that repeat a contract
+
+A function often has several declarations: one in a header, a definition, a
+member declared in its class and defined outside it, a template declared and
+then defined. The contract is written on one of them, and *every declaration
+that carries a contract must carry the same one*: the same annotations, in
+the same order, with equivalent arguments. Parameters are compared by
+position, so you may rename them. A declaration without a contract has the
+function's contract.
+
+[source,cpp]
+----
+include::example$annotations/redeclaration.cpp[tag=same]
+----
+
+The usual style is to write the contract once, on the declaration in the
+header:
+
+[source,cpp]
+----
+include::example$annotations/header_style.cpp[tag=style]
+----
+
+A different contract on a later declaration is an error at that declaration.
+There is no way to add to a contract later, on purpose. cerastes checks each
+translation unit by itself, so a definition that could add a precondition to
+its header's would be checked against more than the callers in other
+translation units were promised.
+
+Two limits follow from how declarations are compared. cerastes compares the
+expressions of the two contracts as the front end does, so two contracts that
+mean the same thing can still be reported as different:
+
+* `this->a > x` on one declaration and `a > y` on another;
+* any contract that contains a lambda, because two lambdas are never the same
+  one. That includes every `forall`.
+
+Write such a contract once, on one declaration, and leave the others without
+one:
+
+[source,cpp]
+----
+include::example$annotations/lambda_once.cpp[tag=once]
+----
+
+An explicit specialization of a function template follows the same rule with
+respect to the primary template. It may repeat the primary template's
+contract, or carry none, in which case it has the primary's. It may not have a
+different one, whichever of the two is declared first. Callers rely on the
+primary template's contract, but a call with those arguments runs the
+specialization.
+
+[source,cpp]
+----
+include::example$annotations/specialization.cpp[tag=spec]
+----
+
+An explicit specialization of a *member template* of a class template is
+refused when the primary member template has a contract, on any of its
+declarations, and whether or not the specialization repeats the contract:
+`attr_member_template_specialization`.
+
+[source,cpp]
+----
+include::example$annotations/errors/member_template_specialization.cpp[tag=bad]
+----
+
+=== Members, constructors and destructors
+
+In a member function, `this` and the members declared before the function are
+in scope. A class is not a complete context for an annotation, so a member
+declared later is not. A member declared in its class and defined outside it
+follows the rule above:
+
+[source,cpp]
+----
+include::example$annotations/members.cpp[tag=members]
+----
+
+A constructor's contract is written after its parameter list and before its
+member-initializer list. A constructor and a destructor have no result, so
+`ensures` takes no result name there.
+
+[source,cpp]
+----
+include::example$annotations/constructors.cpp[tag=ctor]
+----
+
+=== Templates
+
+An annotation in a function template is type-checked in the template, with
+dependent types, as any template code is. It is checked again in each
+instance, with the types substituted, and an error found only in an instance
+is reported with the instantiation context. A template that is never
+instantiated still has its annotations checked in the template.
+
+[source,cpp]
+----
+include::example$annotations/templates.cpp[tag=template]
+----
+
+Which templates are verified once, for every type that meets their
+requirements, is a later milestone. Today an annotation in a template is only
+placed and type-checked.
+
+== Loop invariants
+
+`invariant(p)` is written immediately before a `while`, `do`, `for` or
+range-based `for` statement. It says that `p` holds each time control reaches
+the loop's test. Several invariants on one loop are conjoined.
+
+[source,cpp]
+----
+include::example$annotations/loops.cpp[tag=while]
+----
+
+[source,cpp]
+----
+include::example$annotations/loops.cpp[tag=do]
+----
+
+The invariant is read before the loop's own declarations exist, so *declare a
+loop counter before the loop*, not in the `for` statement. A name declared in
+the `for` init-statement, by a range-based `for`, or in the condition of a
+`while` or `for` (`while (int i = next())`) is not in scope in its invariant.
+If no other variable has that name, naming it is an error. If an outer
+variable has the same name, the invariant would silently be about the outer
+one, so cerastes rejects it (see <<not-allowed>>).
+
+[source,cpp]
+----
+include::example$annotations/loops.cpp[tag=for]
+----
+
+The invariant is written before the loop, and nowhere else: not on the loop
+body and not after it.
+
+== check
+
+`check(p)` states that `p` holds at that point of the function. It is a
+statement of its own, and it sees everything in scope there.
+
+[source,cpp]
+----
+include::example$annotations/check.cpp[tag=check]
+----
+
+It is named `check`, not `assert`, so that it cannot collide with the
+`<cassert>` macro. Write it with braces after an `if`, because the macro leaves
+an empty statement behind in an ordinary build (see
+xref:ordinary-compilers.adoc[Building annotated code with ordinary compilers]).
+
+== Predicates, pure functions, fold and unfold
+
+A *predicate* is a function that you write in pass:[C++] and mark as specification:
+a named condition that annotations can use. A *pure function* is a
+specification function that returns a value. Neither is part of the program
+that runs. Write the macro first in the declaration:
+
+[source,cpp]
+----
+include::example$annotations/predicates.cpp[tag=predicate]
+----
+
+[source,cpp]
+----
+include::example$annotations/predicates.cpp[tag=pure]
+----
+
+A predicate returns `bool`, cannot also be `pure`, and has no `requires` or
+`ensures`. A pure function does not return `void`, and may have a contract. The
+body of either is ordinary pass:[C++] and may use the specification functions
+below. In an annotation, a call to one is an ordinary call.
+
+`fold(e)` and `unfold(e)` are statements. Their argument is a call to a
+predicate: `fold` records that the predicate's condition holds and may be used
+as a unit, and `unfold` exchanges the unit for the condition it stands for.
+Their effect is not checked yet; their placement and argument are.
+
+[source,cpp]
+----
+include::example$annotations/predicates.cpp[tag=fold]
+----
+
+== Specification functions
+
+`<cerastes.h>` declares five functions in `namespace cerastes` for use in
+annotations. They are declared and type-checked like any function, and they
+are never defined, so a program cannot call one. cerastes recognizes them by the
+declarations in `<cerastes.h>`, however you reach them: qualified
+(`cerastes::old(x)`), through a using-directive or using-declaration (`old(x)`
+after `using namespace cerastes;`) or as a template-id (`old<int>(x)`):
+
+[cols="2,5"]
+|===
+| Function | What it will mean
+
+| `owns(place)`
+| full permission to read and write `place`
+
+| `reads(place)`
+| permission to read `place`
+
+| `old(e)`
+| the value of `e` on entry, in `ensures`
+
+| `owns_range(p, n)`
+| permission to the `n` elements starting at `p`
+
+| `forall(body, free...)`
+| for every value of the first parameter of `body`
+|===
+
+Today they only have to type-check; a later milestone gives `owns`, `reads`
+and `owns_range` their meaning, in the memory model.
+
+[source,cpp]
+----
+include::example$annotations/spec_functions.cpp[tag=spec]
+----
+
+=== forall
+
+`cerastes::forall(body, free...)` takes a lambda as its first argument. The
+lambda's first parameter is the quantified variable, and its other parameters
+receive the trailing arguments, in order. The lambda has no captures, because
+an annotation after a parameter list cannot name a parameter inside a lambda:
+pass what it needs as trailing arguments.
+
+[source,cpp]
+----
+include::example$annotations/forall.cpp[tag=contract]
+----
+
+In a `check` or an `invariant`, which are statements in a function body, a
+lambda may capture as usual. The form above works there too:
+
+[source,cpp]
+----
+include::example$annotations/forall.cpp[tag=check]
+----
+
+The lambda's parameters have concrete types: a generic lambda (`auto` parameters,
+a template lambda) is rejected. In the contract of a *function template*,
+including a member template, the lambda also cannot name a template parameter:
+a parameter of type `const T*`, `sizeof(T)` in the body, a `decltype(x)` parameter
+or the enclosing class's `T`. EDG reports `undefined_identifier` for the `T`,
+with "detected during instantiation of" and the template, and only when the
+template is instantiated (a template that is never instantiated is not
+diagnosed). So in this version `forall` cannot quantify over an array of `T` in
+a function template's contract: use concrete parameter types where the element
+type is fixed, or put the quantifier in a class template's member or a
+non-template function. Contracts of class-template members are not affected. cerastes does not yet check that the lambda takes
+one more parameter than there are trailing arguments. Writing it correctly is
+your job today.
+
+== What cerastes checks, and who reports it
+
+The EDG front end reports an unknown name, the wrong entity or statement kind,
+an annotation that attaches to nothing, the wrong number of arguments, an
+argument that is undeclared or ill-typed, every error in a result name, and a
+reference to a function parameter pack or a pack expansion in an argument. The
+front end exits with status 2 when it reports one.
+
+cerastes itself reports the rest (listed below), in the same format and at the
+pass:[C++] line. Both exit with status 2.
+
+An annotation does not change anything. It must not contain:
+
+* an assignment, a compound assignment, `pass:[++]` or `--`;
+* `new`, `delete` or `throw`;
+* a read or write of a `volatile` object;
+* a GNU statement expression.
+
+This includes the body of a lambda written in the annotation. Calls to
+functions that are not specification functions are left to a later milestone,
+which will reject them.
+
+Every annotation is checked, in whatever file it is: a header, a system header
+or a directory given with `--sys_include` is not exempt.
+
+An error inside the argument of a macro such as `CERASTES_REQUIRES` is
+reported at the argument's own line and column, even when the macro
+invocation spans several lines.
+
+[#not-allowed]
+== Where annotations are not allowed
+
+Each diagnostic has a tag. EDG's tags are the names of its messages. cerastes's
+own are written `cerastes-<tag>`. The examples below are tests that expect
+exactly that diagnostic at the marked line.
+
+=== A contract before the declaration
+
+`requires` and `ensures` belong directly after the parameter list. Written
+before the declaration, or after the function's name, they are rejected by
+cerastes with `cerastes-contract_not_after_parameters`.
+
+[source,cpp]
+----
+include::example$annotations/errors/contract_before_declaration.cpp[tag=bad]
+----
+
+If the contract names a parameter, EDG reports `undefined_identifier`
+instead, because the parameter does not exist yet at that point:
+
+[source,cpp]
+----
+include::example$annotations/errors/prefix_names_parameter.cpp[tag=bad]
+----
+
+=== A name that does not exist
+
+An annotation is type-checked like any expression. A name that is not declared
+is `undefined_identifier`:
+
+[source,cpp]
+----
+include::example$annotations/errors/requires_not_declared.cpp[tag=bad]
+----
+
+A name in the `cerastes` namespace that is not one of the eight, such as
+`assert`, is `unrecognized_attribute`:
+
+[source,cpp]
+----
+include::example$annotations/errors/unknown_attribute.cpp[tag=bad]
+----
+
+=== A result name that is not allowed
+
+A result name that is also a parameter is `decl_hides_function_parameter`:
+
+[source,cpp]
+----
+include::example$annotations/errors/result_name_shadows.cpp[tag=bad]
+----
+
+On a `void` function, a constructor or a destructor it is
+`attr_result_name_void_function`:
+
+[source,cpp]
+----
+include::example$annotations/errors/result_name_void.cpp[tag=bad]
+----
+
+When the return type is deduced it is `attr_result_name_deduced_type`:
+
+[source,cpp]
+----
+include::example$annotations/errors/result_name_deduced.cpp[tag=bad]
+----
+
+=== The wrong entity or statement
+
+`requires` and `ensures` on anything but a function are
+`wrong_entity_for_attribute`:
+
+[source,cpp]
+----
+include::example$annotations/errors/contract_on_variable.cpp[tag=bad]
+----
+
+`invariant` on a statement that is not a loop is
+`attr_requires_iteration_statement`:
+
+[source,cpp]
+----
+include::example$annotations/errors/invariant_on_if.cpp[tag=bad]
+----
+
+A variable declared in a `for` statement is not in scope in the loop's
+invariant, so naming it is `undefined_identifier`:
+
+[source,cpp]
+----
+include::example$annotations/errors/invariant_for_counter.cpp[tag=bad]
+----
+
+If an outer variable has the same name as the loop's own, the front end finds
+the outer one, and the invariant would be about the wrong variable. cerastes
+rejects an invariant that names a variable with the same name as one declared
+in the loop's init-statement, range-based `for` declaration or condition,
+`cerastes-invariant_shadowed_by_loop_variable`:
+
+[source,cpp]
+----
+include::example$annotations/errors/invariant_shadowed.cpp[tag=bad]
+----
+
+`check`, `fold` and `unfold` on anything but a null statement, a loop for
+example, are `attr_requires_null_statement`:
+
+[source,cpp]
+----
+include::example$annotations/errors/check_on_loop.cpp[tag=bad]
+----
+
+=== Predicates and pure functions
+
+`fold` and `unfold` need a call to a predicate. Anything else is
+`cerastes-fold_callee_not_predicate`, or `cerastes-fold_argument_not_call` when
+the argument is not a call at all:
+
+[source,cpp]
+----
+include::example$annotations/errors/fold_not_predicate.cpp[tag=bad]
+----
+
+A predicate that does not return `bool` is `cerastes-predicate_not_bool`:
+
+[source,cpp]
+----
+include::example$annotations/errors/predicate_returns_int.cpp[tag=bad]
+----
+
+A contract on a predicate is `cerastes-contract_on_predicate`:
+
+[source,cpp]
+----
+include::example$annotations/errors/contract_on_predicate.cpp[tag=bad]
+----
+
+The program must not use a predicate, a pure function or a specification
+function: a call from ordinary code, a use in a namespace-scope initializer, a
+default member initializer or a member-initializer, or taking its address, is
+`cerastes-spec_call_in_code`. The bodies of predicate and pure functions are
+specification, so they may call the specification functions.
+
+[source,cpp]
+----
+include::example$annotations/errors/spec_call_in_code.cpp[tag=bad]
+----
+
+A function marked both `predicate` and `pure` is `cerastes-predicate_and_pure`,
+and a `pure` function that returns `void` is `cerastes-pure_returns_void`.
+
+=== Side effects and old
+
+An annotation that changes something is `cerastes-annotation_side_effect`:
+
+[source,cpp]
+----
+include::example$annotations/errors/side_effect.cpp[tag=bad]
+----
+
+`cerastes::old` outside `ensures` is `cerastes-old_outside_ensures`:
+
+[source,cpp]
+----
+include::example$annotations/errors/old_in_requires.cpp[tag=bad]
+----
+
+=== Declarations that disagree
+
+A later declaration with a different contract is `attr_redeclaration_mismatch`:
+
+[source,cpp]
+----
+include::example$annotations/errors/redeclaration_mismatch.cpp[tag=bad]
+----
+
+So is an explicit specialization whose contract differs from the primary
+template's:
+
+[source,cpp]
+----
+include::example$annotations/errors/specialization_differs.cpp[tag=bad]
+----
+
+And so is repeating a contract that contains a lambda, even when the text is
+the same:
+
+[source,cpp]
+----
+include::example$annotations/errors/lambda_contract_repeated.cpp[tag=bad]
+----
+
+=== Lambdas, deduction guides and modules
+
+A lambda cannot carry a contract: the attribute would attach to the closure's
+call operator. Written after the lambda's parameter list, it is
+`wrong_entity_for_attribute`. Written between the introducer and the parameter
+list, cerastes rejects it with `cerastes-annotation_on_lambda`.
+
+[source,cpp]
+----
+include::example$annotations/errors/contract_on_lambda.cpp[tag=bad]
+----
+
+A lambda that you *write in* an annotation, as in `forall`, must have concrete
+parameter types. A generic lambda (an `auto` parameter, or a template lambda
+such as `[]<class T>(T x) { ... }`) is rejected with
+`cerastes-generic_lambda_in_annotation`, because its call operator is never
+instantiated in an annotation, so a body that does not compile would be
+accepted without a word.
+
+[source,cpp]
+----
+include::example$annotations/errors/generic_lambda.cpp[tag=bad]
+----
+
+In the contract of a function template, a lambda that names a template
+parameter is also rejected, by EDG, when the template is instantiated
+(`undefined_identifier` on the template parameter, "detected during
+instantiation"):
+
+[source,cpp]
+----
+include::example$annotations/errors/forall_template_parameter.cpp[tag=bad]
+----
+
+A deduction guide cannot carry a contract either. The front end rejects an
+attribute written after the guide's parameters (`wrong_entity_for_attribute`)
+and one written between the template header and the guide
+(`unattached_attribute`). A parameter of a requires-expression is not a
+function, so a contract after it is `wrong_entity_for_attribute` too.
+
+pass:[C++]20 modules are not supported yet. A module unit is rejected with
+`cerastes-modules_unsupported`, because a contract on an entity that a module
+file exports is not carried through it.
+
+=== Changing the cerastes macro
+
+The front end defines `+__CERASTES__+`. Undefining it, or defining it again, in the
+source (`+#undef+`, `+#define+`) is `cerastes-cerastes_macro_changed`, because it would
+silently turn every annotation in the rest of the file into nothing. On the
+command line the options that do it are refused before the front end runs.
+
+[source,cpp]
+----
+include::example$annotations/errors/macro_undefined.cpp[tag=bad]
+----
+
+== Language modes
+
+cerastes reads pass:[C++] in Clang's emulation mode, and C as C23. It refuses
+to run in GNU emulation (`--gnu_version`), and it refuses C before C23.
+Redeclarations in different namespaces could otherwise escape the rule that
+contracts must match, and the identifier-list declarators of older C could
+bind the names in a contract to global variables.
+
+== Seeing what cerastes reads
+
+The front end can print a listing of what it understood. From a clone of the
+repository, build it with `scripts/bootstrap.sh` (see
+xref:installation.adoc[Installation]), then run it on a file:
+
+[source,sh]
+----
+scripts/cerastes-fe.sh --c++20 --cerastes_walk annotated.cpp
+----
+
+The listing has one entry for each routine of the file you named (routines that
+come from other files, such as the headers it includes, are not listed), with
+the annotations that belong to it under it, each followed by the typed
+expression tree of its arguments: the parameters, the result name, the
+operators and the types. Annotations on statements are listed under their
+routine. For the contract above, this is the whole listing:
+
+[source,text]
+----
+include::example$annotations/contract.cpp.golden[]
+----
+
+The listing is a developer view, not a stable interface: use it to see where an
+annotation landed and how a name was resolved, for example whether a name in a
+precondition is a parameter or something else.

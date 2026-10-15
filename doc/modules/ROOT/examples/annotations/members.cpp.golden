@@ -1,0 +1,39 @@
+routine counter::operator= plain implicit nobody @ L7:8
+  returns counter &
+  param 1 _: const counter &
+routine counter::operator= plain implicit nobody @ L7:8
+  returns counter &
+  param 1 _: counter &&
+routine counter::get plain body @ L9:7
+  returns int
+  attr [[cerastes::requires]] on routine @ L9:19
+    arg 1 @ L9:37
+      op eok_ge type_kind=tk_integer type=bool @ L9:41
+        op eok_points_to_field type_kind=tk_unknown type=int @ L9:37
+          this: const counter * @ L9:37
+          field counter::val: int @ L9:37
+        const 0 type=int @ L9:44
+  attr [[cerastes::ensures]] on routine @ L9:47
+    arg 1 binder r: int @ L9:64
+    arg 2 @ L9:67
+      op eok_eq type_kind=tk_integer type=bool @ L9:69
+        binder r: int @ L9:67
+        op eok_points_to_field type_kind=tk_unknown type=int @ L9:72
+          this: const counter * @ L9:72
+          field counter::val: int @ L9:72
+routine counter::set plain body @ L16:15
+  returns void
+  param 1 w: int
+  attr [[cerastes::requires]] on routine @ L13:19
+    arg 1 @ L13:37
+      op eok_ge type_kind=tk_integer type=bool @ L13:39
+        param 1 w: int @ L13:37
+        const 0 type=int @ L13:42
+  attr [[cerastes::ensures]] on routine @ L13:45
+    arg 1 @ L13:62
+      op eok_eq type_kind=tk_integer type=bool @ L13:66
+        op eok_points_to_field type_kind=tk_unknown type=int @ L13:62
+          this: counter * @ L13:62
+          field counter::val: int @ L13:62
+        param 1 w: int @ L13:69
+end walk: 4 routines reported, 0 routines with bodies in non-system files outside the primary file

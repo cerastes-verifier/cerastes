@@ -1,0 +1,58 @@
+routine bump plain body @ L7:5
+  returns int
+  param 1 x: int
+  attr [[cerastes::ensures]] on routine @ L7:17
+    arg 1 binder r: int @ L7:34
+    arg 2 @ L7:37
+      op eok_eq type_kind=tk_integer type=bool @ L7:39
+        binder r: int @ L7:37
+        op eok_add type_kind=tk_integer type=int @ L7:44
+          param 1 x: int @ L7:42
+          const 1 type=int @ L7:46
+routine incr plain body @ L15:6
+  returns void
+  param 1 x: int &
+  attr [[cerastes::requires]] on routine @ L15:19
+    arg 1 @ L15:37
+      op eok_lt type_kind=tk_integer type=bool @ L15:39
+        op eok_ref_indirect type_kind=tk_pointer type=int @ L15:37
+          param 1 x: int & @ L15:37
+        const 1000 type=int @ L15:41
+  attr [[cerastes::ensures]] on routine @ L15:47
+    arg 1 @ L15:64
+      op eok_eq type_kind=tk_integer type=bool @ L15:66
+        op eok_ref_indirect type_kind=tk_pointer type=int @ L15:64
+          param 1 x: int & @ L15:64
+        op eok_add type_kind=tk_integer type=int @ L15:86
+          op eok_ref_indirect type_kind=tk_pointer type=int @ L15:82
+            op eok_call type_kind=tk_unknown type=const int & @ L15:82
+              routine cerastes::old args <T=int>: const int &(*)(const int &) noexcept @ L15:69
+              op eok_reference_to type_kind=tk_pointer type=const int & @ L15:83
+                op eok_lvalue_adjust type_kind=tk_integer type=const int lvalue @ L15:83
+                  op eok_ref_indirect type_kind=tk_pointer type=int lvalue @ L15:83
+                    param 1 x: int & @ L15:83
+          const 1 type=int @ L15:88
+routine incr_ptr plain body @ L22:6
+  returns void
+  param 1 p: int *
+  attr [[cerastes::requires]] on routine @ L22:23
+    arg 1 @ L22:41
+      op eok_lt type_kind=tk_integer type=bool @ L22:44
+        op eok_indirect type_kind=tk_pointer type=int @ L22:41
+          param 1 p: int * @ L22:42
+        const 1000 type=int @ L22:46
+  attr [[cerastes::ensures]] on routine @ L22:52
+    arg 1 @ L22:69
+      op eok_eq type_kind=tk_integer type=bool @ L22:72
+        op eok_indirect type_kind=tk_pointer type=int @ L22:69
+          param 1 p: int * @ L22:70
+        op eok_add type_kind=tk_integer type=int @ L22:93
+          op eok_ref_indirect type_kind=tk_pointer type=int @ L22:88
+            op eok_call type_kind=tk_unknown type=const int & @ L22:88
+              routine cerastes::old args <T=int>: const int &(*)(const int &) noexcept @ L22:75
+              op eok_reference_to type_kind=tk_pointer type=const int & @ L22:89
+                op eok_lvalue_adjust type_kind=tk_integer type=const int lvalue @ L22:89
+                  op eok_indirect type_kind=tk_pointer type=int lvalue @ L22:89
+                    param 1 p: int * @ L22:90
+          const 1 type=int @ L22:95
+end walk: 3 routines reported, 0 routines with bodies in non-system files outside the primary file

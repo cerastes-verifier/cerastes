@@ -1,0 +1,56 @@
+routine <lambda@L8:48>::<unnamed> plain implicit nobody @ L8:3
+  returns void
+  param 1 _: <lambda@L8:48> &&
+routine <lambda@L8:48>::<unnamed> plain implicit nobody @ L8:3
+  returns void
+  param 1 _: const <lambda@L8:48> &
+routine <lambda@L8:48>::_FUN plain implicit nobody @ L8:3
+  returns bool
+  param 1 i: int
+  param 2 a: const int *
+  param 3 n: int
+routine <lambda@L8:48>::operator bool (*)(int, const int *, int) plain implicit body @ L8:3
+  returns bool (*)(int, const int *, int)
+routine <lambda@L8:48>::operator() plain body @ L8:3
+  returns bool
+  param 1 i: int
+  param 2 a: const int *
+  param 3 n: int
+routine <lambda@L8:48>::operator= plain implicit nobody @ L8:3
+  returns <lambda@L8:48> &
+  param 1 _: const <lambda@L8:48> &
+routine all_nonneg plain body @ L10:6
+  returns bool
+  param 1 a: const int *
+  param 2 n: int
+  attr [[cerastes::requires]] on routine @ L8:3
+    arg 1 @ L8:21
+      op eok_land type_kind=tk_integer type=bool @ L8:28
+        op eok_ge type_kind=tk_integer type=bool @ L8:23
+          param 2 n: int @ L8:21
+          const 0 type=int @ L8:26
+        op eok_call type_kind=tk_unknown type=bool @ L8:47
+          routine cerastes::forall args <F=<lambda@L8:48>, Free=pack{const int *, int}>: bool (*)(<lambda@L8:48>, const int *const &, const int &) noexcept @ L8:31
+          lambda <lambda@L8:48> @ L8:48
+            body return
+              op eok_lor type_kind=tk_integer type=bool @ L8:107
+                op eok_not type_kind=tk_integer type=bool @ L8:88
+                  op eok_land type_kind=tk_integer type=bool @ L8:97
+                    op eok_le type_kind=tk_integer type=bool @ L8:92
+                      const 0 type=int @ L8:90
+                      var i: int decl=L8:55 @ L8:95
+                    op eok_lt type_kind=tk_integer type=bool @ L8:102
+                      var i: int decl=L8:55 @ L8:100
+                      var n: int decl=L8:76 @ L8:104
+                op eok_ge type_kind=tk_integer type=bool @ L8:115
+                  op eok_subscript type_kind=tk_pointer type=int @ L8:111
+                    var a: const int * decl=L8:69 @ L8:110
+                    var i: int decl=L8:55 @ L8:112
+                  const 0 type=int @ L8:118
+          op eok_reference_to type_kind=tk_pointer type=const int *const & @ L8:124
+            op eok_lvalue_adjust type_kind=tk_pointer type=const int *const lvalue @ L8:124
+              param 1 a: const int * lvalue @ L8:124
+          op eok_reference_to type_kind=tk_pointer type=const int & @ L8:127
+            op eok_lvalue_adjust type_kind=tk_integer type=const int lvalue @ L8:127
+              param 2 n: int lvalue @ L8:127
+end walk: 7 routines reported, 0 routines with bodies in non-system files outside the primary file

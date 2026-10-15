@@ -1,0 +1,62 @@
+routine sum_to plain body @ L7:5
+  returns int
+  param 1 n: int
+  attr [[cerastes::requires]] on routine @ L7:19
+    arg 1 @ L7:37
+      op eok_ge type_kind=tk_integer type=bool @ L7:39
+        param 1 n: int @ L7:37
+        const 0 type=int @ L7:42
+  stmt stmk_while @ L11:3 attr [[cerastes::invariant]] @ L11:3
+    arg 1 @ L11:22
+      op eok_land type_kind=tk_integer type=bool @ L11:39
+        op eok_land type_kind=tk_integer type=bool @ L11:29
+          op eok_le type_kind=tk_integer type=bool @ L11:24
+            const 0 type=int @ L11:22
+            var i: int decl=L9:7 @ L11:27
+          op eok_le type_kind=tk_integer type=bool @ L11:34
+            var i: int decl=L9:7 @ L11:32
+            var n: int decl=L7:16 @ L11:37
+        op eok_ge type_kind=tk_integer type=bool @ L11:44
+          var s: int decl=L10:7 @ L11:42
+          const 0 type=int @ L11:47
+routine count plain body @ L20:5
+  returns int
+  param 1 n: int
+  attr [[cerastes::requires]] on routine @ L20:18
+    arg 1 @ L20:36
+      op eok_ge type_kind=tk_integer type=bool @ L20:38
+        param 1 n: int @ L20:36
+        const 0 type=int @ L20:41
+  stmt stmk_for @ L24:3 attr [[cerastes::invariant]] @ L24:3
+    arg 1 @ L24:22
+      op eok_land type_kind=tk_integer type=bool @ L24:39
+        op eok_land type_kind=tk_integer type=bool @ L24:29
+          op eok_le type_kind=tk_integer type=bool @ L24:24
+            const 0 type=int @ L24:22
+            var i: int decl=L22:7 @ L24:27
+          op eok_le type_kind=tk_integer type=bool @ L24:34
+            var i: int decl=L22:7 @ L24:32
+            var n: int decl=L20:15 @ L24:37
+        op eok_eq type_kind=tk_integer type=bool @ L24:44
+          var c: int decl=L23:7 @ L24:42
+          var i: int decl=L22:7 @ L24:47
+routine at_least_one plain body @ L32:5
+  returns int
+  param 1 n: int
+  attr [[cerastes::requires]] on routine @ L32:25
+    arg 1 @ L32:43
+      op eok_ge type_kind=tk_integer type=bool @ L32:45
+        param 1 n: int @ L32:43
+        const 0 type=int @ L32:48
+  stmt stmk_end_test_while @ L35:3 attr [[cerastes::invariant]] @ L35:3
+    arg 1 @ L35:22
+      op eok_land type_kind=tk_integer type=bool @ L35:29
+        op eok_le type_kind=tk_integer type=bool @ L35:24
+          const 0 type=int @ L35:22
+          var i: int decl=L34:7 @ L35:27
+        op eok_le type_kind=tk_integer type=bool @ L35:34
+          var i: int decl=L34:7 @ L35:32
+          op eok_add type_kind=tk_integer type=int @ L35:39
+            var n: int decl=L32:22 @ L35:37
+            const 1 type=int @ L35:41
+end walk: 3 routines reported, 0 routines with bodies in non-system files outside the primary file

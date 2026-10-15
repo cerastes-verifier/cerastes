@@ -1,0 +1,127 @@
+= Building annotated code with ordinary compilers
+
+Source that carries cerastes annotations is meant to build, unchanged, with
+the compiler you already use. This page says how, and what to watch for. It
+applies to Apple clang and GCC, with `pass:[-std=c++20]` for pass:[C++] and
+`-std=c23` for C, and warnings turned all the way up.
+
+== One source, two builds
+
+Include `<cerastes.h>` and write the annotations with its `CERASTES_*` macros
+(xref:annotations.adoc[Annotations]). The header defines them in one of two
+ways, depending on the macro `+__CERASTES__+`:
+
+* cerastes's front end defines `+__CERASTES__+` itself, so each macro expands to
+  the attribute it stands for. You never define it in a build, and cerastes
+  refuses to undefine it or define it again, on the command line (`-U`, `-D`)
+  and in the source (`+#undef+`, `+#define+`, `cerastes-cerastes_macro_changed`): both are
+  errors.
+* Any other compiler does not define it, so the contract and statement macros
+  expand to nothing.
+
+[source,cpp]
+----
+include::example$ordinary-compilers/shared_source.cpp[tag=source]
+----
+
+For cerastes this function has a contract, a loop invariant and a check. For
+clang or GCC it is the same function without them. The written-out form below
+is what the macro for a precondition expands to in each case:
+
+[source,cpp]
+----
+include::example$ordinary-compilers/spelled_out.cpp[tag=expansion]
+----
+
+You can write the attribute yourself like this, but you should not write it
+bare, outside the guard: clang warns `unknown attribute ... ignored`
+(`-Wunknown-attributes`) and GCC warns `scoped attribute directive ignored`
+(`-Wattributes`), and either becomes an error under `-Werror`. That is why the
+macros exist.
+
+== The include path
+
+The header is `include/cerastes.h` in the cerastes repository. It includes no
+other header, so it works with any standard library.
+
+For clang or GCC, give the directory with `-I`:
+
+[source,sh]
+----
+clang++ -std=c++20 -Wall -Wextra -Werror -I path/to/cerastes/include -c sum_to.cpp
+g++ -std=c++20 -Wall -Wextra -Werror -I path/to/cerastes/include -c sum_to.cpp
+----
+
+`scripts/cerastes-fe.sh` adds the same directory for you, as a system include
+directory, so it needs no option.
+
+== Predicates and pure functions
+
+`CERASTES_PREDICATE` and `CERASTES_PURE` expand to the attribute and `inline`
+for cerastes, and to `inline` alone for an ordinary compiler. Both builds give
+the function the same linkage, and a function that nothing calls is not
+emitted, so an unused predicate causes no warning.
+
+Write the macro first in the declaration, before `static`, `constexpr` and the
+return type. An attribute cannot appear in the middle of a decl-specifier
+sequence.
+
+[source,cpp]
+----
+include::example$ordinary-compilers/predicates.cpp[tag=placement]
+----
+
+The program must not call a predicate or a pure function. A predicate that an
+ordinary compiler does emit (because something called it) calls
+specification functions, and those are the next section's subject.
+
+== Specification functions are declared, not defined
+
+`cerastes::owns`, `reads`, `old`, `forall` and `owns_range` are declared in
+`<cerastes.h>` and never defined. They are only ever named inside annotations,
+which an ordinary compiler never sees, or inside the body of a predicate or a
+pure function. If a program calls one of them, directly or through a predicate
+that it calls, the build ends in a link error that names a `cerastes::`
+function. Read that error as "specification code is reachable at run time":
+find the call and remove it. A definition that returned `true` would have let
+such a call succeed silently.
+
+== Warnings to expect
+
+An annotation that an ordinary compiler removes can leave something behind.
+Three cases come up:
+
+* A parameter that only a contract uses draws `-Wunused-parameter`. Mark the
+  parameter `+[[maybe_unused]]+`.
+* A local variable that only a `CERASTES_CHECK` uses draws
+  `-Wunused-variable`. Mark it `+[[maybe_unused]]+`.
+* `CERASTES_CHECK(p);` leaves an empty statement. After `if (c)` with no braces
+  that draws `-Wempty-body`, so write the braces.
+
+[source,cpp]
+----
+include::example$ordinary-compilers/unused_parameter.cpp[tag=param]
+----
+
+[source,cpp]
+----
+include::example$ordinary-compilers/check_only_local.cpp[tag=local]
+----
+
+[source,cpp]
+----
+include::example$ordinary-compilers/empty_body.cpp[tag=braces]
+----
+
+== C
+
+In C23 the macros work as well, because a `[[namespace::name]]` attribute is
+valid C23 and may follow a function declarator. Build with `-std=c23`. The
+specification functions in `namespace cerastes` are pass:[C++] only for now, so
+a C program uses the macros, and predicates written in C, but not `owns` and
+the others.
+
+[source,c]
+----
+include::example$ordinary-compilers/c23.c[tag=c]
+----

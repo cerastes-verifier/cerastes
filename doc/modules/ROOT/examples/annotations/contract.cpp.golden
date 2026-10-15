@@ -1,0 +1,24 @@
+routine abs_val plain body @ L7:5
+  returns int
+  param 1 x: int
+  attr [[cerastes::requires]] on routine @ L7:20
+    arg 1 @ L7:38
+      op eok_gt type_kind=tk_integer type=bool @ L7:40
+        param 1 x: int @ L7:38
+        const -1000000 type=int @ L7:42
+  attr [[cerastes::ensures]] on routine @ L7:52
+    arg 1 binder r: int @ L7:69
+    arg 2 @ L7:72
+      op eok_land type_kind=tk_integer type=bool @ L7:79
+        op eok_ge type_kind=tk_integer type=bool @ L7:74
+          binder r: int @ L7:72
+          const 0 type=int @ L7:77
+        op eok_lor type_kind=tk_integer type=bool @ L7:90
+          op eok_eq type_kind=tk_integer type=bool @ L7:85
+            binder r: int @ L7:83
+            param 1 x: int @ L7:88
+          op eok_eq type_kind=tk_integer type=bool @ L7:95
+            binder r: int @ L7:93
+            op eok_negate type_kind=tk_integer type=int @ L7:98
+              param 1 x: int @ L7:99
+end walk: 1 routines reported, 0 routines with bodies in non-system files outside the primary file

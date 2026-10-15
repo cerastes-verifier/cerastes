@@ -1,0 +1,40 @@
+routine range::operator= plain implicit nobody @ L7:8
+  returns range &
+  param 1 _: const range &
+routine range::range plain implicit nobody @ L7:8
+  returns void
+  param 1 _: const range &
+routine range::range plain body @ L10:3
+  returns void
+  param 1 l: int
+  param 2 h: int
+  attr [[cerastes::requires]] on routine @ L10:23
+    arg 1 @ L10:41
+      op eok_le type_kind=tk_integer type=bool @ L10:43
+        param 1 l: int @ L10:41
+        param 2 h: int @ L10:46
+  attr [[cerastes::ensures]] on routine @ L10:49
+    arg 1 @ L10:66
+      op eok_land type_kind=tk_integer type=bool @ L10:74
+        op eok_eq type_kind=tk_integer type=bool @ L10:69
+          op eok_points_to_field type_kind=tk_unknown type=int @ L10:66
+            this: range * @ L10:66
+            field range::lo: int @ L10:66
+          param 1 l: int @ L10:72
+        op eok_eq type_kind=tk_integer type=bool @ L10:80
+          op eok_points_to_field type_kind=tk_unknown type=int @ L10:77
+            this: range * @ L10:77
+            field range::hi: int @ L10:77
+          param 2 h: int @ L10:83
+routine range::~range plain body @ L11:3
+  returns void
+  attr [[cerastes::requires]] on routine @ L11:12
+    arg 1 @ L11:30
+      op eok_le type_kind=tk_integer type=bool @ L11:33
+        op eok_points_to_field type_kind=tk_unknown type=int @ L11:30
+          this: range * @ L11:30
+          field range::lo: int @ L11:30
+        op eok_points_to_field type_kind=tk_unknown type=int @ L11:36
+          this: range * @ L11:36
+          field range::hi: int @ L11:36
+end walk: 4 routines reported, 0 routines with bodies in non-system files outside the primary file

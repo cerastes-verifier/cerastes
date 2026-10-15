@@ -1,0 +1,15 @@
+routine halve plain body @ L9:5
+  returns int
+  param 1 x: int
+  attr [[cerastes::requires]] on routine @ L7:18
+    arg 1 @ L7:36
+      op eok_ge type_kind=tk_integer type=bool @ L7:38
+        param 1 x: int @ L7:36
+        const 0 type=int @ L7:41
+  attr [[cerastes::ensures]] on routine @ L7:44
+    arg 1 binder r: int @ L7:61
+    arg 2 @ L7:64
+      op eok_le type_kind=tk_integer type=bool @ L7:66
+        binder r: int @ L7:64
+        param 1 x: int @ L7:69
+end walk: 1 routines reported, 0 routines with bodies in non-system files outside the primary file

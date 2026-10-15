@@ -1,0 +1,9 @@
+routine small plain body @ L7:35
+  returns bool
+  param 1 x: int
+  attr [[cerastes::predicate]] on routine @ L7:1
+routine twice plain body @ L12:19
+  returns int
+  param 1 x: int
+  attr [[cerastes::pure]] on routine @ L12:1
+end walk: 2 routines reported, 0 routines with bodies in non-system files outside the primary file

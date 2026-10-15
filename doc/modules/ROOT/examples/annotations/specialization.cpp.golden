@@ -1,0 +1,48 @@
+routine twice prototype nobody @ L7:22
+  returns T
+  param 1 v: T
+  attr [[cerastes::requires]] on routine @ L7:33
+    arg 1 @ L7:51
+      op eok_bool_cast type_kind=tk_template_param type=bool @ L7:51
+        op eok_ge type_kind=tk_template_param type=<tptk_unknown> @ L7:53
+          param 1 v: T lvalue @ L7:51
+          const 0 type=int @ L7:56
+  attr [[cerastes::ensures]] on routine @ L7:59
+    arg 1 binder r: T @ L7:76
+    arg 2 @ L7:79
+      op eok_bool_cast type_kind=tk_template_param type=bool @ L7:79
+        op eok_ge type_kind=tk_template_param type=<tptk_unknown> @ L7:81
+          binder r: T lvalue @ L7:79
+          param 1 v: T lvalue @ L7:84
+routine twice specialization body @ L9:17
+  returns int
+  param 1 v: int
+  template twice args <T=int>
+  attr [[cerastes::requires]] on routine @ L7:33
+    arg 1 @ L7:51
+      op eok_ge type_kind=tk_integer type=bool @ L7:53
+        param 1 v: int @ L7:51
+        const 0 type=int @ L7:56
+  attr [[cerastes::ensures]] on routine @ L7:59
+    arg 1 binder r: int @ L7:76
+    arg 2 @ L7:79
+      op eok_ge type_kind=tk_integer type=bool @ L7:81
+        binder r: int @ L7:79
+        param 1 v: int @ L7:84
+routine twice specialization body @ L14:18
+  returns long
+  param 1 v: long
+  template twice args <T=long>
+  attr [[cerastes::requires]] on routine @ L7:33
+    arg 1 @ L7:51
+      op eok_ge type_kind=tk_integer type=bool @ L7:53
+        param 1 v: long @ L7:51
+        op eok_cast type_kind=tk_integer type=long cast=implicit @ L7:56
+          const 0 type=int @ L7:56
+  attr [[cerastes::ensures]] on routine @ L7:59
+    arg 1 binder r: long @ L7:76
+    arg 2 @ L7:79
+      op eok_ge type_kind=tk_integer type=bool @ L7:81
+        binder r: long @ L7:79
+        param 1 v: long @ L7:84
+end walk: 3 routines reported, 0 routines with bodies in non-system files outside the primary file

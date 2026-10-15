@@ -29,10 +29,11 @@ C/C++ source + contracts
         |
         v
   EDG front end            built, in the cerastes configuration; parses
-        |                  C and C++, no contract syntax yet
+        |                  C and C++ and the cerastes annotations
         v
-  IL walk (back end)       a developer listing of EDG's IL only; no
-        |                  verification IR yet
+  IL walk (back end)       checks the rules EDG cannot check for the
+        |                  annotations; prints a developer listing of
+        |                  EDG's IL; no verification IR yet
         v
   Viper text (.vpr)        not built
         |
@@ -56,8 +57,22 @@ Nothing is verified yet. What exists is:
   in-process back end that prints a listing of EDG's intermediate language.
   It is developer tooling: it exists to show that EDG's representation of
   templates carries what generic verification needs.
+* The annotation layer: eight annotations (`requires`, `ensures`, `invariant`,
+  `check`, `fold`, `unfold`, `predicate` and `pure`), written with the macros
+  of `<cerastes.h>`. The EDG front end parses and type-checks them as
+  pass:[C++] expressions, places them on the function or statement they belong
+  to, and rejects the misplaced ones. cerastes then checks the rules that EDG
+  cannot: for example that a contract is written after the parameter list,
+  that an annotation has no side effects, that `fold` and `unfold` name a
+  predicate, and that `old` appears only in `ensures`. The errors are listed in
+  xref:annotations.adoc#not-allowed[Where annotations are not allowed].
+  `scripts/cerastes-fe.sh --cerastes_walk` shows what cerastes reads. Nothing is
+  verified: a contract that the code violates is accepted. See
+  xref:annotations.adoc[Annotations], and
+  xref:ordinary-compilers.adoc[Building annotated code with ordinary compilers]
+  for building the same source with clang or GCC.
 
-There is no annotation syntax and no `cerastes verify` command yet.
+There is no `cerastes verify` command yet.
 
 == Following progress
 

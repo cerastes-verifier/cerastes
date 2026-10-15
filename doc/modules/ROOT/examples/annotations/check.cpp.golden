@@ -1,0 +1,31 @@
+routine pick plain body @ L7:5
+  returns int
+  param 1 a: int
+  param 2 b: int
+  attr [[cerastes::requires]] on routine @ L7:24
+    arg 1 @ L7:42
+      op eok_land type_kind=tk_integer type=bool @ L7:49
+        op eok_ge type_kind=tk_integer type=bool @ L7:44
+          param 1 a: int @ L7:42
+          const 0 type=int @ L7:47
+        op eok_ge type_kind=tk_integer type=bool @ L7:54
+          param 2 b: int @ L7:52
+          const 0 type=int @ L7:57
+  stmt stmk_empty @ L9:3 attr [[cerastes::check]] @ L9:3
+    arg 1 @ L9:18
+      op eok_ge type_kind=tk_integer type=bool @ L9:24
+        op eok_add type_kind=tk_integer type=int @ L9:20
+          var a: int decl=L7:14 @ L9:18
+          var b: int decl=L7:21 @ L9:22
+        const 0 type=int @ L9:27
+  stmt stmk_empty @ L12:5 attr [[cerastes::check]] @ L12:5
+    arg 1 @ L12:20
+      op eok_lt type_kind=tk_integer type=bool @ L12:22
+        var a: int decl=L7:14 @ L12:20
+        var b: int decl=L7:21 @ L12:24
+  stmt stmk_empty @ L15:5 attr [[cerastes::check]] @ L15:5
+    arg 1 @ L15:20
+      op eok_ge type_kind=tk_integer type=bool @ L15:22
+        var a: int decl=L7:14 @ L15:20
+        var b: int decl=L7:21 @ L15:25
+end walk: 1 routines reported, 0 routines with bodies in non-system files outside the primary file
