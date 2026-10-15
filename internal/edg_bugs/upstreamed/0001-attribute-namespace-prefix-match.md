@@ -4,7 +4,7 @@
 - **Found:** M2 (2026-10-14), while registering the `cerastes` attribute namespace
 - **Status:** fixed. Branch `0001` in the fork clone is commit `822c8f35f8` on upstream
   `main` `034385ba0a`; fork series commit A
-- **Upstream issue:** not filed
+- **Upstream issue:** Filed and a PR submitted
 
 ## Summary
 

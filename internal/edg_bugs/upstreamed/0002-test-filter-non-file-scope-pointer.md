@@ -5,7 +5,7 @@
 - **Status:** fixed. Branch `0002` in the fork clone is commit `6129554087` on upstream
   `main` `034385ba0a`, the fork series commit FILT (`86b5465978`) cherry-picked
   (`-x`)
-- **Upstream issue:** not filed
+- **Upstream issue:** Filed and a PR submitted
 
 ## Summary
 

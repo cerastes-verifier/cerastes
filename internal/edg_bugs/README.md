@@ -33,8 +33,8 @@ file per bug, numbered like the decision records: `NNNN-short-name.md`.
 
 | No. | Bug | Status |
 |---|---|---|
-| [0001](0001-attribute-namespace-prefix-match.md) | An attribute namespace that is only a prefix of a known one is accepted | fixed: branch `0001` (`822c8f35f8`) |
-| [0002](0002-test-filter-non-file-scope-pointer.md) | The test output filter does not normalize `**possible non-file-scope ptr** (0x…)` | fixed: branch `0002` (`6129554087`) |
+| [0001](upstreamed/0001-attribute-namespace-prefix-match.md) | An attribute namespace that is only a prefix of a known one is accepted | Upstreamed |
+| [0002](upstreamed/0002-test-filter-non-file-scope-pointer.md) | The test output filter does not normalize `**possible non-file-scope ptr** (0x…)` | Upstreamed |
 | [0003](0003-attribute-parameter-pack-substituted-empty.md) | A function parameter pack in an attribute argument is substituted as an empty pack | open |
 | [0004](0004-attribute-parameter-after-pack-wrong-parameter.md) | A parameter after a function parameter pack, named in an attribute argument, is the wrong parameter in an instance | open |
 | [0005](0005-macos-base-predefines-blocks.md) | The macOS clang base predefines `__BLOCKS__`, but the front end cannot parse block syntax | open |
