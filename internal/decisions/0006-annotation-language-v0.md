@@ -288,7 +288,9 @@ summarized here):
       the offending text (`orig_seq`/`orig_column`) when that position lies
       in a user file. Otherwise it points at `seq`/`column`, the start of the
       macro invocation. Both layers then report the same line for the same
-      problem. The walker prints `seq`/`column`, and says so.
+      problem. The walker's annotation trees follow the same rule, so each
+      node of a `CERASTES_*` argument shows its own column. The rest of the
+      walker output keeps `seq`/`column`.
 
 ## Consequences
 
@@ -300,9 +302,9 @@ summarized here):
     files, and only an addition (`orig_seq`, `orig_column`) to source
     positions in the IL.
   - cerastes adopts it in `edg_config` (decision 0002, M2 amendment).
-  - The walker still prints the invocation position for attributes and their
-    trees until the printer reads the original positions, so tests keep each
-    `CERASTES_*` invocation on one line.
+  - The walker prints the original positions for annotation trees as well
+    (item 10). Tests still keep each `CERASTES_*` invocation on one line, for
+    readability.
 - **Contracts that quantify are wordier than with `[&]`.** The free-variable
   form is what C++ allows after a parameter list. It is also what Viper's
   quantifiers need: an explicit bound variable.
