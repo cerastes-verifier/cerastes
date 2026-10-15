@@ -265,6 +265,16 @@ summarized here):
       - C++20 modules (`import`, module units): contracts on imported entities
         are not carried through module files, so they are rejected until that
         is checked (invariant 3);
+      - generic lambdas (`auto` parameters, `[]<class…>` template lambdas) in
+        any annotation argument. Their call operators are never instantiated
+        there, so an ill-formed body (`y.foo()` on a `long`) would be accepted
+        silently (CP3 part 7). Lambdas with concrete parameter types, as the
+        `forall` form uses, are fine. In a template's contract, a lambda whose
+        parameters have template-parameter types may fail at instantiation
+        (EDG); that fails closed;
+      - any annotation argument whose tree contains an EDG error node or an
+        error type. A substitution that went wrong without a diagnostic must
+        never reach the verifier;
       - a `fold`/`unfold` argument that is not a call to a `predicate`
         function;
       - a `predicate` that does not return `bool`, or a `pure` function that
