@@ -107,7 +107,9 @@ for example `atexit_b`'s. There are three independent causes:
 `<iostream>`, `<string>`, `<vector>` and `<algorithm>` have all three (17
 errors); `<utility>` has only the first. Same Command Line Tools as M0 (SDK
 27.0, CLT 27.0.0.0.1788430756). The owner raises these with the EDG team
-(handoff, question 6).
+(handoff, question 6). Root causes, reproduced on upstream on 2026-10-15:
+`internal/edg_bugs/` 0005 (`__BLOCKS__`), 0007 (vector types not configured
+for macOS) and 0006 (the interference-size macros).
 
 ## VeriFast
 

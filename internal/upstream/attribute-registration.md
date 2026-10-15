@@ -682,7 +682,10 @@ or documented; none is silent unless it says so.
 ## 11. Adjacent issues found
 
 Found while building the series. Draft texts for the owner; each says what is already
-fixed by a commit in the series. They are separate from the Discussion.
+fixed by a commit in the series. They are separate from the Discussion. The filing-ready
+versions are in `internal/edg_bugs/` (re-checked on upstream on 2026-10-15): issue 1 is
+0001 (branch `0001`), issue 2 is 0003 and 0004, issue 6 is 0002 (branch `0002`); issues 3, 4
+and 5 did not reproduce on upstream and are not filed (see that README).
 
 ### Issue 1: a namespace that only starts like a known one is accepted (fixed by A)
 
@@ -723,8 +726,8 @@ function body the same expression is substituted correctly, because the body is 
 again for each instance.) A reference to a parameter that follows a pack has the same
 problem, since it has another number in an instance. The series avoids it for registered
 attributes by rejecting these references and pack expansions (B); the general behaviour
-for the attributes the front end defines is unchanged. Not verified for a built-in
-attribute on the unmodified parent: the reproduction above uses a registered attribute.
+for the attributes the front end defines is unchanged. Verified on upstream with clang's
+`enable_if` on 2026-10-15 (`internal/edg_bugs/0003`; the parameter-after-pack case is 0004).
 
 ### Issue 3: out-of-class definitions of class-template members: attribute arguments are not substituted for the class parameters (fixed by F)
 
@@ -739,8 +742,8 @@ attribute written on the definition outside the class, or after an instance was 
 did not reach the members of existing instances either. Commit `8b4d48ff56` substitutes
 the enclosing class's parameters first and attaches such attributes to the members of
 existing instances; test `GH-postfunc-cls`. The draft reproduction in the commit uses a
-registered attribute; a reproduction with a built-in attribute that takes an expression
-should be made before filing.
+registered attribute. With the built-in `enable_if`, upstream substitutes the class's
+parameters correctly (checked 2026-10-15), so this is not filed as an upstream bug.
 
 ### Issue 4: internal error for an expression attribute after the identifier list of an old-style definition
 
@@ -751,8 +754,9 @@ expression argument after an identifier list of an old-style definition
 int f(x) [[ns::attr(x > 0)]] int x; { return x; }   // --c17 or --c23, clang or GNU mode
 ```
 
-Reproduces on the unmodified parent (reported by the cerastes back-end work, not
-re-run for this draft). The series makes the registered form an error before it gets
+Correction (2026-10-15): this does **not** reproduce on the unmodified parent. With
+`enable_if`, `diagnose_if` or an unknown attribute, upstream reports `identifier "x" is
+undefined`, which is right; the internal error was in the series' registered-attribute path. The series makes the registered form an error before it gets
 there (D: an entity-attached attribute after the identifier list of an old-style
 definition; test `GH-postfunc-err-knr`, `--c17` and `--c23`, plain, clang and GNU modes).
 The underlying crash for attributes the front end defines is not fixed.

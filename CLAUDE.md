@@ -60,6 +60,10 @@ third_party/edg (EDG: the owner's fork, decision 0009) · third_party/silicon (S
   force-push: old cerastes commits pin fork commits), then move the pin.
   NEVER open issues, PRs or Discussions against upstream edgcpp/compiler; the
   owner files them (draft the text in internal/handoff.md).
+- A real upstream EDG bug (reproduced on unmodified upstream main) gets
+  internal/edg_bugs/NNNN-*.md in the format of edgcpp/compiler#252 (see its
+  README). Once fixed, it also gets a fork branch named NNNN, based on
+  upstream main, holding the one discrete commit (with its test) that fixes it.
 - Silicon needs JDK 17 (its sbt 1.6.2 cannot run on newer JDKs); use
   $CERASTES_JAVA, not the java on PATH.
 - Z3 is the pinned 4.16.0 in build/tools, not Homebrew's z3.

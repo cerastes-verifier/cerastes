@@ -367,12 +367,14 @@ Each has a recommended answer. Answer inline, as before.
 8. **Dependabot** covers GitHub Actions *and* npm in `/doc`, following your
    int128 template; the earlier recommendation was Actions only.
    *Recommended: keep both.*
-9. **Upstream:** when to open the Discussion and which adjacent issues to
-   file (`internal/upstream/attribute-registration.md` §11: the prefix
-   namespace match, empty-pack substitution, out-of-class member
-   substitution, the K&R internal error, Clang/GNU-mode attribute drops,
-   il_display raw pointers). *Recommended: the empty-pack and K&R issues
-   first; they are EDG bugs independent of cerastes.*
+9. **Upstream:** when to open the Discussion, and which EDG bugs to file.
+   Since 2026-10-15 the bugs are in `internal/edg_bugs/` (0001–0007), in the
+   format of edgcpp/compiler#252, each reproduced on upstream `main`. 0001
+   and 0002 have fix branches `0001` and `0002` in the fork clone (not
+   pushed). The K&R internal error and out-of-class member substitution did
+   not reproduce on upstream and are not filed. *Recommended: 0005–0007
+   first (they block every libc++ header on macOS), then 0003/0004, then
+   0001/0002 with their branches.*
 10. **Docker containers:** answered (killed, and a standing rule; §2 step 5).
 11. **Fork commit K** (`23f55e3628`) fixes a crash that G and I introduced
     for explicit specializations declared inside a class template (§3). It
