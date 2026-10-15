@@ -3,18 +3,25 @@
 - **Labels:** `bug`, `infrastructure`
 - **Found:** M0 (2026-10-13). Narrowed in M1.5 (cause 1 of the libc++ failures in
   cerastes decision 0001); reproduced on upstream on 2026-10-15
-- **Status:** open
+- **Status:** fixed. Branch `0005` in the fork clone is commit `cca18c33c5` on upstream
+  `main` `d6f83174c7`; merged into the fork's `cerastes` as `8e1eb6c0a6`
 - **Upstream issue:** not filed
 
 ## Summary
 
 The native macOS bases predefine `__BLOCKS__` for clang mode:
 - `bases/cmake-native/macos-arm/clang/lib/predefined_macros.txt` line 114;
-- `bases/cmake-native/macos-x86_64/clang/lib/predefined_macros.txt` line 65.
+- `bases/cmake-native/macos-x86_64/clang/lib/predefined_macros.txt` line 65;
+- the byte-identical copies in each base's target-configuration directory
+  (`lib_macos_arm64/`, `lib_macos_x86_64/`, read with `--target`).
 
 ```
 clang no  __BLOCKS__ 1
 ```
+
+The same four files predefine `__block`
+(`__attribute__((__blocks__(byref)))`), which clang defines together with
+`__BLOCKS__`, and only when blocks are enabled.
 
 The front end has no support for Apple's blocks extension: no block pointer
 type, and `^` is not accepted in a declarator. The macOS SDK declares
@@ -69,19 +76,52 @@ gives 8 errors in `usr/include/_stdlib.h`, at lines 298 (3), 308, 345, 352,
 
 - `grep` finds no blocks support in `src/` (block pointer types,
   `__BLOCKS__`).
-- `__BLOCKS__` comes only from the two macOS bases' `predefined_macros.txt`.
+- `__BLOCKS__` comes only from the macOS bases' `predefined_macros.txt` (four
+  copies). They are output of `util/make_predef_macro_table`, which keeps
+  every macro the host clang predefines unless it is listed in
+  `delete_unneeded_entries`.
 - Apple clang 21 predefines `__BLOCKS__ 1`
-  (`clang++ -dM -E -x c++ /dev/null`), and it supports blocks.
+  (`clang++ -dM -E -x c++ /dev/null`), and it supports blocks. With
+  `-fno-blocks` it defines neither `__BLOCKS__` nor `__block`.
+- The front end's own `__has_feature(blocks)` and `__has_extension(blocks)`
+  are 0, which libc++ tests.
+- With the fix (branch `0005`; the same upstream `cpfe` binary, `EDG_BASE`
+  switched between the two bases):
+  - the reproducer has no diagnostics, with the arm64 and the x86_64 base;
+  - `#include <utility>` and `#include <cstdlib>` go from 8 errors to 0, and
+    C17 `#include <stdlib.h>` from 6 to 0;
+  - `<string>`, `<vector>`, `<algorithm>` and `<iostream>` go from 17 errors to
+    9; the rest are [0006](0006-macos-base-missing-interference-size-macros.md)
+    and [0007](0007-clang-ext-vector-type-unsupported.md);
+  - run natively with `edgy` against its recording, in `edg_x86_64` and
+    `edg_x86_64_cp`, the new test fails with the upstream base, fails with a
+    base that keeps `__block`, and passes with the fixed base.
 
-## Suggested fix
+## Fix
 
-Remove `__BLOCKS__` from the two macOS bases' `predefined_macros.txt`. The
-headers then take their non-blocks paths. Supporting the blocks extension
-in clang mode is the larger alternative.
+Branch `0005`, commit `cca18c33c5` "Do not predefine __BLOCKS__ and __block in
+the macOS clang bases.":
+- It removes `__BLOCKS__` and `__block` from the four copies of
+  `predefined_macros.txt`. The headers then take their non-blocks paths.
+- It adds both macros to `delete_unneeded_entries` in
+  `util/make_predef_macro_table` (clang branch), so a table regenerated on
+  macOS does not bring them back. Run on Apple clang 21 before and after, the
+  generated table differs in exactly those two lines. `util/Changes` has an
+  entry.
+- The test is `tests/tests/changes/GH-no-blocks-predefine.sft.cpp`: the
+  reproducer, plus checks that `__block` and `__has_feature(blocks)` are off.
+  The Linux bases never define the macros, so in the Docker configurations it
+  passes with or without the fix. It fails before and passes after only
+  natively on macOS.
+- No `src/Changes` entry: CONTRIBUTING.md exempts build-system changes.
+
+Supporting the blocks extension in clang mode is the larger alternative, and
+nothing needs it to parse the headers.
 
 ## Impact on cerastes
 
-cerastes runs EDG natively on macOS with the SDK's headers. Until this is
-fixed, a verified program cannot include any C++ standard header that
-reaches `<stdlib.h>`. The tests use only `<cstdio>`, `<cstdint>`,
-`<concepts>`, `<type_traits>` and `<limits>` (decision 0001).
+cerastes runs EDG natively on macOS with the SDK's headers. Before the fix,
+a verified program could not include any C++ standard header that reaches
+`<stdlib.h>`, so the tests used only `<cstdio>`, `<cstdint>`, `<concepts>`,
+`<type_traits>` and `<limits>` (decision 0001). With the fork pinned at the
+merge, `<utility>` and `<cstdlib>` parse.

@@ -111,6 +111,12 @@ errors); `<utility>` has only the first. Same Command Line Tools as M0 (SDK
 `internal/edg_bugs/` 0005 (`__BLOCKS__`), 0007 (vector types not configured
 for macOS) and 0006 (the interference-size macros).
 
+**Fixes (2026-10-15).** Each cause is fixed by a branch of the fork, merged
+into its `cerastes` branch and pinned here:
+- 0005, pinned at `8e1eb6c0a6`: `<utility>`, `<cstdlib>` and C's
+  `<stdlib.h>` parse. `<iostream>`, `<string>`, `<vector>` and `<algorithm>`
+  have 9 errors left (causes 2 and 3), `<new>` 2 (cause 3).
+
 ## VeriFast
 
 Per the pre-M0 decision, option (a) builds `mborland/verifast@generic2`

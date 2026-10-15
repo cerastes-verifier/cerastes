@@ -20,10 +20,17 @@ file per bug, numbered like the decision records: `NNNN-short-name.md`.
   get a file here.
 - **Fixed bugs get a branch** in the fork clone `~/Documents/compiler`, named
   with the bug's number (`0001`). It is based on upstream `main` and holds the
-  one discrete commit that fixes the bug, with its test. The owner pushes
+  one discrete commit that fixes the bug, with its test. When one fix builds
+  on another, its branch is stacked on the other's branch and holds one
+  commit on top of it; the bug file says so.
+- **Fixed bugs are also merged** into the fork's `cerastes` branch (with
+  `--no-ff`, so the branch's commit is kept as it is), and cerastes moves its
+  pin to the merge. The owner pushes
   branches and files the issues: sessions never open upstream issues, PRs or
   Discussions (decision 0003 item 6).
-- **Reproductions** were run on upstream `main` `034385ba0a`, built natively
+- **Reproductions** were run on upstream `main` (`034385ba0a` for 0001–0007,
+  `d6f83174c7` from 0008 on and for the fixes; no file under `src/`, `bases/`
+  or `cmake/` differs between the two), built natively
   with the `macos-arm-clang-debug` preset and run as `HACKING.md` describes
   (`--clang_version=210000`, the scraped system include directories). Apple
   clang 21 (Command Line Tools 27.0, SDK 27.0) is the reference. Each file
@@ -37,9 +44,12 @@ file per bug, numbered like the decision records: `NNNN-short-name.md`.
 | [0002](upstreamed/0002-test-filter-non-file-scope-pointer.md) | The test output filter does not normalize `**possible non-file-scope ptr** (0x…)` | Upstreamed |
 | [0003](0003-attribute-parameter-pack-substituted-empty.md) | A function parameter pack in an attribute argument is substituted as an empty pack | open |
 | [0004](0004-attribute-parameter-after-pack-wrong-parameter.md) | A parameter after a function parameter pack, named in an attribute argument, is the wrong parameter in an instance | open |
-| [0005](0005-macos-base-predefines-blocks.md) | The macOS clang base predefines `__BLOCKS__`, but the front end cannot parse block syntax | open |
+| [0005](0005-macos-base-predefines-blocks.md) | The macOS clang base predefines `__BLOCKS__`, but the front end cannot parse block syntax | fixed (branch `0005`) |
 | [0006](0006-macos-base-missing-interference-size-macros.md) | The macOS clang base lacks `__GCC_DESTRUCTIVE_SIZE` and `__GCC_CONSTRUCTIVE_SIZE` | open |
 | [0007](0007-clang-ext-vector-type-unsupported.md) | Native macOS builds do not support `ext_vector_type` (or `vector_size`), which libc++ uses | open |
+| [0008](0008-enable-if-address-of-release-local-constant.md) | Taking the address of a function with an `enable_if` whose condition is a constant is an internal error | open |
+| [0009](0009-enable-if-default-argument-not-evaluated.md) | A call that omits a defaulted parameter named in an `enable_if` condition is rejected | open |
+| [0010](0010-enable-if-class-pack-elements-indistinguishable.md) | Elements of a class template parameter pack named in the `enable_if` of a member function are indistinguishable | open |
 
 0005, 0006 and 0007 are the three causes of the libc++ failures recorded
 in decision 0001: `<utility>`, `<string>`, `<vector>`, `<algorithm>` and
