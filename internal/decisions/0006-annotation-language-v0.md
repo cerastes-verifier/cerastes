@@ -280,7 +280,29 @@ summarized here):
         occur: cerastes registers only `cerastes`, and EDG's test attributes
         are compiled out, 0002);
       - an `invariant` that names a variable shadowed by the loop's own
-        init-statement or range-`for` declaration (item 2);
+        init-statement or range-`for` declaration (item 2).
+        - **It fails closed.** Any variable, function or named constant with
+          the loop variable's name counts, qualified or not (`Cfg::i`,
+          `Mode::i`), because the IL does not record how a name was written.
+          A narrowing to "the function's own class and its bases", tried
+          after CP7, missed enclosing classes, lambdas, local classes,
+          in-class friends and `using enum` (CP8) and was reverted.
+        - Members reached through `this` count too, also through casts,
+          base-class conversions, `(*this).i` and anonymous members.
+        - The only exemption is a member function called through an object
+          other than `this` (`v.size()`).
+        - Calls of member functions count inside lambdas that capture
+          `this`, `*this` or `[=]` (CP8b).
+        - **Not detected:** a data member accessed inside a lambda that
+          captures `this` or `*this`. Its object is a placeholder constant in
+          the IL.
+      - `contract_name_hides_member` fires when the class declares the
+        member at or after the name's own position (not the routine's; CP8).
+        It is a usability check: the contract keeps its C++ meaning, the
+        outer entity. **Not detected:** members of enclosing classes; a base
+        member hidden by a later derived member; static locals used in a
+        local class; in-class friends; later enumerators of the class's
+        enumerations; later anonymous-union or anonymous-struct members.
       - a cerastes attribute on a lambda (`[] [[cerastes::requires(…)]] () {}`
         attaches to the closure's `operator()`) or on a deduction guide, since
         neither can carry a contract in v0;
@@ -326,12 +348,20 @@ summarized here):
     - **Spec functions are identified by entity,** never by spelling.
       - **Resolved calls** (instances, non-templates) are recognized by the
         `cerastes::` declarations from `<cerastes.h>`.
-      - **Dependent calls** in templates are recognized by name only when
-        the name was found in namespace `cerastes` (qualified, or through
-        an alias), or when a using-directive or using-declaration that
-        brings it in is visible at that point.
-      - A user's `algo::forall` or `mine::old`, or an unqualified `old(x)`
-        found by argument-dependent lookup, is ordinary code (CP6).
+      - **Dependent calls** in templates fail closed (CP7). Once namespace
+        `cerastes` is declared in the translation unit:
+        - an unqualified `old`/`owns`/`reads`/`forall`/`owns_range` is
+          taken to be the spec function;
+        - a qualified one is a spec function unless qualified lookup in its
+          namespace cannot reach `cerastes` (through using-directives and
+          using-declarations, transitively), or it is a class member.
+
+        An earlier version that searched for using-directives silently
+        missed directives at block and namespace scope.
+      - A user's `algo::forall` or `mine::old` (qualified) is ordinary code,
+        and so is anything in a file without `<cerastes.h>`. An unqualified
+        call meant to reach a user function by argument-dependent lookup must
+        be qualified in annotated code: a documented limitation.
     - **No file is exempt.** Every routine, statement and body that carries
       a `cerastes::` attribute is checked, in whatever file it is, including
       a header marked as a system header, a linemarker, a `--sys_include`

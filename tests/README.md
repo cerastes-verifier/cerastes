@@ -227,13 +227,22 @@ as stale):
   `annotation_substitution_error` are defense-in-depth checks that EDG's own checks make
   unreachable from source. A self-test runs `scripts/cerastes-fe.sh --c++20 --cerastes_checks_selftest
   --brief_diagnostics --display_error_number` on a contracted function template
-  and a contracted variadic template, requires all four tags plus two
+  and a contracted variadic template, requires all four tags (`annotation_substitution_error` twice) plus two
   `unsupported_annotation_expression` errors (and no other error) with the
   option, and a clean run without it. The same option injects an error node into a substituted annotation tree (the
   `annotation_substitution_error` check) and makes the first tree of
   the walk read one parameter reference as `(unmapped)` and one node as visited
   twice (`(repeated node)`); `PrinterPathTests` checks both lines and both
-  errors, and that they are absent without the option.
+  errors, and that they are absent without the option. The hook injects an error
+  expression into the first node and an error type into the second, so both branches of
+  `annotation_substitution_error` fire (two errors, `(error expression)` and `(error type)`);
+- `source_scan_incomplete` is reached when the primary source is read from standard input
+  (`cerastes-fe.sh -`), which a test file cannot be; `SourceFromStdinTests` runs it, and
+  the same text from a file, which is clean (`STDIN_ONLY_TAGS`);
+- `analysis_limit_reached` (a budget of a million shared expression nodes) is not
+  reached by any reasonable source (EDG's own parser slows down first);
+  `--cerastes_checks_selftest` lowers the budget, so `ChecksSelftestTests` shows it fire
+  (`SELFTEST_ONLY_TAGS`).
 
 `unsupported_annotation_expression` (a fallback node, a depth over 256, a lambda
 body that is not one `return <expr>;`, an unmapped or repeated node) has

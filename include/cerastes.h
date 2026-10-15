@@ -4,17 +4,32 @@
 // <cerastes.h>: the annotation macros and the specification functions
 // (decision 0008).  It includes no other header.
 //
-// With the cerastes front end, which defines __CERASTES__ itself, each CERASTES_*
-// macro expands to the attribute it stands for (decision 0006).  With any other
-// compiler the contract and statement macros expand to nothing, and
-// CERASTES_PREDICATE and CERASTES_PURE expand to `inline`.
+// With the cerastes front end each CERASTES_* macro expands to the attribute it
+// stands for (decision 0006).  The front end is recognised by the attributes
+// themselves (__has_cpp_attribute / __has_c_attribute of cerastes::requires is 1
+// there and 0 in any other compiler), not by the macro __CERASTES__ that the front
+// end also defines, so that undefining that macro cannot silently drop the
+// contracts.  (The front end rejects a source-level #undef or #define of
+// __CERASTES__.)  With any other compiler the contract and statement macros expand
+// to nothing, and CERASTES_PREDICATE and CERASTES_PURE expand to `inline`.
+// Tampering with the macros of this header is not supported.
 //
 // Write CERASTES_PREDICATE and CERASTES_PURE first in the declaration, before
 // `static`, `constexpr` and the return type.
 #ifndef CERASTES_H
 #define CERASTES_H
 
-#ifdef __CERASTES__
+#if defined(__cplusplus) && defined(__has_cpp_attribute)
+#  if __has_cpp_attribute(cerastes::requires)
+#    define CERASTES_ATTRIBUTES_ 1
+#  endif
+#elif !defined(__cplusplus) && defined(__has_c_attribute)
+#  if __has_c_attribute(cerastes::requires)
+#    define CERASTES_ATTRIBUTES_ 1
+#  endif
+#endif
+
+#ifdef CERASTES_ATTRIBUTES_
 #  define CERASTES_REQUIRES(...)  [[cerastes::requires(__VA_ARGS__)]]
 #  define CERASTES_ENSURES(...)   [[cerastes::ensures(__VA_ARGS__)]]
 #  define CERASTES_INVARIANT(...) [[cerastes::invariant(__VA_ARGS__)]]

@@ -52,4 +52,10 @@ CERASTES_DIAG(generic_lambda_in_annotation, error,
 CERASTES_DIAG(unsupported_annotation_expression, error,
               "this version cannot check this part of an annotation: %s")
 CERASTES_DIAG(cerastes_macro_changed, error,
-              "__CERASTES__ is defined by the front end and cannot be %s: the annotation macros of <cerastes.h> would expand to nothing")
+              "__CERASTES__ is defined by the front end and cannot be %s: code that tests it would no longer see the annotations the front end reads")
+CERASTES_DIAG(source_scan_incomplete, error,
+              "the source files could not all be checked for a change of __CERASTES__: %s")
+CERASTES_DIAG(contract_name_hides_member, error,
+              "\"%s\" in this contract is not the member \"%s\" of the class: the class declares it after the function")
+CERASTES_DIAG(analysis_limit_reached, error,
+              "the checks of this annotation or body reached a limit (%s) and cannot vouch for it")

@@ -7742,11 +7742,20 @@ SELFTEST_ONLY_TAGS = {
     "annotation_substitution_error": "EDG reports an erroneous annotation argument itself "
                                      "before the back end sees it; `--cerastes_checks_selftest` "
                                      "injects an error node into a substituted tree",
+    "analysis_limit_reached": "the budget is a million shared expression nodes and no source "
+                              "reaches it with a reasonable file (EDG's own parser slows down "
+                              "first); `--cerastes_checks_selftest` lowers the budget",
 }
 # Tags with no reproducer of any kind (neither a source test nor the self-test hook).
 # Empty today; an entry needs its reason, and goes when a test names the tag.
 NO_REPRODUCER_TAGS: dict[str, str] = {}
-UNTESTED_BY_FRONTEND_ERROR = {**SELFTEST_ONLY_TAGS, **NO_REPRODUCER_TAGS}
+# Tags reached by an input that a test file cannot express (a path on disk).
+STDIN_ONLY_TAGS = {
+    "source_scan_incomplete": "reached when the primary source is read from standard input "
+                              "(`cerastes-fe.sh -`), which a test file cannot be; "
+                              "SourceFromStdinTests runs it and its twin",
+}
+UNTESTED_BY_FRONTEND_ERROR = {**SELFTEST_ONLY_TAGS, **NO_REPRODUCER_TAGS, **STDIN_ONLY_TAGS}
 
 
 def tag_coverage_problems(defined, used, allowed):
@@ -7806,6 +7815,8 @@ class TagCoverageTwinTests(unittest.TestCase):
         for tag, reason in UNTESTED_BY_FRONTEND_ERROR.items():
             self.assertGreater(len(reason.split()), 5, tag)
         self.assertEqual(set(SELFTEST_ONLY_TAGS) & set(NO_REPRODUCER_TAGS), set())
+        self.assertEqual(set(STDIN_ONLY_TAGS) & (set(NO_REPRODUCER_TAGS) | set(SELFTEST_ONLY_TAGS)),
+                         set())
 
 
 @e2e_gate((REAL_ROOT / "src" / "backend" / "diagnostics.def").is_file(),
@@ -7874,13 +7885,18 @@ class ChecksSelftestTests(unittest.TestCase):
         self.assertEqual(run.stdout, "")
         cerastes = {t[len(rt.CERASTES_TAG_PREFIX):] for t in tags
                     if t.startswith(rt.CERASTES_TAG_PREFIX)}
-        # the hook also injects an error node (annotation_substitution_error), and makes the first
+        # the hook also injects an error expression and an error type
+        # (annotation_substitution_error), and makes the first
         # tree read one parameter reference as unmapped
         # and one node as visited twice: two unsupported_annotation_expression errors
         self.assertEqual(cerastes, set(SELFTEST_ONLY_TAGS) | {"unsupported_annotation_expression"},
                          tags)
         self.assertEqual(tags.count("cerastes-unsupported_annotation_expression"), 2, tags)
-        self.assertEqual(tags.count("cerastes-annotation_substitution_error"), 1, tags)
+        # both branches of the check: an error expression in the first node, an error
+        # type in the second
+        self.assertEqual(tags.count("cerastes-annotation_substitution_error"), 2, tags)
+        self.assertIn("(error expression)", run.stderr)
+        self.assertIn("(error type)", run.stderr)
         # and nothing else: no EDG error rides along
         self.assertTrue(all(t.startswith(rt.CERASTES_TAG_PREFIX) for t in tags), tags)
 
@@ -7890,6 +7906,41 @@ class ChecksSelftestTests(unittest.TestCase):
                              "\nint h() { return g(1); }\n")
         run, _parsed, tags = self.run_fe("--cerastes_checks_selftest")
         self.assertEqual((run.returncode, tags), (0, []), run)
+
+
+@e2e_gate(_real_front_end_available() and _real_tables_available(),
+          "CERASTES_FE, scripts/cerastes-fe.sh or the generated headers missing; "
+          "run scripts/bootstrap.sh")
+class SourceFromStdinTests(unittest.TestCase):
+    """`source_scan_incomplete`: the back end reads the text of every file to find
+    a change of __CERASTES__, so a primary source it cannot reopen (standard input,
+    `cerastes-fe.sh -`) is an error, not a silent pass.  The same text from a file
+    is clean."""
+
+    SOURCE = "#include <cerastes.h>\nint half(int x) CERASTES_REQUIRES(x >= 0);\n"
+
+    def run_fe(self, *args, stdin=None):
+        env = rt.load_env()
+        return subprocess.run([*rt.FE_COMMAND, "--c++20", *rt.DIAG_OPTIONS, *args],
+                              input=stdin, capture_output=True, text=True, env=env,
+                              cwd=REAL_ROOT, timeout=rt.FRONTEND_TIMEOUT_S)
+
+    def test_standard_input_is_an_error_naming_the_input(self):
+        run = self.run_fe("-", stdin=self.SOURCE)
+        self.assertEqual(run.returncode, rt.EDG_ERRORS_STATUS, run)
+        registry = rt.load_registry(rt.load_env())
+        parsed = rt.parse_fe_diagnostics(run.stderr)
+        errors = [(d.tag(registry), d.line) for d in parsed.diags if d.severity == "error"]
+        self.assertEqual(errors, [("cerastes-source_scan_incomplete", 1)], run.stderr)
+        self.assertEqual(parsed.problems, [])
+        self.assertIn('cannot read "-"', run.stderr)
+
+    def test_the_same_text_from_a_file_is_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "half.cpp"
+            path.write_text(self.SOURCE)
+            run = self.run_fe(str(path))
+        self.assertEqual((run.returncode, run.stdout, run.stderr), (0, "", ""), run)
 
 
 @e2e_gate(_real_front_end_available() and _real_tables_available(),

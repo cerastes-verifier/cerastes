@@ -1,0 +1,36 @@
+routine V::operator= plain implicit nobody @ L10:8
+  returns V &
+  param 1 _: V &&
+routine V::operator= plain implicit nobody @ L10:8
+  returns V &
+  param 1 _: const V &
+routine V::size plain body @ L11:7
+  returns int
+routine other_class_member_function plain body @ L14:5
+  returns int
+  param 1 v: const V &
+  param 2 n: int
+  attr [[maybe_unused]] on param 1 @ L14:35
+  stmt stmk_for @ L17:3 attr [[cerastes::invariant]] @ L17:3
+    arg 1 @ L17:22
+      op eok_eq type_kind=tk_integer type=bool @ L17:31
+        op eok_dot_member_call type_kind=tk_unknown type=int @ L17:28
+          routine V::size: int (*)() const @ L17:24
+          op eok_ref_indirect type_kind=tk_pointer type=const V lvalue @ L17:22
+            var v: const V & decl=L14:59 @ L17:22
+        const 0 type=int @ L17:34
+routine S::operator= plain implicit nobody @ L23:8
+  returns S &
+  param 1 _: S &&
+routine S::operator= plain implicit nobody @ L23:8
+  returns S &
+  param 1 _: const S &
+routine S::get plain body @ L25:7
+  returns int
+  param 1 x: int
+  attr [[cerastes::requires]] on routine @ L25:18
+    arg 1 @ L25:36
+      op eok_lt type_kind=tk_integer type=bool @ L25:38
+        param 1 x: int @ L25:36
+        var limit: int decl=L21:5 @ L25:40
+end walk: 7 routines reported, 0 routines with bodies in non-system files outside the primary file

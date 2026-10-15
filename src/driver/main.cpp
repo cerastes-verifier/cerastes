@@ -16,6 +16,8 @@
 //                               GNU emulation (decision 0007)
 //   --c --c89 --c99 --no_c99 --c11 --c17 --c18 --old_c -K
 //                               C before C23 (decision 0007)
+//   --create_pch --use_pch --pch --pch_dir
+//                               a precompiled header skips the reading of its files
 //   --output_mode=sarif         back-end diagnostics cannot be emitted as SARIF yet
 // EDG accepts an unambiguous abbreviation of a long option, so a refused option
 // is recognised under every spelling EDG would resolve to it.  The language
@@ -115,6 +117,11 @@ bool check_argument(const char* arg, const char* next) {
     if (is_one_of(n, {"c", "c89", "c99", "no_c99", "c11", "c17", "c18", "old_c"})) {
       refuse("C before C23 is not supported: use --c23 (--c selects an older default; older C lets identifier-list "
              "declarators bind a contract's names to globals; decision 0007)");
+    }
+    if (is_one_of(n, {"create_pch", "use_pch", "pch", "pch_dir"})) {
+      refuse("precompiled headers (--create_pch, --use_pch, --pch, --pch_dir) are not supported: "
+             "a precompiled header skips the front end's reading of the files it holds, so the "
+             "checks of the annotations in them (and of __CERASTES__) could not be made");
     }
     if (n == "output_mode" && value == "sarif") {
       refuse("--output_mode=sarif is not supported yet: cerastes diagnostics cannot be written "

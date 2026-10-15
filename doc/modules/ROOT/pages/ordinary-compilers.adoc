@@ -8,16 +8,26 @@ applies to Apple clang and GCC, with `pass:[-std=c++20]` for pass:[C++] and
 == One source, two builds
 
 Include `<cerastes.h>` and write the annotations with its `CERASTES_*` macros
-(xref:annotations.adoc[Annotations]). The header defines them in one of two
-ways, depending on the macro `+__CERASTES__+`:
+(xref:annotations.adoc[Annotations]). The header defines them in one of two ways,
+and it chooses by asking the compiler whether it knows the attributes, not by
+looking at a macro: `+__has_cpp_attribute(cerastes::requires)+` (in C23,
+`+__has_c_attribute(cerastes::requires)+`) is 1 only in cerastes's front end.
 
-* cerastes's front end defines `+__CERASTES__+` itself, so each macro expands to
-  the attribute it stands for. You never define it in a build, and cerastes
-  refuses to undefine it or define it again, on the command line (`-U`, `-D`)
-  and in the source (`+#undef+`, `+#define+`, `cerastes-cerastes_macro_changed`): both are
-  errors.
-* Any other compiler does not define it, so the contract and statement macros
-  expand to nothing.
+* In cerastes's front end each macro expands to the attribute it stands for.
+* Any other compiler gives 0, so the contract and statement macros expand to
+  nothing.
+
+The front end also defines the macro `+__CERASTES__+`, for your own `+#ifdef+`. You
+never define it in a build, and cerastes refuses to undefine it or define it again,
+on the command line (`-U`, `-D`) and in the source (`+#undef+`, `+#define+`,
+`cerastes-cerastes_macro_changed`): both are errors. Because the header does not
+depend on it, undefining it could not turn the contracts off, but it is still
+reported. The header has no `+#error+` of its own.
+
+The macros of `<cerastes.h>` are not a place to customize. Redefining one of them
+(for example `CERASTES_CHECK`), or defining the guard `CERASTES_H` before including
+the header, is not supported, and cerastes does not detect it: the annotations
+would silently mean something else, or nothing.
 
 [source,cpp]
 ----

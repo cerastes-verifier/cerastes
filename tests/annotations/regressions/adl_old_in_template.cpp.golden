@@ -1,0 +1,21 @@
+routine hist::V::operator= plain implicit nobody @ L6:8
+  returns hist::V &
+  param 1 _: const hist::V &
+routine hist::V::operator= plain implicit nobody @ L6:8
+  returns hist::V &
+  param 1 _: hist::V &&
+routine hist::old plain body @ L9:10
+  returns hist::V
+  param 1 x: hist::V
+routine prev prototype body @ L16:3
+  returns T
+  param 1 x: T
+  op eok_call type_kind=tk_unknown type=<tptk_unknown> @ L18:13
+  tconst tpck_unknown_function type=<tptk_unknown> @ L18:10
+routine prev instance body @ L16:3
+  returns hist::V
+  param 1 x: hist::V
+  template prev args <T=hist::V>
+routine main plain body @ L21:5
+  returns int
+end walk: 6 routines reported, 0 routines with bodies in non-system files outside the primary file

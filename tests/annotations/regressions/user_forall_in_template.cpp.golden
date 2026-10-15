@@ -1,0 +1,50 @@
+routine algo::forall prototype body @ L7:6
+  returns bool
+  param 1 r: const R &
+  param 2 p: P
+  op eok_cast type_kind=tk_template_param type=<tptk_unknown> @ L9:18
+  op eok_ref_indirect type_kind=tk_pointer type=const R @ L9:18
+  op eok_bool_cast type_kind=tk_template_param type=bool @ L10:9
+  tconst tpck_expression type=<tptk_unknown> @ L10:9
+  op eok_not type_kind=tk_template_param type=<tptk_unknown> @ L10:9
+  op eok_call type_kind=tk_unknown type=<tptk_unknown> @ L10:11
+  op eok_cast type_kind=tk_unknown type=bool @ -
+  tconst tpck_expression type=<tptk_unknown> @ -
+  tconst tpck_expression type=bool @ -
+routine algo::forall instance body @ L7:6
+  returns bool
+  param 1 r: const int (&)[3]
+  param 2 p: <lambda@L25:20>
+  template algo::forall args <R=int [3], P=<lambda@L25:20>>
+routine all_of prototype body @ L17:6
+  returns bool
+  param 1 r: const R &
+  param 2 p: P
+  op eok_call type_kind=tk_unknown type=<tptk_unknown> @ L19:22
+  tconst tpck_unknown_function type=<tptk_unknown> @ L19:10
+  op eok_ref_indirect type_kind=tk_pointer type=const R @ L19:23
+routine all_of instance body @ L17:6
+  returns bool
+  param 1 r: const int (&)[3]
+  param 2 p: <lambda@L25:20>
+  template all_of args <R=int [3], P=<lambda@L25:20>>
+routine main plain body @ L22:5
+  returns int
+routine <lambda@L25:20>::<unnamed> plain implicit nobody @ L25:20
+  returns void
+  param 1 _: <lambda@L25:20> &&
+routine <lambda@L25:20>::<unnamed> plain implicit body @ L25:20
+  returns void
+  param 1 _: const <lambda@L25:20> &
+routine <lambda@L25:20>::operator= plain implicit nobody @ L25:20
+  returns <lambda@L25:20> &
+  param 1 _: const <lambda@L25:20> &
+routine <lambda@L25:20>::_FUN plain implicit nobody @ L25:22
+  returns bool
+  param 1 v: int
+routine <lambda@L25:20>::operator bool (*)(int) plain implicit body @ L25:22
+  returns bool (*)(int)
+routine <lambda@L25:20>::operator() plain body @ L25:22
+  returns bool
+  param 1 v: int
+end walk: 11 routines reported, 0 routines with bodies in non-system files outside the primary file

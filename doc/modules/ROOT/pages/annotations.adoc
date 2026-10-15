@@ -238,8 +238,12 @@ include::example$annotations/errors/member_template_specialization.cpp[tag=bad]
 
 In a member function, `this` and the members declared before the function are
 in scope. A class is not a complete context for an annotation, so a member
-declared later is not. A member declared in its class and defined outside it
-follows the rule above:
+declared later is not. If the contract names something outside the class that
+a member declared later in the class hides (`int limit = 10;` before the class,
+`int f(int x) CERASTES_REQUIRES(x < limit)` in it and `int limit = 3;` after
+it), the name means the outer one in the contract but the member in the body,
+so cerastes rejects the contract (`cerastes-contract_name_hides_member`). A member declared in its class and
+defined outside it follows the rule above:
 
 [source,cpp]
 ----
@@ -261,7 +265,12 @@ An annotation in a function template is type-checked in the template, with
 dependent types, as any template code is. It is checked again in each
 instance, with the types substituted, and an error found only in an instance
 is reported with the instantiation context. A template that is never
-instantiated still has its annotations checked in the template.
+instantiated has its annotations type-checked in the template, but cerastes's
+own checks that need the instance are made only in instances. In a template that
+is never instantiated, these are not checked yet: a `fold` or `unfold` whose
+callee is dependent, a predicate whose return type is dependent, a call of a
+predicate or a pure function from ordinary code that depends on a template
+parameter, and an assignment to an object of a template-parameter type.
 
 [source,cpp]
 ----
@@ -292,9 +301,10 @@ The invariant is read before the loop's own declarations exist, so *declare a
 loop counter before the loop*, not in the `for` statement. A name declared in
 the `for` init-statement, by a range-based `for`, or in the condition of a
 `while` or `for` (`while (int i = next())`) is not in scope in its invariant.
-If no other variable has that name, naming it is an error. If an outer
-variable has the same name, the invariant would silently be about the outer
-one, so cerastes rejects it (see <<not-allowed>>).
+If nothing else has that name, naming it is an error. If something else does
+(an outer variable, a data member or static member of the enclosing class, an
+enumerator, a function), the invariant would silently be about that entity, so
+cerastes rejects it (see <<not-allowed>>).
 
 [source,cpp]
 ----
@@ -356,9 +366,17 @@ include::example$annotations/predicates.cpp[tag=fold]
 `<cerastes.h>` declares five functions in `namespace cerastes` for use in
 annotations. They are declared and type-checked like any function, and they
 are never defined, so a program cannot call one. cerastes recognizes them by the
-declarations in `<cerastes.h>`, however you reach them: qualified
-(`cerastes::old(x)`), through a using-directive or using-declaration (`old(x)`
-after `using namespace cerastes;`) or as a template-id (`old<int>(x)`):
+declarations in `<cerastes.h>`: written `cerastes::old(x)`, or `old(x)` after
+`using namespace cerastes;` or `using cerastes::old;`, or as a template-id
+(`old<int>(x)`). A function of your own with the same name, called qualified
+with your own namespace (`algo::forall`, `mine::old`), is ordinary code, also
+inside a template, and so is any such call in a file that does not include
+`<cerastes.h>`. Inside a template, an *unqualified* call `old(x)` (or `owns`,
+`reads`, `forall`, `owns_range`) whose callee depends on a template parameter
+is taken to be the specification function whenever `<cerastes.h>` is
+included, even if argument-dependent lookup would find a function of yours:
+qualify your own functions there (this errs on the side of rejecting). The
+five functions:
 
 [cols="2,5"]
 |===
@@ -436,14 +454,15 @@ pass:[C++] line. Both exit with status 2.
 
 An annotation does not change anything. It must not contain:
 
-* an assignment, a compound assignment, `pass:[++]` or `--`;
+* a built-in assignment, a built-in compound assignment, `pass:[++]` or `--`;
 * `new`, `delete` or `throw`;
 * a read or write of a `volatile` object;
 * a GNU statement expression.
 
 This includes the body of a lambda written in the annotation. Calls to
 functions that are not specification functions are left to a later milestone,
-which will reject them.
+which will reject them. An overloaded `operator=` (or any other overloaded
+operator) is a call, so it is left to that milestone too.
 
 Every annotation is checked, in whatever file it is: a header, a system header
 or a directory given with `--sys_include` is not exempt.
@@ -546,11 +565,17 @@ invariant, so naming it is `undefined_identifier`:
 include::example$annotations/errors/invariant_for_counter.cpp[tag=bad]
 ----
 
-If an outer variable has the same name as the loop's own, the front end finds
-the outer one, and the invariant would be about the wrong variable. cerastes
-rejects an invariant that names a variable with the same name as one declared
-in the loop's init-statement, range-based `for` declaration or condition,
-`cerastes-invariant_shadowed_by_loop_variable`:
+If an outer variable, a data member (static or not), an enumerator or a function
+has the same name as the loop's own variable, the front end finds that one, and
+the invariant would be about the wrong entity. cerastes rejects an invariant that
+names an entity which a variable declared in the loop's init-statement,
+range-based `for` declaration or condition hides,
+`cerastes-invariant_shadowed_by_loop_variable`. The check is deliberately
+broad: it rejects any entity with the name of the loop's variable, however the
+invariant writes it (`i`, `this->i`, `(*this).i`, `Cfg::i`, `Mode::i`), because
+it cannot tell which spellings the loop's variable hides. The one exception is a
+member function called through another object (`v.size()`). Rename the loop's
+variable when the check gets in the way:
 
 [source,cpp]
 ----
@@ -592,7 +617,8 @@ include::example$annotations/errors/contract_on_predicate.cpp[tag=bad]
 
 The program must not use a predicate, a pure function or a specification
 function: a call from ordinary code, a use in a namespace-scope initializer, a
-default member initializer or a member-initializer, or taking its address, is
+default member initializer or a member-initializer, a use as a template argument or
+in an address constant, or taking its address, is
 `cerastes-spec_call_in_code`. The bodies of predicate and pure functions are
 specification, so they may call the specification functions.
 
@@ -692,9 +718,14 @@ file exports is not carried through it.
 === Changing the cerastes macro
 
 The front end defines `+__CERASTES__+`. Undefining it, or defining it again, in the
-source (`+#undef+`, `+#define+`) is `cerastes-cerastes_macro_changed`, because it would
-silently turn every annotation in the rest of the file into nothing. On the
+source (`+#undef+`, `+#define+`) is `cerastes-cerastes_macro_changed`. The macros of
+`<cerastes.h>` no longer depend on it, but code of your own that tests
+`+__CERASTES__+` would silently stop seeing what the front end reads. On the
 command line the options that do it are refused before the front end runs.
+The report is positioned at the line of the `+#undef+` or `+#define+`, also when it is
+written with a line splice, a comment or a digraph. cerastes reads the source text to
+find it, so a source that it cannot read twice (standard input) is rejected with
+`cerastes-source_scan_incomplete`, and the precompiled-header options are refused.
 
 [source,cpp]
 ----

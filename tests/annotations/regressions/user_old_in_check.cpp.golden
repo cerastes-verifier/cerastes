@@ -1,0 +1,30 @@
+routine mine::old prototype body @ L9:6
+  returns bool
+  param 1 v: T
+  op eok_gt type_kind=tk_template_param type=<tptk_unknown> @ L11:12
+routine mine::old instance nobody @ L9:6
+  returns bool
+  param 1 v: int
+  template mine::old args <T=int>
+routine g prototype body @ L16:6
+  returns void
+  param 1 x: T
+  stmt stmk_empty @ L18:3 attr [[cerastes::check]] @ L18:3
+    arg 1 @ L18:18
+      op eok_bool_cast type_kind=tk_template_param type=bool @ L18:18
+        op eok_call type_kind=tk_unknown type=<tptk_unknown> @ L18:27
+          tconst tpck_unknown_function mine::old type=<tptk_unknown> @ L18:18
+          var x: T decl=L16:10 lvalue @ L18:28
+  op eok_cast type_kind=tk_unknown type=void @ L19:3
+routine g instance body @ L16:6
+  returns void
+  param 1 x: int
+  template g args <T=int>
+  stmt stmk_empty @ L18:3 attr [[cerastes::check]] @ L18:3
+    arg 1 @ L18:18
+      op eok_call type_kind=tk_unknown type=bool @ L18:27
+        routine mine::old args <T=int>: bool (*)(int) @ L18:18
+        var x: int decl=L16:10 @ L18:28
+routine use plain body @ L22:5
+  returns int
+end walk: 5 routines reported, 0 routines with bodies in non-system files outside the primary file

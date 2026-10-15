@@ -1,0 +1,80 @@
+routine pos prototype body @ L9:25
+  returns bool
+  param 1 v: T
+  attr [[cerastes::predicate]] on routine @ L9:1
+  op eok_gt type_kind=tk_template_param type=<tptk_unknown> @ L11:12
+routine pos instance nobody @ L9:25
+  returns bool
+  param 1 v: int
+  template pos args <T=int>
+  attr [[cerastes::predicate]] on routine @ L9:1
+routine pos instance nobody @ L9:25
+  returns bool
+  param 1 v: long
+  template pos args <T=long>
+  attr [[cerastes::predicate]] on routine @ L9:1
+routine keep prototype body @ L15:3
+  returns T
+  param 1 v: T
+  attr [[maybe_unused]] on param 1 @ L15:10
+  attr [[cerastes::requires]] on routine @ L15:30
+    arg 1 @ L15:48
+      op eok_bool_cast type_kind=tk_template_param type=bool @ L15:48
+        op eok_call type_kind=tk_unknown type=<tptk_unknown> @ L15:51
+          tconst tpck_unknown_function pos type=<tptk_unknown> @ L15:48
+          param 1 v: T lvalue @ L15:52
+  stmt stmk_empty @ L17:3 attr [[cerastes::unfold]] @ L17:3
+    arg 1 @ L17:19
+      op eok_call type_kind=tk_unknown type=<tptk_unknown> @ L17:22
+        tconst tpck_unknown_function pos type=<tptk_unknown> @ L17:19
+        var v: T decl=L15:27 lvalue @ L17:23
+  stmt stmk_empty @ L19:3 attr [[cerastes::fold]] @ L19:3
+    arg 1 @ L19:17
+      op eok_call type_kind=tk_unknown type=<tptk_unknown> @ L19:20
+        tconst tpck_unknown_function pos type=<tptk_unknown> @ L19:17
+        var w: T decl=L18:5 lvalue @ L19:21
+routine keep instance body @ L15:3
+  returns int
+  param 1 v: int
+  attr [[maybe_unused]] on param 1 @ L15:10
+  template keep args <T=int>
+  attr [[cerastes::requires]] on routine @ L15:30
+    arg 1 @ L15:48
+      op eok_call type_kind=tk_unknown type=bool @ L15:51
+        routine pos args <T=int>: bool (*)(int) @ L15:48
+        param 1 v: int @ L15:52
+  stmt stmk_empty @ L17:3 attr [[cerastes::unfold]] @ L17:3
+    arg 1 @ L17:19
+      op eok_call type_kind=tk_unknown type=bool @ L17:22
+        routine pos args <T=int>: bool (*)(int) @ L17:19
+        var v: int decl=L15:27 @ L17:23
+  stmt stmk_empty @ L19:3 attr [[cerastes::fold]] @ L19:3
+    arg 1 @ L19:17
+      op eok_call type_kind=tk_unknown type=bool @ L19:20
+        routine pos args <T=int>: bool (*)(int) @ L19:17
+        var w: int decl=L18:5 @ L19:21
+routine keep instance body @ L15:3
+  returns long
+  param 1 v: long
+  attr [[maybe_unused]] on param 1 @ L15:10
+  template keep args <T=long>
+  attr [[cerastes::requires]] on routine @ L15:30
+    arg 1 @ L15:48
+      op eok_call type_kind=tk_unknown type=bool @ L15:51
+        routine pos args <T=long>: bool (*)(long) @ L15:48
+        param 1 v: long @ L15:52
+  stmt stmk_empty @ L17:3 attr [[cerastes::unfold]] @ L17:3
+    arg 1 @ L17:19
+      op eok_call type_kind=tk_unknown type=bool @ L17:22
+        routine pos args <T=long>: bool (*)(long) @ L17:19
+        var v: long decl=L15:27 @ L17:23
+  stmt stmk_empty @ L19:3 attr [[cerastes::fold]] @ L19:3
+    arg 1 @ L19:17
+      op eok_call type_kind=tk_unknown type=bool @ L19:20
+        routine pos args <T=long>: bool (*)(long) @ L19:17
+        var w: long decl=L18:5 @ L19:21
+routine use plain body @ L23:6
+  returns long
+  param 1 a: int
+  param 2 b: long
+end walk: 7 routines reported, 0 routines with bodies in non-system files outside the primary file

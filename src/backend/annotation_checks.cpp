@@ -78,24 +78,113 @@ bool has_cerastes_attribute(a_routine_ptr r) {
   return false;
 }
 
-// The name of the callee that a dependent call (a template-parameter constant of
-// kind tpck_unknown_function, or tpck_template_ref for `f<T>(x)`) records, or null.
-const char* unknown_callee_name(a_constant_ptr c) {
+// The constant that names the callee of a dependent call (a template-parameter
+// constant of kind tpck_unknown_function, or tpck_template_ref for `f<T>(x)`, which
+// holds the unknown function in its `con`), or null.
+a_constant_ptr unknown_callee_constant(a_constant_ptr c) {
   if (c == nullptr || c->kind != ck_template_param) return nullptr;
   const auto& tp = c->variant.template_param;
-  if (tp.kind == tpck_unknown_function) return c->source_corresp.name;
-  if (tp.kind == tpck_template_ref && tp.variant.template_ref.con != nullptr)
-    return tp.variant.template_ref.con->source_corresp.name;
+  if (tp.kind == tpck_unknown_function) return c;
+  if (tp.kind == tpck_template_ref) return tp.variant.template_ref.con;
   return nullptr;
 }
 
-// The specification functions of <cerastes.h> (namespace cerastes), by the name a
-// dependent call records: the lookup is done in each instance, where the entity
-// itself is known (is_spec_function_name); a never-instantiated template is
-// checked by name, so that a spelling (using cerastes::old, old<T>(x)) cannot hide one.
+// The specification functions of <cerastes.h> (namespace cerastes).
 bool is_spec_name(const char* n) {
   return n != nullptr && (std::strcmp(n, "old") == 0 || std::strcmp(n, "owns") == 0 || std::strcmp(n, "reads") == 0 ||
                           std::strcmp(n, "forall") == 0 || std::strcmp(n, "owns_range") == 0);
+}
+
+// Whether `ns` (an alias resolved) is the namespace cerastes declared in the
+// global namespace.
+a_namespace_ptr resolve_alias(a_namespace_ptr ns) {
+  for (int guard = 0; ns != nullptr && ns->is_namespace_alias && guard < 64; ++guard) ns = ns->variant.assoc_namespace;
+  return ns;
+}
+
+bool is_cerastes_namespace(a_namespace_ptr ns) {
+  ns = resolve_alias(ns);
+  if (ns == nullptr || ns->source_corresp.name == nullptr || std::strcmp(ns->source_corresp.name, "cerastes") != 0)
+    return false;
+  a_scope_ptr parent = ns->source_corresp.parent_scope;
+  return parent == nullptr || parent->kind == sck_file;
+}
+
+bool scope_is_cerastes_namespace(a_scope_ptr sp) {
+  return sp != nullptr && (sp->kind == sck_namespace || sp->kind == sck_namespace_extension) &&
+         is_cerastes_namespace(sp->variant.assoc_namespace);
+}
+
+// Whether the translation unit declares namespace cerastes at all (that is,
+// <cerastes.h> or an equivalent declaration is visible).  Without it no name can
+// denote a specification function.
+bool cerastes_namespace_in_tu() {
+  static int cached = -1;
+  if (cached < 0) {
+    cached = 0;
+    a_scope_ptr file = il_header.region_scope_entry[FILE_SCOPE_REGION_NUMBER];
+    for (a_namespace_ptr ns = file ? file->namespaces : nullptr; ns; ns = ns->next)
+      if (is_cerastes_namespace(ns)) { cached = 1; break; }
+  }
+  return cached == 1;
+}
+
+// Whether qualified lookup of `name` in namespace `ns` can find a function of
+// namespace cerastes: `ns` is cerastes, or (transitively) has a using-directive
+// for it, or a using-declaration of `name` from it.
+// `visited` holds the namespaces already searched (CP8: without it, chains of
+// directives took exponential time, and a cycle reached the depth limit).
+bool namespace_reaches_cerastes(a_namespace_ptr ns, const char* name, int depth,
+                                std::set<a_namespace_ptr>& visited) {
+  ns = resolve_alias(ns);
+  if (ns == nullptr || depth > 64) return ns != nullptr;  // too deep: fail closed
+  if (!visited.insert(ns).second) return false;            // searched already
+  if (is_cerastes_namespace(ns)) return true;
+  a_scope_ptr sp = ns->variant.assoc_scope;
+  if (sp == nullptr) return true;  // unknown: fail closed
+  for (a_using_decl_ptr u = sp->using_directives; u; u = u->next)
+    if (u->entity.kind == iek_namespace &&
+        namespace_reaches_cerastes(reinterpret_cast<a_namespace_ptr>(u->entity.ptr), name, depth + 1, visited))
+      return true;
+  for (a_using_decl_ptr u = sp->using_declarations; u; u = u->next) {
+    a_source_correspondence* scp = nullptr;
+    if (u->entity.kind == iek_routine) scp = &reinterpret_cast<a_routine_ptr>(u->entity.ptr)->source_corresp;
+    else if (u->entity.kind == iek_template) scp = &reinterpret_cast<a_template_ptr>(u->entity.ptr)->source_corresp;
+    if (scp && scp->name && std::strcmp(scp->name, name) == 0 && scope_is_cerastes_namespace(scp->parent_scope))
+      return true;
+  }
+  return false;
+}
+
+// The specification function that a dependent callee names, or null.  This
+// fails CLOSED (CP7 audit): once namespace cerastes is declared in the
+// translation unit,
+// - an UNQUALIFIED `old(x)` (or owns, reads, forall, owns_range) is taken to be
+//   the specification function, whatever using-directives are in effect where
+//   it is written (argument-dependent lookup of a user function with the same
+//   name is a documented limitation: qualify it);
+// - a QUALIFIED name is the specification function unless its qualifier is a
+//   namespace from which qualified lookup cannot reach cerastes (`mine::old`),
+//   or a class (`S::old`, a member).
+// Without namespace cerastes in the translation unit nothing is one.
+const char* dependent_spec_callee(a_constant_ptr c) {
+  a_constant_ptr k = unknown_callee_constant(c);
+  if (k == nullptr || !is_spec_name(k->source_corresp.name)) return nullptr;
+  if (!cerastes_namespace_in_tu()) return nullptr;
+  const char* name = k->source_corresp.name;
+  // A template_ref's `con` need not be a template-parameter constant (CP7 #11):
+  // read is_qualified_name only when it is; otherwise treat it as qualified and
+  // let the qualifier decide (failing closed when it is unknown).
+  const bool qualified = k->kind == ck_template_param ? k->variant.template_param.is_qualified_name : true;
+  if (!qualified) return name;
+  a_scope_ptr scope = k->source_corresp.parent_scope;
+  if (scope == nullptr) return name;  // unknown qualifier: fail closed
+  if (scope->kind == sck_namespace || scope->kind == sck_namespace_extension) {
+    std::set<a_namespace_ptr> visited;
+    return namespace_reaches_cerastes(scope->variant.assoc_namespace, name, 0, visited) ? name : nullptr;
+  }
+  if (scope->kind == sck_file) return name;  // `::old`: fail closed
+  return nullptr;  // a class member
 }
 
 bool is_function_template(a_template_ptr t) {
@@ -183,9 +272,105 @@ void add_scope_variables(a_scope_ptr sp, std::set<std::string>* names, std::set<
     if (c->kind == sck_block || c->kind == sck_condition) add_scope_variables(c, names, vars);
 }
 
+bool is_member_of_class(a_scope_ptr sp) { return sp != nullptr && sp->kind == sck_class_struct_union; }
+
+// Whether the class has a member named `name`: a data member, a static data
+// member, a member function, a type or an enumerator declared in its scope.
+bool class_has_member(a_type_ptr cls, const char* name) {
+  if (cls == nullptr || name == nullptr) return false;
+  a_type_ptr t = skip_typerefs(cls);
+  if (!is_immediate_class_type(t)) return false;
+  for (a_field_ptr f = t->variant.class_struct_union.field_list; f; f = f->next)
+    if (f->source_corresp.name && std::strcmp(f->source_corresp.name, name) == 0) return true;
+  a_class_type_supplement_ptr x = t->variant.class_struct_union.extra_info;
+  a_scope_ptr sp = x ? x->assoc_scope : nullptr;
+  if (sp == nullptr) return false;
+  for (a_variable_ptr v = sp->variables; v; v = v->next)
+    if (v->source_corresp.name && std::strcmp(v->source_corresp.name, name) == 0) return true;
+  for (a_routine_ptr r = sp->routines; r; r = r->next)
+    if (r->source_corresp.name && std::strcmp(r->source_corresp.name, name) == 0) return true;
+  for (a_constant_ptr c = sp->constants; c; c = c->next)
+    if (c->source_corresp.name && std::strcmp(c->source_corresp.name, name) == 0) return true;
+  for (a_type_ptr ty = sp->types; ty; ty = ty->next)
+    if (ty->source_corresp.name && std::strcmp(ty->source_corresp.name, name) == 0) return true;
+  return false;
+}
+
+// The position of the first member of `cls` named `name` (as class_has_member
+// finds it), or a null position.
+a_source_position first_member_position(a_type_ptr cls, const char* name) {
+  a_source_position none = null_source_position;
+  if (cls == nullptr || name == nullptr) return none;
+  a_type_ptr t = skip_typerefs(cls);
+  if (!is_immediate_class_type(t)) return none;
+  a_source_position best = none;
+  auto consider = [&](const a_source_correspondence& sc) {
+    if (sc.name && std::strcmp(sc.name, name) == 0 && sc.decl_position.seq != 0 &&
+        (best.seq == 0 || sc.decl_position.seq < best.seq ||
+         (sc.decl_position.seq == best.seq && sc.decl_position.column < best.column)))
+      best = sc.decl_position;
+  };
+  for (a_field_ptr f = t->variant.class_struct_union.field_list; f; f = f->next) consider(f->source_corresp);
+  a_class_type_supplement_ptr x = t->variant.class_struct_union.extra_info;
+  a_scope_ptr sp = x ? x->assoc_scope : nullptr;
+  if (sp != nullptr) {
+    for (a_variable_ptr v = sp->variables; v; v = v->next) consider(v->source_corresp);
+    for (a_routine_ptr r = sp->routines; r; r = r->next) consider(r->source_corresp);
+    for (a_constant_ptr c = sp->constants; c; c = c->next) consider(c->source_corresp);
+    for (a_type_ptr ty = sp->types; ty; ty = ty->next) consider(ty->source_corresp);
+  }
+  return best;
+}
+
+// Whether the class declares a member named `name` that the name written at
+// `at` could not see (contract_name_hides_member): one declared at or after
+// `at`.  A member declared before `at` was visible there, so the name was
+// written qualified (`::limit`, CP7).  The position compared is the name's own
+// (CP8: not the routine's, which is the definition's for a member defined
+// outside its class); equal or unknown positions fail closed.
+bool class_declares_member_later(a_type_ptr cls, const char* name, const a_source_position& at) {
+  if (!class_has_member(cls, name)) return false;
+  a_source_position m = first_member_position(cls, name);
+  if (m.seq == 0 || at.seq == 0) return true;  // unknown: fail closed
+  return m.seq > at.seq || (m.seq == at.seq && m.column >= at.column);
+}
+
+// The object of a member access with casts (the implicit `const S *` of `this`
+// in a const member function), conversions to a base class (an inherited
+// member, CP7), `*` (`(*this).i`), `&` (the copy of `*this` captured by a
+// `[*this]` lambda, CP8b) and the accesses to anonymous members
+// (`this-><unnamed>.i`, and a lambda's capture fields, CP8) peeled off.
+an_expr_node_ptr peel_member_object(an_expr_node_ptr obj) {
+  for (int guard = 0; obj != nullptr && obj->kind == enk_operation && guard < 1024; ++guard) {
+    const auto& o = obj->variant.operation;
+    if (o.operands == nullptr) break;
+    const bool anonymous_member = (o.kind == eok_dot_field || o.kind == eok_points_to_field) &&
+                                  o.operands->next != nullptr && o.operands->next->kind == enk_field &&
+                                  o.operands->next->variant.field.ptr != nullptr &&
+                                  o.operands->next->variant.field.ptr->source_corresp.name == nullptr;
+    if (o.kind != eok_cast && o.kind != eok_base_class_cast && o.kind != eok_indirect && o.kind != eok_address_of &&
+        !anonymous_member)
+      break;
+    obj = o.operands;
+  }
+  return obj;
+}
+
+// Whether a member reached through `obj` (peeled) is named unqualified: the
+// object is `this`, or an unnamed object (the members of an anonymous union).
+bool object_named_unqualified(an_expr_node_ptr obj) {
+  obj = peel_member_object(obj);
+  if (obj == nullptr) return false;
+  if (obj->kind == enk_param_ref) return obj->variant.param_ref.param_num == 0;
+  if (obj->kind == enk_variable && obj->variant.variable.ptr != nullptr)
+    return obj->variant.variable.ptr->is_this_parameter || obj->variant.variable.ptr->source_corresp.name == nullptr;
+  return false;
+}
+
 // ---- Scanning an annotation argument -----------------------------------------
 
 struct Scan {
+  a_type_ptr member_class = nullptr;  // contract of a member function: its class
   std::set<std::pair<int, std::string>> reported;  // one diagnostic per kind and text per attribute
   Annot annot = Annot::none;
   a_routine_ptr owner = nullptr;
@@ -194,9 +379,13 @@ struct Scan {
   std::set<a_variable_ptr> lambda_vars;    // variables declared in lambdas of the argument
   std::set<an_expr_node_ptr> seen;
   std::set<a_lambda_ptr> lambdas;
+  // Member functions called through an object other than `this` (`v.size()`):
+  // named after `.`/`->`, never unqualified (CP7), so no shadowing check.
+  std::set<an_expr_node_ptr> object_member_callees;
 };
 Scan* g_scan = nullptr;
 bool g_error_injected = false;  // --cerastes_checks_selftest
+bool g_type_injected = false;
 // Lambdas written in annotation arguments: their bodies are annotation code,
 // not ordinary code (spec_call_in_code).
 std::set<a_routine_ptr> g_annotation_lambda_routines;
@@ -241,6 +430,11 @@ const char* side_effect_of(an_expr_operator_kind k) {
 }
 
 constexpr unsigned long kBudget = 1000000;
+// The budget of shared expressions a traversal may follow.  The self-test lowers
+// it to one, so that the first folded constant (an unnamed constant that records
+// the expression it came from, such as `1 + 1`) exhausts it and the limit is
+// reported (analysis_limit_reached).
+unsigned long budget() { return options().checks_selftest ? 1 : kBudget; }
 
 void scan_lambda_body(a_lambda_ptr l, an_expr_or_stmt_traversal_block_ptr tb) {
   a_routine_ptr r = l ? l->lambda_routine : nullptr;
@@ -269,7 +463,10 @@ void scan_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb) {
   }
   if (seen_kind == enk_error)
     scan_report(sc, Diag::annotation_substitution_error, e->position, {"error expression"});
-  else if (e->type != nullptr && is_error_type(e->type))
+  else if (options().checks_selftest && !g_type_injected && g_error_injected) {
+    g_type_injected = true;  // self-test: the second node has an error type
+    scan_report(sc, Diag::annotation_substitution_error, e->position, {"error type"});
+  } else if (e->type != nullptr && is_error_type(e->type))
     scan_report(sc, Diag::annotation_substitution_error, e->position, {"error type"});
   // A read of a volatile object: the glvalue-to-prvalue conversion clears
   // is_lvalue and keeps the glvalue's type in orig_lvalue_type (il_def.h:15003).
@@ -281,6 +478,22 @@ void scan_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb) {
       const auto& op = e->variant.operation;
       if (const char* what = side_effect_of(op.kind))
         scan_report(sc, Diag::annotation_side_effect, e->position, {what});
+      // A member named through `this` (implicitly or not) that has the name of a
+      // variable the loop declares: the loop's variable cannot be what it names.
+      if ((op.kind == eok_dot_field || op.kind == eok_points_to_field) && op.operands != nullptr &&
+          op.operands->next != nullptr && op.operands->next->kind == enk_field) {
+        a_field_ptr f = op.operands->next->variant.field.ptr;
+        if (f && f->source_corresp.name && sc.loop_names.count(f->source_corresp.name) &&
+            object_named_unqualified(op.operands))
+          scan_report(sc, Diag::invariant_shadowed_by_loop_variable, e->position, {f->source_corresp.name});
+      }
+      if ((op.kind == eok_dot_member_call || op.kind == eok_points_to_member_call) && op.operands != nullptr &&
+          op.operands->next != nullptr && !object_named_unqualified(op.operands->next)) {
+        an_expr_node_ptr callee = op.operands;
+        if (callee->kind == enk_operation && callee->variant.operation.operands != nullptr)
+          callee = callee->variant.operation.operands;  // an address of the routine
+        if (callee->kind == enk_routine) sc.object_member_callees.insert(callee);
+      }
       if (is_call_kind(op.kind) && sc.annot != Annot::ensures) {
         a_routine_ptr callee = direct_callee(e);
         if (callee && rname(callee) == "cerastes::old") scan_report(sc, Diag::old_outside_ensures, e->position);
@@ -296,11 +509,33 @@ void scan_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb) {
     case enk_statement:
       scan_report(sc, Diag::statement_expression_in_annotation, e->position);
       break;
+    case enk_routine: {
+      a_routine_ptr r = e->variant.routine.ptr;
+      const char* n = r ? r->source_corresp.name : nullptr;
+      if (sc.object_member_callees.count(e)) break;
+      if (n && sc.loop_names.count(n))
+        scan_report(sc, Diag::invariant_shadowed_by_loop_variable, e->position, {n});
+      if (n && sc.member_class && !is_member_of_class(r->source_corresp.parent_scope) &&
+          class_declares_member_later(sc.member_class, n, e->position))
+        scan_report(sc, Diag::contract_name_hides_member, e->position, {n, n});
+      break;
+    }
     case enk_constant: {
+      a_constant_ptr nc = e->variant.constant.ptr;
+      // A named constant (an enumerator, a named constant) with the name of a
+      // variable the loop declares, or of a member the class declares later.
+      if (nc != nullptr && nc->kind != ck_template_param && nc->source_corresp.name != nullptr) {
+        const char* n = nc->source_corresp.name;
+        if (sc.loop_names.count(n))
+          scan_report(sc, Diag::invariant_shadowed_by_loop_variable, e->position, {n});
+        if (sc.member_class && !is_member_of_class(nc->source_corresp.parent_scope) &&
+            class_declares_member_later(sc.member_class, n, e->position))
+          scan_report(sc, Diag::contract_name_hides_member, e->position, {n, n});
+      }
       // A call of `cerastes::old` that depends on a template parameter is a
       // constant that names the callee (tpck_unknown_function, or tpck_template_ref
       // for old<T>(x)); in an instance the call is resolved and found above.
-      const char* callee = unknown_callee_name(e->variant.constant.ptr);
+      const char* callee = dependent_spec_callee(e->variant.constant.ptr);
       if (sc.annot != Annot::ensures && callee != nullptr && std::strcmp(callee, "old") == 0)
         scan_report(sc, Diag::old_outside_ensures, e->position);
       break;
@@ -310,6 +545,10 @@ void scan_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb) {
       if (v && v->source_corresp.name && sc.loop_names.count(v->source_corresp.name) &&
           !sc.lambda_vars.count(v))
         scan_report(sc, Diag::invariant_shadowed_by_loop_variable, e->position, {v->source_corresp.name});
+      if (v && v->source_corresp.name && sc.member_class && !sc.lambda_vars.count(v) &&
+          !is_member_of_class(v->source_corresp.parent_scope) && v->source_corresp.enclosing_routine == nullptr &&
+          class_declares_member_later(sc.member_class, v->source_corresp.name, e->position))
+        scan_report(sc, Diag::contract_name_hides_member, e->position, {v->source_corresp.name, v->source_corresp.name});
       break;
     }
     case enk_lambda: {
@@ -355,8 +594,10 @@ void scan_expression(an_expr_node_ptr root, Scan& sc) {
   tb.process_non_dynamic_constants = TRUE;
   tb.process_template_parameter_constants_and_expressions = TRUE;
   tb.process_expressions_for_constants = FALSE;
-  tb.shared_expr_budget = kBudget;
+  tb.shared_expr_budget = budget();
   traverse_expr(root, &tb);
+  if (tb.terminate && tb.shared_expr_budget == 0)
+    scan_report(sc, Diag::analysis_limit_reached, root->position, {"the budget of shared expressions"});
   g_scan = saved;
 }
 
@@ -417,6 +658,8 @@ void check_attribute(an_attribute_ptr a, a_routine_ptr owner, a_statement_ptr st
   sc.annot = k;
   sc.owner = owner;
   sc.context = context;
+  if (is_contract(k) && owner != nullptr && is_member_of_class(owner->source_corresp.parent_scope))
+    sc.member_class = owner->source_corresp.parent_scope->variant.assoc_type;
   if (k == Annot::invariant && stmt != nullptr) {
     // A variable declared in the condition of a while or for loop.
     if ((stmt->kind == stmk_while || stmt->kind == stmk_for) && stmt->expr != nullptr &&
@@ -540,40 +783,121 @@ void check_modules() {
 
 
 // A source-level `#undef __CERASTES__` or `#define __CERASTES__` in any file read
-// (decision 0008): the front end defines the macro itself, and without it every
-// CERASTES_* macro expands to nothing, silently dropping the annotations.  The
-// macro table is gone when the back end runs, so the text of the files is read:
-// a line of that shape (also in a skipped #if block, which is rejected too).
+// (decision 0008): the front end defines the macro itself, and user code that
+// tests it would see another value.  (<cerastes.h> does not depend on it, so no
+// annotation is lost; this is about the macro the program sees.)  The macro table
+// is gone when the back end runs, so the text of the files is read: logical lines
+// (line splices removed), comments blanked, the digraph `%:` read as `#`; a
+// directive of that shape is an error even in a skipped #if block.  A file that
+// cannot be read, or an include tree deeper than the cap, is an error too (the
+// check could not be made).
+constexpr int kIncludeDepthCap = 256;
+
+void report_scan_incomplete(const std::string& why, a_source_file_ptr f) {
+  DiagPos p;
+  p.known = true;
+  p.line = 1;
+  p.col = 0;
+  p.file = f && f->file_name ? f->file_name : "";
+  p.full_name = f && f->full_name ? f->full_name : "";
+  report_at(Diag::source_scan_incomplete, p, {why});
+}
+
 void scan_file_for_macro_change(a_source_file_ptr f) {
-  if (f == nullptr || f->full_name == nullptr) return;
-  std::ifstream in(f->full_name);
-  std::string line;
-  for (unsigned long n = 1; std::getline(in, line); ++n) {
+  if (f == nullptr) return;
+  if (f->full_name == nullptr) return;  // a generated entry (#line): no file of its own
+  std::ifstream in(f->full_name, std::ios::binary);
+  if (!in) {
+    report_scan_incomplete(std::string("cannot read \"") + f->full_name + "\"", f);
+    return;
+  }
+  const std::string raw((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+
+  // Translation phase 2: backslash-newline splices are removed.
+  std::string spliced;
+  spliced.reserve(raw.size());
+  for (size_t i = 0; i < raw.size(); ++i) {
+    if (raw[i] == '\\' && i + 1 < raw.size() && raw[i + 1] == '\n') { ++i; continue; }
+    if (raw[i] == '\\' && i + 2 < raw.size() && raw[i + 1] == '\r' && raw[i + 2] == '\n') { i += 2; continue; }
+    spliced += raw[i];
+  }
+  if (spliced.find("__CERASTES__") == std::string::npos) return;  // the common case
+
+  // The same text with the position (line, column) of every character in the
+  // original file, so that a directive is reported where it is written.
+  std::vector<std::pair<unsigned long, unsigned long>> where;
+  std::string text;
+  {
+    unsigned long line = 1, col = 1;
+    where.reserve(raw.size());
+    for (size_t i = 0; i < raw.size(); ++i) {
+      if (raw[i] == '\\' && i + 1 < raw.size() && raw[i + 1] == '\n') { ++line; col = 1; ++i; continue; }
+      if (raw[i] == '\\' && i + 2 < raw.size() && raw[i + 1] == '\r' && raw[i + 2] == '\n') { ++line; col = 1; i += 2; continue; }
+      text += raw[i];
+      where.push_back({line, col});
+      if (raw[i] == '\n') { ++line; col = 1; } else { ++col; }
+    }
+  }
+  // Translation phase 3: comments become one space (a block comment may span
+  // lines: the directive continues after it); the newlines inside it go.
+  std::string code;
+  std::vector<std::pair<unsigned long, unsigned long>> cwhere;
+  for (size_t i = 0; i < text.size(); ++i) {
+    if (text.compare(i, 2, "/*") == 0) {
+      size_t end = text.find("*/", i + 2);
+      code += ' ';
+      cwhere.push_back(where[i]);
+      i = end == std::string::npos ? text.size() : end + 1;
+    } else if (text.compare(i, 2, "//") == 0) {
+      while (i < text.size() && text[i] != '\n') ++i;
+      --i;  // the newline stays
+    } else {
+      code += text[i];
+      cwhere.push_back(where[i]);
+    }
+  }
+  // Directives: logical lines of the comment-free text.
+  size_t pos = 0;
+  while (pos < code.size()) {
+    size_t eol = code.find('\n', pos);
+    if (eol == std::string::npos) eol = code.size();
+    const std::string line = code.substr(pos, eol - pos);
+    const size_t base = pos;
+    pos = eol + 1;
     if (line.find("__CERASTES__") == std::string::npos) continue;
     size_t i = 0;
-    while (i < line.size() && std::isspace(static_cast<unsigned char>(line[i]))) ++i;
-    if (i >= line.size() || line[i] != '#') continue;
-    const size_t hash = i++;
-    while (i < line.size() && std::isspace(static_cast<unsigned char>(line[i]))) ++i;
+    auto skip_ws = [&] {
+      while (i < line.size() && (line[i] == ' ' || line[i] == '\t' || line[i] == '\r' || line[i] == '\f' || line[i] == '\v')) ++i;
+    };
+    skip_ws();
+    const size_t hash = i;
+    if (i < line.size() && line[i] == '#') ++i;
+    else if (line.compare(i, 2, "%:") == 0) i += 2;
+    else continue;
+    skip_ws();
     const char* what = nullptr;
     if (line.compare(i, 5, "undef") == 0) { what = "undefined"; i += 5; }
     else if (line.compare(i, 6, "define") == 0) { what = "redefined"; i += 6; }
     if (what == nullptr || i >= line.size() || !std::isspace(static_cast<unsigned char>(line[i]))) continue;
-    while (i < line.size() && std::isspace(static_cast<unsigned char>(line[i]))) ++i;
+    skip_ws();
     if (line.compare(i, 12, "__CERASTES__") != 0) continue;
     if (i + 12 < line.size() && (std::isalnum(static_cast<unsigned char>(line[i + 12])) || line[i + 12] == '_')) continue;
     DiagPos p;
     p.known = true;
     p.file = f->file_name ? f->file_name : f->full_name;
     p.full_name = f->full_name;
-    p.line = n;
-    p.col = hash + 1;
+    p.line = cwhere[base + hash].first;
+    p.col = cwhere[base + hash].second;
     report_at(Diag::cerastes_macro_changed, p, {what});
   }
 }
 
 void scan_files_for_macro_change(a_source_file_ptr f, int depth) {
-  for (; f != nullptr && depth < 64; f = f->next) {
+  for (; f != nullptr; f = f->next) {
+    if (depth >= kIncludeDepthCap) {
+      report_scan_incomplete("the include tree is deeper than " + std::to_string(kIncludeDepthCap) + " levels", f);
+      return;
+    }
     scan_file_for_macro_change(f);
     scan_files_for_macro_change(f->first_child_file, depth + 1);
   }
@@ -651,6 +975,7 @@ struct SpecCall {
 std::vector<SpecCall> g_spec_calls;
 
 struct BodyState {
+  a_source_position pos{};        // where the constants of an initializer are reported
   a_routine_ptr routine = nullptr;
   bool spec_caller = false;       // the routine is itself a specification function
   std::set<a_statement_ptr> statements;
@@ -658,6 +983,26 @@ struct BodyState {
 };
 BodyState* g_body = nullptr;
 std::set<a_statement_ptr> g_checked_statements;  // statements with annotations checked in a body
+
+bool is_spec_routine(a_routine_ptr r) {
+  return marked(r, Annot::predicate) || marked(r, Annot::pure) || is_spec_function_name(rname(r));
+}
+
+// The address of a specification function (a constant of kind ck_address on a
+// routine: `&p` in an initializer, or a template argument) in ordinary code: a
+// call through the pointer would go unseen.
+void note_spec_address_constant(a_constant_ptr c, const a_source_position& at) {
+  if (c == nullptr || c->kind != ck_address || c->variant.address.kind != abk_routine) return;
+  a_routine_ptr r = c->variant.address.variant.routine;
+  if (r != nullptr && is_spec_routine(r)) g_spec_calls.push_back({g_body ? g_body->routine : nullptr, at, rname(r)});
+}
+
+// A routine named in ordinary code whose template arguments include the address
+// of a specification function (`call<&p>(x)`).
+void note_spec_template_arguments(a_routine_ptr callee, const a_source_position& at) {
+  for (a_template_arg_ptr a = callee->template_arg_list; a; a = a->next)
+    if (a->kind == tak_nontype && !a->is_array_bound_of_unknown_type) note_spec_address_constant(a->variant.constant, at);
+}
 
 void body_on_statement(a_statement_ptr s, an_expr_or_stmt_traversal_block_ptr) {
   if (!g_body->statements.insert(s).second) return;
@@ -686,18 +1031,19 @@ void body_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb) {
   if (e->kind == enk_routine) {
     a_routine_ptr callee = e->variant.routine.ptr;
     if (callee == nullptr) return;
-    const std::string n = rname(callee);
-    if (marked(callee, Annot::predicate) || marked(callee, Annot::pure) || is_spec_function_name(n))
-      g_spec_calls.push_back({b.routine, e->position, n});
+    if (is_spec_routine(callee)) g_spec_calls.push_back({b.routine, e->position, rname(callee)});
+    note_spec_template_arguments(callee, e->position);
   } else if (e->kind == enk_constant) {
     // A dependent call of a specification function in a template that may never be
     // instantiated: only its name is known.
-    const char* callee = unknown_callee_name(e->variant.constant.ptr);
-    if (is_spec_name(callee)) g_spec_calls.push_back({b.routine, e->position, std::string("cerastes::") + callee});
+    const char* callee = dependent_spec_callee(e->variant.constant.ptr);
+    if (callee != nullptr) g_spec_calls.push_back({b.routine, e->position, std::string("cerastes::") + callee});
+    note_spec_address_constant(e->variant.constant.ptr, e->position);
   }
 }
 
 void body_on_constant(a_constant_ptr c, an_expr_or_stmt_traversal_block_ptr tb) {
+  if (g_body->pos.seq != 0) note_spec_address_constant(c, g_body->pos);
   // Only expressions of this body: a call site's copy of a callee's default
   // argument records a file-scope expression.
   if (c->expr != nullptr && c->source_corresp.name == nullptr && !in_file_scope(c->expr)) {
@@ -718,7 +1064,7 @@ void init_traversal(an_expr_or_stmt_traversal_block* tb) {
   tb->process_non_dynamic_constants = TRUE;
   tb->process_template_parameter_constants_and_expressions = TRUE;
   tb->process_expressions_for_constants = FALSE;
-  tb->shared_expr_budget = kBudget;
+  tb->shared_expr_budget = budget();
 }
 
 // The body of a routine and the expressions that run with it: constructor
@@ -744,6 +1090,8 @@ void check_body(a_routine_ptr r) {
     }
     if (sp->assoc_block != nullptr) traverse_statement(sp->assoc_block, &tb);
   }
+  if (tb.terminate && tb.shared_expr_budget == 0)
+    report(Diag::analysis_limit_reached, r->source_corresp.decl_position, {"the budget of shared expressions in \"" + rname(r) + "\""});
   g_body = saved;
 }
 
@@ -758,6 +1106,7 @@ void check_initializers() {
   for (a_variable_ptr v : g_c.variables) {
     SrcPos pos = resolve(v->source_corresp.decl_position);
     if (!pos.known || pos.in_system || v->compiler_generated) continue;
+    b.pos = v->source_corresp.decl_position;
     if (v->init_kind == initk_dynamic && v->initializer.dynamic != nullptr)
       traverse_dynamic_init(v->initializer.dynamic, &tb);
     else if (v->init_kind == initk_static && v->initializer.constant != nullptr)
@@ -766,8 +1115,11 @@ void check_initializers() {
   for (a_field_ptr f : g_c.fields) {
     SrcPos pos = resolve(f->source_corresp.decl_position);
     if (!pos.known || pos.in_system) continue;
+    b.pos = f->source_corresp.decl_position;
     if (f->initializer != nullptr) traverse_dynamic_init(f->initializer, &tb);
   }
+  if (tb.terminate && tb.shared_expr_budget == 0)
+    report(Diag::analysis_limit_reached, null_source_position, {"the budget of shared expressions in the initializers"});
   g_body = saved;
 }
 
@@ -803,8 +1155,19 @@ void check_annotations() {
   std::vector<a_routine_ptr> checked;
   for (a_routine_ptr r : order) {
     SrcPos pos = resolve(r->source_corresp.decl_position);
-    if (!pos.known) continue;
-    if (!has_cerastes_attribute(r) && (pos.in_system || r->compiler_generated)) continue;
+    const bool attributed = has_cerastes_attribute(r);
+    if (!pos.known) {
+      if (!attributed) continue;
+      // An annotated routine that cannot be placed in the source: checked, and an
+      // error (it cannot be vouched for).
+      for (an_attribute_ptr a = r->source_corresp.attributes; a; a = a->next)
+        if (is_registered_cerastes(a)) {
+          report(Diag::unsupported_annotation_expression, a->position, {"an annotated routine that has no source position"});
+          break;
+        }
+    } else if (!attributed && (pos.in_system || r->compiler_generated)) {
+      continue;
+    }
     checked.push_back(r);
   }
   // Bodies first: they hold the statement annotations, and show which routines

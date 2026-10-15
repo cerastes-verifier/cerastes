@@ -1,0 +1,89 @@
+routine nonneg prototype body @ L9:25
+  returns bool
+  param 1 v: T
+  attr [[cerastes::predicate]] on routine @ L9:1
+  op eok_ge type_kind=tk_template_param type=<tptk_unknown> @ L11:12
+routine nonneg instance nobody @ L9:25
+  returns bool
+  param 1 v: int
+  template nonneg args <T=int>
+  attr [[cerastes::predicate]] on routine @ L9:1
+routine nonneg instance nobody @ L9:25
+  returns bool
+  param 1 v: long
+  template nonneg args <T=long>
+  attr [[cerastes::predicate]] on routine @ L9:1
+routine twice prototype body @ L15:17
+  returns T
+  param 1 v: T
+  attr [[cerastes::pure]] on routine @ L15:1
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L17:12
+routine twice instance nobody @ L15:17
+  returns int
+  param 1 v: int
+  template twice args <T=int>
+  attr [[cerastes::pure]] on routine @ L15:1
+routine twice instance nobody @ L15:17
+  returns long
+  param 1 v: long
+  template twice args <T=long>
+  attr [[cerastes::pure]] on routine @ L15:1
+routine bump prototype body @ L21:3
+  returns T
+  param 1 v: T
+  attr [[cerastes::requires]] on routine @ L21:13
+    arg 1 @ L21:31
+      op eok_bool_cast type_kind=tk_template_param type=bool @ L21:31
+        op eok_call type_kind=tk_unknown type=<tptk_unknown> @ L21:37
+          tconst tpck_unknown_function nonneg type=<tptk_unknown> @ L21:31
+          param 1 v: T lvalue @ L21:38
+  attr [[cerastes::ensures]] on routine @ L21:42
+    arg 1 binder r: T @ L21:59
+    arg 2 @ L21:62
+      op eok_bool_cast type_kind=tk_template_param type=bool @ L21:62
+        op eok_ge type_kind=tk_template_param type=<tptk_unknown> @ L21:64
+          binder r: T lvalue @ L21:62
+          op eok_call type_kind=tk_unknown type=<tptk_unknown> @ L21:72
+            tconst tpck_unknown_function twice type=<tptk_unknown> @ L21:67
+            param 1 v: T lvalue @ L21:73
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L23:16
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L23:12
+routine bump instance body @ L21:3
+  returns int
+  param 1 v: int
+  template bump args <T=int>
+  attr [[cerastes::requires]] on routine @ L21:13
+    arg 1 @ L21:31
+      op eok_call type_kind=tk_unknown type=bool @ L21:37
+        routine nonneg args <T=int>: bool (*)(int) @ L21:31
+        param 1 v: int @ L21:38
+  attr [[cerastes::ensures]] on routine @ L21:42
+    arg 1 binder r: int @ L21:59
+    arg 2 @ L21:62
+      op eok_ge type_kind=tk_integer type=bool @ L21:64
+        binder r: int @ L21:62
+        op eok_call type_kind=tk_unknown type=int @ L21:72
+          routine twice args <T=int>: int (*)(int) @ L21:67
+          param 1 v: int @ L21:73
+routine bump instance body @ L21:3
+  returns long
+  param 1 v: long
+  template bump args <T=long>
+  attr [[cerastes::requires]] on routine @ L21:13
+    arg 1 @ L21:31
+      op eok_call type_kind=tk_unknown type=bool @ L21:37
+        routine nonneg args <T=long>: bool (*)(long) @ L21:31
+        param 1 v: long @ L21:38
+  attr [[cerastes::ensures]] on routine @ L21:42
+    arg 1 binder r: long @ L21:59
+    arg 2 @ L21:62
+      op eok_ge type_kind=tk_integer type=bool @ L21:64
+        binder r: long @ L21:62
+        op eok_call type_kind=tk_unknown type=long @ L21:72
+          routine twice args <T=long>: long (*)(long) @ L21:67
+          param 1 v: long @ L21:73
+routine use plain body @ L26:6
+  returns long
+  param 1 a: int
+  param 2 b: long
+end walk: 10 routines reported, 0 routines with bodies in non-system files outside the primary file

@@ -29,7 +29,7 @@ constexpr an_attr_registration_flag_set kContract = RAF_ENTITY_ATTACHED | RAF_MU
 const an_attr_registration kAttributes[] = {
     {"requires", "(Xb)", "r", kContract},
     // "R": an optional first argument names the function's result (the fork's
-    // result-name signature code, decision 0007 item 4); it needs RAF_ENTITY_ATTACHED.
+    // result-name signature code, decision 0007 item 6); it needs RAF_ENTITY_ATTACHED.
     {"ensures", "(R,Xb)", "r", kContract},
     {"invariant", "(Xb)", "s:+i!", RAF_NO_FLAGS},
     {"check", "(Xb)", "s:+n!", RAF_NO_FLAGS},
