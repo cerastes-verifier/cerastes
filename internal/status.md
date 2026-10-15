@@ -4,6 +4,79 @@ Session handoff log, newest first. Each entry says what is done, what is not,
 any surprises, the decision records added and the exact first step for the
 next session.
 
+## EDG bugs 0003–0007 (2026-10-15): fixed; branches ready for the owner's PRs
+
+**Done.** Each bug has a fix branch in `~/Documents/compiler`. Each is based
+on upstream `main` `d6f83174c7`, except 0003, which is stacked on 0004. The
+fork's `cerastes` merges each one with `--no-ff`, and cerastes pins the
+result. The pin is now `4ff94f065c`.
+
+| Bug | Branch (for the PR) | What |
+|---|---|---|
+| 0005 | `0005` = `7173149c6b` (owner re-committed, GH #307, PR open) | no `__BLOCKS__`/`__block` in the macOS clang bases |
+| 0006 | `0006` = `7b4d725551` | interference-size macros in the macOS clang bases |
+| 0007 | `0007` = `b49d77f810` + `3f91f945f9` (squash) | `GNU_VECTOR_TYPES_ALLOWED` on macOS |
+| 0004 | `0004` = `35e10894c9` | `enable_if` parameters after a function parameter pack |
+| 0003 | `0003` = `1419c40a6d`, on `0004` | function parameter packs in `enable_if` conditions |
+| 0016 | `0016` = `46d897f6b0` | adjacent function parameter packs (0003 needs it) |
+
+- With 0005–0007, all 29 libc++ headers tried parse with stock `cpfe` and
+  with `cerastes-fe` on SDK 27.0. `tests/edg-smoke/libcxx_headers*` keep it
+  so, and the Installation page and decision 0001 say so. `<simd/simd.h>`
+  does not parse (0013).
+- cerastes now requires `GNU_VECTOR_TYPES_ALLOWED` (IL layout):
+  `scripts/check_edg_config.sh` and `src/backend/edg_il.h`.
+- The handoff (§6, §7) gains the M3/M4 notes on vector types and dependent
+  subscripts.
+- Every fix had:
+  - an Opus review, often several rounds;
+  - fail-before/pass-after natively and in Docker;
+  - Docker `changes,regressions` in both configurations with no mismatch.
+
+  0004 and 0003 were also mutation-tested and checked against clang with a
+  probe matrix (C++11–23). `check.sh` is green at each pin.
+- 0004 and 0003 change only the `enable_if` path. The fork series still
+  rejects pack references in registered attributes (commit B).
+
+**Not done / owner decisions.**
+- Owner, 2026-10-15: fix only EDG bugs that block cerastes. 0008–0015 and
+  0017–0019 were found along the way and are recorded, open, unfixed.
+- 0003 has known limitations, stated in its message: packs inside a
+  requires-expression in the condition, a rare nested-type shape, and
+  reference/forwarding packs (`Ts&&...`), whose calls are now rejected
+  (0015).
+
+**Surprises.**
+- 0004's first version leaked its renumbering into requires-expressions and
+  concept satisfaction. It rejected valid code and poisoned cached concept
+  results, and the Docker suites did not catch it. The review did.
+- Enabling vector types natively exposed upstream asserts in the
+  C-generating back end (0011) and gaps in vector support (0012–0014). None
+  affects cerastes-fe.
+- The owner re-commits branches with a one-line message and a `GH<N>` test
+  name when filing. A branch's commit then differs from the one merged into
+  the fork's `cerastes` (as with 0001/A).
+
+**Evidence.** In the fork's `.tmp/agent-bugs/`: per bug, the analysis, the
+review probes and the mutants. Remove it when no longer needed.
+
+**Owner steps.**
+1. Push the fork's `cerastes` (`4ff94f065c`), then cerastes `main`. `check.sh`
+   reports NOT YET PUSHED until then.
+2. PR the branches. 0004 must land before 0003. Squash 0007's two commits.
+
+**Questions for the owner.**
+1. Lift the fork series' rejection of pack references in registered
+   attributes, now that 0003/0004 show how (the same renumbering in
+   `copy_of_attributes_with_substitution`)? *Recommended: not before M4
+   needs contracts on variadic templates.*
+2. File 0016 upstream with 0003, or separately? *Recommended: separately and
+   first, since it needs no `enable_if`.*
+
+**First step for the next session.** Unchanged from M2: confirm the pushes,
+merge upstream `main` into the fork (0009), move the pin, run `check.sh`.
+Then the CI session before M3.
+
 ## M2 — Annotation layer (2026-10-14 to 2026-10-15): done locally; pushes pending
 
 Read `internal/handoff.md` next. Its §2 lists the owner's push steps in

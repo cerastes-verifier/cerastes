@@ -3,8 +3,10 @@
 - **Labels:** `bug`
 - **Found:** M2 (2026-10-14), audit CP2a issue 1, with attributes registered through the
   fork series; reproduced on upstream with `enable_if` on 2026-10-15
-- **Status:** open. The fork series rejects such references in registered attributes
-  (commit B); the bug itself is not fixed
+- **Status:** fixed for `enable_if`. Branch `0003` in the fork clone is commit
+  `1419c40a6d`, stacked on branch `0004` (`35e10894c9`, on upstream `main`
+  `d6f83174c7`): PR 0004 first. Merged into the fork's `cerastes` as `4ff94f065c`.
+  The fork series still rejects such references in registered attributes (commit B)
 - **Upstream issue:** not filed
 
 ## Summary
@@ -75,18 +77,39 @@ pack.cpp:9:5: note: candidate disabled: all positive
   embedding program (fork series, decision 0007 of cerastes):
   `[[ns::attr(sizeof...(args))]]` is 0 in every instance.
 
-## Suggested fix
+## Fix
 
-When the attribute arguments of a function template are substituted for an
-instance, substitute references to the function parameter pack against the
-instance's expanded parameter list, as the body is. That covers
-`sizeof...`, folds and pack expansions.
-
-If that is not feasible, a reference to a function parameter pack in an
-attribute argument should be an error rather than an empty pack. We have not
-located the path that `enable_if` takes; for registered attributes, the
-fork series found this behaviour in the substitution of attribute arguments
-in `attribute.c`.
+Branch `0003`, commit `1419c40a6d` "Expand function parameter packs named in
+enable_if conditions with the elements of the instance.", stacked on
+[0004](0004-attribute-parameter-after-pack-wrong-parameter.md):
+- Root cause: `eval_enable_if_attributes` (`src/overload.c`) substitutes the
+  condition with a fresh substitution state, so a reference to a function
+  parameter pack finds no pack information and is expanded as an empty pack
+  (`sizeof...` gives 0, folds give their identity).
+- The fix builds the pack information from the instance's parameter list
+  (each function parameter pack's first element, or none for an empty pack)
+  for that substitution. Pack-element references are renumbered to the
+  current element's position, using 0004's convention and guards.
+- Tests: `tests/tests/changes/GH-enable-if-pack.sft.cpp` (C++17 to 23),
+  `GH-enable-if-pack-cxx11.sft.cpp` (C++11 and 14),
+  `GH-enable-if-pack-explicit-object.sft.cpp` (C++23) and
+  `GH-enable-if-pack-nested.sft.cpp`. They fail with upstream and with 0004
+  alone, and pass with 0003, natively and in Docker. Docker
+  `changes,regressions` has no mismatch in either configuration. Reviewed by
+  the Opus auditor; its blocking finding was fixed. Mutation-tested and
+  checked against clang with the analysis probe matrix.
+- Folds over two adjacent function packs also need
+  [0016](0016-adjacent-function-parameter-packs-element-count.md) (fixed on its
+  own branch).
+- Known limitations (owner decision: not pursued):
+  - a pack named inside a requires-expression in the condition is still
+    empty;
+  - in a rare shape, a nested function type's parameter named in an
+    expansion of the outer pack takes the outer element's type;
+  - a condition that names elements of a reference or forwarding pack
+    (`Ts&&... args`) now rejects every call. Upstream accepted them only
+    because the pack was empty. Reference parameters are not evaluable
+    ([0015](0015-enable-if-reference-parameter-not-evaluated.md)).
 
 ## Impact on cerastes
 
@@ -94,4 +117,6 @@ A contract cannot mention a function parameter pack. In the fork series,
 registered attribute arguments that name a function parameter pack, or
 expand a pack, are errors (commit B). The Annotations page lists them among
 the errors the front end reports. Without that, such a contract would
-silently mean something else in every instance.
+silently mean something else in every instance. The fix is for `enable_if`'s
+path; registered attributes go through another one, so lifting those
+rejections would be a separate change and a decision for the owner.

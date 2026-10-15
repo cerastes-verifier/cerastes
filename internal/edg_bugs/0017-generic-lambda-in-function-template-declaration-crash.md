@@ -103,6 +103,31 @@ with a trailing return type on the lambda crashes before and after the 0004 fix)
   was not examined further; it does not give a wrong result in the probes
   (`[](auto v) { return v; }(0.5) > 0` with `T = int` is accepted, as in clang).
 
+## A second symptom: a generic lambda with a parameter pack of its own
+
+The same substitution (a generic lambda in a function template's declaration) gives
+an error, not a crash, when the lambda has a *parameter pack* of its own
+(`auto... v`) (found by the review of the 0003 fix, `f11.cpp`, on upstream, the 0004 and the 0003 branches alike):
+
+```c++
+template <class T> auto k5(T x) -> decltype([](auto... v) { return sizeof...(v); }(1, 2)) { return 0; }
+int a0 = k5(1);
+```
+
+**Actual:** `error: function "lambda []()->void" cannot be called with the given argument list`
+(twice). **Expected:** no diagnostic; clang 21 accepts it. The closure's call operator
+has no parameters in the substituted copy: the lambda's own pack is expanded to no
+elements. The same happens in an `enable_if` condition (`k3.cpp`, and the reviewer's
+`template <class... Ts> int f11(Ts... xs) enable_if([](auto... v) { return ((v > 0) && ...); }(xs...))`)
+and with a function template that has a template pack. A non-template function
+(`int k2(int x) enable_if([](auto... v) {...}(1, 2))`) and a generic lambda with a
+single plain `auto` parameter are accepted. So it is the substitution of the lambda
+for a function template, as in the crash, and I take it for the same cause (the
+lambda's invented template parameters are looked up in the function template's
+argument list, here a pack of the lambda ending up empty); that was not confirmed in the
+code for this symptom. Probes: `.tmp/agent-bugs/analysis/new/f11/` (`f11`, `h2`, `k2`
+to `k5`).
+
 ## Suggested fix
 
 In `copy_template_param_lambda_expr` (or in the lookup by coordinates), do not
