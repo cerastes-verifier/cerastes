@@ -54,10 +54,12 @@ is green, and its report line says `NOT YET PUSHED` until then.
      `tender_maxwell`, found a front-end crash in the series (§3, K). K fixes
      it. That run is still going, and its results are for J. The full suite
      at K has **not** been run: run it before upstreaming.
-5. **A stale Docker container.** edg-backend asked for `docker stop
-   charming_shannon`, a leftover of an interrupted mutation run. Its own
-   `docker kill` was denied by the permission settings, so it was left for
-   the owner.
+5. **Docker containers: done.** On 2026-10-15 the owner had the session kill
+   `charming_shannon` (stale) and `tender_maxwell` (the full suite at J),
+   with the host scripts driving them (`.tmp/agent-m2/evidence_run10.sh`,
+   `edg-docker-test`). Standing rule from then on: a session kills any
+   container running a suite that is behind the current fork tip, without
+   asking. The fork's `.tmp/agent-m2/` remains; remove it when convenient.
 
 ## 3. The EDG fork series (pinned at K)
 
@@ -371,15 +373,7 @@ Each has a recommended answer. Answer inline, as before.
    substitution, the K&R internal error, Clang/GNU-mode attribute drops,
    il_display raw pointers). *Recommended: the empty-pack and K&R issues
    first; they are EDG bugs independent of cerastes.*
-10. **Docker containers.**
-    - `charming_shannon` is stale (§2 step 5).
-    - `tender_maxwell` is still running the full suite at J. It was started
-      by an earlier evidence script, `.tmp/agent-m2/evidence_run10.sh`, whose
-      result directory no longer exists. Its results are for J, which K
-      supersedes.
-
-    Sessions do not stop containers. *Recommended: `docker stop` both, then
-    remove the fork's `.tmp/agent-m2/`.*
+10. **Docker containers:** answered (killed, and a standing rule; §2 step 5).
 11. **Fork commit K** (`23f55e3628`) fixes a crash that G and I introduced
     for explicit specializations declared inside a class template (§3). It
     was added on top: the history is not rewritten (0009). *Recommended:
