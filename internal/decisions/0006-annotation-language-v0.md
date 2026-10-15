@@ -235,6 +235,19 @@ summarized here):
      M2 does not check that the lambda takes exactly one more parameter than
      there are trailing arguments: the quantified variable's type cannot be
      deduced. M6, which gives `forall` its meaning, must reject a mismatch.
+
+     In the contract of a function template, including a member template, the
+     lambda cannot name a template parameter. That rules out a parameter of
+     type `const T*`, `sizeof(T)` in the body, a `decltype(x)` parameter and
+     the enclosing class's `T`.
+     - EDG reports `undefined_identifier` for the `T` only when the template
+       is instantiated, with "detected during instantiation of". This is an
+       EDG limitation (the fork's commit J; CP3 part 8).
+     - So in v0, `forall` cannot quantify over an array of `T` in a
+       function template's contract. Use concrete parameter types, or put
+       the quantifier in a class template's member or a non-template
+       function.
+     - Contracts of class-template members are not affected.
    - `old` is meaningful only in `ensures`. Using it elsewhere is an error
      from cerastes.
 10. **Who diagnoses what.**
