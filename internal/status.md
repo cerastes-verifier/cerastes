@@ -4,6 +4,103 @@ Session handoff log, newest first. Each entry says what is done, what is not,
 any surprises, the decision records added and the exact first step for the
 next session.
 
+## M2 — Annotation layer (2026-10-14 to 2026-10-15): done locally; pushes pending
+
+Read `internal/handoff.md` next. Its §2 lists the owner's push steps in
+order, and §10 has the questions.
+
+**Owner decisions this milestone**
+- EDG work is a local commit series on the fork's `cerastes` branch; the
+  owner pushes.
+- **cerastes pins the fork** (decision 0009, 2026-10-14). It replaces
+  "upstream only". Each session starts by merging upstream `main` into the
+  fork (never rebase).
+- The macros are named `CERASTES_*`.
+- Loop invariants are prefix only.
+- `forall` takes its free variables as trailing arguments.
+- Redeclarations must match (the VeriFast rule).
+- M1's probes were renamed from `cerastes::` to `unreg_ns::`.
+- The full EDG `all` suite on the x86-64 box is the owner's step.
+
+**Done**
+- **The EDG fork series** A, FILT, B, C, D0, D, F, E, G, H, I, J and K, on
+  base `034385ba0a`, with the pin at K (`23f55e3628`). It adds:
+  - a general attribute-registration mechanism, with no `cerastes` string
+    in EDG;
+  - attributes after the parameter list attached to the routine;
+  - must-match across redeclarations and explicit specializations;
+  - class-template substitution;
+  - result names;
+  - substitution that fails closed.
+
+  Each commit has `GH-*` tests, fail-before against its parent, and a
+  `changes,regressions` run against the expectations (handoff §3).
+- **cerastes registers its eight attributes** from the driver
+  (`src/backend/register_attributes.cpp`). The walker prints each one, on
+  its entity, with a typed expression tree: dependent in prototypes,
+  substituted in instances.
+- **24 cerastes-side checks** (`src/backend/diagnostics.def`) reject what
+  EDG cannot. They fail closed on anything the listing cannot represent.
+- **`<cerastes.h>`** has the `CERASTES_*` macros and the declared-only spec
+  functions. It keys on `__has_cpp_attribute(cerastes::requires)`. The
+  same tests build with Apple clang and GCC 16 under
+  `-Wall -Wextra -Werror` (`native-ok`).
+- **Tests.** `tests/annotations/` has 242 files:
+  - 188 negatives, each with a twin;
+  - positives with goldens, each checked against `--il_display`.
+
+  The harness gained `frontend-refused`, `native-ok`, canaries and
+  `--check-headers`. There are 675 self-tests.
+- **Docs.** The Annotations page and "Building with ordinary compilers";
+  every example is a test.
+- **Upstream draft:** `internal/upstream/attribute-registration.md`.
+- **Audits.** CP1 to CP8b (Opus). Every blocking finding is fixed; the
+  open should-fix items are in handoff §4 item 8.
+
+**Acceptance.** See handoff §9.
+- `check.sh` is green.
+- The annotation tests and doc examples pass, with native-ok on Apple clang
+  and GCC.
+- The docs build with zero warnings.
+- **Pending the owner's pushes** (fork, then cerastes, then the website):
+  publication at https://cerastes.dev/cerastes/doc/.
+
+**Not done / deferred**
+- **The full EDG suite** (`imported,edg,cwg,stdlib`, both x86-64
+  configurations) has not been run at K. The run at J found the crash that
+  K fixes; it is the owner's step on the x86-64 box (handoff §2).
+- The mutation runs for H and I were never repeated after their final
+  versions.
+- The open CP7/CP8 items (handoff §4 item 8).
+- CI for the repository (a session before M3).
+
+**Surprises**
+- **The full suite found a front-end crash** in our own series. G stored,
+  and I dereferenced, an uninitialized template symbol for explicit
+  specializations declared inside a class template. It crashed the x86
+  ASan build on `gnats-23971*`, `d00244a` and `ms_cpgen01`. Native arm64
+  survived by luck, and `cerastes-fe` runs the same path. Fixed by K. The
+  lesson: `changes,regressions` is not enough before a pin moves.
+- **The audits found real bugs at every round.** Silent drops, misattached
+  attributes, parameter numbering after packs, crashes, and an EDG change
+  that altered ordinary overload resolution (the first J, amended before
+  it was pinned).
+- **Narrowing a check without an audit regressed it** (CP8). The shadow
+  checks now fail closed.
+- **The session's scratchpad was lost at a context reset.** The per-commit
+  evidence and the auditor's oracle went with it. Evidence now lives in
+  the fork's `.tmp/agent-*` (handoff §3).
+
+**Decision records added:** 0005-edg-source-override,
+0006-annotation-language-v0, 0007-edg-attribute-registration,
+0008-cerastes-header, 0009-edg-fork-pin.
+
+**First step for the next session.** Confirm that the owner has pushed the
+fork's `cerastes` branch, then cerastes `main`, then the website (handoff
+§2). Then merge upstream `main` into the fork's `cerastes` (0009), move the
+pin and run `check.sh`. Then the CI session (a decision record; a macOS
+runner first, x64 Docker if the goldens drift), before M3.
+
 ## M1.5 — User documentation site (2026-10-14): done locally; live deploy pending the owner's push
 
 Read `internal/handoff.md` next.
