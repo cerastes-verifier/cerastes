@@ -132,13 +132,13 @@ include. The code examples on these pages are test files, which
 
 * *macOS on Apple silicon only.* `scripts/bootstrap.sh` refuses to run
   elsewhere.
-* *Some standard headers do not parse.* With the macOS SDK 27.0 that was
-  checked, the front end reports errors for `<iostream>`, `<string>`,
-  `<vector>` and `<algorithm>`, all in pass:[libc++]'s `+__algorithm+` headers.
-  `<new>`, `<utility>`, `<cstdlib>`, `<cstdio>`, `<cstdint>`, `<concepts>`,
-  `<type_traits>` and `<limits>` parse cleanly, which is why the example
-  above uses `<cstdio>`. This is a limitation of the EDG front end at the
-  pinned commit, not of cerastes itself.
+* *Some SDK headers do not parse.* With the macOS SDK 27.0 that was checked,
+  the pass:[libc++] headers that were tried parse, among them `<algorithm>`, `<string>`,
+  `<vector>`, `<iostream>`, `<map>`, `<format>`, `<ranges>` and `<filesystem>`.
+  Apple's `<simd/simd.h>`, and the framework headers that include it, do not:
+  the EDG front end does not support element access on vector types (`v.x`).
+  This is a limitation of the EDG front end at the pinned commit, not of
+  cerastes itself.
 * *The system headers are not pinned.* EDG reads the headers of the Command
   Line Tools that are installed on your machine, so a different SDK version
   can change what parses.

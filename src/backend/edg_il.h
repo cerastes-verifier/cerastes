@@ -48,4 +48,9 @@ CERASTES_REQUIRE_(INCLUDE_EDG_TEST_ATTRIBUTES, 0);
 CERASTES_REQUIRE_(AUTOMATIC_TEMPLATE_INSTANTIATION, 0);
 CERASTES_REQUIRE_(FUNCTION_PROTOTYPE_INSTANTIATION_DEFERRAL_ALLOWED, 0);
 static_assert(DEFAULT_INSTANTIATION_MODE == tim_used, "DEFAULT_INSTANTIATION_MODE must be tim_used");
+// From the stock macOS configuration (cmake_defines.h), not edg_config: the
+// fix of EDG bug 0007 (internal/edg_bugs).  It adds type, attribute and token
+// kinds (tk_vector, ...) and so changes the IL layout; libc++'s
+// <__algorithm/simd_utils.h> needs it.
+static_assert(GNU_VECTOR_TYPES_ALLOWED == 1, "GNU_VECTOR_TYPES_ALLOWED must be 1 (EDG bug 0007's fix)");
 #undef CERASTES_REQUIRE_

@@ -43,6 +43,9 @@ require FULLY_RESOLVED_MACRO_POSITIONS 1
 require INCLUDE_EDG_TEST_ATTRIBUTES 0
 require AUTOMATIC_TEMPLATE_INSTANTIATION 0
 require FUNCTION_PROTOTYPE_INSTANTIATION_DEFERRAL_ALLOWED 0
+# From the stock macOS configuration (cmake_defines.h), not edg_config: EDG bug
+# 0007's fix.  It changes the IL layout (tk_vector and other kinds).
+require GNU_VECTOR_TYPES_ALLOWED 1
 
 if [[ $fail -ne 0 ]]; then
   exit 1

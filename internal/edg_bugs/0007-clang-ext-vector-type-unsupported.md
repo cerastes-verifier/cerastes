@@ -3,7 +3,9 @@
 - **Labels:** `bug`, `infrastructure`
 - **Found:** M0 (2026-10-13). Narrowed in M1.5 (cause 2 of the libc++ failures in
   cerastes decision 0001); root cause found on upstream on 2026-10-15
-- **Status:** open (the one-line fix below was tested locally, not committed)
+- **Status:** fixed. Branch `0007` in the fork clone is commit `b49d77f810` on upstream
+  `main` `d6f83174c7`, plus the test follow-up `3f91f945f9` (squash them for
+  the PR); merged into the fork's `cerastes` as `d3cae7714b` and `c1cb2bb47b`
 - **Upstream issue:** not filed
 
 ## Summary
@@ -78,26 +80,79 @@ first is:
 ## Confirmation
 
 With `GNU_VECTOR_TYPES_ALLOWED=1` added to
-`cmake/macro-conf/support/platform/macos/base.cmakedef` (rebuilt natively,
-then reverted):
+`cmake/macro-conf/support/platform/macos/base.cmakedef` (branch `0007`,
+rebuilt natively):
 - the reproducer above and the `vector_size` example compile with no
   diagnostics;
-- the 7 `find.h` errors of `#include <algorithm>` are gone.
+- with the bases of [0005](upstreamed/0005-macos-base-predefines-blocks.md)
+  and [0006](0006-macos-base-missing-interference-size-macros.md), the
+  libc++ headers that failed have no errors left in `--c++20`: `<algorithm>`,
+  `<string>`, `<vector>`, `<iostream>`, `<map>`, `<unordered_map>`, `<set>`,
+  `<functional>`, `<memory>`, `<array>`, `<span>`, `<ranges>`, `<format>`,
+  `<numeric>`, `<optional>`, `<sstream>`, `<fstream>`, `<thread>`, `<mutex>`,
+  `<chrono>`, `<random>`, `<regex>`, `<filesystem>` and `<string_view>`;
+- `std::find`, `std::ranges::find`, `std::mismatch` and `std::equal` on
+  `vector<char>`, `u16string`, `string_view` and the other element types that
+  libc++ vectorizes are accepted, also in constant evaluation, with and without
+  the C-generating back end (`__find_vectorized` and `__mismatch_vectorized`
+  are instantiated);
+- the Docker configurations are unaffected: the Linux configurations do not
+  import the macOS files, and `--dump_configuration` differs only in this
+  macro;
+- run natively with `edgy` against its recording, in `edg_x86_64` and
+  `edg_x86_64_cp`, the new test fails with the front end built before the
+  change and passes with the one built after it.
 
-The remaining 10 errors are those of
-[0005](0005-macos-base-predefines-blocks.md) (8, `_stdlib.h`) and
-[0006](0006-macos-base-missing-interference-size-macros.md) (2,
-`interference_size.h`).
+Vector code that native macOS builds used to ignore now reaches code paths
+with problems of their own; none is caused by the change (the same inputs
+fail the same way in a Linux build hosted by clang):
+- [0011](0011-c-gen-be-vector-fill-needs-gcc-target.md): the C-generating back
+  end asserts on vector operations when it is built with clang
+  (`eok_vector_fill`, `eok_vector_question`, `eok_vector_lor`,
+  `eok_vector_not`). Natively, 107 tests per configuration that mention
+  vector types now abort there.
+- [0012](0012-builtin-shufflevector-error-operand-assertion.md):
+  `__builtin_shufflevector` with an error operand (12 cases, already recorded
+  in Docker).
+- [0013](0013-ext-vector-type-element-access-unsupported.md): `v.x` and the
+  other element accesses are unsupported, so the SDK's `<simd/simd.h>`, which
+  was silently empty, now fails. `<arm_neon.h>` goes the other way, from
+  errors to none.
+- Bool vectors and `__builtin_reduce_*`, which libc++'s `__any_of`,
+  `__all_of` and `__find_first_set` use, need clang 15 or later emulated
+  (`--clang_version`); with a bare `--clang` (clang 9) they are errors. The
+  cerastes scripts pass the installed clang's version, so libc++ is fine.
+- 16 x86-only GCC tests go from FAIL to CATASTROPHE and 17 tests newly FAIL,
+  from running x86 or GCC-mode tests with the arm64 clang base.
 
-## Suggested fix
+## Fix
 
-Add `GNU_VECTOR_TYPES_ALLOWED=1` to
-`cmake/macro-conf/support/platform/macos/base.cmakedef`, as the Linux
-platform configuration does. Only the test above was run with it; the
-EDG test suites were not.
+Branch `0007`, commit `b49d77f810` "Allow GNU and clang vector types in the
+macOS macro configurations." and its follow-up `3f91f945f9` "Test bool vectors
+and __builtin_reduce_* in the macOS vector-type test.":
+- It sets `GNU_VECTOR_TYPES_ALLOWED=1` in the common macOS platform file,
+  which the arm64 and x86_64 presets import. `GNU_EXTENSIONS_ALLOWED`, which it
+  requires, is already set there; the neon vector types use the same macro.
+- The legacy non-CMake macOS settings (`src/defines_macosx.h`) have the same
+  gap and are left alone.
+- The test is `tests/tests/changes/GH-macos-vector-types.sft.cpp`, run with
+  clang 21 emulated (`--clang_v 210000`). It checks what libc++ relies on:
+  vector sizes for `ext_vector_type` aliases and alias templates and a
+  `vector_size` typedef, element-wise arithmetic and comparison,
+  `__builtin_convertvector`, `__builtin_bit_cast`, subscripting, braced
+  initialization from a pack expansion, and the bool-vector operations of
+  libc++'s `__any_of`, `__all_of` and `__find_first_set`
+  (`__builtin_reduce_or`/`_and`, a bit cast to a mask, `__builtin_ctzg`). In
+  the Docker configurations it passes with or without the fix.
+- The message of `b49d77f810` wrongly says the front end lacks bool vectors
+  and `__builtin_reduce_*` (they need clang 15 or later emulated), and its list
+  of C-generating back-end sites misses `eok_vector_question`; the follow-up's
+  message corrects both.
+- No `src/Changes` entry: CONTRIBUTING.md exempts build-system changes.
 
 ## Impact on cerastes
 
-Together with 0005 and 0006, this is why cerastes cannot verify programs
+Together with 0005 and 0006, this was why cerastes could not verify programs
 that include `<algorithm>`, `<string>`, `<vector>` or `<iostream>` on macOS
-(decision 0001).
+(decision 0001). The macro changes the IL layout, so cerastes requires it
+(`scripts/check_edg_config.sh`, `src/backend/edg_il.h`).

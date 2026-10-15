@@ -165,6 +165,13 @@ scripts/cerastes-fe.sh <mode option> --brief_diagnostics --display_error_number 
 own diagnostics could never appear). The test passes only if stdout is empty and
 the diagnostics on stderr are exactly the expected ones.
 
+A `frontend-warning` test with one deliberate warning (for example
+`[[unreg_ns::x]] int g;`, an unrecognized attribute namespace), in a file of
+includes and code under test, is the way to run cerastes-fe to the end on code
+that has no golden: the test passes only if that warning is the
+only diagnostic, so any error in the includes or the code, or a front end that
+stopped early, fails it (see `edg-smoke/libcxx_headers_cerastes_fe.cpp`).
+
 **The diagnostic names.** `<diag>` is the tag of EDG's diagnostic, the name in
 `error_msg.txt` without its `ec_` prefix (`undefined_identifier`,
 `attribute_namespace_unrecognized`), not its number. Tags are validated, so a

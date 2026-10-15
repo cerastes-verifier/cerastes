@@ -267,6 +267,19 @@ Unchanged from the M1 handoff (`git show c0b7ef2:internal/handoff.md`, §3):
 - **Explicit specializations inherit accumulating attributes** (`pure`)
   from the template. Check the purity of every body that is treated as
   pure.
+- **Vector types reach the IL** since EDG bug 0007's fix is pinned
+  (2026-10-15; `GNU_VECTOR_TYPES_ALLOWED`). The walker lists them through
+  its generic path, and contracts with vector builtins already fail closed
+  (`unsupported_annotation_expression`). The encoder must accept only an
+  allow-list of type kinds and operator kinds and fail closed on everything
+  else (invariant 3):
+  - the new type kinds are `tk_vector`, `tk_scalable_vector`,
+    `tk_scalable_vector_count`, `tk_riscv_vector`, `tk_mfp8`,
+    `tk_float8e4m3` and `tk_float8e5m2`;
+  - vector arithmetic uses the ordinary operator kinds (`eok_add`,
+    `eok_multiply`, … with `type_kind=tk_vector`, `eok_vector_fill` inside),
+    besides the `eok_vector_*` kinds, so checking operator kinds alone is
+    not enough.
 - **CI session before M3** (owner accepted M1.5 question 7): a decision
   record; a macOS runner with a pinned Xcode first, x64 Docker if the
   goldens drift; then `check.sh` in CI. The CI needs the fork pushed.
@@ -275,6 +288,12 @@ Unchanged from the M1 handoff (`git show c0b7ef2:internal/handoff.md`, §3):
   `check.sh`, and review golden diffs.
 
 ## 7. For M4 (unchanged from M1, plus M2)
+
+- **Eligibility must key on a dependent result type** (`tptk_unknown`), not
+  on `type_kind` alone: in a prototype, `v[0]` on a dependent `vec<T, 4>` (or
+  on any dependent `V v`) is `eok_subscript` with `type_kind=tk_pointer` and
+  type `<tptk_unknown>`, which plan.md's "tk_unknown operations" would not
+  catch (bug 0007 review, 2026-10-15).
 
 The M1 notes (`git show c0b7ef2:internal/handoff.md`, §6) all still hold:
 - `(T)<literal>` is a `tpck_expression` constant;

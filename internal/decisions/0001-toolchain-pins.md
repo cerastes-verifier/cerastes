@@ -119,6 +119,16 @@ into its `cerastes` branch and pinned here:
 - 0006, pinned at `99d825cff0`: `<new>` parses. `<iostream>`, `<string>`,
   `<vector>` and `<algorithm>` have 7 errors left, all in
   `__algorithm/find.h` (cause 2).
+- 0007, pinned at `c1cb2bb47b` (with its test follow-up): none of the five headers has an error left,
+  nor do `<map>`, `<unordered_map>`, `<functional>`, `<memory>`, `<array>`,
+  `<span>`, `<ranges>`, `<format>`, `<numeric>`, `<optional>`, `<variant>`,
+  `<tuple>`, `<sstream>`, `<regex>`, `<filesystem>`, `<new>` and `<cstdlib>`,
+  with `scripts/cpfe.sh` and with `scripts/cerastes-fe.sh` (`--c++20`).
+  `tests/edg-smoke/libcxx_headers.cpp` keeps it so. The fix enables vector
+  types natively, which changes the IL layout: `GNU_VECTOR_TYPES_ALLOWED` is
+  now required by `scripts/check_edg_config.sh` and `src/backend/edg_il.h`.
+  The SDK's `<simd/simd.h>` now fails instead of being silently empty
+  (`internal/edg_bugs/0013`).
 
 ## VeriFast
 
