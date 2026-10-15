@@ -2,11 +2,5 @@ routine before plain body @ L12:5
   returns int
   param 1 x: int
 warning: line directive in the primary file at L14; code after it is attributed to elsewhere.h
-warning: attribute [[cerastes::lost(x > 0)]] @ elsewhere.h:101 is outside the primary file and not reported
+warning: attribute [[cerastes::check(<aak_expression>)]] @ elsewhere.h:101 is outside the primary file and not reported
 end walk: 1 routines reported, 1 routines with bodies in non-system files outside the primary file
---- stderr ---
-"elsewhere.h", line 101: warning: attribute namespace "cerastes" is
-          unrecognized
-    [[cerastes::lost(x > 0)]];
-      ^
-

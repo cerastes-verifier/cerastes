@@ -9,9 +9,12 @@
 
 #include "edg_il.h"
 #include "options.h"
+#include "run_state.h"
 #include "walker.h"
 
 void back_end(void) {
+  cerastes::note_back_end_ran();
+  cerastes::refuse_unsupported_mode();
   // EDG accepts unambiguous abbreviations of --remove_unneeded_entities, so the
   // driver's own check on the option string can be bypassed.  Check the runtime
   // state itself: with pruning on, never-instantiated templates and unused

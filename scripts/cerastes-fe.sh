@@ -43,4 +43,9 @@ for dir in "${dirs[@]}"; do
   [[ -n "$dir" ]] && sys_includes+=("--sys_include=$dir")
 done
 
+# include/ holds <cerastes.h> (decision 0008).  As a system include directory,
+# diagnostics for macros used in the caller's file still point at the caller's
+# file, and the header's own warnings are not repeated in every test.
+sys_includes+=("--sys_include=$CERASTES_INCLUDE_DIR")
+
 exec "$CERASTES_FE" --clang_version="$EDG_CLANG_VER_SCRAPE" "${sys_includes[@]}" "$@"

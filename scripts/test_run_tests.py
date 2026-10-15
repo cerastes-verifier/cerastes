@@ -6897,13 +6897,52 @@ class RealNativeTests(MemoisedStamp, unittest.TestCase):
         for family in self.families():
             self.assertIn(f"FAIL  {self.dir / 'a.cpp'} [c++20] native-ok: {family}", out)
 
-    def test_the_cerastes_macro_stays_undefined(self):
-        # __CERASTES__ stays undefined (the annotation macros of <cerastes.h>
-        # must expand to nothing for ordinary compilers)
-        status, out = self.run_test(
-            "d.cpp", "#ifdef __CERASTES__\n#error __CERASTES__ is defined\n#endif\n"
-                     "int f() { return 0; }\n")
-        self.assertEqual(status, 0, out)
+    def run_fe(self, name, body):
+        path = self.dir / name
+        path.write_text(body)
+        return rt.run_tool([*rt.FE_COMMAND, "--c++20", str(path)], self.env,
+                           rt.FRONTEND_TIMEOUT_S)
+
+    def native(self, name, body, family):
+        path = self.dir / name
+        path.write_text(body)
+        lang, mode = "c++", "c++20"
+        comp = (rt.NativeCompiler("Apple clang", self.env["CERASTES_CLANG_CC"],
+                                  self.env["CERASTES_CLANG_CXX"]) if family == "Apple clang"
+                else rt.NativeCompiler("GCC", self.env["CERASTES_GCC_CC"],
+                                       self.env["CERASTES_GCC_CXX"]))
+        return rt.run_tool(rt.native_command(comp.exe(lang), lang, mode,
+                                             self.env["CERASTES_INCLUDE_DIR"], str(path)),
+                           rt.native_env(self.env, family), rt.NATIVE_TIMEOUT_S)
+
+    UNDEFINED_ERROR = "#ifndef __CERASTES__\n#error __CERASTES__ is not defined\n#endif\n"
+    DEFINED_ERROR = "#ifdef __CERASTES__\n#error __CERASTES__ is defined\n#endif\n"
+
+    def test_the_front_end_defines_the_macro_and_the_ordinary_compilers_do_not(self):
+        # decision 0008: the driver defines __CERASTES__ (the annotation macros of
+        # <cerastes.h> expand to attributes); ordinary compilers never do (they
+        # expand to nothing), which is what native-ok relies on
+        run = self.run_fe("d1.cpp", self.UNDEFINED_ERROR + "int f() { return 0; }\n")
+        self.assertEqual((run.returncode, run.stdout, run.stderr), (0, "", ""), run)
+        run = self.run_fe("d2.cpp", self.DEFINED_ERROR + "int f() { return 0; }\n")
+        self.assertEqual(run.returncode, 4, run)  # `#error` is a catastrophic error
+        self.assertIn("__CERASTES__ is defined", run.stderr)
+        for family in self.families():
+            with self.subTest(family):
+                run = self.native("d3.cpp", self.DEFINED_ERROR + "int f();\n", family)
+                self.assertEqual((run.returncode, run.stdout, run.stderr), (0, "", ""), run)
+                run = self.native("d4.cpp", self.UNDEFINED_ERROR + "int f();\n", family)
+                self.assertNotEqual(run.returncode, 0, run)
+                self.assertIn("__CERASTES__ is not defined", run.stdout + run.stderr)
+
+    def test_a_native_ok_test_that_expects_the_macro_defined_fails_natively(self):
+        # the end-to-end twin: through the harness, the front end accepts the file
+        # that needs the macro, and the ordinary compilers reject it
+        status, out = self.run_test("d5.cpp", self.UNDEFINED_ERROR + "int f() { return 0; }\n")
+        self.assertEqual(status, 1, out)
+        self.assertNotIn("FAIL  " + str(self.dir / "d5.cpp") + " [c++20]\n", out)  # the golden passes
+        for family in self.families():
+            self.assertIn(f"FAIL  {self.dir / 'd5.cpp'} [c++20] native-ok: {family}", out)
 
 
 class EnvironmentAuthorityTests(DiagRunCase):
@@ -7552,13 +7591,43 @@ class RealRefusedTests(MemoisedStamp, unittest.TestCase):
         self.assertEqual(status, 0, out)
 
     def test_an_option_that_is_accepted_is_not_a_refusal(self):
-        # the driver does not refuse these today: the run compiles, so the test
-        # must fail (twin: the check is not vacuous)
-        for options in ("--c++20", "--c++20 --brief_diagnostics", "--c11"):
+        # the driver does not refuse these: the run compiles, so the test must
+        # fail (twin: the check is not vacuous)
+        for options in ("--c++20", "--c++20 --brief_diagnostics", "--c23 --display_error_number",
+                        "--c++17"):
             with self.subTest(options):
                 status, out = self.run_test("d.cpp", "frontend-refused anything", options)
                 self.assertEqual(status, 1, out)
                 self.assertIn("a refusal is status 2 (the driver) or 4", out)
+
+    def test_the_drivers_language_and_macro_refusals(self):
+        # decisions 0007 and 0008: C before C23, GNU emulation and undefining
+        # __CERASTES__ are refused by the driver itself (exit 2, one line)
+        for expect, options in (
+                ("C before C23 is not supported", "--c11"),
+                ("C before C23 is not supported", "--c99"),
+                ("C before C23 is not supported", "--c17"),
+                ("GNU emulation", "--gnu_version=150000"),
+                ("GNU emulation", "--gcc"),
+                ("GNU emulation", "--g++"),
+                ("-U of __CERASTES__ is not supported", "-U__CERASTES__")):
+            with self.subTest(options):
+                status, out = self.run_test("l.c" if "c1" in options or "c99" in options
+                                            else "l.cpp", f"frontend-refused {expect}", options)
+                self.assertEqual(status, 0, out)
+
+    def test_the_refusals_have_the_drivers_shape(self):
+        for options in ("--c11", "--gnu_version=150000", "-U__CERASTES__"):
+            with self.subTest(options):
+                path = self.dir / "s.cpp"
+                path.write_text("int f() { return 0; }\n")
+                run = rt.run_tool([*rt.FE_COMMAND, *options.split(), str(path)], rt.load_env(),
+                                  rt.FRONTEND_TIMEOUT_S)
+                self.assertEqual(run.returncode, rt.REFUSAL_STATUS, run)
+                self.assertEqual(run.stdout, "")
+                lines = [l for l in run.stderr.split("\n") if l.strip()]
+                self.assertEqual(len(lines), 1, run.stderr)
+                self.assertTrue(lines[0].startswith(rt.REFUSAL_PREFIX), lines[0])
 
     def test_an_ordinary_compilation_with_errors_is_not_a_refusal(self):
         status, out = self.run_test("e.cpp", "frontend-refused undefined", "--c++20",

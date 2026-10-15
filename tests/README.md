@@ -215,8 +215,9 @@ error and a back-end diagnostic together. Write two tests.
 
 ## Refused options
 
-The driver refuses some options (`--remove_unneeded_entities`; later GNU
-emulation and C modes older than C23) before EDG runs, with exit status 2 and a
+The driver refuses some options before EDG runs (`--remove_unneeded_entities`,
+C modes older than C23, GNU emulation `--gcc`/`--g++`/`--gnu_version`, and `-U` of
+`__CERASTES__`, which the driver defines itself: decisions 0007 and 0008), with exit status 2 and a
 single line, not with a diagnostic at a line of the file. A `frontend-refused`
 test says so:
 
@@ -259,8 +260,9 @@ by each compiler, with
 ```
 
 and passes only if the compiler exits with status 0 and prints nothing on
-stdout and stderr. `-U__CERASTES__` is what makes `<cerastes.h>` expand its
-annotations to nothing. The compilers come from `build/env.sh`, which is
+stdout and stderr. The ordinary compilers never define `__CERASTES__` (the
+cerastes front end does), and `-U__CERASTES__` makes sure: that is what makes
+`<cerastes.h>` expand its annotations to nothing. The compilers come from `build/env.sh`, which is
 [authoritative](#the-environment): `CERASTES_CLANG_CC`/`CERASTES_CLANG_CXX`
 (Apple clang, found with `xcrun`; run by its real path the harness sets
 `SDKROOT` for it if it is not set) and `CERASTES_GCC_CC`/`CERASTES_GCC_CXX` (the

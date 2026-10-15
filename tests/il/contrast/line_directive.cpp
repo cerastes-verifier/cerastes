@@ -13,6 +13,6 @@ int before(int x) { return x + 1; }
 
 #line 100 "elsewhere.h"
 int moved(int x) {
-  [[cerastes::lost(x > 0)]];
+  [[cerastes::check(x > 0)]];
   return x * 2;
 }
