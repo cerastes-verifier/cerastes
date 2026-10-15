@@ -44,8 +44,8 @@ file per bug, numbered like the decision records: `NNNN-short-name.md`.
 | [0002](upstreamed/0002-test-filter-non-file-scope-pointer.md) | The test output filter does not normalize `**possible non-file-scope ptr** (0x…)` | Upstreamed |
 | [0003](0003-attribute-parameter-pack-substituted-empty.md) | A function parameter pack in an attribute argument is substituted as an empty pack | open |
 | [0004](0004-attribute-parameter-after-pack-wrong-parameter.md) | A parameter after a function parameter pack, named in an attribute argument, is the wrong parameter in an instance | open |
-| [0005](0005-macos-base-predefines-blocks.md) | The macOS clang base predefines `__BLOCKS__`, but the front end cannot parse block syntax | fixed (branch `0005`) |
-| [0006](0006-macos-base-missing-interference-size-macros.md) | The macOS clang base lacks `__GCC_DESTRUCTIVE_SIZE` and `__GCC_CONSTRUCTIVE_SIZE` | open |
+| [0005](upstreamed/0005-macos-base-predefines-blocks.md) | The macOS clang base predefines `__BLOCKS__`, but the front end cannot parse block syntax | Upstreamed |
+| [0006](0006-macos-base-missing-interference-size-macros.md) | The macOS clang base lacks `__GCC_DESTRUCTIVE_SIZE` and `__GCC_CONSTRUCTIVE_SIZE` | fixed on branch `0006`; not filed |
 | [0007](0007-clang-ext-vector-type-unsupported.md) | Native macOS builds do not support `ext_vector_type` (or `vector_size`), which libc++ uses | open |
 | [0008](0008-enable-if-address-of-release-local-constant.md) | Taking the address of a function with an `enable_if` whose condition is a constant is an internal error | open |
 | [0009](0009-enable-if-default-argument-not-evaluated.md) | A call that omits a defaulted parameter named in an `enable_if` condition is rejected | open |

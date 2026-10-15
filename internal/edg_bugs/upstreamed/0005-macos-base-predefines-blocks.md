@@ -3,9 +3,11 @@
 - **Labels:** `bug`, `infrastructure`
 - **Found:** M0 (2026-10-13). Narrowed in M1.5 (cause 1 of the libc++ failures in
   cerastes decision 0001); reproduced on upstream on 2026-10-15
-- **Status:** fixed. Branch `0005` in the fork clone is commit `cca18c33c5` on upstream
-  `main` `d6f83174c7`; merged into the fork's `cerastes` as `8e1eb6c0a6`
-- **Upstream issue:** not filed
+- **Status:** fixed. Branch `0005` is commit `7173149c6b` on upstream `main`
+  `d6f83174c7`, pushed for the PR. The fork's `cerastes` merged the version
+  before filing, `cca18c33c5` (the same fix; its test was then renamed
+  `GH307`), as `8e1eb6c0a6`
+- **Upstream issue:** filed as edgcpp/compiler#307, and a PR opened
 
 ## Summary
 
@@ -91,16 +93,16 @@ gives 8 errors in `usr/include/_stdlib.h`, at lines 298 (3), 308, 345, 352,
   - `#include <utility>` and `#include <cstdlib>` go from 8 errors to 0, and
     C17 `#include <stdlib.h>` from 6 to 0;
   - `<string>`, `<vector>`, `<algorithm>` and `<iostream>` go from 17 errors to
-    9; the rest are [0006](0006-macos-base-missing-interference-size-macros.md)
-    and [0007](0007-clang-ext-vector-type-unsupported.md);
+    9; the rest are [0006](../0006-macos-base-missing-interference-size-macros.md)
+    and [0007](../0007-clang-ext-vector-type-unsupported.md);
   - run natively with `edgy` against its recording, in `edg_x86_64` and
     `edg_x86_64_cp`, the new test fails with the upstream base, fails with a
     base that keeps `__block`, and passes with the fixed base.
 
 ## Fix
 
-Branch `0005`, commit `cca18c33c5` "Do not predefine __BLOCKS__ and __block in
-the macOS clang bases.":
+Branch `0005`, commit `7173149c6b` "Do not define `__BLOCKS__` with macOS
+Clang [GH #307]":
 - It removes `__BLOCKS__` and `__block` from the four copies of
   `predefined_macros.txt`. The headers then take their non-blocks paths.
 - It adds both macros to `delete_unneeded_entries` in
@@ -108,7 +110,7 @@ the macOS clang bases.":
   macOS does not bring them back. Run on Apple clang 21 before and after, the
   generated table differs in exactly those two lines. `util/Changes` has an
   entry.
-- The test is `tests/tests/changes/GH-no-blocks-predefine.sft.cpp`: the
+- The test is `tests/tests/changes/GH307.sft.cpp`: the
   reproducer, plus checks that `__block` and `__has_feature(blocks)` are off.
   The Linux bases never define the macros, so in the Docker configurations it
   passes with or without the fix. It fails before and passes after only
