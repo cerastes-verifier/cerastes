@@ -3,7 +3,8 @@
 - **Labels:** `bug`
 - **Found:** 0003 fix (2026-10-15). Reproduced on upstream `d6f83174c7` the same day;
   no `enable_if` is involved
-- **Status:** open
+- **Status:** fixed. Branch `0016` in the fork clone is commit `46d897f6b0` on upstream
+  `main` `d6f83174c7`; merged into the fork's `cerastes` as `b1403a3ae7`
 - **Upstream issue:** not filed
 
 ## Summary
@@ -83,19 +84,36 @@ g++ 16 accept both files.
   and the implementer's in `.tmp/agent-bugs/0003/probes/` (`g01_two_packs.cpp`,
   `g02_decl.cpp`, `g03_trailing_return.cpp`).
 
-## Suggested fix
+## Fix
 
-Count only the elements that have the pack's number: add `param_id->param_num ==
-param_num` to the loop condition (the variable `param_num`, the number of the pack, is
-already set at the top of the function):
+Branch `0016`, commit `46d897f6b0` "Count only the elements of a function
+parameter pack that belong to the pack.":
+- `find_parameter_for_pack` counts only the elements that have the pack's
+  number (`param_id->param_num == param_num` in the loop condition). A
+  pack's elements are contiguous and share one number, so the count stops at
+  the end of the pack. An empty pack counts 0, and a non-pack parameter
+  between two packs already stopped the old loop.
+- The other loops over pack elements in `scope_stk.c` and `templates.c`
+  already check the number or are delimited by start-of-pack arguments. The
+  back ends' name discriminators count across packs but include the
+  parameter's name, so they cannot collide (review).
+- Tests:
+  - `tests/tests/changes/GH-adjacent-packs.sft.cpp` (C++11 to 23, accepted by
+    clang 21 and g++ 16): a trailing return type and a `noexcept` naming two
+    adjacent packs, empty, middle and member cases, folds from C++17, a class
+    pack in a row with a member template's function pack, and three packs in
+    a row.
+  - `GH-adjacent-packs-mismatch.sft.cpp`: packs of different lengths are
+    still an error.
+  Both fail before and pass after, natively with `edgy` and in Docker
+  (`edg_x86_64`, `edg_x86_64_cp`).
+- Docker `changes,regressions` has no mismatch in either configuration.
+  `src/Changes` has an entry. Reviewed by the Opus auditor (approved).
 
-```c
-  for (; param_id != NULL && param_id->is_pack_element &&
-         param_id->param_num == param_num;
-       param_id = param_id->next) {
-    (*elements)++;
-  }
-```
+A member template using a class pack and two function packs in one expansion
+is accepted by g++ 16 and rejected by clang 21, so the test leaves it out.
+With an empty class pack, the same shapes fail for another reason
+([0018](0018-empty-class-pack-and-member-pack-in-one-expansion.md)).
 
 ## Impact on cerastes
 

@@ -55,8 +55,9 @@ file per bug, numbered like the decision records: `NNNN-short-name.md`.
 | [0013](0013-ext-vector-type-element-access-unsupported.md) | Element access on an `ext_vector_type` vector (`v.x`, swizzles) is unsupported | open |
 | [0014](0014-ext-vector-size-deduction-requires-int.md) | The size of an `ext_vector_type` alias template is deduced only into an `int` parameter | open |
 | [0015](0015-enable-if-reference-parameter-not-evaluated.md) | An `enable_if` condition that names a reference parameter rejects every call (and, after a pack, crashes) | open |
-| [0016](0016-adjacent-function-parameter-packs-element-count.md) | Two adjacent function parameter packs: one pack's element count includes the other's | open |
+| [0016](0016-adjacent-function-parameter-packs-element-count.md) | Two adjacent function parameter packs: one pack's element count includes the other's | fixed on branch `0016`; not filed |
 | [0017](0017-generic-lambda-in-function-template-declaration-crash.md) | A generic lambda with more `auto` parameters than the function template has template parameters, in its declaration, crashes the front end | open |
+| [0018](0018-empty-class-pack-and-member-pack-in-one-expansion.md) | An empty class pack and a member template's pack in one expansion: "identifier is undefined" at the class instantiation | open |
 
 0005, 0006 and 0007 are the three causes of the libc++ failures recorded
 in decision 0001: `<utility>`, `<string>`, `<vector>`, `<algorithm>` and
