@@ -213,6 +213,38 @@ error and a back-end diagnostic together. Write two tests.
 `--update-golden` leaves these tests alone. They need `CERASTES_FE`,
 `CERASTES_EDG_GEN` and `EDG_CLANG_VER_SCRAPE` from `build/env.sh`.
 
+## Every back-end diagnostic has a test
+
+`src/backend/diagnostics.def` lists the tags of the cerastes back end
+(`CERASTES_DIAG(tag, severity, "message")`); the harness reads the tags from it
+(a `cerastes-<tag>` in a header is validated against it). The harness self-test
+requires every tag of that file to be named by at least one `frontend-error`
+test under `tests/` or the documentation examples, with these exceptions, listed
+with their reasons in `UNTESTED_BY_FRONTEND_ERROR` in `scripts/test_run_tests.py`
+(an entry for a tag that a test names, or that the file no longer defines, fails
+as stale):
+- `contract_not_propagated`, `parameter_after_pack`, `result_name_on_void` and
+  `annotation_substitution_error` are defense-in-depth checks that EDG's own checks make
+  unreachable from source. A self-test runs `scripts/cerastes-fe.sh --c++20 --cerastes_checks_selftest
+  --brief_diagnostics --display_error_number` on a contracted function template
+  and a contracted variadic template, requires all four tags plus two
+  `unsupported_annotation_expression` errors (and no other error) with the
+  option, and a clean run without it. The same option injects an error node into a substituted annotation tree (the
+  `annotation_substitution_error` check) and makes the first tree of
+  the walk read one parameter reference as `(unmapped)` and one node as visited
+  twice (`(repeated node)`); `PrinterPathTests` checks both lines and both
+  errors, and that they are absent without the option.
+
+`unsupported_annotation_expression` (a fallback node, a depth over 256, a lambda
+body that is not one `return <expr>;`, an unmapped or repeated node) has
+negatives for the first three. `PrinterPathTests` (real front end, from source)
+shows each path of the walker's printer fire on a fixture, with a twin that
+does not reach it: `(children not printed)` (a requires-expression in a
+dependent contract), `(depth limit)`, `body <N statements>`, `tconst` kinds
+other than `tpck_expression`, `contract from root template`, and the walker
+warning `contract of <root> missing on <routine>` (with
+`--cerastes_walk_selftest` on a contracted template, never without it).
+
 ## Refused options
 
 The driver refuses some options before EDG runs (`--remove_unneeded_entities`,

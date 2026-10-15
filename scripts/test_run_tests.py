@@ -42,6 +42,30 @@ import check_doc_examples as cde  # noqa: E402
 import run_tests as rt  # noqa: E402
 
 REAL_ROOT = rt.ROOT  # before any test patches it
+
+
+def scrub_inherited_environment(environ=None, env_sh=None):
+    """Remove from the process environment every variable that build/env.sh
+    defines, and CERASTES_EDG_SRC, so that the self-test does not depend on the
+    shell that runs it (`. build/env.sh` is what CLAUDE.md tells developers to
+    do).  Tests that need such a variable set it explicitly (mock.patch.dict,
+    set_env); the tests of the real tools read the values from build/env.sh with
+    rt.load_env().  CERASTES_REQUIRE_E2E is the caller's switch and stays.
+    Returns the names removed."""
+    environ = os.environ if environ is None else environ
+    env_sh = Path(env_sh) if env_sh is not None else REAL_ROOT / "build" / "env.sh"
+    names = {"CERASTES_EDG_SRC"}
+    if env_sh.exists():
+        names |= set(re.findall(r"^export (\w+)=", env_sh.read_text(), re.MULTILINE))
+    names.discard("CERASTES_REQUIRE_E2E")
+    removed = sorted(n for n in names if n in environ)
+    for name in removed:
+        del environ[name]
+    return removed
+
+
+scrub_inherited_environment()
+
 _REAL_EDG_STAMP_PROBLEM = rt.edg_stamp_problem  # before any test patches it
 _real_stamp_memo: list = []
 
@@ -3405,7 +3429,8 @@ class E2EGateTests(unittest.TestCase):
                      "RealFrontEndGoldenTests", "WalkerSelfTestHookTests",
                      "DocBuildWarningsTests", "TreeScriptTwinTests", "EdgTreeToolTests",
                      "RealTagTableTests", "RealDiagnosticTests", "RealNativeTests",
-                     "RealRefusedTests"):
+                     "RealRefusedTests", "RealTagCoverageTests", "ChecksSelftestTests",
+                     "PrinterPathTests"):
             self.assertRegex(source, rf"@e2e_gate\([^@]*?\)\nclass {name}\b", name)
 
 
@@ -3703,7 +3728,12 @@ class DocBuildWarningsTests(unittest.TestCase):
         site = self.tmp / "out"
         status, out = self.run_check("--html", site)
         self.assertEqual(status, 0, out)  # not vacuous: the clean copy passes
-        self.assertIn("2 code blocks", out)  # ... and has blocks to look at
+        # ... and has blocks to look at: as many as the page sources declare (the
+        # copy holds the real documentation, so the number is not a constant)
+        declared = cde.check_tree(self.repo).blocks
+        self.assertGreaterEqual(declared, 2)  # the e2e page and a real page at least
+        found = int(re.search(r"(\d+) code blocks in a cerastes language", out).group(1))
+        self.assertGreaterEqual(found, declared, out)
         self.assertEqual(self.run_check()[0], 0)
         base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.repo, check=True,
                               capture_output=True, text=True).stdout.strip()
@@ -7006,6 +7036,50 @@ class EnvironmentAuthorityTests(DiagRunCase):
             self.assertIn("unknown EDG diagnostic tag `undefined_identifier`", out)
 
 
+class HermeticEnvironmentTests(unittest.TestCase):
+    """The self-test does not depend on the shell that runs it: the variables
+    build/env.sh defines are scrubbed from the process at import."""
+
+    def test_the_scrub_removes_what_env_sh_defines_and_the_override(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env_sh = Path(tmp) / "env.sh"
+            env_sh.write_text('# comment\nexport CERASTES_GCC_CC="/x"\nexport Z3_EXE="/z"\n'
+                              'export EDG_BASE="/b"\n')
+            environ = {"CERASTES_GCC_CC": "", "Z3_EXE": "/other", "EDG_BASE": "/b",
+                       "CERASTES_EDG_SRC": "/fork", "CERASTES_REQUIRE_E2E": "1",
+                       "PATH": "/bin", "SDKROOT": "/sdk", "CERASTES_UNLISTED": "keep"}
+            removed = scrub_inherited_environment(environ, env_sh)
+        self.assertEqual(removed, ["CERASTES_EDG_SRC", "CERASTES_GCC_CC", "EDG_BASE", "Z3_EXE"])
+        self.assertEqual(environ, {"CERASTES_REQUIRE_E2E": "1", "PATH": "/bin",
+                                   "SDKROOT": "/sdk", "CERASTES_UNLISTED": "keep"})
+
+    def test_the_scrub_covers_every_variable_of_the_real_env_sh(self):
+        real = REAL_ROOT / "build" / "env.sh"
+        if not real.exists():
+            self.skipTest("build/env.sh missing; run scripts/bootstrap.sh")
+        names = set(re.findall(r"^export (\w+)=", real.read_text(), re.MULTILINE))
+        environ = {n: "poison" for n in names}
+        scrub_inherited_environment(environ)
+        self.assertEqual(environ, {})
+
+    def test_the_authority_tests_pass_in_a_poisoned_shell(self):
+        # the twin of the scrub call at the top of this file: with it removed,
+        # the inherited values reach the fixtures and these tests fail
+        real = REAL_ROOT / "build" / "env.sh"
+        if not real.exists():
+            self.skipTest("build/env.sh missing; run scripts/bootstrap.sh")
+        env = dict(os.environ)
+        for name in re.findall(r"^export (\w+)=", real.read_text(), re.MULTILINE):
+            env[name] = "/poison/" + name
+        env["CERASTES_GCC_CC"] = ""
+        env["CERASTES_EDG_SRC"] = "/poison/fork"
+        proc = subprocess.run([sys.executable, str(Path(__file__).resolve()),
+                               "-k", "EnvironmentAuthorityTests", "-k", "BootstrapGitEnvironmentTests"],
+                              capture_output=True, text=True, env=env, cwd=REAL_ROOT)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertRegex(proc.stderr, r"Ran [1-9]\d* tests?")
+
+
 class NativeEnvironmentAuthorityTests(NativeCase):
     def test_an_empty_inherited_gcc_does_not_drop_gcc(self):
         t = self.native_test("a.cpp", "int f();")
@@ -7301,14 +7375,26 @@ class BootstrapGitEnvironmentTests(unittest.TestCase):
                         "GIT_INDEX_FILE": str(decoy / ".git" / "index"),
                         "GIT_OBJECT_DIRECTORY": str(decoy / ".git" / "objects"),
                         "GIT_COMMON_DIR": str(decoy / ".git"), "GIT_NAMESPACE": "x"})
-            run = subprocess.run([str(REAL_ROOT / "scripts" / "bootstrap.sh"), "--build-only"],
-                                 cwd=REAL_ROOT, env=env, capture_output=True, text=True,
-                                 timeout=900)
-            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
-            calls = log.read_text()
+            # This runs the real build step of the shared tree, so it can race
+            # another process that is building or editing it (the one flake seen
+            # was during a pin move).  The claim under test is about git's
+            # environment, so it is checked first and on every attempt, and a
+            # failed build is retried once before it fails the test.
+            attempts = []
+            for _ in range(2):
+                run = subprocess.run([str(REAL_ROOT / "scripts" / "bootstrap.sh"), "--build-only"],
+                                     cwd=REAL_ROOT, env=env, capture_output=True, text=True,
+                                     timeout=900)
+                attempts.append(run)
+                calls = log.read_text()
+                self.assertNotRegex(calls, r"(?m)^(?:" + "|".join(edg_tree.GIT_REDIRECTS) + ")=",
+                                    calls)  # (GIT_EDITOR and the like are not redirects)
+                if run.returncode == 0:
+                    break
             self.assertGreater(calls.count("-- "), 3, calls)  # the stub was used
-            self.assertNotRegex(calls, r"(?m)^(?:" + "|".join(edg_tree.GIT_REDIRECTS) + ")=",
-                                calls)  # (GIT_EDITOR and the like are not redirects)
+            self.assertEqual(attempts[-1].returncode, 0,
+                             f"after {len(attempts)} attempt(s):\n"
+                             + "\n".join(r.stdout[-2000:] + r.stderr[-2000:] for r in attempts))
 
 
 # ---------------------------------------------------------------------------
@@ -7636,12 +7722,336 @@ class RealRefusedTests(MemoisedStamp, unittest.TestCase):
         self.assertIn("may be an ordinary compilation with errors", out)
 
 
+# ---------------------------------------------------------------------------
+# The back end's diagnostics: every tag has a test
+# ---------------------------------------------------------------------------
+
+# Tags of src/backend/diagnostics.def that no frontend-error test can name, each
+# with the reason.  This list is pinned: an entry for a tag that a test now uses,
+# or that the definitions no longer have, fails (tag_coverage_problems).
+SELFTEST_ONLY_TAGS = {
+    "contract_not_propagated": "a defense-in-depth check that EDG's own substitution "
+                               "makes unreachable; `--cerastes_checks_selftest` simulates a "
+                               "lost contract (ChecksSelftestTests)",
+    "parameter_after_pack": "EDG rejects a contract that names a parameter after a pack "
+                            "first (attr_parameter_after_pack); the back end's copy is "
+                            "reached only by `--cerastes_checks_selftest`",
+    "result_name_on_void": "EDG rejects a result name on a void function first "
+                           "(attr_result_name_void_function); the back end's copy is "
+                           "reached only by `--cerastes_checks_selftest`",
+    "annotation_substitution_error": "EDG reports an erroneous annotation argument itself "
+                                     "before the back end sees it; `--cerastes_checks_selftest` "
+                                     "injects an error node into a substituted tree",
+}
+# Tags with no reproducer of any kind (neither a source test nor the self-test hook).
+# Empty today; an entry needs its reason, and goes when a test names the tag.
+NO_REPRODUCER_TAGS: dict[str, str] = {}
+UNTESTED_BY_FRONTEND_ERROR = {**SELFTEST_ONLY_TAGS, **NO_REPRODUCER_TAGS}
+
+
+def tag_coverage_problems(defined, used, allowed):
+    """What is wrong with how `used` (the cerastes tags that frontend-error tests
+    name) covers `defined` (src/backend/diagnostics.def), given `allowed`
+    (tag -> reason for tags no such test can name)."""
+    problems = []
+    for tag in sorted(defined - used - set(allowed)):
+        problems.append(f"the diagnostic `{tag}` has no frontend-error test and no entry in "
+                        "UNTESTED_BY_FRONTEND_ERROR")
+    for tag, reason in sorted(allowed.items()):
+        if not reason.strip():
+            problems.append(f"the allowlist entry `{tag}` has no reason")
+        if tag not in defined:
+            problems.append(f"the allowlist entry `{tag}` is not in diagnostics.def")
+        elif tag in used:
+            problems.append(f"the allowlist entry `{tag}` is stale: a frontend-error test "
+                            "names it now (remove the entry)")
+    for tag in sorted(used - defined):
+        problems.append(f"a test names `cerastes-{tag}`, which diagnostics.def does not define")
+    return problems
+
+
+class TagCoverageTwinTests(unittest.TestCase):
+    """The coverage check fails when it is weakened (fixture tag sets)."""
+
+    DEFINED = {"a", "b", "c"}
+
+    def test_a_covered_set_passes(self):
+        self.assertEqual(tag_coverage_problems(self.DEFINED, {"a", "b"}, {"c": "why"}), [])
+        self.assertEqual(tag_coverage_problems(self.DEFINED, {"a", "b", "c"}, {}), [])
+
+    def test_a_tag_without_a_test_or_a_reason_fails(self):
+        problems = tag_coverage_problems(self.DEFINED, {"a"}, {})
+        self.assertEqual(len(problems), 2)
+        self.assertTrue(all("has no frontend-error test" in p for p in problems))
+
+    def test_an_allowlist_entry_needs_a_reason(self):
+        self.assertTrue(tag_coverage_problems(self.DEFINED, {"a", "b"}, {"c": " "}))
+
+    def test_a_stale_allowlist_entry_fails(self):
+        problems = tag_coverage_problems(self.DEFINED, {"a", "b", "c"}, {"c": "why"})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("stale", problems[0])
+
+    def test_an_allowlist_entry_for_an_unknown_tag_fails(self):
+        problems = tag_coverage_problems(self.DEFINED, {"a", "b", "c"}, {"zzz": "why"})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("not in diagnostics.def", problems[0])
+
+    def test_a_test_naming_an_undefined_tag_fails(self):
+        problems = tag_coverage_problems(self.DEFINED, {"a", "b", "c", "q"}, {})
+        self.assertEqual(problems, ["a test names `cerastes-q`, which diagnostics.def does "
+                                    "not define"])
+
+    def test_the_real_allowlist_has_reasons(self):
+        for tag, reason in UNTESTED_BY_FRONTEND_ERROR.items():
+            self.assertGreater(len(reason.split()), 5, tag)
+        self.assertEqual(set(SELFTEST_ONLY_TAGS) & set(NO_REPRODUCER_TAGS), set())
+
+
+@e2e_gate((REAL_ROOT / "src" / "backend" / "diagnostics.def").is_file(),
+          "src/backend/diagnostics.def missing")
+class RealTagCoverageTests(unittest.TestCase):
+    def used_tags(self):
+        used = set()
+        for base in (REAL_ROOT / "tests", REAL_ROOT / "doc" / "modules" / "ROOT" / "examples"):
+            for f in base.rglob("*"):
+                if f.suffix in (".c", ".cpp") and f.is_file():
+                    exp = rt.read_header(f)
+                    if isinstance(exp, rt.Expectation):
+                        used |= {d.tag[len(rt.CERASTES_TAG_PREFIX):] for d in exp.diags
+                                 if d.tag.startswith(rt.CERASTES_TAG_PREFIX)}
+        return used
+
+    def test_every_back_end_diagnostic_has_a_test_or_a_reason(self):
+        defined = rt.load_cerastes_tags()
+        self.assertGreater(len(defined), 10)
+        self.assertEqual(tag_coverage_problems(defined, self.used_tags(),
+                                               UNTESTED_BY_FRONTEND_ERROR), [])
+
+
+@e2e_gate(_real_front_end_available() and _real_tables_available(),
+          "CERASTES_FE, scripts/cerastes-fe.sh or the generated headers missing; "
+          "run scripts/bootstrap.sh")
+class ChecksSelftestTests(unittest.TestCase):
+    """The defense-in-depth checks of the back end, which EDG's own checks make
+    unreachable from source, through `--cerastes_checks_selftest` (it simulates a
+    lost contract, a pack that is not last, a void return) on a contracted
+    function template and a contracted variadic template."""
+
+    SOURCE = ("#include <cerastes.h>\n\n"
+              "template <class T>\n"
+              "T twice(T v) CERASTES_REQUIRES(v >= 0) CERASTES_ENSURES(r, r >= v)\n"
+              "{\n  return v + v;\n}\n\n"
+              "template <class... Ts>\n"
+              "int count(int n, Ts... xs) CERASTES_REQUIRES(n >= 0)\n"
+              "{\n  return n + sizeof...(xs);\n}\n\n"
+              "int use()\n{\n  return twice(1) + count(1, 2, 3);\n}\n")
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.path = Path(tmp.name) / "s.cpp"
+        self.path.write_text(self.SOURCE)
+        self.env = rt.load_env()
+        self.registry = rt.load_registry(self.env)
+
+    def run_fe(self, *extra):
+        run = rt.run_tool([*rt.FE_COMMAND, "--c++20", *extra, *rt.DIAG_OPTIONS, str(self.path)],
+                          self.env, rt.FRONTEND_TIMEOUT_S)
+        parsed = rt.parse_fe_diagnostics(run.stderr)
+        tags = [d.tag(self.registry) for d in parsed.diags if d.severity == "error"]
+        return run, parsed, tags
+
+    def test_without_the_option_the_fixture_is_clean(self):
+        run, parsed, tags = self.run_fe()
+        self.assertEqual((run.returncode, run.stdout, run.stderr), (0, "", ""), run)
+        self.assertEqual(tags, [])
+
+    def test_with_the_option_every_selftest_check_fires(self):
+        run, parsed, tags = self.run_fe("--cerastes_checks_selftest")
+        self.assertEqual(run.returncode, rt.EDG_ERRORS_STATUS, run)
+        self.assertEqual(parsed.problems, [])
+        self.assertEqual(run.stdout, "")
+        cerastes = {t[len(rt.CERASTES_TAG_PREFIX):] for t in tags
+                    if t.startswith(rt.CERASTES_TAG_PREFIX)}
+        # the hook also injects an error node (annotation_substitution_error), and makes the first
+        # tree read one parameter reference as unmapped
+        # and one node as visited twice: two unsupported_annotation_expression errors
+        self.assertEqual(cerastes, set(SELFTEST_ONLY_TAGS) | {"unsupported_annotation_expression"},
+                         tags)
+        self.assertEqual(tags.count("cerastes-unsupported_annotation_expression"), 2, tags)
+        self.assertEqual(tags.count("cerastes-annotation_substitution_error"), 1, tags)
+        # and nothing else: no EDG error rides along
+        self.assertTrue(all(t.startswith(rt.CERASTES_TAG_PREFIX) for t in tags), tags)
+
+    def test_the_option_changes_nothing_but_these_errors(self):
+        # the hook is a test hook: a file with no contract is unaffected
+        self.path.write_text("int f(int x) { return x; }\ntemplate <class T> T g(T v) { return v; }"
+                             "\nint h() { return g(1); }\n")
+        run, _parsed, tags = self.run_fe("--cerastes_checks_selftest")
+        self.assertEqual((run.returncode, tags), (0, []), run)
+
+
+@e2e_gate(_real_front_end_available() and _real_tables_available(),
+          "CERASTES_FE, scripts/cerastes-fe.sh or the generated headers missing; "
+          "run scripts/bootstrap.sh")
+class PrinterPathTests(unittest.TestCase):
+    """Each fixture is a real source that reaches one path of the walker's
+    printer (and of the back end's check of the same tree); the twin next to it,
+    which does not, must not print it.  A fallback node, a depth over the cap, a
+    lambda body that is not one `return <expr>;`, an unmapped parameter reference
+    and a node visited twice are errors (unsupported_annotation_expression,
+    invariant 3), not silent output."""
+
+    UAE = "cerastes-unsupported_annotation_expression"
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+        self.env = rt.load_env()
+        self.registry = rt.load_registry(self.env)
+
+    def walk(self, source, *extra, name="p.cpp"):
+        path = self.dir / name
+        path.write_text("#include <cerastes.h>\n" + source)
+        run = rt.run_tool([*rt.FE_COMMAND, "--c++20", rt.WALK_OPTION, *extra, *rt.DIAG_OPTIONS,
+                           str(path)], self.env, rt.FRONTEND_TIMEOUT_S)
+        parsed = rt.parse_fe_diagnostics(run.stderr)
+        errors = [(d.tag(self.registry), d.line) for d in parsed.diags if d.severity == "error"]
+        return run, errors
+
+    def assertClean(self, run, errors):
+        self.assertEqual((run.returncode, run.stderr, errors), (0, "", []), run.stderr)
+
+    # -- children not printed: a requires-expression in a dependent contract
+    def test_a_requires_expression_in_a_dependent_contract(self):
+        run, errors = self.walk("template <class T> int h(T y) CERASTES_REQUIRES(requires (T q) "
+                                "{ q + y; });\nint use() { return h(1); }\n")
+        self.assertEqual(errors, [(self.UAE, 2)], run.stderr)
+        self.assertEqual(run.returncode, rt.EDG_ERRORS_STATUS)
+        self.assertRegex(run.stdout, r"node enk_requires type=bool @ L2:\d+ \(children not printed\)")
+        self.assertRegex(run.stdout, r"const true type=bool @ -")  # its instance is a constant
+        self.assertIn("an expression of kind enk_requires", run.stderr)
+        self.assertClean(*self.walk("template <class T> int h(T y) CERASTES_REQUIRES(y > 0);\n"
+                                    "int use() { return h(1); }\n"))
+        run, _ = self.walk("template <class T> int h(T y) CERASTES_REQUIRES(y > 0);\n"
+                           "int use() { return h(1); }\n")
+        self.assertNotIn("children not printed", run.stdout)
+
+    # -- depth limit
+    def chain(self, n):
+        return "int d(int y) CERASTES_REQUIRES(%s > 0);\n" % " + ".join(["y"] + ["1"] * n)
+
+    def test_a_deep_expression_hits_the_depth_cap(self):
+        run, errors = self.walk(self.chain(300))
+        self.assertEqual(errors, [(self.UAE, 2)], run.stderr)
+        self.assertIn("(depth limit)", run.stdout)
+        self.assertIn("an expression nested deeper than 256 levels", run.stderr)
+        ops = len(re.findall(r"^\s+op eok_add ", run.stdout, re.M))
+        self.assertTrue(200 < ops < 300, ops)
+        run, errors = self.walk(self.chain(100))
+        self.assertClean(run, errors)
+        self.assertNotIn("(depth limit)", run.stdout)
+        self.assertEqual(len(re.findall(r"^\s+op eok_add ", run.stdout, re.M)), 100)
+
+    # -- a lambda body that is not a single return
+    def test_a_lambda_body_with_several_statements(self):
+        run, errors = self.walk("int lam(int n) CERASTES_REQUIRES(cerastes::forall("
+                                "[](int i, int n) { int t = i; return t < n; }, n));\n")
+        self.assertEqual(errors, [(self.UAE, 2)], run.stderr)
+        self.assertIn("a lambda whose body is not a single return statement", run.stderr)
+        self.assertRegex(run.stdout, r"body <\d+ statements>")
+        run, errors = self.walk("int lam(int n) CERASTES_REQUIRES(cerastes::forall("
+                                "[](int i, int n) { return i < n; }, n));\n")
+        self.assertClean(run, errors)
+        self.assertIn("body return", run.stdout)
+        self.assertNotIn("statements>", run.stdout)
+
+    # -- tconst kinds other than tpck_expression
+    def test_tconst_kinds(self):
+        src = ("template <class T> T g(T v) CERASTES_REQUIRES(v >= sizeof(T) && alignof(T) > 0 "
+               "&& noexcept(v + 1));\n"
+               "int use() { return g(1); }\n")
+        run, errors = self.walk(src)
+        self.assertClean(run, errors)
+        for kind in ("tpck_sizeof", "tpck_alignof"):
+            self.assertRegex(run.stdout, rf"tconst {kind} operand=T type=unsigned long @ L2:\d+")
+        self.assertRegex(run.stdout, r"tconst tpck_noexcept type=bool @ L2:\d+")
+        run, errors = self.walk("template <class T> T g(T v) CERASTES_REQUIRES(v >= 0);\n"
+                                "int use() { return g(1); }\n")
+        self.assertClean(run, errors)
+        for kind in ("tpck_sizeof", "tpck_alignof", "tpck_noexcept"):
+            self.assertNotIn(kind, run.stdout)
+
+    # -- contract from root template
+    def test_a_member_template_prototype_shows_the_root_contract(self):
+        src = ("template <class U> struct S { template <class T> T g(T v); };\n"
+               "template <class U> template <class T> T S<U>::g(T v) CERASTES_REQUIRES(v >= 0) "
+               "{ return v; }\nint use() { S<long> s; return s.g(1); }\n")
+        run, errors = self.walk(src)
+        self.assertClean(run, errors)
+        self.assertIn("contract from root template S<U>::g", run.stdout)
+        run, errors = self.walk("template <class T> T g(T v) CERASTES_REQUIRES(v >= 0) "
+                                "{ return v; }\nint use() { return g(1); }\n")
+        self.assertNotIn("from root template", run.stdout)
+
+    # -- the walker's contract-missing warning
+    CONTRACTED = ("template <typename T>\nT inc(T v) CERASTES_REQUIRES(v >= 0) { return v + 1; }\n\n"
+                  "template <typename T>\nT never(T v) CERASTES_REQUIRES(v >= 0) { return v; }\n\n"
+                  "int use() { return inc(3); }\n")
+
+    def test_the_contract_missing_warning_fires_with_the_hook_only(self):
+        run, errors = self.walk(self.CONTRACTED)
+        self.assertClean(run, errors)
+        self.assertNotIn("warning:", run.stdout)
+        run, errors = self.walk(self.CONTRACTED, "--cerastes_walk_selftest")
+        self.assertClean(run, errors)
+        lines = run.stdout.splitlines()
+        self.assertIn("warning: contract of inc missing on inc", lines)
+        # the template with no instance has no instance routine to complain about
+        self.assertNotIn("warning: contract of never missing on never", lines)
+
+    def test_the_warning_needs_a_contract_on_the_root(self):
+        run, errors = self.walk("template <typename T>\nT inc(T v) { return v + 1; }\n"
+                                "int use() { return inc(3); }\n", "--cerastes_walk_selftest")
+        self.assertClean(run, errors)
+        self.assertFalse([l for l in run.stdout.splitlines()
+                          if l.startswith("warning: contract of")])
+
+    # -- (unmapped) and (repeated node), through --cerastes_checks_selftest
+    TWO_PARAMS = ("int f(int x, int y) CERASTES_REQUIRES(x > 0 && y > x) "
+                  "CERASTES_ENSURES(r, r > x);\n")
+
+    def test_unmapped_and_repeated_nodes_with_the_hook(self):
+        run, errors = self.walk(self.TWO_PARAMS, "--cerastes_checks_selftest")
+        self.assertEqual(run.returncode, rt.EDG_ERRORS_STATUS)
+        self.assertIn("(unmapped)", run.stdout)
+        self.assertIn("(repeated node)", run.stdout)
+        self.assertEqual(errors.count((self.UAE, 2)), 2, run.stderr)
+        self.assertIn("a parameter reference that is not understood", run.stderr)
+        self.assertIn("a node that is part of the tree twice", run.stderr)
+
+    def test_without_the_hook_neither_appears(self):
+        run, errors = self.walk(self.TWO_PARAMS)
+        self.assertClean(run, errors)
+        for marker in ("(unmapped)", "(repeated node)", "children not printed", "depth limit"):
+            self.assertNotIn(marker, run.stdout)
+
+    def test_the_hook_changes_only_the_first_tree(self):
+        run, errors = self.walk("int g(int x) CERASTES_REQUIRES(x > 0);\n" + self.TWO_PARAMS,
+                                "--cerastes_checks_selftest")
+        self.assertEqual(run.stdout.count("(unmapped)"), 1, run.stdout)
+        self.assertEqual(run.stdout.count("(repeated node)"), 1, run.stdout)
+
+
 class DocumentationTests(unittest.TestCase):
     """tests/README.md describes every kind and rule of this harness."""
 
     def test_the_readme_documents_the_extensions(self):
         text = (REAL_ROOT / "tests" / "README.md").read_text()
-        for needle in ("frontend-refused", "cerastes-fe-options", "cerastes-fe: error: ",
+        for needle in ("--cerastes_checks_selftest", "UNTESTED_BY_FRONTEND_ERROR",
+                       "diagnostics.def", "frontend-refused", "cerastes-fe-options", "cerastes-fe: error: ",
                        "frontend-ok` is a header error", "switch its own check off",
                        "inline code", "verifies the active kind's build stamp",
                        "GIT_REDIRECTS", "twin-exempt", "tests/annotations/warnings", "authoritative",
