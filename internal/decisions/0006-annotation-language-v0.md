@@ -276,7 +276,9 @@ summarized here):
         are not `pure`, `predicate` or spec functions, and implicit ones:
         overloaded operators, conversion functions, constructors and
         destructors. M3's encoder rejects them;
-      - a registered attribute in a namespace other than `cerastes`;
+      - (a registered attribute in a namespace other than `cerastes` cannot
+        occur: cerastes registers only `cerastes`, and EDG's test attributes
+        are compiled out, 0002);
       - an `invariant` that names a variable shadowed by the loop's own
         init-statement or range-`for` declaration (item 2);
       - a cerastes attribute on a lambda (`[] [[cerastes::requires(…)]] () {}`
@@ -314,11 +316,26 @@ summarized here):
       Each diagnostic has one owner, either EDG or cerastes, and a must-fail
       test.
     - **Known gap.** Every cerastes-side check of a dependent construct is
-      made in each instance: a `fold`/`unfold` callee, and a dependent
-      assignment such as `v = 0` on a `T`, which is not an `eok_assign` in the
-      prototype. In a template that is never instantiated, these constructs
-      are not checked in M2. M4's eligibility checker must fail closed on
-      them.
+      made in each instance: a `fold`/`unfold` callee, a dependent assignment
+      such as `v = 0` on a `T` (not an `eok_assign` in the prototype), and a
+      predicate whose return type is dependent. In a template that is never
+      instantiated, these constructs are not checked in M2. M4's eligibility
+      checker must fail closed on them.
+    - **Spec functions are identified by entity,** never by spelling: the
+      `cerastes::` declarations from `<cerastes.h>`, whether reached
+      qualified, through `using`, or as a template-id (`old<T>`).
+    - **No file is exempt.** Every routine, statement and body that carries
+      a `cerastes::` attribute is checked, in whatever file it is, including
+      a header marked as a system header, a linemarker, a `--sys_include`
+      directory, or a C redeclaration of a library function (CP5 audit). The
+      walker warns about such attributes outside the primary file.
+    - **`__CERASTES__` is the front end's.** Defining, undefining or
+      redefining it, on the command line or in the source, is refused, and
+      `back_end()` checks it as a backstop. Otherwise a single
+      `#undef __CERASTES__` would silently drop every contract.
+    - `old` in the body of a `pure` or `predicate` function, and spec
+      functions reached through a function pointer, are left to M3/M6 (Viper
+      functions have no `old`).
     - **Positions.** A cerastes diagnostic, like EDG's own under
       `FULLY_RESOLVED_MACRO_POSITIONS`, points at the original position of
       the offending text (`orig_seq`/`orig_column`) when that position lies
