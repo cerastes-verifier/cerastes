@@ -1,0 +1,60 @@
+routine nonneg plain body @ L9:25
+  returns bool
+  param 1 x: int
+  attr [[cerastes::predicate]] on routine @ L9:1
+routine plus1 plain body @ L14:19
+  returns int
+  param 1 x: int
+  attr [[cerastes::requires]] on routine @ L14:32
+    arg 1 @ L14:50
+      op eok_gt type_kind=tk_integer type=int @ L14:52
+        param 1 x: int @ L14:50
+        const 0 type=int @ L14:54
+  attr [[cerastes::ensures]] on routine @ L14:57
+    arg 1 binder r: int @ L14:74
+    arg 2 @ L14:77
+      op eok_eq type_kind=tk_integer type=int @ L14:79
+        binder r: int @ L14:77
+        op eok_add type_kind=tk_integer type=int @ L14:84
+          param 1 x: int @ L14:82
+          const 1 type=int @ L14:86
+  attr [[cerastes::pure]] on routine @ L14:1
+routine everything plain body @ L19:5
+  returns int
+  param 1 n: int
+  attr [[cerastes::requires]] on routine @ L19:23
+    arg 1 @ L19:41
+      op eok_ge type_kind=tk_integer type=int @ L19:43
+        param 1 n: int @ L19:41
+        const 0 type=int @ L19:46
+  attr [[cerastes::ensures]] on routine @ L19:49
+    arg 1 binder r: int @ L19:66
+    arg 2 @ L19:69
+      op eok_eq type_kind=tk_integer type=int @ L19:71
+        binder r: int @ L19:69
+        param 1 n: int @ L19:74
+  stmt stmk_while @ L22:40 attr [[cerastes::invariant]] @ L22:3
+    arg 1 @ L22:22
+      op eok_land type_kind=tk_integer type=int @ L22:29
+        op eok_le type_kind=tk_integer type=int @ L22:24
+          const 0 type=int @ L22:22
+          var i: int decl=L21:7 @ L22:27
+        op eok_le type_kind=tk_integer type=int @ L22:34
+          var i: int decl=L21:7 @ L22:32
+          var n: int decl=L19:20 @ L22:37
+  stmt stmk_empty @ L25:25 attr [[cerastes::check]] @ L25:3
+    arg 1 @ L25:18
+      op eok_eq type_kind=tk_integer type=int @ L25:20
+        var i: int decl=L21:7 @ L25:18
+        var n: int decl=L19:20 @ L25:23
+  stmt stmk_empty @ L26:27 attr [[cerastes::fold]] @ L26:3
+    arg 1 @ L26:17
+      op eok_call type_kind=tk_unknown type=bool @ L26:23
+        routine nonneg: bool (*)(int) @ L26:17
+        var i: int decl=L21:7 @ L26:24
+  stmt stmk_empty @ L27:29 attr [[cerastes::unfold]] @ L27:3
+    arg 1 @ L27:19
+      op eok_call type_kind=tk_unknown type=bool @ L27:25
+        routine nonneg: bool (*)(int) @ L27:19
+        var i: int decl=L21:7 @ L27:26
+end walk: 3 routines reported, 0 routines with bodies in non-system files outside the primary file

@@ -1,0 +1,32 @@
+routine grid plain body @ L7:5
+  returns int
+  param 1 n: int
+  attr [[cerastes::requires]] on routine @ L7:17
+    arg 1 @ L7:35
+      op eok_ge type_kind=tk_integer type=bool @ L7:37
+        param 1 n: int @ L7:35
+        const 0 type=int @ L7:40
+  stmt stmk_while @ L12:3 attr [[cerastes::invariant]] @ L12:3
+    arg 1 @ L12:22
+      op eok_land type_kind=tk_integer type=bool @ L12:29
+        op eok_le type_kind=tk_integer type=bool @ L12:24
+          const 0 type=int @ L12:22
+          var i: int decl=L9:7 @ L12:27
+        op eok_le type_kind=tk_integer type=bool @ L12:34
+          var i: int decl=L9:7 @ L12:32
+          var n: int decl=L7:14 @ L12:37
+  stmt stmk_while @ L12:3 attr [[cerastes::invariant]] @ L12:40
+    arg 1 @ L12:59
+      op eok_ge type_kind=tk_integer type=bool @ L12:61
+        var c: int decl=L11:7 @ L12:59
+        const 0 type=int @ L12:64
+  stmt stmk_while @ L14:5 attr [[cerastes::invariant]] @ L14:5
+    arg 1 @ L14:24
+      op eok_land type_kind=tk_integer type=bool @ L14:31
+        op eok_le type_kind=tk_integer type=bool @ L14:26
+          const 0 type=int @ L14:24
+          var j: int decl=L10:7 @ L14:29
+        op eok_le type_kind=tk_integer type=bool @ L14:36
+          var j: int decl=L10:7 @ L14:34
+          var n: int decl=L7:14 @ L14:39
+end walk: 1 routines reported, 0 routines with bodies in non-system files outside the primary file

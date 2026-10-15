@@ -1,0 +1,68 @@
+routine sum_n prototype body @ L8:3
+  returns T
+  param 1 n: T
+  attr [[cerastes::requires]] on routine @ L8:14
+    arg 1 @ L8:32
+      op eok_bool_cast type_kind=tk_template_param type=bool @ L8:32
+        op eok_ge type_kind=tk_template_param type=<tptk_unknown> @ L8:34
+          param 1 n: T lvalue @ L8:32
+          const 0 type=int @ L8:37
+  tconst tpck_expression type=T @ L10:9
+  op eok_cast type_kind=tk_unknown type=T @ L10:9
+  tconst tpck_expression type=T @ L11:9
+  op eok_cast type_kind=tk_unknown type=T @ L11:9
+  stmt stmk_while @ L12:3 attr [[cerastes::invariant]] @ L12:3
+    arg 1 @ L12:22
+      op eok_bool_cast type_kind=tk_template_param type=bool @ L12:22
+        op eok_land type_kind=tk_integer type=<tptk_unknown> @ L12:39
+          op eok_land type_kind=tk_integer type=<tptk_unknown> @ L12:29
+            op eok_ge type_kind=tk_template_param type=<tptk_unknown> @ L12:24
+              var i: T decl=L10:5 lvalue @ L12:22
+              const 0 type=int @ L12:27
+            op eok_le type_kind=tk_template_param type=<tptk_unknown> @ L12:34
+              var i: T decl=L10:5 lvalue @ L12:32
+              var n: T decl=L8:11 lvalue @ L12:37
+          op eok_ge type_kind=tk_template_param type=<tptk_unknown> @ L12:44
+            var s: T decl=L11:5 lvalue @ L12:42
+            const 0 type=int @ L12:47
+  op eok_bool_cast type_kind=tk_template_param type=bool @ L12:57
+  op eok_lt type_kind=tk_template_param type=<tptk_unknown> @ L12:59
+  op eok_add_assign type_kind=tk_template_param type=<tptk_unknown> @ L13:7
+  op eok_add_assign type_kind=tk_integer type=<tptk_unknown> @ L14:7
+  stmt stmk_empty @ L16:3 attr [[cerastes::check]] @ L16:3
+    arg 1 @ L16:18
+      op eok_bool_cast type_kind=tk_template_param type=bool @ L16:18
+        op eok_ge type_kind=tk_template_param type=<tptk_unknown> @ L16:20
+          var s: T decl=L11:5 lvalue @ L16:18
+          const 0 type=int @ L16:23
+routine sum_n instance body @ L8:3
+  returns int
+  param 1 n: int
+  template sum_n args <T=int>
+  attr [[cerastes::requires]] on routine @ L8:14
+    arg 1 @ L8:32
+      op eok_ge type_kind=tk_integer type=bool @ L8:34
+        param 1 n: int @ L8:32
+        const 0 type=int @ L8:37
+  stmt stmk_while @ L12:3 attr [[cerastes::invariant]] @ L12:3
+    arg 1 @ L12:22
+      op eok_land type_kind=tk_integer type=bool @ L12:39
+        op eok_land type_kind=tk_integer type=bool @ L12:29
+          op eok_ge type_kind=tk_integer type=bool @ L12:24
+            var i: int decl=L10:5 @ L12:22
+            const 0 type=int @ L12:27
+          op eok_le type_kind=tk_integer type=bool @ L12:34
+            var i: int decl=L10:5 @ L12:32
+            var n: int decl=L8:11 @ L12:37
+        op eok_ge type_kind=tk_integer type=bool @ L12:44
+          var s: int decl=L11:5 @ L12:42
+          const 0 type=int @ L12:47
+  stmt stmk_empty @ L16:3 attr [[cerastes::check]] @ L16:3
+    arg 1 @ L16:18
+      op eok_ge type_kind=tk_integer type=bool @ L16:20
+        var s: int decl=L11:5 @ L16:18
+        const 0 type=int @ L16:23
+routine use plain body @ L20:5
+  returns int
+  param 1 n: int
+end walk: 3 routines reported, 0 routines with bodies in non-system files outside the primary file

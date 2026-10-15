@@ -1,0 +1,35 @@
+routine in_range plain body @ L8:25
+  returns bool
+  param 1 lo: int
+  param 2 hi: int
+  param 3 v: int
+  attr [[cerastes::predicate]] on routine @ L8:1
+routine use plain body @ L13:5
+  returns int
+  param 1 lo: int
+  param 2 hi: int
+  param 3 v: int
+  attr [[maybe_unused]] on param 1 @ L13:11
+  attr [[maybe_unused]] on param 2 @ L13:36
+  attr [[cerastes::requires]] on routine @ L13:66
+    arg 1 @ L13:84
+      op eok_call type_kind=tk_unknown type=bool @ L13:92
+        routine in_range: bool (*)(int, int, int) @ L13:84
+        param 1 lo: int @ L13:93
+        param 2 hi: int @ L13:97
+        param 3 v: int @ L13:101
+  stmt stmk_empty @ L15:3 attr [[cerastes::unfold]] @ L15:3
+    arg 1 @ L15:19
+      op eok_call type_kind=tk_unknown type=bool @ L15:27
+        routine in_range: bool (*)(int, int, int) @ L15:19
+        var lo: int decl=L13:30 @ L15:28
+        var hi: int decl=L13:55 @ L15:32
+        var v: int decl=L13:63 @ L15:36
+  stmt stmk_empty @ L17:3 attr [[cerastes::fold]] @ L17:3
+    arg 1 @ L17:17
+      op eok_call type_kind=tk_unknown type=bool @ L17:25
+        routine in_range: bool (*)(int, int, int) @ L17:17
+        var lo: int decl=L13:30 @ L17:26
+        var hi: int decl=L13:55 @ L17:30
+        var w: int decl=L16:7 @ L17:34
+end walk: 2 routines reported, 0 routines with bodies in non-system files outside the primary file

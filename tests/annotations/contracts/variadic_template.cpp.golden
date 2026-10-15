@@ -1,0 +1,67 @@
+routine count prototype body @ L11:5
+  returns int
+  param 1 args: Ts
+  attr [[cerastes::requires]] on routine @ L11:23
+    arg 1 @ L11:41
+      op eok_gt type_kind=tk_integer type=bool @ L11:55
+        tconst tpck_expression type=unsigned long @ L11:41
+          sizeof... Ts type=unsigned long @ L11:41
+        op eok_cast type_kind=tk_integer type=unsigned long cast=implicit @ L11:57
+          const 0 type=int @ L11:57
+  attr [[cerastes::ensures]] on routine @ L11:60
+    arg 1 binder r: int @ L11:77
+    arg 2 @ L11:80
+      op eok_gt type_kind=tk_integer type=bool @ L11:82
+        binder r: int @ L11:80
+        const 0 type=int @ L11:84
+  op eok_cast type_kind=tk_integer type=int @ L13:10
+  tconst tpck_expression type=unsigned long @ L13:10
+  op eok_cast type_kind=tk_integer type=int @ -
+  tconst tpck_expression type=unsigned long @ -
+  tconst tpck_expression type=int @ -
+routine count instance body @ L11:5
+  returns int
+  param 1 args: int
+  param 2 args: int
+  template count args <Ts=pack{int, int}>
+  attr [[cerastes::requires]] on routine @ L11:23
+    arg 1 @ L11:41
+      op eok_gt type_kind=tk_integer type=bool @ L11:55
+        const 2 type=unsigned long @ L11:55
+        op eok_cast type_kind=tk_integer type=unsigned long cast=implicit @ L11:57
+          const 0 type=int @ L11:57
+  attr [[cerastes::ensures]] on routine @ L11:60
+    arg 1 binder r: int @ L11:77
+    arg 2 @ L11:80
+      op eok_gt type_kind=tk_integer type=bool @ L11:82
+        binder r: int @ L11:80
+        const 0 type=int @ L11:84
+routine count2 prototype body @ L18:5
+  returns int
+  param 1 args: Ts
+  attr [[cerastes::requires]] on routine @ L18:26
+    arg 1 @ L18:45
+      op eok_gt type_kind=tk_integer type=bool @ L18:59
+        tconst tpck_expression type=unsigned long @ L18:45
+          sizeof... Ts type=unsigned long @ L18:45
+        op eok_cast type_kind=tk_integer type=unsigned long cast=implicit @ L18:61
+          const 0 type=int @ L18:61
+  op eok_cast type_kind=tk_integer type=int @ L20:10
+  tconst tpck_expression type=unsigned long @ L20:10
+  op eok_cast type_kind=tk_integer type=int @ -
+  tconst tpck_expression type=unsigned long @ -
+  tconst tpck_expression type=int @ -
+routine count2 instance body @ L18:5
+  returns int
+  param 1 args: int
+  param 2 args: int
+  template count2 args <Ts=pack{int, int}>
+  attr [[cerastes::requires]] on routine @ L18:26
+    arg 1 @ L18:45
+      op eok_gt type_kind=tk_integer type=bool @ L18:59
+        const 2 type=unsigned long @ L18:59
+        op eok_cast type_kind=tk_integer type=unsigned long cast=implicit @ L18:61
+          const 0 type=int @ L18:61
+routine use plain body @ L30:5
+  returns int
+end walk: 5 routines reported, 0 routines with bodies in non-system files outside the primary file

@@ -1,0 +1,37 @@
+routine dbl prototype body @ L10:22
+  returns T
+  param 1 w: T
+  attr [[cerastes::requires]] on routine @ L8:31
+    arg 1 @ L8:49
+      op eok_bool_cast type_kind=tk_template_param type=bool @ L8:49
+        op eok_ge type_kind=tk_template_param type=<tptk_unknown> @ L8:51
+          param 1 w: T lvalue @ L8:49
+          const 0 type=int @ L8:54
+  attr [[cerastes::ensures]] on routine @ L8:57
+    arg 1 binder r: T @ L8:74
+    arg 2 @ L8:77
+      op eok_bool_cast type_kind=tk_template_param type=bool @ L8:77
+        op eok_ge type_kind=tk_template_param type=<tptk_unknown> @ L8:79
+          binder r: T lvalue @ L8:77
+          param 1 w: T lvalue @ L8:82
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L12:12
+routine dbl instance body @ L10:22
+  returns long
+  param 1 w: long
+  template dbl args <T=long>
+  attr [[cerastes::requires]] on routine @ L8:31
+    arg 1 @ L8:49
+      op eok_ge type_kind=tk_integer type=bool @ L8:51
+        param 1 w: long @ L8:49
+        op eok_cast type_kind=tk_integer type=long cast=implicit @ L8:54
+          const 0 type=int @ L8:54
+  attr [[cerastes::ensures]] on routine @ L8:57
+    arg 1 binder r: long @ L8:74
+    arg 2 @ L8:77
+      op eok_ge type_kind=tk_integer type=bool @ L8:79
+        binder r: long @ L8:77
+        param 1 w: long @ L8:82
+routine use plain body @ L15:6
+  returns long
+  param 1 x: long
+end walk: 3 routines reported, 0 routines with bodies in non-system files outside the primary file

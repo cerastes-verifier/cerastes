@@ -1,0 +1,120 @@
+routine cell::operator= plain implicit nobody @ L8:8
+  returns cell &
+  param 1 _: cell &&
+routine cell::operator= plain implicit nobody @ L8:8
+  returns cell &
+  param 1 _: const cell &
+routine set plain body @ L12:6
+  returns void
+  param 1 c: cell *
+  param 2 v: int
+  attr [[cerastes::requires]] on routine @ L13:3
+    arg 1 @ L13:21
+      op eok_call type_kind=tk_unknown type=bool @ L13:35
+        routine cerastes::owns args <T=int>: bool (*)(const int &) noexcept @ L13:21
+        op eok_reference_to type_kind=tk_pointer type=const int & @ L13:36
+          op eok_lvalue_adjust type_kind=tk_integer type=const int lvalue @ L13:37
+            op eok_points_to_field type_kind=tk_unknown type=int lvalue @ L13:37
+              param 1 c: cell * @ L13:36
+              field cell::val: int @ L13:39
+  attr [[cerastes::ensures]] on routine @ L14:3
+    arg 1 @ L14:20
+      op eok_land type_kind=tk_integer type=bool @ L14:43
+        op eok_call type_kind=tk_unknown type=bool @ L14:34
+          routine cerastes::owns args <T=int>: bool (*)(const int &) noexcept @ L14:20
+          op eok_reference_to type_kind=tk_pointer type=const int & @ L14:35
+            op eok_lvalue_adjust type_kind=tk_integer type=const int lvalue @ L14:36
+              op eok_points_to_field type_kind=tk_unknown type=int lvalue @ L14:36
+                param 1 c: cell * @ L14:35
+                field cell::val: int @ L14:38
+        op eok_eq type_kind=tk_integer type=bool @ L14:53
+          op eok_points_to_field type_kind=tk_unknown type=int @ L14:47
+            param 1 c: cell * @ L14:46
+            field cell::val: int @ L14:49
+          param 2 v: int @ L14:56
+routine get plain body @ L19:5
+  returns int
+  param 1 c: const cell *
+  attr [[cerastes::requires]] on routine @ L19:24
+    arg 1 @ L19:42
+      op eok_call type_kind=tk_unknown type=bool @ L19:57
+        routine cerastes::reads args <T=int>: bool (*)(const int &) noexcept @ L19:42
+        op eok_reference_to type_kind=tk_pointer type=const int & @ L19:58
+          op eok_points_to_field type_kind=tk_unknown type=const int lvalue @ L19:59
+            param 1 c: const cell * @ L19:58
+            field cell::val: int @ L19:61
+  attr [[cerastes::ensures]] on routine @ L19:67
+    arg 1 binder r: int @ L19:84
+    arg 2 @ L19:87
+      op eok_eq type_kind=tk_integer type=bool @ L19:89
+        binder r: int @ L19:87
+        op eok_points_to_field type_kind=tk_unknown type=int @ L19:93
+          param 1 c: const cell * @ L19:92
+          field cell::val: int @ L19:95
+routine bump plain body @ L24:6
+  returns void
+  param 1 c: cell *
+  attr [[cerastes::requires]] on routine @ L25:3
+    arg 1 @ L25:21
+      op eok_land type_kind=tk_integer type=bool @ L25:44
+        op eok_call type_kind=tk_unknown type=bool @ L25:35
+          routine cerastes::owns args <T=int>: bool (*)(const int &) noexcept @ L25:21
+          op eok_reference_to type_kind=tk_pointer type=const int & @ L25:36
+            op eok_lvalue_adjust type_kind=tk_integer type=const int lvalue @ L25:37
+              op eok_points_to_field type_kind=tk_unknown type=int lvalue @ L25:37
+                param 1 c: cell * @ L25:36
+                field cell::val: int @ L25:39
+        op eok_lt type_kind=tk_integer type=bool @ L25:54
+          op eok_points_to_field type_kind=tk_unknown type=int @ L25:48
+            param 1 c: cell * @ L25:47
+            field cell::val: int @ L25:50
+          const 100 type=int @ L25:56
+  attr [[cerastes::ensures]] on routine @ L26:3
+    arg 1 @ L26:20
+      op eok_land type_kind=tk_integer type=bool @ L26:43
+        op eok_call type_kind=tk_unknown type=bool @ L26:34
+          routine cerastes::owns args <T=int>: bool (*)(const int &) noexcept @ L26:20
+          op eok_reference_to type_kind=tk_pointer type=const int & @ L26:35
+            op eok_lvalue_adjust type_kind=tk_integer type=const int lvalue @ L26:36
+              op eok_points_to_field type_kind=tk_unknown type=int lvalue @ L26:36
+                param 1 c: cell * @ L26:35
+                field cell::val: int @ L26:38
+        op eok_eq type_kind=tk_integer type=bool @ L26:53
+          op eok_points_to_field type_kind=tk_unknown type=int @ L26:47
+            param 1 c: cell * @ L26:46
+            field cell::val: int @ L26:49
+          op eok_add type_kind=tk_integer type=int @ L26:78
+            op eok_ref_indirect type_kind=tk_pointer type=int @ L26:69
+              op eok_call type_kind=tk_unknown type=const int & @ L26:69
+                routine cerastes::old args <T=int>: const int &(*)(const int &) noexcept @ L26:56
+                op eok_reference_to type_kind=tk_pointer type=const int & @ L26:70
+                  op eok_lvalue_adjust type_kind=tk_integer type=const int lvalue @ L26:71
+                    op eok_points_to_field type_kind=tk_unknown type=int lvalue @ L26:71
+                      param 1 c: cell * @ L26:70
+                      field cell::val: int @ L26:73
+            const 1 type=int @ L26:80
+routine first plain body @ L31:5
+  returns int
+  param 1 a: const int *
+  param 2 n: unsigned int
+  attr [[cerastes::requires]] on routine @ L32:3
+    arg 1 @ L32:21
+      op eok_land type_kind=tk_integer type=bool @ L32:27
+        op eok_gt type_kind=tk_integer type=bool @ L32:23
+          param 2 n: unsigned int @ L32:21
+          op eok_cast type_kind=tk_integer type=unsigned int cast=implicit @ L32:25
+            const 0 type=int @ L32:25
+        op eok_call type_kind=tk_unknown type=bool @ L32:50
+          routine cerastes::owns_range args <T=int>: bool (*)(const int *, unsigned long) noexcept @ L32:30
+          param 1 a: const int * @ L32:51
+          op eok_cast type_kind=tk_integer type=unsigned long cast=implicit @ L32:54
+            param 2 n: unsigned int @ L32:54
+  attr [[cerastes::ensures]] on routine @ L33:3
+    arg 1 binder r: int @ L33:20
+    arg 2 @ L33:23
+      op eok_eq type_kind=tk_integer type=bool @ L33:25
+        binder r: int @ L33:23
+        op eok_subscript type_kind=tk_pointer type=int @ L33:29
+          param 1 a: const int * @ L33:28
+          const 0 type=int @ L33:30
+end walk: 6 routines reported, 0 routines with bodies in non-system files outside the primary file

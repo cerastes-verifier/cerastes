@@ -1,0 +1,92 @@
+routine m prototype body @ L11:5
+  returns int
+  param 1 y: int
+  param 2 xs: Ts
+  attr [[cerastes::requires]] on routine @ L11:24
+    arg 1 @ L11:42
+      op eok_ge type_kind=tk_integer type=bool @ L11:44
+        param 1 y: int @ L11:42
+        const 0 type=int @ L11:47
+  attr [[cerastes::ensures]] on routine @ L11:50
+    arg 1 binder r: int @ L11:67
+    arg 2 @ L11:70
+      op eok_ge type_kind=tk_integer type=bool @ L11:72
+        binder r: int @ L11:70
+        param 1 y: int @ L11:75
+  op eok_cast type_kind=tk_integer type=int @ L13:10
+  op eok_add type_kind=tk_integer type=unsigned long @ L13:12
+  op eok_cast type_kind=tk_integer type=unsigned long @ L13:10
+  tconst tpck_expression type=unsigned long @ L13:14
+routine m instance body @ L11:5
+  returns int
+  param 1 y: int
+  param 2 xs: int
+  param 3 xs: double
+  template m args <Ts=pack{int, double}>
+  attr [[cerastes::requires]] on routine @ L11:24
+    arg 1 @ L11:42
+      op eok_ge type_kind=tk_integer type=bool @ L11:44
+        param 1 y: int @ L11:42
+        const 0 type=int @ L11:47
+  attr [[cerastes::ensures]] on routine @ L11:50
+    arg 1 binder r: int @ L11:67
+    arg 2 @ L11:70
+      op eok_ge type_kind=tk_integer type=bool @ L11:72
+        binder r: int @ L11:70
+        param 1 y: int @ L11:75
+routine m2 prototype body @ L16:5
+  returns int
+  param 1 y: int
+  param 2 xs: auto
+  attr [[cerastes::requires]] on routine @ L16:27
+    arg 1 @ L16:45
+      op eok_ge type_kind=tk_integer type=bool @ L16:47
+        param 1 y: int @ L16:45
+        const 0 type=int @ L16:50
+  op eok_cast type_kind=tk_integer type=int @ L18:10
+  op eok_add type_kind=tk_integer type=unsigned long @ L18:12
+  op eok_cast type_kind=tk_integer type=unsigned long @ L18:10
+  tconst tpck_expression type=unsigned long @ L18:14
+routine m2 instance body @ L16:5
+  returns int
+  param 1 y: int
+  param 2 xs: int
+  template m2 args <#0=pack{int}>
+  attr [[cerastes::requires]] on routine @ L16:27
+    arg 1 @ L16:45
+      op eok_ge type_kind=tk_integer type=bool @ L16:47
+        param 1 y: int @ L16:45
+        const 0 type=int @ L16:50
+routine holder<int, long>::operator= plain implicit nobody @ L22:8
+  returns holder<int, long> &
+  param 1 _: const holder<int, long> &
+routine holder<int, long>::operator= plain implicit nobody @ L22:8
+  returns holder<int, long> &
+  param 1 _: holder<int, long> &&
+routine holder<Ts...>::m3 prototype body @ L23:7
+  returns int
+  param 1 y: int
+  param 2 xs: Ts
+  attr [[cerastes::requires]] on routine @ L23:27
+    arg 1 @ L23:45
+      op eok_ge type_kind=tk_integer type=bool @ L23:47
+        param 1 y: int @ L23:45
+        const 0 type=int @ L23:50
+  op eok_cast type_kind=tk_integer type=int @ L23:62
+  op eok_add type_kind=tk_integer type=unsigned long @ L23:64
+  op eok_cast type_kind=tk_integer type=unsigned long @ L23:62
+  tconst tpck_expression type=unsigned long @ L23:66
+routine holder<int, long>::m3 instance body @ L23:7
+  returns int
+  param 1 y: int
+  param 2 xs: int
+  param 3 xs: long
+  template holder<Ts...>::m3 args <none>
+  attr [[cerastes::requires]] on routine @ L23:27
+    arg 1 @ L23:45
+      op eok_ge type_kind=tk_integer type=bool @ L23:47
+        param 1 y: int @ L23:45
+        const 0 type=int @ L23:50
+routine use plain body @ L26:5
+  returns int
+end walk: 9 routines reported, 0 routines with bodies in non-system files outside the primary file

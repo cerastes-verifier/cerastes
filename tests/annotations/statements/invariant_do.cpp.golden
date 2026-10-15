@@ -1,0 +1,20 @@
+routine at_least_one plain body @ L6:5
+  returns int
+  param 1 n: int
+  attr [[cerastes::requires]] on routine @ L6:25
+    arg 1 @ L6:43
+      op eok_ge type_kind=tk_integer type=bool @ L6:45
+        param 1 n: int @ L6:43
+        const 0 type=int @ L6:48
+  stmt stmk_end_test_while @ L9:3 attr [[cerastes::invariant]] @ L9:3
+    arg 1 @ L9:22
+      op eok_land type_kind=tk_integer type=bool @ L9:29
+        op eok_le type_kind=tk_integer type=bool @ L9:24
+          const 0 type=int @ L9:22
+          var i: int decl=L8:7 @ L9:27
+        op eok_le type_kind=tk_integer type=bool @ L9:34
+          var i: int decl=L8:7 @ L9:32
+          op eok_add type_kind=tk_integer type=int @ L9:39
+            var n: int decl=L6:22 @ L9:37
+            const 1 type=int @ L9:41
+end walk: 1 routines reported, 0 routines with bodies in non-system files outside the primary file

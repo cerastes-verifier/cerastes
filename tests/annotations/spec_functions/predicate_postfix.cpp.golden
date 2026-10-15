@@ -1,0 +1,9 @@
+routine nonneg plain body @ L16:13
+  returns bool
+  param 1 x: int
+  attr [[cerastes::predicate]] on routine @ L9:29
+routine twice plain body @ L21:12
+  returns int
+  param 1 x: int
+  attr [[cerastes::pure]] on routine @ L10:27
+end walk: 2 routines reported, 0 routines with bodies in non-system files outside the primary file

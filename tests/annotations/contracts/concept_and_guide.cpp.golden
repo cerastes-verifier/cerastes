@@ -1,0 +1,30 @@
+routine box<int>::box plain implicit nobody @ L10:8
+  returns void
+  param 1 _: box<int> &&
+routine box<int>::box plain implicit nobody @ L10:8
+  returns void
+  param 1 _: const box<int> &
+routine box<int>::operator= plain implicit nobody @ L10:8
+  returns box<int> &
+  param 1 _: box<int> &&
+routine box<int>::operator= plain implicit nobody @ L10:8
+  returns box<int> &
+  param 1 _: const box<int> &
+routine <unnamed> prototype implicit nobody @ L11:3
+  returns box<T>
+  param 1 v: T
+routine box<T>::box prototype nobody @ L11:3
+  returns void
+  param 1 v: T
+routine box<int>::box instance nobody @ L11:3
+  returns void
+  param 1 v: int
+  template box<T>::box args <none>
+routine box prototype nobody @ L16:1
+  returns box<T>
+  param 1 x: T
+routine box instance nobody @ L16:1
+  returns box<int>
+  param 1 x: int
+  template box args <T=int>
+end walk: 9 routines reported, 0 routines with bodies in non-system files outside the primary file

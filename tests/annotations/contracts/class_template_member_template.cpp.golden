@@ -1,0 +1,47 @@
+routine box<int>::operator= plain implicit nobody @ L11:8
+  returns box<int> &
+  param 1 _: box<int> &&
+routine box<int>::operator= plain implicit nobody @ L11:8
+  returns box<int> &
+  param 1 _: const box<int> &
+routine box<int>::twice prototype nobody @ L12:24
+  returns T
+  param 1 v: T
+  attr [[cerastes::requires]] on routine @ L12:35
+    arg 1 @ L12:53
+      op eok_bool_cast type_kind=tk_template_param type=bool @ L12:53
+        op eok_ge type_kind=tk_template_param type=<tptk_unknown> @ L12:55
+          param 1 v: T lvalue @ L12:53
+          const 0 type=int @ L12:58
+routine box<int>::twice instance body @ L12:24
+  returns int
+  param 1 v: int
+  template box<int>::twice args <T=int>
+  attr [[cerastes::requires]] on routine @ L12:35
+    arg 1 @ L12:53
+      op eok_ge type_kind=tk_integer type=bool @ L12:55
+        param 1 v: int @ L12:53
+        const 0 type=int @ L12:58
+routine box<int>::twice instance body @ L12:24
+  returns long
+  param 1 v: long
+  template box<int>::twice args <T=long>
+  attr [[cerastes::requires]] on routine @ L12:35
+    arg 1 @ L12:53
+      op eok_ge type_kind=tk_integer type=bool @ L12:55
+        param 1 v: long @ L12:53
+        op eok_cast type_kind=tk_integer type=long cast=implicit @ L12:58
+          const 0 type=int @ L12:58
+routine box<U>::twice prototype body @ L17:11
+  returns T
+  param 1 v: T
+  attr [[cerastes::requires]] on routine @ L12:35
+    arg 1 @ L12:53
+      op eok_bool_cast type_kind=tk_template_param type=bool @ L12:53
+        op eok_ge type_kind=tk_template_param type=<tptk_unknown> @ L12:55
+          param 1 v: T lvalue @ L12:53
+          const 0 type=int @ L12:58
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L19:12
+routine use plain body @ L22:5
+  returns int
+end walk: 7 routines reported, 0 routines with bodies in non-system files outside the primary file

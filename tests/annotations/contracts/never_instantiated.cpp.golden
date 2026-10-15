@@ -1,0 +1,18 @@
+routine twice prototype body @ L9:3
+  returns T
+  param 1 v: T
+  attr [[cerastes::requires]] on routine @ L9:14
+    arg 1 @ L9:32
+      op eok_bool_cast type_kind=tk_template_param type=bool @ L9:32
+        op eok_gt type_kind=tk_template_param type=<tptk_unknown> @ L9:34
+          param 1 v: T lvalue @ L9:32
+          const 0 type=int @ L9:36
+  attr [[cerastes::ensures]] on routine @ L9:39
+    arg 1 binder r: T @ L9:56
+    arg 2 @ L9:59
+      op eok_bool_cast type_kind=tk_template_param type=bool @ L9:59
+        op eok_gt type_kind=tk_template_param type=<tptk_unknown> @ L9:61
+          binder r: T lvalue @ L9:59
+          param 1 v: T lvalue @ L9:63
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L11:12
+end walk: 1 routines reported, 0 routines with bodies in non-system files outside the primary file

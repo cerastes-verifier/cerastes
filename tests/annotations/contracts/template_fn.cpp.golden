@@ -1,0 +1,36 @@
+routine inc prototype body @ L9:3
+  returns T
+  param 1 v: T
+  attr [[cerastes::requires]] on routine @ L9:12
+    arg 1 @ L9:30
+      op eok_bool_cast type_kind=tk_template_param type=bool @ L9:30
+        op eok_ge type_kind=tk_template_param type=<tptk_unknown> @ L9:32
+          param 1 v: T lvalue @ L9:30
+          const 0 type=int @ L9:35
+  attr [[cerastes::ensures]] on routine @ L9:38
+    arg 1 binder r: T @ L9:55
+    arg 2 @ L9:58
+      op eok_bool_cast type_kind=tk_template_param type=bool @ L9:58
+        op eok_gt type_kind=tk_template_param type=<tptk_unknown> @ L9:60
+          binder r: T lvalue @ L9:58
+          param 1 v: T lvalue @ L9:62
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L11:12
+routine inc instance body @ L9:3
+  returns int
+  param 1 v: int
+  template inc args <T=int>
+  attr [[cerastes::requires]] on routine @ L9:12
+    arg 1 @ L9:30
+      op eok_ge type_kind=tk_integer type=bool @ L9:32
+        param 1 v: int @ L9:30
+        const 0 type=int @ L9:35
+  attr [[cerastes::ensures]] on routine @ L9:38
+    arg 1 binder r: int @ L9:55
+    arg 2 @ L9:58
+      op eok_gt type_kind=tk_integer type=bool @ L9:60
+        binder r: int @ L9:58
+        param 1 v: int @ L9:62
+routine use plain body @ L14:5
+  returns int
+  param 1 x: int
+end walk: 3 routines reported, 0 routines with bodies in non-system files outside the primary file

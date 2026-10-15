@@ -1,0 +1,49 @@
+routine counter::operator= plain implicit nobody @ L8:8
+  returns counter &
+  param 1 _: const counter &
+routine counter::operator= plain implicit nobody @ L8:8
+  returns counter &
+  param 1 _: counter &&
+routine counter::get plain body @ L10:7
+  returns int
+  attr [[cerastes::requires]] on routine @ L10:19
+    arg 1 @ L10:37
+      op eok_ge type_kind=tk_integer type=bool @ L10:41
+        op eok_points_to_field type_kind=tk_unknown type=int @ L10:37
+          this: const counter * @ L10:37
+          field counter::val: int @ L10:37
+        const 0 type=int @ L10:44
+  attr [[cerastes::ensures]] on routine @ L10:47
+    arg 1 binder r: int @ L10:64
+    arg 2 @ L10:67
+      op eok_eq type_kind=tk_integer type=bool @ L10:69
+        binder r: int @ L10:67
+        op eok_points_to_field type_kind=tk_unknown type=int @ L10:72
+          this: const counter * @ L10:72
+          field counter::val: int @ L10:72
+routine counter::bump plain body @ L14:8
+  returns void
+  attr [[cerastes::requires]] on routine @ L14:15
+    arg 1 @ L14:33
+      op eok_lt type_kind=tk_integer type=bool @ L14:37
+        op eok_points_to_field type_kind=tk_unknown type=int @ L14:33
+          this: counter * @ L14:33
+          field counter::val: int @ L14:33
+        const 100 type=int @ L14:39
+  attr [[cerastes::ensures]] on routine @ L14:44
+    arg 1 @ L14:61
+      op eok_eq type_kind=tk_integer type=bool @ L14:65
+        op eok_points_to_field type_kind=tk_unknown type=int @ L14:61
+          this: counter * @ L14:61
+          field counter::val: int @ L14:61
+        op eok_add type_kind=tk_integer type=int @ L14:87
+          op eok_ref_indirect type_kind=tk_pointer type=int @ L14:81
+            op eok_call type_kind=tk_unknown type=const int & @ L14:81
+              routine cerastes::old args <T=int>: const int &(*)(const int &) noexcept @ L14:68
+              op eok_reference_to type_kind=tk_pointer type=const int & @ L14:82
+                op eok_lvalue_adjust type_kind=tk_integer type=const int lvalue @ L14:82
+                  op eok_points_to_field type_kind=tk_unknown type=int lvalue @ L14:82
+                    this: counter * @ L14:82
+                    field counter::val: int @ L14:82
+          const 1 type=int @ L14:89
+end walk: 4 routines reported, 0 routines with bodies in non-system files outside the primary file

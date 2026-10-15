@@ -1,0 +1,56 @@
+routine box<int>::operator= plain implicit nobody @ L9:8
+  returns box<int> &
+  param 1 _: box<int> &&
+routine box<int>::operator= plain implicit nobody @ L9:8
+  returns box<int> &
+  param 1 _: const box<int> &
+routine box<T>::get prototype body @ L11:5
+  returns T
+  attr [[cerastes::requires]] on routine @ L11:17
+    arg 1 @ L11:35
+      op eok_bool_cast type_kind=tk_template_param type=bool @ L11:35
+        op eok_ge type_kind=tk_template_param type=<tptk_unknown> @ L11:37
+          op eok_points_to_field type_kind=tk_unknown type=const T lvalue @ L11:35
+            this: const box<T> * @ L11:35
+            field box<T>::v: T @ L11:35
+          const 0 type=int @ L11:40
+  op eok_points_to_field type_kind=tk_unknown type=const T @ L11:52
+routine box<int>::get instance body @ L11:5
+  returns int
+  template box<T>::get args <none>
+  attr [[cerastes::requires]] on routine @ L11:17
+    arg 1 @ L11:35
+      op eok_ge type_kind=tk_integer type=bool @ L11:37
+        op eok_points_to_field type_kind=tk_unknown type=int @ L11:35
+          this: const box<int> * @ L11:35
+          field box<int>::v: int @ L11:35
+        const 0 type=int @ L11:40
+routine box<T>::twice prototype body @ L16:11
+  returns T
+  attr [[cerastes::ensures]] on routine @ L12:19
+    arg 1 binder r: T @ L12:36
+    arg 2 @ L12:39
+      op eok_bool_cast type_kind=tk_template_param type=bool @ L12:39
+        op eok_ge type_kind=tk_template_param type=<tptk_unknown> @ L12:41
+          binder r: T lvalue @ L12:39
+          op eok_points_to_field type_kind=tk_unknown type=const T lvalue @ L12:44
+            this: const box<T> * @ L12:44
+            field box<T>::v: T @ L12:44
+  op eok_add type_kind=tk_template_param type=<tptk_unknown> @ L18:12
+  op eok_points_to_field type_kind=tk_unknown type=const T @ L18:10
+  op eok_points_to_field type_kind=tk_unknown type=const T @ L18:14
+routine box<int>::twice instance body @ L16:11
+  returns int
+  template box<T>::twice args <none>
+  attr [[cerastes::ensures]] on routine @ L12:19
+    arg 1 binder r: int @ L12:36
+    arg 2 @ L12:39
+      op eok_ge type_kind=tk_integer type=bool @ L12:41
+        binder r: int @ L12:39
+        op eok_points_to_field type_kind=tk_unknown type=int @ L12:44
+          this: const box<int> * @ L12:44
+          field box<int>::v: int @ L12:44
+routine use plain body @ L21:5
+  returns int
+  param 1 b: const box<int> &
+end walk: 7 routines reported, 0 routines with bodies in non-system files outside the primary file

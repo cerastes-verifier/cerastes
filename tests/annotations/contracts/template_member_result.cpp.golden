@@ -1,0 +1,23 @@
+routine maker::operator= plain implicit nobody @ L10:8
+  returns maker &
+  param 1 _: const maker &
+routine maker::operator= plain implicit nobody @ L10:8
+  returns maker &
+  param 1 _: maker &&
+routine maker::make prototype body @ L14:29
+  returns T
+  attr [[cerastes::ensures]] on routine @ L14:36
+    arg 1 binder r: T @ L14:53
+    arg 2 @ L14:56
+      const true type=bool @ L14:56
+  tconst tpck_expression type=T @ L16:10
+routine maker::make instance body @ L14:29
+  returns int
+  template maker::make args <T=int>
+  attr [[cerastes::ensures]] on routine @ L14:36
+    arg 1 binder r: int @ L14:53
+    arg 2 @ L14:56
+      const true type=bool @ -
+routine use plain body @ L19:5
+  returns int
+end walk: 5 routines reported, 0 routines with bodies in non-system files outside the primary file

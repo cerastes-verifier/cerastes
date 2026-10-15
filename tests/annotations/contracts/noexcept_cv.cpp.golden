@@ -1,0 +1,34 @@
+routine s::operator= plain implicit nobody @ L6:8
+  returns s &
+  param 1 _: const s &
+routine s::operator= plain implicit nobody @ L6:8
+  returns s &
+  param 1 _: s &&
+routine s::a plain body @ L8:7
+  returns int
+  attr [[cerastes::requires]] on routine @ L8:17
+    arg 1 @ L8:35
+      op eok_gt type_kind=tk_integer type=bool @ L8:37
+        op eok_points_to_field type_kind=tk_unknown type=int @ L8:35
+          this: const s * @ L8:35
+          field s::v: int @ L8:35
+        const 0 type=int @ L8:39
+routine s::b plain body @ L9:7
+  returns int
+  attr [[cerastes::requires]] on routine @ L9:26
+    arg 1 @ L9:44
+      op eok_gt type_kind=tk_integer type=bool @ L9:46
+        op eok_points_to_field type_kind=tk_unknown type=int @ L9:44
+          this: const s * @ L9:44
+          field s::v: int @ L9:44
+        const 0 type=int @ L9:48
+routine s::c plain body @ L10:7
+  returns int
+  attr [[cerastes::requires]] on routine @ L10:22
+    arg 1 @ L10:40
+      op eok_gt type_kind=tk_integer type=bool @ L10:42
+        op eok_points_to_field type_kind=tk_unknown type=int @ L10:40
+          this: s * @ L10:40
+          field s::v: int @ L10:40
+        const 0 type=int @ L10:44
+end walk: 5 routines reported, 0 routines with bodies in non-system files outside the primary file

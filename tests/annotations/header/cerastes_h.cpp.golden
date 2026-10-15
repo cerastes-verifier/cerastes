@@ -1,0 +1,86 @@
+routine spec_probe plain body @ L10:25
+  returns bool
+  param 1 p: const int *
+  param 2 n: unsigned int
+  attr [[cerastes::predicate]] on routine @ L10:1
+routine <lambda@L13:53>::<unnamed> plain implicit nobody @ L13:53
+  returns void
+  param 1 _: <lambda@L13:53> &&
+routine <lambda@L13:53>::<unnamed> plain implicit nobody @ L13:53
+  returns void
+  param 1 _: const <lambda@L13:53> &
+routine <lambda@L13:53>::operator= plain implicit nobody @ L13:53
+  returns <lambda@L13:53> &
+  param 1 _: const <lambda@L13:53> &
+routine <lambda@L13:53>::_FUN plain implicit nobody @ L13:55
+  returns bool
+  param 1 i: int
+routine <lambda@L13:53>::operator bool (*)(int) plain implicit body @ L13:55
+  returns bool (*)(int)
+routine <lambda@L13:53>::operator() plain body @ L13:55
+  returns bool
+  param 1 i: int
+routine plus1 plain body @ L16:19
+  returns int
+  param 1 x: int
+  attr [[cerastes::requires]] on routine @ L16:32
+    arg 1 @ L16:50
+      op eok_gt type_kind=tk_integer type=bool @ L16:52
+        param 1 x: int @ L16:50
+        const 0 type=int @ L16:54
+  attr [[cerastes::ensures]] on routine @ L16:57
+    arg 1 binder r: int @ L16:74
+    arg 2 @ L16:77
+      op eok_eq type_kind=tk_integer type=bool @ L16:79
+        binder r: int @ L16:77
+        op eok_add type_kind=tk_integer type=int @ L16:84
+          param 1 x: int @ L16:82
+          const 1 type=int @ L16:86
+  attr [[cerastes::pure]] on routine @ L16:1
+routine everything plain body @ L21:5
+  returns int
+  param 1 n: int
+  attr [[cerastes::requires]] on routine @ L21:23
+    arg 1 @ L21:41
+      op eok_ge type_kind=tk_integer type=bool @ L21:43
+        param 1 n: int @ L21:41
+        const 0 type=int @ L21:46
+  attr [[cerastes::ensures]] on routine @ L21:49
+    arg 1 binder r: int @ L21:66
+    arg 2 @ L21:69
+      op eok_eq type_kind=tk_integer type=bool @ L21:71
+        binder r: int @ L21:69
+        param 1 n: int @ L21:74
+  stmt stmk_while @ L24:3 attr [[cerastes::invariant]] @ L24:3
+    arg 1 @ L24:22
+      op eok_land type_kind=tk_integer type=bool @ L24:29
+        op eok_le type_kind=tk_integer type=bool @ L24:24
+          const 0 type=int @ L24:22
+          var i: int decl=L23:7 @ L24:27
+        op eok_le type_kind=tk_integer type=bool @ L24:34
+          var i: int decl=L23:7 @ L24:32
+          var n: int decl=L21:20 @ L24:37
+  stmt stmk_empty @ L27:3 attr [[cerastes::check]] @ L27:3
+    arg 1 @ L27:18
+      op eok_eq type_kind=tk_integer type=bool @ L27:20
+        var i: int decl=L23:7 @ L27:18
+        var n: int decl=L21:20 @ L27:23
+  stmt stmk_empty @ L28:3 attr [[cerastes::fold]] @ L28:3
+    arg 1 @ L28:17
+      op eok_call type_kind=tk_unknown type=bool @ L28:27
+        routine spec_probe: bool (*)(const int *, unsigned int) @ L28:17
+        op eok_cast type_kind=tk_pointer type=const int * cast=implicit @ L28:28
+          op eok_address_of type_kind=tk_pointer type=int * @ L28:28
+            var i: int decl=L23:7 lvalue @ L28:29
+        op eok_cast type_kind=tk_integer type=unsigned int cast=implicit @ L28:32
+          const 1 type=int @ L28:32
+  stmt stmk_empty @ L29:3 attr [[cerastes::unfold]] @ L29:3
+    arg 1 @ L29:19
+      op eok_call type_kind=tk_unknown type=bool @ L29:29
+        routine spec_probe: bool (*)(const int *, unsigned int) @ L29:19
+        op eok_cast type_kind=tk_pointer type=const int * cast=implicit @ L29:30
+          op eok_address_of type_kind=tk_pointer type=int * @ L29:30
+            var i: int decl=L23:7 lvalue @ L29:31
+        op eok_cast type_kind=tk_integer type=unsigned int cast=implicit @ L29:34
+          const 1 type=int @ L29:34
+end walk: 9 routines reported, 0 routines with bodies in non-system files outside the primary file

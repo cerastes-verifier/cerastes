@@ -1,0 +1,17 @@
+routine clear plain nobody @ L10:6
+  returns void
+  param 1 x: int
+  attr [[cerastes::ensures]] on routine @ L10:19
+    arg 1 @ L10:36
+      op eok_gt type_kind=tk_integer type=bool @ L10:38
+        param 1 x: int @ L10:36
+        const 0 type=int @ L10:40
+routine reset plain nobody @ L12:6
+  returns unit
+  param 1 x: int
+  attr [[cerastes::ensures]] on routine @ L12:19
+    arg 1 @ L12:36
+      op eok_gt type_kind=tk_integer type=bool @ L12:38
+        param 1 x: int @ L12:36
+        const 0 type=int @ L12:40
+end walk: 2 routines reported, 0 routines with bodies in non-system files outside the primary file

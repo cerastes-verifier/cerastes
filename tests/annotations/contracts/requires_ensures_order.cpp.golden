@@ -1,0 +1,29 @@
+routine a_first plain nobody @ L7:5
+  returns int
+  param 1 x: int
+  attr [[cerastes::requires]] on routine @ L7:20
+    arg 1 @ L7:38
+      op eok_gt type_kind=tk_integer type=bool @ L7:40
+        param 1 x: int @ L7:38
+        const 0 type=int @ L7:42
+  attr [[cerastes::ensures]] on routine @ L7:45
+    arg 1 binder r: int @ L7:62
+    arg 2 @ L7:65
+      op eok_gt type_kind=tk_integer type=bool @ L7:67
+        binder r: int @ L7:65
+        param 1 x: int @ L7:69
+routine b_first plain nobody @ L8:5
+  returns int
+  param 1 x: int
+  attr [[cerastes::ensures]] on routine @ L8:20
+    arg 1 binder r: int @ L8:37
+    arg 2 @ L8:40
+      op eok_gt type_kind=tk_integer type=bool @ L8:42
+        binder r: int @ L8:40
+        param 1 x: int @ L8:44
+  attr [[cerastes::requires]] on routine @ L8:47
+    arg 1 @ L8:65
+      op eok_gt type_kind=tk_integer type=bool @ L8:67
+        param 1 x: int @ L8:65
+        const 0 type=int @ L8:69
+end walk: 2 routines reported, 0 routines with bodies in non-system files outside the primary file

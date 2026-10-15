@@ -1,0 +1,8 @@
+routine total plain body @ L7:5
+  returns int
+  stmt stmk_range_based_for @ L11:3 attr [[cerastes::invariant]] @ L11:3
+    arg 1 @ L11:22
+      op eok_ge type_kind=tk_integer type=bool @ L11:24
+        var s: int decl=L10:7 @ L11:22
+        const 0 type=int @ L11:27
+end walk: 1 routines reported, 0 routines with bodies in non-system files outside the primary file

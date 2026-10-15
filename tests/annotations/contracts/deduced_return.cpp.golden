@@ -1,0 +1,25 @@
+routine next_auto plain body @ L9:6
+  returns int
+  param 1 x: int
+  attr [[cerastes::ensures]] on routine @ L9:23
+    arg 1 @ L9:40
+      op eok_lt type_kind=tk_integer type=bool @ L9:42
+        param 1 x: int @ L9:40
+        const 1000 type=int @ L9:44
+routine next_dt plain body @ L11:16
+  returns int
+  param 1 x: int
+  attr [[cerastes::ensures]] on routine @ L11:31
+    arg 1 @ L11:48
+      op eok_lt type_kind=tk_integer type=bool @ L11:50
+        param 1 x: int @ L11:48
+        const 1000 type=int @ L11:52
+routine next_tr plain body @ L13:6
+  returns int
+  param 1 x: int
+  attr [[cerastes::ensures]] on routine @ L13:21
+    arg 1 @ L13:38
+      op eok_lt type_kind=tk_integer type=bool @ L13:40
+        param 1 x: int @ L13:38
+        const 1000 type=int @ L13:42
+end walk: 3 routines reported, 0 routines with bodies in non-system files outside the primary file

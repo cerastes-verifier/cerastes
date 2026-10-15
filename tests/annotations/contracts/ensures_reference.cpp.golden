@@ -1,0 +1,47 @@
+routine incr plain body @ L8:6
+  returns void
+  param 1 x: int &
+  attr [[cerastes::requires]] on routine @ L8:19
+    arg 1 @ L8:37
+      op eok_lt type_kind=tk_integer type=bool @ L8:39
+        op eok_ref_indirect type_kind=tk_pointer type=int @ L8:37
+          param 1 x: int & @ L8:37
+        const 1000 type=int @ L8:41
+  attr [[cerastes::ensures]] on routine @ L8:47
+    arg 1 @ L8:64
+      op eok_eq type_kind=tk_integer type=bool @ L8:66
+        op eok_ref_indirect type_kind=tk_pointer type=int @ L8:64
+          param 1 x: int & @ L8:64
+        op eok_add type_kind=tk_integer type=int @ L8:86
+          op eok_ref_indirect type_kind=tk_pointer type=int @ L8:82
+            op eok_call type_kind=tk_unknown type=const int & @ L8:82
+              routine cerastes::old args <T=int>: const int &(*)(const int &) noexcept @ L8:69
+              op eok_reference_to type_kind=tk_pointer type=const int & @ L8:83
+                op eok_lvalue_adjust type_kind=tk_integer type=const int lvalue @ L8:83
+                  op eok_ref_indirect type_kind=tk_pointer type=int lvalue @ L8:83
+                    param 1 x: int & @ L8:83
+          const 1 type=int @ L8:88
+routine incr_ptr plain body @ L13:6
+  returns void
+  param 1 p: int *
+  attr [[cerastes::requires]] on routine @ L13:23
+    arg 1 @ L13:41
+      op eok_lt type_kind=tk_integer type=bool @ L13:44
+        op eok_indirect type_kind=tk_pointer type=int @ L13:41
+          param 1 p: int * @ L13:42
+        const 1000 type=int @ L13:46
+  attr [[cerastes::ensures]] on routine @ L13:52
+    arg 1 @ L13:69
+      op eok_eq type_kind=tk_integer type=bool @ L13:72
+        op eok_indirect type_kind=tk_pointer type=int @ L13:69
+          param 1 p: int * @ L13:70
+        op eok_add type_kind=tk_integer type=int @ L13:93
+          op eok_ref_indirect type_kind=tk_pointer type=int @ L13:88
+            op eok_call type_kind=tk_unknown type=const int & @ L13:88
+              routine cerastes::old args <T=int>: const int &(*)(const int &) noexcept @ L13:75
+              op eok_reference_to type_kind=tk_pointer type=const int & @ L13:89
+                op eok_lvalue_adjust type_kind=tk_integer type=const int lvalue @ L13:89
+                  op eok_indirect type_kind=tk_pointer type=int lvalue @ L13:89
+                    param 1 p: int * @ L13:90
+          const 1 type=int @ L13:95
+end walk: 2 routines reported, 0 routines with bodies in non-system files outside the primary file

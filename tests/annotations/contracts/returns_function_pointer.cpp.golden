@@ -1,0 +1,26 @@
+routine pick plain nobody @ L12:9
+  returns handler
+  param 1 x: int
+  attr [[cerastes::requires]] on routine @ L12:21
+    arg 1 @ L12:39
+      op eok_gt type_kind=tk_integer type=bool @ L12:41
+        param 1 x: int @ L12:39
+        const 0 type=int @ L12:43
+routine make plain nobody @ L14:9
+  returns handler
+  param 1 x: int
+  attr [[cerastes::ensures]] on routine @ L14:21
+    arg 1 binder r: handler @ L14:38
+    arg 2 @ L14:41
+      op eok_ne type_kind=tk_pointer type=bool @ L14:43
+        binder r: handler @ L14:41
+        const 0 type=handler @ L14:46
+routine refer plain nobody @ L16:13
+  returns handler_ref
+  param 1 x: int
+  attr [[cerastes::requires]] on routine @ L16:26
+    arg 1 @ L16:44
+      op eok_gt type_kind=tk_integer type=bool @ L16:46
+        param 1 x: int @ L16:44
+        const 0 type=int @ L16:48
+end walk: 3 routines reported, 0 routines with bodies in non-system files outside the primary file

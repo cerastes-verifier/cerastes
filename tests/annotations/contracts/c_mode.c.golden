@@ -1,0 +1,52 @@
+routine abs_val plain body @ L9:5
+  returns int
+  param 1 x: int
+  attr [[cerastes::requires]] on routine @ L7:20
+    arg 1 @ L7:38
+      op eok_gt type_kind=tk_integer type=int @ L7:40
+        param 1 x: int @ L7:38
+        const -1000 type=int @ L7:42
+  attr [[cerastes::ensures]] on routine @ L7:49
+    arg 1 binder r: int @ L7:66
+    arg 2 @ L7:69
+      op eok_ge type_kind=tk_integer type=int @ L7:71
+        binder r: int @ L7:69
+        const 0 type=int @ L7:74
+routine nonneg plain body @ L14:25
+  returns bool
+  param 1 x: int
+  attr [[cerastes::predicate]] on routine @ L14:1
+routine count_to plain body @ L19:5
+  returns int
+  param 1 n: int
+  attr [[cerastes::requires]] on routine @ L19:21
+    arg 1 @ L19:39
+      op eok_ge type_kind=tk_integer type=int @ L19:41
+        param 1 n: int @ L19:39
+        const 0 type=int @ L19:44
+  attr [[cerastes::ensures]] on routine @ L19:47
+    arg 1 binder r: int @ L19:64
+    arg 2 @ L19:67
+      op eok_eq type_kind=tk_integer type=int @ L19:69
+        binder r: int @ L19:67
+        param 1 n: int @ L19:72
+  stmt stmk_while @ L22:40 attr [[cerastes::invariant]] @ L22:3
+    arg 1 @ L22:22
+      op eok_land type_kind=tk_integer type=int @ L22:29
+        op eok_le type_kind=tk_integer type=int @ L22:24
+          const 0 type=int @ L22:22
+          var i: int decl=L21:7 @ L22:27
+        op eok_le type_kind=tk_integer type=int @ L22:34
+          var i: int decl=L21:7 @ L22:32
+          var n: int decl=L19:18 @ L22:37
+  stmt stmk_empty @ L25:25 attr [[cerastes::check]] @ L25:3
+    arg 1 @ L25:18
+      op eok_eq type_kind=tk_integer type=int @ L25:20
+        var i: int decl=L21:7 @ L25:18
+        var n: int decl=L19:18 @ L25:23
+  stmt stmk_empty @ L26:27 attr [[cerastes::fold]] @ L26:3
+    arg 1 @ L26:17
+      op eok_call type_kind=tk_unknown type=bool @ L26:23
+        routine nonneg: bool (*)(int) @ L26:17
+        var i: int decl=L21:7 @ L26:24
+end walk: 3 routines reported, 0 routines with bodies in non-system files outside the primary file

@@ -1,0 +1,25 @@
+routine nonneg plain body @ L8:25
+  returns bool
+  param 1 x: int
+  attr [[cerastes::predicate]] on routine @ L8:1
+routine clamp_hi plain body @ L13:19
+  returns int
+  param 1 x: int
+  param 2 hi: int
+  attr [[cerastes::pure]] on routine @ L13:1
+routine dbl plain body @ L18:19
+  returns int
+  param 1 x: int
+  attr [[cerastes::requires]] on routine @ L18:30
+    arg 1 @ L18:48
+      op eok_ge type_kind=tk_integer type=bool @ L18:50
+        param 1 x: int @ L18:48
+        const 0 type=int @ L18:53
+  attr [[cerastes::ensures]] on routine @ L18:56
+    arg 1 binder r: int @ L18:73
+    arg 2 @ L18:76
+      op eok_ge type_kind=tk_integer type=bool @ L18:78
+        binder r: int @ L18:76
+        param 1 x: int @ L18:81
+  attr [[cerastes::pure]] on routine @ L18:1
+end walk: 3 routines reported, 0 routines with bodies in non-system files outside the primary file

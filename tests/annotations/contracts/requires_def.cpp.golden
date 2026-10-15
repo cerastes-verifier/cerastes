@@ -1,0 +1,15 @@
+routine clamp_pos plain body @ L7:5
+  returns int
+  param 1 x: int
+  param 2 hi: int
+  attr [[cerastes::requires]] on routine @ L7:30
+    arg 1 @ L7:48
+      op eok_gt type_kind=tk_integer type=bool @ L7:51
+        param 2 hi: int @ L7:48
+        const 0 type=int @ L7:53
+  attr [[cerastes::requires]] on routine @ L7:56
+    arg 1 @ L7:74
+      op eok_ge type_kind=tk_integer type=bool @ L7:76
+        param 1 x: int @ L7:74
+        const 0 type=int @ L7:79
+end walk: 1 routines reported, 0 routines with bodies in non-system files outside the primary file
