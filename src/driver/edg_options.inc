@@ -1,28 +1,24 @@
 // Part of cerastes, under the Apache License v2.0 with LLVM Exceptions.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-// Every long option (--name) that EDG's cmd_line.c describes, in source order,
-// including ones that the cerastes configuration compiles out.  EDG accepts an
-// unambiguous abbreviation of a long option (look_up_option_description), and
+// Every long option (--name) that EDG's cmd_line.c describes AND that is compiled
+// into the cerastes configuration, in source order.  EDG accepts an unambiguous
+// abbreviation of a long option (look_up_option_description), and
 // src/driver/main.cpp resolves abbreviations the same way, to refuse options
-// that are spelled in short form.  A name that is compiled out here can make an
-// abbreviation look ambiguous when EDG sees it as unique; the C-mode and
-// GNU-mode refusals are therefore backed by state checks (run_state.cpp).
+// that are spelled in short form; an option that is not compiled in (EDG says
+// "invalid option") must not be here, or an abbreviation that EDG resolves would
+// look ambiguous to the driver.
 //
-// Regenerate when the EDG pin moves (from the repository root):
-//   perl -0ne 'print "    \"$1\",\n" while /add_option_description\(\s*optk_\w+,\s*"([^"]+)"/g' \
-//     third_party/edg/src/cmd_line.c
-// Generated from the EDG fork at 9e811ba59a (decision 0009).
+// Regenerate with `scripts/check_edg_options.sh --update`; the same script
+// (check.sh) fails when this list differs from the built front end.
     "strict",
     "strict_warnings",
     "no_line_commands",
     "preprocess",
     "comments",
-    "old_line_commands",
     "old_c",
     "dependencies",
     "trace_includes",
-    "no_il_lowering",
     "il_display",
     "anachronisms",
     "no_anachronisms",
@@ -32,14 +28,6 @@
     "signed_chars",
     "unsigned_chars",
     "instantiate",
-    "auto_instantiation",
-    "no_auto_instantiation",
-    "ii_file",
-    "suppress_instantiation_flags",
-    "template_info_file",
-    "definition_list_file",
-    "exported_template_file",
-    "template_directory",
     "implicit_include",
     "no_implicit_include",
     "suppress_vtbl",
@@ -64,10 +52,8 @@
     "xref",
     "error_output",
     "output",
-    "module_init",
     "db",
     "db_name",
-    "db_alloc_seq",
     "time_limit",
     "diag_suppress",
     "diag_remark",
@@ -80,11 +66,6 @@
     "constexpr_diag_error",
     "display_error_number",
     "no_display_error_number",
-    "gen_c_file_name",
-    "msvc_target_version",
-    "gen_c_msvc_version",
-    "gen_c_gnu_version",
-    "gen_c_clang_version",
     "create_pch",
     "use_pch",
     "pch",
@@ -92,8 +73,6 @@
     "no_pch_messages",
     "pch_verbose",
     "no_pch_verbose",
-    "mmap_address",
-    "pch_mem",
     "pch_dir",
     "wdir",
     "create_header_unit",
@@ -159,9 +138,6 @@
     "pack_alignment",
     "alternative_tokens",
     "no_alternative_tokens",
-    "inlining",
-    "no_inlining",
-    "inline_statement_limit",
     "svr4",
     "no_svr4",
     "brief_diagnostics",
@@ -218,8 +194,6 @@
     "no_enum_overloading",
     "nonstd_qualifier_deduction",
     "no_nonstd_qualifier_deduction",
-    "one_instantiation_per_object",
-    "instantiation_dir",
     "late_tiebreaker",
     "early_tiebreaker",
     "preinclude",
@@ -263,10 +237,6 @@
     "no_compound_literals",
     "base_assign_op_is_default",
     "no_base_assign_op_is_default",
-    "sun",
-    "no_sun",
-    "sun_linker_scope",
-    "no_sun_linker_scope",
     "dep_name",
     "no_dep_name",
     "ignore_std",
@@ -281,7 +251,6 @@
     "c89",
     "export",
     "no_export",
-    "no_stdarg_builtin",
     "trans_unit_test",
     "gcc",
     "no_gcc",
@@ -305,13 +274,7 @@
     "upc_strict",
     "upc_relaxed",
     "upc_threads",
-    "fixed_point",
-    "no_fixed_point",
-    "named_address_spaces",
-    "no_named_address_spaces",
     "edg_base_dir",
-    "named_registers",
-    "no_named_registers",
     "thread_local_storage",
     "no_thread_local_storage",
     "macro_positions_in_diagnostics",
@@ -324,8 +287,6 @@
     "no_stdc_zero_in_system_headers",
     "template_typedefs_in_diagnostics",
     "no_template_typedefs_in_diagnostics",
-    "defer_parse_function_templates",
-    "no_defer_parse_function_templates",
     "uliterals",
     "no_uliterals",
     "default_calling_convention",

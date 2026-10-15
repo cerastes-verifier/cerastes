@@ -3,7 +3,10 @@
 #include "render.h"
 
 #include <cstdio>
+#include <string>
+#include <vector>
 
+#include "diagnostics.h"
 #include "il_names.h"
 
 namespace cerastes {
@@ -30,7 +33,7 @@ bool is_closure_class(a_type_ptr t) {
 // <seq> is its internal sequence number, not a line (il_to_str.c:951-960).
 // Print "<lambda@L<line>:<col>>" with the resolved position instead.
 void put_closure(a_type_ptr t) {
-  g_octl->output_str(("<lambda@" + resolve(t->source_corresp.decl_position).str() + ">").c_str(), g_octl);
+  g_octl->output_str(("<lambda@" + position_label(t->source_corresp.decl_position) + ">").c_str(), g_octl);
 }
 
 // output_name hook: closure classes get our spelling (and no qualifier, as in
@@ -100,6 +103,13 @@ std::string capture(Fn fn) {
 
 }  // namespace
 
+std::string position_label(const a_source_position& p) {
+  DiagPos d = diag_position(p);
+  if (!d.known) return "-";
+  std::string s = "L" + std::to_string(d.line) + ":" + std::to_string(d.col);
+  return d.in_primary ? s : d.file + ":" + s;
+}
+
 std::string SrcPos::str() const {
   return "L" + std::to_string(line) + ":" + std::to_string(col);
 }
@@ -152,6 +162,76 @@ std::string render_template_arg(a_template_arg_ptr a) {
   std::string s = capture([&](an_il_to_str_output_control_block_ptr o) { form_a_template_arg(a, o); });
   g_in_type = saved;
   return s;
+}
+
+namespace {
+std::string template_param_name(a_template_parameter_ptr tp, int index) {
+  if (tp && tp->source_corresp.name) return tp->source_corresp.name;
+  return "#" + std::to_string(index);
+}
+}  // namespace
+
+// A pack is shown as "Ts=pack{int, long}" (tak_start_of_pack_expansion opens
+// it, following is_pack_element arguments belong to it; il_def.h:7683-7790).
+std::string render_template_args(a_template_ptr tmpl, a_template_arg_ptr list) {
+  if (list == nullptr) return "none";
+  a_template_parameter_ptr tp =
+      (tmpl && tmpl->template_decl) ? tmpl->template_decl->param_list : nullptr;
+  std::vector<std::string> parts;
+  std::vector<std::string> pack;
+  std::string pack_name;
+  bool in_pack = false;
+  int index = 0;
+  auto flush_pack = [&] {
+    if (!in_pack) return;
+    std::string s = pack_name + "=pack{";
+    for (size_t i = 0; i < pack.size(); ++i) s += (i ? ", " : "") + pack[i];
+    parts.push_back(s + "}");
+    in_pack = false;
+    pack.clear();
+  };
+  for (a_template_arg_ptr a = list; a; a = a->next) {
+    if (a->kind == tak_start_of_pack_expansion) {
+      flush_pack();
+      in_pack = true;
+      pack_name = template_param_name(tp, index);
+      if (tp) tp = tp->next;
+      ++index;
+      continue;
+    }
+    if (in_pack && a->is_pack_element) {
+      pack.push_back(render_template_arg(a));
+      continue;
+    }
+    flush_pack();
+    parts.push_back(template_param_name(tp, index) + "=" + render_template_arg(a));
+    if (tp) tp = tp->next;
+    ++index;
+  }
+  flush_pack();
+  std::string s;
+  for (size_t i = 0; i < parts.size(); ++i) s += (i ? ", " : "") + parts[i];
+  return s;
+}
+
+std::string render_constant(a_constant_ptr c) {
+  if (c == nullptr) return "<null>";
+  if (c->kind == ck_integer) {
+    a_type_ptr t = c->type ? skip_typerefs(c->type) : nullptr;
+    // A null pointer constant of type std::nullptr_t is `nullptr`, a bool `true` or
+    // `false`; anything else its plain decimal value as diagnostics print it
+    // (const_ints.h), without suffix or cast.
+    if (t != nullptr && is_nullptr_type(t)) return "nullptr";
+    a_number_buffer b = decimal_str_for_integer_constant(c);
+    if (t != nullptr && is_bool_type(t)) return std::string(b.as_temp_characters()) == "0" ? "false" : "true";
+    return b.as_temp_characters();
+  }
+  if (c->kind == ck_float || c->kind == ck_address) {
+    // EDG's own formatter: the value of a floating constant, or the address of an
+    // entity (&x, a string literal, a function).
+    return capture([&](an_il_to_str_output_control_block_ptr o) { form_constant(c, /*need_parens=*/FALSE, o); });
+  }
+  return std::string("<") + name_of(c->kind) + ">";
 }
 
 std::string render_attribute(an_attribute_ptr a) {

@@ -30,6 +30,7 @@ python3 scripts/check_doc_examples.py
 
 step "edg configuration"
 scripts/check_edg_config.sh
+scripts/check_edg_options.sh
 
 step "harness self-test"
 # The self-tests that need the real front end must fail, not skip, here.

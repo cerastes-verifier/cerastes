@@ -1,0 +1,55 @@
+// Part of cerastes, under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// The diagnostics of the cerastes back end (decisions 0006 item 10, 0007).
+// One line per diagnostic: CERASTES_DIAG(tag, severity, "message").  The tag is
+// lower case; it is printed as `#cerastes-<tag>` when --display_error_number is
+// on, and tests name it as `cerastes-<tag>`.  scripts/run_tests.py reads the tags
+// from this file, so a new line here is all a new test needs.  `%s` in a message
+// is replaced by the arguments of the report, in order.  Messages follow EDG's
+// style: lower case, no final period.
+//
+// X-macro: this file is included with CERASTES_DIAG defined.
+
+CERASTES_DIAG(contract_not_after_parameters, error,
+              "\"cerastes::%s\" must be written directly after the parameter list")
+CERASTES_DIAG(annotation_side_effect, error,
+              "%s is not allowed in an annotation (annotations must not have side effects)")
+CERASTES_DIAG(statement_expression_in_annotation, error,
+              "a statement expression is not allowed in an annotation")
+CERASTES_DIAG(fold_argument_not_call, error,
+              "the argument of \"cerastes::%s\" must be a direct call of a predicate function")
+CERASTES_DIAG(fold_callee_not_predicate, error,
+              "function \"%s\" is called in \"cerastes::%s\" but is not marked [[cerastes::predicate]]")
+CERASTES_DIAG(predicate_not_bool, error,
+              "a [[cerastes::predicate]] function must return bool, but \"%s\" returns \"%s\"")
+CERASTES_DIAG(pure_returns_void, error,
+              "a [[cerastes::pure]] function must return a value, but \"%s\" returns void")
+CERASTES_DIAG(predicate_and_pure, error,
+              "function \"%s\" cannot be both [[cerastes::predicate]] and [[cerastes::pure]]")
+CERASTES_DIAG(contract_on_predicate, error,
+              "a [[cerastes::predicate]] function cannot have a contract (\"cerastes::%s\" on \"%s\")")
+CERASTES_DIAG(old_outside_ensures, error,
+              "\"cerastes::old\" can only be used in \"cerastes::ensures\"")
+CERASTES_DIAG(invariant_shadowed_by_loop_variable, error,
+              "\"%s\" in this invariant is not the variable of the same name declared by the loop")
+CERASTES_DIAG(annotation_on_lambda, error,
+              "\"cerastes::%s\" cannot be applied to a lambda expression")
+CERASTES_DIAG(modules_unsupported, error,
+              "C++20 modules are not supported: contracts are not carried through module files")
+CERASTES_DIAG(parameter_after_pack, error,
+              "a function with a contract cannot have a parameter after a function parameter pack (\"%s\")")
+CERASTES_DIAG(result_name_on_void, error,
+              "the result name \"%s\" of \"cerastes::ensures\" is not allowed: \"%s\" returns void")
+CERASTES_DIAG(contract_not_propagated, error,
+              "the contract of \"%s\" is missing on \"%s\" (the template's contract was not carried to it)")
+CERASTES_DIAG(spec_call_in_code, error,
+              "specification function \"%s\" cannot be called from ordinary code")
+CERASTES_DIAG(annotation_substitution_error, error,
+              "an annotation argument is erroneous after template substitution (%s)")
+CERASTES_DIAG(generic_lambda_in_annotation, error,
+              "a generic lambda (auto or template parameters) is not allowed in an annotation: its call operator is never checked")
+CERASTES_DIAG(unsupported_annotation_expression, error,
+              "this version cannot check this part of an annotation: %s")
+CERASTES_DIAG(cerastes_macro_changed, error,
+              "__CERASTES__ is defined by the front end and cannot be %s: the annotation macros of <cerastes.h> would expand to nothing")

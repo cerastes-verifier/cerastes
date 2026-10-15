@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "annotation_checks.h"
+#include "diagnostics.h"
 #include "edg_il.h"
 #include "options.h"
 #include "run_state.h"
@@ -24,5 +26,10 @@ void back_end(void) {
     std::fprintf(stderr, "error: cerastes requires --no_remove_unneeded_entities\n");
     std::exit(2);
   }
+  // The back end's own checks run on every invocation, after EDG's (this
+  // function is only reached when EDG reported no errors).  Their diagnostics are
+  // printed after the walk so that --cerastes_walk still lists the IL.
+  cerastes::check_annotations();
   if (cerastes::options().walk) cerastes::walk_il_and_print();
+  cerastes::flush_diagnostics();
 }

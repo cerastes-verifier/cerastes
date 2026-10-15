@@ -14,7 +14,7 @@
 //                               cerastes defines it itself (decision 0008)
 //   --gcc --no_gcc --g++ --no_g++ --gnu_version
 //                               GNU emulation (decision 0007)
-//   --c89 --c99 --no_c99 --c11 --c17 --c18 --old_c -K
+//   --c --c89 --c99 --no_c99 --c11 --c17 --c18 --old_c -K
 //                               C before C23 (decision 0007)
 //   --output_mode=sarif         back-end diagnostics cannot be emitted as SARIF yet
 // EDG accepts an unambiguous abbreviation of a long option, so a refused option
@@ -112,8 +112,8 @@ bool check_argument(const char* arg, const char* next) {
       refuse("GNU emulation (--gcc, --g++, --gnu_version) is not supported: cerastes reads "
              "C++ in Clang emulation mode (decision 0007)");
     }
-    if (is_one_of(n, {"c89", "c99", "no_c99", "c11", "c17", "c18", "old_c"})) {
-      refuse("C before C23 is not supported: use --c23 (older C lets identifier-list "
+    if (is_one_of(n, {"c", "c89", "c99", "no_c99", "c11", "c17", "c18", "old_c"})) {
+      refuse("C before C23 is not supported: use --c23 (--c selects an older default; older C lets identifier-list "
              "declarators bind a contract's names to globals; decision 0007)");
     }
     if (n == "output_mode" && value == "sarif") {
@@ -131,7 +131,7 @@ bool check_argument(const char* arg, const char* next) {
       return a.size() == 2 && next != nullptr;
     }
     if (letter == 'K') {
-      refuse("C before C23 is not supported: use --c23 (older C lets identifier-list "
+      refuse("C before C23 is not supported: use --c23 (--c selects an older default; older C lets identifier-list "
              "declarators bind a contract's names to globals; decision 0007)");
     }
     // Other short options with a separate value (-I dir, -o file, ...): do not
@@ -155,6 +155,8 @@ int main(int argc, char** argv) {
       cerastes::options().walk = true;
     } else if (std::strcmp(argv[i], "--cerastes_walk_selftest") == 0) {
       cerastes::options().walk = cerastes::options().walk_selftest = true;
+    } else if (std::strcmp(argv[i], "--cerastes_checks_selftest") == 0) {
+      cerastes::options().checks_selftest = true;
     } else {
       bool consumed = check_argument(argv[i], i + 1 < argc ? argv[i + 1] : nullptr);
       args.push_back(argv[i]);

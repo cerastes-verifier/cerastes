@@ -11,6 +11,13 @@ struct Options {
   // behave as if no prototype routine had been seen and no instance had an
   // assoc_template, to prove the two `warning:` lines fire.
   bool walk_selftest = false;
+  // --cerastes_checks_selftest: test hook for the defense-in-depth checks that
+  // EDG's own checks make unreachable.  It makes check_annotations() behave as
+  // if every instance had lost its contract (contract_not_propagated), the last
+  // function parameter pack came before another parameter (parameter_after_pack)
+  // and every function returned void (result_name_on_void), so that a test can
+  // prove each of those diagnostics fires.
+  bool checks_selftest = false;
 };
 Options& options();
 }  // namespace cerastes

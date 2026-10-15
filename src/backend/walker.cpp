@@ -67,6 +67,8 @@
 #include <string>
 #include <vector>
 
+#include "annotation_il.h"
+#include "expr_tree.h"
 #include "il_names.h"
 #include "options.h"
 #include "render.h"
@@ -243,65 +245,34 @@ bool is_pseudo(an_attribute_ptr a) {
          a->syntactic_location == al_implicit;
 }
 
-void add_attrs(std::string& out, an_attribute_ptr list, const std::string& on) {
+// Registered cerastes attributes are printed once per owner: a routine that
+// shares an attribute entry with another (instances may) still shows it.
+std::set<std::pair<an_attribute_ptr, a_routine_ptr>> g_printed_registered;
+
+void add_attrs(std::string& out, an_attribute_ptr list, const std::string& on, a_routine_ptr owner = nullptr) {
   for (an_attribute_ptr a = list; a; a = a->next) {
     // Pseudo-attributes (empty group, `using` prefix) and implicit ones that
     // never appeared in the source are not reported.
     if (is_pseudo(a)) continue;
+    if (is_registered_cerastes(a)) {
+      // `attr [[cerastes::NAME]] on routine @ POS`, then the argument trees.
+      if (!g_printed_registered.insert({a, owner}).second) continue;
+      g_printed.insert(a);
+      out += "  attr [[cerastes::" + std::string(a->name ? a->name : "?") + "]] on " + on + " @ " +
+             annotation_position(a->position) + "\n";
+      print_annotation_args(out, a, owner, 4);
+      continue;
+    }
     if (!g_printed.insert(a).second) continue;  // each attribute once
     out += "  attr " + render_attribute(a) + " on " + on + " @ " + at(a->position) + "\n";
   }
 }
 
-// ---- Template argument and constraint rendering -----------------------------
+// ---- Constraint rendering ---------------------------------------------------
 
 std::string param_name(a_template_parameter_ptr tp, int index) {
   if (tp && tp->source_corresp.name) return tp->source_corresp.name;
   return "#" + std::to_string(index);
-}
-
-// "T=int, U=short"; parameter names come from assoc_template->template_decl.
-// A pack is shown as "Ts=pack{int, long}" (tak_start_of_pack_expansion opens
-// it, following is_pack_element arguments belong to it; il_def.h:7683-7790).
-std::string render_args(a_template_ptr tmpl, a_template_arg_ptr list) {
-  if (list == nullptr) return "none";
-  a_template_parameter_ptr tp =
-      (tmpl && tmpl->template_decl) ? tmpl->template_decl->param_list : nullptr;
-  std::vector<std::string> parts;
-  std::vector<std::string> pack;
-  std::string pack_name;
-  bool in_pack = false;
-  int index = 0;
-  auto flush_pack = [&] {
-    if (!in_pack) return;
-    std::string s = pack_name + "=pack{";
-    for (size_t i = 0; i < pack.size(); ++i) s += (i ? ", " : "") + pack[i];
-    parts.push_back(s + "}");
-    in_pack = false;
-    pack.clear();
-  };
-  for (a_template_arg_ptr a = list; a; a = a->next) {
-    if (a->kind == tak_start_of_pack_expansion) {
-      flush_pack();
-      in_pack = true;
-      pack_name = param_name(tp, index);
-      if (tp) tp = tp->next;
-      ++index;
-      continue;
-    }
-    if (in_pack && a->is_pack_element) {
-      pack.push_back(render_template_arg(a));
-      continue;
-    }
-    flush_pack();
-    parts.push_back(param_name(tp, index) + "=" + render_template_arg(a));
-    if (tp) tp = tp->next;
-    ++index;
-  }
-  flush_pack();
-  std::string s;
-  for (size_t i = 0; i < parts.size(); ++i) s += (i ? ", " : "") + parts[i];
-  return s;
 }
 
 // Constraint lines for a prototype routine.
@@ -361,11 +332,26 @@ bool g_in_own_default_args = false;
 // argument also records a file-scope expression and is not followed.
 bool followable(an_expr_node_ptr e) { return g_in_own_default_args || !in_file_scope(e); }
 
+a_routine_ptr g_body_routine = nullptr;  // the routine whose body is being walked
+
 void on_statement(a_statement_ptr s, an_expr_or_stmt_traversal_block_ptr) {
   // a_statement.attributes (il_def.h:16540)
   for (an_attribute_ptr a = s->attributes; a; a = a->next) {
     if (is_pseudo(a)) continue;
-    if (!g_printed.insert(a).second) continue;
+    // A registered attribute is printed once per routine, like those of a routine;
+    // any other once.
+    if (is_registered_cerastes(a)) {
+      if (!g_printed_registered.insert({a, g_body_routine}).second) continue;
+      g_printed.insert(a);
+    } else if (!g_printed.insert(a).second) {
+      continue;
+    }
+    if (is_registered_cerastes(a)) {
+      *g_body += std::string("  stmt ") + name_of(s->kind) + " @ " + annotation_position(s->position) +
+                 " attr [[cerastes::" + (a->name ? a->name : "?") + "]] @ " + annotation_position(a->position) + "\n";
+      print_annotation_args(*g_body, a, nullptr, 4);
+      continue;
+    }
     *g_body += std::string("  stmt ") + name_of(s->kind) + " @ " + at(s->position) + " attr " +
                render_attribute(a) + "\n";
   }
@@ -540,7 +526,7 @@ Item describe(a_routine_ptr r) {
   }
   if (kind == RKind::instance || kind == RKind::specialization) {
     out += "  template " + (tmpl ? render_name(&tmpl->source_corresp, iek_template) : std::string("<none>")) +
-           " args <" + render_args(tmpl, r->template_arg_list) + ">\n";
+           " args <" + render_template_args(tmpl, r->template_arg_list) + ">\n";
   }
   if (kind == RKind::prototype) add_constraints(out, r, tmpl);
 
@@ -551,7 +537,7 @@ Item describe(a_routine_ptr r) {
   // alias such as `using FT = int(int)`) are shared by every declaration that
   // uses them; their own attributes belong to the alias, not to this routine,
   // and are reported once as a top-level `on typedef`.
-  add_attrs(out, r->source_corresp.attributes, "routine");
+  add_attrs(out, r->source_corresp.attributes, "routine", r);
   for (a_type_ptr t = r->type; t; t = t->variant.typeref.type) {
     if (t->kind != tk_typeref) {
       add_attrs(out, t->source_corresp.attributes, "type");
@@ -561,9 +547,21 @@ Item describe(a_routine_ptr r) {
       add_attrs(out, t->source_corresp.attributes, "type");
   }
   if (scope) add_variable_attrs(out, scope);
+  // An inheriting constructor has no contract of its own: the inherited
+  // constructor's applies.
+  if (r->is_inheriting_ctor && r->friends_or_originator.inherited_routine != nullptr)
+    out += "  inherits " + render_name(&r->friends_or_originator.inherited_routine->source_corresp, iek_routine) + "\n";
+  // The prototype of a member template of a class instance carries the contract
+  // of its root template only on the root.
+  if (kind == RKind::prototype && tmpl != nullptr) {
+    a_routine_ptr root = root_routine_of_template(tmpl);
+    if (root != nullptr && root != r && contract_names(root) != contract_names(r))
+      out += "  contract from root template " + render_name(&root->source_corresp, iek_routine) + "\n";
+  }
 
   // Expressions: default arguments, constructor mem-initializers, the body.
   g_body = &out;
+  g_body_routine = r;
   g_body_is_proto = kind == RKind::prototype;
   g_cur_const_expr = nullptr;
   g_seen_ops.clear();
@@ -604,12 +602,13 @@ Item describe(a_routine_ptr r) {
     if (scope->assoc_block) traverse_statement(scope->assoc_block, &tb);
   }
   g_body = nullptr;
+  g_body_routine = nullptr;
   if (tb.terminate && tb.shared_expr_budget == 0)
     out += "  warning: expression walk truncated (shared-expression budget exhausted)\n";
 
   // Tie-break for entities at the same position and kind (e.g. the implicit
   // copy and move assignment of a class): name, template arguments, type.
-  it.key = name + "\x01" + (r->template_arg_list ? render_args(tmpl, r->template_arg_list) : std::string()) +
+  it.key = name + "\x01" + (r->template_arg_list ? render_template_args(tmpl, r->template_arg_list) : std::string()) +
            "\x01" + render_type(r->type);
   it.text = out;
   return it;
@@ -711,7 +710,13 @@ void walk_il_and_print() {
     a_template_ptr def = t->definition_template;
     if (def == nullptr) continue;  // declaration only: no body, no prototype routine expected
     a_routine_ptr proto = def->prototype_instantiation.routine;
-    if (proto && g_collected.routine_set.count(proto) && !body_scope(proto)) {
+    // A prototype routine has no body by nature when it is a deduction guide, an
+    // explicitly defaulted or deleted function, a pure virtual function or an
+    // implicit one; only a routine that is defined and has lost its body counts.
+    const bool bodyless_by_nature =
+        proto && (proto->special_kind == sfk_deduction_guide || proto->is_defaulted || proto->is_deleted ||
+                  proto->pure_virtual || proto->compiler_generated);
+    if (proto && !bodyless_by_nature && g_collected.routine_set.count(proto) && !body_scope(proto)) {
       Item w;
       w.line = pos.line;
       w.col = pos.col;
@@ -745,6 +750,30 @@ void walk_il_and_print() {
     }
   }
 
+  // A routine's contract comes from its root template (0006 item 6).  An
+  // instance or specialization whose own list of contract attributes differs from
+  // the root's is reported, as the back end's own check (contract_not_propagated)
+  // rejects it.  The prototype of a member template of a class instance
+  // (S<long>::g) usually has no contract of its own, because the contract is
+  // written on the root template only; that is shown, not an error.
+  for (a_routine_ptr r : g_collected.routines) {
+    SrcPos pos = resolve(r->source_corresp.decl_position);
+    if (!pos.in_primary) continue;
+    if (r->is_prototype_instantiation) continue;  // see describe()
+    if (r->is_inheriting_ctor) continue;           // takes the contract of the inherited constructor
+    a_routine_ptr root = root_routine(r);
+    if (root == nullptr) continue;
+    if (options().walk_selftest ? contract_names(root).empty() : contracts_agree(root, r)) continue;
+    Item w;
+    w.line = pos.line;
+    w.col = pos.col;
+    w.order = 103;
+    w.key = render_name(&r->source_corresp, iek_routine);
+    w.text = "warning: contract of " + render_name(&root->source_corresp, iek_routine) + " missing on " +
+             w.key + "\n";
+    items.push_back(w);
+  }
+
   for (Item& w : line_directive_warnings()) items.push_back(w);
 
   // Attributes not printed with an owner: report them on their own so that no
@@ -764,9 +793,18 @@ void walk_il_and_print() {
       w.order = 50;
       std::string owner = o != g_collected.attr_owner.end() ? o->second : "<unknown owner>";
       w.key = owner;
-      w.text = "attr " + render_attribute(a) + " on " + owner + " @ " + pos.str() + "\n";
+      if (is_registered_cerastes(a)) {
+        w.text = "attr [[cerastes::" + std::string(a->name ? a->name : "?") + "]] on " + owner + " @ " +
+                 annotation_position(a->position) + "\n";
+        print_annotation_args(w.text, a, nullptr, 2);
+      } else {
+        w.text = "attr " + render_attribute(a) + " on " + owner + " @ " + pos.str() + "\n";
+      }
       items.push_back(w);
-    } else if (!pos.in_system && a->namespace_name && std::string(a->namespace_name) == "cerastes") {
+    } else if (a->namespace_name && std::string(a->namespace_name) == "cerastes") {
+      // Outside the primary file, in a user file or a system file (a header, a
+      // #pragma GCC system_header, a linemarker, a redeclaration of a library
+      // function): the annotation is checked wherever it is, and listed here.
       Item w;
       w.line = pos.line;
       w.col = pos.col;
