@@ -2,7 +2,7 @@
 
 CONTRIBUTING.md says feature requests start as a GitHub Discussion, and a
 maintainer opens an issue after consensus. So this is written as a Discussion,
-now with a working implementation behind it: a series of 12 commits on the
+now with a working implementation behind it: a series of 13 commits on the
 `cerastes` branch of `mborland/compiler`, on top of upstream `034385ba`,
 proposed for upstream (owner's direction, 2026-10-14: implement on the fork
 first, then discuss). cerastes pins that branch (decision 0009), so the code has
@@ -14,8 +14,8 @@ not part of the post.
 Evidence conventions. Statements about the series come from the commits
 themselves: `git show <sha>`, the `src/Changes` entry, the section of
 `doc/source/ext_intf.rst` and the tests of each commit, at the fork's tip
-`88916714e6` (commit SHAs are those of the local branch at that tip and change
-if a commit is amended before it is pushed). Statements about the unmodified
+`23f55e3628` (commit SHAs are those of the local branch at that tip; cerastes
+pins them, so the commits are no longer amended). Statements about the unmodified
 front end are probes run against EDG `9847356d461d2bef846bf133e16821f0e8b69749`
 (`7.0-25-g9847356d46`, the cerastes pin before the series), built in the
 cerastes configuration; they are kept in Appendix B, and the probe files are in
@@ -64,8 +64,8 @@ attributes:
 4. dependent arguments in template prototypes, substituted ones in instances;
 5. a way to mark a declaration as specification-only.
 
-Items 1 to 4 are implemented, as 12 commits (28 files under `src/`, `doc/` and
-`dev_tools/`, +3363 -81 lines; 43 new tests), described one by one in section 5.
+Items 1 to 4 are implemented, as 13 commits (28 files under `src/`, `doc/` and
+`dev_tools/`, +3377 -81 lines; 44 new tests), described one by one in section 5.
 Item 5 is not implemented and cerastes does not need it yet. We would like
 feedback on the design and on the series, and a decision on how to land it
 (section 12).
@@ -136,8 +136,8 @@ functions, memory model).
 
 ## 5. The series as built
 
-Twelve commits on `mborland/compiler` branch `cerastes`, in this order, on
-upstream `034385ba0a` (the fork's tip is `88916714e6`). Each commit has its own
+Thirteen commits on `mborland/compiler` branch `cerastes`, in this order, on
+upstream `034385ba0a` (the fork's tip is `23f55e3628`). Each commit has its own
 `src/Changes` entry, its documentation in `doc/source` where it changes the
 interface, and its own tests under `tests/tests/changes/` with their recordings.
 Every subject carries `[GH #?]` (FILT carries `[]`), to be replaced when the
@@ -159,6 +159,7 @@ and D0, which are independent. The "files" counts are `src/`, `doc/` and
 | H | `fa150e01c7` | Fix the result-name scope of an attribute of a member function defined outside its class | 5, +89 -5 | 2 (+1 changed) |
 | I | `207da5dffd` | Reject explicit specializations of member templates with must-match attributes; pack, lambda and duplicate-error fixes | 14, +394 -96 | 5 (+2 changed) |
 | J | `88916714e6` | Make the substitution of the arguments of registered attributes fail closed | 10, +172 -61 | 3 (+1 changed) |
+| K | `23f55e3628` | Initialize the template symbol of an explicit specialization whose template is not known yet | 7, +43 -1 | 1 |
 
 (F comes before E in the branch because E's scope work needed F's
 substitution; the letters are our names from the audit, not an order.)
@@ -445,6 +446,21 @@ IL lowering off run with `--no_il_lowering`. Files: `attribute.c`, `il.c`,
 `expr.c`, `decl_spec.c`, `templates.c`, `il.h`, `ext_intf.rst`.
 Tests: `GH-postfunc-subst-error.sft.cpp`, `GH-generic-lambda-substitution.sft.cpp`,
 `GH-result-name-void-two.sft.cpp`; `GH-postfunc-lambda-t.sft.cpp` is rewritten.
+
+### 5.13 K `23f55e3628`: a crash fix for G and I
+
+`prototype_routine_of_template_instance` set its out parameters (the template's
+symbol and supplement) only when it found the template. G records an explicit
+specialization whose template is not known yet, and stored the uninitialized
+symbol. That is an explicit specialization of a member template declared in its
+class template (valid since CWG 727, and in Microsoft mode). I then read the
+symbol. On x86-64 with AddressSanitizer the front end crashed on
+`edg/cmeerw/gnats-23971*`, `edg/daveed/d00244a`, `edg/rma/ms_cpgen01` and
+`EDGcpfe9529`, whether the class template was instantiated or not. Both out
+parameters are now set to NULL when NULL is returned. The crash was found by the
+full `imported,edg,cwg,stdlib` run, which the per-commit `changes,regressions`
+runs had not covered. Files: `templates.c`, `Changes`. Test:
+`GH-spec-in-class.sft.cpp` (four modes; it crashes the parent commit).
 
 ## 6. What an embedding program writes and what it gets
 
@@ -1197,9 +1213,9 @@ Missing today, with evidence:
 
 ### O.1 State of the code and of upstream
 
-- **The code** is 12 commits on the local clone's `cerastes` branch (`~/Documents/compiler`),
+- **The code** is 13 commits on the local clone's `cerastes` branch (`~/Documents/compiler`),
   on top of upstream `034385ba0a` ("Fix Python 3.6 compatibility issues"), tip
-  `88916714e6`. cerastes pins that tip (decision 0009). Until you push the branch, the pin
+  `23f55e3628`. cerastes pins that tip (decision 0009). Until you push the branch, the pin
   names commits that exist only in the clone (remote `fork-local`), and `scripts/check.sh`
   prints "NOT YET PUSHED".
 - **Upstream** was at `034385ba0a` when this was last checked (2026-10-14, by the compare
