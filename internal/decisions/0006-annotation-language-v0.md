@@ -216,8 +216,10 @@ summarized here):
     - **EDG** (0007): unknown name, wrong entity or statement kind, an
       attribute that appertains to nothing, wrong number of arguments,
       ill-typed or undeclared argument expressions, every result-name error,
-      and references to function parameter packs or pack expansions in an
-      argument (EDG would otherwise substitute them as empty packs).
+      references to function parameter packs or pack expansions in an
+      argument (EDG would otherwise substitute them as empty packs), and
+      references to parameters that follow a pack (whose numbering changes
+      in instances).
     - **cerastes** (the back end, in EDG's diagnostic format, at the C++ line,
       exit status 2):
       - `requires`/`ensures` anywhere but directly after the parameter list

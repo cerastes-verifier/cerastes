@@ -140,6 +140,13 @@ EDG tests that fail on its parent and pass on it, a `src/Changes` entry and a
      registered attribute arguments, a reference to a function parameter pack
      and a pack expansion (of the argument or of the attribute) are therefore
      errors. The general EDG bug is drafted as a separate upstream issue.
+   - **Parameters after a pack** (CP3 part 5). An instance keeps the
+     prototype's parameter numbers, but its parameter list is expanded. In
+     `m(T... xs, int y) [[requires(y >= 0)]]` with `T = int, long`, the
+     instance's contract names the `long` element, not `y`. So a reference to
+     any function parameter that follows a function parameter pack is an
+     error, already in the prototype. cerastes also fails closed on routines
+     whose prototype has a pack that is not the last parameter.
 6. **The result name (commit E).**
    - `ensures(r, p)` and `ensures(p)` share one descriptor with signature
      `(R,Xb)`. A leading identifier followed by a comma is the result name.
