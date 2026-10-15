@@ -116,6 +116,9 @@ into its `cerastes` branch and pinned here:
 - 0005, pinned at `8e1eb6c0a6`: `<utility>`, `<cstdlib>` and C's
   `<stdlib.h>` parse. `<iostream>`, `<string>`, `<vector>` and `<algorithm>`
   have 9 errors left (causes 2 and 3), `<new>` 2 (cause 3).
+- 0006, pinned at `99d825cff0`: `<new>` parses. `<iostream>`, `<string>`,
+  `<vector>` and `<algorithm>` have 7 errors left, all in
+  `__algorithm/find.h` (cause 2).
 
 ## VeriFast
 
