@@ -43,7 +43,7 @@ file per bug, numbered like the decision records: `NNNN-short-name.md`.
 | [0001](upstreamed/0001-attribute-namespace-prefix-match.md) | An attribute namespace that is only a prefix of a known one is accepted | Upstreamed |
 | [0002](upstreamed/0002-test-filter-non-file-scope-pointer.md) | The test output filter does not normalize `**possible non-file-scope ptr** (0x…)` | Upstreamed |
 | [0003](0003-attribute-parameter-pack-substituted-empty.md) | A function parameter pack in an attribute argument is substituted as an empty pack | open |
-| [0004](0004-attribute-parameter-after-pack-wrong-parameter.md) | A parameter after a function parameter pack, named in an attribute argument, is the wrong parameter in an instance | open |
+| [0004](0004-attribute-parameter-after-pack-wrong-parameter.md) | A parameter after a function parameter pack, named in an attribute argument, is the wrong parameter in an instance | fixed on branch `0004` (`enable_if`); not filed |
 | [0005](upstreamed/0005-macos-base-predefines-blocks.md) | The macOS clang base predefines `__BLOCKS__`, but the front end cannot parse block syntax | Upstreamed |
 | [0006](0006-macos-base-missing-interference-size-macros.md) | The macOS clang base lacks `__GCC_DESTRUCTIVE_SIZE` and `__GCC_CONSTRUCTIVE_SIZE` | fixed on branch `0006`; not filed |
 | [0007](0007-clang-ext-vector-type-unsupported.md) | Native macOS builds do not support `ext_vector_type` (or `vector_size`), which libc++ uses | fixed on branch `0007`; not filed |
@@ -54,6 +54,9 @@ file per bug, numbered like the decision records: `NNNN-short-name.md`.
 | [0012](0012-builtin-shufflevector-error-operand-assertion.md) | `__builtin_shufflevector` with an operand that becomes an error operand is an internal error | open |
 | [0013](0013-ext-vector-type-element-access-unsupported.md) | Element access on an `ext_vector_type` vector (`v.x`, swizzles) is unsupported | open |
 | [0014](0014-ext-vector-size-deduction-requires-int.md) | The size of an `ext_vector_type` alias template is deduced only into an `int` parameter | open |
+| [0015](0015-enable-if-reference-parameter-not-evaluated.md) | An `enable_if` condition that names a reference parameter rejects every call (and, after a pack, crashes) | open |
+| [0016](0016-adjacent-function-parameter-packs-element-count.md) | Two adjacent function parameter packs: one pack's element count includes the other's | open |
+| [0017](0017-generic-lambda-in-function-template-declaration-crash.md) | A generic lambda with more `auto` parameters than the function template has template parameters, in its declaration, crashes the front end | open |
 
 0005, 0006 and 0007 are the three causes of the libc++ failures recorded
 in decision 0001: `<utility>`, `<string>`, `<vector>`, `<algorithm>` and
