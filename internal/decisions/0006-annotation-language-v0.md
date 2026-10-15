@@ -140,6 +140,24 @@ summarized here):
        a member, the primary's contract is the one on any declaration of
        `S<T>::m`, including a definition outside the class.
      - When the primary has no contract, a specialization may not add one.
+     - **Unsupported in v0** (invariant 3; CP3 parts 5–6). Explicit
+       specializations of *member templates* of class templates are rejected
+       whenever the primary member template has a contract on any of its
+       declarations. Both forms are rejected:
+       - `template <> template <class U> int S<int>::g(U)`;
+       - `template <> template <> int S<int>::g<long>(long)`.
+
+       Three rounds of EDG fixes did not get their comparison and
+       inheritance right.
+     - **Where cerastes takes a contract from.** A template instance or
+       specialization takes its contract from its root template, through
+       `assoc_template` and `prototype_template`, never only from its own
+       attribute list. Some IL routines have an empty list while their root
+       has a contract: for example the member-template prototype `S<long>::g`
+       of a class instance, which is a documented EDG limitation. If a
+       routine whose root has `requires`/`ensures` lacks them after cerastes's
+       own substitution, or has different ones, cerastes rejects it with a
+       diagnostic. The walker cross-checks this.
      - Members of an explicit or partial *class* specialization
        (`template <> struct S<int> { … };`) belong to a different class and
        carry their own contracts in v0. M4 must not let a generic proof of

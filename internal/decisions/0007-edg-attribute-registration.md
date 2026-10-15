@@ -219,7 +219,12 @@ EDG tests that fail on its parent and pass on it, a `src/Changes` entry and a
      with the primary (0006 item 6), which EDG enforces in any declaration
      order, also when the primary's contract is written only on an
      out-of-class definition. Members of explicit or partial class
-     specializations carry their own contracts (M4 fails closed on them);
+     specializations carry their own contracts (M4 fails closed on them).
+     Explicit specializations of member templates of class templates are an
+     error when the primary has a must-match attribute (0006 item 6). The
+     member-template prototype of a class instance carries no copy of the
+     contract (EDG limitation), so cerastes reads contracts from the root
+     template;
    - the language mode. cerastes runs C++ in Clang emulation and C as C23.
      GNU emulation (`--gnu_version`) is refused by the driver, because there
      `extern "C"` redeclarations in different namespaces can become separate
