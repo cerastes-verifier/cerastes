@@ -238,7 +238,7 @@ There is deliberately no user-facing `assume`.
 
 **Tasks**
 - Register the attributes in `attribute.c`'s descriptor table under the `cerastes` namespace, one commit per attribute on the `cerastes` branch. Write application functions for binder injection and deferred parsing.
-  > **Superseded by decision 0007 (2026-10-14):** EDG gets a general registration mechanism (no `cerastes` string in EDG; 0003 item 7), developed as a local commit series on the fork's `cerastes` branch, one commit per phase. cerastes registers its table from its own driver and builds against the fork on the topic branch `m2-annotations` (decision 0005).
+  > **Superseded by decision 0007 (2026-10-14):** EDG gets a general registration mechanism (no `cerastes` string in EDG; 0003 item 7), developed as a local commit series on the fork's `cerastes` branch, one commit per phase. cerastes registers its table from its own driver. Since decision 0009 (same day) the submodule pins the fork, so M2 landed on `main` (the topic branch `m2-annotations` was dropped).
 - Diagnostics:
   - binder shadows a parameter,
   - wrong placement,
@@ -247,7 +247,7 @@ There is deliberately no user-facing `assume`.
 - Write the user-facing annotation reference as `doc/modules/ROOT/pages/annotations.adoc`, plus a page on building annotated code with ordinary compilers through `<cerastes.h>`. Every example is an included test (see M1.5).
 
 **Acceptance**
-- `tests/annotations/` positive cases: `il_display` golden output shows each attribute attached to the right entity with a typed expression tree, and inside templates the expressions are dependent.
+- `tests/annotations/` positive cases: `il_display` golden output shows each attribute attached to the right entity with a typed expression tree, and inside templates the expressions are dependent. *(As built: the goldens are the walker's `--cerastes_walk` listing, which prints each attribute with its typed tree; il_display is the evidence each golden is checked against.)*
 - Negative cases produce the specific EDG diagnostic.
 - The same files compile with Apple clang (and GCC if installed) using `-std=c++20 -Wall -Wextra -Werror`, without `__CERASTES__`, and with zero warnings.
 - The annotation reference is published at https://cerastes.dev/cerastes/doc/, and each of its examples runs in `check.sh`.

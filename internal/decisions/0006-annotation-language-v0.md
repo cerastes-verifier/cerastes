@@ -310,15 +310,17 @@ summarized here):
       - both `predicate` and `pure` on one function;
       - a contract on a `predicate`;
       - `old` outside `ensures`;
-      - a call to a `predicate` or `pure` function from ordinary code (if M2
-        has time; otherwise M3).
+      - a use of a `predicate`, `pure` or spec function from ordinary code
+        (a call, or taking its address; implemented in M2).
 
       Each diagnostic has one owner, either EDG or cerastes, and a must-fail
       test.
     - **Known gap.** Every cerastes-side check of a dependent construct is
-      made in each instance: a `fold`/`unfold` callee, a dependent assignment
-      such as `v = 0` on a `T` (not an `eok_assign` in the prototype), and a
-      predicate whose return type is dependent. In a template that is never
+      made in each instance: a `fold`/`unfold` callee, a predicate whose
+      return type is dependent, and a dependent call of a predicate or pure
+      function from ordinary code. (A dependent built-in assignment such as
+      `v = 0` on a `T` is an `eok_assign` in the prototype and is rejected
+      there; CP6.) In a template that is never
       instantiated, these constructs are not checked in M2. M4's eligibility
       checker must fail closed on them.
     - **Spec functions are identified by entity,** never by spelling: the

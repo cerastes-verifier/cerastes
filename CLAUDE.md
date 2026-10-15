@@ -39,7 +39,7 @@ User docs: doc/ (Antora) → https://cerastes.dev/cerastes/doc/ (decision 0004)
 src/backend (EDG IL → VIR) · src/vir · src/viper (VIR → .vpr + pos map) ·
 src/driver · include/cerastes.h · tests/<area>/ · scripts/ ·
 doc/ (user docs, Antora, published) · internal/ (developer docs, not published) ·
-third_party/edg (EDG, upstream) · third_party/silicon (Silicon + silver)
+third_party/edg (EDG: the owner's fork, decision 0009) · third_party/silicon (Silicon + silver)
 
 ## Toolchain
 - Pins and the reasons for them: internal/decisions/0001-toolchain-pins.md.

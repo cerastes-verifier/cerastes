@@ -1,6 +1,13 @@
 # 0005 — Building cerastes against an EDG tree other than the pin
 
-- **Status:** accepted (owner, 2026-10-14: "Topic branch + override"). Item 6 (topic branch) superseded by decision 0009 the same day: the pin moves to fork commits, so M2 lands on `main`; the override remains for uncommitted EDG work, and `check.sh` on `main` still refuses it.
+- **Status:** accepted (owner, 2026-10-14: "Topic branch + override").
+  Superseded the same day by decision 0009 in two places:
+  - item 6 (topic branch): the pin moves to fork commits, so M2 lands on
+    `main`. The override remains for uncommitted EDG work, and `check.sh`
+    on `main` still refuses it;
+  - the pin guard of item 5: the URL is now the fork's, and the gitlink
+    must be contained in `origin/cerastes` or `fork-local/cerastes`. It no
+    longer has to be an ancestor of upstream `origin/main`.
 - **Milestone:** M2 (2026-10-14)
 
 ## Context

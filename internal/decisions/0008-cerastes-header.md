@@ -114,6 +114,5 @@ Probe facts (M2 Phase 1):
   specification code is reachable at run time. The docs say so.
 - **Multi-line macro invocations.** Errors in a multi-line `CERASTES_*`
   invocation are reported at the argument's own line and column once
-  `FULLY_RESOLVED_MACRO_POSITIONS` is on (0006, Consequences). Tests still keep
-  invocations on one line, because walker positions are those of the
-  invocation.
+  `FULLY_RESOLVED_MACRO_POSITIONS` is on (0006, Consequences). The walker prints
+  original positions too. Tests keep invocations on one line for readability.
