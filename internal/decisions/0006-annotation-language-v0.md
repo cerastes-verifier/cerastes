@@ -275,6 +275,12 @@ summarized here):
       - any annotation argument whose tree contains an EDG error node or an
         error type. A substitution that went wrong without a diagnostic must
         never reach the verifier;
+      - any annotation expression the walker cannot represent exactly
+        (`unsupported_annotation_expression`, CP4 audit). That includes a
+        dependent requires-expression, an expression nested too deeply, a
+        parameter reference it cannot map, and a lambda whose body is not a
+        single `return <expression>;` (a `forall` body is one expression in
+        v0). What the listing cannot show, the verifier cannot encode;
       - a `fold`/`unfold` argument that is not a call to a `predicate`
         function;
       - a `predicate` that does not return `bool`, or a `pure` function that
