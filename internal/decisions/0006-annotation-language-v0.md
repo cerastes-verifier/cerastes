@@ -135,6 +135,21 @@ summarized here):
      contract, but a call with those arguments runs the specialization.
      Letting a specialization have its own, compatible contract would need a
      behavioural-subtyping obligation (M5-style). That can be added later.
+     - The rule covers explicit specializations of function templates and of
+       members of class templates (`template <> int S<int>::m(int x)`). For
+       a member, the primary's contract is the one on any declaration of
+       `S<T>::m`, including a definition outside the class.
+     - When the primary has no contract, a specialization may not add one.
+     - Members of an explicit or partial *class* specialization
+       (`template <> struct S<int> { … };`) belong to a different class and
+       carry their own contracts in v0. M4 must not let a generic proof of
+       `S<T>::m` cover a call that resolves to such a member, and must fail
+       closed on it.
+     - A template instance never reads "no contract attached" as
+       `requires(true)`. A contract written only on an out-of-class
+       definition reaches every instance member (0007 item 5). Until that is
+       verified for a member, M3 rejects calls to it as calls with no
+       visible contract.
    - Within one declaration, several `requires` (or `ensures`) are conjoined
      in source order, and so are several `invariant`s on one loop.
    - **Why not accumulate** (the CP1 audit found this). Translation units are

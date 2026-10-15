@@ -208,8 +208,11 @@ EDG tests that fail on its parent and pass on it, a `src/Changes` entry and a
    - contract consistency across translation units (0006 item 6), which EDG
      cannot see;
    - choosing between prototype and instance (M4). Explicit specializations
-     follow must-match with the primary template (0006 item 6), which EDG
-     enforces in any declaration order;
+     of function templates and of class-template members follow must-match
+     with the primary (0006 item 6), which EDG enforces in any declaration
+     order, also when the primary's contract is written only on an
+     out-of-class definition. Members of explicit or partial class
+     specializations carry their own contracts (M4 fails closed on them);
    - the language mode. cerastes runs C++ in Clang emulation and C as C23.
      GNU emulation (`--gnu_version`) is refused by the driver, because there
      `extern "C"` redeclarations in different namespaces can become separate
