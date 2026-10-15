@@ -163,6 +163,13 @@ summarized here):
        carry their own contracts in v0. M4 must not let a generic proof of
        `S<T>::m` cover a call that resolves to such a member, and must fail
        closed on it.
+     - An inheriting constructor (`using Base::Base;`) has no contract of its
+       own. The inherited constructor's contract applies, and the walker
+       prints `inherits <constructor>` so that M3 can map a call to it.
+     - Hidden friends of class instances, members of local classes in
+       template instances, and lambdas in instances carry their own
+       substituted copy of the contract; the IL gives them no link to a root
+       template.
      - A template instance never reads "no contract attached" as
        `requires(true)`. A contract written only on an out-of-class
        definition reaches every instance member (0007 item 5). Until that is
