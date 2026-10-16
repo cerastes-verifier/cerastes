@@ -71,6 +71,8 @@ third_party/edg (EDG: the owner's fork, decision 0009) · third_party/silicon (S
 ## Conventions
 - Commit to local `main` without asking (end of session, and after each
   change the owner asks for). Never push; the owner pushes.
+- No `Co-Authored-By: Claude` (or any Claude attribution) trailer on any
+  commit, here or in the EDG fork (owner, 2026-10-16).
 - C++20 for tool code; EDG code follows EDG's own style in third_party/edg.
 - Test files start with `// expect:` lines; grammar and categories in
   tests/README.md (see also plan.md §0).

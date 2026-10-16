@@ -363,29 +363,53 @@ Each has a recommended answer. Answer inline, as before.
 
 1. **Push order** (§2): fork `cerastes`, then cerastes `main`, then the
    website. *Recommended: as listed.*
+
+This is complete
+
 2. **Explicit specializations** must match the primary template's contract
    (or carry none); members of class specializations carry their own. This
    was decided by the orchestrator, extending your must-match rule.
    *Recommended: keep it. Independent specialization contracts would need an
    M5-style subtyping obligation.*
+
+Accept recommendation 
+
 3. **Explicit specializations of member templates** with a contract on the
    primary are rejected (invariant 3, after three EDG rounds did not get
    them right). *Recommended: keep it for v0; revisit in M4.*
+
+Accept recommendation
+
 4. **Language modes:** cerastes refuses GNU emulation and C before C23.
    *Recommended: keep it.*
+
+Accept recommendation, and add to M7 inventory. C23 is fine, GNU emulation will need to be added.
+
 5. **Lambdas in function-template contracts** cannot name `T` (an EDG
    limitation). *Recommended: accept for v0; an EDG fix (lambda rescan with
    declaration info, without crashes) is a later fork commit.*
+
+Fix EDG now so that we have it since T will also be needed for template verification.
+
 6. **Fork commits carry `Co-Authored-By: Claude Sonnet 5.5`.** EDG's
    `CONTRIBUTING.md` asks contributors to understand and defend AI-assisted
    work. *Recommended: keep the trailer, and review the series before
    upstreaming.*
+
+Do not add Claude as a co-author on any commit
+
 7. **Brand kit:** the loose `cerastes-lockup-on-light.svg` and
    `cerastes-avatar-500.png` also differ from the kit's copies (you asked
    only about on-dark). *Recommended: replace them with the kit's.*
+
+Accept recommendation
+
 8. **Dependabot** covers GitHub Actions *and* npm in `/doc`, following your
    int128 template; the earlier recommendation was Actions only.
    *Recommended: keep both.*
+
+Accept recommendation
+
 9. **Upstream:** when to open the Discussion, and which EDG bugs to file.
    Since 2026-10-15 the bugs are in `internal/edg_bugs/` (0001–0007), in the
    format of edgcpp/compiler#252, each reproduced on upstream `main`. 0001
@@ -394,9 +418,14 @@ Each has a recommended answer. Answer inline, as before.
    not reproduce on upstream and are not filed. *Recommended: 0005–0007
    first (they block every libc++ header on macOS), then 0003/0004, then
    0001/0002 with their branches.*
+
+I will handle this myself
+
 10. **Docker containers:** answered (killed, and a standing rule; §2 step 5).
 11. **Fork commit K** (`23f55e3628`) fixes a crash that G and I introduced
     for explicit specializations declared inside a class template (§3). It
     was added on top: the history is not rewritten (0009). *Recommended:
     review it with G and I, and run the full `all` suite at K on the
     x86-64 box before upstreaming the series.*
+
+Accept recommendation 

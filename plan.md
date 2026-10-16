@@ -384,6 +384,9 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
 - **Metrics:**
   - Using the ISO standard drafts and CppReference inventory the language features and then annotate which we support and which we do not. Store this in an MD file for future milestones
   - Assess the relative difficulty of unimplemented features. E.g. which require compiler changes, which require viper changes, or which we can handle locally in future sessions
+- **Known entries** (recorded as they are decided, so none is lost):
+  - **Language modes** (owner, 2026-10-16, M2 handoff question 4). GNU emulation is refused today and will need to be added: it needs EDG work, since `extern "C"` redeclarations in two namespaces escape must-match there. C before C23 is refused by design (C23 is the supported C).
+  - **Constructs M3 rejects** (decision 0012 lists them): each one is an entry, with the milestone expected to lift it.
 - **User docs:** publish a "Language support" page in `doc/` from the inventory. It shows what is supported and unsupported, by standard. The difficulty assessment stays in the planning file.
 
 **Acceptance:** complete records of features that are and are not implemented with annotated difficulty sorted by language standard.

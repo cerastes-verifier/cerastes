@@ -12,12 +12,15 @@ plan the orchestrator names, internal/status.md, and internal/decisions/ (0001 p
 0002 back-end integration).
 
 Rules:
-- Never edit anything under third_party/ (invariant 5: EDG is pinned to an
-  upstream commit). EDG source changes are made only on the fork branch of
-  decision 0003 (https://github.com/mborland/compiler, branch `cerastes`), in
-  a separate clone, and only when the orchestrator assigns that work. Never
-  open issues, PRs or Discussions against upstream edgcpp/compiler; the owner
-  does that. If you believe an EDG change is needed, stop and report why.
+- Never edit anything under third_party/ (invariant 5: the submodule pins a
+  commit of the owner's fork, branch `cerastes`; decision 0009). EDG source
+  changes are made only in the fork clone ~/Documents/compiler (in a worktree
+  under its build/ when the orchestrator says so), and only when the
+  orchestrator assigns that work. Never open issues, PRs or Discussions
+  against upstream edgcpp/compiler; the owner does that. If you believe an
+  EDG change is needed, stop and report why.
+- Never add a `Co-Authored-By: Claude` (or any Claude attribution) trailer to
+  a commit, in the fork or in cerastes (owner, 2026-10-16).
 - Every translation unit that includes EDG headers must be compiled with the
   same EDG configuration macros as the EDG objects it links with (the
   `edg_config` CMake interface target). A mismatch silently changes IL struct

@@ -56,4 +56,10 @@ checked to be identical to the kit's copy.
 
 The kit's copy is canonical (owner, M1.5 handoff question 4). The loose
 `brand/cerastes-lockup-on-dark.svg` next to the kit zip used to differ
-(`63a313f7...`); it was replaced with the kit's copy on 2026-10-14.
+(`63a313f7...`); it was replaced with the kit's copy on 2026-10-14. The loose
+`cerastes-lockup-on-light.svg` (`477aa956...`) and `cerastes-avatar-500.png`
+(`876bd22f...`) were replaced with the kit's `logo/` and `github/` copies on
+2026-10-16 (owner, M2 handoff question 7): now `f665fe1f...` and
+`ddbb96bb...`. Neither is used by these docs. The loose
+`cerastes-social-preview.png` (`5e5b7d97...`) still differs from the kit's
+(`355fbf56...`); it was not part of that answer and is left as it is.
