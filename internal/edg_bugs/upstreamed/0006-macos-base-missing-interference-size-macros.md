@@ -88,7 +88,7 @@ gives, among others:
   - with the bases of 0005 and 0006 together, `<new>`, `<utility>` and
     `<cstdlib>` have no errors, and `<string>`, `<vector>`, `<algorithm>`
     and `<iostream>` have 7, all in `__algorithm/find.h`
-    ([0007](0007-clang-ext-vector-type-unsupported.md));
+    ([0007](../0007-clang-ext-vector-type-unsupported.md));
   - run natively with `edgy` against its recording, in `edg_x86_64` and
     `edg_x86_64_cp`, the new test fails with the upstream base and passes
     with the fixed base.
@@ -116,7 +116,7 @@ clang rather than a fixed Apple clang 15 snapshot. That would also fix
 
 ## Impact on cerastes
 
-As with [0005](upstreamed/0005-macos-base-predefines-blocks.md), cerastes
+As with [0005](0005-macos-base-predefines-blocks.md), cerastes
 could not verify a program that includes `<new>`, or anything that reaches it
 (`<string>`, `<vector>`, `<algorithm>`, `<iostream>`), in C++17 or later with
 the current Command Line Tools. With the fork pinned at the merge, `<new>`

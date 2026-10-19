@@ -85,7 +85,7 @@ rebuilt natively):
 - the reproducer above and the `vector_size` example compile with no
   diagnostics;
 - with the bases of [0005](upstreamed/0005-macos-base-predefines-blocks.md)
-  and [0006](0006-macos-base-missing-interference-size-macros.md), the
+  and [0006](upstreamed/0006-macos-base-missing-interference-size-macros.md), the
   libc++ headers that failed have no errors left in `--c++20`: `<algorithm>`,
   `<string>`, `<vector>`, `<iostream>`, `<map>`, `<unordered_map>`, `<set>`,
   `<functional>`, `<memory>`, `<array>`, `<span>`, `<ranges>`, `<format>`,

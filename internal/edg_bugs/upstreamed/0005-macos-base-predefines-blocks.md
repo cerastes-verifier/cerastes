@@ -93,7 +93,7 @@ gives 8 errors in `usr/include/_stdlib.h`, at lines 298 (3), 308, 345, 352,
   - `#include <utility>` and `#include <cstdlib>` go from 8 errors to 0, and
     C17 `#include <stdlib.h>` from 6 to 0;
   - `<string>`, `<vector>`, `<algorithm>` and `<iostream>` go from 17 errors to
-    9; the rest are [0006](../0006-macos-base-missing-interference-size-macros.md)
+    9; the rest are [0006](0006-macos-base-missing-interference-size-macros.md)
     and [0007](../0007-clang-ext-vector-type-unsupported.md);
   - run natively with `edgy` against its recording, in `edg_x86_64` and
     `edg_x86_64_cp`, the new test fails with the upstream base, fails with a
