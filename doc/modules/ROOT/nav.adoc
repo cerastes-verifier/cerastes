@@ -2,3 +2,6 @@
 * xref:installation.adoc[Installation]
 * xref:annotations.adoc[Annotations]
 * xref:ordinary-compilers.adoc[Building with ordinary compilers]
+* xref:verifying.adoc[Verifying a program]
+* xref:integer-semantics.adoc[Integer semantics]
+* xref:error-messages.adoc[Error messages]

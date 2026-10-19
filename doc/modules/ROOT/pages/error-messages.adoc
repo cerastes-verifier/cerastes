@@ -1,0 +1,289 @@
+= Error messages
+
+When `cerastes verify` cannot prove something, it prints one error per problem,
+at the line of the C or pass:[C++] source that causes it:
+
+[source,text]
+----
+<file>:<line>: error: <category>: <message>
+<file>:<line>: note: <what the note says>
+----
+
+The *category* names what could not be proved. There are eleven, and each has a
+section below. A *note* line follows an error when a second place matters: the
+clause of a contract that failed, or the callee's clause that a call does not
+meet. Errors are sorted by file, line and category, and the exit status is 1
+when there are any. xref:verifying.adoc[Verifying a program] describes the
+command and the other exit statuses.
+
+Every example below is a program that fails with exactly the error named in
+its section (the example's line is the one the error points at), followed by
+the same program fixed so that it verifies.
+
+[NOTE]
+====
+cerastes proves that an error cannot happen on any path, with the information
+it has: contracts, branches and loop invariants. It does not run your program.
+An error means that it could not exclude the problem, and not necessarily that
+a run reaches it. To find out which, use the counterexample in your head or a
+test; then either fix the code or give the verifier the missing fact.
+====
+
+Problems that are not verification errors, for example a program the tool does
+not accept, are described in xref:verifying.adoc#not-supported[What is not
+supported yet].
+
+== precondition
+
+A call may not satisfy a `CERASTES_REQUIRES` clause of the function it calls. It is reported at the call, with a note that names the clause of the callee.
+
+The verifier could not show that the arguments meet the callee's precondition on every path that reaches the call. Here `use_half` passes `m`, which may be odd, to `half`, which requires an even number.
+
+[source,cpp]
+----
+include::example$error-messages/precondition_error.cpp[tag=source]
+----
+
+[source,console]
+----
+precondition_error.cpp:16: error: precondition: the precondition of `half` may not hold
+precondition_error.cpp:7: note: this is the requirement of `half`
+----
+
+*How to fix it.* Either establish the precondition before the call (a test and an early return, or a stronger `CERASTES_REQUIRES` on the caller, as below), or weaken what the callee requires if it does not need it.
+
+[source,cpp]
+----
+include::example$error-messages/precondition_fixed.cpp[tag=source]
+----
+
+== postcondition
+
+A `CERASTES_ENSURES` clause may not hold when the function returns. It is reported at the `return` statement that may leave the clause false (or at the closing brace of a `void` function), with a note at the clause.
+
+The value the function returns, together with what is known about the parameters, does not imply the clause. In the example the function returns one more than the contract allows.
+
+[source,cpp]
+----
+include::example$error-messages/postcondition_error.cpp[tag=source]
+----
+
+[source,console]
+----
+postcondition_error.cpp:10: error: postcondition: the postcondition of `double_it` may not hold
+postcondition_error.cpp:8: note: this is the postcondition
+----
+
+*How to fix it.* Change the code so that it returns the right value, or change the contract if it states the wrong thing. If the clause holds only for some arguments, add the condition to `CERASTES_REQUIRES`. Remember that a parameter in a postcondition is its value on entry.
+
+[source,cpp]
+----
+include::example$error-messages/postcondition_fixed.cpp[tag=source]
+----
+
+== check
+
+A `CERASTES_CHECK` may not hold. It is reported at the check.
+
+What the verifier knows at that point (the precondition, the assignments and the branches taken) does not imply the condition. A check is a claim for the verifier to prove, and never an assumption.
+
+[source,cpp]
+----
+include::example$error-messages/check_error.cpp[tag=source]
+----
+
+[source,console]
+----
+check_error.cpp:10: error: check: this `check` may not hold
+----
+
+*How to fix it.* Establish the condition (a stronger precondition or loop invariant, as below), or correct the check.
+
+[source,cpp]
+----
+include::example$error-messages/check_fixed.cpp[tag=source]
+----
+
+== invariant-entry
+
+A loop invariant may not hold when the loop is first reached. It is reported at the invariant clause.
+
+The invariant must be true before the first evaluation of the loop condition. In the example `i` starts at 1, so when `n` is 0 the clause `i <= n` is false on entry.
+
+[source,cpp]
+----
+include::example$error-messages/invariant_entry_error.cpp[tag=source]
+----
+
+[source,console]
+----
+invariant_entry_error.cpp:11: error: invariant-entry: this loop invariant may not hold on entry
+----
+
+*How to fix it.* Initialize the variables so that the invariant holds, or weaken the invariant. The error is about the first iteration; an invariant that is wrong later is `invariant-preserved`.
+
+[source,cpp]
+----
+include::example$error-messages/invariant_entry_fixed.cpp[tag=source]
+----
+
+== invariant-preserved
+
+A loop invariant may not hold again after an iteration of the body that started with it true. It is reported at the invariant clause.
+
+The invariant and the loop condition hold at the start of the body, but the body, followed by the loop's increment, may leave the invariant false. Here `i += 2` can step past `n`.
+
+[source,cpp]
+----
+include::example$error-messages/invariant_preserved_error.cpp[tag=source]
+----
+
+[source,console]
+----
+invariant_preserved_error.cpp:11: error: invariant-preserved: this loop invariant may not be preserved by an iteration
+----
+
+*How to fix it.* Change the body so that it keeps the invariant, or strengthen or weaken the invariant until it is both preserved and strong enough to prove what follows the loop. A loop's condition is checked each time it is evaluated, so an arithmetic error in the condition is reported separately.
+
+[source,cpp]
+----
+include::example$error-messages/invariant_preserved_fixed.cpp[tag=source]
+----
+
+== overflow
+
+A signed arithmetic operation may produce a value that does not fit its type, or a signed division may be the smallest value divided by -1. It is reported at the operator.
+
+Signed overflow is undefined behaviour in C and pass:[C++], so cerastes treats it as an error rather than assuming it wraps. See xref:integer-semantics.adoc[Integer semantics] for the exact rules. Unsigned arithmetic never gives this error: it wraps. The error also appears for arithmetic inside a contract.
+
+[source,cpp]
+----
+include::example$error-messages/overflow_error.cpp[tag=source]
+----
+
+[source,console]
+----
+overflow_error.cpp:8: error: overflow: signed `int` addition may overflow
+----
+
+*How to fix it.* Bound the operands in a `CERASTES_REQUIRES`, as below, test before computing, compute in a wider type, or use an unsigned type if wrapping is what you mean.
+
+[source,cpp]
+----
+include::example$error-messages/overflow_fixed.cpp[tag=source]
+----
+
+== division-by-zero
+
+A divisor of `/` or `%` may be zero. It is reported at the operator.
+
+Nothing in the precondition or the code before the division excludes a zero divisor.
+
+[source,cpp]
+----
+include::example$error-messages/division_by_zero_error.cpp[tag=source]
+----
+
+[source,console]
+----
+division_by_zero_error.cpp:8: error: division-by-zero: the divisor may be zero
+----
+
+*How to fix it.* Require the divisor to be non-zero, or test it before dividing.
+
+[source,cpp]
+----
+include::example$error-messages/division_by_zero_fixed.cpp[tag=source]
+----
+
+== shift
+
+A shift may have a count that is negative or at least the width of the promoted left operand, or a left shift of a signed value may have a negative left operand or a result that does not fit. It is reported at the operator.
+
+In the example the count `n` may be 32 or more, which is undefined for a 32-bit `unsigned`.
+
+[source,cpp]
+----
+include::example$error-messages/shift_error.cpp[tag=source]
+----
+
+[source,console]
+----
+shift_error.cpp:8: error: shift: the shift count may be negative or at least the width (32 bits) of `unsigned int`
+----
+
+*How to fix it.* Bound the count, as below, or mask or reduce it before shifting. Mind that operands narrower than `int` are promoted first, so the width that matters is the promoted type's.
+
+[source,cpp]
+----
+include::example$error-messages/shift_fixed.cpp[tag=source]
+----
+
+== conversion
+
+A conversion to a signed type may be given a value that does not fit. It is reported at the conversion: the cast, the initializer, the assignment, the argument or the `return`.
+
+cerastes does not accept a wrapping conversion to a signed type, written or implicit, because the standards disagree on what it means. Conversions to unsigned types wrap and are never an error.
+
+[source,cpp]
+----
+include::example$error-messages/conversion_error.cpp[tag=source]
+----
+
+[source,console]
+----
+conversion_error.cpp:9: error: conversion: the value may not fit in `signed char` (a conversion to a signed type must be exact)
+----
+
+*How to fix it.* Bound the value so that it fits, as below, or convert to the unsigned type of the same width and use that.
+
+[source,cpp]
+----
+include::example$error-messages/conversion_fixed.cpp[tag=source]
+----
+
+== missing-return
+
+A function that returns a value may reach its closing brace without a `return`. It is reported at the closing brace.
+
+Flowing off the end of a non-`void` function is undefined behaviour in pass:[C++] and C when the caller uses the result. The only exception is `main`, which returns 0.
+
+[source,cpp]
+----
+include::example$error-messages/missing_return_error.cpp[tag=source]
+----
+
+[source,console]
+----
+missing_return_error.cpp:14: error: missing-return: control may reach the end of `sign` without returning a value
+----
+
+*How to fix it.* Add the missing `return`, or restructure the function so that every path returns.
+
+[source,cpp]
+----
+include::example$error-messages/missing_return_fixed.cpp[tag=source]
+----
+
+== termination
+
+A termination measure (`CERASTES_DECREASES`) may be negative, or may not decrease. For a loop it is reported at the loop's `CERASTES_DECREASES` clause, and for a recursive function at the recursive call, with a note at the callee's measure.
+
+The measure must get smaller from one iteration to the next (for a function, from the entry to each recursive call), and must not be negative when the loop condition holds. A measure that stays the same, grows, or can go below zero does not show that the loop or recursion ends, so cerastes does not accept it. In the example the body forgot to add 1 to `i`.
+
+[source,cpp]
+----
+include::example$error-messages/termination_error.cpp[tag=source]
+----
+
+[source,console]
+----
+termination_error.cpp:12: error: termination: the measure of this loop may not decrease, or may not be bounded below by zero
+----
+
+*How to fix it.* Change the code so that the measure decreases, as below, or choose a measure that does: for a loop that counts up to `n`, the distance `n - i` to the bound. A measure with several expressions is compared lexicographically (see xref:verifying.adoc[Verifying a program]). The measure's own arithmetic is checked too: an overflow in it is an `overflow` error at the measure.
+
+[source,cpp]
+----
+include::example$error-messages/termination_fixed.cpp[tag=source]
+----

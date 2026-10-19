@@ -6,12 +6,17 @@ that exist today, where each may be written, and what each means.
 
 [IMPORTANT]
 ====
-cerastes parses these annotations, type-checks them as pass:[C++] expressions
-and places them on the function or statement they belong to. It also rejects
-the mistakes listed under <<not-allowed>>. It does *not* verify anything
-yet: a program with a contract that its code violates is accepted. The meaning
-of the annotations (what a contract promises and what a verifier must prove)
-is stated here so that you can write them now. A later milestone checks them.
+`cerastes verify` (xref:verifying.adoc[Verifying a program]) checks `requires`,
+`ensures`, `invariant`, `decreases` and `check` in functions over integers and `bool`. The
+other parts of this page are parsed, type-checked and placed on the function
+or statement they belong to, and the mistakes listed under <<not-allowed>> are
+rejected, but nothing checks what they mean yet. `cerastes verify` does not
+accept them in a program it verifies: a `fold` or `unfold` statement is
+rejected (`cerastes-unsupported_statement`), and so is any call in an
+annotation other than `cerastes::old` (`cerastes-call_in_annotation`), which
+includes the predicates, pure functions and specification functions that this
+page describes. Their declarations are accepted. The rest of this page states
+what they will mean, so that you can write them now.
 ====
 
 Everything on this page is a test. Each example is compiled by cerastes's
@@ -22,7 +27,7 @@ code with ordinary compilers].
 
 == Writing annotations
 
-There are eight annotations. You write them with macros from `<cerastes.h>`:
+There are nine annotations. You write them with macros from `<cerastes.h>`:
 
 [cols="2,3,3"]
 |===
@@ -39,6 +44,10 @@ There are eight annotations. You write them with macros from `<cerastes.h>`:
 | `CERASTES_INVARIANT(p)`
 | before a `while`, `do`, `for` or range-based `for` statement
 | `p` holds every time control reaches the loop test
+
+| `CERASTES_DECREASES(e1, ...)`
+| before a `while` or `for` statement, or after a function's parameter list
+| termination measure: it gets smaller with every iteration of the loop, or every recursive call of the function
 
 | `CERASTES_CHECK(p)`
 | as a statement
@@ -234,6 +243,17 @@ declarations, and whether or not the specialization repeats the contract:
 include::example$annotations/errors/member_template_specialization.cpp[tag=bad]
 ----
 
+The same specialization written *inside* the class template (`template <> int f<int>(int)`
+in the class body, allowed since CWG 727) is not checked by the front end at all when the class
+template is never instantiated, so cerastes refuses it itself, whenever it, or the member
+template of the same name, has a contract: `cerastes-in_class_specialization_contract`.
+It is reported at the specialization. Write the specialization at namespace scope instead.
+
+[source,cpp]
+----
+include::example$annotations/errors/in_class_specialization.cpp[tag=bad]
+----
+
 === Members, constructors and destructors
 
 In a member function, `this` and the members declared before the function are
@@ -314,6 +334,51 @@ include::example$annotations/loops.cpp[tag=for]
 The invariant is written before the loop, and nowhere else: not on the loop
 body and not after it.
 
+== Termination measures: decreases
+
+`decreases(e1, ..., en)` says why a loop or a recursion ends. It has one or more
+integer expressions, a *measure*, and it is written in one of two places. Before a
+loop (next to its invariants) it is the loop's measure: it must get smaller with
+every iteration, and must not be negative when the loop condition holds. After a
+function's parameter list (with `requires` and `ensures`, in any order) it is part of
+the function's contract: it is compared from the entry of the function to each
+recursive call. With several expressions the comparison is lexicographic: at the first
+one that changes it must have got smaller (from a value that is not negative), and the
+later ones may be anything.
+
+[source,cpp]
+----
+include::example$annotations/decreases.cpp[tag=loop]
+----
+
+[source,cpp]
+----
+include::example$annotations/decreases.cpp[tag=function]
+----
+
+The measure is an annotation like the others: it has no side effects, may not call
+`cerastes::old`, names the parameters of the function by their values on entry, and,
+in the loop form, may not name a variable that the loop itself declares (the same rule
+as for `invariant`). A measure on a function is a contract, so every declaration that
+carries one must carry the same, and it is refused on a predicate. The same macros
+build the file with other compilers: `CERASTES_DECREASES` expands to nothing there.
+
+A measure before anything but a loop, or before a function's declaration instead of
+after its parameter list, is an error:
+
+[source,cpp]
+----
+include::example$annotations/errors/decreases_on_if.cpp[tag=bad]
+----
+
+[source,cpp]
+----
+include::example$annotations/errors/decreases_prefix.cpp[tag=bad]
+----
+
+What a measure proves, and what `cerastes verify` requires (a measure on every loop and
+every function in a recursion cycle), is on xref:verifying.adoc[Verifying a program].
+
 == check
 
 `check(p)` states that `p` holds at that point of the function. It is a
@@ -349,12 +414,14 @@ include::example$annotations/predicates.cpp[tag=pure]
 A predicate returns `bool`, cannot also be `pure`, and has no `requires` or
 `ensures`. A pure function does not return `void`, and may have a contract. The
 body of either is ordinary pass:[C++] and may use the specification functions
-below. In an annotation, a call to one is an ordinary call.
+below. In an annotation, a call to one is an ordinary call (`cerastes verify`
+does not accept it yet, see above).
 
 `fold(e)` and `unfold(e)` are statements. Their argument is a call to a
 predicate: `fold` records that the predicate's condition holds and may be used
 as a unit, and `unfold` exchanges the unit for the condition it stands for.
-Their effect is not checked yet; their placement and argument are.
+Their effect is not checked yet, and `cerastes verify` rejects them; their
+placement and argument are checked by the front end.
 
 [source,cpp]
 ----
@@ -398,7 +465,7 @@ five functions:
 | for every value of the first parameter of `body`
 |===
 
-Today they only have to type-check; a later milestone gives `owns`, `reads`
+Today they only have to type-check (and `cerastes verify` accepts only `old`); a later milestone gives `owns`, `reads`
 and `owns_range` their meaning, in the memory model.
 
 [source,cpp]
@@ -459,10 +526,11 @@ An annotation does not change anything. It must not contain:
 * a read or write of a `volatile` object;
 * a GNU statement expression.
 
-This includes the body of a lambda written in the annotation. Calls to
-functions that are not specification functions are left to a later milestone,
-which will reject them. An overloaded `operator=` (or any other overloaded
-operator) is a call, so it is left to that milestone too.
+This includes the body of a lambda written in the annotation. The front end
+alone accepts a call to a function that is not a specification function, and so
+an overloaded `operator=` (or any other overloaded operator), which is a call.
+`cerastes verify` rejects every call in an annotation other than
+`cerastes::old` (`cerastes-call_in_annotation`), the implicit ones included.
 
 Every annotation is checked, in whatever file it is: a header, a system header
 or a directory given with `--sys_include` is not exempt.
@@ -507,7 +575,7 @@ is `undefined_identifier`:
 include::example$annotations/errors/requires_not_declared.cpp[tag=bad]
 ----
 
-A name in the `cerastes` namespace that is not one of the eight, such as
+A name in the `cerastes` namespace that is not one of the nine, such as
 `assert`, is `unrecognized_attribute`:
 
 [source,cpp]
@@ -627,8 +695,34 @@ specification, so they may call the specification functions.
 include::example$annotations/errors/spec_call_in_code.cpp[tag=bad]
 ----
 
+A `constexpr` predicate or pure function can be evaluated by the compiler, which
+would run its body as ordinary code. So a use where the language requires a constant
+expression is a use from ordinary code too: an array bound, a `static_assert` in a
+function body, an enumerator, a `constexpr` variable's initializer, a bit-field width,
+`alignas`, a default template argument, `noexcept(...)`, `explicit(...)`, a `decltype`
+operand, a `case` label, `if constexpr`, `sizeof`, and the body of a `constexpr` or
+`consteval` function. All are `cerastes-spec_call_in_code`.
+
+[source,cpp]
+----
+include::example$annotations/errors/spec_call_constexpr.cpp[tag=bad]
+----
+
+Five such contexts are not found yet, because the front end folds the call into its value
+and leaves nothing for cerastes to read: a class template argument (`S<scale(3)>`), an
+explicit function template argument (`ft<scale(1)>()`), and a `static_assert` at namespace
+or class scope. Do not rely on them: a later change makes the front end refuse them.
+
 A function marked both `predicate` and `pure` is `cerastes-predicate_and_pure`,
 and a `pure` function that returns `void` is `cerastes-pure_returns_void`.
+
+The marker goes on a function of your own. On a constructor, a destructor or an
+assignment operator (which have effects, defaulted or not) it is
+`cerastes-spec_marker_on_special_member`, and a marker written in a system header is
+`cerastes-spec_marker_in_system_file`. Do not mark a library function that you
+redeclare, and write the marker on the first declaration of a function: cerastes
+does not check either yet, and a use that comes before the marker is not refused
+by the front end's constant evaluation.
 
 === Side effects and old
 
@@ -644,6 +738,15 @@ include::example$annotations/errors/side_effect.cpp[tag=bad]
 [source,cpp]
 ----
 include::example$annotations/errors/old_in_requires.cpp[tag=bad]
+----
+
+`old` also does not belong in the body of a predicate or a pure function, which has no entry
+state to name: that is `cerastes-old_outside_ensures` too, whether it is called, its address is
+taken, or it is named in a template.
+
+[source,cpp]
+----
+include::example$annotations/errors/old_in_pure.cpp[tag=bad]
 ----
 
 === Declarations that disagree
@@ -730,6 +833,41 @@ find it, so a source that it cannot read twice (standard input) is rejected with
 [source,cpp]
 ----
 include::example$annotations/errors/macro_undefined.cpp[tag=bad]
+----
+
+The same holds for every name that the annotations depend on. A `+#define+` or `+#undef+`,
+anywhere in the translation unit and outside `<cerastes.h>` itself, of one of these is
+`cerastes-annotation_macro_changed`, reported at the directive:
+
+* `cerastes`, an attribute name (`requires`, `ensures`, `invariant`, `check`, `fold`, `unfold`,
+  `predicate`, `pure`) and a specification-function name (`old`, `owns`, `reads`, `forall`,
+  `owns_range`): `+#define ensures requires+` would turn every postcondition into a precondition;
+* `+CERASTES_H+` and every `+CERASTES_*+` macro, which are the header's own;
+* every predefined macro of the front end, among them `+__cplusplus+`,
+  `+__STDC_VERSION__+`, `+__has_cpp_attribute+` and `+__has_c_attribute+`: the header uses them to
+  decide whether the annotations are on, and the header stops with an `+#error+` when they were
+  changed before it was included.
+
+The check uses the front end's own record of what the preprocessor did, so a directive in a
+comment, a string literal or a skipped `+#if 0+` group does not count, and neither does one that
+changes nothing: an `+#undef+` of a macro that is not defined, or the identical redefinition of
+one that is. A header of the system that defines one of these names is rejected as well.
+
+[source,cpp]
+----
+include::example$annotations/errors/macro_changed.cpp[tag=bad]
+----
+
+=== <cerastes.h> in a namespace
+
+`<cerastes.h>` must be included at global scope. Included inside a namespace, it declares
+`foo::cerastes::owns` and the others, which no check of cerastes recognizes as specification
+functions, so their uses would be read as ordinary code. A use of such a function is
+`cerastes-cerastes_header_in_namespace`:
+
+[source,cpp]
+----
+include::example$annotations/errors/header_in_namespace.cpp[tag=bad]
 ----
 
 == Language modes

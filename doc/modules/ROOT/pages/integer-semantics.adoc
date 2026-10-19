@@ -1,0 +1,233 @@
+= Integer semantics
+
+This page says what cerastes proves about integer arithmetic. It describes one
+meaning for each expression, used for C23 and for pass:[C++]20 alike, so a
+`.c` file verifies, or fails, the same way in both modes. Where the two
+standards differ, cerastes takes the stricter rule. Each rule below says what
+is an error, and every error is reported at the operator with the category
+named in xref:error-messages.adoc[Error messages].
+
+In short:
+
+* signed arithmetic that does not fit its type is an error;
+* unsigned arithmetic wraps;
+* a conversion to a signed type that does not fit is an error, with or
+  without a cast;
+* division by zero, and a shift whose count or result is out of range, are
+  errors;
+* operands narrower than `int` are promoted, as in C and pass:[C++], and that
+  has consequences you can prove or trip over.
+
+== Types and ranges
+
+The integer types are `bool`, `char`, `signed char`, `unsigned char`, `short`,
+`int`, `long`, `long long` and their unsigned forms, `wchar_t`, `char8_t`,
+`char16_t`, `char32_t`, and `+__int128+` with `+unsigned __int128+`. Their sizes
+and whether plain `char` is signed come from the compiler's description of the
+target (on macOS for Apple silicon `int` is 32 bits, `long` is 64 and plain
+`char` is signed), never from constants inside cerastes.
+
+A value of a type is always inside its range. A parameter is assumed to be in
+the range of its type when the function starts, and cerastes proves that every
+result, and every value an operation produces, is in range too.
+
+Enumerations and their constants, `_BitInt`, floating point and vector types
+are rejected in this version (xref:verifying.adoc#not-supported[the list of
+constructs not yet supported]). So are the bitwise operators `&`, `|`, `^`
+and `~`.
+
+== Signed overflow is an error
+
+`+`, `-`, `*`, unary `-`, `pass:[++]`, `--` and the compound assignments on a signed
+type must produce a value that fits the type. If one may not, cerastes reports
+`overflow` at the operator.
+
+[source,cpp]
+----
+include::example$error-messages/overflow_error.cpp[tag=source]
+----
+
+The fix is to state in a contract what the caller must guarantee:
+
+[source,cpp]
+----
+include::example$error-messages/overflow_fixed.cpp[tag=source]
+----
+
+== Unsigned arithmetic wraps
+
+An unsigned operation produces the mathematical result modulo 2^N^, as both
+standards define it, so it is never an error, and a contract can rely on it.
+That includes `-u`, which is `2^N - u` for `u != 0`, and `<<` on an unsigned
+value.
+
+[source,cpp]
+----
+include::example$integer-semantics/unsigned_wraps.cpp[tag=source]
+----
+
+== Conversions
+
+[cols="2,5"]
+|===
+| Conversion to | Rule
+
+| an unsigned type
+| modulo 2^N^, no error
+
+| a signed type
+| the value must fit, otherwise `conversion`; this holds for an implicit
+  conversion and for a cast written by you (`(short)x`, `static_cast<short>(x)`),
+  and for an initialization, an assignment, a compound assignment, an argument
+  and a return value
+
+| `bool`
+| `v != 0`
+|===
+
+pass:[C++]20 defines the conversion of an out-of-range value to a signed type as
+modular, and C23 leaves it to the implementation. cerastes makes it an error in
+both, which is also what VeriFast does by default. A conversion that cannot
+lose anything (the source range lies within the target's) needs no check.
+
+[source,cpp]
+----
+include::example$integer-semantics/narrowing.cpp[tag=source]
+----
+
+`small` verifies because the contract keeps `x` in the range of `signed char`.
+`low_byte` converts to an unsigned type, which wraps. Without the `requires`,
+`(signed char)x` is the error:
+
+[source,cpp]
+----
+include::example$error-messages/conversion_error.cpp[tag=source]
+----
+
+To get a wrapped byte from a value, convert to the unsigned type first, as
+`low_byte` does, and then use the unsigned value; do not rely on a signed type
+wrapping.
+
+== Promotions and the usual arithmetic conversions
+
+C and pass:[C++] compute with operands of rank lower than `int` in `int`.
+cerastes follows them exactly, so these faithful consequences apply:
+
+* the product of two `unsigned short` values is computed in `int`, and can
+  overflow it;
+* `unsigned char` operands promote to `int`, so the product of two of them
+  always fits, and converting it back to `unsigned char` wraps;
+* when `int` meets `unsigned`, the `int` converts to `unsigned`, so `-1 < 0u`
+  is false and `i + 0u > 0u` is true for `i == -1`.
+
+[source,cpp]
+----
+include::example$integer-semantics/promotion_ok.cpp[tag=source]
+----
+
+[source,cpp]
+----
+include::example$integer-semantics/promotion_overflow.cpp[tag=source]
+----
+
+The same arithmetic gives the same answer in C23 and in pass:[C++]20:
+
+[source,c]
+----
+include::example$integer-semantics/usual_conversions.c[tag=source]
+----
+
+A compound assignment computes in the common type of its operands and then
+converts the result back to the variable's type, with the check of the
+conversion table above. So `us *= us` on `unsigned short` is computed in `int`
+and then converted back, and `c += 1` on a `signed char` is an error when `c`
+is the largest `signed char`.
+
+In C, a condition (of `if`, `while`, `for` and `?:`, and an operand of `!`,
+`&&` and `||`) is true when it is not zero, and a comparison produces an `int`
+with the value 0 or 1. In pass:[C++] those positions are `bool`. A contract
+means the same either way:
+
+[source,c]
+----
+include::example$integer-semantics/truth_values.c[tag=source]
+----
+
+== Division and remainder
+
+`/` and `%` truncate toward zero. A zero divisor is an error, `division-by-zero`.
+For a signed type, the smallest value divided by -1 does not fit, so it is
+`overflow`, not a division by zero.
+
+[source,cpp]
+----
+include::example$integer-semantics/division_truncates.cpp[tag=source]
+----
+
+[source,cpp]
+----
+include::example$integer-semantics/int_min_division.cpp[tag=source]
+----
+
+== Shifts
+
+The count of a shift must be at least 0 and less than the width of the
+promoted left operand; otherwise it is `shift`. Left shift of an unsigned value
+wraps. Left shift of a signed value must have a non-negative left operand and a
+result that fits; pass:[C++]20 would define more, but cerastes uses C23's stricter rule
+in both modes. Right shift of a negative value is arithmetic (it rounds toward
+negative infinity): defined in pass:[C++]20 and what this target does in C23.
+
+[source,cpp]
+----
+include::example$integer-semantics/shifts.cpp[tag=source]
+----
+
+[source,cpp]
+----
+include::example$integer-semantics/shift_negative.cpp[tag=source]
+----
+
+== Annotations mean their C value
+
+An annotation is an expression of the program's language, and it means what
+that expression computes. Unsigned arithmetic wraps in a contract too, and
+signed overflow, a division by zero, a bad shift or a narrowing conversion in a
+contract is an error at the annotation's line, with the same category as in
+code. Each clause is checked under the clauses before it, so a `requires` may
+rely on an earlier `requires`, and an `ensures` on every `requires` and the
+earlier `ensures`.
+
+[source,cpp]
+----
+include::example$integer-semantics/annotation_overflow.cpp[tag=source]
+----
+
+To reason with unbounded arithmetic in a contract, widen the operands:
+
+[source,cpp]
+----
+include::example$integer-semantics/annotation_widened.cpp[tag=source]
+----
+
+== Constants
+
+A constant the compiler has already folded is checked as you wrote it, so
+`signed char c = 300;` and `return 300;` from a function returning `signed
+char` are `conversion` errors, while `unsigned u = -1;` is fine:
+
+[source,cpp]
+----
+include::example$integer-semantics/constants.cpp[tag=source]
+----
+
+[source,cpp]
+----
+include::example$integer-semantics/constant_narrowing.cpp[tag=source]
+----
+
+The compiler's own warnings for these (overflow in a constant, a bad shift
+count, a division by zero, a sign change, a truncation, a missing `return`) are
+not shown by `cerastes verify`: the verifier reports each problem itself, once,
+with its category. A `#pragma` that changes a warning cannot hide a problem
+from it.

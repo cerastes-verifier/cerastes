@@ -1,0 +1,313 @@
+= Verifying a program
+
+`cerastes verify` checks a C or pass:[C++] source file against the contracts
+written in it. It proves, for every function with a body, that the
+postconditions hold, that every call meets the callee's precondition, that
+every `CERASTES_CHECK` and loop invariant holds, that no integer
+operation overflows, divides by zero or shifts out of range, and that every
+loop and every recursive function terminates. When it cannot prove one of
+these, it reports the line. This page describes the command,
+what it verifies, what it prints and the assumptions a result rests on.
+
+The annotations are described in xref:annotations.adoc[Annotations]. The
+meaning of the integer operations is in xref:integer-semantics.adoc[Integer
+semantics], and every message the tool can print is in
+xref:error-messages.adoc[Error messages].
+
+== Running it
+
+[source,sh]
+----
+build/cerastes verify midpoint.cpp
+----
+
+The file is the one source file of the run. It is this function:
+
+[source,cpp]
+----
+include::example$verifying/midpoint.cpp[tag=source]
+----
+
+[source,console]
+----
+midpoint.cpp: verified (1 function; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+The command takes these options and no others. An option that is not in this
+table is refused with exit status 2, even if the front end would accept it:
+verification must not depend on a diagnostic that was switched off or a
+dialect that was changed behind its back.
+
+[cols="2,5"]
+|===
+| Option | Meaning
+
+| `-I<dir>`, `-I <dir>`
+| Add `<dir>` to the user include path.
+
+| `-D<name>[=<value>]`, `-U<name>`
+| Define or undefine a macro. `+__CERASTES__+` is defined by the tool and cannot be
+  defined or undefined. The names the annotations depend on
+  (`+__has_cpp_attribute+`, `+__has_c_attribute+`, `cerastes`, `requires`,
+  `+CERASTES_H+` and every `CERASTES_*` macro) are refused too.
+
+| `--std=pass:[c++20]`, `--std=c23`
+| The language mode. The default is `c23` for a `.c` file and `pass:[c++20]` for
+  anything else. GNU dialects and C before C23 are not accepted.
+
+| `--keep-vpr`, `--keep-vpr=<path>`
+| Keep the generated Viper program and its position map. See
+  <<keep-vpr>>.
+
+| `--timeout=<seconds>`
+| The wall-clock limit for the proof search. The default is 300. Reaching it is
+  a failure of the tool, not a verdict on your program (exit status 3).
+
+| `--help`, `--version`
+| Print usage, or the version.
+|===
+
+The tools the verifier runs (the Java runtime, Silicon, Z3 and the system
+include directories) are fixed when cerastes is built. Environment variables
+such as `SILICON_JAR` or `Z3_EXE` do not change a result.
+
+== What is verified
+
+cerastes verifies the *primary file and every user header it includes*: each
+function body in them. A header is verified again in every run that includes
+it.
+
+A *system file* is not verified. It is a file under one of the system include
+directories the tool was built with (the SDK, the pass:[C++] library, the
+compiler's own headers), or exactly the `include/cerastes.h` of the cerastes
+checkout. The test is made on the file's real path (symbolic links and `..`
+are resolved), never on a flag in the source, so a `#pragma` or a `#line` in
+your code cannot turn the checks off. A `#line` directive in a verified file is
+rejected for the same reason. A function declared in a system file is used only
+through a contract; its body is never read.
+
+A directory you give with `-I` is a user directory, even if it holds
+library code.
+
+The bodies of functions marked `CERASTES_PREDICATE` and `CERASTES_PURE` are
+specification and are not verified. In this version a call of one of them in
+executable code is rejected, and in a contract only `cerastes::old` may be
+called.
+
+== The output
+
+A verification error is one line on standard output, followed by notes that
+say which clause is involved:
+
+[source,console]
+----
+midpoint_overflow.cpp:10: error: overflow: signed `int` addition may overflow
+----
+
+The file is written as you gave it on the command line (or as the include
+resolved, for a header), the line is the line of the C or pass:[C++] source,
+and the category is one of eleven names that
+xref:error-messages.adoc[Error messages] explains. Errors are sorted by file,
+then line, then category, and each is printed once. A program with errors
+exits with status 1.
+
+[source,cpp]
+----
+include::example$verifying/midpoint_overflow.cpp[tag=source]
+----
+
+A program that cerastes does not accept, because EDG finds a compile error
+or because it uses a construct that cerastes does not verify, is reported
+on standard error in EDG's format, with the diagnostic's name, and the exit
+status is 2. Standard output is then empty:
+
+[source,console]
+----
+"rejected_switch.cpp", line 8: error #cerastes-unsupported_statement: a switch statement is not supported by "cerastes verify" (decision 0012)
+    switch (x) {
+    ^
+
+1 error detected in the compilation of "rejected_switch.cpp".
+----
+
+Nothing else is printed. In particular a warning from the front end in a
+verified file is shown on standard error like any diagnostic, so a program
+that is meant to verify cleanly should compile without warnings.
+
+== Exit status
+
+[cols="1,6"]
+|===
+| Status | Meaning
+
+| 0 | Every function verified.
+| 1 | Verification errors, printed on standard output.
+| 2 | The program is not accepted: a front-end error, a construct cerastes does not verify, a refused option or a missing file.
+| 3 | The tool failed: the prover crashed, timed out or gave no verdict, an error could not be traced to a source line, or the front end aborted with an internal error. This is never a statement about your program.
+|===
+
+== Loops and termination
+
+A loop needs an invariant to be verified (the verifier does not unroll it) and
+a *measure*, `CERASTES_DECREASES(...)`, to show that it ends. The invariant
+must hold when the loop is first reached and after every iteration, and what
+follows the loop is proved from the invariant and the negation of the
+condition. The measure is one or more integer expressions that get smaller
+with every iteration and never go below zero: in `n - i`, the loop condition
+`i < n` makes it positive, and `i += 1` makes it smaller. The arithmetic in the
+loop is checked on every iteration, and so is the condition each time it is
+evaluated, and so is the arithmetic of the measure.
+
+[source,cpp]
+----
+include::example$verifying/loop.cpp[tag=source]
+----
+
+Here the invariant `s == 2 * i` and the bound `i <= n` give `s == 2 * n` when
+the loop ends, and the measure `n - i` shows that it ends. A loop with no
+`CERASTES_INVARIANT` is verified with only the facts the verifier derives
+automatically (that each variable the loop assigns stays in the range of its
+type), which is rarely enough to prove anything about the result.
+
+A recursive function needs a measure too, written after its parameter list. It
+is compared from the entry of the function to every call of a function in the
+same recursion cycle, over the arguments of the call:
+
+[source,cpp]
+----
+include::example$verifying/recursion.cpp[tag=source]
+----
+
+A measure with several expressions is compared lexicographically: at the first
+one that changes, the new value must be smaller than the old one, which must
+not be negative, and the later ones may be anything. A function that is not in
+a recursion cycle needs no measure. A loop, or a function in a cycle (direct
+recursion, or mutual recursion through other functions of the file), without
+one is rejected, because a program whose termination is not shown cannot be
+called verified:
+
+[source,cpp]
+----
+include::example$verifying/missing_measure.cpp[tag=source]
+----
+
+The errors a wrong invariant or measure can cause are `invariant-entry`,
+`invariant-preserved` and `termination`, described in
+xref:error-messages.adoc[Error messages].
+
+[#keep-vpr]
+== Keeping the Viper program
+
+cerastes translates the program to Viper, the verification language of the
+Silicon prover, and Silicon asks Z3. `--keep-vpr` writes the Viper text and
+the position map that links each checked line of it to your source:
+
+[source,sh]
+----
+build/cerastes verify midpoint.cpp --keep-vpr
+----
+
+This writes `midpoint.vpr` and `midpoint.vpr.map` into the current directory.
+`--keep-vpr=<path>` writes `<path>` and `<path>.map`. The files are written for
+every run that reaches the prover (exit status 0, 1 or 3), whatever the
+verdict. They are for people who want to see what was checked; the reports
+already point at your source, never at the Viper file.
+
+== The single-unit assumption
+
+A result is for one translation unit. A contract you declare for a function
+that is defined elsewhere, in another source file or in a library, is
+*trusted*: the callers in this unit are verified against it, and nothing here
+checks that the definition satisfies it. The success line says so. The
+definition is checked when the file that contains it is verified; a library
+function that is never verified is trusted for good.
+
+[source,cpp]
+----
+include::example$verifying/declared_elsewhere.cpp[tag=source]
+----
+
+Here `two_ids` is verified assuming `next_id` meets its contract. A function
+that has neither a contract nor a body in a verified file cannot be called from
+verified code: the call is rejected, because there is nothing to verify it
+against.
+
+== What a result means
+
+A verified function terminates on every input that satisfies its `requires`,
+has no undefined behaviour on the way, and returns a value that satisfies its
+`ensures`: the result is *total correctness*. (In these programs, which have no
+input or output, a loop or recursion that never ends is undefined behaviour in
+pass:[C++] anyway, which is why cerastes does not leave it unchecked.)
+
+What a result rests on is the single-unit assumption above, and it includes
+termination. A contract you declare for a function that is defined elsewhere
+is trusted to hold *and to terminate*. This is most visible with a contract
+that cannot be met:
+
+[source,cpp]
+----
+include::example$verifying/trusted_never_returns.cpp[tag=source]
+----
+
+`absurd` verifies, because its only path calls a function that, by its
+contract, never returns. If `never_returns` can in fact return, the
+verification says nothing about `absurd`. A contract you declare for code you
+have not verified is something you promise, not something the tool checks.
+
+The termination assumption has a limit that the check cannot see. If a
+function of this file calls a function that is defined in another file, which
+in turn calls back a function of this file, the cycle goes through code that
+was verified in another run: each file verifies, and the program does not
+terminate. A recursion cycle that passes through a function defined in another
+translation unit is not detected.
+
+A parameter in a postcondition denotes the value it had on entry, as the
+xref:annotations.adoc[Annotations] page describes. `CERASTES_CHECK` and a loop
+invariant see its current value.
+
+== Both modes mean the same
+
+The same source means the same in C23 and in pass:[C++]20. Where the two
+standards differ (conversions to a signed type, left shift of a negative
+value), cerastes uses the stricter rule in both, so a `.c` file verifies, or
+fails, identically in either mode:
+
+[source,c]
+----
+include::example$verifying/same_in_both_modes.c[tag=source]
+----
+
+[#not-supported]
+== What is not supported yet
+
+cerastes rejects what it cannot verify, with a diagnostic at the line, and
+never approximates it:
+
+[source,cpp]
+----
+include::example$verifying/rejected_switch.cpp[tag=source]
+----
+
+The constructs that are rejected in this version are:
+
+* *Statements:* `switch`, `break`, `continue`, `do ... while`, `goto` and labels,
+  `try` and `throw`, `asm`, and an `if` with an init-statement or with a
+  declaration in its condition.
+* *Declarations:* a local with no initializer, `static`, `thread_local` and
+  `extern` locals, global variables (also `const` ones), arrays, classes, unions,
+  enumerations, lambdas, templates, `constexpr` and `consteval` functions,
+  variadic functions, function pointers, `[[noreturn]]` functions, and
+  `CERASTES_REQUIRES` on `main`.
+* *Types:* pointers, references, floating point, `volatile`, `_BitInt`, vector
+  types.
+* *Expressions:* the bitwise operators (`&`, `|`, `^`, `~`), the comma
+  operator, an assignment used as a value, two calls in one expression that are
+  not nested in each other (`f(x) + g(y)`), and a call in the second operand of
+  `&&`, `||` or `?:`, or in a loop condition.
+* *Attributes:* any attribute other than the cerastes ones and `maybe_unused`,
+  `nodiscard`, `deprecated`, `likely` and `unlikely` (some attributes, such as
+  `assume`, would let you state an unchecked fact).
+
+A function with a body but no contract is verified against the default
+contract: its parameters and its result are in the range of their types.

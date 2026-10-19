@@ -41,12 +41,13 @@ scripts/bootstrap.sh
 . builds EDG's stock front end, `cpfe`, in `build/edg`;
 . builds `build/cerastes-fe`, EDG's front end in the configuration cerastes
   needs, with cerastes's own back end linked in;
+. builds `build/cerastes`, the verifier driver (`cerastes verify`);
 . builds Silicon with `sbt assembly`, unless a stamp shows the jar is current;
 . downloads Z3 4.16.0 into `build/tools` and checks its SHA-256;
 . runs `npm ci` in `doc/` to install the tools that build this documentation,
   unless the installed packages already match `doc/package-lock.json`;
 . writes `build/env.sh`, which sets, among others, `Z3_EXE`, `SILICON_JAR`,
-  `CERASTES_JAVA`, `CPFE` and `CERASTES_FE` for the pinned tools.
+  `CERASTES_JAVA`, `CPFE`, `CERASTES_FE` and `CERASTES_VERIFY` for the pinned tools.
 
 The script is idempotent: running it again changes nothing that is already
 current. `scripts/bootstrap.sh --build-only`, which `scripts/check.sh` uses,
@@ -115,6 +116,54 @@ translation of the program to a file in the current directory (here,
 
 A syntax error is reported as an `error:` message that quotes the source line
 and marks the position, and the exit status is 2.
+
+== Verify your first program
+
+`build/cerastes` verifies a source file against the contracts written in it.
+This function, from
+`doc/modules/ROOT/examples/verifying/midpoint.cpp`, returns a number between two
+others:
+
+[source,cpp]
+----
+include::example$verifying/midpoint.cpp[tag=source]
+----
+
+Verify it:
+
+[source,sh]
+----
+build/cerastes verify doc/modules/ROOT/examples/verifying/midpoint.cpp
+----
+
+[source,console]
+----
+doc/modules/ROOT/examples/verifying/midpoint.cpp: verified (1 function; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+The exit status is 0. Now verify a version with a plausible mistake, which
+computes the midpoint as `(lo + hi) / 2`:
+
+[source,cpp]
+----
+include::example$verifying/midpoint_overflow.cpp[tag=source]
+----
+
+[source,sh]
+----
+build/cerastes verify doc/modules/ROOT/examples/verifying/midpoint_overflow.cpp
+----
+
+[source,console]
+----
+doc/modules/ROOT/examples/verifying/midpoint_overflow.cpp:10: error: overflow: signed `int` addition may overflow
+----
+
+The line is the line of the source, and the exit status is 1: when `lo` and
+`hi` are both large, their sum does not fit in an `int`. The precondition allows
+that, so the verifier cannot exclude it. xref:verifying.adoc[Verifying a
+program] describes the command, and xref:error-messages.adoc[Error messages]
+explains every category.
 
 == Build this documentation
 

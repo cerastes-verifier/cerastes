@@ -1,0 +1,40 @@
+routine count_up plain body @ L7:5
+  returns int
+  param 1 n: int
+  attr [[cerastes::requires]] on routine @ L7:21
+    arg 1 @ L7:39
+      op eok_ge type_kind=tk_integer type=bool @ L7:41
+        param 1 n: int @ L7:39
+        const 0 type=int @ L7:44
+  stmt stmk_while @ L10:3 attr [[cerastes::invariant]] @ L10:3
+    arg 1 @ L10:22
+      op eok_land type_kind=tk_integer type=bool @ L10:29
+        op eok_le type_kind=tk_integer type=bool @ L10:24
+          const 0 type=int @ L10:22
+          var i: int decl=L9:7 @ L10:27
+        op eok_le type_kind=tk_integer type=bool @ L10:34
+          var i: int decl=L9:7 @ L10:32
+          var n: int decl=L7:18 @ L10:37
+  stmt stmk_while @ L10:3 attr [[cerastes::decreases]] @ L11:3
+    arg 1 @ L11:22
+      op eok_subtract type_kind=tk_integer type=int @ L11:24
+        var n: int decl=L7:18 @ L11:22
+        var i: int decl=L9:7 @ L11:26
+routine count_down plain body @ L20:5
+  returns int
+  param 1 n: int
+  attr [[cerastes::requires]] on routine @ L21:5
+    arg 1 @ L21:23
+      op eok_ge type_kind=tk_integer type=bool @ L21:25
+        param 1 n: int @ L21:23
+        const 0 type=int @ L21:28
+  attr [[cerastes::decreases]] on routine @ L22:5
+    arg 1 @ L22:24
+      param 1 n: int lvalue @ L22:24
+  attr [[cerastes::ensures]] on routine @ L23:5
+    arg 1 binder r: int @ L23:22
+    arg 2 @ L23:25
+      op eok_eq type_kind=tk_integer type=bool @ L23:27
+        binder r: int @ L23:25
+        const 0 type=int @ L23:30
+end walk: 2 routines reported, 0 routines with bodies in non-system files outside the primary file
