@@ -24,6 +24,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "annotation_il.h"
@@ -31,8 +32,10 @@
 #include "diagnostics.h"
 #include "expr_tree.h"
 #include "il_names.h"
+#include "il_query.h"
 #include "options.h"
 #include "render.h"
+#include "verify_config.h"
 
 namespace cerastes {
 namespace {
@@ -46,6 +49,13 @@ struct Collected {
   std::vector<a_variable_ptr> variables;  // declared outside any routine
   std::vector<a_field_ptr> fields;
   std::vector<a_statement_ptr> annotated_statements;  // statements with a cerastes attribute
+  // R4a/R4b/R4d: every expression node that names a routine, every class type that is an instance of a class
+  // template, and every registered cerastes attribute, each once, wherever the IL keeps it.
+  std::vector<an_expr_node_ptr> routine_nodes;
+  std::vector<a_type_ptr> class_instances;
+  std::vector<a_constant_ptr> address_constants;  // the address of a routine, or a pointer to a member function
+  std::vector<a_variable_ptr> all_variables;      // every variable, local ones included
+  std::vector<an_attribute_ptr> cerastes_attributes;
 };
 Collected g_c;
 // Prototype routine -> the template that owns it.
@@ -59,9 +69,27 @@ void collect(char* entry, an_il_entry_kind kind) {
     g_c.templates.push_back(reinterpret_cast<a_template_ptr>(entry));
   } else if (kind == iek_variable) {
     auto v = reinterpret_cast<a_variable_ptr>(entry);
+    g_c.all_variables.push_back(v);
     if (v->source_corresp.enclosing_routine == nullptr) g_c.variables.push_back(v);
   } else if (kind == iek_field) {
     g_c.fields.push_back(reinterpret_cast<a_field_ptr>(entry));
+  } else if (kind == iek_expr_node) {
+    auto e = reinterpret_cast<an_expr_node_ptr>(entry);
+    if (e->kind == enk_routine) g_c.routine_nodes.push_back(e);
+  } else if (kind == iek_type) {
+    auto t = reinterpret_cast<a_type_ptr>(entry);
+    if ((t->kind == tk_struct || t->kind == tk_class || t->kind == tk_union) &&
+        t->variant.class_struct_union.extra_info != nullptr &&
+        t->variant.class_struct_union.extra_info->template_arg_list != nullptr)
+      g_c.class_instances.push_back(t);
+  } else if (kind == iek_constant) {
+    auto c = reinterpret_cast<a_constant_ptr>(entry);
+    if ((c->kind == ck_address && c->variant.address.kind == abk_routine) ||
+        (c->kind == ck_ptr_to_member && c->variant.ptr_to_member.is_function_ptr))
+      g_c.address_constants.push_back(c);
+  } else if (kind == iek_attribute) {
+    auto a = reinterpret_cast<an_attribute_ptr>(entry);
+    if (is_registered_cerastes(a)) g_c.cerastes_attributes.push_back(a);
   } else if (kind == iek_statement) {
     auto st = reinterpret_cast<a_statement_ptr>(entry);
     for (an_attribute_ptr a = st->attributes; a; a = a->next)
@@ -193,8 +221,6 @@ bool is_function_template(a_template_ptr t) {
 
 // ---- Helpers -----------------------------------------------------------------
 
-std::string rname(a_routine_ptr r) { return render_name(&r->source_corresp, iek_routine); }
-
 bool is_instance(a_routine_ptr r) {
   return !r->is_prototype_instantiation && (r->is_template_function || r->assoc_template != nullptr);
 }
@@ -221,41 +247,6 @@ std::string instance_context(a_routine_ptr r) {
 a_type_ptr return_type_of(a_routine_ptr r) {
   a_type_ptr rt = r->type ? skip_typerefs(r->type) : nullptr;
   return (rt && rt->kind == tk_routine) ? rt->variant.routine.return_type : nullptr;
-}
-
-bool is_spec_function_name(const std::string& n) {
-  return n == "cerastes::owns" || n == "cerastes::reads" || n == "cerastes::old" ||
-         n == "cerastes::forall" || n == "cerastes::owns_range";
-}
-
-// A routine marked predicate or pure, on its own attribute list or its root
-// template's (an instance of a marked template).
-bool marked(a_routine_ptr r, Annot k) {
-  if (has_annot(r, k)) return true;
-  a_routine_ptr root = root_routine(r);
-  return root != nullptr && has_annot(root, k);
-}
-
-// The routine called by a call expression whose callee is named directly, or
-// null.
-a_routine_ptr direct_callee(an_expr_node_ptr e) {
-  if (e == nullptr || e->kind != enk_operation) return nullptr;
-  const auto& op = e->variant.operation;
-  if (op.kind != eok_call && op.kind != eok_dot_member_call && op.kind != eok_points_to_member_call)
-    return nullptr;
-  if (op.operands == nullptr || op.operands->kind != enk_routine) return nullptr;
-  return op.operands->variant.routine.ptr;
-}
-
-bool is_call_kind(an_expr_operator_kind k) {
-  return k == eok_call || k == eok_dot_member_call || k == eok_points_to_member_call;
-}
-
-a_scope_ptr body_scope(a_routine_ptr r) {
-  if (r->function_def_number == NULL_function_def_number) return nullptr;
-  a_scope_ptr sp = scope_for_routine_or_null(r);
-  if (sp == nullptr || sp->kind != sck_function || sp->variant.routine.ptr != r) return nullptr;
-  return sp;
 }
 
 void add_scope_variables(a_scope_ptr sp, std::set<std::string>* names, std::set<a_variable_ptr>* vars) {
@@ -367,6 +358,55 @@ bool object_named_unqualified(an_expr_node_ptr obj) {
   return false;
 }
 
+// The routine a constant names by address: `&f` (ck_address) or `&S::f`, a pointer to a member function
+// (ck_ptr_to_member, R4b), or null.
+a_routine_ptr address_constant_routine(a_constant_ptr c) {
+  if (c == nullptr) return nullptr;
+  if (c->kind == ck_address && c->variant.address.kind == abk_routine) return c->variant.address.variant.routine;
+  if (c->kind == ck_ptr_to_member && c->variant.ptr_to_member.is_function_ptr)
+    return c->variant.ptr_to_member.variant.routine;
+  return nullptr;
+}
+
+// ---- R4d, R4e: where the specification functions are declared, and `old` -------------------------------
+
+// R4d (cerastes_header_in_namespace): a specification function declared in a namespace `cerastes` that is not
+// the global one (`namespace foo { #include <cerastes.h> }`).  Its callers name `foo::cerastes::owns`, which
+// no check of this file recognizes as a specification function, so the call would be read as ordinary code.
+// Reported where such a function is named.
+bool is_spec_name_in_nested_cerastes_namespace(a_routine_ptr callee) {
+  if (callee == nullptr || !is_spec_name(callee->source_corresp.name)) return false;
+  a_scope_ptr sp = callee->source_corresp.parent_scope;
+  if (sp == nullptr || (sp->kind != sck_namespace && sp->kind != sck_namespace_extension)) return false;
+  a_namespace_ptr ns = resolve_alias(sp->variant.assoc_namespace);
+  if (ns == nullptr || ns->source_corresp.name == nullptr || std::strcmp(ns->source_corresp.name, "cerastes") != 0)
+    return false;
+  a_scope_ptr parent = ns->source_corresp.parent_scope;
+  return parent != nullptr && parent->kind != sck_file;
+}
+
+void check_namespaced_spec(an_expr_node_ptr e) {
+  if (e->kind != enk_routine) return;
+  a_routine_ptr callee = e->variant.routine.ptr;
+  if (is_spec_name_in_nested_cerastes_namespace(callee))
+    report(Diag::cerastes_header_in_namespace, e->position, {rname(callee)});
+}
+
+// R4e (old_outside_ensures): `cerastes::old` is for `ensures` only.  In the body of a predicate or pure
+// function it is meaningless too (there is no entry state to name): a call, its address, or a dependent
+// name that may turn out to be it.
+void check_old_in_spec_body(an_expr_node_ptr e) {
+  if (e->kind == enk_routine) {
+    a_routine_ptr callee = e->variant.routine.ptr;
+    if (callee != nullptr && rname(callee) == "cerastes::old") report(Diag::old_outside_ensures, e->position);
+  } else if (e->kind == enk_constant) {
+    const char* callee = dependent_spec_callee(e->variant.constant.ptr);
+    if (callee != nullptr && std::strcmp(callee, "old") == 0) report(Diag::old_outside_ensures, e->position);
+    a_routine_ptr by_address = address_constant_routine(e->variant.constant.ptr);
+    if (by_address != nullptr && rname(by_address) == "cerastes::old") report(Diag::old_outside_ensures, e->position);
+  }
+}
+
 // ---- Scanning an annotation argument -----------------------------------------
 
 struct Scan {
@@ -393,6 +433,15 @@ std::set<a_lambda_ptr> g_lambdas_checked;
 // The call operators of every lambda seen: a contract cannot be written on one,
 // so its attributes are reported once, as annotation_on_lambda.
 std::set<a_routine_ptr> g_lambda_routines;
+// R4a: the expression nodes that may name a specification function: those of the argument trees of registered
+// attributes (lambdas in them included) and of the bodies of specification functions.  Every other node that
+// names one is ordinary code.
+std::set<an_expr_node_ptr> g_exempt_nodes;
+// Nodes that a body walk already recorded as a use of a specification function (reported or, for the body of a
+// lambda in an annotation, excused).
+std::set<an_expr_node_ptr> g_handled_nodes;
+// The same for constants (`&cerastes::old<int>` in a specification body or an annotation).
+std::set<a_constant_ptr> g_exempt_constants;
 
 void note_lambda(a_lambda_ptr l);
 
@@ -451,6 +500,8 @@ void scan_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb) {
     tb->suppress_subtree_walk = TRUE;
     return;
   }
+  g_exempt_nodes.insert(e);
+  check_namespaced_spec(e);
   // An erroneous node: the front end gives up on an argument it cannot
   // substitute (for example a lambda in an instance's contract) without always
   // reporting it.  Never read such an annotation as meaning anything.
@@ -570,6 +621,7 @@ void scan_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb) {
 // may have been folded to a constant, and the front end keeps what it came
 // from.  Named constants (enumerators) are written elsewhere.
 void scan_on_constant(a_constant_ptr c, an_expr_or_stmt_traversal_block_ptr tb) {
+  g_exempt_constants.insert(c);
   if (c->expr != nullptr && c->source_corresp.name == nullptr) {
     if (tb->shared_expr_budget != 0 && --tb->shared_expr_budget == 0) {
       tb->terminate = TRUE;
@@ -651,16 +703,18 @@ void check_attribute(an_attribute_ptr a, a_routine_ptr owner, a_statement_ptr st
   Annot k = classify(a);
   if (k == Annot::none) return;
   const std::string context = instance_context(owner);
-  if (is_contract(k) && a->syntactic_location != al_post_func)
+  // `decreases` before a loop is the loop's measure (like `invariant`); on a function it is a contract.
+  const bool function_form = is_contract(k) && stmt == nullptr;
+  if (function_form && a->syntactic_location != al_post_func)
     report(Diag::contract_not_after_parameters, a->position, {a->name}, context);
 
   Scan sc;
   sc.annot = k;
   sc.owner = owner;
   sc.context = context;
-  if (is_contract(k) && owner != nullptr && is_member_of_class(owner->source_corresp.parent_scope))
+  if (function_form && owner != nullptr && is_member_of_class(owner->source_corresp.parent_scope))
     sc.member_class = owner->source_corresp.parent_scope->variant.assoc_type;
-  if (k == Annot::invariant && stmt != nullptr) {
+  if ((k == Annot::invariant || k == Annot::decreases) && stmt != nullptr) {
     // A variable declared in the condition of a while or for loop.
     if ((stmt->kind == stmk_while || stmt->kind == stmk_for) && stmt->expr != nullptr &&
         stmt->expr->kind == enk_condition && stmt->expr->variant.condition != nullptr &&
@@ -910,6 +964,68 @@ void check_macro_unchanged() {
   scan_files_for_macro_change(primary->first_child_file, 0);
 }
 
+// ---- R4c: a #define or #undef of a name the annotations depend on (decision 0008 item 2) -----------
+// The preprocessor's own record (RECORD_MACROS_IN_IL): every #define and #undef that was in an active
+// group, with its position.  A directive outside the real <cerastes.h> of this checkout that defines or
+// undefines
+//  * `cerastes`, an attribute name, a specification-function name, `CERASTES_H` or a `CERASTES_*` macro
+//    (the header's own macros),
+//  * or any predefined macro (`#define ensures requires` turned postconditions into preconditions;
+//    `#undef __cplusplus` made the header expand to nothing).  That includes `__has_cpp_attribute` in C++
+//    and `__has_c_attribute` in C, the feature tests that decide whether the header expands the macros.
+//    They are protected by being predefined, not by name: in the other language a system header
+//    (sys/cdefs.h) defines the one that is not (`#ifndef __has_cpp_attribute`) and it means nothing there,
+// is an error.  A macro of the command line has no position: it is reported at none (the drivers refuse
+// such options themselves; this keeps the front end honest when run directly).
+const std::string& real_cerastes_header() {
+  static const std::string path = canonical_path(std::string(CERASTES_SOURCE_INCLUDE_DIR) + "/cerastes.h");
+  return path;
+}
+
+bool is_protected_macro_name(const std::string& n, const std::set<std::string>& predefined) {
+  static const char* const fixed[] = {"cerastes",  "requires", "ensures", "invariant", "check",
+                                      "fold",      "unfold",   "predicate", "pure",     "decreases", "old",
+                                      "owns",      "reads",    "forall",  "owns_range", "CERASTES_H"};
+  for (const char* f : fixed)
+    if (n == f) return true;
+  if (n.compare(0, 9, "CERASTES_") == 0) return true;
+  return predefined.count(n) != 0;
+}
+
+std::string macro_name(a_macro_ptr m) {
+  if (m->source_corresp.name != nullptr) return m->source_corresp.name;
+  // from the text: "#define NAME..." or "#undef NAME"
+  if (m->text == nullptr) return "";
+  const char* t = m->text;
+  t += std::strncmp(t, "#undef", 6) == 0 ? 6 : std::strncmp(t, "#define", 7) == 0 ? 7 : 0;
+  while (*t == ' ' || *t == '\t') ++t;
+  const char* e = t;
+  while (std::isalnum(static_cast<unsigned char>(*e)) || *e == '_') ++e;
+  return std::string(t, e);
+}
+
+void check_macros_in_il() {
+  std::set<std::string> predefined;
+  for (a_macro_ptr m = il_header.macros; m != nullptr; m = m->next)
+    if (m->is_predefined && !m->is_undef) {
+      const std::string n = macro_name(m);
+      if (!n.empty()) predefined.insert(n);
+    }
+  const std::string& header = real_cerastes_header();
+  for (a_macro_ptr m = il_header.macros; m != nullptr; m = m->next) {
+    if (m->is_predefined && !m->is_undef) continue;  // the predefinition itself
+    const std::string n = macro_name(m);
+    if (n.empty() || !is_protected_macro_name(n, predefined)) continue;
+    // `-D__CERASTES__` (the front end's own definition) has its own check.
+    if (n == "__CERASTES__") continue;
+    if (!m->is_command_line_definition) {
+      const std::string where = physical_path(m->source_corresp.decl_position);
+      if (!header.empty() && where == header) continue;
+    }
+    report(Diag::annotation_macro_changed, m->source_corresp.decl_position, {n, m->is_undef ? "undefined" : "defined"});
+  }
+}
+
 void check_routine_level(a_routine_ptr r, const std::map<a_routine_ptr, a_template_ptr>& proto_owner) {
   const std::string name = rname(r);
   const std::string context = instance_context(r);
@@ -922,6 +1038,26 @@ void check_routine_level(a_routine_ptr r, const std::map<a_routine_ptr, a_templa
   const bool is_pure = pure != nullptr || marked(r, Annot::pure);
   a_type_ptr ret = return_type_of(r);
   const bool dependent_ret = ret != nullptr && is_template_dependent_type(ret);
+
+  // The marker of a specification function is a promise about the whole function: it goes on a function of
+  // the user's own (not one declared in a system file, such as a library function, or built in), and never on a
+  // special member function.  (Instances take the template's marks; they are not checked again.)  That the marker
+  // must be on the first declaration of the function is not decidable from the IL: the front end keeps no list
+  // of the declarations, and `on_primary_declaration` is the definition's (see the 0006 note on item 10).
+  if (!is_instance(r)) {
+    const SrcPos decl = resolve(r->source_corresp.decl_position);
+    const bool library = !decl.known || decl.in_system;
+    for (an_attribute_ptr a = r->source_corresp.attributes; a; a = a->next) {
+      const Annot k = classify(a);
+      if (k != Annot::predicate && k != Annot::pure) continue;
+      const char* what = a->name ? a->name : "?";
+      const bool special = r->special_kind == sfk_constructor || r->special_kind == sfk_destructor ||
+                           (r->source_corresp.name != nullptr && std::strcmp(r->source_corresp.name, "operator=") == 0);
+      if (special) report(Diag::spec_marker_on_special_member, a->position, {what, name}, context);
+      const SrcPos where = resolve(a->position);
+      if (library || (where.known && where.in_system)) report(Diag::spec_marker_in_system_file, a->position, {what, name}, context);
+    }
+  }
 
   // Where a diagnostic about the mark points: the attribute on this routine, or
   // the routine's declaration when the mark comes from the root template only.
@@ -984,17 +1120,13 @@ struct BodyState {
 BodyState* g_body = nullptr;
 std::set<a_statement_ptr> g_checked_statements;  // statements with annotations checked in a body
 
-bool is_spec_routine(a_routine_ptr r) {
-  return marked(r, Annot::predicate) || marked(r, Annot::pure) || is_spec_function_name(rname(r));
-}
-
 // The address of a specification function (a constant of kind ck_address on a
 // routine: `&p` in an initializer, or a template argument) in ordinary code: a
 // call through the pointer would go unseen.
 void note_spec_address_constant(a_constant_ptr c, const a_source_position& at) {
-  if (c == nullptr || c->kind != ck_address || c->variant.address.kind != abk_routine) return;
-  a_routine_ptr r = c->variant.address.variant.routine;
-  if (r != nullptr && is_spec_routine(r)) g_spec_calls.push_back({g_body ? g_body->routine : nullptr, at, rname(r)});
+  a_routine_ptr r = address_constant_routine(c);
+  if (r == nullptr || !is_spec_routine(r) || at.seq == 0) return;
+  g_spec_calls.push_back({g_body ? g_body->routine : nullptr, at, rname(r)});
 }
 
 // A routine named in ordinary code whose template arguments include the address
@@ -1024,14 +1156,21 @@ void body_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb) {
     if (l) note_lambda(l);
     return;
   }
-  if (b.spec_caller) return;
+  if (b.spec_caller) {
+    g_exempt_nodes.insert(e);
+    check_old_in_spec_body(e);
+    return;
+  }
   // A reference to a specification function in ordinary code: a call, and also
   // taking its address (a call through the pointer would go unseen).  The routine
   // is found by entity, whatever its spelling (using, qualified or not).
   if (e->kind == enk_routine) {
     a_routine_ptr callee = e->variant.routine.ptr;
     if (callee == nullptr) return;
-    if (is_spec_routine(callee)) g_spec_calls.push_back({b.routine, e->position, rname(callee)});
+    if (is_spec_routine(callee)) {
+      g_spec_calls.push_back({b.routine, e->position, rname(callee)});
+      g_handled_nodes.insert(e);
+    }
     note_spec_template_arguments(callee, e->position);
   } else if (e->kind == enk_constant) {
     // A dependent call of a specification function in a template that may never be
@@ -1043,7 +1182,14 @@ void body_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb) {
 }
 
 void body_on_constant(a_constant_ptr c, an_expr_or_stmt_traversal_block_ptr tb) {
-  if (g_body->pos.seq != 0) note_spec_address_constant(c, g_body->pos);
+  if (g_body->spec_caller) {
+    g_exempt_constants.insert(c);
+    a_routine_ptr by_address = address_constant_routine(c);
+    if (by_address != nullptr && rname(by_address) == "cerastes::old")
+      report(Diag::old_outside_ensures, c->source_corresp.decl_position);
+  } else {
+    note_spec_address_constant(c, g_body->pos);
+  }
   // Only expressions of this body: a call site's copy of a callee's default
   // argument records a file-scope expression.
   if (c->expr != nullptr && c->source_corresp.name == nullptr && !in_file_scope(c->expr)) {
@@ -1123,6 +1269,202 @@ void check_initializers() {
   g_body = saved;
 }
 
+// ---- R4a/R4b: every use of a specification function outside annotations and specification bodies -----
+// The walks above find the uses in bodies and initializers.  A use can also hang off a type (an array bound,
+// `decltype`), a field (a bit-field width), a template parameter (a default argument), an exception
+// specification, an attribute argument that is not a cerastes one (`alignas`, `explicit`), an enumerator, a
+// block-scope `static_assert` or a constant variable's initializer: all of them constant-evaluated contexts, which
+// are ordinary code (il-inventory, "R4a").  So one more pass looks at every expression node of the IL that names a
+// routine, wherever it hangs, and every class instance whose template arguments name one by address.  A node
+// is excused only if it lies under the arguments of a registered cerastes attribute (lambdas included) or in the
+// body of a specification function: those nodes are marked first.  Calls the walks found were reported there.
+void mark_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb) {
+  if (!g_exempt_nodes.insert(e).second) {
+    tb->suppress_subtree_walk = TRUE;
+    return;
+  }
+  if (e->kind == enk_lambda) {
+    a_lambda_ptr l = e->variant.init.source.lambda;
+    a_routine_ptr lr = l ? l->lambda_routine : nullptr;
+    a_scope_ptr sp = lr ? body_scope(lr) : nullptr;
+    if (sp != nullptr && sp->assoc_block != nullptr) traverse_statement(sp->assoc_block, tb);
+  }
+}
+
+void mark_on_constant(a_constant_ptr c, an_expr_or_stmt_traversal_block_ptr tb) {
+  g_exempt_constants.insert(c);
+  if (c->expr != nullptr && c->source_corresp.name == nullptr) {
+    if (tb->shared_expr_budget != 0 && --tb->shared_expr_budget == 0) {
+      tb->terminate = TRUE;
+      return;
+    }
+    traverse_expr(c->expr, tb);
+    tb->suppress_subtree_walk = TRUE;
+  }
+}
+
+void init_mark_traversal(an_expr_or_stmt_traversal_block* tb) {
+  clear_expr_or_stmt_traversal_block(tb);
+  tb->process_expr = mark_on_expr;
+  tb->process_constant = mark_on_constant;
+  tb->process_non_dynamic_constants = TRUE;
+  tb->process_template_parameter_constants_and_expressions = TRUE;
+  tb->process_expressions_for_constants = FALSE;
+  tb->shared_expr_budget = budget();
+}
+
+void mark_attribute_arguments(an_attribute_ptr a) {
+  if (!is_registered_cerastes(a)) return;
+  for (const AnnotArg& g : arguments_of(a)) {
+    if (g.kind != AnnotArg::Kind::expression || g.expr == nullptr) continue;
+    an_expr_or_stmt_traversal_block tb;
+    init_mark_traversal(&tb);
+    traverse_expr(g.expr, &tb);
+    if (tb.terminate && tb.shared_expr_budget == 0)
+      report(Diag::analysis_limit_reached, g.expr->position, {"the budget of shared expressions in an annotation"});
+  }
+}
+
+void mark_spec_body(a_routine_ptr r) {
+  a_scope_ptr sp = body_scope(r);
+  an_expr_or_stmt_traversal_block tb;
+  init_mark_traversal(&tb);
+  a_type_ptr rt = r->type ? skip_typerefs(r->type) : nullptr;
+  if (rt && rt->kind == tk_routine && rt->variant.routine.extra_info)
+    for (a_param_type_ptr p = rt->variant.routine.extra_info->param_type_list; p; p = p->next)
+      if (p->default_arg_expr) traverse_expr(p->default_arg_expr, &tb);
+  if (sp != nullptr) {
+    for (a_constructor_init_ptr ci = sp->variant.routine.constructor_inits; ci; ci = ci->next) {
+      if (ci->initializer) traverse_dynamic_init(ci->initializer, &tb);
+      if (ci->source_expr) traverse_expr(ci->source_expr, &tb);
+    }
+    if (sp->assoc_block != nullptr) traverse_statement(sp->assoc_block, &tb);
+  }
+  if (tb.terminate && tb.shared_expr_budget == 0)
+    report(Diag::analysis_limit_reached, r->source_corresp.decl_position, {"the budget of shared expressions in \"" + rname(r) + "\""});
+}
+
+void mark_exempt_nodes() {
+  for (an_attribute_ptr a : g_c.cerastes_attributes) mark_attribute_arguments(a);
+  for (a_routine_ptr r : g_c.routines) {
+    for (an_attribute_ptr a = r->source_corresp.attributes; a; a = a->next) mark_attribute_arguments(a);
+    if (marked(r, Annot::predicate) || marked(r, Annot::pure)) mark_spec_body(r);
+  }
+  for (a_statement_ptr st : g_c.annotated_statements)
+    for (an_attribute_ptr a = st->attributes; a; a = a->next) mark_attribute_arguments(a);
+}
+
+// The class type a variable's type reaches through typedefs, arrays, pointers and references, or null.
+a_type_ptr class_behind(a_type_ptr t) {
+  for (int guard = 0; t != nullptr && guard < 32; ++guard) {
+    t = skip_typerefs(t);
+    if (t->kind == tk_array) t = t->variant.array.element_type;
+    else if (t->kind == tk_pointer) t = t->variant.pointer.type;
+    else return t;
+  }
+  return nullptr;
+}
+
+// is_spec_routine for a routine named by many nodes: decided once, and the (costly) qualified name is
+// rendered only for a routine that has the name of a specification function.
+bool is_spec_routine_cached(a_routine_ptr r) {
+  static std::map<a_routine_ptr, bool> cache;
+  auto it = cache.find(r);
+  if (it != cache.end()) return it->second;
+  bool result = marked(r, Annot::predicate) || marked(r, Annot::pure) ||
+                (is_spec_name(r->source_corresp.name) && is_spec_routine(r));
+  cache[r] = result;
+  return result;
+}
+
+void check_all_spec_references() {
+  // What the body walks reported already, by line: a use also seen here as a node or a constant (the operand of
+  // `&f` inside the constant that the walk reported at the initializer) is the same use.
+  std::set<std::tuple<std::string, unsigned long, std::string>> done;
+  for (const SpecCall& c : g_spec_calls) {
+    SrcPos p = resolve(c.at);
+    if (p.known) done.insert({p.file, p.line, c.callee});
+  }
+  auto fresh = [&](const a_source_position& at, const std::string& callee) {
+    SrcPos p = resolve(at);
+    return !p.known || done.insert({p.file, p.line, callee}).second;
+  };
+  for (an_expr_node_ptr e : g_c.routine_nodes) {
+    check_namespaced_spec(e);
+    a_routine_ptr callee = e->variant.routine.ptr;
+    if (callee == nullptr || !is_spec_routine_cached(callee)) continue;
+    if (g_exempt_nodes.count(e) || g_handled_nodes.count(e)) continue;
+    // A node with no position is compiler-generated (a copy of a template argument or a default argument whose
+    // original, written in the source, has its own node and position).
+    if (e->position.seq == 0) continue;
+    if (fresh(e->position, rname(callee))) report(Diag::spec_call_in_code, e->position, {rname(callee)});
+  }
+  // `&f` and `&S::f` (R4b): constants that name a specification function, wherever they are used.
+  for (a_constant_ptr c : g_c.address_constants) {
+    a_routine_ptr r = address_constant_routine(c);
+    if (r == nullptr || !is_spec_routine_cached(r) || c->source_corresp.decl_position.seq == 0) continue;
+    if (g_exempt_constants.count(c)) continue;
+    if (fresh(c->source_corresp.decl_position, rname(r))) report(Diag::spec_call_in_code, c->source_corresp.decl_position, {rname(r)});
+  }
+  // `V<&nonneg>`, `W<&S::ok>`: the address of a specification function as a template argument of a class.  The
+  // class instance has the position of its template, so the use is reported where a variable of that type is
+  // declared; an instance no variable has is reported at its template.
+  std::map<a_type_ptr, std::string> flagged;
+  for (a_type_ptr t : g_c.class_instances) {
+    for (a_template_arg_ptr a = t->variant.class_struct_union.extra_info->template_arg_list; a; a = a->next) {
+      if (a->kind != tak_nontype || a->is_array_bound_of_unknown_type) continue;
+      a_routine_ptr r = address_constant_routine(a->variant.constant);
+      if (r != nullptr && is_spec_routine_cached(r)) flagged[t] = rname(r);
+    }
+  }
+  std::set<a_type_ptr> placed;
+  for (a_variable_ptr v : g_c.all_variables) {
+    a_type_ptr t = class_behind(v->type);
+    auto it = t ? flagged.find(t) : flagged.end();
+    // compiler-generated variables (the parameters of implicit members) have no position
+    if (it == flagged.end() || v->source_corresp.decl_position.seq == 0) continue;
+    placed.insert(t);
+    if (fresh(v->source_corresp.decl_position, it->second))
+      report(Diag::spec_call_in_code, v->source_corresp.decl_position, {it->second});
+  }
+  std::set<std::string> placed_callees;
+  for (a_type_ptr t : placed) placed_callees.insert(flagged[t]);
+  for (const auto& f : flagged) {
+    if (placed.count(f.first)) continue;
+    // Another type entry of an instance already placed (a qualified or reference variant, with no position)
+    if (f.first->source_corresp.decl_position.seq == 0 && placed_callees.count(f.second)) continue;
+    if (fresh(f.first->source_corresp.decl_position, f.second))
+      report(Diag::spec_call_in_code, f.first->source_corresp.decl_position, {f.second});
+  }
+}
+
+// ---- R2-1: an explicit specialization of a member template written inside its class ------------------------
+// (`template <> int f<int>(int)` in the class template, CWG 727).  When the class template is never instantiated
+// EDG checks nothing about it, so a contract that differs from the primary's, one that is added, and one that
+// is dropped would all go unseen.  Such a specialization is rejected when it, or the member template of the
+// same name in its class, carries a contract (consistent with decision 0006 item 6: explicit specializations of
+// member templates with a contract are not supported).  Reported at the specialization.
+bool has_contract(a_routine_ptr r) { return !contracts_of(r).empty(); }
+
+void check_in_class_specialization(a_routine_ptr r) {
+  if (!r->is_in_class_specialization) return;
+  bool contract = has_contract(r);
+  const char* name = r->source_corresp.name;
+  a_scope_ptr cs = r->source_corresp.parent_scope;
+  if (!contract && name != nullptr && cs != nullptr && cs->kind == sck_class_struct_union) {
+    for (a_routine_ptr m = cs->routines; m != nullptr && !contract; m = m->next)
+      if (m != r && !m->is_in_class_specialization && m->source_corresp.name != nullptr &&
+          std::strcmp(m->source_corresp.name, name) == 0 && has_contract(m))
+        contract = true;
+    if (!contract) {
+      // the primary may be a template that is only reachable through the root template of this routine
+      a_routine_ptr root = root_routine(r);
+      if (root != nullptr && root != r && has_contract(root)) contract = true;
+    }
+  }
+  if (contract) report(Diag::in_class_specialization_contract, r->source_corresp.decl_position, {rname(r)});
+}
+
 }  // namespace
 
 void check_annotations() {
@@ -1130,6 +1472,9 @@ void check_annotations() {
   g_proto_owner.clear();
   g_annotation_lambda_routines.clear();
   g_lambdas_checked.clear();
+  g_exempt_nodes.clear();
+  g_handled_nodes.clear();
+  g_exempt_constants.clear();
   walk_file_scope_il(collect, nullptr, nullptr, nullptr, nullptr, /*clear_fe_pointers=*/FALSE);
   for (a_memory_region_number region = FILE_SCOPE_REGION_NUMBER + 1; region <= highest_used_region_number; ++region) {
     if (mem_region_table[region] == nullptr) continue;
@@ -1176,6 +1521,7 @@ void check_annotations() {
   // scans before.
   g_spec_calls.clear();
   g_checked_statements.clear();
+  mark_exempt_nodes();
   for (a_routine_ptr r : checked) check_body(r);
   // Statements with an annotation that no body walk reached (a body in a system
   // file that is not checked).
@@ -1199,8 +1545,11 @@ void check_annotations() {
   }
   for (const SpecCall& c : g_spec_calls)
     if (!g_annotation_lambda_routines.count(c.caller)) report(Diag::spec_call_in_code, c.at, {c.callee}, instance_context(c.caller));
+  check_all_spec_references();
+  for (a_routine_ptr r : g_c.routines) check_in_class_specialization(r);
   check_modules();
   check_macro_unchanged();
+  check_macros_in_il();
 }
 
 }  // namespace cerastes

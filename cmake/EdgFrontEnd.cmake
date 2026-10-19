@@ -54,6 +54,9 @@ target_compile_definitions(edg_config INTERFACE
   PROTOTYPE_INSTANTIATIONS_IN_IL=1
   ALL_TEMPLATE_INFO_IN_IL=1
   RECORD_UNRECOGNIZED_ATTRIBUTES=1
+  # R4c (decision 0008 item 2): every #define and #undef of the translation unit is an IL entry (a_macro),
+  # so a change of the names the annotations depend on is found from what the preprocessor really did.
+  RECORD_MACROS_IN_IL=1
   EXTRA_SOURCE_POSITIONS_IN_IL=1
   INSTANTIATE_TEMPLATES_EVERYWHERE_USED=1
   DEFAULT_INSTANTIATION_MODE=tim_used

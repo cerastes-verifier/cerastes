@@ -70,6 +70,7 @@
 #include "annotation_il.h"
 #include "expr_tree.h"
 #include "il_names.h"
+#include "il_query.h"
 #include "options.h"
 #include "render.h"
 
@@ -210,9 +211,14 @@ const char* rkind_name(RKind k) {
 // function template / member of a class template.  is_template_function
 // (:12522) marks instances and specializations; is_specialized (:12532) marks
 // those whose definition is user-supplied.
+//
+// An explicit specialization written inside its class template (`template <> int f<int>(int)` in the class, CWG
+// 727) is both: a prototype instantiation (the class is a template) and specialized (its body is the user's),
+// with no assoc_template.  It is listed as a specialization, which is what it is (R2-2); the check
+// `in_class_specialization_contract` is made on it.
 RKind classify(a_routine_ptr r) {
-  if (r->is_prototype_instantiation) return RKind::prototype;
-  if (r->is_template_function || r->assoc_template != nullptr)
+  if (r->is_prototype_instantiation && !r->is_specialized) return RKind::prototype;
+  if (r->is_template_function || r->assoc_template != nullptr || r->is_specialized)
     return r->is_specialized ? RKind::specialization : RKind::instance;
   return RKind::plain;
 }
@@ -440,18 +446,6 @@ void on_constant(a_constant_ptr c, an_expr_or_stmt_traversal_block_ptr tb) {
   }
   *g_body += std::string("  tconst ") + name_of(c->variant.template_param.kind) +
              " type=" + render_type(c->type) + " @ " + pos + "\n";
-}
-
-// The routine's own function scope, or null when it has none in the IL.
-// function_def_number selects the routine's descriptor (mem_tables.h:80-107);
-// unlike il_header.region_scope_entry[memory_region] this is correct for
-// lambdas and members of local classes, which share the enclosing function's
-// memory region (B1).
-a_scope_ptr body_scope(a_routine_ptr r) {
-  if (r->function_def_number == NULL_function_def_number) return nullptr;
-  a_scope_ptr sp = scope_for_routine_or_null(r);
-  if (sp == nullptr || sp->kind != sck_function || sp->variant.routine.ptr != r) return nullptr;
-  return sp;
 }
 
 // Attributes on the variables of a function scope and its nested block scopes.
@@ -716,7 +710,10 @@ void walk_il_and_print() {
     const bool bodyless_by_nature =
         proto && (proto->special_kind == sfk_deduction_guide || proto->is_defaulted || proto->is_deleted ||
                   proto->pure_virtual || proto->compiler_generated);
-    if (proto && !bodyless_by_nature && g_collected.routine_set.count(proto) && !body_scope(proto)) {
+    // A friend function template defined in a class template has two prototype routines, one for the friend
+    // declaration (never defined) and one for the definition (R2-8, a false alarm of this check): only a
+    // prototype that is defined and has lost its body counts.
+    if (proto && !bodyless_by_nature && proto->defined && g_collected.routine_set.count(proto) && !body_scope(proto)) {
       Item w;
       w.line = pos.line;
       w.col = pos.col;

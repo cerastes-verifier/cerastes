@@ -9,9 +9,11 @@
 
 #include "annotation_checks.h"
 #include "diagnostics.h"
+#include "encode.h"
 #include "edg_il.h"
 #include "options.h"
 #include "run_state.h"
+#include "verify_config.h"
 #include "walker.h"
 
 void back_end(void) {
@@ -31,5 +33,7 @@ void back_end(void) {
   // printed after the walk so that --cerastes_walk still lists the IL.
   cerastes::check_annotations();
   if (cerastes::options().walk) cerastes::walk_il_and_print();
+  // `cerastes verify` (decision 0011): encode the IL when the annotation checks found nothing wrong.
+  if (cerastes::verify_config().on && cerastes::reported_count() == 0) cerastes::verify_encode();
   cerastes::flush_diagnostics();
 }

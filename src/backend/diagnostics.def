@@ -59,3 +59,55 @@ CERASTES_DIAG(contract_name_hides_member, error,
               "\"%s\" in this contract is not the member \"%s\" of the class: the class declares it after the function")
 CERASTES_DIAG(analysis_limit_reached, error,
               "the checks of this annotation or body reached a limit (%s) and cannot vouch for it")
+
+// ---- M3 re-look R2/R4 (annotation_checks.cpp) ----------------------------------------------------
+CERASTES_DIAG(cerastes_header_in_namespace, error,
+              "\"%s\" is declared in a namespace \"cerastes\" that is not the global one: <cerastes.h> must be included at "
+              "global scope, so that the specification functions are cerastes::owns and the like")
+CERASTES_DIAG(in_class_specialization_contract, error,
+              "the explicit specialization \"%s\" of a member template, written inside its class, cannot be checked against "
+              "the member template's contract: write the specialization at namespace scope (decision 0006 item 6)")
+CERASTES_DIAG(spec_marker_on_special_member, error,
+              "\"cerastes::%s\" cannot be applied to the special member function \"%s\": a constructor, a destructor "
+              "and an assignment operator have effects, and a specification function has none")
+CERASTES_DIAG(spec_marker_in_system_file, error,
+              "\"cerastes::%s\" cannot be applied to \"%s\": it is declared in a system file or built in, and "
+              "specification functions are your own")
+CERASTES_DIAG(annotation_macro_changed, error,
+              "the macro \"%s\" cannot be %s here: the annotations and <cerastes.h> depend on it (decision 0008)")
+
+// ---- verify mode (`cerastes verify`, decisions 0011 and 0012) ---------------------------------------
+// Rejections made while the IL is encoded for verification.  They are reported only in verify mode, for
+// code in files that are verified (0011 item 4); `cerastes-fe` never reports them.  Each is an
+// "unsupported construct is rejected, never approximated" diagnostic (invariant 3).  In the messages
+// `%s` is a short description of the construct, in the user's terms.
+CERASTES_DIAG(unsupported_statement, error,
+              "%s is not supported by \"cerastes verify\" (decision 0012)")
+CERASTES_DIAG(unsupported_expression, error,
+              "%s is not supported by \"cerastes verify\" (decision 0012)")
+CERASTES_DIAG(unsupported_declaration, error,
+              "%s is not supported by \"cerastes verify\" (decision 0012)")
+CERASTES_DIAG(unsupported_type, error,
+              "type \"%s\" is not supported by \"cerastes verify\": only integer types and bool are (decision 0012)")
+CERASTES_DIAG(unsupported_attribute, error,
+              "the attribute %s is not supported by \"cerastes verify\": it can change what the code means "
+              "(decision 0011 item 7)")
+CERASTES_DIAG(unrecognized_attribute, error,
+              "the attribute %s is not recognized: it would be ignored, so what it was meant to say would "
+              "not be checked (decision 0011 item 7)")
+CERASTES_DIAG(line_directive_in_verify, error,
+              "a #line directive or linemarker is not allowed in a file that \"cerastes verify\" checks: it "
+              "changes the file names of the lines after it (decision 0011 item 4)")
+CERASTES_DIAG(contract_on_main, error,
+              "\"main\" cannot have \"cerastes::requires\": nothing calls it, so the precondition would be "
+              "assumed and never checked (decision 0011 item 7)")
+CERASTES_DIAG(call_without_contract, error,
+              "the call to \"%s\" cannot be verified: the function has no body in a verified file and no "
+              "contract (\"cerastes::requires\" or \"cerastes::ensures\") on a visible declaration")
+CERASTES_DIAG(call_in_annotation, error,
+              "a call to \"%s\" is not allowed in an annotation: only \"cerastes::old\" can be called here")
+CERASTES_DIAG(system_header_pragma_in_verify, error,
+              "a \"#pragma ... system_header\" is not allowed in a file that \"cerastes verify\" checks: it would "
+              "make the rest of the file a system header, which is never verified (decision 0011 item 4)")
+CERASTES_DIAG(missing_decreases, error,
+              "%s (decision 0013)")

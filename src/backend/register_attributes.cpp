@@ -7,6 +7,7 @@
 //   (Xb)  one unevaluated expression, contextually converted to bool
 //   (R,Xb) an optional result name (an identifier), then (Xb)
 //   (X)   one unevaluated expression
+//   (X+)  one or more unevaluated expressions
 //   r     a routine (a function; for RAF_ENTITY_ATTACHED, after the parameter list)
 //   s:+i! a statement that is an iteration statement
 //   s:+n! a statement that is a null statement
@@ -32,6 +33,10 @@ const an_attr_registration kAttributes[] = {
     // result-name signature code, decision 0007 item 6); it needs RAF_ENTITY_ATTACHED.
     {"ensures", "(R,Xb)", "r", kContract},
     {"invariant", "(Xb)", "s:+i!", RAF_NO_FLAGS},
+    // decreases (decision 0013): the termination measure, a list of integer expressions; written before a loop
+    // (like `invariant`) or after the parameter list (a contract, like `requires`).  One name with two targets: the
+    // flags only matter for the routine placement.
+    {"decreases", "(X+)", "r|s:+i!", kContract},
     {"check", "(Xb)", "s:+n!", RAF_NO_FLAGS},
     {"fold", "(X)", "s:+n!", RAF_NO_FLAGS},
     {"unfold", "(X)", "s:+n!", RAF_NO_FLAGS},

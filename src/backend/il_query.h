@@ -1,0 +1,65 @@
+// Part of cerastes, under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Small questions about the IL that more than one pass asks (the annotation checks, the walker and
+// the verify-mode encoder).  Each was an anonymous-namespace helper of one of them; they live here
+// so that there is one answer.
+#pragma once
+
+#include <string>
+#include <vector>
+
+#include "annotation_il.h"
+#include "edg_il.h"
+
+namespace cerastes {
+
+// Qualified name of a routine, as EDG prints it.
+std::string rname(a_routine_ptr r);
+
+// The routine's own function scope, or null when it has none in the IL.  function_def_number selects
+// the routine's descriptor (mem_tables.h:80-107); unlike il_header.region_scope_entry[memory_region]
+// this is correct for lambdas and members of local classes, which share the enclosing function's
+// memory region (B1).
+a_scope_ptr body_scope(a_routine_ptr r);
+
+// A call expression kind: a plain call, or a member call through `.` or `->`.
+bool is_call_kind(an_expr_operator_kind k);
+
+// The routine called by a call expression whose callee is named directly, or null.
+a_routine_ptr direct_callee(an_expr_node_ptr e);
+
+// The names of cerastes's own specification functions ("cerastes::owns", ...).
+bool is_spec_function_name(const std::string& n);
+
+// A routine marked predicate or pure, on its own attribute list or its root template's (an instance of a
+// marked template).
+bool marked(a_routine_ptr r, Annot k);
+
+// A predicate, a pure function, or one of cerastes's spec functions: specification, never run.
+bool is_spec_routine(a_routine_ptr r);
+
+// The file that sequence number `seq` physically lies in (the file EDG read, whatever `#line` or a
+// linemarker made of its name), or null for sequence number 0 (a compiler-generated entity).
+a_source_file_ptr physical_file(a_seq_number seq);
+
+// The canonical physical path (realpath) of the file `p` lies in; "" when the position is unknown or the
+// file cannot be resolved.
+std::string physical_path(const a_source_position& p);
+
+// 0011 item 4: the position lies in a file that `cerastes verify` verifies (known, and not a system file by
+// canonical physical path).
+bool in_verified_file(const a_source_position& p);
+
+// The entities of the translation unit that the verify-mode encoder looks at, each once, in the order the
+// IL walk reports them (file scope first, then the routine-scope regions in region order).
+struct IlEntities {
+  std::vector<a_routine_ptr> routines;
+  std::vector<a_template_ptr> templates;
+  std::vector<a_variable_ptr> variables;  // those not declared inside a routine
+  std::vector<a_type_ptr> types;
+  std::vector<an_asm_entry_ptr> asm_entries;  // file-scope asm declarations (not the asm statements of bodies)
+};
+IlEntities collect_entities();
+
+}  // namespace cerastes

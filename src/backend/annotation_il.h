@@ -28,7 +28,7 @@
 
 namespace cerastes {
 
-enum class Annot { none, requires_, ensures, invariant, check, fold, unfold, predicate, pure };
+enum class Annot { none, requires_, ensures, invariant, check, fold, unfold, predicate, pure, decreases };
 
 inline bool is_registered_cerastes(an_attribute_ptr a) {
   return a->kind == ak_registered && a->namespace_name != nullptr &&
@@ -40,14 +40,16 @@ inline Annot classify(an_attribute_ptr a) {
   static const struct { const char* name; Annot kind; } kNames[] = {
       {"requires", Annot::requires_}, {"ensures", Annot::ensures},     {"invariant", Annot::invariant},
       {"check", Annot::check},        {"fold", Annot::fold},           {"unfold", Annot::unfold},
-      {"predicate", Annot::predicate}, {"pure", Annot::pure},
+      {"predicate", Annot::predicate}, {"pure", Annot::pure},      {"decreases", Annot::decreases},
   };
   for (const auto& n : kNames)
     if (std::strcmp(a->name, n.name) == 0) return n.kind;
   return Annot::none;
 }
 
-inline bool is_contract(Annot k) { return k == Annot::requires_ || k == Annot::ensures; }
+// `decreases` is a contract when written after a function's parameter list (decision 0013 item 1); before a
+// loop it is a statement annotation like `invariant`.
+inline bool is_contract(Annot k) { return k == Annot::requires_ || k == Annot::ensures || k == Annot::decreases; }
 
 // One argument of a registered attribute.
 struct AnnotArg {

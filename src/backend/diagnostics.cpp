@@ -192,8 +192,10 @@ void flush_diagnostics() {
     return std::tie(a.pos.seq, a.pos.line, a.pos.col, a.message) <
            std::tie(b.pos.seq, b.pos.line, b.pos.col, b.message);
   });
-  for (const Entry& e : v) std::fputs(render(e).c_str(), stderr);
-  std::fflush(stderr);
+  // EDG's own error stream (stderr unless --error_output redirected it), so that the two are in order in one place.
+  FILE* out = f_error != nullptr ? f_error : stderr;
+  for (const Entry& e : v) std::fputs(render(e).c_str(), out);
+  std::fflush(out);
   diagnostic_counters.total.errors += v.size();
   v.clear();
   seen().clear();

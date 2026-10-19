@@ -29,10 +29,18 @@
 #  endif
 #endif
 
+// Fails closed (decision 0008 item 2): under the cerastes front end the attributes must be available, or every
+// macro below would expand to nothing and the contracts would silently vanish (for example after `-U__cplusplus`
+// or `#undef __cplusplus` before this include).  Ordinary compilers never define __CERASTES__.
+#if defined(__CERASTES__) && !defined(CERASTES_ATTRIBUTES_)
+#  error "cerastes.h: the cerastes front end is running (__CERASTES__ is defined) but the cerastes attributes are not available (check that __cplusplus, __STDC_VERSION__ and __has_cpp_attribute / __has_c_attribute were not changed); contracts would be dropped"
+#endif
+
 #ifdef CERASTES_ATTRIBUTES_
 #  define CERASTES_REQUIRES(...)  [[cerastes::requires(__VA_ARGS__)]]
 #  define CERASTES_ENSURES(...)   [[cerastes::ensures(__VA_ARGS__)]]
 #  define CERASTES_INVARIANT(...) [[cerastes::invariant(__VA_ARGS__)]]
+#  define CERASTES_DECREASES(...) [[cerastes::decreases(__VA_ARGS__)]]
 #  define CERASTES_CHECK(...)     [[cerastes::check(__VA_ARGS__)]]
 #  define CERASTES_FOLD(...)      [[cerastes::fold(__VA_ARGS__)]]
 #  define CERASTES_UNFOLD(...)    [[cerastes::unfold(__VA_ARGS__)]]
@@ -42,6 +50,7 @@
 #  define CERASTES_REQUIRES(...)
 #  define CERASTES_ENSURES(...)
 #  define CERASTES_INVARIANT(...)
+#  define CERASTES_DECREASES(...)
 #  define CERASTES_CHECK(...)
 #  define CERASTES_FOLD(...)
 #  define CERASTES_UNFOLD(...)
