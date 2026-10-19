@@ -371,9 +371,36 @@ summarized here):
       redefining it, on the command line or in the source, is refused, and
       `back_end()` checks it as a backstop. Otherwise a single
       `#undef __CERASTES__` would silently drop every contract.
-    - `old` in the body of a `pure` or `predicate` function, and spec
-      functions reached through a function pointer, are left to M3/M6 (Viper
-      functions have no `old`).
+    - `old` in the body of a `pure` or `predicate` function is rejected
+      (`old_outside_ensures`, M3 re-look R4e, 2026-10-16): Viper functions
+      have no `old`. Spec functions reached through a function pointer are
+      left to M6.
+    - **M3 re-look additions** (2026-10-16; the probes are in
+      `internal/il-inventory.md`, "R4a", P13–P15):
+      - **Compile-time uses of `constexpr`/`consteval` spec functions**
+        (owner: `constexpr` stays allowed on `predicate`/`pure`). A use that
+        leaves a trace in the IL (array bounds, `case` labels, enumerators,
+        `constexpr` variables, `if constexpr`, `noexcept(…)`, `alignas`,
+        `explicit(bool)`, bit-field widths, default template arguments,
+        `sizeof`/`decltype` operands, …) is rejected from the IL by a pass
+        over every expression node (`spec_call_in_code`). Template arguments
+        and `static_assert` outside function bodies leave no trace; they are
+        closed by a fork-series mechanism that makes EDG refuse to evaluate
+        such a call at compile time (owner-approved; until it is pinned they
+        are a known gap).
+      - **More `spec_call_in_code`:** initializers of block-scope `static`
+        and `thread_local` variables, and pointers to member functions
+        (`&S::ok`), also as template arguments.
+      - **Changing the names annotations depend on** is rejected
+        (`annotation_macro_changed`; 0008 item 2), and `<cerastes.h>` fails
+        closed under the cerastes front end.
+      - **`<cerastes.h>` included inside a namespace** is rejected
+        (`cerastes_header_in_namespace`) where its spec functions are named.
+      - **In-class explicit specializations of member templates** (CWG 727)
+        with a contract, or whose primary has one, are rejected
+        (`in_class_specialization_contract`), extending item 6's v0 rule to
+        the in-class form. EDG checks nothing about them when the class
+        template is never instantiated (G/I/K review, 2026-10-16).
     - **Positions.** A cerastes diagnostic, like EDG's own under
       `FULLY_RESOLVED_MACRO_POSITIONS`, points at the original position of
       the offending text (`orig_seq`/`orig_column`) when that position lies

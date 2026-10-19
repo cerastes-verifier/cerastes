@@ -38,7 +38,8 @@ Probe facts (M2 Phase 1):
 
 1. **Names.** `CERASTES_REQUIRES(...)`, `CERASTES_ENSURES(...)`,
    `CERASTES_INVARIANT(...)`, `CERASTES_CHECK(...)`, `CERASTES_FOLD(...)`,
-   `CERASTES_UNFOLD(...)`, `CERASTES_PREDICATE` and `CERASTES_PURE`. They
+   `CERASTES_UNFOLD(...)`, `CERASTES_PREDICATE`, `CERASTES_PURE` and (M3, decision 0013)
+   `CERASTES_DECREASES(...)`. They
    replace plan.md's `VF_*` (owner, 2026-10-14).
    - The macros are variadic, so commas inside lambdas and `forall` calls need
      no extra parentheses.
@@ -52,10 +53,32 @@ Probe facts (M2 Phase 1):
      - The front end still defines `__CERASTES__` for user code, and
        reports any source-level change of it (`cerastes_macro_changed`,
        0006 item 10).
-     - There is no `#error` for tampering: an EDG `#error` would stop the
-       run before the back end could report the positioned diagnostic.
-     - Redefining the `CERASTES_*` macros themselves, or defining
-       `CERASTES_H` before the include, is unsupported and not detected.
+     - **The header fails closed under the cerastes front end** (amended
+       2026-10-16 after the M3-3 audit, which showed that `-U__cplusplus`, or
+       `#undef __cplusplus` before the include, made every macro expand to
+       nothing and a false postcondition verify): when `__CERASTES__` is
+       defined but the attributes are not available, the header stops the
+       run with `#error`. M2 had avoided an `#error` so that the back end
+       could report a positioned diagnostic; stopping the run is the safer
+       choice, and the `#error` names the header line and the reason.
+       `__CERASTES__` itself cannot be removed unnoticed (item 3).
+     - **Changing the names the annotations depend on is rejected**, on the
+       command line by the drivers (0011 item 2) and in the source by the
+       back end (`annotation_macro_changed`, M3 re-look R4c): a `#define` or
+       `#undef` anywhere in the unit, outside this header, of `cerastes`, an
+       attribute name (`requires`, `ensures`, `invariant`, `check`, `fold`,
+       `unfold`, `predicate`, `pure`, `decreases`), a spec-function name (`old`, `owns`,
+       `reads`, `forall`, `owns_range`), `CERASTES_H`, a `CERASTES_*` macro,
+       `__has_cpp_attribute`, `__has_c_attribute`, or a predefined macro
+       (`#define ensures requires` turned postconditions into preconditions).
+       The detection uses EDG's own record of the directives
+       (`RECORD_MACROS_IN_IL`), so string literals, comments and inactive
+       groups do not count. `__has_cpp_attribute` and `__has_c_attribute`
+       are protected as predefined macros, not by name: `<sys/cdefs.h>`
+       defines the one of the other language under `#ifndef`, which is
+       allowed. A directive that changes no macro (an `#undef` of an
+       undefined name, an identical redefinition) is not recorded by EDG and
+       is harmless. The diagnostic is reported at the directive.
    - **When the attributes are available:** each macro expands to exactly its
      attribute (0006). `CERASTES_PREDICATE` expands to
      `[[cerastes::predicate]] inline` and `CERASTES_PURE` to

@@ -712,3 +712,679 @@ Confirmed by evidence unless marked (source).
     `tk_typeref` to `unsigned short`; M4 must skip typerefs before classifying an
     argument (F5). `bool` is `int_kind: char` + `bool_type: TRUE`, so excluding it
     needs `bool_type` (B8).
+
+## M3: scalar code (probes P1–P12)
+
+Evidence for the facts the scalar encoder (decisions 0010 and 0012, `internal/encoding.md`) relies on. Probes are in
+`tests/il/m3/` (header `frontend-ok`, `frontend-warning <tag>` or `golden`; each runs in `check.sh`). The listings below
+come from `scripts/cerastes-fe.sh --c++20|--c23 --il_display <probe>` read back through a scratch printer that shows,
+per expression node, its kind, `type`, `operation.type_kind`, flags, constant value, `a_constant.expr`/`orig_type`,
+and the position (`position`) and start (`expr_range.start`) as `L<line>:<col>`; `compiler_generated` is the
+`an_expr_node` flag (il_def.h:15092), `ol=` is `orig_lvalue_type` (:14915), `lvalue` is `is_lvalue` (:14940). Trimmed
+excerpts are marked. Verdicts are PASS (the output shows it) or UNCLEAR; nothing is rounded up.
+
+### P1: promotions and the usual arithmetic conversions: **PASS**
+
+`tests/il/m3/p1_conversions.cpp` (C++20) and `p1_conversions.c` (C23).
+
+- Every converted operand is its own `eok_cast`, `compiler_generated`, whose `type` is the converted type. The
+  operation's `type` is the converted (promoted/common) type and `operation.type_kind` is `tk_integer`
+  (il_def.h:15126-15132: the kind of type the operation acts on).
+- Promotion of narrow operands (`p1_conversions.cpp:3`, `signed char + signed char`):
+  ```
+  eok_cast tk=tk_integer type=signed char compiler_generated @L3:56
+    eok_add tk=tk_integer type=int @L3:58 start@L3:56
+      eok_cast tk=tk_integer type=int compiler_generated @L3:56
+        variable type=signed char a (param) ol=signed char @L3:56
+      eok_cast tk=tk_integer type=int compiler_generated @L3:60
+        variable type=signed char b (param) ol=signed char @L3:60
+  ```
+  The outermost cast is the implicit conversion of `return` back to the return type.
+- `unsigned short * unsigned short` (`:5`) is `eok_multiply type=int` over two int-casts: computed in `int`.
+- Mixed signedness: `int + unsigned` (`:7`) casts only the `int` operand (`eok_cast type=unsigned int`); `long + unsigned`
+  (`:9`) casts the `unsigned` to `long`; `long long + unsigned long` (`:11`) is computed in `unsigned long long`
+  (`eok_add type=unsigned long long`, both operands cast to `unsigned long long`, result cast back to `long long`).
+- Comparison `int < unsigned` (`:12`): `eok_lt type=bool` over `eok_cast type=unsigned int` of the `int` operand. Same in C
+  with `type=int` for the result (`p1_conversions.c:8`).
+- Plain `char` operands are promoted like `signed char` (`ch1`, `:13`).
+
+C23 gives the same shapes (`p1_conversions.c:4-8`). Counter-evidence for "every conversion is explicit": none found
+for ordinary binary, unary, comparison and call-argument contexts; see P2 and P4 for the two places where the IL does
+**not** convert (compound assignment, shift counts).
+
+### P2: compound assignment and `++`/`--`: **PASS (with a finding that contradicts 0012 item 7)**
+
+`tests/il/m3/p2_compound.cpp`, `p1_conversions.c:9`.
+
+- `x op= e` is ONE node (`eok_add_assign`, `eok_subtract_assign`, `eok_multiply_assign`, `eok_divide_assign`,
+  `eok_remainder_assign`, `eok_shiftl_assign`, `eok_shiftr_assign`, `eok_or_assign`), `type` = the left operand's type,
+  `operation.type_kind` = `tk_integer`. The left operand is the bare lvalue. The right operand is **not converted to a
+  computation type**:
+  ```
+  eok_add_assign tk=tk_integer type=signed char is_lvalue result_is_not_used @L3:38
+    variable type=signed char c (param) is_lvalue @L3:36
+    constant type=int int:1 [expr=NONE] @L3:41                 (c += 1)
+  eok_add_assign tk=tk_integer type=int is_lvalue result_is_not_used @L6:50
+    variable type=int i (param) is_lvalue @L6:48
+    variable type=unsigned int u (param) ol=unsigned int @L6:53    (i += u: raw unsigned)
+  eok_add_assign tk=tk_integer type=short is_lvalue result_is_not_used @L5:33
+    variable type=short s (param) is_lvalue @L5:31
+    variable type=long l (param) ol=long @L5:36                 (s += l: raw long)
+  eok_multiply_assign tk=tk_integer type=short is_lvalue result_is_not_used @L5:41
+    variable type=short s (param) is_lvalue @L5:39
+    eok_cast tk=tk_integer type=int compiler_generated @L5:44   (s *= s: rhs promoted by its own cast)
+      variable type=short s (param) ol=short @L5:44
+  ```
+  The right operand carries only the integer promotion the operand would get anywhere (a narrow rhs is cast to `int`);
+  it is never converted to the common type with the left operand, and the left operand is never converted. So the
+  computation type `C` of `x op= e` is **not in the IL**: it has to be derived (usual arithmetic conversions of the
+  promoted left type and the right operand's type, for shifts the promoted left type alone).
+- `++`/`--`: `eok_pre_incr`, `eok_post_incr`, `eok_pre_decr`, `eok_post_decr`, `type` = operand type, no conversion node
+  (`p2_compound.cpp:7-8`, `signed char`, `unsigned char`, `short`, `int`). Pre forms are lvalues in C++
+  (`is_lvalue`) and not in C (`p1_conversions.c:9`: `eok_pre_incr ... type=signed char result_is_not_used`); post
+  forms yield a prvalue of the operand type (`eok_post_incr type=signed char`), which a use converts like any other
+  prvalue (`int a = c++;`, `p2_compound.cpp:11`: `eok_cast type=int compiler_generated` over `eok_post_incr`).
+- `++b`/`b++` on `bool` is an error in C++ (EDG: "incrementing a bool value is not allowed"); in C it is accepted:
+  `p5_bool.c:14`, `eok_pre_incr tk=tk_integer type=bool result_is_not_used`.
+- `bool b; b += i; b |= true;` (C++, `p2_compound.cpp:10`): `eok_add_assign type=bool` with the raw `int` right operand,
+  and `eok_or_assign type=bool` with the right operand a constant `int:1` whose `expr` is an `eok_cast` from the `bool`
+  constant.
+- Result unused: every statement-level assignment has `result_is_not_used` (il_def.h expr-node flag).
+
+Fields: `an_expr_node.type` (il_def.h:14903 region), `operation.kind`/`type_kind` (:15126-15132), `result_is_not_used`,
+`is_lvalue` (:14940).
+
+### P3: folded constants, diagnostics, pragmas: **PASS (cases below); one UNCLEAR**
+
+`tests/il/m3/p3_folded.cpp`, `p3b_default_arg_constants.cpp`; the tool outputs are reproduced.
+
+**What the IL keeps.** `a_constant.expr` (il_def.h:4777-4790; `orig_type` :4774) is kept for every constant in a function
+body that is the result of folding or of a conversion:
+
+| Source (`p3_folded.cpp`) | IL in the body |
+|---|---|
+| `INT_MAX + 1` (`:18`) | **not folded**: `eok_add tk=tk_integer type=int @L18:33` over `constant 2147483647`, `constant 1` |
+| `65536 * 65536` (`:31`), `-(-2147483647 - 1 - 1)`, `9223372036854775807LL + 1` | not folded either: the operation stays, operands are constants |
+| `1 / 0`, `1 % 0` (`:20`, `:21`) | not folded: `eok_divide` / `eok_remainder` over `constant 1`, `constant 0 [is_simple_zero]` |
+| `1 << -1` (`:26`) | not folded: `eok_shiftl` over `constant 1` and `constant -1 [expr=eok_negate]` |
+| `1 << 40` (`:19`) | **folded** to `constant type=int int:0 [expr=eok_shiftl]`; `expr` = `eok_shiftl` over `1` and `40` |
+| `signed char c = 300;` (`:22`) | `dyninit dik_constant`, `const int:44 orig_type=int expr=present`; `expr` = `eok_cast type=signed char compiler_generated` over `constant int:300` |
+| `unsigned u = -1;` (`:23`) | `const int:4294967295U orig_type=int`, `expr` = `eok_cast type=unsigned int` over `constant -1 [expr=eok_negate]` |
+| `(short)70000` (`:24`) | `constant type=int int:4464 [expr=eok_cast,orig_type=short]`; its `expr` chain ends at `eok_cast type=short` (**not** compiler_generated: the explicit cast) over `constant int:70000` |
+| `x + (2147483647 + 1)` (`:25`) | `eok_add` over `variable x` and `eok_add is_parenthesized` over the two constants: not folded |
+| `0u - 1` (`:28`) | folded to `int:4294967295U [expr=eok_subtract]` then cast to `int` with `orig_type=unsigned int`; expr chain intact |
+| `return 300;` in `signed char` function (`:37`), `takes_sc(300)` (`:39`) | `constant type=signed char int:44 [expr=eok_cast,orig_type=int]`, `expr` = `eok_cast ... signed char compiler_generated` over `constant 300` |
+
+Excerpt (`p3_folded.cpp:24`, `(short)70000`):
+```
+constant type=int int:4464 [expr=eok_cast,orig_type=short] @L24:29
+  -- constant.expr:
+    eok_cast tk=tk_integer type=int compiler_generated @L24:29
+      constant type=short int:4464 [expr=eok_cast,orig_type=int] @L24:29
+        -- constant.expr:
+          eok_cast tk=tk_integer type=short @L24:29
+            constant type=int int:70000 [expr=NONE] @L24:36
+```
+So: the original expression is available for every folded or converted constant that occurs under a function-body
+node. Literals have `expr=NONE` (a literal needs none). **UNCLEAR:** whether a constant with `orig_type` and no `expr`
+(the "implicitly-converted" case of the il_def.h comment) can occur in a function body. It occurs only at file scope in
+the corpus (40 constants such as `0UL` in system headers, all under file-scope nodes, 0 under a function-region node,
+over the 115 goldens' il_display and the M3 probes; none of the 40 prints `local_expr_ref`, which il_display prints for
+a constant when set, il_display.c:1353), and il_def.h:4774-4790 says `expr` is NULL for "some implicitly-converted
+constants" and when "memory region constraints do not permit direct pointing" (then `local_expr_ref` is TRUE).
+Default-argument constants copied into a call do keep `expr` (`p3b_default_arg_constants.cpp:4`, `constant ...
+int:7L [expr=eok_cast,orig_type=int] @L4:25`). A constant that has `orig_type` and no `expr` should be rejected rather
+than trusted; none of the probes reaches that rule.
+
+**Diagnostics** (`scripts/cerastes-fe.sh --c++20 --display_error_number --brief_diagnostics --no_colors`, `p3_folded.cpp`):
+
+| Case | Number, tag | Fires at |
+|---|---|---|
+| `INT_MAX + 1`, `65536 * 65536`, `9223372036854775807LL + 1`, `-2147483647 - 1 - 1`, `x + (2147483647 + 1)` | #61 `integer_overflow` | the operator |
+| `1 << 40` | #63 `shift_count_too_large` | the count |
+| `1 << -1` | #62 `negative_shift_count` | the count |
+| `1 / 0` | #39 `divide_by_zero` | the divisor |
+| `1 % 0` | #179 `mod_by_zero` | the divisor |
+| `signed char c = 300`, `return 300` (signed char), `takes_sc(300)` | #69 `integer_truncated` | the constant |
+| `unsigned u = -1`, `0u - 1` | #68 `integer_sign_change` | the constant |
+| `(short)70000` | **none** | (explicit cast: silent) |
+
+`p3c_unsigned_diagnostics.cpp`: `unsigned char c = 300;` and `unsigned short f() { return 70000; }` also give #69, and `unsigned u = -1;` gives #68. So
+#68 and #69 fire for conversions **to unsigned**, which 0010 item 5 makes legal (modular). Making them errors would
+reject valid programs, and the cases they cover are all visible to the encoder through `expr` (table above), so they
+need not be enabled. #39, #61, #62, #63, #179 cover cases that are not folded anyway (the operation stays in the IL);
+they are a backstop. One false positive: `(__int128)9223372036854775807LL * 4` gives #61 although it fits in 128 bits
+(`p9_wide_constants.cpp:11`, the single warning that probe expects), and is left unfolded; with `--diag_error=61` valid 128-bit code would be rejected.
+
+`--diag_error=<n,...>` turns these into errors (`... error #61-D: integer operation result is out of range`, "2 errors
+detected", exit status 2; the same file exits 0 without it).
+
+**Pragmas** (`p3d_diag_pragmas.cpp` shows the default-option diagnostics; the `--diag_error=61` runs are from the same text on the command line): `#pragma diag_suppress 61` and
+`#pragma diag_remark 61` silence the diagnostic; `#pragma diag_default 61` restores it; **`#pragma diag_warning 61` makes it
+a warning even under `--diag_error=61`** (the pragma overrides the command line: line 10 stays `warning #61-D` while
+lines 2 and 6 become `error #61-D`). `#pragma clang diagnostic ignored "-Winteger-overflow"` is **not** honoured
+(`warning #161-D: unrecognized #pragma`, line 11; the overflow warning at line 13 still fires); `#pragma GCC diagnostic`
+is `warning #1675-D: unrecognized GCC pragma`. The diagnostic pragmas leave no trace in the IL (only `checking_pragma`
+entries appear), so rejecting them needs the source scan, as 0010 item 12 says.
+
+### P4: shapes of `<<`, `>>`, `%`, unary operators, `!`, comma, `?:`: **PASS**
+
+`tests/il/m3/p4_shapes.cpp`.
+
+- Shifts are NOT balanced: `eok_shiftl`/`eok_shiftr` with `type` = the promoted LEFT operand type; the right operand is raw
+  (`a << u`: `variable type=unsigned int u` uncast, `:3`; `a >> l`: raw `long`; `uc << 3`: left cast to `int`, `3` raw):
+  ```
+  eok_shiftl tk=tk_integer type=int @L3:109 start@L3:106
+    eok_cast tk=tk_integer type=int compiler_generated @L3:106
+      variable type=unsigned char uc (param) ol=unsigned char @L3:106
+    constant type=int int:3 [expr=NONE] @L3:112
+  ```
+  `unsigned long a << int n` (`:4`): `eok_shiftl type=unsigned long`, raw `int` count.
+- `%` and `/` are balanced like `+`: `u % b` with `int b` gives `eok_remainder type=unsigned int` with `b` cast to
+  `unsigned int` (`:5`).
+- `-a` is `eok_negate`, `+a` is `eok_unary_plus`, `~a` is `eok_complement`; operands of narrow type are promoted by a cast
+  (`-c` on `unsigned char`: `eok_negate type=int` over `eok_cast type=int`); `-u` on `unsigned` stays `unsigned int`
+  (`(int)-u`: explicit `eok_cast tk=tk_integer type=int` (not compiler_generated) over `eok_negate type=unsigned int`).
+  `-b` on `bool` promotes to `int` through a cast.
+- `!a` (C++): `eok_not type=bool` over `eok_bool_cast type=bool compiler_generated` of the `int` operand; assigning it to an
+  `int` adds `eok_cast type=int compiler_generated`.
+- `&&`/`||` (C++): `eok_land`/`eok_lor type=bool`, each operand an `eok_bool_cast` when not already `bool`;
+  `is_parenthesized` marks `(...)`; there is no parenthesis node.
+- `?:`: `eok_question tk=tk_unknown type=<common type>` with operands (condition, then, else); `c ? a : u` with
+  `int a`, `unsigned u` has `type=unsigned int` and `a` wrapped in `eok_cast type=unsigned int`
+  (`:9`).
+- Comma: `eok_comma tk=tk_unknown type=int` with two operands (`:10`); pre/post increments inside expressions keep their
+  own nodes (`:11`: `eok_add` over `eok_post_incr` and `eok_pre_incr`).
+- `type_kind` is `tk_integer` for every integer operation above and `tk_unknown` for `eok_question`, `eok_comma`,
+  `eok_call` (il_def.h:15126-15132).
+
+### P5: `bool`, C23 `bool`/`_Bool`, results of comparisons and logic: **PASS**
+
+`tests/il/m3/p5_bool.c` (C23) and `p5_bool.cpp` (C++20).
+
+- C23: comparison, `&&`, `||` and `!` have `type=int` (`p5_bool.c:4`: `eok_lt tk=tk_integer type=int`); their operands
+  are NOT wrapped (`eok_land type=int` over the bare `variable a` and `variable b`, `:5`), and `if`/`while` conditions
+  are the bare `int` expressions (`stmk_if` with `variable type=int a`, `:13`).
+  C++20 for contrast: `eok_lt type=bool`, wrapped in `eok_cast type=int compiler_generated` when used as `int`
+  (`p5_bool.cpp:4`); `&&` operands are `eok_bool_cast compiler_generated` (`:5`); the `if` condition is
+  `eok_bool_cast type=bool compiler_generated` over `variable a` (`:12`).
+- Conversion to `bool`: `eok_bool_cast tk=tk_integer type=bool compiler_generated` in both languages (`bool as_bool(int a)`,
+  `p5_bool.c:7`, `p5_bool.cpp:7`); in C also `bool r = a < b;` is `eok_bool_cast` over `eok_lt type=int` (`:8`).
+- From `bool`: `eok_cast tk=tk_integer type=int compiler_generated` (`b + 1`, `:10`).
+- `true`/`false`: `constant type=bool int:1 [expr=NONE,non_arithmetic]` (C++, `p5_bool.cpp:10`); in C23 the printed value is
+  `int:1U` / `int:0U` (`p5_bool.c:11-12`), the same constant with an unsigned-style suffix.
+- `bool` itself is `tk_integer` with `int_kind: char` and `bool_type: TRUE` (P12).
+
+### P6: parameter references: contract, body, statement annotations: **PASS**
+
+`tests/il/m3/p6_param_refs.cpp` (golden; every fact of it was checked by `scripts/walker_oracle.py`, 12 facts).
+
+- **Contracts** (`requires`/`ensures`, file-scope region): `enk_param_ref` with `param_ref.param_num` (1-based) and
+  `param_ref.levels_up`. From the raw il_display of the probe:
+  ```
+  kind:                    enk_param_ref
+  param_ref.param_num:     1
+  param_ref.levels_up:     0         (requires: parameter 1, `a`)
+  ```
+  and `param_num: 2, levels_up: 0` for `b`. In `ensures` the parameters are `{k,1}` and the result binder is `{1,0}`
+  (walker listing `ensures(r, r >= a)`: `binder r: int @ L6:76`, `param 1 a: int @ L6:81`), as annotation_il.h documents.
+- **Body**: `enk_variable` whose `variable` is the parameter variable (`variable ... a (param)`, `is_parameter: TRUE`,
+  listed in the function scope's `parameters`). `int s = a;` is `variable type=int a (param)` (`p6_param_refs.cpp:8`);
+  the assignment `a = a + 1;` has `variable type=int a (param) is_lvalue`.
+- **Statement annotations** (`check`, `invariant`): `enk_variable` of the SAME variable records, in the function
+  region, with `position.orig_*` = the macro-argument position (raw il_display: `variable: func-scope variable@...: s`,
+  `start.orig_column: 22`). The walker's tree: `var a: int decl=L6:11 @ L11:18` (`stmt stmk_empty @ L11:3 attr
+  [[cerastes::check]]`), where `a` is the parameter variable and denotes its current value.
+- **Mapping** parameter k <-> variable: the variable record has `assoc_param_type` (il_def.h:11232) pointing to the k-th
+  `param-type` entry of the routine type (`param_num` k, il_def.h:6500s), so a contract's `{k,0}` maps to the variable
+  whose `assoc_param_type` is the k-th param-type, and equally to the k-th entry of the function scope's `parameters`
+  list. Evidence: `variable@...: a` has `assoc_param_type: param-type@778f9bdbe0`, whose `param_num: 1`; `b` has
+  `param-type@778f9bdd10`, `param_num: 2`.
+- il_display does not link the statement-annotation nodes to anything (it does not print the attribute entries of
+  statements); they are found as expression nodes of the function region that no body reaches. The walker, whose
+  output the oracle checks, is the reliable way to read them.
+
+### P7: calls: **PASS**
+
+`tests/il/m3/p7_calls.cpp`.
+
+- `eok_call tk=tk_unknown type=<result type>`; operands: first an `enk_routine` (`routine type=int (*)(int, int) add
+  ol=int (int, int)`), then the arguments in order. The overload is already selected: `overloaded(x)` and
+  `overloaded(l)` name `int (*)(int)` and `int (*)(long)` respectively (`:20`).
+- Arguments are converted to the parameter type by `eok_cast ... compiler_generated`: `add(s, uc)` casts both to `int`
+  (`:14`); `narrow(x)` with `signed char` parameter casts `int x` to `signed char` (`:16`); `wide(x)` casts to `long`.
+  The call result is converted by a cast around the call (`r = narrow(x)` is `eok_cast type=int` over `eok_call
+  type=signed char`).
+- **Default arguments** are inserted as copies, no `default_arg_expr` node: `with_default(x)` has operands `variable x`,
+  `constant type=int int:5 ... @L7:33`, `constant type=long int:7L ... @L7:45`; the constants' positions are in the
+  callee's declaration (L7), not at the call (L18). The copy's top node carries `generated_default_arg: TRUE`
+  (il_def.h:14980): raw il_display shows `generated_default_arg: TRUE` on `expr-node@7ac16a3200` (kind `enk_constant`,
+  position L7:33) and on the inserted `eok_call` of `int c = add(1, 2)` (position L25:48).
+  A non-constant default (`c = add(1, 2)`) is the whole call node copied; an `enk_constant` default `2 + 3` is folded with
+  `expr=eok_add` (`:25`).
+- A function declared without a body is an ordinary routine with no function scope (printer: `== int f(n: int) @L4:5 nobody`
+  for `p11_statements.cpp:4`): the call node is identical to a call of a defined function
+  (`routine type=int (*)(int) nobody ol=int (int) @L15:7`, `p7_calls.cpp:15`).
+- A call used as a statement has `result_is_not_used` and type `void` for `v()` (`:22`).
+
+### P8: positions: **PASS**
+
+`tests/il/m3/p8_positions.cpp` (the listing below is its il_display, positions as `L<line>:<col>`); more evidence in the P1-P7 excerpts.
+
+```
+r = (a + b) * 2;     eok_add (parenthesized)   position L3:14 start L3:12 end L3:16
+                     eok_multiply              position L3:19 start L3:11 end L3:21
+r = -r;              eok_negate                position L4:7  start L4:7  end L4:8
+                     eok_assign                position L4:5  start L4:3  end L4:8
+r = g(a, b);         eok_call                  position L5:8  start L5:7  end L5:13
+return r > 0 ? r : -r;  eok_question           position L6:16 start L6:10 end L6:23
+```
+- A binary or assignment node's `position` is the OPERATOR token; `start` (`expr_range.start`) is the first operand's start
+  and `end` the last token (`EXTRA_SOURCE_POSITIONS_IN_IL`). A call's `position` is the `(`; unary: the operator
+  (at `start`); `?:`: the `?`; a compiler-generated cast: the operand's start; a statement: its first token
+  (`stmk_return @L6:3`, `end_position` L6:24).
+- `start` does not include a parenthesis around the node itself (`(a + b)`: start L3:12, the `(` is col 11) but the enclosing
+  node's start does (`eok_multiply` start L3:11).
+- `position.seq` is a sequence number mapped to a line by the `seq-number-lookup-entry` records (same as M1).
+- **Macro arguments** (`CERASTES_*`): the nodes of an annotation argument have `position` = the macro invocation (L9:3 for a
+  statement macro) and `position.orig_seq/orig_column` = the argument token in the user's text (raw il_display, P6:
+  `start.orig_column: 22`, i.e. `L12:22`); the walker/back end uses the original when it is not in a system header. Nodes
+  of ordinary code outside macros have no `orig_*`.
+- A statement or expression with no source (`stmk_return` generated at a function's end, the `0` of `main`) has
+  `position.seq` 0 and shows as `@-`.
+
+### P9: reading full-width constants: **PASS**
+
+`tests/il/m3/p9_wide_constants.cpp`.
+
+- `an_integer_value` (targ_def.h:1486-1679) is a host integer here (`INTEGER_VALUE_REPR_IS_A_HOST_INTEGER` TRUE); the
+  exact decimal text of any integer constant is `decimal_str_for_integer_constant(a_constant*)` (const_ints.h:254, defined
+  :2230: value, signedness (`int_constant_is_signed`) and size taken from the constant's own type). The walker already
+  uses it (`render_constant`, `src/backend/render.cpp`). il_display prints the same value (with a type suffix) in
+  `integer_value`.
+- Values read back (il_display `integer_value`, `p9_wide_constants.cpp`):
+  `unsigned long long` max `18446744073709551615ULL`; `long long` min `-9223372036854775808LL` (folded from
+  `-9223372036854775807LL - 1`, expr kept); `unsigned long` `9223372036854775808UL`; `__int128` `(1 << 100)`:
+  `1267650600228229401496703205376`; `unsigned __int128` max: `340282366920938463463374607431768211455U`;
+  `__int128` min: `-170141183460469231731687303715884105728`; `unsigned` max `4294967295U`.
+- **il_display prints a type suffix** on integer values (`2UL`, `4294967295U`, `5LL`, `1U`); strip it when parsing il_display
+  text. The API string has no suffix.
+- A 128-bit literal in source does not compile (`error #23: integer constant is too large` for a 39-digit literal), so 128-bit constants arise only from folding casts (`(__int128)1 << 100`) or runtime values.
+- Caveat (P3): `(__int128)9223372036854775807LL * 4` gets warning #61 although it fits, and stays unfolded.
+
+### P10: const globals, enumerators, `constexpr`: **PASS**
+
+`tests/il/m3/p10_named_constants.cpp`.
+
+- A `const int` global with a constant initializer, used in a body, is a folded constant with its value AND an `expr`:
+  `constant type=int int:40 [expr=enk_variable]` whose `expr` is `variable type=int kConst` (a reference to the global;
+  `:12`). `constexpr int kCx = kConst + 2` gives `int:42 [expr=enk_variable]` (`:13`). A non-const global is a plain
+  `variable type=int g_nonconst` with no constant (`:18`).
+- An enumerator: `constant type=int int:6 [expr=eok_cast,orig_type=E]` whose `expr` is `eok_cast ... compiler_generated`
+  over `constant type=E int:6 [expr=eok_add]`, whose `expr` is the initializer expression at its own position
+  (`eok_add @L6:23`, in the enum declaration). `signed char sc = C;` (value 300) is `const int:44 orig_type=E`
+  with a cast to `signed char` in `expr` and warning #69.
+- `constexpr` calls: `sq(3)` is `constant type=int int:9 [expr=eok_call]` with `expr` = `eok_call` of `routine sq` with
+  the argument constants; `big(0) + x` is `constant int:2147483647 [expr=eok_call]`: the folded value is kept AND the call
+  is visible, so the encoder can see that a `constexpr` function ran at compile time. A non-constant argument (`sq(x)`)
+  is an ordinary `eok_call`.
+
+### P11: statements: **PASS**
+
+`tests/il/m3/p11_statements.cpp`.
+
+- `int s = 0;` is TWO statements: `stmk_decl` (with `entities` = the variable; the variable also has `dynamic`
+  = the dynamic-init) followed by `stmk_init` (`dynamic_init` = the same dynamic-init, il_def.h:15833). The `stmk_init`
+  is the one that executes; reading both double-counts the initializer. An initializer that is a constant is
+  `dik_constant` (`const int:0 expr=NONE`); an expression is `dik_expression`. `int uninit;` has `init_kind=initk_none`
+  (il_def.h:11016) and no `stmk_init`.
+- `static_assert(...)` is a `stmk_decl` whose `entities` is a **`static-assertion`** record (`condition` = a constant
+  `true`, `string_literal`), not a variable (`p11_statements.cpp`, function `sa`; il_display `func-scope static-assertion@...`, `condition: ... constant: true`).
+- `for (int i = 0; i < n; i++) s += i;`: `stmk_for` with `initialization` (a `compiler_generated` block holding
+  the `stmk_decl`/`stmk_init`), `expr` = the condition, `increment`, `statement` = the body (a `compiler_generated` block when the
+  source has no braces), `for_init_scope`. A missing condition (`for(;;)`) has no `expr`. `j++, k++` in the increment
+  is `eok_comma`.
+- `while`: `stmk_while` with `expr` and `loop_statement`. `if`/`else`: `stmk_if` with `expr`, `then_statement`,
+  `else_statement` (a source `else if` is a `compiler_generated` block holding a nested `stmk_if`).
+- `break` and `continue` are `stmk_goto compiler_generated` (and a `stmk_label` after the loop); the encoder must reject
+  every `stmk_goto`, including generated ones.
+- `if (int x = f(n))`: the condition is an expression node of kind `enk_condition` (il_def.h:13593) at no position.
+- `main` without `return`: a trailing `stmk_return compiler_generated` at `@-` with a constant `0`. A non-`void` function that
+  falls off its end (`falls_off`): a trailing `stmk_return compiler_generated` with **no** expression (and EDG warns #940
+  `implicit_return_from_non_void_function`); a `void` function also ends in a generated `stmk_return` without expression.
+  So "closing brace reached in a non-`void` function" is: a generated `stmk_return` without `expr`.
+- `return a;` in a `signed char` function: `stmk_return` with `eok_cast type=signed char compiler_generated` over `variable a`.
+- A nested block `{ int inner = s; ... }` is a `stmk_block` with its own scope.
+
+### P12: integer types: size and signedness: **PASS**
+
+`tests/il/m3/p12_type_facts.cpp` (C++20; `_BitInt` accepted in C++).
+
+Every integer type is `kind: tk_integer` with `int_kind` (`an_integer_kind`, il_def.h:5659-5679, field :10052), `size`
+in bytes (a_type.size, il_def.h:9793), and flags (`bool_type` :10108, `char16_t_type`/`char32_t_type` :10096):
+
+| Type | `int_kind` | `size` | notes |
+|---|---|---|---|
+| `bool` | `char` | 1 | `bool_type: TRUE` (C++ and C23 alike) |
+| `char` | `char` | 1 | signedness: il_header `plain_chars_are_signed: TRUE` (il_def.h:18828), `int_kind_is_signed[ik_char]` (:5689) |
+| `signed char` / `unsigned char` | `signed char` / `unsigned char` | 1 | |
+| `short` / `unsigned short` | `short` / `unsigned short` | 2 | |
+| `int` / `unsigned` | `int` / `unsigned int` | 4 | |
+| `long`, `long long` and unsigned | `long`, `long long`, ... | 8 | LP64 |
+| `wchar_t` | `int` | 4 | printed name `wchar_t`; same `int_kind` as `int` (signed here) |
+| `char8_t` | `unsigned char` | 1 | |
+| `char16_t` / `char32_t` | `unsigned short` / `unsigned int` | 2 / 4 | `char16_t_type`/`char32_t_type` flags |
+| `__int128` / `unsigned __int128` | `__int128_t` / `__uint128_t` | 16 | `ik_int128`, `ik_unsigned_int128` |
+| `_BitInt(24)` | `_BitInt(24)` | 3 | `ik_bit_precise`; width in the name, not in `size * 8` |
+| `unsigned _BitInt(7)` | `unsigned _BitInt(7)` | 1 | `ik_unsigned_bit_precise` |
+
+Output (scratch reader over `p12.il`): `f_bool [('tk_integer','char','bool','1')]`, `f_wc [('tk_integer','int','','4')]
+wchar_t`, `f_i128 [('tk_integer','__int128_t','','16')]`, `f_bi [('tk_integer','_BitInt(24)','','3')]`. So: size from the type's
+`size`; signedness from `int_kind_is_signed[int_kind]` at run time (plain `char` after EDG has set it from the target); `bool` by
+`bool_type`; `_BitInt` by the two bit-precise kinds (reject); enumerations are another kind (`tk_enum`, P10: the constant's
+type prints as `E`).
+
+### Probe-by-probe answers to decisions 0010 and 0012
+
+| Reference | Verdict | Evidence |
+|---|---|---|
+| 0010 item 2 (P12): sizes and signedness from EDG at run time; plain `char` signed on this target | **confirms** | P12 table (`size`, `int_kind`, `plain_chars_are_signed: TRUE`); the array `int_kind_is_signed` itself is not visible in il_display (UNCLEAR for the array, PASS for the header flag it comes from) |
+| 0010 item 2 (P9): `__int128` supported only if exact constant reading exists | **confirms** it exists | `decimal_str_for_integer_constant` (const_ints.h:254); il_display prints full 128-bit values; caveat: spurious #61 on valid 128-bit multiplies (not folded) |
+| 0010 item 6 (P1, P2): "the IL makes promotions and usual arithmetic conversions explicit" | **confirms P1; contradicts P2** | P1: every binary/unary/comparison/call-argument conversion is an `eok_cast compiler_generated`. P2/P4: compound assignment, `<<=`/`>>=` and shift counts are NOT converted: the right operand is raw (or only integer-promoted) and the computation type is not in the IL |
+| 0010 item 10 (P5): C result `int`, C++ `bool` | **confirms**, with a refinement | C23: comparison/logical/`!` nodes have `type=int`, operands and conditions are not wrapped; C++: `type=bool`, operands/conditions wrapped in `eok_bool_cast` |
+| 0010 item 12 / P3: "constant keeps its original expression, or only `orig_type`" | **confirms** for function bodies; one **UNCLEAR** | all converted/folded constants in bodies keep `expr` (table above); the no-`expr` form was found only at file scope; overflowing operations (`INT_MAX + 1`, `65536 * 65536`, `1/0`, `1 << -1`) are not folded at all |
+| 0010 item 12: `--diag_error` for #61/#39/#63..., "tags fixed by P3" | **confirms** the mechanism, amends the list | #39, #61, #62, #63, #179 work (`--diag_error=...` -> errors); #68/#69 also fire for conversions to unsigned (legal, modular), so they must not be enabled; a user `#pragma diag_warning` overrides `--diag_error` (so reject diag pragmas, as written); `#pragma clang/GCC diagnostic` are not honoured (#161/#1675) |
+| 0012 item 2 (P6): contracts read formals, `check`/`invariant` read current locals | **confirms** | contracts use `enk_param_ref` `{k,0}` (`{k,1}` and binder `{1,0}` in `ensures`); body and statement annotations use `enk_variable` of the parameter variables; the mapping is `assoc_param_type` |
+| 0012 item 7 (P2): "computation type `C` the IL gives" | **contradicts** | P2: the IL does not give `C` for compound assignment; the encoder must derive it (usual arithmetic conversions of the promoted left type and the right operand), and for shifts use the promoted left type |
+| 0012 item 12: "globals (unless P10 shows the IL gives a constant)" | **confirms** the exception | P10: a `const`/`constexpr` integer global is a folded constant whose `expr` is an `enk_variable` of the global; a non-const global is a bare `enk_variable` |
+| 0012 item 6 calls (not tagged P7 in the text) | **confirms** | P7: operand 1 `enk_routine` (overload selected), converted arguments, default-argument copies with `generated_default_arg`, results converted by a cast around the call; a bodyless function is an ordinary routine |
+| 0012 item 3 statements (not tagged) | **confirms with additions** | P11: declaration + `stmk_init` pair; `static_assert` is a `stmk_decl` over a `static-assertion` entity; `break`/`continue` are generated `stmk_goto`s; `if (int x = ...)` has an `enk_condition` |
+| 0012 item 9: falling off the end, `main` returns 0 | **confirms** | P11: generated trailing `stmk_return`, with constant 0 only in `main` |
+| 0012 item 12: vector arithmetic uses the ordinary operator kinds, operand types are checked too | **UNCLEAR** | not probed here (EDG bug 0007 vector types); `operation.type_kind` is `tk_vector` per il_def.h:15126-15132's comment, not observed |
+| encoding.md section 2: shifts typed as "promoted left operand type" | **confirms** | P4 |
+| encoding.md section 3: positions of obligations | **confirms the rule needed** | P8: error positions should use the operator token (`position`); for default arguments and constants from the callee's declaration use the call's position, since their own positions lie in the declaration |
+
+### R4a: constant-evaluated uses of `constexpr` predicate and pure functions
+
+`tests/il/m3/r4a_constant_contexts.cpp` (C++20; `q` is a `constexpr CERASTES_PREDICATE` returning `bool`, `p` a
+`constexpr CERASTES_PURE` returning `int`). Every context below calls one of them in a constant expression. The traces
+come from il_display read through a scratch scan (`r4a_scan.py` in the session scratchpad): for every `enk_routine`
+expression node naming `p` or `q`, its chain of owners by reverse pointer search (the `<key-` links below are the IL
+fields that lead from the owner to the node). The same text through `scripts/cerastes-fe.sh --c++20 --brief_diagnostics
+--display_error_number --no_colors` gives what the back end reports today. Line numbers are those of the probe.
+
+| Context | Line | Trace in the IL (owner `<field-` chain from the `enk_routine` of `p`/`q`) | Where | Reported today | Found by scanning every expression node |
+|---|---|---|---|---|---|
+| C1 array bound (namespace scope) | 23 | `type(tk_array) <bound_constant- constant <expr- eok_call <operands- enk_routine` (the bound constant also appears as an `eok_cast`'s `constant`) | file-scope region | no | yes |
+| C1b array bound (local) | 43 | `local-expr-node-ref <expr` (record `constant-expr referrer: constant`, listed in the function scope's `expr_node_refs`) | function region | no | yes |
+| C2 template argument (class template) | 25 | **none**: the instance `S<4>` carries `template_arg_list` with `constant: 4` (`ck_integer`, no `expr`, no routine pointer anywhere) | - | no | **no trace** |
+| C2b template argument (local) | 44 | **none** (`S<2>`, same) | - | no | **no trace** |
+| C19 explicit function template argument `ft<p(1)>()` | 52 | **none**: the instance routine's `template_arg_list.constant: 2` has no `expr`; the call node is `eok_call` of `routine ft` only | - | no | **no trace** |
+| C3 `static_assert` at namespace scope | 26 | **none**: no `static-assertion` record and no node naming `q` (only block-scope ones leave a record) | - | no | **no trace** |
+| C3c `static_assert` in a class | 38 | **none** (same) | - | no | **no trace** |
+| C3b `static_assert` in a body | 45 | `static-assertion <condition- constant <expr- eok_call <operands- enk_routine`; the `stmk_decl`'s `entities` points to the record | function region | no | yes |
+| C4 `case` label | 46 | `switch-case-entry <case_value- constant <expr- eok_call <operands- enk_routine` | function region | yes (L46) | yes |
+| C5 enumerator initializer (namespace) | 27 | named `constant(ck_integer)` (the enumerator) `<expr- eok_call`; the enumerator's constant is also reached through an `eok_cast` node | file-scope region | no | yes |
+| C5b enumerator in a body | 47 | same shape; the enumerator's entries live in the file-scope region although the enum is local | file-scope region | no | yes |
+| C6 `constexpr` variable (namespace) | 28 | `variable(g_cx) <constant- constant <expr- eok_call <operands- enk_routine` | file-scope region | no | yes |
+| C6b `constexpr` variable (local) | 48 | `variable(local_cx) <dynamic- dynamic-init <constant- constant <expr- eok_call` | function region | yes (L48) | yes |
+| C7 `if constexpr` | 49 | `stmt(stmk_constexpr_if) <expr- enk_constant <constant- constant <expr- eok_call` | function region | yes (L49) | yes |
+| C8 `noexcept(...)` operator | 50 | `variable(n) <dynamic- dynamic-init <constant- constant <expr- eok_noexcept <operands- eok_call` | function region | yes (L50) | yes |
+| C9 `alignas(p(7))` | 32 | `attribute-arg <constant- constant <expr- eok_call` (the `alignas` is an attribute entry on the variable; its argument is an `attribute-arg` of kind `constant`) | file-scope region | no | yes |
+| C10 bit-field width | 31 | `field <bit_size_constant- constant <expr- eok_call` | file-scope region | no | yes |
+| C11 default template argument | 29 | `template-parameter(N) <default_arg_constant- constant <expr- eok_call`; the instance `D<6>` has no trace | file-scope region | no | yes (on the template parameter) |
+| C12 body of a `constexpr` function | 33 | `stmt(stmk_return) <expr- eok_add <operands- eok_call <operands- enk_routine` | function region | yes (L33) | yes |
+| C13 body of a `consteval` function | 34 | `stmt(stmk_return) <expr- eok_call <operands- enk_routine` | function region | yes (L34) | yes |
+| C12b/C13b constexpr/consteval call, constant-evaluated or not | 53-55 | the call site is an ordinary `eok_call` of `ce_body`/`cx_body` (folded to a constant with the call kept as `expr`); the use of `p` is only in the callee's body (C12/C13) | - | via the callee (L33/L34) | yes (callee body) |
+| C14 `noexcept(q(1))` specifier | 36 | `exception-specification <noexcept_arg- constant <expr- eok_call` | file-scope region | no | yes |
+| C15 `explicit(q(1))` | 37 | `attribute-arg <constant- constant <expr- eok_call` | file-scope region | no | yes |
+| C16 `sizeof(p(1))` (unevaluated) | 51 | `variable(sz) <dynamic- dynamic-init <constant- ... eok_cast <expr- constant <expr- enk_sizeof <expr- eok_call` | function region | yes (L51) | yes |
+| C17 `decltype(p(1))` (unevaluated) | 40 | `type(tk_typeref) <expr- eok_call <operands- enk_routine` | file-scope region | no | yes |
+
+Output of the scan for the rows with a trace, quoted (the `CALL` abbreviates `expr-node(routine) <operands-
+expr-node(operation call)`): `(23, 'p', 'file-scope', 'CALL <expr- constant(ck_integer) <constant- expr-node(constant)
+<operands- expr-node(operation cast) <expr- constant(ck_integer) <bound_constant- type(tk_array:int [4])')`;
+`(43, 'p', 'func-scope', 'CALL <expr- local-expr-node-ref')`; `(45, 'q', 'func-scope', 'CALL <expr- constant(ck_integer)
+<condition- static-assertion')`; `(46, 'p', 'func-scope', 'CALL <expr- constant(ck_integer) <case_value-
+switch-case-entry')`; `(32, 'p', 'file-scope', 'CALL <expr- constant(ck_integer) <constant- attribute-arg')`;
+`(36, 'q', 'file-scope', 'CALL <expr- constant(ck_integer) <noexcept_arg- exception-specification')`; `(40, 'p', 'file-scope',
+'CALL <expr- type(tk_typeref:int)')`. No row exists for lines 25, 26, 38, 44, 52.
+
+**What walks reach.** The checks that exist (the "Reported today" column: L33, L34, L46, L48, L49, L50, L51) find the
+uses that are statements or expressions of function bodies: they walk `stmt` trees and what the statements point to. They
+do not see the contexts whose trace hangs off a type, a field, a template parameter, an exception specification, an
+attribute argument, an enumerator or a block-scope `static_assert`/local array bound (C1, C1b, C3b, C5, C5b, C6, C9,
+C10, C11, C14, C15, C17), although every one of those traces is an `enk_routine` expression node in a dumped region.
+
+**What a scan of all expression nodes reaches.** `il_display` and the walker enumerate IL entries with the same calls
+(`walk_file_scope_il`, `walk_routine_scope_il`; il_display.c:8707, 8743; `src/backend/walker.cpp` `collect`), and
+those hand every entry, expression nodes included, to the callback. A pass over every `enk_routine` node whose
+routine carries `cerastes::predicate` or `cerastes::pure` finds a trace for 20 of the 25 rows (all but C2, C2b, C19,
+C3 and C3c). Legitimate uses must be excluded: nodes under the argument trees of registered `cerastes::` attributes
+(including statement attributes, whose entries are reachable in memory through `statement.attributes` though
+il_display does not print them) and the bodies of spec functions. The exclusion has to tell those apart from other
+attribute arguments (C9 and C15 are `alignas` and `explicit`, ordinary attributes whose `attribute-arg` is a
+constant with a call in `expr`).
+
+**Contexts with no trace.** A template argument that is a call to a `constexpr` function (C2, C2b, C19) and `static_assert`
+outside a function body (C3, C3c) leave nothing: the argument is the folded value (`ck_integer`, no `expr`), and EDG
+keeps no record of a namespace- or class-scope `static_assert`. The default template argument keeps its expression on the
+template parameter (C11), but a use of the template with it (`D<>`) leaves only `D<6>`.
+
+**Verdict for plan R4a.** Step 2 (reject from the IL) covers 20 of the 25 contexts with a pass over all expression
+nodes, including every one of the "not reported today" contexts that has a trace, but it cannot cover C2, C2b, C19, C3
+and C3c: for those the IL holds no trace of the call. They need step 3 (an EDG mechanism that stops constant evaluation
+of a routine carrying a registered attribute, which would make every one of them an ordinary error, traces or not) or
+step 4 (documented gap).
+
+**Status of the R4a contexts (2026-10-16).** The 12 contexts that have a trace and that the earlier checks did not report
+(11 rows plus the default template argument, which keeps its expression on the template parameter) are reported by the
+annotation checks' pass over every expression node (test-mutator's IL pass, which excludes the argument trees of registered
+`cerastes::` attributes and the bodies of spec functions). The 5 contexts with no trace (C2, C2b, C19, C3, C3c) need the
+EDG fork's commit "P": a registration flag, `RAF_NO_CONSTANT_EVALUATION`, that stops constant evaluation of a routine
+carrying a registered attribute, which makes every one of them an ordinary error. Until that commit is pinned they stay a
+documented gap; nothing in the IL can close them.
+
+### P13: recognized attributes in verified code: **PASS (with the findings below)**
+
+`tests/il/m3/p13_attributes.cpp` (C++20) and `p13_attributes.c` (C23), both goldens (every line checked by
+`scripts/walker_oracle.py`: 31 and 29 facts, the rest unverifiable as stated); the entry lists below come from a scratch
+reader of il_display (`attrs.py`: for every routine, function type, parameter, type, variable and field it follows
+`attributes` and prints `kind | name | namespace | syntactic_location | family | position`).
+
+**One list per entity.** Every entity has ONE singly linked list of `an_attribute` entries (field `next`), reached from
+the entity: `source_corresp.attributes` for routines, variables, fields, types, namespaces, labels, templates and
+constants (il_def.h:3615); `a_param_type.attributes` for parameters (:6545; the parameter's variable record also has an
+`attributes` pointer); `a_statement.attributes` for statements (:16540). Each entry has `kind` (`an_attribute_kind`; a
+recognized attribute has its own kind, anything else is `unrecognized`), `family`, `syntactic_location` (:3173), `name`
+(:3224) and `namespace_name` (:3226), and `arguments`. A walker over those lists enumerates every attribute; the back end
+reads `kind` for recognized ones and `name` for the rest. Where each lands (C++20 unless noted):
+
+| Source | Entity and list | Entry (`kind | name | ns | location | family`) |
+|---|---|---|
+| `[[noreturn]] void nr_def(int)` (`:5`) | routine | `noreturn \| noreturn \| - \| prefix \| std` |
+| `__attribute__((noreturn)) void g1(int);` / `void g2(int) __attribute__((noreturn));` / `[[gnu::noreturn]] void g3(int);` (`p13b_gnu_spellings.cpp`) | routine | `noreturn \| noreturn \| - \| prefix or postfix \| gnu`; `[[gnu::noreturn]]`: ns `gnu`, family `std` |
+| `[[nodiscard]] int nd(int)` (`:6`) | routine | `nodiscard \| nodiscard \| - \| prefix \| std` |
+| `[[deprecated("old")]] int dep(int)` (`:7`) | routine | `deprecated \| deprecated \| - \| prefix \| std`; argument `<aak_constant>` (the string) |
+| `[[gnu::always_inline]] inline int ai(int)` (`:8`) | routine | `always_inline \| always_inline \| gnu \| prefix \| std` |
+| `int ai2(int) __attribute__((always_inline));` (`:9`) | routine | **`unrecognized \| always_inline \| - \| postfix \| gnu`**: the same attribute is recognized in the prefix spelling above and not in this one |
+| `__attribute__((const)) int cn(int)`, `__attribute__((pure)) int pu(int)` (`:11`, `:12`) | routine | `const \| const \| - \| prefix \| gnu`, `pure \| pure \| ...` |
+| `[[maybe_unused]] int a` and `int b [[maybe_unused]]` as parameters (`:14`) | parameter (`a_param_type.attributes`) | `maybe_unused \| ... \| prefix` and `... \| declarator-id` |
+| `struct [[nodiscard]] Tag` (`:15`) | type | `nodiscard \| nodiscard \| - \| tag name \| std` |
+| `struct [[deprecated]] Old`, `enum [[deprecated]] En` (`:16`, `:17`) | type | entry on the type's list (printed after the flag line, see below) |
+| `[[maybe_unused]] int unused = 0;` (`:19`) and `int cl __attribute__((cleanup(cleanup_fn))) = 1;` (`:20`) | local variable | **entry not dumped** by il_display (`attributes: file-scope attribute@...` with no record); the walker prints `attr [[maybe_unused]] on variable unused @ L19:5` and `attr [[cleanup(cleanup_fn)]] on variable cl @ L20:25` |
+| `[[assume(x > 0)]];` (`:21`), `__attribute__((assume(x > 1)));` (`:22`) | null statement | `stmk_empty` with `attributes` set; entry not dumped; the walker prints `stmt stmk_empty @ L21:3 attr [[assume(<aak_expression>)]]` and the same for `L22` (C++: an expression argument; C23: raw tokens, `[[assume(x > 0)]]` in `p13_attributes.c:18`) |
+| `if (c) [[likely]] { } else [[unlikely]] { }` (`:23`) | the `then`/`else` **block** statements | `stmk_block @ L23:25 attr [[likely]]`, `stmk_block @ L23:54 attr [[unlikely]]` (not the `if`) |
+| `[[fallthrough]];` (`:24`) | null statement | `stmk_empty @ L24:31 attr [[fallthrough]]` |
+| `[[]];` (`:25`) | null statement | `attributes` set (a pseudo entry of kind `empty attribute`), no entry printed by the walker |
+| C23 `[[unsequenced]]`, `[[reproducible]]` (`p13_attributes.c:9-10`) | routine | **`unrecognized \| unsequenced \| - \| prefix \| std`** and `reproducible`: EDG has no semantics for them |
+| `alignas(8) int al1` (`p13b_gnu_spellings.cpp`) | variable | `align \| alignas \| - \| prefix \| alignas`; `__attribute__((aligned(16)))` on a function (`p13b`): `align \| aligned \| - \| postfix \| gnu` and the type's `alignment: 16` |
+
+**Attributes that leave something besides, or instead of, an entry.**
+- `[[noreturn]]` in every spelling that EDG recognizes sets `does_not_return` on the routine's **function type**
+  (`a_routine_type_supplement`, il_def.h:7540, printed `does_not_return: TRUE`) as well as leaving the entry.
+- **`_Noreturn` (a specifier) and the `noreturn` macro of `<stdnoreturn.h>` leave NO attribute entry**; only the type flag:
+  `p13_attributes.c`: `nr_spec` and `nr_macro` have `attributes: NULL` and the type has `does_not_return: TRUE` (il_display
+  lines 2483, 2557, 2631 of the dump; also `nr_attr`). The C `[[noreturn]]` entry is named `_Noreturn`.
+- Flags that duplicate an entry: `has_nodiscard_attribute` (routine, il_def.h:12582), `is_deprecated_or_unavailable`
+  (routine/type/variable, :3569; il_display prints the flag line and then the entity's `attributes`, which belong to
+  `source_corresp`), `is_pure` (:12591, for `pure` only; `const` leaves the entry only), `always_inline` (:12692; the
+  prefix `[[gnu::always_inline]]` form, not `ai2`'s postfix one), `never_throws` (:12560, for `nothrow`).
+- `__attribute__((noreturn))` in C23 with `<stdnoreturn.h>` included is macro-expanded to `__attribute__((_Noreturn))`
+  (the entry's `position.orig_*` is in the header) and EDG records it `unrecognized | _Noreturn`, **without** the type flag:
+  an attribute can be silently lost to a macro. `__attribute__((nodiscard))` (not a GNU attribute) is `unrecognized`.
+- `__declspec(...)` is a syntax error in this configuration (`error #20: identifier "noreturn" is undefined`,
+  `microsoft_mode: FALSE`), so it cannot occur in code that gets this far.
+- Attribute entries that only function-region entities point to (locals, statements, the parameter variables) are not
+  dumped by il_display; the walker, which follows the pointers in memory, prints them. That is how the back end can
+  enumerate: walk every routine's function scope (variables, nested block scopes, statements) and read the `attributes`
+  lists, which the walker does.
+- Recognized-in-one-spelling attributes mean the back end must classify by `name` (and namespace), not by `kind`
+  alone; `kind == unrecognized` entries still carry a usable `name`.
+
+### P14: `#line` directives and linemarkers: **PASS**
+
+`tests/il/m3/p14_line_directives.cpp` and `.c` (with the user header `p14_inc.inc`: the harness refuses a `.h` file in `tests/`).
+
+```
+ 4  #include "p14_inc.inc"        (inc: from_header; then `#line 500 "renamed_in_header.h"`; after_line_in_header)
+ 5  int plain_before(int a)
+ 6  #line 100 "presumed.h"
+ 7  int after_line(int a)
+ 8  # 12 "marker.h" 3
+ 9  int after_system_marker(int a)
+10  # 40 "tests/il/m3/p14_line_directives.cpp" 1
+11  int after_return_marker(int a)
+12  #line 70
+13  int after_number_only(int a)
+```
+`seq-number-lookup-entry` records (il_display; `full_name` NULL marks a directive entry, il_def.h:150: "NULL for
+entries generated by #line directives"):
+```
+lookup 1 4   line 1   tests/il/m3/p14_line_directives.cpp  full_name tests/il/m3/p14_line_directives.cpp
+lookup 5 7   line 1   tests/il/m3/p14_inc.inc              full_name tests/il/m3/p14_inc.inc  inc
+lookup 8 8   line 500 renamed_in_header.h                  full_name NULL  inc
+lookup 9 10  line 5   tests/il/m3/p14_line_directives.cpp  full_name tests/il/m3/p14_line_directives.cpp
+lookup 11 12 line 100 presumed.h                           full_name NULL
+lookup 13 14 line 12  marker.h                             full_name NULL  sys
+lookup 15 16 line 40  tests/il/m3/p14_line_directives.cpp  full_name NULL
+lookup 17 17 line 70  tests/il/m3/p14_line_directives.cpp  full_name NULL
+```
+- Every `#line` or linemarker creates a `source-file` record (il_def.h:137) with `full_name: NULL` (:150), `name_as_written:
+  NULL`, `file_name` = the presumed name (`presumed.h`), `first_line_number` = the new line, and a `seq-number-lookup-entry` for
+  its sequence range. The record is a CHILD of the real file it appears in (`first_child_file` chain of the primary file
+  lists `p14_inc.inc`, `presumed.h`, `marker.h`; the header's lists `renamed_in_header.h`), so the physical file of a
+  directive is its parent. `#line 70` with no name reuses the current presumed name with a new record.
+- A flag-3 linemarker (`# 12 "marker.h" 3`) makes the record `from_system_include_dir: TRUE` (:218): the code after it
+  (`after_system_marker`, and in the C probe even the later `after_number_only` with `#line 70`) counts as **system** code:
+  `seq_is_in_system_header` is true for it, and the walker neither reports nor counts it (the C probe's `end walk:` counts 3
+  routines with bodies in non-system files and not the system one). A flag-1 linemarker back to the primary file's own name
+  (`# 40 "tests/il/m3/p14_line_directives.cpp" 1`) makes later code look like the primary file with the wrong line numbers:
+  `after_return_marker @ L40:5` and `after_number_only @ L70:5` are reported by the walker as primary-file routines at
+  lines 40 and 70, which are not their physical lines (11 and 13). `seq_is_in_include_file` is false for them
+  (`full_name == NULL` and the name equals the primary's: il.c:4856-4863).
+- **Detection.** `walker.cpp:631-660` (`line_directive_warnings`) reads `il_header.seq_number_lookup_entries`, keeps those whose
+  `source_file->full_name == NULL`, lies inside the primary file's sequence range and not inside a real include, and derives
+  the directive's physical line with `conv_seq_to_physical_file_and_line` (il.c:4780). Output of the C++ probe:
+  ```
+  warning: line directive in the primary file at L6; code after it is attributed to presumed.h
+  warning: line directive in the primary file at L8; code after it is attributed to marker.h
+  warning: line directive in the primary file at L10; code after it is attributed to tests/il/m3/p14_line_directives.cpp
+  warning: line directive in the primary file at L12; code after it is attributed to tests/il/m3/p14_line_directives.cpp
+  ```
+  It does **not** warn about the directive in the user header (`#line 500 "renamed_in_header.h"` at `p14_inc.inc:3`):
+  the same test over the header's sequence range (any `source-file` with `full_name == NULL`, any parent) finds it, and
+  that is the test for every verified file (the back end's own rule can be: a verified file contains a directive iff some
+  `source-file` entry has `full_name == NULL` and its parent is that file).
+- **Physical path vs presumed name.** For a real file `full_name` is "the actual file name" (il_def.h:150) as EDG built
+  it from the command line or the include directory, **not canonicalized**: `tests/il/m3/p14_line_directives.cpp` and
+  `tests/il/m3/p14_inc.inc` (relative to the working directory, joined to the includer's directory), absolute when the
+  include directory was given absolutely (`/Users/.../include/cerastes.h`). `file_name` is the display form (the
+  presumed name after a directive), `name_as_written` the text of the `#include` (`"p14_inc.inc"`). The physical file and
+  line of any sequence number come from `conv_seq_to_physical_file_and_line(seq, &src_file, &line, &at_end)` (il.c:4780);
+  `src_file->full_name` is the path to canonicalize (with `realpath` against the working directory), `conv_seq_to_file_and_line`
+  gives the presumed pair.
+
+### P15: shapes the encoder will walk: **PASS**
+
+`tests/il/m3/p15_body_shapes.cpp`, `p15b_noreturn.cpp` (both `frontend-warning`).
+
+- `(void)e;`: `stmk_expr` over `eok_cast tk=tk_unknown type=void result_is_not_used` (a `tk_unknown` cast to `void`; NOT
+  compiler-generated) over the operand with `result_is_not_used` on the operand (`(void)a;`: `variable type=int a (param)
+  is_lvalue result_is_not_used`; `(void)(a + b);`: the `eok_add is_parenthesized result_is_not_used`; `(void)sink(a);`: the
+  `eok_call result_is_not_used`). Excerpt (`p15_body_shapes.cpp:12`, `(void)(a + b);`):
+  ```
+  stmk_expr @L12:3
+    eok_cast tk=tk_unknown type=void result_is_not_used @L12:3 start@L12:3
+      eok_add tk=tk_integer type=int is_parenthesized result_is_not_used @L12:12 start@L12:10
+        variable type=int a (param) ol=int @L12:10 start@L12:10
+        variable type=int b (param) ol=int @L12:14 start@L12:14
+  ```
+- A discarded expression statement without a cast (`a / 1;`, `a + b;`, `a;`) is `stmk_expr` directly over the node with
+  `result_is_not_used` (`eok_divide ... result_is_not_used`, `variable ... is_lvalue result_is_not_used`); EDG warns
+  `#174 expr_has_no_effect` for each. The operation is still in the IL, so its checks apply.
+- `a / 0;`: `stmk_expr` over `eok_divide tk=tk_integer type=int result_is_not_used` with `constant type=int int:0
+  [expr=NONE,is_simple_zero]`; EDG warns #39 `divide_by_zero` and #174, and does not fold or drop the operation.
+- `int x = x;`: `stmk_decl`/`stmk_init` pair whose `dynamic-init` is `dik_expression` over `variable type=int x ol=int`, the
+  variable being declared; EDG warns `#549 used_before_set`. The uninitialized read is visible to the encoder as an
+  `enk_variable` whose variable is declared by the same statement.
+- Return from a `[[noreturn]]` function (`p15b_noreturn.cpp`): EDG gives **warning #1305 `noreturn_function_does_return`**
+  ("function declared with "noreturn" does return") at the `return` (`nr_return`, a `return;` inside), at the closing brace
+  when the end is reachable (`nr_falls`, `nr_loop`) and at `return a;` of a non-`void` function (`nr_int`); it is a
+  warning, the IL is the ordinary one (`stmk_return`, or the compiler-generated trailing `stmk_return` at `@-`), and code
+  after a call to a noreturn function stays in the IL (`caller`: `nr_falls(a); a = 1;`). `nr_int` also shows that
+  `[[noreturn]]` on a non-`void` function raises no diagnostic of its own in C++. Expectations: `frontend-warning
+  noreturn_function_does_return @ L7, L8, L9, L10` in the probe's header.
+
+### M3-4: facts found while writing the encoder
+
+Each was checked against `il_def.h` and by the staged suite (`build/m3-staging/tests/scalar`, run through
+`build/cerastes verify`); none contradicts an earlier probe.
+
+- An **enumeration type** is a `tk_integer` with `variant.integer.enum_type` set (not a kind of its own); an
+  enumerator's constant has an integer type but its original `expr` chain passes through a constant of the enum type.
+  The encoder tests the flag (`vtype`, `constant`).
+- A `break`/`continue` is a `stmk_goto` whose `a_label` has `break_label`/`continue_label` set (il_def.h a_label);
+  the label statement the front end places for it is the same label (its flags are set, `compiler_generated` may not be):
+  the encoder tells them from a user label by the flags.
+- A variable length array leaves `is_vla`/`has_variably_modified_type` on the variable, a `stmk_vla_decl` and
+  `stmk_set_vla_size`, and at the end of the scope a generated `stmk_expr` whose expression is `enk_vla_dealloc` plus
+  an assignment to a return-value temporary: everything after the rejected declaration is the compiler's cleanup.
+- A lambda expression is `enk_lambda`; its closure class has `extra_info->is_lambda_closure_class` and the call operator
+  routine has `is_lambda_body`.
+- `cerastes::old(x)` in an `ensures` is `eok_ref_indirect` over `eok_call` of the template instance `cerastes::old`
+  whose argument is `eok_reference_to` of `eok_lvalue_adjust` of the parameter reference (`old(x + y)` has an
+  `enk_temp_init` operand, which M2's checks reject).
+- Internal errors of EDG are diagnostics of severity `es_internal_error`, counted as catastrophes, and exit with
+  `RC_CATASTROPHE` (4), the same as a missing source file (`EXIT_ON_INTERNAL_ERROR`); only the text (`internal error
+  #<n>`) tells them apart.
+- `--error_output <file>` takes its value as a separate word; `f_error` (error.h) is the stream EDG's diagnostics, and
+  the back end's, are written to.
+
+### M3-4 (termination, decision 0013): IL facts the encoder uses
+
+- `[[cerastes::decreases(e1, ..., en)]]` is one registered attribute with both targets (`"(X+)"`, flags `r|s:+i!`,
+  `register_attributes.cpp`). After a function's parameter list it is on the routine's attribute list with
+  `syntactic_location == al_post_func`, so `contracts_of(r)` returns it together with `requires` and `ensures`, in source
+  order; the encoder tells them apart by `classify()` and must not treat a `decreases` as a postcondition. Its arguments are
+  the `aak_expression` entries of `arguments_of(a)`, one per component; parameters are `enk_param_ref {k,0}`, as in
+  `requires`. Before a `while` or `for` it is on the statement's own attribute list (`a_statement.attributes`), beside
+  `invariant`. A `do`, range-based `for` or other loop that this version rejects carries its clauses too, and the
+  statement is rejected once as such.
+- In C++ a statement's `position` starts at its attributes, so for a loop with `CERASTES_INVARIANT(...)` or
+  `CERASTES_DECREASES(...)` before it the position is the attribute's line; the keyword's line is found in the source text
+  (`loop_keyword_position`). In C23 the position is the keyword's.
+- The call graph is read from the bodies: every `eok_call` whose first operand is an `enk_routine` (`direct_callee`) is an
+  edge from the routine being encoded to the callee; only callees with a body in a verified file (`body_scope`, and the
+  body's position in a verified file) are edges, since a trusted callee is assumed to terminate. A function that reaches
+  itself needs a measure.
+- Positions: `a_source_position.seq` is the invocation (expansion) site of a macro, `orig_seq` and `orig_column` are the
+  position of the text itself (basics.h:909-917): an argument token's own place, or a token of the macro's body at the
+  `#define`. Nodes of user macro bodies are reported at the expansion site with a note at the `#define`.
+- `an_asm_entry`: an `asm` statement of a body is an entry of a routine memory region (and a `stmk_asm`); a file-scope
+  `asm(...)` is one the file-scope walk reports. Only the latter is rejected as a declaration.
+- Attributes written on a type (`typedef int __attribute__((x)) T;`, or on the return type of a function declaration) are on the
+  type entry's `source_corresp.attributes`, an entry with no declaration position of its own; the attribute's position
+  decides whether it is in a verified file. `#pragma GCC system_header` makes a `source-file` record with the same
+  `file_name` as its parent, `full_name == NULL` and `from_system_include_dir`; `#pragma clang system_header` is ignored
+  by this EDG (warning #161).

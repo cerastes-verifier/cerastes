@@ -83,20 +83,29 @@ verifies; Viper's `\` and `%` on `Int` are Euclidean (`(-7)\2 == -4`, `(-7)%2 ==
    - **Default arguments.** An argument the call omits is the callee's default-argument expression, which the
      IL copies into the call (`generated_default_arg`, P7). It is encoded at the call like a written argument,
      and its obligations are reported at the call, with a note at the default argument.
-   - Recursion is allowed. Results are partial correctness: termination is not checked, and `ensures` are
-     claims about normal returns only (a trusted callee that throws, or that never returns, is outside them);
-     the docs say so.
+   - Recursion is allowed, with a termination measure (decision 0013): results are total correctness. A
+     trusted callee is assumed to terminate (part of its trusted contract); one that throws is outside its
+     `ensures`, which are claims about normal returns; the docs say so.
 7. **Assignments** evaluate the right-hand side, convert it to the left operand's type (checked), and assign.
    A compound assignment `x op= e` is `x = (T)((C)x op (C)e)`, where the encoder computes the computation type
    `C` itself, because the IL does not give it (0010 item 6; P2); shift-assignment converts the operands
    separately; `++x`/`x++` as statements are `x += 1` in the same way. `++`/`--` on `bool` are rejected.
-8. **Loops.** A loop's condition is checked each time C/C++ evaluates it: its obligations are asserted before the
-   loop and again at the end of each iteration (after the `for` increment). Its invariants are the user's
-   `invariant` clauses, in order, preceded by an automatic invariant `T_MIN <= x && x <= T_MAX` for each local `x`
-   the loop assigns. The automatic invariants are proved like any other (on entry and by preservation), never
-   inhaled; a failure of one is an internal error (exit 3), since every assignment is already checked. The
-   obligations of the user's invariants (0010 item 11) are asserted before the loop and at the end of each
-   iteration, guarded by the earlier invariants.
+8. **Loops.** A loop's condition is checked each time C/C++ evaluates it, and so are the obligations of its
+   invariants (0010 item 11). Both are emitted as further Viper `invariant` clauses, so Silicon checks them at
+   exactly the points C/C++ evaluates the condition: on entry, and after each iteration (after the `for`
+   increment), before the next evaluation. The clauses of a loop, in order:
+   - an automatic invariant `T_MIN <= x && x <= T_MAX` for each local `x` the loop assigns;
+   - the user's `invariant` clauses, in source order, each directly preceded by its own obligations (so an
+     invariant's obligations are guarded by the invariants before it, and the invariant itself is evaluated only
+     where it is well-defined);
+   - the obligations of the condition.
+
+   Each clause is checked in the state where C/C++ evaluates it, and may rely on the clauses before it, which are
+   checked first (an obligation asserted at the end of the body could not use the invariants that hold after
+   the iteration). Inside the body, all clauses are known, as for any invariant. Nothing is inhaled; a failure of
+   an automatic invariant is an internal error (exit 3), since every assignment is already checked. The map
+   entries of an obligation clause carry the obligation's own category with both invariant ids (M3-4, as
+   built; il-analyst).
 9. **Returns.** `return e;` assigns `res` (converted to the return type, checked), asserts each user `ensures`
    clause at the `return` (`postcondition`, with a note at the clause), then jumps to a label at the end of the
    method (`goto end`, which Silicon accepts from inside loops). A `void` function asserts its `ensures` at each
@@ -111,10 +120,13 @@ verifies; Viper's `\` and `%` on `Int` are Euclidean (`(-7)\2 == -4`, `(-7)%2 ==
     each `requires` clause guarded by the earlier `requires`, and of each `ensures` clause guarded by all
     `requires` and the earlier `ensures`. The contract clauses themselves are emitted with total prelude
     functions, so Viper's own well-definedness checks never fail.
-11. **The prelude** contains only functions with bodies: no domains, no axioms, no bodyless functions:
-    `c_abs`, `c_div` and `c_rem` (C's truncating division and remainder, built on Viper's Euclidean operators
-    and total at a zero divisor), `c_pow2` (a literal table up to the widest type, and at least 1 for every
-    argument), `c_wrap(x, m)` (`x % m` for `m = 2^N`), and `c_shr` (floor division by `c_pow2(n)`).
+11. **The prelude** contains only functions with bodies and no postconditions: no domains, no axioms, no
+    bodyless functions. `c_div` and `c_rem` (C's truncating division and remainder for signed operands, four
+    explicit sign cases over Viper's Euclidean operators, total at a zero divisor), `c_udiv` and `c_urem` (the
+    unsigned forms; a single form built on an absolute value was not provable by Z3 for unsigned operands, M3-4
+    spikes), `c_pow2` (a literal table up to the widest type, and at least 1 for every argument), `c_wrap(x, m)`
+    (`x % m` for `m = 2^N`), and `c_shr` (floor division by `c_pow2(n)`). Every obligation is emitted as one
+    atomic condition, since Silicon reports each conjunct of a failing `&&` as its own error.
 12. **Rejected in M3**, each with a diagnostic at the C/C++ line and a test (invariant 3), and each an M7
     inventory entry:
     - statements: `break`, `continue` (in the IL, compiler-generated `goto`s: every `goto` is rejected),

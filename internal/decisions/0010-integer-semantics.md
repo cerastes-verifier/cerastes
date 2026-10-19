@@ -113,7 +113,8 @@ always the stricter or the target's, so that a `.c` test means the same in `c23`
     - So soundness does not depend on EDG's diagnostics. Verify mode **suppresses** the front-end warnings the
       verifier reports itself, with a category and a line (`#61` integer overflow, `#62`/`#63` shift counts,
       `#39`/`#179` division and remainder by zero, `#68`/`#69` sign change and truncation, `#940` missing
-      return), so that a test or a user sees each problem once. They are not promoted to errors: `#68`/`#69`
+      return), so that a test or a user sees each problem once (0011 item 7 lists the other verify-mode
+      suppression, `#2803`). They are not promoted to errors: `#68`/`#69`
       also fire for conversions to unsigned types, which item 5 defines, and `#61` fires falsely on some
       `__int128` arithmetic. A `#pragma diag_*` in the source therefore cannot hide a problem from the
       verifier; at most it turns a warning into an error, which only rejects the program (fails closed). No

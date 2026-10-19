@@ -267,6 +267,7 @@ There is deliberately no user-facing `assume`.
 - `return`.
 - Calls to annotated functions, verified modularly against their contracts.
 - `check`.
+- Termination (owner, 2026-10-16): `decreases` measures on loops and recursive functions; results are total correctness (decision 0013).
 - Decision records:
   - Signed overflow is a verification error.
   - Unsigned arithmetic is modular.

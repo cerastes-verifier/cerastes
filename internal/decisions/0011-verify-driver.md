@@ -19,13 +19,27 @@ Decision 0002 fixed the integration: EDG's front end compiled into our binary, w
 2. **Command line** (an allow-list; no EDG option passes through, so `--diag_suppress`, `--no_code_gen` and the
    like cannot reach the front end):
    - `cerastes verify <file> [options]`, one source file per run;
-   - `-I<dir>` / `-I <dir>`; `-D<name>[=<value>]`; `-U<name>`. Defining or undefining `__CERASTES__` is refused
-     (0006 item 10), and so are the names R4c protects (`__has_cpp_attribute`, `__has_c_attribute`,
-     `cerastes`, `requires`, `CERASTES_H`, `CERASTES_*`);
+   - `-I<dir>` / `-I <dir>`; `-D<name>[=<value>]`. **`-U` is refused**, and `-D` is refused for (the macro
+     name is trimmed before comparing, as EDG trims it):
+     - any reserved identifier (`__x`, `_X`) and `defined`: this covers `__CERASTES__` (0006 item 10),
+       `__cplusplus`, `__STDC_VERSION__`, `__has_cpp_attribute`, `__has_c_attribute`, `__clang__`, `__EDG__`,
+       `__FILE__`, `__LINE__` and every other predefined macro — changing one is undefined behaviour in both
+       standards, and `-U__cplusplus` made `<cerastes.h>` drop every contract (M3-3 audit);
+     - the cerastes names: `cerastes`, the attribute names (`requires`, `ensures`, `invariant`, `check`,
+       `fold`, `unfold`, `predicate`, `pure`, `decreases`), the spec-function names (`old`, `owns`, `reads`, `forall`,
+       `owns_range`), `CERASTES_H` and every `CERASTES_*` (`-Densures=requires` turned postconditions into
+       preconditions, M3-3 audit);
+     - a name that is not an identifier.
+
+     The same definitions and undefinitions written in the source are rejected by the back end
+     (`annotation_macro_changed`, decision 0008), and `<cerastes.h>` fails closed under the cerastes front end
+     when its attributes are not available;
    - `--std=c++20` or `--std=c23` (default: `c23` for `.c`, `c++20` otherwise). GNU emulation and C before
      C23 stay refused (owner, M2 question 4);
    - `--keep-vpr` writes `<stem>.vpr` and `<stem>.vpr.map` into the current directory; `--keep-vpr=<path>`
-     writes `<path>` and `<path>.map`;
+     writes `<path>` and `<path>.map`; a keep path that names the source file (or any existing non-`.vpr`
+     input) is refused;
+   - the source file must not be a system file (item 4): verifying a system header is refused (exit 2);
    - `--timeout=<seconds>` (default 300): wall-clock limit for Silicon; reaching it is a tool failure;
    - `--help`, `--version`.
 3. **Tool locations** (the Java 17 runtime, `silicon.jar`, the pinned Z3, the system include directories, the
@@ -39,7 +53,8 @@ Decision 0002 fixed the integration: EDG's front end compiled into our binary, w
    `#pragma clang system_header` in user code cannot exempt it.
    - The path compared is the file's canonical physical path (`realpath`, so `..` and symbolic links are
      resolved), compared with the canonical system directories component by component (M3-D audit: EDG
-     records `#include "<sdk>/usr/include/../../…/evil.h"` verbatim).
+     records `#include "<sdk>/usr/include/../../…/evil.h"` verbatim). A file whose path cannot be resolved is a
+     verified file (fail closed), never a system file.
    - `#line` directives and linemarkers in a verified file are rejected (`line_directive_in_verify`): they
      give later lines a presumed file name, which could name a system file.
    - Directories given with `-I`, and `/usr/local/include` (writable, first in the scraped list), are user
@@ -57,7 +72,9 @@ Decision 0002 fixed the integration: EDG's front end compiled into our binary, w
    verifies it; if it is in a system file, nothing ever verifies it, and its `trusted-contract` tag in the
    emitted Viper says "trusted, never verified". The contract manifest that would check consistency across
    units is deferred (handoff §6). The well-formedness of every contract used in the unit (0010 item 11), trusted
-   ones included, is checked here.
+   ones included, is checked here. Trusted contracts include termination (0013 item 5): a recursion cycle through a
+   function defined in another unit is not detected by a single-unit run, and the success line and the Verifying
+   page say so.
 7. **Verify-mode checks** besides the encoder's allow-lists (0012):
    - an attribute EDG does not recognize, in a verified file, is an error (`unrecognized_attribute`), not
      EDG's warning #2803 (0007 item 8). `cerastes-fe` keeps the warning;
@@ -69,23 +86,37 @@ Decision 0002 fixed the integration: EDG's front end compiled into our binary, w
      `cleanup(…)` and others, and an assumption that does not hold is undefined behaviour). In a verified file,
      an attribute other than a `cerastes::` one is accepted only if it is one of `maybe_unused`, `nodiscard`,
      `deprecated`, `likely` and `unlikely`, or the GNU spellings `unused`, `warn_unused_result` and
-     `deprecated`; any other is rejected (`unsupported_attribute`), on any entity, statement or type;
+     `deprecated`; any other is rejected (`unsupported_attribute`), on any entity, statement or type (types
+     include typedefs: `typedef int __attribute__((x)) t;` puts the attribute on the type). In a few positions
+     EDG records an attribute nowhere and gives it no effect (`int [[gnu::x]] v`, an attribute-declaration
+     `[[gnu::x]];`, a namespace's attributes, a cast's type, an alias declaration's attributes, M3 audit); there
+     cerastes cannot see it, and since EDG ignores it, it changes nothing that is verified;
    - a function declared `[[noreturn]]`/`_Noreturn` is rejected (returning from it is undefined behaviour);
    - `requires` on `main` is rejected (`contract_on_main`): nothing calls `main`, so its precondition would be
      assumed and never checked;
-   - the front-end warnings of 0010 item 12 are suppressed (the verifier reports those problems itself);
+   - the front-end warnings of 0010 item 12 are suppressed (the verifier reports those problems itself), and so
+     is EDG's warning #2803 for an unrecognized attribute, which verify mode reports as the error
+     `unrecognized_attribute`;
+   - EDG runs with `--display_error_number` and `--no_wrap_diagnostics`, and writes its diagnostics to a private
+     file (`--error_output`) that the driver copies to standard error; a diagnostic `internal error #…` there
+     makes the run exit 3 (item 8);
    - all of M2's annotation checks run as in `cerastes-fe`.
 8. **Exit status:** 0 verified; 1 verification errors; 2 the program is not accepted (a front-end error, a
-   cerastes rejection, a refused option); 3 a tool failure (Silicon crashed, timed out, gave no verdict, or
-   reported an error the position map does not explain).
+   cerastes rejection, a refused option, a missing source file); 3 a tool failure (Silicon crashed, timed out,
+   gave no verdict, or reported an error the position map does not explain; or the front end itself aborted
+   with an internal error, which the driver catches and reports as exit 3).
 9. **Output.**
    - A verification error: `<file>:<line>: error: <category>: <message>`, then any `<file>:<line>: note: …`
      lines (for a postcondition, the clause; for a precondition, the callee's clause). `<file>` is the path
      as given on the command line, or the header's path.
    - Front-end errors and rejections keep EDG's format (`"file", line N: error: …`), as in M2.
    - Success: `<file>: verified (<n> functions; one translation unit: assumes that functions defined elsewhere
-     satisfy the contracts declared here)`.
-   - Errors are sorted by file, line and category; nothing is printed twice.
+     satisfy the contracts declared here)`, with `1 function` when `n` is 1. `n` counts the function bodies
+     verified (trusted contracts are not counted); with `n = 0` there is nothing to verify, and the driver says
+     so on standard error and exits 2 (never a vacuous `verified`).
+   - A run with a self-test hook (item 13) never prints the verified line.
+   - Errors are sorted by file (the printed path, compared byte by byte), then line, then category (byte
+     order); nothing is printed twice.
    - **Streams.** The verdict line and verification errors and notes go to standard output. Front-end
      diagnostics (EDG's and cerastes's rejections) go to standard error, always with their error numbers
      (`#<n>`, `#cerastes-<tag>`: the driver turns EDG's `--display_error_number` on), followed by EDG's summary
@@ -109,6 +140,7 @@ Decision 0002 fixed the integration: EDG's front end compiled into our binary, w
     | `shift` | a shift amount or a left-shifted value is out of range (0010 item 8) | the operator |
     | `conversion` | a conversion to a signed type may not fit (0010 item 5) | the conversion (the operator, initializer, argument or `return`) |
     | `missing-return` | a non-`void` function may reach its end without `return` | the closing brace |
+    | `termination` | a termination measure may be negative or may not decrease (decision 0013) | the loop's `decreases` (loops), or the recursive call with a note at the callee's `decreases` |
 
 11. **Silicon** is run as `java -Xss128m -jar silicon.jar --z3Exe <z3> --numberOfErrorsToReport 0 <file.vpr>`
     (the same command the harness uses for `.vpr` tests), from a private temporary directory. Its verdict is
@@ -116,7 +148,11 @@ Decision 0002 fixed the integration: EDG's front end compiled into our binary, w
     errors" with exit 1 and N entries). Each error's Viper position is looked up in the position map, which
     records for every emitted check its line, the Viper error kind it can produce, the category and the C++
     file, line and message. An error that is not in the map, or not of the expected kind, is exit 3, never
-    dropped. The *backstops* (Silicon's own check of a method precondition at a call, and of a method
+    dropped. An error matches an entry only if its Viper id **and its reason** are the ones the entry expects
+    (an `assert.failed` whose reason is not `assertion.false` is exit 3). The output is accepted as a verdict
+    only if it consists of Silicon's version banner and the verdict with its error list, nothing else. A
+    signal (SIGINT, SIGTERM) while Silicon runs kills Silicon's process group, removes the temporary
+    directory and exits 3. The *backstops* (Silicon's own check of a method precondition at a call, and of a method
     postcondition at its end) are implied by the encoder's asserts, so if one fires the encoder has missed a
     check: they are mapped to exit 3 with a message naming the C/C++ line.
 12. **The position map** is written next to the `.vpr` with `--keep-vpr`; its format is in
