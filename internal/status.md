@@ -4,6 +4,88 @@ Session handoff log, newest first. Each entry says what is done, what is not,
 any surprises, the decision records added and the exact first step for the
 next session.
 
+## M2 re-look items and M3 — scalar encoder and driver (2026-10-16 to 2026-10-19): done; pushes and the pin move pending
+
+Read `internal/handoff.md` next (§2 owner steps, §4 the EDG chain, §9 questions).
+
+**Owner decisions this session (2026-10-16)**
+- Narrowing to a signed type that does not fit is an error, implicit or explicit; to unsigned it wraps (0010).
+- Annotation arithmetic has its C/C++ meaning (0010 item 11).
+- `cerastes verify` verifies the primary file and user headers; system files only by contract, decided by
+  canonical path (0011).
+- Termination is checked: `decreases` on loops and recursive functions, total correctness (0013).
+- `constexpr` stays allowed on `predicate`/`pure`; compile-time uses are rejected (IL pass + fork commit P).
+- Lambdas in template contracts can name `T`, member templates included (EDG 0020 + series L, M).
+- Mutation acceptance: safe-direction contract mutants (stronger `requires`, weaker `ensures`/`check`) form their
+  own counted bucket; the rest is killed or listed as reviewed equivalents.
+- CI deferred to its own session; full EDG suites run on the x86-64 box by the session; no Claude co-author
+  trailer on any commit; approved expectation changes: `cerastes_h.cpp` rewritten (R4e), 12 lines added to
+  `tests/il/m3/r4a_constant_contexts.cpp`, the R1 test moves (applied with the pin move, next session).
+
+**Done**
+- **Session start:** upstream `307002eae6` merged into the fork (`0bcd9bf28a`), pinned (`7aec17d`), box-checked.
+- **Re-look items** (handoff §3): the walker oracle committed and in `check.sh`; R4a–R4e and the R2 findings
+  closed on the cerastes side (`annotation_macro_changed`, `cerastes_header_in_namespace`,
+  `in_class_specialization_contract`, `spec_marker_on_special_member`, `spec_marker_in_system_file`, more
+  `spec_call_in_code` and `old_outside_ensures`); `RECORD_MACROS_IN_IL=1`; `<cerastes.h>` fails closed; brand
+  files; records.
+- **M3:** decision records 0010–0013 and `internal/encoding.md`; `src/vir` and `src/viper` (VIR, typing, lowering,
+  the prelude with bodies only, the emitter and position map, a 155-case Silicon-checked self-test); the IL → VIR
+  encoder (`src/backend/encode.cpp`); `build/cerastes verify` (allow-listed options, tool paths fixed at
+  configure time, Silicon in a process group with timeout and signal cleanup, a strict verdict parser, mapping by
+  line + id + reason, exit codes 0–3, `--selftest` with 81 checks, self-test hooks that can never verify);
+  eleven error categories; `scripts/lint_viper.py`, `scripts/mutate.py`, the harness for verify tests (streams,
+  categories, `@ file:L` for headers, helper headers, dual modes, error twins, a `build/vpr` lock); `tests/scalar`
+  (82 positives, 175 negatives, 6 helper headers); user docs: Verifying a program, Integer semantics, Error
+  messages (one section per category), the Installation walkthrough, Annotations updated (`decreases`, R4 rules).
+- **EDG:** bug 0020 (three audit rounds), series L, M, N, P built, audited and box-checked on temp branches
+  (handoff §4); bug files 0020 and 0021.
+
+**Acceptance**
+- `scripts/check.sh` green (821 s on a quiet machine): self-tests 931 + 68 + 107 + 117; tests 2043 passed,
+  0 failed, 1 skipped (native-ok: Apple clang 516, GCC 516); 412 emitted `.vpr` lint clean; VIR self-test 155/155;
+  walker oracle 131 goldens, 0 failed; docs 0 problems.
+- `run_tests.py --count-error-twins`: 82 (every positive has an `error` twin in each of its modes).
+- Mutation run (test-mutator, full `tests/scalar`): 892 killed, 260 safe-direction, 125 listed equivalents,
+  0 unexplained survivors, 19 stillborn; the 125 equivalents reviewed and accepted by the Opus auditor
+  (2026-10-19), who also re-checked every bucket entry densely (none mislabelled).
+- `build/cerastes verify doc/.../verifying/midpoint.cpp --keep-vpr=…`: exit 0, `.vpr` and `.map` written, lint
+  clean; `…/midpoint_overflow.cpp`: exit 1, `midpoint_overflow.cpp:10: error: overflow: …`.
+- Every encoder and driver change audited (Opus): records twice, harness three rounds, VIR libraries, driver,
+  encoder, the delta with termination; every blocking finding fixed.
+
+**Not done / deferred**
+- **Merge the EDG chain and move the pin** (next session's first step, handoff §4): fast-forward the fork's
+  `cerastes` to P `b9519388ea` (the auditor approved the merge; the box's full suite matches at the tip except the
+  known `cwg1835`/`cwg2881`), pin it, register `RAF_NO_CONSTANT_EVALUATION` for `predicate`/`pure`, add the 5
+  remaining expect lines to `r4a_constant_contexts.cpp`, apply the approved R1 test moves (`forall` over `T`),
+  update 0006 item 9, 0007, the Annotations page and the upstream draft.
+- **Branch `0020` alone fails its own new test on Linux** (`GH-lambda-template-param-qualified`, both modes, FAIL
+  — it passes at the chain tip): explain before the owner files 0020 upstream.
+- **Tooling should-fix items from the last audit:** `mutate.py`'s direction classifier decides on a grid of plain
+  integers (restrict the bucket to linear signed clauses and treat `==`/`!=` flips as unknown, or use Z3 with C
+  types); the bucket ignores callers in the file; `mutate.py --list` starts a run; `lint_viper.py` accepts
+  `decreases *` and conditional `decreases` (the emitter produces neither).
+- Known gaps in handoff §5 item 2 (cross-unit termination; first-declaration marker rule; attributes EDG drops).
+- CI (its own session); the contract manifest.
+
+**Surprises**
+- The audits found blocking holes at every stage, and several were unsound in subtle ways: unsequenced calls behind
+  a non-returning callee, `[[assume]]`, `-U__cplusplus` and `#define ensures requires` silently dropping or turning
+  contracts, bodies attached to system templates skipped, a wrong overload silently chosen by EDG fix 0020 (twice).
+- C++ forward progress made partial correctness unsound for C++: hence termination in M3.
+- `edg_x86_64_cp` expectation files are overrides; the "known cp differences" of earlier handoffs were an artefact.
+- Fork commit J's fail-closed rule had leaked to ordinary attributes since M2 (fixed in L).
+- Concurrent harness runs raced on `build/vpr` (now locked); 14 stale background shells (now a standing rule).
+
+**Decision records added:** 0010-integer-semantics, 0011-verify-driver, 0012-scalar-encoding, 0013-termination;
+amended 0002 (`RECORD_MACROS_IN_IL`), 0006 (R4 rules), 0008 (fail-closed header, protected names).
+
+**First step for the next session.** Confirm the owner's pushes (handoff §2). Then, in `~/Documents/compiler` (the
+owner may have another branch checked out: never check out in the main tree), fast-forward `cerastes` to
+`b9519388ea` (`git fetch . b9519388ea:cerastes`), move the pin, rebuild, register `RAF_NO_CONSTANT_EVALUATION`,
+run `check.sh`, and do the C6 follow-ups listed above; then the CI session.
+
 ## EDG bugs 0003–0007 (2026-10-15): fixed; branches ready for the owner's PRs
 
 **Done.** Each bug has a fix branch in `~/Documents/compiler`. Each is based
