@@ -7,8 +7,8 @@ Every test file starts with a header of `//` comment lines carrying its
 expectations (grammar in tests/README.md):
 
     // expect: verified
-    // expect: error <category>[:<reason>] @ L<line>     (one line per error)
-    // expect: rejected <tag>
+    // expect: error <category> @ L<line>                (one line per error; .vpr: <category>[:<reason>])
+    // expect: rejected <diag> @ L<line>                 (one line per diagnostic; C and C++ only)
     // expect: frontend-ok
     // expect: frontend-error <diag> @ L<line>           (one line per diagnostic)
     // expect: frontend-warning <diag> @ L<line>
@@ -26,8 +26,20 @@ walker (scripts/cerastes-fe.sh <mode option> --cerastes_walk <file>, from the
 repository root), and its output must equal the golden file byte for byte:
 stdout, then, if stderr is not empty, a line `--- stderr ---` and stderr.
 The golden file is `<test>.golden` for a test with one mode and
-`<test>.<mode>.golden` for each mode of a test with several.  The other
-expectations need the cerastes driver, which lands in M3.
+`<test>.<mode>.golden` for each mode of a test with several.
+`verified`, `error` and `rejected` tests (C and C++) run `cerastes verify`
+(decision 0011) once per mode, from the repository root:
+
+    build/cerastes verify <file> --std=<c++20|c23> --keep-vpr=build/vpr/<file>.<mode>.vpr
+
+Exit status 0 means verified (a `<file>: verified (...)` line), 1 means
+verification errors (`<file>:<line>: error: <category>: <message>` lines, each
+possibly followed by `note:` lines), 2 means the program was not accepted (EDG
+format diagnostics on stderr), 3 or anything else a tool failure, which fails
+whatever the test expects (so does a timeout or a crash).  The expectation must
+match exactly, as for `.vpr` tests and for `frontend-error` tests; the
+categories are DRIVER_CATEGORIES.  Each run must leave the `--keep-vpr` file and
+its `.map`; the harness writes `build/vpr/MANIFEST` for scripts/lint_viper.py.
 
 `frontend-error`/`frontend-warning` tests run the cerastes front end with
 `--brief_diagnostics --display_error_number --no_colors` and compare the
@@ -88,13 +100,17 @@ The exit status is 1 if any test fails and 2 on usage or environment errors
 from __future__ import annotations
 
 import argparse
+import atexit
 import concurrent.futures
 import dataclasses
+import datetime
 import difflib
 import functools
+import hashlib
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -107,7 +123,8 @@ GOLDEN_SUFFIX = ".golden"
 # Suffixes (lower case) that mark a file as C/C++/Viper source.  A file under a
 # scanned directory with one of these that is not in TEST_SUFFIXES (exactly,
 # so `.CPP` and `.C` count) would silently never run: an error instead.
-SOURCE_LIKE_SUFFIXES = {".c", ".cc", ".cp", ".cpp", ".cxx", ".c++", ".h", ".hh", ".hpp",
+SOURCE_LIKE_SUFFIXES = {".c", ".cc", ".cp", ".cpp", ".cxx", ".c++", ".h", ".hh", ".hpp", ".inc",
+                        ".def", ".tpp", ".txx", ".ixx", ".cppm", ".tbl",
                         ".hxx", ".h++", ".ipp", ".inl", ".tcc", ".i", ".ii", ".sil", ".vpr"}
 SKIP_MARKER = ".harness-skip"
 # The only directories where a skip marker is permitted, relative to ROOT.  A
@@ -120,7 +137,10 @@ SKIP_ALLOWED = [Path("tests/differential/verifast")]
 # them, so the harness self-test pins this constant and a run without paths.
 DEFAULT_PATHS = (Path("tests"), Path("doc/modules/ROOT/examples"))
 SILICON_TIMEOUT_S = 600
-FRONTEND_TIMEOUT_S = 120
+# The largest front-end test (the libc++ headers in the cerastes configuration) takes about 70 s of CPU, which a
+# loaded machine stretches past 120 s; a hang still fails, after ten minutes.
+FRONTEND_TIMEOUT_S = 600
+VERIFY_TIMEOUT_S = 600
 NATIVE_TIMEOUT_S = 300
 
 # The command that runs the cerastes front end; the mode option, the walker
@@ -128,6 +148,20 @@ NATIVE_TIMEOUT_S = 300
 # fake front end.
 FE_COMMAND = [str(ROOT / "scripts" / "cerastes-fe.sh")]
 WALK_OPTION = "--cerastes_walk"
+# The command that runs `cerastes verify` (decision 0011); `verify`, the test
+# path, `--std=<mode>` and `--keep-vpr=<path>` are appended.  None: the program
+# named by CERASTES_VERIFY in build/env.sh (written by scripts/bootstrap.sh).
+# The self-test replaces it with a fake verifier.
+VERIFY_COMMAND: list[str] | None = None
+# Where `--keep-vpr` output goes: <VPR_DIR>/<test path>.<mode>.vpr, and the
+# `.map` next to it.  The directory is cleared by a run that selects a test
+# that must produce Viper, and MANIFEST lists the files that run expects
+# (one path relative to VPR_DIR per line), for scripts/lint_viper.py.
+VPR_DIR = ROOT / "build" / "vpr"
+VPR_MANIFEST = "MANIFEST"
+# The first line of the manifest: `# run-id: <UTC time>-<hash of the file list>`, so
+# that scripts/lint_viper.py can tell the files of this run from stale ones.
+RUN_ID_PREFIX = "# run-id: "
 STDERR_MARKER = "--- stderr ---"
 # The walker's last stdout line.  Its presence proves the walk ran to the end,
 # so a run that printed only diagnostics cannot match a golden by accident.
@@ -141,6 +175,8 @@ MAX_PROBLEM_LINES = 60
 # Language modes and the EDG options that select them.  The first mode listed
 # for a suffix is its default.
 MODE_OPTIONS = {"c++20": "--c++20", "c23": "--c23"}
+# The same modes as `cerastes verify` spells them (decision 0011 item 2).
+VERIFY_STD_OPTIONS = {"c++20": "--std=c++20", "c23": "--std=c23"}
 DEFAULT_MODES = {".cpp": ["c++20"], ".c": ["c23"]}
 
 
@@ -161,10 +197,12 @@ class ExpectedError:
     category: str
     reason: str | None  # None: any reason
     line: int
+    file: str | None = None  # a repository-relative header; None: the test file
 
     def __str__(self) -> str:
         reason = f":{self.reason}" if self.reason else ""
-        return f"{self.category}{reason} @ L{self.line}"
+        where = f"{self.file}:" if self.file else ""
+        return f"{self.category}{reason} @ {where}L{self.line}"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -173,18 +211,21 @@ class ExpectedDiag:
     severity: str  # "error" or "warning"
     tag: str  # an EDG diagnostic tag, or `cerastes-<tag>`
     line: int
+    file: str | None = None  # a repository-relative header (rejected tests); None: the test file
 
     def __str__(self) -> str:
-        return f"{self.tag} @ L{self.line}"
+        where = f"{self.file}:" if self.file else ""
+        return f"{self.tag} @ {where}L{self.line}"
 
 
 @dataclasses.dataclass
 class Expectation:
     # "verified", "error", "rejected", "frontend-ok", "frontend-diag" (any
-    # frontend-error/-warning lines) or "golden"
+    # frontend-error/-warning lines), "frontend-refused" or "golden".  The
+    # diagnostics of a "rejected" test are in `diags` (all errors), as for a
+    # frontend-error test.
     kind: str
     errors: list[ExpectedError]
-    rejected: str | None
     modes: list[str]
     diags: list[ExpectedDiag] = dataclasses.field(default_factory=list)
     native_ok: bool = False
@@ -192,6 +233,7 @@ class Expectation:
     twin_exempt: str | None = None  # the reason, for a positive test with no must-fail twin
     refused: str | None = None  # frontend-refused: a substring of the refusal message
     fe_options: list[str] = dataclasses.field(default_factory=list)  # cerastes-fe-options
+    c_only: str | None = None  # `// c-only: <reason>`: a .c test that does not run in c++20
 
 
 # Kinds that stand alone: each must be the only outcome line of its test
@@ -203,28 +245,74 @@ _MODE_RE = re.compile(r"^//\s*mode:\s*(.*?)\s*$")
 _TWIN_RE = re.compile(r"^//\s*twin:\s*(.*?)\s*$")
 _TWIN_EXEMPT_RE = re.compile(r"^//\s*twin-exempt:\s*(.*?)\s*$")
 _FE_OPTIONS_RE = re.compile(r"^//\s*cerastes-fe-options:\s*(.*?)\s*$")
+_C_ONLY_RE = re.compile(r"^//\s*c-only:\s*(.*?)\s*$")
 _REFUSED_FE_RE = re.compile(r"^frontend-refused\s+(?P<substring>\S.*)$")
+# `@ L<n>` is a line of the test file; `@ <repository-relative file>:L<n>` a line of a
+# user header the test includes (decision 0011 item 4: headers are verified too).
+_AT = (r"\s+@\s+(?:(?P<file>[A-Za-z0-9_][A-Za-z0-9_./+-]*):)?L(?P<line>[1-9][0-9]*)$")
 _ERROR_RE = re.compile(
-    r"^error\s+(?P<category>[a-z][a-z0-9-]*)(?::(?P<reason>[a-z][a-z0-9.]*))?"
-    r"\s+@\s+L(?P<line>[1-9][0-9]*)$")
-_REJECTED_RE = re.compile(r"^rejected\s+(?P<tag>[a-z][a-z0-9-]*)$")
+    r"^error\s+(?P<category>[a-z][a-z0-9-]*)(?::(?P<reason>[a-z][a-z0-9.]*))?" + _AT)
 # An EDG tag is [A-Za-z0-9_]+ (some start with a digit, some have capitals);
 # a cerastes back-end diagnostic is `cerastes-<tag>`.  Whether the tag exists is
 # checked against the tables by validate_diag_tags (it needs the build).
 _DIAG_TAG = r"(?:cerastes-[a-z0-9_]+(?:-[a-z0-9_]+)*|[A-Za-z0-9_]+)"
+_REJECTED_RE = re.compile(r"^rejected\s+(?P<tag>" + _DIAG_TAG + r")" + _AT)
 _DIAG_RE = re.compile(r"^frontend-(?P<severity>error|warning)\s+(?P<tag>" + _DIAG_TAG
                       + r")\s+@\s+L(?P<line>[1-9][0-9]*)$")
 CERASTES_TAG_PREFIX = "cerastes-"
+
+# The categories of `// expect: error <category> @ L<n>` in a C or C++ test:
+# the table of decision 0011 item 10, which the driver, this harness, the
+# error-messages page and the tests share.  Adding one changes all four (a
+# self-test compares this set with the decision record and tests/README.md).
+DRIVER_CATEGORIES = frozenset({
+    "precondition", "postcondition", "check", "invariant-entry", "invariant-preserved",
+    "overflow", "division-by-zero", "shift", "conversion", "missing-return", "termination"})
+# The outcomes whose test runs `cerastes verify` (when it is a C or C++ file).
+VERIFY_KINDS = ("verified", "error", "rejected")
 
 # Outcomes that count as "positive" for the native-ok policy and for twins.
 POSITIVE_KINDS = ("golden", "verified")
 # Positive tests under these directories (relative to ROOT), and any positive
 # test that includes <cerastes.h>, must carry `// expect: native-ok`.
 NATIVE_POLICY_DIRS = (Path("tests/annotations"),
+                      Path("tests/scalar"),
                       Path("doc/modules/ROOT/examples/annotations"),
-                      Path("doc/modules/ROOT/examples/ordinary-compilers"))
+                      Path("doc/modules/ROOT/examples/ordinary-compilers"),
+                      # the examples of the M3 pages (verifying, error messages, integer
+                      # semantics): positives build with ordinary compilers too
+                      Path("doc/modules/ROOT/examples/verifying"),
+                      Path("doc/modules/ROOT/examples/error-messages"),
+                      Path("doc/modules/ROOT/examples/integer-semantics"))
 NEGATIVE_DIR = Path("tests/annotations/negative")
+SCALAR_NEGATIVE_DIR = Path("tests/scalar/negative")
+# Every directory of must-fail twins; a test under one needs `twin:` and must
+# expect an error.
+NEGATIVE_DIRS = (NEGATIVE_DIR, SCALAR_NEGATIVE_DIR)
+# The twin rule of invariant 2 in the other direction, per area: every
+# positive test under the first directory (outside the second) is the `twin:`
+# of a test under the second, or says why not with `twin-exempt:`.
+TWIN_AREAS = ((Path("tests/annotations"), NEGATIVE_DIR),
+              (Path("tests/scalar"), SCALAR_NEGATIVE_DIR))
+# In these areas a positive test needs a twin that expects an `error` (a runtime
+# verification failure of the encoding rule it exercises): a `rejected` twin shows
+# that a construct is refused, not that the rule is checked, so it does not count.
+ERROR_TWIN_AREAS = (Path("tests/scalar"),)
 _CERASTES_H_RE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*[<"]cerastes\.h[>"]', re.MULTILINE)
+
+
+def header_file(file: str | None, lineno: int, suffix: str) -> str | None:
+    """The file of `@ <file>:L<n>` after its checks: C and C++ tests only, a
+    repository-relative path without `..` or `.` components, normalized."""
+    if file is None:
+        return None
+    if suffix == ".vpr":
+        raise HeaderError(f"L{lineno}: `@ <file>:L<n>` does not apply to .vpr files")
+    parts = file.split("/")
+    if "" in parts or "." in parts or ".." in parts or file != os.path.normpath(file):
+        raise HeaderError(f"L{lineno}: `{file}` must be a normalized repository-relative path "
+                          "(no `..`, `.` or empty components)")
+    return file
 
 
 def parse_header(text: str, suffix: str) -> Expectation:
@@ -238,6 +326,7 @@ def parse_header(text: str, suffix: str) -> Expectation:
     twins: list[tuple[int, str]] = []
     exempts: list[tuple[int, str]] = []
     fe_options_lines: list[tuple[int, str]] = []
+    c_only_lines: list[tuple[int, str]] = []
     modes: list[str] = []
     in_header = True
     for lineno, raw in enumerate(text.splitlines(), start=1):
@@ -253,11 +342,14 @@ def parse_header(text: str, suffix: str) -> Expectation:
                 exempts.append((lineno, m.group(1)))
             elif m := _FE_OPTIONS_RE.match(line):
                 fe_options_lines.append((lineno, m.group(1)))
+            elif m := _C_ONLY_RE.match(line):
+                c_only_lines.append((lineno, m.group(1)))
             continue
         in_header = False
         if (_EXPECT_RE.match(line) or _MODE_RE.match(line) or _TWIN_RE.match(line)
-                or _TWIN_EXEMPT_RE.match(line) or _FE_OPTIONS_RE.match(line)):
-            raise HeaderError(f"L{lineno}: expect:/mode:/twin:/twin-exempt:/"
+                or _TWIN_EXEMPT_RE.match(line) or _FE_OPTIONS_RE.match(line)
+                or _C_ONLY_RE.match(line)):
+            raise HeaderError(f"L{lineno}: expect:/mode:/twin:/twin-exempt:/c-only:/"
                               "cerastes-fe-options: lines must be in the leading comment block")
 
     if not expects:
@@ -266,7 +358,6 @@ def parse_header(text: str, suffix: str) -> Expectation:
     errors: list[ExpectedError] = []
     diags: list[ExpectedDiag] = []
     kinds: set[str] = set()
-    rejected = None
     refused = None
     native_ok = False
     for lineno, body in expects:
@@ -289,7 +380,16 @@ def parse_header(text: str, suffix: str) -> Expectation:
                 if reason is not None and reason not in VIPER_REASONS:
                     raise HeaderError(f"L{lineno}: unknown Viper error reason "
                                       f"`{reason}`")
-            errors.append(ExpectedError(category, reason, int(m.group("line"))))
+            else:
+                if category not in DRIVER_CATEGORIES:
+                    raise HeaderError(
+                        f"L{lineno}: unknown error category `{category}` for a C or C++ "
+                        "test (known: " + ", ".join(sorted(DRIVER_CATEGORIES)) + ")")
+                if reason is not None:
+                    raise HeaderError(f"L{lineno}: `:{reason}` applies to .vpr tests only; "
+                                      "the driver's errors have a category, not a Viper reason")
+            errors.append(ExpectedError(category, reason, int(m.group("line")),
+                                        header_file(m.group("file"), lineno, suffix)))
         elif m := _DIAG_RE.match(body):
             kinds.add("frontend-diag")
             diags.append(ExpectedDiag(m.group("severity"), m.group("tag"),
@@ -301,9 +401,8 @@ def parse_header(text: str, suffix: str) -> Expectation:
             refused = m.group("substring")
         elif m := _REJECTED_RE.match(body):
             kinds.add("rejected")
-            if rejected is not None:
-                raise HeaderError(f"L{lineno}: more than one `rejected` line")
-            rejected = m.group("tag")
+            diags.append(ExpectedDiag("error", m.group("tag"), int(m.group("line")),
+                                      header_file(m.group("file"), lineno, suffix)))
         else:
             raise HeaderError(f"L{lineno}: cannot parse `expect: {body}`")
     if not kinds:
@@ -373,6 +472,19 @@ def parse_header(text: str, suffix: str) -> Expectation:
             raise HeaderError(f"L{lineno}: `twin-exempt:` applies to positive tests only "
                               "(" + " or ".join(POSITIVE_KINDS) + ")")
 
+    c_only = None
+    if c_only_lines:
+        lineno, c_only = c_only_lines[0]
+        if len(c_only_lines) != 1:
+            raise HeaderError(f"L{c_only_lines[1][0]}: more than one `c-only:` line")
+        if suffix != ".c":
+            raise HeaderError(f"L{lineno}: `c-only:` applies to .c files only")
+        if not c_only:
+            raise HeaderError(f"L{lineno}: `c-only:` needs a reason (why the test does not run "
+                              "in c++20)")
+        if "c++20" in modes:
+            raise HeaderError(f"L{lineno}: `c-only:` contradicts `mode:` listing c++20")
+
     if suffix == ".vpr":
         if modes:
             raise HeaderError("`mode:` does not apply to .vpr files")
@@ -386,8 +498,8 @@ def parse_header(text: str, suffix: str) -> Expectation:
         if len(set(modes)) != len(modes):
             raise HeaderError("a mode is listed twice")
         modes = [] if kind == "frontend-refused" else (modes or DEFAULT_MODES[suffix])
-    return Expectation(kind, errors, rejected, modes, diags, native_ok, twin, twin_exempt,
-                       refused, fe_options)
+    return Expectation(kind, errors, modes, diags, native_ok, twin, twin_exempt,
+                       refused, fe_options, c_only)
 
 
 def _under(path: Path, directory: Path) -> bool:
@@ -399,10 +511,25 @@ def _under(path: Path, directory: Path) -> bool:
     return True
 
 
+# `.c` tests under these directories run in both languages (c23 as C, c++20 as C++)
+# unless they carry `// c-only: <reason>`.
+DUAL_MODE_DIRS = (Path("tests/scalar"),
+                  Path("doc/modules/ROOT/examples/verifying"),
+                  Path("doc/modules/ROOT/examples/error-messages"),
+                  Path("doc/modules/ROOT/examples/integer-semantics"))
+
+
 def policy_problem(path: Path, text: str, exp: Expectation) -> str | None:
     """The native-ok policy: positive tests of the annotation layer, and every
     positive test that includes <cerastes.h>, must compile with ordinary
-    compilers (`// expect: native-ok`).  None when `path` complies."""
+    compilers (`// expect: native-ok`); `.c` tests of DUAL_MODE_DIRS run in both
+    modes or say why not.  None when `path` complies."""
+    if path.suffix == ".c" and exp.c_only is None and exp.kind != "frontend-refused":
+        for directory in DUAL_MODE_DIRS:
+            if _under(path, directory) and set(exp.modes) != {"c23", "c++20"}:
+                return (f"a .c test under {directory}/ must run in both modes "
+                        "(`// mode: c23, c++20`: the code is valid C and C++) or carry "
+                        "`// c-only: <reason>`")
     if exp.kind == "frontend-ok" and path.suffix != ".vpr":
         # stock cpfe does not define __CERASTES__, so the annotations in such a
         # test are not even parsed: it would pass for nothing
@@ -429,16 +556,13 @@ def expects_failure(exp: Expectation) -> bool:
             or (exp.kind == "frontend-diag" and any(d.severity == "error" for d in exp.diags)))
 
 
-def cross_file_problems() -> list[tuple[Path, str]]:
-    """The twin rule in the other direction (invariant 2): every positive test
-    under tests/annotations/ is named by the `twin:` of a test under
-    negative/, or says why not with `// twin-exempt: <reason>`.  Looks at the
-    whole tree, whatever was selected."""
-    base = ROOT / "tests" / "annotations"
-    if not base.is_dir():
-        return []
-    positives: list[Path] = []
-    named: set[Path] = set()
+def twin_scan(area: Path, negative_dir: Path):
+    """(positives, named) for an area: the positive tests that need a twin, with
+    their modes, and {positive path: [(kind, modes) of the tests under negative_dir
+    that name it]}."""
+    base = ROOT / area
+    positives: list[tuple[Path, list[str]]] = []
+    named: dict[Path, list[tuple[str, list[str]]]] = {}
     for f in sorted(base.rglob("*")):
         if f.suffix not in TEST_SUFFIXES or not f.is_file():
             continue
@@ -446,14 +570,66 @@ def cross_file_problems() -> list[tuple[Path, str]]:
             exp = parse_header(f.read_text(), f.suffix)
         except HeaderError:
             continue  # reported by its own header check
-        if _under(f, NEGATIVE_DIR):
+        if _under(f, negative_dir):
             if exp.twin:
-                named.add((ROOT / exp.twin).resolve())
+                named.setdefault((ROOT / exp.twin).resolve(), []).append((exp.kind, exp.modes))
         elif exp.kind in POSITIVE_KINDS and exp.twin_exempt is None:
-            positives.append(f)
-    return [(f, "a positive test under tests/annotations/ must be the `twin:` of a test under "
-                f"{NEGATIVE_DIR}/ (invariant 2), or carry `// twin-exempt: <reason>`")
-            for f in positives if f.resolve() not in named]
+            positives.append((f, exp.modes))
+    return positives, named
+
+
+def uncovered_modes(modes: list[str], twins: list[tuple[str, list[str]]]) -> list[str]:
+    """The modes of a positive test in which no `error` twin runs: an error twin
+    that runs in c23 only says nothing about the c++20 run of its positive."""
+    return [m for m in modes if not any(kind == "error" and m in tmodes for kind, tmodes in twins)]
+
+
+def cross_file_problems(areas: list[tuple[Path, Path]] | None = None
+                        ) -> list[tuple[Path, str]]:
+    """The twin rule in the other direction (invariant 2): every positive test
+    under tests/annotations/ (and under tests/scalar/) is named by the `twin:`
+    of a test under that area's negative/ directory, or says why not with
+    `// twin-exempt: <reason>`; in ERROR_TWIN_AREAS one of those twins expects an
+    `error` and, for each mode the positive runs in, one of them runs in that mode.
+    Looks at the whole tree of each area, whatever was selected; `areas`
+    (default: TWIN_AREAS) picks the areas to look at."""
+    problems: list[tuple[Path, str]] = []
+    for area, negative_dir in (TWIN_AREAS if areas is None else areas):
+        if not (ROOT / area).is_dir():
+            continue
+        positives, named = twin_scan(area, negative_dir)
+        need_error = area in ERROR_TWIN_AREAS
+        for f, modes in positives:
+            twins = named.get(f.resolve(), [])
+            if need_error:
+                missing = uncovered_modes(modes, twins)
+                if not missing:
+                    continue
+                if not twins:
+                    why = ""
+                elif not any(kind == "error" for kind, _ in twins):
+                    why = "; it has only a `rejected` twin"
+                else:
+                    why = ("; no `error` twin runs in " + ", ".join(missing)
+                           + " (a twin that runs in one mode says nothing about the other)")
+                problems.append((f, f"a positive test under {area}/ must be the `twin:` of a test "
+                                    f"under {negative_dir}/ that expects an `error` (a `rejected` "
+                                    "twin does not count) (invariant 2), or carry "
+                                    "`// twin-exempt: <reason>`" + why))
+            elif not twins:
+                problems.append((f, f"a positive test under {area}/ must be the `twin:` of a test "
+                                    f"under {negative_dir}/ (invariant 2), or carry "
+                                    "`// twin-exempt: <reason>`"))
+    return problems
+
+
+def count_error_twins(area: Path = Path("tests/scalar"),
+                      negative_dir: Path = SCALAR_NEGATIVE_DIR) -> int:
+    """The number of positive tests of `area` that have an `error` twin in each of
+    their modes: the pairs of the acceptance count (a `rejected` twin is not one)."""
+    positives, named = twin_scan(area, negative_dir)
+    return sum(1 for f, modes in positives
+               if not uncovered_modes(modes, named.get(f.resolve(), [])))
 
 
 # What would neutralise the ordinary-compiler check from inside the file: a
@@ -477,15 +653,15 @@ def native_neutralised(text: str) -> str | None:
 def twin_problem(path: Path, exp: Expectation) -> str | None:
     """The `twin:` rules: required under tests/annotations/negative/, and the
     twin must be an existing test outside it with a positive outcome."""
-    negative = _under(path, NEGATIVE_DIR)
-    if negative:
+    negative = next((d for d in NEGATIVE_DIRS if _under(path, d)), None)
+    if negative is not None:
         if not expects_failure(exp):
-            return (f"a test under {NEGATIVE_DIR}/ must expect at least one error "
+            return (f"a test under {negative}/ must expect at least one error "
                     "(`frontend-error`, `error` or `rejected`); `golden`, `verified`, "
                     "`frontend-ok` and warning-only tests are not must-fail tests")
     if exp.twin is None:
-        if negative:
-            return (f"a test under {NEGATIVE_DIR}/ needs `// twin: <path>` naming the "
+        if negative is not None:
+            return (f"a test under {negative}/ needs `// twin: <path>` naming the "
                     "positive test it was derived from")
         return None
     target = ROOT / exp.twin
@@ -493,8 +669,8 @@ def twin_problem(path: Path, exp: Expectation) -> str | None:
         return f"`twin: {exp.twin}` does not exist (a dangling twin)"
     if target.resolve() == path.resolve():
         return "a test cannot be its own twin"
-    if _under(target, NEGATIVE_DIR):
-        return (f"`twin: {exp.twin}` is itself under {NEGATIVE_DIR}/; a twin is the "
+    if (inside := next((d for d in NEGATIVE_DIRS if _under(target, d)), None)) is not None:
+        return (f"`twin: {exp.twin}` is itself under {inside}/; a twin is the "
                 "positive test, outside it")
     twin_exp = read_header(target)
     if isinstance(twin_exp, HeaderError):
@@ -544,7 +720,11 @@ _VIPER_ERRORS = [
     (r"Conditional statement might fail\.", "if.failed", "if"),
     (r"While statement might fail\.", "while.failed", "while"),
     (r"Assert might fail\.", "assert.failed", "assert"),
-    (r"Function \S+ might not terminate\.", "termination.failed", "termination"),
+    # silver's termination plugin (TerminationErrors.scala), pinned by tests/viper-smoke/termination_kinds.vpr:
+    # the function form has no name in the text; the method and loop forms are the ones decision 0013 maps
+    (r"Function (?:\S+ )?might not terminate\.", "termination.failed", "termination"),
+    (r"Method might not terminate\.", "termination.failed", "termination"),
+    (r"Loop might not terminate\.", "termination.failed", "termination"),
     (r"Postcondition of \S+ might not hold\.", "postcondition.violated",
      "postcondition"),
     (r"Folding .+? might fail\.", "fold.failed", "fold"),
@@ -588,6 +768,11 @@ _VIPER_REASONS = [
     ("epsilon.as.param", r"The parameter .+ might be an epsilon permission.*"),
     ("feature.unsupported", r".+ is not supported\..*"),
     ("unexpected.node", r".+ occurred unexpectedly\..*"),
+    # termination (TerminationErrors.scala): the three messages of TupleSimpleFalse, TupleDecreasesFalse and
+    # TupleBoundedFalse (sic: "might not bounded"), TupleConditionFalse, TerminationConditionFalse
+    ("tuple.false", r"Termination measure might not (?:decrease or might not be bounded|decrease|bounded)\."),
+    ("tuple.condition.false", r"Required tuple condition might not hold\."),
+    ("termination.condition.false", r"Required termination condition might not hold\."),
 ]
 
 VIPER_CATEGORIES = {category for _, _, category in _VIPER_ERRORS}
@@ -606,8 +791,6 @@ _POSITION_RE = re.compile(
     r"\s*\((?P<file>[^()@]+)@(?P<line>\d+)\.(?P<col>\d+)"
     r"(?:--(?P<eline>\d+)\.(?P<ecol>\d+))?\)\s*$")
 _ENTRY_RE = re.compile(r"^\s*\[\s*(\d+)\] (.*)$")
-_SUCCESS_RE = re.compile(r"^Silicon finished verification successfully", re.MULTILINE)
-_FOUND_RE = re.compile(r"^Silicon found (\d+) errors? in", re.MULTILINE)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -619,7 +802,8 @@ class ReportedError:
     message: str
 
     def __str__(self) -> str:
-        return f"{self.category}:{self.reason} @ L{self.line}: {self.message}"
+        reason = f":{self.reason}" if self.reason else ""
+        return f"{self.category}{reason} @ L{self.line}: {self.message}"
 
 
 @dataclasses.dataclass
@@ -652,13 +836,36 @@ def classify(message: str) -> tuple[str, str, str | None, int | None]:
     return UNKNOWN, UNKNOWN, file, line
 
 
+_BANNER_RE = re.compile(r"^Silicon \S+( \(.*\))?\s*$")
+_SUCCESS_LINE_RE = re.compile(r"^Silicon finished verification successfully\b.*$")
+_FOUND_LINE_RE = re.compile(r"^Silicon found (\d+) errors? in .*:\s*$")
+
+
 def parse_silicon_output(output: str, returncode: int) -> SiliconResult:
+    """Silicon's output as a verdict.  The output is accepted only if it is the banner, exactly one verdict
+    line and its error list, nothing else: a warning, a stack trace or a second verdict means that something
+    else happened and is "no verdict" (decision 0011 item 11; src/driver/silicon_output.cpp reads it the
+    same way, and the self-test requires the two to agree)."""
     entries: list[str] = []
+    stray = ""  # the first line that is neither part of a verdict nor of an error message
+    banners = successes = founds = 0
+    found_count = ""
     for raw in output.splitlines():
         if m := _ENTRY_RE.match(raw):
             entries.append(m.group(2))
-        elif entries and raw.strip():
-            entries[-1] += "\n" + raw.strip()
+        elif not raw.strip():
+            continue
+        elif _SUCCESS_LINE_RE.match(raw):
+            successes += 1
+        elif m := _FOUND_LINE_RE.match(raw):
+            founds += 1
+            found_count = m.group(1)
+        elif _BANNER_RE.match(raw):
+            banners += 1
+        elif entries:
+            entries[-1] += "\n" + raw.strip()  # the rest of a multi-line message
+        elif not stray:
+            stray = raw
 
     errors = []
     for entry in entries:
@@ -666,26 +873,38 @@ def parse_silicon_output(output: str, returncode: int) -> SiliconResult:
         errors.append(ReportedError(category, reason, line or 0, file or "?",
                                     " ".join(entry.split())))
 
-    success = _SUCCESS_RE.search(output)
-    found = _FOUND_RE.search(output)
-    problem = None
-    if success and not found and not entries and returncode == 0:
+    no_verdict = f"Silicon did not produce a verdict (exit status {returncode})"
+    if successes + founds == 0:
+        return SiliconResult(False, errors, no_verdict)
+    if stray or banners != 1 or successes + founds != 1:
+        unexpected = f" (unexpected line: {stray[:120]})" if stray else ""
+        return SiliconResult(False, errors, "Silicon's output is not a banner and one verdict"
+                             f"{unexpected} (exit status {returncode})")
+    if successes == 1 and not entries and returncode == 0:
         return SiliconResult(True, [], None)
-    if not found or returncode != 1:
-        problem = f"Silicon did not produce a verdict (exit status {returncode})"
-    elif int(found.group(1)) != len(errors):
-        problem = (f"Silicon reported {found.group(1)} errors but "
-                   f"{len(errors)} were parsed")
+    problem = None
+    if founds != 1 or returncode != 1:
+        problem = no_verdict
+    elif int(found_count) != len(errors):
+        problem = f"Silicon reported {found_count} errors but {len(errors)} were parsed"
     return SiliconResult(False, errors, problem)
+
+
+def same_file(a: str | None, b: str | None) -> bool:
+    return a is not None and b is not None and os.path.normpath(a) == os.path.normpath(b)
 
 
 def compare_errors(expected: list[ExpectedError], reported: list[ReportedError],
                    test_file: str) -> list[str]:
-    """Return mismatch descriptions; empty when the outcome is exactly right."""
+    """Return mismatch descriptions; empty when the outcome is exactly right.
+
+    An expected error is in the test file unless it names a header
+    (`@ <file>:L<n>`); an error in any other file is a failure."""
     problems = []
     remaining = list(reported)
+    allowed = {test_file} | {e.file for e in expected if e.file}
     for r in reported:
-        if r.file != test_file:
+        if not any(same_file(r.file, f) for f in allowed):
             problems.append(f"error reported in another file ({r.file}): {r}")
             remaining.remove(r)
         elif r.category == UNKNOWN or r.reason in (UNKNOWN, TIMEOUT):
@@ -693,8 +912,11 @@ def compare_errors(expected: list[ExpectedError], reported: list[ReportedError],
             problems.append(f"{what}: {r.message}")
             remaining.remove(r)
 
+    def where(e: ExpectedError) -> str:
+        return e.file or test_file
+
     def matches(e: ExpectedError, r: ReportedError) -> bool:
-        return (e.category == r.category and e.line == r.line
+        return (e.category == r.category and e.line == r.line and same_file(r.file, where(e))
                 and (e.reason is None or e.reason == r.reason))
 
     unmatched = []
@@ -707,9 +929,10 @@ def compare_errors(expected: list[ExpectedError], reported: list[ReportedError],
 
     # Pair leftovers to say *how* an expected error was missed.
     for e in unmatched:
-        same_kind = next((r for r in remaining if r.category == e.category
+        in_file = [r for r in remaining if same_file(r.file, where(e))]
+        same_kind = next((r for r in in_file if r.category == e.category
                           and (e.reason is None or e.reason == r.reason)), None)
-        same_line = next((r for r in remaining if r.line == e.line), None)
+        same_line = next((r for r in in_file if r.line == e.line), None)
         if same_kind is not None:
             problems.append(f"wrong line: expected {e}, got {same_kind}")
             remaining.remove(same_kind)
@@ -1122,34 +1345,38 @@ def compare_diags(expected: list[ExpectedDiag], diags: list[FeDiag], registry: T
                   filename: str) -> list[str]:
     """Mismatch descriptions between the expected diagnostics and the ones the
     front end printed, errors and warnings separately; empty when exact.
-    Notes and remarks never count.  A diagnostic in another file is
+    Notes and remarks never count.  A diagnostic is in the test file unless the
+    expectation names a header (`rejected` tests); one in any other file is
     unexpected, whatever it is."""
     problems = []
+    allowed = {filename} | {e.file for e in expected if e.file}
     for severity in ("error", "warning"):
         remaining = [d for d in diags if d.severity == severity]
         for d in list(remaining):
-            if d.file != filename:
+            if not any(same_file(d.file, f) for f in allowed):
                 problems.append(f"unexpected {severity} (in {d.file or 'no file'}): "
                                 f"{_describe(d, registry, d.file)}")
                 remaining.remove(d)
         unmatched = []
         for e in (x for x in expected if x.severity == severity):
             hit = next((d for d in remaining
-                        if d.tag(registry) == e.tag and d.line == e.line), None)
+                        if d.tag(registry) == e.tag and d.line == e.line
+                        and same_file(d.file, e.file or filename)), None)
             if hit is None:
                 unmatched.append(e)
             else:
                 remaining.remove(hit)
         for e in unmatched:
-            same_tag = next((d for d in remaining if d.tag(registry) == e.tag), None)
-            same_line = next((d for d in remaining if d.line == e.line), None)
+            in_file = [d for d in remaining if same_file(d.file, e.file or filename)]
+            same_tag = next((d for d in in_file if d.tag(registry) == e.tag), None)
+            same_line = next((d for d in in_file if d.line == e.line), None)
             if same_tag is not None:
                 problems.append(f"wrong line: expected {severity} {e}, got "
-                                f"{_describe(same_tag, registry, filename)}")
+                                f"{_describe(same_tag, registry, e.file or filename)}")
                 remaining.remove(same_tag)
             elif same_line is not None:
                 problems.append(f"wrong diagnostic at this line: expected {severity} {e}, "
-                                f"got {_describe(same_line, registry, filename)}")
+                                f"got {_describe(same_line, registry, e.file or filename)}")
                 remaining.remove(same_line)
             else:
                 problems.append(f"missing {severity}: expected {e}")
@@ -1209,19 +1436,14 @@ def evaluate_refused(run: ToolRun, exp: Expectation) -> list[str]:
     return problems
 
 
-def evaluate_diags(run: ToolRun, exp: Expectation, registry: TagRegistry,
-                   filename: str) -> list[str]:
-    """Problems with one `frontend-error`/`-warning` run; empty when it passes."""
-    if run.returncode is None:
-        return [f"cerastes-fe {run.error}"]
-    problems = []
-    if run.returncode < 0:
-        problems.append(f"cerastes-fe crashed (signal {-run.returncode})")
-    if run.stdout:
-        problems.append("cerastes-fe printed on stdout (a diagnostics test expects "
-                        f"nothing there): {run.stdout.strip().splitlines()[0]}")
-    parsed = parse_fe_diagnostics(run.stderr)
-    problems += parsed.problems
+def fe_output_problems(stderr: str, expected: list[ExpectedDiag], registry: TagRegistry,
+                       filename: str) -> list[str]:
+    """Problems with the EDG-format diagnostics of one run (the stderr of a
+    `frontend-error` run or of a rejected `cerastes verify` run): output the
+    parser does not know, fatal diagnostics, a summary line that disagrees with
+    the errors printed, and every difference from the expected diagnostics."""
+    parsed = parse_fe_diagnostics(stderr)
+    problems = list(parsed.problems)
     for d in parsed.diags:
         if d.severity in _FE_FATAL:
             problems.append(f"{d.severity} always fails a test: "
@@ -1233,12 +1455,334 @@ def evaluate_diags(run: ToolRun, exp: Expectation, registry: TagRegistry,
     elif parsed.summary_errors is not None and parsed.summary_errors != errors:
         problems.append(f"the summary says {parsed.summary_errors} errors but {errors} "
                         "were parsed")
-    problems += compare_diags(exp.diags, parsed.diags, registry, filename)
+    return problems + compare_diags(expected, parsed.diags, registry, filename)
+
+
+def evaluate_diags(run: ToolRun, exp: Expectation, registry: TagRegistry,
+                   filename: str) -> list[str]:
+    """Problems with one `frontend-error`/`-warning` run; empty when it passes."""
+    if run.returncode is None:
+        return [f"cerastes-fe {run.error}"]
+    problems = []
+    if run.returncode < 0:
+        problems.append(f"cerastes-fe crashed (signal {-run.returncode})")
+    if run.stdout:
+        problems.append("cerastes-fe printed on stdout (a diagnostics test expects "
+                        f"nothing there): {run.stdout.strip().splitlines()[0]}")
+    problems += fe_output_problems(run.stderr, exp.diags, registry, filename)
     want = EDG_ERRORS_STATUS if any(d.severity == "error" for d in exp.diags) else 0
     if run.returncode >= 0 and run.returncode != want:
         problems.append(f"cerastes-fe exited with status {run.returncode}, expected {want} "
                         + ("(errors expected)" if want else "(no errors expected)"))
     return problems
+
+
+# ---------------------------------------------------------------------------
+# `cerastes verify` (`verified`, `error`, `rejected` in a C or C++ test)
+# ---------------------------------------------------------------------------
+
+# Exit statuses of `cerastes verify` (decision 0011 item 8).
+VERIFY_OK = 0
+VERIFY_ERRORS = 1
+VERIFY_REJECTED = 2
+VERIFY_TOOL_FAILURE = 3
+
+# `<file>: verified (<n> functions; one translation unit: ...)`, and
+# `<file>:<line>: error|note: <rest>`, in column 0.  The error's rest is
+# `<category>: <message>`.  An EDG diagnostic (`"file", line N: error #id: ...`)
+# matches neither.
+_VERIFIED_LINE_RE = re.compile(
+    r"^(?P<file>.+?): verified \((?P<n>[0-9]+) functions?; one translation unit: .+\)$")
+_VERIFY_DIAG_RE = re.compile(
+    r"^(?P<file>.+?):(?P<line>[1-9][0-9]*): (?P<kind>error|note): (?P<rest>.*)$")
+_VERIFY_ERROR_REST_RE = re.compile(r"^(?P<category>[a-z][a-z0-9-]*): (?P<message>.*)$")
+
+
+@dataclasses.dataclass
+class VerifyParse:
+    verified: list[str]  # the file named by each `verified` line
+    functions: list[int]  # the number of functions of each `verified` line
+    errors: list[ReportedError]
+    problems: list[str]  # output that cannot be classified
+
+
+def parse_verify_output(stdout: str, stderr: str) -> VerifyParse:
+    """Parse the output of a `cerastes verify` run that ended with status 0 or 1.
+
+    Decision 0011 item 9: the verdict line, the errors and their notes are on
+    stdout, and nothing else is printed.  On stdout a `verified` line, an `error`
+    line (a category outside DRIVER_CATEGORIES is category `unknown`, which no
+    test accepts) and the `note` lines that follow an error are understood; blank
+    lines and indented lines continue the previous line and are dropped.  A note
+    with no error before it, an EDG diagnostic (they go to stderr), and any
+    other line in column 0 are problems.  Anything on stderr is a problem: a
+    verdict or an error there is on the wrong stream, and a front-end diagnostic
+    (a warning in a test) is unexpected output; tests are warning-free.
+    """
+    verified: list[str] = []
+    functions: list[int] = []
+    errors: list[ReportedError] = []
+    problems: list[str] = []
+    after_error = False
+    for raw in stdout.split("\n"):
+        if not raw.strip() or raw[0] in " \t":
+            continue
+        if m := _VERIFY_DIAG_RE.match(raw):
+            if m.group("kind") == "note":
+                if not after_error:
+                    problems.append(f"a `note:` line with no error before it: {raw}")
+                continue
+            after_error = True
+            rest = _VERIFY_ERROR_REST_RE.match(m.group("rest"))
+            if rest is None:
+                problems.append(f"an `error:` line without `<category>: <message>`: {raw}")
+                continue
+            category = rest.group("category")
+            errors.append(ReportedError(
+                category if category in DRIVER_CATEGORIES else UNKNOWN, "",
+                int(m.group("line")), m.group("file"),
+                raw if category in DRIVER_CATEGORIES else f"unknown category `{category}`: {raw}"))
+        elif m := _VERIFIED_LINE_RE.match(raw):
+            after_error = False
+            verified.append(m.group("file"))
+            functions.append(int(m.group("n")))
+        elif _FE_DIAG_RE.match(raw):
+            after_error = False
+            problems.append("a front-end diagnostic on stdout (diagnostics go to stderr, "
+                            f"decision 0011 item 9): {raw}")
+        else:
+            after_error = False
+            problems.append(f"unrecognized driver output: {raw}")
+    for raw in stderr.split("\n"):
+        if not raw.strip() or raw[0] in " \t":
+            continue
+        if _VERIFY_DIAG_RE.match(raw) or _VERIFIED_LINE_RE.match(raw):
+            problems.append(f"a verdict or error line on stderr (they go to stdout, decision "
+                            f"0011 item 9): {raw}")
+        elif _FE_DIAG_RE.match(raw):
+            problems.append("a front-end diagnostic in a run that reached Silicon (a warning "
+                            f"is unexpected output; tests are warning-free): {raw}")
+        else:
+            problems.append(f"unexpected output on stderr: {raw}")
+    return VerifyParse(verified, functions, errors, problems)
+
+
+def _verify_tail(run: ToolRun) -> str:
+    """The first lines of what a failed run printed (stderr, else stdout)."""
+    lines = [l for l in (run.stderr or run.stdout).split("\n") if l.strip()]
+    return " | ".join(lines)[:300] if lines else "(no output)"
+
+
+def evaluate_verify(run: ToolRun, exp: Expectation, registry: TagRegistry | None,
+                    filename: str) -> list[str]:
+    """Problems with one `cerastes verify` run of a `verified`, `error` or
+    `rejected` test; empty when it passes.
+
+    `filename` is the test path as given on the command line (the file of its
+    own messages).  Exit status 3, any status other than 0 to 2, a crash and a
+    timeout fail whatever the test expects.  `registry` names the EDG tags of a
+    rejection (required for a `rejected` test).
+    """
+    if run.returncode is None:
+        return [f"cerastes verify {run.error}"]
+    if run.returncode < 0:
+        return [f"cerastes verify crashed (signal {-run.returncode})"]
+    code = run.returncode
+    if code == VERIFY_TOOL_FAILURE:
+        return [f"cerastes verify failed (exit status {code}, a tool failure; it fails "
+                f"whatever the test expects): {_verify_tail(run)}"]
+    if code not in (VERIFY_OK, VERIFY_ERRORS, VERIFY_REJECTED):
+        return [f"cerastes verify exited with status {code}, which is not one of 0 "
+                f"(verified), 1 (errors), 2 (rejected): {_verify_tail(run)}"]
+
+    if code == VERIFY_REJECTED:
+        if exp.kind != "rejected":
+            parsed = parse_fe_diagnostics(run.stderr)
+            shown = [f"  {d.where()}: error #{d.id}: {d.message}"
+                     for d in parsed.diags if d.severity == "error"]
+            return ["expected " + ("verified" if exp.kind == "verified" else "verification "
+                    "errors") + ", but the program was rejected (exit status 2):"] \
+                + (shown or [f"  {_verify_tail(run)}"])
+        assert registry is not None
+        problems = []
+        if run.stdout:
+            problems.append("cerastes verify printed on stdout (a rejection prints "
+                            f"nothing there): {run.stdout.strip().splitlines()[0]}")
+        return problems + fe_output_problems(run.stderr, exp.diags, registry, filename)
+
+    parsed = parse_verify_output(run.stdout, run.stderr)
+    problems = list(parsed.problems)
+    if code == VERIFY_OK:
+        if parsed.errors:
+            problems.append("exit status 0 but the output has `error:` lines")
+        if len(parsed.verified) != 1:
+            problems.append(f"exit status 0 needs exactly one `{filename}: verified (...)` "
+                            f"line, found {len(parsed.verified)}")
+        else:
+            if parsed.verified[0] != filename:
+                problems.append(f"the `verified` line names {parsed.verified[0]}, not {filename}")
+            if parsed.functions[0] < 1:
+                problems.append("the `verified` line counts no function: nothing of the test "
+                                "was verified")
+        if exp.kind != "verified":
+            problems.append("expected " + ("a rejection (exit status 2)" if exp.kind ==
+                            "rejected" else "errors") + ", but the program verified")
+        return problems
+
+    # exit status 1
+    if parsed.verified:
+        problems.append("exit status 1 but the output has a `verified` line")
+    if not parsed.errors:
+        problems.append("exit status 1 but the output has no `error:` line")
+    keys = [(e.file, e.line, e.category) for e in parsed.errors]
+    if keys != sorted(keys):
+        problems.append("the errors are not sorted by printed path (byte order), line and "
+                        "category (byte order) (decision 0011 item 9): " + "; ".join(
+                            f"{f}:{n}: {c}" for f, n, c in keys[:6]))
+    lines = [e.message for e in parsed.errors]
+    for twice in sorted({l for l in lines if lines.count(l) > 1}):
+        problems.append(f"an error is printed twice (decision 0011 item 9): {twice}")
+    if exp.kind == "verified":
+        problems.append("expected verified, but verification errors were reported:")
+        problems += [f"  {e}" for e in parsed.errors]
+    elif exp.kind == "rejected":
+        problems.append("expected a rejection (exit status 2), but verification errors were "
+                        "reported (exit status 1):")
+        problems += [f"  {e}" for e in parsed.errors]
+    else:
+        problems += compare_errors(exp.errors, parsed.errors, filename)
+    return problems
+
+
+def verify_command(env: dict[str, str], path: Path, mode: str, vpr: Path) -> list[str]:
+    """The `cerastes verify` command for one mode of a test (run from the root):
+    VERIFY_COMMAND, else the program of CERASTES_VERIFY."""
+    base = VERIFY_COMMAND if VERIFY_COMMAND is not None else [env["CERASTES_VERIFY"]]
+    return [*base, "verify", rel(path), VERIFY_STD_OPTIONS[mode], f"--keep-vpr={rel(vpr)}"]
+
+
+def vpr_path(path: Path, mode: str) -> Path:
+    """Where `--keep-vpr` writes for `path` in `mode`: VPR_DIR/<repository-
+    relative path>.<mode>.vpr (a test outside the repository goes under
+    VPR_DIR/external/ with its absolute path)."""
+    shown = rel(path)
+    inside = not Path(shown).is_absolute()
+    parts = Path(shown).parts if inside else ("external", *Path(shown).parts[1:])
+    return VPR_DIR.joinpath(*parts[:-1], f"{parts[-1]}.{mode}.vpr")
+
+
+def is_verify_test(path: Path, exp: Expectation | HeaderError) -> bool:
+    """Whether the test runs `cerastes verify` (a C or C++ file with a verdict)."""
+    return (isinstance(exp, Expectation) and path.suffix != ".vpr"
+            and exp.kind in VERIFY_KINDS)
+
+
+def vpr_expected(exp: Expectation) -> bool:
+    """Whether a verify run of this test must leave Viper behind: it does when
+    Silicon runs (exit status 0 or 1), not for a rejection (exit status 2)."""
+    return exp.kind in ("verified", "error")
+
+
+def vpr_problems(vpr: Path, filename: str | None = None,
+                 headers: list[str] | tuple[str, ...] = ()) -> list[str]:
+    """Problems with the `--keep-vpr` output of a run that ended with status 0 or
+    1: the `.vpr` and its `.map` must exist and not be empty, and the map (tab-
+    separated, the file the 4th field: encoding.md section 5) must have at least
+    one entry in `filename`, the test file as given to the driver, so that a test
+    none of whose bodies was verified (all skipped, or taken for system code)
+    cannot pass.  `headers` are the helper headers with function bodies that the test
+    includes: each needs an entry too, so a driver that skipped their bodies fails."""
+    problems = []
+    mapf = vpr.with_name(vpr.name + ".map")
+    for f in (vpr, mapf):
+        try:
+            size = f.stat().st_size
+        except OSError:
+            problems.append(f"the driver did not write {rel(f)} (`--keep-vpr`)")
+            continue
+        if size == 0:
+            problems.append(f"{rel(f)} is empty")
+    if filename is not None and not problems:
+        files = {line.split("\t")[3] for line in read_exact(mapf).split("\n")
+                 if line.count("\t") >= 3}
+        if not any(same_file(f, filename) for f in files):
+            problems.append(f"{rel(mapf)} has no entry in {filename}: nothing of the test "
+                            "was verified")
+        for h in headers:
+            if not any(same_file(f, h) for f in files):
+                problems.append(f"{rel(mapf)} has no entry in {h}, a helper header with a "
+                                f"function body that {filename} includes: its bodies were not "
+                                "verified")
+    return problems
+
+
+def vpr_manifest(tests: list[tuple[Path, Expectation]]) -> list[str]:
+    """The files (relative to VPR_DIR) that a run of `tests` must leave behind."""
+    return sorted(vpr_path(f, m).relative_to(VPR_DIR).as_posix()
+                  for f, e in tests if vpr_expected(e) for m in e.modes)
+
+
+def make_run_id(manifest: list[str]) -> str:
+    """`<UTC time>-<8 hex digits of the hash of the manifest's file list>`."""
+    digest = hashlib.sha256("\n".join(manifest).encode()).hexdigest()[:8]
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return f"{now}-{digest}"
+
+
+_VPR_LOCKS: dict[Path, object] = {}
+
+
+def release_vpr_locks() -> None:
+    """Drop every lock this process holds (at exit; a self-test that holds several in temporary trees)."""
+    for handle in _VPR_LOCKS.values():
+        handle.close()
+    _VPR_LOCKS.clear()
+
+
+atexit.register(release_vpr_locks)
+
+
+def lock_vpr_dir() -> None:
+    """Take the exclusive lock on build/vpr for the rest of this process.  A run that will empty and fill build/vpr
+    (every run that selects a test expecting Viper) must be the only one: a second run would empty it under the first,
+    whose tests would then fail with "the driver did not write build/vpr/...".  The lock is a `flock` on
+    `<VPR_DIR>.lock` (released when the process ends, however it ends); it is never waited for: a second run fails
+    at once, naming the first.  A process that already holds it (a self-test calling main() twice) keeps it."""
+    import fcntl
+    path = VPR_DIR.with_name(VPR_DIR.name + ".lock")
+    if path in _VPR_LOCKS:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(path, "a+")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.seek(0)
+        pid = handle.read().strip() or "unknown"
+        handle.close()
+        raise UsageError(f"another run_tests.py is using build/vpr (pid {pid}); wait for it or stop it "
+                         f"(the lock is {rel(path)})") from None
+    handle.seek(0)
+    handle.truncate()
+    handle.write(f"{os.getpid()}\n")
+    handle.flush()
+    _VPR_LOCKS[path] = handle
+
+
+def reset_vpr_dir(manifest: list[str], run_id: str) -> None:
+    """Empty VPR_DIR (stale files cannot pass for this run's output) and write
+    its MANIFEST: the run id line, then one file per line.  Refuses a directory
+    that is not named `vpr`, so a bad patch of VPR_DIR cannot delete anything
+    else."""
+    if VPR_DIR.name != "vpr":
+        raise UsageError(f"refusing to clear {VPR_DIR}: not a directory named `vpr`")
+    if VPR_DIR.is_symlink() or VPR_DIR.is_file():
+        VPR_DIR.unlink()
+    elif VPR_DIR.exists():
+        shutil.rmtree(VPR_DIR)
+    VPR_DIR.mkdir(parents=True)
+    (VPR_DIR / VPR_MANIFEST).write_text(f"{RUN_ID_PREFIX}{run_id}\n"
+                                        + "".join(f"{line}\n" for line in manifest))
 
 
 # ---------------------------------------------------------------------------
@@ -1582,7 +2126,7 @@ def run_frontend(path: Path, exp: Expectation, env: dict[str, str]) -> list[Outc
         name = f"{rel(path)} [{mode}]"
         if exp.kind != "frontend-ok":
             outcomes.append(Outcome(name, [
-                f"`expect: {exp.kind}` needs the cerastes driver (M3)"]))
+                f"`expect: {exp.kind}` is not a front-end test (harness error)"]))
             continue
         cmd = [str(ROOT / "scripts" / "cpfe.sh"), MODE_OPTIONS[mode],
                "--no_code_gen", str(path)]
@@ -1669,6 +2213,29 @@ def run_golden(path: Path, exp: Expectation, env: dict[str, str],
     return outcomes
 
 
+def run_verify(path: Path, exp: Expectation, env: dict[str, str],
+               opts: RunOptions) -> list[Outcome]:
+    """One `cerastes verify` run per mode of a `verified`, `error` or `rejected`
+    test (see the module docstring and evaluate_verify)."""
+    if opts.update_golden:
+        return []  # not a golden test: nothing to update
+    outcomes = []
+    for mode in exp.modes:
+        vpr = vpr_path(path, mode)
+        # A file left by an earlier run cannot stand in for the one the driver
+        # has to write now.
+        for f in (vpr, vpr.with_name(vpr.name + ".map")):
+            f.unlink(missing_ok=True)
+        vpr.parent.mkdir(parents=True, exist_ok=True)
+        run = run_tool(verify_command(env, path, mode, vpr), env, VERIFY_TIMEOUT_S)
+        problems = evaluate_verify(run, exp, opts.registry, rel(path))
+        if run.returncode in (VERIFY_OK, VERIFY_ERRORS) and vpr_expected(exp):
+            problems += vpr_problems(vpr, rel(path),
+                                     [rel(h) for h in helper_bodies_included(path)])
+        outcomes.append(Outcome(f"{rel(path)} [{mode}]", problems, run.stdout + run.stderr))
+    return outcomes
+
+
 def run_one(path: Path, exp: Expectation | HeaderError, env: dict[str, str],
             opts: RunOptions) -> list[Outcome]:
     if isinstance(exp, HeaderError):
@@ -1681,6 +2248,8 @@ def run_one(path: Path, exp: Expectation | HeaderError, env: dict[str, str],
         outcomes = run_diags(path, exp, env, opts)
     elif exp.kind == "frontend-refused":
         outcomes = run_refused(path, exp, env, opts)
+    elif exp.kind in VERIFY_KINDS:
+        outcomes = run_verify(path, exp, env, opts)
     else:
         outcomes = run_frontend(path, exp, env)
     if exp.native_ok and opts.native is not None and not opts.update_golden:
@@ -1706,11 +2275,18 @@ class Selection:
     skipped: dict[Path, str] = dataclasses.field(default_factory=dict)  # dir -> reason
     unrecognized: list[Path] = dataclasses.field(default_factory=list)  # source-like, not tests
     hidden: list[Path] = dataclasses.field(default_factory=list)  # tests inside skipped dirs
+    helpers: list[Path] = dataclasses.field(default_factory=list)  # helper headers (headers/)
 
 
 UNRECOGNIZED_MESSAGE = ("looks like a C/C++/Viper source file, but its suffix is not a "
                         "test suffix (" + ", ".join(sorted(TEST_SUFFIXES)) + "), so it "
-                        "would never run; rename it or remove it")
+                        "would never run; rename it or remove it (a header that tests include "
+                        "belongs in a `headers/` directory)")
+# Helper headers (and `.inc`, `.def`, ... files that tests include) live only in a
+# directory of this name, below the test area that uses them; they are never run
+# as tests, hold no `expect:` line and must be included by some test.
+HELPER_DIR_NAME = "headers"
+_INCLUDE_RE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*"([^"\n]+)"', re.MULTILINE)
 HIDDEN_MESSAGE = ("has an `// expect:` header but is in a skipped directory, so it "
                   "would never run; move it out of the skipped directory or remove "
                   "the header")
@@ -1720,6 +2296,186 @@ def looks_like_source(name: str) -> bool:
     """A source-like file name that is not a test file name."""
     suffix = Path(name).suffix
     return suffix not in TEST_SUFFIXES and suffix.lower() in SOURCE_LIKE_SUFFIXES
+
+
+def is_helper(path: Path, scan_root: Path) -> bool:
+    """Whether a source-like file is in a `headers/` directory: a directory
+    component of that name below the repository root (below the scanned
+    directory, for a file outside the repository), so that where the repository
+    is checked out cannot decide it."""
+    try:
+        parts = path.resolve().relative_to(ROOT.resolve()).parts
+    except ValueError:
+        try:
+            parts = path.resolve().relative_to(scan_root.resolve()).parts
+        except ValueError:
+            return False
+    return HELPER_DIR_NAME in parts[:-1]
+
+
+def helper_area(path: Path) -> Path:
+    """The directory that holds the `headers/` directory of a helper: the tests
+    that may include it are below it."""
+    parts = path.parts
+    return Path(*parts[:max(i for i, p in enumerate(parts[:-1]) if p == HELPER_DIR_NAME)])
+
+
+def active_source_text(text: str) -> str:
+    """`text` without comments and without the lines of `#if 0` blocks (up to their
+    `#else`, `#elif` or `#endif`), so that an include there is not an include.  Other
+    conditionals count as active."""
+    text = re.sub(r"/\*.*?\*/", lambda m: "\n" * m.group().count("\n"), text, flags=re.S)
+    out: list[str] = []
+    skipping = 0  # nesting depth inside an `#if 0` block, 0 when not skipping
+    for raw in text.split("\n"):
+        line = re.sub(r"//.*$", "", raw)
+        directive = re.match(r"^\s*#\s*(\w+)\s*(\S*)", line)
+        word = directive.group(1) if directive else ""
+        if skipping:
+            if word in ("if", "ifdef", "ifndef"):
+                skipping += 1
+            elif word == "endif":
+                skipping -= 1
+            elif word in ("else", "elif") and skipping == 1:
+                skipping = 0
+            out.append("")
+            continue
+        if word == "if" and directive and directive.group(2) == "0":
+            skipping = 1
+            out.append("")
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
+def includes_of(path: Path) -> set[Path]:
+    """The files that the `#include "..."` lines of `path` name, resolved against its
+    directory (the harness passes no -I), which exist.  Includes in comments and in
+    `#if 0` blocks do not count."""
+    try:
+        text = path.read_bytes().decode("utf-8", "replace")
+    except OSError:
+        return set()
+    out = set()
+    for name in _INCLUDE_RE.findall(active_source_text(text)):
+        target = (path.parent / name).resolve()
+        if target.is_file():
+            out.add(target)
+    return out
+
+
+_TRANSPARENT_BLOCK_RE = re.compile(
+    r'\s*(?:(?:\[\[.*?\]\]\s*)*(?:inline\s+)?namespace\b.*|extern\s*""\s*)\Z', re.DOTALL)
+_NOT_A_BODY_RE = re.compile(r"\s*(?:struct|union|enum|class|namespace|typedef)\b")
+
+
+def has_function_body(text: str) -> bool:
+    """Whether `text` (a header) defines a function: a `{` at file scope, or in
+    namespaces and `extern "C"` / `extern "C++"` blocks only (nested to any depth),
+    whose statement so far has a `)` and is not a struct, union, enum, class,
+    namespace or typedef, nor an initializer (`=` outside parentheses).  A
+    function inside a class or any other braces is not a function of the file
+    (the encoder rejects classes), and a block whose head is neither a namespace
+    nor a linkage block hides what is inside it."""
+    code = active_source_text(text)
+    code = re.sub(r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'', '""', code)
+    stack: list[bool] = []  # one entry per open brace: is it a namespace or linkage block
+    start = 0  # where the statement at the current (transparent) level began
+    for i, ch in enumerate(code):
+        at_top = all(stack)
+        if ch == "{":
+            if at_top:
+                stmt = code[start:i]
+                if _TRANSPARENT_BLOCK_RE.match(stmt):
+                    stack.append(True)
+                    start = i + 1
+                    continue
+                paren, flat = 0, []
+                for c in stmt:
+                    paren += (c == "(") - (c == ")")
+                    flat.append(c if paren == 0 else " ")
+                outer = "".join(flat)
+                if (")" in stmt and "=" not in outer.replace("==", "")
+                        and not _NOT_A_BODY_RE.match(stmt)):
+                    return True
+            stack.append(False)
+        elif ch == "}":
+            if stack:
+                stack.pop()
+            if all(stack):
+                start = i + 1
+        elif ch == ";" and at_top:
+            start = i + 1
+    return False
+
+
+def in_headers_dir(path: Path, base: Path) -> bool:
+    """Whether `path` is in a `headers/` directory: below the repository root, else
+    below `base` (a test outside the repository, in the self-test)."""
+    for root in (ROOT, base):
+        try:
+            return HELPER_DIR_NAME in path.resolve().relative_to(root.resolve()).parts[:-1]
+        except ValueError:
+            continue
+    return False
+
+
+def helper_bodies_included(test: Path) -> list[Path]:
+    """The helper headers with a function body that `test` includes, directly or
+    through other helpers (comments and `#if 0` aside): the files whose bodies the
+    driver must verify with the test."""
+    out: list[Path] = []
+    seen: set[Path] = set()
+    todo = [test.resolve()]
+    while todo:
+        f = todo.pop()
+        for g in sorted(includes_of(f)):
+            if g in seen or not in_headers_dir(g, test.parent):
+                continue
+            seen.add(g)
+            todo.append(g)
+            try:
+                if has_function_body(g.read_bytes().decode("utf-8", "replace")):
+                    out.append(g)
+            except OSError:
+                pass
+    return out
+
+
+def helper_problems(helpers: list[Path]) -> list[tuple[Path, str]]:
+    """Problems with the helper headers: one that has an `// expect:` line is a
+    test in disguise, and one that no test includes (directly, or through other
+    helpers) is an orphan that nothing verifies.  Looks at the whole tree of the
+    helper's area, whatever was selected."""
+    problems: list[tuple[Path, str]] = []
+    reach: dict[Path, set[Path]] = {}
+    for h in helpers:
+        if has_expect_header(h):
+            problems.append((h, "a helper header is not a test: it must not have an "
+                                "`// expect:` line"))
+        area = helper_area(h.resolve())
+        if area not in reach:
+            tests, files = [], []
+            for f in sorted(area.rglob("*")):
+                if f.is_file() and f.suffix in (".c", ".cpp"):
+                    tests.append(f)
+                elif f.is_file() and looks_like_source(f.name):
+                    files.append(f)
+            graph = {f.resolve(): includes_of(f) for f in tests + files}
+            seen: set[Path] = set()
+            todo = [t.resolve() for t in tests]
+            while todo:
+                f = todo.pop()
+                for g in graph.get(f, includes_of(f)):
+                    if g not in seen:
+                        seen.add(g)
+                        todo.append(g)
+            reach[area] = seen
+        if h.resolve() not in reach[area]:
+            problems.append((h, "orphan helper header: no test includes it (directly or through "
+                                "another helper), so nothing verifies it; include it from a "
+                                "test or remove it"))
+    return problems
 
 
 def has_expect_header(path: Path) -> bool:
@@ -1828,6 +2584,7 @@ def discover(paths: list[str]) -> Selection:
         tests: list[Path] = []
         goldens: list[Path] = []
         unrecognized: list[Path] = []
+        helpers: list[Path] = []
         for dirpath, dirnames, filenames in os.walk(p):
             directory = Path(dirpath)
             if skip_reason(directory) is not None:
@@ -1841,9 +2598,10 @@ def discover(paths: list[str]) -> Selection:
                 elif name.endswith(GOLDEN_SUFFIX):
                     goldens.append(f)
                 elif looks_like_source(name):
-                    unrecognized.append(f)
+                    (helpers if is_helper(f, p) else unrecognized).append(f)
         for f in sorted(tests):
             add_test(f)
+        sel.helpers += [f for f in sorted(helpers) if f not in sel.helpers]
         sel.unrecognized += [f for f in sorted(unrecognized) if f not in sel.unrecognized]
         for g in sorted(goldens):
             if g.resolve() not in seen_goldens:
@@ -1864,6 +2622,10 @@ def required_env(headers: dict[Path, Expectation | HeaderError]) -> list[str]:
             continue
         if path.suffix == ".vpr":
             names += ["CERASTES_JAVA", "SILICON_JAR", "Z3_EXE"]
+        elif exp.kind in VERIFY_KINDS:
+            names += ["CERASTES_VERIFY"]
+            if exp.kind == "rejected":
+                names += ["CERASTES_EDG_GEN"]  # the tags of the expected diagnostics
         elif exp.kind == "frontend-ok":
             names += ["CPFE", "EDG_CLANG_VER_SCRAPE"]
         elif exp.kind == "golden":
@@ -1877,9 +2639,10 @@ def required_env(headers: dict[Path, Expectation | HeaderError]) -> list[str]:
 
 def needs_edg_tools(headers: dict[Path, Expectation | HeaderError]) -> bool:
     """Whether a selected test runs a tool built from the EDG tree."""
-    return any(isinstance(e, Expectation) and e.kind in ("frontend-ok", "golden",
-                                                         "frontend-diag", "frontend-refused")
-               for e in headers.values())
+    return any(isinstance(e, Expectation)
+               and (e.kind in ("frontend-ok", "golden", "frontend-diag", "frontend-refused")
+                    or is_verify_test(f, e))  # `cerastes verify` is built from the EDG tree
+               for f, e in headers.items())
 
 
 def print_outcome(o: Outcome, verbose: bool) -> None:
@@ -1910,11 +2673,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check-headers", action="store_true",
                         help="only validate expectation headers and look for "
                              "orphan golden files")
+    parser.add_argument("--count-error-twins", action="store_true",
+                        help="print the number of positive tests of tests/scalar that have a "
+                             "twin expecting an `error` (the acceptance count) and exit")
+    parser.add_argument("--expect-passed", type=int, metavar="N",
+                        help="fail unless exactly N tests passed and none failed: for a "
+                             "directory whose size a generator states (check.sh pins the "
+                             "VIR self-test's case count with it)")
     parser.add_argument("--update-golden", action="store_true",
                         help="write the golden files of the selected golden tests "
                              "instead of comparing (review the diff; never in "
                              "check.sh)")
     args = parser.parse_args(argv)
+    if args.count_error_twins:
+        print(count_error_twins())
+        return 0
 
     try:
         sel = discover(args.paths or default_paths())
@@ -1923,7 +2696,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     for directory, reason in sel.skipped.items():
         print(f"SKIP  {rel(directory)}: {reason}")
-    if not sel.tests and not sel.goldens and not sel.unrecognized and not sel.hidden:
+    if not (sel.tests or sel.goldens or sel.unrecognized or sel.hidden or sel.helpers):
         skipped = f" ({len(sel.skipped)} directories skipped)" if sel.skipped else ""
         print(f"run_tests.py: no tests found{skipped}", file=sys.stderr)
         return 2
@@ -1937,8 +2710,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"run_tests.py: {err}", file=sys.stderr)
         return 2
 
-    cross = cross_file_problems() if any(
-        _under(f, Path("tests/annotations")) for f in headers) else []
+    # the twin rule looks at the whole tree of each area that a selected test is in
+    cross = cross_file_problems([(area, neg) for area, neg in TWIN_AREAS
+                                 if any(_under(f, area) for f in headers)])
+    helper_probs = helper_problems(sel.helpers)
 
     if args.check_headers:
         bad = 0
@@ -1948,6 +2723,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{rel(f)}: bad header: {exp}")
         for f, message in cross:
             print(f"{rel(f)}: bad header: {message}")
+        for f, message in helper_probs:
+            print(f"{rel(f)}: {message}")
         for g in orphans:
             print(f"{rel(g)}: {ORPHAN_MESSAGE}")
         for f in sel.unrecognized:
@@ -1958,12 +2735,15 @@ def main(argv: list[str] | None = None) -> int:
                    f"{len(orphans)} orphan golden files, {len(sel.skipped)} skipped")
         if cross:
             summary += f", {len(cross)} positive tests without a must-fail twin"
+        if helper_probs:
+            summary += f", {len(helper_probs)} problems with helper headers"
         if sel.unrecognized:
             summary += f", {len(sel.unrecognized)} files with an unrecognized suffix"
         if sel.hidden:
             summary += f", {len(sel.hidden)} tests hidden in skipped directories"
         print(summary)
-        return 1 if bad or cross or orphans or sel.unrecognized or sel.hidden else 0
+        return 1 if bad or cross or helper_probs or orphans or sel.unrecognized \
+            or sel.hidden else 0
 
     try:
         require(env, *required_env(headers))
@@ -1977,6 +2757,20 @@ def main(argv: list[str] | None = None) -> int:
 
     opts = RunOptions(verbose=args.verbose, update_golden=args.update_golden)
     outcomes: list[Outcome] = []
+    verify_tests = [(f, e) for f, e in headers.items()
+                    if isinstance(e, Expectation) and is_verify_test(f, e)]
+    # A run that must produce Viper starts from an empty build/vpr/ with its
+    # MANIFEST, so scripts/lint_viper.py can require every file of this run.
+    if not args.update_golden and any(vpr_expected(e) for _, e in verify_tests):
+        try:
+            manifest = vpr_manifest(verify_tests)
+            run_id = make_run_id(manifest)
+            lock_vpr_dir()
+            reset_vpr_dir(manifest, run_id)
+            print(f"build/vpr: run {run_id}, {len(manifest)} files expected")
+        except UsageError as err:
+            print(f"run_tests.py: {err}", file=sys.stderr)
+            return 2
     native_tests = [(f, e) for f, e in headers.items()
                     if isinstance(e, Expectation) and e.native_ok]
     try:
@@ -2001,7 +2795,7 @@ def main(argv: list[str] | None = None) -> int:
         o = Outcome(rel(g), [ORPHAN_MESSAGE])
         outcomes.append(o)
         print_outcome(o, args.verbose)
-    for f, message in cross:
+    for f, message in cross + helper_probs:
         o = Outcome(rel(f), [message])
         outcomes.append(o)
         print_outcome(o, args.verbose)
@@ -2022,6 +2816,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.update_golden:
         summary += f", {updated} goldens updated, {unchanged} unchanged"
     print(f"\n{summary}")
+    if args.expect_passed is not None and not failed and passed != args.expect_passed:
+        print(f"run_tests.py: expected exactly {args.expect_passed} passing tests, "
+              f"got {passed}", file=sys.stderr)
+        return 1
     return 1 if failed else 0
 
 

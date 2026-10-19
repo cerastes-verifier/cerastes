@@ -1,0 +1,133 @@
+# Reviewed equivalents of the tests/scalar mutation run (decision: plan.md M3 acceptance, tests/README.md "Mutation
+# testing"). Each line is a surviving mutant that is not in the safe-direction bucket (a stronger requires, a weaker
+# ensures or check: counted by the run, never listed) and that a sound verifier is right to accept: a mutant that is a
+# correct program for the same specification (its value, or the clause it changed, makes no difference), a
+# non-terminating or vacuous case that Silicon checked, or a clause whose meaning is unchanged. One reason per entry.
+# The list was proposed by il-analyst (2026-10-16) from the full run and trimmed to what the run reports after the
+# safe-direction bucket (125 entries); the run must end with zero unexplained survivors.
+# reviewed: Opus soundness auditor, 2026-10-19 — all 125 entries accepted as correct programs (no hidden encoder bug); the entries for local_const.c:9:25 and :9:30 had a wrong reason, corrected
+tests/scalar/abs_value.c:11:12:relop:<-><=	`a == 0` gives 0 either way (-0 == 0), so the value is unchanged
+tests/scalar/abs_value.c:11:14:literal:0->1	`a == 0` gives 0 either way (-0 == 0), so the value is unchanged
+tests/scalar/add_bounds.c:9:23:drop-conjunct:a >= 0 &&->	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/add_bounds.c:9:38:literal:1000000000->1000000001	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/add_bounds.c:9:49:drop-conjunct:&& b >= 0->	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/add_bounds.c:9:52:drop-conjunct:b >= 0 &&->	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/add_bounds.c:9:67:literal:1000000000->1000000001	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/call_contract_only.c:12:14:literal:2->1	the ensures `r >= x` is deliberately weak (the test pins that a caller sees the contract, not the body) and still holds for x * 1 and x * 3 with x >= 0
+tests/scalar/call_contract_only.c:12:14:literal:2->3	the ensures `r >= x` is deliberately weak (the test pins that a caller sees the contract, not the body) and still holds for x * 1 and x * 3 with x >= 0
+tests/scalar/call_contract_only.c:9:38:literal:1000->1001	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/call_in_expression.c:11:12:relop:>->>=	the callee's ensures `0 <= r <= 1000` still holds for the mutated value (`x >= 1000` gives 1000 either way, 999 is in range); the test pins the order and checks of nested calls, which depend on the contract only
+tests/scalar/call_in_expression.c:11:14:literal:1000->999	the callee's ensures `0 <= r <= 1000` still holds for the mutated value (`x >= 1000` gives 1000 either way, 999 is in range); the test pins the order and checks of nested calls, which depend on the contract only
+tests/scalar/call_in_expression.c:11:21:literal:1000->999	the callee's ensures `0 <= r <= 1000` still holds for the mutated value (`x >= 1000` gives 1000 either way, 999 is in range); the test pins the order and checks of nested calls, which depend on the contract only
+tests/scalar/call_no_contract.c:13:25:drop-conjunct:r >= -2147483647L - 1 &&->	equivalent on every value the clause can see: `r` is a call result converted to long from an int, so it is always in int's range and these bounds of int's range are implied
+tests/scalar/call_no_contract.c:13:45:literal:1->2	equivalent on every value the clause can see: `r` is a call result converted to long from an int, so it is always in int's range and these bounds of int's range are implied
+tests/scalar/call_precondition.c:15:25:relop:>->>=	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/call_precondition.c:15:27:literal:5->4	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/call_precondition.c:8:25:relop:>->>=	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/call_result_conversion.c:11:12:relop:>->>=	the callee's ensures `0 <= r <= 100` still holds for the mutated value (`x >= 100` gives 100 either way, 99 is in range); the test pins the checked conversion of the call result, which depends on the contract only
+tests/scalar/call_result_conversion.c:11:14:literal:100->99	the callee's ensures `0 <= r <= 100` still holds for the mutated value (`x >= 100` gives 100 either way, 99 is in range); the test pins the checked conversion of the call result, which depends on the contract only
+tests/scalar/call_result_conversion.c:11:20:literal:100->99	the callee's ensures `0 <= r <= 100` still holds for the mutated value (`x >= 100` gives 100 either way, 99 is in range); the test pins the checked conversion of the call result, which depends on the contract only
+tests/scalar/compare_mixed.c:10:29:literal:1->2	the requires still pins one value (i == -2): -2 + 0u > 0u is true, so the ensures r == 1 holds for the mutant
+tests/scalar/compare_mixed.c:13:17:relop:>->>=	the comparison still holds for i == -1 (4294967295u > 0u, and > 1u), so the result is still 1
+tests/scalar/compare_mixed.c:13:19:literal:0u->1u	the comparison still holds for i == -1 (4294967295u > 0u, and > 1u), so the result is still 1
+tests/scalar/compound_mixed.c:9:38:literal:1000->1001	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/compound_mixed.c:9:51:literal:1000u->1001u	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/compound_narrow.c:9:23:drop-conjunct:c >= -100 &&->	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/compound_narrow.c:9:29:literal:100->101	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/compound_narrow.c:9:41:literal:100->101	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/compound_ops.c:8:38:literal:1000->1001	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/compound_ushort.c:9:28:literal:100->101	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/compound_ushort.c:9:40:literal:100->101	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/cond_expr.c:10:12:relop:>->>=	`a >= b` selects a when a == b: the same value
+tests/scalar/contract_wf.c:16:23:drop-conjunct:a >= 0 &&->	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/contract_wf.c:16:38:literal:1000000000->1000000001	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/contract_wf.c:16:49:drop-conjunct:&& b >= 0->	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/contract_wf.c:16:52:drop-conjunct:b >= 0 &&->	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/contract_wf.c:16:67:literal:1000000000->1000000001	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/contract_wf.c:17:27:relop:==->!=	the body returns 0, so the second disjunct of the ensures holds under either spelling of the first
+tests/scalar/contract_wf.c:9:23:drop-conjunct:a >= 0 &&->	the same condition: the changed conjunct is implied by the others (a / b >= 1 and b > 0 imply a >= 0)
+tests/scalar/contract_wf.c:9:25:relop:>=->>	the same condition: the changed conjunct is implied by the others (a / b >= 1 and b > 0 imply a >= 0)
+tests/scalar/contract_wf.c:9:28:literal:0->1	the same condition: the changed conjunct is implied by the others (a / b >= 1 and b > 0 imply a >= 0)
+tests/scalar/conv_assign.c:11:13:literal:0->1	the initial value of `s` is overwritten by `s = x` before any use
+tests/scalar/default_argument.cpp:7:23:drop-conjunct:a >= 0 &&->	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/default_argument.cpp:7:38:literal:1000->1001	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/default_argument.cpp:7:43:drop-conjunct:&& b >= 0->	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/default_argument.cpp:7:46:drop-conjunct:b >= 0 &&->	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/default_argument.cpp:7:61:literal:1000->1001	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/default_argument_expr.cpp:10:3:delete-stmt:(void)b;->;	`(void)b;` discards a value without side effects or obligations: deleting it changes nothing that is verified
+tests/scalar/default_argument_expr.cpp:7:23:drop-conjunct:a >= 0 &&->	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/default_argument_expr.cpp:7:30:drop-conjunct:&& b >= 0->	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/default_argument_expr.cpp:7:30:swap-logic:&&->||	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/div_trunc.c:15:39:literal:2->3	a == -7 and b == 3: -7 % 3 == -1, so the ensures r == -1 still holds
+tests/scalar/div_trunc.c:8:29:literal:7->6	a == -6 and b == 2: -6 / 2 == -3, so the ensures r == -3 still holds
+tests/scalar/ensures_entry.c:8:23:drop-conjunct:x >= 0 &&->	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/ensures_entry.c:8:35:relop:<-><=	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/ensures_entry.c:8:37:literal:100->101	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/for_loop.c:12:11:literal:0->1	the initial value of `i` is overwritten by the for-initialization before any use
+tests/scalar/for_loop.c:14:22:drop-conjunct:0 <= i &&->	weakens the invariant, which is not needed by the proof: every obligation and the postcondition follow from the remaining clauses and the automatic range invariants
+tests/scalar/for_loop.c:9:38:literal:100->101	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/if_else.c:11:9:relop:<-><=	x == lo returns lo either way: the same value
+tests/scalar/if_else.c:13:16:relop:>->>=	x == hi returns hi either way: the same value
+tests/scalar/incdec_uchar.c:8:28:literal:255->256	`c == 256` is unsatisfiable for an unsigned char parameter: the precondition is false and the function verifies vacuously
+tests/scalar/local_const.c:9:25:drop-conjunct:r <= 1000 &&->	equivalent: the other conjunct `r == x * 100` with the precondition `0 <= x && x <= 10` already implies `r <= 1000` (Opus audit, 2026-10-19)
+tests/scalar/local_const.c:9:30:literal:1000->1001	equivalent: the other conjunct `r == x * 100` with the precondition `0 <= x && x <= 10` already implies `r <= 1000` (Opus audit, 2026-10-19)
+tests/scalar/long_arith.c:15:23:drop-conjunct:a >= 0 &&->	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/long_arith.c:15:38:literal:4611686018427387903L->4611686018427387904L	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/long_arith.c:15:77:literal:4611686018427387903L->4611686018427387904L	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/loop_condition.c:12:11:literal:0->1	starting at 1 instead of 0 reaches the same exit value: 1000 / n >= 10 for n <= 100
+tests/scalar/loop_condition.c:13:22:drop-conjunct:0 <= i &&->	weakens the invariant, which is not needed by the proof: every obligation and the postcondition follow from the remaining clauses and the automatic range invariants
+tests/scalar/loop_condition.c:14:22:literal:1000->1001	the mutated measure is also a valid measure: Silicon proved that it decreases at every iteration and is bounded (the program terminates under it as well)
+tests/scalar/loop_condition.c:14:22:literal:1000->999	the mutated measure is also a valid measure: Silicon proved that it decreases at every iteration and is bounded (the program terminates under it as well)
+tests/scalar/loop_condition.c:9:30:drop-conjunct:&& n <= 100->	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/loop_condition.c:9:38:literal:100->101	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/main_implicit.c:10:11:literal:5->4	`x` is 1, so `x > 5` (and `x > 4`, `x > 6`, `x >= 5`) is false: the branch is dead and the mutant executes the same statements
+tests/scalar/main_implicit.c:10:11:literal:5->6	`x` is 1, so `x > 5` (and `x > 4`, `x > 6`, `x >= 5`) is false: the branch is dead and the mutant executes the same statements
+tests/scalar/main_implicit.c:10:9:relop:>->>=	`x` is 1, so `x > 5` (and `x > 4`, `x > 6`, `x >= 5`) is false: the branch is dead and the mutant executes the same statements
+tests/scalar/main_implicit.c:11:12:literal:3->2	the branch `if (x > 5)` is dead for x == 1: nothing here is executed
+tests/scalar/main_implicit.c:11:12:literal:3->4	the branch `if (x > 5)` is dead for x == 1: nothing here is executed
+tests/scalar/main_implicit.c:11:5:delete-stmt:return 3;->;	the branch `if (x > 5)` is dead for x == 1: nothing here is executed
+tests/scalar/measure_expression.c:12:22:drop-conjunct:0 <= i &&->	weakens the invariant, which is not needed by the proof: every obligation and the postcondition follow from the remaining clauses and the automatic range invariants
+tests/scalar/measure_expression.c:13:26:literal:1000->1001	the mutated measure is also a valid measure: Silicon proved that it decreases at every iteration and is bounded (the program terminates under it as well)
+tests/scalar/measure_expression.c:13:26:literal:1000->999	the mutated measure is also a valid measure: Silicon proved that it decreases at every iteration and is bounded (the program terminates under it as well)
+tests/scalar/measure_expression.c:8:38:literal:1000->1001	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/measure_for.c:11:11:literal:0->1	the initial value of `i` is overwritten by the for-initialization before any use
+tests/scalar/measure_for.c:13:22:drop-conjunct:0 <= i &&->	weakens the invariant, which is not needed by the proof: every obligation and the postcondition follow from the remaining clauses and the automatic range invariants
+tests/scalar/measure_for.c:8:30:drop-conjunct:&& n <= 100->	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/measure_for.c:8:38:literal:100->101	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/measure_function_expression.c:8:38:literal:1000->1001	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/measure_function_expression.c:9:28:literal:1000->1001	the mutated measure is also a valid measure: Silicon proved that it decreases at every iteration and is bounded (the program terminates under it as well)
+tests/scalar/measure_function_expression.c:9:28:literal:1000->999	the mutated measure is also a valid measure: Silicon proved that it decreases at every iteration and is bounded (the program terminates under it as well)
+tests/scalar/measure_lexicographic.c:15:11:literal:0->1	the postcondition is `r == 0` on every path: the test pins only that the lexicographic measure is accepted, and the mutant terminates too (Silicon checked its measure)
+tests/scalar/measure_lexicographic.c:15:9:relop:>->>=	the postcondition is `r == 0` on every path: the test pins only that the lexicographic measure is accepted, and the mutant terminates too (Silicon checked its measure)
+tests/scalar/measure_lexicographic.c:16:23:literal:1->2	the postcondition is `r == 0` on every path: the test pins only that the lexicographic measure is accepted, and the mutant terminates too (Silicon checked its measure)
+tests/scalar/measure_lexicographic.c:16:5:delete-stmt:return lex(m, n - 1);->;	the postcondition is `r == 0` on every path: the test pins only that the lexicographic measure is accepted, and the mutant terminates too (Silicon checked its measure)
+tests/scalar/measure_lexicographic.c:18:22:literal:5->4	the postcondition is `r == 0` on every path: the test pins only that the lexicographic measure is accepted, and the mutant terminates too (Silicon checked its measure)
+tests/scalar/measure_lexicographic.c:18:22:literal:5->6	the postcondition is `r == 0` on every path: the test pins only that the lexicographic measure is accepted, and the mutant terminates too (Silicon checked its measure)
+tests/scalar/measure_loop.c:12:22:drop-conjunct:0 <= i &&->	weakens the invariant, which is not needed by the proof: every obligation and the postcondition follow from the remaining clauses and the automatic range invariants
+tests/scalar/measure_loop_return.c:12:22:drop-conjunct:0 <= i &&->	weakens the invariant, which is not needed by the proof: every obligation and the postcondition follow from the remaining clauses and the automatic range invariants
+tests/scalar/measure_loop_return.c:15:11:relop:>=->>	the contract `0 <= r <= n` is the only claim: any exit threshold within the loop keeps it, and the loop still terminates (Silicon checked the measure)
+tests/scalar/measure_loop_return.c:15:14:literal:50->49	the contract `0 <= r <= n` is the only claim: any exit threshold within the loop keeps it, and the loop still terminates (Silicon checked the measure)
+tests/scalar/measure_loop_return.c:15:14:literal:50->51	the contract `0 <= r <= n` is the only claim: any exit threshold within the loop keeps it, and the loop still terminates (Silicon checked the measure)
+tests/scalar/measure_loop_return.c:16:7:delete-stmt:return i;->;	without the early `return`, the loop runs to its end and returns i == n: still within `0 <= r <= n`, and it terminates (Silicon checked the measure)
+tests/scalar/measure_loop_return.c:8:30:drop-conjunct:&& n <= 100->	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/measure_loop_return.c:8:38:literal:100->101	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/measure_mutual.c:18:12:literal:1->0	the postcondition `r == 0 || r == 1` allows both results: the test pins that mutual recursion with measures is accepted
+tests/scalar/measure_mutual.c:29:12:literal:0->1	the postcondition `r == 0 || r == 1` allows both results: the test pins that mutual recursion with measures is accepted
+tests/scalar/mul_vars.c:9:38:literal:40000->40001	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/mul_vars.c:9:62:literal:40000->40001	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/old_cpp.cpp:7:23:drop-conjunct:x >= 0 &&->	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/old_cpp.cpp:7:35:relop:<-><=	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/old_cpp.cpp:7:37:literal:100->101	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/scalar_condition.c:19:10:literal:100->101	the function has no postcondition: the test pins that `requires(x)` makes the division safe, which the constant does not affect
+tests/scalar/scalar_condition.c:19:10:literal:100->99	the function has no postcondition: the test pins that `requires(x)` makes the division safe, which the constant does not affect
+tests/scalar/shl_const.c:8:38:literal:100000000->100000001	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/shr_floor.c:8:29:literal:7->8	a == -8: -8 >> 1 == -4, so the ensures r == -4 still holds
+tests/scalar/static_assert_ok.c:8:23:drop-conjunct:x >= 0 &&->	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/static_assert_ok.c:8:35:relop:<-><=	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/static_assert_ok.c:8:37:literal:100->101	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/two_loops.c:13:22:drop-conjunct:0 <= i &&->	weakens the invariant, which is not needed by the proof: every obligation and the postcondition follow from the remaining clauses and the automatic range invariants
+tests/scalar/two_loops.c:20:22:drop-conjunct:0 <= j &&->	weakens the invariant, which is not needed by the proof: every obligation and the postcondition follow from the remaining clauses and the automatic range invariants
+tests/scalar/two_loops.c:8:38:literal:1000->1001	weakens the requires, which has slack in this test: the body verifies under the weaker clause, so the mutant is a correct program
+tests/scalar/uchar_promote.c:14:28:literal:255->256	`a == 256` is unsatisfiable for an unsigned char parameter: the precondition is false and the function verifies vacuously
+tests/scalar/unsigned_wrap.c:15:28:literal:4294967295u->4294967296u	`4294967296u` converts to 0 (unsigned int): a == 0 gives a + 1u == 1, not 0, but 4294967296u has type unsigned long, so `a == 4294967296u` is false for every unsigned int a: the precondition is unsatisfiable and the function verifies vacuously
+tests/scalar/while_invariant.c:12:22:drop-conjunct:0 <= i &&->	weakens the invariant, which is not needed by the proof: every obligation and the postcondition follow from the remaining clauses and the automatic range invariants

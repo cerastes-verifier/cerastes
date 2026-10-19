@@ -77,6 +77,10 @@ doc/modules/ROOT/nav.adoc, pages/**/*.adoc and partials/**/*.adoc and reports
      paragraph outside `pass:[...]` and `+...+` literal spans: the pair
      formats everything between them, across code spans (a real build turned
      two `__` code spans into italics; one alone is left alone).
+  h. The error-messages page: exactly one `== <category>` section per category
+     of run_tests.DRIVER_CATEGORIES, each including an example that expects
+     `error <that category> @ ...` (details below; active once the page or a
+     verify test exists).
 
 `--html DIR` checks the built site instead of the sources (run it on build/doc
 after scripts/build_docs.sh) and does not depend on the line reader above.  It
@@ -99,6 +103,17 @@ backtick in the text outside `<pre>`, and an inline element closed while one
 inside it is still open (what a doubled formatting mark spanning code spans
 renders to).  What it cannot see (a `++` pair that eats text, `**` pairs)
 only the source lint catches.
+
+Rule h, the error-messages page.  `pages/error-messages.adoc` has exactly one
+level-2 section per category of `run_tests.DRIVER_CATEGORIES` (decision 0011 item 10),
+titled with the category name (`== overflow`), and each section includes, in a
+tagged region, at least one example whose header expects `error <that category> @ ...`
+(a `rejected` or `verified` example does not count, nor one that expects another
+category; an include in a comment does not count).  A section that is not a category,
+a category twice and a missing category are problems.  The rule is inactive while the
+page does not exist and the tree has no verify test; it is mandatory (a missing page
+is a problem) once any `verified`, `error` or `rejected` C or C++ test is under
+`tests/`, the same trigger as scripts/lint_viper.py's empty case.
 
 The exit status is 0 when clean, 1 on problems and 2 on usage errors (for
 example a missing doc component or a module other than ROOT).  `--root DIR`
@@ -1177,6 +1192,103 @@ def check_files(root: Path, report: Report) -> None:
                 "published without being tested: move it there as a test, or remove it"))
 
 
+ERROR_PAGE = "error-messages.adoc"
+_BLOCK_DELIM_RE = re.compile(r"^(?:-{4,}|\.{4,}|\+{4,}|/{4,}|```.*)$")
+_SECTION_RE = re.compile(r"^(=+)\s+(\S.*?)\s*$")
+
+
+def page_sections(text: str) -> list[tuple[int, str, int, int]]:
+    """(level, title, first line, last line) of the sections of a page that are
+    level 1 or 2 (`=` and `==` headings), outside delimited listing, literal,
+    passthrough and comment blocks and fences.  A section runs to the line before
+    the next heading of level 1 or 2."""
+    lines = text.replace("\r\n", "\n").split("\n")
+    heads: list[tuple[int, str, int]] = []
+    open_delim: str | None = None
+    for number, raw in enumerate(lines, start=1):
+        line = raw.rstrip()
+        if open_delim is not None:
+            if line == open_delim:
+                open_delim = None
+            continue
+        if _BLOCK_DELIM_RE.match(line):
+            open_delim = "```" if line.startswith("```") else line
+            continue
+        m = _SECTION_RE.match(line)
+        if m and len(m.group(1)) <= 2:
+            heads.append((len(m.group(1)), m.group(2), number))
+    out = []
+    for i, (level, title, number) in enumerate(heads):
+        end = heads[i + 1][2] - 1 if i + 1 < len(heads) else len(lines)
+        out.append((level, title, number, end))
+    return out
+
+
+def verify_tests_under_tests(root: Path) -> bool:
+    """Whether a `verified`, `error` or `rejected` C or C++ test is under tests/."""
+    base = root / "tests"
+    if not base.is_dir():
+        return False
+    for f in sorted(base.rglob("*")):
+        if f.suffix in (".c", ".cpp") and f.is_file():
+            try:
+                exp = rt.parse_header(rt.read_exact(f), f.suffix)
+            except rt.HeaderError:
+                continue
+            if exp.kind in rt.VERIFY_KINDS:
+                return True
+    return False
+
+
+def example_error_categories(inc: Include, component: Path) -> set[str]:
+    """The categories that the example of `inc` expects as `error` (empty for
+    anything else, or an example that cannot be read; other rules report those)."""
+    full = resolve_example(inc.target, component)
+    if full is None or not full.is_file() or full.suffix not in rt.TEST_SUFFIXES:
+        return set()
+    try:
+        exp = rt.parse_header(rt.read_exact(full), full.suffix)
+    except rt.HeaderError:
+        return set()
+    return {e.category for e in exp.errors} if exp.kind == "error" else set()
+
+
+def check_error_messages(root: Path, component: Path, text: str | None,
+                         includes: list[Include], report: Report) -> None:
+    """Rule h: one section per category on the error-messages page, each with an
+    example that expects that category."""
+    page = str((component / "pages" / ERROR_PAGE).relative_to(root))
+
+    def problem(line: int, message: str) -> None:
+        report.problems.append(Problem(page, line, message))
+    if text is None:
+        if verify_tests_under_tests(root):
+            problem(1, "the page is missing, but the tree has verify tests: it needs one "
+                       "`== <category>` section per category of the driver, each with a "
+                       "must-fail example (decision 0011 item 10)")
+        return
+    sections = [s for s in page_sections(text) if s[0] == 2]
+    seen: dict[str, int] = {}
+    for _level, title, first, last in sections:
+        if title not in rt.DRIVER_CATEGORIES:
+            problem(first, f"`== {title}` is not a category of the driver; the page has one "
+                           "`== <category>` section per category and nothing else at this "
+                           "level (put other text in the preamble or in a `===` subsection)")
+            continue
+        if title in seen:
+            problem(first, f"the section `== {title}` is twice on the page (first at line "
+                           f"{seen[title]})")
+            continue
+        seen[title] = first
+        if not any(title in example_error_categories(inc, component)
+                   for inc in includes if first <= inc.line <= last and not inc.in_comment):
+            problem(first, f"the section `== {title}` includes no example whose header expects "
+                           f"`error {title} @ ...`: show the error with a must-fail example")
+    for category in sorted(rt.DRIVER_CATEGORIES - set(seen)):
+        problem(1, f"no section `== {category}`: every category of the driver is explained "
+                   "(decision 0011 item 10)")
+
+
 def check_tree(root: Path) -> Report:
     """Run every rule on the documentation component under `root`.
 
@@ -1186,10 +1298,13 @@ def check_tree(root: Path) -> Report:
     component = root / COMPONENT
     report = Report()
     used: set[Path] = set()
+    error_page: tuple[str, list[Include]] | None = None
     for page in page_files(component):
         rel = str(page.relative_to(root))
         report.pages += 1
         scan = scan_page(rt.read_exact(page))
+        if page == component / "pages" / ERROR_PAGE:
+            error_page = (rt.read_exact(page), scan.includes)
         report.blocks += scan.blocks
         report.golden_blocks += scan.golden_blocks
         for line, message in scan.problems:
@@ -1198,6 +1313,10 @@ def check_tree(root: Path) -> Report:
             check_include(inc, rel, root, report, used, scan.includes)
 
     check_component_files(root, report)
+    if error_page is not None:
+        check_error_messages(root, component, error_page[0], error_page[1], report)
+    else:
+        check_error_messages(root, component, None, [], report)
     if (root / COMPONENT.parent).is_dir():
         check_files(root, report)
     examples = component / "examples"

@@ -18,6 +18,9 @@ a warning fails scripts/build_docs.sh (skipped without doc/node_modules).
 The golden-test cases run the real harness against a fake front end (a small
 Python script standing in for scripts/cerastes-fe.sh), so they always run;
 a few more run the real cerastes front end when CERASTES_FE is available.
+The verified/error/rejected tests (C and C++ through `cerastes verify`) are run
+against a fake verifier (FakeVerifierCase), so they always run; the class that
+runs the real driver is added with the driver (M3-3).
 Those end-to-end classes are skipped when their prerequisites are missing,
 unless CERASTES_REQUIRE_E2E=1 (scripts/check.sh sets it), in which case they
 fail: a missing front end must not silently turn them off.
@@ -33,6 +36,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -168,15 +172,15 @@ class HeaderTests(unittest.TestCase):
             "no line": ("// expect: error assert\n", ".vpr"),
             "line zero": ("// expect: error assert @ L0\n", ".vpr"),
             "mode on vpr": ("// expect: verified\n// mode: c23\n", ".vpr"),
-            "rejected on vpr": ("// expect: rejected unsupported-union\n", ".vpr"),
+            "rejected on vpr": ("// expect: rejected undefined_identifier @ L3\n", ".vpr"),
             "unknown mode": ("// expect: frontend-ok\n// mode: c++98\n", ".cpp"),
             "duplicate verified": ("// expect: verified\n// expect: verified\n", ".vpr"),
             "golden on vpr": ("// expect: golden\n", ".vpr"),
             "golden twice": ("// expect: golden\n// expect: golden\n", ".cpp"),
             "golden and verified": ("// expect: golden\n// expect: verified\n", ".cpp"),
-            "golden and error": ("// expect: golden\n// expect: error assert @ L3\n", ".cpp"),
+            "golden and error": ("// expect: golden\n// expect: error check @ L3\n", ".cpp"),
             "golden and frontend-ok": ("// expect: frontend-ok\n// expect: golden\n", ".c"),
-            "golden and rejected": ("// expect: golden\n// expect: rejected unsupported-union\n",
+            "golden and rejected": ("// expect: golden\n// expect: rejected undefined_identifier @ L3\n",
                                     ".cpp"),
             "golden after code": ("// expect: verified\nint x;\n// expect: golden\n", ".cpp"),
             "golden with unknown mode": ("// expect: golden\n// mode: c++17\n", ".cpp"),
@@ -227,6 +231,58 @@ class SiliconOutputTests(unittest.TestCase):
     def test_count_mismatch_is_a_problem(self):
         out = TWO_ERRORS.replace("found 2 errors", "found 3 errors")
         self.assertIsNotNone(rt.parse_silicon_output(out, 1).problem)
+
+
+class StrictSiliconVerdictTests(unittest.TestCase):
+    """A verdict is the banner, exactly one verdict line and its error list, nothing else (decision 0011
+    item 11).  Each case is a mutation of SUCCESS or TWO_ERRORS that must be "no verdict"/a problem."""
+
+    def problem(self, output, code):
+        result = rt.parse_silicon_output(output, code)
+        self.assertFalse(result.verified, output)
+        self.assertIsNotNone(result.problem, output)
+        return result.problem
+
+    def test_the_unmutated_outputs_are_clean(self):
+        self.assertTrue(rt.parse_silicon_output(SUCCESS, 0).verified)
+        self.assertIsNone(rt.parse_silicon_output(TWO_ERRORS, 1).problem)
+
+    def test_a_stray_line_after_success_is_not_a_verdict(self):
+        for extra in ("Exception in thread \"main\" java.lang.Error\n", "warning: something\n",
+                      "\tat silicon.Main.main(Main.scala:1)\n"):
+            with self.subTest(extra):
+                self.assertIn("not a banner and one verdict", self.problem(SUCCESS + extra, 0))
+                self.assertIn("unexpected line", self.problem(SUCCESS + extra, 0))
+
+    def test_a_stray_line_before_the_verdict_is_not_a_verdict(self):
+        banner, rest = SUCCESS.split("\n", 1)
+        self.assertIn("unexpected line", self.problem(banner + "\nWARNING: x\n" + rest, 0))
+
+    def test_no_banner_is_not_a_verdict(self):
+        self.assertIn("not a banner and one verdict", self.problem(SUCCESS.split("\n", 1)[1], 0))
+        self.assertIn("not a banner and one verdict", self.problem(TWO_ERRORS.split("\n", 1)[1], 1))
+
+    def test_two_banners_or_two_verdicts_are_not_a_verdict(self):
+        self.assertIn("not a banner and one verdict", self.problem(SUCCESS + SUCCESS, 0))
+        self.assertIn("not a banner and one verdict", self.problem(SUCCESS + TWO_ERRORS, 1))
+        self.assertIn("not a banner and one verdict", self.problem(TWO_ERRORS + TWO_ERRORS, 1))
+        banner, rest = SUCCESS.split("\n", 1)
+        self.assertIn("not a banner and one verdict", self.problem(banner + "\n" + banner + "\n" + rest, 0))
+
+    def test_a_verdict_line_alone_is_not_a_verdict(self):
+        self.assertIn("not a banner and one verdict",
+                      self.problem("Silicon found 0 errors in 0.1s:\n", 1))
+
+    def test_the_exit_status_still_has_to_agree(self):
+        self.assertIn("did not produce a verdict", self.problem(SUCCESS, 1))
+        self.assertIn("did not produce a verdict", self.problem(TWO_ERRORS, 0))
+
+    def test_a_multi_line_message_is_one_error(self):
+        out = TWO_ERRORS.replace("Assertion r > x might not hold. (t.vpr@5.11--5.16)",
+                                 "Assertion r > x\n    might not hold. (t.vpr@5.11--5.16)")
+        result = rt.parse_silicon_output(out, 1)
+        self.assertIsNone(result.problem)
+        self.assertEqual(len(result.errors), 2)
 
 
 class CompareTests(unittest.TestCase):
@@ -1889,6 +1945,243 @@ class IncludeLintTests(DocLintCase):
         self.lint("does not exist", count=1)
 
 
+class ErrorMessagesPageTests(DocLintCase):
+    """Rule h: the error-messages page has one section per category, each with an
+    example that expects it; inactive until the page or a verify test exists."""
+
+    CATEGORIES = sorted(rt.DRIVER_CATEGORIES)
+
+    def category_example(self, category, expect=None, name=None):
+        expect = f"error {category} @ L5" if expect is None else expect
+        return self.example(f"error-messages/{name or category}.c",
+                            f"// expect: {expect}\n// tag::body[]\nint f(void) {{ return 1; }}\n"
+                            "// end::body[]\n")
+
+    def section(self, category, include="auto"):
+        if include == "auto":
+            include = f"include::example$error-messages/{category}.c[tag=body]"
+        body = ["[source,c]", "----", include, "----", ""] if include else []
+        return "\n".join([f"== {category}", "", "What it means.", "", *body, ""])
+
+    def page_of(self, sections, preamble="= Error messages\n\nHow to read them.\n\n"):
+        return preamble + "".join(sections)
+
+    def full_page(self, only=None):
+        cats = self.CATEGORIES if only is None else only
+        for c in cats:
+            self.category_example(c)
+        return self.page_of(self.section(c) for c in cats)
+
+    def error_page(self, text):
+        return self.page("error-messages.adoc", text)
+
+    def test_a_complete_page_is_clean(self):
+        self.error_page(self.full_page())
+        report = self.check()
+        self.assertEqual(report.problems, [])
+        self.assertEqual(report.examples, len(self.CATEGORIES))
+
+    def test_the_categories_are_the_drivers(self):
+        self.assertEqual(self.CATEGORIES, sorted([
+            "precondition", "postcondition", "check", "invariant-entry", "invariant-preserved",
+            "overflow", "division-by-zero", "shift", "conversion", "missing-return", "termination"]))
+
+    def test_it_is_inactive_without_the_page_and_without_verify_tests(self):
+        self.assertEqual(self.messages(), [])
+        # tests of other kinds do not trigger it
+        for name, text in (("tests/il/a.cpp", "// expect: golden\n"),
+                           ("tests/annotations/a.cpp", "// expect: frontend-error a @ L3\n"),
+                           ("tests/viper-smoke/a.vpr", "// expect: verified\n"),
+                           ("tests/scalar/bad.c", "// expect: error nonsense @ L3\n"),
+                           ("tests/scalar/none.c", "// no header\n"),
+                           ("elsewhere/a.c", "// expect: verified\n"),
+                           ("doc/modules/ROOT/examples/a.c", "// expect: verified\n")):
+            with self.subTest(name):
+                path = self.root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text)
+                self.assertEqual([m for m in self.messages() if "error-messages" in m], [], name)
+
+    def test_it_is_mandatory_once_a_verify_test_exists(self):
+        for kind in ("verified", "error check @ L3", "rejected undefined_identifier @ L3"):
+            for suffix in (".c", ".cpp"):
+                with self.subTest(kind, suffix=suffix):
+                    path = self.root / "tests" / "scalar" / f"x{suffix}"
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(f"// expect: {kind}\n")
+                    problems = [m for m in self.messages() if "error-messages.adoc" in m]
+                    self.assertEqual(len(problems), 1, problems)
+                    self.assertIn("pages/error-messages.adoc:1: the page is missing, but the "
+                                  "tree has verify tests", problems[0])
+                    path.unlink()
+
+    def test_with_the_page_it_is_active_whatever_the_tests(self):
+        self.error_page(self.page_of([self.section("overflow")]))
+        for c in ("overflow",):
+            self.category_example(c)
+        problems = self.messages()
+        self.assertEqual(len(problems), len(self.CATEGORIES) - 1, problems)
+
+    def test_a_missing_section(self):
+        for missing in self.CATEGORIES:
+            with self.subTest(missing):
+                cats = [c for c in self.CATEGORIES if c != missing]
+                self.error_page(self.full_page(cats))
+                problems = [m for m in self.messages() if "error-messages.adoc" in m]
+                self.assertEqual(len(problems), 1, problems)
+                self.assertIn(f"no section `== {missing}`", problems[0])
+
+    def test_a_section_without_an_example(self):
+        for category in self.CATEGORIES:
+            with self.subTest(category):
+                for c in self.CATEGORIES:
+                    self.category_example(c)
+                sections = [self.section(c, include=None if c == category else "auto")
+                            for c in self.CATEGORIES]
+                self.error_page(self.page_of(sections))
+                problems = self.messages()
+                self.assertEqual(len(problems), 2, problems)  # (and the example is an orphan)
+                self.assertTrue(any(f"the section `== {category}` includes no example whose "
+                                    f"header expects `error {category} @ ...`" in p
+                                    for p in problems), problems)
+
+    def test_an_example_that_expects_another_category(self):
+        for c in self.CATEGORIES:
+            self.category_example(c)
+        other = [c for c in self.CATEGORIES if c != "overflow"][0]
+        sections = [self.section(c, include=(f"include::example$error-messages/{other}.c[tag=body]"
+                                             if c == "overflow" else "auto"))
+                    for c in self.CATEGORIES]
+        self.error_page(self.page_of(sections))
+        problems = [m for m in self.messages() if "includes no example" in m]
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("`== overflow`", problems[0])
+
+    def test_only_an_error_example_counts(self):
+        for expect in ("verified", "rejected undefined_identifier @ L5", "golden",
+                       "frontend-error undefined_identifier @ L5"):
+            with self.subTest(expect):
+                for c in self.CATEGORIES:
+                    self.category_example(c, expect=f"error {c} @ L5" if c != "check" else expect)
+                self.error_page(self.page_of(self.section(c) for c in self.CATEGORIES))
+                problems = [m for m in self.messages() if "includes no example" in m]
+                self.assertEqual(len(problems), 1, problems)
+                self.assertIn("`== check`", problems[0])
+
+    def test_an_example_may_expect_several_errors_and_one_in_a_header(self):
+        for c in self.CATEGORIES:
+            if c == "overflow":
+                self.category_example(c, expect="error check @ L3\n// expect: error overflow @ "
+                                                "inc/h.h:L7\n// expect: error overflow @ L9")
+            else:
+                self.category_example(c)
+        self.error_page(self.page_of(self.section(c) for c in self.CATEGORIES))
+        self.assertEqual(self.messages(), [])
+
+    def test_an_extra_section(self):
+        self.error_page(self.full_page() + "== Troubleshooting\n\nText.\n")
+        problems = self.messages()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("`== Troubleshooting` is not a category of the driver", problems[0])
+
+    def test_a_category_twice(self):
+        self.error_page(self.full_page() + self.section("shift"))
+        problems = self.messages()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("the section `== shift` is twice on the page", problems[0])
+
+    def test_titles_must_be_exact(self):
+        for title in ("Overflow", "`overflow`", "overflow errors", "overflow:", "division_by_zero"):
+            with self.subTest(title):
+                text = self.full_page().replace("== overflow\n", f"== {title}\n")
+                self.error_page(text)
+                problems = self.messages()
+                self.assertTrue(any(f"`== {title}` is not a category" in p for p in problems), problems)
+                self.assertTrue(any("no section `== overflow`" in p for p in problems), problems)
+
+    def test_other_heading_levels_are_not_sections(self):
+        # a `===` below a category is text, not a category; a `=` is the title
+        text = self.full_page() + "\n=== Hints\n\nText.\n"
+        self.error_page(text)
+        self.assertEqual(self.messages(), [])
+        # and a `===` named like a category does not make the category present
+        text = self.full_page(self.CATEGORIES[1:]).replace(f"== {self.CATEGORIES[1]}\n",
+                                                          f"=== {self.CATEGORIES[1]}\n")
+        self.error_page(self.page_of([f"== {self.CATEGORIES[0]}\n\nx\n", text]))
+        problems = [m for m in self.messages() if "error-messages.adoc" in m]
+        self.assertTrue(any(f"no section `== {self.CATEGORIES[1]}`" in p for p in problems), problems)
+
+    def test_headings_in_listings_and_comments_are_not_sections(self):
+        text = self.full_page(self.CATEGORIES[1:])
+        hidden = ["----\n== " + self.CATEGORIES[0] + "\n----\n", "////\n== " + self.CATEGORIES[0] + "\n////\n",
+                  "....\n== " + self.CATEGORIES[0] + "\n....\n", "```\n== " + self.CATEGORIES[0] + "\n```\n"]
+        for block in hidden:
+            with self.subTest(block[:4]):
+                self.error_page(text + "\n" + block)
+                # (other rules may object to the block itself; only the sections matter here)
+                problems = [m for m in self.messages() if "section" in m]
+                self.assertEqual(len(problems), 1, problems)
+                self.assertIn(f"no section `== {self.CATEGORIES[0]}`", problems[0])
+
+    def test_an_include_belongs_to_its_own_section(self):
+        # the example of `overflow` included under `shift` does not serve `overflow`
+        for c in self.CATEGORIES:
+            self.category_example(c)
+        sections = []
+        for c in self.CATEGORIES:
+            inc = {"overflow": "include::example$error-messages/shift.c[tag=body]",
+                   "shift": "include::example$error-messages/overflow.c[tag=body]"}.get(c, "auto")
+            sections.append(self.section(c, include=inc))
+        self.error_page(self.page_of(sections))
+        problems = [m for m in self.messages() if "includes no example" in m]
+        self.assertEqual(len(problems), 2, problems)
+
+    def test_an_example_before_the_first_section_serves_nobody(self):
+        for c in self.CATEGORIES:
+            self.category_example(c)
+        preamble = ("= Error messages\n\n[source,c]\n----\n"
+                    "include::example$error-messages/overflow.c[tag=body]\n----\n\n")
+        sections = [self.section(c, include=None if c == "overflow" else "auto")
+                    for c in self.CATEGORIES]
+        self.error_page(self.page_of(sections, preamble))
+        problems = [m for m in self.messages() if "includes no example" in m]
+        self.assertEqual(len(problems), 1, problems)
+
+    def test_an_include_in_a_comment_does_not_count(self):
+        for c in self.CATEGORIES:
+            self.category_example(c)
+        commented = "////\ninclude::example$error-messages/overflow.c[tag=body]\n////\n"
+        sections = [self.section(c, include=None) + (commented if c == "overflow" else "")
+                    if c == "overflow" else self.section(c) for c in self.CATEGORIES]
+        self.error_page(self.page_of(sections))
+        problems = [m for m in self.messages() if "includes no example" in m]
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("`== overflow`", problems[0])
+
+    def test_an_include_of_a_missing_example_does_not_count(self):
+        for c in self.CATEGORIES:
+            if c != "overflow":
+                self.category_example(c)
+        self.error_page(self.page_of(self.section(c) for c in self.CATEGORIES))
+        messages = self.messages()
+        self.assertTrue(any("includes no example" in m and "`== overflow`" in m for m in messages),
+                        messages)
+
+    def test_the_command_line_fails_on_a_problem(self):
+        self.error_page(self.full_page(self.CATEGORIES[1:]))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            status = cde.main(["--root", str(self.root)])
+        self.assertEqual(status, 1, out.getvalue())
+        self.assertIn(f"no section `== {self.CATEGORIES[0]}`", out.getvalue())
+
+    def test_the_real_tree_is_inactive_until_the_page_exists(self):
+        real = REAL_ROOT / "doc/modules/ROOT/pages/error-messages.adoc"
+        if real.exists():
+            self.skipTest("the page exists: it is checked by the doc lint itself")
+        self.assertFalse(cde.verify_tests_under_tests(REAL_ROOT))
+
+
 class OrphanLintTests(DocLintCase):
     def test_an_example_no_page_includes_is_an_orphan(self):
         self.example("a.cpp")
@@ -2820,6 +3113,11 @@ def active_lines(text, comment="#"):
 EVASIONS = ("||", "; true", ";true", "set +e", "continue-on-error", "if:")
 
 
+# The fewest cases the VIR self-test may be pinned to in check.sh (it generated 141 when the
+# pin was added); the pin only goes up.
+VIR_CASES_FLOOR = 141
+
+
 def check_sh_problems(text):
     """What is wrong with how scripts/check.sh runs the doc lint and the docs
     build: both lint calls and the build must be active (not commented out),
@@ -2853,6 +3151,77 @@ def check_sh_problems(text):
     verify = index(r"^\s*python3 scripts/edg_tree\.py describe --verify-build\s*$",
                    "the build verification")
     green = index(r"all green", "the final green line")
+    # M3: the self-test of the walker oracle runs with the harness self-test (the
+    # end-to-end classes must fail, not skip: CERASTES_REQUIRE_E2E), and the
+    # oracle itself checks every walker golden after the tests ran
+    selftest = index(r"^\s*python3 scripts/test_run_tests\.py\s*$", "the harness self-test")
+    oracle_test = index(r"^\s*python3 scripts/test_walker_oracle\.py\s*$",
+                        "the walker oracle self-test")
+    oracle = index(r"^\s*python3 scripts/walker_oracle\.py\s*$", "the walker oracle")
+    lint_test = index(r"^\s*python3 scripts/test_lint_viper\.py\s*$", "the Viper lint self-test")
+    lint = index(r"^\s*python3 scripts/lint_viper\.py\s*$", "the Viper lint")
+    mutate_test = index(r"^\s*python3 scripts/test_mutate\.py\s*$", "the mutation script self-test")
+    validate = index(r"^\s*python3 scripts/mutate\.py --validate\s*$", "the mutant validation")
+    doc_lint = index(r"^\s*python3 scripts/check_doc_examples\.py\s*$", "the doc lint")
+    export = index(r"^\s*export CERASTES_REQUIRE_E2E=1\s*$", "the end-to-end requirement")
+    if None not in (export, selftest, oracle_test) and not export < selftest < oracle_test:
+        problems.append("order must be: CERASTES_REQUIRE_E2E=1, the harness self-test, the "
+                        "walker oracle self-test")
+    if None not in (oracle_test, tests) and not oracle_test < tests:
+        problems.append("the walker oracle self-test must run before the tests")
+    if None not in (export, lint_test, tests) and not export < lint_test < tests:
+        problems.append("the Viper lint self-test must run after CERASTES_REQUIRE_E2E=1 and "
+                        "before the tests")
+    if None not in (export, mutate_test, tests) and not export < mutate_test < tests:
+        problems.append("the mutation script self-test must run after CERASTES_REQUIRE_E2E=1 and "
+                        "before the tests")
+    # the validation is a lint step: after the header check, before the build checks
+    if None not in (boot, validate, selftest) and not boot < validate < selftest:
+        problems.append("the mutant validation must run in the lint step: after the build and "
+                        "before the self-tests")
+    # the lint reads what the tests left in build/vpr
+    if None not in (tests, lint, oracle, verify) and not tests < lint < oracle < verify:
+        problems.append("order must be: tests, Viper lint, walker oracle, build verification")
+    # VIR's self-test: its cases are generated into a directory of its own (emptied first),
+    # checked by Silicon through the harness and linted, after the tests and before the oracle
+    vir_rm = index(r"^\s*rm -rf build/vir-selftest\s*$", "the emptying of build/vir-selftest")
+    vir_mkdir = index(r"^\s*mkdir -p build/vir-selftest\s*$", "the creation of build/vir-selftest")
+    vir_gen = index(r'^\s*vir_out="\$\(build/cerastes-vir-selftest build/vir-selftest\)"\s*$',
+                    "the VIR self-test")
+    vir_run = index(r'^\s*python3 scripts/run_tests\.py -j 8 --expect-passed "\$vir_cases" '
+                    r"build/vir-selftest\s*$", "the run of the VIR cases")
+    vir_lint = index(r"^\s*python3 scripts/lint_viper\.py build/vir-selftest/\*\.vpr\s*$",
+                     "the lint of the VIR cases")
+    # the case count is pinned: the tool's own number is read from its output, must be at least
+    # VIR_CASES_FLOOR (a smaller set must fail), and the harness must pass exactly that many
+    vir_print = index(r"^\s*printf '%s\\n' \"\$vir_out\"\s*$", "the print of the VIR self-test output")
+    vir_count = index(r"^\s*vir_cases=\"\$\(printf '%s\\n' \"\$vir_out\" \| sed -n "
+                      r"'s/\^cerastes-vir-selftest: \\\(\[0-9\]\[0-9\]\*\\\) lowering cases written to "
+                      r"\.\*, 0 problems\$/\\1/p'\)\"\s*$", "the reading of the VIR case count")
+    vir_min = index(r"^\s*VIR_CASES_MIN=\d+\s*$", "the floor of the VIR case count")
+    if vir_min is not None:
+        floor = int(re.search(r"=(\d+)", lines[vir_min]).group(1))
+        if floor < VIR_CASES_FLOOR:
+            problems.append(f"VIR_CASES_MIN is {floor}, below the {VIR_CASES_FLOOR} cases the "
+                            "tool generated when it was pinned (raise it with the tool, never lower it)")
+    vir_check = None
+    for i, l in enumerate(lines):
+        if l == 'if [[ ! "$vir_cases" =~ ^[0-9]+$ ]] || (( vir_cases < VIR_CASES_MIN )); then':
+            vir_check = i
+    if vir_check is None:
+        problems.append("no active line checks the VIR case count against VIR_CASES_MIN")
+    else:
+        rest = [l.strip() for l in lines[vir_check + 1:vir_check + 8] if l.strip()]
+        if not (len(rest) >= 3 and rest[0].startswith('echo "check.sh: ') and rest[0].endswith(">&2")
+                and rest[1] == "exit 1" and rest[2] == "fi"):
+            problems.append("the VIR case-count check must print to stderr, `exit 1` and end with `fi`")
+    steps = (vir_rm, vir_mkdir, vir_min, vir_gen, vir_print, vir_count, vir_check, vir_run, vir_lint)
+    if None not in steps + (tests, oracle):
+        if not tests < vir_rm < vir_mkdir < vir_gen < vir_print < vir_count < vir_check < vir_run \
+                < vir_lint < oracle or not vir_min < vir_gen:
+            problems.append("order must be: tests, then VIR_CASES_MIN, empty build/vir-selftest, "
+                            "create it, VIR self-test, read its case count, check the count, run "
+                            "its cases, lint them, then the walker oracle")
     if None not in (edg, boot) and not edg < boot:
         problems.append("the EDG tree guard must run before the build")
     if None not in (tests, verify, green) and not tests < verify < green:
@@ -2912,8 +3281,32 @@ python3 scripts/edg_tree.py check
 step "build"
 scripts/bootstrap.sh --build-only
 python3 scripts/check_doc_examples.py
+python3 scripts/mutate.py --validate
+step "harness self-test"
+export CERASTES_REQUIRE_E2E=1
+python3 scripts/test_run_tests.py
+python3 scripts/test_walker_oracle.py
+python3 scripts/test_lint_viper.py
+python3 scripts/test_mutate.py
 step "tests"
 python3 scripts/run_tests.py
+step "viper lint"
+python3 scripts/lint_viper.py
+step "vir self-test"
+VIR_CASES_MIN=141
+rm -rf build/vir-selftest
+mkdir -p build/vir-selftest
+vir_out="$(build/cerastes-vir-selftest build/vir-selftest)"
+printf '%s\\n' "$vir_out"
+vir_cases="$(printf '%s\\n' "$vir_out" | sed -n 's/^cerastes-vir-selftest: \\([0-9][0-9]*\\) lowering cases written to .*, 0 problems$/\\1/p')"
+if [[ ! "$vir_cases" =~ ^[0-9]+$ ]] || (( vir_cases < VIR_CASES_MIN )); then
+  echo "check.sh: the VIR self-test stated too few cases" >&2
+  exit 1
+fi
+python3 scripts/run_tests.py -j 8 --expect-passed "$vir_cases" build/vir-selftest
+python3 scripts/lint_viper.py build/vir-selftest/*.vpr
+step "walker oracle"
+python3 scripts/walker_oracle.py
 step "docs"
 scripts/build_docs.sh
 python3 scripts/check_doc_examples.py --html build/doc
@@ -3004,10 +3397,132 @@ jobs:
             "tests commented out": self.SH.replace(tests, "# " + tests),
             "tests with a path": self.SH.replace(tests, "python3 scripts/run_tests.py tests/il\n"),
         }
+        mutations.update(self.walker_oracle_mutations())
         for what, text in mutations.items():
             with self.subTest(what):
                 self.assertNotEqual(text, self.SH, "mutation did not apply")
                 self.assertTrue(check_sh_problems(text), what)
+
+    def walker_oracle_mutations(self):
+        """Ways to switch off the walker oracle or its self-test in check.sh."""
+        selftest = "python3 scripts/test_run_tests.py\n"
+        oracle_test = "python3 scripts/test_walker_oracle.py\n"
+        oracle = "python3 scripts/walker_oracle.py\n"
+        export = "export CERASTES_REQUIRE_E2E=1\n"
+        tests = "python3 scripts/run_tests.py\n"
+        verify = "python3 scripts/edg_tree.py describe --verify-build\n"
+        out = {}
+        lint_test = "python3 scripts/test_lint_viper.py\n"
+        lint = "python3 scripts/lint_viper.py\n"
+        mutate_test = "python3 scripts/test_mutate.py\n"
+        validate = "python3 scripts/mutate.py --validate\n"
+        for name, line in (("oracle self-test", oracle_test), ("oracle", oracle),
+                           ("harness self-test", selftest), ("lint self-test", lint_test),
+                           ("lint", lint), ("mutate self-test", mutate_test),
+                           ("mutant validation", validate)):
+            out[f"{name} commented out"] = self.SH.replace(line, "# " + line)
+            out[f"{name} removed"] = self.SH.replace(line, "")
+            out[f"{name} || true"] = self.SH.replace(line, line[:-1] + " || true\n")
+            out[f"{name} ; true"] = self.SH.replace(line, line[:-1] + "; true\n")
+            out[f"{name} in the background"] = self.SH.replace(line, line[:-1] + " &\n")
+        out["oracle with a path"] = self.SH.replace(oracle, "python3 scripts/walker_oracle.py tests/il\n")
+        out["oracle self-test with a filter"] = self.SH.replace(
+            oracle_test, "python3 scripts/test_walker_oracle.py -k nothing\n")
+        out["oracle before the tests"] = self.SH.replace(oracle, "").replace(tests, oracle + tests)
+        out["oracle after the verification"] = self.SH.replace(oracle, "").replace(verify, verify + oracle)
+        out["oracle self-test after the tests"] = self.SH.replace(oracle_test, "").replace(
+            tests, tests + oracle_test)
+        out["oracle self-test before the E2E requirement"] = self.SH.replace(oracle_test, "").replace(
+            export, oracle_test + export)
+        rm = "rm -rf build/vir-selftest\n"
+        mkdir = "mkdir -p build/vir-selftest\n"
+        gen = 'vir_out="$(build/cerastes-vir-selftest build/vir-selftest)"\n'
+        vrun = 'python3 scripts/run_tests.py -j 8 --expect-passed "$vir_cases" build/vir-selftest\n'
+        vlint = "python3 scripts/lint_viper.py build/vir-selftest/*.vpr\n"
+        for name, line in (("vir rm", rm), ("vir mkdir", mkdir), ("vir self-test", gen),
+                           ("vir run", vrun), ("vir lint", vlint)):
+            out[f"{name} commented out"] = self.SH.replace(line, "# " + line)
+            out[f"{name} removed"] = self.SH.replace(line, "")
+            out[f"{name} || true"] = self.SH.replace(line, line[:-1] + " || true\n")
+            out[f"{name} ; true"] = self.SH.replace(line, line[:-1] + "; true\n")
+            out[f"{name} in the background"] = self.SH.replace(line, line[:-1] + " &\n")
+        out["vir run into the harness's directory"] = self.SH.replace(
+            vrun, 'python3 scripts/run_tests.py -j 8 --expect-passed "$vir_cases" build/vpr\n')
+        out["vir run with another directory"] = self.SH.replace(
+            vrun, 'python3 scripts/run_tests.py -j 8 --expect-passed "$vir_cases" tests/viper-smoke\n')
+        out["vir run without the pinned count"] = self.SH.replace(
+            vrun, "python3 scripts/run_tests.py -j 8 build/vir-selftest\n")
+        out["vir run with another count"] = self.SH.replace(
+            vrun, 'python3 scripts/run_tests.py -j 8 --expect-passed 1 build/vir-selftest\n')
+        out["vir run with the count of the minimum"] = self.SH.replace(
+            vrun, 'python3 scripts/run_tests.py -j 8 --expect-passed "$VIR_CASES_MIN" build/vir-selftest\n')
+        out["vir self-test output not captured"] = self.SH.replace(
+            gen, "build/cerastes-vir-selftest build/vir-selftest\n")
+        out["vir lint of the harness's directory"] = self.SH.replace(
+            vlint, "python3 scripts/lint_viper.py build/vpr\n")
+        out["vir lint before its run"] = self.SH.replace(vlint, "").replace(vrun, vlint + vrun)
+        out["vir run before its generation"] = self.SH.replace(vrun, "").replace(gen, vrun + gen)
+        out["vir rm after its generation"] = self.SH.replace(rm, "").replace(gen, gen + rm)
+        out["vir mkdir before the rm"] = self.SH.replace(mkdir, "").replace(rm, mkdir + rm)
+        block = self.SH[self.SH.index("VIR_CASES_MIN=141\n"):self.SH.index(vlint) + len(vlint)]
+        self.assertIn(rm + mkdir + gen, block)
+        out["vir steps before the tests"] = self.SH.replace(block, "").replace(tests, block + tests)
+        out["vir steps after the oracle"] = self.SH.replace(block, "").replace(oracle, oracle + block)
+        out.update(self.vir_count_pin_mutations())
+        out["lint with a path"] = self.SH.replace(lint, "python3 scripts/lint_viper.py tests/viper-smoke\n")
+        out["lint before the tests"] = self.SH.replace(lint, "").replace(tests, lint + tests)
+        out["lint after the oracle"] = self.SH.replace(lint, "").replace(oracle, oracle + lint)
+        out["lint self-test after the tests"] = self.SH.replace(lint_test, "").replace(
+            tests, tests + lint_test)
+        out["lint self-test before the E2E requirement"] = self.SH.replace(lint_test, "").replace(
+            export, lint_test + export)
+        out["validation with a path"] = self.SH.replace(
+            validate, "python3 scripts/mutate.py --validate tests/il\n")
+        out["validation without the flag"] = self.SH.replace(validate, "python3 scripts/mutate.py\n")
+        out["validation after the self-tests"] = self.SH.replace(validate, "").replace(
+            selftest, selftest + validate)
+        out["mutate self-test after the tests"] = self.SH.replace(mutate_test, "").replace(
+            tests, tests + mutate_test)
+        out["no E2E requirement"] = self.SH.replace(export, "")
+        out["E2E requirement commented out"] = self.SH.replace(export, "# " + export)
+        return out
+
+    def vir_count_pin_mutations(self):
+        """Ways to weaken the pin of the VIR self-test's case count: a smaller set of cases
+        (a lower floor, no floor check, a check that cannot fail) or a count nobody compares."""
+        floor = "VIR_CASES_MIN=141\n"
+        printed = 'printf \'%s\\n\' "$vir_out"\n'
+        count = next(l + "\n" for l in self.SH.split("\n") if l.startswith("vir_cases="))
+        check = 'if [[ ! "$vir_cases" =~ ^[0-9]+$ ]] || (( vir_cases < VIR_CASES_MIN )); then\n'
+        body = '  echo "check.sh: the VIR self-test stated too few cases" >&2\n  exit 1\nfi\n'
+        out = {
+            "floor lowered": self.SH.replace(floor, "VIR_CASES_MIN=140\n"),
+            "floor zero": self.SH.replace(floor, "VIR_CASES_MIN=0\n"),
+            "floor removed": self.SH.replace(floor, ""),
+            "floor commented out": self.SH.replace(floor, "# " + floor),
+            "floor not a number": self.SH.replace(floor, "VIR_CASES_MIN=$vir_cases\n"),
+            "floor after the generation": self.SH.replace(floor, "").replace(
+                'python3 scripts/run_tests.py -j 8 --expect-passed', floor
+                + 'python3 scripts/run_tests.py -j 8 --expect-passed', 1),
+            "count not printed": self.SH.replace(printed, ""),
+            "count line removed": self.SH.replace(count, ""),
+            "count line commented out": self.SH.replace(count, "# " + count),
+            "count read from another pattern": self.SH.replace(
+                "lowering cases written", "cases written"),
+            "count check removed": self.SH.replace(check + body, ""),
+            "count check commented out": self.SH.replace(check, "# " + check),
+            "count check with the wrong comparison": self.SH.replace(
+                "vir_cases < VIR_CASES_MIN", "vir_cases > VIR_CASES_MIN"),
+            "count check that only warns": self.SH.replace(body, '  echo "check.sh: few" >&2\nfi\n'),
+            "count check that exits 0": self.SH.replace("  exit 1\nfi\n", "  exit 0\nfi\n"),
+            "count check that prints nowhere": self.SH.replace(" >&2\n  exit 1", "\n  exit 1"),
+            "count check after the run": self.SH.replace(check + body, "").replace(
+                "python3 scripts/lint_viper.py build/vir-selftest/*.vpr\n",
+                check + body + "python3 scripts/lint_viper.py build/vir-selftest/*.vpr\n"),
+            "count check before the count is read": self.SH.replace(check + body, "").replace(
+                count, check + body + count),
+        }
+        return out
 
     def test_the_edg_tree_lines_sit_between_the_right_neighbours(self):
         lines = [l for l in active_lines(self.SH) if l.strip()]
@@ -3481,6 +3996,37 @@ class EndToEndTests(unittest.TestCase):
         status, out = self.run_harness("// expect: error postcondition:insufficient.permission @ L12")
         self.assertEqual(status, 1, out)
         self.assertIn("wrong reason", out)
+
+    def run_main_capturing(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            status = rt.main([*argv])
+        return status, out.getvalue(), err.getvalue()
+
+    def test_expect_passed_pins_the_number_of_passing_tests(self):
+        # check.sh pins the VIR self-test's case count with it: a directory with fewer (or more)
+        # tests than the generator stated must fail even though every test passes
+        ok = str(rt.ROOT / "tests" / "viper-smoke" / "ok.vpr")
+        status, out, err = self.run_main_capturing(ok)
+        self.assertEqual(status, 0, out + err)
+        self.assertIn("1 passed, 0 failed", out)
+        status, out, err = self.run_main_capturing("--expect-passed", "1", ok)
+        self.assertEqual(status, 0, out + err)
+        for wrong in ("0", "2", "141"):
+            with self.subTest(wrong):
+                status, out, err = self.run_main_capturing("--expect-passed", wrong, ok)
+                self.assertEqual(status, 1, out + err)
+                self.assertIn(f"expected exactly {wrong} passing tests, got 1", err)
+
+    def test_expect_passed_does_not_hide_a_failure(self):
+        fixture = rt.ROOT / "tests" / "viper-smoke" / "fail.vpr"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fail.vpr"
+            path.write_text(re.sub(r"^// expect: .*$", "// expect: error postcondition @ L11",
+                                   fixture.read_text(), count=1, flags=re.MULTILINE))
+            status, out, err = self.run_main_capturing("--expect-passed", "0", str(path))
+        self.assertEqual(status, 1, out + err)
+        self.assertIn("0 passed, 1 failed", out)
 
     def test_expected_verified_fails(self):
         status, out = self.run_harness("// expect: verified")
@@ -4104,8 +4650,8 @@ class ExpectDiagHeaderTests(unittest.TestCase):
         bad = {
             "with golden": err + "// expect: golden\n",
             "with verified": err + "// expect: verified\n",
-            "with a viper error": err + "// expect: error assert @ L3\n",
-            "with rejected": err + "// expect: rejected unsupported-union\n",
+            "with a viper error": err + "// expect: error check @ L3\n",
+            "with rejected": err + "// expect: rejected undefined_identifier @ L3\n",
             "with frontend-ok": err + "// expect: frontend-ok\n",
             "no line": "// expect: frontend-error undefined_identifier\n",
             "line zero": "// expect: frontend-error undefined_identifier @ L0\n",
@@ -4137,8 +4683,8 @@ class NativeOkHeaderTests(unittest.TestCase):
                               ("frontend-ok", "frontend-ok"),
                               ("frontend-error undefined_identifier @ L3", "frontend-diag"),
                               ("frontend-warning unrecognized_pragma @ L3", "frontend-diag"),
-                              ("error assert @ L3", "error"),
-                              ("rejected unsupported-union", "rejected")):
+                              ("error check @ L3", "error"),
+                              ("rejected undefined_identifier @ L3", "rejected")):
             for order in (("{o}", "native-ok"), ("native-ok", "{o}")):
                 with self.subTest(outcome=outcome, order=order):
                     text = "".join(f"// expect: {l.format(o=outcome)}\n" for l in order)
@@ -4234,8 +4780,10 @@ class NativePolicyTests(RootedCase):
         # Dropping a directory would let its tests skip the ordinary compilers.
         self.assertEqual(
             [str(d) for d in rt.NATIVE_POLICY_DIRS],
-            ["tests/annotations", "doc/modules/ROOT/examples/annotations",
-             "doc/modules/ROOT/examples/ordinary-compilers"])
+            ["tests/annotations", "tests/scalar", "doc/modules/ROOT/examples/annotations",
+             "doc/modules/ROOT/examples/ordinary-compilers",
+             "doc/modules/ROOT/examples/verifying", "doc/modules/ROOT/examples/error-messages",
+             "doc/modules/ROOT/examples/integer-semantics"])
         self.assertEqual(rt.POSITIVE_KINDS, ("golden", "verified"))
 
     def test_a_positive_test_in_a_policy_directory_needs_native_ok(self):
@@ -4266,7 +4814,7 @@ class NativePolicyTests(RootedCase):
         exp = self.header("tests/annotations/a.cpp",
                           "// expect: frontend-error undefined_identifier @ L3\n")
         self.assertIsInstance(exp, rt.Expectation)
-        exp = self.header("tests/annotations/b.cpp", "// expect: error assert @ L3\n")
+        exp = self.header("tests/annotations/b.cpp", "// expect: error check @ L3\n")
         self.assertIsInstance(exp, rt.Expectation)
 
     def test_including_cerastes_h_needs_native_ok_anywhere(self):
@@ -4328,7 +4876,7 @@ class TwinRuleTests(RootedCase):
         self.assertEqual(exp.twin, "tests/annotations/ok.cpp")
 
     def test_a_verified_twin_passes(self):
-        self.put("tests/scalar/v.cpp", "// expect: verified\n")
+        self.put("tests/scalar/v.cpp", "// expect: verified\n// expect: native-ok\n")
         self.assertIsInstance(self.neg("b.cpp", "tests/scalar/v.cpp"), rt.Expectation)
 
     def test_every_negative_test_needs_a_twin(self):
@@ -4341,7 +4889,7 @@ class TwinRuleTests(RootedCase):
         self.assertIsInstance(err, rt.HeaderError)
 
     def test_every_must_fail_kind_needs_a_twin_in_negative(self):
-        for outcome in ("error assert @ L3", "rejected unsupported-union",
+        for outcome in ("error check @ L3", "rejected undefined_identifier @ L3",
                         "frontend-error undefined_identifier @ L3"):
             with self.subTest(outcome):
                 err = self.neg("x.cpp", None, outcome)
@@ -4398,8 +4946,8 @@ class TwinRuleTests(RootedCase):
         for name, text in (("fe.cpp", "// expect: frontend-error undefined_identifier @ L3\n"),
                            ("w.cpp", "// expect: frontend-warning unrecognized_pragma @ L3\n"),
                            ("e.vpr", "// expect: error assert @ L3\n"),
-                           ("r.cpp", "// expect: rejected unsupported-union\n"),
-                           ("x.cpp", "// expect: error assert @ L3\n")):
+                           ("r.cpp", "// expect: rejected undefined_identifier @ L3\n"),
+                           ("x.cpp", "// expect: error check @ L3\n")):
             with self.subTest(name):
                 self.put(f"tests/annotations/{name}", text)
                 if name.endswith(".vpr"):
@@ -4437,10 +4985,13 @@ class TwinRuleTests(RootedCase):
     def test_twins_are_checked_outside_negative_too(self):
         # A `twin:` that nothing would check is an ignored expectation.
         err = self.header("tests/scalar/t.cpp",
-                          "// expect: verified\n// twin: tests/annotations/missing.cpp\n")
+                          "// expect: verified\n// expect: native-ok\n"
+                          "// twin: tests/annotations/missing.cpp\n")
         self.assertIsInstance(err, rt.HeaderError)
+        self.assertIn("does not exist", str(err))
         ok = self.header("tests/scalar/t2.cpp",
-                         "// expect: verified\n// twin: tests/annotations/ok.cpp\n")
+                         "// expect: verified\n// expect: native-ok\n"
+                         "// twin: tests/annotations/ok.cpp\n")
         self.assertIsInstance(ok, rt.Expectation)
 
     def test_check_headers_reports_a_missing_twin(self):
@@ -4674,7 +5225,7 @@ class ValidateTagsTests(unittest.TestCase):
         self.reg = rt.TagRegistry.load(tmp.name)
 
     def exp(self, *tags):
-        return rt.Expectation("frontend-diag", [], None, ["c++20"],
+        return rt.Expectation("frontend-diag", [], ["c++20"],
                               [rt.ExpectedDiag("error", t, 3) for t in tags])
 
     def test_known_tags_pass(self):
@@ -4713,7 +5264,7 @@ class ValidateTagsTests(unittest.TestCase):
             self.exp("contract_not_boolean"), self.reg, known), rt.HeaderError)
 
     def test_check_diag_headers_replaces_bad_expectations(self):
-        good = rt.Expectation("golden", [], None, ["c++20"])
+        good = rt.Expectation("golden", [], ["c++20"])
         headers = {Path("a.cpp"): good, Path("b.cpp"): self.exp("nope"),
                    Path("c.cpp"): self.exp("exp_semicolon"),
                    Path("d.cpp"): rt.HeaderError("already bad")}
@@ -4725,7 +5276,7 @@ class ValidateTagsTests(unittest.TestCase):
         self.assertIsInstance(headers[Path("c.cpp")], rt.Expectation)
 
     def test_no_diagnostic_tests_need_no_tables(self):
-        headers = {Path("a.cpp"): rt.Expectation("golden", [], None, ["c++20"])}
+        headers = {Path("a.cpp"): rt.Expectation("golden", [], ["c++20"])}
         rt.check_diag_headers(headers, {})  # no CERASTES_EDG_GEN, and no error
 
 
@@ -4969,7 +5520,7 @@ class EvaluateDiagsTests(unittest.TestCase):
         return rt.ToolRun(code, stdout, stderr)
 
     def exp(self, *diags):
-        return rt.Expectation("frontend-diag", [], None, ["c++20"], list(diags))
+        return rt.Expectation("frontend-diag", [], ["c++20"], list(diags))
 
     GOOD = [rt.ExpectedDiag("error", "undefined_identifier", 2),
             rt.ExpectedDiag("warning", "attribute_namespace_unrecognized", 4),
@@ -5966,11 +6517,15 @@ class TreeGateTests(FakeFrontEndCase):
 
     def test_needs_edg_tools(self):
         def exp(kind):
-            return rt.Expectation(kind, [], None, ["c++20"])
+            return rt.Expectation(kind, [], ["c++20"])
         for kind in ("golden", "frontend-ok", "frontend-diag"):
             self.assertTrue(rt.needs_edg_tools({Path("a.cpp"): exp(kind)}), kind)
+        # `cerastes verify` is built from the EDG tree (M3): a C or C++ test with a
+        # verdict needs the tree and stamp checks.  A .vpr test runs Silicon only.
         for kind in ("verified", "error", "rejected"):
-            self.assertFalse(rt.needs_edg_tools({Path("a.cpp"): exp(kind)}), kind)
+            for name in ("a.cpp", "a.c"):
+                self.assertTrue(rt.needs_edg_tools({Path(name): exp(kind)}), (kind, name))
+            self.assertFalse(rt.needs_edg_tools({Path("a.vpr"): exp(kind)}), kind)
         self.assertFalse(rt.needs_edg_tools({Path("a.cpp"): rt.HeaderError("x")}))
         self.assertFalse(rt.needs_edg_tools({}))
 
@@ -7438,7 +7993,7 @@ class RefusedHeaderTests(unittest.TestCase):
             "no substring": "// expect: frontend-refused\n" + options,
             "with golden": refused + options + "// expect: golden\n",
             "with frontend-error": refused + options + "// expect: frontend-error a @ L3\n",
-            "with rejected": refused + options + "// expect: rejected x\n",
+            "with rejected": refused + options + "// expect: rejected undefined_identifier @ L3\n",
             "with native-ok": refused + options + "// expect: native-ok\n",
             "with a mode": refused + options + "// mode: c23\n",
             "options after code": refused + "int x;\n" + options,
@@ -7458,7 +8013,7 @@ class RefusedHeaderTests(unittest.TestCase):
 
 
 class EvaluateRefusedTests(unittest.TestCase):
-    EXP = rt.Expectation("frontend-refused", [], None, [], refused="is not supported",
+    EXP = rt.Expectation("frontend-refused", [], [], refused="is not supported",
                          fe_options=["--remove_unneeded_entities"])
 
     def evaluate(self, stderr, code, stdout="", exp=None):
@@ -7469,7 +8024,7 @@ class EvaluateRefusedTests(unittest.TestCase):
         self.assertEqual(rt.REFUSAL_PREFIX, "cerastes-fe: error: ")
 
     def test_edgs_command_line_error(self):
-        exp = rt.Expectation("frontend-refused", [], None, [], refused="invalid option",
+        exp = rt.Expectation("frontend-refused", [], [], refused="invalid option",
                              fe_options=["--bogus_opt"])
         self.assertEqual(self.evaluate(REAL_COMMAND_LINE, 4, exp=exp), [])
         # without --display_error_number EDG prints no number (what the real run shows)
@@ -7477,12 +8032,12 @@ class EvaluateRefusedTests(unittest.TestCase):
 
     def test_the_substring_must_be_in_the_message(self):
         problems = self.evaluate(DRIVER_REFUSAL, 2, exp=rt.Expectation(
-            "frontend-refused", [], None, [], refused="something else", fe_options=["--x"]))
+            "frontend-refused", [], [], refused="something else", fe_options=["--x"]))
         self.assertEqual(len(problems), 1)
         self.assertIn("does not contain `something else`", problems[0])
         # the prefix is not the message
         self.assertTrue(self.evaluate(DRIVER_REFUSAL, 2, exp=rt.Expectation(
-            "frontend-refused", [], None, [], refused="error: --remove", fe_options=["--x"]))
+            "frontend-refused", [], [], refused="error: --remove", fe_options=["--x"]))
             == [])
 
     def test_the_exit_status_must_fit_the_shape(self):
@@ -7519,7 +8074,7 @@ class EvaluateRefusedTests(unittest.TestCase):
                 self.assertTrue(self.evaluate(line, 2), line)
 
     def test_edgs_shape_is_strict(self):
-        exp = rt.Expectation("frontend-refused", [], None, [], refused="invalid", fe_options=["--x"])
+        exp = rt.Expectation("frontend-refused", [], [], refused="invalid", fe_options=["--x"])
         for stderr in (REAL_COMMAND_LINE.replace("Command-line error #571", "error #571"),
                        REAL_COMMAND_LINE.split("\n", 1)[0] + "\n",
                        REAL_COMMAND_LINE + "extra\n",
@@ -7723,10 +8278,2689 @@ class RealRefusedTests(MemoisedStamp, unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# `cerastes verify` tests: verified / error / rejected in C and C++ (M3-2)
+# ---------------------------------------------------------------------------
+
+DRIVER_TABLE_ROW = re.compile(r"^\s*\|\s*`([a-z][a-z-]*)`\s*\|", re.MULTILINE)
+
+
+class VerifyHeaderTests(unittest.TestCase):
+    def parse(self, text, suffix=".c"):
+        return rt.parse_header(text, suffix)
+
+    def test_the_categories_are_pinned(self):
+        # Decision 0011 item 10.  Adding one changes the driver, this harness, the
+        # error-messages page and the tests: a reviewed change.
+        self.assertEqual(rt.DRIVER_CATEGORIES, frozenset({
+            "precondition", "postcondition", "check", "invariant-entry", "invariant-preserved",
+            "overflow", "division-by-zero", "shift", "conversion", "missing-return", "termination"}))
+        self.assertEqual(rt.VERIFY_KINDS, ("verified", "error", "rejected"))
+
+    def test_every_category_parses_in_c_and_cpp(self):
+        for category in sorted(rt.DRIVER_CATEGORIES):
+            for suffix in (".c", ".cpp"):
+                with self.subTest(category, suffix=suffix):
+                    exp = self.parse(f"// expect: error {category} @ L7\n", suffix)
+                    self.assertEqual(exp.kind, "error")
+                    self.assertEqual(exp.errors, [expected(category, 7)])
+                    self.assertIsNone(exp.errors[0].reason)
+
+    def test_unknown_categories_are_header_errors(self):
+        # Viper kinds the driver never reports, near misses and invented names.
+        for category in ("assert", "assignment", "call", "wellformedness", "nonsense",
+                         "divide-by-zero", "precondtion", "invariant", "return", "narrowing"):
+            for suffix in (".c", ".cpp"):
+                with self.subTest(category, suffix=suffix):
+                    with self.assertRaises(rt.HeaderError) as ctx:
+                        self.parse(f"// expect: error {category} @ L3\n", suffix)
+                    self.assertIn("unknown error category", str(ctx.exception))
+        # spelled outside the grammar (capitals, underscores): not even an error line
+        for category in ("Overflow", "division_by_zero", "over flow"):
+            with self.subTest(category), self.assertRaises(rt.HeaderError):
+                self.parse(f"// expect: error {category} @ L3\n")
+
+    def test_viper_categories_stay_as_they_were_for_vpr(self):
+        self.assertEqual(self.parse("// expect: error assert @ L3\n", ".vpr").errors,
+                         [expected("assert", 3)])
+        # the driver's categories are not Viper's (`overflow` is no Viper kind)
+        with self.assertRaises(rt.HeaderError):
+            self.parse("// expect: error overflow @ L3\n", ".vpr")
+
+    def test_a_reason_belongs_to_vpr_only(self):
+        self.assertEqual(
+            self.parse("// expect: error assert:assertion.false @ L3\n", ".vpr").errors,
+            [expected("assert", 3, "assertion.false")])
+        for suffix in (".c", ".cpp"):
+            with self.subTest(suffix), self.assertRaises(rt.HeaderError) as ctx:
+                self.parse("// expect: error overflow:assertion.false @ L3\n", suffix)
+            self.assertIn("applies to .vpr tests only", str(ctx.exception))
+
+    def test_error_lines_repeat_and_keep_their_order(self):
+        exp = self.parse("// expect: error overflow @ L5\n// expect: error overflow @ L5\n"
+                         "// expect: error check @ L9\n")
+        self.assertEqual(exp.errors, [expected("overflow", 5), expected("overflow", 5),
+                                      expected("check", 9)])
+        self.assertEqual(exp.modes, ["c23"])
+        self.assertEqual(self.parse("// expect: error check @ L9\n", ".cpp").modes, ["c++20"])
+        self.assertEqual(self.parse("// expect: verified\n// mode: c++20, c23\n").modes,
+                         ["c++20", "c23"])
+
+    def test_rejected_grammar(self):
+        exp = self.parse("// expect: rejected cerastes-unsupported_type @ L5\n"
+                         "// expect: rejected cerastes-unsupported_type @ L5\n"
+                         "// expect: rejected undefined_identifier @ L9\n"
+                         "// expect: rejected 3rd_arg_of_assume_aligned_must_be_integral @ L10\n",
+                         ".cpp")
+        self.assertEqual(exp.kind, "rejected")
+        self.assertEqual(exp.errors, [])
+        self.assertEqual(exp.diags, [
+            rt.ExpectedDiag("error", "cerastes-unsupported_type", 5),
+            rt.ExpectedDiag("error", "cerastes-unsupported_type", 5),
+            rt.ExpectedDiag("error", "undefined_identifier", 9),
+            rt.ExpectedDiag("error", "3rd_arg_of_assume_aligned_must_be_integral", 10)])
+        self.assertTrue(rt.expects_failure(exp))
+        self.assertEqual(exp.modes, ["c++20"])
+
+    def test_the_old_rejected_grammar_is_gone(self):
+        # `rejected <tag>` without a line named no line to check: now a header error.
+        for text in ("// expect: rejected unsupported-union\n",
+                     "// expect: rejected cerastes-unsupported_type\n",
+                     "// expect: rejected @ L3\n",
+                     "// expect: rejected cerastes-unsupported_type @ L0\n",
+                     "// expect: rejected cerastes-unsupported_type:why @ L3\n",
+                     "// expect: rejected undefined-identifier @ L3\n",
+                     "// expect: rejected cerastes- @ L3\n",
+                     "// expect: rejected cerastes-Tag @ L3\n",
+                     "// expect: rejected x @ L3 extra\n",
+                     "int x;\n// expect: rejected x @ L3\n"):
+            with self.subTest(text), self.assertRaises(rt.HeaderError):
+                self.parse(text)
+
+    def test_rejected_is_not_mixed_and_not_for_vpr(self):
+        r = "// expect: rejected undefined_identifier @ L3\n"
+        for what, other in (("error", "// expect: error overflow @ L4\n"),
+                            ("verified", "// expect: verified\n"),
+                            ("golden", "// expect: golden\n"),
+                            ("frontend-ok", "// expect: frontend-ok\n"),
+                            ("frontend-error", "// expect: frontend-error undefined_identifier @ L4\n"),
+                            ("frontend-refused",
+                             "// expect: frontend-refused x\n// cerastes-fe-options: --x\n")):
+            with self.subTest(what), self.assertRaises(rt.HeaderError):
+                self.parse(r + other)
+            with self.subTest("reversed " + what), self.assertRaises(rt.HeaderError):
+                self.parse(other + r)
+        with self.assertRaises(rt.HeaderError):
+            self.parse(r, ".vpr")
+
+    def test_verified_stands_alone(self):
+        for other in ("// expect: verified\n", "// expect: error check @ L3\n",
+                      "// expect: rejected undefined_identifier @ L3\n"):
+            with self.subTest(other), self.assertRaises(rt.HeaderError):
+                self.parse("// expect: verified\n" + other)
+
+    def test_native_ok_accompanies_every_verdict(self):
+        for outcome, kind in (("verified", "verified"), ("error check @ L3", "error"),
+                              ("rejected undefined_identifier @ L3", "rejected")):
+            with self.subTest(outcome):
+                exp = self.parse(f"// expect: {outcome}\n// expect: native-ok\n")
+                self.assertEqual((exp.kind, exp.native_ok), (kind, True))
+
+    def test_verdicts_count_for_the_twin_rules(self):
+        err = self.parse("// expect: error check @ L3\n")
+        rej = self.parse("// expect: rejected undefined_identifier @ L3\n")
+        self.assertTrue(rt.expects_failure(err) and rt.expects_failure(rej))
+        self.assertFalse(rt.expects_failure(self.parse("// expect: verified\n")))
+        self.assertIn("verified", rt.POSITIVE_KINDS)
+        for kind in ("error", "rejected"):
+            self.assertNotIn(kind, rt.POSITIVE_KINDS)
+
+
+class HeaderFileGrammarTests(unittest.TestCase):
+    """`@ <repository-relative file>:L<n>` names a line of a user header (B3)."""
+
+    def parse(self, text, suffix=".c"):
+        return rt.parse_header(text, suffix)
+
+    def test_an_error_in_a_header(self):
+        exp = self.parse("// expect: error overflow @ tests/scalar/headers/h.h:L5\n"
+                         "// expect: error check @ L9\n"
+                         "// expect: error check @ a_b-c/d.e+f/h.h:L1\n")
+        self.assertEqual(exp.errors, [rt.ExpectedError("overflow", None, 5, "tests/scalar/headers/h.h"),
+                                      rt.ExpectedError("check", None, 9, None),
+                                      rt.ExpectedError("check", None, 1, "a_b-c/d.e+f/h.h")])
+        self.assertEqual(str(exp.errors[0]), "overflow @ tests/scalar/headers/h.h:L5")
+        self.assertEqual(str(exp.errors[1]), "check @ L9")
+
+    def test_a_rejection_in_a_header(self):
+        exp = self.parse("// expect: rejected undefined_identifier @ tests/scalar/headers/h.h:L2\n"
+                         "// expect: rejected cerastes-unsupported_type @ L3\n", ".cpp")
+        self.assertEqual(exp.diags, [
+            rt.ExpectedDiag("error", "undefined_identifier", 2, "tests/scalar/headers/h.h"),
+            rt.ExpectedDiag("error", "cerastes-unsupported_type", 3, None)])
+        self.assertEqual(str(exp.diags[0]), "undefined_identifier @ tests/scalar/headers/h.h:L2")
+
+    def test_bad_files(self):
+        for what, file in (("absolute", "/abs/h.h"), ("dot dot", "a/../b.h"), ("leading dot dot", "../h.h"),
+                           ("dot", "a/./b.h"), ("leading dot", "./h.h"), ("double slash", "a//b.h"),
+                           ("trailing slash", "a/"), ("space", "a b.h"), ("empty", "")):
+            for kind in ("error check", "rejected undefined_identifier"):
+                with self.subTest(what, kind=kind), self.assertRaises(rt.HeaderError):
+                    self.parse(f"// expect: {kind} @ {file}:L3\n")
+
+    def test_only_error_and_rejected_name_a_file(self):
+        for text in ("// expect: frontend-error undefined_identifier @ h.h:L3\n",
+                     "// expect: frontend-warning unrecognized_pragma @ h.h:L3\n"):
+            with self.subTest(text), self.assertRaises(rt.HeaderError):
+                self.parse(text)
+        with self.assertRaises(rt.HeaderError):  # not for Viper
+            self.parse("// expect: error assert @ a.vpr:L3\n", ".vpr")
+        with self.assertRaises(rt.HeaderError):
+            self.parse("// expect: error check @ h.h:L0\n")
+        with self.assertRaises(rt.HeaderError):
+            self.parse("// expect: error check @ h.h:3\n")
+
+
+class COnlyHeaderTests(unittest.TestCase):
+    def test_grammar(self):
+        exp = rt.parse_header("// expect: verified\n// c-only: uses a C99 designated initializer\n",
+                              ".c")
+        self.assertEqual((exp.c_only, exp.modes), ("uses a C99 designated initializer", ["c23"]))
+        self.assertIsNone(rt.parse_header("// expect: verified\n", ".c").c_only)
+        both = rt.parse_header("// expect: verified\n// mode: c23\n// c-only: why\n", ".c")
+        self.assertEqual(both.modes, ["c23"])
+
+    def test_bad_headers(self):
+        for what, text, suffix in (
+                ("no reason", "// expect: verified\n// c-only:\n", ".c"),
+                ("blank reason", "// expect: verified\n// c-only:    \n", ".c"),
+                ("twice", "// expect: verified\n// c-only: a\n// c-only: b\n", ".c"),
+                ("on a .cpp", "// expect: verified\n// c-only: a\n", ".cpp"),
+                ("on a .vpr", "// expect: verified\n// c-only: a\n", ".vpr"),
+                ("with c++20", "// expect: verified\n// mode: c23, c++20\n// c-only: a\n", ".c"),
+                ("with c++20 alone", "// expect: verified\n// mode: c++20\n// c-only: a\n", ".c"),
+                ("after code", "// expect: verified\nint x;\n// c-only: a\n", ".c")):
+            with self.subTest(what), self.assertRaises(rt.HeaderError):
+                rt.parse_header(text, suffix)
+
+
+class VerifyTagValidationTests(unittest.TestCase):
+    """The tags of a `rejected` test are validated like frontend-error ones."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        write_gen(tmp.name)
+        self.reg = rt.TagRegistry.load(tmp.name)
+
+    def exp(self, *tags):
+        return rt.parse_header("".join(f"// expect: rejected {t} @ L3\n" for t in tags), ".c")
+
+    def test_known_and_unknown_edg_tags(self):
+        self.assertIsNone(rt.validate_diag_tags(
+            self.exp("undefined_identifier", "exp_semicolon"), self.reg, None))
+        err = rt.validate_diag_tags(self.exp("undefined_identifer"), self.reg, None)
+        self.assertIsInstance(err, rt.HeaderError)
+        self.assertIn("did you mean undefined_identifier", str(err))
+
+    def test_cerastes_tags_are_checked_against_the_definitions(self):
+        known = {"unsupported_type"}
+        self.assertIsNone(rt.validate_diag_tags(
+            self.exp("cerastes-unsupported_type"), self.reg, known))
+        self.assertIn("unknown cerastes diagnostic", str(rt.validate_diag_tags(
+            self.exp("cerastes-unsupported_typo"), self.reg, known)))
+        self.assertIn("no cerastes diagnostics are defined yet", str(rt.validate_diag_tags(
+            self.exp("cerastes-unsupported_type"), self.reg, None)))
+
+    def test_check_diag_headers_reads_rejected_tests_too(self):
+        headers = {Path("a.c"): self.exp("nope"), Path("b.c"): self.exp("exp_semicolon")}
+        with tempfile.TemporaryDirectory() as tmp:
+            write_gen(tmp)
+            rt.check_diag_headers(headers, {"CERASTES_EDG_GEN": tmp})
+        self.assertIsInstance(headers[Path("a.c")], rt.HeaderError)
+        self.assertIsInstance(headers[Path("b.c")], rt.Expectation)
+
+    def test_a_verdict_without_diagnostics_needs_no_tables(self):
+        headers = {Path("a.c"): rt.parse_header("// expect: verified\n", ".c"),
+                   Path("b.c"): rt.parse_header("// expect: error check @ L3\n", ".c")}
+        rt.check_diag_headers(headers, {})  # no CERASTES_EDG_GEN, and no error
+
+
+VF = "tests/scalar/t.c"
+VERIFIED_LINE = (f"{VF}: verified (2 functions; one translation unit: assumes that functions "
+                 "defined elsewhere satisfy the contracts declared here)\n")
+OVERFLOW_ERROR = f"{VF}:5: error: overflow: signed addition may overflow\n"
+POST_ERROR = (f"{VF}:9: error: postcondition: the postcondition may not hold\n"
+              f"{VF}:3: note: the `ensures` clause is here\n")
+REJECTION = (f'"{VF}", line 4 (col. 12): error #20: identifier "zzz" is undefined\n'
+             f'1 error detected in the compilation of "{VF}".\n')
+
+
+class ParseVerifyOutputTests(unittest.TestCase):
+    def test_a_verified_line(self):
+        p = rt.parse_verify_output(VERIFIED_LINE, "")
+        self.assertEqual((p.verified, p.functions, p.errors, p.problems), ([VF], [2], [], []))
+        one = VERIFIED_LINE.replace("2 functions", "1 function")
+        self.assertEqual(rt.parse_verify_output(one, "").functions, [1])
+
+    def test_the_verified_line_needs_its_count(self):
+        for line in (f"{VF}: verified (functions; one translation unit: x)\n",
+                     f"{VF}: verified (two functions; one translation unit: x)\n",
+                     f"{VF}: verified (2 functions)\n", f"{VF}: verified (2)\n",
+                     f"{VF}: verified\n"):
+            with self.subTest(line):
+                p = rt.parse_verify_output(line, "")
+                self.assertEqual(p.verified, [])
+                self.assertTrue(p.problems)
+
+    def test_errors_and_notes(self):
+        p = rt.parse_verify_output(OVERFLOW_ERROR + POST_ERROR, "")
+        self.assertEqual([(e.category, e.line, e.file) for e in p.errors],
+                         [("overflow", 5, VF), ("postcondition", 9, VF)])
+        self.assertEqual(p.problems, [])
+        self.assertEqual(p.errors[0].reason, "")
+        self.assertNotIn(":", str(p.errors[0]).split(" @ ")[0])  # no empty reason shown
+
+    def test_stdout_is_the_stream_of_the_verdict_and_the_errors(self):
+        # decision 0011 item 9: they are on stdout; the same lines on stderr are a problem
+        for what, text, needle in (("an error", OVERFLOW_ERROR, "a verdict or error line on stderr"),
+                                   ("a note", POST_ERROR, "a verdict or error line on stderr"),
+                                   ("the verdict", VERIFIED_LINE, "a verdict or error line on stderr")):
+            with self.subTest(what):
+                p = rt.parse_verify_output("", text)
+                self.assertEqual(p.errors, [])
+                self.assertEqual(p.verified, [])
+                self.assertTrue(any(needle in x for x in p.problems), p.problems)
+
+    def test_nothing_else_is_printed_on_stderr(self):
+        warning = (f'"{VF}", line 4 (col. 3): warning #177-D: variable "x" was declared but '
+                   "never referenced\n    int x;\n        ^\n")
+        p = rt.parse_verify_output(VERIFIED_LINE, warning)
+        self.assertEqual(len(p.problems), 1, p.problems)
+        self.assertIn("a front-end diagnostic in a run that reached Silicon", p.problems[0])
+        p = rt.parse_verify_output(VERIFIED_LINE, "java: noise\n")
+        self.assertIn("unexpected output on stderr: java: noise", p.problems[0])
+        self.assertEqual(rt.parse_verify_output(VERIFIED_LINE, "\n   \n").problems, [])
+
+    def test_front_end_diagnostics_do_not_belong_on_stdout(self):
+        p = rt.parse_verify_output(REJECTION, "")
+        self.assertTrue(any("a front-end diagnostic on stdout" in x for x in p.problems), p.problems)
+
+    def test_continuation_and_blank_lines_are_dropped(self):
+        p = rt.parse_verify_output(OVERFLOW_ERROR + "\n    int x = a + b;\n          ^\n", "")
+        self.assertEqual((len(p.errors), p.problems), (1, []))
+
+    def test_unknown_categories_are_not_categories(self):
+        p = rt.parse_verify_output(f"{VF}:5: error: frobnicate: it broke\n", "")
+        self.assertEqual(p.errors[0].category, rt.UNKNOWN)
+        self.assertIn("unknown category `frobnicate`", p.errors[0].message)
+
+    def test_what_is_not_understood_is_a_problem(self):
+        for what, text, needle in (
+                ("note first", f"{VF}:3: note: lonely\n", "no error before it"),
+                ("note after a verified line",
+                 VERIFIED_LINE + f"{VF}:3: note: lonely\n", "no error before it"),
+                ("no category", f"{VF}:5: error: signed addition may overflow\n",
+                 "without `<category>: <message>`"),
+                ("garbage", "something odd\n", "unrecognized driver output: something odd"),
+                ("a summary line", OVERFLOW_ERROR + "1 error\n",
+                 "unrecognized driver output: 1 error"),
+                ("an EDG diagnostic", REJECTION, "a front-end diagnostic on stdout"),
+                ("an EDG warning", f'"{VF}", line 4 (col. 3): warning #177-D: variable "x" '
+                                    "was declared but never referenced\n",
+                 "a front-end diagnostic on stdout"),
+                ("a verified line with no detail", f"{VF}: verified\n",
+                 "unrecognized driver output")):
+            with self.subTest(what):
+                p = rt.parse_verify_output(text, "")
+                self.assertTrue(any(needle in x for x in p.problems), p.problems)
+
+    def test_a_note_belongs_to_the_error_before_it(self):
+        text = OVERFLOW_ERROR + f"{VF}:3: note: n1\n{VF}:4: note: n2\n"
+        self.assertEqual(rt.parse_verify_output(text, "").problems, [])
+
+
+class EvaluateVerifyTests(unittest.TestCase):
+    """The pass/fail verdict of one run, with a fake `ToolRun`."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        write_gen(tmp.name)
+        self.reg = rt.TagRegistry.load(tmp.name)
+
+    def evaluate(self, expects, code, stdout="", stderr="", file=VF, suffix=".c"):
+        exp = rt.parse_header("".join(f"// expect: {e}\n" for e in expects), suffix)
+        return rt.evaluate_verify(rt.ToolRun(code, stdout, stderr), exp, self.reg, file)
+
+    def assertFails(self, problems, needle):
+        self.assertTrue(any(needle in p for p in problems), problems)
+
+    # -- verified ----------------------------------------------------------
+
+    def test_verified_passes(self):
+        self.assertEqual(self.evaluate(["verified"], 0, VERIFIED_LINE), [])
+        # the verdict is on stdout: on stderr it is a problem, and then no verdict is found
+        problems = self.evaluate(["verified"], 0, "", VERIFIED_LINE)
+        self.assertFails(problems, "a verdict or error line on stderr")
+        self.assertFails(problems, "exactly one")
+
+    def test_verified_counts_functions(self):
+        zero = VERIFIED_LINE.replace("2 functions", "0 functions")
+        self.assertFails(self.evaluate(["verified"], 0, zero), "counts no function")
+        one = VERIFIED_LINE.replace("2 functions", "1 function")
+        self.assertEqual(self.evaluate(["verified"], 0, one), [])
+        self.assertNotIn("counts no function", " ".join(self.evaluate(["verified"], 0, VERIFIED_LINE)))
+
+    def test_a_warning_on_stderr_fails_a_verified_run(self):
+        warning = f'"{VF}", line 4 (col. 3): warning #177-D: unused\n'
+        self.assertFails(self.evaluate(["verified"], 0, VERIFIED_LINE, warning),
+                         "a front-end diagnostic in a run that reached Silicon")
+        self.assertFails(self.evaluate(["error overflow @ L5"], 1, OVERFLOW_ERROR, warning),
+                         "a front-end diagnostic in a run that reached Silicon")
+
+    def test_verified_needs_exit_zero_and_the_line(self):
+        self.assertFails(self.evaluate(["verified"], 0, ""), "exactly one")
+        self.assertFails(self.evaluate(["verified"], 0, VERIFIED_LINE + VERIFIED_LINE), "exactly one")
+        self.assertFails(self.evaluate(["verified"], 0, VERIFIED_LINE.replace(VF, "other.c")),
+                         "names other.c")
+
+    def test_verified_with_an_error_line_fails(self):
+        self.assertFails(self.evaluate(["verified"], 0, VERIFIED_LINE + OVERFLOW_ERROR),
+                         "exit status 0 but the output has `error:` lines")
+        problems = self.evaluate(["verified"], 1, OVERFLOW_ERROR)
+        self.assertFails(problems, "expected verified, but verification errors were reported")
+        self.assertFails(problems, "overflow @ L5")
+
+    def test_verified_with_garbage_fails(self):
+        self.assertFails(self.evaluate(["verified"], 0, VERIFIED_LINE + "odd\n"),
+                         "unrecognized driver output: odd")
+
+    # -- error -------------------------------------------------------------
+
+    def test_error_passes_with_exact_errors_and_notes(self):
+        self.assertEqual(self.evaluate(["error overflow @ L5"], 1, OVERFLOW_ERROR), [])
+        self.assertEqual(self.evaluate(["error overflow @ L5", "error postcondition @ L9"], 1,
+                                       OVERFLOW_ERROR + POST_ERROR), [])
+        self.assertEqual(self.evaluate(["error postcondition @ L9", "error overflow @ L5"], 1,
+                                       OVERFLOW_ERROR + POST_ERROR), [])  # any order
+
+    def test_error_wrong_line(self):
+        problems = self.evaluate(["error overflow @ L6"], 1, OVERFLOW_ERROR)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("wrong line: expected overflow @ L6, got overflow @ L5", problems[0])
+
+    def test_error_wrong_category(self):
+        problems = self.evaluate(["error conversion @ L5"], 1, OVERFLOW_ERROR)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("wrong reason: expected conversion @ L5, got overflow @ L5", problems[0])
+
+    def test_error_missing_and_unexpected(self):
+        self.assertFails(self.evaluate(["error overflow @ L5", "error check @ L20"], 1,
+                                       OVERFLOW_ERROR), "missing error: expected check @ L20")
+        self.assertFails(self.evaluate(["error overflow @ L5"], 1, OVERFLOW_ERROR + POST_ERROR),
+                         "unexpected error: postcondition @ L9")
+
+    def test_error_multiset(self):
+        two = OVERFLOW_ERROR + OVERFLOW_ERROR.replace("addition", "multiplication")
+        self.assertEqual(self.evaluate(["error overflow @ L5"] * 2, 1, two), [])
+        self.assertFails(self.evaluate(["error overflow @ L5"], 1, two), "unexpected error")
+        self.assertFails(self.evaluate(["error overflow @ L5"] * 2, 1, OVERFLOW_ERROR),
+                         "missing error")
+
+    def test_errors_must_be_sorted_by_file_line_and_category(self):
+        # decision 0011 item 9
+        sorted_ok = OVERFLOW_ERROR + POST_ERROR
+        self.assertEqual(self.evaluate(["error overflow @ L5", "error postcondition @ L9"], 1,
+                                       sorted_ok), [])
+        swapped = POST_ERROR + OVERFLOW_ERROR
+        problems = self.evaluate(["error overflow @ L5", "error postcondition @ L9"], 1, swapped)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("not sorted by printed path (byte order), line and category", problems[0])
+        # the category breaks a tie on the line; the file comes first
+        check = f"{VF}:5: error: check: c\n"
+        self.assertEqual(self.evaluate(["error overflow @ L5", "error check @ L5"], 1,
+                                       check + OVERFLOW_ERROR), [])
+        self.assertFails(self.evaluate(["error overflow @ L5", "error check @ L5"], 1,
+                                       OVERFLOW_ERROR + check), "not sorted")
+        header = OVERFLOW_ERROR.replace(VF, "inc/h.h")
+        expects = ["error overflow @ L5", "error overflow @ inc/h.h:L5"]
+        self.assertEqual(self.evaluate(expects, 1, header + OVERFLOW_ERROR), [])
+        self.assertFails(self.evaluate(expects, 1, OVERFLOW_ERROR + header), "not sorted")
+        # a line number is a number: 10 comes after 9
+        nine = f"{VF}:9: error: check: c\n"
+        ten = f"{VF}:10: error: check: c\n"
+        self.assertEqual(self.evaluate(["error check @ L9", "error check @ L10"], 1, nine + ten), [])
+        self.assertFails(self.evaluate(["error check @ L9", "error check @ L10"], 1, ten + nine),
+                         "not sorted")
+
+    def test_the_order_is_byte_order(self):
+        capital = "Z/h.h:5: error: check: x\n"  # 'Z' (0x5a) sorts before 'a' (0x61)
+        lower = "a/h.h:5: error: check: x\n"
+        expects = ["error check @ Z/h.h:L5", "error check @ a/h.h:L5"]
+        self.assertEqual(self.evaluate(expects, 1, capital + lower), [])
+        self.assertFails(self.evaluate(expects, 1, lower + capital), "not sorted")
+        # categories too: `check` < `overflow` < `shift` in byte order
+        lines = [f"{VF}:5: error: {c}: x\n" for c in ("check", "overflow", "shift")]
+        expects = [f"error {c} @ L5" for c in ("check", "overflow", "shift")]
+        self.assertEqual(self.evaluate(expects, 1, "".join(lines)), [])
+        self.assertFails(self.evaluate(expects, 1, "".join(reversed(lines))), "not sorted")
+
+    def test_an_error_is_not_printed_twice(self):
+        problems = self.evaluate(["error overflow @ L5"] * 2, 1, OVERFLOW_ERROR * 2)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("printed twice", problems[0])
+
+    def test_an_error_in_a_header_can_be_expected(self):
+        header = f"inc/h.h:5: error: overflow: x\n"
+        self.assertEqual(self.evaluate(["error overflow @ inc/h.h:L5"], 1, header), [])
+        self.assertEqual(self.evaluate(["error overflow @ inc/h.h:L5", "error check @ L9"], 1,
+                                       header + f"{VF}:9: error: check: c\n"), [])
+        # the wrong line, category, file, or a header that is not named
+        self.assertFails(self.evaluate(["error overflow @ inc/h.h:L6"], 1, header), "wrong line")
+        self.assertFails(self.evaluate(["error check @ inc/h.h:L5"], 1, header), "wrong reason")
+        problems = self.evaluate(["error overflow @ inc/g.h:L5"], 1, header)
+        self.assertFails(problems, "error reported in another file (inc/h.h)")
+        self.assertFails(problems, "missing error")
+        self.assertFails(self.evaluate(["error overflow @ L5"], 1, header),
+                         "error reported in another file (inc/h.h)")
+        # `@ L5` is the test file's line 5, not the header's
+        both = header + OVERFLOW_ERROR
+        self.assertEqual(self.evaluate(["error overflow @ inc/h.h:L5", "error overflow @ L5"], 1,
+                                       both), [])
+        self.assertFails(self.evaluate(["error overflow @ L5", "error overflow @ L5"], 1, both),
+                         "error reported in another file")
+
+    def test_a_rejection_in_a_header_can_be_expected(self):
+        rej = ('"inc/h.h", line 2 (col. 3): error #20: identifier "q" is undefined\n'
+               '1 error detected in the compilation of "' + VF + '".\n')
+        self.assertEqual(self.evaluate(["rejected undefined_identifier @ inc/h.h:L2"], 2, "", rej),
+                         [])
+        self.assertFails(self.evaluate(["rejected undefined_identifier @ L2"], 2, "", rej),
+                         "unexpected error (in inc/h.h)")
+        self.assertFails(self.evaluate(["rejected undefined_identifier @ inc/h.h:L3"], 2, "", rej),
+                         "wrong line")
+        self.assertFails(self.evaluate(["rejected undefined_identifier @ inc/g.h:L2"], 2, "", rej),
+                         "unexpected error (in inc/h.h)")
+
+    def test_error_in_another_file_fails(self):
+        text = OVERFLOW_ERROR.replace(VF, "inc/h.h")
+        problems = self.evaluate(["error overflow @ L5"], 1, text)
+        self.assertFails(problems, "error reported in another file (inc/h.h)")
+        self.assertFails(problems, "missing error")
+
+    def test_an_unknown_category_never_matches(self):
+        text = f"{VF}:5: error: frobnicate: it broke\n"
+        self.assertFails(self.evaluate(["error overflow @ L5"], 1, text), "unrecognized error")
+
+    def test_a_note_is_not_an_error(self):
+        # the note's text looks like an error line; it must not count
+        text = OVERFLOW_ERROR + f"{VF}:6: note: error: overflow: not one\n"
+        self.assertEqual(self.evaluate(["error overflow @ L5"], 1, text), [])
+
+    def test_a_note_alone_or_garbage_fails_even_when_the_errors_match(self):
+        self.assertFails(self.evaluate(["error overflow @ L5"], 1,
+                                       f"{VF}:2: note: lonely\n" + OVERFLOW_ERROR),
+                         "no error before it")
+        self.assertFails(self.evaluate(["error overflow @ L5"], 1, OVERFLOW_ERROR + "odd\n"),
+                         "unrecognized driver output")
+
+    def test_error_but_it_verified(self):
+        self.assertFails(self.evaluate(["error overflow @ L5"], 0, VERIFIED_LINE),
+                         "expected errors, but the program verified")
+
+    def test_exit_one_needs_error_lines_and_no_verified_line(self):
+        self.assertFails(self.evaluate(["error overflow @ L5"], 1, ""), "no `error:` line")
+        self.assertFails(self.evaluate(["error overflow @ L5"], 1, VERIFIED_LINE + OVERFLOW_ERROR),
+                         "exit status 1 but the output has a `verified` line")
+
+    # -- rejected ----------------------------------------------------------
+
+    def test_rejected_passes(self):
+        self.assertEqual(self.evaluate(["rejected undefined_identifier @ L4"], 2, "", REJECTION),
+                         [])
+
+    def test_rejected_cerastes_tag(self):
+        text = (f'"{VF}", line 3 (col. 5): error #cerastes-unsupported_type: no pointers\n'
+                f'1 error detected in the compilation of "{VF}".\n')
+        self.assertEqual(self.evaluate(["rejected cerastes-unsupported_type @ L3"], 2, "", text), [])
+
+    def test_rejected_wrong_line_tag_missing_unexpected(self):
+        self.assertFails(self.evaluate(["rejected undefined_identifier @ L5"], 2, "", REJECTION),
+                         "wrong line: expected error undefined_identifier @ L5")
+        self.assertFails(self.evaluate(["rejected exp_semicolon @ L4"], 2, "", REJECTION),
+                         "wrong diagnostic at this line")
+        self.assertFails(self.evaluate(["rejected undefined_identifier @ L4",
+                                        "rejected exp_semicolon @ L8"], 2, "", REJECTION),
+                         "missing error")
+        two = (f'"{VF}", line 4 (col. 12): error #20: identifier "zzz" is undefined\n'
+               f'"{VF}", line 6 (col. 1): error #65: expected a ";"\n'
+               f'2 errors detected in the compilation of "{VF}".\n')
+        self.assertFails(self.evaluate(["rejected undefined_identifier @ L4"], 2, "", two),
+                         "unexpected error")
+
+    def test_rejected_in_another_file_or_with_a_warning_fails(self):
+        other = REJECTION.replace(f'"{VF}", line', '"inc/h.h", line', 1)
+        self.assertFails(self.evaluate(["rejected undefined_identifier @ L4"], 2, "", other),
+                         "unexpected error (in inc/h.h)")
+        warn = (f'"{VF}", line 2 (col. 3): warning #161-D: unrecognized #pragma\n' + REJECTION)
+        self.assertFails(self.evaluate(["rejected undefined_identifier @ L4"], 2, "", warn),
+                         "unexpected warning")
+
+    def test_rejected_output_checks_are_those_of_frontend_tests(self):
+        no_summary = REJECTION.split("\n")[0] + "\n"
+        self.assertFails(self.evaluate(["rejected undefined_identifier @ L4"], 2, "", no_summary),
+                         "no `N errors detected` summary")
+        wrong = REJECTION.replace("1 error detected", "2 errors detected")
+        self.assertFails(self.evaluate(["rejected undefined_identifier @ L4"], 2, "", wrong),
+                         "summary says 2 errors")
+        self.assertFails(self.evaluate(["rejected undefined_identifier @ L4"], 2, "",
+                                       REJECTION + "odd\n"), "unrecognized front-end output: odd")
+        cat = (f'"{VF}", line 1 (col. 25): catastrophic error #1696: cannot open source file "x.h"\n'
+               f'1 catastrophic error detected in the compilation of "{VF}".\n'
+               "Compilation terminated.\n")
+        self.assertFails(self.evaluate(["rejected cannot_open_file @ L1"], 2, "", cat),
+                         "catastrophic error always fails")
+
+    def test_rejected_prints_nothing_on_stdout(self):
+        self.assertFails(self.evaluate(["rejected undefined_identifier @ L4"], 2, "hello\n",
+                                       REJECTION), "printed on stdout")
+
+    def test_rejected_needs_exit_two(self):
+        self.assertFails(self.evaluate(["rejected undefined_identifier @ L4"], 1, OVERFLOW_ERROR),
+                         "expected a rejection (exit status 2), but verification errors")
+        self.assertFails(self.evaluate(["rejected undefined_identifier @ L4"], 0, VERIFIED_LINE),
+                         "expected a rejection (exit status 2), but the program verified")
+        # exit status 2 with no diagnostics at all is not a rejection
+        self.assertFails(self.evaluate(["rejected undefined_identifier @ L4"], 2, "", ""),
+                         "missing error")
+
+    def test_rejected_where_a_verdict_was_expected(self):
+        for expects in (["verified"], ["error overflow @ L5"]):
+            with self.subTest(expects):
+                problems = self.evaluate(expects, 2, "", REJECTION)
+                self.assertFails(problems, "but the program was rejected (exit status 2)")
+                self.assertFails(problems, 'identifier "zzz" is undefined')
+
+    # -- failures that no expectation excuses -------------------------------
+
+    def test_exit_three_fails_whatever_is_expected(self):
+        for expects, stdout, stderr in (
+                (["verified"], VERIFIED_LINE, ""),
+                (["error overflow @ L5"], OVERFLOW_ERROR, ""),
+                (["rejected undefined_identifier @ L4"], "", REJECTION)):
+            with self.subTest(expects):
+                problems = self.evaluate(expects, 3, stdout, stderr + "silicon crashed\n")
+                self.assertEqual(len(problems), 1, problems)
+                self.assertIn("tool failure", problems[0])
+                self.assertIn("silicon crashed", problems[0])
+
+    def test_other_exit_statuses_fail(self):
+        for code in (4, 5, 64, 127, 255):
+            for expects in (["verified"], ["error overflow @ L5"],
+                            ["rejected undefined_identifier @ L4"]):
+                with self.subTest(code, expects=expects):
+                    problems = self.evaluate(expects, code, VERIFIED_LINE, REJECTION)
+                    self.assertEqual(len(problems), 1, problems)
+                    self.assertIn(f"exited with status {code}", problems[0])
+
+    def test_timeouts_and_crashes_fail(self):
+        for expects in (["verified"], ["error overflow @ L5"],
+                        ["rejected undefined_identifier @ L4"]):
+            exp = rt.parse_header("".join(f"// expect: {e}\n" for e in expects), ".c")
+            timed_out = rt.ToolRun(None, error="timed out after 600s")
+            self.assertEqual(rt.evaluate_verify(timed_out, exp, self.reg, VF),
+                             ["cerastes verify timed out after 600s"])
+            crashed = rt.ToolRun(-9, VERIFIED_LINE, "")
+            self.assertEqual(rt.evaluate_verify(crashed, exp, self.reg, VF),
+                             ["cerastes verify crashed (signal 9)"])
+
+    def test_the_filename_is_the_one_on_the_command_line(self):
+        self.assertEqual(self.evaluate(["verified"], 0, VERIFIED_LINE.replace(VF, "a/b.c"),
+                                       file="a/b.c"), [])
+        self.assertFails(self.evaluate(["verified"], 0, VERIFIED_LINE, file="a/b.c"),
+                         "names tests/scalar/t.c, not a/b.c")
+
+
+class VerifyPathsTests(unittest.TestCase):
+    """The command line, the Viper paths and the manifest (pure functions)."""
+
+    ENV = {"CERASTES_VERIFY": "/opt/cerastes/build/cerastes"}
+
+    def test_the_command_line(self):
+        t = rt.ROOT / "tests" / "scalar" / "a.c"
+        for mode, std in (("c23", "--std=c23"), ("c++20", "--std=c++20")):
+            vpr = rt.vpr_path(t, mode)
+            self.assertEqual(
+                rt.verify_command(self.ENV, t, mode, vpr),
+                ["/opt/cerastes/build/cerastes", "verify", "tests/scalar/a.c", std,
+                 f"--keep-vpr=build/vpr/tests/scalar/a.c.{mode}.vpr"])
+
+    def test_verify_command_wins_over_the_environment(self):
+        t = rt.ROOT / "tests" / "scalar" / "a.c"
+        with mock.patch.object(rt, "VERIFY_COMMAND", ["python3", "fake.py"]):
+            cmd = rt.verify_command(self.ENV, t, "c23", rt.vpr_path(t, "c23"))
+        self.assertEqual(cmd[:3], ["python3", "fake.py", "verify"])
+        self.assertIsNone(rt.VERIFY_COMMAND)  # the real default: the environment decides
+
+    def test_the_vpr_path_of_a_test_outside_the_repository(self):
+        path = Path("/somewhere/else/t.cpp")
+        self.assertEqual(rt.vpr_path(path, "c++20"),
+                         rt.VPR_DIR / "external" / "somewhere" / "else" / "t.cpp.c++20.vpr")
+
+    def test_distinct_tests_and_modes_get_distinct_files(self):
+        paths = {rt.vpr_path(rt.ROOT / "tests" / "scalar" / n, m)
+                 for n in ("a.c", "b.c", "negative/a.c") for m in ("c23", "c++20")}
+        self.assertEqual(len(paths), 6)
+
+    def test_the_manifest_lists_the_files_that_must_exist(self):
+        def exp(text, suffix=".c"):
+            return rt.parse_header(text, suffix)
+        both = exp("// expect: verified\n// mode: c++20, c23\n")
+        err = exp("// expect: error check @ L3\n")
+        rej = exp("// expect: rejected undefined_identifier @ L3\n")
+        tests = [(rt.ROOT / "tests/scalar/b.c", err), (rt.ROOT / "tests/scalar/a.c", both),
+                 (rt.ROOT / "tests/scalar/negative/r.c", rej)]
+        self.assertEqual(rt.vpr_manifest(tests), [
+            "tests/scalar/a.c.c++20.vpr", "tests/scalar/a.c.c23.vpr", "tests/scalar/b.c.c23.vpr"])
+        self.assertEqual(rt.vpr_manifest([tests[2]]), [])  # a rejection writes no Viper
+
+    def test_which_tests_run_the_verifier(self):
+        exp = lambda text, suffix: rt.parse_header(text, suffix)  # noqa: E731
+        for kind in ("verified", "error check @ L3", "rejected undefined_identifier @ L3"):
+            e = exp(f"// expect: {kind}\n", ".c")
+            self.assertTrue(rt.is_verify_test(Path("a.c"), e), kind)
+            self.assertTrue(rt.is_verify_test(Path("a.cpp"), e), kind)
+        self.assertFalse(rt.is_verify_test(Path("a.vpr"), exp("// expect: verified\n", ".vpr")))
+        self.assertFalse(rt.is_verify_test(Path("a.vpr"),
+                                           exp("// expect: error assert @ L3\n", ".vpr")))
+        self.assertFalse(rt.is_verify_test(Path("a.c"), exp("// expect: golden\n", ".c")))
+        self.assertFalse(rt.is_verify_test(Path("a.c"), rt.HeaderError("x")))
+
+
+class VprDirectoryTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.base = Path(tmp.name).resolve()
+
+    def patch(self, directory):
+        patcher = mock.patch.object(rt, "VPR_DIR", directory)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_it_empties_the_directory_and_writes_the_manifest(self):
+        vpr = self.base / "vpr"
+        (vpr / "sub").mkdir(parents=True)
+        (vpr / "sub" / "old.vpr").write_text("stale")
+        (vpr / "old.vpr.map").write_text("stale")
+        self.patch(vpr)
+        rt.reset_vpr_dir(["a.c.c23.vpr", "b.c.c23.vpr"], "20261016T120000Z-0a1b2c3d")
+        self.assertEqual(sorted(p.name for p in vpr.iterdir()), ["MANIFEST"])
+        self.assertEqual((vpr / "MANIFEST").read_text(),
+                         "# run-id: 20261016T120000Z-0a1b2c3d\na.c.c23.vpr\nb.c.c23.vpr\n")
+
+    def test_the_run_id(self):
+        files = ["a.c.c23.vpr", "b.c.c23.vpr"]
+        run_id = rt.make_run_id(files)
+        self.assertRegex(run_id, r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$")
+        # the hash tells which selection the run was; the time tells which run it was
+        self.assertEqual(run_id.split("-")[1], rt.make_run_id(files).split("-")[1])
+        self.assertNotEqual(run_id.split("-")[1], rt.make_run_id(files[:1]).split("-")[1])
+        self.assertNotEqual(run_id.split("-")[1], rt.make_run_id(files[::-1]).split("-")[1])
+        moment = rt.datetime.datetime(2026, 10, 16, 12, 0, 1, tzinfo=rt.datetime.timezone.utc)
+        with mock.patch.object(rt.datetime, "datetime") as dt:
+            dt.now.return_value = moment
+            self.assertTrue(rt.make_run_id(files).startswith("20261016T120001Z-"))
+
+    def test_it_creates_the_directory(self):
+        self.patch(self.base / "build" / "vpr")
+        rt.reset_vpr_dir([], "r")
+        self.assertTrue((self.base / "build" / "vpr" / "MANIFEST").is_file())
+
+    def test_it_refuses_a_directory_not_named_vpr(self):
+        victim = self.base / "precious"
+        victim.mkdir()
+        (victim / "keep.txt").write_text("keep")
+        self.patch(victim)
+        with self.assertRaises(rt.UsageError) as ctx:
+            rt.reset_vpr_dir(["x"], "r")
+        self.assertIn("refusing to clear", str(ctx.exception))
+        self.assertEqual((victim / "keep.txt").read_text(), "keep")
+
+    def test_a_symlink_is_removed_not_followed(self):
+        target = self.base / "target"
+        target.mkdir()
+        (target / "keep.txt").write_text("keep")
+        link = self.base / "vpr"
+        link.symlink_to(target, target_is_directory=True)
+        self.patch(link)
+        rt.reset_vpr_dir(["x"], "r")
+        self.assertEqual((target / "keep.txt").read_text(), "keep")
+        self.assertFalse(link.is_symlink())
+        self.assertEqual((link / "MANIFEST").read_text(), "# run-id: r\nx\n")
+
+    def test_vpr_problems(self):
+        vpr = self.base / "a.c.c23.vpr"
+        mapf = self.base / "a.c.c23.vpr.map"
+        self.assertEqual(len(rt.vpr_problems(vpr)), 2)  # both missing
+        vpr.write_text("method m() {}\n")
+        problems = rt.vpr_problems(vpr)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("did not write", problems[0])
+        self.assertTrue(problems[0].endswith("(`--keep-vpr`)"))
+        mapf.write_text("")
+        problems = rt.vpr_problems(vpr)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("is empty", problems[0])
+        mapf.write_text("1\tx\n")
+        self.assertEqual(rt.vpr_problems(vpr), [])
+        vpr.write_text("")
+        self.assertIn("is empty", rt.vpr_problems(vpr)[0])
+
+    def test_the_map_must_have_an_entry_in_the_test_file(self):
+        vpr = self.base / "a.c.c23.vpr"
+        mapf = self.base / "a.c.c23.vpr.map"
+        vpr.write_text("method m() {}\n")
+        entry = "\t".join(["3", "assert.failed", "check", "{f}", "7", "5", "message"])
+        for text in (entry.format(f="tests/scalar/a.c") + "\n",
+                     entry.format(f="inc/h.h") + "\n" + entry.format(f="tests/scalar/a.c") + "\n"):
+            mapf.write_text(text)
+            self.assertEqual(rt.vpr_problems(vpr, "tests/scalar/a.c"), [], text)
+        # all entries in headers (or system files), or none: nothing of the test was verified
+        for text in (entry.format(f="inc/h.h") + "\n", entry.format(f="tests/scalar/b.c") + "\n",
+                     "not a map\n", "1\tx\ty\n"):
+            mapf.write_text(text)
+            problems = rt.vpr_problems(vpr, "tests/scalar/a.c")
+            self.assertEqual(len(problems), 1, (text, problems))
+            self.assertIn("has no entry in tests/scalar/a.c: nothing of the test was verified",
+                          problems[0])
+        # without a file name the map's content is not looked at
+        self.assertEqual(rt.vpr_problems(vpr), [])
+
+
+# A stand-in for `build/cerastes`: logs its arguments and directory (JSON lines in
+# $FAKE_VERIFY_LOG), then acts on the directives in the test file's leading comment
+# block, `// [<mode> ]<word>[: <text>]` (a mode, c++20 or c23, limits the directive
+# to the run for that mode):
+#   out: <text>   stdout          err: <text>   stderr          exit: <n>   exit status
+#   crash         kills itself    sleep         sleeps for 30 s (timeout tests)
+#   novpr, nomap, emptyvpr, emptymap   skip or empty the --keep-vpr file or its .map
+#   mapother      the map has no entry in the test file (only in a header)
+#   maphdr: <file>  one more map entry, in <file> (a header whose bodies were verified)
+# It writes the --keep-vpr file and its `.map` the way a driver does, without
+# creating the directory (the harness must have).
+FAKE_VERIFIER = r'''#!@PYTHON@
+import json, os, re, sys, time
+args = sys.argv[1:]
+log = os.environ.get("FAKE_VERIFY_LOG")
+if log:
+    with open(log, "a") as f:
+        f.write(json.dumps({"argv": args, "cwd": os.getcwd()}) + "\n")
+assert args[0] == "verify", args
+path = args[1]
+std = [a.split("=", 1)[1] for a in args[2:] if a.startswith("--std=")][0]
+keep = [a.split("=", 1)[1] for a in args[2:] if a.startswith("--keep-vpr=")]
+DIRECTIVE = re.compile(r"^// (?:(c\+\+20|c23) )?([a-z]+)(?:: ?(.*?))?\n?$")
+code = 0
+flags = set()
+more_map = []
+with open(path) as f:
+    for line in f:
+        m = DIRECTIVE.match(line)
+        if not m or m.group(1) not in (None, std):
+            continue
+        word, text = m.group(2), m.group(3)
+        if word == "out":
+            sys.stdout.write((text or "") + "\n")
+        elif word == "err":
+            sys.stderr.write((text or "") + "\n")
+        elif word == "exit":
+            code = int(text)
+        elif word == "maphdr":
+            more_map.append(text)
+        elif word in ("crash", "sleep", "novpr", "nomap", "emptyvpr", "emptymap", "mapother"):
+            flags.add(word)
+sys.stdout.flush()
+sys.stderr.flush()
+if "crash" in flags:
+    os.kill(os.getpid(), 9)
+if "sleep" in flags:
+    time.sleep(30)
+if keep and "novpr" not in flags:
+    with open(keep[0], "w") as f:
+        f.write("" if "emptyvpr" in flags else "method m() {}\n")
+    if "nomap" not in flags:
+        with open(keep[0] + ".map", "w") as f:
+            # the 4th field is the file of the check: the test as given (a header with `mapother`)
+            f.write("" if "emptymap" in flags else "1\tassert.failed\tcheck\t%s\t1\t1\tm\n"
+                    % ("inc/h.h" if "mapother" in flags else path))
+            for extra in more_map:  # entries in more files (headers whose bodies were verified)
+                f.write("2\tassert.failed\tcheck\t%s\t1\t1\tm\n" % extra)
+sys.exit(code)
+'''
+
+VERIFIED_DETAIL = ("verified (1 function; one translation unit: assumes that functions defined "
+                   "elsewhere satisfy the contracts declared here)")
+
+
+class VerifierMixin:
+    """For a FakeFrontEndCase: a fake `build/cerastes` named by CERASTES_VERIFY in
+    the fixture env file, `--keep-vpr` output in a temporary directory, and a log
+    of its calls."""
+
+    def setUp(self):
+        super().setUp()
+        base = self.dir.parent
+        self.fake_verify = base / "fake_verify"
+        self.fake_verify.write_text(FAKE_VERIFIER.replace("@PYTHON@", sys.executable))
+        self.fake_verify.chmod(0o755)
+        self.verify_log = base / "verify.log"
+        self.vpr_dir = base / "build" / "vpr"
+        self.set_env(CERASTES_VERIFY=str(self.fake_verify))
+        for patcher in (mock.patch.dict(os.environ, {"FAKE_VERIFY_LOG": str(self.verify_log)}),
+                        mock.patch.object(rt, "VPR_DIR", self.vpr_dir)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def verify_calls(self):
+        if not self.verify_log.exists():
+            return []
+        return [json.loads(l) for l in self.verify_log.read_text().splitlines()]
+
+    def vpr_name(self, name, mode):
+        """VPR_DIR-relative name of the Viper file of test `name` in `mode`."""
+        return rt.vpr_path(self.dir / name, mode).relative_to(self.vpr_dir).as_posix()
+
+    def line(self, name, lineno, category, message="m"):
+        return f"{rt.rel(self.dir / name)}:{lineno}: error: {category}: {message}"
+
+    def vtest(self, name, expects, *directives, modes=None):
+        """A verify test: the `expects` lines (and a mode line) in the header, then
+        the fake's directives; `{f}` in a directive is the test path as the harness
+        passes it."""
+        f = rt.rel(self.dir / name)
+        header = [f"// expect: {e}" for e in expects]
+        if modes:
+            header.append(f"// mode: {modes}")
+        return self.write(name, *(d.replace("{f}", f) for d in directives),
+                          header="\n".join(header))
+
+    def ok(self, name):
+        return f"// out: {rt.rel(self.dir / name)}: {VERIFIED_DETAIL}"
+
+
+class FakeVerifierCase(VerifierMixin, DiagRunCase):
+    """rt.main() on verified/error/rejected tests with a fake `cerastes verify`,
+    against a fixture of the tag tables."""
+
+
+HOLD_THE_LOCK = r"""
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import run_tests as rt
+rt.VPR_DIR = Path(sys.argv[2]) / "vpr"
+rt.lock_vpr_dir()
+print("locked", flush=True)
+sys.stdin.readline()
+"""
+
+
+class VprLockTests(unittest.TestCase):
+    """Two harness runs at once would empty build/vpr under each other (a run that selects a test expecting Viper
+    clears it): the second must fail at once, naming the first, and never wait."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+        patcher = mock.patch.object(rt, "VPR_DIR", self.dir / "vpr")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(rt.release_vpr_locks)
+
+    def holder(self):
+        proc = subprocess.Popen([sys.executable, "-c", HOLD_THE_LOCK, str(Path(rt.__file__).parent), str(self.dir)],
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        self.assertEqual(proc.stdout.readline().strip(), "locked")
+        return proc
+
+    def release(self, proc):
+        proc.stdin.write("\n")
+        proc.stdin.flush()
+        proc.wait(timeout=30)
+        proc.stdin.close()
+        proc.stdout.close()
+
+    def test_a_second_process_fails_at_once_and_names_the_first(self):
+        proc = self.holder()
+        try:
+            started = time.monotonic()
+            with self.assertRaises(rt.UsageError) as caught:
+                rt.lock_vpr_dir()
+            self.assertLess(time.monotonic() - started, 5, "it must not wait")
+            self.assertIn("another run_tests.py is using build/vpr", str(caught.exception))
+            self.assertIn(f"pid {proc.pid}", str(caught.exception))
+        finally:
+            self.release(proc)
+
+    def test_the_lock_is_free_again_when_the_holder_ends(self):
+        proc = self.holder()
+        self.release(proc)
+        rt.lock_vpr_dir()  # no error
+        self.assertEqual(len(rt._VPR_LOCKS), 1)
+
+    def test_a_killed_holder_does_not_leave_a_stale_lock(self):
+        proc = self.holder()
+        proc.kill()
+        proc.wait(timeout=30)
+        proc.stdin.close()
+        proc.stdout.close()
+        rt.lock_vpr_dir()
+
+    def test_a_process_keeps_its_own_lock_across_runs(self):
+        rt.lock_vpr_dir()
+        rt.lock_vpr_dir()  # the second main() of a self-test must not fail against the first
+        self.assertEqual(len(rt._VPR_LOCKS), 1)
+
+    def test_the_lock_is_per_directory(self):
+        rt.lock_vpr_dir()
+        other = self.dir / "other"
+        with mock.patch.object(rt, "VPR_DIR", other / "vpr"):
+            rt.lock_vpr_dir()
+            self.assertEqual(len(rt._VPR_LOCKS), 2)
+
+
+class VerifyRunTests(FakeVerifierCase):
+    # -- the three verdicts through rt.main -----------------------------------
+
+    def test_a_run_that_expects_viper_takes_the_vpr_lock_and_another_does_not(self):
+        t = self.vtest("a.c", ["verified"], self.ok("a.c"))
+        with mock.patch.object(rt, "lock_vpr_dir") as lock:
+            status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+        lock.assert_called_once_with()
+        # a run whose tests produce no Viper (a rejection) never takes it
+        r = self.vtest("r.c", ["rejected undefined_identifier @ L3"], "// exit: 2",
+                       '// err: "' + rt.rel(self.dir / "r.c") + '", line 3 (col. 3): error #20: m',
+                       '// err: 1 error detected in the compilation of "' + rt.rel(self.dir / "r.c") + '".')
+        with mock.patch.object(rt, "lock_vpr_dir") as lock:
+            status, out, _ = self.run_harness(r)
+        self.assertEqual(status, 0, out)
+        lock.assert_not_called()
+
+    def test_a_run_whose_lock_is_taken_fails_before_it_runs_anything(self):
+        t = self.vtest("a.c", ["verified"], self.ok("a.c"))
+        with mock.patch.object(rt, "lock_vpr_dir",
+                               side_effect=rt.UsageError("another run_tests.py is using build/vpr (pid 1)")):
+            status, out, err = self.run_harness(t)
+        self.assertEqual(status, 2, out)
+        self.assertIn("another run_tests.py is using build/vpr (pid 1)", err)
+        self.assertEqual(self.verify_calls(), [])
+
+    def test_verified_passes(self):
+        t = self.vtest("a.c", ["verified"], self.ok("a.c"))
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+        self.assertIn(f"PASS  {rt.rel(t)} [c23]", out)
+        self.assertEqual(self.summary(out), "1 passed, 0 failed, 0 skipped")
+
+    def test_verified_fails_on_an_error_line(self):
+        t = self.vtest("a.c", ["verified"], "// exit: 1", f"// out: {self.line('a.c', 3, 'check')}")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("expected verified, but verification errors were reported", out)
+        self.assertIn("check @ L3", out)
+
+    def test_error_passes_and_names_what_is_wrong(self):
+        err = self.line("a.c", 5, "overflow")
+        t = self.vtest("a.c", ["error overflow @ L5"], "// exit: 1", f"// out: {err}")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+        for expects, needle in ((["error overflow @ L6"], "wrong line: expected overflow @ L6"),
+                                (["error conversion @ L5"], "wrong reason: expected conversion"),
+                                (["error overflow @ L5", "error check @ L9"], "missing error"),
+                                (["error check @ L9"], "unexpected error: overflow @ L5")):
+            with self.subTest(expects):
+                t = self.vtest("b.c", expects, "// exit: 1",
+                               f"// out: {self.line('b.c', 5, 'overflow')}")
+                status, out, _ = self.run_harness(t)
+                self.assertEqual(status, 1, out)
+                self.assertIn(needle, out)
+
+    def test_error_in_another_file_fails(self):
+        err = self.line("a.c", 5, "overflow").replace(rt.rel(self.dir / "a.c"), "inc/h.h")
+        t = self.vtest("a.c", ["error overflow @ L5"], "// exit: 1", f"// out: {err}")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("error reported in another file (inc/h.h)", out)
+
+    def test_the_verdict_and_the_errors_must_be_on_stdout(self):
+        err = self.line("a.c", 5, "overflow")
+        t = self.vtest("a.c", ["error overflow @ L5"], "// exit: 1", f"// err: {err}")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("a verdict or error line on stderr", out)
+        t = self.vtest("b.c", ["verified"], self.ok("b.c").replace("// out:", "// err:"))
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("a verdict or error line on stderr", out)
+
+    def test_a_diagnostic_on_stdout_or_a_warning_on_stderr_fails(self):
+        f = rt.rel(self.dir / "a.c")
+        warning = f'"{f}", line 4 (col. 3): warning #177-D: variable "x" was declared but never used'
+        t = self.vtest("a.c", ["verified"], self.ok("a.c"), f"// err: {warning}")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("a front-end diagnostic in a run that reached Silicon", out)
+        t = self.vtest("b.c", ["verified"], self.ok("b.c"), f"// out: {warning.replace('a.c', 'b.c')}")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("a front-end diagnostic on stdout", out)
+
+    def test_a_verified_line_without_functions_fails(self):
+        t = self.vtest("a.c", ["verified"], self.ok("a.c").replace("1 function", "0 functions"))
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("counts no function", out)
+
+    def test_the_map_must_name_the_test_file(self):
+        t = self.vtest("a.c", ["verified"], self.ok("a.c"), "// mapother")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("has no entry in", out)
+        self.assertIn("nothing of the test was verified", out)
+        err = self.line("b.c", 5, "overflow")
+        t = self.vtest("b.c", ["error overflow @ L5"], "// exit: 1", f"// out: {err}", "// mapother")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("nothing of the test was verified", out)
+
+    def test_an_error_in_a_header_is_expected_with_its_file(self):
+        f = rt.rel(self.dir / "a.c")
+        header = "zzz/headers/h.h"  # (sorts after the test's absolute path, as the driver sorts)
+        t = self.vtest("a.c", [f"error overflow @ {header}:L3", "error check @ L6"], "// exit: 1",
+                       f"// out: {f}:6: error: check: y", f"// out: {header}:3: error: overflow: x")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+        t = self.vtest("b.c", ["error overflow @ L3", "error check @ L6"], "// exit: 1",
+                       f"// out: {rt.rel(self.dir / 'b.c')}:6: error: check: y",
+                       f"// out: {header}:3: error: overflow: x")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("error reported in another file (zzz/headers/h.h)", out)
+
+    def test_unsorted_errors_fail(self):
+        f = rt.rel(self.dir / "a.c")
+        t = self.vtest("a.c", ["error check @ L5", "error check @ L9"], "// exit: 1",
+                       f"// out: {f}:9: error: check: y", f"// out: {f}:5: error: check: x")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("not sorted by printed path (byte order), line and category", out)
+
+    def test_a_rejection_in_a_header_is_expected_with_its_file(self):
+        f = rt.rel(self.dir / "r.c")
+        t = self.vtest("r.c", ["rejected undefined_identifier @ tests/scalar/headers/h.h:L2"],
+                       "// exit: 2", '// err: "tests/scalar/headers/h.h", line 2 (col. 3): error #20: m',
+                       f'// err: 1 error detected in the compilation of "{f}".')
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+
+    def header_test(self, name, helper_text, extra_directives=(), includer="a.c", inc="headers/h.h"):
+        """A verified test that includes a helper header; returns (test, header)."""
+        helper = self.dir / "headers" / "h.h"
+        helper.parent.mkdir(exist_ok=True)
+        helper.write_text(helper_text)
+        t = self.vtest(name, ["verified"], self.ok(name), *extra_directives)
+        t.write_text(t.read_text() + f'#include "{inc}"\n')
+        return t, helper
+
+    BODY = "inline int h(int x) { return x; }\n"
+
+    def test_a_helper_header_with_a_body_needs_a_map_entry_of_its_own(self):
+        t, helper = self.header_test("a.c", self.BODY)
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn(f"has no entry in {rt.rel(helper)}, a helper header with a function body "
+                      f"that {rt.rel(t)} includes", out)
+        t, helper = self.header_test("b.c", self.BODY, [f"// maphdr: {rt.rel(self.dir / 'headers' / 'h.h')}"])
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+
+    def test_a_body_inside_a_namespace_or_linkage_block_needs_a_map_entry(self):
+        for text in ("namespace { inline int h(int x) { return x; } }\n",
+                     'extern "C" { inline int h(int x) { return x; } }\n',
+                     "namespace a { namespace b { inline int h(int x) { return x; } } }\n"):
+            with self.subTest(text):
+                t, helper = self.header_test("a.c", text)
+                status, out, _ = self.run_harness(t)
+                self.assertEqual(status, 1, out)
+                self.assertIn(f"has no entry in {rt.rel(helper)}", out)
+                t, helper = self.header_test("b.c", text,
+                                             [f"// maphdr: {rt.rel(self.dir / 'headers' / 'h.h')}"])
+                status, out, _ = self.run_harness(t)
+                self.assertEqual(status, 0, out)
+
+    def test_a_header_without_a_body_needs_no_entry(self):
+        for text in ("int h(int x);\n", "struct s { int a; };\n", "enum { A = 1 };\n",
+                     "// inline int h(int x) { return x; }\n", "#define H(x) ((x) + 1)\n",
+                     "namespace n { int h(int x); }\n", 'extern "C" { int h(int x); }\n'):
+            with self.subTest(text):
+                t, _ = self.header_test("a.c", text)
+                status, out, _ = self.run_harness(t)
+                self.assertEqual(status, 0, out)
+
+    def test_a_body_in_a_header_included_through_another_one_counts(self):
+        outer = self.dir / "headers" / "outer.h"
+        t, helper = self.header_test("a.c", self.BODY, inc="headers/outer.h")
+        outer.write_text('#include "h.h"\n')
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn(f"has no entry in {rt.rel(helper)}", out)
+
+    def test_an_include_that_is_not_one_does_not_count(self):
+        for line in ('// #include "headers/h.h"', '/* #include "headers/h.h" */',
+                     '#if 0\n#include "headers/h.h"\n#endif', '#include <headers/h.h>'):
+            with self.subTest(line):
+                t, _ = self.header_test("a.c", self.BODY, inc="nothing.h")
+                t.write_text(t.read_text().replace('#include "nothing.h"\n', line + "\n"))
+                status, out, _ = self.run_harness(t)
+                self.assertNotIn("a helper header with a function body", out)
+
+    def test_a_file_outside_a_headers_directory_is_not_a_helper(self):
+        other = self.dir / "other"
+        other.mkdir()
+        (other / "h.h").write_text(self.BODY)
+        t = self.vtest("a.c", ["verified"], self.ok("a.c"))
+        t.write_text(t.read_text() + '#include "other/h.h"\n')
+        status, out, _ = self.run_harness(t)
+        self.assertNotIn("a helper header", out)
+
+    def test_an_orphan_helper_header_fails_a_run(self):
+        t = self.vtest("a.c", ["verified"], self.ok("a.c"))
+        helper = self.dir / "headers" / "h.h"
+        helper.parent.mkdir()
+        helper.write_text("int h(int x);\n")
+        status, out, _ = self.run_harness(self.dir)
+        self.assertEqual(status, 1, out)
+        self.assertIn("orphan helper header", out)
+        self.assertIn(f"FAIL  {rt.rel(helper)}", out)
+        t.write_text(t.read_text() + '#include "headers/h.h"\n')
+        status, out, _ = self.run_harness(self.dir)
+        self.assertEqual(status, 0, out)
+        self.assertEqual([c["argv"][1] for c in self.verify_calls() if c["argv"][1].endswith(".h")], [])
+
+    def test_error_notes_are_ignored(self):
+        f = rt.rel(self.dir / "a.c")
+        t = self.vtest("a.c", ["error postcondition @ L9"], "// exit: 1",
+                       f"// out: {f}:9: error: postcondition: may not hold",
+                       f"// out: {f}:3: note: the `ensures` clause")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+
+    def test_rejected_passes(self):
+        f = rt.rel(self.dir / "r.c")
+        t = self.vtest("r.c", ["rejected undefined_identifier @ L4"], "// exit: 2",
+                       f'// err: "{f}", line 4 (col. 12): error #20: identifier "zzz" is undefined',
+                       f'// err: 1 error detected in the compilation of "{f}".')
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+        self.assertEqual(self.summary(out), "1 passed, 0 failed, 0 skipped")
+
+    def test_rejected_with_a_cerastes_tag(self):
+        f = rt.rel(self.dir / "r.c")
+        t = self.vtest("r.c", ["rejected cerastes-unsupported_type @ L4"], "// exit: 2",
+                       f'// err: "{f}", line 4 (col. 12): error #cerastes-unsupported_type: x',
+                       f'// err: 1 error detected in the compilation of "{f}".')
+        with mock.patch.object(rt, "load_cerastes_tags", return_value={"unsupported_type"}):
+            status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+
+    def test_rejected_with_exit_one_fails(self):
+        err = self.line("r.c", 4, "overflow")
+        t = self.vtest("r.c", ["rejected undefined_identifier @ L4"], "// exit: 1", f"// out: {err}")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("expected a rejection (exit status 2), but verification errors", out)
+
+    def test_a_rejection_where_a_verdict_was_expected_fails(self):
+        f = rt.rel(self.dir / "r.c")
+        rejection = ("// exit: 2", f'// err: "{f}", line 4 (col. 12): error #20: identifier is undefined',
+                     f'// err: 1 error detected in the compilation of "{f}".')
+        for expects in (["verified"], ["error overflow @ L4"]):
+            with self.subTest(expects):
+                t = self.vtest("r.c", expects, *rejection)
+                status, out, _ = self.run_harness(t)
+                self.assertEqual(status, 1, out)
+                self.assertIn("but the program was rejected (exit status 2)", out)
+
+    def test_exit_three_fails_every_expectation(self):
+        f = rt.rel(self.dir / "t.c")
+        for what, expects, out_lines in (
+                ("verified", ["verified"], [self.ok("t.c")]),
+                ("error", ["error overflow @ L5"], [f"// out: {f}:5: error: overflow: m"]),
+                ("rejected", ["rejected undefined_identifier @ L4"], [])):
+            with self.subTest(what):
+                t = self.vtest("t.c", expects, "// exit: 3", "// err: silicon crashed", *out_lines)
+                status, out, _ = self.run_harness(t)
+                self.assertEqual(status, 1, out)
+                self.assertIn("tool failure", out)
+                self.assertIn("silicon crashed", out)
+
+    def test_garbage_output_fails_a_passing_run(self):
+        t = self.vtest("g.c", ["verified"], self.ok("g.c"), "// out: something odd")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("unrecognized driver output: something odd", out)
+
+    def test_a_crash_and_a_timeout_fail(self):
+        t = self.vtest("c.c", ["verified"], self.ok("c.c"), "// crash")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("crashed (signal 9)", out)
+        t = self.vtest("s.c", ["verified"], self.ok("s.c"), "// sleep")
+        with mock.patch.object(rt, "VERIFY_TIMEOUT_S", 1):
+            status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("timed out after 1s", out)
+
+    # -- modes ----------------------------------------------------------------
+
+    def test_the_command_line_and_the_directory(self):
+        c = self.vtest("a.c", ["verified"], self.ok("a.c"))
+        cpp = self.vtest("b.cpp", ["verified"], self.ok("b.cpp"))
+        status, out, _ = self.run_harness(c, cpp)
+        self.assertEqual(status, 0, out)
+        calls = sorted(self.verify_calls(), key=lambda x: x["argv"][1])
+        self.assertEqual([x["argv"] for x in calls], [
+            ["verify", rt.rel(c), "--std=c23", f"--keep-vpr={rt.vpr_path(c, 'c23')}"],
+            ["verify", rt.rel(cpp), "--std=c++20", f"--keep-vpr={rt.vpr_path(cpp, 'c++20')}"]])
+        for call in calls:  # the repository root, where the relative paths mean something
+            self.assertEqual(os.path.realpath(call["cwd"]), os.path.realpath(rt.ROOT))
+
+    def test_each_mode_is_its_own_run(self):
+        t = self.vtest("m.c", ["verified"], self.ok("m.c"), modes="c++20, c23")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+        self.assertEqual(self.summary(out), "2 passed, 0 failed, 0 skipped")
+        self.assertIn(f"PASS  {rt.rel(t)} [c++20]", out)
+        self.assertIn(f"PASS  {rt.rel(t)} [c23]", out)
+        self.assertEqual(sorted(c["argv"][2] for c in self.verify_calls()),
+                         ["--std=c++20", "--std=c23"])
+
+    def test_one_failing_mode_fails_the_test(self):
+        err = self.line("m.c", 3, "overflow")
+        for failing in ("c23", "c++20"):
+            with self.subTest(failing):
+                t = self.vtest("m.c", ["verified"], self.ok("m.c"),
+                               f"// {failing} exit: 1", f"// {failing} out: {err}",
+                               modes="c++20, c23")
+                status, out, _ = self.run_harness(t)
+                self.assertEqual(status, 1, out)
+                self.assertEqual(self.summary(out), "1 passed, 1 failed, 0 skipped")
+                self.assertIn(f"FAIL  {rt.rel(t)} [{failing}]", out)
+
+    def test_a_mode_can_expect_what_only_it_reports(self):
+        # the same file verifies in one mode and errs in the other: with one
+        # expectation line, exactly one of the two runs can match it
+        err = self.line("d.c", 3, "overflow")
+        t = self.vtest("d.c", ["error overflow @ L3"], f"// c23 out: {err}", "// c23 exit: 1",
+                       self.ok("d.c").replace("// out:", "// c++20 out:"), modes="c++20, c23")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn(f"PASS  {rt.rel(t)} [c23]", out)
+        self.assertIn(f"FAIL  {rt.rel(t)} [c++20]", out)
+        self.assertIn("expected errors, but the program verified", out)
+
+    # -- the Viper output -------------------------------------------------------
+
+    def test_the_driver_must_leave_the_vpr_and_its_map(self):
+        for flag, needle in (("novpr", "did not write"), ("nomap", "did not write"),
+                             ("emptyvpr", "is empty"), ("emptymap", "is empty")):
+            with self.subTest(flag):
+                t = self.vtest("v.c", ["verified"], self.ok("v.c"), f"// {flag}")
+                status, out, _ = self.run_harness(t)
+                self.assertEqual(status, 1, out)
+                self.assertIn(needle, out)
+                self.assertIn("(`--keep-vpr`)" if "write" in needle else "is empty", out)
+
+    def test_error_tests_leave_viper_too(self):
+        err = self.line("e.c", 3, "check")
+        t = self.vtest("e.c", ["error check @ L3"], "// exit: 1", f"// out: {err}", "// novpr")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("did not write", out)
+
+    def test_a_rejection_needs_no_viper(self):
+        f = rt.rel(self.dir / "r.c")
+        t = self.vtest("r.c", ["rejected undefined_identifier @ L4"], "// exit: 2", "// novpr",
+                       f'// err: "{f}", line 4 (col. 12): error #20: m',
+                       f'// err: 1 error detected in the compilation of "{f}".')
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+
+    def test_the_harness_makes_the_directory_and_removes_old_output(self):
+        t = self.vtest("a.c", ["verified"], self.ok("a.c"), "// novpr")
+        vpr = rt.vpr_path(t, "c23")
+        vpr.parent.mkdir(parents=True)
+        vpr.write_text("stale\n")
+        (vpr.parent / "a.c.c23.vpr.map").write_text("stale\n")
+        opts = rt.RunOptions()
+        (outcome,) = rt.run_verify(t, rt.read_header(t), rt.load_env(), opts)
+        self.assertTrue(any("did not write" in p for p in outcome.problems), outcome.problems)
+        self.assertFalse(vpr.exists())  # the stale file did not stand in for the driver's
+        self.assertFalse((vpr.parent / "a.c.c23.vpr.map").exists())
+
+    def test_a_full_run_clears_the_directory_and_writes_the_manifest(self):
+        self.vpr_dir.mkdir(parents=True)
+        (self.vpr_dir / "stale.vpr").write_text("x")
+        (self.vpr_dir / "old").mkdir()
+        (self.vpr_dir / "old" / "x.vpr.map").write_text("x")
+        a = self.vtest("a.c", ["verified"], self.ok("a.c"), modes="c++20, c23")
+        err = self.line("b.cpp", 3, "check")
+        b = self.vtest("b.cpp", ["error check @ L3"], "// exit: 1", f"// out: {err}")
+        f = rt.rel(self.dir / "r.c")
+        r = self.vtest("r.c", ["rejected undefined_identifier @ L4"], "// exit: 2",
+                       f'// err: "{f}", line 4 (col. 12): error #20: m',
+                       f'// err: 1 error detected in the compilation of "{f}".')
+        status, out, _ = self.run_harness(a, b, r)
+        self.assertEqual(status, 0, out)
+        expected_manifest = sorted([self.vpr_name("a.c", "c++20"), self.vpr_name("a.c", "c23"),
+                                    self.vpr_name("b.cpp", "c++20")])
+        first, *listed = (self.vpr_dir / "MANIFEST").read_text().splitlines()
+        self.assertRegex(first, r"^# run-id: [0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$")
+        self.assertEqual(listed, expected_manifest)
+        self.assertIn(f"build/vpr: run {first[len(rt.RUN_ID_PREFIX):]}, 3 files expected", out)
+        self.assertFalse((self.vpr_dir / "stale.vpr").exists())
+        self.assertFalse((self.vpr_dir / "old").exists())
+        for name in expected_manifest:  # every file of the manifest is there, with its map
+            self.assertTrue((self.vpr_dir / name).is_file(), name)
+            self.assertTrue((self.vpr_dir / (name + ".map")).is_file(), name)
+        self.assertNotIn(self.vpr_name("r.c", "c23"), expected_manifest)
+
+    def test_a_run_without_viper_leaves_the_directory_alone(self):
+        self.vpr_dir.mkdir(parents=True)
+        (self.vpr_dir / "stale.vpr").write_text("x")
+        f = rt.rel(self.dir / "r.c")
+        r = self.vtest("r.c", ["rejected undefined_identifier @ L4"], "// exit: 2",
+                       f'// err: "{f}", line 4 (col. 12): error #20: m',
+                       f'// err: 1 error detected in the compilation of "{f}".')
+        g = self.write("g.cpp", "// out: a")
+        self.run_harness("--update-golden", g)
+        for args in ((r,), (g,)):
+            status, out, _ = self.run_harness(*args)
+            self.assertEqual(status, 0, out)
+        self.assertEqual((self.vpr_dir / "stale.vpr").read_text(), "x")
+        self.assertFalse((self.vpr_dir / rt.VPR_MANIFEST).exists())
+
+    def test_update_golden_and_check_headers_leave_verify_tests_alone(self):
+        self.vpr_dir.mkdir(parents=True)
+        (self.vpr_dir / "stale.vpr").write_text("x")
+        t = self.vtest("a.c", ["verified"], self.ok("a.c"))
+        for args in (("--update-golden", t), ("--check-headers", t)):
+            with self.subTest(args):
+                status, out, _ = self.run_harness(*args)
+                self.assertEqual(status, 0, out)
+                self.assertEqual(self.verify_calls(), [])
+                self.assertEqual(sorted(p.name for p in self.vpr_dir.iterdir()), ["stale.vpr"])
+        self.assertNotIn("PASS", self.run_harness("--update-golden", t)[1])
+
+    def test_a_refused_directory_is_a_usage_error_that_deletes_nothing(self):
+        precious = self.dir.parent / "precious"
+        precious.mkdir()
+        (precious / "keep.txt").write_text("keep")
+        t = self.vtest("a.c", ["verified"], self.ok("a.c"))
+        with mock.patch.object(rt, "VPR_DIR", precious):
+            status, out, err = self.run_harness(t)
+        self.assertEqual(status, 2, out)
+        self.assertIn("refusing to clear", err)
+        self.assertEqual((precious / "keep.txt").read_text(), "keep")
+        self.assertEqual(self.verify_calls(), [])
+
+    # -- environment and gates --------------------------------------------------
+
+    def test_the_driver_comes_from_the_environment(self):
+        t = self.vtest("a.c", ["verified"], self.ok("a.c"))
+        self.set_env(CERASTES_VERIFY=str(self.dir.parent / "nowhere"))
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("could not be run", out)
+        # VERIFY_COMMAND, where set, takes its place (what the self-test patches)
+        with mock.patch.object(rt, "VERIFY_COMMAND", [str(self.fake_verify)]):
+            status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+
+    def test_a_missing_driver_variable_is_an_environment_error(self):
+        t = self.vtest("a.c", ["verified"], self.ok("a.c"))
+        del self.env_values["CERASTES_VERIFY"]
+        self.set_env()
+        with mock.patch.dict(os.environ):
+            os.environ.pop("CERASTES_VERIFY", None)  # a shell that sourced build/env.sh
+            status, out, err = self.run_harness(t)
+        self.assertEqual(status, 2, out)
+        self.assertIn("CERASTES_VERIFY not set; run scripts/bootstrap.sh", err)
+        self.assertEqual(out, "")
+
+    def test_which_variables_a_test_needs(self):
+        def headers(text, name="a.c"):
+            return {Path(name): rt.parse_header(text, Path(name).suffix)}
+        for text in ("// expect: verified\n", "// expect: error check @ L3\n"):
+            self.assertEqual(rt.required_env(headers(text)), ["CERASTES_VERIFY"])
+            self.assertEqual(rt.required_env(headers(text, "a.cpp")), ["CERASTES_VERIFY"])
+        self.assertEqual(rt.required_env(headers("// expect: rejected undefined_identifier @ L3\n")),
+                         ["CERASTES_VERIFY", "CERASTES_EDG_GEN"])
+        # a .vpr test needs Silicon, not the driver
+        self.assertEqual(rt.required_env(headers("// expect: verified\n", "a.vpr")),
+                         ["CERASTES_JAVA", "SILICON_JAR", "Z3_EXE"])
+
+    def test_the_tree_gate_applies(self):
+        t = self.vtest("a.c", ["verified"], self.ok("a.c"))
+        self.tree_mock.return_value = "build/env.sh is for /a but CERASTES_EDG_SRC selects /b"
+        status, out, err = self.run_harness(t)
+        self.assertEqual(status, 2, out)
+        self.assertIn("CERASTES_EDG_SRC selects /b", err)
+        self.assertEqual(self.verify_calls(), [])
+        self.tree_mock.return_value = None
+        self.stamp_mock.return_value = "the binary under test was built from a different EDG tree"
+        status, out, err = self.run_harness(t)
+        self.assertEqual(status, 2, out)
+        self.assertIn("built from a different EDG tree", err)
+        self.assertEqual(self.verify_calls(), [])
+        self.stamp_mock.return_value = None
+        self.assertEqual(self.run_harness(t)[0], 0)
+
+    def test_an_unknown_tag_is_a_bad_header_not_a_failed_run(self):
+        t = self.vtest("u.c", ["rejected undefined_identifer @ L4"], "// exit: 2")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("bad header: unknown EDG diagnostic tag `undefined_identifer`", out)
+        self.assertEqual(self.verify_calls(), [])
+
+    def test_an_unknown_category_is_a_bad_header_not_a_failed_run(self):
+        t = self.vtest("u.c", ["error assert @ L4"], "// exit: 1")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("bad header: L1: unknown error category `assert`", out)
+        self.assertEqual(self.verify_calls(), [])
+
+    def test_the_files_next_to_the_test_are_not_touched(self):
+        t = self.vtest("a.c", ["verified"], self.ok("a.c"))
+        before = sorted(p.name for p in self.dir.iterdir())
+        self.run_harness(t)
+        self.assertEqual(sorted(p.name for p in self.dir.iterdir()), before)
+
+    def test_verdicts_are_not_golden_tests(self):
+        t = self.vtest("a.c", ["verified"], self.ok("a.c"))
+        self.run_harness(t)
+        self.assertEqual([p.name for p in self.dir.iterdir()], ["a.c"])  # no golden written
+        self.assertNotIn("needs the cerastes driver", self.run_harness(t)[1])
+
+
+class VerifyNativeTests(VerifierMixin, NativeCase):
+    """native-ok on verify tests: the mode picks the compiler's language."""
+
+    def test_a_c_file_in_both_modes_is_compiled_as_c_and_as_cpp(self):
+        t = self.write("d.c", self.ok("d.c"),
+                       header="// expect: verified\n// expect: native-ok\n// mode: c++20, c23")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+        calls = self.compiles_of(t)
+        self.assertEqual(len(calls), 4, calls)
+        cxx = ("-x c++ -std=c++20 -Wall -Wextra -Werror -U__CERASTES__ -I /fake/include "
+               f"-c -o /dev/null {rt.rel(t)}")
+        c = ("-x c -std=c23 -Wall -Wextra -Werror -U__CERASTES__ -I /fake/include "
+             f"-c -o /dev/null {rt.rel(t)}")
+        self.assertEqual(sorted(x.split(" SDKROOT=")[0] + " " + x.split(" ", 2)[2] for x in calls),
+                         sorted([f"fake_clang_cxx {cxx}", f"fake_gcc_cxx {cxx}",
+                                 f"fake_clang_cc {c}", f"fake_gcc_cc {c}"]))
+        self.assertIn(f"PASS  {rt.rel(t)} [c++20] native-ok: GCC", out)
+        self.assertIn(f"PASS  {rt.rel(t)} [c23] native-ok: Apple clang", out)
+        self.assertIn("canary native-ok [GCC, c++]", out)
+        self.assertIn("canary native-ok [GCC, c]", out)
+
+    def test_a_native_failure_fails_a_verified_test(self):
+        t = self.write("n.c", self.ok("n.c"), "// native-fail: gcc",
+                       header="// expect: verified\n// expect: native-ok\n// mode: c++20, c23")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn(f"FAIL  {rt.rel(t)} [c++20] native-ok: GCC", out)
+        self.assertIn(f"FAIL  {rt.rel(t)} [c23] native-ok: GCC", out)
+        self.assertIn(f"PASS  {rt.rel(t)} [c23]\n", out)  # the verdict itself still passes
+
+    def test_a_failing_verdict_still_runs_the_native_check(self):
+        err = self.line("o.c", 3, "check")
+        t = self.write("o.c", f"// out: {err}", "// exit: 1", "// native-fail: gcc",
+                       header="// expect: verified\n// expect: native-ok")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn(f"FAIL  {rt.rel(t)} [c23]\n", out)
+        self.assertIn("native-ok: GCC", out)
+
+    def test_update_golden_runs_no_compiler_and_no_verifier(self):
+        t = self.write("u.c", self.ok("u.c"), header="// expect: verified\n// expect: native-ok")
+        status, out, _ = self.run_harness("--update-golden", t)
+        self.assertEqual(status, 0, out)
+        self.assertEqual(self.calls(), [])
+        self.assertEqual(self.verify_calls(), [])
+
+
+class ScalarAreaTests(RootedCase):
+    """tests/scalar/ follows the twin and native-ok rules of tests/annotations/."""
+
+    POSITIVE = "// expect: verified\n// expect: native-ok\nint f();\n"
+    NEG = "tests/scalar/negative"
+
+    def neg(self, name, twin, outcome="error check @ L4", base=None):
+        lines = [f"// expect: {outcome}"] + ([f"// twin: {twin}"] if twin else [])
+        return self.header(f"{base or self.NEG}/{name}", "\n".join(lines) + "\nint g();\n")
+
+    def problems(self, areas=None):
+        return {str(f.relative_to(self.root)): m for f, m in rt.cross_file_problems(areas)}
+
+    def test_the_areas_are_pinned(self):
+        self.assertEqual(str(rt.SCALAR_NEGATIVE_DIR), "tests/scalar/negative")
+        self.assertEqual(rt.NEGATIVE_DIRS, (rt.NEGATIVE_DIR, rt.SCALAR_NEGATIVE_DIR))
+        self.assertEqual([(str(a), str(n)) for a, n in rt.TWIN_AREAS],
+                         [("tests/annotations", "tests/annotations/negative"),
+                          ("tests/scalar", "tests/scalar/negative")])
+
+    def test_a_positive_scalar_test_needs_native_ok(self):
+        for directory in ("tests/scalar", "tests/scalar/sub/deeper"):
+            with self.subTest(directory):
+                err = self.header(f"{directory}/a.cpp", "// expect: verified\nint f();\n")
+                self.assertIsInstance(err, rt.HeaderError)
+                self.assertIn("tests/scalar", str(err))
+                self.assertIn("native-ok", str(err))
+                self.assertIsInstance(self.header(f"{directory}/b.cpp", self.POSITIVE),
+                                      rt.Expectation)
+
+    def test_negative_scalar_tests_are_exempt_from_native_ok(self):
+        self.put("tests/scalar/ok.cpp", self.POSITIVE)
+        self.assertIsInstance(self.neg("a.cpp", "tests/scalar/ok.cpp"), rt.Expectation)
+
+    def test_every_negative_scalar_test_needs_a_twin(self):
+        self.put("tests/scalar/ok.cpp", self.POSITIVE)
+        for outcome in ("error check @ L4", "rejected undefined_identifier @ L4"):
+            with self.subTest(outcome):
+                err = self.neg("x.cpp", None, outcome)
+                self.assertIsInstance(err, rt.HeaderError)
+                self.assertIn("needs `// twin:", str(err))
+                self.assertIn("tests/scalar/negative", str(err))
+                ok = self.neg("y.cpp", "tests/scalar/ok.cpp", outcome)
+                self.assertIsInstance(ok, rt.Expectation)
+                self.assertEqual(ok.twin, "tests/scalar/ok.cpp")
+
+    def test_a_negative_scalar_test_must_fail(self):
+        self.put("tests/scalar/ok.cpp", self.POSITIVE)
+        for what, text in (("verified", "// expect: verified\n"),
+                           ("golden", "// expect: golden\n"),
+                           ("frontend-ok", "// expect: frontend-ok\n"),
+                           ("warnings", "// expect: frontend-warning unrecognized_pragma @ L3\n")):
+            with self.subTest(what):
+                err = self.header(f"{self.NEG}/{what}.cpp", text + "// twin: tests/scalar/ok.cpp\n")
+                self.assertIsInstance(err, rt.HeaderError)
+                self.assertIn("must expect at least one error", str(err))
+                self.assertIn("tests/scalar/negative", str(err))
+
+    def test_a_twin_in_either_negative_directory_is_refused(self):
+        self.put("tests/scalar/ok.cpp", self.POSITIVE)
+        self.put("tests/annotations/ok.cpp", "// expect: golden\n// expect: native-ok\nint f();\n")
+        self.put(f"{self.NEG}/other.cpp", "// expect: error check @ L3\n// twin: tests/scalar/ok.cpp\n")
+        self.put("tests/annotations/negative/other.cpp",
+                 "// expect: error check @ L3\n// twin: tests/annotations/ok.cpp\n")
+        for target in (f"{self.NEG}/other.cpp", "tests/annotations/negative/other.cpp"):
+            for base in (self.NEG, "tests/annotations/negative"):
+                with self.subTest(target=target, base=base):
+                    err = self.neg("a.cpp", target, base=base)
+                    self.assertIsInstance(err, rt.HeaderError)
+                    self.assertIn("is itself under", str(err))
+
+    def test_a_twin_may_be_in_the_other_area(self):
+        self.put("tests/annotations/ok.cpp", "// expect: golden\n// expect: native-ok\nint f();\n")
+        self.assertIsInstance(self.neg("a.cpp", "tests/annotations/ok.cpp"), rt.Expectation)
+
+    def test_a_scalar_positive_without_a_twin_is_a_problem(self):
+        self.put("tests/scalar/a.cpp", self.POSITIVE)
+        self.put("tests/scalar/sub/b.cpp", self.POSITIVE)
+        found = self.problems()
+        self.assertEqual(sorted(found), ["tests/scalar/a.cpp", "tests/scalar/sub/b.cpp"])
+        self.assertIn("a positive test under tests/scalar/ must be the `twin:` of a test under "
+                      "tests/scalar/negative/", found["tests/scalar/a.cpp"])
+        self.assertIn("twin-exempt", found["tests/scalar/a.cpp"])
+
+    def test_a_negative_naming_it_clears_it_and_another_does_not(self):
+        self.put("tests/scalar/a.cpp", self.POSITIVE)
+        self.put("tests/scalar/b.cpp", self.POSITIVE)
+        self.put(f"{self.NEG}/n.cpp", "// expect: error check @ L3\n// twin: tests/scalar/a.cpp\n")
+        self.assertEqual(list(self.problems()), ["tests/scalar/b.cpp"])
+
+    def test_a_twin_in_the_annotations_negative_dir_does_not_clear_a_scalar_test(self):
+        self.put("tests/scalar/a.cpp", self.POSITIVE)
+        self.put("tests/annotations/negative/n.cpp",
+                 "// expect: error check @ L3\n// twin: tests/scalar/a.cpp\n")
+        self.assertEqual(list(self.problems()), ["tests/scalar/a.cpp"])
+
+    def test_twin_exempt_clears_it(self):
+        self.put("tests/scalar/a.cpp", self.POSITIVE)
+        self.put("tests/scalar/b.cpp",
+                 "// expect: verified\n// expect: native-ok\n// twin-exempt: why\nint f();\n")
+        self.assertEqual(list(self.problems()), ["tests/scalar/a.cpp"])
+
+    def test_negative_tests_are_not_positive(self):
+        self.put("tests/scalar/ok.cpp", self.POSITIVE)
+        self.put(f"{self.NEG}/n.cpp", "// expect: error check @ L3\n// twin: tests/scalar/ok.cpp\n")
+        self.put(f"{self.NEG}/r.cpp",
+                 "// expect: rejected undefined_identifier @ L3\n// twin: tests/scalar/ok.cpp\n")
+        self.assertEqual(self.problems(), {})
+
+    def test_the_areas_are_separate(self):
+        self.put("tests/annotations/a.cpp", "// expect: golden\n// expect: native-ok\nint f();\n")
+        self.put("tests/scalar/a.cpp", self.POSITIVE)
+        self.assertEqual(sorted(self.problems()), ["tests/annotations/a.cpp", "tests/scalar/a.cpp"])
+        scalar = [(a, n) for a, n in rt.TWIN_AREAS if a.name == "scalar"]
+        self.assertEqual(list(self.problems(scalar)), ["tests/scalar/a.cpp"])
+        annotations = [(a, n) for a, n in rt.TWIN_AREAS if a.name == "annotations"]
+        self.assertEqual(list(self.problems(annotations)), ["tests/annotations/a.cpp"])
+
+    def run_check(self, *paths):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()), \
+                mock.patch.object(rt, "check_diag_headers"):
+            status = rt.main(["--check-headers", *map(str, paths)])
+        return status, out.getvalue()
+
+    def test_check_headers_reports_a_scalar_test_without_a_twin(self):
+        self.put("tests/scalar/a.cpp", self.POSITIVE)
+        status, out = self.run_check(self.root / "tests")
+        self.assertEqual(status, 1, out)
+        self.assertIn("tests/scalar/a.cpp: bad header: a positive test under tests/scalar/ "
+                      "must be the `twin:` of a test under tests/scalar/negative/", out)
+        self.assertIn("1 positive tests without a must-fail twin", out)
+
+    def test_a_partial_selection_checks_the_whole_scalar_tree(self):
+        self.put("tests/scalar/a.cpp", self.POSITIVE)
+        self.put("tests/scalar/b.cpp", self.POSITIVE)
+        self.put(f"{self.NEG}/n.cpp", "// expect: error check @ L3\n// twin: tests/scalar/a.cpp\n")
+        status, out = self.run_check(self.root / "tests/scalar/a.cpp")
+        self.assertEqual(status, 1, out)
+        self.assertIn("tests/scalar/b.cpp: bad header", out)
+
+    def test_other_areas_are_not_blamed_for_a_scalar_selection(self):
+        self.put("tests/annotations/a.cpp", "// expect: golden\n// expect: native-ok\nint f();\n")
+        self.put("tests/scalar/a.cpp", self.POSITIVE)
+        self.put(f"{self.NEG}/n.cpp", "// expect: error check @ L3\n// twin: tests/scalar/a.cpp\n")
+        status, out = self.run_check(self.root / "tests/scalar")
+        self.assertEqual(status, 0, out)
+        status, out = self.run_check(self.root / "tests/annotations")
+        self.assertEqual(status, 1, out)
+        self.assertIn("tests/annotations/a.cpp: bad header", out)
+
+    def test_no_scalar_directory_no_problem(self):
+        self.put("tests/annotations/a.cpp", "// expect: golden\n// expect: native-ok\nint f();\n")
+        self.assertEqual(list(self.problems()), ["tests/annotations/a.cpp"])
+        self.assertEqual(self.problems([(Path("tests/scalar"), rt.SCALAR_NEGATIVE_DIR)]), {})
+
+
+class DualModeTests(RootedCase):
+    """A .c test under tests/scalar runs in both languages, or says why not (B4)."""
+
+    def header(self, rel, text):
+        return super().header(rel, text + "int f(void);\n")
+
+    def test_both_modes_in_either_order_pass(self):
+        for modes in ("c23, c++20", "c++20, c23"):
+            with self.subTest(modes):
+                exp = self.header("tests/scalar/a.c", f"// expect: verified\n// expect: native-ok\n"
+                                                      f"// mode: {modes}\n")
+                self.assertIsInstance(exp, rt.Expectation)
+        two_lines = self.header("tests/scalar/b.c", "// expect: verified\n// expect: native-ok\n"
+                                                    "// mode: c23\n// mode: c++20\n")
+        self.assertIsInstance(two_lines, rt.Expectation)
+
+    def test_one_mode_or_none_is_an_error(self):
+        for what, mode in (("none", ""), ("c23", "// mode: c23\n"), ("c++20", "// mode: c++20\n")):
+            with self.subTest(what):
+                err = self.header("tests/scalar/a.c", "// expect: verified\n// expect: native-ok\n"
+                                  + mode)
+                self.assertIsInstance(err, rt.HeaderError)
+                self.assertIn("must run in both modes", str(err))
+                self.assertIn("c-only", str(err))
+
+    def test_c_only_with_a_reason_passes(self):
+        exp = self.header("tests/scalar/a.c", "// expect: verified\n// expect: native-ok\n"
+                                              "// c-only: relies on C's implicit conversion rules\n")
+        self.assertIsInstance(exp, rt.Expectation)
+        self.assertEqual(exp.modes, ["c23"])
+
+    def test_every_kind_of_test_in_the_directory_is_covered(self):
+        self.put("tests/scalar/ok.c", "// expect: verified\n// expect: native-ok\n"
+                                      "// mode: c23, c++20\nint f(void);\n")
+        twin = "// twin: tests/scalar/ok.c\n"
+        for rel, text in (("tests/scalar/negative/e.c", "// expect: error check @ L9\n" + twin),
+                          ("tests/scalar/negative/r.c",
+                           "// expect: rejected undefined_identifier @ L9\n" + twin),
+                          ("tests/scalar/sub/deeper/v.c", "// expect: verified\n// expect: native-ok\n")):
+            with self.subTest(rel):
+                err = self.header(rel, text)
+                self.assertIsInstance(err, rt.HeaderError)
+                self.assertIn("must run in both modes", str(err))
+                ok = self.header(rel, text + "// mode: c23, c++20\n")
+                self.assertNotIn("must run in both modes", str(ok))  # (other rules may still apply)
+
+    def test_other_files_are_not_covered(self):
+        text = "// expect: verified\n// expect: native-ok\n"
+        for rel in ("tests/scalar/a.cpp", "tests/il/a.c", "tests/a.c", "tests/scalarx/a.c",
+                    "doc/modules/ROOT/examples/other/a.c"):
+            with self.subTest(rel):
+                self.assertIsInstance(self.header(rel, text), rt.Expectation)
+
+    def test_the_directories_are_pinned(self):
+        self.assertEqual([str(d) for d in rt.DUAL_MODE_DIRS], [
+            "tests/scalar", "doc/modules/ROOT/examples/verifying",
+            "doc/modules/ROOT/examples/error-messages",
+            "doc/modules/ROOT/examples/integer-semantics"])
+
+    def test_the_documentation_examples_of_the_m3_pages_are_covered(self):
+        for page in ("verifying", "error-messages", "integer-semantics"):
+            base = f"doc/modules/ROOT/examples/{page}"
+            with self.subTest(page):
+                # a .c example runs in both modes, or says why not
+                err = self.header(f"{base}/a.c", "// expect: verified\n// expect: native-ok\n")
+                self.assertIsInstance(err, rt.HeaderError)
+                self.assertIn("must run in both modes", str(err))
+                ok = self.header(f"{base}/b.c", "// expect: verified\n// expect: native-ok\n"
+                                                "// mode: c23, c++20\n")
+                self.assertIsInstance(ok, rt.Expectation)
+                self.assertIsInstance(self.header(f"{base}/c.c", "// expect: verified\n"
+                                                  "// expect: native-ok\n// c-only: C idiom\n"),
+                                      rt.Expectation)
+                # a positive example carries native-ok; a must-fail one does not need it
+                err = self.header(f"{base}/d.cpp", "// expect: verified\n")
+                self.assertIn("native-ok", str(err))
+                self.assertIsInstance(self.header(f"{base}/e.cpp", "// expect: error check @ L9\n"),
+                                      rt.Expectation)
+                self.assertIsInstance(self.header(f"{base}/f.c", "// expect: error check @ L9\n"
+                                                  "// mode: c23, c++20\n"), rt.Expectation)
+        # the neighbouring directories are free
+        self.assertIsInstance(self.header("doc/modules/ROOT/examples/verifying2/a.c",
+                                          "// expect: verified\n"), rt.Expectation)
+
+
+class ErrorTwinTests(RootedCase):
+    """In tests/scalar a positive needs a twin that expects an `error` (B5)."""
+
+    POSITIVE = "// expect: verified\n// expect: native-ok\n// mode: c23, c++20\nint f(void);\n"
+    NEG = "tests/scalar/negative"
+
+    def twin(self, name, kind, positive="a.c"):
+        self.put(f"{self.NEG}/{name}", f"// expect: {kind}\n// mode: c23, c++20\n"
+                                       f"// twin: tests/scalar/{positive}\nint g(void);\n")
+
+    def problems(self):
+        return {str(f.relative_to(self.root)): m for f, m in rt.cross_file_problems()}
+
+    def test_an_error_twin_clears_it(self):
+        self.put("tests/scalar/a.c", self.POSITIVE)
+        self.twin("e.c", "error check @ L9")
+        self.assertEqual(self.problems(), {})
+
+    def test_a_rejected_twin_does_not(self):
+        self.put("tests/scalar/a.c", self.POSITIVE)
+        self.twin("r.c", "rejected undefined_identifier @ L9")
+        found = self.problems()
+        self.assertEqual(list(found), ["tests/scalar/a.c"])
+        self.assertIn("that expects an `error` (a `rejected` twin does not count)", found["tests/scalar/a.c"])
+        self.assertIn("it has only a `rejected` twin", found["tests/scalar/a.c"])
+
+    def test_no_twin_at_all_does_not_say_only_rejected(self):
+        self.put("tests/scalar/a.c", self.POSITIVE)
+        self.assertNotIn("only a `rejected` twin", self.problems()["tests/scalar/a.c"])
+
+    def test_a_rejected_and_an_error_twin_clear_it(self):
+        self.put("tests/scalar/a.c", self.POSITIVE)
+        self.twin("r.c", "rejected undefined_identifier @ L9")
+        self.twin("e.c", "error check @ L9")
+        self.assertEqual(self.problems(), {})
+
+    def test_an_error_twin_must_run_in_every_mode_of_its_positive(self):
+        self.put("tests/scalar/a.c", self.POSITIVE)  # c23 and c++20
+        for modes in ("c23", "c++20"):
+            self.put(f"{self.NEG}/e.c", f"// expect: error check @ L9\n// mode: {modes}\n"
+                                       "// twin: tests/scalar/a.c\nint g(void);\n")
+            other = "c++20" if modes == "c23" else "c23"
+            found = self.problems()
+            self.assertEqual(list(found), ["tests/scalar/a.c"], modes)
+            self.assertIn(f"no `error` twin runs in {other}", found["tests/scalar/a.c"])
+            self.assertEqual(rt.count_error_twins(), 0)
+        # one twin per mode is enough
+        self.twin("e2.c", "error check @ L9")  # both modes
+        self.assertEqual(self.problems(), {})
+        self.assertEqual(rt.count_error_twins(), 1)
+
+    def test_two_twins_that_cover_the_modes_between_them(self):
+        self.put("tests/scalar/a.c", self.POSITIVE)
+        self.put(f"{self.NEG}/c.c", "// expect: error check @ L9\n// mode: c23\n"
+                                    "// twin: tests/scalar/a.c\nint g(void);\n")
+        self.put(f"{self.NEG}/p.c", "// expect: error check @ L9\n// mode: c++20\n"
+                                    "// twin: tests/scalar/a.c\nint g(void);\n")
+        self.assertEqual(self.problems(), {})
+        self.assertEqual(rt.count_error_twins(), 1)
+
+    def test_a_rejected_twin_does_not_cover_a_mode(self):
+        self.put("tests/scalar/a.c", self.POSITIVE)
+        self.put(f"{self.NEG}/c.c", "// expect: error check @ L9\n// mode: c23\n"
+                                    "// twin: tests/scalar/a.c\nint g(void);\n")
+        self.twin("r.c", "rejected undefined_identifier @ L9")  # both modes, but no error
+        self.assertIn("no `error` twin runs in c++20", self.problems()["tests/scalar/a.c"])
+
+    def test_a_c_only_positive_needs_a_c23_error_twin(self):
+        self.put("tests/scalar/a.c", "// expect: verified\n// expect: native-ok\n"
+                                     "// c-only: C23 only\nint f(void);\n")
+        self.put(f"{self.NEG}/c.c", "// expect: error check @ L9\n// c-only: C23 only\n"
+                                    "// twin: tests/scalar/a.c\nint g(void);\n")
+        self.assertEqual(self.problems(), {})
+        self.assertEqual(rt.count_error_twins(), 1)
+
+    def test_a_cpp_positive_is_covered_by_a_cpp_twin(self):
+        self.put("tests/scalar/a.cpp", "// expect: verified\n// expect: native-ok\nint f();\n")
+        self.put(f"{self.NEG}/e.cpp", "// expect: error check @ L9\n// twin: tests/scalar/a.cpp\n"
+                                      "int g();\n")
+        self.assertEqual(self.problems(), {})
+
+    def test_an_error_twin_of_another_positive_does_not(self):
+        self.put("tests/scalar/a.c", self.POSITIVE)
+        self.put("tests/scalar/b.c", self.POSITIVE)
+        self.twin("e.c", "error check @ L9", positive="b.c")
+        self.assertEqual(list(self.problems()), ["tests/scalar/a.c"])
+
+    def test_twin_exempt_still_clears_it(self):
+        self.put("tests/scalar/a.c", "// expect: verified\n// expect: native-ok\n"
+                                     "// mode: c23, c++20\n// twin-exempt: no misuse\nint f(void);\n")
+        self.assertEqual(self.problems(), {})
+
+    def test_the_annotation_area_keeps_its_rule(self):
+        # there a rejected twin is as good as any must-fail test
+        self.put("tests/annotations/a.cpp", "// expect: golden\n// expect: native-ok\nint f();\n")
+        self.put("tests/annotations/negative/r.cpp", "// expect: rejected undefined_identifier @ L9\n"
+                                                     "// twin: tests/annotations/a.cpp\n")
+        self.assertEqual(self.problems(), {})
+
+    def test_the_areas_are_pinned(self):
+        self.assertEqual([str(a) for a in rt.ERROR_TWIN_AREAS], ["tests/scalar"])
+
+    def test_the_acceptance_count_counts_error_twins_only(self):
+        for name in "abcd":
+            self.put(f"tests/scalar/{name}.c", self.POSITIVE)
+        self.twin("e1.c", "error check @ L9", positive="a.c")
+        self.twin("e2.c", "error overflow @ L9", positive="a.c")  # two twins: one pair
+        self.twin("e3.c", "error check @ L9", positive="b.c")
+        self.twin("r1.c", "rejected undefined_identifier @ L9", positive="c.c")
+        self.assertEqual(rt.count_error_twins(), 2)
+        self.twin("e4.c", "error check @ L9", positive="c.c")
+        self.assertEqual(rt.count_error_twins(), 3)
+
+    def test_a_twin_exempt_positive_is_not_counted(self):
+        self.put("tests/scalar/a.c", "// expect: verified\n// expect: native-ok\n"
+                                     "// mode: c23, c++20\n// twin-exempt: why\nint f(void);\n")
+        self.twin("e.c", "error check @ L9")
+        self.assertEqual(rt.count_error_twins(), 0)
+
+    def test_the_command_line_prints_the_count(self):
+        self.put("tests/scalar/a.c", self.POSITIVE)
+        self.twin("e.c", "error check @ L9")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            status = rt.main(["--count-error-twins"])
+        self.assertEqual((status, out.getvalue()), (0, "1\n"))
+
+
+class HelperHeaderTests(RootedCase):
+    """Helper headers live in a `headers/` directory, are included by a test, and
+    are never tests (B3)."""
+
+    TEST = '// expect: verified\n// expect: native-ok\n// mode: c23, c++20\n#include "{inc}"\nint f(void);\n'
+
+    def setUp(self):
+        super().setUp()
+        self.put("tests/scalar/negative/n.c", "// expect: error check @ L9\n// mode: c23, c++20\n"
+                                              "// twin: tests/scalar/a.c\nint g(void);\n")
+
+    def put_test(self, name="a.c", inc="headers/h.h"):
+        return self.put(f"tests/scalar/{name}", self.TEST.format(inc=inc))
+
+    def selection(self, path="tests"):
+        return rt.discover([str(self.root / path)])
+
+    def check(self, *args):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()), \
+                mock.patch.object(rt, "check_diag_headers"):
+            status = rt.main(["--check-headers", *map(str, args or [self.root / "tests"])])
+        return status, out.getvalue()
+
+    def test_an_included_helper_is_clean(self):
+        self.put("tests/scalar/headers/h.h", "int h(int x);\n")
+        self.put_test()
+        sel = self.selection()
+        self.assertEqual([rt.rel(h) for h in sel.helpers], ["tests/scalar/headers/h.h"])
+        self.assertEqual(sel.unrecognized, [])
+        self.assertEqual(rt.helper_problems(sel.helpers), [])
+        status, out = self.check()
+        self.assertEqual(status, 0, out)
+
+    def test_every_include_suffix_is_a_helper_in_headers_and_an_error_elsewhere(self):
+        for suffix in (".h", ".hpp", ".hh", ".inc", ".def", ".tpp", ".ipp", ".inl", ".tcc", ".hxx"):
+            with self.subTest(suffix):
+                self.put(f"tests/scalar/headers/x{suffix}", "// helper\n")
+                self.put_test(inc=f"headers/x{suffix}")
+                sel = self.selection()
+                self.assertEqual([h.name for h in sel.helpers], [f"x{suffix}"])
+                self.assertEqual(sel.unrecognized, [])
+                self.assertEqual(rt.helper_problems(sel.helpers), [])
+                (self.root / f"tests/scalar/headers/x{suffix}").rename(
+                    self.root / f"tests/scalar/x{suffix}")
+                sel = self.selection()
+                self.assertEqual([f.name for f in sel.unrecognized], [f"x{suffix}"], suffix)
+                self.assertEqual(sel.helpers, [])
+                (self.root / f"tests/scalar/x{suffix}").unlink()
+
+    def test_a_header_elsewhere_is_still_an_error(self):
+        for rel in ("tests/scalar/x.h", "tests/il/y.inc", "tests/scalar/negative/z.def",
+                    "tests/scalar/headerz/w.h", "tests/scalar/header/w.h", "tests/Headers/w.h"):
+            with self.subTest(rel):
+                self.put(rel, "// x\n")
+                status, out = self.check()
+                self.assertEqual(status, 1, out)
+                self.assertIn(f"{rel}: looks like a C/C++/Viper source file", out)
+                (self.root / rel).unlink()
+
+    def test_the_headers_directory_may_be_nested_and_deep(self):
+        for rel in ("tests/scalar/a/headers/x.h", "tests/scalar/headers/sub/x.h",
+                    "tests/il/m3/headers/x.inc"):
+            with self.subTest(rel):
+                self.put(rel, "// x\n")
+                self.assertEqual([rt.rel(h) for h in self.selection().helpers], [rel])
+                (self.root / rel).unlink()
+
+    def test_where_the_repository_is_does_not_matter(self):
+        # a checkout below a directory called `headers` must not turn every header into a helper
+        outer = self.root / "headers" / "repo"
+        (outer / "tests/scalar").mkdir(parents=True)
+        (outer / "tests/scalar/x.h").write_text("// x\n")
+        with mock.patch.object(rt, "ROOT", outer):
+            sel = rt.discover([str(outer / "tests")])
+        self.assertEqual([f.name for f in sel.unrecognized], ["x.h"])
+        self.assertEqual(sel.helpers, [])
+
+    def test_an_orphan_helper_is_an_error(self):
+        self.put("tests/scalar/headers/h.h", "int h(int x);\n")
+        self.put("tests/scalar/a.c", "// expect: verified\n// expect: native-ok\n"
+                                     "// mode: c23, c++20\nint f(void);\n")
+        problems = rt.helper_problems(self.selection().helpers)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("orphan helper header: no test includes it", problems[0][1])
+        status, out = self.check()
+        self.assertEqual(status, 1, out)
+        self.assertIn("tests/scalar/headers/h.h: orphan helper header", out)
+        self.assertIn("1 problems with helper headers", out)
+
+    def test_how_a_test_includes_a_helper(self):
+        self.put("tests/scalar/headers/h.h", "int h(int x);\n")
+        cases = {"quoted, relative to the test": ('#include "headers/h.h"\n', True),
+                 "from negative/, up one": ('#include "../headers/h.h"\n', True),
+                 "with spaces": ('  #  include   "headers/h.h"\n', True),
+                 "angle brackets (no -I)": ("#include <headers/h.h>\n", False),
+                 "a comment": ('// #include "headers/h.h"\n', False),
+                 "another name": ('#include "headers/g.h"\n', False),
+                 "not relative to the test": ('#include "h.h"\n', False)}
+        for what, (line, included) in cases.items():
+            with self.subTest(what):
+                where = "negative" if "../" in line else "."
+                (self.root / "tests/scalar/a.c").write_text("// expect: verified\n// mode: c23, c++20\n" + line)
+                (self.root / "tests/scalar/negative/n.c").write_text(
+                    "// expect: error check @ L9\n// mode: c23, c++20\n// twin: tests/scalar/a.c\n"
+                    + (line if where == "negative" else ""))
+                if where == "negative":
+                    (self.root / "tests/scalar/a.c").write_text("// expect: verified\n// mode: c23, c++20\n")
+                problems = rt.helper_problems(self.selection().helpers)
+                self.assertEqual(problems == [], included, (what, problems))
+
+    def test_a_helper_may_be_included_through_another_helper(self):
+        self.put("tests/scalar/headers/outer.h", '#include "inner.h"\n')
+        self.put("tests/scalar/headers/inner.h", "int h(int x);\n")
+        self.put_test(inc="headers/outer.h")
+        self.assertEqual(rt.helper_problems(self.selection().helpers), [])
+        # but two helpers that include each other and no test are orphans
+        self.put_test(inc="nothing.h")
+        (self.root / "tests/scalar/headers/inner.h").write_text('#include "outer.h"\n')
+        problems = rt.helper_problems(self.selection().helpers)
+        self.assertEqual(len(problems), 2, problems)
+
+    def test_a_helper_is_not_a_test(self):
+        self.put("tests/scalar/headers/h.h", "// expect: verified\nint h(int x);\n")
+        self.put_test()
+        problems = rt.helper_problems(self.selection().helpers)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("a helper header is not a test", problems[0][1])
+        status, out = self.check()
+        self.assertEqual(status, 1, out)
+        # not even in a later line of its header block
+        self.put("tests/scalar/headers/h.h", "// a comment\n// expect: golden\nint h(int x);\n")
+        self.assertEqual(len(rt.helper_problems(self.selection().helpers)), 1)
+
+    def test_the_other_areas_are_not_looked_at(self):
+        # an include in a test of another area does not make a helper reachable
+        self.put("tests/scalar/headers/h.h", "int h(int x);\n")
+        self.put("tests/il/i.c", '// expect: frontend-ok\n#include "../scalar/headers/h.h"\n')
+        self.put("tests/scalar/a.c", "// expect: verified\n// expect: native-ok\n"
+                                     "// mode: c23, c++20\nint f(void);\n")
+        self.assertEqual(len(rt.helper_problems(self.selection("tests/scalar").helpers)), 1)
+
+    def test_a_selection_of_one_test_still_sees_the_whole_area(self):
+        self.put("tests/scalar/headers/h.h", "int h(int x);\n")
+        self.put_test()
+        sel = self.selection("tests/scalar/headers")
+        self.assertEqual(rt.helper_problems(sel.helpers), [])
+
+    def test_a_helper_alone_is_something_to_check(self):
+        self.put("tests/scalar/headers/h.h", "int h(int x);\n")
+        status, out = self.check(self.root / "tests/scalar/headers")
+        self.assertEqual(status, 1, out)
+        self.assertIn("orphan helper header", out)
+
+
+
+class IncludeScanTests(unittest.TestCase):
+    """What counts as an include, and as a function body, in a helper header."""
+
+    def test_comments_and_if_zero_blocks_are_not_includes(self):
+        text = ('/* c */ #include "a.h"\n#if 0\n#include "b.h"\n#endif\n// #include "c.h"\n'
+                '#include "d.h"\n#if 0\n#if 1\n#include "e.h"\n#endif\n#include "f.h"\n'
+                '#else\n#include "g.h"\n#endif\n/*\n#include "h.h"\n*/\n#  include  "i.h"\n')
+        found = [m for m in rt._INCLUDE_RE.findall(rt.active_source_text(text))]
+        self.assertEqual(found, ["a.h", "d.h", "g.h", "i.h"])
+
+    def test_line_numbers_survive(self):
+        text = "a\n/* x\ny */\n#if 0\nz\n#endif\nb\n"
+        self.assertEqual(len(rt.active_source_text(text).split("\n")), len(text.split("\n")))
+
+    def test_an_include_in_a_comment_or_if_zero_is_not_an_include_of(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            for name in ("a.h", "b.h", "c.h"):
+                (d / name).write_text("")
+            (d / "t.c").write_text('#include "a.h"\n// #include "b.h"\n#if 0\n#include "c.h"\n#endif\n')
+            self.assertEqual({p.name for p in rt.includes_of(d / "t.c")}, {"a.h"})
+
+    def test_function_bodies(self):
+        yes = ("static inline int f(int x) { return x; }", "void g(void) CERASTES_REQUIRES(1) { }",
+               "enum e { A };\nint g(void) { return 0; }", "int f(int x)\n{\n  return x;\n}",
+               "int f(void) CERASTES_ENSURES(r, r > 0) { return 1; }",
+               "struct s { int a; };\nint f(struct s v) { return v.a; }",
+               # bodies inside namespaces and linkage blocks, to any depth (a body at brace depth 0
+               # only would miss every one of these)
+               "namespace { int f(void) { return 0; } }",
+               "namespace a { namespace b { int f(int x) { return x; } } }",
+               "namespace a::b { int f(void) { return 1; } }",
+               "inline namespace v1 { int f(void) { return 1; } }",
+               "namespace [[deprecated]] n { int f(void) { return 0; } }",
+               'extern "C" { int f(void) { return 0; } }',
+               'extern "C" int f(void) { return 0; }',
+               'extern "C++" { namespace n { int f(void) { return 0; } } }',
+               'extern "C" {\nnamespace { int g(int x) CERASTES_REQUIRES(x > 0) { return x; } }\n}',
+               "namespace n { int a; }\nint f(void) { return 0; }",
+               "namespace n {\nstruct s { int a; };\nint f(struct s v) { return v.a; }\n}")
+        no = ("struct s { int a; };", "int a[] = {1, 2};", "int f(int x);", "// int f(){}",
+              "/* int f(){} */", "#if 0\nint f(void) { return 0; }\n#endif", "int g(int x = 3);",
+              'extern "C" { int f(int); }', "enum { A = 1 };", "typedef struct { int a; } t;",
+              "int x = (1 + 2);", "union u { int a; };", 'const char *s = "{ ) {";',
+              "namespace n { int a; }",
+              # still no body: declarations, types, initializers and class members in a block
+              "namespace n { struct s { int f(void) { return 0; } }; }",
+              "namespace n { int a[] = {1, 2}; }", "namespace n { int f(int); }",
+              "namespace { enum e { A = 1 }; }", "namespace n { int x = (1 + 2); }",
+              'extern "C" int f(int x);', "} int x;", "namespace n = other;\nint x;")
+        for text in yes:
+            with self.subTest(text):
+                self.assertTrue(rt.has_function_body(text), text)
+        for text in no:
+            with self.subTest(text):
+                self.assertFalse(rt.has_function_body(text), text)
+
+
+class RealHelperHeaderTests(unittest.TestCase):
+    def test_the_real_tree_has_only_included_helpers(self):
+        sel = rt.discover([str(REAL_ROOT / "tests"), str(REAL_ROOT / "doc/modules/ROOT/examples")])
+        names = [Path(rt.rel(h)).as_posix() for h in sel.helpers]
+        self.assertIn("tests/il/m3/headers/p14_inc.inc", names)
+        self.assertEqual(rt.helper_problems(sel.helpers), [])
+        self.assertEqual(sel.unrecognized, [])
+
+
+class DriverCategoryDocsTests(unittest.TestCase):
+    """The categories table is the contract between the driver, the harness, the
+    error-messages page and the tests; nobody can change one copy alone."""
+
+    def test_decision_0011_lists_exactly_the_harness_categories(self):
+        text = (REAL_ROOT / "internal" / "decisions" / "0011-verify-driver.md").read_text()
+        self.assertEqual(set(DRIVER_TABLE_ROW.findall(text)), set(rt.DRIVER_CATEGORIES))
+
+    def test_the_readme_lists_exactly_the_harness_categories(self):
+        text = (REAL_ROOT / "tests" / "README.md").read_text()
+        section = text.split("### Categories for C and C++ tests", 1)[1].split("\n## ", 1)[0]
+        self.assertEqual(set(DRIVER_TABLE_ROW.findall(section)), set(rt.DRIVER_CATEGORIES))
+
+    def test_the_table_reader_would_see_a_changed_table(self):
+        # the comparison above is only as good as the row reader
+        table = "| `a-b` | x |\n    | `c` | y |\n| not a row |\n| `Bad` | z |\n"
+        self.assertEqual(DRIVER_TABLE_ROW.findall(table), ["a-b", "c"])
+
+    def test_the_readme_documents_the_verify_tests(self):
+        text = (REAL_ROOT / "tests" / "README.md").read_text()
+        for needle in ("rejected <diag> @ L<line>", "build/cerastes verify", "--keep-vpr",
+                       "build/vpr/MANIFEST", "CERASTES_VERIFY", "DRIVER_CATEGORIES",
+                       "# run-id:", "### Helper headers", "(rule h)", "pages/error-messages.adoc", "headers/", "DUAL_MODE_DIRS", "c-only:",
+                       "ERROR_TWIN_AREAS", "--count-error-twins", "@ <repository-relative file>:L<n>",
+                       "stderr", "sorted by printed path (byte order)",
+                       "unrecognized driver output", "tests/scalar/negative", "TWIN_AREAS",
+                       "exit status 2", "tool failure", "-x c++", ".map"):
+            with self.subTest(needle):
+                self.assertIn(needle, text)
+
+
+class VerifyDocExampleTests(DocLintCase):
+    """The documentation examples of M3 (the verifying, error-messages and
+    integer-semantics pages) may use the verdicts: the source lint accepts them
+    through the same header rules as any test."""
+
+    BODY = "// tag::body[]\nint f(void) { return 1; }\n// end::body[]\n"
+
+    def test_verdict_examples_are_clean_and_checked_like_any_example(self):
+        for name, header in (("v.c", "// expect: verified"),
+                             ("e.c", "// expect: error overflow @ L6"),
+                             ("r.cpp", "// expect: rejected cerastes-unsupported_type @ L6")):
+            self.example(name, header + "\n" + self.BODY)
+            self.page(f"{name}.adoc", block_of(f"include::example${name}[tag=body]"))
+        report = self.check()
+        self.assertEqual(report.problems, [])
+        self.assertEqual(report.examples, 3)
+
+    def test_a_bad_verdict_header_in_an_example_is_a_problem(self):
+        # a Viper category, an unknown one, a reason, the old `rejected` grammar
+        for header in ("error assert @ L3", "error nonsense @ L3",
+                       "error overflow:assertion.false @ L3", "rejected unsupported-union"):
+            with self.subTest(header):
+                self.example("b.c", f"// expect: {header}\n" + self.BODY)
+                self.page("b.adoc", block_of("include::example$b.c[tag=body]"))
+                self.lint("is not a valid test")
+
+
+def _real_verifier_available():
+    verify = rt.load_env().get("CERASTES_VERIFY")
+    return bool(verify) and Path(verify).is_file()
+
+
+def _real_silicon_available():
+    env = rt.load_env()
+    return all(env.get(name) and Path(env[name]).exists()
+               for name in ("CERASTES_JAVA", "SILICON_JAR", "Z3_EXE"))
+
+
+# ---------------------------------------------------------------------------
+# The driver's reading of Silicon's output agrees with the harness's
+# ---------------------------------------------------------------------------
+# src/driver/silicon_output.cpp is a port of `parse_silicon_output` and `classify` above
+# (decision 0011 item 11); the two tables are copies.  `cerastes --cerastes_classify_silicon
+# <file> <exit code>` prints one `error<TAB>id<TAB>category<TAB>reason<TAB>file<TAB>line` line per
+# error and `verdict<TAB>verified|errors|problem<TAB>text`; these tests run both readers on the
+# same outputs and require the same answer, for a sample of every row of both tables, for the
+# malformed outputs, and for the real output of Silicon on tests/viper-smoke/fail_kinds.vpr.
+
+# One message per row of rt._VIPER_ERRORS (keyed by Viper error id) and per row of
+# rt._VIPER_REASONS (keyed by reason id).  A test below requires the keys to equal the
+# tables' ids, so a row added to or dropped from either table without a sample fails.
+CLASSIFY_ERROR_SAMPLES = {
+    "assignment.failed": "Assignment might fail.",
+    "call.failed": "Method call might fail.",
+    "not.wellformed": "Contract might not be well-formed.",
+    "call.precondition": "The precondition of method foo might not hold.",
+    "application.precondition": "Precondition of function bar might not hold.",
+    "exhale.failed": "Exhale might fail.",
+    "inhale.failed": "Inhale might fail.",
+    "if.failed": "Conditional statement might fail.",
+    "while.failed": "While statement might fail.",
+    "assert.failed": "Assert might fail.",
+    "termination.failed": "Function f might not terminate.",  # the old, named form; also the new ones below
+    "postcondition.violated": "Postcondition of m might not hold.",
+    "fold.failed": "Folding p(x) might fail.",
+    "unfold.failed": "Unfolding p(x) might fail.",
+    "package.failed": "Packaging wand might fail.",
+    "apply.failed": "Applying wand might fail.",
+    "invariant.not.preserved": "Loop invariant x > 0 might not be preserved.",
+    "invariant.not.established": "Loop invariant x > 0 might not hold on entry.",
+    "function.not.wellformed": "Function might not be well-formed.",
+    "predicate.not.wellformed": "Predicate might not be well-formed.",
+    "wand.not.wellformed": "Magic wand might not be well-formed.",
+    "letwand.failed": "Referencing a wand might fail.",
+    "quasihavoc.failed": "Quasihavoc might fail.",
+    "quasihavocall.failed": "Quasihavocall might fail.",
+    "heuristics.failed": "Applying heuristics failed.",
+    "internal": "An internal error occurred.",
+}
+# More than one row of the table has the id termination.failed: every row needs a sample of its own.
+CLASSIFY_EXTRA_ERROR_SAMPLES = (
+    ("termination.failed", "Function might not terminate."),
+    ("termination.failed", "Method might not terminate."),
+    ("termination.failed", "Loop might not terminate."),
+)
+CLASSIFY_REASON_SAMPLES = {
+    "assertion.false": "Assertion x > 0 might not hold.",
+    "receiver.null": "Receiver of x.f might be null.",
+    "division.by.zero": "Divisor y might be zero.",
+    "negative.permission": "Fraction p might be negative.",
+    "permission.not.positive": "Fraction p might not be positive.",
+    "insufficient.permission": "There might be insufficient permission to access x.f",
+    "invalid.perm.multiplication": "Permission multiplication might not be possible.",
+    "wand.not.found": "Magic wand instance not found.",
+    "qp.not.injective": "Quantified resource x.f might not be injective.",
+    "quasihavocall.not.injective": "Quasihavocall statement x might not be injective.",
+    "labelled.state.not.reached": "Did not reach labelled state l.",
+    "seq.index.negative": "Index i into s might be negative.",
+    "seq.index.length": "Index i into s might exceed sequence length.",
+    "map.key.contains": "Map m might not contain an entry at key k.",
+    "epsilon.as.param": "The parameter p might be an epsilon permission.",
+    "feature.unsupported": "Foo is not supported.",
+    "unexpected.node": "Foo occurred unexpectedly.",
+    "tuple.false": "Termination measure might not decrease or might not be bounded.",
+    "tuple.condition.false": "Required tuple condition might not hold.",
+    "termination.condition.false": "Required termination condition might not hold.",
+}
+CLASSIFY_EXTRA_REASON_SAMPLES = (
+    ("tuple.false", "Termination measure might not decrease."),
+    ("tuple.false", "Termination measure might not bounded."),
+)
+
+
+def silicon_found(entries, count=None, seconds="0.5s"):
+    """Silicon's output for `entries` (message with position): numbered like Silicon, with
+    the padding it adds from ten errors."""
+    n = len(entries) if count is None else count
+    wide = len(entries) >= 10
+    lines = ["Silicon 1.1-SNAPSHOT (6b540aa4@(detached))",
+             f"Silicon found {n} error{'s' if n != 1 else ''} in {seconds}:"]
+    for i, entry in enumerate(entries):
+        index = f"[{i:2}]" if wide else f"[{i}]"
+        lines += [f"  {index} {entry}", ""]
+    return "\n".join(lines) + "\n"
+
+
+def classify_cases():
+    """(name, Silicon output, exit status) for the agreement tests."""
+    pos = " (t.vpr@3.4--3.9)"
+    cases = [("success", SUCCESS, 0), ("two errors", TWO_ERRORS, 1)]
+    for viper_id, text in CLASSIFY_ERROR_SAMPLES.items():
+        reason = " Assertion x > 0 might not hold."
+        cases.append((f"error {viper_id}", silicon_found([text + reason + pos]), 1))
+    for n, (viper_id, text) in enumerate(CLASSIFY_EXTRA_ERROR_SAMPLES):
+        cases.append((f"error {viper_id} (form {n})", silicon_found([text + " Assertion x > 0 might not hold." + pos]), 1))
+    for reason_id, text in CLASSIFY_REASON_SAMPLES.items():
+        cases.append((f"reason {reason_id}", silicon_found(["Assert might fail. " + text + pos]), 1))
+    for n, (reason_id, text) in enumerate(CLASSIFY_EXTRA_REASON_SAMPLES):
+        cases.append((f"reason {reason_id} (form {n})", silicon_found(["Assert might fail. " + text + pos]), 1))
+    cases += [
+        ("timeout", silicon_found(["Assert might fail. Assertion x > 0 might not hold. "
+                                   "An SMT query timed out after 100ms." + pos]), 1),
+        ("unknown reason", silicon_found(["Assert might fail. Something else entirely." + pos]), 1),
+        ("parse error", silicon_found(['Parse error: Expected (parens | atom):4:1, found "}\\n".'
+                                       " (t.vpr@4.1--4.1)"]), 1),
+        ("no position", silicon_found(["Assert might fail. Assertion x > 0 might not hold."]), 1),
+        ("range position", silicon_found(["Assert might fail. Assertion x > 0 might not hold. "
+                                          "(dir/t.vpr@3.4--5.9)"]), 1),
+        ("multi-line message", silicon_found(["Postcondition of m might not hold.\n"
+                                              "    Assertion r > 0 might not hold. (t.vpr@5.11--5.16)"]), 1),
+        ("ten errors, padded indices",
+         silicon_found([f"Assert might fail. Assertion x > {i} might not hold. (t.vpr@{i + 1}.1--{i + 1}.5)"
+                        for i in range(11)]), 1),
+        ("crash", 'Exception in thread "main" java.lang.Error\n', 1),
+        ("crash with exit 0", 'Exception in thread "main" java.lang.Error\n', 0),
+        ("empty", "", 0),
+        ("empty with exit 1", "", 1),
+        ("count mismatch", TWO_ERRORS.replace("found 2 errors", "found 3 errors"), 1),
+        ("errors with exit 0", TWO_ERRORS, 0),
+        ("errors with exit 2", TWO_ERRORS, 2),
+        ("success with exit 1", SUCCESS, 1),
+        ("success and an error", SUCCESS + TWO_ERRORS, 1),
+        ("found zero errors", "Silicon found 0 errors in 0.1s:\n", 1),
+    ]
+    return cases
+
+
+def viper_id_of(message):
+    """The Viper error id the harness's table gives `message` (a whole entry), or `unknown`."""
+    if m := rt._POSITION_RE.search(message):
+        message = message[:m.start()]
+    message = message.strip()
+    for regex, viper_id, _category in rt._ERROR_KINDS:
+        if regex.fullmatch(message):
+            return viper_id
+    return "unknown"
+
+
+def harness_view(output, code):
+    """What the harness's reader says, in the driver's terms: (errors, verdict, problem)."""
+    result = rt.parse_silicon_output(output, code)
+    errors = [(viper_id_of(e.message), e.category, e.reason, "" if e.file == "?" else e.file, e.line)
+              for e in result.errors]
+    verdict = "verified" if result.verified else ("problem" if result.problem else "errors")
+    return errors, verdict, result.problem or ""
+
+
+def driver_view(driver, output, code, directory):
+    """What `cerastes --cerastes_classify_silicon` says about the same output."""
+    path = Path(directory) / "silicon.out"
+    path.write_text(output)
+    run = subprocess.run([driver, "--cerastes_classify_silicon", str(path), str(code)],
+                         capture_output=True, text=True, timeout=60)
+    if run.returncode != 0 or run.stderr:
+        raise AssertionError(f"the driver failed ({run.returncode}): {run.stderr}")
+    errors, verdict = [], None
+    for line in run.stdout.splitlines():
+        fields = line.split("\t")
+        if fields[0] == "error":
+            _, viper_id, category, reason, file, number = fields
+            errors.append((viper_id, category, reason, file, int(number)))
+        elif fields[0] == "verdict":
+            assert verdict is None, run.stdout
+            verdict = (fields[1], fields[2] if len(fields) > 2 else "")
+        else:
+            raise AssertionError(f"unexpected driver output line: {line!r}")
+    assert verdict is not None, run.stdout
+    return errors, verdict[0], verdict[1]
+
+
+class ClassifySamplesTests(unittest.TestCase):
+    """The samples cover the harness's tables, whether or not a driver is built."""
+
+    def test_error_samples_cover_every_row_of_the_table(self):
+        self.assertEqual(set(CLASSIFY_ERROR_SAMPLES), {i for _, i, _ in rt._VIPER_ERRORS})
+        # and every row, also those that share an id, matches a sample of its own
+        samples = list(CLASSIFY_ERROR_SAMPLES.items()) + list(CLASSIFY_EXTRA_ERROR_SAMPLES)
+        for text, viper_id, _category in rt._VIPER_ERRORS:
+            with self.subTest(text):
+                self.assertTrue(any(i == viper_id and re.fullmatch(text, t) for i, t in samples), text)
+
+    def test_reason_samples_cover_every_row_of_the_table(self):
+        self.assertEqual(set(CLASSIFY_REASON_SAMPLES), {i for i, _ in rt._VIPER_REASONS})
+        samples = list(CLASSIFY_REASON_SAMPLES.items()) + list(CLASSIFY_EXTRA_REASON_SAMPLES)
+        # every alternative of a reason row (the three messages of tuple.false) has a sample
+        for reason_id, pattern in rt._VIPER_REASONS:
+            with self.subTest(reason_id):
+                self.assertTrue(any(i == reason_id and re.fullmatch(pattern, t, re.DOTALL) for i, t in samples), pattern)
+        for reason_id, text in CLASSIFY_EXTRA_REASON_SAMPLES:
+            self.assertEqual(rt.classify("Assert might fail. " + text)[1], reason_id)
+
+    def test_the_harness_reads_each_sample_as_its_row(self):
+        for viper_id, text in CLASSIFY_ERROR_SAMPLES.items():
+            out = silicon_found([text + " Assertion x > 0 might not hold. (t.vpr@3.4--3.9)"])
+            with self.subTest(viper_id):
+                errors, verdict, problem = harness_view(out, 1)
+                self.assertEqual((verdict, problem), ("errors", ""))
+                self.assertEqual([e[0] for e in errors], [viper_id])
+                self.assertNotEqual(errors[0][1], rt.UNKNOWN)
+        for reason, text in CLASSIFY_REASON_SAMPLES.items():
+            out = silicon_found(["Assert might fail. " + text + " (t.vpr@3.4--3.9)"])
+            with self.subTest(reason):
+                (error,) = harness_view(out, 1)[0]
+                self.assertEqual(error[2], reason)
+
+    def test_the_cases_include_a_clean_verdict_and_every_kind_of_problem(self):
+        views = {name: harness_view(out, code) for name, out, code in classify_cases()}
+        self.assertEqual(views["success"][1], "verified")
+        for name in ("crash", "empty", "count mismatch", "errors with exit 0", "success with exit 1"):
+            self.assertEqual(views[name][1], "problem", name)
+        self.assertEqual(views["timeout"][0][0][2], rt.TIMEOUT)
+        self.assertEqual(views["no position"][0][0][3:], ("", 0))
+        self.assertEqual(len(views["ten errors, padded indices"][0]), 11)
+
+
+@e2e_gate(_real_verifier_available(), "CERASTES_VERIFY missing; run scripts/bootstrap.sh")
+class ClassifySiliconAgreementTests(unittest.TestCase):
+    """The driver's reader of Silicon's output equals the harness's, case by case."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.driver = rt.load_env()["CERASTES_VERIFY"]
+        tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(tmp.cleanup)
+        cls.tmp = tmp.name
+
+    def test_recorded_outputs(self):
+        for name, output, code in classify_cases():
+            with self.subTest(name):
+                self.assertEqual(driver_view(self.driver, output, code, self.tmp),
+                                 harness_view(output, code))
+
+    def test_a_driver_that_disagrees_is_noticed(self):
+        # twin: the comparison above fails when one field differs, here made to differ by
+        # giving the driver a different exit status than the harness reader
+        output = TWO_ERRORS
+        self.assertNotEqual(driver_view(self.driver, output, 0, self.tmp), harness_view(output, 1))
+        # and a different line in the output the harness reads
+        self.assertNotEqual(driver_view(self.driver, output, 1, self.tmp),
+                            harness_view(output.replace("t.vpr@9", "t.vpr@8"), 1))
+
+    def test_a_missing_file_is_a_failure_of_the_command(self):
+        run = subprocess.run([self.driver, "--cerastes_classify_silicon",
+                              str(Path(self.tmp) / "nonexistent"), "1"],
+                             capture_output=True, text=True, timeout=60)
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn("cannot read", run.stderr)
+
+
+@e2e_gate(_real_verifier_available() and _real_silicon_available(),
+          "CERASTES_VERIFY, Java, Silicon or Z3 missing; run scripts/bootstrap.sh")
+class ClassifyRealSiliconTests(unittest.TestCase):
+    """The same agreement on the real output of Silicon."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.driver = rt.load_env()["CERASTES_VERIFY"]
+        tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(tmp.cleanup)
+        cls.tmp = tmp.name
+
+    def test_the_real_output_of_silicon_on_the_kinds_fixtures(self):
+        env = rt.load_env()
+        for name, minimum in (("fail_kinds.vpr", 10), ("termination_kinds.vpr", 6)):
+            with self.subTest(name):
+                fixture = REAL_ROOT / "tests" / "viper-smoke" / name
+                run = subprocess.run([env["CERASTES_JAVA"], "-Xss128m", "-jar", env["SILICON_JAR"],
+                                      "--z3Exe", env["Z3_EXE"], "--numberOfErrorsToReport", "0", str(fixture)],
+                                     capture_output=True, text=True, env=env, timeout=rt.SILICON_TIMEOUT_S)
+                output = run.stdout + run.stderr
+                errors = harness_view(output, run.returncode)[0]
+                self.assertGreaterEqual(len(errors), minimum, output)   # fail_kinds: 11, padded indices
+                self.assertEqual(driver_view(self.driver, output, run.returncode, self.tmp),
+                                 harness_view(output, run.returncode))
+
+
+# The fewest checks `cerastes --selftest` may run (it printed 69 when this was written).  Raise it
+# with the driver's own tests; a driver whose self-test silently runs fewer fails here.
+DRIVER_SELFTEST_MIN = 69
+
+
+ONE_FUNCTION = """#include <cerastes.h>
+int f(int x) CERASTES_REQUIRES(x >= 0 && x < 100) CERASTES_ENSURES(r, r == x + 1)
+{
+  return x + 1;
+}
+"""
+ONE_LOOP = """#include <cerastes.h>
+int g(int n) CERASTES_REQUIRES(n >= 0 && n < 100) CERASTES_ENSURES(r, r == n)
+{
+  int i = 0;
+  CERASTES_INVARIANT(0 <= i && i <= n) CERASTES_DECREASES(n - i) while (i < n) { i += 1; }
+  return i;
+}
+"""
+ONE_FOLDED_CONSTANT = """#include <cerastes.h>
+signed char k(void) CERASTES_ENSURES(r, r == 100) { signed char c = 100; return c; }
+"""
+
+
+@e2e_gate(_real_verifier_available(), "CERASTES_VERIFY missing; run scripts/bootstrap.sh")
+class RealDriverTests(unittest.TestCase):
+    """The real `build/cerastes`: its own self-test, the exit statuses and streams of runs, the refused
+    options, and every self-test hook of decision 0011 item 13."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.driver = rt.load_env()["CERASTES_VERIFY"]
+        tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(tmp.cleanup)
+        cls.tmp = Path(tmp.name)
+        (cls.tmp / "decl.cpp").write_text("int f(int x);\n")
+        (cls.tmp / "one.cpp").write_text(ONE_FUNCTION)
+        (cls.tmp / "loop.cpp").write_text(ONE_LOOP)
+        (cls.tmp / "fold.cpp").write_text(ONE_FOLDED_CONSTANT)
+
+    def setUp(self):
+        self.cwd = Path(tempfile.mkdtemp(dir=self.tmp))
+        for name in ("decl.cpp", "one.cpp", "loop.cpp", "fold.cpp"):
+            shutil.copy(self.tmp / name, self.cwd / name)
+
+    def run_driver(self, *args, timeout=300):
+        return subprocess.run([self.driver, *args], capture_output=True, text=True,
+                              cwd=self.cwd, timeout=timeout)
+
+    def refusal(self, run, needle, status=2):
+        self.assertEqual(run.returncode, status, run.stderr)
+        self.assertEqual(run.stdout, "")
+        lines = [l for l in run.stderr.splitlines() if l.strip()]
+        self.assertEqual(len(lines), 1, run.stderr)
+        self.assertTrue(lines[0].startswith("cerastes: error: "), lines[0])
+        self.assertIn(needle, lines[0])
+
+    def test_the_drivers_own_self_test_passes(self):
+        run = subprocess.run([self.driver, "--selftest"], capture_output=True, text=True, timeout=600)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        m = re.search(r"selftest: (\d+) checks passed", run.stdout + run.stderr)
+        self.assertIsNotNone(m, run.stdout + run.stderr)
+        self.assertGreaterEqual(int(m.group(1)), DRIVER_SELFTEST_MIN)
+
+    def test_a_one_function_program_verifies(self):
+        # the base case of the hook tests below
+        run = self.run_driver("verify", "one.cpp")
+        self.assertEqual((run.returncode, run.stderr), (0, ""), run.stdout)
+        self.assertRegex(run.stdout, r"\Aone\.cpp: verified \(1 function; one translation unit: ")
+        self.assertEqual(run.stdout.count("\n"), 1)
+        self.assertEqual(sorted(p.name for p in self.cwd.iterdir()),
+                         ["decl.cpp", "fold.cpp", "loop.cpp", "one.cpp"])
+
+    def test_a_declarations_only_file_has_nothing_to_verify(self):
+        # twin of the test above: no function with a body is exit 2, never "verified (0 functions)"
+        self.refusal(self.run_driver("verify", "decl.cpp"), "nothing to verify")
+
+    def test_the_silicon_timeout_hook_is_exit_3_and_keeps_the_files(self):
+        out = self.cwd / "kept.vpr"
+        run = self.run_driver("verify", "one.cpp", f"--keep-vpr={out}",
+                              "--cerastes_verify_selftest=silicon_timeout")
+        self.assertEqual(run.returncode, 3, run.stdout + run.stderr)
+        self.assertEqual(run.stdout, "")
+        self.assertIn("Silicon did not finish", run.stderr)
+        self.assertTrue(out.is_file() and out.stat().st_size > 0)
+        self.assertTrue(Path(f"{out}.map").is_file())
+
+    def test_the_abort_hook_is_a_tool_failure(self):
+        run = self.run_driver("verify", "one.cpp", "--cerastes_verify_selftest=abort")
+        self.assertEqual(run.returncode, 3, run.stdout + run.stderr)
+        self.assertEqual(run.stdout, "")
+        self.assertIn("internal error in the front end", run.stderr)
+
+    def test_the_internal_error_hook_is_a_tool_failure(self):
+        # EDG's own internal-error path (an `Internal error #` from inside the back end)
+        run = self.run_driver("verify", "one.cpp", "--cerastes_verify_selftest=internal_error")
+        self.assertEqual(run.returncode, 3, run.stdout + run.stderr)
+        self.assertEqual(run.stdout, "")
+        self.assertIn("Internal error", run.stderr)
+
+    def test_the_hooks_that_change_the_program_never_end_in_exit_0(self):
+        # 0011 item 13: with a hook the run exits 3 (the backstop or the automatic invariant caught the
+        # change, or the hook found nothing to change and the driver refuses to say "verified"); the
+        # twin is the same program without a hook (exit 0, test_a_one_function_program_verifies)
+        for hook, program in (("drop_assert", "one.cpp"), ("drop_assert=3", "one.cpp"),
+                              ("drop_assert", "loop.cpp"), ("weaken_invariant", "one.cpp"),
+                              ("weaken_invariant", "loop.cpp"), ("constant_without_expr", "one.cpp"),
+                              ("constant_without_expr", "loop.cpp")):
+            with self.subTest(hook, program=program):
+                run = self.run_driver("verify", program, f"--cerastes_verify_selftest={hook}")
+                self.assertEqual(run.returncode, 3, run.stdout + run.stderr)
+                self.assertIn("cerastes: error: ", run.stderr)
+
+    def test_the_weakened_invariant_is_reported_with_its_line(self):
+        run = self.run_driver("verify", "loop.cpp", "--cerastes_verify_selftest=weaken_invariant")
+        self.assertEqual(run.returncode, 3, run.stdout + run.stderr)
+        self.assertIn("loop.cpp:5: internal check: automatic range invariant of `i`", run.stderr)
+
+    def test_a_folded_constant_without_its_expression_is_rejected(self):
+        # the hook treats a folded constant as having no `expr`: a program with one is not accepted
+        # (exit 2); the twin is the same program without the hook (exit 0)
+        self.assertEqual(self.run_driver("verify", "fold.cpp").returncode, 0)
+        run = self.run_driver("verify", "fold.cpp", "--cerastes_verify_selftest=constant_without_expr")
+        self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+        self.assertEqual(run.stdout, "")
+
+    def test_keep_vpr_writes_both_files(self):
+        run = self.run_driver("verify", "one.cpp", "--keep-vpr")
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertEqual(sorted(p.name for p in self.cwd.iterdir()),
+                         ["decl.cpp", "fold.cpp", "loop.cpp", "one.cpp", "one.vpr", "one.vpr.map"])
+
+    def test_refused_options_are_exit_2_with_one_line(self):
+        cases = [
+            (["--bogus"], "--bogus"),
+            (["--std=c++17"], "--std=c++17"),
+            (["-D__CERASTES__"], "__CERASTES__"),
+            (["-D __CERASTES__"], "__CERASTES__"),
+            (["-U__CERASTES__"], "__CERASTES__"),
+            (["-D__has_cpp_attribute=0"], "__has_cpp_attribute"),
+            (["-Drequires=1"], "requires"),
+            (["--trigraphs"], "--trigraphs"),
+            (["--timeout=0"], "--timeout"),
+            (["--timeout=abc"], "--timeout"),
+            (["--cerastes_verify_selftest=nonsense"], "nonsense"),
+        ]
+        for args, needle in cases:
+            with self.subTest(args):
+                self.refusal(self.run_driver("verify", "one.cpp", *args), needle)
+        self.refusal(self.run_driver("verify"), "no source file")
+        self.refusal(self.run_driver("nonsense"), "unknown command")
+
+    def test_a_missing_source_file_is_exit_2(self):
+        run = self.run_driver("verify", "absent.cpp")
+        self.assertEqual(run.returncode, 2)
+        self.assertEqual(run.stdout, "")
+        self.assertIn("cannot open source file", run.stderr)
+
+    def test_help_and_usage(self):
+        run = self.run_driver("--help")
+        self.assertEqual((run.returncode, run.stderr), (0, ""))
+        self.assertIn("usage: cerastes verify <file>", run.stdout)
+        self.assertEqual(self.run_driver().returncode, 2)
+
+
+# Placeholder (M3-3): the end-to-end class that runs the REAL `build/cerastes verify`
+# through rt.main goes here, behind e2e_gate(_real_verifier_available(), ...), once
+# the encoder lands.  Until then no test under tests/ may use `verified`, `error` or
+# `rejected` (with CERASTES_REQUIRE_E2E=1 such a class would fail check.sh) except
+# through the fake verifier above.
+
+
+# ---------------------------------------------------------------------------
 # The back end's diagnostics: every tag has a test
 # ---------------------------------------------------------------------------
 
-# Tags of src/backend/diagnostics.def that no frontend-error test can name, each
+# Tags of src/backend/diagnostics.def that no frontend-error or rejected test can name, each
 # with the reason.  This list is pinned: an entry for a tag that a test now uses,
 # or that the definitions no longer have, fails (tag_coverage_problems).
 SELFTEST_ONLY_TAGS = {
@@ -7751,6 +10985,9 @@ SELFTEST_ONLY_TAGS = {
 NO_REPRODUCER_TAGS: dict[str, str] = {}
 # Tags reached by an input that a test file cannot express (a path on disk).
 STDIN_ONLY_TAGS = {
+    "spec_marker_in_system_file": "reached by a marker physically in a system header, which a test file cannot "
+                                  "write (a frontend-error expectation names lines of the test file only); "
+                                  "SpecMarkerInSystemFileTests runs it and its twin",
     "source_scan_incomplete": "reached when the primary source is read from standard input "
                               "(`cerastes-fe.sh -`), which a test file cannot be; "
                               "SourceFromStdinTests runs it and its twin",
@@ -7759,21 +10996,21 @@ UNTESTED_BY_FRONTEND_ERROR = {**SELFTEST_ONLY_TAGS, **NO_REPRODUCER_TAGS, **STDI
 
 
 def tag_coverage_problems(defined, used, allowed):
-    """What is wrong with how `used` (the cerastes tags that frontend-error tests
-    name) covers `defined` (src/backend/diagnostics.def), given `allowed`
-    (tag -> reason for tags no such test can name)."""
+    """What is wrong with how `used` (the cerastes tags that frontend-error and
+    rejected tests name) covers `defined` (src/backend/diagnostics.def), given
+    `allowed` (tag -> reason for tags no such test can name)."""
     problems = []
     for tag in sorted(defined - used - set(allowed)):
-        problems.append(f"the diagnostic `{tag}` has no frontend-error test and no entry in "
-                        "UNTESTED_BY_FRONTEND_ERROR")
+        problems.append(f"the diagnostic `{tag}` has no frontend-error or rejected test and no "
+                        "entry in UNTESTED_BY_FRONTEND_ERROR")
     for tag, reason in sorted(allowed.items()):
         if not reason.strip():
             problems.append(f"the allowlist entry `{tag}` has no reason")
         if tag not in defined:
             problems.append(f"the allowlist entry `{tag}` is not in diagnostics.def")
         elif tag in used:
-            problems.append(f"the allowlist entry `{tag}` is stale: a frontend-error test "
-                            "names it now (remove the entry)")
+            problems.append(f"the allowlist entry `{tag}` is stale: a frontend-error or "
+                            "rejected test names it now (remove the entry)")
     for tag in sorted(used - defined):
         problems.append(f"a test names `cerastes-{tag}`, which diagnostics.def does not define")
     return problems
@@ -7791,7 +11028,7 @@ class TagCoverageTwinTests(unittest.TestCase):
     def test_a_tag_without_a_test_or_a_reason_fails(self):
         problems = tag_coverage_problems(self.DEFINED, {"a"}, {})
         self.assertEqual(len(problems), 2)
-        self.assertTrue(all("has no frontend-error test" in p for p in problems))
+        self.assertTrue(all("has no frontend-error or rejected test" in p for p in problems))
 
     def test_an_allowlist_entry_needs_a_reason(self):
         self.assertTrue(tag_coverage_problems(self.DEFINED, {"a", "b"}, {"c": " "}))
@@ -7819,19 +11056,52 @@ class TagCoverageTwinTests(unittest.TestCase):
                          set())
 
 
+def used_cerastes_tags(bases):
+    """The cerastes diagnostic tags that the tests under `bases` name, in
+    `frontend-error`, `frontend-warning` and `rejected` lines alike (every
+    expected diagnostic of an Expectation is in `diags`)."""
+    used = set()
+    for base in bases:
+        for f in Path(base).rglob("*"):
+            if f.suffix in (".c", ".cpp") and f.is_file():
+                exp = rt.read_header(f)
+                if isinstance(exp, rt.Expectation):
+                    used |= {d.tag[len(rt.CERASTES_TAG_PREFIX):] for d in exp.diags
+                             if d.tag.startswith(rt.CERASTES_TAG_PREFIX)}
+    return used
+
+
+class UsedTagsTwinTests(RootedCase):
+    """A `rejected` test counts as a test of the diagnostic it names."""
+
+    def test_frontend_and_rejected_tests_both_count(self):
+        self.put("t/a.cpp", "// expect: frontend-error cerastes-aaa @ L3\n")
+        self.put("t/b.cpp", "// expect: rejected cerastes-bbb @ L3\n")
+        self.put("t/c.c", "// expect: frontend-warning cerastes-ccc @ L3\n")
+        self.put("t/d.c", "// expect: rejected undefined_identifier @ L3\n")  # an EDG tag
+        self.put("t/sub/e.cpp", "// expect: rejected cerastes-bbb @ L3\n"
+                                "// expect: rejected cerastes-eee @ L4\n")
+        self.put("t/f.cpp", "// expect: verified\n")
+        self.put("t/g.cpp", "// expect: error check @ L3\n")
+        self.assertEqual(used_cerastes_tags([self.root / "t"]), {"aaa", "bbb", "ccc", "eee"})
+
+    def test_a_rejected_test_clears_a_tag_that_would_otherwise_need_a_reason(self):
+        self.put("t/b.cpp", "// expect: rejected cerastes-bbb @ L3\n")
+        used = used_cerastes_tags([self.root / "t"])
+        self.assertEqual(tag_coverage_problems({"bbb"}, used, {}), [])
+        self.assertEqual(len(tag_coverage_problems({"bbb"}, set(), {})), 1)
+
+    def test_a_bad_header_names_nothing(self):
+        self.put("t/a.cpp", "// expect: rejected cerastes-aaa\n")  # the old grammar
+        self.assertEqual(used_cerastes_tags([self.root / "t"]), set())
+
+
 @e2e_gate((REAL_ROOT / "src" / "backend" / "diagnostics.def").is_file(),
           "src/backend/diagnostics.def missing")
 class RealTagCoverageTests(unittest.TestCase):
     def used_tags(self):
-        used = set()
-        for base in (REAL_ROOT / "tests", REAL_ROOT / "doc" / "modules" / "ROOT" / "examples"):
-            for f in base.rglob("*"):
-                if f.suffix in (".c", ".cpp") and f.is_file():
-                    exp = rt.read_header(f)
-                    if isinstance(exp, rt.Expectation):
-                        used |= {d.tag[len(rt.CERASTES_TAG_PREFIX):] for d in exp.diags
-                                 if d.tag.startswith(rt.CERASTES_TAG_PREFIX)}
-        return used
+        return used_cerastes_tags([REAL_ROOT / "tests",
+                                   REAL_ROOT / "doc" / "modules" / "ROOT" / "examples"])
 
     def test_every_back_end_diagnostic_has_a_test_or_a_reason(self):
         defined = rt.load_cerastes_tags()
@@ -7940,6 +11210,35 @@ class SourceFromStdinTests(unittest.TestCase):
             path = Path(tmp) / "half.cpp"
             path.write_text(self.SOURCE)
             run = self.run_fe(str(path))
+        self.assertEqual((run.returncode, run.stdout, run.stderr), (0, "", ""), run)
+
+
+@e2e_gate(_real_front_end_available() and _real_tables_available(),
+          "CERASTES_FE, scripts/cerastes-fe.sh or the generated headers missing; "
+          "run scripts/bootstrap.sh")
+class SpecMarkerInSystemFileTests(unittest.TestCase):
+    """`spec_marker_in_system_file`: a predicate or pure marker written in a system header (here made one with
+    `#pragma GCC system_header`) is an error at the header; the same header without the pragma is clean."""
+
+    HEADER = ("#include <cerastes.h>\n%sCERASTES_PURE int twice(int x) { return x + x; }\n")
+    SOURCE = '#include "marker.h"\nint use(int x) { return x; }\n'
+
+    def run_fe(self, pragma):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "marker.h").write_text(self.HEADER % pragma)
+            (Path(tmp) / "use.cpp").write_text(self.SOURCE)
+            return subprocess.run([*rt.FE_COMMAND, "--c++20", *rt.DIAG_OPTIONS, f"-I{tmp}", str(Path(tmp) / "use.cpp")],
+                                  capture_output=True, text=True, env=rt.load_env(), cwd=REAL_ROOT,
+                                  timeout=rt.FRONTEND_TIMEOUT_S)
+
+    def test_a_marker_in_a_system_header_is_an_error(self):
+        run = self.run_fe("#pragma GCC system_header\n")
+        self.assertEqual(run.returncode, rt.EDG_ERRORS_STATUS, run)
+        self.assertIn("error #cerastes-spec_marker_in_system_file", run.stderr)
+        self.assertIn("marker.h", run.stderr)
+
+    def test_the_same_header_without_the_pragma_is_clean(self):
+        run = self.run_fe("")
         self.assertEqual((run.returncode, run.stdout, run.stderr), (0, "", ""), run)
 
 

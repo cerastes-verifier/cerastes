@@ -17,16 +17,21 @@ that need the built front end. They are skipped when it is missing, unless
 `CERASTES_REQUIRE_E2E=1` (which `scripts/check.sh` sets), in which case they
 fail, so a missing build cannot silently switch them off.
 
+The verify tests (`verified`, `error`, `rejected` in C and C++) are tested against a
+fake `cerastes verify` that the self-test writes, so those checks always run; a
+class that runs the real driver is added with the driver (M3-3).
+
 | Directory | What it checks | Runner |
 |---|---|---|
 | `viper-smoke/` | Silicon and Z3 work, and the harness reads Silicon's errors correctly | Silicon |
 | `edg-smoke/` | The pinned EDG front end parses C++20 and C23 against the system headers | `scripts/cpfe.sh` |
 | `il/` | Golden tests of the IL walker (`--cerastes_walk`): the Gate G1 probes (`g1/`), annotation-free copies of the VeriFast tests (`verifast-plain/`), contrast probes that expose a vacuous pass (`contrast/`) and walker smoke tests | `scripts/cerastes-fe.sh` |
+| `scalar/` | M3: scalar code through `cerastes verify` (`verified` positives, each with a must-fail twin in `scalar/negative/`) | `build/cerastes verify` |
 | `differential/verifast/` | Nothing yet: unmodified reference copies of VeriFast's template tests, with no `expect:` headers. Skipped (`.harness-skip`) | none |
 | `../doc/modules/ROOT/examples/` | The code examples of the user documentation, which are ordinary tests (not under `tests/`, but run by default with it) | by the example's `expect:` kind |
 
-Later milestones add `annotations/` (with `annotations/negative/`: the
-must-fail twins, see [Twins](#twins)), `scalar/`, `templates/`, `concepts/` and
+`annotations/` and `scalar/` each have a `negative/` directory of must-fail twins
+(see [Twins](#twins)). Later milestones add `templates/`, `concepts/` and
 `memory/`, and the differential tests against VeriFast in M4 (see plan.md).
 
 ## Header format
@@ -38,8 +43,9 @@ line of code is an error, so an expectation can never be silently ignored.
 
 ```
 // expect: verified
-// expect: error <category>[:<reason>] @ L<line>
-// expect: rejected <tag>
+// expect: error <category> @ L<line>
+// expect: error <category>[:<reason>] @ L<line>      (.vpr files: Viper reasons)
+// expect: rejected <diag> @ L<line>
 // expect: frontend-ok
 // expect: frontend-error <diag> @ L<line>
 // expect: frontend-warning <diag> @ L<line>
@@ -51,15 +57,22 @@ line of code is an error, so an expectation can never be silently ignored.
 // twin: <repo-relative path of a test>
 ```
 
-- **`verified`**: verification succeeds with no errors. It must be the only
-  outcome line (`native-ok` may accompany it).
-- **`error <category>[:<reason>] @ L<line>`**: one line per expected error.
+- **`verified`**: verification succeeds with no errors (`.vpr` through Silicon,
+  `.c`/`.cpp` through `cerastes verify`). It must be the only outcome line
+  (`native-ok` may accompany it).
+- **`error <category> @ L<line>`**: one line per expected error.
   The test passes only if the reported errors are exactly these: each one
-  with that category, at that line, and with that reason if one is given,
-  and no others. The harness says whether a miss was the *wrong line*, the
-  *wrong reason*, a *missing* error or an *unexpected* one.
-- **`rejected <tag>`**: the driver refuses the program with that diagnostic
-  tag (for example `unsupported-union`). Needs the driver (M3).
+  with that category, at that line, and no others. The harness says whether
+  a miss was the *wrong line*, the *wrong reason* (a wrong category), a
+  *missing* error or an *unexpected* one. In `.vpr` tests the category is a
+  Viper error kind and `:<reason>` (a Viper reason) may follow it; in `.c` and
+  `.cpp` tests the category is one of the driver's ([Categories](#categories-for-c-and-c-tests))
+  and a `:<reason>` is a header error.
+- **`rejected <diag> @ L<line>`**: one line per diagnostic. `cerastes verify`
+  does not accept the program (exit status 2) and prints exactly these errors.
+  `<diag>` is an EDG tag or `cerastes-<tag>`, as for `frontend-error`
+  (validated the same way). `.c` and `.cpp` only. Not mixed with `error`.
+  See [Verify tests](#verify-tests-verified-error-rejected).
 - **`frontend-ok`**: the EDG front end accepts the file with exit status 0
   and prints nothing. For front-end smoke tests only.
 - **`frontend-error <diag> @ L<line>`** and **`frontend-warning <diag> @ L<line>`**:
@@ -220,13 +233,130 @@ error and a back-end diagnostic together. Write two tests.
 `--update-golden` leaves these tests alone. They need `CERASTES_FE`,
 `CERASTES_EDG_GEN` and `EDG_CLANG_VER_SCRAPE` from `build/env.sh`.
 
+## Verify tests (`verified`, `error`, `rejected`)
+
+A `.c` or `.cpp` test with one of these outcomes runs the verifier (decision 0011).
+For each mode of the test the harness runs, from the repository root,
+
+```
+build/cerastes verify <test path relative to the root> --std=<c++20|c23> --keep-vpr=build/vpr/<test path>.<mode>.vpr
+```
+
+(the program is `CERASTES_VERIFY` of `build/env.sh`, which `scripts/bootstrap.sh`
+writes from M3 on; the harness needs it, and treats these tests like the other
+tests that run a tool built from the EDG tree, see
+[The EDG tree](#the-edg-tree-decision-0005)). One run per mode; a test passes
+only if every mode passes. The exit status says what happened:
+
+| Exit | Meaning | What the harness reads |
+|---|---|---|
+| 0 | verified | on stdout exactly one line `<test path>: verified (<n> functions; one translation unit: ...)` with `n >= 1`, no `error:` line, nothing on stderr |
+| 1 | verification errors | on stdout one or more lines `<file>:<line>: error: <category>: <message>`, each possibly followed by `<file>:<line>: note: ...` lines, sorted by printed path (byte order), line and category (byte order) and none twice; nothing on stderr |
+| 2 | the program is not accepted (a front-end error, a cerastes rejection) | EDG-format diagnostics on stderr, as in [Front-end diagnostics](#front-end-diagnostics) (`"file", line N: error #<id>: ...`, with the `N errors detected` summary), nothing on stdout |
+| 3 | tool failure (Silicon crashed or timed out, an error the position map does not explain) | always a failing test, whatever the test expects |
+
+A timeout, a crash (a signal) and any other exit status always fail too. The
+streams are those of decision 0011 item 9: the verdict, the errors and their notes
+are on **stdout**, front-end diagnostics on **stderr**. For exit status 0 and 1
+a verdict or an error on stderr fails the test, and so does anything else on
+stderr (a front-end warning in a test is unexpected output: tests are
+warning-free) and a front-end diagnostic on stdout. A blank line or an indented
+line continues the previous line and is ignored, and a `note:` line is ignored but
+must follow an error. Any other line in column 0 of stdout (a note with no error,
+a line the harness does not know) fails the test as unrecognized driver output.
+Errors out of order, or printed twice, fail it too.
+
+**Where an error is.** `@ L<n>` is a line of the test file. An error in a user
+header (decision 0011 item 4 verifies them) is expected with
+`// expect: error <category> @ <repository-relative file>:L<n>`, and a rejection
+the same way (`rejected <diag> @ <file>:L<n>`); the file is compared with what the
+driver prints. An error in a file that no expectation names is a failure. The path
+has no `..`, `.` or empty component, and `@ <file>:L<n>` is not for `.vpr` or
+`frontend-*` lines.
+
+**`verified`** passes with exit status 0. **`error`** passes with exit status 1
+and exactly the expected errors: the multiset of (category, line) is compared as
+for `.vpr` tests (*wrong line*, *wrong reason*, *missing*, *unexpected*); an
+error reported in another file (a header) is a failure, so is a category the
+driver does not define (`unknown`, "unrecognized error"). **`rejected`** passes
+with exit status 2 and exactly the expected errors as (diagnostic, line), with
+the comparison, the fatal diagnostics (catastrophic, command-line, internal) and
+the summary check of `frontend-error` tests; warnings are not expected, so a
+warning fails. A verdict that is not the expected one is named: a `verified` test
+that is rejected, an `error` test that verified, a `rejected` test that reports
+verification errors.
+
+**Viper output.** For a `verified` or `error` test (a run that ended with exit
+status 0 or 1) the driver must leave the file given by `--keep-vpr=<path>` and
+its position map `<path>.map` (decision 0011 item 2); a missing or empty file
+fails the test. The position map (tab-separated, the file the 4th field:
+encoding.md section 5) must have at least one entry whose file is the test, so a
+test none of whose bodies was verified (all skipped, or taken for system code)
+cannot pass. The harness deletes both files before each run. A run that selects
+such a test first clears `build/vpr/` and writes `build/vpr/MANIFEST`: a first line
+`# run-id: <UTC time>-<hash of the file list>` (the run prints it as
+`build/vpr: run <id>, <n> files expected`), then one line per file it expects
+(`<test path>.<mode>.vpr`, relative to `build/vpr/`, sorted), so that
+`scripts/lint_viper.py` can require every one of them, refuse an empty set and
+refuse a `.vpr` file that the current MANIFEST does not list (a stale file).
+`rejected` tests write no Viper and are not in the manifest. A test outside the
+repository (the harness self-test) writes under `build/vpr/external/`.
+`--update-golden` leaves verify tests alone, and does not clear `build/vpr/`.
+
+### Helper headers
+
+A test may include a header of its own (the driver verifies user headers). Such
+helper files, of any C/C++ include suffix (`.h`, `.hpp`, `.inc`, `.def`, ...), live
+only in a directory named `headers/` below the test area that uses them, for example
+`tests/scalar/headers/`. They are never run as tests. Each one has no `// expect:`
+line (it is not a test) and must be included, with `#include "..."` (the harness
+passes no `-I`, so the name is resolved against the including file's directory,
+for example `"headers/h.h"` or `"../headers/h.h"`), by a test of the area or by
+another helper that a test includes; an orphan, which nothing verifies, is an
+error. An include in a comment or in an `#if 0` block does not count (other
+conditionals count as active). A verify test that includes a helper header with a
+function body, directly or through other helpers, needs a position-map entry whose
+file is that header (exit status 0 or 1), so a driver that skipped the header's
+bodies fails; a header with only declarations, types and macros needs none. A source-like file anywhere else under `tests/` is still an error (it would
+never run). `--check-headers` reports both.
+
+### `.c` tests run in both languages
+
+A `.c` test under `tests/scalar/` and under the three example directories of the M3
+pages (`DUAL_MODE_DIRS`; the documentation examples are tests too) lists both modes,
+`// mode: c23, c++20`, because the code is valid C and C++ and the dual run is what
+checks it. A test that is only C says why: `// c-only: <reason>` (`.c` files only;
+not with `c++20` in `mode:`). Negative tests are covered too.
+
+### Categories for C and C++ tests
+
+The categories of `// expect: error <category> @ L<line>` in a `.c` or `.cpp`
+test are the driver's (`DRIVER_CATEGORIES` in `scripts/run_tests.py`, the table
+of decision 0011 item 10). An unknown category is a header error. They are the
+contract between the driver, the harness, the error-messages page and the tests,
+and the harness self-test compares this table with the decision record.
+
+| Category | Meaning | Reported at |
+|---|---|---|
+| `precondition` | a call may not satisfy a `requires` of the callee | the call |
+| `postcondition` | an `ensures` may not hold | the `return` (or the closing brace of a `void` function) |
+| `check` | a `check` may not hold | the `check` |
+| `invariant-entry` | a loop invariant may not hold on entry | the invariant clause |
+| `invariant-preserved` | a loop invariant may not be preserved by an iteration | the invariant clause |
+| `overflow` | signed arithmetic may overflow | the operator |
+| `division-by-zero` | a divisor may be zero | the operator |
+| `shift` | a shift amount or a left-shifted value is out of range | the operator |
+| `conversion` | a conversion to a signed type may not fit | the conversion |
+| `missing-return` | a non-`void` function may reach its end without `return` | the closing brace |
+| `termination` | a termination measure (`decreases`) may be negative or may not decrease (decision 0013) | the loop's `decreases` clause, or the recursive call |
+
 ## Every back-end diagnostic has a test
 
 `src/backend/diagnostics.def` lists the tags of the cerastes back end
 (`CERASTES_DIAG(tag, severity, "message")`); the harness reads the tags from it
 (a `cerastes-<tag>` in a header is validated against it). The harness self-test
-requires every tag of that file to be named by at least one `frontend-error`
-test under `tests/` or the documentation examples, with these exceptions, listed
+requires every tag of that file to be named by at least one `frontend-error` or
+`rejected` test under `tests/` or the documentation examples, with these exceptions, listed
 with their reasons in `UNTESTED_BY_FRONTEND_ERROR` in `scripts/test_run_tests.py`
 (an entry for a tag that a test names, or that the file no longer defines, fails
 as stale):
@@ -307,6 +437,11 @@ by each compiler, with
 <compiler> -x c   -std=c23   ...        (mode c23)
 ```
 
+The mode, not the suffix, picks the language: a `.c` test that lists
+`// mode: c++20, c23` is compiled as C++ (`-x c++`, by `clang++` and `g++`) in its
+`c++20` run and as C (`-x c`) in its `c23` run, so the dual-mode scalar tests of
+`tests/scalar/` are checked by the compiler of each language.
+
 and passes only if the compiler exits with status 0 and prints nothing on
 stdout and stderr. The ordinary compilers never define `__CERASTES__` (the
 cerastes front end does), and `-U__CERASTES__` makes sure: that is what makes
@@ -343,13 +478,47 @@ __CERASTES__`, `diagnostic push|pop|error` stay allowed).
 **Policy.** `native-ok` is required (a header error, also with
 `--check-headers`) of every positive test (`golden`, later `verified`) in the
 directories listed in `NATIVE_POLICY_DIRS` in `scripts/run_tests.py`:
-`tests/annotations`, `doc/modules/ROOT/examples/annotations` and
-`doc/modules/ROOT/examples/ordinary-compilers` (with their subdirectories), and
+`tests/annotations`, `tests/scalar`, `doc/modules/ROOT/examples/annotations`,
+`doc/modules/ROOT/examples/ordinary-compilers` and the examples of the M3 pages,
+`doc/modules/ROOT/examples/verifying`, `doc/modules/ROOT/examples/error-messages` and
+`doc/modules/ROOT/examples/integer-semantics` (with their subdirectories), and
 of every positive test, wherever it is, whose source has an
 `#include <cerastes.h>` (or `"cerastes.h"`) line. Negative tests are exempt. `expect: frontend-ok` is a header error in these
 directories (stock cpfe does not define `__CERASTES__`, so the annotations
 would not even be parsed, and the test would escape both the twin rule and
 native-ok).
+
+## Time limits
+
+Each run of the front end (`cerastes-fe`, `cpfe`) has a limit of ten minutes, `FRONTEND_TIMEOUT_S` in
+`scripts/run_tests.py`, and a run of `cerastes verify` or Silicon the same. The largest front-end test,
+`edg-smoke/libcxx_headers_cerastes_fe.cpp` (the libc++ headers in the cerastes configuration), takes about 70
+seconds of CPU, which a loaded machine (a parallel build, other test runs) stretches well past the two minutes
+that the limit used to be. A limit is there to catch a hang, never to measure speed: reaching it always
+fails the test, whatever the expectation.
+
+## Mutation testing (`scripts/mutate.py`)
+
+`python3 scripts/mutate.py` (about ten minutes for `tests/scalar`) mutates every `verified` test one place at a
+time (flip a relational operator, a literal plus or minus one, drop one operand of `&&`, swap `&&` and `||`,
+delete a statement) and verifies each mutant. A mutant that is rejected by the verifier (exit status 1) is
+killed; one that still verifies survived, which means that the test would not notice the change. Every
+survivor must be killed (by strengthening the test), or listed with one reason in `tests/mutants-equivalent.txt`
+(`id<TAB>reason`, plus a `# reviewed:` line), or be in the safe-direction bucket. The run ends with zero
+unexplained survivors, and a test none of whose mutants was killed fails the run.
+
+**Why a safe-direction bucket (owner decision, 2026-10-16).** A sound verifier must accept a program that
+meets a *weaker obligation than the original*. Changing a contract so that it is easier to meet gives such a
+program: a stronger `requires` (the body has less to prove, and the callers in the file that cannot meet it are
+the only ones that could notice), a weaker `ensures` or `check` (the body proves more than the clause says). A
+verifier that rejected these mutants would be unsound or incomplete the other way, so a surviving one says
+nothing about the test, and listing thousands of them would bury the survivors that do. They are counted in
+their own bucket, `safe-direction`, which the run reports for each test and in total; they are neither
+required to be killed nor listed (a listed one is a stale entry). The direction is decided by comparing the two
+clauses on a grid of values (`clause_relation` in `scripts/mutate.py`; a clause it cannot model is `unknown`
+and never safe). Everything else still has to be killed or listed: a weaker `requires` (a caller may now
+break the body), a stronger `ensures` or `check` (the body may not prove it), any change of an `invariant` or a
+`decreases`, a mutant that leaves a clause's meaning unchanged, and every mutant of code, never bucketed.
 
 ## The environment
 
@@ -370,8 +539,10 @@ environment.
 ## Twins
 
 Every test under `tests/annotations/negative/` (`NEGATIVE_DIR`, with its
-subdirectories) is the must-fail twin of a positive test and names it:
-`// twin: tests/annotations/<name>.cpp`, a repository-relative path. A missing
+subdirectories) and under `tests/scalar/negative/` (`SCALAR_NEGATIVE_DIR`; both
+in `NEGATIVE_DIRS`) is the must-fail twin of a positive test and names it:
+`// twin: tests/annotations/<name>.cpp` or `// twin: tests/scalar/<name>.c`, a
+repository-relative path. A missing
 `twin:` line is a header error, and so is a twin that does not exist, is itself
 under `negative/`, is the test itself, has a bad header, or has an outcome other
 than `golden` or `verified`. A `twin:` line in any other test is checked the
@@ -384,20 +555,41 @@ error (`frontend-error`, `error` or `rejected`). `golden`, `verified`,
 document a warning live in `tests/annotations/warnings/`.
 
 The rule also runs the other way (invariant 2: every encoding rule has a
-must-fail test). Every positive test (`golden` or `verified`) under
-`tests/annotations/` outside `negative/` must be named as the `twin:` of at
-least one test under `negative/`, or say why not with
+must-fail test), in each of the two areas (`TWIN_AREAS`). Every positive test
+(`golden` or `verified`) under `tests/annotations/` (resp. `tests/scalar/`)
+outside its `negative/` must be named as the `twin:` of at least one test under
+that area's `negative/`, or say why not with
 `// twin-exempt: <reason>` (a non-empty reason; not allowed together with
 `twin:`, on a test that is not positive or under `negative/`). A positive test
 that no negative test names is reported as a header error (`bad header:`),
 also by `--check-headers`, whatever subset of the tests was selected: the
-check reads the whole `tests/annotations/` tree whenever a selected test is in
-it.
+check reads the whole tree of an area whenever a selected test is in it.
+
+In `tests/scalar/` (`ERROR_TWIN_AREAS`) the twin must expect an `error` and must run
+in every mode of its positive (a twin that runs in c23 only says nothing about the
+c++20 run of a dual-mode positive; two twins, one per mode, are enough): a
+`rejected` twin shows that a construct is refused, not that the encoding rule of
+the positive test is checked, so it does not count (the header error then says
+that the test has only a `rejected` twin). The acceptance count of pairs counts
+only those: `python3 scripts/run_tests.py --count-error-twins` prints the number
+of positive tests of `tests/scalar/` with at least one `error` twin (a positive
+test with `twin-exempt:` is not counted).
+
+**Pinning the size of a generated directory.** `python3 scripts/run_tests.py --expect-passed N
+<dir>` fails unless exactly `N` tests passed and none failed. `scripts/check.sh` uses it for the
+cases that `build/cerastes-vir-selftest` generates (`N` is the count the tool prints, which must
+be at least `VIR_CASES_MIN`), so a smaller set of cases, or a file that is not run, cannot pass.
+
+**What counts as Silicon's verdict.** The harness (and the driver, which must agree with it, see
+`ClassifySiliconAgreementTests`) accepts Silicon's output only as the banner, exactly one verdict
+line and its error list: a stray line, a second banner or verdict, or a missing banner is "no
+verdict", never a pass.
 
 ## The EDG tree (decision 0005)
 
 Tests that run a tool built from the EDG tree (`frontend-ok`, `golden`,
-`frontend-error`/`-warning`) first check that `build/env.sh` was written for the
+`frontend-error`/`-warning`, `frontend-refused`, and the `verified`, `error` and
+`rejected` tests of `.c` and `.cpp` files) first check that `build/env.sh` was written for the
 tree that `CERASTES_EDG_SRC` of the current shell selects (`third_party/edg` when
 it is unset or empty), compared by real path, and stop with exit status 2 and
 `build/env.sh is for <X> but CERASTES_EDG_SRC selects <Y>; run
@@ -559,6 +751,17 @@ a module other than `ROOT`; `--root DIR` checks another tree). It reads
   as an italic run). One alone is safe (tested against a real build). Wrap it:
   `` `+__algorithm+` ``.
 
+**The error-messages page (rule h).** `pages/error-messages.adoc` has exactly one
+`== <category>` section per category of `DRIVER_CATEGORIES` (the driver's, see
+[Categories for C and C++ tests](#categories-for-c-and-c-tests)), titled with the
+category name, and each section includes at least one example whose header expects
+`error <that category> @ ...` (a `verified`, `rejected` or other-category example does
+not count, nor an include in a comment or in another section). A missing category, a
+category twice, a section that is not a category and a section without such an
+example are problems. Inactive while the page does not exist and no `verified`,
+`error` or `rejected` C or C++ test is under `tests/`; once one is, a missing page is
+a problem (the trigger is `scripts/lint_viper.py`'s).
+
 **2. The built-site check**, `python3 scripts/check_doc_examples.py --html
 build/doc`, run after `scripts/build_docs.sh` (in `check.sh` and in the CI
 build job). It does not read the pages: it classifies every `<pre>` of the
@@ -669,5 +872,5 @@ Reasons are Viper reason ids: `assertion.false`, `insufficient.permission`,
 `wand.not.found`, `invalid.perm.multiplication`, `epsilon.as.param`,
 `quasihavocall.not.injective`, `feature.unsupported`, `unexpected.node`.
 
-Categories for C and C++ tests are defined by the driver's error messages
-(M3) and will be added here then.
+Categories for C and C++ tests are the driver's: see
+[Categories for C and C++ tests](#categories-for-c-and-c-tests).

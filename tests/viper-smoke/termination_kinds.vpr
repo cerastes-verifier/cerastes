@@ -1,0 +1,67 @@
+// expect: error termination:tuple.false @ L16
+// expect: error termination:tuple.false @ L23
+// expect: error termination:tuple.false @ L31
+// expect: error termination:tuple.condition.false @ L38
+// expect: error termination:tuple.false @ L55
+// expect: error termination:tuple.false @ L55
+//
+// Pins scripts/run_tests.py's table of Silicon's termination messages to the pinned Silicon: a
+// recursive method that does not decrease its measure, two loops (not decreasing, unbounded), a
+// call of a method that has no measure, a recursive function (two errors at one position: the
+// measure neither decreases nor is bounded), and three programs that must verify, among them a
+// lexicographic measure whose later component is negative while the first decreases.
+method bad_recursion(n: Int) returns (r: Int)
+  decreases n
+{
+  r := bad_recursion(n)
+}
+
+method loop_not_decreasing(n: Int)
+{
+  var i: Int := n
+  while (i > 0)
+    decreases i
+  { i := i + 1 }
+}
+
+method loop_unbounded(n: Int)
+{
+  var i: Int := n
+  while (i != 0)
+    decreases i
+  { i := i - 1 }
+}
+
+method calls_one_without_measure(n: Int)
+  decreases n
+{
+  no_measure(n)
+}
+
+method no_measure(n: Int)
+{
+  calls_one_without_measure(n)
+}
+
+method terminating_ok(n: Int) returns (r: Int)
+  requires n >= 0
+  decreases n
+{
+  if (n == 0) { r := 0 } else { r := terminating_ok(n - 1) }
+}
+
+function f_not_decreasing(n: Int): Int
+  decreases n
+{ f_not_decreasing(n) }
+
+function f_ok(n: Int): Int
+  requires n > 0
+  decreases n
+{ n > 1 ? f_ok(n - 1) : 1 }
+
+method lexicographic_ok(a: Int, b: Int) returns (r: Int)
+  requires a >= 0
+  decreases a, b
+{
+  if (b > 0) { r := lexicographic_ok(a, b - 1) } elseif (a > 0) { r := lexicographic_ok(a - 1, -5) } else { r := 0 }
+}

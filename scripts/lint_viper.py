@@ -1,0 +1,569 @@
+#!/usr/bin/env python3
+# Part of cerastes, under the Apache License v2.0 with LLVM Exceptions.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+"""Lint the Viper that `cerastes verify` emits (invariant 4; internal/encoding.md
+section 6, decision 0012).
+
+    python3 scripts/lint_viper.py [path ...]
+
+A path is a directory (every `*.vpr` under it, and its `MANIFEST`) or a `.vpr`
+file.  The default is `build/vpr`, where scripts/run_tests.py puts the
+`--keep-vpr` output of the verify tests.  Each `<file>.vpr` is read with its
+position map `<file>.vpr.map` (encoding.md section 5).  The lint fails (exit
+status 1) on:
+
+* `inhale` or `assume` without `// cerastes:inhale-ok <reason>` on its line
+  (a reason is required);
+* a bodyless `method` without `// cerastes:trusted-contract <reason>` on its
+  `method` line or in the comment lines right above it (decision 0012 item 1:
+  the contracts of functions defined in other units);
+* any `domain`, any `axiom`, any bodyless `function` (the prelude has bodies
+  only, decision 0012 item 11);
+* an `assert`, `requires`, `ensures` or `invariant` line, or a call of a method
+  declared in the file, with no entry in the position map for its `.vpr` line
+  (every check is on its own line and has an entry, decision 0012 item 13);
+* a position map that is not in the format of encoding.md section 5, a map entry
+  for a line that is not there (past the end, blank or a comment), the same
+  Viper error id twice for one line, or a missing map;
+* an empty input set, and a MANIFEST that names a file which is not there.  The
+  manifest is the set of files scripts/run_tests.py expects: its first line is
+  `# run-id: <id>` (printed by the run), then one file per line.  Fewer files
+  than it lists is a failure, so is an empty manifest, one without a run id,
+  and a `.vpr` file that the manifest does not list (a stale file, or one from
+  a partial run: the directory is cleared at the start of every run that
+  selects a verify test).  With no MANIFEST and no
+  `.vpr` file at all, the lint passes (`no emitted Viper to lint`) only when no
+  verify test of the tree expects Viper (a `verified` or `error` test in C or
+  C++): once one exists, an absent or empty `build/vpr` is a failure.
+
+A comment is `//` to the end of the line, or `/* ... */`; a tag in a block
+comment does not count.  Exit status: 0 clean, 1 problems, 2 usage error.
+"""
+
+from __future__ import annotations
+
+import argparse
+import dataclasses
+import re
+import sys
+from pathlib import Path
+from typing import Callable
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import run_tests as rt  # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_DIR = Path("build") / "vpr"
+MANIFEST = rt.VPR_MANIFEST
+MAP_SUFFIX = ".map"
+
+# The categories a map entry may carry: the driver's (decision 0011 item 10)
+# and `internal`, for the checks whose failure is a bug of the encoder and exit
+# status 3 (the automatic range invariants of decision 0012 item 8).
+MAP_CATEGORIES = frozenset(rt.DRIVER_CATEGORIES | {"internal"})
+# The Viper error ids Silicon's messages map to (the table of scripts/run_tests.py).
+# `application.precondition` is not one of them: the prelude's functions have no preconditions
+# (encoding.md section 5), so no emitted check can produce it.
+MAP_ERROR_IDS = frozenset(viper_id for _text, viper_id, _cat in rt._VIPER_ERRORS
+                          if viper_id != "application.precondition")
+
+INHALE_TAG_RE = re.compile(r"//\s*cerastes:inhale-ok\b[ \t]*(?P<reason>\S.*)?$")
+TRUSTED_TAG_RE = re.compile(r"//\s*cerastes:trusted-contract\b[ \t]*(?P<reason>\S.*)?$")
+INHALE_WORD_RE = re.compile(r"\b(inhale|assume)\b")
+CHECK_LINE_RE = re.compile(r"^\s*(assert|requires|ensures|invariant|decreases)\b")
+CHECK_WORD_RE = re.compile(r"\b(assert|requires|ensures|invariant|decreases)\b")
+DECREASES_LINE_RE = re.compile(r"^\s*decreases\b(?P<measure>.*)$")
+WHILE_WORD_RE = re.compile(r"(?<![\w$'])while\b")
+# The Viper error ids a position-map entry may have, by the kind of the line it is
+# for (encoding.md section 5): an `assert` is `assert.failed`; a call of a method is
+# `call.precondition`; an `invariant` clause is `invariant.not.established` and
+# `invariant.not.preserved` (two entries on one line); a method `requires` is
+# `not.wellformed` (a failed precondition is reported at the call, never at the clause);
+# a method `ensures` is `not.wellformed` and `postcondition.violated`; a `decreases` line with a measure
+# is `termination.failed` (a loop's measure is where Silicon reports a loop that does not terminate), and a
+# call may also be `termination.failed` (a recursive call whose measure does not decrease, decision 0013).
+KIND_IDS = {
+    "assert": {"assert.failed"},
+    "requires": {"not.wellformed"},
+    "ensures": {"not.wellformed", "postcondition.violated"},
+    "invariant": {"invariant.not.established", "invariant.not.preserved"},
+    "call": {"call.precondition", "termination.failed"},
+    "decreases": {"termination.failed"},
+}
+TOKEN_RE = re.compile(r"[A-Za-z_$][\w$']*|\d+|::|:=|\S")
+TOP_KEYWORDS = ("method", "function", "predicate", "domain", "field", "define", "import")
+
+
+# ---------------------------------------------------------------------------
+# Reading Viper text
+# ---------------------------------------------------------------------------
+
+@dataclasses.dataclass
+class Source:
+    code: list[str]  # per line: the line without comments
+    comments: list[str]  # per line: its `//` comment text ("" if none), with the `//`
+
+
+def split_source(text: str) -> Source:
+    """Split each line into code and `//` comment; block comments are blanked
+    from the code (their text never counts as a tag)."""
+    code: list[str] = []
+    comments: list[str] = []
+    in_block = False
+    for raw in text.split("\n"):
+        out = []
+        comment = ""
+        i = 0
+        while i < len(raw):
+            if in_block:
+                j = raw.find("*/", i)
+                if j < 0:
+                    i = len(raw)
+                else:
+                    in_block = False
+                    out.append(" ")
+                    i = j + 2
+                continue
+            if raw.startswith("//", i):
+                comment = raw[i:]
+                break
+            if raw.startswith("/*", i):
+                in_block = True
+                i += 2
+                continue
+            out.append(raw[i])
+            i += 1
+        code.append("".join(out))
+        comments.append(comment)
+    return Source(code, comments)
+
+
+@dataclasses.dataclass
+class Decl:
+    kind: str
+    name: str
+    line: int  # 1-based line of the keyword
+    has_body: bool = False
+    body_line: int = 0  # 1-based line of the `{` that opens the body (0: none)
+    end_line: int = 0  # 1-based last line of the declaration (set by declarations())
+
+
+def declarations(src: Source) -> list[Decl]:
+    """The top-level declarations, with whether each has a body."""
+    tokens: list[tuple[str, int]] = []
+    for lineno, line in enumerate(src.code, start=1):
+        tokens += [(m.group(), lineno) for m in TOKEN_RE.finditer(line)]
+    decls: list[Decl] = []
+    depth = 0  # braces
+    paren = 0
+    i = 0
+    n = len(tokens)
+    trigger_end = -2  # index of the `}` that closed the last trigger set
+    while i < n:
+        text, lineno = tokens[i]
+        prev = tokens[i - 1][0] if i else ""
+        if text == "{":
+            # a quantifier trigger set (`:: { f(x) }`, and the sets that follow it:
+            # `{ f(x) } { g(x) }`), not a body: skip it
+            if prev == "::" or i - 1 == trigger_end:
+                level = 0
+                while i < n:
+                    if tokens[i][0] == "{":
+                        level += 1
+                    elif tokens[i][0] == "}":
+                        level -= 1
+                        if level == 0:
+                            break
+                    i += 1
+                trigger_end = i
+            else:
+                if depth == 0 and paren == 0 and decls and not decls[-1].has_body:
+                    decls[-1].has_body = True
+                    decls[-1].body_line = lineno
+                depth += 1
+        elif text == "}":
+            depth = max(0, depth - 1)
+        elif text == "(":
+            paren += 1
+        elif text == ")":
+            paren = max(0, paren - 1)
+        elif depth == 0 and paren == 0 and text in TOP_KEYWORDS and prev != "::":
+            name = tokens[i + 1][0] if i + 1 < n else ""
+            decls.append(Decl(text, name, lineno))
+        i += 1
+    nlines = len(src.code)
+    for k, d in enumerate(decls):
+        d.end_line = decls[k + 1].line - 1 if k + 1 < len(decls) else nlines
+    return decls
+
+
+# ---------------------------------------------------------------------------
+# Position maps (encoding.md section 5)
+# ---------------------------------------------------------------------------
+
+@dataclasses.dataclass(frozen=True)
+class MapEntry:
+    vpr_line: int
+    error_id: str
+    category: str
+    file: str
+    line: int
+    column: int
+    message: str
+    note: str | None
+    map_line: int  # line of the map file, for messages
+
+
+def parse_map(text: str, name: str) -> tuple[list[MapEntry], list[str]]:
+    """The entries of a position map and the problems with its format: one line
+    per check, tab-separated `vpr line, viper error id, category, file, line,
+    column, message [, note]`."""
+    entries: list[MapEntry] = []
+    problems: list[str] = []
+    for lineno, raw in enumerate(text.split("\n"), start=1):
+        if not raw.strip():
+            continue
+
+        def bad(why: str) -> None:
+            problems.append(f"{name}:{lineno}: {why}")
+        fields = raw.split("\t")
+        if len(fields) not in (7, 8):
+            bad(f"a position map line has 7 or 8 tab-separated fields, found {len(fields)}")
+            continue
+        try:
+            vpr_line, line, column = int(fields[0]), int(fields[4]), int(fields[5])
+        except ValueError:
+            bad("the Viper line, line and column of a map entry must be integers")
+            continue
+        if vpr_line < 1 or line < 1 or column < 1:
+            bad("the Viper line, line and column of a map entry start at 1")
+            continue
+        if fields[1] not in MAP_ERROR_IDS:
+            bad(f"unknown Viper error id `{fields[1]}`")
+            continue
+        if fields[2] not in MAP_CATEGORIES:
+            bad(f"unknown category `{fields[2]}` (known: "
+                + ", ".join(sorted(MAP_CATEGORIES)) + ")")
+            continue
+        if not fields[3].strip() or not fields[6].strip():
+            bad("a map entry needs a file and a message")
+            continue
+        if len(fields) == 8 and not fields[7].strip():
+            bad("an empty note field")
+            continue
+        entries.append(MapEntry(vpr_line, fields[1], fields[2], fields[3], line, column,
+                                fields[6], fields[7] if len(fields) == 8 else None, lineno))
+    return entries, problems
+
+
+# ---------------------------------------------------------------------------
+# One .vpr file
+# ---------------------------------------------------------------------------
+
+class CallStatement:
+    """`match(line)`: the line is exactly one call statement, `name(args)` or
+    `targets := name(args)`, with the call's parentheses closing at the end of the
+    line (so `p := h(); p := h()` is not one)."""
+
+    PREFIX = re.compile(r"^\s*(?:[A-Za-z_$][\w$']*(?:\s*,\s*[A-Za-z_$][\w$']*)*\s*:=\s*)?"
+                        r"(?P<name>[A-Za-z_$][\w$']*)\s*\(")
+
+    def match(self, code: str):
+        m = self.PREFIX.match(code)
+        if m is None:
+            return None
+        depth = 1
+        i = m.end()
+        while i < len(code) and depth:
+            depth += (code[i] == "(") - (code[i] == ")")
+            i += 1
+        return m if depth == 0 and code[i:].strip() in ("", ";") else None
+
+
+def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
+             map_name: str | None = None) -> list[str]:
+    """Problems of one Viper file with its position map (None: the map is missing)."""
+    src = split_source(text)
+    problems: list[str] = []
+    decls = declarations(src)
+
+    def add(lineno: int, why: str) -> None:
+        problems.append(f"{name}:{lineno}: {why}")
+
+    for lineno, (code, comment) in enumerate(zip(src.code, src.comments), start=1):
+        if m := INHALE_WORD_RE.search(code):
+            tag = INHALE_TAG_RE.search(comment) if comment else None
+            if tag is None:
+                add(lineno, f"`{m.group(1)}` without `// cerastes:inhale-ok <reason>` "
+                            "(invariant 4)")
+            elif not tag.group("reason"):
+                add(lineno, "`// cerastes:inhale-ok` needs a reason")
+    for d in decls:
+        if d.kind == "import":
+            add(d.line, "`import`: an emitted file is self-contained (the lint reads only this "
+                        "file, so an imported one would escape it)")
+        elif d.kind == "domain":
+            add(d.line, f"`domain {d.name}`: the prelude has no domains (decision 0012 item 11)")
+        elif d.kind == "function" and not d.has_body:
+            add(d.line, f"bodyless `function {d.name}`: functions need bodies "
+                        "(decision 0012 item 11)")
+        elif d.kind == "method" and not d.has_body:
+            tag = trusted_tag(src, d.line)
+            if tag is None:
+                add(d.line, f"bodyless `method {d.name}` without `// cerastes:trusted-contract "
+                            "<reason>` (decision 0012 item 1)")
+            elif not tag.group("reason"):
+                add(d.line, "`// cerastes:trusted-contract` needs a reason")
+    for lineno, code in enumerate(src.code, start=1):
+        if re.search(r"\baxiom\b", code):
+            add(lineno, "`axiom`: the prelude has no axioms (decision 0012 item 11)")
+
+    methods = {d.name for d in decls if d.kind == "method"}
+    call_re = CallStatement()
+    check_lines: dict[int, str] = {}
+    declaration_lines = {d.line for d in decls}
+    call_word_re = re.compile(r"(?<![\w$'])(" + "|".join(map(re.escape, sorted(methods))) + r")\s*\(") \
+        if methods else None
+    for lineno, code in enumerate(src.code, start=1):
+        # every check is on its own line (decision 0012 item 13), so that its map entry
+        # is the line: a keyword that does not start its line, or a second one, hides one
+        words = list(CHECK_WORD_RE.finditer(code))
+        for k, w in enumerate(words):
+            if k > 0 or code[:w.start()].strip():
+                add(lineno, f"`{w.group(1)}` does not start its line: every check is on its "
+                            "own line (decision 0012 item 13)")
+        if m := CHECK_LINE_RE.match(code):
+            if m.group(1) == "decreases" and DECREASES_LINE_RE.match(code).group("measure").strip() in ("", "_"):
+                pass  # an empty measure (a method outside any recursion) or `_` (trusted) is no check
+            else:
+                check_lines[lineno] = m.group(1)
+        elif lineno not in declaration_lines and call_word_re is not None \
+                and (c := call_word_re.search(code)):
+            if (m := call_re.match(code)) and m.group("name") in methods:
+                check_lines[lineno] = f"call of {m.group('name')}"
+            else:
+                add(lineno, f"the call of method `{c.group(1)}` is not alone on its line: every "
+                            "call is a statement of its own (decision 0012 item 13)")
+
+    lint_termination_clauses(src, decls, add)
+
+    if map_text is None:
+        problems.append(f"{name}: no position map ({map_name or name + MAP_SUFFIX})")
+        return problems
+    entries, map_problems = parse_map(map_text, map_name or name + MAP_SUFFIX)
+    problems += map_problems
+    by_line: dict[int, list[MapEntry]] = {}
+    for e in entries:
+        by_line.setdefault(e.vpr_line, []).append(e)
+    for lineno, kind in sorted(check_lines.items()):
+        if lineno not in by_line:
+            add(lineno, f"`{kind}` line has no entry in the position map")
+            continue
+        allowed = KIND_IDS["call" if kind.startswith("call of ") else kind]
+        for e in by_line[lineno]:
+            if e.error_id not in allowed:
+                problems.append(f"{map_name or name + MAP_SUFFIX}:{e.map_line}: the entry for "
+                                f"{name} line {lineno} has the Viper error id `{e.error_id}`, "
+                                f"which a `{kind}` line cannot produce (expected "
+                                + " or ".join(f"`{i}`" for i in sorted(allowed)) + ")")
+    nlines = len(src.code) - (1 if src.code and src.code[-1] == "" and text.endswith("\n") else 0)
+    for lineno, group in sorted(by_line.items()):
+        if lineno > nlines or not src.code[lineno - 1].strip():
+            for e in group:
+                problems.append(f"{map_name or name + MAP_SUFFIX}:{e.map_line}: entry for "
+                                f"{name} line {lineno}, which is "
+                                + ("past the end of the file" if lineno > nlines
+                                   else "blank or a comment"))
+        ids = [e.error_id for e in group]
+        for error_id in sorted({i for i in ids if ids.count(i) > 1}):
+            problems.append(f"{map_name or name + MAP_SUFFIX}: line {lineno} has two entries "
+                            f"with the Viper error id `{error_id}`")
+    return problems
+
+
+def lint_termination_clauses(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    """Decision 0013 item 5: Silicon checks termination only where a `decreases` clause is present, so every
+    method (the `__wf` methods too, with an empty measure) and every `while` has one; and `decreases _`, which
+    assumes termination (invariant 4), is allowed only on a bodyless method with the trusted-contract tag."""
+    for d in decls:
+        if d.kind != "method":
+            continue
+        header_end = d.body_line - 1 if d.has_body else d.end_line
+        lines = range(d.line, max(d.line, header_end) + 1)
+        clauses = [ln for ln in lines if DECREASES_LINE_RE.match(src.code[ln - 1])]
+        if not clauses:
+            add(d.line, f"`method {d.name}` has no `decreases` clause: Silicon checks termination only "
+                        "where one is present (an empty `decreases` for a method outside any recursion, "
+                        "decision 0013 item 5)")
+    for lineno, code in enumerate(src.code, start=1):
+        m = DECREASES_LINE_RE.match(code)
+        if m and m.group("measure").strip() == "_":
+            owner = next((d for d in decls if d.line <= lineno <= d.end_line), None)
+            ok = (owner is not None and owner.kind == "method" and not owner.has_body
+                  and trusted_tag(src, owner.line) is not None)
+            if not ok:
+                add(lineno, "`decreases _` assumes termination (invariant 4): it is allowed only on a "
+                            "bodyless method that carries `// cerastes:trusted-contract <reason>`")
+    for lineno, code in enumerate(src.code, start=1):
+        for _w in WHILE_WORD_RE.finditer(code):
+            body = next((ln for ln in range(lineno, len(src.code) + 1) if "{" in src.code[ln - 1]), len(src.code))
+            if not any(DECREASES_LINE_RE.match(src.code[ln - 1]) for ln in range(lineno, body)):
+                add(lineno, "`while` loop without a `decreases` clause: Silicon checks termination only "
+                            "where one is present (decision 0013 item 5)")
+
+
+def trusted_tag(src: Source, line: int):
+    """The `cerastes:trusted-contract` tag for the method at `line` (1-based): on
+    that line, or in the run of comment-only lines right above it."""
+    m = TRUSTED_TAG_RE.search(src.comments[line - 1]) if src.comments[line - 1] else None
+    i = line - 2
+    while m is None and i >= 0 and not src.code[i].strip() and src.comments[i]:
+        m = TRUSTED_TAG_RE.search(src.comments[i])
+        i -= 1
+    return m
+
+
+# ---------------------------------------------------------------------------
+# Directories, the manifest, the command line
+# ---------------------------------------------------------------------------
+
+class LintUsageError(Exception):
+    pass
+
+
+def verify_tests_expect_viper(root: Path | None = None) -> bool:
+    """Whether a test of the tree (tests/ and the documentation examples) runs
+    `cerastes verify` and must leave Viper behind (`verified` or `error`, in C
+    or C++): then an absent or empty build/vpr is a failure."""
+    base = ROOT if root is None else root
+    paths = [str(base / p) for p in rt.DEFAULT_PATHS if (base / p).is_dir()]
+    if not paths:
+        return False
+    for f in rt.discover(paths).tests:
+        exp = rt.read_header(f)
+        if isinstance(exp, rt.Expectation) and rt.is_verify_test(f, exp) and rt.vpr_expected(exp):
+            return True
+    return False
+
+
+RUN_ID_RE = re.compile(r"^# run-id: (?P<id>\S+)$")
+
+
+def read_manifest(directory: Path) -> tuple[list[str] | None, str | None, list[str]]:
+    """(the manifest's entries or None if there is no MANIFEST, its run id,
+    problems).  The first line is `# run-id: <id>`; other `#` lines are comments."""
+    path = directory / MANIFEST
+    if not path.is_file():
+        return None, None, []
+    lines = [l for l in path.read_text().split("\n") if l.strip()]
+    problems = []
+    run_id = None
+    if lines and (m := RUN_ID_RE.match(lines[0])):
+        run_id = m.group("id")
+        lines = lines[1:]
+    else:
+        problems.append(f"{path}: the first line is not `# run-id: <id>`: the files cannot be "
+                        "tied to a run")
+    entries = [l for l in lines if not l.startswith("#")]
+    seen: set[str] = set()
+    for e in entries:
+        if e.startswith("/") or ".." in Path(e).parts or not e.endswith(".vpr"):
+            problems.append(f"{path}: `{e}` is not a path of a .vpr file below the directory")
+        if e in seen:
+            problems.append(f"{path}: `{e}` is listed twice")
+        seen.add(e)
+    return entries, run_id, problems
+
+
+def lint_directory(directory: Path, expect_viper: Callable[[], bool] | None = None
+                   ) -> tuple[list[str], int, str | None, str | None]:
+    """(problems, number of .vpr files linted, a note, the run id) for a directory;
+    `expect_viper` (default: verify_tests_expect_viper) says whether the tree has
+    a verify test that must leave Viper behind."""
+    if expect_viper is None:
+        expect_viper = verify_tests_expect_viper
+    problems: list[str] = []
+    files = sorted(p for p in directory.rglob("*.vpr") if p.is_file()) if directory.is_dir() else []
+    manifest, run_id, manifest_problems = read_manifest(directory)
+    problems += manifest_problems
+    if manifest is None and not files:
+        if expect_viper():
+            return [f"{directory}: no {MANIFEST} and no .vpr file, but a verify test of the "
+                    "tree expects Viper (run scripts/run_tests.py first)"], 0, None, None
+        return [], 0, "no emitted Viper to lint", None
+    if manifest is not None:
+        if not manifest:
+            problems.append(f"{directory / MANIFEST}: the manifest is empty: an empty set "
+                            "must not pass")
+        for e in manifest:
+            if not (directory / e).is_file():
+                problems.append(f"{directory / MANIFEST}: `{e}` is listed but not there "
+                                f"(fewer files than the {len(manifest)} the run expects)")
+    elif files:
+        problems.append(f"{directory}: .vpr files but no {MANIFEST}: they cannot be tied to the "
+                        "current run (a stale or partial directory)")
+    if manifest is not None:
+        listed = set(manifest)
+        for f in files:
+            if f.relative_to(directory).as_posix() not in listed:
+                problems.append(f"{f}: not listed in the current {MANIFEST} (run "
+                                f"{run_id or '?'}): a stale file, or one from a partial run")
+    if not files:
+        problems.append(f"{directory}: no .vpr file to lint")
+    for f in files:
+        problems += lint_file(f)
+    return problems, len(files), None, run_id
+
+
+def lint_file(path: Path) -> list[str]:
+    mapf = path.with_name(path.name + MAP_SUFFIX)
+    try:
+        text = path.read_text()
+    except OSError as err:
+        return [f"{path}: cannot read ({err})"]
+    map_text = mapf.read_text() if mapf.is_file() else None
+    return lint_vpr(text, map_text, str(path), str(mapf))
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("paths", nargs="*", help="directories or .vpr files (default: build/vpr)")
+    args = parser.parse_args(argv)
+    paths = [Path(p) for p in args.paths] or [ROOT / DEFAULT_DIR]
+    problems: list[str] = []
+    linted = 0
+    notes: list[str] = []
+    runs: list[str] = []
+    for p in paths:
+        if p.is_dir() or (not p.exists() and not args.paths):
+            try:
+                probs, n, note, run_id = lint_directory(p)
+            except rt.UsageError as err:
+                print(f"lint_viper: {err}", file=sys.stderr)
+                return 2
+            problems += probs
+            linted += n
+            if note:
+                notes.append(note)
+            if run_id:
+                runs.append(run_id)
+        elif p.is_file() and p.suffix == ".vpr":
+            problems += lint_file(p)
+            linted += 1
+        else:
+            print(f"lint_viper: {p}: not a directory or a .vpr file", file=sys.stderr)
+            return 2
+    for line in problems:
+        print(line)
+    if problems:
+        print(f"lint_viper: {len(problems)} problems in {linted} files")
+        return 1
+    if notes and linted == 0:
+        print(f"lint_viper: {notes[0]}")
+    else:
+        print(f"lint_viper: {linted} files clean" + (f" (run {', '.join(runs)})" if runs else ""))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
