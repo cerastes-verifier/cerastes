@@ -1,0 +1,20 @@
+routine f plain body @ L11:5
+  returns int
+  param 1 n: int
+  attr [[cerastes::requires]] on routine @ L7:14
+    arg 1 @ L7:32
+      op eok_ge type_kind=tk_integer type=bool @ L7:34
+        param 1 n: int @ L7:32
+        const 0 type=int @ L7:37
+  attr [[cerastes::decreases]] on routine @ L7:40
+    arg 1 @ L7:59
+      param 1 n: int lvalue @ L7:59
+routine g plain body @ L17:5
+  returns int
+  param 1 m: int
+  attr [[cerastes::decreases]] on routine @ L16:14
+    arg 1 @ L16:33
+      op eok_add type_kind=tk_integer type=int @ L16:35
+        param 1 m: int @ L16:33
+        const 1 type=int @ L16:37
+end walk: 2 routines reported, 0 routines with bodies in non-system files outside the primary file

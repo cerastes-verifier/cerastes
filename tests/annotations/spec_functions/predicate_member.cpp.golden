@@ -1,0 +1,28 @@
+routine S::operator= plain implicit nobody @ L6:8
+  returns S &
+  param 1 _: S &&
+routine S::operator= plain implicit nobody @ L6:8
+  returns S &
+  param 1 _: const S &
+routine S::ok plain body @ L7:27
+  returns bool
+  param 1 x: int
+  attr [[cerastes::predicate]] on routine @ L7:3
+routine ident plain body @ L10:5
+  returns int
+  param 1 s: const S &
+  param 2 x: int
+  attr [[cerastes::requires]] on routine @ L10:30
+    arg 1 @ L10:48
+      op eok_dot_member_call type_kind=tk_unknown type=bool @ L10:52
+        routine S::ok: bool (*)(int) const @ L10:50
+        op eok_ref_indirect type_kind=tk_pointer type=const S lvalue @ L10:48
+          param 1 s: const S & @ L10:48
+        param 2 x: int @ L10:53
+  attr [[cerastes::ensures]] on routine @ L10:57
+    arg 1 binder r: int @ L10:74
+    arg 2 @ L10:77
+      op eok_eq type_kind=tk_integer type=bool @ L10:79
+        binder r: int @ L10:77
+        param 2 x: int @ L10:82
+end walk: 4 routines reported, 0 routines with bodies in non-system files outside the primary file

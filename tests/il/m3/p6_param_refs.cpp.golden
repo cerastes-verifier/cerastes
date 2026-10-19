@@ -1,0 +1,39 @@
+routine f plain body @ L7:5
+  returns int
+  param 1 a: int
+  param 2 b: int
+  attr [[cerastes::requires]] on routine @ L7:21
+    arg 1 @ L7:39
+      op eok_land type_kind=tk_integer type=bool @ L7:46
+        op eok_ge type_kind=tk_integer type=bool @ L7:41
+          param 1 a: int @ L7:39
+          const 0 type=int @ L7:44
+        op eok_gt type_kind=tk_integer type=bool @ L7:51
+          param 2 b: int @ L7:49
+          param 1 a: int @ L7:53
+  attr [[cerastes::ensures]] on routine @ L7:56
+    arg 1 binder r: int @ L7:73
+    arg 2 @ L7:76
+      op eok_ge type_kind=tk_integer type=bool @ L7:78
+        binder r: int @ L7:76
+        param 1 a: int @ L7:81
+  stmt stmk_empty @ L10:3 attr [[cerastes::check]] @ L10:3
+    arg 1 @ L10:18
+      op eok_eq type_kind=tk_integer type=bool @ L10:20
+        var s: int decl=L9:7 @ L10:18
+        var a: int decl=L7:11 @ L10:23
+  stmt stmk_empty @ L12:3 attr [[cerastes::check]] @ L12:3
+    arg 1 @ L12:18
+      op eok_land type_kind=tk_integer type=bool @ L12:24
+        op eok_gt type_kind=tk_integer type=bool @ L12:20
+          var a: int decl=L7:11 @ L12:18
+          var s: int decl=L9:7 @ L12:22
+        op eok_gt type_kind=tk_integer type=bool @ L12:29
+          var b: int decl=L7:18 @ L12:27
+          var s: int decl=L9:7 @ L12:31
+  stmt stmk_while @ L13:3 attr [[cerastes::invariant]] @ L13:3
+    arg 1 @ L13:22
+      op eok_le type_kind=tk_integer type=bool @ L13:24
+        var s: int decl=L9:7 @ L13:22
+        var b: int decl=L7:18 @ L13:27
+end walk: 1 routines reported, 0 routines with bodies in non-system files outside the primary file

@@ -3,21 +3,21 @@ routine spec_probe plain body @ L10:25
   param 1 p: const int *
   param 2 n: unsigned int
   attr [[cerastes::predicate]] on routine @ L10:1
-routine <lambda@L13:53>::<unnamed> plain implicit nobody @ L13:53
+routine <lambda@L13:38>::<unnamed> plain implicit nobody @ L13:38
   returns void
-  param 1 _: <lambda@L13:53> &&
-routine <lambda@L13:53>::<unnamed> plain implicit nobody @ L13:53
+  param 1 _: <lambda@L13:38> &&
+routine <lambda@L13:38>::<unnamed> plain implicit nobody @ L13:38
   returns void
-  param 1 _: const <lambda@L13:53> &
-routine <lambda@L13:53>::operator= plain implicit nobody @ L13:53
-  returns <lambda@L13:53> &
-  param 1 _: const <lambda@L13:53> &
-routine <lambda@L13:53>::_FUN plain implicit nobody @ L13:55
+  param 1 _: const <lambda@L13:38> &
+routine <lambda@L13:38>::operator= plain implicit nobody @ L13:38
+  returns <lambda@L13:38> &
+  param 1 _: const <lambda@L13:38> &
+routine <lambda@L13:38>::_FUN plain implicit nobody @ L13:40
   returns bool
   param 1 i: int
-routine <lambda@L13:53>::operator bool (*)(int) plain implicit body @ L13:55
+routine <lambda@L13:38>::operator bool (*)(int) plain implicit body @ L13:40
   returns bool (*)(int)
-routine <lambda@L13:53>::operator() plain body @ L13:55
+routine <lambda@L13:38>::operator() plain body @ L13:40
   returns bool
   param 1 i: int
 routine plus1 plain body @ L16:19
@@ -33,9 +33,14 @@ routine plus1 plain body @ L16:19
     arg 2 @ L16:77
       op eok_eq type_kind=tk_integer type=bool @ L16:79
         binder r: int @ L16:77
-        op eok_add type_kind=tk_integer type=int @ L16:84
-          param 1 x: int @ L16:82
-          const 1 type=int @ L16:86
+        op eok_add type_kind=tk_integer type=int @ L16:99
+          op eok_ref_indirect type_kind=tk_pointer type=int @ L16:95
+            op eok_call type_kind=tk_unknown type=const int & @ L16:95
+              routine cerastes::old args <T=int>: const int &(*)(const int &) noexcept @ L16:82
+              op eok_reference_to type_kind=tk_pointer type=const int & @ L16:96
+                op eok_lvalue_adjust type_kind=tk_integer type=const int lvalue @ L16:96
+                  param 1 x: int lvalue @ L16:96
+          const 1 type=int @ L16:101
   attr [[cerastes::pure]] on routine @ L16:1
 routine everything plain body @ L21:5
   returns int

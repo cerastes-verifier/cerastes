@@ -1,0 +1,19 @@
+routine nonneg plain body @ L6:25
+  returns bool
+  param 1 x: int
+  attr [[cerastes::predicate]] on routine @ L6:1
+routine ident plain body @ L11:5
+  returns int
+  param 1 x: int
+  attr [[cerastes::requires]] on routine @ L11:18
+    arg 1 @ L11:36
+      op eok_call type_kind=tk_unknown type=bool @ L11:42
+        routine nonneg: bool (*)(int) @ L11:36
+        param 1 x: int @ L11:43
+  attr [[cerastes::ensures]] on routine @ L11:47
+    arg 1 binder r: int @ L11:64
+    arg 2 @ L11:67
+      op eok_eq type_kind=tk_integer type=bool @ L11:69
+        binder r: int @ L11:67
+        param 1 x: int @ L11:72
+end walk: 2 routines reported, 0 routines with bodies in non-system files outside the primary file

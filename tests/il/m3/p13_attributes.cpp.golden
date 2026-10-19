@@ -1,0 +1,64 @@
+routine nr_decl plain nobody @ L4:19
+  returns void
+  param 1 _: int
+  attr [[noreturn]] on routine @ L4:3
+routine nr_def plain body @ L5:19
+  returns void
+  param 1 a: int
+  attr [[noreturn]] on routine @ L5:3
+routine nd plain body @ L6:19
+  returns int
+  param 1 a: int
+  attr [[nodiscard]] on routine @ L6:3
+routine dep plain body @ L7:27
+  returns int
+  param 1 a: int
+  attr [[deprecated(<aak_constant>)]] on routine @ L7:3
+routine ai plain body @ L8:35
+  returns int
+  param 1 a: int
+  attr [[gnu::always_inline]] on routine @ L8:3
+routine ai2 plain body @ L10:5
+  returns int
+  param 1 a: int
+  attr [[always_inline]] on routine @ L9:31
+routine cn plain body @ L11:28
+  returns int
+  param 1 a: int
+  attr [[const]] on routine @ L11:16
+routine pu plain body @ L12:27
+  returns int
+  param 1 a: int
+  attr [[pure]] on routine @ L12:16
+routine cleanup_fn plain nobody @ L13:6
+  returns void
+  param 1 _: int *
+routine with_params plain body @ L14:5
+  returns int
+  param 1 a: int
+  param 2 b: int
+  attr [[maybe_unused]] on param 1 @ L14:19
+  attr [[maybe_unused]] on param 2 @ L14:49
+routine Tag::operator= plain implicit nobody @ L15:22
+  returns Tag &
+  param 1 _: Tag &&
+routine Tag::operator= plain implicit nobody @ L15:22
+  returns Tag &
+  param 1 _: const Tag &
+routine Old::operator= plain implicit nobody @ L16:23
+  returns Old &
+  param 1 _: Old &&
+routine Old::operator= plain implicit nobody @ L16:23
+  returns Old &
+  param 1 _: const Old &
+routine stmts plain body @ L18:5
+  returns int
+  param 1 x: int
+  attr [[maybe_unused]] on variable unused @ L19:5
+  attr [[cleanup(cleanup_fn)]] on variable cl @ L20:25
+  stmt stmk_empty @ L21:3 attr [[assume(<aak_expression>)]]
+  stmt stmk_empty @ L22:3 attr [[assume(<aak_expression>)]]
+  stmt stmk_block @ L23:25 attr [[likely]]
+  stmt stmk_block @ L23:54 attr [[unlikely]]
+  stmt stmk_empty @ L24:31 attr [[fallthrough]]
+end walk: 15 routines reported, 0 routines with bodies in non-system files outside the primary file

@@ -1,0 +1,39 @@
+routine down prototype body @ L8:3
+  returns T
+  param 1 n: T
+  attr [[cerastes::requires]] on routine @ L9:5
+    arg 1 @ L9:23
+      op eok_bool_cast type_kind=tk_template_param type=bool @ L9:23
+        op eok_ge type_kind=tk_template_param type=<tptk_unknown> @ L9:25
+          param 1 n: T lvalue @ L9:23
+          const 0 type=int @ L9:28
+  attr [[cerastes::decreases]] on routine @ L10:5
+    arg 1 @ L10:24
+      param 1 n: T lvalue @ L10:24
+  op eok_question type_kind=tk_unknown type=<tptk_unknown> @ L12:17
+  op eok_bool_cast type_kind=tk_template_param type=bool @ L12:10
+  op eok_eq type_kind=tk_template_param type=<tptk_unknown> @ L12:12
+  op eok_call type_kind=tk_unknown type=<tptk_unknown> @ L12:27
+  tconst tpck_unknown_function type=<tptk_unknown> @ L12:23
+  op eok_subtract type_kind=tk_template_param type=<tptk_unknown> @ L12:30
+routine down instance body @ L8:3
+  returns int
+  param 1 n: int
+  template down args <T=int>
+  attr [[cerastes::requires]] on routine @ L9:5
+    arg 1 @ L9:23
+      op eok_ge type_kind=tk_integer type=bool @ L9:25
+        param 1 n: int @ L9:23
+        const 0 type=int @ L9:28
+  attr [[cerastes::decreases]] on routine @ L10:5
+    arg 1 @ L10:24
+      param 1 n: int lvalue @ L10:24
+routine use plain body @ L15:5
+  returns int
+  param 1 n: int
+  attr [[cerastes::requires]] on routine @ L15:16
+    arg 1 @ L15:34
+      op eok_ge type_kind=tk_integer type=bool @ L15:36
+        param 1 n: int @ L15:34
+        const 0 type=int @ L15:39
+end walk: 3 routines reported, 0 routines with bodies in non-system files outside the primary file

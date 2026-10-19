@@ -1,0 +1,64 @@
+routine count_down plain body @ L7:5
+  returns int
+  param 1 n: int
+  attr [[cerastes::requires]] on routine @ L8:5
+    arg 1 @ L8:23
+      op eok_ge type_kind=tk_integer type=bool @ L8:25
+        param 1 n: int @ L8:23
+        const 0 type=int @ L8:28
+  attr [[cerastes::decreases]] on routine @ L9:5
+    arg 1 @ L9:24
+      param 1 n: int lvalue @ L9:24
+  attr [[cerastes::ensures]] on routine @ L10:5
+    arg 1 binder r: int @ L10:22
+    arg 2 @ L10:25
+      op eok_eq type_kind=tk_integer type=bool @ L10:27
+        binder r: int @ L10:25
+        const 0 type=int @ L10:30
+routine decreases_first plain nobody @ L18:5
+  returns int
+  param 1 n: int
+  attr [[cerastes::decreases]] on routine @ L18:28
+    arg 1 @ L18:47
+      param 1 n: int lvalue @ L18:47
+  attr [[cerastes::requires]] on routine @ L18:50
+    arg 1 @ L18:68
+      op eok_ge type_kind=tk_integer type=bool @ L18:70
+        param 1 n: int @ L18:68
+        const 0 type=int @ L18:73
+routine lexicographic plain body @ L20:5
+  returns int
+  param 1 m: int
+  param 2 n: int
+  attr [[cerastes::requires]] on routine @ L21:5
+    arg 1 @ L21:23
+      op eok_land type_kind=tk_integer type=bool @ L21:30
+        op eok_ge type_kind=tk_integer type=bool @ L21:25
+          param 1 m: int @ L21:23
+          const 0 type=int @ L21:28
+        op eok_ge type_kind=tk_integer type=bool @ L21:35
+          param 2 n: int @ L21:33
+          const 0 type=int @ L21:38
+  attr [[cerastes::decreases]] on routine @ L22:5
+    arg 1 @ L22:24
+      param 1 m: int lvalue @ L22:24
+    arg 2 @ L22:27
+      param 2 n: int lvalue @ L22:27
+routine counter::operator= plain implicit nobody @ L30:8
+  returns counter &
+  param 1 _: const counter &
+routine counter::operator= plain implicit nobody @ L30:8
+  returns counter &
+  param 1 _: counter &&
+routine counter::down plain body @ L34:14
+  returns int
+  param 1 n: int
+  attr [[cerastes::requires]] on routine @ L31:19
+    arg 1 @ L31:37
+      op eok_ge type_kind=tk_integer type=bool @ L31:39
+        param 1 n: int @ L31:37
+        const 0 type=int @ L31:42
+  attr [[cerastes::decreases]] on routine @ L31:45
+    arg 1 @ L31:64
+      param 1 n: int lvalue @ L31:64
+end walk: 6 routines reported, 0 routines with bodies in non-system files outside the primary file

@@ -1,0 +1,43 @@
+routine g1 plain nobody @ L4:32
+  returns void
+  param 1 _: int
+  attr [[noreturn]] on routine @ L4:16
+routine g2 plain nobody @ L5:6
+  returns void
+  param 1 _: int
+  attr [[noreturn]] on routine @ L5:29
+routine g3 plain nobody @ L6:24
+  returns void
+  param 1 _: int
+  attr [[gnu::noreturn]] on routine @ L6:3
+routine g4 plain nobody @ L7:19
+  returns void
+  param 1 _: int
+  attr [[noreturn]] on routine @ L7:3
+routine g5 plain body @ L8:36
+  returns int
+  param 1 a: int
+  attr [[unused]] on routine @ L8:16
+routine g6 plain nobody @ L9:33
+  returns int
+  param 1 _: int
+  attr [[deprecated]] on routine @ L9:16
+routine g7 plain nobody @ L10:32
+  returns int
+  param 1 _: int
+  attr [[nodiscard]] on routine @ L10:16
+routine g8 plain nobody @ L11:5
+  returns int
+  param 1 _: int
+  attr [[const]] on routine @ L11:28
+  attr [[nothrow]] on routine @ L11:51
+routine g9 plain nobody @ L13:5
+  returns int
+  param 1 a: int
+  attr [[aligned(<aak_constant>)]] on routine @ L13:30
+routine g10 plain nobody @ L14:6
+  returns void
+  param 1 a: int
+  param 2 b: int
+  attr [[unused]] on param 2 @ L14:38
+end walk: 10 routines reported, 0 routines with bodies in non-system files outside the primary file
