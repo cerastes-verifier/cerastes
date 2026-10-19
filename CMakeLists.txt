@@ -17,5 +17,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)  # our sources: strict C++20; edg_fe overrides (ED
 
 include(cmake/EdgFrontEnd.cmake)
 
+add_subdirectory(src/vir)
+add_subdirectory(src/viper)
 add_subdirectory(src/backend)
 add_subdirectory(src/driver)

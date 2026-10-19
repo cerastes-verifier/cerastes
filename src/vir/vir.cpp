@@ -1,0 +1,277 @@
+// Part of cerastes, under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#include "vir.h"
+
+namespace cerastes::vir {
+
+std::string Type::str() const {
+  switch (kind) {
+    case Kind::Void: return "void";
+    case Kind::Bool: return "bool";
+    case Kind::Int: return int_type != nullptr ? int_type->name : "<int>";
+  }
+  return "?";
+}
+
+int Function::add_param(std::string name, Type type, SrcLoc loc) {
+  const int k = static_cast<int>(params.size());
+  params.push_back(Param{name, type, loc, std::string()});
+  Var* v = new_local(name.empty() ? "arg" + std::to_string(k) : name, type, std::move(loc));
+  v->is_param_copy = true;
+  v->param_index = k;
+  param_vars_.push_back(locals_.size() - 1);
+  return k;
+}
+
+Var* Function::new_local(std::string name, Type type, SrcLoc loc) {
+  auto v = std::make_unique<Var>();
+  v->id = static_cast<int>(locals_.size());
+  v->name = std::move(name);
+  v->type = type;
+  v->loc = std::move(loc);
+  locals_.push_back(std::move(v));
+  return locals_.back().get();
+}
+
+const IntType* Program::int_type(const std::string& name, int bits, bool is_signed) {
+  for (const auto& t : int_types_)
+    if (t->bits == bits && t->is_signed == is_signed) return t.get();
+  auto t = std::make_unique<IntType>();
+  t->name = name;
+  t->bits = bits;
+  t->is_signed = is_signed;
+  int_types_.push_back(std::move(t));
+  return int_types_.back().get();
+}
+
+const IntType* Program::int_type_of(int bits, bool is_signed) {
+  return int_type((is_signed ? "int" : "uint") + std::to_string(bits), bits, is_signed);
+}
+
+Function* Program::add_function(std::string c_name, Type ret, SrcLoc loc, SrcLoc end_loc) {
+  Function& f = functions_.emplace_back();
+  f.id = static_cast<int>(functions_.size()) - 1;
+  f.c_name = std::move(c_name);
+  f.ret = ret;
+  f.loc = std::move(loc);
+  f.end_loc = std::move(end_loc);
+  return &f;
+}
+
+const IntType* promoted(Program& p, const IntType* t) {
+  if (t->bits < p.c_int_bits()) return p.int_type_of(p.c_int_bits(), true);
+  return t;
+}
+
+const IntType* usual_arithmetic(Program& p, const IntType* a, const IntType* b) {
+  if (a->is_signed == b->is_signed) return a->bits >= b->bits ? a : b;
+  const IntType* s = a->is_signed ? a : b;
+  const IntType* u = a->is_signed ? b : a;
+  if (u->bits >= s->bits) return p.int_type_of(u->bits, false);
+  return s;
+}
+
+// ---- Builder ------------------------------------------------------------------------------------------------
+
+namespace {
+Expr* fresh(Program& p, Expr::Kind k, Type t, SrcLoc loc) {
+  Expr* e = p.new_expr();
+  e->kind = k;
+  e->type = t;
+  e->loc = std::move(loc);
+  return e;
+}
+Stmt* fresh_stmt(Program& p, Stmt::Kind k, SrcLoc loc) {
+  Stmt* s = p.new_stmt();
+  s->kind = k;
+  s->loc = std::move(loc);
+  return s;
+}
+}  // namespace
+
+const Expr* Builder::int_const(Type t, std::string decimal, SrcLoc loc) {
+  Expr* e = fresh(p_, Expr::Kind::Const, t, std::move(loc));
+  e->value = std::move(decimal);
+  return e;
+}
+
+const Expr* Builder::bool_const(bool value, SrcLoc loc) {
+  Expr* e = fresh(p_, Expr::Kind::Const, Type::bool_type(), std::move(loc));
+  e->value = value ? "true" : "false";
+  return e;
+}
+
+const Expr* Builder::local(const Var* v, SrcLoc loc) {
+  Expr* e = fresh(p_, Expr::Kind::Local, v->type, std::move(loc));
+  e->var = v;
+  return e;
+}
+
+const Expr* Builder::formal(const Function& f, int k, SrcLoc loc) {
+  Expr* e = fresh(p_, Expr::Kind::Formal, f.params[static_cast<size_t>(k)].type, std::move(loc));
+  e->index = k;
+  return e;
+}
+
+const Expr* Builder::result(const Function& f, SrcLoc loc) {
+  return fresh(p_, Expr::Kind::Result, f.ret, std::move(loc));
+}
+
+const Expr* Builder::old(const Expr* a, SrcLoc loc) {
+  Expr* e = fresh(p_, Expr::Kind::Old, a->type, std::move(loc));
+  e->a = a;
+  return e;
+}
+
+const Expr* Builder::unary(UnaryOp op, const Expr* a, SrcLoc loc) {
+  Expr* e = fresh(p_, Expr::Kind::Unary, op == UnaryOp::Not ? Type::bool_type() : a->type, std::move(loc));
+  e->uop = op;
+  e->a = a;
+  return e;
+}
+
+const Expr* Builder::binary(BinaryOp op, const Expr* a, const Expr* b, SrcLoc loc) {
+  Type t = a->type;
+  switch (op) {
+    case BinaryOp::Lt: case BinaryOp::Le: case BinaryOp::Gt: case BinaryOp::Ge:
+    case BinaryOp::Eq: case BinaryOp::Ne: case BinaryOp::LAnd: case BinaryOp::LOr:
+      t = Type::bool_type();
+      break;
+    default: break;
+  }
+  Expr* e = fresh(p_, Expr::Kind::Binary, t, std::move(loc));
+  e->bop = op;
+  e->a = a;
+  e->b = b;
+  return e;
+}
+
+const Expr* Builder::cond(const Expr* c, const Expr* a, const Expr* b, SrcLoc loc) {
+  Expr* e = fresh(p_, Expr::Kind::Cond, a->type, std::move(loc));
+  e->a = c;
+  e->b = a;
+  e->c = b;
+  return e;
+}
+
+const Expr* Builder::convert(Type to, const Expr* a, bool explicit_cast, SrcLoc loc) {
+  Expr* e = fresh(p_, Expr::Kind::Convert, to, std::move(loc));
+  e->a = a;
+  e->explicit_cast = explicit_cast;
+  return e;
+}
+
+const Expr* Builder::to_bool(const Expr* a, SrcLoc loc) {
+  Expr* e = fresh(p_, Expr::Kind::ToBool, Type::bool_type(), std::move(loc));
+  e->a = a;
+  return e;
+}
+
+const Expr* Builder::bool_to_int(Type to, const Expr* a, SrcLoc loc) {
+  Expr* e = fresh(p_, Expr::Kind::BoolToInt, to, std::move(loc));
+  e->a = a;
+  return e;
+}
+
+const Expr* Builder::call(const Function* callee, std::vector<const Expr*> args, SrcLoc loc) {
+  Expr* e = fresh(p_, Expr::Kind::Call, callee->ret, std::move(loc));
+  e->callee = callee;
+  e->args = std::move(args);
+  return e;
+}
+
+const Expr* Builder::report_at(const Expr* a, SrcLoc loc, std::string note) {
+  Expr* e = fresh(p_, Expr::Kind::ReportAt, a->type, std::move(loc));
+  e->a = a;
+  e->value = std::move(note);
+  return e;
+}
+
+const Expr* Builder::spelled(const Expr* e, std::string c_type_name) {
+  const_cast<Expr*>(e)->c_type_name = std::move(c_type_name);
+  return e;
+}
+
+const Stmt* Builder::decl(const Var* v, const Expr* init, SrcLoc loc) {
+  Stmt* s = fresh_stmt(p_, Stmt::Kind::Decl, std::move(loc));
+  s->var = v;
+  s->expr = init;
+  return s;
+}
+
+const Stmt* Builder::assign(const Var* v, const Expr* value, SrcLoc loc) {
+  Stmt* s = fresh_stmt(p_, Stmt::Kind::Assign, std::move(loc));
+  s->var = v;
+  s->expr = value;
+  return s;
+}
+
+const Stmt* Builder::expr_stmt(const Expr* e, SrcLoc loc) {
+  Stmt* s = fresh_stmt(p_, Stmt::Kind::ExprStmt, std::move(loc));
+  s->expr = e;
+  return s;
+}
+
+const Stmt* Builder::if_stmt(const Expr* c, const Stmt* then_body, const Stmt* else_body, SrcLoc loc) {
+  Stmt* s = fresh_stmt(p_, Stmt::Kind::If, std::move(loc));
+  s->expr = c;
+  s->then_body = then_body;
+  s->else_body = else_body;
+  return s;
+}
+
+const Stmt* Builder::while_stmt(const Expr* c, std::vector<Clause> invariants, std::vector<Clause> measure, const Stmt* body, SrcLoc loc) {
+  Stmt* s = fresh_stmt(p_, Stmt::Kind::While, std::move(loc));
+  s->expr = c;
+  s->invariants = std::move(invariants);
+  s->measure = std::move(measure);
+  s->body = body;
+  return s;
+}
+
+const Stmt* Builder::return_stmt(const Expr* value, SrcLoc loc) {
+  Stmt* s = fresh_stmt(p_, Stmt::Kind::Return, std::move(loc));
+  s->expr = value;
+  return s;
+}
+
+const Stmt* Builder::check(const Expr* e, SrcLoc loc) {
+  Stmt* s = fresh_stmt(p_, Stmt::Kind::Check, std::move(loc));
+  s->expr = e;
+  return s;
+}
+
+const Stmt* Builder::block(std::vector<const Stmt*> stmts, SrcLoc loc) {
+  Stmt* s = fresh_stmt(p_, Stmt::Kind::Block, std::move(loc));
+  s->stmts = std::move(stmts);
+  return s;
+}
+
+const Stmt* Builder::compound_assign(const Var* x, BinaryOp op, const Expr* rhs, SrcLoc loc) {
+  if (!x->type.is_int() || !rhs->type.is_int()) return assign(x, rhs, loc);  // ill-typed on purpose
+  const IntType* tx = x->type.int_type;
+  const IntType* px = promoted(p_, tx);
+  const Expr* lhs_value = local(x, loc);
+  const Expr* left;
+  const Expr* right;
+  const IntType* c;
+  if (op == BinaryOp::Shl || op == BinaryOp::Shr) {
+    c = px;
+    left = convert(Type::integer(c), lhs_value, false, loc);
+    right = rhs;
+  } else {
+    c = usual_arithmetic(p_, px, promoted(p_, rhs->type.int_type));
+    left = convert(Type::integer(c), lhs_value, false, loc);
+    right = convert(Type::integer(c), rhs, false, loc);
+  }
+  const Expr* v = binary(op, left, right, loc);
+  return assign(x, convert(x->type, v, false, loc), loc);
+}
+
+const Stmt* Builder::inc_dec(const Var* x, bool increment, SrcLoc loc) {
+  const IntType* c_int = p_.int_type_of(p_.c_int_bits(), true);
+  const Expr* one = int_const(Type::integer(c_int), "1", loc);
+  return compound_assign(x, increment ? BinaryOp::Add : BinaryOp::Sub, one, std::move(loc));
+}
+
+}  // namespace cerastes::vir

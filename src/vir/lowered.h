@@ -1,0 +1,134 @@
+// Part of cerastes, under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// The lowered program: Viper-level, with the integer semantics of decision 0010 already applied.  `lower.cpp`
+// produces it from VIR; `src/viper/emit.cpp` prints it and decides nothing (internal/encoding.md section 1).
+// Names are final Viper identifiers; every check that can fail carries what a user must be told about it.
+#pragma once
+
+#include <memory>
+#include <set>
+#include <string>
+#include <vector>
+
+#include "vir.h"
+
+namespace cerastes::low {
+
+using vir::SrcLoc;
+
+// ---- pure expressions (Viper expressions over Int and Bool) -------------------------------------------------
+
+struct LExpr;
+using E = std::shared_ptr<const LExpr>;
+
+enum class UnOp { Neg, Not };
+enum class BinOp { Add, Sub, Mul, Lt, Le, Gt, Ge, Eq, Ne, And, Or, Implies };
+
+struct LExpr {
+  enum class Kind { IntLit, BoolLit, Var, Un, Bin, Ite, Fn } kind = Kind::IntLit;
+  std::string text;          // IntLit: a decimal (possibly negative); Var: the name; Fn: the prelude function
+  bool bool_value = false;   // BoolLit
+  UnOp un = UnOp::Neg;
+  BinOp bin = BinOp::Add;
+  E a, b, c;                 // operands; Ite: condition, then, else
+  std::vector<E> args;       // Fn
+};
+
+E int_lit(std::string decimal);
+E bool_lit(bool v);
+E var(std::string name);
+E neg(E a);
+E not_(E a);
+E bin(BinOp op, E a, E b);
+E ite(E c, E a, E b);
+E fn(std::string prelude_name, std::vector<E> args);
+E and_(E a, E b);                 // null operands are "true"
+E implies(E guard_or_null, E c);  // `c` when the guard is null
+// lo <= e && e <= hi  (for contracts and invariants)
+E in_range(E e, const std::string& lo, const std::string& hi);
+// !(e < lo || hi < e): the same condition as ONE atomic assertion.  Silicon reports each conjunct of an
+// asserted `&&` as its own error; an obligation must produce one error.
+E in_range_atomic(E e, const std::string& lo, const std::string& hi);
+
+// ---- what a user is told about a failed check -----------------------------------------------------------------
+
+struct Meta {
+  // One of the driver's categories (0011 item 10), or "internal" for a check whose failure is a bug of the
+  // encoder (a backstop, an automatic range invariant): the driver exits with status 3.
+  std::string category;
+  SrcLoc loc;
+  std::string message;
+  bool has_note = false;
+  SrcLoc note_loc;
+  std::string note_text;
+};
+
+// A check the emitter writes on its own line and records in the position map: the Viper error id Silicon's
+// message maps to (the table of scripts/run_tests.py) and the meaning of a failure.
+struct Check {
+  std::string viper_id;  // "assert.failed", "call.precondition", "invariant.not.established", ...
+  Meta meta;
+};
+
+// ---- statements ---------------------------------------------------------------------------------------------------
+
+struct LStmt;
+
+struct LInvariant {
+  E expr;
+  std::vector<Check> checks;  // usually both invariant.not.established and invariant.not.preserved
+};
+
+struct LStmt {
+  enum class Kind { Assign, Assert, Call, If, While, Goto, Label, Block, Comment } kind = Kind::Block;
+  std::string name;            // Assign: target; Call: the method; Goto, Label: the label; Comment: the text
+  E expr;                      // Assign: value; Assert: the condition; If, While: the condition
+  Check check;                 // Assert; Call (its call.precondition backstop)
+  bool has_termination = false;  // Call: the callee has a termination measure, so Silicon may report termination.failed here
+  Check termination;           // Call: that check (decision 0013 item 8)
+  std::vector<E> args;         // Call
+  std::string target;          // Call: the result variable, or empty
+  std::vector<LStmt> then_body, else_body;  // If; While uses then_body as the loop body
+  std::vector<LInvariant> invariants;       // While
+  std::vector<E> decreases;                 // While: the termination measure, one line `decreases e1, e2` (always at least one)
+  Check decreases_check;                    // While: what a termination.failed at that line means
+  std::vector<LStmt> stmts;    // Block
+};
+
+// ---- methods and the program ------------------------------------------------------------------------------------
+
+struct LVar {
+  std::string name;
+  bool is_bool = false;
+};
+
+struct LClause {
+  E expr;
+  std::vector<Check> checks;  // the failures Silicon can report at this clause's line
+};
+
+struct LMethod {
+  std::string name;
+  std::string comment;                   // a `//` line above the method (the C/C++ function it stands for)
+  std::vector<LVar> formals;
+  std::vector<LVar> results;             // zero or one
+  std::vector<LClause> requires_;
+  std::vector<LClause> ensures_;
+  // `decreases e1, ...` (decision 0013): printed on every method; empty for a function outside any recursion cycle and
+  // for the well-formedness methods; `decreases _` (assumed) only for a bodyless method with a trusted contract.
+  std::vector<E> decreases_;
+  bool decreases_assumed = false;
+  Check decreases_check;                 // the map entry of a non-empty `decreases` line (termination.failed)
+  bool has_body = false;
+  std::vector<LVar> locals;              // declared at the top of the body
+  std::vector<LStmt> body;
+  std::string trusted_reason;            // bodyless methods: emitted as `// cerastes:trusted-contract <reason>`
+};
+
+struct LProgram {
+  std::vector<LMethod> methods;
+  std::set<std::string> prelude_used;    // the prelude functions the methods call (emit.cpp adds their dependencies)
+};
+
+}  // namespace cerastes::low
