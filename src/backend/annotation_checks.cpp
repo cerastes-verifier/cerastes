@@ -485,13 +485,30 @@ constexpr unsigned long kBudget = 1000000;
 // reported (analysis_limit_reached).
 unsigned long budget() { return options().checks_selftest ? 1 : kBudget; }
 
-void scan_lambda_body(a_lambda_ptr l, an_expr_or_stmt_traversal_block_ptr tb) {
+void scan_lambda_body(a_lambda_ptr l, an_expr_or_stmt_traversal_block_ptr tb, const a_source_position& at) {
   a_routine_ptr r = l ? l->lambda_routine : nullptr;
   if (r == nullptr) return;
   a_scope_ptr sp = body_scope(r);
-  if (sp == nullptr) return;
-  add_scope_variables(sp, nullptr, &g_scan->lambda_vars);
-  if (sp->assoc_block) traverse_statement(sp->assoc_block, tb);
+  if (sp != nullptr) {
+    add_scope_variables(sp, nullptr, &g_scan->lambda_vars);
+    if (sp->assoc_block) traverse_statement(sp->assoc_block, tb);
+  }
+  // The lambda's own signature: the rescan of a lambda in a template's contract (fork series L/M) can leave an
+  // error type in a parameter written `decltype(<function parameter>)` without any diagnostic, and a body that
+  // does not use the parameter has no node of that type.  So the return type and every parameter type are checked
+  // too, not only the nodes of the body.  The body is scanned first: when it already reported a substitution error
+  // for this attribute (an erroneous node or type), that error is the one reported (once per attribute).
+  bool reported_substitution_error = false;
+  for (const auto& rep : g_scan->reported)
+    if (rep.first == static_cast<int>(Diag::annotation_substitution_error)) reported_substitution_error = true;
+  if (reported_substitution_error) return;
+  a_type_ptr rt = r->type ? skip_typerefs(r->type) : nullptr;
+  if (rt == nullptr || rt->kind != tk_routine) return;
+  bool bad = rt->variant.routine.return_type != nullptr && is_error_type(rt->variant.routine.return_type);
+  a_routine_type_supplement_ptr x = rt->variant.routine.extra_info;
+  for (a_param_type_ptr p = x ? x->param_type_list : nullptr; p; p = p->next)
+    if (p->type != nullptr && is_error_type(p->type)) bad = true;
+  if (bad) scan_report(*g_scan, Diag::annotation_substitution_error, at, {"error type"});
 }
 
 void scan_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb) {
@@ -609,7 +626,7 @@ void scan_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb) {
       if (l && sc.lambdas.insert(l).second) {
         if (l->lambda_routine) g_annotation_lambda_routines.insert(l->lambda_routine);
         note_lambda(l);
-        scan_lambda_body(l, tb);
+        scan_lambda_body(l, tb, e->position);
       }
       break;
     }

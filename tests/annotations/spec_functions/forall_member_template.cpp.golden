@@ -1,0 +1,265 @@
+routine Buf<int>::operator= plain implicit nobody @ L10:8
+  returns Buf<int> &
+  param 1 _: Buf<int> &&
+routine Buf<int>::operator= plain implicit nobody @ L10:8
+  returns Buf<int> &
+  param 1 _: const Buf<int> &
+routine Buf<U>::all_ge prototype body @ L14:8
+  returns bool
+  param 1 lo: T
+  attr [[maybe_unused]] on param 1 @ L14:17
+  attr [[cerastes::requires]] on routine @ L14:38
+    arg 1 @ L14:56
+      op eok_bool_cast type_kind=tk_template_param type=bool @ L14:56
+        op eok_call type_kind=tk_unknown type=<tptk_unknown> @ L14:72
+          tconst tpck_unknown_function cerastes::forall type=<tptk_unknown> @ L14:56
+          lambda <lambda@L14:73> @ L14:73
+            body return
+              op eok_lor type_kind=tk_integer type=<tptk_unknown> @ L14:135
+                op eok_not type_kind=tk_integer type=bool @ L14:116
+                  op eok_land type_kind=tk_integer type=bool @ L14:125
+                    op eok_le type_kind=tk_integer type=bool @ L14:120
+                      const 0 type=int @ L14:118
+                      var i: int decl=L14:80 @ L14:123
+                    op eok_lt type_kind=tk_integer type=bool @ L14:130
+                      var i: int decl=L14:80 @ L14:128
+                      var m: int decl=L14:99 @ L14:132
+                op eok_ge type_kind=tk_template_param type=<tptk_unknown> @ L14:143
+                  op eok_subscript type_kind=tk_pointer type=<tptk_unknown> @ L14:139
+                    var a: const U * decl=L14:92 @ L14:138
+                    var i: int decl=L14:80 @ L14:140
+                  var l: T decl=L14:104 lvalue @ L14:146
+          op eok_points_to_field type_kind=tk_unknown type=int * lvalue @ L14:152
+            this: Buf<int> * @ L14:152
+            field Buf<int>::data: int * @ L14:152
+          op eok_points_to_field type_kind=tk_unknown type=int lvalue @ L14:158
+            this: Buf<int> * @ L14:158
+            field Buf<int>::n: int @ L14:158
+          param 1 lo: T lvalue @ L14:161
+routine Buf<int>::all_ge prototype nobody @ L14:8
+  returns bool
+  param 1 lo: T
+  attr [[maybe_unused]] on param 1 @ L14:17
+  attr [[cerastes::requires]] on routine @ L14:38
+    arg 1 @ L14:56
+      op eok_bool_cast type_kind=tk_template_param type=bool @ L14:56
+        op eok_call type_kind=tk_unknown type=<tptk_unknown> @ L14:72
+          tconst tpck_unknown_function cerastes::forall type=<tptk_unknown> @ L14:56
+          lambda <lambda@L14:73> @ L14:73
+            body return
+              op eok_lor type_kind=tk_integer type=<tptk_unknown> @ L14:135
+                op eok_not type_kind=tk_integer type=bool @ L14:116
+                  op eok_land type_kind=tk_integer type=bool @ L14:125
+                    op eok_le type_kind=tk_integer type=bool @ L14:120
+                      const 0 type=int @ L14:118
+                      var i: int decl=L14:80 @ L14:123
+                    op eok_lt type_kind=tk_integer type=bool @ L14:130
+                      var i: int decl=L14:80 @ L14:128
+                      var m: int decl=L14:99 @ L14:132
+                op eok_ge type_kind=tk_template_param type=<tptk_unknown> @ L14:143
+                  op eok_subscript type_kind=tk_pointer type=const int lvalue @ L14:139
+                    var a: const int * decl=L14:92 @ L14:138
+                    var i: int decl=L14:80 @ L14:140
+                  var l: T decl=L14:104 lvalue @ L14:146
+          op eok_points_to_field type_kind=tk_unknown type=int * lvalue @ L14:152
+            this: Buf<int> * @ L14:152
+            field Buf<int>::data: int * @ L14:152
+          op eok_points_to_field type_kind=tk_unknown type=int lvalue @ L14:158
+            this: Buf<int> * @ L14:158
+            field Buf<int>::n: int @ L14:158
+          param 1 lo: T lvalue @ L14:161
+routine Buf<int>::all_ge instance body @ L14:8
+  returns bool
+  param 1 lo: int
+  attr [[maybe_unused]] on param 1 @ L14:17
+  template Buf<int>::all_ge args <T=int>
+  attr [[cerastes::requires]] on routine @ L14:38
+    arg 1 @ L14:56
+      op eok_call type_kind=tk_unknown type=bool @ L14:72
+        routine cerastes::forall args <F=<lambda@L14:73>, Free=pack{int *, int, int}>: bool (*)(<lambda@L14:73>, int *const &, const int &, const int &) noexcept @ L14:56
+        lambda <lambda@L14:73> @ L14:73
+          body return
+            op eok_lor type_kind=tk_integer type=bool @ L14:135
+              op eok_not type_kind=tk_integer type=bool @ L14:116
+                op eok_land type_kind=tk_integer type=bool @ L14:125
+                  op eok_le type_kind=tk_integer type=bool @ L14:120
+                    const 0 type=int @ L14:118
+                    var i: int decl=L14:80 @ L14:123
+                  op eok_lt type_kind=tk_integer type=bool @ L14:130
+                    var i: int decl=L14:80 @ L14:128
+                    var m: int decl=L14:99 @ L14:132
+              op eok_ge type_kind=tk_integer type=bool @ L14:143
+                op eok_subscript type_kind=tk_pointer type=int @ L14:139
+                  var a: const int * decl=L14:92 @ L14:138
+                  var i: int decl=L14:80 @ L14:140
+                var l: int decl=L14:104 @ L14:146
+        op eok_reference_to type_kind=tk_pointer type=int *const & @ L14:152
+          op eok_lvalue_adjust type_kind=tk_pointer type=int *const lvalue @ L14:152
+            op eok_points_to_field type_kind=tk_unknown type=int * lvalue @ L14:152
+              this: Buf<int> * @ L14:152
+              field Buf<int>::data: int * @ L14:152
+        op eok_reference_to type_kind=tk_pointer type=const int & @ L14:158
+          op eok_lvalue_adjust type_kind=tk_integer type=const int lvalue @ L14:158
+            op eok_points_to_field type_kind=tk_unknown type=int lvalue @ L14:158
+              this: Buf<int> * @ L14:158
+              field Buf<int>::n: int @ L14:158
+        op eok_reference_to type_kind=tk_pointer type=const int & @ L14:161
+          op eok_lvalue_adjust type_kind=tk_integer type=const int lvalue @ L14:161
+            param 1 lo: int lvalue @ L14:161
+routine Buf<int>::all_ge instance body @ L14:8
+  returns bool
+  param 1 lo: long
+  attr [[maybe_unused]] on param 1 @ L14:17
+  template Buf<int>::all_ge args <T=long>
+  attr [[cerastes::requires]] on routine @ L14:38
+    arg 1 @ L14:56
+      op eok_call type_kind=tk_unknown type=bool @ L14:72
+        routine cerastes::forall args <F=<lambda@L14:73>, Free=pack{int *, int, long}>: bool (*)(<lambda@L14:73>, int *const &, const int &, const long &) noexcept @ L14:56
+        lambda <lambda@L14:73> @ L14:73
+          body return
+            op eok_lor type_kind=tk_integer type=bool @ L14:135
+              op eok_not type_kind=tk_integer type=bool @ L14:116
+                op eok_land type_kind=tk_integer type=bool @ L14:125
+                  op eok_le type_kind=tk_integer type=bool @ L14:120
+                    const 0 type=int @ L14:118
+                    var i: int decl=L14:80 @ L14:123
+                  op eok_lt type_kind=tk_integer type=bool @ L14:130
+                    var i: int decl=L14:80 @ L14:128
+                    var m: int decl=L14:99 @ L14:132
+              op eok_ge type_kind=tk_integer type=bool @ L14:143
+                op eok_cast type_kind=tk_integer type=long cast=implicit @ L14:138
+                  op eok_subscript type_kind=tk_pointer type=int @ L14:139
+                    var a: const int * decl=L14:92 @ L14:138
+                    var i: int decl=L14:80 @ L14:140
+                var l: long decl=L14:104 @ L14:146
+        op eok_reference_to type_kind=tk_pointer type=int *const & @ L14:152
+          op eok_lvalue_adjust type_kind=tk_pointer type=int *const lvalue @ L14:152
+            op eok_points_to_field type_kind=tk_unknown type=int * lvalue @ L14:152
+              this: Buf<int> * @ L14:152
+              field Buf<int>::data: int * @ L14:152
+        op eok_reference_to type_kind=tk_pointer type=const int & @ L14:158
+          op eok_lvalue_adjust type_kind=tk_integer type=const int lvalue @ L14:158
+            op eok_points_to_field type_kind=tk_unknown type=int lvalue @ L14:158
+              this: Buf<int> * @ L14:158
+              field Buf<int>::n: int @ L14:158
+        op eok_reference_to type_kind=tk_pointer type=const long & @ L14:161
+          op eok_lvalue_adjust type_kind=tk_integer type=const long lvalue @ L14:161
+            param 1 lo: long lvalue @ L14:161
+routine <lambda@L14:73>::<unnamed> plain implicit nobody @ L14:38
+  returns void
+  param 1 _: <lambda@L14:73> &&
+routine <lambda@L14:73>::<unnamed> plain implicit nobody @ L14:38
+  returns void
+  param 1 _: <lambda@L14:73> &&
+routine <lambda@L14:73>::<unnamed> plain implicit nobody @ L14:38
+  returns void
+  param 1 _: const <lambda@L14:73> &
+routine <lambda@L14:73>::<unnamed> plain implicit nobody @ L14:38
+  returns void
+  param 1 _: const <lambda@L14:73> &
+routine <lambda@L14:73>::_FUN plain implicit nobody @ L14:38
+  returns bool
+  param 1 i: int
+  param 2 a: const int *
+  param 3 m: int
+  param 4 l: int
+routine <lambda@L14:73>::_FUN plain implicit nobody @ L14:38
+  returns bool
+  param 1 i: int
+  param 2 a: const int *
+  param 3 m: int
+  param 4 l: long
+routine <lambda@L14:73>::operator bool (*)(int, const int *, int, int) plain implicit body @ L14:38
+  returns bool (*)(int, const int *, int, int)
+routine <lambda@L14:73>::operator bool (*)(int, const int *, int, long) plain implicit body @ L14:38
+  returns bool (*)(int, const int *, int, long)
+routine <lambda@L14:73>::operator() plain body @ L14:38
+  returns bool
+  param 1 i: int
+  param 2 a: const int *
+  param 3 m: int
+  param 4 l: int
+routine <lambda@L14:73>::operator() plain body @ L14:38
+  returns bool
+  param 1 i: int
+  param 2 a: const int *
+  param 3 m: int
+  param 4 l: int
+routine <lambda@L14:73>::operator() plain body @ L14:38
+  returns bool
+  param 1 i: int
+  param 2 a: const int *
+  param 3 m: int
+  param 4 l: int
+routine <lambda@L14:73>::operator() plain body @ L14:38
+  returns bool
+  param 1 i: int
+  param 2 a: const int *
+  param 3 m: int
+  param 4 l: long
+routine <lambda@L14:73>::operator() plain body @ L14:38
+  returns bool
+  param 1 i: int
+  param 2 a: const int *
+  param 3 m: int
+  param 4 l: long
+routine <lambda@L14:73>::operator() plain body @ L14:38
+  returns bool
+  param 1 i: int
+  param 2 a: const int *
+  param 3 m: int
+  param 4 l: long
+routine <lambda@L14:73>::operator= plain implicit nobody @ L14:38
+  returns <lambda@L14:73> &
+  param 1 _: const <lambda@L14:73> &
+routine <lambda@L14:73>::operator= plain implicit nobody @ L14:38
+  returns <lambda@L14:73> &
+  param 1 _: const <lambda@L14:73> &
+routine <lambda@L14:73>::operator= plain implicit nobody @ L14:38
+  returns <lambda@L14:73> &
+  param 1 _: const <lambda@L14:73> &
+routine <lambda@L14:73>::operator= plain implicit nobody @ L14:38
+  returns <lambda@L14:73> &
+  param 1 _: const <lambda@L14:73> &
+routine <lambda@L14:73>::operator= plain implicit nobody @ L14:38
+  returns <lambda@L14:73> &
+  param 1 _: const <lambda@L14:73> &
+routine <lambda@L14:73>::operator= plain implicit nobody @ L14:38
+  returns <lambda@L14:73> &
+  param 1 _: const <lambda@L14:73> &
+routine <lambda@L14:73>::operator() prototype body @ L14:38
+  returns auto
+  param 1 i: int
+  param 2 a: const U *
+  param 3 m: int
+  param 4 l: T
+  op eok_lor type_kind=tk_integer type=<tptk_unknown> @ L14:38
+  op eok_not type_kind=tk_integer type=bool @ L14:38
+  op eok_land type_kind=tk_integer type=bool @ L14:38
+  op eok_le type_kind=tk_integer type=bool @ L14:38
+  op eok_lt type_kind=tk_integer type=bool @ L14:38
+  op eok_ge type_kind=tk_template_param type=<tptk_unknown> @ L14:38
+  op eok_subscript type_kind=tk_pointer type=<tptk_unknown> @ L14:38
+routine <lambda@L14:73>::operator() prototype body @ L14:38
+  returns auto
+  param 1 i: int
+  param 2 a: const int *
+  param 3 m: int
+  param 4 l: T
+  op eok_lor type_kind=tk_integer type=<tptk_unknown> @ L14:38
+  op eok_not type_kind=tk_integer type=bool @ L14:38
+  op eok_land type_kind=tk_integer type=bool @ L14:38
+  op eok_le type_kind=tk_integer type=bool @ L14:38
+  op eok_lt type_kind=tk_integer type=bool @ L14:38
+  op eok_ge type_kind=tk_template_param type=<tptk_unknown> @ L14:38
+  op eok_subscript type_kind=tk_pointer type=const int @ L14:38
+routine <lambda@L14:73>::operator= prototype implicit nobody @ L14:38
+  returns <lambda@L14:73> &
+  param 1 _: const <lambda@L14:73> &
+routine <lambda@L14:73>::operator= prototype implicit nobody @ L14:38
+  returns <lambda@L14:73> &
+  param 1 _: const <lambda@L14:73> &
+routine use plain body @ L20:6
+  returns bool
+  param 1 b: Buf<int> &
+end walk: 31 routines reported, 0 routines with bodies in non-system files outside the primary file

@@ -903,5 +903,92 @@ class CommandLineTests(unittest.TestCase):
         self.assertRegex(out, r"walker_oracle: \d+ goldens, \d+ facts checked, 0 failed")
 
 
+@e2e_gate(_front_end_available(), "build/cerastes-fe missing; run scripts/bootstrap.sh")
+class InstanceClosureTests(unittest.TestCase):
+    """The closure class of a forall lambda in an INSTANCE of a function template (the copy made when the
+    front end rescans the lambda; EDG bug 0020, fork series L) has no `lambda` record in il_display.  The
+    oracle knows it is a closure from EDG's flag on its class supplement, corroborated by an `operator()`
+    with is_lambda_body in the class's scope.  The rule is narrow: each half alone is not enough."""
+
+    SOURCE = """\
+#include <cerastes.h>
+template <class T>
+bool all_pos([[maybe_unused]] const T* d, [[maybe_unused]] int n)
+  CERASTES_REQUIRES(cerastes::forall([](int i, const T* a, int m) { return !(0 <= i && i < m) || a[i] > 0; }, d, n))
+{
+  return true;
+}
+class { public: int v; } g1, g2;
+void copy() { g1 = g2; }
+bool use(const int* p) { return all_pos(p, 1); }
+"""
+
+    def fx(self):
+        return fixture("instance_closure.cpp", self.SOURCE, "c++20")
+
+    def test_the_instance_closure_is_listed_and_is_checked(self):
+        fx = self.fx()
+        for text in ("routine <lambda@L4:", "::_FUN plain implicit nobody", "template all_pos args <T=int>",
+                     "routine <unnamed>::operator= plain implicit nobody @ L8:7"):
+            self.assertIn(text, fx.golden)
+        rep = w.analyse(fx.golden, fx.il)
+        self.assertEqual(rep.mismatches, [])
+        self.assertTrue(rep.ok)
+
+    def test_the_fixture_has_a_closure_class_that_no_lambda_record_names(self):
+        # without this the other tests would pass for the wrong reason
+        ex = w.Extractor(fx_il := w.IL(self.fx().il))
+        named = {c.id for c in (fx_il.ref(lam.get("closure_class")) for lam in fx_il.by_kind["lambda"]) if c}
+        self.assertTrue(named)
+        self.assertTrue(ex.closure_ids - named, "no unnamed closure class: the rule is not exercised")
+
+    def test_without_the_flag_the_instance_closure_is_a_mismatch(self):
+        # twin: remove the rule's first half and the listing's `<lambda@..>::...` routines are not found
+        fx = self.fx()
+        real_flag = w.Rec.flag
+
+        def no_closure_flag(self, name):
+            return False if name == "is_lambda_closure_class" else real_flag(self, name)
+        with mock.patch.object(w.Rec, "flag", no_closure_flag):
+            rep = w.analyse(fx.golden, fx.il)
+        self.assertFalse(rep.ok)
+        self.assertTrue(any("not found in il_display" in m and "<lambda@" in m for m in rep.mismatches),
+                        rep.mismatches[:3])
+
+    def test_without_the_lambda_body_the_flag_alone_is_not_enough(self):
+        # twin: the second half of the rule
+        fx = self.fx()
+        real_flag = w.Rec.flag
+
+        def no_body(self, name):
+            return False if (self.kind == "routine" and name == "is_lambda_body") else real_flag(self, name)
+        with mock.patch.object(w.Rec, "flag", no_body):
+            rep = w.analyse(fx.golden, fx.il)
+        self.assertFalse(rep.ok)
+
+    def test_the_rule_does_not_widen_to_other_classes(self):
+        # the flag claimed for every class (doctored): an unnamed class without a lambda body in its scope
+        # stays `<unnamed>`, so its `operator=` still matches.  Widening the rule (dropping the scope test)
+        # would name it `<lambda@..>` and fail here.  (Only unnamed classes can be misnamed: a named one is
+        # printed by its name whatever the closure set says.)
+        fx = self.fx()
+        real_flag = w.Rec.flag
+
+        def every_class_is_a_closure(self, name):
+            if self.kind == "class-type-supplement" and name == "is_lambda_closure_class":
+                return True
+            return real_flag(self, name)
+        with mock.patch.object(w.Rec, "flag", every_class_is_a_closure):
+            rep = w.analyse(fx.golden, fx.il)
+        self.assertEqual(rep.mismatches, [])
+        self.assertTrue(rep.ok)
+
+    def test_a_listing_that_names_the_wrong_closure_is_still_a_mismatch(self):
+        fx = self.fx()
+        wrong = fx.golden.replace("routine <lambda@L4:", "routine <lambda@L5:", 1)
+        self.assertNotEqual(wrong, fx.golden)
+        self.assertFalse(w.analyse(wrong, fx.il).ok)
+
+
 if __name__ == "__main__":
     unittest.main()

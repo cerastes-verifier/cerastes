@@ -160,6 +160,12 @@ and D0, which are independent. The "files" counts are `src/`, `doc/` and
 | I | `207da5dffd` | Reject explicit specializations of member templates with must-match attributes; pack, lambda and duplicate-error fixes | 14, +394 -96 | 5 (+2 changed) |
 | J | `88916714e6` | Make the substitution of the arguments of registered attributes fail closed | 10, +172 -61 | 3 (+1 changed) |
 | K | `23f55e3628` | Initialize the template symbol of an explicit specialization whose template is not known yet | 7, +43 -1 | 1 |
+| P | `b9519388ea` | A registered attribute can forbid the evaluation of a function at compile time (`RAF_NO_CONSTANT_EVALUATION`) | see 5.14 | 2 (29 + accepted cases) |
+
+(L `3b97dcf3eb` and M `45954e8d6d`, lambdas that name template parameters in the attributes of function templates and
+of member templates of class templates, and N `2c423db33d`, tests for explicit specializations of members of
+templates with attributes, come between K and P on the branch and sit on EDG bug 0020's fix; they are not described
+in this draft yet.)
 
 (F comes before E in the branch because E's scope work needed F's
 substitution; the letters are our names from the audit, not an order.)
@@ -462,6 +468,36 @@ full `imported,edg,cwg,stdlib` run, which the per-commit `changes,regressions`
 runs had not covered. Files: `templates.c`, `Changes`. Test:
 `GH-spec-in-class.sft.cpp` (four modes; it crashes the parent commit).
 
+### 5.14 P `b9519388ea`: `RAF_NO_CONSTANT_EVALUATION`
+
+What it does. A registered attribute with the flag `RAF_NO_CONSTANT_EVALUATION` (which also requires
+`RAF_ENTITY_ATTACHED`) makes the front end's interpreter refuse to call a function that has the attribute on any of
+its declarations (the instances of a template get the template's attributes). A call in a context that needs a
+constant is then not a constant expression: error "expression must have a constant value", with the note "cannot call
+function ... in a constant expression: an attribute of the function does not allow it" (new message
+`ec_constexpr_call_of_function_with_attribute`). Nothing else changes: the function is called at run time, appears in
+unevaluated operands (`decltype`, `sizeof`, `noexcept(...)`) as any function does, a constexpr function that calls it
+is accepted while it is not evaluated at compile time, and a program that registers no such attribute is not
+affected. A function that is defaulted cannot have the attribute (a defaulted special member can be trivial, and the
+evaluation of a call of a trivial function calls nothing: the new error
+`ec_attr_no_constant_evaluation_on_defaulted_function`). A call of a virtual function is refused if the function that
+the call names has the attribute or the override it is dispatched to has it.
+
+Why a tool needs it. An embedding program that gives an attribute the meaning "this function is a specification, not
+code" (a verifier's predicate or pure function, a contract-language helper) must make sure that it never runs: not at
+run time, which the tool controls, and not in the compiler's constant evaluation, which only the front end can stop.
+A `constexpr` specification function used as an array bound, a template argument, a `static_assert`, an enumerator, a
+`case` label, an `if constexpr`, a `noexcept` or `explicit` operand, an `alignas` or a bit-field width would
+otherwise be evaluated by the front end, and the program would be accepted with a value that the tool's own model of
+the function may not share. Several of those contexts leave no trace in the IL (the call is folded into a constant), so
+the embedding program cannot find them by walking the IL; the interpreter is the one place that sees all of them.
+
+Files: `attribute.c` (`routine_has_no_constant_evaluation_attribute`, `check_defaulted_function_attributes`), the
+interpreter's callee checks, `error_msg.txt`, `ext_intf.rst`, `Changes`. Tests: `GH-no-constant-evaluation` (29
+cases that must be errors, each anchored to the note or to the defaulted-function error) and
+`GH-no-constant-evaluation-ok` (run-time calls, unevaluated operands, the address of the function, constexpr
+functions that are not evaluated, and the same functions without the attribute or with a flagless attribute).
+
 ## 6. What an embedding program writes and what it gets
 
 A program registers its namespace before calling `edg_main` (example from the
@@ -487,7 +523,7 @@ flags, the code `R` and the statement properties:
 |---|---|---|
 | `sig` | `""` (no arguments), `(Xb)` (an unevaluated expression converted to `bool`), `(X)`, `?(n)`, and the rest of the existing notation; `(R,Xb)`: an optional result name, then the condition | B, E |
 | `target` | `r` routine, `v` variable, `s` statement, `r|v` either; `s:+n!` a null statement, `s:+i!` an iteration statement, `s:-n!`, `s:-i!` the others; no `t`, `c`, `e`, `T`, `0`, no `W` prefix, every switch ends in `!` | B, C |
-| `flags` | `RAF_ENTITY_ATTACHED` (after a function's parameter list the attribute goes on the function, `al_post_func`), `RAF_MUST_MATCH` (also required: the declarations' lists must be equivalent), `RANF_CLOSED` on the namespace | D, B |
+| `flags` | `RAF_ENTITY_ATTACHED` (after a function's parameter list the attribute goes on the function, `al_post_func`), `RAF_MUST_MATCH` (also required: the declarations' lists must be equivalent), `RAF_NO_CONSTANT_EVALUATION` (the front end never evaluates a call of the function at compile time; requires `RAF_ENTITY_ATTACHED`), `RANF_CLOSED` on the namespace | D, P, B |
 
 What the program sees in the IL:
 

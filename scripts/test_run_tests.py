@@ -10973,9 +10973,6 @@ SELFTEST_ONLY_TAGS = {
     "result_name_on_void": "EDG rejects a result name on a void function first "
                            "(attr_result_name_void_function); the back end's copy is "
                            "reached only by `--cerastes_checks_selftest`",
-    "annotation_substitution_error": "EDG reports an erroneous annotation argument itself "
-                                     "before the back end sees it; `--cerastes_checks_selftest` "
-                                     "injects an error node into a substituted tree",
     "analysis_limit_reached": "the budget is a million shared expression nodes and no source "
                               "reaches it with a reasonable file (EDG's own parser slows down "
                               "first); `--cerastes_checks_selftest` lowers the budget",
@@ -11159,8 +11156,10 @@ class ChecksSelftestTests(unittest.TestCase):
         # (annotation_substitution_error), and makes the first
         # tree read one parameter reference as unmapped
         # and one node as visited twice: two unsupported_annotation_expression errors
-        self.assertEqual(cerastes, set(SELFTEST_ONLY_TAGS) | {"unsupported_annotation_expression"},
-                         tags)
+        # (annotation_substitution_error has a source test too since the pin at P, so it is
+        # not in SELFTEST_ONLY_TAGS, but the hook still fires both of its branches)
+        self.assertEqual(cerastes, set(SELFTEST_ONLY_TAGS)
+                         | {"unsupported_annotation_expression", "annotation_substitution_error"}, tags)
         self.assertEqual(tags.count("cerastes-unsupported_annotation_expression"), 2, tags)
         # both branches of the check: an error expression in the first node, an error
         # type in the second

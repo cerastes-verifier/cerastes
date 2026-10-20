@@ -1,0 +1,173 @@
+routine all_pos prototype body @ L12:6
+  returns bool
+  param 1 data: T *
+  param 2 n: int
+  attr [[maybe_unused]] on param 1 @ L12:16
+  attr [[maybe_unused]] on param 2 @ L12:42
+  attr [[cerastes::requires]] on routine @ L12:64
+    arg 1 @ L12:82
+      op eok_bool_cast type_kind=tk_template_param type=bool @ L12:82
+        op eok_call type_kind=tk_unknown type=<tptk_unknown> @ L12:98
+          tconst tpck_unknown_function cerastes::forall type=<tptk_unknown> @ L12:82
+          lambda <lambda@L12:99> @ L12:99
+            body return
+              op eok_lor type_kind=tk_integer type=<tptk_unknown> @ L12:156
+                op eok_not type_kind=tk_integer type=bool @ L12:137
+                  op eok_land type_kind=tk_integer type=bool @ L12:146
+                    op eok_le type_kind=tk_integer type=bool @ L12:141
+                      const 0 type=int @ L12:139
+                      var i: int decl=L12:106 @ L12:144
+                    op eok_lt type_kind=tk_integer type=bool @ L12:151
+                      var i: int decl=L12:106 @ L12:149
+                      var m: int decl=L12:125 @ L12:153
+                op eok_gt type_kind=tk_template_param type=<tptk_unknown> @ L12:164
+                  op eok_subscript type_kind=tk_pointer type=<tptk_unknown> @ L12:160
+                    var a: const T * decl=L12:118 @ L12:159
+                    var i: int decl=L12:106 @ L12:161
+                  const 0 type=int @ L12:166
+          param 1 data: T * lvalue @ L12:172
+          param 2 n: int lvalue @ L12:178
+routine all_pos instance body @ L12:6
+  returns bool
+  param 1 data: int *
+  param 2 n: int
+  attr [[maybe_unused]] on param 1 @ L12:16
+  attr [[maybe_unused]] on param 2 @ L12:42
+  template all_pos args <T=int>
+  attr [[cerastes::requires]] on routine @ L12:64
+    arg 1 @ L12:82
+      op eok_call type_kind=tk_unknown type=bool @ L12:98
+        routine cerastes::forall args <F=<lambda@L12:99>, Free=pack{int *, int}>: bool (*)(<lambda@L12:99>, int *const &, const int &) noexcept @ L12:82
+        lambda <lambda@L12:99> @ L12:99
+          body return
+            op eok_lor type_kind=tk_integer type=bool @ L12:156
+              op eok_not type_kind=tk_integer type=bool @ L12:137
+                op eok_land type_kind=tk_integer type=bool @ L12:146
+                  op eok_le type_kind=tk_integer type=bool @ L12:141
+                    const 0 type=int @ L12:139
+                    var i: int decl=L12:106 @ L12:144
+                  op eok_lt type_kind=tk_integer type=bool @ L12:151
+                    var i: int decl=L12:106 @ L12:149
+                    var m: int decl=L12:125 @ L12:153
+              op eok_gt type_kind=tk_integer type=bool @ L12:164
+                op eok_subscript type_kind=tk_pointer type=int @ L12:160
+                  var a: const int * decl=L12:118 @ L12:159
+                  var i: int decl=L12:106 @ L12:161
+                const 0 type=int @ L12:166
+        op eok_reference_to type_kind=tk_pointer type=int *const & @ L12:172
+          op eok_lvalue_adjust type_kind=tk_pointer type=int *const lvalue @ L12:172
+            param 1 data: int * lvalue @ L12:172
+        op eok_reference_to type_kind=tk_pointer type=const int & @ L12:178
+          op eok_lvalue_adjust type_kind=tk_integer type=const int lvalue @ L12:178
+            param 2 n: int lvalue @ L12:178
+routine all_pos instance body @ L12:6
+  returns bool
+  param 1 data: long *
+  param 2 n: int
+  attr [[maybe_unused]] on param 1 @ L12:16
+  attr [[maybe_unused]] on param 2 @ L12:42
+  template all_pos args <T=long>
+  attr [[cerastes::requires]] on routine @ L12:64
+    arg 1 @ L12:82
+      op eok_call type_kind=tk_unknown type=bool @ L12:98
+        routine cerastes::forall args <F=<lambda@L12:99>, Free=pack{long *, int}>: bool (*)(<lambda@L12:99>, long *const &, const int &) noexcept @ L12:82
+        lambda <lambda@L12:99> @ L12:99
+          body return
+            op eok_lor type_kind=tk_integer type=bool @ L12:156
+              op eok_not type_kind=tk_integer type=bool @ L12:137
+                op eok_land type_kind=tk_integer type=bool @ L12:146
+                  op eok_le type_kind=tk_integer type=bool @ L12:141
+                    const 0 type=int @ L12:139
+                    var i: int decl=L12:106 @ L12:144
+                  op eok_lt type_kind=tk_integer type=bool @ L12:151
+                    var i: int decl=L12:106 @ L12:149
+                    var m: int decl=L12:125 @ L12:153
+              op eok_gt type_kind=tk_integer type=bool @ L12:164
+                op eok_subscript type_kind=tk_pointer type=long @ L12:160
+                  var a: const long * decl=L12:118 @ L12:159
+                  var i: int decl=L12:106 @ L12:161
+                const 0 type=long @ L12:166
+        op eok_reference_to type_kind=tk_pointer type=long *const & @ L12:172
+          op eok_lvalue_adjust type_kind=tk_pointer type=long *const lvalue @ L12:172
+            param 1 data: long * lvalue @ L12:172
+        op eok_reference_to type_kind=tk_pointer type=const int & @ L12:178
+          op eok_lvalue_adjust type_kind=tk_integer type=const int lvalue @ L12:178
+            param 2 n: int lvalue @ L12:178
+routine <lambda@L12:99>::<unnamed> plain implicit nobody @ L12:64
+  returns void
+  param 1 _: <lambda@L12:99> &&
+routine <lambda@L12:99>::<unnamed> plain implicit nobody @ L12:64
+  returns void
+  param 1 _: <lambda@L12:99> &&
+routine <lambda@L12:99>::<unnamed> plain implicit nobody @ L12:64
+  returns void
+  param 1 _: const <lambda@L12:99> &
+routine <lambda@L12:99>::<unnamed> plain implicit nobody @ L12:64
+  returns void
+  param 1 _: const <lambda@L12:99> &
+routine <lambda@L12:99>::_FUN plain implicit nobody @ L12:64
+  returns bool
+  param 1 i: int
+  param 2 a: const int *
+  param 3 m: int
+routine <lambda@L12:99>::_FUN plain implicit nobody @ L12:64
+  returns bool
+  param 1 i: int
+  param 2 a: const long *
+  param 3 m: int
+routine <lambda@L12:99>::operator bool (*)(int, const int *, int) plain implicit body @ L12:64
+  returns bool (*)(int, const int *, int)
+routine <lambda@L12:99>::operator bool (*)(int, const long *, int) plain implicit body @ L12:64
+  returns bool (*)(int, const long *, int)
+routine <lambda@L12:99>::operator() plain body @ L12:64
+  returns bool
+  param 1 i: int
+  param 2 a: const int *
+  param 3 m: int
+routine <lambda@L12:99>::operator() plain body @ L12:64
+  returns bool
+  param 1 i: int
+  param 2 a: const int *
+  param 3 m: int
+routine <lambda@L12:99>::operator() plain body @ L12:64
+  returns bool
+  param 1 i: int
+  param 2 a: const long *
+  param 3 m: int
+routine <lambda@L12:99>::operator() plain body @ L12:64
+  returns bool
+  param 1 i: int
+  param 2 a: const long *
+  param 3 m: int
+routine <lambda@L12:99>::operator= plain implicit nobody @ L12:64
+  returns <lambda@L12:99> &
+  param 1 _: const <lambda@L12:99> &
+routine <lambda@L12:99>::operator= plain implicit nobody @ L12:64
+  returns <lambda@L12:99> &
+  param 1 _: const <lambda@L12:99> &
+routine <lambda@L12:99>::operator= plain implicit nobody @ L12:64
+  returns <lambda@L12:99> &
+  param 1 _: const <lambda@L12:99> &
+routine <lambda@L12:99>::operator= plain implicit nobody @ L12:64
+  returns <lambda@L12:99> &
+  param 1 _: const <lambda@L12:99> &
+routine <lambda@L12:99>::operator() prototype body @ L12:64
+  returns auto
+  param 1 i: int
+  param 2 a: const T *
+  param 3 m: int
+  op eok_lor type_kind=tk_integer type=<tptk_unknown> @ L12:64
+  op eok_not type_kind=tk_integer type=bool @ L12:64
+  op eok_land type_kind=tk_integer type=bool @ L12:64
+  op eok_le type_kind=tk_integer type=bool @ L12:64
+  op eok_lt type_kind=tk_integer type=bool @ L12:64
+  op eok_gt type_kind=tk_template_param type=<tptk_unknown> @ L12:64
+  op eok_subscript type_kind=tk_pointer type=<tptk_unknown> @ L12:64
+routine <lambda@L12:99>::operator= prototype implicit nobody @ L12:64
+  returns <lambda@L12:99> &
+  param 1 _: const <lambda@L12:99> &
+routine use plain body @ L17:6
+  returns bool
+  param 1 p: int *
+  param 2 q: long *
+end walk: 22 routines reported, 0 routines with bodies in non-system files outside the primary file

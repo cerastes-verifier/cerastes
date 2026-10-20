@@ -274,6 +274,56 @@ in the embedding program:
 maintainers object, a second test namespace is the fallback (a question for
 the owner to raise with them).
 
+## Series commits pinned at the M3 close-out (2026-10-20)
+
+The pin moved from `0bcd9bf28a` to P `b9519388ea` (the fork's `cerastes` fast-forwarded; each commit was built,
+audited and run on the x86-64 box on a temporary branch first). The five commits it adds, in order, and what each
+gives cerastes:
+
+| Commit | SHA | What it gives |
+|---|---|---|
+| 0020 (EDG bug 0020, merged as `9068279c12`) | `c539de4101` | The template parameters are bound to the template arguments for the rescan of a non-generic lambda that names them in the declaration of a function template. Before it, a template whose declaration had such a lambda could not be called ("identifier is undefined"). The branch `0020` stays for the owner's PR. |
+| L | `3b97dcf3eb` | A lambda in the argument of a registered attribute of a function template (or of a member template of a class that is not a template) can name the template parameters, in the types of its parameters and in its body. So `forall` over a `const T *` works in a function template's contract (the former limit of 0006 item 9 is lifted; tests `forall_function_template.cpp`). Also closes a crash: a generic lambda in a substituted attribute of a template whose first parameter is a template template parameter is now the fail-closed error, not a segmentation fault. |
+| M | `45954e8d6d` | The same for a member template of a class template: the lambda can name both the class's parameters and the member template's own (test `forall_member_template.cpp`). |
+| N | `2c423db33d` | Tests for the explicit specializations of members of templates that have attributes, and NULL checks in the lookup of a template's prototype (robustness for the specializations of G and I; no behavior cerastes depends on changes). |
+| P | `b9519388ea` | The flag `RAF_NO_CONSTANT_EVALUATION` (below). |
+
+What stays rejected after L and M (tests in `tests/annotations/negative/`): a lambda that depends on `T` only through
+`decltype` of a parameter (the substituted tree is erroneous: `cerastes-annotation_substitution_error`, then
+`cerastes-unsupported_annotation_expression`), and a function parameter pack named in an attribute
+(`attr_function_parameter_pack`, in a function template's, a member template's and a variadic class template's
+contract).
+
+**`RAF_NO_CONSTANT_EVALUATION` is registered for `predicate` and `pure`** (`src/backend/register_attributes.cpp`:
+`RAF_ENTITY_ATTACHED | RAF_NO_CONSTANT_EVALUATION`). The flag needs `RAF_ENTITY_ATTACHED`. EDG's interpreter refuses
+to call a routine with such an attribute on any declaration (the instances of a template get the template's), so a
+constexpr or consteval use of a specification function in a context that needs a constant is the EDG error
+`expr_not_constant` (#28), with the note "cannot call function ... in a constant expression: an attribute of the
+function does not allow it" (#3615-D). A defaulted function cannot carry the marker
+(`attr_no_constant_evaluation_on_defaulted_function`, #3616). Effects for cerastes:
+- A specification function whose first declaration carries the marker is not run at compile time: the
+  constant-evaluated contexts of the R4a list (array bound, template argument, `static_assert`, enumerator, constexpr variable, case label,
+  `if constexpr`, `noexcept` specifier, `explicit(bool)`, bit-field width, `alignas`) are refused by the front end, at
+  the line of the context, including the five that leave no trace in the IL (a global template argument and
+  `static_assert`, a `static_assert` in a class, a local template argument, an explicit template argument of a
+  function). The unevaluated contexts (`decltype`, `sizeof`, the `noexcept` operator, a local array bound that EDG
+  treats as a variable-length array, a constexpr or consteval function body that is not called at compile time)
+  are not refused by EDG; the cerastes-side R4a pass still reports them (`cerastes-spec_call_in_code`).
+  **Known gap (first-declaration marker, M4):** the interpreter reads the attributes the routine has when it is
+  called. If the marker is only on a later redeclaration (or on the definition), a use in a constant context that
+  comes before it is evaluated by EDG as before and is not refused; the cerastes-side pass sees such a use only if it
+  leaves a trace in the IL. Closing it needs the first-declaration marker rule (M4, handoff section 9 Q2).
+- EDG calls `back_end()` only when the front end reported no error (cfe.c). In a file where EDG refuses a
+  compile-time use, the cerastes-side diagnostics are not produced; EDG's errors replace them (same line, same
+  cause). The cerastes-side checks in `annotation_checks.cpp` stay (defense in depth). The back-end constant-context
+  pass is still reached: by the contexts EDG does not refuse (tests `constant_context_c1b`, `c8`, `c11`, `c12`,
+  `c13`, `c16`, `c17`), and by the dependent forms in templates that are never instantiated, which EDG never
+  evaluates. What no test reaches any more are the traces of the contexts EDG now refuses first (array bound at
+  namespace scope, bit-field width, `noexcept` specifier, `explicit(bool)`, enumerator, constexpr variable, case label,
+  `if constexpr`, `alignas`, and the five no-trace contexts), because the back end does not run after an EDG error.
+- A marker on an `= default` special member is now refused by EDG (the cerastes check
+  `spec_marker_on_special_member` still covers the non-defaulted special members).
+
 ## Consequences
 
 - **Goldens.** Registering `cerastes` removes warning #2803 for it. Every

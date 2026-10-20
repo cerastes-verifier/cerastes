@@ -2,8 +2,8 @@
 // expect: native-ok
 // Pins: forall over an array of T in the contract of a member of a class template (the
 // lambda names the class's T): dependent in the prototype, substituted in each
-// instance (Buf<int> and Buf<long>); in a function template's contract this is
-// rejected (decision 0006).
+// instance (Buf<int> and Buf<long>); a function template's form is
+// forall_function_template.cpp.
 #include <cerastes.h>
 
 template <class T>

@@ -1,33 +1,35 @@
-// expect: frontend-error cerastes-spec_call_in_code @ L33
-// expect: frontend-error cerastes-spec_call_in_code @ L34
-// expect: frontend-error cerastes-spec_call_in_code @ L46
-// expect: frontend-error cerastes-spec_call_in_code @ L48
-// expect: frontend-error cerastes-spec_call_in_code @ L49
-// expect: frontend-error cerastes-spec_call_in_code @ L50
-// expect: frontend-error cerastes-spec_call_in_code @ L51
-// expect: frontend-error cerastes-spec_call_in_code @ L23
-// expect: frontend-error cerastes-spec_call_in_code @ L27
-// expect: frontend-error cerastes-spec_call_in_code @ L28
-// expect: frontend-error cerastes-spec_call_in_code @ L29
-// expect: frontend-error cerastes-spec_call_in_code @ L31
-// expect: frontend-error cerastes-spec_call_in_code @ L32
-// expect: frontend-error cerastes-spec_call_in_code @ L36
-// expect: frontend-error cerastes-spec_call_in_code @ L37
-// expect: frontend-error cerastes-spec_call_in_code @ L40
-// expect: frontend-error cerastes-spec_call_in_code @ L43
-// expect: frontend-error cerastes-spec_call_in_code @ L45
-// expect: frontend-error cerastes-spec_call_in_code @ L47
-// expect: frontend-warning set_but_not_used @ L44
+// expect: frontend-error expr_not_constant @ L23
+// expect: frontend-error expr_not_constant @ L25
+// expect: frontend-error expr_not_constant @ L26
+// expect: frontend-error expr_not_constant @ L27
+// expect: frontend-error expr_not_constant @ L28
+// expect: frontend-error expr_not_constant @ L29
+// expect: frontend-error expr_not_constant @ L31
+// expect: frontend-error expr_not_constant @ L32
+// expect: frontend-error expr_not_constant @ L36
+// expect: frontend-error expr_not_constant @ L37
+// expect: frontend-error expr_not_constant @ L38
+// expect: frontend-error expr_not_constant @ L44
+// expect: frontend-error expr_not_constant @ L45
+// expect: frontend-error expr_not_constant @ L46
+// expect: frontend-error expr_not_constant @ L47
+// expect: frontend-error expr_not_constant @ L48
+// expect: frontend-error expr_not_constant @ L49
+// expect: frontend-error expr_not_constant @ L52
+// expect: frontend-error no_matching_function @ L52
+// expect: frontend-error consteval_call_nonconstant @ L53
 // expect: frontend-warning set_but_not_used @ L50
 // expect: frontend-warning set_but_not_used @ L51
 // mode: c++20
-// The errors the back end reports for the contexts that leave a trace in the IL (internal/il-inventory.md, R4a):
-// the seven that body walks always found, and since the R4a pass the twelve whose trace hangs off a type, a field,
-// a template parameter, an exception specification, an attribute argument, an enumerator, a variable's
-// constant or a block-scope static_assert (L23 to L47).  Five contexts leave no trace at all (L25, L26, L38, L44
-// and L52): they come with fork commit P (constant evaluation of a registered routine is refused).
-// The line numbers below are those of the probe as first written; the `#line` directive keeps them while
-// the header above grew with the new expect lines (the physical file is 17 lines longer than the numbers say).
+// Since cerastes registers RAF_NO_CONSTANT_EVALUATION for predicate and pure (fork commit P, pinned 2026-10-20),
+// the front end refuses to evaluate p and q at compile time.  18 of the 24 contexts are EDG's expr_not_constant at
+// their own line, the five that leave no trace in the IL included (L25, L26, L38, L44, L52); L52 also gets
+// no_matching_function, and the consteval call at L53 gets consteval_call_nonconstant (its note points at L34).
+// EDG's errors stop the back end, so the six contexts EDG accepts are not diagnosed in this file: L33 (constexpr
+// body), L34 (consteval body), L40 (decltype operand), L43 (local array bound), L50 (noexcept operator) and L51
+// (sizeof operand).  Each is rejected at its own line by a single-context test with the back end's
+// cerastes-spec_call_in_code: tests/annotations/negative/constant_context_c12, c13, c17, c1b, c8, c16 (owner,
+// 2026-10-20).  The line numbers below are those of the probe as first written; the `#line` directive keeps them.
 // R4a probe: which traces does each constant context leave when it calls a constexpr
 // predicate/pure function?  q is a constexpr predicate, p a constexpr pure function; each
 // context below uses one of them in a constant expression.
