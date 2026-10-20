@@ -135,9 +135,20 @@ Each has a recommended answer. Answer inline, as before.
 
 1. **Your bug-file edits** (0006 → `upstreamed/`, 0005, 0007, README) are uncommitted in the tree. *Recommended:
    commit them yourself, or tell the next session to include them with its first records commit.*
+
+I did it myself
+
 2. **The "marker on the first declaration" rule** needs an EDG registration feature (refuse an accumulating
    attribute on a later declaration). *Recommended: a small series commit in the M4 or M6 session, when spec
    functions get their meaning.*
+
+Follow recommendation in M4
+
 3. **Cross-unit termination** (0013 item 5) stays a stated limit until the contract manifest exists. *Recommended:
    schedule the manifest (handoff §6 of M2) with M5 or M6.*
+
+Schedule in M5 and defer to 6 if it does not make sense in 5.
+
 4. **CI** was deferred to its own session (owner, 2026-10-16). *Recommended: next, before M4; it needs both pushes.*
+
+Make CI its own session before M4.
