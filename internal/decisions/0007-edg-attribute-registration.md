@@ -214,12 +214,12 @@ EDG tests that fail on its parent and pass on it, a `src/Changes` entry and a
      that EDG attached;
    - contract consistency across translation units (0006 item 6), which EDG
      cannot see;
-   - choosing between prototype and instance (M4). Explicit specializations
+   - choosing between prototype and instance (M5). Explicit specializations
      of function templates and of class-template members follow must-match
      with the primary (0006 item 6), which EDG enforces in any declaration
      order, also when the primary's contract is written only on an
      out-of-class definition. Members of explicit or partial class
-     specializations carry their own contracts (M4 fails closed on them).
+     specializations carry their own contracts (M5 fails closed on them).
      Explicit specializations of member templates of class templates are an
      error when the primary has a must-match attribute (0006 item 6). The
      member-template prototype of a class instance carries no copy of the
@@ -258,7 +258,7 @@ The namespace is `cerastes`, closed.
 - `cp_gen_be` printing of registered attributes (it skips them);
 - the scope of variables declared in a `for` init-statement;
 - registered attributes on class templates;
-- spec-only entities (phase 5, R7), which are needed from M6 on.
+- spec-only entities (phase 5, R7), which are needed from M4.5 on.
 
 **Registration is validated strictly.** Each of these is an internal error
 in the embedding program:
@@ -309,10 +309,10 @@ function does not allow it" (#3615-D). A defaulted function cannot carry the mar
   function). The unevaluated contexts (`decltype`, `sizeof`, the `noexcept` operator, a local array bound that EDG
   treats as a variable-length array, a constexpr or consteval function body that is not called at compile time)
   are not refused by EDG; the cerastes-side R4a pass still reports them (`cerastes-spec_call_in_code`).
-  **Known gap (first-declaration marker, M4):** the interpreter reads the attributes the routine has when it is
+  **Known gap (first-declaration marker, M5b):** the interpreter reads the attributes the routine has when it is
   called. If the marker is only on a later redeclaration (or on the definition), a use in a constant context that
   comes before it is evaluated by EDG as before and is not refused; the cerastes-side pass sees such a use only if it
-  leaves a trace in the IL. Closing it needs the first-declaration marker rule (M4, handoff section 9 Q2).
+  leaves a trace in the IL. Closing it needs the first-declaration marker rule (M5b, M3 handoff section 9 Q2).
 - EDG calls `back_end()` only when the front end reported no error (cfe.c). In a file where EDG refuses a
   compile-time use, the cerastes-side diagnostics are not produced; EDG's errors replace them (same line, same
   cause). The cerastes-side checks in `annotation_checks.cpp` stay (defense in depth). The back-end constant-context
@@ -342,3 +342,5 @@ function does not allow it" (#3615-D). A defaulted function cannot carry the mar
 - **Merging.** *(Superseded by decision 0009.)* cerastes pins the fork's
   `cerastes` branch, so code that depends on this series lands on `main` once
   the pin includes the series.
+
+*2026-10-20: milestone numbers follow the renumbering of 2026-10-20 (plan.md: old M4 → M5, M5 → M6, M6 → M4.5 for C and M7 for C++, M7 → M8).*

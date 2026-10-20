@@ -127,7 +127,7 @@ verifies; Viper's `\` and `%` on `Int` are Euclidean (`(-7)\2 == -4`, `(-7)%2 ==
     spikes), `c_pow2` (a literal table up to the widest type, and at least 1 for every argument), `c_wrap(x, m)`
     (`x % m` for `m = 2^N`), and `c_shr` (floor division by `c_pow2(n)`). Every obligation is emitted as one
     atomic condition, since Silicon reports each conjunct of a failing `&&` as its own error.
-12. **Rejected in M3**, each with a diagnostic at the C/C++ line and a test (invariant 3), and each an M7
+12. **Rejected in M3**, each with a diagnostic at the C/C++ line and a test (invariant 3), and each an M8
     inventory entry:
     - statements: `break`, `continue` (in the IL, compiler-generated `goto`s: every `goto` is rejected),
       `switch`, `do … while`, `goto` and labels, `if`/`switch` init-statements and condition declarations,
@@ -136,7 +136,7 @@ verifies; Viper's `\` and `%` on `Int` are Euclidean (`(-7)\2 == -4`, `(-7)%2 ==
       `extern` locals, **globals, including `const` and `constexpr` ones** (their uses are folded constants whose
       `expr` names the global, and the global's initializer, which can narrow or shift, is not encoded; M3-D
       audit), arrays and VLAs, classes, unions, enumerations and enumerators, lambdas, function templates and
-      class templates in a verified file (M4), `constexpr`/`consteval` functions in verified code (a call EDG
+      class templates in a verified file (M5), `constexpr`/`consteval` functions in verified code (a call EDG
       evaluates at compile time would skip its checks), variadic functions, function pointers, `[[noreturn]]`/
       `_Noreturn` functions, `requires` on `main` (0011 item 7);
     - types: pointers, references, `volatile`, floating point, enumerations, `_BitInt`, vector types, any type
@@ -156,3 +156,5 @@ verifies; Viper's `\` and `%` on `Int` are Euclidean (`(-7)\2 == -4`, `(-7)%2 ==
   other units, marked as such.
 - The rejections keep M3 small and sound; each one names the construct, so users know what to rewrite.
 - `break`/`continue` and `do` are the cheapest to add next (forward `goto`s, as `return` already uses).
+
+*2026-10-20: milestone numbers follow the renumbering of 2026-10-20 (plan.md: old M4 → M5, M5 → M6, M6 → M4.5 for C and M7 for C++, M7 → M8).*

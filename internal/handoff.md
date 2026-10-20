@@ -118,7 +118,7 @@ Deferred (probes in the job's scratch directory are gone; the shapes are given h
    `noexcept` specifier, `explicit`, `alignas`, a block `static_assert` with a dependent operand): 2–3 tests.
 5. **Existing gaps (not from this diff):** a class-scope `static_assert(q(sizeof(T)))` in a never-instantiated class
    template is accepted (never evaluated; harmless); a `CERASTES_PURE` override of a non-spec virtual function,
-   called through a base reference at run time, is accepted (M6, virtual dispatch).
+   called through a base reference at run time, is accepted (M7, virtual dispatch).
 6. **The walker oracle** cannot tell an orphan closure copy from the used one (same name, same body in normal cases).
 
 **Found this session:**
@@ -135,13 +135,13 @@ Deferred (probes in the job's scratch directory are gone; the shapes are given h
 
 ## 7. Known gaps carried
 
-- Termination: a recursion cycle through another unit (0013 item 5) — the contract manifest, M5 (M6 if it does not fit).
-- The `predicate`/`pure` marker on the first declaration — M4 (an EDG registration feature).
+- Termination: a recursion cycle through another unit (0013 item 5) — the contract manifest, M6 (M7 if it does not fit).
+- The `predicate`/`pure` marker on the first declaration — M5b (an EDG registration feature).
 - Still rejected for `forall` in templates: a lambda depending on `T` only through `decltype` of a function parameter
   (above), function parameter packs (`attr_function_parameter_pack`), `sizeof...` of a template pack, a lambda that
   names the template it is in (`h` undefined). EDG bug 0021 does not arise: cerastes reads C++ in Clang emulation.
 - Closed: the five compile-time uses of `constexpr` spec functions that left no trace (P, registered).
-- Attributes in positions where EDG records nothing (0011 item 7); M3's rejected constructs (0012 item 12) for M7.
+- Attributes in positions where EDG records nothing (0011 item 7); M3's rejected constructs (0012 item 12) for M4 and M8.
 
 ## 8. Session plans: M4 (the rest of C) and M5 (generic templates)
 

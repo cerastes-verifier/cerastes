@@ -902,7 +902,7 @@ class Encoder {
   // The callee's VIR function for a call, or null after a rejection (0011 item 5).
   vir::Function* callee_for_call(a_routine_ptr callee, const a_source_position& at) {
     if (is_main(callee)) {
-      // C allows it; nothing here relies on `main`'s special rules, so the call is rejected in both modes (M7).
+      // C allows it; nothing here relies on `main`'s special rules, so the call is rejected in both modes (M8).
       reject(Diag::unsupported_expression, at, "a call of \"main\"");
       return nullptr;
     }

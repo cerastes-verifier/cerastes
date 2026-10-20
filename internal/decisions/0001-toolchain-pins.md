@@ -20,7 +20,7 @@ in both places.
 | JDK | Homebrew `openjdk@17` (17.0.20.1) | `brew install openjdk@17` |
 | sbt | 1.6.2 (Silicon's `project/build.properties`), started by the Homebrew `sbt` 2.0.10 launcher | `brew install sbt` |
 | Scala | 2.13.18 (silver's `build.sbt`) | fetched by sbt |
-| VeriFast (differential tests, M4) | `mborland/verifast` branch `generic2` = `0fb63506a51cae559ae92348eb54ba7f7be0bf6d`: upstream `master` plus `a18da574` (generic templates) and `0fb63506` (concepts) | not built by bootstrap; see below |
+| VeriFast (differential tests, M5) | `mborland/verifast` branch `generic2` = `0fb63506a51cae559ae92348eb54ba7f7be0bf6d`: upstream `master` plus `a18da574` (generic templates) and `0fb63506` (concepts) | not built by bootstrap; see below |
 | Antora (user docs, M1.5) | `antora`, `@antora/cli`, `@antora/site-generator` 3.2.1; `@antora/lunr-extension` 1.0.0-alpha.13 | exact pins in `doc/package.json`, locked by `doc/package-lock.json`; `npm ci` in `doc/` by bootstrap |
 | Antora default UI (user docs) | `antora-ui-default` `master` at `0e38223adfd81eb74d4b1779e158f8ad05ff8923` (GitLab job 15385706035), zip SHA-256 `e0ac81aad26961a9cd3cf9bce692a598eff4a1bd2822ce73c9cdc13a15a1e70d` | vendored as `doc/ui/antora-ui-default.zip`; `scripts/build_docs.sh` checks the SHA-256 before every build (`doc/ui/README.md`) |
 | GitHub Actions (docs CI) | `actions/checkout` v7.0.1 `3d3c42e5aac5ba805825da76410c181273ba90b1`, `actions/setup-node` v7.1.0 `949feb2413d6458794dcd2491c4babbbce0c15c1`, `actions/upload-pages-artifact` v5.0.0 `fc324d3547104276b827a68afc52ff2a11cc49c9`, `actions/deploy-pages` v5.0.1 `368f82528645a54fb793d4d04e342629a3f51346`; runner `ubuntu-24.04` | full commit SHAs in `.github/workflows/docs.yml` (from `git ls-remote`; all four are lightweight tags) |
@@ -136,10 +136,10 @@ Per the pre-M0 decision, option (a) builds `mborland/verifast@generic2`
 locally and option (b), recording its outcomes once, is the fallback. The
 local tree `~/Documents/verifast` is on `generic2` at the pin above. Its
 `bin/verifast` is a Linux x86-64 ELF, so it does not run natively on this Mac.
-M4 decides between a native macOS build, running that binary in a container,
+M5 decides between a native macOS build, running that binary in a container,
 or option (b). Bootstrap does not depend on VeriFast.
 
-**Owner decision (handoff question 8, 2026-10-13):** M4 runs the Linux
+**Owner decision (handoff question 8, 2026-10-13):** M5 runs the Linux
 binary in a container and checks its outcomes against the recorded ones
 (option (b)) as well.
 
@@ -210,3 +210,5 @@ $ git submodule status --recursive
  6b540aa45e5af214f4727b7be463ce84b328fabd third_party/silicon (v.26.08-release)
  f02e7010639f314447d74732146644565aa8d135 third_party/silicon/silver (v.26.08-release)
 ```
+
+*2026-10-20: milestone numbers follow the renumbering of 2026-10-20 (plan.md: old M4 → M5, M5 → M6, M6 → M4.5 for C and M7 for C++, M7 → M8).*

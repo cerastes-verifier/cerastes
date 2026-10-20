@@ -306,4 +306,4 @@ an original expression is treated as having none: rejected), `silicon_timeout`, 
 
 **Known over-rejection.** A call written inside an annotation's own `sizeof` operand (`CERASTES_REQUIRES(sizeof(int[p(2)]) > 0)`)
 is rejected as a call in an annotation, although the operand is never evaluated: the encoder reads the folded constant's
-original expression, which contains the call. This is the safe direction (M7 inventory).
+original expression, which contains the call. This is the safe direction (M8 inventory).

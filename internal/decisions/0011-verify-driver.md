@@ -60,7 +60,7 @@ Decision 0002 fixed the integration: EDG's front end compiled into our binary, w
    - Directories given with `-I`, and `/usr/local/include` (writable, first in the scraped list), are user
      directories. Headers are verified again in every unit that includes them.
    - The bodies of `predicate` and `pure` functions are specification, not code: they are never executed
-     (0006 item 8) and are not encoded in M3; their meaning comes with M6.
+     (0006 item 8) and are not encoded in M3; their meaning comes with M4.5f.
 5. **Calls.** A call is verified modularly against the callee's contract (0012). The callee needs a body in a
    verified file, or a contract (at least one `requires` or `ensures`) on a visible declaration; otherwise the
    call is rejected (`call_without_contract`, 0006 item 6). A function in a system file is used only through its
@@ -80,7 +80,7 @@ Decision 0002 fixed the integration: EDG's front end compiled into our binary, w
      EDG's warning #2803 (0007 item 8). `cerastes-fe` keeps the warning;
    - a call inside an annotation is rejected unless it is `cerastes::old` (`call_in_annotation`), including
      implicit calls (overloaded operators, conversion functions, constructors). Calls of `pure` and `predicate`
-     functions come with M6;
+     functions come with M4.5f;
    - **attributes are allow-listed** (M3-D audit: EDG *recognizes* `[[assume(e)]]`,
      `__attribute__((assume(e)))`, `[[unsequenced]]`, `[[reproducible]]`, `__attribute__((const))`,
      `cleanup(…)` and others, and an assumption that does not hold is undefined behaviour). In a verified file,
@@ -175,3 +175,5 @@ Decision 0002 fixed the integration: EDG's front end compiled into our binary, w
 - Headers are verified once per including unit: slower, but nothing is trusted silently.
 - The categories table is the contract between the driver, the harness, the error-messages page and the tests;
   adding a category changes all four.
+
+*2026-10-20: milestone numbers follow the renumbering of 2026-10-20 (plan.md: old M4 → M5, M5 → M6, M6 → M4.5 for C and M7 for C++, M7 → M8).*

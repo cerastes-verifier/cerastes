@@ -131,10 +131,10 @@ summarized here):
      (orchestrator, extending the owner's rule). A specialization may repeat
      the contract or carry none, in which case it has the primary's, but it
      may not differ, whatever the declaration order. The reason: callers,
-     and a generic proof of the template (M4), rely on the primary's
+     and a generic proof of the template (M5), rely on the primary's
      contract, but a call with those arguments runs the specialization.
      Letting a specialization have its own, compatible contract would need a
-     behavioural-subtyping obligation (M5-style). That can be added later.
+     behavioural-subtyping obligation (M6-style). That can be added later.
      - The rule covers explicit specializations of function templates and of
        members of class templates (`template <> int S<int>::m(int x)`). For
        a member, the primary's contract is the one on any declaration of
@@ -160,7 +160,7 @@ summarized here):
        diagnostic. The walker cross-checks this.
      - Members of an explicit or partial *class* specialization
        (`template <> struct S<int> { … };`) belong to a different class and
-       carry their own contracts in v0. M4 must not let a generic proof of
+       carry their own contracts in v0. M5 must not let a generic proof of
        `S<T>::m` cover a call that resolves to such a member, and must fail
        closed on it.
      - An inheriting constructor (`using Base::Base;`) has no contract of its
@@ -200,7 +200,7 @@ summarized here):
    any template code. They are checked again, with substituted types, in
    each instance; an error found only in an instance is reported with the
    instantiation context.
-   - M4 decides when a template is verified once from its prototype.
+   - M5 decides when a template is verified once from its prototype.
    - The walker shows both forms (0007 item 5).
 8. **`predicate` and `pure` functions** are ordinary C++ functions, marked as
    specification functions. They are never called by the program.
@@ -234,7 +234,8 @@ summarized here):
 
      M2 does not check that the lambda takes exactly one more parameter than
      there are trailing arguments: the quantified variable's type cannot be
-     deduced. M6, which gives `forall` its meaning, must reject a mismatch.
+     deduced. M7, which gives the lambda form of `forall` its meaning (M4.5e
+     designs a C form), must reject a mismatch.
 
      In the contract of a function template, including a member template, the
      lambda may name a template parameter (a parameter of type `const T*`,
@@ -369,7 +370,7 @@ summarized here):
       function from ordinary code. (A dependent built-in assignment such as
       `v = 0` on a `T` is an `eok_assign` in the prototype and is rejected
       there; CP6.) In a template that is never
-      instantiated, these constructs are not checked in M2. M4's eligibility
+      instantiated, these constructs are not checked in M2. M5's eligibility
       checker must fail closed on them.
     - **Spec functions are identified by entity,** never by spelling.
       - **Resolved calls** (instances, non-templates) are recognized by the
@@ -400,7 +401,7 @@ summarized here):
     - `old` in the body of a `pure` or `predicate` function is rejected
       (`old_outside_ensures`, M3 re-look R4e, 2026-10-16): Viper functions
       have no `old`. Spec functions reached through a function pointer are
-      left to M6.
+      left to M4.7 (function pointers).
     - **M3 re-look additions** (2026-10-16; the probes are in
       `internal/il-inventory.md`, "R4a", P13–P15):
       - **Compile-time uses of `constexpr`/`consteval` spec functions**
@@ -412,7 +413,7 @@ summarized here):
         **once it has seen the marker**: a use that comes before the marker,
         when the marker is only on a later redeclaration, stays open (the
         first-declaration rule, handoff 5 item 2; an EDG feature planned for
-        M4). Probes at P (`cerastes-fe.sh --c++20`): an array bound outside a
+        M5b). Probes at P (`cerastes-fe.sh --c++20`): an array bound outside a
         function body (global and member), `static_assert` (namespace, class
         and function scope), a class template argument, an explicit function
         template argument, a `case` label, an enumerator, a `constexpr`
@@ -478,3 +479,5 @@ summarized here):
   quantifiers need: an explicit bound variable.
 - **Contracts must match across declarations.** The header's contract is
   the contract; a definition may repeat it but cannot strengthen or weaken it.
+
+*2026-10-20: milestone numbers follow the renumbering of 2026-10-20 (plan.md: old M4 → M5, M5 → M6, M6 → M4.5 for C and M7 for C++, M7 → M8).*
