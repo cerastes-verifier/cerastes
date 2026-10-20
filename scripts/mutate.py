@@ -23,8 +23,13 @@ attributes), never in comments, strings, preprocessor lines or declarations:
   `b`);
 * `swap-logic`: `&&` becomes `||` and `||` becomes `&&`;
 * `delete-stmt`: an expression statement (an assignment, `++`, a call, a
-  `return`) is replaced by `;`.  Declarations, checks (`CERASTES_*`), `static_assert`
-  and compound statements are never deleted.
+  `return`, a `break;`, a `continue;`) is replaced by `;`.  Declarations, checks
+  (`CERASTES_*`), `static_assert` and compound statements are never deleted.  The
+  statement after a `case <k>:` or `default:` label is deleted without its label (the label
+  itself is never deleted, and neither is a `switch` or `do` head), and the `break;` or
+  `continue;` that is the body of an `if (...)`, `while (...)` or `for (...)` is deleted
+  (decision 0014 item 9).  Other bodies of those heads are not (that would change the ids
+  of the tests of M3).
 
 Mutant ids have the form `<path>:<line>:<column>:<op>:<original>-><new>`, with the
 position of the first changed character and the changed text on one line (a
@@ -236,7 +241,9 @@ _DECL_KEYWORDS = {"int", "char", "short", "long", "unsigned", "signed", "bool", 
                   "struct", "union", "enum", "typedef", "constexpr", "inline", "thread_local",
                   "static_assert", "_Static_assert", "using", "class", "typename", "template"}
 _COMPOUND_KEYWORDS = {"if", "else", "while", "for", "do", "switch", "case", "default", "goto",
-                      "break", "continue", "try", "catch"}
+                      "try", "catch"}
+_JUMPS = ("break", "continue")  # deletable: simple statements that move control
+_HEADS = ("if", "while", "for")  # `if (c) break;`: the jump is the deletable statement
 
 
 def matching(tokens: list[Token]) -> dict[int, int]:
@@ -758,19 +765,62 @@ def statement_mutants(src, tokens, pair, open_i, close_i, position, path) -> lis
         if t.kind == "op" and t.text == "}":
             start = i + 1
         elif t.kind == "op" and t.text == ";":
-            if is_deletable(tokens, start, i):
-                line, col = position(tokens[start].start)
-                text = src[tokens[start].start:t.end]
+            target = deletable_target(tokens, pair, start, i)
+            if target is not None:
+                line, col = position(tokens[target].start)
+                text = src[tokens[target].start:t.end]
                 short = one_line(text)
                 if len(short) > STATEMENT_ID_CHARS:
                     short = short[:STATEMENT_ID_CHARS - 3] + "..."
                 out.append(Mutant(path, line, col, "delete-stmt", short, ";",
-                                  tokens[start].start, t.end, ";"))
+                                  tokens[target].start, t.end, ";"))
             start = i + 1
         elif t.kind == "ident" and t.text in ("else", "do") and start == i:
             start = i + 1
         i += 1
     return out
+
+
+def skip_labels(tokens: list[Token], pair: dict[int, int], first: int, semi: int) -> int:
+    """Index of the first token after the `case <value>:` and `default:` labels that open
+    tokens[first..semi] (`first` itself when there is none or a label is malformed)."""
+    i = first
+    while i < semi and tokens[i].kind == "ident" and tokens[i].text in ("case", "default"):
+        j = i + 1
+        if tokens[i].text == "case":
+            ternary = 0
+            while j < semi:
+                u = tokens[j]
+                if u.kind == "op" and u.text in ("(", "["):
+                    j = pair[j]
+                elif u.kind == "op" and u.text == "?":
+                    ternary += 1
+                elif u.kind == "op" and u.text == ":":
+                    if ternary == 0:
+                        break
+                    ternary -= 1
+                j += 1
+        if j >= semi or tokens[j].kind != "op" or tokens[j].text != ":":
+            return first
+        i = j + 1
+    return i
+
+
+def deletable_target(tokens: list[Token], pair: dict[int, int], first: int, semi: int):
+    """The first token of the part of the statement tokens[first..semi] that is deleted, or
+    None: the statement itself; the statement after its `case`/`default` labels; or the
+    `break;`/`continue;` that is the body of `if (...)`, `while (...)` and `for (...)` heads
+    (any number of them), after the labels."""
+    body = skip_labels(tokens, pair, first, semi)
+    if is_deletable(tokens, body, semi):
+        return body
+    i = body
+    while (i < semi and tokens[i].kind == "ident" and tokens[i].text in _HEADS
+           and i + 1 < semi and tokens[i + 1].kind == "op" and tokens[i + 1].text == "("):
+        i = pair[i + 1] + 1
+    if i != body and i == semi - 1 and tokens[i].kind == "ident" and tokens[i].text in _JUMPS:
+        return i
+    return None
 
 
 def is_deletable(tokens: list[Token], first: int, semi: int) -> bool:
