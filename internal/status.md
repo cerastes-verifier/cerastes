@@ -4,6 +4,66 @@ Session handoff log, newest first. Each entry says what is done, what is not,
 any surprises, the decision records added and the exact first step for the
 next session.
 
+## M3 close-out (2026-10-20): done on branch `worktree-m3-closeout`; fast-forward and pushes pending
+
+Read `internal/handoff.md` next (§2 owner steps, §4 the CI session, §5 the mutation triage session, §11 questions).
+
+**Owner decisions (2026-10-20)**
+- Scope: the M3 close-out only, planned at ≤ 4 h. CI stays its own session before M4.
+- Pin P only. The upstream EDG merge (`307002eae6` → `ed0a9efb06`) and its box run open the CI session, an
+  exception to CLAUDE.md's session-start merge. The branch-0020-alone Linux failure goes to the CI session too.
+- Expectation rewrites: a rejection may move from a `cerastes-*` diagnostic to an EDG one at the same line; r4a
+  keeps the 18 contexts EDG now rejects, and the 6 it accepts are covered by single-context tests.
+- Handoff answers folded into `plan.md`: the first-declaration marker rule in M4, the contract manifest in M5 (M6
+  if it does not fit), a "CI session (before M4)" section.
+
+**Done**
+- **Pin at P** `b9519388ea` (the fork's `cerastes` fast-forwarded over 0020, L, M, N, P; chain worktrees and temp
+  branches removed, `0020` kept).
+- **forall over `T`** (R1 moves): positives for function templates and member templates with goldens checked
+  against `--il_display` by a second agent, twins, the doc example, the Annotations page, 0006.
+- **`RAF_NO_CONSTANT_EVALUATION`** registered for `predicate`/`pure`: the front end refuses compile-time evaluation
+  of spec functions (the five no-trace contexts closed); 14 expectation rewrites under the owner's rule, r4a by the
+  owner's decision; docs, 0006, 0007, the upstream draft.
+- **Audit B's blocking item:** a substituted lambda whose own signature holds an error type (series L leaves one,
+  silently, for a `decltype(<parameter>)` lambda parameter) is now `annotation_substitution_error`, with two twins.
+- **Tooling:** `mutate.py --list`; `lint_viper.py` rejects `decreases *` and conditional `decreases`; the
+  safe-direction classifier buckets only clauses the grid models and functions with no use in the file (audit A's
+  blocking item fixed and re-audited); 0013 item 5.
+- **Harness:** `annotation_substitution_error` has a source test now; the walker oracle recognises the closure
+  copies series L makes for instances (narrow rule, twins).
+
+**Acceptance** (handoff §10)
+- `scripts/check.sh` green at `05da953` (10 min 19 s): self-tests 931 + 74 + 113 + 142; tests 2064 passed, 0
+  failed, 1 skipped (native-ok: Apple clang 523, GCC 523); 412 `.vpr` lint clean; VIR self-test 155/155; oracle
+  134 goldens, 0 failed; docs 0 problems.
+- `--count-error-twins` 82; `mutate.py --validate` 1314 mutants, 223 bucket candidates; `--list` 0.6 s, no run.
+- Audits A and B (Opus): one blocking item each, fixed and closed on re-audit.
+- Wall-clock: about 1 h for the execution (planned ≤ 4 h).
+
+**Not done / deferred**
+- **Mutation triage** (its own short session, handoff §5): 74 mutants left the safe-direction bucket (cap 30), so
+  M3's "0 unexplained survivors" holds for the old bucket only until they are killed or listed; audit A's
+  should-fix items go with it.
+- The upstream EDG merge, the 0020 Linux failure, CI (the CI session, handoff §4).
+- Audit B's should-fix items (handoff §6): a false `spec_call_in_code` from series L's leftover closure copies,
+  three missing tests (the `operator=` marker branch, overload choice changed by P, the constant-context pass in
+  never-instantiated templates); the EDG follow-up for the silent error node (question 2).
+
+**Surprises**
+- At P, EDG leaves an error node without a diagnostic in a function template's contract whose `forall` lambda
+  takes `decltype(p)` of a parameter: the back-end check `annotation_substitution_error` is now what rejects it.
+- Registering the flag makes EDG reject most compile-time uses itself, which stops the back end in the whole file:
+  the pre-approved "same line" rule did not fit r4a, and the cerastes-side constant-context checks lost their tests.
+- Series L copies a lambda's closure class for each instance without a `lambda` record; the walker oracle needed a
+  rule for it.
+
+**Decision records:** none added; 0006, 0007, 0013 amended.
+
+**First step for the next session (CI).** Confirm the owner's fast-forward and pushes (handoff §2). Wake the box,
+merge upstream EDG `main` into the fork's `cerastes` (handoff §4), run the full box suites, move the pin, run
+`check.sh`; explain the 0020-alone Linux failure; then CI.
+
 ## M2 re-look items and M3 — scalar encoder and driver (2026-10-16 to 2026-10-19): done; pushes and the pin move pending
 
 Read `internal/handoff.md` next (§2 owner steps, §4 the EDG chain, §9 questions).
