@@ -360,9 +360,12 @@ requires every tag of that file to be named by at least one `frontend-error` or
 with their reasons in `UNTESTED_BY_FRONTEND_ERROR` in `scripts/test_run_tests.py`
 (an entry for a tag that a test names, or that the file no longer defines, fails
 as stale):
-- `contract_not_propagated`, `parameter_after_pack`, `result_name_on_void` and
-  `annotation_substitution_error` are defense-in-depth checks that EDG's own checks make
-  unreachable from source. A self-test runs `scripts/cerastes-fe.sh --c++20 --cerastes_checks_selftest
+- `contract_not_propagated`, `parameter_after_pack` and `result_name_on_void` are
+  defense-in-depth checks that EDG's own checks make unreachable from source.
+  `annotation_substitution_error` was one of them until the pin at P (2026-10-20): EDG now
+  leaves an error node, without a diagnostic, in the substituted contract of a function
+  template whose `forall` lambda takes `decltype(p)` of a function parameter, and the check
+  rejects it (`tests/annotations/negative/forall_function_template_decltype.cpp`). A self-test runs `scripts/cerastes-fe.sh --c++20 --cerastes_checks_selftest
   --brief_diagnostics --display_error_number` on a contracted function template
   and a contracted variadic template, requires all four tags (`annotation_substitution_error` twice) plus two
   `unsupported_annotation_expression` errors (and no other error) with the
@@ -509,14 +512,34 @@ unexplained survivors, and a test none of whose mutants was killed fails the run
 
 **Why a safe-direction bucket (owner decision, 2026-10-16).** A sound verifier must accept a program that
 meets a *weaker obligation than the original*. Changing a contract so that it is easier to meet gives such a
-program: a stronger `requires` (the body has less to prove, and the callers in the file that cannot meet it are
-the only ones that could notice), a weaker `ensures` or `check` (the body proves more than the clause says). A
+program: a stronger `requires` (the body has less to prove; a caller in the file may fail it), a weaker
+`ensures` (the body proves more than the clause says; a caller may rely on it) or `check` (the body proves
+more than the clause says, and nothing relies on a check). A
 verifier that rejected these mutants would be unsound or incomplete the other way, so a surviving one says
 nothing about the test, and listing thousands of them would bury the survivors that do. They are counted in
 their own bucket, `safe-direction`, which the run reports for each test and in total; they are neither
 required to be killed nor listed (a listed one is a stale entry). The direction is decided by comparing the two
-clauses on a grid of values (`clause_relation` in `scripts/mutate.py`; a clause it cannot model is `unknown`
-and never safe). Everything else still has to be killed or listed: a weaker `requires` (a caller may now
+clauses on a grid of values (`clause_relation` in `scripts/mutate.py`). The grid is mathematics on plain
+integers, so a mutant is bucketed only when the grid models C for it; otherwise it is `unknown`, never
+bucketed, and must be killed or listed. A mutant is bucketed only when all of these hold:
+
+- every variable of the clause (original and mutant) is a parameter of the enclosing function whose declared
+  type is a signed builtin integer type (`signed char`, `short`, `int`, `long`, `long long`, with an optional
+  `signed` or `const`; not `bool`, plain `char`, anything unsigned, a typedef, a pointer or a reference); the
+  result name of an `ensures` counts only if the return type is one; a `check` name that the body declares
+  again does not count; a contract of a bodyless declaration is `unknown`;
+- the clause is linear: no product of two variables, `/`, `%`, `<<`, `>>`, bit operation, `?:`, cast, call,
+  subscript or unsigned literal suffix;
+- the mutation is not an `==`/`!=` flip;
+- for a stronger `requires` or a weaker `ensures` (not a `check`), the function has no use (call, recursive
+  call, address, mention in a contract) anywhere else in the file.
+
+"Only when the grid models C" is not a proof: known gaps remain (C precedence of `!` and chained comparisons,
+literal coefficients of `*`, contract well-definedness after a dropped guard, uses of the function inside a
+`#define` body or a default argument). They are listed in the handoff and deferred to the triage session.
+
+`python3 scripts/mutate.py --list [paths]` prints the mutant ids and exits without running anything.
+Everything else still has to be killed or listed: a weaker `requires` (a caller may now
 break the body), a stronger `ensures` or `check` (the body may not prove it), any change of an `invariant` or a
 `decreases`, a mutant that leaves a clause's meaning unchanged, and every mutant of code, never bucketed.
 

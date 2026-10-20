@@ -776,6 +776,31 @@ class RunTests(RunCase):
         for m in GOOD_MUTANTS:
             self.assertIn(f"{rt.rel(t)}:{m}\n", out)
 
+    def test_list_does_not_start_a_run(self):
+        # --list prints the ids and exits: the verifier is never called, not even for the originals
+        self.all_killed()
+        t = self.put("a.c")
+        status, out, _ = self.run_main(t, "--list")
+        self.assertEqual(status, 0, out)
+        self.assertEqual(self.calls(), [])
+        self.assertNotIn("mutants:", out)  # the run's summary line
+        self.assertEqual(len([l for l in out.split("\n") if l.strip()]), len(GOOD_MUTANTS), out)
+
+    def test_list_needs_no_verifier_environment(self):
+        # a run loads the environment (and needs the verifier); --list does not
+        self.put("a.c")
+        with mock.patch.object(rt, "VERIFY_COMMAND", None), \
+                mock.patch.object(rt, "load_env", side_effect=AssertionError("--list loaded the environment")):
+            status, out, err = self.run_main(self.dir, "--list")
+        self.assertEqual((status, err), (0, ""), out)
+
+    def test_list_of_a_test_that_does_not_lex_is_a_failure_without_a_run(self):
+        self.put("a.c", "// expect: verified\nint f(int x) { return (x < 5; }\n")
+        status, out, err = self.run_main(self.dir, "--list")
+        self.assertEqual(status, 1, out)
+        self.assertIn("cannot lex", err)
+        self.assertEqual(self.calls(), [])
+
     def test_nothing_to_mutate_is_a_usage_error(self):
         self.put("e.c", "// expect: error check @ L4\nint f(int x) { return x < 5; }\n")
         status, _, err = self.run_main(self.dir)
@@ -1057,6 +1082,184 @@ class SafeDirectionTests(RunCase):
         self.assertEqual(status, 0, out)
         self.assertIn("0 safe-direction", out)
         self.assertNotIn("safe-direction ", out.replace("0 safe-direction", ""))
+
+
+class SafeDirectionModelTests(unittest.TestCase):
+    """The safe-direction bucket only trusts the grid where it models C: every variable of the clause
+    (original and mutant) a signed builtin integer parameter of the enclosing function, a linear
+    clause, no `==`/`!=` flip, and for a stronger `requires` no use of the function in the file.
+    Each rule has a twin that is bucketed, and a case that is not: removing a rule makes one fail."""
+
+    def safe(self, src, needle, line=None):
+        found = [m for m in mu.mutants_of(src, "x.c")
+                 if needle in m.id and (line is None or m.line == line)]
+        self.assertTrue(found, (needle, [m.id for m in mu.mutants_of(src, "x.c")]))
+        results = {mu.is_safe_direction(m, src) for m in found}
+        self.assertEqual(len(results), 1, (needle, results))
+        return results.pop()
+
+    @staticmethod
+    def req(decl, clause, body="return 0;"):
+        return f"{decl} CERASTES_REQUIRES({clause})\n{{\n  {body}\n}}\n"
+
+    @staticmethod
+    def ens(decl, clause, body="return 0;"):
+        return f"{decl} CERASTES_ENSURES(r, {clause})\n{{\n  {body}\n}}\n"
+
+    # (a) the types
+    def test_signed_builtin_parameters_are_modelled(self):
+        for decl in ("int f(int x)", "int f(const int x)", "int f(signed x)", "int f(signed char x)",
+                     "int f(short x)", "int f(long x)", "int f(long long x)", "int f(long int x)",
+                     "int f(signed long long x)", "int f(int const x)"):
+            with self.subTest(decl):
+                self.assertTrue(self.safe(self.req(decl, "x >= 1"), "relop:>=->>"))
+
+    def test_any_other_parameter_type_is_not_modelled(self):
+        # the old classifier bucketed all of these: `x >= 1` -> `x > 1` is `stronger` on the grid
+        self.assertEqual(mu.clause_relation("x >= 1", "x > 1"), "stronger")
+        for decl in ("int f(unsigned x)", "int f(unsigned int x)", "int f(unsigned long x)",
+                     "int f(unsigned char x)", "int f(unsigned long long x)", "int f(bool x)",
+                     "int f(_Bool x)", "int f(char x)", "int f(size_t x)", "int f(int8_t x)",
+                     "int f(int *x)", "int f(int &x)", "int f(float x)", "int f(long double x)",
+                     "int f(short long x)", "int f(int int x)"):
+            with self.subTest(decl):
+                self.assertFalse(self.safe(self.req(decl, "x >= 1"), "relop:>=->>"))
+
+    def test_the_unsigned_parameter_of_another_function_does_not_matter(self):
+        src = (self.req("int g(unsigned a)", "a >= 1") + self.req("int f(int a)", "a >= 1"))
+        self.assertFalse(self.safe(src, "relop:>=->>", line=1))
+        self.assertTrue(self.safe(src, "relop:>=->>", line=5))
+
+    def test_a_variable_that_is_no_parameter_is_not_modelled(self):
+        src = self.req("int f(int x)", "x >= 1 && g_limit > x")  # a global
+        self.assertFalse(self.safe(src, "relop:>=->>"))
+        src = self.req("int f(int x)", "x >= 1 && x > y")  # y is unknown
+        self.assertFalse(self.safe(src, "relop:>=->>"))
+
+    def test_one_unmodelled_parameter_in_the_clause_is_enough(self):
+        src = self.req("int f(int x, unsigned y)", "x >= 1 && y >= 1")
+        self.assertFalse(self.safe(src, "relop:>=->>", line=1))  # x's flip: y is in the clause
+        src = self.req("int f(int x, int y)", "x >= 1 && y >= 1")
+        self.assertTrue(self.safe(src, "relop:>=->>", line=1))
+
+    def test_the_ensures_result_counts_only_for_a_signed_return_type(self):
+        for ret, expected in (("int", True), ("long long", True), ("signed char", True), ("unsigned", False),
+                              ("unsigned long", False), ("bool", False), ("char", False), ("size_t", False),
+                              ("int *", False)):
+            with self.subTest(ret):
+                src = self.ens(f"{ret} f(int x)", "r <= 5")
+                self.assertEqual(self.safe(src, "literal:5->6"), expected)
+
+    def test_an_ensures_over_a_signed_parameter_and_an_unsigned_result_is_not_modelled(self):
+        # `r` is in the clause; the parameter alone would be fine
+        self.assertFalse(self.safe(self.ens("unsigned f(int x)", "r <= x + 5"), "literal:5->6"))
+        self.assertTrue(self.safe(self.ens("unsigned f(int x)", "x <= 5"), "literal:5->6"))
+
+    def test_a_check_over_a_local_or_a_shadowed_parameter_is_not_modelled(self):
+        src = "int f(int x)\n{\n  int i = 0;\n  CERASTES_CHECK(i <= 5 && x >= 0);\n  return x;\n}\n"
+        self.assertFalse(self.safe(src, "literal:5->6"))  # the local `i`
+        src = "int f(int x)\n{\n  CERASTES_CHECK(x <= 5);\n  return x;\n}\n"
+        self.assertTrue(self.safe(src, "literal:5->6"))
+        src = ("int f(int x)\n{\n  { unsigned x = 3; (void)x; }\n  CERASTES_CHECK(x <= 5);\n"
+               "  return x;\n}\n")
+        self.assertFalse(self.safe(src, "literal:5->6"))  # a block-local `unsigned x` of the same name
+
+    def test_a_contract_of_a_bodyless_declaration_is_not_modelled(self):
+        src = "int f(int x) CERASTES_REQUIRES(x >= 1);\nint g(void) { return 0; }\n"
+        # no body, so no mutant is generated in it, but the macro argument is a target all the same
+        found = [m for m in mu.mutants_of(src, "x.c") if "relop" in m.id]
+        self.assertEqual(len(found), 1)
+        self.assertFalse(mu.is_safe_direction(found[0], src))
+
+    # (b) linearity
+    def test_a_product_of_two_variables_is_not_modelled(self):
+        for clause in ("x * y >= 2", "x * x >= 4", "x * (y + 1) >= 2", "x * 2 * y >= 2", "2 * x * y >= 2"):
+            with self.subTest(clause):
+                # the grid alone would bucket it (`>=` to `>` is stronger): only linearity rejects it
+                self.assertEqual(mu.clause_relation(clause, clause.replace(">=", ">")), "stronger")
+                self.assertFalse(self.safe(self.req("int f(int x, int y)", clause), "relop:>=->>"))
+
+    def test_a_product_with_a_literal_is_linear(self):
+        for clause in ("2 * x >= 2", "x * 2 >= 2", "3 * 4 + x >= 13", "x - 2 * y >= 1"):
+            with self.subTest(clause):
+                self.assertTrue(self.safe(self.req("int f(int x, int y)", clause), "relop:>=->>"))
+
+    def test_division_remainder_and_shifts_are_not_modelled(self):
+        for clause in ("x / 2 >= 1", "x % 2 >= 1", "x << 1 >= 1", "x >> 1 >= 1"):
+            with self.subTest(clause):
+                self.assertFalse(self.safe(self.req("int f(int x)", clause), "relop:>=->>"))
+        # the grid would have called the first two `stronger`
+        self.assertEqual(mu.clause_relation("x / 2 >= 1", "x / 2 > 1"), "stronger")
+        self.assertEqual(mu.clause_relation("x % 3 >= 1", "x % 3 > 1"), "stronger")
+
+    def test_bit_operations_conditionals_casts_calls_and_subscripts_are_not_modelled(self):
+        for clause in ("(x & 1) >= 1", "(x | 1) >= 1", "(x ^ 1) >= 1", "~x >= 1", "(x > 0 ? 1 : 2) >= 1",
+                       "(long)x >= 1", "(unsigned)x >= 1", "abs(x) >= 1", "x[0] >= 1", "x++ >= 1"):
+            with self.subTest(clause):
+                self.assertFalse(self.safe(self.req("int f(int x)", clause), "relop:>=->>"))
+
+    def test_an_unsigned_or_hex_literal_is_not_modelled(self):
+        for clause in ("x >= 1u", "x >= 1U", "x >= 1ul", "x >= 0x1", "x >= 1.0"):
+            with self.subTest(clause):
+                self.assertFalse(self.safe(self.req("int f(int x)", clause), "relop:>=->>"))
+        self.assertTrue(self.safe(self.req("int f(int x)", "x >= 1L"), "relop:>=->>"))  # signed suffix
+
+    # (c) equality flips
+    def test_an_equality_flip_is_never_bucketed(self):
+        src = self.ens("int f(int x)", "r == 1 && r == 2")  # unsatisfiable: the flips are `weaker`
+        flips = [m for m in mu.mutants_of(src, "x.c") if m.op == "relop" and m.original in ("==", "!=")]
+        self.assertEqual(len(flips), 2)
+        # the grid says `weaker` for the flip: the old classifier bucketed it
+        self.assertEqual(mu.clause_relation("r == 1 && r == 2", "r != 1 && r == 2"), "weaker")
+        for m in flips:
+            self.assertFalse(mu.is_safe_direction(m, src), m.id)
+
+    def test_other_mutants_of_a_clause_with_equality_are_still_bucketed(self):
+        src = self.ens("int f(int x)", "r < 5 || r == 2")
+        self.assertTrue(self.safe(src, "relop:<-><="))  # weaker
+        self.assertTrue(self.safe(self.ens("int f(int x)", "r >= 0 && r == 2"), "drop-conjunct:&& r == 2->"))
+
+    # (d) callers
+    def test_a_stronger_requires_with_a_caller_in_the_file_is_not_bucketed(self):
+        base = self.req("int f(int x)", "x >= 1")
+        self.assertTrue(self.safe(base, "relop:>=->>"))
+        for caller in ("int g(int y) { return f(y); }\n",  # a call
+                       "int g(int y) { int (*p)(int) = f; return p(y); }\n",  # the address
+                       "int g(int y) CERASTES_ENSURES(r, r == f(y)) { return y; }\n"):  # a contract
+            with self.subTest(caller):
+                self.assertFalse(self.safe(base + caller, "relop:>=->>", line=1))
+
+    def test_a_recursive_call_is_a_caller(self):
+        src = self.req("int f(int x)", "x >= 1", body="return x > 1 ? f(x - 1) : 1;")
+        self.assertFalse(self.safe(src, "relop:>=->>", line=1))
+
+    def test_a_caller_of_another_function_does_not_matter(self):
+        src = (self.req("int f(int x)", "x >= 1") + self.req("int ff(int x)", "x >= 1")
+               + "int g(int y) { return ff(y); }\n")
+        self.assertTrue(self.safe(src, "relop:>=->>", line=1))  # f has none (ff is another name)
+        self.assertFalse(self.safe(src, "relop:>=->>", line=5))  # ff has one
+
+    def test_a_name_in_a_comment_or_a_string_is_no_caller(self):
+        src = (self.req("int f(int x)", "x >= 1") + "// f(3)\n/* f(4) */\nint g(int y) { return 0; }\n"
+               + 'const char *s = "f(5)";\n')
+        self.assertTrue(self.safe(src, "relop:>=->>", line=1))
+
+    def test_a_weaker_ensures_with_a_caller_in_the_file_is_not_bucketed(self):
+        # a caller may rely on the postcondition that the mutant weakens
+        base = self.ens("int f(int x)", "r >= 0 && r <= 5")
+        self.assertTrue(self.safe(base, "drop-conjunct:&& r <= 5->", line=1))  # no caller: bucketed
+        for caller in ("int g(int y) { return f(y); }\n",
+                       "int g(int y) { int (*p)(int) = f; return p(y); }\n",
+                       "int g(int y) CERASTES_ENSURES(r, r == f(y)) { return y; }\n"):
+            with self.subTest(caller):
+                self.assertFalse(self.safe(base + caller, "drop-conjunct:&& r <= 5->", line=1))
+                self.assertFalse(self.safe(base + caller, "literal:5->6", line=1))
+
+    def test_a_caller_does_not_matter_for_a_weaker_check(self):
+        # a `check` has no callers: rule (d) is about `requires` and `ensures`
+        src = ("int f(int x)\n{\n  CERASTES_CHECK(x >= 0 && x <= 5);\n  return x;\n}\n"
+               "int g(int y) { return f(y); }\n")
+        self.assertTrue(self.safe(src, "literal:5->6", line=3))
 
 
 class ZeroTargetTests(RunCase):
