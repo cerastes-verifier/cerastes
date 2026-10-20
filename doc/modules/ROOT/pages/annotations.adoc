@@ -495,18 +495,43 @@ include::example$annotations/forall.cpp[tag=check]
 ----
 
 The lambda's parameters have concrete types: a generic lambda (`auto` parameters,
-a template lambda) is rejected. In the contract of a *function template*,
-including a member template, the lambda also cannot name a template parameter:
-a parameter of type `const T*`, `sizeof(T)` in the body, a `decltype(x)` parameter
-or the enclosing class's `T`. EDG reports `undefined_identifier` for the `T`,
-with "detected during instantiation of" and the template, and only when the
-template is instantiated (a template that is never instantiated is not
-diagnosed). So in this version `forall` cannot quantify over an array of `T` in
-a function template's contract: use concrete parameter types where the element
-type is fixed, or put the quantifier in a class template's member or a
-non-template function. Contracts of class-template members are not affected. cerastes does not yet check that the lambda takes
-one more parameter than there are trailing arguments. Writing it correctly is
-your job today.
+a template lambda) is rejected.
+
+In the contract of a function template, and of a member template of a class
+template, the lambda may name a template parameter: a parameter of type `const T*`,
+`sizeof(T)` in the body, or, in a member template, the class's `U` next to the
+member's own `T`. That is how `forall` quantifies over an array of `T`. In the
+template itself the lambda's parameter has the dependent type `const T *`; in each
+instance it has the deduced type (`const int *`, `const long *`).
+
+[source,cpp]
+----
+include::example$annotations/forall_template.cpp[tag=template]
+----
+
+Three forms are still rejected. Each is rejected, never accepted with a changed
+meaning:
+
+* A lambda that depends on `T` only through `decltype` of a function parameter
+  (`decltype(data) a`). This is valid pass:[C++], but the front end cannot yet
+  substitute it in the contract. cerastes reports
+  `cerastes-annotation_substitution_error` ("an annotation argument is
+  erroneous after template substitution") and then
+  `cerastes-unsupported_annotation_expression`, both on the contract's line, when the
+  template is instantiated; the parameter is rejected whether or not the lambda's
+  body uses it. Write the parameter's type with the template parameter
+  instead (`const T* a`).
+* A parameter pack. A contract that names a function parameter pack is rejected by
+  the front end (`cannot refer to a function parameter pack`), also inside a lambda's
+  trailing arguments, and a lambda that names a template parameter pack
+  (`sizeof...(Ts)`) is rejected when the template is instantiated.
+* A lambda that calls the template whose contract it is in. The front end does not
+  find the name when it substitutes the contract (`identifier "h" is undefined`, "detected
+  during instantiation of"). A call of a different template from the lambda is
+  accepted by the front end.
+
+cerastes does not yet check that the lambda takes one more parameter than there are
+trailing arguments. Writing it correctly is your job today.
 
 == What cerastes checks, and who reports it
 
@@ -696,22 +721,39 @@ include::example$annotations/errors/spec_call_in_code.cpp[tag=bad]
 ----
 
 A `constexpr` predicate or pure function can be evaluated by the compiler, which
-would run its body as ordinary code. So a use where the language requires a constant
-expression is a use from ordinary code too: an array bound, a `static_assert` in a
-function body, an enumerator, a `constexpr` variable's initializer, a bit-field width,
-`alignas`, a default template argument, `noexcept(...)`, `explicit(...)`, a `decltype`
-operand, a `case` label, `if constexpr`, `sizeof`, and the body of a `constexpr` or
-`consteval` function. All are `cerastes-spec_call_in_code`.
+would run its body as ordinary code. So the front end refuses to evaluate a call of a
+predicate or a pure function at compile time once it has seen the marker (a use that
+comes before the first marker, when the marker is only on a later redeclaration, is not
+refused: write the marker on the first declaration). Where the language requires a constant
+expression and the front end evaluates it, the call is an error: an array bound
+outside a function body (global and member), a `static_assert` (at any scope), an
+enumerator, a `constexpr` variable's initializer, a bit-field width, `alignas`, a
+template argument that is used (explicit, or a default one that an instantiation
+takes), the `noexcept(...)` specifier, `explicit(...)`, a `case` label, `if
+constexpr`. The front end's message is `expression must have a constant value`,
+followed by a note that says it cannot call the function in a constant expression
+because an attribute of the function does not allow it.
 
 [source,cpp]
 ----
 include::example$annotations/errors/spec_call_constexpr.cpp[tag=bad]
 ----
 
-Five such contexts are not found yet, because the front end folds the call into its value
-and leaves nothing for cerastes to read: a class template argument (`S<scale(3)>`), an
-explicit function template argument (`ft<scale(1)>()`), and a `static_assert` at namespace
-or class scope. Do not rely on them: a later change makes the front end refuse them.
+Other uses are found by cerastes, not by the front end, and are reported as
+`cerastes-spec_call_in_code`:
+
+* a `decltype` or `sizeof` operand, and the `noexcept(...)` operator (the specifier
+  after a function's parameters is the front end's);
+* an array bound in a function body (the front end reads it as a variable-length
+  array, so it does not evaluate it), also inside a `sizeof` operand;
+* a default template argument that no instantiation uses;
+* the body of a `constexpr` or `consteval` function;
+* any of these uses inside a template that is never instantiated.
+
+A marker on a function that is defaulted (`P() = default;`, or a defaulted
+comparison) is refused by the front end too: "an attribute that forbids constant
+evaluation cannot be applied to a function that is defaulted". A deleted function
+can carry the marker.
 
 A function marked both `predicate` and `pure` is `cerastes-predicate_and_pure`,
 and a `pure` function that returns `void` is `cerastes-pure_returns_void`.
@@ -722,7 +764,7 @@ assignment operator (which have effects, defaulted or not) it is
 `cerastes-spec_marker_in_system_file`. Do not mark a library function that you
 redeclare, and write the marker on the first declaration of a function: cerastes
 does not check either yet, and a use that comes before the marker is not refused
-by the front end's constant evaluation.
+by the front end's constant evaluation (see above).
 
 === Side effects and old
 
@@ -798,14 +840,14 @@ accepted without a word.
 include::example$annotations/errors/generic_lambda.cpp[tag=bad]
 ----
 
-In the contract of a function template, a lambda that names a template
-parameter is also rejected, by EDG, when the template is instantiated
-(`undefined_identifier` on the template parameter, "detected during
-instantiation"):
+A lambda in the contract of a function template may name a template parameter, but
+not through `decltype` of a function parameter alone. That is rejected when the
+template is instantiated, with `cerastes-annotation_substitution_error` and
+`cerastes-unsupported_annotation_expression` on the contract's line:
 
 [source,cpp]
 ----
-include::example$annotations/errors/forall_template_parameter.cpp[tag=bad]
+include::example$annotations/errors/forall_decltype_parameter.cpp[tag=bad]
 ----
 
 A deduction guide cannot carry a contract either. The front end rejects an

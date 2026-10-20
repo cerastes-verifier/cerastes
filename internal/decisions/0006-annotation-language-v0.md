@@ -237,17 +237,43 @@ summarized here):
      deduced. M6, which gives `forall` its meaning, must reject a mismatch.
 
      In the contract of a function template, including a member template, the
-     lambda cannot name a template parameter. That rules out a parameter of
-     type `const T*`, `sizeof(T)` in the body, a `decltype(x)` parameter and
-     the enclosing class's `T`.
-     - EDG reports `undefined_identifier` for the `T` only when the template
-       is instantiated, with "detected during instantiation of". This is an
-       EDG limitation (the fork's commit J; CP3 part 8).
-     - So in v0, `forall` cannot quantify over an array of `T` in a
-       function template's contract. Use concrete parameter types, or put
-       the quantifier in a class template's member or a non-template
-       function.
-     - Contracts of class-template members are not affected.
+     lambda may name a template parameter (a parameter of type `const T*`,
+     `sizeof(T)` in the body, the enclosing class's `T`).
+     - **History.** From M2 to 2026-10-19 it could not: EDG reported
+       `undefined_identifier` for the `T` when the template was instantiated
+       ("detected during instantiation of"), because the lambda copy made for
+       the instance was rescanned without the template's parameters (the
+       fork's commit J; CP3 part 8). The limitation is lifted by EDG bug 0020
+       (`internal/edg_bugs/0020-*`) and the fork series L and M (lambdas in
+       registered attributes, in function templates and in member templates
+       of class templates), pinned 2026-10-20 at `b9519388ea`. So `forall` can
+       quantify over an array of `T` in a function template's contract: the
+       walker shows a dependent tree in the prototype (`const T *` lambda
+       parameter, `eok_subscript` of dependent type) and a substituted tree in
+       each instance (`const int *`, `int`), and the trees agree with
+       `--il_display` operation by operation (probes of 2026-10-20 at P).
+     - **Still rejected at P** (each fails closed; handoff 5 item 2; tests
+       `tests/annotations/negative/forall_*`):
+       - a lambda that depends on `T` only through `decltype` of a function
+         parameter (valid C++): `cerastes-annotation_substitution_error`
+         ("erroneous after template substitution (error expression)") and
+         `cerastes-unsupported_annotation_expression`, both from cerastes at
+         the contract's line, at instantiation (the parameter is rejected
+         whether or not the lambda's body uses it);
+       - packs: a contract that names a function parameter pack is refused by
+         EDG (`ec_attr_function_parameter_pack`), and a lambda that names a
+         template parameter pack (`sizeof...(Ts)`) gets "the sizeof...
+         operator can be used only in a variadic template" at instantiation;
+       - a nested deduction of the same template: a lambda in `h`'s contract
+         that calls `h` gets `identifier "h" is undefined` at instantiation
+         (a call of a different template deduces and is accepted);
+       - EDG bug 0021 (a lambda *called* in a constant template argument or
+         array bound of a function template's *signature*, in std mode) does
+         not arise: cerastes reads C++ in Clang emulation, where the call
+         folds (probe: accepted by `cerastes-fe.sh`, rejected by the same
+         binary in plain `--c++20`), and a lambda call as a template argument
+         inside a contract is accepted in plain mode too.
+     - Contracts of class-template members were never affected.
    - `old` is meaningful only in `ensures`. Using it elsewhere is an error
      from cerastes.
 10. **Who diagnoses what.**
@@ -378,16 +404,40 @@ summarized here):
     - **M3 re-look additions** (2026-10-16; the probes are in
       `internal/il-inventory.md`, "R4a", P13–P15):
       - **Compile-time uses of `constexpr`/`consteval` spec functions**
-        (owner: `constexpr` stays allowed on `predicate`/`pure`). A use that
-        leaves a trace in the IL (array bounds, `case` labels, enumerators,
-        `constexpr` variables, `if constexpr`, `noexcept(…)`, `alignas`,
-        `explicit(bool)`, bit-field widths, default template arguments,
-        `sizeof`/`decltype` operands, …) is rejected from the IL by a pass
-        over every expression node (`spec_call_in_code`). Template arguments
-        and `static_assert` outside function bodies leave no trace; they are
-        closed by a fork-series mechanism that makes EDG refuse to evaluate
-        such a call at compile time (owner-approved; until it is pinned they
-        are a known gap).
+        (owner: `constexpr` stays allowed on `predicate`/`pure`). The gap is
+        closed for what the front end evaluates (2026-10-20): cerastes
+        registers `predicate` and `pure` with `RAF_NO_CONSTANT_EVALUATION`
+        (`register_attributes.cpp`; fork commit P, pinned at `b9519388ea`), so
+        EDG refuses to evaluate a call of such a function at compile time
+        **once it has seen the marker**: a use that comes before the marker,
+        when the marker is only on a later redeclaration, stays open (the
+        first-declaration rule, handoff 5 item 2; an EDG feature planned for
+        M4). Probes at P (`cerastes-fe.sh --c++20`): an array bound outside a
+        function body (global and member), `static_assert` (namespace, class
+        and function scope), a class template argument, an explicit function
+        template argument, a `case` label, an enumerator, a `constexpr`
+        variable, a bit-field width, a default template argument that is
+        used, `explicit(bool)`, `alignas`, the `noexcept(…)` specifier and
+        `if constexpr` each get EDG's `expression must have a constant value`
+        with the note `cannot call function "f" … in a constant expression:
+        an attribute of the function does not allow it` (the explicit
+        function template argument also gets `no instance of function
+        template matches`); a marker on a defaulted constructor or comparison
+        gets `an attribute that forbids constant evaluation cannot be applied
+        to a function that is defaulted` (a `= delete` marker is accepted).
+        **cerastes, not EDG, rejects** (`spec_call_in_code`, from the IL pass
+        over every expression node; probe `ce/w1.cpp` of 2026-10-20, no EDG
+        error): `decltype` and `sizeof` operands, the `noexcept(…)` operator
+        (as opposed to the specifier), an array bound in a function body
+        (a variable-length array under Clang emulation, so EDG does not
+        evaluate it; also inside `sizeof`), a default template argument that
+        no instantiation uses, the body of a `constexpr`/`consteval`
+        function, and any of these inside a template that is never
+        instantiated (dependent forms EDG does not evaluate). The IL pass
+        also stays as defense in depth for the contexts EDG now refuses; it
+        is still reached, and pinned, by the never-instantiated-template and
+        unevaluated forms (`tests/annotations/negative/constant_context_` c1b,
+        c8, c11, c12, c13, c16, c17).
       - **More `spec_call_in_code`:** initializers of block-scope `static`
         and `thread_local` variables, and pointers to member functions
         (`&S::ok`), also as template arguments.

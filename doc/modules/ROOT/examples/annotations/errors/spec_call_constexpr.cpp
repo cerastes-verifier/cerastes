@@ -1,5 +1,5 @@
-// expect: frontend-error cerastes-spec_call_in_code @ L11
-// A constexpr pure function used where the language evaluates it at compile time is ordinary code.
+// expect: frontend-error expr_not_constant @ L11
+// A constexpr pure function is not evaluated at compile time: the front end refuses it where a constant is required.
 // tag::bad[]
 #include <cerastes.h>
 

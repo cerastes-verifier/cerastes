@@ -1,8 +1,8 @@
-// expect: frontend-error cerastes-spec_call_in_code @ L16
+// expect: frontend-error expr_not_constant @ L16
 // expect: native-ok
 // twin: tests/annotations/spec_functions/constexpr_spec_functions.cpp
 // Mutation of the twin: a constexpr variable at namespace scope calls a constexpr spec function.
-// Pins: plan R4a context C6 (il-inventory R4a): a spec function in a constant-evaluated context is ordinary code, rejected with spec_call_in_code
+// Pins: plan R4a context C6 (il-inventory R4a): a spec function in a constant-evaluated context is ordinary code, refused by the front end (expr_not_constant: RAF_NO_CONSTANT_EVALUATION on predicate/pure, fork commit P)
 #include <cerastes.h>
 
 CERASTES_PREDICATE constexpr bool q(int x) { return x >= 0; }

@@ -64,7 +64,10 @@ Spikes (2026-10-16, Silicon `v.26.08-release`, silver's termination plugin, `Ter
    `decreases _` is an assumption (invariant 4): `scripts/lint_viper.py` allows it only on a bodyless method that
    carries the trusted-contract tag, and requires a `decreases` clause on every other method (the `__wf` methods
    included, with an empty measure) and on every loop, because Silicon checks termination only where a clause is
-   present.
+   present. Since the M3 close-out (2026-10-20) it also rejects `decreases *` (Viper's "no termination check") and
+   a conditional `decreases <measure> if <condition>`, which the emitter never produces: either would leave a method
+   or loop unchecked for termination. The lint reads one line at a time, so a clause split over lines is not
+   seen; the emitter writes each clause on one line (handoff, should-fix).
 6. **Results are total correctness.** A verified function terminates on every input that satisfies its
    `requires` and has no undefined behaviour on the way; partial correctness is gone from the records and the docs.
 7. **Well-formedness.** A measure's own C/C++ obligations (overflow, division by zero, …) are checked where it is

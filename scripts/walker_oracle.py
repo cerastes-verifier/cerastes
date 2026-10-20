@@ -525,6 +525,26 @@ class Extractor:
             c = il.ref(lam.get("closure_class"))
             if c is not None:
                 self.closure_ids.add(c.id)
+        # A closure class that no `lambda` record names: the copy the front end makes when it rescans a lambda
+        # of a function template's contract for an instance (EDG bug 0020 fix, fork series L) has its own class
+        # and its own operator(), but no lambda record.  It is a closure class when EDG's own flag on its class
+        # supplement says so AND its scope holds the lambda body (an `operator()` with is_lambda_body): both,
+        # never a printed name.
+        body_scopes = set()
+        for r in il.by_kind.get("routine", []):
+            if r.flag("is_lambda_body"):
+                ps = il.ref(r.get("parent_scope"))
+                if ps is not None:
+                    body_scopes.add(ps.id)
+        for t in il.by_kind.get("type", []):
+            if t.get("kind") != "tk_class":
+                continue
+            sup = il.ref(t.get("extra_info"))
+            if sup is None or not sup.flag("is_lambda_closure_class"):
+                continue
+            sc = il.ref(sup.get("assoc_scope"))
+            if sc is not None and sc.id in body_scopes:
+                self.closure_ids.add(t.id)
         # problems found while building the views, reported by analyse(): the IL
         # itself is inconsistent with the listing's classification of routines
         self.view_mismatches: List[str] = []

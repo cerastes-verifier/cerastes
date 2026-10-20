@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 """Mutation testing of the must-verify tests (plan.md M3, decisions 0011, 0012).
 
-    python3 scripts/mutate.py [--validate] [-j N] [paths ...]     (default: tests/scalar)
+    python3 scripts/mutate.py [--validate | --list] [-j N] [paths ...]     (default: tests/scalar)
 
 Every `// expect: verified` test under the paths (C and C++, in each of its
 modes) is mutated one place at a time, and each mutant is verified with
@@ -39,16 +39,42 @@ The original must verify in every mode first, or the run fails.
 
 The safe-direction bucket.  A mutant of a *contract* that makes the specification
 easier to meet is a correct program, and a sound verifier must accept it: a
-stronger `requires` (the callers in the file still meet it, or the body has less to
-prove), a weaker `ensures` or `check` (the body proves more than the clause says).
+stronger `requires` (the body has less to prove; a caller in the file may fail it), a
+weaker `ensures` (the body proves more than the clause says; a caller may rely on it) or
+`check` (the body proves more than the clause says; nothing relies on a check).
 Such a mutant that survives is counted in its own bucket, `safe-direction`, reported
 per test and in total, and is not required to be killed and not listed.  The
 direction is decided by comparing the original clause with the mutated one (the two
 clauses are evaluated on a grid of values that holds every literal of either clause
 and its neighbours, 0, +-1, 2 and 3, for every variable; `stronger` means the mutant
-is true nowhere the original is false and false somewhere the original is true).  A
-pair that cannot be evaluated (a conditional expression, an unknown construct) is
-`unknown`, never safe.  The other contract mutants, a weaker `requires`, a
+is true nowhere the original is false and false somewhere the original is true).  The
+grid is plain mathematics on Python integers, so it is trusted only where it models C:
+a mutant is bucketed *only when all of these hold*, and is `unknown` (never bucketed)
+otherwise:
+
+* every variable of the clause, original and mutant, is a parameter of the enclosing
+  function (read from its signature) of a signed builtin integer type (`signed char`,
+  `short`, `int`, `long`, `long long`, with an optional `signed` or `const`; not `bool`,
+  plain `char`, anything unsigned, a typedef, a pointer or a reference); the result name
+  of an `ensures` counts only if the return type is one; for a `check`, a name that the
+  body declares again (a local that may shadow the parameter) does not count; a contract
+  of a declaration without a body has no signature to read, so it is `unknown`;
+* the clause is linear: only `+ - < <= > >= == != && || !` and parentheses, decimal
+  literals without a `u` suffix, and `*` only with a literal operand (no product of two
+  variables, no `/`, `%`, `<<`, `>>`, bit operations, `?:`, casts, calls or subscripts);
+* the mutation is not an `==` <-> `!=` flip (a flip of equality is `unknown`);
+* for a stronger `requires` or a weaker `ensures` (not a `check`), the function is used
+  nowhere else in the file (a call, a recursive call, its address, a mention in a
+  contract): a use means that the mutant must be killed by a failure at the use, or be
+  listed (a caller may fail the stronger precondition, or rely on the weaker
+  postcondition).
+
+A pair that cannot be evaluated (a construct the grid does not know) is `unknown` too.
+Known gaps remain, listed in the handoff and deferred to the triage session: C precedence
+of `!` and chained comparisons, literal coefficients of `*`, the well-definedness of a
+contract after a dropped guard, and uses of the function inside a `#define` body or a
+default argument.
+The other contract mutants, a weaker `requires`, a
 stronger `ensures` or `check`, any change of an `invariant` or a `decreases`, one
 that leaves the clause's meaning unchanged, and every mutant of code, are never
 bucketed: each must be killed or listed.
@@ -59,7 +85,9 @@ equivalent (or intended), apart from those of the safe-direction bucket: lines `
 a mutant which is not generated, which does not survive, or which the
 safe-direction bucket already covers, is stale and fails the run (so a fixed test or an edited source cannot leave a stale excuse).
 
-`--validate` only generates: it checks that the sources lex (balanced braces and
+`--list` generates, prints the id of every mutant (sorted) and exits 0 without running
+anything: it needs no verifier and no environment (a source that cannot be generated is
+reported on stderr and exits 1).  `--validate` only generates: it checks that the sources lex (balanced braces and
 parentheses), that every mutant differs from its original, that the ids are
 unique, and the equivalence list (format and staleness against the generated
 ids).  It needs no verifier and runs in `scripts/check.sh`; the full run (about
@@ -452,9 +480,10 @@ _CONTRACT_RE = re.compile(r"CERASTES_(REQUIRES|ENSURES|CHECK|INVARIANT|DECREASES
 
 
 def contract_clause(src: str, offset: int):
-    """(macro name, clause start, clause end) of the `CERASTES_*(...)` call whose
-    argument contains `offset`, with the result name of `ENSURES(r, ...)` left out,
-    or None when the offset is not in the argument of one."""
+    """(macro name, clause start, clause end, result name) of the `CERASTES_*(...)` call
+    whose argument contains `offset`, with the result name of `ENSURES(r, ...)` left out
+    of the clause (the name is the fourth item, None when there is none), or None when
+    the offset is not in the argument of one."""
     for m in _CONTRACT_RE.finditer(src):
         i = m.end()
         depth, j = 1, i
@@ -464,11 +493,13 @@ def contract_clause(src: str, offset: int):
         if not (i <= offset < j - 1):
             continue
         start, end = i, j - 1
+        binder = None
         if m.group(1) == "ENSURES":
-            b = re.match(r"\s*[A-Za-z_]\w*\s*,", src[start:end])
+            b = re.match(r"\s*([A-Za-z_]\w*)\s*,", src[start:end])
             if b:
                 start += b.end()
-        return m.group(1), start, end
+                binder = b.group(1)
+        return m.group(1), start, end, binder
     return None
 
 
@@ -547,21 +578,164 @@ def clause_relation(original: str, mutant: str) -> str:
     return "weaker" if orig_implies_mut else "stronger"
 
 
+# The types of a parameter (or a result) whose clauses the grid models: the signed builtin
+# integer types, `const` allowed.  Not `bool`, plain `char`, anything unsigned, a typedef, a
+# pointer or a reference: those wrap, are range-limited differently, or are not integers.
+_SIGNED_TYPES = {tuple(sorted(t)) for t in (
+    ("signed", "char"), ("short",), ("short", "int"), ("signed", "short"), ("signed", "short", "int"),
+    ("int",), ("signed",), ("signed", "int"),
+    ("long",), ("long", "int"), ("signed", "long"), ("signed", "long", "int"),
+    ("long", "long"), ("long", "long", "int"), ("signed", "long", "long"),
+    ("signed", "long", "long", "int"))}
+_STORAGE_WORDS = {"static", "inline", "extern", "constexpr", "_Noreturn", "consteval"}
+# The tokens a clause may have for the grid to model it: linear integer arithmetic over signed
+# parameters, comparisons and logic.  Everything else (`/`, `%`, shifts, bit operations, `?:`,
+# casts (their type words are identifiers that are no parameter), calls, subscripts, `++`) is
+# unknown.  `*` is checked apart (a product needs a literal operand).
+_LINEAR_OPS = {"+", "-", "*", "<", "<=", ">", ">=", "==", "!=", "&&", "||", "!", "(", ")"}
+_DECIMAL_RE = re.compile(r"^[0-9]+[lL]{0,2}$")  # no `u` suffix, no hex, no float
+_NOT_A_DECLARATION_PREFIX = {"return", "else", "do", "case", "goto", "sizeof"}
+
+
+def is_signed_builtin(words) -> bool:
+    """Whether the type words (without `const`) name a signed builtin integer type."""
+    words = [w for w in words if w != "const"]
+    return tuple(sorted(words)) in _SIGNED_TYPES
+
+
+@dataclasses.dataclass(frozen=True)
+class Signature:
+    name: str
+    decl_start: int  # offset of the first token of the declaration (the contracts are after the `)`)
+    body_end: int  # offset after the closing brace
+    returns_signed: bool
+    signed_params: frozenset  # names of the parameters of a signed builtin integer type
+    body_decl_names: frozenset  # identifiers that follow another identifier in the body (`T x`)
+
+
+def function_signatures(src: str) -> list[Signature]:
+    """The signature of each function that has a body, and the identifiers that its body
+    may declare (a declaration `T name` can shadow a parameter in a nested block)."""
+    tokens = lex(src)
+    pair = matching(tokens)
+    out = []
+    for o, c in function_bodies(tokens, pair):
+        u = o - 1
+        while u >= 0 and not (tokens[u].kind == "op" and tokens[u].text in (";", "}", "{")):
+            u -= 1
+        v = next((k for k in range(u + 1, o)
+                  if tokens[k].text == "(" and k > 0 and tokens[k - 1].kind == "ident"), None)
+        if v is None:
+            continue
+        ret = [t.text for t in tokens[u + 1:v - 1] if t.text not in _STORAGE_WORDS]
+        params: list[list[Token]] = [[]]
+        depth = 0
+        for t in tokens[v + 1:pair[v]]:
+            if t.kind == "op" and t.text in _OPEN:
+                depth += 1
+            elif t.kind == "op" and t.text in _CLOSE:
+                depth -= 1
+            if depth == 0 and t.kind == "op" and t.text == ",":
+                params.append([])
+            else:
+                params[-1].append(t)
+        signed = set()
+        for p in params:
+            if len(p) >= 2 and p[-1].kind == "ident" and all(t.kind == "ident" for t in p) \
+                    and is_signed_builtin([t.text for t in p[:-1]]):
+                signed.add(p[-1].text)
+        declared = {tokens[k].text for k in range(o + 1, c)
+                    if tokens[k].kind == "ident" and tokens[k - 1].kind == "ident"
+                    and tokens[k - 1].text not in _NOT_A_DECLARATION_PREFIX}
+        out.append(Signature(tokens[v - 1].text, tokens[u + 1].start, tokens[c].end,
+                             is_signed_builtin(ret) and all(w.isidentifier() for w in ret),
+                             frozenset(signed), frozenset(declared)))
+    return out
+
+
+def has_caller(src: str, name: str) -> bool:
+    """Whether the identifier `name` occurs in a function body or in a contract of the file (a
+    call, a recursive call, the address taken: any use a stronger `requires` could break)."""
+    tokens = lex(src)
+    pair = matching(tokens)
+    inside = [False] * len(tokens)
+    for o, c in function_bodies(tokens, pair) + macro_argument_ranges(tokens, pair):
+        for k in range(o + 1, c):
+            inside[k] = True
+    return any(t.kind == "ident" and t.text == name and inside[k] for k, t in enumerate(tokens))
+
+
+def clause_is_modelled(clause: str, allowed: frozenset) -> bool:
+    """Whether every identifier of `clause` is in `allowed` (or `true`/`false`) and the clause
+    is linear over them: only the operators of `_LINEAR_OPS`, decimal literals without an
+    unsigned suffix, and a `*` only between a literal and a variable or literal."""
+    try:
+        tokens = lex(clause)
+    except LexError:
+        return False
+    for k, t in enumerate(tokens):
+        if t.kind == "ident":
+            if t.text not in allowed and t.text not in ("true", "false"):
+                return False
+        elif t.kind == "number":
+            if not _DECIMAL_RE.match(t.text):
+                return False
+        elif t.kind == "op":
+            if t.text not in _LINEAR_OPS:
+                return False
+            if t.text == "*":
+                left = tokens[k - 1] if k > 0 else None
+                right = tokens[k + 1] if k + 1 < len(tokens) else None
+                if left is None or right is None:
+                    return False
+                if not ({left.kind, right.kind} <= {"ident", "number"} and "number" in (left.kind, right.kind)):
+                    return False
+                far_left = tokens[k - 2] if k > 1 else None
+                far_right = tokens[k + 2] if k + 2 < len(tokens) else None
+                if (far_left is not None and far_left.text == "*") or \
+                        (far_right is not None and far_right.text == "*"):
+                    return False  # `x * 2 * y`: a product of variables
+        else:
+            return False  # a string or character literal
+    return True
+
+
 def is_safe_direction(m: "Mutant", src: str) -> bool:
     """A mutant of a contract that makes it easier to meet: a stronger `requires`, a
     weaker `ensures` or `check`.  Never a mutant of code, and never an `invariant` or
-    a `decreases`."""
+    a `decreases`.  Bucketed only when the grid models the clause (see the module
+    docstring): every variable a signed builtin integer parameter of the enclosing function (the
+    `ensures` result only if the return type is one), a linear clause, no `==`/`!=` flip,
+    and, for a stronger `requires` or a weaker `ensures`, no use of the function in the file."""
     found = contract_clause(src, m.start)
     if found is None or found[0] not in ("REQUIRES", "ENSURES", "CHECK"):
         return False
+    if m.op == "relop" and m.original in ("==", "!="):
+        return False  # a flip of equality is `unknown`: never bucketed
+    sig = next((s for s in function_signatures(src) if s.decl_start <= found[1] < s.body_end), None)
+    if sig is None:
+        return False  # a contract of a bodyless declaration: no signature to read the types from
+    allowed = set(sig.signed_params)
+    if found[0] == "ENSURES" and sig.returns_signed and found[3] is not None:
+        allowed.add(found[3])
+    if found[0] == "CHECK":
+        allowed -= sig.body_decl_names  # a local of the same name may shadow the parameter
+    if found[0] in ("REQUIRES", "ENSURES") and has_caller(src, sig.name):
+        # a caller may fail the stronger precondition, or rely on the postcondition that is now
+        # weaker: the mutant must be killed by a failure at the use, or be listed
+        return False
+    if not clause_is_modelled(src[found[1]:found[2]], frozenset(allowed)):
+        return False
     # the start of the clause is before the changed text (or is it), so it is inside the same call
     # in the mutated source, also when the whole tail of the clause was dropped
-    mutated = contract_clause(m.apply(src), found[1])
+    msrc = m.apply(src)
+    mutated = contract_clause(msrc, found[1])
     if mutated is None or mutated[0] != found[0]:
         return False
-    original = src[found[1]:found[2]]
-    msrc = m.apply(src)
-    relation = clause_relation(original, msrc[mutated[1]:mutated[2]])
+    mutant_clause = msrc[mutated[1]:mutated[2]]
+    if not clause_is_modelled(mutant_clause, frozenset(allowed)):
+        return False
+    relation = clause_relation(src[found[1]:found[2]], mutant_clause)
     return relation == ("stronger" if found[0] == "REQUIRES" else "weaker")
 
 
@@ -866,7 +1040,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--validate", action="store_true",
                         help="only generate and check the mutants and the equivalence list")
     parser.add_argument("-j", "--jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2))
-    parser.add_argument("--list", action="store_true", help="print every mutant id")
+    parser.add_argument("--list", action="store_true",
+                        help="print every mutant id and exit (with --validate: and validate)")
     parser.add_argument("--equivalents", type=Path, default=ROOT / EQUIVALENT_FILE,
                         help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
@@ -898,6 +1073,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.list:
         for mid in sorted(generated):
             print(mid)
+        if not args.validate:
+            for p in problems:  # generation problems are still problems, but nothing is run
+                print(p, file=sys.stderr)
+            return 1 if problems else 0  # --list only lists: it never starts a run
     if args.validate:
         safe_all = {mid for s in subjects for mid in s.safe}
         problems += check_equivalents(eq, generated, None, safe_all)

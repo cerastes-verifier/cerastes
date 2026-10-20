@@ -1060,6 +1060,46 @@ class TerminationClauseTests(unittest.TestCase):
         probs = lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
         self.assertTrue(any("`decreases` does not start its line" in p for p in probs), probs)
 
+    def _loop_measure(self, text, error_id="termination.failed"):
+        lines = good_lines()
+        lines[find(lines, "    decreases y - i__1")] = Check(text, error_id, "termination")
+        return lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+
+    def test_decreases_star_is_a_problem_on_a_loop(self):
+        # `decreases *` switches Silicon's termination check off (invariant 4, decision 0013)
+        probs = self._loop_measure("    decreases *")
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`decreases *` assumes termination", probs[0])
+        self.assertIn("decision 0013", probs[0])
+
+    def test_decreases_star_is_a_problem_on_a_method_even_a_trusted_one(self):
+        # `decreases _` is allowed on the trusted bodyless method; `*` never is
+        probs = lv.lint_vpr(*build(self._replaced("  ensures res > x", "  decreases", "  decreases *")),
+                            "t.vpr", "t.vpr.map")
+        self.assertTrue(any("`decreases *` assumes termination" in p for p in probs), probs)
+        probs = lv.lint_vpr(*build(self._replaced("  ensures -2147483648 <= res && res <= 2147483647",
+                                                  "  decreases _", "  decreases *")), "t.vpr", "t.vpr.map")
+        self.assertTrue(any("`decreases *` assumes termination" in p for p in probs), probs)
+
+    def test_decreases_star_among_a_list_of_measures_is_a_problem(self):
+        probs = self._loop_measure("    decreases y - i__1, *")
+        self.assertTrue(any("`decreases *` assumes termination" in p for p in probs), probs)
+
+    def test_a_product_in_a_measure_is_not_decreases_star(self):
+        # the twin of the star rule: a `*` inside a measure is arithmetic
+        self.assertEqual(self._loop_measure("    decreases (y - i__1) * 2"), [])
+
+    def test_a_conditional_decreases_is_a_problem(self):
+        probs = self._loop_measure("    decreases y - i__1 if y > 0")
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("conditional `decreases <measure> if <condition>`", probs[0])
+        probs = lv.lint_vpr(*build(self._replaced("  ensures res > x", "  decreases", "  decreases if true")),
+                            "t.vpr", "t.vpr.map")
+        self.assertTrue(any("conditional `decreases" in p for p in probs), probs)
+
+    def test_an_identifier_containing_if_is_not_a_conditional_decreases(self):
+        self.assertEqual(self._loop_measure("    decreases y - i__1 + gif - elif_"), [])
+
     def test_a_termination_error_id_still_needs_a_known_category(self):
         text, map_text = edited()
         bad = map_text.replace("termination.failed\ttermination", "termination.failed\tnonsense", 1)

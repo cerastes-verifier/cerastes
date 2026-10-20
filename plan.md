@@ -294,6 +294,15 @@ There is deliberately no user-facing `assume`.
 
 ---
 
+## CI session (before M4)
+
+Owner, 2026-10-16 and 2026-10-20: CI for the repository is its own session, run before M4. It opens with the two
+items the M3 close-out left for it, both needing the x86-64 box: merge upstream EDG `main` into the fork's
+`cerastes` with a box run before the pin moves (decision 0009), and explain why branch `0020` alone fails its own
+test on Linux.
+
+---
+
 ## M4 — Generic templates I: reproduce #1034/#1041 · **Gate G2**
 
 **Goal:** parity with the VeriFast PRs. A template is verified once, and the result is used at every eligible call site.
@@ -310,6 +319,7 @@ There is deliberately no user-facing `assume`.
 - **Call sites:** instance routine → `assoc_template`. Use the generic proof when every integral argument is a builtin integer type other than `bool`; otherwise verify the instance with the M3 encoder.
 - **Fallback:** if the generic proof fails, verify per instantiation for the types actually instantiated, and report which templates fell back.
 - Write `internal/soundness/prototype-correspondence.md`: for every construct the checker accepts, the prototype parse and every real instantiation's parse agree. This is the lemma Clang gave for free.
+- **The `predicate`/`pure` marker on the first declaration** (owner, 2026-10-20, M3 handoff question 2): a small fork series commit giving EDG's attribute registration a way to refuse an accumulating attribute on a later declaration; cerastes registers it for `predicate` and `pure`.
 - User docs: a "Generic templates" page covering:
   - when a template is verified once;
   - the eligibility rules in user terms;
@@ -339,6 +349,8 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
   - Emit a Viper method checking `req.pre ⇒ ovl.pre` and `ovl.post ⇒ req.post`.
   - Builtin operations use M3 semantics.
 
+**Contract manifest** (owner, 2026-10-20, M3 handoff question 3): the manifest of the contracts a unit relies on (M2 handoff §6), which cross-unit termination needs (0013 item 5). Schedule it here; if it does not fit M5, move it to M6 and say why in the handoff.
+
 **Tests (`tests/concepts/`)**
 - A user type whose overload satisfies the requirement contract (must verify).
 - An overload with a weaker postcondition (must fail at the instantiation site, reporting both locations).
@@ -364,6 +376,7 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
 - Predicates and pure functions from `[[cerastes::predicate]]`/`[[cerastes::pure]]` C++ functions, with `fold`/`unfold`.
 - Arrays via a `loc(a, i)` domain plus quantified permissions, exposed as `owns_range`.
 - `forall` lowered from lambdas.
+- This can take inspiration from VerCors which already implements these features for viper
 
 **Rejected with diagnostics (for now):** unions, `reinterpret_cast`, character-type aliasing, pointer arithmetic outside arrays, virtual dispatch, exceptions, concurrency.
 

@@ -9,6 +9,8 @@
 //   (X)   one unevaluated expression
 //   (X+)  one or more unevaluated expressions
 //   r     a routine (a function; for RAF_ENTITY_ATTACHED, after the parameter list)
+// Flags used below: RAF_ENTITY_ATTACHED (the attribute is attached to the routine), RAF_MUST_MATCH (redeclarations
+// must repeat it), RAF_NO_CONSTANT_EVALUATION (no compile-time evaluation of the routine)
 //   s:+i! a statement that is an iteration statement
 //   s:+n! a statement that is a null statement
 #include "register_attributes.h"
@@ -42,8 +44,12 @@ const an_attr_registration kAttributes[] = {
     {"unfold", "(X)", "s:+n!", RAF_NO_FLAGS},
     // predicate/pure accumulate (no must-match): the mark on the first
     // declaration covers the definition (0006 item 6).
-    {"predicate", "", "r", RAF_ENTITY_ATTACHED},
-    {"pure", "", "r", RAF_ENTITY_ATTACHED},
+    // RAF_NO_CONSTANT_EVALUATION (fork commit P): the front end does not evaluate a call of such a routine at
+    // compile time (a constexpr/consteval use is refused with EDG's own diagnostic, a defaulted function cannot
+    // carry the marker).  It reads the attributes the routine has when it is called, so a marker that is only on a
+    // later redeclaration does not stop an earlier use (first-declaration gap, M4; decision 0007).
+    {"predicate", "", "r", RAF_ENTITY_ATTACHED | RAF_NO_CONSTANT_EVALUATION},
+    {"pure", "", "r", RAF_ENTITY_ATTACHED | RAF_NO_CONSTANT_EVALUATION},
     {nullptr, nullptr, nullptr, RAF_NO_FLAGS},
 };
 

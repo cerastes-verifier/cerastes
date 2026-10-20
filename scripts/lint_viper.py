@@ -25,6 +25,10 @@ status 1) on:
 * a position map that is not in the format of encoding.md section 5, a map entry
   for a line that is not there (past the end, blank or a comment), the same
   Viper error id twice for one line, or a missing map;
+* termination clauses (decision 0013 item 5): a method or `while` without a
+  `decreases` clause, `decreases _` anywhere but on a bodyless method with the
+  trusted-contract tag, `decreases *` (it assumes termination: invariant 4) and a
+  conditional `decreases <measure> if <condition>`;
 * an empty input set, and a MANIFEST that names a file which is not there.  The
   manifest is the set of files scripts/run_tests.py expects: its first line is
   `# run-id: <id>` (printed by the run), then one file per line.  Fewer files
@@ -381,6 +385,23 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     return problems
 
 
+def _top_level_items(measure: str) -> list[str]:
+    """The comma-separated items of a `decreases` measure (commas inside brackets do not split)."""
+    items, depth, cur = [], 0, ""
+    for ch in measure:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        if ch == "," and depth == 0:
+            items.append(cur.strip())
+            cur = ""
+        else:
+            cur += ch
+    items.append(cur.strip())
+    return items
+
+
 def lint_termination_clauses(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
     """Decision 0013 item 5: Silicon checks termination only where a `decreases` clause is present, so every
     method (the `__wf` methods too, with an empty measure) and every `while` has one; and `decreases _`, which
@@ -404,6 +425,16 @@ def lint_termination_clauses(src: Source, decls: list[Decl], add: Callable[[int,
             if not ok:
                 add(lineno, "`decreases _` assumes termination (invariant 4): it is allowed only on a "
                             "bodyless method that carries `// cerastes:trusted-contract <reason>`")
+        if m:
+            measure = m.group("measure")
+            if "*" in _top_level_items(measure):
+                add(lineno, "`decreases *` assumes termination (invariant 4, decision 0013): Silicon "
+                            "does not check the termination of what carries it; the emitter produces "
+                            "a measure, an empty `decreases`, or `decreases _` on a trusted bodyless method")
+            if re.search(r"(?<![\w$'])if(?![\w$'])", measure):
+                add(lineno, "conditional `decreases <measure> if <condition>` is not allowed (decision 0013): "
+                            "termination is checked only where the condition holds, so the measure must be "
+                            "unconditional")
     for lineno, code in enumerate(src.code, start=1):
         for _w in WHILE_WORD_RE.finditer(code):
             body = next((ln for ln in range(lineno, len(src.code) + 1) if "{" in src.code[ln - 1]), len(src.code))
