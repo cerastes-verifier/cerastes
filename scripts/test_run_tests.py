@@ -3102,13 +3102,24 @@ class HtmlCheckTests(DocLintCase):
 
 def active_lines(text, comment="#"):
     """The lines of a script or workflow without comments (whole-line and
-    trailing ` #` ones)."""
+    trailing ` #` ones).  Only space and tab count as blanks: U+00A0, U+2003, CR and FF are not
+    boundaries for bash or YAML, so `cmd<NBSP>#<NBSP>|| true` is not a comment there (see
+    non_ascii_problems, which the guards of the CI files apply first)."""
     out = []
     for line in text.split("\n"):
-        if line.lstrip().startswith(comment):
+        if line.lstrip(" \t").startswith(comment):
             continue
-        out.append(re.split(r"\s#\s", line)[0].rstrip())
+        out.append(re.split(r"[ \t]#[ \t]", line)[0].rstrip(" \t"))
     return out
+
+
+def non_ascii_problems(text):
+    """A guarded file (check.sh, ci.sh, ci.yml, docs.yml) holds printable ASCII, tab and newline
+    only: Unicode spaces, CR and FF look like blanks to this self-test and not to bash or YAML,
+    so a payload can hide behind them in what looks like a comment."""
+    return [f"line {n}: U+{ord(c):04X} is not printable ASCII, tab or newline"
+            for n, line in enumerate(text.split("\n"), 1) for c in line
+            if not (0x20 <= ord(c) <= 0x7e or c == "\t")]
 
 
 EVASIONS = ("||", "; true", ";true", "set +e", "continue-on-error", "if:")
@@ -3124,7 +3135,7 @@ def check_sh_problems(text):
     build: both lint calls and the build must be active (not commented out),
     in order, with no way to ignore a failure."""
     lines = active_lines(text)
-    problems = []
+    problems = non_ascii_problems(text)
     if not any(re.match(r"^set -[A-Za-z]*e", l) for l in lines):
         problems.append("check.sh does not `set -e`")
     for l in lines:
@@ -3237,10 +3248,10 @@ def workflow_problems(text):
     lint, then the build, then `--html build/doc`, as plain steps."""
     job = re.search(r"^  build:\n(.*?)(?=^  \w[\w-]*:\n|\Z)", text, re.S | re.M)
     if not job:
-        return ["no `build` job"]
+        return non_ascii_problems(text) + ["no `build` job"]
     lines = active_lines(job.group(1))
     steps, cur = [], None
-    problems = []
+    problems = non_ascii_problems(text)
     for line in lines:
         # a step starts at every `- ` at the steps' indentation, whatever its first key is
         # (`- if: false` before `name:` must not be merged into the step before it)
@@ -3370,6 +3381,12 @@ jobs:
                 "scripts/build_docs.sh\n", html + "scripts/build_docs.sh\n"),
             "html wrong directory": self.SH.replace("--html build/doc", "--html other"),
             "html without the flag": self.SH.replace("--html build/doc", ""),
+            "NBSP hiding `|| true` after the html check": self.SH.replace(html, html[:-1] + "\u00a0#\u00a0|| true\n"),
+            "em space hiding `|| true` after the html check": self.SH.replace(html, html[:-1] + "\u2003#\u2003|| true\n"),
+            "CR hiding `|| true` after the html check": self.SH.replace(html, html[:-1] + "\r#\r|| true\n"),
+            "FF hiding `|| true` after the html check": self.SH.replace(html, html[:-1] + "\f#\f|| true\n"),
+            "NBSP comment line hiding a payload": self.SH.replace(html, html + "\u00a0# ||: > scripts/check.sh\n"),
+            "CR hiding a payload after a step": self.SH.replace(html, html + 'step "x"\r# ; : > scripts/check.sh\n'),
         }
         for what, text in mutations.items():
             with self.subTest(what):
@@ -3583,6 +3600,14 @@ jobs:
                 "      - name: Upload\n",
                 "      - name: Build\n        run: scripts/build_docs.sh\n      - name: Upload\n"),
             "html wrong directory": self.YML.replace("--html build/doc", "--html other"),
+            "NBSP hiding `|| true` after the build": self.YML.replace(
+                "        run: scripts/build_docs.sh\n", "        run: scripts/build_docs.sh\u00a0#\u00a0|| true\n"),
+            "em space hiding `|| true` after the build": self.YML.replace(
+                "        run: scripts/build_docs.sh\n", "        run: scripts/build_docs.sh\u2003#\u2003|| true\n"),
+            "CR hiding `|| true` after the build": self.YML.replace(
+                "        run: scripts/build_docs.sh\n", "        run: scripts/build_docs.sh\r#\r|| true\n"),
+            "FF hiding `|| true` after the build": self.YML.replace(
+                "        run: scripts/build_docs.sh\n", "        run: scripts/build_docs.sh\f#\f|| true\n"),
             "job-level if before the steps": self.YML.replace(
                 "    runs-on: ubuntu-latest\n    steps:\n      - name: Lint the examples\n",
                 "    runs-on: ubuntu-latest\n    if: false\n    steps:\n      - name: Lint the examples\n"),
@@ -4124,7 +4149,7 @@ def ci_sh_problems(text):
     `exit`, `|| true`, a background `&`, a changed `want`, `set +e`, a moved or loosened line)."""
     lines = [l for l in active_lines(text) if l.strip()]
     stripped = [l.strip() for l in lines]
-    problems = []
+    problems = non_ascii_problems(text)
     # the whole active text, pinned: what the rules below cannot name (a `break`, a redefined
     # `realpath`, a reassigned constant, an extra command) still cannot get in
     if tuple(lines) != CI_SH_CANONICAL:
@@ -4310,7 +4335,9 @@ def ci_yml_normalized(lines):
         if not l.strip():
             continue
         l = re.sub(r"(\buses:\s*[\w./-]+@)[0-9a-f]{40}$", r"\1<sha>", l)
-        l = re.sub(r"^( {4}|      - )name: .*$", r"\1name: <name>", l)
+        # a name is blanked only if it is a plain scalar that cannot open a quote, a block or a flow
+        # (`name: "Check` ... `name: Upload"` is one multi-line name that swallows the steps between)
+        l = re.sub(r"^( {4}|      - )name: [A-Za-z0-9][A-Za-z0-9 ().,_/-]*$", r"\1name: <name>", l)
         l = re.sub(r"^( {4}timeout-minutes: )[1-9][0-9]*$", r"\1<n>", l)
         l = re.sub(r"^( {6}CERASTES_JOBS: )[1-9][0-9]*$", r"\1<n>", l)
         out.append(l)
@@ -4342,7 +4369,7 @@ def ci_workflow_problems(text):
     the runner, the timeout and the job environment; every action pinned to a commit SHA; the
     checkout; and plain `scripts/ci.sh` then `scripts/check.sh` steps that cannot be ignored."""
     lines = active_lines(text)
-    problems = []
+    problems = non_ascii_problems(text)
     # the whole active text, pinned but for the SHAs, the names, the timeout and the job count: what
     # the rules below cannot name (an extra step, an extra line in a script, a `ref:` under the
     # checkout's `with:`) still cannot get in
@@ -4504,8 +4531,8 @@ class CiGuardTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.YML = cls.YML_PATH.read_text()
-        cls.SH = cls.SH_PATH.read_text()
+        cls.YML = cls.YML_PATH.read_bytes().decode("utf-8")
+        cls.SH = cls.SH_PATH.read_bytes().decode("utf-8")
 
     # ----- ci.yml -----
 
@@ -4641,6 +4668,23 @@ class CiGuardTests(unittest.TestCase):
         sub("a top-level env", "permissions:\n", "env:\n  X: y\npermissions:\n")
         sub("top-level defaults", "permissions:\n", "defaults:\n  run:\n    shell: bash {0}\npermissions:\n")
         # the whole active text is pinned but for SHAs, names, the timeout and the job count
+        for quote in ('"', "'"):
+            out[f"a {quote}-quoted name swallowing the check step"] = Y.replace(
+                "      - name: Check everything\n", f"      - name: {quote}Check everything\n", 1).replace(
+                "      - name: Upload the evidence\n", f"      - name: Upload the evidence{quote}\n", 1)
+        sub("a block name", "      - name: Check everything\n", "      - name: |\n          Check everything\n")
+        sub("a folded name", "      - name: Upload the evidence\n", "      - name: >\n          Upload the evidence\n")
+        sub("a name with a colon", "      - name: Check everything\n", "      - name: Check everything: x\n")
+        sub("a name with an anchor", "      - name: Check everything\n", "      - name: &x Check everything\n")
+        sub("a flow name", "      - name: Check everything\n", "      - name: [Check everything]\n")
+        sub("the job name with a quote", "    name: check (macOS", "    name: 'check (macOS")
+        # a character that bash and YAML do not take for a blank, hiding a payload as a comment
+        for label, ch in (("NBSP", "\u00a0"), ("em space", "\u2003"), ("CR", "\r"), ("FF", "\f")):
+            sub(f"{label} hiding `|| true` after check.sh", check_run, check_run[:-1] + f"{ch}#{ch}|| true\n")
+            sub(f"{label} hiding `|| true` after ci.sh", ci_run, ci_run[:-1] + f"{ch}#{ch}|| true\n")
+            sub(f"{label} comment line in the cache-key script", "          silicon_head=",
+                f"          {ch}# ||: > scripts/check.sh\n          silicon_head=")
+            sub(f"{label} after a step name", "      - name: Checkout\n", f"      - name: Checkout{ch}\n")
         sub("an added step", "      - name: Upload the evidence\n",
             "      - name: Print\n        run: echo hi\n      - name: Upload the evidence\n")
         sub("a step that overwrites check.sh before it runs", self.CHECK_STEP,
@@ -4864,6 +4908,14 @@ class CiGuardTests(unittest.TestCase):
         sub("PATH set by declare -x", "step \"machine\"\n", "step \"machine\"\ndeclare -x PATH=/x:$PATH\n")
         sub("another script sourced", "step \"machine\"\n", "step \"machine\"\n. /tmp/x\n")
         sub("another script sourced with source", "step \"machine\"\n", "step \"machine\"\nsource /tmp/x\n")
+        for label, ch in (("NBSP", "\u00a0"), ("em space", "\u2003"), ("CR", "\r"), ("FF", "\f")):
+            sub(f"{label} hiding a payload after a step", 'step "bootstrap"\n',
+                f'step "bootstrap"{ch}# ; : > scripts/check.sh\n')
+            sub(f"{label} hiding a payload as a comment line", 'step "bootstrap"\n',
+                f'step "bootstrap"\n{ch}# ||: > scripts/check.sh\n')
+            sub(f"{label} hiding `|| true` after an assertion", "python3 scripts/edg_tree.py check\n",
+                f"python3 scripts/edg_tree.py check{ch}#{ch}|| true\n")
+            sub(f"{label} after a pinned line", "cd \"$ROOT\"\n", f"cd \"$ROOT\"{ch}\n")
         sub("an assertion OR-ed with another test", '|| want "xcrun cannot find clang"',
             '|| [[ -n "$CI" ]] || want "xcrun cannot find clang"')
         return out
@@ -4916,15 +4968,17 @@ class RealDocTreeTests(unittest.TestCase):
 
     def test_ci_workflow_and_script_pass_their_guards(self):
         # decision 0016: the real ci.yml and scripts/ci.sh are what CiGuardTests pins
-        self.assertEqual(ci_workflow_problems((REAL_ROOT / ".github" / "workflows" / "ci.yml").read_text()), [])
-        self.assertEqual(ci_sh_problems((REAL_ROOT / "scripts" / "ci.sh").read_text()), [])
+        self.assertEqual(ci_workflow_problems((REAL_ROOT / ".github" / "workflows" / "ci.yml").read_bytes().decode("utf-8")), [])
+        self.assertEqual(ci_sh_problems((REAL_ROOT / "scripts" / "ci.sh").read_bytes().decode("utf-8")), [])
+        for name in (".github/workflows/ci.yml", ".github/workflows/docs.yml", "scripts/ci.sh", "scripts/check.sh"):
+            self.assertEqual(non_ascii_problems((REAL_ROOT / name).read_bytes().decode("utf-8")), [], name)
 
     def test_check_sh_runs_the_lint_the_build_and_the_html_check(self):
-        text = (REAL_ROOT / "scripts" / "check.sh").read_text()
+        text = (REAL_ROOT / "scripts" / "check.sh").read_bytes().decode("utf-8")
         self.assertEqual(check_sh_problems(text), [])
 
     def test_the_docs_workflow_runs_the_lint_the_build_and_the_html_check(self):
-        text = (REAL_ROOT / ".github" / "workflows" / "docs.yml").read_text()
+        text = (REAL_ROOT / ".github" / "workflows" / "docs.yml").read_bytes().decode("utf-8")
         self.assertEqual(workflow_problems(text), [])
 
     def test_the_lint_reuses_the_harness_header_rules(self):
