@@ -11,3 +11,10 @@ int scale(unsigned short a)
 {
   return a * 65535;
 }
+
+// The exact result for the largest operand that fits: a weaker ensures or a stronger requires of `scale` fails here.
+int scale_max(void)
+    CERASTES_ENSURES(r, r == 2147450880)
+{
+  return scale(32768);
+}

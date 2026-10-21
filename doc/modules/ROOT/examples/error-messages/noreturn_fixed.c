@@ -12,6 +12,7 @@
 }
 
 int check_positive(int x)
+    CERASTES_ENSURES(r, r > 0)
 {
   if (x <= 0) {
     fail();

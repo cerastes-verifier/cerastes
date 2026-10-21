@@ -13,6 +13,7 @@ int small(int x)
 
 signed char narrow_result(int x)
     CERASTES_REQUIRES(x >= 0)
+    CERASTES_ENSURES(r, r <= 100)
 {
   return small(x);
 }

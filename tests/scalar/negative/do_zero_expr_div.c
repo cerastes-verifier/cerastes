@@ -6,7 +6,7 @@
 #include <cerastes.h>
 
 int ten_over(int x)
-    CERASTES_ENSURES(r, (x == 0 && r == 0) || (x == 1 && r == 10) || (x != 0 && x != 1 && r >= 0 - 10 && r <= 10))
+    CERASTES_ENSURES(r, (x == 0 && r == 0) || (x != 0 && r == 10 / x))
 {
   int y = 0;
   do {
