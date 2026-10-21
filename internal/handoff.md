@@ -181,21 +181,56 @@ most twice; anything that needs the x86-64 box is its own session. Record number
 
 **M4.1 Control flow** (done in the session that wrote this; see `internal/status.md`).
 
-**M4.2 Scalar declarations.**
-- Scope: forward `goto` and user labels (never backward, never into a loop, never past a declaration whose scope
-  the label is in); enumerations and enumerators with one meaning in `c23` and `c++20` (C's `int` enumerators vs
-  C++'s enum types and their value range; fixed underlying types); `const` globals (the initializer encoded, EDG's
-  folding not trusted, 0010 item 12); locals without an initializer (a read of an indeterminate value is an error:
-  definite assignment in the encoder, or a ghost "defined" flag asserted at each read — decide by spike; a new
-  category if it can fail at verification time); `_Noreturn`/`[[noreturn]]` functions (a call ends the path;
-  termination interplay with 0013); `<assert.h>` `assert` (a cerastes contract for the libc function it calls, so
-  `assert(e)` is a check of `e`).
-- Records: one (scalar declarations), amending 0010 item 2 and 0012 item 12.
-- Agents: il-analyst probes (enum IL in both modes, `goto`/label IL, uninitialized locals, `assert`'s expansion);
-  edg-backend encoder; test-mutator pairs, flips of `reject_goto.c`, `reject_enum.c`, `reject_uninit_local.c`,
-  `reject_global.c` (const only) — each flip needs the owner's pre-approval (invariant 1).
-- Stop rules: uninitialized locals first to go (to M4.3) if the spike is unclear; enums in C++ mode may stay
-  rejected if their value range rule needs more than a session.
+**M4.2 Scalar declarations — split into M4.2a, M4.2b, M4.2c** (owner, 2026-10-21: planning found about three
+sessions of work; a Plan-agent review found the cross-mode traps listed below). Owner decisions for all three:
+retirements pre-approved (`reject_goto.c`, `reject_noreturn.c` in M4.2a; `reject_case_variable.cpp`, `reject_enum.c`
+in M4.2b; `reject_uninit_local.c` in M4.2c — each deleted in the commit that lands its feature, replaced by
+positives, error twins and rejection tests of what stays rejected; `reject_global.c`, a mutable global, stays); a new
+category `noreturn`; a failing `assert(e)` is `check`; "verified" means returns satisfying `ensures` or ends the
+program through a noreturn call (0013 item 6 amended).
+
+**M4.2a Jumps and ends** (run 2026-10-21; record 0015). Forward `goto` and labels, "outward and forward" (the label
+is a later statement of a block enclosing the goto, after the encoder's flattening of generated blocks; never into a
+block, branch, switch body or loop; never past a declaration); `[[noreturn]]`/`_Noreturn` (`ensures false`, every
+reachable return asserts false, category `noreturn`); trusted libc `abort`/`exit`/`_Exit`; `<assert.h>` `assert`
+recognised by the macOS expansion's shape and checked as `check`. See `internal/status.md` for what landed.
+
+**M4.2b Named constants and enumerations** (record 0016).
+- `const`/`constexpr` globals, constant-initialized, defined in a verified file: uses take EDG's folded value as a
+  literal; a `globals__wf` method encodes each initializer by its original expression (used or not), asserts its
+  obligations at the initializer, then asserts equality with EDG's value as `internal` (as `DoOnce` does). Also: C's
+  `const int g;` (tentative, zero), const globals in contracts and annotations (`variable()` rejects them in
+  contracts today, `encode.cpp:642`), `const int g = g + 1` (C++), a self-test hook perturbing the literal (exit 3).
+  Rejected: `extern const` without a definition here, dynamic initialization, system-file globals, `volatile`,
+  `static const` locals (M4.5b with the other statics).
+- **Cross-mode trap (review, blocking):** a const global in a `do … while` condition is a folded constant 0 in C++
+  (`DoOnce`, no measure) but an `enk_variable` in C (a measured loop): a global in the condition must never make a
+  `DoOnce`, in either mode (0014 item 5's argument relies on it).
+- `case k` (const local), `case N` (const global), `case RED` (enumerator): `vir::Var::is_const`, `check_program`
+  rejects an `Assign` to a const local and accepts only const locals in case values (`check.cpp:317`), an `internal`
+  guard per case value against EDG's `case_value`. Case-value obligations are path-dependent today (asserted before
+  the dispatch, `lower.cpp:563-579`; an `if (0) switch` skips `case 1 << 40`, a C 6.6p4 constraint violation): assert
+  them path-independently.
+- Enumerations, one meaning (the stricter rule in both modes): an enum type's values are its C++ value range
+  ([dcl.enum]/8, computed by cerastes; the underlying type's range when fixed), every conversion to an enum type is
+  checked against it (`conversion`); enumerators are `int` constants (with a fixed underlying type, the enum's type,
+  in C23 and C++); enumerator values not fitting `int` rejected; implicit promotion of a non-constant enum operand in
+  arithmetic or ordering comparisons rejected (C promotes `unsigned int`-compatible enums to `unsigned int`, C++ to
+  `int`), `==`/`!=`/`switch`/assignment/explicit casts allowed (mode-independent while every enum value is in its
+  value range); compound assignment and `++`/`--` on enums rejected (they bypass EDG's conversion nodes in C, 0010
+  item 6); a `bool` underlying type rejected; `enum class` (C++) accepted. Enumerators without an initializer have no
+  `expr`.
+- Probe P25: EDG's compatible type for C enums with and without negative enumerators (clang/GCC are not evidence),
+  enumerator types per mode, fixed underlying types, the conversions EDG inserts; fix il-inventory's contradiction
+  (L1084 "`tk_enum`" vs L1344 "`tk_integer` with `enum_type`").
+
+**M4.2c Locals without an initializer** (record 0017). Recommended (review): definite assignment over VIR — one
+forward pass suffices because every jump is forward (intersection at joins and labels; a loop head's state is its
+entry state); no new category; the rejection names the read. Alternative: a ghost "defined" flag per local with
+category `uninitialized` (flags false at method entry, since Viper locals start arbitrary, `emit.cpp:181`; reads
+include compound assignment, `++`/`--`, arguments, returns and annotations; a monotone loop invariant for locals
+declared outside the loop; the automatic range invariant, `lower.cpp:676-691`, must not fail on an unassigned local);
+decide by spike. Small: may share a session with M4.3's start.
 
 **M4.3 Expressions and sequencing.** The comma operator; assignments as values; `x++` inside expressions; calls in
 guarded operands (`&&`, `||`, `?:`) and loop conditions (lowered as branches and re-evaluation); unsequenced calls

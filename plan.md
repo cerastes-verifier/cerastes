@@ -312,7 +312,8 @@ There is deliberately no user-facing `assume`.
 ## CI session (after M4.1)
 
 Owner, 2026-10-16 and 2026-10-20: CI for the repository is its own session. Since the renumbering (owner,
-2026-10-20) it runs after M4.1, followed by the mutation triage session, then M4.2. It opens with the two items the
+2026-10-20) it runs after M4.1, followed by the mutation triage session, then M4.2 (the owner ran M4.2a first,
+2026-10-21; the order of the rest is unchanged). It opens with the two items the
 M3 close-out left for it, both needing the x86-64 box: merge upstream EDG `main` into the fork's `cerastes` with a
 box run before the pin moves (decision 0009), and explain why branch `0020` alone fails its own test on Linux.
 
@@ -334,11 +335,14 @@ valid in both. Strictly C (owner, 2026-10-20): C++ references, `new`/`delete` an
 **Sessions.** Each is planned at ≤ 4 h and lands its decision record (invariant 6), must-verify/must-fail pairs
 (invariant 2) and its docs (invariant 9), with one Opus audit round per diff plus a re-audit of blocking fixes and
 `check.sh` at most twice. `internal/handoff.md` holds each session's tasks, agents, acceptance and stop rules.
+M4.2 was split into M4.2a–c (owner, 2026-10-21): its six constructs did not fit one session.
 
 | Session | Scope | Needs |
 |---|---|---|
 | **M4.1 Control flow** | `break`, `continue`, `do … while` (`do … while (0)` needs no measure, owner), `switch` (case/default/fallthrough, `[[fallthrough]]`), `for(;;)` left by `break` | — |
-| **M4.2 Scalar declarations** | forward `goto` and labels (never backward, into a loop, or past a declaration); enumerations and enumerators (one meaning in both modes); `const` globals; locals without an initializer (definite assignment or a defined-flag check); `_Noreturn`/`[[noreturn]]`; `<assert.h>` `assert` | M4.1 |
+| **M4.2a Jumps and ends** | forward `goto` and labels ("outward and forward": never backward, never into a block, branch, switch body or loop, never past a declaration); `_Noreturn`/`[[noreturn]]` (a new category `noreturn`) with trusted `abort`/`exit`/`_Exit`; `<assert.h>` `assert` checked like `check` | M4.1 |
+| **M4.2b Named constants and enumerations** | `const`/`constexpr` globals (the initializer encoded, EDG's folding not trusted); `case k`/`case N`/`case RED`; enumerations and enumerators (one meaning in both modes) | M4.2a |
+| **M4.2c Locals without an initializer** | a read of an indeterminate value is an error (definite assignment over VIR, or a ghost "defined" flag) | M4.2a |
 | **M4.3 Expressions and sequencing** | the comma operator, assignments as values, `x++` inside expressions, calls in guarded operands and loop conditions, unsequenced calls (C's sequencing rules) | — |
 | **M4.4 Bitwise operators** | `& \| ^ ~` and `&= \|= ^=` on signed and unsigned types (C23 two's complement); a Silicon/Z3 spike first (bounded `Int` definitions vs SMT bit-vector interpretation) | — |
 | **M4.5 Pointers** (sessions a–f, below) | the memory model for C | M4.1–M4.3 |
@@ -357,7 +361,8 @@ valid in both. Strictly C (owner, 2026-10-20): C++ references, `new`/`delete` an
   with frames; ports of VeriFast's `swap.c`, `address_of_local.c`, `globals.c`.
 - **M4.5c Structs:** field cells, `.` and `->`, struct values (copies, initializers, by-value parameters and
   results), nested structs, pointers to fields; ports of `account.c`, `deposit.c`.
-- **M4.5d malloc and free:** trusted libc contracts (`malloc`, `calloc`, `realloc`, `free`, `abort`, `exit`),
+- **M4.5d malloc and free:** trusted libc contracts (`malloc`, `calloc`, `realloc`, `free`; `abort`/`exit` came in
+  M4.2a),
   allocation blocks, ownership on free, leaks (a record); ports of `malloc_block.c`, `cell.c`.
 - **M4.5e Arrays and pointer arithmetic:** local arrays, `a[i]`, `p + i`, `p - q`, comparisons within one object,
   `owns_range` and quantified permissions, `forall` in C; ports of `carrays.c`, `insertion_sort.c`, sum and max.
