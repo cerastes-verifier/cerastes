@@ -1,0 +1,70 @@
+tests/scalar/break_only_exit.c:15:12:relop:<-><=	the condition exit i >= 100 is unreachable (the invariant keeps i <= limit <= 50), so the bound of the loop condition is not decisive
+tests/scalar/break_only_exit.c:15:14:literal:100->101	the condition exit i >= 100 is unreachable (the invariant keeps i <= limit <= 50), so the bound of the loop condition is not decisive
+tests/scalar/break_only_exit.c:15:14:literal:100->99	the condition exit i >= 100 is unreachable (the invariant keeps i <= limit <= 50), so the bound of the loop condition is not decisive
+tests/scalar/break_only_exit.c:9:46:literal:50->51	weaker requires: limit == 51 still keeps i <= limit below the loop bound 100, so the condition exit stays unreachable
+tests/scalar/continue_cond_div.c:10:38:literal:5->6	weaker requires: n == 6 starts the loop at d == 6, which does not run, and the result is 6 as before
+tests/scalar/continue_cond_div.c:14:22:literal:0->1	0 <= d, 1 <= d and 0 < d are the same invariant here: the condition's own obligation already gives d != 0
+tests/scalar/continue_cond_div.c:14:24:relop:<=-><	0 <= d, 1 <= d and 0 < d are the same invariant here: the condition's own obligation already gives d != 0
+tests/scalar/continue_cond_div.c:15:22:literal:6->5	the measure 5 - d and 7 - d are as non-negative and as decreasing as 6 - d at every iteration start (d <= 5 there)
+tests/scalar/continue_cond_div.c:15:22:literal:6->7	the measure 5 - d and 7 - d are as non-negative and as decreasing as 6 - d at every iteration start (d <= 5 there)
+tests/scalar/continue_cond_div.c:16:10:literal:20->21	21 / d > 3 and 20 / d > 3 agree for every d in 1..6 (21 / 6 == 20 / 6 == 3)
+tests/scalar/continue_cond_div.c:18:14:literal:3->2	the continue branch only skips d == 3; any variant of the skip still ends at d == 6, and the spec (r == 6) does not observe the path (a per-path invariant would make the d = 0 twin report the invariant instead of the division)
+tests/scalar/continue_cond_div.c:18:14:literal:3->4	the continue branch only skips d == 3; any variant of the skip still ends at d == 6, and the spec (r == 6) does not observe the path (a per-path invariant would make the d = 0 twin report the invariant instead of the division)
+tests/scalar/continue_cond_div.c:19:12:literal:1->0	the continue branch only skips d == 3; any variant of the skip still ends at d == 6, and the spec (r == 6) does not observe the path (a per-path invariant would make the d = 0 twin report the invariant instead of the division)
+tests/scalar/continue_cond_div.c:19:12:literal:1->2	the continue branch only skips d == 3; any variant of the skip still ends at d == 6, and the spec (r == 6) does not observe the path (a per-path invariant would make the d = 0 twin report the invariant instead of the division)
+tests/scalar/continue_cond_div.c:19:7:delete-stmt:d += 1;->;	the continue branch only skips d == 3; any variant of the skip still ends at d == 6, and the spec (r == 6) does not observe the path (a per-path invariant would make the d = 0 twin report the invariant instead of the division)
+tests/scalar/continue_cond_div.c:20:7:delete-stmt:continue;->;	the continue is the last statement of the loop body: deleting it changes nothing
+tests/scalar/continue_no_step.c:11:11:literal:0->1	the initial value of i is overwritten by the for init-statement
+tests/scalar/continue_skip.c:10:54:relop:>->>=	at n == start (resp. i == start) both disjuncts agree (c == 0 == i - start), so > and >= describe the same states
+tests/scalar/continue_skip.c:14:62:relop:>->>=	at n == start (resp. i == start) both disjuncts agree (c == 0 == i - start), so > and >= describe the same states
+tests/scalar/do_break.c:10:68:relop:<-><=	at n == limit the break exit and the condition exit give the same i, so n < limit and n <= limit allow the same results
+tests/scalar/do_condition_div.c:12:11:literal:0->1	the initial value of d is overwritten by the body before the condition is evaluated
+tests/scalar/do_condition_div.c:15:22:literal:1->0	the loop never iterates twice (its condition is false), so the measure is never compared
+tests/scalar/do_condition_div.c:15:22:literal:1->2	the loop never iterates twice (its condition is false), so the measure is never compared
+tests/scalar/do_condition_div.c:17:9:literal:1->2	n / 2 > 5 is false for every n <= 5, like n / 1 > 5: the same exit
+tests/scalar/do_condition_div.c:19:20:literal:5->6	n / d > 6 is false for every n <= 5, like n / d > 5: the same exit
+tests/scalar/do_continue_cond_div.c:12:22:literal:1->0	1 <= d and 0 <= d are the same invariant here: the condition's own obligation already gives d != 0
+tests/scalar/do_continue_cond_div.c:13:22:literal:6->5	the measure 5 - d and 7 - d are as non-negative and as decreasing as 6 - d at every iteration start (d <= 5 there)
+tests/scalar/do_continue_cond_div.c:13:22:literal:6->7	the measure 5 - d and 7 - d are as non-negative and as decreasing as 6 - d at every iteration start (d <= 5 there)
+tests/scalar/do_continue_cond_div.c:16:14:literal:3->2	the continue branch only skips d == 3; any variant of the skip still ends at d == 6, and the spec (r == 6) does not observe the path (a per-path invariant would make the d = 0 twin report the invariant instead of the division)
+tests/scalar/do_continue_cond_div.c:16:14:literal:3->4	the continue branch only skips d == 3; any variant of the skip still ends at d == 6, and the spec (r == 6) does not observe the path (a per-path invariant would make the d = 0 twin report the invariant instead of the division)
+tests/scalar/do_continue_cond_div.c:17:12:literal:1->0	the continue branch only skips d == 3; any variant of the skip still ends at d == 6, and the spec (r == 6) does not observe the path (a per-path invariant would make the d = 0 twin report the invariant instead of the division)
+tests/scalar/do_continue_cond_div.c:17:12:literal:1->2	the continue branch only skips d == 3; any variant of the skip still ends at d == 6, and the spec (r == 6) does not observe the path (a per-path invariant would make the d = 0 twin report the invariant instead of the division)
+tests/scalar/do_continue_cond_div.c:17:7:delete-stmt:d += 1;->;	the continue branch only skips d == 3; any variant of the skip still ends at d == 6, and the spec (r == 6) does not observe the path (a per-path invariant would make the d = 0 twin report the invariant instead of the division)
+tests/scalar/do_continue_cond_div.c:18:7:delete-stmt:continue;->;	the continue is the last statement of the loop body: deleting it changes nothing
+tests/scalar/do_continue_cond_div.c:20:12:literal:20->21	21 / d > 3 and 20 / d > 3 agree for every d in 1..6 (21 / 6 == 20 / 6 == 3)
+tests/scalar/do_once_decreases.c:12:22:literal:1->0	the written measure of a do ... while (0) is never compared (no iteration is followed by another), so its value is not observable
+tests/scalar/do_once_decreases.c:12:22:literal:1->2	the written measure of a do ... while (0) is never compared (no iteration is followed by another), so its value is not observable
+tests/scalar/do_once_targets.c:12:11:literal:0->1	the initial value of i is overwritten by the for init-statement
+tests/scalar/do_zero_expr.c:9:108:relop:<=-><	the bound r <= 10 is slack: |10 / x| <= 5 for x not in {0, 1}, so 10, 9 and < 10 describe the same results
+tests/scalar/do_zero_expr.c:9:111:literal:10->9	the bound r <= 10 is slack: |10 / x| <= 5 for x not in {0, 1}, so 10, 9 and < 10 describe the same results
+tests/scalar/for_decl_jump.c:10:62:literal:6->7	at n == 7 the second and third disjuncts both give r == 6
+tests/scalar/for_decl_jump.c:16:16:literal:0->1	the initial value of k is not observed (k is read only as k - k)
+tests/scalar/for_ever_break.c:30:10:literal:1->2	a non-zero constant condition is true: while (2) is while (1)
+tests/scalar/loop_in_switch.c:10:100:literal:5->4	weaker ensures (a sound verifier accepts it): at n == 5 both disjuncts give r == 11, so moving the boundary only widens the allowed results
+tests/scalar/loop_in_switch.c:10:71:literal:5->6	weaker ensures (a sound verifier accepts it): at n == 5 both disjuncts give r == 11, so moving the boundary only widens the allowed results
+tests/scalar/loop_in_switch.c:10:98:relop:>->>=	weaker ensures (a sound verifier accepts it): at n == 5 both disjuncts give r == 11, so moving the boundary only widens the allowed results
+tests/scalar/loop_in_switch.c:39:5:delete-stmt:break;->;	break at the end of the last section of the switch: control leaves the switch either way
+tests/scalar/nested_break.c:20:24:literal:3->2	the inner loop is left only by its break (the invariant keeps j <= 1), so the bound of its condition and of its measure is not decisive
+tests/scalar/nested_break.c:20:24:literal:3->4	the inner loop is left only by its break (the invariant keeps j <= 1), so the bound of its condition and of its measure is not decisive
+tests/scalar/nested_break.c:21:14:relop:<-><=	the inner loop is left only by its break (the invariant keeps j <= 1), so the bound of its condition and of its measure is not decisive
+tests/scalar/nested_break.c:21:16:literal:3->2	the inner loop is left only by its break (the invariant keeps j <= 1), so the bound of its condition and of its measure is not decisive
+tests/scalar/nested_break.c:21:16:literal:3->4	the inner loop is left only by its break (the invariant keeps j <= 1), so the bound of its condition and of its measure is not decisive
+tests/scalar/switch_call.c:15:35:relop:<-><=	weaker requires: x == 10 gives succ(10) == 11, which takes the default and satisfies `x >= 2 && r == 0`
+tests/scalar/switch_call.c:15:37:literal:10->11	weaker requires: x == 10 gives succ(10) == 11, which takes the default and satisfies `x >= 2 && r == 0`
+tests/scalar/switch_call.c:8:27:literal:2147483647->2147483646	stronger requires of succ: its only caller passes x < 10
+tests/scalar/switch_default_middle.c:20:5:delete-stmt:break;->;	break at the end of the last section of the switch: control leaves the switch either way
+tests/scalar/switch_fallthrough.c:24:5:delete-stmt:break;->;	break at the end of the last section of the switch: control leaves the switch either way
+tests/scalar/switch_for_decl.c:16:18:literal:0->1	the initial value of k is not observed (k is read only as k - k)
+tests/scalar/switch_for_decl.c:25:5:delete-stmt:break;->;	break at the end of the last section of the switch: control leaves the switch either way
+tests/scalar/switch_gnu_fallthrough.c:18:5:delete-stmt:break;->;	break at the end of the last section of the switch: control leaves the switch either way
+tests/scalar/switch_in_loop.c:26:7:delete-stmt:break;->;	break at the end of the last section of the switch: control leaves the switch either way
+tests/scalar/switch_nested.c:19:7:delete-stmt:break;->;	break at the end of the last section of the inner switch: control leaves the inner switch either way
+tests/scalar/switch_nested.c:28:5:delete-stmt:break;->;	break at the end of the last section of the switch: control leaves the switch either way
+tests/scalar/switch_unsigned_case.c:8:26:drop-conjunct:u == 4294967295u &&->	weaker or equal ensures (a sound verifier accepts it); the clause mentions the unsigned parameter u, which the safe-direction grid does not model
+tests/scalar/switch_unsigned_case.c:8:43:drop-conjunct:&& r == 1->	weaker or equal ensures (a sound verifier accepts it); the clause mentions the unsigned parameter u, which the safe-direction grid does not model
+tests/scalar/switch_unsigned_case.c:8:43:swap-logic:&&->||	weaker or equal ensures (a sound verifier accepts it); the clause mentions the unsigned parameter u, which the safe-direction grid does not model
+tests/scalar/switch_unsigned_case.c:8:58:drop-conjunct:u != 4294967295u &&->	weaker or equal ensures (a sound verifier accepts it); the clause mentions the unsigned parameter u, which the safe-direction grid does not model
+tests/scalar/switch_unsigned_case.c:8:63:literal:4294967295u->4294967296u	weaker or equal ensures (a sound verifier accepts it); the clause mentions the unsigned parameter u, which the safe-direction grid does not model
+tests/scalar/switch_unsigned_case.c:8:75:drop-conjunct:&& r == 0->	weaker or equal ensures (a sound verifier accepts it); the clause mentions the unsigned parameter u, which the safe-direction grid does not model
+tests/scalar/switch_unsigned_case.c:8:75:swap-logic:&&->||	weaker or equal ensures (a sound verifier accepts it); the clause mentions the unsigned parameter u, which the safe-direction grid does not model

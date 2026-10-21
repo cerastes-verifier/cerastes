@@ -1,49 +1,54 @@
-# Handoff after M4.1 — control flow, and the plan re-sequenced (2026-10-20)
+# Handoff after M4.2a — forward goto, functions that do not return, assert (2026-10-21)
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
-rediscover. The M3 close-out handoff is `git show a4da52c:internal/handoff.md`; the M3 handoff (with the owner's
-answers) `git show 80b9e35:internal/handoff.md`.
+rediscover. The M4.1 handoff is `git show 60d3fbe:internal/handoff.md`; the M3 close-out handoff
+`git show a4da52c:internal/handoff.md`.
 
 ## 1. State in one paragraph
 
-The milestones are renumbered (owner, 2026-10-20; `plan.md`, top): the new **M4 is the rest of C** (M4.1–M4.8,
-pointers in M4.5a–f, VerCors as the reference), generic templates are **M5** (M5a–M5g), concepts M6, **C++ memory
-and classes M7**, the inventory M8, evaluation M9; every record is renumbered and notes it. **M4.1 is done** on branch
-`m4.1-control-flow`: `break`, `continue`, `do … while` (and `do … while (0)` without a measure) and `switch` verify,
-with decision 0014, 86 new tests, VIR self-test 204 cases and the docs. The pin is unchanged (P `b9519388ea`).
-Open from M4.1: 70 surviving mutants of the new tests go to the mutation triage session (§5). Nothing is pushed.
-Planned at ≤ 4 h, the session used about 4 h (18:53–22:50), most of it the test-mutator's mutation runs.
+The owner split M4.2 into **M4.2a** (forward `goto`, functions that do not return, `assert`), **M4.2b** (named
+constants and enumerations) and **M4.2c** (locals without an initializer) (2026-10-21; `plan.md`, §8.1). **M4.2a is
+done** on branch `m4.2a-goto-noreturn-assert` (based on `main` `518e0de`): user gotos that jump outward and forward,
+`[[noreturn]]`/`_Noreturn` functions (new category `noreturn`), the trusted C library functions `abort`/`exit`/
+`_Exit`, and `assert` from `<assert.h>` checked as `check`, with decision 0015, about 90 new tests, the VIR self-test at
+230 cases and the docs. The branch's first commit moves the pin back to P `b9519388ea`: `main`'s `518e0de` had pinned
+the pushed `0bcd9bf28a`, which lacks `RAF_NO_CONSTANT_EVALUATION`, so `main` did not build. The CI and mutation triage
+sessions (§4, §5) have still not run; M4.2a went first at the owner's request. Nothing is pushed.
 
 ## 2. Owner steps, in this order
 
-1. **Bring the branch into `main`.** The work is on `m4.1-control-flow` in the worktree `.claude/worktrees/m3-closeout`
-   (based on `main` `bfeda03`):
+1. **Push the fork's `cerastes`** (`git -C ~/Documents/compiler push origin cerastes`): GitHub has `0bcd9bf28a`; the
+   pin P `b9519388ea` is 6 commits ahead. `check.sh` reports `NOT YET PUSHED` until then, and a fresh clone of
+   cerastes cannot fetch the pin.
+2. **Bring the branch into `main`.** The work is on `m4.2a-goto-noreturn-assert` in the worktree
+   `.claude/worktrees/m3-closeout`:
    ```
    cd ~/Documents/cerastes/cerastes
-   git merge --ff-only m4.1-control-flow
+   git merge --ff-only m4.2a-goto-noreturn-assert
+   git submodule update third_party/edg      # the main checkout's EDG is at 0bcd9bf; the branch pins P
    scripts/bootstrap.sh --build-only
    ```
-   The old branch `worktree-m3-closeout` is fully merged; the worktree can be removed when no longer needed
-   (`git worktree remove .claude/worktrees/m3-closeout`).
-2. **Push the fork's `cerastes`** (`git -C ~/Documents/compiler push origin cerastes`): GitHub still has `0bcd9bf28a`;
-   the pin P `b9519388ea` is 6 commits ahead. `check.sh` reports `NOT YET PUSHED` until then.
+   `518e0de` "Update edg version" is what moved the pin back (probably a commit that picked up a stale submodule
+   checkout). If you meant to pin `0bcd9bf`, say so: cerastes needs P.
 3. **Push cerastes `main`.**
-4. Unchanged from the close-out: branch `0020` (`c539de4101`) kept for the upstream PR, its Linux failure unexplained
-   (§4); the fork's `.tmp/agent-*` evidence directories.
+4. Unchanged: branch `0020` (`c539de4101`) kept for the upstream PR, its Linux failure unexplained (§4); the fork's
+   `.tmp/agent-*` evidence directories.
 
 ## 3. What the session did
 
 | Item | Outcome |
 |---|---|
-| Planning (owner's question: plan M4) | Exploring M4 (generic templates) showed G2 needs memory; the owner re-sequenced the plan (§1); this session designed and wrote down every M4 and M5 session (§8), with the VerCors study for M4.5 |
-| Renumbering | `plan.md` (table at the top), the handoff, `encoding.md`, `il-inventory.md`, `tests/README.md`, records 0001/0006/0007/0008/0010–0013, the upstream draft, two code comments; mapped by meaning (old M6 → M4.5 for C, M7 for C++) |
-| Decision 0014 | control flow: structured VIR jumps, invariants and measure on `continue` paths, `do` invariants at the start of each iteration, `do … while (0)` as straight-line code with an internal guard, `switch` dispatch, case values by their original expression, the rejections, #546 suppressed; amends 0010–0013 |
-| Code | `encode.cpp` (target stack with label-shape checks, `do`, `switch`, `step`, `fallthrough` allowed, case values through the constant path, label attributes checked), `src/vir` (forms, `check_program` rules incl. innermost targets, lowering), `verify_main.cpp` (#546) |
-| Tooling | `mutate.py` deletes `break;`/`continue;` and case bodies; `lint_viper.py` rejects backward gotos, labels with invariants, duplicate labels |
-| Tests | 86 new files in `tests/scalar` (31 positives, 55 twins and rejections, both modes where C++ accepts them); `reject_{break,continue,do_while,switch}.c` retired (owner); VIR self-test 155 → 204 lowering cases (+ 75 rejection cases) |
-| Docs | Verifying a program (control-flow section with `control_flow.c`; `rejected_double.cpp` replaces `rejected_switch.cpp`; rejected list), Annotations (`do` invariants, `decreases` before `do`, the `do … while (0)` exemption), Overview |
-| Audits (Opus) | 0014: 1 blocking (EDG folds `case 1 << 40` to 0 with a suppressed warning: case values now encoded by their original expression), 5 should-fix, all taken; code: 0 blocking, 4 should-fix taken (`for (int k…)` in a case, `case k`, stale text, an `__int128` overflow in the checker), notes in §6 |
+| Planning | M4.2 sized at about three sessions by exploration and a Plan-agent review; the owner split it (M4.2a/b/c) and pre-approved the five retirements, the `noreturn` category, `assert` as `check`, and the amended meaning of "verified" |
+| Pin | restored to P on the branch (`48e4b45`) |
+| Plan | `plan.md` M4 table and §8.1 here: M4.2a/b/c, with the review's findings for M4.2b and M4.2c |
+| Decision 0015 | outward-and-forward `goto` (over VIR blocks after the encoder's flattening, with guards for generated blocks); noreturn (`Function::noreturn`, `ensures false`, `assert false` with `noreturn` at each reachable return and at the end; a user's `[[noreturn]]` is a trusted user contract only when no system header wrote the flag); the trusted libc table (`abort`/`exit`/`_Exit`: name, system file, C linkage, signature, flag); `assert` by the macOS expansion's exact shape (through folded constants); amends 0011–0014 |
+| Probes and spikes | P19–P22, S11–S13, all confirmed (`il-inventory.md`, "M4.2a") |
+| Code | `src/vir` (Goto/Label, `goto_problems`, noreturn lowering, assert-origin `Check`), `src/backend/encode.cpp` (user gotos and labels, label attributes on the entity, noreturn, the libc table, the assert matcher, `ensures_on_noreturn`), `verify_main.cpp` (#1305 suppressed) |
+| Tooling | `lint_viper.py`: every `goto` outward and forward at token level; `mutate.py`: deletes `goto L;`, never a label, buckets a deleted call-free `assert(...)`; `noreturn` in the harness |
+| Tests | 90 new files in `tests/scalar` (27 positives, 63 twins and rejections); `reject_goto.c`, `reject_noreturn.c` retired (owner); VIR self-test 204 → 230 lowering cases (75 → 87 rejection cases) |
+| Docs | Verifying a program (goto, functions that do not return, `assert`, the meaning of a result, the rejected list), Error messages (`noreturn`), Annotations (`check` vs `assert`), Overview |
+| Audits (Opus) | 0015: 1 blocking (a lint closed list for `ensures false` that rejected a user's trusted `ensures(false)`: dropped), 9 should-fix taken; code: 0 blocking, 2 should-fix taken (a noreturn flag written by a system header was trusted as the user's claim; missing tests); tooling re-audit: 0 blocking, 3 should-fix taken (the assert bucket with calls, `mutate.py --validate` on a new test, closed-list leftovers) |
 
 ## 4. The CI session (after M4.1; owner 2026-10-16 and 2026-10-20)
 
@@ -61,9 +66,12 @@ Its first two steps need the x86-64 box (memory `x86-box-edg-suites`; the box sl
    pin moves; known baseline mismatches `cwg1835`, `cwg2881`.
 2. **Branch `0020` alone fails its own test on Linux** (M3 handoff §4): `GH-lambda-template-param-qualified.sft.cpp`
    cases 1 and 2, `FAIL--OUTPUT MISMATCH`, passes at the chain tip and natively. Explain it before the owner files 0020.
-3. Then CI itself (a decision record; macOS runner first, x64 Docker if the goldens drift).
+3. Then CI itself (a decision record; macOS runner first, x64 Docker if the goldens drift). Since M4.2a, the `assert`
+   tests depend on the macOS SDK's expansion (`__assert_rtn`, 0015 item 6): a Linux runner would need glibc's shape
+   (`__assert_fail`, possibly a statement expression in GNU C) recognised by the encoder, or those tests marked
+   macOS-only.
 
-## 5. The mutation triage session (short; after the CI session, before M4.2)
+## 5. The mutation triage session (short; after the CI session, before M4.2b)
 
 The classifier now buckets a contract mutant only when the grid models it (signed builtin integer parameters,
 linear, no `==`/`!=` flip) and, for a stronger `requires` or a weaker `ensures`, the function has no use in the
@@ -83,14 +91,27 @@ old bucket only.
 
 **M4.1's survivors (added 2026-10-20).** The mutation run on the 31 new positives (`python3 scripts/mutate.py -j 8
 <files>`; 1403 mutants: 991 killed, 299 in the safe-direction bucket, 27 stillborn) left **70 survivors**, which the
-session's stop rule moved here. test-mutator's proposals are in `build/m4-staging/equivalents-proposed.txt` (id, tab,
-reason; untracked — copy it before cleaning `build/`). 34 of them are in `continue_cond_div.c` and
+session's stop rule moved here. test-mutator's proposals are in `internal/triage/m4.1-survivors-proposed.txt` (id, tab,
+reason; copied from `build/m4-staging/` in M4.2a). 34 of them are in `continue_cond_div.c` and
 `do_continue_cond_div.c`: test weakness, not equivalence (deleting the `continue;` survives) — strengthen those two
 positives (an exact `ensures` on a result the continue branch changes; the twins may keep a weaker invariant so that
 the reported error stays `division-by-zero`, said in their headers). The other 36 look like genuine equivalents or
 safe-direction mutants (the last `break` of a switch, dead initialisers, measures of loops that never repeat, slack
 bounds, `while (1)` → `while (2)`, weaker `ensures` on unsigned parameters, which the classifier does not model);
 each needs the auditor's review before it enters `tests/mutants-equivalent.txt`.
+
+**M4.2a's survivors (added 2026-10-21).** `python3 scripts/mutate.py -j 8` over the 27 new positives and 4 doc
+examples (`internal/triage/m4.2a-mutate.log`): 913 mutants, 476 killed, 220 safe-direction, 13 stillborn, 200
+survivors and 4 tool failures. The 15 survivors and 4 tool failures of `verifying/goto_exit.c` are gone: Silicon timed
+out on its nonlinear contract, so the example was replaced by a linear one with an exact contract (30 mutants, 0
+survivors). test-mutator classified the other 185 read-only, by rule per file, in
+`internal/triage/m4.2a-survivors-proposed.txt` (id, class, reason): 139 equivalent, 31 safe-direction the
+classifier does not model (asserts, `||` ensures, a bodyless callee's ensures), 15 weak tests, 0 suspicious. Most
+equivalents are guards that make a function end the program on more inputs: the amended meaning of "verified" (0015
+item 4) cannot see them. The weak tests are in `assert.c` (doc: pin `r == (a + b) / 2`), `noreturn_fixed.c` (doc: add
+`ensures r > 0`), `goto_in_loop_body.c`, `goto_cleanup.c`, `goto_out_of_loops.c`, `exit_main.c`. Each entry needs the
+auditor's review before it enters `tests/mutants-equivalent.txt`. M4.1's 70 proposals are now tracked too:
+`internal/triage/m4.1-survivors-proposed.txt`.
 
 ## 6. Should-fix items and known gaps
 
@@ -140,12 +161,34 @@ Deferred (probes in the job's scratch directory are gone; the shapes are given h
   accepted and substituted correctly (il-analyst, `--il_display` check); `sizeof(T)` in a lambda body is accepted.
 
 **M4.1 code audit notes (2026-10-20, not blocking):**
-1. `lint_viper.py` does not flag a forward `goto` into a loop body; only VIR's nesting rule (and Silicon's exception,
-   S9c, exit 3) guard it. Add a token-level loop-nesting check to the lint.
+1. *Closed in M4.2a:* `lint_viper.py` now checks every `goto` outward and forward at token level.
 2. Three encoder rejection branches look unreachable and have no test (a `break`/`continue` whose target cannot be
    determined, a non-integer scrutinee, a case value of another type); they fail closed.
 3. The probe/spike evidence of M4.1 is under `build/m4.1/` (gitignored; the facts are in `il-inventory.md`);
    two spike headers (S1b, S7f) state stale expectations, the record's claims are right.
+
+**M4.2a audit notes (2026-10-21, not blocking; every should-fix item was taken):**
+1. **Who wrote the noreturn flag.** The IL keeps only a routine's first declaration position and no list of its
+   declarations (`GENERATE_SOURCE_SEQUENCE_LISTS` is off). The trust "declared noreturn here" therefore checks the first
+   declaration and that no `noreturn` attribute entry sits outside a verified file. `_Noreturn` leaves no entry, so a
+   `_Noreturn` written in a system header would not be seen. None exists in the pinned SDK (grep). The sound check is
+   EDG's source sequence lists, a configuration change (decision 0002) for a later session. The same limit makes the
+   libc table check "declared only in system files" on the first declaration only (0015 item 5; harmless, since
+   must-match stops a user redeclaration from adding a contract).
+2. **Unreached guards** (defence in depth, commented in `encode.cpp`): a declaration directly in a compiler-generated
+   block that is not flattened (P20 found no such shape), and a `cerastes::` attribute on a label (EDG rejects it
+   first, #1835).
+3. **A compiler-generated goto or label without break/continue flags** is now treated as a user one, and
+   `goto_problems` fails closed on it. Before M4.2a it was rejected; no program is known to produce one.
+4. **Diagnostics.** Goto rejections use the generic `unsupported_statement` text, which ends "(decision 0012)", not
+   0015. A misplaced GNU `__attribute__((noreturn))` is reported as `unrecognized_attribute` and spelled
+   `[[noreturn]]` (EDG keeps it as unrecognized).
+5. **Untested.** `_Noreturn int main` in C23 is rejected, but EDG's warning #3271 (a noreturn function with a non-void
+   return type) also prints, which a `rejected` test cannot list; only the C++ variant is tested. The near-miss tests
+   of a user `abort`/`exit` are C++ only: C compilers treat `abort`/`exit` as builtins, so they cannot be `native-ok`.
+6. **`mutate.py --list`** took about 3 minutes under load (0.6 s at the M3 close-out on an idle machine).
+7. The lint's existing "while without decreases" rule reads up to the first `{`, so a quantifier trigger inside an
+   invariant would be misread as the loop body. The emitter writes no trigger today (test-mutator).
 
 ## 7. Known gaps carried
 
@@ -156,6 +199,10 @@ Deferred (probes in the job's scratch directory are gone; the shapes are given h
   names the template it is in (`h` undefined). EDG bug 0021 does not arise: cerastes reads C++ in Clang emulation.
 - Closed: the five compile-time uses of `constexpr` spec functions that left no trace (P, registered).
 - Attributes in positions where EDG records nothing (0011 item 7); M3's rejected constructs (0012 item 12) for M4 and M8.
+- From M4.2a (0015): a `goto` that enters a block, an `if` branch or a switch body (C allows it; Silicon's handling
+  of a jump into an `if` branch is unproven, S9d); a label that is the whole branch of an `if` without braces; GNU
+  computed `goto`; `quick_exit`, `__builtin_trap`, `__builtin_unreachable`/`unreachable()`, `std::terminate`; an
+  `assert` in a `for` increment; glibc's `assert` expansion. Each is rejected with a diagnostic and an M8 entry.
 
 ## 8. Session plans: M4 (the rest of C) and M5 (generic templates)
 
@@ -164,8 +211,8 @@ pointers, references, structs and constructors, which M3's scalar fragment canno
 plan (`plan.md`, "Milestone renumbering"): the **new M4 is the rest of C** (strictly C, sub-milestones M4.1–M4.8,
 pointers in M4.5a–f, VerCors as the reference); generic templates are **M5** (M5a–M5g); concepts M6; **C++ memory
 and classes M7** (references, `new`/`delete`, classes; G2's parts that need them are deferred there); inventory M8;
-evaluation M9. Session order: M4.1 (the session that wrote this) → CI (§4) → mutation triage (§5) → M4.2 … M4.8 →
-M5a … M5g → M6.
+evaluation M9. Session order: M4.1 → M4.2a (owner, 2026-10-21: before CI) → CI (§4) → mutation triage (§5) → M4.2b →
+M4.2c → M4.3 … M4.8 → M5a … M5g → M6.
 
 **Rules for every session below** (memory `session-size-few-hours`): planned at ≤ 4 h with fixed scope and stop
 rules; owner decisions and pre-approved expectation changes asked up front; the decision record before code
@@ -179,7 +226,7 @@ most twice; anything that needs the x86-64 box is its own session. Record number
 
 ### 8.1 M4 — the rest of C
 
-**M4.1 Control flow** (done in the session that wrote this; see `internal/status.md`).
+**M4.1 Control flow** (done 2026-10-20; see `internal/status.md`).
 
 **M4.2 Scalar declarations — split into M4.2a, M4.2b, M4.2c** (owner, 2026-10-21: planning found about three
 sessions of work; a Plan-agent review found the cross-mode traps listed below). Owner decisions for all three:
@@ -432,29 +479,45 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
   misleading, so check `date` against the budget before starting any long run.
 - **Commits:** `git add <paths> && git commit` commits everything staged, including an earlier `git rm`: stage
   deletions only in the commit that lands their feature (one record commit picked them up and was redone).
+  It happened again in M4.2a (the tooling commit took two staged retirements; redone at once): run `git rm` just
+  before the commit that lands the feature, or commit with explicit paths.
+- **M4.2a (2026-10-21):** asking the owner up front (pin, split, pre-approvals, categories, the meaning of "verified")
+  and a Plan-agent review before execution cut the scope to what fits; the record's audit ran in parallel with the
+  probes, and the implementation (VIR, encoder, 90 tests) took about 30 min. The first mutation run did not finish
+  in its 20-minute cap: it overlapped full test runs and two auditors (load average 30), and `mutate.py` prints
+  nothing until the end, so a capped run yields nothing. Run mutation alone on a quiet machine, and consider making
+  `mutate.py` report as it goes (triage session).
+- **Doc pitfalls (M4.2a):** `[[noreturn]]` in text becomes an AsciiDoc anchor even inside `+…+`, so it clashes with
+  a section id `noreturn`; `__name` in backticks needs `+…+`; a possessive after a code span (`` `main`'s ``) breaks
+  the next span. `build_docs.sh` and `check_doc_examples.py --html build/doc` catch all three.
 
 ## 10. Acceptance (commands and results)
 
 | # | Command | Result |
 |---|---|---|
-| 1 | `scripts/check.sh` | all green, 14 min 31 s: harness self-test 931, oracle self-test 74, lint self-test 125, mutate self-test 154; tests 2350 passed, 0 failed, 1 skipped (native-ok: Apple clang 586, GCC 586); 555 `.vpr` lint clean; VIR self-test 204 lowering + 75 rejection cases, 204 passed; oracle 134 goldens, 1915 facts, 0 failed; docs 0 problems; `NOT YET PUSHED` for the pin, as expected |
-| 2 | `python3 scripts/run_tests.py -j 8 tests/scalar doc/modules/ROOT/examples` (before check.sh) | 1320 passed, 0 failed (native-ok: Apple clang 279, GCC 279); baseline before the session 1034 |
-| 3 | `python3 scripts/run_tests.py --count-error-twins` | 113 (82 + 31 new positives) |
-| 4 | `python3 scripts/run_tests.py --check-headers` | 861 / 861 ok |
-| 5 | VIR self-test (`build/cerastes-vir-selftest build/vir-selftest`, run_tests, lint) | 204 lowering + 75 rejection cases, 0 problems; 204 passed; lint clean |
-| 6 | `diff -r -x MANIFEST build/m4-baseline-vpr build/vpr` (M3 tests' Viper vs the session's baseline) | all 412 `.vpr` files of the M3 tests and doc examples byte-identical; none missing |
-| 7 | `python3 scripts/mutate.py -j 8 <31 new positives>` | 1403 mutants: 991 killed, 299 bucket, 27 stillborn, **70 survivors → §5** |
-| 8 | `python3 scripts/test_mutate.py`, `test_lint_viper.py` | 154 and 125 tests OK |
-| 9 | audits (Opus) | 0014: 1 blocking fixed; code: 0 blocking; should-fix items taken; notes §6 |
+| 1 | `scripts/check.sh` (at `610e7e1`, one run) | all green, 17 min 5 s: harness self-test 931 (1 skipped), oracle self-test 74, lint self-test 142, mutate self-test 174; tests 2624 passed, 0 failed, 1 skipped (native-ok: Apple clang 642, GCC 642); 667 `.vpr` lint clean; VIR self-test 230 lowering + 87 rejection cases, 0 problems, 230 passed, lint clean; oracle 134 goldens, 1915 facts, 0 failed; docs 0 problems (source and `--html`); `NOT YET PUSHED` for the pin, as expected |
+| 2 | `python3 scripts/run_tests.py -j 8 tests/scalar doc/modules/ROOT/examples` (before check.sh) | 1594 passed, 0 failed (native-ok: Apple clang 335, GCC 335); baseline at the session start 1320 |
+| 3 | `python3 scripts/run_tests.py --count-error-twins` | 140 (113 + 27 new positives) |
+| 4 | `python3 scripts/run_tests.py --check-headers` | 954 / 954 ok |
+| 5 | `diff -r -x MANIFEST build/m4.2a-baseline-vpr build/vpr` (the existing tests' Viper vs the session's baseline) | all 555 `.vpr` files (and maps) of the M3/M4.1 tests and doc examples byte-identical; none missing; also reproduced independently by the code auditor |
+| 6 | `python3 scripts/mutate.py -j 8 <27 new positives + 4 doc examples>` (26 min, quiet machine) | 913 mutants: 476 killed, 220 bucket, 13 stillborn, 200 survivors, 4 tool failures (all in the replaced `goto_exit.c`; its successor: 30 mutants, 0 survivors); **185 survivors → §5**, classified, 0 suspicious |
+| 7 | `python3 scripts/mutate.py --list tests/scalar` before/after the tooling change | the 2717 existing ids unchanged |
+| 8 | audits (Opus) | 0015: 1 blocking (dropped from the design), 9 should-fix taken; code: 0 blocking, 2 should-fix taken; tooling re-audit: 0 blocking, 3 should-fix taken; notes §6 |
+| 9 | wall-clock | 08:19–about 11:00 (planned ≤ 4 h) |
 
 ## 11. Questions for the owner
 
 Each has a recommended answer. Answer inline, as before.
 
-1. **The M4 and M5 session plans** (§8, `plan.md`): do the sizes and the order fit? In particular M4.5 as six
-   sessions (design first), and M5 as seven (M5b with the box just before the gate). *Recommended: yes; re-plan M4.5b–f
-   after M4.5a's records.*
-2. **The 70 M4.1 survivors** (§5): in the triage session, after the CI session? *Recommended: yes, with the two weak
-   continue tests strengthened first.*
-3. **`case k` with a `const` local** (C++) is rejected (0014 item 6): lift it in M4.2 with `const` globals?
-   *Recommended: yes, M4.2.*
+1. **The EDG pin.** `main`'s `518e0de` moved it to `0bcd9bf28a`; this branch moves it back to P `b9519388ea` (§2).
+   Is P the pin you want (push the fork first)? *Recommended: yes.*
+2. **Order after M4.2a:** CI (§4), then the mutation triage (§5), then M4.2b — or M4.2b first? *Recommended: CI first:
+   it settles the upstream EDG merge and the pin before more code depends on it.*
+3. **M4.2a's surviving mutants** (§5) go to the triage session with M4.1's, and `mutate.py` reports as it goes?
+   *Recommended: yes.*
+4. **EDG's source sequence lists** (`GENERATE_SOURCE_SEQUENCE_LISTS`) would make "who wrote the noreturn flag" and
+   "declared only in system files" exact (§6, M4.2a audit note 1). It is an EDG configuration change (decision 0002;
+   IL layout and goldens). Evaluate it in M4.2b's planning (named constants also care where a declaration is)?
+   *Recommended: yes, as a spike there; until then the attribute-entry check stands.*
+5. **A `goto` into a block or an `if` branch** stays rejected (0015 item 2; stricter than C). Lift it only when a
+   ported example needs it, after a Silicon spike with must-fail twins? *Recommended: yes.*

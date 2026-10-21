@@ -1,0 +1,375 @@
+Wed Oct 21 09:52:18 EDT 2026
+TOOL FAILURE doc/modules/ROOT/examples/verifying/goto_exit.c:11:57:swap-logic:&&->|| [c++20]: cerastes verify exited with status 3: cerastes: error: Silicon did not finish within 300 seconds (--timeout)
+TOOL FAILURE doc/modules/ROOT/examples/verifying/goto_exit.c:14:22:drop-conjunct:0 <= r &&-> [c23]: cerastes verify exited with status 3: cerastes: error: Silicon did not finish within 300 seconds (--timeout)
+TOOL FAILURE doc/modules/ROOT/examples/verifying/goto_exit.c:14:22:drop-conjunct:0 <= r &&-> [c++20]: cerastes verify exited with status 3: cerastes: error: Silicon did not finish within 300 seconds (--timeout)
+TOOL FAILURE doc/modules/ROOT/examples/verifying/goto_exit.c:14:29:swap-logic:&&->|| [c++20]: cerastes verify exited with status 3: cerastes: error: Silicon did not finish within 300 seconds (--timeout)
+TOOL FAILURE doc/modules/ROOT/examples/verifying/goto_exit.c:14:40:swap-logic:&&->|| [c++20]: cerastes verify exited with status 3: cerastes: error: Silicon did not finish within 300 seconds (--timeout)
+SURVIVED doc/modules/ROOT/examples/error-messages/noreturn_fixed.c:16:12:literal:0->1
+SURVIVED doc/modules/ROOT/examples/error-messages/noreturn_fixed.c:16:9:relop:<=-><
+SURVIVED doc/modules/ROOT/examples/error-messages/noreturn_fixed.c:17:5:delete-stmt:fail();->;
+SURVIVED doc/modules/ROOT/examples/verifying/assert.c:14:17:literal:200->201
+SURVIVED doc/modules/ROOT/examples/verifying/assert.c:15:16:literal:2->3
+SURVIVED doc/modules/ROOT/examples/verifying/goto_exit.c:10:38:literal:1000->1001
+SURVIVED doc/modules/ROOT/examples/verifying/goto_exit.c:11:40:literal:31->32
+SURVIVED doc/modules/ROOT/examples/verifying/goto_exit.c:11:43:drop-conjunct:&& r * r <= n->
+SURVIVED doc/modules/ROOT/examples/verifying/goto_exit.c:11:46:drop-conjunct:r * r <= n &&->
+SURVIVED doc/modules/ROOT/examples/verifying/goto_exit.c:11:57:drop-conjunct:&& n < (r + 1) * (r + 1)->
+SURVIVED doc/modules/ROOT/examples/verifying/goto_exit.c:11:62:relop:<-><=
+SURVIVED doc/modules/ROOT/examples/verifying/goto_exit.c:11:69:literal:1->2
+SURVIVED doc/modules/ROOT/examples/verifying/goto_exit.c:11:79:literal:1->2
+SURVIVED doc/modules/ROOT/examples/verifying/goto_exit.c:14:29:drop-conjunct:&& r <= 31->
+SURVIVED doc/modules/ROOT/examples/verifying/goto_exit.c:14:32:drop-conjunct:r <= 31 &&->
+SURVIVED doc/modules/ROOT/examples/verifying/goto_exit.c:14:37:literal:31->32
+SURVIVED doc/modules/ROOT/examples/verifying/goto_exit.c:15:22:literal:31->30
+SURVIVED doc/modules/ROOT/examples/verifying/goto_exit.c:15:22:literal:31->32
+SURVIVED doc/modules/ROOT/examples/verifying/goto_exit.c:16:12:relop:<-><=
+SURVIVED doc/modules/ROOT/examples/verifying/goto_exit.c:16:14:literal:31->32
+SURVIVED doc/modules/ROOT/examples/verifying/no_return.c:18:18:drop-conjunct:a == INT_MIN &&->
+SURVIVED doc/modules/ROOT/examples/verifying/no_return.c:18:31:drop-conjunct:&& b == -1->
+SURVIVED doc/modules/ROOT/examples/verifying/no_return.c:18:31:swap-logic:&&->||
+SURVIVED tests/scalar/assert_call.c:10:38:literal:1000->1001
+SURVIVED tests/scalar/assert_call.c:20:3:delete-stmt:assert(twice(x) == 2 * x);->;
+SURVIVED tests/scalar/assert_cassert.cpp:13:10:drop-conjunct:y > 0 &&->
+SURVIVED tests/scalar/assert_cassert.cpp:13:12:relop:>->>=
+SURVIVED tests/scalar/assert_cassert.cpp:13:16:drop-conjunct:&& y <= 101->
+SURVIVED tests/scalar/assert_cassert.cpp:13:16:swap-logic:&&->||
+SURVIVED tests/scalar/assert_cassert.cpp:13:24:literal:101->102
+SURVIVED tests/scalar/assert_holds.c:14:10:drop-conjunct:y > 0 &&->
+SURVIVED tests/scalar/assert_holds.c:14:12:relop:>->>=
+SURVIVED tests/scalar/assert_holds.c:14:16:drop-conjunct:&& y <= 101->
+SURVIVED tests/scalar/assert_holds.c:14:16:swap-logic:&&->||
+SURVIVED tests/scalar/assert_holds.c:14:24:literal:101->102
+SURVIVED tests/scalar/assert_ndebug.c:13:12:relop:>->>=
+SURVIVED tests/scalar/assert_ndebug.c:13:14:literal:100->101
+SURVIVED tests/scalar/assert_ndebug.c:13:14:literal:100->99
+SURVIVED tests/scalar/assert_obligation.c:13:16:relop:>->>=
+SURVIVED tests/scalar/exit_main.c:10:25:drop-conjunct:0 <= r &&->
+SURVIVED tests/scalar/exit_main.c:10:25:literal:0->1
+SURVIVED tests/scalar/exit_main.c:10:27:relop:<=-><
+SURVIVED tests/scalar/exit_main.c:10:37:relop:<=-><
+SURVIVED tests/scalar/exit_main.c:10:40:literal:3->2
+SURVIVED tests/scalar/exit_main.c:16:10:literal:1->0
+SURVIVED tests/scalar/exit_main.c:16:10:literal:1->2
+SURVIVED tests/scalar/exit_main.c:18:20:relop:<-><=
+SURVIVED tests/scalar/exit_main.c:18:22:literal:3->4
+SURVIVED tests/scalar/exit_main.c:19:10:literal:0->1
+SURVIVED tests/scalar/exit_main.c:19:3:delete-stmt:return 0;->;
+SURVIVED tests/scalar/goto_between_cases.c:23:5:delete-stmt:break;->;
+SURVIVED tests/scalar/goto_between_cases.c:25:5:delete-stmt:break;->;
+SURVIVED tests/scalar/goto_cleanup.c:12:16:literal:0->1
+SURVIVED tests/scalar/goto_cleanup.c:14:13:relop:>->>=
+SURVIVED tests/scalar/goto_cleanup.c:14:15:literal:100->99
+SURVIVED tests/scalar/goto_cleanup.c:15:14:literal:100->99
+SURVIVED tests/scalar/goto_cleanup.c:18:13:relop:<-><=
+SURVIVED tests/scalar/goto_cleanup.c:18:15:literal:10->11
+SURVIVED tests/scalar/goto_cleanup.c:18:15:literal:10->9
+SURVIVED tests/scalar/goto_cleanup.c:19:14:literal:9->10
+SURVIVED tests/scalar/goto_cleanup.c:24:18:drop-conjunct:9 <= status &&->
+SURVIVED tests/scalar/goto_cleanup.c:24:18:literal:9->8
+SURVIVED tests/scalar/goto_cleanup.c:24:30:drop-conjunct:&& status <= 100->
+SURVIVED tests/scalar/goto_cleanup.c:24:30:swap-logic:&&->||
+SURVIVED tests/scalar/goto_cleanup.c:24:43:literal:100->101
+SURVIVED tests/scalar/goto_cleanup.c:9:23:drop-conjunct:0 <= a &&->
+SURVIVED tests/scalar/goto_cleanup.c:9:38:literal:1000->1001
+SURVIVED tests/scalar/goto_cleanup.c:9:43:drop-conjunct:&& 0 <= b->
+SURVIVED tests/scalar/goto_cleanup.c:9:46:drop-conjunct:0 <= b &&->
+SURVIVED tests/scalar/goto_cleanup.c:9:61:literal:1000->1001
+SURVIVED tests/scalar/goto_error_exit.c:12:13:literal:0->1
+SURVIVED tests/scalar/goto_error_exit.c:9:23:drop-conjunct:0 <= x &&->
+SURVIVED tests/scalar/goto_error_exit.c:9:38:literal:100->101
+SURVIVED tests/scalar/goto_error_exit.c:9:42:drop-conjunct:&& 0 <= y->
+SURVIVED tests/scalar/goto_error_exit.c:9:45:drop-conjunct:0 <= y &&->
+SURVIVED tests/scalar/goto_error_exit.c:9:60:literal:100->101
+SURVIVED tests/scalar/goto_in_loop_body.c:14:22:drop-conjunct:0 <= i &&->
+SURVIVED tests/scalar/goto_in_loop_body.c:17:11:relop:>=->>
+SURVIVED tests/scalar/goto_in_loop_body.c:18:7:delete-stmt:goto next;->;
+SURVIVED tests/scalar/goto_in_loop_body.c:20:14:literal:1->0
+SURVIVED tests/scalar/goto_in_loop_body.c:20:5:delete-stmt:count += 1;->;
+SURVIVED tests/scalar/goto_in_loop_body.c:9:30:drop-conjunct:&& n <= 1000->
+SURVIVED tests/scalar/goto_in_loop_body.c:9:33:drop-conjunct:n <= 1000 &&->
+SURVIVED tests/scalar/goto_in_loop_body.c:9:38:literal:1000->1001
+SURVIVED tests/scalar/goto_in_loop_body.c:9:43:drop-conjunct:&& 0 <= limit->
+SURVIVED tests/scalar/goto_in_loop_body.c:9:46:drop-conjunct:0 <= limit &&->
+SURVIVED tests/scalar/goto_in_loop_body.c:9:57:drop-conjunct:&& limit <= 1000->
+SURVIVED tests/scalar/goto_in_loop_body.c:9:69:literal:1000->1001
+SURVIVED tests/scalar/goto_local_label.c:10:28:relop:>->>=
+SURVIVED tests/scalar/goto_local_label.c:10:30:literal:50->49
+SURVIVED tests/scalar/goto_local_label.c:14:11:literal:50->49
+SURVIVED tests/scalar/goto_local_label.c:14:9:relop:>->>=
+SURVIVED tests/scalar/goto_local_label.c:18:3:delete-stmt:r = x;->;
+SURVIVED tests/scalar/goto_local_label.c:9:23:drop-conjunct:0 <= x &&->
+SURVIVED tests/scalar/goto_local_label.c:9:30:drop-conjunct:&& x <= 100->
+SURVIVED tests/scalar/goto_local_label.c:9:30:swap-logic:&&->||
+SURVIVED tests/scalar/goto_local_label.c:9:38:literal:100->101
+SURVIVED tests/scalar/goto_out_of_do_once.c:10:49:drop-conjunct:x <= 50 &&->
+SURVIVED tests/scalar/goto_out_of_do_once.c:10:54:literal:50->51
+SURVIVED tests/scalar/goto_out_of_do_once.c:9:30:drop-conjunct:&& x <= 100->
+SURVIVED tests/scalar/goto_out_of_do_once.c:9:38:literal:100->101
+SURVIVED tests/scalar/goto_out_of_loops.c:10:38:literal:100->101
+SURVIVED tests/scalar/goto_out_of_loops.c:10:42:drop-conjunct:&& 0 <= target->
+SURVIVED tests/scalar/goto_out_of_loops.c:15:29:drop-conjunct:&& i <= n->
+SURVIVED tests/scalar/goto_out_of_loops.c:15:32:drop-conjunct:i <= n &&->
+SURVIVED tests/scalar/goto_out_of_loops.c:18:13:literal:0->1
+SURVIVED tests/scalar/goto_out_of_loops.c:19:31:drop-conjunct:&& j <= n->
+SURVIVED tests/scalar/goto_out_of_loops.c:19:34:drop-conjunct:j <= n &&->
+SURVIVED tests/scalar/goto_out_of_loops.c:22:17:relop:==->!=
+SURVIVED tests/scalar/goto_out_of_loops.c:23:9:delete-stmt:found = i;->;
+SURVIVED tests/scalar/goto_out_of_switch.c:24:5:delete-stmt:break;->;
+SURVIVED tests/scalar/goto_out_of_switch.c:9:33:drop-conjunct:&& code <= 10->
+SURVIVED tests/scalar/goto_out_of_switch.c:9:44:literal:10->11
+SURVIVED tests/scalar/noreturn_abort.c:15:24:literal:1000->1001
+SURVIVED tests/scalar/noreturn_abort.c:15:34:drop-conjunct:&& a <= 1000->
+SURVIVED tests/scalar/noreturn_abort.c:15:42:literal:1000->1001
+SURVIVED tests/scalar/noreturn_abort.c:16:32:drop-conjunct:&& r == a / b->
+SURVIVED tests/scalar/noreturn_declared.c:13:42:literal:100->101
+SURVIVED tests/scalar/noreturn_declared.c:14:38:drop-conjunct:&& key <= 50->
+SURVIVED tests/scalar/noreturn_declared.c:14:48:literal:50->51
+SURVIVED tests/scalar/noreturn_declared.c:16:11:relop:>->>=
+SURVIVED tests/scalar/noreturn_declared.c:16:13:literal:50->49
+SURVIVED tests/scalar/noreturn_declared.c:17:9:literal:1->2
+SURVIVED tests/scalar/noreturn_ends_path.c:12:11:literal:0->1
+SURVIVED tests/scalar/noreturn_ends_path.c:12:9:relop:<-><=
+SURVIVED tests/scalar/noreturn_gnu_spellings.c:12:23:drop-conjunct:0 <= x &&->
+SURVIVED tests/scalar/noreturn_gnu_spellings.c:12:30:drop-conjunct:&& x <= 10->
+SURVIVED tests/scalar/noreturn_gnu_spellings.c:12:30:swap-logic:&&->||
+SURVIVED tests/scalar/noreturn_gnu_spellings.c:12:38:literal:10->11
+SURVIVED tests/scalar/noreturn_gnu_spellings.c:15:11:literal:6->5
+SURVIVED tests/scalar/noreturn_gnu_spellings.c:15:11:literal:6->7
+SURVIVED tests/scalar/noreturn_gnu_spellings.c:15:9:relop:>->>=
+SURVIVED tests/scalar/noreturn_gnu_spellings.c:16:5:delete-stmt:stop_a();->;
+SURVIVED tests/scalar/noreturn_gnu_spellings.c:18:11:literal:3->2
+SURVIVED tests/scalar/noreturn_gnu_spellings.c:18:9:relop:>->>=
+SURVIVED tests/scalar/noreturn_keyword.c:15:24:literal:1000->1001
+SURVIVED tests/scalar/noreturn_keyword.c:15:34:drop-conjunct:&& a <= 1000->
+SURVIVED tests/scalar/noreturn_keyword.c:15:42:literal:1000->1001
+SURVIVED tests/scalar/noreturn_keyword.c:16:32:drop-conjunct:&& r == a / b->
+SURVIVED tests/scalar/noreturn_libc.c:10:23:drop-conjunct:0 <= code &&->
+SURVIVED tests/scalar/noreturn_libc.c:10:33:drop-conjunct:&& code <= 3->
+SURVIVED tests/scalar/noreturn_libc.c:10:33:swap-logic:&&->||
+SURVIVED tests/scalar/noreturn_libc.c:10:44:literal:3->4
+SURVIVED tests/scalar/noreturn_libc.c:15:5:delete-stmt:return 7;->;
+SURVIVED tests/scalar/noreturn_libc.c:17:5:delete-stmt:abort();->;
+SURVIVED tests/scalar/noreturn_libc.c:18:8:literal:2->3
+SURVIVED tests/scalar/noreturn_libc.c:19:10:literal:2->1
+SURVIVED tests/scalar/noreturn_libc.c:19:10:literal:2->3
+SURVIVED tests/scalar/noreturn_libc.c:19:5:delete-stmt:exit(2);->;
+SURVIVED tests/scalar/noreturn_libc.c:21:11:literal:3->2
+SURVIVED tests/scalar/noreturn_libc.c:21:11:literal:3->4
+SURVIVED tests/scalar/noreturn_missing_return.c:17:11:literal:0->1
+SURVIVED tests/scalar/noreturn_missing_return.c:18:5:delete-stmt:return x;->;
+SURVIVED tests/scalar/noreturn_namespaced_exit.cpp:13:23:drop-conjunct:0 <= x &&->
+SURVIVED tests/scalar/noreturn_namespaced_exit.cpp:13:30:drop-conjunct:&& x <= 10->
+SURVIVED tests/scalar/noreturn_namespaced_exit.cpp:13:30:swap-logic:&&->||
+SURVIVED tests/scalar/noreturn_namespaced_exit.cpp:13:38:literal:10->11
+SURVIVED tests/scalar/noreturn_namespaced_exit.cpp:16:11:literal:5->4
+SURVIVED tests/scalar/noreturn_namespaced_exit.cpp:16:11:literal:5->6
+SURVIVED tests/scalar/noreturn_namespaced_exit.cpp:16:9:relop:>->>=
+SURVIVED tests/scalar/noreturn_namespaced_exit.cpp:17:13:literal:1->0
+SURVIVED tests/scalar/noreturn_namespaced_exit.cpp:17:13:literal:1->2
+SURVIVED tests/scalar/noreturn_namespaced_exit.cpp:17:5:delete-stmt:n::exit(1);->;
+SURVIVED tests/scalar/noreturn_other_signature.cpp:11:23:drop-conjunct:0 <= x &&->
+SURVIVED tests/scalar/noreturn_other_signature.cpp:11:30:drop-conjunct:&& x <= 10->
+SURVIVED tests/scalar/noreturn_other_signature.cpp:11:30:swap-logic:&&->||
+SURVIVED tests/scalar/noreturn_other_signature.cpp:11:38:literal:10->11
+SURVIVED tests/scalar/noreturn_other_signature.cpp:14:11:literal:5->4
+SURVIVED tests/scalar/noreturn_other_signature.cpp:14:11:literal:5->6
+SURVIVED tests/scalar/noreturn_other_signature.cpp:14:9:relop:>->>=
+SURVIVED tests/scalar/noreturn_other_signature.cpp:15:5:delete-stmt:exit();->;
+SURVIVED tests/scalar/noreturn_std_exit.cpp:12:11:literal:5->4
+SURVIVED tests/scalar/noreturn_std_exit.cpp:12:11:literal:5->6
+SURVIVED tests/scalar/noreturn_std_exit.cpp:12:9:relop:>->>=
+SURVIVED tests/scalar/noreturn_std_exit.cpp:13:15:literal:1->0
+SURVIVED tests/scalar/noreturn_std_exit.cpp:13:15:literal:1->2
+SURVIVED tests/scalar/noreturn_std_exit.cpp:13:5:delete-stmt:std::exit(1);->;
+SURVIVED tests/scalar/noreturn_std_exit.cpp:15:11:literal:3->2
+SURVIVED tests/scalar/noreturn_std_exit.cpp:15:9:relop:>->>=
+SURVIVED tests/scalar/noreturn_std_exit.cpp:9:23:drop-conjunct:0 <= x &&->
+SURVIVED tests/scalar/noreturn_std_exit.cpp:9:30:drop-conjunct:&& x <= 10->
+SURVIVED tests/scalar/noreturn_std_exit.cpp:9:30:swap-logic:&&->||
+SURVIVED tests/scalar/noreturn_std_exit.cpp:9:38:literal:10->11
+SURVIVED tests/scalar/noreturn_underscore_exit.c:10:23:drop-conjunct:0 <= x &&->
+SURVIVED tests/scalar/noreturn_underscore_exit.c:10:30:drop-conjunct:&& x <= 10->
+SURVIVED tests/scalar/noreturn_underscore_exit.c:10:30:swap-logic:&&->||
+SURVIVED tests/scalar/noreturn_underscore_exit.c:10:38:literal:10->11
+SURVIVED tests/scalar/noreturn_underscore_exit.c:13:11:literal:5->4
+SURVIVED tests/scalar/noreturn_underscore_exit.c:13:9:relop:>->>=
+SURVIVED tests/scalar/noreturn_underscore_exit.c:14:11:literal:1->0
+SURVIVED tests/scalar/noreturn_underscore_exit.c:14:11:literal:1->2
+SURVIVED tests/scalar/noreturn_user_abort.cpp:13:23:drop-conjunct:0 <= x &&->
+SURVIVED tests/scalar/noreturn_user_abort.cpp:13:30:drop-conjunct:&& x <= 10->
+SURVIVED tests/scalar/noreturn_user_abort.cpp:13:30:swap-logic:&&->||
+SURVIVED tests/scalar/noreturn_user_abort.cpp:13:38:literal:10->11
+SURVIVED tests/scalar/noreturn_user_abort.cpp:16:11:literal:5->4
+SURVIVED tests/scalar/noreturn_user_abort.cpp:16:11:literal:5->6
+SURVIVED tests/scalar/noreturn_user_abort.cpp:16:9:relop:>->>=
+SURVIVED tests/scalar/noreturn_user_abort.cpp:17:5:delete-stmt:abort();->;
+SURVIVED tests/scalar/noreturn_user_abort.cpp:9:3:delete-stmt:return;->;
+stale equivalence entry (no such mutant is generated): tests/scalar/abs_value.c:11:12:relop:<-><=
+stale equivalence entry (no such mutant is generated): tests/scalar/abs_value.c:11:14:literal:0->1
+stale equivalence entry (no such mutant is generated): tests/scalar/add_bounds.c:9:23:drop-conjunct:a >= 0 &&->
+stale equivalence entry (no such mutant is generated): tests/scalar/add_bounds.c:9:38:literal:1000000000->1000000001
+stale equivalence entry (no such mutant is generated): tests/scalar/add_bounds.c:9:49:drop-conjunct:&& b >= 0->
+stale equivalence entry (no such mutant is generated): tests/scalar/add_bounds.c:9:52:drop-conjunct:b >= 0 &&->
+stale equivalence entry (no such mutant is generated): tests/scalar/add_bounds.c:9:67:literal:1000000000->1000000001
+stale equivalence entry (no such mutant is generated): tests/scalar/call_contract_only.c:12:14:literal:2->1
+stale equivalence entry (no such mutant is generated): tests/scalar/call_contract_only.c:12:14:literal:2->3
+stale equivalence entry (no such mutant is generated): tests/scalar/call_contract_only.c:9:38:literal:1000->1001
+stale equivalence entry (no such mutant is generated): tests/scalar/call_in_expression.c:11:12:relop:>->>=
+stale equivalence entry (no such mutant is generated): tests/scalar/call_in_expression.c:11:14:literal:1000->999
+stale equivalence entry (no such mutant is generated): tests/scalar/call_in_expression.c:11:21:literal:1000->999
+stale equivalence entry (no such mutant is generated): tests/scalar/call_no_contract.c:13:25:drop-conjunct:r >= -2147483647L - 1 &&->
+stale equivalence entry (no such mutant is generated): tests/scalar/call_no_contract.c:13:45:literal:1->2
+stale equivalence entry (no such mutant is generated): tests/scalar/call_precondition.c:15:25:relop:>->>=
+stale equivalence entry (no such mutant is generated): tests/scalar/call_precondition.c:15:27:literal:5->4
+stale equivalence entry (no such mutant is generated): tests/scalar/call_precondition.c:8:25:relop:>->>=
+stale equivalence entry (no such mutant is generated): tests/scalar/call_result_conversion.c:11:12:relop:>->>=
+stale equivalence entry (no such mutant is generated): tests/scalar/call_result_conversion.c:11:14:literal:100->99
+stale equivalence entry (no such mutant is generated): tests/scalar/call_result_conversion.c:11:20:literal:100->99
+stale equivalence entry (no such mutant is generated): tests/scalar/compare_mixed.c:10:29:literal:1->2
+stale equivalence entry (no such mutant is generated): tests/scalar/compare_mixed.c:13:17:relop:>->>=
+stale equivalence entry (no such mutant is generated): tests/scalar/compare_mixed.c:13:19:literal:0u->1u
+stale equivalence entry (no such mutant is generated): tests/scalar/compound_mixed.c:9:38:literal:1000->1001
+stale equivalence entry (no such mutant is generated): tests/scalar/compound_mixed.c:9:51:literal:1000u->1001u
+stale equivalence entry (no such mutant is generated): tests/scalar/compound_narrow.c:9:23:drop-conjunct:c >= -100 &&->
+stale equivalence entry (no such mutant is generated): tests/scalar/compound_narrow.c:9:29:literal:100->101
+stale equivalence entry (no such mutant is generated): tests/scalar/compound_narrow.c:9:41:literal:100->101
+stale equivalence entry (no such mutant is generated): tests/scalar/compound_ops.c:8:38:literal:1000->1001
+stale equivalence entry (no such mutant is generated): tests/scalar/compound_ushort.c:9:28:literal:100->101
+stale equivalence entry (no such mutant is generated): tests/scalar/compound_ushort.c:9:40:literal:100->101
+stale equivalence entry (no such mutant is generated): tests/scalar/cond_expr.c:10:12:relop:>->>=
+stale equivalence entry (no such mutant is generated): tests/scalar/contract_wf.c:16:23:drop-conjunct:a >= 0 &&->
+stale equivalence entry (no such mutant is generated): tests/scalar/contract_wf.c:16:38:literal:1000000000->1000000001
+stale equivalence entry (no such mutant is generated): tests/scalar/contract_wf.c:16:49:drop-conjunct:&& b >= 0->
+stale equivalence entry (no such mutant is generated): tests/scalar/contract_wf.c:16:52:drop-conjunct:b >= 0 &&->
+stale equivalence entry (no such mutant is generated): tests/scalar/contract_wf.c:16:67:literal:1000000000->1000000001
+stale equivalence entry (no such mutant is generated): tests/scalar/contract_wf.c:17:27:relop:==->!=
+stale equivalence entry (no such mutant is generated): tests/scalar/contract_wf.c:9:23:drop-conjunct:a >= 0 &&->
+stale equivalence entry (no such mutant is generated): tests/scalar/contract_wf.c:9:25:relop:>=->>
+stale equivalence entry (no such mutant is generated): tests/scalar/contract_wf.c:9:28:literal:0->1
+stale equivalence entry (no such mutant is generated): tests/scalar/conv_assign.c:11:13:literal:0->1
+stale equivalence entry (no such mutant is generated): tests/scalar/default_argument.cpp:7:23:drop-conjunct:a >= 0 &&->
+stale equivalence entry (no such mutant is generated): tests/scalar/default_argument.cpp:7:38:literal:1000->1001
+stale equivalence entry (no such mutant is generated): tests/scalar/default_argument.cpp:7:43:drop-conjunct:&& b >= 0->
+stale equivalence entry (no such mutant is generated): tests/scalar/default_argument.cpp:7:46:drop-conjunct:b >= 0 &&->
+stale equivalence entry (no such mutant is generated): tests/scalar/default_argument.cpp:7:61:literal:1000->1001
+stale equivalence entry (no such mutant is generated): tests/scalar/default_argument_expr.cpp:10:3:delete-stmt:(void)b;->;
+stale equivalence entry (no such mutant is generated): tests/scalar/default_argument_expr.cpp:7:23:drop-conjunct:a >= 0 &&->
+stale equivalence entry (no such mutant is generated): tests/scalar/default_argument_expr.cpp:7:30:drop-conjunct:&& b >= 0->
+stale equivalence entry (no such mutant is generated): tests/scalar/default_argument_expr.cpp:7:30:swap-logic:&&->||
+stale equivalence entry (no such mutant is generated): tests/scalar/div_trunc.c:15:39:literal:2->3
+stale equivalence entry (no such mutant is generated): tests/scalar/div_trunc.c:8:29:literal:7->6
+stale equivalence entry (no such mutant is generated): tests/scalar/ensures_entry.c:8:23:drop-conjunct:x >= 0 &&->
+stale equivalence entry (no such mutant is generated): tests/scalar/ensures_entry.c:8:35:relop:<-><=
+stale equivalence entry (no such mutant is generated): tests/scalar/ensures_entry.c:8:37:literal:100->101
+stale equivalence entry (no such mutant is generated): tests/scalar/for_loop.c:12:11:literal:0->1
+stale equivalence entry (no such mutant is generated): tests/scalar/for_loop.c:14:22:drop-conjunct:0 <= i &&->
+stale equivalence entry (no such mutant is generated): tests/scalar/for_loop.c:9:38:literal:100->101
+stale equivalence entry (no such mutant is generated): tests/scalar/if_else.c:11:9:relop:<-><=
+stale equivalence entry (no such mutant is generated): tests/scalar/if_else.c:13:16:relop:>->>=
+stale equivalence entry (no such mutant is generated): tests/scalar/incdec_uchar.c:8:28:literal:255->256
+stale equivalence entry (no such mutant is generated): tests/scalar/local_const.c:9:25:drop-conjunct:r <= 1000 &&->
+stale equivalence entry (no such mutant is generated): tests/scalar/local_const.c:9:30:literal:1000->1001
+stale equivalence entry (no such mutant is generated): tests/scalar/long_arith.c:15:23:drop-conjunct:a >= 0 &&->
+stale equivalence entry (no such mutant is generated): tests/scalar/long_arith.c:15:38:literal:4611686018427387903L->4611686018427387904L
+stale equivalence entry (no such mutant is generated): tests/scalar/long_arith.c:15:77:literal:4611686018427387903L->4611686018427387904L
+stale equivalence entry (no such mutant is generated): tests/scalar/loop_condition.c:12:11:literal:0->1
+stale equivalence entry (no such mutant is generated): tests/scalar/loop_condition.c:13:22:drop-conjunct:0 <= i &&->
+stale equivalence entry (no such mutant is generated): tests/scalar/loop_condition.c:14:22:literal:1000->1001
+stale equivalence entry (no such mutant is generated): tests/scalar/loop_condition.c:14:22:literal:1000->999
+stale equivalence entry (no such mutant is generated): tests/scalar/loop_condition.c:9:30:drop-conjunct:&& n <= 100->
+stale equivalence entry (no such mutant is generated): tests/scalar/loop_condition.c:9:38:literal:100->101
+stale equivalence entry (no such mutant is generated): tests/scalar/main_implicit.c:10:11:literal:5->4
+stale equivalence entry (no such mutant is generated): tests/scalar/main_implicit.c:10:11:literal:5->6
+stale equivalence entry (no such mutant is generated): tests/scalar/main_implicit.c:10:9:relop:>->>=
+stale equivalence entry (no such mutant is generated): tests/scalar/main_implicit.c:11:12:literal:3->2
+stale equivalence entry (no such mutant is generated): tests/scalar/main_implicit.c:11:12:literal:3->4
+stale equivalence entry (no such mutant is generated): tests/scalar/main_implicit.c:11:5:delete-stmt:return 3;->;
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_expression.c:12:22:drop-conjunct:0 <= i &&->
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_expression.c:13:26:literal:1000->1001
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_expression.c:13:26:literal:1000->999
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_expression.c:8:38:literal:1000->1001
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_for.c:11:11:literal:0->1
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_for.c:13:22:drop-conjunct:0 <= i &&->
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_for.c:8:30:drop-conjunct:&& n <= 100->
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_for.c:8:38:literal:100->101
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_function_expression.c:8:38:literal:1000->1001
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_function_expression.c:9:28:literal:1000->1001
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_function_expression.c:9:28:literal:1000->999
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_lexicographic.c:15:11:literal:0->1
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_lexicographic.c:15:9:relop:>->>=
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_lexicographic.c:16:23:literal:1->2
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_lexicographic.c:16:5:delete-stmt:return lex(m, n - 1);->;
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_lexicographic.c:18:22:literal:5->4
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_lexicographic.c:18:22:literal:5->6
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_loop.c:12:22:drop-conjunct:0 <= i &&->
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_loop_return.c:12:22:drop-conjunct:0 <= i &&->
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_loop_return.c:15:11:relop:>=->>
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_loop_return.c:15:14:literal:50->49
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_loop_return.c:15:14:literal:50->51
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_loop_return.c:16:7:delete-stmt:return i;->;
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_loop_return.c:8:30:drop-conjunct:&& n <= 100->
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_loop_return.c:8:38:literal:100->101
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_mutual.c:18:12:literal:1->0
+stale equivalence entry (no such mutant is generated): tests/scalar/measure_mutual.c:29:12:literal:0->1
+stale equivalence entry (no such mutant is generated): tests/scalar/mul_vars.c:9:38:literal:40000->40001
+stale equivalence entry (no such mutant is generated): tests/scalar/mul_vars.c:9:62:literal:40000->40001
+stale equivalence entry (no such mutant is generated): tests/scalar/old_cpp.cpp:7:23:drop-conjunct:x >= 0 &&->
+stale equivalence entry (no such mutant is generated): tests/scalar/old_cpp.cpp:7:35:relop:<-><=
+stale equivalence entry (no such mutant is generated): tests/scalar/old_cpp.cpp:7:37:literal:100->101
+stale equivalence entry (no such mutant is generated): tests/scalar/scalar_condition.c:19:10:literal:100->101
+stale equivalence entry (no such mutant is generated): tests/scalar/scalar_condition.c:19:10:literal:100->99
+stale equivalence entry (no such mutant is generated): tests/scalar/shl_const.c:8:38:literal:100000000->100000001
+stale equivalence entry (no such mutant is generated): tests/scalar/shr_floor.c:8:29:literal:7->8
+stale equivalence entry (no such mutant is generated): tests/scalar/static_assert_ok.c:8:23:drop-conjunct:x >= 0 &&->
+stale equivalence entry (no such mutant is generated): tests/scalar/static_assert_ok.c:8:35:relop:<-><=
+stale equivalence entry (no such mutant is generated): tests/scalar/static_assert_ok.c:8:37:literal:100->101
+stale equivalence entry (no such mutant is generated): tests/scalar/two_loops.c:13:22:drop-conjunct:0 <= i &&->
+stale equivalence entry (no such mutant is generated): tests/scalar/two_loops.c:20:22:drop-conjunct:0 <= j &&->
+stale equivalence entry (no such mutant is generated): tests/scalar/two_loops.c:8:38:literal:1000->1001
+stale equivalence entry (no such mutant is generated): tests/scalar/uchar_promote.c:14:28:literal:255->256
+stale equivalence entry (no such mutant is generated): tests/scalar/unsigned_wrap.c:15:28:literal:4294967295u->4294967296u
+stale equivalence entry (no such mutant is generated): tests/scalar/while_invariant.c:12:22:drop-conjunct:0 <= i &&->
+safe-direction tests/scalar/assert_call.c: 4
+safe-direction tests/scalar/assert_cassert.cpp: 5
+safe-direction tests/scalar/assert_holds.c: 5
+safe-direction tests/scalar/assert_ndebug.c: 1
+safe-direction tests/scalar/assert_obligation.c: 4
+safe-direction tests/scalar/goto_between_cases.c: 16
+safe-direction tests/scalar/goto_cleanup.c: 13
+safe-direction tests/scalar/goto_error_exit.c: 30
+safe-direction tests/scalar/goto_in_loop_body.c: 11
+safe-direction tests/scalar/goto_local_label.c: 11
+safe-direction tests/scalar/goto_out_of_do_once.c: 11
+safe-direction tests/scalar/goto_out_of_loops.c: 10
+safe-direction tests/scalar/goto_out_of_switch.c: 18
+safe-direction tests/scalar/noreturn_abort.c: 4
+safe-direction tests/scalar/noreturn_declared.c: 6
+safe-direction tests/scalar/noreturn_ends_path.c: 3
+safe-direction tests/scalar/noreturn_gnu_spellings.c: 8
+safe-direction tests/scalar/noreturn_keyword.c: 4
+safe-direction tests/scalar/noreturn_libc.c: 7
+safe-direction tests/scalar/noreturn_missing_return.c: 4
+safe-direction tests/scalar/noreturn_namespaced_exit.cpp: 4
+safe-direction tests/scalar/noreturn_other_signature.cpp: 4
+safe-direction tests/scalar/noreturn_std_exit.cpp: 8
+safe-direction tests/scalar/noreturn_underscore_exit.c: 8
+safe-direction tests/scalar/noreturn_user_abort.cpp: 4
+safe-direction doc/modules/ROOT/examples/verifying/goto_exit.c: 4
+safe-direction doc/modules/ROOT/examples/verifying/assert.c: 13
+stillborn (not counted): 13
+  tests/scalar/goto_between_cases.c:14:8:literal:0->1
+  tests/scalar/goto_between_cases.c:16:8:literal:1->0
+  tests/scalar/goto_between_cases.c:16:8:literal:1->2
+  tests/scalar/goto_between_cases.c:19:8:literal:2->1
+  tests/scalar/goto_out_of_do_once.c:18:12:literal:0->1
+  tests/scalar/goto_out_of_switch.c:14:8:literal:0->1
+  tests/scalar/goto_out_of_switch.c:16:8:literal:1->0
+  tests/scalar/goto_out_of_switch.c:16:8:literal:1->2
+  tests/scalar/goto_out_of_switch.c:19:8:literal:2->1
+  tests/scalar/noreturn_libc.c:14:8:literal:0->1
+  tests/scalar/noreturn_libc.c:16:8:literal:1->0
+  tests/scalar/noreturn_libc.c:16:8:literal:1->2
+  tests/scalar/noreturn_libc.c:18:8:literal:2->1
+mutate: 31 tests, 913 mutants: 476 killed, 0 equivalent (reviewed), 220 safe-direction, 200 unexplained survivors, 13 stillborn, 4 tool failures
+exit 3
+Wed Oct 21 10:18:17 EDT 2026

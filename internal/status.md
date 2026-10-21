@@ -4,6 +4,79 @@ Session handoff log, newest first. Each entry says what is done, what is not,
 any surprises, the decision records added and the exact first step for the
 next session.
 
+## M4.2a — forward goto, functions that do not return, assert (2026-10-21): done on branch `m4.2a-goto-noreturn-assert`; fork push, fast-forward and pushes pending
+
+Read `internal/handoff.md` next (§2 owner steps, §4 the CI session, §5 the mutation triage session, §6 audit notes,
+§11 questions).
+
+**Owner decisions (2026-10-21)**
+- M4.2 is split into **M4.2a** (this session), **M4.2b** (`const`/`constexpr` globals, `case k`, enumerations) and
+  **M4.2c** (locals without an initializer); only M4.2a ran. It ran before the CI and triage sessions.
+- The EDG pin is restored to P `b9519388ea` on the branch: `main`'s `518e0de` pinned `0bcd9bf28a`, which lacks
+  `RAF_NO_CONSTANT_EVALUATION`, so `main` did not build.
+- Pre-approved retirements: `reject_goto.c` and `reject_noreturn.c` (done here); `reject_case_variable.cpp`,
+  `reject_enum.c` (M4.2b) and `reject_uninit_local.c` (M4.2c).
+- A new error category `noreturn`; a failing `assert(e)` is `check`.
+- "Verified" now means: on every input satisfying `requires`, no undefined behaviour, and the function returns
+  satisfying its `ensures` or ends the program by calling a function that does not return (0013 item 6 amended).
+
+**Done**
+- **Plan:** `plan.md`'s M4 table and handoff §8.1 hold M4.2a/b/c, with a Plan-agent review's findings for M4.2b
+  (cross-mode traps of const globals in `do … while (0)`, case-value guards, the enum one-meaning rules) and M4.2c
+  (definite assignment recommended).
+- **Decision 0015:** forward `goto` "outward and forward" (the label is a later statement of a block enclosing the
+  `goto`, no declaration between; never into a block, branch, switch body or loop); functions that do not return
+  (`ensures false`, `assert false` with `noreturn` at each reachable return and the end; `ensures` on them rejected;
+  a user's `[[noreturn]]` on a declaration is a trusted user contract unless a system header wrote the flag); the
+  trusted libc table (`abort`, `exit`, `_Exit`); `assert` by the exact shape of the macOS expansion, through folded
+  constants, checked as `check`. Amends 0011–0014.
+- **Probes and spikes:** P19–P22, S11–S13, all confirmed (`il-inventory.md`, "M4.2a").
+- **Code:** `src/vir` (Goto/Label, `vir::goto_problems`, `Function::noreturn`, the assert-origin `Check`),
+  `src/backend/encode.cpp` (user gotos and labels with label attributes from the entity, block-flattening guards,
+  noreturn, the libc table, the assert matcher, `ensures_on_noreturn`), `verify_main.cpp` (#1305 suppressed).
+- **Tooling:** `lint_viper.py` checks every `goto` outward and forward at token level (closes the M4.1 audit note);
+  `mutate.py` deletes `goto L;` and buckets a deleted call-free `assert(...)`; the category `noreturn` in the harness.
+- **Tests:** 90 new files in `tests/scalar` (27 positives, 63 twins and rejections, both modes where C++ accepts
+  them); `reject_goto.c`, `reject_noreturn.c` retired; VIR self-test 204 → 230 lowering cases (75 → 87 rejection
+  cases).
+- **Docs:** Verifying a program (goto; functions that do not return; `assert`; the meaning of a result; the rejected
+  list), Error messages (`noreturn`), Annotations (`check` vs `assert`), Overview.
+
+**Acceptance** (handoff §10)
+- `scripts/check.sh` green at `610e7e1` (17 min 5 s, one run): self-tests 931 + 74 + 142 + 174; tests 2624 passed,
+  0 failed, 1 skipped (native-ok: Apple clang 642, GCC 642); 667 `.vpr` lint clean; VIR self-test 230/230 (+ 87
+  rejection cases); walker oracle 134 goldens, 0 failed; docs 0 problems.
+- Every existing test's emitted Viper is byte-identical to the session's baseline (555 files).
+- `--count-error-twins` 140 (113 + 27); `--check-headers` 954/954.
+- Mutation run on the new positives and doc examples: 913 mutants, 476 killed, 220 bucket, 13 stillborn, 200
+  survivors (185 after the replaced doc example; classified, 0 suspicious; to the triage session, handoff §5).
+- Audits (Opus): 0015 (1 blocking, dropped from the design), the code (0 blocking), the tooling (0 blocking); every
+  should-fix item taken.
+- Wall-clock: about 2 h 40 min (08:19–11:00).
+
+**Not done / deferred**
+- M4.2b and M4.2c (handoff §8.1).
+- Audit notes (handoff §6): the IL keeps only the first declaration's position, so who wrote a noreturn flag is
+  checked through attribute entries (`_Noreturn` leaves none); the sound check needs EDG's source sequence lists.
+- glibc's `assert` expansion (for a Linux CI runner, handoff §4).
+- The CI and mutation triage sessions (unchanged, next).
+
+**Surprises**
+- `main`'s last commit had moved the EDG pin back to a commit without `RAF_NO_CONSTANT_EVALUATION`.
+- EDG keeps a label's attributes on the label entity, not on the label statement; a label that is the whole branch
+  of an `if` without braces sits in a compiler-generated block.
+- A plain user declaration of `quick_exit` before `<stdlib.h>` takes its noreturn flag from the SDK's `__dead2`
+  (code audit): the flag alone does not say who claimed it.
+- EDG folds `!(0)` in `assert(0)`, so the matcher reads folded constants' original expressions (0010 item 12).
+- Asciidoctor registers `[[noreturn]]` in text as an anchor id even inside literal monospace (duplicate-id warning).
+- Committing the tooling picked up two staged `git rm`s (the M4.1 process note); redone before anything else.
+
+**Decision records added:** 0015-goto-noreturn-assert; amended 0011, 0012, 0013, 0014.
+
+**First step for the next session (CI).** Confirm the owner pushed the fork's `cerastes` (P) and fast-forwarded
+`m4.2a-goto-noreturn-assert` (handoff §2). Then the CI session as in handoff §4 (box: upstream EDG merge, the
+0020-alone Linux failure), then the mutation triage session (§5), then M4.2b.
+
 ## M4.1 — control flow, and the plan re-sequenced (2026-10-20): done on branch `m4.1-control-flow`; fast-forward and pushes pending
 
 Read `internal/handoff.md` next (§2 owner steps, §4 the CI session, §5 the mutation triage session, §8 the M4 and M5
