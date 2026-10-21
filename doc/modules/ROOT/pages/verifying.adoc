@@ -223,7 +223,7 @@ evaluated. `CERASTES_INVARIANT` and `CERASTES_DECREASES` are written before
 A `switch` evaluates its controlling expression once, with the usual checks,
 and goes to the matching `case` label, to `default`, or past the `switch`.
 Execution falls through from one label's statements to the next until a
-`break`; `[[fallthrough]];` (or `[[gnu::fallthrough]];`) marks an intended
+`break`; `+[[fallthrough]];+` (or `+[[gnu::fallthrough]];+`) marks an intended
 fallthrough for compilers that warn about it. Each `case` value is checked as it
 is written, like any constant: `case 1 << 40:` is a `shift` error at the label,
 even where the compiler only warns. cerastes rejects a `case` or `default` label that is not directly
@@ -231,6 +231,72 @@ inside the braces of its `switch` (as in Duff's device), a GNU case range
 (`case 1 ... 3:`), a statement before the first label, a declaration that a
 later label jumps over, and a `switch` with an init-statement or a declaration
 in its condition.
+
+[#goto]
+== Jumping forward with goto
+
+A `goto` is verified when it jumps *outward and forward*: its label is a later
+statement of a block that encloses the `goto`, and no declaration of that block
+lies between them. That covers the usual uses: an early exit to a common label
+at the end of a function, a cleanup label, and leaving nested loops or a
+`switch` at once. As with `break`, the loop's condition is not evaluated on the
+way out, so its invariant is not checked there; after the label, what follows is
+proved from each way of getting there.
+
+[source,c]
+----
+include::example$verifying/goto_exit.c[tag=source]
+----
+
+After `found:`, the result is proved twice: on the `goto`, where
+`(r + 1) * (r + 1) > n`, and on the normal exit of the loop.
+
+cerastes rejects a `goto` that jumps backward (write the loop as `while`, `for` or
+`do`), one that jumps into a block, an `if` branch, a loop or the body of a
+`switch`, one that jumps past a declaration that is still in scope at the label
+(its variable would have no value there), and the GNU computed `goto`.
+
+[#no-return]
+== Functions that do not return
+
+A function declared `+[[noreturn]]+` (or `_Noreturn` in C, or with the GNU
+attribute `noreturn`) must never return: cerastes checks that no `return` and no
+closing brace of its body can be reached, and reports one that can as a
+`noreturn` error. A call of such a function ends the path of its caller, so what
+would follow it is not checked.
+
+`abort`, `exit` and `_Exit` from `<stdlib.h>` are known not to return. They are
+the only functions of the C library that cerastes knows so far; `quick_exit`,
+`+__builtin_trap+`, `+__builtin_unreachable+` (and C23's `unreachable()`) and
+`std::terminate` are rejected.
+
+[source,c]
+----
+include::example$verifying/no_return.c[tag=source]
+----
+
+Without the call of `fail`, `a / b` would be a `division-by-zero` and an
+`overflow` error. A function declared not to return cannot have
+`CERASTES_ENSURES` (it would never be checked), and `main` cannot be declared not
+to return. A function that never returns by looping forever is rejected, since
+every loop needs a measure.
+
+[#assert]
+== assert
+
+`assert(e)` from `<assert.h>` (or `<cassert>`) is verified as a check of `e`: a
+failure is a `check` error at the `assert`. Unlike `CERASTES_CHECK`, it is code:
+`e` is evaluated at run time, so its arithmetic is checked like any expression's,
+and it may call functions. When `NDEBUG` is defined, `assert` does nothing, and
+cerastes checks nothing, as the program will run. A result holds for the
+configuration that was verified: with asserts on, the code after `assert(e)` may
+rely on `e`, which a build with `NDEBUG` no longer checks, so verify the
+configuration you ship.
+
+[source,c]
+----
+include::example$verifying/assert.c[tag=source]
+----
 
 [#keep-vpr]
 == Keeping the Viper program
@@ -273,7 +339,9 @@ against.
 
 A verified function terminates on every input that satisfies its `requires`,
 has no undefined behaviour on the way, and returns a value that satisfies its
-`ensures`: the result is *total correctness*. (In these programs, which have no
+`ensures`, or ends the program by calling a function that does not return (such
+as `abort` or `exit`): the result is *total correctness*. A call of `exit` in
+`main` ends the program without checking the `CERASTES_ENSURES` of `main`. (In these programs, which have no
 input or output, a loop or recursion that never ends is undefined behaviour in
 pass:[C++] anyway, which is why cerastes does not leave it unchecked.)
 
@@ -328,14 +396,20 @@ include::example$verifying/rejected_double.cpp[tag=source]
 
 The constructs that are rejected in this version are:
 
-* *Statements:* `goto` and labels, `try` and `throw`, `asm`, an `if` or
+* *Statements:* a `goto` that is not outward and forward (<<goto>>), the GNU
+  computed `goto`, `try` and `throw`, `asm`, an `if` or
   `switch` with an init-statement or with a declaration in its condition, and the
   forms of `switch` listed in <<control-flow>>.
 * *Declarations:* a local with no initializer, `static`, `thread_local` and
   `extern` locals, global variables (also `const` ones), arrays, classes, unions,
   enumerations, lambdas, templates, `constexpr` and `consteval` functions,
-  variadic functions, function pointers, `[[noreturn]]` functions, and
-  `CERASTES_REQUIRES` on `main`.
+  variadic functions, function pointers, `CERASTES_REQUIRES` on `main`, a
+  `main` declared not to return, and `CERASTES_ENSURES` on a function declared
+  not to return.
+* *Calls:* of a function with no body in the file and no contract, among them
+  the functions of the C library other than `abort`, `exit` and `_Exit` (for
+  example `quick_exit`, `+__builtin_trap+`, `+__builtin_unreachable+` and
+  `std::terminate`).
 * *Types:* pointers, references, floating point, `volatile`, `_BitInt`, vector
   types.
 * *Expressions:* the bitwise operators (`&`, `|`, `^`, `~`), the comma
@@ -343,8 +417,8 @@ The constructs that are rejected in this version are:
   not nested in each other (`f(x) + g(y)`), and a call in the second operand of
   `&&`, `||` or `?:`, or in a loop condition.
 * *Attributes:* any attribute other than the cerastes ones and `maybe_unused`,
-  `nodiscard`, `deprecated`, `likely` and `unlikely` (some attributes, such as
-  `assume`, would let you state an unchecked fact).
+  `nodiscard`, `deprecated`, `likely`, `unlikely`, `fallthrough` and `noreturn`
+  (some attributes, such as `assume`, would let you state an unchecked fact).
 
 A function with a body but no contract is verified against the default
 contract: its parameters and its result are in the range of their types.

@@ -9,7 +9,7 @@ at the line of the C or pass:[C++] source that causes it:
 <file>:<line>: note: <what the note says>
 ----
 
-The *category* names what could not be proved. There are eleven, and each has a
+The *category* names what could not be proved. There are twelve, and each has a
 section below. A *note* line follows an error when a second place matters: the
 clause of a contract that failed, or the callee's clause that a call does not
 meet. Errors are sorted by file, line and category, and the exit status is 1
@@ -96,6 +96,8 @@ include::example$error-messages/check_error.cpp[tag=source]
 ----
 check_error.cpp:10: error: check: this `check` may not hold
 ----
+
+An `assert(e)` from `<assert.h>` that may fail is reported in the same way, at the `assert`; the message names `assert` instead of `check`.
 
 *How to fix it.* Establish the condition (a stronger precondition or loop invariant, as below), or correct the check.
 
@@ -286,4 +288,27 @@ termination_error.cpp:12: error: termination: the measure of this loop may not d
 [source,cpp]
 ----
 include::example$error-messages/termination_fixed.cpp[tag=source]
+----
+
+== noreturn
+
+A function declared not to return (with the attribute `noreturn`, or with `_Noreturn` in C) may return. It is reported at the `return` that may be reached, or at the closing brace.
+
+Returning from such a function is undefined behaviour in C and pass:[C++]: its callers are compiled, and verified, as if the call never comes back. Every path through its body must end in a call of another function that does not return, such as `abort` or `exit`.
+
+[source,c]
+----
+include::example$error-messages/noreturn_error.c[tag=source]
+----
+
+[source,console]
+----
+noreturn_error.c:14: error: noreturn: `fail_if` is declared not to return, but control may reach its end
+----
+
+*How to fix it.* Make every path end in a call that does not return, or remove the attribute `noreturn`. A function that ends the program only on some inputs is better written without the condition, with the test at the call:
+
+[source,c]
+----
+include::example$error-messages/noreturn_fixed.c[tag=source]
 ----

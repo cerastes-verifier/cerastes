@@ -89,7 +89,9 @@ include::example$annotations/spelled_out.cpp[tag=attr]
 The namespace is closed. A name that cerastes does not define, such as
 `+[[cerastes::assert(x > 0)]]+`, is an error, and there is deliberately no
 `assume`. The statement annotation is `check`, not `assert`, because
-`<cassert>` expands `assert` as a macro.
+`<cassert>` expands `assert` as a macro. (That macro is verified too: an
+`assert(e)` is checked like a `check`, but it is code, evaluated at run time;
+see xref:verifying.adoc#assert[Verifying a program].)
 
 == Contracts: requires and ensures
 
@@ -396,7 +398,9 @@ include::example$annotations/check.cpp[tag=check]
 ----
 
 It is named `check`, not `assert`, so that it cannot collide with the
-`<cassert>` macro. Write it with braces after an `if`, because the macro leaves
+`<cassert>` macro. A `check` is never executed; `assert` from `<assert.h>` is
+code, and cerastes checks it with its run-time meaning
+(xref:verifying.adoc#assert[Verifying a program]). Write it with braces after an `if`, because the macro leaves
 an empty statement behind in an ordinary build (see
 xref:ordinary-compilers.adoc[Building annotated code with ordinary compilers]).
 
