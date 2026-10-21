@@ -24,7 +24,8 @@ permissions:
 # Pull requests cancel their own superseded runs.  Every run on main finishes: its
 # group is unique per run (one shared group would still drop an older pending run, and
 # a push to main is a result the owner wants whole).  Dispatches on other refs have a
-# group per ref and cancel nothing.
+# group per ref: a running dispatch is never cancelled, but a newer one replaces a
+# pending one.
 concurrency:
   group: ${{ github.event_name == 'pull_request' && format('ci-pr-{0}', github.event.pull_request.number) || (github.ref == 'refs/heads/main' && format('ci-main-{0}', github.run_id)) || format('ci-{0}', github.ref) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -86,8 +87,10 @@ jobs:
           key: ${{ steps.silicon-key.outputs.key }}
       - name: Check everything
         run: scripts/check.sh
+      # always(): a job that hits timeout-minutes counts as cancelled, and its evidence
+      # (the build logs above all) is what a timeout needs.
       - name: Upload the evidence
-        if: ${{ !cancelled() }}
+        if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ci-${{ github.run_id }}-${{ github.run_attempt }}
@@ -95,5 +98,6 @@ jobs:
             build/vpr
             build/env.sh
             build/ci-toolchain.txt
+            build/*.log
           if-no-files-found: warn
           retention-days: 14

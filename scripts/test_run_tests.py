@@ -3240,14 +3240,19 @@ def workflow_problems(text):
         return ["no `build` job"]
     lines = active_lines(job.group(1))
     steps, cur = [], None
+    problems = []
     for line in lines:
-        if re.match(r"^\s+- (?:name|uses|run):", line):
+        # a step starts at every `- ` at the steps' indentation, whatever its first key is
+        # (`- if: false` before `name:` must not be merged into the step before it)
+        if re.match(r"^ {6}- ", line):
             cur = []
             steps.append(cur)
         if cur is not None:
             cur.append(line)
+        # a job-level `if:` or `continue-on-error` (before or after `steps:`) switches the job off
+        if re.match(r"^ {4}[\"']?(?:if|continue-on-error)[\"']?:", line):
+            problems.append(f"the build job has a job-level `{line.strip()}`")
     found = {}
-    problems = []
     for i, step in enumerate(steps):
         body = "\n".join(step)
         runs = re.search(r"^\s+(?:- )?run:\s*(.*)$", body, re.M)
@@ -3575,11 +3580,36 @@ jobs:
                 "      - name: Upload\n",
                 "      - name: Build\n        run: scripts/build_docs.sh\n      - name: Upload\n"),
             "html wrong directory": self.YML.replace("--html build/doc", "--html other"),
+            "job-level if before the steps": self.YML.replace(
+                "    runs-on: ubuntu-latest\n    steps:\n      - name: Lint the examples\n",
+                "    runs-on: ubuntu-latest\n    if: false\n    steps:\n      - name: Lint the examples\n"),
+            "job-level continue-on-error before the steps": self.YML.replace(
+                "    runs-on: ubuntu-latest\n    steps:\n      - name: Lint the examples\n",
+                "    runs-on: ubuntu-latest\n    continue-on-error: true\n    steps:\n"
+                "      - name: Lint the examples\n"),
+            "job-level if after the steps": self.YML.replace(
+                "  deploy:\n", "    if: false\n  deploy:\n"),
+            "html step with a leading `- if:`": self.YML.replace(
+                "      - name: Check the built examples\n",
+                "      - if: false\n        name: Check the built examples\n"),
+            "build step with a leading `- continue-on-error`": self.YML.replace(
+                "      - name: Build\n",
+                "      - continue-on-error: true\n        name: Build\n"),
+            "lint step with a leading `- if:`": self.YML.replace(
+                "      - name: Lint the examples\n",
+                "      - if: false\n        name: Lint the examples\n"),
         }
         for what, text in mutations.items():
             with self.subTest(what):
                 self.assertNotEqual(text, self.YML, "mutation did not apply")
                 self.assertTrue(workflow_problems(text), what)
+
+    def test_the_step_split_does_not_merge_a_step_that_starts_with_if(self):
+        # with the old split (`- name|uses|run` only) the leading `- if:` step was merged into the
+        # step before it; each step is now its own, so the `if:` is found on the right one
+        text = self.YML.replace("      - name: Lint the examples\n",
+                                "      - if: false\n        name: Lint the examples\n")
+        self.assertIn("the lint step can be ignored (`if:`)", workflow_problems(text))
 
     def test_no_build_job_is_a_problem(self):
         self.assertEqual(workflow_problems("jobs:\n  other:\n    steps: []\n"),
@@ -3854,6 +3884,712 @@ class GoldenListingHtmlTests(DocLintCase):
         self.assertEqual(self.run_html()[0], 0)
 
 
+# ---------------------------------------------------------------------------
+# The CI workflow and its setup script (decision 0016)
+# ---------------------------------------------------------------------------
+
+# ci.sh, line by line.  The expected values are pinned here, in the self-test, and not read from
+# the file under test: loosening an assertion (an SDK, a GCC major, a toolchain path) must fail
+# this self-test.  Whole lines (leading indentation stripped), in file order.
+CI_SH_ENV_LOOP = ('for var in JAVA_TOOL_OPTIONS _JAVA_OPTIONS JDK_JAVA_OPTIONS JAVA_OPTS SBT_OPTS SDKROOT '
+                  'MACOSX_DEPLOYMENT_TARGET CC CXX CFLAGS CXXFLAGS CPPFLAGS LDFLAGS CPATH C_INCLUDE_PATH '
+                  'CPLUS_INCLUDE_PATH OBJC_INCLUDE_PATH LIBRARY_PATH GCC_EXEC_PREFIX COMPILER_PATH '
+                  'CERASTES_EDG_SRC; do')
+CI_SH_WANT = 'want() { printf \'ci.sh: %s\\n\' "$*" >&2; exit 1; }'
+CI_SH_GCC_INSTALL = 'command -v "g++-$GCC_MAJOR" >/dev/null || env -u HOMEBREW_NO_INSTALL_UPGRADE brew install gcc'
+CI_SH_TOOL_LOOP = 'for tool in clang++ cc c++; do'
+CI_SH_TOOL_ASSERTION = ('[[ "$(command -v "$tool")" == "/usr/bin/$tool" ]] || want "$tool on PATH is '
+                        '\'$(command -v "$tool")\', expected /usr/bin/$tool"')
+CI_SH_PINNED = (
+    'set -euo pipefail',
+    'ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"',
+    'cd "$ROOT"',
+    # the expected values
+    'CLT=/Library/Developer/CommandLineTools',
+    'CLT_VERSION=27.0.0.0.1788430756',
+    "CLANG_BANNER='Apple clang version 21.0.0 (clang-2100.3.34.2)'",
+    'SDK_VERSION=27.0',
+    'SDK_BUILD=26A425',
+    'GCC_MAJOR=16',
+    'GCC_VERSION=16.2.0',
+    'EDG_CLANG_VER=210000',
+    'MIN_FREE_GB=6',
+    # Homebrew must not change on a developer machine's rehearsal
+    'export HOMEBREW_NO_AUTO_UPDATE=1',
+    'export HOMEBREW_NO_INSTALL_UPGRADE=1',
+    'export HOMEBREW_NO_INSTALL_CLEANUP=1',
+    'export HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1',
+    CI_SH_WANT,
+    # the machine
+    'free_gb="$(df -g "$ROOT" | awk \'NR==2 {print $4}\')" || want "df -g failed"',
+    '[[ "$free_gb" =~ ^[0-9]+$ ]] || want "cannot read the free disk space (df -g gave \'$free_gb\')"',
+    '[[ "$free_gb" -ge "$MIN_FREE_GB" ]] || want "only $free_gb GB free on $ROOT; the build and the tests need $MIN_FREE_GB GB"',
+    # the environment
+    CI_SH_ENV_LOOP,
+    '[[ -z "${!var+set}" ]] || want "$var is set; the build must not depend on it (decision 0016)"',
+    'done',
+    # the toolchain
+    '[[ "${DEVELOPER_DIR:-}" == "$CLT" ]] || want "DEVELOPER_DIR must be $CLT (is \'${DEVELOPER_DIR:-}\')"',
+    'clt_version="$(pkgutil --pkg-info=com.apple.pkg.CLTools_Executables | sed -n \'s/^version: //p\')" || want "pkgutil cannot find the Command Line Tools package"',
+    '[[ "$clt_version" == "$CLT_VERSION" ]] || want "Command Line Tools $clt_version, expected $CLT_VERSION"',
+    'clang_path="$(command -v clang)" || want "clang is not on PATH"',
+    '[[ "$clang_path" == /usr/bin/clang ]] || want "clang on PATH is $clang_path, expected /usr/bin/clang"',
+    CI_SH_TOOL_LOOP,
+    CI_SH_TOOL_ASSERTION,
+    'done',
+    'xcrun_clang="$(xcrun -f clang)" || want "xcrun cannot find clang"',
+    '[[ "$xcrun_clang" == "$CLT/usr/bin/clang" ]] || want "xcrun selects $xcrun_clang, expected $CLT/usr/bin/clang"',
+    'clang_banner="$(clang --version | sed -n 1p)" || want "clang --version failed"',
+    '[[ "$clang_banner" == "$CLANG_BANNER" ]] || want "clang is \'$clang_banner\', expected \'$CLANG_BANNER\'"',
+    'sdk_version="$(xcrun --show-sdk-version)" || want "xcrun cannot report the SDK version"',
+    '[[ "$sdk_version" == "$SDK_VERSION" ]] || want "SDK $sdk_version, expected $SDK_VERSION"',
+    'sdk_build="$(xcrun --show-sdk-build-version)" || want "xcrun cannot report the SDK build version"',
+    '[[ "$sdk_build" == "$SDK_BUILD" ]] || want "SDK build $sdk_build, expected $SDK_BUILD (the headers EDG parses)"',
+    'sdk_path="$(xcrun --show-sdk-path)" || want "xcrun cannot report the SDK path"',
+    'sdk_real="$(realpath "$sdk_path")" || want "cannot resolve the SDK path $sdk_path"',
+    '[[ "$sdk_real" == "$CLT/SDKs/MacOSX$SDK_VERSION.sdk" ]] || want "SDK is $sdk_real, expected $CLT/SDKs/MacOSX$SDK_VERSION.sdk"',
+    # the EDG tree: before anything is built
+    'edg_shallow="$(git -C third_party/edg rev-parse --is-shallow-repository)" || want "third_party/edg is not an initialized submodule"',
+    '[[ "$edg_shallow" == false ]] || want "third_party/edg is a shallow clone; the checkout needs fetch-depth: 0"',
+    'git -C third_party/edg rev-parse -q --verify refs/remotes/origin/cerastes >/dev/null || want "third_party/edg has no origin/cerastes; the submodule clone must keep all remote branches"',
+    'python3 scripts/edg_tree.py check',
+    # GCC
+    CI_SH_GCC_INSTALL,
+    'gxx="$(command -v "g++-$GCC_MAJOR")" || want "g++-$GCC_MAJOR not found"',
+    'gcc_cc="$(command -v "gcc-$GCC_MAJOR")" || want "gcc-$GCC_MAJOR not found"',
+    'gcc_version="$("$gxx" -dumpfullversion)" || want "$gxx -dumpfullversion failed"',
+    '[[ "$gcc_version" == "$GCC_VERSION" ]] || want "g++ is $gcc_version, expected $GCC_VERSION"',
+    'gcc_sysroot="$("$gcc_cc" -print-sysroot)" || want "$gcc_cc -print-sysroot failed"',
+    'gcc_sysroot_real="$(realpath "$gcc_sysroot")" || want "the sysroot \'$gcc_sysroot\' of $gcc_cc does not exist"',
+    '[[ "$gcc_sysroot_real" == "$sdk_real" ]] || want "the sysroot of $gcc_cc is $gcc_sysroot_real, expected the SDK $sdk_real"',
+    # the build, then what it wrote
+    'scripts/bootstrap.sh',
+    '. build/env.sh',
+    '[[ "$CERASTES_CLANG_CXX" == "$CLT/usr/bin/clang++" ]] || want "build/env.sh has CERASTES_CLANG_CXX=$CERASTES_CLANG_CXX, expected $CLT/usr/bin/clang++"',
+    '[[ "$CERASTES_GCC_CXX" == "$gxx" ]] || want "build/env.sh has CERASTES_GCC_CXX=$CERASTES_GCC_CXX, expected $gxx"',
+    '[[ "$EDG_CLANG_VER_SCRAPE" == "$EDG_CLANG_VER" ]] || want "build/env.sh has EDG_CLANG_VER_SCRAPE=$EDG_CLANG_VER_SCRAPE, expected $EDG_CLANG_VER"',
+)
+CI_SH_CONSTANTS = ("CLT", "CLT_VERSION", "CLANG_BANNER", "SDK_VERSION", "SDK_BUILD", "GCC_MAJOR",
+                   "GCC_VERSION", "EDG_CLANG_VER",
+                   "MIN_FREE_GB")
+CI_SH_FUNCTIONS = ("step", "want", "ver")
+CI_SH_LOCALS = ("free_gb", "clt_version", "clang_path", "xcrun_clang", "clang_banner", "sdk_version",
+                "sdk_build", "sdk_path", "sdk_real", "edg_shallow", "gxx", "gcc_cc", "gcc_version",
+                "gcc_sysroot", "gcc_sysroot_real")
+CI_SH_TOP_LEVEL_FORBIDDEN = ("if", "while", "until", "case", "trap", "exec", "exit", "return", "eval",
+                             "unset", "shopt", "true", "false", ":", "alias", "source")
+
+
+def ci_sh_problems(text):
+    """What is wrong with scripts/ci.sh as the runner's assertion script (decision 0016): every
+    assertion pinned line by line, in order, with no way to make one pass or skip it (an early
+    `exit`, `|| true`, a background `&`, a changed `want`, `set +e`, a moved or loosened line)."""
+    lines = [l for l in active_lines(text) if l.strip()]
+    stripped = [l.strip() for l in lines]
+    problems = []
+    if not stripped or stripped[0] != "set -euo pipefail":
+        problems.append("the first command must be `set -euo pipefail`")
+    for l in stripped[1:]:
+        if re.match(r"set\s", l):
+            problems.append(f"`set` after the first line: {l}")
+    # every pinned line, in file order
+    pos, previous = -1, "the start"
+    for pinned in CI_SH_PINNED:
+        found = next((i for i in range(pos + 1, len(stripped)) if stripped[i] == pinned), None)
+        if found is None:
+            where = "is missing" if pinned not in stripped else f"is out of order (after {previous})"
+            problems.append(f"the pinned line {where}: {pinned}")
+        else:
+            pos, previous = found, pinned[:40]
+    # the expected values are assigned once, and before anything uses them
+    for name in CI_SH_CONSTANTS:
+        defs = [i for i, l in enumerate(stripped) if re.match(rf"(?:export |readonly |declare )?{name}=", l)]
+        if len(defs) != 1:
+            problems.append(f"{name} must be assigned exactly once (it is assigned {len(defs)} times)")
+        else:
+            use = next((i for i, l in enumerate(stripped)
+                        if i != defs[0] and re.search(rf"\${{?{name}\b", l)), None)
+            if use is not None and use < defs[0]:
+                problems.append(f"{name} is used before it is assigned")
+    # want() is the only way out of a failed assertion: one definition, and it exits 1
+    if [l for l in stripped if re.match(r"(?:function\s+)?want\s*(?:\(\)|\{)", l)] != [CI_SH_WANT]:
+        problems.append(f"want() must be defined once, as `{CI_SH_WANT}`")
+    for l in stripped:
+        m = re.match(r"(?:function\s+)?([A-Za-z_][\w-]*)\s*\(\)", l)
+        if m and m.group(1) not in CI_SH_FUNCTIONS:
+            problems.append(f"unexpected function `{m.group(1)}`")
+        if re.search(r"\b(?:alias|trap)\b|\bunset\s+-f\b|\breadonly\s+-f\b", l):
+            problems.append(f"cannot redefine or intercept a command: {l}")
+    # the bootstrap runs once, plainly
+    if [l for l in stripped if "bootstrap.sh" in l] != ["scripts/bootstrap.sh"]:
+        problems.append("scripts/bootstrap.sh must run exactly once, with no options (not --build-only)")
+    # nothing leaves early, hides a failure or runs in the background
+    for l in stripped:
+        if l == CI_SH_WANT:
+            continue
+        if re.search(r"\bexit\b", l):
+            problems.append(f"`exit` outside want(): {l}")
+        if re.search(r"\breturn\b", l):
+            problems.append(f"`return`: {l}")
+        if re.search(r";\s*true\b|\|\|\s*true\b|\|\|\s*:|\|\|\s*false\b", l):
+            problems.append(f"a failure is hidden: {l}")
+        if re.search(r"(?<![&>|])&(?![&>])", l):
+            problems.append(f"a command in the background (`&`): {l}")
+        if "||" in l and l != CI_SH_GCC_INSTALL \
+                and (l.count("||") != 1 or not re.search(r'\|\| want ".*"$', l)):
+            problems.append(f"`||` only as `... || want \"...\"` (and the gcc install): {l}")
+        if "CERASTES_EDG_SRC" in l and l != CI_SH_ENV_LOOP:
+            problems.append(f"CERASTES_EDG_SRC outside the assertion that it is unset: {l}")
+    for l in lines:
+        if l[0] in " \t{}":
+            continue  # indented code is inside ver() or the loop: only the rules above apply
+        first = l.split()[0]
+        if first in CI_SH_TOP_LEVEL_FORBIDDEN:
+            problems.append(f"top-level `{first}`: {l}")
+        if first == "export" and l not in CI_SH_PINNED:
+            problems.append(f"an export that is not pinned: {l}")
+        if re.match(r"[A-Za-z_]\w*=", l) and l not in CI_SH_PINNED \
+                and not re.match(rf"(?:{'|'.join(CI_SH_LOCALS)})=", l):
+            problems.append(f"an assignment that is not pinned: {l}")
+    return problems
+
+
+CI_YML_ON = ("  pull_request:", "  push:", "    branches: [main]", "  workflow_dispatch:")
+CI_YML_PERMISSIONS = ("  contents: read",)
+CI_YML_CONCURRENCY = (
+    "  group: ${{ github.event_name == 'pull_request' && format('ci-pr-{0}', github.event.pull_request.number)"
+    " || (github.ref == 'refs/heads/main' && format('ci-main-{0}', github.run_id)) || format('ci-{0}', github.ref) }}",
+    "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
+)
+CI_YML_TOP_KEYS = {"name", "on", "permissions", "concurrency", "jobs"}
+CI_YML_JOB_KEYS = {"name", "runs-on", "timeout-minutes", "env", "steps"}
+CI_YML_STEP_KEYS = {"name", "id", "uses", "with", "run", "if"}
+CI_YML_CLT = "/Library/Developer/CommandLineTools"
+# the only steps that may carry an `if:`, and the expression each must carry, verbatim: the save
+# runs on a cache miss, the upload (build/vpr, which the acceptance compares byte for byte) always,
+# even when the run is cancelled
+CI_YML_IF = {"actions/cache/save@": "steps.silicon-cache.outputs.cache-hit != 'true'",
+             "actions/upload-artifact@": "${{ always() }}"}
+CI_YML_IF_ALLOWED = tuple(CI_YML_IF)
+CI_YML_FORBIDDEN = ("CERASTES_EDG_SRC", "CERASTES_REQUIRE_E2E", "--update-golden", "continue-on-error",
+                    "shell:", "workflow_run", "pull_request_target")
+
+
+def _yml_keys(block, indent):
+    """The `key: value` lines of `block` at exactly `indent` spaces (the first line of a list item,
+    `- key: value`, counts at the indentation of its key), as (key, value) pairs in order; a line
+    that is not a plain `key: value` gives (None, line)."""
+    out = []
+    for l in block:
+        if not l.strip():
+            continue
+        lead, text = len(l) - len(l.lstrip(" ")), l.lstrip(" ")
+        if text.startswith("- ") and lead + 2 == indent:
+            lead, text = indent, text[2:]
+        if lead != indent:
+            continue
+        m = re.match(r"^([\w-]+):(?:\s+(.*))?$", text)
+        out.append((m.group(1), (m.group(2) or "").strip()) if m else (None, text))
+    return out
+
+
+def ci_workflow_problems(text):
+    """What is wrong with .github/workflows/ci.yml (decision 0016), parsed as text: the triggers,
+    permissions and concurrency exactly as pinned; one job with only the five allowed keys
+    (so no job-level `if:`, `continue-on-error`, `strategy`, `container`, `needs`, `defaults`);
+    the runner, the timeout and the job environment; every action pinned to a commit SHA; the
+    checkout; and plain `scripts/ci.sh` then `scripts/check.sh` steps that cannot be ignored."""
+    lines = active_lines(text)
+    problems = []
+    # top level: exactly the five keys, each once, as sections
+    sections, cur = {}, None
+    for l in lines:
+        m = re.match(r"^([\w-]+):\s*(.*)$", l)
+        if m:
+            cur = m.group(1)
+            if cur in sections:
+                problems.append(f"duplicate top-level key `{cur}`")
+            sections[cur] = []
+        elif l.strip():
+            if cur is None or not l.startswith(" "):
+                problems.append(f"unexpected line outside a section: {l.strip()}")
+            else:
+                sections[cur].append(l)
+    if set(sections) != CI_YML_TOP_KEYS:
+        problems.append(f"the top-level keys must be exactly {sorted(CI_YML_TOP_KEYS)}, not {sorted(sections)}")
+    if tuple(sections.get("on", ())) != CI_YML_ON:
+        problems.append("`on:` must be exactly pull_request (no filters), push to branches [main] "
+                        "only, and workflow_dispatch")
+    if tuple(sections.get("permissions", ())) != CI_YML_PERMISSIONS:
+        problems.append("`permissions:` must be exactly `contents: read`")
+    if tuple(sections.get("concurrency", ())) != CI_YML_CONCURRENCY:
+        problems.append("`concurrency:` must be exactly the two pinned lines")
+    for l in lines:
+        if re.search(r"\bwrite\b", l):
+            problems.append(f"no write permission anywhere: {l.strip()}")
+        for bad in CI_YML_FORBIDDEN:
+            if bad in l:
+                problems.append(f"`{bad}` is not allowed in ci.yml: {l.strip()}")
+    # one job with five keys
+    jobs = sections.get("jobs", [])
+    job_names = [k for k, _ in _yml_keys(jobs, 2)]
+    if len(job_names) != 1 or None in job_names:
+        problems.append(f"exactly one job is expected, found {job_names}")
+        return problems
+    job_keys = _yml_keys(jobs, 4)
+    names = [k for k, _ in job_keys]
+    if len(names) != len(set(names)):
+        problems.append("a job key is repeated")
+    if set(names) != CI_YML_JOB_KEYS:
+        problems.append(f"the job's keys must be exactly {sorted(CI_YML_JOB_KEYS)}, not {sorted(set(names), key=str)} "
+                        "(no job-level `if:`, `strategy`, `container`, `needs`, `defaults`)")
+    scalars = dict(job_keys)
+    if scalars.get("runs-on") != "xcode-27":
+        problems.append("`runs-on` must be `xcode-27`")
+    timeout = scalars.get("timeout-minutes", "")
+    if not re.fullmatch(r"[1-9][0-9]*", timeout) or int(timeout) > 360:
+        problems.append("`timeout-minutes` must be an integer of at most 360")
+    # the job environment
+    env_lines, section = [], None
+    for l in jobs:
+        if re.match(r"^ {4}\S", l):
+            section = l.strip()
+        elif section == "env:" and l.strip():
+            env_lines.append(l)
+    env_pairs = _yml_keys(env_lines, 6)
+    env_names = [k for k, _ in env_pairs]
+    env = dict(env_pairs)
+    if len(env_names) != len(set(env_names)) or set(env_names) != {"DEVELOPER_DIR", "CERASTES_JOBS"}:
+        problems.append("the job environment must be exactly DEVELOPER_DIR and CERASTES_JOBS")
+    if env.get("DEVELOPER_DIR") != CI_YML_CLT:
+        problems.append(f"DEVELOPER_DIR must be {CI_YML_CLT} (the Command Line Tools, not an Xcode)")
+    if not re.fullmatch(r"[1-9][0-9]*", env.get("CERASTES_JOBS", "")):
+        problems.append("CERASTES_JOBS must be a positive integer")
+    # the steps, split at every `- ` at the steps' indentation, whatever its first key
+    steps, in_steps = [], False
+    for l in jobs:
+        if re.match(r"^ {4}\S", l):
+            in_steps = l.strip() == "steps:"
+        elif in_steps and l.strip():
+            if re.match(r"^ {6}- ", l):
+                steps.append([l])
+            elif steps:
+                steps[-1].append(l)
+            else:
+                problems.append(f"the steps must be a list indented by 6 spaces: {l.strip()}")
+    parsed = []
+    for step in steps:
+        keys = _yml_keys(step, 8)
+        bad = [k for k, _ in keys if k not in CI_YML_STEP_KEYS]
+        if bad:
+            problems.append(f"a step has keys that are not allowed: {bad} ({step[0].strip()})")
+        d = dict(keys)
+        if len(d) != len(keys):
+            problems.append(f"a step repeats a key: {step[0].strip()}")
+        with_lines, in_with = [], False
+        for l in step:
+            if re.match(r"^ {6}- \S|^ {8}\S", l):
+                in_with = l.strip().removeprefix("- ").startswith("with:")
+            elif in_with and l.strip():
+                with_lines.append(l)
+        parsed.append((d, dict(_yml_keys(with_lines, 10)), step))
+    # every action is pinned to a commit
+    for l in lines:
+        m = re.search(r"\buses:\s*(\S+)", l)
+        if m and not re.fullmatch(r"[\w.-]+/[\w./-]+@[0-9a-f]{40}", m.group(1)):
+            problems.append(f"an action must be pinned to a 40-hex commit SHA: {m.group(1)}")
+    # the checkout
+    checkouts = [w for d, w, _ in parsed if d.get("uses", "").startswith("actions/checkout@")]
+    if len(checkouts) != 1:
+        problems.append("exactly one actions/checkout step is expected")
+    else:
+        for key, value in (("fetch-depth", "0"), ("submodules", "recursive"), ("persist-credentials", "false")):
+            if checkouts[0].get(key) != value:
+                problems.append(f"the checkout needs `{key}: {value}`")
+    # `if:` only where the file says so, and nowhere else
+    if len([l for l in lines if re.match(r"^\s*(?:- )?[\"']?if[\"']?:", l)]) != sum(1 for d, _, _ in parsed if "if" in d):
+        problems.append("`if:` outside a step's own keys")
+    for d, _, step in parsed:
+        if "if" in d and not d.get("uses", "").startswith(CI_YML_IF_ALLOWED):
+            problems.append(f"`if:` only on the cache save and the artifact upload: {step[0].strip()}")
+        for action, expression in CI_YML_IF.items():
+            if d.get("uses", "").startswith(action) and d.get("if") != expression:
+                problems.append(f"the `{action}` step must carry exactly `if: {expression}`")
+    if not any(d.get("uses", "").startswith("actions/upload-artifact@") for d, _, _ in parsed):
+        problems.append("an actions/upload-artifact step is expected")
+
+    # scripts/ci.sh, the cache save, then scripts/check.sh
+    def run_index(command):
+        hits = [i for i, (d, _, _) in enumerate(parsed) if d.get("run") == command]
+        if len(hits) != 1:
+            problems.append(f"exactly one step must run exactly `{command}`")
+            return None
+        extra = sorted(set(parsed[hits[0]][0]) - {"name", "run"})
+        if extra:
+            problems.append(f"the `{command}` step must have only `name` and `run`, not {extra}")
+        return hits[0]
+    ci_i, check_i = run_index("scripts/ci.sh"), run_index("scripts/check.sh")
+    saves = [i for i, (d, _, _) in enumerate(parsed) if d.get("uses", "").startswith("actions/cache/save@")]
+    if None not in (ci_i, check_i) and not ci_i < check_i:
+        problems.append("scripts/ci.sh must run before scripts/check.sh")
+    if len(saves) != 1:
+        problems.append("exactly one actions/cache/save step is expected")
+    elif None not in (ci_i, check_i) and not ci_i < saves[0] < check_i:
+        problems.append("the cache save must come after ci.sh and before check.sh")
+    return problems
+
+
+class CiGuardTests(unittest.TestCase):
+    """ci_workflow_problems and ci_sh_problems: each guard fails on every way to weaken what the
+    CI job asserts or runs (the cases are mutations of the real files, which the guards accept)."""
+
+    YML_PATH = REAL_ROOT / ".github" / "workflows" / "ci.yml"
+    SH_PATH = REAL_ROOT / "scripts" / "ci.sh"
+    CI_RUN = "        run: scripts/ci.sh\n"
+    CHECK_RUN = "        run: scripts/check.sh\n"
+    CI_STEP = "      - name: Set up the toolchain\n" + CI_RUN
+    CHECK_STEP = "      - name: Check everything\n" + CHECK_RUN
+
+    @classmethod
+    def setUpClass(cls):
+        cls.YML = cls.YML_PATH.read_text()
+        cls.SH = cls.SH_PATH.read_text()
+
+    # ----- ci.yml -----
+
+    def test_the_real_workflow_is_fine(self):
+        self.assertEqual(ci_workflow_problems(self.YML), [])
+
+    def yml_mutations(self):
+        Y, ci_run, check_run = self.YML, self.CI_RUN, self.CHECK_RUN
+        out = {}
+
+        def sub(name, old, new):
+            self.assertIn(old, Y, f"{name}: the text to mutate is not in ci.yml")
+            self.assertNotIn(name, out)
+            out[name] = Y.replace(old, new, 1)
+
+        def line_with(fragment):
+            return next(l + "\n" for l in Y.split("\n") if fragment in l)
+        for what, line in (
+                ("pull_request", "  pull_request:\n"), ("push", "  push:\n"),
+                ("push branches", "    branches: [main]\n"), ("workflow_dispatch", "  workflow_dispatch:\n"),
+                ("permissions", "permissions:\n  contents: read\n"), ("contents: read", "  contents: read\n"),
+                ("concurrency group", line_with("  group:")),
+                ("cancel-in-progress", line_with("  cancel-in-progress:")),
+                ("jobs", "jobs:\n"), ("job name", "    name: check (macOS, Command Line Tools 27.0)\n"),
+                ("runs-on", "    runs-on: xcode-27\n"), ("timeout", "    timeout-minutes: 240\n"),
+                ("job env", "    env:\n"), ("DEVELOPER_DIR", "      DEVELOPER_DIR: /Library/Developer/CommandLineTools\n"),
+                ("CERASTES_JOBS", "      CERASTES_JOBS: 3\n"), ("steps", "    steps:\n"),
+                ("fetch-depth", "          fetch-depth: 0\n"), ("submodules", "          submodules: recursive\n"),
+                ("persist-credentials", "          persist-credentials: false\n"),
+                ("ci.sh run", ci_run), ("check.sh run", check_run),
+                ("ci.sh step", self.CI_STEP), ("check.sh step", self.CHECK_STEP),
+                ("cache save step", "      - name: Save the Silicon build\n"),
+                ("cache save uses", line_with("actions/cache/save@")),
+                ("checkout uses", line_with("actions/checkout@")),
+                ("checkout with", "        with:\n          fetch-depth: 0\n")):
+            self.assertIn(line, Y, what)
+            out[f"{what} removed"] = Y.replace(line, "", 1)
+            out[f"{what} commented out"] = Y.replace(line, "".join("#" + l + "\n" for l in line.splitlines()), 1)
+        for name, run in (("ci.sh", ci_run), ("check.sh", check_run)):
+            command = run.split("run: ")[1]
+            sub(f"{name} || true", run, run[:-1] + " || true\n")
+            sub(f"{name} ; true", run, run[:-1] + "; true\n")
+            sub(f"{name} in the background", run, run[:-1] + " &\n")
+            sub(f"{name} after another command", run, "        run: echo hi && " + command)
+            sub(f"{name} as a block", run, "        run: |\n          " + command)
+            sub(f"{name} with an option", run, run[:-1] + " --x\n")
+            sub(f"{name} with a shell", run, run + "        shell: bash {0}\n")
+            sub(f"{name} with a working directory", run, run + "        working-directory: build\n")
+            sub(f"{name} with an env", run, run + "        env:\n          X: y\n")
+            sub(f"{name} with continue-on-error", run, run + "        continue-on-error: true\n")
+            sub(f"{name} with an if", run, run + "        if: always()\n")
+            sub(f"{name} with a timeout", run, run + "        timeout-minutes: 1\n")
+        # a step that starts with another key than `name`: the existing docs.yml guard merges
+        # such a step into the one before it
+        sub("check step with a leading `- if:`", self.CHECK_STEP,
+            "      - if: false\n        name: Check everything\n" + check_run)
+        sub("ci step with a leading `- if:`", self.CI_STEP, "      - if: false\n        name: Set up the toolchain\n" + ci_run)
+        sub("check step with a leading `- continue-on-error`", self.CHECK_STEP,
+            "      - continue-on-error: true\n        name: Check everything\n" + check_run)
+        sub("check step with a leading `- shell`", self.CHECK_STEP,
+            "      - shell: bash {0}\n        name: Check everything\n" + check_run)
+        sub("check step with a leading `- env`", self.CHECK_STEP,
+            "      - env:\n          X: y\n        name: Check everything\n" + check_run)
+        sub("check step as a flow mapping", self.CHECK_STEP,
+            "      - {name: Check everything, run: scripts/check.sh, continue-on-error: true}\n")
+        out["ci.sh after check.sh"] = Y.replace(self.CI_STEP, "").replace(
+            self.CHECK_STEP, self.CHECK_STEP + self.CI_STEP)
+        out["check.sh before the cache save"] = Y.replace(self.CHECK_STEP, "").replace(
+            "      - name: Save the Silicon build\n", self.CHECK_STEP + "      - name: Save the Silicon build\n")
+        out["cache save before ci.sh"] = Y.replace(self.CI_STEP, "").replace(
+            self.CHECK_STEP, self.CI_STEP + self.CHECK_STEP)
+        sub("job-level if before the steps", "    timeout-minutes: 240\n", "    timeout-minutes: 240\n    if: false\n")
+        sub("job-level if just before steps", "    steps:\n", "    if: false\n    steps:\n")
+        out["job-level if at the end"] = Y.rstrip("\n") + "\n    if: false\n"
+        out["job-level quoted if at the end"] = Y.rstrip("\n") + "\n    'if': false\n"
+        for key, value in (("continue-on-error", "true"), ("strategy", "{fail-fast: true}"),
+                           ("container", "ubuntu"), ("needs", "other"), ("defaults", "{run: {shell: sh}}"),
+                           ("permissions", "{contents: write}"), ("environment", "prod"), ("services", "{}"),
+                           ("outputs", "{}")):
+            sub(f"job-level {key} before the steps", "    timeout-minutes: 240\n",
+                f"    timeout-minutes: 240\n    {key}: {value}\n")
+            out[f"job-level {key} at the end"] = Y.rstrip("\n") + f"\n    {key}: {value}\n"
+        sub("a second job", "jobs:\n  check:\n", "jobs:\n  other:\n    runs-on: xcode-27\n    steps: []\n  check:\n")
+        sub("a repeated runs-on", "    runs-on: xcode-27\n", "    runs-on: xcode-27\n    runs-on: xcode-27\n")
+        sub("another runner", "runs-on: xcode-27", "runs-on: macos-26")
+        sub("a runner list", "runs-on: xcode-27", "runs-on: [self-hosted, xcode-27]")
+        sub("timeout 361", "timeout-minutes: 240", "timeout-minutes: 361")
+        sub("timeout quoted", "timeout-minutes: 240", "timeout-minutes: '240'")
+        sub("timeout an expression", "timeout-minutes: 240", "timeout-minutes: ${{ vars.T }}")
+        sub("an Xcode developer dir", "DEVELOPER_DIR: /Library/Developer/CommandLineTools",
+            "DEVELOPER_DIR: /Applications/Xcode_27.app/Contents/Developer")
+        sub("CERASTES_JOBS 0", "CERASTES_JOBS: 3", "CERASTES_JOBS: 0")
+        sub("CERASTES_JOBS x", "CERASTES_JOBS: 3", "CERASTES_JOBS: x")
+        sub("CERASTES_JOBS 03", "CERASTES_JOBS: 3", "CERASTES_JOBS: 03")
+        sub("CERASTES_EDG_SRC in the env", "      CERASTES_JOBS: 3\n", "      CERASTES_JOBS: 3\n      CERASTES_EDG_SRC: /x\n")
+        sub("CERASTES_REQUIRE_E2E in the env", "      CERASTES_JOBS: 3\n",
+            "      CERASTES_JOBS: 3\n      CERASTES_REQUIRE_E2E: 1\n")
+        sub("another variable in the env", "      CERASTES_JOBS: 3\n", "      CERASTES_JOBS: 3\n      CC: gcc\n")
+        sub("a repeated variable in the env", "      CERASTES_JOBS: 3\n", "      CERASTES_JOBS: 3\n      CERASTES_JOBS: 8\n")
+        sub("CERASTES_EDG_SRC on a step", ci_run, ci_run + "        env:\n          CERASTES_EDG_SRC: /x\n")
+        sub("update-golden in the command", check_run, "        run: scripts/check.sh --update-golden\n")
+        sub("a tag instead of a SHA", "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "actions/checkout@v7")
+        sub("a branch instead of a SHA", "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+            "actions/setup-python@main")
+        sub("a short SHA", "actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9", "actions/cache/save@55cc834")
+        sub("an upper-case SHA", "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+            "actions/upload-artifact@CF430E030DDBB5B0ABF93D22962F4752F3646CD9")
+        sub("no SHA at all", "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1", "actions/setup-node")
+        sub("a local action", "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1", "./.github/x")
+        sub("fetch-depth 1", "fetch-depth: 0", "fetch-depth: 1")
+        sub("submodules true", "submodules: recursive", "submodules: true")
+        sub("persist-credentials true", "persist-credentials: false", "persist-credentials: true")
+        sub("a second checkout without the options", "      - name: Set up Python\n",
+            "      - name: Again\n        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n"
+            "      - name: Set up Python\n")
+        sub("contents write", "contents: read", "contents: write")
+        sub("a write permission elsewhere", "permissions:\n  contents: read\n",
+            "permissions:\n  contents: read\n  pull-requests: write\n")
+        sub("a paths filter on pull_request", "  pull_request:\n", "  pull_request:\n    paths: ['doc/**']\n")
+        sub("a types filter on pull_request", "  pull_request:\n", "  pull_request:\n    types: [opened]\n")
+        sub("branches-ignore on push", "    branches: [main]\n", "    branches-ignore: [main]\n")
+        sub("paths-ignore on push", "    branches: [main]\n", "    branches: [main]\n    paths-ignore: ['doc/**']\n")
+        sub("paths on push", "    branches: [main]\n", "    branches: [main]\n    paths: ['src/**']\n")
+        sub("tags on push", "    branches: [main]\n", "    branches: [main]\n    tags: ['v*']\n")
+        sub("push to every branch", "    branches: [main]\n", "")
+        sub("push to another branch", "branches: [main]", "branches: [ci]")
+        sub("a schedule", "  workflow_dispatch:\n", "  workflow_dispatch:\n  schedule:\n    - cron: '0 0 * * *'\n")
+        sub("pull_request_target", "  pull_request:\n", "  pull_request_target:\n")
+        sub("inputs on workflow_dispatch", "  workflow_dispatch:\n", "  workflow_dispatch:\n    inputs: {}\n")
+        sub("cancel-in-progress true", "cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
+            "cancel-in-progress: true")
+        sub("another concurrency group", "format('ci-main-{0}', github.run_id)", "'ci-main'")
+        sub("a top-level env", "permissions:\n", "env:\n  X: y\npermissions:\n")
+        sub("top-level defaults", "permissions:\n", "defaults:\n  run:\n    shell: bash {0}\npermissions:\n")
+        sub("an if on the checkout", "      - name: Checkout\n", "      - name: Checkout\n        if: true\n")
+        save_if = "        if: steps.silicon-cache.outputs.cache-hit != 'true'\n"
+        upload_if = "        if: ${{ always() }}\n"
+        for name, line in (("cache save", save_if), ("upload", upload_if)):
+            for value in ("false", "always()", "${{ success() }}", "true", "${{ failure() }}", "${{ !cancelled() }}",
+                          "${{ always() && false }}"):
+                if line.split("if: ")[1].strip() != value:
+                    sub(f"{name} with `if: {value}`", line, f"        if: {value}\n")
+            sub(f"{name} with a quoted `if`", line, line.replace("if: ", "if: '") .rstrip("\n") + "'\n")
+        sub("cache save without its if", save_if, "")
+        sub("upload without its if", upload_if, "")
+        sub("cache save with its if commented out", save_if, "        # " + save_if.strip() + "\n")
+        sub("upload with its if commented out", upload_if, "        # " + upload_if.strip() + "\n")
+        sub("cache save with the condition inverted", save_if, "        if: steps.silicon-cache.outputs.cache-hit == 'true'\n")
+        sub("cache save with another cache id", save_if, "        if: steps.other.outputs.cache-hit != 'true'\n")
+        sub("an if on setup-python", "      - name: Set up Python\n", "      - name: Set up Python\n        if: false\n")
+        sub("an if on the silicon key step", "      - name: Silicon cache key\n",
+            "      - name: Silicon cache key\n        if: false\n")
+        sub("continue-on-error on the upload", "          if-no-files-found: warn\n",
+            "          if-no-files-found: warn\n        continue-on-error: true\n")
+        sub("continue-on-error on the save", "      - name: Save the Silicon build\n",
+            "      - name: Save the Silicon build\n        continue-on-error: true\n")
+        sub("a shell on a helper step", "        id: silicon-key\n", "        id: silicon-key\n        shell: bash {0}\n")
+        sub("a step with a timeout", "      - name: Set up Python\n",
+            "      - name: Set up Python\n        timeout-minutes: 1\n")
+        return out
+
+    def test_workflow_mutations_are_found(self):
+        mutations = self.yml_mutations()
+        self.assertGreaterEqual(len(mutations), 150)
+        for what, text in mutations.items():
+            with self.subTest(what):
+                self.assertNotEqual(text, self.YML, "the mutation did not apply")
+                self.assertTrue(ci_workflow_problems(text), what)
+
+    def test_the_workflow_guard_accepts_harmless_edits(self):
+        # a changed action SHA, another step name, a comment, a longer list of steps: it is not a diff
+        sha = "0123456789abcdef0123456789abcdef01234567"
+        for what, text in (
+                ("another SHA", self.YML.replace("3d3c42e5aac5ba805825da76410c181273ba90b1", sha)),
+                ("a step renamed", self.YML.replace("name: Check everything", "name: Run the checks")),
+                ("a comment added", self.YML.replace("jobs:\n", "jobs:\n  # a comment\n")),
+                ("timeout 150", self.YML.replace("timeout-minutes: 240", "timeout-minutes: 150")),
+                ("CERASTES_JOBS 4", self.YML.replace("CERASTES_JOBS: 3", "CERASTES_JOBS: 4")),
+                ("an added step", self.YML.replace("      - name: Upload the evidence\n",
+                                                   "      - name: Print\n        run: echo hi\n"
+                                                   "      - name: Upload the evidence\n"))):
+            with self.subTest(what):
+                self.assertNotEqual(text, self.YML)
+                self.assertEqual(ci_workflow_problems(text), [])
+
+    # ----- ci.sh -----
+
+    def test_the_real_script_is_fine(self):
+        self.assertEqual(ci_sh_problems(self.SH), [])
+
+    def test_every_pinned_line_is_in_the_real_script(self):
+        # the pin list cannot drift into a vacuous guard
+        active = [l.strip() for l in active_lines(self.SH)]
+        for pinned in CI_SH_PINNED:
+            with self.subTest(pinned[:50]):
+                self.assertIn(pinned, active)
+        self.assertGreaterEqual(len(CI_SH_PINNED), 50)
+
+    def sh_mutations(self):
+        S = self.SH
+        out = {}
+
+        def sub(name, old, new):
+            self.assertIn(old, S, f"{name}: the text to mutate is not in ci.sh")
+            self.assertNotIn(name, out)
+            out[name] = S.replace(old, new, 1)
+        for n, pinned in enumerate(CI_SH_PINNED):
+            line = next(l for l in S.split("\n") if l.strip() == pinned)
+            label = f"{n:02} {pinned[:44]}"
+            out[f"{label} removed"] = S.replace(line + "\n", "", 1)
+            out[f"{label} commented out"] = S.replace(line + "\n", "# " + line + "\n", 1)
+            if pinned in (CI_SH_ENV_LOOP, "done", CI_SH_WANT):
+                continue
+            out[f"{label} || true"] = S.replace(line + "\n", line + " || true\n", 1)
+            out[f"{label} ; true"] = S.replace(line + "\n", line + "; true\n", 1)
+            out[f"{label} in the background"] = S.replace(line + "\n", line + " &\n", 1)
+        want = CI_SH_WANT
+        sub("want exits 0", want, want.replace("exit 1", "exit 0"))
+        sub("want without an exit", want, want.replace(" exit 1;", ""))
+        sub("want only warns", want, "want() { printf 'ci.sh: %s\\n' \"$*\" >&2; }")
+        sub("want exits 1 only sometimes", want, want.replace("exit 1", "[[ -n ${CI:-} ]] && exit 1"))
+        sub("a second want that returns 0", want, want + "\nwant() { return 0; }")
+        sub("a second want, function keyword", want, want + "\nfunction want { :; }")
+        sub("want aliased", want, want + "\nalias want=true")
+        sub("want unset", want, want + "\nunset -f want")
+        sub("want redefined as a no-op later", "step \"machine\"\n", "step \"machine\"\nwant() { :; }\n")
+        sub("an early exit 0", "step \"machine\"\n", "step \"machine\"\nexit 0\n")
+        sub("an early exit 0 before the toolchain", "step \"toolchain\"\n", "step \"toolchain\"\nexit 0\n")
+        sub("an early exit 0 after a pinned line", "python3 scripts/edg_tree.py check\n",
+            "python3 scripts/edg_tree.py check\n[[ -z ${CI:-} ]] || exit 0\n")
+        sub("a top-level return", "step \"gcc\"\n", "step \"gcc\"\nreturn 0\n")
+        sub("a top-level if", "step \"gcc\"\n", "step \"gcc\"\nif false; then\n")
+        sub("a trap", "step \"machine\"\n", "step \"machine\"\ntrap 'exit 0' ERR\n")
+        sub("exec", "step \"machine\"\n", "step \"machine\"\nexec true\n")
+        sub("SDK_VERSION 27.2", "SDK_VERSION=27.0", "SDK_VERSION=27.2")
+        sub("GCC_MAJOR 15", "GCC_MAJOR=16", "GCC_MAJOR=15")
+        sub("CLT an Xcode path", "CLT=/Library/Developer/CommandLineTools",
+            "CLT=/Applications/Xcode_27.app/Contents/Developer")
+        sub("CLT_VERSION changed", "CLT_VERSION=27.0.0.0.1788430756", "CLT_VERSION=27.0.0.0.1")
+        sub("CLANG_BANNER changed", "clang-2100.3.34.2", "clang-2100.3.34.3")
+        sub("EDG_CLANG_VER changed", "EDG_CLANG_VER=210000", "EDG_CLANG_VER=0")
+        sub("MIN_FREE_GB 0", "MIN_FREE_GB=6", "MIN_FREE_GB=0")
+        sub("a constant assigned again later", "step \"bootstrap\"\n", "step \"bootstrap\"\nSDK_VERSION=27.2\n")
+        sub("a constant exported again later", "step \"bootstrap\"\n", "step \"bootstrap\"\nexport GCC_MAJOR=15\n")
+        out["a constant assigned after its first use"] = S.replace("MIN_FREE_GB=6\n", "", 1).replace(
+            "step \"environment\"\n", "MIN_FREE_GB=6\nstep \"environment\"\n", 1)
+        sub("bootstrap with --build-only", "\nscripts/bootstrap.sh\n", "\nscripts/bootstrap.sh --build-only\n")
+        sub("bootstrap twice", "\nscripts/bootstrap.sh\n", "\nscripts/bootstrap.sh\nscripts/bootstrap.sh --build-only\n")
+        sub("bootstrap with an option", "\nscripts/bootstrap.sh\n", "\nscripts/bootstrap.sh --x\n")
+        start = S.index("edg_shallow=")
+        end = S.index("python3 scripts/edg_tree.py check\n") + len("python3 scripts/edg_tree.py check\n")
+        block = S[start:end]
+        out["the edg-tree block after bootstrap"] = S.replace(block, "", 1).replace(
+            "scripts/bootstrap.sh\n", "scripts/bootstrap.sh\n" + block, 1)
+        out["the edg-tree block at the end"] = S.replace(block, "", 1).rstrip("\n") + "\n" + block
+        sub("set +e inserted", "step \"machine\"\n", "step \"machine\"\nset +e\n")
+        sub("set +u inserted", "step \"machine\"\n", "step \"machine\"\nset +u\n")
+        sub("set +o pipefail inserted", "step \"gcc\"\n", "step \"gcc\"\nset +o pipefail\n")
+        sub("set -eu without pipefail", "set -euo pipefail", "set -eu")
+        sub("set -uo pipefail", "set -euo pipefail", "set -uo pipefail")
+        sub("a command before set", "set -euo pipefail\n", "true\nset -euo pipefail\n")
+        sub("SDKROOT dropped from the loop", " SDKROOT MACOSX", " MACOSX")
+        for var in ("MACOSX_DEPLOYMENT_TARGET", "CFLAGS", "C_INCLUDE_PATH", "JAVA_OPTS", "SBT_OPTS", "CXXFLAGS",
+                    "CPPFLAGS", "LDFLAGS", "CPLUS_INCLUDE_PATH", "OBJC_INCLUDE_PATH", "GCC_EXEC_PREFIX",
+                    "COMPILER_PATH", "CC", "CXX", "CPATH", "LIBRARY_PATH"):
+            sub(f"{var} dropped from the loop", f" {var} ", " ")
+        sub("a variable added to the loop", " COMPILER_PATH CERASTES_EDG_SRC; do", " COMPILER_PATH X CERASTES_EDG_SRC; do")
+        tool_loop = ('for tool in clang++ cc c++; do\n  [[ "$(command -v "$tool")" == "/usr/bin/$tool" ]] || want '
+                     '"$tool on PATH is \'$(command -v "$tool")\', expected /usr/bin/$tool"\ndone\n')
+        sub("the tool loop removed", tool_loop, "")
+        sub("the tool loop commented out", tool_loop, "".join("# " + l + "\n" for l in tool_loop.splitlines()))
+        for dropped in ("cc c++", "clang++ c++", "clang++ cc"):
+            sub(f"the tool loop over `{dropped}` only", "for tool in clang++ cc c++; do", f"for tool in {dropped}; do")
+        sub("the tool assertion against another path", '"/usr/bin/$tool" ]]', '"/opt/homebrew/bin/$tool" ]]')
+        sub("the tool assertion never failing", '"/usr/bin/$tool" ]] || want', '"/usr/bin/$tool" ]] || :; want')
+        out["the tool loop after the xcrun lines"] = S.replace(tool_loop, "", 1).replace(
+            'clang_banner="$(clang --version', tool_loop + 'clang_banner="$(clang --version', 1)
+        sub("SDK_BUILD changed", "SDK_BUILD=26A425", "SDK_BUILD=26A426")
+        sub("GCC_VERSION 16.1.0", "GCC_VERSION=16.2.0", "GCC_VERSION=16.1.0")
+        sub("the GCC version back to the major pattern",
+            '[[ "$gcc_version" == "$GCC_VERSION" ]] || want "g++ is $gcc_version, expected $GCC_VERSION"',
+            '[[ "$gcc_version" == "$GCC_MAJOR".* ]] || want "g++ is $gcc_version, expected $GCC_MAJOR.x"')
+        sub("the sysroot checked only for existence",
+            '[[ "$gcc_sysroot_real" == "$sdk_real" ]] || want "the sysroot of $gcc_cc is $gcc_sysroot_real, expected the SDK $sdk_real"',
+            '[[ -d "$gcc_sysroot" ]] || want "the sysroot \'$gcc_sysroot\' of $gcc_cc does not exist"')
+        sub("the sysroot compared with another path",
+            '[[ "$gcc_sysroot_real" == "$sdk_real" ]]', '[[ "$gcc_sysroot_real" == "$sdk_path" ]]')
+        sub("the sysroot comparison inverted",
+            '[[ "$gcc_sysroot_real" == "$sdk_real" ]]', '[[ "$gcc_sysroot_real" != "$sdk_real" ]]')
+        sub("the old -d form only", 'gcc_sysroot_real="$(realpath "$gcc_sysroot")" || want "the sysroot',
+            '[[ -d "$gcc_sysroot" ]] || want "the sysroot')
+        sub("CERASTES_EDG_SRC dropped from the loop", " COMPILER_PATH CERASTES_EDG_SRC; do", " COMPILER_PATH; do")
+        sub("JAVA_TOOL_OPTIONS dropped from the loop", "for var in JAVA_TOOL_OPTIONS ", "for var in ")
+        sub("the loop assertion negated", '[[ -z "${!var+set}" ]]', '[[ -n "${!var+set}" ]]')
+        sub("CERASTES_EDG_SRC exported", "step \"machine\"\n", "step \"machine\"\nexport CERASTES_EDG_SRC=x\n")
+        sub("CERASTES_EDG_SRC assigned", "step \"machine\"\n", "step \"machine\"\nCERASTES_EDG_SRC=x\n")
+        sub("SDKROOT exported", "step \"machine\"\n", "step \"machine\"\nexport SDKROOT=/x\n")
+        sub("CC assigned", "step \"machine\"\n", "step \"machine\"\nCC=gcc\n")
+        sub("CERASTES_EDG_SRC read", "step \"gcc\"\n", "step \"gcc\"\n: \"$CERASTES_EDG_SRC\"\n")
+        sub("a brew upgrade", "brew install gcc", "brew upgrade")
+        sub("gcc install hidden", ">/dev/null || env -u", ">/dev/null || true; env -u")
+        sub("an assertion that warns only",
+            '|| want "g++-$GCC_MAJOR not found"', '|| echo "g++-$GCC_MAJOR not found"')
+        sub("an assertion that exits 0 by `||`", '|| want "clang is not on PATH"', "|| exit 0")
+        sub("an assertion that continues by `||`", '|| want "clang is not on PATH"', "|| :")
+        sub("an assertion OR-ed with another test", '|| want "xcrun cannot find clang"',
+            '|| [[ -n "$CI" ]] || want "xcrun cannot find clang"')
+        return out
+
+    def test_script_mutations_are_found(self):
+        mutations = self.sh_mutations()
+        self.assertGreaterEqual(len(mutations), 200)
+        for what, text in mutations.items():
+            with self.subTest(what):
+                self.assertNotEqual(text, self.SH, "the mutation did not apply")
+                self.assertTrue(ci_sh_problems(text), what)
+
+    def test_the_script_guard_accepts_harmless_edits(self):
+        for what, text in (
+                ("a comment", self.SH.replace("step \"machine\"\n", "# note\nstep \"machine\"\n")),
+                ("a trailing comment", self.SH.replace("uname -a\n", "uname -a # the machine\n")),
+                ("another step label", self.SH.replace('step "machine"', 'step "the machine"')),
+                ("another tool in the report", self.SH.replace("ver node --version\n  printf 'jobs",
+                                                               "ver node --version\n  ver git --version\n  printf 'jobs")),
+                ("a plain extra command", self.SH.replace("step \"gcc\"\n", "step \"gcc\"\nuname -a\n"))):
+            with self.subTest(what):
+                self.assertNotEqual(text, self.SH)
+                self.assertEqual(ci_sh_problems(text), [])
+
+    def test_the_guards_are_not_vacuous_on_other_input(self):
+        self.assertTrue(ci_workflow_problems(""))
+        self.assertTrue(ci_workflow_problems("name: CI\n"))
+        self.assertTrue(ci_sh_problems(""))
+        self.assertTrue(ci_sh_problems("#!/usr/bin/env bash\nset -euo pipefail\n"))
+
+
 class RealDocTreeTests(unittest.TestCase):
     def test_the_real_documentation_passes_the_lint(self):
         report = cde.check_tree(REAL_ROOT)
@@ -3872,6 +4608,11 @@ class RealDocTreeTests(unittest.TestCase):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             self.assertEqual(cde.main([]), 0, out.getvalue())
+
+    def test_ci_workflow_and_script_pass_their_guards(self):
+        # decision 0016: the real ci.yml and scripts/ci.sh are what CiGuardTests pins
+        self.assertEqual(ci_workflow_problems((REAL_ROOT / ".github" / "workflows" / "ci.yml").read_text()), [])
+        self.assertEqual(ci_sh_problems((REAL_ROOT / "scripts" / "ci.sh").read_text()), [])
 
     def test_check_sh_runs_the_lint_the_build_and_the_html_check(self):
         text = (REAL_ROOT / "scripts" / "check.sh").read_text()
@@ -11544,7 +12285,8 @@ class DocumentationTests(unittest.TestCase):
                        "-U__CERASTES__", "-Werror", "canary", "NATIVE_POLICY_DIRS",
                        "err_data.h", "cerastes-<tag>", "scripts/edg_tree.py",
                        "GCC not installed; Apple clang only",
-                       "CERASTES_JOBS", ".github/workflows/ci.yml", "scripts/ci.sh", "xcode-27"):
+                       "CERASTES_JOBS", ".github/workflows/ci.yml", "scripts/ci.sh", "xcode-27",
+                       "ci_workflow_problems", "ci_sh_problems"):
             with self.subTest(needle):
                 self.assertIn(needle, text)
         for directory in rt.NATIVE_POLICY_DIRS:

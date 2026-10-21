@@ -512,7 +512,8 @@ so that a typo cannot silently change a job count. An explicit `-j` always wins 
 so a bad value stops only a run that needs the default (`--check-headers` and `mutate.py --validate` run
 nothing in parallel). `scripts/check.sh` passes no `-j`, so the variable sets its job count too (the VIR
 self-test run included: the self-test guard rejects any `-j` on that line). Each worker may start a Silicon JVM,
-which is why CI sets `CERASTES_JOBS=3`: three fit the 7 GB of its runner, eight do not.
+which is why CI sets `CERASTES_JOBS=3`: three fit the 7 GB of its runner, eight do not. `scripts/walker_oracle.py` keeps its own default
+(`min(8, cores)`, for its front-end runs only) and does not read `CERASTES_JOBS`.
 
 ## Mutation testing (`scripts/mutate.py`)
 
@@ -836,7 +837,11 @@ so the two checks are both required.
 workflows run in CI. `.github/workflows/ci.yml` runs `scripts/ci.sh` (the
 runner's setup and toolchain assertions) and then the full `scripts/check.sh`,
 so the examples run as tests there too, on GitHub's `xcode-27` runner with
-`CERASTES_JOBS=3` (decision 0016). The docs workflow (`docs.yml`) still builds
+`CERASTES_JOBS=3` (decision 0016). The harness self-test pins both files: `ci_workflow_problems` (the
+triggers, `contents: read`, one job with only five keys, the runner, SHA-pinned actions, the checkout
+options, plain `scripts/ci.sh` then `scripts/check.sh` steps) and `ci_sh_problems` (every toolchain assertion
+of `scripts/ci.sh` as a pinned line, in order, with no early `exit` or `|| true`); the values are pinned in
+the self-test, so loosening an assertion fails it. The docs workflow (`docs.yml`) still builds
 and deploys the docs: it runs the source lint, `scripts/build_docs.sh` (which
 fails on any Antora warning) and the `--html` check, but not the examples as
 tests, because those need the EDG and Silicon toolchain. The harness self-test

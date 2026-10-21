@@ -32,10 +32,10 @@ affects verification results:
 
 | Tool | Version used in M0 |
 |---|---|
-| Host compiler and SDK (builds EDG; supplies the headers EDG parses) | Apple clang 21.0.0 (clang-2100.3.34.2), Command Line Tools 27.0.0.0.1788430756, macOS SDK 27.0, macOS 27.0.1 (26A434). CI selects the same Command Line Tools on GitHub's `xcode-27` image and asserts the package version, the clang banner and the SDK (`scripts/ci.sh`, 0016 item 2) |
-| GCC (the native-ok runs, 0008) | Homebrew `gcc` 16.2.0, the macOS 27 bottle (`--build=aarch64-apple-darwin27`, sysroot `/Library/Developer/CommandLineTools/SDKs/MacOSX27.sdk`, i.e. SDK 27.0); reinstalled by the owner on 2026-10-21, before which it was the macOS 26 bottle with sysroot SDK 26.5. CI installs the same formula and asserts major 16 (0016 item 3) |
+| Host compiler and SDK (builds EDG; supplies the headers EDG parses) | Apple clang 21.0.0 (clang-2100.3.34.2), Command Line Tools 27.0.0.0.1788430756, macOS SDK 27.0 (build `26A425`), macOS 27.0.1 (26A434). CI selects the same Command Line Tools on GitHub's `xcode-27` image and asserts the package version, the clang banner and the SDK version and build (`scripts/ci.sh`, 0016 item 2) |
+| GCC (the native-ok runs, 0008) | Homebrew `gcc` 16.2.0, the macOS 27 bottle (`--build=aarch64-apple-darwin27`, sysroot `/Library/Developer/CommandLineTools/SDKs/MacOSX27.sdk`, i.e. SDK 27.0); reinstalled by the owner on 2026-10-21, before which it was the macOS 26 bottle with sysroot SDK 26.5. CI installs the same formula and asserts 16.2.0 and that its sysroot is the asserted SDK (0016 item 3) |
 | CMake / Ninja | 4.4.3 / 1.13.2 (CI: the image's, 4.4.4 / 1.13.2) |
-| Python | 3.14.7 (the scripts need 3.9 or later; CI uses 3.14 through `actions/setup-python`) |
+| Python | 3.14.7 (the scripts need 3.9 or later; CI uses 3.14 through `actions/setup-python`, the image's cached 3.14.8) |
 | ShellCheck | 0.11.0 |
 | Homebrew | 7.0.9 |
 

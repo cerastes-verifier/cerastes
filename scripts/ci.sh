@@ -23,7 +23,9 @@ CLT=/Library/Developer/CommandLineTools
 CLT_VERSION=27.0.0.0.1788430756
 CLANG_BANNER='Apple clang version 21.0.0 (clang-2100.3.34.2)'
 SDK_VERSION=27.0
+SDK_BUILD=26A425
 GCC_MAJOR=16
+GCC_VERSION=16.2.0
 EDG_CLANG_VER=210000
 MIN_FREE_GB=6
 
@@ -55,7 +57,7 @@ free_gb="$(df -g "$ROOT" | awk 'NR==2 {print $4}')" || want "df -g failed"
 [[ "$free_gb" -ge "$MIN_FREE_GB" ]] || want "only $free_gb GB free on $ROOT; the build and the tests need $MIN_FREE_GB GB"
 
 step "environment"
-for var in JAVA_TOOL_OPTIONS _JAVA_OPTIONS JDK_JAVA_OPTIONS SDKROOT CC CXX CPATH LIBRARY_PATH CERASTES_EDG_SRC; do
+for var in JAVA_TOOL_OPTIONS _JAVA_OPTIONS JDK_JAVA_OPTIONS JAVA_OPTS SBT_OPTS SDKROOT MACOSX_DEPLOYMENT_TARGET CC CXX CFLAGS CXXFLAGS CPPFLAGS LDFLAGS CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH OBJC_INCLUDE_PATH LIBRARY_PATH GCC_EXEC_PREFIX COMPILER_PATH CERASTES_EDG_SRC; do
   [[ -z "${!var+set}" ]] || want "$var is set; the build must not depend on it (decision 0016)"
 done
 printf 'CERASTES_JOBS=%s\n' "${CERASTES_JOBS:-<unset>}"
@@ -66,16 +68,22 @@ clt_version="$(pkgutil --pkg-info=com.apple.pkg.CLTools_Executables | sed -n 's/
 [[ "$clt_version" == "$CLT_VERSION" ]] || want "Command Line Tools $clt_version, expected $CLT_VERSION"
 clang_path="$(command -v clang)" || want "clang is not on PATH"
 [[ "$clang_path" == /usr/bin/clang ]] || want "clang on PATH is $clang_path, expected /usr/bin/clang"
+# EDG's preset also builds with CXX=clang++, and cerastes's CMake with the default cc and c++.
+for tool in clang++ cc c++; do
+  [[ "$(command -v "$tool")" == "/usr/bin/$tool" ]] || want "$tool on PATH is '$(command -v "$tool")', expected /usr/bin/$tool"
+done
 xcrun_clang="$(xcrun -f clang)" || want "xcrun cannot find clang"
 [[ "$xcrun_clang" == "$CLT/usr/bin/clang" ]] || want "xcrun selects $xcrun_clang, expected $CLT/usr/bin/clang"
 clang_banner="$(clang --version | sed -n 1p)" || want "clang --version failed"
 [[ "$clang_banner" == "$CLANG_BANNER" ]] || want "clang is '$clang_banner', expected '$CLANG_BANNER'"
 sdk_version="$(xcrun --show-sdk-version)" || want "xcrun cannot report the SDK version"
 [[ "$sdk_version" == "$SDK_VERSION" ]] || want "SDK $sdk_version, expected $SDK_VERSION"
+sdk_build="$(xcrun --show-sdk-build-version)" || want "xcrun cannot report the SDK build version"
+[[ "$sdk_build" == "$SDK_BUILD" ]] || want "SDK build $sdk_build, expected $SDK_BUILD (the headers EDG parses)"
 sdk_path="$(xcrun --show-sdk-path)" || want "xcrun cannot report the SDK path"
 sdk_real="$(realpath "$sdk_path")" || want "cannot resolve the SDK path $sdk_path"
 [[ "$sdk_real" == "$CLT/SDKs/MacOSX$SDK_VERSION.sdk" ]] || want "SDK is $sdk_real, expected $CLT/SDKs/MacOSX$SDK_VERSION.sdk"
-printf 'clang:   %s\nsdk:     %s (%s)\n' "$clang_banner" "$sdk_version" "$sdk_real"
+printf 'clang:   %s\nsdk:     %s %s (%s)\n' "$clang_banner" "$sdk_version" "$sdk_build" "$sdk_real"
 ver python3 --version
 ver bash --version
 ver git --version
@@ -95,9 +103,12 @@ command -v "g++-$GCC_MAJOR" >/dev/null || env -u HOMEBREW_NO_INSTALL_UPGRADE bre
 gxx="$(command -v "g++-$GCC_MAJOR")" || want "g++-$GCC_MAJOR not found"
 gcc_cc="$(command -v "gcc-$GCC_MAJOR")" || want "gcc-$GCC_MAJOR not found"
 gcc_version="$("$gxx" -dumpfullversion)" || want "$gxx -dumpfullversion failed"
-[[ "$gcc_version" == "$GCC_MAJOR".* ]] || want "g++ is $gcc_version, expected $GCC_MAJOR.x"
+[[ "$gcc_version" == "$GCC_VERSION" ]] || want "g++ is $gcc_version, expected $GCC_VERSION"
 gcc_sysroot="$("$gcc_cc" -print-sysroot)" || want "$gcc_cc -print-sysroot failed"
-[[ -d "$gcc_sysroot" ]] || want "the sysroot '$gcc_sysroot' of $gcc_cc does not exist"
+# The native-ok runs compile against GCC's own sysroot: it must be the SDK asserted above
+# (a macOS 26 bottle names MacOSX26.sdk, which the Command Line Tools 27 also ship).
+gcc_sysroot_real="$(realpath "$gcc_sysroot")" || want "the sysroot '$gcc_sysroot' of $gcc_cc does not exist"
+[[ "$gcc_sysroot_real" == "$sdk_real" ]] || want "the sysroot of $gcc_cc is $gcc_sysroot_real, expected the SDK $sdk_real"
 printf 'g++:     %s %s\ngcc:     %s\nsysroot: %s\n' "$gxx" "$gcc_version" "$gcc_cc" "$gcc_sysroot"
 
 step "bootstrap"
@@ -115,7 +126,7 @@ step "toolchain report"
   printf 'image:   %s %s\n' "${ImageOS:-local}" "${ImageVersion:-local}"
   printf 'clt:     %s\n' "$clt_version"
   printf 'clang:   %s\n' "$clang_banner"
-  printf 'sdk:     %s (%s)\n' "$sdk_version" "$sdk_real"
+  printf 'sdk:     %s %s (%s)\n' "$sdk_version" "$sdk_build" "$sdk_real"
   printf 'gcc:     %s %s (sysroot %s)\n' "$gxx" "$gcc_version" "$gcc_sysroot"
   printf 'java:    %s\n' "$("$CERASTES_JAVA" -version 2>&1 | sed -n 1p)"
   printf 'z3:      %s\n' "$("$Z3_EXE" --version)"
