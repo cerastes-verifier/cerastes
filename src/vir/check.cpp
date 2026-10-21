@@ -3,12 +3,111 @@
 #include "check.h"
 
 #include <set>
+#include <string>
 #include <unordered_set>
 
 #include "dec.h"
 
 namespace cerastes::vir {
 namespace {
+
+// A tiny constant evaluator for the condition of a `do ... while (0)` (LoopForm::DoOnce): lowering runs that body exactly
+// once, so the checker refuses a condition that is not false.  Values are host integers, so only types of at most 64 bits
+// are evaluated; anything it cannot evaluate exactly (division by zero, a result outside its type or an overflow of the
+// host integer, a shift, a call, a variable) is "unknown".  A DoOnce is rejected only if its condition reads a variable or
+// calls, or folds cleanly to a non-zero value; an unknown constant is accepted, because lowering asserts the condition's
+// obligations after the body and then `assert !c` as an internal check.
+struct ConstVal {
+  bool ok = false;
+  bool is_bool = false;
+  __int128 v = 0;
+};
+
+ConstVal unknown() { return ConstVal{}; }
+ConstVal int_val(__int128 v) { return ConstVal{true, false, v}; }
+ConstVal bool_val(bool b) { return ConstVal{true, true, b ? 1 : 0}; }
+
+bool fits(__int128 v, const Type& t) {
+  if (!t.is_int() || t.int_type->bits > 64) return false;
+  const int bits = t.int_type->bits;
+  const __int128 one = 1;
+  if (t.int_type->is_signed) return v >= -(one << (bits - 1)) && v <= (one << (bits - 1)) - 1;
+  return v >= 0 && v <= (one << bits) - 1;
+}
+
+ConstVal eval_const(const Expr& e) {
+  auto sub = [&](const Expr* x) { return x != nullptr ? eval_const(*x) : unknown(); };
+  switch (e.kind) {
+    case Expr::Kind::Const: {
+      if (e.type.is_bool()) return bool_val(e.value == "true");
+      if (!e.type.is_int() || !dec::valid(e.value) || e.value.size() > 30) return unknown();
+      __int128 v = 0;
+      const bool neg = dec::negative(e.value);
+      for (size_t i = neg ? 1 : 0; i < e.value.size(); ++i) v = v * 10 + (e.value[i] - '0');
+      v = neg ? -v : v;
+      return fits(v, e.type) ? int_val(v) : unknown();
+    }
+    case Expr::Kind::ReportAt: return sub(e.a);
+    case Expr::Kind::ToBool: {
+      ConstVal a = sub(e.a);
+      return a.ok && !a.is_bool ? bool_val(a.v != 0) : unknown();
+    }
+    case Expr::Kind::BoolToInt: {
+      ConstVal a = sub(e.a);
+      return a.ok && a.is_bool && fits(a.v, e.type) ? int_val(a.v) : unknown();
+    }
+    case Expr::Kind::Convert: {
+      ConstVal a = sub(e.a);
+      return a.ok && !a.is_bool && fits(a.v, e.type) ? int_val(a.v) : unknown();
+    }
+    case Expr::Kind::Unary: {
+      ConstVal a = sub(e.a);
+      if (!a.ok) return unknown();
+      if (e.uop == UnaryOp::Not) return a.is_bool ? bool_val(a.v == 0) : unknown();
+      if (a.is_bool) return unknown();
+      const __int128 r = e.uop == UnaryOp::Neg ? -a.v : a.v;
+      return fits(r, e.type) ? int_val(r) : unknown();
+    }
+    case Expr::Kind::Cond: {
+      ConstVal c = sub(e.a);
+      if (!c.ok || !c.is_bool) return unknown();
+      return sub(c.v != 0 ? e.b : e.c);
+    }
+    case Expr::Kind::Binary: {
+      ConstVal a = sub(e.a);
+      if (!a.ok) return unknown();
+      if (e.bop == BinaryOp::LAnd || e.bop == BinaryOp::LOr) {
+        if (!a.is_bool) return unknown();
+        if (e.bop == BinaryOp::LAnd && a.v == 0) return bool_val(false);
+        if (e.bop == BinaryOp::LOr && a.v != 0) return bool_val(true);
+        ConstVal b = sub(e.b);
+        return b.ok && b.is_bool ? bool_val(b.v != 0) : unknown();
+      }
+      ConstVal b = sub(e.b);
+      if (!b.ok || a.is_bool != b.is_bool) return unknown();
+      if (e.bop == BinaryOp::Eq) return bool_val(a.v == b.v);
+      if (e.bop == BinaryOp::Ne) return bool_val(a.v != b.v);
+      if (a.is_bool) return unknown();
+      switch (e.bop) {
+        case BinaryOp::Lt: return bool_val(a.v < b.v);
+        case BinaryOp::Le: return bool_val(a.v <= b.v);
+        case BinaryOp::Gt: return bool_val(a.v > b.v);
+        case BinaryOp::Ge: return bool_val(a.v >= b.v);
+        case BinaryOp::Add: return fits(a.v + b.v, e.type) ? int_val(a.v + b.v) : unknown();
+        case BinaryOp::Sub: return fits(a.v - b.v, e.type) ? int_val(a.v - b.v) : unknown();
+        case BinaryOp::Mul: {
+          __int128 r;
+          if (__builtin_mul_overflow(a.v, b.v, &r)) return unknown();  // two large unsigned 64-bit operands
+          return fits(r, e.type) ? int_val(r) : unknown();
+        }
+        case BinaryOp::Div: return b.v != 0 && fits(a.v / b.v, e.type) ? int_val(a.v / b.v) : unknown();
+        case BinaryOp::Rem: return b.v != 0 && fits(a.v % b.v, e.type) ? int_val(a.v % b.v) : unknown();
+        default: return unknown();
+      }
+    }
+    default: return unknown();
+  }
+}
 
 // Where an expression sits; decides which nodes are allowed.
 enum class Ctx {
@@ -44,6 +143,8 @@ class Checker {
   void function(const Function& f) {
     fn_ = &f;
     declared_.clear();
+    jump_ids_.clear();
+    targets_.clear();
     scopes_.clear();
     scopes_.emplace_back();
     for (const auto& v : f.locals())
@@ -148,9 +249,21 @@ class Checker {
       }
       case Stmt::Kind::While: {
         if (s.expr == nullptr || s.body == nullptr) { err(s.loc, "a loop without a condition or a body"); return; }
+        if (s.jump_id < 0) err(s.loc, "a loop with a negative jump id");
+        else if (s.jump_id > 0) register_id(s.jump_id, s.loc);
+        if (s.form == LoopForm::DoWhile && s.jump_id <= 0) err(s.loc, "a `do` loop without a jump id (its exit test jumps to a label named by it)");
         CallState st;
-        expr(*s.expr, Ctx::Annot, false, st, false);  // no calls in a loop condition (0012 item 6)
+        expr(*s.expr, Ctx::Annot, false, st, false);  // no calls in a loop condition, a `do` condition included (0012 item 6)
         if (!s.expr->type.is_bool()) err(s.expr->loc, "a loop condition of type " + s.expr->type.str() + " (convert it with to_bool)");
+        const bool once = s.form == LoopForm::DoOnce;
+        if (once) {
+          const ConstVal cv = eval_const(*s.expr);
+          // Rejected: a condition that reads a variable or calls, or that folds cleanly to a non-zero value.  A constant the
+          // evaluator cannot fold (a shift, an inexact conversion, an overflow) is accepted: lowering asserts its obligations
+          // after the body, so the user sees that error, and the internal `assert !c` stops any value that is not zero.
+          if (mentions_result_or_local(*s.expr) || (cv.ok && !(cv.is_bool && cv.v == 0)))
+            err(s.expr->loc, "a `do ... while` loop lowered as running once whose condition is not a constant zero (decision 0014 item 5)");
+        }
         for (const Clause& c : s.invariants) {
           if (c.expr == nullptr) { err(c.loc, "an invariant without an expression"); continue; }
           if (!c.loc.known()) err(c.loc, "an invariant has no source position");
@@ -158,9 +271,80 @@ class Checker {
           expr(*c.expr, Ctx::Annot, false, ist, false);
           if (!c.expr->type.is_bool()) err(c.expr->loc, "an invariant is not a bool");
         }
-        if (s.measure.empty()) err(s.loc, "a loop without a termination measure (decreases, decision 0013)");
+        if (s.measure.empty() && !once) err(s.loc, "a loop without a termination measure (decreases, decision 0013)");
         for (const Clause& c : s.measure) measure(c, Ctx::Annot, "decreases");
+        targets_.push_back(Target{s.jump_id, true});
         scoped(s.body);
+        targets_.pop_back();
+        if (s.step != nullptr) {
+          if (s.form != LoopForm::While) err(s.step->loc, "a loop step on a `do` loop");
+          else if (s.step->kind != Stmt::Kind::Assign && s.step->kind != Stmt::Kind::ExprStmt)
+            err(s.step->loc, "a loop step that is not an assignment or an expression statement");
+          else scoped(s.step);
+        }
+        break;
+      }
+      case Stmt::Kind::Switch: {
+        if (s.expr == nullptr || s.body == nullptr) { err(s.loc, "a switch without a controlling expression or a body"); return; }
+        if (s.jump_id <= 0) err(s.loc, "a switch without a jump id");
+        else register_id(s.jump_id, s.loc);
+        CallState st;
+        expr(*s.expr, Ctx::Body, false, st, false);  // evaluated once; a call is hoisted like a declaration's initializer
+        if (!s.expr->type.is_int()) err(s.expr->loc, "a switch on a " + s.expr->type.str() + " (the controlling expression is a promoted integer)");
+        if (s.body->kind != Stmt::Kind::Block) { err(s.body->loc, "the body of a switch is not a compound statement"); return; }
+        if (!s.body->loc.known()) err(s.body->loc, "statement without a source position");
+        targets_.push_back(Target{s.jump_id, false});
+        scopes_.emplace_back();
+        std::set<std::string> values;
+        int defaults = 0;
+        bool declaration_seen = false;
+        bool first = true;
+        for (const Stmt* c : s.body->stmts) {
+          if (c == nullptr) { err(s.body->loc, "a null statement in a block"); continue; }
+          if (c->kind == Stmt::Kind::Case) {
+            if (!c->loc.known()) err(c->loc, "statement without a source position");
+            if (declaration_seen) err(c->loc, "a declaration in the body of a switch that this case label jumps over");
+            if (c->expr == nullptr) {
+              if (++defaults > 1) err(c->loc, "a second `default` label in one switch");
+            } else {
+              // The value is any call-free integer expression of the scrutinee's type (the encoder uses the case constant's
+              // original expression, 0010 item 12); EDG guarantees that the folded values are distinct.
+              CallState vst;
+              expr(*c->expr, Ctx::Annot, false, vst, false);
+              if (!c->expr->type.is_int()) err(c->loc, "a case value that is not an integer");
+              else if (c->expr->type != s.expr->type)
+                err(c->loc, "a case value of type " + c->expr->type.str() + " in a switch on " + s.expr->type.str());
+              else if (mentions_result_or_local(*c->expr)) err(c->loc, "a case value that is not a constant expression");
+              else if (c->expr->kind == Expr::Kind::Const && !values.insert(c->expr->value).second)
+                err(c->loc, "the case value " + c->expr->value + " appears twice in one switch");
+            }
+          } else {
+            if (first) err(c->loc, "a statement before the first case label of a switch (it is unreachable)");
+            if (c->kind == Stmt::Kind::Decl) declaration_seen = true;
+            stmt(*c);
+          }
+          first = false;
+        }
+        scopes_.pop_back();
+        targets_.pop_back();
+        break;
+      }
+      case Stmt::Kind::Case:
+        err(s.loc, "a case label that is not directly in the body of its switch");
+        break;
+      case Stmt::Kind::Break:
+      case Stmt::Kind::Continue: {
+        const bool is_break = s.kind == Stmt::Kind::Break;
+        // The target is the INNERMOST loop or switch for a break, the innermost loop for a continue (a switch in between is
+        // skipped): anything else would leave or continue the wrong construct, so it is an inconsistency of the encoder.
+        const Target* t = nullptr;
+        for (auto it = targets_.rbegin(); it != targets_.rend(); ++it)
+          if (is_break || it->is_loop) { t = &*it; break; }
+        if (t == nullptr)
+          err(s.loc, std::string("a `") + (is_break ? "break" : "continue") + "` outside any " + (is_break ? "loop or switch" : "loop"));
+        else if (s.jump_id <= 0 || t->id != s.jump_id)
+          err(s.loc, std::string("a `") + (is_break ? "break" : "continue") + "` that does not name the innermost enclosing " +
+                         (is_break ? "loop or switch" : "loop"));
         break;
       }
       case Stmt::Kind::Return: {
@@ -193,6 +377,10 @@ class Checker {
         break;
       }
     }
+  }
+
+  void register_id(int id, const SrcLoc& loc) {
+    if (!jump_ids_.insert(id).second) err(loc, "jump id " + std::to_string(id) + " is used by two loops or switches");
   }
 
   void scoped(const Stmt* s) {
@@ -357,6 +545,12 @@ class Checker {
   std::unordered_set<const Function*> functions_;
   const Function* fn_ = nullptr;
   std::set<int> declared_;
+  struct Target {
+    int id;
+    bool is_loop;
+  };
+  std::set<int> jump_ids_;
+  std::vector<Target> targets_;  // the loops and switches around the statement being checked, innermost last
   std::vector<std::set<int>> scopes_;
   std::vector<Diag> diags_;
 };

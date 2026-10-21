@@ -43,10 +43,10 @@ There are nine annotations. You write them with macros from `<cerastes.h>`:
 
 | `CERASTES_INVARIANT(p)`
 | before a `while`, `do`, `for` or range-based `for` statement
-| `p` holds every time control reaches the loop test
+| `p` holds every time control reaches the loop test (for `do`, at the start of every iteration)
 
 | `CERASTES_DECREASES(e1, ...)`
-| before a `while` or `for` statement, or after a function's parameter list
+| before a `while`, `do` or `for` statement, or after a function's parameter list
 | termination measure: it gets smaller with every iteration of the loop, or every recursive call of the function
 
 | `CERASTES_CHECK(p)`
@@ -305,7 +305,12 @@ placed and type-checked.
 
 `invariant(p)` is written immediately before a `while`, `do`, `for` or
 range-based `for` statement. It says that `p` holds each time control reaches
-the loop's test. Several invariants on one loop are conjoined.
+the loop's test. A `do` loop runs its body before its first test, so there the
+invariant holds at the start of every iteration: on entry, and each time the
+test is true. `continue` goes to the test (in a `for` loop, through the
+increment), so the invariant must hold there too; `break` leaves the loop
+without reaching the test, so it need not. Several invariants on one loop are
+conjoined.
 
 [source,cpp]
 ----
@@ -339,7 +344,8 @@ body and not after it.
 `decreases(e1, ..., en)` says why a loop or a recursion ends. It has one or more
 integer expressions, a *measure*, and it is written in one of two places. Before a
 loop (next to its invariants) it is the loop's measure: it must get smaller with
-every iteration, and must not be negative when the loop condition holds. After a
+every iteration, and must not be negative when the loop condition holds. A
+`do { ... } while (0)`, the macro idiom whose body runs once, needs none. After a
 function's parameter list (with `requires` and `ensures`, in any order) it is part of
 the function's contract: it is compared from the entry of the function to each
 recursive call. With several expressions the comparison is lexicographic: at the first

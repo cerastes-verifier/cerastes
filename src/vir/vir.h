@@ -133,16 +133,29 @@ struct Clause {
   SrcLoc loc;
 };
 
+// The shape of a loop statement (decision 0014 items 4 and 5).
+//  While:   `while (c) { body; step }`; the invariants hold wherever C evaluates `c`.
+//  DoWhile: `do { body } while (c)`; the invariants hold at the start of every iteration; `c` is evaluated after the body
+//           (and after each `continue`), is encoded for its obligations and may contain no call.
+//  DoOnce:  `do { body } while (c)` where `c` is a constant zero: the body runs once, no iteration follows another, and no
+//           measure is required; lowered as straight-line code.
+enum class LoopForm { While, DoWhile, DoOnce };
+
 struct Stmt {
   enum class Kind {
     Decl,      // `var` = `expr` (a local always has an initializer; the type of `expr` is the type of `var`)
     Assign,    // `var` = `expr` (same type)
     ExprStmt,  // evaluate `expr` (a call, a discarded value, a `(void)e`): only its obligations and effects count
     If,        // if (`expr`) then_body [else else_body]; either body may be null
-    While,     // while (`expr`) invariants body; `expr` has no calls (check.h)
+    While,     // a loop (see `form`): while (`expr`) invariants body [step]; `expr` has no calls (check.h)
     Return,    // return [`expr`]: expr's type is the function's return type, absent iff the function is void
     Check,     // check(`expr`): a Bool, asserted (category `check`)
-    Block      // `stmts`
+    Block,     // `stmts`
+    Switch,    // switch (`expr`) body; `expr` is the (promoted) controlling Int expression, `body` a Block; `jump_id`
+    Case,      // a `case value:` / `default:` marker inside a Switch's own body Block: `expr` is the value (an Int Const of
+               // the scrutinee's type) or null for `default`
+    Break,     // break: leaves the loop or switch whose `jump_id` is `jump_id`
+    Continue   // continue: goes to the end of the iteration of the loop whose `jump_id` is `jump_id`
   };
   Kind kind = Kind::Block;
   SrcLoc loc;
@@ -155,6 +168,11 @@ struct Stmt {
                                             // expressions, compared lexicographically; required (check.h)
   const Stmt* body = nullptr;               // While
   std::vector<const Stmt*> stmts;           // Block
+  LoopForm form = LoopForm::While;          // While
+  const Stmt* step = nullptr;               // While: a `for` loop's increment (an Assign or ExprStmt), run after the body and
+                                            // after each `continue`; may be null
+  int jump_id = 0;                          // While, Switch: this construct's id (> 0 when a Break or Continue may name it;
+                                            // unique within a Function, Builder::jump_id()); Break, Continue: the target's id
 };
 
 // ---- functions and programs ----------------------------------------------------------------------------------
@@ -216,6 +234,9 @@ class Program {
   Program(const Program&) = delete;
   Program& operator=(const Program&) = delete;
 
+  // A fresh jump id (decision 0014): unique within the Program, so also within every Function.
+  int fresh_jump_id() { return next_jump_id_++; }
+
   // Integer types are interned by (bits, is_signed); the first name given wins.
   const IntType* int_type(const std::string& name, int bits, bool is_signed);
   // The interned type of that shape; a type nobody named is created with a synthetic name ("int32", "uint64").
@@ -239,6 +260,7 @@ class Program {
 
  private:
   int c_int_bits_ = 32;
+  int next_jump_id_ = 1;
   std::deque<std::unique_ptr<IntType>> int_types_;
   std::deque<Function> functions_;
   std::deque<Expr> exprs_;
@@ -293,6 +315,16 @@ class Builder {
   const Stmt* expr_stmt(const Expr* e, SrcLoc loc);
   const Stmt* if_stmt(const Expr* c, const Stmt* then_body, const Stmt* else_body, SrcLoc loc);
   const Stmt* while_stmt(const Expr* c, std::vector<Clause> invariants, std::vector<Clause> measure, const Stmt* body, SrcLoc loc);
+  // A loop in any form (decision 0014).  `measure` is required for While and DoWhile and may be empty for DoOnce; `c` is the
+  // condition (for DoOnce it is still encoded, for its obligations); `step` may be null; `jump_id` is from jump_id() (0: no
+  // Break or Continue names this loop).
+  const Stmt* loop(const Expr* c, std::vector<Clause> invariants, std::vector<Clause> measure, const Stmt* body, const Stmt* step,
+                   LoopForm form, int jump_id, SrcLoc loc);
+  const Stmt* switch_stmt(const Expr* scrutinee, const Stmt* body, int jump_id, SrcLoc loc);
+  const Stmt* case_label(const Expr* value_or_null, SrcLoc loc);  // null: `default`
+  const Stmt* break_stmt(int target_jump_id, SrcLoc loc);
+  const Stmt* continue_stmt(int target_jump_id, SrcLoc loc);
+  int jump_id() { return p_.fresh_jump_id(); }
   const Stmt* return_stmt(const Expr* value_or_null, SrcLoc loc);
   const Stmt* check(const Expr* e, SrcLoc loc);
   const Stmt* block(std::vector<const Stmt*> stmts, SrcLoc loc);

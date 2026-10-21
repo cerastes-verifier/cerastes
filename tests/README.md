@@ -32,7 +32,7 @@ class that runs the real driver is added with the driver (M3-3).
 
 `annotations/` and `scalar/` each have a `negative/` directory of must-fail twins
 (see [Twins](#twins)). Later milestones add `templates/`, `concepts/` and
-`memory/`, and the differential tests against VeriFast in M4 (see plan.md).
+`memory/`, and the differential tests against VeriFast in M5 (see plan.md).
 
 ## Header format
 

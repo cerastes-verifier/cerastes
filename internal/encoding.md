@@ -1,8 +1,9 @@
 # Encoding: C/C++ → VIR → Viper
 
 Developer reference for the encoder (plan.md: "Design VIR and document it in `encoding.md`"; it grows each
-milestone). The decisions behind it are 0010 (integer semantics), 0011 (driver), 0012 (scalar encoding). This
-file says *how*; those records say *what* and *why*. Status: M3 (scalar code). Sections marked *(M3-n)* are
+milestone). The decisions behind it are 0010 (integer semantics), 0011 (driver), 0012 (scalar encoding), 0014
+(control flow). This file says *how*; those records say *what* and *why*. Status: M3 (scalar code) and M4.1
+(control flow). Sections marked *(M3-n)* are
 filled in at that checkpoint.
 
 ## 1. Pipeline and layering
@@ -40,8 +41,13 @@ Front-end agnostic. The encoder builds a `Program` with a `Builder`; `check_prog
   `Call(callee, args)`, `ReportAt(e, loc)` (obligations inside `e` are reported at `loc`, with a note at their
   own position: the obligations of a default argument are reported at the call).
 - `Stmt`: `Decl(var, init)`, `Assign(var, e)`, `ExprStmt(e)` (a call, a discarded value; only its obligations
-  and effects count), `If(c, then, else)`, `While(cond, invariants[], body)`, `Return(e?)`, `Check(e)`,
-  `Block(stmts)`. There is no statement for falling off the end: lowering appends the epilogue of the function
+  and effects count), `If(c, then, else)`, `While(cond, invariants[], measure[], body, step?, form, jump_id)`,
+  `Return(e?)`, `Check(e)`, `Block(stmts)`, and since M4.1 (decision 0014) `Switch(scrutinee, body Block, jump_id)`,
+  `Case(value | default)` (a marker directly in a switch body), `Break(id)`, `Continue(id)`. A loop's `form` is
+  `While` (the test before the body; `step` is a `for` loop's increment, an `Assign` or `ExprStmt`), `DoWhile` (the
+  test after the body) or `DoOnce` (`do … while (0)`: the condition evaluates to zero, no measure needed). Jump ids
+  are unique in the Program (`Builder::jump_id()`); a `Break` names the innermost enclosing loop or switch, a
+  `Continue` the innermost enclosing loop, so every jump is forward and none enters a loop. There is no statement for falling off the end: lowering appends the epilogue of the function
   (`missing-return` for a non-`void` function, the `ensures` for a `void` one). `main`'s generated `return 0`
   is an ordinary `Return`.
 - `Function { id, c_name, params[], ret, requires[], ensures[], body?, trusted_reason, loc, end_loc }`; a null
@@ -70,7 +76,14 @@ Front-end agnostic. The encoder builds a `Program` with a `Builder`; `check_prog
   evaluated operand (the right of `&&`/`||`, a branch of `?:`); the calls of one full expression are nested in
   one another (no call is evaluated before another call outside its arguments); a `void` call is the whole
   of an `ExprStmt`;
-- a function without a body has a `trusted_reason`.
+- a function without a body has a `trusted_reason`;
+- **control flow** (0014): jump ids are unique; a `Break`/`Continue` names its innermost target (anything else is an
+  internal inconsistency); a `Case` stands directly in its switch's body, which starts with a `Case`, has no `Decl`
+  before a later `Case` and at most one default; a case value is a call-free, local-free Int expression of exactly
+  the scrutinee's type (constant values distinct); the scrutinee is Int and may contain calls (evaluated once, as a
+  `Decl` initializer); `While`/`DoWhile` need a measure, a `DoOnce` none; a `DoOnce`'s condition is rejected if it reads
+  a local, calls a function or folds cleanly to a non-zero value, and accepted when the checker cannot fold it (its
+  obligations and lowering's internal `assert !c` decide); no calls in any loop condition; `step` only on a `While`-form loop.
 
 ## 3. Lowering (`src/vir/lower.cpp`)
 
@@ -110,6 +123,19 @@ invariant, the obligations of its expression (guarded by the earlier user invari
 (`invariant-entry` / `invariant-preserved`); then the obligations of the loop condition (guarded by all user
 invariants). An obligation as an invariant clause is checked exactly where 0012 item 8 asks (before the first
 evaluation of the condition, and before each next one) and is known inside the body.
+
+**Jumps** (M4.1, decision 0014). A `While` loop is `while (c) inv dec { body; label l_cont__N; step } label
+l_brk__N`, each label emitted only when a `Continue`/`Break` with that id exists (so code without jumps lowers as in
+M3); `Continue` is `goto l_cont__N`, `Break` is `goto l_brk__N`. A continue path reaches the end of the body, so the
+loop's own invariant, condition-obligation and measure clauses are checked there; no new map entries. A `DoWhile` is
+`while (true) inv dec { body; label l_cont__N; assert <obligations of c>; if (!c) { goto l_brk__N } } label l_brk__N`.
+A `DoOnce` is no loop: its invariants (with their obligations) are asserted at entry as `invariant-entry` and its
+measure's obligations there too, then `body; label l_cont__N; assert <obligations of c>; assert !c` (category
+`internal`) `; label l_brk__N`. A `Switch` lowers its scrutinee like any expression into a temporary (obligations
+placed by the call rule), asserts each case value's obligations unconditionally at its label, dispatches with
+`if (t == value) { goto l_case__N_i }` in source order and then `goto l_default__N` or `goto l_brk__N`, and places a
+label at each `Case` marker. The automatic range invariants of a loop include the locals assigned in its `step` and
+in switch bodies. `lint_viper.py` rejects a backward `goto`, a label carrying invariants and a duplicate label.
 
 **Returns.** `return e` assigns `res`, asserts each `ensures` clause (`postcondition`, at the `return`, note at
 the clause), and jumps to `l_end`. The end of the body appends `assert false` (`missing-return`) for a
@@ -188,7 +214,14 @@ The IL facts each rule relies on (node kinds, fields, conversions) are recorded 
 `internal/il-inventory.md`, section "M3: scalar code" (probes P1–P12). The ones the encoder depends on most:
 - `int s = 0;` is a `stmk_decl` followed by a `stmk_init`: encode the initializer once, at the `stmk_init`.
 - `static_assert` in a body is a `stmk_decl` of a static-assertion entry (not encoded).
-- `break`/`continue` are compiler-generated `stmk_goto` + `stmk_label`: every `stmk_goto` is rejected.
+- `break`/`continue` are compiler-generated `stmk_goto` + `stmk_label`; the label carries `break_label`,
+  `continue_label` and, for a switch, `switch_break_label`. No field links a label to its construct: the break label
+  is the next sibling of the loop or switch, the continue label the last statement of the loop body (M4.1, P13).
+  A user `goto` or label is rejected.
+- `do` is `stmk_end_test_while` (`expr`, `loop_statement`); `switch` is `stmk_switch`, its case labels flat
+  siblings (`stmk_switch_case`) in the body block, each with `case_value` (already converted to the promoted
+  scrutinee's type) and `range_end` (a GNU range); a C++ init-statement or condition declaration is an
+  `enk_condition` (M4.1, P14–P16).
 - A `for` init is a compiler-generated block; `if (int x = …)` has an `enk_condition` node (rejected).
 - Reaching the closing brace of a non-`void` function is a compiler-generated `stmk_return` without an
   expression (`main`: with the constant 0).
@@ -272,12 +305,17 @@ operations).
 
 **Statements.** Allow-list: blocks (compiler-generated blocks are flattened, so a `for` initialization stays in
 scope), declarations with their `stmk_init`, expression statements (assignment, compound assignment and `++`/`--` of
-a local, calls, discarded expressions, `(void)e`), `if`, `while` and `for` (as `init; while (cond) { body; incr }`)
-with their invariants read from the loop's attributes, `return`, `static_assert`, null statements and `check`. A
-compiler-generated `return` without a value ends a function and is not encoded (lowering appends the epilogue); the
-generated `return 0` of `main` is encoded at the closing brace. `goto` (with `break` and `continue`, named as such),
-labels written by the user, `switch`, `do`, `try`, `asm`, range-based `for`, `if constexpr`/`consteval` and
-conditions with declarations are `unsupported_statement`.
+a local, calls, discarded expressions, `(void)e`), `if`, `while`, `do` and `for` (the increment is the loop's
+`step`, run after the body and after a `continue`) with their invariants read from the loop's attributes, `break` and
+`continue` (the compiler-generated `goto`s, mapped to the innermost enclosing loop or switch, with the label's shape
+checked, decision 0014), `switch` (case labels directly in its body), `return`, `static_assert`, null statements
+(`[[fallthrough]]` among them) and `check`. A `do` whose condition is a constant zero (EDG's folded value) is the
+loop form `DoOnce`. A compiler-generated `return` without a value ends a function and is not encoded (lowering
+appends the epilogue); the generated `return 0` of `main` is encoded at the closing brace. A user `goto` or label,
+`try`, `asm`, range-based `for`, `if constexpr`/`consteval`, conditions with declarations, and the forms of `switch`
+that 0014 item 1 rejects (nested labels, GNU ranges, a statement before the first label, a declaration a later label
+jumps over, an init-statement) are `unsupported_statement`; verify mode suppresses EDG's warning #546 for the jump
+over a declaration, which cerastes reports itself.
 
 **Termination** (decision 0013). `decreases` is read as a contract of the function (`Function::decreases_`, the
 measure over the formals) and before a loop (`Stmt::measure`); each component must be an integer expression. A loop
@@ -306,4 +344,4 @@ an original expression is treated as having none: rejected), `silicon_timeout`, 
 
 **Known over-rejection.** A call written inside an annotation's own `sizeof` operand (`CERASTES_REQUIRES(sizeof(int[p(2)]) > 0)`)
 is rejected as a call in an annotation, although the operand is never evaluated: the encoder reads the folded constant's
-original expression, which contains the call. This is the safe direction (M7 inventory).
+original expression, which contains the call. This is the safe direction (M8 inventory).

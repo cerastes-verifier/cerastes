@@ -499,7 +499,109 @@ class Lowerer {
       case Stmt::Kind::Block:
         for (const Stmt* c : s.stmts) stmt(*c, out);
         break;
+      case Stmt::Kind::Switch: switch_stmt(s, out); break;
+      case Stmt::Kind::Case:
+        internal_error(s.loc, "a case label outside the body of its switch reached lowering");
+        break;
+      case Stmt::Kind::Break: jump(out, "l_brk__" + std::to_string(s.jump_id)); break;
+      case Stmt::Kind::Continue: jump(out, "l_cont__" + std::to_string(s.jump_id)); break;
     }
+  }
+
+  // ---- jumps (decision 0014) ----
+
+  void jump(std::vector<low::LStmt>& out, std::string label) {
+    low::LStmt g;
+    g.kind = low::LStmt::Kind::Goto;
+    g.name = std::move(label);
+    out.push_back(std::move(g));
+  }
+
+  void label(std::vector<low::LStmt>& out, std::string name) {
+    low::LStmt l;
+    l.kind = low::LStmt::Kind::Label;
+    l.name = std::move(name);
+    out.push_back(std::move(l));
+  }
+
+  // The `break`s and `continue`s inside `s` (a step is not searched: it holds none), by target id.  A label is emitted only
+  // for a construct that something jumps to, so programs without these statements lower exactly as before.
+  static void collect_jumps(const Stmt& s, std::set<int>& breaks, std::set<int>& continues) {
+    switch (s.kind) {
+      case Stmt::Kind::Break: breaks.insert(s.jump_id); break;
+      case Stmt::Kind::Continue: continues.insert(s.jump_id); break;
+      case Stmt::Kind::If:
+        if (s.then_body != nullptr) collect_jumps(*s.then_body, breaks, continues);
+        if (s.else_body != nullptr) collect_jumps(*s.else_body, breaks, continues);
+        break;
+      case Stmt::Kind::While:
+      case Stmt::Kind::Switch:
+        if (s.body != nullptr) collect_jumps(*s.body, breaks, continues);
+        break;
+      case Stmt::Kind::Block:
+        for (const Stmt* c : s.stmts) collect_jumps(*c, breaks, continues);
+        break;
+      default: break;
+    }
+  }
+
+  // `switch (e) { ... }`: the controlling expression is evaluated once into a temporary (its obligations and calls first),
+  // then a chain of tests jumps to the label of the matching `case` (in source order; case values are distinct), else to the
+  // `default` label, else past the switch.  The body is lowered in order with a label at each case marker, so falling through
+  // is falling into the next label and `break` jumps to the label after the body.
+  void switch_stmt(const Stmt& s, std::vector<low::LStmt>& out) {
+    const std::string n = std::to_string(s.jump_id);
+    LV v = full_expr(*s.expr, out);
+    const std::string t = "t__" + std::to_string(fn_.ntemp++);
+    fn_.temps.push_back(low::LVar{t, false});
+    assign(out, t, v.e);
+    std::set<int> breaks, continues;
+    collect_jumps(*s.body, breaks, continues);
+    // The case values (decision 0014: any call-free expression of the scrutinee's type): their obligations are asserted
+    // unconditionally, before the dispatch, each at its case label with its own category; then `t == value` tests.
+    std::vector<E> values(s.body->stmts.size());
+    for (size_t k = 0; k < s.body->stmts.size(); ++k) {
+      const Stmt& c = *s.body->stmts[k];
+      if (c.kind != Stmt::Kind::Case || c.expr == nullptr) continue;
+      Full full;
+      LV cvv = lower(*c.expr, body_env(), nullptr, -1, full);
+      values[k] = cvv.e;
+      for (Obl& o : full.obls) {
+        low::Meta m = o.meta;
+        if (!m.has_note && m.loc.known() && (m.loc.line != c.loc.line || m.loc.file != c.loc.file)) {
+          m.has_note = true;
+          m.note_loc = m.loc;
+          m.note_text = "in the value of this case label";
+        }
+        m.loc = c.loc;
+        emit_assert(out, low::implies(o.guard, o.cond), std::move(m));
+      }
+    }
+    bool has_default = false;
+    size_t index = 0;
+    for (const Stmt* c : s.body->stmts) {
+      if (c->kind == Stmt::Kind::Case) {
+        if (c->expr == nullptr) {
+          has_default = true;
+        } else {
+          low::LStmt i;
+          i.kind = low::LStmt::Kind::If;
+          i.expr = low::bin(low::BinOp::Eq, low::var(t), values[index]);
+          jump(i.then_body, "l_case__" + n + "_" + std::to_string(index));
+          out.push_back(std::move(i));
+        }
+      }
+      ++index;
+    }
+    const bool need_break_label = !has_default || breaks.count(s.jump_id) != 0;
+    jump(out, has_default ? "l_default__" + n : "l_brk__" + n);
+    index = 0;
+    for (const Stmt* c : s.body->stmts) {
+      if (c->kind == Stmt::Kind::Case) label(out, c->expr == nullptr ? "l_default__" + n : "l_case__" + n + "_" + std::to_string(index));
+      else stmt(*c, out);
+      ++index;
+    }
+    if (need_break_label) label(out, "l_brk__" + n);
   }
 
   void ret(const Stmt& s, std::vector<low::LStmt>& out) {
@@ -539,6 +641,10 @@ class Lowerer {
         break;
       case Stmt::Kind::While:
         if (s.body != nullptr) scan(*s.body, assigned, declared);
+        if (s.step != nullptr) scan(*s.step, assigned, declared);
+        break;
+      case Stmt::Kind::Switch:
+        if (s.body != nullptr) scan(*s.body, assigned, declared);
         break;
       case Stmt::Kind::Block:
         for (const Stmt* c : s.stmts) scan(*c, assigned, declared);
@@ -552,12 +658,21 @@ class Lowerer {
   // invariants) and the invariant itself; then the obligations of the loop condition (guarded by all user
   // invariants).  An obligation as an invariant clause is checked exactly where 0012 item 8 asks: before the
   // first evaluation (on entry) and before each next one (preservation), and it is then known inside the body.
+  //
+  // Decision 0014: a `do` loop is `while (true)` with the condition's obligations and the exit test at the end of the body
+  // (item 5); a `for` loop's step follows the `continue` label; `do ... while (0)` is no loop at all (do_once).
   void loop(const Stmt& s, std::vector<low::LStmt>& out) {
+    if (s.form == LoopForm::DoOnce) {
+      do_once(s, out);
+      return;
+    }
+    const bool is_do = s.form == LoopForm::DoWhile;
     low::LStmt w;
     w.kind = low::LStmt::Kind::While;
 
     std::set<int> assigned, declared;
     scan(*s.body, assigned, declared);
+    if (s.step != nullptr) scan(*s.step, assigned, declared);
     for (int id : assigned) {
       if (declared.count(id) != 0) continue;
       const Var& v = *fn_.f->locals()[static_cast<size_t>(id)];
@@ -613,12 +728,69 @@ class Lowerer {
       w.decreases_check = low::Check{"termination.failed", std::move(m)};
     }
 
-    Full cfull;
-    LV cv = lower(*s.expr, body_env(), nullptr, -1, cfull);
-    for (Obl& o : cfull.obls) w.invariants.push_back(obligation_clause(low::and_(prior, o.guard), o));
-    w.expr = cv.e;
+    std::set<int> breaks, continues;
+    collect_jumps(*s.body, breaks, continues);
+    const std::string n = std::to_string(s.jump_id);
+    if (!is_do) {
+      Full cfull;
+      LV cv = lower(*s.expr, body_env(), nullptr, -1, cfull);
+      for (Obl& o : cfull.obls) w.invariants.push_back(obligation_clause(low::and_(prior, o.guard), o));
+      w.expr = cv.e;
+    } else {
+      w.expr = low::bool_lit(true);
+    }
     stmt(*s.body, w.then_body);
+    if (continues.count(s.jump_id) != 0) label(w.then_body, "l_cont__" + n);
+    if (s.step != nullptr) stmt(*s.step, w.then_body);
+    if (is_do) {
+      // C evaluates the condition here, after the body and after each `continue`; its obligations are asserts.
+      LV cv = full_expr(*s.expr, w.then_body);
+      low::LStmt exit;
+      exit.kind = low::LStmt::Kind::If;
+      exit.expr = low::not_(cv.e);
+      jump(exit.then_body, "l_brk__" + n);
+      w.then_body.push_back(std::move(exit));
+    }
     out.push_back(std::move(w));
+    if (is_do || breaks.count(s.jump_id) != 0) label(out, "l_brk__" + n);
+  }
+
+  // `do { B } while (c)` where `c` is a constant zero (decision 0014 item 5): the body runs once and no iteration follows
+  // another, so there is no loop and no measure.  A written invariant is asserted once, at entry (the start of the only
+  // iteration), a written measure only has its obligations checked there; `continue` goes to the condition, which is evaluated
+  // (for its obligations) after the body, and `break` to the end.
+  void do_once(const Stmt& s, std::vector<low::LStmt>& out) {
+    E prior;
+    for (const Clause& c : s.invariants) {
+      Full full;
+      LV v = lower(*c.expr, body_env(), nullptr, -1, full);
+      for (Obl& o : full.obls) emit_assert(out, low::implies(low::and_(prior, o.guard), o.cond), o.meta);
+      low::Meta entry;
+      entry.category = "invariant-entry";
+      entry.loc = c.loc;
+      entry.message = "this loop invariant may not hold on entry";
+      emit_assert(out, v.e, std::move(entry));
+      prior = low::and_(prior, v.e);
+    }
+    for (const Clause& c : s.measure) {
+      Full mfull;
+      lower(*c.expr, body_env(), nullptr, -1, mfull);
+      for (Obl& o : mfull.obls) emit_assert(out, low::implies(low::and_(prior, o.guard), o.cond), o.meta);
+    }
+    std::set<int> breaks, continues;
+    collect_jumps(*s.body, breaks, continues);
+    const std::string n = std::to_string(s.jump_id);
+    stmt(*s.body, out);
+    if (continues.count(s.jump_id) != 0) label(out, "l_cont__" + n);
+    LV cv = full_expr(*s.expr, out);  // the condition's obligations, where C evaluates it
+    // Defense in depth: the body ran once because the condition is false.  If EDG's folded zero ever disagrees with the value
+    // cerastes encoded, the run fails (an internal check, exit 3) instead of silently following the wrong path.
+    low::Meta internal;
+    internal.category = "internal";
+    internal.loc = s.loc;
+    internal.message = "internal check: the condition of a do-once loop is not false";
+    emit_assert(out, low::not_(cv.e), std::move(internal));
+    if (breaks.count(s.jump_id) != 0) label(out, "l_brk__" + n);
   }
 
   low::LInvariant obligation_clause(const E& guard, const Obl& o) {

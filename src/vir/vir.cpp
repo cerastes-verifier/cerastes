@@ -229,6 +229,45 @@ const Stmt* Builder::while_stmt(const Expr* c, std::vector<Clause> invariants, s
   return s;
 }
 
+const Stmt* Builder::loop(const Expr* c, std::vector<Clause> invariants, std::vector<Clause> measure, const Stmt* body, const Stmt* step,
+                          LoopForm form, int jump_id, SrcLoc loc) {
+  Stmt* s = fresh_stmt(p_, Stmt::Kind::While, std::move(loc));
+  s->expr = c;
+  s->invariants = std::move(invariants);
+  s->measure = std::move(measure);
+  s->body = body;
+  s->step = step;
+  s->form = form;
+  s->jump_id = jump_id;
+  return s;
+}
+
+const Stmt* Builder::switch_stmt(const Expr* scrutinee, const Stmt* body, int jump_id, SrcLoc loc) {
+  Stmt* s = fresh_stmt(p_, Stmt::Kind::Switch, std::move(loc));
+  s->expr = scrutinee;
+  s->body = body;
+  s->jump_id = jump_id;
+  return s;
+}
+
+const Stmt* Builder::case_label(const Expr* value, SrcLoc loc) {
+  Stmt* s = fresh_stmt(p_, Stmt::Kind::Case, std::move(loc));
+  s->expr = value;
+  return s;
+}
+
+const Stmt* Builder::break_stmt(int target, SrcLoc loc) {
+  Stmt* s = fresh_stmt(p_, Stmt::Kind::Break, std::move(loc));
+  s->jump_id = target;
+  return s;
+}
+
+const Stmt* Builder::continue_stmt(int target, SrcLoc loc) {
+  Stmt* s = fresh_stmt(p_, Stmt::Kind::Continue, std::move(loc));
+  s->jump_id = target;
+  return s;
+}
+
 const Stmt* Builder::return_stmt(const Expr* value, SrcLoc loc) {
   Stmt* s = fresh_stmt(p_, Stmt::Kind::Return, std::move(loc));
   s->expr = value;

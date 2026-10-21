@@ -10,7 +10,7 @@ All excerpts below come from `build/cerastes-fe` with
 ## Purpose
 
 Gate G1 asks whether EDG's prototype-instantiation IL carries what the generic
-proof of M4 needs. VeriFast answers that question with Clang AST queries
+proof of M5 needs. VeriFast answers that question with Clang AST queries
 (`GenericFunctionChecker` and friends in `src/cxx_frontend/ast_exporter/`). This
 file maps every such query to the EDG IL field that answers it, with
 `--il_display` evidence, and records the five G1 checks.
@@ -120,7 +120,7 @@ between runs.
   op eok_cast type_kind=tk_unknown type=T @ L15:27
   ```
 
-  This matters for M4's fail-closed rule: a cast to `T` of a literal is an
+  This matters for M5's fail-closed rule: a cast to `T` of a literal is an
   `operation.type_kind: tk_unknown` operation, so a rule that rejects
   `tk_unknown` operations must treat a `tpck_expression` constant whose `expr`
   is such a cast as accepted (or accept `eok_cast` to `T` regardless of
@@ -628,7 +628,7 @@ Common IL conventions used below:
 | F2 | :679-680 | `getTemplateSpecializationKind() == TSK_ImplicitInstantiation` | not an explicit specialization or instantiation | `!routine->is_specialized` (`il_def.h:12533`) && `!routine->explicit_instantiation` (`il_def.h:12565`) && `is_template_function` (`il_def.h:12523`) **(derived)** | `specializations.cpp`: implicit `ident<int>` / `twice<int>`: `is_template_function: TRUE`, no `is_specialized`, no `explicit_instantiation`. `ident<char>` (explicit specialization): `is_specialized: TRUE`, `expl_template_arg_list_used: TRUE`. `twice<long>` (explicit instantiation): `explicit_instantiation: TRUE`. | Covered by `specializations.cpp`: `is_specialized` and `explicit_instantiation` distinguish the three cases. |
 | F3 | :686-687 | `getTemplateSpecializationArgs()->asArray()` | the deduced/explicit arguments | `routine->template_arg_list` (list of `a_template_arg`, `il_def.h:13166`, `7683`) | `check3` `pick<int>('x')`: `template_arg_list:` entries `type: int` with `explicitly_specified: TRUE`, then `type: char` (deduced, no flag). Routine also shows `expl_template_arg_list_used: TRUE`. | `explicitly_specified` (`il_def.h:7689`) tells deduced from explicit. |
 | F4 | :688 | `arg.getKind() != TemplateArgument::Type` | only type arguments | `a_template_arg.kind == tak_type` (`il_def.h:7672`) | `check3`: every `template_arg_list` entry is a `type:` (`tak_type`); non-type arguments not probed: derived. | |
-| F5 | :691 | `arg.getAsType().getCanonicalType()` | canonical argument type | `skip_typerefs(arg->variant.type)` | `check3` `inc<unsigned char>`: the `template_arg_list` entry prints `type: ...: unsigned char`. BUT `verifast-plain/integral.cpp` `count_to<uint16_t>`: the entry is `type: ...: uint16_t`, a type entry with `kind: tk_typeref`, `typeref_type: ...: unsigned short`; the golden prints `template count_to args <T=uint16_t>`. (By contrast, `twice<char32_t>`'s entry is a plain `tk_integer`, `int_kind: unsigned int`, `char32_t_type: TRUE`: whether a typeref appears depends on how the argument was spelled.) | Typerefs DO occur in `template_arg_list`. M4 must skip typerefs (`skip_typerefs`) before deciding that an argument is a builtin integer type; classifying the entry's own `kind` would reject `uint16_t` arguments. |
+| F5 | :691 | `arg.getAsType().getCanonicalType()` | canonical argument type | `skip_typerefs(arg->variant.type)` | `check3` `inc<unsigned char>`: the `template_arg_list` entry prints `type: ...: unsigned char`. BUT `verifast-plain/integral.cpp` `count_to<uint16_t>`: the entry is `type: ...: uint16_t`, a type entry with `kind: tk_typeref`, `typeref_type: ...: unsigned short`; the golden prints `template count_to args <T=uint16_t>`. (By contrast, `twice<char32_t>`'s entry is a plain `tk_integer`, `int_kind: unsigned int`, `char32_t_type: TRUE`: whether a typeref appears depends on how the argument was spelled.) | Typerefs DO occur in `template_arg_list`. M5 must skip typerefs (`skip_typerefs`) before deciding that an argument is a builtin integer type; classifying the entry's own `kind` would reject `uint16_t` arguments. |
 | F6 | :692-695 | `isBuiltinIntegerType` on integral params | builtin integer, not bool/enum | as B8 | as B8. | |
 | F7 | :696-699 | `isArithmeticType()`, `isEnumeralType()`, `isPointerType()` | scalar argument for non-integral params | `tk_integer` (incl. bool, enum), `tk_float` / `tk_complex` etc. (`il_def.h:5577`), `tk_pointer` with `!is_reference` **(derived)** | derived (only integer arguments probed). | Clang's `isArithmeticType` excludes complex and scoped enums; mirror precisely in M4. |
 | F8 | ExprSerializer :344-347 | `CallExpr::isTypeDependent()`, `any_of(arguments(), isTypeDependent)` | dependent call is rejected | `eok_call` (`il_def.h:14248`), operand list; C1 on each operand | `check3` `twice_inc` prototype body `return inc(inc(v));`: both calls are `enk_operation eok_call`, `operation.type_kind: tk_unknown`, `type: <unnamed> [tptk_unknown]` (position 15127:36 and 15127:40). A dependent call is recognizable as `eok_call` with a dependent argument or an unresolved callee (F9). | In EDG dependent calls may have `type_kind == tk_unknown` and an unresolved callee (`tpck_unknown_function`). |
@@ -643,7 +643,7 @@ Common IL conventions used below:
 |---|---|---|---|---|---|---|
 | G1 | :501, :505 | `getTemplatedDecl()`, `getQualifiedFuncName` | the template's function and name | E1, E8 | as E1. | |
 | G2 | :509-522 | `getTemplateParameters()`, `getName()`, `integral.test(i)` | emit the parameter list | `param_list` walk: A9, E3, A8 | as A9/E3. | |
-| G3 | :528-534 | `decl->isImplicit()` | implicit templates (deduction guides) have no contract | `source_corresp.is_generated`-style flag, or a compiler-generated template; not found at this reading | not probed: UNCLEAR (no implicit templates in the probes). | Gap: confirm in `il_def.h` whether `a_template` marks implicit templates; M4 only cares about function templates, so low risk. |
+| G3 | :528-534 | `decl->isImplicit()` | implicit templates (deduction guides) have no contract | `source_corresp.is_generated`-style flag, or a compiler-generated template; not found at this reading | not probed: UNCLEAR (no implicit templates in the probes). | Gap: confirm in `il_def.h` whether `a_template` marks implicit templates; M5 only cares about function templates, so low risk. |
 | G4 | :538-544 | `getDefinition()`, `getDescribedFunctionTemplate()`, `owner != decl` | serialize specializations once per redeclaration set | `definition_template` / `canonical_template` (E4, E6): only act on the canonical entry | as E4. | |
 | G5 | :547 | `decl->specializations()` | all instances | no list: scan routines (E7) | as E7. | |
 | G6 | :549-553 | `isExplicitInstantiationOrSpecialization()` | reject explicit instantiation and specialization | `routine->is_specialized`, `explicit_instantiation`, `specialized_with_old_syntax` (`il_def.h:12533`, `12565`, `12542`) | as F2. | Covered by `specializations.cpp` (see F2). |
@@ -655,7 +655,7 @@ Total rows: 74 (A: 9, B: 8, C: 11, D: 15, E: 10, F: 12, G: 9 — see the tables;
 shared-reference rows). Rows with no direct field (marked **(derived)**): A4,
 A8, A9, B3, B4, C1, C2, C6, D1, D12, E7, E8, F2, F7.
 
-## Gotchas for M2/M4
+## Gotchas for M2/M5
 
 Confirmed by evidence unless marked (source).
 
@@ -709,7 +709,7 @@ Confirmed by evidence unless marked (source).
     enum definition that declares nothing is dropped without a diagnostic other
     than #2803; when M2 registers the namespace the drop is fully silent (5b-class).
 20. **Template arguments can be `tk_typeref`s.** `count_to<uint16_t>`'s entry is a
-    `tk_typeref` to `unsigned short`; M4 must skip typerefs before classifying an
+    `tk_typeref` to `unsigned short`; M5 must skip typerefs before classifying an
     argument (F5). `bool` is `int_kind: char` + `bool_type: TRUE`, so excluding it
     needs `bool_type` (B8).
 
@@ -1388,3 +1388,144 @@ Each was checked against `il_def.h` and by the staged suite (`build/m3-staging/t
   decides whether it is in a verified file. `#pragma GCC system_header` makes a `source-file` record with the same
   `file_name` as its parent, `full_name == NULL` and `from_system_include_dir`; `#pragma clang system_header` is ignored
   by this EDG (warning #161).
+
+## M4.1: control flow
+
+Probes P13-P18 and Silicon spikes S1-S10 for decision 0014. Evidence files are under `build/m4.1/probes/` and
+`build/m4.1/spikes/` (gitignored; produced with `scripts/cerastes-fe.sh --c23|--c++20 --il_display|--cerastes_walk <probe>`
+and the pinned Silicon, run as the driver runs it). `il_def.h` lines are in `third_party/edg/src/il_def.h` at pin P.
+
+### P13: generated `break` and `continue`
+
+- `break` and `continue` are an `stmk_goto` (il_def.h:15817, `variant.label.ptr` at :16730) with `compiler_generated: TRUE`
+  and the position of the `break;`/`continue;` text (`p13_while.c.c23.il`: `kind: stmk_goto`, `compiler_generated: TRUE`,
+  `position.seq: 4 / column: 17`, `end_position.column: 22`). The label (`a_label`, il_def.h:13494) carries the flags
+  `break_label` (:13511), `switch_break_label` (:13514, set in addition to `break_label` for a `break` of a switch) and
+  `continue_label` (:13518); `source_corresp` has no name. Evidence: `label@..: break_label: TRUE` and
+  `continue_label: TRUE` (p13_while.c.c23.il, the two `func-scope label@` entries; `p13_switch_loop.c.c23.il`: the label
+  of a switch `break` shows `break_label, switch_break_label`).
+- A label exists only when a jump uses it: an inner loop with a `break` and no `continue` has only a `break_label`
+  (`p13_nested.c.c23.il`); a `for(;;)` left by `break` has no continue label (`p13_forever.c.c23.il`).
+- There is no field linking a label to its construct. The generated `stmk_label` statements sit like this (identical in C23 and
+  C++20, except that C23 wraps more things in `compiler_generated` blocks; see below):
+  - **break label:** the immediately following sibling of the `stmk_while`/`stmk_for`/`stmk_end_test_while`/`stmk_switch`
+    statement, in the same parent block (`p13_while.c.c23.il`: block `c7d0` holds `[stmk_while, stmk_label(break_label)]`;
+    `p13_for.cpp.c++20.il`: the parent block holds `[stmk_for, stmk_label(break_label), stmk_return]`).
+  - **continue label:** the last statement of the loop body block, or, when the body is wrapped (C23, a body that declares
+    something: `p13_nested.c.c23.il`), the last statement of the compiler-generated block that wraps the body, right after it.
+    It is before the `for` increment and before the `do` condition test.
+  - **`for` increment:** not a statement of the body: it is `a_for_loop.increment` (il_def.h:15916, reached through
+    `variant.for_loop.extra_info`); the loop initialization is `a_for_loop.initialization` (a generated block holding the
+    `stmk_decl`/`stmk_init`). Evidence: `p13_for.c.c23.il` `stmk_for ... initialization: ... increment: expr-node` and the
+    continue label after the last body statement.
+  - **`do`:** `[stmk_end_test_while { loop_statement: block[..., stmk_label(continue_label)] }, stmk_label(break_label)]`;
+    the condition `expr` is evaluated after the continue label (`p13_do.c.c23.il`).
+  - **Switch:** `stmk_switch` followed by its `stmk_label` with `break_label` and `switch_break_label`; a `continue` inside
+    the switch is a goto to the enclosing loop's `continue_label` (`p13_switch_loop.c.c23.il`: case 2's `continue` has
+    `flags: continue_label`, the label statement is at the end of the loop body, after the `s = s + 1`).
+- Finding the target: the flags decide the kind (`break_label` without `switch_break_label` = innermost enclosing loop;
+  with it = innermost enclosing switch; `continue_label` = innermost enclosing loop), and the label statement's position
+  confirms it (shape above). A label whose statement is not in one of those places should be rejected. C23 wraps statements
+  in `compiler_generated` blocks that C++20 does not (`p13_for.c.c23.il` vs `p13_for.cpp.c++20.il`), so match on shape, not on
+  parent depth.
+- In C++20 conditions are `bool`-typed (`eok_lt ... [bool]`), in C23 `int`.
+
+### P14: `do ... while`
+
+- `stmk_end_test_while`: `expr` = the standardized condition (il_def.h:16599), `loop_statement` = body (:16648). There is no
+  keyword position and no `while`-keyword position field (`grep` of il_def.h finds none). `position` is the statement start; in
+  C++20 it starts at the first attribute (`p14_do.cpp.c++20.walk`: macro form `stmt stmk_end_test_while @ L6:3`, explicit
+  `[[...]]` on its own line `@ L15:3` = the attribute line), in C23 it is the `do` keyword (`p14_do.c.c23.walk`: `@ L6:74` for the
+  macro form, `@ L17:3` for the explicit form). `end_position` is the end of the `;`.
+- Attributes: `[[cerastes::invariant(..)]]` and `[[cerastes::decreases(..)]]` before `do`, by macro or written out, are on the
+  statement's attribute list and print in the walker as `stmt stmk_end_test_while ... attr [[cerastes::invariant]] @ L..`
+  (C and C++, `p14_do.cpp.c++20.walk`, `p14_do.c.c23.walk`). No EDG diagnostic. Today `cerastes verify` rejects the statement once
+  with `cerastes-unsupported_statement` at the `do` keyword (`build/cerastes verify p14_do.c --std=c23`, line 6 and line 17).
+- Constant conditions: `do { } while (0)`, `while (false)` and `while (1 - 1)` give `expr.kind == enk_constant` with
+  `integer_value 0`, never an operation (`p14_do.cpp.c++20.il`, `p14_do.c.c23.il`). The original expression is kept on the
+  constant: `a_constant.expr` (il_def.h:4782). C++20 for `while (1 - 1)`: the condition constant (type `bool`, `0`) has
+  `expr = eok_bool_cast(...)` whose operand is the `int` constant `0` whose `expr` is `eok_subtract(1, 1)` (`p14_do.cpp.c++20.il`
+  around `constant@76279a0f70`); C23: the `int` constant 0 has `expr = eok_subtract(1, 1)`. A C++20 literal `0` also has
+  `expr = eok_bool_cast(0)`; `false` (C++20: type `bool`; C23: type `bool`, value `0U`) and a C23 literal `0` have no `expr`. So "constant zero after folding" is `enk_constant` with an integer value 0
+  and the original text is recoverable only through `a_constant.expr`.
+
+### P15: `switch`
+
+- `stmk_switch`: `expr` = the scrutinee, `variant.switch_stmt.body_statement` (il_def.h:16717), `extra_info` =
+  `a_switch_stmt_descr` (:16305: `cases` in source order, `default_case`, `sorted_cases`). Each `stmk_switch_case`
+  (:16703) has `switch_statement` (the owning switch) and `extra_info` = `a_switch_case_entry` (:16251: `case_value` (NULL
+  for default), `range_end`, `next`, `position`, `reachable_by_fall_through`).
+- **The scrutinee is integer-promoted by EDG**: `eok_cast(var c)[int]` for `char`, `unsigned char`, `bool`/`_Bool` and `short`;
+  no cast for `int`, `unsigned int`, `long long`, `unsigned long`; `s + 1` for a `short` is `eok_add(eok_cast(s)[int], 1)`
+  (`p15_switch.c.c23.il`, `p15_switch.cpp.c++20.il`).
+- **Case values are converted to the promoted scrutinee type**: `case 'a'` is `97 : int`; `case 255`/`case -1` on
+  `unsigned char` are `255 : int`/`-1 : int` (unreachable values, no diagnostic); `case 65535` on a `short` is `65535 : int`;
+  `case -1` on `unsigned int` is `4294967295U : unsigned int` with warning "integer conversion resulted in a change of sign" in C23
+  (and then a duplicate with `case 4294967295u` is the EDG error "case label value has already appeared"), and an EDG error
+  "invalid narrowing conversion" in C++20 (`p15_neg.cpp`). `long long`: `5000000000LL : long long`, `-2LL`; `unsigned long`:
+  `1UL : unsigned long`. The `case_value` constant's `type` is always the promoted scrutinee type. Duplicate case values and a
+  second `default` are EDG errors in both languages (`p15_neg.cpp`).
+- Body shape: `case`/`default` are sibling statements in the body block, the "labelled" statements follow as plain siblings
+  (`case 1: case 2: return 1;` is two consecutive `stmk_switch_case`; `p15_switch.c.c23.il`, `f_int`). A case that follows
+  fallthrough code has `reachable_by_fall_through: TRUE` (cases after a `return`/`break` do not).
+- The `switch_break_label` is generated only when a `break` uses it (a switch with no `break` has no label statement; the
+  `f_char` function in `p15_switch.c.c23.il` has none).
+
+### P16: switch condition declaration and init-statement (C++)
+
+- `switch (int y = e)`, `switch (int z = a; z + 1)` and `switch (a; a)` all give `stmk_switch` with `expr.kind == enk_condition`
+  (il_def.h:13593, `variant.condition` :15445); the ordinary `switch (a)` gives a plain expression, never an `enk_condition`
+  (`p16_switch_decl.cpp.c++20.il`, `p15_switch.cpp.c++20.il`). In the declaration form the `enk_condition` has `dynamic_init` set
+  and `initialization: NULL`; in the init-statement forms `initialization` is a `stmk_decl` or `stmk_expr` statement with
+  `dynamic_init: NULL`. A rejection keyed on `expr.kind == enk_condition` covers all three and needs no more.
+
+### P17: nested case labels, case ranges, skipped declarations, unreachable code
+
+- **Nested case labels** are accepted by EDG without diagnostic in C23 and C++20 (`p17_duff.c`). A case inside a `while` body in
+  the switch (`duff`), inside a nested block (`inblock`) or inside an `if` (`inif`) has `parent` = that inner block, not the switch's
+  body block; `stmk_switch_case.switch_statement` still points at the switch. Directly in the switch body block: the case's
+  `parent` equals `body_statement` (`p17_duff.c.c23.il`). The check "case marker directly in its switch body" is a parent test.
+- A statement before the first label (`c = 5;` then `case 0:`) is accepted; EDG warns `#111-D statement is unreachable`
+  (`scripts/cerastes-fe.sh --c23 --display_error_number p17_duff.c`).
+- **GNU case ranges are accepted silently in C23 and C++20 (the cerastes configuration is GNU-emulating)**: `case 1 ... 3:` has
+  `case_value 1` and `range_end 3` (`a_switch_case_entry.range_end`, il_def.h:16262; `p17_range.c.c23.il`). Reject them on
+  `range_end != NULL`.
+- **Skipped declarations: warning in C, and in C++ only for a non-trivially initialised object**: `int x = 5;` between `case 0:` and a
+  later case label gives `warning #546-D: transfer of control bypasses initialization of: variable "x"` in both C23 and C++20
+  (`p17_skip.c`, `p17_skip.cpp`; rc 0, so the plan's "C++ already refuses it" is wrong for scalars); `int y;` without an
+  initializer gives no diagnostic; a class with a constructor gives `error #546` in C++20 (`p17_skip2.cpp`). Both modes need
+  cerastes's own rejection of a declaration that a later case label jumps over.
+- Unreachable code after `return` or after `while (1) { return 1; ... }` gives `warning #111-D` only.
+
+### P18: `[[fallthrough]];`
+
+- A `stmk_empty` statement with an attribute list (`stmt stmk_empty @ L6:7 attr [[fallthrough]]`, `p18_fall.cpp.c++20.walk`;
+  `attribute kind ak_fallthrough`, il_def.h:2978, `an_attribute.name` "fallthrough", `namespace_name` NULL). `[[clang::fallthrough]]` and
+  `[[gnu::fallthrough]]` appear as `attr [[clang::fallthrough]]` and `attr [[gnu::fallthrough]]` on the same `stmk_empty`; in C23
+  `__attribute__((fallthrough));` also prints as `attr [[fallthrough]]` (`p18_fall.c.c23.walk`). It is on the same statement in a
+  template's prototype and its instance (`p18_fall.cpp.c++20.walk`, routine `g`). No EDG diagnostic in either language. The encoder's
+  attribute allow-list (`allowed_attribute_name`, `encode.cpp:56`) is name-only.
+
+### Silicon facts (spikes S1-S10, `build/m4.1/spikes/`, Silicon 6b540aa4, Z3 4.16.0)
+
+- A `goto` out of a loop that has an invariant and a `decreases`, to a label after the loop or to `l_end`, verifies and the exit
+  paths are known separately (S1a, S1b: the assert true only on the normal exit fails at that assert).
+- Labels inside a loop body (the `continue` target) work, including gotos to the same label from a nested loop or from the
+  dispatch region of a switch (S2a, S4, S6, S10). A continue that skips the `for` step is `termination` at the `decreases`
+  line (S2b, S6b: `Loop might not terminate. Termination measure might not decrease or might not be bounded`, reported at
+  the `decreases` expression, not at the `while`); a continue path that breaks an invariant is `invariant.not.preserved` at the
+  invariant line (S3).
+- `while (true)` loops left only by `goto` verify; in the `do` shape (body; label; assert; `if (!c) goto brk`) entry, preserved and
+  termination twins fail with the usual errors at the usual lines (S7a-S7d); a negative measure in the only/last iteration is
+  accepted (S7e). The invariant of such a loop is assumed at the start of an arbitrary iteration, so for `do { i++ } while (i < n)`
+  it must say `i == 0 || i < n`-style things to prove facts after the loop (S7a).
+- `do ... while (0)` in the loop shape with `decreases 0` passes the termination check but loses every fact about variables assigned in
+  the loop (S7f3: `ensures res == 1` fails); lowered **without a Viper loop** (body; continue label; break label) it keeps them (S7f2).
+- A `while (true)` with no exit: Silicon does not report code after it (S8c, S8d: `assert false` after it verifies in a method with no
+  termination checking, and is not reported in a method with one); the loop itself fails termination (S8b, S8c).
+- Switch dispatch with a default in the middle and fallthrough verifies (S9a, twin S9b fails at the postcondition).
+- A jump into a loop body (a case label inside a loop, S9c) makes **Silicon throw `ClassCastException`** (not a verdict);
+  a label inside an `if` branch as the target of a jump from outside is accepted (S9d). The lowering must never produce either by
+  construction.
+
+*2026-10-20: milestone numbers before the M4.1 section follow the renumbering of that date (plan.md): generic templates are M5.*

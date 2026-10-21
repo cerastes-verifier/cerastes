@@ -2,7 +2,22 @@
 
 Working name in this plan: **`cerastes`** (we used verifier and vcpp as a placeholder which you need to replace everywhere it is used)
 
-One Claude Code session per milestone. Each session starts from `CLAUDE.md`, this file (its own milestone only), `internal/status.md`, and the decision records, and ends by leaving the repo green and `internal/status.md` updated so the next session can start cold.
+One Claude Code session per milestone, or per sub-milestone when a milestone does not fit in a few hours (≤ 4 h; owner, 2026-10-20): M4.1, M4.5a, M5a, …. Each session starts from `CLAUDE.md`, this file (its own milestone only), `internal/status.md`, and the decision records, and ends by leaving the repo green and `internal/status.md` updated so the next session can start cold.
+
+**Milestone renumbering (owner, 2026-10-20).** Gate G2's VeriFast tests need pointers, references and classes,
+which M3's scalar fragment cannot express, so the rest of C comes first and the later milestones move by one:
+
+| Before 2026-10-20 | Now |
+|---|---|
+| — | **M4** The rest of C (new; sub-milestones M4.1–M4.8, pointers in M4.5a–f) |
+| M4 Generic templates I · Gate G2 | **M5** (sessions M5a–M5g) |
+| M5 Concept-requirement contracts | **M6** |
+| M6 Memory model | its C parts → **M4.5**; its C++ parts → **M7** C++ memory and classes |
+| M7 C and C++ inventory | **M8** |
+| M8 Evaluation | **M9** |
+
+Records, the handoff and code comments use the new numbers (updated 2026-10-20; each record notes it). The history
+entries of `internal/status.md` keep the numbers they were written with.
 
 ---
 
@@ -44,7 +59,7 @@ Cerastes/
     decisions/NNNN-*.md     # one record per non-obvious decision
     il-inventory.md         # M1 output
     encoding.md             # C/C++ → Viper encoding spec (grows each milestone)
-    differential.md         # agreement table vs VeriFast (M4+)
+    differential.md         # agreement table vs VeriFast (M5+)
     soundness/              # arguments the encoder relies on
   third_party/
     edg/                    # submodule: edgcpp/compiler, pinned to head commit
@@ -294,16 +309,83 @@ There is deliberately no user-facing `assume`.
 
 ---
 
-## CI session (before M4)
+## CI session (after M4.1)
 
-Owner, 2026-10-16 and 2026-10-20: CI for the repository is its own session, run before M4. It opens with the two
-items the M3 close-out left for it, both needing the x86-64 box: merge upstream EDG `main` into the fork's
-`cerastes` with a box run before the pin moves (decision 0009), and explain why branch `0020` alone fails its own
-test on Linux.
+Owner, 2026-10-16 and 2026-10-20: CI for the repository is its own session. Since the renumbering (owner,
+2026-10-20) it runs after M4.1, followed by the mutation triage session, then M4.2. It opens with the two items the
+M3 close-out left for it, both needing the x86-64 box: merge upstream EDG `main` into the fork's `cerastes` with a
+box run before the pin moves (decision 0009), and explain why branch `0020` alone fails its own test on Linux.
+
+## Mutation triage session (after the CI session)
+
+The M3 close-out's tightened safe-direction classifier moved 74 mutants of `tests/scalar` out of the bucket: each
+survivor is killed by a new test (never an edited expect line) or listed in `tests/mutants-equivalent.txt` with a
+reason, reviewed by the Opus auditor, together with the close-out audit A's should-fix items (handoff). Until then
+M3's "0 unexplained survivors" holds for the old bucket only.
 
 ---
 
-## M4 — Generic templates I: reproduce #1034/#1041 · **Gate G2**
+## M4 — The rest of C
+
+**Goal:** every C23 construct that VeriFast verifies in C is verified by cerastes, or deliberately deferred with a
+decision record; non-template code, one translation unit. `.c` tests run in both `c23` and `c++20` where the code is
+valid in both. Strictly C (owner, 2026-10-20): C++ references, `new`/`delete` and classes are M7.
+
+**Sessions.** Each is planned at ≤ 4 h and lands its decision record (invariant 6), must-verify/must-fail pairs
+(invariant 2) and its docs (invariant 9), with one Opus audit round per diff plus a re-audit of blocking fixes and
+`check.sh` at most twice. `internal/handoff.md` holds each session's tasks, agents, acceptance and stop rules.
+
+| Session | Scope | Needs |
+|---|---|---|
+| **M4.1 Control flow** | `break`, `continue`, `do … while` (`do … while (0)` needs no measure, owner), `switch` (case/default/fallthrough, `[[fallthrough]]`), `for(;;)` left by `break` | — |
+| **M4.2 Scalar declarations** | forward `goto` and labels (never backward, into a loop, or past a declaration); enumerations and enumerators (one meaning in both modes); `const` globals; locals without an initializer (definite assignment or a defined-flag check); `_Noreturn`/`[[noreturn]]`; `<assert.h>` `assert` | M4.1 |
+| **M4.3 Expressions and sequencing** | the comma operator, assignments as values, `x++` inside expressions, calls in guarded operands and loop conditions, unsequenced calls (C's sequencing rules) | — |
+| **M4.4 Bitwise operators** | `& \| ^ ~` and `&= \|= ^=` on signed and unsigned types (C23 two's complement); a Silicon/Z3 spike first (bounded `Int` definitions vs SMT bit-vector interpretation) | — |
+| **M4.5 Pointers** (sessions a–f, below) | the memory model for C | M4.1–M4.3 |
+| **M4.6 Chars and strings** | string literals as read-only arrays, `char` buffers, `strlen`/`memcpy`/`memcmp`/`strcmp` contracts, `main(argc, argv)` | M4.5e |
+| **M4.7 Function pointers** | contracts on function types, calls through pointers ("the pointer satisfies the type") | M4.5b |
+| **M4.8 C parity close-out** | the VeriFast C differential set, the M4 mutation run, the Memory and ownership page complete, M4's acceptance, the deferred list for M8 | all |
+
+**M4.5 Pointers** (one 4.x for pointers, owner, 2026-10-20; the C parts of the former memory-model milestone):
+- **M4.5a Design** (no encoder code): the memory-model record (cells and typed value fields; a pointer as a block
+  plus an offset, as VerCors does, or one reference per cell; NULL; provenance; address-taken locals), the **C spec
+  syntax** record (`owns`, `reads`, `old`, `owns_range` and `forall` are C++ only today, decision 0008 item 6, and
+  `forall` needs lambdas, which C lacks), the new error categories (permission, null, bounds, double free, …),
+  Silicon spikes, and whether an EDG fork commit is needed (then a box session comes before M4.5b).
+- **M4.5b Pointers to scalars and globals:** `&x` (address-taken locals as cells), `*p`, NULL, pointer parameters
+  with `owns`/`reads`/`old(*p)`, pointer equality, the aliasing trap, mutable globals and `static` locals as cells
+  with frames; ports of VeriFast's `swap.c`, `address_of_local.c`, `globals.c`.
+- **M4.5c Structs:** field cells, `.` and `->`, struct values (copies, initializers, by-value parameters and
+  results), nested structs, pointers to fields; ports of `account.c`, `deposit.c`.
+- **M4.5d malloc and free:** trusted libc contracts (`malloc`, `calloc`, `realloc`, `free`, `abort`, `exit`),
+  allocation blocks, ownership on free, leaks (a record); ports of `malloc_block.c`, `cell.c`.
+- **M4.5e Arrays and pointer arithmetic:** local arrays, `a[i]`, `p + i`, `p - q`, comparisons within one object,
+  `owns_range` and quantified permissions, `forall` in C; ports of `carrays.c`, `insertion_sort.c`, sum and max.
+- **M4.5f Predicates and pure functions:** predicate and pure bodies encoded, `fold`/`unfold`, recursive
+  predicates; a linked list (push, pop, length), `stack.c`, `reverse`.
+
+**Reference: VerCors** (owner, 2026-10-20). VerCors (University of Twente) verifies C through Viper, and its pointer
+encoding is the reference for M4.5 (summary in `internal/handoff.md`). Ideas only: VerCors is MPL-2.0 and its
+pointer prelude rests on axioms; cerastes copies no files, and any axiom it adopts gets its own decision record and
+lint tag (invariant 4).
+
+**Deferred beyond M4** (entries of M8's inventory, each with its reason): unions (effective types), floating point,
+`volatile`/`_Atomic`/`_BitInt`/vector types, variadic functions and `printf`, several translation units (the contract
+manifest, M6), concurrency.
+
+**Docs:** each session extends "Verifying a program", "Annotations" and "Error messages" (one section per new error
+category); from M4.5, a "Memory and ownership" page: `owns`/`reads`/`old` in C, structs, `malloc`/`free`, arrays and
+`owns_range`, `forall`, predicates and pure functions, `fold`/`unfold`, and the rejected constructs.
+
+**Acceptance (checked in M4.8):** pass/fail pairs for every construct, including swap, a struct field update, a
+linked list (push/pop/length with a recursive predicate), array sum/max with a quantifier, and an aliasing trap that
+must fail; the ported VeriFast C examples and their outcomes in `internal/differential.md`; the mutation run over the
+M4 tests with zero unexplained survivors; lint clean; every error category documented with a must-fail example;
+self-framing diagnostics in source terms (for example "reads `c->val` without owning it").
+
+---
+
+## M5 — Generic templates I: reproduce #1034/#1041 · **Gate G2** (was M4)
 
 **Goal:** parity with the VeriFast PRs. A template is verified once, and the result is used at every eligible call site.
 
@@ -326,15 +408,28 @@ test on Linux.
   - what falls back to per-instantiation verification, and how that is reported;
   - the model of an integral `T`.
 
-**Gate G2:** the six tests, ported to `[[cerastes::]]` syntax, plus their mutants reproduce VeriFast's outcomes, recorded in `internal/differential.md`. That includes `integral_fallback`, where the proof holds for `int` but not `signed char` and only `int` is instantiated. Any disagreement is either explained in a decision record or blocks M5.
+**Sessions** (owner, 2026-10-20; designed in the M4.1 session, details in `internal/handoff.md`). The critical path
+is M5a → M5c → M5d → M5e → M5f → M5g; M5b needs the box and can run any time before M5g, best just before it.
+
+| Session | Scope |
+|---|---|
+| **M5a Eligibility** | the fail-closed checker on prototype IL; a verdict per template (eligible; each parameter opaque or integral; the first offending construct); a `cerastes-fe` listing (`--cerastes_generic`) with golden tests (`// golden-options:`); verification results unchanged |
+| **M5b EDG (box)** | fork commits: the first-declaration rule for `predicate`/`pure`; EDG diagnosing the error node series L leaves for a `decltype(p)` lambda parameter; the full box suites before the pin moves |
+| **M5c Generic infrastructure and opaque `T`** | a generic Viper method per eligible template, verified even when never instantiated; an opaque `T` as an empty Viper domain (a tagged lint rule); VeriFast in Docker and the recorded outcomes of the six originals |
+| **M5d Integral `T`** | the limits as ghost formal arguments with VeriFast's linear constraints as `requires` (no axiom, no assume); every symbolic operation checked as signed with symbolic bounds |
+| **M5e Instances, call sites, fallback** | callers call each instance's method; one Silicon run holds the generic method and the instances; the driver decides per template and reports fallbacks as notes |
+| **M5f Specializations, recursion, headers** | explicit specializations, the call graph keyed by instance, templates in user headers, `internal/soundness/prototype-correspondence.md` |
+| **M5g Gate G2** | the ports with line maps, VeriFast on originals and mutants, `internal/differential.md` |
+
+**Gate G2:** the six tests, ported to `[[cerastes::]]` syntax, plus their mutants reproduce VeriFast's outcomes, recorded in `internal/differential.md`. That includes `integral_fallback`, where the proof holds for `int` but not `signed char` and only `int` is instantiated. Any disagreement is either explained in a decision record or blocks M6. **Deferred to M7** (owner, 2026-10-20): `generic_body`'s `assign` and `same_ref` (references) and all of `function_template_general_contract` (constructors and destructors); they are ported and compared there. Pointers (`pick(1, p)`) and bitwise operators (`low_bit`) come from M4 and are in G2.
 
 ---
 
-## M5 — Concept-requirement contracts and per-instantiation obligations (thesis core)
+## M6 — Concept-requirement contracts and per-instantiation obligations (thesis core) (was M5)
 
 **Goal:** contracts attach to concept requirements; a generic body is verified once against those contracts only; each instantiation discharges an obligation that the overload actually selected satisfies the requirement's contract.
 
-**Step 1 — syntax decision** (`NNNN-requirement-contracts.md`, the next free decision number when M5 starts; 0005–0008 were taken by M2). Spike each option against EDG before choosing:
+**Step 1 — syntax decision** (`NNNN-requirement-contracts.md`, the next free decision number when M6 starts; 0005–0008 were taken by M2). Spike each option against EDG before choosing:
 - **(a)** Attributes on compound requirements inside the requires-expression, if EDG's grammar accepts and records them.
 - **(b)** Requirement-spec declarations: `[[cerastes::requirement_of(Addable)]] T add_spec(T a, T b) [[cerastes::ensures(r, r == a + b)]];`
 - **(c)** One attribute on the concept declaration listing requirement contracts.
@@ -349,7 +444,7 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
   - Emit a Viper method checking `req.pre ⇒ ovl.pre` and `ovl.post ⇒ req.post`.
   - Builtin operations use M3 semantics.
 
-**Contract manifest** (owner, 2026-10-20, M3 handoff question 3): the manifest of the contracts a unit relies on (M2 handoff §6), which cross-unit termination needs (0013 item 5). Schedule it here; if it does not fit M5, move it to M6 and say why in the handoff.
+**Contract manifest** (owner, 2026-10-20, M3 handoff question 3): the manifest of the contracts a unit relies on (M2 handoff §6), which cross-unit termination needs (0013 item 5). Schedule it here; if it does not fit M6, move it to M7 and say why in the handoff.
 
 **Tests (`tests/concepts/`)**
 - A user type whose overload satisfies the requirement contract (must verify).
@@ -363,34 +458,28 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
 
 ---
 
-## M6 — Memory model
+## M7 — C++ memory and classes (was M6, "Memory model"; its C parts moved to M4.5)
 
-**Goal:** ownership and heap reasoning with `owns`/`reads`/`old` and predicates written as C++ functions.
+**Goal:** C++'s own memory constructs on top of M4.5's memory model: references, `new`/`delete` and classes.
 
 **Scope**
-- One Viper reference per addressable cell, with a typed value field (decision record).
-- Structs.
-- Address-taken locals moved to the heap in the encoding.
-- `new`/`delete`.
 - References encoded as pointers.
-- Predicates and pure functions from `[[cerastes::predicate]]`/`[[cerastes::pure]]` C++ functions, with `fold`/`unfold`.
-- Arrays via a `loc(a, i)` domain plus quantified permissions, exposed as `owns_range`.
-- `forall` lowered from lambdas.
-- This can take inspiration from VerCors which already implements these features for viper
+- `new`/`delete` (and `new[]`/`delete[]`).
+- Classes: data members as M4.5c's struct cells, member functions, `this`, constructors and destructors with contracts (owner, 2026-10-20: C++ memory stays after the templates and concepts milestones).
+- Predicates and pure functions written as C++ member functions; `forall` lowered from lambdas.
+- This can take inspiration from VerCors, which implements these features for Viper.
 
-**Rejected with diagnostics (for now):** unions, `reinterpret_cast`, character-type aliasing, pointer arithmetic outside arrays, virtual dispatch, exceptions, concurrency.
+**Rejected with diagnostics (for now):** `reinterpret_cast`, character-type aliasing, virtual dispatch, exceptions, concurrency.
 
-**Self-framing diagnostics** use source terms, e.g. "reads `c->val` without owning it".
+**Gate G2's deferred parts** (owner, 2026-10-20): `generic_body`'s `assign` and `same_ref`, and `function_template_general_contract`, ported and compared with VeriFast, recorded in `internal/differential.md`.
 
-**Docs:**
-- A "Memory and ownership" page covering `owns`/`reads`/`old`, predicates and pure functions, `fold`/`unfold`, arrays and `owns_range`, and `forall`.
-- The list of rejected constructs with their diagnostics.
+**Docs:** the "Memory and ownership" page gains references, `new`/`delete`, classes and the C++ forms of the spec functions; the list of rejected constructs with their diagnostics.
 
-**Acceptance:** pass/fail pairs for swap, struct field update, linked list (push/pop/length with a recursive predicate), array sum/max with a quantifier, and an aliasing trap that must fail. Run differential checks against VeriFast where the fragments overlap.
+**Acceptance:** pass/fail pairs for references, `new`/`delete`, a class with constructor and destructor contracts, and a member predicate; the deferred G2 tests agree with VeriFast or the disagreement is explained in a decision record.
 
 ---
 
-## M7 - C and C++ Inventory
+## M8 — C and C++ Inventory (was M7)
 
 **Goal:** create a comprehensive inventory by C and C++ language standards of features that need to be added in future work.
 
@@ -400,12 +489,12 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
   - Assess the relative difficulty of unimplemented features. E.g. which require compiler changes, which require viper changes, or which we can handle locally in future sessions
 - **Known entries** (recorded as they are decided, so none is lost):
   - **Language modes** (owner, 2026-10-16, M2 handoff question 4). GNU emulation is refused today and will need to be added: it needs EDG work, since `extern "C"` redeclarations in two namespaces escape must-match there. C before C23 is refused by design (C23 is the supported C).
-  - **Constructs M3 rejects** (decision 0012 lists them): each one is an entry, with the milestone expected to lift it.
+  - **Constructs M3 rejects** (decision 0012 lists them) and **what M4 defers** (M4's "Deferred beyond M4"): each one is an entry, with the milestone expected to lift it.
 - **User docs:** publish a "Language support" page in `doc/` from the inventory. It shows what is supported and unsupported, by standard. The difficulty assessment stays in the planning file.
 
 **Acceptance:** complete records of features that are and are not implemented with annotated difficulty sorted by language standard.
 
-## M8 — Evaluation and dissertation artifacts
+## M9 — Evaluation and dissertation artifacts (was M8)
 
 **Goal:** numbers and reproducible artifacts for the prelim.
 
@@ -427,7 +516,7 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
 | Gate | Where | Pass | Fail |
 |---|---|---|---|
 | G1 | end of M1 | prototype IL has generic bodies, instance links, constraints, attributes | Clang dependent-AST front end into the same VIR (decision 0003) |
-| G2 | end of M4 | parity with #1034/#1041 on the six tests + mutants | fix or explain before M5; never weaken expectations |
+| G2 | end of M5 (M5g) | parity with #1034/#1041 on the six tests + mutants (parts needing C++ memory deferred to M7) | fix or explain before M6; never weaken expectations |
 
 **Non-goals for this plan:** CIR (stays on its own branch; possible later use for instantiation-side checks), further VeriFast upstream work (the PRs stand as the pilot result), and concurrency.
 

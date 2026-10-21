@@ -47,7 +47,7 @@ const an_attr_registration kAttributes[] = {
     // RAF_NO_CONSTANT_EVALUATION (fork commit P): the front end does not evaluate a call of such a routine at
     // compile time (a constexpr/consteval use is refused with EDG's own diagnostic, a defaulted function cannot
     // carry the marker).  It reads the attributes the routine has when it is called, so a marker that is only on a
-    // later redeclaration does not stop an earlier use (first-declaration gap, M4; decision 0007).
+    // later redeclaration does not stop an earlier use (first-declaration gap, M5b; decision 0007).
     {"predicate", "", "r", RAF_ENTITY_ATTACHED | RAF_NO_CONSTANT_EVALUATION},
     {"pure", "", "r", RAF_ENTITY_ATTACHED | RAF_NO_CONSTANT_EVALUATION},
     {nullptr, nullptr, nullptr, RAF_NO_FLAGS},

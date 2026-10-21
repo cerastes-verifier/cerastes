@@ -771,9 +771,605 @@ void define_termination() {
   });
 }
 
+// ---- control flow (decision 0014): break, continue, do, switch ---------------------------------------------------------
+
+void define_control_flow() {
+  using LF = LoopForm;
+  // f(n: int) with 0 <= n <= 100.
+  auto fn_n = [](Kit& k, Type ret = Type()) {
+    Function* f = k.fn("f", ret.is_void() ? k.vd : ret, {{"n", k.i32}});
+    k.req(f, k.range(k.F(f, 0), k.i32, "0", "100"));
+    return f;
+  };
+  auto plus1 = [](Kit& k, Var* x) { return k.asg(x, k.add(k.v(x), k.num(k.i32, "1"))); };
+
+  // ---- break ----
+  auto break_search = [=](Kit& k, bool bad_after) {
+    Function* f = fn_n(k, k.i32);
+    Var* i = k.local(f, "i", k.i32);
+    const int id = k.jid();
+    const Stmt* w = k.loop(k.lt(k.v(i), k.pv(f, 0)), {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.le(k.v(i), k.pv(f, 0)))},
+                           {k.cl(k.gap(k.pv(f, 0), k.v(i)))},
+                           k.blk({k.iff(k.eq_c(k.v(i), k.i32, "3"), k.blk({k.brk(id)})), plus1(k, i)}), nullptr, LF::While, id);
+    const Stmt* after = bad_after ? k.chk(k.eq(k.v(i), k.pv(f, 0))) : k.chk(k.land(k.ge_c(k.v(i), k.i32, "0"), k.le(k.v(i), k.pv(f, 0))));
+    f->body = k.blk({k.decl(i, k.num(k.i32, "0")), w, after, k.ret(k.v(i))});
+    k.done(f);
+    if (bad_after) k.fail("check", after->loc);
+  };
+  lc("cf_break_both_exits", "while (i < n) { if (i == 3) break; i++; }: i <= n holds on both exits", [=](Kit& k) { break_search(k, false); });
+  lc("cf_break_only_normal_exit_fails", "the same loop: i == n holds only on the normal exit, not after the break", [=](Kit& k) { break_search(k, true); });
+  lc("cf_break_skips_invariant_check", "a break does not evaluate the loop condition: the invariant need not hold at the break", [=](Kit& k) {
+    // while (i < n) invariant c == 0 { c = 5; break; } : on the break path c is 5, which the invariant forbids; nothing is checked there.
+    Function* f = fn_n(k, k.i32);
+    Var* c = k.local(f, "c", k.i32);
+    Var* i = k.local(f, "i", k.i32);
+    const int id = k.jid();
+    const Stmt* w = k.loop(k.lt(k.v(i), k.pv(f, 0)), {k.cl(k.eq_c(k.v(c), k.i32, "0"))}, {k.cl(k.gap(k.pv(f, 0), k.v(i)))},
+                           k.blk({k.asg(c, k.num(k.i32, "5")), k.brk(id)}), nullptr, LF::While, id);
+    f->body = k.blk({k.decl(c, k.num(k.i32, "0")), k.decl(i, k.num(k.i32, "0")), w, k.chk(k.ge_c(k.v(c), k.i32, "0")), k.ret(k.v(c))});
+    k.done(f);
+  });
+
+  // ---- continue ----
+  auto continue_for = [=](Kit& k, bool bad_after) {
+    Function* f = fn_n(k, k.i32);
+    Var* i = k.local(f, "i", k.i32);
+    Var* c = k.local(f, "c", k.i32);
+    const int id = k.jid();
+    const Stmt* body = k.blk({k.iff(k.eq_c(k.v(i), k.i32, "2"), k.blk({k.cnt(id)})), plus1(k, c)});
+    const Stmt* w = k.loop(k.lt(k.v(i), k.pv(f, 0)),
+                           {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.le(k.v(i), k.pv(f, 0))), k.cl(k.ge_c(k.v(c), k.i32, "0")), k.cl(k.le(k.v(c), k.v(i)))},
+                           {k.cl(k.gap(k.pv(f, 0), k.v(i)))}, body, plus1(k, i), LF::While, id);
+    const Stmt* after = bad_after ? k.chk(k.eq(k.v(c), k.pv(f, 0))) : k.chk(k.le(k.v(c), k.pv(f, 0)));
+    f->body = k.blk({k.decl(i, k.num(k.i32, "0")), k.decl(c, k.num(k.i32, "0")), w, after, k.ret(k.v(c))});
+    k.done(f);
+    if (bad_after) k.fail("check", after->loc);
+  };
+  lc("cf_continue_runs_the_step", "for (i = 0; i < n; i++) { if (i == 2) continue; c++; }: the step runs after a continue", [=](Kit& k) { continue_for(k, false); });
+  lc("cf_continue_skips_the_rest", "the same loop: c == n does not hold (the continue skips c++)", [=](Kit& k) { continue_for(k, true); });
+  lc("cf_continue_without_step_does_not_terminate", "while (i < n) { if (i == 2) continue; i++; }: the continue skips the increment", [=](Kit& k) {
+    Function* f = fn_n(k, k.i32);
+    Var* i = k.local(f, "i", k.i32);
+    const int id = k.jid();
+    Clause m = k.cl(k.gap(k.pv(f, 0), k.v(i)));
+    const Stmt* w = k.loop(k.lt(k.v(i), k.pv(f, 0)), {k.cl(k.range(k.v(i), k.i32, "0", "100"))}, {m},
+                           k.blk({k.iff(k.eq_c(k.v(i), k.i32, "2"), k.blk({k.cnt(id)})), plus1(k, i)}), nullptr, LF::While, id);
+    f->body = k.blk({k.decl(i, k.num(k.i32, "0")), w, k.ret(k.v(i))});
+    k.done(f);
+    k.fail("termination", m.loc);
+  });
+  lc("cf_continue_breaks_invariant", "a continue path leaves c == -1, breaking the invariant c == 0", [=](Kit& k) {
+    Function* f = fn_n(k, k.i32);
+    Var* i = k.local(f, "i", k.i32);
+    Var* c = k.local(f, "c", k.i32);
+    const int id = k.jid();
+    Clause inv = k.cl(k.eq_c(k.v(c), k.i32, "0"));
+    const Stmt* w = k.loop(k.lt(k.v(i), k.pv(f, 0)), {k.cl(k.range(k.v(i), k.i32, "0", "100")), inv}, {k.cl(k.gap(k.pv(f, 0), k.v(i)))},
+                           k.blk({k.iff(k.eq_c(k.v(i), k.i32, "2"), k.blk({k.asg(c, k.num(k.i32, "-1")), k.cnt(id)}))}), plus1(k, i), LF::While, id);
+    f->body = k.blk({k.decl(i, k.num(k.i32, "0")), k.decl(c, k.num(k.i32, "0")), w, k.ret(k.v(c))});
+    k.done(f);
+    k.fail("invariant-preserved", inv.loc);
+  });
+  lc("cf_continue_condition_obligation", "a continue path reaches the condition 100 / d > 1, whose obligation (d != 0) is an invariant clause", [=](Kit& k) {
+    Function* f = k.fn("f", k.vd, {{"n", k.i32}});
+    k.req(f, k.range(k.F(f, 0), k.i32, "1", "100"));
+    Var* d = k.local(f, "d", k.i32);
+    const int id = k.jid();
+    const Expr* q = k.div(k.num(k.i32, "100"), k.v(d));
+    const Stmt* w = k.loop(k.gt(q, k.num(k.i32, "1")), {k.cl(k.range(k.v(d), k.i32, "0", "100"))}, {k.cl(k.sub(k.num(k.i32, "100"), k.v(d)))},
+                           k.blk({k.asg(d, k.num(k.i32, "0")), k.cnt(id)}), nullptr, LF::While, id);
+    f->body = k.blk({k.decl(d, k.pv(f, 0)), w});
+    k.done(f);
+    k.fail("division-by-zero", q->loc, 1, "invariant.not.preserved");
+  });
+
+  // ---- nested loops ----
+  auto nested = [=](Kit& k, bool bad) {
+    Function* f = fn_n(k, k.i32);
+    Var* s = k.local(f, "s", k.i32);
+    Var* j = k.local(f, "j", k.i32);
+    const int outer = k.jid();
+    const int inner = k.jid();
+    const Stmt* in = k.loop(k.lt(k.v(j), k.num(k.i32, "3")), {k.cl(k.range(k.v(j), k.i32, "0", "3"))}, {k.cl(k.sub(k.num(k.i32, "3"), k.v(j)))},
+                            k.blk({k.iff(k.eq_c(k.v(j), k.i32, "1"), k.blk({k.brk(inner)})), plus1(k, j)}), nullptr, LF::While, inner);
+    const Stmt* fact = bad ? k.chk(k.eq_c(k.v(j), k.i32, "3")) : k.chk(k.lor(k.eq_c(k.v(j), k.i32, "1"), k.eq_c(k.v(j), k.i32, "3")));
+    // while (s < n) { j = 0; while (j < 3) { if (j == 1) break; j++; } check(...); s++; if (s == 5) continue; }  -- the continue is last
+    const Stmt* out = k.loop(k.lt(k.v(s), k.pv(f, 0)), {k.cl(k.range(k.v(s), k.i32, "0", "100"))}, {k.cl(k.gap(k.pv(f, 0), k.v(s)))},
+                             k.blk({k.asg(j, k.num(k.i32, "0")), in, fact, plus1(k, s), k.iff(k.eq_c(k.v(s), k.i32, "5"), k.blk({k.cnt(outer)}))}),
+                             nullptr, LF::While, outer);
+    f->body = k.blk({k.decl(s, k.num(k.i32, "0")), k.decl(j, k.num(k.i32, "0")), out, k.ret(k.v(s))});
+    k.done(f);
+    if (bad) k.fail("check", fact->loc);
+  };
+  lc("cf_nested_break_inner_only", "a break leaves the inner loop only; after it j == 1 or j == 3; the outer loop goes on", [=](Kit& k) { nested(k, false); });
+  lc("cf_nested_break_fact_too_strong", "the same loops: j == 3 does not hold after the inner loop", [=](Kit& k) { nested(k, true); });
+
+  // ---- do ... while ----
+  // do { i++; } while (i < n);  with the invariant "i == 0 || i < n" and the measure n - i + 1, returning i.
+  auto do_count = [=](Kit& k, int variant) {
+    Function* f = fn_n(k, k.i32);
+    if (variant == 0 || variant == 4) k.ens(f, k.eq(k.R(f), k.cond(k.lt(k.F(f, 0), k.num(k.i32, "1")), k.num(k.i32, "1"), k.F(f, 0))));
+    Var* i = k.local(f, "i", k.i32);
+    const int id = k.jid();
+    Clause inv = k.cl(variant == 1 ? k.eq_c(k.v(i), k.i32, "1") : variant == 2 ? k.le_c(k.v(i), k.i32, "3")
+                                                                               : k.lor(k.eq_c(k.v(i), k.i32, "0"), k.lt(k.v(i), k.pv(f, 0))));
+    Clause m = k.cl(variant == 3 ? k.add(k.cv(k.i64, k.pv(f, 0)), k.num(k.i64, "1"))
+                    : variant == 4 ? k.sub(k.sub(k.cv(k.i64, k.pv(f, 0)), k.cv(k.i64, k.v(i))), k.num(k.i64, "1"))
+                                   : k.add(k.sub(k.cv(k.i64, k.pv(f, 0)), k.cv(k.i64, k.v(i))), k.num(k.i64, "1")));
+    const Stmt* w = k.loop(k.lt(k.v(i), k.pv(f, 0)), {k.cl(k.range(k.v(i), k.i32, "0", "100")), inv}, {m}, k.blk({plus1(k, i)}), nullptr, LF::DoWhile, id);
+    f->body = k.blk({k.decl(i, k.num(k.i32, "0")), w, k.ret(k.v(i))});
+    k.done(f);
+    if (variant == 1) k.fail("invariant-entry", inv.loc);
+    if (variant == 2) k.fail("invariant-preserved", inv.loc);
+    if (variant == 3) k.fail("termination", m.loc);
+  };
+  lc("cf_do_count_ok", "do { i++; } while (i < n) with the invariant i == 0 || i < n: returns max(n, 1)", [=](Kit& k) { do_count(k, 0); });
+  lc("cf_do_invariant_entry_fails", "the do loop with the invariant i == 1: it does not hold at the start of the first iteration", [=](Kit& k) { do_count(k, 1); });
+  lc("cf_do_invariant_not_preserved", "the do loop with the invariant i <= 3: it does not hold at the start of a later iteration", [=](Kit& k) { do_count(k, 2); });
+  lc("cf_do_measure_does_not_decrease", "the do loop with the constant measure n + 1", [=](Kit& k) { do_count(k, 3); });
+  lc("cf_do_negative_measure_in_last_iteration_ok", "the measure n - i - 1 is -1 in the only iteration when n == 0: accepted, no iteration follows", [=](Kit& k) { do_count(k, 4); });
+
+  // do { i++; if (i == 2) continue; c++; if (i == 3) break; } while (i < n);
+  auto do_continue = [=](Kit& k, bool bad_invariant) {
+    Function* f = fn_n(k, k.vd);
+    Var* i = k.local(f, "i", k.i32);
+    Var* c = k.local(f, "c", k.i32);
+    const int id = k.jid();
+    Clause inv = k.cl(bad_invariant ? k.eq(k.v(c), k.v(i)) : k.land(k.ge_c(k.v(c), k.i32, "0"), k.le(k.v(c), k.v(i))));
+    Clause m = k.cl(k.add(k.sub(k.cv(k.i64, k.pv(f, 0)), k.cv(k.i64, k.v(i))), k.num(k.i64, "1")));
+    const Stmt* body = k.blk({plus1(k, i), k.iff(k.eq_c(k.v(i), k.i32, "2"), k.blk({k.cnt(id)})), plus1(k, c), k.iff(k.eq_c(k.v(i), k.i32, "3"), k.blk({k.brk(id)}))});
+    const Stmt* w = k.loop(k.lt(k.v(i), k.pv(f, 0)), {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.lor(k.eq_c(k.v(i), k.i32, "0"), k.lt(k.v(i), k.pv(f, 0)))), inv}, {m}, body, nullptr, LF::DoWhile, id);
+    f->body = k.blk({k.decl(i, k.num(k.i32, "0")), k.decl(c, k.num(k.i32, "0")), w, k.chk(k.ge_c(k.v(i), k.i32, "1"))});
+    k.done(f);
+    if (bad_invariant) k.fail("invariant-preserved", inv.loc);
+  };
+  lc("cf_do_continue_and_break", "continue in a do loop goes to the condition (invariant checked there); break leaves without a check", [=](Kit& k) { do_continue(k, false); });
+  lc("cf_do_continue_breaks_invariant", "the continue path skips c++, so c == i does not hold at the next iteration", [=](Kit& k) { do_continue(k, true); });
+
+  auto do_cond = [=](Kit& k, bool unguarded) {
+    // d = 0 (or n); do { d = 1; } while (100 / d > 200): the condition is evaluated after the body, never on entry.
+    Function* f = fn_n(k, k.vd);
+    Var* d = k.local(f, "d", k.i32);
+    const int id = k.jid();
+    const Expr* q = k.div(k.num(k.i32, "100"), k.v(d));
+    const Stmt* w = k.loop(k.gt(q, k.num(k.i32, "200")), {k.cl(k.range(k.v(d), k.i32, "0", "100"))}, {k.cl(k.num(k.i32, "0"))},
+                           k.blk({k.asg(d, unguarded ? k.pv(f, 0) : k.num(k.i32, "1"))}), nullptr, LF::DoWhile, id);
+    f->body = k.blk({k.decl(d, k.num(k.i32, "0")), w});
+    k.done(f);
+    if (unguarded) k.fail("division-by-zero", q->loc);
+  };
+  lc("cf_do_condition_obligation_after_body", "do { d = 1; } while (100 / d > 200) with d == 0 on entry: the division is checked after the body", [=](Kit& k) { do_cond(k, false); });
+  lc("cf_do_condition_obligation_fails", "do { d = n; } while (100 / d > 200): n may be 0 when the condition is evaluated", [=](Kit& k) { do_cond(k, true); });
+
+  // ---- do ... while (0): no loop ----
+  // do { i += 1; if (n == 7) continue; i += 10; if (n == 8) break; i += 100; } while (0);
+  auto once = [=](Kit& k, int variant) {
+    Function* f = fn_n(k, k.i32);
+    Var* i = k.local(f, "i", k.i32);
+    const int id = k.jid();
+    auto add_to_i = [&](const char* v) { return k.asg(i, k.add(k.v(i), k.num(k.i32, v))); };
+    const Stmt* bad_check = variant == 2 ? k.chk(k.eq_c(k.v(i), k.i32, "5")) : k.chk(k.ge_c(k.v(i), k.i32, "0"));
+    const Stmt* body = k.blk({add_to_i("1"), k.iff(k.eq_c(k.pv(f, 0), k.i32, "7"), k.blk({k.cnt(id)})), add_to_i("10"),
+                              k.iff(k.eq_c(k.pv(f, 0), k.i32, "8"), k.blk({k.brk(id)})), add_to_i("100"), bad_check});
+    Clause inv = k.cl(variant == 3 ? k.eq_c(k.v(i), k.i32, "1") : k.eq_c(k.v(i), k.i32, "0"));
+    const Stmt* w = k.loop(k.no(), {inv}, {}, body, nullptr, LF::DoOnce, id);
+    const Stmt* r = k.ret(k.v(i));
+    f->body = k.blk({k.decl(i, k.num(k.i32, "0")), w, r});
+    k.done(f);
+    const Expr* want = variant == 1 ? k.eq_c(k.R(f), k.i32, "2")
+                                    : k.land(k.implies(k.eq_c(k.F(f, 0), k.i32, "7"), k.eq_c(k.R(f), k.i32, "1")),
+                                             k.land(k.implies(k.eq_c(k.F(f, 0), k.i32, "8"), k.eq_c(k.R(f), k.i32, "11")),
+                                                    k.implies(k.land(k.ne(k.F(f, 0), k.num(k.i32, "7")), k.ne(k.F(f, 0), k.num(k.i32, "8"))), k.eq_c(k.R(f), k.i32, "111"))));
+    k.ens(f, want);
+    if (variant == 1) k.fail("postcondition", r->loc);
+    if (variant == 2) k.fail("check", bad_check->loc);
+    if (variant == 3) k.fail("invariant-entry", inv.loc);
+  };
+  lc("cf_do_once_continue_and_break", "do { ... } while (0) with continue and break: no Viper loop, nothing about i is forgotten", [=](Kit& k) { once(k, 0); });
+  lc("cf_do_once_wrong_postcondition", "the same, with a wrong postcondition for n == 7", [=](Kit& k) { once(k, 1); });
+  lc("cf_do_once_check_fails", "a check inside the do-once body that does not always hold", [=](Kit& k) { once(k, 2); });
+  lc("cf_do_once_invariant_entry_fails", "a written invariant of a do-once loop is asserted at entry", [=](Kit& k) { once(k, 3); });
+  lc("cf_do_once_measure_obligation", "a written measure's own arithmetic (100 / n) is checked at entry", [](Kit& k) {
+    Function* f = k.fn("f", k.vd, {{"n", k.i32}});
+    const Expr* q = k.div(k.num(k.i32, "100"), k.pv(f, 0));
+    const int id = k.jid();
+    f->body = k.blk({k.loop(k.no(), {}, {k.cl(q)}, k.blk({}), nullptr, LF::DoOnce, id)});
+    k.done(f);
+    k.fail("division-by-zero", q->loc);
+  });
+  lc("cf_do_once_has_an_internal_backstop", "a do-once loop asserts that its condition is false, as an internal check", [](Kit& k) {
+    Function* f = k.fn("f", k.vd);
+    const int id = k.jid();
+    f->body = k.blk({k.loop(k.no(), {}, {}, k.blk({}), nullptr, LF::DoOnce, id)});
+    k.done(f);
+    k.require_map("internal", "the condition of a do-once loop is not false");
+  });
+  lc("cf_do_once_condition_conversion_fails", "do { } while ((signed char)256): EDG folds it to 0; the conversion obligation is what the user sees", [](Kit& k) {
+    Function* f = k.fn("f", k.vd);
+    const Expr* conv = k.cv(k.i8, k.num(k.i32, "256"));
+    const int id = k.jid();
+    f->body = k.blk({k.loop(k.tb(conv), {}, {}, k.blk({}), nullptr, LF::DoOnce, id)});
+    k.done(f);
+    k.fail("conversion", conv->loc);
+  });
+  lc("cf_do_once_condition_shift_fails", "do { } while (1 << 40): the shift obligation of the condition fails, and nothing else", [](Kit& k) {
+    Function* f = k.fn("f", k.vd);
+    const Expr* sh = k.shl(k.num(k.i32, "1"), k.num(k.i32, "40"));
+    const int id = k.jid();
+    f->body = k.blk({k.loop(k.tb(sh), {}, {}, k.blk({}), nullptr, LF::DoOnce, id)});
+    k.done(f);
+    k.fail("shift", sh->loc, 1, "", "shift count");
+  });
+  lc("cf_do_once_constant_expression", "do { } while (1 - 1): the condition is a constant zero by evaluation", [](Kit& k) {
+    Function* f = k.fn("f", k.vd);
+    const Expr* c = k.tb(k.sub(k.num(k.i32, "1"), k.num(k.i32, "1")));
+    const int id = k.jid();
+    f->body = k.blk({k.loop(c, {}, {}, k.blk({}), nullptr, LF::DoOnce, id)});
+    k.done(f);
+  });
+
+  // ---- loops left only by break ----
+  auto forever = [=](Kit& k, bool terminates) {
+    Function* f = fn_n(k, k.i32);
+    k.ens(f, k.eq(k.R(f), k.add(k.F(f, 0), k.num(k.i32, "1"))));
+    Var* i = k.local(f, "i", k.i32);
+    const int id = k.jid();
+    Clause m = k.cl(terminates ? k.sub(k.add(k.cv(k.i64, k.pv(f, 0)), k.num(k.i64, "1")), k.cv(k.i64, k.v(i))) : k.num(k.i64, "100"));
+    const Stmt* w = k.loop(k.yes(), {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.le(k.v(i), k.pv(f, 0)))}, {m},
+                           k.blk({plus1(k, i), k.iff(k.gt(k.v(i), k.pv(f, 0)), k.blk({k.brk(id)}))}), nullptr, LF::While, id);
+    f->body = k.blk({k.decl(i, k.num(k.i32, "0")), w, k.ret(k.v(i))});
+    k.done(f);
+    if (!terminates) k.fail("termination", m.loc);
+  };
+  lc("cf_forever_left_by_break", "for (;;) { i++; if (i > n) break; }: returns n + 1", [=](Kit& k) { forever(k, true); });
+  lc("cf_forever_measure_fails", "the same loop with the constant measure 100: the measure does not decrease", [=](Kit& k) { forever(k, false); });
+  lc("cf_forever_without_exit_never_returns", "while (1) with no exit and no return: the code after it is unreachable, so no missing-return", [](Kit& k) {
+    Function* f = k.fn("f", k.i32);
+    const int id = k.jid();
+    // while (true) invariant true decreases 0 {}  -- Silicon does not report the missing return after a loop that cannot be left
+    f->body = k.blk({k.loop(k.yes(), {}, {k.cl(k.num(k.i32, "0"))}, k.blk({}), nullptr, LF::While, id)});
+    k.done(f);
+    k.fail("termination", f->body->stmts[0]->measure[0].loc);
+  });
+
+  // ---- switch ----
+  // switch (x) { case 1: r = 10; case 2: r = r + 1; break; default: r = 7; case 5: r = r + 100; }  (default in the middle)
+  auto dispatch = [=](Kit& k, bool bad) {
+    Function* f = k.fn("f", k.i32, {{"x", k.i32}});
+    k.req(f, k.range(k.F(f, 0), k.i32, "-100", "100"));
+    Var* r = k.local(f, "r", k.i32);
+    const int id = k.jid();
+    const Stmt* body = k.blk({k.cs(k.num(k.i32, "1")), k.asg(r, k.num(k.i32, "10")), k.cs(k.num(k.i32, "2")), k.asg(r, k.add(k.v(r), k.num(k.i32, "1"))),
+                              k.brk(id), k.dflt(), k.asg(r, k.num(k.i32, "7")), k.cs(k.num(k.i32, "5")), k.asg(r, k.add(k.v(r), k.num(k.i32, "100")))});
+    const Stmt* s = k.sw(k.pv(f, 0), body, id);
+    const Stmt* rt = k.ret(k.v(r));
+    f->body = k.blk({k.decl(r, k.num(k.i32, "0")), s, rt});
+    k.done(f);
+    auto x = [&](const char* v) { return k.eq_c(k.F(f, 0), k.i32, v); };
+    if (!bad) {
+      k.ens(f, k.implies(x("1"), k.eq_c(k.R(f), k.i32, "11")));
+      k.ens(f, k.implies(x("2"), k.eq_c(k.R(f), k.i32, "1")));
+      k.ens(f, k.implies(x("5"), k.eq_c(k.R(f), k.i32, "100")));
+    }
+    k.ens(f, k.implies(k.land(k.ne(k.F(f, 0), k.num(k.i32, "1")), k.land(k.ne(k.F(f, 0), k.num(k.i32, "2")), k.ne(k.F(f, 0), k.num(k.i32, "5")))),
+                       k.eq_c(k.R(f), k.i32, bad ? "7" : "107")));
+    if (bad) k.fail("postcondition", rt->loc);
+  };
+  lc("cf_switch_dispatch_fallthrough_default_in_middle", "case 1 falls into case 2; default (in the middle) falls into case 5", [=](Kit& k) { dispatch(k, false); });
+  lc("cf_switch_default_falls_into_next_case", "the postcondition forgets that default falls through into case 5", [=](Kit& k) { dispatch(k, true); });
+  lc("cf_switch_no_default_matches_nothing", "no default: a value that matches no case skips the body", [](Kit& k) {
+    Function* f = k.fn("f", k.i32, {{"x", k.i32}});
+    Var* r = k.local(f, "r", k.i32);
+    const int id = k.jid();
+    const Stmt* body = k.blk({k.cs(k.num(k.i32, "1")), k.asg(r, k.num(k.i32, "10")), k.cs(k.num(k.i32, "2")), k.asg(r, k.num(k.i32, "20"))});
+    f->body = k.blk({k.decl(r, k.num(k.i32, "0")), k.sw(k.pv(f, 0), body, id), k.ret(k.v(r))});
+    k.done(f);
+    k.ens(f, k.implies(k.land(k.ne(k.F(f, 0), k.num(k.i32, "1")), k.ne(k.F(f, 0), k.num(k.i32, "2"))), k.eq_c(k.R(f), k.i32, "0")));
+    k.ens(f, k.implies(k.eq_c(k.F(f, 0), k.i32, "2"), k.eq_c(k.R(f), k.i32, "20")));
+  });
+  lc("cf_switch_missing_return_without_default", "every case returns but there is no default: control may reach the end", [](Kit& k) {
+    Function* f = k.fn("f", k.i32, {{"x", k.i32}});
+    const int id = k.jid();
+    const Stmt* body = k.blk({k.cs(k.num(k.i32, "1")), k.ret(k.num(k.i32, "1")), k.cs(k.num(k.i32, "2")), k.ret(k.num(k.i32, "2"))});
+    f->body = k.blk({k.sw(k.pv(f, 0), body, id)});
+    k.done(f);
+    k.fail("missing-return", f->end_loc);
+  });
+  lc("cf_switch_every_path_returns", "every case and the default return: no missing return", [](Kit& k) {
+    Function* f = k.fn("f", k.i32, {{"x", k.i32}});
+    const int id = k.jid();
+    const Stmt* body = k.blk({k.cs(k.num(k.i32, "1")), k.ret(k.num(k.i32, "1")), k.dflt(), k.ret(k.num(k.i32, "2"))});
+    f->body = k.blk({k.sw(k.pv(f, 0), body, id)});
+    k.done(f);
+  });
+  lc("cf_switch_scrutinee_obligation", "switch (100 / a): the division is checked before the dispatch", [](Kit& k) {
+    Function* f = k.fn("f", k.vd, {{"a", k.i32}});
+    const Expr* q = k.div(k.num(k.i32, "100"), k.pv(f, 0));
+    const int id = k.jid();
+    f->body = k.blk({k.sw(q, k.blk({k.cs(k.num(k.i32, "1")), k.brk(id)}), id)});
+    k.done(f);
+    k.fail("division-by-zero", q->loc);
+  });
+  lc("cf_switch_on_a_call_evaluates_it_once", "switch (g(a)): g's precondition is checked at the call, its postcondition decides the case", [](Kit& k) {
+    Function* g = k.fn("g", k.i32, {{"x", k.i32}});
+    k.req(g, k.gt(k.F(g, 0), k.num(k.i32, "0")));
+    k.ens(g, k.eq_c(k.R(g), k.i32, "1"));
+    k.trusted(g);
+    Function* f = k.fn("f", k.i32, {{"a", k.i32}});
+    k.req(f, k.gt(k.F(f, 0), k.num(k.i32, "0")));
+    const int id = k.jid();
+    const Stmt* body = k.blk({k.cs(k.num(k.i32, "1")), k.ret(k.num(k.i32, "5")), k.dflt(), k.ret(k.num(k.i32, "6"))});
+    f->body = k.blk({k.sw(k.call(g, {k.pv(f, 0)}), body, id)});
+    k.done(f);
+    k.ens(f, k.eq_c(k.R(f), k.i32, "5"));
+  });
+  lc("cf_switch_on_a_call_precondition_fails", "switch (g(a)) with a unconstrained: g's precondition may not hold", [](Kit& k) {
+    Function* g = k.fn("g", k.i32, {{"x", k.i32}});
+    k.req(g, k.gt(k.F(g, 0), k.num(k.i32, "0")));
+    k.trusted(g);
+    Function* f = k.fn("f", k.vd, {{"a", k.i32}});
+    const Expr* c = k.call(g, {k.pv(f, 0)});
+    const int id = k.jid();
+    f->body = k.blk({k.sw(c, k.blk({k.cs(k.num(k.i32, "1")), k.brk(id)}), id)});
+    k.done(f);
+    k.fail("precondition", c->loc);
+  });
+  lc("cf_switch_case_value_obligation_fails", "case 1 << 40 on an int: the shift obligation is asserted at the case label, before the dispatch", [](Kit& k) {
+    Function* f = k.fn("f", k.i32, {{"x", k.i32}});
+    const int id = k.jid();
+    const Stmt* bad = k.cs(k.shl(k.num(k.i32, "1"), k.num(k.i32, "40")));
+    f->body = k.blk({k.sw(k.pv(f, 0), k.blk({k.cs(k.num(k.i32, "2")), k.ret(k.num(k.i32, "1")), bad, k.ret(k.num(k.i32, "2"))}), id), k.ret(k.num(k.i32, "0"))});
+    k.done(f);
+    k.fail("shift", bad->loc, 1, "", "shift count");  // the later obligations of the same case value hold vacuously after it
+  });
+  lc("cf_switch_case_value_expression_ok", "case 1 << 3 and case (2 + 3): obligations hold, values used in the dispatch", [](Kit& k) {
+    Function* f = k.fn("f", k.i32, {{"x", k.i32}});
+    const int id = k.jid();
+    const Stmt* body = k.blk({k.cs(k.shl(k.num(k.i32, "1"), k.num(k.i32, "3"))), k.ret(k.num(k.i32, "8")), k.cs(k.add(k.num(k.i32, "2"), k.num(k.i32, "3"))),
+                              k.ret(k.num(k.i32, "5"))});
+    f->body = k.blk({k.sw(k.pv(f, 0), body, id), k.ret(k.num(k.i32, "0"))});
+    k.done(f);
+    k.ens(f, k.implies(k.eq_c(k.F(f, 0), k.i32, "8"), k.eq_c(k.R(f), k.i32, "8")));
+    k.ens(f, k.implies(k.eq_c(k.F(f, 0), k.i32, "5"), k.eq_c(k.R(f), k.i32, "5")));
+    k.ens(f, k.implies(k.eq_c(k.F(f, 0), k.i32, "3"), k.eq_c(k.R(f), k.i32, "0")));
+  });
+  lc("cf_switch_scrutinee_obligation_after_the_call", "switch (100 / g(x)): the divisor check comes after the call, so g's result is known", [](Kit& k) {
+    Function* g = k.fn("g", k.i32, {{"x", k.i32}});
+    k.ens(g, k.range(k.R(g), k.i32, "1", "10"));
+    k.trusted(g);
+    Function* f = k.fn("f", k.vd, {{"a", k.i32}});
+    const int id = k.jid();
+    f->body = k.blk({k.sw(k.div(k.num(k.i32, "100"), k.call(g, {k.pv(f, 0)})), k.blk({k.cs(k.num(k.i32, "10")), k.brk(id)}), id)});
+    k.done(f);
+  });
+  lc("cf_switch_scrutinee_obligation_after_the_call_fails", "switch (100 / g(x)) where g may return 0: the check after the call fails", [](Kit& k) {
+    Function* g = k.fn("g", k.i32, {{"x", k.i32}});
+    k.ens(g, k.range(k.R(g), k.i32, "0", "10"));
+    k.trusted(g);
+    Function* f = k.fn("f", k.vd, {{"a", k.i32}});
+    const int id = k.jid();
+    const Expr* q = k.div(k.num(k.i32, "100"), k.call(g, {k.pv(f, 0)}));
+    f->body = k.blk({k.sw(q, k.blk({k.cs(k.num(k.i32, "10")), k.brk(id)}), id)});
+    k.done(f);
+    k.fail("division-by-zero", q->loc);
+  });
+  lc("cf_switch_unsigned_scrutinee", "switch on an unsigned int with the case value 4294967295 (what -1 becomes)", [](Kit& k) {
+    Function* f = k.fn("f", k.i32, {{"u", k.u32}});
+    const int id = k.jid();
+    const Stmt* body = k.blk({k.cs(k.num(k.u32, "4294967295")), k.ret(k.num(k.i32, "1")), k.dflt(), k.ret(k.num(k.i32, "0"))});
+    f->body = k.blk({k.sw(k.pv(f, 0), body, id)});
+    k.done(f);
+    k.ens(f, k.implies(k.eq_c(k.F(f, 0), k.u32, "4294967295"), k.eq_c(k.R(f), k.i32, "1")));
+    k.ens(f, k.implies(k.ne(k.F(f, 0), k.num(k.u32, "4294967295")), k.eq_c(k.R(f), k.i32, "0")));
+  });
+  // while (s < n) { switch (s) { case 1: s += 1; break; case 2: s += 3; break; default: s += 1; } s += 1; }
+  auto switch_in_loop = [=](Kit& k, bool bad) {
+    Function* f = fn_n(k, k.i32);
+    Var* s = k.local(f, "s", k.i32);
+    const int lid = k.jid();
+    const int sid = k.jid();
+    auto add_s = [&](const char* v) { return k.asg(s, k.add(k.v(s), k.num(k.i32, v))); };
+    const Stmt* swt = k.sw(k.v(s), k.blk({k.cs(k.num(k.i32, "1")), add_s("1"), k.brk(sid), k.cs(k.num(k.i32, "2")), add_s("3"), k.brk(sid), k.dflt(), add_s("1")}), sid);
+    const Stmt* w = k.loop(k.lt(k.v(s), k.pv(f, 0)), {k.cl(k.range(k.v(s), k.i32, "0", "110"))}, {k.cl(k.sub(k.num(k.i64, "110"), k.cv(k.i64, k.v(s))))},
+                           k.blk({swt, add_s("1")}), nullptr, LF::While, lid);
+    const Stmt* after = bad ? k.chk(k.eq(k.v(s), k.pv(f, 0))) : k.chk(k.ge(k.v(s), k.pv(f, 0)));
+    f->body = k.blk({k.decl(s, k.num(k.i32, "0")), w, after, k.ret(k.v(s))});
+    k.done(f);
+    if (bad) k.fail("check", after->loc);
+  };
+  lc("cf_switch_break_inside_loop", "a switch inside a loop: break leaves the switch only, then s += 1 runs", [=](Kit& k) { switch_in_loop(k, false); });
+  lc("cf_switch_break_inside_loop_overshoots", "the same loop: s == n does not hold (the body can overshoot)", [=](Kit& k) { switch_in_loop(k, true); });
+  // for (i = 0; i < n; i++) { switch (i) { case 1: s = 1; continue; case 2: s = 5; break; default: s = 2; } s = 100; }
+  auto switch_continue = [=](Kit& k, bool step_in_body) {
+    Function* f = fn_n(k, k.i32);
+    Var* i = k.local(f, "i", k.i32);
+    Var* s = k.local(f, "s", k.i32);
+    const int lid = k.jid();
+    const int sid = k.jid();
+    auto add_s = [&](const char* v) { return k.asg(s, k.num(k.i32, v)); };
+    const Stmt* swt = k.sw(k.v(i), k.blk({k.cs(k.num(k.i32, "1")), add_s("1"), k.cnt(lid), k.cs(k.num(k.i32, "2")), add_s("5"), k.brk(sid), k.dflt(), add_s("2")}), sid);
+    std::vector<const Stmt*> body = {swt, add_s("100")};
+    if (step_in_body) body.push_back(plus1(k, i));
+    Clause m = k.cl(k.gap(k.pv(f, 0), k.v(i)));
+    const Stmt* w = k.loop(k.lt(k.v(i), k.pv(f, 0)),
+                           {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.le(k.v(i), k.pv(f, 0))), k.cl(k.ge_c(k.v(s), k.i32, "0"))},
+                           {m}, k.blk(body), step_in_body ? nullptr : plus1(k, i), LF::While, lid);
+    f->body = k.blk({k.decl(i, k.num(k.i32, "0")), k.decl(s, k.num(k.i32, "0")), w, k.chk(k.ge_c(k.v(s), k.i32, "0")), k.ret(k.v(s))});
+    k.done(f);
+    if (step_in_body) k.fail("termination", m.loc);
+  };
+  lc("cf_switch_continue_runs_the_step", "a continue inside a switch continues the loop: the for step runs", [=](Kit& k) { switch_continue(k, false); });
+  lc("cf_switch_continue_skips_body_increment", "the increment is the last statement of the body, so a continue in the switch skips it", [=](Kit& k) { switch_continue(k, true); });
+  lc("cf_auto_range_invariant_from_switch_and_step", "a signed char assigned only in a switch and a for step still gets its automatic range invariant", [](Kit& k) {
+    Function* f = k.fn("f", k.vd);
+    Var* c = k.local(f, "c", k.i8);
+    Var* t = k.local(f, "t", k.i32);
+    const int lid = k.jid();
+    const int sid = k.jid();
+    const Expr* inc = k.cv(k.i8, k.add(k.cv(k.i32, k.v(c)), k.num(k.i32, "1")));
+    const Stmt* swt = k.sw(k.v(t), k.blk({k.cs(k.num(k.i32, "0")), k.asg(c, inc), k.brk(sid)}), sid);
+    const Stmt* w = k.loop(k.lt(k.v(c), k.num(k.i8, "10")), {}, {k.cl(k.sub(k.num(k.i32, "10"), k.cv(k.i32, k.v(c))))}, k.blk({swt}), k.asg(c, inc), LF::While, lid);
+    f->body = k.blk({k.decl(c, k.num(k.i8, "0")), k.decl(t, k.num(k.i32, "0")), w});
+    k.done(f);
+  });
+
+  // ---- what the checker refuses ----
+  auto in_fn = [](Kit& k, const std::function<const Stmt*(Kit&, Function*)>& body) {
+    Function* f = k.fn("f", k.vd, {{"a", k.i32}, {"b", k.bl}});
+    f->body = k.blk({body(k, f)});
+    k.done(f);
+  };
+  rc("cf_break_outside_loop", "outside any loop or switch", [in_fn](Kit& k) { in_fn(k, [](Kit& k, Function*) { return k.brk(k.jid()); }); });
+  rc("cf_continue_outside_loop", "outside any loop", [in_fn](Kit& k) { in_fn(k, [](Kit& k, Function*) { return k.cnt(k.jid()); }); });
+  rc("cf_break_names_a_sibling_loop", "does not name the innermost enclosing loop or switch", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function*) {
+      const int a = k.jid();
+      const int b = k.jid();
+      return k.blk({k.loop(k.no(), {}, {k.cl(k.num(k.i32, "0"))}, k.blk({}), nullptr, LoopForm::While, a),
+                    k.loop(k.no(), {}, {k.cl(k.num(k.i32, "0"))}, k.blk({k.brk(a)}), nullptr, LoopForm::While, b)});
+    });
+  });
+  rc("cf_break_with_id_zero", "does not name the innermost enclosing loop or switch", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function*) { return k.loop(k.no(), {}, {k.cl(k.num(k.i32, "0"))}, k.blk({k.brk(0)}), nullptr, LoopForm::While, 0); });
+  });
+  rc("cf_continue_names_a_switch", "does not name the innermost enclosing loop", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function* f) {
+      const int l = k.jid();
+      const int s = k.jid();
+      return k.loop(k.no(), {}, {k.cl(k.num(k.i32, "0"))}, k.blk({k.sw(k.pv(f, 0), k.blk({k.cs(k.num(k.i32, "1")), k.cnt(s)}), s)}), nullptr, LoopForm::While, l);
+    });
+  });
+  rc("cf_duplicate_jump_id", "used by two loops or switches", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function*) {
+      const int a = k.jid();
+      return k.blk({k.loop(k.no(), {}, {k.cl(k.num(k.i32, "0"))}, k.blk({}), nullptr, LoopForm::While, a),
+                    k.loop(k.no(), {}, {k.cl(k.num(k.i32, "0"))}, k.blk({}), nullptr, LoopForm::While, a)});
+    });
+  });
+  rc("cf_break_names_an_outer_loop", "does not name the innermost enclosing loop or switch", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function*) {
+      const int outer = k.jid();
+      const int inner = k.jid();
+      return k.loop(k.no(), {}, {k.cl(k.num(k.i32, "0"))},
+                    k.blk({k.loop(k.no(), {}, {k.cl(k.num(k.i32, "0"))}, k.blk({k.brk(outer)}), nullptr, LoopForm::While, inner)}), nullptr,
+                    LoopForm::While, outer);
+    });
+  });
+  rc("cf_break_in_a_switch_names_the_loop", "does not name the innermost enclosing loop or switch", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function* f) {
+      const int l = k.jid();
+      const int s = k.jid();
+      return k.loop(k.no(), {}, {k.cl(k.num(k.i32, "0"))}, k.blk({k.sw(k.pv(f, 0), k.blk({k.cs(k.num(k.i32, "1")), k.brk(l)}), s)}), nullptr,
+                    LoopForm::While, l);
+    });
+  });
+  rc("cf_continue_names_an_outer_loop", "does not name the innermost enclosing loop", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function*) {
+      const int outer = k.jid();
+      const int inner = k.jid();
+      return k.loop(k.no(), {}, {k.cl(k.num(k.i32, "0"))},
+                    k.blk({k.loop(k.no(), {}, {k.cl(k.num(k.i32, "0"))}, k.blk({k.cnt(outer)}), nullptr, LoopForm::While, inner)}), nullptr,
+                    LoopForm::While, outer);
+    });
+  });
+  rc("cf_case_value_with_a_call", "a call in a loop condition or in a `check`", [](Kit& k) {
+    Function* g = k.fn("g", k.i32);
+    k.trusted(g);
+    Function* f = k.fn("f", k.vd, {{"a", k.i32}});
+    f->body = k.blk({k.sw(k.pv(f, 0), k.blk({k.cs(k.call(g, {}))}), k.jid())});
+    k.done(f);
+  });
+  rc("cf_case_outside_switch", "not directly in the body of its switch", [in_fn](Kit& k) { in_fn(k, [](Kit& k, Function*) { return k.cs(k.num(k.i32, "1")); }); });
+  rc("cf_case_in_nested_block", "not directly in the body of its switch", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function* f) {
+      const int s = k.jid();
+      return k.sw(k.pv(f, 0), k.blk({k.cs(k.num(k.i32, "0")), k.blk({k.cs(k.num(k.i32, "1"))})}), s);
+    });
+  });
+  rc("cf_case_inside_a_loop_in_the_switch", "not directly in the body of its switch", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function* f) {  // Duff's device
+      const int s = k.jid();
+      const int l = k.jid();
+      return k.sw(k.pv(f, 0), k.blk({k.cs(k.num(k.i32, "0")), k.loop(k.no(), {}, {k.cl(k.num(k.i32, "0"))}, k.blk({k.cs(k.num(k.i32, "1"))}), nullptr, LoopForm::While, l)}), s);
+    });
+  });
+  rc("cf_duplicate_case_value", "appears twice", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function* f) {
+      return k.sw(k.pv(f, 0), k.blk({k.cs(k.num(k.i32, "1")), k.cs(k.num(k.i32, "1"))}), k.jid());
+    });
+  });
+  rc("cf_two_defaults", "second `default`", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function* f) { return k.sw(k.pv(f, 0), k.blk({k.dflt(), k.dflt()}), k.jid()); });
+  });
+  rc("cf_case_value_of_the_wrong_type", "a case value of type", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function* f) { return k.sw(k.pv(f, 0), k.blk({k.cs(k.num(k.u32, "1"))}), k.jid()); });
+  });
+  rc("cf_case_value_not_a_constant", "not a constant expression", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function* f) { return k.sw(k.pv(f, 0), k.blk({k.cs(k.pv(f, 0))}), k.jid()); });
+  });
+  rc("cf_declaration_jumped_over", "jumps over", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function* f) {
+      Var* x = k.local(f, "x", k.i32);
+      return k.sw(k.pv(f, 0), k.blk({k.cs(k.num(k.i32, "0")), k.decl(x, k.num(k.i32, "5")), k.cs(k.num(k.i32, "1"))}), k.jid());
+    });
+  });
+  rc("cf_statement_before_first_case", "before the first case label", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function* f) { return k.sw(k.pv(f, 0), k.blk({k.chk(k.yes()), k.cs(k.num(k.i32, "1"))}), k.jid()); });
+  });
+  rc("cf_switch_on_bool", "a switch on a bool", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function* f) { return k.sw(k.pv(f, 1), k.blk({}), k.jid()); });
+  });
+  rc("cf_switch_without_id", "a switch without a jump id", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function* f) { return k.sw(k.pv(f, 0), k.blk({}), 0); });
+  });
+  rc("cf_switch_body_not_a_block", "not a compound statement", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function* f) { return k.sw(k.pv(f, 0), k.chk(k.yes()), k.jid()); });
+  });
+  rc("cf_call_in_do_condition", "a call in a loop condition", [](Kit& k) {
+    Function* g = k.fn("g", k.bl);
+    k.trusted(g);
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({k.loop(k.call(g, {}), {}, {k.cl(k.num(k.i32, "0"))}, k.blk({}), nullptr, LoopForm::DoWhile, k.jid())});
+    k.done(f);
+  });
+  rc("cf_call_in_do_once_condition", "a call in a loop condition", [](Kit& k) {
+    Function* g = k.fn("g", k.bl);
+    k.trusted(g);
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({k.loop(k.call(g, {}), {}, {}, k.blk({}), nullptr, LoopForm::DoOnce, k.jid())});
+    k.done(f);
+  });
+  rc("cf_do_without_measure", "without a termination measure", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function* f) { return k.loop(k.lt(k.pv(f, 0), k.num(k.i32, "5")), {}, {}, k.blk({}), nullptr, LoopForm::DoWhile, k.jid()); });
+  });
+  rc("cf_while_without_measure_still_rejected", "without a termination measure", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function* f) { return k.loop(k.lt(k.pv(f, 0), k.num(k.i32, "5")), {}, {}, k.blk({}), nullptr, LoopForm::While, k.jid()); });
+  });
+  rc("cf_do_without_jump_id", "a `do` loop without a jump id", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function* f) { return k.loop(k.lt(k.pv(f, 0), k.num(k.i32, "5")), {}, {k.cl(k.num(k.i32, "0"))}, k.blk({}), nullptr, LoopForm::DoWhile, 0); });
+  });
+  rc("cf_do_once_with_a_live_condition", "not a constant zero", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function* f) { return k.loop(k.lt(k.pv(f, 0), k.num(k.i32, "5")), {}, {}, k.blk({}), nullptr, LoopForm::DoOnce, k.jid()); });
+  });
+  rc("cf_do_once_with_a_true_condition", "not a constant zero", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function*) { return k.loop(k.yes(), {}, {}, k.blk({}), nullptr, LoopForm::DoOnce, k.jid()); });
+  });
+  rc("cf_loop_step_not_an_assignment", "not an assignment or an expression statement", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function*) { return k.loop(k.no(), {}, {k.cl(k.num(k.i32, "0"))}, k.blk({}), k.iff(k.yes(), k.blk({})), LoopForm::While, k.jid()); });
+  });
+  rc("cf_step_on_a_do_loop", "a loop step on a `do` loop", [in_fn](Kit& k) {
+    in_fn(k, [](Kit& k, Function* f) {
+      Var* x = k.local(f, "x", k.i32);
+      return k.blk({k.decl(x, k.num(k.i32, "0")),
+                    k.loop(k.no(), {}, {k.cl(k.num(k.i32, "0"))}, k.blk({}), k.asg(x, k.num(k.i32, "1")), LoopForm::DoWhile, k.jid())});
+    });
+  });
+}
+
 void define_calls_loops_and_more() {
   define_calls();
   define_loops();
+  define_control_flow();
   define_termination();
   define_returns_and_contracts();
   define_wellformedness();

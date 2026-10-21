@@ -283,8 +283,8 @@ class TargetTests(unittest.TestCase):
                      "uint8_t u = 5;", "struct p q = {1};", "CERASTES_CHECK(x > 0);",
                      "CERASTES_FOLD(p);", "static_assert(1, \"m\");", "_Static_assert(1, \"m\");",
                      ";", "if (x) y = 1;", "while (x) x--;", "for (;;) y = 1;",
-                     "switch (x) { }", "break;", "continue;", "goto l;",
-                     "typedef int T;"):
+                     "switch (x) { }", "goto l;", "typedef int T;",
+                     "do { } while (x);", "switch (x) { case 1: ; default: ; }"):
             with self.subTest(stmt):
                 self.assertEqual(self.statements("  " + stmt), [], stmt)
 
@@ -330,6 +330,87 @@ class TargetTests(unittest.TestCase):
         src = "int f(int x) CERASTES_ENSURES(r, r > 0) { return x; }\n"
         self.assertEqual([m.original for m in mu.mutants_of(src, "t.c")
                           if m.op == "delete-stmt"], ["return x;"])
+
+    # -- break, continue and the statements after case labels (decision 0014 item 9) --
+
+    def test_break_and_continue_are_deleted(self):
+        got = self.statements("  while (x) {\n    if (y) {\n      break;\n    }\n"
+                              "    continue;\n  }")
+        self.assertEqual(got, ["break;", "continue;"])
+
+    def test_a_deleted_break_becomes_an_empty_statement_and_nothing_else_changes(self):
+        src = body("  while (x) {\n    if (y) {\n      break;\n    }\n    x--;\n  }")
+        (m,) = [m for m in mu.mutants_of(src, "t.c") if m.original == "break;"]
+        self.assertEqual(m.apply(src), src.replace("break;", ";"))
+        self.assertEqual((m.line, m.column), (5, 7))
+        self.assertEqual(m.id, "t.c:5:7:delete-stmt:break;->;")
+
+    def test_the_jump_that_is_the_body_of_a_head_is_deleted_but_no_other_body(self):
+        # `if (x) break;` and its kin: the jump goes, the head stays.  Other bodies of a
+        # head stay as M3 left them (their ids are in tests/mutants-equivalent.txt).
+        got = self.statements("  while (x) {\n    if (y) break;\n    if (x) continue;\n"
+                              "    for (;;) break;\n    if (x) if (y) continue;\n"
+                              "    if (y) x = 1;\n    while (y) y--;\n  }")
+        self.assertEqual(got, ["break;", "continue;", "break;", "continue;"])
+        src = body("  while (x) {\n    if (y) break;\n  }")
+        (m,) = [m for m in mu.mutants_of(src, "t.c") if m.op == "delete-stmt"]
+        self.assertEqual(m.apply(src), src.replace("break;", ";"))
+        self.assertEqual((m.line, m.column), (4, 12))
+
+    def test_the_jump_after_else_and_do_is_deleted(self):
+        got = self.statements("  while (x) {\n    if (y) { } else break;\n    do continue; while (y);\n  }")
+        self.assertEqual(got, ["break;", "continue;"])
+
+    def test_the_statement_after_a_case_or_default_label_is_deleted(self):
+        got = self.statements("  switch (x) {\n  case 1: y = 1; break;\n  case 2: case 3: y = 2;\n"
+                              "  default: return y;\n  }")
+        self.assertEqual(got, ["y = 1;", "break;", "y = 2;", "return y;"])
+
+    def test_a_label_is_never_deleted_only_the_statement_after_it(self):
+        src = body("  switch (x) {\n  case 1: break;\n  default: y = 1;\n  }")
+        mutants = [m for m in mu.mutants_of(src, "t.c") if m.op == "delete-stmt"]
+        self.assertEqual([m.original for m in mutants], ["break;", "y = 1;"])
+        self.assertEqual([m.apply(src).split("\n")[3:5] for m in mutants],
+                         [["  case 1: ;", "  default: y = 1;"], ["  case 1: break;", "  default: ;"]])
+        self.assertEqual([(m.line, m.column) for m in mutants], [(4, 11), (5, 12)])
+
+    def test_labels_followed_by_no_deletable_statement_give_no_mutant(self):
+        for stmt in ("switch (x) { case 1: ; default: ; }",
+                     "switch (x) { case 1: int z = 1; break; }",
+                     "switch (x) { case 1: CERASTES_CHECK(x > 0); }",
+                     "switch (x) { case 1: if (y) { } }",
+                     "switch (x) { case 1: while (y) y--; }",
+                     "switch (x) { case 1: { } default: { } }"):
+            with self.subTest(stmt):
+                got = [m.original for m in mu.mutants_of(body("  " + stmt), "t.c")
+                       if m.op == "delete-stmt"]
+                self.assertEqual(got, ["break;"] if "break" in stmt else [], stmt)
+
+    def test_case_values_with_colons_brackets_and_ternaries_end_at_the_right_colon(self):
+        for label in ("case 1 ? 2 : 3:", "case (1 ? 2 : 3):", "case 'a':", "case ':':",
+                      "case A::b:", "case 1 ? (2 ? 3 : 4) : 5:", "default:"):
+            with self.subTest(label):
+                self.assertEqual(self.statements(f"  switch (x) {{\n  {label} y = 1;\n  }}"),
+                                 ["y = 1;"])
+
+    def test_labels_chain_before_one_statement(self):
+        self.assertEqual(self.statements("  switch (x) { case 1: case 2: default: y = 1; }"),
+                         ["y = 1;"])
+
+    def test_a_malformed_label_gives_no_mutant(self):
+        # `case` with no colon in its statement: the label is not skipped, `case` is a keyword
+        src = body("  switch (x) { case 1 y = 1; }")
+        self.assertEqual([m for m in mu.mutants_of(src, "t.c") if m.op == "delete-stmt"], [])
+
+    def test_a_switch_head_and_a_do_head_are_not_deleted_and_bodies_are(self):
+        self.assertEqual(self.statements("  switch (x) { }"), [])
+        self.assertEqual(self.statements("  do { y = 1; } while (x);"), ["y = 1;"])
+        self.assertEqual(self.statements("  do { } while (x);"), [])
+        self.assertEqual(self.statements("  while (x) ;"), [])
+
+    def test_jump_statements_with_other_tokens_are_not_deleted(self):
+        self.assertEqual(self.statements("  goto l;"), [])
+        self.assertEqual(self.statements("  breaker = 1;"), ["breaker = 1;"])
 
 
 def re_return(text):

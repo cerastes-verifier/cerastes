@@ -682,7 +682,7 @@ or documented; none is silent unless it says so.
 8. Should an unevaluated argument (`X`) instantiate function templates it names? Today it
    does (`cerastes::owns<int>` appears as an instance, B.3a). That is harmless for an
    external back end that filters it, but may not be intended.
-9. Attributes on concepts and requirements (our M5 spike): only "after the concept name"
+9. Attributes on concepts and requirements (our M6 spike): only "after the concept name"
    is accepted (B.4). Do you foresee changing that?
 10. Strictness: a registered attribute is an error where a built-in one is a warning or
     silently dropped (B), in every language mode, and `-w` does not hide it. Is that
@@ -836,7 +836,7 @@ the recorded output of a test that displays such an IL is never stable. Commit
 ## Appendix A: what a VeriFast-class specification language needs
 
 This is a working inventory for the Discussion, not the full language-support
-inventory (cerastes milestone M7). It is for judging the breadth of the
+inventory (cerastes milestone M8). It is for judging the breadth of the
 requirements, and is not meant to be exhaustive.
 
 ### A.1 Sources
@@ -860,7 +860,7 @@ in `tests/cxx/`.
 
 "One possible C++ form" is illustrative only. It is not a cerastes design
 decision unless the third column says plan.md fixes it (plan.md M2's attribute
-table, the spec functions in `<cerastes.h>`, M5 and M6).
+table, the spec functions in `<cerastes.h>`, M4.5, M6 and M7).
 
 ### A.2 Features by category
 
@@ -873,17 +873,17 @@ table, the spec functions in `<cerastes.h>`, M5 and M6).
 | termination | `terminates;` (`parser.ml:1590`), `decreases e;` (`parser.ml:1074, 2112`) | `[[cerastes::terminates]]`, `[[cerastes::decreases(e)]]` | not in plan; open |
 | restrict callers to non-ghost | `nonghost_callers_only` (`parser.ml:1584`) | n/a (ghost code is not a separate caller in the C++ form) | open |
 | **Assertions** | | | |
-| points-to | `e |-> v`, `e |-?-> v` (maybe uninitialized) (`parser.ml:2304`) | `cerastes::owns(e)`, `cerastes::reads(e)` | plan.md M2/M6 (`owns`, `reads`) |
+| points-to | `e |-> v`, `e |-?-> v` (maybe uninitialized) (`parser.ml:2304`) | `cerastes::owns(e)`, `cerastes::reads(e)` | plan.md M2/M4.5 (`owns`, `reads`) |
 | separating conjunction | `A &*& B` (`parser.ml:2293`) | `&&`, given separating meaning by the verifier | owner's example |
 | pattern binders | `?x`, `_` (`parser.ml:2257, 2271`) | the value is `e` itself or `old(e)`; existential choice (`?x` matched against the footprint) has no obvious C++ form | **open design point for cerastes, not EDG** |
 | fractions | `[f]p` (`parse_asn0`) | an extra spec-function argument | open |
 | conditional, switch assertions | `c ? A : B`, `switch (xs) {case nil: ...}` over inductive values (`ast.ml` `WSwitchAsn`) | C++ `?:`; `switch` has no expression form, use a pure function | open |
-| quantifiers | `forall_(T x; e)` (`parser.ml:2238`) | `cerastes::forall([&](T x) { return e; })` | plan.md M6 (lambda-bound `forall`) |
+| quantifiers | `forall_(T x; e)` (`parser.ml:2238`) | `cerastes::forall([&](T x) { return e; })` | plan.md M7 (lambda-bound `forall`; M4.5e designs a C form) |
 | `emp` | `emp` | `true` | open |
 | **Ghost declarations** | | | |
-| predicates with input/output parameters | `predicate nodes(struct node *n; list<...> nodes) = ...`; `;` splits inputs and outputs (`PredTypeExpr`, `ast.ml:417`) | `[[cerastes::predicate]]` function; the input/output split has no obvious C++ form | plan.md M6 (predicate); split is open |
+| predicates with input/output parameters | `predicate nodes(struct node *n; list<...> nodes) = ...`; `;` splits inputs and outputs (`PredTypeExpr`, `ast.ml:417`) | `[[cerastes::predicate]]` function; the input/output split has no obvious C++ form | plan.md M4.5f (predicate); split is open |
 | predicate families, constructors | `predicate_family_instance`, `predicate_ctor` (`parser.ml:991-1005`) | overloads or templates plus the attribute | open |
-| instance predicates in classes | `InstancePredDecl` (`ast.ml:937`); `tests/cxx/instance_preds/Stack.cpp` | member function marked `[[cerastes::predicate]]` | plan.md M6 |
+| instance predicates in classes | `InstancePredDecl` (`ast.ml:937`); `tests/cxx/instance_preds/Stack.cpp` | member function marked `[[cerastes::predicate]]` | plan.md M7 |
 | fixpoint (pure) functions | `fixpoint` (`parser.ml:1066, 1498`) | `[[cerastes::pure]]` function | plan.md M2 (`pure`) |
 | inductive data types | `inductive list<t> = nil \| cons(t, list<t>);` (`parser.ml:973`, `bin/list.gh:19`) | an ordinary C++ type; pattern matching has no obvious form | **open for cerastes** |
 | abstract types | `abstract_type` (`parser.ml:1062`) | opaque struct or template parameter | open |
@@ -906,17 +906,17 @@ table, the spec functions in `<cerastes.h>`, M5 and M6).
 | **Callbacks** | | | |
 | function-pointer specifications | function type with contract, `: ft(args)` clause (`parser.ml:1042, 1596`); `typedef lemma void f(...)()` (`examples/concurrent_cell.c:69`) | attributes on a function type or typedef | open |
 | **C++ specifics** | | | |
-| constructors, destructors | contracts on `Foo()` and `~Foo()` (`tests/cxx/ghost_field.cpp`, `instance_preds/Account.cpp`) | the same attributes on a constructor or destructor, with `this` in scope | plan.md M6 |
-| class invariants | an instance predicate plus open/close in each method | predicate member plus fold/unfold | plan.md M6 |
-| virtual functions | spec override check, `A_vtype`, `this->valid(&typeid(A))()` (`tests/cxx/virtual_methods/spec_override_check.cpp`) | not designed | plan.md M6: rejected for now |
-| references | `tests/cxx/references` | encoded as pointers | plan.md M6 |
-| exceptions | none in VeriFast's C++ front end | not designed | plan.md M6: rejected for now |
-| templates | generic function verified once; integral type parameters (`src/cxx_frontend/Readme.md`, `tests/cxx/templates`) | the same attributes on a template; dependent arguments | plan.md M4 |
+| constructors, destructors | contracts on `Foo()` and `~Foo()` (`tests/cxx/ghost_field.cpp`, `instance_preds/Account.cpp`) | the same attributes on a constructor or destructor, with `this` in scope | plan.md M7 |
+| class invariants | an instance predicate plus open/close in each method | predicate member plus fold/unfold | plan.md M7 |
+| virtual functions | spec override check, `A_vtype`, `this->valid(&typeid(A))()` (`tests/cxx/virtual_methods/spec_override_check.cpp`) | not designed | plan.md M7: rejected for now |
+| references | `tests/cxx/references` | encoded as pointers | plan.md M7 |
+| exceptions | none in VeriFast's C++ front end | not designed | plan.md M7: rejected for now |
+| templates | generic function verified once; integral type parameters (`src/cxx_frontend/Readme.md`, `tests/cxx/templates`) | the same attributes on a template; dependent arguments | plan.md M5 |
 | concurrency, global invariants | `bin/threading.h`: `mutex`, `lock`, `locked`, lock predicates; fractions | none | outside plan.md |
 | **Beyond VeriFast (plan.md)** | | | |
-| generic template verification | n/a | contracts on a template's prototype, checked once; integral `T` axioms | plan.md M4 |
-| contracts on concept requirements | n/a | M5: three candidate syntaxes (attribute on a compound requirement, a requirement-spec declaration, an attribute on the concept); the spike in B.4 shows only "after the concept name" is accepted | plan.md M5 |
-| ownership memory model | n/a | `owns`, `reads`, `old`, `owns_range`, lambda-bound `forall` | plan.md M6 |
+| generic template verification | n/a | contracts on a template's prototype, checked once; integral `T` axioms | plan.md M5 |
+| contracts on concept requirements | n/a | M6: three candidate syntaxes (attribute on a compound requirement, a requirement-spec declaration, an attribute on the concept); the spike in B.4 shows only "after the concept name" is accepted | plan.md M5 |
+| ownership memory model | n/a | `owns`, `reads`, `old`, `owns_range`, lambda-bound `forall` | plan.md M4.5 (C), M7 (C++) |
 
 ### A.3 What each category requires of the front end
 
@@ -931,7 +931,7 @@ These are the properties asked for in R1 to R8, per category.
 | loop specifications | on a loop statement | C++ expressions | locals and parameters at that point | no | dependent | n/a |
 | function-pointer and callback specs | on a function type or typedef | C++ expressions | the function type's parameters | no | dependent | must match |
 | class specifications | on class members, constructors, destructors | as for contracts | `this`, members | yes (instance predicates, ghost fields) | per instantiation | member defined outside its class |
-| concept requirement contracts (M5) | on a requirement (syntax undecided) | C++ expressions | the requirement's parameters | no | dependent by construction | n/a |
+| concept requirement contracts (M6) | on a requirement (syntax undecided) | C++ expressions | the requirement's parameters | no | dependent by construction | n/a |
 
 ---
 
@@ -1354,3 +1354,5 @@ for `assume_stmt.cpp`); a registered attribute in them would behave as in sectio
 - **SHAs** in this document change when commits are reworded or reordered by that rebase.
 - **Section 12** and open questions 1, 2, 3 and 10 should be re-read after the
   maintainers' first response.
+
+*2026-10-20: cerastes milestone numbers follow the renumbering of that date (plan.md: old M4 → M5, M5 → M6, M6 → M4.5 for C and M7 for C++, M7 → M8).*

@@ -28,7 +28,7 @@ always the stricter or the target's, so that a `.c` test means the same in `c23`
    (P12, confirmed: each type's `size` and `int_kind`, and `plain_chars_are_signed` in the IL header), never from
    constants in cerastes: plain `char` is signed on arm64 macOS because EDG says so. Constants are read exactly
    with `decimal_str_for_integer_constant` (P9, confirmed for 128-bit values). Rejected in M3, in both modes,
-   and listed for M7: enumeration types **and enumeration constants** (in C an enumerator has type `int`, but
+   and listed for M8 (M4.2 plans enumerations): enumeration types **and enumeration constants** (in C an enumerator has type `int`, but
    accepting it in `c23` and not in `c++20` would give a `.c` test two meanings), `_BitInt(N)`, floating
    point, vector types (and the other new type kinds of EDG bug 0007's fix), and any type kind not on the
    allow-list.
@@ -82,7 +82,7 @@ always the stricter or the target's, so that a `.c` test means the same in `c23`
    - left shift of an unsigned value wraps;
    - right shift of a negative value is arithmetic (floor division by 2^n): defined in C++20 and this target's
      implementation-defined behaviour in C23 (the Integer semantics page says so).
-9. **Bitwise operators** `&`, `|`, `^` and `~` are rejected in M3 (`unsupported_expression`), and listed for M7.
+9. **Bitwise operators** `&`, `|`, `^` and `~` are rejected in M3 (`unsupported_expression`), and planned for M4.4.
 10. **Comparisons and logical operators** have their mathematical meaning on the converted operands. In C, their
     result is an `int` 0 or 1; in C++, a `bool` (P5, confirmed; item 6 for C's truth values). `&&`, `||` and
     `?:` evaluate their operands conditionally, and the checks of a conditionally evaluated operand are
@@ -133,4 +133,8 @@ always the stricter or the target's, so that a `.c` test means the same in `c23`
   it (`static_cast` to unsigned, then compare).
 - Contracts with signed arithmetic need bounds or wider types, as in code.
 - Every check is an `assert` in the emitted Viper with a position; nothing is inhaled or assumed (invariant 4).
-- The rejections in items 2 and 9 are entries of the M7 inventory.
+- The rejections in items 2 and 9 are entries of the M8 inventory until M4 lifts them.
+
+*2026-10-20: milestone numbers follow the renumbering of 2026-10-20 (plan.md: old M4 → M5, M5 → M6, M6 → M4.5 for C and M7 for C++, M7 → M8).*
+
+*2026-10-20, amended by 0014 (M4.1, audit): item 12 — EDG does fold some operations it diagnoses: in C23 `2147483647 + 1` and `1 << 40` become constants with only warnings #61/#63, which verify mode suppresses; every probed case keeps the original `expr`, and soundness rests on encoding it, not on EDG's diagnostics. Verify mode also suppresses #546 (a jump past an initialization), which cerastes rejects itself. Item 13 — case labels are not left to EDG: a case value is encoded by its original expression and its obligations are checked (0014 item 6).*

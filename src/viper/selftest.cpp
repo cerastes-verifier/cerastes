@@ -61,6 +61,9 @@ class Kit {
   Type u128 = Type::integer(prog.int_type("unsigned __int128", 128, false));
   Type vd = Type::void_type();
   std::vector<Expect> expects;
+  // Position-map rows that must exist without failing (category, message substring): for the checks that cannot be made
+  // to fail from VIR (an internal backstop).
+  std::vector<std::pair<std::string, std::string>> map_requires;
   LowerOptions lower_options;
 
   SrcLoc at() { return SrcLoc{"t.c", ++line_, 3}; }
@@ -140,6 +143,19 @@ class Kit {
   const Stmt* whl(const Expr* c, std::vector<Clause> inv, std::vector<Clause> measure, const Stmt* body) {
     return b.while_stmt(c, std::move(inv), std::move(measure), body, at());
   }
+  void require_map(const std::string& category, const std::string& msg) { map_requires.emplace_back(category, msg); }
+
+  // Control flow (decision 0014).  A loop in any form; `id` is from jid().
+  int jid() { return b.jump_id(); }
+  const Stmt* loop(const Expr* c, std::vector<Clause> inv, std::vector<Clause> measure, const Stmt* body, const Stmt* step,
+                   LoopForm form, int id) {
+    return b.loop(c, std::move(inv), std::move(measure), body, step, form, id, at());
+  }
+  const Stmt* sw(const Expr* scrutinee, const Stmt* body, int id) { return b.switch_stmt(scrutinee, body, id, at()); }
+  const Stmt* cs(const Expr* value) { return b.case_label(value, at()); }
+  const Stmt* dflt() { return b.case_label(nullptr, at()); }
+  const Stmt* brk(int id) { return b.break_stmt(id, at()); }
+  const Stmt* cnt(int id) { return b.continue_stmt(id, at()); }
   // `(long)a - (long)b`: a measure that cannot overflow.
   const Expr* gap(const Expr* a, const Expr* c) { return sub(cv(i64, a), cv(i64, c)); }
   Clause cl(const Expr* e) { return Clause{e, at()}; }
@@ -725,6 +741,14 @@ bool run_lowering_case(const Case& c, const std::string& dir, std::string& probl
         return false;
       }
       fails.emplace_back(r->vpr_line, hc);
+    }
+  }
+  for (const auto& [category, msg] : k.map_requires) {
+    bool found = false;
+    for (const MapRow& r : rows) found = found || (r.category == category && r.msg.find(msg) != std::string::npos);
+    if (!found) {
+      problem = "the position map has no row of category " + category + " with a message containing \"" + msg + "\"";
+      return false;
     }
   }
   std::sort(fails.begin(), fails.end());

@@ -29,6 +29,10 @@ status 1) on:
   `decreases` clause, `decreases _` anywhere but on a bodyless method with the
   trusted-contract tag, `decreases *` (it assumes termination: invariant 4) and a
   conditional `decreases <measure> if <condition>`;
+* jumps (decision 0014 item 9): a backward `goto` (a `goto L` whose `label L` is earlier in the
+  same method: a cycle that Silicon does not check for termination), a `label` that carries
+  `invariant` clauses (an unchecked loop) and a label defined twice in one method.  A forward
+  `goto` and a label without invariants (`goto l_end` ... `label l_end`) are fine;
 * an empty input set, and a MANIFEST that names a file which is not there.  The
   manifest is the set of files scripts/run_tests.py expects: its first line is
   `# run-id: <id>` (printed by the run), then one file per line.  Fewer files
@@ -350,6 +354,7 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
                             "call is a statement of its own (decision 0012 item 13)")
 
     lint_termination_clauses(src, decls, add)
+    lint_jumps(src, decls, add)
 
     if map_text is None:
         problems.append(f"{name}: no position map ({map_name or name + MAP_SUFFIX})")
@@ -441,6 +446,39 @@ def lint_termination_clauses(src: Source, decls: list[Decl], add: Callable[[int,
             if not any(DECREASES_LINE_RE.match(src.code[ln - 1]) for ln in range(lineno, body)):
                 add(lineno, "`while` loop without a `decreases` clause: Silicon checks termination only "
                             "where one is present (decision 0013 item 5)")
+
+
+def lint_jumps(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    """Decision 0014 item 9: control flow is structured (a `while` for every cycle).  Silicon
+    checks the termination of `while` loops only; a cycle made of a backward `goto`, or a loop
+    that a `label ... invariant` introduces, is unchecked, so none is allowed.  Labels are
+    per method: the same name in two methods is fine, in one method it is a problem."""
+    tokens: list[tuple[str, int]] = []
+    for lineno, line in enumerate(src.code, start=1):
+        tokens += [(m.group(), lineno) for m in TOKEN_RE.finditer(line)]
+    for d in decls:
+        if d.kind != "method":
+            continue
+        labels: dict[str, int] = {}  # name -> line of its first definition
+        body = [(t, ln) for t, ln in tokens if d.line <= ln <= d.end_line]
+        for k, (text, lineno) in enumerate(body):
+            nxt = body[k + 1] if k + 1 < len(body) else ("", 0)
+            if text == "label" and nxt[0]:
+                name = nxt[0]
+                if name in labels:
+                    add(lineno, f"duplicate `label {name}` in `method {d.name}` (first on line "
+                                f"{labels[name]}): a label is defined once per method")
+                else:
+                    labels[name] = lineno
+                after = body[k + 2][0] if k + 2 < len(body) else ""
+                if after == "invariant":
+                    add(lineno, f"`label {name}` carries an `invariant`: a label with invariants "
+                                "is a loop that Silicon does not check for termination "
+                                "(decision 0014); loops are `while`")
+            elif text == "goto" and nxt[0] in labels:
+                add(lineno, f"backward `goto {nxt[0]}` (the label is on line {labels[nxt[0]]}): a "
+                            "cycle that Silicon does not check for termination (decision 0014); "
+                            "loops are `while`")
 
 
 def trusted_tag(src: Source, line: int):

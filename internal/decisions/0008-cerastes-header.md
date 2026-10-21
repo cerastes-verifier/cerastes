@@ -119,7 +119,7 @@ Probe facts (M2 Phase 1):
    functions. If a runtime call reaches one, the link fails.
 6. **C.** In C23 mode the macros work, because `[[ns::attr]]` is valid C23,
    after a function declarator too. The spec functions are C++ only in M2. A
-   C form waits for the memory model (M6).
+   C form waits for the memory model (M4.5).
 7. **Where the header lives, and how tools find it.**
    - It is `include/cerastes.h` in this repository.
    - `scripts/cerastes-fe.sh` adds `--sys_include=$CERASTES_INCLUDE_DIR` (F3:
@@ -152,3 +152,5 @@ Probe facts (M2 Phase 1):
   invocation are reported at the argument's own line and column once
   `FULLY_RESOLVED_MACRO_POSITIONS` is on (0006, Consequences). The walker prints
   original positions too. Tests keep invocations on one line for readability.
+
+*2026-10-20: milestone numbers follow the renumbering of 2026-10-20 (plan.md: old M4 → M5, M5 → M6, M6 → M4.5 for C and M7 for C++, M7 → M8).*

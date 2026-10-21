@@ -123,11 +123,11 @@ status is 2. Standard output is then empty:
 
 [source,console]
 ----
-"rejected_switch.cpp", line 8: error #cerastes-unsupported_statement: a switch statement is not supported by "cerastes verify" (decision 0012)
-    switch (x) {
-    ^
+"rejected_double.cpp", line 6: error #cerastes-unsupported_type: type "double" is not supported by "cerastes verify": only integer types and bool are (decision 0012)
+  double half(double x)
+         ^
 
-1 error detected in the compilation of "rejected_switch.cpp".
+1 error detected in the compilation of "rejected_double.cpp".
 ----
 
 Nothing else is printed. In particular a warning from the front end in a
@@ -194,6 +194,43 @@ include::example$verifying/missing_measure.cpp[tag=source]
 The errors a wrong invariant or measure can cause are `invariant-entry`,
 `invariant-preserved` and `termination`, described in
 xref:error-messages.adoc[Error messages].
+
+[#control-flow]
+== Leaving a loop early: break, continue, do and switch
+
+`break` leaves a loop, or a `switch`, at once, without evaluating the loop's
+condition, so the invariant is not checked there. What follows the loop is
+proved from the way it was left: the invariant and the negated condition, or
+the state at one of the `break` statements. `continue` ends the iteration: in a
+`for` loop the increment runs, then the condition is evaluated again, so the
+invariant and the measure are checked there as at the end of the body.
+
+[source,c]
+----
+include::example$verifying/control_flow.c[tag=source]
+----
+
+In `smallest_divisor` the loop ends either at the `break`, where `n % d == 0`,
+or when `d < n` is false, where the invariant gives `d == n`; both give the
+postcondition.
+
+A `do` loop runs its body before its first test, so its invariant holds at the
+start of every iteration (on entry, and each time the test is true), and the
+arithmetic of its condition is checked after the body, where the condition is
+evaluated. `CERASTES_INVARIANT` and `CERASTES_DECREASES` are written before
+`do`. A `do { ... } while (0)`, whose body runs once, needs no measure.
+
+A `switch` evaluates its controlling expression once, with the usual checks,
+and goes to the matching `case` label, to `default`, or past the `switch`.
+Execution falls through from one label's statements to the next until a
+`break`; `[[fallthrough]];` (or `[[gnu::fallthrough]];`) marks an intended
+fallthrough for compilers that warn about it. Each `case` value is checked as it
+is written, like any constant: `case 1 << 40:` is a `shift` error at the label,
+even where the compiler only warns. cerastes rejects a `case` or `default` label that is not directly
+inside the braces of its `switch` (as in Duff's device), a GNU case range
+(`case 1 ... 3:`), a statement before the first label, a declaration that a
+later label jumps over, and a `switch` with an init-statement or a declaration
+in its condition.
 
 [#keep-vpr]
 == Keeping the Viper program
@@ -286,14 +323,14 @@ never approximates it:
 
 [source,cpp]
 ----
-include::example$verifying/rejected_switch.cpp[tag=source]
+include::example$verifying/rejected_double.cpp[tag=source]
 ----
 
 The constructs that are rejected in this version are:
 
-* *Statements:* `switch`, `break`, `continue`, `do ... while`, `goto` and labels,
-  `try` and `throw`, `asm`, and an `if` with an init-statement or with a
-  declaration in its condition.
+* *Statements:* `goto` and labels, `try` and `throw`, `asm`, an `if` or
+  `switch` with an init-statement or with a declaration in its condition, and the
+  forms of `switch` listed in <<control-flow>>.
 * *Declarations:* a local with no initializer, `static`, `thread_local` and
   `extern` locals, global variables (also `const` ones), arrays, classes, unions,
   enumerations, lambdas, templates, `constexpr` and `consteval` functions,

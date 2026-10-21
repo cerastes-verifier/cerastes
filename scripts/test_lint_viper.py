@@ -1108,5 +1108,116 @@ class TerminationClauseTests(unittest.TestCase):
         self.assertTrue(any("unknown category `nonsense`" in p for p in probs), probs)
 
 
+class JumpTests(unittest.TestCase):
+    """Decision 0014 item 9: a backward `goto`, a `label` that carries `invariant` clauses and a
+    label defined twice in one method are problems (cycles Silicon does not check for termination;
+    ambiguous targets); forward gotos and labels without invariants, as the emitter produces them
+    (`goto l_brk`, `label l_brk`), stay accepted.  Each rule has a twin that breaks exactly it."""
+
+    @staticmethod
+    def strict(lines):
+        return lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+
+    @staticmethod
+    def index_of_last(lines, fragment):
+        return max(i for i, l in enumerate(lines) if fragment in (l.text if isinstance(l, Check) else l))
+
+    def with_loop_labels(self, top_line, goto_line, label_first):
+        """The good fixture with a `label` and a `goto` in g__3: `top_line` is the label's
+        line(s), `goto_line` the jump; `label_first` puts the label before the goto."""
+        lines = good_lines()
+        start = find(lines, "  var i__1: Int := 0") + 1
+        end = self.index_of_last(lines, "  label end")
+        if label_first:
+            lines[end:end] = [goto_line]
+            lines[start:start] = list(top_line)
+        else:
+            lines[end:end] = list(top_line)
+            lines[start:start] = [goto_line]
+        return lines
+
+    def test_a_forward_goto_to_a_label_without_invariants_is_clean(self):
+        # the shape of a break: `goto l_brk__1` ... `label l_brk__1`
+        lines = self.with_loop_labels(["  label l_brk__1"], "  goto l_brk__1", label_first=False)
+        self.assertEqual(self.strict(lines), [])
+
+    def test_a_backward_goto_is_a_problem(self):
+        lines = self.with_loop_labels(["  label l_top__1"], "  goto l_top__1", label_first=True)
+        probs = self.strict(lines)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("backward `goto l_top__1`", probs[0])
+        self.assertIn("decision 0014", probs[0])
+        text, _ = build(lines)
+        goto_line = len(text.split("\n")[:text.split("\n").index("  goto l_top__1")]) + 1
+        self.assertTrue(probs[0].startswith(f"t.vpr:{goto_line}:"), probs)
+
+    def test_a_goto_right_after_its_own_label_is_backward(self):
+        lines = self.with_loop_labels(["  label l_x__1", "  goto l_x__1"], "  // no jump", label_first=True)
+        probs = self.strict(lines)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("backward `goto l_x__1`", probs[0])
+
+    def test_the_same_label_name_in_another_method_is_not_a_backward_target(self):
+        # `end` is defined in f__2 (earlier in the file) and g__3: a goto end in g__3 before its
+        # own label is forward
+        lines = good_lines()
+        lines.insert(self.index_of_last(lines, "  label end"), "  goto end")
+        self.assertEqual(self.strict(lines), [])
+
+    def test_a_goto_to_a_label_of_an_earlier_method_is_not_flagged_as_backward(self):
+        # an undefined label is Silicon's business, not the lint's: no cycle is possible
+        lines = good_lines()
+        lines.insert(self.index_of_last(lines, "  label end"), "  goto l_only_in_f__1")
+        i = find(lines, "  goto end")
+        lines.insert(i, "  label l_only_in_f__1")
+        self.assertEqual(self.strict(lines), [])
+
+    def test_a_label_with_an_invariant_on_the_next_line_is_a_problem(self):
+        lines = good_lines()
+        i = find(lines, "  while (i__1 < y)")
+        lines[i:i] = ["  label l_loop__1", Check("    invariant 0 <= i__1", INV, "invariant-preserved")]
+        probs = self.strict(lines)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`label l_loop__1` carries an `invariant`", probs[0])
+
+    def test_a_label_with_an_invariant_on_its_own_line_is_a_problem(self):
+        lines = good_lines()
+        i = find(lines, "  while (i__1 < y)")
+        lines[i:i] = ["  label l_loop__1 invariant true"]
+        probs = self.strict(lines)
+        self.assertTrue(any("`label l_loop__1` carries an `invariant`" in p for p in probs), probs)
+
+    def test_a_label_before_a_while_is_not_a_label_with_an_invariant(self):
+        # the invariant belongs to the `while`, which follows the label: the twin of the rule above
+        lines = good_lines()
+        i = find(lines, "  while (i__1 < y)")
+        lines[i:i] = ["  label l_before_loop__1"]
+        self.assertEqual(self.strict(lines), [])
+
+    def test_a_label_defined_twice_in_one_method_is_a_problem(self):
+        lines = good_lines()
+        i = find(lines, "  var t__1: Int")
+        lines[i:i] = ["  label l_twice__1", "  label l_twice__1"]
+        probs = self.strict(lines)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("duplicate `label l_twice__1` in `method f__2`", probs[0])
+
+    def test_one_label_name_in_two_methods_is_fine(self):
+        text, _ = build(good_lines())
+        self.assertEqual(text.count("label end"), 2)
+        self.assertEqual(self.strict(good_lines()), [])
+
+    def test_a_label_named_like_a_keyword_fragment_is_not_confused(self):
+        lines = good_lines()
+        lines.insert(find(lines, "  goto end"), "  var label_x: Int := 0")
+        self.assertEqual(self.strict(lines), [])
+
+    def test_the_rules_ignore_labels_and_gotos_in_comments(self):
+        lines = good_lines()
+        lines.insert(self.index_of_last(lines, "  label end"), "  // goto l_a")
+        lines.insert(find(lines, "  var i__1: Int := 0") + 1, "  // label l_a")
+        self.assertEqual(self.strict(lines), [])
+
+
 if __name__ == "__main__":
     unittest.main()
