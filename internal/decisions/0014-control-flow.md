@@ -74,6 +74,10 @@ decrease from each iteration to the next (0013).
      `2147483647 + 1` to constants and keeps their `expr`, audit), whose obligations are asserted, and because a
      global, an enumerator or a call in it is rejected (0010 item 12). As a guard, lowering also asserts `!c` there
      as an `internal` check: if EDG's folded zero ever disagreed with cerastes's value, the run ends with exit 3.
+     `check_program` re-evaluates the condition of a `DoOnce`: it rejects one that reads a local, calls a function,
+     or folds cleanly to a value other than zero, and accepts one it cannot fold (a shift, an inexact conversion to
+     a signed type, an overflow), whose failing obligation is then reported (`do … while ((signed char)256)` is a
+     `conversion` error, `do … while (1 << 40)` a `shift` error) and whose value the internal assert pins.
 6. **`switch (e) { … }`** (C11/C23 6.8.4.2, [stmt.switch]). The controlling expression is promoted and evaluated
    once, into a temporary; a call in it is allowed (it is evaluated exactly once), and its obligations are placed by
    0012 item 6 (in `switch (100 / g(x))` the divisor's check follows the call). Dispatch is a chain `if (t == k) { goto l_case_k }` in source order of the labels,
@@ -85,8 +89,10 @@ decrease from each iteration to the next (0013).
    only #61, `case 1 << 31:` (C23) nothing, and verify mode suppresses those warnings (audit, blocking). So each case
    value is encoded **by its original expression**, as every folded constant is (0010 item 12): its obligations
    (`shift`, `overflow`, `conversion`) are asserted unconditionally before the dispatch, at the case label, and a
-   global, an enumerator or a call in it is rejected. A case value whose type differs from the scrutinee's is
-   rejected (fail closed). Duplicate values and a second `default` are EDG errors. Silicon explores each case path
+   global, an enumerator or a call in it is rejected; so is a case value that names a variable (`case k:` with a
+   C++ `const int k`; M4.2 may lift it), at the label. A case value whose type differs from the scrutinee's is
+   rejected (fail closed). A `for` loop with an init-statement is its own block, so a `for (int k = …)` inside a
+   case is not a declaration a later label jumps over (code audit). Duplicate values and a second `default` are EDG errors. Silicon explores each case path
    separately.
 7. **IL facts relied on** (`internal/il-inventory.md`, "M4.1: control flow"):
    - (P13) `break` and `continue` are compiler-generated `stmk_goto`s; the target label carries `break_label`,

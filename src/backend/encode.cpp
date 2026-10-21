@@ -56,7 +56,8 @@ struct VType {
 bool allowed_attribute_name(std::string n) {
   if (n.size() > 4 && n.compare(0, 2, "__") == 0 && n.compare(n.size() - 2, 2, "__") == 0) n = n.substr(2, n.size() - 4);
   return n == "maybe_unused" || n == "nodiscard" || n == "deprecated" || n == "likely" || n == "unlikely" ||
-         n == "unused" || n == "warn_unused_result";
+         n == "unused" || n == "warn_unused_result" ||
+         n == "fallthrough";  // 0014 item 11: no run-time meaning (P18)
 }
 
 // How a rejection describes an operation.
@@ -129,6 +130,15 @@ class Encoder {
     int old_depth = 0;
     bool use_own = false;  // building a node of a user macro body: positions are the definition's
     bool suppress = false;  // after a variable length array: what follows is the compiler's cleanup, not the user's
+    // The loops and switches being encoded, innermost last (decision 0014 item 7).  A `break` or `continue` is a
+    // compiler-generated goto; its label belongs to the construct whose label statement stands where EDG puts it.
+    struct Target {
+      bool is_switch = false;
+      int id = 0;                            // the VIR jump id
+      a_label_ptr break_label = nullptr;     // the label statement right after the construct, if there is one
+      a_label_ptr continue_label = nullptr;  // the label statement ending the body of a loop, if there is one
+    };
+    std::vector<Target> targets;
   };
 
   vir::Program prog_;
@@ -542,31 +552,34 @@ class Encoder {
     return b_.int_const(t.t, text, loc_of(p));
   }
 
-  const Expr* constant(an_expr_node_ptr e) {
-    a_constant_ptr c = e->variant.constant.ptr;
+  const Expr* constant(an_expr_node_ptr e) { return constant_value(e->variant.constant.ptr, e->position); }
+
+  // A folded constant `c` at `pos`: its original expression when EDG recorded one (0010 item 12), else its literal value.
+  // Also used for the value of a `case` label (0014 item 6).
+  const Expr* constant_value(a_constant_ptr c, const a_source_position& pos) {
     if (c == nullptr) {
-      reject(Diag::unsupported_expression, e->position, "a constant that cannot be read");
+      reject(Diag::unsupported_expression, pos, "a constant that cannot be read");
       return nullptr;
     }
     if (c->kind != ck_integer) {
-      reject(Diag::unsupported_expression, e->position, "a constant that is not an integer or a bool");
+      reject(Diag::unsupported_expression, pos, "a constant that is not an integer or a bool");
       return nullptr;
     }
     {
       a_type_ptr st = c->type ? skip_typerefs(c->type) : nullptr;
       if (st != nullptr && st->kind == tk_integer && st->variant.integer.enum_type) {
-        reject(Diag::unsupported_expression, e->position, "an enumeration constant");
+        reject(Diag::unsupported_expression, pos, "an enumeration constant");
         return nullptr;
       }
     }
     VType t;
-    if (!value_type(c->type, e->position, &t)) return nullptr;
+    if (!value_type(c->type, pos, &t)) return nullptr;
     an_expr_node_ptr original = (c->expr != nullptr || c->local_expr_ref) ? expr_node_from_constant(c) : nullptr;
     const bool hook = verify_config().hook == "constant_without_expr";
     if (original != nullptr && !hook) {
       // sizeof and alignof give their value: no run-time operation (0010 item 12).
       if (original->kind == enk_sizeof || original->kind == enk_alignof || original->kind == enk_datasizeof)
-        return literal(c, t, e->position);
+        return literal(c, t, pos);
       // Encode what was written, so that the checks of items 3-8 apply as written; a call in it ran at compile
       // time and is rejected by `call`.
       ++cx_.const_depth;
@@ -574,7 +587,7 @@ class Encoder {
       --cx_.const_depth;
       if (x == nullptr) return nullptr;
       if (x->type != t.t) {
-        reject(Diag::unsupported_expression, e->position, "a folded constant whose original expression has another type");
+        reject(Diag::unsupported_expression, pos, "a folded constant whose original expression has another type");
         return nullptr;
       }
       return x;
@@ -582,10 +595,10 @@ class Encoder {
     if (original != nullptr || c->orig_type != nullptr) {
       // A constant converted from another type whose original expression is not recorded: its value could hide
       // an overflowing conversion, so it is not trusted (0010 item 12).
-      reject(Diag::unsupported_expression, e->position, "a folded constant whose original expression is not recorded");
+      reject(Diag::unsupported_expression, pos, "a folded constant whose original expression is not recorded");
       return nullptr;
     }
-    return literal(c, t, e->position);
+    return literal(c, t, pos);
   }
 
   // ---- expressions --------------------------------------------------------------------------------------------
@@ -954,7 +967,9 @@ class Encoder {
   }
 
   // The `invariant` and `decreases` clauses written before a loop.  A loop without a measure is rejected (0013 item 3).
-  bool encode_loop_clauses(a_statement_ptr s, std::vector<vir::Clause>& invariants, std::vector<vir::Clause>& measure) {
+  // `require_measure` is false only for `do ... while (0)` (0014 item 5).
+  bool encode_loop_clauses(a_statement_ptr s, std::vector<vir::Clause>& invariants, std::vector<vir::Clause>& measure,
+                           bool require_measure = true) {
     bool ok = true;
     bool has_decreases = false;
     for (an_attribute_ptr a = s->attributes; a != nullptr; a = a->next) {
@@ -996,7 +1011,7 @@ class Encoder {
       }
       invariants.push_back(vir::Clause{c, clause_loc});
     }
-    if (!has_decreases) {
+    if (!has_decreases && require_measure) {
       reject_at(Diag::missing_decreases, loop_keyword_position(s),
                 "this loop has no termination measure: write CERASTES_DECREASES(...) before it");
       ok = false;
@@ -1236,6 +1251,176 @@ class Encoder {
       reject(Diag::unsupported_statement, s->position, what);
   }
 
+  // ---- break, continue, do, switch (decision 0014) -----------------------------------------------------------
+  static a_label_ptr label_of(a_statement_ptr s) {
+    return s != nullptr && s->kind == stmk_label ? s->variant.label.ptr : nullptr;
+  }
+
+  // The label of the `break` of a loop or switch: its next sibling (P13).
+  static a_label_ptr break_label_after(a_statement_ptr s, bool is_switch) {
+    a_label_ptr l = label_of(s->next);
+    return l != nullptr && l->break_label && (l->switch_break_label != 0) == is_switch ? l : nullptr;
+  }
+
+  // The label of the `continue` of a loop: the last statement of its body (P13), whether the front end wrapped the body
+  // in a generated block or not.
+  static a_label_ptr continue_label_of(a_statement_ptr body) {
+    a_statement_ptr last = body;
+    if (body != nullptr && body->kind == stmk_block) {
+      last = body->variant.block.statements;
+      while (last != nullptr && last->next != nullptr) last = last->next;
+    }
+    a_label_ptr l = label_of(last);
+    return l != nullptr && l->continue_label && !l->break_label ? l : nullptr;
+  }
+
+  Ctx::Target make_target(a_statement_ptr s, bool is_switch, int id, a_statement_ptr body) {
+    Ctx::Target t;
+    t.is_switch = is_switch;
+    t.id = id;
+    t.break_label = break_label_after(s, is_switch);
+    if (!is_switch) t.continue_label = continue_label_of(body);
+    return t;
+  }
+
+  // A `break` or `continue`: the generated goto names a label; it is accepted only when the label stands where the front
+  // end puts the label of an enclosing loop or switch (so it is the C jump), and rejected otherwise.
+  void jump_statement(a_statement_ptr s, a_label_ptr l, Out& out) {
+    const bool is_break = l->break_label;
+    for (auto it = cx_.targets.rbegin(); it != cx_.targets.rend(); ++it) {
+      const bool hit = is_break ? (it->break_label == l && it->is_switch == (l->switch_break_label != 0))
+                                : (!it->is_switch && it->continue_label == l);
+      if (!hit) continue;
+      out.push_back(is_break ? b_.break_stmt(it->id, loc_of(s->position)) : b_.continue_stmt(it->id, loc_of(s->position)));
+      return;
+    }
+    rejected_statement(s, is_break ? "a break statement whose loop or switch this version cannot determine"
+                                   : "a continue statement whose loop this version cannot determine");
+  }
+
+  // `do { B } while (0)`: the condition is an integer constant that is zero after folding (P14).
+  static bool is_zero_constant(an_expr_node_ptr e) {
+    if (e == nullptr || e->kind != enk_constant) return false;
+    a_constant_ptr c = e->variant.constant.ptr;
+    if (c == nullptr || c->kind != ck_integer) return false;
+    a_number_buffer buf = decimal_str_for_integer_constant(c);
+    return std::string(buf.as_temp_characters()) == "0";
+  }
+
+  // The variable a declaration statement declares (looking through generated blocks), or null.
+  static a_variable_ptr declared_variable(a_statement_ptr s) {
+    if (s->kind == stmk_decl) {
+      for (an_il_entity_list_entry_ptr en = s->variant.decl.entities; en != nullptr; en = en->next)
+        if (en->entity.kind == iek_variable) return reinterpret_cast<a_variable_ptr>(en->entity.ptr);
+      return nullptr;
+    }
+    if (s->kind == stmk_block && s->compiler_generated)
+      for (a_statement_ptr c = s->variant.block.statements; c != nullptr; c = c->next)
+        if (a_variable_ptr v = declared_variable(c)) return v;
+    return nullptr;
+  }
+
+  // The name of a variable that a VIR expression reads, or null.
+  static const char* variable_read_by(const Expr* e) {
+    if (e == nullptr) return nullptr;
+    if (e->kind == Expr::Kind::Local) return e->var != nullptr ? e->var->name.c_str() : "?";
+    for (const Expr* x : {e->a, e->b, e->c})
+      if (const char* n = variable_read_by(x)) return n;
+    for (const Expr* x : e->args)
+      if (const char* n = variable_read_by(x)) return n;
+    return nullptr;
+  }
+
+  void switch_statement(a_statement_ptr s, Out& out) {
+    if (s->expr == nullptr || s->expr->kind == enk_condition) {
+      rejected_statement(s, "a switch statement with an init-statement or a declaration in its condition");
+      return;
+    }
+    a_statement_ptr body = s->variant.switch_stmt.body_statement;
+    // The body is a compound statement; a lone `switch (x) case 1: return 1;` is wrapped in a generated block by the front end.
+    if (body == nullptr || body->kind != stmk_block) {
+      rejected_statement(s, "a switch statement whose body this version cannot read");
+      return;
+    }
+    const Expr* scrut = expr(s->expr);
+    bool ok = scrut != nullptr;
+    if (ok && !scrut->type.is_int()) {
+      reject(Diag::unsupported_statement, s->expr->position, "a switch on a value that is not an integer");
+      ok = false;
+    }
+    const int id = b_.jump_id();
+    cx_.targets.push_back(make_target(s, true, id, nullptr));
+    Out inner;
+    bool seen_label = false;
+    a_statement_ptr skipped = nullptr;  // a declaration of the body that a later label would jump over
+    for (a_statement_ptr c = body->variant.block.statements; c != nullptr; c = c->next) {
+      if (c->kind == stmk_switch_case) {
+        a_switch_case_entry_ptr en = c->variant.switch_case.extra_info;
+        if (c->variant.switch_case.switch_statement != s || en == nullptr) {
+          reject(Diag::unsupported_statement, c->position, "a case label that this version cannot read");
+          ok = false;
+          continue;
+        }
+        check_attributes(c->attributes);  // held to the allow-list like any statement's (0014 item 11)
+        for (an_attribute_ptr a = c->attributes; a != nullptr; a = a->next)
+          if (is_registered_cerastes(a))
+            reject(Diag::unsupported_statement, c->position, "\"cerastes::" + std::string(a->name ? a->name : "?") + "\" on a case label");
+        if (en->range_end != nullptr) {
+          reject(Diag::unsupported_statement, c->position, "a GNU case range (case a ... b)");
+          ok = false;
+          continue;
+        }
+        if (skipped != nullptr) {
+          a_variable_ptr v = declared_variable(skipped);
+          const DiagPos dp = diag_position(skipped->position);
+          reject(Diag::unsupported_statement, c->position,
+                 "a case label that jumps over the declaration of \"" +
+                     std::string(v != nullptr && v->source_corresp.name != nullptr ? v->source_corresp.name : "?") + "\" (line " +
+                     std::to_string(dp.line) + ")");
+          ok = false;
+          skipped = nullptr;
+        }
+        seen_label = true;
+        if (en->case_value == nullptr) {
+          inner.push_back(b_.case_label(nullptr, loc_of(c->position)));
+          continue;
+        }
+        // The value is encoded by its original expression, like every folded constant (0010 item 12): `case 1 << 40` is a
+        // shift error at the label, not the 0 that the front end folded it to.
+        const a_source_position saved_stmt_pos = cx_.stmt_pos;
+        if (c->position.seq != 0) cx_.stmt_pos = c->position;
+        const Expr* v = constant_value(en->case_value, c->position);
+        cx_.stmt_pos = saved_stmt_pos;
+        if (v == nullptr) {
+          ok = false;
+          continue;
+        }
+        if (const char* name = variable_read_by(v)) {
+          // A `const int k = 5; case k:` folds to a constant whose original expression is the variable (fail closed).
+          reject(Diag::unsupported_expression, c->position, std::string("a case value that names a variable (`") + name + "`)");
+          ok = false;
+          continue;
+        }
+        if (scrut != nullptr && v->type != scrut->type) {
+          reject(Diag::unsupported_statement, c->position, "a case value whose type differs from the type of the controlling expression");
+          ok = false;
+          continue;
+        }
+        inner.push_back(b_.case_label(v, loc_of(c->position)));
+        continue;
+      }
+      if (!seen_label && !(c->kind == stmk_empty && c->attributes == nullptr)) {
+        reject(Diag::unsupported_statement, c->position, "a statement before the first case label of a switch (it is unreachable)");
+        ok = false;
+        continue;
+      }
+      if (seen_label && skipped == nullptr && declared_variable(c) != nullptr) skipped = c;
+      statement(c, inner);
+    }
+    cx_.targets.pop_back();
+    if (ok) out.push_back(b_.switch_stmt(scrut, block_of(std::move(inner), body->position), id, loc_of(s->position)));
+  }
+
   void statement(a_statement_ptr s, Out& out) {
     if (s == nullptr) return;
     if (s->position.seq != 0) cx_.stmt_pos = s->position;
@@ -1277,8 +1462,31 @@ class Encoder {
         std::vector<vir::Clause> inv, measure;
         const bool inv_ok = encode_loop_clauses(s, inv, measure);
         const Expr* c = as_bool(expr(s->expr), s->expr->position);
+        const int id = b_.jump_id();
+        cx_.targets.push_back(make_target(s, false, id, s->variant.loop_statement));
         const Stmt* body = sub_statement(s->variant.loop_statement, s->position);
-        if (c != nullptr && inv_ok) out.push_back(b_.while_stmt(c, std::move(inv), std::move(measure), body, loc_of(s->position)));
+        cx_.targets.pop_back();
+        if (c != nullptr && inv_ok)
+          out.push_back(b_.loop(c, std::move(inv), std::move(measure), body, nullptr, vir::LoopForm::While, id, loc_of(s->position)));
+        return;
+      }
+      case stmk_end_test_while: {
+        if (s->expr == nullptr) {
+          rejected_statement(s, "a do statement this version cannot read");
+          return;
+        }
+        // `do { B } while (0)` runs once and needs no measure (0014 item 5).
+        const bool once = is_zero_constant(s->expr);
+        std::vector<vir::Clause> inv, measure;
+        const bool inv_ok = encode_loop_clauses(s, inv, measure, !once);
+        const Expr* c = as_bool(expr(s->expr), s->expr->position);
+        const int id = b_.jump_id();
+        cx_.targets.push_back(make_target(s, false, id, s->variant.loop_statement));
+        const Stmt* body = sub_statement(s->variant.loop_statement, s->position);
+        cx_.targets.pop_back();
+        if (c != nullptr && inv_ok)
+          out.push_back(b_.loop(c, std::move(inv), std::move(measure), body, nullptr,
+                                once ? vir::LoopForm::DoOnce : vir::LoopForm::DoWhile, id, loc_of(s->position)));
         return;
       }
       case stmk_for: {
@@ -1292,20 +1500,35 @@ class Encoder {
           return;
         }
         // init; while (cond) { body; incr }  (0012 item 3)
-        if (fl->initialization != nullptr) statement(fl->initialization, out);
+        // The initialization's scope ends with the loop: it and the loop are one statement of the enclosing block, so
+        // that a `for` with a declaration in a switch body is not a declaration a later case label jumps over (0014).
+        Out whole;
+        if (fl->initialization != nullptr) statement(fl->initialization, whole);
         std::vector<vir::Clause> inv, measure;
         const bool inv_ok = encode_loop_clauses(s, inv, measure);
         const Expr* c = s->expr ? as_bool(expr(s->expr), s->expr->position) : b_.bool_const(true, loc_of(s->position));
-        Out body;
+        Out body, step;
+        const int id = b_.jump_id();
+        cx_.targets.push_back(make_target(s, false, id, s->variant.for_loop.statement));
         if (s->variant.for_loop.statement != nullptr) statement(s->variant.for_loop.statement, body);
-        if (fl->increment != nullptr) expression_statement(fl->increment, fl->increment->position, body);
-        if (c != nullptr && inv_ok) out.push_back(b_.while_stmt(c, std::move(inv), std::move(measure), block_of(std::move(body), s->position), loc_of(s->position)));
+        cx_.targets.pop_back();
+        // The increment is the loop's step: it runs after the body and after each `continue` (0014 item 2).
+        if (fl->increment != nullptr) expression_statement(fl->increment, fl->increment->position, step);
+        const Stmt* step_stmt = step.empty() ? nullptr : step.size() == 1 ? step[0] : block_of(std::move(step), fl->increment->position);
+        if (c != nullptr && inv_ok)
+          whole.push_back(b_.loop(c, std::move(inv), std::move(measure), block_of(std::move(body), s->position), step_stmt,
+                                  vir::LoopForm::While, id, loc_of(s->position)));
+        if (fl->initialization == nullptr) {
+          for (const Stmt* x : whole) out.push_back(x);
+        } else if (!whole.empty()) {
+          out.push_back(block_of(std::move(whole), s->position));
+        }
         return;
       }
       case stmk_goto: {
         a_label_ptr l = s->variant.label.ptr;
-        if (l != nullptr && l->break_label) rejected_statement(s, "a break statement");
-        else if (l != nullptr && l->continue_label) rejected_statement(s, "a continue statement");
+        // `break` and `continue` are compiler-generated gotos (P13); a user goto stays rejected (M4.2).
+        if (s->compiler_generated && l != nullptr && (l->break_label || l->continue_label)) jump_statement(s, l, out);
         else rejected_statement(s, "a goto statement");
         return;
       }
@@ -1316,9 +1539,11 @@ class Encoder {
         if (!made) rejected_statement(s, "a label");
         return;
       }
-      case stmk_switch: rejected_statement(s, "a switch statement"); return;
-      case stmk_switch_case: rejected_statement(s, "a case label"); return;
-      case stmk_end_test_while: rejected_statement(s, "a do statement"); return;
+      case stmk_switch: switch_statement(s, out); return;
+      case stmk_switch_case:
+        // The labels directly in a switch body are read by switch_statement; any other one is nested (0014 item 1).
+        rejected_statement(s, "a case or default label that is not directly in the braces of its switch");
+        return;
       case stmk_try_block:
       case stmk_microsoft_try: rejected_statement(s, "a try statement"); return;
       case stmk_asm:
@@ -1346,9 +1571,9 @@ class Encoder {
     check_attributes(s->attributes);
     for (an_attribute_ptr a = s->attributes; a != nullptr; a = a->next) {
       if (!is_registered_cerastes(a)) continue;
-      if (s->kind == stmk_while || s->kind == stmk_for) continue;  // invariants and measure: read by the loop
+      if (s->kind == stmk_while || s->kind == stmk_for || s->kind == stmk_end_test_while) continue;  // read by the loop
       // The loop statements this version rejects are rejected as such, once.
-      if (s->kind == stmk_end_test_while || s->kind == stmk_range_based_for || s->kind == stmk_for_each) continue;
+      if (s->kind == stmk_range_based_for || s->kind == stmk_for_each) continue;
       annotation_statement(a, s, out);
     }
   }

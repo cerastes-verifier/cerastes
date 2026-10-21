@@ -54,8 +54,9 @@ it verifies and what it does not:
 
 * *Verified:* functions over `bool` and the integer types in C23 and in
   pass:[C++]20, with locals, arithmetic, comparisons and logical operators,
-  `if`/`else`, `while` and `for` loops with invariants and termination
-  measures, recursion with measures, `return`, calls of
+  `if`/`else`, `switch`, `while`, `do` and `for` loops with invariants and
+  termination measures, `break` and `continue`, recursion with measures,
+  `return`, calls of
   functions that have a contract or a body in the same file, and `check`.
   The integer rules (overflow is an error, unsigned arithmetic wraps, a
   conversion to a signed type must be exact) are on
@@ -63,8 +64,8 @@ it verifies and what it does not:
 * *Reported:* eleven kinds of error, each at a line of your source, with what it
   means and how to fix it on xref:error-messages.adoc[Error messages].
 * *Rejected with a diagnostic, never approximated:* everything else, among it
-  pointers, references, classes, templates, `switch`, `break`, `continue`,
-  bitwise operators and floating point
+  pointers, references, classes, templates, `goto`, bitwise operators and
+  floating point
   (xref:verifying.adoc#not-supported[the list]).
 * *Parsed and checked, not verified:* the annotations beyond `requires`,
   `ensures`, `invariant`, `decreases` and `check`: `fold`, `unfold`, predicates, pure
