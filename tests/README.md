@@ -837,11 +837,14 @@ so the two checks are both required.
 workflows run in CI. `.github/workflows/ci.yml` runs `scripts/ci.sh` (the
 runner's setup and toolchain assertions) and then the full `scripts/check.sh`,
 so the examples run as tests there too, on GitHub's `xcode-27` runner with
-`CERASTES_JOBS=3` (decision 0016). The harness self-test pins both files: `ci_workflow_problems` (the
-triggers, `contents: read`, one job with only five keys, the runner, SHA-pinned actions, the checkout
-options, plain `scripts/ci.sh` then `scripts/check.sh` steps) and `ci_sh_problems` (every toolchain assertion
-of `scripts/ci.sh` as a pinned line, in order, with no early `exit` or `|| true`); the values are pinned in
-the self-test, so loosening an assertion fails it. The docs workflow (`docs.yml`) still builds
+`CERASTES_JOBS=3` (decision 0016). The harness self-test pins the active text of both files:
+`ci_workflow_problems` and `ci_sh_problems` compare every active line (comments and blank lines dropped) with
+a pinned copy, so an extra step, an extra command, a `break` in a loop or a reassigned constant fails it;
+only comments, the `uses:` SHAs, the step and job names, `timeout-minutes` and `CERASTES_JOBS` may change in
+ci.yml, and only comments in ci.sh. Structured rules (the triggers, `contents: read`, one job with only five keys,
+the runner, SHA-pinned actions, the checkout options, plain `scripts/ci.sh` then `scripts/check.sh` steps;
+every toolchain assertion as a pinned line, in order, with no early `exit` or `|| true`) give the diagnostics.
+The docs workflow (`docs.yml`) still builds
 and deploys the docs: it runs the source lint, `scripts/build_docs.sh` (which
 fails on any Antora warning) and the `--html` check, but not the examples as
 tests, because those need the EDG and Silicon toolchain. The harness self-test
