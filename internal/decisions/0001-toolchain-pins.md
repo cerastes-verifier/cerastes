@@ -13,7 +13,7 @@ in both places.
 
 | Component | Pin | Obtained by |
 |---|---|---|
-| EDG front end | the owner's fork `mborland/compiler`, branch `cerastes` (decision 0009, since 2026-10-14; submodule URL https://github.com/mborland/compiler.git), currently at upstream `edgcpp/compiler` `034385ba0a6d08578aa3215fda6f674f2efb0c77` (`git describe`: `7.0-33-g034385ba0a`), upstream `main` head on 2026-10-14: "Fix Python 3.6 compatibility issues []" (committed 2026-10-13T22:23:48Z). Moved from `9847356d` (`7.0-25`) in M2; see "Pin history" | submodule `third_party/edg`; stock preset `macos-arm-clang-debug`, built out of tree in `build/edg` |
+| EDG front end | the owner's fork `mborland/compiler`, branch `cerastes` (decision 0009, since 2026-10-14; submodule URL https://github.com/mborland/compiler.git), currently at the fork's `97c2141be9e6d49c7b44be9e93efeecebf2c2ef6` (2026-10-21): the cerastes series merged with upstream `edgcpp/compiler` `main` `21065e551e` ("Fix filter command escaping and script name []"). The base was upstream `034385ba0a` (`7.0-33`) in M2; see "Pin history" | submodule `third_party/edg`; stock preset `macos-arm-clang-debug`, built out of tree in `build/edg` |
 | Silicon | `viperproject/silicon` tag `v.26.08-release` = `6b540aa45e5af214f4727b7be463ce84b328fabd` | submodule `third_party/silicon`; `sbt assembly` → `target/scala-2.13/silicon.jar` |
 | Silver | `viperproject/silver` `f02e7010639f314447d74732146644565aa8d135` (`v.26.08-release`, the commit Silicon's tag records) | nested submodule `third_party/silicon/silver` |
 | Z3 | 4.16.0, `z3-4.16.0-arm64-osx-15.7.3.zip`, SHA-256 `41828fa07d5cb77bfaee326e8e6dac074f26329c09c633f9e66012bb917cf8ae` | downloaded from the Z3 GitHub release into `build/tools/`, checksum verified |
@@ -170,6 +170,22 @@ binary in a container and checks its outcomes against the recorded ones
   `034385ba`, now fetched from `https://github.com/mborland/compiler.git`.
   Pins that are not yet pushed are fetched through the `fork-local` remote
   (`git -C third_party/edg remote add fork-local ~/Documents/compiler`).
+
+- **Fork pins M2–M4.2a (2026-10-14 to 2026-10-21).** K `23f55e3628`, then
+  `4ff94f065c` (EDG bugs 0003–0007), `0bcd9bf28a` (upstream `307002eae6`
+  merged), P `b9519388ea` (0020 and series L, M, N, P); each is recorded in
+  `internal/status.md`.
+
+- **Upstream merge (S1, 2026-10-21).** P → `97c2141be9`, which merges upstream
+  `main` `21065e551e` into the fork's `cerastes` (10 commits after
+  `307002eae6`: #229, #307 (our 0005 re-committed), #302, #309, #218, CI,
+  issue-template and test-filter commits). Under `src/` only four `.c` files
+  change (`lexical.c`, `statements.c`, `decl_inits.c`, `lower_il.c`; no
+  header, so the IL layout is unchanged; #309's hunk is compiled out with
+  `DO_IL_LOWERING` 0). The full box suites at the merge match the
+  expectations in both 64-bit configurations except the known `cwg1835` and
+  `cwg2881`; every test's emitted Viper (667 `.vpr` and their maps) is
+  byte-identical to P's; `check.sh` is green.
 
 ## Dependabot
 
