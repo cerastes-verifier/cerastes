@@ -32,7 +32,11 @@ status 1) on:
 * jumps (decision 0014 item 9): a backward `goto` (a `goto L` whose `label L` is earlier in the
   same method: a cycle that Silicon does not check for termination), a `label` that carries
   `invariant` clauses (an unchecked loop) and a label defined twice in one method.  A forward
-  `goto` and a label without invariants (`goto l_end` ... `label l_end`) are fine;
+  `goto` and a label without invariants (`goto l_end` ... `label l_end`) are fine; and (decision 0015)
+  a forward `goto` into a block: the `label` must sit in a block (a `{ ... }`: the method body, a
+  `while` body, an `if` or `else` branch) that also encloses the `goto`, so a jump goes outward or
+  stays in its block, never into a loop (which would skip the invariant check on entry) or a branch
+  (which would skip its condition);
 * an empty input set, and a MANIFEST that names a file which is not there.  The
   manifest is the set of files scripts/run_tests.py expects: its first line is
   `# run-id: <id>` (printed by the run), then one file per line.  Fewer files
@@ -461,6 +465,16 @@ def lint_jumps(src: Source, decls: list[Decl], add: Callable[[int, str], None]) 
             continue
         labels: dict[str, int] = {}  # name -> line of its first definition
         body = [(t, ln) for t, ln in tokens if d.line <= ln <= d.end_line]
+        label_blocks, goto_blocks = block_nesting(body)
+        for target, lineno, k_goto, blocks in goto_blocks:
+            if target not in label_blocks:
+                continue  # an undefined label is Silicon's business
+            k_label, inside = label_blocks[target]
+            if k_label > k_goto and inside != blocks[:len(inside)]:
+                add(lineno, f"`goto {target}` into a block: the label is inside a `{{ ... }}` (a `while` "
+                            "body or an `if` or `else` branch) that does not enclose the `goto`; a jump "
+                            "may only go outward or stay in its block (it would skip the loop's "
+                            "invariant check or the branch's condition; decision 0015)")
         for k, (text, lineno) in enumerate(body):
             nxt = body[k + 1] if k + 1 < len(body) else ("", 0)
             if text == "label" and nxt[0]:
@@ -479,6 +493,31 @@ def lint_jumps(src: Source, decls: list[Decl], add: Callable[[int, str], None]) 
                 add(lineno, f"backward `goto {nxt[0]}` (the label is on line {labels[nxt[0]]}): a "
                             "cycle that Silicon does not check for termination (decision 0014); "
                             "loops are `while`")
+
+
+def block_nesting(body: list[tuple[str, int]]):
+    """({label: (token index, the braces that enclose its first definition)}, [(label, line, token
+    index, the braces that enclose the `goto`)]) for the tokens of one method.  A brace is the
+    number of its `{` (outermost first); every `{ ... }` counts, the method body, a `while` body,
+    an `if` or `else` branch, and also the balanced trigger sets of quantifiers, which are closed
+    before any `label` or `goto` that follows them."""
+    labels: dict[str, tuple[int, tuple[int, ...]]] = {}
+    gotos: list[tuple[str, int, int, tuple[int, ...]]] = []
+    stack: list[int] = []
+    count = 0
+    for k, (text, lineno) in enumerate(body):
+        nxt = body[k + 1][0] if k + 1 < len(body) else ""
+        if text == "{":
+            count += 1
+            stack.append(count)
+        elif text == "}":
+            if stack:
+                stack.pop()
+        elif text == "label" and nxt:
+            labels.setdefault(nxt, (k, tuple(stack)))
+        elif text == "goto" and nxt:
+            gotos.append((nxt, lineno, k, tuple(stack)))
+    return labels, gotos
 
 
 def trusted_tag(src: Source, line: int):

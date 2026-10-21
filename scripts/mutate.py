@@ -23,12 +23,16 @@ attributes), never in comments, strings, preprocessor lines or declarations:
   `b`);
 * `swap-logic`: `&&` becomes `||` and `||` becomes `&&`;
 * `delete-stmt`: an expression statement (an assignment, `++`, a call, a
-  `return`, a `break;`, a `continue;`) is replaced by `;`.  Declarations, checks
+  `return`, a `break;`, a `continue;`, a `goto L;`) is replaced by `;`.  A call of a
+  function that does not return (`abort();`, `exit(0);`, a `[[noreturn]]` function) is a
+  call like any other.  Declarations, checks
   (`CERASTES_*`), `static_assert` and compound statements are never deleted.  The
   statement after a `case <k>:` or `default:` label is deleted without its label (the label
   itself is never deleted, and neither is a `switch` or `do` head), and the `break;` or
   `continue;` that is the body of an `if (...)`, `while (...)` or `for (...)` is deleted
-  (decision 0014 item 9).  Other bodies of those heads are not (that would change the ids
+  (decision 0014 item 9), and so is the `goto L;` that is the body of one; a `goto` label
+  `L:` is never deleted either (a dangling `goto` is no mutant of the program), only the
+  statement after it.  Other bodies of those heads are not (that would change the ids
   of the tests of M3).
 
 Mutant ids have the form `<path>:<line>:<column>:<op>:<original>-><new>`, with the
@@ -79,6 +83,11 @@ Known gaps remain, listed in the handoff and deferred to the triage session: C p
 of `!` and chained comparisons, literal coefficients of `*`, the well-definedness of a
 contract after a dropped guard, and uses of the function inside a `#define` body or a
 default argument.
+A deleted `assert(...);` statement (the `<assert.h>` macro, decision 0015) whose argument has no
+call, `++`, `--`, assignment or comma is in the bucket too: the program only loses a check, so it
+is a correct program that a sound verifier must accept, and when it survives (the assertion was
+redundant) that is no hole in the test.  With a call the assert is not only a check (the callee
+may end the program, and what the assert established helps what follows), so it is never bucketed.
 The other contract mutants, a weaker `requires`, a
 stronger `ensures` or `check`, any change of an `invariant` or a `decreases`, one
 that leaves the clause's meaning unchanged, and every mutant of code, are never
@@ -707,6 +716,34 @@ def clause_is_modelled(clause: str, allowed: frozenset) -> bool:
     return True
 
 
+_ASSERT_EFFECT_OPS = {"++", "--", ",", "="}
+
+
+def is_assert_statement(text: str) -> bool:
+    """Whether `text` is exactly one `assert(...);` statement (the `<assert.h>` macro) whose argument
+    has no call, `++`, `--`, assignment or comma."""
+    try:
+        tokens = lex(text)
+        pair = matching(tokens)
+    except LexError:
+        return False
+    if not (len(tokens) >= 4 and tokens[0].kind == "ident" and tokens[0].text == "assert"
+            and tokens[1].text == "(" and pair.get(1) == len(tokens) - 2
+            and tokens[-1].text == ";"):
+        return False
+    # the argument must be pure: a call (it may end the program, so deleting the assert can make
+    # what follows fail: `assert(checked(x) == 1)`), an increment, an assignment or a comma may
+    # change what the rest of the function sees, so such a mutant is not the safe direction
+    inner = tokens[2:-2]
+    for k, t in enumerate(inner):
+        if t.kind == "op" and (t.text in _ASSERT_EFFECT_OPS or t.text.endswith("=")
+                               and t.text not in ("==", "!=", "<=", ">=")):
+            return False
+        if t.kind == "ident" and k + 1 < len(inner) and inner[k + 1].text == "(":
+            return False
+    return True
+
+
 def is_safe_direction(m: "Mutant", src: str) -> bool:
     """A mutant of a contract that makes it easier to meet: a stronger `requires`, a
     weaker `ensures` or `check`.  Never a mutant of code, and never an `invariant` or
@@ -714,6 +751,10 @@ def is_safe_direction(m: "Mutant", src: str) -> bool:
     docstring): every variable a signed builtin integer parameter of the enclosing function (the
     `ensures` result only if the return type is one), a linear clause, no `==`/`!=` flip,
     and, for a stronger `requires` or a weaker `ensures`, no use of the function in the file."""
+    if m.op == "delete-stmt":
+        # an `assert(e);` deleted: the program only loses a check, which a sound verifier must
+        # accept (a survivor needs no kill and no entry in the equivalence list; decision 0015)
+        return is_assert_statement(src[m.start:m.end])
     found = contract_clause(src, m.start)
     if found is None or found[0] not in ("REQUIRES", "ENSURES", "CHECK"):
         return False
@@ -781,11 +822,31 @@ def statement_mutants(src, tokens, pair, open_i, close_i, position, path) -> lis
     return out
 
 
+def is_user_label(tokens: list[Token], i: int, semi: int) -> bool:
+    """Whether tokens[i] is the name of a `goto` label: `name :` (the `:` is a token of its own:
+    `name::x` lexes as `::`), where `name` is not `case`, `default` or another keyword."""
+    return (tokens[i].kind == "ident" and tokens[i].text not in _COMPOUND_KEYWORDS
+            and tokens[i].text not in _DECL_KEYWORDS and i + 1 < semi
+            and tokens[i + 1].kind == "op" and tokens[i + 1].text == ":")
+
+
+def is_goto(tokens: list[Token], i: int, semi: int) -> bool:
+    """Whether tokens[i..semi] is `goto name ;` (the `;` is tokens[semi]): a forward jump the
+    mutation may delete.  A computed `goto *p;` is not (its target is no name)."""
+    return (tokens[i].kind == "ident" and tokens[i].text == "goto" and i + 2 == semi
+            and tokens[i + 1].kind == "ident")
+
+
 def skip_labels(tokens: list[Token], pair: dict[int, int], first: int, semi: int) -> int:
-    """Index of the first token after the `case <value>:` and `default:` labels that open
-    tokens[first..semi] (`first` itself when there is none or a label is malformed)."""
+    """Index of the first token after the labels that open tokens[first..semi]: `case <value>:`,
+    `default:` and a `goto` label `name:` (`first` itself when there is none or a `case` label is
+    malformed)."""
     i = first
-    while i < semi and tokens[i].kind == "ident" and tokens[i].text in ("case", "default"):
+    while i < semi and ((tokens[i].kind == "ident" and tokens[i].text in ("case", "default"))
+                        or is_user_label(tokens, i, semi)):
+        if is_user_label(tokens, i, semi):
+            i += 2
+            continue
         j = i + 1
         if tokens[i].text == "case":
             ternary = 0
@@ -820,6 +881,8 @@ def deletable_target(tokens: list[Token], pair: dict[int, int], first: int, semi
         i = pair[i + 1] + 1
     if i != body and i == semi - 1 and tokens[i].kind == "ident" and tokens[i].text in _JUMPS:
         return i
+    if i != body and is_goto(tokens, i, semi):
+        return i
     return None
 
 
@@ -828,6 +891,8 @@ def is_deletable(tokens: list[Token], first: int, semi: int) -> bool:
     empty, not a declaration, a check, an attribute or a compound statement."""
     if first >= semi:
         return False
+    if is_goto(tokens, first, semi):
+        return True
     t = tokens[first]
     if t.kind == "op" and t.text in ("[", "{", "}"):
         return False

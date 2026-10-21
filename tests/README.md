@@ -349,6 +349,7 @@ and the harness self-test compares this table with the decision record.
 | `conversion` | a conversion to a signed type may not fit | the conversion |
 | `missing-return` | a non-`void` function may reach its end without `return` | the closing brace |
 | `termination` | a termination measure (`decreases`) may be negative or may not decrease (decision 0013) | the loop's `decreases` clause, or the recursive call |
+| `noreturn` | a function declared `[[noreturn]]` or `_Noreturn` may return (decision 0015) | the reachable `return`, or the closing brace |
 
 ## Every back-end diagnostic has a test
 

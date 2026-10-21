@@ -1984,7 +1984,8 @@ class ErrorMessagesPageTests(DocLintCase):
     def test_the_categories_are_the_drivers(self):
         self.assertEqual(self.CATEGORIES, sorted([
             "precondition", "postcondition", "check", "invariant-entry", "invariant-preserved",
-            "overflow", "division-by-zero", "shift", "conversion", "missing-return", "termination"]))
+            "overflow", "division-by-zero", "shift", "conversion", "missing-return", "termination",
+            "noreturn"]))
 
     def test_it_is_inactive_without_the_page_and_without_verify_tests(self):
         self.assertEqual(self.messages(), [])
@@ -8293,7 +8294,8 @@ class VerifyHeaderTests(unittest.TestCase):
         # error-messages page and the tests: a reviewed change.
         self.assertEqual(rt.DRIVER_CATEGORIES, frozenset({
             "precondition", "postcondition", "check", "invariant-entry", "invariant-preserved",
-            "overflow", "division-by-zero", "shift", "conversion", "missing-return", "termination"}))
+            "overflow", "division-by-zero", "shift", "conversion", "missing-return", "termination",
+            "noreturn"}))
         self.assertEqual(rt.VERIFY_KINDS, ("verified", "error", "rejected"))
 
     def test_every_category_parses_in_c_and_cpp(self):

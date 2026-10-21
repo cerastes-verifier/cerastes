@@ -283,7 +283,7 @@ class TargetTests(unittest.TestCase):
                      "uint8_t u = 5;", "struct p q = {1};", "CERASTES_CHECK(x > 0);",
                      "CERASTES_FOLD(p);", "static_assert(1, \"m\");", "_Static_assert(1, \"m\");",
                      ";", "if (x) y = 1;", "while (x) x--;", "for (;;) y = 1;",
-                     "switch (x) { }", "goto l;", "typedef int T;",
+                     "switch (x) { }", "goto *p;", "typedef int T;",
                      "do { } while (x);", "switch (x) { case 1: ; default: ; }"):
             with self.subTest(stmt):
                 self.assertEqual(self.statements("  " + stmt), [], stmt)
@@ -409,8 +409,74 @@ class TargetTests(unittest.TestCase):
         self.assertEqual(self.statements("  while (x) ;"), [])
 
     def test_jump_statements_with_other_tokens_are_not_deleted(self):
-        self.assertEqual(self.statements("  goto l;"), [])
+        self.assertEqual(self.statements("  goto *p;"), [])  # a computed goto has no label to keep
+        self.assertEqual(self.statements("  goto l, m;"), [])
         self.assertEqual(self.statements("  breaker = 1;"), ["breaker = 1;"])
+        self.assertEqual(self.statements("  gotox l;"), [])  # a declaration-shaped statement
+        self.assertEqual(self.statements("  goto_l = 1;"), ["goto_l = 1;"])
+
+    # -- goto, labels, noreturn calls and assert (decision 0015) --
+
+    def test_a_goto_is_deleted(self):
+        got = self.statements("  if (y) {\n    goto done;\n  }\n  y = 1;\n  done: return y;")
+        self.assertEqual(got, ["goto done;", "y = 1;", "return y;"])
+
+    def test_a_deleted_goto_becomes_an_empty_statement_and_nothing_else_changes(self):
+        src = body("  if (y) {\n    goto done;\n  }\n  y = 1;\n  done: return y;")
+        (m,) = [m for m in mu.mutants_of(src, "t.c") if m.original == "goto done;"]
+        self.assertEqual(m.apply(src), src.replace("goto done;", ";"))
+        self.assertEqual((m.line, m.column), (4, 5))
+        self.assertEqual(m.id, "t.c:4:5:delete-stmt:goto done;->;")
+
+    def test_the_goto_that_is_the_body_of_a_head_is_deleted_but_no_other_body(self):
+        got = self.statements("  if (y) goto out;\n  while (x) if (y) goto out;\n"
+                              "  for (;;) goto out;\n  if (x) y = 1;\n  out: ;")
+        self.assertEqual(got, ["goto out;", "goto out;", "goto out;"])
+        src = body("  if (y) goto out;\n  out: ;")
+        (m,) = [m for m in mu.mutants_of(src, "t.c") if m.op == "delete-stmt"]
+        self.assertEqual(m.apply(src), src.replace("goto out;", ";"))
+        self.assertEqual((m.line, m.column), (3, 10))
+
+    def test_the_goto_after_else_and_a_label_is_deleted(self):
+        got = self.statements("  if (y) { } else goto out;\n  out: goto out2;\n  out2: ;")
+        self.assertEqual(got, ["goto out;", "goto out2;"])
+
+    def test_a_user_label_is_never_deleted_only_the_statement_after_it(self):
+        src = body("  if (y) goto done;\n  done: y = 1;")
+        mutants = [m for m in mu.mutants_of(src, "t.c") if m.op == "delete-stmt"]
+        self.assertEqual([m.original for m in mutants], ["goto done;", "y = 1;"])
+        self.assertEqual(mutants[1].apply(src).split("\n")[3], "  done: ;")
+        self.assertEqual((mutants[1].line, mutants[1].column), (4, 9))
+
+    def test_labels_followed_by_no_deletable_statement_give_no_mutant(self):
+        for stmt in ("l: ;", "l: int z = 1;", "l: CERASTES_CHECK(x > 0);", "l: { }",
+                     "l: if (y) { }", "l: m: ;", "l: while (y) y--;"):
+            with self.subTest(stmt):
+                got = [m.original for m in mu.mutants_of(body("  " + stmt), "t.c")
+                       if m.op == "delete-stmt"]
+                self.assertEqual(got, [], stmt)
+
+    def test_labels_chain_before_one_statement_with_case_labels(self):
+        self.assertEqual(self.statements("  switch (x) { case 1: l: m: y = 1; }"), ["y = 1;"])
+
+    def test_a_statement_that_merely_contains_a_colon_is_still_one_statement(self):
+        # not a label: the `:` is not the second token, or is part of `::`
+        self.assertEqual(self.statements("  x ? y : z;"), ["x ? y : z;"])
+        self.assertEqual(self.statements("  y = x ? 1 : 2;"), ["y = x ? 1 : 2;"])
+        self.assertEqual(self.statements("  ns::f(y);"), ["ns::f(y);"])
+
+    def test_a_call_of_a_noreturn_function_is_deleted_like_any_call(self):
+        got = self.statements("  if (x == 0) abort();\n  if (y == 0) {\n    exit(1);\n  }\n"
+                              "  _Exit(2);\n  fail();\n  die(y);\n  return 0;")
+        self.assertEqual(got, ["exit(1);", "_Exit(2);", "fail();", "die(y);", "return 0;"])
+        # (the body of an `if` that is a call stays: only a jump is the body of a head)
+
+    def test_an_assert_statement_is_deleted(self):
+        got = self.statements("  assert(x > 0);\n  assert(x > 0 && y < 3);\n  return x;")
+        self.assertEqual(got, ["assert(x > 0);", "assert(x > 0 && y < 3);", "return x;"])
+
+    def test_an_assert_is_not_a_check_and_a_static_assert_is_never_deleted(self):
+        self.assertEqual(self.statements("  static_assert(1, \"m\");\n  CERASTES_CHECK(x > 0);"), [])
 
 
 def re_return(text):
@@ -1341,6 +1407,105 @@ class SafeDirectionModelTests(unittest.TestCase):
         src = ("int f(int x)\n{\n  CERASTES_CHECK(x >= 0 && x <= 5);\n  return x;\n}\n"
                "int g(int y) { return f(y); }\n")
         self.assertTrue(self.safe(src, "literal:5->6", line=3))
+
+
+class AssertDeletionTests(RunCase):
+    """Decision 0015: deleting an `assert(e);` only removes a check, so such a mutant that survives
+    is in the safe-direction bucket (a correct program a sound verifier must accept).  Every other
+    deleted statement, a call of `abort` included, is still killed or listed."""
+
+    SRC = ("// expect: verified\n"
+           "int f(int x)\n"
+           "{\n"
+           "  assert(x > 0);\n"
+           "  x = x + 1;\n"
+           "  return x;\n"
+           "}\n")
+
+    def safe(self, src, needle):
+        found = [m for m in mu.mutants_of(src, "x.c") if "delete-stmt" in m.id and needle in m.id]
+        self.assertEqual(len(found), 1, (needle, [m.id for m in mu.mutants_of(src, "x.c")]))
+        return mu.is_safe_direction(found[0], src)
+
+    def test_a_deleted_assert_is_safe_direction(self):
+        self.assertTrue(self.safe(self.SRC, "assert(x > 0);"))
+
+    def test_an_assert_with_a_message_or_nested_parentheses_is_safe_direction(self):
+        for stmt in ('assert(x > 0 && "message (with parentheses)");', "assert((x > 0) == (x > 1));",
+                     "assert (x > 0);", "assert(x >= 0 && x != 3 && x <= 100);"):
+            with self.subTest(stmt):
+                src = self.SRC.replace("assert(x > 0);", stmt)
+                self.assertTrue(self.safe(src, "assert"), stmt)
+
+    def test_other_deleted_statements_are_not_safe_direction(self):
+        for stmt in ("x = x + 1;", "abort();", "exit(1);", "fail();", "return x;", "x++;"):
+            with self.subTest(stmt):
+                src = self.SRC.replace("assert(x > 0);", stmt)
+                found = [m for m in mu.mutants_of(src, "x.c") if m.op == "delete-stmt"]
+                self.assertTrue(found)
+                for m in found:
+                    self.assertFalse(mu.is_safe_direction(m, src), m.id)
+
+    def test_a_statement_that_only_starts_with_an_assert_is_not_safe_direction(self):
+        # the second operand of the comma has an effect that the deletion would also remove
+        for stmt in ("assert(x > 0), x++;", "assert(x > 0) + 1;", "my_assert(x > 0);",
+                     "assert_that(x > 0);", "(assert(x > 0));", "assert;", "assert x;"):
+            with self.subTest(stmt):
+                src = self.SRC.replace("assert(x > 0);", stmt)
+                found = [m for m in mu.mutants_of(src, "x.c") if m.op == "delete-stmt"
+                         and m.original.startswith(stmt[:6])]
+                for m in found:
+                    self.assertFalse(mu.is_safe_direction(m, src), m.id)
+
+    def test_an_assert_with_a_call_or_an_effect_is_not_safe_direction(self):
+        # `checked(x)` may end the program (exit) unless x > 0: deleting the assert loses what
+        # follows from it, and the mutant can fail to verify: it is not the safe direction
+        for stmt in ("assert(g(x, (1)));", "assert(checked(x) == 1);", "assert(x++ > 0);",
+                     "assert(--x > 0);", "assert((x = 1) > 0);", "assert((x += 1) > 0);",
+                     "assert((x, 1));", "assert(x <<= 1);", "assert(sizeof(x) > 0);"):
+            with self.subTest(stmt):
+                src = self.SRC.replace("assert(x > 0);", stmt)
+                (m,) = [m for m in mu.mutants_of(src, "x.c")
+                        if m.op == "delete-stmt" and m.original.startswith(stmt[:12])]
+                self.assertFalse(mu.is_safe_direction(m, src), stmt)
+
+    def test_comparison_operators_with_an_equals_sign_are_not_assignments(self):
+        for stmt in ("assert(x == 1);", "assert(x != 1);", "assert(x <= 1);", "assert(x >= 1);"):
+            with self.subTest(stmt):
+                src = self.SRC.replace("assert(x > 0);", stmt)
+                (m,) = [m for m in mu.mutants_of(src, "x.c")
+                        if m.op == "delete-stmt" and m.original == stmt]
+                self.assertTrue(mu.is_safe_direction(m, src), stmt)
+
+    def test_a_deleted_goto_is_not_safe_direction(self):
+        src = "int f(int x)\n{\n  if (x) goto out;\n  x = 1;\n  out: return x;\n}\n"
+        (m,) = [m for m in mu.mutants_of(src, "x.c") if m.original == "goto out;"]
+        self.assertFalse(mu.is_safe_direction(m, src))
+
+    def run_with_survivors(self, text, survive):
+        t = self.put("a.c", text)
+        mutants = mu.mutants_of(text, mu.display_path(t))
+        keep = {m.apply(text) for m in mutants if any(part in m.id for part in survive)}
+        self.set_rules([[m.apply(text), 1, None] for m in mutants if m.apply(text) not in keep])
+        return self.run_main(t)
+
+    def test_a_surviving_deleted_assert_is_counted_in_the_bucket_not_unexplained(self):
+        status, out, _ = self.run_with_survivors(self.SRC, ["delete-stmt:assert(x > 0);->;"])
+        self.assertEqual(status, 0, out)
+        self.assertIn("1 safe-direction, 0 unexplained survivors", out)
+        self.assertNotIn("SURVIVED", out)
+
+    def test_a_surviving_deleted_abort_is_an_unexplained_survivor(self):
+        src = self.SRC.replace("assert(x > 0);", "abort();")
+        status, out, _ = self.run_with_survivors(src, ["delete-stmt:abort();->;"])
+        self.assertEqual(status, 1, out)
+        self.assertIn("SURVIVED", out)
+        self.assertIn("0 safe-direction", out)
+
+    def test_a_killed_deleted_assert_is_killed(self):
+        status, out, _ = self.run_with_survivors(self.SRC, [])
+        self.assertEqual(status, 0, out)
+        self.assertIn("0 safe-direction, 0 unexplained survivors", out)
 
 
 class ZeroTargetTests(RunCase):

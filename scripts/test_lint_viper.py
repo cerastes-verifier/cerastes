@@ -1218,6 +1218,174 @@ class JumpTests(unittest.TestCase):
         lines.insert(find(lines, "  var i__1: Int := 0") + 1, "  // label l_a")
         self.assertEqual(self.strict(lines), [])
 
+    # -- a goto into a block (decision 0015) --
+
+    def nested_loops(self, goto_at, label_at):
+        """The good fixture with a second `while` inside the one of g__3, a `goto l_x` at the
+        place `goto_at` and a `label l_x` at `label_at`, each one of 'before' (before the outer
+        loop), 'outer' (in the outer body, before the inner loop), 'inner' (in the inner body),
+        'after_inner' (the outer body, after the inner loop), 'after' (after the outer loop).
+        At one place the goto comes first."""
+        lines = good_lines()
+        lines.insert(find(lines, "  while (i__1 < y)"), "@before@")
+        lines.insert(find(lines, "  var t__2: Int"), "@after@")
+        i = find(lines, "    i__1 := i__1 + 1")
+        lines[i:i] = [
+            "@outer@",
+            "    while (i__1 < y)",
+            Check("      invariant 0 <= i__1", INV, "invariant-preserved"),
+            Check("      decreases y - i__1", "termination.failed", "termination"),
+            "    {",
+            "@inner@",
+            "    }",
+            "@after_inner@",
+        ]
+        out = []
+        for line in lines:
+            if isinstance(line, str) and line.startswith("@"):
+                name = line.strip("@")
+                out += (["  goto l_x"] if name == goto_at else []) \
+                    + (["  label l_x"] if name == label_at else [])
+            else:
+                out.append(line)
+        return out
+
+    def test_a_goto_into_a_loop_body_is_a_problem(self):
+        probs = self.strict(self.nested_loops("before", "outer"))
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`goto l_x` into a block", probs[0])
+        self.assertIn("decision 0015", probs[0])
+
+    def test_the_problem_is_reported_at_the_goto(self):
+        lines = self.nested_loops("before", "outer")
+        text, _ = build(lines)
+        goto_line = text.split("\n").index("  goto l_x") + 1
+        (prob,) = self.strict(lines)
+        self.assertTrue(prob.startswith(f"t.vpr:{goto_line}:"), prob)
+
+    def test_a_goto_into_an_inner_loop_from_the_outer_one_is_a_problem(self):
+        probs = self.strict(self.nested_loops("outer", "inner"))
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("into a block", probs[0])
+
+    def test_a_goto_from_one_loop_body_into_another_is_a_problem(self):
+        # a jump from the inner body to a label in the body of a later loop: not enclosed
+        lines = good_lines()
+        i = find(lines, "  var t__2: Int")
+        lines[i:i] = [
+            "  while (i__1 < y)",
+            Check("    invariant 0 <= i__1", INV, "invariant-preserved"),
+            Check("    decreases y - i__1", "termination.failed", "termination"),
+            "  {",
+            "    label l_second",
+            "  }",
+        ]
+        j = find(lines, "    i__1 := i__1 + 1")
+        lines.insert(j, "    goto l_second")
+        probs = self.strict(lines)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`goto l_second` into a block", probs[0])
+
+    def test_a_goto_out_of_a_loop_is_clean(self):
+        self.assertEqual(self.strict(self.nested_loops("outer", "after")), [])
+
+    def test_a_goto_out_of_nested_loops_is_clean(self):
+        self.assertEqual(self.strict(self.nested_loops("inner", "after")), [])
+        self.assertEqual(self.strict(self.nested_loops("inner", "after_inner")), [])
+
+    def test_a_goto_within_one_loop_body_is_clean(self):
+        self.assertEqual(self.strict(self.nested_loops("outer", "after_inner")), [])
+        self.assertEqual(self.strict(self.nested_loops("inner", "inner")), [])
+
+    def test_a_goto_and_its_label_outside_every_loop_are_clean(self):
+        self.assertEqual(self.strict(self.nested_loops("before", "after")), [])
+
+    def test_a_quantifier_trigger_in_the_loop_header_does_not_open_the_body(self):
+        # the trigger set `{ f(i) }` of an invariant is not the loop's `{`: the label after the
+        # loop is outside the loop, and the label inside the body is inside it
+        lines = good_lines()
+        i = find(lines, "    invariant 0 <= i__1")
+        lines[i] = Check("    invariant forall k: Int :: { c_abs(k) } c_abs(k) >= 0", INV,
+                         "invariant-preserved")
+        lines[i], lines[i + 1] = lines[i + 1], lines[i]  # the older `decreases` lint reads up to the first `{`
+        j = find(lines, "  var t__2: Int")
+        lines.insert(j, "  label l_out")
+        lines.insert(find(lines, "  var i__1: Int := 0") + 1, "  goto l_out")
+        self.assertEqual(self.strict(lines), [])
+        k = find(lines, "    i__1 := i__1 + 1")
+        lines[k + 1:k + 1] = ["    label l_in"]
+        lines.insert(find(lines, "  var i__1: Int := 0") + 1, "  goto l_in")
+        probs = self.strict(lines)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`goto l_in` into a block", probs[0])
+
+    def test_two_trigger_sets_in_the_header_do_not_open_the_body(self):
+        lines = good_lines()
+        i = find(lines, "    invariant 0 <= i__1")
+        lines[i] = Check("    invariant forall k: Int :: { c_abs(k) } { c_abs(k + 1) } c_abs(k) >= 0",
+                         INV, "invariant-preserved")
+        lines[i], lines[i + 1] = lines[i + 1], lines[i]
+        lines.insert(find(lines, "  var t__2: Int"), "  label l_out")
+        lines.insert(find(lines, "  var i__1: Int := 0") + 1, "  goto l_out")
+        self.assertEqual(self.strict(lines), [])
+
+    def test_a_goto_into_an_if_branch_is_a_problem(self):
+        lines = good_lines()
+        i = find(lines, "  var t__2: Int")
+        lines[i:i] = ["  if (y > 0) {", "    label l_if", "  }"]
+        lines.insert(find(lines, "  var i__1: Int := 0") + 1, "  goto l_if")
+        probs = self.strict(lines)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`goto l_if` into a block", probs[0])
+
+    def test_a_goto_from_the_else_branch_into_the_then_branch_is_a_problem(self):
+        # the label is earlier than the goto only if the then-branch is written first: here the goto
+        # is in the then-branch and the label in the else-branch, and the reverse needs a label that
+        # comes after the goto: two ifs
+        lines = good_lines()
+        i = find(lines, "  var t__2: Int")
+        lines[i:i] = ["  if (y > 0) {", "    goto l_else", "  } else {", "    label l_else", "  }"]
+        probs = self.strict(lines)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`goto l_else` into a block", probs[0])
+
+    def test_a_goto_out_of_nested_ifs_and_loops_is_clean(self):
+        lines = good_lines()
+        i = find(lines, "  var t__2: Int")
+        lines[i:i] = ["  if (y > 0) {", "    if (y > 1) {", "      goto l_far", "    } else {",
+                      "      goto l_far", "    }", "  }", "  label l_far"]
+        self.assertEqual(self.strict(lines), [])
+        lines = self.nested_loops("inner", "after")
+        j = lines.index("  goto l_x")
+        lines[j:j] = ["  if (y > 0) {", "  if (y > 1) {"]
+        lines[j + 3:j + 3] = ["  }", "  }"]
+        self.assertEqual(self.strict(lines), [])
+
+    def test_a_goto_to_a_label_later_in_the_same_if_branch_is_clean(self):
+        lines = good_lines()
+        i = find(lines, "  var t__2: Int")
+        lines[i:i] = ["  if (y > 0) {", "    goto l_in", "    label l_in", "  }"]
+        self.assertEqual(self.strict(lines), [])
+
+    def test_a_goto_from_a_loop_body_to_a_label_in_the_enclosing_branch_is_clean(self):
+        lines = good_lines()
+        i = find(lines, "  var i__1: Int := 0")
+        lines.insert(i, "  if (y > 0) {")
+        lines.insert(find(lines, "  var t__2: Int"), "  label l_end_of_branch")
+        lines.insert(find(lines, "  var t__2: Int"), "  }")
+        lines.insert(find(lines, "    i__1 := i__1 + 1"), "    goto l_end_of_branch")
+        self.assertEqual(self.strict(lines), [])
+
+    def test_a_goto_to_a_label_never_defined_is_not_this_rules_business(self):
+        lines = good_lines()
+        lines.insert(find(lines, "  var i__1: Int := 0") + 1, "  goto l_nowhere")
+        self.assertEqual(self.strict(lines), [])
+
+    def test_a_goto_in_a_comment_into_a_loop_is_ignored(self):
+        lines = self.nested_loops("before", "outer")
+        lines[lines.index("  goto l_x")] = "  // goto l_x"
+        self.assertEqual(self.strict(lines), [])
+
 
 if __name__ == "__main__":
     unittest.main()
