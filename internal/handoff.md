@@ -1,54 +1,49 @@
-# Handoff after the M3 close-out (2026-10-20)
+# Handoff after M4.1 — control flow, and the plan re-sequenced (2026-10-20)
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
-rediscover. The M3 handoff (with the owner's answers) is `git show 80b9e35:internal/handoff.md`; the M2 one is
-`git show e8830f9:internal/handoff.md`.
+rediscover. The M3 close-out handoff is `git show a4da52c:internal/handoff.md`; the M3 handoff (with the owner's
+answers) `git show 80b9e35:internal/handoff.md`.
 
 ## 1. State in one paragraph
 
-The M3 close-out is done on branch `worktree-m3-closeout` (§2 step 1 brings it to `main`). The pin is the fork's P
-`b9519388ea` (EDG bug 0020 + series L, M, N, P): a lambda in a contract can name a template parameter, in function
-templates and member templates too, and `predicate`/`pure` carry `RAF_NO_CONSTANT_EVALUATION`, so the front end
-refuses to evaluate a spec function at compile time. The tooling should-fix items of the M3 audit are done; the
-tightened safe-direction classifier moved 74 mutants out of the bucket, and their triage is its own short session
-(§5). Planned at ≤ 4 h, the session ran about 1 h of wall-clock time (16:24 to 17:25), plus the planning step.
-Nothing is pushed.
+The milestones are renumbered (owner, 2026-10-20; `plan.md`, top): the new **M4 is the rest of C** (M4.1–M4.8,
+pointers in M4.5a–f, VerCors as the reference), generic templates are **M5** (M5a–M5g), concepts M6, **C++ memory
+and classes M7**, the inventory M8, evaluation M9; every record is renumbered and notes it. **M4.1 is done** on branch
+`m4.1-control-flow`: `break`, `continue`, `do … while` (and `do … while (0)` without a measure) and `switch` verify,
+with decision 0014, 86 new tests, VIR self-test 204 cases and the docs. The pin is unchanged (P `b9519388ea`).
+Open from M4.1: 70 surviving mutants of the new tests go to the mutation triage session (§5). Nothing is pushed.
+Planned at ≤ 4 h, the session used about 4 h (18:53–22:50), most of it the test-mutator's mutation runs.
 
 ## 2. Owner steps, in this order
 
-1. **Bring the session branch into `main`.** The work is on `worktree-m3-closeout` (worktree
-   `.claude/worktrees/m3-closeout`). Your main checkout still has your uncommitted `plan.md` and
-   `internal/handoff.md` edits; commit `80b9e35` holds them verbatim (`plan.md` plus the folded answers), so
-   discard them and fast-forward:
+1. **Bring the branch into `main`.** The work is on `m4.1-control-flow` in the worktree `.claude/worktrees/m3-closeout`
+   (based on `main` `bfeda03`):
    ```
    cd ~/Documents/cerastes/cerastes
-   git checkout -- plan.md internal/handoff.md
-   git merge --ff-only worktree-m3-closeout
-   git -C third_party/edg fetch fork-local && git submodule update third_party/edg
+   git merge --ff-only m4.1-control-flow
    scripts/bootstrap.sh --build-only
-   git worktree remove .claude/worktrees/m3-closeout   # when you no longer need it
    ```
-2. **Push the fork's `cerastes`** (`git -C ~/Documents/compiler push origin cerastes`): it is `b9519388ea`, 6 commits
-   ahead of GitHub (0020's merge, L, M, N, P). `check.sh` reports `NOT YET PUSHED` until then.
+   The old branch `worktree-m3-closeout` is fully merged; the worktree can be removed when no longer needed
+   (`git worktree remove .claude/worktrees/m3-closeout`).
+2. **Push the fork's `cerastes`** (`git -C ~/Documents/compiler push origin cerastes`): GitHub still has `0bcd9bf28a`;
+   the pin P `b9519388ea` is 6 commits ahead. `check.sh` reports `NOT YET PUSHED` until then.
 3. **Push cerastes `main`.**
-4. **Branch `0020`** (`c539de4101`) is kept for the upstream PR, but its Linux failure is still unexplained (§4).
-5. **Agent evidence:** the fork's `.tmp/agent-*` directories are still there (M3 handoff §2 step 5). The chain
-   worktrees `build/wt-0020`, `wt-0020c`, `wt-L`, `wt-M`, `wt-N`, `wt-P` and the branches `tmp-*` are removed.
+4. Unchanged from the close-out: branch `0020` (`c539de4101`) kept for the upstream PR, its Linux failure unexplained
+   (§4); the fork's `.tmp/agent-*` evidence directories.
 
 ## 3. What the session did
 
 | Item | Outcome |
 |---|---|
-| Fork | `cerastes` fast-forwarded `0bcd9bf28a` → `b9519388ea`; nothing new in EDG |
-| Pin | `third_party/edg` → `b9519388ea`; at P, before the registration, exactly the two forall-over-`T` tests changed (1220 pass, 2 fail) |
-| R1 moves (owner, 2026-10-16) | the negative test and the doc error example became positives with goldens; a member-template positive; five twins (a `decltype` parameter used, unused, of a plain `int`; function parameter packs in a member template and a variadic class template); goldens checked against `--il_display` by a second agent |
-| Registration | `predicate`/`pure` get `RAF_NO_CONSTANT_EVALUATION`; 13 tests and 1 doc example move from `cerastes-spec_call_in_code` / `cerastes-spec_marker_on_special_member` to EDG's `expr_not_constant` / `attr_no_constant_evaluation_on_defaulted_function` at the same line (owner rule, 2026-10-20) |
-| r4a | outside the rule; owner (2026-10-20): 18 contexts are EDG errors at their own lines (the five no-trace ones included), the 6 EDG accepts are covered by `constant_context_c12, c13, c17, c1b, c8, c16` |
-| Tooling | `mutate.py --list`; lint rejects `decreases *` and conditional `decreases`; the classifier (§5) |
-| Harness | `annotation_substitution_error` left the self-test-only list (it has a source test now, §6); the walker oracle recognises the closure copies series L makes for instances |
-| Records | 0006 (forall, R4a), 0007 (L, M, N, P, the flag), 0013 item 5 (lint), the upstream draft (P, §5.14), plan.md (owner answers, CI session section) |
-| Docs | Annotations page: forall over `T` works, what is still rejected, the constexpr passage |
+| Planning (owner's question: plan M4) | Exploring M4 (generic templates) showed G2 needs memory; the owner re-sequenced the plan (§1); this session designed and wrote down every M4 and M5 session (§8), with the VerCors study for M4.5 |
+| Renumbering | `plan.md` (table at the top), the handoff, `encoding.md`, `il-inventory.md`, `tests/README.md`, records 0001/0006/0007/0008/0010–0013, the upstream draft, two code comments; mapped by meaning (old M6 → M4.5 for C, M7 for C++) |
+| Decision 0014 | control flow: structured VIR jumps, invariants and measure on `continue` paths, `do` invariants at the start of each iteration, `do … while (0)` as straight-line code with an internal guard, `switch` dispatch, case values by their original expression, the rejections, #546 suppressed; amends 0010–0013 |
+| Code | `encode.cpp` (target stack with label-shape checks, `do`, `switch`, `step`, `fallthrough` allowed, case values through the constant path, label attributes checked), `src/vir` (forms, `check_program` rules incl. innermost targets, lowering), `verify_main.cpp` (#546) |
+| Tooling | `mutate.py` deletes `break;`/`continue;` and case bodies; `lint_viper.py` rejects backward gotos, labels with invariants, duplicate labels |
+| Tests | 86 new files in `tests/scalar` (31 positives, 55 twins and rejections, both modes where C++ accepts them); `reject_{break,continue,do_while,switch}.c` retired (owner); VIR self-test 155 → 204 lowering cases (+ 75 rejection cases) |
+| Docs | Verifying a program (control-flow section with `control_flow.c`; `rejected_double.cpp` replaces `rejected_switch.cpp`; rejected list), Annotations (`do` invariants, `decreases` before `do`, the `do … while (0)` exemption), Overview |
+| Audits (Opus) | 0014: 1 blocking (EDG folds `case 1 << 40` to 0 with a suppressed warning: case values now encoded by their original expression), 5 should-fix, all taken; code: 0 blocking, 4 should-fix taken (`for (int k…)` in a case, `case k`, stale text, an `__int128` overflow in the checker), notes in §6 |
 
 ## 4. The CI session (after M4.1; owner 2026-10-16 and 2026-10-20)
 
@@ -85,6 +80,17 @@ edited expect line) or listed in `tests/mutants-equivalent.txt` with a reason, r
 expects 7 of the 8 caller-ensures leavers to be killed already; `call_result_conversion.c:9:40 100->101` is safe.
 Fold in audit A's should-fix items (§6) at the same time. Until then M3's "0 unexplained survivors" holds for the
 old bucket only.
+
+**M4.1's survivors (added 2026-10-20).** The mutation run on the 31 new positives (`python3 scripts/mutate.py -j 8
+<files>`; 1403 mutants: 991 killed, 299 in the safe-direction bucket, 27 stillborn) left **70 survivors**, which the
+session's stop rule moved here. test-mutator's proposals are in `build/m4-staging/equivalents-proposed.txt` (id, tab,
+reason; untracked — copy it before cleaning `build/`). 34 of them are in `continue_cond_div.c` and
+`do_continue_cond_div.c`: test weakness, not equivalence (deleting the `continue;` survives) — strengthen those two
+positives (an exact `ensures` on a result the continue branch changes; the twins may keep a weaker invariant so that
+the reported error stays `division-by-zero`, said in their headers). The other 36 look like genuine equivalents or
+safe-direction mutants (the last `break` of a switch, dead initialisers, measures of loops that never repeat, slack
+bounds, `while (1)` → `while (2)`, weaker `ensures` on unsigned parameters, which the classifier does not model);
+each needs the auditor's review before it enters `tests/mutants-equivalent.txt`.
 
 ## 6. Should-fix items and known gaps
 
@@ -132,6 +138,14 @@ Deferred (probes in the job's scratch directory are gone; the shapes are given h
   first and the back end does not run. They stay as defence in depth (0006 says so).
 - **Accepted, correct:** in a member of a class template, a `forall` lambda parameter written `decltype(member)` is
   accepted and substituted correctly (il-analyst, `--il_display` check); `sizeof(T)` in a lambda body is accepted.
+
+**M4.1 code audit notes (2026-10-20, not blocking):**
+1. `lint_viper.py` does not flag a forward `goto` into a loop body; only VIR's nesting rule (and Silicon's exception,
+   S9c, exit 3) guard it. Add a token-level loop-nesting check to the lint.
+2. Three encoder rejection branches look unreachable and have no test (a `break`/`continue` whose target cannot be
+   determined, a non-integer scrutinee, a case value of another type); they fail closed.
+3. The probe/spike evidence of M4.1 is under `build/m4.1/` (gitignored; the facts are in `il-inventory.md`);
+   two spike headers (S1b, S7f) state stale expectations, the record's claims are right.
 
 ## 7. Known gaps carried
 
@@ -377,38 +391,35 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
   rule): run it once early in a session that moves the pin.
 - **The approved r4a rule was too narrow** for a file whose other errors stop the back end; asking up front with a
   concrete fallback would have saved a round trip.
+- **M4.1 (2026-10-20):** the implementation (encoder, VIR, 86 tests) was done in about 1 h 15 min; the
+  test-mutator's mutation runs on the new positives (two runs, one discarded after a rebuild) took most of the rest.
+  Run mutation on new tests once, after the last rebuild, with a time box; the session's clock readings mid-run were
+  misleading, so check `date` against the budget before starting any long run.
+- **Commits:** `git add <paths> && git commit` commits everything staged, including an earlier `git rm`: stage
+  deletions only in the commit that lands their feature (one record commit picked them up and was redone).
 
 ## 10. Acceptance (commands and results)
 
 | # | Command | Result |
 |---|---|---|
-| 1 | `scripts/check.sh` (at `05da953`) | all green, 10 min 19 s: harness self-test 931, oracle self-test 74, lint self-test 113, mutate self-test 142; tests 2064 passed, 0 failed, 1 skipped (native-ok: Apple clang 523, GCC 523); 412 `.vpr` lint clean; VIR self-test 155/155; oracle 134 goldens, 1915 facts, 0 failed; docs 0 problems; `NOT YET PUSHED` for the pin, as expected |
-| 2 | `python3 scripts/run_tests.py --count-error-twins` | 82 |
-| 3 | `python3 scripts/mutate.py --validate` | 82 tests, 1314 mutants, 125 equivalents, 223 bucket candidates |
-| 4 | `python3 scripts/mutate.py --list tests/scalar` | 1314 ids in 0.6 s, no run |
-| 5 | full mutation run | not repeated: the 74 leavers go to the triage session (§5) |
-| 6 | pins | `third_party/edg` and the fork's `cerastes` at `b9519388ea`; branch `0020` kept; chain worktrees gone |
-| 7 | audits (Opus) | A (tooling): 1 blocking, fixed, re-audit closed; B (pin, registration, tests, oracle): 1 blocking, fixed, re-audit closed; should-fix items in §6 |
+| 1 | `scripts/check.sh` | all green, 14 min 31 s: harness self-test 931, oracle self-test 74, lint self-test 125, mutate self-test 154; tests 2350 passed, 0 failed, 1 skipped (native-ok: Apple clang 586, GCC 586); 555 `.vpr` lint clean; VIR self-test 204 lowering + 75 rejection cases, 204 passed; oracle 134 goldens, 1915 facts, 0 failed; docs 0 problems; `NOT YET PUSHED` for the pin, as expected |
+| 2 | `python3 scripts/run_tests.py -j 8 tests/scalar doc/modules/ROOT/examples` (before check.sh) | 1320 passed, 0 failed (native-ok: Apple clang 279, GCC 279); baseline before the session 1034 |
+| 3 | `python3 scripts/run_tests.py --count-error-twins` | 113 (82 + 31 new positives) |
+| 4 | `python3 scripts/run_tests.py --check-headers` | 861 / 861 ok |
+| 5 | VIR self-test (`build/cerastes-vir-selftest build/vir-selftest`, run_tests, lint) | 204 lowering + 75 rejection cases, 0 problems; 204 passed; lint clean |
+| 6 | `diff -r -x MANIFEST build/m4-baseline-vpr build/vpr` (M3 tests' Viper vs the session's baseline) | all 412 `.vpr` files of the M3 tests and doc examples byte-identical; none missing |
+| 7 | `python3 scripts/mutate.py -j 8 <31 new positives>` | 1403 mutants: 991 killed, 299 bucket, 27 stillborn, **70 survivors → §5** |
+| 8 | `python3 scripts/test_mutate.py`, `test_lint_viper.py` | 154 and 125 tests OK |
+| 9 | audits (Opus) | 0014: 1 blocking fixed; code: 0 blocking; should-fix items taken; notes §6 |
 
 ## 11. Questions for the owner
 
 Each has a recommended answer. Answer inline, as before.
 
-1. **Split M4 into M4a–M4d** (§8) in `plan.md`? *Recommended: yes, so each session is planned at ≤ 4 h.*
-
-   **Owner (2026-10-20):** split, and re-sequenced: the new M4 is the rest of C (M4.1–M4.8), generic templates
-   are M5 (M5a–M5g); §8 and `plan.md`.
-2. **EDG's silent error node** for a `decltype(p)` lambda parameter in a function template (§6): a fork follow-up
-   commit (diagnose it in the rescan)? *Recommended: in M4a, as a small series commit with a `GH-` test; the cerastes
-   check keeps it safe until then.*
-
-   **Owner (2026-10-20):** its own session with the box, M5b (§8.2), with the first-declaration rule.
-3. **Order of the next sessions.** *Recommended: CI session (with the upstream merge and 0020), then the mutation
-   triage session (about 2 h), then M4a.*
-
-   **Owner (2026-10-20):** CI, then triage, then M4 — but M4.1 (cerastes-only, no box) ran first, in the session
-   that re-sequenced the plan.
-4. **Audit A's should-fix items 1–5** (§6): *Recommended: in the triage session, since they change which mutants are
-   bucketed.*
-
-   Not asked separately; §5 keeps them in the triage session.
+1. **The M4 and M5 session plans** (§8, `plan.md`): do the sizes and the order fit? In particular M4.5 as six
+   sessions (design first), and M5 as seven (M5b with the box just before the gate). *Recommended: yes; re-plan M4.5b–f
+   after M4.5a's records.*
+2. **The 70 M4.1 survivors** (§5): in the triage session, after the CI session? *Recommended: yes, with the two weak
+   continue tests strengthened first.*
+3. **`case k` with a `const` local** (C++) is rejected (0014 item 6): lift it in M4.2 with `const` globals?
+   *Recommended: yes, M4.2.*

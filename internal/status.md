@@ -4,6 +4,73 @@ Session handoff log, newest first. Each entry says what is done, what is not,
 any surprises, the decision records added and the exact first step for the
 next session.
 
+## M4.1 — control flow, and the plan re-sequenced (2026-10-20): done on branch `m4.1-control-flow`; fast-forward and pushes pending
+
+Read `internal/handoff.md` next (§2 owner steps, §4 the CI session, §5 the mutation triage session, §8 the M4 and M5
+session plans, §11 questions).
+
+**Owner decisions (2026-10-20)**
+- **Re-sequencing** (planning M4 showed Gate G2's VeriFast tests need pointers, references and classes): the new
+  **M4 is the rest of C** (strictly C; M4.1–M4.8, pointers in M4.5a–f, VerCors as the reference); generic templates
+  are **M5** (M5a–M5g); concepts M6; **C++ memory and classes M7** (G2's parts that need them are deferred there);
+  inventory M8; evaluation M9. Records were renumbered everywhere (each notes it); `status.md` history keeps the old
+  numbers (`plan.md`'s table maps them).
+- EDG work of M5 (first-declaration marker, the silent error node) is its own session with the box (M5b).
+- Order: this session (M4.1, cerastes-only) → CI → mutation triage → M4.2 ….
+- M4.1: `do … while (0)` needs no measure; `[[fallthrough]]` allowed; `reject_break.c`, `reject_continue.c`,
+  `reject_do_while.c`, `reject_switch.c` and the Verifying page's switch example retired (pre-approved).
+
+**Done**
+- **Plan:** `plan.md` renumbered (table at the top), the new M4 with its 4.x sessions, M5 with M5a–M5g, M7 "C++
+  memory and classes"; the handoff §8 holds every M4 and M5 session plan (designed this session: the M5 eligibility
+  checker, the opaque/integral `T` models without axioms, one-run fallback, G2 scope; the VerCors study for M4.5).
+- **Decision 0014 (control flow):** structured VIR jumps (`Break`/`Continue` to the innermost target, `Switch`/`Case`,
+  loop forms `While`/`DoWhile`/`DoOnce`, a `for` loop's `step`) lowered to forward gotos; invariants and the measure
+  checked on `continue` paths; `do` invariants at the start of every iteration; `do … while (0)` as straight-line
+  code with an internal guard; `switch` dispatch with case values encoded by their original expression; the
+  rejections; #546 suppressed (cerastes rejects every such jump itself). Amends 0010, 0011, 0012, 0013.
+- **Code:** `src/backend/encode.cpp` (target stack with label-shape checks, `do`, `switch`, `step`, allow-list),
+  `src/vir` (forms, `check_program` rules, lowering), `src/driver/verify_main.cpp` (#546), VIR self-test
+  (204 lowering + 75 rejection cases).
+- **Tooling:** `mutate.py` deletes `break;`/`continue;` and case bodies; `lint_viper.py` rejects backward gotos,
+  labels with invariants, duplicate labels.
+- **Tests:** 86 new files in `tests/scalar` (31 positives, 55 twins and rejections; both modes where C++ accepts them); the M3 rejection tests of `break`, `continue`, `do` and `switch` retired; VIR self-test 155 → 204 lowering cases (+ 75 rejection cases). 70 surviving mutants of the new tests go to the triage session (handoff §5)..
+- **Docs:** Verifying a program (a control-flow section with a verified example; the rejected list; the
+  rejected-construct example is now `rejected_double.cpp`), Annotations (`do` invariant meaning, `decreases` before
+  `do`, the `do … while (0)` exemption), Overview.
+
+**Acceptance**
+- `scripts/check.sh` green (14 min 31 s): self-tests 931 + 74 + 125 + 154; tests 2350 passed, 0 failed, 1 skipped
+  (native-ok: Apple clang 586, GCC 586); 555 `.vpr` lint clean; VIR self-test 204/204 (+ 75 rejection cases);
+  walker oracle 134 goldens, 0 failed; docs 0 problems.
+- Every M3 test's emitted Viper is byte-identical to the session's baseline (412 files).
+- `--count-error-twins` 113 (82 + 31); `--check-headers` 861/861.
+- Mutation run on the 31 new positives: 1403 mutants, 991 killed, 299 bucket, 27 stillborn, 70 survivors
+  (to the triage session, handoff §5).
+- Audits (Opus): 0014 (1 blocking, fixed: case values by their original expression) and the code (0 blocking);
+  every should-fix item of both taken; notes in handoff §6.
+
+**Not done / deferred**
+- Forward user `goto` and labels (M4.2's first item; `reject_goto.c` unchanged).
+- 70 surviving mutants of the new tests (handoff §5), moved to the triage session by the stop rule.
+- Audit notes (handoff §6): the lint does not flag a forward `goto` into a loop body (only VIR's nesting rule and
+  Silicon's exception guard it); three encoder rejection branches look unreachable and have no test.
+- The CI session and the mutation triage session (unchanged, next).
+
+**Surprises**
+- EDG folds constant expressions it only warns about (`case 1 << 40` → 0, `2147483647 + 1` in C23) and verify mode
+  suppressed those warnings: case values had to be encoded by their original expression (Opus audit, blocking).
+- EDG accepts Duff's device, GNU case ranges and a jump over a declaration (only warnings), and Silicon throws on a
+  `goto` into a loop: each is rejected by cerastes.
+- A `do … while (0)` lowered as a Viper loop with `decreases 0` loses the facts its body establishes; straight-line
+  code keeps them.
+
+**Decision records added:** 0014-control-flow; amended 0010, 0011, 0012, 0013; all records renumbered.
+
+**First step for the next session (CI).** Confirm the owner's fast-forward of `m4.1-control-flow` and the fork push
+(handoff §2). Wake the box, merge upstream EDG `main` into the fork's `cerastes` (handoff §4), run the full box
+suites, move the pin, run `check.sh`; explain the 0020-alone Linux failure; then CI.
+
 ## M3 close-out (2026-10-20): done on branch `worktree-m3-closeout`; fast-forward and pushes pending
 
 Read `internal/handoff.md` next (§2 owner steps, §4 the CI session, §5 the mutation triage session, §11 questions).
