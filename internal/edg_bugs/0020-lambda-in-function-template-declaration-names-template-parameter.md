@@ -110,6 +110,10 @@ while the test passed at the chain tip and natively. **It was not a bug in 0020:
   steps), then `changes` matches the expectations in `edg_x86_64` and in the `edg_x86_64_cp` overlay (91 expected
   non-PASS, 91 got, 0 unexpected). The box runner `~/edg-cerastes-runs/run.sh` now removes `build/gcc` before every
   run and reports `BUILD FAILED` when ninja stops. Evidence copied to `build/s1/0020d/` (gitignored).
+- **The imported expectations 0020 changes** (`lambda-targ4`, `lambda-uneval7`, `SemaCXX/lambda-unevaluated`) had
+  never run on Linux from a clean build of `0020` alone: run `0020f` (2026-10-21, clean build of `c539de4101`,
+  `changes,regressions,imported`) matches in both configurations (cp overlay: changes 91/91, regressions 3/3,
+  imported 9075/9075, 0 unexpected).
 
 Branch `0020` is ready for the owner to file upstream as it is.
 

@@ -4,6 +4,56 @@ Session handoff log, newest first. Each entry says what is done, what is not,
 any surprises, the decision records added and the exact first step for the
 next session.
 
+## S1 — EDG upstream merge and pin move (2026-10-21): done on branch `edg-upstream-merge`; fork push, fast-forward and pushes pending
+
+Read `internal/handoff.md` next (the "S1 is done" owner steps at the top, §4.1 the result, §4.2 the CI session).
+
+**Owner decisions (2026-10-21, planning round)**
+- The CI session is split: **S1** EDG upstream merge (box), **S2** CI, **S3** mutation triage, then M4.2b; each
+  ≤ 4 h with at most three Sonnet agents and one read-only Opus auditor; any question stops the work and goes to
+  the owner (`plan.md`, handoff §4, §5).
+- S2: GitHub's standard `xcode-27` runner, the full `check.sh` on pull requests, pushes to `main` and dispatch; the
+  owner pushes at checkpoints. S3: weak tests strengthened in place (never an `expect:` line).
+- The fork's duplicate `__BLOCKS__` test stays for now; the owner files 0020 upstream.
+
+**Done**
+- **Plan:** `plan.md` and the handoff describe the three sessions with the facts found while planning (commit
+  `d344584`); M4.2b's and M4.2c's records become 0017 and 0018 (CI takes 0016).
+- **Fork:** `97c2141be9` merges upstream `main` `21065e551e` (10 commits after `307002eae6`; upstream moved past
+  the planned `dedc820c91` that morning, tests only) into `cerastes`: `src/Changes` both sides kept,
+  `util/Changes` and `util/make_predef_macro_table` upstream's text (its re-commit of our 0005).
+- **Box:** the full suites at the merge match (known `cwg1835`, `cwg2881`); `run.sh` now builds from scratch and
+  reports `BUILD FAILED` when ninja stops.
+- **0020's Linux failure explained:** the box's incremental build failed to link and `edg-docker-test` ran the
+  previous binaries (0020's previous revision), so the two cases of the last amend failed; a clean build passes
+  (`internal/edg_bugs/0020-*.md`).
+- **Pin** `97c2141be9` (commit `1b5c352`); decision 0001's EDG row and pin history.
+
+**Acceptance**
+- `scripts/check.sh` green (15 min 43 s, one run): tests 2624 passed, 0 failed, 1 skipped (native-ok: Apple clang
+  642, GCC 642); VIR self-test 230/230 (+ 87 rejection cases); walker oracle 134 goldens, 0 failed; docs 0 problems.
+- Every test's emitted Viper (667 `.vpr` and maps) byte-identical to P's.
+- Box `U-full` at `97c2141be9`, `changes,regressions,imported,edg,cwg,stdlib`, both 64-bit configurations: match
+  except the two known; clean builds of `c539de4101`: `0020e` (`changes`) and `0020f`
+  (`changes,regressions,imported`) match in both configurations.
+- Audit (Opus): 0 blocking; three should-fix items taken (handoff §4.1).
+- Wall-clock: about 11:29–12:05 plus box waits.
+
+**Not done / deferred**
+- S2 (CI) and S3 (mutation triage), handoff §4.2 and §5.
+- The fork's duplicate `GH-no-blocks-predefine` test (owner: leave it).
+
+**Surprises**
+- Upstream moved twice in two days (`dedc820c91`, then `21065e551e`).
+- The 0005 duplicate conflicted after all: the fork carries the session's original 0005, upstream the owner's
+  re-commit.
+- A failed link on the box does not fail `edg-docker-test`: it tests whatever binaries are left.
+
+**Decision records added:** none; 0001 amended.
+
+**First step for the next session (S2, CI).** Confirm the owner pushed the fork's `cerastes` (`97c2141be9`) and
+fast-forwarded and pushed `main` (handoff, top). Then handoff §4.2: decision 0016 first.
+
 ## M4.2a — forward goto, functions that do not return, assert (2026-10-21): done on branch `m4.2a-goto-noreturn-assert`; fork push, fast-forward and pushes pending
 
 Read `internal/handoff.md` next (§2 owner steps, §4 the CI session, §5 the mutation triage session, §6 audit notes,

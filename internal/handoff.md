@@ -11,6 +11,20 @@ planned at ≤ 4 h with at most three Sonnet agents (edg-backend, il-analyst, te
 soundness-auditor. If the orchestrator or any agent has a question, the session stops that work and asks the owner.
 §4 and §5 hold the facts found while planning.
 
+**S1 is done (2026-10-21, branch `edg-upstream-merge`; result in §4.1).** The fork's `cerastes` merges upstream
+`main` `21065e551e` (`97c2141be9`, not pushed); cerastes pins it; box suites, tests, `.vpr` identity and `check.sh`
+green; 0020's Linux failure explained (stale box binaries). **Owner steps after S1, in this order:**
+1. Push the fork's `cerastes`: `git -C ~/Documents/compiler push origin cerastes` (GitHub has P `b9519388ea`; the pin
+   `97c2141be9` is one merge ahead; `check.sh` reports `NOT YET PUSHED` until then, and S2's CI cannot fetch it).
+2. Bring the branch into `main` and rebuild:
+   ```
+   cd ~/Documents/cerastes/cerastes
+   git merge --ff-only edg-upstream-merge
+   git submodule update third_party/edg
+   scripts/bootstrap.sh --build-only
+   ```
+3. Push cerastes `main`. Then S2 (§4.2) can start.
+
 ## 1. State in one paragraph
 
 The owner split M4.2 into **M4.2a** (forward `goto`, functions that do not return, `assert`), **M4.2b** (named
@@ -100,6 +114,30 @@ the evidence).
 
 **Acceptance:** 0020 PASS on a clean build; the full suites at the merge with only the two known mismatches; every
 test's `.vpr` byte-identical; `check.sh` green; no open blocking audit item.
+
+**Result (S1, 2026-10-21, about 35 min of work plus box time).**
+- **Merge:** upstream had moved again that morning to `21065e551e` ("Fix filter command escaping and script name",
+  tests only: 285 files under `tests/tests/edg/cmeerw`), so the fork merges that tip: `97c2141be9`. Conflicts:
+  `src/Changes` (both sides kept, the fork's first) and, unexpectedly, `util/Changes` and
+  `util/make_predef_macro_table`: the fork carries the session's original 0005, upstream the owner's re-commit (#307);
+  upstream's text taken (it drops the fork's comment). The Opus audit reproduced both as exact unions/upstream text,
+  P→merge under `src/` equal to upstream's own delta, the fork series intact, no header changed.
+- **Box (`run.sh` now builds from scratch and reports `BUILD FAILED`):** `U-full` at `97c2141be9`, all six suites,
+  both configurations: match except the known `cwg1835` (`PASS--OUTPUT MISMATCH`) and `cwg2881`
+  (`ABORT--OUTPUT MISMATCH`); changes 154/154, regressions 5/5, imported 9075/9075, edg 238/238, stdlib 3/3 (cp
+  overlay).
+- **0020:** run `0020d`'s incremental build linked stale fork-series objects against 0020's `il.c`; the link failed
+  and `edg-docker-test` ran the previous box binaries (0020's previous revision, which lacks the `template`-keyword
+  rule), so exactly cases f5 and f6 failed. A clean build of `c539de4101` matches `changes` (`0020e`) and
+  `changes,regressions,imported` (`0020f`, which also covers the imported expectations 0020 changes) in both
+  configurations. Written up in `internal/edg_bugs/0020-*.md`; the owner files it.
+- **cerastes at the pin:** 2624 passed, 0 failed, 1 skipped (native-ok 642/642), as at M4.2a; 667 `.vpr` and maps
+  byte-identical to P's (checked after the test run and after `check.sh`); `check.sh` green (15 min 43 s).
+- **Audit (Opus):** 0 blocking. Taken: the 0020 write-up's mechanism (above), a clean Linux run of 0020's imported
+  expectations (`0020f`), 0001's pin history. Notes: the fork keeps two tests for the same `__BLOCKS__` fix (its
+  original `GH-no-blocks-predefine` and upstream's `GH307`; owner: leave it until a fork commit touches
+  `tests/changes`); #229 matters once M5 encodes template instances (add a test with an unbraced discarded
+  `if constexpr` branch then); `--dump_configuration`'s build date does not identify the pin.
 
 ### 4.2 S2 — CI (about 3 h; branch `ci`; needs S1 pushed)
 
