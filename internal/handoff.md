@@ -24,6 +24,17 @@ green; 0020's Linux failure explained (stale box binaries). **Owner steps after 
    scripts/bootstrap.sh --build-only
    ```
 3. Push cerastes `main`. Then S2 (§4.2) can start.
+*(Done by the owner, 2026-10-21.)*
+
+**S2 is done (2026-10-21, branch `ci`, PR #1; result in §4.2).** `.github/workflows/ci.yml` runs `scripts/ci.sh`
+(the owner's Command Line Tools asserted exactly, GCC 16.2.0, full bootstrap) and the full `scripts/check.sh` on
+GitHub's `xcode-27` runner (decision 0016). **Owner steps after S2, in this order:**
+1. Merge PR #1 into `main` (it carries your `59e1bf3` and the S2 commits; or locally `git merge --ff-only ci` in
+   the main checkout and push `main`). The push to `main` starts the first CI run there (its own group; it is never
+   cancelled).
+2. After the first green run on `main`: make the `CI` job `check (macOS, Command Line Tools 27.0)` a required check
+   on `main` (§11 question 6, answered yes).
+Then S3 (§5).
 
 ## 1. State in one paragraph
 
@@ -660,3 +671,20 @@ Each has a recommended answer. Answer inline, as before.
    *Recommended: yes, as a spike there; until then the attribute-entry check stands.*
 5. **A `goto` into a block or an `if` branch** stays rejected (0015 item 2; stricter than C). Lift it only when a
    ported example needs it, after a Silicon spike with must-fail twins? *Recommended: yes.*
+
+**S2 (CI), 2026-10-21:**
+
+6. **Make CI a required check on `main`** (branch protection or a ruleset requiring `check (macOS, Command Line
+   Tools 27.0)`)? *Recommended: yes, after the first green run on `main`; Dependabot's weekly pull requests then
+   cannot merge red.* If you also enable a merge queue, `ci.yml` needs a `merge_group` trigger (and the guard's pinned
+   `on:` with it). **Answered (owner, 2026-10-21): yes.**
+7. **When the preview image changes its tools** (a new Command Line Tools, SDK build or Homebrew `gcc`), `ci.sh`
+   fails by design. Then: move the assertion and 0001 together after checking the change on your Mac (same
+   package), or wait for GitHub? *Recommended: move both, in a short session with a rehearsal; never loosen the
+   assertion alone.* **Answered (owner, 2026-10-21): yes** (0016 item 2).
+8. **Tighten `timeout-minutes`** (240 now) once two runs on `main` are green: max(150, 1.5 × measured)?
+   *Recommended: yes; S2's runs give the first numbers (§4.2).* **Answered (owner, 2026-10-21): yes** (0016 item 9;
+   the first session that sees two green runs on `main` does it, with the guard's bound).
+9. **Tie each action SHA to 0001** in the guard (today any 40-hex commit passes; a commit that exists only in a fork
+   resolves too, so review and Dependabot are the check)? *Recommended: not now; revisit if anyone but you and
+   Dependabot edits the workflows.* **Answered (owner, 2026-10-21): not now.**
