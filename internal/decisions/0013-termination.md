@@ -91,3 +91,5 @@ Spikes (2026-10-16, Silicon `v.26.08-release`, silver's termination plugin, `Ter
   checks (placement, side effects, shadowing) cover it, each with tests.
 - Silicon reports a non-decreasing loop at the measure's position, and a recursive call at the call: both are C/C++
   lines through the position map.
+
+*2026-10-20, amended by 0014 (M4.1, owner): item 3 — a `do … while` whose condition is a constant zero runs its body once and needs no `decreases`; it is lowered as straight-line code, not as a Viper loop.*

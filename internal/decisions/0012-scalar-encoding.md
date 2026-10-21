@@ -158,3 +158,5 @@ verifies; Viper's `\` and `%` on `Int` are Euclidean (`(-7)\2 == -4`, `(-7)%2 ==
 - `break`/`continue` and `do` are the cheapest to add next (forward `goto`s, as `return` already uses).
 
 *2026-10-20: milestone numbers follow the renumbering of 2026-10-20 (plan.md: old M4 → M5, M5 → M6, M6 → M4.5 for C and M7 for C++, M7 → M8).*
+
+*2026-10-20, amended by 0014 (M4.1): items 3 and 12 — `break`, `continue`, `do … while` and `switch` are accepted (a `for` loop's increment is its `step`); item 8 — on a `continue` path the invariants, the condition's obligations and the measure are checked as at the end of the body, on a `break` path nothing; a `do` loop's invariant holds at the start of every iteration. User `goto` and labels stay rejected (M4.2).*

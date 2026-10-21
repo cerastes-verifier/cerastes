@@ -177,3 +177,5 @@ Decision 0002 fixed the integration: EDG's front end compiled into our binary, w
   adding a category changes all four.
 
 *2026-10-20: milestone numbers follow the renumbering of 2026-10-20 (plan.md: old M4 → M5, M5 → M6, M6 → M4.5 for C and M7 for C++, M7 → M8).*
+
+*2026-10-20, amended by 0014 (M4.1): item 7 — `fallthrough` joins the attribute allow-list, and verify mode also suppresses EDG's warning #546 (a jump past an initialization), which cerastes rejects itself.*

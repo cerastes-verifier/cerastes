@@ -136,3 +136,5 @@ always the stricter or the target's, so that a `.c` test means the same in `c23`
 - The rejections in items 2 and 9 are entries of the M8 inventory until M4 lifts them.
 
 *2026-10-20: milestone numbers follow the renumbering of 2026-10-20 (plan.md: old M4 → M5, M5 → M6, M6 → M4.5 for C and M7 for C++, M7 → M8).*
+
+*2026-10-20, amended by 0014 (M4.1, audit): item 12 — EDG does fold some operations it diagnoses: in C23 `2147483647 + 1` and `1 << 40` become constants with only warnings #61/#63, which verify mode suppresses; every probed case keeps the original `expr`, and soundness rests on encoding it, not on EDG's diagnostics. Verify mode also suppresses #546 (a jump past an initialization), which cerastes rejects itself. Item 13 — case labels are not left to EDG: a case value is encoded by its original expression and its obligations are checked (0014 item 6).*
