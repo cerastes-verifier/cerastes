@@ -24,6 +24,7 @@ in both places.
 | Antora (user docs, M1.5) | `antora`, `@antora/cli`, `@antora/site-generator` 3.2.1; `@antora/lunr-extension` 1.0.0-alpha.13 | exact pins in `doc/package.json`, locked by `doc/package-lock.json`; `npm ci` in `doc/` by bootstrap |
 | Antora default UI (user docs) | `antora-ui-default` `master` at `0e38223adfd81eb74d4b1779e158f8ad05ff8923` (GitLab job 15385706035), zip SHA-256 `e0ac81aad26961a9cd3cf9bce692a598eff4a1bd2822ce73c9cdc13a15a1e70d` | vendored as `doc/ui/antora-ui-default.zip`; `scripts/build_docs.sh` checks the SHA-256 before every build (`doc/ui/README.md`) |
 | GitHub Actions (docs CI) | `actions/checkout` v7.0.1 `3d3c42e5aac5ba805825da76410c181273ba90b1`, `actions/setup-node` v7.1.0 `949feb2413d6458794dcd2491c4babbbce0c15c1`, `actions/upload-pages-artifact` v5.0.0 `fc324d3547104276b827a68afc52ff2a11cc49c9`, `actions/deploy-pages` v5.0.1 `368f82528645a54fb793d4d04e342629a3f51346`; runner `ubuntu-24.04` | full commit SHAs in `.github/workflows/docs.yml` (from `git ls-remote`; all four are lightweight tags) |
+| GitHub Actions (CI, decision 0016) | `actions/checkout` v7.0.1 and `actions/setup-node` v7.1.0 (the SHAs above), `actions/setup-python` v7.0.0 `5fda3b95a4ea91299a34e894583c3862153e4b97` (2026-07-20), `actions/cache` v6.1.0 `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` (2026-06-26; its `restore` and `save` sub-actions), `actions/upload-artifact` v7.0.2 `cf430e030ddbb5b0abf93d22962f4752f3646cd9` (2026-10-07); runner `xcode-27` (GitHub's image, a public preview; `20261012.0260.1` when S2 started) | full commit SHAs in `.github/workflows/ci.yml` (from `git ls-remote`; all lightweight tags; releases at least two weeks old) |
 | Node.js (user docs) | major 26 (`doc/.node-version`; CI's `setup-node` reads it); 26.9.0 / npm 11.19.1 locally | Homebrew `node`; bootstrap warns when the major differs |
 
 Recorded but not pinned, because any recent version works and none of them
@@ -31,9 +32,10 @@ affects verification results:
 
 | Tool | Version used in M0 |
 |---|---|
-| Host compiler and SDK (builds EDG; supplies the headers EDG parses) | Apple clang 21.0.0 (clang-2100.3.34.2), Command Line Tools, macOS SDK 27.0, macOS 27.0.1 (26A434) |
-| CMake / Ninja | 4.4.3 / 1.13.2 |
-| Python | 3.14.7 (the scripts need 3.9 or later) |
+| Host compiler and SDK (builds EDG; supplies the headers EDG parses) | Apple clang 21.0.0 (clang-2100.3.34.2), Command Line Tools 27.0.0.0.1788430756, macOS SDK 27.0 (build `26A425`), macOS 27.0.1 (26A434). CI selects the same Command Line Tools on GitHub's `xcode-27` image and asserts the package version, the clang banner and the SDK version and build (`scripts/ci.sh`, 0016 item 2) |
+| GCC (the native-ok runs, 0008) | Homebrew `gcc` 16.2.0, the macOS 27 bottle (`--build=aarch64-apple-darwin27`, sysroot `/Library/Developer/CommandLineTools/SDKs/MacOSX27.sdk`, i.e. SDK 27.0); reinstalled by the owner on 2026-10-21, before which it was the macOS 26 bottle with sysroot SDK 26.5. CI installs the same formula and asserts 16.2.0 and that its sysroot is the asserted SDK (0016 item 3) |
+| CMake / Ninja | 4.4.3 / 1.13.2 (CI: the image's, 4.4.4 / 1.13.2) |
+| Python | 3.14.7 (the scripts need 3.9 or later; CI uses 3.14 through `actions/setup-python`, the image's cached 3.14.8) |
 | ShellCheck | 0.11.0 |
 | Homebrew | 7.0.9 |
 
@@ -186,6 +188,14 @@ binary in a container and checks its outcomes against the recorded ones
   expectations in both 64-bit configurations except the known `cwg1835` and
   `cwg2881`; every test's emitted Viper (667 `.vpr` and their maps) is
   byte-identical to P's; `check.sh` is green.
+
+- **CI (S2, 2026-10-21; decision 0016).** No pin moves. `.github/workflows/ci.yml`
+  runs `scripts/ci.sh` and the full `scripts/check.sh` on GitHub's `xcode-27`
+  image (a public preview) with the owner's Command Line Tools, which
+  `ci.sh` asserts together with GCC 16; the rows "GitHub Actions (CI)", "Host
+  compiler and SDK", "GCC" and "Python" record it. A change of the image's
+  tools fails the job until the owner moves the assertion and this record
+  together.
 
 ## Dependabot
 

@@ -1154,7 +1154,9 @@ def main(argv: list[str] | None = None) -> int:
                         f"{', '.join(DEFAULT_PATHS)})")
     parser.add_argument("--validate", action="store_true",
                         help="only generate and check the mutants and the equivalence list")
-    parser.add_argument("-j", "--jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2))
+    parser.add_argument("-j", "--jobs", type=int, default=None,
+                        help=f"parallel mutants (default: ${rt.JOBS_VARIABLE} from the shell if set, "
+                             "else half the CPUs; an explicit -j wins)")
     parser.add_argument("--list", action="store_true",
                         help="print every mutant id and exit (with --validate: and validate)")
     parser.add_argument("--equivalents", type=Path, default=ROOT / EQUIVALENT_FILE,
@@ -1214,6 +1216,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     env = rt.load_env()
     try:
+        if args.jobs is None:  # an explicit -j wins: the variable is consulted only here
+            args.jobs = rt.default_jobs()
         if rt.VERIFY_COMMAND is None:
             rt.require(env, "CERASTES_VERIFY")
             if (problem := rt.edg_tree_problem()) is not None \

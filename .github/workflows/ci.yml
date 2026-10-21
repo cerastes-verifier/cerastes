@@ -1,0 +1,103 @@
+# The full check: scripts/ci.sh (runner setup: asserts the toolchain, installs what is
+# missing, bootstraps) and then scripts/check.sh (build, lint, self-tests, tests, mutation
+# validation, docs) on every pull request, every push to main and on request.
+# Decision record: internal/decisions/0016-ci.md.
+#
+# The runner is GitHub's xcode-27 image, whose Command Line Tools are the toolchain the
+# expectations were made on; ci.sh asserts it exactly and fails the job when the image
+# drifts (never loosen an assertion: update 0001, 0016 and ci.sh together).  Docs publishing
+# stays in docs.yml.
+#
+# Actions are pinned to full commit SHAs (the comment gives the release);
+# change them deliberately, never through a moving tag.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Pull requests cancel their own superseded runs.  Every run on main finishes: its
+# group is unique per run (one shared group would still drop an older pending run, and
+# a push to main is a result the owner wants whole).  Dispatches on other refs have a
+# group per ref: a running dispatch is never cancelled, but a newer one replaces a
+# pending one.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('ci-pr-{0}', github.event.pull_request.number) || (github.ref == 'refs/heads/main' && format('ci-main-{0}', github.run_id)) || format('ci-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: check (macOS, Command Line Tools 27.0)
+    runs-on: xcode-27
+    timeout-minutes: 240
+    env:
+      DEVELOPER_DIR: /Library/Developer/CommandLineTools
+      CERASTES_JOBS: 3
+    steps:
+      # Full history, with every remote branch of the submodules: edg_tree.py needs
+      # origin/cerastes of third_party/edg and the pin's ancestry in it (decision 0009).
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14'
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: doc/.node-version
+          cache: npm
+          cache-dependency-path: doc/package-lock.json
+      # bootstrap.sh skips `sbt assembly` when build/silicon.stamp records the silicon and
+      # silver heads, a clean tree and the JDK formula (JDK_FORMULA in scripts/bootstrap.sh)
+      # and the jar exists.  The key carries the two heads and a hash of bootstrap.sh, so
+      # any change to bootstrap.sh is a (conservative) cache miss.
+      - name: Silicon cache key
+        id: silicon-key
+        run: |
+          silicon_head="$(git rev-parse HEAD:third_party/silicon)"
+          silver_head="$(git -C third_party/silicon rev-parse HEAD:silver)"
+          echo "key=silicon-v1-${{ runner.os }}-${{ runner.arch }}-${silicon_head}-${silver_head}-${{ hashFiles('scripts/bootstrap.sh') }}" >> "$GITHUB_OUTPUT"
+      - name: Restore the Silicon build
+        id: silicon-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            third_party/silicon/target/scala-2.13/silicon.jar
+            build/silicon.stamp
+          key: ${{ steps.silicon-key.outputs.key }}
+      - name: Set up the toolchain
+        run: scripts/ci.sh
+      - name: Save the Silicon build
+        if: steps.silicon-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            third_party/silicon/target/scala-2.13/silicon.jar
+            build/silicon.stamp
+          key: ${{ steps.silicon-key.outputs.key }}
+      - name: Check everything
+        run: scripts/check.sh
+      # always(): a job that hits timeout-minutes counts as cancelled, and its evidence
+      # (the build logs above all) is what a timeout needs.
+      - name: Upload the evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            build/vpr
+            build/env.sh
+            build/ci-toolchain.txt
+            build/*.log
+          if-no-files-found: warn
+          retention-days: 14

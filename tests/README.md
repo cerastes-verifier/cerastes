@@ -501,6 +501,20 @@ seconds of CPU, which a loaded machine (a parallel build, other test runs) stret
 that the limit used to be. A limit is there to catch a hang, never to measure speed: reaching it always
 fails the test, whatever the expectation.
 
+## Parallelism (`-j`, `CERASTES_JOBS`)
+
+`run_tests.py` and `mutate.py` run tests in parallel, each with a pool of `-j N` workers (`--jobs`). The
+default is `CERASTES_JOBS` if it is set, else half the CPUs (at least 1: `default_jobs()` in
+`scripts/run_tests.py`). The variable is read from the shell, never from `build/env.sh` (a value there is
+ignored, and `bootstrap.sh` does not write one). It must be a positive decimal integer (`3`, `10`): the empty
+string, `0`, a sign, a leading zero, a space or anything else is a usage error (exit 2) that names the variable,
+so that a typo cannot silently change a job count. An explicit `-j` always wins and does not read the variable,
+so a bad value stops only a run that needs the default (`--check-headers` and `mutate.py --validate` run
+nothing in parallel). `scripts/check.sh` passes no `-j`, so the variable sets its job count too (the VIR
+self-test run included: the self-test guard rejects any `-j` on that line). Each worker may start a Silicon JVM,
+which is why CI sets `CERASTES_JOBS=3`: three fit the 7 GB of its runner, eight do not. `scripts/walker_oracle.py` keeps its own default
+(`min(8, cores)`, for its front-end runs only) and does not read `CERASTES_JOBS`.
+
 ## Mutation testing (`scripts/mutate.py`)
 
 `python3 scripts/mutate.py` (about ten minutes for `tests/scalar`) mutates every `verified` test one place at a
@@ -559,6 +573,9 @@ tree: `CERASTES_EDG_SRC` is read from the shell, and checked against what
 `env.sh` was written for (see [The EDG tree](#the-edg-tree-decision-0005)). The
 harness self-test points the harness at fixture env files, not at the process
 environment.
+
+`CERASTES_JOBS` (the default `-j`, [Parallelism](#parallelism--j-cerastes_jobs)) is also read from the shell
+and not from the file.
 
 ## Twins
 
@@ -787,8 +804,8 @@ example are problems. Inactive while the page does not exist and no `verified`,
 a problem (the trigger is `scripts/lint_viper.py`'s).
 
 **2. The built-site check**, `python3 scripts/check_doc_examples.py --html
-build/doc`, run after `scripts/build_docs.sh` (in `check.sh` and in the CI
-build job). It does not read the pages: it classifies every `<pre>` of the
+build/doc`, run after `scripts/build_docs.sh` (in `check.sh` and in the docs
+workflow's build job). It does not read the pages: it classifies every `<pre>` of the
 generated HTML (and every `<code>` with a `language-X`, `lang-X` or `data-lang`):
 
 - a block in a cerastes language must, after unescaping, equal a tagged region
@@ -816,11 +833,22 @@ with a `<div style="white-space:pre">`), a `++` pair that eats text, or `**`
 pairs (they render as well-formed HTML). Only the source lint catches those,
 so the two checks are both required.
 
-`check.sh` runs the examples as tests, both checks, and the docs build; CI
-(the docs workflow) runs the source lint, `scripts/build_docs.sh` (which fails
-on any Antora warning) and the `--html` check, but not the examples as tests,
-because those need the EDG and Silicon toolchain. The harness self-test has a
-twin for each rule; it checks that `check.sh` and the workflow run the checks
+`check.sh` runs the examples as tests, both checks, and the docs build. Two
+workflows run in CI. `.github/workflows/ci.yml` runs `scripts/ci.sh` (the
+runner's setup and toolchain assertions) and then the full `scripts/check.sh`,
+so the examples run as tests there too, on GitHub's `xcode-27` runner with
+`CERASTES_JOBS=3` (decision 0016). The harness self-test pins the active text of both files:
+`ci_workflow_problems` and `ci_sh_problems` compare every active line (comments and blank lines dropped) with
+a pinned copy, so an extra step, an extra command, a `break` in a loop or a reassigned constant fails it;
+only comments, the `uses:` SHAs, the step and job names, `timeout-minutes` and `CERASTES_JOBS` may change in
+ci.yml, and only comments in ci.sh. Structured rules (the triggers, `contents: read`, one job with only five keys,
+the runner, SHA-pinned actions, the checkout options, plain `scripts/ci.sh` then `scripts/check.sh` steps;
+every toolchain assertion as a pinned line, in order, with no early `exit` or `|| true`) give the diagnostics.
+The docs workflow (`docs.yml`) still builds
+and deploys the docs: it runs the source lint, `scripts/build_docs.sh` (which
+fails on any Antora warning) and the `--html` check, but not the examples as
+tests, because those need the EDG and Silicon toolchain. The harness self-test
+has a twin for each rule; it checks that `check.sh` and the docs workflow run the checks
 as active, ordered steps that cannot be ignored (`|| true`, `set +e`,
 `continue-on-error`, a comment); and an end-to-end twin builds a temporary copy
 of `doc/` with Antora to show that a broken xref or include tag fails the

@@ -60,7 +60,7 @@ file per bug, numbered like the decision records: `NNNN-short-name.md`.
 | [0017](0017-generic-lambda-in-function-template-declaration-crash.md) | A generic lambda with more `auto` parameters than the function template has template parameters, in its declaration, crashes the front end | open |
 | [0018](0018-empty-class-pack-and-member-pack-in-one-expansion.md) | An empty class pack and a member template's pack in one expansion: "identifier is undefined" at the class instantiation | open |
 | [0019](0019-cxx23-parameter-names-in-nested-function-type-trailing-return.md) | In C++23, parameter names of a nested function type are not found in its trailing return type in some contexts | open |
-| [0020](0020-lambda-in-function-template-declaration-names-template-parameter.md) | A lambda that names a template parameter in a function template's declaration cannot be substituted: "identifier is undefined" | fixed on branch `0020`; not filed |
+| [0020](upstreamed/0020-lambda-in-function-template-declaration-names-template-parameter.md) | A lambda that names a template parameter in a function template's declaration cannot be substituted: "identifier is undefined" | Upstreamed |
 | [0021](0021-lambda-called-in-constant-template-argument-not-folded-std-mode.md) | A lambda called in a constant template argument of a function template is not folded in std mode: "template instantiation resulted in unexpected function type" | open |
 
 0008 to 0019 were found while fixing 0003 to 0007 and 0016. They are

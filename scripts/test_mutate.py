@@ -1647,5 +1647,67 @@ class ValidateTests(RunCase):
         self.assertEqual(status, 0, out.getvalue() + err.getvalue())
 
 
+class JobsTests(RunCase):
+    """The default `-j` is CERASTES_JOBS, else half the CPUs; an explicit -j wins (decision 0016)."""
+
+    def jobs_of_a_run(self, *args, variable=None, cpus=16):
+        """The `jobs` that main() hands to run_all, or the exit status of a run that stopped early."""
+        self.set_rules([["x <= 5", 1, None], ["x < 6", 1, None], ["x < 4", 1, None],
+                        ["  ;\n", 1, None]])
+        t = self.put("a.c")
+        seen = []
+        real = mu.run_all
+
+        def spy(subjects, env, jobs, workdir):
+            seen.append(jobs)
+            return real(subjects, env, jobs, workdir)
+        environ = {} if variable is None else {"CERASTES_JOBS": variable}
+        # set after the scrub of CERASTES_* in setUp (that is what makes the first case "unset")
+        with mock.patch.dict(os.environ, environ), mock.patch.object(mu, "run_all", spy), \
+                mock.patch.object(rt.os, "cpu_count", return_value=cpus):
+            status, out, err = self.run_main(*args, t)
+        return status, seen, out, err
+
+    def test_unset_is_half_the_cpus(self):
+        status, seen, out, _ = self.jobs_of_a_run(cpus=16)
+        self.assertEqual((status, seen), (0, [8]), out)
+        status, seen, out, _ = self.jobs_of_a_run(cpus=3)
+        self.assertEqual((status, seen), (0, [1]), out)
+
+    def test_the_variable_is_the_default(self):
+        for value in ("3", "5", "10"):
+            with self.subTest(value):
+                status, seen, out, _ = self.jobs_of_a_run(variable=value, cpus=16)
+                self.assertEqual((status, seen), (0, [int(value)]), out)
+
+    def test_an_explicit_j_wins(self):
+        for variable in ("3", None, "x", "0"):
+            for flag in ("-j", "--jobs"):
+                with self.subTest(variable=variable, flag=flag):
+                    status, seen, out, _ = self.jobs_of_a_run(flag, "2", variable=variable)
+                    self.assertEqual((status, seen), (0, [2]), out)
+
+    def test_an_invalid_value_is_an_environment_error_that_runs_nothing(self):
+        for value in ("", "0", "-1", "x", " 3", "3 ", "03", "3\n"):
+            with self.subTest(value=value):
+                status, seen, _, err = self.jobs_of_a_run(variable=value)
+                self.assertEqual((status, seen), (2, []))
+                self.assertIn("CERASTES_JOBS", err)
+                self.assertEqual(self.calls(), [])
+
+    def test_validate_and_list_do_not_need_the_variable(self):
+        t = self.put("a.c")
+        with mock.patch.dict(os.environ, {"CERASTES_JOBS": "x"}):
+            for flags in (["--validate"], ["--list"]):
+                status, out, err = self.run_main(*flags, t)
+                self.assertEqual(status, 0, out + err)
+
+    def test_mutate_uses_the_harness_default(self):
+        source = (rt.ROOT / "scripts" / "mutate.py").read_text()
+        self.assertIn("args.jobs = rt.default_jobs()", source)
+        self.assertNotIn("os.cpu_count", source)
+        self.assertRegex(source, r'"-j", "--jobs", type=int, default=None')
+
+
 if __name__ == "__main__":
     unittest.main()
