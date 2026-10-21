@@ -313,8 +313,10 @@ int verify_command(int argc, char** argv) {
   // The warnings the verifier reports itself (0010 item 12): constant-folding warnings, unused variables, etc.
   // #2803 (an unrecognized attribute) is replaced by the error `unrecognized_attribute` (0011 item 7).
   // #546 (a jump bypasses an initialization) is replaced by cerastes's own rejection of every such jump: a switch body
-  // declaration that a later case label skips (`unsupported_statement`), and every user goto (0014 items 1 and 7).
-  edg.push_back("--diag_suppress=61,62,63,39,179,68,69,546,940,2803");
+  // declaration that a later case label skips, and a goto past a declaration, both `unsupported_statement` (0014 items 1 and
+  // 7; 0015 item 2).  #1305 (a function declared not to return may return) is replaced by the `noreturn` check at every
+  // reachable `return` and closing brace (0015 item 4).
+  edg.push_back("--diag_suppress=61,62,63,39,179,68,69,546,940,1305,2803");
   for (const std::string& d : a.includes) edg.push_back("-I" + d);
   for (const std::string& m : a.macro_options) edg.push_back(m);
   edg.push_back(a.file);

@@ -156,6 +156,17 @@ class Kit {
   const Stmt* dflt() { return b.case_label(nullptr, at()); }
   const Stmt* brk(int id) { return b.break_stmt(id, at()); }
   const Stmt* cnt(int id) { return b.continue_stmt(id, at()); }
+  // User gotos and labels, assert and functions that do not return (decision 0015).
+  const Stmt* go(int id) { return b.goto_stmt(id, at()); }
+  const Stmt* lab(int id, const std::string& name = "L") { return b.label_stmt(id, name, at()); }
+  const Stmt* asrt(const Expr* e) { return b.check(e, at(), true); }
+  // A bodyless trusted function that does not return (what `abort` becomes).
+  Function* abort_fn() {
+    Function* a = fn("abort", vd);
+    a->noreturn = true;
+    trusted(a, "libc: abort never returns");
+    return a;
+  }
   // `(long)a - (long)b`: a measure that cannot overflow.
   const Expr* gap(const Expr* a, const Expr* c) { return sub(cv(i64, a), cv(i64, c)); }
   Clause cl(const Expr* e) { return Clause{e, at()}; }

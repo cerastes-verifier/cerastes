@@ -36,7 +36,7 @@ correctness (0013).
    lies between the two. "Block" is a VIR block: the encoder flattens the blocks EDG generates (C23 makes more of
    them than C++20) so that a declaration's VIR block contains at least its C scope (P20). Two guards keep that true
    whatever EDG generates (audit): a generated block that directly holds a user label is never flattened silently
-   (rejected), and a generated block that is not flattened (one with attributes) and directly holds a declaration is
+   (rejected; this happens for a label that is the whole branch of an `if` without braces, `if (c) L: x = 1;`), and a generated block that is not flattened (one with attributes) and directly holds a declaration is
    rejected, since a jump past that declaration would not be seen. Consequences: a `goto` is never backward
    (so it creates no loop that Silicon would not check for invariants or termination), never enters a loop (S9c),
    never enters an `if` branch, a plain block or a switch body (so the dispatch of a switch, with its case-value
@@ -73,16 +73,23 @@ correctness (0013).
    - **Calls** are ordinary calls (0012 item 6): after `f(…)`, Viper's call rule gives the callee's `ensures false`,
      so the rest of the path is unreachable. Nothing is inhaled or assumed.
    - **Spellings with an effect only.** A `noreturn` attribute entry is accepted only on a routine whose type has the
-     flag set; anywhere EDG would ignore it, it is rejected (`unsupported_attribute`).
+     flag set; anywhere else it is rejected (EDG keeps a misplaced one as an unrecognized attribute, so the diagnostic
+     is `unrecognized_attribute`, or EDG errors itself, #1835).
    - **Declared here, defined elsewhere.** A user function declared `[[noreturn]]` in a verified file and defined in
-     another unit — every declaration of it in a verified file, with a source position (not a builtin) — is used
-     through its declaration: a bodyless method with its `requires` and `ensures false`, tagged
+     another unit — its first declaration in a verified file, with a source position (not a builtin), and the flag
+     written there: no `noreturn` attribute entry of it in a file that is not verified, and no file that cannot be
+     placed (code audit: a user's plain `void quick_exit(int);` before `<stdlib.h>` takes the flag from the SDK's
+     `__dead2`, which is not the user's claim) — is used through its declaration: a bodyless method with its `requires` and `ensures false`, tagged
      `// cerastes:trusted-contract declared noreturn here, defined in another unit` (the single-unit assumption,
      0011 item 6). `[[noreturn]]` counts as a contract for 0011 item 5, so such a function may be called without a
-     `requires` or `ensures`. A function with any declaration in a system file is a C library function: only item 5's
-     table can make it trusted (`[[noreturn]] int abs(int);` before `<stdlib.h>` does not make `abs` end the path; its
-     call is rejected). As for every trusted contract (0012 item 6), a trusted callee that throws (C++) is outside its
-     contract.
+     `requires` or `ensures`. Like any contract a user writes on a declaration, it is the user's claim: a function the C
+     library also declares (`_Noreturn int rand(void);` before `<stdlib.h>`) is trusted to end the path, as a user's
+     `ensures(false)` on it would be (0011 item 6); the tag's "defined in another unit" is then inexact, as it already
+     is for such contracts (the IL keeps only the first declaration's position, P21). A scan of the system headers for
+     the name was tried and dropped (it misses `(name)(…)` declarations and names built by macros); the sound check,
+     EDG's source sequence lists, is a configuration change for a later session (handoff). Builtins have no source
+     position and are never trusted. As for every trusted contract (0012 item 6), a trusted callee that throws (C++)
+     is outside its contract.
    - **Rejected:** a `cerastes::ensures` on such a function (it never returns, so it would never be checked:
      `ensures_on_noreturn`), and a `main` declared not to return. `requires` and `decreases` are allowed.
    - **Termination** (0013) is unchanged: the function is in the call graph like any other; a loop needs a measure, so
@@ -100,7 +107,9 @@ correctness (0013).
 5. **Trusted C library functions** (a new, built-in table in the encoder; M4.5a decides whether it moves to a header
    when contracts need permissions; M4.5d adds `malloc`/`free`). An entry applies to a function declared only in
    system files (0011 item 4), with C linkage, the exact signature and EDG's "does not return" flag (P21); anything
-   else with the same name is an ordinary function. A rule keyed to the flag alone would also trust `quick_exit`, the
+   else with the same name is an ordinary function. The IL keeps only the first declaration's position (P21), so
+   "declared only in system files" is checked on the first declaration; a later user redeclaration of `exit` cannot add
+   a contract (must-match, 0006 item 6) and changes nothing. A rule keyed to the flag alone would also trust `quick_exit`, the
    builtins `__builtin_trap`/`__builtin_unreachable`, `std::terminate` and `__assert_rtn`, which all carry it (P21):
    the table is a closed list of names. Entries:
    `void abort(void)`, `void exit(int)`, `void _Exit(int)`: `requires true`, `ensures false`, `decreases _` (0013
@@ -151,8 +160,9 @@ correctness (0013).
    the postcondition); (S13) an assert's obligations come first; after a call that does not return, every assert
    holds.
 10. **Tooling.** `lint_viper.py`: item 3's outward-and-forward rule. `mutate.py`: `delete-stmt` deletes a `goto L;`;
-    deleting an `assert(…);` statement removes a check (and the calls in it, whose contracts only add facts), so such a
-    surviving mutant is in the safe-direction bucket.
+    deleting an `assert(…);` statement whose condition has no call, increment, assignment or comma only removes a check,
+    so such a surviving mutant is in the safe-direction bucket; one with a call is not (re-audit: a callee's `ensures`
+    can hold only because the callee ends the program otherwise, so deleting the call can make the program wrong).
 11. **Amends** 0011 items 5, 6, 7 and 10; 0012 items 3, 6, 9 and 12; 0013 items 5 and 6; 0014 items 1, 2, 3, 9 and 11
     (#546 stays suppressed: cerastes now rejects every jump past a declaration, `goto` included, item 2); and
     `internal/encoding.md` §2, §3, §7 and §8.

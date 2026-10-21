@@ -155,7 +155,9 @@ struct Stmt {
     Case,      // a `case value:` / `default:` marker inside a Switch's own body Block: `expr` is the value (an Int Const of
                // the scrutinee's type) or null for `default`
     Break,     // break: leaves the loop or switch whose `jump_id` is `jump_id`
-    Continue   // continue: goes to the end of the iteration of the loop whose `jump_id` is `jump_id`
+    Continue,  // continue: goes to the end of the iteration of the loop whose `jump_id` is `jump_id`
+    Goto,      // goto: a user `goto` to the Label whose `jump_id` is `jump_id` (decision 0015 item 2; goto_problems)
+    Label      // a user label `label_name:` with id `jump_id` (a direct statement of a Block)
   };
   Kind kind = Kind::Block;
   SrcLoc loc;
@@ -172,7 +174,11 @@ struct Stmt {
   const Stmt* step = nullptr;               // While: a `for` loop's increment (an Assign or ExprStmt), run after the body and
                                             // after each `continue`; may be null
   int jump_id = 0;                          // While, Switch: this construct's id (> 0 when a Break or Continue may name it;
-                                            // unique within a Function, Builder::jump_id()); Break, Continue: the target's id
+                                            // unique within a Function, Builder::jump_id()); Break, Continue, Goto: the target's id;
+                                            // Label: its own id
+  std::string label_name;                   // Label: the user's name
+  bool from_assert = false;                 // Check: written as C's `assert(e)`: `expr` is typed like code (calls allowed) and a
+                                            // failure says `assert` (decision 0015 item 6)
 };
 
 // ---- functions and programs ----------------------------------------------------------------------------------
@@ -211,6 +217,10 @@ struct Function {
   // For a function without a body: why its contract is trusted ("declared here, defined in another unit" or
   // "trusted, never verified" for a function of a system file).  Required then; emitted as a comment tag.
   std::string trusted_reason;
+  // Declared not to return (`[[noreturn]]`, `_Noreturn`; decision 0015 item 4): with a body, every reachable `return` and the
+  // closing brace are `noreturn` errors and the method ensures `false`; without one it is a trusted contract that ensures `false`
+  // (`trusted_reason` required).  It has no user `ensures`.
+  bool noreturn = false;
 
   bool verified() const { return body != nullptr; }
 
@@ -266,6 +276,22 @@ class Program {
   std::deque<Expr> exprs_;
   std::deque<Stmt> stmts_;
 };
+
+// ---- user gotos (decision 0015 item 2) -------------------------------------------------------------------------
+
+// Why a Goto is not accepted.  A Goto with label id L is accepted iff the Label with that id is a direct statement of a
+// Block that is an ancestor of the Goto, at an index after the one holding the Goto, with no Decl of that Block between
+// the two.  Otherwise: `no_label` (no such Label in the function), `skips_declaration` (`variable` names the variable),
+// `backward` (the Label comes before the Goto in a pre-order walk) or `enters` (anything else).
+struct GotoProblem {
+  const Stmt* go = nullptr;
+  enum class Kind { backward, enters, skips_declaration, no_label } kind = Kind::no_label;
+  std::string label;     // the user's name of the label (empty for no_label)
+  std::string variable;  // skips_declaration: the variable
+};
+// The problems of the Gotos of `f`'s body (none for a function without a body).  check_program reports each one as an
+// internal error: the encoder rejects them first, with a diagnostic at the C/C++ line.
+std::vector<GotoProblem> goto_problems(const Function& f);
 
 // ---- the standards' conversion rules (the one place they are implemented) -----------------------------------------
 
@@ -326,7 +352,9 @@ class Builder {
   const Stmt* continue_stmt(int target_jump_id, SrcLoc loc);
   int jump_id() { return p_.fresh_jump_id(); }
   const Stmt* return_stmt(const Expr* value_or_null, SrcLoc loc);
-  const Stmt* check(const Expr* e, SrcLoc loc);
+  const Stmt* check(const Expr* e, SrcLoc loc, bool from_assert = false);
+  const Stmt* goto_stmt(int label_id, SrcLoc loc);
+  const Stmt* label_stmt(int label_id, std::string name, SrcLoc loc);
   const Stmt* block(std::vector<const Stmt*> stmts, SrcLoc loc);
 
   // `x op= rhs` and `++x`, `x++`, `--x`, `x--` as statements (0010 item 6).  The IL does not give the

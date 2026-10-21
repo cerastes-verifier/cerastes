@@ -1366,6 +1366,282 @@ void define_control_flow() {
   });
 }
 
+// ---- user gotos, functions that do not return, assert (decision 0015) -----------------------------------------------
+
+void define_goto_noreturn_assert() {
+  using LF = LoopForm;
+  auto fn_n = [](Kit& k, Type ret = Type()) {
+    Function* f = k.fn("f", ret.is_void() ? k.vd : ret, {{"n", k.i32}});
+    k.req(f, k.range(k.F(f, 0), k.i32, "0", "100"));
+    return f;
+  };
+  auto plus1 = [](Kit& k, Var* x) { return k.asg(x, k.add(k.v(x), k.num(k.i32, "1"))); };
+
+  // ---- goto ----
+  // S11a: goto from an inner loop to a label after the outer loop.  The twin checks a fact true only on the normal exit.
+  auto nested = [=](Kit& k, bool twin) {
+    Function* f = fn_n(k, k.i32);
+    Var* i = k.local(f, "i", k.i32);
+    Var* j = k.local(f, "j", k.i32);
+    Var* r = k.local(f, "r", k.i32);
+    const int L = k.jid();
+    auto inv = [&](Var* x) {
+      return std::vector<Clause>{k.cl(k.range(k.v(x), k.i32, "0", "100")), k.cl(k.le(k.v(x), k.pv(f, 0))), k.cl(k.range(k.v(r), k.i32, "0", "2"))};
+    };
+    const Stmt* inner = k.loop(k.lt(k.v(j), k.pv(f, 0)), inv(j), {k.cl(k.gap(k.pv(f, 0), k.v(j)))},
+                               k.blk({k.iff(k.eq_c(k.add(k.v(i), k.v(j)), k.i32, "7"), k.blk({k.asg(r, k.num(k.i32, "1")), k.go(L)})), plus1(k, j)}),
+                               nullptr, LF::While, k.jid());
+    const Stmt* outer = k.loop(k.lt(k.v(i), k.pv(f, 0)), inv(i), {k.cl(k.gap(k.pv(f, 0), k.v(i)))},
+                               k.blk({k.asg(j, k.num(k.i32, "0")), inner, plus1(k, i)}), nullptr, LF::While, k.jid());
+    const Stmt* c = twin ? k.chk(k.eq_c(k.v(r), k.i32, "2")) : k.chk(k.ge_c(k.v(r), k.i32, "1"));
+    f->body = k.blk({k.decl(i, k.num(k.i32, "0")), k.decl(r, k.num(k.i32, "0")), k.decl(j, k.num(k.i32, "0")), outer,
+                     k.asg(r, k.num(k.i32, "2")), k.lab(L), c, k.ret(k.v(r))});
+    k.done(f);
+    if (twin) k.fail("check", c->loc);
+  };
+  lc("goto_out_of_nested_loops", "goto from the inner loop to a label after the outer loop: r >= 1 on both exits", [=](Kit& k) { nested(k, false); });
+  lc("goto_out_of_nested_loops_twin", "the same: r == 2 holds only on the normal exit, not after the goto", [=](Kit& k) { nested(k, true); });
+
+  // S11b: a continue-like goto to a later label of a loop body.
+  auto cont_like = [=](Kit& k, int variant) {  // 0 ok, 1 breaks an invariant, 2 skips the step
+    Function* f = fn_n(k, k.i32);
+    Var* i = k.local(f, "i", k.i32);
+    Var* r = k.local(f, "r", k.i32);
+    const int L = k.jid();
+    Clause inv = k.cl(k.land(k.ge_c(k.v(r), k.i32, "0"), k.le(k.v(r), k.v(i))));
+    Clause m = k.cl(k.gap(k.pv(f, 0), k.v(i)));
+    const Stmt* jump = variant == 1 ? k.blk({k.asg(r, k.add(k.v(r), k.num(k.i32, "5"))), k.go(L)}) : k.blk({k.go(L)});
+    std::vector<const Stmt*> body = {k.iff(k.eq_c(k.v(i), k.i32, "3"), jump), k.asg(r, k.add(k.v(r), k.num(k.i32, "1")))};
+    if (variant == 2) {
+      body.push_back(plus1(k, i));
+      body.push_back(k.lab(L));
+    } else {
+      body.push_back(k.lab(L));
+      body.push_back(plus1(k, i));
+    }
+    const Stmt* w = k.loop(k.lt(k.v(i), k.pv(f, 0)), {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.le(k.v(i), k.pv(f, 0))), inv}, {m},
+                           k.blk(body), nullptr, LF::While, k.jid());
+    f->body = k.blk({k.decl(i, k.num(k.i32, "0")), k.decl(r, k.num(k.i32, "0")), w, k.ret(k.v(r))});
+    k.done(f);
+    if (variant == 1) k.fail("invariant-preserved", inv.loc);
+    if (variant == 2) k.fail("termination", m.loc);
+  };
+  lc("goto_continue_like", "a goto to a later label of the loop body (like continue): the invariants hold at the end of the body", [=](Kit& k) { cont_like(k, 0); });
+  lc("goto_continue_like_breaks_invariant", "the goto path adds 5 to r, so r <= i does not hold at the next iteration", [=](Kit& k) { cont_like(k, 1); });
+  lc("goto_continue_like_skips_step", "the label is after the step: the goto path does not decrease the measure", [=](Kit& k) { cont_like(k, 2); });
+
+  // S11c: goto out of a do ... while (0) (straight-line code).
+  auto from_once = [=](Kit& k, bool twin) {
+    Function* f = fn_n(k, k.i32);
+    Var* r = k.local(f, "r", k.i32);
+    const int L = k.jid();
+    const Stmt* body = k.blk({k.iff(k.eq_c(k.pv(f, 0), k.i32, "5"), k.blk({k.asg(r, k.num(k.i32, "1")), k.go(L)})), k.asg(r, k.num(k.i32, "1"))});
+    const Stmt* c = twin ? k.chk(k.eq_c(k.v(r), k.i32, "2")) : k.chk(k.ge_c(k.v(r), k.i32, "1"));
+    f->body = k.blk({k.decl(r, k.num(k.i32, "0")), k.loop(k.no(), {}, {}, body, nullptr, LF::DoOnce, k.jid()),
+                     k.asg(r, k.add(k.v(r), k.num(k.i32, "1"))), k.lab(L), c, k.ret(k.v(r))});
+    k.done(f);
+    if (twin) k.fail("check", c->loc);
+  };
+  lc("goto_out_of_do_once", "goto out of do { ... } while (0) to a later label: r >= 1 on both paths", [=](Kit& k) { from_once(k, false); });
+  lc("goto_out_of_do_once_twin", "the same: r == 2 holds only when the body ran to its end", [=](Kit& k) { from_once(k, true); });
+
+  // goto out of a switch.
+  auto from_switch = [=](Kit& k, bool twin) {
+    Function* f = fn_n(k, k.i32);
+    Var* r = k.local(f, "r", k.i32);
+    const int L = k.jid();
+    const Stmt* sbody = k.blk({k.cs(k.num(k.i32, "1")), k.asg(r, k.num(k.i32, "1")), k.go(L), k.dflt(), k.asg(r, k.num(k.i32, "2"))});
+    const Stmt* c = twin ? k.chk(k.eq_c(k.v(r), k.i32, "1")) : k.chk(k.range(k.v(r), k.i32, "1", "12"));
+    f->body = k.blk({k.decl(r, k.num(k.i32, "0")), k.sw(k.pv(f, 0), sbody, k.jid()), k.asg(r, k.add(k.v(r), k.num(k.i32, "10"))),
+                     k.lab(L), c, k.ret(k.v(r))});
+    k.done(f);
+    if (twin) k.fail("check", c->loc);
+  };
+  lc("goto_out_of_switch", "goto out of a switch case to a label after the switch's fallout code", [=](Kit& k) { from_switch(k, false); });
+  lc("goto_out_of_switch_twin", "the same: r == 1 does not hold on the default path", [=](Kit& k) { from_switch(k, true); });
+
+  lc("goto_unreferenced_label_ok", "a label no goto targets lowers to nothing", [=](Kit& k) {
+    Function* f = fn_n(k, k.i32);
+    f->body = k.blk({k.lab(k.jid()), k.ret(k.pv(f, 0))});
+    k.done(f);
+  });
+  lc("goto_over_statement_and_before_declaration", "a goto over an assignment to a label with a declaration after it", [=](Kit& k) {
+    Function* f = fn_n(k, k.i32);
+    Var* r = k.local(f, "r", k.i32);
+    Var* y = k.local(f, "y", k.i32);
+    const int L = k.jid();
+    f->body = k.blk({k.decl(r, k.num(k.i32, "0")), k.iff(k.gt(k.pv(f, 0), k.num(k.i32, "5")), k.blk({k.go(L)})), k.asg(r, k.num(k.i32, "1")),
+                     k.lab(L), k.decl(y, k.add(k.v(r), k.num(k.i32, "1"))), k.chk(k.range(k.v(y), k.i32, "1", "2")), k.ret(k.v(y))});
+    k.done(f);
+  });
+
+  // ---- functions that do not return ----
+  lc("noreturn_calls_abort_on_every_path", "a noreturn function whose every path calls a bodyless noreturn function verifies", [=](Kit& k) {
+    Function* a = k.abort_fn();
+    Function* f = fn_n(k);
+    f->noreturn = true;
+    f->body = k.blk({k.iff(k.gt(k.pv(f, 0), k.num(k.i32, "0")), k.blk({k.es(k.call(a, {}))})), k.es(k.call(a, {}))});
+    k.done(f);
+  });
+  lc("noreturn_end_reachable", "a noreturn function that can reach its closing brace", [=](Kit& k) {
+    Function* a = k.abort_fn();
+    Function* f = fn_n(k);
+    f->noreturn = true;
+    f->body = k.blk({k.iff(k.gt(k.pv(f, 0), k.num(k.i32, "0")), k.blk({k.es(k.call(a, {}))}))});
+    k.done(f);
+    k.fail("noreturn", f->end_loc);
+  });
+  lc("noreturn_return_reachable", "a noreturn function with a return that can be reached", [=](Kit& k) {
+    Function* a = k.abort_fn();
+    Function* f = fn_n(k);
+    f->noreturn = true;
+    const Stmt* r = k.ret(nullptr);
+    f->body = k.blk({k.iff(k.gt(k.pv(f, 0), k.num(k.i32, "0")), k.blk({r})), k.es(k.call(a, {}))});
+    k.done(f);
+    k.fail("noreturn", r->loc);
+  });
+  lc("noreturn_value_return_reachable", "a non-void noreturn function: the reachable return is a noreturn error, not a missing-return", [=](Kit& k) {
+    Function* f = fn_n(k, k.i32);
+    f->noreturn = true;
+    const Stmt* r = k.ret(k.num(k.i32, "1"));
+    f->body = k.blk({r});
+    k.done(f);
+    k.fail("noreturn", r->loc);
+  });
+  lc("noreturn_value_end_reachable", "a non-void noreturn function that falls off its end: noreturn at the brace", [=](Kit& k) {
+    Function* f = fn_n(k, k.i32);
+    f->noreturn = true;
+    f->body = k.blk({});
+    k.done(f);
+    k.fail("noreturn", f->end_loc);
+  });
+  lc("noreturn_unreachable_return_ok", "a return after a call that does not return is unreachable: no error", [=](Kit& k) {
+    Function* a = k.abort_fn();
+    Function* f = fn_n(k);
+    f->noreturn = true;
+    f->body = k.blk({k.es(k.call(a, {})), k.ret(nullptr)});
+    k.done(f);
+  });
+  lc("noreturn_call_makes_rest_unreachable", "after abort() in a measured loop, check(false) holds", [=](Kit& k) {
+    Function* a = k.abort_fn();
+    Function* f = fn_n(k, k.i32);
+    Var* i = k.local(f, "i", k.i32);
+    const Stmt* w = k.loop(k.lt(k.v(i), k.pv(f, 0)), {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.le(k.v(i), k.pv(f, 0)))}, {k.cl(k.gap(k.pv(f, 0), k.v(i)))},
+                           k.blk({k.iff(k.eq_c(k.v(i), k.i32, "50"), k.blk({k.es(k.call(a, {})), k.chk(k.no())})), plus1(k, i)}), nullptr, LF::While, 0);
+    f->body = k.blk({k.decl(i, k.num(k.i32, "0")), w, k.ret(k.v(i))});
+    k.done(f);
+  });
+  lc("noreturn_without_call_check_false_fails", "the same check(false) without the call is reachable", [=](Kit& k) {
+    Function* f = fn_n(k, k.i32);
+    const Stmt* c = k.chk(k.no());
+    f->body = k.blk({k.iff(k.eq_c(k.pv(f, 0), k.i32, "50"), k.blk({c})), k.ret(k.pv(f, 0))});
+    k.done(f);
+    k.fail("check", c->loc);
+  });
+
+  // ---- assert ----
+  auto div_assert = [=](Kit& k, int variant) {  // 0 ok, 1 asserted fact false, 2 divisor may be 0
+    Function* f = k.fn("f", k.vd, {{"a", k.i32}, {"b", k.i32}});
+    k.req(f, k.range(k.F(f, 0), k.i32, "0", "100"));
+    k.req(f, k.range(k.F(f, 1), k.i32, variant == 2 ? "0" : "1", "100"));
+    const Expr* d = k.div(k.pv(f, 0), k.pv(f, 1));
+    const Stmt* a = k.asrt(k.ge_c(d, k.i32, variant == 1 ? "1" : "0"));
+    f->body = k.blk({a});
+    k.done(f);
+    if (variant == 1) k.fail("check", a->loc, 1, "", "assert");
+    if (variant == 2) k.fail("division-by-zero", d->loc);
+  };
+  lc("assert_with_division_ok", "assert(a / b >= 0) with b >= 1", [=](Kit& k) { div_assert(k, 0); });
+  lc("assert_fails_as_check", "assert(a / b >= 1) may not hold: a `check` error that names assert", [=](Kit& k) { div_assert(k, 1); });
+  lc("assert_obligation_first", "assert(a / b >= 0) with b possibly 0: the division is reported", [=](Kit& k) { div_assert(k, 2); });
+  auto call_assert = [=](Kit& k, bool good) {
+    Function* g = k.fn("g", k.i32, {{"x", k.i32}});
+    k.req(g, k.range(k.F(g, 0), k.i32, "0", "100"));
+    if (good) k.ens(g, k.gt(k.R(g), k.num(k.i32, "0")));
+    k.trusted(g);
+    Function* f = k.fn("f", k.vd, {{"x", k.i32}});
+    k.req(f, k.range(k.F(f, 0), k.i32, "0", "100"));
+    const Stmt* a = k.asrt(k.gt(k.call(g, {k.pv(f, 0)}), k.num(k.i32, "0")));
+    f->body = k.blk({a});
+    k.done(f);
+    if (!good) k.fail("check", a->loc, 1, "", "assert");
+  };
+  lc("assert_with_call_ok", "assert(g(x) > 0) where g ensures a positive result: the call is hoisted like any other", [=](Kit& k) { call_assert(k, true); });
+  lc("assert_with_call_fails", "assert(g(x) > 0) where g has no such ensures", [=](Kit& k) { call_assert(k, false); });
+  lc("assert_false_reachable_fails", "assert(0) on a reachable path", [=](Kit& k) {
+    Function* f = fn_n(k);
+    const Stmt* a = k.asrt(k.no());
+    f->body = k.blk({a});
+    k.done(f);
+    k.fail("check", a->loc, 1, "", "assert");
+  });
+  lc("assert_after_abort_is_vacuous", "after a call that does not return, assert(0) holds", [=](Kit& k) {
+    Function* a = k.abort_fn();
+    Function* f = fn_n(k);
+    f->body = k.blk({k.es(k.call(a, {})), k.asrt(k.no())});
+    k.done(f);
+  });
+}
+
+void define_goto_rejections() {
+  using LF = LoopForm;
+  auto plain = [](Kit& k, std::vector<const Stmt*> body) {
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk(std::move(body));
+    k.done(f);
+    return f;
+  };
+  rc("goto_backward", "goes backward", [=](Kit& k) {
+    const int L = k.jid();
+    plain(k, {k.lab(L), k.go(L)});
+  });
+  rc("goto_enters_block", "enters a block", [=](Kit& k) {
+    const int L = k.jid();
+    plain(k, {k.go(L), k.blk({k.lab(L)})});
+  });
+  rc("goto_enters_if_branch", "enters a block", [=](Kit& k) {
+    const int L = k.jid();
+    plain(k, {k.go(L), k.iff(k.yes(), k.blk({k.lab(L)}))});
+  });
+  rc("goto_enters_loop", "enters a block", [=](Kit& k) {
+    const int L = k.jid();
+    plain(k, {k.go(L), k.whl(k.yes(), {}, {k.cl(k.num(k.i32, "0"))}, k.blk({k.lab(L)}))});
+  });
+  rc("goto_enters_switch_body", "enters a block", [=](Kit& k) {
+    const int L = k.jid();
+    plain(k, {k.go(L), k.sw(k.num(k.i32, "1"), k.blk({k.cs(k.num(k.i32, "1")), k.lab(L)}), k.jid())});
+  });
+  rc("goto_enters_do_once", "enters a block", [=](Kit& k) {
+    const int L = k.jid();
+    plain(k, {k.go(L), k.loop(k.no(), {}, {}, k.blk({k.lab(L)}), nullptr, LF::DoOnce, k.jid())});
+  });
+  rc("goto_skips_declaration", "skips a declaration", [=](Kit& k) {
+    const int L = k.jid();
+    Function* f = k.fn("f", k.vd);
+    Var* x = k.local(f, "x", k.i32);
+    f->body = k.blk({k.go(L), k.decl(x, k.num(k.i32, "1")), k.lab(L)});
+    k.done(f);
+  });
+  rc("goto_missing_label", "not in the function", [=](Kit& k) { plain(k, {k.go(k.jid())}); });
+  rc("label_id_used_twice", "used twice", [=](Kit& k) {
+    const int L = k.jid();
+    plain(k, {k.lab(L), k.lab(L)});
+  });
+  rc("label_id_of_a_loop", "and a label", [=](Kit& k) {
+    const int L = k.jid();
+    plain(k, {k.lab(L), k.loop(k.no(), {}, {}, k.blk({}), nullptr, LF::DoOnce, L)});
+  });
+  rc("label_not_directly_in_a_block", "not directly in a block", [=](Kit& k) { plain(k, {k.iff(k.yes(), k.lab(k.jid()))}); });
+  rc("noreturn_with_ensures", "declared not to return", [=](Kit& k) {
+    Function* a = k.abort_fn();
+    Function* f = k.fn("f", k.vd, {{"x", k.i32}});
+    f->noreturn = true;
+    k.ens(f, k.gt(k.F(f, 0), k.num(k.i32, "0")));
+    f->body = k.blk({k.es(k.call(a, {}))});
+    k.done(f);
+  });
+}
+
 void define_calls_loops_and_more() {
   define_calls();
   define_loops();
@@ -1375,6 +1651,8 @@ void define_calls_loops_and_more() {
   define_wellformedness();
   define_compound_assignment();
   define_misc();
+  define_goto_noreturn_assert();
+  define_goto_rejections();
 }
 
 // ---- typing-rule rejections -----------------------------------------------------------------------------------

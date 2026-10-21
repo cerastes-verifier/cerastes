@@ -274,9 +274,23 @@ const Stmt* Builder::return_stmt(const Expr* value, SrcLoc loc) {
   return s;
 }
 
-const Stmt* Builder::check(const Expr* e, SrcLoc loc) {
+const Stmt* Builder::check(const Expr* e, SrcLoc loc, bool from_assert) {
   Stmt* s = fresh_stmt(p_, Stmt::Kind::Check, std::move(loc));
   s->expr = e;
+  s->from_assert = from_assert;
+  return s;
+}
+
+const Stmt* Builder::goto_stmt(int label_id, SrcLoc loc) {
+  Stmt* s = fresh_stmt(p_, Stmt::Kind::Goto, std::move(loc));
+  s->jump_id = label_id;
+  return s;
+}
+
+const Stmt* Builder::label_stmt(int label_id, std::string name, SrcLoc loc) {
+  Stmt* s = fresh_stmt(p_, Stmt::Kind::Label, std::move(loc));
+  s->jump_id = label_id;
+  s->label_name = std::move(name);
   return s;
 }
 

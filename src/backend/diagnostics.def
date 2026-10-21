@@ -111,3 +111,6 @@ CERASTES_DIAG(system_header_pragma_in_verify, error,
               "make the rest of the file a system header, which is never verified (decision 0011 item 4)")
 CERASTES_DIAG(missing_decreases, error,
               "%s (decision 0013)")
+CERASTES_DIAG(ensures_on_noreturn, error,
+              "\"cerastes::ensures\" on a function declared not to return: it never returns, so the postcondition "
+              "would never be checked (decision 0015)")

@@ -2,8 +2,8 @@
 
 Developer reference for the encoder (plan.md: "Design VIR and document it in `encoding.md`"; it grows each
 milestone). The decisions behind it are 0010 (integer semantics), 0011 (driver), 0012 (scalar encoding), 0014
-(control flow). This file says *how*; those records say *what* and *why*. Status: M3 (scalar code) and M4.1
-(control flow). Sections marked *(M3-n)* are
+(control flow), 0015 (forward `goto`, functions that do not return, `assert`). This file says *how*; those records
+say *what* and *why*. Status: M3 (scalar code), M4.1 (control flow) and M4.2a. Sections marked *(M3-n)* are
 filled in at that checkpoint.
 
 ## 1. Pipeline and layering
@@ -47,7 +47,13 @@ Front-end agnostic. The encoder builds a `Program` with a `Builder`; `check_prog
   `While` (the test before the body; `step` is a `for` loop's increment, an `Assign` or `ExprStmt`), `DoWhile` (the
   test after the body) or `DoOnce` (`do … while (0)`: the condition evaluates to zero, no measure needed). Jump ids
   are unique in the Program (`Builder::jump_id()`); a `Break` names the innermost enclosing loop or switch, a
-  `Continue` the innermost enclosing loop, so every jump is forward and none enters a loop. There is no statement for falling off the end: lowering appends the epilogue of the function
+  `Continue` the innermost enclosing loop, so every jump is forward and none enters a loop. Since M4.2a (decision
+  0015) `Goto(label id)` and `Label(id, name)`: `vir::goto_problems` (used by `check_program` and by the encoder for
+  its diagnostics) accepts a `Goto` only if its `Label` is a direct statement of a `Block` enclosing the `Goto`, after
+  the `Goto`'s ancestor there, with no `Decl` of that `Block` between them ("outward and forward"); so user jumps are
+  forward too and never enter a block or a loop. `Check(e, from_assert)`: an `assert` from `<assert.h>` is a `Check`
+  whose `e` is a code expression (calls allowed, as in an `if` condition). `Function::noreturn` marks a function
+  declared not to return. There is no statement for falling off the end: lowering appends the epilogue of the function
   (`missing-return` for a non-`void` function, the `ensures` for a `void` one). `main`'s generated `return 0`
   is an ordinary `Return`.
 - `Function { id, c_name, params[], ret, requires[], ensures[], body?, trusted_reason, loc, end_loc }`; a null
@@ -136,10 +142,17 @@ placed by the call rule), asserts each case value's obligations unconditionally 
 `if (t == value) { goto l_case__N_i }` in source order and then `goto l_default__N` or `goto l_brk__N`, and places a
 label at each `Case` marker. The automatic range invariants of a loop include the locals assigned in its `step` and
 in switch bodies. `lint_viper.py` rejects a backward `goto`, a label carrying invariants and a duplicate label.
+A user `Goto` is `goto l_user_<name>__N` and its `Label` is `label l_user_<name>__N`, emitted only when a `goto`
+targets it. Since M4.2a `lint_viper.py` checks every `goto` (generated or user) at token level: its label must come
+later, inside braces that also enclose the `goto` (so no jump into a loop body or an `if` branch).
 
 **Returns.** `return e` assigns `res`, asserts each `ensures` clause (`postcondition`, at the `return`, note at
 the clause), and jumps to `l_end`. The end of the body appends `assert false` (`missing-return`) for a
-non-`void` function and the `ensures` asserts for a `void` one, then `label l_end`.
+non-`void` function and the `ensures` asserts for a `void` one, then `label l_end`. A function declared not to return
+(M4.2a) asserts `false` with category `noreturn` at each `return` and at the end of its body instead, and its method
+has `ensures false` (implied by those asserts; a bodyless one, from the C library table or declared here and defined
+elsewhere, carries the trusted tag, `libc: …` or `declared noreturn here, defined in another unit`). A call of such a function is an
+ordinary call: its `ensures false` ends the path.
 
 **Well-formedness.** Each function with a contract also gets `f__wf`, a method with only the type ranges as
 preconditions, that asserts the obligations of each `requires` clause under the clauses before it, and of each
@@ -217,7 +230,11 @@ The IL facts each rule relies on (node kinds, fields, conversions) are recorded 
 - `break`/`continue` are compiler-generated `stmk_goto` + `stmk_label`; the label carries `break_label`,
   `continue_label` and, for a switch, `switch_break_label`. No field links a label to its construct: the break label
   is the next sibling of the loop or switch, the continue label the last statement of the loop body (M4.1, P13).
-  A user `goto` or label is rejected.
+  A user `goto` is a `stmk_goto` without `compiler_generated`, naming its `a_label`; a user label is a `stmk_label`
+  covering only `L:`, the labeled statement is its next sibling, and the label's attributes are on the label entity
+  (M4.2a, P19). A computed `goto *p` is `stmk_assigned_goto`.
+- `assert(e)` on macOS is `eok_question[void](__builtin_expect((long)!e, 0), __assert_rtn(…), (void)0)`, with a
+  `bool` conversion around the condition in C++; every node is positioned at the macro invocation (M4.2a, P22).
 - `do` is `stmk_end_test_while` (`expr`, `loop_statement`); `switch` is `stmk_switch`, its case labels flat
   siblings (`stmk_switch_case`) in the body block, each with `case_value` (already converted to the promoted
   scrutinee's type) and `range_end` (a GNU range); a C++ init-statement or condition declaration is an
@@ -268,11 +285,14 @@ are not diagnosed again, and after a VLA the compiler's own cleanup statements a
 reported per (tag, line).
 
 **Routines.** Every routine of a verified file is checked for attributes and signature (a variadic function, a
-function without a prototype, a `[[noreturn]]` function, a parameter or result of a type with no VIR meaning); every one
+function without a prototype, a `main` declared not to return, a parameter or result of a type with no VIR meaning;
+a routine whose type says it does not return is `Function::noreturn`, M4.2a); every one
 with a body becomes a VIR function with a body, created before any body is encoded so that calls and recursion find it.
 Routines that are templates, instances of templates, members of classes, compiler-generated or lambda bodies are not
 encoded (the template or class declaration is what is rejected); a call of a template instance is rejected. A callee without one is
-a trusted contract when a declaration carries a `requires` or `ensures`, else `call_without_contract`; its reason is
+a trusted contract when a declaration carries a `requires` or `ensures` or the function is declared not to return
+(M4.2a), or when it is one of the C library functions of 0015 item 5 (`abort`, `exit`, `_Exit`: name, system file,
+C linkage, signature and the "does not return" flag all checked), else `call_without_contract`; its reason is
 "declared here, defined in another unit" or "trusted, never verified: declared in a system file". `predicate`/`pure`
 routines and the spec functions are skipped (their bodies are not encoded); a call of one from code is
 `spec_call_in_code`. `requires` on `main` is `contract_on_main`. Attributes are held to the allow-list of 0011 item 7
@@ -311,7 +331,10 @@ a local, calls, discarded expressions, `(void)e`), `if`, `while`, `do` and `for`
 checked, decision 0014), `switch` (case labels directly in its body), `return`, `static_assert`, null statements
 (`[[fallthrough]]` among them) and `check`. A `do` whose condition is a constant zero (EDG's folded value) is the
 loop form `DoOnce`. A compiler-generated `return` without a value ends a function and is not encoded (lowering
-appends the epilogue); the generated `return 0` of `main` is encoded at the closing brace. A user `goto` or label,
+appends the epilogue); the generated `return 0` of `main` is encoded at the closing brace. A user `goto` and label
+become `Goto`/`Label` (one id per `a_label`); the label entity's attributes go through the allow-list; after the
+function is built, each `vir::goto_problems` entry is reported as `unsupported_statement` at the `goto` (M4.2a). The
+`assert` expansion is matched by its exact shape and becomes `Check(e, from_assert)` (0015 item 6). A computed `goto`,
 `try`, `asm`, range-based `for`, `if constexpr`/`consteval`, conditions with declarations, and the forms of `switch`
 that 0014 item 1 rejects (nested labels, GNU ranges, a statement before the first label, a declaration a later label
 jumps over, an init-statement) are `unsupported_statement`; verify mode suppresses EDG's warning #546 for the jump

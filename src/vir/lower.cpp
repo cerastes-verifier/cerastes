@@ -493,7 +493,7 @@ class Lowerer {
       case Stmt::Kind::Return: ret(s, out); break;
       case Stmt::Kind::Check: {
         LV v = full_expr(*s.expr, out);
-        emit_assert(out, v.e, meta("check", s.loc, "this `check` may not hold"));
+        emit_assert(out, v.e, meta("check", s.loc, s.from_assert ? "this `assert` may not hold" : "this `check` may not hold"));
         break;
       }
       case Stmt::Kind::Block:
@@ -505,6 +505,10 @@ class Lowerer {
         break;
       case Stmt::Kind::Break: jump(out, "l_brk__" + std::to_string(s.jump_id)); break;
       case Stmt::Kind::Continue: jump(out, "l_cont__" + std::to_string(s.jump_id)); break;
+      case Stmt::Kind::Goto: jump(out, user_label(s)); break;
+      case Stmt::Kind::Label:
+        if (user_targets_.count(s.jump_id) != 0) label(out, user_label(s));
+        break;
     }
   }
 
@@ -543,6 +547,35 @@ class Lowerer {
         break;
       default: break;
     }
+  }
+
+  // The user labels some `goto` of the function targets (a label is emitted only then, decision 0015 item 3).
+  void collect_gotos(const Stmt& s, std::set<int>& targets) {
+    switch (s.kind) {
+      case Stmt::Kind::Goto: targets.insert(s.jump_id); break;
+      case Stmt::Kind::Label: user_names_[s.jump_id] = s.label_name; break;
+      case Stmt::Kind::If:
+        if (s.then_body != nullptr) collect_gotos(*s.then_body, targets);
+        if (s.else_body != nullptr) collect_gotos(*s.else_body, targets);
+        break;
+      case Stmt::Kind::While:
+        if (s.body != nullptr) collect_gotos(*s.body, targets);
+        if (s.step != nullptr) collect_gotos(*s.step, targets);
+        break;
+      case Stmt::Kind::Switch:
+        if (s.body != nullptr) collect_gotos(*s.body, targets);
+        break;
+      case Stmt::Kind::Block:
+        for (const Stmt* c : s.stmts) collect_gotos(*c, targets);
+        break;
+      default: break;
+    }
+  }
+
+  // A Goto carries only the label's id: its name is the Label's (collect_gotos found them all before lowering the body).
+  std::string user_label(const Stmt& s) const {
+    const auto it = user_names_.find(s.jump_id);
+    return "l_user_" + sanitize(it != user_names_.end() ? it->second : s.label_name) + "__" + std::to_string(s.jump_id);
   }
 
   // `switch (e) { ... }`: the controlling expression is evaluated once into a temporary (its obligations and calls first),
@@ -609,7 +642,13 @@ class Lowerer {
       LV v = full_expr(*s.expr, out);
       assign(out, kResult, v.e);
     }
-    postconditions(s.loc, out);
+    if (fn_.f->noreturn) {
+      // decision 0015 item 4: a function declared not to return must not return; a reachable `return` is the error.
+      emit_assert(out, low::bool_lit(false),
+                  meta("noreturn", s.loc, "`" + fn_.f->c_name + "` is declared not to return, but it may return here"));
+    } else {
+      postconditions(s.loc, out);
+    }
     low::LStmt g;
     g.kind = low::LStmt::Kind::Goto;
     g.name = kEndLabel;
@@ -849,6 +888,7 @@ class Lowerer {
       LV v = lower(*c.expr, cenv, nullptr, -1, scratch);
       m.ensures_.push_back(clause_checks(v.e, c.loc.known() ? c.loc : f.loc, true, f.c_name));
     }
+    if (f.noreturn) m.ensures_.push_back(clause_checks(low::bool_lit(false), f.loc, true, f.c_name));  // decision 0015 item 4
 
     if (f.body == nullptr) {
       m.trusted_reason = f.trusted_reason;
@@ -872,9 +912,15 @@ class Lowerer {
     // The parameters' local copies (0012 item 2).
     for (size_t k = 0; k < f.params.size(); ++k)
       assign(m.body, var_name(*f.param_var(static_cast<int>(k))), low::var(formal_name(f, static_cast<int>(k))));
+    user_targets_.clear();
+    user_names_.clear();
+    collect_gotos(*f.body, user_targets_);
     stmt(*f.body, m.body);
     // The end of the body: a non-void function must not reach it; a void one returns.
-    if (f.ret.is_void()) {
+    if (f.noreturn) {
+      emit_assert(m.body, low::bool_lit(false),
+                  meta("noreturn", f.end_loc, "`" + f.c_name + "` is declared not to return, but control may reach its end"));
+    } else if (f.ret.is_void()) {
       postconditions(f.end_loc, m.body);
     } else {
       emit_assert(m.body, low::bool_lit(false),
@@ -943,6 +989,8 @@ class Lowerer {
   const SrcLoc* report_at_ = nullptr;
   const std::string* report_note_ = nullptr;
   int assert_count_ = 0;
+  std::map<int, std::string> user_names_;  // the user's name of each label of the current function, by id
+  std::set<int> user_targets_;  // the ids of the user labels some goto of the current function targets
 };
 
 }  // namespace

@@ -160,7 +160,32 @@ class Checker {
     for (const Clause& c : f.requires_) clause(c, Ctx::Requires, "requires");
     for (const Clause& c : f.ensures_) clause(c, Ctx::Ensures, "ensures");
     for (const Clause& c : f.decreases_) measure(c, Ctx::Requires, "decreases");
-    if (f.body != nullptr) stmt(*f.body);
+    if (f.noreturn && !f.ensures_.empty())
+      err(f.ensures_.front().loc, "an `ensures` on '" + f.c_name + "', which is declared not to return (decision 0015 item 4)");
+    if (f.body != nullptr) {
+      for (const GotoProblem& p : goto_problems(f)) {
+        const char* why = "";
+        switch (p.kind) {
+          case GotoProblem::Kind::backward: why = "goes backward to"; break;
+          case GotoProblem::Kind::enters: why = "enters a block, branch, loop or switch to reach"; break;
+          case GotoProblem::Kind::skips_declaration: why = "skips a declaration to reach"; break;
+          case GotoProblem::Kind::no_label: why = "names a label that is not in the function:"; break;
+        }
+        err(p.go->loc, std::string("a `goto` that ") + why + " label '" + p.label + "'" +
+                           (p.kind == GotoProblem::Kind::skips_declaration ? " (past '" + p.variable + "')" : "") +
+                           " (decision 0015 item 2)");
+      }
+      stmt(*f.body);
+    }
+  }
+
+  // A statement of a Block: a Label is allowed here and only here (decision 0015 item 3).
+  void child(const Stmt& c) {
+    if (c.kind != Stmt::Kind::Label) { stmt(c); return; }
+    if (!c.loc.known()) err(c.loc, "statement without a source position");
+    if (c.jump_id <= 0) err(c.loc, "a label without an id");
+    else if (!jump_ids_.insert(c.jump_id).second) err(c.loc, "label id " + std::to_string(c.jump_id) + " is used twice (by two labels, or by a loop or switch)");
+    if (c.label_name.empty()) err(c.loc, "a label without a name");
   }
 
   void clause(const Clause& c, Ctx ctx, const char* what) {
@@ -321,7 +346,7 @@ class Checker {
           } else {
             if (first) err(c->loc, "a statement before the first case label of a switch (it is unreachable)");
             if (c->kind == Stmt::Kind::Decl) declaration_seen = true;
-            stmt(*c);
+            child(*c);
           }
           first = false;
         }
@@ -363,7 +388,7 @@ class Checker {
       case Stmt::Kind::Check: {
         if (s.expr == nullptr) { err(s.loc, "a check without an expression"); return; }
         CallState st;
-        expr(*s.expr, Ctx::Annot, false, st, false);
+        expr(*s.expr, s.from_assert ? Ctx::Body : Ctx::Annot, false, st, false);
         if (!s.expr->type.is_bool()) err(s.expr->loc, "a check of type " + s.expr->type.str() + " (it must be a bool)");
         break;
       }
@@ -371,16 +396,22 @@ class Checker {
         scopes_.emplace_back();
         for (const Stmt* c : s.stmts) {
           if (c == nullptr) { err(s.loc, "a null statement in a block"); continue; }
-          stmt(*c);
+          child(*c);
         }
         scopes_.pop_back();
         break;
       }
+      case Stmt::Kind::Goto:
+        if (s.jump_id <= 0) err(s.loc, "a `goto` without a label id");
+        break;
+      case Stmt::Kind::Label:
+        err(s.loc, "a label that is not directly in a block (decision 0015 item 3)");
+        break;
     }
   }
 
   void register_id(int id, const SrcLoc& loc) {
-    if (!jump_ids_.insert(id).second) err(loc, "jump id " + std::to_string(id) + " is used by two loops or switches");
+    if (!jump_ids_.insert(id).second) err(loc, "jump id " + std::to_string(id) + " is used by two loops or switches, or by a loop or switch and a label");
   }
 
   void scoped(const Stmt* s) {
@@ -558,5 +589,103 @@ class Checker {
 }  // namespace
 
 std::vector<Diag> check_program(const Program& program) { return Checker(program).run(); }
+
+namespace {
+
+// One statement as the pre-order walk of goto_problems sees it.
+struct GotoWalk {
+  struct Pos {
+    const Stmt* block;
+    size_t index;
+  };
+  struct Info {
+    const Stmt* stmt = nullptr;
+    int order = 0;
+    std::vector<Pos> path;           // the enclosing Blocks, outermost first, with the index of the child holding the statement
+    const Stmt* parent_block = nullptr;  // Label: the Block it is a direct statement of (null: not direct)
+    size_t index = 0;
+  };
+  std::vector<Info> gotos;
+  std::vector<Info> labels;
+  std::vector<Pos> path;
+  int counter = 0;
+
+  void walk(const Stmt* s, const Stmt* parent_block, size_t index) {
+    if (s == nullptr) return;
+    const int order = counter++;
+    if (s->kind == Stmt::Kind::Goto || s->kind == Stmt::Kind::Label) {
+      Info i;
+      i.stmt = s;
+      i.order = order;
+      i.path = path;
+      i.parent_block = parent_block;
+      i.index = index;
+      (s->kind == Stmt::Kind::Goto ? gotos : labels).push_back(std::move(i));
+    }
+    switch (s->kind) {
+      case Stmt::Kind::Block:
+        for (size_t k = 0; k < s->stmts.size(); ++k) {
+          path.push_back(Pos{s, k});
+          walk(s->stmts[k], s, k);
+          path.pop_back();
+        }
+        break;
+      case Stmt::Kind::If:
+        walk(s->then_body, nullptr, 0);
+        walk(s->else_body, nullptr, 0);
+        break;
+      case Stmt::Kind::While:
+        walk(s->body, nullptr, 0);
+        walk(s->step, nullptr, 0);
+        break;
+      case Stmt::Kind::Switch: walk(s->body, nullptr, 0); break;
+      default: break;
+    }
+  }
+};
+
+}  // namespace
+
+std::vector<GotoProblem> goto_problems(const Function& f) {
+  std::vector<GotoProblem> out;
+  if (f.body == nullptr) return out;
+  GotoWalk w;
+  w.walk(f.body, nullptr, 0);
+  for (const GotoWalk::Info& g : w.gotos) {
+    const GotoWalk::Info* target = nullptr;
+    for (const GotoWalk::Info& l : w.labels)
+      if (l.stmt->jump_id == g.stmt->jump_id) { target = &l; break; }
+    GotoProblem p;
+    p.go = g.stmt;
+    if (target == nullptr) {
+      p.kind = GotoProblem::Kind::no_label;
+      out.push_back(std::move(p));
+      continue;
+    }
+    p.label = target->stmt->label_name;
+    bool accepted = false;
+    if (target->parent_block != nullptr) {
+      for (const GotoWalk::Pos& pos : g.path) {
+        if (pos.block != target->parent_block || target->index <= pos.index) continue;
+        const Stmt* skipped = nullptr;
+        for (size_t k = pos.index + 1; k < target->index && skipped == nullptr; ++k) {
+          const Stmt* c = pos.block->stmts[k];
+          if (c != nullptr && c->kind == Stmt::Kind::Decl) skipped = c;
+        }
+        if (skipped != nullptr) {
+          p.kind = GotoProblem::Kind::skips_declaration;
+          p.variable = skipped->var != nullptr ? skipped->var->name : "";
+          out.push_back(p);
+        }
+        accepted = true;  // handled: either fine or reported as skips_declaration
+        break;
+      }
+    }
+    if (accepted) continue;
+    p.kind = target->order < g.order ? GotoProblem::Kind::backward : GotoProblem::Kind::enters;
+    out.push_back(std::move(p));
+  }
+  return out;
+}
 
 }  // namespace cerastes::vir

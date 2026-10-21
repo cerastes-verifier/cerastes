@@ -139,6 +139,11 @@ class Encoder {
       a_label_ptr continue_label = nullptr;  // the label statement ending the body of a loop, if there is one
     };
     std::vector<Target> targets;
+    // User labels: one VIR id per label entity (decision 0015 item 2); the C/C++ position of each user `goto`, for the
+    // diagnostics of vir::goto_problems.
+    bool in_for_step = false;  // encoding the increment of a `for` loop
+    std::map<a_label_ptr, int> label_ids;
+    std::map<const Stmt*, a_source_position> goto_positions;
   };
 
   vir::Program prog_;
@@ -345,10 +350,18 @@ class Encoder {
   }
 
   // ---- attributes (decision 0011 item 7) -----------------------------------------------------------------------
-  void check_attributes(an_attribute_ptr list) {
+  void check_attributes(an_attribute_ptr list, bool on_noreturn_routine = false) {
     for (an_attribute_ptr a = list; a != nullptr; a = a->next) {
       if (is_registered_cerastes(a)) continue;
       if (a->kind == ak_empty_attr) continue;
+      // `noreturn`, `gnu::noreturn`, `__attribute__((noreturn))` and C23 `[[_Noreturn]]` (decision 0015 item 1, P21): they set
+      // the function type's "does not return" flag, which check_signature reads.  `[[_Noreturn]]` in C++ is unrecognized.
+      // Only on a routine whose type carries the flag (the caller says so); anywhere else it is rejected below.
+      if (a->kind == ak_noreturn && a->name != nullptr && on_noreturn_routine) {
+        std::string n = a->name;
+        if (n.size() > 4 && n.compare(0, 2, "__") == 0 && n.compare(n.size() - 2, 2, "__") == 0) n = n.substr(2, n.size() - 4);
+        if (n == "noreturn" || n == "_Noreturn") continue;
+      }
       const char* ns = a->namespace_name;
       const bool ns_ok = ns == nullptr || *ns == '\0' || std::strcmp(ns, "gnu") == 0;
       if (ns_ok && a->name != nullptr && allowed_attribute_name(a->name)) continue;
@@ -401,8 +414,8 @@ class Encoder {
       reject(Diag::unsupported_declaration, at, "a function declared without a prototype");
       ok = false;
     }
-    if (ours && x->does_not_return) {
-      reject(Diag::unsupported_attribute, at, "\"noreturn\"");
+    if (ours && x->does_not_return && is_main(r)) {
+      reject(Diag::unsupported_declaration, at, "a \"main\" declared not to return");
       ok = false;
     }
     VType ret = vtype(return_type(r));
@@ -455,8 +468,10 @@ class Encoder {
       f->params[static_cast<size_t>(k)].c_type_name = pt.name;
       const_cast<vir::Var*>(f->param_var(k))->c_type_name = pt.name;
     }
+    f->noreturn = x->does_not_return != 0;  // decision 0015 item 4
     if (!has_body_here) {
-      f->trusted_reason = in_verified_file(decl) ? "declared here, defined in another unit"
+      f->trusted_reason = in_verified_file(decl) ? (f->noreturn ? "declared noreturn here, defined in another unit"
+                                                                 : "declared here, defined in another unit")
                                                   : "trusted, never verified: declared in a system file";
     }
     encode_contract(r, f);
@@ -501,6 +516,11 @@ class Encoder {
       }
       if (exprs != 1 || others != 0 || arg == nullptr) {
         reject(Diag::unsupported_expression, a->position, "this form of \"cerastes::" + std::string(a->name ? a->name : "?") + "\"");
+        continue;
+      }
+      if (k == Annot::ensures && f->noreturn) {
+        // It never returns, so the postcondition would never be checked (decision 0015 item 4).
+        reject(Diag::ensures_on_noreturn, a->position, "");
         continue;
       }
       const Expr* c = clause_bool(expr(arg), arg->position);
@@ -559,6 +579,10 @@ class Encoder {
   const Expr* constant_value(a_constant_ptr c, const a_source_position& pos) {
     if (c == nullptr) {
       reject(Diag::unsupported_expression, pos, "a constant that cannot be read");
+      return nullptr;
+    }
+    if (c->kind == ck_address && c->variant.address.kind == abk_label) {
+      reject(Diag::unsupported_expression, pos, "the address of a label (GNU)");
       return nullptr;
     }
     if (c->kind != ck_integer) {
@@ -912,6 +936,51 @@ class Encoder {
     return block_of(std::move(out), p);
   }
 
+  // The "does not return" flag of `r` is the user's claim: the first declaration is at a known position in a file that
+  // is placed and verified (builtins and unplaceable files are never trusted here, though in_verified_file is true for the
+  // latter), and no `noreturn` attribute entry sits outside a verified file (`void quick_exit(int);` before
+  // `#include <stdlib.h>` takes its flag from the SDK's `__dead2`).  `_Noreturn` leaves no entry, so a system header's
+  // `_Noreturn` on a function the user declared first cannot be told apart; that is the user's contract (0011 items 5-6).
+  bool user_declared_noreturn(a_routine_ptr r) {
+    a_routine_type_supplement_ptr x = routine_supplement(r);
+    if (x == nullptr || !x->does_not_return) return false;
+    const a_source_position decl = r->source_corresp.decl_position;
+    if (decl.seq == 0 || physical_path(decl).empty() || !in_verified_file(decl)) return false;
+    for (an_attribute_ptr a = r->source_corresp.attributes; a != nullptr; a = a->next)
+      if (a->kind == ak_noreturn && (a->position.seq == 0 || physical_path(a->position).empty() || !in_verified_file(a->position)))
+        return false;
+    return true;
+  }
+
+  // The trusted C library table (decision 0015 item 5): `void abort(void)`, `void exit(int)` and `void _Exit(int)`, declared
+  // only in system files, with C linkage and EDG's "does not return" flag.  Returns the tag for the emitted Viper (a
+  // `libc:` reason; the lint requires a tag on every bodyless method), or null for any other routine: `quick_exit`, the builtins, `std::terminate` and a user's own
+  // function of the same name keep their ordinary treatment.
+  const char* trusted_libc_reason(a_routine_ptr r) {
+    a_routine_type_supplement_ptr x = routine_supplement(r);
+    if (x == nullptr || !x->does_not_return || !x->prototyped || x->has_ellipsis) return nullptr;
+    const a_source_position decl = r->source_corresp.decl_position;
+    if (decl.seq == 0 || in_verified_file(decl)) return nullptr;  // builtins have no position
+    if (r->source_corresp.name == nullptr || r->source_corresp.is_class_member) return nullptr;
+    if (r->source_corresp.name_linkage != nlk_external) return nullptr;  // C linkage (P21)
+    if (r->is_template_function || r->assoc_template != nullptr || r->is_prototype_instantiation) return nullptr;
+    a_type_ptr rt = return_type(r);
+    if (rt == nullptr || skip_typerefs(rt)->kind != tk_void) return nullptr;
+    size_t nparams = 0;
+    bool first_is_int = false;
+    for (a_param_type_ptr p = x->param_type_list; p != nullptr; p = p->next, ++nparams) {
+      a_type_ptr t = p->type ? skip_typerefs(p->type) : nullptr;
+      if (nparams == 0)
+        first_is_int = t != nullptr && t->kind == tk_integer && !t->variant.integer.enum_type &&
+                       !t->variant.integer.bool_type && t->variant.integer.int_kind == ik_int;
+    }
+    const std::string n = r->source_corresp.name;
+    if (n == "abort" && nparams == 0) return "libc: abort never returns (C23 7.24.4.1)";
+    if (n == "exit" && nparams == 1 && first_is_int) return "libc: exit never returns (C23 7.24.4.4)";
+    if (n == "_Exit" && nparams == 1 && first_is_int) return "libc: _Exit never returns (C23 7.24.4.5)";
+    return nullptr;
+  }
+
   // The callee's VIR function for a call, or null after a rejection (0011 item 5).
   vir::Function* callee_for_call(a_routine_ptr callee, const a_source_position& at) {
     if (is_main(callee)) {
@@ -927,11 +996,21 @@ class Encoder {
       vir::Function* f = function_of(callee, true, at);
       return f;
     }
+    if (const char* why = trusted_libc_reason(callee)) {
+      vir::Function* f = function_of(callee, false, at);
+      if (f != nullptr) f->trusted_reason = why;
+      return f;
+    }
     bool has_contract = false;  // a `decreases` alone is not a contract (0011 item 5)
     for (an_attribute_ptr a : contracts_of(callee)) {
       const Annot k = classify(a);
       if (k == Annot::requires_ || k == Annot::ensures) has_contract = true;
     }
+    // A function declared not to return, in a verified file, counts as a contract: it ensures `false` (decision 0015 item 4,
+    // amending 0011 item 5).  It is a user contract, trusted like a user's `ensures`, even when a system header declares
+    // the function too (EDG keeps only the first declaration's position).  But the flag must be the user's: see
+    // user_declared_noreturn.
+    if (user_declared_noreturn(callee)) has_contract = true;
     if (!has_contract) {
       reject(Diag::call_without_contract, at, rname(callee));
       return nullptr;
@@ -1140,6 +1219,82 @@ class Encoder {
     return it->second;
   }
 
+  // ---- assert (decision 0015 item 6, P22) ----------------------------------------------------------------------
+  static bool is_operation(an_expr_node_ptr e, an_expr_operator_kind k, size_t operands) {
+    return e != nullptr && e->kind == enk_operation && e->variant.operation.kind == k && operands_of(e).size() == operands;
+  }
+
+  static bool has_type_kind(a_type_ptr t, a_type_kind k) { return t != nullptr && skip_typerefs(t)->kind == k; }
+
+  // A folded constant's original expression, looked through recursively; the node itself when it is not a folded constant.
+  static an_expr_node_ptr folded_original(an_expr_node_ptr e) {
+    for (int guard = 0; guard < 16 && e != nullptr && e->kind == enk_constant; ++guard) {
+      a_constant_ptr c = e->variant.constant.ptr;
+      if (c == nullptr || c->expr == nullptr || c->local_expr_ref) break;
+      an_expr_node_ptr o = expr_node_from_constant(c);
+      if (o == nullptr || o == e) break;
+      e = o;
+    }
+    return e;
+  }
+
+  // The integer constant 0 as the macro writes it: no original expression (0010 item 12) except the implicit conversion of
+  // the literal `0` to the type of `__builtin_expect`'s parameter.  A folded `(void)(1 - 1)` is not plain.
+  static bool is_plain_zero(an_expr_node_ptr e) {
+    if (!is_zero_constant(e)) return false;
+    a_constant_ptr c = e->variant.constant.ptr;
+    if (c->local_expr_ref) return false;
+    if (c->expr == nullptr) return true;
+    an_expr_node_ptr o = expr_node_from_constant(c);
+    while (o != nullptr && o->kind == enk_operation && o->variant.operation.kind == eok_cast && operands_of(o).size() == 1 &&
+           has_type_kind(o->type, tk_integer))
+      o = operands_of(o)[0];
+    return o != nullptr && o != e && o->kind == enk_constant && o->variant.constant.ptr != nullptr &&
+           o->variant.constant.ptr->expr == nullptr && !o->variant.constant.ptr->local_expr_ref && is_zero_constant(o);
+  }
+
+  // The system function the SDK's `assert` calls on failure: declared in a system file, C linkage, void, does not return.
+  static bool is_assert_failure_function(a_routine_ptr r) {
+    if (r == nullptr || r->source_corresp.name == nullptr || std::strcmp(r->source_corresp.name, "__assert_rtn") != 0) return false;
+    const a_source_position decl = r->source_corresp.decl_position;
+    if (decl.seq == 0 || in_verified_file(decl) || r->source_corresp.is_class_member) return false;
+    if (r->source_corresp.name_linkage != nlk_external) return false;
+    a_routine_type_supplement_ptr x = routine_supplement(r);
+    return x != nullptr && x->does_not_return && has_type_kind(return_type(r), tk_void);
+  }
+
+  // `e` of `assert(e)`, when `s` is exactly the SDK's expansion
+  //   (__builtin_expect(!(e), 0) ? __assert_rtn(...) : (void)0)
+  // (C++ puts a bool conversion on the condition); otherwise null.  Anything else stays rejected as before.
+  static an_expr_node_ptr assert_condition(an_expr_node_ptr s) {
+    if (!is_operation(s, eok_question, 3) || !has_type_kind(s->type, tk_void)) return nullptr;
+    auto q = operands_of(s);
+    an_expr_node_ptr cond = q[0];
+    if (is_operation(cond, eok_bool_cast, 1)) cond = operands_of(cond)[0];
+    if (!is_operation(cond, eok_call, 3)) return nullptr;
+    a_routine_ptr expect = direct_callee(cond);
+    if (expect == nullptr || expect->source_corresp.name == nullptr ||
+        std::strcmp(expect->source_corresp.name, "__builtin_expect") != 0 || expect->special_kind != sfk_none ||
+        expect->variant.builtin_function_kind == bfk_none)
+      return nullptr;
+    auto args = operands_of(cond);  // [0] is the routine
+    // `assert(0)`: EDG folds `!(0)` (and the `(long)` conversion of it) to a constant whose original expression is the
+    // operation (0010 item 12); see through it.  A constant with no original expression there does not match.
+    an_expr_node_ptr first = folded_original(args[1]);
+    if (!is_operation(first, eok_cast, 1) || !has_type_kind(first->type, tk_integer)) return nullptr;
+    an_expr_node_ptr negated = folded_original(operands_of(first)[0]);
+    if (!is_operation(negated, eok_not, 1)) return nullptr;
+    if (!is_plain_zero(args[2])) return nullptr;
+    an_expr_node_ptr failure = q[1];
+    if (failure == nullptr || failure->kind != enk_operation || failure->variant.operation.kind != eok_call) return nullptr;
+    if (!is_assert_failure_function(direct_callee(failure))) return nullptr;
+    an_expr_node_ptr fallthrough = q[2];
+    if (!is_operation(fallthrough, eok_cast, 1) || !has_type_kind(fallthrough->type, tk_void) ||
+        !is_plain_zero(operands_of(fallthrough)[0]))
+      return nullptr;
+    return operands_of(negated)[0];
+  }
+
   // An expression statement: an assignment, a compound assignment, an increment or decrement, a call, or an
   // expression without side effects.
   void expression_statement(an_expr_node_ptr e, const a_source_position& pos, Out& out) {
@@ -1150,6 +1305,18 @@ class Encoder {
       auto ops = operands_of(e);
       if (ops.size() != 1) break;
       e = ops[0];
+    }
+    if (an_expr_node_ptr cond = assert_condition(e)) {
+      // `assert(cond)` from <assert.h> (decision 0015 item 6): `cond` is code, evaluated as an `if` condition is; the
+      // arguments of `__assert_rtn` are never encoded.
+      if (cx_.in_for_step) {
+        // A check in a loop's step is an internal error of check_program: reject it here, at the source.
+        reject(Diag::unsupported_expression, pos, "an assert in the increment of a for loop");
+        return;
+      }
+      const Expr* c = as_bool(expr(cond), cond->position);
+      if (c != nullptr) out.push_back(b_.check(c, loc_of(pos), true));
+      return;
     }
     if (e->kind == enk_operation) {
       const an_expr_operator_kind k = e->variant.operation.kind;
@@ -1281,6 +1448,33 @@ class Encoder {
     t.break_label = break_label_after(s, is_switch);
     if (!is_switch) t.continue_label = continue_label_of(body);
     return t;
+  }
+
+  int label_id(a_label_ptr l) {
+    auto it = cx_.label_ids.find(l);
+    if (it != cx_.label_ids.end()) return it->second;
+    return cx_.label_ids[l] = b_.jump_id();
+  }
+
+  // The rejections of the user's gotos that break the rule of decision 0015 item 2, at the `goto`.
+  void report_goto_problems(vir::Function* f) {
+    for (const vir::GotoProblem& g : vir::goto_problems(*f)) {
+      auto pos = cx_.goto_positions.find(g.go);
+      const a_source_position at = pos != cx_.goto_positions.end() ? pos->second : cx_.stmt_pos;
+      const std::string to = "a goto to \"" + g.label + "\" that ";
+      switch (g.kind) {
+        case vir::GotoProblem::Kind::backward: reject(Diag::unsupported_statement, at, to + "jumps backward"); break;
+        case vir::GotoProblem::Kind::enters:
+          reject(Diag::unsupported_statement, at, to + "jumps into a block, a branch, a loop or a switch body");
+          break;
+        case vir::GotoProblem::Kind::skips_declaration:
+          reject(Diag::unsupported_statement, at, to + "jumps past the declaration of \"" + g.variable + "\"");
+          break;
+        case vir::GotoProblem::Kind::no_label:
+          reject(Diag::unsupported_statement, at, "a goto whose label this version cannot find");
+          break;
+      }
+    }
   }
 
   // A `break` or `continue`: the generated goto names a label; it is accepted only when the label stands where the front
@@ -1429,6 +1623,18 @@ class Encoder {
       case stmk_empty: return;
       case stmk_block: {
         Out inner;
+        if (s->compiler_generated) {
+          // Guards (decision 0015 item 2; P20 found neither shape): a flattened block must not hold a user label (its scope
+          // would change), and a block kept as a block must not hold a declaration (a goto past it would not see it).
+          const bool flattened = s->attributes == nullptr;
+          for (a_statement_ptr c = s->variant.block.statements; c != nullptr; c = c->next) {
+            if (flattened && c->kind == stmk_label && c->variant.label.ptr != nullptr && !c->variant.label.ptr->break_label &&
+                !c->variant.label.ptr->continue_label && !c->variant.label.ptr->switch_break_label)
+              reject(Diag::unsupported_statement, c->position, "a label in a block the compiler made");
+            // No shape reaches this today (P20): defence in depth.
+            if (!flattened && c->kind == stmk_decl) reject(Diag::unsupported_statement, c->position, "a declaration in a block the compiler made");
+          }
+        }
         for (a_statement_ptr c = s->variant.block.statements; c != nullptr; c = c->next) statement(c, inner);
         if (s->compiler_generated && s->attributes == nullptr) {
           // A block the front end made (a `for` initialization, an `else if`): its statements stay at this level,
@@ -1513,7 +1719,9 @@ class Encoder {
         if (s->variant.for_loop.statement != nullptr) statement(s->variant.for_loop.statement, body);
         cx_.targets.pop_back();
         // The increment is the loop's step: it runs after the body and after each `continue` (0014 item 2).
+        cx_.in_for_step = true;
         if (fl->increment != nullptr) expression_statement(fl->increment, fl->increment->position, step);
+        cx_.in_for_step = false;
         const Stmt* step_stmt = step.empty() ? nullptr : step.size() == 1 ? step[0] : block_of(std::move(step), fl->increment->position);
         if (c != nullptr && inv_ok)
           whole.push_back(b_.loop(c, std::move(inv), std::move(measure), block_of(std::move(body), s->position), step_stmt,
@@ -1527,16 +1735,39 @@ class Encoder {
       }
       case stmk_goto: {
         a_label_ptr l = s->variant.label.ptr;
-        // `break` and `continue` are compiler-generated gotos (P13); a user goto stays rejected (M4.2).
-        if (s->compiler_generated && l != nullptr && (l->break_label || l->continue_label)) jump_statement(s, l, out);
-        else rejected_statement(s, "a goto statement");
+        // `break` and `continue` are compiler-generated gotos (P13); every other goto is the user's (decision 0015 item 2):
+        // it is checked as a VIR statement once the function is built (goto_problems).  A compiler-generated goto (or label,
+        // below) without break/continue flags is treated as a user one, and goto_problems then fails closed on it.
+        if (s->compiler_generated && l != nullptr && (l->break_label || l->continue_label)) {
+          jump_statement(s, l, out);
+        } else if (l == nullptr) {
+          rejected_statement(s, "a goto statement whose label this version cannot read");
+        } else {
+          const Stmt* g = b_.goto_stmt(label_id(l), loc_of(s->position));
+          cx_.goto_positions[g] = s->position;
+          out.push_back(g);
+        }
         return;
       }
+      case stmk_assigned_goto: rejected_statement(s, "a computed goto (GNU)"); return;
       case stmk_label: {
-        // The labels the front end makes for `break` and `continue` follow the goto that is rejected.
+        // The labels the front end makes for `break` and `continue` follow the goto that names them (P13); the others are
+        // the user's.
         a_label_ptr l = s->variant.label.ptr;
-        const bool made = s->compiler_generated || (l != nullptr && (l->break_label || l->continue_label || l->switch_break_label));
-        if (!made) rejected_statement(s, "a label");
+        if (l == nullptr) {
+          rejected_statement(s, "a label this version cannot read");
+          return;
+        }
+        if (l->break_label || l->continue_label || l->switch_break_label) return;
+        // Label attributes are on the label entity, not on the statement (P19): held to the allow-list like any other.
+        check_attributes(l->source_corresp.attributes);
+        // EDG rejects a registered cerastes attribute on a label first (#1835); this is defence in depth.
+        for (an_attribute_ptr a = l->source_corresp.attributes; a != nullptr; a = a->next)
+          if (is_registered_cerastes(a))
+            reject(Diag::unsupported_statement, s->position,
+                   "\"cerastes::" + std::string(a->name ? a->name : "?") + "\" on a label");
+        const char* nm = l->source_corresp.name;
+        out.push_back(b_.label_stmt(label_id(l), nm != nullptr ? nm : "?", loc_of(s->position)));
         return;
       }
       case stmk_switch: switch_statement(s, out); return;
@@ -1598,10 +1829,13 @@ class Encoder {
       return;
     }
     Out out;
+    const auto reported_before = reported_count();
     statement(sp->assoc_block, out);
     for (a_variable_ptr v : cx_.pending)
       reject(Diag::unsupported_declaration, v->source_corresp.decl_position, "an initialization this version cannot read");
     f->body = b_.block(std::move(out), loc_of(r->source_corresp.decl_position));
+    // Only a complete function body can be judged: after a rejection a label or a declaration may be missing.
+    if (reported_count() == reported_before) report_goto_problems(f);
     cx_ = Ctx();
   }
 
@@ -1729,7 +1963,10 @@ void Encoder::run(const IlEntities& ents) {
         reject(Diag::unsupported_declaration, at, std::string(skipped) + " (this version verifies plain functions only)");
       continue;
     }
-    check_attributes(r->source_corresp.attributes);
+    {
+      a_routine_type_supplement_ptr rx = routine_supplement(r);
+      check_attributes(r->source_corresp.attributes, rx != nullptr && rx->does_not_return);
+    }
     if (is_spec_routine(r)) continue;  // specification, never run: its body is not encoded (0011 item 4)
     if (r->is_declared_constexpr || r->is_constexpr || r->is_consteval) {
       reject(Diag::unsupported_declaration, decl, r->is_consteval ? "a consteval function" : "a constexpr function");
@@ -1747,6 +1984,11 @@ void Encoder::run(const IlEntities& ents) {
         if (classify(a) == Annot::requires_) reject(Diag::contract_on_main, a->position, "");
     }
     if (!check_signature(r, decl)) continue;
+    if (a_routine_type_supplement_ptr nx = routine_supplement(r); nx != nullptr && nx->does_not_return) {
+      // Also for a function that is declared and never called (function_of is lazy): decision 0015 item 4.
+      for (an_attribute_ptr a : contracts_of(r))
+        if (classify(a) == Annot::ensures) reject(Diag::ensures_on_noreturn, a->position, "");
+    }
     if (body != nullptr) {
       if (function_of(r, true, decl) != nullptr) to_verify_.push_back(r);
     }
