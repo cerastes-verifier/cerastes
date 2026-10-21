@@ -94,6 +94,11 @@ Facts checked on 2026-10-13:
      rest of the repository is follow-up work. If macOS runners cannot
      reproduce the toolchain-tied goldens, the owner's fallback is x64 in
      Docker.
+     *Amended by 0016 (S2, 2026-10-21):* `.github/workflows/ci.yml` now runs
+     the full `check.sh`, the doc examples as tests included, on GitHub's
+     `xcode-27` runner with the owner's Command Line Tools; this workflow
+     still builds the site on pull requests and deploys it from `main`. The
+     x64 Docker fallback is recorded in 0016 item 13, not built.
 5. **UI.**
    - The site uses the default Antora UI plus supplemental files in
      `doc/ui/supplemental/`: the logo lockup, the Ink/Sand palette, Archivo

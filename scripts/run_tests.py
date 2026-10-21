@@ -142,6 +142,28 @@ SILICON_TIMEOUT_S = 600
 FRONTEND_TIMEOUT_S = 600
 VERIFY_TIMEOUT_S = 600
 NATIVE_TIMEOUT_S = 300
+JOBS_VARIABLE = "CERASTES_JOBS"
+
+
+def default_jobs(environ: "dict[str, str] | os._Environ[str] | None" = None) -> int:
+    """The default `-j`: CERASTES_JOBS if set, else half the CPUs (at least 1).
+
+    The variable is read from the shell (`os.environ`), never from build/env.sh.  A value
+    must be a positive decimal integer without sign, space or leading zero; anything else,
+    the empty string included, is a UsageError that names the variable, because a typo that
+    silently fell back to the CPU default would make a CI job count wrong without a trace.
+    An explicit `-j` never calls this: it wins.
+    """
+    if environ is None:
+        environ = os.environ
+    value = environ.get(JOBS_VARIABLE)
+    if value is None:
+        return max(1, (os.cpu_count() or 2) // 2)
+    if re.fullmatch(r"[1-9][0-9]*", value, re.ASCII) is None:
+        raise UsageError(f"{JOBS_VARIABLE}={value!r} is not a positive integer "
+                         f"(unset it, or use a value like 3; -j overrides it)")
+    return int(value)
+
 
 # The command that runs the cerastes front end; the mode option, the walker
 # option and the test path are appended.  The self-test replaces it with a
@@ -2667,8 +2689,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="test files or directories (default: "
                              + " and ".join(f"{p}/" for p in DEFAULT_PATHS)
                              + "; a missing default directory is an error)")
-    parser.add_argument("-j", "--jobs", type=int,
-                        default=max(1, (os.cpu_count() or 2) // 2))
+    parser.add_argument("-j", "--jobs", type=int, default=None,
+                        help=f"parallel tests (default: ${JOBS_VARIABLE} from the shell if set, "
+                             "else half the CPUs; an explicit -j wins)")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="print full diffs and tool output for failing tests")
     parser.add_argument("--check-headers", action="store_true",
@@ -2745,6 +2768,13 @@ def main(argv: list[str] | None = None) -> int:
         print(summary)
         return 1 if bad or cross or helper_probs or orphans or sel.unrecognized \
             or sel.hidden else 0
+
+    if args.jobs is None:  # an explicit -j wins: the variable is consulted only here
+        try:
+            args.jobs = default_jobs()
+        except UsageError as err:
+            print(f"run_tests.py: {err}", file=sys.stderr)
+            return 2
 
     try:
         require(env, *required_env(headers))

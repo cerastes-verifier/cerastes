@@ -51,7 +51,7 @@ step "viper lint"
 python3 scripts/lint_viper.py
 
 step "vir self-test"
-# VIR's own cases (typing rejections, 141 lowering cases), through Silicon and the lint;
+# VIR's own cases (typing rejections and lowering cases), through Silicon and the lint;
 # a directory of its own, emptied first: build/vpr belongs to the harness
 # The case count is pinned twice: the tool must state at least VIR_CASES_MIN cases (a smaller
 # set must not pass), and the harness must pass exactly the number it stated (a case lost on
@@ -66,7 +66,7 @@ if [[ ! "$vir_cases" =~ ^[0-9]+$ ]] || (( vir_cases < VIR_CASES_MIN )); then
   echo "check.sh: the VIR self-test stated ${vir_cases:-no number of} cases; at least $VIR_CASES_MIN are expected" >&2
   exit 1
 fi
-python3 scripts/run_tests.py -j 8 --expect-passed "$vir_cases" build/vir-selftest
+python3 scripts/run_tests.py --expect-passed "$vir_cases" build/vir-selftest
 python3 scripts/lint_viper.py build/vir-selftest/*.vpr
 
 step "walker oracle"

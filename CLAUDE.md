@@ -6,6 +6,8 @@ User docs: doc/ (Antora) → https://cerastes.dev/cerastes/doc/ (decision 0004)
 ## Commands
 - Bootstrap: scripts/bootstrap.sh   (idempotent; macOS on Apple silicon)
 - Everything: scripts/check.sh   (must be green before ending a session)
+- CI: .github/workflows/ci.yml runs scripts/ci.sh (toolchain asserts, bootstrap) then check.sh on
+  GitHub's xcode-27 with the owner's Command Line Tools (decision 0016); CERASTES_JOBS sets the default -j
 - Tests only: python3 scripts/run_tests.py [file|dir ...]   (-v shows tool output)
 - Harness self-test: python3 scripts/test_run_tests.py
 - EDG front end (stock): scripts/cpfe.sh --c++20 [cpfe options] <file>   (adds system headers)

@@ -1,9 +1,9 @@
 # User documentation (doc/, Antora): build on pull requests, build and deploy
 # to GitHub Pages on pushes to main.  Decision record: internal/decisions/0004-docs-site.md.
 #
-# CI builds the docs and lints the doc examples (scripts/check_doc_examples.py,
-# source and rendered HTML).  It does not run the examples as tests: those need
-# the EDG and Silicon toolchain, so scripts/check.sh runs them (0004 item 4).
+# This workflow builds the docs and lints the doc examples (scripts/check_doc_examples.py,
+# source and rendered HTML).  It does not run the examples as tests: those need the EDG
+# and Silicon toolchain, so scripts/check.sh runs them, in ci.yml (decision 0016).
 #
 # Actions are pinned to full commit SHAs (the comment gives the release);
 # change them deliberately, never through a moving tag.

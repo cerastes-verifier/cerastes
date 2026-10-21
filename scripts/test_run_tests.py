@@ -3189,7 +3189,7 @@ def check_sh_problems(text):
     vir_mkdir = index(r"^\s*mkdir -p build/vir-selftest\s*$", "the creation of build/vir-selftest")
     vir_gen = index(r'^\s*vir_out="\$\(build/cerastes-vir-selftest build/vir-selftest\)"\s*$',
                     "the VIR self-test")
-    vir_run = index(r'^\s*python3 scripts/run_tests\.py -j 8 --expect-passed "\$vir_cases" '
+    vir_run = index(r'^\s*python3 scripts/run_tests\.py --expect-passed "\$vir_cases" '
                     r"build/vir-selftest\s*$", "the run of the VIR cases")
     vir_lint = index(r"^\s*python3 scripts/lint_viper\.py build/vir-selftest/\*\.vpr\s*$",
                      "the lint of the VIR cases")
@@ -3304,7 +3304,7 @@ if [[ ! "$vir_cases" =~ ^[0-9]+$ ]] || (( vir_cases < VIR_CASES_MIN )); then
   echo "check.sh: the VIR self-test stated too few cases" >&2
   exit 1
 fi
-python3 scripts/run_tests.py -j 8 --expect-passed "$vir_cases" build/vir-selftest
+python3 scripts/run_tests.py --expect-passed "$vir_cases" build/vir-selftest
 python3 scripts/lint_viper.py build/vir-selftest/*.vpr
 step "walker oracle"
 python3 scripts/walker_oracle.py
@@ -3438,7 +3438,7 @@ jobs:
         rm = "rm -rf build/vir-selftest\n"
         mkdir = "mkdir -p build/vir-selftest\n"
         gen = 'vir_out="$(build/cerastes-vir-selftest build/vir-selftest)"\n'
-        vrun = 'python3 scripts/run_tests.py -j 8 --expect-passed "$vir_cases" build/vir-selftest\n'
+        vrun = 'python3 scripts/run_tests.py --expect-passed "$vir_cases" build/vir-selftest\n'
         vlint = "python3 scripts/lint_viper.py build/vir-selftest/*.vpr\n"
         for name, line in (("vir rm", rm), ("vir mkdir", mkdir), ("vir self-test", gen),
                            ("vir run", vrun), ("vir lint", vlint)):
@@ -3448,15 +3448,25 @@ jobs:
             out[f"{name} ; true"] = self.SH.replace(line, line[:-1] + "; true\n")
             out[f"{name} in the background"] = self.SH.replace(line, line[:-1] + " &\n")
         out["vir run into the harness's directory"] = self.SH.replace(
-            vrun, 'python3 scripts/run_tests.py -j 8 --expect-passed "$vir_cases" build/vpr\n')
+            vrun, 'python3 scripts/run_tests.py --expect-passed "$vir_cases" build/vpr\n')
         out["vir run with another directory"] = self.SH.replace(
-            vrun, 'python3 scripts/run_tests.py -j 8 --expect-passed "$vir_cases" tests/viper-smoke\n')
+            vrun, 'python3 scripts/run_tests.py --expect-passed "$vir_cases" tests/viper-smoke\n')
         out["vir run without the pinned count"] = self.SH.replace(
-            vrun, "python3 scripts/run_tests.py -j 8 build/vir-selftest\n")
+            vrun, "python3 scripts/run_tests.py build/vir-selftest\n")
+        # decision 0016: CI sets the job count (CERASTES_JOBS), so this line must not carry any
+        # `-j`: a hard-coded count would start 8 Silicon JVMs on a 7 GB runner
+        out["vir run with a hard-coded -j 8"] = self.SH.replace(
+            vrun, 'python3 scripts/run_tests.py -j 8 --expect-passed "$vir_cases" build/vir-selftest\n')
+        out["vir run with -j 3"] = self.SH.replace(
+            vrun, 'python3 scripts/run_tests.py -j 3 --expect-passed "$vir_cases" build/vir-selftest\n')
+        out["vir run with --jobs 8"] = self.SH.replace(
+            vrun, 'python3 scripts/run_tests.py --jobs 8 --expect-passed "$vir_cases" build/vir-selftest\n')
+        out["vir run with -j 8 after the count"] = self.SH.replace(
+            vrun, 'python3 scripts/run_tests.py --expect-passed "$vir_cases" -j 8 build/vir-selftest\n')
         out["vir run with another count"] = self.SH.replace(
-            vrun, 'python3 scripts/run_tests.py -j 8 --expect-passed 1 build/vir-selftest\n')
+            vrun, 'python3 scripts/run_tests.py --expect-passed 1 build/vir-selftest\n')
         out["vir run with the count of the minimum"] = self.SH.replace(
-            vrun, 'python3 scripts/run_tests.py -j 8 --expect-passed "$VIR_CASES_MIN" build/vir-selftest\n')
+            vrun, 'python3 scripts/run_tests.py --expect-passed "$VIR_CASES_MIN" build/vir-selftest\n')
         out["vir self-test output not captured"] = self.SH.replace(
             gen, "build/cerastes-vir-selftest build/vir-selftest\n")
         out["vir lint of the harness's directory"] = self.SH.replace(
@@ -3503,8 +3513,8 @@ jobs:
             "floor commented out": self.SH.replace(floor, "# " + floor),
             "floor not a number": self.SH.replace(floor, "VIR_CASES_MIN=$vir_cases\n"),
             "floor after the generation": self.SH.replace(floor, "").replace(
-                'python3 scripts/run_tests.py -j 8 --expect-passed', floor
-                + 'python3 scripts/run_tests.py -j 8 --expect-passed', 1),
+                'python3 scripts/run_tests.py --expect-passed', floor
+                + 'python3 scripts/run_tests.py --expect-passed', 1),
             "count not printed": self.SH.replace(printed, ""),
             "count line removed": self.SH.replace(count, ""),
             "count line commented out": self.SH.replace(count, "# " + count),
@@ -11396,6 +11406,127 @@ class PrinterPathTests(unittest.TestCase):
         self.assertEqual(run.stdout.count("(repeated node)"), 1, run.stdout)
 
 
+class DefaultJobsTests(FakeFrontEndCase):
+    """CERASTES_JOBS sets the default `-j` (decision 0016): read from the shell, validated strictly,
+    always beaten by an explicit `-j`, and really passed to the pool."""
+
+    INVALID = ("", "0", "-1", "x", " 3", "3 ", "3\n", "03", "+3", "3.0", "1e1", "0x3", "\u0663", "3 4")
+
+    @staticmethod
+    def environ(**values):
+        """os.environ with CERASTES_JOBS replaced by `values` (nothing if empty): mock.patch.dict
+        restores it afterwards.  scrub_inherited_environment() leaves CERASTES_JOBS alone."""
+        patcher = mock.patch.dict(os.environ, values)
+        patcher.start()
+        if not values:
+            os.environ.pop(rt.JOBS_VARIABLE, None)
+        return patcher
+
+    def with_variable(self, value):
+        patcher = self.environ() if value is None else self.environ(CERASTES_JOBS=value)
+        self.addCleanup(patcher.stop)
+
+    def test_unset_is_half_the_cpus_and_at_least_one(self):
+        for cpus, jobs in ((16, 8), (8, 4), (3, 1), (2, 1), (1, 1), (None, 1)):
+            with self.subTest(cpus=cpus), mock.patch.object(rt.os, "cpu_count", return_value=cpus):
+                self.assertEqual(rt.default_jobs({}), jobs)
+
+    def test_the_variable_is_the_default(self):
+        with mock.patch.object(rt.os, "cpu_count", return_value=16):
+            for value in ("1", "3", "8", "10", "64"):
+                with self.subTest(value):
+                    self.assertEqual(rt.default_jobs({"CERASTES_JOBS": value}), int(value))
+
+    def test_an_invalid_value_is_a_usage_error_that_names_the_variable(self):
+        for value in self.INVALID:
+            with self.subTest(value=value):
+                with self.assertRaises(rt.UsageError) as caught:
+                    rt.default_jobs({"CERASTES_JOBS": value})
+                self.assertIn("CERASTES_JOBS", str(caught.exception))
+
+    def test_it_reads_the_process_environment(self):
+        self.with_variable("3")
+        with mock.patch.object(rt.os, "cpu_count", return_value=16):
+            self.assertEqual(rt.default_jobs(), 3)
+        self.with_variable(None)
+        with mock.patch.object(rt.os, "cpu_count", return_value=16):
+            self.assertEqual(rt.default_jobs(), 8)
+
+    def test_it_never_reads_build_env_sh(self):
+        # build/env.sh is for tool paths; a value there must not reach the job count
+        self.with_variable(None)
+        self.set_env(CERASTES_JOBS="5")
+        self.assertEqual(rt.load_env()[rt.JOBS_VARIABLE], "5")  # the file is read...
+        with mock.patch.object(rt.os, "cpu_count", return_value=16):
+            self.assertEqual(rt.default_jobs(), 8)  # ... but default_jobs() reads only the shell
+
+    def spy_on_the_pool(self):
+        workers = []
+        real = rt.concurrent.futures.ThreadPoolExecutor
+
+        def spy(*args, **kwargs):
+            workers.append(kwargs.get("max_workers", args[0] if args else None))
+            return real(*args, **kwargs)
+        patcher = mock.patch.object(rt.concurrent.futures, "ThreadPoolExecutor", spy)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return workers
+
+    def test_main_passes_the_default_to_the_pool(self):
+        t = self.write("x.cpp", "// out: a")
+        self.run_harness("--update-golden", t)
+        workers = self.spy_on_the_pool()
+        cpus = mock.patch.object(rt.os, "cpu_count", return_value=16)
+        cpus.start()
+        self.addCleanup(cpus.stop)
+        for value, expected in (("3", 3), ("5", 5), (None, 8)):
+            with self.subTest(value=value):
+                self.with_variable(value)
+                del workers[:]
+                status, out, err = self.run_harness(t)
+                self.assertEqual(status, 0, out + err)
+                self.assertEqual(workers, [expected])
+
+    def test_an_explicit_j_wins(self):
+        t = self.write("x.cpp", "// out: a")
+        self.run_harness("--update-golden", t)
+        workers = self.spy_on_the_pool()
+        for value in ("3", None, "x", "0", ""):
+            for flag in ("-j", "--jobs"):
+                with self.subTest(value=value, flag=flag):
+                    self.with_variable(value)
+                    del workers[:]
+                    status, out, err = self.run_harness(flag, "5", t)
+                    self.assertEqual(status, 0, out + err)
+                    self.assertEqual(workers, [5])
+
+    def test_an_invalid_value_stops_a_run_before_any_test(self):
+        t = self.write("x.cpp", "// out: a")
+        self.run_harness("--update-golden", t)
+        workers = self.spy_on_the_pool()
+        for value in self.INVALID:
+            with self.subTest(value=value):
+                self.with_variable(value)
+                status, out, err = self.run_harness(t)
+                self.assertEqual(status, 2, out + err)
+                self.assertIn("CERASTES_JOBS", err)
+                self.assertNotIn("PASS", out)
+        self.assertEqual(workers, [], "no pool must have been started")
+
+    def test_the_variable_is_consulted_only_when_the_default_is_needed(self):
+        # --check-headers runs nothing in parallel, and an explicit -j wins even over a bad value
+        t = self.write("x.cpp", "// out: a")
+        self.with_variable("x")
+        status, out, err = self.run_harness("--check-headers", t)
+        self.assertEqual(status, 0, out + err)
+
+    def test_the_source_has_no_other_default(self):
+        source = (rt.ROOT / "scripts" / "run_tests.py").read_text()
+        self.assertEqual(source.count("os.cpu_count()"), 1, "only default_jobs() knows the CPU count")
+        self.assertRegex(source, r'(?m)^ *args\.jobs = default_jobs\(\)$')
+        self.assertRegex(source, r'"-j", "--jobs", type=int, default=None')
+
+
 class DocumentationTests(unittest.TestCase):
     """tests/README.md describes every kind and rule of this harness."""
 
@@ -11412,7 +11543,8 @@ class DocumentationTests(unittest.TestCase):
                        "diagnostics.def", "--brief_diagnostics", "--display_error_number",
                        "-U__CERASTES__", "-Werror", "canary", "NATIVE_POLICY_DIRS",
                        "err_data.h", "cerastes-<tag>", "scripts/edg_tree.py",
-                       "GCC not installed; Apple clang only"):
+                       "GCC not installed; Apple clang only",
+                       "CERASTES_JOBS", ".github/workflows/ci.yml", "scripts/ci.sh", "xcode-27"):
             with self.subTest(needle):
                 self.assertIn(needle, text)
         for directory in rt.NATIVE_POLICY_DIRS:
