@@ -148,3 +148,5 @@ decrease from each iteration to the next (0013).
 - Every jump is forward and structured, so the soundness of the jump encoding reduces to Silicon's handling of
   forward `goto`s (the spikes) and to `check_program`'s nesting rules.
 - `goto` and labels written by the user remain rejected until M4.2.
+
+*2026-10-21, amended by 0015 (M4.2a): items 1 and 2 — a user `goto` is accepted when its label is a later statement of a block enclosing it with no declaration between (outward and forward); `check_program` proves this from the nesting too, so every jump is still forward and none enters a loop; item 3 — lowering also emits `l_user_<name>__N` labels, only where a `goto` targets them; item 9 — gotos and labels carry no checks; item 11 — #546 stays suppressed: cerastes rejects every jump past a declaration, a user `goto` included.*

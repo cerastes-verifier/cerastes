@@ -1528,4 +1528,132 @@ and the pinned Silicon, run as the driver runs it). `il_def.h` lines are in `thi
   a label inside an `if` branch as the target of a jump from outside is accepted (S9d). The lowering must never produce either by
   construction.
 
+## M4.2a: goto, noreturn, assert
+
+Probes P19-P22 and Silicon spikes S11-S13 for decision 0015. Evidence files are under `build/m4.2a/probes/` and
+`build/m4.2a/spikes/` (gitignored; produced with `scripts/cerastes-fe.sh --c23|--c++20 --display_error_number --il_display
+|--cerastes_walk <probe>` and the pinned Silicon, run as the driver runs it). Probe names below are files in that directory
+(`p19_goto.c`, with `.cpp` twins; `<probe>.<c23|c++20>.il` is the il_display output). `il_def.h` lines are in
+`third_party/edg/src/il_def.h` at pin P. The statement and expression trees quoted are condensed from il_display by
+`build/m4.2a/tools/tree.py` (positions are `seq:column`).
+
+### P19: user `goto` and labels
+
+- A user `goto L;` is `stmk_goto` (il_def.h:15817) with `compiler_generated` unset, `label` the `a_label` (il_def.h:13494) and
+  position 3:14-3:20; the label is `stmk_label` (:15818) covering only `L:` (5:1-5:2). The labeled statement is the **next
+  sibling**, not nested (`p19_goto.c.c23.il`: `stmk_label @5:1-5:2` then `stmk_expr @6:3`; identical in C++20). `a_label.exec_stmt`
+  (:13545) points at the `stmk_label`; `source_corresp.name` is "L", `decl_position` 5:1. No break/continue flags.
+- The `goto` of `if (c) goto L;` is always inside a compiler-generated then-block (both modes). In C23 the `if` itself is inside a
+  compiler-generated block too (P20).
+- **Gotos out of loops and switches generate nothing**: a `goto` out of `while`, `for`, `do`, a `switch` case and
+  `do { goto E; } while (0)` is a plain `stmk_goto` (`p19_out.*.il`); each label is the next sibling after the loop (C23: after the
+  generated wrapper block) and, for a switch, after the switch's own generated break label. EDG warns `#111-D` for the
+  unreachable statement after `do { goto E; } while (0)`.
+- **A declaration after a label** (`L: int y = 2;`) is accepted in both modes with no diagnostic; `stmk_decl` and `stmk_init`
+  are siblings after the `stmk_label` (`p19_decl.*`). **A label before `}`** (`L: }`): no diagnostic in C23, `warning #127-D:
+  expected a statement` in C++20; no `stmk_empty` either way, and EDG appends a compiler-generated `stmk_return` (`p19_end2.*`).
+- **Attributes on a label are on the label entity, not on the statement**: `[[maybe_unused]] L:` and `L: __attribute__((unused))` are
+  accepted in both modes; the `stmk_label` has `attributes: NULL`, the label entity has `maybe_unused: TRUE` and
+  `source_corresp.attributes` set (`p19_attr.*`, `p19_attr2.*`). An unrecognized `[[foo::bar]] L:` survives there (`warning
+  #2803-D` for the namespace; the walker prints `attr [[foo::bar]] on label f::L @ L4:5`, `p19_attr3.*`); `[[gnu::cold]] M:` is
+  accepted. The encoder's `check_attributes_statement(s)` reads `s->attributes` and so never sees them: the allow-list must run over
+  `a_label.source_corresp.attributes`.
+- **GNU local labels** (`__label__ L;`) are accepted with no diagnostic and no IL difference (`p19_locallabel.*`). **Computed goto**
+  (`void *p = &&L; goto *p;`) is accepted; the statement is `stmk_assigned_goto` (il_def.h:15856) with `expr = var p : void *`
+  (`p19_computed.*`).
+- Diagnostics: a label never referenced is `warning #177-D: label "L" was declared but never referenced`; a `goto` to an undefined
+  label is `error #114: label "L" was referenced but not defined` (both modes; `p19_unref.*`, `p19_undef.*`).
+
+### P20: scopes and generated blocks
+
+- **C23 wraps every `if`, `for`, `while`, `do` and `switch` statement in one compiler-generated block holding just that statement**;
+  C++20 does not (`p20_case.c.c23.il` routine h vs `p20_case.cpp.c++20.il`). In both modes a brace-less then, else or loop body is a
+  compiler-generated block, `else if` is a generated else-block (C23: holding a generated wrapper holding the `if`), and a `for`
+  init-statement is a generated block in `a_for_loop.initialization`.
+- **A declaration directly after `case` has no generated block**: `case 1: int y = 1; return y;` leaves `stmk_decl`, `stmk_init`
+  as siblings in the switch body, in both modes (`p20_case.*`, routine f); likewise after a label. The generated blocks that can hold
+  a declaration are the `for` init-statement (handled on its own by the encoder) and the branch block of `if (c) int y = 1;` (error
+  #525 in C23; C++20 accepts it with only #177): there the block's scope is the branch, which is the C/C++ scope. The C23 wrappers
+  never hold a declaration. So **flattening generated blocks (`encode.cpp:1424`) gives a VIR block equal to the C scope** for every
+  shape probed; `declared_variable` (`encode.cpp:1311`) only matters for the `for` init.
+- **A jump past an initialization** (`if (x > 0) goto L; int y = 1; L: return y;`): C23 `warning #546-D: transfer of control bypasses
+  initialization of: variable "y"`, positioned at the `goto`; C++20 `error #546`, even when `L:` labels only a null statement
+  (`p20_skip.*`, `p20_skip3.*`). `int y;` without an initializer gives no #546 in either mode (`p20_skip2.*`). A case label jumping
+  over a declaration is a warning in both modes (P17).
+
+### P21: functions that do not return
+
+- **`does_not_return`** (`a_routine_type_supplement`, il_def.h:7540, printed on the `tk_routine` type) is TRUE for `[[noreturn]]`,
+  `[[gnu::noreturn]]`, `__attribute__((noreturn))` and `_Noreturn` in both modes, and for `[[_Noreturn]]` in C23 only. The routine's
+  attribute list (`routines.py`, `p21_nr.*.il`):
+
+  | spelling | C23 | C++20 |
+  |---|---|---|
+  | `[[noreturn]]` | kind noreturn, family std, no namespace | same |
+  | `[[gnu::noreturn]]` | kind noreturn, namespace gnu | same |
+  | `__attribute__((noreturn))` | kind noreturn, family gnu | same |
+  | `_Noreturn` | **no attribute entry** | **no attribute entry** (accepted silently) |
+  | `[[_Noreturn]]` | kind noreturn, name `_Noreturn` | `kind unrecognized`; `does_not_return` NOT set; no diagnostic |
+
+  So cerastes reads `does_not_return` of the routine type (the check at `encode.cpp:404` already does), never attributes.
+- **Redeclarations**: `[[noreturn]]` on a later declaration is `error #1846: attribute "noreturn" did not appear on original
+  declaration` (both modes, `p21_redecl.*`); a plain redeclaration after a `[[noreturn]]` or `_Noreturn` one keeps one routine entity
+  with `does_not_return` TRUE (`p21_redecl2.*`).
+- **Warnings**: `#1305-D: function declared with "noreturn" does return` at the `return` keyword of `return;` and at the closing
+  brace when control falls off the end (`p21_nr.*`, functions g1-g4, both modes); `[[noreturn]] int f1(void)` gives `#3271-D:
+  "noreturn" function has non-void return type` in C23 only.
+- **The C library** (`p21_decls.*`): `abort` is in the SDK's `_abort.h`, `exit`, `quick_exit` and `_Exit` in `_stdlib.h` (both under
+  `usr/include`, `from_system_include_dir`). All have `does_not_return` TRUE, `name_linkage C` also in C++, `sc_extern`, attributes
+  `__noreturn__` (and `__cold__` for `abort`); parameter lists `void()` / `void(void)` for `abort` and `void (int)` for the others.
+  `std::exit` and `std::abort` call **the same routine entities** as `::exit` and `::abort` (one address `routine@7ca41f5dd0` for
+  `exit` in all three spellings, `p21_decls.cpp.c++20.il`).
+- **Look-alikes** (`p21_builtin.*`): `__builtin_trap` and `__builtin_unreachable` are ordinary `eok_call`s of an `enk_routine` with
+  `builtin_function_kind` set (il_def.h:12312), `compiler_generated`, no declaration position, `does_not_return` TRUE; C23
+  `unreachable()` (`<stddef.h>`) expands to `__builtin_unreachable` (the same entity); `std::terminate` is a system routine with
+  `does_not_return` TRUE (`__noreturn__`, `noexcept`). `__assert_rtn` and `__builtin_expect`: see P22 (`__assert_rtn` has the flag,
+  `__builtin_expect` does not).
+
+### P22: `assert`
+
+- `<assert.h>` (C23) and `<cassert>` (C++20) produce no diagnostic; the macOS expansion is
+  `(__builtin_expect(!(e), 0) ? __assert_rtn(__func__, __FILE_NAME__, __LINE__, #e) : (void)0)` (SDK `assert.h:72`), and
+  `((void)0)` under `NDEBUG` (`p22_assert.*`, `p22_ndebug.*`).
+- **Tree** of `assert(x > 0);` (`p22_assert.c.c23.il`): `stmk_expr` of
+  `eok_question[void]( eok_call[long](__builtin_expect, eok_cast[long](eok_not[int](eok_gt[int](var x, const 0))), const 0L),
+  eok_call[void](__assert_rtn, array_to_pointer(var <__func__>), <file-name literal>, const 5:int, <text literal "x > 0">),
+  eok_cast[void](const 0:int) )`. `__func__` is a compiler-generated, unnamed, static, constexpr variable local to the routine
+  (`source_corresp.enclosing_routine`, no name, `init_kind initk_static`, constant "g", type `const char[2]`). `assert(f(x) > 0)`
+  has an `eok_call[int]` of `f` as the left operand of `>`. `__assert_rtn` (system `_assert.h`, C linkage, `void (const char *,
+  const char *, int, const char *)`) has `does_not_return` TRUE (`__noreturn__`, `__cold__`); `__builtin_expect` is a builtin
+  routine of type `long (long, long)` without the flag.
+- **C++20 differences**: the condition is wrapped as `eok_bool_cast[bool](eok_call[long](__builtin_expect ...))`; `!` and `>`
+  are `bool`-typed; `__builtin_expect` is `throw()`; the file-name literal is `const char[15]`.
+- **Positions**: every node's `position` is the macro invocation (`2908:3`, the statement start). Only
+  `expr_range.start.orig_seq/orig_column` (EXTRA_SOURCE_POSITIONS_IN_IL) tells user text from macro text: the user's `x`, `0`, the
+  `>` node and the stringified text literal have `orig` on the user's line (`2908:10`, `2908:14`, `2908:10`, `2908:10`); the `!`,
+  `__builtin_expect`, `0L`, `__assert_rtn`, `__func__`, `__LINE__` (`5`) and the `(void)0` have `orig` in assert.h (`2862:...`); the
+  file-name literal has `orig 2848`. Under `NDEBUG` the statement is `eok_cast[void](const 0)` only.
+- Today `build/cerastes verify` on a file with `assert` reports `cerastes-call_without_contract` for `__builtin_expect` and
+  `cerastes-unsupported_type` for `void`, at the line of the `assert`, in both modes; with `NDEBUG` the file verifies
+  (`p22_assert.*`, `p22_ndebug.c`).
+
+### Silicon facts (spikes S11-S13, `build/m4.2a/spikes/`, Silicon 6b540aa4, Z3 4.16.0)
+
+- **S11 (`s11a`, `s11b*`, `s11c*`)**: a `goto` from an inner loop to a label after the outer loop verifies (`s11a.vpr`); the twin
+  asserting a fact true only on the normal exit fails at that assert (`s11a_twin.vpr@30`). A `goto` from a dispatch inside a loop
+  body to a later label of the same body verifies (`s11b.vpr`); the twin whose goto path breaks an invariant is `Loop invariant
+  res >= 0 && res <= i might not be preserved. Assertion res <= i might not hold. (s11b_twin.vpr@11.15--11.35)`, and the twin whose
+  label is after the step is `Loop might not terminate ... (s11b_twin2.vpr@12.15--12.20)` (the `decreases` line). A `goto` out of
+  straight-line `DoOnce` code to a later label verifies, and a fact true only on the normal path fails after the label
+  (`s11c.vpr`, `s11c_twin.vpr@18`).
+- **S12 (`s12a`, `s12b`, `s12c`, `s12c2`)**: a bodyless `method abort_() requires true ensures false decreases _` called inside a
+  loop with a measure and from a method with `decreases` verifies, and an `assert false` after the call verifies (`s12a.vpr`); without
+  the call it fails (`s12a_twin.vpr@19`). A bodied `ensures false` method whose returns are `assert false` verifies when each path
+  ends in such a call (`s12b.vpr`). With a reachable return Silicon reports **only** the explicit `assert false` (`Assert might fail.
+  Assertion false might not hold. s12c.vpr@13.12--13.17`), not the postcondition; without the explicit assert it reports `Postcondition
+  of die might not hold. Assertion false might not hold. (s12c2.vpr@8.11--8.16)`.
+- **S13 (`s13`, `s13b`)**: `assert b != 0; assert (a \ b) >= 0` verifies with `b > 0`; with `b` possibly 0 Silicon reports three
+  errors: `b != 0` (line 8), a cascade `a \ b >= 0` at the next line (9) and, in the second method, the genuinely false `a \ b >= 1`
+  (21). After a call of `abort_()` every assert holds (`assert 1 == 2` verifies, `s13.vpr`).
+
 *2026-10-20: milestone numbers before the M4.1 section follow the renumbering of that date (plan.md): generic templates are M5.*

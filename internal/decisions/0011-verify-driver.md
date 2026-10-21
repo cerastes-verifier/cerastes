@@ -141,6 +141,7 @@ Decision 0002 fixed the integration: EDG's front end compiled into our binary, w
     | `conversion` | a conversion to a signed type may not fit (0010 item 5) | the conversion (the operator, initializer, argument or `return`) |
     | `missing-return` | a non-`void` function may reach its end without `return` | the closing brace |
     | `termination` | a termination measure may be negative or may not decrease (decision 0013) | the loop's `decreases` (loops), or the recursive call with a note at the callee's `decreases` |
+    | `noreturn` | a function declared not to return (`[[noreturn]]`, `_Noreturn`) may return (decision 0015) | the reachable `return`, or the closing brace |
 
 11. **Silicon** is run as `java -Xss128m -jar silicon.jar --z3Exe <z3> --numberOfErrorsToReport 0 <file.vpr>`
     (the same command the harness uses for `.vpr` tests), from a private temporary directory. Its verdict is
@@ -179,3 +180,5 @@ Decision 0002 fixed the integration: EDG's front end compiled into our binary, w
 *2026-10-20: milestone numbers follow the renumbering of 2026-10-20 (plan.md: old M4 → M5, M5 → M6, M6 → M4.5 for C and M7 for C++, M7 → M8).*
 
 *2026-10-20, amended by 0014 (M4.1): item 7 — `fallthrough` joins the attribute allow-list, and verify mode also suppresses EDG's warning #546 (a jump past an initialization), which cerastes rejects itself.*
+
+*2026-10-21, amended by 0015 (M4.2a): item 5 — a function declared `[[noreturn]]` here counts as having a contract (`ensures false`, trusted when defined elsewhere), and `abort`, `exit` and `_Exit` from the C library have built-in trusted contracts; item 6 — the built-in C library contracts are trusted too, tagged `libc: <name> never returns (…)` rather than "trusted, never verified"; item 7 — `noreturn` (std and GNU spellings, `_Noreturn`) is accepted, so the rejection of `[[noreturn]]` functions is lifted (a noreturn `main` stays rejected), and verify mode also suppresses EDG's warning #1305; item 10 — the new category `noreturn`, and `check` also reports a failing `assert`.*

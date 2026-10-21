@@ -93,3 +93,5 @@ Spikes (2026-10-16, Silicon `v.26.08-release`, silver's termination plugin, `Ter
   lines through the position map.
 
 *2026-10-20, amended by 0014 (M4.1, owner): item 3 — a `do … while` whose condition is a constant zero runs its body once and needs no `decreases`; it is lowered as straight-line code, not as a Viper loop.*
+
+*2026-10-21, amended by 0015 (M4.2a, owner): item 6 — a verified function, on every input that satisfies its `requires`, has no undefined behaviour and either returns satisfying its `ensures` or ends the program by calling a function that does not return (`abort`, `exit`, `_Exit`, a `[[noreturn]]` function); item 5 — the built-in C library contracts and functions declared `[[noreturn]]` here and defined elsewhere are trusted to terminate (`decreases _`) like any trusted contract; "system functions cannot call user code" no longer holds for `exit`, which runs `atexit` functions and, in C++, static destructors — in a single unit without function pointers or classes none is user code of this unit, and other units' code is under the single-unit assumption.*
