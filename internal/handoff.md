@@ -5,6 +5,12 @@ The next session reads this file after `CLAUDE.md`, its own section in `plan.md`
 rediscover. The M4.1 handoff is `git show 60d3fbe:internal/handoff.md`; the M3 close-out handoff
 `git show a4da52c:internal/handoff.md`.
 
+**Planning update (2026-10-21, after M4.2a).** The owner split the CI session: three sessions run before M4.2b,
+**S1** the EDG upstream merge and pin move (box, §4.1), **S2** CI (§4.2) and **S3** the mutation triage (§5), each
+planned at ≤ 4 h with at most three Sonnet agents (edg-backend, il-analyst, test-mutator) and one read-only Opus
+soundness-auditor. If the orchestrator or any agent has a question, the session stops that work and asks the owner.
+§4 and §5 hold the facts found while planning.
+
 ## 1. State in one paragraph
 
 The owner split M4.2 into **M4.2a** (forward `goto`, functions that do not return, `assert`), **M4.2b** (named
@@ -14,9 +20,10 @@ done** on branch `m4.2a-goto-noreturn-assert` (based on `main` `518e0de`): user 
 `_Exit`, and `assert` from `<assert.h>` checked as `check`, with decision 0015, about 90 new tests, the VIR self-test at
 230 cases and the docs. The branch's first commit moves the pin back to P `b9519388ea`: `main`'s `518e0de` had pinned
 the pushed `0bcd9bf28a`, which lacks `RAF_NO_CONSTANT_EVALUATION`, so `main` did not build. The CI and mutation triage
-sessions (§4, §5) have still not run; M4.2a went first at the owner's request. Nothing is pushed.
+sessions (§4, §5) have still not run; M4.2a went first at the owner's request. *(2026-10-21: the owner pushed the
+fork's `cerastes` (P) and cerastes `main` (`243cf57`, the M4.2a branch tip); §2 is done.)*
 
-## 2. Owner steps, in this order
+## 2. Owner steps, in this order (all done, 2026-10-21)
 
 1. **Push the fork's `cerastes`** (`git -C ~/Documents/compiler push origin cerastes`): GitHub has `0bcd9bf28a`; the
    pin P `b9519388ea` is 6 commits ahead. `check.sh` reports `NOT YET PUSHED` until then, and a fresh clone of
@@ -50,28 +57,120 @@ sessions (§4, §5) have still not run; M4.2a went first at the owner's request.
 | Docs | Verifying a program (goto, functions that do not return, `assert`, the meaning of a result, the rejected list), Error messages (`noreturn`), Annotations (`check` vs `assert`), Overview |
 | Audits (Opus) | 0015: 1 blocking (a lint closed list for `ensures false` that rejected a user's trusted `ensures(false)`: dropped), 9 should-fix taken; code: 0 blocking, 2 should-fix taken (a noreturn flag written by a system header was trusted as the user's claim; missing tests); tooling re-audit: 0 blocking, 3 should-fix taken (the assert bucket with calls, `mutate.py --validate` on a new test, closed-list leftovers) |
 
-## 4. The CI session (after M4.1; owner 2026-10-16 and 2026-10-20)
+## 4. The EDG session (S1) and the CI session (S2) (owner 2026-10-16, 2026-10-20, split 2026-10-21)
 
-Its first two steps need the x86-64 box (memory `x86-box-edg-suites`; the box sleeps, ask the owner to wake it):
+### 4.1 S1 — EDG upstream merge and pin move (box; about 2–2.5 h; branch `edg-upstream-merge`)
 
-1. **Merge upstream EDG `main`** into the fork's `cerastes` (`--no-ff`, never rebase; decision 0009). Upstream was
-   `ed0a9efb06` on 2026-10-20, 8 commits after `307002eae6`:
-   - `52a125e154` is our 0005 (`__BLOCKS__`), re-committed by the owner: expect it to merge as a duplicate of the
-     fork's 0005 merge, or to conflict;
-   - `4545bf930c` (#229, `if constexpr` with non-brace statements) changes front-end behaviour;
-   - `ed0a9efb06` (#309) moves the position of cleanup actions to the closing brace: goldens and position maps may
-     move;
-   - `5bfce0ac36` (#302, base-class initializer order), and CI/docs commits.
-   Then the full box suites (`changes,regressions,imported,edg,cwg,stdlib`, both 64-bit configurations) before the
-   pin moves; known baseline mismatches `cwg1835`, `cwg2881`.
+Needs the x86-64 box (memory `x86-box-edg-suites`; the box sleeps, ask the owner to wake it). Agents: edg-backend
+(the fork merge, the box runs, the pin move), il-analyst (0020 from the box outputs), soundness-auditor (the merge,
+the evidence).
+
+1. **Merge upstream EDG `main`** into the fork's `cerastes` (`--no-ff`, never rebase; decision 0009). Upstream is
+   `dedc820c91` (2026-10-21), 9 commits after `307002eae6`, all fetched in `~/Documents/compiler` as `edgcpp/main`:
+   - `52a125e154` is our 0005 (`__BLOCKS__`), re-committed by the owner: `git range-diff` shows it identical to the
+     fork's `7173149c6b`, so it merges as a duplicate;
+   - `4545bf930c` (#229, `if constexpr` with non-brace statements, `lexical.c`): cerastes's `if constexpr` tests all
+     use braces;
+   - `ed0a9efb06` (#309) moves the position of cleanup actions to the closing brace, in `lower_il.c`: cerastes runs
+     with no lowering (`src/backend/edg_il.h:35`), so positions should not move (the `.vpr` identity check proves it);
+   - `dedc820c91` (#218, new since the M4.2a handoff) suppresses `noreturn_function_does_return` when a noreturn
+     constructor or destructor is called (`statements.c`; the fork's hunk there is far away): the four warnings
+     `tests/il/m3/p15b_noreturn.cpp` lists involve neither;
+   - `5bfce0ac36` (#302, base-class initializer order); `3c62b61f23` moves the box's Docker images to
+     `ghcr.io/edgcpp`; CI, docs and issue-template commits.
+   Expect one textual conflict, `src/Changes` (keep both sides); any other conflict: stop and ask. Then the full box
+   suites (`changes,regressions,imported,edg,cwg,stdlib`, both 64-bit configurations) before the pin moves; known
+   baseline mismatches `cwg1835`, `cwg2881`. **Every box run starts from a clean build** (`rm -rf
+   ~/edg-cerastes/build/gcc`): see item 2.
 2. **Branch `0020` alone fails its own test on Linux** (M3 handoff §4): `GH-lambda-template-param-qualified.sft.cpp`
    cases 1 and 2, `FAIL--OUTPUT MISMATCH`, passes at the chain tip and natively. Explain it before the owner files 0020.
-3. Then CI itself (a decision record; macOS runner first, x64 Docker if the goldens drift). Since M4.2a, the `assert`
-   tests depend on the macOS SDK's expansion (`__assert_rtn`, 0015 item 6): a Linux runner would need glibc's shape
-   (`__assert_fail`, possibly a statement expression in GNU C) recognised by the encoder, or those tests marked
-   macOS-only.
+   **Hypothesis (planning, 2026-10-21): a stale incremental build on the box.** `edg-docker-test` reconfigures only
+   when `build/gcc` is missing and otherwise rebuilds files newer than their objects; the box tree is rsynced with the
+   Mac's file times. Run `0020d` checked out `c539de4101` over a Mac checkout of `0006`, so only `il.c`, `lexical.c`
+   and `overload.c` got fresh times, while about 17 other files that differ from the previous box build (the fork
+   series: `scope_stk.h`, `symbol_tbl.h`, `il_def.h`, `attribute.c`, …, which change struct layouts) kept stale
+   objects. The test and its `.rto` expectations are identical at `0020` and at the tip, and no later commit touches
+   the check. Confirm on the box: `~/edg-cerastes-runs/0020d/run.log` should compile only those three files; then a
+   clean-build `run.sh 0020e c539de4101 changes` should pass. If it still fails: stop and ask (a real 0020 bug).
+3. **Pin move**, locally while the box runs: keep `build/vpr` as the baseline, `git -C third_party/edg fetch
+   fork-local` and `fetch origin` (its `origin/cerastes` is stale at `0bcd9bf28a`), check out the merge, `git add
+   third_party/edg`, `scripts/bootstrap.sh --build-only`, `run_tests.py -j 8`, `diff -r -x MANIFEST <baseline>
+   build/vpr` (byte-identical expected; any golden, `expect:` or `.vpr` difference: stop and ask). Then `check.sh`,
+   decision 0001's EDG row, the 0020 bug file, an Opus audit of the merge and the evidence.
 
-## 5. The mutation triage session (short; after the CI session, before M4.2b)
+**Acceptance:** 0020 PASS on a clean build; the full suites at the merge with only the two known mismatches; every
+test's `.vpr` byte-identical; `check.sh` green; no open blocking audit item.
+
+### 4.2 S2 — CI (about 3 h; branch `ci`; needs S1 pushed)
+
+Owner decisions (2026-10-21): GitHub's standard **`xcode-27`** runner (GA 2026-10-15: macOS 27.0.1, Xcode 27.0
+`27A266a`, clang 21.0.0, SDKs 27.0 and 27.2, JDK 17, gcc-13/14/15, no sbt or shellcheck), the **full `check.sh`** on
+pull requests, pushes to `main` and `workflow_dispatch`; the repository is public, so the runner is free. **The owner
+pushes** the branch at checkpoints; the session watches the runs read-only (`gh run watch`, `gh run view
+--log-failed`). Agents: edg-backend (`scripts/ci.sh`, the workflow), test-mutator (harness and self-tests),
+il-analyst (drift analysis), soundness-auditor.
+
+1. **Decision 0016-ci** first (the next free number; M4.2b's and M4.2c's records become 0017 and 0018): runner,
+   triggers, per-ref concurrency (pull requests cancel, `main` never), `contents: read`; the toolchain match and its
+   known difference (Xcode 27.0's clang against the owner's Command Line Tools `clang-2100.3.34.2`; SDK 27.0 selected
+   and asserted, not 27.2; `EDG_CLANG_VER` 210000); Homebrew `gcc` with major 16 asserted (the owner's `g++-16`);
+   caches for inputs only (sbt and Coursier, Silicon's `target` and stamp keyed on the silicon and silver gitlinks and
+   the JDK, Z3 by asset and SHA, npm), never EDG or cerastes build outputs; drift policy: stop and ask, never edit an
+   expectation to match CI; the x64 Docker fallback recorded, not built (glibc's `assert` shape `__assert_fail`, the
+   macOS-only `posix_spawn_file_actions_addchdir` in `src/driver/silicon.cpp`, the Darwin-only `bootstrap.sh`).
+   Amend 0004 ("CI runs only the docs") and 0001 (the runner, the new action SHAs).
+2. **What CI must work around** (planning facts): a shallow submodule checkout lacks `refs/remotes/origin/cerastes`,
+   so `edg_tree.py check` fails (fetch `+refs/heads/cerastes:refs/remotes/origin/cerastes`, blobless, enough history
+   for `--is-ancestor`); `run_tests.py`'s default `-j` is cpu/2 (1 on 3 cores) and the `check.sh` lines for
+   `run_tests.py` and `mutate.py --validate` are pinned by self-tests (`test_run_tests.py:3151`, `3165`), so the job
+   count comes from an environment variable `CERASTES_JOBS` read by `run_tests.py` and `mutate.py` (with a self-test
+   twin); `bootstrap.sh` needs Homebrew's `openjdk@17` and installs sbt and shellcheck; the EDG checkout is 3.7 GB
+   (`tests/` 2.6 GB: a sparse checkout is the fallback if the disk is tight); 7 GB of RAM may need `-j 2`.
+3. **`scripts/ci.sh`** (prints `uname`, `df -h`, the SDK, clang and gcc versions; sets `DEVELOPER_DIR`; asserts SDK
+   27.0 and gcc 16; fetches the fork ref; `bootstrap.sh`; asserts a GCC in `build/env.sh`; `check.sh`), and
+   **`.github/workflows/ci.yml`** (pinned `checkout` with `submodules: recursive` and `persist-credentials: false`,
+   `setup-node`, `actions/cache`, `upload-artifact` for logs on failure; `timeout-minutes: 150`). Self-test guards in
+   the style of docs.yml's (`test_run_tests.py` 3114, 3235–3270), each with a twin: `ci.yml` runs `scripts/ci.sh` with
+   no `|| true`, `; true`, `set +e`, `continue-on-error` or `if:`; no `--update-golden`, no `CERASTES_EDG_SRC`;
+   `ci.sh` runs `check.sh` unconditionally.
+4. **Rehearsal** (= `check.sh` run #1): a fresh clone of the branch under `build/ci-rehearsal` (submodules with
+   `--reference`) running `CERASTES_JOBS=3 scripts/ci.sh`. Then the owner's push, the run (60–90 min), at most two
+   infrastructure fix rounds; drift on the runner: il-analyst diffs it, the session stops and asks.
+
+**Acceptance:** a green `ci.yml` run on GitHub (URL recorded; the log shows SDK 27.0 and gcc-16; test counts equal to
+the local ones, native-ok with both compilers); self-tests and `check.sh` green; no open blocking audit item.
+
+## 5. The mutation triage session (S3; about 3.5–4 h; after the CI session, before M4.2b; branch `mutation-triage`)
+
+**Planning facts and owner decisions (2026-10-21).** Independent of the box. Agents: test-mutator A (tooling:
+`mutate.py`, `lint_viper.py`, their self-tests, `tests/README.md`), test-mutator B (strengthened tests, twins, list
+proposals), soundness-auditor (the tooling diff, every new list entry); il-analyst only if a survivor needs IL
+evidence.
+- **Weak tests are strengthened in place** (owner): a surviving mutant of a file can only be killed by that file's own
+  contract, so the file's `ensures`/`check` are tightened; its `expect:` lines are untouched, it must verify in every
+  mode it declares, and each new clause gets a must-fail twin. Doc examples change their pages (`build_docs.sh`,
+  `check_doc_examples.py --html build/doc`).
+- **Size now:** `tests/scalar` has 140 positives, **3522 mutants** (`--list`, 90 s), 738 in the bucket (`--validate`);
+  a full run at `-j 8` is about 45–90 min. Run it once, alone, after the tooling and the strengthening, capped at
+  100 min; nothing else but text review meanwhile.
+- **Trap 1:** a run over a subset reports every list entry whose file is not selected as "no such mutant is
+  generated" and exits 1 (`m4.2a-mutate.log` has 125 such lines): check staleness only for selected files.
+- **Trap 2:** a `doc/…` entry would fail `check.sh`'s `mutate.py --validate` (default `tests/scalar`; the line and
+  `DEFAULT_PATHS` are pinned by self-tests): make `--validate` also generate every file the list names.
+- **Corrections to the counts below:** the per-file leaver list adds up to 73, the reason breakdown to 74 (the static
+  recompute settles it; import both modules, because `e04ce6e`'s `--list` alone starts a full run). The two
+  `cond_div` files have **22** M4.1 proposals, not 34; only 10 are test weakness (the literals `3→2/4`, `1→0/2` and
+  the deleted `d += 1`, five per file); deleting the `continue;` is a true equivalent (the last statement of the loop
+  body), as are the measure, invariant, `20→21` and `n <= 6` mutants.
+- **Tooling items** (with self-test twins): progress on stderr with `flush` via `submit`/`as_completed` in `run_all`
+  (stdout stays as it is: the self-tests read it); traps 1 and 2; `assert(e)` modelled as a CHECK clause (0015) before
+  the 12 "weaker assert" proposals are listed; audit A items 1–5 (§6); compile each clause once (`_holds`;
+  `switch_nested.c` alone takes 60 s to generate); the duplicated test name in `test_mutate.py` (377 and 451: the
+  case-label test never runs). Proposals in `m4.2a-survivors-proposed.txt` have three columns; the list takes two.
+- **Stop rule:** more than about 10 new weak tests beyond those named here go to the handoff.
+- **Acceptance:** the full run exits 0 (0 unexplained survivors, 0 tool failures, no `NO KILLED MUTANT`);
+  `--validate` clean; the mutate and lint self-tests green; docs 0 problems; `check.sh` green; no open blocking audit
+  item.
 
 The classifier now buckets a contract mutant only when the grid models it (signed builtin integer parameters,
 linear, no `==`/`!=` flip) and, for a stronger `requires` or a weaker `ensures`, the function has no use in the
@@ -211,8 +310,8 @@ pointers, references, structs and constructors, which M3's scalar fragment canno
 plan (`plan.md`, "Milestone renumbering"): the **new M4 is the rest of C** (strictly C, sub-milestones M4.1–M4.8,
 pointers in M4.5a–f, VerCors as the reference); generic templates are **M5** (M5a–M5g); concepts M6; **C++ memory
 and classes M7** (references, `new`/`delete`, classes; G2's parts that need them are deferred there); inventory M8;
-evaluation M9. Session order: M4.1 → M4.2a (owner, 2026-10-21: before CI) → CI (§4) → mutation triage (§5) → M4.2b →
-M4.2c → M4.3 … M4.8 → M5a … M5g → M6.
+evaluation M9. Session order: M4.1 → M4.2a (owner, 2026-10-21: before CI) → EDG upstream merge (§4.1) → CI (§4.2) →
+mutation triage (§5) → M4.2b → M4.2c → M4.3 … M4.8 → M5a … M5g → M6.
 
 **Rules for every session below** (memory `session-size-few-hours`): planned at ≤ 4 h with fixed scope and stop
 rules; owner decisions and pre-approved expectation changes asked up front; the decision record before code
@@ -242,7 +341,7 @@ block, branch, switch body or loop; never past a declaration); `[[noreturn]]`/`_
 reachable return asserts false, category `noreturn`); trusted libc `abort`/`exit`/`_Exit`; `<assert.h>` `assert`
 recognised by the macOS expansion's shape and checked as `check`. See `internal/status.md` for what landed.
 
-**M4.2b Named constants and enumerations** (record 0016).
+**M4.2b Named constants and enumerations** (record 0017; 0016 is CI's).
 - `const`/`constexpr` globals, constant-initialized, defined in a verified file: uses take EDG's folded value as a
   literal; a `globals__wf` method encodes each initializer by its original expression (used or not), asserts its
   obligations at the initializer, then asserts equality with EDG's value as `internal` (as `DoOnce` does). Also: C's
@@ -271,7 +370,7 @@ recognised by the macOS expansion's shape and checked as `check`. See `internal/
   enumerator types per mode, fixed underlying types, the conversions EDG inserts; fix il-inventory's contradiction
   (L1084 "`tk_enum`" vs L1344 "`tk_integer` with `enum_type`").
 
-**M4.2c Locals without an initializer** (record 0017). Recommended (review): definite assignment over VIR — one
+**M4.2c Locals without an initializer** (record 0018). Recommended (review): definite assignment over VIR — one
 forward pass suffices because every jump is forward (intersection at joins and labels; a loop head's state is its
 entry state); no new category; the rejection names the read. Alternative: a ghost "defined" flag per local with
 category `uninitialized` (flags false at method entry, since Viper locals start arbitrary, `emit.cpp:181`; reads
@@ -390,7 +489,7 @@ instances before that rejection is lifted.
   by il-analyst; one Opus audit. Stop rules: cut the oracle's structural checks, then tag coverage automation, then
   `main` in the ports; any rule family not done by 2:10 returns ineligible "not checked" (fail closed).
 
-**M5b EDG (box).** After the CI session's upstream merge; best just before M5g. Fork commit Q: a registration flag
+**M5b EDG (box).** After the S1 upstream merge (§4.1); best just before M5g. Fork commit Q: a registration flag
 refusing an accumulating attribute that first appears on a later declaration (check site
 `attach_decl_attributes_to_entity`, `decls.c:806-812`, next to `reconcile_must_match_attributes`,
 `attribute.c:4131-4230`; next free flag bit `0x8`, `attribute.h:401-437`; precedent
@@ -510,11 +609,13 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
 Each has a recommended answer. Answer inline, as before.
 
 1. **The EDG pin.** `main`'s `518e0de` moved it to `0bcd9bf28a`; this branch moves it back to P `b9519388ea` (§2).
-   Is P the pin you want (push the fork first)? *Recommended: yes.*
+   Is P the pin you want (push the fork first)? *Recommended: yes.* **Answered (owner, 2026-10-21): yes; the fork's
+   `cerastes` (P) and `main` are pushed.**
 2. **Order after M4.2a:** CI (§4), then the mutation triage (§5), then M4.2b — or M4.2b first? *Recommended: CI first:
-   it settles the upstream EDG merge and the pin before more code depends on it.*
+   it settles the upstream EDG merge and the pin before more code depends on it.* **Answered (owner, 2026-10-21): CI
+   first, split into three sessions: EDG upstream merge (§4.1), CI (§4.2), mutation triage (§5), then M4.2b.**
 3. **M4.2a's surviving mutants** (§5) go to the triage session with M4.1's, and `mutate.py` reports as it goes?
-   *Recommended: yes.*
+   *Recommended: yes.* **Answered (owner, 2026-10-21): yes; weak tests are strengthened in place (§5).**
 4. **EDG's source sequence lists** (`GENERATE_SOURCE_SEQUENCE_LISTS`) would make "who wrote the noreturn flag" and
    "declared only in system files" exact (§6, M4.2a audit note 1). It is an EDG configuration change (decision 0002;
    IL layout and goldens). Evaluate it in M4.2b's planning (named constants also care where a declaration is)?

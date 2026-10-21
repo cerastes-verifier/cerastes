@@ -309,20 +309,37 @@ There is deliberately no user-facing `assume`.
 
 ---
 
-## CI session (after M4.1)
+## Between M4.2a and M4.2b: three sessions (owner, 2026-10-21)
 
-Owner, 2026-10-16 and 2026-10-20: CI for the repository is its own session. Since the renumbering (owner,
-2026-10-20) it runs after M4.1, followed by the mutation triage session, then M4.2 (the owner ran M4.2a first,
-2026-10-21; the order of the rest is unchanged). It opens with the two items the
-M3 close-out left for it, both needing the x86-64 box: merge upstream EDG `main` into the fork's `cerastes` with a
-box run before the pin moves (decision 0009), and explain why branch `0020` alone fails its own test on Linux.
+Owner, 2026-10-16 and 2026-10-20: CI for the repository is its own session. It was planned after M4.1 and before
+the mutation triage session; the owner ran M4.2a first (2026-10-21). On 2026-10-21 the owner split the CI session's
+box work from CI itself: the sessions run **EDG upstream merge (S1) → CI (S2) → mutation triage (S3) → M4.2b**,
+each planned at ≤ 4 h with at most three Sonnet agents and one read-only Opus auditor. Details, facts found while
+planning and stop rules: `internal/handoff.md` §4.1, §4.2 and §5.
 
-## Mutation triage session (after the CI session)
+### EDG upstream merge session (S1, box)
 
-The M3 close-out's tightened safe-direction classifier moved 74 mutants of `tests/scalar` out of the bucket: each
-survivor is killed by a new test (never an edited expect line) or listed in `tests/mutants-equivalent.txt` with a
-reason, reviewed by the Opus auditor, together with the close-out audit A's should-fix items (handoff). Until then
-M3's "0 unexplained survivors" holds for the old bucket only.
+The two items the M3 close-out left, both needing the x86-64 box: merge upstream EDG `main` (`dedc820c91` on
+2026-10-21, 9 commits after `307002eae6`) into the fork's `cerastes` with the full box suites before the pin moves
+(decision 0009), and explain why branch `0020` alone fails its own test on Linux (most likely a stale incremental
+build on the box; confirmed by a clean-build run). The emitted Viper of every test must stay byte-identical.
+
+### CI session (S2)
+
+A decision record (0016), then `.github/workflows/ci.yml` running the full `scripts/check.sh` on GitHub's
+`xcode-27` runner (macOS 27, Xcode 27.0, SDK 27.0: the owner's toolchain) on pull requests, pushes to `main` and
+`workflow_dispatch`. The owner pushes the branch at checkpoints; the session watches the runs read-only. If the
+expectations drift on the runner, the session stops and asks; x64 Docker (which needs glibc's `assert` shape in the
+encoder) stays the recorded fallback.
+
+### Mutation triage session (S3)
+
+The M3 close-out's tightened safe-direction classifier moved 74 mutants of `tests/scalar` out of the bucket, and
+M4.1 and M4.2a left 70 and 185 survivors: each survivor is killed by strengthening its own file's contract (in
+place, owner 2026-10-21: never an edited expect line, a must-fail twin per new clause) or listed in
+`tests/mutants-equivalent.txt` with a reason, reviewed by the Opus auditor, together with the close-out audit A's
+should-fix items and `mutate.py` reporting as it goes. Until then M3's "0 unexplained survivors" holds for the old
+bucket only.
 
 ---
 
@@ -335,7 +352,8 @@ valid in both. Strictly C (owner, 2026-10-20): C++ references, `new`/`delete` an
 **Sessions.** Each is planned at ≤ 4 h and lands its decision record (invariant 6), must-verify/must-fail pairs
 (invariant 2) and its docs (invariant 9), with one Opus audit round per diff plus a re-audit of blocking fixes and
 `check.sh` at most twice. `internal/handoff.md` holds each session's tasks, agents, acceptance and stop rules.
-M4.2 was split into M4.2a–c (owner, 2026-10-21): its six constructs did not fit one session.
+M4.2 was split into M4.2a–c (owner, 2026-10-21): its six constructs did not fit one session. Between M4.2a and
+M4.2b run the EDG upstream merge, CI and mutation triage sessions (above).
 
 | Session | Scope | Needs |
 |---|---|---|
