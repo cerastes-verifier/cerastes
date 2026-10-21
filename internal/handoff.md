@@ -189,6 +189,67 @@ il-analyst (drift analysis), soundness-auditor.
 **Acceptance:** a green `ci.yml` run on GitHub (URL recorded; the log shows SDK 27.0 and gcc-16; test counts equal to
 the local ones, native-ok with both compilers); self-tests and `check.sh` green; no open blocking audit item.
 
+**Result (S2, 2026-10-21, 14:39–16:35; branch `ci`, PR #1).**
+- **Planning changed four things** (owner, decision 0016):
+  - CI selects the runner's **Command Line Tools**, not Xcode 27.0. The `xcode-27` image (a public preview, not GA)
+    ships CLT 27.0.0.0.1788430756, the owner's exact package.
+  - The first runs come from a pull request.
+  - `check.sh`'s VIR line drops `-j 8`.
+  - The owner reinstalled Homebrew `gcc`, whose macOS 26 bottle had compiled the native-ok runs against SDK 26.5.
+- **The workflow differs from this section's plan:**
+  - `fetch-depth: 0` instead of fetching the fork ref;
+  - `ci.sh` and `check.sh` are separate steps;
+  - only npm and the Silicon jar are cached (not Z3, sbt or Coursier);
+  - `timeout-minutes: 240`;
+  - Python 3.14 is set up.
+- **Acceptance run** [39664543570](https://github.com/cerastes-verifier/cerastes/actions/runs/39664543570) at
+  `c959f59`: **green**, 44 min (checkout 2.5 min, `ci.sh` 1 min 45 s with the jar cached, `check.sh` 41 min, of which
+  tests 24 min 41 s at `-j 3` and VIR 6 min 49 s).
+  - **Toolchain report:** image `macos27 20261012.0260.1`; CLT 27.0.0.0.1788430756; clang-2100.3.34.2; SDK 27.0
+    `26A425`; g++-16 16.2.0, sysroot `MacOSX27.sdk`; JDK 17.0.20.1; Z3 4.16.0; Python 3.14.8; bash 3.2.57; CMake
+    4.4.4; Node 26.12.1.
+  - **Disk:** 35 GB free of 145 GB.
+  - **Same counts as run #2 below** (`compare_ci.py`, every item):
+    - self-tests 951 (skipped=2), 74 (expected failures=1), 142 and 180;
+    - tests 2624 passed, 0 failed, 1 skipped (native-ok: Apple clang 642, GCC 642);
+    - VIR 230/230 (+ 87 rejection cases);
+    - headers 954/954;
+    - `mutate --validate` 3522 mutants;
+    - oracle 134 goldens, 0 failed;
+    - docs green.
+  - **Emitted Viper:** the uploaded `build/vpr` (1335 files) is byte-identical to the rehearsal's.
+- **Canary** 39658634464 at `6bfb1c3`: setup green; cancelled by the next push after the four self-tests (identical)
+  and 1762 test PASS lines, with no FAIL line.
+- **Local `check.sh`, both in fresh clones with the runner's environment:**
+  - run #1 at `6bfb1c3`: 21 min;
+  - run #2 at `c80d0d9`: 20 min.
+
+  Both green, with the counts above (the harness self-test had 941 tests at `6bfb1c3`). The final `c959f59` changes
+  only self-test code and 0016; the full harness self-test there gave 951 OK (skipped=1) in the worktree.
+- **Local baseline with the reinstalled GCC:** 2624/0/1, native-ok 642/642; `.vpr` byte-identical to S1's.
+- **Audits (Opus), three rounds, 0 blocking:**
+  1. The GCC checks would have passed a macOS 26 bottle, and 0016 claimed guards that did not exist yet. Fixed:
+     - GCC 16.2.0 exactly, with its sysroot equal to the asserted SDK;
+     - SDK build `26A425`;
+     - `/usr/bin` shims for `clang++`, `cc` and `c++`;
+     - 21 environment variables that must be unset;
+     - the upload with `always()`, logs included.
+  2. The guards accepted additions: an extra step or checkout key, a line in the cache-key script, `break` in a loop,
+     a `function` override, a reassignment. Fixed: they pin the whole active text.
+  3. An unclosed quoted step name, and non-ASCII blanks before `#`. Fixed: names are normalised only as plain
+     scalars, and printable ASCII only.
+- **Notes kept:**
+  - The guard does not tie each SHA to 0001 (owner: not now, §11 question 9).
+  - `check.sh`'s own guard still misses a line wrapped in `if false; then … fi`. This predates S2.
+  - `CERASTES_JOBS` has no upper bound, and `-j 0` crashes; both predate S2.
+  - `walker_oracle.py` keeps `min(8, cores)`.
+  - A fresh clone's harness self-test skips one test more (0016 item 11).
+- **Owner answers** (§11 questions 6–9):
+  - a required check on `main`: yes;
+  - when the image's tools change: move the assertion and 0001 together after a rehearsal;
+  - tighten the timeout after two green runs on `main`;
+  - SHAs tied to 0001: not now.
+
 ## 5. The mutation triage session (S3; about 3.5–4 h; after the CI session, before M4.2b; branch `mutation-triage`)
 
 **Planning facts and owner decisions (2026-10-21).** Independent of the box. Agents: test-mutator A (tooling:

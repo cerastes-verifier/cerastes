@@ -4,6 +4,100 @@ Session handoff log, newest first. Each entry says what is done, what is not,
 any surprises, the decision records added and the exact first step for the
 next session.
 
+## S2 — CI (2026-10-21): done on branch `ci` (PR #1, green); merge pending
+
+Read `internal/handoff.md` next: the "S2 is done" owner steps at the top, §4.2 the result, §5 the mutation triage
+session S3.
+
+**Owner decisions (2026-10-21, S2 planning and close)**
+- **Toolchain:** CI selects the runner's Command Line Tools (`DEVELOPER_DIR=/Library/Developer/CommandLineTools`),
+  not Xcode 27.0. The `xcode-27` image ships CLT 27.0.0.0.1788430756, the owner's exact package.
+- **First runs** come from a pull request the owner opens (PR #1). `workflow_dispatch` needs the file on `main`.
+- **`check.sh`'s VIR line** drops its hard-coded `-j 8`. The default is `CERASTES_JOBS`, else half the cores.
+- **GCC:** the owner reinstalled Homebrew `gcc` (16.2.0). It is now the macOS 27 bottle with sysroot SDK 27.0; it
+  was the macOS 26 bottle, against SDK 26.5.
+- **Handoff questions 6–9:**
+  - CI becomes a required check on `main` after the first green run there;
+  - when the image's tools change, move the assertion and 0001 together after a rehearsal;
+  - tighten the timeout after two green runs on `main`;
+  - no SHA allowlist for now.
+
+**Done**
+- **Decision 0016-ci.** 0001 amended: the CI actions, the host toolchain (SDK build `26A425`), a new GCC row, Python.
+  0004 item 4 amended. `CLAUDE.md` gains a CI line.
+- **`.github/workflows/ci.yml`**, one job on `xcode-27`:
+  - triggers: pull requests, pushes to `main`, dispatch; permissions `contents: read`;
+  - concurrency: PRs cancel superseded runs; `main` runs never cancel;
+  - `timeout-minutes: 240`;
+  - a full checkout with submodules, so `edg_tree.py` finds `origin/cerastes`;
+  - Python 3.14 and Node 26;
+  - the Silicon jar cached by the silicon and silver gitlinks;
+  - `scripts/ci.sh`, then `scripts/check.sh`, as separate steps;
+  - the evidence uploaded with `always()`: `build/vpr`, `build/env.sh`, the toolchain report, `build/*.log`.
+- **`scripts/ci.sh`**
+  - asserts:
+    - the CLT package;
+    - the `/usr/bin` compiler shims;
+    - the clang banner;
+    - SDK 27.0, build `26A425`;
+    - GCC 16.2.0, whose sysroot is that SDK;
+    - the EDG submodule is not shallow and has `origin/cerastes`;
+    - `edg_tree.py check`;
+    - 21 environment variables are unset;
+  - installs GCC when missing, and runs the full `bootstrap.sh`;
+  - checks `build/env.sh` and writes `build/ci-toolchain.txt`;
+  - never installs anything already present, so a rehearsal leaves the owner's Mac unchanged.
+- **Harness**
+  - `rt.default_jobs()` reads `CERASTES_JOBS` (`run_tests.py`, `mutate.py`). It is read lazily, and `-j` wins.
+    Twins.
+  - `CiGuardTests` pins the whole active text of `ci.yml` (only the SHAs, names, timeout and job count may vary)
+    and of `ci.sh` (only comments may vary). Printable ASCII only. 223 and 402 rejected mutations.
+  - `workflow_problems` (`docs.yml`) now rejects a job-level `if:` or `continue-on-error`, and `if :`.
+  - Self-tests: harness 931 → 951, mutate 174 → 180.
+- **Docs and comments:** `tests/README.md` (Parallelism, CI) and the `docs.yml` header comment. No `doc/` page:
+  nothing user-visible.
+
+**Acceptance**
+- **CI run [39664543570](https://github.com/cerastes-verifier/cerastes/actions/runs/39664543570)** at `c959f59`: green
+  in 44 min (`check.sh` 41 min).
+  - Log: CLT 27.0.0.0.1788430756, clang-2100.3.34.2, SDK 27.0 `26A425`, g++-16 16.2.0 (sysroot SDK 27.0), Python
+    3.14.8, image `20261012.0260.1`.
+  - Every count equals the fresh-clone run #2:
+    - self-tests 951 (skipped=2), 74, 142, 180;
+    - tests 2624 passed, 0 failed, 1 skipped (native-ok: Apple clang 642, GCC 642);
+    - VIR 230/230;
+    - oracle 134 goldens, 0 failed;
+    - docs green.
+  - The uploaded `build/vpr` (1335 files) is byte-identical.
+- **Local `check.sh`, twice, in fresh clones** with the runner's environment (`CERASTES_JOBS=3`, the CLT): both
+  green.
+  - Run #1 at `6bfb1c3`: 21 min. Run #2 at `c80d0d9`: 20 min.
+  - The final `c959f59` changes only self-test code and 0016; its full harness self-test gave 951 OK.
+- **Local baseline with the reinstalled GCC:** 2624/0/1, native-ok 642/642; `.vpr` byte-identical to S1's.
+- **Audits (Opus):** three rounds, 0 blocking. Every should-fix item is taken (handoff §4.2).
+- **Wall-clock:** 14:39–16:35 (planning before).
+
+**Not done / deferred**
+- The guard does not tie each action SHA to 0001 (owner: not now).
+- `check.sh`'s own guard still misses a line wrapped in `if false; then … fi`. This predates S2.
+- Tightening the timeout waits for two green runs on `main`.
+- S3 (mutation triage, handoff §5), then M4.2b.
+
+**Surprises**
+- `xcode-27` is a public preview, and it ships the owner's exact Command Line Tools.
+- The owner's GCC had been compiling the native-ok runs against SDK 26.5.
+- The runner is quick:
+  - checkout 2.5 min;
+  - `ci.sh` 3.5 min cold, 1 min 45 s with the jar cached;
+  - tests 2.4× slower than locally at the same `-j 3`.
+- Each audit round found a new way past the text guards. Pinning the whole active text (ASCII only) ended it.
+- `pull_request` runs need no workflow on `main`; `workflow_dispatch` does.
+
+**Decision records added:** 0016-ci; 0001 and 0004 amended.
+
+**First step for the next session (S3, mutation triage).** Confirm that the owner merged PR #1 and that the CI run
+on `main` is green. Then handoff §5.
+
 ## S1 — EDG upstream merge and pin move (2026-10-21): done on branch `edg-upstream-merge`; fork push, fast-forward and pushes pending
 
 Read `internal/handoff.md` next (the "S1 is done" owner steps at the top, §4.1 the result, §4.2 the CI session).
