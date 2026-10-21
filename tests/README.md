@@ -517,7 +517,8 @@ which is why CI sets `CERASTES_JOBS=3`: three fit the 7 GB of its runner, eight 
 
 ## Mutation testing (`scripts/mutate.py`)
 
-`python3 scripts/mutate.py` (about ten minutes for `tests/scalar`) mutates every `verified` test one place at a
+`python3 scripts/mutate.py` (45 to 90 minutes at `-j 8` for `tests/scalar`: run it alone, and give it a
+time cap you can live with, since it logs as it goes, see Progress below) mutates every `verified` test one place at a
 time (flip a relational operator, a literal plus or minus one, drop one operand of `&&`, swap `&&` and `||`,
 delete a statement) and verifies each mutant. A mutant that is rejected by the verifier (exit status 1) is
 killed; one that still verifies survived, which means that the test would not notice the change. Every
@@ -543,20 +544,64 @@ bucketed, and must be killed or listed. A mutant is bucketed only when all of th
   `signed` or `const`; not `bool`, plain `char`, anything unsigned, a typedef, a pointer or a reference); the
   result name of an `ensures` counts only if the return type is one; a `check` name that the body declares
   again does not count; a contract of a bodyless declaration is `unknown`;
-- the clause is linear: no product of two variables, `/`, `%`, `<<`, `>>`, bit operation, `?:`, cast, call,
-  subscript or unsigned literal suffix;
+- the clause is linear: no `*` at all (a literal coefficient is not monotone: `3 * x + y < 10` against
+  `4 * x + y < 10` is incomparable), no `/`, `%`, `<<`, `>>`, bit operation, `?:`, cast, call, subscript or
+  unsigned literal suffix;
+- Python and C read the clause alike: at most one comparison between two `&&`/`||` or brackets (`x < r < 1`,
+  `r == x > 0`), the operand of `!` is followed only by `&&`, `||`, `)` or the end (`!r < 1`), and a bracketed
+  group with `&&` or `||` of its own is not an operand of a comparison or of arithmetic;
 - the mutation is not an `==`/`!=` flip;
-- for a stronger `requires` or a weaker `ensures` (not a `check`), the function has no use (call, recursive
-  call, address, mention in a contract) anywhere else in the file.
+- for a stronger `requires` or a weaker `ensures` (not a `check`), the function's name occurs nowhere else in
+  the file, except in its own declarations and definitions: a call, a recursive call, its address, a mention in a
+  contract, in a `#define` body (or any directive but `#include`), in a default argument or in an initializer
+  is a use (comments and strings are not read; a directive the script cannot lex makes every name used);
 
-"Only when the grid models C" is not a proof: known gaps remain (C precedence of `!` and chained comparisons,
-literal coefficients of `*`, contract well-definedness after a dropped guard, uses of the function inside a
-`#define` body or a default argument). They are listed in the handoff and deferred to the triage session.
+`assert(e);` (decision 0015: a failing assert is a `check`) is a `check` clause: a mutant inside the argument
+of an `assert(...);` statement is bucketed when the argument gets weaker, under the rules above as for a `check`,
+and only when the argument is pure (no call, `++`, `--`, assignment or comma). A stronger argument is never
+bucketed. Only the macro is meant: `static_assert` and names that merely contain `assert` are not.
+
+**Why the bucket does not ask whether the mutated clause is well-defined (owner, 2026-10-21: "verifier-checked").**
+A bucketed mutant is a correct program only if its mutated clause is well-defined, and a dropped conjunct, a swapped
+`&&`/`||` or a relop or literal change can weaken a guard (`x != 0 && 100 / x > 1` becomes `100 / x > 1`). The bucket
+does not check that: a surviving mutant has already passed cerastes' own well-definedness check of contract arithmetic
+(decision 0010 item 11: contract arithmetic has its C meaning, overflow and division by zero included, checked by the
+emitted `__wf` methods and the clause's own checks), so an ill-defined survivor would be a bug of the verifier, not a
+hole in the test. That check is pinned by must-fail tests, which a weakened verifier would fail:
+`tests/scalar/negative/contract_wf_divzero.c` and `contract_wf_overflow.c` (twin `tests/scalar/contract_wf.c`), and,
+with the guarded originals in `tests/scalar/guard_kept.c` as their must-verify twin, the contracts written as a mutant
+would leave them: `guard_dropped_requires.c` (a requires, division by zero), `guard_dropped_ensures_later.c` (an
+ensures whose guard sat in an earlier ensures that lost it, division by zero in the later one),
+`guard_dropped_overflow.c` (`r < 2147483647 &&` dropped before `r + 1`, overflow), `guard_dropped_ensures_later_overflow.c`
+(the same for the later ensures), `guard_swapped_requires_overflow.c` (`||` swapped to `&&` in a requires, overflow),
+`guard_changed_invariant.c` (a loop invariant's guard changed, division by zero at entry) and
+`measure_loop_overflow_later.c` (a measure that overflows; invariants and measures are never bucketed but are clauses
+too). A weaker `check` or `assert` never evaluates an operand in a state where the original did not (they are judged
+in the state at their line, where what the original proved is still known), so it cannot become ill-defined;
+`guard_swapped_check.c` and `guard_swapped_assert.c` (`||` swapped to `&&`, division by zero) pin the same check for
+the stronger form that the bucket never accepts, as defence in depth.
+
+"Only when the grid models C" is not a proof (the grid is a handful of values per variable), so the rules above
+fail closed: when in doubt a mutant is `unknown` and must be killed or listed.
 
 `python3 scripts/mutate.py --list [paths]` prints the mutant ids and exits without running anything.
 Everything else still has to be killed or listed: a weaker `requires` (a caller may now
 break the body), a stronger `ensures` or `check` (the body may not prove it), any change of an `invariant` or a
 `decreases`, a mutant that leaves a clause's meaning unchanged, and every mutant of code, never bucketed.
+
+**Progress.** A run writes one line to stderr, flushed, when each verifier run finishes (in finishing order):
+`mutate: [k/N] <mutant id or "<path> (original)"> [<mode>]: <outcome>`. k and N count the originals and the
+mutants apart (outcomes `verified`, `does not verify`, `rejected`, `tool failure` for an original; `killed`,
+`survived`, `stillborn`, `tool failure` for a mutant). Stdout is the report and does not change. A run stopped by a
+time cap still leaves its outcomes in the log: `python3 scripts/mutate.py -j 8 2> build/mutate.log`.
+
+**The equivalence list and the selection.** A run over some of the tests checks only the entries whose file it
+selected. `--validate` (the `check.sh` step, `tests/scalar` by default, a few seconds of work) also generates every
+file the list names outside the selection (the doc examples) and checks all entries against them; an entry whose file
+does not exist or is not a `// expect: verified` C or C++ test is stale. A run does not check the entries of
+files it did not select, and `--validate` cannot tell whether an entry survives: the acceptance run must name every
+file the list names (the doc examples among them: `python3 scripts/mutate.py tests/scalar doc/modules/ROOT/examples/...`),
+or those entries are never checked for survival.
 
 ## The environment
 

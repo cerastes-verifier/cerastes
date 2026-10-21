@@ -68,44 +68,94 @@ otherwise:
   of an `ensures` counts only if the return type is one; for a `check`, a name that the
   body declares again (a local that may shadow the parameter) does not count; a contract
   of a declaration without a body has no signature to read, so it is `unknown`;
-* the clause is linear: only `+ - < <= > >= == != && || !` and parentheses, decimal
-  literals without a `u` suffix, and `*` only with a literal operand (no product of two
-  variables, no `/`, `%`, `<<`, `>>`, bit operations, `?:`, casts, calls or subscripts);
+* the clause is linear: only `+ - < <= > >= == != && || !` and parentheses, and decimal
+  literals without a `u` suffix (no `*` at all, not even with a literal coefficient: `3 * x + y < 10`
+  against `4 * x + y < 10` is incomparable, which a small grid may not show; no `/`, `%`, `<<`, `>>`,
+  bit operations, `?:`, casts, calls or subscripts);
+* Python and C read the clause alike (`c_semantics_ok`): at most one comparison between two `&&`/`||`
+  or brackets (Python chains `a < b < c`, C does not; `r == x > 0` is `r == (x > 0)` in C), the
+  operand of `!` is followed only by `&&`, `||`, `)` or the end (`!r < 1` is `(!r) < 1` in C), and a
+  bracketed group with `&&` or `||` of its own is not an operand of a comparison or of arithmetic
+  (Python's `and` yields an operand, C's `&&` yields 0 or 1);
 * the mutation is not an `==` <-> `!=` flip (a flip of equality is `unknown`);
-* for a stronger `requires` or a weaker `ensures` (not a `check`), the function is used
-  nowhere else in the file (a call, a recursive call, its address, a mention in a
-  contract): a use means that the mutant must be killed by a failure at the use, or be
-  listed (a caller may fail the stronger precondition, or rely on the weaker
-  postcondition).
+* for a stronger `requires` or a weaker `ensures` (not a `check`), the identifier of the
+  function occurs nowhere else in the file (`has_caller`): a call, a recursive call, its
+  address, a mention in a contract, in a `#define` body or other directive (not an `#include`
+  line), in a default argument, in an initializer; only its own declarations and definitions
+  (`declarator_indexes`: outside every body and bracket, directly after a type, followed by `(`, no `=`
+  before it in the statement) are not uses, and neither are comments and strings.  A use means that
+  the mutant must be killed by a failure at the use, or be listed (a caller may fail the stronger
+  precondition, or rely on the weaker postcondition).  A directive that this lexer cannot read (an
+  apostrophe in an `#error` line) makes every name used;
 
-A pair that cannot be evaluated (a construct the grid does not know) is `unknown` too.
-Known gaps remain, listed in the handoff and deferred to the triage session: C precedence
-of `!` and chained comparisons, literal coefficients of `*`, the well-definedness of a
-contract after a dropped guard, and uses of the function inside a `#define` body or a
-default argument.
-A deleted `assert(...);` statement (the `<assert.h>` macro, decision 0015) whose argument has no
-call, `++`, `--`, assignment or comma is in the bucket too: the program only loses a check, so it
-is a correct program that a sound verifier must accept, and when it survives (the assertion was
-redundant) that is no hole in the test.  With a call the assert is not only a check (the callee
-may end the program, and what the assert established helps what follows), so it is never bucketed.
-The other contract mutants, a weaker `requires`, a
-stronger `ensures` or `check`, any change of an `invariant` or a `decreases`, one
-that leaves the clause's meaning unchanged, and every mutant of code, are never
-bucketed: each must be killed or listed.
+The bucket does not ask whether the mutated clause is well-defined, though a dropped conjunct, a swapped
+`&&`/`||` or a relop or literal change that weakens a guard can leave arithmetic in a contract that overflows or
+divides by zero (a mutant is a correct program only if its clause is well-defined).  It need not: a mutant that
+survives has been accepted by cerastes, and cerastes checks the well-definedness of contract arithmetic itself
+(decision 0010 item 11: contract arithmetic has its C meaning, overflow and division by zero included, checked
+by the emitted `__wf` methods and the clause's own checks), so a surviving mutant whose clause is ill-defined
+would be a bug of the verifier, not a hole in the test.  That check is pinned by must-fail tests in
+tests/scalar/negative, each with the guarded original in tests/scalar/guard_kept.c as its must-verify twin:
+`contract_wf_divzero.c` and `contract_wf_overflow.c` (twin `contract_wf.c`), and the tests that write a
+contract exactly as a drop-conjunct or swap-logic mutant would leave it, one per clause kind:
+`guard_dropped_requires.c` (a requires whose own guard is gone: division by zero), `guard_dropped_ensures_later.c`
+(an ensures whose guard was in an earlier ensures that lost it: division by zero in the later one),
+`guard_dropped_overflow.c` (an ensures with `r + 1` and the guard `r < 2147483647 &&` dropped: overflow),
+`guard_dropped_ensures_later_overflow.c` (the same with an overflow in the later ensures),
+`guard_swapped_requires_overflow.c` (`||` swapped to `&&` in a requires: `x + 1` evaluated for x == INT_MAX),
+`guard_changed_invariant.c` (the guard of a loop invariant changed: division by zero at entry) and
+`measure_loop_overflow_later.c` (a measure whose arithmetic overflows).  Invariants and measures are never
+bucketed; they are pinned because they are clauses too.  A weaker `check` or `assert` never evaluates an operand
+in a state where the original did not (it is judged in the state at its line, where what the original proved is
+still known), so it cannot become ill-defined; `guard_swapped_check.c` and `guard_swapped_assert.c` (`||` swapped
+to `&&`: division by zero) pin the same check for the stronger form that the bucket never accepts, as defence in
+depth.  The argument rests on these tests: a verifier that stopped checking the well-definedness of contract
+arithmetic would fail them, and the bucket would then hide the survivors.
+
+A pair that cannot be evaluated (a construct the grid does not know), or whose grid is larger than
+two million points, is `unknown` too.
+`assert(e);` (the `<assert.h>` macro, decision 0015: a failing assert is a `check`) is a `check`
+clause for the bucket: a mutant inside the argument of an `assert(...);` statement is bucketed when the
+mutated argument is weaker, under exactly the rules of a `check` (every variable a signed builtin integer
+parameter of the enclosing function that the body does not declare again, linear, no `==`/`!=` flip)
+and only when the argument is pure by the rule of `is_assert_statement` (no call, `++`, `--`,
+assignment or comma).  A stronger argument is never bucketed; `static_assert` and an identifier that
+merely contains `assert` are not the macro; the statement must start a statement (after `;`, `{`, `}`, `)`,
+`:`, `else` or `do`).  A *deleted* `assert(...);` statement whose argument is pure is in the bucket too: the
+program only loses a check, so it is a correct program that a sound verifier must accept, and when it
+survives (the assertion was redundant) that is no hole in the test.  With a call the assert is not only a
+check (the callee may end the program, and what the assert established helps what follows), so it is never
+bucketed.  The other contract mutants, a weaker `requires`, a stronger `ensures` or `check`, any change of
+an `invariant` or a `decreases`, one that leaves the clause's meaning unchanged, and every mutant of code,
+are never bucketed: each must be killed or listed.
+
+Progress.  A run writes one line to stderr, flushed, as soon as each verifier run finishes (in the
+order they finish): `mutate: [k/N] <mutant id or "<path> (original)"> [<mode>]: <outcome>`.  k and N count
+the originals (outcome `verified`, `does not verify`, `rejected` or `tool failure`) and the mutants (outcome
+`killed`, `survived`, `stillborn` or `tool failure`) apart.  A run that a time cap stops therefore still
+leaves its outcomes in a log; stdout is the report, unchanged, in a deterministic order.
 
 `tests/mutants-equivalent.txt` lists the survivors that were reviewed and are
 equivalent (or intended), apart from those of the safe-direction bucket: lines `id<TAB>reason`, `#` comments, and a
 `# reviewed: <who, when>` line whenever there are entries.  An entry that names
 a mutant which is not generated, which does not survive, or which the
 safe-direction bucket already covers, is stale and fails the run (so a fixed test or an edited source cannot leave a stale excuse).
+A run over some of the tests checks only the entries of the files it selected (the others are not
+generated, so nothing is known about them); `--validate` also generates every file that the list names
+outside the selection (`check.sh` selects `tests/scalar`; the list also names doc examples) and checks
+all entries against them: an entry whose file does not exist, or is not a `// expect: verified` C or
+C++ test, is stale too.  A run does not check the entries of files it did not select, and `--validate` cannot
+tell whether an entry survives: the acceptance run must therefore name every file that the list names (the doc
+examples among them), or those entries are never checked for survival.
 
 `--list` generates, prints the id of every mutant (sorted) and exits 0 without running
 anything: it needs no verifier and no environment (a source that cannot be generated is
 reported on stderr and exits 1).  `--validate` only generates: it checks that the sources lex (balanced braces and
 parentheses), that every mutant differs from its original, that the ids are
 unique, and the equivalence list (format and staleness against the generated
-ids).  It needs no verifier and runs in `scripts/check.sh`; the full run (about
-six minutes for tests/scalar) is an acceptance step.  With no verified test under
+ids).  It needs no verifier and runs in `scripts/check.sh` (a few seconds for tests/scalar: each
+clause is compiled once and each source is read once); the full run (45 to 90 minutes at `-j 8` for
+tests/scalar) is an acceptance step.  With no verified test under
 the paths and none in the tree, `--validate` passes with a note (the first
 tests come with M3); once the tree has one, an empty selection fails.
 
@@ -120,6 +170,7 @@ import argparse
 import bisect
 import concurrent.futures
 import dataclasses
+import functools
 import itertools
 import os
 import re
@@ -167,9 +218,15 @@ _IDENT_RE = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
 _NUMBER_RE = re.compile(r"\.?[0-9](?:[eEpP][+-]|[A-Za-z0-9_.'])*")
 
 
-def lex(src: str) -> list[Token]:
+_INCLUDE_RE = re.compile(r"#[ \t]*(?:include|include_next|import)\b")
+
+
+def lex(src: str, preprocessor: bool = False) -> list[Token]:
     """Tokens of `src` without comments and preprocessor lines (a `#` line, with
-    its backslash continuations, produces nothing: a macro body is never mutated)."""
+    its backslash continuations, produces nothing: a macro body is never mutated).
+    With `preprocessor=True` the tokens of the directive lines are produced too (not the
+    `#` that starts one, and not an `#include` line): `has_caller` reads the identifiers of
+    a `#define` body with it."""
     tokens: list[Token] = []
     i, n = 0, len(src)
     line_start = True  # only whitespace seen since the last newline
@@ -190,6 +247,11 @@ def lex(src: str) -> list[Token]:
             if j < 0:
                 raise LexError("unterminated /* comment")
             i = j + 2
+        elif preprocessor and c == "\\" and src.startswith("\\\n", i):
+            i += 2  # a backslash-newline inside a directive
+        elif preprocessor and c == "#" and line_start and not _INCLUDE_RE.match(src, i):
+            i += 1  # the directive's own tokens are lexed like any others
+            line_start = False
         elif c == "#" and line_start:
             while i < n:  # to the end of the line, following backslash-newlines
                 j = src.find("\n", i)
@@ -495,19 +557,19 @@ SAFE = "safe-direction"
 _CONTRACT_RE = re.compile(r"CERASTES_(REQUIRES|ENSURES|CHECK|INVARIANT|DECREASES)\s*\(")
 
 
-def contract_clause(src: str, offset: int):
-    """(macro name, clause start, clause end, result name) of the `CERASTES_*(...)` call
-    whose argument contains `offset`, with the result name of `ENSURES(r, ...)` left out
-    of the clause (the name is the fourth item, None when there is none), or None when
-    the offset is not in the argument of one."""
+@functools.lru_cache(maxsize=4)
+def _contract_calls(src: str):
+    """((macro name, clause start, clause end, result name), (argument start, argument end))
+    of every `CERASTES_REQUIRES|ENSURES|CHECK|INVARIANT|DECREASES(...)` call of `src`, in
+    order, with the result name of `ENSURES(r, ...)` left out of the clause (the name is the
+    fourth item, None when there is none).  Read once per source."""
+    out = []
     for m in _CONTRACT_RE.finditer(src):
         i = m.end()
         depth, j = 1, i
         while j < len(src) and depth:
             depth += (src[j] == "(") - (src[j] == ")")
             j += 1
-        if not (i <= offset < j - 1):
-            continue
         start, end = i, j - 1
         binder = None
         if m.group(1) == "ENSURES":
@@ -515,7 +577,52 @@ def contract_clause(src: str, offset: int):
             if b:
                 start += b.end()
                 binder = b.group(1)
-        return m.group(1), start, end, binder
+        out.append(((m.group(1), start, end, binder), (i, j - 1)))
+    return tuple(out)
+
+
+def contract_clause(src: str, offset: int):
+    """(macro name, clause start, clause end, result name) of the `CERASTES_*(...)` call
+    whose argument contains `offset`, with the result name of `ENSURES(r, ...)` left out
+    of the clause (the name is the fourth item, None when there is none), or None when
+    the offset is not in the argument of one."""
+    for clause, (i, end) in _contract_calls(src):
+        if i <= offset < end:
+            return clause
+    return None
+
+
+_STATEMENT_BEFORE = {";", "{", "}", ")", ":", "else", "do"}  # what may precede a statement
+
+
+@functools.lru_cache(maxsize=4)
+def _assert_calls(src: str):
+    """(argument start, argument end) of every `assert(...);` statement of `src` (the
+    `<assert.h>` macro: exactly the identifier `assert`, not `static_assert` or `my_assert`)
+    whose argument is pure by the rule of `is_assert_statement`."""
+    try:
+        tokens = lex(src)
+        pair = matching(tokens)
+    except LexError:
+        return ()
+    out = []
+    for k, t in enumerate(tokens):
+        if not (t.kind == "ident" and t.text == "assert" and k + 1 < len(tokens)
+                and tokens[k + 1].text == "(" and k > 0 and tokens[k - 1].text in _STATEMENT_BEFORE):
+            continue
+        close = pair[k + 1]
+        if close + 1 < len(tokens) and tokens[close + 1].text == ";" \
+                and is_assert_statement(src[t.start:tokens[close + 1].end]):
+            out.append((tokens[k + 1].end, tokens[close].start))
+    return tuple(out)
+
+
+def assert_clause(src: str, offset: int):
+    """("ASSERT", argument start, argument end, None) of the pure `assert(...);` statement whose
+    argument contains `offset`, else None (decision 0015: a failing assert is a `check`)."""
+    for start, end in _assert_calls(src):
+        if start <= offset < end:
+            return ("ASSERT", start, end, None)
     return None
 
 
@@ -534,10 +641,91 @@ class _Unknown(Exception):
     pass
 
 
+_COMPARISONS = {"<", "<=", ">", ">=", "==", "!="}
+
+
+def c_semantics_ok(tokens: list[Token]) -> bool:
+    """Whether Python reads the clause the way C does (the grid evaluates the Python reading).  Python
+    chains comparisons (`a < b < c` is `a < b and b < c`; C compares the 0/1 of `a < b` with `c`, and
+    puts `==` below `<`: `r == x > 0` is `r == (x > 0)`), `not` binds looser than a comparison (`!r < 1` is
+    `(!r) < 1` in C), and `and`/`or` yield an operand (`(x && y) == 1` compares 1 in C).  Only the
+    forms where the two readings agree are accepted (the rest is `unknown`, never bucketed):
+
+    * at most one comparison operator between two `&&`/`||` or brackets of one level;
+    * a bracketed group that has `&&` or `||` of its own (or holds nothing but such a group: `((x && y))`) is
+      used only as an operand of `&&`, `||`, `!`, another bracket, or alone (never of a comparison or of
+      arithmetic);
+    * the operand of `!` (a bracketed group, an identifier or a literal, after any number of `!`) is
+      followed only by `&&`, `||`, a closing bracket or the end of the clause."""
+    n = len(tokens)
+    closes: dict[int, int] = {}  # index of a `(` -> index of its `)`
+    valued: set[int] = set()  # the `(` of the groups whose value is a `&&`/`||` result
+    frames = [[0, False, -1]]  # [comparisons since the last `&&`/`||`, has a logic operator, index of its `(`]
+    for k, t in enumerate(tokens):
+        if t.kind != "op":
+            continue
+        frame = frames[-1]
+        if t.text in _COMPARISONS:
+            frame[0] += 1
+            if frame[0] > 1:
+                return False
+        elif t.text in ("&&", "||"):
+            frame[0] = 0
+            frame[1] = True
+        elif t.text == "(":
+            frames.append([0, False, k])
+        elif t.text == ")":
+            if len(frames) == 1:
+                return False
+            _, logic, opened = frames.pop()
+            closes[opened] = k
+            child = opened + 1  # a bracket that holds nothing but a logic-valued group is logic-valued too
+            if not logic and child < k and tokens[child].text == "(" and closes.get(child) == k - 1 \
+                    and child in valued:
+                logic = True
+            if logic:
+                valued.add(opened)
+                before = tokens[opened - 1].text if opened > 0 else None
+                after = tokens[k + 1].text if k + 1 < n else None
+                if before not in (None, "&&", "||", "(", "!") or after not in (None, "&&", "||", ")"):
+                    return False
+    if len(frames) != 1:
+        return False
+    pair = {}
+    stack: list[int] = []
+    for k, t in enumerate(tokens):
+        if t.kind == "op" and t.text == "(":
+            stack.append(k)
+        elif t.kind == "op" and t.text == ")":
+            pair[stack.pop()] = k
+    for k, t in enumerate(tokens):
+        if not (t.kind == "op" and t.text == "!"):
+            continue
+        j = k + 1
+        while j < n and tokens[j].kind == "op" and tokens[j].text == "!":
+            j += 1
+        if j >= n:
+            return False
+        if tokens[j].kind == "op" and tokens[j].text == "(":
+            after = pair[j] + 1
+        elif tokens[j].kind in ("ident", "number"):
+            after = j + 1
+        else:
+            return False
+        if after < n and tokens[after].text not in ("&&", "||", ")"):
+            return False
+    return True
+
+
 def _as_python(clause: str) -> str:
     c = re.sub(r"(\d)[uUlL]+\b", r"\1", clause)
     if "?" in c or "sizeof" in c or "[" in c or "->" in c or "." in re.sub(r"\d\.\d", "", c):
         raise _Unknown(clause)
+    try:
+        if not c_semantics_ok(lex(clause)):
+            raise _Unknown(clause)
+    except LexError:
+        raise _Unknown(clause) from None
     c = re.sub(r"\(\s*(?:unsigned\s+|signed\s+)?(?:char|short|int|long\s+long|long|bool)\s*\)", "", c)
     c = c.replace("&&", " and ").replace("||", " or ")
     c = re.sub(r"!(?!=)", " not ", c)
@@ -555,9 +743,15 @@ def _as_python(clause: str) -> str:
     return c
 
 
+_EVAL_GLOBALS = {"_cdiv": _cdiv, "_cmod": _cmod, "__builtins__": {}}
+_GRID_LIMIT = 2_000_000  # a grid of more points than this is not evaluated: `unknown`
+
+
 def _holds(code, env) -> bool:
+    """Whether the clause holds at `env`; `code` is a code object (`compile(..., "eval")`) so that the
+    grid, which calls this thousands of times for one clause, compiles it once."""
     try:
-        return bool(eval(code, {"_cdiv": _cdiv, "_cmod": _cmod, "__builtins__": {}}, env))
+        return bool(eval(code, _EVAL_GLOBALS, env))
     except ZeroDivisionError:
         return False  # the clause is undefined: it does not hold
     except Exception as err:  # anything else is a construct we do not model
@@ -579,15 +773,20 @@ def clause_relation(original: str, mutant: str) -> str:
         if len(names) > 3:
             values = {v for v in values if abs(v) < 10 or v in lits or v - 1 in lits or v + 1 in lits}
         values = sorted(values)
+        if len(values) ** len(names) > _GRID_LIMIT:
+            return "unknown"
+        # eval() strips leading blanks and compile() does not: strip the same ones
+        code_o = compile(po.strip(" \t"), "<original>", "eval")
+        code_m = compile(pm.strip(" \t"), "<mutant>", "eval")
         orig_implies_mut = mut_implies_orig = True
         for combo in itertools.product(values, repeat=len(names)):
             env = dict(zip(names, combo))
-            a, b = _holds(po, env), _holds(pm, env)
+            a, b = _holds(code_o, env), _holds(code_m, env)
             orig_implies_mut &= not (a and not b)
             mut_implies_orig &= not (b and not a)
             if not orig_implies_mut and not mut_implies_orig:
                 return "incomparable"
-    except (_Unknown, SyntaxError, NameError, TypeError):
+    except (_Unknown, SyntaxError, NameError, TypeError, ValueError, RecursionError):
         return "unknown"
     if orig_implies_mut and mut_implies_orig:
         return "equal"
@@ -607,8 +806,9 @@ _STORAGE_WORDS = {"static", "inline", "extern", "constexpr", "_Noreturn", "const
 # The tokens a clause may have for the grid to model it: linear integer arithmetic over signed
 # parameters, comparisons and logic.  Everything else (`/`, `%`, shifts, bit operations, `?:`,
 # casts (their type words are identifiers that are no parameter), calls, subscripts, `++`) is
-# unknown.  `*` is checked apart (a product needs a literal operand).
-_LINEAR_OPS = {"+", "-", "*", "<", "<=", ">", ">=", "==", "!=", "&&", "||", "!", "(", ")"}
+# unknown, and so is every `*`: a literal coefficient is not monotone (`3 * x + y < 10` against
+# `4 * x + y < 10` is incomparable, which the grid may not show), so no product is modelled.
+_LINEAR_OPS = {"+", "-", "<", "<=", ">", ">=", "==", "!=", "&&", "||", "!", "(", ")"}
 _DECIMAL_RE = re.compile(r"^[0-9]+[lL]{0,2}$")  # no `u` suffix, no hex, no float
 _NOT_A_DECLARATION_PREFIX = {"return", "else", "do", "case", "goto", "sizeof"}
 
@@ -631,7 +831,13 @@ class Signature:
 
 def function_signatures(src: str) -> list[Signature]:
     """The signature of each function that has a body, and the identifiers that its body
-    may declare (a declaration `T name` can shadow a parameter in a nested block)."""
+    may declare (a declaration `T name` can shadow a parameter in a nested block).  Read
+    once per source."""
+    return list(_function_signatures(src))
+
+
+@functools.lru_cache(maxsize=4)
+def _function_signatures(src: str) -> tuple[Signature, ...]:
     tokens = lex(src)
     pair = matching(tokens)
     out = []
@@ -666,30 +872,84 @@ def function_signatures(src: str) -> list[Signature]:
         out.append(Signature(tokens[v - 1].text, tokens[u + 1].start, tokens[c].end,
                              is_signed_builtin(ret) and all(w.isidentifier() for w in ret),
                              frozenset(signed), frozenset(declared)))
+    return tuple(out)
+
+
+def declarator_indexes(tokens: list[Token], pair: dict[int, int]) -> set[int]:
+    """Indexes of the identifiers that are the name of a function being declared or defined:
+    outside every function body, bracket and brace block except `namespace` and `extern`
+    blocks, directly after a type (an identifier, `*`, `&`, `&&` or `>`), followed by `(`, and
+    with no `=` earlier in the statement (`int v = f(2);` is a use).  Anything else is not."""
+    bodies = {o for o, _c in function_bodies(tokens, pair)}
+    out: set[int] = set()
+    n = len(tokens)
+    start, seen_eq, i = 0, False, 0
+    while i < n:
+        t = tokens[i]
+        if t.kind == "op" and t.text == "{":
+            stmt = tokens[start:i]
+            first = stmt[0].text if stmt else ""
+            has_close = any(u.kind == "op" and u.text == ")" for u in stmt)
+            if i not in bodies and first in ("namespace", "extern") and not has_close:
+                i += 1  # a transparent block: its declarations are at the top level
+                start, seen_eq = i, False
+                continue
+            i = pair[i] + 1
+            start, seen_eq = i, False
+        elif t.kind == "op" and t.text in ("(", "["):
+            i = pair[i] + 1
+        elif t.kind == "op" and t.text in (";", "}"):
+            i += 1
+            start, seen_eq = i, False
+        else:
+            if t.kind == "op" and t.text == "=":
+                seen_eq = True
+            elif (t.kind == "ident" and not seen_eq and i > start and i + 1 < n
+                    and tokens[i + 1].kind == "op" and tokens[i + 1].text == "("
+                    and (tokens[i - 1].kind == "ident"
+                         or (tokens[i - 1].kind == "op" and tokens[i - 1].text in ("*", "&", "&&", ">")))):
+                out.add(i)
+            i += 1
     return out
 
 
+@functools.lru_cache(maxsize=4)
+def _used_names(src: str):
+    """The identifiers that occur anywhere in `src` other than as the name of a function being
+    declared or defined (`declarator_indexes`): in a body, a contract, a default argument, an
+    initializer, a `#define` body or a directive.  Comments and strings are not read.  None when
+    the file does not lex with its directives (then everything counts as used)."""
+    try:
+        plain = lex(src)
+        pair = matching(plain)
+        full = lex(src, preprocessor=True)
+    except LexError:
+        return None
+    plain_starts = {t.start for t in plain}
+    names = {t.text for t in full if t.kind == "ident" and t.start not in plain_starts}
+    declarators = declarator_indexes(plain, pair)
+    names |= {t.text for k, t in enumerate(plain) if t.kind == "ident" and k not in declarators}
+    return frozenset(names)
+
+
 def has_caller(src: str, name: str) -> bool:
-    """Whether the identifier `name` occurs in a function body or in a contract of the file (a
-    call, a recursive call, the address taken: any use a stronger `requires` could break)."""
-    tokens = lex(src)
-    pair = matching(tokens)
-    inside = [False] * len(tokens)
-    for o, c in function_bodies(tokens, pair) + macro_argument_ranges(tokens, pair):
-        for k in range(o + 1, c):
-            inside[k] = True
-    return any(t.kind == "ident" and t.text == name and inside[k] for k, t in enumerate(tokens))
+    """Whether the identifier `name` occurs anywhere in the file other than as the name of its own
+    declaration or definition (a call, a recursive call, the address taken, a mention in a
+    contract, a `#define` body, a default argument, an initializer: any use a stronger `requires`
+    or a weaker `ensures` could break)."""
+    used = _used_names(src)
+    return used is None or name in used
 
 
 def clause_is_modelled(clause: str, allowed: frozenset) -> bool:
     """Whether every identifier of `clause` is in `allowed` (or `true`/`false`) and the clause
-    is linear over them: only the operators of `_LINEAR_OPS`, decimal literals without an
-    unsigned suffix, and a `*` only between a literal and a variable or literal."""
+    is linear over them: only the operators of `_LINEAR_OPS` (so no `*`), decimal literals without
+    an unsigned suffix, and a reading in which Python and C agree (`c_semantics_ok`)."""
     try:
         tokens = lex(clause)
     except LexError:
         return False
-    for k, t in enumerate(tokens):
+    for t in tokens:
         if t.kind == "ident":
             if t.text not in allowed and t.text not in ("true", "false"):
                 return False
@@ -699,21 +959,9 @@ def clause_is_modelled(clause: str, allowed: frozenset) -> bool:
         elif t.kind == "op":
             if t.text not in _LINEAR_OPS:
                 return False
-            if t.text == "*":
-                left = tokens[k - 1] if k > 0 else None
-                right = tokens[k + 1] if k + 1 < len(tokens) else None
-                if left is None or right is None:
-                    return False
-                if not ({left.kind, right.kind} <= {"ident", "number"} and "number" in (left.kind, right.kind)):
-                    return False
-                far_left = tokens[k - 2] if k > 1 else None
-                far_right = tokens[k + 2] if k + 2 < len(tokens) else None
-                if (far_left is not None and far_left.text == "*") or \
-                        (far_right is not None and far_right.text == "*"):
-                    return False  # `x * 2 * y`: a product of variables
         else:
             return False  # a string or character literal
-    return True
+    return c_semantics_ok(tokens)
 
 
 _ASSERT_EFFECT_OPS = {"++", "--", ",", "="}
@@ -746,44 +994,46 @@ def is_assert_statement(text: str) -> bool:
 
 def is_safe_direction(m: "Mutant", src: str) -> bool:
     """A mutant of a contract that makes it easier to meet: a stronger `requires`, a
-    weaker `ensures` or `check`.  Never a mutant of code, and never an `invariant` or
+    weaker `ensures` or `check` (or a weaker argument of a pure `assert(...);`, which is a `check`,
+    decision 0015).  Never a mutant of code, and never an `invariant` or
     a `decreases`.  Bucketed only when the grid models the clause (see the module
     docstring): every variable a signed builtin integer parameter of the enclosing function (the
     `ensures` result only if the return type is one), a linear clause, no `==`/`!=` flip,
-    and, for a stronger `requires` or a weaker `ensures`, no use of the function in the file."""
+    and no use of the function in the file for a stronger `requires` or a weaker `ensures`.  Whether the
+    mutated clause is well-defined (a dropped guard) is not asked here: see the module docstring."""
     if m.op == "delete-stmt":
         # an `assert(e);` deleted: the program only loses a check, which a sound verifier must
         # accept (a survivor needs no kill and no entry in the equivalence list; decision 0015)
         return is_assert_statement(src[m.start:m.end])
     found = contract_clause(src, m.start)
-    if found is None or found[0] not in ("REQUIRES", "ENSURES", "CHECK"):
+    if found is None:
+        found = assert_clause(src, m.start)  # `assert(e);` is a `check`
+    if found is None or found[0] not in ("REQUIRES", "ENSURES", "CHECK", "ASSERT"):
         return False
     if m.op == "relop" and m.original in ("==", "!="):
         return False  # a flip of equality is `unknown`: never bucketed
-    sig = next((s for s in function_signatures(src) if s.decl_start <= found[1] < s.body_end), None)
+    if not (found[1] <= m.start and m.end <= found[2]):
+        return False  # the change reaches outside the clause (the clause is no longer the same call)
+    sig = next((s for s in _function_signatures(src) if s.decl_start <= found[1] < s.body_end), None)
     if sig is None:
         return False  # a contract of a bodyless declaration: no signature to read the types from
     allowed = set(sig.signed_params)
     if found[0] == "ENSURES" and sig.returns_signed and found[3] is not None:
         allowed.add(found[3])
-    if found[0] == "CHECK":
+    if found[0] in ("CHECK", "ASSERT"):
         allowed -= sig.body_decl_names  # a local of the same name may shadow the parameter
     if found[0] in ("REQUIRES", "ENSURES") and has_caller(src, sig.name):
         # a caller may fail the stronger precondition, or rely on the postcondition that is now
         # weaker: the mutant must be killed by a failure at the use, or be listed
         return False
-    if not clause_is_modelled(src[found[1]:found[2]], frozenset(allowed)):
+    clause = src[found[1]:found[2]]
+    if not clause_is_modelled(clause, frozenset(allowed)):
         return False
-    # the start of the clause is before the changed text (or is it), so it is inside the same call
-    # in the mutated source, also when the whole tail of the clause was dropped
-    msrc = m.apply(src)
-    mutated = contract_clause(msrc, found[1])
-    if mutated is None or mutated[0] != found[0]:
-        return False
-    mutant_clause = msrc[mutated[1]:mutated[2]]
+    # the changed text lies inside the clause, so the mutated clause is the clause with it replaced
+    mutant_clause = src[found[1]:m.start] + m.replacement + src[m.end:found[2]]
     if not clause_is_modelled(mutant_clause, frozenset(allowed)):
         return False
-    relation = clause_relation(src[found[1]:found[2]], mutant_clause)
+    relation = clause_relation(clause, mutant_clause)
     return relation == ("stronger" if found[0] == "REQUIRES" else "weaker")
 
 
@@ -1033,6 +1283,34 @@ def generate(chosen: list[tuple[Path, list[str]]]) -> tuple[list[Subject], list[
     return subjects, problems
 
 
+def generate_listed(eq: Equivalents, selected: set[str]) -> tuple[list[Subject], list[str]]:
+    """Subjects for the files that the equivalence list names and the selection does not contain,
+    the problems (an entry whose file does not exist or is not a `// expect: verified` C or C++ test;
+    the problems of generating the file)."""
+    listed = sorted({entry_path(mid) for mid in eq.entries} - selected)
+    chosen: list[tuple[Path, list[str]]] = []
+    problems: list[str] = []
+    for name in listed:
+        path = Path(name) if Path(name).is_absolute() else ROOT / name
+        why = None
+        if not path.is_file():
+            why = "the file does not exist"
+        else:
+            try:
+                picked = select([str(path)])
+            except Problem:
+                picked = []
+            if len(picked) != 1 or display_path(picked[0][0]) != name:
+                why = "the file is not a `// expect: verified` C or C++ test"
+            else:
+                chosen.append(picked[0])
+        if why is not None:
+            for mid in sorted(m for m in eq.entries if entry_path(m) == name):
+                problems.append(f"stale equivalence entry ({why}): {mid}")
+    subjects, generated_problems = generate(chosen)
+    return subjects, problems + generated_problems
+
+
 def verify_base(env: dict[str, str]) -> list[str]:
     return rt.VERIFY_COMMAND if rt.VERIFY_COMMAND is not None else [env["CERASTES_VERIFY"]]
 
@@ -1102,8 +1380,26 @@ def run_all(subjects: list[Subject], env: dict[str, str], jobs: int, workdir: Pa
         shutil.rmtree(d, ignore_errors=True)
         return item, status_of(run)
 
+    def run_batch(pool, items):
+        """The outcomes of `items`, in the order of `items`.  One line per finished verifier run goes
+        to stderr as soon as it finishes (in completion order, flushed), so that a run stopped by a time
+        cap still leaves its outcomes in a log: `mutate: [k/N] <mutant id or "<path> (original)"> [<mode>]:
+        <outcome>`, k and N counting the originals and the mutants apart."""
+        futures = {pool.submit(run_one, item): index for index, item in enumerate(items)}
+        results: list = [None] * len(items)
+        for done, future in enumerate(concurrent.futures.as_completed(futures), start=1):
+            item, (outcome, detail) = results[futures[future]] = future.result()
+            _kind, subject, mutant, mode = item
+            if mutant is None:  # the original must verify: exit status 0 is "verified", anything else is a failure
+                name = f"{display_path(subject.path)} (original)"
+                outcome = {SURVIVED: "verified", KILLED: "does not verify", STILLBORN: "rejected"}.get(outcome, outcome)
+            else:
+                name = mutant.id
+            print(f"mutate: [{done}/{len(items)}] {name} [{mode}]: {outcome}", file=sys.stderr, flush=True)
+        return results
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, jobs)) as pool:
-        baseline = list(pool.map(run_one, work))
+        baseline = run_batch(pool, work)
         bad_files: set[Path] = set()
         for (kind, s, m, mode), (outcome, detail) in baseline:
             if outcome == FAILED:
@@ -1118,7 +1414,7 @@ def run_all(subjects: list[Subject], env: dict[str, str], jobs: int, workdir: Pa
         mutant_work = [("mutant", s, m, mode) for s in subjects if s.path not in bad_files
                        for m in s.mutants for mode in s.modes]
         per: dict[str, list[str]] = {}
-        for (kind, s, m, mode), (outcome, detail) in pool.map(run_one, mutant_work):
+        for (kind, s, m, mode), (outcome, detail) in run_batch(pool, mutant_work):
             per.setdefault(m.id, []).append(outcome)
             if outcome == FAILED:
                 result.failures.append(f"{m.id} [{mode}]: {detail}")
@@ -1127,12 +1423,22 @@ def run_all(subjects: list[Subject], env: dict[str, str], jobs: int, workdir: Pa
     return result
 
 
+def entry_path(mid: str) -> str:
+    """The file of a mutant id (the id has the form `path:line:column:op:original->new`)."""
+    m = ID_RE.match(mid)
+    return m.group("path") if m else mid
+
+
 def check_equivalents(eq: Equivalents, generated: set[str],
-                      outcomes: dict[str, str] | None, safe: frozenset | set = frozenset()) -> list[str]:
+                      outcomes: dict[str, str] | None, safe: frozenset | set = frozenset(),
+                      files: set[str] | frozenset[str] | None = None) -> list[str]:
     """Stale entries: not generated; covered by the safe-direction bucket; with `outcomes`
-    also not surviving."""
+    also not surviving.  With `files`, only the entries of those files are checked: a run over some
+    of the tests knows nothing about the mutants of the others."""
     problems = list(eq.problems)
     for mid in sorted(eq.entries):
+        if files is not None and entry_path(mid) not in files:
+            continue
         if mid in safe:
             problems.append(f"stale equivalence entry (the safe-direction bucket covers this mutant: "
                             f"a stronger requires, or a weaker ensures or check): {mid}")
@@ -1185,6 +1491,7 @@ def main(argv: list[str] | None = None) -> int:
 
     subjects, problems = generate(chosen)
     generated = {m.id for s in subjects for m in s.mutants}
+    selected_files = {display_path(s.path) for s in subjects}
     total = len(generated)
     eq = read_equivalents(args.equivalents)
     if args.list:
@@ -1196,7 +1503,14 @@ def main(argv: list[str] | None = None) -> int:
             return 1 if problems else 0  # --list only lists: it never starts a run
     if args.validate:
         safe_all = {mid for s in subjects for mid in s.safe}
-        problems += check_equivalents(eq, generated, None, safe_all)
+        # the list may name files outside the selection (the doc examples; the default selection is
+        # tests/scalar): generate each one, so that its entries are checked for staleness too
+        extra_subjects, extra_problems = generate_listed(eq, selected_files)
+        problems += extra_problems
+        generated |= {m.id for s in extra_subjects for m in s.mutants}
+        safe_all |= {mid for s in extra_subjects for mid in s.safe}
+        checked_files = selected_files | {display_path(s.path) for s in extra_subjects}
+        problems += check_equivalents(eq, generated, None, safe_all, checked_files)
         if total == 0:
             problems.append("no mutant is generated: an empty set must not pass")
         for p in problems:
@@ -1206,7 +1520,9 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(f"mutate: {len(subjects)} tests, {total} mutants generated, "
               f"{len(eq.entries)} reviewed equivalents, {len(safe_all)} in the safe-direction bucket "
-              "if they survive")
+              "if they survive"
+              + (f" ({len(extra_subjects)} more files named by the list were generated too)"
+                 if extra_subjects else ""))
         return 0
 
     if problems:
@@ -1236,7 +1552,7 @@ def main(argv: list[str] | None = None) -> int:
     safe_all = {mid for s in subjects for mid in s.safe}
     safe_survivors = [mid for mid in survivors if mid in safe_all]
     unexplained = [mid for mid in survivors if mid not in eq.entries and mid not in safe_all]
-    stale = check_equivalents(eq, generated, result.outcomes, safe_all)
+    stale = check_equivalents(eq, generated, result.outcomes, safe_all, selected_files)
     # a test none of whose mutants was killed notices nothing: all survived, all stillborn,
     # or a mix; it fails the run even if each survivor were reviewed
     unmutated: list[str] = []

@@ -1100,6 +1100,86 @@ class TerminationClauseTests(unittest.TestCase):
     def test_an_identifier_containing_if_is_not_a_conditional_decreases(self):
         self.assertEqual(self._loop_measure("    decreases y - i__1 + gif - elif_"), [])
 
+    # A clause may run over several lines: the termination rules read it whole (defence in depth: the
+    # emitter writes one line per clause today).
+    def _loop_clause_lines(self, first, *more):
+        """The loop's measure line replaced by `first` (a check with its map entry) and the lines `more`."""
+        lines = good_lines()
+        i = find(lines, "    decreases y - i__1")
+        lines[i:i + 1] = [Check(first, "termination.failed", "termination"), *more]
+        return lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+
+    def test_a_decreases_star_on_the_next_line_is_a_problem(self):
+        probs = self._loop_clause_lines("    decreases", "      *")
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`decreases *` assumes termination", probs[0])
+        # the problem is reported at the line of the keyword
+        self.assertTrue(probs[0].startswith("t.vpr:%d:" % (find(self._loop_lines_text("    decreases", "      *"),
+                                                                "    decreases") + 1)), probs)
+
+    @staticmethod
+    def _loop_lines_text(first, *more):
+        lines = good_lines()
+        i = find(lines, "    decreases y - i__1")
+        lines[i:i + 1] = [first, *more]
+        return lines
+
+    def test_a_decreases_star_after_a_comma_on_the_next_line_is_a_problem(self):
+        probs = self._loop_clause_lines("    decreases y - i__1,", "      *")
+        self.assertTrue(any("`decreases *` assumes termination" in p for p in probs), probs)
+
+    def test_a_split_measure_that_is_a_product_is_not_decreases_star(self):
+        # the twin of the split-star rule: a `*` inside a measure that continues on the next line is arithmetic
+        self.assertEqual(self._loop_clause_lines("    decreases (y - i__1)", "      * 2"), [])
+
+    def test_a_conditional_decreases_on_the_next_line_is_a_problem(self):
+        probs = self._loop_clause_lines("    decreases y - i__1", "      if y > 0")
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("conditional `decreases <measure> if <condition>`", probs[0])
+        probs = self._loop_clause_lines("    decreases", "      if y > 0")
+        self.assertTrue(any("conditional `decreases" in p for p in probs), probs)
+
+    def test_a_decreases_underscore_on_the_next_line_is_a_problem_except_where_it_is_allowed(self):
+        probs = self._loop_clause_lines("    decreases", "      _")
+        self.assertTrue(any("`decreases _` assumes termination" in p for p in probs), probs)
+        lines = good_lines()
+        i = find(lines, "  ensures res > x") + 1
+        lines[i:i + 1] = ["  decreases", "    _"]  # on a method with a body
+        probs = lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+        self.assertTrue(any("`decreases _` assumes termination" in p for p in probs), probs)
+        # the twin: the trusted bodyless method may have it, written over two lines too
+        lines = good_lines()
+        i = find(lines, "  ensures -2147483648 <= res && res <= 2147483647")
+        lines[i + 1:i + 2] = ["  decreases", "    _"]
+        self.assertEqual(lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map"), [])
+
+    def test_a_split_clause_is_a_check_with_its_entry(self):
+        # `decreases` alone on a line is an empty measure (no entry needed); with a measure on the next line it is
+        # a measure, so its line needs the entry
+        lines = good_lines()
+        i = find(lines, "    decreases y - i__1")
+        lines[i:i + 1] = ["    decreases", "      y - i__1"]
+        probs = lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`decreases` line has no entry in the position map", probs[0])
+        lines[i] = Check("    decreases", "termination.failed", "termination")
+        self.assertEqual(lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map"), [])
+
+    def test_a_clause_ends_at_a_brace_a_clause_or_a_declaration(self):
+        for following in ("{", "}", "  requires true", "  ensures true", "  invariant true", "  decreases n", "while (x)",
+                          "  label end", "  goto end", "  var v: Int", "  assert true", "  inhale true", "method m()",
+                          "function f(): Int", "predicate p()", "field f: Int", "domain D {"):
+            with self.subTest(following):
+                src = lv.split_source("method m()\n  decreases n\n" + following + "\n")
+                self.assertEqual(lv.decreases_measures(src)[2], "n")
+        # blank lines and comments inside a clause do not end it
+        src = lv.split_source("method m()\n  decreases n,\n\n  // comment\n  m\n{\n")
+        self.assertEqual(lv.decreases_measures(src)[2], "n, m")
+
+    def test_a_clause_that_continues_to_the_end_of_the_file_is_read_whole(self):
+        src = lv.split_source("method m()\n  decreases n,\n   *\n")
+        self.assertIn("*", lv._top_level_items(lv.decreases_measures(src)[2]))
+
     def test_a_termination_error_id_still_needs_a_known_category(self):
         text, map_text = edited()
         bad = map_text.replace("termination.failed\ttermination", "termination.failed\tnonsense", 1)
@@ -1385,6 +1465,30 @@ class JumpTests(unittest.TestCase):
         lines = self.nested_loops("before", "outer")
         lines[lines.index("  goto l_x")] = "  // goto l_x"
         self.assertEqual(self.strict(lines), [])
+
+
+class SelfTestHygieneTests(unittest.TestCase):
+    """A test method defined twice in one class replaces the first, which then never runs (it happened here:
+    two `test_labels_followed_by_no_deletable_statement_give_no_mutant`)."""
+
+    @staticmethod
+    def defined_twice(source):
+        """["Class.name", ...] for every method that a class of `source` defines more than once."""
+        import ast
+        import collections
+        out = []
+        for cls in [n for n in ast.walk(ast.parse(source)) if isinstance(n, ast.ClassDef)]:
+            names = collections.Counter(f.name for f in cls.body if isinstance(f, ast.FunctionDef))
+            out += [f"{cls.name}.{name}" for name, n in sorted(names.items()) if n > 1]
+        return out
+
+    def test_no_test_name_is_defined_twice_in_a_class(self):
+        self.assertEqual(self.defined_twice(Path(__file__).read_text()), [])
+
+    def test_the_check_sees_a_duplicate(self):
+        src = "class C:\n    def test_a(self): pass\n    def test_a(self): pass\n    def test_b(self): pass\n"
+        self.assertEqual(self.defined_twice(src), ["C.test_a"])
+        self.assertEqual(self.defined_twice(src.replace("def test_a(self): pass\n    def test_b", "def test_c(self): pass\n    def test_b")), [])
 
 
 if __name__ == "__main__":

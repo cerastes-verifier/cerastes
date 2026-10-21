@@ -86,6 +86,11 @@ CHECK_LINE_RE = re.compile(r"^\s*(assert|requires|ensures|invariant|decreases)\b
 CHECK_WORD_RE = re.compile(r"\b(assert|requires|ensures|invariant|decreases)\b")
 DECREASES_LINE_RE = re.compile(r"^\s*decreases\b(?P<measure>.*)$")
 WHILE_WORD_RE = re.compile(r"(?<![\w$'])while\b")
+# What ends a `decreases` clause that runs over several lines: a line that opens a block (`{`, `}`), starts
+# another clause, a statement or a declaration (a line that starts with anything else continues the clause).
+CLAUSE_END_RE = re.compile(r"^\s*(?:[{}]|(?:assert|requires|ensures|invariant|decreases|while|var|label|goto|inhale|"
+                           r"exhale|assume|fold|unfold|apply|package|else|method|function|predicate|domain|field|"
+                           r"define|import|axiom|adt|type)(?![\w$']))")
 # The Viper error ids a position-map entry may have, by the kind of the line it is
 # for (encoding.md section 5): an `assert` is `assert.failed`; a call of a method is
 # `call.precondition`; an `invariant` clause is `invariant.not.established` and
@@ -292,6 +297,25 @@ class CallStatement:
         return m if depth == 0 and code[i:].strip() in ("", ";") else None
 
 
+def decreases_measures(src: Source) -> dict[int, str]:
+    """The measure of every `decreases` clause, by the line of its keyword: the text after the keyword,
+    and the lines that follow while they do not start a block, another clause, a statement or a
+    declaration (`CLAUSE_END_RE`), so that a clause written over several lines (`decreases` on one line and
+    `*` or `if c` on the next) is read whole.  Blank lines (and comments) inside a clause are skipped."""
+    out: dict[int, str] = {}
+    for lineno, code in enumerate(src.code, start=1):
+        m = DECREASES_LINE_RE.match(code)
+        if not m:
+            continue
+        parts = [m.group("measure")]
+        for more in src.code[lineno:]:
+            if more.strip() and CLAUSE_END_RE.match(more):
+                break
+            parts.append(more)
+        out[lineno] = " ".join(" ".join(parts).split())
+    return out
+
+
 def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
              map_name: str | None = None) -> list[str]:
     """Problems of one Viper file with its position map (None: the map is missing)."""
@@ -334,6 +358,7 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     call_re = CallStatement()
     check_lines: dict[int, str] = {}
     declaration_lines = {d.line for d in decls}
+    measures = decreases_measures(src)
     call_word_re = re.compile(r"(?<![\w$'])(" + "|".join(map(re.escape, sorted(methods))) + r")\s*\(") \
         if methods else None
     for lineno, code in enumerate(src.code, start=1):
@@ -345,7 +370,7 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
                 add(lineno, f"`{w.group(1)}` does not start its line: every check is on its "
                             "own line (decision 0012 item 13)")
         if m := CHECK_LINE_RE.match(code):
-            if m.group(1) == "decreases" and DECREASES_LINE_RE.match(code).group("measure").strip() in ("", "_"):
+            if m.group(1) == "decreases" and measures[lineno] in ("", "_"):
                 pass  # an empty measure (a method outside any recursion) or `_` (trusted) is no check
             else:
                 check_lines[lineno] = m.group(1)
@@ -357,7 +382,7 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
                 add(lineno, f"the call of method `{c.group(1)}` is not alone on its line: every "
                             "call is a statement of its own (decision 0012 item 13)")
 
-    lint_termination_clauses(src, decls, add)
+    lint_termination_clauses(src, decls, add, measures)
     lint_jumps(src, decls, add)
 
     if map_text is None:
@@ -411,10 +436,14 @@ def _top_level_items(measure: str) -> list[str]:
     return items
 
 
-def lint_termination_clauses(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+def lint_termination_clauses(src: Source, decls: list[Decl], add: Callable[[int, str], None],
+                             measures: dict[int, str] | None = None) -> None:
     """Decision 0013 item 5: Silicon checks termination only where a `decreases` clause is present, so every
     method (the `__wf` methods too, with an empty measure) and every `while` has one; and `decreases _`, which
-    assumes termination (invariant 4), is allowed only on a bodyless method with the trusted-contract tag."""
+    assumes termination (invariant 4), is allowed only on a bodyless method with the trusted-contract tag.
+    A clause is read whole when it runs over several lines (`decreases_measures`)."""
+    if measures is None:
+        measures = decreases_measures(src)
     for d in decls:
         if d.kind != "method":
             continue
@@ -425,25 +454,22 @@ def lint_termination_clauses(src: Source, decls: list[Decl], add: Callable[[int,
             add(d.line, f"`method {d.name}` has no `decreases` clause: Silicon checks termination only "
                         "where one is present (an empty `decreases` for a method outside any recursion, "
                         "decision 0013 item 5)")
-    for lineno, code in enumerate(src.code, start=1):
-        m = DECREASES_LINE_RE.match(code)
-        if m and m.group("measure").strip() == "_":
+    for lineno, measure in sorted(measures.items()):
+        if measure == "_":
             owner = next((d for d in decls if d.line <= lineno <= d.end_line), None)
             ok = (owner is not None and owner.kind == "method" and not owner.has_body
                   and trusted_tag(src, owner.line) is not None)
             if not ok:
                 add(lineno, "`decreases _` assumes termination (invariant 4): it is allowed only on a "
                             "bodyless method that carries `// cerastes:trusted-contract <reason>`")
-        if m:
-            measure = m.group("measure")
-            if "*" in _top_level_items(measure):
-                add(lineno, "`decreases *` assumes termination (invariant 4, decision 0013): Silicon "
-                            "does not check the termination of what carries it; the emitter produces "
-                            "a measure, an empty `decreases`, or `decreases _` on a trusted bodyless method")
-            if re.search(r"(?<![\w$'])if(?![\w$'])", measure):
-                add(lineno, "conditional `decreases <measure> if <condition>` is not allowed (decision 0013): "
-                            "termination is checked only where the condition holds, so the measure must be "
-                            "unconditional")
+        if "*" in _top_level_items(measure):
+            add(lineno, "`decreases *` assumes termination (invariant 4, decision 0013): Silicon "
+                        "does not check the termination of what carries it; the emitter produces "
+                        "a measure, an empty `decreases`, or `decreases _` on a trusted bodyless method")
+        if re.search(r"(?<![\w$'])if(?![\w$'])", measure):
+            add(lineno, "conditional `decreases <measure> if <condition>` is not allowed (decision 0013): "
+                        "termination is checked only where the condition holds, so the measure must be "
+                        "unconditional")
     for lineno, code in enumerate(src.code, start=1):
         for _w in WHILE_WORD_RE.finditer(code):
             body = next((ln for ln in range(lineno, len(src.code) + 1) if "{" in src.code[ln - 1]), len(src.code))

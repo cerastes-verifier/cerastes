@@ -17,6 +17,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -374,7 +375,7 @@ class TargetTests(unittest.TestCase):
                          [["  case 1: ;", "  default: y = 1;"], ["  case 1: break;", "  default: ;"]])
         self.assertEqual([(m.line, m.column) for m in mutants], [(4, 11), (5, 12)])
 
-    def test_labels_followed_by_no_deletable_statement_give_no_mutant(self):
+    def test_case_labels_followed_by_no_deletable_statement_give_no_mutant(self):
         for stmt in ("switch (x) { case 1: ; default: ; }",
                      "switch (x) { case 1: int z = 1; break; }",
                      "switch (x) { case 1: CERASTES_CHECK(x > 0); }",
@@ -1326,10 +1327,20 @@ class SafeDirectionModelTests(unittest.TestCase):
                 self.assertEqual(mu.clause_relation(clause, clause.replace(">=", ">")), "stronger")
                 self.assertFalse(self.safe(self.req("int f(int x, int y)", clause), "relop:>=->>"))
 
-    def test_a_product_with_a_literal_is_linear(self):
+    def test_no_product_is_modelled_not_even_with_a_literal(self):
+        # a literal coefficient is not monotone: `3 * x + y < 10` against `4 * x + y < 10` is incomparable, and
+        # a grid of few values may not show it; so every `*` is `unknown` (audit A item 2)
         for clause in ("2 * x >= 2", "x * 2 >= 2", "3 * 4 + x >= 13", "x - 2 * y >= 1"):
             with self.subTest(clause):
-                self.assertTrue(self.safe(self.req("int f(int x, int y)", clause), "relop:>=->>"))
+                self.assertEqual(mu.clause_relation(clause, clause.replace(">=", ">")), "stronger")
+                self.assertFalse(self.safe(self.req("int f(int x, int y)", clause), "relop:>=->>"))
+        src = self.req("int f(int x, int y)", "3 * x + y < 10")
+        for needle in ("literal:3->4", "literal:3->2", "literal:10->11", "relop:<-><="):
+            with self.subTest(needle):
+                self.assertFalse(self.safe(src, needle))
+        # the twin without the coefficient is bucketed (the weaker direction of a stronger requires)
+        src = self.req("int f(int x, int y)", "x + y < 10")
+        self.assertTrue(self.safe(src, "literal:10->9"))
 
     def test_division_remainder_and_shifts_are_not_modelled(self):
         for clause in ("x / 2 >= 1", "x % 2 >= 1", "x << 1 >= 1", "x >> 1 >= 1"):
@@ -1407,6 +1418,270 @@ class SafeDirectionModelTests(unittest.TestCase):
         src = ("int f(int x)\n{\n  CERASTES_CHECK(x >= 0 && x <= 5);\n  return x;\n}\n"
                "int g(int y) { return f(y); }\n")
         self.assertTrue(self.safe(src, "literal:5->6", line=3))
+
+
+class TriageRuleTests(unittest.TestCase):
+    """The tightened bucket (S3, the triage session): `assert(e);` as a `check`, Python's reading of `!` and of
+    chained comparisons, products, a dropped guard (not a reason to keep a mutant out), and uses of the function in a `#define`
+    body, a default argument or an initializer.  Each rule has a case that must be bucketed and one that must
+    not; removing the rule fails one of them."""
+
+    def safe(self, src, needle, line=None):
+        found = [m for m in mu.mutants_of(src, "x.c")
+                 if needle in m.id and (line is None or m.line == line)]
+        self.assertTrue(found, (needle, [m.id for m in mu.mutants_of(src, "x.c")]))
+        results = {mu.is_safe_direction(m, src) for m in found}
+        self.assertEqual(len(results), 1, (needle, results))
+        return results.pop()
+
+    # -- assert(e); is a check (decision 0015) ----------------------------------------------------------
+
+    @staticmethod
+    def asrt(clause, decl="int f(int x, int y)", before="", after=""):
+        return f"{decl}\n{{\n{before}  assert({clause});\n{after}  return x;\n}}\n"
+
+    def test_a_weaker_assert_argument_is_bucketed(self):
+        src = self.asrt("x >= 0 && x <= 5")
+        self.assertTrue(self.safe(src, "literal:5->6"))
+        self.assertTrue(self.safe(src, "drop-conjunct:&& x <= 5->"))
+        self.assertTrue(self.safe(src, "drop-conjunct:x >= 0 &&->"))
+        self.assertTrue(self.safe(src, "swap-logic:&&->||"))
+
+    def test_a_stronger_assert_argument_is_not_bucketed(self):
+        src = self.asrt("x >= 0 && x <= 5")
+        self.assertFalse(self.safe(src, "literal:5->4"))
+        self.assertFalse(self.safe(src, "relop:<=-><"))
+        self.assertFalse(self.safe(src, "relop:>=->>"))
+        self.assertFalse(self.safe(src, "literal:0->1"))
+        self.assertFalse(self.safe(self.asrt("x >= 0 || x <= 5"), "swap-logic:||->&&"))
+
+    def test_an_assert_in_a_branch_or_after_an_else_is_still_a_check(self):
+        for before, after in (("  if (y)\n  ", ""), ("  if (y) {\n  } else\n  ", ""), ("  { ", "  }\n"),
+                              ("  do ", "  while (0);\n")):
+            with self.subTest(before):
+                src = self.asrt("x <= 5", before=before, after=after)
+                self.assertTrue(self.safe(src, "literal:5->6"))
+
+    def test_an_assert_equality_flip_is_never_bucketed(self):
+        src = self.asrt("x == 1 && x == 2")  # unsatisfiable: the flips are `weaker` on the grid
+        self.assertFalse(self.safe(src, "relop:==->!=", line=3))
+
+    def test_only_the_assert_macro_is_a_check(self):
+        for name in ("static_assert", "my_assert", "assert_that", "assertx", "_assert", "CERASTES_ASSERT"):
+            with self.subTest(name):
+                src = f"int f(int x, int y)\n{{\n  {name}(x <= 5);\n  return x;\n}}\n"
+                self.assertFalse(self.safe(src, "literal:5->6"))
+        # the twin: `assert` itself
+        self.assertTrue(self.safe(self.asrt("x <= 5"), "literal:5->6"))
+
+    def test_an_assert_that_is_not_a_statement_is_not_a_check(self):
+        for stmt in ("(assert(x <= 5));", "y = assert(x <= 5);", "return assert(x <= 5);", "assert(x <= 5), y++;",
+                     "assert(x <= 5) + 1;"):
+            with self.subTest(stmt):
+                src = f"int f(int x, int y)\n{{\n  {stmt}\n  return x;\n}}\n"
+                found = [m for m in mu.mutants_of(src, "x.c") if "literal:5->6" in m.id]
+                self.assertTrue(found)
+                self.assertFalse(any(mu.is_safe_direction(m, src) for m in found), stmt)
+
+    def test_an_impure_assert_argument_is_not_a_check(self):
+        for clause in ("x <= 5 && g(y) == 1", "x++ <= 5", "--x <= 5", "(y = x) <= 5", "(y += x) <= 5", "(y, x) <= 5",
+                       "x <= 5 && (y <<= 1)"):
+            with self.subTest(clause):
+                src = self.asrt(clause)
+                found = [m for m in mu.mutants_of(src, "x.c") if "literal:5->6" in m.id]
+                self.assertTrue(found)
+                self.assertFalse(any(mu.is_safe_direction(m, src) for m in found), clause)
+
+    def test_an_assert_argument_must_be_modelled_like_a_check(self):
+        # a message, an unsigned or unknown variable, a product, a division, a local that may shadow
+        for clause, decl in (('x <= 5 && "msg"', "int f(int x, int y)"), ("x <= 5", "int f(unsigned x, int y)"),
+                             ("x <= 5 && z > 0", "int f(int x, int y)"), ("x * y <= 5", "int f(int x, int y)"),
+                             ("x / y <= 5", "int f(int x, int y)"), ("x <= 5", "int f(long long *x, int y)")):
+            with self.subTest(clause, decl=decl):
+                self.assertFalse(self.safe(self.asrt(clause, decl=decl), "literal:5->6"))
+        shadow = "int f(int x)\n{\n  { unsigned x = 3; (void)x; }\n  assert(x <= 5);\n  return x;\n}\n"
+        self.assertFalse(self.safe(shadow, "literal:5->6"))
+        self.assertTrue(self.safe("int f(int x)\n{\n  assert(x <= 5);\n  return x;\n}\n", "literal:5->6"))
+
+    def test_an_assert_needs_no_caller_check(self):
+        # like a `check`, an assert has no callers: a call of the function does not matter
+        src = self.asrt("x <= 5") + "int g(int a) { return f(a, 1); }\n"
+        self.assertTrue(self.safe(src, "literal:5->6", line=3))
+
+    # -- Python's reading of `!` and of comparisons (audit A item 1) --------------------------------------
+
+    def test_c_semantics_ok_table(self):
+        ok = ["x < 1", "x < y && y < 3", "x < y || y < 3 && x > 0", "(x < y) < 1", "(x < y) == (y < 1)", "!(x < 1)",
+              "!x && y", "x && !y", "!!(x < 1) && y", "!(x < 1) || !(y < 2)", "(x && y) && z", "!(x && y)",
+              "((x && y)) && z", "!((x && y))", "((x && y))", "(((x && y))) || z", "((x < 1)) == ((y < 1))",
+              "x + 1 < y - 2", "- 3 < x", "(x < 1)", "((x && y))", "x"]
+        bad = ["x < y < 1", "x <= y < 1", "x == y == 1", "y == x > 0", "x < y == 1", "x != y < 3 && z",
+               "!y < 1", "!(y) < 1", "!x == 1", "!x + 1", "!(x) - 1", "!(x < 1) == 0", "!", "x && !",
+               "(x && y) == 1", "(x || y) < 3", "1 + (x && y)", "(x && y) + 1", "- (x && y)", "f(x && y)",
+               "x < (y || z)", "(x < 1", "x < 1)",
+               "((x && y)) == 1", "(((x && y))) + 1 > 1", "-((x && y))", "f((x && y))", "1 + ((x || y))",
+               "(((x && y))) < 3"]
+        for clause in ok:
+            with self.subTest(clause):
+                self.assertTrue(mu.c_semantics_ok(mu.lex(clause)), clause)
+        for clause in bad:
+            with self.subTest(clause):
+                self.assertFalse(mu.c_semantics_ok(mu.lex(clause)), clause)
+
+    def test_a_clause_with_a_chain_or_a_loose_not_is_unknown(self):
+        for original, mutant in (("x < y < 1", "x < y < 2"), ("!y < 1", "!y < 2"), ("y == x > 0", "y == x > 1"),
+                                 ("(x && y) == 1", "(x && y) == 2")):
+            with self.subTest(original):
+                self.assertEqual(mu.clause_relation(original, mutant), "unknown")
+                self.assertFalse(mu.clause_is_modelled(original, frozenset({"x", "y"})))
+
+    def test_such_a_clause_is_never_bucketed_in_a_contract(self):
+        for clause, needle in (("x < y < 5", "literal:5->4"), ("!y < 5", "literal:5->6"),
+                               ("y == x > 0", "literal:0->1"), ("(x && y) >= 1", "literal:1->2")):
+            with self.subTest(clause):
+                # `requires`, the stronger direction: the grid alone calls each of these `stronger` (and the
+                # checks before this change bucketed them), but C reads `x < y < 5` as `(x < y) < 5`, etc.
+                src = f"int f(int x, int y) CERASTES_REQUIRES({clause})\n{{\n  return 0;\n}}\n"
+                found = [m for m in mu.mutants_of(src, "x.c") if needle in m.id]
+                self.assertTrue(found)
+                self.assertFalse(any(mu.is_safe_direction(m, src) for m in found), clause)
+
+    def test_a_logic_group_in_two_brackets_is_still_a_logic_group(self):
+        # audit round 1: `((x && r)) >= 1` is `(x != 0 && r != 0) >= 1` in C, not `x and r >= 1`
+        src = "int f(int x, int y) CERASTES_ENSURES(r, ((x && r)) >= 1)\n{\n  return x;\n}\n"
+        found = [m for m in mu.mutants_of(src, "x.c") if "drop-conjunct:x &&->" in m.id]
+        self.assertEqual(len(found), 1)
+        self.assertFalse(mu.is_safe_direction(found[0], src))
+        # the twin with one pair of brackets round a non-logic group is as before
+        src = "int f(int x, int y) CERASTES_ENSURES(r, ((x >= 1)) && r >= 1)\n{\n  return x;\n}\n"
+        self.assertTrue(self.safe(src, "drop-conjunct:((x >= 1)) &&->"))
+
+    def test_the_forms_where_python_and_c_agree_are_still_bucketed(self):
+        src = "int f(int x, int y) CERASTES_REQUIRES(x >= 0 && !(y < 3))\n{\n  return 0;\n}\n"
+        self.assertTrue(self.safe(src, "relop:<-><="))  # `!(y <= 3)` is stronger
+        src = "int f(int x, int y) CERASTES_REQUIRES((x < y) >= 1)\n{\n  return 0;\n}\n"
+        self.assertTrue(self.safe(src, "relop:>=->>"))
+        src = "int f(int x, int y) CERASTES_REQUIRES(!y && x >= 1)\n{\n  return 0;\n}\n"
+        self.assertTrue(self.safe(src, "relop:>=->>"))
+
+    # -- the guard of a dropped conjunct (audit A item 3, decision 0010 item 11) ------------------------------
+
+    @staticmethod
+    def ens(*clauses, decl="int f(int x)", body="return x;"):
+        return decl + "".join(f" CERASTES_ENSURES(r, {c})" for c in clauses) + "\n{\n  " + body + "\n}\n"
+
+    def test_a_dropped_guard_does_not_keep_a_mutant_out_of_the_bucket(self):
+        # owner, 2026-10-21 ("verifier-checked"): whether the mutated clause is well-defined is not the bucket's
+        # business; a surviving mutant has passed cerastes' own well-definedness check of contract arithmetic
+        # (decision 0010 item 11, pinned by the guard_dropped_* must-fail tests).  `r >= 0` may be the guard
+        # of `r + 1`; dropping it is still the weaker direction.
+        src = self.ens("r >= 0 && r + 1 > -5")
+        self.assertTrue(self.safe(src, "drop-conjunct:r >= 0 &&->"))
+        src = self.ens("r >= -10 && r + 1 > -5")
+        self.assertTrue(self.safe(src, "drop-conjunct:&& r + 1 > -5->"))  # the arithmetic itself dropped: weaker
+        self.assertTrue(self.safe(self.ens("r >= 0 && r > -5"), "drop-conjunct:r >= 0 &&->"))
+
+    def test_a_swapped_logic_operator_with_arithmetic_in_a_later_clause_is_bucketed(self):
+        src = "int f(int x)\n{\n  CERASTES_CHECK(x >= 0 && x <= 5);\n  CERASTES_CHECK(x + 1 <= 6);\n  return x;\n}\n"
+        self.assertTrue(self.safe(src, "swap-logic:&&->||", line=3))
+        later = self.ens("r >= 0 && r > -5", "r + 1 > -5")
+        self.assertTrue(self.safe(later, "drop-conjunct:r >= 0 &&->"))
+
+    def test_the_guard_rule_is_gone(self):
+        self.assertFalse(hasattr(mu, "may_be_undefined"))
+        self.assertFalse(hasattr(mu, "guard_texts"))
+
+    def test_the_other_mutants_of_a_clause_with_arithmetic_are_still_bucketed(self):
+        # the rule is about a guard removed by a dropped conjunct or a swapped operator
+        src = self.ens("r >= -10 && r + 1 > -5")
+        self.assertTrue(self.safe(src, "literal:5->6"))  # `r + 1 > -6` is weaker
+        self.assertFalse(self.safe(src, "literal:5->4"))  # `r + 1 > -4` is stronger: not the safe direction
+
+    # -- uses of the function (audit A item 4) -----------------------------------------------------------------
+
+    @staticmethod
+    def requires_f(extra="", prefix=""):
+        return prefix + "int f(int x) CERASTES_REQUIRES(x >= 1)\n{\n  return x;\n}\n" + extra
+
+    def test_a_use_in_a_define_body_or_a_default_argument_or_an_initializer_is_a_caller(self):
+        for extra in ("#define CALL f(1)\n", "#define CALL \\\n  f(1)\n", "#define ADDR f\n", "#define f_ f\n",
+                      "int g(int a = f(1)) { return a; }\n", "int v = f(2);\n", "int (*table[])(int) = { f };\n",
+                      "#define f(a) a\n", "int g(int a) { return a; }\n#define CALL(a) g(f(a))\n"):
+            with self.subTest(extra):
+                src = self.requires_f(extra)
+                self.assertTrue(mu.has_caller(src, "f"), extra)
+                self.assertFalse(self.safe(src, "relop:>=->>", line=1), extra)
+
+    def test_a_define_before_the_function_is_a_use_too(self):
+        src = self.requires_f(prefix="#define CALL f(1)\n")
+        self.assertFalse(self.safe(src, "relop:>=->>", line=2))
+
+    def test_the_declaration_itself_is_no_caller(self):
+        # (the contract of a declaration without a body has no signature: its mutant is never bucketed)
+        prototype = "int f(int x) CERASTES_REQUIRES(x >= 1);\nint f(int x)\n{\n  return x;\n}\n"
+        self.assertFalse(mu.has_caller(prototype, "f"))
+        for src in (self.requires_f(),
+                    "int f(int x);\n" + self.requires_f(),
+                    "static int f(int x) CERASTES_REQUIRES(x >= 1)\n{\n  return x;\n}\n",
+                    "int *f(int x) CERASTES_REQUIRES(x >= 1)\n{\n  return 0;\n}\n",
+                    "namespace n {\nint f(int x) CERASTES_REQUIRES(x >= 1)\n{\n  return x;\n}\n}\n",
+                    'extern "C" {\nint f(int x) CERASTES_REQUIRES(x >= 1)\n{\n  return x;\n}\n}\n',
+                    self.requires_f("// f(3)\n/* f(4) */\n#define G g(1)\n#include <f.h>\n#include \"f.h\"\n"
+                                    'const char *s = "f(5)";\n')):
+            with self.subTest(src):
+                self.assertFalse(mu.has_caller(src, "f"), src)
+                self.assertTrue(self.safe(src, "relop:>=->>"), src)
+
+    def test_a_call_in_a_body_or_a_contract_is_still_a_caller(self):
+        for extra in ("int g(int y) { return f(y); }\n", "int g(int y) CERASTES_ENSURES(r, r == f(y)) { return y; }\n",
+                      "int g(int y) { int (*p)(int) = f; return p(y); }\n"):
+            with self.subTest(extra):
+                self.assertTrue(mu.has_caller(self.requires_f(extra), "f"))
+
+    def test_a_directive_that_does_not_lex_counts_everything_as_a_use(self):
+        # fail closed: an apostrophe in an `#error` line is no character literal to the preprocessor, but the lexer
+        # of this script cannot tell, so no name is known to be unused
+        src = self.requires_f("#error don't\n")
+        self.assertEqual(mu.lex(src)[0].text, "int")  # the plain lexer skips the directive
+        self.assertTrue(mu.has_caller(src, "f"))
+        self.assertTrue(mu.has_caller(src, "anything_else"))
+        self.assertFalse(self.safe(src, "relop:>=->>", line=1))
+
+    def test_the_identifiers_of_a_directive_are_lexed_without_changing_the_plain_tokens(self):
+        src = "#define F(a) a < 3\n#include <x.h>\nint f(int x);\n"
+        self.assertEqual([t.text for t in mu.lex(src)], ["int", "f", "(", "int", "x", ")", ";"])
+        self.assertEqual([t.text for t in mu.lex(src, preprocessor=True)],
+                         ["define", "F", "(", "a", ")", "a", "<", "3", "int", "f", "(", "int", "x", ")", ";"])
+        src = "#define CALL \\\n  f(1)\nint g;\n"
+        self.assertEqual([t.text for t in mu.lex(src, preprocessor=True)],
+                         ["define", "CALL", "f", "(", "1", ")", "int", "g", ";"])
+        with self.assertRaises(mu.LexError):
+            mu.lex("a \\\n b")  # a backslash-newline outside a directive is still an error
+
+    # -- read once per source (speed) -------------------------------------------------------------------------
+
+    def test_each_source_is_read_once_not_once_per_mutant(self):
+        src = "int f(int x) CERASTES_REQUIRES(x >= 1 && x <= 100) CERASTES_ENSURES(r, r >= 0 && r <= 1000)\n" \
+              "{\n  CERASTES_CHECK(x >= 0 && x <= 5);\n  return x;\n}\n"
+        mutants = mu.mutants_of(src, "x.c")
+        self.assertGreater(len(mutants), 10)
+        mu._function_signatures.cache_clear()
+        mu._used_names.cache_clear()
+        with mock.patch.object(mu, "function_bodies", wraps=mu.function_bodies) as spy:
+            for m in mutants:
+                mu.is_safe_direction(m, src)
+        # one call for the signatures and one for the declarators of `has_caller`, however many mutants
+        self.assertLessEqual(spy.call_count, 2)
+
+    def test_a_clause_is_compiled_once_not_once_per_grid_point(self):
+        import builtins
+        with mock.patch.object(builtins, "compile", wraps=builtins.compile) as spy:
+            self.assertEqual(mu.clause_relation("a >= 0 && b >= 0 && c >= 0", "a >= 0 && b >= 0"), "weaker")
+        self.assertEqual(spy.call_count, 2)  # the original and the mutant
+
+    def test_a_grid_that_is_too_big_is_unknown(self):
+        names = " && ".join(f"v{i} > {i}" for i in range(12))
+        self.assertEqual(mu.clause_relation(names, names.replace("v0 > 0", "v0 > 1")), "unknown")
 
 
 class AssertDeletionTests(RunCase):
@@ -1647,6 +1922,252 @@ class ValidateTests(RunCase):
         self.assertEqual(status, 0, out.getvalue() + err.getvalue())
 
 
+class ProgressTests(RunCase):
+    """One line per finished verifier run goes to stderr, flushed, as soon as the run finishes: a run that a time
+    cap stops still leaves its outcomes in a log.  Stdout (the report) is unchanged."""
+
+    LINE = re.compile(r"^mutate: \[(\d+)/(\d+)\] (.+) \[(\S+)\]: (killed|survived|stillborn|tool failure|verified|"
+                      r"does not verify|rejected)$")
+
+    def lines(self, err):
+        out = []
+        for line in err.splitlines():
+            m = self.LINE.match(line)
+            self.assertIsNotNone(m, line)
+            out.append(m)
+        return out
+
+    def test_one_line_per_run_with_the_outcome(self):
+        t = self.put("a.c")
+        # a different status for each mutant: killed, stillborn, a tool failure, and a survivor
+        self.set_rules([["x <= 5", 1, None], ["x < 6", 2, None], ["x < 4", 3, None]])
+        status, out, err = self.run_main(t)
+        self.assertEqual(status, 3, out)
+        lines = self.lines(err)
+        self.assertEqual(len(lines), 5)  # the original and four mutants
+        originals = [m for m in lines if m.group(3).endswith(" (original)")]
+        self.assertEqual(len(originals), 1)
+        self.assertEqual((originals[0].group(1), originals[0].group(2), originals[0].group(5)), ("1", "1", "verified"))
+        self.assertIn(rt.rel(t), originals[0].group(3))
+        prefix = rt.rel(t) + ":"
+        mutants = {m.group(3): m.group(5) for m in lines if m not in originals}
+        self.assertEqual(mutants, {prefix + GOOD_MUTANTS[0]: "killed", prefix + GOOD_MUTANTS[1]: "stillborn",
+                                   prefix + GOOD_MUTANTS[2]: "tool failure", prefix + GOOD_MUTANTS[3]: "survived"})
+        # k counts 1..N in the order the runs finish, N is the number of mutant runs
+        self.assertEqual(sorted(int(m.group(1)) for m in lines if m not in originals), [1, 2, 3, 4])
+        self.assertEqual({m.group(2) for m in lines if m not in originals}, {"4"})
+        # the report is on stdout, and the progress is not
+        self.assertNotIn("mutate: [", out)
+        self.assertIn("SURVIVED", out)
+        self.assertIn("1 tests, 4 mutants: 1 killed, 0 equivalent (reviewed), 0 safe-direction, 1 unexplained "
+                      "survivors, 1 stillborn, 1 tool failures", out)
+
+    def test_every_mode_is_a_run(self):
+        self.set_rules([["x <= 5", 1, None]])
+        t = self.put("a.c", GOOD.replace("verified\n", "verified\n// mode: c23, c++20\n"))
+        status, out, err = self.run_main(t)
+        lines = self.lines(err)
+        self.assertEqual(len(lines), 2 + 2 * 4)  # an original per mode, then four mutants per mode
+        self.assertEqual({m.group(4) for m in lines}, {"c23", "c++20"})
+
+    def test_an_original_that_does_not_verify_is_said_so(self):
+        t = self.put("a.c")
+        self.set_rules([["x < 5", 1, None]])
+        status, out, err = self.run_main(t)
+        self.assertEqual(status, 1, out)
+        lines = self.lines(err)
+        self.assertEqual(len(lines), 1)  # no mutant of an original that does not verify is run
+        self.assertEqual(lines[0].group(5), "does not verify")
+
+    def test_a_line_is_flushed_when_it_is_written(self):
+        class Counting(io.StringIO):
+            flushes = 0
+
+            def flush(self):
+                Counting.flushes += 1
+                super().flush()
+        t = self.put("a.c")
+        self.set_rules([["x <= 5", 1, None], ["x < 6", 1, None], ["x < 4", 1, None], ["  ;\n", 1, None]])
+        err = Counting()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            self.assertEqual(mu.main(["--equivalents", str(self.equivalents), str(t)]), 0)
+        self.assertEqual(len(err.getvalue().splitlines()), 5)
+        self.assertGreaterEqual(Counting.flushes, 5)
+
+    def test_a_line_appears_when_its_run_finishes_not_at_the_end(self):
+        # with one worker the runs are sequential; a verifier that waits for the line of the previous run would
+        # wait for ever if the lines were written only at the end of the run (the timeout makes that a failure)
+        import time
+        t = self.put("a.c")
+        self.set_rules([["x <= 5", 1, None], ["x < 6", 1, None], ["x < 4", 1, None], ["  ;\n", 1, None]])
+        err = io.StringIO()
+        calls = []
+        real = mu.run_verifier
+
+        def waiting(*args):
+            n = len(calls)
+            calls.append(1)
+            deadline = time.time() + 20
+            while n > 0 and len(err.getvalue().splitlines()) < n and time.time() < deadline:
+                time.sleep(0.01)
+            self.assertGreaterEqual(len(err.getvalue().splitlines()), n, "the line of the previous run is missing")
+            return real(*args)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err), \
+                mock.patch.object(mu, "run_verifier", waiting):
+            self.assertEqual(mu.main(["--equivalents", str(self.equivalents), "-j", "1", str(t)]), 0)
+        self.assertEqual(len(calls), 5)
+
+    def test_the_order_of_the_report_does_not_depend_on_the_finishing_order(self):
+        # tool failures are listed in the order of the work, whichever run finishes first.  The runs finish in the
+        # reverse of the order of the work, without any timing: each run waits (with four workers they all run at
+        # once) until the progress line of the run after it has been written
+        import time
+        t = self.put("a.c")
+        self.set_rules([["x <= 5", 3, None], ["x < 6", 4, None], ["x < 4", 3, None], ["  ;\n", 4, None]])
+        real = mu.run_verifier
+        mutants = mu.mutants_of(GOOD, rt.rel(t))
+        order = [m.id for m in mutants]
+        texts = [m.apply(GOOD) for m in mutants]
+        err = io.StringIO()
+
+        def reversed_finish(env, file, mode, include_dir):
+            text = Path(file).read_text()
+            if text in texts and texts.index(text) + 1 < len(texts):
+                after = order[texts.index(text) + 1]
+                deadline = time.time() + 30
+                while after not in err.getvalue() and time.time() < deadline:
+                    time.sleep(0.005)  # a poll for the condition, not an ordering by delay
+                self.assertIn(after, err.getvalue(), "the run after this one never finished")
+            return real(env, file, mode, include_dir)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), \
+                mock.patch.object(mu, "run_verifier", reversed_finish):
+            status = mu.main(["--equivalents", str(self.equivalents), "-j", "4", str(t)])
+        self.assertEqual(status, 3, out.getvalue())
+        done = [m.group(3) for m in self.lines(err.getvalue())][1:]  # the progress lines follow the finishing order
+        self.assertEqual(done, order[::-1])
+        failures = [l for l in out.getvalue().splitlines() if l.startswith("TOOL FAILURE")]
+        self.assertEqual([l.split(" ", 2)[2].split(" [")[0] for l in failures], order)  # the report: the work order
+
+
+class ListedFilesTests(RunCase):
+    """The equivalence list may name files outside the selection: a run over some of the tests checks only the
+    entries of those files; `--validate` generates every file the list names and checks all of its entries."""
+
+    SAFE_SRC = ("// expect: verified\n"
+                "int f(int x) CERASTES_REQUIRES(x >= 0 && x <= 100) CERASTES_ENSURES(r, r >= 0)\n"
+                "{\n  return x + 1;\n}\n")
+
+    def entry(self, name, suffix="4:12:relop:<-><="):
+        return rt.rel(self.dir / name) + ":" + suffix
+
+    def write_list(self, *entries):
+        self.equivalents.write_text("# reviewed: me\n" + "".join(f"{e}\twhy\n" for e in entries))
+
+    def all_killed(self):
+        self.set_rules([["x <= 5", 1, None], ["x < 6", 1, None], ["x < 4", 1, None], ["  ;\n", 1, None]])
+
+    # -- trap 1: a run over a subset
+
+    def test_a_run_over_a_subset_ignores_the_entries_of_the_other_files(self):
+        a, _b = self.put("a.c"), self.put("b.c")
+        self.all_killed()
+        self.write_list(self.entry("b.c"), self.entry("nowhere.c"))
+        status, out, _ = self.run_main(a)
+        self.assertEqual(status, 0, out)
+        self.assertNotIn("stale", out)
+        self.assertNotIn("no such mutant", out)
+
+    def test_a_run_still_checks_the_entries_of_its_own_files(self):
+        a, _b = self.put("a.c"), self.put("b.c")
+        self.all_killed()
+        self.write_list(self.entry("a.c", "99:1:relop:<-><="))
+        status, out, _ = self.run_main(a)
+        self.assertEqual(status, 1, out)
+        self.assertIn("no such mutant is generated", out)
+        # and over both files, the entry of b.c is checked too (its mutant is killed: stale)
+        self.write_list(self.entry("b.c"))
+        status, out, _ = self.run_main(self.dir)
+        self.assertEqual(status, 1, out)
+        self.assertIn("the mutant is killed, not a survivor", out)
+
+    # -- trap 2: --validate generates the files the list names
+
+    def test_validate_checks_an_entry_of_a_file_outside_the_selection(self):
+        a, _b = self.put("a.c"), self.put("b.c")
+        self.write_list(self.entry("b.c"))
+        status, out, _ = self.run_main("--validate", a)
+        self.assertEqual(status, 0, out)
+        self.assertIn("1 reviewed equivalents", out)
+        self.assertIn("1 more files named by the list were generated too", out)
+        self.assertEqual(self.calls(), [])  # nothing is verified
+        # the same entry names a mutant that is not generated: stale, though its file is not selected
+        self.write_list(self.entry("b.c", "99:1:relop:<-><="))
+        status, out, _ = self.run_main("--validate", a)
+        self.assertEqual(status, 1, out)
+        self.assertIn("stale equivalence entry (no such mutant is generated): " + self.entry("b.c", "99:1:relop:<-><="),
+                      out)
+
+    def test_validate_finds_an_entry_the_bucket_covers_in_a_file_outside_the_selection(self):
+        a, b = self.put("a.c"), self.put("b.c", self.SAFE_SRC)
+        (m,) = [m for m in mu.mutants_of(self.SAFE_SRC, mu.display_path(b)) if m.op == "relop" and m.original == ">="
+                and m.line == 2 and m.column < 40]
+        self.write_list(m.id)
+        status, out, _ = self.run_main("--validate", a)
+        self.assertEqual(status, 1, out)
+        self.assertIn("the safe-direction bucket covers this mutant", out)
+        # the twin: a mutant of the same file that no rule buckets (it is code) is a fine entry
+        (code,) = [m for m in mu.mutants_of(self.SAFE_SRC, mu.display_path(b)) if m.op == "literal"
+                   and m.original == "1" and m.new == "2" and m.line == 4]
+        self.write_list(code.id)
+        status, out, _ = self.run_main("--validate", a)
+        self.assertEqual(status, 0, out)
+
+    def test_validate_reports_an_entry_whose_file_does_not_exist(self):
+        a = self.put("a.c")
+        self.write_list(self.entry("nowhere.c"))
+        status, out, _ = self.run_main("--validate", a)
+        self.assertEqual(status, 1, out)
+        self.assertIn("stale equivalence entry (the file does not exist): " + self.entry("nowhere.c"), out)
+        self.assertEqual(out.count(self.entry("nowhere.c")), 1)  # said once
+
+    def test_validate_reports_an_entry_whose_file_is_not_a_verified_test(self):
+        a = self.put("a.c")
+        self.put("e.c", "// expect: error postcondition @ L3\nint f(int x)\n{\n  return x < 5;\n}\n")
+        self.put("notes.txt", "x < 5\n")
+        for name in ("e.c", "notes.txt"):
+            with self.subTest(name):
+                self.write_list(self.entry(name))
+                status, out, _ = self.run_main("--validate", a)
+                self.assertEqual(status, 1, out)
+                self.assertIn("stale equivalence entry (the file is not a `// expect: verified` C or C++ test): "
+                              + self.entry(name), out)
+
+    def test_validate_reports_the_problems_of_generating_a_listed_file(self):
+        a = self.put("a.c")
+        self.put("b.c", "// expect: verified\nvoid empty(void)\n{\n}\n")
+        self.write_list(self.entry("b.c"))
+        status, out, _ = self.run_main("--validate", a)
+        self.assertEqual(status, 1, out)
+        self.assertIn(f"{rt.rel(self.dir / 'b.c')}: no mutant is generated for this test", out)
+
+    def test_entries_inside_the_selection_do_not_generate_anything_more(self):
+        a = self.put("a.c")
+        self.write_list(self.entry("a.c"))
+        status, out, _ = self.run_main("--validate", a)
+        self.assertEqual(status, 0, out)
+        self.assertNotIn("more files", out)
+
+    def test_check_equivalents_with_files_skips_the_others(self):
+        eq = mu.Equivalents({"x/a.c:1:1:relop:<-><=": "r", "x/b.c:1:1:relop:<-><=": "r"}, "me", [])
+        self.assertEqual(len(mu.check_equivalents(eq, set(), None)), 2)
+        problems = mu.check_equivalents(eq, set(), None, files={"x/a.c"})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("x/a.c", problems[0])
+        self.assertEqual(mu.check_equivalents(eq, set(), None, files=set()), [])
+        self.assertEqual(mu.entry_path("x/a.c:1:1:relop:<-><="), "x/a.c")
+
+
 class JobsTests(RunCase):
     """The default `-j` is CERASTES_JOBS, else half the CPUs; an explicit -j wins (decision 0016)."""
 
@@ -1707,6 +2228,30 @@ class JobsTests(RunCase):
         self.assertIn("args.jobs = rt.default_jobs()", source)
         self.assertNotIn("os.cpu_count", source)
         self.assertRegex(source, r'"-j", "--jobs", type=int, default=None')
+
+
+class SelfTestHygieneTests(unittest.TestCase):
+    """A test method defined twice in one class replaces the first, which then never runs (it happened here:
+    two `test_labels_followed_by_no_deletable_statement_give_no_mutant`)."""
+
+    @staticmethod
+    def defined_twice(source):
+        """["Class.name", ...] for every method that a class of `source` defines more than once."""
+        import ast
+        import collections
+        out = []
+        for cls in [n for n in ast.walk(ast.parse(source)) if isinstance(n, ast.ClassDef)]:
+            names = collections.Counter(f.name for f in cls.body if isinstance(f, ast.FunctionDef))
+            out += [f"{cls.name}.{name}" for name, n in sorted(names.items()) if n > 1]
+        return out
+
+    def test_no_test_name_is_defined_twice_in_a_class(self):
+        self.assertEqual(self.defined_twice(Path(__file__).read_text()), [])
+
+    def test_the_check_sees_a_duplicate(self):
+        src = "class C:\n    def test_a(self): pass\n    def test_a(self): pass\n    def test_b(self): pass\n"
+        self.assertEqual(self.defined_twice(src), ["C.test_a"])
+        self.assertEqual(self.defined_twice(src.replace("def test_a(self): pass\n    def test_b", "def test_c(self): pass\n    def test_b")), [])
 
 
 if __name__ == "__main__":
