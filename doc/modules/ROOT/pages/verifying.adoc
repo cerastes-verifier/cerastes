@@ -248,8 +248,9 @@ proved from each way of getting there.
 include::example$verifying/goto_exit.c[tag=source]
 ----
 
-After `found:`, the result is proved twice: on the `goto`, where
-`(r + 1) * (r + 1) > n`, and on the normal exit of the loop.
+After `done:`, the postcondition is proved for each way of getting there: from
+either `goto`, where `result` is still -1, and from the subtraction, which
+cannot overflow because `0 <= y <= x` holds there.
 
 cerastes rejects a `goto` that jumps backward (write the loop as `while`, `for` or
 `do`), one that jumps into a block, an `if` branch, a loop or the body of a

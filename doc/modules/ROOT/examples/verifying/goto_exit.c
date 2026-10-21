@@ -1,25 +1,23 @@
 // expect: verified
 // expect: native-ok
 // mode: c23, c++20
-// A forward goto leaves a loop; after the label, each way of getting there is proved separately.
+// Forward gotos to a common exit; after the label, each way of getting there is proved separately.
 // tag::source[]
 #include <cerastes.h>
 
-// The integer square root of n.
-int root(int n)
-    CERASTES_REQUIRES(0 <= n && n <= 1000)
-    CERASTES_ENSURES(r, 0 <= r && r <= 31 && r * r <= n && n < (r + 1) * (r + 1))
+// x - y, or -1 when y is negative or greater than x.
+int checked_difference(int x, int y)
+    CERASTES_ENSURES(r, ((y < 0 || x < y) && r == -1) || (0 <= y && y <= x && r == x - y))
 {
-  int r = 0;
-  CERASTES_INVARIANT(0 <= r && r <= 31 && r * r <= n)
-  CERASTES_DECREASES(31 - r)
-  while (r < 31) {
-    if ((r + 1) * (r + 1) > n) {
-      goto found;
-    }
-    r += 1;
+  int result = -1;
+  if (y < 0) {
+    goto done;
   }
-found:
-  return r;
+  if (x < y) {
+    goto done;
+  }
+  result = x - y;
+done:
+  return result;
 }
 // end::source[]
