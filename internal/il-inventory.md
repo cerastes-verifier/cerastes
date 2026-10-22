@@ -1796,4 +1796,192 @@ operations and casts (C++ adds the generated `eok_bool_cast` on top). `while (0)
   after a failed obligation is silent only because the obligation is closed and false (S14e), so the path is infeasible after it: **a guard must come after the obligations of its own case** (and
   after those of every earlier case in the prologue order) or a false guard would be reported first. Not tested: a guard placed before its case's obligations; a prologue shared by methods with several parameters.
 
+## M4.2b2: enumerations
+
+Probes P25-P27 for decision 0018 (enumeration types and enumerators). Evidence is under `build/m4.2b2/probes/` (gitignored), produced with
+`scripts/cerastes-fe.sh --c23|--c++20 --display_error_number --il_display <probe>` (output `<probe>.<mode>.il` / `.err`, written by
+`build/m4.2b2/fe.sh`) and, for diagnostics, `build/m4.2b2/p27.sh` (plain front end, the front end with verify mode's options from
+`src/driver/verify_main.cpp`, and `build/cerastes verify`). The trees quoted are condensed from il_display by the scratch tool
+`build/m4.2b2/il.py` (`types`, `enumdef`, `fn`, `cases`, `dik`, `vars`, `ops`, `uses`, `check`; positions omitted; `ENUM:X` marks a constant whose
+address is an entry of an enumeration's list, `[named_def]` marks `is_named_constant_definition`; `{expr=...}` is a folded constant's `expr` chain;
+`gen` is `compiler_generated`). `il_def.h` lines are in `third_party/edg/src/il_def.h` at the pin. Probe files: `p25_a.c`, `p25_shapes.c|cpp`,
+`p25_init.c|cpp`, `p25_use.c|cpp`, `p25_big.c|cpp`, `p25_bool.c|cpp`, `p25_local.c|cpp`, `p25_inc.c|cpp`, `p25_copy.c|cpp`, `p25_chain.cpp`, `p26.c|cpp`
+(functions `gN`, `hN`, `sN`, one construct each; in `p26.c` `gN` is on line N+7), `p26_sw.c`, `p26_contract.c|cpp`, `p27_*` (`p27_init_summary.txt` has the
+18 initializer cases in both modes). A file that EDG refuses produces no IL, so each refusal has a file of its own. Both modes ran on every probe unless a
+construct is invalid in one.
+
+### P25: types, enumerators, how a use is linked to its enumerator: **PASS (rule below), with the copies listed**
+
+**Type entry** (a_type, `kind tk_integer`; `enum_type` :10074, `has_explicit_enum_base` :10069, `is_scoped_enum` :10078, `originally_unnamed` :10112, `bool_type`
+:10109, `enum_info` union :10147-10162, `base_type` :9570, `enumerator_list_seen`/`_complete` :9509/:9512, `incomplete` :9808,
+`underlying_type_should_use_unsigned` :9525; `tree`: `il.py types`). One entry per enumeration (a C `enum fwd;` before its definition, a C++ opaque
+`enum Op : int;` and `enum class SOp;` before theirs give one entry each: `p25_shapes.c|cpp`):
+
+| source | C23 | C++20 |
+|---|---|---|
+| `enum color {RED, GREEN, BLUE}` | `int_kind unsigned int`, size 4, `constant_list` (RED→GREEN→BLUE via `next`), `enumerator_list_complete` | `int_kind int`, size 4, `underlying_type_should_use_unsigned TRUE` (GNU mode), `constant_list` |
+| `enum neg {M = -1, Z, P}` | `int_kind int`, size 4 | `int_kind int`, size 4, no `underlying_type_should_use_unsigned` |
+| `enum E8 : unsigned char {A8 = 1, B8 = 255}` | **parsed with no diagnostic**: `has_explicit_enum_base`, `base_type unsigned char`, `int_kind unsigned char`, size 1 | the same |
+| `: long` (`BL = 5000000000`), `: unsigned`, `: short` | accepted; `int_kind long` size 8, `unsigned int` 4, `short` 2 | the same |
+| `enum EB : bool {FB, TB}` | accepted; `base_type bool`, `bool_type TRUE`, `int_kind unsigned char`, size 1 (`p25_bool.c`) | accepted; `bool_type TRUE`, `int_kind char`, size 1 |
+| `enum class S {SA, SB}` / `enum class SB2 : short {X = -3, Y}` | n/a | `is_scoped_enum`, `int_kind int` size 4 / `short` size 2 (`has_explicit_enum_base`, `base_type short`); **`assoc_scope`** (a scope of `kind sck_enum` whose `constants` :18473 chain holds the enumerators); no `constant_list` |
+| `enum Empty {};` | n/a (C refuses) | `enumerator_list_complete`, `constant_list NULL`, `int_kind int` |
+| `enum { U0, U1 };` | `originally_unnamed TRUE`, no name | the same |
+| `typedef enum { T0, T1 } tdef;` | a **`tk_typeref`** entry named `tdef` whose `typeref_type` is the unnamed enum (`p25_shapes.c.c23.il:3144`); a variable of type `tdef` has the typeref as `type` | the enum itself takes the name `tdef` (`originally_unnamed TRUE`) |
+| incomplete: `enum inc;` (C), `enum fx : int;` / `enum class SOp;` never defined | `enum inc`: `incomplete TRUE`, size 0, no `enumerator_list_*`; `enum fx : int`: size 4, `has_explicit_enum_base`, `constant_list NULL`, no `enumerator_list_*` | `Op`: the same as `fx`; `SOp`: `assoc_scope NULL`, no flags (`p25_inc.c|cpp`) |
+
+`packed` was never set. Every C++ translation unit also carries the library's `align_val_t` (scoped, `assoc_scope NULL`, `has_explicit_enum_base`, size 8): an encoder
+that walks every enumeration type must skip system types.
+
+Enumerators outside `int`, **no diagnostic in either mode** (`p25_big.c|cpp`, `.err` empty): `enum Big {BIG = 3000000000}` is `int_kind unsigned int` (C: enumerator type
+`unsigned int`; C++: `Big`), `{B2A = 1, B2B = 4294967295u}` `unsigned int`, `{B3 = -3000000000}` `long` size 8, `{B4 = 2147483647, B4N}` (the implicit
+value is 2147483648) `unsigned int`, `{B5 = 4294967296}` `long`/`unsigned long`. So the encoder must reject these itself.
+
+**Type of an enumerator constant** (a_constant `type` :4773, `integer_value` :5041): C, unfixed: **`int`**, a separate type entry (never the plain `int` entry: it has `enum_info.affiliated_type`
+:10161 pointing at the enumeration, `p25_a.c.c23.il` `type@7ba8a7fab0` vs plain int `type@7ba8818e00`; for an enum with an enumerator above `INT_MAX` the affiliated entry is
+`unsigned int`/`long`); C, fixed (`: unsigned char`...): the enumeration type itself (`A8 type=enum E8 value=1U`); C++ (fixed, unfixed, scoped): the enumeration type
+itself (`RED type=color`; `affiliated_type` is NULL in C++, as :10161 says).
+
+**C's compatible type** (`int_kind` of the enumeration, `p25_shapes.c`, `p25_init.c`, `p25_big.c`): no negative enumerator and all fit `unsigned int` → `unsigned int`
+(`color`, `fwd`, `U`, `T`, `Big4`); a negative enumerator → `int` (`neg`, `A` of `p25_init.c` with `NEG = -2`) or `long` when below `INT_MIN`; fixed → the base type. C++ unfixed:
+`int` whenever the values fit `int`, with `underlying_type_should_use_unsigned` TRUE when none is negative (the `int_kind` is still `int`).
+
+**How a use is linked (the encoder's rule): by flag, and by pointer.**
+- The enumerators are `a_constant` entries with **`is_named_constant_definition`** (il_def.h:4931) set; they sit on the enumeration's `constant_list` (C, C++ unscoped) or on
+  its `assoc_scope`'s `constants` (scoped). `il.py check`: in every probe the set of constants with the flag equals the set of list/scope members (`p25_*`: `flag-not-in-list=[]
+  list-not-flag=[]`, 8, 12, 21, 25, 16, 14, 5 enumerators). No folded constant, cast result or copy carries the flag.
+- A reference in code or in a contract is an `enk_constant` expression node whose `constant` **is the list entry** (same pointer): `p25_a.c.c23.il:2550`
+  `enum_info.constant_list: file-scope constant@7ba8a7f600: RED`, `:11808` (the node of `c == RED`) `constant: file-scope constant@7ba8a7f600: RED`, and the entry's own block
+  (`:2448`) has `is_named_constant_definition: TRUE`. Where the front end folds a use into a larger constant, the enumerator is the innermost `enk_constant` of the `expr` chain, still the
+  same pointer: `return RED;` (C) `const int 0 {expr=eok_cast[int](const int 0 ENUM:RED) gen}`; `RED + 1` `const int 1 {expr=add[int](const int 0 {expr=cast[int](const int 0 ENUM:RED) gen}, const int 1)}`;
+  `(int)BLUE` `const int 2 {expr=cast[int](const int 2 ENUM:BLUE)}` (non-gen cast); an enumerator in another's initializer (`REF = ADD + 1`) `const int 2 ENUM:ADD {expr=add...}`
+  (`p26.c`, `p25_init.c`). In contracts the node is the argument of the walker's `const 0 type=int` and in the IL `eok_ne[int](eok_cast[unsigned int](enk_param_ref) gen,
+  eok_cast[unsigned int](const int 0 ENUM:RED) gen)` (`p25_use.c`, `il.py ops`; not folded; positions are the attribute's).
+- **Copies.** EDG makes a *fresh* constant of the enumeration's type (value and name equal, no flag, **no `expr`**) in these places only (found by `il.py fn|dik|cases|vars` over
+  `p25_copy.c|cpp`, `p25_use.cpp`, `p26.cpp`, `p26_sw.c`):
+  1. C++: the initializer of an enum-typed variable or constant from an enumerator of the same enumeration, both unscoped and scoped: a dynamic-init `dik_constant` `color 1` (`color
+     d = GREEN;`), `S 0` (`S s = S::SA`), a global `gk: color 1`, `kc`/`ke: color 2` (`p25_copy.cpp`, `p25_local.cpp`);
+  2. C++: the case value of `case S::SA:` in a switch over a **scoped** enumeration, `S 0` (`p25_use.cpp.c++20.il:21294` `constant@7b8295b550: SA`, a different pointer from the list entry
+     `:4335` `constant@7b82901520`, no flag, no `expr`);
+  3. C: the same shapes for a *fixed-base* enumeration: `enum E8 e = A8;` is `dik_constant enum E8 1U`, `enum EU e = U1;` `enum EU 1U`, and `case U0:` in a switch over an
+     `enum EU` is `enum EU 0U` (`p25_copy.c`, `p26_sw.c`). For an unfixed C enumeration the same initializers keep the chain
+     (`enum color 1U {expr=eok_cast[enum color](const int 1 ENUM:GREEN) gen}`).
+  A copy needs no identification: `expr` is NULL, so the encoder reads the constant as a literal of the enumeration type with EDG's value (it equals the enumerator's value). No copy of a
+  *non*-enumerator value loses its chain: `constexpr color k7 = static_cast<color>(7); color d = k7;` is `dik_constant color 7 {expr=var k7}` and `k7` is `color 7 {expr=eok_cast[color](const
+  int 7)}`; `case ks` (scoped, out of range) `S 77 {expr=var ks}` (`p25_chain.cpp`). So a constant of an enumeration type with neither flag nor `expr` was in every probe an enumerator's copy; the Const range
+  check of an enum literal covers it either way.
+- **Position and name:** an enumerator carries `source_corresp.name` and `decl_position` (the identifier: `RED` `1:13`, `identifier_range` 13-15, `p25_a.c.c23.il:2448-2470`), usable to report at
+  the enumerator's line; `enum_value_range` (a_decl_position_supplement :1975) is the source range of an **explicit** initializer and is absent for an implicit value.
+
+**The enumerator definition constant** (`il.py enumdef`; a_constant `type` :4773, `orig_type` :4777, `expr` :4782; `p25_init.c|cpp`):
+
+| enumerator | C23 | C++20 |
+|---|---|---|
+| `LIT = 5` | `type int`, value 5, **no `expr`**, `enum_value_range` set | `type A`, value 5, no `expr`, range set |
+| `NEG = -2` | `expr` `negate[int](const int 2)` at its own position (L1:25) | the same, `type A` |
+| `ADD = 1 + 1` | `expr` `add[int](const int 1, const int 1)` | the same |
+| `CASTED = (signed char)300` | value 44, `orig_type int`, `expr` `cast[signed char](const int 300)` | value 44, `type A`, `orig_type int`, the same `expr` |
+| `AFTER`, `IMPL` (no initializer) | value previous + 1 (`CASTED` 44 → `AFTER` 45; `REF` 3 → `IMPL` 4; the first is 0), **no `expr`, no `enum_value_range`** | the same |
+| `REF = ADD + 1` | `expr` `add[int](const int 2 ENUM:ADD {expr=add...}, const int 1)` | `add[int](const A 2 ENUM:ADD ..., const int 1)` |
+| `OV = 2147483647 + 1`, `SH = 1 << 40` | accepted, warnings #61, #63; values -2147483648, 0 (folded, wrapped); `expr` `add[int](...)`, `shiftl[int](const int 1, const int 40)`; the implicit `NOINIT` after `SH` is 1 | **error #28** (not a constant expression; note #2707/#63); no IL |
+| `SIZ = sizeof(int)` | `expr` `enk_sizeof[int]`, value 4 | the same |
+| `CA = 300u, CB = CA + 1` | `CB` `expr` `add[unsigned int](const int 300 ENUM:CA, const unsigned int 1U {cast...gen})`: the operand is typed `int` (C) / `C` (C++) and carries **no conversion node** under an `unsigned int` operation | `add[unsigned int](const C 300 ENUM:CA, const unsigned int 1U ...)` |
+| `DB = (1 > 0)`, `A = 'a'` | `expr` `gt[int](...)` / none (`'a'` literal), value 1 / 97 | `gt[bool](...)` / none |
+
+So: an explicit literal (and `'a'`) leaves `expr` NULL, an implicit value leaves both `expr` and `enum_value_range` NULL: **only `enum_value_range` tells an implicit value from an
+explicit literal**, and neither needs an initializer check (an implicit value is previous + 1 by construction; the encoder rejects an enumeration whose values leave `int`). Inside an
+enumerator initializer the final type of an earlier enumerator is shown (`const C 300`) while the operation was typed with the definition-time type ([dcl.enum]/5; `300u` → `unsigned int`):
+an operand type can differ from the operation's with no cast node, so an initializer must be encoded with the operation's types, the enumerator operand as a literal converted by value.
+**In C that typing is wrong** (Opus audit, round 1): C23 6.7.3.3 gives an earlier enumerator type `int` inside the list when its value fits, but EDG's C front end types the reference node the
+C++ way (`CA = 300u, CB = (CA - 301) / 2`: the `CA` node is `unsigned int`, the constant `int`; `enum { U = 2u, V = U > -1 };` folds V to 0 where C gives 1; stock `cpfe --c17|--c23` fails
+`_Static_assert(CB == 0)`, `decl_spec.c:5930` under `gcc_mode`). So in C the encoder rejects an enumerator reference whose node type differs from the constant's type (decision 0018 item 10).
+Also seen: `A = (int)1.5` has `orig_type double` and `expr cast[int](const double ck_float)`; C++ accepts `A = (1, 2)` (`eok_comma`, warning #174), C refuses it (#57); `A = 10 / 0` and `1 << 32` are errors (#39 C,
+#28 C++), see P27.
+
+### P26: conversion nodes EDG inserts around enum operands: **PASS (maps below); C leaves some operands bare**
+
+`color c`, `RED`, unfixed non-negative (`p26.c` lines 8-50, `p26.cpp`; `il.py fn gN`). `cast(T)` is a `compiler_generated` `eok_cast`. Outer `cast[int]` in C++ is the
+bool-to-int conversion of the `return`.
+
+| construct | C23 | C++20 |
+|---|---|---|
+| `c == RED`, `c != 1`, `c < GREEN` | `eq[int](cast[unsigned int](c), const unsigned int 0U {cast[unsigned int](const int 0 ENUM:RED)})`: **both operands to the compatible type** (`unsigned int` for `color` and `EU`, `int` for `neg`, `int` for `E8` by promotion) | `cast[int](eq[bool](cast[int](c), const int 0 {cast[int](const color 0 ENUM:RED)}))`: to `int` |
+| `c == d` (both enums) | `eq[int](cast[unsigned int](c), cast[unsigned int](d))` | `cast[int](eq[bool](cast[int](c), cast[int](d)))` |
+| `c + 1`, `c + RED` | `cast[int](add[unsigned int](cast[unsigned int](c), 1U {...}))`: **unsigned arithmetic** for an unfixed non-negative enum | `add[int](cast[int](c), const int 1)`: **`int`** |
+| `RED + 1` | folded `const int 1 {add[int](const int 0 {cast[int](const int 0 ENUM:RED)}, const int 1)}` | the same with `cast[int](const color 0 ENUM:RED)` |
+| `-c`, `~c` | `cast[int](negate[enum color](var c))`, `cast[int](complement[enum color](var c))`: the **operation is typed with the enum type, the operand has no cast** | `negate[int](cast[int](c))`, `complement[int](cast[int](c))` |
+| `c << 1`, `1 << c` | `cast[int](shiftl[enum color](var c, const int 1))`, `shiftl[int](const int 1, var c)`: left operand and count bare | `shiftl[int](cast[int](c), 1)`, `shiftl[int](1, cast[int](c))` |
+| `c && 1`, `!c` | `land[int](var c, const int 1)`, `not[int](var c)`: **bare** | `land[bool](bool_cast[bool](c) gen, ...)`, `not[bool](bool_cast[bool](c))` |
+| `if (c)`, `while (c)`, `for (; c;)`, `do ... while (c)`, `c ? 1 : 0` | the condition is `var c:enum color`, **bare** (`stmk_if`, `stmk_while`, `stmk_for`, `stmk_end_test_while`, `eok_question` operand 1; `p26.c` g23, `p26_sw.c` wh/fo/dw/cq) | `eok_bool_cast[bool](var c) gen` |
+| `x ? c : RED` | `question[enum color](x, c, const enum color 0U {cast[enum color](const int 0 ENUM:RED) gen})` (type `enum color`) | `question[color](bool_cast(x), c, const color 0 ENUM:RED)` |
+| `x ? RED : GREEN` | `question[int](x, const int 0 ENUM:RED, const int 1 ENUM:GREEN)`: **type `int`**, the enumerators bare | `question[color](..., const color 0 ENUM:RED, const color 1 ENUM:GREEN)`: **type `color`** |
+| `x ? c : 5` | `cast[int](question[unsigned int](x, cast[unsigned int](c), 5U {...}))` | `question[int](bool_cast(x), cast[int](c), const int 5)` |
+| `int i = c` / `unsigned u = c` | `dik_expression` `cast[int](var c) gen` / `cast[unsigned int](var c) gen` (directly, not through the compatible type) | the same |
+| `enum color d = c` | `dik_expression var c` (no cast) | the same |
+| `enum color d = 2;` | `dik_constant enum color 2U {cast[enum color](const int 2) gen}`, warning #188 | **error #144** |
+| `enum color d = (enum color)2;` | `dik_constant enum color 2U {cast[enum color](const int 2)}` (not gen) | `color 2 {cast[color](const int 2)}` |
+| `d = RED` | `assign[enum color](var d, const enum color 0U {cast[enum color](const int 0 ENUM:RED) gen})` | `assign[color](var d, const color 0 ENUM:RED)` (no cast) |
+| `d = 1` | `assign[enum color](var d, const enum color 1U {cast[enum color](const int 1) gen})`, #188 | **error #513** |
+| `ip(c)` (int parameter) | argument `cast[int](var c) gen` | the same |
+| `ep(x)` (int to an enum parameter) | argument `cast[enum color](var x) gen`, #188 | **error #167** |
+| `return c;` in an `int` function | `cast[int](var c) gen` | the same |
+| `return 1;` in an enum function | `const enum color 1U {cast[enum color](const int 1) gen}`, #188 | **error #120** |
+| `return BLUE;` in an enum function | `const enum color 2U {cast[enum color](const int 2 ENUM:BLUE) gen}` | `const color 2 ENUM:BLUE` (no cast) |
+| `bool b = c` | `dik_expression` `bool_cast[bool](var c) gen` | the same |
+| `(enum E8)300` | `const enum E8 44U {cast[enum E8](const int 300)}` (wrapped value 44, **chain kept**, non-gen) | `const E8 44U {cast[E8](const int 300)}` |
+| `(enum color)x`, `static_cast<color>(x)` | `cast[enum color](var x)` (non-gen) | `cast[color](var x)` (non-gen; the two spellings are identical) |
+| `c++`, `c += 1` | `post_incr[enum color](var c)`, `add_assign[enum color](var c, const unsigned int 1U {...})`: operation typed enum, lhs bare | **error #511** |
+| `x += c` | `add_assign[int](var x, cast[unsigned int](var c) gen)` | `add_assign[int](var x, cast[int](var c) gen)` |
+| `c \| GREEN` (C++) | not probed in C | accepted by EDG (`p27_bad10.cpp`: no error; `c \|= RED` is #511) |
+| `enum E8` (`: unsigned char`): `e + 1`, `e == A8` (C++ also `-e`) | `add[int](cast[int](e), 1)`, `eq[int](cast[int](e), const int 1 {cast[int](const enum E8 1U ENUM:A8)})`: promoted to **`int`** | the same; `negate[int](cast[int](e))` |
+| `enum EU` (`: unsigned`): `e + 1`, `e == U1` (C++ also `-e`) | `unsigned int` arithmetic, operands `cast[unsigned int]` | the same; `cast[int](negate[unsigned int](cast[unsigned int](e)))` |
+| `enum neg`: `n < Z`, `n + 1` | `int` | `int` |
+
+**Promotion in C++ (STOP rule 2): not triggered.** The unfixed `color` is promoted to `int` in every C++ context (`c + 1` `add[int]`, `RED + 1`, `c + RED`, `~c` `complement[int]`, `x ? RED : 5` `question[int]`),
+with `underlying_type_should_use_unsigned` TRUE on the type; `E8` to `int`; only `EU` (fixed `unsigned`) and an out-of-int enumeration give `unsigned int`. **C differs for an unfixed non-negative enumeration:** arithmetic on it
+is `unsigned int` (the compatible type), so `c + 1` (and `c - 1`: `RED - 1` would be `UINT_MAX`) differs from C++; with arithmetic on enum operands rejected the comparisons agree (an enum value of the
+range checked by the record lies in `[0, 3]`).
+
+**Scoped enumerations** (C++, `p26.cpp` `s1`-`s20`, `p25_use.cpp`): `s == S::SA` is `cast[int](eq[bool](var s, const S 0 ENUM:SA)) gen` (the outer cast is the return's): **no promotion at all**, both operands `S`;
+`s < S::SB`, `s <= `, `s > `, `s == t`, `s != t` the same; `static_cast<int>(s)` `cast[int](var s)` (non-gen), `static_cast<S>(x)` `cast[S](var x)`, `static_cast<bool>(s)` `cast[int](bool_cast[bool](var s))`;
+`return S::SB` `const S 1 ENUM:SB`; `s = S::SB` `assign[S](var s, const S 1 ENUM:SB)`; `s ? ...` is refused by the language. Contracts: `r == S::SB` `eq[bool](enk_param_ref[S], const S 1 ENUM:SB)` (`p26_contract.cpp`).
+
+**`switch`** (`il.py fn`/`cases`; `p26_sw.c`, `p26.cpp`, `p25_use.*`; the case entry's `case_value` is a_switch_case_entry :16259):
+
+| subject | scrutinee | case value (`case X:`) |
+|---|---|---|
+| C, unfixed `color` | `var e:enum color`, **bare** | `enum color 0U {cast[enum color](const int 0 ENUM:RED) gen}` |
+| C, `neg` | `var e:enum neg`, bare | `enum neg -1 {cast[enum neg](const int -1 ENUM:M {negate...}) gen}` |
+| C, `EU` (`: unsigned`) | `var e:enum EU`, bare | `enum EU 0U`, **a copy (no chain)** |
+| C, `E8` (`: unsigned char`) | `cast[int](var e) gen` | `int 1 {cast[int](const enum E8 1U ENUM:A8) gen}` |
+| C, `int x` with `case RED` | `var x:int` | `int 0 {cast[int](const int 0 ENUM:RED) gen}` |
+| C, `case 1` in a switch over `color` | bare | `enum color 1U {cast[enum color](const int 1) gen}`, warning #188 |
+| C++ `color`, `E8`, `neg` | `cast[int](var e) gen` | `int 0 {cast[int](const color 0 ENUM:RED) gen}` |
+| C++ `EU` | `cast[unsigned int](var e) gen` | `unsigned int 0U {cast[unsigned int](const EU 0U ENUM:U0) gen}` |
+| C++ scoped `S` | `var s:S`, bare | `case S::SA` `S 0`, **a copy**; `case static_cast<S>(1)` `S 1 {cast[S](const int 1)}`; `case ks` (a `constexpr S`) `S 77 {expr=var ks}` |
+
+**Where C leaves an enum operand without a conversion node** (record-amendment item, not a stop): the switch scrutinee of an enumeration whose compatible type is `int` or wider (`color`, `neg`, `EU`; `E8` is promoted);
+every condition (`if`, `while`, `for`, `do`, `?:`, `&&`, `||`, `!`); the operand of unary `-` and `~` and both operands of `<<` (the operation itself is typed with the enum type, its result then cast to `int`); the
+left operand of `++`, `--` and compound assignment; the arms of a `?:` whose arms are both of the enum type (the `?:` is then typed `enum color`). Converted: both operands of `==`, `!=`, `<`..., of `+`, `-`, ..., the
+right operand of compound assignment, arguments, `return`, assignment to an integer.
+
+### P27: diagnostics: **PASS** (`p27.sh`, `p27_*`; plain front end, the front end with verify mode's flags, and `build/cerastes verify`)
+
+Verify mode's EDG options were, when probed, `--diag_suppress=61,62,63,39,179,68,69,546,940,1305,2803`, `--diag_error=1901` (C only) and `--diag_error=161,1675` (`verify_main.cpp:324-332`), and
+`build/cerastes verify` stopped at the declaration (`unsupported_declaration: an enumeration`). *Since M4.2b2 (decision 0018) verify mode also suppresses #188 (below), and enumerations are encoded.*
+- **Casts out of range, no diagnostic in any mode or option set:** `(enum E8)300` (value 44), `(enum color)7`, `(enum color)-1` (C: `4294967295U`; C++: `-1`), `(enum neg)5`, `static_cast<color>(7)`, `static_cast<S>(77)`, `static_cast<S8>(300)`;
+  the chain `{expr=eok_cast[...](const int 300)}` is kept (`p27_cast.c|cpp`, `il.py fn f1..`), so the encoder can check them (the folded value for a fixed type is wrapped).
+- **An enumerator out of `int`**, `enum Big {BIG = 3000000000}` and the other four shapes of P25: no diagnostic (`p25_big.*.err` empty).
+- **Mixed enum/int, C23** (`p27_mixed.c`): **warning #188-D** "enumerated type mixed with another type" (not suppressed by verify mode when probed; suppressed since 0018, every such conversion being checked) at `enum color d = 2;`, `d = 1;`, `ep(x)` (int to an enum
+  parameter), `return 1;`, `return o;` (another enumeration) and `case 1:` / `case O1:` in a switch over `color`; **no diagnostic** for `c == 1`, `c == o` (two enumerations), `c++`, `c += 1`, `x += c`, `c < 1.5`, `ip(c)`.
+- **C++ refuses what C warns about** (`p27_bad1-9.cpp`, plain mode): `color d = 2` #144, `d = 1` #513, `ep(x)` #167, `return 1` #120, `return o` (other enumeration) #120, `c++`, `++c`, `c += 1`, `c |= RED` all #511 ("requires an applicable
+  user-defined operator function"); `c | GREEN` and `c & GREEN` are accepted (`p27_bad10|11.cpp`).
+- **A switch that misses an enumerator and has no default**: no diagnostic in either mode (`m12` in `p27_mixed.c|cpp`).
+- **Enumerator initializers** (`p27_init_summary.txt`): `const int K = 1; enum { A = K };` C: warning #1901 plain, **error #1901 with verify's `--diag_error=1901`** (also `static const`); C++: accepted, `expr` is `var K`. `A = 1.5` and `1.0`: errors in both
+  (#157 C, #2412 C++). `A = (int)1.5`: accepted in both (`expr cast[int](const double ck_float)`, `orig_type double`). `A = (1, 2)`: C error #57; C++ warning #174, `eok_comma`. `A = 2147483648`, `{A = 2147483647, B}`, `1 << 31`: silent. `A = 2147483647 + 1`,
+  `1 << 32`: C warnings #61, #63 (suppressed by verify mode; the values wrap), C++ **error #28**. `A = 10 / 0`: C error #39, C++ error #28.
+- **Incidental, predates this session** (`p27_init14.cpp`, `p27_init16.cpp`, `p27_gen1.cpp`): in C++, an error #28 that carries a *note* that verify mode suppresses (`#39` division by zero, `#63` shift count: `A = 10 / 0`, `A = 1 << 32`, `constexpr int z = 1 << 32;`) makes EDG fail with
+  `internal error #2656: assertion failed: determine_severity_code: bad severity`, and `build/cerastes verify` ends with exit 3 `internal error in the front end (the program was not checked)`. It is a tool failure, never a verdict (`p27_gen2.cpp`, `case 10 / 0`, is an ordinary
+  error #39). Not specific to enumerations.
+
 *2026-10-20: milestone numbers before the M4.1 section follow the renumbering of that date (plan.md): generic templates are M5.*

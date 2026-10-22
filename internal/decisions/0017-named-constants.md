@@ -200,3 +200,5 @@ a cross-mode trap: a `const` variable in a `do … while` condition could be a f
   type (a generated conversion, as for an `unsigned` or `long` scrutinee, or an operation such as a negation): their
   case values move to the prologue and the dispatch compares with EDG's value. Every other existing test's `.vpr` is
   unchanged.
+
+*2026-10-22, amended by 0018 (M4.2b2): item 7 — `names_object` does not look inside an enumerator (an enumerator names no object), so `do … while (A)` with an enumerator `A == 0` runs once in both modes; item 4 — enumerators with a written initializer are named constants of the unit, checked in the same prologue in declaration order.*
