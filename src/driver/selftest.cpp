@@ -203,11 +203,13 @@ void test_report(Checks& c) {
       "15\tassert.failed\toverflow\tt.c\t6\t3\tsigned `int` addition may overflow\n"
       "20\tassert.failed\tpostcondition\tt.c\t12\t3\tthe postcondition may not hold\tt.c:10:this clause may not hold\n"
       "30\tcall.precondition\tprecondition\th.h\t4\t1\tthe precondition of `g` may not hold\th.h:2:the clause\n"
-      "30\tassert.failed\tcheck\tt.c\t3\t1\tcheck may not hold\n";
+      "30\tassert.failed\tcheck\tt.c\t3\t1\tcheck may not hold\n"
+      "41\tassert.failed\tuninitialized\tt.c\t8\t3\t`x` may be read here before it is given a value\n"
+      "42\tinvariant.not.established\tuninitialized\tt.c\t9\t3\t`x` may be read here before it is given a value\n";
   std::string problem;
   std::vector<MapRow> rows = parse_position_map(map, &problem);
-  c.expect(problem.empty() && rows.size() == 6, "a well-formed position map parses");
-  if (rows.size() == 6) {
+  c.expect(problem.empty() && rows.size() == 8, "a well-formed position map parses");
+  if (rows.size() == 8) {
     c.expect(rows[3].has_note && rows[3].note_file == "t.c" && rows[3].note_line == 10 && rows[3].note_text == "this clause may not hold",
              "a note is read");
     c.eq(rows[4].file, std::string("h.h"), "a header's file");
@@ -236,6 +238,19 @@ void test_report(Checks& c) {
       c.eq(render_error(m.errors[1]), std::string("t.c:6: error: overflow: signed `int` addition may overflow\n"), "an overflow error");
       c.eq(render_error(m.errors[2]), std::string("t.c:12: error: postcondition: the postcondition may not hold\nt.c:10: note: this clause may not hold\n"),
            "a postcondition error and its note");
+    }
+  }
+  {
+    // Decision 0019 item 8: a failed read of a local without a value is an assertion at the read, or a loop-invariant check.
+    SiliconVerdict v;
+    v.errors = {err("assert.failed", 41), err("invariant.not.established", 42)};
+    MappedVerdict m = map_errors(v, rows, "program.vpr");
+    c.expect(m.failures.empty() && m.errors.size() == 2, "the two shapes of an uninitialized read map");
+    if (m.errors.size() == 2) {
+      c.eq(render_error(m.errors[0]), std::string("t.c:8: error: uninitialized: `x` may be read here before it is given a value\n"),
+           "an uninitialized read at its line");
+      c.eq(render_error(m.errors[1]), std::string("t.c:9: error: uninitialized: `x` may be read here before it is given a value\n"),
+           "an uninitialized read in a loop invariant");
     }
   }
   {

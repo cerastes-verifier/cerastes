@@ -350,6 +350,7 @@ and the harness self-test compares this table with the decision record.
 | `missing-return` | a non-`void` function may reach its end without `return` | the closing brace |
 | `termination` | a termination measure (`decreases`) may be negative or may not decrease (decision 0013) | the loop's `decreases` clause, or the recursive call |
 | `noreturn` | a function declared `[[noreturn]]` or `_Noreturn` may return (decision 0015) | the reachable `return`, or the closing brace |
+| `uninitialized` | a local declared without an initializer may be read before it is given a value (decision 0019) | the read |
 
 ## Every back-end diagnostic has a test
 
@@ -492,13 +493,13 @@ directories (stock cpfe does not define `__CERASTES__`, so the annotations
 would not even be parsed, and the test would escape both the twin rule and
 native-ok).
 
-**An accepted exception: code only the verifier sees.** A positive test in `NATIVE_POLICY_DIRS` may put under
-`#ifdef __CERASTES__` (which only the cerastes front end defines) code that the ordinary compilers refuse as a
-*warning* under `-Werror` while it is valid C and C++, for example `case 4:` over an enumeration, which `-Wswitch`
-refuses. Nothing else may be hidden this way: not code that fails to compile, and not a construct to dodge a check.
-The test must say so in a header comment, with the reason and what the compilers see instead.
-`tests/scalar/enum_case_promoted.c` is the example. This is a convention reviewed by hand, not a harness rule (the
-owner decides on a rule, handoff question 19).
+**No code only the verifier sees (owner, 2026-10-22; decision 0019 item 11).** A native-ok test may not hide code
+from the ordinary compilers: no `#ifdef __CERASTES__` around code of the program itself (the macros of `<cerastes.h>`
+are the one use of `__CERASTES__`, and they expand to annotations only). M4.2b2 had accepted one exception, a
+never-taken `case 4:` over an enumeration under `#ifdef __CERASTES__` that `-Wswitch` refuses; the verifier now rejects
+such a switch itself (`cerastes-case_not_in_enumeration`, `cerastes-enumerator_not_handled`), so the program is not
+valid for cerastes and must be written without it. A shape the compilers refuse is a negative test (a `rejected` or an
+`error` one), which is exempt from native-ok. This is a convention reviewed by hand, not a harness rule.
 
 ## Time limits
 

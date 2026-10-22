@@ -241,6 +241,14 @@ class Encoder {
     report_at(d, dp, {what});
   }
 
+  // As reject(), for a diagnostic whose message takes several arguments.
+  void reject_args(Diag d, const a_source_position& p, const std::vector<std::string>& args) {
+    if (cx_.suppress) return;
+    DiagPos dp = position_for(p);
+    if (!rejected_.insert({static_cast<int>(d), dp.file, dp.line}).second) return;
+    report_at(d, dp, args);
+  }
+
   // As reject(), at a position already resolved (a line found in the source text).
   void reject_at(Diag d, const DiagPos& dp, const std::string& what) {
     if (cx_.suppress) return;
@@ -1147,6 +1155,14 @@ class Encoder {
       allow_enum_conversion(ops[0]);
       allow_enum_conversion(ops[1]);
     }
+    if (op != vir::BinaryOp::Eq && op != vir::BinaryOp::Ne) {
+      // Decision 0019 item 10: an order of two values of one enumeration (or of its enumerators).
+      const Expr* ea = nullptr;
+      const Expr* ec = nullptr;
+      const int r = ordered_enumeration_operands(e, ops, &ea, &ec);
+      if (r < 0) return nullptr;
+      if (r > 0) return logical_result(e, b_.binary(op, ea, ec, loc_of(e->position)));
+    }
     const Expr* a = expr(ops[0]);
     const Expr* c = expr(ops[1]);
     if (a == nullptr || c == nullptr) return nullptr;
@@ -1564,8 +1580,11 @@ class Encoder {
         cx_.rejected_vars.insert(v);
         continue;
       }
-      if (v->init_kind == initk_none) {
-        reject(Diag::unsupported_declaration, at, "a local variable without an initializer");
+      // Decision 0019 item 1: a non-const local of an accepted scalar type without an initializer is ordinary; reading it
+      // before an assignment is an `uninitialized` verification error (Silicon decides it on each path).  A const one can
+      // never be given a value (C++ error #257): still rejected.
+      if (v->init_kind == initk_none && is_const_object(v)) {
+        reject(Diag::unsupported_declaration, at, "a const local variable without an initializer");
         cx_.rejected_vars.insert(v);
         continue;
       }
@@ -1573,7 +1592,10 @@ class Encoder {
       vir::Var* var = cx_.fn->new_local(nm ? nm : "", vt.t, loc_of(at));
       var->c_type_name = vt.name;
       cx_.vars[v] = var;
-      if (v->init_kind == initk_static) {
+      if (v->init_kind == initk_none) {
+        // initk_none and no `stmk_init` statement (P28): the declaration alone, with no initializer expression.
+        out.push_back(b_.decl(var, nullptr, loc_of(at)));
+      } else if (v->init_kind == initk_static) {
         // A constant initializer with no `stmk_init` statement.
         if (is_const_object(v) && v->initializer.constant != nullptr)
           cx_.local_const_inits[v] = Ctx::ConstInit{v->initializer.constant, at};
@@ -2028,17 +2050,41 @@ class Encoder {
     }
   }
 
-  // The variable a declaration statement declares (looking through generated blocks), or null.
-  static a_variable_ptr declared_variable(a_statement_ptr s) {
+  // The first variable declared WITH an initializer by a declaration statement (every entity is looked at: `int x, y = 1;` is
+  // one `stmk_decl` whose later initializers come as `stmk_init`s, P28), or null.  A declaration all of whose entities are
+  // variables without an initializer may be jumped over and may stand before the first case label (decision 0019 item 6).
+  static a_variable_ptr initialized_variable(a_statement_ptr s) {
     if (s->kind == stmk_decl) {
       for (an_il_entity_list_entry_ptr en = s->variant.decl.entities; en != nullptr; en = en->next)
-        if (en->entity.kind == iek_variable) return reinterpret_cast<a_variable_ptr>(en->entity.ptr);
+        if (en->entity.kind == iek_variable) {
+          a_variable_ptr v = reinterpret_cast<a_variable_ptr>(en->entity.ptr);
+          if (v->init_kind != initk_none) return v;
+        }
       return nullptr;
     }
     if (s->kind == stmk_block && s->compiler_generated)
       for (a_statement_ptr c = s->variant.block.statements; c != nullptr; c = c->next)
-        if (a_variable_ptr v = declared_variable(c)) return v;
+        if (a_variable_ptr v = initialized_variable(c)) return v;
     return nullptr;
+  }
+
+  // A declaration of nothing but variables without an initializer (also inside a block the compiler made).
+  static bool is_uninitialized_declaration(a_statement_ptr s) {
+    if (s->kind == stmk_decl) {
+      if (s->variant.decl.entities == nullptr) return false;
+      for (an_il_entity_list_entry_ptr en = s->variant.decl.entities; en != nullptr; en = en->next) {
+        if (en->entity.kind != iek_variable) return false;
+        if (reinterpret_cast<a_variable_ptr>(en->entity.ptr)->init_kind != initk_none) return false;
+      }
+      return true;
+    }
+    if (s->kind == stmk_block && s->compiler_generated && s->attributes == nullptr) {
+      if (s->variant.block.statements == nullptr) return false;
+      for (a_statement_ptr c = s->variant.block.statements; c != nullptr; c = c->next)
+        if (!is_uninitialized_declaration(c)) return false;
+      return true;
+    }
+    return false;
   }
 
   // The name of a variable that a VIR expression reads, or null.
@@ -2136,6 +2182,30 @@ class Encoder {
       promoted = vir::Type::integer(prog_.int_type(sgn ? "int" : "unsigned int", cb, sgn));
       scrut = b_.convert(promoted, scrut, false, loc_of(s->expr->position));
     }
+    // Decision 0019 item 11: a switch over an enumeration (before promotion, in both modes) is held to the two rules of
+    // -Wswitch: every case has the value of an enumerator, and without a default every enumerator's value has a case.
+    a_type_ptr sw_enum = ok ? switch_enumeration(s->expr) : nullptr;
+    std::string sw_enum_name;
+    std::vector<std::pair<std::string, std::string>> sw_enumerators;  // (name, value) in declaration order
+    std::set<std::string> sw_enum_values, sw_case_values;
+    bool sw_has_default = false;
+    bool sw_rule1_failed = false;
+    if (sw_enum != nullptr) {
+      if (!enum_info(sw_enum).ok) {
+        sw_enum = nullptr;  // rejected at its declaration or its use
+      } else {
+        sw_enum_name = render_type(sw_enum);
+        for (a_constant_ptr k : enumerators_of(sw_enum)) {
+          if (k->kind != ck_integer) {
+            sw_enum = nullptr;  // enum_info refuses this: fail closed
+            break;
+          }
+          const std::string val = decimal_value(k);
+          sw_enumerators.emplace_back(k->source_corresp.name != nullptr ? k->source_corresp.name : "?", val);
+          sw_enum_values.insert(val);
+        }
+      }
+    }
     const int id = b_.jump_id();
     cx_.targets.push_back(make_target(s, true, id, nullptr));
     Out inner;
@@ -2159,7 +2229,7 @@ class Encoder {
           continue;
         }
         if (skipped != nullptr) {
-          a_variable_ptr v = declared_variable(skipped);
+          a_variable_ptr v = initialized_variable(skipped);
           const DiagPos dp = diag_position(skipped->position);
           reject(Diag::unsupported_statement, c->position,
                  "a case label that jumps over the declaration of \"" +
@@ -2170,8 +2240,24 @@ class Encoder {
         }
         seen_label = true;
         if (en->case_value == nullptr) {
+          sw_has_default = true;
           inner.push_back(b_.case_label(nullptr, loc_of(c->position)));
           continue;
+        }
+        if (sw_enum != nullptr) {
+          // Rule 1: the front end's value of the case is the value of an enumerator (`case 4:` over RED, GREEN, BLUE is not).
+          if (en->case_value->kind != ck_integer) {
+            reject(Diag::unsupported_statement, c->position, "a case value that is not an integer");
+            ok = false;
+            continue;
+          }
+          const std::string front_value = decimal_value(en->case_value);
+          if (sw_enum_values.count(front_value) == 0) {
+            reject_args(Diag::case_not_in_enumeration, c->position, {front_value, sw_enum_name});
+            sw_rule1_failed = true;
+            continue;
+          }
+          sw_case_values.insert(front_value);
         }
         // The value is encoded by its original expression, like every folded constant (0010 item 12): `case 1 << 40` is a
         // shift error at the label, not the 0 that the front end folded it to.
@@ -2220,15 +2306,27 @@ class Encoder {
         inner.push_back(b_.case_label(v, maybe_perturb(v->type, constant_text(en->case_value, v->type)), loc_of(c->position)));
         continue;
       }
-      if (!seen_label && !(c->kind == stmk_empty && c->attributes == nullptr)) {
+      // Before the first label nothing runs, but a declaration without an initializer puts its variable in scope in every case
+      // (decision 0019 item 6, P28); any initialized declarator there stays rejected.
+      if (!seen_label && !(c->kind == stmk_empty && c->attributes == nullptr) && !is_uninitialized_declaration(c)) {
         reject(Diag::unsupported_statement, c->position, "a statement before the first case label of a switch (it is unreachable)");
         ok = false;
         continue;
       }
-      if (seen_label && skipped == nullptr && declared_variable(c) != nullptr) skipped = c;
+      if (seen_label && skipped == nullptr && initialized_variable(c) != nullptr) skipped = c;
       statement(c, inner);
     }
     cx_.targets.pop_back();
+    // Rule 2, judged only when every case could be read (the first enumerator in declaration order with no case).
+    if (sw_enum != nullptr && ok && !sw_has_default) {
+      for (const auto& en : sw_enumerators)
+        if (sw_case_values.count(en.second) == 0) {
+          reject_args(Diag::enumerator_not_handled, s->position, {en.first, sw_enum_name});
+          sw_rule1_failed = true;
+          break;
+        }
+    }
+    if (sw_rule1_failed) ok = false;
     if (ok) out.push_back(b_.switch_stmt(scrut, block_of(std::move(inner), body->position), id, loc_of(s->position)));
   }
 
@@ -2459,6 +2557,173 @@ class Encoder {
 
   void declaration_level_checks(const IlEntities& ents);
   const EnumInfo& enum_info(a_type_ptr t);
+
+  // ---- enumeration operands and switches (decision 0019 items 10-11) ----
+  // The enumeration type entry of a type: the enumeration itself or, for the `int` of a C enumerator, the type it is affiliated
+  // with (il_def.h:10159-10166); null when the type is not an enumeration.
+  static a_type_ptr enumeration_entry(a_type_ptr t) {
+    if (t == nullptr) return nullptr;
+    a_type_ptr ct = skip_typerefs(t);
+    if (ct == nullptr || ct->kind != tk_integer) return nullptr;
+    a_type_ptr et = ct->variant.integer.enum_type ? ct : ct->variant.integer.enum_info.affiliated_type;
+    if (et != nullptr) et = skip_typerefs(et);
+    return (et != nullptr && et->kind == tk_integer && et->variant.integer.enum_type) ? et : nullptr;
+  }
+
+  // An operand that is a value of an enumeration through nothing but the front end's own implicit conversions (generated casts
+  // and the original expression of a folded constant that is one): the node left after them or the enumerator, the enumeration
+  // and the type of every node passed.  False when it is anything else (fail closed).
+  struct EnumOperand {
+    an_expr_node_ptr inner = nullptr;     // the value (null when an enumerator)
+    a_constant_ptr enumerator = nullptr;  // the enumerator (null otherwise)
+    a_type_ptr entry = nullptr;           // its enumeration
+    std::vector<a_type_ptr> via;          // the types of the implicit conversions passed, outermost first
+  };
+  static bool enumeration_operand(an_expr_node_ptr n, EnumOperand* out) {
+    std::vector<a_type_ptr> via;
+    for (int guard = 0; n != nullptr && guard < 16; ++guard) {
+      if (n->kind == enk_constant) {
+        a_constant_ptr c = n->variant.constant.ptr;
+        if (is_enumerator(c)) {
+          via.push_back(n->type);
+          out->enumerator = c;
+          out->entry = enumeration_entry(c->type);
+          out->via = via;
+          return out->entry != nullptr;
+        }
+        // A named constant of the enumeration type (`const enum color k = RED;` folded to a constant of that type) is a value of
+        // the enumeration; it is encoded like any constant (its initializer is checked in the prologue, decision 0017).
+        if (n->type != nullptr) {
+          a_type_ptr nt = skip_typerefs(n->type);
+          if (nt != nullptr && nt->kind == tk_integer && nt->variant.integer.enum_type) break;
+        }
+        // A folded constant (C: `const unsigned 1U {expr = cast(GREEN)}`): only when its original is itself an implicit
+        // conversion or a constant; a variable's value or any computation is not an enumerator.
+        if (c != nullptr && c->expr != nullptr && !c->local_expr_ref) {
+          an_expr_node_ptr o = expr_node_from_constant(c);
+          if (o != nullptr && o != n &&
+              (o->kind == enk_constant ||
+               (o->kind == enk_operation && o->variant.operation.kind == eok_cast && o->compiler_generated))) {
+            via.push_back(n->type);
+            n = o;
+            continue;
+          }
+        }
+        return false;
+      }
+      if (n->kind == enk_operation && n->variant.operation.kind == eok_cast && n->compiler_generated) {
+        an_expr_node_ptr o = n->variant.operation.operands;
+        if (o == nullptr || o->next != nullptr) return false;
+        via.push_back(n->type);
+        n = o;
+        continue;
+      }
+      break;
+    }
+    if (n == nullptr) return false;
+    a_type_ptr t = n->type != nullptr ? skip_typerefs(n->type) : nullptr;
+    if (t == nullptr || t->kind != tk_integer || !t->variant.integer.enum_type) return false;
+    out->inner = n;
+    out->entry = t;
+    out->via = via;
+    return true;
+  }
+
+  // The literal of an enumerator in its enumeration's type.
+  const Expr* enumerator_literal(a_constant_ptr c, a_type_ptr entry, const a_source_position& pos) {
+    if (c->kind != ck_integer || c->source_corresp.decl_position.seq == 0 || !in_verified_file(c->source_corresp.decl_position)) {
+      reject(Diag::unsupported_expression, pos,
+             "an enumerator of an enumeration declared in a system file (system files are used only through contracts, decision 0018)");
+      return nullptr;
+    }
+    const EnumInfo& ei = enum_info(entry);
+    if (!ei.ok) {
+      if (!ei.silent) reject(Diag::unsupported_type, pos, ei.name);
+      return nullptr;
+    }
+    return value_literal(ei.type, constant_text(c, ei.type), pos);
+  }
+
+  // `a < b`, `a <= b`, ...: 1 when the operands are values of one enumeration, or one such value and an enumerator of it (`*a`
+  // and `*c` are then both values of the enumeration, and are compared as such: every value lies in the value range, which lies
+  // in the type both operands are converted to, so the conversions keep each value and their order, 0019 item 10); 0 when that
+  // is not the case (the ordinary path decides: it accepts what 0018 accepted and rejects the rest); -1 when it is, but cannot
+  // be encoded.
+  int ordered_enumeration_operands(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops, const Expr** a, const Expr** c) {
+    EnumOperand lo_, ro_;
+    if (!enumeration_operand(ops[0], &lo_) || !enumeration_operand(ops[1], &ro_)) return 0;
+    if (lo_.entry != ro_.entry) return 0;
+    // An order of two enumerators is what 0018 accepted as two literals: it keeps its path (and its meaning).
+    if (lo_.enumerator != nullptr && ro_.enumerator != nullptr) return 0;
+    const EnumInfo& ei = enum_info(lo_.entry);
+    if (!ei.ok) {
+      if (!ei.silent) reject(Diag::unsupported_type, e->position, ei.name);
+      return -1;
+    }
+    // Both operands are converted to one type that holds every value of the enumeration (fail closed on anything else).
+    VType ta = vtype(ops[0]->type);
+    VType tb = vtype(ops[1]->type);
+    if (!ta.ok || !tb.ok || ta.t != tb.t || !ta.t.is_int()) return 0;
+    const vir::dec::Range value_range = vir::dec::range_of(*ei.type.int_type);
+    for (const EnumOperand* o : {&lo_, &ro_})
+      for (a_type_ptr via : o->via) {
+        VType tv = vtype(via);
+        if (!tv.ok || !tv.t.is_int() || !vir::dec::contains(vir::dec::range_of(*tv.t.int_type), value_range)) return 0;
+      }
+    if (!vir::dec::contains(vir::dec::range_of(*ta.t.int_type), value_range)) return 0;
+    const Expr* x[2] = {nullptr, nullptr};
+    const EnumOperand* o[2] = {&lo_, &ro_};
+    for (int i = 0; i < 2; ++i) {
+      if (o[i]->enumerator != nullptr) {
+        x[i] = enumerator_literal(o[i]->enumerator, o[i]->entry, ops[i]->position);
+      } else {
+        x[i] = expr(o[i]->inner);
+        if (x[i] != nullptr && x[i]->type != ei.type) {
+          reject(Diag::unsupported_expression, e->position,
+                 "a comparison of order whose operand has another type than the enumeration (decision 0019 item 10)");
+          x[i] = nullptr;
+        }
+      }
+      if (x[i] == nullptr) return -1;
+    }
+    *a = x[0];
+    *c = x[1];
+    return 1;
+  }
+
+  // The enumeration of the controlling expression of a switch (decision 0019 item 11), or null: a value of an enumeration (a
+  // variable, parameter, call, cast or named constant), an enumerator (an `int` constant in C), or a `?:` whose arms are values
+  // of one enumeration, each through the front end's own implicit conversions only.  `switch ((int)c)` is not one.
+  static a_type_ptr switch_enumeration(an_expr_node_ptr n, int depth = 0) {
+    if (n == nullptr || depth > 4) return nullptr;
+    // Implicit conversions around a `?:` (C promotes its arms and C++ converts the whole): looked through first.
+    an_expr_node_ptr m = n;
+    for (int guard = 0; m != nullptr && guard < 16; ++guard) {
+      if (m->kind == enk_operation && m->variant.operation.kind == eok_cast && m->compiler_generated &&
+          m->variant.operation.operands != nullptr && m->variant.operation.operands->next == nullptr) {
+        m = m->variant.operation.operands;
+      } else if (m->kind == enk_constant && m->variant.constant.ptr != nullptr && !is_enumerator(m->variant.constant.ptr) &&
+                 m->variant.constant.ptr->expr != nullptr && !m->variant.constant.ptr->local_expr_ref) {
+        an_expr_node_ptr o = expr_node_from_constant(m->variant.constant.ptr);
+        if (o == nullptr || o == m) break;
+        m = o;
+      } else {
+        break;
+      }
+    }
+    if (m != nullptr && m->kind == enk_operation && m->variant.operation.kind == eok_question) {
+      an_expr_node_ptr cnd = m->variant.operation.operands;
+      if (cnd == nullptr || cnd->next == nullptr || cnd->next->next == nullptr) return nullptr;
+      a_type_ptr x = switch_enumeration(cnd->next, depth + 1);
+      a_type_ptr y = switch_enumeration(cnd->next->next, depth + 1);
+      return (x != nullptr && x == y) ? x : nullptr;
+    }
+    EnumOperand eo;
+    return enumeration_operand(n, &eo) ? eo.entry : nullptr;
+  }
+
+  // The decimal value of an integer constant.
+  static std::string decimal_value(a_constant_ptr c) { return std::string(decimal_str_for_integer_constant(c).as_temp_characters()); }
 
   // ---- enumerations (decision 0018) ----
   // An enumerator: the constant that defines it (il_def.h:4930, is_named_constant_definition).  Its uses are this constant

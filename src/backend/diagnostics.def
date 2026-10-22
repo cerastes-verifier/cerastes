@@ -118,3 +118,8 @@ CERASTES_DIAG(missing_decreases, error,
 CERASTES_DIAG(ensures_on_noreturn, error,
               "\"cerastes::ensures\" on a function declared not to return: it never returns, so the postcondition "
               "would never be checked (decision 0015)")
+// A switch over an enumeration is held to the two rules of -Wswitch (decision 0019 item 11).
+CERASTES_DIAG(case_not_in_enumeration, error,
+              "case value %s is not the value of an enumerator of \"%s\"")
+CERASTES_DIAG(enumerator_not_handled, error,
+              "enumerator \"%s\" of \"%s\" is not handled in this switch, which has no default label")

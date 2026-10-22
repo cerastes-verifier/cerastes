@@ -45,7 +45,8 @@ Front-end agnostic. The encoder builds a `Program` with a `Builder`; `check_prog
   `Cond(c, a, b)`, `Convert(to, e, explicit)` (Int to Int), `ToBool(e)` (`e != 0`), `BoolToInt(to, e)`,
   `Call(callee, args)`, `ReportAt(e, loc)` (obligations inside `e` are reported at `loc`, with a note at their
   own position: the obligations of a default argument are reported at the call).
-- `Stmt`: `Decl(var, init)`, `Assign(var, e)`, `ExprStmt(e)` (a call, a discarded value; only its obligations
+- `Stmt`: `Decl(var, init)` (since M4.2c, decision 0019, `init` may be null: a local declared without an
+  initializer), `Assign(var, e)`, `ExprStmt(e)` (a call, a discarded value; only its obligations
   and effects count), `If(c, then, else)`, `While(cond, invariants[], measure[], body, step?, form, jump_id)`,
   `Return(e?)`, `Check(e)`, `Block(stmts)`, and since M4.1 (decision 0014) `Switch(scrutinee, body Block, jump_id)`,
   `Case(value | default)` (a marker directly in a switch body), `Break(id)`, `Continue(id)`. A loop's `form` is
@@ -55,7 +56,8 @@ Front-end agnostic. The encoder builds a `Program` with a `Builder`; `check_prog
   `Continue` the innermost enclosing loop, so every jump is forward and none enters a loop. Since M4.2a (decision
   0015) `Goto(label id)` and `Label(id, name)`: `vir::goto_problems` (used by `check_program` and by the encoder for
   its diagnostics) accepts a `Goto` only if its `Label` is a direct statement of a `Block` enclosing the `Goto`, after
-  the `Goto`'s ancestor there, with no `Decl` of that `Block` between them ("outward and forward"); so user jumps are
+  the `Goto`'s ancestor there, with no `Decl` with an initializer of that `Block` between them ("outward and
+  forward"; a `Decl` without one may be jumped past since M4.2c); so user jumps are
   forward too and never enter a block or a loop. `Check(e, from_assert)`: an `assert` from `<assert.h>` is a `Check`
   whose `e` is a code expression (calls allowed, as in an `if` condition). `Function::noreturn` marks a function
   declared not to return. There is no statement for falling off the end: lowering appends the epilogue of the function
@@ -97,8 +99,8 @@ Front-end agnostic. The encoder builds a `Program` with a `Builder`; `check_prog
   has exactly the constant's type; `value` is a literal of that type; a constant without `init` has value `0`; a
   function without a body has no local constants;
 - **control flow** (0014): jump ids are unique; a `Break`/`Continue` names its innermost target (anything else is an
-  internal inconsistency); a `Case` stands directly in its switch's body, which starts with a `Case`, has no `Decl`
-  before a later `Case` and at most one default; a case value is a call-free, local-free Int expression of exactly
+  internal inconsistency); a `Case` stands directly in its switch's body, which starts with a `Case` (or with `Decl`s
+  without an initializer, M4.2c), has no `Decl` with an initializer before a later `Case` and at most one default; a case value is a call-free, local-free Int expression of exactly
   the scrutinee's type; every non-`default` `Case` has `folded`, a literal in the scrutinee type's range, and the
   `folded` values are distinct; the scrutinee is Int and may contain calls (evaluated once, as a
   `Decl` initializer); `While`/`DoWhile` need a measure, a `DoOnce` none; a `DoOnce`'s condition is rejected if it reads
@@ -181,6 +183,18 @@ finds a call, a `Formal`, `Old`, `Result` or `Local`, that is an internal loweri
 dropped call or an out-of-range index. The obligations and guards are closed formulas (no variable), so Silicon, which assumes a failed assert's condition, stops the path at the
 first failure and reports nothing after it; a function whose switches have only literal case values, and a program without
 named constants, lower exactly as before.
+
+**Locals without an initializer** (M4.2c, decision 0019 items 4–5). A function whose body has a `Decl` without an
+initializer gets, for each such local `v_x__N`, a ghost `Bool` local `d_v_x__N` (its flag) and, per loop that assigns
+it and does not declare it, a snapshot `ds_v_x__N__K` (`K` counts the function's loops that are not `DoOnce`). The flag
+is reset (`d := false; v := 0`, `false` for `bool`, an enumeration's low end only if 0 were outside its range) at the
+`Decl`, at the entry of the `Block` that directly holds the `Decl`, and, for a `Decl` directly in a switch body, after
+the scrutinee and before the dispatch. Every `Assign` of a flagged local (and a `Decl` with an initializer) sets
+`d := true` after the value. Every `Local` read of a flagged local is an obligation `d` (category `uninitialized`,
+"`x` may be read here before it is given a value") at the read, under the current guard, like any other obligation.
+A loop that assigns a flagged local declared outside it assigns the snapshot before the loop (after a `for` init) and
+carries `invariant ds ==> d` (`internal`), after the automatic range invariants and before the user's clauses. A
+function without such a local lowers exactly as before.
 
 **Returns.** `return e` assigns `res`, asserts each `ensures` clause (`postcondition`, at the `return`, note at
 the clause), and jumps to `l_end`. The end of the body appends `assert false` (`missing-return`) for a
@@ -327,8 +341,9 @@ variable that is not a named constant (below); a weak function (`is_weak`/`is_we
 `asm`; a template; a `constexpr` or `consteval`
 function; a variadic function; a function without a prototype; a `static`, unnamed-namespace or `inline` function
 that is declared (with a contract, say) and not defined in the file (no other unit can define it, so its contract
-would be trusted for nothing); locals that are `static`, `extern` or `thread_local`, arrays and VLAs, locals without
-an initializer, a local used in its own initializer. **A body written in a verified file that this encoder does not
+would be trusted for nothing); locals that are `static`, `extern` or `thread_local`, arrays and VLAs, a `const` local
+without an initializer, a local used in its own initializer. Since M4.2c a local without an initializer
+(`initk_none`, no `stmk_init`) is a `Decl` without one (decision 0019). **A body written in a verified file that this encoder does not
 encode is rejected, never skipped** (M3 pre-commit audit): the body of a lambda, of a compiler-generated function,
 of an explicit specialization or other body for a template declared elsewhere, or of an out-of-line member of a class
 declared elsewhere (`template <> int std::gcd<int, int>(...) { ... }`, `std::exception::what()`); a template or a

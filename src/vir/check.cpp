@@ -289,11 +289,13 @@ class Checker {
     if (!s.loc.known()) err(s.loc, "statement without a source position");
     switch (s.kind) {
       case Stmt::Kind::Decl: {
-        if (s.var == nullptr || s.expr == nullptr) { err(s.loc, "a declaration without a variable or an initializer"); return; }
-        CallState st;
-        expr(*s.expr, Ctx::Body, false, st, false);
-        if (s.var->type != s.expr->type)
-          err(s.expr->loc, "the initializer of '" + s.var->name + "' has type " + s.expr->type.str() + ", not " + s.var->type.str());
+        if (s.var == nullptr) { err(s.loc, "a declaration without a variable"); return; }
+        if (s.expr != nullptr) {  // no initializer: declared only (decision 0019)
+          CallState st;
+          expr(*s.expr, Ctx::Body, false, st, false);
+          if (s.var->type != s.expr->type)
+            err(s.expr->loc, "the initializer of '" + s.var->name + "' has type " + s.expr->type.str() + ", not " + s.var->type.str());
+        }
         declare(*s.var, s.loc);  // declared after its initializer: `int x = x;` reads an undeclared x
         break;
       }
@@ -373,10 +375,11 @@ class Checker {
         std::set<std::string> values;
         int defaults = 0;
         bool declaration_seen = false;
-        bool first = true;
+        bool seen_case = false;  // a case label has come
         for (const Stmt* c : s.body->stmts) {
           if (c == nullptr) { err(s.body->loc, "a null statement in a block"); continue; }
           if (c->kind == Stmt::Kind::Case) {
+            seen_case = true;
             if (!c->loc.known()) err(c->loc, "statement without a source position");
             if (declaration_seen) err(c->loc, "a declaration in the body of a switch that this case label jumps over");
             if (c->expr == nullptr) {
@@ -396,11 +399,12 @@ class Checker {
               else if (!values.insert(c->folded).second) err(c->loc, "the case value " + c->folded + " appears twice in one switch");
             }
           } else {
-            if (first) err(c->loc, "a statement before the first case label of a switch (it is unreachable)");
-            if (c->kind == Stmt::Kind::Decl) declaration_seen = true;
+            // A declaration without an initializer is not executed, but its variable is in scope in the cases (decision 0019 item 6).
+            if (!seen_case && !(c->kind == Stmt::Kind::Decl && c->expr == nullptr))
+              err(c->loc, "a statement before the first case label of a switch (it is unreachable)");
+            if (c->kind == Stmt::Kind::Decl && c->expr != nullptr) declaration_seen = true;
             child(*c);
           }
-          first = false;
         }
         scopes_.pop_back();
         targets_.pop_back();
@@ -742,7 +746,7 @@ std::vector<GotoProblem> goto_problems(const Function& f) {
         const Stmt* skipped = nullptr;
         for (size_t k = pos.index + 1; k < target->index && skipped == nullptr; ++k) {
           const Stmt* c = pos.block->stmts[k];
-          if (c != nullptr && c->kind == Stmt::Kind::Decl) skipped = c;
+          if (c != nullptr && c->kind == Stmt::Kind::Decl && c->expr != nullptr) skipped = c;
         }
         if (skipped != nullptr) {
           p.kind = GotoProblem::Kind::skips_declaration;

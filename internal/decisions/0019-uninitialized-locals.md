@@ -49,7 +49,9 @@ object would be indeterminate at the target. With this record that object is ord
    - **C++ value-initialization** (`int x{};`, `int x = {};`, `bool b{};`) is already an initializer: `initk_dynamic`
      with a constant 0, accepted since M3 (P28). `int x = int();` stays rejected (`enk_temp_init`).
    - **A `const` local without an initializer stays rejected** (`unsupported_declaration`). It can never be given a
-     value, C++ refuses it (error #257), and the C front end warns (#257-D, P28).
+     value, C++ refuses it (error #257), and the C front end warns (#257-D, P28). Verify mode suppresses that C
+     warning (#257, C only; there is no #257 at file scope in C, P28), replaced by this rejection (amends 0011
+     item 7).
 2. **Meaning.**
    - **Indeterminate.** Such a local holds an indeterminate value from the start of its block until it is assigned, and
      again each time its declaration is reached (C23 6.2.4p6; in C++ each execution of the declaration makes a new
@@ -66,7 +68,9 @@ object would be indeterminate at the target. With this record that object is ord
    This is stricter than the standards in three places, stated on the Verifying a program page:
    - no exception is made for C++'s `unsigned char` and `std::byte` copies;
    - in C++ a discarded-value expression `x;` or `(void)x;` of a non-volatile scalar is not a read ([expr.context]/2),
-     but cerastes treats it as one, as C does (C23 6.3.2.1p2), so it means the same in both modes;
+     but cerastes treats it as one, as C does (C23 6.3.2.1p2), so it means the same in both modes (`(void)x;` is
+     tested; `x;` takes the same path, and the front end's warning #174, "expression has no effect", keeps it out of
+     the warning-free tests);
    - C's distinction between objects whose address is taken and others does not arise (no `&` before M4.5).
 
    An unevaluated operand (`sizeof`, `_Alignof`, `typeof`) is not a read: the encoder uses its value, which does not
@@ -172,8 +176,9 @@ object would be indeterminate at the target. With this record that object is ord
    - **The failure.** In C++, an error #28 ("expression must have a constant value") from constant evaluation carries
      the evaluator's diagnostic as a note. When that diagnostic's number is one verify mode suppresses, the front end
      stops with internal error #2656, `determine_severity_code: bad severity`, and `cerastes verify` exits 3 instead of
-     2. Every C++ constant-expression context does this: a `constexpr` variable, an enumerator, `static_assert`, an
-     array bound, a template argument, `if constexpr`, `alignas`, a bit-field width. The shapes include
+     2. The C++ constant-expression contexts that report through error #28 do this: a `constexpr` variable, an
+     enumerator, `static_assert`, an array bound, a template argument, `if constexpr`, `alignas`, a bit-field width (not
+     a `case` label, which reports #39 itself, nor a narrowing template argument, P30). The shapes include
      `enum { A = 1 << 32 };` and `constexpr int z = 1 << 32;`. The note-capable numbers of the suppression list are #39,
      #62, #63 and #61 (the constant-expression interpreter's notes, P30). C has no such notes and never fails.
    - **The cause.** The front end applies a number's severity override to a note too, so a suppressed note has no
@@ -207,6 +212,11 @@ object would be indeterminate at the target. With this record that object is ord
       - ordering against any other integer, even a constant (`c < 2`): in C it is computed in `unsigned int` when no
         enumerator is negative, so `c < -1` is true in C and false in C++;
       - ordering two different enumerations.
+
+      Two enumerators (`RED < GREEN`), or an enumerator and an integer (`RED < 2`), are integer constants and stay
+      accepted as before (0018 item 6 (iv)). One difference in what the modes accept, never in meaning (Opus audit,
+      round 2): the C front end drops a unary `+` on an enumerator, so `c >= +GREEN` is the same IL as
+      `c >= GREEN` and is accepted in C, while C++ rejects it (a promoted enumerator against a value).
 11. **Switches over an enumeration: `-Wswitch`'s two rules** (handoff §11 question 19; amends 0018 item 6(ii) and 0014
     item 6). The rules apply, in both modes, to a `switch` whose controlling expression is an **enumeration value**:
     a variable, parameter, call result, cast or named constant of an enumeration type; an enumerator
