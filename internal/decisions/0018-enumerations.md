@@ -91,6 +91,9 @@ item 7). The two languages differ in three ways that matter here:
      the folded constant's original expression, where the conversion sits.
      Every other implicit conversion is rejected at the conversion (`unsupported_expression`): an operand of arithmetic,
      of an ordering comparison, of a unary operator, of a shift (either operand), and an arm of `?:`.
+     *(Amended by 0019 item 10, 2026-10-22: (v) as an operand of an ordering comparison whose two operands are values of
+     the same unscoped enumeration or its enumerators is accepted too; ordering against any other operand stays
+     rejected.)*
    - **Why these agree.** For a fixed underlying type both languages promote by that type (C23 6.3.1.1p2,
      [conv.prom]/4), so the conversions are the same. Otherwise an enumeration value lies in its range (item 4), which
      lies in `int` (item 2) and, when it is non-negative, in `unsigned int`. Converting it to C's promoted type (the
@@ -105,10 +108,12 @@ item 7). The two languages differ in three ways that matter here:
      fixed type, or with a fixed type of rank at most `int` (cerastes promotes it to its promoted type and converts
      each case constant to that type, as C23 6.8.5.3 says; the front end writes those conversions as casts into the
      enumeration, its own way of naming that type, so they are not conversions into the enumeration in the sense of
-     item 5: `case 4:` over `enum color` is a case that is never taken, in both modes; a written cast,
+     item 5: `case 4:` over `enum color` is a case that is never taken, in both modes *(withdrawn by 0019 item 11,
+     2026-10-22: a case value that is not an enumerator's value is now rejected, as `-Wswitch` does)*; a written cast,
      `case (enum color)2:`, is a checked conversion and then promoted). An enumeration with a fixed type above `int`
      (`: long`, `: unsigned long`) is not promoted, and its case constants convert into the enumeration, checked
-     (`case -1:` over `enum E : unsigned long` is a `conversion` error; C++ refuses it),
+     (`case -1:` over `enum E : unsigned long` is a `conversion` error; C++ refuses it) *(withdrawn by 0019 item 11,
+     2026-10-22: a case value that is not an enumerator's value is now rejected first)*,
      conditions (`if (c)`, `!c`, `&&`: `c != 0`), the operand of unary `-` and `~` and both operands of a shift (the
      operation has the enumeration's type), and the left operand of `++`, `--` and compound assignment. The first two
      are accepted; an operation on a raw enumeration operand is rejected at the operation, the same rule as at the
@@ -116,7 +121,8 @@ item 7). The two languages differ in three ways that matter here:
 7. **Scoped enumerations** (C++) have no implicit conversions: `switch`, `==`, `!=` and the ordering comparisons of two
    operands of the same scoped enumeration are operations on the enumeration's values; `static_cast` in and out is
    items 5 and 6. (Ordering of an unscoped enumeration's values is rejected by item 6 even between two operands of the
-   same enumeration: lifting it is a later, separate rule.)
+   same enumeration: lifting it is a later, separate rule.) *(Amended by 0019 item 10, 2026-10-22: lifted for two
+   operands of the same unscoped enumeration.)*
 8. **Also rejected** (`unsupported_expression`): `?:` whose result has an enumeration type (in C++ `x ? RED : GREEN`
    has the enumeration's type and is rejected; in C it has type `int`, P26, and is an ordinary `int` expression, so
    the two modes accept different programs here, never with different meanings); compound assignment and
@@ -166,7 +172,9 @@ item 7). The two languages differ in three ways that matter here:
     literal one by `enum_value_range`, il_def.h:1975, P25); the encoder checks that the front end's value is exactly
     that and fails closed otherwise (no Viper check: it is a property of the IL, like the identification of item 9). `perturb_folded` (0017
     item 9) also moves the value each enumerator guard compares with.
-11. **One meaning in both modes.** With items 3–10 every enumeration value is in its range, and `==`/`!=`, `switch`,
+11. **One meaning in both modes.** *(Amended by 0019 items 10–11, 2026-10-22: ordering of one unscoped enumeration
+    is accepted, and a switch on an enumeration value is held to `-Wswitch`'s two rules in both modes.)* With items
+    3–10 every enumeration value is in its range, and `==`/`!=`, `switch`,
     conversions out of an enumeration and enumerator arithmetic have one meaning in C and C++. `.cpp` only: `enum
     class`, `E::A`, `static_cast`, empty enumerations, enumerations used where C++ needs a conversion that C makes
     implicitly, a `?:` of enumeration type (rejected). `c23` only: implicit integer-to-enumeration conversions (accepted
@@ -196,8 +204,10 @@ item 7). The two languages differ in three ways that matter here:
 - A program that converts an out-of-range value into an enumeration is reported, in C too.
 - Emitted Viper does not change for any program without an enumeration: an enumeration is a new VIR type, and no
   existing rule changes for the other types.
-- Lifting later: ordering of unscoped enumeration values (both operands of one enumeration), compound assignment on
-  enumerations, enumerations in classes and templates (M7, M5), system enumerations (M8).
+- Lifting later: ordering of unscoped enumeration values (both operands of one enumeration; *lifted by 0019 item 10*),
+  compound assignment on enumerations, enumerations in classes and templates (M7, M5), system enumerations (M8).
 - Found while probing (not specific to enumerations; a tool failure, never a verdict): in C++ an error #28 whose note
   verify mode suppresses makes the front end stop with internal error #2656 (`enum { A = 1 << 32 };`, `constexpr int z
-  = 1 << 32;`), so `cerastes verify` exits 3 (handoff §6).
+  = 1 << 32;`), so `cerastes verify` exits 3 (handoff §6). *(Fixed in verify mode by 0019 item 9; EDG bug 0022.)*
+
+*2026-10-22, amended by 0019 (M4.2c; the owner's answers to handoff §11 questions 18 and 19): items 6 and 7 — an ordering comparison (`<`, `<=`, `>`, `>=`) whose two operands are values of the same unscoped enumeration or its enumerators is accepted (both modes convert both operands to one promoted type that keeps every value of the range and their order); ordering against any other operand stays rejected; item 6(ii) — a case value that is not the value of an enumerator is rejected (`case_not_in_enumeration`), no longer a case that is never taken; item 11 — a switch over an enumeration without `default` must list every enumerator's value (`enumerator_not_handled`): both rules are clang's and GCC's `-Wswitch` (0019 item 11).*
