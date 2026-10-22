@@ -8,7 +8,7 @@
 
 int average(int a, int b)
     CERASTES_REQUIRES(0 <= a && a <= 100 && 0 <= b && b <= 100)
-    CERASTES_ENSURES(r, 0 <= r && r <= 100)
+    CERASTES_ENSURES(r, r == (a + b) / 2)
 {
   int sum = a + b;
   assert(sum <= 200);

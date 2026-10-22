@@ -299,6 +299,8 @@ configuration you ship.
 include::example$verifying/assert.c[tag=source]
 ----
 
+Here the `requires` keeps `sum` small, the `assert` states a bound that the `requires` guarantees, and the contract pins the result exactly: `r == (a + b) / 2`.
+
 [#keep-vpr]
 == Keeping the Viper program
 

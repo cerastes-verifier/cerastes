@@ -16,3 +16,11 @@ int use(void)
 {
   return pick(1);
 }
+
+// Zero for both parameters: a stronger requires of `pick` fails here.
+int use_zero(int z)
+    CERASTES_REQUIRES(z == 0)
+    CERASTES_ENSURES(r, r == 0)
+{
+  return pick(z, z);
+}

@@ -11,3 +11,10 @@ int top_byte(unsigned char c)
 {
   return c << 24;
 }
+
+// The exact result for the largest byte that fits: a weaker ensures or a stronger requires of `top_byte` fails here.
+int top_byte_max(void)
+    CERASTES_ENSURES(r, r == 2130706432)
+{
+  return top_byte(127);
+}

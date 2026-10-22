@@ -15,3 +15,12 @@ int use(void)
 {
   return add_default(1);
 }
+
+// Both ends of the callee's range, through the explicit arguments: a stronger requires of `add_default` fails here.
+int use_edges(void)
+    CERASTES_ENSURES(r, r == 2000)
+{
+  int low = add_default(0, 1000);
+  int high = add_default(1000, 0);
+  return low + high;
+}

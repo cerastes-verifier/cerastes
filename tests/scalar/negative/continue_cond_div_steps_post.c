@@ -1,0 +1,26 @@
+// expect: error postcondition @ L25
+// mode: c23, c++20
+// twin: tests/scalar/continue_cond_div.c
+// Pins: 0014 item 4: the exact steps invariant and ensures of the positive are what notice the continue branch
+// The ensures drops the n >= 3 case: those walks take 6 - n steps, not 5 - n.
+#include <cerastes.h>
+
+int walk(int n)
+    CERASTES_REQUIRES(1 <= n && n <= 5)
+    CERASTES_ENSURES(r, r == 5 - n)
+{
+  int d = n;
+  int steps = 0;
+  CERASTES_INVARIANT(0 <= d && d <= 6 && n <= d && (d != 3 || n == 3) && steps == d - n - ((n <= 2 && d >= 4) ? 1 : 0))
+  CERASTES_DECREASES(6 - d)
+  while (20 / d > 3) {
+    d += 1;
+    steps += 1;
+    if (d == 3) {
+      d += 1;
+      continue;
+    }
+  }
+  CERASTES_CHECK(d == 6);
+  return steps;
+}

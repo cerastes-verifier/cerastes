@@ -24,3 +24,9 @@ int dispatch(int x)
     return 0;
   }
 }
+
+int top(void)
+    CERASTES_ENSURES(r, r == 2147483647)
+{
+  return succ(2147483646);
+}

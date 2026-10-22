@@ -1,0 +1,13 @@
+// expect: error overflow @ L10
+// mode: c23, c++20
+// twin: tests/scalar/guard_kept.c
+// Pins: 0010 item 11: `r < 2147483647` dropped from an earlier ensures; `r + 1` in the later one can overflow
+#include <cerastes.h>
+
+int by_two_ensures_overflow(int x)
+    CERASTES_REQUIRES(x >= 0 && x < 2147483647)
+    CERASTES_ENSURES(r, r >= 0)
+    CERASTES_ENSURES(r, r + 1 > x)
+{
+  return x;
+}

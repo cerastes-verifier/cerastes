@@ -312,3 +312,5 @@ noreturn_error.c:14: error: noreturn: `fail_if` is declared not to return, but c
 ----
 include::example$error-messages/noreturn_fixed.c[tag=source]
 ----
+
+The contract of `check_positive` is what its callers rely on: the path through `fail()` ends the program, so only the path that returns has to satisfy `r > 0`.

@@ -14,3 +14,11 @@ int down(int n)
   }
   return down(n - 1);
 }
+
+// The largest n the requires of `down` allows is passed on: a stronger upper bound fails here.
+int down_max(int n)
+    CERASTES_REQUIRES(n >= 0 && n <= 1000)
+    CERASTES_ENSURES(r, r == 0)
+{
+  return down(n);
+}
