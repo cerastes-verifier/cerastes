@@ -344,6 +344,15 @@ class Lowerer {
     const IntType& s = *e.a->type.int_type;
     const IntType& t = *e.type.int_type;
     if (dec::contains(dec::range_of(t), dec::range_of(s))) return a;  // every source value is a target value
+    if (t.is_enum) {
+      // Into an enumeration: one of its values, whatever the underlying type's signedness; never a wrap (decision 0018
+      // item 5).
+      const dec::Range r = dec::range_of(t);
+      obl(full, guard, gdep, range_obligation(a.e, t), a.dep,
+          meta("conversion", e.loc,
+               "the value may not be one of the values of `" + spell(e) + "` (" + r.lo + " to " + r.hi + ")"));
+      return a;
+    }
     if (t.is_signed) {
       obl(full, guard, gdep, range_obligation(a.e, t), a.dep,
           meta("conversion", e.loc,

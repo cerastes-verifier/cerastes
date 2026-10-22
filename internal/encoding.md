@@ -35,6 +35,10 @@ Front-end agnostic. The encoder builds a `Program` with a `Builder`; `check_prog
   interned and compared by `(bits, is_signed)`** (`unsigned int` and `char32_t` are one VIR type): the
   spelling the user wrote lives in `Expr::c_type_name` / `Var::c_type_name` / `Param::c_type_name` and is used
   only in messages (`Builder::spelled`). `Program::set_c_int_bits` fixes the width of `int` (default 32).
+  Since M4.2b2 (decision 0018) an **enumeration** is an `IntType` with `is_enum`, made by `Program::enum_type`:
+  never interned, equal only to itself, with the size and signedness of its underlying (C++) or compatible (C)
+  type and its own value range `[lo, hi]`, which `dec::range_of` returns, so every range rule below (parameters,
+  results, automatic loop invariants, constants) uses the value range.
 - `Type = Void | Bool | Int(IntType)`.
 - `Expr` (pure, typed): `Const(decimal | true/false)`, `Local(var)`, `Formal(k)`, `Result`, `Old(e)`,
   `Unary{Neg, Plus, Not}`, `Binary{Add, Sub, Mul, Div, Rem, Shl, Shr, Lt, Le, Gt, Ge, Eq, Ne, LAnd, LOr}`,
@@ -121,6 +125,7 @@ type, `lo`/`hi` its range, `w` its width):
 | `a >> n` | `c_shr(a, n)` (floor division by `2^n`) | `0 <= n < w` (`shift`) |
 | `Convert` to signed `T` | `e` | `lo <= e <= hi` (`conversion`); none when the source range is inside `T`'s |
 | `Convert` to unsigned `T` | `c_wrap(e, 2^w)`; `e` when the source range is inside | none |
+| `Convert` to an enumeration `T` (0018) | `e` | `lo <= e <= hi` over the value range (`conversion`), never a wrap; none when the source range is inside |
 | `ToBool(e)`, `BoolToInt(e)` | `e != 0`, `e ? 1 : 0` | none |
 | `a && b`, `a \|\| b`, `c ? x : y` | the Viper operators | the obligations of `b` are guarded by `a` (`!a`), of `x` by `c`, of `y` by `!c` |
 
@@ -289,6 +294,16 @@ The IL facts each rule relies on (node kinds, fields, conversions) are recorded 
   `const int k = 5;` is `initk_dynamic` with its value in the `stmk_init`'s `dik_constant`; a case value naming a
   constant is a constant of the promoted scrutinee type whose `expr` chain reaches the variable; weak constants and
   functions carry `is_weak`/`is_weakref` (`#pragma weak` leaves no attribute entry).
+- Enumerations (M4.2b2, P25–P27): an enumeration is a `tk_integer` with `enum_type`, one type entry per enumeration;
+  its enumerators are the `constant_list` (unscoped) or the `constants` of `assoc_scope` (scoped), each flagged
+  `is_named_constant_definition`, and every reference is an `enk_constant` naming that very entry (also inside a folded
+  constant's `expr` chain). An enumerator's definition constant has an `expr` only for a non-literal initializer;
+  `enum_value_range` tells a literal initializer from an implicit value. In C an enumerator of an enumeration without a
+  fixed type has type `int` (its own type entry, `affiliated_type`), elsewhere the enumeration. C++ promotes every
+  enumeration operand with a compiler-generated cast (to `int` for an unfixed one); C converts the operands of `==`,
+  `<` and arithmetic to the compatible type but leaves the switch scrutinee, conditions, the operands of unary `-`,
+  `~` and shifts, and the left operand of `++`/`--`/compound assignment unconverted. The front end makes unflagged
+  copies of an enumerator's value without `expr` in a few places (C++ `color d = GREEN;`, a scoped case value).
 
 **Positions of obligations.** An operator's obligation is reported at the operator node's `position` (the
 operator token); a call's at its `position` (the `(`); a conversion's at the conversion node, or at the
@@ -307,7 +322,7 @@ obligation that comes from a default argument at the call, with a note at the de
 fail closed. Positions of nodes are mapped through `diag_position` (0006 item 10).
 
 **Declarations (rejected with `unsupported_declaration`, at the declaration's first line).** In a verified file: a
-class, struct, union or enumeration (a lambda's closure class is reported at the lambda expression instead); a global
+class, struct or union (an enumeration: below; a lambda's closure class is reported at the lambda expression instead); a global
 variable that is not a named constant (below); a weak function (`is_weak`/`is_weakref`, 0017 item 2); a file-scope
 `asm`; a template; a `constexpr` or `consteval`
 function; a variadic function; a function without a prototype; a `static`, unnamed-namespace or `inline` function
@@ -320,8 +335,33 @@ declared elsewhere (`template <> int std::gcd<int, int>(...) { ... }`, `std::exc
 class written in the file is rejected at its declaration instead. Attributes written on a type of a verified file
 (a typedef, the unnamed type of `int __attribute__((x)) f(int)`) are held to the allow-list, wherever the type is
 recorded; `vector_size` and its relatives are exempt there (the vector type they make is rejected where it is used). `unsupported_type` (a pointer, reference, float,
-`volatile`, `_Atomic`, `_BitInt`, vector or enumeration type) is reported at the declaration that mentions the type
-(the function for a parameter or result, the variable for a local). A call of `main` is rejected in both modes. A
+`volatile`, `_Atomic`, `_BitInt`, vector or system enumeration type) is reported at the declaration that mentions the type
+(the function for a parameter or result, the variable for a local). A call of `main` is rejected in both modes.
+
+**Enumerations (decision 0018).** `enum_info` makes one VIR type per enumeration type entry (`Program::enum_type`:
+bits and signedness of the IL type, the value range of 0018 item 3) and rejects at the declaration (at the enumerator
+for a problem of one enumerator) an enumeration in a block, a class or a template, a `bool` base, an enumerator
+outside `int`, an implicit enumerator value that is not the previous one plus one, an incomplete enumeration without
+a fixed type, and attributes outside the allow-list; a system enumeration is rejected at its use. Enumerators with a
+written initializer join the named constants of 0017 (`encode_named_enumerator`, in source order with the variables),
+so their initializers are checked in every method's prologue. A use of an enumerator (`is_enumerator`) is a literal of
+its IL type with the front end's value, read before the constant's `expr`, and only if its enumeration passed
+`enum_info`; an `enk_constant` node whose type differs from its enumerator's adds the implicit conversion in C++
+(definition-time types) and is rejected in C, and a C enumerator's initializer may use `sizeof`/`_Alignof` only of a
+plain arithmetic type and no `typeof` (`plain_arithmetic_type`, `typeof_or_sizeof_of_expression`: EDG types an earlier
+enumerator the C++ way there). A named constant of an enumeration whose
+front-end value is outside the value range (its initializer's conversion fails in the prologue) is used as the
+conversion of a literal of the underlying type (`value_literal`), and `check_program` checks such front-end values
+against the underlying type (`front_end_value_fits`). A C switch over an enumeration of rank at most `int` without a
+promotion node is encoded in the promoted type (`enum_case_value`): the scrutinee converted, each case constant
+converted to the promoted type (C23 6.8.5.3), not into the enumeration. `conversion()` checks every
+conversion into an enumeration (the lowering's `conversion` obligation over the value range), rejects one from `bool`,
+and accepts an implicit conversion out of an enumeration only on a node its parent marked (`allow_enum_conversion`:
+the operands of `==`/`!=`, the switch scrutinee, a whole initializer, the right side of `=`, an argument, a returned
+value) or whose operand is an enumerator. Arithmetic, shifts and unary operators on a raw enumeration operand (C's
+unconverted operands), a comparison of an enumeration with another type, an ordering of an unscoped enumeration, a
+`?:` of enumeration type, and compound assignment and `++`/`--` on or with an enumeration are rejected at the
+operation. `names_object` stops at an enumerator. A
 rejected local is remembered: its later uses
 are not diagnosed again, and after a VLA the compiler's own cleanup statements are not either (A6). One diagnostic is
 reported per (tag, line).

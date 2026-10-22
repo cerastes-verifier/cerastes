@@ -1,0 +1,38 @@
+// expect: verified
+// expect: native-ok
+// mode: c23, c++20
+// Pins: 0018 item 3: enum sign { NEG = -1, ZERO, POS } has the values -2 to 1 (the smallest signed bit-field that holds -1 and 1)
+#include <cerastes.h>
+
+enum sign { NEG = -1, ZERO, POS };
+
+enum sign classify(int x)
+    CERASTES_REQUIRES(-2 <= x && x <= 1)
+    CERASTES_ENSURES(r, (int)r == x)
+{
+  enum sign s = (enum sign)x;
+  return s;
+}
+
+int magnitude(enum sign s)
+    CERASTES_ENSURES(r, 0 <= r && (r == (int)s || r == -(int)s))
+{
+  int v = (int)s;
+  if (v < 0) {
+    return -v;
+  }
+  return v;
+}
+
+int use(void)
+    CERASTES_ENSURES(r, r == 4)
+{
+  enum sign low = classify(-2);
+  enum sign mid = classify(0);
+  enum sign high = classify(1);
+  int a = magnitude(low);
+  int b = magnitude(NEG);
+  int c = magnitude(mid);
+  int d = magnitude(high);
+  return a + b + c + d;
+}

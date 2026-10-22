@@ -102,10 +102,13 @@ item 7). The two languages differ in three ways that matter here:
      type). Arithmetic, ordering against a negative value and shifts are computed in C's promoted `unsigned int` and
      C++'s `int`, and differ.
    - **Where C writes no conversion** (P26): the controlling expression of a `switch` over an enumeration without a
-     fixed type (cerastes promotes it to the compatible type and converts each case constant to that type, as C23
-     6.8.4.2 says; the front end writes those conversions as casts into the enumeration, its own way of naming that
-     type, so they are not conversions into the enumeration in the sense of item 5: `case 4:` over `enum color` is a
-     case that is never taken, in both modes),
+     fixed type, or with a fixed type of rank at most `int` (cerastes promotes it to its promoted type and converts
+     each case constant to that type, as C23 6.8.5.3 says; the front end writes those conversions as casts into the
+     enumeration, its own way of naming that type, so they are not conversions into the enumeration in the sense of
+     item 5: `case 4:` over `enum color` is a case that is never taken, in both modes; a written cast,
+     `case (enum color)2:`, is a checked conversion and then promoted). An enumeration with a fixed type above `int`
+     (`: long`, `: unsigned long`) is not promoted, and its case constants convert into the enumeration, checked
+     (`case -1:` over `enum E : unsigned long` is a `conversion` error; C++ refuses it),
      conditions (`if (c)`, `!c`, `&&`: `c != 0`), the operand of unary `-` and `~` and both operands of a shift (the
      operation has the enumeration's type), and the left operand of `++`, `--` and compound assignment. The first two
      are accepted; an operation on a raw enumeration operand is rejected at the operation, the same rule as at the
@@ -153,7 +156,12 @@ item 7). The two languages differ in three ways that matter here:
     when its value fits** (C23 6.7.3.3), but the front end types the reference the C++ way, by the initializer's type
     (Opus audit, round 1: `enum { U = 2u, V = U > -1 };` folds `V` to 0, C gives 1; P25), so in C an enumerator
     reference whose node type differs from the enumerator's own type is rejected (`unsupported_expression`); in C++
-    that typing is right and the reference is converted. An enumerator without an
+    that typing is right and the reference is converted. The same typing is seen by `sizeof`, `_Alignof` and `typeof`
+    without a reference node being encoded (Opus audit, round 2: `enum { N = sizeof(int), M = sizeof(N) };` verified
+    `M == 8`, C gives 4; round 3: an array bound or a `typeof` inside a type operand, `_BitInt(e)`), so in C an
+    enumerator's initializer may use `sizeof` and `_Alignof` only of an arithmetic type that is not bit-precise, named
+    directly or through plain typedefs, and no `typeof` type (a cast's target included); anything else is rejected
+    (`sizeof(int)` stays accepted). An enumerator without an
     initializer has the previous enumerator's value plus one (0 for the first, C23 6.7.3.3, [dcl.enum]/2; told from a
     literal one by `enum_value_range`, il_def.h:1975, P25); the encoder checks that the front end's value is exactly
     that and fails closed otherwise (no Viper check: it is a property of the IL, like the identification of item 9). `perturb_folded` (0017

@@ -320,8 +320,10 @@ int verify_command(int argc, char** argv) {
   // accepts as an extension) is NOT suppressed, and in C mode it is an error: strict ISO C refuses every constant-expression
   // context (a case value, `_Static_assert`, a file-scope initializer, an array bound) that names an object (C23 6.6p8;
   // 0017 item 2).  The encoder also rejects a case value and a constant's initializer that name an object itself
-  // (defence in depth: the diagnostic pragmas that could downgrade #1901 are rejected below).
-  edg.push_back("--diag_suppress=61,62,63,39,179,68,69,546,940,1305,2803");
+  // (defence in depth: the diagnostic pragmas that could downgrade #1901 are rejected below).  #188 (C: an enumerated type
+  // mixed with another type, as in `enum color c = 2;` or `case 1:` over an enumeration) is replaced by the `conversion`
+  // check of every conversion into an enumeration (decision 0018 item 5; P27).
+  edg.push_back("--diag_suppress=61,62,63,39,179,68,69,188,546,940,1305,2803");
   if (c_mode) edg.push_back("--diag_error=1901");
   // A pragma EDG does not understand (#161 unrecognized #pragma, #1675 unrecognized GCC pragma) refuses the file: clang may
   // act on it (`#pragma clang attribute push (__attribute__((weak)), apply_to = ...)`, `#pragma GCC ...`) while EDG records
