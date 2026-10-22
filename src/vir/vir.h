@@ -46,10 +46,15 @@ struct SrcLoc {
 // An integer type of the target, filled from EDG's configuration at run time (0010 item 2).  Two IntTypes
 // are the same type for VIR iff they have the same `bits` and `is_signed` (`name` only labels messages):
 // `unsigned int` and `char32_t` are one type, `char` and `signed char` are one type.  `bits` is at most 128.
+// An enumeration (decision 0018 item 3) is the same type only as itself, and its values are [lo, hi], not the
+// range of its bits and signedness (which are those of its underlying or compatible type).
 struct IntType {
   std::string name;  // "int", "unsigned long", "char", ... (for messages and Viper comments)
   int bits = 0;
   bool is_signed = false;
+  bool is_enum = false;    // an enumeration type (Program::enum_type)
+  bool is_scoped = false;  // a C++ scoped enumeration
+  std::string lo, hi;      // an enumeration's value range, decimal (dec::range_of)
 };
 
 struct Type {
@@ -64,10 +69,11 @@ struct Type {
   bool is_void() const { return kind == Kind::Void; }
   bool is_bool() const { return kind == Kind::Bool; }
   bool is_int() const { return kind == Kind::Int; }
-  // Same VIR type (Int types: same bits and signedness).
+  // Same VIR type (Int types: same bits and signedness; an enumeration only itself).
   bool operator==(const Type& o) const {
     if (kind != o.kind) return false;
     if (kind != Kind::Int) return true;
+    if (int_type->is_enum || o.int_type->is_enum) return int_type == o.int_type;
     return int_type->bits == o.int_type->bits && int_type->is_signed == o.int_type->is_signed;
   }
   bool operator!=(const Type& o) const { return !(*this == o); }
@@ -273,6 +279,10 @@ class Program {
   const IntType* int_type(const std::string& name, int bits, bool is_signed);
   // The interned type of that shape; a type nobody named is created with a synthetic name ("int32", "uint64").
   const IntType* int_type_of(int bits, bool is_signed);
+  // A new enumeration type (decision 0018 item 3), never interned: each call makes a distinct type.  `bits` and
+  // `is_signed` are the underlying (C++) or compatible (C) type's; [lo, hi] is the value range, within that type.
+  const IntType* enum_type(const std::string& name, int bits, bool is_signed, bool is_scoped, const std::string& lo,
+                           const std::string& hi);
 
   // The width of C's `int` on this target (EDG's `sizeof(int) * CHAR_BIT`); integer promotion is relative to
   // it.  Set it once, before building; the default is 32.
@@ -298,6 +308,7 @@ class Program {
   int c_int_bits_ = 32;
   int next_jump_id_ = 1;
   std::deque<std::unique_ptr<IntType>> int_types_;
+  std::deque<std::unique_ptr<IntType>> enum_types_;  // apart from int_types_, so int_type() never returns one
   std::deque<Function> functions_;
   std::deque<NamedConst> named_consts_;
   std::deque<Expr> exprs_;

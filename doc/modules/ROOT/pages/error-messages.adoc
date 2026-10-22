@@ -223,7 +223,7 @@ include::example$error-messages/shift_fixed.cpp[tag=source]
 
 == conversion
 
-A conversion to a signed type may be given a value that does not fit. It is reported at the conversion: the cast, the initializer, the assignment, the argument or the `return`.
+A conversion to a signed type may be given a value that does not fit, or a conversion to an enumeration a value that is not one of the enumeration's values. It is reported at the conversion: the cast, the initializer, the assignment, the argument or the `return`.
 
 cerastes does not accept a wrapping conversion to a signed type, written or implicit, because the standards disagree on what it means. Conversions to unsigned types wrap and are never an error.
 
@@ -243,6 +243,22 @@ conversion_error.cpp:9: error: conversion: the value may not fit in `signed char
 ----
 include::example$error-messages/conversion_fixed.cpp[tag=source]
 ----
+
+A conversion to an enumeration is checked against the enumeration's values
+(xref:integer-semantics.adoc#enumerations[Enumerations]), never wrapped, also
+when the enumeration's underlying type is unsigned:
+
+[source,c]
+----
+include::example$integer-semantics/enumeration_range.c[tag=source]
+----
+
+[source,console]
+----
+enumeration_range.c:11: error: conversion: the value may not be one of the values of `enum color` (0 to 3)
+----
+
+*How to fix it.* Bound the value with a `requires` or a test before the cast.
 
 == missing-return
 

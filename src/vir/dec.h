@@ -81,8 +81,10 @@ struct Range {
   std::string lo, hi;
 };
 
-// The values of an integer type: [-2^(bits-1), 2^(bits-1)-1] or [0, 2^bits-1].
+// The values of an integer type: [-2^(bits-1), 2^(bits-1)-1] or [0, 2^bits-1]; of an enumeration, its value
+// range (decision 0018 item 3).
 inline Range range_of(const IntType& t) {
+  if (t.is_enum) return Range{t.lo, t.hi};
   if (t.is_signed) return Range{neg(pow2(t.bits - 1)), dec1(pow2(t.bits - 1))};
   return Range{"0", dec1(pow2(t.bits))};
 }

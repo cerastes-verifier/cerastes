@@ -53,7 +53,17 @@ after M4.2b1:**
 2. Push this branch and open its PR: `git push origin m4.2b1-named-constants` (the session never pushes). CI runs
    `check.sh` as locally.
 3. Answer §11 questions 14 (strict C for `const` objects in constant expressions) and 15 (C23 `constexpr`). Then
-   M4.2b2 (§8.1).
+   M4.2b2 (§8.1). *(Answered 2026-10-22: keep the strict rule; an M8 entry.)*
+
+**M4.2b2 is done (2026-10-22, branch `m4.2b2-enumerations`, based on M4.2b1's tip `6b5f7d9`; result in
+`internal/status.md`).** Enumeration types and enumerators verify in both modes (record 0018): each enumeration is its
+own VIR type with its value range, every conversion into it is checked (`conversion`, never a wrap), implicit
+conversions out of it are accepted only where C and C++ agree, enumerator initializers are checked in the 0017 prologue,
+and a C switch over an enumeration is encoded in the promoted type. **Owner steps after M4.2b2:**
+1. Merge M4.2b1's PR (`m4.2b1-named-constants`) first: this branch contains it.
+2. Push this branch and open its PR: `git push origin m4.2b2-enumerations` (the session never pushes). CI runs
+   `check.sh` as locally.
+3. Answer §11 questions 16–19. Then M4.2c (§8.1; the next free record, 0019).
 
 ## 1. State in one paragraph
 
@@ -494,6 +504,33 @@ Deferred (probes in the job's scratch directory are gone; the shapes are given h
    value is never mutated; the planned extension (P2) was cut. Mutating constant initializers would test how the
    prologue's checks and the uses depend on the value.
 
+**M4.2b2 audit notes (2026-10-22, not blocking; every blocking and should-fix item was taken):**
+1. **Pointers will reopen the C enumerator-list hole (for M4.5).** EDG types an earlier enumerator inside a C
+   enumerator list the C++ way; cerastes rejects the routes that observe it (a reference whose node type differs,
+   `sizeof`/`_Alignof` of anything but a plain arithmetic type, `typeof`; 0018 item 10). Pointer arithmetic is a further
+   route the front end accepts in an enumerator value (`(int)(long)((typeof(N) *)0 + 1)` folds to 8, C gives 4; also
+   `&((char (*)[e])0)[1]`), closed today only because pointer types are rejected. When M4.5 accepts pointers, keep them
+   out of C enumerator initializers or apply the node-type rule there.
+2. **The C rule is deliberately conservative:** in a C enumerator initializer it also rejects `sizeof` of any expression,
+   arrays, typedefs of arrays and typedefs of `typeof`, even when they do not depend on the list (fails closed; 0018 item
+   10 says so).
+3. **Untested defence-in-depth branches** (no IL shape reaches them): in `comparison()`, raw enumeration operands of
+   different types and an order on an unscoped enumeration; "an enumerator whose enumeration this version cannot find";
+   "a scoped enumeration whose underlying type is not int"; "values do not fit its underlying type".
+4. **Fail-closed corners:** in C++ `x == (color)2`-style comparisons were rejected until the folded-operand rule (now
+   accepted); a C case value of a shape `enum_case_value` does not know (neither the generated cast, a written cast, an
+   enumerator nor a copy) is rejected ("a case value this version cannot read"); `?:` of enumeration type is rejected in
+   C++ while C reads `x ? RED : GREEN` as `int` (0018 item 8).
+5. **The flag `is_named_constant_definition`** is also set by EDG on predeclared SVE/RISC-V enumerations (a `#pragma GCC
+   aarch64 "arm_sve.h"` position), module enumerators and non-standard member constants; cerastes requires the
+   enumerator's enumeration to have passed `enum_info`, so none of them is trusted (0018 item 9).
+6. **A C23 tag redefinition** gives a second type entry for one enumeration (harmless: uses refer to the first; both are
+   checked).
+7. **Messages:** an out-of-range conversion names the enumeration as each mode spells it (`enum color` in C, `color` in
+   C++); rejection texts still end "(decision 0012)" as before.
+8. **`#ifdef __CERASTES__` in a native-ok positive** (`enum_case_promoted.c`) is a hand-reviewed convention
+   (`tests/README.md`), not a harness rule (§11 question 19).
+
 ## 7. Known gaps carried
 
 - Termination: a recursion cycle through another unit (0013 item 5) — the contract manifest, M6 (M7 if it does not fit).
@@ -557,8 +594,9 @@ value; case values (`case k` with a const local, `case N` with a const global) c
 path-independently; a `do … while` condition that names a variable is a measured loop in both modes (the cross-mode
 trap); hook `perturb_folded`. See `internal/status.md` for what landed.
 
-**M4.2b2 Enumerations** (the next free record, 0018; designed in the M4.2b planning, 2026-10-21; owner answers
-below). Retirement pre-approved: `reject_enum.c`.
+**M4.2b2 Enumerations** (record 0018; designed in the M4.2b planning, 2026-10-21; owner answers below; **run
+2026-10-22**, see `internal/status.md` for what landed and how it departs from this design: C's enumerator-list typing,
+the C switch in the promoted type, the copies, #188). Retirement pre-approved: `reject_enum.c` (retired).
 - **Owner (2026-10-21):** an out-of-range conversion to an enum with a fixed unsigned underlying type
   (`enum E : unsigned char`, `(enum E)300`) is a `conversion` error, like every conversion into an enum. **Note to
   relook:** wrapping like unsigned in general (0010's modular unsigned arithmetic): *integer semantics should model
@@ -614,7 +652,7 @@ below). Retirement pre-approved: `reject_enum.c`.
   comparisons, `enum class`, fixed bases, empty enums, enum-typed const globals. Never cut: the conversion check, the
   promotion rule, enumerator recognition, the initializer check.
 
-**M4.2c Locals without an initializer** (the next free record: 0019 if M4.2b2 takes 0018). Recommended (review): definite assignment over VIR — one
+**M4.2c Locals without an initializer** (the next free record: 0019). Recommended (review): definite assignment over VIR — one
 forward pass suffices because every jump is forward (intersection at joins and labels; a loop head's state is its
 entry state); no new category; the rejection names the read. Alternative: a ghost "defined" flag per local with
 category `uninitialized` (flags false at method entry, since Viper locals start arbitrary, `emit.cpp:181`; reads
@@ -662,7 +700,8 @@ contracts in `bin/*.h`; canonical examples to port are listed per session below.
   added before M4.5b.
 - **M4.5b Pointers to scalars and globals:** `&x`, `*p`, NULL, pointer parameters with `owns`/`reads`/`old(*p)`,
   pointer equality, an aliasing trap that must fail, mutable globals and `static` locals as cells with frames; ports
-  of VeriFast's `examples/swap.c`, `examples/address_of_local.c`, `examples/globals.c`.
+  of VeriFast's `examples/swap.c`, `examples/address_of_local.c`, `examples/globals.c`; keep pointer arithmetic out of C
+  enumerator initializers or extend 0018 item 10's rule to it (§6, M4.2b2 note 1).
 - **M4.5c Structs:** field cells, `.`/`->`, struct values (copies, initializers, by-value parameters and results),
   nested structs, pointers to fields; ports of `tutorial_solutions/account.c`, `deposit.c`.
 - **M4.5d malloc and free:** trusted contracts for `malloc`, `calloc`, `realloc`, `free`, `abort`, `exit` (system
@@ -916,8 +955,33 @@ Each has a recommended answer. Answer inline, as before.
     extension, GCC refuses the static assertion). The alternative keeps the warning suppressed and has cerastes reject
     only the contexts it cares about (case labels; initializers would then be accepted). Keep the strict rule?
     *Recommended: yes — one rule, portable C, and C programmers write such constants as enumerators (M4.2b2) or
-    macros.*
+    macros.* **Answered (owner, 2026-10-22): keep it strict** (so `enum { A = K };` naming a `const` object is refused
+    in C too, 0018 item 2).
 15. **C23 `constexpr` objects do not parse** in this EDG configuration (P23: warning #77, errors #65/#20), although
     C23 has them; with them, `case N:` would be valid C. Record it as an M8 inventory entry and check whether upstream
     EDG supports C23 `constexpr` (an option, or a later version), or treat it as an EDG issue to draft? *Recommended:
-    an M8 entry now; check upstream's C23 status when the next upstream merge runs.*
+    an M8 entry now; check upstream's C23 status when the next upstream merge runs.* **Answered (owner, 2026-10-22): an
+    M8 entry now** (`plan.md` M8, "Known entries").
+
+**M4.2b2, 2026-10-22:**
+
+16. **EDG's C enumerator-list typing.** Inside an enumerator list EDG's C front end types a reference to an earlier
+    enumerator by its initializer's type (the C++ rule, `decl_spec.c:5930` under `gcc_mode`), while C23 6.7.3.3 makes it
+    `int` when the value fits: `enum { U = 2u, V = U > -1 };` folds `V` to 0 (C gives 1; stock `cpfe --c23` fails
+    `_Static_assert`). cerastes now rejects such a reference in C (0018 item 10). Reproduce it on unmodified upstream
+    `main` and draft `internal/edg_bugs/NNNN-*.md` for you to file? *Recommended: yes, in the next EDG session (box);
+    no fork fix, since it does not block cerastes (memory: EDG bugs scoped to cerastes).*
+17. **EDG internal error #2656** (found by P27): in C++, an error #28 whose note verify mode suppresses makes the front
+    end assert (`determine_severity_code: bad severity`): `enum { A = 1 << 32 };`, `constexpr int z = 1 << 32;`, so
+    `cerastes verify` exits 3 (a tool failure, never a verdict). Investigate which suppressed number is the note and stop
+    suppressing it (or suppress differently), and draft the EDG bug? *Recommended: a short item in the next session that
+    touches the driver; tests avoid the shape until then.*
+18. **Ordering of unscoped enumeration values** (`c < GREEN`, both operands of one enumeration) is rejected (0018 item
+    7) although it means the same in both languages for values in range. Lift it when a ported example needs it?
+    *Recommended: yes, then; one rule and one test pair.*
+19. **`#ifdef __CERASTES__` in a native-ok positive** (`tests/scalar/enum_case_promoted.c`): clang's and GCC's `-Wswitch`
+    (in `-Wall`) refuse `case 4:` over an enumeration, so the never-taken cases are hidden from the native compilers and
+    the header says why. Accept this pattern (and add a sentence to `tests/README.md`), or forbid it and keep such shapes
+    out of native-ok positives? *Recommended: accept it, only for code the compilers refuse as a warning, with the reason
+    in the header.*
+

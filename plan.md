@@ -515,6 +515,8 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
 - **Known entries** (recorded as they are decided, so none is lost):
   - **Language modes** (owner, 2026-10-16, M2 handoff question 4). GNU emulation is refused today and will need to be added: it needs EDG work, since `extern "C"` redeclarations in two namespaces escape must-match there. C before C23 is refused by design (C23 is the supported C).
   - **Constructs M3 rejects** (decision 0012 lists them) and **what M4 defers** (M4's "Deferred beyond M4"): each one is an entry, with the milestone expected to lift it.
+  - **C23 `constexpr` objects** (owner, 2026-10-22, M4.2b1 handoff question 15): they do not parse in this EDG configuration (P23: warning #77, errors #65/#20), so `case N:` with a C `constexpr` cannot be written; check upstream EDG's C23 status at the next upstream merge.
+  - **Enumerations M4.2b2 leaves rejected** (decision 0018): enumerations from system headers, enumerations in blocks, classes and templates, a `bool` underlying type, enumerators outside `int`, ordering comparisons of unscoped enumeration values, compound assignment and `++`/`--` on enumerations, and in C an enumerator list that names an earlier enumerator whose initializer is not of type `int`.
 - **User docs:** publish a "Language support" page in `doc/` from the inventory. It shows what is supported and unsupported, by standard. The difficulty assessment stays in the planning file.
 
 **Acceptance:** complete records of features that are and are not implemented with annotated difficulty sorted by language standard.

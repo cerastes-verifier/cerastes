@@ -123,7 +123,7 @@ status is 2. Standard output is then empty:
 
 [source,console]
 ----
-"rejected_double.cpp", line 6: error #cerastes-unsupported_type: type "double" is not supported by "cerastes verify": only integer types and bool are (decision 0012)
+"rejected_double.cpp", line 6: error #cerastes-unsupported_type: type "double" is not supported by "cerastes verify": only integer types, bool and the enumerations of the verified files are (decisions 0012 and 0018)
   double half(double x)
          ^
 
@@ -395,6 +395,14 @@ pass:[C++] a namespace-scope `const` has internal linkage, so the file that
 defines a function whose contract you trust may give a constant of the same
 name another value; keep such constants in one header that both files include.
 
+And for enumerations: a value of an enumeration is assumed to be one of its
+values (xref:integer-semantics.adoc#enumerations[Enumerations]) when it comes
+from outside the verified code, as a parameter or as the result of a function
+whose contract you trust. Every conversion into an enumeration in verified code
+is checked, but C lets code in another file store any value of the integer type
+the compiler picks for the enumeration, and such a value is outside what the
+result covers.
+
 == What a result means
 
 A verified function terminates on every input that satisfies its `requires`,
@@ -463,7 +471,10 @@ The constructs that are rejected in this version are:
 * *Declarations:* a local with no initializer, `static`, `thread_local` and
   `extern` locals, global variables other than the constants of <<constants>>,
   arrays, classes, unions,
-  enumerations, lambdas, templates, `constexpr` and `consteval` functions,
+  an enumeration declared in a function, a class or a template, or with a
+  `bool` underlying type or an enumerator outside the range of `int`, an
+  enumeration declared without its enumerators and without an underlying type,
+  lambdas, templates, `constexpr` and `consteval` functions,
   variadic functions, function pointers, `CERASTES_REQUIRES` on `main`, a
   `main` declared not to return, and `CERASTES_ENSURES` on a function declared
   not to return.
@@ -472,12 +483,25 @@ The constructs that are rejected in this version are:
   example `quick_exit`, `+__builtin_trap+`, `+__builtin_unreachable+` and
   `std::terminate`).
 * *Types:* pointers, references, floating point, `volatile`, `_BitInt`, vector
-  types.
+  types, enumerations declared in system headers.
 * *Expressions:* the bitwise operators (`&`, `|`, `^`, `~`), the comma
   operator, an assignment used as a value, two calls in one expression that are
   not nested in each other (`f(x) + g(y)`), and a call in the second operand of
   `&&`, `||` or `?:`, or in a loop condition, and, in C, a variable named where a
-  constant expression is required (a `case` value, `_Static_assert`).
+  constant expression is required (a `case` value, `_Static_assert`, an
+  enumerator's value), and an enumeration value that the compiler converts to an
+  integer for arithmetic, a comparison of order, a unary operator, a shift or an
+  arm of `?:`, a `?:` whose result is an enumeration, in C an enumerator's value
+  that names an earlier enumerator whose initializer has a type other than `int`
+  (the front end gives it the pass:[C++] type) or that uses `sizeof` or `_Alignof`
+  of an expression or `typeof`, and compound assignment,
+  `pass:[++]` and `--` on an enumeration
+  (xref:integer-semantics.adoc#enumerations[Enumerations]):
++
+[source,c]
+----
+include::example$verifying/enum_arithmetic_rejected.c[tag=source]
+----
 * *Attributes:* any attribute other than the cerastes ones and `maybe_unused`,
   `nodiscard`, `deprecated`, `likely`, `unlikely`, `fallthrough` and `noreturn`
   (some attributes, such as `assume`, would let you state an unchecked fact).

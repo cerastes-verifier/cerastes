@@ -16,7 +16,9 @@ In short:
 * division by zero, and a shift whose count or result is out of range, are
   errors;
 * operands narrower than `int` are promoted, as in C and pass:[C++], and that
-  has consequences you can prove or trip over.
+  has consequences you can prove or trip over;
+* a value of an enumeration is always one of its values, and a conversion into
+  an enumeration that may not give one is an error.
 
 == Types and ranges
 
@@ -31,10 +33,10 @@ A value of a type is always inside its range. A parameter is assumed to be in
 the range of its type when the function starts, and cerastes proves that every
 result, and every value an operation produces, is in range too.
 
-Enumerations and their constants, `_BitInt`, floating point and vector types
-are rejected in this version (xref:verifying.adoc#not-supported[the list of
-constructs not yet supported]). So are the bitwise operators `&`, `|`, `^`
-and `~`.
+Enumerations have their own range, described in <<enumerations>>.
+`_BitInt`, floating point and vector types are rejected in this version
+(xref:verifying.adoc#not-supported[the list of constructs not yet supported]).
+So are the bitwise operators `&`, `|`, `^` and `~`.
 
 == Signed overflow is an error
 
@@ -80,6 +82,12 @@ include::example$integer-semantics/unsigned_wraps.cpp[tag=source]
   conversion and for a cast written by you (`(short)x`, `static_cast<short>(x)`),
   and for an initialization, an assignment, a compound assignment, an argument
   and a return value
+
+| an enumeration
+| the value must be one of the values of the enumeration, otherwise
+  `conversion`; this holds for a cast, for C's implicit conversions, and for an
+  enumeration whose underlying type is unsigned: it never wraps
+  (<<enumerations>>)
 
 | `bool`
 | `v != 0`
@@ -238,3 +246,55 @@ A named constant, a `const` global, is checked the same way: its initializer as
 you wrote it, whether or not anything uses it, so `const short limit = 70000;`
 is a `conversion` error at its line
 (xref:verifying.adoc#constants[Named constants]).
+
+[#enumerations]
+== Enumerations
+
+An enumeration and its enumerators are verified in both modes. Each
+enumeration has a range of values:
+
+* an enumeration whose underlying type is fixed (`enum small : unsigned char`,
+  and every pass:[C++] `enum class`, whose underlying type is `int` unless you
+  write another) has the values of that type;
+* any other enumeration has the values of the smallest bit-field that holds
+  all its enumerators, as in pass:[C++]: `enum color { RED, GREEN, BLUE }` has
+  the values 0 to 3, `enum sign { NEG = -1, ZERO, POS }` the values -2 to 1.
+
+A value of an enumeration is always in that range. A parameter is assumed to
+be in it, a result must be in it, and every conversion into an enumeration
+must give a value in it, or it is a `conversion` error: a cast you write, and
+in C an integer stored into an enumeration without a cast. A value in the
+range need not be an enumerator: `(enum color)3` is fine. C itself lets an
+enumeration hold any value of an integer type the compiler picks for it, so
+this rule is stricter than C, and it is the same in both modes.
+
+[source,c]
+----
+include::example$integer-semantics/enumerations.c[tag=source]
+----
+
+Without the `requires`, the cast may not give one of the values:
+
+[source,c]
+----
+include::example$integer-semantics/enumeration_range.c[tag=source]
+----
+
+An enumerator is its value. In C an enumerator is an `int` and in pass:[C++]
+it has the enumeration's type, but because every value of an enumeration lies
+in the range of `int`, comparing with `==` and `!=`, a `switch`, and storing an
+enumeration value into an integer variable, argument or result mean the same in
+both languages, and so does arithmetic on enumerators (`GREEN + 1`). An
+enumerator's initializer is checked as you wrote it, like a named constant's:
+`enum { S = (signed char)300 };` is a `conversion` error at its line.
+
+Arithmetic on an enumeration value is where the two languages part: C
+computes `c - 1` in `unsigned int` for `enum color` (so 0 - 1 is the largest
+`unsigned int`), pass:[C++] in `int` (so it is -1). cerastes therefore rejects
+an enumeration value that the compiler converts to an integer for arithmetic,
+for a comparison of order (`<`, `<=`, `>`, `>=`), for a unary operator, for a
+shift or for an arm of `?:`. Write the conversion yourself (`(int)c - 1`) to
+say which you mean. Compound assignment, `pass:[++]` and `--` on an enumeration are
+rejected too. A pass:[C++] `enum class` has no implicit conversions; its
+values can be compared with each other, including with `<`.
+

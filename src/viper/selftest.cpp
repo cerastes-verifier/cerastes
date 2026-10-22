@@ -61,6 +61,11 @@ class Kit {
   Type i128 = Type::integer(prog.int_type("__int128", 128, true));
   Type u128 = Type::integer(prog.int_type("unsigned __int128", 128, false));
   Type vd = Type::void_type();
+  // An enumeration type (decision 0018): `bits`/`is_signed` are the underlying (C++) or compatible (C) type's, [lo, hi] the
+  // value range.  Every call makes a distinct type.
+  Type en(const std::string& name, int bits, bool is_signed, const std::string& lo, const std::string& hi, bool scoped = false) {
+    return Type::integer(prog.enum_type(name, bits, is_signed, scoped, lo, hi));
+  }
   std::vector<Expect> expects;
   // Position-map rows that must exist without failing (category, message substring): for the checks that cannot be made
   // to fail from VIR (an internal backstop).

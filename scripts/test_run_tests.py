@@ -11941,6 +11941,15 @@ int pick(int x) CERASTES_ENSURES(r, r >= 0 && r <= 2)
   }
 }
 """
+# an enumerator with a written initializer: a named constant of the unit, with its own guard (0018 item 10)
+ONE_ENUMERATORS = """#include <cerastes.h>
+enum e { A0, B0 = 1 << 3 };
+int pick(int x) CERASTES_ENSURES(r, r >= 0 && r <= 1)
+{
+  if (x == B0) { return 1; }
+  return 0;
+}
+"""
 
 
 @e2e_gate(_real_verifier_available(), "CERASTES_VERIFY missing; run scripts/bootstrap.sh")
@@ -11960,10 +11969,11 @@ class RealDriverTests(unittest.TestCase):
         (cls.tmp / "fold.cpp").write_text(ONE_FOLDED_CONSTANT)
         (cls.tmp / "named.cpp").write_text(ONE_NAMED_CONSTANTS)
         (cls.tmp / "cases.cpp").write_text(ONE_CASE_EXPRESSIONS)
+        (cls.tmp / "enums.cpp").write_text(ONE_ENUMERATORS)
 
     def setUp(self):
         self.cwd = Path(tempfile.mkdtemp(dir=self.tmp))
-        for name in ("decl.cpp", "one.cpp", "loop.cpp", "fold.cpp", "named.cpp", "cases.cpp"):
+        for name in ("decl.cpp", "one.cpp", "loop.cpp", "fold.cpp", "named.cpp", "cases.cpp", "enums.cpp"):
             shutil.copy(self.tmp / name, self.cwd / name)
 
     def run_driver(self, *args, timeout=300):
@@ -11992,7 +12002,7 @@ class RealDriverTests(unittest.TestCase):
         self.assertRegex(run.stdout, r"\Aone\.cpp: verified \(1 function; one translation unit: ")
         self.assertEqual(run.stdout.count("\n"), 1)
         self.assertEqual(sorted(p.name for p in self.cwd.iterdir()),
-                         ["cases.cpp", "decl.cpp", "fold.cpp", "loop.cpp", "named.cpp", "one.cpp"])
+                         ["cases.cpp", "decl.cpp", "enums.cpp", "fold.cpp", "loop.cpp", "named.cpp", "one.cpp"])
 
     def test_a_declarations_only_file_has_nothing_to_verify(self):
         # twin of the test above: no function with a body is exit 2, never "verified (0 functions)"
@@ -12029,7 +12039,8 @@ class RealDriverTests(unittest.TestCase):
                               ("drop_assert", "loop.cpp"), ("weaken_invariant", "one.cpp"),
                               ("weaken_invariant", "loop.cpp"), ("constant_without_expr", "one.cpp"),
                               ("constant_without_expr", "loop.cpp"),
-                              ("perturb_folded", "named.cpp"), ("perturb_folded", "cases.cpp")):
+                              ("perturb_folded", "named.cpp"), ("perturb_folded", "cases.cpp"),
+                              ("perturb_folded", "enums.cpp")):
             with self.subTest(hook, program=program):
                 run = self.run_driver("verify", program, f"--cerastes_verify_selftest={hook}")
                 self.assertEqual(run.returncode, 3, run.stdout + run.stderr)
@@ -12073,6 +12084,20 @@ class RealDriverTests(unittest.TestCase):
         self.assertEqual(run.stdout, "")
         self.assertIn("cases.cpp:5: internal check: ", run.stderr)
 
+    def test_the_perturbed_enumerator_fails_its_internal_guard(self):
+        # 0018 item 10: an enumerator with a written initializer is a named constant of the unit, and
+        # perturb_folded moves the value its guard compares with: the guard, at the enumerator's line
+        # (2), fails and the run ends with exit 3; a run without the hook verifies. An enumerator
+        # without an initializer (`A0`) has no guard, and the program has no other constant or case
+        # value, so the guard of `B0` is the only thing the hook can move.
+        run = self.run_driver("verify", "enums.cpp")
+        self.assertEqual((run.returncode, run.stderr), (0, ""), run.stdout)
+        self.assertRegex(run.stdout, r"\Aenums\.cpp: verified \(1 function; one translation unit: ")
+        run = self.run_driver("verify", "enums.cpp", "--cerastes_verify_selftest=perturb_folded")
+        self.assertEqual(run.returncode, 3, run.stdout + run.stderr)
+        self.assertEqual(run.stdout, "")
+        self.assertIn("enums.cpp:2: internal check: ", run.stderr)
+
     def test_the_hook_that_perturbs_nothing_is_not_verified(self):
         # a program with no named constant and no case value gives perturb_folded nothing to move: the
         # driver refuses to say "verified" for a run in which a hook changed nothing (0011 item 13)
@@ -12085,7 +12110,7 @@ class RealDriverTests(unittest.TestCase):
         run = self.run_driver("verify", "one.cpp", "--keep-vpr")
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
         self.assertEqual(sorted(p.name for p in self.cwd.iterdir()),
-                         ["cases.cpp", "decl.cpp", "fold.cpp", "loop.cpp", "named.cpp", "one.cpp", "one.vpr", "one.vpr.map"])
+                         ["cases.cpp", "decl.cpp", "enums.cpp", "fold.cpp", "loop.cpp", "named.cpp", "one.cpp", "one.vpr", "one.vpr.map"])
 
     def test_refused_options_are_exit_2_with_one_line(self):
         cases = [

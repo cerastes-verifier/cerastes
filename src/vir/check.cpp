@@ -28,7 +28,9 @@ ConstVal int_val(__int128 v) { return ConstVal{true, false, v}; }
 ConstVal bool_val(bool b) { return ConstVal{true, true, b ? 1 : 0}; }
 
 bool fits(__int128 v, const Type& t) {
-  if (!t.is_int() || t.int_type->bits > 64) return false;
+  // An enumeration's values are its value range, not its bits (decision 0018): left "unknown" here, which only makes a
+  // `DoOnce` condition unknown (accepted, and guarded by lowering).
+  if (!t.is_int() || t.int_type->bits > 64 || t.int_type->is_enum) return false;
   const int bits = t.int_type->bits;
   const __int128 one = 1;
   if (t.int_type->is_signed) return v >= -(one << (bits - 1)) && v <= (one << (bits - 1)) - 1;
@@ -136,6 +138,8 @@ class Checker {
 
   void err(const SrcLoc& loc, std::string reason) { diags_.push_back(Diag{loc, std::move(reason)}); }
 
+  static bool is_enum(const Type& t) { return t.is_int() && t.int_type != nullptr && t.int_type->is_enum; }
+
   static bool value_type(const Type& t) {
     if (t.is_bool()) return true;
     return t.is_int() && t.int_type != nullptr && t.int_type->bits >= 1 && t.int_type->bits <= 128;
@@ -190,6 +194,17 @@ class Checker {
     if (!t.is_int() || t.int_type == nullptr) return false;
     return dec::valid(v) && dec::in_range(v, dec::range_of(*t.int_type));
   }
+  // The front end's value of a named constant or a case label (decision 0017): a value of the type, except that for an
+  // enumeration it need only be a value of the underlying type (decision 0018 item 5).  An enumeration value outside the value
+  // range comes from a conversion into the enumeration in the initializer or the case value as written, whose closed
+  // obligation the prologue asserts, and fails, before anything uses the value; the encoder never makes a Const of it.
+  static bool front_end_value_fits(const std::string& v, const Type& t) {
+    if (!is_enum(t)) return literal_fits(v, t);
+    IntType underlying;
+    underlying.bits = t.int_type->bits;
+    underlying.is_signed = t.int_type->is_signed;
+    return dec::valid(v) && dec::in_range(v, dec::range_of(underlying));
+  }
 
   // A named constant (decision 0017 item 4): the initializer as written is call-free, mentions no variable, parameter, result
   // or `old`, and has exactly the constant's type; `value` is a literal of that type.
@@ -200,7 +215,7 @@ class Checker {
       err(c.loc, name + " is not a bool or an integer");
       return;
     }
-    if (!literal_fits(c.value, c.type)) err(c.loc, "the front end's value of " + name + " ('" + c.value + "') is not a value of " + c.type.str());
+    if (!front_end_value_fits(c.value, c.type)) err(c.loc, "the front end's value of " + name + " ('" + c.value + "') is not a value of " + c.type.str());
     if (c.init == nullptr) {
       if (c.value != "0") err(c.loc, name + " has no initializer but a value other than 0");
       return;
@@ -376,7 +391,7 @@ class Checker {
                 err(c->loc, "a case value of type " + c->expr->type.str() + " in a switch on " + s.expr->type.str());
               else if (mentions_result_or_local(*c->expr)) err(c->loc, "a case value that is not a constant expression");
               if (c->folded.empty()) err(c->loc, "internal: a case without its front-end value");
-              else if (!literal_fits(c->folded, s.expr->type))
+              else if (!front_end_value_fits(c->folded, s.expr->type))
                 err(c->loc, "the front end's case value '" + c->folded + "' is not a value of " + s.expr->type.str());
               else if (!values.insert(c->folded).second) err(c->loc, "the case value " + c->folded + " appears twice in one switch");
             }
@@ -512,6 +527,7 @@ class Checker {
           if (!e.type.is_bool()) err(e.loc, "`!` has a non-bool type");
         } else {
           if (!e.a->type.is_int()) err(e.loc, "operand of unary arithmetic is " + e.a->type.str() + ", not an integer");
+          else if (is_enum(e.a->type)) err(e.loc, "unary arithmetic on a value of the enumeration " + e.a->type.str() + " (decision 0018 item 6)");
           if (e.type != e.a->type) err(e.loc, "unary arithmetic changes the type");
         }
         break;
@@ -538,6 +554,7 @@ class Checker {
         if (!sub(e.a, false)) break;
         if (!e.a->type.is_bool()) err(e.loc, "bool_to_int of a " + e.a->type.str());
         if (!e.type.is_int()) err(e.loc, "bool_to_int does not give an integer");
+        else if (is_enum(e.type)) err(e.loc, "bool_to_int to the enumeration " + e.type.str() + " (decision 0018 item 5)");
         break;
       case Expr::Kind::ReportAt:
         if (sub(e.a, false) && e.type != e.a->type) err(e.loc, "report_at changes the type");
@@ -569,6 +586,15 @@ class Checker {
     expr(*e.b, ctx, guarded || lazy, st, false);
     const Type& a = e.a->type;
     const Type& b = e.b->type;
+    switch (e.bop) {
+      case BinaryOp::Add: case BinaryOp::Sub: case BinaryOp::Mul: case BinaryOp::Div: case BinaryOp::Rem:
+      case BinaryOp::Shl: case BinaryOp::Shr:
+        // Arithmetic and shifts are computed in the promoted type, which differs between C and C++ for an enumeration
+        // (decision 0018 item 6): the encoder converts or rejects first; this is the backstop.
+        if (is_enum(a) || is_enum(b)) err(e.loc, "arithmetic or a shift on a value of an enumeration (decision 0018 item 6)");
+        break;
+      default: break;
+    }
     switch (e.bop) {
       case BinaryOp::Add: case BinaryOp::Sub: case BinaryOp::Mul: case BinaryOp::Div: case BinaryOp::Rem:
         if (!a.is_int() || a != b) err(e.loc, "arithmetic operands have types " + a.str() + " and " + b.str() + ": both must be the same integer type (EDG's conversions are explicit)");

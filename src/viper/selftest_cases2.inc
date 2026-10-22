@@ -1820,7 +1820,502 @@ void define_named_constant_rejections() {
   });
 }
 
+// Enumerations (decision 0018): a type whose values are its value range, whatever the bits and signedness of its underlying (C++)
+// or compatible (C) type; a conversion into it is one `conversion` obligation over that range, never a wrap.
+void define_enumerations() {
+  // `color`: an unfixed enumeration with the values 0..3 (compatible type `unsigned int` in C); `E8`: `: unsigned char`, 0..255;
+  // `neg`: -2..1 (compatible type `int`).
+  auto color = [](Kit& k) { return k.en("color", 32, false, "0", "3"); };
+  auto e8 = [](Kit& k) { return k.en("E8", 8, false, "0", "255"); };
+  auto neg_enum = [](Kit& k) { return k.en("neg", 32, true, "-2", "1"); };
+
+  lc("enum_param_range_assumed", "f(color c) -> int: a parameter of an enumeration is one of its values on entry, so (int)c is in [0, 3]", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", k.i32, {{"c", c}});
+    k.ens(f, k.range(k.R(f), k.i32, "0", "3"));
+    f->body = k.blk({k.ret(k.cv(k.i32, k.pv(f, 0)))});
+    k.done(f);
+  });
+  lc("enum_param_range_not_narrower", "the same f with ensures result <= 2: color's value 3 breaks it", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", k.i32, {{"c", c}});
+    k.ens(f, k.le_c(k.R(f), k.i32, "2"));
+    const Stmt* r = k.ret(k.cv(k.i32, k.pv(f, 0)));
+    f->body = k.blk({r});
+    k.done(f);
+    k.fail("postcondition", r->loc);
+  });
+  lc("enum_param_negative_range_assumed", "neg n (-2..1): (int)n is in [-2, 1]", [neg_enum](Kit& k) {
+    const Type n = neg_enum(k);
+    Function* f = k.fn("f", k.i32, {{"n", n}});
+    k.ens(f, k.range(k.R(f), k.i32, "-2", "1"));
+    f->body = k.blk({k.ret(k.cv(k.i32, k.pv(f, 0)))});
+    k.done(f);
+  });
+  lc("enum_param_negative_range_not_tighter", "the same with ensures result >= -1: neg's value -2 breaks it", [neg_enum](Kit& k) {
+    const Type n = neg_enum(k);
+    Function* f = k.fn("f", k.i32, {{"n", n}});
+    k.ens(f, k.ge_c(k.R(f), k.i32, "-1"));
+    const Stmt* r = k.ret(k.cv(k.i32, k.pv(f, 0)));
+    f->body = k.blk({r});
+    k.done(f);
+    k.fail("postcondition", r->loc);
+  });
+
+  lc("enum_convert_into_bounded", "(color)x under requires 0 <= x <= 3: no obligation fails", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", c, {{"x", k.i32}});
+    k.req(f, k.range(k.F(f, 0), k.i32, "0", "3"));
+    f->body = k.blk({k.ret(k.cv(c, k.pv(f, 0)))});
+    k.done(f);
+  });
+  lc("enum_convert_into_unbounded", "(color)x with x any int: a `conversion` error at the cast, naming the value range", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", c, {{"x", k.i32}});
+    const Expr* e = k.cv(c, k.pv(f, 0));
+    f->body = k.blk({k.ret(e)});
+    k.done(f);
+    k.fail("conversion", e->loc, 1, "", "may not be one of the values of `color` (0 to 3)");
+  });
+  lc("enum_convert_into_upper_bound_missing", "(color)x under requires x >= 0 only: 4 is not a value", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", c, {{"x", k.i32}});
+    k.req(f, k.ge_c(k.F(f, 0), k.i32, "0"));
+    const Expr* e = k.cv(c, k.pv(f, 0));
+    f->body = k.blk({k.ret(e)});
+    k.done(f);
+    k.fail("conversion", e->loc);
+  });
+  lc("enum_convert_negative_range", "(neg)x under requires -2 <= x <= 1: both ends are values", [neg_enum](Kit& k) {
+    const Type n = neg_enum(k);
+    Function* f = k.fn("f", n, {{"x", k.i32}});
+    k.req(f, k.range(k.F(f, 0), k.i32, "-2", "1"));
+    f->body = k.blk({k.ret(k.cv(n, k.pv(f, 0)))});
+    k.done(f);
+  });
+  lc("enum_convert_negative_range_lower_end", "(neg)x under requires -3 <= x <= 1: -3 is not a value", [neg_enum](Kit& k) {
+    const Type n = neg_enum(k);
+    Function* f = k.fn("f", n, {{"x", k.i32}});
+    k.req(f, k.range(k.F(f, 0), k.i32, "-3", "1"));
+    const Expr* e = k.cv(n, k.pv(f, 0));
+    f->body = k.blk({k.ret(e)});
+    k.done(f);
+    k.fail("conversion", e->loc);
+  });
+  lc("enum_convert_constant_in_range", "(color)3 and (color)0: constants that are values", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", c);
+    f->body = k.blk({k.es(k.cv(c, k.num(k.i32, "0"))), k.ret(k.cv(c, k.num(k.i32, "3")))});
+    k.done(f);
+  });
+  lc("enum_convert_constant_out_of_range", "(color)4: 4 is not one of color's values", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", c);
+    const Expr* e = k.cv(c, k.num(k.i32, "4"));
+    f->body = k.blk({k.ret(e)});
+    k.done(f);
+    k.fail("conversion", e->loc);
+  });
+
+  // A fixed or an unsigned underlying type: the conversion is checked, never wrapped (owner, 2026-10-21).
+  lc("enum_fixed_unsigned_in_range", "(E8)x under requires 0 <= x <= 255 (E8 : unsigned char)", [e8](Kit& k) {
+    const Type e = e8(k);
+    Function* f = k.fn("f", e, {{"x", k.i32}});
+    k.req(f, k.range(k.F(f, 0), k.i32, "0", "255"));
+    f->body = k.blk({k.ret(k.cv(e, k.pv(f, 0)))});
+    k.done(f);
+  });
+  lc("enum_fixed_unsigned_not_wrapped", "(E8)x under requires 0 <= x <= 300: a conversion error for 256..300, not the wrapped value (an unsigned char would wrap)", [e8](Kit& k) {
+    const Type e = e8(k);
+    Function* f = k.fn("f", e, {{"x", k.i32}});
+    k.req(f, k.range(k.F(f, 0), k.i32, "0", "300"));
+    const Expr* c = k.cv(e, k.pv(f, 0));
+    f->body = k.blk({k.ret(c)});
+    k.done(f);
+    k.fail("conversion", c->loc);
+  });
+  lc("enum_fixed_unsigned_negative_not_wrapped", "(E8)-1: a conversion error, not 255", [e8](Kit& k) {
+    const Type e = e8(k);
+    Function* f = k.fn("f", e);
+    const Expr* c = k.cv(e, k.num(k.i32, "-1"));
+    f->body = k.blk({k.ret(c)});
+    k.done(f);
+    k.fail("conversion", c->loc);
+  });
+  lc("enum_fixed_unsigned_value_is_not_the_wrap", "the value (E8)x is x, not x mod 256: ensures result == x holds under x in [0, 255]", [e8](Kit& k) {
+    const Type e = e8(k);
+    Function* f = k.fn("f", k.i32, {{"x", k.i32}});
+    k.req(f, k.range(k.F(f, 0), k.i32, "0", "255"));
+    k.ens(f, k.eq(k.R(f), k.F(f, 0)));
+    f->body = k.blk({k.ret(k.cv(k.i32, k.cv(e, k.pv(f, 0))))});
+    k.done(f);
+  });
+  lc("enum_unfixed_unsigned_source", "(color)u for an unsigned int u: an unsigned source above 3 is a conversion error", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", c, {{"u", k.u32}});
+    const Expr* e = k.cv(c, k.pv(f, 0));
+    f->body = k.blk({k.ret(e)});
+    k.done(f);
+    k.fail("conversion", e->loc);
+  });
+  lc("enum_unfixed_unsigned_source_bounded", "(color)u under requires u <= 3", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", c, {{"u", k.u32}});
+    k.req(f, k.le_c(k.F(f, 0), k.u32, "3"));
+    f->body = k.blk({k.ret(k.cv(c, k.pv(f, 0)))});
+    k.done(f);
+  });
+
+  // Out of an enumeration: the usual rule, relative to its value range.
+  lc("enum_to_narrow_signed_contained", "(signed char)c for color c: [0, 3] is inside [-128, 127], so no obligation (the bits of color are 32)", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", k.i8, {{"c", c}});
+    f->body = k.blk({k.ret(k.cv(k.i8, k.pv(f, 0)))});
+    k.done(f);
+  });
+  lc("enum_to_narrow_signed_not_contained", "(signed char)e for E8 e: 128..255 are not signed char values", [e8](Kit& k) {
+    const Type e = e8(k);
+    Function* f = k.fn("f", k.i8, {{"e", e}});
+    const Expr* c = k.cv(k.i8, k.pv(f, 0));
+    f->body = k.blk({k.ret(c)});
+    k.done(f);
+    k.fail("conversion", c->loc);
+  });
+  lc("enum_to_unsigned_char_contained", "(unsigned char)e for E8 e: the ranges are equal", [e8](Kit& k) {
+    const Type e = e8(k);
+    Function* f = k.fn("f", k.u8, {{"e", e}});
+    k.ens(f, k.eq(k.cv(k.i32, k.R(f)), k.cv(k.i32, k.F(f, 0))));
+    f->body = k.blk({k.ret(k.cv(k.u8, k.pv(f, 0)))});
+    k.done(f);
+  });
+  lc("enum_negative_to_unsigned_wraps_by_c", "(unsigned)n for neg n: out of an enumeration the target's own rule applies: unsigned wraps, so -1 gives UINT_MAX", [neg_enum](Kit& k) {
+    const Type n = neg_enum(k);
+    Function* f = k.fn("f", k.u32, {{"n", n}});
+    k.ens(f, k.implies(k.eq(k.cv(k.i32, k.F(f, 0)), k.num(k.i32, "-1")), k.eq_c(k.R(f), k.u32, "4294967295")));
+    f->body = k.blk({k.ret(k.cv(k.u32, k.pv(f, 0)))});
+    k.done(f);
+  });
+  lc("enum_to_another_enum_contained", "(neg)c for color c under requires c <= 1: color's 0..1 are inside neg's -2..1", [color, neg_enum](Kit& k) {
+    const Type c = color(k);
+    const Type n = neg_enum(k);
+    Function* f = k.fn("f", n, {{"c", c}});
+    k.req(f, k.le_c(k.F(f, 0), c, "1"));
+    f->body = k.blk({k.ret(k.cv(n, k.pv(f, 0)))});
+    k.done(f);
+  });
+  lc("enum_to_another_enum_not_contained", "(neg)c for color c: 2 and 3 are not neg values", [color, neg_enum](Kit& k) {
+    const Type c = color(k);
+    const Type n = neg_enum(k);
+    Function* f = k.fn("f", n, {{"c", c}});
+    const Expr* e = k.cv(n, k.pv(f, 0));
+    f->body = k.blk({k.ret(e)});
+    k.done(f);
+    k.fail("conversion", e->loc, 1, "", "may not be one of the values of `neg` (-2 to 1)");
+  });
+
+  // A value of an enumeration used as a condition: to_bool is `!= 0`.
+  lc("enum_to_bool", "to_bool(c) for color c: true exactly when c != 0, so true implies c >= 1", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", k.bl, {{"c", c}});
+    k.ens(f, k.implies(k.R(f), k.ge_c(k.F(f, 0), c, "1")));
+    f->body = k.blk({k.ret(k.tb(k.pv(f, 0)))});
+    k.done(f);
+  });
+  lc("enum_to_bool_not_stronger", "the same with ensures true implies c >= 2: color 1 breaks it", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", k.bl, {{"c", c}});
+    k.ens(f, k.implies(k.R(f), k.ge_c(k.F(f, 0), c, "2")));
+    const Stmt* r = k.ret(k.tb(k.pv(f, 0)));
+    f->body = k.blk({r});
+    k.done(f);
+    k.fail("postcondition", r->loc);
+  });
+
+  // Comparisons and a switch on an enumeration-typed scrutinee with enum-typed case values.
+  lc("enum_switch_enum_cases", "switch (c) { case 0: return 1; case 2: return 2; default: return 0; } with every value typed color", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", k.i32, {{"c", c}});
+    const int id = k.jid();
+    f->body = k.blk({k.sw(k.pv(f, 0), k.blk({k.cs(k.num(c, "0")), k.ret(k.num(k.i32, "1")), k.cs(k.num(c, "2")), k.ret(k.num(k.i32, "2")), k.dflt(),
+                                             k.ret(k.num(k.i32, "0"))}), id)});
+    k.done(f);
+    k.ens(f, k.implies(k.eq(k.F(f, 0), k.num(c, "0")), k.eq_c(k.R(f), k.i32, "1")));
+    k.ens(f, k.implies(k.eq(k.F(f, 0), k.num(c, "2")), k.eq_c(k.R(f), k.i32, "2")));
+    k.ens(f, k.implies(k.lor(k.eq(k.F(f, 0), k.num(c, "1")), k.eq(k.F(f, 0), k.num(c, "3"))), k.eq_c(k.R(f), k.i32, "0")));
+  });
+  lc("enum_switch_wrong_arm", "the same switch with `case 2` returning 1: the postcondition for color 2 fails at that return", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", k.i32, {{"c", c}});
+    const int id = k.jid();
+    const Stmt* wrong = k.ret(k.num(k.i32, "1"));
+    f->body = k.blk({k.sw(k.pv(f, 0), k.blk({k.cs(k.num(c, "0")), k.ret(k.num(k.i32, "1")), k.cs(k.num(c, "2")), wrong, k.dflt(), k.ret(k.num(k.i32, "0"))}), id)});
+    k.done(f);
+    k.ens(f, k.implies(k.eq(k.F(f, 0), k.num(c, "2")), k.eq_c(k.R(f), k.i32, "2")));
+    k.fail("postcondition", wrong->loc);
+  });
+  lc("enum_switch_no_default_covers_range", "a switch over every value of color with no default: the `check false` after it is unreachable", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", k.i32, {{"c", c}});
+    const int id = k.jid();
+    const Stmt* body = k.blk({k.cs(k.num(c, "0")), k.ret(k.num(k.i32, "0")), k.cs(k.num(c, "1")), k.ret(k.num(k.i32, "1")), k.cs(k.num(c, "2")),
+                              k.ret(k.num(k.i32, "2")), k.cs(k.num(c, "3")), k.ret(k.num(k.i32, "3"))});
+    f->body = k.blk({k.sw(k.pv(f, 0), body, id), k.chk(k.no()), k.ret(k.num(k.i32, "0"))});
+    k.done(f);
+  });
+  lc("enum_switch_missing_value_reaches_the_end", "the same switch without `case 3`: color 3 reaches the code after it, where `check false` fails", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", k.i32, {{"c", c}});
+    const int id = k.jid();
+    const Stmt* body = k.blk({k.cs(k.num(c, "0")), k.ret(k.num(k.i32, "0")), k.cs(k.num(c, "1")), k.ret(k.num(k.i32, "1")), k.cs(k.num(c, "2")),
+                              k.ret(k.num(k.i32, "2"))});
+    const Stmt* never = k.chk(k.no());
+    f->body = k.blk({k.sw(k.pv(f, 0), body, id), never, k.ret(k.num(k.i32, "0"))});
+    k.done(f);
+    k.fail("check", never->loc);
+  });
+  lc("enum_compare_two_values", "a < b || a == b for two color parameters implies a <= b", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", k.bl, {{"a", c}, {"b", c}});
+    k.ens(f, k.implies(k.R(f), k.le(k.F(f, 0), k.F(f, 1))));
+    f->body = k.blk({k.ret(k.lor(k.lt(k.pv(f, 0), k.pv(f, 1)), k.eq(k.pv(f, 0), k.pv(f, 1))))});
+    k.done(f);
+  });
+  lc("enum_compare_wrong_direction", "the same with a > b in the body: the postcondition fails", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", k.bl, {{"a", c}, {"b", c}});
+    k.ens(f, k.implies(k.R(f), k.le(k.F(f, 0), k.F(f, 1))));
+    const Stmt* r = k.ret(k.gt(k.pv(f, 0), k.pv(f, 1)));
+    f->body = k.blk({r});
+    k.done(f);
+    k.fail("postcondition", r->loc);
+  });
+
+  // A trusted function returning an enumeration: its result is one of the values, which the caller may rely on.
+  lc("enum_trusted_result_range", "a bodyless color g(): the caller knows (int)g() is in [0, 3]", [color](Kit& k) {
+    const Type c = color(k);
+    Function* g = k.fn("g", c);
+    k.trusted(g);
+    Function* f = k.fn("f", k.i32);
+    k.ens(f, k.range(k.R(f), k.i32, "0", "3"));
+    f->body = k.blk({k.ret(k.cv(k.i32, k.call(g, {})))});
+    k.done(f);
+  });
+  lc("enum_trusted_result_range_not_narrower", "the same with ensures result <= 2: g() may return 3", [color](Kit& k) {
+    const Type c = color(k);
+    Function* g = k.fn("g", c);
+    k.trusted(g);
+    Function* f = k.fn("f", k.i32);
+    k.ens(f, k.le_c(k.R(f), k.i32, "2"));
+    const Stmt* r = k.ret(k.cv(k.i32, k.call(g, {})));
+    f->body = k.blk({r});
+    k.done(f);
+    k.fail("postcondition", r->loc);
+  });
+  lc("enum_call_argument_is_a_value", "a callee h(color c) requires c != 3 called with (color)x under x in [0, 2]: the cast holds and the precondition holds", [color](Kit& k) {
+    const Type c = color(k);
+    Function* h = k.fn("h", k.i32, {{"c", c}});
+    k.req(h, k.ne(k.F(h, 0), k.num(c, "3")));
+    k.trusted(h);
+    Function* f = k.fn("f", k.i32, {{"x", k.i32}});
+    k.req(f, k.range(k.F(f, 0), k.i32, "0", "2"));
+    f->body = k.blk({k.ret(k.call(h, {k.cv(c, k.pv(f, 0))}))});
+    k.done(f);
+  });
+  lc("enum_call_argument_precondition_fails", "the same with x in [0, 3]: the call's precondition c != 3 fails", [color](Kit& k) {
+    const Type c = color(k);
+    Function* h = k.fn("h", k.i32, {{"c", c}});
+    k.req(h, k.ne(k.F(h, 0), k.num(c, "3")));
+    k.trusted(h);
+    Function* f = k.fn("f", k.i32, {{"x", k.i32}});
+    k.req(f, k.range(k.F(f, 0), k.i32, "0", "3"));
+    const Expr* call = k.call(h, {k.cv(c, k.pv(f, 0))});
+    f->body = k.blk({k.ret(call)});
+    k.done(f);
+    k.fail("precondition", call->loc);
+  });
+
+  // A loop that assigns an enumeration local: the automatic range invariant (decision 0013) gives its range at the loop head.
+  lc("enum_loop_local_auto_invariant", "e = (color)2 in a loop: after it e is a value of color (automatic invariant), so (int)e <= 3", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", k.i32, {{"n", k.i32}});
+    k.req(f, k.range(k.F(f, 0), k.i32, "0", "10"));
+    k.ens(f, k.range(k.R(f), k.i32, "0", "3"));
+    Var* e = k.local(f, "e", c);
+    Var* i = k.local(f, "i", k.i32);
+    f->body = k.blk({k.decl(e, k.cv(c, k.num(k.i32, "0"))), k.decl(i, k.num(k.i32, "0")),
+                     k.whl(k.lt(k.v(i), k.pv(f, 0)), {k.cl(k.range(k.v(i), k.i32, "0", "10"))}, {k.cl(k.gap(k.pv(f, 0), k.v(i)))},
+                           k.blk({k.asg(e, k.cv(c, k.num(k.i32, "2"))), k.asg(i, k.add(k.v(i), k.num(k.i32, "1")))})),
+                     k.ret(k.cv(k.i32, k.v(e)))});
+    k.done(f);
+  });
+  lc("enum_loop_local_not_tighter", "the same loop assigning (color)3 with ensures result <= 2: the postcondition at the return fails", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", k.i32, {{"n", k.i32}});
+    k.req(f, k.range(k.F(f, 0), k.i32, "1", "10"));
+    k.ens(f, k.le_c(k.R(f), k.i32, "2"));
+    Var* e = k.local(f, "e", c);
+    Var* i = k.local(f, "i", k.i32);
+    const Stmt* r = k.ret(k.cv(k.i32, k.v(e)));
+    f->body = k.blk({k.decl(e, k.cv(c, k.num(k.i32, "0"))), k.decl(i, k.num(k.i32, "0")),
+                     k.whl(k.lt(k.v(i), k.pv(f, 0)), {k.cl(k.range(k.v(i), k.i32, "0", "10"))}, {k.cl(k.gap(k.pv(f, 0), k.v(i)))},
+                           k.blk({k.asg(e, k.cv(c, k.num(k.i32, "3"))), k.asg(i, k.add(k.v(i), k.num(k.i32, "1")))})),
+                     r});
+    k.done(f);
+    k.fail("postcondition", r->loc);
+  });
+  lc("enum_loop_local_auto_invariant_hook", "while ((int)e < 1) e = (color)1 with the automatic invariant weakened to [0, 0] (a self-test hook): Silicon rejects it", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", k.vd);
+    Var* e = k.local(f, "e", c);
+    const Stmt* w = k.whl(k.lt(k.cv(k.i32, k.v(e)), k.num(k.i32, "1")), {}, {k.cl(k.sub(k.num(k.i32, "1"), k.cv(k.i32, k.v(e))))},
+                          k.blk({k.asg(e, k.cv(c, k.num(k.i32, "1")))}));
+    f->body = k.blk({k.decl(e, k.cv(c, k.num(k.i32, "0"))), w});
+    k.done(f);
+    k.lower_options.weaken_auto_invariant = true;
+    k.fail("internal", w->loc, 1, "invariant.not.preserved");  // true on entry (e = 0), not preserved by e = 1
+  });
+
+  // An enumeration-typed named constant (decision 0017): its initializer converts into the enumeration and is checked in every prologue.
+  lc("enum_named_constant_initializer_holds", "const color RED = (color)1; the conversion holds, and the internal guard agrees with the front end's value 1", [color](Kit& k) {
+    const Type c = color(k);
+    k.nc("RED", c, k.cv(c, k.num(k.i32, "1")), "1");
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+    k.require_map("internal", "the value of `RED` as written differs from the front end's");
+  });
+  lc("enum_named_constant_out_of_range_front_end_value", "const color BAD = (color)7 (the front end keeps 7, a value of unsigned int but not of color): the conversion is an error at the initializer", [color](Kit& k) {
+    const Type c = color(k);
+    const Expr* init = k.cv(c, k.num(k.i32, "7"));
+    k.nc("BAD", c, init, "7");
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+    k.fail("conversion", init->loc);
+  });
+  lc("enum_named_constant_signed_fixed_fails", "const S8 B = (S8)200 with S8 : signed char (the front end folds -56): the conversion is an error at the initializer", [](Kit& k) {
+    const Type e = k.en("S8", 8, true, "-128", "127");
+    const Expr* init = k.cv(e, k.num(k.i32, "200"));
+    k.nc("B", e, init, "-56");
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+    k.fail("conversion", init->loc);
+  });
+  lc("enum_named_constant_fixed_unsigned_fails", "const E8 W = (E8)300 (the front end folds 44): the conversion is an error, not the wrapped 44", [e8](Kit& k) {
+    const Type e = e8(k);
+    const Expr* init = k.cv(e, k.num(k.i32, "300"));
+    k.nc("W", e, init, "44");
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+    k.fail("conversion", init->loc);
+  });
+}
+
+// The typing rules of decision 0018: an enumeration is a type of its own, and arithmetic on its values is never built.
+void define_enumeration_rejections() {
+  auto color = [](Kit& k) { return k.en("color", 32, false, "0", "3"); };
+  rc("enum_neg_rejected", "unary arithmetic on a value of the enumeration", [color](Kit& k) {
+    Function* f = k.fn("f", k.vd, {{"c", color(k)}});
+    f->body = k.blk({k.es(k.neg(k.pv(f, 0)))});
+    k.done(f);
+  });
+  rc("enum_plus_rejected", "unary arithmetic on a value of the enumeration", [color](Kit& k) {
+    Function* f = k.fn("f", k.vd, {{"c", color(k)}});
+    f->body = k.blk({k.es(k.b.unary(UnaryOp::Plus, k.pv(f, 0), k.at()))});
+    k.done(f);
+  });
+  rc("enum_add_left_operand_rejected", "arithmetic or a shift on a value of an enumeration", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", k.vd, {{"c", c}});
+    f->body = k.blk({k.es(k.add(k.pv(f, 0), k.num(c, "1")))});
+    k.done(f);
+  });
+  rc("enum_sub_right_operand_rejected", "arithmetic or a shift on a value of an enumeration", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", k.vd, {{"c", c}});
+    f->body = k.blk({k.es(k.sub(k.num(c, "2"), k.pv(f, 0)))});
+    k.done(f);
+  });
+  rc("enum_shl_count_rejected", "arithmetic or a shift on a value of an enumeration", [color](Kit& k) {
+    Function* f = k.fn("f", k.vd, {{"c", color(k)}});
+    f->body = k.blk({k.es(k.shl(k.num(k.i32, "1"), k.pv(f, 0)))});
+    k.done(f);
+  });
+  rc("enum_shr_left_operand_rejected", "arithmetic or a shift on a value of an enumeration", [color](Kit& k) {
+    Function* f = k.fn("f", k.vd, {{"c", color(k)}});
+    f->body = k.blk({k.es(k.shr(k.pv(f, 0), k.num(k.i32, "1")))});
+    k.done(f);
+  });
+  rc("enum_bool_to_int_rejected", "bool_to_int to the enumeration", [color](Kit& k) {
+    Function* f = k.fn("f", k.vd, {{"b", k.bl}});
+    f->body = k.blk({k.es(k.bi(color(k), k.pv(f, 0)))});
+    k.done(f);
+  });
+  rc("enum_compound_assign_rejected", "arithmetic or a shift on a value of an enumeration", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", k.vd);
+    Var* e = k.local(f, "e", c);
+    f->body = k.blk({k.decl(e, k.num(c, "0")), k.b.compound_assign(e, BinaryOp::Add, k.num(c, "1"), k.at())});
+    k.done(f);
+  });
+  rc("enum_compound_assign_enum_right_hand_side_rejected", "arithmetic or a shift on a value of an enumeration", [color](Kit& k) {
+    Function* f = k.fn("f", k.vd);
+    Var* x = k.local(f, "x", k.i32);
+    f->body = k.blk({k.decl(x, k.num(k.i32, "0")), k.b.compound_assign(x, BinaryOp::Add, k.num(color(k), "1"), k.at())});
+    k.done(f);
+  });
+  rc("enum_equality_between_two_enumerations", "equality operands", [](Kit& k) {
+    const Type a = k.en("a", 32, false, "0", "3");
+    const Type b = k.en("b", 32, false, "0", "3");
+    Function* f = k.fn("f", k.vd, {{"x", a}, {"y", b}});
+    f->body = k.blk({k.es(k.eq(k.pv(f, 0), k.pv(f, 1)))});
+    k.done(f);
+  });
+  rc("enum_comparison_with_the_underlying_type", "comparison operands", [color](Kit& k) {
+    Function* f = k.fn("f", k.vd, {{"c", color(k)}, {"u", k.u32}});
+    f->body = k.blk({k.es(k.lt(k.pv(f, 0), k.pv(f, 1)))});
+    k.done(f);
+  });
+  rc("enum_assign_int_constant_without_a_conversion", "where", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", k.vd);
+    Var* e = k.local(f, "e", c);
+    f->body = k.blk({k.decl(e, k.cv(c, k.num(k.i32, "0"))), k.asg(e, k.num(k.u32, "1"))});
+    k.done(f);
+  });
+  rc("enum_named_constant_value_outside_the_underlying_type", "is not a value of color", [color](Kit& k) {
+    const Type c = color(k);
+    k.nc("BAD", c, k.cv(c, k.num(k.i32, "7")), "-1");  // color is unsigned: -1 is not a value of its bits either
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+  });
+  rc("enum_named_constant_value_outside_the_fixed_type", "is not a value of E8", [](Kit& k) {
+    const Type e = k.en("E8", 8, false, "0", "255");
+    k.nc("BAD", e, k.cv(e, k.num(k.i32, "300")), "300");  // the front end wraps (E8)300 to 44: 300 is never its value
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+  });
+  rc("enum_case_value_outside_the_underlying_type", "is not a value of color", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", k.vd, {{"c", c}});
+    f->body = k.blk({k.sw(k.pv(f, 0), k.blk({k.b.case_label(k.num(c, "1"), "-1", k.at())}), k.jid())});
+    k.done(f);
+  });
+  rc("enum_constant_out_of_range", "does not fit", [color](Kit& k) {
+    const Type c = color(k);
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({k.es(k.num(c, "4"))});
+    k.done(f);
+  });
+}
+
 void define_calls_loops_and_more() {
+  define_enumerations();
+  define_enumeration_rejections();
   define_named_constants();
   define_named_constant_rejections();
   define_calls();

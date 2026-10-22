@@ -88,7 +88,8 @@ CERASTES_DIAG(unsupported_expression, error,
 CERASTES_DIAG(unsupported_declaration, error,
               "%s is not supported by \"cerastes verify\" (decision 0012)")
 CERASTES_DIAG(unsupported_type, error,
-              "type \"%s\" is not supported by \"cerastes verify\": only integer types and bool are (decision 0012)")
+              "type \"%s\" is not supported by \"cerastes verify\": only integer types, bool and the enumerations of the verified "
+              "files are (decisions 0012 and 0018)")
 CERASTES_DIAG(unsupported_attribute, error,
               "the attribute %s is not supported by \"cerastes verify\": it can change what the code means "
               "(decision 0011 item 7)")

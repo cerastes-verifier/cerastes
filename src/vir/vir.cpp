@@ -48,6 +48,20 @@ const IntType* Program::int_type_of(int bits, bool is_signed) {
   return int_type((is_signed ? "int" : "uint") + std::to_string(bits), bits, is_signed);
 }
 
+const IntType* Program::enum_type(const std::string& name, int bits, bool is_signed, bool is_scoped, const std::string& lo,
+                                  const std::string& hi) {
+  auto t = std::make_unique<IntType>();
+  t->name = name;
+  t->bits = bits;
+  t->is_signed = is_signed;
+  t->is_enum = true;
+  t->is_scoped = is_scoped;
+  t->lo = lo;
+  t->hi = hi;
+  enum_types_.push_back(std::move(t));
+  return enum_types_.back().get();
+}
+
 Function* Program::add_function(std::string c_name, Type ret, SrcLoc loc, SrcLoc end_loc) {
   Function& f = functions_.emplace_back();
   f.id = static_cast<int>(functions_.size()) - 1;
@@ -331,6 +345,8 @@ const Stmt* Builder::block(std::vector<const Stmt*> stmts, SrcLoc loc) {
 
 const Stmt* Builder::compound_assign(const Var* x, BinaryOp op, const Expr* rhs, SrcLoc loc) {
   if (!x->type.is_int() || !rhs->type.is_int()) return assign(x, rhs, loc);  // ill-typed on purpose
+  // An enumeration operand (decision 0018 item 8): the arithmetic on it, which check_program rejects; never promoted here.
+  if (x->type.int_type->is_enum || rhs->type.int_type->is_enum) return assign(x, binary(op, local(x, loc), rhs, loc), loc);
   const IntType* tx = x->type.int_type;
   const IntType* px = promoted(p_, tx);
   const Expr* lhs_value = local(x, loc);
