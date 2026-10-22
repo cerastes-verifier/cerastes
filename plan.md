@@ -352,14 +352,16 @@ valid in both. Strictly C (owner, 2026-10-20): C++ references, `new`/`delete` an
 **Sessions.** Each is planned at ≤ 4 h and lands its decision record (invariant 6), must-verify/must-fail pairs
 (invariant 2) and its docs (invariant 9), with one Opus audit round per diff plus a re-audit of blocking fixes and
 `check.sh` at most twice. `internal/handoff.md` holds each session's tasks, agents, acceptance and stop rules.
-M4.2 was split into M4.2a–c (owner, 2026-10-21): its six constructs did not fit one session. Between M4.2a and
-M4.2b run the EDG upstream merge, CI and mutation triage sessions (above).
+M4.2 was split into M4.2a–c (owner, 2026-10-21): its six constructs did not fit one session; M4.2b was split again
+into M4.2b1 and M4.2b2 (owner, 2026-10-21, M4.2b planning). Between M4.2a and M4.2b1 run the EDG upstream merge, CI
+and mutation triage sessions (above).
 
 | Session | Scope | Needs |
 |---|---|---|
 | **M4.1 Control flow** | `break`, `continue`, `do … while` (`do … while (0)` needs no measure, owner), `switch` (case/default/fallthrough, `[[fallthrough]]`), `for(;;)` left by `break` | — |
 | **M4.2a Jumps and ends** | forward `goto` and labels ("outward and forward": never backward, never into a block, branch, switch body or loop, never past a declaration); `_Noreturn`/`[[noreturn]]` (a new category `noreturn`) with trusted `abort`/`exit`/`_Exit`; `<assert.h>` `assert` checked like `check` | M4.1 |
-| **M4.2b Named constants and enumerations** | `const`/`constexpr` globals (the initializer encoded, EDG's folding not trusted); `case k`/`case N`/`case RED`; enumerations and enumerators (one meaning in both modes) | M4.2a |
+| **M4.2b1 Named constants and case values** | `const`/`constexpr` globals (the initializer encoded, EDG's folding not trusted; checked in a prologue of every method, owner); `case k`/`case N` with case-value obligations checked path-independently; a `do … while` condition that names a variable is a loop | M4.2a |
+| **M4.2b2 Enumerations** | enumeration types (a value range per type, every conversion into it checked) and enumerators (one meaning in both modes); `case RED`; enum-typed constants | M4.2b1 |
 | **M4.2c Locals without an initializer** | a read of an indeterminate value is an error (definite assignment over VIR, or a ghost "defined" flag) | M4.2a |
 | **M4.3 Expressions and sequencing** | the comma operator, assignments as values, `x++` inside expressions, calls in guarded operands and loop conditions, unsequenced calls (C's sequencing rules) | — |
 | **M4.4 Bitwise operators** | `& \| ^ ~` and `&= \|= ^=` on signed and unsigned types (C23 two's complement); a Silicon/Z3 spike first (bounded `Int` definitions vs SMT bit-vector interpretation) | — |
