@@ -4,6 +4,97 @@ Session handoff log, newest first. Each entry says what is done, what is not,
 any surprises, the decision records added and the exact first step for the
 next session.
 
+## M4.2b1 — Named constants and case values (2026-10-21): done on branch `m4.2b1-named-constants`; PR pending
+
+Read `internal/handoff.md` next: the "M4.2b1 is done" owner steps at the top, §6 the M4.2b1 audit notes, §8.1 M4.2b2,
+§11 questions 13–15.
+
+**Owner decisions (2026-10-21, M4.2b planning)**
+- M4.2b is split: **M4.2b1** (this session: named constants, case values; record 0017) and **M4.2b2** (enumerations;
+  the next free record, 0018; M4.2c then 0019). The enum design from the planning review is in handoff §8.1.
+- Named constants and case values are checked in a **prologue at the entry of every method** (not a separate
+  `globals__wf` method); a failing initializer hides the unit's other errors (accepted).
+- For M4.2b2: an out-of-range conversion to an enum with a fixed unsigned base is a `conversion` error. **Relook
+  unsigned wrapping**: integer semantics should model real integers, not how C and C++ support them (handoff §11
+  question 13; memory).
+- No spike of EDG's source sequence lists in M4.2b (§11 question 4 answered).
+
+**Done**
+- **Decision 0017-named-constants**; amends 0010 items 12–13, 0011 items 7 and 13, 0012 items 4 and 12, 0014 items 5–6.
+  Probes P23–P24 and spikes S14–S15 in `il-inventory.md` ("M4.2b1"); il-inventory L1084 corrected (an enumeration is
+  `tk_integer` with `enum_type`).
+- **Named constants:** a file-scope `const` (C++ also `constexpr`), constant-initialized (`initk_static`), in a verified
+  file, a value type, not `thread_local`, not weak, only allow-listed attributes; C's `static const int z;` is 0. A use
+  is EDG's value, in code, contracts, `check`, invariants, measures and (C++) case values; each initializer is encoded
+  as written and checked in every method's prologue (obligations at their lines, then an `internal` guard against
+  EDG's value). Rejected: mutable globals (`reject_global.c` unchanged), `extern const` without a definition, C
+  `const int z;` (common symbol), weak constants and weak functions, dynamic initialization, `thread_local`,
+  `volatile`, other attributes, globals from system files (at the use).
+- **Case values:** checked in the prologue of the function's method and of its `__wf` method (path-independent; an
+  `if (0) switch` or an unsatisfiable `requires` no longer hides a bad case value); the dispatch compares with EDG's
+  value. C++ `case k`/`case N` (a named constant, or a folded `const`/`constexpr` local, transitively) accepted;
+  `reject_case_variable.cpp` retired (pre-approved).
+- **C:** `--diag_error=1901` makes a `const` object in a C constant expression (case label, `_Static_assert`,
+  file-scope initializer) a front-end error (strict ISO C, §11 question 14); the encoder also rejects case values and
+  constant initializers naming an object.
+- **Pragmas** (re-audit, blocking; predates this session): `#pragma clang attribute` applied attributes EDG never
+  records (`loader_uninitialized`, `weak`) with only warning #161. Verify mode makes #161 and #1675 (unrecognized
+  pragmas) errors and rejects EDG's own diagnostic pragmas in verified files (`diagnostic_pragma_in_verify`), which
+  could turn those errors back into warnings.
+- **`do … while (c)`** is a `DoOnce` only when `c` names no variable (`names_object`): one meaning in both modes.
+- **Hook** `perturb_folded` (exit 3 through the internal guards), with harness self-tests.
+- **Code:** `src/backend/encode.cpp` (`encode_named_constants`, `variable()`, `local_const_use`, `names_object`, case
+  values, weak functions, the hook), `src/driver/verify_main.cpp` (#1901, the hook), `src/vir` (`NamedConst`,
+  `Case::folded`, `check_program` rules, the prologue, `closed_expr`), `src/backend/register_attributes.cpp` (the
+  diagnostic-pragma recorder); VIR self-test 230 → 246 lowering cases (87 → 93 rejection cases).
+- **Tests:** 60 new files in `tests/scalar` (8 positives, 22 error twins, 30 rejection tests; both modes where both
+  accept the code), 2 doc examples, harness self-tests for `perturb_folded`; `reject_case_variable.cpp` retired. The
+  positives were strengthened in place after the first mutation run (callers at the boundaries, exact `ensures`, no
+  dead code).
+- **Docs:** Verifying a program (Named constants with two examples, switch, `do`, the single-unit assumption, the
+  rejected list), Integer semantics (constants), Annotations (constants in contracts, `do … while (0)`), Overview.
+
+**Acceptance**
+- `scripts/check.sh` green at `59d6103` (13 min 46 s, one run): self-tests 954 (skipped=1) + 74 + 152 + 225; tests
+  2819 passed, 0 failed, 1 skipped (native-ok: Apple clang 659, GCC 659); 786 `.vpr` lint clean; VIR self-test 246/246
+  (+ 93 rejection cases); walker oracle 134 goldens, 0 failed; docs 0 problems; `mutate.py --validate` 149 tests,
+  4046 mutants, 436 equivalents, 748 in the bucket.
+- Emitted Viper of every pre-existing test (733 `.vpr`) byte-identical to the session's baseline, except the 9 runs of
+  `switch_case_expr.c` and its three twins and of `switch_unsigned_case.c` and its twin, whose case values moved to
+  the prologue (reviewed: obligations and an `internal` guard at entry, dispatch on EDG's value).
+- `--count-error-twins` 149 (141 + 8); `--check-headers` 1049/1049.
+- Mutation: first run over the new positives, the doc example and the two switch tests whose Viper changed: 429
+  mutants, 293 killed, 7 listed equivalents held, 32 safe-direction, 89 unexplained, 8 stillborn; after the positives
+  were strengthened, the 8 positives and the doc example: 277 mutants, 265 killed, 6 safe-direction, **0 unexplained**,
+  6 stillborn, **0 tool failures**; no new list entries.
+- Audits (Opus, one reviewer): 0017 — 2 blocking (weak constants; C tentative definitions with external linkage), 6
+  should-fix, 9 notes, all blocking and should-fix taken; code — 1 blocking (attributes on constants not checked), 2
+  should-fix, taken; re-audit — 1 blocking (`#pragma clang attribute`, unrecognized pragmas), fixed; final re-audit of
+  the pragma fix: 0 blocking.
+- Wall-clock: 22:28–00:20 (planning before).
+
+**Not done / deferred**
+- M4.2b2 (enumerations, handoff §8.1) and M4.2c.
+- Audit notes (handoff §6, M4.2b1): C `_Static_assert` naming a constant under `#pragma diag_suppress 1901`; static
+  assertions are not encoded; messages; #177 noise; `mutate.py` does not mutate constant initializers (the planned
+  extension was cut).
+
+**Surprises**
+- C23 `constexpr` does not parse in this EDG configuration (§11 question 15); EDG folds `const` objects in C as an
+  extension (#1901), so C uses of constants are folded constants too.
+- Silicon continues after a failed assert with its condition assumed (S14 corrected mid-session); the prologue's
+  argument rests on its asserts being closed.
+- The Opus audits found two wrong "verified" results in the first design (weak constants; C tentative definitions,
+  common symbols under clang's default `-fcommon`) and one in the code (attributes such as `loader_uninitialized` on a
+  constant), plus a `#pragma weak f` hole for functions that predates this session.
+- In C++ a `#pragma weak` before any declaration of its name is ignored by clang++ and EDG alike.
+
+**Decision records added:** 0017-named-constants; amended 0010, 0011, 0012, 0014.
+
+**First step for the next session (M4.2b2).** Confirm the owner merged the `mutation-triage` and
+`m4.2b1-named-constants` PRs and CI is green on `main`. Then handoff §8.1 "M4.2b2" (the next free record, 0018): probes
+first (the enum IL facts it lists), with §11 question 13 (unsigned wrapping) in mind.
+
 ## S3 — Mutation triage (2026-10-21): done on branch `mutation-triage`; PR pending
 
 Read `internal/handoff.md` next: the "S3 is done" owner steps at the top, §5 the result, §8.1 M4.2b.

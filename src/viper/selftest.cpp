@@ -41,6 +41,7 @@ struct Expect {
   std::string viper_id;   // restrict to one Viper error id ("" = any)
   std::string msg;        // restrict to checks whose message contains this ("" = any)
   int note_line = -1;     // when >= 0, the map entry must carry a note at this source line
+  int only_hit = -1;      // when >= 0: of the `count` matching checks (in Viper line order) only this one must fail
 };
 
 // A kit for building programs: every node gets a fresh source line, so an expectation can name a node.
@@ -71,6 +72,13 @@ class Kit {
   void fail(const std::string& category, const SrcLoc& l, size_t count = 1, const std::string& id = "",
             const std::string& msg = "") {
     expects.push_back(Expect{category, l.line, count, id, msg});
+  }
+
+  // `count` checks match; only the `index`-th (Viper line order) must fail (the others sit on paths a contract makes vacuous).
+  void fail_only(const std::string& category, const SrcLoc& l, size_t count, size_t index, const std::string& msg = "") {
+    Expect e{category, l.line, count, "", msg, -1};
+    e.only_hit = static_cast<int>(index);
+    expects.push_back(e);
   }
 
   // The same, and the entry's note (the position of the obligation inside a report_at node) must be at `note_line`.
@@ -152,7 +160,20 @@ class Kit {
     return b.loop(c, std::move(inv), std::move(measure), body, step, form, id, at());
   }
   const Stmt* sw(const Expr* scrutinee, const Stmt* body, int id) { return b.switch_stmt(scrutinee, body, id, at()); }
-  const Stmt* cs(const Expr* value) { return b.case_label(value, at()); }
+  // `case value:`; `folded` is the front end's value (decision 0017 item 5).  Empty: a bare Const folds to itself; any other
+  // value folds to "0" (the cases that give a non-constant value test the rejections of other rules).
+  const Stmt* cs(const Expr* value, const std::string& folded = "") {
+    std::string f = folded;
+    if (f.empty()) f = value->kind == Expr::Kind::Const ? value->value : "0";
+    return b.case_label(value, f, at());
+  }
+  // Named constants (decision 0017): a program's, or a function's own (the `const` locals that case values name).
+  NamedConst* nc(const std::string& name, Type t, const Expr* init, const std::string& value) {
+    return prog.add_named_const(name, t, at(), init, value);
+  }
+  NamedConst* lnc(Function* f, const std::string& name, Type t, const Expr* init, const std::string& value) {
+    return f->add_local_const(name, t, at(), init, value);
+  }
   const Stmt* dflt() { return b.case_label(nullptr, at()); }
   const Stmt* brk(int id) { return b.break_stmt(id, at()); }
   const Stmt* cnt(int id) { return b.continue_stmt(id, at()); }
@@ -745,7 +766,9 @@ bool run_lowering_case(const Case& c, const std::string& dir, std::string& probl
                 " in the position map, found " + std::to_string(hits.size());
       return false;
     }
-    for (const MapRow* r : hits) {
+    for (size_t hi = 0; hi < hits.size(); ++hi) {
+      const MapRow* r = hits[hi];
+      if (e.only_hit >= 0 && static_cast<size_t>(e.only_hit) != hi) continue;
       const char* hc = harness_category(r->id);
       if (hc == nullptr) {
         problem = "no harness category for Viper error id " + r->id;

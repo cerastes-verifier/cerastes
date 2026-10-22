@@ -13,4 +13,10 @@ namespace cerastes {
 // table is static, so this may be called more than once.
 void register_cerastes_annotations();
 
+// Verify mode only (decision 0017 item 2): puts a recorder in front of EDG's handlers of the diagnostic pragmas
+// (pk_diag_suppress/remark/warning/error/once/default and pk_diagnostic), by replacing their entries of EDG's
+// `function_pointers` table; each handler then runs unchanged.  Call before edg_main(); the encoder rejects every recorded
+// pragma in a verified file (diagnostic_pragma_in_verify).
+void install_diag_pragma_recorder();
+
 }  // namespace cerastes

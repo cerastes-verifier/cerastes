@@ -11918,6 +11918,29 @@ int g(int n) CERASTES_REQUIRES(n >= 0 && n < 100) CERASTES_ENSURES(r, r == n)
 ONE_FOLDED_CONSTANT = """#include <cerastes.h>
 signed char k(void) CERASTES_ENSURES(r, r == 100) { signed char c = 100; return c; }
 """
+# a named constant whose initializer is not a literal, and a switch with non-literal case values (0017 items 4, 5, 9)
+ONE_NAMED_CONSTANTS = """#include <cerastes.h>
+const int base = 1 << 3;
+int pick(int x) CERASTES_ENSURES(r, r >= 0 && r <= 2)
+{
+  switch (x) {
+  case base: return 1;
+  case base + 1: return 2;
+  default: return 0;
+  }
+}
+"""
+# the same without a named constant: the case values alone
+ONE_CASE_EXPRESSIONS = """#include <cerastes.h>
+int pick(int x) CERASTES_ENSURES(r, r >= 0 && r <= 2)
+{
+  switch (x) {
+  case 1 << 3: return 1;
+  case 2 + 1: return 2;
+  default: return 0;
+  }
+}
+"""
 
 
 @e2e_gate(_real_verifier_available(), "CERASTES_VERIFY missing; run scripts/bootstrap.sh")
@@ -11935,10 +11958,12 @@ class RealDriverTests(unittest.TestCase):
         (cls.tmp / "one.cpp").write_text(ONE_FUNCTION)
         (cls.tmp / "loop.cpp").write_text(ONE_LOOP)
         (cls.tmp / "fold.cpp").write_text(ONE_FOLDED_CONSTANT)
+        (cls.tmp / "named.cpp").write_text(ONE_NAMED_CONSTANTS)
+        (cls.tmp / "cases.cpp").write_text(ONE_CASE_EXPRESSIONS)
 
     def setUp(self):
         self.cwd = Path(tempfile.mkdtemp(dir=self.tmp))
-        for name in ("decl.cpp", "one.cpp", "loop.cpp", "fold.cpp"):
+        for name in ("decl.cpp", "one.cpp", "loop.cpp", "fold.cpp", "named.cpp", "cases.cpp"):
             shutil.copy(self.tmp / name, self.cwd / name)
 
     def run_driver(self, *args, timeout=300):
@@ -11967,7 +11992,7 @@ class RealDriverTests(unittest.TestCase):
         self.assertRegex(run.stdout, r"\Aone\.cpp: verified \(1 function; one translation unit: ")
         self.assertEqual(run.stdout.count("\n"), 1)
         self.assertEqual(sorted(p.name for p in self.cwd.iterdir()),
-                         ["decl.cpp", "fold.cpp", "loop.cpp", "one.cpp"])
+                         ["cases.cpp", "decl.cpp", "fold.cpp", "loop.cpp", "named.cpp", "one.cpp"])
 
     def test_a_declarations_only_file_has_nothing_to_verify(self):
         # twin of the test above: no function with a body is exit 2, never "verified (0 functions)"
@@ -12003,7 +12028,8 @@ class RealDriverTests(unittest.TestCase):
         for hook, program in (("drop_assert", "one.cpp"), ("drop_assert=3", "one.cpp"),
                               ("drop_assert", "loop.cpp"), ("weaken_invariant", "one.cpp"),
                               ("weaken_invariant", "loop.cpp"), ("constant_without_expr", "one.cpp"),
-                              ("constant_without_expr", "loop.cpp")):
+                              ("constant_without_expr", "loop.cpp"),
+                              ("perturb_folded", "named.cpp"), ("perturb_folded", "cases.cpp")):
             with self.subTest(hook, program=program):
                 run = self.run_driver("verify", program, f"--cerastes_verify_selftest={hook}")
                 self.assertEqual(run.returncode, 3, run.stdout + run.stderr)
@@ -12022,11 +12048,44 @@ class RealDriverTests(unittest.TestCase):
         self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
         self.assertEqual(run.stdout, "")
 
+    def test_the_perturbed_named_constants_fail_the_internal_guards(self):
+        # 0017 item 9: perturb_folded moves every named constant's value and every case value to a
+        # neighbouring value, so the `internal` guards (the value as written equals EDG's) fail and the
+        # run ends with exit 3 and names them; the twin is the same program without the hook (exit 0)
+        run = self.run_driver("verify", "named.cpp")
+        self.assertEqual((run.returncode, run.stderr), (0, ""), run.stdout)
+        self.assertRegex(run.stdout, r"\Anamed\.cpp: verified \(1 function; one translation unit: ")
+        run = self.run_driver("verify", "named.cpp", "--cerastes_verify_selftest=perturb_folded")
+        self.assertEqual(run.returncode, 3, run.stdout + run.stderr)
+        self.assertEqual(run.stdout, "")
+        self.assertIn("internal check: ", run.stderr)
+        # a failed closed assert (the prologue's are variable-free) ends the path, although Silicon goes on after
+        # a failed assert that has variables, with its condition assumed: the constant's guard, at its
+        # declaration (line 2), is the only one reported
+        self.assertIn("named.cpp:2: internal check: the value of `base`", run.stderr)
+
+    def test_the_perturbed_case_values_fail_the_internal_guards(self):
+        # the same for a case value alone: the guard is at the case label (line 5), and a run without
+        # the hook verifies
+        self.assertEqual(self.run_driver("verify", "cases.cpp").returncode, 0)
+        run = self.run_driver("verify", "cases.cpp", "--cerastes_verify_selftest=perturb_folded")
+        self.assertEqual(run.returncode, 3, run.stdout + run.stderr)
+        self.assertEqual(run.stdout, "")
+        self.assertIn("cases.cpp:5: internal check: ", run.stderr)
+
+    def test_the_hook_that_perturbs_nothing_is_not_verified(self):
+        # a program with no named constant and no case value gives perturb_folded nothing to move: the
+        # driver refuses to say "verified" for a run in which a hook changed nothing (0011 item 13)
+        run = self.run_driver("verify", "one.cpp", "--cerastes_verify_selftest=perturb_folded")
+        self.assertEqual(run.returncode, 3, run.stdout + run.stderr)
+        self.assertEqual(run.stdout, "")
+        self.assertIn("cerastes: error: ", run.stderr)
+
     def test_keep_vpr_writes_both_files(self):
         run = self.run_driver("verify", "one.cpp", "--keep-vpr")
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
         self.assertEqual(sorted(p.name for p in self.cwd.iterdir()),
-                         ["decl.cpp", "fold.cpp", "loop.cpp", "one.cpp", "one.vpr", "one.vpr.map"])
+                         ["cases.cpp", "decl.cpp", "fold.cpp", "loop.cpp", "named.cpp", "one.cpp", "one.vpr", "one.vpr.map"])
 
     def test_refused_options_are_exit_2_with_one_line(self):
         cases = [

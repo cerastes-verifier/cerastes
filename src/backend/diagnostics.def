@@ -109,6 +109,9 @@ CERASTES_DIAG(call_in_annotation, error,
 CERASTES_DIAG(system_header_pragma_in_verify, error,
               "a \"#pragma ... system_header\" is not allowed in a file that \"cerastes verify\" checks: it would "
               "make the rest of the file a system header, which is never verified (decision 0011 item 4)")
+CERASTES_DIAG(diagnostic_pragma_in_verify, error,
+              "a diagnostic pragma in a verified file: cerastes relies on the front end's errors, which it could "
+              "turn off (decision 0017 item 2)")
 CERASTES_DIAG(missing_decreases, error,
               "%s (decision 0013)")
 CERASTES_DIAG(ensures_on_noreturn, error,

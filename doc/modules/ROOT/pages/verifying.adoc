@@ -218,7 +218,9 @@ A `do` loop runs its body before its first test, so its invariant holds at the
 start of every iteration (on entry, and each time the test is true), and the
 arithmetic of its condition is checked after the body, where the condition is
 evaluated. `CERASTES_INVARIANT` and `CERASTES_DECREASES` are written before
-`do`. A `do { ... } while (0)`, whose body runs once, needs no measure.
+`do`. A `do { ... } while (0)`, whose body runs once, needs no measure; a
+condition that names a variable, even a constant equal to zero, makes it an
+ordinary loop that needs one.
 
 A `switch` evaluates its controlling expression once, with the usual checks,
 and goes to the matching `case` label, to `default`, or past the `switch`.
@@ -226,7 +228,9 @@ Execution falls through from one label's statements to the next until a
 `break`; `+[[fallthrough]];+` (or `+[[gnu::fallthrough]];+`) marks an intended
 fallthrough for compilers that warn about it. Each `case` value is checked as it
 is written, like any constant: `case 1 << 40:` is a `shift` error at the label,
-even where the compiler only warns. cerastes rejects a `case` or `default` label that is not directly
+even where the compiler only warns. The `case` values are checked at the start
+of the function, whether or not the `switch` is reached, and in pass:[C++] they
+may name constants (<<constants>>). cerastes rejects a `case` or `default` label that is not directly
 inside the braces of its `switch` (as in Duff's device), a GNU case range
 (`case 1 ... 3:`), a statement before the first label, a declaration that a
 later label jumps over, and a `switch` with an init-statement or a declaration
@@ -301,6 +305,54 @@ include::example$verifying/assert.c[tag=source]
 
 Here the `requires` keeps `sum` small, the `assert` states a bound that the `requires` guarantees, and the contract pins the result exactly: `r == (a + b) / 2`.
 
+[#constants]
+== Named constants
+
+A `const` variable at file scope (in pass:[C++] also `constexpr`, and at
+namespace scope) whose initializer is a constant can be used anywhere: in code,
+in `CERASTES_REQUIRES`, `CERASTES_ENSURES`, `CERASTES_CHECK`, invariants and
+measures. In pass:[C++] it can also be named in the initializer of another
+constant and be a `case` value, and so can a local `const` or `constexpr`
+variable initialized with a constant (`case LIMIT:`, `case LIMIT + 1:`,
+`case k:`).
+
+[source,c]
+----
+include::example$verifying/named_constants.c[tag=source]
+----
+
+A constant's initializer is checked as you wrote it, like any constant
+(xref:integer-semantics.adoc#constants[Integer semantics]), at the start of every
+function in the file, whether or not the function uses it, so the error is
+reported at the constant even when nothing reads it:
+
+[source,c]
+----
+include::example$verifying/named_constants_error.c[tag=source]
+----
+
+[source,console]
+----
+named_constants_error.c:7: error: shift: the shift count may be negative or at least the width (32 bits) of `int`
+----
+
+Until it is fixed, such an error hides the other errors of the file. The `case` values of a function
+are checked the same way, at its start, so a bad `case` value is reported even
+where the `switch` is never reached.
+
+Rejected: a global variable that is not `const`; a `const` declared `extern`
+and not defined in the file; in C, `const int z;` without an initializer (another
+file may define `z`, and the linker would use its value: write `= 0`, or make it
+`static`); a weak constant (`+__attribute__((weak))+`, `+#pragma weak+`), whose
+value another file may replace; a constant initialized by running code (in
+pass:[C++], an initializer that is not a constant expression, such as
+`const int n = f();`); `volatile` and `thread_local` constants; a global
+declared in a system header. In C, a constant cannot be named where the language
+requires a constant expression (a `case` value, `_Static_assert`, the
+initializer of another file-scope constant): a `const` object is not a constant
+expression in C, although some compilers accept it, so the front end refuses it.
+C23's `constexpr` objects are not accepted by the front end yet.
+
 [#keep-vpr]
 == Keeping the Viper program
 
@@ -337,6 +389,11 @@ Here `two_ids` is verified assuming `next_id` meets its contract. A function
 that has neither a contract nor a body in a verified file cannot be called from
 verified code: the call is rejected, because there is nothing to verify it
 against.
+
+The same holds for constants: a constant's value is the one in this file. In
+pass:[C++] a namespace-scope `const` has internal linkage, so the file that
+defines a function whose contract you trust may give a constant of the same
+name another value; keep such constants in one header that both files include.
 
 == What a result means
 
@@ -404,7 +461,8 @@ The constructs that are rejected in this version are:
   `switch` with an init-statement or with a declaration in its condition, and the
   forms of `switch` listed in <<control-flow>>.
 * *Declarations:* a local with no initializer, `static`, `thread_local` and
-  `extern` locals, global variables (also `const` ones), arrays, classes, unions,
+  `extern` locals, global variables other than the constants of <<constants>>,
+  arrays, classes, unions,
   enumerations, lambdas, templates, `constexpr` and `consteval` functions,
   variadic functions, function pointers, `CERASTES_REQUIRES` on `main`, a
   `main` declared not to return, and `CERASTES_ENSURES` on a function declared
@@ -418,10 +476,16 @@ The constructs that are rejected in this version are:
 * *Expressions:* the bitwise operators (`&`, `|`, `^`, `~`), the comma
   operator, an assignment used as a value, two calls in one expression that are
   not nested in each other (`f(x) + g(y)`), and a call in the second operand of
-  `&&`, `||` or `?:`, or in a loop condition.
+  `&&`, `||` or `?:`, or in a loop condition, and, in C, a variable named where a
+  constant expression is required (a `case` value, `_Static_assert`).
 * *Attributes:* any attribute other than the cerastes ones and `maybe_unused`,
   `nodiscard`, `deprecated`, `likely`, `unlikely`, `fallthrough` and `noreturn`
   (some attributes, such as `assume`, would let you state an unchecked fact).
+* *Pragmas:* a `#pragma` the front end does not recognize (among them
+  `#pragma clang attribute`, which applies attributes the verifier would not
+  see, and `#pragma clang diagnostic` or `#pragma GCC diagnostic`), and the
+  front end's own `#pragma diag_suppress` and its relatives, which could turn the
+  errors cerastes relies on into warnings.
 
 A function with a body but no contract is verified against the default
 contract: its parameters and its result are in the range of their types.

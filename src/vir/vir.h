@@ -179,6 +179,9 @@ struct Stmt {
   std::string label_name;                   // Label: the user's name
   bool from_assert = false;                 // Check: written as C's `assert(e)`: `expr` is typed like code (calls allowed) and a
                                             // failure says `assert` (decision 0015 item 6)
+  std::string folded;                       // Case (not default): the front end's value of the label, a decimal Int literal of the
+                                            // scrutinee's type; the dispatch compares with it and a prologue guard proves `expr` equals
+                                            // it (decision 0017 item 5).  Empty for `default`.
 };
 
 // ---- functions and programs ----------------------------------------------------------------------------------
@@ -191,6 +194,19 @@ struct Var {
   std::string c_type_name;   // the C/C++ spelling of the type, for messages (empty: use type.str())
   bool is_param_copy = false;  // the local copy of a parameter (0012 item 2)
   int param_index = -1;        // for a parameter copy
+};
+
+// A named constant (decision 0017): a file-scope `const` object (global), or a `const` local of a function that a case
+// value names.  Its uses are literals holding `value`; `init` is the initializer as written, checked in the prologue of
+// every method (obligations, then an internal guard that it equals `value`).
+struct NamedConst {
+  int id = 0;                // unique within its list
+  std::string c_name;        // the C/C++ name (messages and the Viper comment)
+  Type type;                 // Bool or Int
+  SrcLoc loc;                // the declaration (the guard's position)
+  const Expr* init = nullptr;  // the initializer as written: call-free, no Local/Result/Formal/Old, exactly `type`;
+                               // null for C's tentative definition (value "0"): nothing is checked
+  std::string value;         // the front end's value, a decimal literal of `type` ("0"/"1" for Bool)
 };
 
 struct Param {
@@ -227,6 +243,11 @@ struct Function {
   // The local copy of parameter `k` that the body reads and assigns (created by add_param).
   const Var* param_var(int k) const { return locals_[param_vars_[static_cast<size_t>(k)]].get(); }
 
+  // The `const` locals a case value of the body names (C++ only; decision 0017 item 6), checked like the program's named
+  // constants, after them, in this function's method and in its `__wf` method.  Definition order = call order.
+  NamedConst* add_local_const(std::string c_name, Type type, SrcLoc loc, const Expr* init, std::string value);
+  const std::deque<NamedConst>& local_consts() const { return local_consts_; }
+
   // Declare a parameter; returns its index.  Also creates its local copy (a `Var` named like the parameter).
   int add_param(std::string name, Type type, SrcLoc loc);
   // Declare a local.  The pointer stays valid for the life of the Function.
@@ -236,6 +257,7 @@ struct Function {
  private:
   std::vector<std::unique_ptr<Var>> locals_;  // all Vars (parameter copies and locals)
   std::vector<size_t> param_vars_;            // index into locals_ of each parameter's copy
+  std::deque<NamedConst> local_consts_;
 };
 
 class Program {
@@ -264,6 +286,10 @@ class Program {
   const std::deque<Function>& functions() const { return functions_; }
   std::deque<Function>& functions() { return functions_; }
 
+  // The unit's named constants (decision 0017), in definition order; every method with a body checks them in its prologue.
+  NamedConst* add_named_const(std::string c_name, Type type, SrcLoc loc, const Expr* init, std::string value);
+  const std::deque<NamedConst>& named_consts() const { return named_consts_; }
+
   // Arena (used by the Builder).
   Expr* new_expr() { return &exprs_.emplace_back(); }
   Stmt* new_stmt() { return &stmts_.emplace_back(); }
@@ -273,6 +299,7 @@ class Program {
   int next_jump_id_ = 1;
   std::deque<std::unique_ptr<IntType>> int_types_;
   std::deque<Function> functions_;
+  std::deque<NamedConst> named_consts_;
   std::deque<Expr> exprs_;
   std::deque<Stmt> stmts_;
 };
@@ -347,7 +374,9 @@ class Builder {
   const Stmt* loop(const Expr* c, std::vector<Clause> invariants, std::vector<Clause> measure, const Stmt* body, const Stmt* step,
                    LoopForm form, int jump_id, SrcLoc loc);
   const Stmt* switch_stmt(const Expr* scrutinee, const Stmt* body, int jump_id, SrcLoc loc);
-  const Stmt* case_label(const Expr* value_or_null, SrcLoc loc);  // null: `default`
+  const Stmt* case_label(const Expr* value_or_null, SrcLoc loc);  // null: `default`; a value needs the folded form below
+  // `value` is the label as written (obligations checked in the prologue); `folded` is the front end's value (decision 0017 item 5).
+  const Stmt* case_label(const Expr* value, std::string folded, SrcLoc loc);
   const Stmt* break_stmt(int target_jump_id, SrcLoc loc);
   const Stmt* continue_stmt(int target_jump_id, SrcLoc loc);
   int jump_id() { return p_.fresh_jump_id(); }

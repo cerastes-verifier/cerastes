@@ -85,9 +85,10 @@ int refuse(const std::string& message) {
 // drop_assert[=N]: drop the N-th assert (default 0); weaken_invariant: fail the automatic range invariants;
 // constant_without_expr: treat a folded constant as having no expression; silicon_timeout: run Silicon with a
 // timeout of zero; abort: abort() inside the back end (a front-end crash); internal_error: an EDG internal error raised from the back end
-// (both exit status 3).
+// (both exit status 3); perturb_folded: move every named constant's value and every case value's front-end value to a
+// neighbouring value of its type, so the internal guards of decision 0017 fail (exit status 3).
 bool is_hook(const std::string& h) {
-  if (h == "drop_assert" || h == "weaken_invariant" || h == "constant_without_expr" || h == "silicon_timeout" || h == "abort" || h == "internal_error") return true;
+  if (h == "drop_assert" || h == "weaken_invariant" || h == "constant_without_expr" || h == "perturb_folded" || h == "silicon_timeout" || h == "abort" || h == "internal_error") return true;
   if (h.rfind("drop_assert=", 0) != 0 || h.size() == 12) return false;
   for (size_t i = 12; i < h.size(); ++i)
     if (h[i] < '0' || h[i] > '9') return false;
@@ -315,8 +316,20 @@ int verify_command(int argc, char** argv) {
   // #546 (a jump bypasses an initialization) is replaced by cerastes's own rejection of every such jump: a switch body
   // declaration that a later case label skips, and a goto past a declaration, both `unsupported_statement` (0014 items 1 and
   // 7; 0015 item 2).  #1305 (a function declared not to return may return) is replaced by the `noreturn` check at every
-  // reachable `return` and closing brace (0015 item 4).
+  // reachable `return` and closing brace (0015 item 4).  #1901 (C: use of a const variable in a constant expression, which EDG
+  // accepts as an extension) is NOT suppressed, and in C mode it is an error: strict ISO C refuses every constant-expression
+  // context (a case value, `_Static_assert`, a file-scope initializer, an array bound) that names an object (C23 6.6p8;
+  // 0017 item 2).  The encoder also rejects a case value and a constant's initializer that name an object itself
+  // (defence in depth: the diagnostic pragmas that could downgrade #1901 are rejected below).
   edg.push_back("--diag_suppress=61,62,63,39,179,68,69,546,940,1305,2803");
+  if (c_mode) edg.push_back("--diag_error=1901");
+  // A pragma EDG does not understand (#161 unrecognized #pragma, #1675 unrecognized GCC pragma) refuses the file: clang may
+  // act on it (`#pragma clang attribute push (__attribute__((weak)), apply_to = ...)`, `#pragma GCC ...`) while EDG records
+  // nothing, so the verified code would not be what runs (0011 item 7, 0017 item 2).  EDG's own diagnostic pragmas
+  // (`#pragma diag_suppress 161`) could turn these errors off again; EDG keeps no IL entry for them, so
+  // install_diag_pragma_recorder() records them as EDG processes them and the encoder rejects each one in a verified file
+  // (diagnostic_pragma_in_verify).
+  edg.push_back("--diag_error=161,1675");
   for (const std::string& d : a.includes) edg.push_back("-I" + d);
   for (const std::string& m : a.macro_options) edg.push_back(m);
   edg.push_back(a.file);
@@ -383,6 +396,7 @@ int verify_command(int argc, char** argv) {
   install_crash_handlers();
   install_terminate_handlers();
   cerastes::register_cerastes_annotations();
+  cerastes::install_diag_pragma_recorder();
   const int edg_status = edg_main(static_cast<int>(edg_argv.size()) - 1, edg_argv.data());
   std::fflush(stderr);
   const std::string diagnostics = slurp(diag_file);

@@ -45,6 +45,16 @@ after S3:**
    `check.sh` as locally.
 2. Merge it. Then M4.2b (§8.1).
 
+**M4.2b1 is done (2026-10-21, branch `m4.2b1-named-constants`, based on S3's tip `426f23d`; result in
+`internal/status.md`).** Named constants (`const`/`constexpr` globals) and case values (C++ `case k`/`case N`) are
+checked in a prologue of every method (record 0017); M4.2b was split into M4.2b1 and M4.2b2 (owner). **Owner steps
+after M4.2b1:**
+1. Merge S3's PR first (`mutation-triage`): this branch contains it.
+2. Push this branch and open its PR: `git push origin m4.2b1-named-constants` (the session never pushes). CI runs
+   `check.sh` as locally.
+3. Answer §11 questions 14 (strict C for `const` objects in constant expressions) and 15 (C23 `constexpr`). Then
+   M4.2b2 (§8.1).
+
 ## 1. State in one paragraph
 
 The owner split M4.2 into **M4.2a** (forward `goto`, functions that do not return, `assert`), **M4.2b** (named
@@ -461,6 +471,29 @@ Deferred (probes in the job's scratch directory are gone; the shapes are given h
 7. The lint's existing "while without decreases" rule reads up to the first `{`, so a quantifier trigger inside an
    invariant would be misread as the loop body. The emitter writes no trigger today (test-mutator).
 
+**M4.2b1 audit notes (2026-10-21, not blocking; every blocking and should-fix item was taken):**
+1. **Static assertions are not encoded** (0010 item 13): `_Static_assert((1 << 40) == 0, "")` verifies with #63
+   suppressed, which clang refuses. (A C `_Static_assert` naming a constant is refused through #1901, and EDG's
+   diagnostic pragmas, which could turn that back into a warning, are now rejected in verified files.) The pragma
+   rule also rejects common harmless pragmas in user code (`#pragma clang diagnostic`, `#pragma GCC diagnostic`):
+   an allow-list of pragmas that cannot change meaning would lift that.
+2. **Messages.** A block-scope `extern const int A;` naming an internal-linkage C++ constant is reported as "a static
+   local variable"; in C, a block-scope `extern` followed by a file-scope `static` tentative definition as "a local
+   variable without an initializer" (both fail closed). A weak function written with the attribute gets two
+   diagnostics (`unsupported_attribute` and `unsupported_declaration`). The rejection texts still end "(decision
+   0012)" (as M4.2a's do).
+3. **`names_object` returns false on a node kind it does not know** (a `decltype(k){}` constant): the cross-mode rule
+   fails open there; still sound, since a `DoOnce` keeps its `internal` guard.
+4. **Verify output noise:** EDG warning #177 ("declared but never referenced") prints for an unused C++ named
+   constant; consider suppressing it in verify mode.
+5. **`perturb_folded`** can make two adjacent case values equal, which `check_program` rejects (exit 2, not 3): a
+   self-test fixture must keep its case values apart (done).
+6. **Several units:** a C++ internal-linkage constant named in a trusted contract may have another value in the
+   defining unit (documented on Verifying a program; the contract manifest is M6).
+7. **`mutate.py` does not mutate namespace-scope initializers** (pinned by `test_mutate.py`), so a constant's own
+   value is never mutated; the planned extension (P2) was cut. Mutating constant initializers would test how the
+   prologue's checks and the uses depend on the value.
+
 ## 7. Known gaps carried
 
 - Termination: a recursion cycle through another unit (0013 item 5) — the contract manifest, M6 (M7 if it does not fit).
@@ -483,7 +516,7 @@ plan (`plan.md`, "Milestone renumbering"): the **new M4 is the rest of C** (stri
 pointers in M4.5a–f, VerCors as the reference); generic templates are **M5** (M5a–M5g); concepts M6; **C++ memory
 and classes M7** (references, `new`/`delete`, classes; G2's parts that need them are deferred there); inventory M8;
 evaluation M9. Session order: M4.1 → M4.2a (owner, 2026-10-21: before CI) → EDG upstream merge (§4.1) → CI (§4.2) →
-mutation triage (§5; done 2026-10-21) → M4.2b → M4.2c → M4.3 … M4.8 → M5a … M5g → M6.
+mutation triage (§5; done 2026-10-21) → M4.2b1 → M4.2b2 → M4.2c → M4.3 … M4.8 → M5a … M5g → M6.
 
 **Rules for every session below** (memory `session-size-few-hours`): planned at ≤ 4 h with fixed scope and stop
 rules; owner decisions and pre-approved expectation changes asked up front; the decision record before code
@@ -513,36 +546,75 @@ block, branch, switch body or loop; never past a declaration); `[[noreturn]]`/`_
 reachable return asserts false, category `noreturn`); trusted libc `abort`/`exit`/`_Exit`; `<assert.h>` `assert`
 recognised by the macOS expansion's shape and checked as `check`. See `internal/status.md` for what landed.
 
-**M4.2b Named constants and enumerations** (record 0017; 0016 is CI's).
-- `const`/`constexpr` globals, constant-initialized, defined in a verified file: uses take EDG's folded value as a
-  literal; a `globals__wf` method encodes each initializer by its original expression (used or not), asserts its
-  obligations at the initializer, then asserts equality with EDG's value as `internal` (as `DoOnce` does). Also: C's
-  `const int g;` (tentative, zero), const globals in contracts and annotations (`variable()` rejects them in
-  contracts today, `encode.cpp:642`), `const int g = g + 1` (C++), a self-test hook perturbing the literal (exit 3).
-  Rejected: `extern const` without a definition here, dynamic initialization, system-file globals, `volatile`,
-  `static const` locals (M4.5b with the other statics).
-- **Cross-mode trap (review, blocking):** a const global in a `do … while` condition is a folded constant 0 in C++
-  (`DoOnce`, no measure) but an `enk_variable` in C (a measured loop): a global in the condition must never make a
-  `DoOnce`, in either mode (0014 item 5's argument relies on it).
-- `case k` (const local), `case N` (const global), `case RED` (enumerator): `vir::Var::is_const`, `check_program`
-  rejects an `Assign` to a const local and accepts only const locals in case values (`check.cpp:317`), an `internal`
-  guard per case value against EDG's `case_value`. Case-value obligations are path-dependent today (asserted before
-  the dispatch, `lower.cpp:563-579`; an `if (0) switch` skips `case 1 << 40`, a C 6.6p4 constraint violation): assert
-  them path-independently.
-- Enumerations, one meaning (the stricter rule in both modes): an enum type's values are its C++ value range
-  ([dcl.enum]/8, computed by cerastes; the underlying type's range when fixed), every conversion to an enum type is
-  checked against it (`conversion`); enumerators are `int` constants (with a fixed underlying type, the enum's type,
-  in C23 and C++); enumerator values not fitting `int` rejected; implicit promotion of a non-constant enum operand in
-  arithmetic or ordering comparisons rejected (C promotes `unsigned int`-compatible enums to `unsigned int`, C++ to
-  `int`), `==`/`!=`/`switch`/assignment/explicit casts allowed (mode-independent while every enum value is in its
-  value range); compound assignment and `++`/`--` on enums rejected (they bypass EDG's conversion nodes in C, 0010
-  item 6); a `bool` underlying type rejected; `enum class` (C++) accepted. Enumerators without an initializer have no
-  `expr`.
-- Probe P25: EDG's compatible type for C enums with and without negative enumerators (clang/GCC are not evidence),
-  enumerator types per mode, fixed underlying types, the conversions EDG inserts; fix il-inventory's contradiction
-  (L1084 "`tk_enum`" vs L1344 "`tk_integer` with `enum_type`").
+**M4.2b split into M4.2b1 and M4.2b2** (owner, 2026-10-21, M4.2b planning: constants, case values and
+enumerations did not fit one ≤ 4 h session).
 
-**M4.2c Locals without an initializer** (record 0018). Recommended (review): definite assignment over VIR — one
+**M4.2b1 Named constants and case values** (record 0017; run 2026-10-21). `const`/`constexpr` globals defined in a
+verified file and constant-initialized; uses take EDG's folded value as a literal (bodies, contracts, annotations,
+case values); each initializer is encoded by its original expression and checked in a **prologue at the entry of
+every method** (owner, replacing the planned separate `globals__wf` method), with an `internal` guard against EDG's
+value; case values (`case k` with a const local, `case N` with a const global) checked in the same prologue, so
+path-independently; a `do … while` condition that names a variable is a measured loop in both modes (the cross-mode
+trap); hook `perturb_folded`. See `internal/status.md` for what landed.
+
+**M4.2b2 Enumerations** (the next free record, 0018; designed in the M4.2b planning, 2026-10-21; owner answers
+below). Retirement pre-approved: `reject_enum.c`.
+- **Owner (2026-10-21):** an out-of-range conversion to an enum with a fixed unsigned underlying type
+  (`enum E : unsigned char`, `(enum E)300`) is a `conversion` error, like every conversion into an enum. **Note to
+  relook:** wrapping like unsigned in general (0010's modular unsigned arithmetic): *integer semantics should model
+  real integers, not how C and C++ support them* (§11 question 13).
+- **VIR:** `IntType` gains `is_enum`, `is_scoped`, `lo`, `hi`; `Program::enum_type(...)` always makes a new type in
+  its own store (never through `int_type()`'s interning by shape, whose "first name wins" could return an enum for
+  `unsigned int`); the encoder caches one type per `skip_typerefs(t)`; `Type` equality for enums is identity;
+  `dec::range_of` returns the value range (so formals, results, `__wf`, the automatic loop invariants, Const range
+  checks and `convert`'s containment test follow); `convert` into an enum: `range_obligation`, category `conversion`
+  ("the value may not be one of the values of `enum color` (0 to 3)"), never `c_wrap`; `check_program` rejects
+  arithmetic and unary operators on an enum operand and `BoolToInt` to an enum; `compound_assign`/`inc_dec` on an enum
+  build VIR that `check_program` rejects (they compute in `unsigned` today). Emitted Viper of existing tests must stay
+  byte-identical.
+- **Value range** (`enum_range()` in the encoder): fixed (`has_explicit_enum_base` or `is_scoped_enum`: a scoped enum
+  without a base has underlying type `int`, [dcl.enum]/5) → the underlying type's range; unfixed → [dcl.enum]/8 over
+  `enum_info.constant_list` ({0} and an empty C++ enum give [0, 1]; {0..2} [0, 3]; {−1, 0, 1} [−2, 1]), computed in
+  `dec` strings; C gets the same (stricter than C). Rejected at the declaration: an enumerator outside `int`, a `bool`
+  base, an incomplete unfixed type; block-scope enums stay rejected; enums from system headers rejected (M8).
+- **Accepted:** enum parameters, results, locals, const globals, `old`, `decreases`; every `eok_cast` into an enum
+  (checked); casts to `bool`; explicit casts from an enum; an implicit enum → integer cast only (i) as a direct
+  operand of `==`/`!=`, (ii) as the switch scrutinee, (iii) as a whole initializer, assignment right-hand side,
+  argument or return value, (iv) when its operand is an enumerator reference; enumerator references become literals
+  with EDG's value, intercepted at the top of `constant_value` (before `c->expr` is read, so the initializer is not
+  encoded at each use); enumerator initializers checked in the M4.2b1 prologue; scoped enums: switch, `==`/`!=`, and
+  ordering of two raw operands of one scoped enum.
+- **Rejected** (`unsupported_expression` at the cast unless noted): any other implicit enum → integer cast
+  (arithmetic, ordering, unary, shift operand or count, `?:` arms), `?:` of enum type, compound assignment and
+  `++`/`--` on an enum or with an enum right-hand side; `bool` base, an enumerator outside `int`
+  (`unsupported_declaration`); system enums (`unsupported_type`).
+- **One meaning:** every enum value lies in its value range (checked conversion, enumerator, `requires`, `ensures`),
+  which lies in `int` (and in `unsigned` when non-negative), so `==`/`!=`/switch, conversions out of an enum and
+  enumerator arithmetic agree in C and C++. `.cpp` only: `enum class`, `E::A`, `static_cast`, empty enums. c23 only:
+  implicit int → enum, `e++`, `e += 1` (rejections), an enumerator initializer C++ refuses.
+- **Probe first** (il-analyst, both modes; P-numbers continue after M4.2b1's): the type entries (`int_kind`, `size`,
+  `base_type`, `constant_list`/`assoc_scope`), C's compatible type with and without negative enumerators, the type of
+  an enumerator constant per mode (`affiliated_type` in C), how a use is linked to its enumerator (pointer equality
+  with the `constant_list` entry or another flag), every conversion node EDG inserts (`compiler_generated`, target),
+  C++ promotion of `A + 1` and `e + 1`, the scoped switch's scrutinee and case types, EDG's enum warnings. Fix
+  il-inventory L1084 (`tk_enum` = `tk_integer`, `il_def.h:5583`; done in M4.2b1). **Stop rules:** enumerator uses
+  that cannot be identified by pointer or flag → stop and ask (no value or position heuristic); C++ promoting an
+  unfixed enumerator to anything but `int` → stop; C leaving enum operands without conversion nodes → amend the
+  record before code (the encoder inserts the conversion only in the four allowed places).
+- **Tests** (twins in `negative/`): `enum_switch.c` (`case RED`), `enum_conv_cast.c` (`(enum color)x`, 3 is in range
+  but not an enumerator) and its `conversion` twin, a negative-enumerator range, `enum_to_int.c`, `enum_eq.c`,
+  enumerator arithmetic, `enum_contract.c` (precondition and postcondition twins), `enum_fixed.c` (`: unsigned char`,
+  `conversion`, not a wrap), `enum_class.cpp`, `enum_loop.c`, `enum_bool_conv.c`, an enumerator initializer checked
+  (`(signed char)300` → `conversion` at the enum line), unnamed and empty enums; rejections for each rejected shape.
+  `native-ok`: switches cover every enumerator or have a `default`; out-of-range values non-constant.
+- **Docs:** integer-semantics (an Enumerations section with examples; the Conversions table), verifying (the
+  not-supported list; a trusted function returning an enum is assumed to return one of its values), overview,
+  error-messages (`conversion` on enum targets).
+- **Estimate** about 1 h 45 min of work. **Cut order** (each stays rejected with a diagnostic): scoped ordering
+  comparisons, `enum class`, fixed bases, empty enums, enum-typed const globals. Never cut: the conversion check, the
+  promotion rule, enumerator recognition, the initializer check.
+
+**M4.2c Locals without an initializer** (the next free record: 0019 if M4.2b2 takes 0018). Recommended (review): definite assignment over VIR — one
 forward pass suffices because every jump is forward (intersection at joins and labels; a loop head's state is its
 entry state); no new category; the rejection names the read. Alternative: a ghost "defined" flag per local with
 category `uninitialized` (flags false at method entry, since Viper locals start arbitrary, `emit.cpp:181`; reads
@@ -791,7 +863,9 @@ Each has a recommended answer. Answer inline, as before.
 4. **EDG's source sequence lists** (`GENERATE_SOURCE_SEQUENCE_LISTS`) would make "who wrote the noreturn flag" and
    "declared only in system files" exact (§6, M4.2a audit note 1). It is an EDG configuration change (decision 0002;
    IL layout and goldens). Evaluate it in M4.2b's planning (named constants also care where a declaration is)?
-   *Recommended: yes, as a spike there; until then the attribute-entry check stands.*
+   *Recommended: yes, as a spike there; until then the attribute-entry check stands.* **Answered (owner, 2026-10-21,
+   M4.2b planning): not in M4.2b** (named constants do not need it: a global first declared in a system file is
+   rejected, and an initializer is checked by its original expression wherever it is); revisit for M4.5b or M5b.
 5. **A `goto` into a block or an `if` branch** stays rejected (0015 item 2; stricter than C). Lift it only when a
    ported example needs it, after a Silicon spike with must-fail twins? *Recommended: yes.*
 
@@ -823,3 +897,27 @@ Each has a recommended answer. Answer inline, as before.
     every new rule of the bucket needs its own audit.*
 12. **A full mutation run in CI:** about 85 min at `-j 10` locally, far more on the 3-core runner. Keep it a
     per-session acceptance step, with `--validate` in `check.sh`? *Recommended: yes, keep it out of CI.*
+
+**M4.2b planning, 2026-10-21:**
+
+13. **Relook unsigned wrapping** (owner note, 2026-10-21, with the M4.2b2 answer that a conversion into a fixed
+    unsigned enum is checked, not wrapped): *model integer semantics on real integers, not on how C and C++ support
+    them.* Today 0010 makes unsigned arithmetic and conversions to unsigned types modular. A later session (M4.4's
+    bitwise record, or its own) decides whether wrapping becomes an error by default, with an explicit way to ask for
+    modular arithmetic. *Recommended: decide it in its own short session before M4.4, since bitwise operators on
+    unsigned types depend on it.*
+
+**M4.2b1, 2026-10-21:**
+
+14. **A `const` object in a C constant expression** (0017 item 2; the audit's S1, decided by the orchestrator to keep
+    the session going). EDG accepts it with the discretionary warning #1901; M4.2b1 makes #1901 an error in C
+    (`--diag_error=1901`), so C programs naming a `const` in a case label, a `_Static_assert` or another file-scope
+    constant's initializer are refused (strict ISO C; clang and GCC accept `const int B = A + 1;` at file scope as an
+    extension, GCC refuses the static assertion). The alternative keeps the warning suppressed and has cerastes reject
+    only the contexts it cares about (case labels; initializers would then be accepted). Keep the strict rule?
+    *Recommended: yes — one rule, portable C, and C programmers write such constants as enumerators (M4.2b2) or
+    macros.*
+15. **C23 `constexpr` objects do not parse** in this EDG configuration (P23: warning #77, errors #65/#20), although
+    C23 has them; with them, `case N:` would be valid C. Record it as an M8 inventory entry and check whether upstream
+    EDG supports C23 `constexpr` (an option, or a later version), or treat it as an EDG issue to draft? *Recommended:
+    an M8 entry now; check upstream's C23 status when the next upstream merge runs.*

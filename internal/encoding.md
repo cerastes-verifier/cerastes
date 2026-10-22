@@ -2,8 +2,9 @@
 
 Developer reference for the encoder (plan.md: "Design VIR and document it in `encoding.md`"; it grows each
 milestone). The decisions behind it are 0010 (integer semantics), 0011 (driver), 0012 (scalar encoding), 0014
-(control flow), 0015 (forward `goto`, functions that do not return, `assert`). This file says *how*; those records
-say *what* and *why*. Status: M3 (scalar code), M4.1 (control flow) and M4.2a. Sections marked *(M3-n)* are
+(control flow), 0015 (forward `goto`, functions that do not return, `assert`), 0017 (named constants and case values).
+This file says *how*; those records say *what* and *why*. Status: M3 (scalar code), M4.1 (control flow), M4.2a and
+M4.2b1. Sections marked *(M3-n)* are
 filled in at that checkpoint.
 
 ## 1. Pipeline and layering
@@ -59,7 +60,12 @@ Front-end agnostic. The encoder builds a `Program` with a `Builder`; `check_prog
 - `Function { id, c_name, params[], ret, requires[], ensures[], body?, trusted_reason, loc, end_loc }`; a null
   body is a trusted contract (`trusted_reason` required). Each parameter has a *local copy* (`param_var(k)`)
   that the body reads and assigns; contracts read the formal (`Formal(k)`, the entry value).
-- `Program { functions }`.
+- `Program { functions, named_consts }`. Since M4.2b1 (decision 0017) a **`NamedConst { id, c_name, type, loc, init?, value }`**
+  is a `const` global of the unit (`Program::add_named_const`) or a `const` local that a case value names
+  (`Function::add_local_const`): `init` is the initializer as written (null for C's tentative definition), `value` is the
+  front end's value (a decimal literal of `type`, `0`/`1` for `bool`). A use of a named constant is an ordinary `Const`
+  of that value; there is no `Expr` kind for it. `Case` also carries **`folded`**, the front end's value of the label
+  (`Builder::case_label(value, folded, loc)`), a decimal literal of the scrutinee's type; empty only for `default`.
 - **Compound assignment, `++`, `--` are expanded by the Builder** (`compound_assign`, `inc_dec`), not by the
   encoder, so that the promotion rules exist in one place (`promoted`, `usual_arithmetic` in `vir.cpp`): the IL
   does not give the computation type (0010 item 6). `x op= e` is `x = (T)((C)x op (C)e)`; shifts convert only
@@ -83,10 +89,14 @@ Front-end agnostic. The encoder builds a `Program` with a `Builder`; `check_prog
   one another (no call is evaluated before another call outside its arguments); a `void` call is the whole
   of an `ExprStmt`;
 - a function without a body has a `trusted_reason`;
+- **named constants** (0017): `init`, when present, is call-free, mentions no `Local`, `Formal`, `Result` or `Old`, and
+  has exactly the constant's type; `value` is a literal of that type; a constant without `init` has value `0`; a
+  function without a body has no local constants;
 - **control flow** (0014): jump ids are unique; a `Break`/`Continue` names its innermost target (anything else is an
   internal inconsistency); a `Case` stands directly in its switch's body, which starts with a `Case`, has no `Decl`
   before a later `Case` and at most one default; a case value is a call-free, local-free Int expression of exactly
-  the scrutinee's type (constant values distinct); the scrutinee is Int and may contain calls (evaluated once, as a
+  the scrutinee's type; every non-`default` `Case` has `folded`, a literal in the scrutinee type's range, and the
+  `folded` values are distinct; the scrutinee is Int and may contain calls (evaluated once, as a
   `Decl` initializer); `While`/`DoWhile` need a measure, a `DoOnce` none; a `DoOnce`'s condition is rejected if it reads
   a local, calls a function or folds cleanly to a non-zero value, and accepted when the checker cannot fold it (its
   obligations and lowering's internal `assert !c` decide); no calls in any loop condition; `step` only on a `While`-form loop.
@@ -138,13 +148,34 @@ loop's own invariant, condition-obligation and measure clauses are checked there
 A `DoOnce` is no loop: its invariants (with their obligations) are asserted at entry as `invariant-entry` and its
 measure's obligations there too, then `body; label l_cont__N; assert <obligations of c>; assert !c` (category
 `internal`) `; label l_brk__N`. A `Switch` lowers its scrutinee like any expression into a temporary (obligations
-placed by the call rule), asserts each case value's obligations unconditionally at its label, dispatches with
-`if (t == value) { goto l_case__N_i }` in source order and then `goto l_default__N` or `goto l_brk__N`, and places a
+placed by the call rule), dispatches with
+`if (t == folded) { goto l_case__N_i }` in source order (the front end's value, nothing asserted: the case values are in
+the method's prologue, below) and then `goto l_default__N` or `goto l_brk__N`, and places a
 label at each `Case` marker. The automatic range invariants of a loop include the locals assigned in its `step` and
 in switch bodies. `lint_viper.py` rejects a backward `goto`, a label carrying invariants and a duplicate label.
 A user `Goto` is `goto l_user_<name>__N` and its `Label` is `label l_user_<name>__N`, emitted only when a `goto`
 targets it. Since M4.2a `lint_viper.py` checks every `goto` (generated or user) at token level: its label must come
 later, inside braces that also enclose the `goto` (so no jump into a loop body or an `if` branch).
+
+**The prologue** (M4.2b1, decision 0017 items 4 and 5). Every method that has a body, each function's method and
+each `__wf`, begins, right after the copies of the parameters (at the start of the body in `__wf`), with:
+(1) for each `NamedConst` of the program in definition order: `init` lowered like any expression, its obligations asserted
+at their own positions, then an `internal` guard `assert <init> == <value>` at the constant's `loc` (message "internal
+check: the value of `X` as written differs from the front end's"); the guard is omitted when `init` is a bare `Const`
+equal to `value`, and a constant without `init` has neither; (2) the function's own local constants, the same way;
+(3) each `Case` of the function's body in source pre-order (a nested switch's labels
+included), its value's obligations asserted re-positioned at the label, with the note "in the value of this case label"
+when an obligation's own position is on another line (decision 0014 item 6), then an `internal` guard `assert <value> ==
+<folded>` at the label (message "internal check: case value as written differs from the front end's"), omitted when the
+value is a bare `Const` equal to `folded`. Each case's guard follows that case's own obligations. Items (2) and (3) are
+emitted in the function's own method **and in its `__wf` method** (which exists exactly when the function has a user
+`requires`, `ensures` or `decreases` and assumes only the type ranges), with identical metas, so the driver's removal of
+identical reports leaves one error; this is how a case value of a function whose `requires` is unsatisfiable (`requires
+x > 0 && x < 0`, which makes its own method vacuous) is still checked. A prologue expression is closed: if lowering one
+finds a call, a `Formal`, `Old`, `Result` or `Local`, that is an internal lowering error (`LowerResult::errors`), never a
+dropped call or an out-of-range index. The obligations and guards are closed formulas (no variable), so Silicon, which assumes a failed assert's condition, stops the path at the
+first failure and reports nothing after it; a function whose switches have only literal case values, and a program without
+named constants, lower exactly as before.
 
 **Returns.** `return e` assigns `res`, asserts each `ensures` clause (`postcondition`, at the `return`, note at
 the clause), and jumps to `l_end`. The end of the body appends `assert false` (`missing-return`) for a
@@ -175,6 +206,7 @@ method f_f__0(p_a__0: Int, p_b__1: Int) returns (res: Int)
   var v_a__0: Int                                          // every local and temporary, at the top
   var t__0: Int
   v_a__0 := p_a__0                                         // the parameters' local copies (0012 item 2)
+  assert <closed obligation>                               // the prologue: named constants, case values, their guards (0017)
   assert <guard ==> obligation>                            // one check per line
   t__0 := f_g__1(args)                                     // a hoisted call
   res := <value>
@@ -210,6 +242,9 @@ One line per check, tab-separated, UTF-8, `\n`-terminated:
 - `<category>` is a driver category (0011 item 10) for a check the user can cause, and `internal` for what only an
   encoder bug can make fail (Silicon's own check of a precondition at a call or of a postcondition, the
   well-formedness of a clause, an automatic range invariant): the driver exits with status 3.
+- The two guards of M4.2b1 are `internal` entries on an `assert` line: "the value of `X` as written differs from the
+  front end's" (at the constant's declaration) and "case value as written differs from the front end's" (at the case
+  label). A failing guard means EDG's folding and cerastes's reading of the same expression disagree: exit 3.
 - The driver matches each Silicon error by its `.vpr` line and id; no match is exit 3 (0011 item 11).
 - The driver's classifier of Silicon's messages and the harness's (`_VIPER_ERRORS`) are two copies of one
   table pinned to the Silicon version; a self-test runs both on the same recorded outputs and requires
@@ -248,6 +283,12 @@ The IL facts each rule relies on (node kinds, fields, conversions) are recorded 
 - Parameters: contracts use `enk_param_ref` (`{k,0}` in `requires`, `{k,1}` in `ensures`, the result binder
   `{1,0}`); bodies and statement annotations use `enk_variable`, linked to parameter `k` by
   `variable.assoc_param_type`.
+- Named constants (M4.2b1, P23–P24): a constant-initialized file-scope variable is `initk_static` with its value in
+  `initializer.constant`; every use of it, in both modes, is a folded constant whose `expr` chain ends at the
+  `enk_variable`; C's tentative `static const int z;` is not folded (its uses are variable reads); a local
+  `const int k = 5;` is `initk_dynamic` with its value in the `stmk_init`'s `dik_constant`; a case value naming a
+  constant is a constant of the promoted scrutinee type whose `expr` chain reaches the variable; weak constants and
+  functions carry `is_weak`/`is_weakref` (`#pragma weak` leaves no attribute entry).
 
 **Positions of obligations.** An operator's obligation is reported at the operator node's `position` (the
 operator token); a call's at its `position` (the `(`); a conversion's at the conversion node, or at the
@@ -267,7 +308,8 @@ fail closed. Positions of nodes are mapped through `diag_position` (0006 item 10
 
 **Declarations (rejected with `unsupported_declaration`, at the declaration's first line).** In a verified file: a
 class, struct, union or enumeration (a lambda's closure class is reported at the lambda expression instead); a global
-variable, `const` and `constexpr` ones included; a file-scope `asm`; a template; a `constexpr` or `consteval`
+variable that is not a named constant (below); a weak function (`is_weak`/`is_weakref`, 0017 item 2); a file-scope
+`asm`; a template; a `constexpr` or `consteval`
 function; a variadic function; a function without a prototype; a `static`, unnamed-namespace or `inline` function
 that is declared (with a contract, say) and not defined in the file (no other unit can define it, so its contract
 would be trusted for nothing); locals that are `static`, `extern` or `thread_local`, arrays and VLAs, locals without
@@ -298,8 +340,23 @@ routines and the spec functions are skipped (their bodies are not encoded); a ca
 `spec_call_in_code`. `requires` on `main` is `contract_on_main`. Attributes are held to the allow-list of 0011 item 7
 on routines, parameters, locals and statements of verified code (`unsupported_attribute`, `unrecognized_attribute`).
 
+**Named constants** (0017). `encode_named_constants` runs after the declaration checks and classifies each file-scope
+variable of a verified file, in source order: `const` (or `constexpr`), a value type, not `thread_local`, not weak,
+and `initk_static` with an integer constant (or, in C, `static` with no initializer: value 0) makes a named constant,
+whose initializer is encoded through the folded-constant path (original expression, `const_depth`, calls rejected)
+and added with `Program::add_named_const` (EDG's value as `value`); anything else is rejected at its declaration
+(mutable, `extern` without a definition, a C tentative definition with external linkage, dynamic initialization,
+`thread_local`, weak, a static data member, an initializer of another type, a constant named in its own initializer;
+`volatile` and other types through `vtype`). `variable()` looks the variable up in that table first, in every mode
+and context (contracts included), and gives a literal of EDG's value; a file-scope variable of a system file is
+rejected at its use. While a C++ case value is encoded, a `const`/`constexpr` local whose declaration recorded a
+constant initializer becomes a function local constant once (`Function::add_local_const`), its initializer encoded
+the same way; the case label carries EDG's `case_value` as `folded`. Verify mode passes `--diag_error=1901` in C,
+so a C constant expression that names an object never reaches the encoder (its own C case-value rejection is an
+unreached backstop).
+
 **Contracts.** A `requires` or `ensures` argument is encoded in contract mode: `enk_param_ref` is `Formal(k)` (or the
-result binder), a variable reference is rejected, a call is `call_in_annotation` except `cerastes::old`, which the IL
+result binder), a named constant is its value, any other variable reference is rejected, a call is `call_in_annotation` except `cerastes::old`, which the IL
 shows as a dereference of a call whose argument is a reference to a parameter reference and is encoded as `Old`. The
 same mode applies to the arguments of `check` and `invariant` (code mode, but calls are `call_in_annotation`).
 
@@ -311,8 +368,9 @@ source text.
 
 **Constants** (0010 item 12). An `enk_constant` of kind integer is encoded by its original expression
 (`expr_node_from_constant`) when it has one: operations and conversions as written, a reference to a local `const`
-variable as that local, `sizeof`/`alignof` by value; a call in it (a compile-time evaluated `constexpr` call) and a
-global or enumerator are rejected; a constant with `orig_type` and no recorded expression is rejected. A plain literal is
+variable as that local, a named constant as its value, `sizeof`/`alignof` by value; a call in it (a compile-time
+evaluated `constexpr` call), another global and an enumerator are rejected; a constant with `orig_type` and no
+recorded expression is rejected. A plain literal is
 its exact decimal value (`decimal_str_for_integer_constant`).
 
 **Expressions.** `+ - * / %` and shifts map to the VIR operators; comparisons and `&& || !` produce `Bool` and are
@@ -329,8 +387,8 @@ a local, calls, discarded expressions, `(void)e`), `if`, `while`, `do` and `for`
 `step`, run after the body and after a `continue`) with their invariants read from the loop's attributes, `break` and
 `continue` (the compiler-generated `goto`s, mapped to the innermost enclosing loop or switch, with the label's shape
 checked, decision 0014), `switch` (case labels directly in its body), `return`, `static_assert`, null statements
-(`[[fallthrough]]` among them) and `check`. A `do` whose condition is a constant zero (EDG's folded value) is the
-loop form `DoOnce`. A compiler-generated `return` without a value ends a function and is not encoded (lowering
+(`[[fallthrough]]` among them) and `check`. A `do` whose condition is a constant zero (EDG's folded value) that names
+no variable or parameter, following every constant's `expr` (`names_object`, 0017 item 7), is the loop form `DoOnce`. A compiler-generated `return` without a value ends a function and is not encoded (lowering
 appends the epilogue); the generated `return 0` of `main` is encoded at the closing brace. A user `goto` and label
 become `Goto`/`Label` (one id per `a_label`); the label entity's attributes go through the allow-list; after the
 function is built, each `vir::goto_problems` entry is reported as `unsupported_statement` at the `goto` (M4.2a). The
@@ -363,7 +421,9 @@ and the Viper come from `emit`; a map entry without a C/C++ position, or a progr
 with the rejections (exit 2): it is an encoder bug, never silently clamped or dropped.
 
 **Self-test hooks** (0011 item 13): `drop_assert[=N]`, `weaken_invariant`, `constant_without_expr` (every constant with
-an original expression is treated as having none: rejected), `silicon_timeout`, `abort`, `internal_error`.
+an original expression is treated as having none: rejected), `perturb_folded` (every named constant's value and every
+case label's `folded` moved to a neighbouring value, so the prologue's internal guards fail: exit 3), `silicon_timeout`,
+`abort`, `internal_error`.
 
 **Known over-rejection.** A call written inside an annotation's own `sizeof` operand (`CERASTES_REQUIRES(sizeof(int[p(2)]) > 0)`)
 is rejected as a call in an annotation, although the operand is never evaluated: the encoder reads the folded constant's

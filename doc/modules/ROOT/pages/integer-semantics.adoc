@@ -210,6 +210,7 @@ To reason with unbounded arithmetic in a contract, widen the operands:
 include::example$integer-semantics/annotation_widened.cpp[tag=source]
 ----
 
+[#constants]
 == Constants
 
 A constant the compiler has already folded is checked as you wrote it, so
@@ -230,4 +231,10 @@ The compiler's own warnings for these (overflow in a constant, a bad shift
 count, a division by zero, a sign change, a truncation, a missing `return`) are
 not shown by `cerastes verify`: the verifier reports each problem itself, once,
 with its category. A `#pragma` that changes a warning cannot hide a problem
-from it.
+from it: the front end's diagnostic pragmas are refused in the files it
+verifies.
+
+A named constant, a `const` global, is checked the same way: its initializer as
+you wrote it, whether or not anything uses it, so `const short limit = 70000;`
+is a `conversion` error at its line
+(xref:verifying.adoc#constants[Named constants]).

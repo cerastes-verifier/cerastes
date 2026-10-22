@@ -51,6 +51,11 @@ std::string physical_path(const a_source_position& p);
 // canonical physical path).
 bool in_verified_file(const a_source_position& p);
 
+// The positions of the EDG diagnostic pragmas (`#pragma diag_suppress` and the like, `diagnostic push/pop`, also through
+// `_Pragma` and macros) the front end processed, recorded by the hook install_diag_pragma_recorder() (register_attributes.h)
+// puts in front of EDG's handlers (decision 0017 item 2).  EDG keeps no IL entry for them.
+const std::vector<a_source_position>& diag_pragma_sites();
+
 // The entities of the translation unit that the verify-mode encoder looks at, each once, in the order the
 // IL walk reports them (file scope first, then the routine-scope regions in region order).
 struct IlEntities {
