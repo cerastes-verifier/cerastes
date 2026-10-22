@@ -45,6 +45,16 @@ after S3:**
    `check.sh` as locally.
 2. Merge it. Then M4.2b (§8.1).
 
+**M4.2b1 is done (2026-10-21, branch `m4.2b1-named-constants`, based on S3's tip `426f23d`; result in
+`internal/status.md`).** Named constants (`const`/`constexpr` globals) and case values (C++ `case k`/`case N`) are
+checked in a prologue of every method (record 0017); M4.2b was split into M4.2b1 and M4.2b2 (owner). **Owner steps
+after M4.2b1:**
+1. Merge S3's PR first (`mutation-triage`): this branch contains it.
+2. Push this branch and open its PR: `git push origin m4.2b1-named-constants` (the session never pushes). CI runs
+   `check.sh` as locally.
+3. Answer §11 questions 14 (strict C for `const` objects in constant expressions) and 15 (C23 `constexpr`). Then
+   M4.2b2 (§8.1).
+
 ## 1. State in one paragraph
 
 The owner split M4.2 into **M4.2a** (forward `goto`, functions that do not return, `assert`), **M4.2b** (named
@@ -461,6 +471,29 @@ Deferred (probes in the job's scratch directory are gone; the shapes are given h
 7. The lint's existing "while without decreases" rule reads up to the first `{`, so a quantifier trigger inside an
    invariant would be misread as the loop body. The emitter writes no trigger today (test-mutator).
 
+**M4.2b1 audit notes (2026-10-21, not blocking; every blocking and should-fix item was taken):**
+1. **Static assertions are not encoded** (0010 item 13): `_Static_assert((1 << 40) == 0, "")` verifies with #63
+   suppressed, which clang refuses. (A C `_Static_assert` naming a constant is refused through #1901, and EDG's
+   diagnostic pragmas, which could turn that back into a warning, are now rejected in verified files.) The pragma
+   rule also rejects common harmless pragmas in user code (`#pragma clang diagnostic`, `#pragma GCC diagnostic`):
+   an allow-list of pragmas that cannot change meaning would lift that.
+2. **Messages.** A block-scope `extern const int A;` naming an internal-linkage C++ constant is reported as "a static
+   local variable"; in C, a block-scope `extern` followed by a file-scope `static` tentative definition as "a local
+   variable without an initializer" (both fail closed). A weak function written with the attribute gets two
+   diagnostics (`unsupported_attribute` and `unsupported_declaration`). The rejection texts still end "(decision
+   0012)" (as M4.2a's do).
+3. **`names_object` returns false on a node kind it does not know** (a `decltype(k){}` constant): the cross-mode rule
+   fails open there; still sound, since a `DoOnce` keeps its `internal` guard.
+4. **Verify output noise:** EDG warning #177 ("declared but never referenced") prints for an unused C++ named
+   constant; consider suppressing it in verify mode.
+5. **`perturb_folded`** can make two adjacent case values equal, which `check_program` rejects (exit 2, not 3): a
+   self-test fixture must keep its case values apart (done).
+6. **Several units:** a C++ internal-linkage constant named in a trusted contract may have another value in the
+   defining unit (documented on Verifying a program; the contract manifest is M6).
+7. **`mutate.py` does not mutate namespace-scope initializers** (pinned by `test_mutate.py`), so a constant's own
+   value is never mutated; the planned extension (P2) was cut. Mutating constant initializers would test how the
+   prologue's checks and the uses depend on the value.
+
 ## 7. Known gaps carried
 
 - Termination: a recursion cycle through another unit (0013 item 5) — the contract manifest, M6 (M7 if it does not fit).
@@ -873,3 +906,18 @@ Each has a recommended answer. Answer inline, as before.
     bitwise record, or its own) decides whether wrapping becomes an error by default, with an explicit way to ask for
     modular arithmetic. *Recommended: decide it in its own short session before M4.4, since bitwise operators on
     unsigned types depend on it.*
+
+**M4.2b1, 2026-10-21:**
+
+14. **A `const` object in a C constant expression** (0017 item 2; the audit's S1, decided by the orchestrator to keep
+    the session going). EDG accepts it with the discretionary warning #1901; M4.2b1 makes #1901 an error in C
+    (`--diag_error=1901`), so C programs naming a `const` in a case label, a `_Static_assert` or another file-scope
+    constant's initializer are refused (strict ISO C; clang and GCC accept `const int B = A + 1;` at file scope as an
+    extension, GCC refuses the static assertion). The alternative keeps the warning suppressed and has cerastes reject
+    only the contexts it cares about (case labels; initializers would then be accepted). Keep the strict rule?
+    *Recommended: yes — one rule, portable C, and C programmers write such constants as enumerators (M4.2b2) or
+    macros.*
+15. **C23 `constexpr` objects do not parse** in this EDG configuration (P23: warning #77, errors #65/#20), although
+    C23 has them; with them, `case N:` would be valid C. Record it as an M8 inventory entry and check whether upstream
+    EDG supports C23 `constexpr` (an option, or a later version), or treat it as an EDG issue to draft? *Recommended:
+    an M8 entry now; check upstream's C23 status when the next upstream merge runs.*
