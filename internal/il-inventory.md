@@ -1081,8 +1081,8 @@ in bytes (a_type.size, il_def.h:9793), and flags (`bool_type` :10108, `char16_t_
 Output (scratch reader over `p12.il`): `f_bool [('tk_integer','char','bool','1')]`, `f_wc [('tk_integer','int','','4')]
 wchar_t`, `f_i128 [('tk_integer','__int128_t','','16')]`, `f_bi [('tk_integer','_BitInt(24)','','3')]`. So: size from the type's
 `size`; signedness from `int_kind_is_signed[int_kind]` at run time (plain `char` after EDG has set it from the target); `bool` by
-`bool_type`; `_BitInt` by the two bit-precise kinds (reject); enumerations are another kind (`tk_enum`, P10: the constant's
-type prints as `E`).
+`bool_type`; `_BitInt` by the two bit-precise kinds (reject); enumerations are `tk_integer` with `variant.integer.enum_type` set
+(il_def.h:5583 `tk_enum = tk_integer`, a synonym, not a kind of their own; P10: the constant's type prints as `E`).
 
 ### Probe-by-probe answers to decisions 0010 and 0012
 
@@ -1655,5 +1655,132 @@ Probes P19-P22 and Silicon spikes S11-S13 for decision 0015. Evidence files are 
 - **S13 (`s13`, `s13b`)**: `assert b != 0; assert (a \ b) >= 0` verifies with `b > 0`; with `b` possibly 0 Silicon reports three
   errors: `b != 0` (line 8), a cascade `a \ b >= 0` at the next line (9) and, in the second method, the genuinely false `a \ b >= 1`
   (21). After a call of `abort_()` every assert holds (`assert 1 == 2` verifies, `s13.vpr`).
+
+## M4.2b1: named constants and case values
+
+Probes P23-P24 and Silicon spikes S14-S15 for decision 0017 (named constants, case values in a path-independent prologue,
+the `do … while` condition). Evidence is under `build/m4.2b1/probes/` and `build/m4.2b1/spikes/` (gitignored), produced
+with `scripts/cerastes-fe.sh --c23|--c++20 --display_error_number --il_display|--cerastes_walk <probe>` (output
+`<probe>.<c|cpp>.<c23|c++20>.il` / `.walk` / `.err`) and the pinned Silicon, run as `run_tests.py` runs it (`java -Xss128m -jar
+silicon.jar --z3Exe z3 --numberOfErrorsToReport 0 <file>`). The trees quoted are condensed from il_display by the scratch tools
+`build/m4.2b1/tree.py` and `tree2.py` (`vars`, `fn <routine>`, `cases`, `dik`; positions omitted; `{expr=...}` is the folded
+constant's `expr` chain). `il_def.h` lines are in `third_party/edg/src/il_def.h` at the pin. Probe files: `p23_g.cpp`
+(C++ globals), `p23_gb.c` (the C globals that EDG accepts; `p23_g.c` is the first attempt, refused), `p23_use.c|cpp`,
+`p23_z.c|cpp`, `p23_zero.c|cpp`, `p24_case.c|cpp`, `p24_ty.c|cpp`. Both modes run on every probe unless a construct is invalid in one.
+
+### P23: named constants (namespace scope and locals)
+
+**Variable fields** (a_variable, il_def.h:11215-11874): `type` :11227, `storage_class` :11251, `is_constexpr` :11533,
+`has_explicit_initializer` :11622, `constant_valued` :11710 ("Only set in C++"), `is_thread_local` :11720, `init_kind` :11745,
+`initializer` :11752 (union an_initializer :11034; `.constant` for `initk_static`, `an_init_kind` :11014). Per variable, at
+namespace scope, `tree.py vars` on `p23_gb.c.c23.il` and `p23_g.cpp.c++20.il`:
+
+| source | C23 | C++20 |
+|---|---|---|
+| `const int g = 40;` | `initk_static`, constant `int 40`, `sc_unspecified`, linkage C (external) | `initk_static`, `int 40`, `constant_valued`, **`sc_static`**, linkage internal |
+| `constexpr int c = g + 2;` | **not accepted** (below) | `initk_static`, `is_constexpr`, constant `int 42 {expr=eok_add(const 40 {expr=var g}, const 2)}` |
+| `const short s = 7;` | static, `short 7 {expr=eok_cast[short](const int 7) gen}` | same |
+| `const bool b = 1;` | static, `bool 1U {expr=eok_bool_cast[bool](const int 1) gen}` (the value prints `1U`) | static, `bool 1 {expr=eok_bool_cast...}` |
+| `const unsigned u = -1;` | static, `unsigned 4294967295U {expr=eok_cast(const int -1 {expr=eok_negate(const 1)}) gen}`; warning #68-D | same |
+| `const int sh = 1 << 40;` | static, `int 0 {expr=eok_shiftl(const 1, const 40)}`; warning #63-D | **static** (not dynamic), same constant; warning #63-D |
+| `const signed char sc = (signed char)300;` | static, `signed char 44 {expr=eok_cast[signed char](const int 300)}`; no diagnostic | same |
+| `const int ov = 2147483647 + 1;` | static, `int -2147483648 {expr=eok_add(const 2147483647, const 1)}`; warning #61-D | **`initk_dynamic`**, no constant, no `constant_valued`; warning #61-D |
+| `const int z;` | **`initk_none`**, `sc_unspecified`, no `has_explicit_initializer` (same as `int w;`); never `initk_zero` | **error #257** (const variable requires an initializer) |
+| `extern const int e;` | `initk_none`, `sc_extern` | same (linkage C++) |
+| `extern const int d = 5;` | static `int 5`, `sc_unspecified`; no diagnostic | static `int 5`, `constant_valued`, `sc_unspecified`, linkage C++; no diagnostic |
+| `const int self = self + 1;` | n/a (C: not probed) | `initk_dynamic`, no constant, no diagnostic |
+| `int f(void); const int fc = f();` | **error #59** (function call is not allowed in a constant expression) | `initk_dynamic`, no constant |
+| `volatile const int vc = 1;` | static, constant `int 1`, type `const volatile int` | static, `int 1`, but **no `constant_valued`** |
+| `inline constexpr int ic = 3;` | n/a | static, `is_constexpr`, `int 3`, `sc_unspecified` |
+| `static const int st = 4;` | static `int 4`, `sc_static`, linkage internal | same |
+| `_Thread_local` / `thread_local const int tl = 5;` | static `int 5`, **`is_thread_local: TRUE`** | static `int 5`, `constant_valued`, `is_thread_local: TRUE` |
+| `sys_nerr` (`<stdio.h>`, `extern const int`) | `initk_none`, `sc_extern`, linkage C, declared in the SDK | same |
+
+Further, `p23_z.c.c23.il`: `const int zz; const int zz = 3;` is **one** variable (`initk_static`, constant 3, `decl_position` at the
+defining line 5, a use folds to `const int 3 {expr=var zz}`); `const int ex2 = 6; extern const int ex2;` stays `initk_static`
+6; `int w;` and a tentative `const int z;` stay `initk_none` and their uses are a plain `var`. `p23_zero.*`: `const int zb =
+{0};` and C23 `const int ze = {};` are static with constant 0 and **no `expr`**; C++ `const int zi{};` is static 0 with no `expr`;
+C++ `const int zv = int();` is static 0 with `{expr=enk_temp_init}` (il_def.h:13583). `initk_zero` was not produced by
+any construct above (the zero-value shape is `initk_none` in C, an error in C++).
+
+**C23 `constexpr` is not accepted by this EDG configuration**: `constexpr int c = g + 2;` gives `warning #77-D: this declaration has
+no storage class or type specifier` and `error #65: expected a ";"` at the `int` (`p23_g.c.c23.err`), and the later use `c` is
+`error #20: identifier "c" is undefined`. So `constexpr` globals and locals exist only in C++20 here; in C23 the constants are
+`const`. (Not probed: another `--std` spelling for C23 `constexpr`.)
+
+**Uses (folded)**, `tree.py fn` on both modes (`p23_gb.c.c23.il`, `p23_g.cpp.c++20.il`): every use of a variable whose
+initializer is a constant is an `enk_constant` whose constant carries the variable's value and whose `expr` is an
+`enk_variable` node of the variable, and a larger folded expression is **one** constant whose `expr` is the unfolded tree with
+those leaves: `return x * g;` is `eok_multiply(var x, const int 40 {expr=var g})`; `return s + 1;` is `const int 8
+{expr=eok_add(const int 7 {expr=eok_cast[int](const short 7 {expr=var s}) gen}, const int 1)}`; `return b;` (C23) is `const int 1
+{expr=eok_cast[int](const bool 1U {expr=var b}) gen}`; `return u;` as `(int)u` is `const int -1 {expr=eok_cast[int](const unsigned
+4294967295U {expr=var u})}`; `return ov;` (C23) is `const int -2147483648 {expr=var ov}`; `return sh;` is `const int 0 {expr=var sh}`.
+Promotion casts sit **inside** the chain, between the variable and the folded value. Un-folded uses are a plain `var`:
+`e`, `sys_nerr`, `vc` (both modes), `z` (C), and in C++ also `ov`, `self`, `fc` (dynamic). In all 21 folded uses probed, the use's
+value equals the variable's initializer constant converted by the casts in the chain; no counterexample was found (not a proof).
+`local_expr_ref` (il_def.h:2788) was never observed: no constant in any probe printed it (unconfirmed that il_display would print it).
+
+**Uses in annotations** (`p23_use.c|cpp`, `--il_display` and `--cerastes_walk`): a global `g` used in `CERASTES_REQUIRES(x < g)`,
+`ENSURES(.. r == x + g ..)`, `CHECK(g == 40)`, `INVARIANT(i <= g)`, `DECREASES(g - i)`, a loop condition and a `return` gives 7 `enk_variable`
+nodes of `g` in the IL, **all 7 referenced as the `expr` of a folded constant 40**, in both modes (Python check over `p23_use.*.il`:
+`g-nodes 7 constants linked 7 ['40']`); the contract nodes carry the attribute's position (L7:5, L8:5), the statement-attribute ones 3:3.
+The walker prints them as `const 40 type=int @ L7:27` (it does not print the `expr`), `s` as `op eok_cast ... const 7 type=short`, `u` as `const 4000000000
+type=unsigned int`.
+
+**Locals** (`p24_case.c|cpp`, `tree2.py dik`): `const int k = 5;`, `constexpr int n = 3;` (C++ only), `const int kc = (signed char)300;`, `const int ks =
+1 << 40;`, `const int g0 = 0;` are **`init_kind initk_dynamic`** variables with **no `constant` field** in both modes, `sc_auto`; the value is in the
+`stmk_init`'s `dynamic_init` (a_dynamic_init), `kind dik_constant` (il_def.h:3969), `variable` k, `constant` `int 5`; `kc` is `int 44 {expr=eok_cast[int](const signed
+char 44 {expr=eok_cast[signed char](const int 300)}) gen}` and `ks` `int 0 {expr=eok_shiftl(const 1, const 40)}`. `constant_valued` and `is_constexpr` are
+set in C++ only (`k`: `constant_valued`; `n`: both). A use of a local `k` folds like a global's: `case_value = int 5 {expr=var k}`.
+EDG accepts `case k`, `case n`, `case kc`, `case ks` in **both modes**: in C23 `case N` and `case k` on a non-constexpr `const` give `warning #1901-D: use of a const
+variable in a constant expression is nonstandard in C` (also for `case N + 1` and `case NC`), accepted; C++ gives no diagnostic (only #63-D for the shift).
+
+### P24: case values and `do … while` conditions
+
+**Case values** (`tree2.py cases`; the entry is `a_switch_case_entry`, il_def.h:16251, `case_value` :16259): for `const int N = 8;`, `const int NC = 3;` and the locals above,
+identical in C23 and C++20 (`p24_case.*`, `p24_ty.*`):
+
+- `case N:` is `case_value int 8 {expr=var N}`; `case N + 1:` is `int 9 {expr=eok_add(const int 8 {expr=var N}, const int 1)}`; `case NC:` (C++: `constexpr`) `int 3 {expr=var NC}`;
+  `case k:` `int 5 {expr=var k}`; `case n:` `int 3 {expr=var n}`; `case kc:` `int 44 {expr=var kc}`; `case ks:` `int 0 {expr=var ks}`. The chain always reaches the variable.
+- **The case value's type is the promoted scrutinee type** with the conversion in the chain: for `signed char x`, `case N` is `int 8 {expr=var N}`; for `unsigned x` it is
+  `unsigned int 8U {expr=eok_cast[unsigned int](const int 8 {expr=var N}) gen}`; for `long x`, `long 8L {expr=eok_cast[long](const int 8 {expr=var N}) gen}`;
+  a plain `case 3` is `unsigned int 3U {expr=eok_cast[unsigned int](const int 3) gen}` there.
+
+**`do … while (c)`** (the condition is the `expr` of `stmk_end_test_while`, il_def.h:15825): for `Z0`/`g0`/`k0`/`n0` = 0 (global const, local const, local constexpr) and `N - N`:
+
+| condition | C23 | C++20 |
+|---|---|---|
+| `while (Z0)` global const 0 | `const int 0 {expr=var Z0}` | `const bool 0 {expr=eok_bool_cast[bool](const int 0 {expr=var Z0}) gen}` |
+| `while (g0)` / `(k0)` local const 0 | `const int 0 {expr=var g0}` | `const bool 0 {expr=eok_bool_cast(const int 0 {expr=var g0}) gen}` |
+| `while (n0)` constexpr local | n/a | `const bool 0 {expr=eok_bool_cast(const int 0 {expr=var n0}) gen}` |
+| `while (N - N)` | `const int 0 {expr=eok_subtract(const int 8 {expr=var N}, const int 8 {expr=var N})}` | `const bool 0 {expr=eok_bool_cast(const int 0 {expr=eok_subtract(...)}) gen}` |
+| `while (0)` | `const int 0` with **no `expr`** | `const bool 0 {expr=eok_bool_cast[bool](const int 0) gen}`, the inner `const int 0` has no `expr` |
+
+So the condition is always a folded `enk_constant` 0 (never an `enk_variable`), and a variable it names is found only by following the `expr` chain through
+operations and casts (C++ adds the generated `eok_bool_cast` on top). `while (0)` is distinguished by an inner constant whose `expr` is NULL.
+
+### Silicon facts (spikes S14-S15, `build/m4.2b1/spikes/`, Silicon 6b540aa4, Z3 4.16.0)
+
+- **S14 (`s14a`, `s14b`, `s14c`)**: **a failed `assert` ends the path.** One method with `assert x > 20; assert x > 30; r := 5; assert x > 40` and `ensures r == 0`
+  reports **exactly one error**, the first (`s14a.vpr@6.10--6.16`); no later assert, no postcondition. `s14c` (a following `assert x > 15`, `assert x < 0`, `assert false`) also gives
+  one error. The same failing `assert` text in two methods gives **two errors**, one per Viper position (`s14b.vpr@5` and `@12`): Silicon reports per method. (S13's three-error
+  output on `a \ b` (above) is not reconciled with this; it was well-definedness of a division, not a plain `assert` after a failed `assert`: unconfirmed which of the two applies to a
+  failed obligation followed by a guard; S15 tests the case that matters.)
+- **S15 (`s15_edit.py`, `*_p.vpr`)**: the emitted `.vpr` of the four files **already asserts every case value's obligations before the dispatch** (right after the scrutinee temp
+  `t__0 := v_x__0`; the dispatch `if (t__0 == <case expr>)` carries none). The hand edit moves them to straight after the parameter copy (`v_x__0 := p_x__0`) and follows each
+  case's obligations with `assert <case expr> == <EDG folded>` (`1 * c_pow2(40) == 0`, `(2 + 1) == 3`, `5 == 5`; for the conversion twin `1 * c_pow2(3) == 8`, `2 + 1 == 3`,
+  `300 == 44`; for the overflow twin `2147483647 + 1 == -2147483648`, an Int expression that is **false**). Results:
+
+  | file (c23) | Silicon |
+  |---|---|
+  | `switch_case_expr_shift.c` edited (`shift_p.vpr`) | **1 error**: the shift-count obligation `!(40 < 0 \|\| 31 < 40)` (`shift_p.vpr@17`); the false guard `c_pow2(40) == 0` and the postcondition are not reported |
+  | `switch_case_expr_conversion.c` edited (`conv_p.vpr`) | **1 error**: `!(300 < -128 \|\| 127 < 300)` (`conv_p.vpr@23`); the false guard `300 == 44` is not reported |
+  | `switch_case_expr_over.c` edited (`over_p.vpr`) | **1 error**: the addition's range obligation (`over_p.vpr@21`); the false guard is not reported |
+  | `switch_case_expr.c` edited (`pos_p.vpr`) | **verified** |
+  | `pos_bad.vpr` (positive with the guard `2 + 1 == 4`) | 1 error, the guard (`pos_bad.vpr@22`): a guard that is false with passing obligations is reported alone |
+
+  The unedited emission gives the same single errors (`build/cerastes verify ... --std=c23`: `shift`, `conversion`, `overflow` at the case line). So no twin changes its outcome, and a false guard
+  after a failed obligation is silent only because S14 ends the path there: **a guard must come after the obligations of its own case** (and after those of every earlier case in the prologue order) or a
+  false guard would be reported first. Not tested: a guard placed before its case's obligations; a prologue shared by methods with several parameters.
 
 *2026-10-20: milestone numbers before the M4.1 section follow the renumbering of that date (plan.md): generic templates are M5.*
