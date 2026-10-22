@@ -2313,6 +2313,470 @@ void define_enumeration_rejections() {
   });
 }
 
+// Locals declared without an initializer (decision 0019): the flag, its resets, the loop snapshot and the `uninitialized`
+// error at a read.  The hand-written Viper that these shapes lower to was run in spike S16 (internal/il-inventory.md).
+void define_uninitialized() {
+  using LF = LoopForm;
+  auto fn_n = [](Kit& k, Type ret) {
+    Function* f = k.fn("f", ret, {{"n", k.i32}});
+    k.req(f, k.range(k.F(f, 0), k.i32, "0", "100"));
+    return f;
+  };
+  auto plus1 = [](Kit& k, Var* x) { return k.asg(x, k.add(k.v(x), k.num(k.i32, "1"))); };
+  auto gt_c = [](Kit& k, Function* f, const char* c) { return k.gt(k.pv(f, 0), k.num(k.i32, c)); };
+
+  // ---- straight-line code ----
+  lc("uninit_assign_then_read", "int x; x = n; return x; reads only after the assignment", [=](Kit& k) {
+    Function* f = fn_n(k, k.i32);
+    Var* x = k.local(f, "x", k.i32);
+    k.ens(f, k.eq(k.R(f), k.F(f, 0)));
+    f->body = k.blk({k.decl(x, nullptr), k.asg(x, k.pv(f, 0)), k.ret(k.v(x))});
+    k.done(f);
+  });
+  lc("uninit_read_in_return", "int x; return x; reads a variable that never has a value", [=](Kit& k) {
+    Function* f = fn_n(k, k.i32);
+    Var* x = k.local(f, "x", k.i32);
+    const Expr* r = k.v(x);
+    f->body = k.blk({k.decl(x, nullptr), k.ret(r)});
+    k.done(f);
+    k.fail("uninitialized", r->loc);
+  });
+  lc("uninit_one_armed_if", "int x; if (n > 5) x = 1; return x; may read an unassigned x", [=](Kit& k) {
+    Function* f = fn_n(k, k.i32);
+    Var* x = k.local(f, "x", k.i32);
+    const Expr* r = k.v(x);
+    f->body = k.blk({k.decl(x, nullptr), k.iff(gt_c(k, f, "5"), k.blk({k.asg(x, k.num(k.i32, "1"))})), k.ret(r)});
+    k.done(f);
+    k.fail("uninitialized", r->loc);
+  });
+  lc("uninit_both_arms_assign", "both arms of an if/else assign x before the read", [=](Kit& k) {
+    Function* f = fn_n(k, k.i32);
+    Var* x = k.local(f, "x", k.i32);
+    k.ens(f, k.lor(k.eq_c(k.R(f), k.i32, "1"), k.eq_c(k.R(f), k.i32, "2")));
+    f->body = k.blk({k.decl(x, nullptr), k.iff(gt_c(k, f, "5"), k.blk({k.asg(x, k.num(k.i32, "1"))}), k.blk({k.asg(x, k.num(k.i32, "2"))})),
+                     k.ret(k.v(x))});
+    k.done(f);
+  });
+  lc("uninit_path_precise", "if (n > 5) x = 1; if (n > 5) return x; the read is only on paths that assigned", [=](Kit& k) {
+    Function* f = fn_n(k, k.i32);
+    Var* x = k.local(f, "x", k.i32);
+    f->body = k.blk({k.decl(x, nullptr), k.iff(gt_c(k, f, "5"), k.blk({k.asg(x, k.num(k.i32, "1"))})),
+                     k.iff(gt_c(k, f, "5"), k.blk({k.ret(k.v(x))})), k.ret(k.num(k.i32, "0"))});
+    k.done(f);
+  });
+  lc("uninit_path_precise_twin", "the second condition is n > 3: the read may come when the first did not assign", [=](Kit& k) {
+    Function* f = fn_n(k, k.i32);
+    Var* x = k.local(f, "x", k.i32);
+    const Expr* r = k.v(x);
+    f->body = k.blk({k.decl(x, nullptr), k.iff(gt_c(k, f, "5"), k.blk({k.asg(x, k.num(k.i32, "1"))})),
+                     k.iff(gt_c(k, f, "3"), k.blk({k.ret(r)})), k.ret(k.num(k.i32, "0"))});
+    k.done(f);
+    k.fail("uninitialized", r->loc);
+  });
+  lc("uninit_abort_branch", "one branch calls a function that does not return, the other assigns: the read after the if is fine", [=](Kit& k) {
+    Function* a = k.abort_fn();
+    Function* f = fn_n(k, k.i32);
+    Var* x = k.local(f, "x", k.i32);
+    k.ens(f, k.eq_c(k.R(f), k.i32, "7"));
+    f->body = k.blk({k.decl(x, nullptr), k.iff(gt_c(k, f, "5"), k.blk({k.es(k.call(a, {}))}), k.blk({k.asg(x, k.num(k.i32, "7"))})), k.ret(k.v(x))});
+    k.done(f);
+  });
+  lc("uninit_compound_assign_reads", "int x; x += 1; reads x first", [=](Kit& k) {
+    Function* f = fn_n(k, k.i32);
+    Var* x = k.local(f, "x", k.i32);
+    const Stmt* s = k.b.compound_assign(x, BinaryOp::Add, k.num(k.i32, "1"), k.at());
+    f->body = k.blk({k.decl(x, nullptr), s, k.ret(k.v(x))});
+    k.done(f);
+    k.fail("uninitialized", s->loc);
+  });
+  lc("uninit_compound_assign_after_assignment", "int x; x = 5; x += 1; x++: the reads are after the assignment", [=](Kit& k) {
+    Function* f = fn_n(k, k.i32);
+    Var* x = k.local(f, "x", k.i32);
+    k.ens(f, k.eq_c(k.R(f), k.i32, "7"));
+    f->body = k.blk({k.decl(x, nullptr), k.asg(x, k.num(k.i32, "5")), k.b.compound_assign(x, BinaryOp::Add, k.num(k.i32, "1"), k.at()),
+                     k.b.inc_dec(x, true, k.at()), k.ret(k.v(x))});
+    k.done(f);
+  });
+  lc("uninit_increment_reads", "int x; x++; reads x first", [=](Kit& k) {
+    Function* f = fn_n(k, k.vd);
+    Var* x = k.local(f, "x", k.i32);
+    const Stmt* s = k.b.inc_dec(x, true, k.at());
+    f->body = k.blk({k.decl(x, nullptr), s});
+    k.done(f);
+    k.fail("uninitialized", s->loc);
+  });
+  lc("uninit_read_in_condition", "int x; if (x > 0) ...: the read in a condition", [=](Kit& k) {
+    Function* f = fn_n(k, k.vd);
+    Var* x = k.local(f, "x", k.i32);
+    const Expr* r = k.v(x);
+    f->body = k.blk({k.decl(x, nullptr), k.iff(k.gt(r, k.num(k.i32, "0")), k.blk({}))});
+    k.done(f);
+    k.fail("uninitialized", r->loc);
+  });
+  lc("uninit_read_in_check", "int x; check(x == 0): the read in a check", [=](Kit& k) {
+    Function* f = fn_n(k, k.vd);
+    Var* x = k.local(f, "x", k.i32);
+    const Expr* r = k.v(x);
+    f->body = k.blk({k.decl(x, nullptr), k.chk(k.eq_c(r, k.i32, "0"))});
+    k.done(f);
+    k.fail("uninitialized", r->loc);
+  });
+  lc("uninit_read_in_call_argument", "int x; g(x): the read as an argument", [=](Kit& k) {
+    Function* g = k.fn("g", k.vd, {{"a", k.i32}});
+    k.trusted(g);
+    Function* f = fn_n(k, k.vd);
+    Var* x = k.local(f, "x", k.i32);
+    const Expr* r = k.v(x);
+    f->body = k.blk({k.decl(x, nullptr), k.es(k.call(g, {r}))});
+    k.done(f);
+    k.fail("uninitialized", r->loc);
+  });
+  lc("uninit_read_guarded_by_short_circuit", "n > 200 && x > 0: the right operand is only evaluated when n > 200, which the requires excludes", [=](Kit& k) {
+    Function* f = fn_n(k, k.vd);
+    Var* x = k.local(f, "x", k.i32);
+    f->body = k.blk({k.decl(x, nullptr), k.iff(k.land(gt_c(k, f, "200"), k.gt(k.v(x), k.num(k.i32, "0"))), k.blk({}))});
+    k.done(f);
+  });
+  lc("uninit_read_in_short_circuit_twin", "n > 5 && x > 0: the right operand can be evaluated", [=](Kit& k) {
+    Function* f = fn_n(k, k.vd);
+    Var* x = k.local(f, "x", k.i32);
+    const Expr* r = k.v(x);
+    f->body = k.blk({k.decl(x, nullptr), k.iff(k.land(gt_c(k, f, "5"), k.gt(r, k.num(k.i32, "0"))), k.blk({}))});
+    k.done(f);
+    k.fail("uninitialized", r->loc);
+  });
+
+  // ---- bool and enumeration ----
+  lc("uninit_bool_assigned", "bool b; b = n > 5; return b ? 1 : 0", [=](Kit& k) {
+    Function* f = fn_n(k, k.i32);
+    Var* b = k.local(f, "b", k.bl);
+    k.ens(f, k.implies(k.gt(k.F(f, 0), k.num(k.i32, "5")), k.eq_c(k.R(f), k.i32, "1")));
+    k.ens(f, k.implies(k.lnot(k.gt(k.F(f, 0), k.num(k.i32, "5"))), k.eq_c(k.R(f), k.i32, "0")));
+    f->body = k.blk({k.decl(b, nullptr), k.asg(b, k.gt(k.pv(f, 0), k.num(k.i32, "5"))), k.ret(k.bi(k.i32, k.v(b)))});
+    k.done(f);
+  });
+  lc("uninit_bool_read", "bool b; if (b) ...: the read of a bool", [=](Kit& k) {
+    Function* f = fn_n(k, k.vd);
+    Var* b = k.local(f, "b", k.bl);
+    const Expr* r = k.v(b);
+    f->body = k.blk({k.decl(b, nullptr), k.iff(r, k.blk({}))});
+    k.done(f);
+    k.fail("uninitialized", r->loc);
+  });
+  lc("uninit_enum_assigned", "shade e; e = 2; return (int)e: an enumeration whose values are 1..3", [=](Kit& k) {
+    const Type shade = k.en("shade", 32, false, "1", "3");
+    Function* f = fn_n(k, k.i32);
+    Var* e = k.local(f, "e", shade);
+    k.ens(f, k.eq_c(k.R(f), k.i32, "2"));
+    f->body = k.blk({k.decl(e, nullptr), k.asg(e, k.num(shade, "2")), k.ret(k.cv(k.i32, k.v(e)))});
+    k.done(f);
+  });
+  lc("uninit_enum_read", "shade e; return (int)e: the read of an enumeration", [=](Kit& k) {
+    const Type shade = k.en("shade", 32, false, "1", "3");
+    Function* f = fn_n(k, k.i32);
+    Var* e = k.local(f, "e", shade);
+    const Expr* r = k.v(e);
+    f->body = k.blk({k.decl(e, nullptr), k.ret(k.cv(k.i32, r))});
+    k.done(f);
+    k.fail("uninitialized", r->loc);
+  });
+  lc("uninit_enum_dummy_in_range", "0 is not a value of shade (1..3): the fixed value is 1, so the automatic range invariant holds on entry", [=](Kit& k) {
+    const Type shade = k.en("shade", 32, false, "1", "3");
+    Function* f = fn_n(k, k.i32);
+    Var* e = k.local(f, "e", shade);
+    Var* i = k.local(f, "i", k.i32);
+    const Stmt* w = k.loop(k.lt(k.v(i), k.pv(f, 0)), {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.le(k.v(i), k.pv(f, 0)))},
+                           {k.cl(k.gap(k.pv(f, 0), k.v(i)))}, k.blk({k.asg(e, k.num(shade, "2")), plus1(k, i)}), nullptr, LF::While, k.jid());
+    f->body = k.blk({k.decl(e, nullptr), k.decl(i, k.num(k.i32, "0")), w, k.ret(k.num(k.i32, "0"))});
+    k.done(f);
+  });
+
+  // ---- loops ----
+  // x is assigned before the loop (variant 0), never before it (1), or only inside it and read after (2); 3 is 0 without the
+  // snapshot invariant (a self-test hook).
+  auto outer_loop = [=](Kit& k, int variant) {
+    Function* f = fn_n(k, k.i32);
+    Var* x = k.local(f, "x", k.i32);
+    Var* i = k.local(f, "i", k.i32);
+    Var* s = k.local(f, "s", k.i32);
+    std::vector<Clause> inv = {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.le(k.v(i), k.pv(f, 0)))};
+    const Expr* rd = k.v(x);
+    std::vector<const Stmt*> body;
+    if (variant == 2) body = {k.asg(x, k.v(i)), plus1(k, i)};
+    else body = {k.asg(s, rd), k.asg(x, k.v(i)), plus1(k, i)};
+    const Stmt* w = k.loop(k.lt(k.v(i), k.pv(f, 0)), inv, {k.cl(k.gap(k.pv(f, 0), k.v(i)))}, k.blk(body), nullptr, LF::While, k.jid());
+    std::vector<const Stmt*> top = {k.decl(x, nullptr), k.decl(i, k.num(k.i32, "0")), k.decl(s, k.num(k.i32, "0"))};
+    if (variant == 0 || variant == 3) top.push_back(k.asg(x, k.num(k.i32, "5")));
+    top.push_back(w);
+    const Expr* after = variant == 2 ? k.v(x) : k.v(s);
+    top.push_back(k.ret(after));
+    f->body = k.blk(top);
+    k.done(f);
+    if (variant == 1 || variant == 3) k.fail("uninitialized", rd->loc);
+    if (variant == 2) k.fail("uninitialized", after->loc);
+    if (variant == 3) k.lower_options.drop_snapshot_invariant = true;
+  };
+  lc("uninit_loop_assigned_before", "x = 5 before the loop; the loop reads x and reassigns it: the snapshot invariant keeps the flag", [=](Kit& k) { outer_loop(k, 0); });
+  lc("uninit_loop_read_first", "the loop reads x before assigning it and x never had a value before the loop", [=](Kit& k) { outer_loop(k, 1); });
+  lc("uninit_after_loop_that_may_not_run", "x assigned only in the loop body; read after the loop, which may run zero times", [=](Kit& k) { outer_loop(k, 2); });
+  lc("uninit_loop_snapshot_is_needed", "the loop of uninit_loop_assigned_before without its snapshot invariant (a self-test hook): the read in the body fails", [=](Kit& k) { outer_loop(k, 3); });
+  auto invariant_read = [=](Kit& k, bool assigned_before) {
+    Function* f = fn_n(k, k.i32);
+    Var* x = k.local(f, "x", k.i32);
+    Var* i = k.local(f, "i", k.i32);
+    const Expr* xr = k.v(x);
+    const Stmt* w = k.loop(k.lt(k.v(i), k.pv(f, 0)),
+                           {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.le(k.v(i), k.pv(f, 0))), k.cl(k.ge_c(xr, k.i32, "0"))},
+                           {k.cl(k.gap(k.pv(f, 0), k.v(i)))}, k.blk({k.asg(x, k.v(i)), plus1(k, i)}), nullptr, LF::While, k.jid());
+    std::vector<const Stmt*> top = {k.decl(x, nullptr), k.decl(i, k.num(k.i32, "0"))};
+    if (assigned_before) top.push_back(k.asg(x, k.num(k.i32, "5")));
+    top.push_back(w);
+    top.push_back(k.ret(k.num(k.i32, "0")));
+    f->body = k.blk(top);
+    k.done(f);
+    if (!assigned_before) k.fail("uninitialized", xr->loc, 1, "invariant.not.established");
+  };
+  lc("uninit_invariant_reads_assigned", "invariant x >= 0 where x = 5 before the loop: the flag obligation of the invariant holds", [=](Kit& k) { invariant_read(k, true); });
+  lc("uninit_invariant_reads_unassigned", "invariant x >= 0 where x has no value on entry: the flag clause fails as an invariant check, category uninitialized", [=](Kit& k) { invariant_read(k, false); });
+  lc("uninit_loop_condition_reads", "while (i < n && y >= 0) with y unassigned: the flag clause of the condition fails on entry", [=](Kit& k) {
+    Function* f = fn_n(k, k.vd);
+    Var* y = k.local(f, "y", k.i32);
+    Var* i = k.local(f, "i", k.i32);
+    const Expr* yr = k.v(y);
+    const Stmt* w = k.loop(k.land(k.lt(k.v(i), k.pv(f, 0)), k.ge_c(yr, k.i32, "0")),
+                           {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.le(k.v(i), k.pv(f, 0)))}, {k.cl(k.gap(k.pv(f, 0), k.v(i)))},
+                           k.blk({plus1(k, i)}), nullptr, LF::While, k.jid());
+    f->body = k.blk({k.decl(y, nullptr), k.decl(i, k.num(k.i32, "0")), w});
+    k.done(f);
+    k.fail("uninitialized", yr->loc, 1, "invariant.not.established");
+  });
+  lc("uninit_loop_condition_reads_assigned", "the same with y = 1 before the loop", [=](Kit& k) {
+    Function* f = fn_n(k, k.vd);
+    Var* y = k.local(f, "y", k.i32);
+    Var* i = k.local(f, "i", k.i32);
+    const Stmt* w = k.loop(k.land(k.lt(k.v(i), k.pv(f, 0)), k.ge_c(k.v(y), k.i32, "0")),
+                           {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.le(k.v(i), k.pv(f, 0)))}, {k.cl(k.gap(k.pv(f, 0), k.v(i)))},
+                           k.blk({plus1(k, i)}), nullptr, LF::While, k.jid());
+    f->body = k.blk({k.decl(y, nullptr), k.asg(y, k.num(k.i32, "1")), k.decl(i, k.num(k.i32, "0")), w});
+    k.done(f);
+  });
+  lc("uninit_loop_body_local", "int t; in the loop body, assigned before its read in every iteration", [=](Kit& k) {
+    Function* f = fn_n(k, k.i32);
+    Var* t = k.local(f, "t", k.i32);
+    Var* i = k.local(f, "i", k.i32);
+    Var* s = k.local(f, "s", k.i32);
+    const Stmt* w = k.loop(k.lt(k.v(i), k.pv(f, 0)), {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.le(k.v(i), k.pv(f, 0)))},
+                           {k.cl(k.gap(k.pv(f, 0), k.v(i)))},
+                           k.blk({k.decl(t, nullptr), k.asg(t, k.v(i)), k.asg(s, k.v(t)), plus1(k, i)}), nullptr, LF::While, k.jid());
+    f->body = k.blk({k.decl(i, k.num(k.i32, "0")), k.decl(s, k.num(k.i32, "0")), w, k.ret(k.v(s))});
+    k.done(f);
+  });
+  lc("uninit_loop_body_local_second_iteration", "int t; in the loop body, read in the second iteration before it is assigned again", [=](Kit& k) {
+    Function* f = fn_n(k, k.i32);
+    Var* t = k.local(f, "t", k.i32);
+    Var* i = k.local(f, "i", k.i32);
+    Var* s = k.local(f, "s", k.i32);
+    const Expr* r = k.v(t);
+    const Stmt* w = k.loop(k.lt(k.v(i), k.pv(f, 0)), {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.le(k.v(i), k.pv(f, 0)))},
+                           {k.cl(k.gap(k.pv(f, 0), k.v(i)))},
+                           k.blk({k.decl(t, nullptr), k.iff(k.eq_c(k.v(i), k.i32, "1"), k.blk({k.asg(s, r)})), k.asg(t, k.v(i)), plus1(k, i)}),
+                           nullptr, LF::While, k.jid());
+    f->body = k.blk({k.decl(i, k.num(k.i32, "0")), k.decl(s, k.num(k.i32, "0")), w, k.ret(k.v(s))});
+    k.done(f);
+    k.fail("uninitialized", r->loc);
+  });
+  // The inner loop assigns x, which both loops see from outside.
+  auto nested = [=](Kit& k, bool assigned_before) {
+    Function* f = k.fn("f", k.i32, {{"n", k.i32}, {"m", k.i32}});
+    k.req(f, k.range(k.F(f, 0), k.i32, "0", "100"));
+    k.req(f, k.range(k.F(f, 1), k.i32, "0", "100"));
+    Var* x = k.local(f, "x", k.i32);
+    Var* i = k.local(f, "i", k.i32);
+    Var* j = k.local(f, "j", k.i32);
+    const Expr* after_inner = k.v(x);
+    const Stmt* inner = k.loop(k.lt(k.v(j), k.pv(f, 1)), {k.cl(k.range(k.v(j), k.i32, "0", "100")), k.cl(k.le(k.v(j), k.pv(f, 1)))},
+                               {k.cl(k.gap(k.pv(f, 1), k.v(j)))}, k.blk({k.asg(x, k.v(j)), plus1(k, j)}), nullptr, LF::While, k.jid());
+    const Stmt* outer = k.loop(k.lt(k.v(i), k.pv(f, 0)), {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.le(k.v(i), k.pv(f, 0)))},
+                               {k.cl(k.gap(k.pv(f, 0), k.v(i)))},
+                               k.blk({k.decl(j, k.num(k.i32, "0")), inner, k.chk(k.le_c(after_inner, k.i32, "2147483647")), plus1(k, i)}), nullptr,
+                               LF::While, k.jid());
+    std::vector<const Stmt*> top = {k.decl(x, nullptr), k.decl(i, k.num(k.i32, "0"))};
+    if (assigned_before) top.push_back(k.asg(x, k.num(k.i32, "1")));
+    top.push_back(outer);
+    top.push_back(k.ret(k.num(k.i32, "0")));
+    f->body = k.blk(top);
+    k.done(f);
+    if (!assigned_before) k.fail("uninitialized", after_inner->loc);
+  };
+  lc("uninit_nested_loops_assigned_before", "x = 1 before two nested loops; the inner one assigns x; read after the inner loop: one snapshot per loop", [=](Kit& k) { nested(k, true); });
+  lc("uninit_nested_loops_unassigned", "the same without x = 1: the inner loop may not run", [=](Kit& k) { nested(k, false); });
+  // do { x = i; i++ } while (i < n && x >= 0); the test reads x only when i < n.  The twin assigns x only when n > 5.
+  auto do_loop = [=](Kit& k, bool twin) {
+    Function* f = fn_n(k, k.i32);
+    Var* x = k.local(f, "x", k.i32);
+    Var* i = k.local(f, "i", k.i32);
+    const Expr* xr = k.v(x);
+    const Stmt* assign_x = twin ? k.iff(gt_c(k, f, "5"), k.blk({k.asg(x, k.v(i))})) : k.asg(x, k.v(i));
+    const Stmt* w = k.loop(k.land(k.lt(k.v(i), k.pv(f, 0)), k.ge_c(xr, k.i32, "0")),
+                           {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.le(k.v(i), k.pv(f, 0)))}, {k.cl(k.gap(k.pv(f, 0), k.v(i)))},
+                           k.blk({assign_x, plus1(k, i)}), nullptr, LF::DoWhile, k.jid());
+    f->body = k.blk({k.decl(x, nullptr), k.decl(i, k.num(k.i32, "0")), w, k.ret(twin ? k.num(k.i32, "0") : k.v(x))});
+    k.done(f);
+    if (twin) k.fail("uninitialized", xr->loc);
+  };
+  lc("uninit_do_while", "do { x = i; i++; } while (i < n && x >= 0); return x; the exit test and the read after the loop come after the assignment", [=](Kit& k) { do_loop(k, false); });
+  lc("uninit_do_while_twin", "the body assigns x only when n > 5: the exit test may read an unassigned x", [=](Kit& k) { do_loop(k, true); });
+  // while (1) { ...; break; } and a read after it.
+  auto break_loop = [=](Kit& k, bool twin) {
+    Function* f = fn_n(k, k.i32);
+    Var* x = k.local(f, "x", k.i32);
+    const int id = k.jid();
+    std::vector<const Stmt*> body;
+    if (twin) body.push_back(k.iff(gt_c(k, f, "5"), k.blk({k.brk(id)})));
+    body.push_back(k.asg(x, k.num(k.i32, "3")));
+    body.push_back(k.brk(id));
+    const Stmt* w = k.loop(k.yes(), {}, {k.cl(k.num(k.i32, "1"))}, k.blk(body), nullptr, LF::While, id);
+    const Expr* r = k.v(x);
+    f->body = k.blk({k.decl(x, nullptr), w, k.ret(r)});
+    if (!twin) k.ens(f, k.eq_c(k.R(f), k.i32, "3"));
+    k.done(f);
+    if (twin) k.fail("uninitialized", r->loc);
+  };
+  lc("uninit_break_after_assignment", "while (1) { x = 3; break; } return x;", [=](Kit& k) { break_loop(k, false); });
+  lc("uninit_break_before_assignment", "while (1) { if (n > 5) break; x = 3; break; } return x; the first break leaves x unassigned", [=](Kit& k) { break_loop(k, true); });
+
+  // ---- jumps past a declaration ----
+  // if (n > 5) goto L; int y; y = 2; L: <tail>
+  auto goto_past = [=](Kit& k, int variant) {  // 0: read at the label, 1: assign then read after the label, 2: nothing read
+    Function* f = fn_n(k, k.i32);
+    Var* y = k.local(f, "y", k.i32);
+    const int L = k.jid();
+    const Expr* r = k.v(y);
+    std::vector<const Stmt*> top = {k.iff(gt_c(k, f, "5"), k.blk({k.go(L)})), k.decl(y, nullptr), k.asg(y, k.num(k.i32, "2")), k.lab(L)};
+    if (variant == 1) top.push_back(k.asg(y, k.num(k.i32, "3")));
+    top.push_back(k.ret(variant == 2 ? k.pv(f, 0) : r));
+    f->body = k.blk(top);
+    k.done(f);
+    if (variant == 0) k.fail("uninitialized", r->loc);
+  };
+  lc("uninit_goto_past_declaration_read", "a goto past int y; reads y at the label: y has no value on the goto path", [=](Kit& k) { goto_past(k, 0); });
+  lc("uninit_goto_past_declaration_assigned_after", "a goto past int y; y is assigned after the label before it is read", [=](Kit& k) { goto_past(k, 1); });
+  lc("uninit_goto_past_declaration_unused", "a goto past int y; y is not read after the label", [=](Kit& k) { goto_past(k, 2); });
+  lc("uninit_goto_past_declaration_in_range", "the variable keeps its fixed value on the goto path: a loop after the label assigns it, so its range invariant must hold on entry", [=](Kit& k) {
+    Function* f = fn_n(k, k.i32);
+    Var* y = k.local(f, "y", k.i8);
+    Var* i = k.local(f, "i", k.i32);
+    const int L = k.jid();
+    const Stmt* w = k.loop(k.lt(k.v(i), k.pv(f, 0)), {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.le(k.v(i), k.pv(f, 0)))},
+                           {k.cl(k.gap(k.pv(f, 0), k.v(i)))}, k.blk({k.asg(y, k.num(k.i8, "1")), plus1(k, i)}), nullptr, LF::While, k.jid());
+    f->body = k.blk({k.decl(i, k.num(k.i32, "0")), k.iff(gt_c(k, f, "5"), k.blk({k.go(L)})), k.decl(y, nullptr), k.asg(y, k.num(k.i8, "2")), k.lab(L), w,
+                     k.ret(k.num(k.i32, "0"))});
+    k.done(f);
+  });
+
+  // ---- switch ----
+  // switch (n) { int x; case 1: x = 2; r = x; break; default: r = 0; }, and its twin that reads x in the case.
+  auto sw_before = [=](Kit& k, bool twin) {
+    Function* f = fn_n(k, k.i32);
+    Var* x = k.local(f, "x", k.i32);
+    Var* r = k.local(f, "r", k.i32);
+    const int id = k.jid();
+    const Expr* rd = k.v(x);
+    std::vector<const Stmt*> body = {k.decl(x, nullptr), k.cs(k.num(k.i32, "1"))};
+    if (!twin) body.push_back(k.asg(x, k.num(k.i32, "2")));
+    body.push_back(k.asg(r, rd));
+    body.push_back(k.brk(id));
+    body.push_back(k.dflt());
+    body.push_back(k.asg(r, k.num(k.i32, "0")));
+    f->body = k.blk({k.decl(r, k.num(k.i32, "0")), k.sw(k.pv(f, 0), k.blk(body), id), k.ret(k.v(r))});
+    if (!twin) {
+      k.ens(f, k.implies(k.eq_c(k.F(f, 0), k.i32, "1"), k.eq_c(k.R(f), k.i32, "2")));
+      k.ens(f, k.implies(k.lnot(k.eq_c(k.F(f, 0), k.i32, "1")), k.eq_c(k.R(f), k.i32, "0")));
+    }
+    k.done(f);
+    if (twin) k.fail("uninitialized", rd->loc);
+  };
+  lc("uninit_switch_declaration_before_first_case", "switch (n) { int x; case 1: x = 2; r = x; break; default: r = 0; }", [=](Kit& k) { sw_before(k, false); });
+  lc("uninit_switch_declaration_before_first_case_twin", "the same, but case 1 reads x without assigning it: the dispatch jumped past the declaration", [=](Kit& k) { sw_before(k, true); });
+  // switch (n) { case 1: int x; x = 2; r = x; break; case 2: r = <0 or x>; break; }
+  auto sw_after = [=](Kit& k, bool twin) {
+    Function* f = fn_n(k, k.i32);
+    Var* x = k.local(f, "x", k.i32);
+    Var* r = k.local(f, "r", k.i32);
+    const int id = k.jid();
+    const Expr* rd = k.v(x);
+    std::vector<const Stmt*> body = {k.cs(k.num(k.i32, "1")), k.decl(x, nullptr), k.asg(x, k.num(k.i32, "2")), k.asg(r, k.v(x)), k.brk(id),
+                                     k.cs(k.num(k.i32, "2")), k.asg(r, twin ? rd : k.num(k.i32, "0")), k.brk(id)};
+    f->body = k.blk({k.decl(r, k.num(k.i32, "0")), k.sw(k.pv(f, 0), k.blk(body), id), k.ret(k.v(r))});
+    k.done(f);
+    if (twin) k.fail("uninitialized", rd->loc);
+  };
+  lc("uninit_switch_declaration_after_case", "switch (n) { case 1: int x; x = 2; r = x; break; case 2: r = 0; break; }: case 2 jumps past the declaration", [=](Kit& k) { sw_after(k, false); });
+  lc("uninit_switch_declaration_after_case_twin", "case 2 reads x, which the dispatch to it did not assign", [=](Kit& k) { sw_after(k, true); });
+  lc("uninit_switch_fallthrough", "case 1 assigns x and falls into case 2, which reads it: the dispatch to case 2 skips the assignment", [=](Kit& k) {
+    Function* f = fn_n(k, k.i32);
+    Var* x = k.local(f, "x", k.i32);
+    Var* r = k.local(f, "r", k.i32);
+    const int id = k.jid();
+    const Expr* rd = k.v(x);
+    f->body = k.blk({k.decl(r, k.num(k.i32, "0")), k.decl(x, nullptr),
+                     k.sw(k.pv(f, 0), k.blk({k.cs(k.num(k.i32, "1")), k.asg(x, k.num(k.i32, "1")), k.cs(k.num(k.i32, "2")), k.asg(r, rd), k.brk(id)}), id),
+                     k.ret(k.v(r))});
+    k.done(f);
+    k.fail("uninitialized", rd->loc);
+  });
+}
+
+void define_uninitialized_rejections() {
+  auto plain = [](Kit& k, const std::function<const Stmt*(Kit&, Function*)>& body) {
+    Function* f = k.fn("f", k.vd, {{"n", k.i32}});
+    f->body = k.blk({body(k, f)});
+    k.done(f);
+  };
+  rc("uninit_goto_skips_initialized_declaration_after_plain_one", "skips a declaration", [=](Kit& k) {
+    const int L = k.jid();
+    Function* f = k.fn("f", k.vd);
+    Var* x = k.local(f, "x", k.i32);
+    Var* y = k.local(f, "y", k.i32);
+    f->body = k.blk({k.go(L), k.decl(x, nullptr), k.decl(y, k.num(k.i32, "1")), k.lab(L)});
+    k.done(f);
+  });
+  rc("uninit_switch_initialized_declaration_before_first_case", "before the first case label", [=](Kit& k) {
+    plain(k, [](Kit& k, Function* f) {
+      Var* y = k.local(f, "y", k.i32);
+      return k.sw(k.pv(f, 0), k.blk({k.decl(y, k.num(k.i32, "5")), k.cs(k.num(k.i32, "1"))}), k.jid());
+    });
+  });
+  rc("uninit_switch_statement_after_plain_declaration_before_first_case", "before the first case label", [=](Kit& k) {
+    plain(k, [](Kit& k, Function* f) {
+      Var* x = k.local(f, "x", k.i32);
+      return k.sw(k.pv(f, 0), k.blk({k.decl(x, nullptr), k.chk(k.yes()), k.cs(k.num(k.i32, "1"))}), k.jid());
+    });
+  });
+  rc("uninit_switch_case_jumps_over_initialized_declaration_after_plain_one", "jumps over", [=](Kit& k) {
+    plain(k, [](Kit& k, Function* f) {
+      Var* x = k.local(f, "x", k.i32);
+      Var* y = k.local(f, "y", k.i32);
+      return k.sw(k.pv(f, 0), k.blk({k.cs(k.num(k.i32, "0")), k.decl(x, nullptr), k.decl(y, k.num(k.i32, "5")), k.cs(k.num(k.i32, "1"))}), k.jid());
+    });
+  });
+  rc("uninit_declaration_without_variable", "a declaration without a variable", [=](Kit& k) {
+    plain(k, [](Kit& k, Function*) { return k.decl(nullptr, nullptr); });
+  });
+  rc("uninit_declared_twice", "declared twice", [=](Kit& k) {
+    Function* f = k.fn("f", k.vd);
+    Var* x = k.local(f, "x", k.i32);
+    f->body = k.blk({k.decl(x, nullptr), k.decl(x, nullptr)});
+    k.done(f);
+  });
+  rc("uninit_assignment_before_declaration", "not declared here", [=](Kit& k) {
+    Function* f = k.fn("f", k.vd);
+    Var* x = k.local(f, "x", k.i32);
+    f->body = k.blk({k.asg(x, k.num(k.i32, "1")), k.decl(x, nullptr)});
+    k.done(f);
+  });
+}
+
 void define_calls_loops_and_more() {
   define_enumerations();
   define_enumeration_rejections();
@@ -2328,6 +2792,8 @@ void define_calls_loops_and_more() {
   define_misc();
   define_goto_noreturn_assert();
   define_goto_rejections();
+  define_uninitialized();
+  define_uninitialized_rejections();
 }
 
 // ---- typing-rule rejections -----------------------------------------------------------------------------------

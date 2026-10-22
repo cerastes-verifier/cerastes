@@ -132,12 +132,61 @@ class Lowerer {
     std::vector<std::string> var_names;  // by Var::id
     std::vector<low::LVar> temps;
     int ntemp = 0;
+    // Decision 0019: the locals declared without an initializer (by Var::id) each get a ghost flag `d_<name>`, true exactly
+    // when the object holds a value; a loop that assigns one declared outside it gets a snapshot `ds_<name>__<loop>`.
+    std::set<int> flagged;
+    std::vector<low::LVar> snapshots;
+    int nloop = 0;
   };
 
   void internal_error(const SrcLoc& loc, std::string what) { errors_.push_back(Diag{loc, std::move(what)}); }
 
   const std::string& var_name(const Var& v) {
     return fn_.var_names[static_cast<size_t>(v.id)];
+  }
+
+  // ---- locals declared without an initializer (decision 0019) ----
+
+  static void find_flagged(const Stmt& s, std::set<int>& out) {
+    switch (s.kind) {
+      case Stmt::Kind::Decl:
+        if (s.expr == nullptr && s.var != nullptr) out.insert(s.var->id);
+        break;
+      case Stmt::Kind::If:
+        if (s.then_body != nullptr) find_flagged(*s.then_body, out);
+        if (s.else_body != nullptr) find_flagged(*s.else_body, out);
+        break;
+      case Stmt::Kind::While:
+        if (s.body != nullptr) find_flagged(*s.body, out);
+        if (s.step != nullptr) find_flagged(*s.step, out);
+        break;
+      case Stmt::Kind::Switch:
+        if (s.body != nullptr) find_flagged(*s.body, out);
+        break;
+      case Stmt::Kind::Block:
+        for (const Stmt* c : s.stmts)
+          if (c != nullptr) find_flagged(*c, out);
+        break;
+      default: break;
+    }
+  }
+
+  bool flagged(const Var& v) const { return fn_.flagged.count(v.id) != 0; }
+  std::string flag_name(const Var& v) { return "d_" + var_name(v); }
+
+  // The fixed value a variable holds while it has none: 0 (`false`), or the low end of an enumeration's value range when 0 is
+  // not in it.  It only keeps the variable inside its type's range (0019 item 5).
+  E dummy_value(const Var& v) {
+    if (v.type.is_bool()) return low::bool_lit(false);
+    const dec::Range r = dec::range_of(*v.type.int_type);
+    return low::int_lit(dec::in_range("0", r) ? "0" : r.lo);
+  }
+
+  // `d := false; v := <dummy>`: the variable is indeterminate (at its declaration, at the entry of its block, before a switch's
+  // dispatch).
+  void reset(std::vector<low::LStmt>& out, const Var& v) {
+    assign(out, flag_name(v), low::bool_lit(false));
+    assign(out, var_name(v), dummy_value(v));
   }
 
   low::Meta meta(const char* category, const SrcLoc& loc, std::string message) {
@@ -175,6 +224,9 @@ class Lowerer {
         if (e.type.is_bool()) return {low::bool_lit(e.value == "true"), -1};
         return {low::int_lit(e.value), -1};
       case Expr::Kind::Local:
+        if (flagged(*e.var))  // a read of a local declared without an initializer: its flag must be set (decision 0019 item 4)
+          obl(full, guard, gdep, low::var(flag_name(*e.var)), -1,
+              meta("uninitialized", e.loc, "`" + e.var->name + "` may be read here before it is given a value"));
         return {low::var(var_name(*e.var)), -1};
       case Expr::Kind::Formal: {
         const size_t k = static_cast<size_t>(e.index);
@@ -481,8 +533,13 @@ class Lowerer {
     switch (s.kind) {
       case Stmt::Kind::Decl:
       case Stmt::Kind::Assign: {
+        if (s.expr == nullptr) {  // a Decl without an initializer (check_program allows no other)
+          reset(out, *s.var);
+          break;
+        }
         LV v = full_expr(*s.expr, out);
         assign(out, var_name(*s.var), v.e);
+        if (flagged(*s.var)) assign(out, flag_name(*s.var), low::bool_lit(true));
         break;
       }
       case Stmt::Kind::ExprStmt:
@@ -506,6 +563,10 @@ class Lowerer {
         break;
       }
       case Stmt::Kind::Block:
+        // A goto past a declaration lands in this block with the variable in scope: it starts indeterminate at the block's
+        // entry (decision 0019 item 4).
+        for (const Stmt* c : s.stmts)
+          if (c->kind == Stmt::Kind::Decl && c->expr == nullptr) reset(out, *c->var);
         for (const Stmt* c : s.stmts) stmt(*c, out);
         break;
       case Stmt::Kind::Switch: switch_stmt(s, out); break;
@@ -597,6 +658,9 @@ class Lowerer {
     const std::string t = "t__" + std::to_string(fn_.ntemp++);
     fn_.temps.push_back(low::LVar{t, false});
     assign(out, t, v.e);
+    // A case label may jump past a declaration of the body without an initializer: reset them before the dispatch (0019 item 4).
+    for (const Stmt* c : s.body->stmts)
+      if (c->kind == Stmt::Kind::Decl && c->expr == nullptr) reset(out, *c->var);
     std::set<int> breaks, continues;
     collect_jumps(*s.body, breaks, continues);
     // The case values' obligations and the guards that each equals the front end's value are in the prologue of the method
@@ -718,6 +782,27 @@ class Lowerer {
         inv.checks.push_back(low::Check{id2, std::move(m)});
       }
       w.invariants.push_back(std::move(inv));
+    }
+
+    // Decision 0019 item 4: Viper havocs the flag of a variable the loop assigns and that is declared outside it.  A snapshot of
+    // the flag before the loop and the invariant `snapshot ==> flag` keep a value given before the loop known inside it.
+    const int loop_number = fn_.nloop++;
+    for (int id : assigned) {
+      if (declared.count(id) != 0 || fn_.flagged.count(id) == 0) continue;
+      const Var& v = *fn_.f->locals()[static_cast<size_t>(id)];
+      const std::string snap = "ds_" + var_name(v) + "__" + std::to_string(loop_number);
+      fn_.snapshots.push_back(low::LVar{snap, true});
+      assign(out, snap, low::var(flag_name(v)));
+      low::LInvariant inv;
+      inv.expr = low::implies(low::var(snap), low::var(flag_name(v)));
+      for (const char* id2 : {"invariant.not.established", "invariant.not.preserved"}) {
+        low::Meta m;
+        m.category = "internal";
+        m.loc = s.loc;
+        m.message = "internal check: the loop keeps `" + v.name + "` given a value";
+        inv.checks.push_back(low::Check{id2, std::move(m)});
+      }
+      if (!opt_.drop_snapshot_invariant) w.invariants.push_back(std::move(inv));
     }
 
     E prior;  // the conjunction of the user invariants so far
@@ -962,6 +1047,7 @@ class Lowerer {
     fn_.f = &f;
     fn_.method = method_name(f);
     for (const auto& v : f.locals()) fn_.var_names.push_back(local_name(*v));
+    if (f.body != nullptr) find_flagged(*f.body, fn_.flagged);
 
     low::LMethod m;
     m.name = fn_.method;
@@ -1033,6 +1119,8 @@ class Lowerer {
     end.name = kEndLabel;
     m.body.push_back(std::move(end));
     for (const auto& v : f.locals()) m.locals.push_back(low::LVar{fn_.var_names[static_cast<size_t>(v->id)], v->type.is_bool()});
+    for (int id : fn_.flagged) m.locals.push_back(low::LVar{flag_name(*f.locals()[static_cast<size_t>(id)]), true});
+    for (const low::LVar& t : fn_.snapshots) m.locals.push_back(t);
     for (const low::LVar& t : fn_.temps) m.locals.push_back(t);
     out_.methods.push_back(std::move(m));
   }

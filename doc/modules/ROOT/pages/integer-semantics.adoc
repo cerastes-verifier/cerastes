@@ -292,9 +292,34 @@ Arithmetic on an enumeration value is where the two languages part: C
 computes `c - 1` in `unsigned int` for `enum color` (so 0 - 1 is the largest
 `unsigned int`), pass:[C++] in `int` (so it is -1). cerastes therefore rejects
 an enumeration value that the compiler converts to an integer for arithmetic,
-for a comparison of order (`<`, `<=`, `>`, `>=`), for a unary operator, for a
-shift or for an arm of `?:`. Write the conversion yourself (`(int)c - 1`) to
-say which you mean. Compound assignment, `pass:[++]` and `--` on an enumeration are
-rejected too. A pass:[C++] `enum class` has no implicit conversions; its
-values can be compared with each other, including with `<`.
+for a unary operator, for a shift or for an arm of `?:`. Write the conversion
+yourself (`(int)c - 1`) to say which you mean. Compound assignment, `pass:[++]`
+and `--` on an enumeration are rejected too.
+
+The order of two values of the same enumeration can be compared (`<`, `<=`,
+`>`, `>=`), and so can a value and one of its enumerators: both languages
+compare the same two integers. Comparing the order of an enumeration value with
+any other integer is rejected, even with a constant: C compares `c < -1` in
+`unsigned int` for `enum color`, where it is true, and pass:[C++] in `int`,
+where it is false. Write the conversion (`(int)c < 2`). A pass:[C++] `enum
+class` has no implicit conversions; its values can be compared with each other,
+including with `<`.
+
+[source,c]
+----
+include::example$integer-semantics/enum_order.c[tag=source]
+----
+
+A `switch` on an enumeration is held to the two rules of the compilers'
+`-Wswitch` warning, which `-Wall` turns on: every `case` value must be the value
+of one of the enumeration's enumerators, and a `switch` without `default` must
+have a `case` for every enumerator. The language allows both, but such a
+`switch` is almost always a mistake, and both clang and GCC refuse it under
+`-Werror`. cerastes rejects it at the `case` label, or at the `switch` for a
+missing enumerator:
+
+[source,c]
+----
+include::example$integer-semantics/enum_switch_rejected.c[tag=source]
+----
 

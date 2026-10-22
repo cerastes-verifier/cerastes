@@ -142,6 +142,7 @@ Decision 0002 fixed the integration: EDG's front end compiled into our binary, w
     | `missing-return` | a non-`void` function may reach its end without `return` | the closing brace |
     | `termination` | a termination measure may be negative or may not decrease (decision 0013) | the loop's `decreases` (loops), or the recursive call with a note at the callee's `decreases` |
     | `noreturn` | a function declared not to return (`[[noreturn]]`, `_Noreturn`) may return (decision 0015) | the reachable `return`, or the closing brace |
+    | `uninitialized` | a local declared without an initializer may be read before it is given a value (decision 0019) | the read |
 
 11. **Silicon** is run as `java -Xss128m -jar silicon.jar --z3Exe <z3> --numberOfErrorsToReport 0 <file.vpr>`
     (the same command the harness uses for `.vpr` tests), from a private temporary directory. Its verdict is
@@ -186,3 +187,5 @@ Decision 0002 fixed the integration: EDG's front end compiled into our binary, w
 *2026-10-21, amended by 0017 (M4.2b1): item 7 — in C, verify mode makes EDG's discretionary warning #1901 (a `const` object named in a constant expression: a case label, `_Static_assert`, a file-scope initializer) an error (`--diag_error=1901`), so such C programs are refused; in both modes #161 (unrecognized `#pragma`) and #1675 (unrecognized GCC pragma) are errors (`#pragma clang attribute` applies attributes EDG never records), and EDG's own diagnostic pragmas (`diag_*`, `diagnostic`) are rejected in verified files (`diagnostic_pragma_in_verify`), since they could turn those errors back into warnings; item 13 — a new hook, `perturb_folded`, moves the value cerastes takes from EDG for every named constant and case value, so the prologue's `internal` guards fail (exit 3).*
 
 *2026-10-22, amended by 0018 (M4.2b2): item 7 — verify mode also suppresses #188 (C: an enumerated type mixed with another type, as in `enum color c = 2;`), since every conversion into an enumeration is checked (0018 item 5).*
+
+*2026-10-22, amended by 0019 (M4.2c): item 7 — verify mode turns off the front end's used-before-set warning (#549) with `--no_use_before_set_warnings`, since cerastes checks every read itself (`uninitialized`); the suppression list is unchanged (the front end's internal error #2656 on a suppressed note waits for the fork fix 0022, 0019 item 9); item 10 — a new category `uninitialized`.*

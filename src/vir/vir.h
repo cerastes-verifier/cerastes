@@ -149,7 +149,8 @@ enum class LoopForm { While, DoWhile, DoOnce };
 
 struct Stmt {
   enum class Kind {
-    Decl,      // `var` = `expr` (a local always has an initializer; the type of `expr` is the type of `var`)
+    Decl,      // `var` = `expr` (the type of `expr` is the type of `var`); `expr == nullptr`: declared WITHOUT an initializer, so `var`
+               // holds no value until an Assign gives it one (decision 0019: reading it before is an `uninitialized` error)
     Assign,    // `var` = `expr` (same type)
     ExprStmt,  // evaluate `expr` (a call, a discarded value, a `(void)e`): only its obligations and effects count
     If,        // if (`expr`) then_body [else else_body]; either body may be null
@@ -318,8 +319,8 @@ class Program {
 // ---- user gotos (decision 0015 item 2) -------------------------------------------------------------------------
 
 // Why a Goto is not accepted.  A Goto with label id L is accepted iff the Label with that id is a direct statement of a
-// Block that is an ancestor of the Goto, at an index after the one holding the Goto, with no Decl of that Block between
-// the two.  Otherwise: `no_label` (no such Label in the function), `skips_declaration` (`variable` names the variable),
+// Block that is an ancestor of the Goto, at an index after the one holding the Goto, with no Decl WITH an initializer of that
+// Block between the two (a Decl without one may be jumped over, decision 0019 item 6).  Otherwise: `no_label` (no such Label in the function), `skips_declaration` (`variable` names the variable),
 // `backward` (the Label comes before the Goto in a pre-order walk) or `enters` (anything else).
 struct GotoProblem {
   const Stmt* go = nullptr;
@@ -374,6 +375,7 @@ class Builder {
   const Expr* spelled(const Expr* e, std::string c_type_name);
 
   // Statements.
+  // `init` null: a local declared without an initializer (decision 0019).
   const Stmt* decl(const Var* v, const Expr* init, SrcLoc loc);
   const Stmt* assign(const Var* v, const Expr* value, SrcLoc loc);
   const Stmt* expr_stmt(const Expr* e, SrcLoc loc);

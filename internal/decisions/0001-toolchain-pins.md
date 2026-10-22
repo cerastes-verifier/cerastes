@@ -13,7 +13,7 @@ in both places.
 
 | Component | Pin | Obtained by |
 |---|---|---|
-| EDG front end | the owner's fork `mborland/compiler`, branch `cerastes` (decision 0009, since 2026-10-14; submodule URL https://github.com/mborland/compiler.git), currently at the fork's `97c2141be9e6d49c7b44be9e93efeecebf2c2ef6` (2026-10-21): the cerastes series merged with upstream `edgcpp/compiler` `main` `21065e551e` ("Fix filter command escaping and script name []"). The base was upstream `034385ba0a` (`7.0-33`) in M2; see "Pin history" | submodule `third_party/edg`; stock preset `macos-arm-clang-debug`, built out of tree in `build/edg` |
+| EDG front end | the owner's fork `mborland/compiler`, branch `cerastes` (decision 0009, since 2026-10-14; submodule URL https://github.com/mborland/compiler.git), currently at the fork's `f0ed5525af135a139630d9b5840bd13b7d2d158c` (2026-10-22): the cerastes series merged with upstream `edgcpp/compiler` `main` `ec2f12cffa` ("Add codecov reporting []"), through the fix branch of EDG bug 0022. The base was upstream `034385ba0a` (`7.0-33`) in M2; see "Pin history" | submodule `third_party/edg`; stock preset `macos-arm-clang-debug`, built out of tree in `build/edg` |
 | Silicon | `viperproject/silicon` tag `v.26.08-release` = `6b540aa45e5af214f4727b7be463ce84b328fabd` | submodule `third_party/silicon`; `sbt assembly` → `target/scala-2.13/silicon.jar` |
 | Silver | `viperproject/silver` `f02e7010639f314447d74732146644565aa8d135` (`v.26.08-release`, the commit Silicon's tag records) | nested submodule `third_party/silicon/silver` |
 | Z3 | 4.16.0, `z3-4.16.0-arm64-osx-15.7.3.zip`, SHA-256 `41828fa07d5cb77bfaee326e8e6dac074f26329c09c633f9e66012bb917cf8ae` | downloaded from the Z3 GitHub release into `build/tools/`, checksum verified |
@@ -196,6 +196,21 @@ binary in a container and checks its outcomes against the recorded ones
   compiler and SDK", "GCC" and "Python" record it. A change of the image's
   tools fails the job until the owner moves the assertion and this record
   together.
+
+- **EDG bug 0022 and upstream `ec2f12cffa` (M4.2c, 2026-10-22).** `97c2141be9` →
+  `f0ed5525af`, the owner's merge of branch `0022` (`3b05dd5c43`, the fix of EDG bug
+  0022, based on upstream `main` `ec2f12cffa`) into the fork's `cerastes`; it brings
+  the 11 upstream commits after `21065e551e` too. Under `src/`: `error.c` (0022),
+  `templates.c`, `types.c`, `overload.c`, `il.c`, `il_display.c` (#173, #335, #340),
+  `targ_def.h` and `defines_linux.h` (#38: 128-bit integer value limits when `__int128`
+  is allowed), `il.h` (a defaulted parameter) and `il_def.h` (a comment): no IL layout
+  change. Every test's emitted Viper is byte-identical to the previous pin's (1107
+  `.vpr`, see `internal/status.md`, M4.2c); `check.sh` is green. One expectation
+  changed, with the owner's approval: #38 removes EDG's spurious #61 on a valid
+  `__int128` multiply, so the M3 probe `p9_wide_constants.cpp` is `frontend-ok`, and
+  `p9_wide_constants_overflow.cpp` pins #61 on a product outside `__int128`. The box
+  suites at `f0ed5525af` were not run by the session (owner's merge; the next box
+  session).
 
 ## Dependabot
 

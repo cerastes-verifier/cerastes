@@ -1010,6 +1010,10 @@ return r > 0 ? r : -r;  eok_question           position L6:16 start L6:10 end L6
 - **il_display prints a type suffix** on integer values (`2UL`, `4294967295U`, `5LL`, `1U`); strip it when parsing il_display
   text. The API string has no suffix.
 - A 128-bit literal in source does not compile (`error #23: integer constant is too large` for a 39-digit literal), so 128-bit constants arise only from folding casts (`(__int128)1 << 100`) or runtime values.
+- *M4.2c (2026-10-22, pin `f0ed5525af`):* the caveat below, a spurious #61 on a valid 128-bit multiply
+  (`(__int128)9223372036854775807LL * 4`), is gone: upstream #38 folds `__int128` constants with 128-bit limits.
+  `p9_wide_constants.cpp` is `frontend-ok` now (owner), and `p9_wide_constants_overflow.cpp` pins both sides: #61 for
+  a product outside `__int128` (2^127, 2^128), none for one inside (2^65, 3 * 2^125) or for an unsigned wrap.
 - Caveat (P3): `(__int128)9223372036854775807LL * 4` gets warning #61 although it fits, and stays unfolded.
 
 ### P10: const globals, enumerators, `constexpr`: **PASS**
@@ -1983,5 +1987,329 @@ Verify mode's EDG options were, when probed, `--diag_suppress=61,62,63,39,179,68
 - **Incidental, predates this session** (`p27_init14.cpp`, `p27_init16.cpp`, `p27_gen1.cpp`): in C++, an error #28 that carries a *note* that verify mode suppresses (`#39` division by zero, `#63` shift count: `A = 10 / 0`, `A = 1 << 32`, `constexpr int z = 1 << 32;`) makes EDG fail with
   `internal error #2656: assertion failed: determine_severity_code: bad severity`, and `build/cerastes verify` ends with exit 3 `internal error in the front end (the program was not checked)`. It is a tool failure, never a verdict (`p27_gen2.cpp`, `case 10 / 0`, is an ordinary
   error #39). Not specific to enumerations.
+
+## M4.2c: locals without an initializer, #2656, -Wswitch
+
+Probes P28-P31 for decision 0019 (indeterminate values; P30 and P31 below) and spike S16. Evidence is under `build/m4.2c/probes/` and `build/m4.2c/spikes/` (gitignored), produced with
+`scripts/cerastes-fe.sh --c23|--c++20 --display_error_number --il_display <probe>` (`build/m4.2c/fe.sh`: output `<probe>.<mode>.il` / `.err`), the scratch tools `il.py` (`fn`,
+`types`) and `tree2.py dik` (copies of the M4.2b2 tools; `il.py fn` now also follows `body_statement`, `initialization`, `increment` and `loop_statement`), `build/m4.2c/p29.sh` (the front
+end with verify mode's option list, `src/driver/verify_main.cpp:299-334` at this commit, plus extra options) and `build/cerastes verify` (`*.verify*.txt`). Silicon was run as
+`scripts/run_tests.py` runs `.vpr` fixtures (`build/m4.2c/spikes/silicon.sh`: `java -Xss128m -jar silicon.jar --z3Exe ... --numberOfErrorsToReport 0`). `il_def.h` lines are in
+`third_party/edg/src/il_def.h` at the pin. Probe files: `p28.c` (functions `g1`-`g13` on lines 2-14), `p28x.cpp` (the same without `g6` and `g8`, `bool` for `_Bool`),
+`p28_init.cpp|p28_init2.cpp`, `p28_self.c`, `p28_reg.c`, `p29.c` (functions `d1`-`d18`, one per line), `p29_jump.c` (`j1`-`j8`, split into `j1.c|cpp`...), `p29_acc.c`.
+A `.cpp` file is compiled in the mode of the option, not of its extension, so each probe ran in both modes unless a construct is invalid in one.
+
+### P28: IL of a local without an initializer: **PASS (the stop rule did not trigger)**
+
+Every declaration without an initializer, in both modes, has `init_kind initk_none` (`an_init_kind` :11014, `a_variable.init_kind` :11088) and **no `stmk_init` statement**; the
+declaration is a `stmk_decl` whose `entities` list (:16802, a list: several variables per statement) holds it. `tree2.py dik` (`probes/p28.c.c23.il`, `probes/p28x.cpp.c++20.il`):
+
+| source | function | variable | C23 | C++20 |
+|---|---|---|---|---|
+| `int x;` | `g1` | `x` | `type=int sc=sc_auto init_kind=initk_none` | the same |
+| `int x, y = 1;` | `g2` | `x` / `y` | `initk_none` / `initk_dynamic` (one `stmk_decl`, then one `stmk_init` with `dik_constant 1`) | the same |
+| `int y = 1, x;` | `g3` | `y` / `x` | `initk_dynamic` / `initk_none` | the same |
+| `_Bool b;` / `bool b;` | `g4` | `b` | `type=bool ... initk_none` | the same |
+| `enum color c;` (file-scope `enum color {RED, GREEN, BLUE}`) | `g5` | `c` | `type=enum color ... initk_none` | `type=color ... initk_none` |
+| `const int kk;` | `g6` | `kk` | `type=const int ... initk_none` (**front end: warning #257-D, below**) | **refused: `error #257: const variable "kk" requires an initializer`** (`p28.c.c++20.err`) |
+| `for (int i; ; ) {...}` | `g7` | `i` | `initk_none`; the `stmk_decl` is the `for`'s `initialization:` (`il.py fn g7`) | the same (C wraps the `for` in a compiler-generated block; C++ does not) |
+| `register int r;` | `g8` | `r` | `sc=sc_register init_kind=initk_none` (il_def.h `sc_register` :424) | **refused: `error #2798: use of the "register" storage class specifier is not allowed`** |
+| `unsigned char u;` | `g9` | `u` | `type=unsigned char ... initk_none` | the same |
+| `int t;` in a `while` body | `g10` | `t` | `initk_none`; the `stmk_decl` is the first statement of the loop body (`loop_statement:`) | the same |
+| `int x; if (n) goto L; x = 1; int y; y = 2; L: return n;` | `g11` | `x`, `y` | both `initk_none`, two `stmk_decl`s, the `stmk_label` after the second (inside the function block) | the same |
+| `switch (k) { int x; case 1: ... }` | `g12` | `x` | `initk_none`; the `stmk_decl` is the **first statement of the switch's `body_statement` block, before the first `stmk_switch_case`** | the same |
+| `switch (k) { case 1: int x; x = 2; ... case 2: ... }` | `g13` | `x` | `initk_none`; the `stmk_decl` follows the first `stmk_switch_case` | the same |
+
+Statement trees (`il.py fn`, condensed; `probes/p28.c.c23.trees`, `probes/p28x.cpp.c++20.trees`; only the C blocks marked `gen` differ from C++, where `if`/`while`/`switch`/`for`
+stand directly in the function block and a condition is wrapped by `eok_bool_cast [gen]`):
+
+```
+g1:  stmk_block { stmk_decl; stmk_expr eok_assign[int](var x, var k); stmk_return var x }
+g3:  stmk_block { stmk_decl; stmk_init; stmk_expr eok_assign[int](var x, var k); stmk_return eok_add(var x, var y) }
+g12: stmk_block { stmk_block gen { stmk_switch var k  body_statement: stmk_block { stmk_decl; stmk_switch_case; stmk_expr eok_assign(var x, const int 2); stmk_return var x; stmk_switch_case; stmk_return const int 0 } } }
+g13: ... body_statement: stmk_block { stmk_switch_case; stmk_decl; stmk_expr eok_assign(var x, const int 2); stmk_return var x; stmk_switch_case; stmk_return const int 3; stmk_switch_case; stmk_return const int 0 }
+```
+
+- **One `stmk_decl` can declare several variables** (`entities` of `g3`'s declaration is `variable@...bd190` (`y`) followed by `variable@...bd570` (`x`), `probes/p28.c.c23.il:13301-13302`), and the **`stmk_init` of
+  `y` comes after the whole `stmk_decl`**, i.e. after `x`'s declaration: `int x, y = x;` reads `x` in `y`'s initializer, after `x`'s declaration point (`p28_self.c` line 2).
+- **The assignment of a no-initializer local is an ordinary `stmk_expr` `eok_assign`** (`g1`, `g4`, `g5`, `g9`: the right side carries the usual conversions, e.g. `eok_bool_cast`, an `eok_cast` of an enumerator in C, a folded constant with `expr`).
+- **Today's encoder** rejects each of these at `src/backend/encode.cpp:1566` (`v->init_kind == initk_none`: `unsupported_declaration` "a local variable without an initializer", `probes/p28.c.verify.c23.txt`).
+  In a switch body it *also* rejects what surrounds the declaration, whether or not it has an initializer: `encode.cpp:2224` "a statement before the first case label of a switch (it is unreachable)" (`g12`: the
+  declaration before `case 1:`), and `encode.cpp:2165` "a case label that jumps over the declaration of x" (`g13`: `case 2:` after the declaration; `probes/p28.c.verify.c23.txt`, lines 13 and 14). The VIR checker holds the same two rules
+  (`src/vir/check.cpp:375-400`: `first` and `declaration_seen`) and a third for `goto` (`check.cpp:745-752`, `GotoProblem::Kind::skips_declaration`).
+- **C++ initializers that are not `initk_none`** (`probes/p28_init.cpp.c++20.il`, `tree2.py dik`):
+
+  | source | `init_kind` | statement | `build/cerastes verify` today (`probes/p28_init.cpp.verify.txt`, `p28_init2.cpp.verify.txt`) |
+  |---|---|---|---|
+  | `int x{};` (`h1`), `int x = {};` (`h2`), `int x = 0;` (`h6`) | `initk_dynamic` | `stmk_init`, `dik_constant 0` | accepted |
+  | `int x = int();` (`h3`) | `initk_dynamic` | `stmk_init`: a `dik_zero` entry, then `dik_constant 0 {expr=enk_temp_init}` | **rejected: `unsupported_expression` "an expression of kind enk_temp_init"** (not a no-initializer local; unchanged by M4.2c) |
+  | `int x{k};` (`h4`), `int x(k);` (`h7`) | `initk_dynamic` | `stmk_init`, `dik_expression` | accepted |
+  | `bool b{};` (`h8`) | `initk_dynamic` | `stmk_init`, `dik_constant [bool 0]` | accepted |
+  | `int x();` (`h5`) | (a function declaration: no variable) | `stmk_decl` of a routine | rejected: `unsupported_declaration` (unchanged) |
+
+  So value-initialization is already an initializer with a constant 0 and needs nothing new. `h3` and `h5` were removed to get `p28_init2.cpp` (6 functions) to `verified`.
+- **A local used in its own initializer stays refused** (`p28_self.c` line 1, `int x = x + n;`: `unsupported_declaration` "a local variable used in its own initializer"); `int x, y = x;` (line 2) is
+  refused today only because `x` has no initializer, and becomes an `uninitialized` read of `x` (its flag is false) with the design.
+- `register int r = 1;` and `auto int a = 1;` are accepted today in C23 (`p28_reg.c`), so only the missing initializer stands in the way of `g8`.
+- `--cerastes_walk` prints routines, signatures and attributes, not declarations or initializers, so it adds nothing for these shapes; `il_display` and the trees above are the evidence.
+
+### P29: front-end diagnostics: **PASS (findings below)**
+
+`p29.sh` runs `cerastes-fe` with verify mode's current list (`--display_error_number --no_wrap_diagnostics --no_colors --diag_suppress=61,62,63,39,179,68,69,188,546,940,1305,2803`, `--diag_error=1901` in C,
+`--diag_error=161,1675`) plus extra options; the outputs are `probes/p29.c.c23.verifyflags.txt`, `p29.c.cxx.verifyflags.txt`, `p29_jump.c.*.verifyflags.txt`, `jump_plain.txt`.
+
+**Used before set, #549** (`warning #549-D: variable "x" is used before its value is set`, discretionary; `p29.c`, **identical in C23 and C++20**):
+
+| line | source | #549 |
+|---|---|---|
+| 1 | `int x; return x + n;` | **yes** |
+| 2 | `int x; if (c) x = 1; if (c) return x; return 0;` (path-precise correct) | no |
+| 3 | `int x; if (c) x = 1; return x;` (read possibly uninitialized) | **no** (a textual set before the read silences it) |
+| 4, 5 | `int x; x++;`, `int x; x += 1;` | **yes** (a compound assignment reads) |
+| 8, 9 | `x = 1; return x + n;`, one assignment per `if`/`else` arm | no |
+| 10 | `int x; while (n > 0) { if (n == 3) x = 1; else return x; n--; } ...` | no (outer variable, uncompleted loop: `symbol_ref.c:2633-2650`) |
+| 11 | `int x; for (;;) { if (n) return x; x = 1; }` | no (the same rule) |
+| 12 | `int x; if (x) return 1; x = n; ...` | **yes** |
+| 13 | `int x; x = x + 1;` | **yes** |
+| 14 | `int x, y = 1; y = n; return x;` | **yes** |
+| 18 | `int x; int y; y = x; x = 1; return y + n;` | **yes** (a use before the textual set) |
+| `p29_acc.c:3` | `int x; if (0) return x; x = n; return x;` (correct: the read is dead) | **yes** (a spurious warning on a program cerastes accepts) |
+| `p29_acc.c:4` | `int x; return n + (int)sizeof(x);` | no |
+| `p28_self.c:1,2` | `int x = x + n;`, `int x, y = x;` | yes, yes |
+
+EDG decides this by the order of the source, not by paths: it warns only at the **first use** of a variable (`vp->used` is then set, `symbol_ref.c:2555-2557`) that has no textual set before it
+(`sym_ptr->value_has_been_set`), and stays silent when the use is inside a loop or after a label that "may be reached by a branch back" (`symbol_ref.c:2633-2650`: `last_label_decl_seq`, `is_loop_scope`). So #549 neither
+finds every read that cerastes will reject (line 3: one-armed `if`) nor spares every read cerastes accepts (`p29_acc.c:3`); **it is not evidence for or against an `uninitialized` verdict.**
+
+**Other warnings the shapes print** (same files): `#550-D variable "x" was set but never used` (`d6`, `int x; x = 1; return n;`; `d14` for `y`; `j1`), `#177-D variable "x" was declared but never referenced`
+(`d7`, `int x; return n;`; `j2`), `#185-D dynamic initialization in unreachable code` (`j8`), and, for C only, **`#257-D const variable "kk" requires an initializer`** (`g6`; C++ has the hard error #257).
+None of #550, #177, #257 is in verify mode's suppression list today; all are printed on stderr by `build/cerastes verify` (`probes/p28.c.verify.c23.txt` starts with the C23 `#257`, `#549`, `#550`).
+
+**#546** (`transfer of control bypasses initialization of`), `p29_jump.c`, split files `j1`-`j8`, plain front end (`jump_plain.txt`) and verify mode's list (`p29_jump.c.*.verifyflags.txt`):
+
+| source | C23 | C++20 |
+|---|---|---|
+| `j1` `if (n) goto L; int y; y = 2; L: ...` (goto past a declaration **without** an initializer) | no #546 | no #546 |
+| `j3`, `j4` (the same with the label before/after the assignment) | none | none |
+| `j5` `switch (k) { ... case 1: int x; x = 2; ... case 2: ...}` (case past a declaration without an initializer) | none | none |
+| `j7` `switch (k) { int x; case 1: ... default: x = 0; ...}` | none | none |
+| `j2` `if (n) goto L; int y = 2; L: ...` (goto past a declaration **with** an initializer) | `warning #546-D` | **`error #546`** (not discretionary: `--diag_suppress=546` does not hide it; `p29_jump.c.cxx.verifyflags.txt`: `error #546` and `1 error detected`) |
+| `j6` `case 1: int x = 5; ... case 2:`, `j8` `switch (k) { int x = 7; case 1: ... }` | `warning #546-D` | `warning #546-D` (suppressed by verify mode) |
+
+So **no #546 appears for a jump past a declaration without an initializer** (as expected), and the C++ goto past an initialized declaration is a front-end error that cerastes did not control and does not change.
+
+**Suppressing #549** (`p29.sh p29.c c23 --diag_suppress=549` and `... --no_use_before_set_warnings`, `probes/p29.c.c23.sup549.txt`, `p29.c.c23.nubs.txt`): the two outputs are **identical**: every #549 is gone, and
+#550 (lines 6, 14) and #177 (line 7) remain. A second `--diag_suppress=` option accumulates with the first (`p29_acc.c` line 2: #188 stays suppressed). `--no_use_before_set_warnings` (`cmd_line.c:393`, short `-j`, sets
+`suppress_used_before_set_warnings`, `cmd_line.c:10835-10839`) skips the whole check at `symbol_ref.c:2556`; `vp->used = TRUE` (what #177 and #550 read) is still set, so no other warning changes.
+
+**A diagnostic pragma overrides the number but not the option** (`p29_prag.c`: `#pragma diag_error 549` before `int p1(int n) { int x; return x + n; }`): with `--diag_suppress=549` the front end prints `error #549-D: variable "x" is used before
+its value is set` (`p29.sh p29_prag.c c23 --diag_suppress=549`, and `build/cerastes verify` the same, `1 error detected`); with `--no_use_before_set_warnings` it prints nothing (the check is not made). Verify mode rejects a diagnostic pragma in a verified file
+(`diagnostic_pragma_in_verify`), but one in a system header would still apply.
+
+**Recommendation: add `--no_use_before_set_warnings` to the EDG command line** (`verify_main.cpp`, next to the suppression list, with a comment that cerastes reports the read itself as `uninitialized`, 0019). Both forms give identical output on every probe, and #549 must go: it is a
+*warning on stderr*, and a test whose stderr is not empty fails (`tests/README.md`: "a front-end warning in a test is unexpected output: tests are warning-free"), so every `uninitialized` must-fail test, and every correct program with a dead-code read, would fail on EDG's
+own #549 line. The option is chosen over the number because it cannot be turned back on by a pragma (above); the number form would turn a pragma in a system header into a spurious rejection (fail closed, but a wrong one). Open question for the owner: #550 and
+#177 also print for natural `uninitialized` tests (`int x; return n;`, `int x; x = 1; return n;`), so test authors must write variables that are read; whether verify mode should suppress them too is a separate decision (it changes only stderr).
+
+### Silicon facts (spike S16, `build/m4.2c/spikes/`, Silicon 6b540aa4, Z3 4.16.0)
+
+Hand-written Viper in the style `lower.cpp` emits (method locals declared at the top, `v_x` the variable, `d_x` the flag, `ds_x__N` the snapshot before loop `N`, `while`/`goto`/`label`, the `goto l_end; assert false; label l_end` ending;
+no inhale and no assume; `scripts/lint_viper.py` accepts every construct, its only complaints being the hand-written `f_abort__9` without its trusted tag and the missing `.map`). The flag is reset by `d_x := false; v_x := 0`.
+
+| file | result |
+|---|---|
+| `s16_ok.vpr` (11 methods and the trusted `f_abort__9`) | **verified** |
+| `s16_more_ok.vpr` (3 methods) | **verified** |
+| `s16_fail.vpr` (8 methods) | 8 flag errors, each exactly at the marked `assert d_*` line, plus 2 range errors in `m_goto_noentry` (below) |
+| `s16_more_fail.vpr` (3 methods) | 3 errors, each at its marked line |
+| `s16_g.vpr` | 1 error, the control (below) |
+| `s16_cascade_{0,1,min}.vpr` (8 methods each), `s16_cascade_loop.vpr` | see (f) |
+
+- **Must verify** (`s16_ok.out`, `s16_more_ok.out`: "Silicon finished verification successfully"):
+  (a) `m_a` assign then read; `m_ifelse` both arms assign; `m_pathprecise` `if (c) x = 1; if (c) return x;`; `m_abort` one arm calls a bodyless method `ensures false`, the other assigns, the read follows;
+  (b) `m_loop_outer` (x assigned before the loop, read and reassigned in it; invariants in `lower.cpp`'s order: the automatic range invariant, `ds_x__1 ==> d_x`, the user invariants, among them `invariant d_x`, the flag obligation of a user invariant that reads `x`);
+  (c) `m_forever_break` (`while (true)`, assignment, `goto l_brk`, read after); `m_do` (`while (true)` with the exit test at the end, `x = i` before the test, read after the loop); `m_continue` (a `continue` skips the assignment, the read is after it in the same iteration);
+  (e) `m_switch` (the reset before the dispatch, each case assigns before it reads), `m_switch_fall` (the label reached by fallthrough reads nothing of `x`);
+  `m_goto_ok` (the block-entry reset, a forward `goto` past the declaration, nothing read after the label); `m_body_local` (a body-local flag reset in the body, **no invariant mentions it**: (g) second half);
+  `m_nested` (`x` outer to two loops: one snapshot per loop, read after the inner loop and after the outer one).
+- **Must fail, at the read, with Silicon's own text** (`s16_fail.out`, `s16_more_fail.out`). A flag read is `Assert might fail. Assertion d_x might not hold.` (silver `assert.failed:assertion.false`), at the `assert d_*` line:
+
+  | | method | line | error |
+  |---|---|---|---|
+  | (a') | `m_a1` (one-armed `if`) | 17 | `Assert might fail. Assertion d_x might not hold. (s16_fail.vpr@17.10--17.13)` |
+  | (b') | `m_loop_nosnap` (the loop of `m_loop_outer` without `ds_x__1 ==> d_x`) | 45 | the same at the read in the body: **the snapshot invariant is needed** |
+  | (b'') | `m_loop_after` (read after a loop that may not run) | 82 | the same |
+  | (h2) | `m_loop_read_first` (read before the assignment in the body, `x` outer, never assigned before) | 111 | the same |
+  | (d) | `m_goto_read` (block-entry reset, goto past the declaration reset, read at the label) | 141 | `Assert might fail. Assertion d_y might not hold.` **and nothing else** |
+  | (d2) | `m_goto_noentry` (the same **without** the block-entry reset) | 164 | the flag error **and two postcondition errors** (`Postcondition of m_goto_noentry might not hold. Assertion -2147483648 <= res / res <= 2147483647 might not hold`): on the goto path `v_y` is an unconstrained `Int`, so the **dummy value is needed on that path too**, not only the flag |
+  | (e') | `m_switch_read` (the case reads `x`; the reset is before the dispatch) | 186 | the flag error |
+  | (h) | `m_body_local_read` (body-local `t`, read in iteration 2 before `t = i`) | 218 | the flag error (the declaration reset makes it fail in every iteration that reaches the read) |
+  | | `m_nested_read` (inner loop may not run), `m_switch_fall_read` (dispatch to `case 2` skips `x = 1`) | 41, 72 | the flag error |
+  | | `m_inv_entry` (`invariant d_x`: a user invariant that reads `x` before any assignment) | 102 | **`Loop invariant d_x might not hold on entry. Assertion d_x might not hold.`** (silver `invariant.not.established`): the flag obligation of an invariant is reported as an invariant check, like every obligation clause (`obligation_clause`) |
+
+- **(f) The dummy value does not matter for a cascade; the knowledge of the flag does** (`s16_cascade_{0,1,min}.out`, gen by `gen_cascade.py`; `int x; return <e>;` with `e` in `100 / x`, `100 % x`, `100 / (x - 1)`, `x - 1`, `x + 1`, `-x`, `x * 2`, `INT_MAX / x`, each with the
+  obligations `lower.cpp` emits, `v_x := d` for `d` = 0, 1, `INT_MIN`): **every one of the 24 methods reports exactly one error, the flag assert**, for all three dummies, including `100 / x` with 0 and `x - 1`, `-x` with `INT_MIN`. This is S14's rule
+  (a failed `assert` is assumed and the path goes on, ending only if the assumption contradicts it): the flag was just set to `false` on this very path, so assuming `d_x` makes the path infeasible and no later obligation is reported. The
+  cascade does appear when **the flag is not known on the path**: `s16_cascade_loop.vpr` (`x` outer to a loop that assigns it; `100 / x` read first in the body, dummy 0) reports **two errors**, `assert d_x` (31) and `assert v_x != 0` (32): after the loop head's havoc the
+  flag is unknown, so assuming it does not end the path and `x` is any in-range value, whatever the dummy. (A genuine report: `x` could also be 0 there.) **Consequences:** (1) the dummy only has to be a value of the type's range (the automatic range invariant, `lower.cpp:686-721`,
+  must hold when the flag is false, (d2) above), so `0` for `int`/`unsigned`/`char`s, `false` for `bool`, and for an enumeration `0` **only if 0 is in its value range** (decision 0018's `[lo, hi]`): otherwise `lo`; a literal in range avoids any new obligation; (2) a second
+  error at the same line after an unknown-flag read is possible and is not a bug of the dummy; (3) after the first uninitialized read on a path with a known flag, later errors of that path are not reported (S14).
+- **(g)** `s16_g.vpr`: after a loop that does not assign the snapshot, `assert ds_x__1` verifies with **no invariant naming the snapshot**, i.e. Viper does not havoc a variable the loop does not assign; the control `assert d_x` (the loop assigns the flag) fails (`s16_g.vpr@31`), so the flag itself is havocked at the head
+  (which is why the snapshot invariant is needed). A flag reset inside a loop body needs no invariant (`m_body_local`, `m_body_local_read`).
+- **Order of the three resets matters only for what the flag says at a label**: the block-entry reset is what makes `(d)` exact (one error, no range errors) and `(d2)` shows what is lost without it.
+
+### P30: the front end's internal error #2656 on a suppressed note: **PASS** (cause found; fixed on fork branch `0022`, pinned at `f0ed5525af` the same day)
+
+Evidence: `build/m4.2c/edg2656/` (`matrix.txt`, `compare.txt`, `out/<probe>.{A,B,C}.txt`, `drv_*.txt`, `repro-*.txt`,
+`edgy-*.txt`). Probes are `edg2656/probes/*` (126 files: C++ `constexpr` variable, enumerator, `static_assert`, array
+bound, template argument, `case`, `if constexpr`, `alignas`, bit-field width, `consteval`, `constexpr` call chains,
+lambdas; C enumerator, `_Static_assert`, case, file-scope initializer, array bound, bit-field; run-time uses), run
+with the front end and verify mode's options (`edg2656/fe.sh`).
+
+- **Cause** (`third_party/edg/src/error.c`):
+  - `create_diagnostic_entry` (:5032) applies `check_for_overridden_severity` to every primary-kind entry, including
+    the `es_more_info` notes that the constant-expression interpreter attaches to error #28 (`add_more_info_list`,
+    :7678).
+  - `es_more_info` is below `es_discretionary_error`, so a suppressed number gives the note `es_none`.
+  - Displaying the error then reaches `determine_severity_code` (:3023), which asserts:
+    `internal error #2656: assertion failed: determine_severity_code: bad severity`.
+- **Which suppressed numbers are notes** (each suppressed alone):
+  - #39 (division and remainder by zero), #62 (shift count negative) and #63 (shift count too large);
+  - #61 (integer operation result out of range), only for a shift count or pointer offset that overflows the host
+    integer (`1 << (unsigned __int128)-1`);
+  - #68, #69, #179, #188, #546, #940, #1305 and #2803 are never notes (outside `interpret.c` they are primary
+    diagnostics only).
+
+  An ordinary overflow in a constant expression gives note #2707 (and #2706), which verify mode does not suppress.
+- **Where it fails.**
+  - **C++:** 49 of the probes, exit 4 from the front end and exit 3 from `cerastes verify`. Every C++
+    constant-expression context fails for a #39, #62 or #63 note, except a C++ `case` label (an ordinary error #39)
+    and a narrowing template argument (#2361).
+  - **C:** never, because C has no interpreter notes. Run-time uses (`x << 40`, `x / 0`, `x << -1`,
+    `2147483647 + 1 + x`) print nothing with verify mode's options and warnings #63, #39, #62 and #61 without them,
+    so the suppression does real work.
+- **Remarks instead of suppression** (`compare.txt`). Making #39, #61, #62 and #63 remarks (`--diag_remark`), or all
+  twelve numbers, gives byte-identical output on all 126 probes:
+  - the 49 failures become an error #28 with exit 2;
+  - run-time uses still print nothing;
+  - every other probe is unchanged.
+
+  **But the front end then prints the error twice** under a "1 error detected" summary: the overridden note is no
+  longer `es_more_info`, so `construct_text_message` writes it as a diagnostic of its own and then again within its
+  error (`out/cxx_enumerator_div.cpp.B.txt`). The test harness rejects that (a summary that does not match the errors
+  printed), so verify mode keeps its suppression list and waits for the fix (owner, 2026-10-22; decision 0019 item 9).
+- **Upstream.** Reproduced with stock `cpfe` on upstream `main` `ec2f12cffa` (`repro-before.txt`). Fixed on fork
+  branch `0022` (`3b05dd5c43`): `add_more_info_list` frees a note whose severity is `es_none`. The `GH-*` test fails
+  before and passes after, natively (`edgy-before-vs-recording.txt`, `edgy-after.txt`). The bug file is
+  `internal/edg_bugs/0022-suppressed-note-internal-error.md`.
+- **Incidental, not pursued:** `constexpr int z = (-2147483647 - 1) / -1;` (and `% -1`) gives no diagnostic at all in
+  this front end (probes `cxx_note_1`, `cxx_note_2`). cerastes encodes initializers as written (0017), so it does not
+  rely on the fold.
+
+### P31: `-Wswitch` on switches over an enumeration: **PASS (matrix below; the compilers disagree on 6 of 71 shapes)**
+
+The test-mutator's matrix (`build/m4.2c/tests-prep/matrix.txt`, `matrix/results.json`, one file per shape in `matrix/*.c|*.cpp`, generator `gen_matrix.py`) compiles 71 shapes, each in C and in C++ where
+valid, with Apple clang (Command Line Tools) and GCC 16 (Homebrew `gcc-16`, `g++-16`), `-std=c23` and `-std=c++20`, `-Wall -Wextra -Werror -U__CERASTES__`. A cell is `ok` or a diagnostic; `show_matrix.py`
+prints the diagnostics, `build/m4.2c/summ_matrix.py` classifies them. Of the 71 shapes (a shape that C++ only, `enum class`, is `n/a` for C): **25 are accepted by every compiler and mode, 40 are warned by every
+compiler and mode that can compile them, 6 differ.**
+
+**What every compiler and mode warns on** (the two `-Wswitch` rules, `-Werror,-Wswitch` in clang, `-Werror=switch` in GCC):
+
+- **Rule 1, a case that is not an enumerator's value.** `case 4:` over `enum color { RED, GREEN, BLUE }` (`unfixed_case4_default`, `_covering`); `case 5:` over `enum neg { -1..1 }`; `case -2:`; over fixed bases, `case 2:` over
+  `enum uc : unsigned char { U0, U1 }`, `case 200:`, `case 5:` over `: unsigned long`, `case 7:` over `: int`; a value that does not fit the base also gets `-Wswitch-outside-range` in GCC (`case 300:` over `: unsigned char`)
+  and an overflow note in clang C, and `case -1:` over `: unsigned long` gets a narrowing warning in C++ besides. A cast out of range, `case (enum color)7:`, warns in all but clang C++20, which refuses it as not a constant expression. `enum class` too
+  (`class_cast_case7_default`, `class_uchar_case_cast200_default`). A `case` named by an out-of-range integer constant object (`const int K4 = 4;`, C++) warns too.
+- **Rule 2, an enumerator without a case and no `default`.** One missing enumerator (`unfixed_missing_blue_nodefault`, `fixed_uchar_missing_nodefault`, `class_missing_nodefault`), several (clang lists them in one diagnostic, GCC one per
+  enumerator), a switch with no case at all (`unfixed_empty_switch`, `unfixed_no_case_stmt_nodefault`; GCC adds `-Wswitch-unreachable` for a statement before the first label), an enumerator whose value no case has (`dup_enum_A_only_nodefault`: `enum dup { A = 0, B = 0, C }` with only `case A:` leaves `C`).
+- Both rules fire for every spelling of the controlling expression that has the enumeration's type: a parameter, a local, a `typedef` name (including a `typedef` of an unnamed enumeration), a `const`-qualified parameter, a
+  call result, a parenthesized expression, an assignment, a cast `(enum color)i`, and the inner switch of nested switches.
+
+**What every compiler and mode accepts:**
+
+- A `default` label (any missing enumerator, any `case 4`: `unfixed_missing_blue_default`, `unfixed_only_default`, `unfixed_all_and_default`) silences rule 2; it does not silence rule 1 (`unfixed_case4_default` warns).
+- All enumerators covered, without `default` (`unfixed_all_nodefault`, `neg_enum_all`, `fixed_uchar_all_nodefault`, `fixed_ulong_all_nodefault`, `class_all_nodefault`, `fallthrough_all_nodefault`).
+- A case value that is an integer expression equal to an enumerator's value (`case RED + 1:`, `unfixed_case_red_plus_1`; `case 1u:`; `case 2:` where it is `BLUE`), and enumerators that share a value (`dup_enum_*`: covering one of two
+  aliases covers both).
+- **A controlling expression that is not of enumeration type:** `switch ((int)c)`, `switch (c + 0)`, `switch (+c)` (`int_cast_case4`, `int_cast_enumerators_missing`, `promoted_c_plus_0_case4`, `switch_unary_plus_case4`): no rule applies, so
+  `case 4:` and missing enumerators are accepted.
+
+**Where they disagree** (6 shapes; the `ok` cells are `-Wall -Wextra -Werror` clean; sources in `matrix/`):
+
+| shape | clang C23 | clang C++20 | gcc C23 | g++ C++20 |
+|---|---|---|---|---|
+| `switch (RED) { case RED: ...; case GREEN: ... }` (an enumerator, `BLUE` missing; `switch_on_enumerator_directly_missing`) | ok | ok | ok | **warns** (`BLUE` not handled) |
+| `switch (RED) { case 0: ...; case 4: ...; default: }` (`switch_on_enumerator_case4`) | ok | **warns** | **warns** | **warns** |
+| `switch (i ? RED : GREEN) { case RED: ... }` (`switch_ternary_missing`) | ok | **warns** | **warns** | **warns** |
+| `switch (i ? RED : GREEN) { case 0: ...; case 4: ...; default: }` (`switch_ternary_case4`) | ok | **warns** | **warns** | **warns** |
+| `const enum color K = RED; switch (K) { case RED: ... }` (`switch_const_obj_missing`) | ok | ok | **warns** | **warns** |
+| `switch (OA) { case OA: ... }` (the other enumeration's enumerator, `OB` missing; `switch_other_enumerator_missing`) | ok | ok | ok | **warns** |
+
+Reading the table: in C an enumerator has type `int`, so clang C23 (and GCC C for a bare enumerator) treat the expression as an integer; clang folds a `const` object of enumeration type to its value; GCC keeps its enumeration
+type. **g++ warns on all six; it is the strictest.** Smaller differences that do not change a verdict: the diagnostic wording (`enum color` against `color`, one message per enumerator against a list), `-Wenum-compare-switch` in clang
+C++ for a `case` of another enumeration (`unfixed_case_other_enum`: every compiler also reports `duplicate case value`, an error), and clang C++20's "not a constant expression" for `case (enum color)7:`.
+
+**The owner's rule (2026-10-22, "strictest, as g++").** The two rules apply **in both modes** to a switch whose controlling expression, before promotion, is an enumeration value, an enumerator, or a `?:` whose arms are enumerators of one
+enumeration (g++'s reading, which includes a `const` object of enumeration type). They do not apply to a controlling expression that is an integer expression (a cast to `int`, `c + 0`, `+c`, an ordinary `int`).
+Because an enumerator in C is an `int` constant (P25, P26), the encoder has to recognize an enumerator, or a `?:` of them, as an enumerator of that enumeration in C by the node the front end leaves (P25's `ENUM:` constants), not by
+the type of the expression.
+
+### P32: IL of an ordering comparison on enumerations: **PASS (one wording point for item 10, below)**
+
+Evidence is under `build/m4.2c/probes/`: `p32.c` (functions `a1`-`a8` color, `b1`-`b3` neg, `c1`-`g2` fixed bases; the enumerations `color {RED, GREEN, BLUE}`, `neg {NA = -1, NB, NC}`, `other {OA, OB}`, `uc : unsigned char`, `si : int`,
+`ui : unsigned int`, `sl : long`, `ul : unsigned long`), `p32b.c` (a negative-valued and an unsigned-compatible enumeration together, `m1`-`m4`), `p32_class.cpp` (`enum class`, `h1`-`h5`). IL: `p32.c.c23.il`, `p32.c.c++20.il`,
+`p32b.c.*.il`, `p32_class.cpp.c++20.il`; condensed trees: `p32.c.c23.trees`, `p32.c.cxx.trees`, `p32_class.cpp.cxx.trees` (`il.py fn`; `[gen]` marks a compiler-generated node, `{expr=...}` a folded constant's `expr` chain, `ENUM:X [named_def]`
+an enumerator). Both modes ran (`./fe.sh`): C23's only warning is #68 (a sign change) at `c < -1`, which verify mode suppresses.
+
+**The type each comparison is computed in** (the type of the `eok_lt`/`eok_le` operands; both operands are `eok_cast [gen]` to it, a variable operand from its enumeration type):
+
+| enumeration (values) | operand pair | C23 | C++20 |
+|---|---|---|---|
+| `color` 0..2, unfixed | value, value (`a < b`, `a2`) | **`unsigned int`** (the compatible type) | **`int`** |
+| | value, enumerator (`c < BLUE`, `c <= GREEN`, `RED < c`) | `unsigned int` | `int` |
+| `neg` -1..1, unfixed | `n < NC`, `a < b`, `n < 0` | `int` | `int` |
+| `uc : unsigned char` | `a < b`, `a < U1` | `int` (the promoted base) | `int` |
+| `si : int` | `a < b`, `a < I1` | `int` | `int` |
+| `ui : unsigned int` | `a < b`, `a < V1` | `unsigned int` | `unsigned int` |
+| `sl : long` | `a < b`, `a < L1` | `long` | `long` |
+| `ul : unsigned long` | `a < b`, `a < W1` | `unsigned long` | `unsigned long` |
+| `enum class S`, `T : unsigned char`, `N : int` | `a < b`, `a < S::SB` | n/a | **no conversion node**: `eok_lt[bool](var a:S, var b:S)`, a built-in comparison of the scoped enumeration itself (`p32_class.cpp.cxx.trees`) |
+
+The result type differs only by the front end's own wrapping: C `eok_lt[int](...)`; C++ `eok_cast[int](eok_lt[bool](...)) [gen]`.
+
+**The `expr` chain of an enumerator operand** (an enumerator is an `int` constant in C and a constant of the enumeration type in C++; `p32.c.c23.trees`, `p32.c.cxx.trees`):
+
+| source | C23 | C++20 |
+|---|---|---|
+| `c < BLUE` (`a1`) | `const unsigned int 2U {expr=eok_cast[unsigned int](const int 2 ENUM:BLUE [named_def]) [gen]}` | `const int 2 {expr=eok_cast[int](const color 2 ENUM:BLUE [named_def]) [gen]}` |
+| `RED < c` (`a7`) | `const unsigned int 0U {expr=eok_cast[unsigned int](const int 0 ENUM:RED [named_def]) [gen]}` | `const int 0 {expr=eok_cast[int](const color 0 ENUM:RED [named_def]) [gen]}` |
+| `n < NC` (`b1`, neg) | `const int 1 {expr=eok_cast[int](const int 1 ENUM:NC [named_def]) [gen]}` | `const int 1 {expr=eok_cast[int](const neg 1 ENUM:NC [named_def]) [gen]}` |
+| `a < U1` (`c2`, fixed `uc`) | `const int 1 {expr=eok_cast[int](const enum uc 1U ENUM:U1 [named_def]) [gen]}`: **in C a fixed-base enumerator has the enumeration's type** | `const int 1 {expr=eok_cast[int](const uc 1U ENUM:U1 [named_def]) [gen]}` |
+| `a < V1` (`e2`, fixed `ui`) | `const unsigned int 7U {expr=eok_cast[unsigned int](const enum ui 7U ENUM:V1 ...) [gen]}` | `const unsigned int 7U {expr=eok_cast[unsigned int](const ui 7U ENUM:V1 ...) [gen]}` |
+| `RED < 2` (`a3`) | folded: `const int 1 {expr=eok_lt[int](const int 0 {expr=eok_cast[int](const int 0 ENUM:RED ...) [gen]}, const int 2)}`, **compared as `int`**: both operands are constants, the enumerator is `int` | folded: `const int 1 {expr=eok_cast[int](const bool 1 {expr=eok_lt[bool](const int 0 {expr=eok_cast[int](const color 0 ENUM:RED ...) [gen]}, const int 2)}) [gen]}` |
+
+So in C a bare enumerator is `int` and an unfixed-enumeration value is converted to its compatible type; `c < BLUE` has an `int` constant against a `color` value and is computed in `unsigned int` (the compatible type of `color`) because
+the value's type is the higher-ranked one. A fixed-base enumerator keeps the enumeration's type in C.
+
+**Operands the record rejects** (item 10), what each does:
+
+| source | C23 | C++20 | same values? |
+|---|---|---|---|
+| `c < 2` (`a4`) | `lt(cast<unsigned>(c), const unsigned int 2U {expr=cast<unsigned>(const int 2)})` | `lt(cast<int>(c), const int 2)` | yes for every in-range `c` (0..2), but not for a negative literal |
+| `c < -1` (`a5`) | `lt(cast<unsigned>(c), const unsigned int 4294967295U {expr=cast<unsigned>(const int -1 {expr=negate(1)})})`: **true for every `c`** | `lt(cast<int>(c), const int -1 {expr=negate(1)})`: **false for every `c`** | **no** (the reason `c < -1` stays rejected) |
+| `c < o`, two unfixed enumerations (`a6`) | `lt(cast<unsigned>(c), cast<unsigned>(o))` | `lt(cast<int>(c), cast<int>(o))` | yes for non-negative enumerations (both ranges are in 0..) |
+| `n < c`, `c < n` (`neg` with `color`, `p32b.c` `m1`, `m2`) | `lt(cast<unsigned>(n), cast<unsigned>(c))`: **`n = -1` becomes 4294967295** | `lt(cast<int>(n), cast<int>(c))` | **no** (`n = -1`: C false, C++ true) |
+| `c < 0u`, `n < 0u` (`m3`, `m4`) | `unsigned int` | `unsigned int` | yes |
+
+**Do both modes compare the same values for every in-range pair of one enumeration (or an enumeration value and one of its enumerators)? Yes**, for all seven enumerations probed: where the type differs (`color`: `unsigned int` in C, `int` in C++) every value of
+the enumeration is in 0..2, which both types hold, so the conversion keeps each value and the order; every other row has the same type in both modes. The cases that differ are exactly the mixed ones: an enumeration against a negative literal
+(`c < -1`) and a negative-valued enumeration against an unsigned-compatible one (`n < c`), both of which the record keeps rejected.
+
+**Wording to correct in item 10.** The record says both operands are converted "in C++, `int`". The IL shows **in C++ the promoted underlying type**: `int` for an unfixed enumeration and for bases up to `int` (`uc`, `si`), but `unsigned int` for `: unsigned int`,
+`long` for `: long` and `unsigned long` for `: unsigned long` (`e1`-`g2`), the same as C for those. The conclusion (one meaning in both modes for one enumeration) is unaffected, because a value of the enumeration lies in the value range, which both types
+hold. Scoped enumerations are compared as themselves (no conversion node) and are outside item 10 as written (unscoped only).
+
+**Wording to correct in item 11.** It says the rules apply to "a switch whose controlling expression has an enumeration type before promotion". In C an enumerator and a `?:` of enumerators have type `int` (P25), so that wording would not cover the
+shapes on which the owner's rule ("strictest, as g++", P31) applies in both modes; the record should state the rule as the owner gave it: the controlling expression is an enumeration value, an enumerator, or a `?:` of enumerators of one enumeration (a `const`
+object of enumeration type is an enumeration value, as for g++).
 
 *2026-10-20: milestone numbers before the M4.1 section follow the renumbering of that date (plan.md): generic templates are M5.*

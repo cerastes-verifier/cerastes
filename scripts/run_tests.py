@@ -290,7 +290,7 @@ CERASTES_TAG_PREFIX = "cerastes-"
 DRIVER_CATEGORIES = frozenset({
     "precondition", "postcondition", "check", "invariant-entry", "invariant-preserved",
     "overflow", "division-by-zero", "shift", "conversion", "missing-return", "termination",
-    "noreturn"})
+    "noreturn", "uninitialized"})
 # The outcomes whose test runs `cerastes verify` (when it is a C or C++ file).
 VERIFY_KINDS = ("verified", "error", "rejected")
 
