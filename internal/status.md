@@ -4,6 +4,97 @@ Session handoff log, newest first. Each entry says what is done, what is not,
 any surprises, the decision records added and the exact first step for the
 next session.
 
+## M4.2b2 — Enumerations (2026-10-22): done on branch `m4.2b2-enumerations`; PR pending (after M4.2b1's)
+
+Read `internal/handoff.md` next: the "M4.2b2 is done" owner steps at the top, §6 the M4.2b2 audit notes, §8.1 M4.2c,
+§11 questions 16–19.
+
+**Owner decisions (2026-10-22)**
+- Branch `m4.2b2-enumerations` from M4.2b1's tip `6b5f7d9` in the M4.2b1 worktree (M4.2b1's PR is not merged yet).
+- Handoff §11 question 14: keep #1901 an error in C (so `enum { A = K };` naming a `const` object is refused in C);
+  question 15: C23 `constexpr` is an M8 entry (`plan.md` M8, "Known entries").
+- **Enumerator copies:** EDG's unflagged copies of an enumerator's value (no flag, no `expr`: C++ `color d = GREEN;`, a
+  scoped `case S::SA:`, C fixed-type equivalents) are read as literals of EDG's value, range-checked (stop rule 1 not
+  triggered).
+
+**Done**
+- **Decision 0018-enumerations** (commit `ab7afd4`, revised after the code audit); amends 0010 items 2 and 5, 0011 item
+  7, 0012 item 12, 0017 item 7. Probes P25–P27 in `il-inventory.md` ("M4.2b2"; neither planning stop rule triggered).
+- **Enumerations in both modes:** file-scope enumerations of verified files (unscoped, scoped, fixed bases in both modes,
+  unnamed, C++ empty); each is its own VIR type (`Program::enum_type`: identity, value range `[lo, hi]` by [dcl.enum]/8
+  in C++20's wording, in C too; a fixed type's underlying range); `dec::range_of` gives the value range, so parameters,
+  results, trusted results, the automatic loop invariants and constants follow.
+- **Conversions:** every conversion into an enumeration is a `conversion` obligation over the value range, never a wrap
+  (also for an unsigned base); an implicit conversion out of an enumeration only as an operand of `==`/`!=`, a switch's
+  controlling expression or case value, a whole initializer, assignment, argument or return, or of an enumerator
+  (folded named constants included); explicit casts and `bool` conversions accepted.
+- **Enumerators:** a use is a literal of EDG's value (`is_named_constant_definition`, its enumeration accepted);
+  initializers checked as written in the 0017 prologue, implicit values checked to be previous + 1; `names_object` stops
+  at an enumerator (`do … while (A)` with `A == 0` runs once in both modes).
+- **C specifics:** a C switch over an enumeration of rank at most `int` is encoded in the promoted type (C23 6.8.5.3:
+  `case 4:` over `enum color` is never taken, as in C++); a fixed type above `int` is not promoted and its case
+  constants convert into the enumeration (checked); EDG's C++-style typing of earlier enumerators inside a C enumerator
+  list (and `sizeof`/`_Alignof`/`typeof` of them) is rejected (audit rounds 1–2, two wrong "verified" results); #188 is
+  suppressed in verify mode.
+- **Rejected** (each with a test): arithmetic, ordering (unscoped), unary operators and shifts on enumeration values,
+  `?:` of enumeration type, compound assignment and `++`/`--` on or with an enumeration, a `bool` base, enumerators
+  outside `int`, incomplete enumerations without a fixed type, enumerations in blocks, classes and templates, system
+  enumerations (at the use), attributes off the allow-list.
+- **Code:** `src/vir` (`IntType` enum fields, `Program::enum_type`, `Type` identity, `range_of`, the `conversion`
+  obligation into an enumeration, `check_program` backstops, `front_end_value_fits`), `src/backend/encode.cpp`
+  (`enum_info`, `encode_named_enumerator`, enumerator recognition, the conversion allow-marks, the C switch promotion,
+  the C list-typing rejections), `src/driver/verify_main.cpp` (#188), `diagnostics.def` (`unsupported_type` text); VIR
+  self-test 246 → 288 lowering cases (93 → 109 rejection cases).
+- **Tests:** 92 new files in `tests/scalar` (24 positives, 42 error twins, 26 rejection tests; both modes where both
+  accept the code, the c-only and .cpp-only splits of 0018 item 11), 3 doc examples, a `perturb_folded` harness self-test with an enumerator guard; `reject_enum.c` retired
+  (pre-approved). `tests/README.md`: the `conversion` row; the native-ok exception for code only the verifier sees
+  (`#ifdef __CERASTES__` around a `case 4:` that `-Wswitch` refuses; handoff §11 question 19).
+- **Docs:** Integer semantics (an Enumerations section, the Conversions table), Verifying a program (the not-supported
+  list, the C cross-unit note on the single-unit assumption), Error messages (`conversion` on an enumeration), Overview.
+
+**Acceptance**
+- `scripts/check.sh` green (16 min 2 s, one run): self-tests 955 (skipped=1) + 74 + 152 + 225; tests 3067 passed, 0
+  failed, 1 skipped (native-ok: Apple clang 704, GCC 704); 904 `.vpr` lint clean; VIR self-test 288/288 (+ 109 rejection
+  cases); walker oracle 134 goldens, 0 failed; docs 0 problems; `mutate.py --validate` 173 tests, 4861 mutants, 446
+  equivalents, 752 in the bucket.
+- Emitted Viper of every pre-existing test (786 `.vpr` and maps) byte-identical to the session's baseline
+  (`build/m4.2b2-baseline-vpr`), checked after each integration run and finally over check.sh's `build/vpr` (236 new
+  files, no other difference); the 246 existing VIR self-test cases' `.vpr` byte-identical too.
+- `--count-error-twins` 173 (149 + 24); `--check-headers` 1143/1143.
+- Mutation over the new positives and the doc example: first run 947 mutants, 797 killed, 20 safe-direction, 114
+  unexplained, 16 stillborn, 0 tool failures; the positives strengthened in place (exact single-clause `ensures`,
+  callers at the boundaries; no `expect:` line touched; the twins, all new this session, regenerated with them); final
+  run over the 24 positives and the doc example: 862 mutants, 830 killed, 4 safe-direction, 18 stillborn, 0 tool
+  failures, 10 survivors listed as equivalents (8 in the never-taken `case 4`/`case -1` branches of
+  `enum_case_promoted.c`, 2 `-0 == 0` in `enum_negative.c`), **0 unexplained**; `--validate` 173 tests, 4861 mutants,
+  446 equivalents.
+- Audits (Opus, one reviewer): record and evidence — 1 blocking (C enumerator-list typing), 4 should-fix, notes, all
+  taken; code — 1 blocking (`sizeof`/`typeof` bypass in C), 2 should-fix, notes, taken; re-audit — the blocking item
+  still open through `sizeof` type operands (array bounds, nested `typeof`, `_BitInt(e)`) and a missing conversion
+  twin, both taken; final re-audit: blocking item closed, no new issue; the 10 equivalence entries reviewed and
+  accepted.
+- Wall-clock: 09:30–12:40 (planning before).
+
+**Not done / deferred**
+- M4.2c (locals without an initializer, record 0019).
+- Audit notes (handoff §6, M4.2b2).
+
+**Surprises**
+- EDG's C front end types an earlier enumerator inside an enumerator list the C++ way (`decl_spec.c:5930`, `gcc_mode`),
+  so its own folded values are wrong for C (`enum { U = 2u, V = U > -1 };` gives 0, C gives 1): two wrong "verified"
+  results until the audits (handoff §11 question 16).
+- EDG represents C's conversion of a case constant to the promoted type as a cast into the enumeration, so `case 4:` over
+  an enumeration first looked like a conversion error in C only.
+- A named constant or case value of an enumeration can hold a front-end value outside the value range (its conversion
+  fails in the prologue), which `check_program`'s range rule first turned into a rejection.
+- In C++, an error #28 whose note verify mode suppresses makes EDG assert (#2656), exit 3 (handoff §11 question 17).
+- The agents finished the implementation in about an hour; the audits found the C-only holes.
+
+**Decision records added:** 0018-enumerations; amended 0010, 0011, 0012, 0017.
+
+**First step for the next session (M4.2c).** Confirm the owner merged the M4.2b1 and M4.2b2 PRs and CI is green on
+`main`. Then handoff §8.1 "M4.2c" (the next free record, 0019), with §11 questions 16–19 answered.
+
 ## M4.2b1 — Named constants and case values (2026-10-21): done on branch `m4.2b1-named-constants`; PR pending
 
 Read `internal/handoff.md` next: the "M4.2b1 is done" owner steps at the top, §6 the M4.2b1 audit notes, §8.1 M4.2b2,
