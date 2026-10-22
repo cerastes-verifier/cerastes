@@ -4,6 +4,84 @@ Session handoff log, newest first. Each entry says what is done, what is not,
 any surprises, the decision records added and the exact first step for the
 next session.
 
+## S3 — Mutation triage (2026-10-21): done on branch `mutation-triage`; PR pending
+
+Read `internal/handoff.md` next: the "S3 is done" owner steps at the top, §5 the result, §8.1 M4.2b.
+
+**Owner decisions (2026-10-21)**
+- S3 runs now, before M4.2b (the plan's order); it ends on a branch, and the owner opens the PR.
+- **Audit A item 3, "verifier-checked":** the safe-direction bucket has no guard rule. A bucketed mutant is a correct
+  program only if its mutated clause is well-defined. A surviving mutant has already passed cerastes' own contract
+  well-definedness check (0010 item 11), which `guard_kept.c` and its `negative/guard_*` twins pin. The literal rule
+  would have moved 145 mutants out of the bucket.
+- Defaults accepted with the plan:
+  - the full run covers `tests/scalar` and the 4 M4.2a doc examples (the other 27 doc examples go to M4.8);
+  - the classifier does not learn typed locals: a weaker `check` or `assert` of a local is listed;
+  - `internal/triage/` is removed, being resolved (`git show 50f07ca:internal/triage/<file>` keeps it).
+
+**Done**
+- **`mutate.py`**
+  - a progress line per finished run on stderr;
+  - a run checks list entries only for the files it selects (trap 1);
+  - `--validate` also generates every file the list names (trap 2);
+  - `assert(e);` modelled as a CHECK clause;
+  - C-exact reading: chained comparisons, a loose `!` and a logic group inside arithmetic or a comparison (nested
+    brackets too) are `unknown`, and so is any `*` (audit A items 1–2);
+  - `has_caller` counts uses in `#define` bodies and default arguments (item 4);
+  - each clause compiled once: `--validate` 93 s → 3 s.
+- **`lint_viper.py`:** the termination rules see a `decreases` clause split over lines (item 5).
+- **Self-tests:**
+  - the shadowed duplicate test runs, with a duplicate-name check;
+  - the order test is event-driven;
+  - `test_mutate.py` 180 → 225, `test_lint_viper.py` 142 → 152.
+- **Weak tests strengthened in place**, 17 files, never an `expect:` line, with 33 new must-fail twins:
+  - M4.1: `continue_cond_div.c`, `do_continue_cond_div.c`, `do_zero_expr.c`, `switch_call.c`;
+  - M4.2a: `goto_in_loop_body.c`, `goto_cleanup.c`, `goto_out_of_loops.c`, `exit_main.c`, and the doc examples
+    `verifying/assert.c` and `error-messages/noreturn_fixed.c`;
+  - the M3 leavers: `call_precondition.c`, `call_result_conversion.c`, `default_argument.cpp`,
+    `default_argument_expr.cpp`, `measure_function_expression.c`, `shift_promoted.c`, `ushort_scale.c`;
+  - the well-definedness pins `guard_kept.c` and its eight `guard_*` twins, `measure_loop_overflow_later.c`, and
+    `main_implicit_post.c`.
+- **`tests/mutants-equivalent.txt`:** 125 → 436 entries, every new one reviewed by the Opus auditor.
+- **Leavers resolved:**
+  - the 74 M3 leavers: 25 already killed, 4 stillborn, 24 killed by strengthened tests, 21 listed;
+  - the 30 that `*` moves out: 1 killed, 29 listed;
+  - M4.1's and M4.2a's survivors: the weak ones killed, the rest listed with corrected reasons.
+
+**Acceptance**
+- **Full mutation run**, in three shards balanced by verifier runs (`-j 10`, 18:13–19:55, 1 h 41 min), over `tests/scalar` and the four doc examples: each shard exits 0. Together: 145 tests, 3880 mutants: 2652 killed, 436 equivalent (reviewed; every list entry survived), 733 safe-direction, **0 unexplained survivors**, 59 stillborn, **0 tool failures**
+- `scripts/check.sh` green (14 min 7 s, at the final tests and list): self-tests 951 + 74 + 152 + 225; tests 2694 passed, 0 failed, 1 skipped (native-ok: Apple clang 644, GCC 644); 733 `.vpr` lint clean; VIR self-test 230/230; walker oracle 134 goldens, 0 failed; docs 0 problems. Run #1 (14 min 37 s, before the audit fixes): green, 2678 tests
+- `--validate`: 141 tests, 3801 mutants, 436 equivalents, 742 in the bucket.
+- `run_tests.py --count-error-twins` 141; `--check-headers` 988/988.
+- The generated ids are identical to HEAD's for every file the session did not edit.
+- Audits (Opus):
+  - round 1 (tooling): 1 blocking, fixed;
+  - round 2 (entries and tests): 1 blocking (`do_zero_expr.c` had slack; killed), 2 kills preferred and done;
+  - the re-audit: every item closed, no new blocking item.
+- Wall-clock: 16:47–20:15.
+
+**Not done / deferred**
+- The 27 verified doc examples outside the M4.2a four have never been mutated (M4.8).
+- Audit notes (handoff §6):
+  - `assert` is recognised by name, not as the `<assert.h>` macro;
+  - a literal mutated past `LLONG_MAX` changes type;
+  - `test_the_guard_rule_is_gone` is a `hasattr` check.
+
+**Surprises**
+- The literal guard rule (audit A item 3) would have moved 145 mutants out of the bucket. The same argument applies
+  to 242 relop/literal mutants. Hence the owner's verifier-checked rule.
+- `do_zero_expr.c`'s two "equivalent" proposals were stronger `ensures` on a slack bound: a weak test (round 2).
+- Silicon checks an invariant's well-definedness where it is evaluated (at entry and after each iteration), not in
+  an arbitrary loop-head state, so a dropped invariant guard is reported only when a reachable evaluation is
+  ill-defined (sound; agent A's first pin verified, so `guard_changed_invariant.c` uses a changed guard).
+- Generating mutants took 2 minutes (each clause was compiled once per grid point).
+
+**Decision records added:** none (the bucket's argument is in `mutate.py` and `tests/README.md`).
+
+**First step for the next session (M4.2b).** Confirm the owner merged the `mutation-triage` PR and CI is green on
+`main`. Then handoff §8.1 "M4.2b" (record 0017), with §11 question 4 (a spike of EDG's source sequence lists) in
+its planning.
+
 ## S2 — CI (2026-10-21): done on branch `ci` (PR #1, green); merge pending
 
 Read `internal/handoff.md` next: the "S2 is done" owner steps at the top, §4.2 the result, §5 the mutation triage

@@ -34,7 +34,16 @@ GitHub's `xcode-27` runner (decision 0016). **Owner steps after S2, in this orde
    cancelled).
 2. After the first green run on `main`: make the `CI` job `check (macOS, Command Line Tools 27.0)` a required check
    on `main` (§11 question 6, answered yes).
-Then S3 (§5).
+Then S3 (§5). *(PR #1 merged, `e1f2860`.)*
+
+**S3 is done (2026-10-21, branch `mutation-triage`; result in §5).** The mutation triage: `mutate.py` and
+`lint_viper.py` take audit A's items, the owner's "verifier-checked" rule replaces a guard rule in the bucket, 17 weak
+tests are strengthened in place with 33 new must-fail twins, and `tests/mutants-equivalent.txt` grows from 125 to 436
+reviewed entries. The full run over `tests/scalar` and the four doc examples the list names exits 0. **Owner steps
+after S3:**
+1. Push the branch and open the PR: `git push origin mutation-triage` (the session never pushes). CI runs
+   `check.sh` as locally.
+2. Merge it. Then M4.2b (§8.1).
 
 ## 1. State in one paragraph
 
@@ -250,7 +259,7 @@ the local ones, native-ok with both compilers); self-tests and `check.sh` green;
   - tighten the timeout after two green runs on `main`;
   - SHAs tied to 0001: not now.
 
-## 5. The mutation triage session (S3; about 3.5–4 h; after the CI session, before M4.2b; branch `mutation-triage`)
+## 5. The mutation triage session (S3; done 2026-10-21, result at the end; branch `mutation-triage`)
 
 **Planning facts and owner decisions (2026-10-21).** Independent of the box. Agents: test-mutator A (tooling:
 `mutate.py`, `lint_viper.py`, their self-tests, `tests/README.md`), test-mutator B (strengthened tests, twins, list
@@ -322,9 +331,62 @@ item 4) cannot see them. The weak tests are in `assert.c` (doc: pin `r == (a + b
 auditor's review before it enters `tests/mutants-equivalent.txt`. M4.1's 70 proposals are now tracked too:
 `internal/triage/m4.1-survivors-proposed.txt`.
 
+**Result (S3, 2026-10-21, 16:47–20:15; branch `mutation-triage`).** Three test-mutator agents and one Opus auditor:
+A for the tooling, B for the named weak tests and the doc examples, C for the M3 leavers.
+- **The leaver count** is 74 (`call_contract_only.c` has 4, not 3). Recomputed statically by importing
+  `e04ce6e`'s `mutate.py` and HEAD's.
+- **Stop rule hit.** Audit A item 3 as written (bucket a drop-conjunct or swap-logic mutant only if no possibly
+  undefined arithmetic remains in its clause or a later one) moved 145 mutants out of the bucket. The same reasoning
+  would also apply to 242 relop and literal mutants.
+  - **Owner's answer, "verifier-checked":** no guard rule. A surviving mutant has passed cerastes' own contract
+    well-definedness check (0010 item 11: the `__wf` method checks each `requires` under the earlier ones, and each
+    `ensures` under the `requires` and the earlier `ensures`; checks, asserts, invariants and measures are checked
+    where they are evaluated).
+  - That check is pinned per clause kind by `tests/scalar/guard_kept.c` and `negative/guard_dropped_requires.c`,
+    `guard_dropped_ensures_later.c`, `guard_dropped_ensures_later_overflow.c`, `guard_dropped_overflow.c`,
+    `guard_swapped_requires_overflow.c`, `guard_swapped_check.c`, `guard_swapped_assert.c`,
+    `guard_changed_invariant.c`, plus the existing `contract_wf_divzero.c` and `contract_wf_overflow.c`.
+  - The auditor confirmed the argument against `src/vir/lower.cpp`.
+- **The bucket after the tooling:** 30 mutants leave (any `*` is `unknown`) and 2 join (asserts of `assert_ndebug.c`).
+- **Tooling** (round-1 audit: 1 blocking, a logic group inside two brackets read with Python's meaning; fixed):
+  - progress lines on stderr;
+  - traps 1 and 2;
+  - `assert(e);` as a CHECK clause;
+  - the C-exact reading;
+  - `has_caller` with `#define` bodies and default arguments;
+  - the split-`decreases` lint;
+  - speed: `--list`/`--validate` 2 min → 3 s, the mutate self-test 98 s → 15 s;
+  - the duplicate test and its check;
+  - the event-ordered progress test.
+- **Tests**, 17 positives strengthened in place:
+  - B: 6 named M4.2a/M4.1 tests, 2 doc examples, `do_zero_expr.c` (round 2: its "equivalents" were stronger
+    `ensures` on a slack bound) and `switch_call.c`;
+  - C: 7 M3 files, with callers and bounds appended so that no listed id moved.
+  - 33 new twins; no `expect:` line of an existing test changed.
+- **The list:** 436 entries. Of the 125 M3 entries, all are kept, with ids unchanged. 311 are new, under 120
+  distinct reasons, reviewed by the auditor in two rounds plus a re-audit. The header records it.
+- **`internal/triage/`** (the proposal files above) is removed: every entry is resolved, killed or listed;
+  `git show 50f07ca:internal/triage/<file>` keeps them.
+- **Acceptance:** **Full mutation run**, in three shards balanced by verifier runs (`-j 10`, 18:13–19:55, 1 h 41 min), over `tests/scalar` and the four doc examples: each shard exits 0. Together: 145 tests, 3880 mutants: 2652 killed, 436 equivalent (reviewed; every list entry survived), 733 safe-direction, **0 unexplained survivors**, 59 stillborn, **0 tool failures**; `check.sh` green (14 min 7 s, at the final tests and list): self-tests 951 + 74 + 152 + 225; tests 2694 passed, 0 failed, 1 skipped (native-ok: Apple clang 644, GCC 644); 733 `.vpr` lint clean; VIR self-test 230/230; walker oracle 134 goldens, 0 failed; docs 0 problems. Run #1 (14 min 37 s, before the audit fixes): green, 2678 tests.
+- **Process.** A, B and C ran their file-level runs at `-j 4` alongside the owner's IDE and a VM (load up to 96). The
+  full run waited for a quiet machine and was split into three shards balanced by verifier runs. Each shard is a
+  complete run of its files: trap 1's fix makes shards add up to one run.
+
 ## 6. Should-fix items and known gaps
 
-**Audit A (tooling), deferred to the triage session** (none affects the 223 current candidates):
+**S3 audit notes (2026-10-21, not blocking):**
+1. `assert` is recognised by name (`_assert_calls`), not as the `<assert.h>` macro: a user-defined C++ function named
+   `assert` would be bucketed like a check. None exists in the corpus.
+2. A literal mutated past `9223372036854775807` changes its C type to unsigned. No test has such a literal.
+3. `test_the_guard_rule_is_gone` (`test_mutate.py`) is a `hasattr` check; its behavioural twin does the real work.
+4. Silicon checks an invariant's well-definedness at entry and preservation, not in the arbitrary loop-head state.
+   This is sound (every reachable state is checked, and invariants are never bucketed); `guard_changed_invariant.c`
+   pins it. A loop measure's range obligation is an invariant clause too: checked at every evaluation of the loop
+   head (`measure_loop_overflow_later.c`).
+5. A run checks list entries only for the files it selects, so an acceptance run must name every file the list names
+   (the doc examples too). `tests/README.md` says so.
+
+**Audit A (tooling), deferred to the triage session** (*all five closed in S3*):
 1. Python's meaning of chained comparisons and of `not` differs from C's (`x < r < 1`, `!r < 1`, `r == x > 0` can be
    bucketed wrongly): allow `!` only on a parenthesized operand, one comparison per operand, or parse with C precedence.
 2. A literal coefficient of `*` is not monotone (`3 * x + y < 10` → `4 * x …` incomparable but bucketed): make it
@@ -421,7 +483,7 @@ plan (`plan.md`, "Milestone renumbering"): the **new M4 is the rest of C** (stri
 pointers in M4.5a–f, VerCors as the reference); generic templates are **M5** (M5a–M5g); concepts M6; **C++ memory
 and classes M7** (references, `new`/`delete`, classes; G2's parts that need them are deferred there); inventory M8;
 evaluation M9. Session order: M4.1 → M4.2a (owner, 2026-10-21: before CI) → EDG upstream merge (§4.1) → CI (§4.2) →
-mutation triage (§5) → M4.2b → M4.2c → M4.3 … M4.8 → M5a … M5g → M6.
+mutation triage (§5; done 2026-10-21) → M4.2b → M4.2c → M4.3 … M4.8 → M5a … M5g → M6.
 
 **Rules for every session below** (memory `session-size-few-hours`): planned at ≤ 4 h with fixed scope and stop
 rules; owner decisions and pre-approved expectation changes asked up front; the decision record before code
@@ -749,3 +811,15 @@ Each has a recommended answer. Answer inline, as before.
 9. **Tie each action SHA to 0001** in the guard (today any 40-hex commit passes; a commit that exists only in a fork
    resolves too, so review and Dependabot are the check)? *Recommended: not now; revisit if anyone but you and
    Dependabot edits the workflows.* **Answered (owner, 2026-10-21): not now.**
+
+**S3 (mutation triage), 2026-10-21:**
+
+10. **The 27 verified doc examples that have never been mutated** (all but the M4.2a four): mutate them in M4.8's
+    mutation run, or in a short session before? *Recommended: M4.8, with the M4 tests; their survivors are listed or
+    their pages' examples strengthened then.*
+11. **Typed locals in the classifier:** a weaker `check` or `assert` of a local declared with a signed builtin type
+    is listed today (about 20 entries, e.g. `assert_holds.c`, `check_stmt.c`, `goto_cleanup.c`). Teach the classifier
+    to read local declarations so they are bucketed? *Recommended: not now; the entries are reviewed and cheap, and
+    every new rule of the bucket needs its own audit.*
+12. **A full mutation run in CI:** about 85 min at `-j 10` locally, far more on the 3-core runner. Keep it a
+    per-session acceptance step, with `--validate` in `check.sh`? *Recommended: yes, keep it out of CI.*
