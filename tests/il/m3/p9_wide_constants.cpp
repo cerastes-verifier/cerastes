@@ -1,4 +1,4 @@
-// expect: frontend-warning integer_overflow @ L11
+// expect: frontend-ok
 // M3 probe P9: reading full-width constants.
 unsigned long long ull_max() { return 18446744073709551615ULL; }
 long long ll_min() { return -9223372036854775807LL - 1; }

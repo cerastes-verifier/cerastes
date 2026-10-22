@@ -4,7 +4,7 @@ Session handoff log, newest first. Each entry says what is done, what is not,
 any surprises, the decision records added and the exact first step for the
 next session.
 
-## M4.2c — Locals without an initializer, with §11 questions 17–19 (2026-10-22): done on branch `m4.2c-uninitialized-locals`; PR pending (after M4.2b2's)
+## M4.2c — Locals without an initializer, with §11 questions 17–19 (2026-10-22): done on branch `m4.2c-uninitialized-locals`, EDG pin `f0ed5525af`; PR pending (after M4.2b2's)
 
 Read `internal/handoff.md` next: the "M4.2c is done" owner steps at the top, §6 the M4.2c audit notes, §8.1 the EDG box
 session after M4.2c and M4.3, §11 questions 20–23.
@@ -22,10 +22,14 @@ session after M4.2c and M4.3, §11 questions 20–23.
   - Question 18 now: ordering of one unscoped enumeration; mixed enumeration/integer ordering stays rejected.
   - Question 19 reversed: reject what `-Wswitch` rejects, in both modes. The strictest reading is g++'s, where
     clang and GCC disagree. The `#ifdef __CERASTES__` pattern in native-ok tests is forbidden.
-- **#2656.** No driver change. The `--diag_remark` workaround prints the error twice, so these C++ shapes stay exit 3
-  until the fork fix `0022` is pinned (the next box session).
+- **#2656.** No driver change. The `--diag_remark` workaround prints the error twice. At the end of the session the
+  owner merged the fork fix `0022` into the fork's `cerastes` (`f0ed5525af`) and asked for the pin to move before the
+  close-out: done, so the C++ shapes now give error #28 alone, exit 2.
 - **Retirements** (approved): `reject_uninit_local.c`, `reject_enum_order.c`, `enum_case_promoted.c` and its two twins,
   `enum_case_cast_over.c` and `enum_fixed_long_case.c`. The 8 equivalence entries of `enum_case_promoted.c` go too.
+- **The pin move's one expectation change** (approved): at `f0ed5525af` upstream #38 removes EDG's spurious #61 on a
+  valid `__int128` multiply, so `tests/il/m3/p9_wide_constants.cpp` is `frontend-ok`, with a new test that must warn
+  (`p9_wide_constants_overflow.cpp`: #61 for a product outside `__int128`, none inside).
 
 **Done**
 - **Decision 0019** (`d220f74`, revised after the audits). Amends 0011 items 7 and 10, 0012 items 3 and 12, 0014
@@ -54,7 +58,11 @@ session after M4.2c and M4.3, §11 questions 20–23.
   - **Cause:** a suppressed constant-evaluation note (#39, #61, #62, #63) has no severity, and the text output asserts.
   - **Bug file** `internal/edg_bugs/0022-suppressed-note-internal-error.md`, reproduced on upstream `ec2f12cffa`.
   - **Fork fix:** branch `0022` (`3b05dd5c43`, one commit on `ec2f12cffa`, with a `GH-*` test that fails before and
-    passes after natively). Not merged into `cerastes` and not pinned.
+    passes after natively).
+- **Pin** `97c2141be9` → `f0ed5525af`: the owner's merge of `0022` into the fork's `cerastes`, which also brings
+  upstream `ec2f12cffa` (pushed). No IL layout change; decision 0001's EDG row and pin history. Three C++ #2656 tests
+  (`reject_enum_shift_not_constant.cpp`, `reject_constexpr_shift_not_constant.cpp`, `reject_enum_div_not_constant.cpp`:
+  `rejected expr_not_constant`, exit 2).
 - **Code.**
   - `src/vir`: `vir.h`, `check.cpp` (the relaxed jump rules), `lower.cpp` (flags, resets, snapshots, the hook
     `drop_snapshot_invariant`), `selftest_cases2.inc`.
@@ -99,13 +107,15 @@ session after M4.2c and M4.3, §11 questions 20–23.
   0018 amendment, `do` condition reads, ten missing tests, C++ discarded-value reads), all taken; code — 0 blocking, 1
   should-fix (docs), notes, taken; fork commit and bug file — 0 blocking, should-fix (SARIF claims, "every context",
   the README) taken, the commit amended; the 15 equivalents — all accepted.
-- Wall-clock: 14:06–17:15 (planning before).
+- At the new pin `f0ed5525af`: `scripts/check.sh` (16 min 42 s) passed everything except `p9_wide_constants.cpp`, the
+  one expectation the pin changes (owner-approved). After the change it passes, and so does the new
+  `p9_wide_constants_overflow.cpp`, each on its own; the owner skipped a third full run. Every `.vpr` (1107 and maps) is
+  byte-identical to the pre-pin output, and the three #2656 tests pass (`rejected expr_not_constant`, exit 2).
+- Wall-clock: 14:06–17:50 (planning before).
 
 **Not done / deferred**
 - The EDG box session (handoff §8.1):
-  - the fork's merge of upstream `ec2f12cffa`;
-  - the box suites for `0022`, its merge and the pin move;
-  - the three C++ #2656 tests;
+  - the full box suites at the pin `f0ed5525af` (merged without a box run);
   - §11 question 16's bug draft.
 - Audit notes (handoff §6, M4.2c).
 

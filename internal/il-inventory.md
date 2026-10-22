@@ -1010,6 +1010,10 @@ return r > 0 ? r : -r;  eok_question           position L6:16 start L6:10 end L6
 - **il_display prints a type suffix** on integer values (`2UL`, `4294967295U`, `5LL`, `1U`); strip it when parsing il_display
   text. The API string has no suffix.
 - A 128-bit literal in source does not compile (`error #23: integer constant is too large` for a 39-digit literal), so 128-bit constants arise only from folding casts (`(__int128)1 << 100`) or runtime values.
+- *M4.2c (2026-10-22, pin `f0ed5525af`):* the caveat below, a spurious #61 on a valid 128-bit multiply
+  (`(__int128)9223372036854775807LL * 4`), is gone: upstream #38 folds `__int128` constants with 128-bit limits.
+  `p9_wide_constants.cpp` is `frontend-ok` now (owner), and `p9_wide_constants_overflow.cpp` pins both sides: #61 for
+  a product outside `__int128` (2^127, 2^128), none for one inside (2^65, 3 * 2^125) or for an unsigned wrap.
 - Caveat (P3): `(__int128)9223372036854775807LL * 4` gets warning #61 although it fits, and stays unfolded.
 
 ### P10: const globals, enumerators, `constexpr`: **PASS**
@@ -2154,7 +2158,7 @@ no inhale and no assume; `scripts/lint_viper.py` accepts every construct, its on
   (which is why the snapshot invariant is needed). A flag reset inside a loop body needs no invariant (`m_body_local`, `m_body_local_read`).
 - **Order of the three resets matters only for what the flag says at a label**: the block-entry reset is what makes `(d)` exact (one error, no range errors) and `(d2)` shows what is lost without it.
 
-### P30: the front end's internal error #2656 on a suppressed note: **PASS** (cause found; fixed on fork branch `0022`, not pinned)
+### P30: the front end's internal error #2656 on a suppressed note: **PASS** (cause found; fixed on fork branch `0022`, pinned at `f0ed5525af` the same day)
 
 Evidence: `build/m4.2c/edg2656/` (`matrix.txt`, `compare.txt`, `out/<probe>.{A,B,C}.txt`, `drv_*.txt`, `repro-*.txt`,
 `edgy-*.txt`). Probes are `edg2656/probes/*` (126 files: C++ `constexpr` variable, enumerator, `static_assert`, array

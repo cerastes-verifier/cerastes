@@ -3,10 +3,9 @@
 - **Labels:** `bug`
 - **Found:** probe P27 of cerastes M4.2b2 (2026-10-22). Reproduced on upstream `main` `ec2f12cffa` in session M4.2c
   the same day.
-- **Status:** fixed on branch `0022` (`3b05dd5c43`, one commit on `ec2f12cffa`), not filed. It is not yet merged
-  into the fork's `cerastes` or in the cerastes pin: that waits for the fork's merge of upstream `main` up to
-  `ec2f12cffa` and the full suites on the x86-64 box. The commit's Changes entry still carries `[GH #?]` until the issue
-  has a number.
+- **Status:** fixed on branch `0022` (`3b05dd5c43`, one commit on `ec2f12cffa`), merged into the fork's `cerastes`
+  by the owner (`f0ed5525af`, 2026-10-22) and pinned by cerastes (M4.2c); not filed. The full box suites at the merge
+  are still to run. The commit's Changes entry still carries `[GH #?]` until the issue has a number.
 - **Upstream issue:** not filed
 
 ## Summary
@@ -89,8 +88,8 @@ asserting."
   - Pass-after: no mismatch.
 - **Regressions.** Native `edgy -R` of `changes`, `regressions`, `cwg` and `edg` give the same mismatching tests
   before and after: native macOS platform differences, none new.
-- **Still to run** before the fork's `cerastes` takes it: the full suites on the x86-64 box, and the Changes check
-  in Docker with an issue number.
+- **Still to run** (it is merged and pinned): the full suites on the x86-64 box, and the Changes check in Docker with
+  an issue number.
 - **A related display bug, not fixed by this commit.** With `--diag_remark`, `--diag_warning` or `--diag_error` on
   a note's number, the note is no longer `es_more_info`, so `construct_text_message` writes it as a diagnostic of its
   own and the whole error is displayed twice (under a "1 error detected" summary). Not applying the severity override
@@ -101,7 +100,7 @@ asserting."
 
 `cerastes verify` suppresses #39, #61, #62 and #63, because cerastes checks those operations itself (decision 0010
 item 12). So in C++ an out-of-range constant expression (`enum { A = 1 << 32 };`, `constexpr int z = 1 << 32;`) stops
-with this internal error, and `cerastes verify` exits 3 (a tool failure, never a verdict) instead of refusing the
+with this internal error, and `cerastes verify` exited 3 (a tool failure, never a verdict) instead of refusing the
 program with error #28 (exit 2). Making the numbers remarks instead would stop the failure but print the error twice
-(the related display bug above), which the test harness rejects. Decision 0019 item 9 keeps the suppression list and
-waits for this fix in the pin.
+(the related display bug above), which the test harness rejects. Decision 0019 item 9 kept the suppression list and
+waited for this fix; since the pin `f0ed5525af` the shapes give error #28 alone, exit 2.

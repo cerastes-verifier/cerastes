@@ -70,17 +70,18 @@ and a C switch over an enumeration is encoded in the promoted type. **Owner step
 `internal/status.md`).** Locals without an initializer verify in both modes (record 0019): a read that may see an
 indeterminate value is the new error category `uninitialized` (P4222R1), checked on each path by a ghost flag; a `goto`
 or `case` may jump past such a declaration. With it, §11 questions 17–19: EDG's internal error #2656 is fixed on the fork
-branch `0022` (not pinned; no driver change), ordering of one unscoped enumeration verifies, and a switch on an
-enumeration value is held to `-Wswitch`'s two rules (g++'s reading). **Owner steps after M4.2c, in this order:**
+branch `0022` (no driver change; the owner merged it into the fork's `cerastes`, `f0ed5525af`, and the pin moved there at
+the end of the session), ordering of one unscoped enumeration verifies, and a switch on an enumeration value is held to
+`-Wswitch`'s two rules (g++'s reading). **Owner steps after M4.2c, in this order:**
 1. Merge M4.2b2's PR (#4, `m4.2b2-enumerations`) first: this branch contains it.
 2. Push this branch and open its PR: `git push origin m4.2c-uninitialized-locals` (the session never pushes). CI runs
    `check.sh` as locally.
-3. The fork branch `0022` (`3b05dd5c43`, in `~/Documents/compiler`, on upstream `main` `ec2f12cffa`) is ready for the
-   upstream issue/PR: file `internal/edg_bugs/0022-suppressed-note-internal-error.md`, then replace `[GH #?]` in the
-   commit's Changes entry with the number (the Changes check needs it) and push the branch.
-4. Plan the next **EDG box session** (§8.1, "EDG box session after M4.2c"): upstream moved 11 commits
-   (`21065e551e` → `ec2f12cffa`); merge it into the fork's `cerastes`, run the box suites, merge `0022` (`--no-ff`),
-   move the pin, add the three #2656 tests; and §11 question 16's bug draft.
+3. The fork branch `0022` (`3b05dd5c43`, in `~/Documents/compiler`, on upstream `main` `ec2f12cffa`; merged into
+   `cerastes` as `f0ed5525af`, which is pushed and pinned) is ready for the upstream issue/PR: file
+   `internal/edg_bugs/0022-suppressed-note-internal-error.md`, then replace `[GH #?]` in the commit's Changes entry with
+   the number (the Changes check needs it) and push the branch.
+4. Plan the next **EDG box session** (§8.1, "EDG box session after M4.2c"): the full box suites at the pin
+   `f0ed5525af` (upstream `ec2f12cffa` and `0022`, merged without a box run), and §11 question 16's bug draft.
 5. Answer §11 questions 20–23. Then M4.3 (§8.1).
 
 ## 1. State in one paragraph
@@ -694,14 +695,13 @@ include compound assignment, `++`/`--`, arguments, returns and annotations; a mo
 declared outside the loop; the automatic range invariant, `lower.cpp:676-691`, must not fail on an unassigned local);
 decide by spike. Small: may share a session with M4.3's start.
 
-**EDG box session after M4.2c** (owner, 2026-10-22). (1) Merge upstream `main` (`ec2f12cffa`, 11 commits after
-`21065e551e`; none touches `src/error.c`) into the fork's `cerastes` with the full box suites, as S1 did. (2) Run the box
-suites on branch `0022` (both 64-bit configurations; `changes,regressions` at least, and whether its `.rto` needs
-`edg_x86_32` overrides), merge it into `cerastes` with `--no-ff`, move the pin, and add the three C++ #2656 tests
-(`enum { A = 1 << 32 };`, `constexpr int z = 1 << 32;`, `enum { A = 10 / 0 };`: `rejected expr_not_constant`, exit 2;
-until then `cerastes verify` exits 3 on them, 0019 item 9). No driver change is needed. (3) §11 question 16: reproduce
-the C enumerator-list typing on unmodified upstream and draft its bug file (no fork fix). Clean builds every run
-(memory: stale binaries after a failed link).
+**EDG box session after M4.2c** (owner, 2026-10-22). The owner merged `0022` into the fork's `cerastes`
+(`f0ed5525af`, which also brings upstream `main` `ec2f12cffa`, 11 commits after `21065e551e`) and M4.2c moved the pin
+there (`check.sh` green, every `.vpr` byte-identical, the three #2656 tests added). Still to do on the box: (1) the full
+suites at `f0ed5525af` in both 64-bit configurations (`changes,regressions,imported,edg,cwg,stdlib`; known `cwg1835`,
+`cwg2881`), and whether `0022`'s `.rto` needs `edg_x86_32` overrides; (2) §11 question 16: reproduce the C
+enumerator-list typing on unmodified upstream and draft its bug file (no fork fix). Clean builds every run (memory:
+stale binaries after a failed link).
 
 **M4.3 Expressions and sequencing.** The flag of decision 0019 must follow an assignment inside an expression at its
 point in the evaluation order (0019 item 13). The comma operator; assignments as values; `x++` inside expressions; calls in
@@ -1022,8 +1022,8 @@ Each has a recommended answer. Answer inline, as before.
     suppressing it (or suppress differently), and draft the EDG bug? *Recommended: a short item in the next session that
     touches the driver; tests avoid the shape until then.* **Answered (owner, 2026-10-22): done in M4.2c, with a fork
     fix branch.** The notes are #39, #61, #62 and #63 (P30). Making them remarks prints the error twice (a second EDG
-    display bug), so the owner chose no driver change: the fix is branch `0022`, pinned after the next box session
-    (0019 item 9; `internal/edg_bugs/0022-suppressed-note-internal-error.md`).
+    display bug), so the owner chose no driver change: the fix is branch `0022`, which the owner merged into the
+    fork's `cerastes` and M4.2c pinned (`f0ed5525af`; 0019 item 9; `internal/edg_bugs/0022-suppressed-note-internal-error.md`).
 18. **Ordering of unscoped enumeration values** (`c < GREEN`, both operands of one enumeration) is rejected (0018 item
     7) although it means the same in both languages for values in range. Lift it when a ported example needs it?
     *Recommended: yes, then; one rule and one test pair.* **Answered (owner, 2026-10-22): do it now** (it diverges

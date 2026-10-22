@@ -186,13 +186,14 @@ object would be indeterminate at the target. With this record that object is ord
    - **No driver change** (owner, 2026-10-22). Making those numbers remarks (`--diag_remark`) stops the failure, but
      the front end then prints the error twice under a "1 error detected" summary: a second front-end bug in how an
      overridden note is displayed (P30). That output is inconsistent and cannot be pinned by a test. The failure is a
-     tool failure (exit status 3), never a verdict, and the program is one C++ refuses anyway, so these shapes stay
-     exit status 3 until the fix is in the pin, and no test uses them.
+     tool failure (exit status 3), never a verdict, and the program is one C++ refuses anyway, so these shapes stayed
+     exit status 3 until the fix was in the pin.
    - **The EDG side.** The bug is `internal/edg_bugs/0022-suppressed-note-internal-error.md`, reproduced on unmodified
      upstream `main` (`ec2f12cffa`). Its fix is one commit on the fork branch `0022`, based on upstream `main`: a
-     suppressed note is left out of its error. A session with the x86-64 box runs the full suites, merges it into
-     `cerastes` and moves the pin; then the C++ shapes give one error #28, exit status 2, with no driver change, and
-     their tests land.
+     suppressed note is left out of its error. The owner merged it into the fork's `cerastes` (`f0ed5525af`, with
+     upstream `ec2f12cffa`) and the pin moved there in the same session (2026-10-22): the C++ shapes now give one error
+     #28 and exit status 2, with no driver change, pinned by `reject_enum_shift_not_constant.cpp`,
+     `reject_constexpr_shift_not_constant.cpp` and `reject_enum_div_not_constant.cpp`.
 10. **Ordering of one unscoped enumeration** (handoff §11 question 18; amends 0018 items 6 and 7).
     - **Accepted.** `<`, `<=`, `>`, `>=` whose two operands are values of the same unscoped enumeration, or one of its
       enumerators.
@@ -275,7 +276,7 @@ object would be indeterminate at the target. With this record that object is ord
 - A local may be declared without an initializer and assigned later, in both modes. A read that may come first is an
   `uninitialized` error at the read.
 - A `goto` or a `case` label may jump past such a declaration.
-- `cerastes verify` still stops with an internal error (exit status 3) on an out-of-range constant expression in
-  C++ until the fork fix 0022 is in the pin; then it refuses the program with the front end's error #28.
+- `cerastes verify` no longer stops with an internal error on an out-of-range constant expression in C++ (EDG bug
+  0022, fixed in the pin): it refuses the program with the front end's error #28.
 - Ordering two values of one unscoped enumeration verifies. A switch over an enumeration is held to `-Wswitch`.
 - The emitted Viper of every program without a local declared without an initializer is unchanged.
