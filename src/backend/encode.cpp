@@ -25,6 +25,7 @@
 
 #include "annotation_il.h"
 #include "check.h"
+#include "dec.h"
 #include "diagnostics.h"
 #include "edg_il.h"
 #include "emit.h"
@@ -142,6 +143,21 @@ class Encoder {
     // User labels: one VIR id per label entity (decision 0015 item 2); the C/C++ position of each user `goto`, for the
     // diagnostics of vir::goto_problems.
     bool in_for_step = false;  // encoding the increment of a `for` loop
+    // Case values (decision 0017 items 5-6): while a case label's value (or the initializer of a local constant it names)
+    // is encoded, a use of a variable is noted, and in C++ a `const` local with a constant initializer is a function
+    // local constant, whose uses are literals.
+    bool case_value = false;
+    std::string case_var;  // the first variable the case value names (empty: none)
+    struct ConstInit {
+      a_constant_ptr c = nullptr;  // the initializer's constant (the declaration's `dik_constant`, P23)
+      a_source_position at{};      // the declaration
+    };
+    std::map<a_variable_ptr, ConstInit> local_const_inits;  // const locals declared so far with a constant initializer
+    struct ConstValue {
+      vir::Type type;
+      std::string value;
+    };
+    std::map<a_variable_ptr, ConstValue> local_consts;  // those a case value named: registered once per function
     std::map<a_label_ptr, int> label_ids;
     std::map<const Stmt*, a_source_position> goto_positions;
   };
@@ -154,6 +170,14 @@ class Encoder {
   std::map<a_routine_ptr, std::set<a_routine_ptr>> edges_;  // calls between verified functions (decision 0013 item 4)
   std::set<std::tuple<int, std::string, unsigned long>> rejected_;  // (diagnostic, file, line)
   Ctx cx_;
+  // Named constants (decision 0017): the file-scope `const` objects of verified files that are encoded, by variable.
+  struct NamedInfo {
+    vir::Type type;
+    std::string value;  // EDG's value, decimal ("0"/"1" for bool)
+  };
+  std::map<a_variable_ptr, NamedInfo> named_;
+  std::set<a_variable_ptr> rejected_globals_;  // file-scope variables rejected at their declaration: uses are not diagnosed again
+  a_variable_ptr encoding_named_ = nullptr;     // the named constant whose initializer is being encoded
 
   // ---- diagnostics and positions ---------------------------------------------------------------------------
   a_source_position pos_or(const a_source_position& p) const {
@@ -572,6 +596,51 @@ class Encoder {
     return b_.int_const(t.t, text, loc_of(p));
   }
 
+  // EDG's value of an integer constant as the decimal text VIR holds ("0"/"1" for a bool).
+  static std::string constant_text(a_constant_ptr c, const vir::Type& t) {
+    a_number_buffer buf = decimal_str_for_integer_constant(c);
+    const std::string text = buf.as_temp_characters();
+    if (t.is_bool()) return text == "0" ? "0" : "1";
+    return text;
+  }
+
+  // A literal of `t` holding `value` (a named constant's use).
+  const Expr* value_literal(const vir::Type& t, const std::string& value, const a_source_position& p) {
+    if (t.is_bool()) return b_.bool_const(value != "0", loc_of(p));
+    return b_.int_const(t, value, loc_of(p));
+  }
+
+  // 0011 item 13, perturb_folded: a neighbouring value of the same type, so that an `internal` guard of decision 0017 fails.
+  static std::string perturb_text(const vir::Type& t, const std::string& v) {
+    if (t.is_bool()) return v == "0" ? "1" : "0";
+    if (!t.is_int() || t.int_type == nullptr) return v;
+    const vir::dec::Range r = vir::dec::range_of(*t.int_type);
+    auto inc = [](const std::string& a) {  // a + 1 for a non-negative decimal
+      std::string s = a;
+      size_t i = s.size();
+      while (i > 0) {
+        --i;
+        if (s[i] == '9') {
+          s[i] = '0';
+        } else {
+          ++s[i];
+          return s;
+        }
+      }
+      return "1" + s;
+    };
+    if (vir::dec::cmp(v, r.lo) <= 0) {  // at the minimum: +1
+      if (vir::dec::negative(r.lo)) return vir::dec::neg(vir::dec::dec1(r.lo.substr(1)));
+      return inc(v);
+    }
+    if (v == "0") return "-1";
+    if (vir::dec::negative(v)) return "-" + inc(v.substr(1));
+    return vir::dec::dec1(v);
+  }
+  static std::string maybe_perturb(const vir::Type& t, const std::string& v) {
+    return verify_config().hook == "perturb_folded" ? perturb_text(t, v) : v;
+  }
+
   const Expr* constant(an_expr_node_ptr e) { return constant_value(e->variant.constant.ptr, e->position); }
 
   // A folded constant `c` at `pos`: its original expression when EDG recorded one (0010 item 12), else its literal value.
@@ -663,6 +732,18 @@ class Encoder {
 
   const Expr* variable(an_expr_node_ptr e) {
     a_variable_ptr v = e->variant.variable.ptr;
+    if (v != nullptr) {
+      const char* vn = v->source_corresp.name;
+      if (cx_.case_value && cx_.case_var.empty()) cx_.case_var = vn ? vn : "?";
+      // A named constant (decision 0017 item 3) is its value: a literal of its type at the use, also in a contract.
+      auto nc = named_.find(v);
+      if (nc != named_.end()) return value_literal(nc->second.type, nc->second.value, e->position);
+      if (v == encoding_named_) {
+        reject(Diag::unsupported_declaration, v->source_corresp.decl_position, "a constant named in its own initializer");
+        return nullptr;
+      }
+      if (rejected_globals_.count(v) != 0) return nullptr;  // diagnosed at its declaration
+    }
     if (v == nullptr || cx_.contract) {
       reject(Diag::unsupported_expression, e->position, "a variable reference that cannot be read");
       return nullptr;
@@ -671,15 +752,174 @@ class Encoder {
     auto it = cx_.vars.find(v);
     if (it == cx_.vars.end()) {
       const char* n = v->source_corresp.name;
-      reject(Diag::unsupported_expression, e->position,
-             std::string("the variable \"") + (n ? n : "?") + "\", which is not a local or a parameter of this function");
+      const a_source_position dp = v->source_corresp.decl_position;
+      if (v->source_corresp.enclosing_routine == nullptr && dp.seq != 0 && !in_verified_file(dp))
+        reject(Diag::unsupported_expression, e->position,
+               std::string("a global declared in a system file (`") + (n ? n : "?") + "`; system files are used only through contracts)");
+      else
+        reject(Diag::unsupported_expression, e->position,
+               std::string("the variable \"") + (n ? n : "?") + "\", which is not a local or a parameter of this function");
       return nullptr;
+    }
+    if (cx_.case_value && il_header.source_language != sl_C && cx_.declaring != v && cx_.pending.count(v) == 0) {
+      bool failed = false;
+      if (const Expr* x = local_const_use(v, e->position, &failed)) return x;
+      if (failed) return nullptr;  // diagnosed
     }
     if (cx_.declaring == v || cx_.pending.count(v) != 0) {
       reject(Diag::unsupported_declaration, v->source_corresp.decl_position, "a local variable used in its own initializer");
       return nullptr;
     }
     return b_.local(it->second, loc_of(e->position));
+  }
+
+  // A reference to a `const`/`constexpr` local from a case value (C++, decision 0017 item 6): the local becomes a function
+  // local constant once (its initializer checked as written in the function's prologue), and the use is its value.  Null
+  // with `*failed` false when `v` is not such a local (the use stays a local read, which the case label then rejects).
+  const Expr* local_const_use(a_variable_ptr v, const a_source_position& pos, bool* failed) {
+    auto done = cx_.local_consts.find(v);
+    if (done != cx_.local_consts.end()) return value_literal(done->second.type, done->second.value, pos);
+    auto in = cx_.local_const_inits.find(v);
+    if (in == cx_.local_const_inits.end() || cx_.fn == nullptr) return nullptr;
+    const Ctx::ConstInit init = in->second;
+    VType t;
+    if (!value_type(v->type, init.at, &t)) {
+      *failed = true;
+      return nullptr;
+    }
+    const Expr* x = constant_initializer(init.c, init.at);
+    if (x == nullptr) {
+      *failed = true;
+      return nullptr;
+    }
+    if (x->type != t.t) {
+      reject(Diag::unsupported_expression, init.at, "an initializer whose type is not the variable's type");
+      *failed = true;
+      return nullptr;
+    }
+    const std::string value = constant_text(init.c, t.t);
+    const char* nm = v->source_corresp.name;
+    cx_.fn->add_local_const(nm ? nm : "", t.t, loc_of(init.at), x, maybe_perturb(t.t, value));
+    cx_.local_consts[v] = Ctx::ConstValue{t.t, value};
+    return value_literal(t.t, value, pos);
+  }
+
+  // The kinds of constants decision 0017 item 1 names: const-qualified (before typedefs are skipped) or constexpr.
+  static bool is_const_object(a_variable_ptr v) {
+    return (f_get_type_qualifiers(v->type, TRUE) & TQ_CONST) != 0 || v->is_constexpr;
+  }
+
+  // Classifies and encodes the file-scope variables of verified files (decision 0017 items 1, 2, 4): each is a named constant
+  // (added to the program, in source order) or rejected at its declaration.
+  void encode_named_constants(const IlEntities& ents) {
+    std::vector<a_variable_ptr> vars;
+    for (a_variable_ptr v : ents.variables) {
+      if (v->compiler_generated) continue;
+      const a_source_position p = v->source_corresp.decl_position;
+      if (p.seq == 0 || !in_verified_file(p)) continue;
+      vars.push_back(v);
+    }
+    std::stable_sort(vars.begin(), vars.end(), [](a_variable_ptr a, a_variable_ptr b) {
+      return a->source_corresp.decl_position.seq < b->source_corresp.decl_position.seq;
+    });
+    const bool c_mode = il_header.source_language == sl_C;
+    for (a_variable_ptr v : vars) {
+      const a_source_position p = v->source_corresp.decl_position;
+      const char* nm = v->source_corresp.name;
+      const std::string name = nm ? nm : "?";
+      cx_ = Ctx();
+      cx_.stmt_pos = p;
+      auto refuse = [&](const std::string& why) {
+        reject(Diag::unsupported_declaration, p, why);
+        rejected_globals_.insert(v);
+      };
+      {
+        // Attributes are held to the allow-list like a local's or a parameter's (0011 item 7): `loader_uninitialized` and
+        // `section` change what the object holds, an unknown one may.
+        const auto before = reported_count();
+        check_attributes(v->source_corresp.attributes);
+        if (reported_count() != before) {
+          rejected_globals_.insert(v);
+          continue;
+        }
+      }
+      // The type first, so that the message names the real reason (an array of const is not "not const").
+      VType vt = vtype(v->type);
+      if (!vt.ok || vt.t.is_void()) {
+        if (vt.ok) vt.name = "void";
+        reject_type(vt, p);
+        rejected_globals_.insert(v);
+        continue;
+      }
+      if (!is_const_object(v)) {
+        refuse("a global variable that is not const (mutable globals come with M4.5b)");
+        continue;
+      }
+      if (v->source_corresp.is_class_member) {
+        refuse("a static data member");
+        continue;
+      }
+      if (v->is_thread_local) {
+        refuse("a thread_local constant");
+        continue;
+      }
+      if (v->is_weak || v->is_weakref) {
+        // `__attribute__((weak))`, `[[gnu::weak]]` and `#pragma weak` all set the flag: another unit may replace the value at link time.
+        refuse("a weak constant (another unit may replace its value)");
+        continue;
+      }
+      const Expr* init = nullptr;
+      std::string value = "0";
+      if (v->init_kind == initk_static && v->initializer.constant != nullptr && v->initializer.constant->kind == ck_integer) {
+        if (c_mode) {
+          // Enforced here too (defence in depth: the driver's `--diag_error=1901` refuses it first, and the diagnostic
+          // pragmas that could downgrade it are rejected).  (sizeof and alignof operands are not nodes names_object follows.)
+          an_expr_node probe{};
+          probe.kind = enk_constant;
+          probe.variant.constant.ptr = v->initializer.constant;
+          if (names_object(&probe)) {
+            reject(Diag::unsupported_expression, p,
+                   "in C, a constant's initializer that names another object (it is not a constant expression in C)");
+            rejected_globals_.insert(v);
+            continue;
+          }
+        }
+        encoding_named_ = v;
+        ++cx_.const_depth;  // the initializer is a constant expression: no calls (`call` rejects them)
+        init = constant_initializer(v->initializer.constant, p);
+        --cx_.const_depth;
+        encoding_named_ = nullptr;
+        if (init == nullptr) {
+          rejected_globals_.insert(v);
+          continue;
+        }
+        if (init->type != vt.t) {
+          refuse("an initializer whose type is not the constant's type");
+          continue;
+        }
+        value = constant_text(v->initializer.constant, vt.t);
+      } else if (v->init_kind == initk_none && v->storage_class == sc_extern) {
+        refuse("an extern const that is not defined in this file (its value is not known here)");
+        continue;
+      } else if ((v->init_kind == initk_none || v->init_kind == initk_zero) && c_mode && v->storage_class == sc_static) {
+        // An internal-linkage tentative definition (C23 6.9.2): zero-initialized, no initializer to check, and no other unit
+        // can define it.
+      } else if (v->init_kind == initk_none && c_mode && v->storage_class == sc_unspecified) {
+        // External linkage: a common symbol under clang's default -fcommon, so another unit's definition wins at link time.
+        refuse("a const tentative definition with external linkage (another unit may define it; write `= 0` or make it static)");
+        continue;
+      } else if (v->init_kind == initk_dynamic) {
+        refuse("a const global whose initializer is not a constant expression (dynamic initialization)");
+        continue;
+      } else {
+        refuse("a const whose initialization this version cannot read");
+        continue;
+      }
+      named_[v] = NamedInfo{vt.t, value};
+      // No initializer: nothing is checked, so perturb_folded leaves the value 0 (check_program rejects a perturbed one).
+      prog_.add_named_const(name, vt.t, loc_of(p), init, init != nullptr ? maybe_perturb(vt.t, value) : value);
+    }
+    cx_ = Ctx();
   }
 
   const Expr* param_reference(an_expr_node_ptr e) {
@@ -1145,6 +1385,8 @@ class Encoder {
       cx_.vars[v] = var;
       if (v->init_kind == initk_static) {
         // A constant initializer with no `stmk_init` statement.
+        if (is_const_object(v) && v->initializer.constant != nullptr)
+          cx_.local_const_inits[v] = Ctx::ConstInit{v->initializer.constant, at};
         initializer(v, var, nullptr, v->initializer.constant, at, out);
       } else {
         cx_.pending.insert(v);
@@ -1196,6 +1438,9 @@ class Encoder {
     if (d->kind == dik_expression) {
       initializer(v, it->second, d->variant.expression, nullptr, s->position.seq ? s->position : at, out);
     } else if (d->kind == dik_constant) {
+      // A `const` local with a constant initializer: a case value may name it (decision 0017 item 6, C++).
+      if (is_const_object(v) && d->variant.constant.ptr != nullptr)
+        cx_.local_const_inits[v] = Ctx::ConstInit{d->variant.constant.ptr, at};
       initializer(v, it->second, nullptr, d->variant.constant.ptr, s->position.seq ? s->position : at, out);
     } else {
       cx_.pending.erase(v);
@@ -1501,6 +1746,26 @@ class Encoder {
     return std::string(buf.as_temp_characters()) == "0";
   }
 
+  // Whether an expression names a variable or a parameter, following every folded constant's original expression (0017 item 7).
+  static bool names_object(an_expr_node_ptr e, int depth = 0) {
+    if (e == nullptr || depth > 64) return false;
+    switch (e->kind) {
+      case enk_variable:
+      case enk_param_ref: return true;
+      case enk_constant: {
+        a_constant_ptr c = e->variant.constant.ptr;
+        if (c == nullptr || (c->expr == nullptr && !c->local_expr_ref)) return false;
+        an_expr_node_ptr o = expr_node_from_constant(c);
+        return o != nullptr && o != e && names_object(o, depth + 1);
+      }
+      case enk_operation:
+        for (an_expr_node_ptr o = e->variant.operation.operands; o != nullptr; o = o->next)
+          if (names_object(o, depth + 1)) return true;
+        return false;
+      default: return false;
+    }
+  }
+
   // The variable a declaration statement declares (looking through generated blocks), or null.
   static a_variable_ptr declared_variable(a_statement_ptr s) {
     if (s->kind == stmk_decl) {
@@ -1583,9 +1848,22 @@ class Encoder {
         // shift error at the label, not the 0 that the front end folded it to.
         const a_source_position saved_stmt_pos = cx_.stmt_pos;
         if (c->position.seq != 0) cx_.stmt_pos = c->position;
+        cx_.case_value = true;
+        cx_.case_var.clear();
         const Expr* v = constant_value(en->case_value, c->position);
+        cx_.case_value = false;
+        const std::string named_var = cx_.case_var;
         cx_.stmt_pos = saved_stmt_pos;
         if (v == nullptr) {
+          ok = false;
+          continue;
+        }
+        if (il_header.source_language == sl_C && !named_var.empty()) {
+          // A `const` object is not an integer constant expression in C (C23 6.6p8).  The driver makes EDG's #1901 an error in
+          // C and diagnostic pragmas are rejected, so this is defence in depth (reached with a `#pragma diag_*`, which is
+          // itself rejected; 0017 item 2).
+          reject(Diag::unsupported_expression, c->position,
+                 "in C, a case value that names a variable (`" + named_var + "`; it is not an integer constant expression in C)");
           ok = false;
           continue;
         }
@@ -1600,7 +1878,8 @@ class Encoder {
           ok = false;
           continue;
         }
-        inner.push_back(b_.case_label(v, loc_of(c->position)));
+        // EDG's value of the label (P24); the prologue proves the value as written equal to it (decision 0017 item 5).
+        inner.push_back(b_.case_label(v, maybe_perturb(v->type, constant_text(en->case_value, v->type)), loc_of(c->position)));
         continue;
       }
       if (!seen_label && !(c->kind == stmk_empty && c->attributes == nullptr)) {
@@ -1682,7 +1961,8 @@ class Encoder {
           return;
         }
         // `do { B } while (0)` runs once and needs no measure (0014 item 5).
-        const bool once = is_zero_constant(s->expr);
+        // ... unless the condition names a variable or parameter (0017 item 7): then it is a measured loop in both modes.
+        const bool once = is_zero_constant(s->expr) && !names_object(s->expr);
         std::vector<vir::Clause> inv, measure;
         const bool inv_ok = encode_loop_clauses(s, inv, measure, !once);
         const Expr* c = as_bool(expr(s->expr), s->expr->position);
@@ -1904,12 +2184,7 @@ void Encoder::declaration_level_checks(const IlEntities& ents) {
       continue;  // the lambda expression is rejected
     reject(Diag::unsupported_declaration, p, is_enum ? "an enumeration" : "a class, struct or union");
   }
-  for (a_variable_ptr v : ents.variables) {
-    if (v->compiler_generated) continue;
-    const a_source_position p = v->source_corresp.decl_position;
-    if (p.seq == 0 || !in_verified_file(p)) continue;
-    reject(Diag::unsupported_declaration, p, "a global variable (including a const or constexpr one)");
-  }
+  // File-scope variables are classified by encode_named_constants (decision 0017).
   for (an_asm_entry_ptr a : ents.asm_entries) {
     const a_source_position p = a->source_corresp.decl_position;
     if (p.seq == 0 || !in_verified_file(p)) continue;
@@ -1929,6 +2204,7 @@ void Encoder::declaration_level_checks(const IlEntities& ents) {
 void Encoder::run(const IlEntities& ents) {
   prog_.set_c_int_bits(static_cast<int>(targ_sizeof_int) * static_cast<int>(targ_char_bit));
   declaration_level_checks(ents);
+  encode_named_constants(ents);
 
   // Routines in verified files: signature and attributes of every declaration, bodies verified.  A body in a
   // verified file that is not encoded (a lambda's, a compiler-generated one, one of a template, a specialization
@@ -1968,6 +2244,11 @@ void Encoder::run(const IlEntities& ents) {
       check_attributes(r->source_corresp.attributes, rx != nullptr && rx->does_not_return);
     }
     if (is_spec_routine(r)) continue;  // specification, never run: its body is not encoded (0011 item 4)
+    if (r->is_weak || r->is_weakref) {
+      // `#pragma weak f` sets the flag without an attribute entry: another unit's definition replaces this one at link time.
+      reject(Diag::unsupported_declaration, decl, "a weak function (another unit may replace its definition)");
+      continue;
+    }
     if (r->is_declared_constexpr || r->is_constexpr || r->is_consteval) {
       reject(Diag::unsupported_declaration, decl, r->is_consteval ? "a consteval function" : "a constexpr function");
       continue;
@@ -2073,6 +2354,19 @@ void verify_encode() {
   if (cfg.hook == "internal_error") internal_error("cerastes self-test hook: an internal error raised from the back end");
 
   reject_line_directives_pass();
+  // EDG's own diagnostic pragmas could turn off the front-end errors that the verifier relies on (decision 0017 item 2).
+  {
+    std::set<unsigned long> seen;
+    for (const a_source_position& p : diag_pragma_sites()) {
+      if (p.seq == 0) {  // a pragma that cannot be placed is rejected too (fail closed, decision 0011 item 4)
+        DiagPos unknown;
+        report_at(Diag::diagnostic_pragma_in_verify, unknown);
+        continue;
+      }
+      if (!in_verified_file(p) || !seen.insert(static_cast<unsigned long>(p.seq)).second) continue;
+      report_at(Diag::diagnostic_pragma_in_verify, diag_position(p));
+    }
+  }
 
   Encoder enc;
   enc.run(collect_entities());

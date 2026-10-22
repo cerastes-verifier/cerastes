@@ -1759,13 +1759,26 @@ identical in C23 and C++20 (`p24_case.*`, `p24_ty.*`):
 So the condition is always a folded `enk_constant` 0 (never an `enk_variable`), and a variable it names is found only by following the `expr` chain through
 operations and casts (C++ adds the generated `eok_bool_cast` on top). `while (0)` is distinguished by an inner constant whose `expr` is NULL.
 
+**Audit additions (2026-10-21, Opus audit of 0017).**
+
+- **C `const int self = self + 1;` is refused by the front end**: `error #28: expression must have a constant value` with `note #2689-D: the value of variable "self"` (`/tmp/audit0017/q3.c`,
+  `q3.err`). (C++ accepts it as a dynamic initialization, P23 above.)
+- **Weak constants**: `const int W = 7; #pragma weak W` sets only `is_weak: TRUE` (il_def.h variable bit) and `has_associated_pragma: TRUE` on the variable; the variable's `attributes` is NULL, so no attribute entry
+  tells a weak constant from an ordinary one (`/tmp/audit0017/w2.c`, `w2.il`; init_kind is still `initk_static`, constant 7). A weak definition can be replaced at link time, so cerastes must read `is_weak`
+  itself and reject it.
+- **`sizeof` of an expression differs between the modes**: `const unsigned long SA = sizeof('a');` and `SB = sizeof(1 == 1);` are `unsigned long 4UL` in C23 and `unsigned long 1UL` in C++20 (both
+  `{expr=enk_sizeof}`; `p23_sizeof.c|cpp`, `tree.py vars`): the character constant and the comparison have type `int` in C and `char`/`bool` in C++. A named constant with such an initializer has a
+  different value per mode, which is the folded value's job (the `enk_sizeof` is encoded as its value, 0010 item 12).
+
 ### Silicon facts (spikes S14-S15, `build/m4.2b1/spikes/`, Silicon 6b540aa4, Z3 4.16.0)
 
-- **S14 (`s14a`, `s14b`, `s14c`)**: **a failed `assert` ends the path.** One method with `assert x > 20; assert x > 30; r := 5; assert x > 40` and `ensures r == 0`
-  reports **exactly one error**, the first (`s14a.vpr@6.10--6.16`); no later assert, no postcondition. `s14c` (a following `assert x > 15`, `assert x < 0`, `assert false`) also gives
-  one error. The same failing `assert` text in two methods gives **two errors**, one per Viper position (`s14b.vpr@5` and `@12`): Silicon reports per method. (S13's three-error
-  output on `a \ b` (above) is not reconciled with this; it was well-definedness of a division, not a plain `assert` after a failed `assert`: unconfirmed which of the two applies to a
-  failed obligation followed by a guard; S15 tests the case that matters.)
+- **S14 (`s14a`-`s14e`)**: **Silicon assumes a failed `assert`'s condition and goes on; a path ends only when that assumption contradicts the path.** (Corrected: the first
+  version of this entry said "a failed assert ends the path", which `s14d` refutes.) `s14a` (`assert x > 20; assert x > 30; r := 5; assert x > 40`, `ensures r == 0`, `requires 0 <= x <= 10`)
+  reports **one error**, the first (`s14a.vpr@6.10--6.16`): `x > 20` contradicts the precondition, so the path is infeasible afterwards; `s14c` (then `assert x > 15`, `assert x < 0`,
+  `assert false`) also gives one error. `s14e` (`assert 31 < 5` with a closed false condition, then `assert x > 8` and a failing `ensures`) gives **one error**, at `31 < 5`. `s14d`
+  (`assert x > 5` is feasible with the precondition) gives **three errors**: `x > 5`, `x > 8` and `x > 20` (`s14d.vpr@5, @6, @8`). The same failing `assert` text in two methods gives
+  **two errors**, one per Viper position (`s14b.vpr@5` and `@12`). So a method stops at a failed obligation whose condition mentions no variable (an initializer or a case value is
+  built from constants, so its obligation is closed: its failure means the condition is false) and nothing else is reported after it; an obligation over variables does not end the path.
 - **S15 (`s15_edit.py`, `*_p.vpr`)**: the emitted `.vpr` of the four files **already asserts every case value's obligations before the dispatch** (right after the scrutinee temp
   `t__0 := v_x__0`; the dispatch `if (t__0 == <case expr>)` carries none). The hand edit moves them to straight after the parameter copy (`v_x__0 := p_x__0`) and follows each
   case's obligations with `assert <case expr> == <EDG folded>` (`1 * c_pow2(40) == 0`, `(2 + 1) == 3`, `5 == 5`; for the conversion twin `1 * c_pow2(3) == 8`, `2 + 1 == 3`,
@@ -1780,7 +1793,7 @@ operations and casts (C++ adds the generated `eok_bool_cast` on top). `while (0)
   | `pos_bad.vpr` (positive with the guard `2 + 1 == 4`) | 1 error, the guard (`pos_bad.vpr@22`): a guard that is false with passing obligations is reported alone |
 
   The unedited emission gives the same single errors (`build/cerastes verify ... --std=c23`: `shift`, `conversion`, `overflow` at the case line). So no twin changes its outcome, and a false guard
-  after a failed obligation is silent only because S14 ends the path there: **a guard must come after the obligations of its own case** (and after those of every earlier case in the prologue order) or a
-  false guard would be reported first. Not tested: a guard placed before its case's obligations; a prologue shared by methods with several parameters.
+  after a failed obligation is silent only because the obligation is closed and false (S14e), so the path is infeasible after it: **a guard must come after the obligations of its own case** (and
+  after those of every earlier case in the prologue order) or a false guard would be reported first. Not tested: a guard placed before its case's obligations; a prologue shared by methods with several parameters.
 
 *2026-10-20: milestone numbers before the M4.1 section follow the renumbering of that date (plan.md): generic templates are M5.*

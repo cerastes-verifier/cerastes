@@ -590,26 +590,8 @@ class Lowerer {
     assign(out, t, v.e);
     std::set<int> breaks, continues;
     collect_jumps(*s.body, breaks, continues);
-    // The case values (decision 0014: any call-free expression of the scrutinee's type): their obligations are asserted
-    // unconditionally, before the dispatch, each at its case label with its own category; then `t == value` tests.
-    std::vector<E> values(s.body->stmts.size());
-    for (size_t k = 0; k < s.body->stmts.size(); ++k) {
-      const Stmt& c = *s.body->stmts[k];
-      if (c.kind != Stmt::Kind::Case || c.expr == nullptr) continue;
-      Full full;
-      LV cvv = lower(*c.expr, body_env(), nullptr, -1, full);
-      values[k] = cvv.e;
-      for (Obl& o : full.obls) {
-        low::Meta m = o.meta;
-        if (!m.has_note && m.loc.known() && (m.loc.line != c.loc.line || m.loc.file != c.loc.file)) {
-          m.has_note = true;
-          m.note_loc = m.loc;
-          m.note_text = "in the value of this case label";
-        }
-        m.loc = c.loc;
-        emit_assert(out, low::implies(o.guard, o.cond), std::move(m));
-      }
-    }
+    // The case values' obligations and the guards that each equals the front end's value are in the prologue of the method
+    // (decision 0017 item 5), so the dispatch compares with the front end's value and asserts nothing.
     bool has_default = false;
     size_t index = 0;
     for (const Stmt* c : s.body->stmts) {
@@ -619,7 +601,7 @@ class Lowerer {
         } else {
           low::LStmt i;
           i.kind = low::LStmt::Kind::If;
-          i.expr = low::bin(low::BinOp::Eq, low::var(t), values[index]);
+          i.expr = low::bin(low::BinOp::Eq, low::var(t), low::int_lit(c->folded));
           jump(i.then_body, "l_case__" + n + "_" + std::to_string(index));
           out.push_back(std::move(i));
         }
@@ -839,6 +821,116 @@ class Lowerer {
     return inv;
   }
 
+  // ---- the prologue (decision 0017 items 4 and 5) ----
+
+  static bool bare_const_equals(const Expr& x, const std::string& value) {
+    if (x.kind != Expr::Kind::Const) return false;
+    if (x.type.is_bool()) return (x.value == "true") == (value == "1" || value == "true");
+    return x.value == value;
+  }
+
+  static E literal_of(const Type& t, const std::string& value) {
+    if (t.is_bool()) return low::bool_lit(value == "1" || value == "true");
+    return low::int_lit(value);
+  }
+
+  // `assert <e> == <value>` as an internal check at `loc` (a failure is a bug of the encoder or of the front end's folding).
+  void internal_guard(std::vector<low::LStmt>& out, const E& e, const Type& t, const std::string& value, const SrcLoc& loc,
+                      std::string message) {
+    low::Meta m;
+    m.category = "internal";
+    m.loc = loc;
+    m.message = std::move(message);
+    emit_assert(out, low::bin(low::BinOp::Eq, e, literal_of(t, value)), std::move(m));
+  }
+
+  // One named constant: its initializer as written (obligations at their own positions), then the guard that it equals
+  // the front end's value.  Nothing for a definition without an initializer.
+  // A prologue expression is closed: no call, variable, parameter, result or `old` (check_program guarantees it).  Anything
+  // else is an impossible state, reported as an internal error instead of a dropped call or an out-of-range index.
+  bool closed_expr(const Expr& e, const char* what) {
+    switch (e.kind) {
+      case Expr::Kind::Call: case Expr::Kind::Formal: case Expr::Kind::Old: case Expr::Kind::Result: case Expr::Kind::Local:
+        internal_error(e.loc, std::string("a call, variable, parameter, result or `old` in ") + what + " reached the prologue");
+        return false;
+      default: break;
+    }
+    for (const Expr* x : {e.a, e.b, e.c})
+      if (x != nullptr && !closed_expr(*x, what)) return false;
+    return true;
+  }
+
+  bool closed_result(const Full& full, const Expr& e, const char* what) {
+    if (full.calls.empty()) return true;
+    internal_error(e.loc, std::string("a call in ") + what + " reached the prologue");
+    return false;
+  }
+
+  void named_const_check(const NamedConst& c, std::vector<low::LStmt>& out) {
+    if (c.init == nullptr) return;
+    if (!closed_expr(*c.init, "the initializer of a named constant")) return;
+    Full full;
+    LV v = lower(*c.init, body_env(), nullptr, -1, full);
+    if (!closed_result(full, *c.init, "the initializer of a named constant")) return;
+    for (Obl& o : full.obls) emit_assert(out, low::implies(o.guard, o.cond), o.meta);
+    if (bare_const_equals(*c.init, c.value)) return;
+    internal_guard(out, v.e, c.type, c.value, c.loc,
+                   "internal check: the value of `" + c.c_name + "` as written differs from the front end's");
+  }
+
+  // One `case value:` label: the value as written, its obligations at the label (with a note when an obligation's own position
+  // is elsewhere, as in decision 0014 item 6), then the guard that it equals the front end's value.
+  void case_check(const Stmt& c, std::vector<low::LStmt>& out) {
+    if (!closed_expr(*c.expr, "a case value")) return;
+    Full full;
+    LV v = lower(*c.expr, body_env(), nullptr, -1, full);
+    if (!closed_result(full, *c.expr, "a case value")) return;
+    for (Obl& o : full.obls) {
+      low::Meta m = o.meta;
+      if (!m.has_note && m.loc.known() && (m.loc.line != c.loc.line || m.loc.file != c.loc.file)) {
+        m.has_note = true;
+        m.note_loc = m.loc;
+        m.note_text = "in the value of this case label";
+      }
+      m.loc = c.loc;
+      emit_assert(out, low::implies(o.guard, o.cond), std::move(m));
+    }
+    if (bare_const_equals(*c.expr, c.folded)) return;
+    internal_guard(out, v.e, c.expr->type, c.folded, c.loc, "internal check: case value as written differs from the front end's");
+  }
+
+  // The case labels of a body in source order (a nested switch's labels follow the outer label before them).
+  void case_checks(const Stmt* s, std::vector<low::LStmt>& out) {
+    if (s == nullptr) return;
+    switch (s->kind) {
+      case Stmt::Kind::Case:
+        if (s->expr != nullptr) case_check(*s, out);
+        break;
+      case Stmt::Kind::Block:
+        for (const Stmt* c : s->stmts) case_checks(c, out);
+        break;
+      case Stmt::Kind::If:
+        case_checks(s->then_body, out);
+        case_checks(s->else_body, out);
+        break;
+      case Stmt::Kind::While:
+        case_checks(s->body, out);
+        case_checks(s->step, out);
+        break;
+      case Stmt::Kind::Switch: case_checks(s->body, out); break;
+      default: break;
+    }
+  }
+
+  // The prologue of a method with a body: the unit's named constants, then (with `own`: a function's method and its
+  // `__wf` method) its local constants and its case values.
+  void prologue(std::vector<low::LStmt>& out, const Function* own) {
+    for (const NamedConst& c : prog_.named_consts()) named_const_check(c, out);
+    if (own == nullptr) return;
+    for (const NamedConst& c : own->local_consts()) named_const_check(c, out);
+    case_checks(own->body, out);
+  }
+
   // ---- functions ----
 
   low::LClause clause_checks(E expr, const SrcLoc& loc, bool ensures, const std::string& what) {
@@ -912,6 +1004,7 @@ class Lowerer {
     // The parameters' local copies (0012 item 2).
     for (size_t k = 0; k < f.params.size(); ++k)
       assign(m.body, var_name(*f.param_var(static_cast<int>(k))), low::var(formal_name(f, static_cast<int>(k))));
+    prologue(m.body, &f);
     user_targets_.clear();
     user_names_.clear();
     collect_gotos(*f.body, user_targets_);
@@ -955,6 +1048,8 @@ class Lowerer {
     if (f.ret.is_int())
       m.requires_.push_back(clause_checks(range_check(low::var(kResult), *f.ret.int_type), f.loc, false, f.c_name + " (well-formedness)"));
     m.has_body = true;
+    prologue(m.body, &f);  // the same checks as the function's own method (the driver removes identical reports); a function whose
+                           // `requires` is unsatisfiable never reaches its own prologue
     const Env env = contract_env();
     E prior;
     auto go = [&](const Clause& c) {

@@ -1117,7 +1117,7 @@ void define_control_flow() {
   lc("cf_switch_case_value_obligation_fails", "case 1 << 40 on an int: the shift obligation is asserted at the case label, before the dispatch", [](Kit& k) {
     Function* f = k.fn("f", k.i32, {{"x", k.i32}});
     const int id = k.jid();
-    const Stmt* bad = k.cs(k.shl(k.num(k.i32, "1"), k.num(k.i32, "40")));
+    const Stmt* bad = k.cs(k.shl(k.num(k.i32, "1"), k.num(k.i32, "40")), "0");  // EDG folds 1 << 40 to 0
     f->body = k.blk({k.sw(k.pv(f, 0), k.blk({k.cs(k.num(k.i32, "2")), k.ret(k.num(k.i32, "1")), bad, k.ret(k.num(k.i32, "2"))}), id), k.ret(k.num(k.i32, "0"))});
     k.done(f);
     k.fail("shift", bad->loc, 1, "", "shift count");  // the later obligations of the same case value hold vacuously after it
@@ -1125,7 +1125,7 @@ void define_control_flow() {
   lc("cf_switch_case_value_expression_ok", "case 1 << 3 and case (2 + 3): obligations hold, values used in the dispatch", [](Kit& k) {
     Function* f = k.fn("f", k.i32, {{"x", k.i32}});
     const int id = k.jid();
-    const Stmt* body = k.blk({k.cs(k.shl(k.num(k.i32, "1"), k.num(k.i32, "3"))), k.ret(k.num(k.i32, "8")), k.cs(k.add(k.num(k.i32, "2"), k.num(k.i32, "3"))),
+    const Stmt* body = k.blk({k.cs(k.shl(k.num(k.i32, "1"), k.num(k.i32, "3")), "8"), k.ret(k.num(k.i32, "8")), k.cs(k.add(k.num(k.i32, "2"), k.num(k.i32, "3")), "5"),
                               k.ret(k.num(k.i32, "5"))});
     f->body = k.blk({k.sw(k.pv(f, 0), body, id), k.ret(k.num(k.i32, "0"))});
     k.done(f);
@@ -1642,7 +1642,187 @@ void define_goto_rejections() {
   });
 }
 
+// Named constants and case values (decision 0017): the prologue of every method with a body.
+void define_named_constants() {
+  lc("nc_initializer_shift_fails", "const int A = 1 << 40; (EDG folds it to 0): the shift is an error at the initializer", [](Kit& k) {
+    const Expr* init = k.shl(k.num(k.i32, "1"), k.num(k.i32, "40"));
+    k.nc("A", k.i32, init, "0");
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+    k.fail("shift", init->loc, 1, "", "shift count");  // one method, no contract: no __wf
+  });
+  lc("nc_guard_holds_and_has_a_map_row", "const int B = 2 + 3; with the front end's value 5: obligations hold, the internal guard holds", [](Kit& k) {
+    k.nc("B", k.i32, k.add(k.num(k.i32, "2"), k.num(k.i32, "3")), "5");
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+    k.require_map("internal", "the value of `B` as written differs from the front end's");
+  });
+  lc("nc_guard_fails", "const int C = 2 + 3; with a front-end value 6: the internal guard fails at the declaration", [](Kit& k) {
+    NamedConst* c = k.nc("C", k.i32, k.add(k.num(k.i32, "2"), k.num(k.i32, "3")), "6");
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+    k.fail("internal", c->loc, 1, "", "the value of `C` as written");
+  });
+  lc("nc_used_in_contract_and_body", "const int N = 20 + 20 (value 40) read as the literal 40 in a requires, the body and an ensures", [](Kit& k) {
+    k.nc("N", k.i32, k.add(k.num(k.i32, "20"), k.num(k.i32, "20")), "40");
+    Function* f = k.fn("f", k.i32, {{"x", k.i32}});
+    k.req(f, k.range(k.F(f, 0), k.i32, "0", "39"));
+    k.ens(f, k.eq(k.R(f), k.add(k.F(f, 0), k.num(k.i32, "40"))));
+    f->body = k.blk({k.chk(k.lt(k.pv(f, 0), k.num(k.i32, "40"))), k.ret(k.add(k.pv(f, 0), k.num(k.i32, "40")))});
+    k.done(f);
+  });
+  lc("nc_prologue_in_the_wf_method", "a failing constant initializer is reported in a function's method and in its __wf method", [](Kit& k) {
+    const Expr* init = k.shl(k.num(k.i32, "1"), k.num(k.i32, "40"));
+    k.nc("A", k.i32, init, "0");
+    Function* f = k.fn("f", k.i32, {{"x", k.i32}});
+    k.req(f, k.ge_c(k.F(f, 0), k.i32, "0"));
+    f->body = k.blk({k.ret(k.pv(f, 0))});
+    k.done(f);
+    k.fail("shift", init->loc, 2, "", "shift count");
+  });
+  lc("nc_bool", "const bool T = !false (value 1) and const bool U = true: the guard compares Bool values", [](Kit& k) {
+    k.nc("T", k.bl, k.lnot(k.no()), "1");
+    k.nc("U", k.bl, k.yes(), "1");
+    Function* f = k.fn("f", k.bl);
+    f->body = k.blk({k.ret(k.yes())});
+    k.done(f);
+    k.require_map("internal", "the value of `T` as written differs from the front end's");
+  });
+  lc("nc_bool_value_differs", "const bool V = true with the front end's value 0: a bare literal that differs still gets its guard, which fails", [](Kit& k) {
+    NamedConst* c = k.nc("V", k.bl, k.yes(), "0");
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+    k.fail("internal", c->loc, 1, "", "the value of `V` as written");
+  });
+  lc("case_value_checked_on_every_path", "if (false) switch (x) { case 1 << 40: ... }: the case value's shift is checked at entry, path-independently", [](Kit& k) {
+    Function* f = k.fn("f", k.i32, {{"x", k.i32}});
+    const int id = k.jid();
+    const Stmt* bad = k.cs(k.shl(k.num(k.i32, "1"), k.num(k.i32, "40")), "0");
+    const Stmt* swt = k.sw(k.pv(f, 0), k.blk({bad, k.ret(k.num(k.i32, "1"))}), id);
+    f->body = k.blk({k.iff(k.no(), swt), k.ret(k.num(k.i32, "0"))});
+    k.done(f);
+    k.fail("shift", bad->loc, 1, "", "shift count");
+  });
+  lc("case_guard_holds_and_has_a_map_row", "case 1 << 3 with the front end's value 8: the internal guard holds; a plain `case 3` has no guard", [](Kit& k) {
+    Function* f = k.fn("f", k.i32, {{"x", k.i32}});
+    const int id = k.jid();
+    const Stmt* body = k.blk({k.cs(k.shl(k.num(k.i32, "1"), k.num(k.i32, "3")), "8"), k.ret(k.num(k.i32, "1")), k.cs(k.num(k.i32, "3")), k.ret(k.num(k.i32, "2")),
+                              k.dflt(), k.ret(k.num(k.i32, "0"))});
+    f->body = k.blk({k.sw(k.pv(f, 0), body, id)});
+    k.done(f);
+    k.ens(f, k.implies(k.eq_c(k.F(f, 0), k.i32, "8"), k.eq_c(k.R(f), k.i32, "1")));
+    k.ens(f, k.implies(k.eq_c(k.F(f, 0), k.i32, "3"), k.eq_c(k.R(f), k.i32, "2")));
+    k.require_map("internal", "case value as written differs from the front end's");
+  });
+  lc("case_guard_fails", "case 1 + 1 with a front-end value 3: the internal guard fails at the case label", [](Kit& k) {
+    Function* f = k.fn("f", k.i32, {{"x", k.i32}});
+    const int id = k.jid();
+    const Stmt* bad = k.cs(k.add(k.num(k.i32, "1"), k.num(k.i32, "1")), "3");
+    f->body = k.blk({k.sw(k.pv(f, 0), k.blk({bad, k.ret(k.num(k.i32, "1"))}), id), k.ret(k.num(k.i32, "0"))});
+    k.done(f);
+    k.fail("internal", bad->loc, 1, "", "case value as written");
+  });
+  lc("case_dispatch_uses_the_front_end_value", "case N + 1 (N = 8, so 9): the dispatch compares with 9, so x == 9 returns 1", [](Kit& k) {
+    Function* f = k.fn("f", k.i32, {{"x", k.i32}});
+    const int id = k.jid();
+    const Stmt* swt = k.sw(k.pv(f, 0), k.blk({k.cs(k.add(k.num(k.i32, "8"), k.num(k.i32, "1")), "9"), k.ret(k.num(k.i32, "1")), k.dflt(), k.ret(k.num(k.i32, "0"))}), id);
+    f->body = k.blk({swt});
+    k.done(f);
+    k.ens(f, k.implies(k.eq_c(k.F(f, 0), k.i32, "9"), k.eq_c(k.R(f), k.i32, "1")));
+    k.ens(f, k.implies(k.ne(k.F(f, 0), k.num(k.i32, "9")), k.eq_c(k.R(f), k.i32, "0")));
+  });
+  lc("case_local_const_in_a_case_value", "const int k = 2 + 3 (a local constant of f) named by `case k`: its initializer is checked in f's prologue", [](Kit& k) {
+    Function* f = k.fn("f", k.i32, {{"x", k.i32}});
+    k.lnc(f, "k", k.i32, k.add(k.num(k.i32, "2"), k.num(k.i32, "3")), "5");
+    const int id = k.jid();
+    f->body = k.blk({k.sw(k.pv(f, 0), k.blk({k.cs(k.num(k.i32, "5")), k.ret(k.num(k.i32, "1")), k.dflt(), k.ret(k.num(k.i32, "0"))}), id)});
+    k.done(f);
+    k.ens(f, k.implies(k.eq_c(k.F(f, 0), k.i32, "5"), k.eq_c(k.R(f), k.i32, "1")));
+    k.require_map("internal", "the value of `k` as written differs from the front end's");
+  });
+  lc("case_local_const_shift_fails", "const int ks = 1 << 40; named by `case ks` (folded 0): the local constant's shift is an error in f's method", [](Kit& k) {
+    Function* f = k.fn("f", k.i32, {{"x", k.i32}});
+    const Expr* init = k.shl(k.num(k.i32, "1"), k.num(k.i32, "40"));
+    k.lnc(f, "ks", k.i32, init, "0");
+    const int id = k.jid();
+    f->body = k.blk({k.sw(k.pv(f, 0), k.blk({k.cs(k.num(k.i32, "0")), k.ret(k.num(k.i32, "1")), k.dflt(), k.ret(k.num(k.i32, "0"))}), id)});
+    k.done(f);
+    k.fail("shift", init->loc, 1, "", "shift count");
+  });
+  lc("case_value_checked_when_requires_is_unsatisfiable", "requires x > 0 && x < 0 makes the method vacuous; the case value's shift is still reported, by the __wf method", [](Kit& k) {
+    Function* f = k.fn("f", k.i32, {{"x", k.i32}});
+    k.req(f, k.land(k.gt(k.F(f, 0), k.num(k.i32, "0")), k.lt(k.F(f, 0), k.num(k.i32, "0"))));
+    const int id = k.jid();
+    const Stmt* bad = k.cs(k.shl(k.num(k.i32, "1"), k.num(k.i32, "40")), "0");
+    f->body = k.blk({k.sw(k.pv(f, 0), k.blk({bad, k.ret(k.num(k.i32, "1"))}), id), k.ret(k.num(k.i32, "0"))});
+    k.done(f);
+    k.fail_only("shift", bad->loc, 2, 1, "shift count");  // the method's own copy is vacuous; the __wf copy fails
+  });
+  lc("nc_local_const_checked_in_the_wf_method", "a local constant with a failing shift is reported in the function's method and in its __wf method", [](Kit& k) {
+    Function* f = k.fn("f", k.i32, {{"x", k.i32}});
+    const Expr* init = k.shl(k.num(k.i32, "1"), k.num(k.i32, "40"));
+    k.lnc(f, "ks", k.i32, init, "0");
+    k.req(f, k.ge_c(k.F(f, 0), k.i32, "0"));
+    const int id = k.jid();
+    f->body = k.blk({k.sw(k.pv(f, 0), k.blk({k.cs(k.num(k.i32, "0")), k.ret(k.num(k.i32, "1"))}), id), k.ret(k.num(k.i32, "0"))});
+    k.done(f);
+    k.fail("shift", init->loc, 2, "", "shift count");
+  });
+  lc("case_nested_switch_values_in_source_order", "a nested switch's case value is checked in the prologue too (its shift fails)", [](Kit& k) {
+    Function* f = k.fn("f", k.i32, {{"x", k.i32}});
+    const int outer = k.jid();
+    const int inner = k.jid();
+    const Stmt* bad = k.cs(k.shl(k.num(k.i32, "1"), k.num(k.i32, "40")), "0");
+    const Stmt* isw = k.sw(k.pv(f, 0), k.blk({bad, k.ret(k.num(k.i32, "1"))}), inner);
+    f->body = k.blk({k.sw(k.pv(f, 0), k.blk({k.cs(k.num(k.i32, "7")), isw, k.dflt(), k.ret(k.num(k.i32, "0"))}), outer)});
+    k.done(f);
+    k.fail("shift", bad->loc, 1, "", "shift count");
+  });
+}
+
+void define_named_constant_rejections() {
+  rc("nc_initializer_mentions_a_variable", "mentions a variable", [](Kit& k) {
+    Function* f = k.fn("f", k.vd, {{"a", k.i32}});
+    k.nc("A", k.i32, k.add(k.pv(f, 0), k.num(k.i32, "1")), "1");
+    f->body = k.blk({});
+    k.done(f);
+  });
+  rc("nc_initializer_has_another_type", "has type", [](Kit& k) {
+    k.nc("A", k.i64, k.num(k.i32, "1"), "1");
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+  });
+  rc("nc_value_out_of_range", "is not a value of", [](Kit& k) {
+    k.nc("A", k.i32, k.num(k.i32, "1"), "2147483648");
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+  });
+  rc("case_folded_out_of_range", "is not a value of", [](Kit& k) {
+    Function* f = k.fn("f", k.vd, {{"a", k.i32}});
+    f->body = k.blk({k.sw(k.pv(f, 0), k.blk({k.cs(k.num(k.i32, "1"), "4294967296")}), k.jid())});
+    k.done(f);
+  });
+  rc("case_without_a_front_end_value", "a case without its front-end value", [](Kit& k) {
+    Function* f = k.fn("f", k.vd, {{"a", k.i32}});
+    f->body = k.blk({k.sw(k.pv(f, 0), k.blk({k.b.case_label(k.num(k.i32, "1"), "", k.at())}), k.jid())});
+    k.done(f);
+  });
+  rc("case_duplicate_front_end_value", "appears twice", [](Kit& k) {
+    Function* f = k.fn("f", k.vd, {{"a", k.i32}});
+    f->body = k.blk({k.sw(k.pv(f, 0), k.blk({k.cs(k.add(k.num(k.i32, "1"), k.num(k.i32, "1")), "2"), k.cs(k.num(k.i32, "2"))}), k.jid())});
+    k.done(f);
+  });
+}
+
 void define_calls_loops_and_more() {
+  define_named_constants();
+  define_named_constant_rejections();
   define_calls();
   define_loops();
   define_control_flow();

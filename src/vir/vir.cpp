@@ -58,6 +58,28 @@ Function* Program::add_function(std::string c_name, Type ret, SrcLoc loc, SrcLoc
   return &f;
 }
 
+NamedConst* Program::add_named_const(std::string c_name, Type type, SrcLoc loc, const Expr* init, std::string value) {
+  NamedConst& c = named_consts_.emplace_back();
+  c.id = static_cast<int>(named_consts_.size()) - 1;
+  c.c_name = std::move(c_name);
+  c.type = type;
+  c.loc = std::move(loc);
+  c.init = init;
+  c.value = std::move(value);
+  return &c;
+}
+
+NamedConst* Function::add_local_const(std::string c_name, Type type, SrcLoc loc, const Expr* init, std::string value) {
+  NamedConst& c = local_consts_.emplace_back();
+  c.id = static_cast<int>(local_consts_.size()) - 1;
+  c.c_name = std::move(c_name);
+  c.type = type;
+  c.loc = std::move(loc);
+  c.init = init;
+  c.value = std::move(value);
+  return &c;
+}
+
 const IntType* promoted(Program& p, const IntType* t) {
   if (t->bits < p.c_int_bits()) return p.int_type_of(p.c_int_bits(), true);
   return t;
@@ -253,6 +275,13 @@ const Stmt* Builder::switch_stmt(const Expr* scrutinee, const Stmt* body, int ju
 const Stmt* Builder::case_label(const Expr* value, SrcLoc loc) {
   Stmt* s = fresh_stmt(p_, Stmt::Kind::Case, std::move(loc));
   s->expr = value;
+  return s;
+}
+
+const Stmt* Builder::case_label(const Expr* value, std::string folded, SrcLoc loc) {
+  Stmt* s = fresh_stmt(p_, Stmt::Kind::Case, std::move(loc));
+  s->expr = value;
+  s->folded = std::move(folded);
   return s;
 }
 

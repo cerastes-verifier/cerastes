@@ -124,6 +124,7 @@ class Checker {
   }
 
   std::vector<Diag> run() {
+    for (const NamedConst& c : prog_.named_consts()) named_const(c, "the named constant");
     for (const Function& f : prog_.functions()) function(f);
     return std::move(diags_);
   }
@@ -157,6 +158,10 @@ class Checker {
     if (!f.end_loc.known() && f.body != nullptr) err(f.loc, "function '" + f.c_name + "' has no closing-brace position");
     if (f.body == nullptr && f.trusted_reason.empty())
       err(f.loc, "function '" + f.c_name + "' has no body and no reason for trusting its contract");
+    for (const NamedConst& c : f.local_consts()) {
+      if (f.body == nullptr) err(c.loc, "a local constant of '" + f.c_name + "', which has no body");
+      named_const(c, "the local constant");
+    }
     for (const Clause& c : f.requires_) clause(c, Ctx::Requires, "requires");
     for (const Clause& c : f.ensures_) clause(c, Ctx::Ensures, "ensures");
     for (const Clause& c : f.decreases_) measure(c, Ctx::Requires, "decreases");
@@ -177,6 +182,36 @@ class Checker {
       }
       stmt(*f.body);
     }
+  }
+
+  // A decimal literal of an Int type's range, or "0"/"1" of bool (a front-end value, decision 0017).
+  static bool literal_fits(const std::string& v, const Type& t) {
+    if (t.is_bool()) return v == "0" || v == "1";
+    if (!t.is_int() || t.int_type == nullptr) return false;
+    return dec::valid(v) && dec::in_range(v, dec::range_of(*t.int_type));
+  }
+
+  // A named constant (decision 0017 item 4): the initializer as written is call-free, mentions no variable, parameter, result
+  // or `old`, and has exactly the constant's type; `value` is a literal of that type.
+  void named_const(const NamedConst& c, const char* what) {
+    const std::string name = std::string(what) + " '" + c.c_name + "'";
+    if (!c.loc.known()) err(c.loc, name + " has no source position");
+    if (!value_type(c.type)) {
+      err(c.loc, name + " is not a bool or an integer");
+      return;
+    }
+    if (!literal_fits(c.value, c.type)) err(c.loc, "the front end's value of " + name + " ('" + c.value + "') is not a value of " + c.type.str());
+    if (c.init == nullptr) {
+      if (c.value != "0") err(c.loc, name + " has no initializer but a value other than 0");
+      return;
+    }
+    if (mentions_state(*c.init)) {
+      err(c.init->loc, "the initializer of " + name + " mentions a variable, a parameter, the result, `old` or a call");
+      return;
+    }
+    CallState st;
+    expr(*c.init, Ctx::Annot, false, st, false);
+    if (c.init->type != c.type) err(c.init->loc, "the initializer of " + name + " has type " + c.init->type.str() + ", not " + c.type.str());
   }
 
   // A statement of a Block: a Label is allowed here and only here (decision 0015 item 3).
@@ -340,8 +375,10 @@ class Checker {
               else if (c->expr->type != s.expr->type)
                 err(c->loc, "a case value of type " + c->expr->type.str() + " in a switch on " + s.expr->type.str());
               else if (mentions_result_or_local(*c->expr)) err(c->loc, "a case value that is not a constant expression");
-              else if (c->expr->kind == Expr::Kind::Const && !values.insert(c->expr->value).second)
-                err(c->loc, "the case value " + c->expr->value + " appears twice in one switch");
+              if (c->folded.empty()) err(c->loc, "internal: a case without its front-end value");
+              else if (!literal_fits(c->folded, s.expr->type))
+                err(c->loc, "the front end's case value '" + c->folded + "' is not a value of " + s.expr->type.str());
+              else if (!values.insert(c->folded).second) err(c->loc, "the case value " + c->folded + " appears twice in one switch");
             }
           } else {
             if (first) err(c->loc, "a statement before the first case label of a switch (it is unreachable)");
@@ -507,6 +544,15 @@ class Checker {
         break;
       case Expr::Kind::Call: call(e, ctx, guarded, st); break;
     }
+  }
+
+  static bool mentions_state(const Expr& e) {
+    if (e.kind == Expr::Kind::Result || e.kind == Expr::Kind::Local || e.kind == Expr::Kind::Call || e.kind == Expr::Kind::Formal ||
+        e.kind == Expr::Kind::Old)
+      return true;
+    for (const Expr* x : {e.a, e.b, e.c})
+      if (x != nullptr && mentions_state(*x)) return true;
+    return false;
   }
 
   static bool mentions_result_or_local(const Expr& e) {

@@ -56,7 +56,7 @@ it verifies and what it does not:
   pass:[C++]20, with locals, arithmetic, comparisons and logical operators,
   `if`/`else`, `switch`, `while`, `do` and `for` loops with invariants and
   termination measures, `break` and `continue`, forward `goto`, recursion with
-  measures, `return`, calls of functions that have a contract or a body in the
+  measures, `return`, named constants (`const` globals), calls of functions that have a contract or a body in the
   same file, functions that do not return (`+[[noreturn]]+`, `abort`, `exit`),
   `assert` and `check`.
   The integer rules (overflow is an error, unsigned arithmetic wraps, a
