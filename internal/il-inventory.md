@@ -2195,7 +2195,7 @@ with the front end and verify mode's options (`edg2656/fe.sh`).
   error (`out/cxx_enumerator_div.cpp.B.txt`). The test harness rejects that (a summary that does not match the errors
   printed), so verify mode keeps its suppression list and waits for the fix (owner, 2026-10-22; decision 0019 item 9).
 - **Upstream.** Reproduced with stock `cpfe` on upstream `main` `ec2f12cffa` (`repro-before.txt`). Fixed on fork
-  branch `0022` (`92b0b9a037`): `add_more_info_list` frees a note whose severity is `es_none`. The `GH-*` test fails
+  branch `0022` (`3b05dd5c43`): `add_more_info_list` frees a note whose severity is `es_none`. The `GH-*` test fails
   before and passes after, natively (`edgy-before-vs-recording.txt`, `edgy-after.txt`). The bug file is
   `internal/edg_bugs/0022-suppressed-note-internal-error.md`.
 - **Incidental, not pursued:** `constexpr int z = (-2147483647 - 1) / -1;` (and `% -1`) gives no diagnostic at all in
