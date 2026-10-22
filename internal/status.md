@@ -4,6 +4,130 @@ Session handoff log, newest first. Each entry says what is done, what is not,
 any surprises, the decision records added and the exact first step for the
 next session.
 
+## M4.2c — Locals without an initializer, with §11 questions 17–19 (2026-10-22): done on branch `m4.2c-uninitialized-locals`; PR pending (after M4.2b2's)
+
+Read `internal/handoff.md` next: the "M4.2c is done" owner steps at the top, §6 the M4.2c audit notes, §8.1 the EDG box
+session after M4.2c and M4.3, §11 questions 20–23.
+
+**Owner decisions (2026-10-22, M4.2c planning and during the session)**
+- **Uninitialized reads.**
+  - Reading a local before it is initialized is a verification error with a **new category `uninitialized`**, the
+    first rule of the C++ profiles papers (P4222R1).
+  - It is **path-precise**: a ghost flag per local, decided by Silicon, not a syntactic definite-assignment rule.
+  - A `goto` or `case` label may jump past a declaration without an initializer; the variable then has no value at
+    the label.
+- **§11 questions 16–19.**
+  - Question 16: as recommended (the next EDG box session).
+  - Question 17: with a fork fix branch.
+  - Question 18 now: ordering of one unscoped enumeration; mixed enumeration/integer ordering stays rejected.
+  - Question 19 reversed: reject what `-Wswitch` rejects, in both modes. The strictest reading is g++'s, where
+    clang and GCC disagree. The `#ifdef __CERASTES__` pattern in native-ok tests is forbidden.
+- **#2656.** No driver change. The `--diag_remark` workaround prints the error twice, so these C++ shapes stay exit 3
+  until the fork fix `0022` is pinned (the next box session).
+- **Retirements** (approved): `reject_uninit_local.c`, `reject_enum_order.c`, `enum_case_promoted.c` and its two twins,
+  `enum_case_cast_over.c` and `enum_fixed_long_case.c`. The 8 equivalence entries of `enum_case_promoted.c` go too.
+
+**Done**
+- **Decision 0019** (`d220f74`, revised after the audits). Amends 0011 items 7 and 10, 0012 items 3 and 12, 0014
+  items 1 and 6, 0015 item 2, and 0018 items 6, 7 and 11. Probes P28–P32 and spike S16 are in `il-inventory.md`
+  ("M4.2c").
+- **Uninitialized locals, both modes.**
+  - A local without an initializer (`initk_none`) is a VIR `Decl` without an initializer.
+  - **Lowering.** Each such local gets a ghost flag `d_…`, reset (with the value 0) in three places: at the
+    declaration, at the entry of its block, and before a switch's dispatch.
+  - Every write sets the flag.
+  - **Reads.** Every read is an obligation `uninitialized` at the read: in code, conditions, invariants, measures,
+    `check`/`assert`, `return`, arguments, and the read of `x += …`/`x++`.
+  - **Loops.** A loop that assigns such a local declared outside it carries a snapshot invariant `ds_… ==> d_…`.
+  - Jumps past a declaration without an initializer are accepted (`goto`, case labels, a declaration before the first
+    case label).
+  - **Still rejected:** a `const` local without an initializer; `int x = x;`.
+  - **Front end.** Verify mode turns EDG's #549 off (`--no_use_before_set_warnings`, which a pragma cannot undo) and
+    suppresses C's #257.
+- **Enumerations.**
+  - Ordering of two values of one unscoped enumeration, or of a value and one of its enumerators, verifies (any fixed
+    base).
+  - A switch on an enumeration value (a variable, call, cast, named constant, enumerator, or `?:` of enumerators) is
+    rejected when a case value is not an enumerator's (`case_not_in_enumeration`), or when, without `default`, an
+    enumerator has no case (`enumerator_not_handled`).
+- **EDG #2656.**
+  - **Cause:** a suppressed constant-evaluation note (#39, #61, #62, #63) has no severity, and the text output asserts.
+  - **Bug file** `internal/edg_bugs/0022-suppressed-note-internal-error.md`, reproduced on upstream `ec2f12cffa`.
+  - **Fork fix:** branch `0022` (`3b05dd5c43`, one commit on `ec2f12cffa`, with a `GH-*` test that fails before and
+    passes after natively). Not merged into `cerastes` and not pinned.
+- **Code.**
+  - `src/vir`: `vir.h`, `check.cpp` (the relaxed jump rules), `lower.cpp` (flags, resets, snapshots, the hook
+    `drop_snapshot_invariant`), `selftest_cases2.inc`.
+  - `src/backend/encode.cpp`: `initk_none`, the switch-body rules over every entity of a declaration,
+    `enumeration_operand`, `ordered_enumeration_operands`, `switch_enumeration`, rules 1–2.
+  - `src/backend/diagnostics.def`: two diagnostics.
+  - `src/driver/verify_main.cpp`: `--no_use_before_set_warnings`, C's `--diag_suppress=257`.
+  - `src/driver/selftest.cpp`: map rows.
+  - The VIR self-test goes from 288 to 333 lowering cases (109 → 116 rejection cases).
+- **Tests.** 136 new files in `tests/scalar` (31 positives, 73 error twins, 32 rejection tests; both modes where both accept
+  the code, `c-only` for `register`, `.cpp` for scoped enumerations), 5 doc examples; 7 retired (approved). Every positive
+  is `native-ok` (Apple clang and GCC, `-Wall -Wextra -Werror`, no `#ifdef __CERASTES__`); the dispatch reset's value is
+  pinned (`uninit_switch_decl_loop_in_range.c` fails with exit 3 when it is removed, checked by hand).
+- **Harness.**
+  - The category `uninitialized` is added to `run_tests.py`, its self-test and `tests/README.md`.
+  - `tests/README.md` forbids `#ifdef __CERASTES__` that hides code from the native compilers.
+- **Docs.**
+  - Verifying a program: locals without an initializer; jumps past declarations; switch and goto rules; the
+    not-supported list.
+  - Error messages: `uninitialized`, thirteen categories.
+  - Integer semantics: enumeration ordering and the `-Wswitch` rules.
+  - Overview.
+
+**Acceptance**
+- `scripts/check.sh` green (19 min 46 s, one run): self-tests 955 (skipped=1) + 74 + 152 + 225; tests 3453 passed, 0
+  failed, 1 skipped (native-ok: Apple clang 768, GCC 768); 1107 `.vpr` lint clean; VIR self-test 333/333 (+ 116
+  rejection cases); walker oracle 134 goldens, 0 failed; docs 0 problems; `mutate.py --validate` 203 tests, 5733
+  mutants, 453 equivalents, 830 in the bucket.
+- Emitted Viper of every pre-existing test byte-identical to the session's baseline (`build/m4.2c-baseline-vpr`, 895
+  `.vpr` and maps; the 9 of the retired tests gone; 212 new), and the 288 existing VIR self-test cases' `.vpr` too.
+- `--count-error-twins` 203; `--check-headers` 1277/1277.
+- Mutation over the new positives and doc examples: first run 34 tests, 1487 mutants, 1010 killed, 212 safe-direction,
+  246 unexplained, 19 stillborn, 0 tool failures; the positives were strengthened in place (exact single-clause
+  `ensures`, callers at the boundaries, no slack bounds; no `expect:` line touched); re-runs over every changed file:
+  865 + 95 mutants, 848 killed, 78 safe-direction, 19 stillborn, 0 tool failures, 15 survivors listed as reviewed
+  equivalents (dead cases of a switch on `(int)c`, a noreturn arm, alternative measures, unobservable guards), **0
+  unexplained**.
+- Fork `0022`: the `GH-*` test aborts before the fix and passes after, natively, in `edg_x86_64` and `edg_x86_64_cp`;
+  native `edgy -R` of `changes`, `regressions`, `cwg`, `edg`: the same mismatch sets before and after (macOS platform
+  differences).
+- Audits (Opus, one reviewer): record and evidence — 0 blocking, 5 should-fix (item 10's argument for fixed bases, the
+  0018 amendment, `do` condition reads, ten missing tests, C++ discarded-value reads), all taken; code — 0 blocking, 1
+  should-fix (docs), notes, taken; fork commit and bug file — 0 blocking, should-fix (SARIF claims, "every context",
+  the README) taken, the commit amended; the 15 equivalents — all accepted.
+- Wall-clock: 14:06–17:15 (planning before).
+
+**Not done / deferred**
+- The EDG box session (handoff §8.1):
+  - the fork's merge of upstream `ec2f12cffa`;
+  - the box suites for `0022`, its merge and the pin move;
+  - the three C++ #2656 tests;
+  - §11 question 16's bug draft.
+- Audit notes (handoff §6, M4.2c).
+
+**Surprises**
+- **P4222R1 is stricter than C, and stricter than a verifier needs.** It wants `[[uninit]]` on a deliberately
+  uninitialized definition and treats every branch as taken. The owner chose the path-precise check without markers
+  (§11 question 21).
+- **EDG's #549 goes by source order.** It misses the one-armed `if` and fires on a dead read.
+- **The #2656 workaround hit a second EDG bug.** A note whose severity is overridden (remark, warning or error) makes
+  EDG print the whole error twice, so the planned driver workaround could not be tested.
+- **S16: a failed read cascades only where the flag is unknown.** Where the flag was just reset, Silicon's assumption
+  of the failed assert ends the path, so the dummy value never leads to a second error there.
+- **The audits found no blocking item in three rounds.** They found an unsound-looking but sound safety net (only a
+  write sets a flag), two missing record nuances (the `do` condition, C++ discarded-value reads), and that the fork
+  commit's SARIF claims were wrong.
+
+**Decision records added:** 0019-uninitialized-locals; amended 0011, 0012, 0014, 0015, 0018.
+
+**First step for the next session.** Confirm the owner merged the M4.2b2 and M4.2c PRs and CI is green on `main`. Then
+either the EDG box session (handoff §8.1, "EDG box session after M4.2c") or M4.3 (§8.1), as the owner chooses
+(§11 questions 20–23 answered first).
+
 ## M4.2b2 — Enumerations (2026-10-22): done on branch `m4.2b2-enumerations`; PR pending (after M4.2b1's)
 
 Read `internal/handoff.md` next: the "M4.2b2 is done" owner steps at the top, §6 the M4.2b2 audit notes, §8.1 M4.2c,
