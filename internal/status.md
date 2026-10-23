@@ -4,6 +4,144 @@ Session handoff log, newest first. Each entry says what is done, what is not,
 any surprises, the decision records added and the exact first step for the
 next session.
 
+## M4.3a — Side effects in expressions (2026-10-22): done on branch `m4.3a-side-effects`; PR pending
+
+Read `internal/handoff.md` next: the "M4.3a is done" owner steps at the top, §6 the M4.3a audit notes, §8.1 M4.3b,
+§11 questions 24–26.
+
+**Owner decisions (2026-10-22, M4.3 planning and during the session)**
+- **§11 questions 20–23:**
+  - Q20: as recommended (#550/#177 stay).
+  - Q21: P4222R1's markers in M4.5, the rest in M7 (`plan.md`).
+  - Q22: a jump past an initialized declaration is refused in both modes.
+  - Q23: no.
+- **Split.** M4.3 is split into **M4.3a** (this session, record 0020) and **M4.3b** (calls in guarded operands and loop
+  conditions, unsequenced calls by the dependency-chain rule; record 0021).
+- **Unsequenced modifications** are rejected statically, like the compilers, by C's rules in both modes. C++17's extra
+  sequencing is not used.
+- **Warning shapes rejected like the compilers** (the union of clang and GCC, both modes):
+  - an assignment as a condition without extra parentheses;
+  - a comma operand without effect;
+  - a discarded value around a side effect;
+  - a side effect in `sizeof`.
+
+  A pure discarded statement (`x + 1;`) stays accepted.
+- **Calls ordered by `,`** are in M4.3a.
+- **EDG warnings.** Suppression is allowed only for an EDG number whose every shape cerastes rejects. P34 found no such
+  number, and the owner then ruled that #187 and #174 print on accepted shapes.
+- **`typeof`/`decltype` operands** are accepted and recorded (the encoder cannot reach them).
+- **Retirements** (approved): `reject_comma.c`, `reject_assign_value.c`, `reject_chained_assign.c`,
+  `reject_incr_in_expr.c`.
+- **The CI failure** the owner reported (`EdgTreeToolTests`, a `copytree` race with git's background maintenance) is
+  fixed in this session, before the PR.
+
+**Done**
+- **Decision 0020** (`df5bf40`, revised after both audits). It amends:
+  - 0012 items 3, 4, 6, 8 and 12;
+  - 0014 item 5;
+  - 0019 items 4, 6, 8 and 13.
+
+  Probes P33–P35 and spikes S17–S18 are in `il-inventory.md` ("M4.3a").
+- **Accepted, both modes:**
+  - assignments, compound assignments and `++`/`--` used as values, and chained assignment;
+  - the comma operator, where its value is used and as statements (expression statements, `for` init and step), with
+    calls ordered by it;
+  - side effects in the right operand of `&&`/`||` and the arms of `?:`, lowered as branches;
+  - side effects in loop conditions, lowered by the top-test shape `while (true) { <condition>; if (!c) goto brk; body }`;
+  - the 0019 flag, set at the write.
+- **Rejected, each with a test:**
+  - `unsequenced_modification`: C's rule, exact except that both `?:` arms count;
+  - `assignment_as_condition`, `comma_without_effect`, `value_not_used` and `side_effect_not_evaluated`, by P35's
+    211-shape matrix;
+  - the C++ lvalue uses;
+  - `int y = (y = 1);` and `int y = y++;`;
+  - side effects in `assert` conditions (as before).
+- **Lowering.** Calls are the only fixed points. Every other item (obligation, write, snapshot, branch) goes right after
+  the calls it depends on. Reads of locals written in the same expression are snapshots. The comma floor applies.
+- **Code:**
+  - `src/vir`:
+    - `AssignE` and `Comma`, and the Builder's expression forms;
+    - the `check_program` contexts (LoopCond, Assert), reachable-once for AssignE/Call/Comma, and Block steps;
+    - `sequence_problems`;
+    - the effect-ordered `Full`/`flush`, branches, the top-test loop, `scan_expr`, the order check and `pure_full`.
+  - `src/viper/selftest_cases3.inc` (new).
+  - `src/backend/encode.cpp`:
+    - nested forms, and discarded commas as statements;
+    - the four warning detectors;
+    - the own-initializer rule through assignments, and effects in `assert` refused;
+    - the double-encoding guard, and `report_sequence_problems`.
+  - `diagnostics.def`: five tags.
+- **VIR self-test:** 333 → 452 lowering cases, 116 → 171 rejection cases (`src/viper/selftest_cases3.inc`; `VIR_CASES_MIN` 452).
+- **Tests:**
+  - 146 new files in `tests/scalar`: 40 positives, 58 error twins and 48 rejection tests, both modes where both accept the
+    code (`typeof_effect.c` is C only);
+  - 3 doc examples;
+  - 4 retired (approved).
+
+  Every positive is `native-ok` (Apple clang and GCC, `-Wall -Wextra -Werror`).
+- **Harness:**
+  - A `rejected` test may list the front end's expected warnings (`frontend-warning <diag> @ L<n>`, an exact multiset
+    match). EDG's #174 fires on every comma whose left operand has no effect.
+  - The `EdgTreeToolTests` race is fixed: the fixture repositories run with git's automatic maintenance and gc off, and
+    the copy skips `*.lock`.
+- **Tooling:**
+  - `mutate.py` gets the operators `drop-store`, `swap-incdec` and `drop-comma`;
+  - `lint_viper.py` gets the flag rule: every `d_x := true` directly follows a write of `x`.
+- **Docs:**
+  - Verifying a program: the section "Side effects in expressions", with three examples, and the not-supported list.
+  - Error messages, Integer semantics and Overview.
+
+**Acceptance**
+- `scripts/check.sh` green (22 min 57 s, one run on the final tree; a first run was stopped after its harness
+  self-test passed, to take the equivalence review's test fixes): self-tests 968 (skipped=1) + 74 + 176 + 262; tests 3901 passed, 0 failed, 1 skipped (native-ok: Apple clang 849,
+  GCC 849); 1305 `.vpr` lint clean; VIR self-test 452/452 (+ 171 rejection cases); walker oracle 134 goldens, 0 failed;
+  docs 0 problems; `mutate.py --validate` 243 tests, 6690 mutants, 463 equivalents, 962 in the bucket.
+- Emitted Viper of every pre-existing test (1107 `.vpr` and maps) byte-identical to the session's baseline
+  (`build/m4.3a-baseline-vpr`); the 333 existing VIR self-test cases' `.vpr` too (`build/m4.3a-baseline-vir`).
+- `--count-error-twins` 243 (203 + 40); `--check-headers` 1426/1426; `mutate.py --validate` 243 tests, 6690 mutants,
+  463 equivalents.
+- **Mutation** over the 40 new positives and the doc example `verifying/expressions.c`:
+  - Run 1: 1575 mutants: 941 killed, 352 safe-direction, 275 unexplained, 6 stillborn, 1 tool failure. The binary was
+    relinked at 21:07, during the run, with audit round 2's encoder fixes; they change only the rejection of two
+    discarded shapes, so at most a mutant becomes stillborn. Every re-run used the final binary.
+  - The positives were strengthened in place: tight bounds, exact single-clause `ensures`, the guard made essential, no
+    dead initial values. No `expect:` line was touched, and the twins were regenerated with them.
+  - Run 2: 1023 mutants: 841 killed, 153 safe-direction, 20 unexplained, 6 stillborn, 3 tool failures (timeouts on a
+    nonlinear division, now removed from the positives).
+  - Run 3, the changed files: 331 mutants, 276 killed, 14 listed equivalents, 39 safe-direction, 0 unexplained, 2
+    stillborn, 0 tool failures.
+  - The Opus review of the 14 entries accepted 10 and rejected 4 (two slack preconditions, a condition constant that did
+    not pin its rule, a dead statement made by a slack bound). Those tests were strengthened and the 4 entries dropped.
+    Run 4, the four files: 152 mutants, 135 killed, 3 equivalents, 14 safe-direction, **0 unexplained**, **0 tool
+    failures**.
+- **Audits** (Opus, one reviewer):
+  - Round 1 (record, evidence, VIR): 1 blocking (a call that does not return hid the checks of an unsequenced sibling
+    operand), fixed by placing writes, snapshots and branches like obligations; 6 should-fix, taken; 3 notes.
+  - Round 2 (encoder, the fix, tooling, tests): 0 blocking; 4 should-fix (a discarded `?:` with an effect only in its
+    condition, a nested `sizeof`, missing rejection tests, the doc example's twin), taken; 5 notes (handoff §6).
+  - The equivalence entries: 10 accepted, 4 rejected (above).
+- Wall-clock: 19:06–23:15 (planning before).
+
+**Not done / deferred**
+- M4.3b (handoff §8.1).
+- The audit notes (handoff §6, M4.3a).
+
+**Surprises**
+- **The first lowering was unsound** (audit round 1, blocking). Keeping every effect in one left-to-right order let a
+  call that does not return hide the checks of an unsequenced sibling operand. The fix is 0012 item 6's own placement,
+  applied to writes and snapshots.
+- **EDG warns where the compilers do not, and vice versa.** #187 fires on any constant assigned in a truth context, and
+  #174 on any comma left operand without effect. No sequencing warning exists in EDG.
+- **GCC's `-Wunused-value` on `a && (x = b);`** depends on whether `b` is a constant: C folds `(x = 1) != 0` away. The
+  union rule keeps that asymmetry (§11 question 25).
+- **No compiler warns about `x = (x++, 2)` or `x = g(x++)`**, and both are defined C. The first draft of the rule
+  rejected them.
+
+**Decision records added:** 0020-side-effects-and-sequencing. Amended: 0012, 0014, 0019.
+
+**First step for the next session.** Confirm that the owner merged the M4.3a PR and that CI is green on `main`. Then
+M4.3b (handoff §8.1; record 0021), after §11 questions 24–26 are answered.
+
 ## M4.2c — Locals without an initializer, with §11 questions 17–19 (2026-10-22): done on branch `m4.2c-uninitialized-locals`, EDG pin `f0ed5525af`; PR pending (after M4.2b2's)
 
 Read `internal/handoff.md` next: the "M4.2c is done" owner steps at the top, §6 the M4.2c audit notes, §8.1 the EDG box
