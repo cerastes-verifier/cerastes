@@ -44,7 +44,12 @@ Front-end agnostic. The encoder builds a `Program` with a `Builder`; `check_prog
   `Unary{Neg, Plus, Not}`, `Binary{Add, Sub, Mul, Div, Rem, Shl, Shr, Lt, Le, Gt, Ge, Eq, Ne, LAnd, LOr}`,
   `Cond(c, a, b)`, `Convert(to, e, explicit)` (Int to Int), `ToBool(e)` (`e != 0`), `BoolToInt(to, e)`,
   `Call(callee, args)`, `ReportAt(e, loc)` (obligations inside `e` are reported at `loc`, with a note at their
-  own position: the obligations of a default argument are reported at the call).
+  own position: the obligations of a default argument are reported at the call). Since M4.3a (decision 0020) two
+  expressions have side effects: `AssignE(var, a, b, yields_old)` (an assignment, compound assignment, `++` or `--`
+  used as a value: `a` is the value stored, already converted to `var`'s type by `Builder::assign_expr`,
+  `compound_assign_expr`, `inc_dec_expr`; for `x++`/`x--`, `b` is the one `Local x` node that `a` also uses, the old
+  value, and the value of the node is `b`) and `Comma(a, b)` (only where its value is used; `a` may be a `void` call).
+  A top-level assignment is still the statement `Assign`, and a discarded comma is the statements of its operands.
 - `Stmt`: `Decl(var, init)` (since M4.2c, decision 0019, `init` may be null: a local declared without an
   initializer), `Assign(var, e)`, `ExprStmt(e)` (a call, a discarded value; only its obligations
   and effects count), `If(c, then, else)`, `While(cond, invariants[], measure[], body, step?, form, jump_id)`,
@@ -92,8 +97,15 @@ Front-end agnostic. The encoder builds a `Program` with a `Builder`; `check_prog
   `Local` not in contracts; a local is declared before use, in scope, once;
 - **calls** (0012 item 6): not in contracts, `check`, invariants or loop conditions; not in a conditionally
   evaluated operand (the right of `&&`/`||`, a branch of `?:`); the calls of one full expression are nested in
-  one another (no call is evaluated before another call outside its arguments); a `void` call is the whole
-  of an `ExprStmt`;
+  one another (no call is evaluated before another call outside its arguments) or ordered by `,` (0020 item 1); a
+  `void` call is the whole of an `ExprStmt` or the left operand of a `Comma`;
+- **side effects** (0020 item 9): `AssignE` and `Comma` only in code (statement expressions, initializers, returns,
+  `if` and `switch` conditions, arguments, and loop conditions, `Ctx::LoopCond`, which still refuses calls); never in
+  contracts, `check` or `assert` conditions (`Ctx::Assert`), invariants, measures, case values, named-constant
+  initializers or a `DoOnce` condition; an `AssignE` node is used once in a function, its `b` is a `Local` of its
+  variable used in `a`; a loop whose condition has a side effect has a jump id; a `for` step may be a `Block` of
+  `Assign`/`ExprStmt`; and `vir::sequence_problems` (0020 item 4: no local written by one operand and read or written
+  by an operand not sequenced with it) finds nothing, which the encoder reports first as `unsequenced_modification`;
 - a function without a body has a `trusted_reason`;
 - **named constants** (0017): `init`, when present, is call-free, mentions no `Local`, `Formal`, `Result` or `Old`, and
   has exactly the constant's type; `value` is a literal of that type; a constant without `init` has value `0`; a
@@ -140,6 +152,21 @@ values (category `precondition`, note at the clause). An obligation is asserted 
 highest index its condition or its guard mentions, or before the first call if it mentions none, so a callee that
 never returns cannot hide a check that does not depend on it.
 
+**Side effects** (M4.3a, decision 0020 item 7). A full expression's `Full` holds its obligations and an ordered list
+of **effects**: a call (as above), a write (`v := value; d := true`, the flag only for a flagged local), a snapshot
+(`t := v`) and a branch (`if (c) { … } else { … }` assigning a temporary). Calls keep their order and are the only
+fixed points; every other item (obligation, write, snapshot, branch) goes right after the last call it depends on (the
+temporaries it mentions, its guard's, the floor, and for a snapshot of `x` every earlier write of `x`), or before the
+first call when it depends on none — the call rule above, applied to writes and snapshots too — and items after the
+same call keep evaluation order (left to right for unsequenced operands). Every read of a local that the full expression writes is a snapshot
+at its point (its `uninitialized` obligation follows the snapshot), so a printed value never names a variable the
+expression writes; the value of an `AssignE` is its lowered `a` (or the snapshot of `b`). A right operand of `&&`/`||`
+or an arm of `?:` with a side effect is a branch, whose effects and obligations are emitted inside the `if`; an
+operand without one keeps the guard of the table above. After the left operand of `,` every later item depends at
+least on the left operand's last call (the floor), so nothing of the right operand moves before it. After `flush`, a
+fail-closed check confirms that the snapshots and writes of each variable kept their evaluation order. A full expression without
+`AssignE` or `Comma` lowers exactly as before.
+
 **Loops.** `while (c) { body }` becomes a Viper `while` whose invariant clauses are, in order: the automatic
 range invariant of every local that the loop assigns and did not declare (category `internal`); for each user
 invariant, the obligations of its expression (guarded by the earlier user invariants), then the invariant
@@ -152,6 +179,10 @@ l_brk__N`, each label emitted only when a `Continue`/`Break` with that id exists
 M3); `Continue` is `goto l_cont__N`, `Break` is `goto l_brk__N`. A continue path reaches the end of the body, so the
 loop's own invariant, condition-obligation and measure clauses are checked there; no new map entries. A `DoWhile` is
 `while (true) inv dec { body; label l_cont__N; assert <obligations of c>; if (!c) { goto l_brk__N } } label l_brk__N`.
+A `While` whose condition has a side effect (M4.3a, 0020 item 7) is lowered with the test first, as the `do` shape
+moved to the top: `while (true) inv dec { <the condition's effects and obligations>; if (!c) { goto l_brk__N } body;
+label l_cont__N; step } label l_brk__N`. The locals a loop assigns (automatic range invariants, `ds_` snapshots)
+include those written in any expression of the loop, its own condition and nested loops' conditions included.
 A `DoOnce` is no loop: its invariants (with their obligations) are asserted at entry as `invariant-entry` and its
 measure's obligations there too, then `body; label l_cont__N; assert <obligations of c>; assert !c` (category
 `internal`) `; label l_brk__N`. A `Switch` lowers its scrutinee like any expression into a temporary (obligations
@@ -432,13 +463,18 @@ its exact decimal value (`decimal_str_for_integer_constant`).
 wrapped with `bool_to_int` when the node's type is `int` (C); an integer in a boolean position is read as `e != 0`;
 casts map to `convert`, `to_bool` or `bool_to_int`; `?:` to `cond`; a call to `call`, a default argument wrapped in
 `report_at` at the call. After building each operation its VIR type is compared with the node's EDG type, so a
-conversion the IL left implicit fails closed. Everything else is `unsupported_expression` with a description of the
-operator (the comma operator, bitwise operators, assignments and increments used as values, pointer and member
-operations).
+conversion the IL left implicit fails closed. Since M4.3a (0020) an assignment, compound assignment, `++` or `--`
+used as an operand becomes `assign_expr`/`compound_assign_expr`/`inc_dec_expr` (the same checks as at statement level:
+a local target, the `bool` and enumeration rules, the own-initializer rule) and a comma whose value is used `comma`;
+an IL node with a side effect is never encoded twice (fail closed); `vir::sequence_problems` is reported as
+`unsequenced_modification` at the write; and the warning rules of 0020 item 5 (`assignment_as_condition`,
+`comma_without_effect`, `value_not_used`, `side_effect_not_evaluated`) are IL checks. Everything else is
+`unsupported_expression` with a description of the operator (bitwise operators, pointer and member operations).
 
 **Statements.** Allow-list: blocks (compiler-generated blocks are flattened, so a `for` initialization stays in
 scope), declarations with their `stmk_init`, expression statements (assignment, compound assignment and `++`/`--` of
-a local, calls, discarded expressions, `(void)e`), `if`, `while`, `do` and `for` (the increment is the loop's
+a local, calls, discarded expressions, `(void)e`; a discarded comma, also in a `for` init-statement or increment,
+becomes the statements of its operands in order, 0020 item 6), `if`, `while`, `do` and `for` (the increment is the loop's
 `step`, run after the body and after a `continue`) with their invariants read from the loop's attributes, `break` and
 `continue` (the compiler-generated `goto`s, mapped to the innermost enclosing loop or switch, with the label's shape
 checked, decision 0014), `switch` (case labels directly in its body), `return`, `static_assert`, null statements

@@ -341,7 +341,8 @@ behaviour in pass:[C++]26), and it is the first thing the pass:[C++]
 initialization profile forbids (P4222). Look for a path that reaches the read
 without passing an assignment: a branch that does not assign the variable, a
 loop that may run zero times, a `switch` without `default`, or a `goto` or `case`
-label that jumps past the assignment. A read is any use of the value, including
+label that jumps past the assignment, or a read that comes before an assignment in
+the same expression (`(y = x, x = 1)`). A read is any use of the value, including
 the old value in `x += 1` or `pass:[x++]`, a `return`, an argument, and an annotation
 such as `CERASTES_CHECK` or a loop invariant (there it is reported where the
 invariant is checked).

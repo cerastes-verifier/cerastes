@@ -343,33 +343,71 @@ const Stmt* Builder::block(std::vector<const Stmt*> stmts, SrcLoc loc) {
   return s;
 }
 
-const Stmt* Builder::compound_assign(const Var* x, BinaryOp op, const Expr* rhs, SrcLoc loc) {
-  if (!x->type.is_int() || !rhs->type.is_int()) return assign(x, rhs, loc);  // ill-typed on purpose
+const Expr* Builder::compound_value(const Var* x, const Expr* xval, BinaryOp op, const Expr* rhs, SrcLoc loc) {
+  if (!x->type.is_int() || !rhs->type.is_int()) return rhs;  // ill-typed on purpose
   // An enumeration operand (decision 0018 item 8): the arithmetic on it, which check_program rejects; never promoted here.
-  if (x->type.int_type->is_enum || rhs->type.int_type->is_enum) return assign(x, binary(op, local(x, loc), rhs, loc), loc);
+  if (x->type.int_type->is_enum || rhs->type.int_type->is_enum) return binary(op, xval, rhs, loc);
   const IntType* tx = x->type.int_type;
   const IntType* px = promoted(p_, tx);
-  const Expr* lhs_value = local(x, loc);
   const Expr* left;
   const Expr* right;
   const IntType* c;
   if (op == BinaryOp::Shl || op == BinaryOp::Shr) {
     c = px;
-    left = convert(Type::integer(c), lhs_value, false, loc);
+    left = convert(Type::integer(c), xval, false, loc);
     right = rhs;
   } else {
     c = usual_arithmetic(p_, px, promoted(p_, rhs->type.int_type));
-    left = convert(Type::integer(c), lhs_value, false, loc);
+    left = convert(Type::integer(c), xval, false, loc);
     right = convert(Type::integer(c), rhs, false, loc);
   }
   const Expr* v = binary(op, left, right, loc);
-  return assign(x, convert(x->type, v, false, loc), loc);
+  return convert(x->type, v, false, loc);
+}
+
+const Stmt* Builder::compound_assign(const Var* x, BinaryOp op, const Expr* rhs, SrcLoc loc) {
+  if (!x->type.is_int() || !rhs->type.is_int()) return assign(x, rhs, loc);  // ill-typed on purpose
+  // An enumeration operand: compound_value gives the ill-typed `x op rhs`, which check_program rejects.
+  const Expr* xval = local(x, loc);
+  return assign(x, compound_value(x, xval, op, rhs, loc), loc);
 }
 
 const Stmt* Builder::inc_dec(const Var* x, bool increment, SrcLoc loc) {
   const IntType* c_int = p_.int_type_of(p_.c_int_bits(), true);
   const Expr* one = int_const(Type::integer(c_int), "1", loc);
   return compound_assign(x, increment ? BinaryOp::Add : BinaryOp::Sub, one, std::move(loc));
+}
+
+const Expr* Builder::assign_expr(const Var* v, const Expr* value, SrcLoc loc) {
+  Expr* e = fresh(p_, Expr::Kind::AssignE, v->type, std::move(loc));
+  e->var = v;
+  e->a = value;
+  return e;
+}
+
+const Expr* Builder::compound_assign_expr(const Var* x, BinaryOp op, const Expr* rhs, SrcLoc loc) {
+  const Expr* xval = local(x, loc);
+  return assign_expr(x, compound_value(x, xval, op, rhs, loc), std::move(loc));
+}
+
+const Expr* Builder::inc_dec_expr(const Var* x, bool increment, bool post, SrcLoc loc) {
+  const IntType* c_int = p_.int_type_of(p_.c_int_bits(), true);
+  const Expr* one = int_const(Type::integer(c_int), "1", loc);
+  const Expr* old_value = local(x, loc);  // one node: the stored value and (for x++) the node's value share it
+  const Expr* value = compound_value(x, old_value, increment ? BinaryOp::Add : BinaryOp::Sub, one, loc);
+  Expr* e = const_cast<Expr*>(assign_expr(x, value, std::move(loc)));
+  if (post) {
+    e->b = old_value;
+    e->yields_old = true;
+  }
+  return e;
+}
+
+const Expr* Builder::comma(const Expr* a, const Expr* b, SrcLoc loc) {
+  Expr* e = fresh(p_, Expr::Kind::Comma, b->type, std::move(loc));
+  e->a = a;
+  e->b = b;
+  return e;
 }
 
 }  // namespace cerastes::vir

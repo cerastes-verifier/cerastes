@@ -7741,7 +7741,15 @@ class EdgTreeToolTests(unittest.TestCase):
     def make_env():
         env = {k: v for k, v in os.environ.items()
                if k not in ("CERASTES_EDG_SRC", "GIT_DIR", "GIT_WORK_TREE")}
+        # No automatic maintenance or gc in the fixtures' repositories: a background `git maintenance`
+        # or `gc --auto` that a fixture command starts removes or creates files under .git while the
+        # template is copied (`shutil.Error: ... .git/objects/maintenance.lock ... No such file`, seen
+        # on the CI runner).
         env.update({"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull,
+                    "GIT_CONFIG_COUNT": "3",
+                    "GIT_CONFIG_KEY_0": "maintenance.auto", "GIT_CONFIG_VALUE_0": "false",
+                    "GIT_CONFIG_KEY_1": "gc.auto", "GIT_CONFIG_VALUE_1": "0",
+                    "GIT_CONFIG_KEY_2": "gc.autoDetach", "GIT_CONFIG_VALUE_2": "false",
                     "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
                     "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"})
         return env
@@ -7755,7 +7763,8 @@ class EdgTreeToolTests(unittest.TestCase):
         def git(cwd, *args):
             cwd.mkdir(parents=True, exist_ok=True)
             run = subprocess.run(["git", "-c", "commit.gpgsign=false", "-c",
-                                  "core.hooksPath=/dev/null", *args], cwd=cwd, env=cls.env,
+                                  "core.hooksPath=/dev/null", "-c", "maintenance.auto=false", "-c",
+                                  "gc.auto=0", *args], cwd=cwd, env=cls.env,
                                  capture_output=True, text=True)
             assert run.returncode == 0, (args, run.stderr)
             return run.stdout.strip()
@@ -7804,11 +7813,19 @@ class EdgTreeToolTests(unittest.TestCase):
         cls._template_tmp.cleanup()
         super().tearDownClass()
 
+    @staticmethod
+    def copy_template(src, dst):
+        """Copy the pristine fixture.  Lock files are transient (git removes its own when a command
+        ends, and a background maintenance run creates and removes `objects/maintenance.lock`): one
+        that exists while the tree is read must not make the copy fail, and none is needed."""
+        shutil.copytree(src, dst, symlinks=True, dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("*.lock"))
+
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.tmp = Path(tmp.name).resolve()
-        shutil.copytree(self.template, self.tmp, symlinks=True, dirs_exist_ok=True)
+        self.copy_template(self.template, self.tmp)
         self.root = self.tmp / "repo"
         self.sub = self.root / "third_party" / "edg"
         self.override = self.tmp / "override"
@@ -7821,7 +7838,8 @@ class EdgTreeToolTests(unittest.TestCase):
     def git(self, cwd, *args):
         cwd.mkdir(parents=True, exist_ok=True)
         run = subprocess.run(["git", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
-                              *args], cwd=cwd, env=self.env, capture_output=True, text=True)
+                              "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=cwd,
+                             env=self.env, capture_output=True, text=True)
         self.assertEqual(run.returncode, 0, (args, run.stderr))
         return run.stdout.strip()
 
@@ -7843,6 +7861,31 @@ class EdgTreeToolTests(unittest.TestCase):
         self.assertIn("error: ", err)
         self.assertIn(needle, err)
         self.assertEqual(out, "")
+
+    # --- the fixture itself ---
+
+    def test_the_fixture_repositories_run_no_automatic_maintenance(self):
+        # twin of the CI failure: a background `git maintenance`/`gc --auto` removed
+        # .git/objects/maintenance.lock while the template was being copied
+        for repo in (self.root, self.sub, self.override):
+            for key, want in (("maintenance.auto", "false"), ("gc.auto", "0"),
+                              ("gc.autoDetach", "false")):
+                self.assertEqual(self.git(repo, "config", "--get", key), want, (repo, key))
+
+    def test_the_copy_of_the_template_skips_lock_files_and_keeps_everything_else(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src, dst = Path(tmp) / "src", Path(tmp) / "dst"
+            self.write(src / ".git" / "objects" / "maintenance.lock", "x\n")
+            self.write(src / ".git" / "index.lock", "x\n")
+            self.write(src / ".git" / "HEAD", "ref\n")
+            self.write(src / "a.txt", "a\n")
+            self.write(src / "lockfile.txt", "kept\n")
+            self.copy_template(src, dst)
+            self.assertEqual(sorted(str(f.relative_to(dst)) for f in dst.rglob("*") if f.is_file()),
+                             [".git/HEAD", "a.txt", "lockfile.txt"])
+
+    def test_no_fixture_test_needs_a_lock_file(self):
+        self.assertEqual([f for f in self.tmp.rglob("*.lock")], [])
 
     # --- check: the pin ---
 
@@ -9957,6 +10000,73 @@ class EvaluateVerifyTests(unittest.TestCase):
         warn = (f'"{VF}", line 2 (col. 3): warning #161-D: unrecognized #pragma\n' + REJECTION)
         self.assertFails(self.evaluate(["rejected undefined_identifier @ L4"], 2, "", warn),
                          "unexpected warning")
+
+    WARNING = f'"{VF}", line 4 (col. 3): warning #177-D: variable "x" was declared but never referenced\n'
+
+    def test_a_rejected_test_may_list_the_warnings_it_expects(self):
+        expects = ["rejected undefined_identifier @ L4", "frontend-warning declared_but_not_referenced @ L4"]
+        self.assertEqual(self.evaluate(expects, 2, "", self.WARNING + REJECTION), [])
+
+    def test_a_listed_warning_that_is_not_printed_fails(self):
+        expects = ["rejected undefined_identifier @ L4", "frontend-warning declared_but_not_referenced @ L4"]
+        self.assertFails(self.evaluate(expects, 2, "", REJECTION), "missing warning")
+
+    def test_an_unlisted_warning_still_fails_when_others_are_listed(self):
+        other = f'"{VF}", line 3 (col. 3): warning #161-D: unrecognized #pragma\n'
+        expects = ["rejected undefined_identifier @ L4", "frontend-warning declared_but_not_referenced @ L4"]
+        self.assertFails(self.evaluate(expects, 2, "", other + self.WARNING + REJECTION),
+                         "unexpected warning")
+
+    def test_a_listed_warning_at_the_wrong_line_or_with_another_tag_fails(self):
+        expects = ["rejected undefined_identifier @ L4", "frontend-warning declared_but_not_referenced @ L5"]
+        self.assertFails(self.evaluate(expects, 2, "", self.WARNING + REJECTION),
+                         "wrong line: expected warning declared_but_not_referenced @ L5")
+        expects = ["rejected undefined_identifier @ L4", "frontend-warning unrecognized_pragma @ L4"]
+        self.assertFails(self.evaluate(expects, 2, "", self.WARNING + REJECTION),
+                         "wrong diagnostic at this line")
+
+    def test_a_warning_is_counted_once_per_listing(self):
+        expects = ["rejected undefined_identifier @ L4", "frontend-warning declared_but_not_referenced @ L4"]
+        self.assertFails(self.evaluate(expects, 2, "", self.WARNING * 2 + REJECTION),
+                         "unexpected warning")
+        two = ["rejected undefined_identifier @ L4"] + ["frontend-warning declared_but_not_referenced @ L4"] * 2
+        self.assertFails(self.evaluate(two, 2, "", self.WARNING + REJECTION), "missing warning")
+
+    def test_without_warning_lines_a_warning_still_fails(self):
+        self.assertFails(self.evaluate(["rejected undefined_identifier @ L4"], 2, "",
+                                       self.WARNING + REJECTION), "unexpected warning")
+
+    def test_the_header_of_a_rejected_test_may_hold_frontend_warning_lines(self):
+        text = ("// expect: rejected cerastes-comma_without_effect @ L9\n"
+                "// expect: frontend-warning declared_but_not_referenced @ L9\n// mode: c23\nint x;\n")
+        exp = rt.parse_header(text, ".c")
+        self.assertEqual(exp.kind, "rejected")
+        self.assertEqual([(d.severity, d.tag, d.line) for d in exp.diags],
+                         [("error", "cerastes-comma_without_effect", 9),
+                          ("warning", "declared_but_not_referenced", 9)])
+
+    def test_a_frontend_error_line_still_does_not_mix_with_rejected(self):
+        text = ("// expect: rejected cerastes-comma_without_effect @ L9\n"
+                "// expect: frontend-error exp_semicolon @ L9\n// mode: c23\nint x;\n")
+        with self.assertRaises(rt.HeaderError) as ctx:
+            rt.parse_header(text, ".c")
+        self.assertIn("mix", str(ctx.exception))
+        both = ("// expect: rejected cerastes-comma_without_effect @ L9\n"
+                "// expect: frontend-warning declared_but_not_referenced @ L9\n"
+                "// expect: frontend-error exp_semicolon @ L9\n// mode: c23\nint x;\n")
+        with self.assertRaises(rt.HeaderError):
+            rt.parse_header(both, ".c")
+
+    def test_frontend_warning_lines_alone_are_still_a_frontend_test(self):
+        text = "// expect: frontend-warning declared_but_not_referenced @ L9\n// mode: c23\nint x;\n"
+        self.assertEqual(rt.parse_header(text, ".c").kind, "frontend-diag")
+
+    def test_a_warning_line_does_not_mix_with_other_outcomes(self):
+        for other in ("verified", "error overflow @ L5"):
+            text = (f"// expect: {other}\n// expect: frontend-warning declared_but_not_referenced @ L9\n"
+                    "// mode: c23\nint x;\n")
+            with self.subTest(other), self.assertRaises(rt.HeaderError):
+                rt.parse_header(text, ".c")
 
     def test_rejected_output_checks_are_those_of_frontend_tests(self):
         no_summary = REJECTION.split("\n")[0] + "\n"

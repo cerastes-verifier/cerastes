@@ -2230,6 +2230,273 @@ class JobsTests(RunCase):
         self.assertRegex(source, r'"-j", "--jobs", type=int, default=None')
 
 
+EFFECT_OPS = ("drop-store", "swap-incdec", "drop-comma")
+
+
+def effects(src, path="t.c"):
+    """[(id, mutated source with the id's change applied)] of the three effect operators."""
+    return [(m.id, m.apply(src)) for m in mu.mutants_of(src, path) if m.op in EFFECT_OPS]
+
+
+def effect_ids(statements, decl="int f(int x, int y)"):
+    return [i for i, _ in effects(body(statements, decl))]
+
+
+def effect_ids_of(op, statements):
+    return [i for i in effect_ids(statements) if f":{op}:" in i]
+
+
+def effect_result(statements, ident, decl="int f(int x, int y)"):
+    """The mutated body (from the line after the opening brace) of the one effect mutant called `ident`."""
+    src = body(statements, decl)
+    (got,) = [text for i, text in effects(src) if i == ident]
+    return got.split("\n", 2)[2]
+
+
+class EffectOperatorTests(unittest.TestCase):
+    """drop-store, swap-incdec and drop-comma (M4.3a): where each produces a mutant, exactly, and the
+    twins where nothing may be produced (a statement that discards the value, argument and declarator
+    commas, annotations).  `body()` puts the first statement on line 3."""
+
+    # --- drop-store -------------------------------------------------------------------------
+
+    def test_a_parenthesized_assignment_used_as_a_value_loses_its_store(self):
+        stmt = "  int a = (x = y + 1);\n  return a;"
+        self.assertEqual(effect_ids(stmt), ["t.c:3:12:drop-store:x =->"])
+        self.assertEqual(effect_result(stmt, "t.c:3:12:drop-store:x =->"),
+                         "  int a = (y + 1);\n  return a;\n}\n")
+
+    def test_a_chained_assignment_loses_the_inner_store_only(self):
+        stmt = "  int a;\n  y = a = x;\n  return y;"
+        self.assertEqual(effect_ids(stmt), ["t.c:4:7:drop-store:a =->"])
+        self.assertEqual(effect_result(stmt, "t.c:4:7:drop-store:a =->"),
+                         "  int a;\n  y = x;\n  return y;\n}\n")
+
+    def test_a_chained_declaration_initializer_has_one_store_to_drop(self):
+        self.assertEqual(effect_ids("  int a = 0;\n  int b = a = x;\n  return b;"),
+                         ["t.c:4:11:drop-store:a =->"])
+        self.assertEqual(effect_ids("  int a = 0;\n  int b = a = x, c = (a = y), d = 3;\n  return b;"),
+                         ["t.c:4:11:drop-store:a =->", "t.c:4:23:drop-store:a =->"])
+
+    def test_an_assignment_in_an_argument_a_condition_a_return_and_an_index_loses_its_store(self):
+        for stmt, count in (("  return g(x = 1, y);", 1), ("  if ((x = y) > 0) return 1;\n  return 0;", 1),
+                            ("  while ((x = y) > 0) { }\n  return x;", 1), ("  return x = 1;", 1),
+                            ("  return y > 0 ? (x = 1) : (y = 2);", 2), ("  return a[x = 1];", 1)):
+            with self.subTest(stmt):
+                self.assertEqual(len(effect_ids_of("drop-store", stmt)), count, stmt)
+
+    def test_an_assignment_that_is_a_heads_whole_condition_is_used(self):
+        # `if (x = y)` is a rejected shape, but its value is used
+        self.assertEqual(effect_ids("  if (x = y) return 1;\n  return 0;"), ["t.c:3:7:drop-store:x =->"])
+
+    def test_a_statement_level_assignment_is_not_a_store_to_drop(self):
+        for stmt in ("  x = 1;", "  x = 1;\n  y = 2;", "  (x = 1);", "  (void)(x = 1);", "  ((x = 1));",
+                     "  (void)x;\n  x = 1, y = 2;", "  if (y) x = 1;", "  if (y) { } else x = 1;",
+                     "  do x = 1; while (0);", "  switch (y) { case 1: x = 1; }", "  l: x = 1;"):
+            with self.subTest(stmt):
+                self.assertEqual(effect_ids_of("drop-store", stmt), [], stmt)
+
+    def test_a_for_init_and_step_assignment_is_not_a_store_to_drop(self):
+        self.assertEqual(effect_ids("  for (x = 0; x < y; x = x + 1) { }"), [])
+        self.assertEqual(effect_ids_of("drop-store", "  for (x = 0, y = 1; x < y; x = x + 1, y = y - 1) { }"), [])
+
+    def test_a_chained_assignment_in_a_for_clause_loses_the_inner_store(self):
+        self.assertEqual(effect_ids("  int a;\n  for (a = x = 0; x < y; x = x + 1) { }"),
+                         ["t.c:4:12:drop-store:x =->"])
+
+    def test_a_declarator_initializer_is_not_an_assignment(self):
+        for stmt in ("  int a = 0;", "  int a = 0, b = y;", "  const int a = y;", "  unsigned a = 1u, b = a;",
+                     "  T a = x;", "  T *p = 0, *q = p;", "  for (int i = 0, j = y; i < j; ) { }",
+                     "  static int a = 1;"):
+            with self.subTest(stmt):
+                self.assertEqual(effect_ids(stmt), [], stmt)
+
+    def test_only_a_plain_identifier_is_a_store(self):
+        for stmt in ("  return (p->x = 1);", "  return (a[0] = 1);", "  return (*p = 1);", "  return (s.f = 1);",
+                     "  return (x += 1);", "  return (x <<= 1);"):
+            with self.subTest(stmt):
+                self.assertEqual(effect_ids(stmt), [], stmt)
+
+    def test_an_assignment_in_an_annotation_argument_is_not_code(self):
+        src = body("  CERASTES_CHECK((x = 1) > 0);\n  CERASTES_INVARIANT((x = 1) > y)\n  while ((y = 1) > x) { }\n"
+                   "  return y;")
+        self.assertEqual([i for i, _ in effects(src)], ["t.c:5:11:drop-store:y =->"])
+        self.assertEqual(effects(body("  [[cerastes::check((x = 1) > 0)]];\n  return x;")), [])
+
+    def test_a_contract_after_the_parameters_is_not_code(self):
+        src = "int f(int x, int y) CERASTES_REQUIRES((x = 1) > 0) CERASTES_ENSURES(r, (y = 1) > r)\n{\n  return y;\n}\n"
+        self.assertEqual(effects(src), [])
+
+    # --- swap-incdec ------------------------------------------------------------------------
+
+    def test_a_used_post_increment_is_swapped_with_the_pre_increment_and_with_the_decrement(self):
+        stmt = "  int i = 0;\n  while (i++ < x) { y = y + 1; }\n  return i + y;"
+        self.assertEqual(effect_ids(stmt), ["t.c:4:10:swap-incdec:i++->++i", "t.c:4:11:swap-incdec:++->--"])
+        self.assertEqual(effect_result(stmt, "t.c:4:10:swap-incdec:i++->++i").split("\n")[1],
+                         "  while (++i < x) { y = y + 1; }")
+        self.assertEqual(effect_result(stmt, "t.c:4:11:swap-incdec:++->--").split("\n")[1],
+                         "  while (i-- < x) { y = y + 1; }")
+
+    def test_a_used_pre_decrement_is_swapped_with_the_post_decrement_and_the_increment(self):
+        stmt = "  int i = 3;\n  return --i * y;"
+        self.assertEqual(effect_ids(stmt), ["t.c:4:10:swap-incdec:--->++", "t.c:4:10:swap-incdec:--i->i--"])
+        self.assertEqual(effect_result(stmt, "t.c:4:10:swap-incdec:--i->i--").split("\n")[1],
+                         "  return i-- * y;")
+        self.assertEqual(effect_result(stmt, "t.c:4:10:swap-incdec:--->++").split("\n")[1],
+                         "  return ++i * y;")
+
+    def test_a_swap_keeps_the_text_around_it(self):
+        stmt = "  int i = 0;\n  return i++  +  y;"
+        self.assertEqual(effect_result(stmt, "t.c:4:10:swap-incdec:i++->++i").split("\n")[1],
+                         "  return ++i  +  y;")
+
+    def test_incdec_as_an_initializer_an_argument_and_a_return_is_used(self):
+        for stmt in ("  int a = x++;\n  return a;", "  return g(x--, y);", "  return ++x;", "  return x++;",
+                     "  y = x++;\n  return y;", "  return a[x++];"):
+            with self.subTest(stmt):
+                self.assertEqual(len(effect_ids_of("swap-incdec", stmt)), 2, stmt)
+
+    def test_a_statement_level_incdec_is_not_swapped(self):
+        for stmt in ("  x++;", "  ++x;", "  x--;", "  --x;", "  (void)x++;", "  (void)++x;", "  (void)(x++);",
+                     "  (x++);", "  if (y) x++;", "  if (y) { } else ++x;", "  while (y > 0) y--;",
+                     "  x++, y--;", "  do x++; while (y < 0);", "  l: ++x;", "  switch (y) { case 1: ++x; }"):
+            with self.subTest(stmt):
+                self.assertEqual(effect_ids_of("swap-incdec", stmt), [], stmt)
+
+    def test_a_for_step_clause_incdec_is_not_swapped_but_a_used_one_in_the_condition_is(self):
+        self.assertEqual(effect_ids("  for (x = 0; x < y; x++) { }"), [])
+        self.assertEqual(effect_ids("  for (x = 0; x < y; ++x) { }"), [])
+        self.assertEqual(effect_ids_of("swap-incdec", "  for (x = 0; x++ < y; x++) { }"),
+                         ["t.c:3:15:swap-incdec:x++->++x", "t.c:3:16:swap-incdec:++->--"])
+
+    def test_the_operand_of_incdec_is_a_plain_identifier(self):
+        for stmt in ("  return s.f++;", "  return p->f--;", "  return a[0]++;", "  return ++s.f;", "  return --p->f;",
+                     "  return ++a[0];", "  return (*p)++;", "  return ns::v++;"):
+            with self.subTest(stmt):
+                self.assertEqual(effect_ids_of("swap-incdec", stmt), [], stmt)
+
+    def test_incdec_in_an_annotation_argument_is_not_code(self):
+        src = body("  CERASTES_CHECK(x++ > 0);\n  CERASTES_INVARIANT(++y > x)\n  while (y > 0) { }\n  return y;")
+        self.assertEqual(effects(src), [])
+
+    # --- drop-comma -------------------------------------------------------------------------
+
+    def test_the_left_operand_of_a_parenthesized_comma_with_an_effect_is_dropped(self):
+        for stmt, ident, after in (
+                ("  return (x++, y);", "t.c:3:11:drop-comma:x++,->", "  return (y);"),
+                ("  return (x = 1, y);", "t.c:3:11:drop-comma:x = 1,->", "  return (y);"),
+                ("  return (g(x), y);", "t.c:3:11:drop-comma:g(x),->", "  return (y);"),
+                ("  return (g(x), h(y));", "t.c:3:11:drop-comma:g(x),->", "  return (h(y));")):
+            with self.subTest(stmt):
+                self.assertEqual(effect_ids_of("drop-comma", stmt), [ident])
+                self.assertEqual(effect_result(stmt, ident).split("\n")[0], after)
+
+    def test_a_comma_without_an_effect_on_its_left_gives_no_mutant(self):
+        for stmt in ("  return (x, y);", "  return (x + 1, y);", "  return (0, y);"):
+            with self.subTest(stmt):
+                self.assertEqual(effect_ids_of("drop-comma", stmt), [], stmt)
+
+    def test_each_operand_of_a_chain_of_commas_is_dropped_in_turn(self):
+        stmt = "  return (x++, y++, x);"
+        got = effect_ids_of("drop-comma", stmt)
+        self.assertEqual(got, ["t.c:3:11:drop-comma:x++,->", "t.c:3:16:drop-comma:y++,->"])
+        self.assertEqual(effect_result(stmt, got[0]).split("\n")[0], "  return (y++, x);")
+        self.assertEqual(effect_result(stmt, got[1]).split("\n")[0], "  return (x++, x);")
+
+    def test_a_comma_statement_loses_its_left_operand(self):
+        stmt = "  g(x), h(y);"
+        self.assertEqual(effect_ids(stmt), ["t.c:3:3:drop-comma:g(x),->"])
+        self.assertEqual(effect_result(stmt, "t.c:3:3:drop-comma:g(x),->").split("\n")[0], "  h(y);")
+
+    def test_a_for_init_and_step_comma_loses_its_left_operand(self):
+        stmt = "  int i;\n  int j;\n  for (i = 0, j = x; i < j; i++, j--) { }\n  return i;"
+        got = effect_ids(stmt)
+        self.assertEqual(got, ["t.c:5:8:drop-comma:i = 0,->", "t.c:5:29:drop-comma:i++,->"])
+        self.assertEqual(effect_result(stmt, got[0]).split("\n")[2], "  for (j = x; i < j; i++, j--) { }")
+        self.assertEqual(effect_result(stmt, got[1]).split("\n")[2], "  for (i = 0, j = x; i < j; j--) { }")
+
+    def test_a_comma_in_a_condition_loses_its_left_operand(self):
+        stmt = "  int c = 0;\n  while (c = g(x), c < y) { y--; }\n  return c;"
+        self.assertEqual(effect_ids_of("drop-comma", stmt), ["t.c:4:10:drop-comma:c = g(x),->"])
+        self.assertEqual(effect_result(stmt, "t.c:4:10:drop-comma:c = g(x),->").split("\n")[1],
+                         "  while (c < y) { y--; }")
+
+    def test_an_argument_separator_is_not_a_comma_operator(self):
+        for stmt in ("  return g(x++, y);", "  g(x++, y);", "  return g(h(x), y);", "  return g(x = 1, y);",
+                     "  return k(g(x), (y));", "  return sizeof(x++, y);", "  CERASTES_CHECK(g(x), y);",
+                     "  return s.g(x++, y);", "  return ns::g(x++, y);", "  return (g)(x++, y);"):
+            with self.subTest(stmt):
+                self.assertEqual(effect_ids_of("drop-comma", stmt), [], stmt)
+
+    def test_a_comma_operator_inside_an_argument_is_found(self):
+        self.assertEqual(effect_ids_of("drop-comma", "  return g((h(x), y), 2);"),
+                         ["t.c:3:13:drop-comma:h(x),->"])
+
+    def test_a_declarator_comma_is_not_a_comma_operator(self):
+        for stmt in ("  int a = g(x), b = y;", "  int a = 0, b = x++;", "  T a = g(x), b = h(y);",
+                     "  T *p = g(x), *q = h(y);", "  for (int i = g(x), j = y; i < j; ) { }",
+                     "  int a[2] = { g(x), y };"):
+            with self.subTest(stmt):
+                self.assertEqual(effect_ids_of("drop-comma", stmt), [], stmt)
+
+    def test_a_comma_in_an_annotation_argument_is_not_code(self):
+        src = body("  CERASTES_CHECK((g(x), y) > 0);\n  CERASTES_INVARIANT((x++, y) > 0)\n  while (y > 0) { }\n"
+                   "  return y;")
+        self.assertEqual(effects(src), [])
+
+    def test_a_comma_after_a_cast_or_a_head_is_a_comma_operator(self):
+        self.assertEqual(effect_ids_of("drop-comma", "  return (int)(g(x), y);"),
+                         ["t.c:3:16:drop-comma:g(x),->"])
+        self.assertEqual(effect_ids_of("drop-comma", "  if (y) (g(x), h(y));\n  return 0;"),
+                         ["t.c:3:11:drop-comma:g(x),->"])
+
+    # --- all three --------------------------------------------------------------------------
+
+    def test_the_sample_gains_no_effect_mutant(self):
+        # SAMPLE has `i++;` and `y = y + 10u;` as statements, and annotations, and no used effect
+        self.assertEqual(effects(SAMPLE), [])
+
+    def test_the_effect_operators_have_ids_of_the_documented_shape(self):
+        src = body("  int a = (x = y);\n  return (g(a), a++) + ++x;")
+        made = [m for m in mu.mutants_of(src, "t.c") if m.op in EFFECT_OPS]
+        self.assertEqual(len(made), 6)
+        for m in made:
+            parsed = mu.ID_RE.match(m.id)
+            self.assertIsNotNone(parsed, m.id)
+            self.assertEqual(parsed.group("op"), m.op)
+            self.assertIn(m.op, mu.OPS)
+
+    def test_every_effect_mutant_differs_from_its_original_and_ids_are_unique(self):
+        src = body("  int a = (x = y);\n  for (a = 0, y = 1; a++ < x; a++, y--) { }\n"
+                   "  return (g(a), a++) + ++x + (y = x = 1);")
+        made = mu.mutants_of(src, "t.c")
+        self.assertEqual(len({m.id for m in made}), len(made))
+        eff = [m for m in made if m.op in EFFECT_OPS]
+        self.assertTrue(eff)
+        for m in eff:
+            self.assertNotEqual(m.apply(src), src, m.id)
+
+    def test_the_effect_operators_coexist_with_the_older_ones(self):
+        src = body("  int i = 0;\n  return (g(i), i++) < y;")
+        self.assertEqual(sorted({m.op for m in mu.mutants_of(src, "t.c")}),
+                         ["delete-stmt", "drop-comma", "literal", "relop", "swap-incdec"])
+
+    def test_a_mutant_of_an_effect_is_never_in_the_safe_direction_bucket(self):
+        src = ("int f(int x, int y) CERASTES_REQUIRES(x > 0 && y > 0) CERASTES_ENSURES(r, r > 0)\n{\n"
+               "  int a = (x = y);\n  return (g(a), a++) + ++x;\n}\n")
+        eff = [m for m in mu.mutants_of(src, "t.c") if m.op in EFFECT_OPS]
+        self.assertEqual(len(eff), 6)
+        for m in eff:
+            self.assertFalse(mu.is_safe_direction(m, src), m.id)
+
+    def test_the_operators_are_documented_where_the_readers_look(self):
+        doc = Path(mu.__file__).read_text().split('"""')[1]
+        readme = (Path(mu.__file__).resolve().parent.parent / "tests" / "README.md").read_text()
+        for op in EFFECT_OPS:
+            self.assertIn(f"`{op}`", doc)
+            self.assertIn(f"`{op}`", readme)
+
+
 class SelfTestHygieneTests(unittest.TestCase):
     """A test method defined twice in one class replaces the first, which then never runs (it happened here:
     two `test_labels_followed_by_no_deletable_statement_give_no_mutant`)."""

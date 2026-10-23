@@ -42,7 +42,9 @@ So are the bitwise operators `&`, `|`, `^` and `~`.
 
 `+`, `-`, `*`, unary `-`, `pass:[++]`, `--` and the compound assignments on a signed
 type must produce a value that fits the type. If one may not, cerastes reports
-`overflow` at the operator.
+`overflow` at the operator. This holds wherever they appear: the value of an
+assignment used inside an expression is the value stored, converted to the
+variable's type by the rules below.
 
 [source,cpp]
 ----

@@ -65,7 +65,6 @@ bool allowed_attribute_name(std::string n) {
 // How a rejection describes an operation.
 std::string describe_operation(an_expr_operator_kind k) {
   switch (k) {
-    case eok_comma: return "the comma operator";
     case eok_and: return "the bitwise operator &";
     case eok_or: return "the bitwise operator |";
     case eok_xor: return "the bitwise operator ^";
@@ -73,19 +72,7 @@ std::string describe_operation(an_expr_operator_kind k) {
     case eok_and_assign: return "the bitwise assignment &=";
     case eok_or_assign: return "the bitwise assignment |=";
     case eok_xor_assign: return "the bitwise assignment ^=";
-    case eok_assign:
-    case eok_bassign:
-    case eok_add_assign:
-    case eok_subtract_assign:
-    case eok_multiply_assign:
-    case eok_divide_assign:
-    case eok_remainder_assign:
-    case eok_shiftl_assign:
-    case eok_shiftr_assign: return "an assignment used as a value";
-    case eok_pre_incr:
-    case eok_post_incr:
-    case eok_pre_decr:
-    case eok_post_decr: return "an increment or decrement used as a value";
+    case eok_bassign: return "an assignment of a class or reference type";
     case eok_address_of: return "taking an address";
     case eok_indirect:
     case eok_ref_indirect:
@@ -120,6 +107,10 @@ class Encoder {
     vir::Function* fn = nullptr;
     std::map<a_variable_ptr, vir::Var*> vars;
     std::set<a_variable_ptr> pending;  // declared, initializer not yet seen
+    // The IL nodes with a side effect (assignment, ++/--, call) encoded in this function (decision 0020 item 10).
+    std::set<an_expr_node_ptr> encoded_effects;
+    // The IL position of each AssignE built (for the report of vir::sequence_problems, decision 0020 item 4).
+    std::map<const Expr*, a_source_position> assign_positions;
   std::set<a_variable_ptr> rejected_vars;  // declarations rejected: their uses are not diagnosed again
     a_source_position stmt_pos{};      // the statement being encoded, for nodes without a position
     a_variable_ptr declaring = nullptr;  // the variable whose initializer is being encoded
@@ -766,6 +757,14 @@ class Encoder {
     an_expr_node_ptr original = (c->expr != nullptr || c->local_expr_ref) ? expr_node_from_constant(c) : nullptr;
     const bool hook = verify_config().hook == "constant_without_expr";
     if (original != nullptr && !hook) {
+      {
+        // Decision 0020 item 5: a side effect in an unevaluated operand does not happen (`sizeof(x++)`).
+        const char* what = "";
+        if (an_expr_node_ptr fx = unevaluated_side_effect(original, &what)) {
+          reject(Diag::side_effect_not_evaluated, fx->position, what);
+          return nullptr;
+        }
+      }
       // sizeof and alignof give their value: no run-time operation (0010 item 12).
       if (original->kind == enk_sizeof || original->kind == enk_alignof || original->kind == enk_datasizeof)
         return literal(c, t, pos);
@@ -1112,6 +1111,13 @@ class Encoder {
 
   const Expr* expr(an_expr_node_ptr e) {
     if (e == nullptr) return nullptr;
+    if (is_effect_operation(e) && !cx_.encoded_effects.insert(e).second) {
+      // Decision 0020 item 10: an IL node with a side effect is encoded once per function; a second encoding would be a second
+      // copy of the effect in the VIR.  Fail closed.
+      reject(Diag::unsupported_expression, e->position,
+             "an internal inconsistency: an expression with a side effect would be encoded twice (decision 0020 item 10)");
+      return nullptr;
+    }
     const bool macro_node = !cx_.contract && !cx_.annotation && e->kind == enk_operation && e->position.orig_seq != 0;
     const bool saved = cx_.use_own;
     cx_.use_own = macro_node;
@@ -1352,6 +1358,19 @@ class Encoder {
         }
         return finish(e, b_.cond(c, a, d, loc_of(e->position)));
       }
+      case eok_assign:
+      case eok_add_assign:
+      case eok_subtract_assign:
+      case eok_multiply_assign:
+      case eok_divide_assign:
+      case eok_remainder_assign:
+      case eok_shiftl_assign:
+      case eok_shiftr_assign:
+      case eok_pre_incr:
+      case eok_post_incr:
+      case eok_pre_decr:
+      case eok_post_decr: return assignment_value(e, ops);
+      case eok_comma: return comma_value(e, ops);
       case eok_cast: return conversion(e);
       case eok_bool_cast: {
         if (!operand_count(e, 1, ops)) return nullptr;
@@ -1678,7 +1697,170 @@ class Encoder {
       reject(Diag::unsupported_expression, e->position, "an assignment to a variable that is not a local of this function");
       return nullptr;
     }
+    // As variable() (0012 item 3): `int y = (y = 1);` stays rejected now that an assignment may be nested.
+    if (cx_.declaring == e->variant.variable.ptr || cx_.pending.count(e->variant.variable.ptr) != 0) {
+      reject(Diag::unsupported_declaration, e->variant.variable.ptr->source_corresp.decl_position,
+             "a local variable used in its own initializer");
+      return nullptr;
+    }
     return it->second;
+  }
+
+  // ---- assignments, compound assignments, `++` and `--` (decision 0020 items 1-2, 10) -----------------------------------------
+  // The kinds that are encoded: `=`, the seven arithmetic and shift compound assignments, and the four increments and decrements.
+  // The bitwise assignments stay rejected (M4.4).
+  static bool is_encoded_assignment_kind(an_expr_operator_kind k) {
+    switch (k) {
+      case eok_assign:
+      case eok_add_assign:
+      case eok_subtract_assign:
+      case eok_multiply_assign:
+      case eok_divide_assign:
+      case eok_remainder_assign:
+      case eok_shiftl_assign:
+      case eok_shiftr_assign:
+      case eok_pre_incr:
+      case eok_post_incr:
+      case eok_pre_decr:
+      case eok_post_decr: return true;
+      default: return false;
+    }
+  }
+
+  // What an assignment-like node says, checked the same way at statement level and as a value.
+  struct AssignParts {
+    vir::Var* v = nullptr;                  // the local written
+    const Expr* x = nullptr;                // `=` and compound: the (converted) right-hand side; null for `++`/`--`
+    vir::BinaryOp op = vir::BinaryOp::Add;  // compound assignment
+    bool increment = false;                 // `++`/`--`
+  };
+  enum class AssignRes { ok, rejected, malformed };
+
+  AssignRes assignment_parts(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops, AssignParts* p) {
+    const an_expr_operator_kind k = e->variant.operation.kind;
+    const SrcLoc l = loc_of(e->position);
+    if (k == eok_assign) {
+      if (ops.size() != 2) return AssignRes::malformed;
+      p->v = lvalue_var(ops[0]);
+      allow_enum_conversion(ops[1]);  // decision 0018 item 6 (iii)
+      p->x = expr(ops[1]);
+      return p->v == nullptr || p->x == nullptr ? AssignRes::rejected : AssignRes::ok;
+    }
+    if (is_incdec_kind(k)) {
+      if (ops.size() != 1) return AssignRes::malformed;
+      p->v = lvalue_var(ops[0]);
+      if (p->v == nullptr) return AssignRes::rejected;
+      if (!p->v->type.is_int()) {
+        reject(Diag::unsupported_expression, e->position, "an increment or decrement of a bool");
+        return AssignRes::rejected;
+      }
+      if (is_enum_type(p->v->type)) {
+        reject(Diag::unsupported_expression, e->position, "an increment or decrement of an enumeration (decision 0018 item 8)");
+        return AssignRes::rejected;
+      }
+      p->increment = k == eok_pre_incr || k == eok_post_incr;
+      return AssignRes::ok;
+    }
+    // A compound assignment.
+    if (ops.size() != 2) return AssignRes::malformed;
+    p->v = lvalue_var(ops[0]);
+    p->x = expr(ops[1]);
+    if (p->v == nullptr || p->x == nullptr) return AssignRes::rejected;
+    if (!p->v->type.is_int()) {
+      reject(Diag::unsupported_expression, e->position, "a compound assignment to a bool");
+      return AssignRes::rejected;
+    }
+    if (is_enum_type(p->v->type) || is_enum_type(p->x->type)) {
+      // Both compute in the promoted type, which differs between C and C++ (decision 0018 item 8).
+      reject(Diag::unsupported_expression, e->position, "a compound assignment to or with an enumeration value (decision 0018 item 8)");
+      return AssignRes::rejected;
+    }
+    if (p->x->type.is_bool()) {
+      // `i += flag`: the bool is promoted to int first.
+      const vir::IntType* i = prog_.int_type("int", prog_.c_int_bits(), true);
+      p->x = b_.bool_to_int(vir::Type::integer(i), p->x, l);
+    }
+    p->op = k == eok_add_assign         ? vir::BinaryOp::Add
+            : k == eok_subtract_assign  ? vir::BinaryOp::Sub
+            : k == eok_multiply_assign  ? vir::BinaryOp::Mul
+            : k == eok_divide_assign    ? vir::BinaryOp::Div
+            : k == eok_remainder_assign ? vir::BinaryOp::Rem
+            : k == eok_shiftl_assign    ? vir::BinaryOp::Shl
+                                        : vir::BinaryOp::Shr;
+    return AssignRes::ok;
+  }
+
+  // An assignment, compound assignment or `++`/`--` whose value is used (decision 0020 item 1): an AssignE.  Its IL position is
+  // kept for vir::sequence_problems.  P33: the node is directly the operand, with the left operand's type, and any conversion
+  // the use needs is a generated cast around it.
+  const Expr* assignment_value(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
+    if (cx_.contract || cx_.annotation || cx_.const_depth > 0) {
+      // C++ may read `int y = (y = 1);` as a constant initializer: the own-initializer rule (0012 item 3) still gives its
+      // diagnostic, as in C.
+      if (!ops.empty() && ops[0]->kind == enk_variable && ops[0]->variant.variable.ptr != nullptr &&
+          (cx_.declaring == ops[0]->variant.variable.ptr || cx_.pending.count(ops[0]->variant.variable.ptr) != 0) &&
+          cx_.vars.count(ops[0]->variant.variable.ptr) != 0) {
+        lvalue_var(ops[0]);
+        return nullptr;
+      }
+      reject(Diag::unsupported_expression, e->position, "an assignment, increment or decrement in an annotation, or in an expression the compiler folded to a constant "
+             "(`0 && (x = 1)` and `1 || x++` are never evaluated)");
+      return nullptr;
+    }
+    const an_expr_operator_kind k = e->variant.operation.kind;
+    AssignParts a;
+    const AssignRes res = assignment_parts(e, ops, &a);
+    if (res == AssignRes::malformed) {
+      operand_count(e, is_incdec_kind(k) ? 1 : 2, ops);
+      return nullptr;
+    }
+    if (res != AssignRes::ok) return nullptr;
+    const SrcLoc l = loc_of(e->position);
+    const Expr* r = k == eok_assign        ? b_.assign_expr(a.v, a.x, l)
+                    : is_incdec_kind(k)    ? b_.inc_dec_expr(a.v, a.increment, k == eok_post_incr || k == eok_post_decr, l)
+                                           : b_.compound_assign_expr(a.v, a.op, a.x, l);
+    cx_.assign_positions[r] = e->position;
+    return finish(e, r);
+  }
+
+  // The comma operator whose value is used (decision 0020 item 1): the left operand is evaluated first, completely (a call of a
+  // void function or a `(void)` cast is allowed there); rules B(1) and C of item 5 apply to it.  A comma whose value is discarded is
+  // statements instead (expression_statement).
+  const Expr* comma_value(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
+    if (!operand_count(e, 2, ops)) return nullptr;
+    if (cx_.contract || cx_.annotation || cx_.const_depth > 0) {
+      reject(Diag::unsupported_expression, e->position, "the comma operator in an annotation, or in an expression the compiler folded to a constant");
+      return nullptr;
+    }
+    if (comma_left_without_effect(ops[0])) reject(Diag::comma_without_effect, e->position, "");
+    an_expr_node_ptr left = ops[0];
+    bool voided = false;
+    while (is_void_cast(left)) {
+      left = left->variant.operation.operands;
+      voided = true;
+    }
+    if (!voided) {
+      // The left operand's value is discarded: a comma on its left has its own right operand discarded (rule B(2)), and rule C.
+      // (discarded_value_with_effect reports B(2) for a comma there.)
+      if (an_expr_node_ptr d = discarded_value_with_effect(left)) reject(Diag::value_not_used, d->position, "");
+    }
+    const Expr* a = expr(left);
+    const Expr* b = expr(ops[1]);
+    if (a == nullptr || b == nullptr) return nullptr;
+    if (b->type.is_void()) {
+      reject(Diag::unsupported_expression, e->position, "a comma operator whose right operand is void, used as a value");
+      return nullptr;
+    }
+    return finish(e, b_.comma(a, b, loc_of(e->position)));
+  }
+
+  // The rejections of vir::sequence_problems (decision 0020 item 4): an unsequenced modification, at the write.
+  void report_sequence_problems(vir::Function* f) {
+    for (const vir::SequenceProblem& sp : vir::sequence_problems(*f)) {
+      auto pos = cx_.assign_positions.find(sp.at);
+      const a_source_position at = pos != cx_.assign_positions.end() ? pos->second : cx_.stmt_pos;
+      reject(Diag::unsequenced_modification, at, sp.variable);
+    }
   }
 
   // ---- assert (decision 0015 item 6, P22) ----------------------------------------------------------------------
@@ -1759,7 +1941,10 @@ class Encoder {
 
   // An expression statement: an assignment, a compound assignment, an increment or decrement, a call, or an
   // expression without side effects.
-  void expression_statement(an_expr_node_ptr e, const a_source_position& pos, Out& out) {
+  //
+  // A discarded comma is the statements of its operands in order (decision 0020 item 6: the comma is a sequence point, so this
+  // is exact); `voided` says that an enclosing `(void)` cast covers `e` (a comma's right operand).
+  void expression_statement(an_expr_node_ptr e, const a_source_position& pos, Out& out, bool voided = false) {
     // `(void)e;`
     while (e->kind == enk_operation && e->variant.operation.kind == eok_cast) {
       a_type_ptr to = skip_typerefs(e->type);
@@ -1767,8 +1952,14 @@ class Encoder {
       auto ops = operands_of(e);
       if (ops.size() != 1) break;
       e = ops[0];
+      voided = true;
     }
     if (an_expr_node_ptr cond = assert_condition(e)) {
+      if (an_expr_node_ptr fx = first_effect(cond, false)) {
+        // 0015 item 6: `assert` is checked like `check`, and NDEBUG would remove its side effects.
+        reject(Diag::unsupported_expression, fx->position, "a side effect in the condition of assert (decision 0015 item 6)");
+        return;
+      }
       // `assert(cond)` from <assert.h> (decision 0015 item 6): `cond` is code, evaluated as an `if` condition is; the
       // arguments of `__assert_rtn` are never encoded.
       if (cx_.in_for_step) {
@@ -1784,70 +1975,36 @@ class Encoder {
       const an_expr_operator_kind k = e->variant.operation.kind;
       auto ops = operands_of(e);
       const SrcLoc l = loc_of(e->position);
+      if (is_encoded_assignment_kind(k)) {
+        // An assignment, compound assignment or `++`/`--` at the top of an expression statement stays a VIR statement (decision
+        // 0020 item 6): code without nested effects builds the VIR it always did.
+        AssignParts a;
+        const AssignRes r = assignment_parts(e, ops, &a);
+        if (r == AssignRes::rejected) return;
+        if (r == AssignRes::ok) {
+          if (k == eok_assign) out.push_back(b_.assign(a.v, a.x, l));
+          else if (is_incdec_kind(k)) out.push_back(b_.inc_dec(a.v, a.increment, l));
+          else out.push_back(b_.compound_assign(a.v, a.op, a.x, l));
+          return;
+        }
+      }
       switch (k) {
-        case eok_assign: {
+        case eok_comma: {
           if (ops.size() != 2) break;
-          vir::Var* v = lvalue_var(ops[0]);
-          allow_enum_conversion(ops[1]);  // decision 0018 item 6 (iii)
-          const Expr* x = expr(ops[1]);
-          if (v == nullptr || x == nullptr) return;
-          out.push_back(b_.assign(v, x, l));
-          return;
-        }
-        case eok_add_assign:
-        case eok_subtract_assign:
-        case eok_multiply_assign:
-        case eok_divide_assign:
-        case eok_remainder_assign:
-        case eok_shiftl_assign:
-        case eok_shiftr_assign: {
-          if (ops.size() != 2) break;
-          vir::Var* v = lvalue_var(ops[0]);
-          const Expr* x = expr(ops[1]);
-          if (v == nullptr || x == nullptr) return;
-          if (!v->type.is_int()) {
-            reject(Diag::unsupported_expression, e->position, "a compound assignment to a bool");
-            return;
-          }
-          if (is_enum_type(v->type) || is_enum_type(x->type)) {
-            // Both compute in the promoted type, which differs between C and C++ (decision 0018 item 8).
-            reject(Diag::unsupported_expression, e->position, "a compound assignment to or with an enumeration value (decision 0018 item 8)");
-            return;
-          }
-          if (x->type.is_bool()) {
-            // `i += flag`: the bool is promoted to int first.
-            const vir::IntType* i = prog_.int_type("int", prog_.c_int_bits(), true);
-            x = b_.bool_to_int(vir::Type::integer(i), x, l);
-          }
-          vir::BinaryOp op = k == eok_add_assign        ? vir::BinaryOp::Add
-                             : k == eok_subtract_assign ? vir::BinaryOp::Sub
-                             : k == eok_multiply_assign ? vir::BinaryOp::Mul
-                             : k == eok_divide_assign   ? vir::BinaryOp::Div
-                             : k == eok_remainder_assign ? vir::BinaryOp::Rem
-                             : k == eok_shiftl_assign   ? vir::BinaryOp::Shl
-                                                        : vir::BinaryOp::Shr;
-          out.push_back(b_.compound_assign(v, op, x, l));
-          return;
-        }
-        case eok_pre_incr:
-        case eok_post_incr:
-        case eok_pre_decr:
-        case eok_post_decr: {
-          if (ops.size() != 1) break;
-          vir::Var* v = lvalue_var(ops[0]);
-          if (v == nullptr) return;
-          if (!v->type.is_int()) {
-            reject(Diag::unsupported_expression, e->position, "an increment or decrement of a bool");
-            return;
-          }
-          if (is_enum_type(v->type)) {
-            reject(Diag::unsupported_expression, e->position, "an increment or decrement of an enumeration (decision 0018 item 8)");
-            return;
-          }
-          out.push_back(b_.inc_dec(v, k == eok_pre_incr || k == eok_post_incr, l));
+          // The shapes the compilers warn about (item 5), once per comma; the operands are still encoded.
+          if (comma_left_without_effect(ops[0]) || (!voided && discarded_comma_right_without_effect(ops[1])))
+            reject(Diag::comma_without_effect, e->position, "");
+          expression_statement(ops[0], ops[0]->position.seq ? ops[0]->position : pos, out);
+          expression_statement(ops[1], ops[1]->position.seq ? ops[1]->position : pos, out, voided);
           return;
         }
         default: break;
+      }
+    }
+    if (!voided) {
+      if (an_expr_node_ptr d = discarded_value_with_effect(e)) {
+        reject(Diag::value_not_used, d->position, "");  // item 5 (b), at the operator that discards the value
+        return;
       }
     }
     const Expr* x = expr(e);
@@ -1992,6 +2149,181 @@ class Encoder {
           if (names_object(o, depth + 1)) return true;
         return false;
       default: return false;
+    }
+  }
+
+  // ---- side effects in expressions (decision 0020) ----------------------------------------------------------------------
+  // An assignment of any kind, `++` or `--` (the kinds annotation_checks.cpp's side_effect_of names).
+  static bool is_assignment_kind(an_expr_operator_kind k) {
+    switch (k) {
+      case eok_assign:
+      case eok_bassign:
+      case eok_add_assign:
+      case eok_subtract_assign:
+      case eok_multiply_assign:
+      case eok_divide_assign:
+      case eok_remainder_assign:
+      case eok_shiftl_assign:
+      case eok_shiftr_assign:
+      case eok_and_assign:
+      case eok_or_assign:
+      case eok_xor_assign:
+      case eok_padd_assign:
+      case eok_psubtract_assign: return true;
+      default: return false;
+    }
+  }
+  static bool is_incdec_kind(an_expr_operator_kind k) {
+    return k == eok_pre_incr || k == eok_post_incr || k == eok_pre_decr || k == eok_post_decr;
+  }
+  static bool is_call_kind(an_expr_operator_kind k) {
+    return k == eok_call || k == eok_dot_member_call || k == eok_points_to_member_call;
+  }
+  static bool is_effect_operation(an_expr_node_ptr e, bool with_calls = true) {
+    if (e == nullptr || e->kind != enk_operation) return false;
+    const an_expr_operator_kind k = e->variant.operation.kind;
+    return is_assignment_kind(k) || is_incdec_kind(k) || (with_calls && is_call_kind(k));
+  }
+
+  // The first node (in evaluation-agnostic IL order) of `e` that has a side effect: an assignment, an increment or decrement, or
+  // a call.  Folded constants and the operands of `sizeof` are not followed (they are not evaluated); null when there is none.
+  static an_expr_node_ptr first_effect(an_expr_node_ptr e, bool with_calls = true, int depth = 0) {
+    if (e == nullptr || e->kind != enk_operation || depth > 1000) return nullptr;
+    if (is_effect_operation(e, with_calls)) return e;
+    for (an_expr_node_ptr o = e->variant.operation.operands; o != nullptr; o = o->next)
+      if (an_expr_node_ptr f = first_effect(o, with_calls, depth + 1)) return f;
+    return nullptr;
+  }
+
+  // `(void) x`: an explicit discard (the compilers do not warn about a value discarded this way).
+  static bool is_void_cast(an_expr_node_ptr e) {
+    if (e == nullptr || e->kind != enk_operation || e->variant.operation.kind != eok_cast) return false;
+    a_type_ptr to = skip_typerefs(e->type);
+    return to != nullptr && to->kind == tk_void && e->variant.operation.operands != nullptr &&
+           e->variant.operation.operands->next == nullptr;
+  }
+
+  // ---- the shapes the compilers warn about (decision 0020 item 5; the lists are finalized from probe P35) ----
+  // `if (x = a)`: an assignment `=` that is the whole condition of if, while, do or for (after the front end's own bool
+  // conversion) and has no parentheses of its own.  clang's and GCC's -Wparentheses warn about exactly these, in C and C++, and
+  // about no compound assignment, `?:` condition, `&&` operand or `!` operand.  The node, or null.
+  static an_expr_node_ptr assignment_as_condition_node(an_expr_node_ptr c) {
+    for (int guard = 0; c != nullptr && guard < 16 && c->kind == enk_operation && c->compiler_generated &&
+                        (c->variant.operation.kind == eok_bool_cast || c->variant.operation.kind == eok_cast) &&
+                        c->variant.operation.operands != nullptr && c->variant.operation.operands->next == nullptr;
+         ++guard)
+      c = c->variant.operation.operands;
+    if (c == nullptr || c->kind != enk_operation || c->variant.operation.kind != eok_assign) return nullptr;
+    return c->is_parenthesized ? nullptr : c;
+  }
+  void check_condition(an_expr_node_ptr c) {
+    if (an_expr_node_ptr a = assignment_as_condition_node(c)) reject(Diag::assignment_as_condition, a->position, "");
+  }
+
+  // The left operand of a comma has no effect where the compilers warn: not a `(void)` cast (explicit) and no side effect inside.
+  static bool comma_left_without_effect(an_expr_node_ptr l) { return !is_void_cast(l) && first_effect(l) == nullptr; }
+  // The right operand of a comma whose value is discarded has no effect (and is not itself a `(void)` cast).  Not asked when the
+  // whole comma is cast to void: neither compiler warns then.
+  static bool discarded_comma_right_without_effect(an_expr_node_ptr r) { return !is_void_cast(r) && first_effect(r) == nullptr; }
+  // Rule C of decision 0020 item 5 (P35 shape (b)): a discarded expression (a whole expression statement, or a discarded comma
+  // operand) whose value is thrown away by an operator while a side effect sits inside.  The node of the operator that discards
+  // the value, or null.  Fine: a `(void)` cast, an assignment, a compound assignment, `++`/`--`, a call and a comma (its operands
+  // are checked by rule B and again by this rule); for `?:` each arm is checked (a pure arm is fine: `a ? x++ : 0;`); for `&&`
+  // and `||` the right operand must be a plain `=` of an integer constant (`a || (x = 1);`: GCC folds the condition away) or another
+  // `&&`/`||` checked the same way, and anything else with a side effect is rejected (`a && x++;`, `a && (x = b);`, `a && f();`);
+  // any other top operator is rejected when it contains a side effect (`x++ + 1;`, `-x++;`,
+  // `(int)x++;`, `x == (y = 1);`, `g(x) + 1;`).  A pure discarded expression (`x + 1;`) stays accepted (0012 item 3).
+  // (Not static: a discarded comma inside reports rule B(2) itself.)
+  an_expr_node_ptr discarded_value_with_effect(an_expr_node_ptr e, int depth = 0) {
+    // The front end's own conversions around an operand (C++ converts the operands of `&&`/`||` to bool) are not the user's operator.
+    for (int guard = 0; e != nullptr && guard < 16 && e->kind == enk_operation && e->compiler_generated &&
+                        (e->variant.operation.kind == eok_bool_cast || e->variant.operation.kind == eok_cast) &&
+                        e->variant.operation.operands != nullptr && e->variant.operation.operands->next == nullptr;
+         ++guard)
+      e = e->variant.operation.operands;
+    if (e == nullptr || e->kind != enk_operation || depth > 64 || is_void_cast(e)) return nullptr;
+    const an_expr_operator_kind k = e->variant.operation.kind;
+    if (is_assignment_kind(k) || is_incdec_kind(k) || is_call_kind(k)) return nullptr;
+    auto ops = operands_of(e);
+    if (k == eok_comma) {
+      // A discarded comma (an arm of a discarded `?:`, or the left operand of a comma): its right operand is discarded too, so
+      // rule B(2) applies to it and rule C to that operand, recursively.  (Its left operand is checked where it is encoded.)
+      if (ops.size() != 2) return nullptr;
+      if (discarded_comma_right_without_effect(ops[1])) reject(Diag::comma_without_effect, e->position, "");
+      return discarded_value_with_effect(ops[1], depth + 1);
+    }
+    if (k == eok_question && ops.size() == 3) {
+      // Each arm is a discarded position (rules B(2) and C apply to it).  When neither arm has an effect, the effect is in the
+      // condition alone and its value is thrown away (`x++ ? 1 : 0;`); `a ? x++ : 0;` and `a ? (x = 1) : (x = 2);` are fine.
+      if (an_expr_node_ptr x = discarded_value_with_effect(ops[1], depth + 1)) return x;
+      if (an_expr_node_ptr x = discarded_value_with_effect(ops[2], depth + 1)) return x;
+      if (first_effect(ops[1]) == nullptr && first_effect(ops[2]) == nullptr && first_effect(ops[0]) != nullptr) return e;
+      return nullptr;
+    }
+    if ((k == eok_land || k == eok_lor) && ops.size() == 2) {
+      an_expr_node_ptr r = ops[1];
+      while (r != nullptr && r->kind == enk_operation && r->compiler_generated && r->variant.operation.operands != nullptr &&
+             r->variant.operation.operands->next == nullptr &&
+             (r->variant.operation.kind == eok_bool_cast || r->variant.operation.kind == eok_cast))
+        r = r->variant.operation.operands;
+      if (r == nullptr || r->kind != enk_operation) return nullptr;
+      const an_expr_operator_kind rk = r->variant.operation.kind;
+      if (rk == eok_land || rk == eok_lor) return discarded_value_with_effect(r, depth + 1);
+      if (rk == eok_assign) {
+        // `a && (x = 1);` is fine: GCC folds the constant condition away.  A non-constant right-hand side is `(x = b) != 0`, whose
+        // value is computed and not used.
+        auto ro = operands_of(r);
+        an_expr_node_ptr rhs = ro.size() == 2 ? ro[1] : nullptr;
+        while (rhs != nullptr && rhs->kind == enk_operation && rhs->compiler_generated && rhs->variant.operation.operands != nullptr &&
+               rhs->variant.operation.operands->next == nullptr &&
+               (rhs->variant.operation.kind == eok_bool_cast || rhs->variant.operation.kind == eok_cast))
+          rhs = rhs->variant.operation.operands;
+        if (rhs != nullptr && rhs->kind == enk_constant && rhs->variant.constant.ptr != nullptr &&
+            rhs->variant.constant.ptr->kind == ck_integer)
+          return nullptr;
+      }
+      return first_effect(r) != nullptr ? r : nullptr;
+    }
+    return first_effect(e) != nullptr ? e : nullptr;
+  }
+  // A side effect in the operand of `sizeof`, `_Alignof` or `noexcept` (not evaluated), reached through the folded constant that
+  // replaces the operator: the node of the effect, or null.  P33: `typeof`/`decltype` operands are not reachable from statements.
+  static an_expr_node_ptr unevaluated_side_effect(an_expr_node_ptr original, const char** what) {
+    if (original == nullptr) return nullptr;
+    if (original->kind == enk_sizeof || original->kind == enk_alignof || original->kind == enk_datasizeof) {
+      const auto& si = original->variant.sizeof_info;
+      if (si.is_type) return nullptr;
+      *what = original->kind == enk_sizeof ? "sizeof" : original->kind == enk_alignof ? "alignof" : "__datasizeof";
+      return effect_in_unevaluated(si.variant.expr);
+    }
+    if (original->kind == enk_operation && original->variant.operation.kind == eok_noexcept && original->variant.operation.operands) {
+      *what = "noexcept";
+      return effect_in_unevaluated(original->variant.operation.operands);
+    }
+    return nullptr;
+  }
+  // A side effect anywhere inside an unevaluated operand, following what first_effect does not: the original expression of a
+  // folded constant (`sizeof(sizeof(x++))`: the inner `sizeof` is a constant whose expression is `x++`) and the operand of a nested
+  // `sizeof`, `_Alignof` or `noexcept`.
+  static an_expr_node_ptr effect_in_unevaluated(an_expr_node_ptr e, int depth = 0) {
+    if (e == nullptr || depth > 64) return nullptr;
+    switch (e->kind) {
+      case enk_operation:
+        if (is_effect_operation(e)) return e;
+        for (an_expr_node_ptr o = e->variant.operation.operands; o != nullptr; o = o->next)
+          if (an_expr_node_ptr f = effect_in_unevaluated(o, depth + 1)) return f;
+        return nullptr;
+      case enk_constant: {
+        a_constant_ptr c = e->variant.constant.ptr;
+        if (c == nullptr || (c->expr == nullptr && !c->local_expr_ref)) return nullptr;
+        an_expr_node_ptr o = expr_node_from_constant(c);
+        return o != nullptr && o != e ? effect_in_unevaluated(o, depth + 1) : nullptr;
+      }
+      case enk_sizeof:
+      case enk_alignof:
+      case enk_datasizeof:
+        return e->variant.sizeof_info.is_type ? nullptr : effect_in_unevaluated(e->variant.sizeof_info.variant.expr, depth + 1);
+      default: return nullptr;
     }
   }
 
@@ -2369,6 +2701,7 @@ class Encoder {
           rejected_statement(s, "an if statement with a declaration in its condition");
           return;
         }
+        check_condition(s->expr);
         const Expr* c = as_bool(expr(s->expr), s->expr->position);
         const Stmt* t = sub_statement(s->variant.if_stmt.then_statement, s->position);
         const Stmt* f = s->variant.if_stmt.else_statement ? sub_statement(s->variant.if_stmt.else_statement, s->position) : nullptr;
@@ -2382,6 +2715,7 @@ class Encoder {
         }
         std::vector<vir::Clause> inv, measure;
         const bool inv_ok = encode_loop_clauses(s, inv, measure);
+        check_condition(s->expr);
         const Expr* c = as_bool(expr(s->expr), s->expr->position);
         const int id = b_.jump_id();
         cx_.targets.push_back(make_target(s, false, id, s->variant.loop_statement));
@@ -2401,6 +2735,7 @@ class Encoder {
         const bool once = is_zero_constant(s->expr) && !names_object(s->expr);
         std::vector<vir::Clause> inv, measure;
         const bool inv_ok = encode_loop_clauses(s, inv, measure, !once);
+        check_condition(s->expr);
         const Expr* c = as_bool(expr(s->expr), s->expr->position);
         const int id = b_.jump_id();
         cx_.targets.push_back(make_target(s, false, id, s->variant.loop_statement));
@@ -2428,6 +2763,7 @@ class Encoder {
         if (fl->initialization != nullptr) statement(fl->initialization, whole);
         std::vector<vir::Clause> inv, measure;
         const bool inv_ok = encode_loop_clauses(s, inv, measure);
+        if (s->expr != nullptr) check_condition(s->expr);
         const Expr* c = s->expr ? as_bool(expr(s->expr), s->expr->position) : b_.bool_const(true, loc_of(s->position));
         Out body, step;
         const int id = b_.jump_id();
@@ -2551,7 +2887,10 @@ class Encoder {
       reject(Diag::unsupported_declaration, v->source_corresp.decl_position, "an initialization this version cannot read");
     f->body = b_.block(std::move(out), loc_of(r->source_corresp.decl_position));
     // Only a complete function body can be judged: after a rejection a label or a declaration may be missing.
-    if (reported_count() == reported_before) report_goto_problems(f);
+    if (reported_count() == reported_before) {
+      report_goto_problems(f);
+      report_sequence_problems(f);
+    }
     cx_ = Ctx();
   }
 

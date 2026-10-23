@@ -1467,6 +1467,173 @@ class JumpTests(unittest.TestCase):
         self.assertEqual(self.strict(lines), [])
 
 
+class FlagTests(unittest.TestCase):
+    """Decision 0019 item 5: the ghost flag `d_<name>` of a local without an initializer is set only by a write
+    of that local (`<name> := ...` directly before `d_<name> := true`), and a reset (`d_<name> := false`)
+    is directly followed by the dummy value (`<name> := <literal>`).  Each rule has a twin that breaks
+    exactly it; the fixtures use the emitter's shapes (`var d_v_x__2: Bool`, `v_x__2 := 0`)."""
+
+    X = "v_x__2"
+
+    @staticmethod
+    def strict(lines):
+        return lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+
+    def with_body(self, *body):
+        """The good fixture with `body` (lines) inserted in g__3 before `var t__2: Int`, after the
+        declarations of a variable and its flag."""
+        lines = good_lines()
+        i = find(lines, "  var t__2: Int")
+        lines[i:i] = [f"  var {self.X}: Int", f"  var d_{self.X}: Bool", *body]
+        return lines
+
+    def probs(self, *body):
+        return self.strict(self.with_body(*body))
+
+    def good_body(self):
+        x = self.X
+        return [f"  d_{x} := false", f"  {x} := 0", f"  {x} := y", f"  d_{x} := true"]
+
+    def test_the_emitters_shape_is_clean(self):
+        self.assertEqual(self.probs(*self.good_body()), [])
+
+    def test_a_dummy_may_be_any_literal_the_emitter_writes(self):
+        x = self.X
+        for dummy in ("0", "-3", "(-3)", "42", "false", "true"):
+            with self.subTest(dummy):
+                self.assertEqual(self.probs(f"  d_{x} := false", f"  {x} := {dummy}"), [])
+
+    def test_blank_lines_and_comments_between_the_pair_are_skipped(self):
+        x = self.X
+        self.assertEqual(self.probs(f"  d_{x} := false", "", "  // the dummy", f"  {x} := 0", f"  {x} := y",
+                                    "  /* set */", f"  d_{x} := true"), [])
+
+    def test_a_write_in_a_branch_with_its_flag_is_clean(self):
+        x = self.X
+        self.assertEqual(self.probs(f"  d_{x} := false", f"  {x} := 0", "  if (y > 0) {", f"    {x} := y",
+                                    f"    d_{x} := true", "  }"), [])
+
+    def test_a_flag_set_without_the_write_is_a_problem(self):
+        x = self.X
+        probs = self.probs(f"  d_{x} := false", f"  {x} := 0", "  t__2 := y", f"  d_{x} := true")
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn(f"`d_{x} := true` does not directly follow a write `{x} := ...`", probs[0])
+        self.assertIn("decision 0019 item 5", probs[0])
+
+    def test_the_problem_is_at_the_flag_line(self):
+        x = self.X
+        lines = self.with_body(f"  d_{x} := false", f"  {x} := 0", "  t__2 := y", f"  d_{x} := true")
+        text, _ = build(lines)
+        flag_line = text.split("\n").index(f"  d_{x} := true") + 1
+        probs = self.strict(lines)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertTrue(probs[0].startswith(f"t.vpr:{flag_line}:"), probs)
+
+    def test_an_unrelated_statement_between_the_write_and_the_flag_is_a_problem(self):
+        x = self.X
+        probs = self.probs(f"  d_{x} := false", f"  {x} := 0", f"  {x} := y", "  t__2 := y", f"  d_{x} := true")
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("does not directly follow a write", probs[0])
+
+    def test_the_write_of_another_variable_before_the_flag_is_a_problem(self):
+        x = self.X
+        probs = self.probs(f"  d_{x} := false", f"  {x} := 0", f"  t__2 := y", f"  d_{x} := true")
+        self.assertEqual(len(probs), 1, probs)
+
+    def test_a_write_of_a_longer_name_does_not_stand_for_the_variable(self):
+        # `v_x__20 := ...` is not a write of `v_x__2`
+        x = self.X
+        probs = self.probs(f"  d_{x} := false", f"  {x} := 0", f"  {x}0 := y", f"  d_{x} := true")
+        self.assertEqual(len(probs), 1, probs)
+
+    def test_a_write_of_a_shorter_name_does_not_stand_for_the_variable(self):
+        probs = self.probs("  d_v_x__20 := false", "  v_x__20 := 0", "  v_x__2 := y", "  d_v_x__20 := true")
+        self.assertEqual(len(probs), 1, probs)
+
+    def test_a_flag_set_as_the_very_first_line_is_a_problem(self):
+        probs = lv.lint_vpr("d_v := true\n", "", "t.vpr", "t.vpr.map")
+        self.assertTrue(any("does not directly follow a write" in p for p in probs), probs)
+
+    def test_a_comment_that_looks_like_a_write_does_not_count(self):
+        x = self.X
+        probs = self.probs(f"  d_{x} := false", f"  {x} := 0", "  t__2 := y", f"  // {x} := y", f"  d_{x} := true")
+        self.assertEqual(len(probs), 1, probs)
+
+    def test_a_reset_that_is_not_followed_by_the_dummy_is_a_problem(self):
+        x = self.X
+        probs = self.probs(f"  d_{x} := false", "  t__2 := 0")
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn(f"`d_{x} := false` is not directly followed by `{x} := <literal>`", probs[0])
+        self.assertIn("decision 0019 item 5", probs[0])
+
+    def test_a_reset_followed_by_a_value_that_is_not_a_literal_is_a_problem(self):
+        x = self.X
+        for value in ("y", "y + 1", "0 + y", "d_" + x, "(y)"):
+            with self.subTest(value):
+                probs = self.probs(f"  d_{x} := false", f"  {x} := {value}")
+                self.assertEqual(len(probs), 1, probs)
+
+    def test_a_reset_followed_by_the_dummy_of_another_variable_is_a_problem(self):
+        x = self.X
+        probs = self.probs(f"  d_{x} := false", "  t__2 := 0")
+        self.assertEqual(len(probs), 1, probs)
+
+    def test_a_reset_in_the_last_line_of_a_file_is_a_problem(self):
+        probs = lv.lint_vpr("method m() {\n  d_v := false\n", "", "t.vpr", "t.vpr.map")
+        self.assertTrue(any("is not directly followed by `v := <literal>`" in p for p in probs), probs)
+
+    def test_a_flag_is_assigned_nothing_but_true_and_false(self):
+        x = self.X
+        for value in ("y > 0", f"d_{x}", "(true)", "!false", "true && true"):
+            with self.subTest(value):
+                probs = self.probs(f"  d_{x} := false", f"  {x} := 0", f"  {x} := y", f"  d_{x} := {value}")
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn(f"`d_{x}` is assigned", probs[0])
+
+    def test_a_flag_assignment_must_stand_alone_on_its_line(self):
+        x = self.X
+        for line in (f"  {x} := y; d_{x} := true", f"  d_{x} := true; {x} := 0", f"  if (y > 0) {{ d_{x} := true }}"):
+            with self.subTest(line):
+                probs = self.probs(f"  d_{x} := false", f"  {x} := 0", f"  {x} := y", line)
+                self.assertTrue(any("does not stand alone" in p or "is assigned" in p for p in probs), probs)
+
+    def test_a_flag_declared_with_an_initial_value_is_a_problem(self):
+        x = self.X
+        lines = self.with_body(f"  d_{x} := false", f"  {x} := 0")
+        lines[lines.index(f"  var d_{x}: Bool")] = f"  var d_{x}: Bool := true"
+        probs = self.strict(lines)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("declared without an initializer", probs[0])
+
+    def test_the_snapshot_and_the_reads_of_a_flag_are_not_assignments_to_it(self):
+        x = self.X
+        body = self.good_body() + [f"  var ds_{x}__1: Bool", f"  ds_{x}__1 := d_{x}",
+                                   Check(f"  assert ds_{x}__1 ==> d_{x}", A, "uninitialized")]
+        self.assertEqual(self.probs(*body), [])
+
+    def test_two_flags_each_follow_their_own_write(self):
+        reset = ["  d_a := false", "  a := 0", "  d_b := false", "  b := 0"]
+        self.assertEqual(self.probs(*reset, "  a := y", "  d_a := true", "  b := y", "  d_b := true"), [])
+        # the writes first and the flags after: each flag follows the wrong statement
+        probs = self.probs(*reset, "  a := y", "  b := y", "  d_a := true", "  d_b := true")
+        self.assertEqual(len(probs), 2, probs)
+        self.assertIn("d_a := true", probs[0])
+        self.assertIn("d_b := true", probs[1])
+
+    def test_a_flag_that_is_not_ours_is_checked_all_the_same(self):
+        # any `d_<name>` is a flag: the C variables are `v_...` in the emitted text
+        probs = self.probs("  d_other := false", "  other := 0", "  t__2 := y", "  d_other := true")
+        self.assertEqual(len(probs), 1, probs)
+
+    def test_the_rule_runs_in_lint_vpr(self):
+        import inspect
+        self.assertIn("lint_flags(src, add)", inspect.getsource(lv.lint_vpr))
+        self.assertTrue(callable(lv.lint_flags))
+
+    def test_a_file_without_flags_is_unaffected(self):
+        self.assertEqual(self.strict(good_lines()), [])
+
+
 class SelfTestHygieneTests(unittest.TestCase):
     """A test method defined twice in one class replaces the first, which then never runs (it happened here:
     two `test_labels_followed_by_no_deletable_statement_give_no_mutant`)."""

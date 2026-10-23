@@ -85,7 +85,8 @@ struct Obl {
   E guard;   // may be null
   E cond;
   low::Meta meta;
-  int dep = -1;
+  int dep = -1;     // the highest call it depends on (its slot: emitted after that call, before the next one)
+  size_t seq = 0;   // creation order within the Full (items of one slot keep it)
 };
 
 struct CallItem {
@@ -97,10 +98,38 @@ struct CallItem {
   low::Check termination;
 };
 
+// One effect of a full expression (decision 0020 items 5 and 7).  CALLS are the only fixed points: their order is the order of
+// evaluation (a nested chain, or the order of a comma).  Every other item, an obligation as well as a write, a snapshot or a branch,
+// has a slot: the highest call it depends on (through the temporaries it mentions, its guard, the comma floor, and the earlier
+// accesses to the variables it touches), and is emitted right after that call and before the next one, in creation order within a
+// slot; an item that depends on no call comes before the first.  A callee that does not return cannot hide a check C may evaluate
+// before the call (decision 0012 item 6): a callee can neither read nor write a local, and the sequencing rule leaves unsequenced
+// operands no shared local.
+struct Effect {
+  enum class Kind {
+    Call,      // a call (CallItem)
+    Write,     // `name := value`, then `flag := true` when `flag` is set: an assignment used as a value
+    Snapshot,  // `name := value` where `name` is a fresh temporary and `value` the current value of a local this expression writes
+    Branch     // `stmts`: the guarded operand of `&&`, `||` or `?:` with its own effects, as an `if`, assigning a temporary
+  } kind = Kind::Call;
+  CallItem call;
+  std::string name;
+  E value;
+  std::string flag;
+  std::vector<low::LStmt> stmts;
+  int slot = -1;                 // Call: its ordinal among the calls; the others: the call they follow (-1: before the first call)
+  size_t seq = 0;                // creation order within the Full
+  std::set<int> reads, writes;   // the locals (Var ids) a snapshot or write, or a branch's inner effects, read and write
+};
+
 // What one full expression leaves behind.
 struct Full {
   std::vector<Obl> obls;
-  std::vector<CallItem> calls;
+  std::vector<Effect> effects;
+  int ncalls = 0;                       // calls so far: the next call's ordinal
+  size_t next_seq = 0;
+  std::map<int, int> last_write;        // Var id -> the slot of the latest write (item order of the expression so far)
+  std::map<int, int> last_access;       // Var id -> the highest slot of any snapshot or write of it
 };
 
 // How Local/Formal/Result are read.
@@ -212,7 +241,8 @@ class Lowerer {
     o.guard = guard;
     o.cond = std::move(cond);
     o.meta = std::move(m);
-    o.dep = std::max(gdep, cdep);
+    o.dep = std::max({gdep, cdep, floor_});  // floor_: after the left operand of a comma, what it depends on came first (E6)
+    o.seq = full.next_seq++;
     full.obls.push_back(std::move(o));
   }
 
@@ -224,6 +254,11 @@ class Lowerer {
         if (e.type.is_bool()) return {low::bool_lit(e.value == "true"), -1};
         return {low::int_lit(e.value), -1};
       case Expr::Kind::Local:
+        if (!shared_.empty()) {
+          const auto it = shared_.find(&e);  // the old value of `x++`: read once (decision 0020)
+          if (it != shared_.end()) return it->second;
+        }
+        if (in_full_ && written_.count(e.var->id) != 0) return snapshot(e, guard, gdep, full);
         if (flagged(*e.var))  // a read of a local declared without an initializer: its flag must be set (decision 0019 item 4)
           obl(full, guard, gdep, low::var(flag_name(*e.var)), -1,
               meta("uninitialized", e.loc, "`" + e.var->name + "` may be read here before it is given a value"));
@@ -239,6 +274,7 @@ class Lowerer {
       case Expr::Kind::Unary: return unary(e, env, guard, gdep, full);
       case Expr::Kind::Binary: return binary(e, env, guard, gdep, full);
       case Expr::Kind::Cond: {
+        if (has_effect(*e.b) || has_effect(*e.c)) return branch_cond(e, env, guard, gdep, full);
         LV c = lower(*e.a, env, guard, gdep, full);
         E gt = low::and_(guard, c.e);
         E gf = low::and_(guard, low::not_(c.e));
@@ -271,6 +307,8 @@ class Lowerer {
         return a;
       }
       case Expr::Kind::Call: return call(e, env, guard, gdep, full);
+      case Expr::Kind::AssignE: return assign_value(e, env, guard, gdep, full);
+      case Expr::Kind::Comma: return comma(e, env, guard, gdep, full);
     }
     internal_error(e.loc, "unknown expression kind");
     return {low::int_lit("0"), -1};
@@ -317,6 +355,7 @@ class Lowerer {
     using low::BinOp;
     const bool lazy_and = e.bop == BinaryOp::LAnd;
     const bool lazy_or = e.bop == BinaryOp::LOr;
+    if ((lazy_and || lazy_or) && has_effect(*e.b)) return branch_logical(e, env, guard, gdep, full);
     LV a = lower(*e.a, env, guard, gdep, full);
     E gb = guard;
     int gbd = gdep;
@@ -429,6 +468,7 @@ class Lowerer {
     for (const Clause& c : callee.requires_) {
       Full scratch;  // the clause's own obligations belong to the callee's well-formedness method
       LV v = lower(*c.expr, cenv, nullptr, -1, scratch);
+      pure_full(scratch, *c.expr, "a precondition");
       low::Meta m = meta("precondition", e.loc, "the precondition of `" + callee.c_name + "` may not hold");
       m.has_note = true;
       m.note_loc = c.loc.known() ? c.loc : callee.loc;
@@ -452,15 +492,229 @@ class Lowerer {
       item.has_termination = true;
       item.termination = low::Check{"termination.failed", std::move(tm)};
     }
-    const int idx = static_cast<int>(full.calls.size());
+    const int idx = full.ncalls++;
     E value;
     if (!callee.ret.is_void()) {
       item.target = "t__" + std::to_string(fn_.ntemp++);
       fn_.temps.push_back(low::LVar{item.target, callee.ret.is_bool()});
       value = low::var(item.target);
     }
-    full.calls.push_back(std::move(item));
+    Effect fx;
+    fx.kind = Effect::Kind::Call;
+    fx.call = std::move(item);
+    fx.slot = idx;
+    fx.seq = full.next_seq++;
+    full.effects.push_back(std::move(fx));
     return {value, idx};
+  }
+
+  // ---- effects used as values (decision 0020) ----
+
+  static bool has_effect(const Expr& e) {
+    if (e.kind == Expr::Kind::AssignE || e.kind == Expr::Kind::Comma || e.kind == Expr::Kind::Call) return true;
+    for (const Expr* x : {e.a, e.b, e.c})
+      if (x != nullptr && has_effect(*x)) return true;
+    for (const Expr* x : e.args)
+      if (x != nullptr && has_effect(*x)) return true;
+    return false;
+  }
+
+  // The locals a full expression writes (its AssignE targets, those in guarded operands included).
+  static void collect_writes(const Expr& e, std::set<int>& out) {
+    if (e.kind == Expr::Kind::AssignE && e.var != nullptr) out.insert(e.var->id);
+    for (const Expr* x : {e.a, e.b, e.c})
+      if (x != nullptr) collect_writes(*x, out);
+    for (const Expr* x : e.args)
+      if (x != nullptr) collect_writes(*x, out);
+  }
+
+  std::string new_temp(bool is_bool) {
+    const std::string t = "t__" + std::to_string(fn_.ntemp++);
+    fn_.temps.push_back(low::LVar{t, is_bool});
+    return t;
+  }
+
+  // E3: a read of a local that the full expression writes is a snapshot, taken where C reads it; its `uninitialized` obligation
+  // (decision 0019) takes the snapshot's slot, so the flag is read where the value is.
+  LV snapshot(const Expr& e, const E& guard, int gdep, Full& full) {
+    const std::string t = new_temp(e.var->type.is_bool());
+    const int id = e.var->id;
+    // A read after a write of the same local follows that write's slot; the comma floor too.
+    const auto w = full.last_write.find(id);
+    const int slot = std::max(floor_, w == full.last_write.end() ? -1 : w->second);
+    Effect fx;
+    fx.kind = Effect::Kind::Snapshot;
+    fx.name = t;
+    fx.value = low::var(var_name(*e.var));
+    fx.slot = slot;
+    fx.seq = full.next_seq++;
+    fx.reads.insert(id);
+    full.effects.push_back(std::move(fx));
+    touch(full, id, slot);
+    if (flagged(*e.var))
+      obl(full, guard, gdep, low::var(flag_name(*e.var)), slot,
+          meta("uninitialized", e.loc, "`" + e.var->name + "` may be read here before it is given a value"));
+    return {low::var(t), slot};
+  }
+
+  // `x = a` used as a value: the old value (for x++) is read once, then the stored value is lowered, then the write is an effect.
+  // E4: the node's value is the stored value as lowered (or the old value's snapshot), never `v_x`.
+  // Record an access (a snapshot or a write) of a local at `slot`.
+  static void touch(Full& full, int id, int slot) {
+    const auto it = full.last_access.find(id);
+    if (it == full.last_access.end()) full.last_access[id] = slot;
+    else it->second = std::max(it->second, slot);
+  }
+
+  // The highest slot of the items created from `effect_from` and `obl_from` on (a comma's left operand).
+  static int highest_slot(const Full& full, size_t effect_from, size_t obl_from) {
+    int high = -1;
+    for (size_t k = effect_from; k < full.effects.size(); ++k) high = std::max(high, full.effects[k].slot);
+    for (size_t k = obl_from; k < full.obls.size(); ++k) high = std::max(high, full.obls[k].dep);
+    return high;
+  }
+
+  LV assign_value(const Expr& e, const Env& env, const E& guard, int gdep, Full& full) {
+    if (!in_full_ || e.var == nullptr || written_.count(e.var->id) == 0) {
+      internal_error(e.loc, "an assignment used as a value outside a full expression reached lowering");
+      return {low::int_lit("0"), -1};
+    }
+    if (guard != nullptr) {
+      internal_error(e.loc, "an effect in a conditionally evaluated pure operand reached lowering");
+      return {low::int_lit("0"), -1};
+    }
+    LV old_value;
+    if (e.b != nullptr) {
+      old_value = lower(*e.b, env, guard, gdep, full);
+      shared_[e.b] = old_value;
+    }
+    LV stored = lower(*e.a, env, guard, gdep, full);
+    if (e.b != nullptr) shared_.erase(e.b);
+    // The write follows what its value depends on, the comma floor and every earlier access to the same local.
+    const int id = e.var->id;
+    const auto a = full.last_access.find(id);
+    const int slot = std::max({floor_, stored.dep, a == full.last_access.end() ? -1 : a->second});
+    Effect fx;
+    fx.kind = Effect::Kind::Write;
+    fx.name = var_name(*e.var);
+    fx.value = stored.e;
+    if (flagged(*e.var)) fx.flag = flag_name(*e.var);
+    fx.slot = slot;
+    fx.seq = full.next_seq++;
+    fx.writes.insert(id);
+    full.effects.push_back(std::move(fx));
+    full.last_write[id] = slot;
+    touch(full, id, slot);
+    if (e.yields_old) return old_value;
+    return stored;
+  }
+
+  // `a, b`: `a` for its effects and obligations, then `b`; whatever follows the left operand is placed after its last effect (E6).
+  LV comma(const Expr& e, const Env& env, const E& guard, int gdep, Full& full) {
+    if (!in_full_) {
+      internal_error(e.loc, "a comma outside a full expression reached lowering");
+      return {low::int_lit("0"), -1};
+    }
+    const size_t effect_from = full.effects.size();
+    const size_t obl_from = full.obls.size();
+    lower(*e.a, env, guard, gdep, full);
+    const int saved = floor_;
+    // Only what the left operand itself depends on: a call elsewhere in the enclosing expression is unsequenced with the right operand.
+    floor_ = std::max(floor_, highest_slot(full, effect_from, obl_from));
+    LV b = lower(*e.b, env, guard, gdep, full);
+    floor_ = saved;
+    return b;
+  }
+
+  // The operand `e` lowered into the statements of one branch of an `if`: its own Full, flushed inside the branch, ending with
+  // `t := value`.  Its obligations are asserted inside the branch, so C's guard is the branch itself.
+  std::vector<low::LStmt> branch_body(const Expr& e, const Env& env, const std::string& t, std::set<int>& reads, std::set<int>& writes) {
+    const int saved = floor_;
+    floor_ = -1;
+    Full inner;
+    LV v = lower(e, env, nullptr, -1, inner);
+    floor_ = saved;
+    if (inner.ncalls != 0) internal_error(e.loc, "a call in a guarded operand with effects reached lowering");
+    for (const Effect& fx : inner.effects) {
+      reads.insert(fx.reads.begin(), fx.reads.end());
+      writes.insert(fx.writes.begin(), fx.writes.end());
+    }
+    std::vector<low::LStmt> body;
+    flush(inner, body);
+    assign(body, t, v.e);
+    return body;
+  }
+
+  // The branch as an effect: after what its condition depends on, the comma floor, every earlier write of the locals it reads and every
+  // earlier access to the locals it writes (its inner effects stay in the order they were lowered in).
+  void add_branch(Full& full, Effect&& fx, int cond_dep, const std::set<int>& reads, const std::set<int>& writes) {
+    int slot = std::max(floor_, cond_dep);
+    for (int id : reads) {
+      const auto w = full.last_write.find(id);
+      if (w != full.last_write.end()) slot = std::max(slot, w->second);
+    }
+    for (int id : writes) {
+      const auto a = full.last_access.find(id);
+      if (a != full.last_access.end()) slot = std::max(slot, a->second);
+    }
+    fx.slot = slot;
+    fx.seq = full.next_seq++;
+    fx.reads = reads;
+    fx.writes = writes;
+    for (int id : writes) full.last_write[id] = slot;
+    for (int id : reads) touch(full, id, slot);
+    for (int id : writes) touch(full, id, slot);
+    full.effects.push_back(std::move(fx));
+  }
+
+  // `a && b` / `a || b` where `b` has effects (E5): `t := a; if (t) { b's effects and obligations; t := b }` (`!t` for ||).
+  LV branch_logical(const Expr& e, const Env& env, const E& guard, int gdep, Full& full) {
+    if (guard != nullptr) {
+      internal_error(e.loc, "an effect in a conditionally evaluated operand reached lowering");
+      return {low::bool_lit(false), -1};
+    }
+    if (!in_full_) {
+      internal_error(e.loc, "an effect in a logical operand outside a full expression reached lowering");
+      return {low::bool_lit(false), -1};
+    }
+    LV a = lower(*e.a, env, guard, gdep, full);
+    const std::string t = new_temp(true);
+    Effect fx;
+    fx.kind = Effect::Kind::Branch;
+    assign(fx.stmts, t, a.e);
+    low::LStmt i;
+    i.kind = low::LStmt::Kind::If;
+    i.expr = e.bop == BinaryOp::LAnd ? low::var(t) : low::not_(low::var(t));
+    std::set<int> reads, writes;
+    i.then_body = branch_body(*e.b, env, t, reads, writes);
+    fx.stmts.push_back(std::move(i));
+    add_branch(full, std::move(fx), a.dep, reads, writes);
+    return {low::var(t), full.effects.back().slot};
+  }
+
+  // `c ? a : b` where an arm has effects (E5): `if (c) { a...; t := a } else { b...; t := b }`.
+  LV branch_cond(const Expr& e, const Env& env, const E& guard, int gdep, Full& full) {
+    if (guard != nullptr) {
+      internal_error(e.loc, "an effect in a conditionally evaluated operand reached lowering");
+      return {low::int_lit("0"), -1};
+    }
+    if (!in_full_) {
+      internal_error(e.loc, "an effect in a conditional operand outside a full expression reached lowering");
+      return {low::int_lit("0"), -1};
+    }
+    LV c = lower(*e.a, env, guard, gdep, full);
+    const std::string t = new_temp(e.type.is_bool());
+    Effect fx;
+    fx.kind = Effect::Kind::Branch;
+    low::LStmt i;
+    i.kind = low::LStmt::Kind::If;
+    i.expr = c.e;
+    std::set<int> reads, writes;
+    i.then_body = branch_body(*e.b, env, t, reads, writes);
+    i.else_body = branch_body(*e.c, env, t, reads, writes);
+    fx.stmts.push_back(std::move(i));
+    add_branch(full, std::move(fx), c.dep, reads, writes);
+    return {low::var(t), full.effects.back().slot};
   }
 
   // ---- emitting a full expression (0012 item 6) ----
@@ -478,18 +732,47 @@ class Lowerer {
     out.push_back(assert_stmt(std::move(cond), std::move(m)));
   }
 
-  // Calls are hoisted in evaluation order (a nested chain, so innermost first).  An obligation goes right
-  // after the call with the highest index it depends on, its guard included, or before the first call when it
-  // depends on none: a callee that does not return cannot hide a check that does not depend on it.
+  // The calls are emitted in order (a nested chain, or the order of a comma); everything else is emitted in the slot it was given: right
+  // after the call it depends on and before the next one (items of a slot in creation order), or before the first call when it depends
+  // on none (see Effect): a callee that does not return cannot hide a check or an effect that C may evaluate before the call
+  // (decision 0012 item 6, 0020 item 7).  An effect is a hoisted call, `v := value` (and its flag) for a write, a snapshot of a local
+  // that the expression writes, or an `if` for a guarded operand with effects.
   void flush(Full& full, std::vector<low::LStmt>& out) {
-    const int n = static_cast<int>(full.calls.size());
+    const int n = full.ncalls;
+    auto slot_of = [n](int s) { return std::min(s, n - 1); };
+    check_variable_order(full, slot_of);
+    std::vector<size_t> call_at(static_cast<size_t>(n), 0);
+    for (size_t k = 0; k < full.effects.size(); ++k)
+      if (full.effects[k].kind == Effect::Kind::Call) call_at[static_cast<size_t>(full.effects[k].slot)] = k;
     for (int slot = -1; slot < n; ++slot) {
-      for (Obl& o : full.obls) {
-        const int d = std::min(o.dep, n - 1);
-        if (d == slot) emit_assert(out, low::implies(o.guard, o.cond), o.meta);
+      // The items of this slot, obligations and non-call effects, in creation order.
+      std::vector<std::pair<size_t, std::pair<bool, size_t>>> items;  // (seq, (is obligation, index))
+      for (size_t k = 0; k < full.obls.size(); ++k)
+        if (slot_of(full.obls[k].dep) == slot) items.push_back({full.obls[k].seq, {true, k}});
+      for (size_t k = 0; k < full.effects.size(); ++k)
+        if (full.effects[k].kind != Effect::Kind::Call && slot_of(full.effects[k].slot) == slot) items.push_back({full.effects[k].seq, {false, k}});
+      std::sort(items.begin(), items.end());
+      for (const auto& it : items) {
+        if (it.second.first) {
+          Obl& o = full.obls[it.second.second];
+          emit_assert(out, low::implies(o.guard, o.cond), o.meta);
+          continue;
+        }
+        Effect& fx = full.effects[it.second.second];
+        switch (fx.kind) {
+          case Effect::Kind::Call: break;
+          case Effect::Kind::Write:
+            assign(out, fx.name, fx.value);
+            if (!fx.flag.empty()) assign(out, fx.flag, low::bool_lit(true));
+            break;
+          case Effect::Kind::Snapshot: assign(out, fx.name, fx.value); break;
+          case Effect::Kind::Branch:
+            for (low::LStmt& st : fx.stmts) out.push_back(std::move(st));
+            break;
+        }
       }
       if (slot + 1 < n) {
-        CallItem& c = full.calls[static_cast<size_t>(slot + 1)];
+        CallItem& c = full.effects[call_at[static_cast<size_t>(slot + 1)]].call;
         low::LStmt s;
         s.kind = low::LStmt::Kind::Call;
         s.name = c.method;
@@ -503,6 +786,33 @@ class Lowerer {
     }
   }
 
+  // The fail-closed check of the slots: for every local, its snapshots and writes (a branch counts as the accesses of its inner
+  // effects) are emitted in the order they were created, except that two reads may swap.  A hoisted write that overtook an earlier
+  // read or write of the same local would change a value, so it is an internal error rather than a wrong Viper program.
+  template <typename SlotOf>
+  void check_variable_order(const Full& full, SlotOf slot_of) {
+    struct Access {
+      int id;
+      bool write;
+      int slot;
+      size_t seq;
+    };
+    std::vector<Access> all;  // in creation order
+    for (const Effect& fx : full.effects) {
+      if (fx.kind == Effect::Kind::Call) continue;
+      for (int id : fx.reads) all.push_back({id, false, slot_of(fx.slot), fx.seq});
+      for (int id : fx.writes) all.push_back({id, true, slot_of(fx.slot), fx.seq});
+    }
+    std::sort(all.begin(), all.end(), [](const Access& x, const Access& y) { return x.seq < y.seq; });
+    for (size_t i = 0; i < all.size(); ++i)
+      for (size_t j = i + 1; j < all.size(); ++j) {
+        if (all[i].id != all[j].id || (!all[i].write && !all[j].write)) continue;
+        // emitted order is (slot, seq): the earlier-created access must not come later
+        if (all[i].slot > all[j].slot)
+          internal_error(SrcLoc{}, "an access to a local was emitted before an earlier access to it in the same full expression");
+      }
+  }
+
   Env body_env() const { return Env{}; }
 
   Env contract_env() const {
@@ -514,7 +824,14 @@ class Lowerer {
 
   LV full_expr(const Expr& e, std::vector<low::LStmt>& out) {
     Full full;
+    const std::set<int> saved_written = std::move(written_);
+    const bool saved_in_full = in_full_;
+    written_.clear();
+    collect_writes(e, written_);
+    in_full_ = true;
     LV v = lower(e, body_env(), nullptr, -1, full);
+    in_full_ = saved_in_full;
+    written_ = saved_written;
     flush(full, out);
     return v;
   }
@@ -716,6 +1033,7 @@ class Lowerer {
     for (const Clause& c : fn_.f->ensures_) {
       Full scratch;
       LV v = lower(*c.expr, env, nullptr, -1, scratch);
+      pure_full(scratch, *c.expr, "a postcondition");
       low::Meta m = meta("postcondition", at, "the postcondition of `" + fn_.f->c_name + "` may not hold");
       m.has_note = true;
       m.note_loc = c.loc;
@@ -724,20 +1042,39 @@ class Lowerer {
     }
   }
 
-  // Locals that a loop assigns but does not declare: the ones whose values cross iterations.
+  // The locals an expression assigns (the targets of its AssignE nodes).
+  static void scan_expr(const Expr* e, std::set<int>& assigned) {
+    if (e == nullptr) return;
+    if (e->kind == Expr::Kind::AssignE && e->var != nullptr) assigned.insert(e->var->id);
+    for (const Expr* x : {e->a, e->b, e->c}) scan_expr(x, assigned);
+    for (const Expr* x : e->args) scan_expr(x, assigned);
+  }
+
+  // Locals that a loop assigns but does not declare: the ones whose values cross iterations.  Every expression counts, a nested
+  // loop's condition and a `do` condition included (decision 0020).
   static void scan(const Stmt& s, std::set<int>& assigned, std::set<int>& declared) {
     switch (s.kind) {
-      case Stmt::Kind::Decl: declared.insert(s.var->id); break;
-      case Stmt::Kind::Assign: assigned.insert(s.var->id); break;
+      case Stmt::Kind::Decl:
+        declared.insert(s.var->id);
+        scan_expr(s.expr, assigned);
+        break;
+      case Stmt::Kind::Assign:
+        assigned.insert(s.var->id);
+        scan_expr(s.expr, assigned);
+        break;
+      case Stmt::Kind::ExprStmt: case Stmt::Kind::Return: case Stmt::Kind::Check: scan_expr(s.expr, assigned); break;
       case Stmt::Kind::If:
+        scan_expr(s.expr, assigned);
         if (s.then_body != nullptr) scan(*s.then_body, assigned, declared);
         if (s.else_body != nullptr) scan(*s.else_body, assigned, declared);
         break;
       case Stmt::Kind::While:
+        scan_expr(s.expr, assigned);
         if (s.body != nullptr) scan(*s.body, assigned, declared);
         if (s.step != nullptr) scan(*s.step, assigned, declared);
         break;
       case Stmt::Kind::Switch:
+        scan_expr(s.expr, assigned);
         if (s.body != nullptr) scan(*s.body, assigned, declared);
         break;
       case Stmt::Kind::Block:
@@ -767,6 +1104,10 @@ class Lowerer {
     std::set<int> assigned, declared;
     scan(*s.body, assigned, declared);
     if (s.step != nullptr) scan(*s.step, assigned, declared);
+    scan_expr(s.expr, assigned);  // the loop's own condition (a side effect in it assigns, decision 0020)
+    // A condition with a side effect is evaluated inside the body, at the top (the `do` shape of 0014 item 5 moved up): the invariants
+    // and the measure stay where C evaluates the condition, and its obligations are asserted at every evaluation.
+    const bool top_test = !is_do && has_effect(*s.expr);
     for (int id : assigned) {
       if (declared.count(id) != 0) continue;
       const Var& v = *fn_.f->locals()[static_cast<size_t>(id)];
@@ -809,6 +1150,7 @@ class Lowerer {
     for (const Clause& c : s.invariants) {
       Full full;
       LV v = lower(*c.expr, body_env(), nullptr, -1, full);
+      pure_full(full, *c.expr, "a loop invariant");
       for (Obl& o : full.obls) w.invariants.push_back(obligation_clause(low::and_(prior, o.guard), o));
       low::LInvariant inv;
       inv.expr = v.e;
@@ -832,6 +1174,7 @@ class Lowerer {
     for (const Clause& c : s.measure) {
       Full mfull;
       LV mv = lower(*c.expr, body_env(), nullptr, -1, mfull);
+      pure_full(mfull, *c.expr, "a loop measure");
       for (Obl& o : mfull.obls) w.invariants.push_back(obligation_clause(low::and_(prior, o.guard), o));
       w.decreases.push_back(mv.e);
     }
@@ -846,9 +1189,18 @@ class Lowerer {
     std::set<int> breaks, continues;
     collect_jumps(*s.body, breaks, continues);
     const std::string n = std::to_string(s.jump_id);
-    if (!is_do) {
+    if (top_test) {
+      w.expr = low::bool_lit(true);
+      LV cv = full_expr(*s.expr, w.then_body);
+      low::LStmt exit;
+      exit.kind = low::LStmt::Kind::If;
+      exit.expr = low::not_(cv.e);
+      jump(exit.then_body, "l_brk__" + n);
+      w.then_body.push_back(std::move(exit));
+    } else if (!is_do) {
       Full cfull;
       LV cv = lower(*s.expr, body_env(), nullptr, -1, cfull);
+      pure_full(cfull, *s.expr, "a loop condition");
       for (Obl& o : cfull.obls) w.invariants.push_back(obligation_clause(low::and_(prior, o.guard), o));
       w.expr = cv.e;
     } else {
@@ -867,7 +1219,7 @@ class Lowerer {
       w.then_body.push_back(std::move(exit));
     }
     out.push_back(std::move(w));
-    if (is_do || breaks.count(s.jump_id) != 0) label(out, "l_brk__" + n);
+    if (is_do || top_test || breaks.count(s.jump_id) != 0) label(out, "l_brk__" + n);
   }
 
   // `do { B } while (c)` where `c` is a constant zero (decision 0014 item 5): the body runs once and no iteration follows
@@ -879,6 +1231,7 @@ class Lowerer {
     for (const Clause& c : s.invariants) {
       Full full;
       LV v = lower(*c.expr, body_env(), nullptr, -1, full);
+      pure_full(full, *c.expr, "a loop invariant");
       for (Obl& o : full.obls) emit_assert(out, low::implies(low::and_(prior, o.guard), o.cond), o.meta);
       low::Meta entry;
       entry.category = "invariant-entry";
@@ -890,6 +1243,7 @@ class Lowerer {
     for (const Clause& c : s.measure) {
       Full mfull;
       lower(*c.expr, body_env(), nullptr, -1, mfull);
+      pure_full(mfull, *c.expr, "a loop measure");
       for (Obl& o : mfull.obls) emit_assert(out, low::implies(low::and_(prior, o.guard), o.cond), o.meta);
     }
     std::set<int> breaks, continues;
@@ -945,7 +1299,8 @@ class Lowerer {
   bool closed_expr(const Expr& e, const char* what) {
     switch (e.kind) {
       case Expr::Kind::Call: case Expr::Kind::Formal: case Expr::Kind::Old: case Expr::Kind::Result: case Expr::Kind::Local:
-        internal_error(e.loc, std::string("a call, variable, parameter, result or `old` in ") + what + " reached the prologue");
+      case Expr::Kind::AssignE: case Expr::Kind::Comma:
+        internal_error(e.loc, std::string("a call, variable, parameter, result, `old` or side effect in ") + what + " reached the prologue");
         return false;
       default: break;
     }
@@ -954,8 +1309,15 @@ class Lowerer {
     return true;
   }
 
+  // A Full that is lowered only for its obligations (a contract, an invariant, a measure, a pure loop condition): it must hold no effect,
+  // or the effect would be dropped.
+  void pure_full(const Full& full, const Expr& e, const char* what) {
+    if (!full.effects.empty())
+      internal_error(e.loc, std::string("a call or side effect in ") + what + " reached lowering outside a full expression");
+  }
+
   bool closed_result(const Full& full, const Expr& e, const char* what) {
-    if (full.calls.empty()) return true;
+    if (full.effects.empty()) return true;
     internal_error(e.loc, std::string("a call in ") + what + " reached the prologue");
     return false;
   }
@@ -1066,6 +1428,7 @@ class Lowerer {
     for (const Clause& c : f.requires_) {
       Full scratch;
       LV v = lower(*c.expr, cenv, nullptr, -1, scratch);
+      pure_full(scratch, *c.expr, "a precondition");
       m.requires_.push_back(clause_checks(v.e, c.loc.known() ? c.loc : f.loc, false, f.c_name));
     }
     if (f.ret.is_int())
@@ -1073,6 +1436,7 @@ class Lowerer {
     for (const Clause& c : f.ensures_) {
       Full scratch;
       LV v = lower(*c.expr, cenv, nullptr, -1, scratch);
+      pure_full(scratch, *c.expr, "a postcondition");
       m.ensures_.push_back(clause_checks(v.e, c.loc.known() ? c.loc : f.loc, true, f.c_name));
     }
     if (f.noreturn) m.ensures_.push_back(clause_checks(low::bool_lit(false), f.loc, true, f.c_name));  // decision 0015 item 4
@@ -1086,6 +1450,7 @@ class Lowerer {
     for (const Clause& c : f.decreases_) {
       Full scratch;  // its own obligations belong to the well-formedness method
       LV v = lower(*c.expr, cenv, nullptr, -1, scratch);
+      pure_full(scratch, *c.expr, "a termination measure");
       m.decreases_.push_back(v.e);
     }
     if (!f.decreases_.empty()) {
@@ -1152,6 +1517,7 @@ class Lowerer {
     auto go = [&](const Clause& c) {
       Full full;
       LV v = lower(*c.expr, env, nullptr, -1, full);
+      pure_full(full, *c.expr, "a contract clause");
       for (Obl& o : full.obls) emit_assert(m.body, low::implies(low::and_(prior, o.guard), o.cond), o.meta);
       prior = low::and_(prior, v.e);
     };
@@ -1162,6 +1528,7 @@ class Lowerer {
     for (const Clause& c : f.decreases_) {
       Full full;
       LV v = lower(*c.expr, env, nullptr, -1, full);
+      pure_full(full, *c.expr, "a termination measure");
       for (Obl& o : full.obls) emit_assert(m.body, low::implies(low::and_(requires_only, o.guard), o.cond), o.meta);
     }
     if (m.body.empty()) {
@@ -1181,6 +1548,12 @@ class Lowerer {
   const SrcLoc* report_at_ = nullptr;
   const std::string* report_note_ = nullptr;
   int assert_count_ = 0;
+  // The full expression being lowered (decision 0020): the locals it writes (every read of one is a snapshot), the comma floor (E6),
+  // and the old-value nodes of `x++` whose read is shared.
+  bool in_full_ = false;
+  std::set<int> written_;
+  int floor_ = -1;
+  std::map<const Expr*, LV> shared_;
   std::map<int, std::string> user_names_;  // the user's name of each label of the current function, by id
   std::set<int> user_targets_;  // the ids of the user labels some goto of the current function targets
 };

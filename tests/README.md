@@ -45,7 +45,7 @@ line of code is an error, so an expectation can never be silently ignored.
 // expect: verified
 // expect: error <category> @ L<line>
 // expect: error <category>[:<reason>] @ L<line>      (.vpr files: Viper reasons)
-// expect: rejected <diag> @ L<line>
+// expect: rejected <diag> @ L<line>      (may be followed by frontend-warning lines: its expected warnings)
 // expect: frontend-ok
 // expect: frontend-error <diag> @ L<line>
 // expect: frontend-warning <diag> @ L<line>
@@ -282,7 +282,15 @@ driver does not define (`unknown`, "unrecognized error"). **`rejected`** passes
 with exit status 2 and exactly the expected errors as (diagnostic, line), with
 the comparison, the fatal diagnostics (catastrophic, command-line, internal) and
 the summary check of `frontend-error` tests; warnings are not expected, so a
-warning fails. A verdict that is not the expected one is named: a `verified` test
+warning fails, unless the test lists it: a `rejected` test may also carry
+`// expect: frontend-warning <diag> @ L<n>` lines (one per warning), and then the multiset of
+(warning tag, line) the front end prints must equal them exactly (a listed warning that is
+not printed fails as *missing*, an unlisted one as *unexpected*; the same tag at another line is
+*wrong line*). Without such lines no warning is allowed. A `frontend-error` line does not mix
+with `rejected`, and `frontend-warning` lines without a `rejected` line are a front-end test.
+The cerastes tests use it for EDG's #174 (`expr_has_no_effect`), which the owner decided
+not to suppress: it fires on every comma operator whose left operand has no effect, which
+`comma_without_effect` rejects. A verdict that is not the expected one is named: a `verified` test
 that is rejected, an `error` test that verified, a `rejected` test that reports
 verification errors.
 
@@ -529,7 +537,11 @@ which is why CI sets `CERASTES_JOBS=3`: three fit the 7 GB of its runner, eight 
 `python3 scripts/mutate.py` (45 to 90 minutes at `-j 8` for `tests/scalar`: run it alone, and give it a
 time cap you can live with, since it logs as it goes, see Progress below) mutates every `verified` test one place at a
 time (flip a relational operator, a literal plus or minus one, drop one operand of `&&`, swap `&&` and `||`,
-delete a statement) and verifies each mutant. A mutant that is rejected by the verifier (exit status 1) is
+delete a statement; and, in code only and where the value of the expression is used, `drop-store` (`(x = e)`
+becomes `(e)`, `y = x = a` becomes `y = a`), `swap-incdec` (`x++` and `++x` swapped, `++` and `--` swapped) and
+`drop-comma` (`(a, b)` becomes `(b)` when `a` has an effect, also in a `for` init or step clause and as an
+expression statement; never an argument or declarator separator, and no mutant at a statement that discards the
+value, such as `x = 1;`, `i++;` or `(void)x++;`)) and verifies each mutant. A mutant that is rejected by the verifier (exit status 1) is
 killed; one that still verifies survived, which means that the test would not notice the change. Every
 survivor must be killed (by strengthening the test), or listed with one reason in `tests/mutants-equivalent.txt`
 (`id<TAB>reason`, plus a `# reviewed:` line), or be in the safe-direction bucket. The run ends with zero

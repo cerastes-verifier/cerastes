@@ -82,7 +82,19 @@ the end of the session), ordering of one unscoped enumeration verifies, and a sw
    the number (the Changes check needs it) and push the branch.
 4. Plan the next **EDG box session** (§8.1, "EDG box session after M4.2c"): the full box suites at the pin
    `f0ed5525af` (upstream `ec2f12cffa` and `0022`, merged without a box run), and §11 question 16's bug draft.
-5. Answer §11 questions 20–23. Then M4.3 (§8.1).
+5. Answer §11 questions 20–23. Then M4.3 (§8.1). *(Answered 2026-10-22, M4.3 planning; M4.3 split into M4.3a/M4.3b.)*
+
+**M4.3a is done (2026-10-22, branch `m4.3a-side-effects`, based on `main` `be44583`, the merged M4.2c; result in
+`internal/status.md`).** Assignments, compound assignments and `++`/`--` used as values, chained assignment, the comma
+operator (calls ordered by it too), and side effects in guarded operands and loop conditions verify in both modes (record
+0020); an unsequenced modification is rejected by C's rules in both modes; the shapes the compilers' `-Wall` warns about
+are rejected like the compilers (the union of clang and GCC, P35). With it, the CI fix the owner asked for (a race in
+`EdgTreeToolTests`' `copytree`). **Owner steps after M4.3a, in this order:**
+1. Your §11 answers 20–23 were uncommitted in the main checkout's `internal/handoff.md`; this branch carries them, so drop
+   the main checkout's copy before merging: `git -C ~/Documents/cerastes/cerastes checkout internal/handoff.md`.
+2. Push the branch and open its PR: `git push origin m4.3a-side-effects` (the session never pushes). CI runs `check.sh`
+   as locally.
+3. Answer §11 questions 24–26. Then M4.3b (§8.1; the next free record, 0021).
 
 ## 1. State in one paragraph
 
@@ -564,6 +576,27 @@ Deferred (probes in the job's scratch directory are gone; the shapes are given h
 5. **Incidental:** `constexpr int z = (-2147483647 - 1) / -1;` (and `% -1`) gives no diagnostic in this EDG (P30); cerastes
    encodes initializers as written (0017), so it does not rely on the fold.
 
+**M4.3a audit notes (2026-10-22; round 1 had one blocking item, fixed and re-audited in round 2; every should-fix item
+of both rounds was taken):**
+1. **Round 1's blocking item** (fixed): the first lowering kept every effect in one left-to-right order, so in
+   `never_returns(0) + 100 / y++` the checks of `100 / y++` followed a call that does not return ("verified" although C
+   may divide first). Calls are now the only fixed points (0020 item 7 E1–E2); four must-fail self-test cases and
+   `tests/scalar/negative/never_returns_unsequenced_divzero.c`, `never_returns_comma_divzero.c` pin it.
+2. **`check_variable_order`** (`src/vir/lower.cpp`) compares the emitted order of each variable's snapshots and writes
+   with their creation order, which holds by construction, so it cannot fire today and no hook shows that it can. That
+   creation order is C's order rests on the sequencing rule (0020 item 4) alone.
+3. **`lint_flags`** (`scripts/lint_viper.py`) checks that a flag is set on the line right after the write. A write and its
+   flag hoisted above a read C performs first would pass the lint; only lowering's placement rule guards that.
+4. **The comma floor is conservative in the sound direction** (0020 E6): an item that uses a comma's value, or a sibling
+   sequenced after it, may be placed before the comma's call, so `(never_returns(0), 1) && 100 / d` reports a false
+   `division-by-zero`.
+5. **Unpinned safe rejections:** `0 && (x = 1)` and `1 || x++` (EDG folds them; rejected with a message that now says
+   so), `assert((note(x), x >= 0))` (rejected by `check_program`). No tests.
+6. **Warnings outside P35:** clang's `-Wself-assign` on `x = x;` and on the new `y = (x = x)` (accepted; §11 question
+   24); `_Generic(x++, …)` is rejected already (the encoder does not accept `_Generic`).
+7. **`decltype(x++)`** is accepted with no test (clang warns, so no native-ok positive can hold it); `typeof(x++)` is
+   pinned by the C-only `typeof_effect.c` (0020 item 5).
+
 ## 7. Known gaps carried
 
 - Termination: a recursion cycle through another unit (0013 item 5) — the contract manifest, M6 (M7 if it does not fit).
@@ -586,7 +619,7 @@ plan (`plan.md`, "Milestone renumbering"): the **new M4 is the rest of C** (stri
 pointers in M4.5a–f, VerCors as the reference); generic templates are **M5** (M5a–M5g); concepts M6; **C++ memory
 and classes M7** (references, `new`/`delete`, classes; G2's parts that need them are deferred there); inventory M8;
 evaluation M9. Session order: M4.1 → M4.2a (owner, 2026-10-21: before CI) → EDG upstream merge (§4.1) → CI (§4.2) →
-mutation triage (§5; done 2026-10-21) → M4.2b1 → M4.2b2 → M4.2c → M4.3 … M4.8 → M5a … M5g → M6.
+mutation triage (§5; done 2026-10-21) → M4.2b1 → M4.2b2 → M4.2c → M4.3a → M4.3b (owner, 2026-10-22: M4.3 split) → M4.4 … M4.8 → M5a … M5g → M6.
 
 **Rules for every session below** (memory `session-size-few-hours`): planned at ≤ 4 h with fixed scope and stop
 rules; owner decisions and pre-approved expectation changes asked up front; the decision record before code
@@ -703,11 +736,36 @@ suites at `f0ed5525af` in both 64-bit configurations (`changes,regressions,impor
 enumerator-list typing on unmodified upstream and draft its bug file (no fork fix). Clean builds every run (memory:
 stale binaries after a failed link).
 
-**M4.3 Expressions and sequencing.** The flag of decision 0019 must follow an assignment inside an expression at its
-point in the evaluation order (0019 item 13). The comma operator; assignments as values; `x++` inside expressions; calls in
-guarded operands (`&&`, `||`, `?:`) and loop conditions (lowered as branches and re-evaluation); unsequenced calls
-(C's sequencing rules: an unsequenced modification of one object is undefined behaviour and must be rejected or
-detected). Record (sequencing), amending 0012 items 4 and 6. Mutation operators for the new forms.
+**M4.3 Expressions and sequencing — split into M4.3a and M4.3b** (owner, 2026-10-22, M4.3 planning).
+
+**M4.3a Side effects in expressions** (record 0020; **run 2026-10-22**, see `internal/status.md`). Assignments, compound
+assignments and `++`/`--` used as values, chained assignment, the comma operator (and calls ordered by it), side effects
+in guarded operands (lowered as branches) and loop conditions (the top-test loop shape); unsequenced modifications
+rejected by C's rules in both modes; the `-Wall` shapes rejected like the compilers (the union of P35); the 0019 flag at
+the write. Lowering: calls are the only fixed points, every other item is placed after the calls it depends on (audit
+round 1's blocking finding).
+
+**M4.3b Calls in expressions** (record 0021, the next free number; planned in the M4.3 planning, 2026-10-22). Scope:
+- calls in the right operand of `&&`/`||` and the arms of `?:`: inside M4.3a's branches (E5), each call a fixed point
+  inside its branch; the branch is then a fixed point of the enclosing full expression;
+- calls in loop conditions: M4.3a's top-test shape (a `while`/`for` condition lowered inside `while (true)`), and `do`
+  conditions (already lowered in the body); 0014 item 5's "no call in `c`" lifted;
+- **unsequenced calls by the dependency-chain rule** (owner, 2026-10-22): each check's set is the calls that must have
+  returned before C evaluates it (the results it uses, its guard, M4.3a's floor, and, for an item that touches a local,
+  the calls the earlier accesses to it depend on). When the sets of a full expression form a chain under ⊆, the calls
+  are ordered by it and each item goes right after its set, so no callee that ends the program hides a check C may
+  evaluate first; otherwise the expression is rejected (`100 / f(x) + 100 / g(y)`: each check depends on a different
+  call). This generalizes M4.3a's placement (`src/vir/lower.cpp`, calls as fixed points) from one call order to the
+  order the chain gives; `check_program`'s `CallState` rule (nested, or ordered by `,`) becomes the chain test.
+- Ports: `fib(n - 1) + fib(n - 2)`, `max(f(a), f(b))`, `while (next(i) < n)`, `a > 0 && pos(a) > 1`.
+- Retirements to approve at its planning: `reject_call_guarded.c`, `reject_call_cond.c`, `reject_call_loop_condition.c`,
+  `reject_do_call_condition.c`, `reject_unsequenced_calls.c`, `reject_effect_call_guarded.c`,
+  `reject_effect_call_loop_condition.c` (M4.3a's), and the VIR rejection cases `call_in_loop_condition`,
+  `call_in_guarded_operand`, `call_in_conditional_branch`, `two_unnested_calls`, `sibling_calls_in_arguments`,
+  `cf_call_in_do_condition` (`cf_call_in_do_once_condition` stays while `DoOnce` refuses calls).
+- Mutation operators for calls: swap the operands of `&&`/`||` around a call; swap the arms of `?:`.
+- Facts to probe first: none new in the IL (P33 covers the shapes); Silicon spikes of a call inside a branch and in a
+  top-test condition (precondition and termination checks at the right line, the callee's `ensures` known after it).
 
 **M4.4 Bitwise operators.** `& | ^ ~` and `&= |= ^=` on signed and unsigned types (C23 two's complement). Spike first
 (Silicon `v.26.08`): total prelude functions with bodies over `Int` (bounded recursion on bits) vs an SMT bit-vector
@@ -741,7 +799,11 @@ contracts in `bin/*.h`; canonical examples to port are listed per session below.
   macros, or a binder-introducing attribute (EDG's result-name mechanism, 0007 item 6); (3) the new error categories
   (permission, null dereference, out of bounds, invalid free, …) and their messages in source terms. Silicon spikes
   for each candidate encoding, including the axioms each needs. If an EDG fork commit is needed, a box session is
-  added before M4.5b.
+  added before M4.5b. (4) **P4222R1's markers** (`[[uninit]]`, `[[ref_to_uninit]]`) and the stricter mode that asks for
+  them (owner, 2026-10-22, §11 question 21: "as early as possible", in M4.5; what is left goes to M7): how they attach
+  (an attribute on a definition and on a pointer parameter), and how 0019's flag follows the cell. (5) With pointers,
+  0020 item 4's sequencing rule must become a check on objects, not names (`*p = (*q)++` may alias): a path-precise
+  category then (0020 item 4).
 - **M4.5b Pointers to scalars and globals:** `&x`, `*p`, NULL, pointer parameters with `owns`/`reads`/`old(*p)`,
   pointer equality, an aliasing trap that must fail, mutable globals and `static` locals as cells with frames; ports
   of VeriFast's `examples/swap.c`, `examples/address_of_local.c`, `examples/globals.c`; keep pointer arithmetic out of C
@@ -1042,14 +1104,33 @@ Each has a recommended answer. Answer inline, as before.
 20. **Warnings #550 ("set but never used") and #177 ("declared but never referenced")** print in verify mode for natural
     code with a local declared without an initializer (`int x; x = 1; return n;`) and fail a test (tests are
     warning-free). Suppress them in verify mode? *Recommended: not now; they are true and useful to a user, and tests
-    read their variables.*
+    read their variables.* **Answered (owner, 2026-10-22): follow the recommendation** (#550 and #177 stay).
 21. **P4222's markers.** cerastes asks for no `[[uninit]]` on a definition left uninitialized (0019 item 3). Add a
     stricter mode that also requires P4222R1's markers (`[[uninit]]`, `[[ref_to_uninit]]`)? *Recommended: an M8
     inventory entry; revisit with M4.5 (pointers to uninitialized objects) and M7 (member initialization).*
+    **Answered (owner, 2026-10-22): "We should handle these as early as possible so in M4.5 and then whatever is left add
+    to M7."** (plan.md M4.5a and M7, §8.1.)
 22. **A jump past a declaration *with* an initializer in C** (allowed in C, the object is indeterminate at the label;
     C++ refuses it): with 0019's flag it could be accepted in C. Lift it? *Recommended: no, until a ported example needs
-    it; one program for both modes.*
+    it; one program for both modes.* **Answered (owner, 2026-10-22): "This should be refused in both modes."** (0019
+    item 6, amended by 0020.)
 23. **EDG's double display of an overridden note** (`--diag_remark`/`--diag_warning`/`--diag_error` on a note's number
     prints the whole error twice; described in bug 0022). Draft it as its own bug? *Recommended: no (EDG bugs scoped to
-    cerastes); 0022 removes cerastes's need for an override.*
+    cerastes); 0022 removes cerastes's need for an override.* **Answered (owner, 2026-10-22): no.**
 
+
+**M4.3a, 2026-10-22:**
+
+24. **`-Wself-assign`** (clang, both modes; GCC is silent) warns on `x = x;`, which cerastes has accepted since M3 (0012
+    item 3), and on the new value form `y = (x = x)` (accepted; audit round 2). The union rule of 0020 item 5 would reject
+    both. Reject them (a small rule; no existing test uses the shape), and when? *Recommended: yes, in M4.3b, with a
+    rejection test per form.*
+25. **The `&&`/`||` asymmetry of rule C** (0020 item 5). By the union, a discarded `a && (x = 1);` is accepted (all four
+    configurations are silent; EDG prints its #187) while `a && (x = b);` is rejected (gcc C warns: it folds `(x = b) != 0`
+    away only for a constant). Keep the union exactly, or reject every discarded `&&`/`||` whose right operand has a side
+    effect (one rule, stricter than every compiler on the constant form; `if (a) x = 1;` says the same)? *Recommended:
+    keep the union; it is your rule, and the constant form already prints EDG's warning.*
+26. **Sequencing with pointers.** 0020 item 4 checks names, which is exact while every modified object is a named local.
+    With pointers (M4.5), `*p = (*q)++` is undefined only when `p` and `q` alias, so the check must become a check on
+    objects, decided per path: a new category (`unsequenced`) in the manner of `uninitialized`. *Recommended: yes, as
+    part of M4.5a's memory-model record.*
