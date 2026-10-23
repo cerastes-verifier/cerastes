@@ -123,3 +123,21 @@ CERASTES_DIAG(case_not_in_enumeration, error,
               "case value %s is not the value of an enumerator of \"%s\"")
 CERASTES_DIAG(enumerator_not_handled, error,
               "enumerator \"%s\" of \"%s\" is not handled in this switch, which has no default label")
+
+// Side effects inside expressions (decision 0020 items 4-5): C's sequencing rule, and the shapes that clang's and GCC's
+// -Wall warn about, which are rejected like errors.
+CERASTES_DIAG(unsequenced_modification, error,
+              "\"%s\" is modified in this expression and also read or modified elsewhere in it with no sequence point "
+              "between: the behavior is undefined (decision 0020)")
+CERASTES_DIAG(assignment_as_condition, error,
+              "an assignment is used as a condition without extra parentheses: write \"((x = e))\" or compare the value "
+              "(\"(x = e) != 0\"), as -Wparentheses asks (decision 0020)")
+CERASTES_DIAG(comma_without_effect, error,
+              "an operand of this comma operator has no side effect, so the value it computes is thrown away "
+              "(decision 0020)")
+CERASTES_DIAG(value_not_used, error,
+              "the value of this expression is not used, and the expression has a side effect inside it: write the "
+              "effect as a statement of its own, or cast the whole expression to void (decision 0020)")
+CERASTES_DIAG(side_effect_not_evaluated, error,
+              "the side effect in this operand of %s is never evaluated: the operand is not executed "
+              "(decision 0020)")

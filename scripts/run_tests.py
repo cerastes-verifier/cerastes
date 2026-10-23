@@ -8,7 +8,8 @@ expectations (grammar in tests/README.md):
 
     // expect: verified
     // expect: error <category> @ L<line>                (one line per error; .vpr: <category>[:<reason>])
-    // expect: rejected <diag> @ L<line>                 (one line per diagnostic; C and C++ only)
+    // expect: rejected <diag> @ L<line>                 (one line per diagnostic; C and C++ only;
+    //                                                    frontend-warning lines may list its warnings)
     // expect: frontend-ok
     // expect: frontend-error <diag> @ L<line>           (one line per diagnostic)
     // expect: frontend-warning <diag> @ L<line>
@@ -383,6 +384,7 @@ def parse_header(text: str, suffix: str) -> Expectation:
     kinds: set[str] = set()
     refused = None
     native_ok = False
+    fe_error_lines = False  # a `frontend-error` line (a `frontend-warning` may accompany `rejected`)
     for lineno, body in expects:
         if body == "native-ok":
             if suffix == ".vpr":
@@ -415,6 +417,8 @@ def parse_header(text: str, suffix: str) -> Expectation:
                                         header_file(m.group("file"), lineno, suffix)))
         elif m := _DIAG_RE.match(body):
             kinds.add("frontend-diag")
+            if m.group("severity") == "error":
+                fe_error_lines = True
             diags.append(ExpectedDiag(m.group("severity"), m.group("tag"),
                                       int(m.group("line"))))
         elif m := _REFUSED_FE_RE.match(body):
@@ -428,6 +432,10 @@ def parse_header(text: str, suffix: str) -> Expectation:
                                       header_file(m.group("file"), lineno, suffix)))
         else:
             raise HeaderError(f"L{lineno}: cannot parse `expect: {body}`")
+    if kinds == {"rejected", "frontend-diag"} and not fe_error_lines:
+        # `frontend-warning` lines of a `rejected` test: the front-end warnings that the run is
+        # expected to print besides its errors (the multiset of (tag, line) must match exactly)
+        kinds = {"rejected"}
     if not kinds:
         raise HeaderError("`expect: native-ok` accompanies an outcome (golden, "
                           "frontend-error, ...); it is not a test by itself")

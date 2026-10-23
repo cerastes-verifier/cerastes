@@ -146,8 +146,9 @@ Ordinary C writes `while (i++ < n)`, `for (i = 0, j = n; i < j; i++, j--)`, `if 
    - **E2.** Every other item — an obligation, a write, a snapshot, a branch (which holds no call in M4.3a) — is placed
      right after the last call it depends on, or before the first call when it depends on none: 0012 item 6's placement,
      applied to writes and snapshots too. An item depends on a call through the temporaries it mentions (a call's result,
-     and the snapshots, writes and branches whose values it uses), its guard, the floor of E6, and, for a snapshot of
-     `x`, every earlier write of `x` in the full expression. Items placed after the same call keep evaluation order (left
+     and the snapshots, writes and branches whose values it uses), its guard, the floor of E6 (inside a comma's right
+     operand), and the earlier accesses of the locals it touches (a snapshot of `x` follows every earlier write of `x`, a
+     write of `x` every earlier snapshot or write of it). Items placed after the same call keep evaluation order (left
      to right for unsequenced operands, C's order for sequenced ones). So no item is placed after a call that C may
      evaluate after it: a call that does not return hides only what depends on it. (Audit round 1 found the first form
      of this rule, which kept every effect in one left-to-right order, unsound: in `never_returns(0) + 100 / y++` the
@@ -165,7 +166,10 @@ Ordinary C writes `while (i++ < n)`, `for (i = 0, j = n; i < j; i++, j--)`, `if 
      without side effects keeps the `guard ==> cond` encoding of 0012 item 5.
    - **E6.** Every item of the right operand of `,` depends at least on the left operand's last call (the floor): C
      evaluates nothing of the right operand before the left is complete. The floor ends with the comma: items of the
-     comma's siblings are not bound by it.
+     comma's siblings, and items that use the comma's value, are not bound by it (they depend on its calls only through
+     the values they use). That direction is sound: such an item may be placed before a call that C evaluates first,
+     which can only report an error on a path where C would not reach it (audit round 2: `(never_returns(0), 1) &&
+     100 / d` reports `division-by-zero`, a false alarm).
      So the calls of a comma come in source order and a check after a call that does not return is never hoisted
      before it (`(abort(), 1 / d)` verifies).
    - **The flag** (0019 item 13). Only a write effect sets a flag, right after the write (0019 item 5's property, now

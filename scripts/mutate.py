@@ -34,6 +34,22 @@ attributes), never in comments, strings, preprocessor lines or declarations:
   `L:` is never deleted either (a dangling `goto` is no mutant of the program), only the
   statement after it.  Other bodies of those heads are not (that would change the ids
   of the tests of M3).
+* `drop-store`, `swap-incdec` and `drop-comma` (side effects in expressions, M4.3a) are mutants of code
+  only (never inside the arguments of `CERASTES_*` or `[[cerastes::...]]`, so never in the safe-direction
+  bucket below), and only where the effect is part of an expression whose value is used:
+  `drop-store` removes the store of an assignment used as a value (`(x = e)` becomes `(e)`, `y = x = a`
+  becomes `y = a`, `f(x = e)` becomes `f(e)`; the id is `x =` -> empty), `swap-incdec` turns a used `x++`
+  into `++x` and back (`x++` -> `++x`) and a used `++` into `--` and back (`++` -> `--`), and `drop-comma`
+  drops the left operand of a comma operator whose left operand has an effect (an assignment, `++`, `--` or
+  a call): `(a, b)` becomes `(b)`, `f(x), g(y);` becomes `g(y);`, and in a `for` init or step clause `i = 0,
+  j = n` becomes `j = n` (the id is the dropped operand and its comma -> empty).  None is produced for the
+  statements that discard the value: a whole expression statement (`x = 1;`, `i++;`), a whole `for` init or
+  step clause or one of its comma-separated parts (`for (i = 0; ...; i++)`), or the operand of a cast to
+  `void` (`(void)x++;`); the value-discarding comma operands of such a statement are skipped alike (`i = 0,
+  j = n;`), while its comma is a `drop-comma` target.  A comma that is an argument separator (`f(a, b)`, also
+  of a macro), the separator of declarators (`int i = 0, j = n;`, also in a `for` init) or of an
+  initializer is never a target, and neither is an assignment that initializes a declarator.  An
+  assignment's `x` is a plain identifier (not `p->x`, `a[i]`, `*p`); so is the operand of `++`/`--`.
 
 Mutant ids have the form `<path>:<line>:<column>:<op>:<original>-><new>`, with the
 position of the first changed character and the changed text on one line (a
@@ -188,7 +204,9 @@ DEFAULT_PATHS = ("tests/scalar",)
 REVIEWED_RE = re.compile(r"^#\s*reviewed:\s*(?P<who>\S.*)$")
 ID_RE = re.compile(r"^(?P<path>.+?):(?P<line>\d+):(?P<col>\d+):(?P<op>[a-z][a-z-]*):"
                    r"(?P<orig>.*)->(?P<new>.*)$")
-OPS = ("relop", "literal", "drop-conjunct", "swap-logic", "delete-stmt")
+OPS = ("relop", "literal", "drop-conjunct", "swap-logic", "delete-stmt", "drop-store", "swap-incdec",
+       "drop-comma")
+EFFECT_OPS = ("drop-store", "swap-incdec", "drop-comma")  # the operators of side effects in expressions
 STATEMENT_ID_CHARS = 40
 
 
@@ -544,6 +562,7 @@ def mutants_of(src: str, path: str) -> list[Mutant]:
 
     for o, c in bodies:
         out += statement_mutants(src, tokens, pair, o, c, position, path)
+    out += effect_mutants(src, tokens, pair, rev_pair, bodies, in_macro, position, path)
     out.sort(key=lambda m: (m.start, m.op, m.end, m.new))
     return out
 
@@ -1001,6 +1020,8 @@ def is_safe_direction(m: "Mutant", src: str) -> bool:
     `ensures` result only if the return type is one), a linear clause, no `==`/`!=` flip,
     and no use of the function in the file for a stronger `requires` or a weaker `ensures`.  Whether the
     mutated clause is well-defined (a dropped guard) is not asked here: see the module docstring."""
+    if m.op in EFFECT_OPS:
+        return False  # a mutant of code: it must be killed or listed
     if m.op == "delete-stmt":
         # an `assert(e);` deleted: the program only loses a check, which a sound verifier must
         # accept (a survivor needs no kill and no entry in the equivalence list; decision 0015)
@@ -1069,6 +1090,314 @@ def statement_mutants(src, tokens, pair, open_i, close_i, position, path) -> lis
         elif t.kind == "ident" and t.text in ("else", "do") and start == i:
             start = i + 1
         i += 1
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Side effects in expressions: drop-store, swap-incdec, drop-comma
+# ---------------------------------------------------------------------------
+
+_ASSIGN_OPS = {"=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>="}
+_NOT_CALLS = {"sizeof", "alignof", "_Alignof", "typeof", "typeof_unqual", "_Generic", "defined",
+              "if", "while", "for", "switch", "return", "case", "else", "do", "goto", "decltype",
+              "noexcept", "static_assert", "_Static_assert", "asm", "__asm__"} | _DECL_KEYWORDS
+_GROUP_HEADS = ("if", "while", "switch")  # `if (a, b)`: the comma is an operator
+_GROUP_WORDS = _GROUP_HEADS + ("return", "else", "do")  # a `(` after these groups an expression
+_NO_EXPRESSION = ("goto", "break", "continue", "case", "default")
+_OPERAND_BEFORE = {"(", ",", "=", "?", "[", "return"} | _ASSIGN_OPS  # what may precede an assignment's variable
+
+
+def _is_declaration(tokens: list[Token], first: int, semi: int) -> bool:
+    """Whether tokens[first..semi] (the statement without its labels and heads) is a declaration:
+    it starts with a declaration keyword, or with `T name` / `T *name` (a typedef name)."""
+    if first >= semi or tokens[first].kind != "ident":
+        return False
+    t = tokens[first].text
+    if t in _DECL_KEYWORDS:
+        return True
+    if t in _COMPOUND_KEYWORDS or t == "return":
+        return False
+    j = first + 1
+    while j < semi and tokens[j].kind == "op" and tokens[j].text in ("*", "&", "&&"):
+        j += 1
+    return j < semi and tokens[j].kind == "ident" and tokens[j].text not in _NOT_CALLS
+
+
+def _has_effect(tokens: list[Token], lo: int, hi: int) -> bool:
+    """Whether tokens[lo..hi) holds an assignment, `++`, `--` or a call."""
+    for k in range(lo, hi):
+        t = tokens[k]
+        if t.kind == "op" and (t.text in _ASSIGN_OPS or t.text in ("++", "--")):
+            return True
+        if t.kind == "ident" and t.text not in _NOT_CALLS and k + 1 < hi \
+                and tokens[k + 1].kind == "op" and tokens[k + 1].text == "(":
+            return True
+    return False
+
+
+class _EffectContext:
+    """What the effect operators need to know about the statements of one function body: the `=` that
+    initialize a declarator (never an assignment), the element spans whose value is discarded (a whole
+    expression statement, a `for` init or step clause, each operand of a comma that is itself
+    discarded, the operand of a cast to `void`), and the comma operators (as the token index of the
+    comma and the span of its left operand)."""
+
+    def __init__(self, tokens, pair, rev_pair):
+        self.tokens = tokens
+        self.pair = pair
+        self.rev_pair = rev_pair
+        self.init_eq: set[int] = set()
+        self.discarded: set[tuple[int, int]] = set()
+        self.commas: list[tuple[int, int, int]] = []
+
+    def split(self, lo, hi):
+        """Spans of the elements of tokens[lo..hi) separated by commas at its own level."""
+        tokens, pair = self.tokens, self.pair
+        spans, start, i = [], lo, lo
+        while i < hi:
+            t = tokens[i]
+            if t.kind == "op" and t.text in _OPEN:
+                i = pair[i] + 1
+                continue
+            if t.kind == "op" and t.text == ",":
+                spans.append((start, i))
+                start = i + 1
+            i += 1
+        spans.append((start, hi))
+        return spans
+
+    def grouping_paren(self, i):
+        """Whether the `(` at token `i` groups an expression (or is the head of an `if`, `while` or
+        `switch`) rather than starting an argument list: its commas are comma operators."""
+        tokens = self.tokens
+        if i == 0:
+            return True
+        p = tokens[i - 1]
+        if p.kind == "ident":
+            return p.text in _GROUP_WORDS
+        if p.kind == "op" and p.text == ")":
+            o = self.rev_pair[i - 1]
+            before = tokens[o - 1] if o > 0 else None
+            if before is not None and before.kind == "ident" and before.text in _GROUP_HEADS + ("for",):
+                return True  # `if (c) (a, b);`
+            inner = tokens[o + 1:i - 1]  # a cast: `(int)(a, b)`
+            return bool(inner) and any(u.kind == "ident" for u in inner) and all(
+                u.kind == "ident" and u.text in _DECL_KEYWORDS or u.kind == "op" and u.text == "*"
+                for u in inner)
+        return not (p.kind == "op" and p.text in ("]", "::", ".", "->"))
+
+    def scan_commas(self, lo, hi, operator):
+        """Record the comma operators of tokens[lo..hi); `operator` says whether commas at this level
+        are comma operators (they are separators in an argument list, an initializer or a declaration)."""
+        tokens, pair = self.tokens, self.pair
+        start, i = lo, lo
+        while i < hi:
+            t = tokens[i]
+            if t.kind == "op" and t.text in _OPEN:
+                self.scan_commas(i + 1, pair[i], t.text == "(" and self.grouping_paren(i))
+                i = pair[i] + 1
+                continue
+            if t.kind == "op" and t.text == ",":
+                if operator:
+                    self.commas.append((i, start, i))
+                start = i + 1
+            i += 1
+
+    def discard(self, lo, hi):
+        """The value of tokens[lo..hi) is discarded: each comma element, after a cast to `void` and
+        inside redundant parentheses, is a discarded element."""
+        tokens, pair = self.tokens, self.pair
+        for a, b in self.split(lo, hi):
+            while b - a >= 3 and tokens[a].text == "(" and tokens[a + 1].text == "void" \
+                    and tokens[a + 2].text == ")":
+                a += 3
+            if a >= b:
+                continue
+            self.discarded.add((a, b))
+            if tokens[a].kind == "op" and tokens[a].text == "(" and pair[a] == b - 1:
+                self.discard(a + 1, b - 1)
+
+    def head(self, i):
+        """The head `if|while|switch|for (...)` at token `i`; returns the index after its `)`."""
+        tokens, pair = self.tokens, self.pair
+        o, c = i + 1, pair[i + 1]
+        if tokens[i].text != "for":
+            self.scan_commas(o + 1, c, True)
+            return c + 1
+        clauses = []  # init, condition, step
+        start, k = o + 1, o + 1
+        while k < c:
+            u = tokens[k]
+            if u.kind == "op" and u.text in _OPEN:
+                k = pair[k] + 1
+                continue
+            if u.kind == "op" and u.text == ";":
+                clauses.append((start, k))
+                start = k + 1
+            k += 1
+        clauses.append((start, c))
+        if len(clauses) == 3:
+            init, cond, step = clauses
+            if _is_declaration(tokens, init[0], init[1]):
+                self.declaration(init[0], init[1])
+            else:
+                self.scan_commas(init[0], init[1], True)
+                self.discard(*init)
+            self.scan_commas(cond[0], cond[1], True)
+            self.scan_commas(step[0], step[1], True)
+            self.discard(*step)
+        else:  # a range-based for: no expression of ours
+            self.scan_commas(o + 1, c, False)
+        return c + 1
+
+    def declaration(self, lo, hi):
+        """tokens[lo..hi) is a declaration: the first `=` of each declarator initializes it (a later `=` of
+        the same initializer, `int b = a = x;`, is an assignment), and its commas separate declarators."""
+        tokens, pair = self.tokens, self.pair
+        i = lo
+        expect = True  # the next `=` initializes a declarator (the ones after it are assignments)
+        while i < hi:
+            t = tokens[i]
+            if t.kind == "op" and t.text in _OPEN:
+                i = pair[i] + 1
+                continue
+            if t.kind == "op" and t.text == ",":
+                expect = True
+            elif t.kind == "op" and t.text == "=" and expect:
+                self.init_eq.add(i)
+                expect = False
+            i += 1
+        self.scan_commas(lo, hi, False)
+
+    def segment(self, start, end):
+        """The statement tokens[start..end) (`end` is its `;`, or the `{` that follows heads and labels)."""
+        tokens, pair = self.tokens, self.pair
+        j = start
+        while True:  # annotations (`CERASTES_INVARIANT(...)`, `[[cerastes::...]]`), labels, heads
+            while j < end and (tokens[j].kind == "ident" and tokens[j].text.startswith("CERASTES_")
+                               and j + 1 < end and tokens[j + 1].text == "("
+                               or tokens[j].kind == "op" and tokens[j].text == "["):
+                j = pair[j + 1 if tokens[j].kind == "ident" else j] + 1
+            j = skip_labels(tokens, pair, j, end)
+            if j < end and tokens[j].kind == "ident" and tokens[j].text in _HEADS + ("switch",) \
+                    and j + 1 < end and tokens[j + 1].kind == "op" and tokens[j + 1].text == "(":
+                j = self.head(j)
+                continue
+            break
+        if j >= end:
+            return
+        t = tokens[j]
+        if t.kind == "ident" and t.text in _NO_EXPRESSION:
+            return
+        if t.kind == "ident" and t.text == "return":
+            self.scan_commas(j + 1, end, True)
+        elif _is_declaration(tokens, j, end):
+            self.declaration(j, end)
+        else:
+            self.scan_commas(j, end, True)
+            self.discard(j, end)
+
+    def walk(self, open_i, close_i):
+        tokens, pair = self.tokens, self.pair
+        i = open_i + 1
+        start = i
+        while i < close_i:
+            t = tokens[i]
+            if t.kind == "op" and t.text == "{":
+                self.segment(start, i)  # the heads and labels before the block
+                self.walk(i, pair[i])
+                i = pair[i] + 1
+                start = i
+                continue
+            if t.kind == "op" and t.text in ("(", "["):
+                i = pair[i] + 1
+                continue
+            if t.kind == "op" and t.text == "}":
+                start = i + 1
+            elif t.kind == "op" and t.text == ";":
+                self.segment(start, i)
+                start = i + 1
+            elif t.kind == "ident" and t.text in ("else", "do") and start == i:
+                start = i + 1
+            i += 1
+
+
+def _short(text: str) -> str:
+    text = one_line(text)
+    return text if len(text) <= STATEMENT_ID_CHARS else text[:STATEMENT_ID_CHARS - 3] + "..."
+
+
+def effect_mutants(src, tokens, pair, rev_pair, bodies, in_macro, position, path) -> list[Mutant]:
+    """The `drop-store`, `swap-incdec` and `drop-comma` mutants of the function bodies (see the module
+    docstring).  Only code: never an argument of a `CERASTES_*` macro or of a `[[cerastes::...]]`
+    attribute, and only where the value of the expression is used (the statements that discard it, the
+    `for` init and step clauses and a cast to `void` are skipped; a comma is a comma operator only where it
+    is not an argument, an initializer or a declarator separator)."""
+    out: list[Mutant] = []
+
+    def add(op, a, end, original, new, replacement):
+        line, col = position(tokens[a].start)
+        out.append(Mutant(path, line, col, op, _short(original), new, tokens[a].start, end, replacement))
+
+    for o, c in bodies:
+        ctx = _EffectContext(tokens, pair, rev_pair)
+        ctx.walk(o, c)
+        for k in range(o + 1, c):
+            if in_macro[k]:
+                continue
+            t = tokens[k]
+            if t.kind != "op":
+                continue
+            if t.text == "=" and k not in ctx.init_eq and k > o + 1 and tokens[k - 1].kind == "ident" \
+                    and k + 1 < c and tokens[k - 1].text not in _NOT_CALLS:
+                before = tokens[k - 2]
+                if before.kind == "ident" and before.text != "return" or before.kind == "op" \
+                        and before.text not in _OPERAND_BEFORE:
+                    continue
+                end = k + 1  # the right operand ends at a `,` `;` or closing bracket (or the `:` of a `?:`)
+                ternary = 0
+                while end < c:
+                    u = tokens[end]
+                    if u.kind == "op":
+                        if u.text in _OPEN:
+                            end = pair[end] + 1
+                            continue
+                        if u.text in _CLOSE or u.text in (",", ";"):
+                            break
+                        if u.text == "?":
+                            ternary += 1
+                        elif u.text == ":":
+                            if ternary == 0:
+                                break
+                            ternary -= 1
+                    end += 1
+                if end == k + 1 or (k - 1, end) in ctx.discarded:
+                    continue
+                add("drop-store", k - 1, tokens[k + 1].start, f"{tokens[k - 1].text} =", "", "")
+            elif t.text in ("++", "--"):
+                other = "--" if t.text == "++" else "++"
+                prv = tokens[k - 1]
+                nxt = tokens[k + 1] if k + 1 < c else None
+                if prv.kind == "ident" and prv.text not in _NOT_CALLS and (
+                        k < 2 or tokens[k - 2].text not in (".", "->", "::")):
+                    span, name, postfix = (k - 1, k + 1), prv.text, True  # x++
+                elif nxt is not None and nxt.kind == "ident" and nxt.text not in _NOT_CALLS and not (
+                        k + 2 < len(tokens)
+                        and tokens[k + 2].text in (".", "->", "[", "(", "::", "++", "--")):
+                    span, name, postfix = (k, k + 2), nxt.text, False  # ++x
+                else:
+                    continue
+                if span in ctx.discarded:
+                    continue
+                swapped = f"{t.text}{name}" if postfix else f"{name}{t.text}"
+                add("swap-incdec", span[0], tokens[span[1] - 1].end, f"{name}{t.text}" if postfix
+                    else f"{t.text}{name}", swapped, swapped)
+                add("swap-incdec", k, t.end, t.text, other, other)
+        for k, a, b in ctx.commas:
+            if k <= o or k >= c or in_macro[k] or a >= b:
+                continue
+            if _has_effect(tokens, a, b):
+                add("drop-comma", a, tokens[k + 1].start, src[tokens[a].start:tokens[k].end], "", "")
     return out
 
 
