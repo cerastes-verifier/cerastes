@@ -112,6 +112,11 @@ discarded `&&`/`||` now follows GCC's rule (P37). With it, the CI timeout goes f
 4. Answer §11 questions 27–31. For the next session, §11 question 13 (unsigned wrapping, in its own short session before
    M4.4) is still the recommendation; the EDG box session after M4.2c (§8.1) is also pending.
 
+**M4.4 planning (2026-10-23, after M4.3b).** The owner answered §11 questions 27–31 and question 13 (no wrapping), and
+split M4.4 into four sessions (§8.1): **M4.4a** no wrapping and exit 3 for internal inconsistencies, **M4.4b** bitwise
+operators, **M4.4c** writes outside F, `void` `?:` arms and warnings in verified tests, **M4.4d** exact sets. Each is
+planned at ≤ 4 h on its own branch, with the pre-approved expectation changes listed in §8.1.
+
 ## 1. State in one paragraph
 
 The owner split M4.2 into **M4.2a** (forward `goto`, functions that do not return, `assert`), **M4.2b** (named
@@ -665,7 +670,7 @@ plan (`plan.md`, "Milestone renumbering"): the **new M4 is the rest of C** (stri
 pointers in M4.5a–f, VerCors as the reference); generic templates are **M5** (M5a–M5g); concepts M6; **C++ memory
 and classes M7** (references, `new`/`delete`, classes; G2's parts that need them are deferred there); inventory M8;
 evaluation M9. Session order: M4.1 → M4.2a (owner, 2026-10-21: before CI) → EDG upstream merge (§4.1) → CI (§4.2) →
-mutation triage (§5; done 2026-10-21) → M4.2b1 → M4.2b2 → M4.2c → M4.3a → M4.3b (owner, 2026-10-22: M4.3 split) → M4.4 … M4.8 → M5a … M5g → M6.
+mutation triage (§5; done 2026-10-21) → M4.2b1 → M4.2b2 → M4.2c → M4.3a → M4.3b (owner, 2026-10-22: M4.3 split) → M4.4a → M4.4b → M4.4c → M4.4d (owner, 2026-10-23: M4.4 split) → M4.5a … M4.8 → M5a … M5g → M6.
 
 **Rules for every session below** (memory `session-size-few-hours`): planned at ≤ 4 h with fixed scope and stop
 rules; owner decisions and pre-approved expectation changes asked up front; the decision record before code
@@ -813,10 +818,103 @@ round 1's blocking finding).
 - Facts to probe first: none new in the IL (P33 covers the shapes); Silicon spikes of a call inside a branch and in a
   top-test condition (precondition and termination checks at the right line, the callee's `ensures` known after it).
 
-**M4.4 Bitwise operators.** `& | ^ ~` and `&= |= ^=` on signed and unsigned types (C23 two's complement). Spike first
-(Silicon `v.26.08`): total prelude functions with bodies over `Int` (bounded recursion on bits) vs an SMT bit-vector
-interpretation domain (needs a lint rule and a record: invariant 4). Record (bitwise), amending 0010 item 9. Note for
-M5: integral `T` still rejects bitwise operators; per-instance fallback now verifies them (`low_bit`).
+**M4.4 — split into M4.4a, M4.4b, M4.4c, M4.4d** (owner, 2026-10-23, M4.4 planning). The owner answered §11 question 13
+(no wrapping) and questions 27–31 together with M4.4. A Plan-agent review sized the work at four sessions of ≤ 4 h each,
+each on its own branch, and the owner split it. The approved plan is `~/.claude/plans/using-plan-md-and-handoff-md-unified-honey.md`;
+the essentials follow. Team in every session: edg-backend, il-analyst, test-mutator, and the read-only Opus auditor.
+
+*Owner decisions for all four (2026-10-23):*
+- **No wrapping.** It uses the existing categories (`overflow`, `conversion`, `shift`) and has no opt-in; the explicit
+  way is a reduction in a wider type (`%`, then masks). In C, `==`/`!=` with an enumeration compares mathematically.
+- **Expectation changes.** In M4.4a, any test that flips only because of a new `overflow`, `conversion` or `shift` error
+  at a wrapping site is pre-approved:
+  - a test whose point was the wrap is retired and replaced (a positive in range and an error twin at the old line);
+  - an error twin, or a test sharing a wrapping fixture, has the wrap removed in its body in place (never an `expect:`
+    line), with a new twin for the wrap.
+
+  The retirements listed below are pre-approved too. Any other flip stops the work and the session asks.
+
+**M4.4a No wrapping, and exit 3 for internal inconsistencies** (record 0022; §11 questions 13 and 29).
+- **Probe P38 first** (the review's blocking item). EDG must keep `a_constant.expr` for every folded unsigned constant:
+  - the constants `-1u`, `0u - 1u`, `4294967295u + 1u`, `65536u * 65536u`, `unsigned u = -1;`, and nested ones;
+  - in bodies, contracts, named-constant initializers, enumerator initializers, case labels (C only for `case -1:`
+    over `unsigned`; C++ refuses it, #2362) and default arguments.
+
+  A place with no `expr` is rejected. The trust-EDG sites are `encode.cpp:783-789` and `:1046`.
+- **Lowering.** The four wrap sites (`lower.cpp:489, 542, 584, 611`) become obligations; `wrap()` and `c_wrap` go. A
+  conversion of an integer literal whose value fits needs no obligation.
+- **Amendments.**
+  - 0010 items 4, 5, 6, 8, 10, 11, 12, 14;
+  - 0012 item 11; 0014 item 6; 0017; 0018 items 5–6; 0020 item 2;
+  - 0021 item 3: unsigned parameters now create obligations, so a new `unsequenced_calls` is possible; that is a
+    stop-and-ask flip;
+  - 0011 items 8 and 13, for Q29.
+- **Q29.** The back end sets an internal-inconsistency flag for lowering's errors, emit's problems and the
+  "encoded twice" guard. `verify_main.cpp` checks it before line 424 (`edg_status != 0 → 2`) and returns 3. The hook
+  `perturb_fixed_order` proves it end to end, with `--selftest` checks.
+- **Known flips** (the review's reading):
+
+  | Group | Files |
+  |---|---|
+  | 15 positives | `assign_value_unsigned`, `compare_mixed`, `const_global_init`, `conv_unsigned`, `incdec_uchar`, `incdec_value_unsigned`, `shift_unsigned`, `switch_unsigned_case`, `uchar_promote`, `uninit_compound`, `unsigned_mul`, `unsigned_neg`, `unsigned_wrap`, `usual_conversions`, `enum_list_type.cpp` |
+  | 17 error twins | the `_post` twins of those, `assert_cast_kept`, `compound_ushort_over`, `const_global_init_conversion`, `const_global_init_post` |
+  | 7 doc examples | `unsigned_wraps`, `constants`, `narrowing`, `shifts`, `promotion_ok`, `promotion_overflow`, `usual_conversions.c` |
+  | VIR self-test | about 15 cases |
+
+  The stop rule is more than 10 flips outside this list.
+- **Byte identity.** A baseline `.vpr` without `c_wrap` is identical; the rest is compared ignoring the prelude.
+
+**M4.4b Bitwise operators** (record 0023).
+- **Probes.**
+  - P39, the IL: operands of `& | ^ ~` and `&= |= ^=` (char, short, bool, mixed signedness, `__int128`, C's bare
+    enumeration operand of `~`, folded constants).
+  - P40, the warning matrix (clang and GCC, `-Wall -Wextra`, both modes): `a & b == c`, `a | b & c`, `a & b ? c : d`,
+    `~b`, `b1 & b2`, `(x & 2) == 1`, `!x & y`, `2 ^ 32`, `if (x |= a)`.
+
+  The union of the warned shapes is rejected, and the detectors look inside folded constants' `expr`.
+- **Spike S21: candidate (A).** A total closed form per computed width, with a body and no `requires` or `ensures`:
+  - `c_and_N` sums bit k of a and b times 2ᵏ, with `|` and `^` derived from it;
+  - signed operands go through two's complement;
+  - `~a` is `−a − 1` for signed types and `MAX − a` for unsigned ones.
+
+  Battery: exact constants (the prologue guard), masks, negative operands, 8–128 bits, and a popcount loop; a median
+  under 2 s and a maximum under 10 s. (B), bounded recursion, is spiked only if (A) misses. (C), a bit-vector domain,
+  means stop and ask. 128-bit bitwise may be rejected (M8).
+- **Code traps.**
+  - `assignment_parts`' operator chain ends in `Shr` (`encode.cpp:1810`).
+  - The compound forms need three places: `:1712`, `:1361-1372` and `:1810`.
+  - `check.cpp:71`: every unary operator other than `Neg` is the identity.
+  - `lower.cpp:493`: an unhandled unary operator returns its operand; it should be `internal_error`.
+  - The `check.cpp` typing switch and the enumeration backstop.
+- **Consequences under 0022:** `sc |= 0x80`, `uc = ~uc`, `u & -8` and unsigned `x & -x` are `conversion` errors.
+- **Retired** (pre-approved): `reject_bit_and.c`, `reject_bit_or.c`, `reject_bit_xor.c`, `reject_bit_not.c`,
+  `reject_bit_and_assign.c`.
+- **Cuts, in order:** popcount and `low_bit`, then 128-bit.
+- **M5 note:** integral `T` still rejects bitwise operators; the per-instance fallback verifies them (`low_bit`).
+
+**M4.4c Writes outside F, `void` `?:` arms, warnings in verified tests** (record 0024; §11 questions 28, 30, 31).
+- **Q28.** Only writes and snapshots leave F; call-free branches hold checks and stay in F, slotted by prefix. A write
+  goes right after the member of its set that comes last in π, with ties broken by creation order. That means changes
+  to `lower.cpp` lines 1084-1093, 1117, 1128, 1187-1188 and 1225, and to `origin_of`. `diagnostics.def` drops "or
+  assigns".
+- **Q30.** A `void` `?:` in statement position becomes an `If`, built directly (so no `assignment_as_condition`), with
+  each arm through `expression_statement`. That covers expression statements, discarded commas, and `for` steps
+  (`check.cpp` `step_shape` widened to an `If` of steps).
+- **Q31.** `frontend-warning` lines are allowed with `verified` and `error` outcomes. The pin is
+  `discarded_and_assign_warn.c` (`a && (y = 2);`), with its twin.
+- **Retired** (pre-approved): `reject_unsequenced_assignments.c`, `calls_rej_two_writes`,
+  `reject_void_conditional_arms.c`, and the `unsupported_type` line of the four `reject_assert_shape_*.c` tests as
+  measured.
+
+**M4.4d Exact sets** (record 0025; §11 question 27).
+- **Measure first** with a prototype: exact precondition sets also move preconditions in pre-M4.3b programs
+  (`f(a, g(b))`), and any expectation change other than the approved one stops the work.
+- **Two steps:** exact sets (a precondition gets PRE(c), and a comma's value carries its floor), else today's sets. A
+  rejection reports step 2's conflict.
+- **The mechanism** (decided in the record): dual sets through `LV`/`Obl`/`Effect`/`Full::pre`/`last_*`/`floor_`/`since`,
+  or lowering twice with a rollback.
+- **Tests:** `h((validate(y), y))`, `100 / (validate(y), y)`, `(nr(0), 1) && 100 / d`, and `h(f(x), y) + 100 / g(z)`
+  (accepted by the fallback). `reject_unsequenced_split_requires.c` is retired (pre-approved).
 
 **M4.5 Pointers** (one 4.x, sessions a–f).
 
@@ -1096,7 +1194,16 @@ Each has a recommended answer. Answer inline, as before.
     them.* Today 0010 makes unsigned arithmetic and conversions to unsigned types modular. A later session (M4.4's
     bitwise record, or its own) decides whether wrapping becomes an error by default, with an explicit way to ask for
     modular arithmetic. *Recommended: decide it in its own short session before M4.4, since bitwise operators on
-    unsigned types depend on it.*
+    unsigned types depend on it.* **Answered (owner, 2026-10-23, M4.4 planning): "Wrapping should be prohibited."**
+    Every integer operation whose mathematical result does not fit the type it is computed in is an error, unsigned
+    too, in the existing categories:
+    - unsigned `+ - *`, unary `-`, and `++`/`--` in `unsigned int` or wider give `overflow`;
+    - a conversion that does not fit gives `conversion`, including `uc++` at 255, which is computed in `int`;
+    - `u << n` losing bits gives `shift`.
+
+    There is no modular opt-in: a reduction is written in a wider type (`%` now, masks from M4.4b), and a truncating
+    marker is an M8 entry. In C, `==`/`!=` between an enumeration and a possibly negative `int` compares the values
+    mathematically, which is exactly C's result, so both modes agree. It is done first, in **M4.4a** (record 0022).
 
 **M4.2b1, 2026-10-21:**
 
@@ -1188,14 +1295,27 @@ Each has a recommended answer. Answer inline, as before.
 27. **Exact sets for preconditions and commas** (§6 M4.3b note 2). The sets are smaller than "what C completes first",
     which is sound but gives false alarms on `h((validate(y), y))`, a C idiom. Make them exact (the Viper of M4.3a-era
     programs with these shapes changes; no expectation does)? *Recommended: not now; when a ported example meets it.*
+    **Answered (owner, 2026-10-23): "Do it now since we know it is correct."** The M4.4 planning found that exact sets
+    also reject shapes accepted today (`h(f(x), y) + 100 / g(z)`, where `h`'s `requires` reads only `y`), so the owner
+    chose two steps: exact sets first, today's (sound) sets if F is not a chain, a rejection only if both fail. It is
+    **M4.4d** (record 0025; `reject_unsequenced_split_requires.c` retired, pre-approved).
 28. **Writes in the chain** (§6 note 3). Let writes and snapshots, which cannot fail, be placed after the last fixed
     point of their set instead of entering F, so `(x = f(a)) + (y = g(b))` is accepted? *Recommended: not now; one rule
-    is simpler to audit; revisit when a port needs it.*
+    is simpler to audit; revisit when a port needs it.* **Answered (owner, 2026-10-23): "Do it now since we know it is
+    correct."** It is **M4.4c** (record 0024). Only writes and snapshots leave F; call-free branches hold checks and
+    stay. `reject_unsequenced_assignments.c` and the VIR case `calls_rej_two_writes` are retired (pre-approved).
 29. **Exit status of lowering's internal errors** (§6 note 6): route them to exit 3, decision 0011's "tool failure, never
     a verdict"? *Recommended: yes, a short item in the next session that touches the driver (its own report path and a
-    `--selftest` check).*
+    `--selftest` check).* **Answered (owner, 2026-10-23): follow the recommendation.** It is in **M4.4a** (0011 items 8
+    and 13 amended).
 30. **`void` arms of `?:`** (`c ? v(x) : w(y);`, accepted by every compiler, rejected as `unsupported_type`): an M8
-    entry, or support now? *Recommended: an M8 entry; `if (c) v(x); else w(y);` says the same.*
+    entry, or support now? *Recommended: an M8 entry; `if (c) v(x); else w(y);` says the same.* **Answered (owner,
+    2026-10-23): "Do it now since we know it is correct."** It is **M4.4c** (record 0024): a `void` `?:` in statement
+    position is C's `if`. `reject_void_conditional_arms.c` is retired, and the `unsupported_type` line of the four
+    `reject_assert_shape_*.c` tests changes as measured (pre-approved). A `void` `?:` as the left operand of a comma
+    whose value is used, and C++'s `return c ? v() : w();`, stay rejected (M8).
 31. **Warnings in verified tests** (§6 note 7): let a `verified` test list its expected front-end warnings
     (`frontend-warning`, as a `rejected` test may), so accepted shapes that print EDG's #187 can be pinned?
-    *Recommended: yes, a small harness item with twins in the next session that touches the harness.*
+    *Recommended: yes, a small harness item with twins in the next session that touches the harness.* **Answered
+    (owner, 2026-10-23): follow the recommendation.** It is in **M4.4c**: `error` tests may list the same warnings,
+    since a positive's twin prints them too.
