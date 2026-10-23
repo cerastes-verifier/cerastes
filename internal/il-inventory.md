@@ -2654,3 +2654,165 @@ per `.vpr` line and id, so the condition's asserts (one per line, inside the loo
 
 Mapping notes: every assertion sits on its own line, including those inside the `if (t) { ... }` branch and the snapshot's flag assertion, so line + id stays unique per check. Two checks of one full expression that Silicon reports
 at the same `.vpr` line cannot occur in these shapes. The only surprise is `s17a_termnonneg` (a measure that is negative at the exiting head still verifies), a property of Silicon's back-edge check, not of the shape.
+
+## M4.3b: calls in expressions
+
+Probe P36 and spikes S19-S20 for decision 0021. Evidence is under `build/m4.3b/probes/` and `build/m4.3b/spikes/` (gitignored). Silicon is `6b540aa4` (`Silicon 1.1-SNAPSHOT (6b540aa4@(detached))`, silver as pinned), Z3 4.16.0, run as `build/m4.3b/spikes/s19lib.py` does (`$CERASTES_JAVA -Xss128m -jar $SILICON_JAR --z3Exe $Z3_EXE --numberOfErrorsToReport 0 <file.vpr>`; the output of each run is the `.out` beside its `.vpr`). `il_def.h` lines are in `third_party/edg/src/il_def.h` at the pin `f0ed5525af`.
+P36's IL dumps ran as `build/m4.3b/fe.sh <probe> c23|c++20` (`scripts/cerastes-fe.sh --display_error_number --il_display`); `build/m4.3b/tree4.py <il> fn` condenses a function body to a tree like M4.3a's `tree3.py` and adds, with `POS=1`, `plain` or `MACRO(orig seq:col)` per node (see 3 below). `build/m4.3b/matrix.py` ran Apple clang (clang-2100.3.34.2) and GCC 16.2.0 with `-fsyntax-only -Wall -Wextra`, C23 and C++20 (`matrix.txt`, `matrix.json`, `matrix_detail.json`; the list below comes from `table36.py`). Probe files, one function per line: `p36.c|cpp` (`a1`-`a40`, plus a template in the `.cpp`), `p36b.c|cpp` (`b1`-`b18`, macros), `p36c.c|cpp` (`c1`-`c7`, macro and layout extras). The `.cpp` files are copies (`p36.cpp` adds `t1`, `t2`).
+
+### P36: `-Wself-assign`: **PASS (no stop rule triggered)**
+
+**1. Who warns.** GCC 16 has no such warning: it is silent on every function of the three probes with `-Wall -Wextra` in both modes. Apple clang warns with `-Wself-assign`, text `explicitly assigning value of variable of type 'int' to itself` (`'enum color'`, `'T'` for the other types; `p36:a14` in C++ prints it twice), in both modes alike (`matrix_detail.json`). EDG gives **no** diagnostic of its own for any shape: the plain front end in both modes prints only #550 (`parameter "y" was set but never used`, lines of `a5`, `a18`, `a29`: an artefact of the probe) and #174 (`expression has no effect`, `a28`, `x = (x, x);`, a shape cerastes already rejects as `comma_without_effect`); `build/cerastes verify p36.c` shows the same warnings, then cerastes's own errors (`probes/p36.c.c23.err`, `p36.cpp.c++20.err`, `p36b`/`p36c`: nothing). So no EDG warning is on a shape that cerastes accepts and clang rejects, and the verify-mode warnings are unchanged.
+
+**2. The verdict by shape** (clang C = clang C++ unless stated; GCC and EDG: no warning for any row).
+
+Warns (`-Wself-assign`):
+
+| shape | probe |
+|---|---|
+| `x = x;`, `x = (x);`, `(x) = x;`, `(x) = (x);`, `x = ((x));` | a1-a4, a27 |
+| `y = (x = x);` (the inner assignment), `y = x = x;` (the inner), `x = (x = x);` (the inner; also `-Wunsequenced` in C only) | a5, a29, a39 |
+| the `for` step `x = x`; `return (x = x, y);`; `x = x, y++;` (discarded comma); `if ((x = x))`; `while ((x = x))`; `(void)(x = x);`; `int y = (x = x) + 1;` | a6, a7, a8, a9, a40, a31, a30 |
+| `short s; s = s;`, `bool b; b = b;`, `enum color e; e = e;`, a local `int x = 1; x = x;`, a `do { x = x; } while (0);` body, a global `gl = gl;` | a11, a13, a14, a15, a24, a35 |
+| the statement over two lines (`x =\n x;`), an earlier `x = x;` followed by a macro statement, `#line` | b15, b14/b18, c6 |
+| parentheses written by a macro around a written operand: `#define LP (` then `x = LP x RP;`; a comment: `x = (x) /* c */;` | c1, c5 |
+| a template definition `template <class T> void t1(T x) { x = x; }` (`'T'`): **C++ only, and only at the definition, none at the instance** (cerastes rejects every template at M4, `unsupported_declaration`) | p36.cpp line 45 |
+
+Silent (all four configurations):
+
+| shape | probe |
+|---|---|
+| an explicit cast on the right: `x = (int)x;`, `x = (int)(x);`, `s = (short)s;`, `long x; x = (int)x;`, `unsigned x = (unsigned)x` | a10, a32, a12, a33, a34 |
+| any other right operand: `x = +x;`, `x = x + 0;`, `x = x ? x : x;`, `x = y = x;` (the outer `x = <assignment>`), `x = (x, x);` (clang `-Wunused-value` only), compound assignments `x += x;`, `x -= x;` | a16, a17, a36, a18, a28, a25, a26 |
+| `sizeof(x = x)` (clang `-Wunevaluated-expression` only) | a23 |
+| **any macro involvement** in the operator or either operand: `#define SET(a, b) a = b` with `SET(x, x)`, `SET(x, (x))`, `SET((x), x)`; `#define X x` with `X = x`, `x = X`, `X = X`; `ID(x) = x`, `x = ID(x)`, `ID(x) = ID(x)`; `x EQ x` (`#define EQ =`); `SELF(x)` (`#define SELF(v) (v = v)`); `E;` (`#define E x = x`); `x = PAREN(x)`; `SETX` (a `do { x = x; } while (0)` macro); `WRAP(x = x;)` (the whole statement is a macro argument); `#define BODY { x = x; }`; `PAIR(x, ID(x))`; multi-line `PAIR(x,\n x)`; `WRAP(x) = x`; `x = WRAP(x)`; `x = (WRAP(x))`; `#define L x =` with `L x;`; `#define R = x` with `x R;`; `x = LP RX RP;` (`#define RX x`) | a19-a22, a37, a38, b1-b13, b16, b17, c2, c3, c7 |
+
+So clang's rule is: both operands, after dropping parentheses and implicit conversions, name the **same variable**, the right one is not under an explicit cast or any other operator, **and neither operand nor the `=` token comes from a macro expansion** (including a macro argument: `ID(x) = x` is silent) and the expression is not in an unevaluated context. A parenthesis written by a macro does not matter (c1 warns: the `x` is a written token).
+
+**3. IL facts** (`probes/p36.c.c23.trees`, `p36.cpp.c++20.trees`, `p36b.*.trees`, `p36c.*.trees`; one line per function; `@seq:column` is `position`).
+
+(a) *The shape of the node.* An assignment is `eok_assign` (`il_def.h:14120`) with two operands. The left operand is an `enk_variable` with `is_lvalue`; the right is the `enk_variable` with `orig_lvalue_type` (the value read, `orig_lvalue_type` at `il_def.h:14917`: the lvalue-to-rvalue conversion clears `is_lvalue`, no node), directly, with no generated cast, for every same-type shape, in both modes (`a1`, `a11` short, `a13` bool, `a14` enum, `a15`):
+
+```text
+a1  stmk_expr eok_assign[int] {nu} @5:20 plain(var x:int {lv} @5:18 plain, var x:int {olt=int} @5:22 plain)                 (C23)
+a1  stmk_expr eok_assign[int] {lv,nu} @5:20 plain(var x:int {lv} @5:18 plain, var x:int {olt=int} @5:22 plain)            (C++20)
+a11 eok_assign[short] {nu} @15:23 plain(var s:short {lv} @15:21 plain, var s:short {olt=short} @15:25 plain)
+```
+No node is generated between the variables in any warned shape, so no compiler-generated cast needs peeling: a peeling rule (drop `compiler_generated` casts only) would be harmless. An explicit cast is its own `eok_cast` **without** `compiler_generated` (`a10`: `eok_cast[int] @14:23 plain(var x...)`; `a12`; `a33`: `eok_cast[long] {gen}(eok_cast[int](var x:long))`: the generated one is peeled, the explicit one stops), which is clang's silent shape. `+x`, `x + 0`, `?:`, `,` and the compound assignments are other node kinds (`eok_unary_plus`, `eok_add`, `eok_question`, `eok_comma`, `eok_add_assign`), silent.
+
+(b) *Parentheses.* No node: `is_parenthesized` (`il_def.h:15075`) is on the operand or the assignment (`a2` the right `x {par}`; `a3` the left `{lv,par}`; `a4` both; `a5` the inner assignment `{par}`; `a27` `{par}`). The flag does not matter to clang's rule, so the detector ignores it.
+
+(c) *Macro origin.* `RECORD_MACROS_IN_IL=1` records only the `#define`s (`iek_macro`); what tells a macro-expanded node apart is the source position (`a_source_position`, `basics.h:896-923`, `FULLY_RESOLVED_MACRO_POSITIONS`): `seq`/`column` give the start of the **top-level macro invocation**, `orig_seq`/`orig_column` the origin of the token (the macro definition, or the argument text of the invocation); outside a macro `orig == (seq, column)`, and `il_display` prints `orig_*` only when they differ (`il_display.c:587`). On a node: `position` (`il_def.h:15110`; the operator for an operation node, the token for a variable). Observed, `tree4.py`'s `plain` (orig equal) or `MACRO` (orig different):
+
+```text
+a1  eok_assign @5:20 plain(var x @5:18 plain, var x @5:22 plain)                                          written: all three plain
+a19 eok_assign @23:19 MACRO(orig 1:21)(var x @23:19 MACRO(orig 23:23), var x @23:19 MACRO(orig 23:26))   SET(x, x): the = in the #define (line 1), the operands are the argument text
+a20 eok_assign @24:21 plain(var x @24:19 MACRO(orig 2:11), var x @24:23 plain)                            X = x: only the left token is a macro
+a21 eok_assign @25:21 plain(var x @25:19 plain, var x @25:23 MACRO(orig 2:11))                            x = X
+b1  eok_assign @10:24 plain(var x @10:18 MACRO(orig 10:21), var x @10:26 plain)                           ID(x) = x: an argument token (orig = the argument's column)
+c1  eok_assign @7:20 plain(var x @7:18 plain, var x {par} @7:25 plain)                                   x = LP x RP: written tokens, the parentheses are not in the IL
+c2  eok_assign @8:18 MACRO(orig 3:13)(var x @8:18 MACRO(orig 3:11), var x @8:20 plain)                    L x; with L = `x =`
+b9  eok_assign @18:18 MACRO(orig 18:25)(var x @18:18 MACRO(orig 18:23), var x @18:18 MACRO(orig 18:27))  WRAP(x = x;): a macro argument (orig is the user's text; seq/column the invocation)
+c6  eok_assign @14:5 plain(var x @14:3 plain, var x @14:7 plain)                                          after `#line 100`: plain, as clang warns
+```
+The rule "no operand and no operator token is from a macro" is therefore decidable: **`position.orig_seq == position.seq && position.orig_column == position.column`** for the assignment node, for the left variable node and for the right variable node. It reproduces clang's verdict on every probe: `build/m4.3b/detector36.py` applies the rule to the four sets of `.trees` (C23 and C++20 for `p36`, `p36b`, `p36c`) and compares with `matrix.json`: **132 (function, mode) pairs, 0 mismatches**, the detector firing on 57 (`b15`, `c6` and the template `t1` are keyed by line in `matrix.json`; the detector fires on all three, and clang warns at their lines or at the template definition). The silent macro shapes (b1-b13, b16, b17, c2, c3, c7, a19-a22, a37, a38) each have at least one `MACRO` node; the written-but-silent shapes (a10, a12, a16, a17, a18, a23, a25, a26, a28, a32-a34, a36) are separated by the node kinds, not by positions. The existing `macro_node` test in `encode.cpp` (`e->position.orig_seq != 0`) is **not** this rule (for a plain node `orig_seq == seq != 0`): the new detector compares the pairs.
+
+**Proposed detector** (for the `self_assignment` rule, after M4.3a's detectors): at every `eok_assign` node reached in code (a statement, a used value, a `for` step, a condition, a `return`): (1) strip `compiler_generated` `eok_cast`/`eok_bool_cast` wrappers from both operands (never an explicit cast); (2) both results are `enk_variable` and name the same variable; (3) the assignment node's position and each of the two variable nodes' positions have `orig_seq == seq && orig_column == column`; then reject, reported at the assignment (the `=`). A compound assignment, `++`/`--` and anything inside `sizeof`/`typeof` (already rejected by 0020) are not self-assignments. The shapes where cerastes would reject but clang is silent under `-Wall -Wextra` are none (the rule is the same set); the shapes clang warns and cerastes already rejects for another reason are `a35` (a global, 0012), `a28`-like commas (`comma_without_effect`), `a39` (`unsequenced_modification`, which wins by reporting first or together) and the template definition (`unsupported_declaration`).
+
+**Verdict: PASS.** Clang's verdict turns only on facts the IL keeps (same variable, no node between, explicit casts as separate nodes, macro origin through `orig_*`). Parentheses are irrelevant to clang. No EDG warning exists for a shape cerastes accepts. Stop rule 3 does not fire.
+
+### S19: the termination check placed by cerastes (decision 0021, option B): **PASS (the explicit assert is equivalent to Silicon's own check, including unequal lengths)**
+
+**1. Silicon's rule, from the source** (`third_party/silicon/silver/src/main/scala/viper/silver/plugin/standard/termination/transformation/`). A call to a method of the **same strongly connected component** as the caller (`MethodCheck.scala:66`; the sets come from Kosaraju over a call graph that has an edge for **every `MethodCall` node syntactically in a method body**, `:268-285`, so dead code counts and a self-call is its own component) gets, immediately before it, `assert (caller condition ==> lex(callee tuple over the call's arguments, old(caller tuple)))` (`createTupleCheck`); `createLexDecreaseCheck` (`DecreasesCheck.scala:111-165`, `createExp`) is, with `s` the callee's tuple over the arguments and `b` the caller's, "both tuples extended with a TOP element":
+
+```text
+createExp(b, s) = false                                          if s is empty         (:130)
+                  true                                           if s is not empty and b is empty   (:134)
+                  (decreasing(s0, b0) && bounded(b0)) || (s0 == b0 && createExp(b', s'))   otherwise
+```
+with `decreasing(x, y) <== x < y` and `bounded(x) <== x >= 0` for `Int` (`silver/src/main/resources/import/decreases/int.vpr`, the axioms of `IntWellFoundedOrder`; implications, so Silicon proves exactly what it can derive from `x < y`, `x >= 0`). Unfolded, with N = the callee's measure over the arguments (`s`), M = the caller's over its formals (`b`; formals are immutable, so `old` is the entry value): **`⋁ᵢ<min(|N|,|M|) (⋀ₗ<ᵢ Nₗ == Mₗ ∧ Nᵢ < Mᵢ ∧ Mᵢ ≥ 0)`, and when `|N| > |M|` also `⋀ₗ<|M| Nₗ == Mₗ`** (a longer tuple that agrees on the whole shorter one is smaller; equal tuples, and a shorter `N` that agrees on its length, fail). For equal lengths this is exactly 0013 item 2's formula, so plan fallback A (immovable calls) is **not needed** for unequal lengths either. A call to a method **outside** the component gets only `assert callee.terminationCondition` (`:111-125`), which is `true` for a callee with a `decreases` tuple without condition: no decrease check (case 8).
+
+**2. The matrix.** `build/m4.3b/spikes/s19a.py`, `s19b.py`, `s19c.py` write, per point, V0 (the call alone) and V1 (the same method with `assert lex(N, M)` on one line right before the call: `s19lib.lex`) in the style of the emitted Viper (`spikes/base/{recursion,measure_mutual,noreturn_recursive}.vpr` are the real emitted files they copy: `requires` range per formal, `ensures` range of `res`, `decreases` the measure over `p…`, locals `v…` copied from the formals, `assert noov(arg)` per argument, `t := f(args)`), runs Silicon once per file (many independent methods per file, errors mapped back by line) and compares: **V1's `assert` fails exactly when V0's termination check fails**, point by point. The state of a point is fixed by an `inhale p == c` (spike only). Results (each `s19_case*.txt` lists every point; `mismatches` 0 everywhere; "own-term" = Silicon's own check reporting in V1 as well):
+
+| case | shapes | points | V0 fails / passes | mismatches | V1 own-term reports |
+|---|---|---|---|---|---|
+| 1 one component | `n-1`, `n`, `n+1`, `0`, `-1`, `n-2` at n = -1, 0, 1, 3 (old value -1; `n-1` at n = 0 passes, `n` and `n+1` fail) | 24 | 13 / 11 | 0 | 0 |
+| 2 two components | `(a∓1/a/a+1, b+100/b-1/b/0/-5/b+1)` at a, b in {-1, 0, 1}; includes `(a-1, b+100)`, `(a, b-1)` at b = 0, `(a, b)`, `(a+1, b-1)`, `(a-1, -5)` | 162 | 111 / 51 | 0 | 0 |
+| 3 three components | all 27 argument shapes at 12 states (`c` = -1, 0, 1); `3b`: equal up to the last, negative middles | 324 + 42 | 172 / 152 and 18 / 24 | 0 | 0 |
+| 4 mutual, equal lengths | `f(a,b)` calls `g(c,d)` (g's measure `(q0,q1)`, `(q1,q0)` and `(q0+q1, q0)`), 15 argument shapes at 9 states, g's call back is dead code `if (false)` (the cycle is syntactic) | 810 | 474 / 336 | 0 | 0 |
+| 5 mutual, **unequal lengths** | 2→1, 1→2, 3→1, 1→3, 3→2, 2→3, up to 300 sampled argument/state points each (first, 248 V0-only points were used to read the rule off; then the source, `:129-148`, gave the exact form) | 1380 | 662 / 718 | 0 | 0 |
+| 6 `c_div` measure | measure `c_div(n, 2)` (prelude function copied from `src/viper/prelude.cpp:36`); arguments `c_div(n,2)`, `n-1`, `c_div(n,2)-1`, `c_div(n,3)`, `c_div(n-1,2)`, `c_div(n,-2)`; 10 concrete states and 4 symbolic ranges | 84 | 50 / 34 | 0 | 0 |
+| 7 parameter changed | `v0 := v0 + 5; f(v0 - 1)` (measure over the **entry** `p0`: must fail at every state; arguments `v0-6`, `v0-5`, `v0` too) and `v0 := v0 - 5; f(v0 + 4/+5/+6/-1)` | 48 | 33 / 15 | 0 | 0 |
+| symbolic states | ranges for 1 and 2 components (the solver, not constants) | 76 | 43 / 33 | 0 | 0 |
+
+2950 points, every one with both outcomes represented in each family. Case 7's must-fail shape: `n := n + 5; f(n - 1)` with measure `n` is reported by V0 at the call and by V1 at the assert in every state tried (`s19_case7.txt`: `OK c1 vals=['p0 == -3'] args=['v0 - 1']  V0 term-fails=1  V1 assert-fails=1`, likewise for p0 = 0, 1, 3, 8 and `1 <= p0 <= 1000`).
+
+**3. Case 8: a non-recursive callee with a measure placed after another call.** `spikes/s19_case8.vpr`: `h1`/`h2`/`h3` have `decreases p0`, call `ret(0)` (returns) and then `g_meas(p0 + 1000)` (measure `q0`), `g_empty(p0 + 1000)` (empty `decreases`) or `g_meas(-5)`; `g` does not call `h`. **`Silicon finished verification successfully`** (`s19_case8.out`): no check at all, as `MethodCheck.scala:111-125` says, so no explicit assert is needed for a call outside the caller's component (the cerastes cycle must equal Viper's components: the VIR call graph with an edge for every call node of a body, dead code included).
+
+**4. Case 9: the hole, and the placement.** `spikes/s19_case9_*.vpr` (`never` is the trusted `ensures false decreases _` shape of `f_abort`; the caller `f(n)` has `decreases p0` and `inhale 0 <= p0 <= 100`); outputs in the `.out` files:
+
+| variant | Silicon | |
+|---|---|---|
+| `t := never(0); t2 := f(v0 + 1)` (Silicon's check alone) | `verified`, 0 errors | **the hole** (`s19_case9_alone.out`: `Silicon finished verification successfully`) |
+| `t := ret(0); t2 := f(v0 + 1)` (a callee that returns) | 1 error: `Method might not terminate. Termination measure might not decrease or might not be bounded.` at the call, line 28 (`termination.failed` / `tuple.false`) | control (`s19_case9_control.out`) |
+| `assert lex; t := never(0); t2 := f(v0 + 1)` | 1 error: `Assert might fail. Assertion v0 + 1 < p0 might not hold.` at the assert, line 26 (`assert.failed` / `assertion.false`) | the explicit assert **before** `never` closes the hole (`s19_case9_assert_before_never.out`) |
+| `t := never(0); assert lex; t2 := f(v0 + 1)` | `verified` | placed **after** `never` it is hidden too (`s19_case9_assert_after_never.out`): the placement is the point |
+| `assert lex; t := ret(0); t2 := f(v0 + 1)` | 1 error at the assert (line 26) | an intervening returning call: the failed assert is reported once, Silicon's own check at the call is then silent |
+| `assert lex(n-1); t := ret(0); t2 := f(v0 - 1)` at `1 <= p0` | `verified` | `s19_case9_assert_before_ret_ok.out` |
+
+(For one component the assert is `(((v0 + 1)) < (p0) && (p0) >= 0)` and Silicon's message names the failing conjunct, `v0 + 1 < p0`.)
+
+**5. Case 10: reports.** One report per failure, always, in every point of the matrix:
+- V0 (Silicon's own check): `Method might not terminate. Termination measure might not decrease or might not be bounded.` at the call; Silicon id `termination.failed`, reason `tuple.false` (`s19_case9_control.out`; `s19_case1.out` has the first 13).
+- V1 (the explicit assert): `Assert might fail. Assertion <expr> might not hold.` at the assert; id `assert.failed`, reason `assertion.false`; **Silicon's own check at the call does not also report**: the failed assert is assumed afterwards (the M4.2b1 S14 behaviour) and the assumed condition is the check's own condition, so the check holds. Across the 2950 points the counts are `V1 assert-fails` = `V0 term-fails` (0 or 1) and `V1 own-term-fails` = 0 in every row (`grep -c 'V1 own-term-fails=[1-9]'` is 0 in every `s19_case*.txt`).
+- Consequence for the report layer: the explicit obligation is the only report for a failing call and carries category `termination` by construction (its own `Meta`), and `report.cpp:140-147` has nothing to de-duplicate; Silicon's `termination.failed`/`tuple.false` at the call remains the backstop that fires only if cerastes omits the assert (a call whose set already contains every earlier call).
+
+**Verdict: PASS.** The explicit assert is equivalent to Silicon's check for equal lengths and, with the TOP-extended rule above, for unequal lengths; the one assumption is that the arguments' values at the assert's position equal their values at the call (a callee that returns cannot change a local; an argument depending on a call result puts that call into PRE(c)).
+
+### S20: order, branches and loop conditions: **PASS**
+
+`build/m4.3b/spikes/s20.py`, Viper in the shape `src/vir/lower.cpp` emits (items right after the calls they depend on; `branch_body` as an `if` holding the call; the top-test loop `while (true) { <obligations>; t := next(…); if (!(t < n)) { goto l_brk } body }` of `lower.cpp:1192-1199`; the `do` shape `…body…; <obligations>; t := next(…); if (!c) { goto l_brk }` of `:1212-1221`; `nr` is `ensures false decreases _` like `f_abort`). Result: `build/m4.3b/spikes/s20_result.txt` (`s20_{a,b,c,d}.vpr/.out`). Every variant below gave exactly the listed errors and no other:
+
+| case | variant | errors |
+|---|---|---|
+| (a) `nr(k) + 100 / zero(y)` | order `zero`, `assert t1 != 0`, `nr` | **1: `assert.failed` at the division check** (`a_zero_first`) |
+| | order `nr`, `zero`, `assert` | 0: verifies, **the hole** (`a_nr_first`) |
+| | `zero` first with a caller precondition `y != 0` | still 1 at the check (`a_zero_first_with_pre`: zero's result is unconstrained) |
+| (b) a branch with a call before the outer `nr` | `if (a > 0) { assert a > 0; t := g(a); assert t != 0; u := 100 / t }; t2 := nr(k)` | **1 at `assert t != 0`** (`b_branch_first`) |
+| | the branch after `nr` | 0: **the hole** (`b_branch_after_nr`) |
+| | `if (a >= 0) { assert a > 0 …` | 1 at the branch's precondition assert (`b_branch_pre`) |
+| | the inner check guarded by `if (t != 0)` | 0 (`b_branch_guarded_ok`) |
+| (c) `while (next(i, n) < n) { i++; }`, loop head invariants `0 <= i <= n-1`, `decreases n - i` | `next_loose` (pre `q0 < q1`) | 0: verifies, and `res == n - 1` after the loop holds, so the callee's `ensures res == q0 + 1` is known after the call (`c_ok`) |
+| | `next_tight` (pre `q0 + 1 < q1`: fails only for the last evaluation `i = n - 1`) | **1: `assert.failed` at the precondition assert in the loop**, nothing else (`c_pre_last`) |
+| | a wrong post (`res == n`) | 1 at the post assert (`c_post_wrong`: the exit state is known, not vacuous) |
+| | body `i := i + 0` | 1 `termination.failed`/`tuple.false` at the loop's `decreases` (`c_term`) |
+| | body `i := i + 3` | 1 `invariant.not.preserved` at the user invariant (`c_inv`) |
+| | user invariant `1 <= i <= n-1` | 1 `invariant.not.established` at it (`c_entry`) |
+| (d) `do { i++; } while (next(i, n) < n);`, invariants at the start of every iteration `0 <= i <= n-2`, `n >= 2` | `next_loose` | 0, `res == n - 1` holds (`d_ok`) |
+| | `next_tight` | 1 at the precondition assert at the end of the body (`d_pre_last`) |
+| | wrong post / body `i := i + 0` | 1 post assert / 1 `termination.failed` (`d_post_wrong`, `d_term`) |
+| | user invariant `i <= n - 3` | 2: `invariant.not.established` and `invariant.not.preserved` at it (`d_inv`) |
+
+The facts for the lowering: (a)/(b) are the hole 0021's chain rule closes by ordering (a call that does not return must come after every item whose check C may evaluate first, and a branch holding a call is such an item); (c)/(d) need nothing new in Viper: the call in a loop condition is an ordinary call of the body, its precondition is an ordinary assert reported where it fails, and the loop's invariants, measure and exit knowledge behave as for M4.3a's top-test loops. One expectation corrected while writing the spike: in a `do` loop the exit test comes before the invariant is checked, so `i := i + 3` is reported first at the callee's precondition, not as an invariant failure (`d_inv` therefore uses a tighter invariant).
+
+### P37: discarded guarded calls, and a discarded `&&`/`||` with a side effect on its left: **PASS (the union rule extends; the detector corrected)**
+
+Run by the orchestrator after audit round 1 (item 6): `build/m4.3b/probes/p37/` (`p37.c`, `p37c.c` with Apple clang and
+GCC 16, `-Wall -Wextra -fsyntax-only`, `-std=c23` and `-x c++ -std=c++20`; `p37b.c`, `p37d.c` the same shapes with
+contracts through `build/cerastes verify`). EDG prints no warning on any of them (only #187 on `(x = 2) && a;`).
+
+| shape (discarded) | clang C/C++ | gcc C | g++ | cerastes before | after |
+|---|---|---|---|---|---|
+| `a && g(x);`, `a \|\| g(x);` | - | unused-value | - | `value_not_used` | same |
+| `c ? g(x) : h(y);`, `c ? g(x) : 0;`, `(void)(a && g(x));` | - | - | - | accepted by the encoder (calls refused later until M4.3b) | accepted |
+| `c ? v(x) : w(y);`, `c ? (void)g(x) : (void)h(y);` (void arms) | - | - | - | `unsupported_type` (`void`) | same (VIR has no void value) |
+| `a && (g(x), 1);` | unused-value | - | - | `value_not_used` | same |
+| `a && (y = g(x));`, `a && g(x) && h(x);`, `g(x) && g(a);` | - | unused-value | - | `value_not_used` | same |
+| `g(x) && a;`, `g(x) \|\| a;`, `x++ && a;`, `(x = 2) && a;`, `a && x++ && a;` | - | unused-value | - | **accepted** | `value_not_used` |
+| `x++ && (y = 1);`, `x++ && a && (x = 1);` | - | - | - | accepted | accepted |
+
+GCC's C rule (`warn_if_unused_value`): a discarded `&&`/`||` warns unless its right operand, after C's conversion to a
+truth value, still has a side effect at its top, which only an assignment of a constant keeps; the left operand does not
+matter. M4.3a's detector applied the right-operand test only when the right operand itself had an effect, so it accepted
+the left-operand shapes: corrected in `discarded_value_with_effect` (edg-backend, M4.3b), which now reports at the
+operator whose right operand fails.
