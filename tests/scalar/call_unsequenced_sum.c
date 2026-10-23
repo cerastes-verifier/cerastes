@@ -6,7 +6,7 @@
 
 int bounded(int x)
     CERASTES_REQUIRES(x >= 0)
-    CERASTES_ENSURES(r, r == (x > 1000 ? 1000 : x) && r >= 0)
+    CERASTES_ENSURES(r, r == (x > 1000 ? 1000 : x))
 {
   return x > 1000 ? 1000 : x;
 }

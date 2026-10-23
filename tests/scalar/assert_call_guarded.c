@@ -7,7 +7,7 @@
 
 int pos(int x)
     CERASTES_REQUIRES(x > 0)
-    CERASTES_ENSURES(r, r == x && r > 0)
+    CERASTES_ENSURES(r, r == x)
 {
   return x;
 }

@@ -6,14 +6,14 @@
 
 int g(int x)
     CERASTES_REQUIRES(x > 0)
-    CERASTES_ENSURES(r, r == x && r > 0)
+    CERASTES_ENSURES(r, r == x)
 {
   return x;
 }
 
 int h(int y)
     CERASTES_REQUIRES(y > 1)
-    CERASTES_ENSURES(r, r == y && r > 1)
+    CERASTES_ENSURES(r, r == y)
 {
   return y;
 }

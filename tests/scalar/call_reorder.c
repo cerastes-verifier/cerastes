@@ -17,14 +17,14 @@ int f(int x)
 }
 
 int h(int y)
-    CERASTES_ENSURES(r, r == y)
+    CERASTES_ENSURES(r, r == 1)
 {
-  return y;
+  return 1 + (y - y);
 }
 
 int test(int x, int y)
-    CERASTES_REQUIRES(0 < y && x <= 2147483647 - 100 / y)
-    CERASTES_ENSURES(r, r == x + 100 / y)
+    CERASTES_REQUIRES(x <= 2147483547)
+    CERASTES_ENSURES(r, r == x + 100)
 {
   return f(g(x)) + 100 / h(y);
 }

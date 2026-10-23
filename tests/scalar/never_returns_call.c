@@ -10,7 +10,7 @@ int never_returns(int x)
 
 int nonzero(int y)
     CERASTES_REQUIRES(y != 0)
-    CERASTES_ENSURES(r, r == y && r != 0)
+    CERASTES_ENSURES(r, r == y)
 {
   return y;
 }

@@ -5,29 +5,29 @@
 #include <cerastes.h>
 
 int f(int x)
-    CERASTES_REQUIRES(0 <= x && x < 2147483647)
-    CERASTES_ENSURES(r, r == x + 1 && r > 0)
+    CERASTES_REQUIRES(x < 2147483647)
+    CERASTES_ENSURES(r, r == x + 1)
 {
   return x + 1;
 }
 
 int h(int y)
-    CERASTES_REQUIRES(0 <= y && y < 2147483646)
-    CERASTES_ENSURES(r, r == y + 2 && r >= 2)
+    CERASTES_REQUIRES(y < 2147483646)
+    CERASTES_ENSURES(r, r == y + 2)
 {
   return y + 2;
 }
 
 int g(int a, int b)
-    CERASTES_REQUIRES(1 <= a && 2 <= b)
-    CERASTES_ENSURES(r, r == a - b && -b < r && r < a - 1)
+    CERASTES_REQUIRES(-1 <= a && 0 <= b)
+    CERASTES_ENSURES(r, r == a - b)
 {
   return a - b;
 }
 
 int test(int x, int y)
-    CERASTES_REQUIRES(0 <= x && x <= 2147483647 && 0 <= y && y < 2147483646)
-    CERASTES_ENSURES(r, r == x - y - 1)
+    CERASTES_REQUIRES(-2 <= x && x <= 2147483647 && 0 <= y && y < 2147483646)
+    CERASTES_ENSURES(r, r == x - (y + 1))
 {
   return g(f(x), h(y));
 }

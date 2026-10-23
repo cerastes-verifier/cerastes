@@ -5,8 +5,8 @@
 #include <cerastes.h>
 
 int succ(int x)
-    CERASTES_REQUIRES(0 <= x && x <= 1000)
-    CERASTES_ENSURES(r, r == x + 1 && 1 <= r && r <= 1001)
+    CERASTES_REQUIRES(x < 2147483647)
+    CERASTES_ENSURES(r, r == x + 1)
 {
   return x + 1;
 }
@@ -18,7 +18,7 @@ int larger(int p, int q)
 }
 
 int test(int a, int b)
-    CERASTES_REQUIRES(0 <= a && a <= 1000 && 0 <= b && b <= 1000)
+    CERASTES_REQUIRES(a < 2147483647 && b < 2147483647)
     CERASTES_ENSURES(r, r == (a > b ? a : b))
 {
   return larger(succ(a), succ(b));

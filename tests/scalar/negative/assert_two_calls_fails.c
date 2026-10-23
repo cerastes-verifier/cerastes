@@ -6,15 +6,15 @@
 #include <cerastes.h>
 
 int succ(int x)
-    CERASTES_REQUIRES(0 <= x && x <= 1000)
-    CERASTES_ENSURES(r, r == x + 1 && 1 <= r && r <= 1001)
+    CERASTES_REQUIRES(x <= 1000)
+    CERASTES_ENSURES(r, r == x + 1)
 {
   return x + 1;
 }
 
 int pred(int y)
-    CERASTES_REQUIRES(0 <= y && y <= 1000)
-    CERASTES_ENSURES(r, r == y + 1 && 1 <= r && r <= 1001)
+    CERASTES_REQUIRES(y <= 1000)
+    CERASTES_ENSURES(r, r == y + 1)
 {
   return y + 1;
 }

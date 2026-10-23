@@ -5,7 +5,7 @@
 #include <cerastes.h>
 
 int never_returns(int x)
-    CERASTES_REQUIRES(x >= 0)
+    CERASTES_REQUIRES(x == 0)
     CERASTES_ENSURES(r, false);
 
 int g(int n)
@@ -30,7 +30,14 @@ int g(int n)
     CERASTES_ENSURES(r, false)
 {
   if (n == 0) {
-    return never_returns(1);
+    return never_returns(0);
   }
   return never_returns(0) + f(n - 1);
+}
+
+int run(int n)
+    CERASTES_REQUIRES(0 <= n)
+    CERASTES_ENSURES(r, false)
+{
+  return f(n);
 }

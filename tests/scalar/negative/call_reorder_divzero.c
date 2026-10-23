@@ -17,9 +17,9 @@ int f(int x)
 }
 
 int h(int y)
-    CERASTES_ENSURES(r, r == y)
+    CERASTES_ENSURES(r, r >= 0)
 {
-  return y;
+  return y < 0 ? 0 : y;
 }
 
 int test(int x, int y)

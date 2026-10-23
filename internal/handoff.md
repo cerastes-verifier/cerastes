@@ -96,6 +96,22 @@ are rejected like the compilers (the union of clang and GCC, P35). With it, the 
    as locally.
 3. Answer §11 questions 24–26. Then M4.3b (§8.1; the next free record, 0021).
 
+**M4.3b is done (2026-10-23, branch `m4.3b-calls`, based on local `main` `ba90e75`, the merged M4.3a; result in
+`internal/status.md`).** Calls in the right operand of `&&`/`||` and the arms of `?:`, in `while`/`for`/`do` conditions,
+and in any arrangement whose checks form a chain verify in both modes (record 0021: the dependency-chain rule, decided
+exactly in lowering); an expression whose checks depend on different unsequenced calls is rejected (`unsequenced_calls`);
+where another call may precede a recursive call, cerastes asserts that call's termination itself (Silicon's own relation,
+S19); clang's `-Wself-assign` shapes are rejected (`self_assignment`, §11 question 24); and the M4.3a detector for a
+discarded `&&`/`||` now follows GCC's rule (P37). With it, the CI timeout goes from 240 to 150 minutes (§11 question 8).
+**Owner steps after M4.3b, in this order:**
+1. Merge M4.3a's PR (#6, `m4.3a-side-effects`) first: this branch contains it (local `main` `ba90e75` is that merge).
+2. Your §11 answers 24–26 were uncommitted in the main checkout's `internal/handoff.md`; this branch carries them, so drop
+   the main checkout's copy before merging: `git -C ~/Documents/cerastes/cerastes checkout internal/handoff.md`.
+3. Push the branch and open its PR: `git push origin m4.3b-calls` (the session never pushes). CI runs `check.sh` under the
+   new 150-minute limit.
+4. Answer §11 questions 27–31. For the next session, §11 question 13 (unsigned wrapping, in its own short session before
+   M4.4) is still the recommendation; the EDG box session after M4.2c (§8.1) is also pending.
+
 ## 1. State in one paragraph
 
 The owner split M4.2 into **M4.2a** (forward `goto`, functions that do not return, `assert`), **M4.2b** (named
@@ -597,6 +613,36 @@ of both rounds was taken):**
 7. **`decltype(x++)`** is accepted with no test (clang warns, so no native-ok positive can hold it); `typeof(x++)` is
    pinned by the C-only `typeof_effect.c` (0020 item 5).
 
+**M4.3b audit notes (2026-10-23; round 1 on the record had one blocking item, fixed in the record and in the code; round 2
+on the code and on the tests had none; every should-fix item of both rounds was taken):**
+1. **Round 1's blocking item** (fixed): the family F held PRE(c) only for the termination checks that end up printed, which
+   depends on the order F determines; in `nr(k) + g(h(x))` with `g` recursive, g's explicit check would have been placed
+   after `nr`. F now holds PRE(c) for every call in the caller's recursion cycle (0021 item 3); a VIR case pins it.
+2. **Smaller sets are sound but cost false alarms** (round 2, recorded in 0021 item 10): a precondition's set is its
+   arguments' values and the floor, and a comma's value does not carry its left operand's floor, so
+   `h((validate(y), y))` (with `validate` ending the program unless `y > 0`) and `100 / (validate(y), y)` report errors C
+   cannot reach. Exact sets would change the Viper of M4.3a-era programs (§11 question 27).
+3. **Writes and snapshots are in F** (0021 item 3): `(x = f(a)) + (y = g(b))` is rejected although neither write can fail
+   (§11 question 28).
+4. **The fail-closed checks check the plan, not the emitted text** (round 2): `check_fixed_order` and
+   `check_variable_order` cannot see a set computed too large (the only unsound direction). The pins guard that, and the
+   auditor traced each to verify if its mechanism were removed: `never_returns_call_divzero.c` (the chain order),
+   `branch_after_noreturn_divzero.c` (D(B) in F), `noreturn_recursive_pair_same.c`, `recursive_after_noreturn_same.c` and
+   the `call_term_*` twins (the explicit termination check), `call_term_arg_value_same.c` (the argument's value), and the
+   `_pre` twins of the loop conditions (a call made at every evaluation).
+5. **Over-rejections** (sound): `a && (y = x = 1);` (every compiler is silent; the constant test looks one assignment
+   deep); a discarded `a && (flag = x);` with a `bool` target and a non-constant value (GCC is silent; untested); a `?:`
+   with `void` arms (`unsupported_type`, §11 question 30).
+6. **Lowering's internal errors exit 2, not 3** (predates M4.3b): they are reported as `unsupported_expression` ("an
+   internal inconsistency: …"), and `verify_main.cpp` maps only EDG's own internal errors to 3 (§11 question 29). Since
+   M4.3b they are reported before lowering's rejections, so a rejection never hides one.
+7. **Accepted shapes that print EDG's #187 cannot be pinned by a verified test** (`a && (y = 2);`, `a && (flag = 0);`
+   with a `bool` target): the harness fails a `verified` run on any warning. `discarded_and_assign_const.c` pins the nearest
+   warning-free shape (`a ? (y = 2) : 0;`), and `build/m4.3b/edg/disc.py` the probes (§11 question 31).
+8. **Some twins pin nothing specific to 0021** (round 2, tests): the loops' `_termination`/`_preserved` twins,
+   `call_reorder_divzero.c` and `call_comma_floor_divzero.c` fail for their stated reason at their line, as they would have
+   before M4.3b; the positives and the pins carry the rule.
+
 ## 7. Known gaps carried
 
 - Termination: a recursion cycle through another unit (0013 item 5) — the contract manifest, M6 (M7 if it does not fit).
@@ -745,7 +791,7 @@ rejected by C's rules in both modes; the `-Wall` shapes rejected like the compil
 the write. Lowering: calls are the only fixed points, every other item is placed after the calls it depends on (audit
 round 1's blocking finding).
 
-**M4.3b Calls in expressions** (record 0021, the next free number; planned in the M4.3 planning, 2026-10-22). Scope:
+**M4.3b Calls in expressions** (record 0021; **run 2026-10-23**, see `internal/status.md`; with it, cerastes's own termination check of a recursive call that another call may precede, `self_assignment`, and P37's correction of a discarded `&&`/`||`). The planning text follows (2026-10-22). Scope:
 - calls in the right operand of `&&`/`||` and the arms of `?:`: inside M4.3a's branches (E5), each call a fixed point
   inside its branch; the branch is then a fixed point of the enclosing full expression;
 - calls in loop conditions: M4.3a's top-test shape (a `while`/`for` condition lowered inside `while (true)`), and `do`
@@ -1124,13 +1170,32 @@ Each has a recommended answer. Answer inline, as before.
 24. **`-Wself-assign`** (clang, both modes; GCC is silent) warns on `x = x;`, which cerastes has accepted since M3 (0012
     item 3), and on the new value form `y = (x = x)` (accepted; audit round 2). The union rule of 0020 item 5 would reject
     both. Reject them (a small rule; no existing test uses the shape), and when? *Recommended: yes, in M4.3b, with a
-    rejection test per form.*
+    rejection test per form.* **Answered (owner, 2026-10-23): yes, in M4.3b, with a rejection test per form.**
 25. **The `&&`/`||` asymmetry of rule C** (0020 item 5). By the union, a discarded `a && (x = 1);` is accepted (all four
     configurations are silent; EDG prints its #187) while `a && (x = b);` is rejected (gcc C warns: it folds `(x = b) != 0`
     away only for a constant). Keep the union exactly, or reject every discarded `&&`/`||` whose right operand has a side
     effect (one rule, stricter than every compiler on the constant form; `if (a) x = 1;` says the same)? *Recommended:
-    keep the union; it is your rule, and the constant form already prints EDG's warning.*
+    keep the union; it is your rule, and the constant form already prints EDG's warning.* **Answered (owner, 2026-10-23):
+    keep the union.**
 26. **Sequencing with pointers.** 0020 item 4 checks names, which is exact while every modified object is a named local.
     With pointers (M4.5), `*p = (*q)++` is undefined only when `p` and `q` alias, so the check must become a check on
     objects, decided per path: a new category (`unsequenced`) in the manner of `uninitialized`. *Recommended: yes, as
-    part of M4.5a's memory-model record.*
+    part of M4.5a's memory-model record.* **Answered (owner, 2026-10-23): yes, as part of M4.5a's memory model** (§8.1
+    M4.5a item (5)).
+
+**M4.3b, 2026-10-23:**
+
+27. **Exact sets for preconditions and commas** (§6 M4.3b note 2). The sets are smaller than "what C completes first",
+    which is sound but gives false alarms on `h((validate(y), y))`, a C idiom. Make them exact (the Viper of M4.3a-era
+    programs with these shapes changes; no expectation does)? *Recommended: not now; when a ported example meets it.*
+28. **Writes in the chain** (§6 note 3). Let writes and snapshots, which cannot fail, be placed after the last fixed
+    point of their set instead of entering F, so `(x = f(a)) + (y = g(b))` is accepted? *Recommended: not now; one rule
+    is simpler to audit; revisit when a port needs it.*
+29. **Exit status of lowering's internal errors** (§6 note 6): route them to exit 3, decision 0011's "tool failure, never
+    a verdict"? *Recommended: yes, a short item in the next session that touches the driver (its own report path and a
+    `--selftest` check).*
+30. **`void` arms of `?:`** (`c ? v(x) : w(y);`, accepted by every compiler, rejected as `unsupported_type`): an M8
+    entry, or support now? *Recommended: an M8 entry; `if (c) v(x); else w(y);` says the same.*
+31. **Warnings in verified tests** (§6 note 7): let a `verified` test list its expected front-end warnings
+    (`frontend-warning`, as a `rejected` test may), so accepted shapes that print EDG's #187 can be pinned?
+    *Recommended: yes, a small harness item with twins in the next session that touches the harness.*

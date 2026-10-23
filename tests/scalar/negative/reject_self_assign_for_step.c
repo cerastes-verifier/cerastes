@@ -8,7 +8,7 @@ int f(int n, int x)
     CERASTES_REQUIRES(0 <= n && n < 100)
 {
   int i;
-  CERASTES_INVARIANT(0 <= i && i <= n)
+  CERASTES_INVARIANT(i <= n)
   CERASTES_DECREASES(n - i)
   for (i = 0; i < n; x = x) {
     i++;

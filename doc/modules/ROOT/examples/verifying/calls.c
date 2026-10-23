@@ -7,7 +7,7 @@
 
 int pos(int x)
     CERASTES_REQUIRES(x > 0)
-    CERASTES_ENSURES(r, r == x && r > 0)
+    CERASTES_ENSURES(r, r == x)
 {
   return x;
 }
@@ -19,8 +19,8 @@ int guarded(int a)
 }
 
 int next(int x)
-    CERASTES_REQUIRES(0 <= x && x < 2147483647)
-    CERASTES_ENSURES(r, r == x + 1 && r > 0)
+    CERASTES_REQUIRES(x < 2147483647)
+    CERASTES_ENSURES(r, r == x + 1)
 {
   return x + 1;
 }
@@ -30,7 +30,7 @@ int count(int n)
     CERASTES_ENSURES(r, r == n)
 {
   int i = 0;
-  CERASTES_INVARIANT(0 <= i && i <= n)
+  CERASTES_INVARIANT(i <= n)
   CERASTES_DECREASES(n - i)
   while (next(i) <= n) {
     i = i + 1;

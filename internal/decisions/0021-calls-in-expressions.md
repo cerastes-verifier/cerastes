@@ -19,7 +19,9 @@
 
   Facts marked (P*n*) and (S*n*) are probes and Silicon spikes, recorded with their evidence in
   `internal/il-inventory.md`, "M4.3b" (P36–P37, S19–S20). Audit round 1 (Opus) found one blocking item (the termination
-  member of F in item 3, fixed) and should-fix items folded into items 1, 3, 4, 8, 9, 11 and 13.
+  member of F in item 3, fixed) and should-fix items folded into items 1, 3, 4, 8, 9, 11 and 13. Audit round 2 (Opus, the
+  code and the tests) found no blocking item; its record items (the smaller sets of item 10, a constant zero in item 1's
+  discarded `&&`) are folded in.
 - **Milestone:** M4.3b (2026-10-23).
 
 ## Context
@@ -59,7 +61,8 @@ never interleave, but their order is unspecified, and a program is correct only 
      *left* operand when its right operand is not an assignment of a constant (`x++ && a;`, `(x = 2) && a;`), which the
      M4.3a detector accepted: the detector now applies 0020 item 5's right-operand rule whenever the expression has a
      side effect anywhere (a correction of the implementation, not of the rule), and reports at the operator whose
-     right operand fails. A `?:` whose arms are `void` calls (`c ? v(x) : w(y);`) stays rejected (`unsupported_type`:
+     right operand fails. The constant must be nonzero, or the target `bool`: GCC's C mode warns on `a && (y = 0);`,
+     since `(y = 0) != 0` folds to a constant (audit round 2). A `?:` whose arms are `void` calls (`c ? v(x) : w(y);`) stays rejected (`unsupported_type`:
      VIR has no `void` value; an M8 inventory entry).
 2. **Meaning.** A call in a guarded operand runs, with its precondition checked, exactly when C evaluates the operand. A
    call in a loop condition runs, with its precondition checked, at each evaluation. Calls that C leaves unsequenced

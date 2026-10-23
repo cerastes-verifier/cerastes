@@ -5,14 +5,14 @@
 #include <cerastes.h>
 
 int step(int x)
-    CERASTES_REQUIRES(0 <= x && x < 100)
-    CERASTES_ENSURES(r, r == x + 1 && 0 < r && r <= 100)
+    CERASTES_REQUIRES(x < 100)
+    CERASTES_ENSURES(r, r == x + 1)
 {
   return x + 1;
 }
 
 int test(int n)
-    CERASTES_REQUIRES(0 <= n && n <= 101)
+    CERASTES_REQUIRES(n <= 101)
     CERASTES_ENSURES(r, r == (n > 1 ? n - 1 : 1))
 {
   int i = 0;

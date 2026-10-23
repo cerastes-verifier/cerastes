@@ -5,9 +5,9 @@
 #include <cerastes.h>
 
 int fib(int n)
-    CERASTES_REQUIRES(0 <= n && n <= 1073741825)
+    CERASTES_REQUIRES(n <= 1073741825)
     CERASTES_DECREASES(n)
-    CERASTES_ENSURES(r, r == n && r >= 0)
+    CERASTES_ENSURES(r, r == n)
 {
   if (n < 2) {
     return n;
@@ -16,8 +16,8 @@ int fib(int n)
 }
 
 int use_fib(int m)
-    CERASTES_REQUIRES(0 <= m && m <= 1073741825)
-    CERASTES_ENSURES(r, r == m && r >= 0)
+    CERASTES_REQUIRES(m <= 1073741825)
+    CERASTES_ENSURES(r, r == m)
 {
   return fib(m);
 }
