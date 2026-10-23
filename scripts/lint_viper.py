@@ -37,6 +37,14 @@ status 1) on:
   `while` body, an `if` or `else` branch) that also encloses the `goto`, so a jump goes outward or
   stays in its block, never into a loop (which would skip the invariant check on entry) or a branch
   (which would skip its condition);
+* the flags of locals without an initializer (decision 0019 item 5: only a write sets a flag, and a
+  declaration, a block entry or a switch dispatch resets it): in a method, every `d_<name> := true` must
+  directly follow (the previous line that is neither blank nor a comment) an assignment `<name> := ...` of
+  the variable it flags, so a flag cannot be set without the write; every `d_<name> := false` (a reset) must
+  directly precede `<name> := <dummy>`, an integer literal or `true`/`false` (the emitter writes the flag
+  first, then the value: `d_v := false` and then `v := 0`), so a variable cannot be reset to a value that
+  is then taken for a determinate one; and a flag is assigned nothing but `true` and `false`.  The
+  snapshot of a loop (`ds_<name> := d_<name>`) and the reads of a flag are not assignments to it;
 * an empty input set, and a MANIFEST that names a file which is not there.  The
   manifest is the set of files scripts/run_tests.py expects: its first line is
   `# run-id: <id>` (printed by the run), then one file per line.  Fewer files
@@ -384,6 +392,7 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
 
     lint_termination_clauses(src, decls, add, measures)
     lint_jumps(src, decls, add)
+    lint_flags(src, add)
 
     if map_text is None:
         problems.append(f"{name}: no position map ({map_name or name + MAP_SUFFIX})")
@@ -519,6 +528,49 @@ def lint_jumps(src: Source, decls: list[Decl], add: Callable[[int, str], None]) 
                 add(lineno, f"backward `goto {nxt[0]}` (the label is on line {labels[nxt[0]]}): a "
                             "cycle that Silicon does not check for termination (decision 0014); "
                             "loops are `while`")
+
+
+FLAG_ASSIGN_RE = re.compile(r"^\s*d_(?P<name>[A-Za-z_$][\w$']*)\s*:=(?P<value>.*)$")
+FLAG_ANYWHERE_RE = re.compile(r"(?<![\w$'])d_[\w$']*\s*:=")
+FLAG_DECL_INIT_RE = re.compile(r"(?<![\w$'])var\s+d_[\w$']*\s*:\s*Bool\s*:=")
+DUMMY_VALUE_RE = re.compile(r"^\s*(?:-?\s*\d+|\(\s*-\s*\d+\s*\)|true|false)\s*;?\s*$")
+
+
+def lint_flags(src: Source, add: Callable[[int, str], None]) -> None:
+    """Decision 0019 item 5: the ghost flag `d_<name>` of a local without an initializer is set only by a
+    write of that local, and a reset gives the local its dummy value.  A flag that could be set without
+    the write would make an `uninitialized` obligation hold for a variable that has no value: the one
+    place where a lowering bug turns into a wrong `verified`.  So `d_<name> := true` must follow
+    `<name> := ...` directly, `d_<name> := false` must precede `<name> := <literal>` directly, and a flag
+    is assigned nothing else.  Neighbours are the previous and next lines that are neither blank nor a
+    comment (the emitter writes one statement per line)."""
+    lines = [(ln, code) for ln, code in enumerate(src.code, start=1) if code.strip()]
+    for k, (lineno, code) in enumerate(lines):
+        if FLAG_DECL_INIT_RE.search(code):
+            add(lineno, "a flag is declared without an initializer (`var d_<name>: Bool`): it holds a value only "
+                        "after a reset (decision 0019 item 5)")
+        m = FLAG_ASSIGN_RE.match(code)
+        if len(FLAG_ANYWHERE_RE.findall(code)) > (1 if m else 0) or (m is None and FLAG_ANYWHERE_RE.search(code)):
+            add(lineno, "an assignment to a flag does not stand alone on its line: the flag rule reads "
+                        "one statement per line (decision 0019 item 5)")
+            continue
+        if m is None:
+            continue
+        name, value = m.group("name"), m.group("value").strip().rstrip(";").strip()
+        if value == "true":
+            prev = lines[k - 1][1] if k > 0 else ""
+            if not re.match(r"^\s*" + re.escape(name) + r"\s*:=", prev):
+                add(lineno, f"`d_{name} := true` does not directly follow a write `{name} := ...`: a flag is "
+                            "set only by the write of its variable (decision 0019 item 5)")
+        elif value == "false":
+            nxt = lines[k + 1][1] if k + 1 < len(lines) else ""
+            r = re.match(r"^\s*" + re.escape(name) + r"\s*:=(?P<rest>.*)$", nxt)
+            if r is None or DUMMY_VALUE_RE.match(r.group("rest")) is None:
+                add(lineno, f"`d_{name} := false` is not directly followed by `{name} := <literal>`: a reset "
+                            "gives the variable its dummy value (decision 0019 item 5)")
+        else:
+            add(lineno, f"`d_{name}` is assigned `{value}`: a flag is assigned only `true`, by the write of "
+                        "its variable, or `false`, by a reset (decision 0019 item 5)")
 
 
 def block_nesting(body: list[tuple[str, int]]):

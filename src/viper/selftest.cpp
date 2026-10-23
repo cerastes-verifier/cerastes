@@ -158,6 +158,15 @@ class Kit {
   }
   void require_map(const std::string& category, const std::string& msg) { map_requires.emplace_back(category, msg); }
 
+  // Effects used as values (decision 0020).  `x++` is incE(x), `++x` incE(x, false), `x--` decE(x), `x op= rhs` cmpE(x, op, rhs).
+  const Expr* asgE(const Var* x, const Expr* value) { return b.assign_expr(x, value, at()); }
+  const Expr* cmpE(const Var* x, BinaryOp op, const Expr* rhs) { return b.compound_assign_expr(x, op, rhs, at()); }
+  const Expr* incE(const Var* x, bool post = true) { return b.inc_dec_expr(x, true, post, at()); }
+  const Expr* decE(const Var* x, bool post = true) { return b.inc_dec_expr(x, false, post, at()); }
+  const Expr* comma(const Expr* a, const Expr* c) { return b.comma(a, c, at()); }
+  const Stmt* incS(const Var* x) { return b.inc_dec(x, true, at()); }
+  const Stmt* decS(const Var* x) { return b.inc_dec(x, false, at()); }
+
   // Control flow (decision 0014).  A loop in any form; `id` is from jid().
   int jid() { return b.jump_id(); }
   const Stmt* loop(const Expr* c, std::vector<Clause> inv, std::vector<Clause> measure, const Stmt* body, const Stmt* step,
@@ -689,9 +698,12 @@ void define_bool_and_guards() {
 namespace {
 void define_calls_loops_and_more();
 void define_rejections();
+void define_side_effects();
+void define_side_effect_rejections();
 }  // namespace
 
 #include "selftest_cases2.inc"
+#include "selftest_cases3.inc"
 
 namespace {
 
@@ -836,6 +848,8 @@ int main(int argc, char** argv) {
   define_bool_and_guards();
   define_calls_loops_and_more();
   define_rejections();
+  define_side_effects();
+  define_side_effect_rejections();
   int bad = 0;
   for (const Case& c : lowering_cases()) {
     std::string problem;

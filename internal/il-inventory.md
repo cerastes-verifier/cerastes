@@ -2313,3 +2313,344 @@ shapes on which the owner's rule ("strictest, as g++", P31) applies in both mode
 object of enumeration type is an enumeration value, as for g++).
 
 *2026-10-20: milestone numbers before the M4.1 section follow the renumbering of that date (plan.md): generic templates are M5.*
+
+
+## M4.3a: side effects in expressions
+
+Probes P33-P35 and spikes S17-S18 for decision 0020. Evidence is under `build/m4.3a/probes/` and `build/m4.3a/spikes/` (gitignored). The IL probes ran as
+`scripts/cerastes-fe.sh --c23|--c++20 --display_error_number --il_display <probe>` (`build/m4.3a/fe.sh`: output `<probe>.<mode>.il` / `.err`); `build/m4.3a/tree3.py <il> fn [NAME...]` condenses
+a function body to a tree (`lv` = `is_lvalue`, `nu` = `result_is_not_used`, `par` = `is_parenthesized`, `gen` = `compiler_generated`, `olt` = `orig_lvalue_type`; `POS=1` adds the position and range);
+the trees are `probes/p33*.trees`. `build/m4.3a/warn.py` ran each probe through the plain front end and `build/cerastes verify` (verify mode's flags), `build/m4.3a/matrix.py` ran the native compilers
+(`matrix.json`, `matrix.txt`; the tables below come from `build/m4.3a/tables.py`). Silicon was run as `scripts/run_tests.py` runs `.vpr` fixtures (`spikes/gen17.py`, `spikes/gen18.py` write the `.vpr` and
+`.out` files and run `java -Xss128m -jar silicon.jar --z3Exe ... --numberOfErrorsToReport 0`). `il_def.h` lines are in `third_party/edg/src/il_def.h` at the pin `f0ed5525af`. Probe files, one function per
+line: `p33.c|cpp` (`a1`-`a25`), `p33b.c|cpp` (`c1`-`c34`), `p33c.cpp` (`d1`-`d12`, C++ lvalue uses), `p33d.c` (`u1`-`u7`, unevaluated C), `p33e.cpp` (`e1`-`e6`, unevaluated C++), `p34.c|cpp`
+(`u*` unsequenced, `k*` commas, `h*` conditions, `d*` discarded values, `s*` unevaluated), `p34b.c|cpp` (`j*`, assignments of a constant as a condition), `p34c.c|cpp` (`w*`, writes of the target inside the
+right-hand side), `p34d.c|cpp` (`m*`, comma and discarded-value extras). The `.cpp` files are copies of the `.c` files (`typeof` becomes `decltype` in `p34.cpp`); every probe ran in both modes.
+
+### P33: IL of side effects used as values: **PASS (no stop rule triggered)**
+
+The stop rules (C++ wrapper node the encoder cannot map; value not the converted value; node type not the left operand's; `parenthesized` unreliable) were each checked and none fires. The field is
+`is_parenthesized` (`an_expr_node` :15075, "TRUE if the expression was parenthesized in the source code"); there is no `eok_parens` node (`PARENS_IN_IL` is 0).
+
+**1. A used `=`, `op=`, `++`, `--` is its own node and sits directly as the operand; there is no wrapper in either mode.** Its `type` is the left operand's type; a conversion to the context's type is a separate
+`compiler_generated` `eok_cast` (or `eok_bool_cast`) around it, never between the lvalue and the node. `probes/p33.c.c23.trees`, `p33.cpp.cxx.trees`, `p33b.*.trees`:
+
+```text
+a1  stmk_init [dik_expression] var=y eok_add[int](eok_assign[int] {par}(var x:int {lv}, var a:int {olt=int}), const int 1[int])                       (C23)
+a1  ... eok_add[int](eok_assign[int] {par,olt=int}(var x:int {lv}, var a:int {olt=int}), const int 1[int])                                           (C++20)
+a3  stmk_expr eok_assign[int] {nu}(var i:int {lv}, eok_cast[int] {gen}(eok_assign[short](var s:short {lv}, var v:short {olt=short})))                 (C23; C++20: the same, {lv,nu} / {olt=short})
+c16 ... eok_add[int](eok_cast[int] {gen}(eok_add_assign[short] {par}(var s:short {lv}, const int 1000[int])), var a:int {olt=int})                     (compound: short type, rhs int)
+c18 ... eok_add[int](eok_cast[int] {gen}(eok_post_incr[short](var s:short {lv})), var a:int {olt=int})
+c20 stmk_return eok_cast[short] {gen}(eok_post_incr[int](var x:int {lv}))                          (return x++ in a short function)
+a20 stmk_expr eok_assign[bool] {nu}(var b:bool {lv}, eok_bool_cast[bool] {gen}(eok_assign[int] {par}(var x:int {lv}, const int 5[int])))              (b = (x = 5))
+a21 stmk_init [dik_expression] var=y eok_cast[int] {gen}(eok_assign[bool] {par}(var b:bool {lv}, const bool 1U[bool]))                                (int y = (b = true))
+a22 ... eok_eq[int](eok_cast[unsigned int] {gen}(eok_assign[enum color] {par}(var c:enum color {lv}, const enum color 1U {expr=...}[enum color])), ...)  (C23; C++20: cast to int, color)
+c21 stmk_expr eok_assign[long] {nu}(var l:long {lv}, eok_cast[long] {gen}(eok_assign[int](var i:int {lv}, const int 5[int])))                          (l = i = 5)
+```
+
+The value of the node is the new value of the left operand (the converted right-hand side); `x++`/`x--` (`eok_post_incr`/`eok_post_decr`, `il_def.h:14051`) are prvalues of the left operand's type that yield the old value.
+`a2` (`y = x = a`) is `eok_assign[int](y, eok_assign[int](x, a))` in both modes with no node between; a chain across types (`a3`, `c21`) has exactly one `eok_cast {gen}` where the types differ.
+Every right-hand-side variable read is `olt=<type>` (glvalue-to-prvalue by clearing `is_lvalue`, no node: `il_def.h:14907`); no read of a written variable is wrapped.
+
+**2. C23 against C++20 (`is_lvalue` :14942, `orig_lvalue_type` :14907).**
+
+| node | C23 | C++20 |
+|---|---|---|
+| used `x = e`, `x op= e`, `++x`, `--x` | `type` = left's type, no `lv`, no `olt` | `type` = left's type, **no `lv`, `olt` = that type** (the lvalue cleared) |
+| used `x++`, `x--` | prvalue, no flags | prvalue, no flags |
+| discarded `x = e`, `++x`, `op=` (statement, comma's left operand, `for` init) | `{nu}` | `{lv,nu}` |
+| discarded `x++`, `x--` | `{nu}` | `{nu}` |
+| comparison, `!`, `&&` | type `int` | type `bool` |
+| `if`/`while`/`for`/`do` condition that is an assignment or an int | the assignment itself | `eok_bool_cast[bool] {gen}` around it |
+| `?:` condition | the operand itself | `eok_bool_cast[bool] {gen}` around it |
+
+An assignment whose result is used **as an lvalue** (C++ only) keeps `is_lvalue`: `(x = 1) = 2` (`d1`: `eok_assign {lv,nu}(eok_assign[int] {lv,par}(x, 1), 2)`), `++x = 3` (`d2`), `++++x` (`d3`), `(a, x) = 5` (`d4`: the comma
+is `{lv,par}`), `(c ? x : y) = 1` (`d5`), `(x += 1) += 2` (`d7`), `int& r = (x = 1)` (`d6`, `eok_reference_to {gen}`). `lvalue_var` (`encode.cpp:1670`) rejects any left operand that is not an `enk_variable`, which covers all of them
+(`probes/p33c.cpp.cxx.trees`). `(x) = 3` and `(x)++` are `enk_variable {lv,par}` and pass `lvalue_var`.
+
+**3. `result_is_not_used`** (:14963) is on the top node of an expression statement, on a comma and its **left** operand, on a `(void)` cast and its operand (`c13`: `eok_cast[void] {nu}(eok_assign {nu,par}...)`), and on a `for`
+step expression. It is **not** on the right operand of a discarded comma (`a15`, `for (i = 0, j = n; ...; i++, j--)`: init `eok_comma[int] {nu}(eok_assign {nu}(i, 0), eok_assign(j, n))`, step
+`eok_comma[int] {nu}(eok_post_incr {nu}(i), eok_post_decr(j))`; the right operand carries no `nu` in either mode). The encoder must take "discarded" from the context, not from `nu` on the right operand.
+
+**4. The comma** is `eok_comma` (:14174), `type` = the right operand's type (`v(), x++` is `eok_comma[int]`; `v(), v()` is `eok_comma[void]`), with a `(void)` call as left operand as `eok_cast[void] {nu}(eok_call {nu}(...))`
+(`a17`). A comma whose left operand has no effect has the bare operand with `nu` (`c24` C23: `eok_comma[int] {par}(var a:int {nu,olt=int}, const int 3)`; C++20 `var a {lv,nu}`). A used comma with parentheses
+has `par` (`a16`: `eok_comma[int] {par}(eok_assign {nu}(x, a), eok_add(x, 1))`); in C++20 a used comma of an int value has `olt=int` (`c26`). `(x = 1, x = 2)`: left `{nu}`/`{lv,nu}`, right the plain assignment.
+
+**5. Conditions and `is_parenthesized`.** `par` sits on the assignment, never on the `eok_bool_cast` or on the comparison around it. It is reliable (`probes/p33b.*.trees`, `c1`-`c12`):
+
+| source | C23 condition | C++20 condition |
+|---|---|---|
+| `if (x = a)` | `eok_assign[int](...)`, no `par` | `eok_bool_cast {gen}(eok_assign {olt=int}(...))`, no `par` |
+| `if ((x = a))` | `eok_assign {par}` | `eok_bool_cast {gen}(eok_assign {par,olt=int})` |
+| `if (((x = a)))` | `eok_assign {par}` | same |
+| `if ((x = a) != 0)` | `eok_ne[int](eok_assign {par}, 0)` | `eok_ne[bool](eok_assign {par,olt=int}, 0)` |
+| `while (x = a)` / `while ((x = a))` (and `for`, `do`) | no `par` / `par` | `eok_bool_cast {gen}(...)` with the same `par` |
+| `!(x = a)`, `(x = a) && b`, `b && (x = a)`, `c ? (x = a) : 0` | `par` on the assignment | the same, under the casts |
+| `if (x = a, x > 0)` | `eok_comma[int](eok_assign {nu}, eok_gt)`, no `par` | `eok_comma[bool](eok_assign {lv,nu}, eok_gt[bool])` |
+
+So `assignment_as_condition` is: the whole condition of an `if`/`while`/`for`/`do`, after peeling one `eok_bool_cast {gen}` (C++), is an assignment or compound assignment node without `is_parenthesized`.
+The statement's own `(`..`)` is not recorded as parentheses (`c1`, `c5`: no `par`), so no false negative; a double parenthesis is present (`c2`, `c3`, `c6`, `c7`).
+
+**6. Statements.** `stmk_while`/`stmk_for`/`stmk_end_test_while` keep the condition in `expr` (`stmk_for`: `initialization` a statement, `increment` an expression, body in `statement`; loops: `loop_statement`);
+C23 wraps each loop in a `compiler_generated` `stmk_block`, C++20 does not (`a13`, `a14`, `a15`). `stmk_switch` `expr` is the `eok_post_incr` itself (`a9`, no cast, both modes). `eok_question` has the arms as the
+effect nodes directly (`a19`: `eok_question[int](var c, eok_post_incr, eok_post_decr)`; C++20 wraps the condition in `eok_bool_cast {gen}` and puts `olt=int` on the `?:` and on its used arms, `c32`, `c33`).
+`return (x = a, x + 1)` (`a16`) and `return x++` (`a8`) have the effect node directly under `stmk_return`; an `int y = (x = a) + 1;` initializer is a `stmk_init` whose `dynamic-init` has `kind dik_expression` and
+`expression` the tree (the `dik_constant` form is only for constant initializers).
+
+**7. Positions.** Every operation node's `position` is the operator token and `expr_range` spans its operands without enclosing parentheses (`POS=1 tree3.py`: `a1` the assign `@5:35[33-37]` for `x = a` at columns 33-37;
+`a8` `x++` `@12:36[35-37]`; comma `@19:64[61-68]`). A diagnostic at an `AssignE`'s IL node therefore points at the `=` / `++` / `,`.
+
+**8. Unevaluated operands.** `sizeof(x++)` is folded to a constant (`const int 4 {expr=eok_cast {gen}(const unsigned long 4UL {expr=enk_sizeof}...)}`, `a23`, `u1`, `u2`, `s2`); the operand node survives **only**
+in the constant's `expr` chain: the constant's `expr` -> `enk_sizeof` node (:13611, `is_type FALSE`) -> `expr` = `eok_post_incr {par}` (`p33.c.c23.il`, function `a23`). `sizeof(x = 1)`, `sizeof x++` the same. `typeof(x++)` (C) and
+`decltype(x++)` (C++) leave **no expression in any statement or expression tree**: the operand is a `local-expr-node-ref` entity with `decltype referrer: <type>` (`p33d.c.c23.il` function `u3`, `p33e.cpp.c++20.il`
+function `e2`), reachable only from the type. `noexcept(x++)` is a folded constant whose `expr` is `eok_noexcept(eok_post_incr)` (`e3`). A walk of the statement trees for rule (c) sees `sizeof` operands through the
+constant chain only; it cannot see `typeof`/`decltype` operands at all (they are not evaluated, so this is sound; it only matters if the owner wants `typeof(x++)` rejected, P35).
+
+**Stop rule for the interface (`build/m4.3a/vir-api.md`):** nothing in P33 contradicts it. `AssignE.type` = the left operand's type holds for every node above; `yields_old` for the post forms; the converted value of a
+narrowing chain is the inner node's `type` followed by the encoder's own conversion (the gen cast), exactly as for `assign` today.
+
+### P34: EDG's own warnings on these shapes: **UNCLEAR for the owner's suppression rule (no EDG number qualifies for suppression); no EDG sequencing warning exists**
+
+`build/m4.3a/warn.py` runs each probe through plain `scripts/cerastes-fe.sh --display_error_number` and through `build/cerastes verify` (at the baseline binary, before the M4.3a encoder; verify mode prints EDG's warnings, then
+cerastes's own errors), in both modes. The two agree on every warning number: verify mode adds only the `cerastes-*` errors (`unsupported_expression`, `call_without_contract`, `missing_decreases`, which are
+today's rejections of these shapes). Verify mode's suppression list is `src/driver/verify_main.cpp:313`: `--diag_suppress=61,62,63,39,179,68,69,188,546,940,1305,2803`, plus `--no_use_before_set_warnings` (#549), C only
+`--diag_suppress=257` and `--diag_error=1901`, and `--diag_error=161,1675`. So **#174, #187, #550, #177, #111 are not suppressed today** and print, with exit status decided by verification (`probes/t2.c`, `x + 1;`: the #174
+warning, then `error: overflow`, exit 1). The "EDG (C / C++)" column of the tables below lists the numbers other than #550/#177/#68 (variables set but not used, declared but not referenced, integer sign change: probe artefacts).
+
+- **No sequencing warning.** Not one of `u1`-`u19`, `w1`-`w24` (all the unsequenced shapes) gets an EDG diagnostic of any number. cerastes's `unsequenced_modification` is the only report.
+- **#174 "expression has no effect"** (verify mode: not suppressed). Fires on: a comma's left operand that has no effect (`(a, b);` `k1`, `y, x++;` `k3`, `(a, 3)` `k4`/`c24`, `(a, x++)` `k9`, `for (...; a, x++)` `k11`, `(x, 1);` `k15`,
+  `(1, x++)` `w8`, `(void)(a, b)` `m2`), **and on shapes the plan accepts or treats separately**: the pure discarded statements `x + 1;` (`d4`) and `+x;` (`d14`, 0012 item 3 keeps them accepted), and `sizeof(x++);` as a statement (`d6`).
+  It does **not** fire on the (a) shapes (`x++, y;` `k2`, `x++, 1;` `k8`, `x = 1, y;` `m10`, `(void)g(a), 1;` `m12`, a `for` init `x = 0, a;` `k10`), on (b) (`x++ + 1;` `d1`, `x == (y = 1);` `d2`, `(x = 1) + 0;` `d3`, `x++ < 3;`,
+  `-x++;`, `!x++;`), or on (c) in an expression (`sizeof(x++)` in `s1`/`s2`; `typeof`/`decltype`). So #174 covers `x + 1;`, which cerastes accepts: **it cannot be suppressed under the owner's rule**, and cerastes's
+  `comma_without_effect` is needed for (a) regardless.
+- **#187 "use of = where == may have been intended"** (not suppressed). Fires **only when the right-hand side is a constant** (`if (x = 3)`, `if (x = 'c')`, `if (x = 1 + 2)`, `while`, `do`, `for`: `j1`, `j2`, `j10`, `j11`, `j13`, `j14`, `j17`, `j20`);
+  never for `if (x = a)`, `if (x = a + 1)`, `if (x = g(a))`, `if (x += 1)`, `if (x = y = 3)` (`h1`..`h5`, `j3`, `j4`, `j6`, `j16`). It **also fires on shapes the compilers accept silently and the plan accepts**: `if ((x = 3))` (double parentheses,
+  `j5`), `(x = 3) && a` (`j7`), `a && (x = 3)` (`j8`), `(x = 3) ? a : x` (`j9`), `(x = 1) ? x : 0` (`w16`), `!(x = 3)` (`j12`), `a == 1 || (x = 3)` (`j18`), and the statements `a && (x = 1);` / `a || (x = 1);` (`m17`, `m18`). EDG's rule ignores
+  the extra parentheses. **#187 cannot be suppressed** (it covers accepted shapes), and it does not cover the non-constant `if (x = a)`: cerastes's `assignment_as_condition` is needed anyway. A test whose accepted shape has a
+  constant right-hand side (`a && (x = 1);`) prints #187 as a warning and still verifies; tests that use a non-constant right-hand side print nothing.
+- **#550** ("set but never used"): fires on a local or parameter that is only written (`u6`, `u12`, `h7`-`h9`, `h16`, `a10`, `a18`); the plan's positives read every written variable. **#177** (declared but never referenced, `c25`),
+  **#111** (unreachable statement, `j15`: a consequence of `if (x = a, 1) return x; return a;`) and **#68** (sign change in `u += -1`, `c17`, already suppressed) are artefacts. **#549** is off.
+
+**Verdict.** No EDG warning number can be added to the suppression list under the rule "suppress only when cerastes rejects every shape the number covers": #174 covers `x + 1;`, #187 covers `if ((x = 3))` and the other
+accepted shapes, #550 and #177 stay by decision (handoff §11 question 20, as recommended). The plan's stop rule 2 ("an EDG number covers a shape cerastes accepts") applies to #174 and #187 only as a reason **not to suppress**;
+both already print today for accepted code (`x + 1;`). For the owner: with no suppression, a rejected `if (x = 3)` prints #187 and then `assignment_as_condition` (two messages for one problem); every other rejected shape
+prints only the cerastes message.
+
+### P35: native compilers on the same shapes: **PASS (matrix below; the compilers disagree on several shapes, the union is stated)**
+
+`build/m4.3a/matrix.py` compiles each probe with Apple clang (Command Line Tools, `$CERASTES_CLANG_CC`/`_CXX`) and GCC 16 (Homebrew `gcc-16`, `g++-16`), `-fsyntax-only -Wall -Wextra` (no `-Werror`), `-x c -std=c23` and `-x c++ -std=c++20`;
+`matrix.txt` is the raw table, `matrix.json` and `matrix_detail.json` (messages) the data. 211 shapes. A cell is the warning flag, `-` for none; the flags `-Wunused-parameter`, `-Wunused-variable`,
+`-Wunused-but-set-variable|parameter` (artefacts of a probe that writes without reading) are left out of the cells, except that a positive test must read every variable it writes (`-Wunused-but-set-variable` is in `-Wall`).
+The last column is EDG (P34). Shapes that are silent everywhere (115) follow the table.
+
+**Every P33 shape is silent in all four configurations**, except the two that are the (b) and (c) shapes by design: `a23` `sizeof(x++)` (clang only) and `a24` `x++ + 1;` (all). `a1`-`a22`, `a25`, `c2`-`c4`, `c6`-`c23`, `c26`-`c34` and
+`d1`-`d12` (C++ lvalue uses) produce no warning of any kind (`c25`, `c1`, `c5`, `c24` are the expected ones: unused variable, `if (x = a)`, `while (x = a)`, `x = (a, 3)`; `p33c:d4`, `(a, x) = 5`, warns `-Wunused-value` in both C++ compilers: the comma's left operand `a` has no effect).
+
+**What the compilers agree on, and the union (the owner's rule: strictest, in both modes).**
+
+- **`-Wparentheses`** warns, in all four, on an assignment that is the whole condition of `if`/`while`/`do`/`for` without extra parentheses: `if (x = a)`, `while (x = a)`, `do {} while (x = a)`, `for (; x = a;)`, with any right-hand side
+  (`h1`, `h2`, `h4`, `h5`, `j1`-`j4`, `j10`, `j11`, `j13`, `j14`, `j16`, `j17`, `j20`). It is **silent in all four** on: `if ((x = a))` and `(((x = a)))` (`c2`, `c3`, `j5`), `if ((x = a) != 0)`, `!(x = a)` (`h6`, `j12`), `(x = a) && b`,
+  `b && (x = a)`, `a || (x = a)`, `(x = a) ? 1 : 2`, `c ? (x = a) : 0` as a condition, `a && (x = a)`, `x = (x = a) ? 1 : 2`, `if (x = a, x)` (a comma), `if (x++)`, `if (x += a)` and `if (x -= a)` (compound assignment other than bitwise:
+  `h3`, `h15`, `j6`). **Only clang** warns on `if (x |= a)` (`h13`; bitwise assignment is rejected anyway until M4.4). The set to reject, with the union, is the whole condition being `=` (and the bitwise compounds) with no `par`; compound `+=` and `-=` are not warned by either compiler.
+- **`-Wunused-value`** (both, with clang's `-Wunused-comparison` for a discarded comparison, which GCC reports as `-Wunused-value`): a comma whose left operand has no effect (`k1`, `k3`, `k4`, `k9`, `k11`, `k15`, `m2`: all four); **a discarded comma whose right operand
+  has no effect** (`x++, y;` `k2`, `x++, 1;` `k8`, `x = 1, y;` `m10`, `(void)g(a), 1;` `m12`, the `for` init `x = 0, a;` `k10`: all four, shape (a)); a discarded operator with an effect inside (shape (b)): `x++ + 1;` `d1`/`a24`, `x * 2` `m23`,
+  `(x += 1) + 1;` `m24`, `-x++;` `d7`, `!x++;` `m15`, `x == (y = 1);` `d2`, `x++ < 3;` `d9`, `x++ == 1;` `m14`, `(x = 1) == 1;` `d8`, `(x = 1) == y;` `m22`: all four; **gcc C is silent on** `(x = 1) + 0;` (`d3`, `m21`), **both GCCs are silent on** `(int)x++;` (`d10`),
+  **g++ is silent on** `(x = 1, x + 1);` and `(x++, x + 1);` (`d17`, `d18`). The pure `x + 1;` (`d4`), `+x;` (`d14`) and `g(x) + 1;` (`d13`) warn in all four (0012 item 3 accepts `x + 1;`; the plan keeps it accepted). **Silent in all four**, so accepted: `(void)(x++ + 1);` (`d5`, `m13`),
+  `(void)x++;`, `x++, (void)y;` (`m1`), `(void)(x++, y);` (`m3`), `(void)y, x++;` (`k7`), `v(), v();`, `g(a), x++;`, `(void)0, x` (`k12`-`k14`), `x++, x++;` (`m8`), `(x = 1, y = 2);` (`m9`), `y = (x++, y)` (`m6`), `a ? x++ : 0;`, `a ? x++ : x--;`
+  (`d11`, `m20`), `a ? (x = 1) : (x = 2);` (`m19`), `a || (x = 1);`, `a && (x = 1);` (`m17`, `m18`), `(x = 1);`, `(x++);` (`m28`, `m29`), `((void)0, x++);` (`m30`). **`a && x++;` warns only in gcc C** (`d12`: "value computed is not used"): by the union
+  rule it is rejected in both modes, while `a && (x = 1);` is accepted (an asymmetry of GCC's, recorded for the owner).
+  `x = x;` (`d16`) warns `-Wself-assign` in clang only; the plan does not list it.
+- **`-Wunsequenced` (clang) / `-Wsequence-point` (GCC)**, the shapes where the compilers differ are the C++17 ones. **All four** warn on: `i++ + i`, `x + x++`, `x++ + x++`, `x++ * ++x`, `f(x++, x)`, `(x = 1) + x`, `(x = 1) + (x = 2)`, `(x = b) * (x = b)`,
+  `(c ? x++ : 0) + x`, `int y = x++ + x`, `g(x++) + x`, `(x++ < 3) + x`, `x = x + (x = 1)`, `y = x++ + (x = 1)`, `g(x = 1) + g(x = 2)` (`u1`, `u4`-`u7`, `u9`-`u13`, `u16`, `u17`, `w11`, `w12`, `w15`). **Clang C, gcc C and g++ but not clang C++** (C++17 sequences the
+  right operand of `=`/`op=` before the assignment): `x = x++` (`u2`), `x += x++` (`u3`: gcc C and clang C only), `x = (x = 1)`, `x = ++x`, `x = (x += 1)`, `x = (c ? x++ : 0)`, `x = x++ + 1`, `x = c && x++` (`w1`, `w2`, `w3`, `w5`, `w6`, `w9`), `x += (x = 1)` (`w7`: clang C and gcc C).
+  **Shapes with a comma:** `(x++, 0) + x` (`u8`) and `(x++, (void)0, 3) + x` (`m4`) are warned by both clang modes and g++ but not by gcc C; `(x++ , 0) + (x++ , 0)` (`w21`) by both clang modes only. **No compiler warns**, although every one is
+  well-defined: `x = x + 1`, `(x = 1, x) + 1`, `x++ && x`, `x++, x` (`u14`, `u15`, `u18`, `u19`), `x = (x++, 2)` (`w4`), `x = g(x++)` (`w14`), `y = (x = 2, x++)` (`w10`), `y = x = x + 1` (`w13`), `(x = 1) ? x : 0` (`w16`), `x++ ? x : 0` (`w18`), `int y = x++, z = x` (`w19`),
+  `(x = 1) + (a = 2)` and `(x = 3) + a` (different variables: `w20`, `w24`), `(c ? x++ : x--) + 1`, `c ? x++ : (x = 2)` (`w22`, `w23`; one arm only is evaluated). The union covers all eight shapes of the plan's `unsequenced_modification` list. The plan's rule ("a write of the target inside the right-hand side of
+  an assignment is a conflict") is stricter than every compiler on `x = (x++, 2)` and `x = g(x++)` (and on `x = (x++, 2)` the C standard agrees that it is defined): a reject with no compiler behind it; the owner may want to know.
+- **Unevaluated operands** (`-Wunevaluated-expression`, clang only; GCC has no such warning): `sizeof(x++)`, `sizeof(x = 1)`, `sizeof x++` in C and C++ (`a23`, `u1`, `u2`, `s1`, `s2`, `d6`); **clang C++ only**: `decltype(x++)`, `noexcept(x++)`, `sizeof(decltype(x++))`, `sizeof(x++) + sizeof(x--)` (`e1`-`e4`, `e6`, `s3`, `s4`).
+  `typeof(x++)` in C23 is silent in clang and gcc (`u3`, `u4`: no warning), `sizeof(typeof(x++))` too; `alignof(int)` is silent. The union applied in both modes would reject `typeof(x++)` in C although neither C compiler warns (clang warns the C++ spelling `decltype(x++)`): the encoder could not see
+  the operand anyway (P33 item 8).
+
+**Applying the union in both modes** gives these rejections: assignment (or `|=`-style compound) as a whole condition without parentheses; a comma whose left operand has no effect; a discarded comma whose right operand has no effect (the left operand may be a `(void)` call or any operand with an effect);
+a discarded result of a non-assignment, non-call, non-`(void)`, non-`?:`/`&&`/`||`-at-top operator that has an effect inside (`x++ + 1;`, `x++ == 1;`, `(x = 1) + 0;`, `(int)x++;`, `(x = 1, x + 1);`) and, by gcc C alone, `a && x++;`; a side effect in the operand of `sizeof`
+(and, if the owner extends the rule to the C++ spellings, `typeof`, `decltype`, `noexcept`); and every unsequenced-modification shape in the table, including the C++17-sequenced ones. Where the compilers warn on `a && x++;` but not on `a && (x = 1);` the rule has to pick one: the union rejects both only if the owner treats an
+assignment under `&&` like an increment (GCC itself does not).
+
+| shape | clang C | clang C++ | gcc C | gcc C++ | EDG (C / C++) |
+|---|---|---|---|---|---|
+| `p33:a23` `return sizeof(x++);` | unevaluated-expression | unevaluated-expression | - | - | - / - |
+| `p33:a24` `x++ + 1; return x;` | unused-value | unused-value | unused-value | unused-value | - / - |
+| `p33b:c1` `if (x = a) return x; return 0;` | parentheses | parentheses | parentheses | parentheses | - / - |
+| `p33b:c5` `while (x = a) { a--; } return x;` | parentheses | parentheses | parentheses | parentheses | - / - |
+| `p33b:c24` `x = (a, 3); return x;` | unused-value | unused-value | unused-value | unused-value | 174 / 174 |
+| `p34:u1` `return i++ + i;` | unsequenced | unsequenced | sequence-point | sequence-point | - / - |
+| `p34:u2` `x = x++; return x;` | unsequenced | - | sequence-point | sequence-point | - / - |
+| `p34:u3` `x += x++; return x;` | unsequenced | - | sequence-point | - | - / - |
+| `p34:u4` `return f(x++, x);` | unsequenced | unsequenced | sequence-point | sequence-point | - / - |
+| `p34:u5` `return (x = 1) + x;` | unsequenced | unsequenced | sequence-point | sequence-point | - / - |
+| `p34:u6` `return (x = 1) + (x = 2);` | unsequenced | unsequenced | sequence-point | sequence-point | - / - |
+| `p34:u7` `return (c ? x++ : 0) + x;` | unsequenced | unsequenced | sequence-point | sequence-point | - / - |
+| `p34:u8` `return (x++, 0) + x;` | unsequenced | unsequenced | - | sequence-point | - / - |
+| `p34:u9` `return x + x++;` | unsequenced | unsequenced | sequence-point | sequence-point | - / - |
+| `p34:u10` `return x++ + x++;` | unsequenced | unsequenced | sequence-point | sequence-point | - / - |
+| `p34:u11` `return x++ * ++x;` | unsequenced | unsequenced | sequence-point | sequence-point | - / - |
+| `p34:u12` `return (x = b) * (x = b);` | unsequenced | unsequenced | sequence-point | sequence-point | - / - |
+| `p34:u13` `int y = x++ + x; return y;` | unsequenced | unsequenced | sequence-point | sequence-point | - / - |
+| `p34:u16` `int y = g(x++) + x; return y;` | unsequenced | unsequenced | sequence-point | sequence-point | - / - |
+| `p34:u17` `int y = (x++ < 3) + x; return y;` | unsequenced | unsequenced | sequence-point | sequence-point | - / - |
+| `p34:k1` `(a, b); return b;` | unused-value | unused-value | unused-value | unused-value | 174 / 174 |
+| `p34:k2` `x++, y; return x + y;` | unused-value | unused-value | unused-value | unused-value | - / - |
+| `p34:k3` `y, x++; return x + y;` | unused-value | unused-value | unused-value | unused-value | 174 / 174 |
+| `p34:k4` `return y;` | unused-value | unused-value | unused-value | unused-value | 174 / 174 |
+| `p34:k8` `x++, 1; return x;` | unused-value | unused-value | unused-value | unused-value | - / - |
+| `p34:k9` `return (a, x++);` | unused-value | unused-value | unused-value | unused-value | 174 / 174 |
+| `p34:k10` `for (x = 0, a; x < 3; x++) { } return x;` | unused-value | unused-value | unused-value | unused-value | - / - |
+| `p34:k11` `for (x = 0; x < 3; a, x++) { } return x;` | unused-value | unused-value | unused-value | unused-value | 174 / 174 |
+| `p34:k15` `(x, 1); return x;` | unused-value | unused-value | unused-value | unused-value | 174 / 174 |
+| `p34:h1` `if (x = a) return x; return 0;` | parentheses | parentheses | parentheses | parentheses | - / - |
+| `p34:h2` `while (x = a) { a--; } return x;` | parentheses | parentheses | parentheses | parentheses | - / - |
+| `p34:h4` `do { a--; } while (x = a); return x;` | parentheses | parentheses | parentheses | parentheses | - / - |
+| `p34:h5` `for (; x = a; ) { a--; } return x;` | parentheses | parentheses | parentheses | parentheses | - / - |
+| `p34:h13` `if (x \|= a) return x; return 0;` | parentheses | parentheses | - | - | - / - |
+| `p34:d1` `x++ + 1; return x;` | unused-value | unused-value | unused-value | unused-value | - / - |
+| `p34:d2` `x == (y = 1); return x + y;` | unused-comparison | unused-comparison | unused-value | unused-value | - / - |
+| `p34:d3` `(x = 1) + 0; return x;` | unused-value | unused-value | - | unused-value | - / - |
+| `p34:d4` `x + 1; return x;` | unused-value | unused-value | unused-value | unused-value | 174 / 174 |
+| `p34:d6` `sizeof(x++); return x;` | unevaluated-expression,unused-value | unevaluated-expression,unused-value | unused-value | unused-value | 174 / 174 |
+| `p34:d7` `-x++; return x;` | unused-value | unused-value | unused-value | unused-value | - / - |
+| `p34:d8` `(x = 1) == 1; return x;` | unused-comparison | unused-comparison | unused-value | unused-value | - / - |
+| `p34:d9` `x++ < 3; return x;` | unused-comparison | unused-comparison | unused-value | unused-value | - / - |
+| `p34:d10` `(int)x++; return x;` | unused-value | unused-value | - | - | - / - |
+| `p34:d13` `g(x) + 1; return x;` | unused-value | unused-value | unused-value | unused-value | - / - |
+| `p34:d14` `+x; return x;` | unused-value | unused-value | unused-value | unused-value | 174 / 174 |
+| `p34:d16` `x = x; return x;` | self-assign | self-assign | - | - | - / - |
+| `p34:d17` `(x = 1, x + 1); return x;` | unused-value | unused-value | unused-value | - | - / - |
+| `p34:d18` `(x++, x + 1); return x;` | unused-value | unused-value | unused-value | - | - / - |
+| `p34:s1` `return sizeof(x = 1) + x;` | unevaluated-expression | unevaluated-expression | - | - | - / - |
+| `p34:s2` `return sizeof x++ + x;` | unevaluated-expression | unevaluated-expression | - | - | - / - |
+| `p34:d12` `a && x++; return x;` | - | - | unused-value | - | - / - |
+| `p34:s3` `typeof(x++) z = 0; return z + x;` | - | unevaluated-expression | - | - | - / - |
+| `p34:s4` `return sizeof(typeof(x++)) + x;` | - | unevaluated-expression | - | - | - / - |
+| `p34b:j1` `if (x = 3) return x; return a;` | parentheses | parentheses | parentheses | parentheses | 187 / 187 |
+| `p34b:j2` `while (x = 1) { a--; if (a < 0) break; } return x;` | parentheses | parentheses | parentheses | parentheses | 187 / 187 |
+| `p34b:j3` `if (x = a + 1) return x; return 0;` | parentheses | parentheses | parentheses | parentheses | - / - |
+| `p34b:j4` `if (x = g(a)) return x; return 0;` | parentheses | parentheses | parentheses | parentheses | - / - |
+| `p34b:j10` `do { a--; } while (x = 0); return x + a;` | parentheses | parentheses | parentheses | parentheses | 187 / 187 |
+| `p34b:j11` `for (; x = 2; ) { a--; if (a < 0) break; } return x;` | parentheses | parentheses | parentheses | parentheses | 187 / 187 |
+| `p34b:j13` `if (x = 0) return x; return a;` | parentheses | parentheses | parentheses | parentheses | 187 / 187 |
+| `p34b:j14` `if (x = -1) return x; return a;` | parentheses | parentheses | parentheses | parentheses | 187 / 187 |
+| `p34b:j16` `int y = 0; if (x = y = 3) return x; return a;` | parentheses | parentheses | parentheses | parentheses | - / - |
+| `p34b:j17` `if (x = 1 + 2) return x; return a;` | parentheses | parentheses | parentheses | parentheses | 187 / 187 |
+| `p34b:j20` `if (x = 'c') return x; return a;` | parentheses | parentheses | parentheses | parentheses | 187 / 187 |
+| `p34b:j5` `if ((x = 3)) return x; return a;` | - | - | - | - | 187 / 187 |
+| `p34b:j7` `return (x = 3) && a;` | - | - | - | - | 187 / 187 |
+| `p34b:j8` `return a && (x = 3);` | - | - | - | - | 187 / 187 |
+| `p34b:j9` `return (x = 3) ? a : x;` | - | - | - | - | 187 / 187 |
+| `p34b:j12` `if (!(x = 3)) return x; return a;` | - | - | - | - | 187 / 187 |
+| `p34b:j15` `if (x = a, 1) return x; return a;` | - | - | - | - | 111 / 111 |
+| `p34b:j18` `if (a == 1 \|\| (x = 3)) return x; return a;` | - | - | - | - | 187 / 187 |
+| `p34c:w1` `x = (x = 1); return x;` | unsequenced | - | sequence-point | sequence-point | - / - |
+| `p34c:w2` `x = ++x; return x;` | unsequenced | - | sequence-point | sequence-point | - / - |
+| `p34c:w3` `x = (x += 1); return x;` | unsequenced | - | sequence-point | sequence-point | - / - |
+| `p34c:w5` `x = (c ? x++ : 0); return x;` | unsequenced | - | sequence-point | sequence-point | - / - |
+| `p34c:w6` `x = x++ + 1; return x;` | unsequenced | - | sequence-point | sequence-point | - / - |
+| `p34c:w7` `x += (x = 1); return x;` | unsequenced | - | sequence-point | - | - / - |
+| `p34c:w8` `x = (1, x++); return x;` | unused-value,unsequenced | unused-value | unused-value,sequence-point | unused-value,sequence-point | 174 / 174 |
+| `p34c:w9` `x = c && x++; return x;` | unsequenced | - | sequence-point | sequence-point | - / - |
+| `p34c:w11` `x = x + (x = 1); return x;` | unsequenced | unsequenced | sequence-point | sequence-point | - / - |
+| `p34c:w12` `int y; y = x++ + (x = 1); return x + y;` | unsequenced | unsequenced | sequence-point | sequence-point | - / - |
+| `p34c:w15` `return g(x = 1) + g(x = 2);` | unsequenced | unsequenced | sequence-point | sequence-point | - / - |
+| `p34c:w21` `int y = (x++ , 0) + (x++ , 0); return x + y;` | unsequenced | unsequenced | - | - | - / - |
+| `p34c:w16` `return (x = 1) ? x : 0;` | - | - | - | - | 187 / 187 |
+| `p34d:m2` `(void)(a, b); return b;` | unused-value | unused-value | unused-value | unused-value | 174 / 174 |
+| `p34d:m4` `return (x++, (void)0, 3) + x;` | unsequenced | unsequenced | - | sequence-point | - / - |
+| `p34d:m10` `x = 1, y; return x + y;` | unused-value | unused-value | unused-value | unused-value | - / - |
+| `p34d:m12` `(void)g(a), 1; return x;` | unused-value | unused-value | unused-value | unused-value | - / - |
+| `p34d:m14` `x++ == 1; return x;` | unused-comparison | unused-comparison | unused-value | unused-value | - / - |
+| `p34d:m15` `!x++; return x;` | unused-value | unused-value | unused-value | unused-value | - / - |
+| `p34d:m21` `(x = 1) + 0; return x;` | unused-value | unused-value | - | unused-value | - / - |
+| `p34d:m22` `(x = 1) == y; return x;` | unused-comparison | unused-comparison | unused-value | unused-value | - / - |
+| `p34d:m23` `x++ * 2; return x;` | unused-value | unused-value | unused-value | unused-value | - / - |
+| `p34d:m24` `(x += 1) + 1; return x;` | unused-value | unused-value | unused-value | unused-value | - / - |
+| `p34d:m17` `a && (x = 1); return x;` | - | - | - | - | 187 / 187 |
+| `p34d:m18` `a \|\| (x = 1); return x;` | - | - | - | - | 187 / 187 |
+
+
+Silent in all four configurations and in EDG (115 shapes): `p33:a1` `int y = (x = a) + 1; return y + x;`; `p33:a2` `y = x = a; return y + x;`; `p33:a3` `short s; int i; i = s = v; return i + s;`; `p33:a4` `int y = (x += 2) * 3; return y + x;`; `p33:a5` `int y; y = x++; return y + x;`; `p33:a6` `int y; y = ++x; return y + x;`; `p33:a7` `int y; y = x--; return y + x;`; `p33:a8` `return x++;`; `p33:a9` `switch (x++) { case 0: return 1; default: return 2; }`; `p33:a10` `return f(x = a);`; `p33:a11` `if ((x = a - 1) > 0) return x; return 0;`; `p33:a12` `if ((x = a)) return x; return 0;`; `p33:a13` `int c = 0; while (i++ < n) c++; return c + i;`; `p33:a14` `int c = 0; do { c++; } while (i++ < n); return c + i;`; `p33:a15` `for (i = 0, j = n; i < j; i++, j--) c++; return c + i + j;`; `p33:a16` `return (x = a, x + 1);`; `p33:a17` `(void)g(), i++; return i;`; `p33:a18` `return n > 0 && (x = n) > 1;`; `p33:a19` `return c ? x++ : x--;`; `p33:a20` `bool b = false; int x = a; b = (x = 5); return b + x;`; `p33:a21` `bool b; int y = (b = true); return y + b;`; `p33:a22` `enum color c = RED; int k = (c = GREEN) == GREEN; return k + c;`; `p33:a25` `v(), x++; return x;`; `p33b:c25` `v(), v(); return a;`; `p33b:c2` `if ((x = a)) return x; return 0;`; `p33b:c3` `if (((x = a))) return x; return 0;`; `p33b:c4` `if ((x = a) != 0) return x; return 0;`; `p33b:c6` `do { a--; } while ((x = a)); return x;`; `p33b:c7` `for (; (x = a); ) { a--; } return x;`; `p33b:c8` `if (!(x = a)) return x; return 0;`; `p33b:c9` `return (x = a) && b;`; `p33b:c10` `return b && (x = a);`; `p33b:c11` `if (c ? (x = a) : 0) return x; return 0;`; `p33b:c12` `if (x = a, x > 0) return x; return 0;`; `p33b:c13` `(void)(x = a); return x;`; `p33b:c14` `(void)x++; return x;`; `p33b:c15` `x = a; ++x; --x; x--; return x;`; `p33b:c16` `short s = 1; int y = (s += 1000) + a; return y + s;`; `p33b:c17` `unsigned u = 1; int y = (u += -1) > 0; return y + (int)u + a;`; `p33b:c18` `short s = 1; int y = s++ + a; return y + s;`; `p33b:c19` `unsigned char c = 1; int y = c++ + a; return y + c;`; `p33b:c20` `return x++;`; `p33b:c21` `long l; int i = a; l = i = 5; return (int)l + i;`; `p33b:c22` `int y = (x = a) ? 1 : 2; return y + x;`; `p33b:c23` `int y = 1; v(), x = (y = 2); return x + y;`; `p33b:c26` `int y = (x = 1, x = 2); return x + y;`; `p33b:c27` `return (x++, x++);`; `p33b:c28` `int y = (v(), x); return y;`; `p33b:c29` `x = f(x = a); return x;`; `p33b:c30` `int y = (x = a), z = x; return y + z;`; `p33b:c31` `++x; return x;`; `p33b:c32` `return x ? ++x : --x;`; `p33b:c33` `return c ? (x = 1) : (y = 2);`; `p33b:c34` `int *p = &x; (*p)++; return x;`; `p34:k6` `return (x++, 1);`; `p34:h14` `if (x++) return x; return 0;`; `p34:u14` `return x = x + 1;`; `p34:u15` `return (x = 1, x) + 1;`; `p34:u18` `return x++ && x;`; `p34:u19` `return x++ , x;`; `p34:k5` `return y;`; `p34:k7` `(void)a, x++; return x;`; `p34:k12` `v(), v(); return x;`; `p34:k13` `g(a), x++; return x;`; `p34:k14` `return (void)0, x;`; `p34:h3` `if (x += a) return x; return 0;`; `p34:h6` `if (!(x = a)) return x; return 0;`; `p34:h7` `return (x = a) && b;`; `p34:h8` `return b && (x = a);`; `p34:h9` `return (x = a) ? 1 : 2;`; `p34:h10` `if ((x = a)) return x; return 0;`; `p34:h11` `if ((x = a) != 0) return x; return 0;`; `p34:h12` `if (x = a, x) return x; return 0;`; `p34:h15` `if (x -= a) return x; return 0;`; `p34:h16` `return (x = a) \|\| a;`; `p34:h17` `while ((x = a)) { a--; } return x;`; `p34:h18` `if ((x = a) == 0) return x; return 0;`; `p34:h19` `if (a && (x = a)) return x; return 0;`; `p34:h20` `if (a ? (x = a) : 0) return x; return 0;`; `p34:h21` `if (a \|\| x++) return x; return 0;`; `p34:h22` `x = (x = a) ? 1 : 2; return x;`; `p34:d5` `(void)(x++ + 1); return x;`; `p34:d11` `a ? x++ : 0; return x;`; `p34:d15` `(x++); return x;`; `p34b:j6` `if (x += 1) return x; return a;`; `p34b:j19` `if (a == (b = 3)) return x + b; return a;`; `p34c:w4` `x = (x++, 2); return x;`; `p34c:w10` `int y = (x = 2, x++); return x + y;`; `p34c:w13` `int y = x = x + 1; return x + y;`; `p34c:w14` `return x = g(x++);`; `p34c:w17` `return (x++ , x++);`; `p34c:w18` `return x++ ? x : 0;`; `p34c:w19` `int y = x++, z = x; return y + z;`; `p34c:w20` `int y = (x = 1) + (a = 2); return x + y + a;`; `p34c:w22` `return (c ? x++ : x--) + 1;`; `p34c:w23` `return c ? x++ : (x = 2);`; `p34c:w24` `return (x = 3) + a;`; `p34d:m25` `(void)(x += 1) + 1; return x;`; `p34d:m1` `x++, (void)y; return x + y;`; `p34d:m3` `(void)(x++, y); return x + y;`; `p34d:m5` `for (x = 0, y = 1; x < 3; x++, y++) { a++; } return x + y + a;`; `p34d:m6` `y = (x++, y); return x + y;`; `p34d:m7` `x++, g(y); return x + y;`; `p34d:m8` `x++, x++; return x;`; `p34d:m9` `(x = 1, y = 2); return x + y;`; `p34d:m11` `g(a), (void)0; return x;`; `p34d:m13` `(void)(x++ + 1); return x;`; `p34d:m16` `(void)x; return x;`; `p34d:m19` `a ? (x = 1) : (x = 2); return x;`; `p34d:m20` `a ? x++ : x--; return x;`; `p34d:m26` `return (void)(x = 1), x;`; `p34d:m27` `y = (x = 1, x++, 3); return x + y;`; `p34d:m28` `(x = 1); return x;`; `p34d:m29` `(x++); return x;`; `p34d:m30` `((void)0, x++); return x;`
+
+### S17: the top-test loop shape: **PASS (every twin fails at its line; Silicon never threw)**
+
+Hand-written Viper in the style of the emitted code (`spikes/do_count.vpr`, `continue_skip.vpr`, `uninit_nested_loops.vpr` are `build/cerastes verify --keep-vpr` output of existing tests); `spikes/gen17.py` writes `spikes/s17*.vpr` and `.out`.
+The shape, for C `while (i++ < n) { c++; }` (`spikes/s17a_ok.vpr`): the automatic range invariants of the written locals, the user invariant, its well-definedness conjunct, `decreases`, and a body that holds the condition's effects and test:
+
+```text
+  while (true)
+    invariant (-2147483648) <= v_i && v_i <= 2147483647          // automatic range invariants (i, c)
+    invariant (-2147483648) <= v_c && v_c <= 2147483647
+    invariant v_i == v_c && 0 <= v_c && v_c <= v_n                // the user's invariant, at the head: before the condition
+    invariant (...) ==> !((v_n - v_i) < (-2147483648) || 2147483647 < (v_n - v_i))     // its well-definedness / the measure's
+    decreases v_n - v_i
+  {
+    t_old := v_i                                // snapshot of the read of i (E3)
+    assert !((v_i + 1) < (-2147483648) || 2147483647 < (v_i + 1))      // the condition's own obligation, at every evaluation
+    v_i := v_i + 1
+    t_c := t_old < v_n
+    if (!t_c) { goto l_brk }
+    assert ...; v_c := v_c + 1                  // the body
+    label l_cont                                // `continue` target; a `for` step goes here
+  }
+  label l_brk
+```
+
+| file | change | Silicon result (`.out`) |
+|---|---|---|
+| `s17a_ok` | none | verified |
+| `s17a_entry` | `v_i := 1` before the loop | `Loop invariant ... might not hold on entry. Assertion v_i == v_c might not hold. (@21.15--21.51)`: the invariant's line |
+| `s17a_preserved` | body adds 2 to `c` | `Loop invariant ... might not be preserved. Assertion v_i == v_c might not hold. (@21)` |
+| `s17a_term` | `decreases v_n` | `Loop might not terminate. Termination measure might not decrease or might not be bounded. (@23.15--23.18)`: the `decreases` clause |
+| `s17a_termunbounded` | `decreases 0 - v_i` (decreasing but not bounded) | the same message at the `decreases` clause |
+| `s17a_termnonneg` | `decreases v_n - v_i - 1` (negative at the last head) | **verified**: the bound is checked on the back edge only (a head from which the test fails and the loop exits needs no bound) |
+| `s17a_lastoverflow` | `requires n <= 2147483647` | `Assert might fail. Assertion !(v_i + 1 < -2147483648 || ...) might not hold. (@27.12--27.66)`: the `i++` assertion in the condition, failing only when `i == INT_MAX` at the last evaluation |
+| `s17a_post` | invariant without `c <= n` | two errors: the same overflow assertion (@27) and `Assert might fail. Assertion res == p_n might not hold. (@39)`: the exit state is needed |
+| `s17a_post_exitstate` | `res == p_n + 1` | `Assert might fail. Assertion res == p_n + 1 might not hold. (@39.10--39.24)` |
+| `s17b_continue_ok` | `while (i++ < n) { if (i <= 2) continue; c++; }` with `goto l_cont` | verified |
+| `s17b_continue_bad` | invariant `i > 3` instead of `i > 2` | `Loop invariant ... might not be preserved. (@21.15--21.96)` |
+| `s17b_break_ok` | `while (i++ < n) { if (i == 5) break; c++; }` with `goto l_brk` from the body | verified (`res == min(n, 4)`) |
+| `s17b_break_bad` | postcondition `res == 5` on the break path | `Assert might fail. Assertion ... res == 5 might not hold. (@41.10--41.59)` |
+| `s17c_flag_ok` | `int x; int c = 0; x = 0; while (c < n && (x = c + 1) > 0) c++; return x;`: `d_v_x`, `ds_v_x := d_v_x` before the loop, `invariant ds_v_x ==> d_v_x`, the branch form for `&&` | verified |
+| `s17c_flag_nodefine` | no `x = 0` before the loop | `Assert might fail. Assertion d_v_x might not hold. (@44.10--44.15)`: the read after the loop (the `&&` writes `x` in a branch only) |
+| `s17c_flag_noDS` | `invariant ds_v_x ==> d_v_x` dropped | `Assert might fail. Assertion d_v_x might not hold. (@45)`: the `ds_` snapshot invariant is what carries the flag across the havoc |
+| `s17c_range_dropped` | the automatic range invariant of `x` dropped | `Postcondition of ... might not hold. Assertion -2147483648 <= res might not hold` and `res <= 2147483647`: the range of a local written only in a branch of the condition is needed after the loop |
+| `s17d_condonly_ok`, `_norange` | `int x = 0; while ((x = c + 1) <= n) c++;`, user invariant mentioning `x - 1` | both **verified**: when the condition always writes `x` first, the automatic range invariant is not needed (the assertion before the write gives the range); it matters when the write is under `&&`/`?:` |
+
+Silicon error ids for the harness (`scripts/run_tests.py` patterns): invariant entry `invariant.not.established`, preservation `invariant.not.preserved`, `Assert might fail` `assert.failed`, `Loop might not terminate` `termination.failed`,
+postcondition `postcondition.violated`. The `.vpr` of the five verifying spikes passes `scripts/lint_viper.py` once a position map exists (`spikes/mkmap.py` writes a dummy one; `lint_viper: 5 files clean`): the shape has no backward
+`goto`, no label with invariants, `goto l_brk` leaves the loop outward, `goto l_cont` stays in the loop body's block; `d_v := true` follows `v := ...` and `d_v := false` precedes `v := 0`, as the planned flag rule requires. The position map is
+per `.vpr` line and id, so the condition's asserts (one per line, inside the loop body) map as every other check does; no ambiguity was seen.
+
+### S18: branch lowering and read snapshots: **PASS (every twin fails at its line)**
+
+`spikes/gen18.py` writes `spikes/s18*.vpr` and `.out`. The prelude has `c_div` as emitted and trusted methods `f_abort__9` (`ensures false`, `decreases _`) and `f_g__8`.
+
+| file | Viper (hand-lowered) | result |
+|---|---|---|
+| `s18a_and_ok` | `y = n > 0 && (x = n) > 1;`: `t := v_n > 0; if (t) { v_x := v_n; d_v_x := true; t := v_n > 1 }; v_y := t ? 1 : 0` (E4: the value of `(x = n)` is `v_n`) | verified, `res == (p_n > 1 ? 1 : 0)` |
+| `s18a_and_badvalue` | postcondition `> 2` | `Assert might fail. Assertion res == (p_n > 2 ? 1 : 0) might not hold. (@37)` |
+| `s18a_and_readx_untaken` | a later read of `x` (`assert d_v_x`), no precondition | `Assert might fail. Assertion d_v_x might not hold. (@35.10--35.15)`: fails on the path that skips the branch only |
+| `s18a_and_readx_taken` | the same with `requires p_n > 0` | verified (only the taken path is feasible) |
+| `s18a_and_readx_wrongreq` | the same with `requires p_n < 0` | the flag assertion fails |
+| `s18a_and_value_via_vx` | `t := v_x > 1` (value read back from `v_x`) | verified: harmless right after the write, but E4 does not rely on it |
+| `s18a2_guarded_div_ok` / `_bad` | `n > 0 && 100 / (x = n) > 1`: the division assertion `v_n != 0` inside the branch; guard `n > 0` / `n >= 0` | verified / `Assert might fail. Assertion v_n != 0 might not hold. (@32.12--32.20)` (at `n == 0`) |
+| `s18b_cond_ok` | `y = c ? (x = 1) : (x = 2); return x + y;`: `if (v_c != 0) { v_x := 1; d := true; t := 1 } else { v_x := 2; d := true; t := 2 }` | verified, `res == (c != 0 ? 2 : 4)` |
+| `s18b_cond_onearm` / `_noread` | the else arm does not write `x`; with / without the later read | the flag assertion fails (`@37.10--37.15`) / verified |
+| `s18b_cond_badvalue` | wrong postcondition | `Assert might fail. Assertion res == (p_c != 0 ? 2 : 3) might not hold. (@42)` |
+| `s18c_snap_ok` | `r = (y = x, x = 1, y + x)`: `t_x1 := v_x; assert d_v_x; v_y := t_x1; v_x := 1; d_v_x := true; t_y2 := v_y; t_x2 := v_x; assert no-overflow(t_y2 + t_x2); v_r := t_y2 + t_x2` | verified, `res == p_x + 1` with `p_x <= 2147483646` |
+| `s18c_snap_overflow` | no precondition | `Assert might fail. Assertion !(t_y2 + t_x2 < -2147483648 || ...) might not hold. (@38.10--38.72)` (at `x == INT_MAX`) |
+| `s18c_snap_uninit` | `x` has no value before | `Assert might fail. Assertion d_v_x might not hold. (@32.10--32.15)`: the `uninitialized` obligation at the snapshot's slot |
+| `s18c_snap_wronglowering` | the snapshot of `x` for `y = x` taken after `x := 1` | `Assert might fail. Assertion res == p_x + 1 might not hold. (@42)`: why E3 needs the snapshot before the write |
+| `s18d_noreturn_ok` | `(abort(), 1 / d)`: `f_abort__9(); assert v_d != 0; assert !(1 == INT_MIN && v_d == -1); res := c_div(1, v_d)` | **verified with `d` unconstrained** (the checks follow the call that ends the program) |
+| `s18d_noreturn_swapped` | checks before the call | `Assert might fail. Assertion v_d != 0 might not hold. (@23.10--23.18)` |
+| `s18d_returning_call` | `g()` that returns | `Assert might fail. Assertion v_d != 0 might not hold. (@24.10--24.18)` |
+
+Mapping notes: every assertion sits on its own line, including those inside the `if (t) { ... }` branch and the snapshot's flag assertion, so line + id stays unique per check. Two checks of one full expression that Silicon reports
+at the same `.vpr` line cannot occur in these shapes. The only surprise is `s17a_termnonneg` (a measure that is negative at the exiting head still verifies), a property of Silicon's back-edge check, not of the shape.

@@ -108,7 +108,12 @@ struct Expr {
     ToBool,      // `a` (Int) != 0, a Bool
     BoolToInt,   // `a` (Bool) as 0 or 1 of Int type `type`
     Call,        // `callee`(`args`...): type = callee's return type
-    ReportAt     // `a`, but obligations inside it are reported at `loc` with a note at their own position
+    ReportAt,    // `a`, but obligations inside it are reported at `loc` with a note at their own position
+    AssignE,     // an assignment used as a value (decision 0020): `var` := `a` (already of `var`'s type); the value of the node is `a`
+                 // (the new value, `type` = `var`'s type), or, when `yields_old`, the old value `b` (x++, x--).  `b` is null or the one
+                 // `Local var` node that `a` also uses for the old value: the lowering reads it once.  Allowed in code and in a loop
+                 // condition, never in an annotation; reachable once per function; see `sequence_problems`.
+    Comma        // `a`, then `b` (decision 0020): `type` = `b`'s type, never void; `a` may be a void call; a sequence point between them
   };
   Kind kind = Kind::Const;
   Type type;     // the type of the value (Void only for a Call of a void function)
@@ -128,6 +133,7 @@ struct Expr {
   std::string c_type_name;
   const Function* callee = nullptr;        // Call
   std::vector<const Expr*> args;           // Call: already converted to the parameter types
+  bool yields_old = false;                 // AssignE: the value is the old value `b` (x++, x--), not the new one
 };
 
 // ---- statements ------------------------------------------------------------------------------------------------
@@ -178,8 +184,8 @@ struct Stmt {
   const Stmt* body = nullptr;               // While
   std::vector<const Stmt*> stmts;           // Block
   LoopForm form = LoopForm::While;          // While
-  const Stmt* step = nullptr;               // While: a `for` loop's increment (an Assign or ExprStmt), run after the body and
-                                            // after each `continue`; may be null
+  const Stmt* step = nullptr;               // While: a `for` loop's increment (an Assign or ExprStmt, or a Block of them: a discarded
+                                            // comma `i++, j--`), run after the body and after each `continue`; may be null
   int jump_id = 0;                          // While, Switch: this construct's id (> 0 when a Break or Continue may name it;
                                             // unique within a Function, Builder::jump_id()); Break, Continue, Goto: the target's id;
                                             // Label: its own id
@@ -316,6 +322,25 @@ class Program {
   std::deque<Stmt> stmts_;
 };
 
+// ---- sequencing (decision 0020) -----------------------------------------------------------------------------------
+
+// A modification of a local that is unsequenced with another access to it in one full expression (C23 6.5.1p3, C++ before C++17;
+// cerastes uses C's rules in both modes).  `at` is the AssignE whose write conflicts (report there); `variable` is the local's
+// source name.  The rule (decision 0020 item 4), with W the locals an operand writes (AssignE targets) and R the locals it reads:
+//  * the operands of every Binary other than LAnd/LOr, and the arguments of a Call among themselves, are unsequenced: a conflict
+//    if W(p) meets W(q) or R(q) (or the other way round);
+//  * a Cond's condition is sequenced before its arms, a Comma's left before its right, LAnd/LOr's left before their right (no
+//    check); the two arms of a Cond are not checked against each other, but the Cond as a whole counts as W/R = their union;
+//  * a plain store (an AssignE, an Assign or a Decl) conflicts with a write of its own target inside the stored expression unless a
+//    sequence point separates them: the write lies inside the left operand of a Comma, the first operand of an LAnd/LOr, the
+//    condition of a Cond or an argument of a Call.  (A compound assignment needs no extra rule: its expansion reads the target as
+//    an operand of a Binary.)  A read of the target is no conflict; neither is the read of an AssignE's own target in its own `a`.
+struct SequenceProblem {
+  const Expr* at = nullptr;  // the AssignE whose write conflicts
+  std::string variable;      // the local's source name
+};
+std::vector<SequenceProblem> sequence_problems(const Function& f);
+
 // ---- user gotos (decision 0015 item 2) -------------------------------------------------------------------------
 
 // Why a Goto is not accepted.  A Goto with label id L is accepted iff the Label with that id is a direct statement of a
@@ -399,6 +424,17 @@ class Builder {
   const Stmt* label_stmt(int label_id, std::string name, SrcLoc loc);
   const Stmt* block(std::vector<const Stmt*> stmts, SrcLoc loc);
 
+  // Effects used as values (decision 0020).  The statement forms below stay as they are: a top-level assignment is an `Assign`.
+  // `value` has `v`'s type (the encoder converts it as for `assign`).  The node's type is `v`'s; its value is `value`.
+  const Expr* assign_expr(const Var* v, const Expr* value, SrcLoc loc);
+  // `x op= rhs` as a value: the same computation type and conversions as compound_assign; the value is the new value of `x`.
+  const Expr* compound_assign_expr(const Var* x, BinaryOp op, const Expr* rhs, SrcLoc loc);
+  // `++x` (post false: the new value), `x++` (post true: the old value, yields_old); `--` likewise.  The old value is one shared
+  // `Local x` node (`b`), also used inside the stored expression.
+  const Expr* inc_dec_expr(const Var* x, bool increment, bool post, SrcLoc loc);
+  // `a, b`: the value of `b` after `a`.  `a` may be a void call; `b` must not be void.
+  const Expr* comma(const Expr* a, const Expr* b, SrcLoc loc);
+
   // `x op= rhs` and `++x`, `x++`, `--x`, `x--` as statements (0010 item 6).  The IL does not give the
   // computation type (P2), so these compute it with the rules above and expand to
   //     x = (T_x)( (C)x  op  (C)rhs )                      op in Add Sub Mul Div Rem, C = usual arithmetic
@@ -413,6 +449,8 @@ class Builder {
   const Stmt* inc_dec(const Var* x, bool increment, SrcLoc loc);
 
  private:
+  // `(T_x)((C)xval op (C)rhs)`: the stored value of a compound assignment (see compound_assign); `xval` is the read of `x`.
+  const Expr* compound_value(const Var* x, const Expr* xval, BinaryOp op, const Expr* rhs, SrcLoc loc);
   Program& p_;
 };
 

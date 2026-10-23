@@ -300,6 +300,59 @@ and an expression statement that only names the variable (`x;` or
 `(void)x;`) does not read it in pass:[C++], while cerastes counts it as a read,
 as C does. An operand of `sizeof` is never a read.
 
+[#side-effects]
+== Side effects in expressions
+
+An assignment, a compound assignment and `pass:[++]` or `--` may be used as a
+value, and the comma operator may join expressions, in both modes:
+
+[source,c]
+----
+include::example$verifying/expressions.c[tag=source]
+----
+
+The value of `x = e` is the value stored in `x`: `e` converted to the type of
+`x`, which is checked like every conversion (xref:integer-semantics.adoc[Integer
+semantics]). The value of `x += e` and of `pass:[++x]` is the new value of `x`,
+the value of `pass:[x++]` the old one. In `a, b` the left operand is evaluated
+completely, then the right one, whose value is the value of the whole
+expression. A side effect in the right operand of `&&` or `||`, or in an arm of
+`?:`, happens only when that operand is evaluated, and one in a loop condition
+happens each time the condition is evaluated: the loop invariant holds before
+each evaluation. A variable assigned inside an expression has its value from
+that point on (<<uninitialized>>).
+
+The last evaluation of a loop condition counts too. In `count_up` the condition's
+`pass:[i++]` runs once more than the body, so after the loop `i` is `n + 1`;
+returning `total + i - 1` instead gives `3 * n`, and the postcondition fails at
+the `return`:
+
+[source,c]
+----
+include::example$verifying/expressions_error.c[tag=source]
+----
+
+C leaves the order in which most operands are evaluated unspecified, and an
+expression that modifies a variable and also reads or modifies it in an operand
+that is not sequenced with the modification is undefined behaviour. cerastes
+rejects such an expression at the modification, by C's rules in both modes,
+even where pass:[C++]17 defines it (`x = pass:[x++]`):
+
+[source,c]
+----
+include::example$verifying/unsequenced.c[tag=source]
+----
+
+The operators that sequence their operands are `&&`, `||`, `,` and the condition
+of `?:`; both arms of `?:` count as modifying what either arm modifies. The
+operands of the other operators, and the arguments of a call, are not
+sequenced. As with `-Wswitch`, a few shapes that the compilers' `-Wall` warns
+about are rejected too: an assignment used as a condition without extra
+parentheses (write `if ((x = e) != 0)` or `if ((x = e))`, not `if (x = e)`), a
+comma operator one of whose operands has no effect, a discarded value computed
+around a side effect (`pass:[x++] + 1;`), and a side effect inside `sizeof`,
+which is never evaluated.
+
 [#no-return]
 == Functions that do not return
 
@@ -524,10 +577,13 @@ The constructs that are rejected in this version are:
   `std::terminate`).
 * *Types:* pointers, references, floating point, `volatile`, `_BitInt`, vector
   types, enumerations declared in system headers.
-* *Expressions:* the bitwise operators (`&`, `|`, `^`, `~`), the comma
-  operator, an assignment used as a value, two calls in one expression that are
-  not nested in each other (`f(x) + g(y)`), and a call in the second operand of
-  `&&`, `||` or `?:`, or in a loop condition, and, in C, a variable named where a
+* *Expressions:* the bitwise operators (`&`, `|`, `^`, `~`), two calls in one
+  expression that are neither nested in each other nor ordered by the comma
+  operator (`f(x) + g(y)`), a call in the second operand of `&&`, `||` or `?:`,
+  or in a loop condition, the shapes of <<side-effects>> (an unsequenced
+  modification, an assignment as a condition without extra parentheses, a comma
+  operand without effect, a discarded value around a side effect, a side effect
+  in `sizeof`), and, in C, a variable named where a
   constant expression is required (a `case` value, `_Static_assert`, an
   enumerator's value), and an enumeration value that the compiler converts to an
   integer for arithmetic, a comparison of order, a unary operator, a shift or an

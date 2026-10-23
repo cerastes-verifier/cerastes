@@ -55,6 +55,7 @@ it verifies and what it does not:
 * *Verified:* functions over `bool` and the integer types in C23 and in
   pass:[C++]20, with locals (with or without an initializer: a read before the
   first assignment is an error), arithmetic, comparisons and logical operators,
+  assignments and `pass:[++]`/`--` used as values and the comma operator,
   `if`/`else`, `switch`, `while`, `do` and `for` loops with invariants and
   termination measures, `break` and `continue`, forward `goto`, recursion with
   measures, `return`, named constants (`const` globals), enumerations and their constants, calls of functions that

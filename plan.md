@@ -353,7 +353,7 @@ valid in both. Strictly C (owner, 2026-10-20): C++ references, `new`/`delete` an
 (invariant 2) and its docs (invariant 9), with one Opus audit round per diff plus a re-audit of blocking fixes and
 `check.sh` at most twice. `internal/handoff.md` holds each session's tasks, agents, acceptance and stop rules.
 M4.2 was split into M4.2a–c (owner, 2026-10-21): its six constructs did not fit one session; M4.2b was split again
-into M4.2b1 and M4.2b2 (owner, 2026-10-21, M4.2b planning). Between M4.2a and M4.2b1 run the EDG upstream merge, CI
+into M4.2b1 and M4.2b2 (owner, 2026-10-21, M4.2b planning). M4.3 was split into M4.3a and M4.3b (owner, 2026-10-22, M4.3 planning). Between M4.2a and M4.2b1 run the EDG upstream merge, CI
 and mutation triage sessions (above).
 
 | Session | Scope | Needs |
@@ -363,7 +363,8 @@ and mutation triage sessions (above).
 | **M4.2b1 Named constants and case values** | `const`/`constexpr` globals (the initializer encoded, EDG's folding not trusted; checked in a prologue of every method, owner); `case k`/`case N` with case-value obligations checked path-independently; a `do … while` condition that names a variable is a loop | M4.2a |
 | **M4.2b2 Enumerations** | enumeration types (a value range per type, every conversion into it checked) and enumerators (one meaning in both modes); `case RED`; enum-typed constants | M4.2b1 |
 | **M4.2c Locals without an initializer** | a read of an indeterminate value is an error: the category `uninitialized` (P4222), checked on each path by a ghost flag (owner, 2026-10-22; record 0019); jumps past such a declaration; with handoff §11 questions 17–19 (EDG #2656 fixed on fork branch `0022`, pinned at `f0ed5525af`; ordering of one enumeration, `-Wswitch`'s rules) | M4.2a |
-| **M4.3 Expressions and sequencing** | the comma operator, assignments as values, `x++` inside expressions, calls in guarded operands and loop conditions, unsequenced calls (C's sequencing rules) | — |
+| **M4.3a Side effects in expressions** | assignments, compound assignments and `x++` used as values, chained assignment, the comma operator (calls sequenced by `,` too), side effects in `&&`/`\|\|`/`?:` operands and loop conditions; C's sequencing rules (an unsequenced modification is rejected like `-Wunsequenced`); `-Wall`'s warning shapes rejected like the compilers (owner, 2026-10-22; record 0020) | M4.2c |
+| **M4.3b Calls in expressions** | calls in guarded operands and loop conditions; unsequenced calls by the dependency-chain rule (owner, 2026-10-22; record 0021) | M4.3a |
 | **M4.4 Bitwise operators** | `& \| ^ ~` and `&= \|= ^=` on signed and unsigned types (C23 two's complement); a Silicon/Z3 spike first (bounded `Int` definitions vs SMT bit-vector interpretation) | — |
 | **M4.5 Pointers** (sessions a–f, below) | the memory model for C | M4.1–M4.3 |
 | **M4.6 Chars and strings** | string literals as read-only arrays, `char` buffers, `strlen`/`memcpy`/`memcmp`/`strcmp` contracts, `main(argc, argv)` | M4.5e |
@@ -375,7 +376,9 @@ and mutation triage sessions (above).
   plus an offset, as VerCors does, or one reference per cell; NULL; provenance; address-taken locals), the **C spec
   syntax** record (`owns`, `reads`, `old`, `owns_range` and `forall` are C++ only today, decision 0008 item 6, and
   `forall` needs lambdas, which C lacks), the new error categories (permission, null, bounds, double free, …),
-  Silicon spikes, and whether an EDG fork commit is needed (then a box session comes before M4.5b).
+  Silicon spikes, and whether an EDG fork commit is needed (then a box session comes before M4.5b); and how P4222R1's
+  markers (`[[uninit]]`, `[[ref_to_uninit]]`) and their stricter mode come in for pointers to uninitialized objects
+  (owner, 2026-10-22, handoff §11 question 21: as early as possible, in M4.5; what is left goes to M7).
 - **M4.5b Pointers to scalars and globals:** `&x` (address-taken locals as cells), `*p`, NULL, pointer parameters
   with `owns`/`reads`/`old(*p)`, pointer equality, the aliasing trap, mutable globals and `static` locals as cells
   with frames; ports of VeriFast's `swap.c`, `address_of_local.c`, `globals.c`.
@@ -492,6 +495,7 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
 - `new`/`delete` (and `new[]`/`delete[]`).
 - Classes: data members as M4.5c's struct cells, member functions, `this`, constructors and destructors with contracts (owner, 2026-10-20: C++ memory stays after the templates and concepts milestones).
 - Predicates and pure functions written as C++ member functions; `forall` lowered from lambdas.
+- P4222R1's markers for what M4.5 leaves (member initialization; owner, 2026-10-22, handoff §11 question 21).
 - This can take inspiration from VerCors, which implements these features for Viper.
 
 **Rejected with diagnostics (for now):** `reinterpret_cast`, character-type aliasing, virtual dispatch, exceptions, concurrency.

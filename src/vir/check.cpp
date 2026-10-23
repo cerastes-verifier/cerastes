@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #include "check.h"
 
+#include <map>
 #include <set>
 #include <string>
 #include <unordered_set>
@@ -113,8 +114,10 @@ ConstVal eval_const(const Expr& e) {
 
 // Where an expression sits; decides which nodes are allowed.
 enum class Ctx {
-  Body,      // code: Local, Call allowed (not Formal, Result, Old)
-  Annot,     // `check` and `invariant`: like Body, but no calls (0011 item 7)
+  Body,      // code: Local, Call, AssignE and Comma allowed (not Formal, Result, Old)
+  Annot,     // `check` and `invariant`: like Body, but no calls (0011 item 7) and no side effects (decision 0020 item 3)
+  LoopCond,  // a loop condition: Body with its effects (decision 0020: run at every evaluation), still no calls (0012 item 6)
+  Assert,    // C's `assert(e)`: calls as in code, no side effects (decision 0015 item 6, 0020)
   Requires,  // a `requires`: Formal only
   Ensures    // an `ensures`: Formal, Result, Old
 };
@@ -148,6 +151,7 @@ class Checker {
   void function(const Function& f) {
     fn_ = &f;
     declared_.clear();
+    seen_effects_.clear();
     jump_ids_.clear();
     targets_.clear();
     scopes_.clear();
@@ -185,6 +189,10 @@ class Checker {
                            " (decision 0015 item 2)");
       }
       stmt(*f.body);
+      // The backstop of the encoder's own report (decision 0020 item 4): a modification unsequenced with another access.
+      for (const SequenceProblem& p : sequence_problems(f))
+        err(p.at != nullptr ? p.at->loc : f.loc, "unsequenced modification of '" + p.variable +
+                                                    "' (decision 0020: another access to it in the same expression is not sequenced after it)");
     }
   }
 
@@ -330,7 +338,11 @@ class Checker {
         else if (s.jump_id > 0) register_id(s.jump_id, s.loc);
         if (s.form == LoopForm::DoWhile && s.jump_id <= 0) err(s.loc, "a `do` loop without a jump id (its exit test jumps to a label named by it)");
         CallState st;
-        expr(*s.expr, Ctx::Annot, false, st, false);  // no calls in a loop condition, a `do` condition included (0012 item 6)
+        // No calls in a loop condition, a `do` condition included (0012 item 6); a side effect is allowed (it runs at every evaluation,
+        // decision 0020), except in the condition of a `do ... while (0)`, which is no loop.
+        expr(*s.expr, s.form == LoopForm::DoOnce ? Ctx::Annot : Ctx::LoopCond, false, st, false);
+        if (has_assignment_effect(*s.expr) && s.form == LoopForm::While && s.jump_id <= 0)
+          err(s.expr->loc, "a loop whose condition has a side effect and no jump id (it is lowered with an exit jump, decision 0020)");
         if (!s.expr->type.is_bool()) err(s.expr->loc, "a loop condition of type " + s.expr->type.str() + " (convert it with to_bool)");
         const bool once = s.form == LoopForm::DoOnce;
         if (once) {
@@ -355,8 +367,8 @@ class Checker {
         targets_.pop_back();
         if (s.step != nullptr) {
           if (s.form != LoopForm::While) err(s.step->loc, "a loop step on a `do` loop");
-          else if (s.step->kind != Stmt::Kind::Assign && s.step->kind != Stmt::Kind::ExprStmt)
-            err(s.step->loc, "a loop step that is not an assignment or an expression statement");
+          else if (!step_shape(*s.step))
+            err(s.step->loc, "a loop step that is not an assignment or an expression statement (or a block of them)");
           else scoped(s.step);
         }
         break;
@@ -444,7 +456,7 @@ class Checker {
       case Stmt::Kind::Check: {
         if (s.expr == nullptr) { err(s.loc, "a check without an expression"); return; }
         CallState st;
-        expr(*s.expr, s.from_assert ? Ctx::Body : Ctx::Annot, false, st, false);
+        expr(*s.expr, s.from_assert ? Ctx::Assert : Ctx::Annot, false, st, false);
         if (!s.expr->type.is_bool()) err(s.expr->loc, "a check of type " + s.expr->type.str() + " (it must be a bool)");
         break;
       }
@@ -564,12 +576,88 @@ class Checker {
         if (sub(e.a, false) && e.type != e.a->type) err(e.loc, "report_at changes the type");
         break;
       case Expr::Kind::Call: call(e, ctx, guarded, st); break;
+      case Expr::Kind::AssignE: assign_value(e, ctx, guarded, st); break;
+      case Expr::Kind::Comma: comma(e, ctx, guarded, st); break;
     }
+  }
+
+  static bool effects_allowed(Ctx ctx) { return ctx == Ctx::Body || ctx == Ctx::LoopCond; }
+
+  static bool contains_node(const Expr& root, const Expr* needle) {
+    if (&root == needle) return true;
+    for (const Expr* x : {root.a, root.b, root.c})
+      if (x != nullptr && contains_node(*x, needle)) return true;
+    for (const Expr* x : root.args)
+      if (x != nullptr && contains_node(*x, needle)) return true;
+    return false;
+  }
+
+  // An effect used as a value (decision 0020): in code and in a loop condition only; once per function; of a visible local; the
+  // stored value has the local's type; the old value, if any, is the one `Local` node that the stored value reads.
+  void assign_value(const Expr& e, Ctx ctx, bool guarded, CallState& st) {
+    if (!effects_allowed(ctx)) {
+      err(e.loc, "a side effect (an assignment, increment or decrement used as a value) in a contract, an annotation or an `assert`");
+      return;
+    }
+    if (!seen_effects_.insert(&e).second) err(e.loc, "an assignment used as a value that is reachable twice (its effect would run twice)");
+    if (e.var == nullptr || e.a == nullptr) { err(e.loc, "an assignment used as a value without a variable or a value"); return; }
+    if (!owned(*e.var)) err(e.loc, "variable '" + e.var->name + "' does not belong to function '" + fn_->c_name + "'");
+    else if (!visible(*e.var)) err(e.loc, "assignment to '" + e.var->name + "', which is not declared here");
+    if (e.type != e.var->type) err(e.loc, "an assignment used as a value has type " + e.type.str() + ", not the variable's " + e.var->type.str());
+    expr(*e.a, ctx, guarded, st, false);
+    if (e.a->type != e.var->type)
+      err(e.a->loc, "assignment to '" + e.var->name + "' of a " + e.a->type.str() + " where " + e.var->type.str() + " is required");
+    if (e.yields_old && e.b == nullptr) err(e.loc, "an assignment that yields the old value without one");
+    if (e.b != nullptr) {
+      if (e.b->kind != Expr::Kind::Local || e.b->var != e.var) err(e.b->loc, "the old value of an assignment is not a read of its own variable");
+      else if (!contains_node(*e.a, e.b)) err(e.b->loc, "the old value of an assignment is not the node its stored value reads");
+      if (!e.yields_old) err(e.loc, "an assignment with an old value that does not yield it");
+    }
+  }
+
+  // The comma operator (decision 0020): the left operand is evaluated first and its value dropped (it may be a void call); a call
+  // in it is sequenced before every call of the right operand, but not before a call elsewhere in the enclosing expression.
+  void comma(const Expr& e, Ctx ctx, bool guarded, CallState& st) {
+    if (!effects_allowed(ctx)) {
+      err(e.loc, "the comma operator in a contract, an annotation or an `assert`");
+      return;
+    }
+    if (e.a == nullptr || e.b == nullptr) { err(e.loc, "a comma with a missing operand"); return; }
+    if (!seen_effects_.insert(&e).second) err(e.loc, "a comma that is reachable twice (its effects would run twice)");
+    const int base = st.seen;
+    expr(*e.a, ctx, guarded, st, true);
+    const int left_calls = st.seen - base;
+    st.seen = base;
+    expr(*e.b, ctx, guarded, st, false);
+    const int right_calls = st.seen - base;
+    st.seen = base + left_calls + right_calls;
+    if (e.type != e.b->type) err(e.loc, "a comma has the wrong type");
+    if (e.type.is_void()) err(e.loc, "a comma of type void (a discarded comma is two statements)");
+  }
+
+  // Whether the expression holds an AssignE or a Comma: the loop condition then needs the exit jump of the top-test shape.  (Not the
+  // same question as lower.cpp's has_effect, which also counts a Call: that one decides where a guarded operand is lowered as a branch.)
+  static bool has_assignment_effect(const Expr& e) {
+    if (e.kind == Expr::Kind::AssignE || e.kind == Expr::Kind::Comma) return true;
+    for (const Expr* x : {e.a, e.b, e.c})
+      if (x != nullptr && has_assignment_effect(*x)) return true;
+    for (const Expr* x : e.args)
+      if (x != nullptr && has_assignment_effect(*x)) return true;
+    return false;
+  }
+
+  // A loop step: an Assign or ExprStmt, or a Block of them (a discarded comma `i++, j--`, decision 0020).
+  static bool step_shape(const Stmt& s) {
+    if (s.kind == Stmt::Kind::Assign || s.kind == Stmt::Kind::ExprStmt) return true;
+    if (s.kind != Stmt::Kind::Block) return false;
+    for (const Stmt* c : s.stmts)
+      if (c == nullptr || (c->kind != Stmt::Kind::Assign && c->kind != Stmt::Kind::ExprStmt)) return false;
+    return true;
   }
 
   static bool mentions_state(const Expr& e) {
     if (e.kind == Expr::Kind::Result || e.kind == Expr::Kind::Local || e.kind == Expr::Kind::Call || e.kind == Expr::Kind::Formal ||
-        e.kind == Expr::Kind::Old)
+        e.kind == Expr::Kind::Old || e.kind == Expr::Kind::AssignE || e.kind == Expr::Kind::Comma)
       return true;
     for (const Expr* x : {e.a, e.b, e.c})
       if (x != nullptr && mentions_state(*x)) return true;
@@ -577,7 +665,9 @@ class Checker {
   }
 
   static bool mentions_result_or_local(const Expr& e) {
-    if (e.kind == Expr::Kind::Result || e.kind == Expr::Kind::Local || e.kind == Expr::Kind::Call) return true;
+    if (e.kind == Expr::Kind::Result || e.kind == Expr::Kind::Local || e.kind == Expr::Kind::Call || e.kind == Expr::Kind::AssignE ||
+        e.kind == Expr::Kind::Comma)
+      return true;
     for (const Expr* x : {e.a, e.b, e.c})
       if (x != nullptr && mentions_result_or_local(*x)) return true;
     return false;
@@ -624,10 +714,11 @@ class Checker {
   }
 
   void call(const Expr& e, Ctx ctx, bool guarded, CallState& st) {
-    if (ctx == Ctx::Annot)
+    if (!seen_effects_.insert(&e).second) err(e.loc, "a call that is reachable twice (it would run twice)");
+    if (ctx == Ctx::Annot || ctx == Ctx::LoopCond)
       err(e.loc, "a call in a loop condition or in a `check`, `invariant` or `decreases` clause (a call is hoisted before its statement, "
                  "where C/C++ does not evaluate these)");
-    else if (ctx != Ctx::Body)
+    else if (ctx != Ctx::Body && ctx != Ctx::Assert)
       err(e.loc, "a call in a contract");
     if (guarded) err(e.loc, "a call in a conditionally evaluated operand (a hoisted call would run when C/C++ does not run it)");
     if (st.seen > 0)
@@ -652,6 +743,7 @@ class Checker {
   std::unordered_set<const Function*> functions_;
   const Function* fn_ = nullptr;
   std::set<int> declared_;
+  std::set<const Expr*> seen_effects_;  // the AssignE, Comma and Call nodes met in the current function (each may be reachable once)
   struct Target {
     int id;
     bool is_loop;
@@ -763,5 +855,157 @@ std::vector<GotoProblem> goto_problems(const Function& f) {
   }
   return out;
 }
+
+namespace {
+
+// The sequencing rule (decision 0020 item 4; the comment at SequenceProblem in vir.h): the locals each operand writes and reads.
+struct Wr {
+  std::map<int, const Expr*> w;   // var id -> an AssignE writing it, anywhere inside
+  std::map<int, const Expr*> wu;  // the same for the writes no sequence point shields from the expression's value
+  std::set<int> r;                // var ids read
+};
+
+class Sequencer {
+ public:
+  explicit Sequencer(const Function& f) : f_(f) {}
+
+  std::vector<SequenceProblem> run() {
+    if (f_.body != nullptr) stmt(f_.body);
+    return std::move(out_);
+  }
+
+ private:
+  void report(const Expr* at, int var_id) {
+    if (!reported_.insert({at, var_id}).second) return;
+    const auto& ls = f_.locals();
+    const std::string name = var_id >= 0 && static_cast<size_t>(var_id) < ls.size() ? ls[static_cast<size_t>(var_id)]->name : "?";
+    out_.push_back(SequenceProblem{at, name});
+  }
+
+  // Two unsequenced operands: a write of one meets a write or a read of the other.
+  void pair(const Wr& p, const Wr& q) {
+    for (const auto& [id, node] : p.w) {
+      const auto qw = q.w.find(id);
+      if (qw != q.w.end()) report(qw->second, id);
+      else if (q.r.count(id) != 0) report(node, id);
+    }
+    for (const auto& [id, node] : q.w)
+      if (p.r.count(id) != 0 && p.w.count(id) == 0) report(node, id);
+  }
+
+  static void absorb(Wr& into, const Wr& from, bool shielded) {
+    for (const auto& [id, node] : from.w) into.w.emplace(id, node);
+    for (const auto& id : from.r) into.r.insert(id);
+    if (!shielded)
+      for (const auto& [id, node] : from.wu) into.wu.emplace(id, node);
+  }
+
+  Wr expr(const Expr* e) {
+    Wr out;
+    if (e == nullptr) return out;
+    switch (e->kind) {
+      case Expr::Kind::Const: case Expr::Kind::Formal: case Expr::Kind::Result: break;
+      case Expr::Kind::Local:
+        if (e->var != nullptr) out.r.insert(e->var->id);
+        break;
+      case Expr::Kind::Old: case Expr::Kind::Unary: case Expr::Kind::Convert: case Expr::Kind::ToBool: case Expr::Kind::BoolToInt:
+      case Expr::Kind::ReportAt:
+        absorb(out, expr(e->a), false);
+        break;
+      case Expr::Kind::Binary: {
+        const Wr a = expr(e->a);
+        const Wr b = expr(e->b);
+        const bool lazy = e->bop == BinaryOp::LAnd || e->bop == BinaryOp::LOr;
+        if (!lazy) pair(a, b);
+        absorb(out, a, lazy);  // the first operand of && and || is sequenced before the value of the whole
+        absorb(out, b, false);
+        break;
+      }
+      case Expr::Kind::Cond: {
+        const Wr c = expr(e->a);
+        const Wr x = expr(e->b);
+        const Wr y = expr(e->c);  // the arms are not checked against each other: at most one runs
+        absorb(out, c, true);
+        absorb(out, x, false);
+        absorb(out, y, false);
+        break;
+      }
+      case Expr::Kind::Comma: {
+        const Wr a = expr(e->a);
+        const Wr b = expr(e->b);
+        absorb(out, a, true);
+        absorb(out, b, false);
+        break;
+      }
+      case Expr::Kind::Call: {
+        std::vector<Wr> args;
+        for (const Expr* a : e->args) args.push_back(expr(a));
+        for (size_t i = 0; i < args.size(); ++i)
+          for (size_t j = i + 1; j < args.size(); ++j) pair(args[i], args[j]);
+        for (const Wr& a : args) absorb(out, a, true);  // a call is a sequence point after its arguments
+        break;
+      }
+      case Expr::Kind::AssignE: {
+        const Wr a = expr(e->a);
+        if (e->var != nullptr) {
+          const auto hit = a.wu.find(e->var->id);
+          if (hit != a.wu.end()) report(hit->second, e->var->id);  // a write of the target inside the stored value
+        }
+        absorb(out, a, false);
+        if (e->var != nullptr) {
+          out.w[e->var->id] = e;
+          out.wu[e->var->id] = e;
+        }
+        break;
+      }
+    }
+    return out;
+  }
+
+  // A plain store of `value` to `target` (an Assign or a Decl).
+  void store(const Var* target, const Expr* value) {
+    const Wr v = expr(value);
+    if (target == nullptr) return;
+    const auto hit = v.wu.find(target->id);
+    if (hit != v.wu.end()) report(hit->second, target->id);
+  }
+
+  void stmt(const Stmt* s) {
+    if (s == nullptr) return;
+    switch (s->kind) {
+      case Stmt::Kind::Decl:
+      case Stmt::Kind::Assign:
+        if (s->expr != nullptr) store(s->var, s->expr);
+        break;
+      case Stmt::Kind::ExprStmt: case Stmt::Kind::Return: case Stmt::Kind::Check: expr(s->expr); break;
+      case Stmt::Kind::If:
+        expr(s->expr);
+        stmt(s->then_body);
+        stmt(s->else_body);
+        break;
+      case Stmt::Kind::While:
+        expr(s->expr);
+        stmt(s->body);
+        stmt(s->step);
+        break;
+      case Stmt::Kind::Switch:
+        expr(s->expr);
+        stmt(s->body);
+        break;
+      case Stmt::Kind::Block:
+        for (const Stmt* c : s->stmts) stmt(c);
+        break;
+      case Stmt::Kind::Case: case Stmt::Kind::Break: case Stmt::Kind::Continue: case Stmt::Kind::Goto: case Stmt::Kind::Label: break;
+    }
+  }
+
+  const Function& f_;
+  std::vector<SequenceProblem> out_;
+  std::set<std::pair<const Expr*, int>> reported_;
+};
+
+}  // namespace
+
+std::vector<SequenceProblem> sequence_problems(const Function& f) { return Sequencer(f).run(); }
 
 }  // namespace cerastes::vir
