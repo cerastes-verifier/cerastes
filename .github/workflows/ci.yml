@@ -34,7 +34,7 @@ jobs:
   check:
     name: check (macOS, Command Line Tools 27.0)
     runs-on: xcode-27
-    timeout-minutes: 240
+    timeout-minutes: 150
     env:
       DEVELOPER_DIR: /Library/Developer/CommandLineTools
       CERASTES_JOBS: 3

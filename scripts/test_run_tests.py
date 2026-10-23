@@ -4266,7 +4266,7 @@ CI_YML_CANONICAL = (
     '  check:',
     '    name: check (macOS, Command Line Tools 27.0)',
     '    runs-on: xcode-27',
-    '    timeout-minutes: 240',
+    '    timeout-minutes: 150',
     '    env:',
     '      DEVELOPER_DIR: /Library/Developer/CommandLineTools',
     '      CERASTES_JOBS: 3',
@@ -4426,8 +4426,8 @@ def ci_workflow_problems(text):
     if scalars.get("runs-on") != "xcode-27":
         problems.append("`runs-on` must be `xcode-27`")
     timeout = scalars.get("timeout-minutes", "")
-    if not re.fullmatch(r"[1-9][0-9]*", timeout) or int(timeout) > 360:
-        problems.append("`timeout-minutes` must be an integer of at most 360")
+    if not re.fullmatch(r"[1-9][0-9]*", timeout) or int(timeout) > 150:
+        problems.append("`timeout-minutes` must be an integer of at most 150 (decision 0016 item 9)")
     # the job environment
     env_lines, section = [], None
     for l in jobs:
@@ -4557,7 +4557,7 @@ class CiGuardTests(unittest.TestCase):
                 ("concurrency group", line_with("  group:")),
                 ("cancel-in-progress", line_with("  cancel-in-progress:")),
                 ("jobs", "jobs:\n"), ("job name", "    name: check (macOS, Command Line Tools 27.0)\n"),
-                ("runs-on", "    runs-on: xcode-27\n"), ("timeout", "    timeout-minutes: 240\n"),
+                ("runs-on", "    runs-on: xcode-27\n"), ("timeout", "    timeout-minutes: 150\n"),
                 ("job env", "    env:\n"), ("DEVELOPER_DIR", "      DEVELOPER_DIR: /Library/Developer/CommandLineTools\n"),
                 ("CERASTES_JOBS", "      CERASTES_JOBS: 3\n"), ("steps", "    steps:\n"),
                 ("fetch-depth", "          fetch-depth: 0\n"), ("submodules", "          submodules: recursive\n"),
@@ -4604,7 +4604,7 @@ class CiGuardTests(unittest.TestCase):
             "      - name: Save the Silicon build\n", self.CHECK_STEP + "      - name: Save the Silicon build\n")
         out["cache save before ci.sh"] = Y.replace(self.CI_STEP, "").replace(
             self.CHECK_STEP, self.CI_STEP + self.CHECK_STEP)
-        sub("job-level if before the steps", "    timeout-minutes: 240\n", "    timeout-minutes: 240\n    if: false\n")
+        sub("job-level if before the steps", "    timeout-minutes: 150\n", "    timeout-minutes: 150\n    if: false\n")
         sub("job-level if just before steps", "    steps:\n", "    if: false\n    steps:\n")
         out["job-level if at the end"] = Y.rstrip("\n") + "\n    if: false\n"
         out["job-level quoted if at the end"] = Y.rstrip("\n") + "\n    'if': false\n"
@@ -4612,16 +4612,18 @@ class CiGuardTests(unittest.TestCase):
                            ("container", "ubuntu"), ("needs", "other"), ("defaults", "{run: {shell: sh}}"),
                            ("permissions", "{contents: write}"), ("environment", "prod"), ("services", "{}"),
                            ("outputs", "{}")):
-            sub(f"job-level {key} before the steps", "    timeout-minutes: 240\n",
-                f"    timeout-minutes: 240\n    {key}: {value}\n")
+            sub(f"job-level {key} before the steps", "    timeout-minutes: 150\n",
+                f"    timeout-minutes: 150\n    {key}: {value}\n")
             out[f"job-level {key} at the end"] = Y.rstrip("\n") + f"\n    {key}: {value}\n"
         sub("a second job", "jobs:\n  check:\n", "jobs:\n  other:\n    runs-on: xcode-27\n    steps: []\n  check:\n")
         sub("a repeated runs-on", "    runs-on: xcode-27\n", "    runs-on: xcode-27\n    runs-on: xcode-27\n")
         sub("another runner", "runs-on: xcode-27", "runs-on: macos-26")
         sub("a runner list", "runs-on: xcode-27", "runs-on: [self-hosted, xcode-27]")
-        sub("timeout 361", "timeout-minutes: 240", "timeout-minutes: 361")
-        sub("timeout quoted", "timeout-minutes: 240", "timeout-minutes: '240'")
-        sub("timeout an expression", "timeout-minutes: 240", "timeout-minutes: ${{ vars.T }}")
+        sub("timeout 151", "timeout-minutes: 150", "timeout-minutes: 151")
+        sub("timeout 240, the old value", "timeout-minutes: 150", "timeout-minutes: 240")
+        sub("timeout 361", "timeout-minutes: 150", "timeout-minutes: 361")
+        sub("timeout quoted", "timeout-minutes: 150", "timeout-minutes: '150'")
+        sub("timeout an expression", "timeout-minutes: 150", "timeout-minutes: ${{ vars.T }}")
         sub("an Xcode developer dir", "DEVELOPER_DIR: /Library/Developer/CommandLineTools",
             "DEVELOPER_DIR: /Applications/Xcode_27.app/Contents/Developer")
         sub("CERASTES_JOBS 0", "CERASTES_JOBS: 3", "CERASTES_JOBS: 0")
@@ -4754,7 +4756,7 @@ class CiGuardTests(unittest.TestCase):
                 ("another SHA", self.YML.replace("3d3c42e5aac5ba805825da76410c181273ba90b1", sha)),
                 ("a step renamed", self.YML.replace("name: Check everything", "name: Run the checks")),
                 ("a comment added", self.YML.replace("jobs:\n", "jobs:\n  # a comment\n")),
-                ("timeout 150", self.YML.replace("timeout-minutes: 240", "timeout-minutes: 150")),
+                ("a shorter timeout", self.YML.replace("timeout-minutes: 150", "timeout-minutes: 120")),
                 ("CERASTES_JOBS 4", self.YML.replace("CERASTES_JOBS: 3", "CERASTES_JOBS: 4")),
                 ("the job renamed", self.YML.replace("name: check (macOS", "name: build (macOS")),
                 ("a trailing comment on a SHA", self.YML.replace("# v7.0.1", "# v7.0.2")),
