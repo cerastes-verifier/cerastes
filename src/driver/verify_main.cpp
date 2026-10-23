@@ -314,8 +314,8 @@ int verify_command(int argc, char** argv) {
   // The warnings the verifier reports itself (0010 item 12): constant-folding warnings, unused variables, etc.
   // #2803 (an unrecognized attribute) is replaced by the error `unrecognized_attribute` (0011 item 7).
   // #546 (a jump bypasses an initialization) is replaced by cerastes's own rejection of every such jump: a switch body
-  // declaration that a later case label skips, and a goto past a declaration, both `unsupported_statement` (0014 items 1 and
-  // 7; 0015 item 2).  #1305 (a function declared not to return may return) is replaced by the `noreturn` check at every
+  // declaration with an initializer that a later case label skips, and a goto past a declaration with an initializer, both
+  // `unsupported_statement` (0014 items 1 and 7; 0015 item 2; a declaration without one may be jumped past, 0019 item 6).  #1305 (a function declared not to return may return) is replaced by the `noreturn` check at every
   // reachable `return` and closing brace (0015 item 4).  #1901 (C: use of a const variable in a constant expression, which EDG
   // accepts as an extension) is NOT suppressed, and in C mode it is an error: strict ISO C refuses every constant-expression
   // context (a case value, `_Static_assert`, a file-scope initializer, an array bound) that names an object (C23 6.6p8;
@@ -324,6 +324,14 @@ int verify_command(int argc, char** argv) {
   // mixed with another type, as in `enum color c = 2;` or `case 1:` over an enumeration) is replaced by the `conversion`
   // check of every conversion into an enumeration (decision 0018 item 5; P27).
   edg.push_back("--diag_suppress=61,62,63,39,179,68,69,188,546,940,1305,2803");
+  // #549 (a variable is used before its value is set) goes by the order of the source, not by paths: it misses the one-armed
+  // `if (c) x = 1; return x;` and fires on a dead read, so it is no evidence either way.  cerastes checks every read of a local
+  // declared without an initializer itself, on each feasible path (`uninitialized`, decision 0019 items 3 and 7).  The option
+  // turns the check off for good: a diagnostic pragma cannot turn it back on, unlike `--diag_suppress=549` (P29).
+  edg.push_back("--no_use_before_set_warnings");
+  // C: #257 (a `const` local without an initializer, a warning in C and an error in C++) is replaced by cerastes's own
+  // rejection of every such local (decision 0019 item 1; P28).  At file scope C gives no #257 (0017 handles `const int z;`).
+  if (c_mode) edg.push_back("--diag_suppress=257");
   if (c_mode) edg.push_back("--diag_error=1901");
   // A pragma EDG does not understand (#161 unrecognized #pragma, #1675 unrecognized GCC pragma) refuses the file: clang may
   // act on it (`#pragma clang attribute push (__attribute__((weak)), apply_to = ...)`, `#pragma GCC ...`) while EDG records

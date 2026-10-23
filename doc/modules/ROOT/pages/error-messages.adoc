@@ -9,7 +9,7 @@ at the line of the C or pass:[C++] source that causes it:
 <file>:<line>: note: <what the note says>
 ----
 
-The *category* names what could not be proved. There are twelve, and each has a
+The *category* names what could not be proved. There are thirteen, and each has a
 section below. A *note* line follows an error when a second place matters: the
 clause of a contract that failed, or the callee's clause that a call does not
 meet. Errors are sorted by file, line and category, and the exit status is 1
@@ -330,3 +330,38 @@ include::example$error-messages/noreturn_fixed.c[tag=source]
 ----
 
 The contract of `check_positive` is what its callers rely on: the path through `fail()` ends the program, so only the path that returns has to satisfy `r > 0`.
+
+== uninitialized
+
+A local variable may be read before it has a value. It is reported at the read.
+
+A variable declared without an initializer has no value until it is assigned:
+reading it first is undefined behaviour in C and in pass:[C++] (erroneous
+behaviour in pass:[C++]26), and it is the first thing the pass:[C++]
+initialization profile forbids (P4222). Look for a path that reaches the read
+without passing an assignment: a branch that does not assign the variable, a
+loop that may run zero times, a `switch` without `default`, or a `goto` or `case`
+label that jumps past the assignment. A read is any use of the value, including
+the old value in `x += 1` or `pass:[x++]`, a `return`, an argument, and an annotation
+such as `CERASTES_CHECK` or a loop invariant (there it is reported where the
+invariant is checked).
+
+[source,c]
+----
+include::example$error-messages/uninitialized_error.c[tag=source]
+----
+
+[source,console]
+----
+uninitialized_error.c:12: error: uninitialized: `r` may be read here before it is given a value
+----
+
+*How to fix it.* Give the variable a value on every path that reaches the read,
+or initialize it where it is declared. cerastes follows the paths of the
+program, so the assignments need not be in the same branch as the read, only on
+every way to it:
+
+[source,c]
+----
+include::example$error-messages/uninitialized_fixed.c[tag=source]
+----

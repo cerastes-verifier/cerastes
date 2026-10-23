@@ -21,6 +21,9 @@ struct LowerOptions {
   int drop_assert = -1;
   // Weaken every automatic range invariant so that it fails.
   bool weaken_auto_invariant = false;
+  // Leave out the invariants `snapshot ==> flag` of loops (decision 0019 item 4), so that a read of a variable given a value before
+  // a loop fails inside it: the self-test of why they are there.
+  bool drop_snapshot_invariant = false;
 };
 
 struct LowerResult {

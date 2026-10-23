@@ -31,7 +31,7 @@ file per bug, numbered like the decision records: `NNNN-short-name.md`.
 - **Reproductions** were run on upstream `main` (`034385ba0a` for 0001–0007,
   `d6f83174c7` from 0008 on and for the fixes up to 0016; no file under `src/`,
   `bases/` or `cmake/` differs between the two; `307002eae6` from 0020 on,
-  which changes `src/decl_inits.c` and `src/cp_gen_be.c`), built natively
+  which changes `src/decl_inits.c` and `src/cp_gen_be.c`; `ec2f12cffa` for 0022), built natively
   with the `macos-arm-clang-debug` preset and run as `HACKING.md` describes
   (`--clang_version=210000`, the scraped system include directories). Apple
   clang 21 (Command Line Tools 27.0, SDK 27.0) is the reference. Each file
@@ -62,6 +62,7 @@ file per bug, numbered like the decision records: `NNNN-short-name.md`.
 | [0019](0019-cxx23-parameter-names-in-nested-function-type-trailing-return.md) | In C++23, parameter names of a nested function type are not found in its trailing return type in some contexts | open |
 | [0020](upstreamed/0020-lambda-in-function-template-declaration-names-template-parameter.md) | A lambda that names a template parameter in a function template's declaration cannot be substituted: "identifier is undefined" | Upstreamed |
 | [0021](0021-lambda-called-in-constant-template-argument-not-folded-std-mode.md) | A lambda called in a constant template argument of a function template is not folded in std mode: "template instantiation resulted in unexpected function type" | open |
+| [0022](0022-suppressed-note-internal-error.md) | Suppressing the number of a constant-evaluation note is an internal error: "determine_severity_code: bad severity" | fixed on branch `0022` (on `ec2f12cffa`), merged into `cerastes` and pinned (`f0ed5525af`); not filed (box suites pending) |
 
 0008 to 0019 were found while fixing 0003 to 0007 and 0016. They are
 recorded only. On 2026-10-15 the owner decided that only bugs that block

@@ -63,7 +63,26 @@ and a C switch over an enumeration is encoded in the promoted type. **Owner step
 1. Merge M4.2b1's PR (`m4.2b1-named-constants`) first: this branch contains it.
 2. Push this branch and open its PR: `git push origin m4.2b2-enumerations` (the session never pushes). CI runs
    `check.sh` as locally.
-3. Answer §11 questions 16–19. Then M4.2c (§8.1; the next free record, 0019).
+3. Answer §11 questions 16–19. Then M4.2c (§8.1; the next free record, 0019). *(Answered 2026-10-22, M4.2c planning:
+   16 as recommended; 18 and 19 done in M4.2c; 17 done in M4.2c with the fork fix branch `0022`.)*
+
+**M4.2c is done (2026-10-22, branch `m4.2c-uninitialized-locals`, based on M4.2b2's tip `971c17c`; result in
+`internal/status.md`).** Locals without an initializer verify in both modes (record 0019): a read that may see an
+indeterminate value is the new error category `uninitialized` (P4222R1), checked on each path by a ghost flag; a `goto`
+or `case` may jump past such a declaration. With it, §11 questions 17–19: EDG's internal error #2656 is fixed on the fork
+branch `0022` (no driver change; the owner merged it into the fork's `cerastes`, `f0ed5525af`, and the pin moved there at
+the end of the session), ordering of one unscoped enumeration verifies, and a switch on an enumeration value is held to
+`-Wswitch`'s two rules (g++'s reading). **Owner steps after M4.2c, in this order:**
+1. Merge M4.2b2's PR (#4, `m4.2b2-enumerations`) first: this branch contains it.
+2. Push this branch and open its PR: `git push origin m4.2c-uninitialized-locals` (the session never pushes). CI runs
+   `check.sh` as locally.
+3. The fork branch `0022` (`3b05dd5c43`, in `~/Documents/compiler`, on upstream `main` `ec2f12cffa`; merged into
+   `cerastes` as `f0ed5525af`, which is pushed and pinned) is ready for the upstream issue/PR: file
+   `internal/edg_bugs/0022-suppressed-note-internal-error.md`, then replace `[GH #?]` in the commit's Changes entry with
+   the number (the Changes check needs it) and push the branch.
+4. Plan the next **EDG box session** (§8.1, "EDG box session after M4.2c"): the full box suites at the pin
+   `f0ed5525af` (upstream `ec2f12cffa` and `0022`, merged without a box run), and §11 question 16's bug draft.
+5. Answer §11 questions 20–23. Then M4.3 (§8.1).
 
 ## 1. State in one paragraph
 
@@ -529,7 +548,21 @@ Deferred (probes in the job's scratch directory are gone; the shapes are given h
 7. **Messages:** an out-of-range conversion names the enumeration as each mode spells it (`enum color` in C, `color` in
    C++); rejection texts still end "(decision 0012)" as before.
 8. **`#ifdef __CERASTES__` in a native-ok positive** (`enum_case_promoted.c`) is a hand-reviewed convention
-   (`tests/README.md`), not a harness rule (§11 question 19).
+   (`tests/README.md`), not a harness rule (§11 question 19). *(M4.2c: the owner forbade the pattern; the file is
+   retired and `tests/README.md` says so.)*
+
+**M4.2c audit notes (2026-10-22, not blocking; every should-fix item was taken):**
+1. **`c >= +GREEN`** is accepted in C (the front end drops a unary `+` on an enumerator, so it is the IL of `c >= GREEN`)
+   and rejected in C++: a difference in what the modes accept, never in meaning (0019 item 10).
+2. **Rejection texts** still end "(decision 0012)", also for the new "a const local variable without an initializer"
+   (0019 item 1).
+3. **`switch_enumeration`** also accepts `?:` arms that are enumeration values (not only enumerators); 0018 item 8
+   rejects those shapes first, so nothing changes.
+4. **Duplicate display of an overridden note** (`--diag_remark`/`--diag_warning`/`--diag_error` on a note's number):
+   a separate, pre-existing EDG display bug, recorded in bug 0022's text, not fixed by `0022` (memory: EDG bugs scoped
+   to cerastes).
+5. **Incidental:** `constexpr int z = (-2147483647 - 1) / -1;` (and `% -1`) gives no diagnostic in this EDG (P30); cerastes
+   encodes initializers as written (0017), so it does not rely on the fold.
 
 ## 7. Known gaps carried
 
@@ -652,7 +685,9 @@ the C switch in the promoted type, the copies, #188). Retirement pre-approved: `
   comparisons, `enum class`, fixed bases, empty enums, enum-typed const globals. Never cut: the conversion check, the
   promotion rule, enumerator recognition, the initializer check.
 
-**M4.2c Locals without an initializer** (the next free record: 0019). Recommended (review): definite assignment over VIR — one
+**M4.2c Locals without an initializer** (record 0019; **run 2026-10-22**, see `internal/status.md`: the owner chose a
+new category `uninitialized` checked path-precisely by a ghost flag, not definite assignment, and lifted jumps past such
+declarations; §11 questions 17–19 ran in the same session). The planning text follows. Recommended (review): definite assignment over VIR — one
 forward pass suffices because every jump is forward (intersection at joins and labels; a loop head's state is its
 entry state); no new category; the rejection names the read. Alternative: a ghost "defined" flag per local with
 category `uninitialized` (flags false at method entry, since Viper locals start arbitrary, `emit.cpp:181`; reads
@@ -660,7 +695,16 @@ include compound assignment, `++`/`--`, arguments, returns and annotations; a mo
 declared outside the loop; the automatic range invariant, `lower.cpp:676-691`, must not fail on an unassigned local);
 decide by spike. Small: may share a session with M4.3's start.
 
-**M4.3 Expressions and sequencing.** The comma operator; assignments as values; `x++` inside expressions; calls in
+**EDG box session after M4.2c** (owner, 2026-10-22). The owner merged `0022` into the fork's `cerastes`
+(`f0ed5525af`, which also brings upstream `main` `ec2f12cffa`, 11 commits after `21065e551e`) and M4.2c moved the pin
+there (`check.sh` green, every `.vpr` byte-identical, the three #2656 tests added). Still to do on the box: (1) the full
+suites at `f0ed5525af` in both 64-bit configurations (`changes,regressions,imported,edg,cwg,stdlib`; known `cwg1835`,
+`cwg2881`), and whether `0022`'s `.rto` needs `edg_x86_32` overrides; (2) §11 question 16: reproduce the C
+enumerator-list typing on unmodified upstream and draft its bug file (no fork fix). Clean builds every run (memory:
+stale binaries after a failed link).
+
+**M4.3 Expressions and sequencing.** The flag of decision 0019 must follow an assignment inside an expression at its
+point in the evaluation order (0019 item 13). The comma operator; assignments as values; `x++` inside expressions; calls in
 guarded operands (`&&`, `||`, `?:`) and loop conditions (lowered as branches and re-evaluation); unsequenced calls
 (C's sequencing rules: an unsequenced modification of one object is undefined behaviour and must be rejected or
 detected). Record (sequencing), amending 0012 items 4 and 6. Mutation operators for the new forms.
@@ -970,18 +1014,42 @@ Each has a recommended answer. Answer inline, as before.
     `int` when the value fits: `enum { U = 2u, V = U > -1 };` folds `V` to 0 (C gives 1; stock `cpfe --c23` fails
     `_Static_assert`). cerastes now rejects such a reference in C (0018 item 10). Reproduce it on unmodified upstream
     `main` and draft `internal/edg_bugs/NNNN-*.md` for you to file? *Recommended: yes, in the next EDG session (box);
-    no fork fix, since it does not block cerastes (memory: EDG bugs scoped to cerastes).*
+    no fork fix, since it does not block cerastes (memory: EDG bugs scoped to cerastes).* **Answered (owner,
+    2026-10-22): as recommended** (the next EDG box session, §8.1).
 17. **EDG internal error #2656** (found by P27): in C++, an error #28 whose note verify mode suppresses makes the front
     end assert (`determine_severity_code: bad severity`): `enum { A = 1 << 32 };`, `constexpr int z = 1 << 32;`, so
     `cerastes verify` exits 3 (a tool failure, never a verdict). Investigate which suppressed number is the note and stop
     suppressing it (or suppress differently), and draft the EDG bug? *Recommended: a short item in the next session that
-    touches the driver; tests avoid the shape until then.*
+    touches the driver; tests avoid the shape until then.* **Answered (owner, 2026-10-22): done in M4.2c, with a fork
+    fix branch.** The notes are #39, #61, #62 and #63 (P30). Making them remarks prints the error twice (a second EDG
+    display bug), so the owner chose no driver change: the fix is branch `0022`, which the owner merged into the
+    fork's `cerastes` and M4.2c pinned (`f0ed5525af`; 0019 item 9; `internal/edg_bugs/0022-suppressed-note-internal-error.md`).
 18. **Ordering of unscoped enumeration values** (`c < GREEN`, both operands of one enumeration) is rejected (0018 item
     7) although it means the same in both languages for values in range. Lift it when a ported example needs it?
-    *Recommended: yes, then; one rule and one test pair.*
+    *Recommended: yes, then; one rule and one test pair.* **Answered (owner, 2026-10-22): do it now** (it diverges
+    from language conformance): two values of one unscoped enumeration, or a value and one of its enumerators, are
+    ordered in M4.2c; an enumeration value against another integer stays rejected (0019 item 10).
 19. **`#ifdef __CERASTES__` in a native-ok positive** (`tests/scalar/enum_case_promoted.c`): clang's and GCC's `-Wswitch`
     (in `-Wall`) refuse `case 4:` over an enumeration, so the never-taken cases are hidden from the native compilers and
     the header says why. Accept this pattern (and add a sentence to `tests/README.md`), or forbid it and keep such shapes
     out of native-ok positives? *Recommended: accept it, only for code the compilers refuse as a warning, with the reason
-    in the header.*
+    in the header.* **Answered (owner, 2026-10-22): reject it like the compilers** ("it may be legal, but it is
+    wrong"): both halves of `-Wswitch` are rejections, the strictest reading (g++'s) in both modes, and the
+    `#ifdef __CERASTES__` pattern is forbidden (0019 item 11; `enum_case_promoted.c` and four twins retired).
+
+**M4.2c, 2026-10-22:**
+
+20. **Warnings #550 ("set but never used") and #177 ("declared but never referenced")** print in verify mode for natural
+    code with a local declared without an initializer (`int x; x = 1; return n;`) and fail a test (tests are
+    warning-free). Suppress them in verify mode? *Recommended: not now; they are true and useful to a user, and tests
+    read their variables.*
+21. **P4222's markers.** cerastes asks for no `[[uninit]]` on a definition left uninitialized (0019 item 3). Add a
+    stricter mode that also requires P4222R1's markers (`[[uninit]]`, `[[ref_to_uninit]]`)? *Recommended: an M8
+    inventory entry; revisit with M4.5 (pointers to uninitialized objects) and M7 (member initialization).*
+22. **A jump past a declaration *with* an initializer in C** (allowed in C, the object is indeterminate at the label;
+    C++ refuses it): with 0019's flag it could be accepted in C. Lift it? *Recommended: no, until a ported example needs
+    it; one program for both modes.*
+23. **EDG's double display of an overridden note** (`--diag_remark`/`--diag_warning`/`--diag_error` on a note's number
+    prints the whole error twice; described in bug 0022). Draft it as its own bug? *Recommended: no (EDG bugs scoped to
+    cerastes); 0022 removes cerastes's need for an override.*
 

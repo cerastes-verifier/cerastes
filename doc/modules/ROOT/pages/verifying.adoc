@@ -230,11 +230,15 @@ fallthrough for compilers that warn about it. Each `case` value is checked as it
 is written, like any constant: `case 1 << 40:` is a `shift` error at the label,
 even where the compiler only warns. The `case` values are checked at the start
 of the function, whether or not the `switch` is reached, and in pass:[C++] they
-may name constants (<<constants>>). cerastes rejects a `case` or `default` label that is not directly
+may name constants (<<constants>>). A `switch` on an enumeration must also pass
+the compilers' `-Wswitch` rules (xref:integer-semantics.adoc#enumerations[Enumerations]).
+A label may jump past a declaration without an initializer: the variable has no
+value there until it is assigned (<<uninitialized>>). cerastes rejects a `case` or `default` label that is not directly
 inside the braces of its `switch` (as in Duff's device), a GNU case range
-(`case 1 ... 3:`), a statement before the first label, a declaration that a
-later label jumps over, and a `switch` with an init-statement or a declaration
-in its condition.
+(`case 1 ... 3:`), a statement other than a declaration without an initializer
+before the first label, a declaration with an initializer that a later label
+jumps over, and a `switch` with an init-statement or a declaration in its
+condition.
 
 [#goto]
 == Jumping forward with goto
@@ -256,10 +260,45 @@ After `done:`, the postcondition is proved for each way of getting there: from
 either `goto`, where `result` is still -1, and from the subtraction, which
 cannot overflow because `0 <= y <= x` holds there.
 
-cerastes rejects a `goto` that jumps backward (write the loop as `while`, `for` or
-`do`), one that jumps into a block, an `if` branch, a loop or the body of a
-`switch`, one that jumps past a declaration that is still in scope at the label
-(its variable would have no value there), and the GNU computed `goto`.
+A `goto` may jump past a declaration without an initializer; the variable has
+no value at the label until it is assigned (<<uninitialized>>). cerastes rejects
+a `goto` that jumps backward (write the loop as `while`, `for` or `do`), one that
+jumps into a block, an `if` branch, a loop or the body of a `switch`, one that
+jumps past a declaration with an initializer that is still in scope at the
+label (the initialization would be skipped), and the GNU computed `goto`.
+
+[#uninitialized]
+== Locals without an initializer
+
+A local may be declared without an initializer and given its value later. Until
+it is assigned it has no value: reading it is undefined behaviour in C and in
+pass:[C++] (erroneous behaviour in pass:[C++]26), and the first rule of the
+pass:[C++] initialization profile (P4222) forbids it. cerastes checks every
+read. A read that may come before the variable has a value is an
+`uninitialized` error at the read
+(xref:error-messages.adoc[Error messages]). The check follows the
+paths of the program, so a variable assigned on every path that reaches the
+read verifies, even when the assignment is in another branch than the read:
+
+[source,c]
+----
+include::example$verifying/uninitialized.c[tag=source]
+----
+
+In `pick`, `x` is read only when `c` is non-zero, and then it was assigned.
+
+A read is any use of the value: in an expression, a condition, a `return`, an
+argument, the old value in `x += 1` or `pass:[x++]`, and an annotation such as
+`CERASTES_CHECK` or a loop invariant. Each time its declaration is reached, in
+the next iteration of a loop for example, the variable has no value again. A
+`goto` or a `case` label may jump past a declaration without an initializer, as
+C and pass:[C++] allow; the variable then has no value at the label until it
+is assigned. A `const` local without an initializer is rejected, since it can
+never be given a value. cerastes is stricter than pass:[C++] in two cases:
+copying an indeterminate `unsigned char` is allowed there and an error here,
+and an expression statement that only names the variable (`x;` or
+`(void)x;`) does not read it in pass:[C++], while cerastes counts it as a read,
+as C does. An operand of `sizeof` is never a read.
 
 [#no-return]
 == Functions that do not return
@@ -468,7 +507,8 @@ The constructs that are rejected in this version are:
   computed `goto`, `try` and `throw`, `asm`, an `if` or
   `switch` with an init-statement or with a declaration in its condition, and the
   forms of `switch` listed in <<control-flow>>.
-* *Declarations:* a local with no initializer, `static`, `thread_local` and
+* *Declarations:* a `const` local with no initializer, a local initialized
+  from itself (`int x = x;`), `static`, `thread_local` and
   `extern` locals, global variables other than the constants of <<constants>>,
   arrays, classes, unions,
   an enumeration declared in a function, a class or a template, or with a
@@ -491,7 +531,10 @@ The constructs that are rejected in this version are:
   constant expression is required (a `case` value, `_Static_assert`, an
   enumerator's value), and an enumeration value that the compiler converts to an
   integer for arithmetic, a comparison of order, a unary operator, a shift or an
-  arm of `?:`, a `?:` whose result is an enumeration, in C an enumerator's value
+  arm of `?:` (comparing the order of two values of the same enumeration is
+  allowed), a `?:` whose result is an enumeration, a `switch` on an enumeration
+  that the compilers' `-Wswitch` rejects (a `case` value that is not an
+  enumerator, or a missing enumerator without `default`), in C an enumerator's value
   that names an earlier enumerator whose initializer has a type other than `int`
   (the front end gives it the pass:[C++] type) or that uses `sizeof` or `_Alignof`
   of an expression or `typeof`, and compound assignment,

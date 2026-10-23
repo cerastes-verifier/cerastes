@@ -174,3 +174,5 @@ correctness (0013).
 - Jumps stay forward and structured, so their soundness still reduces to Silicon's forward `goto` (S10, S11) and
   `check_program`'s nesting rules.
 - The trusted libc table is the first cerastes-supplied contract; each entry is tagged in the emitted Viper.
+
+*2026-10-22, amended by 0019 (M4.2c): item 2 — a `goto` may jump past a declaration without an initializer (the variable has no value at the label until it is assigned, `uninitialized`); one past a declaration with an initializer stays rejected.*
