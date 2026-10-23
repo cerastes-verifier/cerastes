@@ -117,6 +117,27 @@ split M4.4 into four sessions (§8.1): **M4.4a** no wrapping and exit 3 for inte
 operators, **M4.4c** writes outside F, `void` `?:` arms and warnings in verified tests, **M4.4d** exact sets. Each is
 planned at ≤ 4 h on its own branch, with the pre-approved expectation changes listed in §8.1.
 
+**M4.4a is done (2026-10-23, branch `m4.4a-no-wrapping`, based on local `main` `b395a2b`, the merged M4.3b; result in
+`internal/status.md`).**
+- **No wrapping** (record 0022; §11 question 13). Unsigned arithmetic, `-u`, `u << n` and every conversion into an
+  unsigned type are checked like the signed forms (`overflow`, `shift`, `conversion`), and `c_wrap` is gone.
+- **Exit 3** (question 29). Lowering's internal errors, the emitter's problems and the "encoded twice" guard are tool
+  failures, reported as `internal_inconsistency`.
+- **Enumerations in C** (owner, during the session). C compares an enumeration without negative values as `unsigned
+  int`, and both compilers warn `-Wsign-compare`. So `==`/`!=` between such an enumeration and a signed operand that
+  may be negative is rejected in both modes, and so is `==`/`!=` between two different enumerations (`-Wenum-compare`;
+  audit round 2's blocking item).
+
+**Owner steps after M4.4a, in this order:**
+1. **Handoff answers.** Your §11 answers 27–31 were uncommitted in the main checkout's `internal/handoff.md`; this
+   branch carries them, together with question 13's answer. Drop the main checkout's copy before merging:
+   `git -C ~/Documents/cerastes/cerastes checkout internal/handoff.md`.
+2. **M4.3b.** Local `main` has M4.3b merged (`b395a2b`); `origin/main` as last fetched here is `d694606` (M4.3a's PR).
+   If GitHub does not have M4.3b yet, push `main`, or open and merge M4.3b's PR (`m4.3b-calls`), first.
+3. **This branch.** Push it and open its PR: `git push origin m4.4a-no-wrapping` (the session never pushes). CI runs
+   `check.sh` as locally.
+4. **Questions.** Answer §11 questions 32–36. Then M4.4b (§8.1, record 0023, probes P40–P41).
+
 ## 1. State in one paragraph
 
 The owner split M4.2 into **M4.2a** (forward `goto`, functions that do not return, `assert`), **M4.2b** (named
@@ -648,6 +669,53 @@ on the code and on the tests had none; every should-fix item of both rounds was 
    `call_reorder_divzero.c` and `call_comma_floor_divzero.c` fail for their stated reason at their line, as they would have
    before M4.3b; the positives and the pins carry the rule.
 
+**M4.4a audit notes (2026-10-23).** Round 1, on the record and P38, had no blocking item; its should-fix items were taken
+into 0022. Round 2, on the code and the tests, had one blocking item: two different enumerations in `==`/`!=`, now
+rejected in both modes. Its should-fix items were taken, and a re-audit checked the blocking fix. Notes not taken:
+1. **What EDG still computes itself, and wraps** (0022 item 2): `_Static_assert`, `#if`, array bounds and other
+   expressions in types, template arguments, and character literals (`'\xff'` is -1, `L'\xffffffff'` an `int` -1;
+   `'abcde'` is truncated with only warning #1654, which verify mode does not suppress). These are C's own values, so
+   nothing is unsound, but they are outside the real-integer model (§11 questions 32–33).
+2. **The exit-3 paths for emitter problems and "encoded twice"** have no test; no program reaches them without a hook.
+   `--selftest` sets the flag itself rather than running the encoder's path, while `RealDriverTests` covers the
+   lowering path end to end (`perturb_fixed_order`).
+3. **The defensive rejection in `enum_case_value`** (a constant with an `orig_type` and no `expr`) is unreachable and
+   untested; `constant_value` already rejects that shape.
+4. **`same_fixed` in the doc example `enum_compare_signed.c`** is shown on the page but never verified, since the file is
+   a rejection test. The accepted shapes are pinned by `tests/scalar/enum_eq_signed_ok.c` and `enum_eq_truth_ok.c`.
+5. **Item 5 is stricter than the compilers** for `x == (enum color)2` and `c == (x > 0 ? 1 : 2)`, and stays as strict as
+   clang for `c == (int)b` (GCC is silent there). See §11 question 34.
+6. **A rejection test matches only the tag and the line.** That holds for the `reject_enum_eq_*` tests and the doc
+   example. Each shape was accepted before item 5, so removing the rule fails them.
+7. **Re-audit 2b's notes.** The blocking item is closed: no `==`/`!=` with an enumeration gives opposite meanings in the
+   two modes. Its should-fix items were taken: the record's wording, and four rejection tests (`c == (int)b`, `RED ==
+   NB`, `f == n`, `f == NA`). The rest:
+   - a few shapes are rejected in one mode and accepted in the other with the same values (0022 item 5, "Verdicts in
+     the two modes"; §11 question 36);
+   - `switch (c) { case NB: … }` over `enum color` is accepted while `c == NB` is rejected: the same values, different
+     policies (0019 rule 1 against 0022 item 5);
+   - C's `case -1:` over an enumeration prints the wrapped value 4294967295 in the `case_not_in_enumeration` message,
+     where C++ prints -1 (a message only; predates M4.4a);
+   - lowering's internal-inconsistency diagnostics have no source position (acceptable for a tool failure).
+8. **The in-place changes under the rule** (0022 status). The body changed; no `expect:` line did. Each change is
+   listed with its new twin, which pins the wrap:
+
+   | Tests changed in place | Change | New twin |
+   |---|---|---|
+   | `assign_value_unsigned.c` and its `_post` | `requires 0 <= a <= 255` | `negative/assign_value_unsigned_conversion.c` |
+   | `incdec_value_unsigned.c` and its `_post` | `requires c <= 254` | `negative/incdec_value_unsigned_conversion.c` |
+   | `uchar_promote.c` and its `_post` | `a == 254` | `negative/uchar_promote_conversion.c` |
+   | `uninit_compound.c` | `requires a <= 4294967292u` | `negative/uninit_compound_overflow.c` |
+   | `const_global_init.c` and `negative/const_global_init_{over,shift,conversion,post}.c` | `U = 65535u * 65537u` | `negative/const_unsigned_negative.c` |
+   | `enum_list_type.cpp` and its `_post` | `V = U * 1073741824 > 0` | `negative/enum_list_type_wrap.cpp` |
+   | `negative/assert_cast_kept.c` | `requires 0 <= x <= 255` | `negative/assert_cast_conversion.c` |
+   | `negative/compound_ushort_over.c` | `a == 65535 && b == 65535` | `negative/compound_ushort_conversion.c` |
+   | `negative/compound_mixed_negative.c` | `requires i >= 0 && …` | `negative/compound_mixed_neg_operand.c` |
+
+   The doc examples `integer-semantics/{narrowing,constants,shifts,promotion_ok,promotion_overflow,usual_conversions}`
+   were changed the same way, with `unsigned_checked.cpp`, `unsigned_overflow.cpp`, `modular_explicit.cpp`,
+   `constant_unsigned_error.cpp` and `usual_conversions_error.c` new.
+
 ## 7. Known gaps carried
 
 - Termination: a recursion cycle through another unit (0013 item 5) — the contract manifest, M6 (M7 if it does not fit).
@@ -866,9 +934,9 @@ the essentials follow. Team in every session: edg-backend, il-analyst, test-muta
 
 **M4.4b Bitwise operators** (record 0023).
 - **Probes.**
-  - P39, the IL: operands of `& | ^ ~` and `&= |= ^=` (char, short, bool, mixed signedness, `__int128`, C's bare
+  - P40, the IL: operands of `& | ^ ~` and `&= |= ^=` (char, short, bool, mixed signedness, `__int128`, C's bare
     enumeration operand of `~`, folded constants).
-  - P40, the warning matrix (clang and GCC, `-Wall -Wextra`, both modes): `a & b == c`, `a | b & c`, `a & b ? c : d`,
+  - P41, the warning matrix (clang and GCC, `-Wall -Wextra`, both modes): `a & b == c`, `a | b & c`, `a & b ? c : d`,
     `~b`, `b1 & b2`, `(x & 2) == 1`, `!x & y`, `2 ^ 32`, `if (x |= a)`.
 
   The union of the warned shapes is rejected, and the detectors look inside folded constants' `expr`.
@@ -960,6 +1028,9 @@ contracts in `bin/*.h`; canonical examples to port are listed per session below.
 - **M4.5e Arrays and pointer arithmetic:** local arrays, `a[i]`, `p + i`, `p - q`, comparisons within one object,
   `owns_range` and quantified permissions, `forall` in C; ports of `examples/carrays.c`, `examples/insertion_sort.c`,
   array sum and max.
+  **From P38 (M4.4a, record 0022 item 3):** a braced initializer with more than 1000 elements keeps no `expr` for its
+  elements (`REDUCE_BACKING_EXPRESSION_USE`), only an `orig_type`. Read every element through `constant_value`, which
+  rejects that shape, never through `ck_aggregate`'s values directly, or a wrapping element would pass unchecked.
 - **M4.5f Predicates and pure functions:** predicate and pure bodies encoded (0011 item 4 lifted), `fold`/`unfold`,
   recursive predicates; a linked list (push, pop, length), `tutorial_solutions/stack.c`, `reverse`. Lemmas and ghost
   inductive data are open design points (`internal/upstream/attribute-registration.md` Appendix A): a record decides
@@ -977,6 +1048,12 @@ M4's acceptance (plan.md), and the deferred list for M8 (unions, floating point,
 vector types, variadic functions and `printf`, several translation units, concurrency).
 
 ### 8.2 M5 — generic templates (designed in the M4.1 session)
+
+**From P38 (M4.4a, record 0022 item 3):** a non-type template argument keeps no `expr` in this configuration
+(`BACKING_EXPR_FOR_NONTYPE_TEMPL_ARG` is false), so `t<0u - 1u>()` reaches an instance as the plain constant
+`4294967295U`, which cannot be told from a literal. Under 0022 (no wrapping) M5 must not trust such a constant: check a
+template argument's conversion at the place where it is written (the template-id in the caller), or reject arguments
+that are not literals, decided in M5a's record.
 
 The M3 handoff §6 still holds: VIR's `IntType` needs a type form for `T`; templates in verified files are rejected
 today (`encode.cpp:1462-1467` declarations, `:1495-1497` routines, `:926-929` calls); generic proofs read contracts
@@ -1319,3 +1396,28 @@ Each has a recommended answer. Answer inline, as before.
     *Recommended: yes, a small harness item with twins in the next session that touches the harness.* **Answered
     (owner, 2026-10-23): follow the recommendation.** It is in **M4.4c**: `error` tests may list the same warnings,
     since a positive's twin prints them too.
+
+**M4.4a, 2026-10-23:**
+
+32. **`_Static_assert` and other values EDG computes alone still wrap** (§6 M4.4a note 1):
+    `_Static_assert(65536u * 65536u == 0u)` is accepted. A closed `_Static_assert` condition could be encoded as written
+    and checked in the 0017 prologue, like a named constant's initializer. Do it, and when? *Recommended: yes, a small
+    item in M4.4b (its record already touches constants); `#if` and array bounds stay EDG's (an M8 entry).*
+33. **Multi-character literals** (`'abcde'`) are truncated by EDG with only warning #1654, which verify mode does not
+    suppress, so a verified test cannot hold one. Make #1654 an error in verify mode (`--diag_error=1654`), as C23
+    makes them implementation-defined? *Recommended: yes, a one-line driver item with a test, in the next session that
+    touches the driver.*
+34. **Item 5 rejects two shapes the compilers accept**: `x == (enum color)2`, which in C would otherwise be a
+    `conversion` error in C only, and `c == (x > 0 ? 1 : 2)`. It also rejects `c == (int)b`, where only clang warns.
+    Keep the rule as it is (one meaning in both modes, the strictest reading)? *Recommended: keep it; each has an
+    explicit form that verifies (`(int)`).*
+35. **Sign-compare shapes without enumerations.** `n == 0u`, `i < u` and `-1 < 0u` are path-precise `conversion` errors
+    now (0022 item 1), where the compilers warn `-Wsign-compare`, in C++ `-Wall` and in C `-Wextra`, on some of them. Keep
+    the path-precise check, or reject the warned shapes like the compilers as for enumerations? *Recommended: keep the
+    path-precise check; it reports only what can actually go wrong, and a warned shape that is in range verifies.*
+36. **Item 5's remaining mode differences** (re-audit 2b; sound, but not one verdict in both modes). A `?:` or comma
+    whose result is a truth value is typed `int` in C and `bool` in C++, so `c == (x ? true : false)` is rejected in C
+    only. A `?:` of enumerators is typed `int` in C and the enumeration in C++, so `(x ? RED : GREEN) == y` is rejected
+    in C++ only. Extend the rule, so that a `?:` whose arms are truth values, or a comma whose right operand is one,
+    counts as a truth value, and in C a `?:` of enumerators of one enumeration counts as a value of it? *Recommended:
+    yes, as a small item in M4.4b, with a test pair per shape.*

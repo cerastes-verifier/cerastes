@@ -4,6 +4,172 @@ Session handoff log, newest first. Each entry says what is done, what is not,
 any surprises, the decision records added and the exact first step for the
 next session.
 
+## M4.4a — No wrapping, and exit 3 for internal inconsistencies (2026-10-23): done on branch `m4.4a-no-wrapping`; PR pending (after M4.3b's)
+
+Read `internal/handoff.md` next: the "M4.4a is done" owner steps at the top, §6 the M4.4a audit notes, §8.1 M4.4b–d,
+§11 questions 32–36.
+
+**Owner decisions (2026-10-23, M4.4 planning and during the session)**
+- **§11 question 13: "Wrapping should be prohibited."** Unsigned arithmetic and conversions are checked like signed
+  ones:
+  - the existing categories (`overflow`, `conversion`, `shift`);
+  - no modular opt-in: a reduction is written in a wider type, and a truncating marker is an M8 entry.
+- **§11 questions 27–31:**
+  - Q27, Q28, Q30: do them now;
+  - Q29, Q31: follow the recommendation.
+- **The split.** M4.4 is four sessions, each ≤ 4 h:
+  - **M4.4a**: no wrapping, Q29, the folded-constant probe;
+  - **M4.4b**: bitwise operators;
+  - **M4.4c**: Q28, Q30, Q31;
+  - **M4.4d**: Q27, exact sets with today's sets as the fallback.
+- **Expectation changes by rule.** Every test or VIR case that flips only because of a new `overflow`, `conversion` or
+  `shift` error at a wrapping site is pre-approved:
+  - a test whose point was the wrap is retired and replaced;
+  - an error twin, or a test sharing a wrapping fixture, has the wrap removed in its body in place (never an
+    `expect:` line), with a new twin for the wrap.
+- **Enumerations compared with a signed integer** (during the session). Both compilers warn `-Wsign-compare` on C's
+  `enum == int`, so the planned mathematical comparison was dropped: the shape is rejected in both modes, like the
+  compilers (0022 item 5).
+
+**Done**
+- **Decision 0022** (record commit; revised after the three audits). It amends:
+  - 0010 items 1, 4, 5, 6, 8, 10, 11, 12 and its Consequences;
+  - 0011 items 8, 10 and 13;
+  - 0012 item 11;
+  - 0014 item 6;
+  - 0017 item 4;
+  - 0018 items 5 and 6;
+  - 0020 item 2;
+  - 0021 item 3.
+
+  Probes P38 (EDG keeps `expr` for every wrapping constant the encoder reads; two lost classes, unreachable today) and
+  P39 (the compilers' `-Wsign-compare`/`-Wenum-compare` matrix, with an addendum) are in `il-inventory.md`, "M4.4a".
+- **No wrapping, both modes.**
+  - Unsigned `+ - *`, `-u` (unless 0) and `++`/`--` in `unsigned int` or wider are `overflow`.
+  - `u << n` losing bits is `shift`.
+  - Every conversion into an unsigned type that does not fit is `conversion`. That covers casts, initializers,
+    assignments, arguments, returns, the usual arithmetic conversions (`-1 < 0u`), case values, named-constant and
+    enumerator initializers as written, and `uc++` at 255.
+  - The same applies in contracts and annotations, in default arguments and in the 0017 prologue. A failed closed
+    obligation there ends the path, so the run exits 1, never 3.
+  - A constant that fits needs no check (item 4). `c_wrap` is gone from the prelude.
+- **Enumerations (item 5).** `==`/`!=` between a value of an enumeration compared as `unsigned` in C and a signed
+  operand that may be negative is rejected in both modes (`unsupported_expression`). So is `==`/`!=` between two
+  different enumerations (audit round 2's blocking item). Truth values and constants ≥ 0 are accepted.
+- **Exit 3** (Q29). Lowering's internal errors, the emitter's problems and the "encoded twice" guard:
+  - are reported with their own diagnostic, `internal_inconsistency`;
+  - set `VerifyOutput::internal_inconsistency`, which the driver tests before the front end's status;
+  - are proved end to end by a new hook, `perturb_fixed_order`.
+
+  `cerastes --selftest` has 94 checks (was 84).
+- **Code:**
+  - `src/vir/lower.cpp`;
+  - `src/viper/prelude.{cpp,h}`;
+  - `src/backend/encode.cpp` (`reject_enumeration_sign_compare`, the flag, the hook, the `enum_case_value` check);
+  - `src/backend/diagnostics.def` (`internal_inconsistency`);
+  - `src/backend/verify_config.{h,cpp}` (`front_end_exit_status`);
+  - `src/driver/verify_main.cpp`, `src/driver/selftest.cpp`.
+- **VIR self-test:** 506 → 549 lowering cases (17 retired by the rule, 60 added); 175 rejection cases. Every baseline
+  case without `c_wrap` is byte-identical.
+- **Tests:**
+  - 14 new positives and 78 new twins and rejection tests in `tests/scalar`, both modes where both accept the code; 24
+    of the negatives are rejection tests;
+  - 17 tests changed in place by the rule;
+  - 6 new doc examples, and 7 doc examples changed in place.
+
+  21 files retired by the rule: the positives `unsigned_wrap.c`, `unsigned_mul.c`, `unsigned_neg.c`,
+  `shift_unsigned.c`, `conv_unsigned.c`, `incdec_uchar.c`, `compare_mixed.c`, `usual_conversions.c`,
+  `switch_unsigned_case.c`, `enum_cast_eq.c`, their `_post` twins, and the doc example
+  `integer-semantics/unsigned_wraps.cpp`. `enum_cast_eq.c` (`x == (enum color)2`) went under the owner's item-5 rule;
+  the others went under the wrap rule.
+- **In place:**
+  - `assign_value_unsigned`, `const_global_init` and its four twins, `enum_list_type.cpp` and its twin;
+  - `incdec_value_unsigned`, `uchar_promote`, `uninit_compound`;
+  - `assert_cast_kept`, `compound_ushort_over`, `compound_mixed_negative`;
+  - the `_post` twins of those positives;
+  - the doc examples `narrowing`, `constants`, `shifts`, `promotion_ok`, `promotion_overflow` and `usual_conversions`.
+
+  Each is listed with its new twin in handoff §6.
+- **Harness:**
+  - `DRIVER_SELFTEST_MIN` 94;
+  - a `RealDriverTests` test for the hook (its tag, lowering's message, the driver's line, exit 3, and a twin without
+    the hook);
+  - `VERIFY_HOOK_ONLY_TAGS` for the new diagnostic;
+  - `tests/README.md` (the category and exit-status tables);
+  - `VIR_CASES_MIN` 549.
+- **Docs:**
+  - Integer semantics: "Unsigned arithmetic is checked too", "Modular arithmetic, written out", the conversions
+    table, promotions, shifts, annotations, constants, and the enumeration comparison rule;
+  - Error messages (`overflow`, `conversion`);
+  - Verifying a program (exit 3);
+  - Overview.
+
+**Acceptance**
+- **`scripts/check.sh` green** on the final code, 14:28–14:58 (29 min 20 s). The two earlier launches stopped at the
+  doc lint and at the harness self-test's tag-coverage rule, before any test ran.
+  - Self-tests 969 (skipped=1) + 74 + 176 + 275.
+  - Tests 4401 passed, 0 failed, 1 skipped (native-ok: Apple clang 920, GCC 920).
+  - 1562 `.vpr` lint clean.
+  - VIR self-test 549/549 (+ 175 rejection cases).
+  - Walker oracle 134 goldens, 0 failed.
+  - Docs 0 problems.
+- **After it**, re-audit 2b's four rejection tests and one harness assertion were checked as a delta (memory: verify
+  the delta):
+  - the four files: 8 passed, 0 failed;
+  - harness self-test 969 tests OK (skipped=1);
+  - `--check-headers` 1612/1612; `--count-error-twins` 277;
+  - `mutate.py --validate` 277 tests, 7783 mutants, 532 equivalents, 1069 in the bucket;
+  - the docs rebuilt, 0 problems.
+- **Byte identity.** Against the session's baseline (`build/m4.4a-baseline-vpr`, taken before any change), every
+  baseline `.vpr` and map without `c_wrap` is byte-identical: 2670 files.
+  - The 178 that differ all had `c_wrap`.
+  - The 78 that are gone belong to retired tests.
+  - 276 files are new.
+- **Mutation** over the 23 new and changed positives and doc examples:
+
+  | Run | Mutants | Killed | Safe-direction | Unexplained | Stillborn | Tool failures |
+  |---|---|---|---|---|---|---|
+  | 1 | 567 | 467 | 57 | 43 | 0 | 0 |
+  | 2 (9 strengthened in place) | 285 | 257 | 28 | 0 | 0 | 0 |
+  | 3 (4 positives from audit round 2) | 94 | 88 | 4 | 0 | 2 | 0 |
+
+  The result is **0 unexplained** and **0 tool failures**, with no new equivalents. 13 entries of retired or changed
+  files were dropped from `tests/mutants-equivalent.txt`; no remaining entry argues from wrapping.
+- **Audits** (Opus, one reviewer):
+  - **Round 1** (the record and P38): 0 blocking, 10 should-fix (taken into 0022), 5 notes.
+  - **Round 2** (code and tests): 1 blocking (two different enumerations), 4 should-fix (truth values, three VIR
+    cases, `compound_mixed_negative.c`, missing tests), 8 notes. All taken except what handoff §6 lists.
+  - **Re-audit 2b:** the blocking item closed; 3 should-fix (the record's wording, the remaining mode differences,
+    four tests), taken; 6 notes.
+- **Wall-clock:** 11:56–15:05 (planning before).
+
+**Not done / deferred**
+- M4.4b (bitwise operators), M4.4c (Q28, Q30, Q31), M4.4d (Q27): handoff §8.1.
+- The audit notes (handoff §6, M4.4a).
+- §11 questions 32–36:
+  - `_Static_assert` and other values EDG computes;
+  - multi-character literals;
+  - item 5's stricter shapes;
+  - sign-compare shapes without enumerations;
+  - item 5's remaining mode differences.
+
+**Surprises**
+- **EDG folds wrapping unsigned constants silently, but keeps every expression the encoder reads.** P38 found two
+  classes that lose it (non-type template arguments, braced lists over 1000 elements), both unreachable today and noted
+  for M5 and M4.5e.
+- **Both compilers warn `-Wsign-compare` on C's `enum == int`.** That reversed the planned mathematical comparison.
+  Audit round 2 then found that two different enumerations had escaped the rule, with opposite verdicts in the two
+  modes.
+- **Some VIR self-test cases could not keep their expectations.** Once nothing wraps, an unsigned `<<` and a mixed sum
+  always carry a second obligation, so those cases were retired rather than restructured.
+- **Three launches of `check.sh`.** Doc lint (`++` outside a passthrough, an orphan example) and the tag-coverage rule
+  for a hook-only diagnostic each stopped it in its first minutes.
+
+**Decision records added:** 0022-no-wrapping; amended 0010, 0011, 0012, 0014, 0017, 0018, 0020, 0021.
+
+**First step for the next session (M4.4b).** Confirm that the owner merged M4.3b's and M4.4a's PRs and that CI is green
+on `main`. Then handoff §8.1 "M4.4b" (record 0023; probes P40–P41, spike S21), after §11 questions 32–36 are answered.
+
 ## M4.3b — Calls in expressions (2026-10-23): done on branch `m4.3b-calls`; PR pending (after M4.3a's #6)
 
 Read `internal/handoff.md` next: the "M4.3b is done" owner steps at the top, §6 the M4.3b audit notes, §11 questions
