@@ -50,6 +50,15 @@ attributes), never in comments, strings, preprocessor lines or declarations:
   of a macro), the separator of declarators (`int i = 0, j = n;`, also in a `for` init) or of an
   initializer is never a target, and neither is an assignment that initializes a declarator.  An
   assignment's `x` is a plain identifier (not `p->x`, `a[i]`, `*p`); so is the operand of `++`/`--`.
+* `swap-logical` and `swap-arms` (calls in expressions, M4.3b) are mutants of code only too.  `swap-logical`
+  swaps the two operands of an `&&` or `||` when at least one of them contains a call (`a > 0 && pos(a) > 1`
+  becomes `pos(a) > 1 && a > 0`): it pins that a call's guard is placed right.  The operands are the
+  operands of the operator at its own precedence (in `a && b || c` the `&&` swaps `a` and `b`, the `||`
+  swaps `a && b` and `c`), so a swap never changes how the other operators of the expression group.
+  `swap-arms` swaps the two arms of a `?:` (`c ? a : b` becomes `c ? b : a`, the arms being the middle
+  operand and the operand after the `:`, a nested conditional in the last arm included).  Neither is made
+  for an arm or operand with an unparenthesized comma or assignment where that would change the grouping,
+  for two equal operands, or inside the arguments of `CERASTES_*` and `[[cerastes::...]]`.
 
 Mutant ids have the form `<path>:<line>:<column>:<op>:<original>-><new>`, with the
 position of the first changed character and the changed text on one line (a
@@ -205,8 +214,9 @@ REVIEWED_RE = re.compile(r"^#\s*reviewed:\s*(?P<who>\S.*)$")
 ID_RE = re.compile(r"^(?P<path>.+?):(?P<line>\d+):(?P<col>\d+):(?P<op>[a-z][a-z-]*):"
                    r"(?P<orig>.*)->(?P<new>.*)$")
 OPS = ("relop", "literal", "drop-conjunct", "swap-logic", "delete-stmt", "drop-store", "swap-incdec",
-       "drop-comma")
-EFFECT_OPS = ("drop-store", "swap-incdec", "drop-comma")  # the operators of side effects in expressions
+       "drop-comma", "swap-logical", "swap-arms")
+# the operators of side effects and calls in expressions: mutants of code only, never bucketed
+EFFECT_OPS = ("drop-store", "swap-incdec", "drop-comma", "swap-logical", "swap-arms")
 STATEMENT_ID_CHARS = 40
 
 
@@ -1327,9 +1337,107 @@ def _short(text: str) -> str:
     return text if len(text) <= STATEMENT_ID_CHARS else text[:STATEMENT_ID_CHARS - 3] + "..."
 
 
+_NO_CALL_WORDS = _NOT_CALLS | {"assert"}
+
+
+def _has_call(tokens: list[Token], lo: int, hi: int) -> bool:
+    """Whether tokens[lo..hi) holds a call (an identifier followed by `(`)."""
+    for k in range(lo, hi - 1):
+        if tokens[k].kind == "ident" and tokens[k].text not in _NO_CALL_WORDS \
+                and tokens[k + 1].kind == "op" and tokens[k + 1].text == "(":
+            return True
+    return False
+
+
+def _logical_operand_end(tokens, pair, i, is_and):
+    """Index after the right operand that starts at token `i`: the operand of `&&` stops at `&&` and `||`,
+    the operand of `||` only at `||` (an `&&` binds tighter), both at `?`, `:`, `,`, `;`, an assignment or the
+    closing bracket of the enclosing group."""
+    if is_and:
+        return _conjunct_end(tokens, pair, i)
+    j = i
+    while j < len(tokens):
+        t = tokens[j]
+        if t.kind == "op":
+            if t.text in _OPEN:
+                j = pair[j] + 1
+                continue
+            if t.text in _CLOSE or t.text in _LOGIC_STOP:
+                break
+        j += 1
+    return j
+
+
+def _logical_operand_start(tokens, pair, rev_pair, i, is_and):
+    """Index of the first token of the left operand of the `&&` or `||` at token `i`."""
+    if is_and:
+        return _conjunct_start(tokens, pair, rev_pair, i)
+    j = i - 1
+    while j >= 0:
+        t = tokens[j]
+        if t.kind == "op":
+            if t.text in _CLOSE:
+                j = rev_pair[j] - 1
+                continue
+            if t.text in _OPEN or t.text in _LOGIC_STOP:
+                break
+        elif t.kind == "ident" and t.text in _LOGIC_STOP_WORDS:
+            break
+        j -= 1
+    return j + 1
+
+
+def _conditional_arms(tokens, pair, q, limit):
+    """For the `?` at token `q`: (a0, a1, b0, b1), the middle operand tokens[a0..a1) and the operand
+    tokens[b0..b1) after the matching `:` (a nested conditional in it included), or None when the shape
+    is not one a swap keeps in the same grouping (a comma at the level of the middle operand, an
+    assignment in the last operand, no matching `:`)."""
+    j, depth, colon = q + 1, 0, None
+    while j < limit:
+        u = tokens[j]
+        if u.kind == "op":
+            if u.text in _OPEN:
+                j = pair[j] + 1
+                continue
+            if u.text in _CLOSE or u.text in (";", ","):
+                return None
+            if u.text == "?":
+                depth += 1
+            elif u.text == ":":
+                if depth == 0:
+                    colon = j
+                    break
+                depth -= 1
+        j += 1
+    if colon is None or colon == q + 1:
+        return None
+    j, depth = colon + 1, 0
+    while j < limit:
+        u = tokens[j]
+        if u.kind == "op":
+            if u.text in _OPEN:
+                j = pair[j] + 1
+                continue
+            if u.text in _CLOSE or u.text in (";", ","):
+                break
+            if u.text in _ASSIGN_OPS:
+                return None
+            if u.text == "?":
+                depth += 1
+            elif u.text == ":":
+                if depth == 0:
+                    break
+                depth -= 1
+        j += 1
+    if j == colon + 1:
+        return None
+    return q + 1, colon, colon + 1, j
+
+
+
 def effect_mutants(src, tokens, pair, rev_pair, bodies, in_macro, position, path) -> list[Mutant]:
-    """The `drop-store`, `swap-incdec` and `drop-comma` mutants of the function bodies (see the module
-    docstring).  Only code: never an argument of a `CERASTES_*` macro or of a `[[cerastes::...]]`
+    """The `drop-store`, `swap-incdec`, `drop-comma`, `swap-logical` and `swap-arms` mutants of the function
+    bodies (see the module docstring).  Only code: never an argument of a `CERASTES_*` macro or of a `[[cerastes::...]]`
     attribute, and only where the value of the expression is used (the statements that discard it, the
     `for` init and step clauses and a cast to `void` are skipped; a comma is a comma operator only where it
     is not an argument, an initializer or a declarator separator)."""
@@ -1398,6 +1506,35 @@ def effect_mutants(src, tokens, pair, rev_pair, bodies, in_macro, position, path
                 continue
             if _has_effect(tokens, a, b):
                 add("drop-comma", a, tokens[k + 1].start, src[tokens[a].start:tokens[k].end], "", "")
+        for k in range(o + 1, c):
+            t = tokens[k]
+            if in_macro[k] or t.kind != "op":
+                continue
+            if t.text in ("&&", "||"):
+                is_and = t.text == "&&"
+                a = _logical_operand_start(tokens, pair, rev_pair, k, is_and)
+                b = _logical_operand_end(tokens, pair, k + 1, is_and)
+                if a <= o or b > c or a >= k or b <= k + 1:
+                    continue
+                if not (_has_call(tokens, a, k) or _has_call(tokens, k + 1, b)):
+                    continue
+                left = src[tokens[a].start:tokens[k - 1].end]
+                right = src[tokens[k + 1].start:tokens[b - 1].end]
+                if one_line(left) == one_line(right):
+                    continue
+                add("swap-logical", a, tokens[b - 1].end, f"{left} {t.text} {right}",
+                    f"{right} {t.text} {left}", f"{right} {t.text} {left}")
+            elif t.text == "?":
+                arms = _conditional_arms(tokens, pair, k, c)
+                if arms is None:
+                    continue
+                a0, a1, b0, b1 = arms
+                left = src[tokens[a0].start:tokens[a1 - 1].end]
+                right = src[tokens[b0].start:tokens[b1 - 1].end]
+                if one_line(left) == one_line(right):
+                    continue
+                add("swap-arms", a0, tokens[b1 - 1].end, f"{left} : {right}", f"{right} : {left}",
+                    f"{right} : {left}")
     return out
 
 

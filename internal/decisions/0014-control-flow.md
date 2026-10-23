@@ -156,3 +156,5 @@ decrease from each iteration to the next (0013).
 *2026-10-22, amended by 0019 (M4.2c): item 1 — a declaration without an initializer may stand before the first case label of a switch body, and a later case label may jump past it (one with an initializer stays rejected); item 6 — a switch on an enumeration value is held to `-Wswitch`'s two rules: every case value is an enumerator's value, and without `default` every enumerator has a case (0019 item 11).*
 
 *2026-10-22, amended by 0020 (M4.3a): item 5 — the `do` shape, with the test moved first, is also the lowering of a `while` or `for` loop whose condition has a side effect (0020 item 7); a call in any loop condition stays rejected until M4.3b.*
+
+*2026-10-23, amended by 0021 (M4.3b): item 5 — a call may appear in the condition of a `while`, `for` or `do` loop (it runs at each evaluation; `while`/`for` use the top-test shape of 0020 item 7); a `DoOnce` condition still refuses calls.*

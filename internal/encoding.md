@@ -95,12 +95,14 @@ Front-end agnostic. The encoder builds a `Program` with a `Builder`; `check_prog
 - constants lie in their type's range; every node has a source position;
 - `Formal`, `Result`, `Old` only in contracts (`Result`, `Old` only in `ensures`; `Old` not of the result);
   `Local` not in contracts; a local is declared before use, in scope, once;
-- **calls** (0012 item 6): not in contracts, `check`, invariants or loop conditions; not in a conditionally
-  evaluated operand (the right of `&&`/`||`, a branch of `?:`); the calls of one full expression are nested in
-  one another (no call is evaluated before another call outside its arguments) or ordered by `,` (0020 item 1); a
-  `void` call is the whole of an `ExprStmt` or the left operand of a `Comma`;
+- **calls** (0012 item 6, 0021): not in contracts, `check`, invariants, measures, case values, named-constant
+  initializers or a `DoOnce` condition (`Ctx::Annot`); since M4.3b they may stand in a conditionally evaluated operand
+  (the right of `&&`/`||`, a branch of `?:`), in a loop condition (`Ctx::LoopCond`; the loop then has a jump id), and
+  anywhere in a full expression: whether the calls of a full expression can be ordered is decided by lowering (the
+  dependency-chain rule, §3, reported through `LowerResult::rejections`); a `void` call is the whole of an `ExprStmt` or
+  the left operand of a `Comma`;
 - **side effects** (0020 item 9): `AssignE` and `Comma` only in code (statement expressions, initializers, returns,
-  `if` and `switch` conditions, arguments, and loop conditions, `Ctx::LoopCond`, which still refuses calls); never in
+  `if` and `switch` conditions, arguments, and loop conditions, `Ctx::LoopCond`, which accepts calls since M4.3b); never in
   contracts, `check` or `assert` conditions (`Ctx::Assert`), invariants, measures, case values, named-constant
   initializers or a `DoOnce` condition; an `AssignE` node is used once in a function, its `b` is a `Local` of its
   variable used in `a`; a loop whose condition has a side effect has a jump id; a `for` step may be a `Block` of
@@ -117,7 +119,8 @@ Front-end agnostic. The encoder builds a `Program` with a `Builder`; `check_prog
   `folded` values are distinct; the scrutinee is Int and may contain calls (evaluated once, as a
   `Decl` initializer); `While`/`DoWhile` need a measure, a `DoOnce` none; a `DoOnce`'s condition is rejected if it reads
   a local, calls a function or folds cleanly to a non-zero value, and accepted when the checker cannot fold it (its
-  obligations and lowering's internal `assert !c` decide); no calls in any loop condition; `step` only on a `While`-form loop.
+  obligations and lowering's internal `assert !c` decide); no calls in a `DoOnce` condition (other loop conditions may
+  call, 0021); `step` only on a `While`-form loop.
 
 ## 3. Lowering (`src/vir/lower.cpp`)
 
@@ -146,19 +149,32 @@ type, `lo`/`hi` its range, `w` its width):
 An obligation is asserted as ONE atomic condition (a range is `!(e < lo || hi < e)`, not a conjunction):
 Silicon reports each conjunct of an asserted `&&` as its own error.
 
-**Calls and the placement of obligations** (0012 item 6). The calls of a full expression are hoisted, innermost
-first, into temporaries `t__k := f(args)`, each preceded by `assert`s of the callee's `requires` over the argument
-values (category `precondition`, note at the clause). An obligation is asserted right after the call with the
-highest index its condition or its guard mentions, or before the first call if it mentions none, so a callee that
-never returns cannot hide a check that does not depend on it.
+**Calls and the placement of obligations** (0012 item 6, 0021). The calls of a full expression are hoisted into
+temporaries `t__k := f(args)`, each preceded by `assert`s of the callee's `requires` over the argument values
+(category `precondition`, note at the clause). Every item has the **set** of fixed points (calls, and branches that
+contain a call) C must have completed before it evaluates the item: those whose values it uses, its guard's, the comma
+floor's, and those of the earlier accesses to the locals it touches; a call's precondition has the set of its
+arguments (PRE). **The dependency-chain rule** (0021 item 3): the sets of a full expression (every obligation, write,
+snapshot and call-free branch; PRE ∪ {B} for each branch with a call; PRE of each explicit termination check) must form
+a chain under ⊆, or the expression is rejected (`unsequenced_calls`, at the later of two witnessing calls); the calls
+are then emitted in the chain's order (the members of the smallest set first, ties in creation order) and each item
+right after the calls of its set and before every other, so a callee that never returns cannot hide a check C may
+evaluate before it. For every expression accepted before M4.3b (calls nested or ordered by `,`) the sets are intervals
+of creation order and the emitted Viper is unchanged. **Termination at a call** (0021 item 4): a call in the caller's
+recursion cycle (Viper's strongly connected components: an edge for every call node, dead code included) that is
+emitted after a call outside its PRE gets an explicit `assert` of Silicon's own decrease relation (the callee's
+measure over the arguments against the caller's over its parameters, unequal lengths included), category
+`termination`, placed by its PRE; Silicon's check at the call stays as a backstop.
 
 **Side effects** (M4.3a, decision 0020 item 7). A full expression's `Full` holds its obligations and an ordered list
 of **effects**: a call (as above), a write (`v := value; d := true`, the flag only for a flagged local), a snapshot
-(`t := v`) and a branch (`if (c) { … } else { … }` assigning a temporary). Calls keep their order and are the only
-fixed points; every other item (obligation, write, snapshot, branch) goes right after the last call it depends on (the
-temporaries it mentions, its guard's, the floor, and for a snapshot of `x` every earlier write of `x`), or before the
-first call when it depends on none — the call rule above, applied to writes and snapshots too — and items after the
-same call keep evaluation order (left to right for unsequenced operands). Every read of a local that the full expression writes is a snapshot
+(`t := v`) and a branch (`if (c) { … } else { … }` assigning a temporary). Calls, and since M4.3b branches that
+contain a call, are the fixed points, in the order of the chain above; every other item (obligation, write, snapshot,
+call-free branch) goes right after the fixed points of its set (the temporaries it mentions, its guard's, the floor,
+and for a snapshot of `x` every earlier write of `x`), or before the first fixed point when its set is empty — the
+call rule above, applied to writes and snapshots too — and items in the same place keep evaluation order (left to
+right for unsequenced operands). A branch with a call holds its own full expression, placed by the same rule inside
+the `if`. Every read of a local that the full expression writes is a snapshot
 at its point (its `uninitialized` obligation follows the snapshot), so a printed value never names a variable the
 expression writes; the value of an `AssignE` is its lowered `a` (or the snapshot of `b`). A right operand of `&&`/`||`
 or an arm of `?:` with a side effect is a branch, whose effects and obligations are emitted inside the `if`; an
@@ -468,7 +484,10 @@ used as an operand becomes `assign_expr`/`compound_assign_expr`/`inc_dec_expr` (
 a local target, the `bool` and enumeration rules, the own-initializer rule) and a comma whose value is used `comma`;
 an IL node with a side effect is never encoded twice (fail closed); `vir::sequence_problems` is reported as
 `unsequenced_modification` at the write; and the warning rules of 0020 item 5 (`assignment_as_condition`,
-`comma_without_effect`, `value_not_used`, `side_effect_not_evaluated`) are IL checks. Everything else is
+`comma_without_effect`, `value_not_used`, `side_effect_not_evaluated`) are IL checks, and so (M4.3b, 0021 item 8) is
+`self_assignment`: an `eok_assign` whose operands, after compiler-generated casts, are the same variable, with no node
+from a macro expansion (`orig_seq`/`orig_column` equal to `seq`/`column`), as clang's `-Wself-assign`. Lowering's
+rejections (`LowerResult::rejections`, 0021 item 3) are reported as `unsequenced_calls`. Everything else is
 `unsupported_expression` with a description of the operator (bitwise operators, pointer and member operations).
 
 **Statements.** Allow-list: blocks (compiler-generated blocks are flattened, so a `for` initialization stays in
@@ -500,7 +519,8 @@ obligations are asserted in the `__wf` method under the `requires`. A loop's mea
 clause, placed after its invariants; its obligations are invariant clauses at the loop head, after the user invariants
 and before the condition's. A call of a function that has a measure carries a `termination.failed` map entry (category
 `termination`, a note at the callee's measure); a loop's `decreases` line has one (at the measure's line). Every method
-and every loop has a `decreases` line (Silicon checks termination only where one is present); a method's non-empty
+and every loop has a `decreases` line (Silicon checks termination only where one is present); since M4.3b a call that
+another unsequenced call may precede also gets cerastes's own `termination` assert (§3, 0021 item 4); a method's non-empty
 `decreases` line also has an entry, which `lint_viper.py` requires. Silicon's semantics, measured on the pinned build: the
 measure must decrease and be bounded (new < old and old >= 0 at the first component that changes) at every iteration
 that is followed by another one; the iteration after which the loop exits may have a negative measure.

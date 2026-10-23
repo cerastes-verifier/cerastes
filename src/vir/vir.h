@@ -160,7 +160,7 @@ struct Stmt {
     Assign,    // `var` = `expr` (same type)
     ExprStmt,  // evaluate `expr` (a call, a discarded value, a `(void)e`): only its obligations and effects count
     If,        // if (`expr`) then_body [else else_body]; either body may be null
-    While,     // a loop (see `form`): while (`expr`) invariants body [step]; `expr` has no calls (check.h)
+    While,     // a loop (see `form`): while (`expr`) invariants body [step]; `expr` may have calls and side effects (decisions 0020, 0021), except a `DoOnce` condition (check.h)
     Return,    // return [`expr`]: expr's type is the function's return type, absent iff the function is void
     Check,     // check(`expr`): a Bool, asserted (category `check`)
     Block,     // `stmts`

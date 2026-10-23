@@ -1037,26 +1037,6 @@ void define_side_effect_rejections() {
       return k2.loop(k2.lt(k2.incE(x), I(k2, "5")), {}, {k2.cl(I(k2, "0"))}, k2.blk({}), nullptr, LoopForm::While, 0);
     });
   });
-  rc("fx_rej_call_in_effectful_loop_condition", "a call in a loop condition", [=](Kit& k) {
-    Function* g = g1(k);
-    shape(k, [=](Kit& k2, Function*, Var* x, Var*) {
-      return k2.loop(k2.lt(k2.call(g, {k2.incE(x)}), I(k2, "5")), {}, {k2.cl(I(k2, "0"))}, k2.blk({}), nullptr, LoopForm::While, k2.jid());
-    });
-  });
-  rc("fx_rej_effect_with_call_in_guarded_operand", "a call in a conditionally evaluated operand", [=](Kit& k) {
-    Function* g = g1(k);
-    shape(k, [=](Kit& k2, Function* f, Var* x, Var*) {
-      return k2.es(k2.bi(k2.i32, k2.land(k2.pv(f, 0), k2.gt(k2.call(g, {k2.incE(x)}), I(k2, "0")))));
-    });
-  });
-  rc("fx_rej_calls_around_a_comma_in_a_sum", "not nested in each other", [=](Kit& k) {
-    Function* g = g1(k);
-    expr_shape(k, [=](Kit& k2, Function*, Var*, Var*) { return k2.add(k2.comma(k2.call(g, {I(k2, "1")}), I(k2, "0")), k2.call(g, {I(k2, "2")})); });
-  });
-  rc("fx_rej_two_unnested_calls_still", "not nested in each other", [=](Kit& k) {
-    Function* g = g1(k);
-    expr_shape(k, [=](Kit& k2, Function*, Var*, Var*) { return k2.add(k2.call(g, {I(k2, "1")}), k2.call(g, {I(k2, "2")})); });
-  });
   rc("fx_rej_step_is_not_a_statement_list", "not an assignment or an expression statement", [=](Kit& k) {
     shape(k, [=](Kit& k2, Function*, Var* x, Var*) {
       return k2.loop(k2.lt(k2.v(x), I(k2, "5")), {}, {k2.cl(I(k2, "0"))}, k2.blk({}), k2.blk({k2.iff(k2.yes(), k2.blk({}))}), LoopForm::While, 0);

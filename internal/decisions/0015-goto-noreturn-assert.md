@@ -176,3 +176,5 @@ correctness (0013).
 - The trusted libc table is the first cerastes-supplied contract; each entry is tagged in the emitted Viper.
 
 *2026-10-22, amended by 0019 (M4.2c): item 2 — a `goto` may jump past a declaration without an initializer (the variable has no value at the label until it is assigned, `uninitialized`); one past a declaration with an initializer stays rejected.*
+
+*2026-10-23, amended by 0021 (M4.3b): item 6 — an `assert` condition may hold calls in guarded operands and unsequenced calls, under 0021's dependency-chain rule; side effects stay refused in it.*

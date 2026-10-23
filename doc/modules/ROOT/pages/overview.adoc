@@ -60,7 +60,8 @@ it verifies and what it does not:
   termination measures, `break` and `continue`, forward `goto`, recursion with
   measures, `return`, named constants (`const` globals), enumerations and their constants, calls of functions that
   have a contract or a body in the
-  same file, functions that do not return (`+[[noreturn]]+`, `abort`, `exit`),
+  same file (anywhere in an expression, also in guarded operands and loop
+  conditions, when C's order of calls cannot hide a check), functions that do not return (`+[[noreturn]]+`, `abort`, `exit`),
   `assert` and `check`.
   The integer rules (overflow is an error, unsigned arithmetic wraps, a
   conversion to a signed type must be exact, a value of an enumeration is one of its values) are on

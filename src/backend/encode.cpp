@@ -1736,11 +1736,38 @@ class Encoder {
   };
   enum class AssignRes { ok, rejected, malformed };
 
+  // `x = x` (decision 0021 item 8, probe P36): the shapes clang's -Wself-assign warns about.  Both operands, once the front end's
+  // own conversions are peeled (never an explicit cast, which is its own node without `compiler_generated`; parentheses are a
+  // flag, not a node), are the same variable, and neither the `=` nor an operand comes from a macro expansion: a node written
+  // outside any macro has orig_seq/orig_column equal to seq/column (basics.h a_source_position), which is not the
+  // `orig_seq != 0` test of macro_node.
+  static an_expr_node_ptr peel_generated_conversions(an_expr_node_ptr e) {
+    for (int guard = 0; e != nullptr && guard < 16 && e->kind == enk_operation && e->compiler_generated &&
+                        (e->variant.operation.kind == eok_cast || e->variant.operation.kind == eok_bool_cast) &&
+                        e->variant.operation.operands != nullptr && e->variant.operation.operands->next == nullptr;
+         ++guard)
+      e = e->variant.operation.operands;
+    return e;
+  }
+  static bool written_outside_macros(an_expr_node_ptr e) {
+    return e->position.orig_seq == e->position.seq && e->position.orig_column == e->position.column;
+  }
+  void check_self_assignment(an_expr_node_ptr assign, const std::vector<an_expr_node_ptr>& ops) {
+    if (ops.size() != 2) return;
+    an_expr_node_ptr l = peel_generated_conversions(ops[0]);
+    an_expr_node_ptr r = peel_generated_conversions(ops[1]);
+    if (l == nullptr || r == nullptr || l->kind != enk_variable || r->kind != enk_variable) return;
+    if (l->variant.variable.ptr == nullptr || l->variant.variable.ptr != r->variant.variable.ptr) return;
+    if (!written_outside_macros(assign) || !written_outside_macros(l) || !written_outside_macros(r)) return;
+    reject(Diag::self_assignment, assign->position, "");
+  }
+
   AssignRes assignment_parts(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops, AssignParts* p) {
     const an_expr_operator_kind k = e->variant.operation.kind;
     const SrcLoc l = loc_of(e->position);
     if (k == eok_assign) {
       if (ops.size() != 2) return AssignRes::malformed;
+      check_self_assignment(e, ops);
       p->v = lvalue_var(ops[0]);
       allow_enum_conversion(ops[1]);  // decision 0018 item 6 (iii)
       p->x = expr(ops[1]);
@@ -2229,8 +2256,9 @@ class Encoder {
   // operand) whose value is thrown away by an operator while a side effect sits inside.  The node of the operator that discards
   // the value, or null.  Fine: a `(void)` cast, an assignment, a compound assignment, `++`/`--`, a call and a comma (its operands
   // are checked by rule B and again by this rule); for `?:` each arm is checked (a pure arm is fine: `a ? x++ : 0;`); for `&&`
-  // and `||` the right operand must be a plain `=` of an integer constant (`a || (x = 1);`: GCC folds the condition away) or another
-  // `&&`/`||` checked the same way, and anything else with a side effect is rejected (`a && x++;`, `a && (x = b);`, `a && f();`);
+  // and `||` with a side effect anywhere in it (also only in the left operand: `x++ && a;`, P37) the right operand must be a plain
+  // `=` of an integer constant (`a || (x = 1);`: GCC folds the condition away) or another `&&`/`||` checked the same way, and
+  // anything else is rejected (`a && x++;`, `a && (x = b);`, `a && f();`, `g(x) && a;`);
   // any other top operator is rejected when it contains a side effect (`x++ + 1;`, `-x++;`,
   // `(int)x++;`, `x == (y = 1);`, `g(x) + 1;`).  A pure discarded expression (`x + 1;`) stays accepted (0012 item 3).
   // (Not static: a discarded comma inside reports rule B(2) itself.)
@@ -2261,28 +2289,37 @@ class Encoder {
       return nullptr;
     }
     if ((k == eok_land || k == eok_lor) && ops.size() == 2) {
-      an_expr_node_ptr r = ops[1];
-      while (r != nullptr && r->kind == enk_operation && r->compiler_generated && r->variant.operation.operands != nullptr &&
-             r->variant.operation.operands->next == nullptr &&
-             (r->variant.operation.kind == eok_bool_cast || r->variant.operation.kind == eok_cast))
-        r = r->variant.operation.operands;
-      if (r == nullptr || r->kind != enk_operation) return nullptr;
-      const an_expr_operator_kind rk = r->variant.operation.kind;
-      if (rk == eok_land || rk == eok_lor) return discarded_value_with_effect(r, depth + 1);
-      if (rk == eok_assign) {
-        // `a && (x = 1);` is fine: GCC folds the constant condition away.  A non-constant right-hand side is `(x = b) != 0`, whose
-        // value is computed and not used.
+      // P37: GCC's C mode warns "value computed is not used" on a discarded `&&`/`||` that has a side effect anywhere in it (also
+      // only in the left operand: `x++ && a;`, `g(x) || a;`), unless the right operand is a plain assignment of an integer constant
+      // (GCC folds the condition away) or another `&&`/`||` whose right operand is checked the same way.  Reported at the operator
+      // whose right operand fails.  With no side effect at all the expression stays accepted (0012 item 3).
+      if (first_effect(e) == nullptr) return nullptr;
+      an_expr_node_ptr cur = e;
+      for (int hops = 0; hops < 64; ++hops) {
+        auto cops = operands_of(cur);
+        if (cops.size() != 2) return cur;
+        an_expr_node_ptr r = peel_generated_conversions(cops[1]);
+        if (r == nullptr || r->kind != enk_operation) return cur;
+        const an_expr_operator_kind rk = r->variant.operation.kind;
+        if (rk == eok_land || rk == eok_lor) {
+          cur = r;
+          continue;
+        }
+        if (rk != eok_assign) return cur;
+        // `a && (x = 2);` is fine: C turns `(x = 2) != 0` into the constant 1, which GCC folds away.  A constant zero is not
+        // (`a && (x = 0);`, `a && (x = 1 - 1);`: the folded value decides), unless the target is a bool (P37, audit round 2).  A
+        // non-constant right-hand side is `(x = b) != 0`, whose value is computed and not used.
         auto ro = operands_of(r);
-        an_expr_node_ptr rhs = ro.size() == 2 ? ro[1] : nullptr;
-        while (rhs != nullptr && rhs->kind == enk_operation && rhs->compiler_generated && rhs->variant.operation.operands != nullptr &&
-               rhs->variant.operation.operands->next == nullptr &&
-               (rhs->variant.operation.kind == eok_bool_cast || rhs->variant.operation.kind == eok_cast))
-          rhs = rhs->variant.operation.operands;
+        an_expr_node_ptr rhs = ro.size() == 2 ? peel_generated_conversions(ro[1]) : nullptr;
         if (rhs != nullptr && rhs->kind == enk_constant && rhs->variant.constant.ptr != nullptr &&
-            rhs->variant.constant.ptr->kind == ck_integer)
-          return nullptr;
+            rhs->variant.constant.ptr->kind == ck_integer) {
+          a_type_ptr target = ro[0]->type != nullptr ? skip_typerefs(ro[0]->type) : nullptr;
+          const bool bool_target = target != nullptr && target->kind == tk_integer && target->variant.integer.bool_type;
+          if (bool_target || !is_zero_constant(rhs)) return nullptr;
+        }
+        return cur;
       }
-      return first_effect(r) != nullptr ? r : nullptr;
+      return e;
     }
     return first_effect(e) != nullptr ? e : nullptr;
   }
@@ -3526,6 +3563,22 @@ void verify_encode() {
       at.full_name = d.loc.file;
       at.seq = at.line;
       report_at(Diag::unsupported_expression, at, {"an internal inconsistency: " + d.reason});
+    }
+    return;
+  }
+  if (!lowered.rejections.empty()) {
+    // Only after the internal errors, which must win.  Decision 0021: the calls of one full expression whose checks do
+    // not form a chain.  A rejection like the others (exit status 2); `d.reason` names the two calls, `d.loc` is the later.
+    for (const vir::Diag& d : lowered.rejections) {
+      DiagPos at;
+      at.known = d.loc.known();
+      at.in_primary = false;
+      at.line = static_cast<unsigned long>(d.loc.line);
+      at.col = static_cast<unsigned long>(d.loc.column);
+      at.file = d.loc.file;
+      at.full_name = d.loc.file;
+      at.seq = at.line;
+      report_at(Diag::unsequenced_calls, at, {d.reason});
     }
     return;
   }

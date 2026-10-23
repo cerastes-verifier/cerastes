@@ -285,7 +285,7 @@ include::example$error-messages/missing_return_fixed.cpp[tag=source]
 
 == termination
 
-A termination measure (`CERASTES_DECREASES`) may be negative, or may not decrease. For a loop it is reported at the loop's `CERASTES_DECREASES` clause, and for a recursive function at the recursive call, with a note at the callee's measure.
+A termination measure (`CERASTES_DECREASES`) may be negative, or may not decrease. For a loop it is reported at the loop's `CERASTES_DECREASES` clause, and for a recursive function at the recursive call, with a note at the callee's measure. A recursive call that another call of the same expression may precede (`f(n - 1) + f(n - 2)`) is checked where C may make it, before the other call, and reported the same way (xref:verifying.adoc#calls[Calls in expressions]).
 
 The measure must get smaller from one iteration to the next (for a function, from the entry to each recursive call), and must not be negative when the loop condition holds. A measure that stays the same, grows, or can go below zero does not show that the loop or recursion ends, so cerastes does not accept it. In the example the body forgot to add 1 to `i`.
 

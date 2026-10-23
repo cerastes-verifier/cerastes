@@ -141,3 +141,12 @@ CERASTES_DIAG(value_not_used, error,
 CERASTES_DIAG(side_effect_not_evaluated, error,
               "the side effect in this operand of %s is never evaluated: the operand is not executed "
               "(decision 0020)")
+
+// Calls in expressions and the shapes that clang's -Wself-assign warns about (decision 0021).
+CERASTES_DIAG(unsequenced_calls, error,
+              "%s: C may call either of them first, and something this expression checks or assigns depends on only "
+              "one of them, so a call that does not return could keep it from being checked; write the calls as "
+              "separate statements (decision 0021)")
+CERASTES_DIAG(self_assignment, error,
+              "this assigns a variable to itself, as -Wself-assign warns: the assignment has no effect and is "
+              "almost always a mistake (decision 0021)")
