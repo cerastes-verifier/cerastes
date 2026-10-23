@@ -253,7 +253,7 @@ only if every mode passes. The exit status says what happened:
 | 0 | verified | on stdout exactly one line `<test path>: verified (<n> functions; one translation unit: ...)` with `n >= 1`, no `error:` line, nothing on stderr |
 | 1 | verification errors | on stdout one or more lines `<file>:<line>: error: <category>: <message>`, each possibly followed by `<file>:<line>: note: ...` lines, sorted by printed path (byte order), line and category (byte order) and none twice; nothing on stderr |
 | 2 | the program is not accepted (a front-end error, a cerastes rejection) | EDG-format diagnostics on stderr, as in [Front-end diagnostics](#front-end-diagnostics) (`"file", line N: error #<id>: ...`, with the `N errors detected` summary), nothing on stdout |
-| 3 | tool failure (Silicon crashed or timed out, an error the position map does not explain) | always a failing test, whatever the test expects |
+| 3 | tool failure (Silicon crashed or timed out, an error the position map does not explain, an internal inconsistency in cerastes's own encoding: decision 0022 item 12) | always a failing test, whatever the test expects |
 
 A timeout, a crash (a signal) and any other exit status always fail too. The
 streams are those of decision 0011 item 9: the verdict, the errors and their notes
@@ -351,10 +351,10 @@ and the harness self-test compares this table with the decision record.
 | `check` | a `check` may not hold | the `check` |
 | `invariant-entry` | a loop invariant may not hold on entry | the invariant clause |
 | `invariant-preserved` | a loop invariant may not be preserved by an iteration | the invariant clause |
-| `overflow` | signed arithmetic may overflow | the operator |
+| `overflow` | arithmetic may overflow, signed or unsigned (decision 0022: nothing wraps) | the operator |
 | `division-by-zero` | a divisor may be zero | the operator |
 | `shift` | a shift amount or a left-shifted value is out of range | the operator |
-| `conversion` | a conversion to a signed type or to an enumeration may not fit | the conversion |
+| `conversion` | a conversion to an integer type, signed or unsigned, or to an enumeration may not fit | the conversion |
 | `missing-return` | a non-`void` function may reach its end without `return` | the closing brace |
 | `termination` | a termination measure (`decreases`) may be negative or may not decrease (decision 0013) | the loop's `decreases` clause, or the recursive call |
 | `noreturn` | a function declared `[[noreturn]]` or `_Noreturn` may return (decision 0015) | the reachable `return`, or the closing brace |

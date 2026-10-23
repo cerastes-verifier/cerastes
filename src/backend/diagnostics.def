@@ -85,6 +85,10 @@ CERASTES_DIAG(unsupported_statement, error,
               "%s is not supported by \"cerastes verify\" (decision 0012)")
 CERASTES_DIAG(unsupported_expression, error,
               "%s is not supported by \"cerastes verify\" (decision 0012)")
+// A tool failure, not a statement about the program (decision 0022 item 12): lowering's own checks, the emitter's checks and the
+// encoder's guards.  `cerastes verify` exits 3 after printing it.
+CERASTES_DIAG(internal_inconsistency, error,
+              "an internal inconsistency: %s (the program was not checked; decision 0022 item 12)")
 CERASTES_DIAG(unsupported_declaration, error,
               "%s is not supported by \"cerastes verify\" (decision 0012)")
 CERASTES_DIAG(unsupported_type, error,

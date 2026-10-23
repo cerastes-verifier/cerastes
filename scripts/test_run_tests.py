@@ -12008,9 +12008,29 @@ class ClassifyRealSiliconTests(unittest.TestCase):
                                  harness_view(output, run.returncode))
 
 
-# The fewest checks `cerastes --selftest` may run (it printed 69 when this was written).  Raise it
+# The fewest checks `cerastes --selftest` may run (it printed 94 when this was written).  Raise it
 # with the driver's own tests; a driver whose self-test silently runs fewer fails here.
-DRIVER_SELFTEST_MIN = 69
+DRIVER_SELFTEST_MIN = 94
+
+# A nested call: the argument of `f1` is a call of `g`, and `f1` has a `requires`, so lowering must
+# order the two calls (0021); the hook perturb_fixed_order breaks that order.
+NESTED_CALLS = """#include <cerastes.h>
+
+int g(int x)
+    CERASTES_REQUIRES(x >= 0 && x < 100)
+    CERASTES_ENSURES(r, r == x + 1);
+
+int f1(int x)
+    CERASTES_REQUIRES(x > 0 && x < 1000)
+    CERASTES_ENSURES(r, r == x);
+
+int c(int x)
+    CERASTES_REQUIRES(x >= 0 && x < 100)
+    CERASTES_ENSURES(r, r == x + 1)
+{
+  return f1(g(x));
+}
+"""
 
 
 ONE_FUNCTION = """#include <cerastes.h>
@@ -12218,6 +12238,24 @@ class RealDriverTests(unittest.TestCase):
         self.assertEqual(run.stdout, "")
         self.assertIn("cerastes: error: ", run.stderr)
 
+    def test_the_perturbed_call_order_is_an_internal_inconsistency_exit_3(self):
+        # 0022 item 12: lowering's own order check (a fail-closed internal check) is a tool failure,
+        # exit 3 with the one-line report, never exit 2 (a rejection of the program); the twin is the
+        # same program without the hook (exit 0)
+        (self.cwd / "nested.cpp").write_text(NESTED_CALLS)
+        run = self.run_driver("verify", "nested.cpp")
+        self.assertEqual((run.returncode, run.stderr), (0, ""), run.stdout)
+        self.assertRegex(run.stdout, r"\Anested\.cpp: verified \(1 function; one translation unit: ")
+        run = self.run_driver("verify", "nested.cpp", "--cerastes_verify_selftest=perturb_fixed_order")
+        self.assertEqual(run.returncode, 3, run.stdout + run.stderr)
+        self.assertEqual(run.stdout, "")
+        self.assertIn("cerastes: error: internal inconsistency in the encoder (the program was not checked)",
+                      run.stderr)
+        # lowering's own fail-closed message (the order check), not only the driver's line
+        self.assertIn("error #cerastes-internal_inconsistency", run.stderr)
+        self.assertIn("an internal inconsistency:", run.stderr)
+        self.assertIn("are not exactly the set it depends on", run.stderr)
+
     def test_keep_vpr_writes_both_files(self):
         run = self.run_driver("verify", "one.cpp", "--keep-vpr")
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
@@ -12297,7 +12335,13 @@ STDIN_ONLY_TAGS = {
                               "(`cerastes-fe.sh -`), which a test file cannot be; "
                               "SourceFromStdinTests runs it and its twin",
 }
-UNTESTED_BY_FRONTEND_ERROR = {**SELFTEST_ONLY_TAGS, **NO_REPRODUCER_TAGS, **STDIN_ONLY_TAGS}
+# Tags reached only through a hook of `cerastes verify` (`--cerastes_verify_selftest=<hook>`), never by a program.
+VERIFY_HOOK_ONLY_TAGS = {
+    "internal_inconsistency": "an encoder bug, a tool failure (exit 3) and never a verdict, so no program reaches it "
+                              "(decision 0022 item 12); `--cerastes_verify_selftest=perturb_fixed_order` makes lowering "
+                              "report it (RealDriverTests, test_the_perturbed_call_order_is_an_internal_inconsistency_exit_3)",
+}
+UNTESTED_BY_FRONTEND_ERROR = {**SELFTEST_ONLY_TAGS, **NO_REPRODUCER_TAGS, **STDIN_ONLY_TAGS, **VERIFY_HOOK_ONLY_TAGS}
 
 
 def tag_coverage_problems(defined, used, allowed):
@@ -12359,6 +12403,8 @@ class TagCoverageTwinTests(unittest.TestCase):
         self.assertEqual(set(SELFTEST_ONLY_TAGS) & set(NO_REPRODUCER_TAGS), set())
         self.assertEqual(set(STDIN_ONLY_TAGS) & (set(NO_REPRODUCER_TAGS) | set(SELFTEST_ONLY_TAGS)),
                          set())
+        self.assertEqual(set(VERIFY_HOOK_ONLY_TAGS)
+                         & (set(NO_REPRODUCER_TAGS) | set(SELFTEST_ONLY_TAGS) | set(STDIN_ONLY_TAGS)), set())
 
 
 def used_cerastes_tags(bases):

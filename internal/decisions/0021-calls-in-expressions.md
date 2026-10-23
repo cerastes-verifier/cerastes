@@ -237,3 +237,5 @@ never interleave, but their order is unspecified, and a program is correct only 
 - An expression whose checks depend on different unsequenced calls is rejected (`unsequenced_calls`); rewriting it with
   a local per call (`int a = f(x); int b = g(y); … 100 / a + 100 / b`) fixes the order and is accepted.
 - The emitted Viper of every program accepted before M4.3b is unchanged.
+
+*2026-10-23, amended by 0022 (M4.4a): item 3 ("where it is decided") — an unsigned operation creates a check rather than wrapping (except a conversion of a constant that fits, 0022 item 4), and a conversion into an unsigned parameter is checked, so `g(f(x), h(y))` with `unsigned` parameters can be `unsequenced_calls` as the `short` form already is (0022 item 10).*

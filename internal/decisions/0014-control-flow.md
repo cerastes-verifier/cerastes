@@ -158,3 +158,5 @@ decrease from each iteration to the next (0013).
 *2026-10-22, amended by 0020 (M4.3a): item 5 — the `do` shape, with the test moved first, is also the lowering of a `while` or `for` loop whose condition has a side effect (0020 item 7); a call in any loop condition stays rejected until M4.3b.*
 
 *2026-10-23, amended by 0021 (M4.3b): item 5 — a call may appear in the condition of a `while`, `for` or `do` loop (it runs at each evaluation; `while`/`for` use the top-test shape of 0020 item 7); a `DoOnce` condition still refuses calls.*
+
+*2026-10-23, amended by 0022 (M4.4a): item 6 — `case -1` over an `unsigned int` scrutinee (C) is a `conversion` error, not `4294967295`.*

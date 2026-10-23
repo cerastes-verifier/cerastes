@@ -9,10 +9,10 @@ named in xref:error-messages.adoc[Error messages].
 
 In short:
 
-* signed arithmetic that does not fit its type is an error;
-* unsigned arithmetic wraps;
-* a conversion to a signed type that does not fit is an error, with or
-  without a cast;
+* arithmetic that does not fit its type is an error, signed or unsigned:
+  nothing wraps;
+* a conversion that does not fit its target type is an error, with or without
+  a cast;
 * division by zero, and a shift whose count or result is out of range, are
   errors;
 * operands narrower than `int` are promoted, as in C and pass:[C++], and that
@@ -58,17 +58,31 @@ The fix is to state in a contract what the caller must guarantee:
 include::example$error-messages/overflow_fixed.cpp[tag=source]
 ----
 
-== Unsigned arithmetic wraps
+[#unsigned]
+== Unsigned arithmetic is checked too
 
-An unsigned operation produces the mathematical result modulo 2^N^, as both
-standards define it, so it is never an error, and a contract can rely on it.
-That includes `-u`, which is `2^N - u` for `u != 0`, and `<<` on an unsigned
-value.
+C and pass:[C++] define unsigned arithmetic modulo 2^N^, but cerastes does
+not wrap: an integer always means the mathematical value of the expression
+that computed it. So `+`, `-`, `*`, `pass:[++]`, `--` and the compound
+assignments on an unsigned type must produce a value that fits the type, or
+cerastes reports `overflow` at the operator, exactly as for a signed type.
+That includes `u - v` with `u < v`, and `-u` for any `u` other than 0.
 
 [source,cpp]
 ----
-include::example$integer-semantics/unsigned_wraps.cpp[tag=source]
+include::example$integer-semantics/unsigned_checked.cpp[tag=source]
 ----
+
+Without the `requires`, the sum may not fit:
+
+[source,cpp]
+----
+include::example$integer-semantics/unsigned_overflow.cpp[tag=source]
+----
+
+A result you want modulo 2^N^ is written out, in a type wide enough for the
+exact value, so that the program says what it means (see
+<<modular,Modular arithmetic, written out>>).
 
 == Conversions
 
@@ -76,29 +90,27 @@ include::example$integer-semantics/unsigned_wraps.cpp[tag=source]
 |===
 | Conversion to | Rule
 
-| an unsigned type
-| modulo 2^N^, no error
-
-| a signed type
+| an integer type, signed or unsigned
 | the value must fit, otherwise `conversion`; this holds for an implicit
-  conversion and for a cast written by you (`(short)x`, `static_cast<short>(x)`),
-  and for an initialization, an assignment, a compound assignment, an argument
-  and a return value
+  conversion and for a cast written by you (`(short)x`, `static_cast<short>(x)`,
+  `(unsigned)x`), and for an initialization, an assignment, a compound
+  assignment, an argument and a return value
 
 | an enumeration
 | the value must be one of the values of the enumeration, otherwise
   `conversion`; this holds for a cast, for C's implicit conversions, and for an
-  enumeration whose underlying type is unsigned: it never wraps
-  (<<enumerations>>)
+  enumeration whose underlying type is unsigned (<<enumerations>>)
 
 | `bool`
 | `v != 0`
 |===
 
-pass:[C++]20 defines the conversion of an out-of-range value to a signed type as
-modular, and C23 leaves it to the implementation. cerastes makes it an error in
-both, which is also what VeriFast does by default. A conversion that cannot
-lose anything (the source range lies within the target's) needs no check.
+Both standards define the conversion of an out-of-range value to an unsigned
+type as modular, pass:[C++]20 does the same for a signed type, and C23 leaves
+that to the implementation. cerastes makes every one of them an error, in both
+modes, which is also what VeriFast does by default. A conversion that cannot
+lose anything (the source range lies within the target's, or the value is a
+constant that fits) needs no check.
 
 [source,cpp]
 ----
@@ -106,17 +118,28 @@ include::example$integer-semantics/narrowing.cpp[tag=source]
 ----
 
 `small` verifies because the contract keeps `x` in the range of `signed char`.
-`low_byte` converts to an unsigned type, which wraps. Without the `requires`,
-`(signed char)x` is the error:
+`low_byte` reduces `x` modulo 256 itself, so its conversion to `unsigned char`
+always fits. Without the `requires`, `(signed char)x` is the error:
 
 [source,cpp]
 ----
 include::example$error-messages/conversion_error.cpp[tag=source]
 ----
 
-To get a wrapped byte from a value, convert to the unsigned type first, as
-`low_byte` does, and then use the unsigned value; do not rely on a signed type
-wrapping.
+[#modular]
+=== Modular arithmetic, written out
+
+There is no wrapping cast and no switch that turns wrapping on. A result
+modulo 2^N^ is computed exactly in a type wide enough for it, and then
+reduced with `%`, so the conversion back always fits:
+
+[source,cpp]
+----
+include::example$integer-semantics/modular_explicit.cpp[tag=source]
+----
+
+The same works for a hash or a checksum: compute the step in `unsigned long
+long` and reduce it modulo 2^32^ before converting it back to `unsigned`.
 
 == Promotions and the usual arithmetic conversions
 
@@ -125,10 +148,12 @@ cerastes follows them exactly, so these faithful consequences apply:
 
 * the product of two `unsigned short` values is computed in `int`, and can
   overflow it;
-* `unsigned char` operands promote to `int`, so the product of two of them
-  always fits, and converting it back to `unsigned char` wraps;
-* when `int` meets `unsigned`, the `int` converts to `unsigned`, so `-1 < 0u`
-  is false and `i + 0u > 0u` is true for `i == -1`.
+* `unsigned char` operands promote to `int`, so the sum of two of them always
+  fits, and converting it back to `unsigned char` must fit too: `uc + uc` stored
+  into an `unsigned char` is a `conversion` error unless the sum is at most 255;
+* when `int` meets `unsigned`, the `int` converts to `unsigned`, and that
+  conversion is checked: `-1 < 0u` and `i + 0u` for a negative `i` are
+  `conversion` errors.
 
 [source,cpp]
 ----
@@ -147,11 +172,20 @@ The same arithmetic gives the same answer in C23 and in pass:[C++]20:
 include::example$integer-semantics/usual_conversions.c[tag=source]
 ----
 
+With a negative `i`, `i + 0u` converts it to `unsigned int`, and that is the
+error:
+
+[source,c]
+----
+include::example$integer-semantics/usual_conversions_error.c[tag=source]
+----
+
 A compound assignment computes in the common type of its operands and then
 converts the result back to the variable's type, with the check of the
 conversion table above. So `us *= us` on `unsigned short` is computed in `int`
 and then converted back, and `c += 1` on a `signed char` is an error when `c`
-is the largest `signed char`.
+is the largest `signed char`, as `uc += 1` and `pass:[uc++]` are on an `unsigned char`
+holding 255.
 
 In C, a condition (of `if`, `while`, `for` and `?:`, and an operand of `!`,
 `&&` and `||`) is true when it is not zero, and a comparison produces an `int`
@@ -183,7 +217,8 @@ include::example$integer-semantics/int_min_division.cpp[tag=source]
 
 The count of a shift must be at least 0 and less than the width of the
 promoted left operand; otherwise it is `shift`. Left shift of an unsigned value
-wraps. Left shift of a signed value must have a non-negative left operand and a
+must give a result that fits, otherwise it is `shift`: no bits are dropped.
+Left shift of a signed value must have a non-negative left operand and a
 result that fits; pass:[C++]20 would define more, but cerastes uses C23's stricter rule
 in both modes. Right shift of a negative value is arithmetic (it rounds toward
 negative infinity): defined in pass:[C++]20 and what this target does in C23.
@@ -201,9 +236,9 @@ include::example$integer-semantics/shift_negative.cpp[tag=source]
 == Annotations mean their C value
 
 An annotation is an expression of the program's language, and it means what
-that expression computes. Unsigned arithmetic wraps in a contract too, and
-signed overflow, a division by zero, a bad shift or a narrowing conversion in a
-contract is an error at the annotation's line, with the same category as in
+that expression computes. Overflow, signed or unsigned, a division by zero, a
+bad shift or a conversion that does not fit in a contract is an error at the
+annotation's line, with the same category as in
 code. Each clause is checked under the clauses before it, so a `requires` may
 rely on an earlier `requires`, and an `ensures` on every `requires` and the
 earlier `ensures`.
@@ -224,8 +259,8 @@ include::example$integer-semantics/annotation_widened.cpp[tag=source]
 == Constants
 
 A constant the compiler has already folded is checked as you wrote it, so
-`signed char c = 300;` and `return 300;` from a function returning `signed
-char` are `conversion` errors, while `unsigned u = -1;` is fine:
+`signed char c = 300;`, `unsigned u = -1;` and `return 300;` from a function
+returning `signed char` are `conversion` errors:
 
 [source,cpp]
 ----
@@ -235,6 +270,11 @@ include::example$integer-semantics/constants.cpp[tag=source]
 [source,cpp]
 ----
 include::example$integer-semantics/constant_narrowing.cpp[tag=source]
+----
+
+[source,cpp]
+----
+include::example$integer-semantics/constant_unsigned_error.cpp[tag=source]
 ----
 
 The compiler's own warnings for these (overflow in a constant, a bad shift
@@ -297,6 +337,23 @@ an enumeration value that the compiler converts to an integer for arithmetic,
 for a unary operator, for a shift or for an arm of `?:`. Write the conversion
 yourself (`(int)c - 1`) to say which you mean. Compound assignment, `pass:[++]`
 and `--` on an enumeration are rejected too.
+
+An `==` or `!=` between an enumeration value and a signed integer that may be
+negative is rejected, in both modes. In C an enumeration without negative
+values is compared as `unsigned int`, so `c == x` converts `x` to `unsigned
+int`, and both clang and GCC warn about it (`-Wsign-compare`). Write the
+conversion you mean, for example `(int)c == x`. A constant that is not negative
+(`c == 1`), an enumerator of an enumeration without a fixed unsigned type
+(`GREEN == x`), a comparison or other truth value
+(`c == (x > 0)`), and a `bool`, `unsigned char` or `long` operand are fine.
+Comparing values of two different enumerations with `==` or `!=` is rejected
+as well, as every compiler warns about it; convert both sides (`(int)c ==
+(int)n`):
+
+[source,c]
+----
+include::example$integer-semantics/enum_compare_signed.c[tag=source]
+----
 
 The order of two values of the same enumeration can be compared (`<`, `<=`,
 `>`, `>=`), and so can a value and one of its enumerators: both languages

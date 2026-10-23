@@ -29,7 +29,6 @@ std::string prelude_text(const std::set<std::string>& used) {
   std::string t;
   auto fn = [&](const std::string& head, const std::string& body) { t += "function " + head + "\n{\n  " + body + "\n}\n"; };
   if (all.count("c_pow2") != 0) fn("c_pow2(n: Int): Int", pow2_table());
-  if (all.count("c_wrap") != 0) fn("c_wrap(x: Int, m: Int): Int", "(m > 0 ? (x % m) : 0)");
   if (all.count("c_shr") != 0) fn("c_shr(a: Int, n: Int): Int", "(a \\ c_pow2(n))");
   // Signed division and remainder: four explicit cases, so that Z3 can bound the result without nonlinear help.
   if (all.count("c_div") != 0)

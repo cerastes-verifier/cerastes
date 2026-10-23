@@ -307,29 +307,91 @@ void define_arithmetic() {
     f->body = k.blk({k.ret(k.neg(k.pv(f, 0)))});
     k.done(f);
   });
-  lc("u32_wraps", "unsigned arithmetic is modular: a + 1 == 0 at UINT_MAX, 0 - 1 == UINT_MAX, -1u == UINT_MAX", [](Kit& k) {
+  // Unsigned arithmetic does not wrap (decision 0022 item 1): every result that does not fit is an error, as for signed types.
+  lc("u32_exact_arithmetic", "unsigned arithmetic with exact results: a + 1 for a < UINT_MAX, 5 - 3, -0, 65535 * 65537 == UINT_MAX", [](Kit& k) {
     Function* f = k.fn("f", k.u32, {{"a", k.u32}});
-    k.ens(f, k.implies(k.eq_c(k.F(f, 0), k.u32, "4294967295"), k.eq_c(k.R(f), k.u32, "0")));
-    k.ens(f, k.implies(k.lt(k.F(f, 0), k.num(k.u32, "4294967295")), k.eq(k.cv(k.u64, k.R(f)), k.add(k.cv(k.u64, k.F(f, 0)), k.num(k.u64, "1")))));
-    f->body = k.blk({k.chk(k.eq_c(k.sub(k.num(k.u32, "0"), k.num(k.u32, "1")), k.u32, "4294967295")),
-                     k.chk(k.eq_c(k.neg(k.num(k.u32, "1")), k.u32, "4294967295")),
-                     k.chk(k.eq_c(k.mul(k.num(k.u32, "65536"), k.num(k.u32, "65536")), k.u32, "0")),
+    k.req(f, k.lt(k.F(f, 0), k.num(k.u32, "4294967295")));
+    k.ens(f, k.eq(k.cv(k.u64, k.R(f)), k.add(k.cv(k.u64, k.F(f, 0)), k.num(k.u64, "1"))));
+    f->body = k.blk({k.chk(k.eq_c(k.sub(k.num(k.u32, "5"), k.num(k.u32, "3")), k.u32, "2")),
+                     k.chk(k.eq_c(k.neg(k.num(k.u32, "0")), k.u32, "0")),
+                     k.chk(k.eq_c(k.mul(k.num(k.u32, "65535"), k.num(k.u32, "65537")), k.u32, "4294967295")),
                      k.ret(k.add(k.pv(f, 0), k.num(k.u32, "1")))});
     k.done(f);
   });
-  lc("u32_wrap_wrong", "0 - 1 is not 0 for unsigned int", [](Kit& k) {
+  lc("u32_add_unbounded", "a + b on unsigned int: may overflow (it does not wrap)", [](Kit& k) { binop_fn(k, k.u32, BinaryOp::Add, "", "", false, true, "overflow"); });
+  lc("u32_add_bounded", "a + b on unsigned int with both in [0, 1000]", [](Kit& k) { binop_fn(k, k.u32, BinaryOp::Add, "0", "1000", true, false, ""); });
+  lc("u32_add_at_max", "UINT_MAX + 1u is an overflow, not 0", [](Kit& k) {
     Function* f = k.fn("f", k.vd);
-    const Stmt* c = k.chk(k.eq_c(k.sub(k.num(k.u32, "0"), k.num(k.u32, "1")), k.u32, "0"));
-    f->body = k.blk({c});
+    const Expr* e = k.add(k.num(k.u32, "4294967295"), k.num(k.u32, "1"));
+    f->body = k.blk({k.es(e)});
     k.done(f);
-    k.fail("check", c->loc);
+    k.fail("overflow", e->loc, 1, "", "unsigned `unsigned int` addition may overflow (cerastes does not wrap)");
   });
-  lc("u128_wraps", "unsigned __int128 wraps at 2^128", [](Kit& k) {
-    Function* f = k.fn("f", k.vd);
-    const std::string max = "340282366920938463463374607431768211455";
-    f->body = k.blk({k.chk(k.eq_c(k.add(k.num(k.u128, max), k.num(k.u128, "1")), k.u128, "0")),
-                     k.chk(k.eq_c(k.sub(k.num(k.u128, "0"), k.num(k.u128, "1")), k.u128, max))});
+  lc("u32_sub_unbounded", "a - b on unsigned int: a < b is an overflow (it does not wrap)", [](Kit& k) { binop_fn(k, k.u32, BinaryOp::Sub, "", "", false, true, "overflow"); });
+  lc("u32_sub_bounded", "a - b on unsigned int with b <= a", [](Kit& k) {
+    Function* f = k.fn("f", k.u32, {{"a", k.u32}, {"b", k.u32}});
+    k.req(f, k.le(k.F(f, 1), k.F(f, 0)));
+    k.ens(f, k.le(k.R(f), k.F(f, 0)));
+    f->body = k.blk({k.ret(k.sub(k.pv(f, 0), k.pv(f, 1)))});
     k.done(f);
+  });
+  lc("u32_sub_below_zero", "0u - 1u is an overflow, not UINT_MAX", [](Kit& k) {
+    Function* f = k.fn("f", k.vd);
+    const Expr* e = k.sub(k.num(k.u32, "0"), k.num(k.u32, "1"));
+    f->body = k.blk({k.es(e)});
+    k.done(f);
+    k.fail("overflow", e->loc, 1, "", "unsigned `unsigned int` subtraction may overflow (cerastes does not wrap)");
+  });
+  lc("u32_mul_unbounded", "a * b on unsigned int: may overflow (it does not wrap)", [](Kit& k) { binop_fn(k, k.u32, BinaryOp::Mul, "", "", false, true, "overflow"); });
+  lc("u32_mul_bounded", "a * b on unsigned int with both in [0, 65535]: at most 4294836225", [](Kit& k) { binop_fn(k, k.u32, BinaryOp::Mul, "0", "65535", true, false, ""); });
+  lc("u32_mul_65536_squared", "65536u * 65536u is an overflow, not 0", [](Kit& k) {
+    Function* f = k.fn("f", k.vd);
+    const Expr* e = k.mul(k.num(k.u32, "65536"), k.num(k.u32, "65536"));
+    f->body = k.blk({k.es(e)});
+    k.done(f);
+    k.fail("overflow", e->loc, 1, "", "unsigned `unsigned int` multiplication may overflow (cerastes does not wrap)");
+  });
+  lc("u32_neg_nonzero", "-a on unsigned int: a != 0 is an overflow, not 2^32 - a", [](Kit& k) {
+    Function* f = k.fn("f", k.u32, {{"a", k.u32}});
+    const Expr* e = k.neg(k.pv(f, 0));
+    f->body = k.blk({k.ret(e)});
+    k.done(f);
+    k.fail("overflow", e->loc, 1, "", "negating a nonzero `unsigned int` value overflows (cerastes does not wrap)");
+  });
+  lc("u32_neg_zero", "-a on unsigned int with a == 0 is 0", [](Kit& k) {
+    Function* f = k.fn("f", k.u32, {{"a", k.u32}});
+    k.req(f, k.eq_c(k.F(f, 0), k.u32, "0"));
+    k.ens(f, k.eq_c(k.R(f), k.u32, "0"));
+    f->body = k.blk({k.ret(k.neg(k.pv(f, 0)))});
+    k.done(f);
+  });
+  lc("u32_neg_one", "-1u is an overflow, not UINT_MAX", [](Kit& k) {
+    Function* f = k.fn("f", k.vd);
+    const Expr* e = k.neg(k.num(k.u32, "1"));
+    f->body = k.blk({k.es(e)});
+    k.done(f);
+    k.fail("overflow", e->loc);
+  });
+  lc("u128_exact_arithmetic", "unsigned __int128 with exact results: (2^128 - 2) + 1 and 2^128 - 1 - (2^128 - 1)", [](Kit& k) {
+    Function* f = k.fn("f", k.vd);
+    const std::string max = "340282366920938463463374607431768211455", below = "340282366920938463463374607431768211454";
+    f->body = k.blk({k.chk(k.eq_c(k.add(k.num(k.u128, below), k.num(k.u128, "1")), k.u128, max)),
+                     k.chk(k.eq_c(k.sub(k.num(k.u128, max), k.num(k.u128, max)), k.u128, "0"))});
+    k.done(f);
+  });
+  lc("u128_add_at_max", "unsigned __int128: (2^128 - 1) + 1 is an overflow, not 0", [](Kit& k) {
+    Function* f = k.fn("f", k.vd);
+    const Expr* e = k.add(k.num(k.u128, "340282366920938463463374607431768211455"), k.num(k.u128, "1"));
+    f->body = k.blk({k.es(e)});
+    k.done(f);
+    k.fail("overflow", e->loc);
+  });
+  lc("u128_sub_below_zero", "unsigned __int128: 0 - 1 is an overflow, not 2^128 - 1", [](Kit& k) {
+    Function* f = k.fn("f", k.vd);
+    const Expr* e = k.sub(k.num(k.u128, "0"), k.num(k.u128, "1"));
+    f->body = k.blk({k.es(e)});
+    k.done(f);
+    k.fail("overflow", e->loc);
   });
   lc("signed_does_not_wrap", "int + 1 at INT_MAX is an overflow, not INT_MIN", [](Kit& k) {
     Function* f = k.fn("f", k.vd);
@@ -403,13 +465,6 @@ void define_arithmetic() {
   lc("u32_rem_value_wrong", "7u % 2u is 1u, not 0u", [](Kit& k) {
     Function* f = k.fn("f", k.vd);
     const Stmt* s = k.chk(k.eq_c(k.rem(k.num(k.u32, "7"), k.num(k.u32, "2")), k.u32, "0"));
-    f->body = k.blk({s});
-    k.done(f);
-    k.fail("check", s->loc);
-  });
-  lc("u32_neg_wrong", "-1u is 4294967295u, not 1u (unary minus on an unsigned type wraps)", [](Kit& k) {
-    Function* f = k.fn("f", k.vd);
-    const Stmt* s = k.chk(k.eq_c(k.neg(k.num(k.u32, "1")), k.u32, "1"));
     f->body = k.blk({s});
     k.done(f);
     k.fail("check", s->loc);
@@ -522,18 +577,41 @@ void define_shifts() {
     f->body = k.blk({k.ret(k.shr(k.pv(f, 0), k.pv(f, 1)))});
     k.done(f);
   });
-  lc("shl_u32_wraps", "unsigned << wraps: 3u << 31 == 2^31, and the count is still checked", [](Kit& k) {
+  lc("shl_u32_fits", "unsigned << whose result fits: 1u << 31 == 2^31, 3u << 30 == 3 * 2^30", [](Kit& k) {
     Function* f = k.fn("f", k.vd);
-    f->body = k.blk({k.chk(k.eq_c(k.shl(k.num(k.u32, "3"), k.num(k.i32, "31")), k.u32, "2147483648")),
-                     k.chk(k.eq_c(k.shl(k.num(k.u32, "1"), k.num(k.i32, "31")), k.u32, "2147483648"))});
+    f->body = k.blk({k.chk(k.eq_c(k.shl(k.num(k.u32, "1"), k.num(k.i32, "31")), k.u32, "2147483648")),
+                     k.chk(k.eq_c(k.shl(k.num(k.u32, "3"), k.num(k.i32, "30")), k.u32, "3221225472"))});
     k.done(f);
   });
-  lc("shl_u32_bad_count", "1u << 32: the count is out of range", [](Kit& k) {
+  lc("shl_u32_loses_bits", "3u << 31 does not fit unsigned int (it does not wrap to 2^31)", [](Kit& k) {
+    Function* f = k.fn("f", k.vd);
+    const Expr* e = k.shl(k.num(k.u32, "3"), k.num(k.i32, "31"));
+    f->body = k.blk({k.es(e)});
+    k.done(f);
+    k.fail("shift", e->loc, 1, "", "the result of `<<` may not fit in `unsigned int`");
+  });
+  lc("shl_u32_unbounded", "a << 1 on unsigned int: the result may not fit", [](Kit& k) {
+    Function* f = k.fn("f", k.u32, {{"a", k.u32}});
+    const Expr* e = k.shl(k.pv(f, 0), k.num(k.i32, "1"));
+    f->body = k.blk({k.ret(e)});
+    k.done(f);
+    k.fail("shift", e->loc, 1, "", "the result of `<<` may not fit");
+  });
+  lc("shl_u32_bounded", "a << 1 on unsigned int with a <= 2147483647", [](Kit& k) {
+    Function* f = k.fn("f", k.u32, {{"a", k.u32}});
+    k.req(f, k.le_c(k.F(f, 0), k.u32, "2147483647"));
+    k.ens(f, k.eq(k.cv(k.u64, k.R(f)), k.mul(k.cv(k.u64, k.F(f, 0)), k.num(k.u64, "2"))));
+    f->body = k.blk({k.ret(k.shl(k.pv(f, 0), k.num(k.i32, "1")))});
+    k.done(f);
+  });
+  // Retired and replaced (decision 0022): an unsigned `<<` also checks its result, so the line has two `shift` rows and the old single
+  // expectation cannot hold.  The new case pins the count row; shl_u32_loses_bits pins the result row.
+  lc("shl_u32_count_32", "1u << 32: the count is out of range", [](Kit& k) {
     Function* f = k.fn("f", k.vd);
     const Expr* e = k.shl(k.num(k.u32, "1"), k.num(k.i32, "32"));
     f->body = k.blk({k.es(e)});
     k.done(f);
-    k.fail("shift", e->loc, 1);
+    k.fail("shift", e->loc, 1, "", "shift count");
   });
   lc("shl_u64_count_type_differs", "the count has its own type: 1ul << (unsigned char)40", [](Kit& k) {
     Function* f = k.fn("f", k.vd);
@@ -565,19 +643,66 @@ void define_conversions() {
     k.done(f);
     k.fail("conversion", e->loc);
   });
-  lc("conv_to_unsigned_wraps", "(unsigned)a is a modulo 2^32: -1 becomes UINT_MAX", [](Kit& k) {
+  // Conversions into an unsigned type are exact (decision 0022 item 1), implicit or explicit; a constant that fits needs no
+  // obligation (item 4).
+  lc("conv_to_unsigned_exact", "(unsigned)a for an int a >= 0: exact", [](Kit& k) {
     Function* f = k.fn("f", k.u32, {{"a", k.i32}});
-    k.ens(f, k.implies(k.ge_c(k.F(f, 0), k.i32, "0"), k.eq(k.cv(k.i64, k.R(f)), k.cv(k.i64, k.F(f, 0)))));
-    k.ens(f, k.implies(k.lt(k.F(f, 0), k.num(k.i32, "0")), k.eq(k.cv(k.i64, k.R(f)), k.add(k.cv(k.i64, k.F(f, 0)), k.num(k.i64, "4294967296")))));
-    f->body = k.blk({k.chk(k.eq_c(k.cv(k.u32, k.num(k.i32, "-1")), k.u32, "4294967295")), k.ret(k.cv(k.u32, k.pv(f, 0)))});
+    k.req(f, k.ge_c(k.F(f, 0), k.i32, "0"));
+    k.ens(f, k.eq(k.cv(k.i64, k.R(f)), k.cv(k.i64, k.F(f, 0))));
+    f->body = k.blk({k.ret(k.cv(k.u32, k.pv(f, 0)))});
     k.done(f);
   });
-  lc("conv_to_unsigned_wrong", "(unsigned char)300 is 44, not 300", [](Kit& k) {
-    Function* f = k.fn("f", k.vd);
-    const Stmt* s = k.chk(k.eq_c(k.cv(k.u8, k.num(k.i32, "300")), k.u8, "255"));
-    f->body = k.blk({k.chk(k.eq_c(k.cv(k.u8, k.num(k.i32, "300")), k.u8, "44")), s});
+  lc("conv_negative_to_unsigned", "(unsigned)a for an unconstrained int a: a < 0 is a conversion error (it does not wrap to 2^32 + a)", [](Kit& k) {
+    Function* f = k.fn("f", k.u32, {{"a", k.i32}});
+    const Expr* e = k.cv(k.u32, k.pv(f, 0));
+    f->body = k.blk({k.ret(e)});
     k.done(f);
-    k.fail("check", s->loc);
+    k.fail("conversion", e->loc, 1, "", "the value may not fit in `unsigned int` (a conversion must be exact)");
+  });
+  lc("conv_negative_to_unsigned_explicit", "(unsigned)a written in the program: the same error", [](Kit& k) {
+    Function* f = k.fn("f", k.u32, {{"a", k.i32}});
+    const Expr* e = k.b.convert(k.u32, k.pv(f, 0), true, k.at());
+    f->body = k.blk({k.ret(e)});
+    k.done(f);
+    k.fail("conversion", e->loc, 1, "", "the value may not fit in `unsigned int`");
+  });
+  lc("conv_const_minus_one_to_unsigned", "unsigned u = -1: the constant -1 is outside unsigned int", [](Kit& k) {
+    Function* f = k.fn("f", k.vd);
+    Var* u = k.local(f, "u", k.u32);
+    const Expr* e = k.cv(k.u32, k.num(k.i32, "-1"));
+    f->body = k.blk({k.decl(u, e)});
+    k.done(f);
+    k.fail("conversion", e->loc);
+  });
+  lc("conv_const_fits_unsigned_needs_no_check", "(unsigned)5 and (unsigned char)255: constants inside the target emit no obligation (item 4)", [](Kit& k) {
+    Function* f = k.fn("f", k.vd);
+    const Expr* a = k.cv(k.u32, k.num(k.i32, "5"));
+    const Expr* b = k.cv(k.u8, k.num(k.i32, "255"));
+    f->body = k.blk({k.chk(k.eq_c(a, k.u32, "5")), k.chk(k.eq_c(b, k.u8, "255"))});
+    k.done(f);
+    k.rows("conversion", a->loc, 0);
+    k.rows("conversion", b->loc, 0);
+  });
+  lc("conv_const_300_to_unsigned_char", "(unsigned char)300: the constant is outside unsigned char (it is not 44)", [](Kit& k) {
+    Function* f = k.fn("f", k.vd);
+    const Expr* e = k.cv(k.u8, k.num(k.i32, "300"));
+    f->body = k.blk({k.es(e)});
+    k.done(f);
+    k.fail("conversion", e->loc, 1, "", "the value may not fit in `unsigned char`");
+  });
+  lc("conv_u32_to_u8_unbounded", "(unsigned char)u for an unsigned int u: may not fit", [](Kit& k) {
+    Function* f = k.fn("f", k.u8, {{"u", k.u32}});
+    const Expr* e = k.cv(k.u8, k.pv(f, 0));
+    f->body = k.blk({k.ret(e)});
+    k.done(f);
+    k.fail("conversion", e->loc);
+  });
+  lc("conv_u32_to_u8_bounded", "(unsigned char)u with u <= 255", [](Kit& k) {
+    Function* f = k.fn("f", k.u8, {{"u", k.u32}});
+    k.req(f, k.le_c(k.F(f, 0), k.u32, "255"));
+    k.ens(f, k.eq(k.cv(k.u32, k.R(f)), k.F(f, 0)));
+    f->body = k.blk({k.ret(k.cv(k.u8, k.pv(f, 0)))});
+    k.done(f);
   });
   lc("conv_u32_to_i32_unbounded", "(int)u: may exceed INT_MAX", [](Kit& k) {
     Function* f = k.fn("f", k.i32, {{"u", k.u32}});
@@ -605,9 +730,17 @@ void define_conversions() {
     k.done(f);
     k.fail("conversion", e->loc);
   });
-  lc("conv_i128_to_u128_wraps", "(unsigned __int128)(__int128)-1 == 2^128 - 1", [](Kit& k) {
-    Function* f = k.fn("f", k.vd);
-    f->body = k.blk({k.chk(k.eq_c(k.cv(k.u128, k.num(k.i128, "-1")), k.u128, "340282366920938463463374607431768211455"))});
+  lc("conv_i128_to_u128_negative", "(unsigned __int128)a for an unconstrained __int128 a: a < 0 is a conversion error", [](Kit& k) {
+    Function* f = k.fn("f", k.u128, {{"a", k.i128}});
+    const Expr* e = k.cv(k.u128, k.pv(f, 0));
+    f->body = k.blk({k.ret(e)});
+    k.done(f);
+    k.fail("conversion", e->loc);
+  });
+  lc("conv_i128_to_u128_nonnegative", "(unsigned __int128)a for an __int128 a >= 0", [](Kit& k) {
+    Function* f = k.fn("f", k.u128, {{"a", k.i128}});
+    k.req(f, k.ge_c(k.F(f, 0), k.i128, "0"));
+    f->body = k.blk({k.ret(k.cv(k.u128, k.pv(f, 0)))});
     k.done(f);
   });
   lc("conv_same_shape_is_identity", "unsigned -> unsigned of the same width needs nothing", [](Kit& k) {
