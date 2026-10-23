@@ -86,9 +86,11 @@ int refuse(const std::string& message) {
 // constant_without_expr: treat a folded constant as having no expression; silicon_timeout: run Silicon with a
 // timeout of zero; abort: abort() inside the back end (a front-end crash); internal_error: an EDG internal error raised from the back end
 // (both exit status 3); perturb_folded: move every named constant's value and every case value's front-end value to a
-// neighbouring value of its type, so the internal guards of decision 0017 fail (exit status 3).
+// neighbouring value of its type, so the internal guards of decision 0017 fail (exit status 3); perturb_fixed_order: swap the first
+// two fixed points of a full expression's call order, so that lowering's fail-closed order check reports its internal error
+// (decisions 0021 and 0022 item 12; exit status 3).
 bool is_hook(const std::string& h) {
-  if (h == "drop_assert" || h == "weaken_invariant" || h == "constant_without_expr" || h == "perturb_folded" || h == "silicon_timeout" || h == "abort" || h == "internal_error") return true;
+  if (h == "drop_assert" || h == "weaken_invariant" || h == "constant_without_expr" || h == "perturb_folded" || h == "perturb_fixed_order" || h == "silicon_timeout" || h == "abort" || h == "internal_error") return true;
   if (h.rfind("drop_assert=", 0) != 0 || h.size() == 12) return false;
   for (size_t i = 12; i < h.size(); ++i)
     if (h[i] < '0' || h[i] > '9') return false;
@@ -419,6 +421,12 @@ int verify_command(int argc, char** argv) {
   std::fflush(stderr);
   if (has_internal_error(diagnostics)) {
     std::fprintf(stderr, "cerastes: error: internal error in the front end (the program was not checked)\n");
+    return 3;
+  }
+  if (cerastes::front_end_exit_status(cfg.out, edg_status) == 3) {
+    // Decision 0022 item 12: lowering's internal errors, the emitter's problems and the encoder's "encoded twice" guard; their
+    // diagnostics were printed above.
+    std::fprintf(stderr, "cerastes: error: internal inconsistency in the encoder (the program was not checked)\n");
     return 3;
   }
   if (edg_status != 0) return 2;  // EDG's and cerastes's diagnostics are on standard error

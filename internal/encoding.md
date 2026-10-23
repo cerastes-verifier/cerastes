@@ -12,7 +12,7 @@ filled in at that checkpoint.
 ```
 EDG IL ──(src/backend/encode.cpp: IL → VIR, all C/C++ knowledge, allow-lists, rejections)──▶ VIR
 VIR ──(src/vir/check.cpp: typing rules; fails closed)──▶ checked VIR
-VIR ──(src/vir/lower.cpp: integer semantics → obligations, conversions, wraps)──▶ lowered VIR
+VIR ──(src/vir/lower.cpp: integer semantics → obligations, conversions)──▶ lowered VIR
 lowered VIR ──(src/viper/emit.cpp + prelude.cpp + posmap.cpp: text only, no semantics)──▶ .vpr + .vpr.map
 .vpr ──(Silicon, src/driver/silicon.cpp)──▶ errors ──(position map, src/driver/report.cpp)──▶ C/C++ lines
 ```
@@ -130,18 +130,17 @@ type, `lo`/`hi` its range, `w` its width):
 
 | Operation | Value | Obligations (category) |
 |---|---|---|
-| signed `a + b`, `a - b`, `a * b` | `a op b` | `lo <= a op b <= hi` (`overflow`) |
-| unsigned `a op b` | `c_wrap(a op b, 2^w)` | none |
+| `a + b`, `a - b`, `a * b` (signed or unsigned, 0022) | `a op b` | `lo <= a op b <= hi` (`overflow`) |
 | signed `-a` | `-a` | `a != lo` (`overflow`) |
-| unsigned `-a` | `c_wrap(-a, 2^w)` | none |
+| unsigned `-a` (0022) | `-a` | `a == 0` (`overflow`) |
 | `+a`, `!a` | `a`, `!a` | none |
 | signed `a / b`, `a % b` | `c_div(a, b)`, `c_rem(a, b)` | `b != 0` (`division-by-zero`); `!(a == lo && b == -1)` (`overflow`) |
 | unsigned `a / b`, `a % b` | `c_udiv(a, b)`, `c_urem(a, b)` | `b != 0` (`division-by-zero`) |
 | `a << n` signed | `a * c_pow2(n)` | `0 <= n < w`; `a >= 0`; `a * c_pow2(n) <= hi` (`shift`, three obligations) |
-| `a << n` unsigned | `c_wrap(a * c_pow2(n), 2^w)` | `0 <= n < w` (`shift`) |
+| `a << n` unsigned (0022) | `a * c_pow2(n)` | `0 <= n < w`; `a * c_pow2(n) <= hi` (`shift`, two obligations) |
 | `a >> n` | `c_shr(a, n)` (floor division by `2^n`) | `0 <= n < w` (`shift`) |
 | `Convert` to signed `T` | `e` | `lo <= e <= hi` (`conversion`); none when the source range is inside `T`'s |
-| `Convert` to unsigned `T` | `c_wrap(e, 2^w)`; `e` when the source range is inside | none |
+| `Convert` to unsigned `T` (0022) | `e` | `lo <= e <= hi` (`conversion`); none when the source range is inside, or when `e` is a constant in range (0022 item 4) |
 | `Convert` to an enumeration `T` (0018) | `e` | `lo <= e <= hi` over the value range (`conversion`), never a wrap; none when the source range is inside |
 | `ToBool(e)`, `BoolToInt(e)` | `e != 0`, `e ? 1 : 0` | none |
 | `a && b`, `a \|\| b`, `c ? x : y` | the Viper operators | the obligations of `b` are guarded by `a` (`!a`), of `x` by `c`, of `y` by `!c` |
@@ -255,14 +254,14 @@ ordinary call: its `ensures false` ends the path.
 preconditions, that asserts the obligations of each `requires` clause under the clauses before it, and of each
 `ensures` under all `requires` and the earlier `ensures`.
 
-**The prelude** (`src/viper/prelude.cpp`) has total functions with bodies only: `c_wrap(x, m)`, `c_pow2(n)` (a
+**The prelude** (`src/viper/prelude.cpp`) has total functions with bodies only (0022 removed `c_wrap`): `c_pow2(n)` (a
 table, at least 1 for every `n`), `c_shr(a, n)`, `c_div`/`c_rem` for signed operands (four explicit cases) and
 `c_udiv`/`c_urem` for unsigned ones (Z3 proves the range of these only in that form).
 
 ## 4. Viper shape
 
 ```
-function c_wrap(x: Int, m: Int): Int { ... }              // only the prelude functions the program uses
+function c_pow2(n: Int): Int { ... }                      // only the prelude functions the program uses
 
 // C/C++ function `f`
 method f_f__0(p_a__0: Int, p_b__1: Int) returns (res: Int)
@@ -365,6 +364,10 @@ The IL facts each rule relies on (node kinds, fields, conversions) are recorded 
   `<` and arithmetic to the compatible type but leaves the switch scrutinee, conditions, the operands of unary `-`,
   `~` and shifts, and the left operand of `++`/`--`/compound assignment unconverted. The front end makes unflagged
   copies of an enumerator's value without `expr` in a few places (C++ `color d = GREEN;`, a scoped case value).
+  `==`/`!=` between a value of an enumeration compared in an unsigned type in C (no negative values; unfixed, or a fixed
+  unsigned base of rank `int` or above) and a signed non-enumeration operand that is not a constant ≥ 0 is rejected in both
+  modes, like the compilers' `-Wsign-compare`; so is `==`/`!=` between two different enumerations (`-Wenum-compare`). A truth
+  value (a comparison, `!`, `&&`, `||`) counts as non-negative (0022 item 5, P39).
 
 **Positions of obligations.** An operator's obligation is reported at the operator node's `position` (the
 operator token); a call's at its `position` (the `(`); a conversion's at the conversion node, or at the
@@ -527,14 +530,16 @@ that is followed by another one; the iteration after which the loop exits may ha
 
 **Counting and output.** `n` of the verdict line is the number of verified function bodies (0011 item 9; trusted
 contracts are not counted); with none, the driver says "nothing to verify" and exits 2. The map entries
-and the Viper come from `emit`; a map entry without a C/C++ position, or a program that `check_program` or
-`lower_program` refuses, is reported as `unsupported_expression` with the text "internal inconsistency" and ends the run
-with the rejections (exit 2): it is an encoder bug, never silently clamped or dropped.
+and the Viper come from `emit`. A map entry without a C/C++ position, an internal error of `lower_program`, or the
+encoder's "encoded twice" guard is reported as `internal_inconsistency` ("an internal inconsistency: …"), and the run
+exits 3 (0022 item 12): it is an encoder bug, a tool failure, never a verdict, and never silently clamped or dropped.
+A program that `check_program` refuses is a rejection (exit 2), since a program can reach it.
 
 **Self-test hooks** (0011 item 13): `drop_assert[=N]`, `weaken_invariant`, `constant_without_expr` (every constant with
 an original expression is treated as having none: rejected), `perturb_folded` (every named constant's value and every
 case label's `folded` moved to a neighbouring value, so the prologue's internal guards fail: exit 3), `silicon_timeout`,
-`abort`, `internal_error`.
+`abort`, `internal_error`, `perturb_fixed_order` (lowering's call order perturbed, so its fail-closed check reports an
+internal error: exit 3, 0022 item 12).
 
 **Known over-rejection.** A call written inside an annotation's own `sizeof` operand (`CERASTES_REQUIRES(sizeof(int[p(2)]) > 0)`)
 is rejected as a call in an annotation, although the operand is never evaluated: the encoder reads the folded constant's

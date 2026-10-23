@@ -486,16 +486,13 @@ class Lowerer {
               meta("overflow", e.loc, "negating the smallest value of `" + spell(e) + "` overflows"));
           return {low::neg(a.e), a.dep};
         }
-        use("c_wrap");
-        return {low::fn("c_wrap", {low::neg(a.e), low::int_lit(dec::pow2(t.bits))}), a.dep};
+        // Unsigned (decision 0022 item 1): -a fits iff a == 0; cerastes does not wrap.
+        obl(full, guard, gdep, low::bin(low::BinOp::Eq, a.e, low::int_lit("0")), a.dep,
+            meta("overflow", e.loc, "negating a nonzero `" + spell(e) + "` value overflows (cerastes does not wrap)"));
+        return {low::neg(a.e), a.dep};
       }
     }
     return a;
-  }
-
-  E wrap(const E& v, const IntType& t) {
-    use("c_wrap");
-    return low::fn("c_wrap", {v, low::int_lit(dec::pow2(t.bits))});
   }
 
   static const char* op_noun(BinaryOp op) {
@@ -539,7 +536,10 @@ class Lowerer {
               meta("overflow", e.loc, std::string("signed `") + spell(e) + "` " + op_noun(e.bop) + " may overflow"));
           return {v, dep};
         }
-        return {wrap(v, t), dep};
+        // Unsigned (decision 0022 item 1): the exact result must fit; cerastes does not wrap.
+        obl(full, guard, gdep, range_obligation(v, t), dep,
+            meta("overflow", e.loc, std::string("unsigned `") + spell(e) + "` " + op_noun(e.bop) + " may overflow (cerastes does not wrap)"));
+        return {v, dep};
       }
       case BinaryOp::Div: case BinaryOp::Rem: {
         const IntType& t = *e.type.int_type;
@@ -581,7 +581,10 @@ class Lowerer {
               meta("shift", e.loc, "the result of `<<` may not fit in `" + spell(e) + "`"));
           return {v, dep};
         }
-        return {wrap(v, t), dep};
+        // Unsigned (decision 0022 item 1): a >= 0 by type, so only the result must fit; cerastes does not wrap.
+        obl(full, guard, gdep, low::bin(BinOp::Le, v, low::int_lit(dec::range_of(t).hi)), dep,
+            meta("shift", e.loc, "the result of `<<` may not fit in `" + spell(e) + "`"));
+        return {v, dep};
       }
     }
     internal_error(e.loc, "unknown binary operator");
@@ -608,7 +611,12 @@ class Lowerer {
                std::string("the value may not fit in `") + spell(e) + "` (a conversion to a signed type must be exact)"));
       return a;
     }
-    return {wrap(a.e, t), a.dep};  // to an unsigned type: modulo 2^bits (both standards)
+    // To an unsigned type (decision 0022 items 1 and 4): the value must fit; cerastes does not wrap.  An integer constant that
+    // lies in the target's range needs no obligation.
+    if (e.a->kind == Expr::Kind::Const && dec::in_range(e.a->value, dec::range_of(t))) return a;
+    obl(full, guard, gdep, range_obligation(a.e, t), a.dep,
+        meta("conversion", e.loc, std::string("the value may not fit in `") + spell(e) + "` (a conversion must be exact)"));
+    return a;
   }
 
   // ---- calls (decisions 0012 item 6 and 0021) ----

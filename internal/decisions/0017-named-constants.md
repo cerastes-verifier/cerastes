@@ -202,3 +202,5 @@ a cross-mode trap: a `const` variable in a `do … while` condition could be a f
   unchanged.
 
 *2026-10-22, amended by 0018 (M4.2b2): item 7 — `names_object` does not look inside an enumerator (an enumerator names no object), so `do … while (A)` with an enumerator `A == 0` runs once in both modes; item 4 — enumerators with a written initializer are named constants of the unit, checked in the same prologue in declaration order.*
+
+*2026-10-23, amended by 0022 (M4.4a): item 4 — the prelude list loses `c_wrap`, and an initializer that wraps to an unsigned type (`const unsigned U = -1;`) is a `conversion` or `overflow` error in the prologue, which ends it (exit 1, never 3: the failed closed assert ends the path before the internal guard).*

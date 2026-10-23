@@ -5,6 +5,7 @@
 #include <cerastes.h>
 
 unsigned int bump(unsigned int a)
+    CERASTES_REQUIRES(a <= 4294967292u)
     CERASTES_ENSURES(r, r == a + 3)
 {
   unsigned int x;
@@ -23,4 +24,10 @@ int bump_signed(int a)
   x = a;
   x -= 1;
   return x;
+}
+
+unsigned int top(void)
+    CERASTES_ENSURES(r, r == 4294967295u)
+{
+  return bump(4294967292u);
 }

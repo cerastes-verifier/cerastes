@@ -2816,3 +2816,187 @@ truth value, still has a side effect at its top, which only an assignment of a c
 matter. M4.3a's detector applied the right-operand test only when the right operand itself had an effect, so it accepted
 the left-operand shapes: corrected in `discarded_value_with_effect` (edg-backend, M4.3b), which now reports at the
 operator whose right operand fails.
+
+## M4.4a: no wrapping, and the constants EDG folds
+
+Probe P38 for the M4.4a decision (no wrapping, handoff §11 question 13; record `0022-no-wrapping.md`). Evidence is under `build/m4.4a/probes/p38/` (gitignored: 274 probe files, one `.ver`, `.tree`, `.err` per file and mode, plus the raw `il_display` dumps this section quotes). `il_def.h` lines are in `third_party/edg/src/il_def.h` at the pin `f0ed5525af`; every EDG source line below is in `third_party/edg/src/`; `encode.cpp` lines are those of HEAD `b395a2b` (`src/backend/encode.cpp`). The question: decision 0010 item 12 says a folded constant is checked by encoding what was written (`a_constant.expr`, recursively), and was probed only for `0u - 1` in a function body (P3). Once an unsigned operation that does not fit is an error, any place where EDG folds a wrapping constant **without** `expr` would let the wrap through as "verified". So: in which places does a folded wrapping constant keep `expr`, and where does the encoder trust EDG's value?
+
+**Commands** (each probe file was run in the mode of its extension: `.c` as C23, `.cpp` as C++20; the generators wrote `.c` and `.cpp` copies of every shape that is valid in both).
+
+```text
+scripts/cerastes-fe.sh --c23|--c++20 --display_error_number --il_display <file>     IL evidence
+scripts/cerastes-fe.sh --c23|--c++20 --cerastes_walk <file>                          typed listing of annotations
+build/cerastes verify <file> --std=c23|c++20                                         today's encoder (no --keep-vpr)
+```
+
+Scratch tools (gitignored, `build/m4.4a/`): `gen38.py`, `gen38b.py`, `gen38c.py`, `gen38d.py`, `gen38e.py`, `gen38f.py`, `gen38g.py` write the probe files (`gen38b.py` combines one function per expression into one file per place and writes `probes/p38/index.json`: file to function to line range); `run38.py [-j N] <dir|file>...` runs the three commands above per file; `p38tree.py <il> fn|vars|enums|attrs|aggs|targs` condenses an `il_display` dump (modes: function bodies and `switch-case-entry`s, file-scope variables, enumerators, routine attribute arguments, aggregate initializer elements, template argument lists) and prints **every constant as `K<type value expr=NONE|expr=<tree> [orig_type=T] [local_expr_ref] [enumerator]>`**, recursively, so a missing `expr` is visible; `sum38.py` and `sum38b.py` summarise `.tree`/`.ver` per file and per function (verdict by the error lines inside the function's line range); `attrsum38.py <place>` summarises the contract trees; `table38.py`, `targs38.py`. The condenser was checked on `t0.c` against the raw dump (below). The addresses in a raw dump change with every run; the quoted blocks are identified by content.
+
+### P38: **PASS for every place the encoder can reach; two classes of constants lose `expr`, not reachable today (noted for M5 (templates) and M4.5e (arrays) in handoff §8)**
+
+**1. The shapes, by constant** (`fn/ret.c`, `fn/ret.cpp`, `extra/ret.c`; the same top constant in every body place, see 2). Column "IL": the folded constant's value and the root of its `expr` (`orig=` the `orig_type`). EDG's own diagnostics, `fn/ret.c` (same in C++): #68 on e10, #69 on e13, #63 on e18 and e21, **none on any other row** (`unsigned` `+ - *`, `<<` that loses bits, `-1u`, explicit casts and sizeof/limits macros are silent). "Verify today" is `build/cerastes verify`: every row in every place verifies except the two shift counts (`1u << 32`, `1 << 40`), which `shift` rejects today and which serve as the **witness** that the written expression, not EDG's value, is what the encoder checks.
+
+| # | expression (as returned/assigned as `T`) | T | IL (C23) | IL (C++20) | verify today |
+|---|---|---|---|---|---|
+| e01 | `-1u` | unsigned | `4294967295U` `eok_negate` | same | verified |
+| e02 | `0u - 1u` | unsigned | `4294967295U` `eok_subtract` | same | verified |
+| e03 | `0u - 1` | unsigned | `4294967295U` `eok_subtract` (the `1` is a generated cast) | same | verified |
+| e04 | `4294967295u + 1u` | unsigned | `0U` `eok_add` | same | verified |
+| e05 | `65536u * 65536u` | unsigned | `0U` `eok_multiply` | same | verified |
+| e06 | `1u << 31` (fits) | unsigned | `2147483648U` `eok_shiftl` | same | verified |
+| e07 | `3u << 31` (**loses a bit**: `3 * 2^31 = 0x180000000`) | unsigned | `2147483648U` `eok_shiftl` | same | verified |
+| e08 | `6u << 31` (loses bits) | unsigned | `0U` `eok_shiftl` | same | verified |
+| e09 | `(unsigned)-1` | unsigned | `4294967295U` `eok_cast` `orig=int` | same | verified |
+| e10 | `-1` (implicit, `unsigned u = -1`) | unsigned | `4294967295U` `eok_cast` (generated) `orig=int` | same | verified (#68) |
+| e11 | `-(1u)` | unsigned | `4294967295U` `eok_negate` | same | verified |
+| e12 | `0ull - 1` | unsigned long long | `18446744073709551615ULL` `eok_subtract` | same | verified |
+| e13 | `300` (implicit, `unsigned char c = 300`) | unsigned char | `44U` `eok_cast` (generated) `orig=int` | same | verified (#69) |
+| e14 | `(unsigned char)-1` | unsigned char | `255U` `eok_cast` `orig=int` | same | verified |
+| e15 | `(0u - 1u) > 5u` | int | `1` `eok_gt` | `1` `eok_cast` `orig=bool` over the `eok_gt` | verified |
+| e16 | `(0u - 1u) / 2u` | unsigned | `2147483647U` `eok_divide` over the `eok_subtract` constant | same | verified |
+| e17 | `4294967294u + 1u` (fits, control) | unsigned | `4294967295U` `eok_add` | same | verified |
+| e18 | `1u << 32` | unsigned | `0U` `eok_shiftl` | same | `shift` (#63) |
+| e19 | `(unsigned char)300` | unsigned char | `44U` `eok_cast` `orig=int` | same | verified |
+| e20 | `-(0u)` (fits, control) | unsigned | `0U` `eok_negate` | same | verified |
+| e21 | `1 << 40` (witness) | int | `0` `eok_shiftl` | same | `shift` (#63) |
+| x01 | `sizeof(int) - 5` | unsigned long | `18446744073709551615UL` `eok_subtract` | same | verified |
+| x02 | `sizeof(char) - 2` | unsigned long | `18446744073709551615UL` `eok_subtract` | same | verified |
+| x03 | `UINT_MAX + 1u` | unsigned | `0U` `eok_add` | same | verified |
+| x04 | `ULONG_MAX + 1ul` | unsigned long | `0UL` `eok_add` | same | verified |
+| x05 | `SIZE_MAX + 1` | unsigned long | `0UL` `eok_add` | same | verified |
+| x06 | `UCHAR_MAX + 1` | int | `256` `eok_add` | same | verified |
+| x07 | `(unsigned char)(UCHAR_MAX + 1)` | unsigned char | `0U` `eok_cast` `orig=int` | same | verified |
+| x08, x10, x11, x12 | `sizeof(int) * 3 - 12`, `UINT_MAX - 0u`, `INT_MAX + 1u`, `UINT32_MAX + 1` (fit, controls) | | `0UL` `eok_subtract`, `4294967295U` `eok_subtract`, `2147483648U` `eok_add`, `0UL` `eok_cast` `orig=unsigned int` | same | verified |
+| x09 | `(unsigned)sizeof(char) - 2u` | unsigned | `4294967295U` `eok_subtract` | same | verified |
+
+**Raw dump** (`probes/p38/t0.c`, line 1 `unsigned r(void) { return 0u - 1u; }`, `scripts/cerastes-fe.sh --c23 --display_error_number --il_display t0.c`, the constant of the `return`, with the operands of its `expr`):
+
+```text
+func-scope constant@...5b0
+type:                    file-scope type@...: unsigned int
+expr:                    func-scope expr-node@...4d0
+kind:                    ck_integer
+integer_value:           4294967295U
+func-scope expr-node@...4d0   kind: enk_operation   operation.kind: eok_subtract   (operands: constant 0U, constant 1U, both without expr: literals)
+```
+
+`il_def.h:4777` `orig_type`, `:4781-4790` `expr` ("If the constant is not just a literal this points to an expression node representing that constant. Otherwise, NULL ... (Note that for some implicitly-converted constants, this field is NULL and the conversion's original type is recorded in orig_type instead.)"). **No constant in any of the 274 files has `local_expr_ref`** (`il_display.c:1355`; `p38tree.py` prints the flag when set, and `grep -rl local_expr_ref probes/p38` finds no file).
+
+**2. The places** (every cell is evidence from `probes/p38`; "kept" means the `expr` field is present and the tree under it is the written expression, checked in each of the listed files by `p38tree.py`; the summary lines are `sum38b.py <place>` and `sum38.py <dir>`).
+
+| place | files (line of e02/e13) | IL: `expr` kept for the folded wrapping constant? | `orig_type` without `expr`? | encoder path today | verify today (C23 / C++20) |
+|---|---|---|---|---|---|
+| **body: initializer, assignment, return, argument, condition** | `fn/init.c:4`, `asg`, `ret.c:4`, `arg`, `cnd` (and `.cpp`), e01-e21 and `extra/ret.c` x01-x12 | **kept** on e01-e21 in all 5 places and both modes (210 function results in `fn/{init,asg,ret,arg,cnd}.{c,cpp}`) and on x01-x12 in `extra/ret.*` and `extra/cnd.*` (48 results); no top-level constant of any of these rows lacks `expr` (`sum38b.py fn extra`; its `SUSPECT` column lists only macro leaves under a kept `expr`) | none | `constant` (`encode.cpp:681`) to `constant_value` (`:712`), the `original != nullptr` branch (`:757-781`): the expression is encoded as written | every row verified, but e18 and e21: `shift` (`fn/ret.c:20`, `:23`; the same in the other four places and in `.cpp`) |
+| **contract `requires`/`ensures`** (il_display prints routine attributes: `p38tree.py attrs`) | `fn/req.c:6`, `fn/ens.c`; `whole/req.c`, `whole/ens.c` | **no folded constant lost its `expr`**: in a contract EDG either leaves the operation unfolded (`eok_eq(param_ref, eok_subtract(0U, 1U))`: no constant at all) or folds with `expr` kept (C only, and only some second operands: `unsigned int=4294967295U expr=eok_subtract(...)`, `attrsum38.py req`). Fully constant annotations are not folded at all (`whole/req.c`: `attr requires args: eok_eq[int](eok_shiftl[int](const 1, const 40), const 0)`) | none | the argument tree is encoded by `expr`, a folded constant by the same `constant_value` path | e18, e21 and `whole/`'s `1 << 40 == 0`: `shift` in `requires` (`whole/req.c:4`), `ensures` (`whole/ens.c:4`); all other rows verified. **These `shift` errors prove nothing about folded constants: EDG does not fold the shift in an annotation (the tree above is `eok_shiftl` over two constants), so the encoder reports the operation itself** (audit round 1). The folded constants of annotations are covered by the hook, below. C++: the second operand never folds (only the negations show a constant, each with `expr=eok_negate`: `-1u`, `-(1u)`, `-1` under a cast, `-(0u)`) |
+| **contract `check`, `invariant`/`decreases`** | `fn/chk.c:7`, `fn/inv.c`; `whole/chk.c`, `whole/inv.c` | **il_display does not print statement attributes** (M1: `attributes:` names the entry and the entry is not dumped), so no `expr` listing exists. Indirect evidence: the walker (`--cerastes_walk`, `fn/chk.c.c23.walk`) shows the same shapes (`op eok_subtract` over `const 0`, `const 1` for the first operand, `const 4294967295` for a folded second one) but prints only values; the `shift` of `CERASTES_CHECK(1 << 40 == 0)` (`whole/chk.c:4`, `whole/inv.c:5`) is, as for `requires`, the unfolded operation and proves nothing about folded constants; the hook below covers `check` and `invariant` | not observable in `il_display` | same path (the annotation expression is scanned like any expression, `ek_normal`) | e18/e21 `shift` (unfolded operations); the rest verified |
+| **file-scope named constants** `const T K = E;` (decision 0017) | `named/nc.c:5`, `nc.cpp`, `one_e18`, `one_e21` | **kept**: the initializer constant of `K` has `expr` for every row (`p38tree.py vars`: `K_e02: ... constant=K<unsigned int 4294967295U expr=eok_subtract[...]>`); a use `return K;` is a constant with `expr=var K` | none (e13: `K<unsigned char 44U expr=eok_cast {gen}(K<int 300 expr=NONE>) orig_type=int>`) | prologue: `encode_named_variable` (`:940`) to `constant_initializer` (`:1650`) to `constant_value` path A; a use is the literal of EDG's value (`variable()`, `encode.cpp:835`) after that check | verified; e18 / e21 alone: `shift` at the declaration. **A failing initializer hides the unit's other errors** (0017; the first combined file hid e21 behind e18's error, so they are probed alone) |
+| **`constexpr` named constants** (C++) | `named/ncx.cpp`, `onex_e18.cpp`, `onex_e21.cpp` | **kept**, same as `const` | none | same | verified; e18/e21: EDG's own error #28 (`expression must have a constant value`), the whole unit stops in the front end |
+| **named constants made of named constants** | `named/nest_use.cpp`, `nest_wrapK.cpp`, `nest_use_constexpr.cpp`, `nest_wrapK_constexpr.cpp`, `nest_*_code.*`, `nest_B.*`, `nest_Bcode.*`, `nest_uc.*`, `nest_ucK.*` | **kept** (`const unsigned K2 = K + 1u;`: `K<unsigned int 0U expr=eok_add[...](var K, 1U)>`; a use in code `K + 1u`: `0U expr=eok_add`; `const int B = (0u-1u) > 5u;`: `1 expr=eok_gt`/`eok_cast orig=bool`) | none | same | verified; C: `nest_use.c`/`nest_wrapK.c` are EDG error #1901 (a `const` object in a constant expression, decision 0017) |
+| **enumerators with a written initializer** (decision 0018) | `enum/n01`-`n08`, `n11`, `n12`, `n14`, `n19`-`n21`, `n23`-`n26`, `n31`, `n32` (`.c`, `.cpp`) | **kept**: the enumerator constant (`is_named_constant_definition`) has `expr` for every initializer that is an expression, e.g. `n02` `A = (0u - 1u) / 2u`: `K<int 2147483647 expr=eok_divide[unsigned int](K<unsigned int 4294967295U expr=eok_subtract ...>, 2U) enumerator>`; `n03` `(unsigned char)300`: `K<int 44 expr=eok_cast[unsigned char](K<int 300>) orig_type=int enumerator>` (C++: enumerator type is the enumeration) | none | `encode_named_enumerator` (`:1041`, `expr_node_from_constant` at `:1047`): the initializer is encoded as written in the prologue | verified for the ones whose value fits `int` (n01-n08, n12, n14, n19, n20, n23, n24, n26, n31, n32); n11 `(int)(0u - 1u)`: `conversion` today; n13 `1 << 40`: `shift` (C) / EDG #28 (C++); n17, n21, n25: `unsupported_declaration` (value outside `int`, 0018 item 2) |
+| **enumerators without `expr`** (the second trust site, `encode.cpp:1046`) | `enum/n09`, `n10`, `n27`-`n30` (literal initializer, also converted to a fixed base), `n33`-`n40` (implicit values) | **no `expr`, no `orig_type`**, value is the literal or previous + 1: e.g. `n27` `enum : unsigned { A = 5 }`: `enum <unnamed> 5U expr=NONE enumerator`. The value cannot wrap: for a fixed base EDG itself refuses (**#1749**, `n15`, `n16`, `n18`, `n22`, `n33`, `n35`, `n36`, `n38`-`n40`, the wrapping implicit value and the literal outside the type); for an unfixed one the type widens (`n34`, `n37`: `4294967296L`, `2147483648U`) and the value is outside `int`, which 0018 item 2 rejects | none | `if (c->expr == nullptr && !c->local_expr_ref) return;` (`:1046`): nothing is checked, EDG's value is used | verified for fitting literals (n09, n10, n27-n32); rejected as above |
+| **`case` values** (C and C++) | `case/k01`-`k18` | **kept** for every case constant that is not a plain literal: `k01` (C) `case -1:` over `unsigned`: `K<unsigned int 4294967295U expr=eok_cast {gen}(K<int -1 expr=eok_negate(...)>) orig_type=int>`; `k02` `0u - 1u`: `expr=eok_subtract`; `k04`, `k05`, `k06`, `k09`, `k10`, `k11`, `k14`, `k16`-`k18` likewise; plain literals (`k03` `4294967295u`, `k07` `300`) have `expr=NONE` and no `orig_type` | none | `switch_statement` (`:2517`) to `constant_value` (`:2645`); a bare `enum` switch in C through `enum_case_value` (`:2473`) | verified; `k01.cpp`: EDG #2362 (narrowing); `k13` `1 << 40`: `shift`; `k15` (`unsigned char x`, `case -1`) verified (`int` promotion, no wrap); `k16.c`: #1901 |
+| **`case` over an enumeration with a fixed base** (the enum-typed case constant of `enum_case_value`) | `ecase/c01`-`c15` | every case constant that is not a literal has `expr` (e.g. `c05.c` `enum E=4294967295U expr=eok_cast orig_type=int`); EDG leaves `case 300:` over `enum E : unsigned char` as a bare `int` (`ecase/c01`); rule 1 (`case_not_in_enumeration`) compares EDG's value, and `c12` (`X = 44`, `case 300`) and `c14` still reject (the case value 300 / -1 is not 44 / 255); an explicit cast into the enumeration (`c13`, `c15`) is the `conversion` error today (the value is checked, never wrapped, 0018 item 6) | none | `enum_case_value`: the generated cast is peeled and the written constant is encoded; the `!has_expr` arm (`:2476`: an enumerator or an enum-typed `ck_integer` without `expr`) delegates to `constant_value` (`:2494`), which rejects `orig_type` without `expr` (`:783-787`), and since audit round 1 rejects it first itself; P38 reaches the arm only with enumerator copies (`c11` `case X:`, `enum E=1U expr=NONE enumerator`) | `case_not_in_enumeration` (exit 2) for `c01`-`c10`, `c12`, `c14`; `conversion` for `c13`, `c15`; `c11` verified; C++ `c05`, `c06`: EDG #2362 |
+| **default arguments** (C++) | `defarg/d01.cpp`-`d13.cpp` | **kept**: the default-argument constant (`generated_default_arg`) has `expr` (`defarg/d01.cpp`, `scripts/cerastes-fe.sh --c++20 --il_display`: `file-scope constant@...: expr: file-scope expr-node@... kind: enk_operation eok_subtract`, integer_value `4294967295U`); `d02` `unsigned a = -1`: `eok_cast orig_type=int` | none | the call's argument node is a constant with `generated_default_arg`; `constant_value` path A, reported at the call (`encode.cpp:1298-1300`) | verified; `d09` `int a = 1 << 40`: `shift` |
+| **locals, automatic and static** | `loc/l01`-`l10`, `g01`-`g08` | **kept**: `const unsigned char c = 300;` (local) `K<unsigned char 44U expr=eok_cast {gen}(...) orig_type=int>`; file-scope `const unsigned long long K = 5;` `expr=eok_cast orig_type=int` | none | as above | automatic verified; `static` locals: `unsupported_declaration` (0012); `g08` `const short K = 70000;`: `conversion` |
+| **`static_assert`/`_Static_assert`, `#if`, array bounds** (EDG's, 0010 item 13) | `misc/sa.*`, `pp.*`, `arr.*` | not encoded | | | `_Static_assert((0u - 1u) > 5u, ...)` and `_Static_assert(65536u * 65536u == 0u, ...)`: **no diagnostic, accepted** (`misc/sa.c`, `sa.cpp`); `#if (0u - 1u) > 5u` and `#if -1 > 0u`: both true, wrapping (the preprocessor's own modular `uintmax_t`), only #68 on the sign change of `-1 > 0u` (`misc/pp.c:8`); array bound `int a[(0u - 1u) > 5u ? 1 : 2]`: EDG gives 1, the array is `unsupported_declaration` (`misc/arr.c`) |
+| **non-type template arguments** (C++) | `tmpl/t01`-`t09`, `targs38.py` | **LOST** (class 1 below) | **both**: with a conversion `orig_type` and no `expr`; without one neither | not reached: the template is rejected first (`unsupported_declaration`, "a template is not supported", `tmpl/t01.cpp:3`; `t02` "a class, struct or union ..."; `t03` "a global declared in a system file (`value`...)") | `t01`, `t04`-`t07`, `t09`: `unsupported_declaration`; `t08` `t<-1>`: EDG #304 / #3323 |
+| **aggregate initializers** (arrays, structs) | `misc/agg_short.*`, `agg_neg.*`, `agg_long.*` | **kept** for lists of at most 1000 elements (`agg_short`: `const unsigned char A[3] = {300,1,1}` elements `K<unsigned char 44U expr=eok_cast {gen}(K<int 300>) orig_type=int>`); **LOST** beyond that (class 2 below) | **yes** in `agg_long` | not reached: arrays are `unsupported_declaration` (0012; M4.5e) | rejected at the declaration |
+
+**3. Where the encoder takes EDG's value, and why each place is covered** (the list of 0022 item 3; `encode.cpp` lines of HEAD `b395a2b`).
+
+| place | what the encoder takes | why a wrapping constant cannot get through |
+|---|---|---|
+| a literal without `expr` (`constant_value`, `:789`) | EDG's value of a `ck_integer` with `expr == NULL`, `orig_type == NULL`, not `local_expr_ref` | it is the number written: in P38 the constants that reach it are only plain literals (`0`, `1`, `5u`, `300`, `4294967295u`, `31`, `2u`, the `1`/`0` of generated `return` values and the leaves inside the macro bodies of `<limits.h>`); the census `sum38.py`/`sum38b.py` makes of constants with `expr=NONE` and a value that is not a number of the source text (`SUSPECT`, all 274 files) lists only macro leaves (under a kept `expr`), the implicit enumerator values of `enum/n34`/`n37` (the next row), and aggregate and template-parameter constants rejected earlier. **No folded wrapping constant of section 2 reaches this arm.** The only shapes that would (class 1, template arguments) have no path today |
+| a constant with `orig_type` and no `expr` (`:783-787`) | nothing: rejected ("a folded constant whose original expression is not recorded") | reached in P38 only by shapes rejected earlier (`tmpl/t05`, `t07` through their instances, `agg_long`) |
+| a use of a named constant or an enumerator (`variable()` `:835`, `is_enumerator` in `constant_value`) | EDG's value of the initializer | the initializer is encoded as written and checked in every method's closed prologue (0017, 0018), where a failed obligation ends the path (S14, S15) before any use |
+| an enumerator without an initializer (`encode_named_enumerator`, `:1046`) | EDG's value: a literal initializer, or the previous value + 1 | no wrap is possible: for a fixed base EDG itself refuses (#1749: `n15`, `n16`, `n18`, `n22`, `n33`, `n35`, `n36`, `n38`-`n40`); for an unfixed one the type widens (`n34`, `n37`: `4294967296L`, `2147483648U`) and the value is outside `int`, which 0018 item 2 rejects; the implicit values are checked to be previous + 1 (0018) |
+| `sizeof` / `alignof` | their value, no run-time operation (0010 item 12) | a layout fact, not an arithmetic result (`x01`, `x02` keep the surrounding subtraction as `expr`) |
+| `Case::folded`, the value of a `case` label | EDG's value for the dispatch | guarded in the prologue: the value as written, with its obligations at the label, must equal EDG's (0017); `k01`-`k18`, `ecase/c01`-`c15` |
+| an enumerator copy as a case value (`enum_case_value`, `:2476`) | the enumerator's value, converted to the promoted type | an enumerator or an enum-typed `ck_integer` without `expr`; the arm delegates to `constant_value`, which rejects `orig_type` without `expr`, and checks `orig_type` first itself since audit round 1; P38 reaches it only with `case X:` copies (`ecase/c11`), whose value is the enumerator's and was checked against its enumeration (0018) |
+
+**The annotation hook** (audit round 1; closes the contracts rows of section 2). `il_display` does not print the arguments of `check`/`invariant`, and the shift witness proves nothing in annotations (EDG leaves the shift unfolded there). The encoder's own hook does: `--cerastes_verify_selftest=constant_without_expr` makes `constant_value` ignore every `expr` (`:758-789`), so it rejects each folded constant that has one (`error #cerastes-unsupported_expression: a folded constant whose original expression is not recorded ...`). `build/m4.4a/hook38.py` runs `build/cerastes verify probes/p38/fn/{chk,inv,req,ens}.{c,cpp} --std=c23|c++20 --cerastes_verify_selftest=constant_without_expr` (outputs `probes/p38/hook/*.out`, `hook/summary.txt`; the auditor's runs are in `/tmp/audit-m44a/raw/`): every run exits 2 and rejects, by function,
+- **C23: 15 of 21 functions** in each of the four places: e01, e02, e04, e05, e06, e07, e08, e09, e10, e11, e14, e15, e16, e17, e20;
+- **C++20: 6 of 21** in each: e01, e09, e10, e11, e14, e20 (the negations, the only constants EDG folds in a C++ annotation).
+
+For `requires` and `ensures` these are exactly the functions whose `il_display` shows a folded constant with an `expr` (`attrsum38.py req`: the same 15 and the same 6), and `check` and `invariant` give the identical sets, so every folded constant of an annotation has an `expr` in both modes. (What the hook cannot show is a folded constant with neither `expr` nor `orig_type`: it would be taken as a literal. None is visible in `req`/`ens`, and `chk`/`inv` scan the same expressions through the same scanner.)
+
+### The two classes that lose `expr`
+
+**Class 1: non-type template arguments (not reachable today; noted for M5 in handoff §8).** `il_display` of `tmpl/t01.cpp` (`unsigned f(void) { return t<0u - 1u>(); }`, `template <unsigned N> unsigned t(void) { return N; }`), the instance routine `t`:
+
+```text
+file-scope routine@...: t        assoc_template: file-scope template@...   is_template_function: TRUE
+template_arg_list:
+  constant:              file-scope constant@...0980: 4294967295U
+  explicitly_specified:  TRUE
+file-scope constant@...0980:  type: unsigned int   null_pointer_constant_ruled_out: TRUE   kind: ck_integer   integer_value: 4294967295U
+                              (no `expr:` line, no `orig_type:` line)
+```
+
+The instance body's `return N;` is an `enk_constant` naming a *different* constant, `constant@...0f50: 4294967295U` (second `stmk_return` of region `t`, `tmpl/t01.cpp.c++20.tree`); `il_display` does not dump that constant's block, so its `expr` **cannot be read: UNCLEAR** (the dumped one, the template argument, has none; the class-template member initializer of `t02` is dumped and has none, below). `targs38.py` over `tmpl/t0*.cpp`: `t<0u - 1u>`: `K<unsigned int 4294967295U expr=NONE>`; `t<65536u * 65536u>`: `0U expr=NONE`; `t<4294967295u + 1u>`: `0U expr=NONE`; `t<5u>`: `5U expr=NONE`; with a conversion: `t<(unsigned char)300>`: `K<unsigned char 44U expr=NONE orig_type=int>`; `t<(0u - 1u) / 2u>` with `int N`: `K<int 2147483647 expr=NONE orig_type=unsigned int>`; the class-template member `S<0u - 1u>::v` (`tmpl/t02.cpp`): `v: ... constant=K<unsigned int 4294967295U expr=NONE>`. **Cause:** `BACKING_EXPR_FOR_NONTYPE_TEMPL_ARG` is FALSE in the cerastes configuration (`host_envir.h:1533-1545`: TRUE only `#if BACK_END_IS_CP_GEN_BE`, which `edg_config` sets to 0, `cmake/EdgFrontEnd.cmake`), so `curr_expr_kind_is_one_in_which_const_exprs_are_recorded()` (the arm for `!BACKING_EXPR_FOR_NONTYPE_TEMPL_ARG`, `exprutil.h:1375-1381`: `!ek_pp && (depth_template_declaration_scope != NO_SCOPE_DEPTH || !curr_expr_kind_is(ek_template_arg))`) is FALSE for `ek_template_arg` outside template declarations, and `expr_interpret_expression_operand` clears it (`exprutil.c:6431-6433`); the comment at `host_envir.h:1520-1528` says why (one instance is referred to by many expressions that fold to the same value; only one could be kept). **The shape cannot be recognised from the constant alone:** with no conversion it is `ck_integer`, `expr == NULL`, `orig_type == NULL`, `local_expr_ref` FALSE, exactly a literal; the only difference is where it sits (the `template_arg_list` of an instance routine or class, or the body/members of such an instance). With a conversion it carries `orig_type` and is rejected by the existing `orig_type` rule (`:783-787`). **No path today:** cerastes rejects templates (`unsupported_declaration` at the prototype, M4) and system class-template members (`t03`), so `constant_value`'s literal arm never sees one. M5 (generic templates, instances verified per instantiation) will, and then `BACKING_EXPR_FOR_NONTYPE_TEMPL_ARG=1` is not enough (one expression per instance). The instance-specific value would need the written argument from the call's `expl_template_arg_list_used` / source positions, which P38 did not probe.
+
+**Class 2: simple implicit conversions of constants in long braced initializers (not reachable today; noted for M4.5e in handoff §8).** `REDUCE_BACKING_EXPRESSION_USE` is TRUE (`host_envir.h:1494-1496`); `decl_inits.c:4722-4725` sets `reduce_backing_expression_use` when `dps->init_state.pending_elements` (a braced list longer than `MIN_BRACED_INIT_PARSE_ELEMENT_COUNT` = 1000 elements, `expr.c:47559`, `:47693`, `:48011`), and `exprutil.c:10531-10546` then records **no backing expression** for "a nontrivial implicit cast on top of a simple constant ... a top-level initializer expression for an entity with static storage duration", only `orig_type` (`exprutil.c:10518-10526`). `misc/agg_long.c` (`const unsigned char A[1101] = { 300, 1, ... }`, 1101 elements) `p38tree.py aggs`: `aggregate const unsigned char [1101]: 1101 elements; 1101 with orig_type and no expr`, first element `K<unsigned char 44U expr=NONE orig_type=int>` (raw: `first_constant: constant@...: (unsigned char)44U`, `orig_type: int`, `integer_value: 44U`, no `expr:`), while `agg_short.c` (3 elements) gives `K<unsigned char 44U expr=eok_cast[unsigned char] {gen}(const K<int 300 expr=NONE>) orig_type=int>`. **Recognisable:** `orig_type != NULL && expr == NULL`, which `constant_value` already rejects (`:783-787`), so an implementation of M4.5e that routes every element through `constant_value` is safe; one that reads `ck_aggregate` elements' values directly (`first_constant`/`next`) is not.
+
+**Not classes of loss:** `ek_pp` (`#if`, never in the IL, EDG's); `_Static_assert` and array bounds (EDG's, accepted silently as shown above); enumerators without `expr` (no wrap possible, see the table); `local_expr_ref` (never seen).
+
+**Verdict: PASS** for the places the encoder reaches today (body, contracts, named constants, enumerator initializers, case values, default arguments, locals): a folded wrapping constant keeps `expr` there in both modes, and the encoder encodes it as written. In function bodies, named constants, case values and default arguments the `1 << 40` witness gives `shift` (EDG folds it there and keeps `expr`); in annotations the evidence is the hook (above), not the witness. **Not reachable today:** class 1 (template arguments; noted for M5 in handoff §8) and class 2 (long aggregate lists; noted for M4.5e in handoff §8); the first is not recognisable from the constant. Surprises: `3u << 31` does not fit in 32 bits (`1u << 31` is the fitting control); EDG warns on none of the wrapping unsigned arithmetic (only #68/#69 on conversions and #63 on shift counts), so the encoder is the only check once wrapping is an error; a failing named-constant initializer hides the others (0017).
+
+### P39: which `==`/`!=` with an enumeration operand the compilers warn on (0022 item 5): **PASS**
+
+`build/m4.4a/probes/p39/sc.c` (22 functions, `s1`-`s22`, line 5 + n; `run.sh` strips the `#include` to make `sc.cpp`, keeping the line numbers); `bash build/m4.4a/probes/p39/run.sh` (output `probes/p39/run.out`): Apple clang 21.0.0 (`clang-2100.3.34.2`) and GCC 16.2.0 (`gcc-16`), `-Wall -Wextra -fsyntax-only`, `-std=c23` in C and `-std=c++20` in C++. The declarations: `enum color { RED, GREEN, BLUE }` (unsigned compatible type in C), `enum neg { NA = -1, NB }`, `enum fu : unsigned { FA, FB }`, `static const int M = -1`. `W` is `-Wsign-compare`; `T` is clang C++'s `-Wtautological-constant-out-of-range-compare` ("comparison of constant -1 with expression of type 'enum color' is always false"); `-` no warning. "Verdict" is what 0022 item 5 decides, the same in both modes.
+
+| # | shape | clang C | clang C++ | gcc C | gcc C++ | verdict (item 5) |
+|---|---|---|---|---|---|---|
+| s1 | `c == x` (`int x`) | W | - | W | - | rejected |
+| s2 | `c != s` (`short`) | W | - | W | - | rejected |
+| s3 | `c == v` (`signed char`) | W | - | W | - | rejected |
+| s4 | `c == v` (`char`, signed on this target) | W | - | W | - | rejected |
+| s5 | `c == -1` | W | T | W | - | rejected (negative constant) |
+| s6 | `c == 1` | - | - | - | - | accepted (a constant >= 0, item 4) |
+| s7 | `c == M` (`const int M = -1`) | W | T | W | - | rejected (negative named constant) |
+| s8 | `x == (enum color)2` | - | - | - | - | **rejected, stricter than the compilers** (the other operand is a signed `int` that may be negative) |
+| s9 | `c == b` (`bool`) | - | - | - | - | accepted |
+| s10 | `c == l` (`long`) | - | - | - | - | accepted (C compares in `long`) |
+| s11 | `c == (int)u` | W | - | W | - | rejected |
+| s12 | `c == x + 1` | W | - | W | - | rejected |
+| s13 | `f == x` (`enum fu : unsigned`) | W | W | W | W | rejected (a fixed `unsigned` base is compared unsigned in both modes) |
+| s14 | `n == x` (`enum neg`) | - | - | - | - | accepted (an enumeration with a negative value is signed) |
+| s15 | `x != c` | W | - | W | - | rejected (either order) |
+| s16 | `c == uc` (`unsigned char`) | - | - | - | - | accepted |
+| s17 | `c == (x > 0 ? 1 : 2)` | - | - | - | - | **rejected, stricter than the compilers** (an `int` that is not a constant) |
+| s18 | `c == d` (two `enum color`) | - | - | - | - | accepted |
+| s19 | `(int)c == x` | - | - | - | - | accepted (the explicit cast gives an `int`) |
+| s20 | `GREEN == x` | - | - | - | - | accepted (an enumerator) |
+| s21 | `c == (enum color)x` | - | - | - | - | accepted (two enumeration values; the cast itself is a checked conversion) |
+| s22 | `c == -x` | W | - | W | - | rejected |
+
+Counts: clang C 11 warnings (s1-s5, s7, s11, s12, s13, s15, s22), clang C++ 3 (s5 and s7 as `T`, s13 as `W`), gcc C the same 11 as clang C, gcc C++ 1 (s13). So both compilers, in C only, warn on every shape where a signed operand that may be negative meets an enumeration without negative values, and in C++ only on the fixed `unsigned` base, which is item 5's rule. The two shapes the rule rejects although no compiler warns are **s8** and **s17**: both compare an enumeration value with a signed `int` that is not a constant >= 0, so in C a negative `int` would be a `conversion` error in C only; the rule stays simple and uniform (0022 item 5, "Stricter than the compilers"). Item 5's verdict column was derived from the rule's four conditions applied to each shape, not run through the encoder (the encoder change is edg-backend's).
+
+**P39 addendum (audit round 2): two more probe files, the auditor's** `/tmp/audit-m44a/h1.{c,cpp}` and `g.{c,cpp}` (copied to `build/m4.4a/probes/p39/audit/`; `bash build/m4.4a/probes/p39/run2.sh`, output `probes/p39/run2.out`; the same compilers and flags). The verdicts are 0022 item 5's (the rule applied to each shape, not run through the encoder).
+
+*Two different enumerations* (`h1.c`; the line numbers are the functions' `L4`-`L7`; declarations as in `sc.c`):
+
+| # | shape | clang C | clang C++ | gcc C | gcc C++ | verdict |
+|---|---|---|---|---|---|---|
+| h1 | `c == n` (`enum color`, `enum neg`) | `-Wenum-compare` and W | `-Wdeprecated-enum-compare` | `-Wenum-compare` and W | `-Wenum-compare` | rejected in both modes |
+| h2 | `c == NA` (an enumerator of another enumeration) | `-Wenum-compare` and W | `-Wdeprecated-enum-compare` and T | `-Wenum-compare` and W | `-Wenum-compare` | rejected in both modes |
+| h3 | `f == n` (`enum fu : unsigned`, `enum neg`) | `-Wenum-compare` and W | `-Wdeprecated-enum-compare` and W | `-Wenum-compare` and W | `-Wenum-compare` and W | rejected in both modes |
+| h4 | `f == NA` | `-Wenum-compare` and W | `-Wdeprecated-enum-compare` and W | `-Wenum-compare` and W | `-Wenum-compare` and W | rejected in both modes |
+
+Every compiler warns on every shape in both modes (`-Wenum-compare` in C and in g++, `-Wdeprecated-enum-compare` in clang++), so item 5 rejects a comparison of values or enumerators of two different enumerations in both modes (`c == n` would otherwise be a `conversion` error in C and verify in C++). Two values of one enumeration stay accepted (`s18`, `s21`).
+
+*Truth-valued and constant operands* (`g.c`; `g1` is on line 3, `g10` on line 12 in both files):
+
+| # | shape | clang C | clang C++ | gcc C | gcc C++ | verdict |
+|---|---|---|---|---|---|---|
+| g1 | `c == (x > 0)` | - | - | - | - | accepted (a truth value is 0 or 1) |
+| g2 | `c == !x` | - | - | - | - | accepted |
+| g3 | `c == (x && y)` | - | - | - | - | accepted |
+| g9 | `c == (x == 0)` | - | - | - | - | accepted |
+| g4 | `c == 'a'` | - | T | - | - | accepted (a constant >= 0) |
+| g8 | `c == (int)(0u - 1u + 1u)` (the constant 0) | - | - | - | - | accepted (a constant >= 0) |
+| g5 | `c == '\xff'` (-1 on this target) | W | T | W | - | rejected (a negative constant) |
+| g6 | `c == (short)-1` | W | T | W | - | rejected |
+| g7 | `c == (y = x)` | W | - | W | - | rejected (a signed `int` that may be negative) |
+| g10 | `c == (int)b` (`bool b`, an explicit cast) | W | - | - | - | rejected (not a truth value; clang warns, the strictest reading) |
+
+So `g1`, `g2`, `g3` and `g9`, the four truth-valued shapes of the audit, are silent in all four configurations and accepted in both modes. `T` is clang C++'s `-Wtautological-constant-out-of-range-compare`.

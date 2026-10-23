@@ -1,6 +1,6 @@
 // expect: verified
 // expect: native-ok
-// A conversion to a signed type is checked; a conversion to an unsigned type wraps.
+// A conversion to a signed type is checked, and so is a conversion to an unsigned type.
 // tag::source[]
 #include <cerastes.h>
 
@@ -12,8 +12,9 @@ signed char small(int x)
 }
 
 unsigned char low_byte(int x)
-    CERASTES_ENSURES(r, r >= 0)
+    CERASTES_REQUIRES(x >= 0)
+    CERASTES_ENSURES(r, r == x % 256)
 {
-  return (unsigned char)x;
+  return (unsigned char)(x % 256);
 }
 // end::source[]
