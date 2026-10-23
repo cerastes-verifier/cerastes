@@ -116,7 +116,7 @@ ConstVal eval_const(const Expr& e) {
 enum class Ctx {
   Body,      // code: Local, Call, AssignE and Comma allowed (not Formal, Result, Old)
   Annot,     // `check` and `invariant`: like Body, but no calls (0011 item 7) and no side effects (decision 0020 item 3)
-  LoopCond,  // a loop condition: Body with its effects (decision 0020: run at every evaluation), still no calls (0012 item 6)
+  LoopCond,  // a loop condition: Body, its effects and calls run at every evaluation (decisions 0020 and 0021)
   Assert,    // C's `assert(e)`: calls as in code, no side effects (decision 0015 item 6, 0020)
   Requires,  // a `requires`: Formal only
   Ensures    // an `ensures`: Formal, Result, Old
@@ -135,10 +135,6 @@ class Checker {
   }
 
  private:
-  struct CallState {
-    int seen = 0;  // calls seen so far in the current full expression (in evaluation order)
-  };
-
   void err(const SrcLoc& loc, std::string reason) { diags_.push_back(Diag{loc, std::move(reason)}); }
 
   static bool is_enum(const Type& t) { return t.is_int() && t.int_type != nullptr && t.int_type->is_enum; }
@@ -232,8 +228,7 @@ class Checker {
       err(c.init->loc, "the initializer of " + name + " mentions a variable, a parameter, the result, `old` or a call");
       return;
     }
-    CallState st;
-    expr(*c.init, Ctx::Annot, false, st, false);
+    expr(*c.init, Ctx::Annot, false);
     if (c.init->type != c.type) err(c.init->loc, "the initializer of " + name + " has type " + c.init->type.str() + ", not " + c.type.str());
   }
 
@@ -252,8 +247,7 @@ class Checker {
       return;
     }
     if (!c.loc.known()) err(c.loc, std::string("a ") + what + " clause has no source position");
-    CallState st;
-    expr(*c.expr, ctx, false, st, false);
+    expr(*c.expr, ctx, false);
     if (!c.expr->type.is_bool()) err(c.expr->loc, std::string("the ") + what + " clause is not a bool");
   }
 
@@ -265,8 +259,7 @@ class Checker {
       return;
     }
     if (!c.loc.known()) err(c.loc, std::string("a ") + what + " component has no source position");
-    CallState st;
-    expr(*c.expr, ctx, false, st, false);
+    expr(*c.expr, ctx, false);
     if (!c.expr->type.is_int()) err(c.expr->loc, std::string("a ") + what + " component of type " + c.expr->type.str() + " (a measure is an integer)");
   }
 
@@ -299,8 +292,7 @@ class Checker {
       case Stmt::Kind::Decl: {
         if (s.var == nullptr) { err(s.loc, "a declaration without a variable"); return; }
         if (s.expr != nullptr) {  // no initializer: declared only (decision 0019)
-          CallState st;
-          expr(*s.expr, Ctx::Body, false, st, false);
+          expr(*s.expr, Ctx::Body, false);
           if (s.var->type != s.expr->type)
             err(s.expr->loc, "the initializer of '" + s.var->name + "' has type " + s.expr->type.str() + ", not " + s.var->type.str());
         }
@@ -311,22 +303,19 @@ class Checker {
         if (s.var == nullptr || s.expr == nullptr) { err(s.loc, "an assignment without a variable or a value"); return; }
         if (!owned(*s.var)) err(s.loc, "variable '" + s.var->name + "' does not belong to function '" + fn_->c_name + "'");
         else if (!visible(*s.var)) err(s.loc, "assignment to '" + s.var->name + "', which is not declared here");
-        CallState st;
-        expr(*s.expr, Ctx::Body, false, st, false);
+        expr(*s.expr, Ctx::Body, false);
         if (s.var->type != s.expr->type)
           err(s.expr->loc, "assignment to '" + s.var->name + "' of a " + s.expr->type.str() + " where " + s.var->type.str() + " is required");
         break;
       }
       case Stmt::Kind::ExprStmt: {
         if (s.expr == nullptr) { err(s.loc, "an expression statement without an expression"); return; }
-        CallState st;
-        expr(*s.expr, Ctx::Body, false, st, true);
+        expr(*s.expr, Ctx::Body, true);
         break;
       }
       case Stmt::Kind::If: {
         if (s.expr == nullptr) { err(s.loc, "an `if` without a condition"); return; }
-        CallState st;
-        expr(*s.expr, Ctx::Body, false, st, false);
+        expr(*s.expr, Ctx::Body, false);
         if (!s.expr->type.is_bool()) err(s.expr->loc, "an `if` condition of type " + s.expr->type.str() + " (convert it with to_bool)");
         scoped(s.then_body);
         scoped(s.else_body);
@@ -337,12 +326,11 @@ class Checker {
         if (s.jump_id < 0) err(s.loc, "a loop with a negative jump id");
         else if (s.jump_id > 0) register_id(s.jump_id, s.loc);
         if (s.form == LoopForm::DoWhile && s.jump_id <= 0) err(s.loc, "a `do` loop without a jump id (its exit test jumps to a label named by it)");
-        CallState st;
-        // No calls in a loop condition, a `do` condition included (0012 item 6); a side effect is allowed (it runs at every evaluation,
-        // decision 0020), except in the condition of a `do ... while (0)`, which is no loop.
-        expr(*s.expr, s.form == LoopForm::DoOnce ? Ctx::Annot : Ctx::LoopCond, false, st, false);
-        if (has_assignment_effect(*s.expr) && s.form == LoopForm::While && s.jump_id <= 0)
-          err(s.expr->loc, "a loop whose condition has a side effect and no jump id (it is lowered with an exit jump, decision 0020)");
+        // A side effect or a call in a loop condition runs at every evaluation (decisions 0020 and 0021), except in the condition of a
+        // `do ... while (0)`, which is no loop: there a call is refused (Ctx::Annot).
+        expr(*s.expr, s.form == LoopForm::DoOnce ? Ctx::Annot : Ctx::LoopCond, false);
+        if (has_effect(*s.expr) && s.form == LoopForm::While && s.jump_id <= 0)
+          err(s.expr->loc, "a loop whose condition has a side effect or a call and no jump id (it is lowered with an exit jump, decisions 0020 and 0021)");
         if (!s.expr->type.is_bool()) err(s.expr->loc, "a loop condition of type " + s.expr->type.str() + " (convert it with to_bool)");
         const bool once = s.form == LoopForm::DoOnce;
         if (once) {
@@ -356,8 +344,7 @@ class Checker {
         for (const Clause& c : s.invariants) {
           if (c.expr == nullptr) { err(c.loc, "an invariant without an expression"); continue; }
           if (!c.loc.known()) err(c.loc, "an invariant has no source position");
-          CallState ist;
-          expr(*c.expr, Ctx::Annot, false, ist, false);
+          expr(*c.expr, Ctx::Annot, false);
           if (!c.expr->type.is_bool()) err(c.expr->loc, "an invariant is not a bool");
         }
         if (s.measure.empty() && !once) err(s.loc, "a loop without a termination measure (decreases, decision 0013)");
@@ -377,8 +364,7 @@ class Checker {
         if (s.expr == nullptr || s.body == nullptr) { err(s.loc, "a switch without a controlling expression or a body"); return; }
         if (s.jump_id <= 0) err(s.loc, "a switch without a jump id");
         else register_id(s.jump_id, s.loc);
-        CallState st;
-        expr(*s.expr, Ctx::Body, false, st, false);  // evaluated once; a call is hoisted like a declaration's initializer
+        expr(*s.expr, Ctx::Body, false);  // evaluated once; a call is hoisted like a declaration's initializer
         if (!s.expr->type.is_int()) err(s.expr->loc, "a switch on a " + s.expr->type.str() + " (the controlling expression is a promoted integer)");
         if (s.body->kind != Stmt::Kind::Block) { err(s.body->loc, "the body of a switch is not a compound statement"); return; }
         if (!s.body->loc.known()) err(s.body->loc, "statement without a source position");
@@ -399,8 +385,7 @@ class Checker {
             } else {
               // The value is any call-free integer expression of the scrutinee's type (the encoder uses the case constant's
               // original expression, 0010 item 12); EDG guarantees that the folded values are distinct.
-              CallState vst;
-              expr(*c->expr, Ctx::Annot, false, vst, false);
+              expr(*c->expr, Ctx::Annot, false);
               if (!c->expr->type.is_int()) err(c->loc, "a case value that is not an integer");
               else if (c->expr->type != s.expr->type)
                 err(c->loc, "a case value of type " + c->expr->type.str() + " in a switch on " + s.expr->type.str());
@@ -446,8 +431,7 @@ class Checker {
         } else if (s.expr == nullptr) {
           err(s.loc, "`return;` in non-void function '" + fn_->c_name + "'");
         } else {
-          CallState st;
-          expr(*s.expr, Ctx::Body, false, st, false);
+          expr(*s.expr, Ctx::Body, false);
           if (s.expr->type != fn_->ret)
             err(s.expr->loc, "return of a " + s.expr->type.str() + " from a function returning " + fn_->ret.str());
         }
@@ -455,8 +439,7 @@ class Checker {
       }
       case Stmt::Kind::Check: {
         if (s.expr == nullptr) { err(s.loc, "a check without an expression"); return; }
-        CallState st;
-        expr(*s.expr, s.from_assert ? Ctx::Assert : Ctx::Annot, false, st, false);
+        expr(*s.expr, s.from_assert ? Ctx::Assert : Ctx::Annot, false);
         if (!s.expr->type.is_bool()) err(s.expr->loc, "a check of type " + s.expr->type.str() + " (it must be a bool)");
         break;
       }
@@ -491,9 +474,10 @@ class Checker {
 
   // ---- expressions ----
 
-  // `guarded`: the node is evaluated conditionally (right of && / ||, a branch of ?:).
+  // Decision 0021 item 6: no rule about the number or the placement of calls is checked here (a call in a guarded operand, a loop
+  // condition or next to another call); lowering decides the order of calls exactly and reports what it cannot place.
   // `void_ok`: a Call of a void function is allowed here (an expression statement).
-  void expr(const Expr& e, Ctx ctx, bool guarded, CallState& st, bool void_ok) {
+  void expr(const Expr& e, Ctx ctx, bool void_ok) {
     if (!e.loc.known()) err(e.loc, "expression without a source position");
     if (e.type.is_void()) {
       if (e.kind != Expr::Kind::Call) err(e.loc, "an expression of type void that is not a call");
@@ -501,9 +485,9 @@ class Checker {
     } else if (!value_type(e.type)) {
       err(e.loc, "an expression of an unsupported type");
     }
-    auto sub = [&](const Expr* x, bool g) {
+    auto sub = [&](const Expr* x) {
       if (x == nullptr) { err(e.loc, "a missing operand"); return false; }
-      expr(*x, ctx, guarded || g, st, false);
+      expr(*x, ctx, false);
       return true;
     };
     switch (e.kind) {
@@ -534,10 +518,10 @@ class Checker {
       case Expr::Kind::Old:
         if (ctx != Ctx::Ensures) { err(e.loc, "`old` outside an `ensures`"); break; }
         if (e.a != nullptr && mentions_result_or_local(*e.a)) err(e.loc, "`old` of the result (it has no value on entry)");
-        if (sub(e.a, false) && e.a->type != e.type) err(e.loc, "`old` changes the type");
+        if (sub(e.a) && e.a->type != e.type) err(e.loc, "`old` changes the type");
         break;
       case Expr::Kind::Unary:
-        if (!sub(e.a, false)) break;
+        if (!sub(e.a)) break;
         if (e.uop == UnaryOp::Not) {
           if (!e.a->type.is_bool()) err(e.loc, "operand of `!` is " + e.a->type.str() + ", not bool (convert it with to_bool)");
           if (!e.type.is_bool()) err(e.loc, "`!` has a non-bool type");
@@ -547,37 +531,37 @@ class Checker {
           if (e.type != e.a->type) err(e.loc, "unary arithmetic changes the type");
         }
         break;
-      case Expr::Kind::Binary: binary(e, ctx, guarded, st); break;
+      case Expr::Kind::Binary: binary(e, ctx); break;
       case Expr::Kind::Cond:
         if (e.a == nullptr || e.b == nullptr || e.c == nullptr) { err(e.loc, "a conditional with a missing operand"); break; }
-        expr(*e.a, ctx, guarded, st, false);
-        expr(*e.b, ctx, true, st, false);
-        expr(*e.c, ctx, true, st, false);
+        expr(*e.a, ctx, false);
+        expr(*e.b, ctx, false);
+        expr(*e.c, ctx, false);
         if (!e.a->type.is_bool()) err(e.loc, "the condition of `?:` is " + e.a->type.str() + ", not bool (convert it with to_bool)");
         if (e.b->type != e.c->type) err(e.loc, "the branches of `?:` have different types " + e.b->type.str() + " and " + e.c->type.str());
         if (e.type != e.b->type) err(e.loc, "`?:` has the wrong type");
         break;
       case Expr::Kind::Convert:
-        if (!sub(e.a, false)) break;
+        if (!sub(e.a)) break;
         if (!e.a->type.is_int() || !e.type.is_int()) err(e.loc, "a conversion between " + e.a->type.str() + " and " + e.type.str() + " (use to_bool / bool_to_int for bool)");
         break;
       case Expr::Kind::ToBool:
-        if (!sub(e.a, false)) break;
+        if (!sub(e.a)) break;
         if (!e.a->type.is_int()) err(e.loc, "to_bool of a " + e.a->type.str());
         if (!e.type.is_bool()) err(e.loc, "to_bool does not give a bool");
         break;
       case Expr::Kind::BoolToInt:
-        if (!sub(e.a, false)) break;
+        if (!sub(e.a)) break;
         if (!e.a->type.is_bool()) err(e.loc, "bool_to_int of a " + e.a->type.str());
         if (!e.type.is_int()) err(e.loc, "bool_to_int does not give an integer");
         else if (is_enum(e.type)) err(e.loc, "bool_to_int to the enumeration " + e.type.str() + " (decision 0018 item 5)");
         break;
       case Expr::Kind::ReportAt:
-        if (sub(e.a, false) && e.type != e.a->type) err(e.loc, "report_at changes the type");
+        if (sub(e.a) && e.type != e.a->type) err(e.loc, "report_at changes the type");
         break;
-      case Expr::Kind::Call: call(e, ctx, guarded, st); break;
-      case Expr::Kind::AssignE: assign_value(e, ctx, guarded, st); break;
-      case Expr::Kind::Comma: comma(e, ctx, guarded, st); break;
+      case Expr::Kind::Call: call(e, ctx); break;
+      case Expr::Kind::AssignE: assign_value(e, ctx); break;
+      case Expr::Kind::Comma: comma(e, ctx); break;
     }
   }
 
@@ -594,7 +578,7 @@ class Checker {
 
   // An effect used as a value (decision 0020): in code and in a loop condition only; once per function; of a visible local; the
   // stored value has the local's type; the old value, if any, is the one `Local` node that the stored value reads.
-  void assign_value(const Expr& e, Ctx ctx, bool guarded, CallState& st) {
+  void assign_value(const Expr& e, Ctx ctx) {
     if (!effects_allowed(ctx)) {
       err(e.loc, "a side effect (an assignment, increment or decrement used as a value) in a contract, an annotation or an `assert`");
       return;
@@ -604,7 +588,7 @@ class Checker {
     if (!owned(*e.var)) err(e.loc, "variable '" + e.var->name + "' does not belong to function '" + fn_->c_name + "'");
     else if (!visible(*e.var)) err(e.loc, "assignment to '" + e.var->name + "', which is not declared here");
     if (e.type != e.var->type) err(e.loc, "an assignment used as a value has type " + e.type.str() + ", not the variable's " + e.var->type.str());
-    expr(*e.a, ctx, guarded, st, false);
+    expr(*e.a, ctx, false);
     if (e.a->type != e.var->type)
       err(e.a->loc, "assignment to '" + e.var->name + "' of a " + e.a->type.str() + " where " + e.var->type.str() + " is required");
     if (e.yields_old && e.b == nullptr) err(e.loc, "an assignment that yields the old value without one");
@@ -616,33 +600,29 @@ class Checker {
   }
 
   // The comma operator (decision 0020): the left operand is evaluated first and its value dropped (it may be a void call); a call
-  // in it is sequenced before every call of the right operand, but not before a call elsewhere in the enclosing expression.
-  void comma(const Expr& e, Ctx ctx, bool guarded, CallState& st) {
+  // in it is sequenced before every call of the right operand, but not before a call elsewhere in the enclosing expression
+  // (lowering's floor, decision 0021).
+  void comma(const Expr& e, Ctx ctx) {
     if (!effects_allowed(ctx)) {
       err(e.loc, "the comma operator in a contract, an annotation or an `assert`");
       return;
     }
     if (e.a == nullptr || e.b == nullptr) { err(e.loc, "a comma with a missing operand"); return; }
     if (!seen_effects_.insert(&e).second) err(e.loc, "a comma that is reachable twice (its effects would run twice)");
-    const int base = st.seen;
-    expr(*e.a, ctx, guarded, st, true);
-    const int left_calls = st.seen - base;
-    st.seen = base;
-    expr(*e.b, ctx, guarded, st, false);
-    const int right_calls = st.seen - base;
-    st.seen = base + left_calls + right_calls;
+    expr(*e.a, ctx, true);
+    expr(*e.b, ctx, false);
     if (e.type != e.b->type) err(e.loc, "a comma has the wrong type");
     if (e.type.is_void()) err(e.loc, "a comma of type void (a discarded comma is two statements)");
   }
 
-  // Whether the expression holds an AssignE or a Comma: the loop condition then needs the exit jump of the top-test shape.  (Not the
-  // same question as lower.cpp's has_effect, which also counts a Call: that one decides where a guarded operand is lowered as a branch.)
-  static bool has_assignment_effect(const Expr& e) {
-    if (e.kind == Expr::Kind::AssignE || e.kind == Expr::Kind::Comma) return true;
+  // Whether the expression holds an AssignE, a Comma or a Call (the same question as lower.cpp's has_effect): the loop condition then
+  // needs the exit jump of the top-test shape (decisions 0020 and 0021).
+  static bool has_effect(const Expr& e) {
+    if (e.kind == Expr::Kind::AssignE || e.kind == Expr::Kind::Comma || e.kind == Expr::Kind::Call) return true;
     for (const Expr* x : {e.a, e.b, e.c})
-      if (x != nullptr && has_assignment_effect(*x)) return true;
+      if (x != nullptr && has_effect(*x)) return true;
     for (const Expr* x : e.args)
-      if (x != nullptr && has_assignment_effect(*x)) return true;
+      if (x != nullptr && has_effect(*x)) return true;
     return false;
   }
 
@@ -673,11 +653,10 @@ class Checker {
     return false;
   }
 
-  void binary(const Expr& e, Ctx ctx, bool guarded, CallState& st) {
+  void binary(const Expr& e, Ctx ctx) {
     if (e.a == nullptr || e.b == nullptr) { err(e.loc, "a binary operation with a missing operand"); return; }
-    const bool lazy = e.bop == BinaryOp::LAnd || e.bop == BinaryOp::LOr;
-    expr(*e.a, ctx, guarded, st, false);
-    expr(*e.b, ctx, guarded || lazy, st, false);
+    expr(*e.a, ctx, false);
+    expr(*e.b, ctx, false);
     const Type& a = e.a->type;
     const Type& b = e.b->type;
     switch (e.bop) {
@@ -713,16 +692,13 @@ class Checker {
     }
   }
 
-  void call(const Expr& e, Ctx ctx, bool guarded, CallState& st) {
+  void call(const Expr& e, Ctx ctx) {
     if (!seen_effects_.insert(&e).second) err(e.loc, "a call that is reachable twice (it would run twice)");
-    if (ctx == Ctx::Annot || ctx == Ctx::LoopCond)
+    if (ctx == Ctx::Annot)
       err(e.loc, "a call in a loop condition or in a `check`, `invariant` or `decreases` clause (a call is hoisted before its statement, "
                  "where C/C++ does not evaluate these)");
-    else if (ctx != Ctx::Body && ctx != Ctx::Assert)
+    else if (ctx != Ctx::Body && ctx != Ctx::LoopCond && ctx != Ctx::Assert)
       err(e.loc, "a call in a contract");
-    if (guarded) err(e.loc, "a call in a conditionally evaluated operand (a hoisted call would run when C/C++ does not run it)");
-    if (st.seen > 0)
-      err(e.loc, "two calls in one expression that are not nested in each other (their order is unspecified)");
     if (e.callee == nullptr || functions_.count(e.callee) == 0) { err(e.loc, "a call of a function that is not in the program"); return; }
     const Function& f = *e.callee;
     if (e.args.size() != f.params.size()) {
@@ -731,12 +707,11 @@ class Checker {
     }
     for (size_t k = 0; k < e.args.size(); ++k) {
       if (e.args[k] == nullptr) { err(e.loc, "a missing argument"); continue; }
-      expr(*e.args[k], ctx, guarded, st, false);
+      expr(*e.args[k], ctx, false);
       if (k < f.params.size() && e.args[k]->type != f.params[k].type)
         err(e.args[k]->loc, "argument " + std::to_string(k + 1) + " of '" + f.c_name + "' is " + e.args[k]->type.str() + ", the parameter is " + f.params[k].type.str() + " (convert it)");
     }
     if (e.type != f.ret) err(e.loc, "a call of '" + f.c_name + "' with the wrong result type");
-    ++st.seen;
   }
 
   const Program& prog_;

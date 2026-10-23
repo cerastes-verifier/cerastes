@@ -4,6 +4,154 @@ Session handoff log, newest first. Each entry says what is done, what is not,
 any surprises, the decision records added and the exact first step for the
 next session.
 
+## M4.3b — Calls in expressions (2026-10-23): done on branch `m4.3b-calls`; PR pending (after M4.3a's #6)
+
+Read `internal/handoff.md` next: the "M4.3b is done" owner steps at the top, §6 the M4.3b audit notes, §11 questions
+27–31.
+
+**Owner decisions (2026-10-23, M4.3b planning)**
+- **§11 questions 24–26:**
+  - Q24: `-Wself-assign` rejected in M4.3b, a rejection test per form.
+  - Q25: keep the union.
+  - Q26: sequencing with pointers in M4.5a's memory-model record.
+- **Termination (option B).** Where another unsequenced call may precede a recursive call, cerastes asserts that call's
+  measure decrease itself. Fallback (A) was pre-approved and not needed: S19 reproduced every case, unequal lengths
+  included.
+- **Retirements (17, approved):**
+  - 7 tests: `reject_call_guarded.c`, `reject_call_cond.c`, `reject_call_loop_condition.c`, `reject_do_call_condition.c`,
+    `reject_unsequenced_calls.c`, `reject_effect_call_guarded.c`, `reject_effect_call_loop_condition.c`;
+  - 10 VIR rejection cases (6 in `selftest_cases2.inc`, 4 in `selftest_cases3.inc`), each returned as a lowering case.
+- **Extras:**
+  - the CI timeout 240 → 150 (§11 question 8);
+  - tests for M4.3a audit note 5;
+  - a hook showing `check_variable_order` can fire (M4.3a audit note 2).
+
+**Done**
+- **Decision 0021** (`3d30e31`, revised after both audits). It amends:
+  - 0012 items 6 and 12;
+  - 0013 items 2 and 8;
+  - 0014 item 5;
+  - 0015 item 6;
+  - 0020 items 1, 5 (the implementation), 7, 9 and 14.
+
+  0016 item 9 is amended too (`4b9c3c0`). Probes P36–P37 and spikes S19–S20 are in `il-inventory.md` ("M4.3b").
+- **Accepted, both modes:**
+  - calls in the right operand of `&&`/`||` and the arms of `?:`;
+  - calls in `while`/`for`/`do` conditions;
+  - calls in any arrangement whose checks form a chain (`f(x) + g(y)`, `max(f(a), f(b))`, `fib(n - 1) + fib(n - 2)`,
+    `(f(), 0) + g()`), also in `assert` conditions;
+  - discarded `c ? g(x) : h(y);`.
+- **The dependency-chain rule** (lowering, exact):
+  - **Sets.** Each item has the set of fixed points (calls, and branches that contain a call) C must complete first.
+  - **The chain.** The family F of a full expression must be a chain under ⊆. The calls are then emitted in its order,
+    and each item right after its set.
+  - **Rejection.** Otherwise `unsequenced_calls`, at the later witness, or at the call holding a default argument.
+- **Termination.** Every call in the caller's recursion cycle contributes PRE(c) to F. The explicit `termination` assert
+  is printed only when another call precedes the call. It uses Silicon's relation (unequal lengths included, an atomic
+  form), and the cycles are recomputed from the emitted calls, fail-closed.
+- **Fail-closed checks:** `check_fixed_order`, `check_cycles`, and `check_variable_order` on the new keys, with three
+  hooks.
+- **check_program** drops the nested-or-comma, guarded and loop-condition call rules.
+- **Encoder:**
+  - `self_assignment` (clang's `-Wself-assign` exactly: same variable after generated casts, no macro involvement; 131
+    probe functions agree);
+  - the M4.3a detector for a discarded `&&`/`||` now applies the right-operand rule whenever the expression has a side
+    effect, with a constant zero not counting (GCC's C mode, P37 and audit round 2);
+  - lowering's internal errors are reported before its rejections.
+- **Code:**
+  - `src/vir` (`lower.cpp`, `check.cpp`, `lower.h`, `vir.h`);
+  - `src/viper` (`selftest.cpp` with `rl`/`rh` runners, `selftest_cases4.inc`);
+  - `src/backend` (`encode.cpp`, `diagnostics.def`: `unsequenced_calls`, `self_assignment`);
+  - `src/driver/selftest.cpp`.
+- **VIR self-test:** 452 → 506 lowering cases; 171 → 175 rejection cases (10 retired, 14 new).
+- **Tests:**
+  - 30 new positives, 47 error twins and 36 rejection tests in `tests/scalar`, both modes (one `.cpp`: a default
+    argument);
+  - 3 doc examples;
+  - 7 retired.
+
+  Every positive is `native-ok`.
+- **Tooling:**
+  - `mutate.py` operators `swap-logical` and `swap-arms`;
+  - `VIR_CASES_MIN` 506;
+  - the CI guard pins 150.
+- **Docs:**
+  - Verifying a program: "Calls in expressions" (three examples), the self-assignment rule, and the not-supported list;
+  - Error messages: termination at an unsequenced recursive call;
+  - Annotations: measures of unequal lengths;
+  - Overview.
+
+**Acceptance**
+- `scripts/check.sh` green.
+  - Run 1 (27 min 23 s, before the equivalence review's eight kills): self-tests 968 (skipped=1) + 74 + 176 + 275;
+    tests 4242 passed, 0 failed, 1 skipped (native-ok: Apple clang 911, GCC 911); 1463 `.vpr` lint clean; VIR self-test
+    506/506 (+ 175 rejection cases); walker oracle 134 goldens, 0 failed; docs 0 problems.
+  - After run 1 only the equivalence review's kills changed (six positives, their twins, the list), so the delta was
+    checked instead of a second full run (owner, 2026-10-23): those 15 files, 58 passed, 0 failed (native-ok: Apple clang
+    12, GCC 12); `--check-headers` 1535/1535; `--count-error-twins` 273; `mutate.py --validate` 273 tests, 7456 mutants,
+    545 equivalents, 1039 in the bucket.
+- **Byte identity.** Emitted Viper of every pre-existing test (1305 `.vpr` and maps in `build/m4.3b-baseline-vpr`) is
+  byte-identical, checked after the integration run and again over check.sh's `build/vpr`: 316 new files, none changed
+  or missing. The 452 pre-existing VIR self-test
+  cases' `.vpr` and maps are byte-identical too.
+- **Integration run** (before the audit round 2 fixes and the mutation strengthening): 3182 passed, 0 failed (native-ok:
+  Apple clang 602, GCC 602).
+- **Counts** (final tree): `--count-error-twins` 273 (243 + 30); `--check-headers` 1535/1535; `mutate.py --validate` 273
+  tests, 7456 mutants, 545 equivalents, 1039 in the bucket.
+- **Mutation** over the 30 new positives and `calls.c`:
+
+  | Run | Mutants | Killed | Safe-direction | Unexplained | Stillborn | Tool failures |
+  |---|---|---|---|---|---|---|
+  | 1 | 1053 | 784 | 76 | 168 | 24 | 1 (a nonlinear divisor, since removed) |
+  | 2 | 913 | 697 | 89 | 103 | 24 | 0 |
+  | 3 | 826 | 630 | 79 | 93 | 24 | 0 |
+
+  The runs used the strengthened positives: slack lower bounds removed, boundary callers, `never_returns(x == 0)`,
+  `call_reorder` redesigned.
+
+  A fourth run, over the three files whose invariants changed, gave 121 mutants: 97 killed, 17 safe-direction, 7
+  survivors.
+
+  The Opus review of the 90 survivors accepted 82 (5 reasons corrected) and rejected 8, which were killed by
+  strengthening six positives in place (a boundary caller, exact bounds, `never_returns` restricted). A fifth run, over
+  those six files, gave 193 mutants: 150 killed, 13 listed equivalents, 16 safe-direction, 14 stillborn, **0
+  unexplained**, **0 tool failures**. 82 entries were added to `tests/mutants-equivalent.txt`.
+- **Audits** (Opus, one reviewer):
+  - **Round 1** (record and evidence): 1 blocking (the termination member of F was circular), fixed in the record and the
+    code; 8 should-fix taken; 6 notes.
+  - **Round 2, code:** 0 blocking; 3 should-fix (a constant zero in a discarded `&&`, smaller sets recorded, internal
+    errors before rejections), taken; 5 notes (3 taken: a guard for an in-cycle callee without a measure, `__wf` calls,
+    the termination-conflict wording).
+  - **Round 2, tests:** 0 blocking; 4 should-fix (missing rejection tests, right-operand discarded calls and the zero,
+    rejection positions, slack preconditions), taken. Every soundness pin was traced to verify if its mechanism were
+    removed.
+- **Wall-clock:** 07:22–10:47 (planning before).
+
+**Not done / deferred**
+- §11 questions 27–31: exact sets for preconditions and commas, writes in the chain, the exit status of lowering's
+  internal errors, `void` `?:` arms, and warnings in verified tests.
+- The audit notes (handoff §6, M4.3b).
+
+**Surprises**
+- **The termination check is a check of the call too.** Silicon checks `decreases` only at the call line, so ordering
+  calls alone would have verified `g(n - 1) + g(n + 1)` in a recursive `g` that does not return. Option B moves the
+  check, and the first form of F was circular (audit round 1).
+- **M4.3a's discarded `&&`/`||` detector missed two GCC shapes.** It missed effects only in the left operand
+  (`x++ && a;`, P37), and an assigned constant zero (`a && (y = 0);`, audit round 2). Both are corrected; no existing test
+  used them.
+- **A self-recursive call cannot be the must-fail twin with `n + 1`.** The callee's own range precondition fails first,
+  so the termination pins call `g(n)`.
+- **The mutation phase ran about 84 minutes against a 25-minute cap.** It took three runs over 31 files, plus a fourth.
+  The ensures conjuncts added to kill slack preconditions cost more survivors than they killed and were reverted.
+
+**Decision records added:** 0021-calls-in-expressions; amended 0012, 0013, 0014, 0015, 0016, 0020.
+
+**First step for the next session.** Confirm that the owner merged the M4.3a and M4.3b PRs and that CI is green on
+`main` (now with `timeout-minutes: 150`). Then, as the owner chooses:
+- §11 question 13 (unsigned wrapping) in its own short session before M4.4 (recommended);
+- the EDG box session (§8.1);
+- or M4.4.
+
 ## M4.3a — Side effects in expressions (2026-10-22): done on branch `m4.3a-side-effects`; PR pending
 
 Read `internal/handoff.md` next: the "M4.3a is done" owner steps at the top, §6 the M4.3a audit notes, §8.1 M4.3b,

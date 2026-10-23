@@ -357,7 +357,9 @@ function's parameter list (with `requires` and `ensures`, in any order) it is pa
 the function's contract: it is compared from the entry of the function to each
 recursive call. With several expressions the comparison is lexicographic: at the first
 one that changes it must have got smaller (from a value that is not negative), and the
-later ones may be anything.
+later ones may be anything. Between two functions of one recursion whose measures have
+different lengths, only the common length is compared, and when it is all equal, the call
+counts as a decrease only if the called function's measure is the longer one.
 
 [source,cpp]
 ----

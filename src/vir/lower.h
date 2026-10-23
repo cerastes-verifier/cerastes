@@ -24,12 +24,24 @@ struct LowerOptions {
   // Leave out the invariants `snapshot ==> flag` of loops (decision 0019 item 4), so that a read of a variable given a value before
   // a loop fails inside it: the self-test of why they are there.
   bool drop_snapshot_invariant = false;
+  // Move the first snapshot or write of a full expression behind everything, so that `check_variable_order` (the fail-closed check that
+  // the accesses to a local are emitted in the order they were created) reports its internal error: the self-test of why it is there.
+  bool perturb_access_order = false;
+  // Swap the first two fixed points of a full expression's order, so that `check_fixed_order` (the fail-closed check that the fixed points
+  // emitted before an item are exactly its set) reports its internal error (decision 0021).
+  bool perturb_fixed_order = false;
+  // Forget the calls inside `if`, loops and blocks when computing the recursion components, as an under-approximation would: the check of
+  // the components against the emitted methods must report it (decision 0021 item 4).
+  bool cycles_ignore_nested_calls = false;
 };
 
 struct LowerResult {
   low::LProgram program;
   // Internal inconsistencies found while lowering a program that passed check_program (never expected).
   std::vector<Diag> errors;
+  // Programs refused by a rule only lowering can decide exactly (decision 0021: the calls of a full expression
+  // whose checks do not form a chain).  Reported to the user as rejections (`unsequenced_calls`), at `loc`.
+  std::vector<Diag> rejections;
 };
 
 LowerResult lower_program(const Program& program, const LowerOptions& options = {});
