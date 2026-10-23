@@ -81,7 +81,8 @@ never interleave, but their order is unspecified, and a program is correct only 
      follows *every* earlier access. A fixed point P has PRE(P): for a call, everything its arguments use or contain,
      and the floor (C completes the arguments before the call); for a branch with a call, everything its condition
      operand uses or contains, the floor, and the sets of the earlier accesses its reads and writes must follow. A value that uses P has the set D(P) = PRE(P) ∪ {P}. Every set is
-     closed downward: it contains the PRE of each of its members.
+     closed downward: it contains the PRE of each of its members. A set may be smaller than this (item 10, "Smaller sets
+     are safe"); it is never larger.
    - **The family F** of a full expression: the sets of all its obligations, writes, snapshots and call-free branches;
      D(B) for every branch B with a call (its checks are inside it and cannot be placed apart from it); and PRE(c) for
      **every** call c whose callee is in the caller's recursion cycle (its termination check, item 4), added before the
@@ -100,7 +101,9 @@ never interleave, but their order is unspecified, and a program is correct only 
      the other's check while C may evaluate it first. Examples rejected: `100 / f(x) + 100 / g(y)`,
      `(f(x), 100 / g(y)) + 100 / h(z)`, `(a && g(x)) + (b && h(y))`, `a && (100 / f(x) + 100 / g(y) > 0)` (inside the
      branch), `(f(x) > 0 && 100 / y > 0) + 100 / g(z)` (the guard counts), and `g(f(x), h(y))` when the parameters of `g`
-     are `short` (each argument's conversion is a check on its own call) while it is accepted with `int` parameters.
+     are `short` (each argument's conversion is a check on its own call) or when `g` has one `requires` clause about each
+     argument (`requires(1 <= a)`, `requires(2 <= b)`: each clause is a check on one call), while it is accepted with
+     `int` parameters and one clause about both (`requires(1 <= a && 2 <= b)`).
      Accepted: `f(x) + g(y)`, `max(f(a), f(b))`, `f(g(x)) + 100 / h(y)` (emitted h, its check, g, f — when `f` has no
      `requires`, the argument `g(x)` needs no conversion check and `f` is not in the caller's recursion cycle; otherwise
      PRE(f) = {g} is a set of F that conflicts with {h}, and it is rejected), `(f(), 0) + g()`,
@@ -128,7 +131,9 @@ never interleave, but their order is unspecified, and a program is correct only 
      element) between the callee's measure N over the call's arguments and the caller's measure M over its parameters'
      entry values: ⋁ᵢ<min(|N|,|M|) (⋀ₗ<ᵢ Nₗ = Mₗ ∧ Nᵢ < Mᵢ ∧ Mᵢ ≥ 0), and, when |N| > |M|, also the disjunct
      ⋀ₗ<|M| Nₗ = Mₗ (a longer callee measure that agrees on the caller's whole measure decreases; an equal or shorter one
-     that agrees does not). For equal lengths it is 0013 item 2's relation. It is emitted as one `assert` (S19:
+     that agrees does not). For equal lengths it is 0013 item 2's relation. It is emitted as one atomic `assert`,
+     `!(!alt₁ && !alt₂ && …)` over the disjuncts, so that a failure is one report (with a plain `||` Silicon reported one
+     S19 point twice); S19 was rerun on this form (S19:
      2950 points over one to three components, mutual recursion of equal and unequal lengths, a `c_div` measure and a
      parameter changed before the call; the explicit assert fails exactly where Silicon's check fails, 0 mismatches).
    - **The cycle.** Silicon checks a call when the callee is in the caller's strongly connected component of the method
@@ -182,15 +187,23 @@ never interleave, but their order is unspecified, and a program is correct only 
     - **Order.** π is one of C's orders, and every order gives the same values (item 2). Each item is emitted right
       after the fixed points of its set, all of which C completes before evaluating it; so an item hidden by a callee
       that does not return is one C cannot evaluate before that callee returns, in any order.
-    - **Calls' own checks.** A call's precondition is an obligation with the set PRE(c) (0012 item 6), and its
-      termination is checked where C may make the call (item 4). A branch with a call comes right after PRE(B).
+    - **Calls' own checks.** A call's precondition is an obligation whose set is that of the argument values it reads
+      and the floor (0012 item 6), a subset of PRE(c); its termination is checked where C may make the call (item 4).
+      A branch with a call comes right after PRE(B).
+    - **Smaller sets are safe.** Some sets are smaller than "everything C completes first": a precondition's (above),
+      and the value of a comma, which carries the values it uses but not its left operand's floor (0020 E6). An item
+      with a smaller set is asserted earlier than C may evaluate it, which can only report an error on a path where C
+      would not reach it (a false alarm), never hide one: `h((validate(y), y))`, where `validate` ends the program unless
+      `y > 0` and `h` requires a positive argument, reports `precondition` (audit round 2). Making these sets exact would
+      change the Viper of programs accepted in M4.3a, so it is left for a later record (handoff §6).
     - **Rejection.** When F is not a chain, no order of the calls places every item right after its set, and the
       expression is rejected.
     - **No `inhale`, `assume` or axiom is emitted** (invariant 4).
 11. **Tests and documentation.** Must-verify and must-fail pairs for every accepted form, in both modes; the soundness
     pins `nr(k) + 100 / zero(y)` (must fail `division-by-zero`) and `g(n - 1) + g(n + 1)` in a recursive `g` that does
-    not return (must fail `termination` at `g(n + 1)`), each of which verifies if the calls are reordered without sets,
-    or without item 4; for item 4 also unequal lengths behind a call that does not return (a longer callee measure that
+    not return (must fail `termination` at `g(n + 1)`; the C test writes `g(n - 1) + g(n)`, since `g(n + 1)` would also
+    break `g`'s own range precondition, and the VIR self-test keeps `g(n + 1)`), each of which verifies if the calls are
+    reordered without sets, or without item 4; for item 4 also unequal lengths behind a call that does not return (a longer callee measure that
     agrees verifies, a shorter one fails), the argument values at the check (`nr(0) + g((m = n + 1, m))` fails), the
     check inside a branch and in a loop condition, mutual recursion, and a cycle whose only back edge is dead code;
     `assert` conditions with calls; the discarded guarded calls of item 1; verified positives for the shapes

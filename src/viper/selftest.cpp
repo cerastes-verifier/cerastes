@@ -70,6 +70,13 @@ class Kit {
   // Position-map rows that must exist without failing (category, message substring): for the checks that cannot be made
   // to fail from VIR (an internal backstop).
   std::vector<std::pair<std::string, std::string>> map_requires;
+  // How many position-map rows of a category sit at a line (decision 0021: whether an explicit check was written), without failing.
+  struct RowCount {
+    std::string category;
+    int line;
+    size_t count;
+  };
+  std::vector<RowCount> row_counts;
   LowerOptions lower_options;
 
   SrcLoc at() { return SrcLoc{"t.c", ++line_, 3}; }
@@ -157,6 +164,7 @@ class Kit {
     return b.while_stmt(c, std::move(inv), std::move(measure), body, at());
   }
   void require_map(const std::string& category, const std::string& msg) { map_requires.emplace_back(category, msg); }
+  void rows(const std::string& category, const SrcLoc& l, size_t n) { row_counts.push_back(RowCount{category, l.line, n}); }
 
   // Effects used as values (decision 0020).  `x++` is incE(x), `++x` incE(x, false), `x--` decE(x), `x op= rhs` cmpE(x, op, rhs).
   const Expr* asgE(const Var* x, const Expr* value) { return b.assign_expr(x, value, at()); }
@@ -230,6 +238,8 @@ struct Reject {
   std::string name;
   std::string must_contain;
   std::function<void(Kit&)> build;
+  // Where the refusal comes from: check_program, a rejection of lowering (decision 0021), or an internal error of lowering (a self-test hook).
+  enum class Where { Check, Lower, Hook } where = Where::Check;
 };
 std::vector<Reject>& reject_cases() {
   static std::vector<Reject> c;
@@ -241,6 +251,15 @@ void lc(std::string name, std::string doc, std::function<void(Kit&)> build) {
 }
 [[maybe_unused]] void rc(std::string name, std::string must_contain, std::function<void(Kit&)> build) {
   reject_cases().push_back(Reject{std::move(name), std::move(must_contain), std::move(build)});
+}
+
+// A program that lowering refuses (`LowerResult::rejections`): the reason must contain `must_contain`.
+[[maybe_unused]] void rl(std::string name, std::string must_contain, std::function<void(Kit&)> build) {
+  reject_cases().push_back(Reject{std::move(name), std::move(must_contain), std::move(build), Reject::Where::Lower});
+}
+// A program for which lowering, with a hook set, reports an internal error that contains `must_contain`.
+[[maybe_unused]] void rh(std::string name, std::string must_contain, std::function<void(Kit&)> build) {
+  reject_cases().push_back(Reject{std::move(name), std::move(must_contain), std::move(build), Reject::Where::Hook});
 }
 
 // ---- the cases ------------------------------------------------------------------------------------------------
@@ -700,10 +719,13 @@ void define_calls_loops_and_more();
 void define_rejections();
 void define_side_effects();
 void define_side_effect_rejections();
+void define_calls_in_expressions();
+void define_calls_in_expressions_rejections();
 }  // namespace
 
 #include "selftest_cases2.inc"
 #include "selftest_cases3.inc"
+#include "selftest_cases4.inc"
 
 namespace {
 
@@ -794,6 +816,16 @@ bool run_lowering_case(const Case& c, const std::string& dir, std::string& probl
       fails.emplace_back(r->vpr_line, hc);
     }
   }
+  for (const Kit::RowCount& want : k.row_counts) {
+    size_t n = 0;
+    for (const MapRow& r : rows)
+      if (r.category == want.category && r.line == want.line) ++n;
+    if (n != want.count) {
+      problem = "expected " + std::to_string(want.count) + " position-map row(s) of category " + want.category + " at line " +
+                std::to_string(want.line) + ", found " + std::to_string(n);
+      return false;
+    }
+  }
   for (const auto& [category, msg] : k.map_requires) {
     bool found = false;
     for (const MapRow& r : rows) found = found || (r.category == category && r.msg.find(msg) != std::string::npos);
@@ -850,6 +882,8 @@ int main(int argc, char** argv) {
   define_rejections();
   define_side_effects();
   define_side_effect_rejections();
+  define_calls_in_expressions();
+  define_calls_in_expressions_rejections();
   int bad = 0;
   for (const Case& c : lowering_cases()) {
     std::string problem;
@@ -862,12 +896,33 @@ int main(int argc, char** argv) {
     Kit k;
     r.build(k);
     const std::vector<Diag> d = check_program(k.prog);
+    if (r.where == Reject::Where::Check) {
+      bool ok = false;
+      for (const Diag& x : d)
+        if (x.reason.find(r.must_contain) != std::string::npos) ok = true;
+      if (!ok) {
+        std::fprintf(stderr, "FAIL (rejection) %s: expected a diagnostic containing \"%s\", got %zu: %s\n", r.name.c_str(),
+                     r.must_contain.c_str(), d.size(), d.empty() ? "(none)" : d[0].reason.c_str());
+        ++bad;
+      }
+      continue;
+    }
+    if (!d.empty()) {
+      std::fprintf(stderr, "FAIL (rejection) %s: check_program rejected the program: %s\n", r.name.c_str(), d[0].reason.c_str());
+      ++bad;
+      continue;
+    }
+    const LowerResult lr = lower_program(k.prog, k.lower_options);
+    const std::vector<Diag>& got = r.where == Reject::Where::Lower ? lr.rejections : lr.errors;
     bool ok = false;
-    for (const Diag& x : d)
+    for (const Diag& x : got)
       if (x.reason.find(r.must_contain) != std::string::npos) ok = true;
-    if (!ok) {
-      std::fprintf(stderr, "FAIL (rejection) %s: expected a diagnostic containing \"%s\", got %zu: %s\n", r.name.c_str(),
-                   r.must_contain.c_str(), d.size(), d.empty() ? "(none)" : d[0].reason.c_str());
+    // A refused program is refused for that reason alone: a rejection leaves no internal error behind, and an internal error no rejection.
+    const std::vector<Diag>& other = r.where == Reject::Where::Lower ? lr.errors : lr.rejections;
+    if (!ok || !other.empty()) {
+      std::fprintf(stderr, "FAIL (%s) %s: expected a %s containing \"%s\", got %zu: %s%s\n", r.where == Reject::Where::Lower ? "lowering rejection" : "lowering hook",
+                   r.name.c_str(), r.where == Reject::Where::Lower ? "rejection" : "internal error", r.must_contain.c_str(), got.size(),
+                   got.empty() ? "(none)" : got[0].reason.c_str(), other.empty() ? "" : " (and the other kind too)");
       ++bad;
     }
   }

@@ -541,7 +541,10 @@ delete a statement; and, in code only and where the value of the expression is u
 becomes `(e)`, `y = x = a` becomes `y = a`), `swap-incdec` (`x++` and `++x` swapped, `++` and `--` swapped) and
 `drop-comma` (`(a, b)` becomes `(b)` when `a` has an effect, also in a `for` init or step clause and as an
 expression statement; never an argument or declarator separator, and no mutant at a statement that discards the
-value, such as `x = 1;`, `i++;` or `(void)x++;`)) and verifies each mutant. A mutant that is rejected by the verifier (exit status 1) is
+value, such as `x = 1;`, `i++;` or `(void)x++;`), and, for calls in expressions and also in code only,
+`swap-logical` (the two operands of an `&&` or `||` swapped when one of them contains a call:
+`a > 0 && pos(a) > 1` becomes `pos(a) > 1 && a > 0`, which pins that a call's guard is placed right) and
+`swap-arms` (`c ? a : b` becomes `c ? b : a`)) and verifies each mutant. A mutant that is rejected by the verifier (exit status 1) is
 killed; one that still verifies survived, which means that the test would not notice the change. Every
 survivor must be killed (by strengthening the test), or listed with one reason in `tests/mutants-equivalent.txt`
 (`id<TAB>reason`, plus a `# reviewed:` line), or be in the safe-direction bucket. The run ends with zero

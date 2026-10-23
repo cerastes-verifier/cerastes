@@ -1325,13 +1325,6 @@ void define_control_flow() {
   rc("cf_switch_body_not_a_block", "not a compound statement", [in_fn](Kit& k) {
     in_fn(k, [](Kit& k, Function* f) { return k.sw(k.pv(f, 0), k.chk(k.yes()), k.jid()); });
   });
-  rc("cf_call_in_do_condition", "a call in a loop condition", [](Kit& k) {
-    Function* g = k.fn("g", k.bl);
-    k.trusted(g);
-    Function* f = k.fn("f", k.vd);
-    f->body = k.blk({k.loop(k.call(g, {}), {}, {k.cl(k.num(k.i32, "0"))}, k.blk({}), nullptr, LoopForm::DoWhile, k.jid())});
-    k.done(f);
-  });
   rc("cf_call_in_do_once_condition", "a call in a loop condition", [](Kit& k) {
     Function* g = k.fn("g", k.bl);
     k.trusted(g);
@@ -2840,49 +2833,12 @@ void define_rejections() {
     f->body = k.blk({k.chk(k.call(g, {}))});
     k.done(f);
   });
-  rc("call_in_loop_condition", "a call in a loop condition", [](Kit& k) {
-    Function* g = k.fn("g", k.bl);
-    k.trusted(g);
-    Function* f = k.fn("f", k.vd);
-    f->body = k.blk({k.whl(k.call(g, {}), {}, {k.cl(k.num(k.i32, "0"))}, k.blk({}))});
-    k.done(f);
-  });
   rc("call_in_requires", "a call in a contract", [](Kit& k) {
     Function* g = k.fn("g", k.bl);
     k.trusted(g);
     Function* f = k.fn("f", k.vd);
     k.req(f, k.call(g, {}));
     f->body = k.blk({});
-    k.done(f);
-  });
-  rc("call_in_guarded_operand", "conditionally evaluated operand", [](Kit& k) {
-    Function* g = k.fn("g", k.bl);
-    k.trusted(g);
-    Function* f = k.fn("f", k.vd, {{"b", k.bl}});
-    f->body = k.blk({k.es(k.land(k.pv(f, 0), k.call(g, {})))});
-    k.done(f);
-  });
-  rc("call_in_conditional_branch", "conditionally evaluated operand", [](Kit& k) {
-    Function* g = k.fn("g", k.i32);
-    k.trusted(g);
-    Function* f = k.fn("f", k.vd, {{"b", k.bl}});
-    f->body = k.blk({k.es(k.cond(k.pv(f, 0), k.call(g, {}), k.num(k.i32, "0")))});
-    k.done(f);
-  });
-  rc("two_unnested_calls", "not nested in each other", [](Kit& k) {
-    Function* g = k.fn("g", k.i32);
-    k.trusted(g);
-    Function* f = k.fn("f", k.vd);
-    f->body = k.blk({k.es(k.add(k.call(g, {}), k.call(g, {})))});
-    k.done(f);
-  });
-  rc("sibling_calls_in_arguments", "not nested in each other", [](Kit& k) {
-    Function* g = k.fn("g", k.i32);
-    k.trusted(g);
-    Function* h = k.fn("h", k.i32, {{"x", k.i32}, {"y", k.i32}});
-    k.trusted(h);
-    Function* f = k.fn("f", k.vd);
-    f->body = k.blk({k.es(k.call(h, {k.call(g, {}), k.call(g, {})}))});
     k.done(f);
   });
   rc("assign_type_mismatch", "where", [](Kit& k) {

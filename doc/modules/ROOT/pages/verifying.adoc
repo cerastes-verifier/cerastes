@@ -350,8 +350,66 @@ sequenced. As with `-Wswitch`, a few shapes that the compilers' `-Wall` warns
 about are rejected too: an assignment used as a condition without extra
 parentheses (write `if ((x = e) != 0)` or `if ((x = e))`, not `if (x = e)`), a
 comma operator one of whose operands has no effect, a discarded value computed
-around a side effect (`pass:[x++] + 1;`), and a side effect inside `sizeof`,
-which is never evaluated.
+around a side effect (`pass:[x++] + 1;`), a side effect inside `sizeof`, which is
+never evaluated, and an assignment of a variable to itself (`x = x`, which
+Clang's `-Wself-assign` reports; written through a macro, or with an explicit
+cast, it is accepted, as Clang accepts it).
+
+[#calls]
+== Calls in expressions
+
+A call may appear anywhere in the code of a function: as an operand of any
+operator, in the second operand of `&&` or `||`, in an arm of `?:` and in the
+condition of a loop. Each call is checked against the contract of the function
+it calls, where it is made: its `CERASTES_REQUIRES` at the call, and its
+`CERASTES_ENSURES` known after it. A call in the second operand of `&&` is made
+only when the first operand is true, so its precondition may rely on the first
+operand, and a call in a loop condition is made, with its precondition checked,
+each time the condition is evaluated:
+
+[source,c]
+----
+include::example$verifying/calls.c[tag=source]
+----
+
+With the guard `a >= 0` instead, `pos` may be called with 0, which its
+precondition excludes, and the precondition fails at the call:
+
+[source,c]
+----
+include::example$verifying/calls_error.c[tag=source]
+----
+
+C does not say in which order it calls two functions of one expression that are
+not nested in each other and not separated by `,`, `&&`, `||` or the condition
+of `?:`: in `f(a) + f(b)` either call may come first, and every order must be
+correct. A function that does not return (one that calls `exit`, even on some
+inputs only) stops the program before anything C would have evaluated after it,
+so a check C may evaluate first must be checked first. cerastes accepts such an
+expression when its checks can be put in one order: each check depends on the
+calls whose results it uses (and on the calls its guard and the earlier
+operands of a `,` use), and for any two checks, the calls one depends on must be
+among the calls the other depends on. It then checks each one as early as C can
+evaluate it. When two checks each depend on a call the other does not, as in
+`100 / f(x) + 100 / g(y)`, the expression is rejected (`unsequenced_calls`);
+giving each call its own statement fixes the order:
+
+[source,c]
+----
+include::example$verifying/unsequenced_calls.c[tag=source]
+----
+
+The checks of a call count too: each `CERASTES_REQUIRES` clause of the function
+called, over the arguments it reads, and the conversion of each argument to its
+parameter's type. So `g(f(x), h(y))` is rejected when `g` has one
+`CERASTES_REQUIRES` clause about each argument, or `short` parameters that `int`
+results must be converted to, since each of those checks depends on one call;
+one clause about both arguments, or `int` parameters, keeps it accepted.
+
+A recursive call that another call of the same expression may precede, as in
+`fib(n - 1) + fib(n - 2)`, has its termination measure (`CERASTES_DECREASES`)
+checked where C may make it, before the other call, and a failure is reported at
+the recursive call (xref:error-messages.adoc#_termination[termination]).
 
 [#no-return]
 == Functions that do not return
@@ -577,13 +635,13 @@ The constructs that are rejected in this version are:
   `std::terminate`).
 * *Types:* pointers, references, floating point, `volatile`, `_BitInt`, vector
   types, enumerations declared in system headers.
-* *Expressions:* the bitwise operators (`&`, `|`, `^`, `~`), two calls in one
-  expression that are neither nested in each other nor ordered by the comma
-  operator (`f(x) + g(y)`), a call in the second operand of `&&`, `||` or `?:`,
-  or in a loop condition, the shapes of <<side-effects>> (an unsequenced
+* *Expressions:* the bitwise operators (`&`, `|`, `^`, `~`), calls whose
+  checks cannot be put in one order (<<calls>>: `100 / f(x) + 100 / g(y)`, two
+  operands of `&&` or `||` with calls added together, two assignments of call
+  results in one expression), the shapes of <<side-effects>> (an unsequenced
   modification, an assignment as a condition without extra parentheses, a comma
   operand without effect, a discarded value around a side effect, a side effect
-  in `sizeof`), and, in C, a variable named where a
+  in `sizeof`, an assignment of a variable to itself), and, in C, a variable named where a
   constant expression is required (a `case` value, `_Static_assert`, an
   enumerator's value), and an enumeration value that the compiler converts to an
   integer for arithmetic, a comparison of order, a unary operator, a shift or an

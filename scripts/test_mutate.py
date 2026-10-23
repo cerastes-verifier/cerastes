@@ -2230,11 +2230,11 @@ class JobsTests(RunCase):
         self.assertRegex(source, r'"-j", "--jobs", type=int, default=None')
 
 
-EFFECT_OPS = ("drop-store", "swap-incdec", "drop-comma")
+EFFECT_OPS = ("drop-store", "swap-incdec", "drop-comma", "swap-logical", "swap-arms")
 
 
 def effects(src, path="t.c"):
-    """[(id, mutated source with the id's change applied)] of the three effect operators."""
+    """[(id, mutated source with the id's change applied)] of the effect operators."""
     return [(m.id, m.apply(src)) for m in mu.mutants_of(src, path) if m.op in EFFECT_OPS]
 
 
@@ -2254,9 +2254,9 @@ def effect_result(statements, ident, decl="int f(int x, int y)"):
 
 
 class EffectOperatorTests(unittest.TestCase):
-    """drop-store, swap-incdec and drop-comma (M4.3a): where each produces a mutant, exactly, and the
-    twins where nothing may be produced (a statement that discards the value, argument and declarator
-    commas, annotations).  `body()` puts the first statement on line 3."""
+    """drop-store, swap-incdec and drop-comma (M4.3a), swap-logical and swap-arms (M4.3b): where each produces
+    a mutant, exactly, and the twins where nothing may be produced (a statement that discards the value,
+    argument and declarator commas, annotations, operands without a call).  `body()` puts the first statement on line 3."""
 
     # --- drop-store -------------------------------------------------------------------------
 
@@ -2450,7 +2450,111 @@ class EffectOperatorTests(unittest.TestCase):
         self.assertEqual(effect_ids_of("drop-comma", "  if (y) (g(x), h(y));\n  return 0;"),
                          ["t.c:3:11:drop-comma:g(x),->"])
 
-    # --- all three --------------------------------------------------------------------------
+    # --- swap-logical -----------------------------------------------------------------------
+
+    def test_the_operands_of_a_logical_operator_with_a_call_are_swapped(self):
+        for stmt, ident, after in (
+                ("  return x > 0 && g(x) > 1;", "t.c:3:10:swap-logical:x > 0 && g(x) > 1->g(x) > 1 && x > 0",
+                 "  return g(x) > 1 && x > 0;"),
+                ("  return x > 0 || g(x) > 1;", "t.c:3:10:swap-logical:x > 0 || g(x) > 1->g(x) > 1 || x > 0",
+                 "  return g(x) > 1 || x > 0;"),
+                ("  return g(x) && y;", "t.c:3:10:swap-logical:g(x) && y->y && g(x)", "  return y && g(x);"),
+                ("  return g(x) && h(y);", "t.c:3:10:swap-logical:g(x) && h(y)->h(y) && g(x)",
+                 "  return h(y) && g(x);")):
+            with self.subTest(stmt):
+                self.assertEqual(effect_ids_of("swap-logical", stmt), [ident])
+                self.assertEqual(effect_result(stmt, ident).split("\n")[0], after)
+
+    def test_logical_operands_without_a_call_give_no_mutant(self):
+        for stmt in ("  return x > 0 && y > 1;", "  return x > 0 || y > 1;", "  return (x > 0) && (y > 1 || x);",
+                     "  return sizeof(int) > 0 && x;", "  return x && y && x;"):
+            with self.subTest(stmt):
+                self.assertEqual(effect_ids_of("swap-logical", stmt), [], stmt)
+
+    def test_the_operands_are_those_of_the_operator_at_its_own_precedence(self):
+        stmt = "  return x > 0 && g(x) || y > 1;"
+        got = effect_ids_of("swap-logical", stmt)
+        self.assertEqual(got, ["t.c:3:10:swap-logical:x > 0 && g(x)->g(x) && x > 0",
+                               "t.c:3:10:swap-logical:x > 0 && g(x) || y > 1->y > 1 || x > 0 && g(x)"])
+        self.assertEqual(effect_result(stmt, got[0]).split("\n")[0], "  return g(x) && x > 0 || y > 1;")
+        self.assertEqual(effect_result(stmt, got[1]).split("\n")[0], "  return y > 1 || x > 0 && g(x);")
+        stmt = "  return x > 0 || y > 1 && g(x);"  # the `&&` is the operand of the `||`
+        got = effect_ids_of("swap-logical", stmt)
+        self.assertEqual(effect_result(stmt, got[0]).split("\n")[0], "  return y > 1 && g(x) || x > 0;")
+        self.assertEqual(effect_result(stmt, got[1]).split("\n")[0], "  return x > 0 || g(x) && y > 1;")
+
+    def test_a_chain_swaps_each_neighbouring_pair_that_has_a_call(self):
+        stmt = "  return x > 0 && y > 0 && g(x);"
+        got = effect_ids_of("swap-logical", stmt)
+        self.assertEqual(got, ["t.c:3:19:swap-logical:y > 0 && g(x)->g(x) && y > 0"])
+        self.assertEqual(effect_result(stmt, got[0]).split("\n")[0], "  return x > 0 && g(x) && y > 0;")
+
+    def test_a_logical_operand_that_is_a_group_or_sits_in_a_conditional_or_initializer_is_whole(self):
+        stmt = "  return (x > 0 || y > 0) && g(x);"
+        self.assertEqual(effect_result(stmt, effect_ids_of("swap-logical", stmt)[0]).split("\n")[0],
+                         "  return g(x) && (x > 0 || y > 0);")
+        stmt = "  return y > 0 ? x > 0 && g(x) : 0;"
+        self.assertEqual(effect_result(stmt, effect_ids_of("swap-logical", stmt)[0]).split("\n")[0],
+                         "  return y > 0 ? g(x) && x > 0 : 0;")
+        stmt = "  int a = x > 0 && g(x);\n  return a;"
+        self.assertEqual(effect_result(stmt, effect_ids_of("swap-logical", stmt)[0]).split("\n")[0],
+                         "  int a = g(x) && x > 0;")
+
+    def test_equal_logical_operands_give_no_mutant(self):
+        self.assertEqual(effect_ids_of("swap-logical", "  return g(x) && g(x);"), [])
+
+    def test_a_logical_operator_in_an_annotation_argument_is_not_code(self):
+        src = body("  CERASTES_CHECK(x > 0 && g(x) > 0);\n  CERASTES_INVARIANT(x > 0 || g(y) > 0)\n"
+                   "  while (y > 0) { }\n  return y;")
+        self.assertEqual(effects(src), [])
+
+    # --- swap-arms --------------------------------------------------------------------------
+
+    def test_the_arms_of_a_conditional_are_swapped(self):
+        for stmt, ident, after in (
+                ("  return y > 0 ? x : 0;", "t.c:3:18:swap-arms:x : 0->0 : x", "  return y > 0 ? 0 : x;"),
+                ("  return y > 0 ? g(x) : h(y);", "t.c:3:18:swap-arms:g(x) : h(y)->h(y) : g(x)",
+                 "  return y > 0 ? h(y) : g(x);"),
+                ("  int a = y ? x + 1 : x - 1;\n  return a;", "t.c:3:15:swap-arms:x + 1 : x - 1->x - 1 : x + 1",
+                 "  int a = y ? x - 1 : x + 1;")):
+            with self.subTest(stmt):
+                self.assertEqual(effect_ids_of("swap-arms", stmt), [ident])
+                self.assertEqual(effect_result(stmt, ident).split("\n")[0], after)
+
+    def test_a_nested_conditional_in_the_last_arm_is_part_of_it(self):
+        stmt = "  return y > 0 ? 1 : x > 0 ? 2 : 3;"
+        got = effect_ids_of("swap-arms", stmt)
+        self.assertEqual(got, ["t.c:3:18:swap-arms:1 : x > 0 ? 2 : 3->x > 0 ? 2 : 3 : 1",
+                               "t.c:3:30:swap-arms:2 : 3->3 : 2"])
+        self.assertEqual(effect_result(stmt, got[0]).split("\n")[0], "  return y > 0 ? x > 0 ? 2 : 3 : 1;")
+        self.assertEqual(effect_result(stmt, got[1]).split("\n")[0], "  return y > 0 ? 1 : x > 0 ? 3 : 2;")
+
+    def test_a_nested_conditional_in_the_middle_arm_is_part_of_it(self):
+        stmt = "  return y > 0 ? x > 0 ? 2 : 3 : 1;"
+        got = effect_ids_of("swap-arms", stmt)
+        self.assertEqual(len(got), 2)
+        self.assertEqual(effect_result(stmt, got[0]).split("\n")[0], "  return y > 0 ? 1 : x > 0 ? 2 : 3;")
+        self.assertEqual(effect_result(stmt, got[1]).split("\n")[0], "  return y > 0 ? x > 0 ? 3 : 2 : 1;")
+
+    def test_a_conditional_whose_arms_cannot_be_swapped_whole_gives_no_mutant(self):
+        for stmt in ("  return y ? x : x;", "  return y ? 1, 2 : 3;", "  return y ? x : y = 2;"):
+            with self.subTest(stmt):
+                self.assertEqual(effect_ids_of("swap-arms", stmt), [], stmt)
+
+    def test_a_conditional_in_an_annotation_argument_is_not_code(self):
+        src = body("  CERASTES_CHECK((x > 0 ? y : 0) > 0);\n  CERASTES_INVARIANT((y > 0 ? x : 1) > 0)\n"
+                   "  while (y > 0) { }\n  return y;")
+        self.assertEqual(effects(src), [])
+
+    def test_a_swap_mutant_is_never_in_the_safe_direction_bucket(self):
+        src = ("int f(int x, int y) CERASTES_REQUIRES(x > 0 && y > 0) CERASTES_ENSURES(r, r > 0)\n{\n"
+               "  return (x > 0 && g(y) > 0 ? x : y);\n}\n")
+        made = [m for m in mu.mutants_of(src, "t.c") if m.op in ("swap-logical", "swap-arms")]
+        self.assertEqual(sorted(m.op for m in made), ["swap-arms", "swap-logical"])
+        for m in made:
+            self.assertFalse(mu.is_safe_direction(m, src), m.id)
+
+    # --- all of them --------------------------------------------------------------------------
 
     def test_the_sample_gains_no_effect_mutant(self):
         # SAMPLE has `i++;` and `y = y + 10u;` as statements, and annotations, and no used effect

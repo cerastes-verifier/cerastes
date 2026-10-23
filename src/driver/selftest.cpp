@@ -349,7 +349,7 @@ Built build_program(bool with_g) {
   Built out;
   if (!check_program(p).empty()) return out;
   LowerResult lr = lower_program(p);
-  if (!lr.errors.empty()) return out;
+  if (!lr.errors.empty() || !lr.rejections.empty()) return out;
   viper::Emitted e = viper::emit(lr.program);
   out.vpr = e.vpr;
   out.map = e.map;
@@ -382,7 +382,7 @@ Built build_nonterminating() {
   Built out;
   if (!check_program(p).empty()) return out;
   LowerResult lr = lower_program(p);
-  if (!lr.errors.empty()) return out;
+  if (!lr.errors.empty() || !lr.rejections.empty()) return out;
   viper::Emitted e = viper::emit(lr.program);
   out.vpr = e.vpr;
   out.map = e.map;
