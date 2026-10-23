@@ -20,7 +20,6 @@ namespace cerastes::viper {
 //                   Separate functions because Z3 proves the range of these quickly and not of the general ones
 //   c_pow2(n)       2^n for 1 <= n <= 127, 1 for n <= 0, and 2^128 above (always >= 1)
 //   c_shr(a, n)     a >> n: floor(a / 2^n) (arithmetic for negative a)
-//   c_wrap(x, m)    x modulo m in [0, m) for m > 0 (the modular arithmetic of unsigned types); 0 otherwise
 std::string prelude_text(const std::set<std::string>& used);
 
 // The prelude functions that `name` calls.

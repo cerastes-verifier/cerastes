@@ -63,8 +63,8 @@ it verifies and what it does not:
   same file (anywhere in an expression, also in guarded operands and loop
   conditions, when C's order of calls cannot hide a check), functions that do not return (`+[[noreturn]]+`, `abort`, `exit`),
   `assert` and `check`.
-  The integer rules (overflow is an error, unsigned arithmetic wraps, a
-  conversion to a signed type must be exact, a value of an enumeration is one of its values) are on
+  The integer rules (overflow is an error, signed or unsigned: nothing wraps; a
+  conversion must be exact; a value of an enumeration is one of its values) are on
   xref:integer-semantics.adoc[Integer semantics].
 * *Reported:* thirteen kinds of error, each at a line of your source, with what it
   means and how to fix it on xref:error-messages.adoc[Error messages].

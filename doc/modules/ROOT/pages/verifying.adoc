@@ -143,7 +143,7 @@ that is meant to verify cleanly should compile without warnings.
 | 0 | Every function verified.
 | 1 | Verification errors, printed on standard output.
 | 2 | The program is not accepted: a front-end error, a construct cerastes does not verify, a refused option or a missing file.
-| 3 | The tool failed: the prover crashed, timed out or gave no verdict, an error could not be traced to a source line, or the front end aborted with an internal error. This is never a statement about your program.
+| 3 | The tool failed: the prover crashed, timed out or gave no verdict, an error could not be traced to a source line, the front end aborted with an internal error, or cerastes found an inconsistency in its own encoding (reported as "an internal inconsistency"). This is never a statement about your program.
 |===
 
 == Loops and termination

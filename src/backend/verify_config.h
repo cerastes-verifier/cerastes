@@ -17,6 +17,9 @@ struct VerifyOutput {
   std::string vpr;       // the Viper program
   std::string map;       // its position map (internal/encoding.md section 5)
   int functions = 0;     // functions whose bodies were verified
+  // Decision 0022 item 12: lowering's internal errors, the emitter's problems or the encoder's "encoded twice" guard fired.  The
+  // diagnostics are shown as usual, but the run is a tool failure (exit status 3), never a rejection (2).
+  bool internal_inconsistency = false;
 };
 
 struct VerifyConfig {
@@ -32,6 +35,11 @@ struct VerifyConfig {
   VerifyOutput out;
 };
 VerifyConfig& verify_config();
+
+// The driver's status after the front end returned `edg_status` (nonzero: a diagnostic was reported, by EDG or by the back end):
+// 3 when the back end flagged an internal inconsistency (decision 0022 item 12, which amends 0011 item 8), else 2 for a nonzero
+// `edg_status`, else 0.
+int front_end_exit_status(const VerifyOutput& out, int edg_status);
 
 // The canonical physical path (realpath: `..`, `.` and symbolic links resolved), or "" when the file does
 // not exist.

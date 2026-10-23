@@ -204,17 +204,26 @@ void define_side_effects() {
     k.done(f);
     k.fail("postcondition", r->loc);
   });
-  auto unsigned_wrap = [=](Kit& k, bool wrong) {
+  auto unsigned_exact = [=](Kit& k, bool wrong) {
     Function* f = k.fn("f", k.vd);
     Var* x = k.local(f, "x", k.u32);
     Var* y = k.local(f, "y", k.u32);
-    const Stmt* c = k.chk(k.eq_c(k.v(x), k.u32, wrong ? "4294967295" : "0"));
-    f->body = k.blk({k.decl(x, k.num(k.u32, "4294967295")), k.decl(y, k.incE(x)), k.chk(k.eq_c(k.v(y), k.u32, "4294967295")), c});
+    const Stmt* c = k.chk(k.eq_c(k.v(x), k.u32, wrong ? "4294967294" : "4294967295"));
+    f->body = k.blk({k.decl(x, k.num(k.u32, "4294967294")), k.decl(y, k.incE(x)), k.chk(k.eq_c(k.v(y), k.u32, "4294967294")), c});
     k.done(f);
     if (wrong) k.fail("check", c->loc);
   };
-  lc("fx_incdec_unsigned_wraps", "unsigned x = UINT_MAX; y = x++: y is UINT_MAX and x wraps to 0", [=](Kit& k) { unsigned_wrap(k, false); });
-  lc("fx_incdec_unsigned_wraps_wrong", "the same with check(x == UINT_MAX) afterwards", [=](Kit& k) { unsigned_wrap(k, true); });
+  lc("fx_incdec_unsigned_exact", "unsigned x = UINT_MAX - 1; y = x++: y is UINT_MAX - 1 and x is UINT_MAX", [=](Kit& k) { unsigned_exact(k, false); });
+  lc("fx_incdec_unsigned_exact_wrong", "the same with check(x == UINT_MAX - 1) afterwards", [=](Kit& k) { unsigned_exact(k, true); });
+  lc("fx_incdec_unsigned_at_max", "unsigned x = UINT_MAX; y = x++: the incremented value does not fit unsigned int (no wrap)", [=](Kit& k) {
+    Function* f = k.fn("f", k.vd);
+    Var* x = k.local(f, "x", k.u32);
+    Var* y = k.local(f, "y", k.u32);
+    const Expr* inc = k.incE(x);
+    f->body = k.blk({k.decl(x, k.num(k.u32, "4294967295")), k.decl(y, inc)});
+    k.done(f);
+    k.fail("overflow", inc->loc);
+  });
   auto small = [=](Kit& k, bool bounded) {
     Function* f = k.fn("f", k.i8, {{"c", k.i8}});
     if (bounded) k.req(f, k.le_c(k.F(f, 0), k.i8, "126"));

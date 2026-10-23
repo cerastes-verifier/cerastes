@@ -12,6 +12,11 @@ VerifyConfig& verify_config() {
   return c;
 }
 
+int front_end_exit_status(const VerifyOutput& out, int edg_status) {
+  if (out.internal_inconsistency) return 3;
+  return edg_status != 0 ? 2 : 0;
+}
+
 std::string canonical_path(const std::string& path) {
   if (path.empty()) return "";
   char buf[PATH_MAX];

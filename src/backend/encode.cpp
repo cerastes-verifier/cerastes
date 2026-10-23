@@ -1114,8 +1114,9 @@ class Encoder {
     if (is_effect_operation(e) && !cx_.encoded_effects.insert(e).second) {
       // Decision 0020 item 10: an IL node with a side effect is encoded once per function; a second encoding would be a second
       // copy of the effect in the VIR.  Fail closed.
-      reject(Diag::unsupported_expression, e->position,
-             "an internal inconsistency: an expression with a side effect would be encoded twice (decision 0020 item 10)");
+      verify_config().out.internal_inconsistency = true;  // a tool failure, exit status 3 (decision 0022 item 12)
+      reject(Diag::internal_inconsistency, e->position,
+             "an expression with a side effect would be encoded twice (decision 0020 item 10)");
       return nullptr;
     }
     const bool macro_node = !cx_.contract && !cx_.annotation && e->kind == enk_operation && e->position.orig_seq != 0;
@@ -1161,7 +1162,10 @@ class Encoder {
       allow_enum_conversion(ops[0]);
       allow_enum_conversion(ops[1]);
     }
-    if (op != vir::BinaryOp::Eq && op != vir::BinaryOp::Ne) {
+    if (op == vir::BinaryOp::Eq || op == vir::BinaryOp::Ne) {
+      // Decision 0022 item 5: an enumeration value compared with a signed integer that may be negative is rejected.
+      if (reject_enumeration_sign_compare(e, ops)) return nullptr;
+    } else {
       // Decision 0019 item 10: an order of two values of one enumeration (or of its enumerators).
       const Expr* ea = nullptr;
       const Expr* ec = nullptr;
@@ -2469,7 +2473,8 @@ class Encoder {
 
   // The value of a case label of a C switch over a bare enumeration value, converted to the promoted type of the condition
   // (C23 6.8.5.3).  EDG's value is `(enum E)(operand)`, an implicit cast into the enumeration (P26); the operand is encoded as a
-  // constant expression and converted to `promoted` (0010 item 5: `case -1:` wraps, as in C).  Any other shape is rejected.
+  // constant expression and converted to `promoted` (decision 0022 item 1: the conversion is checked, so `case -1:` over an `unsigned int` scrutinee is a
+  // `conversion` error, never the wrapped value 4294967295).  Any other shape is rejected.
   const Expr* enum_case_value(a_constant_ptr cv, const a_source_position& pos, const vir::Type& enum_type, const vir::Type& promoted) {
     const SrcLoc l = loc_of(pos);
     const bool has_expr = cv->expr != nullptr || cv->local_expr_ref;
@@ -2479,6 +2484,12 @@ class Encoder {
       VType ct = vtype(cv->type);
       if (is_enumerator(cv) ? !ct.ok : !(ct.ok && ct.t == enum_type)) {
         reject(Diag::unsupported_statement, pos, "a case value this version cannot read");
+        return nullptr;
+      }
+      if (!is_enumerator(cv) && cv->orig_type != nullptr) {
+        // Fail closed (probe P38, decision 0022 item 3): a constant converted from another type whose original expression is not
+        // recorded could hide a conversion that does not fit; constant_value rejects that shape too (0010 item 12).
+        reject(Diag::unsupported_statement, pos, "a folded constant whose original expression is not recorded");
         return nullptr;
       }
       const Expr* x = constant_value(cv, pos);
@@ -3067,6 +3078,98 @@ class Encoder {
     return 1;
   }
 
+  // `c == x` and `c != x` where `c` is a value of an enumeration that C compares in an unsigned type and `x` is a signed integer that
+  // may be negative.  In C, EDG computes it as `eq[int](cast[unsigned int](c), cast[unsigned int](x))` (P26): a negative `x` would
+  // convert to a large unsigned value, which is why both compilers warn (`-Wsign-compare`, probe P39).  Decision 0022 item 5: it is
+  // rejected, in both modes (in C++ the same shape is `cast[int](c) == x`, or `unsigned int` for a fixed unsigned base; the verdict
+  // does not depend on the mode).  The rule:
+  //  - one operand is a value of an enumeration E (as `enumeration_operand` reads it), not an enumerator, the other is not one;
+  //  - E has no negative value and C's promoted type of E is an unsigned type of rank int or above (an unfixed E without negative
+  //    enumerators, or a fixed base `unsigned`, `unsigned long`, ...; not `unsigned char`/`unsigned short`, which promote to `int`);
+  //  - the other operand's own type (through the front end's generated casts and a folded constant's original expression) is a signed
+  //    integer type that is not an enumeration and not `bool`, which C converts to E's unsigned type (promoted width <= E's width:
+  //    a wider `long` makes C compare in `long`);
+  //  - and it is not an integer constant whose value is >= 0.
+  // Returns true when the shape was rejected.
+  bool reject_enumeration_sign_compare(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
+    if (ops.size() != 2 || ops[0] == nullptr || ops[1] == nullptr) return false;
+    EnumOperand eo[2];
+    const bool is_enum[2] = {enumeration_operand(ops[0], &eo[0]), enumeration_operand(ops[1], &eo[1])};
+    if (is_enum[0] && is_enum[1]) {
+      // Two values or enumerators of DIFFERENT enumerations (in C an enumerator is an `int`, found through the front end's enumerator
+      // mark): C and C++ give different meanings (`unsigned int` against `int` in C, `int` in C++), and every compiler warns
+      // (-Wenum-compare): rejected in both modes.  Two values of one enumeration stay accepted.
+      if (eo[0].entry == eo[1].entry) return false;
+      const EnumInfo& i0 = enum_info(eo[0].entry);
+      const EnumInfo& i1 = enum_info(eo[1].entry);
+      if (!i0.ok || !i1.ok) return false;  // the ordinary path reports it
+      reject(Diag::unsupported_expression, e->position,
+             "an equality between values of two different enumerations (`" + i0.type.int_type->name + "` and `" + i1.type.int_type->name +
+                 "`): the compilers warn (-Wenum-compare); convert both sides explicitly, for example `(int)c == (int)n` (decision 0022 item 5)");
+      return true;
+    }
+    if (!is_enum[0] && !is_enum[1]) return false;
+    const int ei_side = is_enum[0] ? 0 : 1;
+    if (eo[ei_side].enumerator != nullptr || eo[ei_side].inner == nullptr) return false;
+    const EnumInfo& info = enum_info(eo[ei_side].entry);
+    if (!info.ok) return false;  // the ordinary path reports it
+    const vir::IntType* et = info.type.int_type;
+    if (et == nullptr || vir::dec::negative(vir::dec::range_of(*et).lo)) return false;
+    // The unsigned type C compares E's values in.  A fixed base is its own (an unsigned type of rank int or above).  An unfixed
+    // enumeration without negative enumerators has the compatible type `unsigned int` in C, whatever the front end calls its
+    // underlying type in C++ (there `int` with the "use unsigned" flag, P26): one verdict in both modes.
+    const a_type_ptr entry = eo[ei_side].entry;
+    const bool fixed = entry->variant.integer.has_explicit_enum_base || entry->variant.integer.is_scoped_enum;
+    const int ubits = fixed ? et->bits : prog_.c_int_bits();
+    if (fixed && (et->is_signed || et->bits < prog_.c_int_bits())) return false;
+    // The other operand's own type, and whether it is a constant that is not negative.  `last_const` is the innermost constant on the
+    // path, whose sign decides: every implicit conversion between it and the operand either preserves its value or lands on an unsigned
+    // type (EDG's `const unsigned 4294967295U {expr = cast(const int -1)}`), which the rule exempts, so the innermost value is the one
+    // the program wrote.
+    an_expr_node_ptr n = ops[1 - ei_side];
+    a_constant_ptr last_const = nullptr;
+    for (int guard = 0; n != nullptr && guard < 16; ++guard) {
+      if (n->kind == enk_constant && n->variant.constant.ptr != nullptr && n->variant.constant.ptr->kind == ck_integer) {
+        a_constant_ptr c = n->variant.constant.ptr;
+        last_const = c;
+        if (c->expr != nullptr && !c->local_expr_ref) {
+          an_expr_node_ptr o = expr_node_from_constant(c);
+          if (o != nullptr && o != n) {
+            n = o;
+            continue;
+          }
+        }
+        break;
+      }
+      if (n->kind == enk_operation && n->variant.operation.kind == eok_cast && n->compiler_generated) {
+        an_expr_node_ptr o = n->variant.operation.operands;
+        if (o == nullptr || o->next != nullptr) return false;
+        n = o;
+        continue;
+      }
+      break;
+    }
+    if (n == nullptr || n->type == nullptr) return false;
+    if (n->kind == enk_operation) {
+      // A truth value is 0 or 1 whatever its type (`int` in C, `bool` in C++): never negative, so no mode-dependent verdict.
+      switch (n->variant.operation.kind) {
+        case eok_lt: case eok_le: case eok_gt: case eok_ge: case eok_eq: case eok_ne:
+        case eok_land: case eok_lor: case eok_not: case eok_bool_cast:
+          return false;
+        default: break;
+      }
+    }
+    VType ot = vtype(n->type);
+    if (!ot.ok || !ot.t.is_int() || is_enum_type(ot.t) || !ot.t.int_type->is_signed) return false;
+    if (std::max(ot.t.int_type->bits, prog_.c_int_bits()) > ubits) return false;
+    if (last_const != nullptr && !vir::dec::negative(decimal_value(last_const))) return false;  // a constant >= 0 (record 0022 item 4)
+    const std::string promoted = ubits == prog_.c_int_bits() ? "unsigned int" : "an unsigned " + std::to_string(ubits) + "-bit integer type";
+    reject(Diag::unsupported_expression, e->position,
+           "an equality between a value of `" + et->name + "` and a signed integer that may be negative: C compares it as `" + promoted +
+               "` (the compilers warn, -Wsign-compare); convert one side explicitly, for example `(int)c == x` (decision 0022 item 5)");
+    return true;
+  }
+
   // The enumeration of the controlling expression of a switch (decision 0019 item 11), or null: a value of an enumeration (a
   // variable, parameter, call, cast or named constant), an enumerator (an `int` constant in C), or a `?:` whose arms are values
   // of one enumeration, each through the front end's own implicit conversions only.  `switch ((int)c)` is not one.
@@ -3552,8 +3655,10 @@ void verify_encode() {
   lo.weaken_auto_invariant = cfg.hook == "weaken_invariant";
   if (cfg.hook == "drop_assert") lo.drop_assert = 0;
   if (cfg.hook.compare(0, 12, "drop_assert=") == 0) lo.drop_assert = std::atoi(cfg.hook.c_str() + 12);
+  lo.perturb_fixed_order = cfg.hook == "perturb_fixed_order";
   vir::LowerResult lowered = vir::lower_program(program, lo);
   if (!lowered.errors.empty()) {
+    cfg.out.internal_inconsistency = true;  // a tool failure, exit status 3 (decision 0022 item 12)
     for (const vir::Diag& d : lowered.errors) {
       DiagPos at;
       at.known = d.loc.known();
@@ -3562,7 +3667,7 @@ void verify_encode() {
       at.file = d.loc.file;
       at.full_name = d.loc.file;
       at.seq = at.line;
-      report_at(Diag::unsupported_expression, at, {"an internal inconsistency: " + d.reason});
+      report_at(Diag::internal_inconsistency, at, {d.reason});
     }
     return;
   }
@@ -3584,9 +3689,10 @@ void verify_encode() {
   }
   viper::Emitted emitted = viper::emit(lowered.program);
   if (!emitted.problems.empty()) {
+    cfg.out.internal_inconsistency = true;  // a tool failure, exit status 3 (decision 0022 item 12)
     for (const std::string& why : emitted.problems) {
       DiagPos at;
-      report_at(Diag::unsupported_expression, at, {"an internal inconsistency: " + why});
+      report_at(Diag::internal_inconsistency, at, {why});
     }
     return;
   }

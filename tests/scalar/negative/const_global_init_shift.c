@@ -6,7 +6,7 @@
 #include <cerastes.h>
 
 const int G = 1 << 40;
-const unsigned U = -1;
+const unsigned U = 65535u * 65537u;
 const signed char SC = (signed char)5;
 
 int combine(int x)

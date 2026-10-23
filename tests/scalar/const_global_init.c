@@ -1,13 +1,13 @@
 // expect: verified
 // expect: native-ok
 // mode: c23, c++20
-// Pins: 0017 items 3 and 4: an initializer is checked as written (shift, a wrap to unsigned, a cast)
-// G is 8, SC is 5 and U is UINT_MAX in both modes. Constants that name other constants are C++ only
+// Pins: 0017 items 3 and 4 and 0022: an initializer is checked as written (shift, an unsigned product that fits, a cast)
+// G is 8, SC is 5 and U is UINT_MAX (65535u * 65537u, exact) in both modes. Constants that name other constants are C++ only
 // (const_global_init_named.cpp): C does not accept a const object in a constant expression.
 #include <cerastes.h>
 
 const int G = 1 << 3;
-const unsigned U = -1;
+const unsigned U = 65535u * 65537u;
 const signed char SC = (signed char)5;
 
 int combine(int x)

@@ -3,7 +3,7 @@
 // tag::source[]
 #include <cerastes.h>
 
-unsigned short product(unsigned short a, unsigned short b)
+int product(unsigned short a, unsigned short b)
 {
   return a * b;
 }

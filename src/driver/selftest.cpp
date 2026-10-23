@@ -440,6 +440,58 @@ void test_pipeline(Checks& c, const SiliconTools& tools) {
   }
 }
 
+// ---- 0022 item 12: lowering's internal errors are tool failures ---------------------------------------------
+
+// `int g(int x)` and `int f1(int x) requires x > 0` (both trusted), and `int c(int x) { return f1(g(x)); }`: the nested call whose
+// precondition depends on `g`'s call.  With `perturb_fixed_order` lowering's own order check reports an internal error.
+// `valid` is cleared when the program does not pass check_program (a failed expectation of the caller).
+vir::LowerResult lower_nested_calls(bool perturb, bool* valid) {
+  using namespace vir;
+  Program p;
+  Builder b(p);
+  const IntType* it = p.int_type("int", 32, true);
+  const Type T = Type::integer(it);
+  auto loc = [](int line, int col = 3) { return SrcLoc{"t.c", line, col}; };
+  Function* g = p.add_function("g", T, loc(1), loc(1));
+  g->add_param("x", T, loc(1));
+  g->trusted_reason = "declared here, defined in another unit";
+  Function* f1 = p.add_function("f1", T, loc(2), loc(2));
+  f1->add_param("x", T, loc(2));
+  f1->trusted_reason = "declared here, defined in another unit";
+  f1->requires_.push_back({b.binary(BinaryOp::Gt, b.formal(*f1, 0, loc(2)), b.int_const(T, "0", loc(2)), loc(2)), loc(2)});
+  Function* c = p.add_function("c", T, loc(3), loc(5));
+  c->add_param("x", T, loc(3));
+  const Expr* inner = b.call(g, {b.local(c->param_var(0), loc(4))}, loc(4));
+  c->body = b.block({b.return_stmt(b.call(f1, {inner}, loc(4)), loc(4))}, loc(3));
+  LowerOptions lo;
+  lo.perturb_fixed_order = perturb;
+  *valid = check_program(p).empty();
+  if (!*valid) return LowerResult{};
+  return lower_program(p, lo);
+}
+
+void test_internal_inconsistency(Checks& c) {
+  VerifyOutput out;
+  c.eq(front_end_exit_status(out, 0), 0, "no diagnostic and no flag: status 0");
+  c.eq(front_end_exit_status(out, 1), 2, "a front-end or encoder rejection is exit status 2");
+  out.internal_inconsistency = true;
+  c.eq(front_end_exit_status(out, 1), 3, "an internal inconsistency is exit status 3, never 2");
+  c.eq(front_end_exit_status(out, 0), 3, "an internal inconsistency is a tool failure even if the front end reported nothing");
+  bool valid = false;
+  vir::LowerResult ok = lower_nested_calls(false, &valid);
+  c.expect(valid, "the nested calls pass check_program");
+  c.expect(ok.errors.empty() && ok.rejections.empty(), "the nested calls lower without the hook");
+  vir::LowerResult bad = lower_nested_calls(true, &valid);
+  c.expect(!bad.errors.empty(), "perturb_fixed_order makes lowering report an internal error");
+  c.expect(!bad.errors.empty() && bad.errors[0].reason.find("are not exactly the set it depends on") != std::string::npos,
+           "the internal error is the order check's");
+  c.expect(bad.rejections.empty(), "the internal error is not a rejection");
+  // What the encoder does with LowerResult::errors: it sets the flag, and the status is then 3.
+  VerifyOutput flagged;
+  flagged.internal_inconsistency = !bad.errors.empty();
+  c.eq(front_end_exit_status(flagged, 1), 3, "lowering's internal errors give exit status 3");
+}
+
 }  // namespace
 
 int run_selftest(const SiliconTools& tools) {
@@ -447,6 +499,7 @@ int run_selftest(const SiliconTools& tools) {
   test_paths(c);
   test_silicon_output(c);
   test_report(c);
+  test_internal_inconsistency(c);
   test_pipeline(c, tools);
   if (c.failed == 0) {
     std::printf("selftest: %d checks passed\n", c.total);

@@ -154,9 +154,9 @@ include::example$error-messages/invariant_preserved_fixed.cpp[tag=source]
 
 == overflow
 
-A signed arithmetic operation may produce a value that does not fit its type, or a signed division may be the smallest value divided by -1. It is reported at the operator.
+An arithmetic operation may produce a value that does not fit its type, signed or unsigned, or a signed division may be the smallest value divided by -1. It is reported at the operator.
 
-Signed overflow is undefined behaviour in C and pass:[C++], so cerastes treats it as an error rather than assuming it wraps. See xref:integer-semantics.adoc[Integer semantics] for the exact rules. Unsigned arithmetic never gives this error: it wraps. The error also appears for arithmetic inside a contract.
+Signed overflow is undefined behaviour in C and pass:[C++], so cerastes treats it as an error rather than assuming it wraps. Unsigned arithmetic is defined to wrap, but cerastes does not wrap it either: `u - v` with `u < v`, a sum or product past the largest value, `-u` for `u != 0`, and `pass:[++]` or `--` past either end of an `unsigned int` (or wider) give this error too, with a message such as "unsigned `unsigned int` addition may overflow (cerastes does not wrap)". See xref:integer-semantics.adoc#unsigned[Integer semantics] for the exact rules. The error also appears for arithmetic inside a contract.
 
 [source,cpp]
 ----
@@ -168,7 +168,7 @@ include::example$error-messages/overflow_error.cpp[tag=source]
 overflow_error.cpp:8: error: overflow: signed `int` addition may overflow
 ----
 
-*How to fix it.* Bound the operands in a `CERASTES_REQUIRES`, as below, test before computing, compute in a wider type, or use an unsigned type if wrapping is what you mean.
+*How to fix it.* Bound the operands in a `CERASTES_REQUIRES`, as below, test before computing, or compute in a wider type. If a result modulo 2^N^ is what you mean, write the reduction out (xref:integer-semantics.adoc#modular[Modular arithmetic, written out]).
 
 [source,cpp]
 ----
@@ -223,9 +223,9 @@ include::example$error-messages/shift_fixed.cpp[tag=source]
 
 == conversion
 
-A conversion to a signed type may be given a value that does not fit, or a conversion to an enumeration a value that is not one of the enumeration's values. It is reported at the conversion: the cast, the initializer, the assignment, the argument or the `return`.
+A conversion to an integer type may be given a value that does not fit, signed or unsigned, or a conversion to an enumeration a value that is not one of the enumeration's values. It is reported at the conversion: the cast, the initializer, the assignment, the argument, the `return`, or the operand that C converts for an operator (`-1 < 0u` converts `-1` to `unsigned`).
 
-cerastes does not accept a wrapping conversion to a signed type, written or implicit, because the standards disagree on what it means. Conversions to unsigned types wrap and are never an error.
+cerastes does not accept a wrapping conversion, written or implicit: to a signed type the standards disagree on what it means, and to an unsigned type a wrap is almost always a mistake. A conversion to an unsigned type that does not fit is reported as "the value may not fit in `unsigned char` (a conversion must be exact)". This includes `pass:[uc++]` and `uc += 1` on an `unsigned char` holding 255, which compute in `int` and convert back.
 
 [source,cpp]
 ----
@@ -237,7 +237,7 @@ include::example$error-messages/conversion_error.cpp[tag=source]
 conversion_error.cpp:9: error: conversion: the value may not fit in `signed char` (a conversion to a signed type must be exact)
 ----
 
-*How to fix it.* Bound the value so that it fits, as below, or convert to the unsigned type of the same width and use that.
+*How to fix it.* Bound the value so that it fits, as below, or reduce it yourself before converting (`(unsigned char)(x % 256)` for `x >= 0`).
 
 [source,cpp]
 ----
@@ -245,8 +245,8 @@ include::example$error-messages/conversion_fixed.cpp[tag=source]
 ----
 
 A conversion to an enumeration is checked against the enumeration's values
-(xref:integer-semantics.adoc#enumerations[Enumerations]), never wrapped, also
-when the enumeration's underlying type is unsigned:
+(xref:integer-semantics.adoc#enumerations[Enumerations]), also when the
+enumeration's underlying type is unsigned:
 
 [source,c]
 ----
