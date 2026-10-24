@@ -3000,3 +3000,794 @@ Every compiler warns on every shape in both modes (`-Wenum-compare` in C and in 
 | g10 | `c == (int)b` (`bool b`, an explicit cast) | W | - | - | - | rejected (not a truth value; clang warns, the strictest reading) |
 
 So `g1`, `g2`, `g3` and `g9`, the four truth-valued shapes of the audit, are silent in all four configurations and accepted in both modes. `T` is clang C++'s `-Wtautological-constant-out-of-range-compare`.
+
+## M4.4b1: bitwise operators, and what EDG leaves in the IL
+
+Probe P40 for the M4.4b decision (bitwise operators `& | ^ ~ &= |= ^=`; record 0023) and the Q33 facts on character literals (handoff §11 question 33). Evidence is under `build/m4.4b1/p40/` (gitignored: probe sources in `probes/{ops,enum,fold,par,cnd,chr2}/`, one `.tree`, `.err`, `.walk`, and (verify) `.ver` per file and mode, `IL` dumps not kept; the scratch tools are `run40.py` (runner: `scripts/cerastes-fe.sh --c23|--c++20 --display_error_number --il_display`, `--cerastes_walk`, `build/cerastes verify`), `gen40a.py`, `gen40c.py`, `gen40q.py` (generators), `sum40.py`, `fns.py`, `uac40.py`, `chk40.py`, `col40.py`, `il40.py` (summaries and checks), `p38tree.py` (the P38 condenser, copied; a node's flags print as `{par,gen,lv,nu,olt=}`, a constant as `K<type value expr=NONE|tree orig_type= enumerator>`). `il_def.h` lines are at the pin `f0ed5525af`. The files of `.c` ran as C23, those of `.cpp` as C++20; every shape valid in both has both.
+
+### P40: **PASS: no stop condition. Every folded bitwise constant keeps its original `expr` at every place the encoder reads; `is_parenthesized` is on the written operation node (inside a folded constant's `expr`, never on the constant)**
+
+**1. Operand conversions** (`probes/ops/{bin,cmp,cpl}.{c,cpp}`, 32 + 98 + 14 shapes per operator and mode; `*.c23.sum`, `*.cpp20.sum` are the condensed tables; **C23 and C++20 are identical** except the C++ compound node is an lvalue (`{lv,nu}`) and C's `bool` results are `eok_bool_cast`/`eok_cast`-wrapped the same way in both):
+
+| shape | IL (both modes) |
+|---|---|
+| `a OP b` (`& | ^`, same shape for the three; 96 rows) | `eok_and|or|xor[R]` where **R = the usual arithmetic conversion of the promoted operands**; each operand that is not already of type R carries a **compiler-generated `eok_cast[R]`** (so `uchar & uchar` is `and[int](cast[int](a), cast[int](b))`, `int & unsigned` is `and[unsigned](cast[unsigned](a), b)`, `long & unsigned` is `and[long](a, cast[long](b))`, `int & long long` casts a, `bool & bool` casts both to int). Checked on all 96 rows: both operands' effective type equals the operation's type. `__int128` / `unsigned __int128`: same (R is the 128-bit type, mixed signedness gives the unsigned one). |
+| the use of the result | the result is **not** converted at the node: a `return`, initializer or argument adds its own generated `cast[T]` around the node, a `bool` destination `eok_bool_cast[bool]` (`f_and_bool_bool`: `bool_cast(and[int](cast[int] a, cast[int] b))`). |
+| `~a` (14 types, 3 uses) | `eok_complement[R]` with R the promoted type (`int` for char, short, bool and their unsigned, else the type); a promoted operand carries `cast[int]`. |
+| `a OP= b` (588 rows, `OP=` for 14 lhs types x 6-10 rhs types) | `eok_and_assign|or_assign|xor_assign[T]` where **T is the type of the left operand** (not the computed type), the **left operand is bare** (`var a {lv}`, no promotion cast), and **the right operand carries the generated cast to R = UAC(promote(lhs), promote(rhs))** when its own type differs (`uchar &= int` bare int; `uint &= int` `cast[unsigned](b)`; `int &= uint` bare; `uchar &= uchar` `cast[int](b)`; `i128 &= int` `cast[__int128](b)`; `int &= long long` bare long long: R is wider than T and nothing converts the lhs). `uac40.py`: all 588 rows satisfy "rhs effective type = UAC", and every node type is the lhs type (the only mismatches of a width-only model are `long` vs `long long`, same width, EDG uses the higher rank). This is the shape of the arithmetic compounds (`+= <<=`: `ref/ref.c`), so `assignment_parts` can take the same path. The conversion of the result back to T is not in the IL (a `bool` lhs: result `!= 0`; a narrower lhs: a value that may not fit is the 0022 `conversion` check). |
+| value of a compound used (`return a &= b;`, `int r = a &= b;`) | the node as above (C++: an lvalue), with the use's own generated `cast[int]`/nothing around it (P33's shape). |
+
+**2. Enumeration operands** (`probes/enum/e1.{c,cpp}`, `c.fn`, `cpp.fn`):
+
+| shape | C23 | C++20 |
+|---|---|---|
+| `~c`, `c` an `enum color` (values 0..2, no negative enumerator) | `cast[int] {gen}(complement[enum color](var c))`: **bare enumeration operand, the node has the enumeration's type** (= `unsigned int`), the cast to int is outside (P26's note confirmed; also `enum neg`: `complement[enum neg]`) | `complement[int](cast[int] {gen}(var c))` |
+| `c & 1`, `1 & c`, `c \| 1u`, `c ^ d`, `c \| f` (two enumerations), `(c & d) == RED` | computed in **`unsigned int`**, the enumeration operand cast to it (`and[unsigned](cast[unsigned](c), 1U)`, then `cast[int]`); `enum neg & 3`: `and[int](cast[int](n), 3)` | computed in `int` (`and[int](cast[int](c), 1)`), `c \| 1u`: `or[unsigned](cast[unsigned](c), 1U)` |
+| `RED \| GREEN`, `RED \| NA`, `~RED` | folded: `K<int 1 expr=or[int](K<int 0 expr=cast[int] {gen}(K<int 0 enumerator>) orig_type=int>, K<int 1 expr=cast[int] {gen}(K<int 1 enumerator>) ...>)>`, i.e. the enumerators are int constants with a generated cast copy of the value, the inner constant is flagged `enumerator` | `or[int](K<int 0 expr=cast[int](K<color 0 enumerator>) orig_type=color>, ...)`; two different enumerations (`RED \| NA`) both fold, no error |
+| `x &= RED`, `x & GREEN` | rhs `K<int 0 expr=cast[int] {gen}(K<int 0 expr=NONE enumerator>) orig_type=int>`: the unflagged copy of 0018 item 6 (flag on the inner constant only) | same with `K<color 0 enumerator>` |
+| `c &= 1` | accepted by C (`and_assign[enum color](c, K<unsigned 1U expr=cast(1) orig_type=int>)`: **node type = the enumeration, rhs cast to unsigned**) | **error #511** (front end), exit 2 |
+| `(c ? GREEN : BLUE) & 1` | `?:` is **int-typed**, arms `K<int 1 enumerator>` / `K<int 2 enumerator>`, condition bare `c` | `?:` has type `color`, arms `K<color 1 enumerator>`, condition `bool_cast(c)` |
+
+**3. Folded bitwise constants** (`probes/fold/*.{c,cpp}` and `index.json`, generated by `gen40c.py`: 20 int-valued and 11 unsigned/wide expressions (`0xF0 | 0x0F`, `~0`, `~0u`, `-8 & 13`, `(1 << 4) | 1`, `2 ^ 32`, nested, mixed `~0 & 5 | 2 ^ 1`, `(0xF0 | 0x0F) == 255`, `(1 | 2) ? 7 : 8`, `~(-2147483647 - 1)`, `(unsigned char)~0`, `~0ull`, `0x7FFFFFFF | 0x80000000`, ...), **1312 probe lines** over 25 places in both modes). Two independent oracles:
+- **encoder oracle** (`chk40.py`, `chk40.out`): today's `build/cerastes verify` rejects the bitwise operator at the line of **every** probe line (1312 of 1312, except C's `nnest.c`, 20 lines, which EDG's #1901 refuses before: a `const` object in a constant expression); `col40.py`: the caret is inside the *last written occurrence of E* (not the `__typeof__(E)` of the type), for every place but `opd` (the written `x & (E)`, not decisive) and `enum2` (the first rejected declaration of the line is `AB = A | B`); `enum3` (`X = E` first) confirms the enumerator. A folded constant without `expr` would verify silently with EDG's value, so this shows the encoder reaches an original tree in each place.
+- **IL oracle** (`il40.py`): 6143 `K` nodes over the printable places: 2657 with `expr`, **0 with `expr=NONE` whose value is not a literal written on the line**.
+
+| place | `expr` kept | note |
+|---|---|---|
+| return, initializer, assignment, argument, condition, local `const`, `x == (E)`, case value `case E:` (also over an unsigned `x`) | **kept** | e.g. `-8 & 13`: `K<int 8 expr=and[int](K<int -8 expr=negate(K<int 8>)>, K<int 13>)>` |
+| file-scope `const`/`constexpr` initializer (`const T K = E;`, `const long long K = E`), use `K & 1`, `K \| 1` (C++; C is #1901) | **kept**; the use is `K<int 3 expr=var K>` | |
+| enumerator initializers: `A = E`, `AB = A \| B`, `X = E, Y = X + 0` | **kept** (C: `K<int 3 expr=or[int](K<int 1 enumerator>, K<int 2 enumerator>) enumerator>`; C++: the constants are typed `K<e_b03 8 ...>` for earlier enumerators) | |
+| C++ default argument `int f(int a = E)` | **kept** on the call's generated constant | |
+| contract `requires`/`ensures` (`il_display` prints them) | `0xF0 \| 0x0F`, `-8 & 13` etc.: **unfolded** (`eok_or[int] {par}(240, 15)`); `~0`: folded with `expr=complement {par}` (`K<int -1 expr=complement[int] {par}(K<int 0>)>`); unsigned: gen casts around, `{par}` on the `and` | no folded constant without `expr` |
+| `check`, `invariant`, `decreases` | not printed by `il_display` (M1); the encoder oracle rejects at the operator inside the attribute's tokens for all 31 + 31 + 20 lines | |
+
+**4. `is_parenthesized`** (`probes/par/p1.*` 50 shapes, `p2.*` 20, `p*.sum`, `par` = the flag):
+- It is set on **the node of the parenthesized expression**, never on a generated cast around it: `(a & b) == c` is `eq(and {par}(a, b), c)` and in C++ `cast[int] {gen}(eq[bool](and {par}(a, b), c))` (the cast has no flag); `(a & b) ? c : d` is `question(and {par}(a, b), ...)` (C++: `bool_cast {gen}` around the `and {par}`); `(x & 3) == (1 | 2)`: `eq(and {par}, K<3 expr=or {par}(1, 2)>)`. Same nodes in C23 and C++20 (the diff of 50 functions is generated casts only).
+- **Folded constants:** the flag is on the **root of the constant's `expr` tree** (`x & (1 == 2)`: `K<int 0 expr=eq[int] {par}(1, 2)>`; `(1 | 2) & x`: `K<int 3 expr=or {par}(1, 2)>`; double parentheses `((1 | 2))` the same single flag; C++: `K<int 1 expr=cast[int] {gen}(K<bool 1 expr=eq[bool] {par}(1, 1)>)>`: the flag is on the innermost original operation under any chain of generated casts and `K`-with-`expr` wrappers). Never on the `enk_constant` node or the `a_constant` (0 occurrences in the 70 files).
+- **Lost:** a parenthesized literal, named constant or enumerator (`(3) & x`, `(K) & x`, `(RED) | x`): the constant has no operation node to carry the flag (`K<int 3 expr=NONE>`, `K<int 3 expr=var K>` unflagged). A parenthesized variable keeps it (`(x) & (y)`: `var x {par,olt=int}`). Harmless for the `-Wparentheses` family (the shapes name an *operation* operand), recorded.
+- Unparenthesized shapes carry no flag anywhere: `x & 1 == 2` is `and(x, K<int 0 expr=eq(1, 2)>)`, `a & b == c` is `and(a, eq(b, c))`, `a | b & c` is `or(a, and(b, c))`, `1 | 2 & 3` folds with the inner `and` unflagged, `1 == 1 | x`: `K<int 1 expr=eq>` unflagged.
+
+**5. `?:`, comma, bool-valued shapes** (`probes/cnd/c1.*`, 34 shapes, `c1.*.tree`):
+- **C23:** `x ? true : false` is `question[int](x, K<int 1 expr=cast[int] {gen}(K<bool 1>)>, K<int 0 expr=cast[int] {gen}(K<bool 0>)>)` (the arms are folded **with `expr`**: a generated cast of the `bool` constant); `x ? (x > 0) : (x < 0)` is int-typed with `gt[int] {par}`/`lt[int] {par}` arms; `b ? b : b` (bool b) is `bool_cast[bool](question[int](b, cast[int](b), cast[int](b)))` (the condition is bare, the arms cast to int); `x ? y : 0` bare.
+- `c == (x++, x > 0)` (`enum color c`): `eq[int](cast[unsigned] {gen}(c), cast[unsigned] {gen}(comma[int] {par}(post_incr {nu}(x), gt[int](x, 0))))` in C, `eq[bool](cast[int](c), cast[int](comma[bool] {par}(...)))` in C++. The comma carries `{par}`; its left operand is `{nu}` (and `{lv,nu}` for a bare `x` in C++).
+- **Enumerators in a C `?:`:** `c == (x ? RED : GREEN)`: `?:` is `int`-typed `{par}`, the arms are **`K<int 0 enumerator>`, `K<int 1 enumerator>`** (flagged, as 0018 describes). When the whole `?:` is folded (`(1 ? NB : NC)`, `n == (0 ? NB : NC)`) the constant is `K<int 0 expr=cast[int] {gen}(K<int 0 expr=question[int] {par}(K<int 1>, K<int 0 enumerator>, K<int 1 enumerator>)>)>`: the arms keep the flag inside the `expr`. Where the arm is converted (a mixed `x ? RED : x`, `x ? NA : 1`) the arm is the **unflagged copy** `K<int 0 expr=cast[int] {gen}(K<int 0 enumerator>)>` (the flag is on the inner constant only), and `NA = -1` is `K<int -1 expr=negate[int](K<int 1>) enumerator>`. `c == (x, RED)`, `c == (0, RED)`: the comma's right operand `K<int 0 enumerator>` (folded `(0, RED)` is `K<unsigned 0U expr=cast[unsigned](K<int 0 enumerator>)>`).
+- **C++:** the same `?:` has the enumeration type (`question[color](bool_cast(x), K<color 0 enumerator>, K<color 1 enumerator>)`, folded: `K<color 0 expr=question[color] {par}(K<bool 1 expr=bool_cast(K<int 1>)>, K<color 0 enumerator>, ...)>`); a mixed one (`x ? RED : x`) is int-typed with the unflagged copy as arm; `x ? true : false` is `question[bool]` over bare `K<bool 1>`.
+
+### Q33: character literals (`probes/chr2/q33.txt`, raw stderr `<f>.<mode>.{plain,err}.txt`; `--display_error_number`; the second run adds `--diag_error=1422,1654,26,3255`; `--il_display` accepted, the folded value is not shown)
+
+Tag names (the harness's `TagRegistry`, `tags40.py`): **1422 `multi_char_literal`, 1654 `leading_character_ignored_in_char_literal`, 26 `too_many_characters`, 3255 `utf16_char_lit_too_long`**; also hard errors 1535 `no_char16_t_representation`, 25 `zero_length_string`, 27 `bad_character_value`, 3439 `char_too_wide_for_rep`.
+
+| literal | C23 plain | C++20 plain | with `--diag_error=1422,1654,26,3255` |
+|---|---|---|---|
+| `'ab'`, `'abc'`, `'abcd'`, `'\x41\x42'` | warning #1422-D, exit 0 | same | error #1422-D, exit 2, both modes |
+| `'abcde'` | warning #1654-D | same | error #1654-D, exit 2 |
+| `L'ab'`, `L'abc'`, `u'ab'`, `U'ab'`, `u'éa'` | warning **#26-D** | **hard error #26** (exit 2, no option needed) | C: error #26-D, exit 2; C++: unchanged |
+| `u8'ab'`, `u8'\U0001F600'` | warning **#1422-D** | warning **#26-D** | error in both, exit 2 |
+| `u'\U0001F600'` | warning #3255-D | **hard error #1535** | C: error #3255-D, exit 2 |
+| `U'\U0001F600'`, `L'\U0001F600'`, `L'é'`, `u8'a'`, `u8'\xff'` | no diagnostic | no diagnostic | exit 0 |
+| `'a'`, `'\n'`, `'\101'`, `'\x41'`, `'\xff'` | no diagnostic | no diagnostic | exit 0 |
+| `'\x141'` | hard error #27-D (exit 2) | same | unchanged |
+| `''` | hard error #25 | same | unchanged |
+| `'é'` | hard error #3439-D | same | unchanged |
+
+Today's `build/cerastes verify` accepts `'ab'`, `'abcde'` and `u'\U0001F600'` (C23) with EDG's warning and result `verified`; the `--diag_error` list above turns every one of them into a front-end error in both modes (so `rejected multi_char_literal @ L<n>` etc.). (A case-insensitive file system collapsed `uab`/`Uab` in the first run; `probes/chr/` is stale, `probes/chr2/` is the result.)
+
+### Implications for `encode.cpp`
+
+- `operation()` gets `eok_and`, `eok_or`, `eok_xor`, `eok_complement`: operands arrive **already converted to the result type** by generated casts (the existing cast path handles them, including `bool` operands cast to `int`); the node's type is R, no recomputation. `eok_complement` on a **bare enumeration operand in C** (type `enum color`, result type the enumeration) must be handled before the generated `cast[int]` that follows: its value is `~` of the enumeration's base (`unsigned` for `color`, `int` for `neg`), and the cast to `int` is a `conversion` check.
+- Compound forms: `eok_and_assign|or_assign|xor_assign`: node type = lhs type, lhs bare, rhs already cast to R; compute in R = **the rhs operand's own (cast) type**, then convert to T (the 0022 checked conversion; `bool` lhs: `!= 0`). `assignment_parts` can add the three kinds beside the arithmetic ones; the existing `is_enum_type(lhs)` rejection already covers `c &= 1` in C (C++ is an EDG error).
+- Folded constants need nothing beyond what 0010 item 12 / 0022 item 3 already do: P40 confirms `expr` everywhere. Read the written tree through chains of `K`-with-`expr` and generated casts; the **parenthesis flag of a folded constant is on the innermost original operation** (`is_parenthesized` of the `expr` root after peeling generated casts and `K` wrappers), never on the constant.
+- Warning shapes (`-Wparentheses`, `-Wbitwise-op-parentheses`, `-Wbitwise-conditional-parentheses`): the flag is on the operand operation node in both modes (C++: under no generated cast, the casts are outside); look through a `K` with `expr` for folded operands; literals, named constants and enumerators never carry it.
+- Enumeration C/C++ difference: `c & 1` is `unsigned` in C and `int` in C++ for an enumeration without negative enumerators; `~c` differs in value (and the `int` cast of `~c` in C is a `conversion` obligation).
+- Q33: `--diag_error=1422,1654,26,3255` (add `3255` in C only matters) suffices in both modes; the harness tags are the four above.
+
+### P41: which bitwise-operator shapes the native compilers and EDG warn on (decision 0023): **PASS (matrix below; 7 new rules and 2 extensions, the union is stated)**
+
+Evidence is under `build/m4.4b1/p41/` (gitignored): `shapes*.py` (the shape lists), `gen.py` (one function per source line, `p41*.c` and `p41*.cpp`; `p41*.json` maps a line to its shape), `matrix.py` (the runs), `run.sh` (regenerates everything, about 4 minutes), `raw/` (every
+compiler output), `p41*.matrix.txt|json` and `p41*.detail.json` (cells and messages), `sweep.py` (the xor sweep), `q33/` (the header sweep), `mkdoc.py` + `P41.tmpl.md` (this text).
+Apple clang 21.0.0 (`clang-2100.3.34.2`, Command Line Tools) and GCC 16.2.0 (Homebrew `gcc-16`/`g++-16`), `-fsyntax-only` with `-std=c23` in C and `-std=c++20` in C++, each shape compiled four times (no `-W` flag, `-Wall`, `-Wextra`, `-Wall -Wextra`);
+EDG is `scripts/cerastes-fe.sh --c23|--c++20 --display_error_number` (EDG's #550/#551 "set but not used" left out, as are the compilers' `-Wunused-parameter`/`-Wunused-variable`/`-Wunused-but-set-*`). 916 shapes in five files:
+`p41` (315: the eleven groups of the plan), `p41b` (505: sweeps and variants), `p41c` (30), `p41d` (26), `p41e` (40). A cell is the warning flag, `-` for none; no suffix means `-Wall` enables it, `[E]` that only `-Wextra` does, `[D]` that it is on without any flag.
+`-Wsign-compare` is `[E]` in C and plain (in `-Wall`) in C++ for GCC. All flags below are in `-Wall` unless a suffix says otherwise. A native-ok test uses both flags with `-Werror`, so every cell that is not `-` fails it.
+
+**EDG warns on none of the bitwise shapes** (every EDG cell is `-`). Its only entries in these files are unrelated: #174 (a comma operand without effect: `~(a, 1)`, `x &= (0, x)`), #186 (`u >= 0`, `u < 0`), #68 (`(int)(u & -1)`). So every rule below is cerastes's own (as 0020 item 5).
+**Contract expressions are invisible to the compilers** (`CERASTES_REQUIRES(...)` expands to nothing, `<cerastes.h>`), so the same shapes in a `requires`/`ensures` get no warning from anyone; `--cerastes_walk` shows them as ordinary trees (`a & b == c` is `eok_and` over `a` and an implicit `eok_cast` int of `eok_eq`;
+`contract.cpp`). The compilers do warn in `static_assert` and enumerator values (`k1`, `k2`, `k6`, `k7`: same cells as code). Applying the rules to contracts too is the uniform, stricter choice (recommendation; 0023's decision).
+
+Peeling used below: parentheses are the flag `is_parenthesized` (no node), the front end's promotions and conversions are `compiler_generated` casts (peeled), an explicit cast is a node without that flag (never peeled except where stated). A **truth value** T is, after that peeling:
+a comparison (`== != < > <= >=`), `!e`, `&&`, `||`, a `bool`-typed expression (variable, call, `(bool)` cast, `true`/`false`, a `?:` of bool arms).
+
+**1. A comparison, `+`/`-` or another bitwise operator as an operand of `& | ^`** (`-Wparentheses`; clang's `-Wbitwise-op-parentheses` for the third)
+
+| id | shape | clang C | clang C++ | gcc C | gcc C++ | EDG (C / C++) |
+|---|---|---|---|---|---|---|
+| 1a | `a & b == c;` | parentheses[D] | parentheses[D] | parentheses | parentheses | - / - |
+| 1b | `a == b & c;` | parentheses[D] | parentheses[D] | parentheses | parentheses | - / - |
+| 1e | `(a == b) & (c == d);` | - | - | - | - | - / - |
+| 1o | `(a == b) & c;` | - | - | - | - | - / - |
+| 1p | `a & (b == c);` | - | - | - | - | - / - |
+| 1q | `a == b & c == d;` | - | - | parentheses | parentheses | - / - |
+| 1r | `CMPAND(a, b, c);` | parentheses[D] | parentheses[D] | - | - | - / - |
+| 1s | `PARAND(a, b, c);` | parentheses[D] | parentheses[D] | - | - | - / - |
+| 1t | `5 & 3 == 3;` | parentheses[D] | parentheses[D] | parentheses | parentheses | - / - |
+| 1u | `a & b == 0 ? 1 : 2;` | bitwise-conditional-parentheses[D],parentheses[D] | bitwise-conditional-parentheses[D],parentheses[D] | parentheses | parentheses | - / - |
+| 1B | `a \| b != c;` | parentheses[D] | parentheses[D] | parentheses | parentheses | - / - |
+| 1E | `a & b == c & d;` | parentheses[D] | parentheses[D] | parentheses | parentheses | - / - |
+| 1G | `CMPRET(a, b, c);` | bitwise-conditional-parentheses[D],parentheses[D] | bitwise-conditional-parentheses[D],parentheses[D] | - | - | - / - |
+| 1v | `(a < b) \| (c < d);` | - | - | - | - | - / - |
+| 1z | `(a & b) == c;` | - | - | - | - | - / - |
+| 2a | `a \| b + c;` | - | - | parentheses | parentheses | - / - |
+| 2b | `a & b - c;` | - | - | parentheses | parentheses | - / - |
+| 2c | `a ^ b + c;` | - | - | parentheses | parentheses | - / - |
+| 2d | `a + b \| c;` | - | - | parentheses | parentheses | - / - |
+| 2e | `a - b & c;` | - | - | parentheses | parentheses | - / - |
+| 2f | `a \| b & c;` | bitwise-op-parentheses | bitwise-op-parentheses | parentheses | parentheses | - / - |
+| 2g | `a ^ b & c;` | bitwise-op-parentheses | bitwise-op-parentheses | parentheses | parentheses | - / - |
+| 2h | `a \| b ^ c;` | bitwise-op-parentheses | bitwise-op-parentheses | parentheses | parentheses | - / - |
+| 2i | `a & b \| c;` | bitwise-op-parentheses | bitwise-op-parentheses | parentheses | parentheses | - / - |
+| 2j | `a ^ b \| c;` | bitwise-op-parentheses | bitwise-op-parentheses | parentheses | parentheses | - / - |
+| 2k | `a & b ^ c;` | bitwise-op-parentheses | bitwise-op-parentheses | parentheses | parentheses | - / - |
+| 2l | `(a & b) \| c;` | - | - | - | - | - / - |
+| 2n | `a \| b \| c;` | - | - | - | - | - / - |
+| 2o | `a & b & c;` | - | - | - | - | - / - |
+| 2p | `a ^ b ^ c;` | - | - | - | - | - / - |
+| 2q | `a \| b * c;` | - | - | - | - | - / - |
+| 2r | `a << b \| c;` | - | - | - | - | - / - |
+| 2s | `a \| b << c;` | - | - | - | - | - / - |
+| 2t | `u + v & w;` | - | - | parentheses | parentheses | - / - |
+| 2u | `MIXOR(a, b, c);` | - | - | - | - | - / - |
+| 2v | `uc \| vc + 1;` | - | - | parentheses | parentheses | - / - |
+| 2w | `a \| b / c;` | - | - | - | - | - / - |
+| 2F | `a ^ b & c \| d;` | bitwise-op-parentheses | bitwise-op-parentheses | parentheses | parentheses | - / - |
+| 2G | `p \| q & r;` | bitwise-op-parentheses | bitwise-op-parentheses | parentheses | parentheses | - / - |
+| 2I | `a & b ? c \| d : 0;` | - | - | - | - | - / - |
+
+Both compilers warn on every unparenthesized comparison operand of `&`, `|`, `^` (left or right, any type: `int`, `unsigned`, `bool`, `char`, constants, in a return, a condition, an initializer, `static_assert`, an enumerator); **clang is silent on `a == b & c == d`** (`1q`, both operands comparisons), GCC is not.
+**Only GCC** warns on `+`/`-` as an operand (`2a`-`2e`, `2t`, `2v`, `2A`, any type). **Both** warn on a bitwise operator under a different one (`&` under `|` or `^`, `^` under `|`, on either side: `2f`-`2k`, `2F`-`2H`); a chain of one operator (`2n`-`2p`), shifts (`2r`, `2s`, `2y`, `2z`), `*`, `/`, `%`
+and unary `-`, `+`, `~`, `!` are silent. Parenthesized operands are silent in all four. **Macros:** clang warns in a macro body from the same file (`1r`, `1s`, `1G`, `m3`, `m4`, `b45`); GCC is silent for `1r`, `1s`, `m3` and, in C, for `m1`/`b45` (it warns for those two in C++);
+neither warns on `+` in a macro (`2u`). The IL cannot tell the cases apart reliably, so the rule rejects regardless of macros.
+
+**2. `!x` on the left of `&` or `|`**
+
+| id | shape | clang C | clang C++ | gcc C | gcc C++ | EDG (C / C++) |
+|---|---|---|---|---|---|---|
+| n1 | `!x & y;` | logical-not-parentheses[D] | logical-not-parentheses[D] | parentheses | parentheses | - / - |
+| n2 | `!x \| y;` | - | - | parentheses | parentheses | - / - |
+| n3 | `!x & 1;` | logical-not-parentheses[D] | logical-not-parentheses[D] | - | - | - / - |
+| n4 | `!x \| 1;` | - | - | - | - | - / - |
+| n5 | `!x & 2;` | logical-not-parentheses[D] | logical-not-parentheses[D] | parentheses | parentheses | - / - |
+| n8 | `!x & (y == 0);` | - | - | - | - | - / - |
+| n9 | `!x & !y;` | - | - | - | - | - / - |
+| n11 | `!x & q;` | - | - | - | - | - / - |
+| n12 | `!p & y;` | - | - | parentheses | parentheses | - / - |
+| n13 | `!x & (int)(y > 0);` | logical-not-parentheses[D] | logical-not-parentheses[D] | - | - | - / - |
+| n15 | `!!x & y;` | - | - | parentheses | parentheses | - / - |
+| n16 | `!x & y & z;` | logical-not-parentheses[D] | logical-not-parentheses[D] | parentheses | parentheses | - / - |
+| n17 | `!x & !y & z;` | - | - | - | - | - / - |
+| n19 | `!(x > 0) & y;` | - | - | parentheses | parentheses | - / - |
+| n21 | `!x ^ y;` | - | - | - | - | - / - |
+| n22 | `(!x) \| y;` | - | - | - | - | - / - |
+| n24 | `!x \| (y > 0);` | - | - | - | - | - / - |
+| n30 | `!x & 0;` | logical-not-parentheses[D] | logical-not-parentheses[D] | - | - | - / - |
+| n31 | `!x \| 0;` | - | - | - | - | - / - |
+| n35 | `!uc & y;` | logical-not-parentheses[D] | logical-not-parentheses[D] | parentheses | parentheses | - / - |
+| n37 | `!x \| -y;` | - | - | parentheses | parentheses | - / - |
+| and_castq | `!x & (int)q;` | logical-not-parentheses[D] | logical-not-parentheses[D] | parentheses | parentheses | - / - |
+| and_castcmp | `!x & (int)(y > 0);` | logical-not-parentheses[D] | logical-not-parentheses[D] | - | - | - / - |
+| and_boolcall | `!x & fb(y);` | - | - | - | - | - / - |
+| and_boolcast | `!x & (bool)y;` | - | - | - | - | - / - |
+| and_true | `!x & true;` | - | - | - | - | - / - |
+| and_one_l | `!x & 1L;` | logical-not-parentheses[D] | logical-not-parentheses[D] | - | - | - / - |
+| or_castq | `!x \| (int)q;` | - | - | parentheses | parentheses | - / - |
+| or_castcmp | `!x \| (int)(y > 0);` | - | - | - | - | - / - |
+| or_two | `!x \| 2;` | - | - | parentheses | parentheses | - / - |
+| or_m1 | `!x \| -1;` | - | - | parentheses | parentheses | - / - |
+| or_charlit | `!x \| 'a';` | - | - | parentheses | parentheses | - / - |
+| or_one_l | `!x \| 1L;` | - | - | - | - | - / - |
+| or_one | `!x \| 1;` | - | - | - | - | - / - |
+| or_zero | `!x \| 0;` | - | - | - | - | - / - |
+| or_boolcall | `!x \| fb(y);` | - | - | - | - | - / - |
+| or_true | `!x \| true;` | - | - | - | - | - / - |
+
+Clang (`-Wlogical-not-parentheses`, on by default) warns on `!e & r` only, never on `|` or `^`, for every `r` that is not a truth value, **including literals** (`!x & 1`, `!x & 0`, and `(int)(y > 0)`, `(int)q`); GCC (`-Wparentheses`) warns on `!e & r` and `!e | r` (not `^`) unless `r` is a truth value by form (a comparison, `!`, `&&`,
+`||`, a bool variable or call, a `(bool)` cast, `(int)(y > 0)`) **or the literal 0 or 1** (`!x & 1`, `!x | 1`, `!x | 0`: silent). GCC warns when `e` is itself a truth value (`!!x & y`, `!(x > 0) & y`, `!p & y`), clang does not. `!` as the right operand (`x & !y`, `y | !x`), `!x ^ y`, `!x & !y`, `!x & !y & z` (the inner `&` has a truth right operand), `(!x) | y`
+are silent. Types do not matter (`!uc & y`, `!u & v` warn).
+
+**3. `?:` with a bitwise condition** (clang `-Wbitwise-conditional-parentheses`, on by default; GCC never)
+
+| id | shape | clang C | clang C++ | gcc C | gcc C++ | EDG (C / C++) |
+|---|---|---|---|---|---|---|
+| 4a | `a & b ? c : d;` | - | - | - | - | - / - |
+| 4b | `a \| b ? c : d;` | - | - | - | - | - / - |
+| 4c | `a ^ b ? c : d;` | - | - | - | - | - / - |
+| 4d | `a & 1 ? b : c;` | - | - | - | - | - / - |
+| 4e | `(a == b) & c ? 1 : 2;` | - | - | - | - | - / - |
+| 4f | `(a & b) ? c : d;` | - | - | - | - | - / - |
+| 4g | `a ? b & c : d;` | - | - | - | - | - / - |
+| 4i | `a \| (b > 0) ? c : d;` | bitwise-conditional-parentheses[D] | bitwise-conditional-parentheses[D] | - | - | - / - |
+| 4j | `p & q ? 1 : 2;` | bitwise-conditional-parentheses[D] | bitwise-conditional-parentheses[D] | - | - | - / - |
+| 4n | `a & b == c ? 1 : 2;` | bitwise-conditional-parentheses[D],parentheses[D] | bitwise-conditional-parentheses[D],parentheses[D] | parentheses | parentheses | - / - |
+| q1 | `a \| (b > 0) ? c : d;` | bitwise-conditional-parentheses[D] | bitwise-conditional-parentheses[D] | - | - | - / - |
+| q2 | `(b > 0) \| a ? c : d;` | - | - | - | - | - / - |
+| q3 | `a & !b ? c : d;` | bitwise-conditional-parentheses[D] | bitwise-conditional-parentheses[D] | - | - | - / - |
+| q5 | `a & (b && c) ? c : d;` | bitwise-conditional-parentheses[D] | bitwise-conditional-parentheses[D] | - | - | - / - |
+| q6 | `a & q ? c : d;` | bitwise-conditional-parentheses[D] | bitwise-conditional-parentheses[D] | - | - | - / - |
+| q7 | `p & b ? c : d;` | - | - | - | - | - / - |
+| q8 | `p \| q ? c : d;` | bitwise-conditional-parentheses[D] | bitwise-conditional-parentheses[D] | - | - | - / - |
+| q9 | `a ^ q ? c : d;` | - | - | - | - | - / - |
+| q10 | `a ^ (b > 0) ? c : d;` | - | - | - | - | - / - |
+| q11 | `a & (b > 0) ? c : d;` | bitwise-conditional-parentheses[D] | bitwise-conditional-parentheses[D] | - | - | - / - |
+| q12 | `(a > 0) & (b > 0) ? c : d;` | bitwise-conditional-parentheses[D] | bitwise-conditional-parentheses[D] | - | - | - / - |
+| q13 | `(a > 0) \| b ? c : d;` | - | - | - | - | - / - |
+| q15 | `a \| (int)(b > 0) ? c : d;` | - | - | - | - | - / - |
+| q16 | `a \| (b > 0 ? 1 : 2) ? c : d;` | - | - | - | - | - / - |
+| q17 | `a \| fb(b) ? c : d;` | bitwise-conditional-parentheses[D] | bitwise-conditional-parentheses[D] | - | - | - / - |
+| q18 | `fb(a) \| b ? c : d;` | - | - | - | - | - / - |
+| q20 | `(a \| (b > 0)) ? c : d;` | - | - | - | - | - / - |
+| q22 | `a & (b \|\| c) ? c : d;` | bitwise-conditional-parentheses[D] | bitwise-conditional-parentheses[D] | - | - | - / - |
+| q23 | `a \| !b ? c : d;` | bitwise-conditional-parentheses[D] | bitwise-conditional-parentheses[D] | - | - | - / - |
+| q24 | `a \| ~b ? c : d;` | - | - | - | - | - / - |
+
+Clang warns when the unparenthesized condition is `&` or `|` (not `^`) and its **right** operand is a truth value (comparison, `!`, `&&`, `||`, bool variable or call), also when the left operand is a truth value too (`q12`); it is silent when only the left operand is a truth value (`q2`, `q7`, `q13`, `q18`), for an explicit `(int)` cast (`q15`),
+`~b`, a `?:`, a parenthesized condition (`q20`), and for plain `a & b ? c : d`, `a | b ? c : d`, `a & 1 ? ...` (`4a`-`4d`). Nothing else is warned about `a & b ? c : d` (the plan's guess was wrong: no compiler warns there).
+
+**4. `~` of a truth value** (`-Wbool-operation`, in `-Wall`)
+
+| id | shape | clang C | clang C++ | gcc C | gcc C++ | EDG (C / C++) |
+|---|---|---|---|---|---|---|
+| 5a | `~p;` | bool-operation | bool-operation | bool-operation | bool-operation | - / - |
+| 5b | `~(x > 0);` | bool-operation | bool-operation | bool-operation | bool-operation | - / - |
+| 5c | `~!x;` | bool-operation | bool-operation | bool-operation | bool-operation | - / - |
+| 5d | `~0;` | - | - | - | - | - / - |
+| 5e | `~1;` | - | - | - | - | - / - |
+| 5f | `~true;` | bool-operation | bool-operation | bool-operation | bool-operation | - / - |
+| 5g | `~x;` | - | - | - | - | - / - |
+| 5h | `~(p && q);` | bool-operation | bool-operation | bool-operation | bool-operation | - / - |
+| 5m | `~(p == q);` | bool-operation | bool-operation | bool-operation | bool-operation | - / - |
+| 5n | `~(a & b);` | - | - | - | - | - / - |
+| 5o | `~(p & q);` | bool-operation | bool-operation | - | - | - / - |
+| 5p | `~(int)p;` | - | - | - | - | - / - |
+| 5w | `~(p ^ q);` | bool-operation | bool-operation | - | - | - / - |
+| 5x | `~false;` | bool-operation | bool-operation | bool-operation | bool-operation | - / - |
+| t1 | `~(p ? q : r);` | bool-operation | bool-operation | - | bool-operation | - / - |
+| t2 | `~fb(a);` | bool-operation | bool-operation | bool-operation | bool-operation | - / - |
+| t3 | `~(bool)a;` | bool-operation | bool-operation | bool-operation | bool-operation | - / - |
+| t4 | `~(a > 0 ? 1 : 2);` | - | - | - | - | - / - |
+| t5 | `~(p \| q);` | bool-operation | bool-operation | - | - | - / - |
+| t6 | `~(p & fb(a));` | bool-operation | bool-operation | - | - | - / - |
+| t7 | `~((a > 0) & (b > 0));` | bool-operation | bool-operation | - | - | - / - |
+| t8 | `~((a > 0) \| b);` | - | - | - | - | - / - |
+| t9 | `~(p ^ true);` | bool-operation | bool-operation | - | - | - / - |
+| t10 | `~((a > 0) \| (b > 0));` | bool-operation | bool-operation | - | - | - / - |
+| t12 | `~(a & 1);` | - | - | - | - | - / - |
+| t14 | `~(!a);` | bool-operation | bool-operation | bool-operation | bool-operation | - / - |
+| t16 | `~(a ? 1 : 0);` | - | - | - | - | - / - |
+| t17 | `~(p ? a : 1);` | - | - | - | - | - / - |
+| t18 | `p = ~p; return p;` | bool-operation | bool-operation | bool-operation | bool-operation | - / - |
+| t20 | `~(unsigned)p;` | - | - | - | - | - / - |
+| t21 | `~+p;` | bool-operation | bool-operation | - | - | - / - |
+| t22 | `~-p;` | - | - | - | - | - / - |
+| t23 | `~~p;` | bool-operation | bool-operation | bool-operation | bool-operation | - / - |
+| t25 | `~(a & q);` | - | - | - | - | - / - |
+| t32 | `~(1 == 1);` | bool-operation | bool-operation | - | bool-operation | - / - |
+| t33 | `~(0 \|\| 1);` | bool-operation | bool-operation,constant-logical-operand[D] | - | bool-operation | - / - |
+| k4 | `static_assert(~true != 0, "");` | bool-operation | bool-operation | bool-operation | bool-operation | - / - |
+| c10 | `~p == 1;` | bool-operation | bool-operation | bool-operation | bool-operation | - / - |
+
+Both compilers warn on `~` of: a `bool` variable (`~p`, `p = ~p`, `~~p` once), a call returning `bool`, `(bool)a`, `!a`, a comparison, `&&`, `||`, `true`, `false`. **Clang (C and C++) and g++ also** warn on `~(p ? q : r)` and on `~(1 == 1)`/`~(0 || 1)` (GCC C is silent); **clang only** on `~+p`
+and on `&`, `|`, `^` whose **both** operands are truth values (`t5`-`t7`, `t9`-`t11`, `5o`, `5w`; `~(a & b)`, `~(a > 0) | b` (`t8`), `~(a & q)` (`t25`) are silent). Silent for everyone: `~0`, `~1` (`5d`, `5e`), `~x`, `~(a & 1)`, `~(a ? 1 : 0)` (`t16`), `~-p`, an explicit `(int)`
+or `(unsigned)` cast of a truth value (`5p`, `t20`).
+
+**5. Bitwise on truth values** (clang `-Wbitwise-instead-of-logical`; GCC never)
+
+| id | shape | clang C | clang C++ | gcc C | gcc C++ | EDG (C / C++) |
+|---|---|---|---|---|---|---|
+| 6a | `p & q;` | - | - | - | - | - / - |
+| 6b | `p \| q;` | - | - | - | - | - / - |
+| 6c | `p ^ q;` | - | - | - | - | - / - |
+| 6d | `p & fb(a);` | - | - | - | - | - / - |
+| 6g | `a & b;` | - | - | - | - | - / - |
+| 6h | `(a > 0) & (b > 0);` | - | - | - | - | - / - |
+| e1 | `fb(a) \| gb(b);` | bitwise-instead-of-logical | bitwise-instead-of-logical | - | - | - / - |
+| e2 | `fb(a) \| (b > 0);` | - | - | - | - | - / - |
+| e3 | `(a > 0) \| gb(b);` | - | - | - | - | - / - |
+| e5 | `p \| fb(a);` | - | - | - | - | - / - |
+| e6 | `fb(a) \| p;` | - | - | - | - | - / - |
+| e7 | `fi(a) \| fi(b);` | - | - | - | - | - / - |
+| e8 | `(fi(a) > 0) \| (fi(b) > 0);` | bitwise-instead-of-logical | bitwise-instead-of-logical | - | - | - / - |
+| e9 | `(fi(a) > 0) \| fb(b);` | bitwise-instead-of-logical | bitwise-instead-of-logical | - | - | - / - |
+| e10 | `fb(a) \| (fi(b) > 0);` | bitwise-instead-of-logical | bitwise-instead-of-logical | - | - | - / - |
+| e11 | `fb(a) \| gb(b) \| fb(c);` | bitwise-instead-of-logical | bitwise-instead-of-logical | - | - | - / - |
+| e13 | `fb(a) ^ gb(b);` | - | - | - | - | - / - |
+| e14 | `fb(a) & gb(b);` | bitwise-instead-of-logical | bitwise-instead-of-logical | - | - | - / - |
+| e15 | `(fb(a)) \| (gb(b));` | bitwise-instead-of-logical | bitwise-instead-of-logical | - | - | - / - |
+| e16 | `!fb(a) \| gb(b);` | bitwise-instead-of-logical | bitwise-instead-of-logical | - | - | - / - |
+| e17 | `fb(a) \| !gb(b);` | bitwise-instead-of-logical | bitwise-instead-of-logical | - | - | - / - |
+| e18 | `(p && q) \| fb(a);` | - | - | - | - | - / - |
+| e19 | `fb(a) \| (bool)b;` | - | - | - | - | - / - |
+| e22 | `bool t = true; t \|= fb(a); return t;` | - | - | - | - | - / - |
+| e25 | `(int)fb(a) \| (int)gb(b);` | - | - | - | - | - / - |
+| e27 | `!p \| fb(a);` | - | - | - | - | - / - |
+| e28 | `(a > 0) & fb(b);` | - | - | - | - | - / - |
+| e29 | `fb(a) & (b > 0);` | - | - | - | - | - / - |
+| e30 | `((a > 0) \| (b > 0)) \| fb(a);` | - | - | - | - | - / - |
+| w1 | `(x++ > 0) \| (y++ > 0);` | bitwise-instead-of-logical | bitwise-instead-of-logical | - | - | - / - |
+| w2 | `(x++ > 0) \| (y > 0);` | - | - | - | - | - / - |
+| w3 | `(x > 0) \| (y++ > 0);` | - | - | - | - | - / - |
+| w4 | `p \| (y++ > 0);` | - | - | - | - | - / - |
+| w5 | `fb(a) \| (y++ > 0);` | bitwise-instead-of-logical | bitwise-instead-of-logical | - | - | - / - |
+| w6 | `(y++ > 0) \| fb(a);` | bitwise-instead-of-logical | bitwise-instead-of-logical | - | - | - / - |
+| w8 | `(fb(a) && gb(b)) \| fb(c);` | bitwise-instead-of-logical | bitwise-instead-of-logical | - | - | - / - |
+| w9 | `(fb(a) \|\| gb(b)) & fb(c);` | bitwise-instead-of-logical | bitwise-instead-of-logical | - | - | - / - |
+| w10 | `fb(a) \| fb(b);` | bitwise-instead-of-logical | bitwise-instead-of-logical | - | - | - / - |
+| w12 | `(a > fi(b)) \| (c > fi(d));` | bitwise-instead-of-logical | bitwise-instead-of-logical | - | - | - / - |
+| w13 | `(fi(a) > 0) \| (b > 0);` | - | - | - | - | - / - |
+| w14 | `(a > 0) \| (fi(b) > 0);` | - | - | - | - | - / - |
+| w15 | `(fi(a) > 0) & (fi(b) > 0);` | bitwise-instead-of-logical | bitwise-instead-of-logical | - | - | - / - |
+| w16 | `(x++ > 0) \| fb(y);` | bitwise-instead-of-logical | bitwise-instead-of-logical | - | - | - / - |
+| w17 | `fb(y) \| (x++ > 0);` | bitwise-instead-of-logical | bitwise-instead-of-logical | - | - | - / - |
+| w18 | `(x = 1) \| (y = 1);` | - | - | - | - | - / - |
+| w20 | `(x++ > 0) & (y++ > 0);` | bitwise-instead-of-logical | bitwise-instead-of-logical | - | - | - / - |
+| w21 | `(x++ > 0) ^ (y++ > 0);` | - | - | - | - | - / - |
+| w24 | `int t = fb(a) \| gb(b); return t;` | bitwise-instead-of-logical | bitwise-instead-of-logical | - | - | - / - |
+| w25 | `fb(a) \| gb(b) ? 1 : 0;` | bitwise-conditional-parentheses[D],bitwise-instead-of-logical | bitwise-conditional-parentheses[D],bitwise-instead-of-logical | - | - | - / - |
+| w26 | `fb(a) \| (gb(b) \| fb(c));` | bitwise-instead-of-logical | bitwise-instead-of-logical | - | - | - / - |
+| w27 | `(void)0, fb(a) \| gb(b);` | bitwise-instead-of-logical | bitwise-instead-of-logical | - | - | - / - |
+| w28 | `(p ? p : q) \| fb(1);` | - | - | - | - | - / - |
+| w29 | `(bool)fi(a) \| (bool)fi(b);` | bitwise-instead-of-logical | bitwise-instead-of-logical | - | - | - / - |
+| w30 | `fi(a) != 0 \| fi(b) != 0;` | bitwise-instead-of-logical | bitwise-instead-of-logical | parentheses | parentheses | - / - |
+
+Clang warns on `&` or `|` (never `^`, never `|=`/`&=`) when **both** operands are truth values **and both contain a side effect**: `fb(a) | gb(b)`, `(x++ > 0) | (y++ > 0)`, `!f() | !g()`, `(f() && g()) | h()`, `(fi(a) > 0) | (fi(b) > 0)`, `(bool)fi(a) | (bool)fi(b)`. One side effect is silent
+(`p | fb(a)`, `(a > 0) | gb(b)`, `fb(a) | (b > 0)`, `(x++ > 0) | (y > 0)`), so are `int` operands (`fi(a) | fi(b)`), explicit `(int)` casts (`e25`) and pure truth values (`6a`, `6h`, `e4`). Only a call and `++` were probed as the effect.
+`w30` (`fi(a) != 0 | fi(b) != 0`) is also rule 1 for GCC.
+
+**6. Tautological comparisons and `~` of a narrow unsigned**
+
+| id | shape | clang C | clang C++ | gcc C | gcc C++ | EDG (C / C++) |
+|---|---|---|---|---|---|---|
+| 7a | `(x & 2) == 1;` | taut-bitwise-compare | taut-bitwise-compare | tautological-compare | tautological-compare | - / - |
+| 7b | `(x & 4) == 3;` | taut-bitwise-compare | taut-bitwise-compare | tautological-compare | tautological-compare | - / - |
+| 7c | `(x \| 4) == 3;` | taut-bitwise-compare | taut-bitwise-compare | tautological-compare | tautological-compare | - / - |
+| 7d | `(x & 2) != 1;` | taut-bitwise-compare | taut-bitwise-compare | tautological-compare | tautological-compare | - / - |
+| 7e | `if (x \| 4) return 1; return 0;` | taut-bitwise-compare | taut-bitwise-compare | - | - | - / - |
+| 7f | `if (x & 0) return 1; return 0;` | - | - | - | - | - / - |
+| 7g | `(x & 4) == 4;` | - | - | - | - | - / - |
+| 7h | `(x & 4) == 0;` | - | - | - | - | - / - |
+| 7i | `(x \| 4) == 7;` | - | - | - | - | - / - |
+| 7j | `if (x \| 0) return 1; return 0;` | - | - | - | - | - / - |
+| 7k | `(x & 0) == 0;` | - | - | - | - | - / - |
+| 7l | `x & x;` | - | - | - | - | - / - |
+| 7m | `x \| x;` | - | - | - | - | - / - |
+| 7n | `x ^ x;` | - | - | - | - | - / - |
+| 7o | `(u & 0xFF) == 256;` | - | - | tautological-compare | tautological-compare | - / - |
+| 7p | `(x \| 4) != 3;` | taut-bitwise-compare | taut-bitwise-compare | tautological-compare | tautological-compare | - / - |
+| 7q | `(x \| 1) == 0;` | taut-bitwise-compare | taut-bitwise-compare | tautological-compare | tautological-compare | - / - |
+| 7r | `(x & 1) == 2;` | taut-bitwise-compare | taut-bitwise-compare | tautological-compare | tautological-compare | - / - |
+| 7s | `(uc & 0x100) == 0;` | - | - | - | - | - / - |
+| 7t | `(x & 2) > 1;` | - | - | - | - | - / - |
+| 7u | `(u & 0xF0) == 0x0F;` | - | - | tautological-compare | tautological-compare | - / - |
+| 7v | `if (!(x \| 4)) return 1; return 0;` | taut-bitwise-compare | taut-bitwise-compare | - | - | - / - |
+| 7w | `(4 \| x) == 3;` | taut-bitwise-compare | taut-bitwise-compare | tautological-compare | tautological-compare | - / - |
+| 7x | `(2 & x) == 1;` | taut-bitwise-compare | taut-bitwise-compare | tautological-compare | tautological-compare | - / - |
+| 7y | `(x ^ 1) == x;` | - | - | - | - | - / - |
+| 7z | `(p & 2) == 1;` | taut-bitwise-compare | taut-bitwise-compare | tautological-compare | tautological-compare | - / - |
+| b1 | `(x & 0xFF) == 256;` | taut-bitwise-compare | taut-bitwise-compare | tautological-compare | tautological-compare | - / - |
+| b4 | `(x \| 0xF0) == 0x0F;` | - | - | tautological-compare | tautological-compare | - / - |
+| b5 | `(u & 2) == 1;` | - | - | tautological-compare | tautological-compare | - / - |
+| b6 | `(x & 2) == 1u;` | - | - | tautological-compare | tautological-compare | - / - |
+| b7 | `(uc & 2) == 1;` | taut-bitwise-compare | taut-bitwise-compare | tautological-compare | - | - / - |
+| b10 | `(x \| 3) == 2;` | taut-bitwise-compare | taut-bitwise-compare | tautological-compare | tautological-compare | - / - |
+| b11 | `(x \| 3) == 7;` | - | - | - | - | - / - |
+| b15 | `(x & 0) == 1;` | taut-bitwise-compare | taut-bitwise-compare | tautological-compare | tautological-compare | - / - |
+| b16 | `x \| 4 ? 1 : 2;` | taut-bitwise-compare | taut-bitwise-compare | - | - | - / - |
+| b17 | `x \| 4 && a;` | taut-bitwise-compare | taut-bitwise-compare | - | - | - / - |
+| b20 | `x \| 4 \|\| a;` | taut-bitwise-compare | taut-bitwise-compare | - | - | - / - |
+| b21 | `if ((x \| 4) != 0) return 1; return 0;` | taut-bitwise-compare | taut-bitwise-compare | tautological-compare | tautological-compare | - / - |
+| b22 | `if (x \| -1) return 1; return 0;` | taut-bitwise-compare | taut-bitwise-compare | - | - | - / - |
+| b23 | `if (4 \| x) return 1; return 0;` | taut-bitwise-compare | taut-bitwise-compare | - | - | - / - |
+| b25 | `while (x \| 4) { x--; } return x;` | taut-bitwise-compare | taut-bitwise-compare | - | - | - / - |
+| b26 | `!(x \| 4);` | taut-bitwise-compare | taut-bitwise-compare | - | - | - / - |
+| b27 | `(x & 1) < 2;` | - | - | - | - | - / - |
+| b31 | `(u & 0xFF) == 256;` | - | - | tautological-compare | tautological-compare | - / - |
+| b33 | `(x & 1) == -1;` | taut-bitwise-compare | taut-bitwise-compare | tautological-compare | tautological-compare | - / - |
+| b34 | `(x \| 1) == -1;` | - | - | - | - | - / - |
+| b35 | `(u \| 4) == 3u;` | - | - | tautological-compare | tautological-compare | - / - |
+| b40 | `(x & 2) == 1;` | - | - | tautological-compare | tautological-compare | - / - |
+| b41 | `(x & 2L) == 1;` | - | - | tautological-compare | - | - / - |
+| b43 | `(x & 4) == (2 \| 1);` | - | - | tautological-compare | - | - / - |
+| b49 | `if (x & 0) return 1; return 0;` | - | - | - | - | - / - |
+| b51 | `x & 0 ? 1 : 2;` | - | - | - | - | - / - |
+| 10g | `~uc == 0x0F;` | - | - | sign-compare[E] | sign-compare | - / - |
+| 10k | `~uc == 0xF0;` | - | - | sign-compare[E] | sign-compare | - / - |
+| 10m | `~us == 0xFFFF;` | - | - | sign-compare[E] | sign-compare | - / - |
+| 10G | `~uc == 0xFFFFFF0F;` | sign-compare[E] | sign-compare[E] | sign-compare[E] | sign-compare | - / - |
+| 10H | `~uc == -16;` | - | - | - | - | - / - |
+| c2 | `~uc > 0;` | - | - | sign-compare[E] | sign-compare | - / - |
+| c5 | `~(uc) == 0x0F;` | - | - | sign-compare[E] | sign-compare | - / - |
+| c14 | `~uc == vc;` | - | - | sign-compare[E] | sign-compare | - / - |
+| c15 | `~uc == (int)vc;` | - | - | sign-compare[E] | sign-compare | - / - |
+| c19 | `~uc < -1;` | - | - | - | - | - / - |
+| c22 | `~uc == -1;` | - | - | - | - | - / - |
+| c26 | `~uc == a + 1;` | - | - | - | - | - / - |
+| c30 | `~sc == 0x0F;` | - | - | - | - | - / - |
+| c32 | `~(int)uc == 0x0F;` | - | - | sign-compare[E] | sign-compare | - / - |
+| c35 | `~ul == 0;` | - | - | - | - | - / - |
+| c37 | `~u == 15;` | - | - | - | - | - / - |
+| c40 | `~us == 0xFFFF0000;` | sign-compare[E] | sign-compare[E] | sign-compare[E] | sign-compare | - / - |
+| c11 | `(unsigned char)~a == 0x0F;` | - | - | - | - | - / - |
+| c12 | `~(unsigned char)a == 0x0F;` | - | - | sign-compare[E] | sign-compare | - / - |
+
+(a) **`(x & C1) == C2` / `!=`** with constants and `C2 & ~C1 != 0` (also `C1 = 0`), and **`(x | C1) == C2` / `!=`** with `C1 & ~C2 != 0`, either operand order: GCC (`-Wtautological-compare`) for every operand type (`int`, `unsigned`, `long`, `bool`, `unsigned char`, `x & 2L`, a constant written `0x0F`, and in C `(2 | 1)`), clang (`-Wtautological-bitwise-compare`) only for operands that are `int` after promotion (silent for `unsigned`, `long`, `(x & 2) == 1u`, `b4`-`b6`, `b31`, `b35`, `b40`, `b41`); `<`, `>`, `<=`, `>=` and the non-tautological cases (`7g`-`7i`, `b11`-`b14`, `b32`, `b34`, `(x & 0) == 0`) are silent.
+(b) **Clang only:** `x | C`, `C | x` with a non-zero constant `C` used as a truth value (a condition of `if`/`while`/`?:`, an operand of `!`, `&&`, `||`, a `bool` initializer: `7e`, `7v`, `b16`-`b20`, `b22`, `b23`, `b25`, `b26`); silent: `x | 0`, `x | y`, `x & 0` in every context (`7f`, `7j`, `b49`-`b51`).
+(c) **GCC only** (`-Wsign-compare`, "comparison of promoted bitwise complement of an unsigned value with constant", `[E]` in C, `-Wall` in C++): a comparison (`== != < > <= >=`) of `~e` with a constant `>= 0` in any spelling (`0x0F`, `15`, `15L`, `'a'`, `2147483647`, a macro) or with a value promoted from an unsigned type narrower
+than `int`, when `e` (an explicit cast to `int` or `unsigned char` is looked through: `c12`, `c32`; not `(unsigned char)~a`, `c11`) has an unsigned type of rank below `int` (`unsigned char`, `unsigned short`). **This is the shape the plan listed as silent (`~uc == 0x0F`): it is not, for GCC.** Silent: a negative constant (`~uc == -16`,
+`< -1`, `> -256`), a non-constant `int` (`~uc == a + 1`), `~u`, `~ul` (not promoted), `~sc`, `~ch` (signed), `~uc & 0xFF`, `int t = ~uc; t == 15`. `10G`/`c40` (`~uc == 0xFFFFFF0F`: an `unsigned int` constant) is the ordinary `-Wsign-compare` of `int` and `unsigned`, in all four.
+
+**7. `^` spelled as a power** (`-Wxor-used-as-pow`, on by default in all four)
+
+Sweeps (`sweep.py`, `sweep.out`): `2 ^ n` warns in all four exactly for `n` in 0-64 (silent from 65: `2 ^ 255`, `2 ^ 1000`); `10 ^ n` for every `n` probed (0-89, 100, 255); every other left operand (0, 1, 3, 4, 5, 8, 16, 100, 1000, with `n` 2, 3, 8) is silent.
+
+| id | shape | clang C | clang C++ | gcc C | gcc C++ | EDG (C / C++) |
+|---|---|---|---|---|---|---|
+| 8a | `2 ^ 32;` | xor-used-as-pow[D] | xor-used-as-pow[D] | xor-used-as-pow[D] | xor-used-as-pow[D] | - / - |
+| 8b | `2 ^ 8;` | xor-used-as-pow[D] | xor-used-as-pow[D] | xor-used-as-pow[D] | xor-used-as-pow[D] | - / - |
+| 8c | `10 ^ 3;` | xor-used-as-pow[D] | xor-used-as-pow[D] | xor-used-as-pow[D] | xor-used-as-pow[D] | - / - |
+| 8d | `2 ^ x;` | - | - | - | - | - / - |
+| 8e | `0x2 ^ 32;` | - | - | - | - | - / - |
+| 8f | `2u ^ 32;` | - | - | xor-used-as-pow[D] | xor-used-as-pow[D] | - / - |
+| 8g | `2 ^ 0x20;` | - | - | - | - | - / - |
+| 8h | `1 ^ 32;` | - | - | - | - | - / - |
+| 8i | `POWER(8);` | - | - | - | - | - / - |
+| 8s | `2 ^ N32;` | xor-used-as-pow[D] | xor-used-as-pow[D] | - | - | - / - |
+| 8t | `0x10 ^ 2;` | - | - | - | - | - / - |
+| 8z | `3 ^ 5;` | - | - | - | - | - / - |
+| 8F | `2 ^ 255;` | - | - | - | - | - / - |
+| 8H | `4 ^ 2;` | - | - | - | - | - / - |
+| 8v | `2L ^ 32;` | - | - | xor-used-as-pow[D] | xor-used-as-pow[D] | - / - |
+| 8w | `2 ^ 32u;` | - | - | xor-used-as-pow[D] | xor-used-as-pow[D] | - / - |
+| x_sp1 | `2 ^ 8;` | xor-used-as-pow[D] | xor-used-as-pow[D] | xor-used-as-pow[D] | xor-used-as-pow[D] | - / - |
+| x_sp2 | `0x2 ^ 8;` | - | - | - | - | - / - |
+| x_sp3 | `2 ^ 0x8;` | - | - | - | - | - / - |
+| x_sp4 | `02 ^ 8;` | - | - | - | - | - / - |
+| x_sp5 | `2 ^ 010;` | - | - | - | - | - / - |
+| x_sp6 | `0b10 ^ 8;` | - | - | - | - | - / - |
+| x_sp7 | `2 ^ 0b1000;` | - | - | - | - | - / - |
+| x_sp8 | `2u ^ 8;` | - | - | xor-used-as-pow[D] | xor-used-as-pow[D] | - / - |
+| x_sp9 | `2 ^ 8u;` | - | - | xor-used-as-pow[D] | xor-used-as-pow[D] | - / - |
+| x_sp12 | `(2) ^ 8;` | - | - | xor-used-as-pow[D] | - | - / - |
+| x_sp13 | `2 ^ (8);` | - | - | xor-used-as-pow[D] | - | - / - |
+| x_sp14 | `2 ^ +8;` | xor-used-as-pow[D] | xor-used-as-pow[D] | - | - | - / - |
+| x_sp15 | `2 ^ (int)8;` | - | - | - | - | - / - |
+| x_sp16 | `TWO ^ 8;` | xor-used-as-pow[D] | xor-used-as-pow[D] | - | - | - / - |
+| x_sp17 | `2 ^ N32;` | xor-used-as-pow[D] | xor-used-as-pow[D] | - | - | - / - |
+| x_sp18 | `2 ^ E32;` | - | - | - | - | - / - |
+| x_sp19 | `TWO ^ N32;` | - | - | - | - | - / - |
+| x_sp20 | `2 ^ '\x08';` | - | - | - | - | - / - |
+| x_sp21 | `2 ^ (1 + 7);` | - | - | - | - | - / - |
+| x_sp22 | `(1 + 1) ^ 8;` | - | - | - | - | - / - |
+| x_sp24 | `10 ^ 0x3;` | - | - | - | - | - / - |
+| x_sp26 | `10 ^ 3u;` | - | - | xor-used-as-pow[D] | xor-used-as-pow[D] | - / - |
+| x_sp28 | `2 ^ -1;` | - | - | - | - | - / - |
+| x_sp29 | `-2 ^ 8;` | - | - | - | - | - / - |
+| x_sp30 | `2 ^ 8 ^ 1;` | xor-used-as-pow[D] | xor-used-as-pow[D] | xor-used-as-pow[D] | xor-used-as-pow[D] | - / - |
+| x_sp31 | `1 ^ 2 ^ 8;` | - | - | - | - | - / - |
+| x_sp32 | `x ^ 2 ^ 8;` | - | - | - | - | - / - |
+| x_sp37 | `(unsigned char)2 ^ 8;` | - | - | - | - | - / - |
+| x_sp40 | `'\x02' ^ 8;` | - | - | - | - | - / - |
+| x_sp41 | `2 ^ 8 * 1;` | - | - | - | - | - / - |
+| x_mac1 | `POWER(8);` | - | - | - | - | - / - |
+| x_mac2 | `POWER(N32);` | - | - | - | - | - / - |
+| k5 | `static_assert(2 ^ 8, "");` | xor-used-as-pow[D] | xor-used-as-pow[D] | xor-used-as-pow[D] | xor-used-as-pow[D] | - / - |
+
+Spelling decides the compilers' verdict: **clang** needs two unsuffixed decimal literal tokens, the left not parenthesized, the `^` written outside any macro and at least one operand written in the source (`TWO ^ 8` and `2 ^ N32` warn, `TWO ^ N32` and the macro body `POWER(8)` do not; `2 ^ +8` warns; `sp14`, `sp16`, `sp17`, `sp19`); **GCC** also accepts a suffix on either (`2u`, `8L`, `sp8`-`sp11`, `sp26`, `sp27`), a parenthesized literal in C (`(2) ^ 8`, `2 ^ (8)`), but not a literal that comes from a macro; hex, octal, binary,
+character, `enum` and `const` operands, `(int)8`, `(1 + 1) ^ 8`, `2 ^ -1`, `-2 ^ 8` are silent everywhere, and so are `POWER(8)` (a macro body `2 ^ n`). `2 ^ 8 ^ 1` warns on the inner `2 ^ 8` (`sp30`); `1 ^ 2 ^ 8` and `x ^ 2 ^ 8` do not. The IL has constants, not tokens (EDG folds `2 ^ 8`; the expression is kept, P38),
+so the rule below rejects the broader shape.
+
+**8. A compound bitwise assignment as the whole condition** (clang `-Wparentheses`, on by default; GCC never)
+
+| id | shape | clang C | clang C++ | gcc C | gcc C++ | EDG (C / C++) |
+|---|---|---|---|---|---|---|
+| 9a | `if (x \|= a) return x; return 0;` | parentheses[D] | parentheses[D] | - | - | - / - |
+| 9b | `while (x &= a) { a--; } return x;` | - | - | - | - | - / - |
+| 9c | `if ((x \|= a)) return x; return 0;` | - | - | - | - | - / - |
+| 9d | `int y; y = x \|= a; return y;` | - | - | - | - | - / - |
+| 9e | `if (x = a & b) return x; return 0;` | parentheses[D] | parentheses[D] | parentheses | parentheses | - / - |
+| 9f | `if (x ^= a) return x; return 0;` | - | - | - | - | - / - |
+| 9g | `if (x &= a) return x; return 0;` | - | - | - | - | - / - |
+| 9h | `x \|= a;` | - | - | - | - | - / - |
+| 9i | `for (; x &= a;) { a--; } return x;` | - | - | - | - | - / - |
+| 9j | `do { a--; } while (x \|= a); return x;` | parentheses[D] | parentheses[D] | - | - | - / - |
+| 9l | `(x \|= a) ? 1 : 2;` | - | - | - | - | - / - |
+| 9m | `if (x = a \| b) return x; return 0;` | parentheses[D] | parentheses[D] | parentheses | parentheses | - / - |
+| 9n | `x \|= a; return x;` | - | - | - | - | - / - |
+| 9o | `(x \|= a) + 1; return x;` | unused-value[D] | unused-value[D] | unused-value | unused-value | - / - |
+| 9p | `int y = x \|= a; return y;` | - | - | - | - | - / - |
+| 9q | `if ((x = a & b)) return x; return 0;` | - | - | - | - | - / - |
+| 9r | `x = a & b;` | - | - | - | - | - / - |
+| 9s | `if (x += a) return x; return 0;` | - | - | - | - | - / - |
+| 9t | `!(x \|= a);` | - | - | - | - | - / - |
+| 9u | `(x \|= a) && a;` | - | - | - | - | - / - |
+| 9v | `while (x \|= a) { a--; } return x;` | parentheses[D] | parentheses[D] | - | - | - / - |
+| 9w | `if (x \|= a) return 1; return 0;` | parentheses[D] | parentheses[D] | - | - | - / - |
+| 9x | `if (x <<= a) return x; return 0;` | - | - | - | - | - / - |
+| 9y | `if (x >>= a) return x; return 0;` | - | - | - | - | - / - |
+| 9z | `if (p &= q) return 1; return 0;` | - | - | - | - | - / - |
+| o1 | `if (x \|= a) return x; return 0;` | parentheses[D] | parentheses[D] | - | - | - / - |
+| o2 | `if ((x \|= a)) return x; return 0;` | - | - | - | - | - / - |
+| o3 | `if ((x \|= a, x)) return x; return 0;` | - | - | - | - | - / - |
+| o4 | `if ((x \|= a) && b) return x; return 0;` | - | - | - | - | - / - |
+| o5 | `if (x \|= 1) return x; return 0;` | parentheses[D] | parentheses[D] | - | - | - / - |
+| o6 | `if (!(x \|= a)) return x; return 0;` | - | - | - | - | - / - |
+| o7 | `if (x \|= a) return 1; return 0;` | parentheses[D] | parentheses[D] | - | - | - / - |
+| o8 | `if (p \|= q) return 1; return 0;` | parentheses[D] | parentheses[D] | - | - | - / - |
+| o9 | `if (a && (x \|= b)) return x; return 0;` | - | - | - | - | - / - |
+| o10 | `if (x \|= a && b) return x; return 0;` | parentheses[D] | parentheses[D] | - | - | - / - |
+| o13 | `for (; x \|= a;) { a--; } return x;` | parentheses[D] | parentheses[D] | - | - | - / - |
+| o14 | `do { a--; } while (x \|= a); return x;` | parentheses[D] | parentheses[D] | - | - | - / - |
+| o15 | `do { a--; } while ((x \|= a)); return x;` | - | - | - | - | - / - |
+| o16 | `x \|= a ? 1 : 2;` | - | - | - | - | - / - |
+| o17 | `if (x ^= a) return x; return 0;` | - | - | - | - | - / - |
+| o18 | `if (x &= a) return x; return 0;` | - | - | - | - | - / - |
+| o19 | `if (x <<= a) return x; return 0;` | - | - | - | - | - / - |
+| o20 | `if (x -= a) return x; return 0;` | - | - | - | - | - / - |
+| o21 | `if (x *= a) return x; return 0;` | - | - | - | - | - / - |
+| o22 | `if (x %= a) return x; return 0;` | - | - | - | - | - / - |
+| o23 | `if (x /= a) return x; return 0;` | - | - | - | - | - / - |
+| o24 | `if (x \|= a) {} return x;` | parentheses[D] | parentheses[D] | - | - | - / - |
+| o25 | `if (x \|= a != 0) return x; return 0;` | parentheses[D] | parentheses[D] | - | - | - / - |
+| o26 | `int y = (x \|= a) ? 1 : 2; return y;` | - | - | - | - | - / - |
+| o27 | `int y = x \|= a ? 1 : 2; return y;` | - | - | - | - | - / - |
+| o28 | `if (x \|= a) return 1; else return 0;` | parentheses[D] | parentheses[D] | - | - | - / - |
+| o29 | `switch (x \|= a) { case 0: return 1; default: return 0; }` | - | - | - | - | - / - |
+| o30 | `if ((x \|= a) != 0) return x; return 0;` | - | - | - | - | - / - |
+
+Clang warns on `|=` as the entire condition of `if`, `while`, `for` or `do` without extra parentheses (also on `bool` `p |= q`, `x |= a != 0`); **never** on `&=`, `^=`, `<<=`, `>>=`, `-=`, `*=`, `/=`, `%=`, nor under `switch`, `!`, `&&`, `?:`, a comma, or `(x |= a) != 0`. GCC is silent. The plain `x = a & b` condition warns in all four, as 0020 item 5 says (`9e`, `9m`);
+`(x |= a) + 1;` is the existing discarded-value rule (`9o`).
+
+**9. Self-assignment** (clang `-Wself-assign`, in `-Wall`; GCC never; 0021 item 8)
+
+| id | shape | clang C | clang C++ | gcc C | gcc C++ | EDG (C / C++) |
+|---|---|---|---|---|---|---|
+| s_set | `x = x; return x;` | self-assign | self-assign | - | - | - / - |
+| s_and | `x &= x; return x;` | self-assign | self-assign | - | - | - / - |
+| s_or | `x \|= x; return x;` | self-assign | self-assign | - | - | - / - |
+| s_xor | `x ^= x; return x;` | - | - | - | - | - / - |
+| s_add | `x += x; return x;` | - | - | - | - | - / - |
+| s_sub | `x -= x; return x;` | - | - | - | - | - / - |
+| s_mul | `x *= x; return x;` | - | - | - | - | - / - |
+| s_div | `x /= x; return x;` | - | - | - | - | - / - |
+| s_and_paren | `x &= (x); return x;` | self-assign | self-assign | - | - | - / - |
+| s_or_paren | `x \|= (x); return x;` | self-assign | self-assign | - | - | - / - |
+| s_and_uc | `uc &= uc; return uc;` | self-assign | self-assign | - | - | - / - |
+| s_or_sc | `sc \|= sc; return sc;` | self-assign | self-assign | - | - | - / - |
+| s_and_cast | `x &= (int)x; return x;` | - | - | - | - | - / - |
+| s_or_cast | `x \|= (int)x; return x;` | - | - | - | - | - / - |
+| s_and_u | `u &= u; return (int)u;` | self-assign | self-assign | - | - | - / - |
+| s_and_bool | `p &= p; return p;` | self-assign | self-assign | - | - | - / - |
+| s_or_bool | `p \|= p; return p;` | self-assign | self-assign | - | - | - / - |
+| s_xor_bool | `p ^= p; return p;` | - | - | - | - | - / - |
+| s_and_other | `x &= y; return x;` | - | - | - | - | - / - |
+| s_and_plus | `x &= x + 0; return x;` | - | - | - | - | - / - |
+| s_and_stmt_expr_value | `int y; y = x &= x; return y;` | self-assign | self-assign | - | - | - / - |
+| s_and_cond | `if ((x &= x)) return 1; return 0;` | self-assign | self-assign | - | - | - / - |
+
+Clang's `-Wself-assign` covers `x &= x` and `x |= x` exactly as `x = x` (through parentheses, promotions, `unsigned`, `bool`; an explicit cast hides it); `^=`, `+=`, `-=`, `*=`, `/=`, `%=`, `<<=`, `>>=` are silent.
+
+**10. Shapes that stay silent in all four** (`-` everywhere, except where noted)
+
+| id | shape | clang C | clang C++ | gcc C | gcc C++ | EDG (C / C++) |
+|---|---|---|---|---|---|---|
+| 10a | `x \|= y == z; return x;` | - | - | - | - | - / - |
+| 10c | `p ^ q;` | - | - | - | - | - / - |
+| 10d | `!a & !b;` | - | - | - | - | - / - |
+| 10e | `(a & b) == c;` | - | - | - | - | - / - |
+| 10f | `a \| (b & c);` | - | - | - | - | - / - |
+| 10h | `(int)(u & ~7);` | - | - | - | - | - / - |
+| 10i | `sc \|= 0x80; return sc;` | - | - | - | - | - / - |
+| 10j | `uc \|= 0x80; return uc;` | - | - | - | - | - / - |
+| 10l | `~uc & 0xFF;` | - | - | - | - | - / - |
+| 10n | `(unsigned char)~uc;` | - | - | - | - | - / - |
+| 10o | `~sc == 0x0F;` | - | - | - | - | - / - |
+| 10p | `x & ~u;` | - | - | - | - | - / - |
+| 10q | `x \|= 1u << 3; return x;` | - | - | - | - | - / - |
+| 10r | `u \|= 0x80000000; return (int)u;` | - | - | - | - | - / - |
+| 10s | `x & (int)(1u << 31);` | - | - | - | - | - / - |
+| 10t | `(int)(u & ~0u);` | - | - | - | - | - / - |
+| 10u | `x & -1;` | - | - | - | - | - / - |
+| 10v | `x \| -1;` | - | - | - | - | - / - |
+| 10w | `(int)(u & -1);` | - | - | - | - | #68 / #68 |
+| 10x | `x &= 0xFF; return x;` | - | - | - | - | - / - |
+| 10y | `x &= ~0xFF; return x;` | - | - | - | - | - / - |
+| 10z | `uc &= ~1; return uc;` | - | - | - | - | - / - |
+| 10A | `uc = ~uc; return uc;` | - | - | - | - | - / - |
+| 10F | `(~uc & 0xFF) == 0x0F;` | - | - | - | - | - / - |
+| 10M | `x ^= y; return x;` | - | - | - | - | - / - |
+| 10N | `x &= y; return x;` | - | - | - | - | - / - |
+| 10O | `x \|= y; return x;` | - | - | - | - | - / - |
+| 10Q | `x ^= x; return x;` | - | - | - | - | - / - |
+| 3d | `!x & !y;` | - | - | - | - | - / - |
+| 3e | `!x & (y > 0);` | - | - | - | - | - / - |
+| 3f | `x & !y;` | - | - | - | - | - / - |
+| 3h | `!(x & y);` | - | - | - | - | - / - |
+| 3m | `(!x) & y;` | - | - | - | - | - / - |
+| 3n | `y \| !x;` | - | - | - | - | - / - |
+| 6g | `a & b;` | - | - | - | - | - / - |
+| 6h | `(a > 0) & (b > 0);` | - | - | - | - | - / - |
+| 7l | `x & x;` | - | - | - | - | - / - |
+| 7m | `x \| x;` | - | - | - | - | - / - |
+| 7n | `x ^ x;` | - | - | - | - | - / - |
+
+`x |= y == z` (`10a`), `b1 ^ b2`, `!a & !b`, `(a & b) == c`, `a | (b & c)`, `u & ~7`, `sc |= 0x80` (a narrowing assignment: `-Wconversion` is not in `-Wall`), `u |= 0x80000000`, `x & -1`, `x | -1`, `x & ~u`, `x |= 1u << 3`, `~uc & 0xFF`, `x ^= x`: all silent. The two exceptions are `x &= x` and `x |= x`
+(clang `-Wself-assign`, item 9), and `~uc == 0x0F`/`~uc == 0xF0`/`~us == 0xFFFF` (`10g`, `10k`, `10m`: GCC `-Wsign-compare`, item 6c).
+
+**11. Measure only (not bitwise; for the owner's later question)**
+
+| id | shape | clang C | clang C++ | gcc C | gcc C++ | EDG (C / C++) |
+|---|---|---|---|---|---|---|
+| 11a | `a && b \|\| c;` | logical-op-parentheses | logical-op-parentheses | parentheses | parentheses | - / - |
+| 11b | `a \|\| b && c;` | logical-op-parentheses | logical-op-parentheses | parentheses | parentheses | - / - |
+| 11c | `a + b << c;` | shift-op-parentheses[D] | shift-op-parentheses[D] | parentheses | parentheses | - / - |
+| 11d | `a << b + c;` | shift-op-parentheses[D] | shift-op-parentheses[D] | parentheses | parentheses | - / - |
+| 11m | `a - b << c;` | shift-op-parentheses[D] | shift-op-parentheses[D] | parentheses | parentheses | - / - |
+| 11n | `a << b - c;` | shift-op-parentheses[D] | shift-op-parentheses[D] | parentheses | parentheses | - / - |
+| 11o | `a + b >> c;` | shift-op-parentheses[D] | shift-op-parentheses[D] | parentheses | parentheses | - / - |
+| 11p | `a >> b + c;` | shift-op-parentheses[D] | shift-op-parentheses[D] | parentheses | parentheses | - / - |
+| 11e | `!x == y;` | logical-not-parentheses[D] | logical-not-parentheses[D] | logical-not-parentheses | logical-not-parentheses | - / - |
+| 11t | `!a == b;` | logical-not-parentheses[D] | logical-not-parentheses[D] | logical-not-parentheses | logical-not-parentheses | - / - |
+| 11f | `x == y == z;` | - | - | parentheses | parentheses | - / - |
+| 11j | `x < y < z;` | parentheses[D] | parentheses[D] | parentheses | parentheses | - / - |
+| 11z | `a < b == 1;` | - | - | parentheses | parentheses | - / - |
+| 11g | `x == x;` | tautological-compare[D] | tautological-compare[D] | tautological-compare | tautological-compare | - / - |
+| 11k | `x != x;` | tautological-compare[D] | tautological-compare[D] | tautological-compare | tautological-compare | - / - |
+| 11v | `x > x;` | tautological-compare[D] | tautological-compare[D] | tautological-compare | tautological-compare | - / - |
+| 11h | `u >= 0;` | - | - | type-limits[E] | type-limits[E] | #186 / #186 |
+| 11l | `u < 0;` | - | - | type-limits[E] | type-limits[E] | #186 / #186 |
+| 11i | `if (a << b) return 1; return 0;` | int-in-bool-context | int-in-bool-context | int-in-bool-context | int-in-bool-context | - / - |
+| 11y | `a << b ? 1 : 2;` | int-in-bool-context | int-in-bool-context | int-in-bool-context | int-in-bool-context | - / - |
+| 11x | `if (a * b) return 1; return 0;` | - | - | int-in-bool-context | int-in-bool-context | - / - |
+| 11q | `(a && b) \|\| c;` | - | - | - | - | - / - |
+| 11r | `a && (b \|\| c);` | - | - | - | - | - / - |
+| 11s | `a && b && c;` | - | - | - | - | - / - |
+| 11u | `!(a == b);` | - | - | - | - | - / - |
+| 11w | `x - x;` | - | - | - | - | - / - |
+
+All four warn: `a && b || c`, `a || b && c` (`-Wlogical-op-parentheses`/`-Wparentheses`, `-Wall`), `a + b << c`, `a << b + c` and the `-`/`>>` variants (`-Wshift-op-parentheses` on by default in clang; `-Wparentheses` in GCC), `!x == y` (`-Wlogical-not-parentheses`), `x == x`, `x != x`, `x > x`
+(`-Wtautological-compare`), `if (a << b)` and `a << b ? 1 : 2` (`-Wint-in-bool-context`). **Only GCC:** `x == y == z` and `a < b == 1` (`-Wparentheses`), `if (a * b)` (`-Wint-in-bool-context`), `u >= 0` and `u < 0` (`-Wtype-limits`, `[E]`; EDG's #186 does warn, in both modes).
+**`x < y < z` is an error in clang** (C and C++, by default, `-Wparentheses`: "chained comparison 'X < Y < Z' does not behave the same as a mathematical expression"; GCC only warns). Silent: `(a && b) || c`, `a && (b || c)`, `a && b && c`, `!(a == b)`, `x - x`, `x == y == z` in clang.
+
+#### The rules (decision 0023's list; each states what the IL must show)
+
+The owner's rule (0020 item 5, 0022 item 5): the union of what clang and GCC warn about, in both modes; where the IL cannot see what the compilers see (a literal's spelling, macro use) cerastes rejects the broader shape. All rules apply in code **and** in contracts (the compilers never see the latter, so this is cerastes's stricter reading).
+Operand "kinds" are after peeling parentheses (`is_parenthesized`) and `compiler_generated` casts only. Seven new rules, two extensions of existing ones.
+
+1. **`bitwise_operand_parentheses`.** A binary `eok_and`, `eok_or` or `eok_xor` has an operand (left or right) that is not `is_parenthesized` and is (a) a comparison operation (`eok_eq/ne/lt/gt/le/ge`), or (b) binary `eok_add`/`eok_sub`, or (c) a binary `eok_and/or/xor` whose operator differs from the parent's
+   (`&` under `|` or `^`; `^` under `|`; same-operator chains are fine). Shifts, `*`, `/`, `%`, unary operators and calls are not matched. Spelling: none; macros: the flag is the only thing read (clang warns inside macros, GCC mostly not, `+`/`-` in a macro neither: one rule for all).
+   (a) and (c) are warned by both compilers, (b) by GCC only; `a == b & c == d` is rejected although clang is silent (GCC warns). `(a < b) | (c < d)` (parenthesized) is accepted.
+2. **`logical_not_operand`.** A binary `eok_and` or `eok_or` whose **left** operand is an unparenthesized `eok_lnot` (any operand, itself a truth value or not). Accepted: the right operand is a truth value T (a comparison, `!`, `&&`, `||`, a bool-typed expression or `true`/`false`, with no explicit cast to a non-bool type in between);
+   for `|` also a right operand that is the literal `0` or `1` (any suffix) or an explicit cast of a comparison (GCC is silent, clang never warns on `|`). Everything else is rejected, including `!x & 1` and `!x & (int)(y > 0)` (clang warns), `!!x & y`, `!(x > 0) & y`, `!p & y` (GCC warns). `^` is never matched, nor a `!` on the right.
+3. **`bool_complement`.** An `eok_not` (bitwise `~`) whose operand, after peeling parentheses, compiler-generated casts and a unary plus, is a truth value T extended by `&`/`|`/`^` of two truth values (clang) and a `?:` with bool arms; a constant folded from such an expression counts (`~true`, `~(1 == 1)`). An explicit `(int)`/`(unsigned)` cast is a barrier,
+   `(bool)` is not. `~0`, `~1`, `~x`, `~(a & 1)`, `~(a ? 1 : 0)` are accepted. (Both compilers for the core, clang or g++ for the rest.)
+4. **`bitwise_condition_precedence`.** A `?:` whose condition is not `is_parenthesized` and is a binary `eok_and` or `eok_or` (not `^`) whose **right** operand is a truth value T (explicit casts are a barrier; `~b` and `?:` are not T). Clang only; `a & b ? c : d` with ordinary operands is accepted (all four silent).
+5. **`bitwise_instead_of_logical`.** A binary `eok_and` or `eok_or` (not `^`, not the compound forms) whose operands are both truth values T and **both** contain a side effect (a call, `++`/`--`, an assignment; only calls and `++` probed). Clang only; one side effect, `int` operands and explicit casts to `int` are accepted.
+6. **`bitwise_constant_comparison`**, three clauses. (a) `eok_eq`/`eok_ne` between a constant `C2` and a binary `x & C1` (resp. `x | C1`), `C1` constant, with `C2 & ~C1 != 0` (resp. `C1 & ~C2 != 0`), either order, any integer type (GCC; clang only for `int`-after-promotion), the values EDG's folded ones (spelling, macros, `(2 | 1)` irrelevant).
+   (b) `x | C` or `C | x`, `C` a non-zero constant, in a truth context (a condition, an operand of `!`, `&&`, `||`, a conversion to `bool`; clang). (c) Any of the six comparisons with an operand `~e` where, looking through explicit casts to an integer type, `e` has an unsigned type of rank below `int`, and the other operand is a constant `>= 0` or has such a promoted unsigned type (GCC `-Wsign-compare`);
+   a negative constant or a non-constant signed operand is accepted. Clause (c) rejects `~uc == 0x0F`, which the plan expected to stay silent.
+7. **`xor_as_power`.** A binary `eok_xor` whose operands are both integer constants (any spelling, suffix, parenthesization, macro, `enum` or `const` origin: **broader** than all four compilers) with the left operand's value 2 and the right's in 0..64, or the left 10 and the right >= 0 (probed to 255). Silent in all four, rejected by cerastes:
+   `0x2 ^ 8`, `02 ^ 8`, `2 ^ 0b1000`, `2 ^ E32`, `(1 + 1) ^ 8`, `2 ^ (int)8`, and the macro-body form `POWER(8)` once expanded. Accepted: any other left value, a right operand above 64 for `2`, a non-constant operand (`2 ^ x`, `x ^ 2 ^ 8` unless the folded part is a constant `2 ^ 8`).
+- **E1. `assignment_as_condition` (0020 item 5), extended:** also `|=` (unparenthesized, the whole condition of `if`/`while`/`do`/`for`, any operand type, `bool` included; clang). Not `&=`, `^=` or any other compound, not `switch`.
+- **E2. `self_assignment` (0021 item 8), extended:** also `x &= x` and `x |= x` (same variable after the generated conversions, no macro involvement, an explicit cast hides it, parentheses do not); not `^=`, `+=`, `-=`, `*=`, `/=`, `%=`, `<<=`, `>>=`.
+
+Rules 2, 3 and 5 share the notion T and the peeling, which the encoder implements once. `-Wunused-value` shapes of the bitwise operators (a discarded `a & b;`, `x |= 1;`) follow 0020 item 5's existing rules (`9o`: `(x |= a) + 1;` already rejected by `value_not_used`); `a & b;` as a statement has no side effect and stays accepted like `x + 1;`.
+
+#### Q33: the header sweep for `--diag_error=1422,1654,26,3255`
+
+No header fails. The directly included headers of `tests/scalar`, `tests/annotations` and the doc examples are `<cerastes.h>`, `<stdlib.h>`, `<assert.h>`, `<stdio.h>`, `<stdbool.h>`, `<limits.h>`, `<sys/wait.h>`, `<cstdlib>`, `<cassert>`, `<cstdio>`, `<exception>`, `<coroutine>` and the helper headers
+under `tests/scalar/headers`. `q33/sweep.py` parses each C header in C23 and C++20, each C++ header in C++20, with and without the four numbers (both runs with `--display_error_number`): 19 runs, exit 0 and no diagnostic in each (`q33/sweep.out`). Two further facts:
+(1) EDG suppresses diagnostics in system headers **even when `--diag_error` raises them**: a `--sys_include` header with `'ab'` is silent (exit 0), the same header through `-I` is error #1422 (`q33/usesys.c`). The four numbers therefore bind only the primary file and user headers (`-I`, quotes), which the sweep also covers:
+(2) no verify test, doc example, helper header or `include/cerastes.h` contains a character literal at all (a grep for `'x'`, `'ab'`, `'\x...'` outside comments finds none), so no test trips #1422, #1654, #26 or #3255. Probe: `'ab'` is #1422 (warning by default) in both modes, `'abcde'` #1654, `L'ab'` #26 in C (error already in C++), `'\x1234'` #27 (an error by default).
+
+### S21: a closed form for `& | ^` on mathematical integers (M4.4b1): **PASS for 32, 64 and 128 bits with the hierarchical form `Hn8`; the proposed flat forms (A1, A1h, A2, A2h) FAIL on symbolic operands**
+
+All files, generators and logs: `build/m4.4b1/s21/` (`gen.py`, `gen_split.py`, `gen_h.py` produce the Viper; `run.py` runs it; `claims.py`, `leaf_lemmas.py`, `t_pre.py` are the side experiments; `vpr/` has every file run, `out/` the last Silicon output of each, `results.tsv`, `logs/`). Silicon is run as `src/driver/silicon.cpp:106` runs it: `java -Xss128m -jar silicon.jar --z3Exe z3 --numberOfErrorsToReport 0 program.vpr`, clean environment, pinned JDK 17, Silicon `6b540aa4`, Z3 4.16.0. Timing floor on this machine, a file with one trivial method: **1.3 s** (3 runs, `trivial.vpr`). A baseline run was loading the machine for the first hour (load average up to 174); every number below is from runs made after it ended, at load below 15, and the timing table (3 repetitions) is from a quiet machine.
+
+**1. Semantics.** `semantics.vpr` (12 asserts, Silicon `finished verification successfully`, 1.49 s): Viper's `\` is floor division and `%` the non-negative remainder for a positive divisor, including negative dividends: `(-7) \ 2 == -4`, `(-7) % 2 == 1`, `(-1) \ 2 == -1`, `(-9223372036854775808) \ 4294967296 == -2147483648`, `(-4294967297) % 4294967296 == 4294967295`. Its twin `semantics_fail.vpr` (`(-7) \ 2 == -3`) gives 1 error (`Assert might fail … program.vpr@3.10--3.26`).
+
+**2. The proposed formula is correct** (`formula.py`): `c_and_N(a,b) = Σ_{k<N} 2^k·[bit_k(a) ∧ bit_k(b)] − (a<0 ∧ b<0 ? 2^N : 0)`, `or = a + b − and`, `xor = a + b − 2·and`, with `bit_k(a) = (a \ 2^k) % 2`: 0 mismatches against Python's `& | ^` on 27033 operand pairs for N = 32, 64, 128 (the type's MIN/MAX, −1, 2^N−1, −2^N, random in [−2^N, 2^N), random signed, random unsigned). Hand cases: `(−1) ^ INT_MAX == INT_MIN`, `INT_MIN & −1 == INT_MIN`, `(−1) & 12345 == 12345`, `(−8) & 13 == 8`: all True. The same formula, as Viper, decides every closed constant item below (A1, 32/64/128 bits: 2.0–2.8 s). **It is not usable for symbolic operands**, see 3.
+
+**3. Variants A1, A1h, A2, A2h (the orchestrator's list), N = 32** (one repetition, timeout 40 s; "T/O" is a timeout, i.e. no verdict):
+
+| item | A1 | A1h | A2 (let chain, flat) | A2h |
+|---|---|---|---|---|
+| closed constants, prologue asserts, neg/MIN (6 files) | 1.8–1.9 s, as expected | not run | not run | not run |
+| `x >= 0 ==> and(x, 1) == x % 2` (+ twin) | 1.95 s | | | |
+| `xor(x, x) == 0` | **T/O** | **T/O (30 s)** | **T/O (30 s)** | **T/O (30 s)** |
+| signed range of `and/or/xor` of two signed | **T/O** | **T/O** | **T/O** | **T/O** |
+| unsigned range, `ten_ops_*`, `xor_invol`, `low_bit` | T/O | | | |
+
+Scaling of A1 and A2 on `xor(x,x)==0` and the signed range property (60 s timeout, bits N): A1 xor_self 8: 1.8 s, 10: 6.9 s, 12: T/O; A1 range 8: 9.7 s, 10: T/O; A2 xor_self 8..12: 1.7–4 s, 16: 5.4 s, 20: T/O; A2 range 8: 1.8 s, 12: 4.2 s, 16: T/O. So both are exponential in N for symbolic operands (Z3 case-splits the per-bit `ite`s and the `%`/`\` atoms); 64 bits cannot be completed with them, and a bounded recursion or SMT bit-vectors was not needed (below). Per-function cost of the flat forms is also quadratic: a prelude of one 32/64/128-bit function costs 0.6/1.7/6.5 s over the floor with Silicon doing nothing but reading it (`t_pre.py`).
+
+**4. What works: `Hn8`.** Three ideas, each measured:
+1. **Bits from a floor-division chain** `q0 = a`, `q_{k+1} = q_k \ 2`, `bit_k = q_k − 2·q_{k+1}` (no `%`, no `2^k` literals; the chain on a negative `a` is the infinite two's-complement extension), and **no `(a<0 && b<0)` correction**: the signed function gives the top bit the weight `−2^(N−1)`, so its result is in the signed range by construction; the unsigned function gives it `+2^(N−1)`. Hence **two sets of functions** (`c_and_N` for signed computed types, `c_uand_N` for unsigned ones), as `c_div`/`c_udiv` are split today. Both are total and read the low N bits of two's complement operands (exact on [−2^(N−1), 2^(N−1)) resp. [0, 2^N)). `hsim.py` checks the whole construction (every width, leaf widths 4/8/16): 0 mismatches.
+2. **Hierarchy.** Only an 8-bit leaf has a bit chain. An N-bit function is `c_u<op>_{N/2}(a, b) + 2^(N/2) * c_<u?><op>_{N/2}(a \ 2^(N/2), b \ 2^(N/2))`: a low half (the low bits of `a`, unsigned) plus a high half of the same signedness as the parent. No sizeable function body exists, so the prelude cost is linear (all six functions of one width: 2.0, 2.1, 2.2 s for 32, 64, 128 against 4.0, 10.3, 45 s flat).
+3. **Per bit `ite`**: and: `((ba + bb == 2) ? 1 : 0)`, or: `>= 1`, xor: `== 1`, each op its own function (not derived from `and`). No postcondition on any function (decision 0012 item 11 stays as it is): Z3 derives the range of a result when the property needs it (`range_s`).
+
+**Timing, `Hn8`, whole battery, three repetitions each (median/max seconds; "T/O" = no verdict in 20 s, ×3 repetitions stop at the first):**
+
+| item | N=32 | N=64 | N=128 |
+|---|---|---|---|
+| consts (12 exact constants incl. `xor_64(-1, 2^63-1) == -2^63`, MIN & -1) | 2.03/2.28 | 2.09/2.19 | 2.20/2.26 |
+| consts_fail (`or(240,15) == 256`: exactly 1 error) | 2.02/2.16 | 2.07/2.21 | 2.14/2.26 |
+| prologue (K=0xF0\|0x0F, `~0`, enumerator A\|B, case value 0x80\|1, nested calls) | 2.13/2.19 | 2.40/2.50 | 4.56/4.74 |
+| prologue_fail (`or(240,256) <= 255`: exactly 1 error) | 2.03/2.14 | 2.05/2.17 | 2.17/2.26 |
+| neg_min / neg_min_fail (negative operands, results equal to MIN) | 2.01/2.13, 1.99/2.11 | 2.07/2.15, 2.05/2.14 | 2.11/2.29, 2.09/2.21 |
+| `x>=0 ==> and(x,1) == x%2` / twin (`== 1`) | 1.65/1.75, 1.67/1.77 | 1.66/1.77, 1.67/1.81 | 1.68/1.79, 1.73/1.84 |
+| `xor(x,x) == 0` / twin | 1.66/1.76, 1.65/1.76 | 1.66/1.75, 1.66/1.77 | 1.69/1.83, 1.68/1.84 |
+| signed range of and/or/xor / twin (`0 <= and(x,y)`) | 2.02/2.12, 2.14/2.27 | 2.08/2.18, 2.13/2.22 | 2.22/2.29, 2.50/2.62 |
+| 10 symbolic ops, result in range / twin (`t10 == t9 + 1`) | 2.01/2.15, 2.23/2.31 | 2.12/2.23, 3.09/3.21 | 2.29/2.37, **T/O** |
+| false property `or(x,y) >= and(x,y)` (must fail) | 1.85/1.95 | 1.95/2.05 | 2.14/2.23 |
+| `and(-1,x)==x && or(x,0)==x && and(x,0)==0` twin (`== x + 1`) | 1.66/1.75 | 1.67/1.77 | 1.72/1.84 |
+
+Every must-pass item passes at every width, every twin and the false property fail as expected (one error where one is predicted) except the 128-bit `ten_ops_fail`. The median budget (< 2 s) is met by the symbolic items and misses by 0.0–0.3 s for the constant items, whose floor here is the 1.3–1.7 s JVM and Silicon start (the 128-bit prologue's 4.6 s is the one real cost: three nested calls over 128-bit chains); the max budget (< 10 s) holds everywhere that has a verdict. Nice-to-have items **not met at any width** (T/O in 20 s, `Hn8`): the claims that need the bit relation of a symbolic operand beyond a constant mask or the same operand twice: `and(-1,x)==x` alone, `or(x,0)==x`, `and(x,x)==x`, `xor(xor(a,b),b)==a`, `0 <= and(u,m) <= m`, `or(u,m) >= m`, the 10-op idempotence `and(t,t)==t`, `low_bit` (`0 < and(x, 0-x) <= x`), the popcount loop (`x := and(x, x-1)` strictly decreases) and their twins. Met at 32 bits (claims.py, 1.5–2.2 s): `u & 255 <= 255`, `u & 15 < 16`, `u & 1 == u % 2`, `u & 255 == u % 256`, `(u | 4) & 4 == 4`, `(u & ~4) & 4 == 0`, `xor(u,u)==0`, `and(x,0)==0`, `and(x,y)==and(y,x)`, `xor` range.
+
+**5. Other forms tried (core battery, N=64 unless noted, 20 s timeout; `claims.py` at N=32):**
+- Single function per op without hierarchy, bit chain, ite, with a range postcondition (`Ditefp`): the required items pass at 32 and 64 bits (2.1–4.1 s at 32, 3.2–10.3 s at 64, the per-function cost) and fail the budget at 128 (`consts` T/O at 40 s, the others 8–29 s); `Ddiv` (per-bit `(ba+bb) \ 2`) and `Dlin` (bit products) are worse (`Dlin` T/O on everything symbolic at 16 bits, `Ddivf` without postcondition T/O on the signed range at 32).
+- Hierarchy with other leaves, with range postconditions (`ensures`), 64 bits: `H4`, `H8`, `H16`, `Hd8` (div per bit), `Hh8` (Horner) all pass the required items; `H4`, `H8`, `Hd8`, `Hh8` time out on at least one must-fail twin (`and_m1_fail`, `false_prop`, `ten_ops_fail`), `H16` and **no-postcondition `Hn8`** do not (all time out on `low_bit_fail`). A postcondition (`ensures lo <= result <= hi`) is therefore no help, and would also need a lint change (`ensures` is a check line, `lint_viper.py:93,372`, and has no map entry in a prelude function).
+- 128 bits, core battery: `Hn8` passes everything but `ten_ops_fail`; `Hn4` the same (consts 2.26, prologue 5.20, range_s 2.22); `Hn16` times out on `range_s` (flaky). `Hn8` is the recommendation (fewer levels than `Hn4`, no timeout on a required item).
+- Per-bit forms with `or`/`xor` linear in `and` (`Hm8` div, `Hi8` ite, 32 bits): they prove `xor(x,0)==x` or `or(x,0)==x` (10–13 s) but lose some mask claims (`Hm8`: `(u | 4) & 4 == 4`, `u & 255 == u % 256`, `or <= max`; `Hi8`: `xor(u,u)==0`, `(u | 4) & 4 == 4`); `Hn8` has the best coverage of the masks.
+- Lemma postconditions (`result <= b % 2^N` on the unsigned `and`; `Hb8`): proved at 32 and 64 bits (`u_and_le_k` 5.4 s, 10.1 s) but the function proofs raise every file to 3–12 s and 64 bits `consts` and 128 bits everything time out: not recommended.
+
+**6. Verdict.** `Hn8` meets the budget for the required battery at 32, 64 and 128 bits with a total, non-recursive, body-only prelude of functions that Silicon never has to prove anything about (no postcondition, no axiom, no `inhale`); closed constants (prologue asserts) are decided by evaluation, including a failing one (exactly 1 error). Shapes it cannot prove symbolically (list in 4) hang rather than fail: **Z3 does not return `unknown` for them**. Silicon's `--assertTimeout 3000` turns each into an ordinary `Assert might fail` in 6–12 s (`Hn8`, 64 bits: `ten_ops_idem` 6.0 s, `xor_invol` 6.0 s, `low_bit` 12.0 s, `low_bit_fail` 6.7 s; `S21_ARGS="--assertTimeout 3000"` for `run.py`), sound but an incompleteness: whether the driver sets it is a decision for 0023. The lint accepts the function form (`lint_viper.py` on `Hn8_128_prologue.vpr`: only the spike methods' missing `decreases` and map are reported, no complaint about a `function`).
+
+**7. The emitted text** (`gen_h.py`, `Hn8`; `vpr/Hn8_128_prologue.vpr` is a whole file). Leaf (8 bits; the chain abbreviated here, the file has all eight `let` pairs; `c_uand_8` has `+ 128 *` instead of `+ (-128) *` on the last term):
+
+```text
+function c_and_8(a: Int, b: Int): Int
+{
+  let qa1 == (a \ 2) in let qb1 == (b \ 2) in let qa2 == (qa1 \ 2) in let qb2 == (qb1 \ 2) in ... let qa8 == (qa7 \ 2) in let qb8 == (qb7 \ 2) in (((a - 2 * qa1) + (b - 2 * qb1) == 2) ? 1 : 0) + 2 * (((qa1 - 2 * qa2) + (qb1 - 2 * qb2) == 2) ? 1 : 0) + 4 * (...) + 8 * (...) + 16 * (...) + 32 * (...) + 64 * (((qa6 - 2 * qa7) + (qb6 - 2 * qb7) == 2) ? 1 : 0) + (-128) * (((qa7 - 2 * qa8) + (qb7 - 2 * qb8) == 2) ? 1 : 0)
+}
+function c_and_16(a: Int, b: Int): Int { c_uand_8(a, b) + 256 * c_and_8(a \ 256, b \ 256) }
+function c_uand_16(a: Int, b: Int): Int { c_uand_8(a, b) + 256 * c_uand_8(a \ 256, b \ 256) }
+function c_and_32(a: Int, b: Int): Int { c_uand_16(a, b) + 65536 * c_and_16(a \ 65536, b \ 65536) }
+function c_or_32(a: Int, b: Int): Int { c_uor_16(a, b) + 65536 * c_or_16(a \ 65536, b \ 65536) }
+function c_xor_32(a: Int, b: Int): Int { c_uxor_16(a, b) + 65536 * c_xor_16(a \ 65536, b \ 65536) }
+```
+(In the files each function is on several lines, as `prelude.cpp`'s `fn` writes them.) The per-bit test for `or` is `... >= 1` and for `xor` `... == 1`. Names: `c_<op>_N` (signed computed types), `c_u<op>_N` (unsigned), `op` in `and or xor`, `N` in 8, 16, 32, 64, 128 (the lowering needs 32, 64, 128). `~a` stays inline: `-1 - a` (signed), `MAX - a` (unsigned).
+
+**C++ sketch for `src/viper/prelude.cpp`:**
+
+```cpp
+struct BitFn { std::string op; int width; bool is_unsigned; };
+bool parse_bit_fn(const std::string& n, BitFn& f);   // "c_and_32", "c_uxor_64"; width in {8,16,32,64,128}
+
+// prelude_closure, after the existing c_shr -> c_pow2 rule:
+std::function<void(const std::string&, int, bool)> add = [&](const std::string& op, int w, bool uns) {
+  if (w > 8) { add(op, w / 2, true); add(op, w / 2, uns); }       // low half unsigned, high half as the parent
+  all.insert(bit_fn_name(op, w, uns));
+};
+for (const std::string& n : std::set<std::string>(used)) { BitFn f; if (parse_bit_fn(n, f)) add(f.op, f.width, f.is_unsigned); }
+
+std::string bit_fn_text(const BitFn& f) {
+  if (f.width == 8) {   // leaf: the chain and the weighted sum
+    std::string chain, sum;
+    for (int k = 1; k <= 8; ++k) {
+      auto q = [&](char v, int i) { return i == 0 ? std::string(1, v) : std::string("q") + v + std::to_string(i); };
+      chain += "let qa" + std::to_string(k) + " == (" + q('a', k - 1) + " \\ 2) in let qb" + std::to_string(k) + " == (" + q('b', k - 1) + " \\ 2) in ";
+    }
+    for (int k = 0; k < 8; ++k) {
+      std::string ba = "(" + q('a', k) + " - 2 * qa" + std::to_string(k + 1) + ")", bb = /* same for b */;
+      std::string t = f.op == "and" ? "((" + ba + " + " + bb + " == 2) ? 1 : 0)"
+                    : f.op == "or"  ? "((" + ba + " + " + bb + " >= 1) ? 1 : 0)"
+                                    : "((" + ba + " + " + bb + " == 1) ? 1 : 0)";
+      std::string w = (k == 7 && !f.is_unsigned) ? "(-128)" : std::to_string(1 << k);
+      sum += (k ? " + " : "") + (k == 0 ? t : w + " * " + t);
+    }
+    return chain + sum;
+  }
+  int h = f.width / 2; std::string p = cerastes::vir::dec::pow2(h);
+  return bit_fn_name(f.op, h, true) + "(a, b) + " + p + " * " + bit_fn_name(f.op, h, f.is_unsigned) + "(a \\ " + p + ", b \\ " + p + ")";
+}
+// emit in ascending width order (dependency order), only the closure of the used names.
+```
+(`bit_fn_name(op, w, uns)` is `"c_" + (uns ? "u" : "") + op + "_" + std::to_string(w)`; the sketch is not compiled, the generators in `gen_h.py`/`gen_split.py` are the tested form; `ba`, `bb` use `q('a', k)`/`q('b', k)` the same way.)
+
+**Surprises.** (1) The proposed flat forms prove constants in 2 s but nothing symbolic past 8–12 bits: Z3 proves a symbolic range or identity of a flat bit sum only by case splits. (2) Splitting the work in halves is what makes Silicon's per-function cost linear: a 128-bit flat function costs 6.5 s of Silicon time before any proof, the whole hierarchy 1 s. (3) A range postcondition makes things worse, not better (must-fail twins hang more often). (4) Z3 hangs rather than returning `unknown` on unprovable symbolic bit identities; `--assertTimeout` bounds them. (5) JVM and Silicon start cost 1.3 s, so no file is faster than that. (6) `pkill -f silicon.jar` was run once early in the spike to clean up my own timeouts; the baseline run had already ended (its log says `copied`, 17:03; the kill was at 17:17), but any other Silicon run of another session at that moment would have been killed as well. Later cleanups killed only PIDs of my own orphans.
