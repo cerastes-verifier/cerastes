@@ -1,7 +1,7 @@
 // expect: error postcondition @ L40
 // mode: c23, c++20
 // twin: tests/scalar/bit_long.c
-// Pins: 0023 decision: 2^62 & (2^63 - 1) is 2^62, not one less
+// Pins: 0023 decision: (2^62 + 3) & (2^63 - 3) is 2^62 + 1, not 2^62
 #include <cerastes.h>
 
 long and_long(long a, long b)
@@ -35,15 +35,15 @@ unsigned long long not_ull(unsigned long long a)
 }
 
 long and_long_value(void)
-    CERASTES_ENSURES(r, r == 4611686018427387903L)
+    CERASTES_ENSURES(r, r == 4611686018427387904L)
 {
-  return and_long(4611686018427387904L, 9223372036854775807L);
+  return and_long(4611686018427387907L, 9223372036854775805L);
 }
 
 unsigned long or_ulong_value(void)
-    CERASTES_ENSURES(r, r == 9223372036854775809ul)
+    CERASTES_ENSURES(r, r == 9223372036854775810ul)
 {
-  return or_ulong(9223372036854775808ul, 1ul);
+  return or_ulong(9223372036854775808ul, 2ul);
 }
 
 long long xor_ll_value(void)

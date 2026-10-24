@@ -59,12 +59,12 @@ int apply_mask_value(void)
 }
 
 int classify(int x)
-    CERASTES_ENSURES(r, (x == 129 && r == 1) || (x == 65 && r == 2) || (x != 129 && x != 65 && r == 0))
+    CERASTES_ENSURES(r, (x == 129 && r == 1) || (x == 5 && r == 2) || (x != 129 && x != 5 && r == 0))
 {
   switch (x) {
   case 0x80 | 1:
     return 1;
-  case 64 ^ 1:
+  case 6 ^ 3:
     return 2;
   default:
     return 0;

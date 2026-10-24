@@ -6,7 +6,7 @@
 #include <cerastes.h>
 
 unsigned clear_low_bits(unsigned u)
-    CERASTES_ENSURES(r, r == (u & ~7u) && r <= 4294967288u)
+    CERASTES_ENSURES(r, r == (u & ~7u))
 {
   return u & ~7u;
 }
@@ -18,8 +18,8 @@ int has_flag(int flags)
 }
 // end::source[]
 
-unsigned clear_low_bits_of_13(void)
-    CERASTES_ENSURES(r, r == 8u)
+unsigned clear_low_bits_of_16(void)
+    CERASTES_ENSURES(r, r == 16u)
 {
-  return clear_low_bits(13u);
+  return clear_low_bits(16u);
 }

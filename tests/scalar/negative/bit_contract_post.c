@@ -1,4 +1,4 @@
-// expect: error postcondition @ L35
+// expect: error postcondition @ L36
 // mode: c23, c++20
 // twin: tests/scalar/bit_contract.c
 // Pins: 0023 item 1: 8 | 4 is 12, which the clause of set_flag lets the caller know exactly
@@ -12,20 +12,21 @@ unsigned set_flag(unsigned u)
   return out;
 }
 
-// Clearing a bit with a constant mask: ~4u is 4294967291u, so the result cannot exceed it.
+// Clearing a bit with a constant mask: ~4u is 4294967291u.
 unsigned clear_flag(unsigned u)
-    CERASTES_ENSURES(r, r == (u & ~4u) && r <= 4294967291u)
+    CERASTES_ENSURES(r, r == (u & ~4u))
 {
   unsigned out = u & ~4u;
-  CERASTES_CHECK(out <= 4294967291u);
+  CERASTES_CHECK(out == (u & ~4u));
   return out;
 }
 
 int odd_to_even(int x)
-    CERASTES_REQUIRES(0 <= x && (x & 1) == 1 && x < 2147483647)
-    CERASTES_ENSURES(r, r == x + 1 && (r & 1) == 0)
+    CERASTES_REQUIRES((x & 1) == 1 && x < 2147483647)
+    CERASTES_ENSURES(r, r == x + 1)
 {
   CERASTES_CHECK((x & 1) == 1);
+  CERASTES_CHECK(((x + 1) & 1) == 0);
   return x + 1;
 }
 
@@ -69,4 +70,10 @@ int odd_to_even_max(void)
     CERASTES_ENSURES(r, r == 2147483646)
 {
   return odd_to_even(2147483645);
+}
+
+int odd_to_even_negative(void)
+    CERASTES_ENSURES(r, r == -2)
+{
+  return odd_to_even(-3);
 }

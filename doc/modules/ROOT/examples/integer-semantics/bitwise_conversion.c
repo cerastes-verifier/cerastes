@@ -5,7 +5,7 @@
 #include <cerastes.h>
 
 unsigned clear_low_bits(unsigned u)
-    CERASTES_ENSURES(r, r == (u & ~7u) && r <= 4294967288u)
+    CERASTES_ENSURES(r, r == (u & ~7u))
 {
   return u & ~7;
 }

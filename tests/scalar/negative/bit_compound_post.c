@@ -1,7 +1,7 @@
 // expect: error postcondition @ L72
 // mode: c23, c++20
 // twin: tests/scalar/bit_compound.c
-// Pins: 0023 item 3: x |= 2 on 5 gives 7, not 6
+// Pins: 0023 item 3: x |= 4 on 2 gives 6, not 7
 #include <cerastes.h>
 
 int and_assign(int x, int m)
@@ -61,15 +61,15 @@ int xor_swap_constants(void)
 }
 
 int and_assign_value(void)
-    CERASTES_ENSURES(r, r == 8)
+    CERASTES_ENSURES(r, r == 5)
 {
-  return and_assign(12, 10);
+  return and_assign(13, 7);
 }
 
 int or_assign_value(void)
-    CERASTES_ENSURES(r, r == 6)
+    CERASTES_ENSURES(r, r == 7)
 {
-  return or_assign(5, 2);
+  return or_assign(2, 4);
 }
 
 int xor_assign_value(void)

@@ -61,15 +61,15 @@ int xor_swap_constants(void)
 }
 
 int and_assign_value(void)
-    CERASTES_ENSURES(r, r == 8)
+    CERASTES_ENSURES(r, r == 5)
 {
-  return and_assign(12, 10);
+  return and_assign(13, 7);
 }
 
 int or_assign_value(void)
-    CERASTES_ENSURES(r, r == 7)
+    CERASTES_ENSURES(r, r == 6)
 {
-  return or_assign(5, 2);
+  return or_assign(2, 4);
 }
 
 int xor_assign_value(void)

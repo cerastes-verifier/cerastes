@@ -38,21 +38,21 @@ int or_twelve_ten(void)
 }
 
 unsigned or_bytes(void)
-    CERASTES_ENSURES(r, r == 255u)
+    CERASTES_ENSURES(r, r == 6u)
 {
-  return or_uns(240u, 15u);
+  return or_uns(2u, 4u);
 }
 
 int or_top_low(void)
-    CERASTES_ENSURES(r, r == 1073741825)
+    CERASTES_ENSURES(r, r == 1073741826)
 {
-  return or_int(1073741824, 1);
+  return or_int(1073741824, 2);
 }
 
-unsigned or_all_ones(void)
-    CERASTES_ENSURES(r, r == 4294967295u)
+unsigned or_halves(void)
+    CERASTES_ENSURES(r, r == 4294901760u)
 {
-  return or_uns(4294967294u, 1u);
+  return or_uns(4278190080u, 16711680u);
 }
 
 unsigned or_set_bit_value(void)

@@ -287,7 +287,9 @@ variable, or identities that need the bits of a variable in general:
 `+v & 0xFFFFFFFF == v % 4294967296+` for a 64-bit `v`, `+(u | 4) & 4 == 4+`,
 `+x & ~15 == x - x % 16+`, `+x & x == x+`,
 `+(a ^ b) ^ b == a+` (the swap by XOR), `+u & m <= m+` for a variable mask `m`,
-or the bounds of `+x & -x+`. A claim that needs one of them is not proved or
+or the bounds of `+x & -x+`; nor, for `+__int128+`, a constant operand written as a
+shift of a constant other than 1 (`+(__int128)2 << 100+`; write `+(__int128)1 << 101+`).
+A claim that needs one of them is not proved or
 refuted: verification runs until its time limit (`--timeout`, 300 seconds by
 default) and ends with exit status 3, "not checked", never with a verdict
 (xref:verifying.adoc[Verifying a program]). For such a claim, a caller with

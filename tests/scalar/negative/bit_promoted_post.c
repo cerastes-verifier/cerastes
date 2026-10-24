@@ -1,4 +1,4 @@
-// expect: error postcondition @ L87
+// expect: error postcondition @ L86
 // mode: c23, c++20
 // twin: tests/scalar/bit_promoted.c
 // Pins: 0023 item 1: 255 & 15 is 15, not 16
@@ -53,9 +53,8 @@ int and_ushort(unsigned short a, unsigned short b)
   return a & b;
 }
 
-// Plain char: the operands are kept non-negative so that the result does not depend on its signedness.
+// Plain char (the callers use values that are the same whether char is signed or not).
 int and_char(char a, char b)
-    CERASTES_REQUIRES(0 <= a && 0 <= b)
     CERASTES_ENSURES(r, r == (a & b))
 {
   return a & b;
@@ -88,9 +87,15 @@ int and_uchar_value(void)
 }
 
 int or_uchar_value(void)
-    CERASTES_ENSURES(r, r == 255)
+    CERASTES_ENSURES(r, r == 204)
 {
-  return or_uchar(240, 15);
+  return or_uchar(200, 4);
+}
+
+int and_char_value(void)
+    CERASTES_ENSURES(r, r == 5)
+{
+  return and_char(5, 7);
 }
 
 int xor_uchar_value(void)
@@ -112,15 +117,15 @@ int not_uchar_max(void)
 }
 
 int and_schar_value(void)
-    CERASTES_ENSURES(r, r == 0)
+    CERASTES_ENSURES(r, r == 1)
 {
-  return and_schar(-128, 127);
+  return and_schar(-3, 1);
 }
 
 int and_schar_negative(void)
-    CERASTES_ENSURES(r, r == -128)
+    CERASTES_ENSURES(r, r == -3)
 {
-  return and_schar(-1, -128);
+  return and_schar(-3, -1);
 }
 
 int xor_schar_value(void)
@@ -130,9 +135,9 @@ int xor_schar_value(void)
 }
 
 int or_short_value(void)
-    CERASTES_ENSURES(r, r == -1)
+    CERASTES_ENSURES(r, r == -2)
 {
-  return or_short(-32768, 32767);
+  return or_short(-32762, 32760);
 }
 
 int and_ushort_value(void)

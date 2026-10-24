@@ -28,7 +28,9 @@
   Facts marked (P*n*) and (S*n*) are probes and spikes, recorded with their evidence in `internal/il-inventory.md`,
   "M4.4b1" (P40, P41, S21). Audit round 1 (Opus) found no blocking item; its should-fix items are taken into
   items 2, 4, 5, 6, 7 and 8 (one rule more: the promoted complement comparison in item 5; one shape more: the comma
-  ending in an enumerator in item 7), and its notes are in handoff §6.
+  ending in an enumerator in item 7), and its notes are in handoff §6. Audit round 2 (the code and the tests) found no
+  blocking item; its should-fix items were three tests (the accepted neighbours of item 5, lone enumerators, the 128-bit
+  high half), and its notes are in handoff §6.
 - **Milestone:** M4.4b1 (2026-10-23).
 
 ## Context
@@ -80,8 +82,9 @@ literals with only a warning, and 0022 item 5 still gives a few shapes different
      functions in the file (the same `c_and_32` text verified once an unused `c_or_32` was emitted) and flipped
      between the modes (C's `? 1 : 0` wrapping of a truth value). With the postcondition, the range is a fact at each
      call.
-   - **What Z3 decides** (measured with `build/cerastes verify`, both modes): every closed expression, so the
-     prologue's asserts (0017 item 4) are decided by evaluation, including a failing one (one error); results named in
+   - **What Z3 decides** (measured with `build/cerastes verify`, both modes): every closed expression at 32 and 64 bits,
+     and at 128 bits every one whose operands are literals or shifts of 1, so the prologue's asserts (0017 item 4) are
+     decided by evaluation, including a failing one (one error); results named in
      contracts (`r == (a & b)`); negative operands and results equal to the minimum; the range of a result; a bound by
      a constant mask (`u & 255 <= 255`); `x & 1 == x % 2` and `x & 255 == x % 256` for `x >= 0`; `x ^ x == 0`;
      `x & y == y & x`; and refutations of false claims at constant arguments. The bitwise tests take 1.4–6.3 s per
@@ -90,7 +93,10 @@ literals with only a warning, and 0022 item 5 still gives a few shapes different
      and other arithmetic on the same operands, and identities that need the bits of a symbolic operand:
      `(u | 4) & 4 == 4`, `v & 0xFFFFFFFF == v % 2³²` for a 64-bit `v`, `x & ~15 == x - x % 16`, `(u & ~4) & 4 == 0`,
      `(a ^ b) ^ b == a`, `x | 0 == x`, `x & x == x`, `0 <= (u & m) <= m` and `u | m >= m` for a symbolic `m`, the
-     bounds of `x & -x` (`low_bit`) and a popcount loop. Z3 does not answer on them; Silicon runs until the driver's
+     bounds of `x & -x` (`low_bit`) and a popcount loop; and, at 128 bits, a closed claim whose bitwise operand is a
+     shifted constant other than 1 (`(__int128)2 << 100`, which lowering writes `2 * c_pow2(100)`; the same value
+     written `(__int128)1 << 101`, and the 64-bit form, are decided: the mutation review). Z3 does not answer on them;
+     Silicon runs until the driver's
      `--timeout` (default 300 s) and the run exits 3 as a tool failure ("not checked", 0011 item 8), never with a
      verdict. A false symbolic claim can hang the same way, depending on its shape. Silicon's `--assertTimeout` would
      turn each into an ordinary error in seconds (sound, incomplete); the owner kept the driver as it is. Lemmas that
@@ -178,7 +184,10 @@ literals with only a warning, and 0022 item 5 still gives a few shapes different
      - GCC's `-Wtype-limits` (`-Wextra` only, outside 0020 item 5's `-Wall` union): `(uc & vc) == 300`,
        `(uc | vc) > 255`, `(uc ^ vc) < 0`, like `u >= 0`;
      - shapes inside `_Static_assert`/`static_assert` (P41's `~true`, `2 ^ 8`): static assertions are not encoded
-       until M4.4b2 (record 0024), which runs these detectors on their conditions.
+       until M4.4b2 (record 0024), which runs these detectors on their conditions;
+     - shapes inside the operands of `sizeof`, `_Alignof` and `typeof`, which are never evaluated or encoded
+       (`sizeof(char[2 ^ 8])` verifies, with EDG's value; audit round 2). Their verdicts are right; M4.4b2, which
+       inspects the types inside such operands, may scan them as `unevaluated_side_effect` already does.
    - **Silent everywhere and accepted:** `x |= y == z`, `b1 ^ b2`, `!a & !b`, `(a & b) == c`, `a | (b & c)`, `u & ~7`
      (a `conversion` error by item 3, not a warning shape), `sc |= 0x80`, `x ^= x`, `x & -1`, `~uc & 0xFF`.
 6. **`eval_const`** (`check_program`'s constant evaluation) computes `~` explicitly (signed `−v − 1`, unsigned

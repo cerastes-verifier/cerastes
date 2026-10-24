@@ -1,24 +1,36 @@
-// expect: error postcondition @ L14
-// expect: error postcondition @ L22
-// expect: error postcondition @ L29
+// expect: error postcondition @ L16
+// expect: error postcondition @ L25
+// expect: error postcondition @ L34
+// expect: error postcondition @ L41
 // mode: c23, c++20
 // twin: tests/scalar/bit_not_or_cast.c
 // Pins: 0023 item 5: the values of !x | (int)(y > 0) and !x | 1L are exact
 #include <cerastes.h>
 
+// The result comes from !x alone: the cast is 0.
 int or_cast(void)
     CERASTES_ENSURES(r, r == 0)
 {
   int x = 0;
-  int y = 5;
+  int y = 0;
   return !x | (int)(y > 0);
 }
 
+// Both operands are 0.
 int or_cast_zero(void)
     CERASTES_ENSURES(r, r == 1)
 {
+  int x = 1;
+  int y = 0;
+  return !x | (int)(y > 0);
+}
+
+// The result comes from the cast alone: !x is 0, y is just above the boundary of y > 0.
+int or_cast_one(void)
+    CERASTES_ENSURES(r, r == 0)
+{
   int x = 3;
-  int y = -5;
+  int y = 1;
   return !x | (int)(y > 0);
 }
 

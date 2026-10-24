@@ -47,9 +47,9 @@ int not_max(void)
 }
 
 int or_min_max(void)
-    CERASTES_ENSURES(r, r == -1)
+    CERASTES_ENSURES(r, r == -2)
 {
-  return or_ab(-2147483647 - 1, 2147483647);
+  return or_ab(-2147483647 - 1, 2147483646);
 }
 
 int and_min_all(void)

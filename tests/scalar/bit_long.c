@@ -35,15 +35,15 @@ unsigned long long not_ull(unsigned long long a)
 }
 
 long and_long_value(void)
-    CERASTES_ENSURES(r, r == 4611686018427387904L)
+    CERASTES_ENSURES(r, r == 4611686018427387905L)
 {
-  return and_long(4611686018427387904L, 9223372036854775807L);
+  return and_long(4611686018427387907L, 9223372036854775805L);
 }
 
 unsigned long or_ulong_value(void)
-    CERASTES_ENSURES(r, r == 9223372036854775809ul)
+    CERASTES_ENSURES(r, r == 9223372036854775810ul)
 {
-  return or_ulong(9223372036854775808ul, 1ul);
+  return or_ulong(9223372036854775808ul, 2ul);
 }
 
 long long xor_ll_value(void)

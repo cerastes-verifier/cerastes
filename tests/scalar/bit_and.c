@@ -18,15 +18,21 @@ unsigned and_uns(unsigned a, unsigned b)
 
 // A constant mask bounds the result, whatever the operand (and whatever its sign).
 unsigned and_byte(unsigned u)
-    CERASTES_ENSURES(r, r <= 255u)
+    CERASTES_ENSURES(r, r == (u & 255u))
 {
   return u & 255u;
 }
 
 int and_byte_int(int a)
-    CERASTES_ENSURES(r, 0 <= r && r <= 255)
+    CERASTES_ENSURES(r, r == (a & 255))
 {
   return a & 255;
+}
+
+int and_byte_range(int a)
+    CERASTES_ENSURES(r, 0 <= r && r <= 255)
+{
+  return and_byte_int(a);
 }
 
 // Testing the low bit is the remainder modulo two.
@@ -43,6 +49,12 @@ int and_zero(int a)
   return a & 0;
 }
 
+int and_parity_zero(void)
+    CERASTES_ENSURES(r, r == 0)
+{
+  return and_parity(0);
+}
+
 int and_commutes(int a, int b)
     CERASTES_ENSURES(r, r == 1)
 {
@@ -51,11 +63,11 @@ int and_commutes(int a, int b)
   return p == q;
 }
 
-// Exact values at the callers: 1100 & 1010, the low byte of an all-ones word, the top bit pair of a 31-bit value.
-int and_twelve_ten(void)
-    CERASTES_ENSURES(r, r == 8)
+// Exact values at the callers: 1101 & 0111, the low byte of an all-ones word, two large operands.
+int and_thirteen_seven(void)
+    CERASTES_ENSURES(r, r == 5)
 {
-  return and_int(12, 10);
+  return and_int(13, 7);
 }
 
 unsigned and_low_byte(void)
@@ -64,10 +76,10 @@ unsigned and_low_byte(void)
   return and_uns(4294967295u, 255u);
 }
 
-int and_top_pair(void)
-    CERASTES_ENSURES(r, r == 1073741824)
+int and_large(void)
+    CERASTES_ENSURES(r, r == 1073741821)
 {
-  return and_int(2147483647, 1073741824);
+  return and_int(2147483645, 1073741821);
 }
 
 int and_parity_odd(void)

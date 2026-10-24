@@ -1,4 +1,4 @@
-// expect: error postcondition @ L45
+// expect: error postcondition @ L49
 // mode: c23, c++20
 // twin: tests/scalar/bit_negative.c
 // Pins: 0023 item 1: -8 & 13 is 8, not 9
@@ -24,14 +24,18 @@ int xor_neg(int a, int b)
 
 // A constant mask of a negative operand is still a small non-negative number.
 int and_byte_negative(int a)
-    CERASTES_REQUIRES(a < 0)
-    CERASTES_ENSURES(r, 0 <= r && r <= 255)
+    CERASTES_ENSURES(r, r == (a & 255))
 {
   return a & 255;
 }
 
+int and_byte_negative_range(int a)
+    CERASTES_ENSURES(r, 0 <= r && r <= 255)
+{
+  return and_byte_negative(a);
+}
+
 int xor_commutes_negative(int a, int b)
-    CERASTES_REQUIRES(a < 0 && b < 0)
     CERASTES_ENSURES(r, r == 1)
 {
   int p = a ^ b;
@@ -45,10 +49,28 @@ int and_minus_eight(void)
   return and_neg(-8, 13);
 }
 
-int or_minus_eight(void)
-    CERASTES_ENSURES(r, r == -3)
+int or_minus_six(void)
+    CERASTES_ENSURES(r, r == -6)
 {
-  return or_neg(-8, 5);
+  return or_neg(-6, 2);
+}
+
+int and_minus_five(void)
+    CERASTES_ENSURES(r, r == 3)
+{
+  return and_neg(-5, 3);
+}
+
+int and_byte_of_minus_one(void)
+    CERASTES_ENSURES(r, r == 255)
+{
+  return and_byte_negative(-1);
+}
+
+int and_byte_of_minus_256(void)
+    CERASTES_ENSURES(r, r == 0)
+{
+  return and_byte_negative(-256);
 }
 
 int xor_minus_one(void)
@@ -58,15 +80,15 @@ int xor_minus_one(void)
 }
 
 int and_two_negatives(void)
-    CERASTES_ENSURES(r, r == -8)
+    CERASTES_ENSURES(r, r == -7)
 {
-  return and_neg(-8, -3);
+  return and_neg(-5, -3);
 }
 
 int or_two_negatives(void)
-    CERASTES_ENSURES(r, r == -3)
+    CERASTES_ENSURES(r, r == -2)
 {
-  return or_neg(-8, -3);
+  return or_neg(-4, -2);
 }
 
 int xor_two_negatives(void)

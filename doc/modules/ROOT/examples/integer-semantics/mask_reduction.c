@@ -13,6 +13,12 @@ unsigned char low_byte(int x)
 }
 // end::source[]
 
+unsigned char low_byte_of_zero(void)
+    CERASTES_ENSURES(r, r == 0)
+{
+  return low_byte(0);
+}
+
 unsigned char low_byte_of_1000(void)
     CERASTES_ENSURES(r, r == 232)
 {

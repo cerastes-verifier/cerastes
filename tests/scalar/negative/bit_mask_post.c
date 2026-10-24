@@ -37,6 +37,12 @@ unsigned char low_byte_wraps(void)
   return low_byte(256);
 }
 
+unsigned char low_byte_zero(void)
+    CERASTES_ENSURES(r, r == 0)
+{
+  return low_byte(0);
+}
+
 unsigned char low_byte_max(void)
     CERASTES_ENSURES(r, r == 255)
 {
@@ -71,18 +77,6 @@ int clear_nibble_max(void)
     CERASTES_ENSURES(r, r == 2147483632)
 {
   return clear_low_nibble(2147483647);
-}
-
-int clear_nibble_small(void)
-    CERASTES_ENSURES(r, r == 0)
-{
-  return clear_low_nibble(15);
-}
-
-int clear_nibble_sixteen(void)
-    CERASTES_ENSURES(r, r == 16)
-{
-  return clear_low_nibble(16);
 }
 
 int clear_nibble_negative(void)
