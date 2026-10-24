@@ -129,6 +129,11 @@ class Kit {
   const Expr* rem(const Expr* a, const Expr* c) { return bin(BinaryOp::Rem, a, c); }
   const Expr* shl(const Expr* a, const Expr* c) { return bin(BinaryOp::Shl, a, c); }
   const Expr* shr(const Expr* a, const Expr* c) { return bin(BinaryOp::Shr, a, c); }
+  // Bitwise operators (decision 0023): operands of one integer type, the result of that type.
+  const Expr* band(const Expr* a, const Expr* c) { return bin(BinaryOp::BitAnd, a, c); }
+  const Expr* bor(const Expr* a, const Expr* c) { return bin(BinaryOp::BitOr, a, c); }
+  const Expr* bxor(const Expr* a, const Expr* c) { return bin(BinaryOp::BitXor, a, c); }
+  const Expr* bnot(const Expr* a) { return b.unary(UnaryOp::BitNot, a, at()); }
   const Expr* lt(const Expr* a, const Expr* c) { return bin(BinaryOp::Lt, a, c); }
   const Expr* le(const Expr* a, const Expr* c) { return bin(BinaryOp::Le, a, c); }
   const Expr* gt(const Expr* a, const Expr* c) { return bin(BinaryOp::Gt, a, c); }
@@ -854,11 +859,14 @@ void define_side_effects();
 void define_side_effect_rejections();
 void define_calls_in_expressions();
 void define_calls_in_expressions_rejections();
+void define_bitwise();
+void define_bitwise_rejections();
 }  // namespace
 
 #include "selftest_cases2.inc"
 #include "selftest_cases3.inc"
 #include "selftest_cases4.inc"
+#include "selftest_cases5.inc"
 
 namespace {
 
@@ -1017,6 +1025,8 @@ int main(int argc, char** argv) {
   define_side_effect_rejections();
   define_calls_in_expressions();
   define_calls_in_expressions_rejections();
+  define_bitwise();
+  define_bitwise_rejections();
   int bad = 0;
   for (const Case& c : lowering_cases()) {
     std::string problem;

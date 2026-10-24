@@ -544,7 +544,11 @@ expression statement; never an argument or declarator separator, and no mutant a
 value, such as `x = 1;`, `i++;` or `(void)x++;`), and, for calls in expressions and also in code only,
 `swap-logical` (the two operands of an `&&` or `||` swapped when one of them contains a call:
 `a > 0 && pos(a) > 1` becomes `pos(a) > 1 && a > 0`, which pins that a call's guard is placed right) and
-`swap-arms` (`c ? a : b` becomes `c ? b : a`)) and verifies each mutant. A mutant that is rejected by the verifier (exit status 1) is
+`swap-arms` (`c ? a : b` becomes `c ? b : a`), and, for the bitwise operators (decision 0023) in code and in
+contracts alike, `swap-bitwise` (a binary `&` becomes `|`, `|` becomes `&`, `^` becomes `|`; never `&&`, `||`, a
+compound assignment or a unary `&`) and `drop-complement` (`~e` becomes `e`); clauses with bitwise operators are never
+modelled by the safe-direction grid, and hex literals are not mutated, so a mask that must be reached is written in
+decimal) and verifies each mutant. A mutant that is rejected by the verifier (exit status 1) is
 killed; one that still verifies survived, which means that the test would not notice the change. Every
 survivor must be killed (by strengthening the test), or listed with one reason in `tests/mutants-equivalent.txt`
 (`id<TAB>reason`, plus a `# reviewed:` line), or be in the safe-direction bucket. The run ends with zero

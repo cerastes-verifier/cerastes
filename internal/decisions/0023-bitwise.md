@@ -17,6 +17,11 @@
   - **Undecided identities** (during the session, after S21). The closed form leaves some symbolic identities
     undecided (item 2); such a run ends at the driver's timeout with exit 3, as today, and the limitation is
     documented. No Silicon assertion timeout is added. Popcount and `low_bit` tests are cut (pre-approved).
+  - **Range postconditions on the bitwise prelude functions** (owner, 2026-10-24). With bodies only, Z3 found the
+    range of a bitwise result, which every use of an integer value needs, by luck: the same claim verified in one
+    mode and hung in the other. Each bitwise prelude function therefore carries `ensures lo <= result <= hi`, which
+    Silicon proves against its body on every run (never assumed). It amends 0012 item 11, and the lint accepts exactly
+    that clause in exactly those functions.
   - **Expectation changes.** The five `reject_bit_*` tests are retired (pre-approved). Any other change of a verdict
     stops the work.
 
@@ -49,43 +54,54 @@ literals with only a warning, and 0022 item 5 still gives a few shapes different
 
    `~a` is `−a − 1` for a signed type and `MAX − a` for an unsigned one: linear, inline, never through unary minus
    (whose `INT_MIN` obligation does not apply to `~`).
-2. **Encoding** (S21). `a & b`, `a | b` and `a ^ b` are calls of prelude functions, chosen by the computed type's
-   width N (32, 64 or 128) and signedness: `c_and_N`, `c_or_N`, `c_xor_N` for a signed type, `c_uand_N`, `c_uor_N`,
-   `c_uxor_N` for an unsigned one. `~a` is inline: `-1 - a` for a signed type, `MAX - a` for an unsigned one.
-   - **The functions** (S21's `Hn8`). An 8-bit leaf takes the bits of its operands from a floor-division chain
-     (`q₀ = a`, `qₖ₊₁ = qₖ \ 2`, `bitₖ = qₖ − 2·qₖ₊₁`, Viper's `\` being floor division, which is two's complement's
-     extension for a negative `a`) and adds `2ᵏ·[the bit of the result]`, the top bit weighing `−2⁷` in the signed leaf
-     and `2⁷` in the unsigned one. A function of width N > 8 is `c_u<op>_{N/2}(a, b) + 2^{N/2} · c_<op>_{N/2}(a \
-     2^{N/2}, b \ 2^{N/2})`: the low half unsigned, the high half of the function's own signedness. Each reads the low N
-     bits of its operands as two's complement, which is exact for operands in the computed type's range (every operand
-     is, by the type invariants of 0010 item 2); S21 checked the construction against Python's operators on every width
-     with no mismatch.
-   - **Prelude rule kept.** Every function is total, non-recursive and has a body only: no `requires`, `ensures`,
-     `decreases`, axiom or domain (0012 item 11, unchanged). The prelude holds the closure of the functions a program
-     uses (the halves of each, recursively), in ascending width; a program without a bitwise operator gets the prelude
-     it had.
-   - **What Z3 decides** (S21, three runs each, Silicon's start is 1.3 s): every closed expression, so the prologue's
-     asserts (0017 item 4) are decided by evaluation, including a failing one (one error); negative operands and
-     results equal to the minimum; the range of a result; `x >= 0 ==> (x & 1) == x % 2`, `(x ^ x) == 0`, `u & 255 <= 255`,
-     `(u & 255) == u % 256`, `(u | 4) & 4 == 4`, `(x & y) == (y & x)`, `(x & 0) == 0`; and refutations of false claims of
-     those shapes. Each file of S21's battery took 1.6–2.4 s at 32 and 64 bits, at most 4.7 s at 128 bits. The
-     mask facts (`u & 255 <= 255`, `(u & 255) == u % 256`, `(u | 4) & 4 == 4`, `(x & y) == (y & x)`) were measured at
-     32 bits; audit round 1 found the mask bound decided at 64 and 128 bits (about 2 s) and `(u & 255) == u % 256` at
-     64 bits in 11.3 s on a loaded machine, and the compound narrowings (`uc &= m`, `uc |= vc`, `sc &= tc`) decided.
-   - **What it does not decide** (owner, 2026-10-23: keep this and document it). Symbolic identities that need the
-     relation between the bits of a symbolic operand and its value: `(-1 & x) == x`, `(x | 0) == x`, `(x & x) == x`,
-     `(a ^ b) ^ b == a` (the XOR swap), `0 <= (u & m) <= m` for a symbolic `m`, the bounds of `x & -x` (`low_bit`),
-     and a popcount loop. Z3 does not answer on them; Silicon runs until the driver's `--timeout` (default 300 s), and
-     the run exits 3 as a tool failure ("not checked", 0011 item 8), never with a verdict. That is sound. Silicon's
-     `--assertTimeout` would turn each into an ordinary error in seconds (sound, incomplete); the owner kept the driver
-     as it is. Lemmas that decide such identities are a question for M5 (Gate G2's `low_bit`, handoff §11).
-   - **Rejected forms.** A flat sum of N bit terms (with an independent `\ 2ᵏ` per bit, or a let-chain, flat or
-     nested) decides constants but times out on any symbolic property beyond 8–16 bits; bounded recursion would leave
-     closed prologue asserts undecided (Silicon unfolds recursive functions with limited fuel); range postconditions
-     made must-fail twins hang more often and every file 3–12 s slower.
+2. **Encoding** (S21, and the session's measurements of the real encoder's output). `a & b`, `a | b` and `a ^ b` are
+   calls of prelude functions, chosen by the computed type's width N (32, 64 or 128) and signedness: `c_and_N`,
+   `c_or_N`, `c_xor_N` for a signed type, `c_uand_N`, `c_uor_N`, `c_uxor_N` for an unsigned one. `~a` is inline:
+   `-1 - a` for a signed type, `MAX - a` for an unsigned one.
+   - **The functions.** For N = 32 and 64 each is flat: a floor-division chain per operand (`q₀ = a`,
+     `qₖ₊₁ = qₖ \ 2`, `bitₖ = qₖ − 2·qₖ₊₁`; Viper's `\` is floor division, two's complement's extension for a negative
+     operand), a test per bit (`== 2` for `&`, `>= 1` for `|`, `== 1` for `^` on the sum of the two bits), and the sum
+     of the result bits weighted by `2ᵏ`, the top bit weighing `−2ᴺ⁻¹` in the signed functions and `2ᴺ⁻¹` in the
+     unsigned ones. For N = 128, `c_u<op>_64(a, b) + 2⁶⁴ · c_<op>_64(a \ 2⁶⁴, b \ 2⁶⁴)`, the high half of the
+     function's own signedness. Each reads the low N bits of its operands as two's complement, which is exact for
+     operands in the computed type's range (every operand is, by 0010 item 2); S21 and audit round 1 checked the
+     construction against Python's operators at every width, signed and unsigned, with no mismatch.
+   - **One postcondition each** (owner, 2026-10-24; amends 0012 item 11). Each function has `ensures lo <= result &&
+     result <= hi`, the range of its type. Silicon proves it against the body on every run; nothing assumes it. These
+     are the only prelude functions with a postcondition; none has a `requires` or `decreases`, and there is no axiom
+     or domain. If a prelude postcondition ever failed, Silicon's error has no position-map entry, and the driver
+     reports "an error the map does not explain" with exit 3 (`report.cpp`, `pipeline.cpp`; `--selftest` covers that
+     path): a tool failure, never a verdict. The lint accepts exactly that clause, with the type's exact range, in
+     exactly these 18 functions.
+   - **Why bodies alone did not work.** Every use of an integer value needs its range (a parameter's, a result's, a
+     conversion's), and the range of a sum of N per-bit `ite` terms has no bound until every term is decided: Z3
+     found it by luck. S21's hierarchical form (8-bit leaves, halves summed) passed S21's battery, but the encoder's
+     methods hung (`r == (a & b)` with the result's range check), and whether they did depended on unrelated
+     functions in the file (the same `c_and_32` text verified once an unused `c_or_32` was emitted) and flipped
+     between the modes (C's `? 1 : 0` wrapping of a truth value). With the postcondition, the range is a fact at each
+     call.
+   - **What Z3 decides** (measured with `build/cerastes verify`, both modes): every closed expression, so the
+     prologue's asserts (0017 item 4) are decided by evaluation, including a failing one (one error); results named in
+     contracts (`r == (a & b)`); negative operands and results equal to the minimum; the range of a result; a bound by
+     a constant mask (`u & 255 <= 255`); `x & 1 == x % 2` and `x & 255 == x % 256` for `x >= 0`; `x ^ x == 0`;
+     `x & y == y & x`; and refutations of false claims at constant arguments. The bitwise tests take 1.4–6.3 s per
+     file at 32 and 64 bits, and about 11 s at 128 bits.
+   - **What it does not decide** (owner, 2026-10-23: keep this and document it). Relations between a bitwise result
+     and other arithmetic on the same operands, and identities that need the bits of a symbolic operand:
+     `(u | 4) & 4 == 4`, `v & 0xFFFFFFFF == v % 2³²` for a 64-bit `v`, `x & ~15 == x - x % 16`, `(u & ~4) & 4 == 0`,
+     `(a ^ b) ^ b == a`, `x | 0 == x`, `x & x == x`, `0 <= (u & m) <= m` and `u | m >= m` for a symbolic `m`, the
+     bounds of `x & -x` (`low_bit`) and a popcount loop. Z3 does not answer on them; Silicon runs until the driver's
+     `--timeout` (default 300 s) and the run exits 3 as a tool failure ("not checked", 0011 item 8), never with a
+     verdict. A false symbolic claim can hang the same way, depending on its shape. Silicon's `--assertTimeout` would
+     turn each into an ordinary error in seconds (sound, incomplete); the owner kept the driver as it is. Lemmas that
+     decide such identities are a question for M5 (Gate G2's `low_bit`, handoff §11).
+   - **Rejected forms.** A flat sum without a postcondition and S21's hierarchy (above); a flat sum with an
+     independent `\ 2ᵏ` per bit (constants only); bounded recursion (Silicon unfolds recursive functions with limited
+     fuel, so closed prologue asserts would stay undecided); and Silicon options such as `--proverSaturationTimeout`
+     (no effect).
 
-   Amends 0012 item 11 (the prelude list) and 0017 item 4 (the prelude functions a closed assert may use: total,
-   non-recursive bodies, decided by evaluation).
+   Amends 0012 item 11 (the prelude list and its postconditions) and 0017 item 4 (the prelude functions a closed assert
+   may use: total, non-recursive, decided by evaluation).
 3. **Compound assignment `&=`, `|=` and `^=`** compute in the usual arithmetic conversions of both operands and convert
    the result back with a check, like the other compound forms (0010 item 6, 0022 item 1). Consequences, each an error
    on the paths where the value does not fit:
@@ -121,8 +137,9 @@ literals with only a warning, and 0022 item 5 still gives a few shapes different
      compilers' verdicts change inside macros; cerastes rejects the shape whether or not a macro wrote it (broader).
    - `logical_not_bitwise` (clang `-Wlogical-not-parentheses`, GCC `-Wparentheses`): `!e` as the left operand of `&`
      or `|` (never `^`), unless the right operand is a truth value, or, for `|` only, a constant of value 0 or 1 in any
-     spelling or suffix (GCC decides by value: `!x | 1L` is silent) or an explicit cast of a truth value
-     (`!x | (int)(y > 0)`, silent in all four; clang never warns on `|`). So `!x & 1`, `!x & y`, `!x & (int)(y > 0)`
+     spelling or suffix (GCC decides by value: `!x | 1L` is silent) or an explicit cast of a comparison, `!`, `&&` or
+     `||` (`!x | (int)(y > 0)`, silent in all four; clang never warns on `|`), but not of a `bool` variable (GCC warns
+     on `!x | (int)q`, P41 `or_castq`). So `!x & 1`, `!x & y`, `!x & (int)(y > 0)`
      (clang), `!x | 2`, `!!x & y` and `!(x > 0) & y` are rejected; `!x & !y`, `!x & (y > 0)`, `!x | 1`,
      `!x | (int)(y > 0)`, `x & !y` and `(!x) & y` are accepted.
    - `complement_of_truth_value` (`-Wbool-operation`): `~e` where `e` is a truth value, a `&`, `|` or `^` of two truth
@@ -207,7 +224,8 @@ literals with only a warning, and 0022 item 5 still gives a few shapes different
 
 - **0010:** item 9 (bitwise operators are supported, with this record's meaning).
 - **0011:** item 7 (the verify-mode diagnostics of item 8).
-- **0012:** item 11 (the prelude gains item 2's functions) and item 12 (bitwise operators leave the rejected list).
+- **0012:** item 11 (the prelude gains item 2's functions, the only prelude functions with a postcondition: their
+  range, proved by Silicon, never assumed) and item 12 (bitwise operators leave the rejected list).
 - **0017:** item 4 (the prelude functions a closed assert may use).
 - **0018:** items 6 and 8 (the rejections of item 4 here; `conversion()`'s message names the bitwise operators).
 - **0020:** item 5 (the bitwise warning shapes of item 5 here; the note on `if (x |= a)`).

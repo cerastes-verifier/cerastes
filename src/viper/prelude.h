@@ -1,8 +1,8 @@
 // Part of cerastes, under the Apache License v2.0 with LLVM Exceptions.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-// The Viper prelude (decision 0012 item 11): functions with bodies, nothing else -- no domain, no axiom, no
-// bodyless function, no postcondition that nothing proves.  Every function is total (defined for every
+// The Viper prelude (decision 0012 item 11, amended by 0023): functions with bodies, nothing else -- no domain, no axiom, no
+// bodyless function; the only postconditions are the bitwise functions' ranges, which Silicon proves.  Every function is total (defined for every
 // argument), so a contract that mentions one is always well-formed to Viper.  Only the functions a program uses
 // (and what they need) are emitted.
 #pragma once
@@ -20,6 +20,13 @@ namespace cerastes::viper {
 //                   Separate functions because Z3 proves the range of these quickly and not of the general ones
 //   c_pow2(n)       2^n for 1 <= n <= 127, 1 for n <= 0, and 2^128 above (always >= 1)
 //   c_shr(a, n)     a >> n: floor(a / 2^n) (arithmetic for negative a)
+//   c_and_N, c_or_N, c_xor_N     (N = 32, 64, 128; decision 0023 item 2, spike S21) C's `& | ^` on operands of a signed
+//   c_uand_N, c_uor_N, c_uxor_N  resp. unsigned computed type of N bits, two's complement on the mathematical values.
+//                   Total: they read the low N bits of their arguments (the signed ones as a signed value).  N = 32 and 64 are
+//                   flat: a floor-division chain per operand, a per-bit test, a weighted sum, the top weight -2^(N-1) for the
+//                   signed ones.  N = 128 is c_u<op>_64(a, b) + 2^64 * c_[u]<op>_64(a \ 2^64, b \ 2^64) (prelude_closure adds
+//                   the 64-bit functions).  Each has one `ensures`, the range of its type: the only postconditions in the
+//                   prelude, proved by Silicon against the body (never assumed); no `requires`, no `decreases`, no axiom.
 std::string prelude_text(const std::set<std::string>& used);
 
 // The prelude functions that `name` calls.

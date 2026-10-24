@@ -2601,6 +2601,150 @@ class EffectOperatorTests(unittest.TestCase):
             self.assertIn(f"`{op}`", readme)
 
 
+BITWISE_OPS = ("swap-bitwise", "drop-complement")
+
+
+def bit_mutants(statements, decl="int f(int x, int y)", op=None):
+    """[(id, mutated source)] of the bitwise operators (`body()` puts the first statement on line 3)."""
+    src = body(statements, decl)
+    return [(m.id, m.apply(src)) for m in mu.mutants_of(src, "t.c")
+            if m.op in BITWISE_OPS and (op is None or m.op == op)]
+
+
+class BitwiseOperatorTests(unittest.TestCase):
+    """swap-bitwise and drop-complement (M4.4b1, decision 0023): where each produces a mutant, exactly, and the twins where
+    nothing may be produced (`&&`, `||`, compound assignments, unary `&`, reference declarators, comments, strings,
+    declarations); and that no bitwise mutant ever enters the safe-direction bucket."""
+
+    def test_each_binary_operator_is_swapped(self):
+        for stmt, ident, after in (
+                ("  return x & y;", "t.c:3:12:swap-bitwise:&->|", "  return x | y;"),
+                ("  return x | y;", "t.c:3:12:swap-bitwise:|->&", "  return x & y;"),
+                ("  return x ^ y;", "t.c:3:12:swap-bitwise:^->|", "  return x | y;")):
+            with self.subTest(stmt):
+                made = bit_mutants(stmt)
+                self.assertEqual([i for i, _ in made], [ident])
+                self.assertEqual(made[0][1].split("\n")[2], after)
+
+    def test_a_complement_is_dropped_without_touching_its_operand(self):
+        for stmt, after in (("  return ~x;", "  return x;"), ("  return x & ~7;", "  return x & 7;"),
+                            ("  return ~(x + y);", "  return (x + y);"), ("  return -~x;", "  return -x;")):
+            with self.subTest(stmt):
+                made = bit_mutants(stmt, op="drop-complement")
+                self.assertEqual(len(made), 1)
+                self.assertTrue(made[0][0].endswith(":drop-complement:~->"), made[0][0])
+                self.assertEqual(made[0][1].split("\n")[2], after)
+
+    def test_a_double_complement_gives_one_mutant_per_tilde(self):
+        made = bit_mutants("  return ~~x;", op="drop-complement")
+        self.assertEqual([s.split("\n")[2] for _, s in made], ["  return ~x;", "  return ~x;"])
+        self.assertEqual(len({i for i, _ in made}), 2)
+
+    def test_a_chain_gives_one_mutant_per_operator(self):
+        made = bit_mutants("  return x & y | x ^ y;", op="swap-bitwise")
+        self.assertEqual([s.split("\n")[2] for _, s in made],
+                         ["  return x | y | x ^ y;", "  return x & y & x ^ y;", "  return x & y | x | y;"])
+
+    def test_the_logical_and_compound_operators_are_not_swapped(self):
+        for stmt in ("  return x && y;", "  return x || y;", "  x &= y;\n  return x;", "  x |= y;\n  return x;",
+                     "  x ^= y;\n  return x;", "  return (x &= y);"):
+            with self.subTest(stmt):
+                self.assertEqual(bit_mutants(stmt, op="swap-bitwise"), [], stmt)
+
+    def test_an_address_of_and_a_reference_declarator_are_not_swapped(self):
+        for stmt in ("  int *p = &x;\n  return *p;", "  int &r = x;\n  return r;", "  const int &r = x;\n  return r;",
+                     "  return *&x;", "  return (int)*(char *)&x;", "  auto f = [&]() { return y; };\n  return f();",
+                     "  return x + *&y;", "  return y ? *&x : 0;", "  return &x != 0;"):
+            with self.subTest(stmt):
+                self.assertEqual(bit_mutants(stmt, op="swap-bitwise"), [], stmt)
+
+    def test_an_ampersand_after_an_operand_is_binary(self):
+        for stmt in ("  return (x) & y;", "  return 3 & x;", "  return 'a' & x;",
+                     "  int a[2] = {1, 2};\n  return a[1] & x;", "  return x & (y);", "  return f(x) & y;"):
+            with self.subTest(stmt):
+                self.assertEqual(len(bit_mutants(stmt, op="swap-bitwise")), 1, stmt)
+
+    def test_is_binary_bitwise_reads_the_token_before_the_ampersand(self):
+        def binary(code):
+            tokens = mu.lex(code)
+            pair = mu.matching(tokens)
+            rev = {c: o for o, c in pair.items()}
+            (k,) = [i for i, t in enumerate(tokens) if t.text == "&"]
+            return mu.is_binary_bitwise(tokens, rev, k)
+        self.assertTrue(binary("a & b"))
+        self.assertTrue(binary("(a + 1) & b"))
+        self.assertTrue(binary("a[0] & b"))
+        self.assertTrue(binary("1 & b"))
+        self.assertFalse(binary("& b"))
+        self.assertFalse(binary("return & b"))
+        self.assertFalse(binary("int & r"))
+        self.assertFalse(binary("unsigned long & r"))
+        self.assertFalse(binary("(char *) & b"))
+        self.assertFalse(binary("= & b"))
+        self.assertFalse(binary("[ & ]"))
+        self.assertFalse(binary("case & b"))
+
+    def test_the_bitwise_operators_in_comments_strings_declarations_and_macros_are_not_code(self):
+        src = ('#define M(a) a & ~3\nint f(int x, int y)\n{\n  // x & y ~x\n  /* x | y */\n'
+               '  const char *s = "a & ~b ^ c";\n  return x;\n}\nint g(int a, int &r);\nint h = 1 | ~2;\n')
+        self.assertEqual([m for m in mu.mutants_of(src, "t.c") if m.op in BITWISE_OPS], [])
+
+    def test_the_operators_are_mutants_of_contract_arguments_too(self):
+        src = ("int f(int x, int y) CERASTES_REQUIRES((x & y) >= 0) CERASTES_ENSURES(r, r == (x | ~y))\n{\n"
+               "  CERASTES_CHECK((x ^ y) != 0);\n  return x | ~y;\n}\n")
+        made = [m for m in mu.mutants_of(src, "t.c") if m.op in BITWISE_OPS]
+        self.assertEqual(sorted((m.op, m.original) for m in made),
+                         [("drop-complement", "~"), ("drop-complement", "~"), ("swap-bitwise", "&"),
+                          ("swap-bitwise", "^"), ("swap-bitwise", "|"), ("swap-bitwise", "|")])
+
+    def test_a_bitwise_mutant_is_never_in_the_safe_direction_bucket(self):
+        # the clauses are linear but for the bitwise operator; with `&`, `|`, `^`, `~` outside `_LINEAR_OPS` they are unknown
+        src = ("int f(int x, int y) CERASTES_REQUIRES(x > 0 && y > 0) CERASTES_ENSURES(r, (r & 1) >= 0)\n{\n"
+               "  CERASTES_CHECK((x | y) > 0);\n  CERASTES_CHECK(~x < 0);\n  return x & y;\n}\n")
+        made = [m for m in mu.mutants_of(src, "t.c") if m.op in BITWISE_OPS]
+        self.assertEqual(len(made), 4)
+        for m in made:
+            self.assertFalse(mu.is_safe_direction(m, src), m.id)
+
+    def test_the_grid_does_not_model_bitwise_operators(self):
+        allowed = frozenset({"x", "y"})
+        for clause in ("x & y > 0", "x | y > 0", "x ^ y > 0", "~x < 0", "x > 0"):
+            self.assertEqual(mu.clause_is_modelled(clause, allowed), clause == "x > 0", clause)
+        for op in ("&", "|", "^", "~"):
+            self.assertNotIn(op, mu._LINEAR_OPS)
+
+    def test_the_older_operators_still_see_a_bitwise_expression(self):
+        src = body("  return (x & 3) == 0 ? x | 1 : y;")
+        got = sorted({m.op for m in mu.mutants_of(src, "t.c")})
+        self.assertEqual(got, ["delete-stmt", "literal", "relop", "swap-arms", "swap-bitwise"])
+
+    def test_every_bitwise_mutant_differs_from_its_original_and_ids_are_unique(self):
+        src = body("  int a = x & ~y | y ^ 3;\n  return ~a & (x | y);")
+        made = mu.mutants_of(src, "t.c")
+        self.assertEqual(len({m.id for m in made}), len(made))
+        bit = [m for m in made if m.op in BITWISE_OPS]
+        self.assertEqual(len(bit), 7)
+        for m in bit:
+            self.assertNotEqual(m.apply(src), src, m.id)
+            parsed = mu.ID_RE.match(m.id)
+            self.assertIsNotNone(parsed, m.id)
+            self.assertEqual(parsed.group("op"), m.op)
+            self.assertIn(m.op, mu.OPS)
+
+    def test_a_source_without_bitwise_operators_gains_no_bitwise_mutant(self):
+        self.assertEqual([m for m in mu.mutants_of(SAMPLE, "t.c") if m.op in BITWISE_OPS], [])
+        self.assertEqual([m for m in mu.mutants_of(body("  return x && y || !x;"), "t.c")
+                          if m.op in BITWISE_OPS], [])
+
+    def test_the_operators_are_documented_where_the_readers_look(self):
+        doc = Path(mu.__file__).read_text().split('"""')[1]
+        readme = (Path(mu.__file__).resolve().parent.parent / "tests" / "README.md").read_text()
+        for op in BITWISE_OPS:
+            self.assertIn(f"`{op}`", doc)
+            self.assertIn(f"`{op}`", readme)
+            self.assertIn(op, mu.OPS)
+
+
 class SelfTestHygieneTests(unittest.TestCase):
     """A test method defined twice in one class replaces the first, which then never runs (it happened here:
     two `test_labels_followed_by_no_deletable_statement_give_no_mutant`)."""

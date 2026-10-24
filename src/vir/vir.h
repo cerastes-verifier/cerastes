@@ -85,13 +85,19 @@ struct Type {
 struct Function;
 struct Var;
 
-enum class UnaryOp { Neg, Plus, Not };
+// Neg, Plus: Int -> that IntType (Neg checks the result's range).  Not: Bool -> Bool.
+// BitNot (decision 0023): Int -> that IntType, typed like Neg; `~a` is `-1 - a` (signed) or `MAX - a` (unsigned), always in range,
+// no obligation.
+enum class UnaryOp { Neg, Plus, Not, BitNot };
 enum class BinaryOp {
   Add, Sub, Mul, Div, Rem,  // Int x Int (same IntType) -> that IntType
   Shl, Shr,                 // Int x Int (count: any IntType) -> the left operand's IntType
   Lt, Le, Gt, Ge,           // Int x Int (same IntType) -> Bool
   Eq, Ne,                   // Int x Int (same IntType) or Bool x Bool -> Bool
-  LAnd, LOr                 // Bool x Bool -> Bool; the right operand is evaluated conditionally
+  LAnd, LOr,                // Bool x Bool -> Bool; the right operand is evaluated conditionally
+  BitAnd, BitOr, BitXor     // Int x Int (same IntType) -> that IntType; two's complement on the mathematical values, never leave
+                            // the type, no obligation (decision 0023).  The operands' type is the computation type; the front end
+                            // (the encoder) inserts the usual arithmetic conversions
 };
 
 struct Expr {
@@ -437,7 +443,7 @@ class Builder {
 
   // `x op= rhs` and `++x`, `x++`, `--x`, `x--` as statements (0010 item 6).  The IL does not give the
   // computation type (P2), so these compute it with the rules above and expand to
-  //     x = (T_x)( (C)x  op  (C)rhs )                      op in Add Sub Mul Div Rem, C = usual arithmetic
+  //     x = (T_x)( (C)x  op  (C)rhs )                      op in Add Sub Mul Div Rem BitAnd BitOr BitXor, C = usual arithmetic
   //                                                          conversions of promoted(T_x) and promoted(type of rhs)
   //     x = (T_x)( (C)x  op  rhs )                         op in Shl Shr, C = promoted(T_x); the count keeps its type
   //     x = (T_x)( (C)x +/- (C)1 )                         C = usual arithmetic conversions of promoted(T_x) and int

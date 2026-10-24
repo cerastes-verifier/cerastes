@@ -60,6 +60,18 @@ attributes), never in comments, strings, preprocessor lines or declarations:
   for an arm or operand with an unparenthesized comma or assignment where that would change the grouping,
   for two equal operands, or inside the arguments of `CERASTES_*` and `[[cerastes::...]]`.
 
+* `swap-bitwise` and `drop-complement` (bitwise operators, M4.4b1) are effect-free like `relop` and `literal`: they
+  apply in code and in the arguments of `CERASTES_*` and `[[cerastes::...]]` alike.  `swap-bitwise` turns a binary
+  `&` into `|`, a `|` into `&` and a `^` into `|` (`a & b` becomes `a | b`; the id is `&` -> `|`); never `&&`,
+  `||`, `&=`, `|=`, `^=`, and never a unary `&` (address-of, `[&]`) or the `&` of a reference declarator (`&` is binary
+  when the token before it ends an operand: a number, a character, a string, an identifier other than `return`,
+  `case`, a type keyword and the like, `]`, or a `)` that does not close a cast of builtin type keywords; a cast to a
+  typedef name, `(T)&x`, reads as binary).  `drop-complement` removes a `~` (`~e` becomes `e`; the id is `~` ->
+  empty), so a mask `x & ~7` becomes `x & 7`.  Hex and octal literals are not mutated (`literal` only reads decimal
+  ones), so a mask is written in decimal where the literal must be reached.  A clause with a bitwise operator is never
+  modelled by the safe-direction grid (`&`, `|`, `^`, `~` are not in `_LINEAR_OPS`: Python's precedence of `&`, `^`,
+  `|` differs from C's), so these mutants are never bucketed: each is killed or listed.
+
 Mutant ids have the form `<path>:<line>:<column>:<op>:<original>-><new>`, with the
 position of the first changed character and the changed text on one line (a
 statement is shortened to 40 characters; `new` is empty for a dropped operand).
@@ -214,7 +226,7 @@ REVIEWED_RE = re.compile(r"^#\s*reviewed:\s*(?P<who>\S.*)$")
 ID_RE = re.compile(r"^(?P<path>.+?):(?P<line>\d+):(?P<col>\d+):(?P<op>[a-z][a-z-]*):"
                    r"(?P<orig>.*)->(?P<new>.*)$")
 OPS = ("relop", "literal", "drop-conjunct", "swap-logic", "delete-stmt", "drop-store", "swap-incdec",
-       "drop-comma", "swap-logical", "swap-arms")
+       "drop-comma", "swap-logical", "swap-arms", "swap-bitwise", "drop-complement")
 # the operators of side effects and calls in expressions: mutants of code only, never bucketed
 EFFECT_OPS = ("drop-store", "swap-incdec", "drop-comma", "swap-logical", "swap-arms")
 STATEMENT_ID_CHARS = 40
@@ -517,6 +529,37 @@ def _conjunct_start(tokens, pair, rev_pair, i):
     return j + 1
 
 
+# Bitwise operators (M4.4b1): `swap-bitwise` and `drop-complement`
+_BITWISE_SWAP = {"&": "|", "|": "&", "^": "|"}
+_NOT_AN_OPERAND = _DECL_KEYWORDS | {"return", "case", "else", "do", "goto", "sizeof", "alignof", "_Alignof",
+                                    "typeof", "typeof_unqual", "decltype", "noexcept", "co_return", "throw",
+                                    "new", "delete", "and", "or", "not", "bitand", "bitor", "xor", "compl"}
+
+
+def is_binary_bitwise(tokens: list[Token], rev_pair: dict[int, int], k: int) -> bool:
+    """Whether tokens[k], an `&`, `|` or `^`, is a binary bitwise operator.  `|` and `^` always are.  An `&` is
+    when the token before it ends an operand: a number, a character, a string, an identifier that is not a keyword
+    that starts one (`return`, `case`, a type keyword), `]`, or a `)` that does not close a cast of builtin type
+    keywords (`(char *)&x`; `(T)&x` with a typedef name cannot be told from `(x) & y` and is read as binary).
+    Otherwise it is an address-of or a reference declarator (`int &r`, `[&]`), never a mutant."""
+    if tokens[k].text != "&":
+        return True
+    if k == 0:
+        return False
+    prev = tokens[k - 1]
+    if prev.kind in ("number", "char", "string"):
+        return True
+    if prev.kind == "ident":
+        return prev.text not in _NOT_AN_OPERAND
+    if prev.kind == "op" and prev.text == "]":
+        return True
+    if prev.kind == "op" and prev.text == ")":
+        inner = tokens[rev_pair[k - 1] + 1:k - 1]
+        return not (inner and all(u.kind == "ident" and u.text in _DECL_KEYWORDS
+                                   or u.kind == "op" and u.text == "*" for u in inner))
+    return False
+
+
 def mutants_of(src: str, path: str) -> list[Mutant]:
     """Every mutant of `src` (see the module docstring), in source order."""
     tokens = lex(src)
@@ -557,6 +600,10 @@ def mutants_of(src: str, path: str) -> list[Mutant]:
             if value > 0:
                 add("literal", t.start, t.end, t.text, f"{value - 1}{suffix}",
                     f"{value - 1}{suffix}")
+        elif t.kind == "op" and t.text in _BITWISE_SWAP and is_binary_bitwise(tokens, rev_pair, k):
+            add("swap-bitwise", t.start, t.end, t.text, _BITWISE_SWAP[t.text], _BITWISE_SWAP[t.text])
+        elif t.kind == "op" and t.text == "~":
+            add("drop-complement", t.start, t.end, t.text, "", "")
         elif t.kind == "op" and t.text in ("&&", "||"):
             other = "||" if t.text == "&&" else "&&"
             add("swap-logic", t.start, t.end, t.text, other, other)

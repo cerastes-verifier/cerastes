@@ -62,14 +62,14 @@ it verifies and what it does not:
   have a contract or a body in the
   same file (anywhere in an expression, also in guarded operands and loop
   conditions, when C's order of calls cannot hide a check), functions that do not return (`+[[noreturn]]+`, `abort`, `exit`),
-  `assert` and `check`.
+  `assert` and `check`, and the bitwise operators.
   The integer rules (overflow is an error, signed or unsigned: nothing wraps; a
   conversion must be exact; a value of an enumeration is one of its values) are on
   xref:integer-semantics.adoc[Integer semantics].
 * *Reported:* thirteen kinds of error, each at a line of your source, with what it
   means and how to fix it on xref:error-messages.adoc[Error messages].
 * *Rejected with a diagnostic, never approximated:* everything else, among it
-  pointers, references, classes, templates, a backward `goto`, bitwise operators and
+  pointers, references, classes, templates, a backward `goto` and
   floating point
   (xref:verifying.adoc#not-supported[the list]).
 * *Parsed and checked, not verified:* the annotations beyond `requires`,

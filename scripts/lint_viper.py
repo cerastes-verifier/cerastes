@@ -21,7 +21,13 @@ status 1) on:
   only, decision 0012 item 11);
 * an `assert`, `requires`, `ensures` or `invariant` line, or a call of a method
   declared in the file, with no entry in the position map for its `.vpr` line
-  (every check is on its own line and has an entry, decision 0012 item 13);
+  (every check is on its own line and has an entry, decision 0012 item 13).  The one exception
+  (decision 0012 item 11 as amended for 0023, owner 2026-10-24): the range postcondition of a bitwise
+  prelude function, `function c_[u]<and|or|xor>_<32|64|128>(a: Int, b: Int): Int` with exactly one
+  header line `ensures <lo> <= result && result <= <hi>` (`(-2^(N-1)) ... 2^(N-1)-1` signed, `0 ...
+  2^N-1` unsigned; Silicon proves it once per function, it is never assumed), which needs no map
+  entry.  Any other `ensures`, a `requires` or a `decreases` in a prelude function, and an `ensures`
+  of another shape in a bitwise one, still need an entry (so they are reported);
 * a position map that is not in the format of encoding.md section 5, a map entry
   for a line that is not there (past the end, blank or a comment), the same
   Viper error id twice for one line, or a missing map;
@@ -324,6 +330,32 @@ def decreases_measures(src: Source) -> dict[int, str]:
     return out
 
 
+BIT_FUNCTION_RE = re.compile(r"^c_(?P<u>u?)(?P<op>and|or|xor)_(?P<width>32|64|128)$")
+
+
+def bit_range_ensures_lines(src: Source, decls: list[Decl]) -> set[int]:
+    """The lines of the range postconditions that a bitwise prelude function may carry without a position map
+    entry (decision 0012 item 11, amended for 0023): in `function c_[u]<op>_<N>(a: Int, b: Int): Int` the single
+    header line `ensures <lo> <= result && result <= <hi>`, where `[lo, hi]` is the range of the computed type
+    (`(-2^(N-1)) .. 2^(N-1)-1` for the signed functions, `0 .. 2^N-1` for the unsigned ones).  Any other
+    `ensures` line, and a second one in the same function, is not exempt."""
+    out: set[int] = set()
+    for d in decls:
+        m = BIT_FUNCTION_RE.match(d.name) if d.kind == "function" else None
+        if m is None or not d.has_body:
+            continue
+        head = " ".join(src.code[d.line - 1].split())
+        if not re.fullmatch(r"function " + re.escape(d.name) + r"\(a: Int, b: Int\): Int", head):
+            continue
+        width = int(m.group("width"))
+        lo, hi = (0, 2 ** width - 1) if m.group("u") else (-2 ** (width - 1), 2 ** (width - 1) - 1)
+        want = f"ensures {'(' + str(lo) + ')' if lo < 0 else lo} <= result && result <= {hi}"
+        lines = [n for n in range(d.line + 1, d.body_line) if src.code[n - 1].strip().startswith("ensures")]
+        if len(lines) == 1 and " ".join(src.code[lines[0] - 1].split()) == want:
+            out.add(lines[0])
+    return out
+
+
 def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
              map_name: str | None = None) -> list[str]:
     """Problems of one Viper file with its position map (None: the map is missing)."""
@@ -367,6 +399,7 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     check_lines: dict[int, str] = {}
     declaration_lines = {d.line for d in decls}
     measures = decreases_measures(src)
+    exempt_ensures = bit_range_ensures_lines(src, decls)
     call_word_re = re.compile(r"(?<![\w$'])(" + "|".join(map(re.escape, sorted(methods))) + r")\s*\(") \
         if methods else None
     for lineno, code in enumerate(src.code, start=1):
@@ -378,7 +411,9 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
                 add(lineno, f"`{w.group(1)}` does not start its line: every check is on its "
                             "own line (decision 0012 item 13)")
         if m := CHECK_LINE_RE.match(code):
-            if m.group(1) == "decreases" and measures[lineno] in ("", "_"):
+            if lineno in exempt_ensures:
+                pass  # the range postcondition of a bitwise prelude function: no map entry
+            elif m.group(1) == "decreases" and measures[lineno] in ("", "_"):
                 pass  # an empty measure (a method outside any recursion) or `_` (trusted) is no check
             else:
                 check_lines[lineno] = m.group(1)

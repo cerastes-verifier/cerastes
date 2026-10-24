@@ -390,7 +390,7 @@ class Lowerer {
     return m;
   }
 
-  void use(const char* prelude_fn) { out_.prelude_used.insert(prelude_fn); }
+  void use(const std::string& prelude_fn) { out_.prelude_used.insert(prelude_fn); }
 
   // ---- obligations ----
 
@@ -491,7 +491,14 @@ class Lowerer {
             meta("overflow", e.loc, "negating a nonzero `" + spell(e) + "` value overflows (cerastes does not wrap)"));
         return {low::neg(a.e), a.dep};
       }
+      case UnaryOp::BitNot: {
+        // Decision 0023 item 1: -1 - a (signed) or MAX - a (unsigned): linear, in range for every a, no obligation.
+        const IntType& t = *e.type.int_type;
+        const E k = low::int_lit(t.is_signed ? "-1" : dec::range_of(t).hi);
+        return {low::bin(low::BinOp::Sub, k, a.e), a.dep};
+      }
     }
+    internal_error(e.loc, "unknown unary operator");
     return a;
   }
 
@@ -585,6 +592,17 @@ class Lowerer {
         obl(full, guard, gdep, low::bin(BinOp::Le, v, low::int_lit(dec::range_of(t).hi)), dep,
             meta("shift", e.loc, "the result of `<<` may not fit in `" + spell(e) + "`"));
         return {v, dep};
+      }
+      case BinaryOp::BitAnd: case BinaryOp::BitOr: case BinaryOp::BitXor: {
+        // Decision 0023 item 2 (S21): total prelude functions c_[u]<op>_N by the computed type's signedness and width; the
+        // result is always in range, so no obligation.
+        const IntType& t = *e.type.int_type;
+        if (t.is_enum || (t.bits != 32 && t.bits != 64 && t.bits != 128))
+          internal_error(e.loc, "a bitwise operator on a " + std::to_string(t.bits) + "-bit type (the encoder converts to a computed type of 32, 64 or 128 bits)");
+        const char* op = e.bop == BinaryOp::BitAnd ? "and" : (e.bop == BinaryOp::BitOr ? "or" : "xor");
+        const std::string name = std::string("c_") + (t.is_signed ? "" : "u") + op + "_" + std::to_string(t.bits);
+        use(name);
+        return {low::fn(name, {a.e, b.e}), dep};
       }
     }
     internal_error(e.loc, "unknown binary operator");

@@ -342,6 +342,12 @@ int verify_command(int argc, char** argv) {
   // install_diag_pragma_recorder() records them as EDG processes them and the encoder rejects each one in a verified file
   // (diagnostic_pragma_in_verify).
   edg.push_back("--diag_error=161,1675");
+  // Character literals EDG truncates or gives an implementation-defined value are refused (decision 0023 item 8; P40):
+  // #1422 (a multi-character literal such as 'ab': an implementation-defined value, `-Wmultichar` in both compilers),
+  // #1654 ('abcde': the leading characters are dropped), #26 (`L'ab'`, `u'ab'`, `U'ab'` keep only their first character in
+  // C; already an error in C++) and #3255 (C: a UTF-16 literal such as `u'\U0001F600'` does not fit and is truncated; C++ has
+  // a hard error #1535 of its own).  The diagnostic pragmas that could lower them again are rejected in verified files.
+  edg.push_back("--diag_error=1422,1654,26,3255");
   for (const std::string& d : a.includes) edg.push_back("-I" + d);
   for (const std::string& m : a.macro_options) edg.push_back(m);
   edg.push_back(a.file);

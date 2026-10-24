@@ -154,3 +154,29 @@ CERASTES_DIAG(unsequenced_calls, error,
 CERASTES_DIAG(self_assignment, error,
               "this assigns a variable to itself, as -Wself-assign warns: the assignment has no effect and is "
               "almost always a mistake (decision 0021)")
+
+// The shapes the compilers warn about around the bitwise operators (decision 0023 item 5; P41).  Rejections at the operator, in
+// both modes, with the compiler flag that warns and the fix.
+CERASTES_DIAG(bitwise_operand_parentheses, error,
+              "an operand of this bitwise operator is an unparenthesized comparison, `+`, `-` or different bitwise operator, "
+              "so the precedence is probably not the one intended (-Wparentheses, -Wbitwise-op-parentheses): add "
+              "parentheses (decision 0023)")
+CERASTES_DIAG(logical_not_bitwise, error,
+              "`!x` is the left operand of this bitwise operator, which is probably meant as `!(x & y)` or as a logical "
+              "operator (-Wlogical-not-parentheses, -Wparentheses): write `(!x) & y`, `!(x & y)` or `&&` (decision 0023)")
+CERASTES_DIAG(complement_of_truth_value, error,
+              "`~` is applied to a truth value (a comparison, a bool, `!`, `&&` or `||`), and the result is not its "
+              "negation (-Wbool-operation): write `!` (decision 0023)")
+CERASTES_DIAG(bitwise_condition_parentheses, error,
+              "the condition of this `?:` is an unparenthesized `&` or `|` whose right operand is a truth value, so the "
+              "precedence is probably not the one intended (-Wbitwise-conditional-parentheses): add parentheses "
+              "(decision 0023)")
+CERASTES_DIAG(bitwise_instead_of_logical, error,
+              "`&` or `|` on two truth values that both have side effects evaluates both operands, which `&&` or `||` "
+              "would not (-Wbitwise-instead-of-logical): write the logical operator (decision 0023)")
+CERASTES_DIAG(tautological_bitwise_compare, error,
+              "this bitwise operation with a constant makes the comparison or the condition always true or always false "
+              "(-Wtautological-compare, -Wtautological-bitwise-compare): check the constants (decision 0023)")
+CERASTES_DIAG(xor_as_power, error,
+              "`^` is the bitwise exclusive or, not a power: `2 ^ 8` is 10, not 256 (-Wxor-used-as-pow): write `1 << n` "
+              "for a power of two, or the constant (decision 0023)")

@@ -41,7 +41,8 @@ Front-end agnostic. The encoder builds a `Program` with a `Builder`; `check_prog
   results, automatic loop invariants, constants) uses the value range.
 - `Type = Void | Bool | Int(IntType)`.
 - `Expr` (pure, typed): `Const(decimal | true/false)`, `Local(var)`, `Formal(k)`, `Result`, `Old(e)`,
-  `Unary{Neg, Plus, Not}`, `Binary{Add, Sub, Mul, Div, Rem, Shl, Shr, Lt, Le, Gt, Ge, Eq, Ne, LAnd, LOr}`,
+  `Unary{Neg, Plus, Not, BitNot}`, `Binary{Add, Sub, Mul, Div, Rem, Shl, Shr, Lt, Le, Gt, Ge, Eq, Ne, LAnd, LOr, BitAnd,
+  BitOr, BitXor}` (the bitwise operators appended in M4.4b1, decision 0023),
   `Cond(c, a, b)`, `Convert(to, e, explicit)` (Int to Int), `ToBool(e)` (`e != 0`), `BoolToInt(to, e)`,
   `Call(callee, args)`, `ReportAt(e, loc)` (obligations inside `e` are reported at `loc`, with a note at their
   own position: the obligations of a default argument are reported at the call). Since M4.3a (decision 0020) two
@@ -139,6 +140,8 @@ type, `lo`/`hi` its range, `w` its width):
 | `a << n` signed | `a * c_pow2(n)` | `0 <= n < w`; `a >= 0`; `a * c_pow2(n) <= hi` (`shift`, three obligations) |
 | `a << n` unsigned (0022) | `a * c_pow2(n)` | `0 <= n < w`; `a * c_pow2(n) <= hi` (`shift`, two obligations) |
 | `a >> n` | `c_shr(a, n)` (floor division by `2^n`) | `0 <= n < w` (`shift`) |
+| `a & b`, `a \| b`, `a ^ b` (0023) | `c_and_N(a, b)`, `c_or_N`, `c_xor_N` (signed `T`), `c_uand_N`, `c_uor_N`, `c_uxor_N` (unsigned `T`), `N` = `w` | none |
+| `~a` (0023) | `-1 - a` (signed), `hi - a` (unsigned) | none |
 | `Convert` to signed `T` | `e` | `lo <= e <= hi` (`conversion`); none when the source range is inside `T`'s |
 | `Convert` to unsigned `T` (0022) | `e` | `lo <= e <= hi` (`conversion`); none when the source range is inside, or when `e` is a constant in range (0022 item 4) |
 | `Convert` to an enumeration `T` (0018) | `e` | `lo <= e <= hi` over the value range (`conversion`), never a wrap; none when the source range is inside |
@@ -256,7 +259,12 @@ preconditions, that asserts the obligations of each `requires` clause under the 
 
 **The prelude** (`src/viper/prelude.cpp`) has total functions with bodies only (0022 removed `c_wrap`): `c_pow2(n)` (a
 table, at least 1 for every `n`), `c_shr(a, n)`, `c_div`/`c_rem` for signed operands (four explicit cases) and
-`c_udiv`/`c_urem` for unsigned ones (Z3 proves the range of these only in that form).
+`c_udiv`/`c_urem` for unsigned ones (Z3 proves the range of these only in that form), and the bitwise functions of 0023
+item 2: `c_<op>_N`/`c_u<op>_N` for `op` in `and`, `or`, `xor` and `N` in 32, 64 (flat: a floor-division bit chain
+per operand and a weighted sum of per-bit tests) and 128 (two 64-bit halves). These are the only prelude functions with
+a postcondition, the range of their type (`ensures lo <= result && result <= hi`), which Silicon proves against the
+body and nothing assumes (owner, 2026-10-24; the lint accepts exactly that clause there). Claims that need symbolic bit
+identities are not decided by Z3 (the run ends at `--timeout`, exit 3; 0023 item 2).
 
 ## 4. Viper shape
 
@@ -367,7 +375,9 @@ The IL facts each rule relies on (node kinds, fields, conversions) are recorded 
   `==`/`!=` between a value of an enumeration compared in an unsigned type in C (no negative values; unfixed, or a fixed
   unsigned base of rank `int` or above) and a signed non-enumeration operand that is not a constant ≥ 0 is rejected in both
   modes, like the compilers' `-Wsign-compare`; so is `==`/`!=` between two different enumerations (`-Wenum-compare`). A truth
-  value (a comparison, `!`, `&&`, `||`) counts as non-negative (0022 item 5, P39).
+  value (a comparison, `!`, `&&`, `||`, a `bool` node, a `?:` of truth values, a comma whose right operand is one; never
+  an explicit cast or an `int` constant) counts as non-negative (0022 item 5, P39; 0023 item 7). In C, a `?:` whose arms
+  are enumerators of one enumeration, as an operand of `==`/`!=`, is rejected as C++ rejects the same `?:` (0023 item 7).
 
 **Positions of obligations.** An operator's obligation is reported at the operator node's `position` (the
 operator token); a call's at its `position` (the `(`); a conversion's at the conversion node, or at the
@@ -458,7 +468,8 @@ rejected at its use. While a C++ case value is encoded, a `const`/`constexpr` lo
 constant initializer becomes a function local constant once (`Function::add_local_const`), its initializer encoded
 the same way; the case label carries EDG's `case_value` as `folded`. Verify mode passes `--diag_error=1901` in C,
 so a C constant expression that names an object never reaches the encoder (its own C case-value rejection is an
-unreached backstop).
+unreached backstop). In both modes it passes `--diag_error=1422,1654,26,3255` (0023 item 8): a multi-character
+character literal, or one whose value EDG truncates, refuses the file before the encoder sees its value.
 
 **Contracts.** A `requires` or `ensures` argument is encoded in contract mode: `enk_param_ref` is `Formal(k)` (or the
 result binder), a named constant is its value, any other variable reference is rejected, a call is `call_in_annotation` except `cerastes::old`, which the IL
@@ -488,10 +499,14 @@ a local target, the `bool` and enumeration rules, the own-initializer rule) and 
 an IL node with a side effect is never encoded twice (fail closed); `vir::sequence_problems` is reported as
 `unsequenced_modification` at the write; and the warning rules of 0020 item 5 (`assignment_as_condition`,
 `comma_without_effect`, `value_not_used`, `side_effect_not_evaluated`) are IL checks, and so (M4.3b, 0021 item 8) is
-`self_assignment`: an `eok_assign` whose operands, after compiler-generated casts, are the same variable, with no node
-from a macro expansion (`orig_seq`/`orig_column` equal to `seq`/`column`), as clang's `-Wself-assign`. Lowering's
-rejections (`LowerResult::rejections`, 0021 item 3) are reported as `unsequenced_calls`. Everything else is
-`unsupported_expression` with a description of the operator (bitwise operators, pointer and member operations).
+`self_assignment`: an `eok_assign` (and, M4.4b1, an `&=` or `|=`) whose operands, after compiler-generated casts, are the
+same variable, with no node from a macro expansion (`orig_seq`/`orig_column` equal to `seq`/`column`), as clang's
+`-Wself-assign`. The bitwise warning rules of 0023 item 5 (`bitwise_operand_parentheses`, `logical_not_bitwise`,
+`complement_of_truth_value`, `bitwise_condition_parentheses`, `bitwise_instead_of_logical`,
+`tautological_bitwise_compare`, `xor_as_power`) run where their operator is encoded, also on a folded constant's `expr`
+and in contracts, and `assignment_as_condition` also matches an `|=` condition. Lowering's rejections
+(`LowerResult::rejections`, 0021 item 3) are reported as `unsequenced_calls`. Everything else is
+`unsupported_expression` with a description of the operator (pointer and member operations).
 
 **Statements.** Allow-list: blocks (compiler-generated blocks are flattened, so a `for` initialization stays in
 scope), declarations with their `stmk_init`, expression statements (assignment, compound assignment and `++`/`--` of
