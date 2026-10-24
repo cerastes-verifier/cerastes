@@ -21,7 +21,9 @@
     stops the work.
 
   Facts marked (P*n*) and (S*n*) are probes and spikes, recorded with their evidence in `internal/il-inventory.md`,
-  "M4.4b1" (P40, P41, S21).
+  "M4.4b1" (P40, P41, S21). Audit round 1 (Opus) found no blocking item; its should-fix items are taken into
+  items 2, 4, 5, 6, 7 and 8 (one rule more: the promoted complement comparison in item 5; one shape more: the comma
+  ending in an enumerator in item 7), and its notes are in handoff §6.
 - **Milestone:** M4.4b1 (2026-10-23).
 
 ## Context
@@ -66,7 +68,10 @@ literals with only a warning, and 0022 item 5 still gives a few shapes different
      asserts (0017 item 4) are decided by evaluation, including a failing one (one error); negative operands and
      results equal to the minimum; the range of a result; `x >= 0 ==> (x & 1) == x % 2`, `(x ^ x) == 0`, `u & 255 <= 255`,
      `(u & 255) == u % 256`, `(u | 4) & 4 == 4`, `(x & y) == (y & x)`, `(x & 0) == 0`; and refutations of false claims of
-     those shapes. Each file of S21's battery took 1.6–2.4 s at 32 and 64 bits, at most 4.7 s at 128 bits.
+     those shapes. Each file of S21's battery took 1.6–2.4 s at 32 and 64 bits, at most 4.7 s at 128 bits. The
+     mask facts (`u & 255 <= 255`, `(u & 255) == u % 256`, `(u | 4) & 4 == 4`, `(x & y) == (y & x)`) were measured at
+     32 bits; audit round 1 found the mask bound decided at 64 and 128 bits (about 2 s) and `(u & 255) == u % 256` at
+     64 bits in 11.3 s on a loaded machine, and the compound narrowings (`uc &= m`, `uc |= vc`, `sc &= tc`) decided.
    - **What it does not decide** (owner, 2026-10-23: keep this and document it). Symbolic identities that need the
      relation between the bits of a symbolic operand and its value: `(-1 & x) == x`, `(x | 0) == x`, `(x & x) == x`,
      `(a ^ b) ^ b == a` (the XOR swap), `0 <= (u & m) <= m` for a symbolic `m`, the bounds of `x & -x` (`low_bit`),
@@ -92,16 +97,21 @@ literals with only a warning, and 0022 item 5 still gives a few shapes different
      computed in `int` and fits.
 
    A `bool` target of a compound assignment stays rejected (0012). A `bool` right operand is promoted to `int`.
-4. **Enumerations** follow 0018's rule for arithmetic: a value of an enumeration as an operand of `& | ^ ~` (including
-   C's bare enumeration operand of `~`, P26) and an enumerator in C++ are rejected (`unsupported_expression`), in both
-   modes; so is `RED | NA` with two enumerations (C++20's deprecated enum-enum conversion). A compound bitwise assignment
-   on or with an enumeration is rejected like the other compound forms (0018 item 8).
+4. **Enumerations** follow 0018's rule for arithmetic (0018 item 6): a value of an enumeration as an operand of
+   `& | ^ ~` (including C's bare enumeration operand of `~`, P26) is rejected (`unsupported_expression`) in both modes,
+   and an enumerator is accepted in both, as in arithmetic (`GREEN | 2`). `&`, `|` and `^` whose operands are
+   enumerators of two different enumerations (`RED | NA`) are rejected in both modes: clang++ and g++ warn by default
+   (`-Wdeprecated-enum-enum-conversion`, C++20). The same shape with `+` (`RED + NA`) predates this record and verifies
+   (audit round 1; handoff §11). A compound bitwise assignment on or with an enumeration is rejected like the other
+   compound forms (0018 item 8; in C++ the front end refuses `c |= 1` itself, #511).
 5. **Warning shapes** (amends 0020 item 5; P41: 916 shapes in clang 21 and GCC 16, `-Wall -Wextra`, both modes; EDG
    warns on none of them). Each rule below is a rejection in both modes (`unsupported_expression`-like rejections with
    their own tags, at the operator). The rules read the IL through compiler-generated casts (an explicit cast is a
    node), the front end's `is_parenthesized` (on the innermost written operation, also inside a folded constant's
    `expr`, P40) and folded constants' `expr`. A **truth value** is item 7's: a comparison, `!`, `&&`, `||`, a `bool`
-   node (a `bool` variable or call, a conversion to `bool`, `true`/`false`, a `?:` of truth values). The detectors run
+   node (a `bool` variable or call, a conversion to `bool`, `true`/`false`), a `?:` of truth values or a comma ending in
+   one. P41 found no compiler counting a `?:` as a truth value in the `?:` condition rule; that shape was not probed,
+   and counting it rejects more, never less (listed). The detectors run
    where the encoder encodes the operator, so they apply in bodies, contracts and annotations (where the compilers
    see nothing, since the macros expand to nothing, but the expression means the same), the prologue's initializers
    and case values alike.
@@ -110,9 +120,11 @@ literals with only a warning, and 0022 item 5 still gives a few shapes different
      d`), a `+` or `-` (GCC), or a different bitwise operator (`a | b & c`, `a ^ b & c`, `a | b ^ c`; both). The
      compilers' verdicts change inside macros; cerastes rejects the shape whether or not a macro wrote it (broader).
    - `logical_not_bitwise` (clang `-Wlogical-not-parentheses`, GCC `-Wparentheses`): `!e` as the left operand of `&`
-     or `|` (never `^`), unless the right operand is a truth value, or, for `|` only, the literal `0` or `1` (GCC is
-     silent there; clang never warns on `|`). So `!x & 1`, `!x & y`, `!x | 2`, `!!x & y` and `!(x > 0) & y` are
-     rejected; `!x & !y`, `!x & (y > 0)`, `!x | 1`, `x & !y` and `(!x) & y` are accepted.
+     or `|` (never `^`), unless the right operand is a truth value, or, for `|` only, a constant of value 0 or 1 in any
+     spelling or suffix (GCC decides by value: `!x | 1L` is silent) or an explicit cast of a truth value
+     (`!x | (int)(y > 0)`, silent in all four; clang never warns on `|`). So `!x & 1`, `!x & y`, `!x & (int)(y > 0)`
+     (clang), `!x | 2`, `!!x & y` and `!(x > 0) & y` are rejected; `!x & !y`, `!x & (y > 0)`, `!x | 1`,
+     `!x | (int)(y > 0)`, `x & !y` and `(!x) & y` are accepted.
    - `complement_of_truth_value` (`-Wbool-operation`): `~e` where `e` is a truth value, a `&`, `|` or `^` of two truth
      values (clang), or a unary `+` of one. An explicit `(int)` cast is a barrier. `~0`, `~1`, `~x` are accepted.
    - `bitwise_condition_parentheses` (clang `-Wbitwise-conditional-parentheses`): the condition of a `?:` is an
@@ -124,8 +136,15 @@ literals with only a warning, and 0022 item 5 still gives a few shapes different
    - `tautological_bitwise_compare` (GCC `-Wtautological-compare` for every type, clang
      `-Wtautological-bitwise-compare` for `int`; the union is GCC's): `(x & C1) == C2` or `!=` with constants where
      `C2 & ~C1 != 0` (including `C1 == 0`), and `(x | C1) == C2` or `!=` where `C1 & ~C2 != 0`, either operand order;
-     and (clang) `x | C` or `C | x` with a nonzero constant `C` used as a truth value (an `if`/`while`/`?:` condition,
-     an operand of `!`, `&&`, `||`, a conversion to `bool`).
+     (clang) `x | C` or `C | x` with a nonzero constant `C` used as a truth value (an `if`/`while`/`?:` condition,
+     an operand of `!`, `&&`, `||`, a conversion to `bool`, and the whole condition of `requires`, `ensures`,
+     `invariant`, `check` and `assert`); and (GCC `-Wsign-compare`, "comparison of promoted bitwise complement of an
+     unsigned value with constant", `-Wall` in C++, `-Wextra` in C) a comparison of `~e`, where `e` has type `unsigned
+     char` or `unsigned short` (looking through an explicit cast to `int` or to such a type), with a constant ≥ 0 or a
+     value promoted from an unsigned type narrower than `int`: `~uc == 0x0F` is always false, since `~uc` is a negative
+     `int`. Audit round 1: this shape carries no `conversion` check, so the owner's answer to handoff §11 question 35
+     (keep the path-precise check for sign-compare shapes) does not cover it, and the union rule of 0020 item 5 rejects
+     it.
    - `xor_as_power` (`-Wxor-used-as-pow`, all four): `2 ^ n` with `n` in 0–64 and `10 ^ n` with `n ≥ 0`, both
      operands integer constants. The compilers decide by spelling (clang: decimal literals without a suffix, outside a
      macro; GCC also accepts suffixes and, in C, parenthesized literals), which the IL does not keep. cerastes rejects
@@ -134,18 +153,26 @@ literals with only a warning, and 0022 item 5 still gives a few shapes different
    - **Extensions of 0020's rules:** `assignment_as_condition` also covers `|=` as the whole condition of `if`,
      `while`, `do` or `for` (clang; `&=`, `^=` and the arithmetic compounds are silent everywhere); `self_assignment`
      also covers `x &= x` and `x |= x` (clang; `x ^= x` is silent).
-   - **Not rejected:** GCC's "comparison of promoted bitwise complement of an unsigned value with constant"
-     (`~uc == 0x0F`, `-Wsign-compare`; `-Wextra` in C, `-Wall` in C++). It is a `-Wsign-compare` shape, and the owner
-     kept the path-precise check for those (handoff §11 question 35); the comparison is well defined (`~uc` is a
-     negative `int`), so there is nothing to report. Listed for the owner (handoff §11).
+   - **Not rejected, listed** (audit round 1; handoff §11, with the other `-Wall` shapes P41 measured):
+     - clang's `-Wtautological-constant-out-of-range-compare`/`-Wtautological-constant-compare` (on by default, both
+       modes) on a comparison of `&`, `|` or `^` of two truth values with a constant outside 0–1 (`(p ^ q) == 2`,
+       `(p & q) == -1`, `(p & q) >= 0`). The same family without a bitwise operator (`(a > b) == 2`, warned by all
+       four compilers) predates this record and verifies; both go together;
+     - GCC's `-Wtype-limits` (`-Wextra` only, outside 0020 item 5's `-Wall` union): `(uc & vc) == 300`,
+       `(uc | vc) > 255`, `(uc ^ vc) < 0`, like `u >= 0`;
+     - shapes inside `_Static_assert`/`static_assert` (P41's `~true`, `2 ^ 8`): static assertions are not encoded
+       until M4.4b2 (record 0024), which runs these detectors on their conditions.
    - **Silent everywhere and accepted:** `x |= y == z`, `b1 ^ b2`, `!a & !b`, `(a & b) == c`, `a | (b & c)`, `u & ~7`
      (a `conversion` error by item 3, not a warning shape), `sc |= 0x80`, `x ^= x`, `x & -1`, `~uc & 0xFF`.
 6. **`eval_const`** (`check_program`'s constant evaluation) computes `~` explicitly (signed `−v − 1`, unsigned
-   `hi − v`) and `& | ^` exactly on operands of one type, followed by its range check; anything else is unknown.
+   `hi − v`; unknown for 128-bit types) and `& | ^` exactly on operands of one type, followed by its range check;
+   anything else is unknown, and so is an `unsigned __int128` value outside the evaluator's `__int128` range.
 7. **Question 36: one verdict in both modes for 0022 item 5** (amends 0022 item 5).
    - **Truth values.** An operand counts as a truth value (0 or 1, so never "a signed operand that may be negative")
-     when, after the compiler-generated conversions are peeled, it is a comparison, `&&`, `||`, `!` or a conversion to
-     `bool`; a node of type `bool`; a `?:` whose two arms are truth values; or a comma whose right operand is one. An
+     when, after the compiler-generated conversions are peeled and folded constants are read through their `expr`
+     (in C the arms of `x ? true : false` are `int` constants whose `expr` is the `bool` constant, P40), it is a
+     comparison, `&&`, `||`, `!` or a conversion to `bool`; a node of type `bool`; a `?:` whose two arms are truth
+     values; or a comma whose right operand is one. An
      explicit cast is never peeled (`c == (int)b` stays rejected), and an `int` constant is not a truth value
      (`c == (x > 0 ? 1 : 2)` stays rejected). So `c == (x ? true : false)`, `c == (x ? (x > 0) : (x < 0))`,
      `c == (b ? b : b)` and `c == (x++, x > 0)` are accepted in both modes.
@@ -153,7 +180,12 @@ literals with only a warning, and 0022 item 5 still gives a few shapes different
      one enumeration (after peeling, also inside a folded constant's `expr`) is rejected with 0018 item 8's message,
      whatever the other operand is, as C++ rejects the same `?:` (its type is the enumeration). So
      `(x ? RED : GREEN) == y`, `c == (x ? RED : GREEN)` and `c == (1 ? NB : NC)` are rejected in both modes. Other
-     positions of such a `?:` are unchanged (0018 item 8: C accepts `return x ? RED : GREEN;` from an `int` function).
+     positions of such a `?:` are unchanged (0018 item 8: C accepts `return x ? RED : GREEN;` from an `int` function,
+     and `(x ? RED : GREEN) & 1`, which C++ rejects). The arms may also be commas ending in such enumerators.
+   - **A comma ending in an enumerator in C** (audit round 1). C++ types `(x++, GREEN)` as the enumeration and C as
+     `int`. For `==` and `!=` in C, such a comma counts as a value of its enumerator's enumeration, as in C++: `c ==
+     (x++, GREEN)` compares two values of one enumeration (accepted in both modes) and `(x++, GREEN) == y` with a
+     signed `y` is rejected in both.
 8. **Question 33: character literals EDG truncates are refused** (amends 0011 item 7 and 0022 item 2). Verify mode runs
    EDG with `--diag_error=1422,1654,26,3255`:
    - #1422 `multi_char_literal` (`'ab'`): an implementation-defined value; both compilers warn by default
@@ -162,8 +194,11 @@ literals with only a warning, and 0022 item 5 still gives a few shapes different
    - #26 `too_many_characters` (`L'ab'` keeps its first character in C; already an error in C++);
    - #3255 `utf16_char_lit_too_long` (C: a UTF-16 literal whose value does not fit is truncated).
 
-   The diagnostic pragmas that could lower them again are already rejected in verified files (0017 item 2). No header
-   the tests include trips them (P41's sweep).
+   The diagnostic pragmas that could lower them again are already rejected in verified files (0017 item 2), and so is
+   `#pragma GCC system_header` in a user header (0011 item 4), the other way to silence them: EDG drops these errors in
+   system headers (P41's sweep: `'ab'` in a `--sys_include` header is silent, in a `-I` header #1422), and a system
+   header's macros, named constants and enumerators are reported or rejected where they are used. No header the tests
+   include trips them.
 9. **M5 note.** An integral `T` (M5d) still rejects bitwise operators, and the per-instance fallback encodes them with
    item 2's functions, which do not decide the bounds of `x & -x`: Gate G2's `low_bit` needs lemmas or another form
    (handoff §11).
@@ -187,5 +222,7 @@ literals with only a warning, and 0022 item 5 still gives a few shapes different
 - A mask written to reduce a value (`(unsigned char)(x & 255)`) is the explicit modular form; a mask whose operand is a
   negative `int` constant converted to an unsigned type (`u & ~7`) is a `conversion` error, written `u & ~7u` instead.
 - A program with a multi-character literal is refused (exit 2).
+- 0018 item 8's mode difference stays outside `==`/`!=`: `(x ? RED : GREEN) & 1` is accepted in C and rejected in
+  C++ (a `?:` of enumeration type).
 - A claim whose proof needs a symbolic bit identity (item 2) is not decided: the run ends at `--timeout` with exit 3.
   The Integer semantics page says which claims are decided.

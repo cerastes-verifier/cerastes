@@ -994,6 +994,8 @@ plan is `~/.claude/plans/using-plan-md-and-handoff-md-swift-hinton.md`; the esse
   EDG's 1), nor do the types inside a `sizeof` expression; array typedefs are skipped silently (`encode.cpp:1576`,
   `3436-3440`). EDG keeps each bound's expression (`array.bound_constant`, il_def.h:10355). Rejected until M4.5e, or the
   bound checked in the prologue: the record decides.
+- **Warning shapes in static assertions** (0023 item 5, audit round 1): once their conditions are encoded, the bitwise
+  detectors run on them too (P41 found `~true` and `2 ^ 8` warned there).
 - **Template arguments:** closed (P38: no `expr`, rejected); the M5 note stands. **`#if`:** the EDG box session.
 
 **M4.4c Writes outside F, `void` `?:` arms, warnings in verified tests** (record 0025, was 0024; §11 questions 28, 30, 31).

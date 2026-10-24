@@ -3083,6 +3083,14 @@ Today's `build/cerastes verify` accepts `'ab'`, `'abcde'` and `u'\U0001F600'` (C
 
 ### P41: which bitwise-operator shapes the native compilers and EDG warn on (decision 0023): **PASS (matrix below; 7 new rules and 2 extensions, the union is stated)**
 
+*Names (added with record 0023):* P41's rules 1–7 are record 0023 item 5's tags `bitwise_operand_parentheses` (1),
+`logical_not_bitwise` (2), `complement_of_truth_value` (3), `bitwise_condition_parentheses` (4),
+`bitwise_instead_of_logical` (5), `tautological_bitwise_compare` (6a, 6b and, after audit round 1, 6c) and
+`xor_as_power` (7). The tables below give shapes without their operand types where the type is `int`; a shape whose
+verdict depends on the type (`7a` against `b40`, `b4`) says so in the text of its rule. Audit round 1 also found clang's
+`-Wtautological-constant-out-of-range-compare` on `(p ^ q) == 2` and GCC's `-Wtype-limits` on `(uc & vc) == 300`,
+which this matrix did not probe (record 0023 item 5, "Not rejected, listed").
+
 Evidence is under `build/m4.4b1/p41/` (gitignored): `shapes*.py` (the shape lists), `gen.py` (one function per source line, `p41*.c` and `p41*.cpp`; `p41*.json` maps a line to its shape), `matrix.py` (the runs), `run.sh` (regenerates everything, about 4 minutes), `raw/` (every
 compiler output), `p41*.matrix.txt|json` and `p41*.detail.json` (cells and messages), `sweep.py` (the xor sweep), `q33/` (the header sweep), `mkdoc.py` + `P41.tmpl.md` (this text).
 Apple clang 21.0.0 (`clang-2100.3.34.2`, Command Line Tools) and GCC 16.2.0 (Homebrew `gcc-16`/`g++-16`), `-fsyntax-only` with `-std=c23` in C and `-std=c++20` in C++, each shape compiled four times (no `-W` flag, `-Wall`, `-Wextra`, `-Wall -Wextra`);
