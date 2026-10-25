@@ -214,7 +214,7 @@ include::example$error-messages/shift_error.cpp[tag=source]
 shift_error.cpp:8: error: shift: the shift count may be negative or at least the width (32 bits) of `unsigned int`
 ----
 
-*How to fix it.* Bound the count, as below, or mask or reduce it before shifting. Mind that operands narrower than `int` are promoted first, so the width that matters is the promoted type's.
+*How to fix it.* Bound the count, as below, or mask or reduce it before shifting (`+u << (n & 31)+`). Mind that operands narrower than `int` are promoted first, so the width that matters is the promoted type's. A left shift that may drop bits is fixed the same way: mask the value first, so the result fits (`+(u & 0xFFFFFF) << 8+` for a 32-bit `unsigned u`).
 
 [source,cpp]
 ----
@@ -237,7 +237,7 @@ include::example$error-messages/conversion_error.cpp[tag=source]
 conversion_error.cpp:9: error: conversion: the value may not fit in `signed char` (a conversion to a signed type must be exact)
 ----
 
-*How to fix it.* Bound the value so that it fits, as below, or reduce it yourself before converting (`(unsigned char)(x % 256)` for `x >= 0`).
+*How to fix it.* Bound the value so that it fits, as below, or reduce it yourself before converting (`(unsigned char)(x % 256)` or `+(unsigned char)(x & 255)+` for `x >= 0`). A mask written as a negative `int` converts too: `+u & ~7+` with an `unsigned u` converts `+~7+`, which is -8, to `unsigned int`; write `+u & ~7u+` (xref:integer-semantics.adoc#bitwise[Bitwise operators]).
 
 [source,cpp]
 ----

@@ -351,9 +351,12 @@ about are rejected too: an assignment used as a condition without extra
 parentheses (write `if ((x = e) != 0)` or `if ((x = e))`, not `if (x = e)`), a
 comma operator one of whose operands has no effect, a discarded value computed
 around a side effect (`pass:[x++] + 1;`), a side effect inside `sizeof`, which is
-never evaluated, and an assignment of a variable to itself (`x = x`, which
-Clang's `-Wself-assign` reports; written through a macro, or with an explicit
-cast, it is accepted, as Clang accepts it).
+never evaluated, and an assignment of a variable to itself (`x = x`, and also
+`x &= x` and `x |= x`, which Clang's `-Wself-assign` reports; written through a
+macro, or with an explicit cast, it is accepted, as Clang accepts it). A `|=`
+as the whole condition (`if (x |= a)`) counts as an assignment used as a
+condition. The bitwise operators have shapes of their own
+(xref:integer-semantics.adoc#bitwise[Bitwise operators]).
 
 [#calls]
 == Calls in expressions
@@ -635,7 +638,10 @@ The constructs that are rejected in this version are:
   `std::terminate`).
 * *Types:* pointers, references, floating point, `volatile`, `_BitInt`, vector
   types, enumerations declared in system headers.
-* *Expressions:* the bitwise operators (`&`, `|`, `^`, `~`), calls whose
+* *Expressions:* the bitwise shapes the compilers warn about
+  (xref:integer-semantics.adoc#bitwise[Bitwise operators]), a character literal
+  with more than one character or one that does not fit its type (`'ab'`,
+  `L'ab'`), calls whose
   checks cannot be put in one order (<<calls>>: `100 / f(x) + 100 / g(y)`, two
   operands of `&&` or `||` with calls added together, two assignments of call
   results in one expression), the shapes of <<side-effects>> (an unsequenced
@@ -646,7 +652,8 @@ The constructs that are rejected in this version are:
   enumerator's value), and an enumeration value that the compiler converts to an
   integer for arithmetic, a comparison of order, a unary operator, a shift or an
   arm of `?:` (comparing the order of two values of the same enumeration is
-  allowed), a `?:` whose result is an enumeration, a `switch` on an enumeration
+  allowed), a `?:` whose result is an enumeration (in C, a `?:` of enumerators
+  compared with `==` or `!=`), a `switch` on an enumeration
   that the compilers' `-Wswitch` rejects (a `case` value that is not an
   enumerator, or a missing enumerator without `default`), in C an enumerator's value
   that names an earlier enumerator whose initializer has a type other than `int`

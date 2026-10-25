@@ -1634,6 +1634,119 @@ class FlagTests(unittest.TestCase):
         self.assertEqual(self.strict(good_lines()), [])
 
 
+class BitwisePreludeTests(unittest.TestCase):
+    """The range postcondition of a bitwise prelude function (decision 0012 item 11 as amended for 0023, owner
+    2026-10-24) is the one `ensures` line that needs no position map entry; everything else about it stays checked."""
+
+    @staticmethod
+    def bit_function(name="c_and_32", ensures="auto", signature="(a: Int, b: Int): Int", extra=(), body="a"):
+        width = int(name.rsplit("_", 1)[1]) if name.rsplit("_", 1)[1].isdigit() else 32
+        if ensures == "auto":
+            lo, hi = (0, 2 ** width - 1) if name.startswith("c_u") else (-2 ** (width - 1), 2 ** (width - 1) - 1)
+            ensures = f"ensures {'(' + str(lo) + ')' if lo < 0 else lo} <= result && result <= {hi}"
+        lines = [f"function {name}{signature}"] + [f"  {l}" for l in ([ensures] if ensures else []) + list(extra)]
+        return "\n".join(lines + ["{", f"  {body}", "}"]) + "\n"
+
+    def problems(self, text):
+        return lint_vpr_other(text, "", "t.vpr", "t.vpr.map")
+
+    def test_the_range_form_of_every_bitwise_function_is_accepted(self):
+        for op in ("and", "or", "xor"):
+            for u in ("", "u"):
+                for width in (32, 64, 128):
+                    name = f"c_{u}{op}_{width}"
+                    with self.subTest(name):
+                        self.assertEqual(self.problems(self.bit_function(name)), [])
+
+    def test_the_signed_form_reads_exactly_as_the_emitter_writes_it(self):
+        text = self.bit_function("c_xor_64")
+        self.assertIn("ensures (-9223372036854775808) <= result && result <= 9223372036854775807", text)
+        self.assertEqual(self.problems(text), [])
+        unsigned = self.bit_function("c_uor_32")
+        self.assertIn("ensures 0 <= result && result <= 4294967295", unsigned)
+        self.assertEqual(self.problems(unsigned), [])
+
+    def test_a_range_of_another_shape_is_reported(self):
+        for ensures in ("ensures (-2147483648) <= result && result <= 2147483646",      # one short
+                        "ensures (-2147483647) <= result && result <= 2147483647",      # the other end
+                        "ensures result <= 2147483647",                                  # half a range
+                        "ensures (-2147483648) <= result && result <= 2147483647 && result != 0",
+                        "ensures true"):
+            with self.subTest(ensures):
+                probs = self.problems(self.bit_function("c_and_32", ensures))
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("`ensures` line has no entry in the position map", probs[0])
+
+    def test_the_unsigned_function_needs_the_unsigned_range(self):
+        signed_range = "ensures (-2147483648) <= result && result <= 2147483647"
+        self.assertEqual(len(self.problems(self.bit_function("c_uand_32", signed_range))), 1)
+        unsigned_range = "ensures 0 <= result && result <= 4294967295"
+        self.assertEqual(len(self.problems(self.bit_function("c_and_32", unsigned_range))), 1)
+
+    def test_the_range_of_the_wrong_width_is_reported(self):
+        wrong = "ensures (-2147483648) <= result && result <= 2147483647"
+        self.assertEqual(len(self.problems(self.bit_function("c_and_64", wrong))), 1)
+
+    def test_a_second_ensures_in_the_function_is_reported(self):
+        probs = self.problems(self.bit_function("c_and_32", extra=("ensures result == 0",)))
+        self.assertEqual(len(probs), 2, probs)  # neither is exempt once there are two
+        both = self.bit_function("c_and_32", extra=(self.bit_function("c_and_32").split("\n")[1].strip(),))
+        self.assertEqual(len(self.problems(both)), 2)
+
+    def test_an_ensures_in_another_prelude_function_is_reported(self):
+        for name in ("c_div", "c_rem", "c_abs", "c_and_16", "c_band_32", "c_and_32x", "c_shl_32"):
+            with self.subTest(name):
+                text = (f"function {name}(a: Int, b: Int): Int\n  ensures (-2147483648) <= result && "
+                        "result <= 2147483647\n{\n  a\n}\n")
+                probs = self.problems(text)
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("`ensures` line has no entry in the position map", probs[0])
+
+    def test_a_requires_or_decreases_in_a_bitwise_function_is_reported(self):
+        for extra in ("requires a >= 0", "requires true", "decreases a"):
+            with self.subTest(extra):
+                probs = self.problems(self.bit_function("c_and_32", extra=(extra,)))
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn(extra.split()[0], probs[0])
+
+    def test_a_bitwise_function_without_a_body_is_reported(self):
+        probs = self.problems("function c_and_32(a: Int, b: Int): Int\n  ensures (-2147483648) <= result && "
+                              "result <= 2147483647\n")
+        self.assertTrue(any("bodyless `function c_and_32`" in p for p in probs), probs)
+        probs = self.problems("function c_uor_64(a: Int, b: Int): Int\n")
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("bodyless", probs[0])
+
+    def test_a_different_signature_is_not_exempt(self):
+        for signature in ("(x: Int, y: Int): Int", "(a: Int, b: Int, c: Int): Int", "(a: Int, b: Int): Bool",
+                          "(a: Int): Int"):
+            with self.subTest(signature):
+                probs = self.problems(self.bit_function("c_and_32", signature=signature))
+                self.assertEqual(len(probs), 1, probs)
+
+    def test_a_method_of_that_name_is_not_exempt(self):
+        text = ("method c_and_32(a: Int, b: Int) returns (r: Int)\n  ensures (-2147483648) <= r && r <= 2147483647\n"
+                "  decreases\n{\n}\n")
+        self.assertTrue(any("`ensures` line has no entry in the position map" in p for p in self.problems(text)))
+
+    def test_only_the_range_line_is_exempt(self):
+        method = ("method m__1(x: Int) returns (res: Int)\n  ensures res > x\n  decreases\n{\n  res := x + 1\n}\n")
+        probs = self.problems(self.bit_function("c_and_32") + method)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`ensures` line has no entry in the position map", probs[0])
+        self.assertIn("t.vpr:7:", probs[0])  # the method's ensures, not the function's (line 2)
+
+    def test_an_ensures_in_the_body_of_a_bitwise_function_is_not_exempt(self):
+        text = "function c_and_32(a: Int, b: Int): Int\n{\n  ensures a\n}\n"
+        self.assertTrue(any("ensures" in p for p in self.problems(text)))
+
+    def test_the_function_still_has_no_axiom_or_domain(self):
+        probs = self.problems(self.bit_function("c_and_32") + "axiom a1 { true }\n")
+        self.assertTrue(any("`axiom`" in p for p in probs), probs)
+        probs = self.problems(self.bit_function("c_and_32") + "domain D {}\n")
+        self.assertTrue(any("`domain D`" in p for p in probs), probs)
+
+
 class SelfTestHygieneTests(unittest.TestCase):
     """A test method defined twice in one class replaces the first, which then never runs (it happened here:
     two `test_labels_followed_by_no_deletable_statement_give_no_mutant`)."""

@@ -4,6 +4,148 @@ Session handoff log, newest first. Each entry says what is done, what is not,
 any surprises, the decision records added and the exact first step for the
 next session.
 
+## M4.4b1 — Bitwise operators, multi-character literals, item 5's truth values (2026-10-23 to 2026-10-24): done on branch `m4.4b1-bitwise`; PR pending
+
+Read `internal/handoff.md` next: the "M4.4b1 is done" owner steps at the top, §6 the M4.4b1 audit notes, §8.1 M4.4b2,
+§11 questions 37–39.
+
+**Owner decisions (2026-10-23 and 2026-10-24, M4.4b planning and during the session)**
+- **§11 questions 32–36:**
+  - Q32: "Fix it now, and any other known instances": M4.4b2 (record 0024).
+  - Q33: yes, now. Planning extended it to #1422, #26 and #3255.
+  - Q34, Q35: keep.
+  - Q36: as recommended, in the symmetric form for C's `?:` of enumerators.
+- **The split.** M4.4b is two sessions:
+  - **M4.4b1**: bitwise, Q33, Q36 (record 0023);
+  - **M4.4b2**: Q32 (record 0024).
+
+  M4.4c and M4.4d take records 0025 and 0026. File-scope `_Static_assert` goes through `GENERATE_SOURCE_SEQUENCE_LISTS`
+  after a spike. `#if` goes to an EDG fork commit in the box session.
+- **The closed form.**
+  - 64-bit is not a cut.
+  - Warning shapes the IL cannot match exactly are rejected broader.
+  - The other `-Wall` shapes are measured, then asked (§11 question 37).
+- **Undecided symbolic identities** end at `--timeout` with exit 3, documented. No Silicon assertion timeout.
+- **Range postconditions on the bitwise prelude functions** (2026-10-24), proved by Silicon. This amends 0012 item 11.
+- **The session went on past 4 h** (2026-10-24: continue to the end).
+
+**Done**
+- **Decision 0023** (`7925f71`, revised after both audits: `50d2ff5` and later). It amends:
+  - 0010 item 9; 0011 item 7; 0012 items 11 and 12; 0017 item 4; 0018 items 6 and 8; 0020 item 5;
+  - 0022 items 2, 5 and 7.
+
+  Probes P40 (the IL) and P41 (916 shapes in clang and GCC) and spike S21 are in `il-inventory.md`, "M4.4b1".
+- **Bitwise operators, both modes.**
+  - `& | ^` are prelude functions `c_[u]{and,or,xor}_{32,64,128}`: flat 32/64-bit bit chains, 128 from two 64-bit
+    halves. Each has `ensures lo <= result <= hi`, proved by Silicon and never assumed. Any failure there is unmapped,
+    so it exits 3.
+  - `~` is inline: `-1 - a`, or `MAX - a` for unsigned.
+  - No obligations. `&= |= ^=` convert back with a check.
+  - Enumeration values are rejected and lone enumerators accepted (0018). Two enumerations are rejected.
+- **Warning rules** (seven tags), each also applied in contracts, folded constants, named constants, enumerators and
+  case values:
+  - `bitwise_operand_parentheses`;
+  - `logical_not_bitwise`;
+  - `complement_of_truth_value`;
+  - `bitwise_condition_parentheses`;
+  - `bitwise_instead_of_logical`;
+  - `tautological_bitwise_compare` (including GCC's promoted-complement comparison);
+  - `xor_as_power` (by value, broader).
+
+  Also `|=` in `assignment_as_condition`, and `&=`/`|=` in `self_assignment`.
+- **Q33:** `--diag_error=1422,1654,26,3255`. **Q36:** the `truth_value` helper; C's `?:` of enumerators and comma ending
+  in an enumerator in `==`/`!=`.
+- **Code:**
+  - `src/vir` (`vir.h`, `check.cpp`, `lower.cpp`);
+  - `src/viper` (`prelude.{h,cpp}`, `selftest.cpp`, `selftest_cases5.inc`);
+  - `src/backend` (`encode.cpp`, `diagnostics.def`);
+  - `src/driver/verify_main.cpp`.
+- **VIR self-test:** 549 → 655 lowering cases, 175 → 191 rejection cases (`VIR_CASES_MIN` 655).
+- **Tooling:**
+  - `mutate.py` gets the operators `swap-bitwise` and `drop-complement`;
+  - `lint_viper.py` accepts exactly the range `ensures` in exactly the 18 bitwise prelude functions (15 twins).
+- **New tests.** 99 files: 20 positives, 28 error twins and 51 rejection tests in `tests/scalar`, both modes where both
+  accept the code. Every positive is `native-ok`.
+- **Doc examples.** 3 new: `integer-semantics/bitwise.c`, `bitwise_conversion.c` and `mask_reduction.c`.
+- **What the tests cover.** The seven warning rules, their accepted neighbours, lone enumerators, 128-bit high halves,
+  and Q33 and Q36.
+- **Retired** (pre-approved): `reject_bit_{and,or,xor,not,and_assign}.c`. **Cut** (pre-approved):
+  popcount and `low_bit`.
+- **Docs:**
+  - Integer semantics: "Bitwise operators" (meaning, masks, what the prover decides and not, the rejected shapes), masks
+    in "Modular arithmetic", character literals, item 5's truth values;
+  - Error messages (masks in `conversion`, masking before a shift);
+  - Verifying a program (the warning list, not-supported);
+  - Overview.
+
+**Acceptance**
+- **`scripts/check.sh` green**, 08:19–08:52 (32 min 49 s, one run on `6012129`).
+  - Self-tests 969 (skipped=1) + 74 + 190 + 291.
+  - Tests 4666 passed, 0 failed, 1 skipped (native-ok: Apple clang 959, GCC 959).
+  - 1652 `.vpr` lint clean.
+  - VIR self-test 655/655 (+ 191 rejection cases).
+  - Walker oracle 134 goldens, 0 failed.
+  - Docs 0 problems.
+- **Byte identity.** Against `build/m4.4b1-baseline-vpr` (taken before any change), 3124 pre-existing `.vpr` and maps
+  are identical and 180 files are new. The 12 baseline-only files are the new Q33 tests' output from a run before the
+  driver change; they now refuse in the front end. The 549 old VIR self-test cases' 1098 files are identical.
+- **After check.sh**, audit round 2's tests and the mutation strengthening were checked as a delta (memory: verify
+  the delta): `run_tests.py` over the 104 bitwise, Q33, Q36 and doc files gave 293 passed, 0 failed
+  (native-ok: Apple clang 43, GCC 43). Also:
+  - `--count-error-twins` 297;
+  - `--check-headers` 1709/1709;
+  - `cerastes --selftest` 94;
+  - docs 0 problems;
+  - `mutate.py --validate`: 297 tests, 9332 mutants, 576 equivalents, 1104 in the bucket.
+- **Mutation** over the 19 new positives and the two verified doc examples. The verifier runs were capped at 150 s, later 120 s:
+
+  | Run | Mutants | Killed | Safe-direction | Survivors | Stillborn | Tool failures |
+  |---|---|---|---|---|---|---|
+  | 1–5 (19 files, the last run of each) | 1465 | 1356 | 35 | 44 | 25 | 5 |
+  | 6 (three files strengthened after the review) | 308 | 262 | 0 | 29 | 12 | 5 |
+
+  - **Strengthening.** The positives were strengthened in place between runs: constants that every neighbour changes,
+    same-term claims, boundary callers, and redundant `requires` removed. No `expect:` line was touched.
+  - **Review.** The Opus review of the survivors rejected 3 (weak tests, strengthened in run 6). It then accepted all 44
+    entries now in `tests/mutants-equivalent.txt`, so **0 unexplained**.
+  - **Tool failures** are undecided claims of record 0023 item 2's documented limit, confirmed by the auditor:
+    - `bit_accepted_shapes.c` 16:34, 18:13, 50:34 and 78:3 (each mutant's own postcondition becomes a symbolic
+      identity);
+    - 52:13 in C++20 only, which another run killed (nondeterministic);
+    - `bit_int128.c:53:33`, a closed 128-bit claim over `(__int128)2 << 100`; the record was narrowed for it.
+  - **Orphaned processes.** The first runs' cap was below the driver's `--timeout`, which orphaned 19 Silicon
+    processes; they were killed (handoff §6 note 7).
+- **Audits** (Opus, one reviewer):
+  - **Round 1** (record and evidence): 0 blocking. 8 should-fix were taken: the promoted-complement rule, commas ending
+    in an enumerator, item 4's enumerators, the logical-not exemption, the listed shapes, the evidence widths, and the
+    truth-value wording.
+  - **Round 2** (code and tests): 0 blocking. 2 should-fix (the tests above) and 5 notes (handoff §6).
+- **Wall-clock:** 2026-10-23 16:37–about 22:30, and 2026-10-24 08:19–13:40 (planning before). The planned 4 h were
+  exceeded by the closed form (below).
+
+**Not done / deferred**
+- M4.4b2 (handoff §8.1, record 0024); M4.4c, M4.4d.
+- The audit notes (handoff §6, M4.4b1).
+- §11 questions 37–39: the other `-Wall` shapes, G2's `low_bit`, and M4.4b2's unencodable static assertions.
+
+**Surprises**
+- **The closed form took most of the session.**
+  - The flat forms decided only constants.
+  - S21's hierarchical form passed S21's own battery but hung on the encoder's methods. Every integer use carries a
+    range check, and Z3 found the range of a bitwise result by luck: the same `c_and_32` verified once an unused
+    `c_or_32` was in the file, and results flipped between C and C++ through C's `? 1 : 0` wrapping.
+  - Range postconditions, proved by Silicon, were the only robust form (owner).
+- **Z3 does not return `unknown` on undecided bit identities; it runs until killed.** A false symbolic claim written as
+  an `assert` can hang where the same claim as an `ensures` is refuted in 2 s.
+- **P41 overturned two planning guesses:** `a & b ? c : d` warns nowhere, and `~uc == 0x0F` warns in GCC.
+- **EDG keeps the Q33 errors out of system headers** even with `--diag_error`.
+
+**Decision records added:** 0023-bitwise; amended 0010, 0011, 0012, 0017, 0018, 0020, 0022.
+
+**First step for the next session (M4.4b2).** Confirm that the owner merged M4.4a's and M4.4b1's PRs and that CI is
+green on `main`. Then handoff §8.1 "M4.4b2" (record 0024): the `GENERATE_SOURCE_SEQUENCE_LISTS` spike first, after §11
+question 39 is answered.
+
 ## M4.4a — No wrapping, and exit 3 for internal inconsistencies (2026-10-23): done on branch `m4.4a-no-wrapping`; PR pending (after M4.3b's)
 
 Read `internal/handoff.md` next: the "M4.4a is done" owner steps at the top, §6 the M4.4a audit notes, §8.1 M4.4b–d,

@@ -68,6 +68,14 @@ ConstVal eval_const(const Expr& e) {
       if (!a.ok) return unknown();
       if (e.uop == UnaryOp::Not) return a.is_bool ? bool_val(a.v == 0) : unknown();
       if (a.is_bool) return unknown();
+      if (e.uop == UnaryOp::BitNot) {
+        // Decision 0023 item 6: -v - 1 (signed), hi - v (unsigned), never C++'s `~` on the __int128; 128-bit types are unknown.
+        if (!e.type.is_int() || e.type.int_type->bits > 64 || e.type.int_type->is_enum) return unknown();
+        const __int128 one = 1;
+        const int bits = e.type.int_type->bits;
+        const __int128 r = e.type.int_type->is_signed ? -a.v - 1 : ((one << bits) - 1) - a.v;
+        return fits(r, e.type) ? int_val(r) : unknown();
+      }
       const __int128 r = e.uop == UnaryOp::Neg ? -a.v : a.v;
       return fits(r, e.type) ? int_val(r) : unknown();
     }
@@ -105,6 +113,11 @@ ConstVal eval_const(const Expr& e) {
         }
         case BinaryOp::Div: return b.v != 0 && fits(a.v / b.v, e.type) ? int_val(a.v / b.v) : unknown();
         case BinaryOp::Rem: return b.v != 0 && fits(a.v % b.v, e.type) ? int_val(a.v % b.v) : unknown();
+        // Decision 0023 item 6: two's complement on the mathematical values of operands of one type (exact for signed values on
+        // the __int128, and for unsigned ones up to 64 bits, which are never negative there); then the range check.
+        case BinaryOp::BitAnd: return fits(a.v & b.v, e.type) ? int_val(a.v & b.v) : unknown();
+        case BinaryOp::BitOr: return fits(a.v | b.v, e.type) ? int_val(a.v | b.v) : unknown();
+        case BinaryOp::BitXor: return fits(a.v ^ b.v, e.type) ? int_val(a.v ^ b.v) : unknown();
         default: return unknown();
       }
     }
@@ -662,9 +675,13 @@ class Checker {
     switch (e.bop) {
       case BinaryOp::Add: case BinaryOp::Sub: case BinaryOp::Mul: case BinaryOp::Div: case BinaryOp::Rem:
       case BinaryOp::Shl: case BinaryOp::Shr:
-        // Arithmetic and shifts are computed in the promoted type, which differs between C and C++ for an enumeration
+      case BinaryOp::BitAnd: case BinaryOp::BitOr: case BinaryOp::BitXor:
+        // Arithmetic, shifts and bitwise operators (decision 0023 item 4) are computed in the promoted type, which differs between C and C++ for an enumeration
         // (decision 0018 item 6): the encoder converts or rejects first; this is the backstop.
-        if (is_enum(a) || is_enum(b)) err(e.loc, "arithmetic or a shift on a value of an enumeration (decision 0018 item 6)");
+        if (is_enum(a) || is_enum(b))
+          err(e.loc, e.bop == BinaryOp::BitAnd || e.bop == BinaryOp::BitOr || e.bop == BinaryOp::BitXor
+                         ? "a bitwise operator on a value of an enumeration (decision 0023 item 4)"
+                         : "arithmetic or a shift on a value of an enumeration (decision 0018 item 6)");
         break;
       default: break;
     }
@@ -672,6 +689,10 @@ class Checker {
       case BinaryOp::Add: case BinaryOp::Sub: case BinaryOp::Mul: case BinaryOp::Div: case BinaryOp::Rem:
         if (!a.is_int() || a != b) err(e.loc, "arithmetic operands have types " + a.str() + " and " + b.str() + ": both must be the same integer type (EDG's conversions are explicit)");
         if (e.type != a) err(e.loc, "arithmetic gives " + e.type.str() + ", not " + a.str());
+        break;
+      case BinaryOp::BitAnd: case BinaryOp::BitOr: case BinaryOp::BitXor:
+        if (!a.is_int() || a != b) err(e.loc, "bitwise operands have types " + a.str() + " and " + b.str() + ": both must be the same integer type (the conversions are explicit)");
+        if (e.type != a) err(e.loc, "a bitwise operation gives " + e.type.str() + ", not " + a.str());
         break;
       case BinaryOp::Shl: case BinaryOp::Shr:
         if (!a.is_int() || !b.is_int()) err(e.loc, "shift operands have types " + a.str() + " and " + b.str() + ": both must be integers");

@@ -136,7 +136,36 @@ planned at ≤ 4 h on its own branch, with the pre-approved expectation changes 
    If GitHub does not have M4.3b yet, push `main`, or open and merge M4.3b's PR (`m4.3b-calls`), first.
 3. **This branch.** Push it and open its PR: `git push origin m4.4a-no-wrapping` (the session never pushes). CI runs
    `check.sh` as locally.
-4. **Questions.** Answer §11 questions 32–36. Then M4.4b (§8.1, record 0023, probes P40–P41).
+4. **Questions.** Answer §11 questions 32–36. Then M4.4b (§8.1, record 0023, probes P40–P41). *(Answered 2026-10-23,
+   M4.4b planning.)*
+
+**M4.4b planning (2026-10-23, after M4.4a).** The owner answered §11 questions 32–36 and split M4.4b (§8.1, §11 "M4.4b
+planning"): **M4.4b1** bitwise operators with Q33 (multi-character literals) and Q36 (item 5's mode differences), record
+0023; **M4.4b2** Q32's values the front end computes (`_Static_assert`, character literals, array types in types; `#if`
+in the EDG box session), record 0024. M4.4c and M4.4d take records 0025 and 0026.
+
+**M4.4b1 is done (2026-10-24, branch `m4.4b1-bitwise`, based on local `main` `4cc849f`, the merged M4.4a; result in
+`internal/status.md`).**
+- **Bitwise operators** (record 0023). `& | ^ ~` and `&= |= ^=` verify in both modes with their exact two's complement
+  meaning. `& | ^` are prelude functions per width (32, 64, 128) that carry a range postcondition, which Silicon proves
+  (owner, 2026-10-24: 0012 item 11 amended). `~` is inline. The compound forms convert back with a check.
+- **Warning shapes.** The compilers' bitwise `-Wall` shapes are rejected: seven rules, two extensions of 0020's rules,
+  and GCC's promoted-complement comparison (audit round 1).
+- **Q33.** Multi-character and truncated character literals are refused in verify mode.
+- **Q36.** A `?:` or comma of truth values counts as a truth value. In C, a `?:` of enumerators and a comma ending in
+  an enumerator get C++'s verdict in `==`/`!=`.
+- **Limit (owner: keep it, documented).** Relational and symbolic bit identities (`(u | 4) & 4 == 4`, the XOR swap,
+  `low_bit`) are not decided: such a run ends at `--timeout` with exit 3.
+
+**Owner steps after M4.4b1, in this order:**
+1. **Handoff answers.** Your §11 answers 32–36 were uncommitted in the main checkout's `internal/handoff.md`; this
+   branch carries them. Drop the main checkout's copy before merging:
+   `git -C ~/Documents/cerastes/cerastes checkout internal/handoff.md`.
+2. **M4.4a.** Local `main` `4cc849f` merges M4.4a. If GitHub does not have it yet, push `main` (or open and merge
+   M4.4a's PR, `m4.4a-no-wrapping`) first.
+3. **This branch.** Push it and open its PR: `git push origin m4.4b1-bitwise` (the session never pushes). CI runs
+   `check.sh` as locally (about 33 min here; the bitwise tests add a few minutes).
+4. **Questions.** Answer §11 questions 37–39. Then M4.4b2 (§8.1, record 0024).
 
 ## 1. State in one paragraph
 
@@ -716,6 +745,33 @@ rejected in both modes. Its should-fix items were taken, and a re-audit checked 
    were changed the same way, with `unsigned_checked.cpp`, `unsigned_overflow.cpp`, `modular_explicit.cpp`,
    `constant_unsigned_error.cpp` and `usual_conversions_error.c` new.
 
+**M4.4b1 audit notes (2026-10-24).** Round 1 (the record and P40/P41/S21) and round 2 (the code and the tests) had no
+blocking item. Their should-fix items were taken into record 0023 items 2, 4, 5, 6, 7 and 8, and into three tests
+(`bit_accepted_shapes.c`, `bit_enumerator.c`, `bit_int128.c`'s high half). Notes not taken:
+1. **`~` has no lowering-side guard** (`src/vir/lower.cpp`, `unary`). The binary operators raise an internal error on
+   an enumeration or a width other than 32/64/128; `BitNot` does neither. It is unreachable: `check_program` rejects
+   enumeration operands of unary operators, and the front end always promotes the operand. Add the same guard when
+   `lower.cpp` is next touched.
+2. **One message differs between the modes, with the same verdict.** For `d == (x ? (y, RED) : GREEN)`, C reports only
+   the enumeration-`?:` rejection. C++ also reports `comma_without_effect`, since C returns before the arms are encoded.
+3. **Unevaluated operands are not scanned by the detectors** (`sizeof(char[2 ^ 8])` verifies, with EDG's value; record
+   0023 item 5 lists it). M4.4b2 inspects the types inside such operands and may scan them as
+   `unevaluated_side_effect` does.
+4. **`mutate.py`:** `drop-complement` on a C++ destructor `~T`, and `swap-bitwise` on `(T)&x`, give stillborn mutants
+   (harmless).
+6. **A closed 128-bit claim over a shifted constant other than 1 is undecided** (the mutation review: `and_wide(-1,
+   (__int128)2 << 100)` ends at `--timeout`, exit 3, where `(__int128)1 << 101` is refuted in 39 s and `2L << 40` in
+   14 s). Lowering writes the shift as `2 * c_pow2(100)`. Folding a constant `k * c_pow2(n)` in lowering would decide
+   it, but it changes the Viper of every existing constant shift, so it is left for a session that may change that
+   output; record 0023 item 2 and the Integer semantics page say so.
+7. **The mutation wrapper's cap was below the driver's `--timeout`.** The harness SIGKILLed `cerastes verify` and its
+   Silicon process groups were orphaned (19 JVMs, load average about 800, cleaned up). A cap must stay above the
+   driver's `--timeout`, or the driver must be given a lower one; `run_tests.py`'s `run_tool` could send SIGTERM and
+   wait before killing (a harness item for a later session).
+5. **Item 2's evidence.** S21's symbolic claims (and its hierarchical form) were luck-dependent: they passed S21's
+   battery and hung on the encoder's methods. The session's measurements of the real output are what item 2 rests on.
+   Silicon's start is 1.3 s, and the bitwise tests take 1.4–6.3 s per file at 32/64 bits and 11–20 s at 128 bits.
+
 ## 7. Known gaps carried
 
 - Termination: a recursion cycle through another unit (0013 item 5) — the contract manifest, M6 (M7 if it does not fit).
@@ -738,7 +794,7 @@ plan (`plan.md`, "Milestone renumbering"): the **new M4 is the rest of C** (stri
 pointers in M4.5a–f, VerCors as the reference); generic templates are **M5** (M5a–M5g); concepts M6; **C++ memory
 and classes M7** (references, `new`/`delete`, classes; G2's parts that need them are deferred there); inventory M8;
 evaluation M9. Session order: M4.1 → M4.2a (owner, 2026-10-21: before CI) → EDG upstream merge (§4.1) → CI (§4.2) →
-mutation triage (§5; done 2026-10-21) → M4.2b1 → M4.2b2 → M4.2c → M4.3a → M4.3b (owner, 2026-10-22: M4.3 split) → M4.4a → M4.4b → M4.4c → M4.4d (owner, 2026-10-23: M4.4 split) → M4.5a … M4.8 → M5a … M5g → M6.
+mutation triage (§5; done 2026-10-21) → M4.2b1 → M4.2b2 → M4.2c → M4.3a → M4.3b (owner, 2026-10-22: M4.3 split) → M4.4a → M4.4b1 → M4.4b2 → M4.4c → M4.4d (owner, 2026-10-23: M4.4 split, then M4.4b) → M4.5a … M4.8 → M5a … M5g → M6.
 
 **Rules for every session below** (memory `session-size-few-hours`): planned at ≤ 4 h with fixed scope and stop
 rules; owner decisions and pre-approved expectation changes asked up front; the decision record before code
@@ -853,7 +909,11 @@ there (`check.sh` green, every `.vpr` byte-identical, the three #2656 tests adde
 suites at `f0ed5525af` in both 64-bit configurations (`changes,regressions,imported,edg,cwg,stdlib`; known `cwg1835`,
 `cwg2881`), and whether `0022`'s `.rto` needs `edg_x86_32` overrides; (2) §11 question 16: reproduce the C
 enumerator-list typing on unmodified upstream and draft its bug file (no fork fix). Clean builds every run (memory:
-stale binaries after a failed link).
+stale binaries after a failed link). (3) **`#if`** (owner, 2026-10-23, M4.4b planning; §11 question 32): EDG folds a
+preprocessing expression with no diagnostic for an unsigned wrap (`#if 0u - 1 > 0`), and in C23 its signed overflow is
+#61, a warning verify mode suppresses for bodies; nothing reaches the IL (`preproc.c:460-491`). A fork commit adds a
+discretionary diagnostic, distinct from #61, for a preprocessing expression whose arithmetic wraps or overflows, with
+`GH-*` tests and the full box suites before the pin moves; the cerastes driver then makes it an error in verify mode.
 
 **M4.3 Expressions and sequencing — split into M4.3a and M4.3b** (owner, 2026-10-22, M4.3 planning).
 
@@ -932,35 +992,63 @@ the essentials follow. Team in every session: edg-backend, il-analyst, test-muta
   The stop rule is more than 10 flips outside this list.
 - **Byte identity.** A baseline `.vpr` without `c_wrap` is identical; the rest is compared ignoring the prelude.
 
-**M4.4b Bitwise operators** (record 0023).
-- **Probes.**
-  - P40, the IL: operands of `& | ^ ~` and `&= |= ^=` (char, short, bool, mixed signedness, `__int128`, C's bare
-    enumeration operand of `~`, folded constants).
-  - P41, the warning matrix (clang and GCC, `-Wall -Wextra`, both modes): `a & b == c`, `a | b & c`, `a & b ? c : d`,
-    `~b`, `b1 & b2`, `(x & 2) == 1`, `!x & y`, `2 ^ 32`, `if (x |= a)`.
+**M4.4b — split into M4.4b1 and M4.4b2** (owner, 2026-10-23, M4.4b planning, with §11 questions 32–36). The approved
+plan is `~/.claude/plans/using-plan-md-and-handoff-md-swift-hinton.md`; the essentials follow.
 
-  The union of the warned shapes is rejected, and the detectors look inside folded constants' `expr`.
-- **Spike S21: candidate (A).** A total closed form per computed width, with a body and no `requires` or `ensures`:
-  - `c_and_N` sums bit k of a and b times 2ᵏ, with `|` and `^` derived from it;
-  - signed operands go through two's complement;
-  - `~a` is `−a − 1` for signed types and `MAX − a` for unsigned ones.
-
-  Battery: exact constants (the prologue guard), masks, negative operands, 8–128 bits, and a popcount loop; a median
-  under 2 s and a maximum under 10 s. (B), bounded recursion, is spiked only if (A) misses. (C), a bit-vector domain,
-  means stop and ask. 128-bit bitwise may be rejected (M8).
-- **Code traps.**
-  - `assignment_parts`' operator chain ends in `Shr` (`encode.cpp:1810`).
-  - The compound forms need three places: `:1712`, `:1361-1372` and `:1810`.
-  - `check.cpp:71`: every unary operator other than `Neg` is the identity.
-  - `lower.cpp:493`: an unhandled unary operator returns its operand; it should be `internal_error`.
-  - The `check.cpp` typing switch and the enumeration backstop.
-- **Consequences under 0022:** `sc |= 0x80`, `uc = ~uc`, `u & -8` and unsigned `x & -x` are `conversion` errors.
+**M4.4b1 Bitwise operators, with §11 Q33 and Q36** (record 0023).
+- **Probes and spike.**
+  - P40, the IL (edg-backend): operand conversions of `& | ^ ~` and `&= |= ^=` (char, short, bool, mixed signedness,
+    `__int128`), C's bare enumeration operand of `~`, folded bitwise constants and their `expr` in every place the
+    encoder reads, where `is_parenthesized` sits after folding, and the C shapes of Q36.
+  - P41, the warning matrix (test-mutator; clang and GCC, `-Wall -Wextra`, both modes, and EDG): the union of the warned
+    shapes is rejected, at most 8 detector rules; the unrelated `-Wall` shapes are measured for a §11 question.
+  - S21, the closed form (il-analyst): floor-division bits, `c_and_N(a, b) = Σₖ<N 2ᵏ·[bitₖ(a) ∧ bitₖ(b)] − (a < 0 ∧ b
+    < 0 ? 2ᴺ : 0)` with `bitₖ(a) = (a \ 2ᵏ) % 2`, exact on [−2ᴺ, 2ᴺ) for signed and unsigned operands; `|` and `^`
+    as prelude functions calling it; `~` inline and linear. Variants: independent bits, a let-chain, flat and nested.
+    Budget: median < 2 s, maximum < 10 s. Bounded recursion is out (Silicon's limited unfolding would leave 0017's closed
+    asserts undecided); 64-bit must be completed (owner); 128-bit may be cut.
+- **Semantics.** Exact two's complement on mathematical integers, no obligations; `&= |= ^=` convert back with a check
+  (`sc |= 0x80`, `uc = ~uc`, `u & -8`, `u &= ~FLAG` are `conversion`; unsigned `x & -x` is `overflow`, from the unary
+  minus); enumeration operands rejected (0018's arithmetic rule); a `bool` target of a compound form stays rejected.
+- **Code traps.** `assignment_parts`' operator chain ends in a bare `else` meaning `Shr` (`encode.cpp:1814-1820`): make
+  it an exhaustive `switch`. `eval_const` treats unknown unary operators as the identity (`check.cpp:66-73`).
+  `lower.cpp:495` returns the operand of an unhandled unary operator. `~` must not be built from `Neg` (`~INT_MIN` is
+  `INT_MAX`). New VIR operators are appended at the end of their enumerations.
+- **Q36** (amends 0022 item 5): a `truth_value` helper (comparisons, `&&`, `||`, `!`, `bool_cast`, `bool` nodes, a `?:`
+  of truth values, a comma whose right operand is one; never an explicit cast or an int constant); for `==`/`!=` in C, a
+  `?:` of enumerators of one enumeration is rejected with 0018 item 8's message (owner: the symmetric form).
+- **Q33** (amends 0011 item 7): `--diag_error=1422,1654,26,3255`, with a sweep of every header the tests include.
 - **Retired** (pre-approved): `reject_bit_and.c`, `reject_bit_or.c`, `reject_bit_xor.c`, `reject_bit_not.c`,
   `reject_bit_and_assign.c`.
-- **Cuts, in order:** popcount and `low_bit`, then 128-bit.
+- **Stop rules:** no closed form at 64 bits (only a bit-vector domain left, which needs the owner); a folded bitwise
+  constant without `expr`; more than 8 detector rules; any other verdict change; an unexpected byte difference.
 - **M5 note:** integral `T` still rejects bitwise operators; the per-instance fallback verifies them (`low_bit`).
 
-**M4.4c Writes outside F, `void` `?:` arms, warnings in verified tests** (record 0024; §11 questions 28, 30, 31).
+**M4.4b2 Values the front end computes** (record 0024; §11 Q32, owner: "fix it now, and any other known instances").
+- **Spike first:** `GENERATE_SOURCE_SEQUENCE_LISTS` TRUE in the cerastes configuration (`cmake/EdgFrontEnd.cmake`, the
+  `src/backend/edg_il.h` requirement, `scripts/check_edg_config.sh`; amends 0002). The walker goldens and every `.vpr`
+  must stay byte-identical, or the session stops and asks. It also makes M4.2a audit note 1's check exact (§6).
+- **`_Static_assert`/`static_assert`.** Block scope: the `stmk_decl` entity `iek_static_assertion`, skipped today
+  (`encode.cpp:1574`); file and namespace scope: the source sequence entries of the primary file and user headers
+  (`decls.c:15562-15595` records them only then). The condition keeps its `expr` (a bare literal has none); it is
+  encoded as written and checked in 0017's prologue: the obligations at their lines, then an `internal` guard that it
+  holds. Open for its planning (§11 question 39): a condition cerastes cannot encode (a `constexpr` call, a type trait)
+  is rejected (fail closed) or skipped. Existing: `static_assert_ok.c` keeps its verdict (its Viper changes).
+- **Wrapped character literals** (`'\xff'` is -1, `L'\xffffffff'` an `int` -1; EDG gives no diagnostic, and a plain
+  literal has no IL marker: `chk_char` is `chk_default`). Probe P42 first (plain, `L`, `u`, `U`, `u8`; in macros, case
+  values, enumerator initializers, named constants, default arguments, contracts). A constant without `expr`, not of an
+  enumeration type, with a negative value is a wrapped literal: encoded as the conversion of `v + 2ᴺ` into its character
+  type, a path-precise `conversion` at the literal. The enumerator gap: `encode.cpp:1046` takes a literal initializer's
+  value without a check.
+- **Array types in types.** `sizeof`/`_Alignof` of a type never inspects it (`sizeof(char[65536u * 65536u + 1])` is
+  EDG's 1), nor do the types inside a `sizeof` expression; array typedefs are skipped silently (`encode.cpp:1576`,
+  `3436-3440`). EDG keeps each bound's expression (`array.bound_constant`, il_def.h:10355). Rejected until M4.5e, or the
+  bound checked in the prologue: the record decides.
+- **Warning shapes in static assertions** (0023 item 5, audit round 1): once their conditions are encoded, the bitwise
+  detectors run on them too (P41 found `~true` and `2 ^ 8` warned there).
+- **Template arguments:** closed (P38: no `expr`, rejected); the M5 note stands. **`#if`:** the EDG box session.
+
+**M4.4c Writes outside F, `void` `?:` arms, warnings in verified tests** (record 0025, was 0024; §11 questions 28, 30, 31).
 - **Q28.** Only writes and snapshots leave F; call-free branches hold checks and stay in F, slotted by prefix. A write
   goes right after the member of its set that comes last in π, with ties broken by creation order. That means changes
   to `lower.cpp` lines 1084-1093, 1117, 1128, 1187-1188 and 1225, and to `origin_of`. `diagnostics.def` drops "or
@@ -974,7 +1062,7 @@ the essentials follow. Team in every session: edg-backend, il-analyst, test-muta
   `reject_void_conditional_arms.c`, and the `unsupported_type` line of the four `reject_assert_shape_*.c` tests as
   measured.
 
-**M4.4d Exact sets** (record 0025; §11 question 27).
+**M4.4d Exact sets** (record 0026, was 0025; §11 question 27).
 - **Measure first** with a prototype: exact precondition sets also move preconditions in pre-M4.3b programs
   (`f(a, g(b))`), and any expectation change other than the approved one stops the work.
 - **Two steps:** exact sets (a precondition gets PRE(c), and a comma's value carries its floor), else today's sets. A
@@ -1403,21 +1491,78 @@ Each has a recommended answer. Answer inline, as before.
     `_Static_assert(65536u * 65536u == 0u)` is accepted. A closed `_Static_assert` condition could be encoded as written
     and checked in the 0017 prologue, like a named constant's initializer. Do it, and when? *Recommended: yes, a small
     item in M4.4b (its record already touches constants); `#if` and array bounds stay EDG's (an M8 entry).*
+    **Answered (owner, 2026-10-23): "Fix it now, and any other known instances of the same bad behavior."** The M4.4b
+    planning split M4.4b (owner): this is **M4.4b2** (record 0024): `_Static_assert` at block and file scope (file scope
+    through `GENERATE_SOURCE_SEQUENCE_LISTS`, owner, after a spike), wrapped character literals, array types inside
+    `sizeof` and typedefs; `#if` needs an EDG fork commit, drafted for the EDG box session (owner); template arguments are
+    closed already (P38). §8.1 has the plan.
 33. **Multi-character literals** (`'abcde'`) are truncated by EDG with only warning #1654, which verify mode does not
     suppress, so a verified test cannot hold one. Make #1654 an error in verify mode (`--diag_error=1654`), as C23
     makes them implementation-defined? *Recommended: yes, a one-line driver item with a test, in the next session that
     touches the driver.*
+    **Answered (owner, 2026-10-23): "Yes, and do it now."** In the M4.4b planning the owner extended it to the same
+    loss of value in EDG's other character-literal warnings: `--diag_error=1422,1654,26,3255` (`'ab'`, `'abcde'`, `L'ab'`,
+    a truncated UTF-16 value). It is in **M4.4b1** (record 0023).
 34. **Item 5 rejects two shapes the compilers accept**: `x == (enum color)2`, which in C would otherwise be a
     `conversion` error in C only, and `c == (x > 0 ? 1 : 2)`. It also rejects `c == (int)b`, where only clang warns.
     Keep the rule as it is (one meaning in both modes, the strictest reading)? *Recommended: keep it; each has an
     explicit form that verifies (`(int)`).*
+    **Answered (owner, 2026-10-23): keep it.**
 35. **Sign-compare shapes without enumerations.** `n == 0u`, `i < u` and `-1 < 0u` are path-precise `conversion` errors
     now (0022 item 1), where the compilers warn `-Wsign-compare`, in C++ `-Wall` and in C `-Wextra`, on some of them. Keep
     the path-precise check, or reject the warned shapes like the compilers as for enumerations? *Recommended: keep the
     path-precise check; it reports only what can actually go wrong, and a warned shape that is in range verifies.*
+    **Answered (owner, 2026-10-23): keep the path-precise check.**
 36. **Item 5's remaining mode differences** (re-audit 2b; sound, but not one verdict in both modes). A `?:` or comma
     whose result is a truth value is typed `int` in C and `bool` in C++, so `c == (x ? true : false)` is rejected in C
     only. A `?:` of enumerators is typed `int` in C and the enumeration in C++, so `(x ? RED : GREEN) == y` is rejected
     in C++ only. Extend the rule, so that a `?:` whose arms are truth values, or a comma whose right operand is one,
     counts as a truth value, and in C a `?:` of enumerators of one enumeration counts as a value of it? *Recommended:
     yes, as a small item in M4.4b, with a test pair per shape.*
+    **Answered (owner, 2026-10-23): follow the recommendation.** In the M4.4b planning the owner chose the symmetric
+    form for C (a Plan-agent review found that counting a C `?:` of enumerators as a value of its enumeration would newly
+    accept `c == (x ? RED : GREEN)` in C while C++ rejects it, 0018 item 8): for `==`/`!=`, a C `?:` whose arms are
+    enumerators of one enumeration is rejected with 0018 item 8's message whatever the other operand is. In **M4.4b1**
+    (record 0023).
+
+**M4.4b planning, 2026-10-23** (owner, with the answers above):
+- **Split.** M4.4b is two sessions: **M4.4b1** bitwise operators with Q33 and Q36 (record 0023), then **M4.4b2** Q32's
+  values the front end computes (record 0024). M4.4c and M4.4d become records **0025** and **0026**.
+- **File-scope `_Static_assert`** (no IL record without source sequence lists): turn on `GENERATE_SOURCE_SEQUENCE_LISTS`
+  in the cerastes configuration, after a spike (M4.4b2).
+- **`#if`** (no IL record, no EDG diagnostic for an unsigned wrap; C23's #61 there is suppressed): an EDG fork commit,
+  drafted for the EDG box session (§8.1).
+- **64-bit bitwise** is not a cut: if the first closed forms miss the time budget, M4.4b1 keeps working until 64-bit is
+  complete (128-bit may still be cut, with a test and an M8 entry).
+- **Warning shapes the IL cannot match exactly** (a literal's spelling, as in clang's `2 ^ 32`): reject the broader shape,
+  stricter than the compilers, each one listed.
+- **Other `-Wall` shapes** met by the P41 matrix (`a && b || c`, `!x == y`, `x == y == z`, …): measured in M4.4b1, then
+  a §11 question.
+
+**M4.4b1, 2026-10-24:**
+
+37. **Other `-Wall` shapes cerastes accepts** (P41 group 11 and audit round 1; of these only `(p ^ q) == 2` involves a
+    bitwise operator):
+    - all four compilers warn: `a && b || c`, `a || b && c`, `a + b << c`, `a << b + c`, `!x == y`, `x == x`, `x != x`,
+      `x > x`, `if (a << b)`, `a << b ? 1 : 2`;
+    - clang warns by default on comparing a truth value with a constant outside 0–1 (`(a > b) == 2`, `(p ^ q) == 2`);
+      `x < y < z` is a clang error by default;
+    - GCC only (`-Wall`): `x == y == z`, `a < b == 1`, `if (a * b)`;
+    - `RED + NA` (two enumerations in arithmetic; C++20's default `-Wdeprecated-enum-enum-conversion`; record 0023
+      rejects the bitwise form);
+    - GCC's `-Wextra`-only `-Wtype-limits`: `u >= 0`, `u < 0`, `(uc & vc) == 300` (EDG warns #186 on the first two).
+
+    Reject the `-Wall` ones like the compilers (0020 item 5's union), and when? *Recommended: yes, in M4.4c (which
+    already touches the warning rules' harness, question 31), a rejection test per shape; the `-Wextra`-only
+    `-Wtype-limits` shapes stay accepted, outside the `-Wall` union.*
+38. **Gate G2's `low_bit` and symbolic bit identities.** The prelude decides ranges, same-term results, constant masks
+    and constants, but not `x & -x`'s bounds, `(u & m) <= m` for a symbolic `m`, the XOR swap or popcount (record 0023
+    item 2); such a run ends at `--timeout` with exit 3. G2 (M5) needs `low_bit`. Options: more postconditions proved by
+    Silicon on the prelude functions (for example `0 <= b ==> c_and(a, b) <= b`), measured as in this session; Silicon's
+    `--assertTimeout` (errors instead of timeouts, incomplete); an SMT bit-vector domain (axioms, a lint tag). *Recommended:
+    the first, spiked in M5d's planning (S22), since a postcondition is proved and needs no new trust.*
+39. **M4.4b2: a static assertion whose condition cerastes cannot encode** (a call of a `constexpr` function, a type
+    trait, a name from a system header): reject it (fail closed, invariant 3), or skip it (EDG checked it, and nothing
+    at run time depends on it)? *Recommended: reject it in verified files, as named-constant initializers are (0017),
+    with an M8 entry for C++ type traits.*
+

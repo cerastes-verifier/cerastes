@@ -353,7 +353,7 @@ valid in both. Strictly C (owner, 2026-10-20): C++ references, `new`/`delete` an
 (invariant 2) and its docs (invariant 9), with one Opus audit round per diff plus a re-audit of blocking fixes and
 `check.sh` at most twice. `internal/handoff.md` holds each session's tasks, agents, acceptance and stop rules.
 M4.2 was split into M4.2a–c (owner, 2026-10-21): its six constructs did not fit one session; M4.2b was split again
-into M4.2b1 and M4.2b2 (owner, 2026-10-21, M4.2b planning). M4.3 was split into M4.3a and M4.3b (owner, 2026-10-22, M4.3 planning). M4.4 was split into M4.4a–d (owner, 2026-10-23, M4.4 planning, with handoff §11 questions 13 and 27–31). Between M4.2a and M4.2b1 run the EDG upstream merge, CI
+into M4.2b1 and M4.2b2 (owner, 2026-10-21, M4.2b planning). M4.3 was split into M4.3a and M4.3b (owner, 2026-10-22, M4.3 planning). M4.4 was split into M4.4a–d (owner, 2026-10-23, M4.4 planning, with handoff §11 questions 13 and 27–31). M4.4b was split into M4.4b1 and M4.4b2 (owner, 2026-10-23, M4.4b planning, with handoff §11 questions 32–36); M4.4c and M4.4d take records 0025 and 0026. Between M4.2a and M4.2b1 run the EDG upstream merge, CI
 and mutation triage sessions (above).
 
 | Session | Scope | Needs |
@@ -366,9 +366,10 @@ and mutation triage sessions (above).
 | **M4.3a Side effects in expressions** | assignments, compound assignments and `x++` used as values, chained assignment, the comma operator (calls sequenced by `,` too), side effects in `&&`/`\|\|`/`?:` operands and loop conditions; C's sequencing rules (an unsequenced modification is rejected like `-Wunsequenced`); `-Wall`'s warning shapes rejected like the compilers (owner, 2026-10-22; record 0020) | M4.2c |
 | **M4.3b Calls in expressions** | calls in guarded operands and loop conditions; unsequenced calls by the dependency-chain rule (owner, 2026-10-22; record 0021) | M4.3a |
 | **M4.4a No wrapping** | unsigned arithmetic and conversions are checked like signed ones: a result that does not fit is `overflow`, `conversion` or `shift`, never a wrap (owner, 2026-10-23, handoff §11 question 13; record 0022); lowering's internal errors exit 3 (§11 question 29) | M4.3b |
-| **M4.4b Bitwise operators** | `& \| ^ ~` and `&= \|= ^=` on signed and unsigned types (C23 two's complement), exact on mathematical integers; masks as the explicit modular reduction; a Silicon/Z3 spike first (a closed form with a body over `Int`); `-Wall`'s bitwise warning shapes rejected like the compilers (record 0023) | M4.4a |
-| **M4.4c Writes outside the chain, `void` `?:`** | writes and snapshots leave 0021's family F (§11 question 28); a `void` `?:` in statement position is an `if` (question 30); verified and error tests may list front-end warnings (question 31) (record 0024) | M4.4b |
-| **M4.4d Exact sets** | exact sets for preconditions and commas, with today's sets as the fallback, so no accepted program becomes rejected (§11 question 27; record 0025) | M4.4c |
+| **M4.4b1 Bitwise operators** | `& \| ^ ~` and `&= \|= ^=` on signed and unsigned types (C23 two's complement), exact on mathematical integers; masks as the explicit modular reduction; a Silicon/Z3 spike first (a closed form with a body over `Int`, 64-bit complete); `-Wall`'s bitwise warning shapes rejected like the compilers; multi-character and truncated character literals rejected (§11 question 33); one verdict in both modes for item 5's truth values and `?:` of enumerators (question 36) (record 0023) | M4.4a |
+| **M4.4b2 Values the front end computes** | `_Static_assert` conditions encoded as written and checked in the 0017 prologue (file scope through EDG's source sequence lists, after a spike), wrapped character literals as `conversion` errors, array types inside `sizeof` and typedefs; `#if` through an EDG fork commit in the box session (§11 question 32; record 0024) | M4.4b1 |
+| **M4.4c Writes outside the chain, `void` `?:`** | writes and snapshots leave 0021's family F (§11 question 28); a `void` `?:` in statement position is an `if` (question 30); verified and error tests may list front-end warnings (question 31) (record 0025) | M4.4b2 |
+| **M4.4d Exact sets** | exact sets for preconditions and commas, with today's sets as the fallback, so no accepted program becomes rejected (§11 question 27; record 0026) | M4.4c |
 | **M4.5 Pointers** (sessions a–f, below) | the memory model for C | M4.1–M4.3 |
 | **M4.6 Chars and strings** | string literals as read-only arrays, `char` buffers, `strlen`/`memcpy`/`memcmp`/`strcmp` contracts, `main(argc, argv)` | M4.5e |
 | **M4.7 Function pointers** | contracts on function types, calls through pointers ("the pointer satisfies the type") | M4.5b |
@@ -525,7 +526,7 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
   - **C23 `constexpr` objects** (owner, 2026-10-22, M4.2b1 handoff question 15): they do not parse in this EDG configuration (P23: warning #77, errors #65/#20), so `case N:` with a C `constexpr` cannot be written; check upstream EDG's C23 status at the next upstream merge.
   - **Modular arithmetic on request** (owner, 2026-10-23, M4.4 planning, handoff §11 question 13): cerastes has no
     wrapping (M4.4a, record 0022) and no opt-in; a modular result is written as a reduction in a wider type (`%`, or a
-    mask from M4.4b). A VeriFast-style truncating marker is an entry, to revisit with the ports.
+    mask from M4.4b1). A VeriFast-style truncating marker is an entry, to revisit with the ports.
   - **`void` `?:` outside statement position** (owner, 2026-10-23, §11 question 30): M4.4c accepts `c ? v() : w();` as a
     statement; a `void` `?:` as the left operand of a comma whose value is used, and C++'s `return c ? v() : w();` in a
     `void` function, stay rejected (`unsupported_type`).

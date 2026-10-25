@@ -65,13 +65,6 @@ bool allowed_attribute_name(std::string n) {
 // How a rejection describes an operation.
 std::string describe_operation(an_expr_operator_kind k) {
   switch (k) {
-    case eok_and: return "the bitwise operator &";
-    case eok_or: return "the bitwise operator |";
-    case eok_xor: return "the bitwise operator ^";
-    case eok_complement: return "the bitwise operator ~";
-    case eok_and_assign: return "the bitwise assignment &=";
-    case eok_or_assign: return "the bitwise assignment |=";
-    case eok_xor_assign: return "the bitwise assignment ^=";
     case eok_bassign: return "an assignment of a class or reference type";
     case eok_address_of: return "taking an address";
     case eok_indirect:
@@ -577,6 +570,7 @@ class Encoder {
         reject(Diag::ensures_on_noreturn, a->position, "");
         continue;
       }
+      detect_or_as_truth_value(arg);  // decision 0023 item 5: `requires(x | 4)`, a clause of `ensures`
       const Expr* c = clause_bool(expr(arg), arg->position);
       if (c == nullptr) continue;
       vir::Clause cl{c, loc_of(a->position)};
@@ -1162,7 +1156,11 @@ class Encoder {
       allow_enum_conversion(ops[0]);
       allow_enum_conversion(ops[1]);
     }
+    if ((op == vir::BinaryOp::Eq || op == vir::BinaryOp::Ne) && detect_tautological_compare(e, ops)) return nullptr;  // 0023 item 5
+    if (detect_promoted_complement_compare(e, ops)) return nullptr;                                                   // 0023 item 5 (6c)
     if (op == vir::BinaryOp::Eq || op == vir::BinaryOp::Ne) {
+      // Decision 0023 item 7: in C, a `?:` of enumerators of one enumeration is rejected here as C++ rejects it (its type).
+      if (reject_enumerator_conditional(ops)) return nullptr;
       // Decision 0022 item 5: an enumeration value compared with a signed integer that may be negative is rejected.
       if (reject_enumeration_sign_compare(e, ops)) return nullptr;
     } else {
@@ -1194,6 +1192,8 @@ class Encoder {
   const Expr* logical(an_expr_node_ptr e, vir::BinaryOp op) {
     auto ops = operands_of(e);
     if (!operand_count(e, 2, ops)) return nullptr;
+    detect_or_as_truth_value(ops[0]);
+    detect_or_as_truth_value(ops[1]);
     const Expr* a = as_bool(expr(ops[0]), ops[0]->position);
     const Expr* c = as_bool(expr(ops[1]), ops[1]->position);
     if (a == nullptr || c == nullptr) return nullptr;
@@ -1256,8 +1256,8 @@ class Encoder {
       // An implicit conversion out of an enumeration means the same in C and C++ only where a parent allowed it (decision 0018
       // item 6); C promotes to unsigned int where C++ promotes to int, so everywhere else it is rejected.
       reject(Diag::unsupported_expression, e->position,
-             "an implicit conversion of an enumeration value to an integer in arithmetic, a comparison of order, a unary "
-             "operator, a shift or ?: (decision 0018 item 6)");
+             "an implicit conversion of an enumeration value to an integer in arithmetic, a bitwise operator, a comparison of "
+             "order, a unary operator, a shift or ?: (decision 0018 item 6, decision 0023 item 4)");
       return nullptr;
     }
     return b_.spelled(b_.convert(to.t, x, !e->compiler_generated, l), to.name);
@@ -1346,12 +1346,15 @@ class Encoder {
       }
       case eok_not: {
         if (!operand_count(e, 1, ops)) return nullptr;
+        detect_or_as_truth_value(ops[0]);
         const Expr* a = as_bool(expr(ops[0]), ops[0]->position);
         if (a == nullptr) return nullptr;
         return logical_result(e, b_.unary(vir::UnaryOp::Not, a, loc_of(e->position)));
       }
       case eok_question: {
         if (!operand_count(e, 3, ops)) return nullptr;
+        if (detect_bitwise_condition(ops[0])) return nullptr;  // decision 0023 item 5
+        detect_or_as_truth_value(ops[0]);
         const Expr* c = as_bool(expr(ops[0]), ops[0]->position);
         const Expr* a = expr(ops[1]);
         const Expr* d = expr(ops[2]);
@@ -1370,14 +1373,22 @@ class Encoder {
       case eok_remainder_assign:
       case eok_shiftl_assign:
       case eok_shiftr_assign:
+      case eok_and_assign:
+      case eok_or_assign:
+      case eok_xor_assign:
       case eok_pre_incr:
       case eok_post_incr:
       case eok_pre_decr:
       case eok_post_decr: return assignment_value(e, ops);
+      case eok_and:
+      case eok_or:
+      case eok_xor: return bitwise_binary(e, ops);
+      case eok_complement: return bitwise_complement(e, ops);
       case eok_comma: return comma_value(e, ops);
       case eok_cast: return conversion(e);
       case eok_bool_cast: {
         if (!operand_count(e, 1, ops)) return nullptr;
+        detect_or_as_truth_value(ops[0]);
         const Expr* a = as_bool(expr(ops[0]), ops[0]->position);
         return logical_result(e, a);
       }
@@ -1509,6 +1520,7 @@ class Encoder {
       return;
     }
     cx_.annotation = true;
+    detect_or_as_truth_value(arg);  // decision 0023 item 5: `check(x | 4)`
     const Expr* c = clause_bool(expr(arg), arg->position);
     cx_.annotation = false;
     if (c != nullptr) out.push_back(b_.check(c, loc_of(s->position)));
@@ -1550,6 +1562,7 @@ class Encoder {
         continue;
       }
       cx_.annotation = true;
+      detect_or_as_truth_value(arg);  // decision 0023 item 5: `invariant(x | 4)`
       const Expr* c = clause_bool(expr(arg), arg->position);
       const SrcLoc clause_loc = loc_of(a->position);
       cx_.annotation = false;
@@ -1711,8 +1724,8 @@ class Encoder {
   }
 
   // ---- assignments, compound assignments, `++` and `--` (decision 0020 items 1-2, 10) -----------------------------------------
-  // The kinds that are encoded: `=`, the seven arithmetic and shift compound assignments, and the four increments and decrements.
-  // The bitwise assignments stay rejected (M4.4).
+  // The kinds that are encoded: `=`, the ten arithmetic, shift and bitwise compound assignments (decision 0023 item 3), and the four
+  // increments and decrements.
   static bool is_encoded_assignment_kind(an_expr_operator_kind k) {
     switch (k) {
       case eok_assign:
@@ -1723,6 +1736,9 @@ class Encoder {
       case eok_remainder_assign:
       case eok_shiftl_assign:
       case eok_shiftr_assign:
+      case eok_and_assign:
+      case eok_or_assign:
+      case eok_xor_assign:
       case eok_pre_incr:
       case eok_post_incr:
       case eok_pre_decr:
@@ -1756,14 +1772,17 @@ class Encoder {
   static bool written_outside_macros(an_expr_node_ptr e) {
     return e->position.orig_seq == e->position.seq && e->position.orig_column == e->position.column;
   }
-  void check_self_assignment(an_expr_node_ptr assign, const std::vector<an_expr_node_ptr>& ops) {
-    if (ops.size() != 2) return;
+  // True when it rejected: `x = x`, and (decision 0023 item 5) `x &= x` and `x |= x`; clang is silent on `x ^= x`.
+  bool check_self_assignment(an_expr_node_ptr assign, const std::vector<an_expr_node_ptr>& ops) {
+    if (ops.size() != 2) return false;
     an_expr_node_ptr l = peel_generated_conversions(ops[0]);
     an_expr_node_ptr r = peel_generated_conversions(ops[1]);
-    if (l == nullptr || r == nullptr || l->kind != enk_variable || r->kind != enk_variable) return;
-    if (l->variant.variable.ptr == nullptr || l->variant.variable.ptr != r->variant.variable.ptr) return;
-    if (!written_outside_macros(assign) || !written_outside_macros(l) || !written_outside_macros(r)) return;
+    if (l == nullptr || r == nullptr || l->kind != enk_variable || r->kind != enk_variable) return false;
+    if (l->variant.variable.ptr == nullptr || l->variant.variable.ptr != r->variant.variable.ptr) return false;
+    if (!written_outside_macros(assign) || !written_outside_macros(l) || !written_outside_macros(r)) return false;
+    detected_.insert(assign);
     reject(Diag::self_assignment, assign->position, "");
+    return true;
   }
 
   AssignRes assignment_parts(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops, AssignParts* p) {
@@ -1811,13 +1830,27 @@ class Encoder {
       const vir::IntType* i = prog_.int_type("int", prog_.c_int_bits(), true);
       p->x = b_.bool_to_int(vir::Type::integer(i), p->x, l);
     }
-    p->op = k == eok_add_assign         ? vir::BinaryOp::Add
-            : k == eok_subtract_assign  ? vir::BinaryOp::Sub
-            : k == eok_multiply_assign  ? vir::BinaryOp::Mul
-            : k == eok_divide_assign    ? vir::BinaryOp::Div
-            : k == eok_remainder_assign ? vir::BinaryOp::Rem
-            : k == eok_shiftl_assign    ? vir::BinaryOp::Shl
-                                        : vir::BinaryOp::Shr;
+    // An exhaustive switch: a kind that is not listed is rejected here and never read as `>>=`.  The bitwise forms (decision 0023
+    // item 3): the rhs arrives cast to the usual arithmetic conversion of both operands (P40) and the result converts back to the
+    // left type with the 0022 check, like the other compound forms; `x &= x` and `x |= x` are rejected first (clang -Wself-assign).
+    switch (k) {
+      case eok_and_assign:
+      case eok_or_assign:
+        if (check_self_assignment(e, ops)) return AssignRes::rejected;
+        p->op = k == eok_and_assign ? vir::BinaryOp::BitAnd : vir::BinaryOp::BitOr;
+        break;
+      case eok_xor_assign: p->op = vir::BinaryOp::BitXor; break;
+      case eok_add_assign: p->op = vir::BinaryOp::Add; break;
+      case eok_subtract_assign: p->op = vir::BinaryOp::Sub; break;
+      case eok_multiply_assign: p->op = vir::BinaryOp::Mul; break;
+      case eok_divide_assign: p->op = vir::BinaryOp::Div; break;
+      case eok_remainder_assign: p->op = vir::BinaryOp::Rem; break;
+      case eok_shiftl_assign: p->op = vir::BinaryOp::Shl; break;
+      case eok_shiftr_assign: p->op = vir::BinaryOp::Shr; break;
+      default:
+        reject(Diag::unsupported_expression, e->position, describe_operation(k));
+        return AssignRes::rejected;
+    }
     return AssignRes::ok;
   }
 
@@ -1998,6 +2031,7 @@ class Encoder {
         reject(Diag::unsupported_expression, pos, "an assert in the increment of a for loop");
         return;
       }
+      detect_or_as_truth_value(cond);  // decision 0023 item 5: `assert(x | 4)`
       const Expr* c = as_bool(expr(cond), cond->position);
       if (c != nullptr) out.push_back(b_.check(c, loc_of(pos), true));
       return;
@@ -2244,11 +2278,18 @@ class Encoder {
                         c->variant.operation.operands != nullptr && c->variant.operation.operands->next == nullptr;
          ++guard)
       c = c->variant.operation.operands;
-    if (c == nullptr || c->kind != enk_operation || c->variant.operation.kind != eok_assign) return nullptr;
+    // `=`, and (decision 0023 item 5) `|=` as the whole condition (clang); `&=`, `^=` and the arithmetic compounds are silent.
+    if (c == nullptr || c->kind != enk_operation ||
+        (c->variant.operation.kind != eok_assign && c->variant.operation.kind != eok_or_assign))
+      return nullptr;
     return c->is_parenthesized ? nullptr : c;
   }
   void check_condition(an_expr_node_ptr c) {
-    if (an_expr_node_ptr a = assignment_as_condition_node(c)) reject(Diag::assignment_as_condition, a->position, "");
+    if (an_expr_node_ptr a = assignment_as_condition_node(c)) {
+      detected_.insert(a);
+      reject(Diag::assignment_as_condition, a->position, "");
+    }
+    detect_or_as_truth_value(c);  // decision 0023 item 5: `if (x | 4)`
   }
 
   // The left operand of a comma has no effect where the compilers warn: not a `(void)` cast (explicit) and no side effect inside.
@@ -3078,6 +3119,371 @@ class Encoder {
     return 1;
   }
 
+  // The node left after the front end's own implicit conversions: compiler-generated `eok_cast`s and the original expression of a
+  // folded constant (never an explicit cast, never an enumerator, whose value has no expression).  Null on a malformed node.
+  static an_expr_node_ptr peel_implicit(an_expr_node_ptr n) {
+    for (int guard = 0; n != nullptr && guard < 16; ++guard) {
+      if (n->kind == enk_operation && n->variant.operation.kind == eok_cast && n->compiler_generated) {
+        an_expr_node_ptr o = n->variant.operation.operands;
+        if (o == nullptr || o->next != nullptr) return nullptr;
+        n = o;
+      } else if (n->kind == enk_constant && n->variant.constant.ptr != nullptr && !is_enumerator(n->variant.constant.ptr) &&
+                 n->variant.constant.ptr->expr != nullptr && !n->variant.constant.ptr->local_expr_ref) {
+        an_expr_node_ptr o = expr_node_from_constant(n->variant.constant.ptr);
+        if (o == nullptr || o == n) return n;
+        n = o;
+      } else {
+        return n;
+      }
+    }
+    return nullptr;
+  }
+
+  // Whether `n` is a truth value: 0 or 1, never a negative number (decision 0023 item 7, one verdict in both modes).  After the
+  // implicit conversions and folded constants' original expressions are peeled (an explicit cast is never peeled, so `(int)b` is
+  // not one, and an `int` constant is not one): a comparison, `&&`, `||`, `!` or a conversion to `bool`; a node of type `bool`
+  // (in C++ every comparison has it; in C `x ? true : false` has `bool` arms); a `?:` whose two arms are truth values (the
+  // condition does not matter); a comma whose right operand is one.
+  bool truth_value(an_expr_node_ptr n, int depth = 0) {
+    n = peel_implicit(n);
+    if (n == nullptr || n->type == nullptr || depth > 16) return false;
+    VType t = vtype(n->type);
+    if (t.ok && t.t.is_bool()) return true;
+    if (n->kind != enk_operation) return false;
+    switch (n->variant.operation.kind) {
+      case eok_lt: case eok_le: case eok_gt: case eok_ge: case eok_eq: case eok_ne:
+      case eok_land: case eok_lor: case eok_not: case eok_bool_cast:
+        return true;
+      case eok_question: {
+        an_expr_node_ptr c = n->variant.operation.operands;
+        if (c == nullptr || c->next == nullptr || c->next->next == nullptr) return false;
+        return truth_value(c->next, depth + 1) && truth_value(c->next->next, depth + 1);
+      }
+      case eok_comma: {
+        an_expr_node_ptr r = n->variant.operation.operands;
+        if (r == nullptr || r->next == nullptr) return false;
+        while (r->next != nullptr) r = r->next;
+        return truth_value(r, depth + 1);
+      }
+      default:
+        return false;
+    }
+  }
+
+  // C only (decision 0023 item 7): the `?:` node, if any, that C++ would reject with 0018 item 8's message, reached through the
+  // implicit conversions and folded constants' original expressions: a `?:` whose two arms are enumerators of one enumeration
+  // (each through its implicit conversions: the front end marks the enumerator constant, also inside a folded `?:`'s expression;
+  // P40).  An arm that is itself such a `?:` is searched first, as C++ evaluates the arms first.  C types this `?:` as `int`, so
+  // the operand does not look like an enumeration value, while C++ gives it the enumeration's type and rejects it.
+  an_expr_node_ptr enumerator_conditional(an_expr_node_ptr n, int depth = 0) {
+    n = peel_implicit(n);
+    if (n == nullptr || depth > 8 || n->kind != enk_operation || n->variant.operation.kind != eok_question) return nullptr;
+    an_expr_node_ptr c = n->variant.operation.operands;
+    if (c == nullptr || c->next == nullptr || c->next->next == nullptr) return nullptr;
+    an_expr_node_ptr arm[2] = {c->next, c->next->next};
+    EnumOperand eo[2];
+    for (int i = 0; i < 2; ++i) {
+      if (an_expr_node_ptr inner = enumerator_conditional(arm[i], depth + 1)) return inner;
+    }
+    for (int i = 0; i < 2; ++i) {
+      if (enumeration_operand(arm[i], &eo[i]) && eo[i].enumerator != nullptr) continue;
+      if (!comma_ending_in_enumerator(arm[i], &eo[i])) return nullptr;  // an arm `(y++, RED)` (item 7, audit round 1)
+    }
+    return eo[0].entry == eo[1].entry ? n : nullptr;
+  }
+  bool reject_enumerator_conditional(const std::vector<an_expr_node_ptr>& ops) {
+    if (il_header.source_language != sl_C) return false;
+    for (an_expr_node_ptr o : ops) {
+      if (an_expr_node_ptr q = enumerator_conditional(o)) {
+        reject(Diag::unsupported_expression, q->position, "a conditional expression of enumeration type (decision 0018 item 8)");
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // ---- the bitwise operators and the shapes the compilers warn about (decision 0023 items 3-5; P41) ----
+  // Each detector is a rejection with its own tag at the operator.  They read the IL as P40 found it: through the front end's
+  // generated casts (peel_implicit, peel_generated_conversions; an explicit cast is a node and a barrier), the flag
+  // `is_parenthesized` on the innermost written operation (also inside a folded constant's original expression), and folded
+  // constants' original expressions, so a shape EDG folded (`2 ^ 32`, `5 & 3 == 3`) is found where the encoder reads it.  The
+  // compilers see nothing in an annotation (the macros expand to nothing) and change their verdicts inside macros; cerastes
+  // applies the rules everywhere (the broader shape).
+  // The nodes a detector rejected: the operation's own rejection stays silent for them (one diagnostic per shape).
+  std::set<an_expr_node_ptr> detected_;
+  bool detect(Diag d, an_expr_node_ptr n) {
+    detected_.insert(n);
+    reject(d, n->position, "");
+    return true;
+  }
+
+  static bool is_comparison_kind(an_expr_operator_kind k) {
+    return k == eok_lt || k == eok_le || k == eok_gt || k == eok_ge || k == eok_eq || k == eok_ne;
+  }
+  static bool is_bitwise_binary_kind(an_expr_operator_kind k) { return k == eok_and || k == eok_or || k == eok_xor; }
+  // The innermost written operation of an operand (null when it is a variable, a literal or a constant without an expression).
+  static an_expr_node_ptr written_operation(an_expr_node_ptr n) {
+    n = peel_implicit(n);
+    return n != nullptr && n->kind == enk_operation ? n : nullptr;
+  }
+  // As peel_implicit, and the front end's generated conversions to `bool` too (a C++ condition is one).
+  static an_expr_node_ptr peel_condition(an_expr_node_ptr n) {
+    for (int guard = 0; n != nullptr && guard < 16; ++guard) {
+      n = peel_implicit(n);
+      if (n != nullptr && n->kind == enk_operation && n->variant.operation.kind == eok_bool_cast && n->compiler_generated &&
+          n->variant.operation.operands != nullptr && n->variant.operation.operands->next == nullptr) {
+        n = n->variant.operation.operands;
+        continue;
+      }
+      return n;
+    }
+    return nullptr;
+  }
+  // The integer constant an operand is, through generated conversions only (the converted value, as the compilers evaluate it).
+  static a_constant_ptr integer_constant_operand(an_expr_node_ptr n) {
+    n = peel_generated_conversions(n);
+    if (n == nullptr || n->kind != enk_constant || n->variant.constant.ptr == nullptr || n->variant.constant.ptr->kind != ck_integer)
+      return nullptr;
+    return n->variant.constant.ptr;
+  }
+  // The value of an integer constant as a 128-bit number; false when it does not fit (the rule then does not apply).
+  static bool constant_int128(a_constant_ptr c, __int128* out) {
+    if (c == nullptr) return false;
+    const std::string s = decimal_value(c);
+    size_t i = 0;
+    bool neg = false;
+    if (i < s.size() && (s[i] == '-' || s[i] == '+')) neg = s[i++] == '-';
+    if (i >= s.size() || s.size() - i > 36) return false;
+    __int128 v = 0;
+    for (; i < s.size(); ++i) {
+      if (s[i] < '0' || s[i] > '9') return false;
+      v = v * 10 + (s[i] - '0');
+    }
+    *out = neg ? -v : v;
+    return true;
+  }
+  // A non-constant operand (after generated conversions): the `x` of `x | C`.
+  static bool is_variable_operand(an_expr_node_ptr n) {
+    n = peel_generated_conversions(n);
+    return n != nullptr && n->kind != enk_constant;
+  }
+
+  // `-Wparentheses`, `-Wbitwise-op-parentheses` (item 5): an unparenthesized operand of binary `&`, `|` or `^` that is a comparison,
+  // a `+` or `-`, or a different bitwise operator.
+  bool detect_operand_parentheses(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
+    const an_expr_operator_kind k = e->variant.operation.kind;
+    for (an_expr_node_ptr o : ops) {
+      an_expr_node_ptr n = written_operation(o);
+      if (n == nullptr || n->is_parenthesized) continue;
+      const an_expr_operator_kind nk = n->variant.operation.kind;
+      if (is_comparison_kind(nk) || nk == eok_add || nk == eok_subtract || (is_bitwise_binary_kind(nk) && nk != k))
+        return detect(Diag::bitwise_operand_parentheses, e);
+    }
+    return false;
+  }
+  // `-Wlogical-not-parentheses`, `-Wparentheses` (item 5): `!e` as the left operand of `&` or `|` (never `^`), unless the right
+  // operand is a truth value or, for `|` only, the literal 0 or 1.
+  bool detect_logical_not(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
+    const an_expr_operator_kind k = e->variant.operation.kind;
+    if (k != eok_and && k != eok_or) return false;
+    an_expr_node_ptr l = written_operation(ops[0]);
+    if (l == nullptr || l->variant.operation.kind != eok_not || l->is_parenthesized) return false;
+    if (truth_value(ops[1])) return false;
+    if (k == eok_or) {
+      // GCC is silent on the literal 0 or 1 (by value, whatever the suffix: `1L`), and every compiler on an explicit cast of a
+      // comparison (`!x | (int)(y > 0)`); clang warns about that cast only for `&`.
+      __int128 v = 0;
+      if (constant_int128(integer_constant_operand(ops[1]), &v) && (v == 0 || v == 1)) return false;
+      an_expr_node_ptr r = peel_generated_conversions(ops[1]);
+      if (r != nullptr && r->kind == enk_operation && r->variant.operation.kind == eok_cast && !r->compiler_generated &&
+          r->variant.operation.operands != nullptr && r->variant.operation.operands->next == nullptr) {
+        // GCC exempts the cast of a comparison, `!`, `&&` or `||` by form; `(int)q` of a bool variable still warns (P41 `or_castq`).
+        an_expr_node_ptr o = peel_generated_conversions(r->variant.operation.operands);
+        if (o != nullptr && o->kind == enk_operation &&
+            (is_comparison_kind(o->variant.operation.kind) || o->variant.operation.kind == eok_not ||
+             o->variant.operation.kind == eok_land || o->variant.operation.kind == eok_lor))
+          return false;
+      }
+    }
+    return detect(Diag::logical_not_bitwise, e);
+  }
+  // `-Wbitwise-instead-of-logical` (item 5, clang): `&` or `|` (never `^`) whose two operands are truth values that both have a
+  // side effect.
+  bool detect_bitwise_instead_of_logical(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
+    const an_expr_operator_kind k = e->variant.operation.kind;
+    if (k != eok_and && k != eok_or) return false;
+    if (!truth_value(ops[0]) || !truth_value(ops[1])) return false;
+    if (first_effect(ops[0]) == nullptr || first_effect(ops[1]) == nullptr) return false;
+    return detect(Diag::bitwise_instead_of_logical, e);
+  }
+  // `-Wxor-used-as-pow` (item 5): `2 ^ n` with n in 0-64 and `10 ^ n` with n >= 0, both operands integer constants.  By value,
+  // whatever the spelling (the IL keeps none): the broader shape.
+  bool detect_xor_as_power(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
+    if (e->variant.operation.kind != eok_xor) return false;
+    __int128 a = 0, n = 0;
+    if (!constant_int128(integer_constant_operand(ops[0]), &a) || !constant_int128(integer_constant_operand(ops[1]), &n)) return false;
+    if ((a == 2 && n >= 0 && n <= 64) || (a == 10 && n >= 0)) return detect(Diag::xor_as_power, e);
+    return false;
+  }
+  // The detectors of the binary operators `&`, `|` and `^`, in a fixed order; true when one rejected.
+  bool detect_bitwise_binary(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
+    return detect_xor_as_power(e, ops) || detect_operand_parentheses(e, ops) || detect_logical_not(e, ops) ||
+           detect_bitwise_instead_of_logical(e, ops);
+  }
+  // `-Wbool-operation` (item 5): `~e` where `e` is a truth value, a `&`, `|` or `^` of two truth values (clang), or a unary `+` of
+  // one.  An explicit cast of the operand is a barrier (peel_implicit stops at it).
+  bool detect_complement_of_truth_value(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
+    if (truth_value(ops[0])) return detect(Diag::complement_of_truth_value, e);
+    an_expr_node_ptr n = written_operation(ops[0]);
+    if (n == nullptr) return false;
+    auto nops = operands_of(n);
+    const an_expr_operator_kind nk = n->variant.operation.kind;
+    if (is_bitwise_binary_kind(nk) && nops.size() == 2 && truth_value(nops[0]) && truth_value(nops[1]))
+      return detect(Diag::complement_of_truth_value, e);
+    if (nk == eok_unary_plus && nops.size() == 1 && truth_value(nops[0])) return detect(Diag::complement_of_truth_value, e);
+    return false;
+  }
+  // `-Wbitwise-conditional-parentheses` (item 5, clang): the condition of a `?:` is an unparenthesized `&` or `|` whose right
+  // operand is a truth value.
+  bool detect_bitwise_condition(an_expr_node_ptr cond) {
+    an_expr_node_ptr n = peel_condition(cond);
+    if (n == nullptr || n->kind != enk_operation || n->is_parenthesized) return false;
+    const an_expr_operator_kind k = n->variant.operation.kind;
+    if (k != eok_and && k != eok_or) return false;
+    auto nops = operands_of(n);
+    if (nops.size() != 2 || !truth_value(nops[1])) return false;
+    return detect(Diag::bitwise_condition_parentheses, n);
+  }
+  // `-Wtautological-compare`, `-Wtautological-bitwise-compare` (item 5), in `==` and `!=`: `(x & C1) == C2` with `C2 & ~C1 != 0`,
+  // and `(x | C1) == C2` with `C1 & ~C2 != 0`, either operand order, any operand type (GCC's union).  Both operands of the
+  // bitwise operation constant (a folded constant) is not the shape.
+  bool detect_tautological_compare(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
+    for (int i = 0; i < 2; ++i) {
+      an_expr_node_ptr w = peel_generated_conversions(ops[i]);
+      if (w == nullptr || w->kind != enk_operation) continue;
+      const an_expr_operator_kind k = w->variant.operation.kind;
+      if (k != eok_and && k != eok_or) continue;
+      auto wops = operands_of(w);
+      if (wops.size() != 2) continue;
+      __int128 c2 = 0, c1 = 0;
+      if (!constant_int128(integer_constant_operand(ops[1 - i]), &c2)) continue;
+      int side = -1;  // the operand of the bitwise operation that is the constant C1
+      if (constant_int128(integer_constant_operand(wops[1]), &c1) && is_variable_operand(wops[0])) side = 1;
+      else if (constant_int128(integer_constant_operand(wops[0]), &c1) && is_variable_operand(wops[1])) side = 0;
+      if (side < 0) continue;
+      const bool never = k == eok_and ? ((c2 & ~c1) != 0) : ((c1 & ~c2) != 0);
+      if (never) return detect(Diag::tautological_bitwise_compare, e);
+    }
+    return false;
+  }
+  // An unsigned integer type of rank below `int` that is not `bool` (`unsigned char`, `unsigned short`): the operand type of clause 6c.
+  bool narrow_unsigned(an_expr_node_ptr n) {
+    if (n == nullptr || n->type == nullptr) return false;
+    VType t = vtype(n->type);
+    return t.ok && t.t.is_int() && !is_enum_type(t.t) && !t.t.int_type->is_signed && t.t.int_type->bits < prog_.c_int_bits();
+  }
+  // `-Wsign-compare`, "comparison of promoted bitwise complement of an unsigned value with constant" (GCC; `-Wextra` in C, `-Wall` in
+  // C++; decision 0023 item 5, clause 6c, audit round 1): a comparison (any of the six, either order) of `~e`, where `e` has an
+  // unsigned type of rank below `int` (an explicit cast to `int` is looked through, `~(int)uc`; `(unsigned char)~a` is not this
+  // shape), with a constant >= 0 in any spelling or a value promoted from such a type: `~uc == 0x0F` is always false, since `~uc` is a
+  // negative `int`.  A negative constant, a non-constant `int`, `~u`, `~ul`, `~sc` and `~uc & 0xFF` are silent.
+  bool detect_promoted_complement_compare(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
+    for (int i = 0; i < 2; ++i) {
+      an_expr_node_ptr w = peel_generated_conversions(ops[i]);
+      if (w == nullptr || w->kind != enk_operation || w->variant.operation.kind != eok_complement) continue;
+      auto wops = operands_of(w);
+      if (wops.size() != 1) continue;
+      an_expr_node_ptr n = peel_generated_conversions(wops[0]);
+      for (int guard = 0; n != nullptr && guard < 8 && n->kind == enk_operation && n->variant.operation.kind == eok_cast &&
+                          !n->compiler_generated && n->variant.operation.operands != nullptr && n->variant.operation.operands->next == nullptr;
+           ++guard) {
+        VType to = vtype(n->type);
+        if (!to.ok || !to.t.is_int() || to.t.int_type->is_signed == false || to.t.int_type->bits != prog_.c_int_bits()) break;  // only `(int)`
+        n = peel_generated_conversions(n->variant.operation.operands);
+      }
+      if (!narrow_unsigned(n)) continue;
+      __int128 c = 0;
+      bool hit = false;
+      if (a_constant_ptr k = integer_constant_operand(ops[1 - i])) hit = constant_int128(k, &c) && c >= 0;
+      else hit = narrow_unsigned(peel_generated_conversions(ops[1 - i]));
+      if (hit) return detect(Diag::tautological_bitwise_compare, e);
+    }
+    return false;
+  }
+  // The same warning for `x | C` (or `C | x`) with a nonzero constant used as a truth value: the operand of an `if`, `while`, `do`
+  // or `for` condition, of a `?:` condition, of `!`, `&&`, `||` or a conversion to `bool` (clang).
+  void detect_or_as_truth_value(an_expr_node_ptr operand) {
+    an_expr_node_ptr n = peel_generated_conversions(operand);
+    if (n == nullptr || n->kind != enk_operation || n->variant.operation.kind != eok_or) return;
+    auto nops = operands_of(n);
+    if (nops.size() != 2) return;
+    __int128 c = 0;
+    const bool left_const = constant_int128(integer_constant_operand(nops[0]), &c) && is_variable_operand(nops[1]);
+    const bool right_const = !left_const && constant_int128(integer_constant_operand(nops[1]), &c) && is_variable_operand(nops[0]);
+    if ((left_const || right_const) && c != 0) detect(Diag::tautological_bitwise_compare, n);
+  }
+
+  // The operators themselves (decision 0023 items 1, 3, 4): after the detectors, the operands are encoded and an enumeration
+  // operand is rejected as in arithmetic; the front end has promoted the operands to the computed type (P40), so the VIR operator
+  // has no obligations of its own.
+  const Expr* bitwise_binary(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
+    if (!operand_count(e, 2, ops)) return nullptr;
+    if (detected_.count(e) != 0 || detect_bitwise_binary(e, ops)) return nullptr;
+    // Item 4: enumerators (or values) of two different enumerations (`RED | NA`; C++20 deprecates the conversion, and C and C++
+    // give the operands different types): rejected in both modes.  An enumerator is otherwise an `int` constant, as in arithmetic.
+    EnumOperand eo[2];
+    if (enumeration_operand(ops[0], &eo[0]) && enumeration_operand(ops[1], &eo[1]) && eo[0].entry != eo[1].entry) {
+      reject(Diag::unsupported_expression, e->position,
+             "a bitwise operator on values of two different enumerations (decision 0023 item 4): convert both sides explicitly, "
+             "for example `(int)RED | (int)NA`");
+      return nullptr;
+    }
+    const Expr* a = expr(ops[0]);
+    const Expr* c = expr(ops[1]);
+    if (a == nullptr || c == nullptr) return nullptr;
+    if (is_enum_type(a->type) || is_enum_type(c->type)) {  // item 4: as arithmetic (0018 item 6)
+      reject(Diag::unsupported_expression, e->position, "a bitwise operator on an enumeration value (decision 0023 item 4)");
+      return nullptr;
+    }
+    const an_expr_operator_kind k = e->variant.operation.kind;
+    return finish(e, b_.binary(k == eok_and ? vir::BinaryOp::BitAnd : k == eok_or ? vir::BinaryOp::BitOr : vir::BinaryOp::BitXor, a, c,
+                               loc_of(e->position)));
+  }
+  const Expr* bitwise_complement(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
+    if (!operand_count(e, 1, ops)) return nullptr;
+    if (detected_.count(e) != 0 || detect_complement_of_truth_value(e, ops)) return nullptr;
+    const Expr* a = expr(ops[0]);
+    if (a == nullptr) return nullptr;
+    if (is_enum_type(a->type)) {  // item 4, including C's bare enumeration operand (P26, P40)
+      reject(Diag::unsupported_expression, e->position, "a bitwise operator on an enumeration value (decision 0023 item 4)");
+      return nullptr;
+    }
+    return finish(e, b_.unary(vir::UnaryOp::BitNot, a, loc_of(e->position)));
+  }
+
+  // C only (decision 0023 item 7, audit round 1): a comma whose right operand is an enumerator.  C++ types `(x++, GREEN)` as the
+  // enumeration and C as `int`; for `==` and `!=` in C it counts as a value of the enumerator's enumeration, as in C++.
+  static bool comma_ending_in_enumerator(an_expr_node_ptr n, EnumOperand* out) {
+    an_expr_node_ptr m = peel_implicit(n);
+    if (m == nullptr || m->kind != enk_operation || m->variant.operation.kind != eok_comma) return false;
+    an_expr_node_ptr r = m->variant.operation.operands;
+    if (r == nullptr || r->next == nullptr) return false;
+    while (r->next != nullptr) r = r->next;
+    EnumOperand eo;
+    if (!enumeration_operand(r, &eo) || eo.enumerator == nullptr) {
+      // a nested comma `(a, b, GREEN)`: its right operand is itself one
+      return comma_ending_in_enumerator(r, out);
+    }
+    *out = EnumOperand();
+    out->inner = m;
+    out->entry = eo.entry;
+    return true;
+  }
+  static bool sign_compare_enum_operand(an_expr_node_ptr n, EnumOperand* out) {
+    if (enumeration_operand(n, out)) return true;
+    return il_header.source_language == sl_C && comma_ending_in_enumerator(n, out);
+  }
+
   // `c == x` and `c != x` where `c` is a value of an enumeration that C compares in an unsigned type and `x` is a signed integer that
   // may be negative.  In C, EDG computes it as `eq[int](cast[unsigned int](c), cast[unsigned int](x))` (P26): a negative `x` would
   // convert to a large unsigned value, which is why both compilers warn (`-Wsign-compare`, probe P39).  Decision 0022 item 5: it is
@@ -3094,7 +3500,7 @@ class Encoder {
   bool reject_enumeration_sign_compare(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
     if (ops.size() != 2 || ops[0] == nullptr || ops[1] == nullptr) return false;
     EnumOperand eo[2];
-    const bool is_enum[2] = {enumeration_operand(ops[0], &eo[0]), enumeration_operand(ops[1], &eo[1])};
+    const bool is_enum[2] = {sign_compare_enum_operand(ops[0], &eo[0]), sign_compare_enum_operand(ops[1], &eo[1])};
     if (is_enum[0] && is_enum[1]) {
       // Two values or enumerators of DIFFERENT enumerations (in C an enumerator is an `int`, found through the front end's enumerator
       // mark): C and C++ give different meanings (`unsigned int` against `int` in C, `int` in C++), and every compiler warns
@@ -3150,15 +3556,8 @@ class Encoder {
       break;
     }
     if (n == nullptr || n->type == nullptr) return false;
-    if (n->kind == enk_operation) {
-      // A truth value is 0 or 1 whatever its type (`int` in C, `bool` in C++): never negative, so no mode-dependent verdict.
-      switch (n->variant.operation.kind) {
-        case eok_lt: case eok_le: case eok_gt: case eok_ge: case eok_eq: case eok_ne:
-        case eok_land: case eok_lor: case eok_not: case eok_bool_cast:
-          return false;
-        default: break;
-      }
-    }
+    // A truth value is 0 or 1 whatever its type (`int` in C, `bool` in C++): never negative, so no mode-dependent verdict.
+    if (truth_value(n)) return false;
     VType ot = vtype(n->type);
     if (!ot.ok || !ot.t.is_int() || is_enum_type(ot.t) || !ot.t.int_type->is_signed) return false;
     if (std::max(ot.t.int_type->bits, prog_.c_int_bits()) > ubits) return false;

@@ -546,3 +546,49 @@ tests/scalar/self_assign_not_warned.c:19:3:delete-stmt:x = x + 0;->;	the stateme
 tests/scalar/self_assign_not_warned.c:41:3:delete-stmt:SET(x, x);->;	the statement assigns a variable a value it already has, so deleting it changes nothing
 tests/scalar/self_assign_not_warned.c:50:3:delete-stmt:X = x;->;	the statement assigns a variable a value it already has, so deleting it changes nothing
 tests/scalar/self_assign_not_warned.c:57:3:delete-stmt:x = +x;->;	the statement assigns a variable a value it already has, so deleting it changes nothing
+# M4.4b1 (2026-10-24): 44 entries from the mutation runs of the bitwise positives (tests/scalar/bit_*, the doc example integer-semantics/bitwise.c) and of bit_not_or_cast.c, enum_eq_comma_enumerator.c and enum_eq_truth_cond.c, after the positives were strengthened in place (robust constants, same-term claims, boundary callers). Each is the neighbour of a literal that gives the same bit result, an unselected arm, a collapsed truth value, a discarded x++, or a tautological weaker check.
+# reviewed: Opus soundness auditor, 2026-10-24 (the entries of bit_int128, bit_contract, bit_mask, bit_min_result, bit_negative, the doc example bitwise.c and enum_eq_*; the entries of bit_accepted_shapes, bit_enumerator and bit_not_or_cast were re-derived after the audit's strengthenings and are of the same classes: re-review pending, listed in the M4.4b1 report)
+doc/modules/ROOT/examples/integer-semantics/bitwise.c:24:25:literal:16u->17u	clear_low_bits(17u) is 16u as clear_low_bits(16u) is: the three low bits are cleared
+tests/scalar/bit_accepted_shapes.c:118:20:literal:0->1	both_zero(0, 5): (1, 5) is 0 as (0, 5) is, because the right operand !5 is 0 already
+tests/scalar/bit_accepted_shapes.c:118:23:literal:5->4	both_zero(0, 5): !4 and !6 are 0 as !5 is, so the result is 0 whichever non-zero value the right operand has
+tests/scalar/bit_accepted_shapes.c:118:23:literal:5->6	both_zero(0, 5): !4 and !6 are 0 as !5 is, so the result is 0 whichever non-zero value the right operand has
+tests/scalar/bit_accepted_shapes.c:136:33:literal:20->19	pick_if_bits(1, 1, 10, 20): 1 & 1 is non-zero, so the false arm (20) is never selected and its literal does not matter
+tests/scalar/bit_accepted_shapes.c:136:33:literal:20->21	pick_if_bits(1, 1, 10, 20): 1 & 1 is non-zero, so the false arm (20) is never selected and its literal does not matter
+tests/scalar/bit_accepted_shapes.c:142:23:literal:1->0	pick_if_bits(1, 2, ...): 0 & 2 is 0 as 1 & 2 is, so the condition is false either way
+tests/scalar/bit_accepted_shapes.c:142:29:literal:10->11	pick_if_bits(1, 2, 10, 20): 1 & 2 is 0, so the true arm (10) is never selected and its literal does not matter
+tests/scalar/bit_accepted_shapes.c:142:29:literal:10->9	pick_if_bits(1, 2, 10, 20): 1 & 2 is 0, so the true arm (10) is never selected and its literal does not matter
+tests/scalar/bit_accepted_shapes.c:148:21:literal:1->2	both(true, 1): 2 > 0 as 1 > 0 is (the call is a truth test, a positive argument is as good as another)
+tests/scalar/bit_accepted_shapes.c:196:27:literal:1->2	not_is_minus_one(1): ~2 == -1 is false as ~1 == -1 is, both results are 0
+tests/scalar/bit_accepted_shapes.c:202:17:literal:4->5	or_cmp(4, 3, 3): x |= 1 gives 5 for x = 4 and for x = 5 (bit 0 is set by the |= either way)
+tests/scalar/bit_accepted_shapes.c:208:24:literal:5->4	or_and(8, 12, 5): 12 & 4, 12 & 5 and 12 & 6 are all 4 (12 has only bits 2 and 3, and 4, 5 and 6 share bit 2 with it)
+tests/scalar/bit_accepted_shapes.c:208:24:literal:5->6	or_and(8, 12, 5): 12 & 4, 12 & 5 and 12 & 6 are all 4 (12 has only bits 2 and 3, and 4, 5 and 6 share bit 2 with it)
+tests/scalar/bit_accepted_shapes.c:226:18:literal:1->2	nonzero(1): 2 is as non-zero as 1
+tests/scalar/bit_accepted_shapes.c:232:21:literal:0->1	not_or_one(0): !x | 1L is 1 for every x, so no argument can change the result (the function exists to show that the shape verifies)
+tests/scalar/bit_contract.c:25:43:literal:2147483647->2147483646	for an odd x, x < 2147483647 and x < 2147483646 are the same condition (the largest odd int below the bound is 2147483645)
+tests/scalar/bit_contract.c:29:29:literal:1->0	CERASTES_CHECK(((x + 1) & 0) == 0) is a tautology: a weaker check than the original, which no caller relies on
+tests/scalar/bit_enumerator.c:30:18:literal:2->3	GREEN | 2 and GREEN | 3 are both 3 (the bit of GREEN is already in 3)
+tests/scalar/bit_enumerator.c:36:19:literal:4->5	or_green(4) and or_green(5) are both 5: the | 1 sets bit 0, which 5 has
+tests/scalar/bit_enumerator.c:42:17:literal:3->2	BLUE & 3 and BLUE & 2 are both 2 (3 and 2 share the one bit BLUE has)
+tests/scalar/bit_int128.c:53:20:literal:1->2	-1 -> -2: bit 100 is set in both, and the mask 2^100 has no other bit
+tests/scalar/bit_int128.c:60:40:literal:0->1	~0 -> ~1 (all ones minus one): bit 127 is set in both, and the mask 2^127 has no other bit
+tests/scalar/bit_mask.c:79:27:literal:2147483647->2147483646	clear_low_nibble(2147483646) is 2147483632 as clear_low_nibble(2147483647) is: the low nibble is cleared
+tests/scalar/bit_mask.c:85:28:literal:1->2	clear_low_nibble(-2) is -16 as clear_low_nibble(-1) is: the low nibble is cleared
+tests/scalar/bit_min_result.c:58:35:literal:1->2	INT_MIN & -2 is INT_MIN as INT_MIN & -1 is: INT_MIN has no low bit to lose
+tests/scalar/bit_negative.c:49:22:literal:13->12	-8 has its three low bits clear, so -8 & 12, -8 & 13 and -8 & 14 are all 8
+tests/scalar/bit_negative.c:49:22:literal:13->14	-8 has its three low bits clear, so -8 & 12, -8 & 13 and -8 & 14 are all 8
+tests/scalar/bit_not_or_cast.c:12:11:literal:0->1	x = 0 makes !x 1, which masks the right operand of the |: y = 1 gives (1 > 0) = 1, and 1 | 1 is 1 | 0
+tests/scalar/bit_not_or_cast.c:13:23:relop:>->>=	x = 0 makes !x 1, which masks the right operand of the |: y >= 0 at y = 0 gives 1, and 1 | 1 is 1 | 0
+tests/scalar/bit_not_or_cast.c:13:25:literal:0->1	x = 0 makes !x 1, which masks the right operand of the |: y > 1 at y = 0 gives 0 as y > 0 does
+tests/scalar/bit_not_or_cast.c:20:11:literal:1->2	or_cast_zero: !2 is 0 as !1 is (any non-zero x gives 0), and the cast is 0 as well
+tests/scalar/bit_not_or_cast.c:22:25:literal:0->1	y > 1 at y = 0 is 0 as y > 0 is: the boundary moves away from the value, and !x is 0
+tests/scalar/bit_not_or_cast.c:29:11:literal:3->2	or_cast_one: !2 and !4 are 0 as !3 is (any non-zero x gives 0); the result comes from the cast alone
+tests/scalar/bit_not_or_cast.c:29:11:literal:3->4	or_cast_one: !2 and !4 are 0 as !3 is (any non-zero x gives 0); the result comes from the cast alone
+tests/scalar/bit_not_or_cast.c:30:11:literal:1->2	or_cast_one: (2 > 0) is 1 as (1 > 0) is
+tests/scalar/bit_not_or_cast.c:31:23:relop:>->>=	or_cast_one: (1 >= 0) is 1 as (1 > 0) is
+tests/scalar/bit_not_or_cast.c:37:11:literal:4->3	or_one_long: !x | 1L is 1 for every x, so a neighbouring x gives the same result
+tests/scalar/bit_not_or_cast.c:37:11:literal:4->5	or_one_long: !x | 1L is 1 for every x, so a neighbouring x gives the same result
+tests/scalar/enum_eq_comma_enumerator.c:13:16:swap-incdec:x++->++x	the value of x++ is discarded (the left operand of the comma): x++ and ++x have the same effect
+tests/scalar/enum_eq_comma_enumerator.c:20:11:swap-incdec:x++->++x	the value of x++ is discarded (the left operand of the comma): x++ and ++x have the same effect
+tests/scalar/enum_eq_truth_cond.c:16:53:relop:>->>=	in the arm taken for x != 0, x > 0 and x >= 0 are the same condition
+tests/scalar/enum_eq_truth_cond.c:18:23:relop:>->>=	in the arm taken for x != 0 (the `x ?` condition), x > 0 and x >= 0 are the same condition
+tests/scalar/enum_eq_truth_cond.c:31:16:swap-incdec:x++->++x	the value of x++ is discarded (the left operand of the comma): x++ and ++x have the same effect
