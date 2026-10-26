@@ -4,6 +4,108 @@ Session handoff log, newest first. Each entry says what is done, what is not,
 any surprises, the decision records added and the exact first step for the
 next session.
 
+## M4.4b2 — Values the front end computes: static assertions, character literals, types inside types (2026-10-26): done on branch `m4.4b2-front-end-values`; PR pending
+
+Read `internal/handoff.md` next: the "M4.4b2 is done" owner steps at the top, §6 the M4.4b2 audit notes, §8.1 M4.4c,
+§11 questions 40 and later.
+
+**Owner decisions (2026-10-26, M4.4b2 planning and during the session)**
+- **§11 questions 37–39:** 37 and 38 as recommended (M4.4c; M5d's spike S22). 39: a static assertion cerastes cannot
+  encode is **skipped**, not rejected, and type traits get a session before M5: **M5.0 Type traits** (`plan.md`).
+- **Array types inside types** (`sizeof`/`_Alignof`/`typeof`/`decltype` operands, typedefs) are **rejected until M4.5e**,
+  not checked in the prologue.
+- **The walker keeps its listing** when source sequence lists are on: what only a redeclaration reaches is not listed,
+  and no golden changes (the spike's stop rule fired on two goldens; the owner chose the walker change over editing them).
+
+**Done**
+- **Decision 0024** (`88b66a9`, revised after both audits). Amends 0002, 0010 item 13, 0011 item 7, 0017 items 4–6 and 9,
+  0018 item 10, 0022 items 2–3 and 0023 item 5. Probes P42 (character literals, with census 2), P43 (static assertions,
+  block and file scope), P44 (types) and P45 (the sequence-list spike) are in `il-inventory.md`, "M4.4b2".
+- **Source sequence lists on** (`GENERATE_SOURCE_SEQUENCE_LISTS`, with its derived macros asserted in `edg_il.h` and
+  `check_edg_config.sh`). The walker ignores what only a secondary declaration reaches; every golden, the walker oracle
+  and every `.vpr` of the existing tests are unchanged.
+- **Static assertions** at block, file, namespace, `extern "C"` and class scope are encoded as written and checked in
+  0017's prologue (obligations, then an `internal` guard). Q39's skip: a closed list of triggers (a call of a system
+  routine, a builtin operation, a concept-id, a system variable or enumerator), not entering `sizeof` operands; a skipped
+  assertion is still held to the type rule. The bitwise warning detectors run on them. A cross-check rejects a
+  file-scope assertion the encoder did not handle.
+- **Wrapped character literals** (`'\xff'`, `L'\xffffffff'`, an enumerator `= '\xff'`) are `conversion` errors at the
+  literal, identified by value and type (census 2 found enumeration-typed copies that must keep their reading).
+  Truncated escapes were already front-end errors (#27, #23).
+- **Types computed from a constant** (arrays, `_BitInt`, vectors, class instances with a non-type argument) are rejected
+  in `sizeof`/`_Alignof`/`__datasizeof` operands, the C++ top-level `sizeof` enumerator, array typedefs, and in a skipped
+  assertion's type operands and template arguments; a declared type or enumeration base reached through an alias or
+  member typedef with a non-type argument (`std::conditional_t<(65536u * 65536u == 0u), int, long>`) is rejected.
+- **Attributes on a redeclaration** are now held to the allow-list (they were never checked before).
+- **Code:** `cmake/EdgFrontEnd.cmake`, `src/backend` (`encode.cpp`, `il_query`, `walker.cpp`, `edg_il.h`), `src/vir`
+  (`vir.h`, `vir.cpp`, `check.cpp`, `lower.cpp`: the `NamedConst` kind; M4.4b1 audit note 1's `~` guard), `src/viper`
+  (self-test). **VIR self-test:** 655 → 671 lowering cases, 191 → 199 rejection cases (`VIR_CASES_MIN` 671).
+- **New tests:** 101 files. In `tests/scalar`: 18 positives (`static_assert_*`, `char_literal*`, `enum_negative_copy.cpp`,
+  `enum_fixed_negative.c`), 42 error twins and 37 rejection tests, both modes where both accept the code; every positive
+  is `native-ok`. A walker golden, `tests/il/walker/function_type_attributes.cpp`, pins the listing of function-type
+  attributes against the pre-session walker. Four doc examples. The harness self-test runs `perturb_folded` on a file
+  and a block static assertion (exit 3).
+- **Tooling:** `walker_oracle.py` checks an attribute on an unnamed function type by the attribute's own position, name
+  and tokens (its owner is unverifiable: the type has no position in `il_display`), with self-tests.
+- **Docs:** Verifying a program ("Static assertions", the not-supported list), Integer semantics (character literals,
+  constants), Error messages (`conversion` at a character literal), Overview; four doc examples.
+
+**Acceptance**
+- **`scripts/check.sh` green** (run 2, 12:34–13:06, 32 min 0 s, after audit round 2's fixes; run 1 at 11:25 passed every
+  step up to the walker oracle, which met a golden test added during the run). Run 2:
+  - self-tests: harness 970 (skipped=1), oracle 79, lint 190, mutate 291;
+  - tests 4912 passed, 0 failed, 1 skipped (native-ok: Apple clang 995, GCC 995);
+  - 1768 `.vpr` lint clean;
+  - VIR self-test 671/671 (+ 199 rejection cases);
+  - walker oracle 135 goldens, 1922 facts, 0 failed;
+  - docs 0 problems; `mutate.py --validate` 315 tests, 9704 mutants.
+- **The spike (P45).** Before the walker change 28 goldens gained `<unknown owner>` lines and 2 a redeclaration's
+  attributes; every `.vpr` was identical. With it, every golden passes unedited, and the auditor's extra shapes list as
+  before the session.
+- **Byte identity.** Against `build/m4.4b2-baseline-vpr` (taken before any change), 3316 of the 3324 pre-existing `.vpr`
+  and maps are identical; the 8 that differ are `static_assert_ok.c` and `static_assert_overflow.c` in both modes (their
+  assertions are now encoded; same verdicts). None is missing; 212 are new. The 655 old VIR self-test cases are
+  byte-identical.
+- **After check.sh** (as deltas): `--count-error-twins` 315; `--check-headers` 1811/1811; `cerastes --selftest` 94;
+  `mutate.py --validate` 579 equivalents; `test_mutate.py` OK.
+- **Mutation** over the 18 new positives and the 2 verified doc examples (`mutate.py -j 8`, no external cap):
+
+  | Run | Files | Mutants | Killed | Safe-direction | Stillborn | Survivors | Tool failures |
+  |---|---|---|---|---|---|---|---|
+  | 1 | 20 | 404 | 311 | 26 | 38 | 29 | 0 |
+  | 2 | 10 strengthened | 334 | 252 | 27 | 31 | 24 | 0 |
+  | 3 | the same 10 | 261 | 212 | 15 | 31 | 3 | 0 |
+
+  The positives were strengthened in place (requires at the overflow boundary with boundary callers, an added caller);
+  no `expect:` line was touched. The 3 survivors are equivalent (unreachable-branch and non-enumerator values), accepted
+  by the auditor and added to `tests/mutants-equivalent.txt`: **0 unexplained**.
+- **Audits** (Opus, one reviewer):
+  - **Round 1** (record and evidence): 3 blocking, fixed and pinned (enumeration-typed copies, the record's spike claims
+    and the redeclaration attributes, the skip and a user call in `sizeof`); 4 should-fix taken (types in skipped
+    assertions, declared types through aliases, the enumerator arm, the cross-check).
+  - **Round 2** (code and tests): 0 blocking; 5 should-fix taken (the walker narrowed, guards that reject, enumeration
+    bases, one report per rejected type, the `perturb_folded` harness cases), one partly (the cross-check, a handoff
+    note).
+  - **Re-audit and last review**: 0 blocking; the oracle's should-fix taken; the 3 equivalents accepted.
+- **Wall-clock:** 2026-10-26 10:16–about 13:20 (planning before).
+
+**Not done / deferred**
+- M4.4c, M4.4d; the EDG box session (with `#if`); M5.0.
+- The audit notes (handoff §6, M4.4b2).
+
+**Surprises**
+- **The enumerator copies.** Audit round 1 found negative constants without `expr` that are not literals: copies of an
+  enumerator's value typed by its enumeration. The rule became value and type; census 2 confirmed it.
+- **The walker.** Sequence lists made EDG's walk reach every redeclaration (attribute copies, the redeclaration's
+  function type): 28 goldens changed before the walker learned to ignore them.
+- **Truncated escapes were never a gap**: verify mode runs in Clang emulation, where #27 and #23 are errors.
+- **A redeclaration's attributes were never checked** before the sequence lists made them reachable.
+
+**Decision records added:** 0024-front-end-values; amended 0002, 0010, 0011, 0017, 0018, 0022, 0023.
+
+**First step for the next session (M4.4c).** Confirm that the owner merged M4.4b2's PR and that CI is green on `main`.
+Then handoff §8.1 "M4.4c" (record 0025; §11 questions 28, 30, 31 and 37).
+
 ## M4.4b1 — Bitwise operators, multi-character literals, item 5's truth values (2026-10-23 to 2026-10-24): done on branch `m4.4b1-bitwise`; PR pending
 
 Read `internal/handoff.md` next: the "M4.4b1 is done" owner steps at the top, §6 the M4.4b1 audit notes, §8.1 M4.4b2,

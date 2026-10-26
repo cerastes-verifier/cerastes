@@ -173,6 +173,25 @@ skip a static assertion cerastes cannot encode, and add a type-traits session be
 array types inside types until M4.5e (§11 "M4.4b2 planning"). The approved plan is
 `~/.claude/plans/using-plan-md-and-handoff-md-soft-sloth.md`; §8.1 has the essentials.
 
+**M4.4b2 is done (2026-10-26, branch `m4.4b2-front-end-values`, based on local `main` `10e7905`; result in
+`internal/status.md`).**
+- **Static assertions** (record 0024) are encoded as written and checked in 0017's prologue at every scope; file scope
+  through EDG's source sequence lists, now on (the walker keeps its listing; no golden changed). A condition with a call
+  of a system function, a type trait, a concept-id or a system name is skipped (§11 question 39), but still held to the
+  type rule.
+- **Wrapped character literals** (`'\xff'`) are `conversion` errors at the literal.
+- **Types computed from a constant** (arrays, `_BitInt`, vectors, class instances with a non-type argument) are rejected
+  inside `sizeof`/`_Alignof`/`typeof`/`decltype`, in array typedefs, and as declared types reached through an alias
+  with a non-type argument, until M4.5e.
+
+**Owner steps after M4.4b2, in this order:**
+1. **Handoff answers.** Your §11 answers 37–39 were uncommitted in the main checkout's `internal/handoff.md`; this
+   branch carries them. Drop the main checkout's copy before merging:
+   `git -C ~/Documents/cerastes/cerastes checkout internal/handoff.md`.
+2. **This branch.** Push it and open its PR: `git push origin m4.4b2-front-end-values` (the session never pushes). CI
+   runs `check.sh` as locally; the EDG configuration changed (source sequence lists), so CI rebuilds EDG's front end.
+3. **Questions.** Answer §11 questions 40–42. Then M4.4c (§8.1, record 0025).
+
 ## 1. State in one paragraph
 
 The owner split M4.2 into **M4.2a** (forward `goto`, functions that do not return, `assert`), **M4.2b** (named
@@ -778,6 +797,32 @@ blocking item. Their should-fix items were taken into record 0023 items 2, 4, 5,
    battery and hung on the encoder's methods. The session's measurements of the real output are what item 2 rests on.
    Silicon's start is 1.3 s, and the bitwise tests take 1.4–6.3 s per file at 32/64 bits and 11–20 s at 128 bits.
 
+**M4.4b2 audit notes (2026-10-26).** Round 1 (the record and P42–P45) had three blocking items, all fixed in the record
+and the code and pinned by tests: character-literal identification by value alone misread enumeration-typed copies
+(census 2); the record hid the spike's golden changes and the new rejection of attributes on redeclarations; and the
+skip pre-scan let a user call inside `sizeof` switch off a whole assertion. Round 2 (the code and the tests) had no
+blocking item; its should-fix items were taken (the walker's rule narrowed to redeclarations, recursion guards that
+reject, an enumeration's underlying type through an alias, one report per rejected declared type, the `perturb_folded`
+harness cases, a C++ float condition test). Notes not taken:
+1. **The cross-check covers the file scope only** (round 2 item 4; record 0024 item 2): inside functions the statement
+   walk of every encoded body reaches each assertion, and bodies that are not encoded (rejected functions, `predicate`
+   and `pure` bodies) hold unchecked ones; no test reaches the "does not check" rejection (§11 question 40).
+2. **The walker listing** (round 1 preferred listing a redeclaration's attributes, which changes two goldens; the owner
+   chose to keep the listing). The encoder checks those attributes either way.
+3. **The character-literal trigger compares VIR type names** (`int`, `char`, `wchar_t`); `int_kind` would be sturdier.
+   `Program::int_type` keeps the first name it sees for a shape, so after the helper registers `char` a later C
+   `signed char` message without its own spelling may say `char` (message text only; Viper has no type names).
+4. **A skipped assertion is silent** (round 1 note 13; §11 question 41).
+5. **The walker oracle's new check** (last review): an `on type <unnamed>` line must match an unrecognized attribute
+   entry by position, name and tokens, but the candidates include entries already matched by routine lines, so a phantom
+   line for an attribute the walker lists under its routine, or for a redeclaration's suppressed attribute, would pass
+   the oracle; only the golden comparison catches it. Removing already-matched entries from the pool would close it.
+   Also: the walker lists neither a first declaration's own attribute after the parameter list nor one on a template
+   definition (both predate this session, round 2 note 10).
+6. **Minor:** a typedef whose first reason is not an array (`typedef unsigned _BitInt(8) fn(char a[3]);`) is not rejected
+   at the typedef (any use is); `_Static_assert(1.5, "")` names its type in C (`unsupported_type`) but not in C++
+   (`unsupported_expression`); the M4.5f gap of assertions in a `pure` body has no pinning test.
+
 ## 7. Known gaps carried
 
 - Termination: a recursion cycle through another unit (0013 item 5) — the contract manifest, M6 (M7 if it does not fit).
@@ -1030,7 +1075,9 @@ plan is `~/.claude/plans/using-plan-md-and-handoff-md-swift-hinton.md`; the esse
   constant without `expr`; more than 8 detector rules; any other verdict change; an unexpected byte difference.
 - **M5 note:** integral `T` still rejects bitwise operators; the per-instance fallback verifies them (`low_bit`).
 
-**M4.4b2 Values the front end computes** (record 0024; §11 Q32, owner: "fix it now, and any other known instances").
+**M4.4b2 Values the front end computes** (record 0024; §11 Q32, owner: "fix it now, and any other known instances";
+**run 2026-10-26**, see `internal/status.md` for what landed: the walker change, census 2's enumeration-typed copies, the
+skip's type rule, declared types through aliases, attributes on redeclarations). The planning text follows.
 - **Spike first:** `GENERATE_SOURCE_SEQUENCE_LISTS` TRUE in the cerastes configuration (`cmake/EdgFrontEnd.cmake`, the
   `src/backend/edg_il.h` requirement, `scripts/check_edg_config.sh`; amends 0002). The walker goldens and every `.vpr`
   must stay byte-identical, or the session stops and asks. It also makes M4.2a audit note 1's check exact (§6).
@@ -1594,3 +1641,17 @@ Each has a recommended answer. Answer inline, as before.
   M4.5e**, not checked in the prologue (record 0024). The planning review found further layouts EDG computes from a
   constant inside such operands (`_BitInt(N)`, vector types, `std::array<char, N>`), taken under Q32's "any other
   known instances".
+
+**M4.4b2, 2026-10-26:**
+
+40. **The static-assertion cross-check inside functions** (§6 M4.4b2 note 1). Today the file scope is cross-checked, and
+    inside functions the statement walk of each encoded body is relied on. Compare the assertions EDG's walk finds in
+    function regions with those the encoder saw, with a self-test hook to reach the rejection? *Recommended: yes, a small
+    item in M4.4c (it touches `encode.cpp` anyway); it adds a check, not a meaning.*
+41. **A note for a skipped static assertion.** Q39's skip is silent; a user may believe a skipped condition was checked.
+    Print a note (`cerastes verify` has no warning channel today; a verified test fails on any warning until M4.4c's
+    question 31 lands), or stay silent until M5.0? *Recommended: silent until M5.0, which removes most skips; the
+    Verifying page documents them.*
+42. **`sizeof("abc")` and other string operands** are rejected until M4.6 by the array rule (record 0024 item 6): their
+    size comes from the string, not from a wrapped constant. Lift them in M4.6 with strings, or exempt an array type
+    without a bound constant now? *Recommended: M4.6; one rule is simpler to audit, and no test uses them.*
