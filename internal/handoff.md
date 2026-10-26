@@ -165,7 +165,13 @@ in the EDG box session), record 0024. M4.4c and M4.4d take records 0025 and 0026
    M4.4a's PR, `m4.4a-no-wrapping`) first.
 3. **This branch.** Push it and open its PR: `git push origin m4.4b1-bitwise` (the session never pushes). CI runs
    `check.sh` as locally (about 33 min here; the bitwise tests add a few minutes).
-4. **Questions.** Answer §11 questions 37–39. Then M4.4b2 (§8.1, record 0024).
+4. **Questions.** Answer §11 questions 37–39. Then M4.4b2 (§8.1, record 0024). *(Answered 2026-10-26, M4.4b2
+   planning.)*
+
+**M4.4b2 planning (2026-10-26, after M4.4b1).** The owner answered §11 questions 37–39 (37 and 38 as recommended; 39:
+skip a static assertion cerastes cannot encode, and add a type-traits session before M5, **M5.0**) and chose to reject
+array types inside types until M4.5e (§11 "M4.4b2 planning"). The approved plan is
+`~/.claude/plans/using-plan-md-and-handoff-md-soft-sloth.md`; §8.1 has the essentials.
 
 ## 1. State in one paragraph
 
@@ -794,7 +800,7 @@ plan (`plan.md`, "Milestone renumbering"): the **new M4 is the rest of C** (stri
 pointers in M4.5a–f, VerCors as the reference); generic templates are **M5** (M5a–M5g); concepts M6; **C++ memory
 and classes M7** (references, `new`/`delete`, classes; G2's parts that need them are deferred there); inventory M8;
 evaluation M9. Session order: M4.1 → M4.2a (owner, 2026-10-21: before CI) → EDG upstream merge (§4.1) → CI (§4.2) →
-mutation triage (§5; done 2026-10-21) → M4.2b1 → M4.2b2 → M4.2c → M4.3a → M4.3b (owner, 2026-10-22: M4.3 split) → M4.4a → M4.4b1 → M4.4b2 → M4.4c → M4.4d (owner, 2026-10-23: M4.4 split, then M4.4b) → M4.5a … M4.8 → M5a … M5g → M6.
+mutation triage (§5; done 2026-10-21) → M4.2b1 → M4.2b2 → M4.2c → M4.3a → M4.3b (owner, 2026-10-22: M4.3 split) → M4.4a → M4.4b1 → M4.4b2 → M4.4c → M4.4d (owner, 2026-10-23: M4.4 split, then M4.4b) → M4.5a … M4.8 → M5.0 (owner, 2026-10-26: type traits, §11 question 39) → M5a … M5g → M6.
 
 **Rules for every session below** (memory `session-size-few-hours`): planned at ≤ 4 h with fixed scope and stop
 rules; owner decisions and pre-approved expectation changes asked up front; the decision record before code
@@ -1032,18 +1038,24 @@ plan is `~/.claude/plans/using-plan-md-and-handoff-md-swift-hinton.md`; the esse
   (`encode.cpp:1574`); file and namespace scope: the source sequence entries of the primary file and user headers
   (`decls.c:15562-15595` records them only then). The condition keeps its `expr` (a bare literal has none); it is
   encoded as written and checked in 0017's prologue: the obligations at their lines, then an `internal` guard that it
-  holds. Open for its planning (§11 question 39): a condition cerastes cannot encode (a `constexpr` call, a type trait)
-  is rejected (fail closed) or skipped. Existing: `static_assert_ok.c` keeps its verdict (its Viper changes).
+  holds. A condition cerastes cannot encode is **skipped** (owner, 2026-10-26, §11 question 39): a closed list of
+  triggers found by a pre-scan (a call, `enk_builtin_operation`, a concept-id, an entity of a system file); anything
+  else goes through the encoder and its rejections. Block-scope assertions copy the case-value path (`case_value` flag,
+  the C `named_var` and `variable_read_by` rejections) and are encoded by `expr` then `clause_bool`. Existing:
+  `static_assert_ok.c` and `static_assert_overflow.c` keep their verdicts (their Viper changes).
 - **Wrapped character literals** (`'\xff'` is -1, `L'\xffffffff'` an `int` -1; EDG gives no diagnostic, and a plain
   literal has no IL marker: `chk_char` is `chk_default`). Probe P42 first (plain, `L`, `u`, `U`, `u8`; in macros, case
   values, enumerator initializers, named constants, default arguments, contracts). A constant without `expr`, not of an
   enumeration type, with a negative value is a wrapped literal: encoded as the conversion of `v + 2ᴺ` into its character
-  type, a path-precise `conversion` at the literal. The enumerator gap: `encode.cpp:1046` takes a literal initializer's
-  value without a check.
+  type, a path-precise `conversion` at the literal. The rule is by value, since a C character literal is `int`; N comes
+  from `character_kind`. The enumerator gaps: `encode.cpp:1040` takes a literal initializer's value without a check, and
+  `:1053` a C++ top-level `sizeof`. Truncated escapes (`'\x100'`) are discretionary EDG errors left as warnings in
+  clang mode: `--diag_error` for them.
 - **Array types in types.** `sizeof`/`_Alignof` of a type never inspects it (`sizeof(char[65536u * 65536u + 1])` is
   EDG's 1), nor do the types inside a `sizeof` expression; array typedefs are skipped silently (`encode.cpp:1576`,
-  `3436-3440`). EDG keeps each bound's expression (`array.bound_constant`, il_def.h:10355). Rejected until M4.5e, or the
-  bound checked in the prologue: the record decides.
+  `3436-3440`). EDG keeps each bound's expression (`array.bound_constant`, il_def.h:10355). **Rejected until M4.5e**
+  (owner, 2026-10-26), with `_BitInt(N)`, vector types and class-template instances with a non-type argument inside
+  such operands (planning review; Q32's "other known instances").
 - **Warning shapes in static assertions** (0023 item 5, audit round 1): once their conditions are encoded, the bitwise
   detectors run on them too (P41 found `~true` and `2 ^ 8` warned there).
 - **Template arguments:** closed (P38: no `expr`, rejected); the M5 note stands. **`#if`:** the EDG box session.
@@ -1136,6 +1148,12 @@ M4's acceptance (plan.md), and the deferred list for M8 (unions, floating point,
 vector types, variadic functions and `printf`, several translation units, concurrency).
 
 ### 8.2 M5 — generic templates (designed in the M4.1 session)
+
+**M5.0 Type traits** (owner, 2026-10-26, §11 question 39; `plan.md` "Before M5"). After M4.8 and before M5a. M4.4b2
+skips a static assertion whose condition calls a function, uses a type trait (`enk_builtin_operation`, a variable
+template such as `std::is_integral_v<T>`), a concept-id, or names an entity of a system header (`std::numeric_limits`).
+M5.0 decides how cerastes reads such conditions (and type traits elsewhere: contracts, `if constexpr`), so that M5's
+integral `T` and M6's requirement contracts rest on it. Planned at its own planning, ≤ 4 h.
 
 **From P38 (M4.4a, record 0022 item 3):** a non-type template argument keeps no `expr` in this configuration
 (`BACKING_EXPR_FOR_NONTYPE_TEMPL_ARG` is false), so `t<0u - 1u>()` reaches an instance as the plain constant
@@ -1555,14 +1573,24 @@ Each has a recommended answer. Answer inline, as before.
     Reject the `-Wall` ones like the compilers (0020 item 5's union), and when? *Recommended: yes, in M4.4c (which
     already touches the warning rules' harness, question 31), a rejection test per shape; the `-Wextra`-only
     `-Wtype-limits` shapes stay accepted, outside the `-Wall` union.*
+    **Answered (owner, 2026-10-26): "Yes, follow recommendation."** In **M4.4c** (§8.1), a rejection test per shape.
 38. **Gate G2's `low_bit` and symbolic bit identities.** The prelude decides ranges, same-term results, constant masks
     and constants, but not `x & -x`'s bounds, `(u & m) <= m` for a symbolic `m`, the XOR swap or popcount (record 0023
     item 2); such a run ends at `--timeout` with exit 3. G2 (M5) needs `low_bit`. Options: more postconditions proved by
     Silicon on the prelude functions (for example `0 <= b ==> c_and(a, b) <= b`), measured as in this session; Silicon's
     `--assertTimeout` (errors instead of timeouts, incomplete); an SMT bit-vector domain (axioms, a lint tag). *Recommended:
     the first, spiked in M5d's planning (S22), since a postcondition is proved and needs no new trust.*
+    **Answered (owner, 2026-10-26): "Follow recommendation."** Spike S22 in M5d's planning (§8.2).
 39. **M4.4b2: a static assertion whose condition cerastes cannot encode** (a call of a `constexpr` function, a type
     trait, a name from a system header): reject it (fail closed, invariant 3), or skip it (EDG checked it, and nothing
     at run time depends on it)? *Recommended: reject it in verified files, as named-constant initializers are (0017),
     with an M8 entry for C++ type traits.*
+    **Answered (owner, 2026-10-26): "Skip it for now, but we need to address type traits before we get into concepts.
+    Add before M5."** M4.4b2 skips such an assertion (record 0024, a closed list of triggers); a new session **M5.0
+    Type traits** comes before M5a (`plan.md`, §8.2).
 
+**M4.4b2 planning, 2026-10-26** (owner, with the answers above):
+- **Array types inside types** (`sizeof`/`_Alignof`/`typeof`/`decltype` operands, typedefs) are **rejected until
+  M4.5e**, not checked in the prologue (record 0024). The planning review found further layouts EDG computes from a
+  constant inside such operands (`_BitInt(N)`, vector types, `std::array<char, N>`), taken under Q32's "any other
+  known instances".
