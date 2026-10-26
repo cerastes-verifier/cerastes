@@ -13,6 +13,7 @@
 // The IL facts each rule relies on are in internal/il-inventory.md, "M3: scalar code" (probes P1-P15).
 #include "encode.h"
 
+#include <cerrno>
 #include <cstdlib>
 #include <cctype>
 #include <cstring>
@@ -52,6 +53,7 @@ struct VType {
   std::string name;                  // the type as the program spells it, for messages
   Diag diag = Diag::unsupported_type;  // the diagnostic when !ok
   bool silent = false;               // !ok and already reported at the declaration (an enumeration, decision 0018 item 2)
+  a_type_ptr computed_at = nullptr;  // !ok because this typeref has a non-type template argument (0024 item 6): reported once per function
 };
 
 // The attributes a verified file may carry besides cerastes's own (decision 0011 item 7), by name.
@@ -154,6 +156,7 @@ class Encoder {
   std::set<a_routine_ptr> signature_checked_;
   std::map<a_routine_ptr, std::set<a_routine_ptr>> edges_;  // calls between verified functions (decision 0013 item 4)
   std::set<std::tuple<int, std::string, unsigned long>> rejected_;  // (diagnostic, file, line)
+  std::set<std::pair<a_routine_ptr, a_type_ptr>> computed_reported_;  // typerefs reported by reject_type, per function (0024 item 6)
   Ctx cx_;
   // Named constants (decision 0017): the file-scope `const` objects of verified files that are encoded, by variable.
   struct NamedInfo {
@@ -320,6 +323,9 @@ class Encoder {
 
   void reject_type(const VType& t, const a_source_position& p) {
     if (t.silent) return;
+    // A type computed from a constant (decision 0024 item 6) is reported where it is first met in a function, not again at each
+    // use of a variable declared with it.
+    if (t.computed_at != nullptr && !computed_reported_.insert({cx_.routine, t.computed_at}).second) return;
     if (t.diag == Diag::unsupported_type) reject(Diag::unsupported_type, p, t.name);
     else reject(t.diag, p, "the type \"" + t.name + "\"");
   }
@@ -333,6 +339,16 @@ class Encoder {
     }
     a_type_ptr t = skip_typerefs(type);
     r.name = render_type(t);
+    {
+      // Decision 0024 item 6: an alias template instance or a member typedef of a class instance with a non-type argument
+      // (`std::conditional_t<(65536u * 65536u == 0u), int, long>`) is a type the front end computed alone.
+      std::set<a_type_ptr> seen;
+      if (const char* why = typeref_chain_reason(type, seen, 0, &r.computed_at)) {
+        r.name += std::string(" (") + why + "; decision 0024 item 6)";
+        r.diag = Diag::unsupported_type;
+        return r;
+      }
+    }
     const a_type_qualifier_set q = f_get_type_qualifiers(type, TRUE);
     if ((q & TQ_VOLATILE) != 0) {
       r.name = "volatile " + r.name;
@@ -612,6 +628,62 @@ class Encoder {
     if (ok) out.insert(out.end(), parts.begin(), parts.end());
   }
 
+  // ---- types computed from constants (decision 0024 item 6) -------------------------------------------------------------
+  // The front end computes an array bound, a `_BitInt` width or a non-type template argument alone and wraps the result; a
+  // type that is, or contains, one of these is not read until arrays are (M4.5e).  Null: the type is fine.
+  static const char* computed_type_reason(a_type_ptr t, std::set<a_type_ptr>& seen, int depth = 0);
+
+  // A recursion guard that trips rejects (fail closed): the type is not examined further.
+  static const char* too_deep_reason() { return "a type nested too deeply for this version"; }
+
+  static const char* template_args_reason(a_template_arg_ptr list, std::set<a_type_ptr>& seen, int depth) {
+    for (a_template_arg_ptr a = list; a != nullptr; a = a->next) {
+      if (a->kind == tak_nontype) return "a template instance with a non-type template argument";
+      if (a->kind == tak_type)
+        if (const char* r = computed_type_reason(a->variant.type, seen, depth + 1)) return r;
+    }
+    return nullptr;
+  }
+
+  // A class instance: its own arguments, not its members (classes of verified files are rejected anyway, 0012).
+  static const char* class_instance_reason(a_type_ptr cls, std::set<a_type_ptr>& seen, int depth) {
+    if (cls == nullptr) return nullptr;
+    cls = skip_typerefs(cls);
+    if (cls->kind != tk_class && cls->kind != tk_struct && cls->kind != tk_union) return nullptr;
+    a_class_type_supplement_ptr x = cls->variant.class_struct_union.extra_info;
+    return x != nullptr ? template_args_reason(x->template_arg_list, seen, depth) : nullptr;
+  }
+
+  // The class instance of an entity that is a member of one (a static data member, a member function, a member typedef).
+  static const char* member_class_reason(const a_source_correspondence& sc, std::set<a_type_ptr>& seen, int depth) {
+    if (!sc.is_class_member || sc.parent_scope == nullptr || sc.parent_scope->kind != sck_class_struct_union) return nullptr;
+    return class_instance_reason(sc.parent_scope->variant.assoc_type, seen, depth);
+  }
+
+  // The typeref chain of a type: an alias template instance with a non-type argument, or a member typedef of a class instance
+  // with one (`std::conditional_t<(65536u * 65536u == 0u), int, long>`).  Also what `vtype` asks of every value type.
+  // `where`, when given, receives the typeref of the chain that gave the reason.
+  static const char* typeref_chain_reason(a_type_ptr t, std::set<a_type_ptr>& seen, int depth, a_type_ptr* where = nullptr) {
+    int guard = 0;
+    for (; t != nullptr && t->kind == tk_typeref && guard < 64; ++guard) {
+      if (a_typeref_type_supplement_ptr x = t->variant.typeref.extra_info)
+        if (const char* r = template_args_reason(x->template_arg_list, seen, depth + 1)) {
+          if (where != nullptr) *where = t;
+          return r;
+        }
+      if (const char* r = member_class_reason(t->source_corresp, seen, depth + 1)) {
+        if (where != nullptr) *where = t;
+        return r;
+      }
+      t = t->variant.typeref.type;
+    }
+    if (t != nullptr && t->kind == tk_typeref) {  // the guard tripped: fail closed
+      if (where != nullptr) *where = t;
+      return too_deep_reason();
+    }
+    return nullptr;
+  }
+
   // ---- constants --------------------------------------------------------------------------------------------
   const Expr* literal(a_constant_ptr c, const VType& t, const a_source_position& p) {
     a_number_buffer buf = decimal_str_for_integer_constant(c);
@@ -760,8 +832,10 @@ class Encoder {
         }
       }
       // sizeof and alignof give their value: no run-time operation (0010 item 12).
-      if (original->kind == enk_sizeof || original->kind == enk_alignof || original->kind == enk_datasizeof)
+      if (original->kind == enk_sizeof || original->kind == enk_alignof || original->kind == enk_datasizeof) {
+        if (reject_computed_sizeof_operand(original, pos)) return nullptr;  // decision 0024 item 6
         return literal(c, t, pos);
+      }
       // Encode what was written, so that the checks of items 3-8 apply as written; a call in it ran at compile
       // time and is rejected by `call`.
       ++cx_.const_depth;
@@ -780,7 +854,250 @@ class Encoder {
       reject(Diag::unsupported_expression, pos, "a folded constant whose original expression is not recorded");
       return nullptr;
     }
+    {
+      // Decision 0024 item 5: a character literal above the range of its type (`'\xff'`) has no `expr`, no `orig_type` and a
+      // negative value the front end sign-extended; only an `int` (C) or a plain `char`/`wchar_t` (C++) constant of this shape is
+      // one (any other, an enumeration-typed copy of an enumerator, takes the literal path as before).
+      const bool c_mode = il_header.source_language == sl_C;
+      const bool char_shaped = !t.t.is_bool() && !is_enum_type(t.t) && (c_mode ? t.name == "int" : (t.name == "char" || t.name == "wchar_t"));
+      if (char_shaped && c->expr == nullptr && !c->local_expr_ref && c->orig_type == nullptr) {
+        a_number_buffer buf = decimal_str_for_integer_constant(c);
+        const std::string text = buf.as_temp_characters();
+        if (vir::dec::negative(text)) return wrapped_character_literal(text, c->character_kind == chk_wchar_t, pos, c_mode);
+      }
+    }
     return literal(c, t, pos);
+  }
+
+  // Decision 0024 item 5: the conversion of the literal's code `v + 2^N` (an unsigned N-bit constant) to its character type
+  // (and, in C, to `int`).  It fails for every such code, so the literal is a `conversion` error at its position on the paths
+  // that reach it.  N is 32 for a wide literal (or a value below -128), else 8.
+  const Expr* wrapped_character_literal(const std::string& text, bool wchar_kind, const a_source_position& pos, bool c_mode) {
+    const bool wide = wchar_kind || vir::dec::cmp(text, "-128") < 0;
+    const int n = wide ? 32 : 8;
+    errno = 0;
+    char* end = nullptr;
+    const long long v = std::strtoll(text.c_str(), &end, 10);
+    if (errno != 0 || end == nullptr || *end != '\0' || v >= 0 || v < -(1LL << (n - 1))) {
+      reject(Diag::unsupported_expression, pos, "a character literal whose value this version cannot read (decision 0024 item 5)");
+      return nullptr;
+    }
+    const SrcLoc l = loc_of(pos);
+    const vir::Type code_type = vir::Type::integer(prog_.int_type(wide ? "unsigned int" : "unsigned char", n, false));
+    const vir::Type char_type = vir::Type::integer(prog_.int_type(wide ? "wchar_t" : "char", n, true));
+    const Expr* code = b_.spelled(b_.int_const(code_type, std::to_string(v + (1LL << n)), l), wide ? "unsigned int" : "unsigned char");
+    const Expr* x = b_.spelled(b_.convert(char_type, code, false, l), wide ? "wchar_t" : "char");
+    if (c_mode) x = b_.spelled(b_.convert(vir::Type::integer(prog_.int_type_of(prog_.c_int_bits(), true)), x, false, l), "int");
+    return x;
+  }
+
+  // Decision 0024 item 6: the type of a `sizeof`, `_Alignof` or `__datasizeof` operand (the type operand, or the type of the
+  // expression operand) is, or contains, an array, a `_BitInt`, a vector or a class instance with a non-type argument.
+  bool reject_computed_sizeof_operand(an_expr_node_ptr node, const a_source_position& at) {
+    const auto& si = node->variant.sizeof_info;
+    a_type_ptr t = si.is_type ? si.variant.type : (si.variant.expr != nullptr ? si.variant.expr->type : nullptr);
+    std::set<a_type_ptr> seen;
+    const char* why = computed_type_reason(t, seen);
+    if (why == nullptr) return false;
+    reject(Diag::unsupported_type, at,
+           render_type(t) + " (" + why + " in sizeof, _Alignof or __datasizeof: the front end computes its size alone; rejected until arrays "
+                                          "are encoded, M4.5e; decision 0024 item 6)");
+    return true;
+  }
+
+  // ---- static assertions (decision 0024 items 2 and 3) ---------------------------------------------------------------------------
+  // In a verified file when its position, or its condition's original expression's position, is; with no position at all
+  // it counts as in one (fail closed, like in_verified_file).
+  static bool static_assertion_in_verified_file(a_static_assertion_ptr sa) {
+    bool known = false;
+    auto check = [&](const a_source_position& p) {
+      if (p.seq == 0) return false;
+      known = true;
+      return in_verified_file(p);
+    };
+    if (check(sa->position)) return true;
+    a_constant_ptr c = sa->condition;
+    if (c != nullptr && (c->expr != nullptr || c->local_expr_ref)) {
+      an_expr_node_ptr o = expr_node_from_constant(c);
+      if (o != nullptr && check(o->position)) return true;
+    }
+    return !known;
+  }
+
+  // An entity declared in a system file, or with no position (a builtin): its value is the front end's alone.
+  static bool declared_in_system(const a_source_position& p) { return p.seq == 0 || !in_verified_file(p); }
+
+  struct SkipScan {
+    bool skip = false;      // the assertion needs the front end alone: not encoded, silently (item 3)
+    bool rejected = false;  // a type computed from a constant was met (item 6), and diagnosed
+  };
+
+  void scan_type(a_type_ptr t, const a_source_position& at, SkipScan& out) {
+    std::set<a_type_ptr> seen;
+    if (const char* why = computed_type_reason(t, seen)) {
+      reject(Diag::unsupported_type, at, render_type(t) + " (" + why + "; decision 0024 item 6)");
+      out.rejected = true;
+    }
+  }
+  // `what` names the entity whose template arguments are scanned (a variable template, a routine, a concept).
+  void scan_template_args(a_template_arg_ptr list, const std::string& what, const a_source_position& at, SkipScan& out) {
+    std::set<a_type_ptr> seen;
+    if (const char* why = template_args_reason(list, seen, 0)) {
+      reject(Diag::unsupported_type, at, what + " (" + why + "; the front end computes its value alone; decision 0024 item 6)");
+      out.rejected = true;
+    }
+  }
+  // The class instance an entity is a member of, named as the type (`std::integral_constant<unsigned int, 0U>`).
+  void scan_member_class(const a_source_correspondence& sc, const a_source_position& at, SkipScan& out) {
+    std::set<a_type_ptr> seen;
+    if (const char* why = member_class_reason(sc, seen, 0)) {
+      reject(Diag::unsupported_type, at,
+             render_type(sc.parent_scope->variant.assoc_type) + " (" + why + "; the front end computes its members alone; decision 0024 item 6)");
+      out.rejected = true;
+    }
+  }
+
+  // The pre-scan of a static assertion's condition, following folded constants' original expressions.  The operands of `sizeof`,
+  // `_Alignof`, `__datasizeof` and `noexcept` are not entered (not evaluated: the encoder's sizeof arm and the type rule decide).
+  // A trigger of the skip is a call of a routine declared in a system file or a builtin, a builtin operation, a concept-id, and a
+  // variable or enumerator declared in a system file; a user's routine, variable or enumerator is not a trigger (the encoder
+  // handles it as it always did).  Types computed from constants are rejected wherever the scan meets one, skipped or not.
+  void scan_for_skip(an_expr_node_ptr e, SkipScan& out, int depth = 0) {
+    if (e == nullptr || depth > 256) return;
+    switch (e->kind) {
+      case enk_constant: {
+        a_constant_ptr c = e->variant.constant.ptr;
+        if (c == nullptr) return;
+        if (is_enumerator(c)) {
+          if (declared_in_system(c->source_corresp.decl_position)) {
+            out.skip = true;
+            scan_member_class(c->source_corresp, e->position, out);
+          }
+          return;
+        }
+        if (c->expr == nullptr && !c->local_expr_ref) return;
+        an_expr_node_ptr o = expr_node_from_constant(c);
+        if (o != nullptr && o != e) scan_for_skip(o, out, depth + 1);
+        return;
+      }
+      case enk_variable: {
+        a_variable_ptr v = e->variant.variable.ptr;
+        if (v == nullptr || !declared_in_system(v->source_corresp.decl_position)) return;
+        out.skip = true;
+        if (v->template_info != nullptr)
+          scan_template_args(v->template_info->template_arg_list, render_name(&v->source_corresp, iek_variable), e->position, out);
+        scan_member_class(v->source_corresp, e->position, out);
+        return;
+      }
+      case enk_sizeof:
+      case enk_alignof:
+      case enk_datasizeof: {
+        const auto& si = e->variant.sizeof_info;
+        scan_type(si.is_type ? si.variant.type : (si.variant.expr != nullptr ? si.variant.expr->type : nullptr), e->position, out);
+        return;
+      }
+      case enk_type_operand: scan_type(e->variant.type_operand.type, e->position, out); return;
+      case enk_builtin_operation:
+        out.skip = true;
+        for (an_expr_node_ptr o = e->variant.builtin_operation.operands; o != nullptr; o = o->next) scan_for_skip(o, out, depth + 1);
+        return;
+      case enk_concept_id:
+        out.skip = true;
+        scan_template_args(e->variant.concept_id.args, "a concept-id", e->position, out);
+        return;
+      case enk_operation: {
+        const an_expr_operator_kind k = e->variant.operation.kind;
+        if (k == eok_noexcept) return;
+        if (is_call_kind(k)) {
+          if (a_routine_ptr r = direct_callee(e)) {
+            if (declared_in_system(r->source_corresp.decl_position)) {
+              out.skip = true;
+              scan_template_args(r->template_arg_list, rname(r), e->position, out);
+              scan_member_class(r->source_corresp, e->position, out);
+            }
+          }
+        }
+        for (an_expr_node_ptr o = e->variant.operation.operands; o != nullptr; o = o->next) scan_for_skip(o, out, depth + 1);
+        return;
+      }
+      default: return;
+    }
+  }
+
+  enum class SaResult { encoded, skipped, failed };
+
+  // The condition of a static assertion as a closed Bool expression, as written (decision 0024 item 2); `cx_` is the context of
+  // the prologue or of the function.  `skipped`: nothing to check or the front end's alone (item 3); `failed`: diagnosed.
+  SaResult static_assertion_condition(a_static_assertion_ptr sa, const Expr** out) {
+    a_constant_ptr c = sa->condition;
+    if (c == nullptr) {
+      reject(Diag::unsupported_declaration, sa->position, "a static assertion without a condition (decision 0024 item 2)");
+      return SaResult::failed;
+    }
+    if (c->kind == ck_template_param) return SaResult::skipped;  // a dependent assertion of a template: the template is rejected
+    if (c->kind != ck_integer) {
+      // `static_assert(1.5)`: not an integer or a bool; rejected with its type (decision 0024 item 2).
+      reject(Diag::unsupported_type, sa->position, c->type != nullptr ? render_type(c->type) : std::string("<unknown>"));
+      return SaResult::failed;
+    }
+    if (c->expr == nullptr && !c->local_expr_ref && c->kind == ck_integer) {
+      // A lone literal or enumerator has nothing to check, except a character literal that does not fit its type (item 5).
+      a_number_buffer buf = decimal_str_for_integer_constant(c);
+      if (is_enumerator(c) || !vir::dec::negative(std::string(buf.as_temp_characters()))) return SaResult::skipped;
+    }
+    {
+      an_expr_node node{};
+      node.kind = enk_constant;
+      node.type = c->type;
+      node.variant.constant.ptr = c;
+      node.position = sa->position;
+      SkipScan scan;
+      scan_for_skip(&node, scan);
+      if (scan.rejected) return SaResult::failed;
+      if (scan.skip) return SaResult::skipped;
+    }
+    cx_.case_value = true;  // the case-value path: a named local constant is its value (0017 item 6), a variable is noted
+    cx_.case_var.clear();
+    ++cx_.const_depth;      // a constant expression: no calls (`call` rejects them)
+    const Expr* x = constant_initializer(c, sa->position);
+    --cx_.const_depth;
+    cx_.case_value = false;
+    const std::string named_var = cx_.case_var;
+    if (x == nullptr) return SaResult::failed;
+    if (il_header.source_language == sl_C && !named_var.empty()) {
+      // Defence in depth for #1901 (0017 item 2): a `const` object is not a constant expression in C.
+      reject(Diag::unsupported_expression, sa->position,
+             "in C, a static assertion whose condition names a variable (`" + named_var + "`; it is not a constant expression in C)");
+      return SaResult::failed;
+    }
+    if (const char* name = variable_read_by(x)) {
+      reject(Diag::unsupported_expression, sa->position, std::string("a static assertion whose condition names a variable (`") + name + "`)");
+      return SaResult::failed;
+    }
+    *out = clause_bool(x, sa->position);
+    return *out != nullptr ? SaResult::encoded : SaResult::failed;
+  }
+
+  // A file-scope or namespace-scope assertion: a prologue item of every method, in source order with the named constants.
+  void encode_file_static_assertion(a_static_assertion_ptr sa) {
+    cx_ = Ctx();
+    cx_.stmt_pos = sa->position;
+    const Expr* cond = nullptr;
+    if (static_assertion_condition(sa, &cond) != SaResult::encoded) return;
+    vir::NamedConst* n = prog_.add_static_assertion(loc_of(sa->position), cond);
+    if (verify_config().hook == "perturb_folded") n->value = "0";
+  }
+
+  // A block-scope assertion: a local constant of the function (its prologue and its `__wf`), before the case values.
+  void encode_block_static_assertion(a_static_assertion_ptr sa) {
+    const a_source_position saved = cx_.stmt_pos;
+    if (sa->position.seq != 0) cx_.stmt_pos = sa->position;
+    const Expr* cond = nullptr;
+    if (static_assertion_condition(sa, &cond) == SaResult::encoded) {
+      vir::NamedConst* n = cx_.fn->add_local_static_assertion(loc_of(sa->position), cond);
+      if (verify_config().hook == "perturb_folded") n->value = "0";
+    }
+    cx_.stmt_pos = saved;
   }
 
   // ---- expressions --------------------------------------------------------------------------------------------
@@ -918,13 +1235,22 @@ class Encoder {
       unsigned long seq;
       a_variable_ptr v;
       a_constant_ptr c;
+      a_static_assertion_ptr sa = nullptr;
     };
     std::vector<Item> items;
-    for (a_variable_ptr v : vars) items.push_back({static_cast<unsigned long>(v->source_corresp.decl_position.seq), v, nullptr});
-    for (a_constant_ptr c : pending_enumerators_) items.push_back({static_cast<unsigned long>(c->source_corresp.decl_position.seq), nullptr, c});
+    for (a_variable_ptr v : vars) items.push_back({static_cast<unsigned long>(v->source_corresp.decl_position.seq), v, nullptr, nullptr});
+    for (a_constant_ptr c : pending_enumerators_) items.push_back({static_cast<unsigned long>(c->source_corresp.decl_position.seq), nullptr, c, nullptr});
+    // Static assertions of the file scope's source sequence list (decision 0024 item 2), those of verified files.
+    for (a_static_assertion_ptr sa : ents.static_assertions)
+      if (static_assertion_in_verified_file(sa)) items.push_back({static_cast<unsigned long>(sa->position.seq), nullptr, nullptr, sa});
+    // The fail-closed cross-check: a static assertion the walk reached that is not on the list is not checked.
+    for (a_static_assertion_ptr sa : ents.other_static_assertions)
+      if (static_assertion_in_verified_file(sa))
+        reject(Diag::unsupported_declaration, sa->position, "a static assertion this version does not check (decision 0024 item 2)");
     std::stable_sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return a.seq < b.seq; });
     for (const Item& it : items) {
       if (it.v != nullptr) encode_named_variable(it.v, c_mode);
+      else if (it.sa != nullptr) encode_file_static_assertion(it.sa);
       else encode_named_enumerator(it.c);
     }
     cx_ = Ctx();
@@ -1037,7 +1363,20 @@ class Encoder {
     const char* nm = c->source_corresp.name;
     cx_ = Ctx();
     cx_.stmt_pos = p;
-    if (c->expr == nullptr && !c->local_expr_ref) return;
+    if (c->expr == nullptr && !c->local_expr_ref) {
+      // Decision 0024 item 5: a written initializer that is a character literal above its type's range (`E = '\xff'`) has a
+      // negative value and no expression; the front end's value is not trusted, the literal is checked here.  (An enumerator
+      // without an initializer is not told apart from it here, but `has_written_initializer` does.)
+      if (c->kind == ck_integer && has_written_initializer(c)) {
+        a_number_buffer buf = decimal_str_for_integer_constant(c);
+        const std::string text = buf.as_temp_characters();
+        if (vir::dec::negative(text)) {
+          const Expr* init = wrapped_character_literal(text, c->character_kind == chk_wchar_t, p, il_header.source_language == sl_C);
+          if (init != nullptr) prog_.add_named_const(nm ? nm : "?", init->type, loc_of(p), init, maybe_perturb(init->type, text));
+        }
+      }
+      return;
+    }
     an_expr_node_ptr original = expr_node_from_constant(c);
     if (original == nullptr) {
       reject(Diag::unsupported_declaration, p, "an enumerator whose initializer is not recorded");
@@ -1050,7 +1389,10 @@ class Encoder {
              "enumerator the C++ way; decision 0018 item 10)");
       return;
     }
-    if (original->kind == enk_sizeof || original->kind == enk_alignof || original->kind == enk_datasizeof) return;
+    if (original->kind == enk_sizeof || original->kind == enk_alignof || original->kind == enk_datasizeof) {
+      reject_computed_sizeof_operand(original, p);  // decision 0024 item 6 (after item 10's C check above)
+      return;
+    }
     if (il_header.source_language == sl_C && names_object(original)) {
       // Enforced here too (defence in depth: the driver's `--diag_error=1901` refuses it first, decision 0017 item 2).
       reject(Diag::unsupported_expression, p,
@@ -1584,7 +1926,10 @@ class Encoder {
   void declaration(a_statement_ptr s, Out& out) {
     for (an_il_entity_list_entry_ptr en = s->variant.decl.entities; en != nullptr; en = en->next) {
       const a_tagged_pointer& t = en->entity;
-      if (t.kind == iek_static_assertion) continue;  // checked by EDG; no run-time effect
+      if (t.kind == iek_static_assertion) {  // decision 0024 item 2: checked as written, in the prologue
+        encode_block_static_assertion(reinterpret_cast<a_static_assertion_ptr>(t.ptr));
+        continue;
+      }
       if (t.kind == iek_type) {
         a_type_ptr ty = reinterpret_cast<a_type_ptr>(t.ptr);
         if (ty->kind == tk_typeref) continue;  // a typedef
@@ -3658,6 +4003,37 @@ bool Encoder::is_vector_type_attribute(an_attribute_ptr a) {
   return n == "vector_size" || n == "__vector_size__" || n == "ext_vector_type" || n == "__ext_vector_type__";
 }
 
+const char* Encoder::computed_type_reason(a_type_ptr t, std::set<a_type_ptr>& seen, int depth) {
+  if (t == nullptr) return nullptr;
+  if (depth > 64) return too_deep_reason();
+  if (const char* r = typeref_chain_reason(t, seen, depth)) return r;
+  t = skip_typerefs(t);
+  if (!seen.insert(t).second) return nullptr;  // a cycle, or a type already examined
+  switch (t->kind) {
+    case tk_array: return "an array type";
+    case tk_vector: return "a vector type";
+    case tk_integer:
+      if (t->variant.integer.int_kind == ik_bit_precise || t->variant.integer.int_kind == ik_unsigned_bit_precise)
+        return "a _BitInt type";
+      return nullptr;
+    case tk_pointer: return computed_type_reason(t->variant.pointer.type, seen, depth + 1);
+    case tk_ptr_to_member: return computed_type_reason(t->variant.ptr_to_member.type, seen, depth + 1);
+    case tk_routine: {
+      if (const char* r = computed_type_reason(t->variant.routine.return_type, seen, depth + 1)) return r;
+      if (a_routine_type_supplement_ptr x = t->variant.routine.extra_info)
+        for (a_param_type_ptr p = x->param_type_list; p != nullptr; p = p->next) {
+          if (const char* r = computed_type_reason(p->type, seen, depth + 1)) return r;
+          if (const char* r = computed_type_reason(p->declared_type, seen, depth + 1)) return r;
+        }
+      return nullptr;
+    }
+    case tk_class:
+    case tk_struct:
+    case tk_union: return class_instance_reason(t, seen, depth + 1);
+    default: return nullptr;
+  }
+}
+
 bool Encoder::template_declared_here(a_routine_ptr r) {
   if (r->assoc_template != nullptr) {
     const a_source_position p = r->assoc_template->source_corresp.decl_position;
@@ -3725,8 +4101,16 @@ const Encoder::EnumInfo& Encoder::enum_info(a_type_ptr t) {
   if (i.has_explicit_enum_base) {
     // The explicit underlying type (il_def.h:9570, base_type): not bool, and the type entry's own size and signedness agree.
     a_type_ptr b = i.extra_info != nullptr ? i.extra_info->base_type : nullptr;
+    std::set<a_type_ptr> chain_seen;
+    const char* computed = b != nullptr ? typeref_chain_reason(b, chain_seen, 0) : nullptr;
     b = b != nullptr ? skip_typerefs(b) : nullptr;
-    if (b == nullptr || b->kind != tk_integer || b->variant.integer.enum_type) {
+    if (computed != nullptr) {
+      // Decision 0024 item 6: an underlying type that reaches its meaning through an alias-template instance or a member typedef
+      // with a non-type argument (`: std::conditional_t<(65536u * 65536u == 0u), signed char, long>`) is a type the front end
+      // computed alone.
+      reject(Diag::unsupported_type, p, render_type(b) + " (the underlying type of an enumeration: " + computed + "; decision 0024 item 6)");
+      ok = false;
+    } else if (b == nullptr || b->kind != tk_integer || b->variant.integer.enum_type) {
       refuse(p, "an enumeration whose underlying type this version cannot read");
     } else if (b->variant.integer.bool_type) {
       refuse(p, "an enumeration with underlying type bool (decision 0018 item 2)");
@@ -3833,7 +4217,17 @@ void Encoder::declaration_level_checks(const IlEntities& ents) {
     const a_source_position p = t->source_corresp.decl_position;
     if (p.seq == 0 || !in_verified_file(p)) continue;
     a_type_ptr u = t->kind == tk_typeref ? nullptr : t;
-    if (u == nullptr) continue;
+    if (u == nullptr) {
+      // Decision 0024 item 6: a typedef (or alias) whose type contains an array type is rejected, used or not, until arrays
+      // (M4.5e); a vector typedef stays accepted until it is used.
+      if (t->source_corresp.name != nullptr) {
+        std::set<a_type_ptr> seen;
+        const char* why = computed_type_reason(t->variant.typeref.type, seen);
+        if (why != nullptr && std::strcmp(why, "an array type") == 0)
+          reject(Diag::unsupported_declaration, p, "a typedef or alias of a type that contains an array type (until arrays come, M4.5e; decision 0024 item 6)");
+      }
+      continue;
+    }
     bool is_class = u->kind == tk_class || u->kind == tk_struct || u->kind == tk_union;
     bool is_enum = u->kind == tk_integer && u->variant.integer.enum_type;
     if (!is_class && !is_enum) continue;

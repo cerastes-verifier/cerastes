@@ -494,6 +494,10 @@ class Lowerer {
       case UnaryOp::BitNot: {
         // Decision 0023 item 1: -1 - a (signed) or MAX - a (unsigned): linear, in range for every a, no obligation.
         const IntType& t = *e.type.int_type;
+        // The same guard as the binary bitwise operators (M4.4b1 audit note 1): check_program rejects an enumeration operand and the
+        // encoder converts to a computed type of 32, 64 or 128 bits, so this is unreachable, and an internal error if it is not.
+        if (t.is_enum || (t.bits != 32 && t.bits != 64 && t.bits != 128))
+          internal_error(e.loc, "a bitwise complement on a " + std::to_string(t.bits) + "-bit type (the encoder converts to a computed type of 32, 64 or 128 bits)");
         const E k = low::int_lit(t.is_signed ? "-1" : dec::range_of(t).hi);
         return {low::bin(low::BinOp::Sub, k, a.e), a.dep};
       }
@@ -1777,14 +1781,19 @@ class Lowerer {
 
   void named_const_check(const NamedConst& c, std::vector<low::LStmt>& out) {
     if (c.init == nullptr) return;
-    if (!closed_expr(*c.init, "the initializer of a named constant")) return;
+    // A static assertion (decision 0024 item 2) is checked like a named constant whose value is true: the condition's obligations,
+    // then the guard that it holds (skipped for the bare literal `true`).
+    const bool assertion = c.kind == NamedConst::Kind::StaticAssertion;
+    const char* what = assertion ? "the condition of a static assertion" : "the initializer of a named constant";
+    if (!closed_expr(*c.init, what)) return;
     Full full;
     LV v = lower(*c.init, body_env(), nullptr, {}, full);
-    if (!closed_result(full, *c.init, "the initializer of a named constant")) return;
+    if (!closed_result(full, *c.init, what)) return;
     for (Obl& o : full.obls) emit_assert(out, low::implies(o.guard, o.cond), o.meta);
     if (bare_const_equals(*c.init, c.value)) return;
     internal_guard(out, v.e, c.type, c.value, c.loc,
-                   "internal check: the value of `" + c.c_name + "` as written differs from the front end's");
+                   assertion ? std::string("internal check: static assertion condition as written differs from the front end's (it holds)")
+                             : "internal check: the value of `" + c.c_name + "` as written differs from the front end's");
   }
 
   // One `case value:` label: the value as written, its obligations at the label (with a note when an obligation's own position

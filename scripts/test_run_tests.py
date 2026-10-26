@@ -12230,6 +12230,25 @@ class RealDriverTests(unittest.TestCase):
         self.assertEqual(run.stdout, "")
         self.assertIn("enums.cpp:2: internal check: ", run.stderr)
 
+    def test_the_perturbed_static_assertions_fail_their_internal_guards(self):
+        # 0024 item 2: perturb_folded also flips the guard of each static assertion (file scope and block
+        # scope), so the `internal` guard that the condition as written holds fails and the run ends with
+        # exit 3 at the assertion's line; the twin is the same file without the hook (exit 0), in both modes.
+        # If the hook stopped reaching static assertions, a wrong encoding of the condition would pass unseen.
+        for name, line in (("static_assert_file.c", 7), ("static_assert_block.c", 11)):
+            path = REAL_ROOT / "tests" / "scalar" / name
+            for mode in ("c23", "c++20"):
+                with self.subTest(name, mode=mode):
+                    run = self.run_driver("verify", str(path), f"--std={mode}")
+                    self.assertEqual((run.returncode, run.stderr), (0, ""), run.stdout)
+                    self.assertIn(": verified (", run.stdout)
+                    run = self.run_driver("verify", str(path), f"--std={mode}",
+                                          "--cerastes_verify_selftest=perturb_folded")
+                    self.assertEqual(run.returncode, 3, run.stdout + run.stderr)
+                    self.assertEqual(run.stdout, "")
+                    self.assertIn(f"{name}:{line}: internal check: static assertion condition as written "
+                                  "differs from the front end's", run.stderr)
+
     def test_the_hook_that_perturbs_nothing_is_not_verified(self):
         # a program with no named constant and no case value gives perturb_folded nothing to move: the
         # driver refuses to say "verified" for a run in which a hook changed nothing (0011 item 13)

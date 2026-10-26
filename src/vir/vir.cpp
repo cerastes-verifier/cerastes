@@ -83,6 +83,30 @@ NamedConst* Program::add_named_const(std::string c_name, Type type, SrcLoc loc, 
   return &c;
 }
 
+NamedConst* Program::add_static_assertion(SrcLoc loc, const Expr* condition) {
+  NamedConst& c = named_consts_.emplace_back();
+  c.id = static_cast<int>(named_consts_.size()) - 1;
+  c.c_name = "static_assert";
+  c.type = Type::bool_type();
+  c.loc = std::move(loc);
+  c.init = condition;
+  c.value = "1";
+  c.kind = NamedConst::Kind::StaticAssertion;
+  return &c;
+}
+
+NamedConst* Function::add_local_static_assertion(SrcLoc loc, const Expr* condition) {
+  NamedConst& c = local_consts_.emplace_back();
+  c.id = static_cast<int>(local_consts_.size()) - 1;
+  c.c_name = "static_assert";
+  c.type = Type::bool_type();
+  c.loc = std::move(loc);
+  c.init = condition;
+  c.value = "1";
+  c.kind = NamedConst::Kind::StaticAssertion;
+  return &c;
+}
+
 NamedConst* Function::add_local_const(std::string c_name, Type type, SrcLoc loc, const Expr* init, std::string value) {
   NamedConst& c = local_consts_.emplace_back();
   c.id = static_cast<int>(local_consts_.size()) - 1;

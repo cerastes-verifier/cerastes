@@ -92,6 +92,10 @@ void collect_entry(char* entry, an_il_entry_kind kind) {
       if (!g_collect_in_region && a->source_corresp.enclosing_routine == nullptr) g_collect_out->asm_entries.push_back(a);
       break;
     }
+    case iek_static_assertion:
+      // Block-scope ones are in function regions; the file scope's are on its source sequence list (decision 0024).
+      if (!g_collect_in_region) g_collect_out->other_static_assertions.push_back(reinterpret_cast<a_static_assertion_ptr>(entry));
+      break;
     default: break;
   }
 }
@@ -109,6 +113,19 @@ IlEntities collect_entities() {
     walk_routine_scope_il(region, collect_entry, nullptr, nullptr, nullptr, nullptr, /*clear_fe_pointers=*/FALSE);
   }
   g_collect_in_region = false;
+  if (il_header.primary_scope != nullptr) {
+    // Only the static assertions are read from the list; every other kind is stepped over, sublists included.
+    for (a_source_sequence_entry_ptr e = il_header.primary_scope->source_sequence_list; e != nullptr; e = e->next)
+      if (e->entity.kind == iek_static_assertion)
+        out.static_assertions.push_back(reinterpret_cast<a_static_assertion_ptr>(e->entity.ptr));
+  }
+  {
+    std::set<a_static_assertion_ptr> listed(out.static_assertions.begin(), out.static_assertions.end());
+    std::vector<a_static_assertion_ptr> rest;
+    for (a_static_assertion_ptr a : out.other_static_assertions)
+      if (listed.count(a) == 0) rest.push_back(a);
+    out.other_static_assertions = std::move(rest);
+  }
   g_collect_out = nullptr;
   g_collect_seen = nullptr;
   return out;

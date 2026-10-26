@@ -367,7 +367,7 @@ and mutation triage sessions (above).
 | **M4.3b Calls in expressions** | calls in guarded operands and loop conditions; unsequenced calls by the dependency-chain rule (owner, 2026-10-22; record 0021) | M4.3a |
 | **M4.4a No wrapping** | unsigned arithmetic and conversions are checked like signed ones: a result that does not fit is `overflow`, `conversion` or `shift`, never a wrap (owner, 2026-10-23, handoff §11 question 13; record 0022); lowering's internal errors exit 3 (§11 question 29) | M4.3b |
 | **M4.4b1 Bitwise operators** | `& \| ^ ~` and `&= \|= ^=` on signed and unsigned types (C23 two's complement), exact on mathematical integers; masks as the explicit modular reduction; a Silicon/Z3 spike first (a closed form with a body over `Int`, 64-bit complete); `-Wall`'s bitwise warning shapes rejected like the compilers; multi-character and truncated character literals rejected (§11 question 33); one verdict in both modes for item 5's truth values and `?:` of enumerators (question 36) (record 0023) | M4.4a |
-| **M4.4b2 Values the front end computes** | `_Static_assert` conditions encoded as written and checked in the 0017 prologue (file scope through EDG's source sequence lists, after a spike), wrapped character literals as `conversion` errors, array types inside `sizeof` and typedefs; `#if` through an EDG fork commit in the box session (§11 question 32; record 0024) | M4.4b1 |
+| **M4.4b2 Values the front end computes** | `_Static_assert` conditions encoded as written and checked in the 0017 prologue (file scope through EDG's source sequence lists, after a spike; a condition cerastes cannot encode is skipped, §11 question 39), wrapped character literals as `conversion` errors, array types (and other layouts EDG computes from a constant) inside `sizeof`, `typeof` and typedefs rejected until M4.5e (owner, 2026-10-26); `#if` through an EDG fork commit in the box session (§11 question 32; record 0024) | M4.4b1 |
 | **M4.4c Writes outside the chain, `void` `?:`** | writes and snapshots leave 0021's family F (§11 question 28); a `void` `?:` in statement position is an `if` (question 30); verified and error tests may list front-end warnings (question 31) (record 0025) | M4.4b2 |
 | **M4.4d Exact sets** | exact sets for preconditions and commas, with today's sets as the fallback, so no accepted program becomes rejected (§11 question 27; record 0026) | M4.4c |
 | **M4.5 Pointers** (sessions a–f, below) | the memory model for C | M4.1–M4.3 |
@@ -414,6 +414,18 @@ linked list (push/pop/length with a recursive predicate), array sum/max with a q
 must fail; the ported VeriFast C examples and their outcomes in `internal/differential.md`; the mutation run over the
 M4 tests with zero unexplained survivors; lint clean; every error category documented with a must-fail example;
 self-framing diagnostics in source terms (for example "reads `c->val` without owning it").
+
+---
+
+## Before M5: M5.0 Type traits (owner, 2026-10-26)
+
+**Goal:** what cerastes cannot read in C++ constant expressions before generic templates and concepts depend on it.
+M4.4b2 skips a static assertion whose condition calls a function (a `constexpr` one included), uses a type trait
+(`std::is_integral_v<T>`, `__is_integral(T)`, `std::is_same_v`), names `std::numeric_limits<T>` or another entity of
+a system header (handoff §11 question 39: "Skip it for now, but we need to address type traits before we get into
+concepts. Add before M5."). This session decides how such conditions are encoded or checked, so that M5's integral
+`T` and M6's requirement contracts rest on a known reading of type traits. One session of ≤ 4 h, after M4.8 and before
+M5a; its scope is planned at its own planning (handoff §8.2).
 
 ---
 

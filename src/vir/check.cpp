@@ -226,8 +226,29 @@ class Checker {
   // A named constant (decision 0017 item 4): the initializer as written is call-free, mentions no variable, parameter, result
   // or `old`, and has exactly the constant's type; `value` is a literal of that type.
   void named_const(const NamedConst& c, const char* what) {
-    const std::string name = std::string(what) + " '" + c.c_name + "'";
+    const bool assertion = c.kind == NamedConst::Kind::StaticAssertion;
+    const std::string name = assertion ? std::string("the static assertion") : std::string(what) + " '" + c.c_name + "'";
     if (!c.loc.known()) err(c.loc, name + " has no source position");
+    if (assertion) {
+      // Decision 0024 item 2: a static assertion is a Bool condition, closed like an initializer, and EDG accepted it (value 1).
+      if (!c.type.is_bool()) {
+        err(c.loc, name + " has a condition of type " + c.type.str() + ", not bool");
+        return;
+      }
+      if (c.init == nullptr) {
+        err(c.loc, name + " has no condition");
+        return;
+      }
+      // The value is 1 (EDG accepted the assertion); only the encoder's perturbation hook (0017 item 9) sets 0, to see the guard fail.
+      if (c.value != "0" && c.value != "1") err(c.loc, "the front end's value of " + name + " ('" + c.value + "') is not a bool value");
+      if (mentions_state(*c.init)) {
+        err(c.init->loc, "the condition of " + name + " mentions a variable, a parameter, the result, `old` or a call");
+        return;
+      }
+      expr(*c.init, Ctx::Annot, false);
+      if (c.init->type != c.type) err(c.init->loc, "the condition of " + name + " has type " + c.init->type.str() + ", not bool");
+      return;
+    }
     if (!value_type(c.type)) {
       err(c.loc, name + " is not a bool or an integer");
       return;
