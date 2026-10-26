@@ -3990,3 +3990,464 @@ the scratch reader reads `a_type` directly.
   `integer`, `array` (reject) and `class` instances with a `tak_nontype` argument, run on `sizeof_info` type operands, on typedef entries
   declared in a verified file, and on expression operands; record 0024 item 6 decides to reject `sizeof("abc")` too (an
   array-typed operand, verified before M4.4b2, pinned by no test) until M4.6. `alignas` needs nothing.
+
+## M4.4c: writes outside the chain, `void` `?:` statements, `-Wall` shapes
+
+Probes P46, P46b and P47 for the M4.4c decision (record `0025-...md`; finding A, Q30, and the macro rule of Q37's R5).
+Evidence is under `build/m4.4c/p46/`, `p46b/`, `p47/` (gitignored: probe sources, one `.il`/`.err`/`.tree` per file and mode, the
+kept Viper in `p47/vpr/`). All runs used the binaries of `8bff6ba` (`build/cerastes-fe`, `build/cerastes`), frozen while the baseline
+ran; `il_def.h` lines are at the pin `f0ed5525af` (`third_party/edg/src/`).
+
+**Commands**
+
+```text
+scripts/cerastes-fe.sh --c23|--c++20 --il_display <file>       IL evidence (p46/vq*.{c23,c++20}.il, p46b/mac.*.il)
+python3 build/m4.4c/p46/tree.py <il> [fn,fn]                   condensed statement/expression trees (p46/*.tree); no source under src/
+python3 build/m4.4c/p46b/eqpos.py <il>                         every eok_eq node with position and orig position of it and its operands
+build/m4.4c/p47/run.sh <file...>                               build/cerastes verify in both modes, --keep-vpr=p47/vpr/<name>.<mode>.vpr
+```
+
+### P47: finding A **REPRODUCED: the `uninitialized` check of a flagged local that a later write of the same full expression precedes is vacuous**
+
+**Source** (`p47/a1_comma.c`; `f` and `g` are bodiless with `ensures(r, r == arg)`: trusted, the file has no other contract):
+
+```c
+int h(int a)
+{
+  int x;
+  int y = (x = (g(f(a) > 0 && x > 0), 2));      // L12: C reads x uninitialized when f(a) > 0
+  return y + x;
+}
+```
+
+Both modes: `verified (1 function; ...)`, exit 0, with no warning from EDG; the Viper is identical but for the `? 1 : 0` truth-value wrappers
+(`p47/vpr/a1_comma.c23.vpr`, `.c++20.vpr`). The emitted body, in order (`var` lines and the contract left out):
+
+```text
+  d_v_x__1 := false
+  v_x__1 := 0
+  t__1 := v_x__1                                  the snapshot of `x > 0` (its value, taken where C reads it)
+  v_x__1 := 2                                     the write `x = ...`
+  d_v_x__1 := true
+  t__0 := f_f__2(v_a__0)                          the call f(a), lowered after the write
+  assert (((t__0 > 0) ? 1 : 0) != 0) ==> d_v_x__1                 the uninitialized check: d_v_x is already true
+  t__2 := f_g__1(((((t__0 > 0) ? 1 : 0) != 0) && (((t__1 > 0) ? 1 : 0) != 0)) ? 1 : 0)
+  v_y__2 := 2
+```
+
+**Why**: the flagged snapshot's check has the set `{f} ∪ slot ∪ floor` (`lower.cpp` `snapshot` :814-833, `obl` :397-405), but `touch` records
+only `slot` (∅) in `last_access`, and the comma's value drops its left operand's calls, so the write gets the set ∅ and is placed before
+the call `f`.
+
+**Other shapes that verify (the hole)**, both modes, same mechanism (the write's set misses the guard):
+
+| file | shape (L12) | c23 / c++20 |
+|---|---|---|
+| `a1_comma.c` | `int y = (x = (g(f(a) > 0 && x > 0), 2));` | verified / verified |
+| `c3_and_write.c` | `int y = (((void)(f(a) > 0 && x > 0), 1) && ((x = 1) == 1));` | verified / verified (the write is in a branch; `t__2 := 1 != 0; if (t__2) { v_x := 1; d_v_x := true ... }`, then `t__0 := f(a)`, then the check) |
+| `c4_cond_arm.c` | `int y = (x = ((void)(f(a) > 0 ? x : 0), 2));` | verified / verified |
+
+(`c3_and_write.c`: the first form the orchestrator named, with `(x = 1) == 1` instead of a bare `(x = 1)`, because EDG warns #187 on
+`&& (x = 1)`. Under `-Wall -Wextra -Werror` Apple clang reports `-Wuninitialized` on `a1_comma.c` and `c3_and_write.c` and is silent on
+`c4_cond_arm.c`; GCC 16 is silent on all three. So `a1`/`c3` are error tests with a native warning, `c4` is not.)
+
+**Controls**
+
+| file | what it shows | c23 / c++20 |
+|---|---|---|
+| `a1_comma_init.c`, `c3_and_write_init.c`, `c4_cond_arm_init.c` | `int x = 0;`: no flag, no check | verified / verified |
+| `a1_comma_req.c`, `c3_and_write_req.c`, `c4_cond_arm_req.c` | `requires(a <= 0)`: `f(a) > 0` is false | verified / verified (correct; the same verdict as the hole, so not a discriminating control) |
+| `b1_nowrite.c` | `int y = ((void)g(f(a) > 0 && x > 0), 2);` with no later write | `uninitialized` L12 / same: the check is path precise and fires |
+| `b1_nowrite_req.c` | the same with `requires(a <= 0)` | verified / verified: path precision (the check is `t__0 > 0 ==> d_x`, `a <= 0` makes it unreachable) |
+| `b2_stmt_after.c` | the write in a later statement (`x = y;`) | `uninitialized` L12 / same |
+| `c5_uncond.c` | `x = (g(x), 2)`: an unconditional read | `uninitialized` L12 / same |
+| `c7_cond_call_arm.c`, `c8_comma_g_in_cond.c`, `d1_nocomma.c`, `d2_nocomma_arm.c` | a guarded read with the write in a branch, a read after the comma's left call, no comma at all | `uninitialized` L12 / same |
+
+The hole therefore needs both a guard with a call in the set (`gdep`) and a comma that drops the left operand's calls; without the comma
+(`d1`, `d2`) the write's set contains the guard's call and the order is right.
+
+**Side finding** (`p47/c6_callfree_guard_write.c`, `int y = (x = ((void)(a > 0 && x > 0), 2));`, a call-free guard): C23 reports
+`uninitialized` (correct); **C++20 rejects it**: `error #cerastes-unsupported_expression: the comma operator in an annotation, or in an
+expression the compiler folded to a constant` (decision 0012's wording). Not a soundness issue (a rejection); a mode difference to record.
+`p47/c2_callfree_comma.c` is rejected by `comma_without_effect` in both modes (its left comma operand `((void)..., 1)` has no effect; not a
+valid shape for this probe).
+
+**Existing tests with this shape**: none. A scan of every `.c`/`.cpp` under `tests/` and `doc/modules/ROOT/examples/` (1813 files) for a
+line that has a call, a guard (`&&`, `||` or `?`) and a write to a local declared without an initializer that is also read on that line
+finds only `sequenced_operands.c`, `sequenced_operands_post.c` (`if ((x = a) && x > 5)`: the write precedes the read) and three
+`CERASTES_INVARIANT(... && ...) for (i = 0; ...)` loops (`i` is written by the init clause before the invariant): none reads a flagged local
+in a guarded operand and writes it later in the same full expression. The comma shapes in `tests/scalar/comma_*.c` and `call_comma_*.c`
+(`(x = a, x + b)`, `(m = n - 1, m)`) all write first. So A's fix is expected to change no existing test; `check.sh` is the measurement.
+
+### P46: the IL of a `void` `?:` in statement position **PASS: no stop condition (the extra C++ nodes are around the condition only, and C++ already has them for every `?:`)**
+
+Probes `p46/vq.c`, `vq.cpp` (C23 and C++20 from the same text; `s1`-`s10`), `vq2.*`, `vq3.*` (commas), `vqx.cpp` (`throw`, `return`).
+Trees: `p46/vq*.{c23,c++20}.tree`. `il_def.h`: `eok_question` :14237, `eok_comma` :14174, `eok_bool_cast` :13998, `result_is_not_used`
+:14963, `eval_left_to_right` :15318, `is_parenthesized` :15075, `position` :15110, the `for` statement's `initialization` and `increment`
+:15920-15928.
+
+**1. The shape** (C23; `s1`: `c ? v(x) : w(y);`, `s1` is column 32 of line 4):
+
+```text
+stmk_expr @4:32-47                                                (the position range includes the `;`)
+  enk_operation eok_question : void result_is_not_used=TRUE  @col 34 range 32-46       (the `?`; the range is condition..last arm)
+    enk_variable : int variable=c  @col 32
+    enk_operation eok_call : void result_is_not_used=TRUE  @col 37 range 36-39
+      enk_routine : void (*)(int) routine=v ; enk_variable : int variable=x
+    enk_operation eok_call : void result_is_not_used=TRUE  @col 44 range 43-46
+      enk_routine : void (*)(int) routine=w ; enk_variable : int variable=y
+```
+
+Operands in order: condition, then-arm, else-arm (`next` chain). The node is `enk_operation`, `operation.kind: eok_question`,
+`operation.type_kind: tk_unknown` (as always), **type `void`**, `result_is_not_used: TRUE`. No cast, no `enk_temp_init`, no other node wraps
+the whole expression: the `stmk_expr`'s `expr` is the `eok_question`.
+
+**2. C++20 differs from C23 only in** (diff of the two trees with columns removed, `vq.*.tree`):
+
+| C++20 | C23 |
+|---|---|
+| the condition is wrapped in a `compiler_generated` `eok_bool_cast : bool` (`c`, `a`, `b`); a comparison condition (`f(a) > 0`) is typed `bool`, no wrapper | the condition is the bare `int` variable; `f(a) > 0` is typed `int` |
+| calls print `eval_left_to_right=TRUE` | not printed |
+| assignments are `is_lvalue` with `returns_lvalue_instead_of_usual_rvalue`, `eval_right_to_left` | not printed |
+| a `for` statement is the statement itself | the `for` is wrapped in a `compiler_generated` `stmk_block` (the init scope; `il_def.h:15920-15924`) |
+
+None of these is around a void `?:` or around an arm; the bool wrapper on the condition is what C++ puts on every `?:` (il-inventory D2 and D11).
+**The stop rule ("extra C++ nodes around a void `?:`") does not fire**; the encoder's `?:` condition code already peels it for value `?:`.
+
+**3. The shapes** (both modes unless said; "arm" is the `eok_question` operand):
+
+| source | node tree |
+|---|---|
+| `s1` `c ? v(x) : w(y);` | `stmk_expr` > `eok_question : void` (above) |
+| `s2` `c ? v(x) : (void)0;` | the else arm is `eok_cast : void result_is_not_used` over `enk_constant : int 0 result_is_not_used` (the cast is not `compiler_generated`, no `is_parenthesized`; column of the cast is the `(`) |
+| `s3` `c ? (void)0 : w(y);` | the then arm is that `eok_cast` |
+| `s4` `a ? (b ? v(1) : w(2)) : v(3);` | the inner `eok_question : void`, `is_parenthesized=TRUE` (range 30-44 excludes the parentheses; `position` the inner `?`); no wrapper |
+| `s5` `(c ? v(x) : w(y)), x++;` | `stmk_expr` > `eok_comma : int result_is_not_used` (the type is the right operand's) > [`eok_question : void` with `is_parenthesized`, `eok_post_incr : int`] |
+| `s6` `for (i = 0; i < n; i = i + 1, c ? v(i) : w(i))` | `stmk_for`'s `increment` is an `eok_comma : void result_is_not_used` > [`eok_assign : int result_is_not_used`, `eok_question : void`]; the `?:` is not parenthesized |
+| `s7` `for (...; ...; c ? v(i) : w(i))` | `increment` is the `eok_question : void result_is_not_used` itself |
+| `s8` `(void)(c ? v(x) : w(y));` | `stmk_expr` > `eok_cast : void result_is_not_used` (not generated; `position` the `(` of `(void)`) > `eok_question : void is_parenthesized` |
+| `s9` `f(a) > 0 ? v(x) : w(y);` | the condition is `eok_gt : int` (C) or `eok_gt : bool` (C++) over `eok_call : int` and the constant 0; the arms are as `s1` |
+| `s10` `c ? v(1) : w(2);` | as `s1` with constant arguments |
+| `u3` `c ? v(x) : w(y), (void)0;` | as `s5`: the comma's operands are the unparenthesized `eok_question` and the `eok_cast` |
+| `u4` `z = 1, c ? v(x) : w(y);` | `eok_comma : void` > [`eok_assign`, `eok_question : void`] |
+| C++ `t1` `c ? v(x) : throw 1;` (`vqx.cpp`) | the `eok_question` is still `void`, `result_is_not_used`; the else arm is `enk_throw : int` (with `dynamic_init`, `destructor=NULL`), **no cast**; stays rejected |
+| C++ `t2` `return c ? v0() : w0();` in a `void` function | `stmk_return` with `expr` = the `eok_question : void` directly, no wrapper |
+
+**4. A comma whose value is used** (`vq3.*`, `z = ((c ? v(x) : w(y)), 2);` and `return ((c ? v(x) : w(y)), 2);`): the comma is `eok_comma :
+int`, **without** `result_is_not_used`, parenthesized; the void `?:` is its left operand and still carries `result_is_not_used: TRUE`
+(that flag is set on every void operand). So "the comma's value is used" is decided on the **comma node** (`result_is_not_used`, or a non-`void`
+type), not on the `?:`. A discarded comma (`s5`, `u3`, `u4`, `s6`) has `result_is_not_used: TRUE` on itself; its type is the right operand's
+(`int` for `s5`, `void` for `u4`/`s6`).
+
+**5. Positions.** `position` of the `?:` is the `?` token; `expr_range` runs from the first token of the condition to the end of the last arm;
+`is_parenthesized` is a flag on the `?:` (never a node: `PARENS_IN_IL` is 0). The enclosing `stmk_expr` range ends at the `;`.
+
+**6. Today's diagnostic** (`p46/cur.c`, both modes): `error #cerastes-unsupported_type: type "void" is not supported by "cerastes verify" (decisions
+0012 and 0018)`, at the `?`.
+
+### P46b: macro body versus macro argument **PASS: the IL can tell them apart; `written_outside_macros` does not, and it need not**
+
+Probe `p46b/mac.c` (and `mac.cpp`: identical trees modulo node addresses, `p46b/mac.{c23,c++20}.eq`), compilers in `p46b/compilers.txt`.
+`a_source_position` (`basics.h:896-923`): `seq`/`column` are the start of the **top-level macro invocation**; `orig_seq`/`orig_column` are the
+origin of the token: a macro **definition** (body text) or the **argument text** of the invocation. `il_display` prints the `orig` pair only
+when it differs from `(seq, column)`. The seq numbers are file-wide (the probe's line 8 is seq 2988 after the headers).
+
+| shape (`mac.c`) | operator `==` position (seq, col, orig) | operands (orig) | where the `==` came from |
+|---|---|---|---|
+| m1 `SAME(x)`, `#define SAME(v) ((v) == (v))` | 2988 / 24 / (2983, 22) | (2988, 29), (2988, 29) | **body** (orig_seq < seq: the `#define` line) |
+| m2 `ID(x == x)` | 2989 / 24 / (2989, 29) | (2989, 27), (2989, 32) | **argument** (orig_seq == seq, columns differ) |
+| m3 `assert(x == x)` | 2990 / 17 / (2990, 26) | (2990, 24), (2990, 29) | argument |
+| m4 `CERASTES_REQUIRES(x == x)` (file-scope `attribute-arg`) | 2992 / 5 / (2992, 25) | (2992, 23), (2992, 28); **`enk_param_ref` (param 1), not `enk_variable`** | argument |
+| m5 `[[cerastes::requires(x == x)]]` written out | 2997 / 28 / plain | 2997 / 26 and 31, plain; `enk_param_ref` | written: not in a macro |
+| m6 `EQ(x, x)`, `#define EQ(a, b) ((a) == (b))` | 3001 / 24 / (2985, 23) | (3001, 27), (3001, 30) | body |
+| m7 `x == x` | 3002 / 26 / plain | plain, plain | written |
+| m8 `SAME(` newline `x)` | 3003 / 24 / (2983, 22) | (3004, 5), (3004, 5) | body; the operands are argument text on the **next line**: orig_seq > seq |
+| m9 `ID(x) == x` | 3006 / 30 / plain | left (3006, 27) argument; right plain | written; mixed operands |
+| m10 `ID(ID(x == x))` | 3007 / 25 / (3007, 33) | (3007, 31), (3007, 36) | argument (nested wrappers resolve to the user's text) |
+| m11 `ID(SAME(x))` | 3008 / 25 / (2983, 22) | (3008, 33), (3008, 33) | body |
+| m12 `OUT(x)`, `#define OUT(a) EQ(a, a)` | 3009 / 25 / (2985, 23) | (3009, 29), (3009, 29) | body (of `EQ`, the nested macro) |
+| m13 `ID(x) == ID(x)` | 3010 / 31 / plain | (3010, 28), (3010, 37) arguments | written; both operands arguments |
+
+`is_parenthesized` is `TRUE` on the operator and operands whose parentheses came from a macro body (m1, m6, m8, m11, m12) and on m3
+(`assert`'s own parentheses), `FALSE`/absent where the user wrote none (m2, m4, m5, m7, m9, m10, m13).
+
+**Answer.** The IL tells a token written in a **macro body** from one written in a **macro argument**: with `(s, c)` its `position` and
+`(os, oc)` its `orig` pair, a body token has `os < s` (the `#define` line comes before the use; `os == 0` for predefined and command-line
+macros) and an argument token has `os >= s` with `(os, oc) != (s, c)` (`os > s` when the argument is on a later line of the invocation,
+m8). A token written outside every macro has `(os, oc) == (s, c)`.
+
+**What `written_outside_macros` (`encode.cpp:2117`) decides** (`position.orig_seq == seq && orig_column == column`, per node; the rule of
+`check_self_assignment` is "the operator and both operands pass it"): fires (the three tokens plain) **only** for m5 and m7; exempt for all of
+m1-m4, m6, m8-m13 (m9 and m13: the operator is plain but an operand is not). It does not separate m2-m4, m10 (the user wrote
+`x == x` in an argument) from m1, m6, m8, m11, m12 (the operator comes from a body).
+
+**What the compilers do** (`p46b/compilers.txt`; `-Wall -Wextra`, Apple clang and GCC 16, both modes; the attribute lines are unknown-attribute
+noise): **clang warns only m7** (`-Wtautological-compare`); **GCC warns m7, m9 (`ID(x) == x`) and m13 (`ID(x) == ID(x)`)**, i.e. when the `==` token
+is plain even if an operand is an argument token. Neither warns on m1-m6, m8, m10-m12. So the union rule is "the operator token is plain": a
+detector that tests the operator alone matches GCC (m7, m9, m13) and is a superset of clang's. A detector that tests all three matches clang
+only. `CERASTES_REQUIRES(x == x)` (m4) is argument text with a non-plain operator: both compilers are silent (they do not even see the
+comparison, the attribute is unknown to them), so under either rule it is accepted; the written `[[cerastes::requires(x == x)]]` (m5) is plain
+and would be rejected by a rule that applies to contract expressions. Whether to reject a self-compare of a contract parameter at all is not
+something a compiler decides; it is the owner's call under R5.
+
+**The rule if the 0021 item 8 simplification is not wanted**: "operator plain" (GCC's), or "operator and both operands have `os >= s`"
+(rejects the m2-m4 and m10 shapes whose text the user wrote, accepts body-written ones); both are expressible with the position pair alone.
+
+**Surprise.** The operands of a contract expression are `enk_param_ref` nodes (`param_ref.param_num`, `levels_up`), not `enk_variable`
+(m4, m5): a "same variable on both sides" test for annotations compares `param_num`/`levels_up` pairs, not `variable.ptr`.
+
+### P48: the compiler matrix of the `-Wall` shapes (record 0025 item 6): **PASS: no shape is `-Wextra`-only; 8 rules cover every warned shape**
+
+Evidence: `build/m4.4c/p48/` (gitignored: `gen.py` regenerates `matrix.md`, `matrix-r7-full.md` and `raw/` in about 90 s; `r1.c` … `r8.c`, `misc.c` and `.cpp` copies). The summary follows as written by the probe.
+
+
+Method: `gen.py` writes one file per rule (`r1.c` ... `r8.c`, `misc.c`; identical `.cpp` copies), one shape per line, and compiles each
+with Apple clang 21.0.0 and GCC 16.2.0, C `-std=c23` and C++ `-std=c++20`, at three tiers (none, `-Wall`, `-Wall -Wextra`),
+then runs `build/cerastes verify --std=c23|c++20`. No shape warns only at the `-Wextra` tier (no `E` cell anywhere): the union rule
+is exactly "warns with no option, or with `-Wall`". Unused-parameter/variable warnings are filtered. clang needs `SDKROOT` for
+`<assert.h>` when run by its real path.
+
+Order of the four letters in a cell: clang C, clang C++, gcc C, gcc C++.
+
+#### What cerastes would reject (some compiler warns at tier D or A), per rule
+
+* **R1** all four shapes (`a && b || c`, `a || b && c`, `a || b && c || d`, `a && b || c && d`): all four compilers, `-Wall`
+  (`-Wlogical-op-parentheses` clang, `-Wparentheses` gcc). Silent everywhere: `(a && b) || c`, `a && (b || c)`, `a && b && c`,
+  `a || b || c`, `a || (b && c)`. As planned.
+* **R2** `a + b << c`, `a - b << c`, `a << b + c`, `a + b >> c`, `a >> b - c`, `a >> b + c`, `a << b - c`, and the same with unsigned operands:
+  all four compilers (clang by default, `-Wshift-op-parentheses`; gcc `-Wall`, `-Wparentheses`). `>>` and unsigned operands warn, as planned.
+  Silent everywhere: `(a + b) << c`, `(a + b) >> c`, `a * b << c`, `u * v << w`, `a << b * c`, `-a << b`, `a << b << c`, `a >> b >> c`, `a << (b + c)`.
+* **R3** `!x == y`, `!x != y`, `!x < y`, `!x > y`, `!x <= y`, `!x == 1`: all four (`-Wlogical-not-parentheses`; clang default, gcc `-Wall`).
+  `!x == 0` warns only in clang (default), not gcc. Silent: `x == !y`, `!x == !y`, `!x == (y > 0)`, `!x == b` (bool b), `!(x == y)`, `(!x) == y`.
+* **R4** `a < b < c`, `a > b > c`, `a <= b <= c`: all four; in clang they are an **error by default** (`-Wparentheses`, "chained comparison 'X < Y < Z'
+  does not behave the same as a mathematical expression"), in gcc `-Wall`. `a == b == c`, `a != b != c`, `a < b == 1`, `a == b < c`,
+  `a < b != 0`, `a < b == c < d` warn **only in gcc** (`-Wall` `-Wparentheses`, both modes); clang is silent on all six. Silent: `(a < b) < c`,
+  `(a == b) == c`, `(a < b) == 1`, `a < (b < c)`, `(a < b) == (c < d)`.
+* **R5** all six comparison operators on the same variable, for int, unsigned and bool: clang by default and gcc with `-Wall`
+  (`-Wtautological-compare`), both modes, parameter, local and global alike. `(x) == (x)` too; `(x) == x` warns in clang (both modes) and gcc C but not gcc C++.
+  `x + 1 == x + 1`, `x * 2 == x * 2`, `-x == -x` warn **only in gcc** (both modes, `-Wall`); clang silent. Silent everywhere:
+  `(int)x == x`, `(long)x == x`, `x == (int)x` (an explicit cast exempts), `x == l` with `int l = x`, `x + 1 == x + 2`, `h(x) == h(x)`.
+  **Macro rule, measured:** `SAME(x)` (both operands from the macro body), `ID(x == x)` (the whole comparison inside a macro argument),
+  `assert(x == x)` and `assert(x != x)` are **silent in all four**. But `ID(x) == x`, `x == ID(x)`, `ID(x) == ID(x)` and
+  `X == x` (object-like macro, operator written outside the macro) warn in **gcc C only** (`-Wall`); clang C/C++ and gcc C++ are silent.
+  So "the comparison operator token came from a macro" exempts everywhere; "an operand came from a macro" does not (gcc C). Whether the IL can
+  tell these apart was not measured here (this probe never touched the IL; il-inventory.md:2705 says macro-argument tokens carry orig_seq != seq).
+* **R6** `(a > b)` against a constant outside {0,1}-distinguishing values: all four warn for `== 2`, `!= 2`, `== -1`, `!= -1`, `== 3`, `< 2`, `>= 0`, `<= 1`,
+  `< 0`, `> 1`, `2 == (a > b)`, `== 2u`, `(a && b) == 2`, `(a || b) == 2`, `(a == b) == 2`, `!a == 2`, and for a bool `p`: `p >= 0`, `p == 2`, `p < 2`
+  (clang default `-Wtautological-constant-out-of-range-compare` / `-Wtautological-constant-compare`; gcc `-Wall` `-Wbool-compare`).
+  The bitwise forms are **clang-only** (default): `(p ^ q) == 2`, `(p | q) == 2`, `(p & q) == -1`, `(p & q) >= 0` (gcc silent).
+  `(a > b ? true : false) == 2` warns in clang (both) and gcc C++ but not gcc C. `(int)(a > b) == 2` warns **only in gcc C** (`-Wbool-compare`).
+  Silent everywhere: `(a > b) == 1`, `== 0`, `>= 1`, `< 1`, `> 0`, `<= 0`, `!= 0`, `!= 1`, `(a && b) == c`, `p == 1`, `p == q`, `(a > b) == p`.
+* **R7** signed `<<` in a truth context: all four, `-Wall` `-Wint-in-bool-context`, in **every** context tried (if, while, for, do-while, `!`, `&&`/`||` operand
+  either side, `?:` condition, `bool r =`, `_Bool r =`, return from a `bool` function, argument of a `bool` parameter), parenthesized or not.
+  **Unsigned `<<` is silent** in all four (`u << v`, `u << 1`). `a << 1` warns (constant right operand does not exempt). `a >> b`, `a << b != 0`, `a + b`, `a` silent.
+  `a * b`, `x * 2`, `u * v` (unsigned too), parenthesized or not: **gcc only** (both modes, `-Wall`); clang silent in both modes.
+  `?:` with constant arms: `c ? 2 : 3` warns in all four (clang **by default**, `-Wtautological-constant-compare`, gcc `-Wall` `-Wint-in-bool-context`);
+  `c ? 0 : 3`, `c ? x : 3`, `c ? 3 : x`, `c ? 2 : 0`: gcc only. `c ? 1 : 0` and `c ? 0 : 1`: silent everywhere.
+  Through `?:` arms: `c ? a << b : x`, `c ? x : a << b`, `c ? a << b : a << b`: clang C++ in every truth context, clang C only for conversions to bool
+  (`bool r =`, `_Bool r =`, bool return, bool argument), gcc silent (gcc C warns only for the both-arms `<<` form in bool conversions). `c ? a * b : x` and
+  `c ? x : a * b` silent everywhere; `c ? a * b : a * b` warns gcc C only, only in bool conversions. `c ? u << v : u` silent.
+  Through a comma right operand `(x = 1, a << b)`: gcc C++ in every context; clang C only for conversions to bool; `(x = 1, a * b)`: gcc C++ only; `(x = 1, a)` silent.
+  Enumerators (unscoped, `enum e7 { Z7, ONE7, TWO7 = 2 }`): `if (TWO7)`, `!TWO7`, `bool r = TWO7` warn in **gcc C++ only** (`-Wint-in-bool-context`);
+  `TWO7 && c` warns in clang C, clang C++ and gcc C++; `if (c ? TWO7 : ONE7)` warns in gcc C and C++. `if (ONE7)`, `if (Z7)`, `if (ev)` (enum variable),
+  `c ? TWO7 : ONE7` as a value, `if (2)`: silent in all four. So the enum shapes disagree by mode and by compiler (a C-mode rule would need clang+gcc C: only `TWO7 && c` and `if (c ? TWO7 : ONE7)`).
+* **R8** (enumerators of two different enumerations): in **C no compiler warns** for `RED + NA`, `RED - NA`, `RED * NA`, `RED / NB`, `RED % NB`, `c + n`, `x ? RED : NA`, `x ? c : n`, `RED & NA`, `RED | NA`
+  (clang C, gcc C: silent at every tier). In **C++20** clang and gcc both warn **by default** (`-Wdeprecated-enum-enum-conversion` for the arithmetic and bitwise forms,
+  `-Wdeprecated-enum-compare-conditional` for the `?:` forms). Comparisons `RED == NA`, `c == n`, `c < n` warn in all four (`-Wenum-compare`; clang default, gcc C `-Wall`,
+  gcc C++ default as `-Wdeprecated-enum-compare`). Silent everywhere: `RED + GREEN`, `(int)RED + NA`, `x ? RED : GREEN`, `x ? (int)RED : NA`, `c + 1`, `c + c`, `c == GREEN`, `(int)c + (int)n`.
+  EDG today: rejects (`unsupported_expression`) every enum-variable form `c + n`, `c + 1`, `c + c`, `c == n`, `x ? c : n`, `RED & NA`, `RED | NA`; accepts `RED + NA` and `x ? RED : NA` in both modes;
+  `x ? RED : GREEN` is rejected in c++20 only and accepted in c23 (a mode difference that exists today).
+
+#### Surprises versus the plan's R-list
+
+1. **R8 is C++-only.** No compiler warns about `RED + NA` or `x ? RED : NA` in C; both warn by default in C++20 (deprecated). A rule rejecting them in both modes
+   (the owner's Q37 answer for `x ? RED : NA`) goes beyond the union rule in C mode; it needs an explicit statement (the "reject like the strictest compiler" principle still applies
+   across compilers, but here the difference is the language mode: C has no warning at all).
+2. **R5 macro exemption is finer than "any macro".** Comparison written inside a macro (body or argument) is silent in all four; operands from a macro with the operator outside warn in gcc C.
+   The identical-expression forms (`x + 1 == x + 1`) are gcc-only, both modes.
+3. **R4's equality chains and `a < b == 1` are gcc-only**; clang warns only on the relational chain (an error by default). Mode-independent.
+4. **R3 `!x == 0`** is clang-only (gcc silent).
+5. **R6**: the bitwise forms (`(p ^ q) == 2` ...) are clang-only; `(int)(a > b) == 2` is gcc-C-only; `(a > b ? true : false) == 2` is not warned by gcc C. Plan's cast extension (`(int)(a > b) == 2`) therefore warns in one compiler in one mode only.
+6. **R7**: signed-only `<<` confirmed in all four (no `>>`); `*` is **gcc-only** (including unsigned `u * v`), constant-arm `?:` other than 0/1 is warned (clang by default for `c ? 2 : 3`, gcc for any constant arm that is not
+   0/1 including `c ? x : 3`). Warnings through `?:` arms and comma are partial: `<<` arms warn in clang (C++ always, C in bool conversions); `*` arms only gcc C with both arms `*`. Enumerator conditions are gcc-C++-mostly (see R7).
+7. **No `-Wextra`-only shape** among those measured, so the union rule never reaches `-Wextra` for these shapes (`-Wsign-compare` appeared on a mixed signed/unsigned near miss and was removed).
+8. **Silent and safe to keep accepted in all four (Q30/Q31 pins):** `c ? v(x) : w(y);`, `c ? v(x) : (void)0;`, `c ? (void)0 : v(x);`, `(c ? v(x) : w(y)), x++;`, `x++, c ? v(x) : w(y);`, a nested void `?:`, a void `?:` in a `for` step,
+   `y = 0; c && (y = 2); return y;`, `c || (y = 1);`, `c && ((y = 2));`, `c && (y = 2); return y;` with y a parameter, `c ? (y = 1) : (y = 2);`, `if (c) y = 2;` -- no warning at any tier in clang C/C++ or gcc C/C++.
+   **EDG, by contrast, warns `#187-D` ("use of "=" where "==" may have been intended") on `c && (y = 2)`, `c || (y = 1)` and `c && ((y = 2))` in both modes** (not on the `?:` form, not on `if (c) y = 2;`) -- that is the warning
+   a `frontend-warning assign_where_compare_meant` line would list. The other EDG warnings seen today: `#186-D` on `p >= 0` (bool compared with zero, c23 only), `#111-D` ("statement is unreachable") on `if (ONE7)` and `if (2)` (both modes). Nothing else: EDG warns on none of the R1-R4, R5, R8 shapes.
+
+Table legend: D = warns with no `-W` option, A = first warns with `-Wall`, `!` = an error by default. `REJ:` in an EDG column is a cerastes rejection on that line (informational; calls without contracts in these probes are rejected as `call_without_contract` etc.).
+
+
+### P49: the region walk lists every block-scope static assertion (record 0025 item 5): **PASS in both modes; one C++ shape EDG itself refuses**
+
+Probes `build/m4.4c/p49/sa.c`, `sa.cpp` (nested block, loop body, `switch` body, `if` and `else` branches, dead code after `return`),
+`sa_goto.c`, `sa_goto.cpp` (code after a forward `goto`), `sa_for.c`, `sa_for.cpp` (a static assertion as the init clause of a `for`). The C++
+files are the C files with `_Static_assert` spelled `static_assert`. Run with the current build (`build/cerastes verify <file> --std=c23|c++20`),
+without and with `--cerastes_verify_selftest=drop_block_static_assertion`, the hook that makes the encoder ignore block-scope assertions
+(`encode.cpp` `encode_block_static_assertion`, first line): the cross-check after encoding must then find each assertion that the region walk
+(`il_query.cpp` `collect_entities`, `region_static_assertions`, :96-101) lists and the encoder never saw.
+
+| shape (line in `sa.c` / `sa.cpp`) | without the hook (C23, C++20) | with the hook (C23, C++20) |
+|---|---|---|
+| a nested block `{ _Static_assert(1, ...); s = 1; }` (L8) | verified | `error #cerastes-unsupported_declaration` at L8, "a static assertion this version does not check (decision 0024 item 2)" |
+| a `while` body (L15) | verified | rejected at L15 |
+| a `switch` body, after `case 1:` (L20) | verified | rejected at L20 |
+| the `then` block of an `if` (L27) | verified | rejected at L27 |
+| the `else` block (L30) | verified | rejected at L30 |
+| dead code after `return s;` (L34) | verified | rejected at L34 |
+| after a forward `goto done;` over a block (`sa_goto.*` L9; EDG prints warning #111 "statement is unreachable" at L10 in both runs) | verified | rejected at L9 |
+| the init clause of a `for` (`sa_for.c` L9) | C23: verified | C23: rejected at L9 |
+| the init clause of a `for` (`sa_for.cpp` L9) | **EDG error #2847 "this declaration is not valid here"** (before cerastes sees it) | the same: not reachable in C++ |
+
+All six assertions of `sa.c` and `sa.cpp` come back in one run, each at its own line, in source order: the region walk lists every block-scope
+assertion whatever the statement structure, including those in dead code and after a `goto`. Without the hook every file verifies (the forward
+`goto` is legal for cerastes, 0015 item 1: it jumps outward and forward over a block without a declaration; `static_assert` is not an object
+declaration). In C++ a static assertion in a `for` init is an EDG error, so that shape cannot reach the cross-check; in C23 EDG accepts
+`for (_Static_assert(...); ...)`.
+
+### P50b: dangling `else` and empty bodies in the IL **PASS: both are decidable from the IL, in C23 and C++20, with no macro or `)` position needed**
+
+Probes `build/m4.4c/p50b/de.c`/`de.cpp` (`d1`-`d16`), `eb.c`/`eb.cpp` (`e1`-`e18`), `em.c`/`em.cpp` (macros). Trees `*.{c23,c++20}.tree`
+(`python3 build/m4.4c/p50b/tree2.py <il> [fn,...]`: statements with `pos=seq:col-seq:col`, `else_pos`, `COMPILER_GENERATED`), compilers in
+`de-compilers.txt`, `eb-compilers.txt` (Apple clang and GCC 16, `-Wall -Wextra`, both modes; the macro probe `em.c` is in the text below).
+`il_def.h` (pin `f0ed5525af`): `a_statement.compiler_generated` :16564, `if_stmt.then_statement`/`else_statement`/`else_position` :16630-16640
+(`else_position` is "the position of the `else` keyword", `EXTRA_SOURCE_POSITIONS_IN_IL`), `loop_statement` :16652, `body_statement` :16718,
+`stmk_empty` :15860.
+
+**Facts common to both questions.**
+1. `then_statement` and `else_statement` are always a `stmk_block`. If the user wrote **no braces**, it is a block with `compiler_generated: TRUE`, no
+   position (`pos=-`) and the one statement inside (`stmk_if`, `stmk_expr`, `stmk_empty`, ...). If the user wrote **braces**, it is a
+   `stmk_block` **without** `compiler_generated`, with `position` (the `{`), `end_position` and `final_position` (the `}`), possibly with no
+   statements (`{}`). So the flag that says "written without braces" is `compiler_generated` of the body block (`d1` vs `d2`, `e1` vs `e7`;
+   `d6`: then-block written, else-block generated). The statement inside is **never** itself the written block.
+2. Compiler-generated blocks nest: C23 wraps every `if`, `while`, `for` and each of their bodies in one or two generated blocks (P46); C++20 wraps
+   bodies only (`d1` C23: `stmk_block(gen) > stmk_if > then: stmk_block(gen) > stmk_block(gen) > stmk_if`; C++20: `stmk_if > then: stmk_block(gen) > stmk_if`).
+   So a matcher must **peel** generated blocks, never count them. Peel: while the statement is a `stmk_block` with `compiler_generated` and has
+   statements, take its **last** statement (one child, except after a label: `[stmk_label, stmk_block(gen) > stmk_if]`, `d16`).
+3. Statement fields: `stmk_if.then_statement/else_statement`, `stmk_while.loop_statement`, `stmk_end_test_while.loop_statement` (`do`),
+   `stmk_for.statement`, `stmk_switch.body_statement`. The `if`'s `else_statement` is NULL when there is no `else` (the dump prints no line), and
+   `else_position` is present only with an `else`.
+
+**1. Dangling `else`** (`d1`-`d16`; `else_pos` = `else_position`, as `seq:column`).
+
+What the compilers warn about (`de-compilers.txt`, line = function number):
+
+| shape | clang | GCC |
+|---|---|---|
+| `d1` `if (a) if (b) x=1; else x=2;` | warn at the `else` | warn |
+| `d2` `if (a) { if (b) x=1; else x=2; }` | silent | silent |
+| `d3` `if (a) x=1; else if (b) x=2; else x=3;` | silent | silent |
+| `d4` `if (a) while (b) if (c) x=1; else x=2;`, `d5` with `for` | warn | warn |
+| `d6` `if (a) { x=1; } else x=2;`, `d7` no `else` at all, `d9` `if (a) if (b) x=1; else x=2; else x=3;`, `d11` | silent | silent |
+| `d8` the same as `d1` on several lines (`else` at 11:5) | warn at 11:5 | warn |
+| `d10` `if (a) if (b) x=1; else if (c) x=2;` | warn | warn |
+| `d12` `if (a) if (b) { x=1; } else x=2;`, `d13` `... else { x=2; }` | warn | warn |
+| `d14` `if (a) switch (b) { default: if (a) x=1; else x=2; }`, `d15` with `do` | silent | silent |
+| `d16` `if (a) L: if (b) x=1; else x=2;` | silent | **warn** |
+
+**The test** (same in both modes): an `stmk_if` **O** with `else_statement == NULL` whose `then_statement`, followed down through
+`compiler_generated` blocks (peeling, last statement), `stmk_while.loop_statement`, `stmk_for.statement` and a `stmk_label` (the statement after
+the label, which sits next to it in the generated block), reaches an `stmk_if` **I** with `else_statement != NULL`. Report at `I.else_position`
+(`d1`: 1:53 = clang's column; `d4`: 4:70; `d5`: 5:70; `d8`: 11:5; `d16`: 21:57). Stop (accept) at a written `stmk_block` (no
+`compiler_generated`: `d2`, `d11`), at `stmk_switch` and `stmk_end_test_while` (`d14`, `d15`), and when O has an `else` (`d3`, `d6`, `d9`).
+GCC's label case is included because the rule is the union. The IL for each shape: `d1` O = `stmk_if` pos 1:32 (no `else_pos`), I = `stmk_if` 1:39
+with `else_pos 1:53`; `d2` the then of O is a written `stmk_block pos=2:39-2:67`; `d4` O's then peels to `stmk_while`, whose `loop_statement` peels
+to I (`else_pos 4:70`); `d9` O has `else_statement`.
+Nothing here needs the `if` keyword's or the closing parenthesis's position. Not probed: whether a macro-expanded `else` (its `else_position` has the
+`orig_seq`/`orig_column` pair like any `a_source_position`) is silent in the compilers; the union rule would report it.
+
+**2. Empty bodies** (`e1`-`e18`, `em.c`). The null statement is `stmk_empty`, with its own `position` = `end_position` = the `;`
+(`e1` 1:28, `e2` 3:5 on the next line, `e15` 18:5 with the `)` on line 18 and the condition ending on line 17). The body is the one statement of
+the generated block; `{ }` and `{ ; }` are written blocks (`e7`, `e9`, `e11`, `e12`, `e17`). `stmk_empty` carries `is_fallthrough_statement` for
+`[[fallthrough]];` (not a body).
+
+What the compilers warn about (`eb-compilers.txt`; GCC's `-Wempty-body` is in `-Wextra`, clang's too):
+
+| shape | clang | GCC |
+|---|---|---|
+| `e1` `if (x > 0);`, `e14` with a comment between, `e15` `)` on a later line than the condition | warn at the `;` | warn |
+| `e2` `if (x > 0)` newline `;` (the `;` on its own line) | silent | **warn** |
+| `e3` `if (x) ; else x = 1;` | silent | silent |
+| `e10` `if (x) x = 1; else ;` | silent | **warn** (at the `;`, 12:38) |
+| `e18` `if (x) x = 1; else if (x > 2) ;` | warn | warn |
+| `e4` `while (x--);`, `e5` `for (...);`, `e13` `for (;x;) ;`, `e16` `while (x > 0)` newline `;` | silent | silent |
+| `e6` `switch (x);` | **warn** | silent |
+| `e8` `do ; while (x--);` | silent | **warn** (at the `;`, 10:21) |
+| `e7` `if (x) {}`, `e9` `{ ; }`, `e11`, `e12`, `e17` | silent | silent |
+| `em.c` `if (x) SEMI` (`#define SEMI ;`), `IFX(x)` (`#define IFX(c) if (c);`), `if (x) NOP;` (`#define NOP`) | silent (all three) | **warn** (all three: at the `;` of the macro body, 1:14 and 2:22, and the written `;`, 6:28) |
+
+**The test** (both modes): the body, peeled through `compiler_generated` blocks, is `stmk_empty`, for
+(a) `stmk_if.then_statement` when `else_statement == NULL` (`e1`, `e2`, `e14`, `e15`, `e18`'s inner `if`; with an `else` it is accepted, `e3`);
+(b) `stmk_if.else_statement` (`e10`; any `then`);
+(c) `stmk_end_test_while.loop_statement` (`e8`);
+(d) `stmk_switch.body_statement` (`e6`).
+Report at the `stmk_empty` `position` (the `;`: `e1` 1:28, `e2` 3:5, `e10` 12:38, `e8` 10:21, `e6` 8:28, as the compilers report). Not rejected:
+`stmk_while`/`stmk_for` bodies (`e4`, `e5`, `e13`, `e16`) and any written block (`{}`, `{ ; }`).
+
+**What the IL cannot do, and why it does not matter.** It does not keep the position of the `)` of the condition: `expr_range` is that of the
+condition expression (it excludes the parentheses, and a parenthesized `((x))` is a flag, P46), and the statement `position` is the `if`
+keyword. A rule "the `;` is on the same line as the `)`" (clang's) is therefore not decidable exactly (`e15` has the condition on line 17, the
+`)` and `;` on line 18). The union rule does not need it: GCC warns on `e2` where clang is silent, so **every** null `if` body without an `else`
+is rejected, whatever the line. Macros: the `;` of `if (x) SEMI` has `position` 4:25 with `orig` (1, 14), the macro body's, as for any
+token (P36); GCC warns on all three macro shapes and clang on none, so the union rejects them too and no `orig_seq` test is needed. Any
+macro exemption would have to be an explicit choice (the `;` of a macro body has `orig_seq < seq`, P46b).
+
+### P50: the compiler matrix of the five shape families added during M4.4c (record 0025 item 6, R9–R13)
+
+Evidence: `build/m4.4c/p50/` (gitignored; `gen.py` regenerates `matrix.md` and `raw/`). The summary follows as written by the probe.
+
+
+Method as P48 (`gen.py`; raw outputs in `raw/`; `matrix.md` has one table per rule; cell order clang C, clang C++, gcc C, gcc C++;
+D = default, A = `-Wall`, E = only `-Wall -Wextra`, `-` silent). `scan.py` / `scan_contracts.py` ran clang over every test and doc example.
+The EDG column of matrix.md was measured with the binary built after R1-R8 (so R7/R8 rejections appear there); EDG warns on none of the R9-R13 shapes.
+
+#### R9 constant logical operand (clang only: -Wconstant-logical-operand, default; gcc silent at every tier)
+Warns (clang C and C++, by default): `x && 4`, `x || 2`, `x && -1`, `x && K` (const int K = 4; in C too), `x && (2 + 2)`, `x && 'a'`, `x && 4u`,
+`(x && 4) || y`, `x && (y || 4)`, as a value and as a condition alike. Also clang -Wliteral-conversion on `x && 3.0` (floats are rejected anyway).
+Only the RIGHT operand counts: `4 && x`, `2 || x` are silent everywhere. `b && 4` (bool b) silent. `x && true`, `x && !4`, `x && (4 != 0)`, `x && 2 > 1`,
+`x && (y == 4)`, `x && y` silent.
+Surprise: `x && 1`, `x && 0`, `x || 1`, `x || 0` (and `x && ONE9`, an enumerator of value 1) warn in clang **C++ only** (silent in C), by default. Under the union rule they are rejected in both modes.
+`x && TWO9` (enumerator 2) warns as -Wint-in-bool-context (clang both modes, gcc C++; already rejected by R7).
+
+#### R10 out-of-range constant comparison
+clang by default (-Wtautological-constant-out-of-range-compare), both modes: the constant is outside the range of the OTHER operand's type, for ==, != and the
+ordering operators: `uc == 300`, `uc != 256`, `uc < 256`, `uc == -1`, `sc > 200`, `sc < -129`, `sc == 128`, `us < 70000`, `us == 65536`, `x < 3000000000LL`,
+`x == 4294967296LL`, `x == 4294967295LL`, `u == 4294967296ULL`, `(unsigned char)(uc + 1) == 300`, `b == 2` (already R6), and `uc == 300` inside a `?:`.
+gcc warns the same shapes only with -Wextra (-Wtype-limits, E): stays accepted by the union rule, but clang's D makes these rejected.
+Silent in clang (gcc E only, `-Wtype-limits`): the constant is inside the type's range but the comparison is always true/false: `uc > 255`, `uc >= 0`, `uc < 0`, `uc <= 255`, `sc >= -128`, `sc <= 127`,
+`sc < -128`, `x > 2147483647LL`, `x <= 2147483647LL`, `x >= -2147483648LL`, `u < 0`, `u >= 0`, and the bitwise forms `(uc & vc) == 300`, `(uc | vc) > 255`, `(uc ^ vc) == 256`
+(promoted to int, 300 is in range). These are the "-Wtype-limits shapes stay accepted" of the plan.
+`u == -1`: -Wsign-compare, gcc C++ at -Wall (A), clang C/C++ and gcc C only at -Wextra: so under the union rule it is warned by one compiler in one mode at -Wall; it is a sign-compare shape, not an out-of-range one.
+Enumerations: `e == 7` (enum with range 0..3) warns in clang **C++ only** (default); `e < 0` and `e > 3` are silent (gcc silent everywhere).
+Near misses silent everywhere: `uc == 255`, `uc == 0`, `uc > 254`, `sc > 126`, `sc == -128`, `us < 65535`, `x < 2147483647LL`, `x > -2147483648LL`, `uc + 1 == 300`, `uc + 1 > 255` (int after promotion), `uc == vc`, `x == 1`, `e == 3`.
+EDG: #186-D on `uc >= 0`, `uc < 0`, `u < 0`, `u >= 0` (unsigned compared with zero) and #514-D on `uc == -1` (both modes), no tag otherwise.
+
+#### R11 overlapping comparisons (clang only: -Wtautological-overlap-compare, -Wall; gcc silent)
+Warns (A, both modes, signed and unsigned, as value and condition): `x > 5 && x < 3`, `x < 3 && x > 5`, `x == 1 || x != 1`, `x != 1 || x == 1`, `x > 5 || x < 6`, `x < 6 || x > 5`,
+`x == 1 && x == 2`, `x != 1 || x != 2`, `x > 5 && x < 3 && z`, `(x > 5) && (x < 3)`, `x > 5 && 3 > x`, `5 < x && x < 3`, `x >= 5 && x < 5`, `x > 5 && x <= 5`,
+`x == 1 && x != 1`, `x <= 5 || x >= 5`, and `u > 5 && u < 3`, `u == 1 || u != 1`, `u > 5 || u < 6`, `u == 1 && u == 2`.
+Surprise: `z && x > 5 && x < 3` is silent (`&&` is left-associative, so the last two comparisons are not the operands of one node; clang compares only the two operands of one `&&`/`||`).
+Silent: `x >= 5 && x <= 5`, `x > 5 && x < 10`, `x > 5 && y < 3`, `x == 1 || x == 2`, `x < 3 || x > 5`, `x > 5 || x > 3`, `x > 5 && x > 3`.
+Contracts are not seen by compilers, but the same shapes occur there (below).
+
+#### R12 dangling else (-Wdangling-else: clang default, gcc -Wall; both modes)
+Warns: `if (a) if (b) x = 1; else x = 2;`, with a loop in between (`if (a) while (b) if (c) ... else ...`, `for`), three nested ifs, followed by another statement.
+Silent: braces around the inner if or around the then-part (`if (a) { if (b) x=1; else x=2; }`, `if (a) { if (b) x=1; } else x=2;`), `if (a) if (b) x=1; else x=2; else x=3;`
+(both elses taken), `else if` chains, `while (a) if (b) ... else ...` (the outer is a loop), `if (a) if (b) x = 1;` (no else), `if (a) switch (b) { default: if (c) ... else ... }`,
+and `if (a) do if (b) ... else ... while (c);` (silent in all four).
+EDG: nothing. (Loops in the probe files draw cerastes' `missing_decreases`, irrelevant to the compilers.)
+
+#### R13 empty body (-Wempty-body)
+clang by default, both modes, only when the `;` is on the SAME line as the controlling construct: `if (x > 0);`, `if (x > 0) ;`, `if (x) /* nothing */ ;`, `while (x--);`, `for (i = 0; i < n; i++);`, `switch (x);`.
+gcc: `-Wextra` only (E) and only for if/else/do: `if (x > 0);`, `if (x > 0)\n ;`, `if (x) x = 1; else ;`, `do ; while (x--);`, the `/* nothing */` form; never for `while`, `for`, `switch`.
+Silent in both: the `;` on the next line for clang (`if (x > 0)\n ;`, `while (x--)\n ;`, `for (...)\n ;`: gcc E only for the `if`), `if (x) ; else x = 1;` (all four silent), `if (x) {}`, `do {} while (x--);`, `while (x--) {}`, `for (...) {}`, `if (x) (void)0;`, `if (x) x = 1; else {}`, `{ ; }`.
+By the union rule (default or -Wall): reject the same-line `;` body of `if`, `while`, `for`, `switch`; the next-line forms, `else ;`, `do ;` and `if (x) ; else` stay accepted (gcc -Wextra only or silent).
+
+#### Existing tests and doc examples (clang run over all 1959 files, both modes; contracts scanned separately)
+No file other than the new reject_warn_* ones is hit by R9, R11-bodies, R12 or R13 in a function body or any construct the compilers see.
+Hits that a new rule could turn into a new or changed diagnostic:
+* R10, enum range (clang C++ only, `-Wtautological-constant-out-of-range-compare`): `tests/scalar/negative/reject_enum_eq_negative_const.c`, `reject_enum_eq_negative_literal.c`, `reject_enum_eq_other_negative_enumerator.c`, `reject_enum_eq_other_negative_enumerator_swapped.c`, `reject_enum_order_neg.c` (all `rejected unsupported_expression @ L11/12` today; a new enum-range rule would add a second diagnostic at the same line unless it is skipped when the comparison is already rejected).
+* R11 in CONTRACTS (the compilers never see these): `tests/scalar/negative/logic_and_post.c:8` (`ensures r == (a > 0 || a < 10)`, a tautology on purpose), `tests/scalar/negative/static_assert_block_excluded.c:8` (`requires x >= 0 && x < 0`) and `tests/scalar/negative/switch_case_requires_false_shift.c:8` (`requires x > 0 && x < 0`), both deliberately contradictory preconditions. If R11 applies in annotations, these three tests flip (their expect lines would gain a rejection).
+* -Wtautological-type-limit-compare (clang, not default, not -Wall; stays accepted): `tests/scalar/negative/uninit_loop_condition.c:14`; in contracts many `x <= 2147483647` (type-limits shapes; accepted).
+* My contract scan types every identifier as `int`, so its `-Wtautological-constant-out-of-range-compare` hits on long/long long contracts (llong_arith.c, long_arith.c, bit_long_post.c, bit_int128*_post.c, ...) are artifacts; no real R10 hit in a contract was found, but R10 on contracts with narrow-type parameters was not exhaustively checked (a grep for narrow-type parameters would be needed once the rule exists).
