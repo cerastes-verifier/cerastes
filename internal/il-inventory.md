@@ -3865,6 +3865,13 @@ a class and a use of a system template's variable are rejected (`probes/targ*.cp
 (`-1`, `-2147483647 - 1`, `INT_MIN`, `SCHAR_MIN`, `(char)-1`, `(signed char)200`, negative enumerators, `case -1`, `~0`, `(int)-3.9`, ...) has an `expr`;
 no constant has `expr` NULL and a non-null `orig_type`.
 
+**5b. Census 2 (audit round 1; `P42/c2/`):** the first census missed unflagged negative constants **typed by an enumeration** with no `expr` and no `orig_type`: the
+initializer copy of an enumeration-typed object (`enum E y = A;`, `const enum E K = A;`, C++ and C23, unfixed and fixed) and, in C23, `case A:` over a **fixed**
+enumeration (`: int`, `: long`, `: short`, `: signed char`, `: long long`, `: char`). A second run over 23 files in both modes (enumerators used in locals of the
+enumeration, `int`, `long`, `short` and a typedef, returns, arguments, comparisons, `?:`, casts, `case` over `int` and over the enumeration, contracts, file-scope constants, enumerator
+initializers, `static_assert`, C++ default arguments, `enum class`) finds 81 such constants, **all enumeration-typed**, and **none whose type is the plain `int` (C) or `char`/`wchar_t` (C++)**
+except the control character literals. So a wrapped literal is identified by value **and** type, and no other shape matches.
+
 **6. Diagnostics** (`P42/diag/diag.txt`): `'\x100'`, `'\400'`, `'\777'`, `L'\x100000000'`, `U'\x100000000'`, `u8'\x100'`, `"\x100"` are **error #27-D**;
 `99999999999999999999`, `0xFFFFFFFFFFFFFFFFF`, `18446744073709551616` (and, in C, `18446744073709551615`) **error #23-D**; both exit 2 in `cerastes-fe` and
 `cerastes verify`, both modes. The plan's premise (warnings in clang mode) is wrong: `literals.c:1731` chooses `es_warning` only under

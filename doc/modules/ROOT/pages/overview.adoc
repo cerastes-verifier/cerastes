@@ -62,7 +62,8 @@ it verifies and what it does not:
   have a contract or a body in the
   same file (anywhere in an expression, also in guarded operands and loop
   conditions, when C's order of calls cannot hide a check), functions that do not return (`+[[noreturn]]+`, `abort`, `exit`),
-  `assert` and `check`, and the bitwise operators.
+  `assert` and `check`, the bitwise operators, and static assertions, whose
+  conditions are checked with the same rules.
   The integer rules (overflow is an error, signed or unsigned: nothing wraps; a
   conversion must be exact; a value of an enumeration is one of its values) are on
   xref:integer-semantics.adoc[Integer semantics].

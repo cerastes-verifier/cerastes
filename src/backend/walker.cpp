@@ -90,6 +90,11 @@ struct Collected {
 };
 Collected g_collected;
 std::set<an_attribute_ptr> g_printed;  // attributes already in the output
+// Copies of the attributes of secondary declarations (a_src_seq_secondary_decl.attributes, il_def.h:2160-2166):
+// with GENERATE_SOURCE_SEQUENCE_LISTS (decision 0024) EDG records each attribute of a secondary declaration twice,
+// once on the entity and once here (decls.c, wrapup_sse_for_simple_decl).  The entity's list is what is printed.
+std::set<an_attribute_ptr> g_secondary_copies;
+std::set<an_attribute_ptr> g_fn_type_attrs;  // unrecognized attributes of a redeclaration's function type (see `collect`)
 
 // Register the attributes of an owner.  Attribute entries are allocated in the
 // file-scope region but may be reachable only from function-region entries
@@ -130,6 +135,13 @@ void collect(char* entry, an_il_entry_kind kind) {
   switch (kind) {
     case iek_routine: {
       auto r = reinterpret_cast<a_routine_ptr>(entry);
+      // Decision 0024: with source sequence lists a routine also holds the type as declared at its definition
+      // (a_routine.declared_type, il_def.h:12288 region), a type of its own when the definition's declarator differs from the
+      // first declaration's (`T f(T x) [[a]]; ... T f(T x) [[b]] {}`).  The routine is listed with its own type; the unrecognized
+      // attributes of that other type are not listed again as orphans.  (A registered cerastes:: one is still reported.)
+      if (r->declared_type != nullptr && r->declared_type != r->type)
+        for (an_attribute_ptr a = r->declared_type->source_corresp.attributes; a; a = a->next)
+          if (!is_registered_cerastes(a)) g_fn_type_attrs.insert(a);
       if (g_collected.routine_set.insert(r).second) g_collected.routines.push_back(r);
       note_scp_owner(&r->source_corresp, kind, "routine", true);
       break;
@@ -138,6 +150,21 @@ void collect(char* entry, an_il_entry_kind kind) {
       auto t = reinterpret_cast<a_template_ptr>(entry);
       if (g_collected.template_set.insert(t).second) g_collected.templates.push_back(t);
       note_scp_owner(&t->source_corresp, kind, "template", true);
+      break;
+    }
+    case iek_src_seq_secondary_decl: {
+      // Decision 0024 (source sequence lists on): the copies of a secondary declaration's attributes are reached by
+      // the walk (decls.c, wrapup_sse_for_simple_decl); the entity's own list is what the listing prints.
+      auto sd = reinterpret_cast<a_src_seq_secondary_decl_ptr>(entry);
+      for (an_attribute_ptr a = sd->attributes; a; a = a->next) g_secondary_copies.insert(a);
+      // The function type that a redeclaration of a routine (or a template) declared is no routine's own type, which is
+      // listed through the routine; its unrecognized attributes are not listed again as orphans.  (A registered cerastes::
+      // one is still reported, so that none is lost.)  Other function types (a typedef's, a variable's, a parameter's) are
+      // reached through their own entities and stay as they were.
+      if ((sd->entity.kind == iek_routine || sd->entity.kind == iek_template) && sd->declared_type != nullptr &&
+          sd->declared_type->kind == tk_routine)
+        for (an_attribute_ptr a = sd->declared_type->source_corresp.attributes; a; a = a->next)
+          if (!is_registered_cerastes(a)) g_fn_type_attrs.insert(a);
       break;
     }
     case iek_attribute: {
@@ -778,7 +805,9 @@ void walk_il_and_print() {
   // files outside the primary file, warn instead.
   std::vector<Item> outside;
   for (an_attribute_ptr a : g_collected.attrs) {
-    if (is_pseudo(a) || g_printed.count(a)) continue;
+    if (is_pseudo(a) || g_printed.count(a) || g_secondary_copies.count(a) ||
+        g_fn_type_attrs.count(a))
+      continue;
     SrcPos pos = resolve(a->position);
     if (!pos.known) continue;
     if (pos.in_primary) {

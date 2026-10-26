@@ -218,7 +218,17 @@ struct Var {
 // A named constant (decision 0017): a file-scope `const` object (global), or a `const` local of a function that a case
 // value names.  Its uses are literals holding `value`; `init` is the initializer as written, checked in the prologue of
 // every method (obligations, then an internal guard that it equals `value`).
+//
+// A static assertion (decision 0024 item 2) is the same record with `kind` StaticAssertion: `type` is Bool, `init` is the
+// condition as written as a closed Bool expression, `value` is "1" (EDG accepted the assertion, so its condition is true; the
+// encoder's perturbation hook may set it to "0" so that the guard fails, 0017 item 9), and the
+// prologue checks the condition's obligations at their own positions, then an internal guard that it holds.  Add one with
+// Program::add_static_assertion / Function::add_local_static_assertion; the list order is the order of the prologue.
 struct NamedConst {
+  enum class Kind {
+    Constant,         // a `const` object (the default: every existing construction)
+    StaticAssertion,  // a `static_assert` / `_Static_assert` (decision 0024)
+  };
   int id = 0;                // unique within its list
   std::string c_name;        // the C/C++ name (messages and the Viper comment)
   Type type;                 // Bool or Int
@@ -226,6 +236,7 @@ struct NamedConst {
   const Expr* init = nullptr;  // the initializer as written: call-free, no Local/Result/Formal/Old, exactly `type`;
                                // null for C's tentative definition (value "0"): nothing is checked
   std::string value;         // the front end's value, a decimal literal of `type` ("0"/"1" for Bool)
+  Kind kind = Kind::Constant;  // appended with a default: every existing construction is unchanged
 };
 
 struct Param {
@@ -265,6 +276,9 @@ struct Function {
   // The `const` locals a case value of the body names (C++ only; decision 0017 item 6), checked like the program's named
   // constants, after them, in this function's method and in its `__wf` method.  Definition order = call order.
   NamedConst* add_local_const(std::string c_name, Type type, SrcLoc loc, const Expr* init, std::string value);
+  // A block-scope static assertion of the body (decision 0024 item 2): `condition` is a closed Bool expression (as written),
+  // `loc` the assertion.  It joins local_consts(), in call order with the local constants, and is checked the same way.
+  NamedConst* add_local_static_assertion(SrcLoc loc, const Expr* condition);
   const std::deque<NamedConst>& local_consts() const { return local_consts_; }
 
   // Declare a parameter; returns its index.  Also creates its local copy (a `Var` named like the parameter).
@@ -311,6 +325,10 @@ class Program {
 
   // The unit's named constants (decision 0017), in definition order; every method with a body checks them in its prologue.
   NamedConst* add_named_const(std::string c_name, Type type, SrcLoc loc, const Expr* init, std::string value);
+  // A file-scope or namespace-scope static assertion (decision 0024 item 2): `condition` is a closed Bool expression (as
+  // written), `loc` the assertion.  It joins named_consts(), so the prologue checks it in call order with the named constants
+  // and enumerators.
+  NamedConst* add_static_assertion(SrcLoc loc, const Expr* condition);
   const std::deque<NamedConst>& named_consts() const { return named_consts_; }
 
   // Arena (used by the Builder).

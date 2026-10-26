@@ -1,6 +1,6 @@
 # 0024 — Values the front end computes: static assertions, character literals, types inside types (M4.4b2)
 
-- **Status:** draft for M4.4b2 (2026-10-26). Owner decisions (handoff §11 questions 32 and 39, M4.4b2 planning):
+- **Status:** accepted for M4.4b2 (2026-10-26). Owner decisions (handoff §11 questions 32 and 39, M4.4b2 planning):
   - **Question 32:** "Fix it now, and any other known instances": every place where EDG computes an integer value
     alone, wraps it, and cerastes trusts the result is closed, by encoding the value as written or by rejecting the
     construct. `#if` is the exception: it needs an EDG fork commit and goes to the EDG box session (handoff §8.1).
@@ -32,9 +32,12 @@ rejected).
    `GENERATE_MICROSOFT_IF_EXISTS_ENTRIES` (1) and its two template-instantiation variants (0) from it, and all five are
    asserted in `src/backend/edg_il.h` and checked on the binaries by `scripts/check_edg_config.sh`. EDG's IL walk then follows the
    scopes' source sequence lists, which also reach each redeclaration (a secondary-declaration entry) with copies of
-   its attribute entries and its declared type. The walker (`--cerastes_walk`) ignores the attributes reached only
-   through a secondary declaration, its copies and those of its `declared_type` (owner, 2026-10-26: the listing keeps
-   its meaning, and no golden changes; the round 1 audit preferred listing them, which would change two goldens). With
+   its attribute entries and its declared type. The walker (`--cerastes_walk`) does not list what only a secondary
+   declaration reaches (owner, 2026-10-26: the listing keeps its meaning, and no golden changes; the round 1 audit
+   preferred listing them, which would change two goldens): the attribute copies of a secondary-declaration entry, and
+   an unrecognized attribute on a function type that the walk reaches but no routine prints (a redeclaration's type;
+   the rule is by type kind, since skipping every `declared_type` also hid a repeated typedef's real attribute,
+   `il/contrast/alias_attribute.cpp`); a registered `cerastes::` attribute there is still listed, so none is lost. With
    that, the walker's goldens, the walker oracle and the emitted Viper of every existing test are unchanged (P45: before
    the walker change 28 goldens gained `<unknown owner>` lines and 2 gained a redeclaration's attributes; every `.vpr`
    was identical). **The encoder sees a redeclaration's attributes now** (amends 0011 item 7): the type of a
@@ -69,10 +72,13 @@ rejected).
      until M4.5f, as for case values (0017 item 5).
    - **Class scope and the cross-check.** A class-scope assertion is on the file list and is encoded like the others
      (classes are rejected in verified files anyway); a dependent condition (`ck_template_param`, in a class template,
-     which is rejected) is left alone. Fail closed: every static assertion of a verified file that EDG's IL walk reaches
-     must be encoded, skipped by item 3, or dependent; any other (one in a class local to a function, which only the
-     function's sublist holds) is rejected. An assertion whose keyword and condition have no position counts as in a
-     verified file.
+     which is rejected) is left alone. Fail closed: every static assertion of a verified file that EDG's walk of the file
+     scope reaches must be encoded, skipped by item 3, or dependent; any other is rejected. Inside functions the statement
+     walk of every encoded body reaches each `stmk_decl` (P43: nested blocks, dead code, after `return`); bodies that are
+     not encoded hold assertions that are not checked: rejected functions (their file is rejected) and `predicate`/`pure`
+     bodies (above). A class local to a function, the only other holder (a sublist of the function's list), is rejected.
+     The round 2 audit asked for the comparison in function regions too; it is a handoff note. An assertion whose keyword
+     and condition have no position counts as in a verified file.
    - **Self-test.** `perturb_folded` (0017 item 9) also flips each static assertion's guard.
 3. **The skip (question 39).** Before encoding, the condition is scanned, following folded constants' expressions but
    not entering the operands of `sizeof`, `_Alignof`, `__datasizeof` and `noexcept`, which are never evaluated (they go
@@ -81,8 +87,8 @@ rejected).
    - a call (`eok_call` of an `enk_routine`) of a function declared in a system file, or of a builtin without a
      position: `std::numeric_limits<int>::max()`, `__builtin_constant_p`. A call of a user function is not a trigger:
      the encoder rejects it (a user `constexpr` function is itself rejected today, 0012), so
-     `_Static_assert(sizeof(g()) == sizeof(int) && 65536u * 65536u == 0u, "")` is an `overflow` error, not a skip
-     (round 1 audit);
+     `_Static_assert(sizeof(g()) == sizeof(int) && 65536u * 65536u == 0u, "")` is not skipped: it is rejected, by 0020
+     item 5's rule for a call inside `sizeof` (`side_effect_not_evaluated`) (round 1 audit);
    - a builtin operation (`enk_builtin_operation`): the type traits such as `__is_integral` and `__is_same`, and
      `__builtin_offsetof`;
    - a concept-id (`enk_concept_id`): `std::integral<int>`;
@@ -152,9 +158,11 @@ rejected).
      (`unsupported_declaration`), at block and file scope, used or not. A vector typedef stays accepted until it is
      used (`reject_vector.c`). A rejected typedef used in `sizeof` reports both lines.
    - **Declared types** (round 1 audit). A type the encoder reads as a value type (a local's, a parameter's, a
-     result's, a cast's) that reaches its meaning through an alias-template instance or a member typedef of a class
-     instance with a non-type template argument is rejected (`unsupported_type`):
-     `std::conditional_t<(65536u * 65536u == 0u), int, long> y = x;` chooses `int` by a wrapped constant.
+     result's, a cast's) or as an enumeration's written underlying type (round 2) that reaches its meaning through an
+     alias-template instance or a member typedef of a class instance with a non-type template argument is rejected
+     (`unsupported_type`), once, at the declaration: `std::conditional_t<(65536u * 65536u == 0u), int, long> y = x;`
+     chooses `int` by a wrapped constant. The walks give up after 64 levels by rejecting ("a type nested too deeply"),
+     never by accepting (round 2).
    - `sizeof(int[3])` is rejected too, until M4.5e encodes arrays.
 7. **What is left.** `#if` (the EDG box session); static assertions skipped by item 3 (M5.0); the bodies of `predicate`
    and `pure` functions (M4.5f).

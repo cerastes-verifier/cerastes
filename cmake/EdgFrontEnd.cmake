@@ -73,6 +73,11 @@ target_compile_definitions(edg_config INTERFACE
   # out of the cerastes front end.
   FULLY_RESOLVED_MACRO_POSITIONS=1
   INCLUDE_EDG_TEST_ATTRIBUTES=0
+  # M4.4b2 (decision 0024, amending 0002): the file scope's source_sequence_list is the only IL record of a
+  # file-scope _Static_assert / static_assert (block scope has the iek_static_assertion statement entity).  It
+  # also turns on GENERATE_LINKAGE_SPEC_BLOCKS and GENERATE_MICROSOFT_IF_EXISTS_ENTRIES (host_envir.h:1734-1768)
+  # and adds fields to the variable, routine, type, statement and source-correspondence structs (layout-affecting).
+  GENERATE_SOURCE_SEQUENCE_LISTS=1
   EDG_MAIN=edg_main
   USE_CMAKE_DEFINES)
 

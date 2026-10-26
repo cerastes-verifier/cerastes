@@ -489,6 +489,198 @@ void define_bitwise_rejections() {
     f->body = k.blk({k.es(k.bor(k.pv(f, 0), k.pv(f, 1)))});
     k.done(f);
   });
+  // The same guard for `~` (M4.4b1 audit note 1).
+  rh("bit_not_16_bit_operand_internal_error", "a bitwise complement on a 16-bit type", [](Kit& k) {
+    Function* f = k.fn("f", k.vd, {{"a", k.i16}});
+    f->body = k.blk({k.es(k.bnot(k.pv(f, 0)))});
+    k.done(f);
+  });
+  rh("bit_not_8_bit_operand_internal_error", "a bitwise complement on a 8-bit type", [](Kit& k) {
+    Function* f = k.fn("f", k.vd, {{"a", k.u8}});
+    f->body = k.blk({k.es(k.bnot(k.pv(f, 0)))});
+    k.done(f);
+  });
+}
+
+// ---- static assertions (decision 0024 item 2): checked in the prologue like a named constant whose value is true ----
+void define_static_assertions() {
+  lc("sa_file_scope_holds", "static_assert(2 + 3 == 5) at file scope: the closed condition is decided, the internal guard holds", [](Kit& k) {
+    k.sa(k.eq(k.add(k.num(k.i32, "2"), k.num(k.i32, "3")), k.num(k.i32, "5")));
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+    k.require_map("internal", "static assertion condition as written differs from the front end's");
+  });
+  lc("sa_file_scope_overflow_fails", "static_assert(2147483647 + 1 > 0) at file scope: the addition is an overflow at its own line (the guard cannot fire after it)", [](Kit& k) {
+    const Expr* sum = k.add(k.num(k.i32, "2147483647"), k.num(k.i32, "1"));
+    k.sa(k.gt(sum, k.num(k.i32, "0")));
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+    k.fail("overflow", sum->loc, 1, "", "addition");
+  });
+  lc("sa_file_scope_conversion_fails", "static_assert((signed char)200 == -56) at file scope: the conversion of 200 to signed char is an error", [](Kit& k) {
+    const Expr* narrow = k.cv(k.i8, k.num(k.i32, "200"));
+    k.sa(k.eq(k.cv(k.i32, narrow), k.num(k.i32, "-56")));
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+    k.fail("conversion", narrow->loc, 1, "", "the value may not fit in `signed char`");
+  });
+  lc("sa_file_scope_shift_fails", "static_assert((1 << 40) == 0) at file scope: the shift is an error", [](Kit& k) {
+    const Expr* sh = k.shl(k.num(k.i32, "1"), k.num(k.i32, "40"));
+    k.sa(k.eq(sh, k.num(k.i32, "0")));
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+    k.fail("shift", sh->loc, 1, "", "shift count");
+  });
+  lc("sa_file_scope_checked_in_the_wf_method", "a failing file-scope assertion is reported in a function's method and in its __wf method", [](Kit& k) {
+    const Expr* sum = k.add(k.num(k.i32, "2147483647"), k.num(k.i32, "1"));
+    k.sa(k.gt(sum, k.num(k.i32, "0")));
+    Function* f = k.fn("f", k.i32, {{"x", k.i32}});
+    k.req(f, k.ge_c(k.F(f, 0), k.i32, "0"));
+    f->body = k.blk({k.ret(k.pv(f, 0))});
+    k.done(f);
+    k.fail("overflow", sum->loc, 2, "", "addition");
+  });
+  lc("sa_literal_true_has_no_guard", "static_assert(true): a bare literal, nothing to check and no internal guard", [](Kit& k) {
+    NamedConst* c = k.sa(k.yes());
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+    k.rows("internal", c->loc, 0);
+  });
+  lc("sa_literal_true_value_differs", "static_assert(true) with the value 0 (the perturbation hook): a bare literal that differs still gets its guard, which fails", [](Kit& k) {
+    NamedConst* c = k.sa(k.yes());
+    c->value = "0";
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+    k.fail("internal", c->loc, 1, "", "static assertion condition as written");
+  });
+  lc("sa_value_differs_guard_fails", "static_assert(2 + 3 == 5) with the value 0: the condition holds, the guard compares with false and fails", [](Kit& k) {
+    NamedConst* c = k.sa(k.eq(k.add(k.num(k.i32, "2"), k.num(k.i32, "3")), k.num(k.i32, "5")));
+    c->value = "0";
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+    k.fail("internal", c->loc, 1, "", "static assertion condition as written");
+  });
+  lc("sa_after_failing_constant_not_reported", "const int A = 1 << 40; static_assert(2147483647 + 1 > 0): the constant fails first and ends the path, so the assertion's overflow is not reported", [](Kit& k) {
+    const Expr* init = k.shl(k.num(k.i32, "1"), k.num(k.i32, "40"));
+    k.nc("A", k.i32, init, "0");
+    const Expr* sum = k.add(k.num(k.i32, "2147483647"), k.num(k.i32, "1"));
+    k.sa(k.gt(sum, k.num(k.i32, "0")));
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+    k.fail("shift", init->loc, 1, "", "shift count");
+  });
+  lc("sa_before_failing_constant_is_reported_first", "static_assert(1 + 1 == 2) then const int A = 1 << 40: the assertion holds, the constant fails (call order is prologue order)", [](Kit& k) {
+    k.sa(k.eq(k.add(k.num(k.i32, "1"), k.num(k.i32, "1")), k.num(k.i32, "2")));
+    const Expr* init = k.shl(k.num(k.i32, "1"), k.num(k.i32, "40"));
+    k.nc("A", k.i32, init, "0");
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+    k.fail("shift", init->loc, 1, "", "shift count");
+  });
+  lc("sa_names_a_named_constant", "const int N = 20 + 20 (value 40); static_assert(N == 40) with N as the literal 40: closed, holds", [](Kit& k) {
+    k.nc("N", k.i32, k.add(k.num(k.i32, "20"), k.num(k.i32, "20")), "40");
+    k.sa(k.eq(k.num(k.i32, "40"), k.num(k.i32, "40")));
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+    k.require_map("internal", "static assertion condition as written differs from the front end's");
+  });
+  lc("sa_unsigned_wrap_fails", "static_assert(65536u * 65536u == 0u): the multiplication does not fit, an overflow (cerastes does not wrap)", [](Kit& k) {
+    const Expr* prod = k.bin(BinaryOp::Mul, k.num(k.u32, "65536"), k.num(k.u32, "65536"));
+    k.sa(k.eq(prod, k.num(k.u32, "0")));
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+    k.fail("overflow", prod->loc, 1, "", "unsigned `unsigned int` multiplication");
+  });
+  // Block scope: the function's own local list, in this function's method and its __wf method.
+  lc("sa_block_scope_holds", "static_assert(sizeof-like 4 == 4) inside f: a local static assertion, the guard holds", [](Kit& k) {
+    Function* f = k.fn("f", k.vd);
+    k.lsa(f, k.eq(k.add(k.num(k.i32, "2"), k.num(k.i32, "2")), k.num(k.i32, "4")));
+    f->body = k.blk({});
+    k.done(f);
+    k.require_map("internal", "static assertion condition as written differs from the front end's");
+  });
+  lc("sa_block_scope_shift_fails", "static_assert((1 << 40) == 0) inside f: the shift is reported in f's method", [](Kit& k) {
+    Function* f = k.fn("f", k.vd);
+    const Expr* sh = k.shl(k.num(k.i32, "1"), k.num(k.i32, "40"));
+    k.lsa(f, k.eq(sh, k.num(k.i32, "0")));
+    f->body = k.blk({});
+    k.done(f);
+    k.fail("shift", sh->loc, 1, "", "shift count");
+  });
+  lc("sa_block_scope_checked_when_requires_is_unsatisfiable", "requires x > 0 && x < 0 makes f's method vacuous; the block assertion's overflow is still reported, by the __wf method", [](Kit& k) {
+    Function* f = k.fn("f", k.i32, {{"x", k.i32}});
+    k.req(f, k.land(k.gt(k.F(f, 0), k.num(k.i32, "0")), k.lt(k.F(f, 0), k.num(k.i32, "0"))));
+    const Expr* sum = k.add(k.num(k.i32, "2147483647"), k.num(k.i32, "1"));
+    k.lsa(f, k.gt(sum, k.num(k.i32, "0")));
+    f->body = k.blk({k.ret(k.pv(f, 0))});
+    k.done(f);
+    k.fail_only("overflow", sum->loc, 2, 1, "addition");  // the method's own copy is vacuous; the __wf copy fails
+  });
+  lc("sa_block_scope_with_local_const_in_call_order", "a local constant, then a block assertion, then a case value's shift: the prologue is local constants and assertions in call order, then the case values", [](Kit& k) {
+    Function* f = k.fn("f", k.i32, {{"x", k.i32}});
+    k.lnc(f, "k", k.i32, k.add(k.num(k.i32, "2"), k.num(k.i32, "3")), "5");
+    k.lsa(f, k.eq(k.num(k.i32, "5"), k.num(k.i32, "5")));
+    const int id = k.jid();
+    f->body = k.blk({k.sw(k.pv(f, 0), k.blk({k.cs(k.num(k.i32, "5")), k.ret(k.num(k.i32, "1")), k.dflt(), k.ret(k.num(k.i32, "0"))}), id)});
+    k.done(f);
+    k.require_map("internal", "static assertion condition as written differs from the front end's");
+  });
+}
+
+// What check_program refuses about a static assertion (decision 0024 item 2): a non-bool condition, a condition that names a
+// variable, a parameter, the result, `old` or a call, and a block assertion in a function without a body.
+void define_static_assertion_rejections() {
+  rc("sa_non_bool_type_rejected", "not bool", [](Kit& k) {
+    NamedConst* c = k.sa(k.num(k.i32, "1"));
+    c->type = k.i32;  // C's `static_assert(1)` must arrive as a Bool condition: the encoder converts
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+  });
+  rc("sa_non_bool_condition_rejected", "has type int, not bool", [](Kit& k) {
+    k.sa(k.num(k.i32, "1"));
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+  });
+  rc("sa_condition_names_a_parameter_rejected", "mentions a variable", [](Kit& k) {
+    Function* f = k.fn("f", k.vd, {{"x", k.i32}});
+    f->body = k.blk({});
+    k.done(f);
+    k.sa(k.eq(k.pv(f, 0), k.num(k.i32, "1")));
+  });
+  rc("sa_local_condition_names_a_parameter_rejected", "mentions a variable", [](Kit& k) {
+    Function* f = k.fn("f", k.vd, {{"x", k.i32}});
+    k.lsa(f, k.eq(k.pv(f, 0), k.num(k.i32, "1")));
+    f->body = k.blk({});
+    k.done(f);
+  });
+  rc("sa_condition_calls_a_function_rejected", "mentions a variable", [](Kit& k) {
+    Function* g = k.fn("g", k.bl);
+    g->body = k.blk({k.ret(k.yes())});
+    k.done(g);
+    k.sa(k.call(g, {}));
+    Function* f = k.fn("f", k.vd);
+    f->body = k.blk({});
+    k.done(f);
+  });
+  rc("sa_local_in_a_bodyless_function_rejected", "which has no body", [](Kit& k) {
+    Function* f = k.fn("f", k.vd);
+    k.trusted(f, "declared here, defined in another unit");
+    k.lsa(f, k.yes());
+    k.done(f);
+  });
 }
 
 }  // namespace
