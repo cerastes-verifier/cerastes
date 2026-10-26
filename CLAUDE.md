@@ -1,6 +1,6 @@
 # cerastes — C/C++ verifier (EDG → Viper/Silicon → Z3)
 
-Plan: @plan.md   Status: @internal/status.md
+Plan: @plan.md   Status: internal/status.md (session log; read when needed)
 User docs: doc/ (Antora) → https://cerastes.dev/cerastes/doc/ (decision 0004)
 
 ## Commands
