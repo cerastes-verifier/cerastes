@@ -190,7 +190,12 @@ array types inside types until M4.5e (§11 "M4.4b2 planning"). The approved plan
    `git -C ~/Documents/cerastes/cerastes checkout internal/handoff.md`.
 2. **This branch.** Push it and open its PR: `git push origin m4.4b2-front-end-values` (the session never pushes). CI
    runs `check.sh` as locally; the EDG configuration changed (source sequence lists), so CI rebuilds EDG's front end.
-3. **Questions.** Answer §11 questions 40–42. Then M4.4c (§8.1, record 0025).
+3. **Questions.** Answer §11 questions 40–42. Then M4.4c (§8.1, record 0025). *(Answered 2026-10-26, M4.4c planning.)*
+
+**M4.4c planning (2026-10-26, after M4.4b2).** The owner answered §11 questions 40–42 (as recommended) and chose one
+session for M4.4c with Q37 last and a cut order; the planning review found a placement hole for `uninitialized` checks
+(finding A), fixed first (§11 "M4.4c planning"). The approved plan is
+`~/.claude/plans/using-plan-md-and-handoff-md-wild-rainbow.md`.
 
 ## 1. State in one paragraph
 
@@ -1107,7 +1112,9 @@ skip's type rule, declared types through aliases, attributes on redeclarations).
   detectors run on them too (P41 found `~true` and `2 ^ 8` warned there).
 - **Template arguments:** closed (P38: no `expr`, rejected); the M5 note stands. **`#if`:** the EDG box session.
 
-**M4.4c Writes outside F, `void` `?:` arms, warnings in verified tests** (record 0025, was 0024; §11 questions 28, 30, 31).
+**M4.4c Writes outside F, `void` `?:` arms, warnings in verified tests, `-Wall` shapes** (record 0025, was 0024; §11
+questions 28, 30, 31, 37, 40; owner, 2026-10-26: one session, Q37 last with a cut order; finding A of the planning review
+fixed first; §11 "M4.4c planning").
 - **Q28.** Only writes and snapshots leave F; call-free branches hold checks and stay in F, slotted by prefix. A write
   goes right after the member of its set that comes last in π, with ties broken by creation order. That means changes
   to `lower.cpp` lines 1084-1093, 1117, 1128, 1187-1188 and 1225, and to `origin_of`. `diagnostics.def` drops "or
@@ -1648,10 +1655,27 @@ Each has a recommended answer. Answer inline, as before.
     inside functions the statement walk of each encoded body is relied on. Compare the assertions EDG's walk finds in
     function regions with those the encoder saw, with a self-test hook to reach the rejection? *Recommended: yes, a small
     item in M4.4c (it touches `encode.cpp` anyway); it adds a check, not a meaning.*
+    **Answered (owner, 2026-10-26): follow the recommendation.** In **M4.4c** (record 0025).
 41. **A note for a skipped static assertion.** Q39's skip is silent; a user may believe a skipped condition was checked.
     Print a note (`cerastes verify` has no warning channel today; a verified test fails on any warning until M4.4c's
     question 31 lands), or stay silent until M5.0? *Recommended: silent until M5.0, which removes most skips; the
     Verifying page documents them.*
+    **Answered (owner, 2026-10-26): follow the recommendation.**
 42. **`sizeof("abc")` and other string operands** are rejected until M4.6 by the array rule (record 0024 item 6): their
     size comes from the string, not from a wrapped constant. Lift them in M4.6 with strings, or exempt an array type
     without a bound constant now? *Recommended: M4.6; one rule is simpler to audit, and no test uses them.*
+    **Answered (owner, 2026-10-26): follow the recommendation.**
+
+**M4.4c planning, 2026-10-26** (owner, with the answers above; the approved plan is
+`~/.claude/plans/using-plan-md-and-handoff-md-wild-rainbow.md`):
+- **One session**, with Q37 last and a cut order (a cut rule stays accepted and becomes a §11 question). Q40 joins it.
+- **Finding A** (the planning review): an `uninitialized` check inside a guarded operand could be placed after a later
+  write of the same local (`int x; int y = (x = (g(f(a) > 0 && x > 0), 2));` verified). Fixed in M4.4c, after a probe.
+- **Q28's Viper:** measured changes are allowed for programs with a write or snapshot of a call result (the order π may
+  change), listed in the status entry; any verdict or error-line change stops the work.
+- **A flagged snapshot's `uninitialized` check stays in F** (it is a check): `int x, y; … (x = f(a), x) + (y = g(b), y)`
+  stays rejected, pinned by a test.
+- **`x ? RED : NA`** (two enumerations as the arms of `?:`, warned by default by both C++ compilers) is rejected with
+  Q37's shapes.
+- **The cleanup:** at the end of M4.4c, `internal/status.md`, this file and `plan.md` are trimmed to what is live; a line
+  in each names the commit that holds the full text.
