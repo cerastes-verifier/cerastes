@@ -506,6 +506,40 @@ initializer of another file-scope constant): a `const` object is not a constant
 expression in C, although some compilers accept it, so the front end refuses it.
 C23's `constexpr` objects are not accepted by the front end yet.
 
+[#static-assertions]
+== Static assertions
+
+A `static_assert` (`_Static_assert` in C) is checked as you wrote it, with
+cerastes's integer rules, at block, file and namespace scope. The compiler has
+already found its condition true, but in its own arithmetic, where an unsigned
+product may wrap and, in C, a shift may lose bits. cerastes reports an
+`overflow`, `shift` or `conversion` in the condition at its line, whether or not
+the function that holds it is ever called, and then checks that the condition
+holds:
+
+[source,c]
+----
+include::example$verifying/static_assert.c[tag=source]
+----
+
+[source,c]
+----
+include::example$verifying/static_assert_overflow.c[tag=source]
+----
+
+Like a named constant's initializer, a static assertion is checked at the entry
+of every function it applies to (a file-scope one in all of them), so a failing
+one is reported once and hides the other errors of those functions until it is
+fixed.
+
+A condition that calls a function (`std::numeric_limits<int>::max()`), uses a
+type trait (`std::is_integral_v<int>`, `+__is_integral(int)+`) or a concept
+(`std::integral<int>`), or names a variable or enumerator of a system header, is
+not checked by cerastes in this version: the compiler checks it, and nothing at
+run time depends on it. Type traits are planned before generic templates. The
+types it names are still checked, as everywhere (<<not-supported>>):
+`std::is_same_v<char[4], char[4]>` is rejected for its array type.
+
 [#keep-vpr]
 == Keeping the Viper program
 
@@ -636,8 +670,13 @@ The constructs that are rejected in this version are:
   the functions of the C library other than `abort`, `exit` and `_Exit` (for
   example `quick_exit`, `+__builtin_trap+`, `+__builtin_unreachable+` and
   `std::terminate`).
-* *Types:* pointers, references, floating point, `volatile`, `_BitInt`, vector
-  types, enumerations declared in system headers.
+* *Types:* pointers, references, arrays, floating point, `volatile`, `_BitInt`,
+  vector types, enumerations declared in system headers. Array types, `_BitInt`,
+  vector types and class templates with a constant argument
+  (`std::array<char, 4>`) are rejected also as the operand of `sizeof`,
+  `_Alignof`, `typeof` or `decltype` (`sizeof(int[3])`, `sizeof("abc")`): the
+  compiler computes their size from a constant, which may have wrapped
+  (`sizeof(char[65536u * 65536u + 1])` is 1). So is a typedef of an array type.
 * *Expressions:* the bitwise shapes the compilers warn about
   (xref:integer-semantics.adoc#bitwise[Bitwise operators]), a character literal
   with more than one character or one that does not fit its type (`'ab'`,

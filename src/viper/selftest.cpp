@@ -201,6 +201,10 @@ class Kit {
   NamedConst* lnc(Function* f, const std::string& name, Type t, const Expr* init, const std::string& value) {
     return f->add_local_const(name, t, at(), init, value);
   }
+  // Static assertions (decision 0024 item 2): a program's (file or namespace scope) or a function's own (block scope), `cond` a closed
+  // Bool expression; the front end's value is 1.
+  NamedConst* sa(const Expr* cond) { return prog.add_static_assertion(at(), cond); }
+  NamedConst* lsa(Function* f, const Expr* cond) { return f->add_local_static_assertion(at(), cond); }
   const Stmt* dflt() { return b.case_label(nullptr, at()); }
   const Stmt* brk(int id) { return b.break_stmt(id, at()); }
   const Stmt* cnt(int id) { return b.continue_stmt(id, at()); }
@@ -861,6 +865,8 @@ void define_calls_in_expressions();
 void define_calls_in_expressions_rejections();
 void define_bitwise();
 void define_bitwise_rejections();
+void define_static_assertions();
+void define_static_assertion_rejections();
 }  // namespace
 
 #include "selftest_cases2.inc"
@@ -1027,6 +1033,8 @@ int main(int argc, char** argv) {
   define_calls_in_expressions_rejections();
   define_bitwise();
   define_bitwise_rejections();
+  define_static_assertions();
+  define_static_assertion_rejections();
   int bad = 0;
   for (const Case& c : lowering_cases()) {
     std::string problem;

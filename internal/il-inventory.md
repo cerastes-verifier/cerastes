@@ -3799,3 +3799,194 @@ std::string bit_fn_text(const BitFn& f) {
 (`bit_fn_name(op, w, uns)` is `"c_" + (uns ? "u" : "") + op + "_" + std::to_string(w)`; the sketch is not compiled, the generators in `gen_h.py`/`gen_split.py` are the tested form; `ba`, `bb` use `q('a', k)`/`q('b', k)` the same way.)
 
 **Surprises.** (1) The proposed flat forms prove constants in 2 s but nothing symbolic past 8–12 bits: Z3 proves a symbolic range or identity of a flat bit sum only by case splits. (2) Splitting the work in halves is what makes Silicon's per-function cost linear: a 128-bit flat function costs 6.5 s of Silicon time before any proof, the whole hierarchy 1 s. (3) A range postcondition makes things worse, not better (must-fail twins hang more often). (4) Z3 hangs rather than returning `unknown` on unprovable symbolic bit identities; `--assertTimeout` bounds them. (5) JVM and Silicon start cost 1.3 s, so no file is faster than that. (6) `pkill -f silicon.jar` was run once early in the spike to clean up my own timeouts; the baseline run had already ended (its log says `copied`, 17:03; the kill was at 17:17), but any other Silicon run of another session at that moment would have been killed as well. Later cleanups killed only PIDs of my own orphans.
+
+## M4.4b2: values the front end computes
+
+Probes P42-P44 for the M4.4b2 decision (static assertions, wrapped character literals, array and other layouts in types; record
+`0024-front-end-values.md`; the Q32 and Q39 answers of handoff §11). Evidence is under `build/m4.4b2/P42/`, `P43/`, `P44/`
+(gitignored: probes, one `.il`/`.err`/`.rd`/`.sa`/`.ver` per file and mode; the large `.il` files of P43/P44 were deleted, regenerate
+with each directory's `run*.sh`; summaries `P42.md`, `P43.md`, `P44.md`, `P44/rd_summary.txt`, `P43/blk/scan.txt`, `P42/diag/diag.txt`).
+The probes ran with the **frozen pre-spike binaries** (`build/m4.4b2/old-bin/{cerastes-fe,cerastes}`, copies of the build of 2026-10-24,
+before any M4.4b2 change); the wrapper is `build/m4.4b2/fe.sh` (`scripts/cerastes-fe.sh` with that binary). `il_def.h` lines are at the pin
+`f0ed5525af` (`third_party/edg/src/`).
+
+**Commands**
+
+```text
+build/m4.4b2/fe.sh --c23|--c++20 --display_error_number --il_display <file>      IL evidence (probes' .il)
+build/m4.4b2/old-bin/cerastes verify <file> --std=c23|c++20                       today's encoder (.ver)
+build/m4.4b2/rd.sh --c23|--c++20 <file>      scratch reader (scratch/p42.cpp): every ck_integer constant, expression-node constant and
+                                             case entry with character_kind, expr/local_expr_ref, orig_type, enum_value_range
+build/m4.4b2/rd44.sh <file>                  scratch reader (scratch/p44.cpp): sizeof/alignof/datasizeof nodes, user typedefs and variables,
+                                             types described by the IL fields a helper must follow
+python3 build/m4.4b2/tree.py <il> sa|scan    condensed block-scope static assertions: condition with its expr tree / leaf kinds
+```
+
+The scratch readers are a replacement `back_end()` linked against snapshot copies of `libedg_fe.a`, the driver objects and the cerastes
+libraries (`scratch/lib/`); no file under `src/` or `third_party/` is touched. `--il_display` prints `character_kind` only for strings
+(`il_display.c:1392`); a non-`chk_char` constant's one-line summary carries a `L'`/`u'`/`U'`/`u8'` prefix (`il_to_str.c:7077-7095`).
+
+### P42: **PASS: no stop condition for character literals; one stop-rule hit by the letter, the known template-argument class**
+
+**1. Where a wrapped literal can be read** (`P42/probes/lit.c`, `lit.cpp`, `places.c`, `places.cpp`, `enum3.cpp`; `*.rd`):
+
+| shape | C23 | C++20 |
+|---|---|---|
+| `'\x7f'`, `'\x80'`, `'\xff'`, `'\177'`, `'\200'`, `'\377'` | `int` 127, -128, -1, 127, -128, -1; `expr` NULL, `orig_type` NULL, `character_kind = chk_char` | `char`, the same values, same flags |
+| `L'\x7fffffff'`, `L'\x80000000'`, `L'\xffffffff'` | `int` 2147483647, -2147483648, -1, `chk_wchar_t` | `wchar_t` (signed 32-bit), same values, `chk_wchar_t` |
+| `u'\xffff'`, `U'\xffffffff'` | `unsigned short` 65535 `chk_char16_t`, `unsigned int` 4294967295 `chk_char32_t` | `char16_t`, `char32_t`, never negative |
+| `u8'\xff'` | **`unsigned char` 255, `chk_char`** | `char8_t` 255, `chk_char8_t` |
+| the literal converted (`int c = '\xff';`) | a second constant: `expr` set, `orig_type` = the literal's type, `character_kind = chk_char` (lost on this copy; the literal is inside its `expr`) | same |
+| `enk_constant` expression node of a literal | `constant.ptr` is the **same `a_constant`** (same address): kind and value survive | same |
+
+**2. Places** (all keep the literal as in the table; the literal is a constant without `expr` and without `orig_type`):
+function bodies, `requires`/`ensures` (`E L5:5 -1`), `check`/`invariant` (position of the macro use), a macro `#define NEG '\xff'`, a local
+or file-scope `const char K = '\x80'` (C: the variable's constant **is** the `int` literal), a C++ default argument (literal plus the
+call site's converted copy), and **`case '\x80':`**: in C the `case_value` is the literal itself (`int -128 expr=N`); in C++ it is
+a converted `int -128 expr=Y orig_type=char` copy whose `expr` holds the literal. **Enumerator initializers (the `:1040` constant):
+the enumerator's constant is the literal constant with `is_named_constant_definition` set**; C: `int -1 expr=N orig_type=- ck=chk_char`
+(`E = '\xff'`), `chk_wchar_t` for `L'..'` in an unfixed enumeration; C++: `type = the enumeration`, same flags; **a fixed underlying type
+(`enum : int { C = L'\xffffffff' }`) loses the kind** (`chk_char`, value kept). `enum : unsigned char { U = '\xff' }` is an EDG error #1749.
+
+**3. An enumerator's explicit initializer** is recorded in `source_corresp.decl_pos_info->variant.enum_value_range`
+(`il_def.h:1974-1980`, guard `is_enum_constant(c)`, `il.h:2428`; `il_display.c:769`): null for no initializer, a range for every written
+one (`enum { A = -2, B = '\xff', C, D = 5, F = -2, G, H = L'\xffffffff', J }`: `B evr=1:20-1:25`, `H evr=1:53-1:65`; `C`, `G`, `J`
+`evr=none`). Without it an enumerator with a wrapped literal and an implicit one (`enum { A = -2, B }` / `{ A = -2, B = '\xff' }`)
+are the same constant. The stale `end_position` of an implicit enumerator (copied from the previous one) must not be used.
+
+**4. Today:** `int f(void) ensures r == -1 { return '\xff'; }`, `enum { E = '\xff' }; ... return E;` (`r == -1`), `return L'\xffffffff'`
+and `char c = '\xff'; return c;` all verify in both modes (`probes/gap.c`).
+
+**5. Census** (`probes/census.{c,cpp}`: 47 shapes, all `K` and `E` lines of both modes): a negative constant with `expr` NULL and
+`orig_type` NULL is only (a) a character literal (bare, or inside a same-type cast), (b) an enumerator **without** initializer
+(flagged `enumerator=1`, `evr=none`), or (c) a **non-type template argument** (C++: `tp<-1>`, `TS<-5>::v`: a constant with no position and
+the template-id's argument node), the class of 0022 item 3 (`BACKING_EXPR_FOR_NONTYPE_TEMPL_ARG` is false). (c) is closed today: a template,
+a class and a use of a system template's variable are rejected (`probes/targ*.cpp`, `sysT*.cpp`). Every other negative constant
+(`-1`, `-2147483647 - 1`, `INT_MIN`, `SCHAR_MIN`, `(char)-1`, `(signed char)200`, negative enumerators, `case -1`, `~0`, `(int)-3.9`, ...) has an `expr`;
+no constant has `expr` NULL and a non-null `orig_type`.
+
+**5b. Census 2 (audit round 1; `P42/c2/`):** the first census missed unflagged negative constants **typed by an enumeration** with no `expr` and no `orig_type`: the
+initializer copy of an enumeration-typed object (`enum E y = A;`, `const enum E K = A;`, C++ and C23, unfixed and fixed) and, in C23, `case A:` over a **fixed**
+enumeration (`: int`, `: long`, `: short`, `: signed char`, `: long long`, `: char`). A second run over 23 files in both modes (enumerators used in locals of the
+enumeration, `int`, `long`, `short` and a typedef, returns, arguments, comparisons, `?:`, casts, `case` over `int` and over the enumeration, contracts, file-scope constants, enumerator
+initializers, `static_assert`, C++ default arguments, `enum class`) finds 81 such constants, **all enumeration-typed**, and **none whose type is the plain `int` (C) or `char`/`wchar_t` (C++)**
+except the control character literals. So a wrapped literal is identified by value **and** type, and no other shape matches.
+
+**6. Diagnostics** (`P42/diag/diag.txt`): `'\x100'`, `'\400'`, `'\777'`, `L'\x100000000'`, `U'\x100000000'`, `u8'\x100'`, `"\x100"` are **error #27-D**;
+`99999999999999999999`, `0xFFFFFFFFFFFFFFFFF`, `18446744073709551616` (and, in C, `18446744073709551615`) **error #23-D**; both exit 2 in `cerastes-fe` and
+`cerastes verify`, both modes. The plan's premise (warnings in clang mode) is wrong: `literals.c:1731` chooses `es_warning` only under
+`gnu_version_is(any_version)`, which is `gnu_mode && !clang_mode` (`lang_feat.h:1437`); `verify` always runs in clang mode
+(`verify_main.cpp:304`, GNU emulation refused `edg_args.cpp:151`). No `--diag_error` entry is needed; `u'\x10000'` (#3255, C23 warning) is
+already in 0023's list.
+
+### P43 (block scope, frozen binary): **PASS: every non-literal condition keeps `expr`**
+
+**1. The entity** (`il_def.h:2071-2087` `a_static_assertion {condition, string_literal, position}`; `decls.c:15566-15594`): a block-scope assertion is an
+`iek_static_assertion` in the `entities` list of a `stmk_decl` (`il_display`: `kind: stmk_decl`, `entities: ... static-assertion`), in
+every nested block, in dead code and after `return` (`misc/n01.c`: 8 written, 8 found). `string_literal` is NULL for the one-argument
+form. `condition` is set only when the assertion holds (`decls.c:15660-15668`); a failed one is an EDG error (#1574 C, #2784 C++, exit 2), so a
+NULL condition never reaches the back end. A false non-dependent assertion in a **template** is *not* an error (CWG2518,
+`decls.c:15649-15655`) and is recorded with value 0 (`misc/t01.cpp`).
+
+**2. The condition constant:**
+
+| shape | C23 | C++20 |
+|---|---|---|
+| comparison, logic, arithmetic, `sizeof`, casts, local constexpr use | `K<int 1 expr=<written tree>>` | `K<bool 1 expr=<written tree>>` |
+| an integer-valued condition (`static_assert(4)`, `sizeof(int)`, `1 + 1`) | **unconverted**: `K<int 4 expr=NONE>`, `K<unsigned long 4UL expr=enk_sizeof[int]>`, `K<int 2 expr=add(1,1)>` | `K<bool 1 expr=eok_bool_cast[bool] {gen}(...) orig_type=int>` |
+| lone literal `1`, `true` | `K<int 1 expr=NONE>` | `1`: `bool_cast`; `true`: `K<bool 1 expr=NONE>` |
+| lone enumerator `N` | `K<int 5 expr=NONE enumerator>` (also `K<int -1 ... enumerator>`) | `bool_cast(K<enum 5 expr=NONE enumerator>)` |
+| lone wrapped `'\xff'` | `K<int -1 expr=NONE>` | `bool_cast(K<char -1 expr=NONE>)` |
+| float `1.5` | `K<double ck_float>` (not `ck_integer`) | `bool_cast(K<double ck_float>)` |
+| `(1 << 40) == 0`, `2147483647 + 1 < 0` | **accepted**, folded with wrap (`K<int 1 expr=eq(K<int 0 expr=shiftl(1,40)>, 0)>`) | **EDG error #28** (not a constant) |
+| `(signed char)200 == -56`, `65536u * 65536u == 0u` | accepted (`expr` keeps the casts / the multiply) | accepted, same trees |
+| local `constexpr`/`const` `k` (`static_assert(k == 5)`) | `const` object: `#1901` (error in `verify`; the IL has `K<int 5 expr=var k:int>`) | `K<int 5 expr=var k:int>`: the `expr` is the `enk_variable` itself (as a case value, P24) |
+
+**3. The skip shapes** (`P43/blk/scan.txt`: the leaves of each condition; "system" is `seq_is_in_system_header` of the declared entity's
+`decl_position`): a call `eok_call` with an `enk_routine` operand (a user `constexpr` function, `std::numeric_limits<int>::max()`,
+C `__builtin_constant_p`); `enk_builtin_operation` (`__is_integral`, `__is_same`, `__builtin_offsetof`, both modes; `builtin_operation.kind`
+names it); `enk_concept_id` (`std::integral<int>`); an `enk_variable` declared in a system file (`std::is_integral_v<int>`, `is_integral<int>::value`,
+`numeric_limits<int>::digits`); a flagged enumerator constant declared in a system file (C `_CLOCK_REALTIME`). **Types never trigger it**
+(`enk_sizeof[std::size_t]`, `enk_alignof[int]`). `noexcept(1 + 1)` is an `eok_noexcept` operation (an unknown kind, rejected by the encoder).
+A user `constexpr bool t = std::is_integral_v<int>;` is rejected at its own declaration today (0017 item 2), not skipped. A user `constexpr`
+function and a user struct are themselves rejected today (0012), so a user call or user static member does not reach an assertion yet.
+Every skip shape **verifies** today (the assertion is not looked at).
+
+### P43 (file scope, new binary): **PASS: no stop condition: no block-scope assertion appears in the file-scope list**
+
+Reader `scratch/sq.cpp` over `il_header.primary_scope->source_sequence_list` and each function scope's `source_sequence_list` /
+`src_seq_sublist_list` (`il_def.h:18596-18611`; `a_source_sequence_entry {next, prev, entity}`, `src_seq.h:27-41`); evidence `P43/fs/*.sq`.
+
+- **File list contents:** a file-scope, namespace-scope (flat, with `src-seq-end-of-construct` after each closed namespace), `extern "C"`
+  (after a `linkage-spec-block` entry) and **class-scope** (C++ `struct`, nested class, C `struct`) assertion is an `iek_static_assertion` entry of the
+  file-scope list, in source order; the class-scope one sits right after the `type` entry, before the `field` entries. The condition constant keeps its
+  `expr` (position of `condition->expr` = the condition's text), type `bool` / `int`; a lone `static_assert(true);` has `expr` NULL and no string.
+- **Block scope** assertions are on the function scope's list (and are the `stmk_decl` entities); the overlap with the file list is empty in all
+  four dumps (`fs.cpp`, `fs.c` in C23 and C++20, `sec.cpp`). A class declared in a function keeps its assertion in a `src-seq-sublist` entry of the function's list
+  (also on `src_seq_sublist_list`), in neither the file list nor a `stmk_decl`.
+- **System headers:** their file-scope assertions are in the list with `SYS` positions (libc++: 82 in `<array>`, 103 in `<vector>`, 94 in `<string>`, 64 in
+  `<memory>`, 2 in `<utility>`; none in `<cstdint>`, `<cmath>` or the C headers tried): filter by `seq_is_in_system_header(position.seq)`.
+- **Macros:** an assertion produced by a macro defined in a system header has its `position` and `condition->expr` position **both at the use site in the user file**
+  (`FULLY_RESOLVED_MACRO_POSITIONS`), so a position test treats it as the user's; a template's is dependent (`ck_template_param`, no `expr`).
+- **Secondary declarations** (`src-seq-secondary-decl` with `decl_position` and `entity.kind`) and `pragma`, `macro`, `using-decl`, `field`, `template` entries sit in the same
+  list; assertions between redeclarations remain ordinary entries in source order.
+
+### P44: **PASS: array, `_BitInt`, vector and non-type-template-argument types are reachable only through `sizeof`/`_Alignof`/`__datasizeof`/`typeof`/`decltype` operands and typedefs; declared objects of those types are already rejected**
+
+(`P44/pr/*.rd`, `.ver`; 104 runs, `rd_summary.txt`.)
+
+| shape | IL |
+|---|---|
+| `sizeof(int[3])`, `_Alignof(char[4])`, `sizeof(char(*)[4])`, `sizeof(int(&)[3])` | `enk_sizeof`/`enk_alignof` with `sizeof_info.is_type`, `variant.type` a `tk_array` (under `tk_pointer`, `is_reference`); **`bound_constant` non-NULL**, `expr` NULL for a literal bound |
+| `sizeof(char[65536u * 65536u + 1])` | `tk_array` of **1 element** (`number_of_elements` is the wrapped value), `bound_constant->expr` set; `r == 1` verifies today |
+| `sizeof((char[4]){0})`, `sizeof("abc")` | **expression operands**: `sizeof_info.is_type` FALSE, `variant.expr` an `enk_temp_init` / `enk_constant` whose type is a `tk_array` (the string's has no `bound_constant`) |
+| `typeof(int[3])`, `typeof(x)`, `decltype(x)`, `decltype((x))`, `decltype("abc")`, `using buf = char[8]` | `tk_typeref`, `variant.typeref.kind` = `trk_is_typeof_with_type_operand`, `trk_is_typeof_with_expression`, `trk_is_decltype`, `trk_is_alias` (typedef: `trk_none`), target `variant.typeref.type` |
+| `unsigned _BitInt(8)` | `tk_integer`, `int_kind = ik_unsigned_bit_precise`, width in `variant.integer.extra_info->bit_width` |
+| `typedef int v4si __attribute__((vector_size(16)))` | `tk_typeref` (`trk_none`) -> `tk_vector` (`element_type`, `size_constant`) |
+| `std::array<char, 4>`, `std::bitset<8>`, `std::integral_constant<int, 3>` | `tk_class`, `variant.class_struct_union.extra_info->template_arg_list` with an entry of `kind == tak_nontype` (`il_def.h:7677-7679`) |
+| `typedef char buf[8];` (file and block), `using`, `typedef int inc[];` | a named `tk_typeref` entry (`source_corresp.name`, `decl_position` in the user file), reached by the file-scope walk and by the function-region walk |
+| `int (*)(char[3])`, `typedef int fn_t(int)` | `tk_routine`: `return_type`, `param_type_list` (`a_param_type.type`, `declared_type` = before adjustment, `il_def.h:6390-6404`) |
+| VLA `sizeof(char[n])` | `tk_array` with `is_vla`, `is_variable_size_array`, `bound_constant` NULL; rejected today as a run-time `enk_sizeof` |
+| `_Alignas(8)`, `_Alignas(int)`, `alignas(8)` on a variable | **an attribute** on the variable (`[[_Alignas(<aak_constant>)]]`, `<aak_type>`, `[[alignas(<aak_constant>)]]`); rejected today (0011 item 7's allow-list) in both modes |
+| `enum { M = sizeof(char[4]) }` | C: rejected by 0018 item 10 (`reject_enum_list_sizeof_array.c`); C++: verified, `sizeof` of an array |
+| `int a[3]`, array/`[*]`/`[]` parameters, `extern int garr[5]`, `char (&g())[4]`, `std::array<char,4> a`, local `typeof(int[3]) *p` | already rejected (`unsupported_type` / `unsupported_declaration`) |
+
+`il_display` does not print the array type entry that only a `sizeof` operand reaches, so the golden tests cannot show `bound_constant`;
+the scratch reader reads `a_type` directly.
+
+### P45: the source sequence lists (the spike): **PASS after the walker change the owner chose**
+
+`GENERATE_SOURCE_SEQUENCE_LISTS` 1 in `cmake/EdgFrontEnd.cmake`; EDG then also sets `GENERATE_LINKAGE_SPEC_BLOCKS` 1 and
+`GENERATE_MICROSOFT_IF_EXISTS_ENTRIES` 1 (`host_envir.h:1734-1760`; `MICROSOFT_EXTENSIONS_ALLOWED` is 1 in the stock
+`cmake_defines.h:302`), and the template-instantiation variants stay 0. All five are asserted in `src/backend/edg_il.h` and
+`scripts/check_edg_config.sh` (both binaries print them, `cmd_line.c:8120-8135`). Evidence `build/m4.4b2/P45.md` and
+`p45-*.log`. Full rebuild 102 steps; `bootstrap.sh --build-only` is needed afterwards (its EDG-tree stamp hashes
+`cmake/EdgFrontEnd.cmake`).
+
+| Step | Result |
+|---|---|
+| `check_edg_config.sh` | ok for `cerastes-fe` and `cerastes` |
+| goldens (`tests/annotations tests/il`), no walker change | 998 passed, **28 failed**: every one `attr [[...]] on <unknown owner>` lines, the copies of attribute entries EDG gives a secondary declaration (`decls.c:22128-22139`; any redeclaration with attributes, not only comma lists) |
+| goldens, walker ignoring the attributes reached through `iek_src_seq_secondary_decl` | 1024 passed, **2 failed** (`il/g1/check5_attributes.cpp`, `il/inventory/attr_postfunc.cpp`): the walk now follows `a_src_seq_secondary_decl.declared_type` (`walk_entry.h:3861`), the function type of a redeclaration, which no entity owns, and lists its attributes (`attr [[unreg_ns::a2(...)]] on type <unnamed>`) |
+| goldens, walker also ignoring a secondary declaration's `declared_type` (owner, 2026-10-26) | see the session's status entry |
+| `walker_oracle.py` / `test_walker_oracle.py` | 134 goldens, 1915 facts, 0 failed / OK |
+| full `run_tests.py -j 8` | 4682 passed, 2 failed (the two goldens), 1 skipped; **every `.vpr` byte-identical** to the baseline (no new method, no new rejection) |
+
+### Implications for `encode.cpp` and the record
+
+- **Wrapped character literals.** The literal arm of `constant_value` sees `ck_integer`, `expr` NULL, `orig_type` NULL, negative value, type
+  `int` (C) / `char` / `wchar_t` (C++) with `character_kind` `chk_char` or `chk_wchar_t`; take N from the kind (8, 32), or, where it is lost
+  (converted copies, fixed-underlying enumerators), from the type, or fail on shape. Because the converted copies carry an `expr` to the
+  literal the rule is reached on the literal itself. N does not matter for soundness. **`encode_named_enumerator` (`:1040`)** must tell an
+  enumerator without initializer from one with a literal by `decl_pos_info->variant.enum_value_range` (P42 fact 3), not by value.
+  Do not apply the rule to non-type template arguments (no `expr`, no `orig_type`, negative, no position: P42 census).
+- **Truncated escapes and too-large literals** are errors already (#27-D, #23-D); the plan's `--diag_error` entry for them is unnecessary.
+- **Static assertions** (block scope): read the `stmk_decl` entity; encode `condition->expr` (C: with `clause_bool` on any integer type, C++: the
+  `eok_bool_cast` root), obligations at their lines, then the `internal` guard; lone shapes (literal, enumerator, wrapped literal) have no `expr`;
+  C accepts wrapped constants that C++ rejects (#28), so the encoder is the only check in C; the skip triggers are `eok_call`,
+  `enk_builtin_operation`, `enk_concept_id`, and a system-file `enk_variable` or enumerator constant; unknown operation kinds (`eok_noexcept`) are the
+  encoder's rejection. A failed assertion never reaches the back end.
+- **Types in types.** One recursive helper over `typeref` (all kinds), `pointer`, `routine` (return + `param_type_list`, incl. `declared_type`), `vector`, bit-precise
+  `integer`, `array` (reject) and `class` instances with a `tak_nontype` argument, run on `sizeof_info` type operands, on typedef entries
+  declared in a verified file, and on expression operands; record 0024 item 6 decides to reject `sizeof("abc")` too (an
+  array-typed operand, verified before M4.4b2, pinned by no test) until M4.6. `alignas` needs nothing.

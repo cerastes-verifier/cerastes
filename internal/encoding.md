@@ -233,6 +233,14 @@ dropped call or an out-of-range index. The obligations and guards are closed for
 first failure and reports nothing after it; a function whose switches have only literal case values, and a program without
 named constants, lower exactly as before.
 
+**Static assertions in the prologue** (M4.4b2, decision 0024 item 2). A static assertion is a `NamedConst` of kind
+`StaticAssertion` (`Program::add_static_assertion` for a file- or namespace-scope one, in source order with the named
+constants and enumerators; `Function::add_local_static_assertion` for a block-scope one, among the local constants,
+before the case values): type `Bool`, `init` the condition as written taken as a truth value, `value` `1` (`0` under
+`perturb_folded`). It is lowered like a constant: the condition's obligations at their positions, then the `internal`
+guard (message "internal check: static assertion condition as written differs from the front end's (it holds)"),
+omitted for a bare `true`. `check_program` requires a closed `Bool` condition and a value of `0` or `1`.
+
 **Locals without an initializer** (M4.2c, decision 0019 items 4–5). A function whose body has a `Decl` without an
 initializer gets, for each such local `v_x__N`, a ghost `Bool` local `d_v_x__N` (its flag) and, per loop that assigns
 it and does not declare it, a snapshot `ds_v_x__N__K` (`K` counts the function's loops that are not `DoOnce`). The flag
@@ -555,6 +563,27 @@ an original expression is treated as having none: rejected), `perturb_folded` (e
 case label's `folded` moved to a neighbouring value, so the prologue's internal guards fail: exit 3), `silicon_timeout`,
 `abort`, `internal_error`, `perturb_fixed_order` (lowering's call order perturbed, so its fail-closed check reports an
 internal error: exit 3, 0022 item 12).
+
+**Values the front end computes (decision 0024).** *Static assertions:* file-, namespace-, `extern "C"`- and
+class-scope ones come from the file scope's source sequence list (`collect_entities`, `IlEntities::static_assertions`;
+`GENERATE_SOURCE_SEQUENCE_LISTS` is on), filtered by `static_assertion_in_verified_file` (the keyword's or the
+condition's position; none counts as verified), and join `encode_named_constants`'s items by `seq`
+(`encode_file_static_assertion` → `Program::add_static_assertion`); block-scope ones replace the old skip of the
+`stmk_decl` entity (`encode_block_static_assertion`, the case-value path: `case_value` flag, the C `named_var` and
+`variable_read_by` rejections, `constant_initializer`, `clause_bool` → `Function::add_local_static_assertion`). A lone
+literal or enumerator adds nothing; a NULL condition is rejected; a `ck_template_param` one is left alone; any other
+static assertion of a verified file that the walk reaches is rejected (the cross-check). Before encoding, `scan_for_skip`
+looks for Q39's triggers (a call of a system or position-less routine, `enk_builtin_operation`, `enk_concept_id`, a
+system variable or enumerator), not entering `sizeof`/`_Alignof`/`__datasizeof`/`noexcept` operands, and applies the
+type rule to every type operand and template argument it meets, skipped or not. *Wrapped character literals:*
+`constant_value`'s literal arm sends a negative constant without `expr` or `orig_type` typed plain `int` (C) or
+`char`/`wchar_t` (C++) to `wrapped_character_literal` (`convert(char|wchar_t, (unsigned N-bit) v + 2ᴺ)`, then to `int`
+in C); `encode_named_enumerator` does the same for a written initializer without `expr`, the character type from
+`character_kind`. *Types:* `computed_type_reason` (arrays, `_BitInt`, vectors, class instances with a `tak_nontype`
+argument, through typerefs, pointers and routine types) runs on `sizeof`/`_Alignof`/`__datasizeof` operands
+(`reject_computed_sizeof_operand`), on the C++ top-level `sizeof` enumerator, and on array typedefs of verified files
+(`declaration_level_checks`); `vtype` rejects a typeref chain through an alias-template instance or a member typedef of a
+class instance with a non-type argument (`typeref_chain_reason`).
 
 **Known over-rejection.** A call written inside an annotation's own `sizeof` operand (`CERASTES_REQUIRES(sizeof(int[p(2)]) > 0)`)
 is rejected as a call in an annotation, although the operand is never evaluated: the encoder reads the folded constant's

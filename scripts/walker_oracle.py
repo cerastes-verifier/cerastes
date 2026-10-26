@@ -1813,8 +1813,25 @@ def top_candidates(ex: Extractor) -> List[Block]:
     return out
 
 
+def unnamed_type_attribute_entries(ex: Extractor) -> List[Block]:
+    """Every unrecognized attribute entry at a primary position, rendered as the listing renders an attribute `on type
+    <unnamed>`: the lines about unnamed function types are matched against these on the entry's own name, tokens and
+    position (the type has none)."""
+    il = ex.il
+    out: List[Block] = []
+    for a in il.by_kind.get("attribute", []):
+        if ex.is_pseudo(a) or a.get("kind") != "unrecognized":
+            continue
+        seq = a.get("position.seq")
+        if not seq or not il.is_primary_seq(int(seq)):
+            continue
+        out.append(ex.attr_block(a, "type <unnamed>", None))
+    return out
+
+
 def check_top(rep: Report, g: Golden, il: IL, ex: Extractor) -> None:
     cands = top_candidates(ex)
+    unnamed_type_candidates = unnamed_type_attribute_entries(ex)
     for b in g.top:
         if not b.head.startswith("attr "):
             rep.mismatches.append(f"unrecognized top-level listing line {b.head!r}")
@@ -1829,6 +1846,24 @@ def check_top(rep: Report, g: Golden, il: IL, ex: Extractor) -> None:
                 del cands[i]
                 break
         else:
+            if " on type <unnamed> @ " in b.head:
+                # An unnamed function type (a typedef's, a variable's, a parameter's) has no declaration position, so
+                # `top_candidates` cannot tell it from the function types of redeclarations that il_display also shows
+                # (decision 0024).  The attribute entry has a position of its own, so the line is matched on that: the
+                # name, the tokens and the position must be those of an attribute entry in il_display, each entry used
+                # once.  Only the owner (a type without a position) stays unchecked, and is counted as such.
+                for i, c in enumerate(unnamed_type_candidates):
+                    if attr_matches(text, c.text(), rep) == 1:
+                        rep.fact("unnamed-type-attribute-own-position")
+                        rep.unverifiable["unnamed-type-attribute-owner (the type has no position in il_display)"] += 1
+                        del unnamed_type_candidates[i]
+                        break
+                else:
+                    rep.mismatches.append("an attribute listed `on type <unnamed>` that no attribute entry of il_display has "
+                                          "(name, tokens and position):\n    " + text.replace("\n", "\n    ")
+                                          + "\n  attribute entries at primary positions:\n    "
+                                          + "\n    ".join(c.head for c in unnamed_type_candidates[:8]))
+                continue
             rep.mismatches.append(f"top-level attribute not found on its entity in il_display:\n    "
                                   + text.replace("\n", "\n    ") + "\n  candidates:\n    "
                                   + "\n    ".join(c.head for c in cands[:8]))

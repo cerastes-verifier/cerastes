@@ -39,7 +39,26 @@ Enumerations have their own range, described in <<enumerations>>.
 
 A character literal with more than one character (`'ab'`) is rejected: its value
 is up to the compiler, and a longer one (`'abcde'`) or a wide one (`L'ab'`) loses
-characters. So is a `u'...'` literal whose character does not fit in 16 bits.
+characters. So is a `u'...'` literal whose character does not fit in 16 bits, and
+an escape too large for its type (`'\x100'`, `'\400'`).
+
+A character literal is the code it names, converted to its character type: `'a'`
+is 97 and `'\x7f'` is 127. A code that does not fit is a `conversion` error at
+the literal, on the paths that reach it: plain `char` is signed here, so
+`'\xff'` would be the `char` -1 (an `int` -1 in C), and `L'\xffffffff'` the
+`wchar_t` -1. Write the number instead (`255`, `(unsigned char)0xff`), or, in
+C23, `u8'\xff'`, which is the `unsigned char` 255. `(unsigned char)'\xff'` is
+reported too: the literal is converted to `char` before the cast.
+
+[source,c]
+----
+include::example$integer-semantics/char_literal.c[tag=source]
+----
+
+[source,c]
+----
+include::example$integer-semantics/char_literal_conversion.c[tag=source]
+----
 
 == Signed overflow is an error
 
@@ -365,7 +384,10 @@ verifies.
 A named constant, a `const` global, is checked the same way: its initializer as
 you wrote it, whether or not anything uses it, so `const short limit = 70000;`
 is a `conversion` error at its line
-(xref:verifying.adoc#constants[Named constants]).
+(xref:verifying.adoc#constants[Named constants]). So is the condition of a static
+assertion, which the compiler has accepted in its own arithmetic:
+`static_assert(65536u * 65536u == 0u)` is an `overflow` error
+(xref:verifying.adoc#static-assertions[Static assertions]).
 
 [#enumerations]
 == Enumerations

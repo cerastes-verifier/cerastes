@@ -806,6 +806,67 @@ class EmptyAttributeTests(unittest.TestCase):
 
 
 @e2e_gate(_front_end_available(), "build/cerastes-fe missing; run scripts/bootstrap.sh")
+class UnnamedTypeAttributeTests(unittest.TestCase):
+    """`attr ... on type <unnamed> @ L:C` lines (attributes on the function types of typedefs, aliases, variables and parameters,
+    tests/il/walker/function_type_attributes.cpp): the type has no position in il_display, so the oracle matches the line on the
+    attribute entry's own name, tokens and position.  A wrong token, name, line or column, a line for an attribute that is not
+    there and a duplicated line must fail; the real lines must pass (decision 0024 item 1; the oracle once counted every such
+    line as unverifiable, which let all of these through)."""
+
+    def fx(self):
+        src = (REAL_ROOT / "tests" / "il" / "walker" / "function_type_attributes.cpp").read_text()
+        return fixture("unnamed_type_attr.cpp", src, "c++20")
+
+    LINE = "attr [[unreg_ns::t1(x > 0)]] on type <unnamed> @ L7:27"
+
+    def test_the_fixture_has_the_four_lines(self):
+        fx = self.fx()
+        self.assertEqual(len([l for l in fx.lines if " on type <unnamed> @ " in l]), 4, fx.golden)
+        self.assertIn(self.LINE, fx.lines)
+
+    def test_the_unmodified_golden_passes_and_each_line_is_a_fact(self):
+        fx = self.fx()
+        rep = w.analyse(fx.golden, fx.il)
+        self.assertEqual(rep.mismatches, [])
+        self.assertTrue(rep.ok)
+        self.assertEqual(rep.checked_by["unnamed-type-attribute-own-position"], 4)
+        # only the owner (a type without a position) is unverifiable, once per line
+        self.assertEqual(rep.unverifiable["unnamed-type-attribute-owner (the type has no position in il_display)"], 4)
+
+    def test_every_doctored_line_fails(self):
+        fx = self.fx()
+        for what, new in (
+                ("a wrong token", self.LINE.replace("x > 0", "x > 1")),
+                ("a wrong name", self.LINE.replace("t1", "t9")),
+                ("a wrong namespace", self.LINE.replace("unreg_ns", "other_ns")),
+                ("a wrong line", self.LINE.replace("@ L7:27", "@ L6:27")),
+                ("a wrong column", self.LINE.replace("@ L7:27", "@ L7:28")),
+                ("no tokens", self.LINE.replace("(x > 0)", "")),
+                ("an attribute that is not in the source", "attr [[unreg_ns::t7(q)]] on type <unnamed> @ L7:27")):
+            with self.subTest(what):
+                golden = fx.golden.replace(self.LINE, new)
+                self.assertNotEqual(golden, fx.golden)
+                rep = w.analyse(golden, fx.il)
+                self.assertFalse(rep.ok, what)
+                self.assertTrue(any("<unnamed>" in m for m in rep.mismatches), rep.mismatches)
+
+    def test_a_duplicated_or_extra_line_fails(self):
+        fx = self.fx()
+        dup = fx.golden.replace(self.LINE + "\n", self.LINE + "\n" + self.LINE + "\n")
+        self.assertNotEqual(dup, fx.golden)
+        self.assertFalse(w.analyse(dup, fx.il).ok)
+        extra = fx.golden.replace(self.LINE + "\n", self.LINE + "\nattr [[unreg_ns::t1(x > 0)]] on type <unnamed> @ L9:20\n")
+        self.assertFalse(w.analyse(extra, fx.il).ok)
+
+    def test_a_deleted_line_is_not_a_fact_of_the_others(self):
+        # dropping a line leaves the other three as facts; the attribute entry the golden no longer lists is not an error here (the
+        # redeclarations' copies are not listed either), the count is what pins it
+        fx = self.fx()
+        rep = w.analyse(fx.golden.replace(self.LINE + "\n", ""), fx.il)
+        self.assertEqual(rep.checked_by["unnamed-type-attribute-own-position"], 3)
+
+
+@e2e_gate(_front_end_available(), "build/cerastes-fe missing; run scripts/bootstrap.sh")
 class CommandLineTests(unittest.TestCase):
     """walker_oracle.py as a program: exit 0 clean, 1 on a failure, 2 on a usage error."""
 

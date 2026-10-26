@@ -1,0 +1,39 @@
+attr [[unreg_ns::t1(x > 0)]] on type <unnamed> @ L7:27
+attr [[unreg_ns::t2(y > 0)]] on type <unnamed> @ L8:31
+attr [[unreg_ns::t3(z > 0)]] on type <unnamed> @ L9:20
+routine call plain body @ L10:5
+  returns int
+  param 1 p: int (*)(int)
+  param 2 v: int
+attr [[unreg_ns::t4(w > 0)]] on type <unnamed> @ L10:28
+routine h plain body @ L11:5
+  returns int
+  param 1 q: int
+  attr [[unreg_ns::t5(q > 0)]] on type @ L11:16
+end walk: 2 routines reported, 0 routines with bodies in non-system files outside the primary file
+--- stderr ---
+"tests/il/walker/function_type_attributes.cpp", line 7: warning: attribute
+          namespace "unreg_ns" is unrecognized
+  typedef int fn_t(int x) [[unreg_ns::t1(x > 0)]];
+                            ^
+
+"tests/il/walker/function_type_attributes.cpp", line 8: warning: attribute
+          namespace "unreg_ns" is unrecognized
+  using fp_t = int (*)(int y) [[unreg_ns::t2(y > 0)]];
+                                ^
+
+"tests/il/walker/function_type_attributes.cpp", line 9: warning: attribute
+          namespace "unreg_ns" is unrecognized
+  int (*gp)(int z) [[unreg_ns::t3(z > 0)]] = nullptr;
+                     ^
+
+"tests/il/walker/function_type_attributes.cpp", line 10: warning: attribute
+          namespace "unreg_ns" is unrecognized
+  int call(int (*p)(int w) [[unreg_ns::t4(w > 0)]], int v) { return p(v); }
+                             ^
+
+"tests/il/walker/function_type_attributes.cpp", line 11: warning: attribute
+          namespace "unreg_ns" is unrecognized
+  int h(int q) [[unreg_ns::t5(q > 0)]] { return q; }
+                 ^
+

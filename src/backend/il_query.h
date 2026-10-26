@@ -64,6 +64,11 @@ struct IlEntities {
   std::vector<a_variable_ptr> variables;  // those not declared inside a routine
   std::vector<a_type_ptr> types;
   std::vector<an_asm_entry_ptr> asm_entries;  // file-scope asm declarations (not the asm statements of bodies)
+  // Decision 0024 item 2: the static assertions of the file scope's source sequence list (file, namespace, `extern "C"` and
+  // class scope, in source order, every header's included), and those the file-scope walk reached that are not on it (a
+  // fail-closed cross-check: the encoder reports one in a verified file).
+  std::vector<a_static_assertion_ptr> static_assertions;
+  std::vector<a_static_assertion_ptr> other_static_assertions;
 };
 IlEntities collect_entities();
 

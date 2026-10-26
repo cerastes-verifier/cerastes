@@ -592,3 +592,6 @@ tests/scalar/enum_eq_comma_enumerator.c:20:11:swap-incdec:x++->++x	the value of 
 tests/scalar/enum_eq_truth_cond.c:16:53:relop:>->>=	in the arm taken for x != 0, x > 0 and x >= 0 are the same condition
 tests/scalar/enum_eq_truth_cond.c:18:23:relop:>->>=	in the arm taken for x != 0 (the `x ?` condition), x > 0 and x >= 0 are the same condition
 tests/scalar/enum_eq_truth_cond.c:31:16:swap-incdec:x++->++x	the value of x++ is discarded (the left operand of the comma): x++ and ++x have the same effect
+tests/scalar/char_literal_unreachable.c:11:11:literal:10->11	under requires x <= 10 the branch x > 11 is as unreachable as x > 10; the wrapped literal stays on an excluded path, which is what the test pins
+tests/scalar/char_literal_unreachable.c:13:5:delete-stmt:return c;->;	the deleted statement is the only one of the unreachable branch; no path changes
+tests/scalar/enum_fixed_negative.c:32:24:literal:0->1	(enum EI)1, like 0, is a value of the fixed int enumeration that is not an enumerator (IM = -2, IP = 3): pick takes the default arm and returns 0 either way
