@@ -7,6 +7,7 @@
 #pragma once
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "annotation_il.h"
@@ -69,6 +70,9 @@ struct IlEntities {
   // fail-closed cross-check: the encoder reports one in a verified file).
   std::vector<a_static_assertion_ptr> static_assertions;
   std::vector<a_static_assertion_ptr> other_static_assertions;
+  // Decision 0025 item 5: the static assertions each function memory region holds (block scope), with the region's number, in
+  // region order and then in the walk's order.
+  std::vector<std::pair<a_memory_region_number, a_static_assertion_ptr>> region_static_assertions;
 };
 IlEntities collect_entities();
 

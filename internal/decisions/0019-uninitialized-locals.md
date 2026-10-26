@@ -282,3 +282,5 @@ object would be indeterminate at the target. With this record that object is ord
 - The emitted Viper of every program without a local declared without an initializer is unchanged.
 
 *2026-10-22, amended by 0020 (M4.3a): item 4 — a write inside an expression sets the flag at its point in the evaluation order (a write effect, 0020 item 7), and the locals a loop assigns include those written in its expressions; item 6 — a jump past a declaration with an initializer is refused in both modes (owner, handoff §11 question 22), so the later record that item 6 left open will not come; item 13 — its M4.3 part is done.*
+
+*2026-10-26, amended by 0025 (M4.4c): item 13 — the `uninitialized` check of a snapshot of a flagged local counts as an access of the local with the check's own set, so a later write in the same full expression follows it (finding A, 0025 item 1).*

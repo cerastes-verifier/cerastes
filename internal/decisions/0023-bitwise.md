@@ -253,3 +253,5 @@ literals with only a warning, and 0022 item 5 still gives a few shapes different
   C++ (a `?:` of enumeration type).
 - A claim whose proof needs a symbolic bit identity (item 2) is not decided: the run ends at `--timeout` with exit 3.
   The Integer semantics page says which claims are decided.
+
+*2026-10-26, amended by 0025 (M4.4c): item 4 — two enumerations in `+ - * / %` and as the arms of `?:` are rejected too (0025 item 6, R8); item 5 — the truth-value comparisons it listed as not rejected (`(p ^ q) == 2`) are now rejected (0025 item 6, R6).*

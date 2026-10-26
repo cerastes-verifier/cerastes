@@ -156,12 +156,15 @@ temporaries `t__k := f(args)`, each preceded by `assert`s of the callee's `requi
 (category `precondition`, note at the clause). Every item has the **set** of fixed points (calls, and branches that
 contain a call) C must have completed before it evaluates the item: those whose values it uses, its guard's, the comma
 floor's, and those of the earlier accesses to the locals it touches; a call's precondition has the set of its
-arguments (PRE). **The dependency-chain rule** (0021 item 3): the sets of a full expression (every obligation, write,
-snapshot and call-free branch; PRE ∪ {B} for each branch with a call; PRE of each explicit termination check) must form
-a chain under ⊆, or the expression is rejected (`unsequenced_calls`, at the later of two witnessing calls); the calls
-are then emitted in the chain's order (the members of the smallest set first, ties in creation order) and each item
-right after the calls of its set and before every other, so a callee that never returns cannot hide a check C may
-evaluate before it. For every expression accepted before M4.3b (calls nested or ordered by `,`) the sets are intervals
+arguments (PRE). **The dependency-chain rule** (0021 item 3, 0025 item 2): the sets of a full expression (every
+obligation and call-free branch; PRE ∪ {B} for each branch with a call; PRE of each explicit termination check) must
+form a chain under ⊆, or the expression is rejected (`unsequenced_calls`, at the later of two witnessing calls); the
+calls are then emitted in the chain's order (the members of the smallest set first, ties in creation order) and each
+item right after the calls of its set and before every other, so a callee that never returns cannot hide a check C may
+evaluate before it. Writes and snapshots, which cannot fail, are not in the family (M4.4c): each goes right after the
+member of its set that comes last in that order (first when its set is empty), items in one place keeping creation
+order; fail closed, every member of its set is emitted before it and every later item whose set contains its set after
+it. For every expression accepted before M4.3b (calls nested or ordered by `,`) the sets are intervals
 of creation order and the emitted Viper is unchanged. **Termination at a call** (0021 item 4): a call in the caller's
 recursion cycle (Viper's strongly connected components: an edge for every call node, dead code included) that is
 emitted after a call outside its PRE gets an explicit `assert` of Silicon's own decrease relation (the callee's
@@ -174,8 +177,10 @@ of **effects**: a call (as above), a write (`v := value; d := true`, the flag on
 contain a call, are the fixed points, in the order of the chain above; every other item (obligation, write, snapshot,
 call-free branch) goes right after the fixed points of its set (the temporaries it mentions, its guard's, the floor,
 and for a snapshot of `x` every earlier write of `x`), or before the first fixed point when its set is empty — the
-call rule above, applied to writes and snapshots too — and items in the same place keep evaluation order (left to
-right for unsequenced operands). A branch with a call holds its own full expression, placed by the same rule inside
+call rule above (writes and snapshots by the last member of their set, 0025 item 2) — and items in the same place keep
+evaluation order (left to right for unsequenced operands). The `uninitialized` check of a snapshot of a flagged local
+counts as an access of the local with the check's own set (guard and floor included), so a later write of the local
+follows it (0025 item 1). A branch with a call holds its own full expression, placed by the same rule inside
 the `if`. Every read of a local that the full expression writes is a snapshot
 at its point (its `uninitialized` obligation follows the snapshot), so a printed value never names a variable the
 expression writes; the value of an `AssignE` is its lowered `a` (or the snapshot of `b`). A right operand of `&&`/`||`
@@ -512,7 +517,15 @@ same variable, with no node from a macro expansion (`orig_seq`/`orig_column` equ
 `-Wself-assign`. The bitwise warning rules of 0023 item 5 (`bitwise_operand_parentheses`, `logical_not_bitwise`,
 `complement_of_truth_value`, `bitwise_condition_parentheses`, `bitwise_instead_of_logical`,
 `tautological_bitwise_compare`, `xor_as_power`) run where their operator is encoded, also on a folded constant's `expr`
-and in contracts, and `assignment_as_condition` also matches an `|=` condition. Lowering's rejections
+and in contracts, and `assignment_as_condition` also matches an `|=` condition. The other `-Wall` shapes of 0025 item 6
+(`logical_operand_parentheses`, `shift_operand_parentheses`, `self_comparison`, `logical_not_comparison`,
+`chained_comparison`, `truth_value_compare`, `int_in_truth_context`, `constant_logical_operand`,
+`constant_out_of_range_compare`, `overlapping_comparisons` (code only); two enumerations in arithmetic or `?:` as
+`unsupported_expression`) run the same way, and `dangling_else` and `empty_body` on the `if`/`while`/`for`/`switch`
+statements (written versus compiler-generated blocks, P50b): in `logical`, `binary_arith`, `comparison`, the `?:` arm, and
+`truth_context` (every truth context: conditions, `!`, `&&`/`||` operands, conversions to `bool`, annotation, `assert`
+and static-assertion conditions). A `void` `?:` in statement position (an expression statement, a discarded comma
+operand, a `for` step) is encoded as an `If` whose arms are expression statements in blocks (0025 item 3). Lowering's rejections
 (`LowerResult::rejections`, 0021 item 3) are reported as `unsequenced_calls`. Everything else is
 `unsupported_expression` with a description of the operator (pointer and member operations).
 
@@ -562,7 +575,9 @@ A program that `check_program` refuses is a rejection (exit 2), since a program 
 an original expression is treated as having none: rejected), `perturb_folded` (every named constant's value and every
 case label's `folded` moved to a neighbouring value, so the prologue's internal guards fail: exit 3), `silicon_timeout`,
 `abort`, `internal_error`, `perturb_fixed_order` (lowering's call order perturbed, so its fail-closed check reports an
-internal error: exit 3, 0022 item 12).
+internal error: exit 3, 0022 item 12), `drop_block_static_assertion` (block-scope static assertions ignored by the
+encoder, so the cross-check of each encoded body's region rejects them: exit 2, 0025 item 5). The VIR self-test has its
+own lowering hooks, among them `perturb_write_slot` (0025 item 2).
 
 **Values the front end computes (decision 0024).** *Static assertions:* file-, namespace-, `extern "C"`- and
 class-scope ones come from the file scope's source sequence list (`collect_entities`, `IlEntities::static_assertions`;
@@ -572,7 +587,11 @@ condition's position; none counts as verified), and join `encode_named_constants
 `stmk_decl` entity (`encode_block_static_assertion`, the case-value path: `case_value` flag, the C `named_var` and
 `variable_read_by` rejections, `constant_initializer`, `clause_bool` → `Function::add_local_static_assertion`). A lone
 literal or enumerator adds nothing; a NULL condition is rejected; a `ck_template_param` one is left alone; any other
-static assertion of a verified file that the walk reaches is rejected (the cross-check). Before encoding, `scan_for_skip`
+static assertion of a verified file that the walk reaches is rejected (the cross-check). Since M4.4c (0025 item 5) the
+walk of each routine region also lists its block-scope assertions (`IlEntities::region_static_assertions`); after the
+bodies are encoded, and only when nothing was rejected, each one in a verified file must have reached
+`encode_block_static_assertion` (`check_block_static_assertions`), except in the region of a `predicate` or `pure`
+routine. Before encoding, `scan_for_skip`
 looks for Q39's triggers (a call of a system or position-less routine, `enk_builtin_operation`, `enk_concept_id`, a
 system variable or enumerator), not entering `sizeof`/`_Alignof`/`__datasizeof`/`noexcept` operands, and applies the
 type rule to every type operand and template argument it meets, skipped or not. *Wrapped character literals:*

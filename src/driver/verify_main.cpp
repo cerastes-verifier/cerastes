@@ -88,9 +88,10 @@ int refuse(const std::string& message) {
 // (both exit status 3); perturb_folded: move every named constant's value and every case value's front-end value to a
 // neighbouring value of its type, so the internal guards of decision 0017 fail (exit status 3); perturb_fixed_order: swap the first
 // two fixed points of a full expression's call order, so that lowering's fail-closed order check reports its internal error
-// (decisions 0021 and 0022 item 12; exit status 3).
+// (decisions 0021 and 0022 item 12; exit status 3); drop_block_static_assertion: the encoder ignores the static assertions of function
+// bodies (neither records nor encodes them), so that the cross-check of decision 0025 item 5 reports them (exit status 2).
 bool is_hook(const std::string& h) {
-  if (h == "drop_assert" || h == "weaken_invariant" || h == "constant_without_expr" || h == "perturb_folded" || h == "perturb_fixed_order" || h == "silicon_timeout" || h == "abort" || h == "internal_error") return true;
+  if (h == "drop_assert" || h == "weaken_invariant" || h == "constant_without_expr" || h == "perturb_folded" || h == "perturb_fixed_order" || h == "drop_block_static_assertion" || h == "silicon_timeout" || h == "abort" || h == "internal_error") return true;
   if (h.rfind("drop_assert=", 0) != 0 || h.size() == 12) return false;
   for (size_t i = 12; i < h.size(); ++i)
     if (h[i] < '0' || h[i] > '9') return false;

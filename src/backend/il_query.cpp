@@ -75,6 +75,7 @@ namespace {
 IlEntities* g_collect_out = nullptr;
 std::set<char*>* g_collect_seen = nullptr;
 bool g_collect_in_region = false;
+a_memory_region_number g_collect_region = NULL_region_number;
 void collect_entry(char* entry, an_il_entry_kind kind) {
   if (!g_collect_seen->insert(entry).second) return;
   switch (kind) {
@@ -92,10 +93,14 @@ void collect_entry(char* entry, an_il_entry_kind kind) {
       if (!g_collect_in_region && a->source_corresp.enclosing_routine == nullptr) g_collect_out->asm_entries.push_back(a);
       break;
     }
-    case iek_static_assertion:
-      // Block-scope ones are in function regions; the file scope's are on its source sequence list (decision 0024).
-      if (!g_collect_in_region) g_collect_out->other_static_assertions.push_back(reinterpret_cast<a_static_assertion_ptr>(entry));
+    case iek_static_assertion: {
+      auto sa = reinterpret_cast<a_static_assertion_ptr>(entry);
+      // Block-scope ones are in function regions (kept with the region's number, decision 0025 item 5); the file scope's are on its
+      // source sequence list (decision 0024).
+      if (g_collect_in_region) g_collect_out->region_static_assertions.push_back({g_collect_region, sa});
+      else g_collect_out->other_static_assertions.push_back(sa);
       break;
+    }
     default: break;
   }
 }
@@ -110,9 +115,11 @@ IlEntities collect_entities() {
   g_collect_in_region = true;
   for (a_memory_region_number region = FILE_SCOPE_REGION_NUMBER + 1; region <= highest_used_region_number; ++region) {
     if (mem_region_table[region] == nullptr) continue;
+    g_collect_region = region;
     walk_routine_scope_il(region, collect_entry, nullptr, nullptr, nullptr, nullptr, /*clear_fe_pointers=*/FALSE);
   }
   g_collect_in_region = false;
+  g_collect_region = NULL_region_number;
   if (il_header.primary_scope != nullptr) {
     // Only the static assertions are read from the list; every other kind is stepped over, sublists included.
     for (a_source_sequence_entry_ptr e = il_header.primary_scope->source_sequence_list; e != nullptr; e = e->next)

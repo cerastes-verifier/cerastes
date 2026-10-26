@@ -12,7 +12,8 @@ expectations (grammar in tests/README.md):
     //                                                    frontend-warning lines may list its warnings)
     // expect: frontend-ok
     // expect: frontend-error <diag> @ L<line>           (one line per diagnostic)
-    // expect: frontend-warning <diag> @ L<line>
+    // expect: frontend-warning <diag> @ L<line>        (also lists the warnings of a verified or
+    //                                                    error test)
     // expect: frontend-refused <substring>              (needs cerastes-fe-options)
     // cerastes-fe-options: <options>                    (only with frontend-refused)
     // expect: golden
@@ -283,6 +284,10 @@ _REJECTED_RE = re.compile(r"^rejected\s+(?P<tag>" + _DIAG_TAG + r")" + _AT)
 _DIAG_RE = re.compile(r"^frontend-(?P<severity>error|warning)\s+(?P<tag>" + _DIAG_TAG
                       + r")\s+@\s+L(?P<line>[1-9][0-9]*)$")
 CERASTES_TAG_PREFIX = "cerastes-"
+# The EDG warnings a `verified` or `error` test may list (decision 0025 item 4, owner question 31).  A
+# closed list: a warning in a verified program is otherwise a finding to fix, never to list.  #187
+# fires on `a && (y = 2);`, a shape that every compiler accepts silently and that cerastes verifies.
+VERIFY_WARNING_TAGS = frozenset({"assign_where_compare_meant"})
 
 # The categories of `// expect: error <category> @ L<n>` in a C or C++ test:
 # the table of decision 0011 item 10, which the driver, this harness, the
@@ -432,10 +437,19 @@ def parse_header(text: str, suffix: str) -> Expectation:
                                       header_file(m.group("file"), lineno, suffix)))
         else:
             raise HeaderError(f"L{lineno}: cannot parse `expect: {body}`")
-    if kinds == {"rejected", "frontend-diag"} and not fe_error_lines:
-        # `frontend-warning` lines of a `rejected` test: the front-end warnings that the run is
-        # expected to print besides its errors (the multiset of (tag, line) must match exactly)
-        kinds = {"rejected"}
+    if kinds - {"frontend-diag"} in ({"rejected"}, {"verified"}, {"error"}) \
+            and "frontend-diag" in kinds and not fe_error_lines:
+        # `frontend-warning` lines of a `rejected`, `verified` or `error` test: the front-end
+        # warnings that the run is expected to print (the multiset of (tag, line) must match
+        # exactly).  A `frontend-error` line cannot accompany them (it is its own kind).
+        kinds -= {"frontend-diag"}
+        if kinds != {"rejected"}:
+            for d in diags:
+                if d.tag not in VERIFY_WARNING_TAGS:
+                    raise HeaderError(
+                        f"`frontend-warning {d.tag}` is not allowed in a `verified` or `error` test "
+                        "(allowed: " + ", ".join(sorted(VERIFY_WARNING_TAGS)) + "); fix the warning, "
+                        "or ask for the tag to be added to VERIFY_WARNING_TAGS with a decision")
     if not kinds:
         raise HeaderError("`expect: native-ok` accompanies an outcome (golden, "
                           "frontend-error, ...); it is not a test by itself")
@@ -443,7 +457,8 @@ def parse_header(text: str, suffix: str) -> Expectation:
         raise HeaderError("expectations mix " + ", ".join(sorted(kinds)) +
                           "; a test has exactly one kind of outcome")
     (kind,) = kinds
-    if kind in _SOLE_KINDS and len(expects) - native_ok != 1:
+    if kind in _SOLE_KINDS and len(expects) - native_ok - len(diags) != 1:
+        # (`diags` holds only `frontend-warning` lines here: any other mix was refused above)
         raise HeaderError(f"`expect: {kind}` must be the only outcome line")
 
     twin = None
@@ -521,6 +536,9 @@ def parse_header(text: str, suffix: str) -> Expectation:
             raise HeaderError("`mode:` does not apply to .vpr files")
         if kind not in ("verified", "error"):
             raise HeaderError(f"`expect: {kind}` does not apply to .vpr files")
+        if diags:
+            raise HeaderError("`expect: frontend-warning` does not apply to .vpr files (Silicon "
+                              "runs no front end)")
     else:
         for mode in modes:
             if mode not in MODE_OPTIONS:
@@ -1537,7 +1555,7 @@ class VerifyParse:
     problems: list[str]  # output that cannot be classified
 
 
-def parse_verify_output(stdout: str, stderr: str) -> VerifyParse:
+def parse_verify_output(stdout: str, stderr: str, warnings_listed: bool = False) -> VerifyParse:
     """Parse the output of a `cerastes verify` run that ended with status 0 or 1.
 
     Decision 0011 item 9: the verdict line, the errors and their notes are on
@@ -1548,7 +1566,8 @@ def parse_verify_output(stdout: str, stderr: str) -> VerifyParse:
     with no error before it, an EDG diagnostic (they go to stderr), and any
     other line in column 0 are problems.  Anything on stderr is a problem: a
     verdict or an error there is on the wrong stream, and a front-end diagnostic
-    (a warning in a test) is unexpected output; tests are warning-free.
+    (a warning in a test) is unexpected output, unless the test lists its warnings
+    (`warnings_listed`: the caller compares stderr with them; decision 0025 item 4).
     """
     verified: list[str] = []
     functions: list[int] = []
@@ -1584,7 +1603,7 @@ def parse_verify_output(stdout: str, stderr: str) -> VerifyParse:
         else:
             after_error = False
             problems.append(f"unrecognized driver output: {raw}")
-    for raw in stderr.split("\n"):
+    for raw in ([] if warnings_listed else stderr.split("\n")):
         if not raw.strip() or raw[0] in " \t":
             continue
         if _VERIFY_DIAG_RE.match(raw) or _VERIFIED_LINE_RE.match(raw):
@@ -1612,7 +1631,9 @@ def evaluate_verify(run: ToolRun, exp: Expectation, registry: TagRegistry | None
     `filename` is the test path as given on the command line (the file of its
     own messages).  Exit status 3, any status other than 0 to 2, a crash and a
     timeout fail whatever the test expects.  `registry` names the EDG tags of a
-    rejection (required for a `rejected` test).
+    rejection (required for a `rejected` test) and of the listed `frontend-warning`
+    lines of a `verified` or `error` test: then stderr must hold exactly those
+    warnings (decision 0025 item 4); without such lines any warning fails.
     """
     if run.returncode is None:
         return [f"cerastes verify {run.error}"]
@@ -1641,8 +1662,12 @@ def evaluate_verify(run: ToolRun, exp: Expectation, registry: TagRegistry | None
                             f"nothing there): {run.stdout.strip().splitlines()[0]}")
         return problems + fe_output_problems(run.stderr, exp.diags, registry, filename)
 
-    parsed = parse_verify_output(run.stdout, run.stderr)
+    listed = bool(exp.diags)  # `frontend-warning` lines: stderr must hold exactly these warnings
+    parsed = parse_verify_output(run.stdout, run.stderr, warnings_listed=listed)
     problems = list(parsed.problems)
+    if listed:
+        assert registry is not None
+        problems += fe_output_problems(run.stderr, exp.diags, registry, filename)
     if code == VERIFY_OK:
         if parsed.errors:
             problems.append("exit status 0 but the output has `error:` lines")
@@ -2655,7 +2680,7 @@ def required_env(headers: dict[Path, Expectation | HeaderError]) -> list[str]:
             names += ["CERASTES_JAVA", "SILICON_JAR", "Z3_EXE"]
         elif exp.kind in VERIFY_KINDS:
             names += ["CERASTES_VERIFY"]
-            if exp.kind == "rejected":
+            if exp.kind == "rejected" or exp.diags:
                 names += ["CERASTES_EDG_GEN"]  # the tags of the expected diagnostics
         elif exp.kind == "frontend-ok":
             names += ["CPFE", "EDG_CLANG_VER_SCRAPE"]

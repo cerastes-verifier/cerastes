@@ -27,6 +27,17 @@ struct LowerOptions {
   // Move the first snapshot or write of a full expression behind everything, so that `check_variable_order` (the fail-closed check that
   // the accesses to a local are emitted in the order they were created) reports its internal error: the self-test of why it is there.
   bool perturb_access_order = false;
+  // Move the first write (an assignment used as a value) that has a non-empty set before every fixed point, so that `check_fixed_order`
+  // (a write comes after every member of its set, decision 0025 item 2) reports its internal error.
+  bool perturb_write_slot = false;
+  // Undo decision 0025 item 1: a flagged snapshot records only its own set as the access to its local, not its `uninitialized` check's, so a later
+  // write may be emitted before the check; `check_variable_order`'s counting of flag reads must report it (internal error).
+  bool drop_flag_access = false;
+  // Move the first write that a later item depends on (a later item whose set contains the write's non-empty set) to the last slot, so that the
+  // half of `check_fixed_order` that requires such an item to be emitted after the write reports its internal error (decision 0025 item 2).
+  // The self-test case must place the dependent item before the last slot: the check fires only when the dependent item lands in an earlier
+  // slot than the delayed write, as in `hook_delay_write_slot`'s `h(b) < 100 / (x = g(a))` (the divisor check, slot 0, the write moved to slot 1).
+  bool delay_write_slot = false;
   // Swap the first two fixed points of a full expression's order, so that `check_fixed_order` (the fail-closed check that the fixed points
   // emitted before an item are exactly its set) reports its internal error (decision 0021).
   bool perturb_fixed_order = false;

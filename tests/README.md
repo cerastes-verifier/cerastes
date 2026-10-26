@@ -46,6 +46,7 @@ line of code is an error, so an expectation can never be silently ignored.
 // expect: error <category> @ L<line>
 // expect: error <category>[:<reason>] @ L<line>      (.vpr files: Viper reasons)
 // expect: rejected <diag> @ L<line>      (may be followed by frontend-warning lines: its expected warnings)
+                                       (so may verified and error: see Verify tests)
 // expect: frontend-ok
 // expect: frontend-error <diag> @ L<line>
 // expect: frontend-warning <diag> @ L<line>
@@ -59,7 +60,7 @@ line of code is an error, so an expectation can never be silently ignored.
 
 - **`verified`**: verification succeeds with no errors (`.vpr` through Silicon,
   `.c`/`.cpp` through `cerastes verify`). It must be the only outcome line
-  (`native-ok` may accompany it).
+  (`native-ok` and `frontend-warning` lines may accompany it).
 - **`error <category> @ L<line>`**: one line per expected error.
   The test passes only if the reported errors are exactly these: each one
   with that category, at that line, and no others. The harness says whether
@@ -79,7 +80,9 @@ line of code is an error, so an expectation can never be silently ignored.
   the front end prints exactly these errors and warnings, each with that
   diagnostic at that line. `<diag>` is an EDG diagnostic tag or
   `cerastes-<tag>`. Any number of lines; not mixed with the other outcome
-  kinds; `.c` and `.cpp` only. See [Front-end diagnostics](#front-end-diagnostics).
+  kinds, except that `frontend-warning` lines (and only those) also accompany
+  `rejected`, `verified` and `error` (see [Verify tests](#verify-tests-verified-error-rejected)),
+  where they list the warnings the run prints; `.c` and `.cpp` only. See [Front-end diagnostics](#front-end-diagnostics).
 - **`frontend-refused <substring>`** with **`cerastes-fe-options: <options>`**:
   the driver refuses these command-line options. See
   [Refused options](#refused-options).
@@ -259,8 +262,8 @@ A timeout, a crash (a signal) and any other exit status always fail too. The
 streams are those of decision 0011 item 9: the verdict, the errors and their notes
 are on **stdout**, front-end diagnostics on **stderr**. For exit status 0 and 1
 a verdict or an error on stderr fails the test, and so does anything else on
-stderr (a front-end warning in a test is unexpected output: tests are
-warning-free) and a front-end diagnostic on stdout. A blank line or an indented
+stderr (a front-end warning in a test is unexpected output unless the test lists
+it, see below) and a front-end diagnostic on stdout. A blank line or an indented
 line continues the previous line and is ignored, and a `note:` line is ignored but
 must follow an error. Any other line in column 0 of stdout (a note with no error,
 a line the harness does not know) fails the test as unrecognized driver output.
@@ -288,6 +291,21 @@ warning fails, unless the test lists it: a `rejected` test may also carry
 not printed fails as *missing*, an unlisted one as *unexpected*; the same tag at another line is
 *wrong line*). Without such lines no warning is allowed. A `frontend-error` line does not mix
 with `rejected`, and `frontend-warning` lines without a `rejected` line are a front-end test.
+A `verified` or `error` test may list its warnings the same way (decision 0025 item 4, owner
+question 31): `// expect: verified` plus `// expect: frontend-warning <diag> @ L<n>` lines, or
+`// expect: error <category> @ L<n>` lines plus them. Then the warnings on stderr (exit status 0 or
+1) must be exactly the listed ones, as a multiset of (tag, line) with the messages above (*missing*,
+*unexpected*, *wrong line*), and nothing else may be on stderr; without such lines any warning still
+fails as before. They do not count as outcome lines, so `verified` stays the only outcome line. A
+`frontend-error` line does not mix with `verified` or `error`, and a `.vpr` test takes none. The
+tests use it for EDG's #187 (`assign_where_compare_meant`), which fires on `a && (y = 2);`, a shape
+that every compiler accepts silently and that cerastes verifies. The list of tags a `verified` or
+`error` test may name is closed (`VERIFY_WARNING_TAGS` in `scripts/run_tests.py`, today only
+`assign_where_compare_meant`): any other tag is a header error, since a warning in a verified program
+is a finding to fix, not to list; a `rejected` test may list any warning. The warnings are compared
+per run, so a warning that EDG prints in one mode only (as #186 is in C but not in C++) belongs in a
+test restricted to that mode (`// mode:`, with `// c-only:` for a `.c` file), and the other mode gets
+its own test.
 The cerastes tests use it for EDG's #174 (`expr_has_no_effect`), which the owner decided
 not to suppress: it fires on every comma operator whose left operand has no effect, which
 `comma_without_effect` rejects. A verdict that is not the expected one is named: a `verified` test

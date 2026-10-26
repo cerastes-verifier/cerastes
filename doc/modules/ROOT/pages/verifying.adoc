@@ -356,7 +356,83 @@ never evaluated, and an assignment of a variable to itself (`x = x`, and also
 macro, or with an explicit cast, it is accepted, as Clang accepts it). A `|=`
 as the whole condition (`if (x |= a)`) counts as an assignment used as a
 condition. The bitwise operators have shapes of their own
-(xref:integer-semantics.adoc#bitwise[Bitwise operators]).
+(xref:integer-semantics.adoc#bitwise[Bitwise operators]), and so do comparisons,
+shifts and conditions (<<warning-shapes>>).
+
+A `?:` whose arms are `void`, written as a statement, means the `if` it
+abbreviates: `c ? v(x) : w(y);` is verified as `if (c) v(x); else w(y);`, so each
+arm's checks hold on its own path. This holds also for an operand of a `,` whose
+value is not used and for the step of a `for` loop:
+
+[source,c]
+----
+include::example$verifying/void_conditional.c[tag=source]
+----
+
+Such a `?:` has no value, so using one as a value is rejected: as the left
+operand of a `,` whose value is used, and, in pass:[C++], in
+`return c ? v() : w();` in a function that returns `void` (write the `if`).
+
+[#warning-shapes]
+== Shapes the compilers warn about
+
+Some expressions are valid C and pass:[C++] but rarely mean what they say, and
+clang or GCC warns about them by default or with `-Wall`. cerastes rejects them,
+in both modes and also in annotations, even when only one compiler warns, in one
+language:
+
+* `&&` as an operand of `||` without parentheses: `a && b || c` (write
+  `(a && b) || c`);
+* `{plus}` or `-` as an operand of a shift without parentheses:
+  `+a + b << c+`, `+a >> b - c+` (write `+(a + b) << c+`);
+* `!x` as the left operand of a comparison whose right operand is not a truth
+  value: `!x == y`, `!x < y`, `!x == 0` (write `!(x == y)` or `(!x) == y`);
+* a comparison as an operand of another comparison without parentheses:
+  `+a < b < c+`, `a == b == c`, `+a < b == 1+`;
+* a comparison of a variable with itself (`x == x`, `+x >= x+`), or of two
+  equal expressions without calls (`pass:[x + 1 == x + 1]`); a comparison written
+  inside a macro (`assert(x == x)`) is accepted, as the compilers accept it,
+  except in an annotation, where `CERASTES_REQUIRES(x == x)` is rejected;
+* a truth value compared with a constant that gives the same result whether it
+  is false or true: `+(a > b) == 2+`, `+(a > b) >= 0+`, `p == 2` for a
+  `bool` `p`;
+* in a condition (of `if`, `while`, `do`, `for` and `?:`, an operand of `!`,
+  `&&` and `||`, a conversion to `bool`, and the condition of an annotation, an
+  `assert` or a static assertion): a shift left whose result is signed
+  (`+if (a << b)+`), a multiplication (`pass:[if (a * b)]`), a `?:` with a
+  constant arm other than 0 and 1, or an enumerator whose value is neither 0 nor
+  1 (write `+(a << b) != 0+`);
+* arithmetic on values of two different enumerations (`pass:[RED + NA]`) and a
+  `?:` whose arms are (`x ? RED : NA`), which pass:[C++]20 deprecates;
+* a constant as the right operand of `&&` or `||` (`x && 4`, `x || 2`, also
+  `x && 1`), unless the left operand is a `bool` or the operator comes from a
+  macro (`assert(x && 4)`);
+* in code, a comparison with a literal or an enumerator that the other
+  operand's type cannot hold (`uc == 300` for an `unsigned char` `uc`,
+  `+x < 3000000000LL+` for an `int` `x`);
+* two comparisons of the same variable with constants, joined by `&&`, that can
+  never both hold, or by `||`, one of which always holds (`+x > 5 && x < 3+`,
+  `x == 1 || x != 1`), in code outside macros (in an annotation such a contract
+  is accepted);
+* an `else` that belongs to an inner `if` written without braces
+  (`if (a) if (b) x = 1; else x = 2;`): write the braces;
+* a lone `;` as the body of an `if` without `else` or of a `switch`
+  (`if (x > 0);`), even on the next line or after a macro that expands to
+  nothing: write `{}`.
+
+[source,c]
+----
+include::example$verifying/warning_shapes.c[tag=source]
+----
+
+The shapes of <<side-effects>> and of
+xref:integer-semantics.adoc#bitwise[Bitwise operators] are rejected the same
+way. GCC's `-Wextra`-only warnings, such as `+u >= 0+` for an unsigned `u`,
+`else ;` and `do ; while (c);`, are not: such a comparison is simply true. A few
+warnings are not checked yet, among them `if ((x == y))`, `switch (a > b)`,
+misleading indentation and an empty loop body `while (x--);`.
+`pass:[RED == RED]` is accepted too: the front end replaces it by its value
+before cerastes sees it.
 
 [#calls]
 == Calls in expressions
@@ -401,6 +477,17 @@ giving each call its own statement fixes the order:
 ----
 include::example$verifying/unsequenced_calls.c[tag=source]
 ----
+
+Storing a result is not a check: `(x = f(a)) + (y = g(b))` gives `x` and `y` the
+same values in every order, and is accepted:
+
+[source,c]
+----
+include::example$verifying/call_writes.c[tag=source]
+----
+
+An operand that C evaluates only on one path (the second operand of `&&` or
+`||`, an arm of `?:`) still counts like a check, even when it only assigns.
 
 The checks of a call count too: each `CERASTES_REQUIRES` clause of the function
 called, over the arguments it reads, and the conversion of each argument to its
@@ -530,7 +617,9 @@ include::example$verifying/static_assert_overflow.c[tag=source]
 Like a named constant's initializer, a static assertion is checked at the entry
 of every function it applies to (a file-scope one in all of them), so a failing
 one is reported once and hides the other errors of those functions until it is
-fixed.
+fixed. A static assertion in a function body is checked wherever it stands (in
+a loop, a `switch` or a nested block), except in the body of a
+`CERASTES_PREDICATE` or `CERASTES_PURE` function, which is not verified yet.
 
 A condition that calls a function (`std::numeric_limits<int>::max()`), uses a
 type trait (`std::is_integral_v<int>`, `+__is_integral(int)+`) or a concept
@@ -682,11 +771,13 @@ The constructs that are rejected in this version are:
   with more than one character or one that does not fit its type (`'ab'`,
   `L'ab'`), calls whose
   checks cannot be put in one order (<<calls>>: `100 / f(x) + 100 / g(y)`, two
-  operands of `&&` or `||` with calls added together, two assignments of call
-  results in one expression), the shapes of <<side-effects>> (an unsequenced
+  operands of `&&` or `||` with calls added together, an assignment in such an
+  operand next to a check that depends on another call), the shapes of
+  <<side-effects>> (an unsequenced
   modification, an assignment as a condition without extra parentheses, a comma
   operand without effect, a discarded value around a side effect, a side effect
-  in `sizeof`, an assignment of a variable to itself), and, in C, a variable named where a
+  in `sizeof`, an assignment of a variable to itself), the value of a `?:` whose
+  arms are `void`, the shapes of <<warning-shapes>>, and, in C, a variable named where a
   constant expression is required (a `case` value, `_Static_assert`, an
   enumerator's value), and an enumeration value that the compiler converts to an
   integer for arithmetic, a comparison of order, a unary operator, a shift or an

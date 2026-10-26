@@ -12,7 +12,8 @@
   - **Question 40:** "follow the recommendation": the static-assertion cross-check covers function bodies.
   - **During the session (2026-10-26):** the shapes audit round 1 found outside question 37's list (clang's
     `-Wconstant-logical-operand`, `-Wtautological-constant-out-of-range-compare`, `-Wtautological-overlap-compare`,
-    `-Wempty-body`, and `-Wdangling-else`) are added to M4.4c (item 6, R9–R13).
+    `-Wempty-body`, and `-Wdangling-else`) are added to M4.4c (item 6, R9–R13); the further ones audit round 2 found are
+    listed, and a new session **M4.4e** sweeps every default and `-Wall` warning of clang and GCC.
   - **Planning (2026-10-26):** one session, with question 37 last and a cut order; the planning review's **finding A**
     (item 1) is fixed first; a flagged snapshot's `uninitialized` check stays in F; the Viper of programs with a write or
     snapshot of a call result may change where measured and listed, but no verdict or error line may.
@@ -156,7 +157,7 @@ for `uninitialized` checks (item 1).
      `(a < b) < c`, `(a == b) == c` and `(a < b) == (c < d)` are accepted.
    - **R5, `self_comparison`** (all four; the identical-expression form GCC only): any comparison whose operands, after
      compiler-generated conversions, are the same variable, parameter, enumerator or named constant (`x == x`,
-     `x >= x`, `(x) == x`, `RED == RED`, `K == K`: clang by default), or, for GCC, the same expression without calls,
+     `x >= x`, `(x) == x`, `K == K`: clang by default), or, for GCC, the same expression without calls,
      side effects or explicit casts that contains a variable or parameter (`x + 1 == x + 1`, `-x == -x`). In a contract
      the operands are parameter references, compared by parameter (P46b). An explicit cast is a barrier, and so is an
      expression of constants only (`(int)x == x`, `(long)x == (long)x` and `1 + 2 == 1 + 2` are accepted: all four are
@@ -174,7 +175,7 @@ for `uninitialized` checks (item 1).
    - **R7, `int_in_truth_context`** (signed `<<`: all four; `*`, and a `?:` with a constant arm other than 0 or 1: GCC,
      `c ? 2 : 3` all four; enumerators: GCC's C++ and clang): in a truth context — the condition of `if`, `while`, `do`,
      `for` and `?:`, an operand of `!`, `&&` and `||`, a conversion to `bool`, the conditions of `requires`, `ensures`,
-     `invariant`, `check`, `assert` and a static assertion, and item 3's condition — a `<<` whose result is signed (also
+     `invariant`, `check`, `assert` and an encoded static assertion, and item 3's condition — a `<<` whose result is signed (also
      as either arm of a `?:` or a comma's right operand: clang's C++ mode warns in every context), a `*` (also as a
      comma's right operand; as the arms of a `?:` only when both arms are, and only in a conversion to `bool`: GCC's C
      mode), a `?:` with an integer-constant arm whose value is neither 0 nor 1, or an enumerator whose value is neither 0
@@ -184,15 +185,26 @@ for `uninitialized` checks (item 1).
    - **R9, `constant_logical_operand`** (clang by default; for 0 and 1 its C++ mode only, P50): the right operand of
      `&&` or `||` is an integer constant that is not a truth value (`x && 4`, `x || 2`, `x && K`, `x && 'a'`, and
      `x && 1`), unless the left operand is a `bool` value (`b && 4`). A constant left operand (`4 && x`), a truth value
-     on the right (`x && !4`, `x && 2 > 1`) and `x && true` are accepted.
-   - **R10, `constant_out_of_range_compare`** (clang by default): a comparison of an integer constant with an operand
-     whose type, before the front end's promotions, cannot hold the constant (`uc == 300`, `uc == -1`, `sc > 200`,
+     on the right (`x && !4`, `x && 2 > 1`) and `x && true` are accepted, and so, in code, is an `&&` or `||` that comes
+     from a macro expansion (`assert(x && 4)`, `#define AND4(x) ((x) && 4)`: clang is silent; audit round 2); in an
+     annotation the rule applies whatever the macros, as R5's does. A 0 or 1 right operand that comes from a macro
+     (`#define ONE 1`, `x && ONE`) is rejected although all four compilers are silent: broader, listed for M4.4e.
+   - **R10, `constant_out_of_range_compare`** (clang by default): a comparison of a literal or an enumerator with an
+     operand whose type, before the front end's promotions, cannot hold its value (`uc == 300`, `uc == -1`, `sc > 200`,
      `us < 70000`, `x < 3000000000LL`; for an enumeration, its value range: `e == 7` for 0..3). A constant in range never
-     fires, even when the result is constant (`uc > 255`, `uc >= 0`: GCC's `-Wextra` `-Wtype-limits`). The rule runs only
-     when the enumeration and sign rules have not already rejected the comparison.
+     fires, even when the result is constant (`uc > 255`, `uc >= 0`: GCC's `-Wextra` `-Wtype-limits`), nor does a named
+     constant (`c == DEF` with `const enum color DEF = (enum color)4;`: all four compilers are silent; but clang's C++ mode
+     warns on `uc == DEF` with `const int DEF = 300;`, which is accepted: narrower, listed for M4.4e). The rule runs only
+     when the enumeration and sign rules have not already rejected the comparison, and in code only, as R11 (an
+     out-of-range comparison in a contract is a wrong contract, which verification reports; `check.sh` found three error
+     tests with one, `char_literal_u8_to_schar.c`, `enum_const_conversion.c` and `uchar_promote_post.c`). A constant
+     expression of literals (`uc == 256 + 44`, clang warns) is accepted: narrower, listed for M4.4e.
    - **R11, `overlapping_comparisons`** (clang `-Wall`): `&&` (`||`) whose two operands compare the same variable or
-     parameter with integer constants so that the result is always false (always true): `x > 5 && x < 3`,
-     `x == 1 && x == 2`, `x == 1 || x != 1`, `x <= 5 || x >= 5`. In code only, not in annotations: a precondition that
+     parameter with literals or enumerators so that the result is always false (always true): `x > 5 && x < 3`,
+     `x == 1 && x == 2`, `x == 1 || x != 1`, `x <= 5 || x >= 5`. A named constant (`x > K && x < 3`) and an operator
+     from a macro expansion (`assert(x > 5 && x < 3)`) are accepted (clang is silent; audit round 2). An operand from a
+     macro under a written operator (`#define LIM 5`, `x > LIM && x < 3`; clang is silent) is rejected: broader, listed
+     for M4.4e. In code only, not in annotations: a precondition that
      cannot hold, or a postcondition that always does, is a contract (possibly a wrong one), which no compiler sees, and
      three tests use one on purpose. `x >= 5 && x <= 5`, `x == 1 || x == 2` and `z && x > 5 && x < 3` (the comparisons
      are not one operator's operands) are accepted.
@@ -200,13 +212,20 @@ for `uninitialized` checks (item 1).
      braces (through loop bodies and labels), is an `if` with an `else`: `if (a) if (b) x = 1; else x = 2;`, at the
      `else`. Braces anywhere between them, an outer `else`, an `else if` chain, a `switch` or a `do` between them are
      accepted.
-   - **R13, `empty_body`** (clang by default; P50b): a null statement as the body of an `if` without `else`, a
-     `while`, a `for` or a `switch` (`if (x > 0);`, `while (x--);`), at the `;`. clang warns only when the `;` is on
-     the line of the condition's `)`, which the IL does not record, so a `;` on the next line is rejected too (broader,
-     listed); a `;` from a macro expansion is accepted (clang is silent). `if (x) ; else y;`, `else ;`, `do ; while (c);`
-     (GCC `-Wextra` only) and an empty block `{}` are accepted.
-   - **Still accepted, listed:** GCC's sign-compare on `u == -1` (`-Wall` in C++; the owner's answer to handoff §11
-     question 35 keeps the path-precise `conversion` check); GCC's `-Wtype-limits` (`-Wextra` only): `u >= 0`, `u < 0`; `RED == RED` and
+   - **R13, `empty_body`** (clang by default; P50b): a null statement as the body of an `if` without `else` or of a
+     `switch` (`if (x > 0);`, `switch (x);`), at the `;`. clang warns only when the `;` is on the line of the condition's
+     `)`, which the IL does not record, so a `;` on the next line is rejected too, and so is a body that is an empty
+     macro invocation followed by `;` (`if (x > 0) LOG("positive");` with `LOG` expanding to nothing; clang is silent):
+     broader, listed. A `;` that itself comes from a macro expansion is accepted (clang is silent). Loops are not
+     covered: clang warns about `while (x--);` and `for (…);` only when the next statement is on the same line or
+     indented deeper (audit round 2; P50's probe had the next statement on the same line), which a layout rule would
+     need. `if (x) ; else y;`, `else ;`, `do ; while (c);` (GCC `-Wextra` only) and an empty block `{}` are accepted.
+   - **Still accepted, listed:** default and `-Wall` warnings found by audit round 2 that no rule covers yet (owner,
+     2026-10-26: listed now; a later session, **M4.4e**, sweeps every default and `-Wall` warning of clang and GCC
+     against the language cerastes accepts): clang's `-Wparentheses-equality` (`if ((x == y))`), `-Wswitch-bool`
+     (`switch (a > b)`), `-Wfor-loop-analysis` (`for (…; i < n; i++) { i++; }`), `-Wmisleading-indentation` (clang and
+     GCC), GCC's `-Wmultistatement-macros`, and clang's `-Wempty-body` on loops (R13); GCC's sign-compare on `u == -1`
+     (`-Wall` in C++; the owner's answer to handoff §11 question 35 keeps the path-precise `conversion` check); GCC's `-Wtype-limits` (`-Wextra` only): `u >= 0`, `u < 0`; `RED == RED` and
      `RED + 1 == RED + 1` (clang warns by default), which the front end folds to the constant 1 without keeping the
      expression, so the IL holds no comparison to detect (an M8 entry).
 7. **Facts relied on** (`internal/il-inventory.md`, "M4.4c"): (P46) the IL of a `void` `?:` in both modes; (P47) finding

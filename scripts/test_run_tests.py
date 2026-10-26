@@ -5693,6 +5693,7 @@ FIXTURE_TAGS = {
     "nonviable_because_arg_mismatch": 3326, "static_assert": 1574,
     "comparison_details": 3453, "exp_semicolon": 65,
     "declared_but_not_referenced": 177, "integer_sign_change": 68,
+    "assign_where_compare_meant": 187,
     "cannot_open_file": 1696, "cl_invalid_option": 571,
 }
 
@@ -9815,6 +9816,56 @@ class EvaluateVerifyTests(unittest.TestCase):
         self.assertFails(self.evaluate(["error overflow @ L5"], 1, OVERFLOW_ERROR, warning),
                          "a front-end diagnostic in a run that reached Silicon")
 
+    VWARN = f'"{VF}", line 4 (col. 3): warning #187-D: use of "=" where "==" may have been intended\n'
+
+    def test_a_verified_test_that_lists_its_warning_passes_when_it_is_printed(self):
+        expects = ["verified", "frontend-warning assign_where_compare_meant @ L4"]
+        self.assertEqual(self.evaluate(expects, 0, VERIFIED_LINE, self.VWARN), [])
+
+    def test_a_listed_warning_that_is_not_printed_fails_a_verified_test(self):
+        expects = ["verified", "frontend-warning assign_where_compare_meant @ L4"]
+        self.assertFails(self.evaluate(expects, 0, VERIFIED_LINE, ""),
+                         "missing warning: expected assign_where_compare_meant @ L4")
+
+    def test_an_extra_warning_fails_a_verified_test_that_lists_another(self):
+        expects = ["verified", "frontend-warning assign_where_compare_meant @ L4"]
+        other = f'"{VF}", line 3 (col. 3): warning #161-D: unrecognized #pragma\n'
+        self.assertFails(self.evaluate(expects, 0, VERIFIED_LINE, other + self.VWARN),
+                         "unexpected warning")
+        self.assertFails(self.evaluate(expects, 0, VERIFIED_LINE, self.VWARN * 2),
+                         "unexpected warning")
+
+    def test_a_listed_warning_at_the_wrong_line_or_tag_fails_a_verified_test(self):
+        self.assertFails(self.evaluate(["verified", "frontend-warning assign_where_compare_meant @ L5"],
+                                       0, VERIFIED_LINE, self.VWARN), "wrong line")
+        other = f'"{VF}", line 4 (col. 3): warning #177-D: variable "x" was declared but never referenced\n'
+        self.assertFails(self.evaluate(["verified", "frontend-warning assign_where_compare_meant @ L4"],
+                                       0, VERIFIED_LINE, other), "wrong diagnostic at this line")
+
+    def test_an_error_test_may_list_its_warnings(self):
+        expects = ["error overflow @ L5", "frontend-warning assign_where_compare_meant @ L4"]
+        self.assertEqual(self.evaluate(expects, 1, OVERFLOW_ERROR, self.VWARN), [])
+        self.assertFails(self.evaluate(expects, 1, OVERFLOW_ERROR, ""), "missing warning")
+        self.assertFails(self.evaluate(["error overflow @ L5"], 1, OVERFLOW_ERROR, self.VWARN),
+                         "a front-end diagnostic in a run that reached Silicon")
+        # the errors are still compared when the warnings match
+        self.assertFails(self.evaluate(["error check @ L5", expects[1]], 1, OVERFLOW_ERROR, self.VWARN),
+                         "overflow")
+
+    def test_listed_warnings_do_not_excuse_other_stderr_output(self):
+        expects = ["verified", "frontend-warning assign_where_compare_meant @ L4"]
+        self.assertFails(self.evaluate(expects, 0, VERIFIED_LINE, self.VWARN + "odd\n"),
+                         "unrecognized front-end output: odd")
+        self.assertFails(self.evaluate(expects, 0, VERIFIED_LINE, self.VWARN + VERIFIED_LINE),
+                         "unrecognized front-end output")
+        # a verdict on stdout is still required
+        self.assertFails(self.evaluate(expects, 0, "", self.VWARN), "exactly one")
+
+    def test_without_warning_lines_the_message_is_unchanged(self):
+        self.assertFails(self.evaluate(["verified"], 0, VERIFIED_LINE, self.VWARN),
+                         "a front-end diagnostic in a run that reached Silicon (a warning "
+                         "is unexpected output; tests are warning-free)")
+
     def test_verified_needs_exit_zero_and_the_line(self):
         self.assertFails(self.evaluate(["verified"], 0, ""), "exactly one")
         self.assertFails(self.evaluate(["verified"], 0, VERIFIED_LINE + VERIFIED_LINE), "exactly one")
@@ -10063,12 +10114,79 @@ class EvaluateVerifyTests(unittest.TestCase):
         text = "// expect: frontend-warning declared_but_not_referenced @ L9\n// mode: c23\nint x;\n"
         self.assertEqual(rt.parse_header(text, ".c").kind, "frontend-diag")
 
-    def test_a_warning_line_does_not_mix_with_other_outcomes(self):
-        for other in ("verified", "error overflow @ L5"):
-            text = (f"// expect: {other}\n// expect: frontend-warning declared_but_not_referenced @ L9\n"
-                    "// mode: c23\nint x;\n")
+    def test_a_verified_or_error_test_may_list_the_warnings_it_expects(self):
+        # decision 0025 item 4: the warning lines accompany `verified` and `error` like `rejected`
+        text = ("// expect: verified\n// expect: frontend-warning assign_where_compare_meant @ L9\n"
+                "// expect: frontend-warning assign_where_compare_meant @ L10\n// mode: c23\nint x;\n")
+        exp = rt.parse_header(text, ".c")
+        self.assertEqual(exp.kind, "verified")
+        self.assertEqual([(d.severity, d.tag, d.line) for d in exp.diags],
+                         [("warning", "assign_where_compare_meant", 9),
+                          ("warning", "assign_where_compare_meant", 10)])
+        text = ("// expect: error overflow @ L5\n// expect: error check @ L6\n"
+                "// expect: frontend-warning assign_where_compare_meant @ L9\n// mode: c23\nint x;\n")
+        exp = rt.parse_header(text, ".c")
+        self.assertEqual(exp.kind, "error")
+        self.assertEqual([(e.category, e.line) for e in exp.errors], [("overflow", 5), ("check", 6)])
+        self.assertEqual([(d.severity, d.tag, d.line) for d in exp.diags],
+                         [("warning", "assign_where_compare_meant", 9)])
+        self.assertTrue(rt.expects_failure(exp))
+        # native-ok still accompanies, and the sole-outcome rule still counts the other lines
+        text = ("// expect: verified\n// expect: native-ok\n"
+                "// expect: frontend-warning assign_where_compare_meant @ L9\nint x;\n")
+        self.assertTrue(rt.parse_header(text, ".c").native_ok)
+        with self.assertRaises(rt.HeaderError) as ctx:
+            rt.parse_header("// expect: verified\n// expect: verified\n"
+                            "// expect: frontend-warning assign_where_compare_meant @ L9\nint x;\n", ".c")
+        self.assertIn("only outcome line", str(ctx.exception))
+
+    def test_a_warning_line_still_does_not_mix_with_the_other_kinds(self):
+        warn = "// expect: frontend-warning assign_where_compare_meant @ L9\n"
+        for other in ("frontend-ok", "golden", "frontend-refused x"):
+            text = f"// expect: {other}\n{warn}// mode: c23\nint x;\n"
             with self.subTest(other), self.assertRaises(rt.HeaderError):
                 rt.parse_header(text, ".c")
+        # frontend-error and frontend-warning lines alone are a front-end test (above); a
+        # frontend-error line cannot accompany a verified or error test, with or without the
+        # warning lines
+        for other in ("verified", "error overflow @ L5"):
+            for extra in ("", warn):
+                text = (f"// expect: {other}\n// expect: frontend-error exp_semicolon @ L9\n"
+                        f"{extra}// mode: c23\nint x;\n")
+                with self.subTest(f"{other} / {extra.strip()}"), self.assertRaises(rt.HeaderError) as ctx:
+                    rt.parse_header(text, ".c")
+                self.assertIn("mix", str(ctx.exception))
+        # a verified test that mixes in a rejection or an error is still refused
+        for text in ("// expect: verified\n// expect: error overflow @ L5\n" + warn,
+                     "// expect: verified\n// expect: rejected cerastes-comma_without_effect @ L5\n" + warn,
+                     "// expect: error overflow @ L5\n// expect: rejected cerastes-comma_without_effect @ L5\n" + warn):
+            with self.subTest(text), self.assertRaises(rt.HeaderError):
+                rt.parse_header(text + "int x;\n", ".c")
+
+    def test_a_verified_or_error_test_may_list_only_the_allowed_warnings(self):
+        # decision 0025 item 4: the list is closed (VERIFY_WARNING_TAGS); a `rejected` test may list any
+        self.assertEqual(rt.VERIFY_WARNING_TAGS, {"assign_where_compare_meant"})
+        for outcome in ("verified", "error overflow @ L5"):
+            text = f"// expect: {outcome}\n// expect: frontend-warning declared_but_not_referenced @ L9\nint x;\n"
+            with self.subTest(outcome), self.assertRaises(rt.HeaderError) as ctx:
+                rt.parse_header(text, ".c")
+            self.assertIn("not allowed in a `verified` or `error` test", str(ctx.exception))
+            self.assertIn("assign_where_compare_meant", str(ctx.exception))
+            # one allowed and one other tag: still refused
+            text = (f"// expect: {outcome}\n// expect: frontend-warning assign_where_compare_meant @ L8\n"
+                    "// expect: frontend-warning declared_but_not_referenced @ L9\nint x;\n")
+            with self.subTest(f"{outcome} mixed"), self.assertRaises(rt.HeaderError):
+                rt.parse_header(text, ".c")
+        text = ("// expect: rejected cerastes-comma_without_effect @ L9\n"
+                "// expect: frontend-warning declared_but_not_referenced @ L9\nint x;\n")
+        self.assertEqual(rt.parse_header(text, ".c").kind, "rejected")
+
+    def test_a_vpr_test_takes_no_warning_lines(self):
+        for outcome in ("verified", "error postcondition:assertion.false @ L3"):
+            text = (f"// expect: {outcome}\n// expect: frontend-warning assign_where_compare_meant @ L9\n")
+            with self.subTest(outcome), self.assertRaises(rt.HeaderError) as ctx:
+                rt.parse_header(text, ".vpr")
+            self.assertIn("does not apply to .vpr", str(ctx.exception))
 
     def test_rejected_output_checks_are_those_of_frontend_tests(self):
         no_summary = REJECTION.split("\n")[0] + "\n"
@@ -10973,6 +11091,10 @@ class VerifyRunTests(FakeVerifierCase):
             self.assertEqual(rt.required_env(headers(text, "a.cpp")), ["CERASTES_VERIFY"])
         self.assertEqual(rt.required_env(headers("// expect: rejected undefined_identifier @ L3\n")),
                          ["CERASTES_VERIFY", "CERASTES_EDG_GEN"])
+        # listed warnings need the tags of the registry too
+        self.assertEqual(rt.required_env(headers(
+            "// expect: verified\n// expect: frontend-warning assign_where_compare_meant @ L3\n")),
+            ["CERASTES_VERIFY", "CERASTES_EDG_GEN"])
         # a .vpr test needs Silicon, not the driver
         self.assertEqual(rt.required_env(headers("// expect: verified\n", "a.vpr")),
                          ["CERASTES_JAVA", "SILICON_JAR", "Z3_EXE"])
@@ -12248,6 +12370,25 @@ class RealDriverTests(unittest.TestCase):
                     self.assertEqual(run.stdout, "")
                     self.assertIn(f"{name}:{line}: internal check: static assertion condition as written "
                                   "differs from the front end's", run.stderr)
+
+    def test_the_dropped_block_static_assertions_are_rejected_by_the_cross_check(self):
+        # 0025 item 5: after the bodies are encoded, every block-scope static assertion that EDG's walk
+        # of a routine's region lists must have reached the encoder.  The hook drops them all, so the
+        # cross-check fires: the run is not accepted (exit 2, with its message); the twin is the same
+        # file without the hook (exit 0), in both modes.  If the check stopped looking inside bodies,
+        # an assertion in a loop or a switch body could be skipped unseen.
+        for name in ("static_assert_block.c", "static_assert_nested.c"):
+            path = REAL_ROOT / "tests" / "scalar" / name
+            for mode in ("c23", "c++20"):
+                with self.subTest(name, mode=mode):
+                    run = self.run_driver("verify", str(path), f"--std={mode}")
+                    self.assertEqual((run.returncode, run.stderr), (0, ""), run.stdout)
+                    self.assertIn(": verified (", run.stdout)
+                    run = self.run_driver("verify", str(path), f"--std={mode}",
+                                          "--cerastes_verify_selftest=drop_block_static_assertion")
+                    self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+                    self.assertEqual(run.stdout, "")
+                    self.assertIn("a static assertion this version does not check", run.stderr)
 
     def test_the_hook_that_perturbs_nothing_is_not_verified(self):
         # a program with no named constant and no case value gives perturb_folded nothing to move: the

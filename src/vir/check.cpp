@@ -389,7 +389,7 @@ class Checker {
         if (s.step != nullptr) {
           if (s.form != LoopForm::While) err(s.step->loc, "a loop step on a `do` loop");
           else if (!step_shape(*s.step))
-            err(s.step->loc, "a loop step that is not an assignment or an expression statement (or a block of them)");
+            err(s.step->loc, "a loop step that is not an assignment or an expression statement (or a block of them, or an if with both arms such steps)");
           else scoped(s.step);
         }
         break;
@@ -660,13 +660,20 @@ class Checker {
     return false;
   }
 
-  // A loop step: an Assign or ExprStmt, or a Block of them (a discarded comma `i++, j--`, decision 0020).
+  // A loop step: an Assign or ExprStmt, a Block of steps (a discarded comma `i++, j--`, decision 0020), or an If whose two arms are both
+  // present and each a step (a `void` `?:` in a `for` step is an `if`, decision 0025 item 3: the encoder always builds both arms, an empty
+  // block for `(void)0`).  A one-armed If stays refused.
   static bool step_shape(const Stmt& s) {
-    if (s.kind == Stmt::Kind::Assign || s.kind == Stmt::Kind::ExprStmt) return true;
-    if (s.kind != Stmt::Kind::Block) return false;
-    for (const Stmt* c : s.stmts)
-      if (c == nullptr || (c->kind != Stmt::Kind::Assign && c->kind != Stmt::Kind::ExprStmt)) return false;
-    return true;
+    switch (s.kind) {
+      case Stmt::Kind::Assign:
+      case Stmt::Kind::ExprStmt: return true;
+      case Stmt::Kind::Block:
+        for (const Stmt* c : s.stmts)
+          if (c == nullptr || !step_shape(*c)) return false;
+        return true;
+      case Stmt::Kind::If: return s.then_body != nullptr && s.else_body != nullptr && step_shape(*s.then_body) && step_shape(*s.else_body);
+      default: return false;
+    }
   }
 
   static bool mentions_state(const Expr& e) {

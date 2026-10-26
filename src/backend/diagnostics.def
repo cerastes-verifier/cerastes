@@ -148,8 +148,8 @@ CERASTES_DIAG(side_effect_not_evaluated, error,
 
 // Calls in expressions and the shapes that clang's -Wself-assign warns about (decision 0021).
 CERASTES_DIAG(unsequenced_calls, error,
-              "%s: C may call either of them first, and something this expression checks or assigns depends on only "
-              "one of them, so a call that does not return could keep it from being checked; write the calls as "
+              "%s: C may call either of them first, and something this expression checks, or evaluates on one path only, "
+              "depends on only one of them, so a call that does not return could keep it from being checked; write the calls as "
               "separate statements (decision 0021)")
 CERASTES_DIAG(self_assignment, error,
               "this assigns a variable to itself, as -Wself-assign warns: the assignment has no effect and is "
@@ -180,3 +180,44 @@ CERASTES_DIAG(tautological_bitwise_compare, error,
 CERASTES_DIAG(xor_as_power, error,
               "`^` is the bitwise exclusive or, not a power: `2 ^ 8` is 10, not 256 (-Wxor-used-as-pow): write `1 << n` "
               "for a power of two, or the constant (decision 0023)")
+
+// The other shapes the compilers warn about by default or under -Wall (decision 0025 item 6; P48).  Rejections at the operator, in
+// both modes, with the compiler flag that warns and the fix.
+CERASTES_DIAG(logical_operand_parentheses, error,
+              "an operand of this `||` is an unparenthesized `&&`, so the precedence is probably not the one intended "
+              "(-Wlogical-op-parentheses, -Wparentheses): add parentheses (decision 0025)")
+CERASTES_DIAG(shift_operand_parentheses, error,
+              "an operand of this shift is an unparenthesized `+` or `-`, which binds tighter than the shift but is easily "
+              "read the other way (-Wshift-op-parentheses, -Wparentheses): add parentheses (decision 0025)")
+CERASTES_DIAG(self_comparison, error,
+              "both sides of this comparison are the same expression, so its result does not depend on it "
+              "(-Wtautological-compare): check the operands (decision 0025)")
+CERASTES_DIAG(logical_not_comparison, error,
+              "`!x` is the left operand of this comparison, which is probably meant as `!(x == y)` "
+              "(-Wlogical-not-parentheses, -Wparentheses): write `(!x) == y` or `!(x == y)` (decision 0025)")
+CERASTES_DIAG(chained_comparison, error,
+              "an operand of this comparison is itself an unparenthesized comparison, which does not behave as the "
+              "mathematical chain `a < b < c` (-Wparentheses): write `a < b && b < c` or add parentheses (decision 0025)")
+CERASTES_DIAG(truth_value_compare, error,
+              "a truth value is 0 or 1, and this comparison with a constant gives the same result for both "
+              "(-Wtautological-constant-out-of-range-compare, -Wbool-compare): check the constant (decision 0025)")
+CERASTES_DIAG(int_in_truth_context, error,
+              "an integer operation, a `?:` with integer constants or an enumerator is used as a truth value "
+              "(-Wint-in-bool-context): write the comparison with 0 explicitly (decision 0025)")
+
+// More shapes clang or GCC warn about by default or under -Wall (decision 0025 item 6, R9-R13; P50).
+CERASTES_DIAG(constant_logical_operand, error,
+              "the right operand of this `&&` or `||` is an integer constant, so it is probably not the logical operation "
+              "that was meant (-Wconstant-logical-operand): write the comparison, or `&` for a mask (decision 0025)")
+CERASTES_DIAG(constant_out_of_range_compare, error,
+              "this comparison is always the same, because the constant is outside the range of the other operand's type "
+              "(-Wtautological-constant-out-of-range-compare): check the constant or the type (decision 0025)")
+CERASTES_DIAG(overlapping_comparisons, error,
+              "the two comparisons of this `&&` or `||` overlap, so the whole is always false or always true "
+              "(-Wtautological-overlap-compare): check the constants and the operator (decision 0025)")
+CERASTES_DIAG(dangling_else, error,
+              "this `else` belongs to the inner `if`, not to the outer one, which has no braces (-Wdangling-else): add "
+              "braces (decision 0025)")
+CERASTES_DIAG(empty_body, error,
+              "the body of this statement is an empty statement, so the statement does nothing (-Wempty-body): write "
+              "`{}` if that is meant (decision 0025)")

@@ -1302,6 +1302,22 @@ void define_control_flow() {
   };
   lc("cf_switch_continue_runs_the_step", "a continue inside a switch continues the loop: the for step runs", [=](Kit& k) { switch_continue(k, false); });
   lc("cf_switch_continue_skips_body_increment", "the increment is the last statement of the body, so a continue in the switch skips it", [=](Kit& k) { switch_continue(k, true); });
+  // for (i = 0; i < n; n > 50 ? i++ : i++): a `void` `?:` in the step is an `if` with two steps (decision 0025 item 3).  The twin's else
+  // arm is an empty statement (`(void)0`): the measure does not decrease on that path.
+  auto if_step = [=](Kit& k, bool empty_else) {
+    Function* f = fn_n(k, k.i32);
+    k.ens(f, k.eq(k.R(f), k.F(f, 0)));
+    Var* i = k.local(f, "i", k.i32);
+    Clause m = k.cl(k.gap(k.pv(f, 0), k.v(i)));
+    const Stmt* step = k.iff(k.gt(k.pv(f, 0), k.num(k.i32, "50")), k.blk({plus1(k, i)}), empty_else ? k.blk({}) : k.blk({k.incS(i)}));
+    const Stmt* w = k.loop(k.lt(k.v(i), k.pv(f, 0)), {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.le(k.v(i), k.pv(f, 0)))}, {m}, k.blk({}), step,
+                           LF::While, k.jid());
+    f->body = k.blk({k.decl(i, k.num(k.i32, "0")), w, k.ret(k.v(i))});
+    k.done(f);
+    if (empty_else) k.fail("termination", m.loc);
+  };
+  lc("cf_step_is_an_if", "a for step that is an if with two steps: both arms increment", [=](Kit& k) { if_step(k, false); });
+  lc("cf_step_is_an_if_empty_arm", "the same step with an empty else arm: the measure does not decrease on that path", [=](Kit& k) { if_step(k, true); });
   lc("cf_auto_range_invariant_from_switch_and_step", "a signed char assigned only in a switch and a for step still gets its automatic range invariant", [](Kit& k) {
     Function* f = k.fn("f", k.vd);
     Var* c = k.local(f, "c", k.i8);

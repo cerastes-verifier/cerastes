@@ -187,3 +187,5 @@ rejected).
   template argument (item 6); a skipped assertion whose types or template arguments the type rule rejects (item 3). A
   static assertion before a `switch`'s first case label is rejected by 0014's rule for statements there.
 - The emitted Viper of programs without these constructs is unchanged.
+
+*2026-10-26, amended by 0025 (M4.4c): item 2 — the cross-check also covers each encoded body's region: a block-scope static assertion the encoder did not reach is rejected, except in `predicate` and `pure` bodies (0025 item 5).*

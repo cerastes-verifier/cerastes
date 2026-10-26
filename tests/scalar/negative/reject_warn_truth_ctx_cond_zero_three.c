@@ -1,0 +1,14 @@
+// expect: rejected cerastes-int_in_truth_context @ L10
+// mode: c23, c++20
+// twin: tests/scalar/warn_accepted_neighbours.c
+// Pins: 0025 item 6 R7: a constant arm other than 0 and 1 (gcc)
+#include <cerastes.h>
+#include <stdbool.h>
+
+int test(int a, int b, int c, int x, unsigned u, unsigned v)
+{
+  if (c ? 0 : 3) {
+    return 1;
+  }
+  return 0;
+}
