@@ -4492,7 +4492,7 @@ falls back, or whose two families differ), run over the baseline's 2027 test fil
 
 With the self-test hook `force_base_sets` (every full expression takes step 2) and the mask rule built in, every
 baseline program in both modes was emitted with `--cerastes_verify_selftest=force_base_sets --keep-vpr --timeout=1`
-(the `.vpr` is written before Silicon starts; `build/m4.4d/m2/fb-*.txt`): 1779 of 1821 are byte-identical to
+(the `.vpr` is written before Silicon starts; `build/m4.4d/m2/fb-*.txt`): 1780 of 1822 are byte-identical to
 `build/m4.4d-baseline-vpr`; the 42 that differ (21 programs, both modes) all call `c_and_`/`c_uand_` in the baseline,
 and after dropping the prelude's `and` functions, the mask lines and the lines with ` % <digit>` on both sides, all 42
 are identical too. So the base projection reproduces the previous version's Viper outside the masks, measured on the
@@ -4531,3 +4531,25 @@ Silicon run directly on the kept `.vpr` of `tests/scalar/bit_mask.c` and `tests/
 c23 (neither calls a `c_[u]and_N` function now): with `--numberOfParallelVerifiers 1`, 10 runs each, every run passes
 (the twin reports its one expected error), 1.5–1.6 s; with `--proverRandomizeSeeds` as well, 16 runs each, the same,
 1.4–1.6 s. 0 hangs in 52 runs; before the rule, the one-verifier runs hung 10 of 10 (handoff §3, "From S4").
+
+### After audit round 2: the complement form `2^k * (a \ 2^k)` **PASS**
+
+Audit round 2 found that the first complement form `a - a % 2^k` doubles the emitted text at each level of nested
+complement masks (284 KB at depth 14). The form is now `2^k * (a \ 2^k)` (`low::div_pow2`); the low-mask form
+`a % 2^k` is unchanged. The facts above for S22, M2 and the hang were measured on the first form; for the second
+(`build/m4.4d/`, rebuilt after `check.sh` #2):
+- **Only the complement lines changed:** the 42 mask files re-emitted under `force_base_sets` (`fb2/`) differ from the
+  first form's in 34 lines, every one exactly `(X - (X % P))` → `(P * (X \ P))` (`transform_cmp.py`: 0 unexplained);
+  over the VIR cases, 59 files and 65 lines, all the same transform.
+- **S22 for the new form** (`s22b/`): 591 Silicon asserts `c_[u]and_N(a, M) == 2^k * (a \ 2^k)` at N = 32, 64, 128,
+  signed and unsigned, every allowed k in {0, 1, 8, 16, N/2, N − 1, N}, negative operands and the bounds: all verify;
+  the control fails; a Python reference agrees on all 591. The identity `a − a mod 2^k = 2^k · (a div 2^k)` was proved
+  with Z3 4.16.0 for every k from 0 to 128 (no file kept; the auditor reran k ∈ {0, 1, 2, 63, 64, 127, 128}: unsat).
+  Viper's `\` is SMT-LIB's `div` (`ExpressionTranslator.scala:149`, `TermToSMTLib2Converter.scala:205`), floor
+  division for a positive divisor (`(div -5 16) = -1`).
+- **Verdicts:** the 68 mask sources (32 baseline programs, the new tests and twins, the doc example): 240 passed, 0
+  failed; the 124 VIR mask `.vpr` (`vir3-mask/`): 124 passed.
+- **The hang** (`hang2/`): `bit_mask.c` and `bit_mask_post.c` [c23] with `--numberOfParallelVerifiers 1`, 10 runs each:
+  every run gives its expected outcome in about 1.6 s.
+- **Nesting** (`nest/`): 14 nested complement masks emit about 1 KB (976–1078 bytes), linear in the depth.
+- **Lint:** `lint_viper.py`, extended to `\`, is clean on every `.vpr` above.

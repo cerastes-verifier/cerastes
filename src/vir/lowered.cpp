@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #include "lowered.h"
 
+#include "dec.h"
+
 namespace cerastes::low {
 
 namespace {
@@ -64,6 +66,20 @@ E fn(std::string prelude_name, std::vector<E> args) {
   auto e = make(LExpr::Kind::Fn);
   e->text = std::move(prelude_name);
   e->args = std::move(args);
+  return e;
+}
+
+E mod_pow2(E a, int k) {
+  auto e = make(LExpr::Kind::ModPow2);
+  e->text = vir::dec::pow2(k);
+  e->a = std::move(a);
+  return e;
+}
+
+E div_pow2(E a, int k) {
+  auto e = make(LExpr::Kind::DivPow2);
+  e->text = vir::dec::pow2(k);
+  e->a = std::move(a);
   return e;
 }
 

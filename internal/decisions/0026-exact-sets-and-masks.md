@@ -1,7 +1,8 @@
 # 0026 — Exact sets for preconditions and commas; constant masks as remainders (M4.4d)
 
 - **Status:** accepted for M4.4d (2026-10-27), revised after audit round 1 (Opus: no blocking item; every should-fix
-  item taken) and finalized with M1, M2 and S22. Owner decisions:
+  item taken), finalized with M1, M2 and S22, and revised after audit round 2 (no blocking item; its three should-fix
+  items taken: the complement form, the `c_pow2` bound, the docs' type of a mask). Owner decisions:
   - **Exact sets** (old handoff §11 question 27, 2026-10-23): "Do it now since we know it is correct." The M4.4
     planning found that exact sets also reject shapes accepted today (`h(f(x), y) + 100 / g(z)`), so the owner chose two
     steps: exact sets first, today's (sound) sets if the exact family is not a chain, a rejection only if both fail.
@@ -100,7 +101,10 @@ intermittently (CI run `40434946397`; with one verifier, deterministically).
    of 1822 `.vpr` changed (six tests in both modes: π in `(one(x), 1) + two(y)`, and the write of
    `x = (sink(…), 2)` after `sink`), each in a file whose trace shows a full expression with differing families, and
    no existing test moves a precondition or takes step 2 to be accepted.
-6. **Accepted now:** `h((validate(y), y))`, `100 / (validate(y), y)`, `(nr(0), 1) && 100 / d` (each verifies), and a
+6. **Accepted now:** `h((validate(y), y))`, `100 / (validate(y), y)`, `(nr(0), 1) && 100 / d` and
+   `(nonzero(d), 1) && 100 / d` (each verifies; the C tests use `nonzero`, which returns only when `d != 0`, so the
+   operand after the comma is reachable and mutation can reach it; the never-returning form is pinned by the VIR cases
+   `exact_comma_value_guard` and `_returns`), and a
    callee with one `requires` clause per argument called with an unsequenced call in each (`take(f(x), h(y))`).
    **Still accepted, by step 2:** `h(f(x), y) + 100 / g(z)`; there a false alarm can remain (the documented price of
    the fallback). **Still rejected:** `g(f(x), h(y))` with `short` parameters (each argument's conversion is a check on
@@ -110,12 +114,16 @@ intermittently (CI run `40434946397`; with one verifier, deterministically).
 
 7. **The rule** (amends 0023 item 2). In `a & m`, with the constant on either side (and so `a &= m`, which 0023 item 3
    lowers through the same operator), when the operand `m`, *as lowering emits it*, is a closed expression of integer
-   literals (sums, differences, products, negations, `c_pow2` of a literal: `INT_MIN` arrives as `(-2147483647) - 1`,
+   literals (sums, differences, products, negations, `c_pow2` of a literal from 0 to 128, the prelude's table:
+   `INT_MIN` arrives as `(-2147483647) - 1`,
    `UINT_MAX` as `(2147483647 * 2) + 1`, `~15` as `(-1) - 15`), its value is computed exactly, and when that value M is a
    mask of the computed type (width N, 32, 64 or 128):
    - `m = 2^k − 1` (`0 ≤ k ≤ N` for an unsigned type, `0 ≤ k ≤ N − 1` for a signed one) is written `a % 2^k`;
    - `m = ~(2^k − 1)`, that is `−2^k` for a signed type (`0 ≤ k ≤ N − 1`) and `2^N − 2^k` for an unsigned one
-     (`0 ≤ k ≤ N`), is written `a − a % 2^k`.
+     (`0 ≤ k ≤ N`), is written `2^k * (a \ 2^k)`, the same value as `a − a % 2^k` (SMT-LIB's `div` and `mod` by a
+     positive divisor d satisfy `a = d * (a div d) + a mod d`), with `a` written once: audit round 2 found that
+     `a − a % 2^k` doubles the text at each level of nested complement masks (`((x & ~3) & ~7) & …`: 284 KB at depth
+     14).
 
    The value is the operand's own: each `~` and each conversion was already applied in its own node's type when the
    operand was lowered (`v & ~0u` with a 64-bit `v` has M = 2^32 − 1, the low 32 bits, as in C; `x & ~0xFFu` with a
@@ -127,30 +135,42 @@ intermittently (CI run `40434946397`; with one verifier, deterministically).
    `%` is Viper's: Silicon translates it to SMT-LIB's `mod` (`ExpressionTranslator.scala:150`,
    `TermToSMTLib2Converter.scala:206`), whose result for a positive divisor is the remainder in `[0, divisor)` (the
    Euclidean one; silver leaves `/` and `%` on negative operands to the back end), unlike C's `%`, which keeps
-   `c_rem`/`c_urem`. Lowering builds it only through a constructor that takes the exponent k and prints a power-of-two
-   literal divisor (≥ 1), and `scripts/lint_viper.py` refuses any `%` outside the prelude whose divisor is not such a
-   literal; a divisor-zero failure cannot arise. The rule adds no obligation: the result is in the type's range, as
+   `c_rem`/`c_urem`; Viper's `\` is SMT-LIB's `div`, the matching quotient. Lowering builds each only through a
+   constructor that takes the exponent k and prints a power-of-two literal divisor (≥ 1), and `scripts/lint_viper.py`
+   refuses any `%` or `\` outside the prelude functions that use them whose divisor is not such a literal; a
+   divisor-zero failure cannot arise. The rule adds no obligation: the result is in the type's range, as
    before.
 8. **Why it is exact.** Every operand is in its type's range (0010 item 2), and 0023 item 1 reads it as N-bit two's
    complement. Its low k bits, read as an unsigned number, are `a mod 2^k` (the Euclidean remainder, for negative `a`
-   too), so `a & (2^k − 1) = a mod 2^k`; and `a & ~(2^k − 1)` clears those bits, `a − (a mod 2^k)`, which lies in the
-   type's range. For a signed type k stops at N − 1: the signed value of the all-ones mask is −1, and `a & −1 = a`,
+   too), so `a & (2^k − 1) = a mod 2^k`; and `a & ~(2^k − 1)` clears those bits, `a − (a mod 2^k) = 2^k · (a div 2^k)`,
+   which lies in the type's range. For a signed type k stops at N − 1: the signed value of the all-ones mask is −1, and `a & −1 = a`,
    which the complement form with k = 0 already gives. **S22** checks the rewrite against the prelude function by
    Silicon evaluation at N = 32, 64 and 128, signed and unsigned, for k ∈ {0, 1, 8, 16, N/2, N − 1, N} where allowed,
    at the range's bounds, at negative operands and at random ones; the near misses (`254`, `256`, `2^k`) and the
    cross-type cases above; Viper's `%` on a negative dividend; and, with Z3 directly, the identity for every operand
-   of every (N, k, signedness).
+   of every (N, k, signedness). Those runs used the first complement form `a − a % 2^k`; for `2^k * (a \ 2^k)` S22
+   was rerun (591 Silicon asserts at every N, k and signedness, negative operands included), and Z3 proved
+   `a − a mod 2^k = 2^k · (a div 2^k)` for every k from 0 to 128 (Viper's `\` is SMT-LIB's `div`, floor division for
+   a positive divisor).
 9. **Decided now** (amends 0023 item 2's list of what Z3 does not decide): `v & 0xFFFFFFFF == v % 4294967296` for an
    unsigned 64-bit `v` (C's `%` agrees with the Euclidean remainder on non-negative operands), `x & ~15 == x − x % 16`
-   for `x ≥ 0`, `x & 255` for every `x` (against `((x % 256) + 256) % 256` in C's terms), and the range checks of masked results (`(unsigned)(v & 4294967295u)`). The rest of the list (`(u | 4) &
-   4 == 4`, `x & x == x`, a variable mask, `x & -x`, …) stays undecided.
+   for `x ≥ 0`, `x & 255` for every `x` (against `((x % 256) + 256) % 256` in C's terms), and the range checks of
+   masked results (`(unsigned)(v & 4294967295u)`). The rest of the list (`(u | 4) & 4 == 4`, `x & x == x`, a variable
+   mask, `x & -x`, …) stays undecided. **Only a mask that is a constant where it is written** counts: a mask that is a
+   parameter becomes a constant only at a call (`f(v, 4294967295u)` with `requires((v & m) == v)`), and while the
+   explicit check lowering writes at the call is rewritten, Silicon's own check of the callee's precondition there
+   still reads `c_uand_64(p_v, p_m)`; such a claim may still run to the time limit (exit 3, never a verdict; audit
+   round 2, a probe of 90 s). Writing the constant in the contract decides it.
 10. **The emitted Viper** changes in exactly the programs that call a `c_[u]and_N` function with such a constant
     operand: 42 of the suite's `.vpr` (21 programs in both modes), each calling `c_and_`/`c_uand_` before; the 22 others
     that call those functions keep their Viper (their masks are not constants), and no verdict changes (M2). **The
     hang:** `bit_mask.c` and `bit_mask_post.c` [c23] give their expected outcome in every one of 52 runs with
-    `--numberOfParallelVerifiers 1`, half of them with random seeds, in 1.4–1.6 s each (before: 10 of 10 hung).
+    `--numberOfParallelVerifiers 1`, 32 of them with random seeds, in 1.4–1.6 s each (before: 10 of 10 hung).
     **S22:** 1182 closed comparisons with the prelude functions, the `%` probes and 902 bit-vector proofs (Z3, every
-    operand of every N, k, signedness and form) agree.
+    operand of every N, k, signedness and form) agree. These were measured on the first complement form; after audit
+    round 2 the complement lines changed and nothing else (34 lines in the 42 files), the 68 mask sources and 124 VIR
+    mask programs passed again, 20 more one-verifier runs of the bit_mask tests passed, and 14 nested complement masks
+    emit about 1 KB.
 
 ### Both parts
 
@@ -164,7 +184,10 @@ intermittently (CI run `40434946397`; with one verifier, deterministically).
     (must fail `conversion`: the conversion back is still checked) and `sc &= ~0x0F` (verifies), a loop that masks a
     signed variable, and VIR cases at each width and signedness. The existing pins that an implementation dropping the
     operand's obligations would break: `integer-semantics/bitwise_conversion.c` (`u & ~7`),
-    `negative/bit_mask_negative_conversion.c`, `negative/bit_and_assign_flag_conversion.c`. Pages: Verifying a
+    `negative/bit_mask_negative_conversion.c`, `negative/bit_and_assign_flag_conversion.c`. Since the VIR cases verify
+    under either encoding, a harness test checks the emitted text: the masks of `mask_remainder_word.c` and
+    `mask_remainder_clear.c` are `%` and `\` forms with no `c_[u]and_N` call, and the near misses of `mask_near_miss.c`
+    keep `c_and_32`. Pages: Verifying a
     program ("Calls in expressions"), Integer semantics (bitwise operators); doc examples `verifying/comma_order.c` and
     `integer-semantics/mask_remainder.c`.
 13. **Facts relied on** (`internal/il-inventory.md`, "M4.4d"): (M1) the full suite with exact sets: expectation
@@ -189,5 +212,5 @@ intermittently (CI run `40434946397`; with one verifier, deterministically).
 - The false alarms of 0021 item 10 are gone wherever the exact sets form a chain; where they do not, cerastes keeps
   today's sets, so no program accepted before becomes rejected.
 - A callee may split its contract into one `requires` per argument.
-- A mask by `2^k − 1` or its complement is decided for every operand, and the intermittent `bit_mask.c [c23]` hang is
-  gone.
+- A mask by a constant `2^k − 1` or its complement, written as a constant, is decided for every operand, and the
+  intermittent `bit_mask.c [c23]` hang is gone.

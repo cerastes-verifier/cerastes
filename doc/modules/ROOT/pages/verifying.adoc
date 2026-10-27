@@ -467,16 +467,28 @@ correct. A function that does not return (one that calls `exit`, even on some
 inputs only) stops the program before anything C would have evaluated after it,
 so a check C may evaluate first must be checked first. cerastes accepts such an
 expression when its checks can be put in one order: each check depends on the
-calls whose results it uses (and on the calls its guard and the earlier
-operands of a `,` use), and for any two checks, the calls one depends on must be
-among the calls the other depends on. It then checks each one as early as C can
-evaluate it. When two checks each depend on a call the other does not, as in
+calls C must have finished before it evaluates the check (the calls whose
+results it uses, and the calls its guard and the earlier operands of a `,`
+contain),
+and for any two checks, the calls one depends on must be among the calls the
+other depends on. It then checks each one as early as C can evaluate it. When two checks each depend on a call the other does not, as in
 `100 / f(x) + 100 / g(y)`, the expression is rejected (`unsequenced_calls`);
 giving each call its own statement fixes the order:
 
 [source,c]
 ----
 include::example$verifying/unsequenced_calls.c[tag=source]
+----
+
+C finishes the first operand of `,` before it uses the value of the second, and
+every argument before it makes the call, so a check of that value, and the
+`CERASTES_REQUIRES` of the function called, come after those calls. A function
+that ends the program unless its argument is valid can therefore guard the use
+of that argument within one expression:
+
+[source,c]
+----
+include::example$verifying/comma_order.c[tag=source]
 ----
 
 Storing a result is not a check: `(x = f(a)) + (y = g(b))` gives `x` and `y` the
@@ -491,11 +503,23 @@ An operand that C evaluates only on one path (the second operand of `&&` or
 `||`, an arm of `?:`) still counts like a check, even when it only assigns.
 
 The checks of a call count too: each `CERASTES_REQUIRES` clause of the function
-called, over the arguments it reads, and the conversion of each argument to its
-parameter's type. So `g(f(x), h(y))` is rejected when `g` has one
-`CERASTES_REQUIRES` clause about each argument, or `short` parameters that `int`
-results must be converted to, since each of those checks depends on one call;
-one clause about both arguments, or `int` parameters, keeps it accepted.
+called, which depends on every call in the arguments, and the conversion of each
+argument to its parameter's type, which depends only on the calls in that
+argument. So `g(f(x), h(y))` is accepted when `g` has one `CERASTES_REQUIRES`
+clause about each argument, and rejected when `g` has `short` parameters that
+`int` results must be converted to, since each conversion depends on one call;
+`int` parameters keep it accepted.
+
+When the checks cannot be put in one order this way, cerastes tries once more
+with each `CERASTES_REQUIRES` clause depending only on the calls in the arguments
+it reads, and the value of a `,` only on the calls of its second operand, and
+accepts the expression if that gives one order. Those checks then come earlier
+than C may evaluate them, which can report an error on a path C never takes (a
+false alarm), never miss one. In `h(f(x), y) + 100 / g(z)`, where the
+`CERASTES_REQUIRES` of `h` reads only its second argument, the precondition of
+`h` is checked before `f` is called: if `f` could end the program on the inputs
+where the precondition fails, the report is a false alarm. Giving `f(x)` its own
+statement removes it.
 
 A recursive call that another call of the same expression may precede, as in
 `fib(n - 1) + fib(n - 2)`, has its termination measure (`CERASTES_DECREASES`)
