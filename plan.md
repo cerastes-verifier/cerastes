@@ -119,6 +119,7 @@ Every test file starts with expectation lines that `scripts/run_tests.py` checks
 | M4.4b1 Bitwise operators · M4.4b2 Values the front end computes | 2026-10-23/26 | 0023, 0024 | exact `& \| ^ ~`; static assertions checked as written; wrapped character literals; types from constants rejected until M4.5e |
 | M4.4c Writes outside the chain, `void` `?:`, `-Wall` shapes | 2026-10-26 | 0025 | writes leave the chain; `void` `?:` statements; warnings in tests; the in-function static-assertion cross-check; 13 `-Wall` shape rules |
 | S4 CI tiers | 2026-10-27 | 0016 (item 14) | pull requests and pushes to `main` run a PR tier (Silicon for the changed tests, the doc examples and a fixed 1-in-8 sample; every other run); the full check every night at 07:00 UTC and on dispatch |
+| M4.4d Exact sets, constant masks | 2026-10-27 | 0026 | a precondition and a comma's value get their exact sets, today's sets as the fallback (one `requires` per argument accepted); constant masks as remainders, the `bit_mask.c [c23]` hang fixed |
 
 The finished milestones' plans (goals, tasks, acceptance) are in the commit named above; `internal/status.md` has a
 row per session.
@@ -137,8 +138,7 @@ history of `internal/status.md`).
 
 | Session | Scope | Needs |
 |---|---|---|
-| **M4.4d Exact sets** | exact sets for preconditions and commas, with today's sets as the fallback, so no accepted program becomes rejected (old handoff §11 question 27; record 0026); constant masks as remainders, the fix of the `bit_mask.c [c23]` hang (owner, 2026-10-27, handoff §8 question 47) | M4.4c |
-| **M4.4e The warning sweep** | every default and `-Wall` warning of clang 21 and GCC 16 that can fire on the language cerastes accepts, measured in both modes and rejected like the compilers (one rule per family) or listed; M4.4c's listed shapes first (owner, 2026-10-26; record 0027) | M4.4d |
+| **M4.4e The warning sweep** | every default and `-Wall` warning of clang 21 and GCC 16 that can fire on the language cerastes accepts, measured in both modes and rejected like the compilers (one rule per family) or listed; M4.4c's listed shapes first (owner, 2026-10-26; record 0027) | M4.4d (done) |
 | **M4.5 Pointers** (sessions a–f, below) | the memory model for C | M4.1–M4.3 |
 | **M4.6 Chars and strings** | string literals as read-only arrays, `char` buffers, `strlen`/`memcpy`/`memcmp`/`strcmp` contracts, `main(argc, argv)` | M4.5e |
 | **M4.7 Function pointers** | contracts on function types, calls through pointers ("the pointer satisfies the type") | M4.5b |
