@@ -379,7 +379,8 @@ operand of a `,` whose value is used, and, in pass:[C++], in
 Some expressions are valid C and pass:[C++] but rarely mean what they say, and
 clang or GCC warns about them by default or with `-Wall`. cerastes rejects them,
 in both modes and also in annotations, even when only one compiler warns, in one
-language:
+language (the body of a `CERASTES_PREDICATE` or `CERASTES_PURE` function is not
+verified yet, so these rules do not reach it either):
 
 * `&&` as an operand of `||` without parentheses: `a && b || c` (write
   `(a && b) || c`);

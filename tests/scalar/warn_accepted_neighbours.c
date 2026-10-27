@@ -104,7 +104,7 @@ int not_eq_bool(int x, bool b)
 }
 
 int not_eq_and_bools(int x, bool p, bool q)
-    CERASTES_ENSURES(r, r == (!x == (p & q)))
+    CERASTES_ENSURES(r, r == (!x == (p && q)))
 {
   return !x == (p & q);
 }
