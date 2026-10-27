@@ -261,3 +261,5 @@ for `uninitialized` checks (item 1).
 - `c ? v(x) : w(y);` and its forms in commas and `for` steps verify.
 - The `-Wall` shapes are rejected in every mode, even where only one compiler in one mode warns.
 - The emitted Viper of programs with a write or snapshot of a call result may change; their verdicts do not.
+
+*2026-10-27, amended by 0026 (M4.4d): item 2 — with the exact sets (0026 step 1) a comma's value carries its floor, so the write of `x = (g(a), 2)` now follows `g`; the remark that it may be emitted before `g` describes step 2.*

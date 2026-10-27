@@ -4451,3 +4451,83 @@ Hits that a new rule could turn into a new or changed diagnostic:
 * R11 in CONTRACTS (the compilers never see these): `tests/scalar/negative/logic_and_post.c:8` (`ensures r == (a > 0 || a < 10)`, a tautology on purpose), `tests/scalar/negative/static_assert_block_excluded.c:8` (`requires x >= 0 && x < 0`) and `tests/scalar/negative/switch_case_requires_false_shift.c:8` (`requires x > 0 && x < 0`), both deliberately contradictory preconditions. If R11 applies in annotations, these three tests flip (their expect lines would gain a rejection).
 * -Wtautological-type-limit-compare (clang, not default, not -Wall; stays accepted): `tests/scalar/negative/uninit_loop_condition.c:14`; in contracts many `x <= 2147483647` (type-limits shapes; accepted).
 * My contract scan types every identifier as `int`, so its `-Wtautological-constant-out-of-range-compare` hits on long/long long contracts (llong_arith.c, long_arith.c, bit_long_post.c, bit_int128*_post.c, ...) are artifacts; no real R10 hit in a contract was found, but R10 on contracts with narrow-type parameters was not exhaustively checked (a grep for narrow-type parameters would be needed once the rule exists).
+
+## M4.4d: exact sets for preconditions and commas; constant masks as remainders
+
+Record 0026. Measurements on the M4.4d binary in the worktree `.claude/worktrees/m4.2b1`, branch `m4.4d-exact-sets`;
+evidence under `build/m4.4d/` (not committed). The baseline is local `main` `fce46de` (M4.4c + S4): `run_tests.py -j 8`
+5388 passed, 0 failed, 1 skipped; 1822 `.vpr` in `build/m4.4d-baseline-vpr`; the VIR self-test 686 lowering cases,
+203 rejection cases, 0 problems, in `build/m4.4d-baseline-vir`.
+
+### M1: the full suite with exact sets (part A only) **PASS after one owner decision**
+
+The prototype (dual sets, two steps) with a temporary trace (`CERASTES_M44D_TRACE`: one line per full expression that
+falls back, or whose two families differ), run over the baseline's 2027 test files (`build/m4.4d/m1/`).
+- **Verdicts:** 5386 passed, 2 failed: `tests/scalar/negative/reject_unsequenced_split_requires.c` in both modes now
+  reports `precondition @ L29` instead of `unsequenced_calls @ L29` (the pre-approved retirement; `take(f(x), h(y))`
+  with one `requires` per argument is accepted, and with no caller precondition both clauses may fail). No other
+  verdict or error line changed; no exit 3.
+- **Diff 1** (`diff -rq -x MANIFEST`): 12 `.vpr` changed (six tests, both modes), 1810 identical, 2 new (the retired
+  test now reaches Silicon). π changed in `call_comma_sum.c` and its two twins (`(one(x), 1) + two(y)`: the sum's range
+  check now has {one, two}; emitted one, two, check instead of two, check, one); an item moved after a comma's left
+  operand in `uninit_guarded_comma.c` and its two twins (the write `v_x := 2` follows the left operand's calls). No old
+  test has a precondition that moves (no `f(a, g(b))` shape with a `requires` on `a` alone), and no explicit
+  termination check is printed or dropped.
+- **Step 2 is today's Viper, from the trace:** every changed `.vpr` comes from a file with an `exact-differs` line, and
+  every file without one is byte-identical; no file with such a line is identical.
+- **The fallback population:** no existing test is accepted by step 2 (0 `fallback-accepted`); 27 `fallback-rejected`
+  full expressions in 14 files, all `reject_*unsequenced*` tests (and the doc example `unsequenced_calls.c`), each still
+  rejected with today's message.
+- **Invariants:** no full expression of the 2027 files or of the 828 VIR cases has a base half outside its exact half,
+  and PRE(c) never differs between the halves.
+- **VIR self-test:** 6 of the 686 old cases changed text (`calls_comma_in_a_sum`, `_wrong`,
+  `fx_comma_floor_does_not_leak`, and the three `uninit_write_after_guarded_read_comma*`), all reorderings; Silicon on
+  them and on the 20 new `exact_*` cases: 26 passed. **One old case changed outcome:** `hook_drop_flag_access`
+  (0025 item 1's guard) no longer fires, because its program now takes step 1, where the comma's value already orders
+  the write after the flag check. Owner (2026-10-27): a self-test hook `force_base_sets` makes every full expression take
+  step 2; the case sets it and keeps its program and message, and a hook-off twin shows step 1 orders the program
+  without the guard.
+
+### The force-base run: step 2 is the previous version's Viper **PASS**
+
+With the self-test hook `force_base_sets` (every full expression takes step 2) and the mask rule built in, every
+baseline program in both modes was emitted with `--cerastes_verify_selftest=force_base_sets --keep-vpr --timeout=1`
+(the `.vpr` is written before Silicon starts; `build/m4.4d/m2/fb-*.txt`): 1779 of 1821 are byte-identical to
+`build/m4.4d-baseline-vpr`; the 42 that differ (21 programs, both modes) all call `c_and_`/`c_uand_` in the baseline,
+and after dropping the prelude's `and` functions, the mask lines and the lines with ` % <digit>` on both sides, all 42
+are identical too. So the base projection reproduces the previous version's Viper outside the masks, measured on the
+whole suite (audit round 1 item 8).
+
+### M2: the mask rule (part B) **PASS**
+
+`run_tests.py -j 8` over the 32 baseline programs whose `.vpr` calls `c_and_`/`c_uand_`, the new `tests/scalar/mask_*`
+tests and twins, and the doc example `integer-semantics/mask_remainder.c` (68 sources): 240 passed, 0 failed. Diff 2:
+42 changed `.vpr` (the same 21 programs as above), every one calling `c_and_`/`c_uand_` in the baseline; the 22 others
+that call those functions are identical (their masks are not constants). `lint_viper.py` (with the new remainder rule):
+136 files clean. The 42 files shrink from 895,409 to 787,075 bytes (the prelude loses its `and` functions); no test
+nests complement masks on one operand (item 16 of audit round 1: the largest count of `%` in a body is 4, the prelude's
+own `c_rem`). The new part-A tests, pins and the doc example `verifying/comma_order.c`: 72 passed, 0 failed, every
+`expect:` line as written before the run.
+
+### S22: the mask battery **PASS** (`build/m4.4d/s22/`)
+
+- **Silicon evaluation:** 1182 closed asserts `c_[u]and_N(a, M) == rewrite(a)` at N = 32, 64, 128, signed and
+  unsigned, k ∈ {0, 1, 8, 16, N/2, N − 1, N} where allowed, both forms, at the bounds, ±1, 2^k − 1, 2^k, −2^k,
+  ±(2^k ± 1) and random operands: all verify; a control with one wrong claim fails; a Python two's complement
+  reference agrees on all 1182.
+- **Viper's `%`:** `(-5) % 4 == 3`, `(-4) % 4 == 0`, `(-2147483648) % 256 == 0`, `(-5) - (-5) % 4 == -8` and the symbolic
+  `x < 0 ==> 0 <= x % 4 && x % 4 < 4` verify; the control `(-5) % 4 == -1` fails.
+- **Z3 4.16.0, QF_BV, every operand:** for each N, signedness, allowed k and form, `a` extended by 2 bits, the N-bit
+  `bvand` with the mask equals `bvsmod(a, 2^k)` (or `a − bvsmod(a, 2^k)`): 902 queries, all unsat; a wrong control is
+  sat. (A first `int2bv`/`bv2int` encoding timed out and was abandoned.)
+- **Through the driver** (`s22/c/shapes.c`, both modes): `x & 254u`, `& 256u`, `& 257u` and `x & -3` keep
+  `c_[u]and_N`; `& 0xFFFFFFFFu`, `& 255u`, `255u & x` become `% 4294967296`, `% 256`; `& 0xFFFFFF00u`, `& ~15u`, `& -16`
+  become `x - x % 256`, `x - x % 16`; `v & ~0u` with a 64-bit `v` is `v % 4294967296`; `long long x & ~0xFFu` keeps
+  `c_and_64(x, 4294967295 - 255)` (the constant is positive in 64 bits), and `& ~0xFFLL` is `x - x % 256`.
+
+### The `bit_mask.c [c23]` hang **GONE** (`build/m4.4d/hang/`)
+
+Silicon run directly on the kept `.vpr` of `tests/scalar/bit_mask.c` and `tests/scalar/negative/bit_mask_post.c` in
+c23 (neither calls a `c_[u]and_N` function now): with `--numberOfParallelVerifiers 1`, 10 runs each, every run passes
+(the twin reports its one expected error), 1.5–1.6 s; with `--proverRandomizeSeeds` as well, 16 runs each, the same,
+1.4–1.6 s. 0 hangs in 52 runs; before the rule, the one-verifier runs hung 10 of 10 (handoff §3, "From S4").
