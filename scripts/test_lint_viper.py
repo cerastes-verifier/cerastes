@@ -1747,6 +1747,227 @@ class BitwisePreludeTests(unittest.TestCase):
         self.assertTrue(any("`domain D`" in p for p in probs), probs)
 
 
+class RemainderTests(unittest.TestCase):
+    """Decision 0026 item 7: Viper's `%` is the Euclidean remainder and C's is not, so outside the prelude's
+    `c_rem` and `c_urem` the divisor of every emitted `%` must be a decimal power of two (the constant-mask
+    rewrite `a & (2^k-1)` = `a % 2^k`; the complement `a & ~(2^k-1)` is `2^k * (a \\ 2^k)`, FloorDivisionTests).
+    Every rejected shape has a twin in the accepted ones, so weakening the check fails a test here."""
+
+    PRELUDE = [
+        "function c_rem(a: Int, b: Int): Int",
+        "{",
+        "  (b == 0 ? 0 : (a >= 0 ? (b > 0 ? (a % b) : (a % (-b))) : (b > 0 ? (-((-a) % b)) : (-((-a) % (-b))))))",
+        "}",
+        "function c_urem(a: Int, b: Int): Int",
+        "{",
+        "  ((a >= 0 && b > 0) ? (a % b) : 0)",
+        "}",
+    ]
+
+    @staticmethod
+    def probs(*lines):
+        text = "\n".join(lines) + "\n"
+        return [p for p in lv.lint_vpr(text, "", "t.vpr", "t.vpr.map") if "`%`" in p]
+
+    def in_method(self, *body):
+        return self.probs(*self.PRELUDE, "method m__1(x: Int) returns (res: Int)", "{", *body, "}")
+
+    def test_the_prelude_bodies_are_clean(self):
+        self.assertEqual(self.probs(*self.PRELUDE), [])
+
+    def test_the_mask_forms_are_clean(self):
+        for body in ("  res := (x % 256)", "  res := x - x % 16", "  res := (x % 1)", "  res := x % 2",
+                     "  res := (x % 4294967296)", "  res := (x % 18446744073709551616)",
+                     "  res := (x % 340282366920938463463374607431768211456)",
+                     "  res := (x - (x % 8))"):
+            with self.subTest(body):
+                self.assertEqual(self.in_method(body), [])
+
+    def test_a_divisor_that_is_not_a_power_of_two_is_a_problem(self):
+        for lit in ("0", "3", "255", "257", "1000", "4294967295", "18446744073709551615"):
+            with self.subTest(lit):
+                probs = self.in_method(f"  res := (x % {lit})")
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn(f"the divisor `{lit}`", probs[0])
+                self.assertIn("decision 0026 item 7", probs[0])
+
+    def test_a_divisor_that_is_not_a_plain_literal_is_a_problem(self):
+        for divisor in ("y", "(16)", "-16", "(-16)", "x__1", "(1 + 1)", "16.0", "0x10", "256x", "16'", "+16"):
+            with self.subTest(divisor):
+                probs = self.in_method(f"  res := (x % {divisor})")
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("not a decimal literal", probs[0])
+
+    def test_a_leading_zero_is_not_a_plain_literal(self):
+        probs = self.in_method("  res := (x % 016)")
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("the divisor `016`", probs[0])
+
+    def test_the_problem_is_at_the_line_of_the_percent(self):
+        probs = lv.lint_vpr("\n".join([*self.PRELUDE, "method m__1(x: Int) returns (res: Int)", "{",
+                                       "  res := (x % 255)", "}"]) + "\n", "", "t.vpr", "t.vpr.map")
+        probs = [p for p in probs if "`%`" in p]
+        self.assertEqual(len(probs), 1, probs)
+        self.assertTrue(probs[0].startswith(f"t.vpr:{len(self.PRELUDE) + 3}:"), probs)
+
+    def test_each_percent_of_a_line_is_read(self):
+        self.assertEqual(len(self.in_method("  res := (x % 8) + (x % 12) + (x % 16) + (x % 7)")), 2)
+
+    def test_the_prelude_exemption_is_only_the_two_bodies(self):
+        # a percent with a variable divisor after c_urem's body, in another function, in a method
+        # and in a function that only has the prelude's name as a prefix
+        for lines in (["function c_rem2(a: Int, b: Int): Int", "{", "  (a % b)", "}"],
+                      ["function c_div(a: Int, b: Int): Int", "{", "  (a % b)", "}"],
+                      ["method c_rem(a: Int, b: Int) returns (res: Int)", "{", "  res := (a % b)", "}"]):
+            with self.subTest(lines[0]):
+                self.assertEqual(len(self.probs(*self.PRELUDE, *lines)), 1)
+        # and the exemption does not reach the next declaration
+        probs = self.probs(*self.PRELUDE, "function g(a: Int): Int", "{", "  (a % 3)", "}")
+        self.assertEqual(len(probs), 1, probs)
+
+    def test_c_rem_and_c_urem_themselves_are_exempt_wherever_they_stand(self):
+        self.assertEqual(self.probs(*self.PRELUDE[4:], *self.PRELUDE[:4]), [])
+        self.assertEqual(self.probs(*self.PRELUDE[:4]), [])
+
+    def test_comments_do_not_count(self):
+        self.assertEqual(self.in_method("  res := x // % 3", "  /* x % y */ res := x"), [])
+
+    def test_the_rule_applies_in_contracts_and_conditions_too(self):
+        for line in ("  ensures res == x % 3", "  requires x % y == 0"):
+            with self.subTest(line):
+                text = "\n".join(["method m__1(x: Int, y: Int) returns (res: Int)", line, "{", "}"]) + "\n"
+                probs = [p for p in lv.lint_vpr(text, "", "t.vpr", "t.vpr.map") if "`%`" in p]
+                self.assertEqual(len(probs), 1, probs)
+
+    def test_a_good_program_with_a_mask_remainder_is_clean_with_the_other_rules_on(self):
+        lines = good_lines()
+        lines.insert(find(lines, "  res := t__2"), "  t__2 := (t__2 % 256)")
+        self.assertEqual(lint(lines), [])
+        lines = good_lines()
+        lines.insert(find(lines, "  res := t__2"), "  t__2 := (t__2 % 255)")
+        probs = lint(lines)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("the divisor `255`", probs[0])
+
+
+class FloorDivisionTests(unittest.TestCase):
+    r"""Decision 0026 item 7, the other half: Viper's `\` is the floor division, never C's `/`, so outside the
+    prelude bodies that use it (`c_div`, `c_udiv`, `c_shr`, by name) the divisor of every `\` must be a decimal
+    power of two (the complement mask `2^k * (a \ 2^k)`, and the bit functions' `a \ 2`).  The prelude texts are the
+    emitter's (src/viper/prelude.cpp).  Every rejected shape has an accepted twin."""
+
+    DIV = [
+        "function c_div(a: Int, b: Int): Int",
+        "{",
+        r"  (b == 0 ? 0 : (a >= 0 ? (b > 0 ? (a \ b) : (-(a \ (-b)))) : (b > 0 ? (-((-a) \ b)) : ((-a) \ (-b)))))",
+        "}",
+    ]
+    UDIV = ["function c_udiv(a: Int, b: Int): Int", "{", r"  ((a >= 0 && b > 0) ? (a \ b) : 0)", "}"]
+    SHR = ["function c_shr(a: Int, n: Int): Int", "{", r"  (a \ c_pow2(n))", "}"]
+    LEAF = ["function c_and_32(a: Int, b: Int): Int", "{",
+            r"  let qa1 == (a \ 2) in let qb1 == (b \ 2) in (((a - 2 * qa1) + (b - 2 * qb1) == 2) ? 1 : 0)", "}"]
+    COMPOSITE = ["function c_and_128(a: Int, b: Int): Int", "{",
+                 r"  c_uand_64(a, b) + 18446744073709551616 * c_and_64(a \ 18446744073709551616, "
+                 r"b \ 18446744073709551616)", "}"]
+
+    @staticmethod
+    def probs(*lines):
+        text = "\n".join(lines) + "\n"
+        return [p for p in lv.lint_vpr(text, "", "t.vpr", "t.vpr.map") if "`\\`" in p]
+
+    def in_method(self, *body):
+        return self.probs(*self.DIV, *self.UDIV, *self.SHR, *self.LEAF, *self.COMPOSITE,
+                          "method m__1(x: Int) returns (res: Int)", "{", *body, "}")
+
+    def test_the_prelude_bodies_are_clean(self):
+        for lines in (self.DIV, self.UDIV, self.SHR, self.LEAF, self.COMPOSITE):
+            with self.subTest(lines[0]):
+                self.assertEqual(self.probs(*lines), [])
+
+    def test_the_complement_mask_forms_are_clean(self):
+        for body in (r"  res := (16 * (x \ 16))", r"  res := 8 * (x \ 8)", r"  res := (1 * (x \ 1))",
+                     r"  res := (4294967296 * (x \ 4294967296))", r"  res := (x \ 18446744073709551616)",
+                     r"  res := (340282366920938463463374607431768211456 * (x \ 340282366920938463463374607431768211456))"):
+            with self.subTest(body):
+                self.assertEqual(self.in_method(body), [])
+
+    def test_a_divisor_that_is_not_a_power_of_two_is_a_problem(self):
+        for lit in ("0", "3", "15", "255", "1000", "4294967295"):
+            with self.subTest(lit):
+                probs = self.in_method(rf"  res := ({lit} * (x \ {lit}))")
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn(f"the divisor `{lit}`", probs[0])
+                self.assertIn("decision 0026 item 7", probs[0])
+
+    def test_a_divisor_that_is_not_a_plain_literal_is_a_problem(self):
+        for divisor in ("y", "(16)", "-16", "(-16)", "c_pow2(4)", "(1 + 1)", "16.0", "0x10", "256x", "16'", "+16"):
+            with self.subTest(divisor):
+                probs = self.in_method(rf"  res := (x \ {divisor})")
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("not a decimal literal", probs[0])
+
+    def test_a_leading_zero_is_not_a_plain_literal(self):
+        probs = self.in_method(r"  res := (x \ 016)")
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("the divisor `016`", probs[0])
+
+    def test_the_problem_is_at_the_line_of_the_backslash(self):
+        prelude = [*self.DIV, *self.UDIV, *self.SHR]
+        text = "\n".join([*prelude, "method m__1(x: Int) returns (res: Int)", "{", r"  res := (x \ 15)", "}"]) + "\n"
+        probs = [p for p in lv.lint_vpr(text, "", "t.vpr", "t.vpr.map") if "`\\`" in p]
+        self.assertEqual(len(probs), 1, probs)
+        self.assertTrue(probs[0].startswith(f"t.vpr:{len(prelude) + 3}:"), probs)
+
+    def test_each_backslash_of_a_line_is_read(self):
+        self.assertEqual(len(self.in_method(r"  res := (x \ 8) + (x \ 12) + (x \ 16) + (x \ y)")), 2)
+
+    def test_the_prelude_exemption_is_by_name_and_only_the_bodies(self):
+        # c_div, c_udiv and c_shr are exempt; a bit function, a function with another name, a method named
+        # like a prelude function and the next declaration are not
+        for lines in (["function c_div2(a: Int, b: Int): Int", "{", r"  (a \ b)", "}"],
+                      ["function c_and_32(a: Int, b: Int): Int", "{", r"  (a \ b)", "}"],
+                      ["function c_rem(a: Int, b: Int): Int", "{", r"  (a \ b)", "}"],
+                      ["function c_urem(a: Int, b: Int): Int", "{", r"  (a \ b)", "}"],
+                      ["method c_div(a: Int, b: Int) returns (res: Int)", "{", r"  res := (a \ b)", "}"]):
+            with self.subTest(lines[0]):
+                self.assertEqual(len(self.probs(*self.DIV, *self.UDIV, *self.SHR, *lines)), 1)
+        probs = self.probs(*self.DIV, "function g(a: Int): Int", "{", r"  (a \ 3)", "}")
+        self.assertEqual(len(probs), 1, probs)
+
+    def test_the_two_operators_have_their_own_exemptions(self):
+        # c_div may use `\` but not `%` with a variable divisor, and c_rem the other way round
+        div_with_mod = ["function c_div(a: Int, b: Int): Int", "{", "  (a % b)", "}"]
+        rem_with_div = ["function c_rem(a: Int, b: Int): Int", "{", r"  (a \ b)", "}"]
+        probs = lv.lint_vpr("\n".join(div_with_mod) + "\n", "", "t.vpr", "t.vpr.map")
+        self.assertEqual(len([p for p in probs if "`%`" in p]), 1, probs)
+        probs = lv.lint_vpr("\n".join(rem_with_div) + "\n", "", "t.vpr", "t.vpr.map")
+        self.assertEqual(len([p for p in probs if "`\\`" in p]), 1, probs)
+
+    def test_a_percent_does_not_excuse_a_backslash_on_its_line(self):
+        probs = self.in_method(r"  res := (x % 16) + (x \ 15)")
+        self.assertEqual(len(probs), 1, probs)
+
+    def test_comments_do_not_count(self):
+        self.assertEqual(self.in_method(r"  res := x // \ 3", r"  /* x \ y */ res := x"), [])
+
+    def test_the_rule_applies_in_contracts_and_conditions_too(self):
+        for line in (r"  ensures res == x \ 3", r"  requires x \ y == 0"):
+            with self.subTest(line):
+                text = "\n".join(["method m__1(x: Int, y: Int) returns (res: Int)", line, "{", "}"]) + "\n"
+                probs = [p for p in lv.lint_vpr(text, "", "t.vpr", "t.vpr.map") if "`\\`" in p]
+                self.assertEqual(len(probs), 1, probs)
+
+    def test_a_good_program_with_a_complement_mask_is_clean_with_the_other_rules_on(self):
+        lines = good_lines()
+        lines.insert(find(lines, "  res := t__2"), r"  t__2 := (16 * (t__2 \ 16))")
+        self.assertEqual(lint(lines), [])
+        lines = good_lines()
+        lines.insert(find(lines, "  res := t__2"), r"  t__2 := (15 * (t__2 \ 15))")
+        probs = lint(lines)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("the divisor `15`", probs[0])
+
+
 class SelfTestHygieneTests(unittest.TestCase):
     """A test method defined twice in one class replaces the first, which then never runs (it happened here:
     two `test_labels_followed_by_no_deletable_statement_give_no_mutant`)."""

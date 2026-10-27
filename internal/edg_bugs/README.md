@@ -62,7 +62,7 @@ file per bug, numbered like the decision records: `NNNN-short-name.md`.
 | [0019](0019-cxx23-parameter-names-in-nested-function-type-trailing-return.md) | In C++23, parameter names of a nested function type are not found in its trailing return type in some contexts | open |
 | [0020](upstreamed/0020-lambda-in-function-template-declaration-names-template-parameter.md) | A lambda that names a template parameter in a function template's declaration cannot be substituted: "identifier is undefined" | Upstreamed |
 | [0021](0021-lambda-called-in-constant-template-argument-not-folded-std-mode.md) | A lambda called in a constant template argument of a function template is not folded in std mode: "template instantiation resulted in unexpected function type" | open |
-| [0022](0022-suppressed-note-internal-error.md) | Suppressing the number of a constant-evaluation note is an internal error: "determine_severity_code: bad severity" | fixed on branch `0022` (on `ec2f12cffa`), merged into `cerastes` and pinned (`f0ed5525af`); not filed (box suites pending) |
+| [0022](upstreamed/0022-suppressed-note-internal-error.md) | Suppressing the number of a constant-evaluation note is an internal error: "determine_severity_code: bad severity" | Upstreamed |
 
 0008 to 0019 were found while fixing 0003 to 0007 and 0016. They are
 recorded only. On 2026-10-15 the owner decided that only bugs that block

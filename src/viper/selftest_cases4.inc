@@ -539,7 +539,17 @@ void define_calls_in_expressions() {
     write_after_call(k, false);
   });
   // The flag read is an access (decision 0025 item 1): without it the write of the comma case precedes the check, and the order check says so.
+  // The comma's value carries its floor (decision 0026), so this program takes step 1 and the write follows the check without the flag access; the hook
+  // `force_base_sets` makes every full expression take step 2 (today's sets), where the flag access is what orders them.
   rh("hook_drop_flag_access", "an access to a local was emitted before an earlier access", [=](Kit& k) {
+    k.lower_options.drop_flag_access = true;
+    k.lower_options.force_base_sets = true;
+    guarded_flag_read(k, 0);
+  });
+  // The same program with `drop_flag_access` but without `force_base_sets`: step 1 orders the write after the check by the comma's floor, so there is no
+  // internal error, and the program is what it verifies to (the `uninitialized` error at the read).
+  lc("hook_drop_flag_access_step1", "int x; y = (x = (sink(f(a) > 0 && x > 0), 2)) with the flag access dropped but exact sets: the write still follows "
+     "the check (step 1), so the `uninitialized` error at the read is found and there is no internal error", [=](Kit& k) {
     k.lower_options.drop_flag_access = true;
     guarded_flag_read(k, 0);
   });
@@ -585,6 +595,17 @@ void define_calls_in_expressions() {
     const Expr* call = nested_with_requires(k);
     k.fail("precondition", call->loc);  // checked after g returns
   });
+  // The permanent check of `flush` (decision 0026 item 3): every base half of a set is contained in its exact half.  The hook clears the exact half of the
+  // first `requires` obligation whose base half is not empty (f1's clause reads its argument g(x): the base half is {g}), so the check must report it.
+  rh("hook_drop_exact_set", "the base half of a set of a full expression is not contained in its exact half", [=](Kit& k) {
+    k.lower_options.drop_exact_set = true;
+    nested_with_requires(k);
+  });
+  lc("calls_drop_exact_set_hook_off", "f1(g(x)) with requires x > 0 on f1: without the hook the base half is contained in the exact half (f1's precondition may fail)",
+     [=](Kit& k) {
+       const Expr* call = nested_with_requires(k);
+       k.fail("precondition", call->loc);  // checked after g returns, exact set {g}
+     });
   // The recursion components are those of the emitted methods, dead code included (silver's graph has an edge for every call).
   //   f(n): return never(0) + g(n + 1);       g(c): if (false) { f(c); } return 0;
   // f -> g -> f is a cycle only through the dead call; g(n + 1) does not decrease the measure, and never(0) comes first: the explicit
@@ -649,6 +670,235 @@ void define_calls_in_expressions() {
     f->body = k.blk({k.asrt(k.eq(k.add(k.call(g, {I(k, "1")}), k.call(g, {I(k, "2")})), I(k, "3")))});
     k.done(f);
   });
+
+  // =====================================================================================================================================
+  // Exact sets (decision 0026, part A).  PRE-REGISTERED: every outcome below was written from the record before the lowering change
+  // existed, and is not to be adjusted to what the code prints.
+  //   * A precondition has the set PRE(c): every call in the arguments (not only the values its clauses read).
+  //   * The value of a comma carries its floor: the enclosing floor and everything the left operand contains.
+  //   * A full expression whose exact sets are not a chain takes the base sets (0021 item 10); only when both are not a chain is it
+  //     rejected (`unsequenced_calls`).
+  // The cases without a `fail` verify, the ones with it must fail at that node for that category, and nothing else may fail.
+  // =====================================================================================================================================
+  // `void nr`-like and `validate` helpers: `never(x)` (ensures false) and `zero(y)` (any result) are above; `validate(y)` returns only
+  // when y > 0 (strong) or y >= 0 (weak); `h(x)` requires x > 0.
+  auto validate_fn = [=](Kit& k, bool strong) {
+    Function* v = k.fn("validate", k.vd, {{"y", k.i32}});
+    k.ens(v, strong ? k.gt(k.F(v, 0), I(k, "0")) : k.ge(k.F(v, 0), I(k, "0")));
+    k.trusted(v);
+    return v;
+  };
+  auto h_positive = [=](Kit& k) {
+    Function* h = k.fn("h", k.i32, {{"x", k.i32}});
+    k.req(h, k.gt(k.F(h, 0), I(k, "0")));
+    k.trusted(h);
+    return h;
+  };
+
+  // ---- a precondition follows the calls in its arguments (item 1, first set) ----
+  // int f(int a, int b) { return f1(a, inner(b)); }   f1 requires x > 0 (it reads only a).
+  //   inner = nr (never returns): the precondition follows nr and is unreachable: verifies.  (Under the base sets it was checked first
+  //   and reported a false alarm.)   inner = zero (returns): the precondition may fail: `precondition` at the call of f1.
+  auto pre_after_argument_call = [=](Kit& k, bool inner_returns) {
+    Function* inner = inner_returns ? zero(k) : never(k);
+    Function* f1 = k.fn("f1", k.i32, {{"x", k.i32}, {"y", k.i32}});
+    k.req(f1, k.gt(k.F(f1, 0), I(k, "0")));
+    k.trusted(f1);
+    Function* f = k.fn("f", k.i32, {{"a", k.i32}, {"b", k.i32}});
+    const Expr* call = k.call(f1, {k.pv(f, 0), k.call(inner, {k.pv(f, 1)})});
+    f->body = k.blk({k.ret(call)});
+    k.done(f);
+    if (inner_returns) k.fail("precondition", call->loc);
+  };
+  lc("exact_pre_follows_argument_call", "f1(a, nr(b)) with requires x > 0 on f1 (reading only a), nr never returning: the precondition follows nr, "
+     "so it is unreachable and the function verifies", [=](Kit& k) { pre_after_argument_call(k, false); });
+  lc("exact_pre_follows_argument_call_returns", "f1(a, zero(b)): the same with a returning call: a is unconstrained, `precondition` at the call of f1",
+     [=](Kit& k) { pre_after_argument_call(k, true); });
+
+  // ---- the value of a comma carries its floor (item 1, second set) ----
+  // int f(int d) { return 100 / (abort(), d); }   the divisor check follows abort: verifies.  With a returning call: division-by-zero.
+  auto comma_divisor = [=](Kit& k, bool returns) {
+    const Expr* left = returns ? k.call(zero(k), {I(k, "0")}) : k.call(k.abort_fn(), {});
+    Function* f = k.fn("f", k.i32, {{"d", k.i32}});
+    const Expr* dv = k.div(I(k, "100"), k.comma(left, k.pv(f, 0)));
+    f->body = k.blk({k.ret(dv)});
+    k.done(f);
+    if (returns) k.fail("division-by-zero", dv->loc);
+  };
+  lc("exact_comma_value_divisor", "100 / (abort(), d): the divisor is the value of a comma whose left operand ends the program, so its check "
+     "follows abort and is unreachable: verifies", [=](Kit& k) { comma_divisor(k, false); });
+  lc("exact_comma_value_divisor_returns", "100 / (zero(0), d): the left operand returns, d may be 0: `division-by-zero`",
+     [=](Kit& k) { comma_divisor(k, true); });
+  // bool f(int d) { return (abort(), 1) && 100 / d > 0; }   the guard is a comma value: the right operand's branch follows abort.
+  auto comma_guard = [=](Kit& k, bool returns) {
+    const Expr* left = returns ? k.call(zero(k), {I(k, "0")}) : k.call(k.abort_fn(), {});
+    Function* f = k.fn("f", k.bl, {{"d", k.i32}});
+    const Expr* dv = k.div(I(k, "100"), k.pv(f, 0));
+    f->body = k.blk({k.ret(k.land(k.tb(k.comma(left, I(k, "1"))), k.gt(dv, I(k, "0"))))});
+    k.done(f);
+    if (returns) k.fail("division-by-zero", dv->loc);
+  };
+  lc("exact_comma_value_guard", "(abort(), 1) && 100 / d > 0: the guard is the value of a comma that ends the program, the branch follows it: verifies",
+     [=](Kit& k) { comma_guard(k, false); });
+  lc("exact_comma_value_guard_returns", "(zero(0), 1) && 100 / d > 0: the left operand returns, d may be 0: `division-by-zero`",
+     [=](Kit& k) { comma_guard(k, true); });
+
+  // ---- the idiom: h((validate(y), y)) ----
+  // int c(int y) { return h((validate(y), y)); }   validate returns only when y > 0 (strong) or y >= 0 (weak); h requires x > 0.
+  auto validate_idiom = [=](Kit& k, bool strong, bool force_base = false) {
+    k.lower_options.force_base_sets = force_base;
+    Function* v = validate_fn(k, strong);
+    Function* h = h_positive(k);
+    Function* c = k.fn("c", k.i32, {{"y", k.i32}});
+    const Expr* hc = k.call(h, {k.comma(k.call(v, {k.pv(c, 0)}), k.pv(c, 0))});
+    c->body = k.blk({k.ret(hc)});
+    k.done(c);
+    if (!strong || force_base) k.fail("precondition", hc->loc);
+  };
+  lc("exact_validate_idiom", "h((validate(y), y)) with validate(y) returning only when y > 0 and requires x > 0 on h: the precondition waits for validate",
+     [=](Kit& k) { validate_idiom(k, true); });
+  lc("exact_validate_idiom_force_base", "the same strong validate with the hook force_base_sets (every full expression takes today's sets): h's precondition "
+     "is checked before validate and fails, `precondition` at the call of h: step 1 is what removes the false alarm", [=](Kit& k) { validate_idiom(k, true, true); });
+  lc("exact_validate_idiom_weak", "the same with validate returning when y >= 0: y == 0 reaches h, `precondition` at the call of h",
+     [=](Kit& k) { validate_idiom(k, false); });
+  // ... and inside a branch: int c(bool a, int y) { return a && h((validate(y), y)) > 0; }   the branch's own full expression uses exact sets.
+  auto validate_in_branch = [=](Kit& k, bool strong) {
+    Function* v = validate_fn(k, strong);
+    Function* h = h_positive(k);
+    Function* c = k.fn("c", k.i32, {{"a", k.bl}, {"y", k.i32}});
+    const Expr* hc = k.call(h, {k.comma(k.call(v, {k.pv(c, 1)}), k.pv(c, 1))});
+    c->body = k.blk({k.ret(k.bi(k.i32, k.land(k.pv(c, 0), k.gt(hc, I(k, "0")))))});
+    k.done(c);
+    if (!strong) k.fail("precondition", hc->loc);
+  };
+  lc("exact_validate_idiom_in_branch", "a && h((validate(y), y)) > 0: the call is in the right operand of &&, whose own full expression uses exact sets",
+     [=](Kit& k) { validate_in_branch(k, true); });
+  lc("exact_validate_idiom_in_branch_weak", "the same with the weak validate: `precondition` at the call of h", [=](Kit& k) { validate_in_branch(k, false); });
+
+  // ---- one `requires` clause per argument: now a lowering case (it was `unsequenced_calls`) ----
+  // int c(int x, int y) { return take(fa(x), hb(y)); }   take requires 1 <= a and 2 <= b; each clause now has the set {fa, hb}.
+  auto take_split = [=](Kit& k, bool both_hold) {
+    Function* fa = k.fn("fa", k.i32, {{"x", k.i32}});
+    k.ens(fa, k.ge_c(k.R(fa), k.i32, "1"));
+    k.trusted(fa);
+    Function* hb = k.fn("hb", k.i32, {{"x", k.i32}});
+    if (both_hold) k.ens(hb, k.ge_c(k.R(hb), k.i32, "2"));
+    k.trusted(hb);
+    Function* take = k.fn("take", k.i32, {{"a", k.i32}, {"b", k.i32}});
+    k.req(take, k.le(I(k, "1"), k.F(take, 0)));
+    k.req(take, k.le(I(k, "2"), k.F(take, 1)));
+    k.trusted(take);
+    Function* c = k.fn("c", k.i32, {{"x", k.i32}, {"y", k.i32}});
+    const Expr* call = k.call(take, {k.call(fa, {k.pv(c, 0)}), k.call(hb, {k.pv(c, 1)})});
+    c->body = k.blk({k.ret(call)});
+    k.done(c);
+    // two clauses at the call; only the second (b) can fail, fa's result is >= 1
+    if (!both_hold) k.fail_only("precondition", call->loc, 2, 1);
+  };
+  lc("exact_split_requires", "take(fa(x), hb(y)) with requires 1 <= a and requires 2 <= b, fa >= 1 and hb >= 2: both clauses wait for both calls "
+     "(accepted now, was `unsequenced_calls`): verifies", [=](Kit& k) { take_split(k, true); });
+  lc("exact_split_requires_fails", "the same with no postcondition on hb: the second clause (b) may fail, `precondition` at the call of take",
+     [=](Kit& k) { take_split(k, false); });
+
+  // ---- the fallback: exact sets that are not a chain use the base sets (item 2, step 2) ----
+  // int c(int x, int y, int z) { return h2(f(x), y) + 100 / g(z); }   h2 requires y > 0 (reads only its second parameter).
+  //   exact: PRE(h2) = {f} against {g}: not a chain.  base: {} against {g}: a chain, accepted.
+  auto fallback_pre = [=](Kit& k, bool y_positive) {
+    Function* f_ = t1(k, "f");
+    Function* g_ = k.fn("g", k.i32, {{"z", k.i32}});
+    k.ens(g_, k.range(k.R(g_), k.i32, "1", "100"));
+    k.trusted(g_);
+    Function* h2 = k.fn("h2", k.i32, {{"x", k.i32}, {"y", k.i32}});
+    k.req(h2, k.gt(k.F(h2, 1), I(k, "0")));
+    k.ens(h2, k.range(k.R(h2), k.i32, "0", "1000"));
+    k.trusted(h2);
+    Function* c = k.fn("c", k.i32, {{"x", k.i32}, {"y", k.i32}, {"z", k.i32}});
+    if (y_positive) k.req(c, k.gt(k.F(c, 1), I(k, "0")));
+    const Expr* hc = k.call(h2, {k.call(f_, {k.pv(c, 0)}), k.pv(c, 1)});
+    c->body = k.blk({k.ret(k.add(hc, k.div(I(k, "100"), k.call(g_, {k.pv(c, 2)}))))});
+    k.done(c);
+    if (!y_positive) k.fail("precondition", hc->loc);
+  };
+  lc("exact_fallback_precondition", "h2(f(x), y) + 100 / g(z), h2 requiring y > 0, with requires y > 0 on c: the exact sets are not a chain, the base "
+     "sets are, so it is accepted: verifies", [=](Kit& k) { fallback_pre(k, true); });
+  lc("exact_fallback_precondition_fails", "the same without requires on c: y may be 0, `precondition` at the call of h2",
+     [=](Kit& k) { fallback_pre(k, false); });
+  // int c(int x, int y, int z) { return 100 / (f(x), y) + 100 / g(z); }   the comma's value carries f in the exact sets: {f} against {g}; base:
+  // {} against {g}.
+  auto fallback_comma = [=](Kit& k, bool y_positive) {
+    Function* f_ = t1(k, "f");
+    Function* g_ = k.fn("g", k.i32, {{"z", k.i32}});
+    k.ens(g_, k.range(k.R(g_), k.i32, "1", "100"));
+    k.trusted(g_);
+    Function* c = k.fn("c", k.i32, {{"x", k.i32}, {"y", k.i32}, {"z", k.i32}});
+    if (y_positive) k.req(c, k.gt(k.F(c, 1), I(k, "0")));
+    const Expr* d1 = k.div(I(k, "100"), k.comma(k.call(f_, {k.pv(c, 0)}), k.pv(c, 1)));
+    c->body = k.blk({k.ret(k.add(d1, k.div(I(k, "100"), k.call(g_, {k.pv(c, 2)}))))});
+    k.done(c);
+    if (!y_positive) k.fail("division-by-zero", d1->loc);
+  };
+  lc("exact_fallback_comma_value", "100 / (f(x), y) + 100 / g(z) with requires y > 0: the exact sets are not a chain, the base sets are: accepted, verifies",
+     [=](Kit& k) { fallback_comma(k, true); });
+  lc("exact_fallback_comma_value_fails", "the same without requires on c: `division-by-zero` at the first division", [=](Kit& k) { fallback_comma(k, false); });
+
+  // ---- one full expression in each step: the inner one (a branch's) takes step 1, the outer one takes step 2 ----
+  // int c(int x, int y, int z, int w) requires y > 0 { return h2(f(x), y) + (g(z) > 0 && h((validate(w), w)) > 0); }
+  //   outer: PRE(h2) is {f} (exact) and D(B) of the branch is {g, B}: not a chain; the base sets ({} and {g, B}) are, so the outer expression
+  //   takes step 2 and is accepted.  inner (the right operand of &&, its own full expression): h's precondition has the exact set {validate},
+  //   a chain, so it takes step 1 and waits for validate.  With the strong validate the inner precondition holds only under exact sets: verifies.
+  //   With the weak validate (y >= 0): `precondition` at the call of h.
+  auto mixed_steps = [=](Kit& k, bool strong) {
+    Function* f_ = t1(k, "f");
+    Function* g_ = t1(k, "g");
+    Function* v = validate_fn(k, strong);
+    Function* h = h_positive(k);
+    Function* h2 = k.fn("h2", k.i32, {{"x", k.i32}, {"y", k.i32}});
+    k.req(h2, k.gt(k.F(h2, 1), I(k, "0")));
+    k.ens(h2, k.range(k.R(h2), k.i32, "0", "1000"));
+    k.trusted(h2);
+    Function* c = k.fn("c", k.i32, {{"x", k.i32}, {"y", k.i32}, {"z", k.i32}, {"w", k.i32}});
+    k.req(c, k.gt(k.F(c, 1), I(k, "0")));
+    const Expr* hc = k.call(h, {k.comma(k.call(v, {k.pv(c, 3)}), k.pv(c, 3))});
+    const Expr* branch = k.bi(k.i32, k.land(k.gt(k.call(g_, {k.pv(c, 2)}), I(k, "0")), k.gt(hc, I(k, "0"))));
+    c->body = k.blk({k.ret(k.add(k.call(h2, {k.call(f_, {k.pv(c, 0)}), k.pv(c, 1)}), branch))});
+    k.done(c);
+    if (!strong) k.fail("precondition", hc->loc);
+  };
+  lc("exact_mixed_steps", "h2(f(x), y) + (g(z) > 0 && h((validate(w), w)) > 0): the outer expression takes the base sets (the fallback), the branch's own "
+     "expression the exact sets, so h's precondition waits for validate: verifies", [=](Kit& k) { mixed_steps(k, true); });
+  lc("exact_mixed_steps_weak", "the same with the weak validate: `precondition` at the call of h", [=](Kit& k) { mixed_steps(k, false); });
+
+  // ---- the pins: a set computed too large would verify these (it is the unsound direction, invisible to the checks, item 4) ----
+  // nr(0) + h((g(y), y)): PRE(h) is {g}, not {nr}: the precondition is checked before nr and fails (y is anything after g).
+  auto pin_pre = [=](Kit& k, bool validated) {
+    Function* n = never(k);
+    Function* h = h_positive(k);
+    Function* g = validated ? validate_fn(k, true) : t1(k, "g");
+    Function* c = k.fn("c", k.i32, {{"y", k.i32}});
+    const Expr* hc = k.call(h, {k.comma(k.call(g, {k.pv(c, 0)}), k.pv(c, 0))});
+    c->body = k.blk({k.ret(k.add(k.call(n, {I(k, "0")}), hc))});
+    k.done(c);
+    if (!validated) k.fail("precondition", hc->loc);
+  };
+  lc("exact_pin_pre_not_after_sibling", "nr(0) + h((g(y), y)): PRE(h) is {g}, not nr, so the precondition is checked before nr and fails: `precondition`",
+     [=](Kit& k) { pin_pre(k, false); });
+  lc("exact_pin_pre_not_after_sibling_validated", "nr(0) + h((validate(y), y)) with validate returning only for y > 0: the precondition holds after validate: verifies",
+     [=](Kit& k) { pin_pre(k, true); });
+  // nr(0) + 100 / (g(y), y): the comma's value carries {g}, not {nr}: the divisor check precedes nr and fails.
+  auto pin_comma = [=](Kit& k, bool validated) {
+    Function* n = never(k);
+    Function* g = validated ? validate_fn(k, true) : t1(k, "g");
+    Function* c = k.fn("c", k.i32, {{"y", k.i32}});
+    const Expr* d = k.div(I(k, "100"), k.comma(k.call(g, {k.pv(c, 0)}), k.pv(c, 0)));
+    c->body = k.blk({k.ret(k.add(k.call(n, {I(k, "0")}), d))});
+    k.done(c);
+    if (!validated) k.fail("division-by-zero", d->loc);
+  };
+  lc("exact_pin_comma_not_after_sibling", "nr(0) + 100 / (g(y), y): the comma's value carries {g}, not nr: the divisor check precedes nr and fails: "
+     "`division-by-zero`", [=](Kit& k) { pin_comma(k, false); });
+  lc("exact_pin_comma_not_after_sibling_validated", "nr(0) + 100 / (validate(y), y) with validate returning only for y > 0: verifies",
+     [=](Kit& k) { pin_comma(k, true); });
+  // (nr(0), 1) + 100 / d must fail division-by-zero: the floor does not leak to a sibling.  fx_comma_floor_does_not_leak already pins it.
 }
 
 // ---- shapes whose checks do not form a chain are refused by lowering (rl) ----
@@ -757,6 +1007,32 @@ void define_calls_in_expressions_rejections() {
        f->body = k.blk({k.ret(k.add(rec, k.div(I(k, "100"), k.call(h, {k.pv(f, 1)}))))});
        k.done(f);
      });
+  // Decision 0026 (exact sets): a rejection stays where both steps (the exact sets and the base sets) are not a chain.  PRE-REGISTERED.
+  //   100 / (u(a), f(x)) + 100 / g(y): the first divisor is a call's result, and PRE(f) contains the floor {u} in both halves: {u, f} (exact and
+  //   base) against {g}: no chain either way.
+  rl("calls_rej_comma_value_both_steps", kUnordered, [=](Kit& k) {
+    Function* u = t1(k, "u");
+    Function* f = t1(k, "f");
+    Function* g = t1(k, "g");
+    Function* c = k.fn("c", k.i32, {{"a", k.i32}, {"x", k.i32}, {"y", k.i32}});
+    const Expr* first = k.div(I(k, "100"), k.comma(k.call(u, {k.pv(c, 0)}), k.call(f, {k.pv(c, 1)})));
+    c->body = k.blk({k.ret(k.add(first, k.div(I(k, "100"), k.call(g, {k.pv(c, 2)}))))});
+    k.done(c);
+  });
+  //   take(fa(x), hb(y)) + 100 / g(z), take with one requires per argument: exact: {fa, hb} against {g}; base: {fa}, {hb} and {g}: no chain either way.
+  rl("calls_rej_split_requires_with_third_call", kUnordered, [=](Kit& k) {
+    Function* fa = t1(k, "fa");
+    Function* hb = t1(k, "hb");
+    Function* g = t1(k, "g");
+    Function* take = k.fn("take", k.i32, {{"a", k.i32}, {"b", k.i32}});
+    k.req(take, k.le(I(k, "1"), k.F(take, 0)));
+    k.req(take, k.le(I(k, "2"), k.F(take, 1)));
+    k.trusted(take);
+    Function* c = k.fn("c", k.i32, {{"x", k.i32}, {"y", k.i32}, {"z", k.i32}});
+    const Expr* call = k.call(take, {k.call(fa, {k.pv(c, 0)}), k.call(hb, {k.pv(c, 1)})});
+    c->body = k.blk({k.ret(k.add(call, k.div(I(k, "100"), k.call(g, {k.pv(c, 2)}))))});
+    k.done(c);
+  });
   // The message names both calls and the position is the later one's.
   rl("calls_rej_message_names_both", "the calls to \"f\" and \"g\" are not ordered", [=](Kit& k) {
     Function* f = t1(k, "f");

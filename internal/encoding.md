@@ -141,6 +141,7 @@ type, `lo`/`hi` its range, `w` its width):
 | `a << n` unsigned (0022) | `a * c_pow2(n)` | `0 <= n < w`; `a * c_pow2(n) <= hi` (`shift`, two obligations) |
 | `a >> n` | `c_shr(a, n)` (floor division by `2^n`) | `0 <= n < w` (`shift`) |
 | `a & b`, `a \| b`, `a ^ b` (0023) | `c_and_N(a, b)`, `c_or_N`, `c_xor_N` (signed `T`), `c_uand_N`, `c_uor_N`, `c_uxor_N` (unsigned `T`), `N` = `w` | none |
+| `a & m`, `m & a`, `m` a constant mask (0026 item 7) | `m = 2^k − 1`: `(a % 2^k)`; `m = ~(2^k − 1)`: `(2^k * (a \ 2^k))` (Viper's `%` and `\`, SMT-LIB's `mod` and `div`; `k ≤ w` unsigned, `k ≤ w − 1` signed; `m` is the operand as lowered, evaluated exactly; built only by `low::mod_pow2`/`div_pow2`, linted) | none |
 | `~a` (0023) | `-1 - a` (signed), `hi - a` (unsigned) | none |
 | `Convert` to signed `T` | `e` | `lo <= e <= hi` (`conversion`); none when the source range is inside `T`'s |
 | `Convert` to unsigned `T` (0022) | `e` | `lo <= e <= hi` (`conversion`); none when the source range is inside, or when `e` is a constant in range (0022 item 4) |
@@ -155,8 +156,12 @@ Silicon reports each conjunct of an asserted `&&` as its own error.
 temporaries `t__k := f(args)`, each preceded by `assert`s of the callee's `requires` over the argument values
 (category `precondition`, note at the clause). Every item has the **set** of fixed points (calls, and branches that
 contain a call) C must have completed before it evaluates the item: those whose values it uses, its guard's, the comma
-floor's, and those of the earlier accesses to the locals it touches; a call's precondition has the set of its
-arguments (PRE). **The dependency-chain rule** (0021 item 3, 0025 item 2): the sets of a full expression (every
+floor's, and those of the earlier accesses to the locals it touches. **Two steps** (0026): the *exact* sets give a
+call's precondition PRE(c) (everything its arguments use or contain, and the floor) and a comma's value its floor; the
+*base* sets (0021's) give a precondition only the argument values its clauses read and a comma's value no floor.
+Every set is computed with both halves in one pass; `flush` uses the exact family when it is a chain, else the base
+family when that is (today's Viper exactly), else rejects with the base family's conflict. Each full expression,
+and each branch's own, decides on its own. **The dependency-chain rule** (0021 item 3, 0025 item 2): the sets of a full expression (every
 obligation and call-free branch; PRE ∪ {B} for each branch with a call; PRE of each explicit termination check) must
 form a chain under ⊆, or the expression is rejected (`unsequenced_calls`, at the later of two witnessing calls); the
 calls are then emitted in the chain's order (the members of the smallest set first, ties in creation order) and each
@@ -164,8 +169,9 @@ item right after the calls of its set and before every other, so a callee that n
 evaluate before it. Writes and snapshots, which cannot fail, are not in the family (M4.4c): each goes right after the
 member of its set that comes last in that order (first when its set is empty), items in one place keeping creation
 order; fail closed, every member of its set is emitted before it and every later item whose set contains its set after
-it. For every expression accepted before M4.3b (calls nested or ordered by `,`) the sets are intervals
-of creation order and the emitted Viper is unchanged. **Termination at a call** (0021 item 4): a call in the caller's
+it. For every expression accepted before M4.3b (calls nested or ordered by `,`) the base sets are intervals
+of creation order and the base family emits that version's Viper; the exact family moves a precondition after the calls
+in its arguments, and an item using a comma's value after the comma's left operand (0026 item 5). **Termination at a call** (0021 item 4): a call in the caller's
 recursion cycle (Viper's strongly connected components: an edge for every call node, dead code included) that is
 emitted after a call outside its PRE gets an explicit `assert` of Silicon's own decrease relation (the callee's
 measure over the arguments against the caller's over its parameters, unequal lengths included), category
@@ -186,7 +192,8 @@ at its point (its `uninitialized` obligation follows the snapshot), so a printed
 expression writes; the value of an `AssignE` is its lowered `a` (or the snapshot of `b`). A right operand of `&&`/`||`
 or an arm of `?:` with a side effect is a branch, whose effects and obligations are emitted inside the `if`; an
 operand without one keeps the guard of the table above. After the left operand of `,` every later item depends at
-least on the left operand's last call (the floor), so nothing of the right operand moves before it. After `flush`, a
+least on the left operand's last call (the floor), so nothing of the right operand moves before it; with the exact
+sets the comma's value carries the floor too (0026). After `flush`, a
 fail-closed check confirms that the snapshots and writes of each variable kept their evaluation order. A full expression without
 `AssignE` or `Comma` lowers exactly as before.
 
@@ -576,8 +583,9 @@ an original expression is treated as having none: rejected), `perturb_folded` (e
 case label's `folded` moved to a neighbouring value, so the prologue's internal guards fail: exit 3), `silicon_timeout`,
 `abort`, `internal_error`, `perturb_fixed_order` (lowering's call order perturbed, so its fail-closed check reports an
 internal error: exit 3, 0022 item 12), `drop_block_static_assertion` (block-scope static assertions ignored by the
-encoder, so the cross-check of each encoded body's region rejects them: exit 2, 0025 item 5). The VIR self-test has its
-own lowering hooks, among them `perturb_write_slot` (0025 item 2).
+encoder, so the cross-check of each encoded body's region rejects them: exit 2, 0025 item 5), `force_base_sets` (every
+full expression takes step 2 of 0026, today's sets: the Viper of the previous version, and its false alarms). The VIR
+self-test has its own lowering hooks, among them `perturb_write_slot` (0025 item 2) and `force_base_sets`.
 
 **Values the front end computes (decision 0024).** *Static assertions:* file-, namespace-, `extern "C"`- and
 class-scope ones come from the file scope's source sequence list (`collect_entities`, `IlEntities::static_assertions`;

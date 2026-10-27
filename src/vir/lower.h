@@ -41,6 +41,16 @@ struct LowerOptions {
   // Swap the first two fixed points of a full expression's order, so that `check_fixed_order` (the fail-closed check that the fixed points
   // emitted before an item are exactly its set) reports its internal error (decision 0021).
   bool perturb_fixed_order = false;
+  // Skip step 1 of `flush` (decision 0026 item 2): every full expression takes its base sets, today's (decision 0021 item 10), exactly as
+  // when the exact family is not a chain, and a conflict is reported from the base family.  The Viper of a program is then the one emitted
+  // before exact sets (decision 0026 item 2: step 2's Viper is that of M4.4c), and a case of a check that only the base sets need (such as
+  // `drop_flag_access`, whose shape the exact sets already order) can reach it.
+  bool force_base_sets = false;
+  // Clear the exact half of the set of the first `requires` obligation whose base half is not empty, so that the base half is no longer
+  // contained in the exact half: the permanent check of `flush` that every base half is contained in its exact half (decision 0026
+  // item 3) reports its internal error ("the base half of a set of a full expression is not contained in its exact half").  The self-test
+  // case needs a call whose argument is a call that a `requires` clause reads (`h(g(a))`, `requires` on the argument).
+  bool drop_exact_set = false;
   // Forget the calls inside `if`, loops and blocks when computing the recursion components, as an under-approximation would: the check of
   // the components against the emitted methods must report it (decision 0021 item 4).
   bool cycles_ignore_nested_calls = false;
@@ -51,7 +61,8 @@ struct LowerResult {
   // Internal inconsistencies found while lowering a program that passed check_program (never expected).
   std::vector<Diag> errors;
   // Programs refused by a rule only lowering can decide exactly (decision 0021: the calls of a full expression
-  // whose checks do not form a chain).  Reported to the user as rejections (`unsequenced_calls`), at `loc`.
+  // whose checks do not form a chain, on the exact sets and on the base sets of decision 0026 part A; the report is the base family's).
+  // Reported to the user as rejections (`unsequenced_calls`), at `loc`.
   std::vector<Diag> rejections;
 };
 

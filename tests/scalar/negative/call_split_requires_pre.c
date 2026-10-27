@@ -1,7 +1,7 @@
-// expect: rejected cerastes-unsequenced_calls @ L29
+// expect: error precondition @ L31
 // mode: c23, c++20
-// twin: tests/scalar/call_reorder.c
-// Pins: 0021: g(f(x), h(y)) where the contract of the callee is split into one requires per argument: each clause depends on one call alone
+// twin: tests/scalar/call_split_requires.c
+// Pins: 0026 item 6: y may be 1, so the clause 2 <= b of take fails at the call
 #include <cerastes.h>
 
 int f(int x)
@@ -10,10 +10,10 @@ int f(int x)
   return x;
 }
 
-int h(int z)
-    CERASTES_ENSURES(r, r == z)
+int h(int y)
+    CERASTES_ENSURES(r, r == y)
 {
-  return z;
+  return y;
 }
 
 int take(int a, int b)
@@ -25,6 +25,8 @@ int take(int a, int b)
 }
 
 int test(int x, int y)
+    CERASTES_REQUIRES(1 <= x && 1 <= y)
+    CERASTES_ENSURES(r, r == x - y)
 {
   return take(f(x), h(y));
 }

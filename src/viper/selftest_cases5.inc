@@ -40,6 +40,261 @@ Type bit_type(Kit& k, int bits, bool is_signed) {
   return is_signed ? k.i128 : k.u128;
 }
 
+// ---- constant masks as remainders (decision 0026, part B) ----
+// Lowering writes `x & (2^k - 1)` as `x % 2^k` (Viper's, Euclidean) and `x & ~(2^k - 1)` as `2^k * (x \ 2^k)` when one operand is such a
+// constant (a closed expression of literals as lowered, `~` included, on either side, and `&=`).  PRE-REGISTERED: each claim below is an identity that holds for every operand in the
+// type's range, stated in C's terms (C's `%` truncates, so a claim about a negative operand is stated in closed form or by cases); each
+// `_wrong` twin states a false claim that Z3 refutes (never an identity that needs the bits of a variable mask).  The cases do not mention
+// how the mask is lowered: they pass with the prelude function or with the remainder.
+void define_bitwise_masks() {
+  const int widths[] = {32, 64, 128};
+  int variant_counter = 0;
+
+  // ---- symbolic operand, k at its extremes (0, 1, N-1, and N for an unsigned type): mask and complement, five syntactic forms ----
+  for (const int bits : widths) {
+    for (const bool sg : {true, false}) {
+      for (const bool comp : {false, true}) {
+        std::vector<int> ks = {0, 1, bits - 1};
+        if (!sg) ks.push_back(bits);
+        for (const int kk : ks) {
+          // 0: `x & lit`, 1: `lit & x`, 2: `y = x; y &= lit`, 3: `x & ~alt`, 4: `~alt & x` (alt is the complementary pattern)
+          const int variant = variant_counter++ % 5;
+          auto build = [=](Kit& k, bool wrong) -> SrcLoc {
+            const Type t = bit_type(k, bits, sg);
+            const dec::Range rg = dec::range_of(*t.int_type);
+            const BitU128 M = bit_mask(bits);
+            const BitU128 low = kk == 128 ? M : ((BitU128(1) << kk) - 1);  // 2^kk - 1
+            const BitU128 high = (~low) & M;                               // ~(2^kk - 1): -2^kk (signed) or 2^N - 2^kk (unsigned)
+            const std::string lowT = bit_text(low, bits, sg), highT = bit_text(high, bits, sg);
+            const std::string mT = comp ? highT : lowT, altT = comp ? lowT : highT;
+            Function* f = k.fn("f", t, {{"x", t}});
+            auto N = [&](const std::string& v) { return k.num(t, v); };
+            auto X = [&]() { return k.F(f, 0); };
+            auto R = [&]() { return k.R(f); };
+            auto pow2 = [&](int e) { return N(bit_text(BitU128(1) << e, bits, sg)); };
+            const bool z = kk == 0, full = kk == bits;
+            if (!sg) {
+              if (!comp) {
+                if (full) k.ens(f, wrong ? k.eq_c(R(), t, "0") : k.eq(R(), X()));                       // x & MAX == x (x % 2^N)
+                else k.ens(f, wrong ? k.eq(R(), X()) : k.eq(R(), k.rem(X(), pow2(kk))));                // x & (2^k-1) == x % 2^k
+              } else {
+                if (full) k.ens(f, wrong ? k.eq(R(), X()) : k.eq_c(R(), t, "0"));                       // x & 0 == 0
+                else if (wrong) k.ens(f, z ? k.eq_c(R(), t, "0") : k.eq(R(), X()));                     // (z: x & MAX == x)
+                else k.ens(f, k.eq(R(), k.sub(X(), k.rem(X(), pow2(kk)))));                             // x - x % 2^k
+              }
+            } else if (!comp) {
+              if (z) {
+                k.ens(f, k.eq_c(R(), t, wrong ? "1" : "0"));                                             // x & 0 == 0
+              } else if (kk == 1) {
+                if (wrong) {
+                  k.ens(f, k.eq(R(), X()));
+                } else {
+                  k.ens(f, k.range(R(), t, "0", "1"));
+                  k.ens(f, k.implies(k.ge_c(X(), t, "0"), k.eq(R(), k.rem(X(), N("2")))));
+                }
+              } else {  // kk == bits - 1: x & INT_MAX clears the sign bit
+                if (wrong) {
+                  k.ens(f, k.eq(R(), X()));
+                } else {
+                  k.ens(f, k.ge_c(R(), t, "0"));
+                  k.ens(f, k.implies(k.ge_c(X(), t, "0"), k.eq(R(), X())));
+                  k.ens(f, k.implies(k.lt(X(), N("0")), k.eq(R(), k.add(k.add(X(), N(rg.hi)), N("1")))));
+                }
+              }
+            } else {
+              if (z) {
+                k.ens(f, wrong ? k.eq_c(R(), t, "0") : k.eq(R(), X()));                                  // x & -1 == x
+              } else if (kk == 1) {
+                if (wrong) {
+                  k.ens(f, k.eq(R(), X()));
+                } else {
+                  k.ens(f, k.implies(k.ge_c(X(), t, "0"), k.eq(R(), k.sub(X(), k.rem(X(), N("2"))))));
+                  k.ens(f, k.le(R(), X()));
+                }
+              } else {  // kk == bits - 1: x & INT_MIN keeps only the sign bit
+                k.ens(f, wrong ? k.eq_c(R(), t, "0") : k.eq(R(), k.cond(k.lt(X(), N("0")), N(rg.lo), N("0"))));
+              }
+            }
+            std::vector<const Stmt*> body;
+            const Stmt* r = nullptr;
+            switch (variant) {
+              case 0: r = k.ret(k.band(k.pv(f, 0), N(mT))); break;
+              case 1: r = k.ret(k.band(N(mT), k.pv(f, 0))); break;
+              case 2: {
+                Var* y = k.local(f, "y", t);
+                body.push_back(k.decl(y, k.pv(f, 0)));
+                body.push_back(k.b.compound_assign(y, BinaryOp::BitAnd, N(mT), k.at()));
+                r = k.ret(k.v(y));
+                break;
+              }
+              case 3: r = k.ret(k.band(k.pv(f, 0), k.bnot(N(altT)))); break;
+              default: r = k.ret(k.band(k.bnot(N(altT)), k.pv(f, 0))); break;
+            }
+            body.push_back(r);
+            f->body = k.blk(body);
+            k.done(f);
+            return r->loc;
+          };
+          const std::string name = std::string("bit_mask_") + (comp ? "cmpl" : "and") + (sg ? "_s" : "_u") + std::to_string(bits) + "_k" +
+                                   std::to_string(kk) + "_v" + std::to_string(variant);
+          const std::string doc = std::string("x ") + (comp ? "& ~(2^k-1)" : "& (2^k-1)") + " with k = " + std::to_string(kk) + " on a symbolic " +
+                                  (sg ? "signed " : "unsigned ") + std::to_string(bits) + "-bit x (form " + std::to_string(variant) + "): the identity holds";
+          lc(name, doc, [=](Kit& k) { build(k, false); });
+          lc(name + "_wrong", doc + " (a false claim, refuted by Z3)", [=](Kit& k) {
+            const SrcLoc l = build(k, true);
+            k.fail("postcondition", l);
+          });
+        }
+      }
+    }
+  }
+
+  // ---- near misses stay on the prelude function and are decided on closed operands: 254 and 256 are not masks ----
+  for (const int bits : widths) {
+    for (const bool sg : {true, false}) {
+      auto build = [=](Kit& k, bool wrong) -> SrcLoc {
+        const Type t = bit_type(k, bits, sg);
+        auto N = [&](const std::string& v) { return k.num(t, v); };
+        const std::string X = sg ? "-1000" : "1000";  // 0x...FC18 or 0x3E8
+        Function* f = k.fn("f", k.vd);
+        const Stmt* c1 = k.chk(k.eq(k.band(N(X), N("254")), N(sg ? "24" : "232")));
+        const Stmt* c2 = k.chk(k.eq(k.band(N("256"), N(X)), N(wrong ? "1" : (sg ? "0" : "256"))));
+        f->body = k.blk({c1, c2});
+        k.done(f);
+        return c2->loc;
+      };
+      const std::string name = std::string("bit_mask_near_miss_") + (sg ? "s" : "u") + std::to_string(bits);
+      const std::string doc = std::string(sg ? "-1000" : "1000") + " & 254 and 256 & " + (sg ? "-1000" : "1000") + " on " + (sg ? "signed " : "unsigned ") +
+                              std::to_string(bits) + " bits: closed operands, 254 and 256 are not masks";
+      lc(name, doc, [=](Kit& k) { build(k, false); });
+      lc(name + "_wrong", doc + " (the last claim is false)", [=](Kit& k) {
+        const SrcLoc l = build(k, true);
+        k.fail("check", l);
+      });
+    }
+  }
+
+  // ---- closed negative (signed) and high (unsigned) operands: the remainder is Euclidean, never C's ----
+  for (const int bits : widths) {
+    for (const bool sg : {true, false}) {
+      auto build = [=](Kit& k, bool wrong) -> SrcLoc {
+        const Type t = bit_type(k, bits, sg);
+        auto N = [&](const std::string& v) { return k.num(t, v); };
+        const BitU128 M = bit_mask(bits);
+        const BitU128 maxs = (BitU128(1) << (bits - 1)) - 1;
+        const std::string X = sg ? "-5" : bit_text(M - 4, bits, false);  // -5 or 2^N - 5
+        Function* f = k.fn("f", k.vd);
+        const Stmt* c1 = k.chk(k.eq(k.band(N(X), N("255")), N("251")));
+        const Stmt* c2 = k.chk(k.eq(k.band(k.bnot(N("15")), N(X)), N(sg ? "-16" : bit_text(M - 15, bits, false))));
+        // x & MAX: signed -5 & INT_MAX == INT_MAX - 4 (the sign bit cleared); unsigned (2^N - 5) & (2^N - 1) is itself
+        const Stmt* c3 = sg ? k.chk(k.eq(k.band(N(X), N(bit_text(maxs, bits, true))), N(bit_text(maxs - (wrong ? 3 : 4), bits, true))))
+                            : k.chk(k.eq(k.band(N(X), N(bit_text(M, bits, false))), N(bit_text(wrong ? M - 5 : M - 4, bits, false))));
+        f->body = k.blk({c1, c2, c3});
+        k.done(f);
+        return c3->loc;
+      };
+      const std::string name = std::string("bit_mask_closed_") + (sg ? "negative_s" : "high_u") + std::to_string(bits);
+      const std::string doc = std::string(sg ? "-5" : "2^N - 5") + " & 255, & ~15 and & the type's maximum on " + (sg ? "signed " : "unsigned ") +
+                              std::to_string(bits) + " bits: 251, the complement result and the maximum minus 4 (or itself)";
+      lc(name, doc, [=](Kit& k) { build(k, false); });
+      lc(name + "_wrong", doc + " (the last claim is off by one)", [=](Kit& k) {
+        const SrcLoc l = build(k, true);
+        k.fail("check", l);
+      });
+    }
+  }
+
+  // ---- the identities of decision 0026 item 9 ----
+  // v & 0xFFFFFFFF == v % 4294967296 for an unsigned 64-bit v (and 2^64 for 128 bits); C's % agrees with the Euclidean one on non-negatives.
+  for (const int bits : {64, 128}) {
+    const int half = bits / 2;
+    auto build = [=](Kit& k, bool wrong) -> SrcLoc {
+      const Type t = bit_type(k, bits, false);
+      const BitU128 halfmask = (BitU128(1) << half) - 1;
+      Function* f = k.fn("f", t, {{"v", t}});
+      // the wrong claim divides by 2^half - 1: v == 2^half - 1 gives remainder 0 on the right and 2^half - 1 on the left
+      k.ens(f, k.eq(k.R(f), k.rem(k.F(f, 0), k.num(t, bit_text(wrong ? halfmask : halfmask + 1, bits, false)))));
+      const Stmt* r = k.ret(k.band(k.pv(f, 0), k.num(t, bit_text(halfmask, bits, false))));
+      f->body = k.blk({r});
+      k.done(f);
+      return r->loc;
+    };
+    const std::string name = "bit_mask_half_word_u" + std::to_string(bits);
+    const std::string doc = "v & (2^" + std::to_string(half) + " - 1) == v % 2^" + std::to_string(half) + " for an unsigned " + std::to_string(bits) + "-bit v";
+    lc(name, doc, [=](Kit& k) { build(k, false); });
+    lc(name + "_wrong", doc + " (the claim divides by 2^" + std::to_string(half) + " - 1)", [=](Kit& k) {
+      const SrcLoc l = build(k, true);
+      k.fail("postcondition", l);
+    });
+  }
+  // x & ~15 == x - x % 16 for x >= 0.
+  for (const int bits : {32, 64}) {
+    auto build = [=](Kit& k, bool wrong) -> SrcLoc {
+      const Type t = bit_type(k, bits, true);
+      Function* f = k.fn("f", t, {{"x", t}});
+      k.req(f, k.ge_c(k.F(f, 0), t, "0"));
+      k.ens(f, k.eq(k.R(f), k.sub(k.F(f, 0), k.rem(k.F(f, 0), k.num(t, wrong ? "15" : "16")))));
+      const Stmt* r = k.ret(k.band(k.pv(f, 0), k.bnot(k.num(t, "15"))));
+      f->body = k.blk({r});
+      k.done(f);
+      return r->loc;
+    };
+    const std::string name = "bit_mask_clear_low_s" + std::to_string(bits);
+    const std::string doc = "x & ~15 == x - x % 16 for 0 <= x on signed " + std::to_string(bits) + " bits";
+    lc(name, doc, [=](Kit& k) { build(k, false); });
+    lc(name + "_wrong", doc + " (the claim uses x % 15, false for x = 15)", [=](Kit& k) {
+      const SrcLoc l = build(k, true);
+      k.fail("postcondition", l);
+    });
+  }
+  // x & 255 for every x: ((x % 256) + 256) % 256 in C's terms; the twin drops the correction (false for x = -1).
+  for (const int bits : {32, 64}) {
+    auto build = [=](Kit& k, bool wrong) -> SrcLoc {
+      const Type t = bit_type(k, bits, true);
+      Function* f = k.fn("f", t, {{"x", t}});
+      const Expr* m = k.rem(k.F(f, 0), k.num(t, "256"));
+      k.ens(f, k.eq(k.R(f), wrong ? m : k.rem(k.add(m, k.num(t, "256")), k.num(t, "256"))));
+      const Stmt* r = k.ret(k.band(k.pv(f, 0), k.num(t, "255")));
+      f->body = k.blk({r});
+      k.done(f);
+      return r->loc;
+    };
+    const std::string name = "bit_mask_low_byte_s" + std::to_string(bits);
+    const std::string doc = "x & 255 == ((x % 256) + 256) % 256 for every signed " + std::to_string(bits) + "-bit x, negative included";
+    lc(name, doc, [=](Kit& k) { build(k, false); });
+    lc(name + "_wrong", doc + " (the claim is x % 256, false for x = -1)", [=](Kit& k) {
+      const SrcLoc l = build(k, true);
+      k.fail("postcondition", l);
+    });
+  }
+  // The cross-type pin: `(unsigned long)(~0u) & v` is the constant 4294967295 in the computed type unsigned long, so it keeps the low 32 bits of
+  // an unsigned 64-bit v; the conversion is of ~0u in its own type (0023 item 1), never a 64-bit ~0.  The twin claims `r == v`, false for v = 2^32.
+  for (const bool wrong : {false, true}) {
+    lc(std::string("bit_mask_cross_type_u32_to_u64") + (wrong ? "_wrong" : ""),
+       std::string("(unsigned long)(~0u) & v == ") + (wrong ? "v (wrong)" : "v % 4294967296") + " for an unsigned 64-bit v", [=](Kit& k) {
+         Function* f = k.fn("f", k.u64, {{"v", k.u64}});
+         k.ens(f, wrong ? k.eq(k.R(f), k.F(f, 0)) : k.eq(k.R(f), k.rem(k.F(f, 0), k.num(k.u64, "4294967296"))));
+         const Stmt* r = k.ret(k.band(k.cv(k.u64, k.bnot(k.num(k.u32, "0"))), k.pv(f, 0)));
+         f->body = k.blk({r});
+         k.done(f);
+         if (wrong) k.fail("postcondition", r->loc);
+       });
+  }
+  // The range check of a masked result: (unsigned)(v & 4294967295u) fits, (unsigned)(v & 8589934591u) may not.
+  for (const bool wrong : {false, true}) {
+    lc(std::string("bit_mask_converts_back_u64") + (wrong ? "_wrong" : ""),
+       std::string("(unsigned)(v & ") + (wrong ? "8589934591" : "4294967295") + ") for an unsigned 64-bit v: the masked result " +
+           (wrong ? "may not fit unsigned int" : "always fits unsigned int"),
+       [=](Kit& k) {
+         Function* f = k.fn("f", k.u32, {{"v", k.u64}});
+         const Expr* back = k.cv(k.u32, k.band(k.pv(f, 0), k.num(k.u64, wrong ? "8589934591" : "4294967295")));
+         f->body = k.blk({k.ret(back)});
+         k.done(f);
+         if (wrong) k.fail("conversion", back->loc);
+       });
+  }
+}
+
 void define_bitwise() {
   const BinaryOp ops[] = {BinaryOp::BitAnd, BinaryOp::BitOr, BinaryOp::BitXor};
   const int widths[] = {32, 64, 128};
@@ -402,6 +657,8 @@ void define_bitwise() {
     k.done(f);
     k.fail("internal", w->loc, 1, "", "do-once");
   });
+
+  define_bitwise_masks();
 }
 
 void define_bitwise_rejections() {

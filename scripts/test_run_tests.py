@@ -12660,6 +12660,71 @@ class RealDriverTests(unittest.TestCase):
         self.assertIn("an internal inconsistency:", run.stderr)
         self.assertIn("are not exactly the set it depends on", run.stderr)
 
+    def test_the_forced_base_sets_bring_back_the_false_alarm_and_the_rejection(self):
+        # 0026 item 2: lowering tries the exact sets first and takes today's (the base sets) only when the
+        # exact family is not a chain.  The hook force_base_sets makes every full expression use the base sets,
+        # so a program that only the exact sets accept or verify must give today's answer with it and the new
+        # one without it.  If the hook did nothing, or the exact sets stopped being used, one half fails.
+        # (a) h((validate(y), y)): the precondition of h waits for validate with the exact sets, and is checked
+        # before it (a `precondition` false alarm at the call) with the base sets.  A hooked run that reports errors
+        # exits 3, never 1 (0011 item 13: a hooked run is never a verdict); the error itself is still printed.
+        path = REAL_ROOT / "tests" / "scalar" / "call_comma_validate.c"
+        for mode in ("c23", "c++20"):
+            with self.subTest("call_comma_validate.c", mode=mode):
+                run = self.run_driver("verify", str(path), f"--std={mode}")
+                self.assertEqual((run.returncode, run.stderr), (0, ""), run.stdout)
+                self.assertIn(": verified (", run.stdout)
+                run = self.run_driver("verify", str(path), f"--std={mode}",
+                                      "--cerastes_verify_selftest=force_base_sets")
+                self.assertEqual((run.returncode, run.stderr),
+                                 (3, "cerastes: error: self-test hook force_base_sets was active: exit status forced to 3\n"),
+                                 run.stdout)
+                self.assertIn("call_comma_validate.c:21: error: precondition: the precondition of `h` may not hold",
+                              run.stdout)
+                self.assertNotIn(": verified (", run.stdout)
+        # (b) take(f(x), h(y)) with one `requires` per argument: the exact sets form a chain, the base sets do
+        # not, so with the hook the program is rejected as before M4.4d (exit 2, unsequenced_calls).
+        path = REAL_ROOT / "tests" / "scalar" / "call_split_requires.c"
+        with self.subTest("call_split_requires.c"):
+            run = self.run_driver("verify", str(path), "--std=c23")
+            self.assertEqual((run.returncode, run.stderr), (0, ""), run.stdout)
+            self.assertIn(": verified (", run.stdout)
+            run = self.run_driver("verify", str(path), "--std=c23", "--cerastes_verify_selftest=force_base_sets")
+            self.assertEqual((run.returncode, run.stdout), (2, ""), run.stderr)
+            self.assertIn("error #cerastes-unsequenced_calls", run.stderr)
+
+    def kept_vpr(self, test, mode="c23"):
+        """The Viper that `verify --keep-vpr` writes for a test of tests/scalar (the run must verify)."""
+        path = REAL_ROOT / "tests" / "scalar" / test
+        out = self.cwd / (test + ".vpr")
+        run = self.run_driver("verify", str(path), f"--std={mode}", f"--keep-vpr={out}")
+        self.assertEqual((run.returncode, run.stderr), (0, ""), run.stdout)
+        self.assertIn(": verified (", run.stdout)
+        return out.read_text()
+
+    def test_a_constant_mask_is_emitted_as_a_remainder_not_as_a_bit_function(self):
+        # 0026 item 7: `a & (2^k-1)` is `a % 2^k` and `a & ~(2^k-1)` is `2^k * (a \ 2^k)`, and neither calls a
+        # `c_[u]and_N` function.  The verdict tests cannot see this (a prelude function would verify too, but
+        # it is what made `bit_mask.c` hang), so the emitted text is checked: if the rewrite stopped firing,
+        # these fail while every verified test still passes.  The twin is a near miss, which keeps its function.
+        text = self.kept_vpr("mask_remainder_word.c")
+        self.assertGreaterEqual(len(re.findall(r"% 4294967296\b", text)), 3, text)
+        self.assertNotIn("c_uand_64", text)
+        self.assertNotIn("c_uand_32", text)
+        text = self.kept_vpr("mask_remainder_clear.c")
+        self.assertRegex(text, r"\b16 \* \(+[\w$']+ \\ 16\)")     # x & ~15 (signed int)
+        self.assertRegex(text, r"\b8 \* \(+[\w$']+ \\ 8\)")       # u & ~7u (unsigned)
+        self.assertNotIn("c_and_32", text)
+        self.assertNotIn("c_uand_32", text)
+        # a mask that is not 2^k - 1 or its complement is the prelude function, whatever the nearby constants
+        text = self.kept_vpr("mask_near_miss.c")
+        calls = [l for l in text.splitlines() if "c_and_32(" in l and not l.startswith("function ")]
+        self.assertGreaterEqual(len(calls), 2, text)       # x & 254 and x & 256
+        # the methods only: the prelude's own c_and_32 body, emitted before them, holds `256 * (` as a bit weight
+        methods = text[text.index("\nmethod "):]
+        self.assertNotRegex(methods, r"% 25[46]\b")
+        self.assertNotRegex(methods, r"\b25[46] \* \(")
+
     def test_keep_vpr_writes_both_files(self):
         run = self.run_driver("verify", "one.cpp", "--keep-vpr")
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
