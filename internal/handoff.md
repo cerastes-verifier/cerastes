@@ -1,4 +1,4 @@
-# Handoff after M4.4c — writes outside the chain, `void` `?:` statements, `-Wall` shapes (2026-10-26)
+# Handoff after M4.4c — writes outside the chain, `void` `?:` statements, `-Wall` shapes (2026-10-26) — and S4, CI tiers (2026-10-27)
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
@@ -22,6 +22,12 @@ M4.4c is done on branch `m4.4c-writes-void-warnings` (based on local `main` `8bf
 The EDG pin is unchanged (`f0ed5525af`); the EDG box session (§4.3) is still pending. M4.4b2's PR #10 was merged on
 GitHub during the session; this branch starts from local `main` `8bff6ba`, the same tree.
 
+**S4 (2026-10-27), branch `s4-ci-tiers`** (from local `main` `cfceccb`, which merges M4.4c; decision 0016 item 14): CI
+runs the full `check.sh` every night at 07:00 UTC and on `workflow_dispatch`, and a PR tier on pull requests and pushes
+to `main` (`CERASTES_CHECK_BASE`; `run_tests.py --pr-base`). It started from M4.4c's PR #11, whose CI run failed on one
+test: `tests/scalar/bit_mask.c [c23]` hit the driver's 300 s Silicon limit. That is a fragile Z3 query, not M4.4c (§3,
+"From S4"; §8 question 47).
+
 ## 2. Owner steps after M4.4c, in this order
 
 1. **Handoff answers.** Your old §11 answers 40–42 were uncommitted in the main checkout's `internal/handoff.md`; this
@@ -31,7 +37,16 @@ GitHub during the session; this branch starts from local `main` `8bff6ba`, the s
    merge before opening this branch's PR.
 3. **This branch.** Push it and open its PR: `git push origin m4.4c-writes-void-warnings` (the session never pushes).
    CI runs `check.sh` as locally (the suite grew by about 230 files).
-4. **Questions.** Answer §8 (questions 43–46). Then M4.4d (§4.1, record 0026), then M4.4e (§4.2).
+4. **Questions.** Answer §8 (questions 43–48). Then M4.4d (§4.1, record 0026), then M4.4e (§4.2).
+
+**After S4:**
+5. **PR #11's red run** (run `40434946397`) is the `bit_mask.c [c23]` hang of §3 ("From S4"): its Viper is
+   byte-identical to the local one and to M4.4b1's, so M4.4c did not cause it. Decision 0016 item 10 leaves a rerun or
+   a merge over it to you (§8 question 47).
+6. **This branch** contains M4.4c (it starts from local `main`). Merge PR #11 first, then push and open the PR:
+   `git push origin s4-ci-tiers`. That PR's run is the first PR-tier run (a pull request runs the workflow of its merge
+   commit); its job time gives the measured number for 0016 item 9. The first full nightly runs at 07:00 UTC after the
+   merge.
 
 ## 3. Open audit notes (condensed; the full notes are in the commit named above)
 
@@ -62,6 +77,25 @@ GitHub during the session; this branch starts from local `main` `8bff6ba`, the s
   `verifying/void_conditional.c` keeps a redundant requires conjunct `(c == 0 || n > 0)` (four listed equivalents; the
   `m > 0` pattern of `void_conditional_for.c` would make it needed); a body `p | q` against an exact `&` contract runs to
   the timeout (0023's documented limit), so `not_eq_and_bools` states its contract with `&&`.
+
+**From S4** (the CI failure on PR #11, investigated on the owner's Mac; nothing changed yet):
+- *The `bit_mask.c [c23]` hang.* One Z3 query in `f_low_word__1__wf` (the well-formedness method of `low_word`'s
+  contract), the conversion bound `!((c_uand_64(p_v__0, 4294967295) < 0) || (4294967295 < c_uand_64(...)))`, never
+  answers: `c_uand_64` unfolds 64 halvings, and whether Z3 gets through depends on what the same prover process checked
+  before. Silicon's parallel verifiers make that order vary, so the hang is intermittent (CI run `40434946397`; 1 of 48
+  local runs at 12 at once), and with `--numberOfParallelVerifiers 1` it is deterministic in c23 (10 of 10) and absent
+  in c++20 (0 of 5: c23's `(cond ? 1 : 0) != 0` wrapping changes the history). Silicon's `assertTimeout` defaults to 0,
+  so nothing stops the query; Z3 was busy, not deadlocked (jstack: the worker in `ProverStdIO.readUnsat`). Its twin
+  `negative/bit_mask_post.c [c23]` has the same `low_word` and hangs the same way; a one-verifier sweep of the 89
+  programs that use the bitwise functions found no other hang (the 128-bit tests are slow, 43–75 s, but finish).
+- *Candidate fixes* (§8 question 47): (1) the encoder writes a mask by `2^k - 1` as `x % 2^k` and by `~(2^k - 1)` as
+  `x - x % 2^k` (exact identities on unbounded integers, since Viper's `%` by a positive divisor is the non-negative
+  floor remainder; for exactly those constants with k at most the width; the conversion checks unchanged): on scratch
+  copies 5 of 5 pass with one verifier and 16 of 16 with random seeds (slowest 14.1 s against 42.7 s); it amends 0023
+  and needs a must-verify/must-fail pair and an audit. (2) Silicon options: `--numberOfParallelVerifiers 1` makes every
+  run reproducible (this test would fail every time instead of sometimes), and `--assertTimeout` bounds each query by a
+  resource limit and fails closed (exit 3); both change solver behaviour for the whole suite. (3) Splitting the test
+  shortens the history but leaves the query fragile.
 
 **Carried from earlier sessions** (each still open; the session that wrote it in brackets):
 - *Recognition by name or shape.* `assert` is recognised by its macOS expansion and `__assert_rtn` (S3 note 1: a user
@@ -453,3 +487,15 @@ and in the commit named at the top.
     sweep finds a layout source? *Recommended: keep.*
 46. **One verdict for `x ? RED : GREEN` used as an `int`** (accepted in C, rejected in C++ by 0018 item 8): reject it in C
     too? *Recommended: yes, in M4.4e (it is the enumeration half of `-Wenum-compare`'s family), with a test per mode.*
+
+**S4, 2026-10-27:**
+
+47. **The `bit_mask.c [c23]` hang** (§3, "From S4"): fix it with the encoder's mask-as-remainder rule (candidate 1, an
+    amendment of 0023 with its tests and an audit), in a short session of its own before M4.4d? And PR #11: merge it
+    over the explained red run, or rerun it first? *Recommended: the encoder rule, in its own session before M4.4d; merge
+    PR #11 as it is (the failure predates M4.4c and is explained; a rerun that passes would prove nothing).*
+48. **Reproducible solver runs:** pass `--numberOfParallelVerifiers 1` (each program's prover history fixed, so an
+    intermittent hang becomes a failure every time, at some cost in time) or an `--assertTimeout` (a bound per query that
+    fails closed) to Silicon in the driver? Either changes every test's run and needs a full-suite measurement first.
+    *Recommended: measure `--numberOfParallelVerifiers 1` on the whole suite in the bit_mask session and decide on the
+    numbers; no `--assertTimeout` (a resource bound can turn a slow proof into a failure).*

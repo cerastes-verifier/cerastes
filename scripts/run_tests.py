@@ -95,6 +95,16 @@ not exist is an error (exit 2) that names it, so a vanished examples directory
 cannot silently drop the doc tests.  Paths named on the command line replace
 the defaults.
 
+`--pr-base <ref>` runs the PR tier of CI (decision 0016 item 14): a test
+that reaches Silicon (a `.vpr` test, or a `verified` or `error` test) runs
+only when it changed since `git merge-base <ref> HEAD` (the working tree and
+untracked files included), includes a helper header that changed, is a doc
+example, or is in a fixed sample of 1 in PR_SAMPLE chosen by a hash of its
+path; every other run (rejections, front-end and golden tests, native-ok
+compilations) is made as usual.  The summary counts the Silicon runs left to
+the full check, and `--expect-passed` counts them as passed.  An empty <ref>
+(check.sh's default) is the full run.
+
 The exit status is 1 if any test fails and 2 on usage or environment errors
 (including when no test is selected).
 """
@@ -137,7 +147,10 @@ SKIP_ALLOWED = [Path("tests/differential/verifast")]
 # What a run with no path arguments covers, relative to ROOT.  Documentation
 # examples are tests: dropping the second entry would silently stop running
 # them, so the harness self-test pins this constant and a run without paths.
-DEFAULT_PATHS = (Path("tests"), Path("doc/modules/ROOT/examples"))
+DOC_EXAMPLES = Path("doc/modules/ROOT/examples")
+DEFAULT_PATHS = (Path("tests"), DOC_EXAMPLES)
+# The PR tier's fixed sample (decision 0016 item 14): 1 in PR_SAMPLE of the tests that reach Silicon.
+PR_SAMPLE = 8
 SILICON_TIMEOUT_S = 600
 # The largest front-end test (the libc++ headers in the cerastes configuration) takes about 70 s of CPU, which a
 # loaded machine stretches past 120 s; a hang still fails, after ten minutes.
@@ -2098,6 +2111,7 @@ class RunOptions:
     update_golden: bool = False
     native: NativeSetup | None = None  # the compilers of the native-ok checks
     registry: TagRegistry | None = None  # the tags of the frontend-error checks
+    unselected: frozenset[Path] = frozenset()  # resolved tests whose Silicon runs the PR tier leaves out
 
 
 ENV_SH: Path | None = None  # the env file; None: ROOT/build/env.sh (self-tests point it elsewhere)
@@ -2275,6 +2289,8 @@ def run_verify(path: Path, exp: Expectation, env: dict[str, str],
     test (see the module docstring and evaluate_verify)."""
     if opts.update_golden:
         return []  # not a golden test: nothing to update
+    if path.resolve() in opts.unselected:
+        return []  # left to the full check by the PR tier
     outcomes = []
     for mode in exp.modes:
         vpr = vpr_path(path, mode)
@@ -2297,7 +2313,7 @@ def run_one(path: Path, exp: Expectation | HeaderError, env: dict[str, str],
     if isinstance(exp, HeaderError):
         return [Outcome(rel(path), [f"bad header: {exp}"])]
     if path.suffix == ".vpr":
-        return run_silicon(path, exp, env)
+        return [] if path.resolve() in opts.unselected else run_silicon(path, exp, env)
     if exp.kind == "golden":
         outcomes = run_golden(path, exp, env, opts)
     elif exp.kind == "frontend-diag":
@@ -2476,10 +2492,9 @@ def in_headers_dir(path: Path, base: Path) -> bool:
     return False
 
 
-def helper_bodies_included(test: Path) -> list[Path]:
-    """The helper headers with a function body that `test` includes, directly or
-    through other helpers (comments and `#if 0` aside): the files whose bodies the
-    driver must verify with the test."""
+def helpers_included(test: Path) -> list[Path]:
+    """The helper headers that `test` includes, directly or through other helpers
+    (comments and `#if 0` aside), resolved."""
     out: list[Path] = []
     seen: set[Path] = set()
     todo = [test.resolve()]
@@ -2490,12 +2505,72 @@ def helper_bodies_included(test: Path) -> list[Path]:
                 continue
             seen.add(g)
             todo.append(g)
-            try:
-                if has_function_body(g.read_bytes().decode("utf-8", "replace")):
-                    out.append(g)
-            except OSError:
-                pass
+            out.append(g)
     return out
+
+
+def helper_bodies_included(test: Path) -> list[Path]:
+    """The helper headers with a function body that `test` includes, directly or
+    through other helpers (comments and `#if 0` aside): the files whose bodies the
+    driver must verify with the test."""
+    out: list[Path] = []
+    for g in helpers_included(test):
+        try:
+            if has_function_body(g.read_bytes().decode("utf-8", "replace")):
+                out.append(g)
+        except OSError:
+            pass
+    return out
+
+
+# ---------------------------------------------------------------------------
+# The PR tier (decision 0016 item 14)
+# ---------------------------------------------------------------------------
+
+def reaches_silicon(path: Path, exp: Expectation | HeaderError) -> bool:
+    """Whether a run of the test reaches Silicon: a `.vpr` test, or a `verified` or
+    `error` test (a `rejected` one stops in the front end)."""
+    return isinstance(exp, Expectation) and (
+        path.suffix == ".vpr" or (is_verify_test(path, exp) and vpr_expected(exp)))
+
+
+def silicon_runs(path: Path, exp: Expectation) -> int:
+    """The Silicon runs of a test that reaches Silicon: one per mode, one for a `.vpr` test."""
+    return 1 if path.suffix == ".vpr" else len(exp.modes)
+
+
+def in_pr_sample(test: Path) -> bool:
+    """Whether `test` is in the PR tier's fixed sample: 1 in PR_SAMPLE by a hash of its
+    path relative to the repository root, so that adding a file moves no other in or out."""
+    digest = hashlib.sha256(Path(rel(test)).as_posix().encode()).hexdigest()
+    return int(digest, 16) % PR_SAMPLE == 0
+
+
+@dataclasses.dataclass
+class PrTier:
+    base: str  # the merge base, a full commit name
+    changed: set[Path]  # resolved files changed since `base`, the working tree included
+
+    def selects(self, test: Path) -> bool:
+        """Whether the PR tier makes the Silicon runs of `test`."""
+        return (test.resolve() in self.changed or _under(test, DOC_EXAMPLES) or in_pr_sample(test)
+                or any(h in self.changed for h in helpers_included(test)))
+
+
+def pr_tier(ref: str) -> PrTier:
+    """The PR tier against `ref`: the files that differ between `git merge-base <ref>
+    HEAD` and the working tree, and the untracked ones (a new test not yet committed
+    is a changed test).  A ref git cannot resolve is a UsageError."""
+    def git(*args: str) -> str:
+        proc = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True)
+        if proc.returncode != 0:
+            raise UsageError(f"--pr-base {ref}: `git {' '.join(args)}` failed"
+                             + (f": {proc.stderr.strip()}" if proc.stderr.strip() else ""))
+        return proc.stdout
+    base = git("merge-base", ref, "HEAD").strip()
+    names = (git("diff", "--name-only", "--no-renames", "-z", base, "--").split("\0")
+             + git("ls-files", "--others", "--exclude-standard", "-z").split("\0"))
+    return PrTier(base, {(ROOT / n).resolve() for n in names if n})
 
 
 def helper_problems(helpers: list[Path]) -> list[tuple[Path, str]]:
@@ -2736,11 +2811,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expect-passed", type=int, metavar="N",
                         help="fail unless exactly N tests passed and none failed: for a "
                              "directory whose size a generator states (check.sh pins the "
-                             "VIR self-test's case count with it)")
+                             "VIR self-test's case count with it); with --pr-base, the "
+                             "Silicon runs left to the full check count as passed")
     parser.add_argument("--update-golden", action="store_true",
                         help="write the golden files of the selected golden tests "
                              "instead of comparing (review the diff; never in "
                              "check.sh)")
+    parser.add_argument("--pr-base", metavar="REF", default="",
+                        help="the PR tier of CI (decision 0016 item 14): Silicon runs only for the "
+                             "tests changed since `git merge-base REF HEAD`, the doc examples and a "
+                             f"fixed 1-in-{PR_SAMPLE} sample, every other run as usual; an empty REF "
+                             "(check.sh's default) runs everything")
     args = parser.parse_args(argv)
     if args.count_error_twins:
         print(count_error_twins())
@@ -2820,9 +2901,22 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     opts = RunOptions(verbose=args.verbose, update_golden=args.update_golden)
+    left = 0  # the Silicon runs the PR tier leaves to the full check
+    if args.pr_base:
+        try:
+            tier = pr_tier(args.pr_base)
+        except UsageError as err:
+            print(f"run_tests.py: {err}", file=sys.stderr)
+            return 2
+        silicon = [f for f, e in headers.items() if reaches_silicon(f, e)]
+        opts.unselected = frozenset(f.resolve() for f in silicon if not tier.selects(f))
+        left = sum(silicon_runs(f, headers[f]) for f in silicon if f.resolve() in opts.unselected)
+        print(f"PR tier: merge base {tier.base[:12]}, {len(tier.changed)} files changed; "
+              f"Silicon runs for {len(silicon) - len(opts.unselected)} of {len(silicon)} tests")
     outcomes: list[Outcome] = []
     verify_tests = [(f, e) for f, e in headers.items()
-                    if isinstance(e, Expectation) and is_verify_test(f, e)]
+                    if isinstance(e, Expectation) and is_verify_test(f, e)
+                    and f.resolve() not in opts.unselected]
     # A run that must produce Viper starts from an empty build/vpr/ with its
     # MANIFEST, so scripts/lint_viper.py can require every file of this run.
     if not args.update_golden and any(vpr_expected(e) for _, e in verify_tests):
@@ -2879,10 +2973,13 @@ def main(argv: list[str] | None = None) -> int:
             f"{c.family} {opts.native.runs.get(c.family, 0)}" for c in opts.native.compilers)
     if args.update_golden:
         summary += f", {updated} goldens updated, {unchanged} unchanged"
+    if args.pr_base:
+        summary += f", {left} Silicon runs left to the full check (PR tier)"
     print(f"\n{summary}")
-    if args.expect_passed is not None and not failed and passed != args.expect_passed:
+    if args.expect_passed is not None and not failed and passed + left != args.expect_passed:
         print(f"run_tests.py: expected exactly {args.expect_passed} passing tests, "
-              f"got {passed}", file=sys.stderr)
+              f"got {passed}" + (f" and {left} left to the full check" if args.pr_base else ""),
+              file=sys.stderr)
         return 1
     return 1 if failed else 0
 

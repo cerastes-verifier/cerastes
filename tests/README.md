@@ -550,6 +550,24 @@ self-test run included: the self-test guard rejects any `-j` on that line). Each
 which is why CI sets `CERASTES_JOBS=3`: three fit the 7 GB of its runner, eight do not. `scripts/walker_oracle.py` keeps its own default
 (`min(8, cores)`, for its front-end runs only) and does not read `CERASTES_JOBS`.
 
+## The PR tier (`--pr-base`, `CERASTES_CHECK_BASE`)
+
+CI runs the full check every night and on request, and a smaller PR tier on pull requests and pushes to `main`
+(decision 0016 item 14). `run_tests.py --pr-base <ref>` is that tier: a test that reaches Silicon (a `.vpr`
+test, or a `verified` or `error` test) runs only when it changed since `git merge-base <ref> HEAD` (the
+working tree and untracked files count, so a new test runs before it is committed), when it includes a helper
+header that changed, when it is a doc example, or when it is in the fixed sample: 1 in `PR_SAMPLE` (8) by a
+SHA-256 of its repository-relative path, so adding a file moves no other test in or out. Every other run is
+made as usual: rejections, front-end and golden tests, native-ok compilations, header checks and twins. The
+first line names the merge base and the summary counts the Silicon runs left to the full check; `--expect-passed`
+counts those as passed (the VIR self-test's cases are sampled the same way). An empty `<ref>` is the full run, and
+a ref git cannot resolve is a usage error (exit 2).
+
+`scripts/check.sh` reads `CERASTES_CHECK_BASE` once and passes it to both of its test runs: unset or empty
+(the default, and what a session ends with) is the full check, which ends with `check.sh: all green`; set, it is
+the PR tier, which ends with `check.sh: green in the PR tier (not the full check)`. To rehearse CI's pull-request
+run locally: `CERASTES_CHECK_BASE=main scripts/check.sh`.
+
 ## Mutation testing (`scripts/mutate.py`)
 
 `python3 scripts/mutate.py` (45 to 90 minutes at `-j 8` for `tests/scalar`: run it alone, and give it a
@@ -926,8 +944,10 @@ so the two checks are both required.
 
 `check.sh` runs the examples as tests, both checks, and the docs build. Two
 workflows run in CI. `.github/workflows/ci.yml` runs `scripts/ci.sh` (the
-runner's setup and toolchain assertions) and then the full `scripts/check.sh`,
-so the examples run as tests there too, on GitHub's `xcode-27` runner with
+runner's setup and toolchain assertions) and then `scripts/check.sh`, the full
+check every night at 07:00 UTC and on `workflow_dispatch`, the PR tier on pull
+requests and pushes to `main` ([The PR tier](#the-pr-tier---pr-base-cerastes_check_base)),
+so the examples run as tests there too (every one, in both tiers), on GitHub's `xcode-27` runner with
 `CERASTES_JOBS=3` (decision 0016). The harness self-test pins the active text of both files:
 `ci_workflow_problems` and `ci_sh_problems` compare every active line (comments and blank lines dropped) with
 a pinned copy, so an extra step, an extra command, a `break` in a loop or a reassigned constant fails it;

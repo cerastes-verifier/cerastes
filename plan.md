@@ -118,6 +118,7 @@ Every test file starts with expectation lines that `scripts/run_tests.py` checks
 | M4.4a No wrapping | 2026-10-23 | 0022 | unsigned arithmetic checked like signed; internal errors exit 3 |
 | M4.4b1 Bitwise operators · M4.4b2 Values the front end computes | 2026-10-23/26 | 0023, 0024 | exact `& \| ^ ~`; static assertions checked as written; wrapped character literals; types from constants rejected until M4.5e |
 | M4.4c Writes outside the chain, `void` `?:`, `-Wall` shapes | 2026-10-26 | 0025 | writes leave the chain; `void` `?:` statements; warnings in tests; the in-function static-assertion cross-check; 13 `-Wall` shape rules |
+| S4 CI tiers | 2026-10-27 | 0016 (item 14) | pull requests and pushes to `main` run a PR tier (Silicon for the changed tests, the doc examples and a fixed 1-in-8 sample; every other run); the full check every night at 07:00 UTC and on dispatch |
 
 The finished milestones' plans (goals, tasks, acceptance) are in the commit named above; `internal/status.md` has a
 row per session.
