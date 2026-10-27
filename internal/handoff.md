@@ -33,7 +33,7 @@ The EDG pin is unchanged (`f0ed5525af`); the EDG box session (§4.3) is still pe
    on `bit_mask.c [c23]` alone is the known hang, which this branch fixes.
 3. **This branch.** Push it and open its PR: `git push origin m4.4d-exact-sets` (the session never pushes). The PR tier
    runs the changed tests (about 56 new files), the doc examples and the sample.
-4. **Questions.** Answer §8 (questions 49–52). Then M4.4e (§4.2, record 0027).
+4. **Questions.** Answer §8 (questions 49–52). Then M4.5a (owner, 2026-10-27: M4.4e deferred to M8, §4.2).
 
 ## 3. Open audit notes (condensed; the full notes are in the commit named above)
 
@@ -64,7 +64,7 @@ The EDG pin is unchanged (`f0ed5525af`); the EDG box session (§4.3) is still pe
   an expression); clang's `-Wparentheses-equality`, `-Wswitch-bool`, `-Wfor-loop-analysis`, `-Wmisleading-indentation`
   (clang and GCC), GCC's `-Wmultistatement-macros`, clang's `-Wempty-body` on loops; R10 with a named constant
   (`uc == DEF`, `const int DEF = 300;`, clang's C++ mode warns) or a constant expression (`uc == 256 + 44`); R7 does
-  not look into a `?:` arm that is a comma ending in a constant. All are for **M4.4e** (§4.2).
+  not look into a `?:` arm that is a comma ending in a constant. All are for the warning sweep, now in **M8** (§4.2).
 - *Rejected more broadly than the compilers, listed:* R13's `;` on the line after the condition and an empty macro
   invocation as the body (`if (x > 0) LOG("positive");`), since the IL keeps no position for the `)`; R7's `*` through
   both `?:` arms in every conversion to `bool` (GCC's C mode only); R9 on a 0 or 1 right operand from a macro
@@ -160,25 +160,12 @@ that needs the x86-64 box is its own session. Record numbers are the next free o
 
 Done on 2026-10-27 (`internal/status.md`; plan `~/.claude/plans/using-plan-md-and-my-fuzzy-sky.md`).
 
-### 4.2 M4.4e The warning sweep (owner, 2026-10-26, during M4.4c; record 0027)
+### 4.2 The warning sweep: deferred to M8 (owner, 2026-10-27, M4.5a planning)
 
-Owner (2026-10-27, §8 questions 43–46, as recommended): M4.4e comes right after M4.4d and before M4.5a, with an M8 entry
-for what the IL cannot see; R10 and R11 keep skipping annotations; R13's broader shapes stay rejected; `x ? RED : GREEN`
-used as an `int` is rejected in C too, with a test per mode.
-
-M4.4c's audits kept finding default and `-Wall` warnings that no rule covers (record 0025 item 6, "still accepted"),
-because no one had swept the compilers' complete lists. M4.4e does it once:
-- **Inventory:** every warning clang 21 enables by default or under `-Wall` (`clang -Wall -###`, the diagnostic groups
-  in its documentation, or `diagtool tree`) and every GCC 16 `-Wall` warning (`gcc -Q --help=warnings -Wall`), each
-  marked "can fire on the language cerastes accepts" or not (floating point, pointers, classes, … are rejected anyway;
-  record why per family).
-- **Measure** the families that can fire, both modes, three tiers (§6), with near misses; the IL facts each needs
-  (positions and columns for `-Wmisleading-indentation`, macro origins, loop bodies for `-Wfor-loop-analysis`).
-- **Reject** what warns, one rule per family, a rejection test per shape and the near misses in
-  `warn_accepted_neighbours.c`; list what the IL cannot see (an M8 entry each). Start from 0025 item 6's list and
-  §3's M4.4c notes, and §8 questions 43–46.
-- **Stop rules:** a family that needs an EDG fork commit goes to the box session; any existing test that flips stops
-  the work.
+"Since warnings will impact much more than just what we have now we can defer M4.4e until M8." The sweep is an M8 known
+entry in `plan.md` (every default and `-Wall` warning of clang 21 and GCC 16 that can fire on the language cerastes
+accepts, one rule per family or listed; 0025 item 6's list and §3's M4.4c notes first). Its record takes the next free
+number when it runs; 0027 went to M4.5a. The plan it had is `git show 9017105:internal/handoff.md` §4.2.
 
 ### 4.3 EDG box session (pending since M4.2c)
 
@@ -455,12 +442,37 @@ in the commit named at the top and in `43f0f81` (questions 5, 10–12 and 43–4
     decide, and each such mutant runs to the 300 s timeout. In M4.8's run over the M4 tests, run them with mutants of a
     mask constant counted as "undecided (0023 item 2)", reviewed like the safe-direction bucket? *Recommended: yes, in
     M4.8.*
+
+Follow recommendation
+
 50. **A note when the fallback is used:** an error reported in a full expression that took step 2 may be a false alarm
     (0026 item 6). Print a note with it ("checked with the smaller sets: C may not reach this")? *Recommended: not now;
     no test takes step 2 to be accepted; revisit with the ports in M4.8.*
+
+Follow recommendation
+
 51. **Masks passed as arguments** (§3, M4.4d): a mask that is a parameter of the callee still reaches Silicon's own
     precondition check as `c_uand_N` and may time out. *Recommended: leave it documented; revisit if a port needs it
     (M5's integral `T` will meet masks over a parameter type).*
+
+Follow recommendation
+
 52. **`|` and `^` with a constant mask** (`x | 0xFF`, `x ^ 0xFF`) keep their prelude functions, so symbolic claims about
     them stay undecided. Extend the rule (`x | (2^k − 1) = x − x % 2^k + 2^k − 1`, `x ^ (2^k − 1) = x − 2·(x % 2^k) +
     2^k − 1`)? *Recommended: not now; when a ported example (M4.6 chars, M4.8) needs it, with its own spike.*
+
+Do it now since we know it needs handled
+
+**M4.5a planning, 2026-10-27** (owner; plan `~/.claude/plans/using-plan-md-and-my-streamed-glacier.md`):
+- **M4.4e is deferred to M8** (§4.2).
+- **Q52 is folded into M4.5a** (record 0027, code in `src/vir`), as Q47 was into M4.4d.
+- **`[[cerastes::owns]]` is an owning pointer** wherever it appears: on a parameter the callee borrows the pointee
+  (`p == NULL || owns(*p)` on entry and exit); on a function, the caller receives its result's pointee; on a local or
+  global, the holder frees it or hands it on before its lifetime ends (the leak check); on a struct field, owning the
+  struct owns `*s->f`. Phased over M4.5b–f (record 0029). "Much like how P4222 allows `[[uninit]] int x;`", in
+  addition to `owns(x)` in contracts.
+- **vlibc** (`cerastes-verifier/vlibc`, created by the owner): contract headers and verified implementations; a user's
+  `#include <vlibc/stdlib.h>` is used, and a bare `<stdlib.h>` is transparently replaced in verify mode ("combine all 3
+  of those options"). Our ports of `malloc`/`free` live there, not in this repository as VeriFast's do (record 0030).
+- **P4222's markers** are spelled `[[cerastes::uninit]]`, `[[cerastes::ref_to_uninit]]`, `[[cerastes::must_init]]`,
+  checked when written, with an opt-in strict mode (record 0029).

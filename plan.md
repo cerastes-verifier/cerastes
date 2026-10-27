@@ -138,7 +138,6 @@ history of `internal/status.md`).
 
 | Session | Scope | Needs |
 |---|---|---|
-| **M4.4e The warning sweep** | every default and `-Wall` warning of clang 21 and GCC 16 that can fire on the language cerastes accepts, measured in both modes and rejected like the compilers (one rule per family) or listed; M4.4c's listed shapes first (owner, 2026-10-26; record 0027) | M4.4d (done) |
 | **M4.5 Pointers** (sessions a–f, below) | the memory model for C | M4.1–M4.3 |
 | **M4.6 Chars and strings** | string literals as read-only arrays, `char` buffers, `strlen`/`memcpy`/`memcmp`/`strcmp` contracts, `main(argc, argv)` | M4.5e |
 | **M4.7 Function pointers** | contracts on function types, calls through pointers ("the pointer satisfies the type") | M4.5b |
@@ -318,7 +317,12 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
   - **From M4.4c** (record 0025): `(x = f(a), x) + (y = g(b), y)` with locals declared without an initializer
     stays `unsequenced_calls` (owner: the snapshots' `uninitialized` checks stay in the chain); `RED == RED` is
     accepted although clang warns (the front end folds it without an expression); `else ;` and `do ; while (c);`
-    are accepted (GCC `-Wextra` only); the warning families M4.4e leaves listed.
+    are accepted (GCC `-Wextra` only).
+  - **The warning sweep (was M4.4e;** owner, 2026-10-27, M4.5a planning: "warnings will impact much more than just
+    what we have now"). Every default and `-Wall` warning of clang 21 and GCC 16 that can fire on the language
+    cerastes accepts, measured in both modes and rejected like the compilers (one rule per family) or listed; record
+    0025 item 6's "still accepted" shapes and handoff §3's M4.4c notes first. Its record takes the next free number
+    when it runs (0027 went to M4.5a).
 - **User docs:** publish a "Language support" page in `doc/` from the inventory. It shows what is supported and unsupported, by standard. The difficulty assessment stays in the planning file.
 
 **Acceptance:** complete records of features that are and are not implemented with annotated difficulty sorted by language standard.
