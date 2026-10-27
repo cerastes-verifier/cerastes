@@ -9,8 +9,9 @@
 //    (checks that C/C++ makes undefined or that the verifier must prove) and the calls it found.
 //  * `flush()` writes a `Full` as statements, in the order of 0012 item 6 as decision 0021 states it: calls are
 //    hoisted into temporaries, and every obligation is placed after the fixed points (calls, and branches that hold a
-//    call) of its set and before every other fixed point.  The sets of a full expression must form a chain; if they do
-//    not, the program is rejected (`LowerResult::rejections`).
+//    call) of its set and before every other fixed point.  The sets of the obligations and of the branches (the family
+//    F) must form a chain; if they do not, the program is rejected (`LowerResult::rejections`).  A write or a snapshot
+//    is not in F (decision 0025 item 2): it goes right after the last member of its set in the order of the fixed points.
 //  * Statements are lowered by `Fn::stmt()`.
 #include "lower.h"
 
@@ -19,6 +20,7 @@
 #include <functional>
 #include <map>
 #include <set>
+#include <tuple>
 
 #include "dec.h"
 
@@ -101,6 +103,7 @@ struct Obl {
   Deps dep;         // its set: emitted after the fixed points of the set, before every other
   size_t seq = 0;   // creation order within the Full (items of one slot keep it)
   int term_of = -1; // the fixed point (a call) whose explicit termination check this is (decision 0021 item 4), else -1
+  int flag_of = -1; // the local (Var id) whose `uninitialized` flag this reads, else -1: a read of that local (decision 0025 item 1)
 };
 
 struct CallItem {
@@ -112,12 +115,14 @@ struct CallItem {
   low::Check termination;
 };
 
-// One effect of a full expression (decision 0020 items 5 and 7, decision 0021 item 3).  The FIXED POINTS are the calls and the branches
-// that contain a call: they are numbered in creation order and emitted in the order pi (see flush).  Every other item, an obligation as
-// well as a write, a snapshot or a call-free branch, has a set: the fixed points C must have completed before it evaluates it (through
-// the temporaries it mentions, its guard, the comma floor, and the earlier accesses to the variables it touches), and is emitted right
-// after the fixed points of its set and before every other, in creation order within a slot; an item with an empty set comes before
-// the first fixed point.  A callee that does not return cannot hide a check C may evaluate before the call (decision 0012 item 6): a
+// One effect of a full expression (decision 0020 items 5 and 7, decision 0021 item 3, decision 0025 item 2).  The FIXED POINTS are the
+// calls and the branches that contain a call: they are numbered in creation order and emitted in the order pi (see flush).  Every other
+// item, an obligation as well as a write, a snapshot or a call-free branch, has a set: the fixed points C must have completed before it
+// evaluates it (through the temporaries it mentions, its guard, the comma floor, and the earlier accesses to the variables it touches).
+// An obligation and a call-free branch are emitted right after the fixed points of its set and before every other (its set is a prefix
+// of pi); a write and a snapshot cannot fail, so they are not in the family whose sets must form a chain: they are emitted right after
+// the member of their set that comes last in pi.  Within one slot, items keep creation order; an item with an empty set comes before the
+// first fixed point.  A callee that does not return cannot hide a check C may evaluate before the call (decision 0012 item 6): a
 // callee can neither read nor write a local, and the sequencing rule leaves unsequenced operands no shared local.
 struct Effect {
   enum class Kind {
@@ -810,7 +815,9 @@ class Lowerer {
   }
 
   // E3: a read of a local that the full expression writes is a snapshot, taken where C reads it; its `uninitialized` obligation
-  // (decision 0019) takes the snapshot's set, so the flag is read where the value is.
+  // (decision 0019) is the read of the flag, which is part of the read of the local: it has the set of the read (the snapshot's own
+  // set, its guard's and the comma floor's), and that set, not just the snapshot's, is what a later write of the local must follow
+  // (decision 0025 item 1: a comma drops its left operand's calls, so a later write could otherwise be emitted before the check).
   LV snapshot(const Expr& e, const E& guard, const Deps& gdep, Full& full) {
     const std::string t = new_temp(e.var->type.is_bool());
     const int id = e.var->id;
@@ -825,10 +832,15 @@ class Lowerer {
     fx.seq = full.next_seq++;
     fx.reads.insert(id);
     full.effects.push_back(std::move(fx));
-    touch(full, id, slot);
-    if (flagged(*e.var))
+    if (flagged(*e.var)) {
       obl(full, guard, gdep, low::var(flag_name(*e.var)), slot,
           meta("uninitialized", e.loc, "`" + e.var->name + "` may be read here before it is given a value"));
+      Obl& check = full.obls.back();
+      check.flag_of = id;
+      touch(full, id, opt_.drop_flag_access ? slot : check.dep);  // gdep + slot + floor_: every later access follows the check (hook: only the snapshot's)
+    } else {
+      touch(full, id, slot);
+    }
     return {low::var(t), slot};
   }
 
@@ -1031,8 +1043,8 @@ class Lowerer {
     out.push_back(assert_stmt(std::move(cond), std::move(m)));
   }
 
-  // What the items that have exactly the set `set` are: `term_call` is the recursive call whose explicit termination check has it as PRE
-  // (-1 if none), `ordinary` whether any other item (an obligation, a write, a snapshot, a branch) has it.
+  // What the items of F that have exactly the set `set` are: `term_call` is the recursive call whose explicit termination check has it as
+  // PRE (-1 if none), `ordinary` whether any other item (an obligation, a branch) has it.  A write or a snapshot is not in F.
   struct SetOrigin {
     bool ordinary = false;
     int term_call = -1;
@@ -1045,9 +1057,10 @@ class Lowerer {
       else o.ordinary = true;
     }
     for (const Effect& fx : full.effects) {
+      if (fx.kind != Effect::Kind::Branch) continue;
       if (fx.fixed < 0) {
         if (fx.deps == set) o.ordinary = true;
-      } else if (fx.kind == Effect::Kind::Branch) {
+      } else {
         Deps d = fx.deps;
         d.insert(fx.fixed);
         if (d == set) o.ordinary = true;
@@ -1099,23 +1112,34 @@ class Lowerer {
     rejections_.push_back(Diag{later.loc, std::move(why)});
   }
 
-  // Write a full expression (decision 0021 item 3; 0012 item 6, 0020 item 7 for the shape of the items).  The family F of its sets
-  // (every obligation's, every movable effect's, D(B) of every branch that holds a call; the sets of the explicit termination checks
-  // are among the obligations') must form a chain under inclusion; the fixed points are then ordered pi: those of the smallest set,
-  // then those each larger set adds, then the rest, each group in creation order.  Every set is a prefix of pi, and an item is emitted
-  // right after the |S|-th fixed point of its set S and before every other: a callee that does not return hides only what C cannot
-  // evaluate before it returns.  An item with an empty set comes first.  A fixed point is a hoisted call, or a branch (an `if`
-  // for a guarded operand with effects).  A movable effect is `v := value` (and its flag) for a write, a snapshot of a local that the
-  // expression writes, or an `if` for a call-free guarded operand.  Where the sets form no chain the program is refused
-  // (`rejections`) and the rest is written in creation order, so that lowering finishes.
+  // Where each item of a full expression is emitted: `obl[k]` for `full.obls[k]`, `eff[k]` for a movable `full.effects[k]` (a write, a
+  // snapshot or a call-free branch; unused, -2, for a fixed point).  Slot s is right after pi[s], before pi[s + 1]; -1 is before every
+  // fixed point.  Computed once by flush; emission and both order checks read this one vector, so a check sees the order emission uses.
+  struct Placement {
+    std::vector<int> obl;
+    std::vector<int> eff;
+  };
+
+  // Write a full expression (decision 0021 item 3; 0012 item 6, 0020 item 7 for the shape of the items; decision 0025 item 2).  The
+  // family F of the sets of the checks (every obligation's, the explicit termination checks among them), of the call-free branches, and
+  // D(B) of every branch that holds a call, must form a chain under inclusion; the fixed points are then ordered pi: those of the
+  // smallest set, then those each larger set adds, then the rest, each group in creation order.  Every set of F is a prefix of pi, and
+  // an obligation or a call-free branch is emitted right after the |S|-th fixed point of its set S and before every other: a callee that
+  // does not return hides only what C cannot evaluate before it returns.  A write or a snapshot cannot fail, so its set is not in F: it
+  // is emitted right after the member of its set that comes last in pi (before every fixed point when its set is empty).  Items emitted
+  // after the same fixed point keep creation order.  An item with an empty set comes first.  A fixed point is a hoisted call, or a
+  // branch (an `if` for a guarded operand with effects).  A movable effect is `v := value` (and its flag) for a write, a snapshot of a
+  // local that the expression writes, or an `if` for a call-free guarded operand.  Where the sets of F form no chain the program is
+  // refused (`rejections`) and the rest is written in creation order, so that lowering finishes.
   void flush(Full& full, std::vector<low::LStmt>& out) {
     const int n = full.nfixed;
     std::vector<Deps> sets;
     for (const Obl& o : full.obls) sets.push_back(o.dep);
     for (const Effect& fx : full.effects) {
+      if (fx.kind != Effect::Kind::Branch) continue;  // a write or a snapshot is not in F (decision 0025 item 2); a call is a fixed point
       if (fx.fixed < 0) {
         sets.push_back(fx.deps);
-      } else if (fx.kind == Effect::Kind::Branch) {
+      } else {
         Deps d = fx.deps;
         d.insert(fx.fixed);
         sets.push_back(std::move(d));
@@ -1143,19 +1167,53 @@ class Lowerer {
     if (opt_.perturb_fixed_order && chain && pi.size() >= 2) std::swap(pi[0], pi[1]);  // self-test hook (0011 item 13)
     std::vector<int> pos(static_cast<size_t>(n), 0);  // the index of each fixed point in pi
     for (size_t k = 0; k < pi.size(); ++k) pos[static_cast<size_t>(pi[k])] = static_cast<int>(k);
-    // The slot of an item: right after pi[|S| - 1] (-1: before every fixed point).
-    auto slot_of = [n](const Deps& s) { return std::min(static_cast<int>(s.size()) - 1, n - 1); };
+    // The slot of an item of F: right after pi[|S| - 1] (-1: before every fixed point).  Of a write or a snapshot: right after the member
+    // of its set that comes last in pi (-1 for an empty set).
+    auto prefix_slot = [n](const Deps& s) { return std::min(static_cast<int>(s.size()) - 1, n - 1); };
+    auto last_member = [&pos](const Deps& s) {
+      int m = -1;
+      for (int id : s) m = std::max(m, pos[static_cast<size_t>(id)]);
+      return m;
+    };
+    Placement place;
+    for (const Obl& o : full.obls) place.obl.push_back(prefix_slot(o.dep));
+    bool perturbed = false;
+    bool delayed = false;
+    // Whether an item created after `w` has a set that contains w's set.
+    auto depended_on = [&full](const Effect& w) {
+      auto contains = [&w](const Deps& big) { return std::includes(big.begin(), big.end(), w.deps.begin(), w.deps.end()); };
+      for (const Obl& o : full.obls)
+        if (o.seq > w.seq && contains(o.dep)) return true;
+      for (const Effect& x : full.effects)
+        if (&x != &w && x.seq > w.seq && contains(x.deps)) return true;
+      return false;
+    };
+    for (const Effect& fx : full.effects) {
+      int slot = -2;
+      if (fx.fixed < 0) {
+        slot = fx.kind == Effect::Kind::Branch ? prefix_slot(fx.deps) : last_member(fx.deps);
+        if (opt_.perturb_write_slot && !perturbed && fx.kind == Effect::Kind::Write && !fx.deps.empty()) {  // self-test hook (0025)
+          slot = -1;
+          perturbed = true;
+        }
+        if (opt_.delay_write_slot && !delayed && fx.kind == Effect::Kind::Write && !fx.deps.empty() && depended_on(fx)) {  // self-test hook (0025)
+          slot = n - 1;
+          delayed = true;
+        }
+      }
+      place.eff.push_back(slot);
+    }
     if (chain) {
-      check_variable_order(full, pos);
-      check_fixed_order(full, pi, pos);
+      check_variable_order(full, pos, place);
+      check_fixed_order(full, pi, pos, place);
     }
     for (int slot = -1; slot < n; ++slot) {
       // The items of this slot, obligations and movable effects, in creation order.
       std::vector<std::pair<size_t, std::pair<bool, size_t>>> items;  // (seq, (is obligation, index))
       for (size_t k = 0; k < full.obls.size(); ++k)
-        if (slot_of(full.obls[k].dep) == slot) items.push_back({full.obls[k].seq, {true, k}});
+        if (place.obl[k] == slot) items.push_back({full.obls[k].seq, {true, k}});
       for (size_t k = 0; k < full.effects.size(); ++k)
-        if (full.effects[k].fixed < 0 && slot_of(full.effects[k].deps) == slot) items.push_back({full.effects[k].seq, {false, k}});
+        if (full.effects[k].fixed < 0 && place.eff[k] == slot) items.push_back({full.effects[k].seq, {false, k}});
       std::sort(items.begin(), items.end());
       for (const auto& it : items) {
         if (it.second.first) {
@@ -1200,11 +1258,13 @@ class Lowerer {
     }
   }
 
-  // The fail-closed check of the main property of decision 0021 (like check_variable_order): the fixed points emitted before an item are
-  // exactly its set; every fixed point follows its PRE; and a branch with a call, and a recursive call whose explicit termination check
-  // is not written, come right after their PRE.  A violation would be a wrong Viper program (a check hidden by a call that does not
-  // return), so it is an internal error.
-  void check_fixed_order(const Full& full, const std::vector<int>& pi, const std::vector<int>& pos) {
+  // The fail-closed check of the main property of decision 0021 (like check_variable_order): the fixed points emitted before an
+  // obligation or a call-free branch are exactly its set; every fixed point follows its PRE; and a branch with a call, and a recursive
+  // call whose explicit termination check is not written, come right after their PRE.  A violation would be a wrong Viper program (a
+  // check hidden by a call that does not return), so it is an internal error.  For a write and a snapshot (decision 0025 item 2): every
+  // member of its set is emitted before it, and every item created later whose set (for a fixed point: its PRE) contains that set is
+  // emitted after it.  `place` is the placement emission uses.
+  void check_fixed_order(const Full& full, const std::vector<int>& pi, const std::vector<int>& pos, const Placement& place) {
     auto prefix_is = [&pi](const Deps& s) {
       if (s.size() > pi.size()) return false;
       for (size_t k = 0; k < s.size(); ++k)
@@ -1215,7 +1275,7 @@ class Lowerer {
     for (const Obl& o : full.obls)
       if (!prefix_is(o.dep)) { internal_error(SrcLoc{}, kSet); return; }
     for (const Effect& fx : full.effects)
-      if (fx.fixed < 0 && !prefix_is(fx.deps)) { internal_error(SrcLoc{}, kSet); return; }
+      if (fx.fixed < 0 && fx.kind == Effect::Kind::Branch && !prefix_is(fx.deps)) { internal_error(SrcLoc{}, kSet); return; }
     for (int id = 0; id < full.nfixed; ++id) {
       const Deps& pre = full.pre[static_cast<size_t>(id)];
       for (int p : pre)
@@ -1234,33 +1294,65 @@ class Lowerer {
         internal_error(SrcLoc{}, "a recursive call is emitted without its explicit termination check and not right after what it depends on");
         return;
       }
+    // Writes and snapshots.  The emission order of an item: its slot, then movable items (0) before the fixed point that follows the slot
+    // (1), then creation order; the fixed point at index p of pi follows the items of slot p - 1.
+    using Order = std::tuple<int, int, size_t>;
+    auto movable = [](int slot, size_t seq) { return Order{slot, 0, seq}; };
+    auto fixed_at = [](int p) { return Order{p - 1, 1, 0}; };
+    auto contains = [](const Deps& big, const Deps& small) { return std::includes(big.begin(), big.end(), small.begin(), small.end()); };
+    for (size_t i = 0; i < full.effects.size(); ++i) {
+      const Effect& w = full.effects[i];
+      if (w.fixed >= 0 || w.kind == Effect::Kind::Branch) continue;
+      const int slot = place.eff[i];
+      for (int id : w.deps)
+        if (pos[static_cast<size_t>(id)] > slot) {
+          internal_error(SrcLoc{}, "a write or a snapshot of a full expression is emitted before a fixed point of its set");
+          return;
+        }
+      const Order mine = movable(slot, w.seq);
+      constexpr const char* kLater = "a write or a snapshot of a full expression is emitted after an item that follows it";
+      for (size_t k = 0; k < full.obls.size(); ++k) {
+        const Obl& o = full.obls[k];
+        if (o.seq > w.seq && contains(o.dep, w.deps) && !(movable(place.obl[k], o.seq) > mine)) { internal_error(SrcLoc{}, kLater); return; }
+      }
+      for (size_t k = 0; k < full.effects.size(); ++k) {
+        const Effect& x = full.effects[k];
+        if (k == i || x.seq <= w.seq || !contains(x.deps, w.deps)) continue;
+        const Order theirs = x.fixed >= 0 ? fixed_at(pos[static_cast<size_t>(x.fixed)]) : movable(place.eff[k], x.seq);
+        if (!(theirs > mine)) { internal_error(SrcLoc{}, kLater); return; }
+      }
+    }
   }
 
-  // The fail-closed check of the order: for every local, its snapshots and writes (a branch counts as the accesses of its inner
-  // effects) are emitted in the order they were created, except that two reads may swap.  A hoisted write that overtook an earlier
-  // read or write of the same local would change a value, so it is an internal error rather than a wrong Viper program.  The key of an
-  // item is its place in the emitted order: a movable item with the set S comes between pi[|S| - 1] (key 2|S| - 1) and pi[|S|]
-  // (key 2|S| + 1), so its key is 2|S|; the fixed point at index i has the key 2i + 1.
-  void check_variable_order(const Full& full, const std::vector<int>& pos) {
+  // The fail-closed check of the order: for every local, its snapshots and writes, its flag reads (an obligation that reads the
+  // `uninitialized` flag, decision 0025 item 1) and the branches that touch it (a branch counts as the accesses of its inner effects) are
+  // emitted in the order they were created, except that two reads may swap.  A hoisted write that overtook an earlier read or write of the
+  // same local would change a value, so it is an internal error rather than a wrong Viper program.  The key of an item is its place in the
+  // emitted order: a movable item in slot s comes after pi[s] (key 2s + 1) and before pi[s + 1] (key 2s + 3), so its key is 2s + 2, the
+  // same as 2|S| for an item of F; the fixed point at index i has the key 2i + 1.
+  void check_variable_order(const Full& full, const std::vector<int>& pos, const Placement& place) {
     struct Access {
       int id;
       bool write;
       int key;
       size_t seq;
     };
-    std::vector<Access> all;  // in creation order
-    bool perturbed = false;
-    for (const Effect& fx : full.effects) {
+    std::vector<Access> all;
+    for (size_t i = 0; i < full.effects.size(); ++i) {
+      const Effect& fx = full.effects[i];
       if (fx.reads.empty() && fx.writes.empty()) continue;
-      int key = fx.fixed >= 0 ? 2 * pos[static_cast<size_t>(fx.fixed)] + 1 : 2 * static_cast<int>(fx.deps.size());
-      if (opt_.perturb_access_order && !perturbed) {  // self-test hook (0011 item 13): the first access moves behind everything
-        key += 1000;
-        perturbed = true;
-      }
+      const int key = fx.fixed >= 0 ? 2 * pos[static_cast<size_t>(fx.fixed)] + 1 : 2 * (place.eff[i] + 1);
       for (int id : fx.reads) all.push_back({id, false, key, fx.seq});
       for (int id : fx.writes) all.push_back({id, true, key, fx.seq});
     }
-    std::sort(all.begin(), all.end(), [](const Access& x, const Access& y) { return x.seq < y.seq; });
+    for (size_t k = 0; k < full.obls.size(); ++k)
+      if (full.obls[k].flag_of >= 0) all.push_back({full.obls[k].flag_of, false, 2 * (place.obl[k] + 1), full.obls[k].seq});
+    std::stable_sort(all.begin(), all.end(), [](const Access& x, const Access& y) { return x.seq < y.seq; });  // creation order
+    if (opt_.perturb_access_order && !all.empty()) {  // self-test hook (0011 item 13): the first access moves behind everything
+      const size_t first = all.front().seq;
+      for (Access& a : all)
+        if (a.seq == first) a.key += 1000;
+    }
     for (size_t i = 0; i < all.size(); ++i)
       for (size_t j = i + 1; j < all.size(); ++j) {
         if (all[i].id != all[j].id || (!all[i].write && !all[j].write)) continue;

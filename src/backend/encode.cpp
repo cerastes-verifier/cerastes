@@ -586,7 +586,7 @@ class Encoder {
         reject(Diag::ensures_on_noreturn, a->position, "");
         continue;
       }
-      detect_or_as_truth_value(arg);  // decision 0023 item 5: `requires(x | 4)`, a clause of `ensures`
+      truth_context(arg);  // decision 0023 item 5: `requires(x | 4)`, a clause of `ensures`
       const Expr* c = clause_bool(expr(arg), arg->position);
       if (c == nullptr) continue;
       vir::Clause cl{c, loc_of(a->position)};
@@ -1056,6 +1056,9 @@ class Encoder {
       if (scan.rejected) return SaResult::failed;
       if (scan.skip) return SaResult::skipped;
     }
+    // Decision 0025 item 6, R7: the condition of an assertion that is encoded (a skipped one is the front end's alone).
+    if (c->expr != nullptr && !c->local_expr_ref)
+      if (an_expr_node_ptr o = expr_node_from_constant(c)) truth_context(o);
     cx_.case_value = true;  // the case-value path: a named local constant is its value (0017 item 6), a variable is noted
     cx_.case_var.clear();
     ++cx_.const_depth;      // a constant expression: no calls (`call` rejects them)
@@ -1090,6 +1093,9 @@ class Encoder {
 
   // A block-scope assertion: a local constant of the function (its prologue and its `__wf`), before the case values.
   void encode_block_static_assertion(a_static_assertion_ptr sa) {
+    // Self-test hook (decision 0025 item 5): neither recorded nor encoded, so the cross-check must report it.
+    if (verify_config().hook == "drop_block_static_assertion") return;
+    block_sa_seen_.insert(sa);  // every one the encoder is given, before it is encoded, skipped or diagnosed
     const a_source_position saved = cx_.stmt_pos;
     if (sa->position.seq != 0) cx_.stmt_pos = sa->position;
     const Expr* cond = nullptr;
@@ -1481,6 +1487,13 @@ class Encoder {
   const Expr* binary_arith(an_expr_node_ptr e, vir::BinaryOp op) {
     auto ops = operands_of(e);
     if (!operand_count(e, 2, ops)) return nullptr;
+    if (op == vir::BinaryOp::Shl || op == vir::BinaryOp::Shr) {
+      if (detect_shift_operand_parentheses(e, ops)) return nullptr;  // decision 0025 item 6, R2
+    } else if (reject_two_enumerations(e, ops[0], ops[1],
+                                       "arithmetic on values of two different enumerations (decision 0025 item 6): convert both sides "
+                                       "explicitly, for example `(int)RED + (int)NA`")) {
+      return nullptr;  // R8
+    }
     const Expr* a = expr(ops[0]);
     const Expr* c = expr(ops[1]);
     if (a == nullptr || c == nullptr) return nullptr;
@@ -1500,6 +1513,10 @@ class Encoder {
     }
     if ((op == vir::BinaryOp::Eq || op == vir::BinaryOp::Ne) && detect_tautological_compare(e, ops)) return nullptr;  // 0023 item 5
     if (detect_promoted_complement_compare(e, ops)) return nullptr;                                                   // 0023 item 5 (6c)
+    // Decision 0025 item 6: R5, R3, R4, R6 (each rejects and leaves the comparison unencoded).
+    if (detect_self_comparison(e, ops) || detect_logical_not_comparison(e, ops) || detect_chained_comparison(e, ops) ||
+        detect_truth_value_compare(e, ops, op))
+      return nullptr;
     if (op == vir::BinaryOp::Eq || op == vir::BinaryOp::Ne) {
       // Decision 0023 item 7: in C, a `?:` of enumerators of one enumeration is rejected here as C++ rejects it (its type).
       if (reject_enumerator_conditional(ops)) return nullptr;
@@ -1528,14 +1545,17 @@ class Encoder {
         return nullptr;
       }
     }
+    if (detect_constant_out_of_range(e, ops)) return nullptr;  // R10: after the enumeration and sign rules, which report their own
     return logical_result(e, b_.binary(op, a, c, loc_of(e->position)));
   }
 
   const Expr* logical(an_expr_node_ptr e, vir::BinaryOp op) {
     auto ops = operands_of(e);
     if (!operand_count(e, 2, ops)) return nullptr;
-    detect_or_as_truth_value(ops[0]);
-    detect_or_as_truth_value(ops[1]);
+    if (op == vir::BinaryOp::LOr && detect_logical_operand_parentheses(e, ops)) return nullptr;  // decision 0025 item 6, R1
+    truth_context(ops[0]);
+    truth_context(ops[1]);
+    if (detect_constant_logical_operand(e, ops) || detect_overlapping_comparisons(e, ops, op == vir::BinaryOp::LAnd)) return nullptr;  // R9, R11
     const Expr* a = as_bool(expr(ops[0]), ops[0]->position);
     const Expr* c = as_bool(expr(ops[1]), ops[1]->position);
     if (a == nullptr || c == nullptr) return nullptr;
@@ -1577,6 +1597,7 @@ class Encoder {
     if (!value_type(e->type, e->position, &to)) return nullptr;
     VType from;
     if (!value_type(ops[0]->type, ops[0]->position, &from)) return nullptr;
+    if (to.t.is_bool() && !from.t.is_bool()) truth_context(ops[0], /*conversion_to_bool=*/truth_operands_.count(e) == 0);  // decision 0025 item 6, R7: a conversion to bool is a truth context
     const Expr* x = expr(ops[0]);
     if (x == nullptr) return nullptr;
     if (x->type != from.t) {
@@ -1688,7 +1709,7 @@ class Encoder {
       }
       case eok_not: {
         if (!operand_count(e, 1, ops)) return nullptr;
-        detect_or_as_truth_value(ops[0]);
+        truth_context(ops[0]);
         const Expr* a = as_bool(expr(ops[0]), ops[0]->position);
         if (a == nullptr) return nullptr;
         return logical_result(e, b_.unary(vir::UnaryOp::Not, a, loc_of(e->position)));
@@ -1696,7 +1717,11 @@ class Encoder {
       case eok_question: {
         if (!operand_count(e, 3, ops)) return nullptr;
         if (detect_bitwise_condition(ops[0])) return nullptr;  // decision 0023 item 5
-        detect_or_as_truth_value(ops[0]);
+        if (reject_two_enumerations(e, ops[1], ops[2],
+                                    "a conditional expression whose arms are values of two different enumerations (decision 0025 item 6): "
+                                    "convert both arms explicitly, for example `x ? (int)RED : (int)NA`"))
+          return nullptr;
+        truth_context(ops[0]);
         const Expr* c = as_bool(expr(ops[0]), ops[0]->position);
         const Expr* a = expr(ops[1]);
         const Expr* d = expr(ops[2]);
@@ -1730,7 +1755,7 @@ class Encoder {
       case eok_cast: return conversion(e);
       case eok_bool_cast: {
         if (!operand_count(e, 1, ops)) return nullptr;
-        detect_or_as_truth_value(ops[0]);
+        truth_context(ops[0], /*conversion_to_bool=*/truth_operands_.count(e) == 0);  // a condition's own bool conversion is no conversion
         const Expr* a = as_bool(expr(ops[0]), ops[0]->position);
         return logical_result(e, a);
       }
@@ -1862,7 +1887,7 @@ class Encoder {
       return;
     }
     cx_.annotation = true;
-    detect_or_as_truth_value(arg);  // decision 0023 item 5: `check(x | 4)`
+    truth_context(arg);  // decision 0023 item 5: `check(x | 4)`
     const Expr* c = clause_bool(expr(arg), arg->position);
     cx_.annotation = false;
     if (c != nullptr) out.push_back(b_.check(c, loc_of(s->position)));
@@ -1904,7 +1929,7 @@ class Encoder {
         continue;
       }
       cx_.annotation = true;
-      detect_or_as_truth_value(arg);  // decision 0023 item 5: `invariant(x | 4)`
+      truth_context(arg);  // decision 0023 item 5: `invariant(x | 4)`
       const Expr* c = clause_bool(expr(arg), arg->position);
       const SrcLoc clause_loc = loc_of(a->position);
       cx_.annotation = false;
@@ -2348,6 +2373,25 @@ class Encoder {
     return operands_of(negated)[0];
   }
 
+  // A `void` `?:` in statement position (decision 0025 item 3): `c ? v() : w();` is `if (c) v(); else w();`.  Reached from an
+  // expression statement, from a discarded comma (expression_statement recurses on a comma's operands) and from a `for` step.  The
+  // condition is encoded as the arm of `operation` does for a value `?:`: its detectors, then as_bool; never check_condition (a
+  // `?:` condition is not an `if` condition, so `assignment_as_condition` does not apply).  Each arm is an expression statement of its
+  // own in its own block (a `(void)0` arm is a statement without effect; an `assert` arm stays a Check; an arm that is itself a void
+  // `?:` nests), as sub_statement builds the arms of an `if`; both arms are always present.
+  void void_conditional(an_expr_node_ptr e, const a_source_position& pos, Out& out) {
+    auto ops = operands_of(e);  // the caller checked the count: condition, then arm, else arm
+    if (detect_bitwise_condition(ops[0])) return;  // decision 0023 item 5: as in operation(), the arms are then not encoded
+    truth_context(ops[0]);
+    const Expr* c = as_bool(expr(ops[0]), ops[0]->position);
+    Out t, f;
+    const a_source_position tp = ops[1]->position.seq ? ops[1]->position : pos;
+    const a_source_position fp = ops[2]->position.seq ? ops[2]->position : pos;
+    expression_statement(ops[1], tp, t, /*voided=*/true);
+    expression_statement(ops[2], fp, f, /*voided=*/true);
+    if (c != nullptr) out.push_back(b_.if_stmt(c, block_of(std::move(t), tp), block_of(std::move(f), fp), loc_of(e->position)));
+  }
+
   // An expression statement: an assignment, a compound assignment, an increment or decrement, a call, or an
   // expression without side effects.
   //
@@ -2376,9 +2420,13 @@ class Encoder {
         reject(Diag::unsupported_expression, pos, "an assert in the increment of a for loop");
         return;
       }
-      detect_or_as_truth_value(cond);  // decision 0023 item 5: `assert(x | 4)`
+      truth_context(cond);  // decision 0023 item 5: `assert(x | 4)`
       const Expr* c = as_bool(expr(cond), cond->position);
       if (c != nullptr) out.push_back(b_.check(c, loc_of(pos), true));
+      return;
+    }
+    if (is_void_conditional(e)) {
+      void_conditional(e, pos, out);  // decision 0025 item 3
       return;
     }
     if (e->kind == enk_operation) {
@@ -2634,14 +2682,18 @@ class Encoder {
       detected_.insert(a);
       reject(Diag::assignment_as_condition, a->position, "");
     }
-    detect_or_as_truth_value(c);  // decision 0023 item 5: `if (x | 4)`
+    truth_context(c);  // decision 0023 item 5: `if (x | 4)`
   }
 
   // The left operand of a comma has no effect where the compilers warn: not a `(void)` cast (explicit) and no side effect inside.
-  static bool comma_left_without_effect(an_expr_node_ptr l) { return !is_void_cast(l) && first_effect(l) == nullptr; }
+  // A `void` `?:` (decision 0025 item 3) counts as having an effect, as a `(void)` cast does: no compiler calls a void operand an unused value.
+  static bool is_void_conditional(an_expr_node_ptr e) { return is_operation(e, eok_question, 3) && has_type_kind(e->type, tk_void); }
+  static bool comma_left_without_effect(an_expr_node_ptr l) { return !is_void_cast(l) && !is_void_conditional(l) && first_effect(l) == nullptr; }
   // The right operand of a comma whose value is discarded has no effect (and is not itself a `(void)` cast).  Not asked when the
   // whole comma is cast to void: neither compiler warns then.
-  static bool discarded_comma_right_without_effect(an_expr_node_ptr r) { return !is_void_cast(r) && first_effect(r) == nullptr; }
+  static bool discarded_comma_right_without_effect(an_expr_node_ptr r) {
+    return !is_void_cast(r) && !is_void_conditional(r) && first_effect(r) == nullptr;
+  }
   // Rule C of decision 0020 item 5 (P35 shape (b)): a discarded expression (a whole expression statement, or a discarded comma
   // operand) whose value is thrown away by an operator while a side effect sits inside.  The node of the operator that discards
   // the value, or null.  Fine: a `(void)` cast, an assignment, a compound assignment, `++`/`--`, a call and a comma (its operands
@@ -2916,6 +2968,7 @@ class Encoder {
       rejected_statement(s, "a switch statement with an init-statement or a declaration in its condition");
       return;
     }
+    detect_empty_body(s->variant.switch_stmt.body_statement);  // R13
     a_statement_ptr body = s->variant.switch_stmt.body_statement;
     // The body is a compound statement; a lone `switch (x) case 1: return 1;` is wrapped in a generated block by the front end.
     if (body == nullptr || body->kind != stmk_block) {
@@ -3135,6 +3188,8 @@ class Encoder {
           rejected_statement(s, "an if statement with a declaration in its condition");
           return;
         }
+        detect_dangling_else(s);  // R12
+        if (s->variant.if_stmt.else_statement == nullptr) detect_empty_body(s->variant.if_stmt.then_statement);  // R13
         check_condition(s->expr);
         const Expr* c = as_bool(expr(s->expr), s->expr->position);
         const Stmt* t = sub_statement(s->variant.if_stmt.then_statement, s->position);
@@ -3329,6 +3384,8 @@ class Encoder {
   }
 
   void declaration_level_checks(const IlEntities& ents);
+  void check_block_static_assertions(const IlEntities& ents);
+  std::set<a_static_assertion_ptr> block_sa_seen_;  // decision 0025 item 5
   const EnumInfo& enum_info(a_type_ptr t);
 
   // ---- enumeration operands and switches (decision 0019 items 10-11) ----
@@ -3766,6 +3823,487 @@ class Encoder {
     const bool left_const = constant_int128(integer_constant_operand(nops[0]), &c) && is_variable_operand(nops[1]);
     const bool right_const = !left_const && constant_int128(integer_constant_operand(nops[1]), &c) && is_variable_operand(nops[0]);
     if ((left_const || right_const) && c != 0) detect(Diag::tautological_bitwise_compare, n);
+  }
+
+  // ---- the other `-Wall` shapes (decision 0025 item 6; P48) ----
+  // The detectors read the IL as those of 0023 item 5 do, report at the operator and return true when they rejected; the operation
+  // then stays unencoded (one diagnostic per node).
+
+  // R8, two enumerations: `+ - * / %` whose operands are values of two different enumerations (`RED + NA`), and a `?:` whose arms are.
+  // (`message` is the whole text; 0023 item 4's wording for bitwise operators.)
+  // A value of an enumeration as 0023 items 5 and 7 define it: in C also a `?:` of enumerators of one enumeration and a comma ending in
+  // an enumerator (C types them `int`).
+  bool enum_value_operand(an_expr_node_ptr n, EnumOperand* out) {
+    if (sign_compare_enum_operand(n, out)) return true;
+    if (il_header.source_language != sl_C) return false;
+    an_expr_node_ptr q = enumerator_conditional(n);
+    an_expr_node_ptr c = q != nullptr ? q->variant.operation.operands : nullptr;
+    EnumOperand arm;
+    if (c == nullptr || c->next == nullptr || !sign_compare_enum_operand(c->next, &arm)) return false;
+    *out = EnumOperand();
+    out->inner = q;
+    out->entry = arm.entry;
+    return true;
+  }
+  bool reject_two_enumerations(an_expr_node_ptr e, an_expr_node_ptr a, an_expr_node_ptr b, const char* message) {
+    EnumOperand eo[2];
+    if (!enum_value_operand(a, &eo[0]) || !enum_value_operand(b, &eo[1]) || eo[0].entry == eo[1].entry) return false;
+    reject(Diag::unsupported_expression, e->position, message);
+    return true;
+  }
+
+  // R1: an unparenthesized `&&` as an operand of `||`.
+  bool detect_logical_operand_parentheses(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
+    for (an_expr_node_ptr o : ops) {
+      an_expr_node_ptr n = peel_condition(o);
+      if (n != nullptr && n->kind == enk_operation && !n->is_parenthesized && n->variant.operation.kind == eok_land)
+        return detect(Diag::logical_operand_parentheses, e);
+    }
+    return false;
+  }
+
+  // R2: an unparenthesized binary `+` or `-` as an operand of `<<` or `>>`.
+  bool detect_shift_operand_parentheses(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
+    for (an_expr_node_ptr o : ops) {
+      an_expr_node_ptr n = written_operation(o);
+      if (n == nullptr || n->is_parenthesized || operands_of(n).size() != 2) continue;
+      const an_expr_operator_kind nk = n->variant.operation.kind;
+      if (nk == eok_add || nk == eok_subtract) return detect(Diag::shift_operand_parentheses, e);
+    }
+    return false;
+  }
+
+  // R5, GCC's identical-expression form and the plain one: the same variable or parameter, or the same expression without calls or
+  // side effects; `*has_object` says that a variable or parameter occurs in it (a comparison of constants is the front end's).
+  // Generated conversions are compared as nodes, explicit ones too (an explicit cast on one side only is a difference).
+  bool same_pure_expr(an_expr_node_ptr a, an_expr_node_ptr b, bool* has_object, int depth = 0) {
+    if (a == nullptr || b == nullptr || depth > 16 || a->kind != b->kind) return false;
+    if (a->type == nullptr || b->type == nullptr || skip_typerefs(a->type) != skip_typerefs(b->type)) return false;
+    switch (a->kind) {
+      case enk_variable:
+        *has_object = true;
+        return a->variant.variable.ptr != nullptr && a->variant.variable.ptr == b->variant.variable.ptr;
+      case enk_param_ref:
+        *has_object = true;
+        return a->variant.param_ref.param_num == b->variant.param_ref.param_num &&
+               a->variant.param_ref.levels_up == b->variant.param_ref.levels_up;
+      case enk_constant: {
+        a_constant_ptr ca = a->variant.constant.ptr, cb = b->variant.constant.ptr;
+        return ca != nullptr && cb != nullptr && ca->kind == ck_integer && cb->kind == ck_integer && decimal_value(ca) == decimal_value(cb);
+      }
+      case enk_operation: {
+        const an_expr_operator_kind k = a->variant.operation.kind;
+        if (k != b->variant.operation.kind || a->compiler_generated != b->compiler_generated) return false;
+        switch (k) {
+          case eok_add: case eok_subtract: case eok_multiply: case eok_divide: case eok_remainder:
+          case eok_shiftl: case eok_shiftr: case eok_and: case eok_or: case eok_xor:
+          case eok_negate: case eok_unary_plus: case eok_complement: case eok_not:
+          case eok_lt: case eok_le: case eok_gt: case eok_ge: case eok_eq: case eok_ne: case eok_land: case eok_lor:
+            break;
+          case eok_cast: case eok_bool_cast:
+            if (!a->compiler_generated) return false;  // an explicit cast is a barrier (all four compilers are silent)
+            break;
+          default:
+            return false;  // calls, assignments, commas, `?:` and anything else: not compared
+        }
+        auto oa = operands_of(a);
+        auto ob = operands_of(b);
+        if (oa.size() != ob.size() || oa.empty()) return false;
+        for (size_t i = 0; i < oa.size(); ++i)
+          if (!same_pure_expr(oa[i], ob[i], has_object, depth + 1)) return false;
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
+  // The same enumerator, or the same `const` variable the front end folded to its value (`K == K`): the constants' original expression
+  // is the variable's own node.
+  bool same_named_constant(an_expr_node_ptr a, an_expr_node_ptr b) {
+    if (a->kind != enk_constant || b->kind != enk_constant) return false;
+    a_constant_ptr ca = a->variant.constant.ptr, cb = b->variant.constant.ptr;
+    if (ca == nullptr || cb == nullptr || ca->kind != ck_integer || cb->kind != ck_integer) return false;
+    if (is_enumerator(ca) || is_enumerator(cb)) return is_enumerator(ca) && is_enumerator(cb) && ca == cb;
+    if (ca->expr == nullptr || cb->expr == nullptr || ca->local_expr_ref || cb->local_expr_ref) return false;
+    an_expr_node_ptr oa = expr_node_from_constant(ca);
+    an_expr_node_ptr ob = expr_node_from_constant(cb);
+    return oa != nullptr && ob != nullptr && oa->kind == enk_variable && ob->kind == enk_variable && oa->variant.variable.ptr != nullptr &&
+           oa->variant.variable.ptr == ob->variant.variable.ptr;
+  }
+  // R5: both sides of a comparison are the same expression.  Exempt when the comparison's operator comes from a macro expansion (its
+  // original position differs from its position; a macro body and a macro argument both exempt it: all four compilers are silent),
+  // except in annotations, which the compilers do not see (P46b: `CERASTES_REQUIRES(x == x)` is rejected like the written attribute).
+  bool detect_self_comparison(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
+    if (!cx_.contract && !cx_.annotation && !written_outside_macros(e)) return false;
+    an_expr_node_ptr l = peel_generated_conversions(ops[0]);
+    an_expr_node_ptr r = peel_generated_conversions(ops[1]);
+    if (l == nullptr || r == nullptr) return false;
+    if (l->kind == enk_constant || r->kind == enk_constant) {
+      // Only the same enumerator or the same named constant: an operand the front end folded (`1 + 2`) is a barrier (all four silent).
+      return same_named_constant(l, r) && detect(Diag::self_comparison, e);
+    }
+    bool has_object = false;
+    if (!same_pure_expr(l, r, &has_object) || !has_object) return false;
+    return detect(Diag::self_comparison, e);
+  }
+
+  // GCC's notion of a boolean operand (R3's exemption): a `bool`-typed node, a comparison, `!`, `&&`, `||`, `&`, `|` or `^` of two such,
+  // or a unary `+` of one (an assignment of one is not: GCC warns on `!x == (y = (a > b))`); not a `?:` of them and not a comma ending in one (GCC's C mode warns about those).
+  bool gcc_boolean(an_expr_node_ptr n, int depth = 0) {
+    n = peel_implicit(n);
+    if (n == nullptr || n->type == nullptr || depth > 16) return false;
+    const bool operation = n->kind == enk_operation;
+    const an_expr_operator_kind k = operation ? n->variant.operation.kind : eok_cast;
+    if (operation && (k == eok_question || k == eok_comma)) return false;
+    VType t = vtype(n->type);
+    if (t.ok && t.t.is_bool()) return true;
+    if (!operation) return false;
+    auto nops = operands_of(n);
+    switch (k) {
+      case eok_lt: case eok_le: case eok_gt: case eok_ge: case eok_eq: case eok_ne:
+      case eok_land: case eok_lor: case eok_not: case eok_bool_cast:
+        return true;
+      case eok_and: case eok_or: case eok_xor: return nops.size() == 2 && gcc_boolean(nops[0], depth + 1) && gcc_boolean(nops[1], depth + 1);
+      case eok_unary_plus: return nops.size() == 1 && gcc_boolean(nops[0], depth + 1);
+      default: return false;
+    }
+  }
+  // R3: an unparenthesized `!` as the left operand of a comparison whose right operand is not a truth value.
+  bool detect_logical_not_comparison(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
+    an_expr_node_ptr l = written_operation(ops[0]);
+    if (l == nullptr || l->variant.operation.kind != eok_not || l->is_parenthesized || gcc_boolean(ops[1])) return false;
+    return detect(Diag::logical_not_comparison, e);
+  }
+
+  // R4: an operand of a comparison that is an unparenthesized comparison.
+  bool detect_chained_comparison(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
+    for (an_expr_node_ptr o : ops) {
+      an_expr_node_ptr n = written_operation(o);
+      if (n != nullptr && !n->is_parenthesized && is_comparison_kind(n->variant.operation.kind)) return detect(Diag::chained_comparison, e);
+    }
+    return false;
+  }
+
+  // R6: a truth value, `& | ^` of two truth values (clang), or an explicit integer cast of one (GCC's C mode), as the operand of R6.
+  bool compared_truth_value(an_expr_node_ptr n, int depth = 0) {
+    if (truth_value(n)) return true;
+    an_expr_node_ptr m = written_operation(n);
+    if (m == nullptr || depth > 8) return false;
+    const an_expr_operator_kind k = m->variant.operation.kind;
+    auto mops = operands_of(m);
+    if (is_bitwise_binary_kind(k) && mops.size() == 2) return compared_truth_value(mops[0], depth + 1) && compared_truth_value(mops[1], depth + 1);
+    if (k == eok_unary_plus && mops.size() == 1) return compared_truth_value(mops[0], depth + 1);  // clang
+    if (k == eok_assign && mops.size() == 2) return compared_truth_value(mops[1], depth + 1);     // `(y = (a > b)) == 2` (clang)
+    if (k == eok_cast && !m->compiler_generated && mops.size() == 1) {
+      VType to = vtype(m->type);
+      return to.ok && to.t.is_int() && !is_enum_type(to.t) && compared_truth_value(mops[0], depth + 1);
+    }
+    return false;
+  }
+  // R6: a comparison of a truth value with an integer constant whose result is the same for 0 and for 1.
+  bool detect_truth_value_compare(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops, vir::BinaryOp op) {
+    for (int i = 0; i < 2; ++i) {
+      __int128 c = 0;
+      if (!constant_int128(integer_constant_operand(ops[1 - i]), &c) || !compared_truth_value(ops[i])) continue;
+      auto holds = [&](__int128 v) {
+        const __int128 l = i == 0 ? v : c, r = i == 0 ? c : v;
+        switch (op) {
+          case vir::BinaryOp::Eq: return l == r;
+          case vir::BinaryOp::Ne: return l != r;
+          case vir::BinaryOp::Lt: return l < r;
+          case vir::BinaryOp::Le: return l <= r;
+          case vir::BinaryOp::Gt: return l > r;
+          default: return l >= r;
+        }
+      };
+      if (holds(0) == holds(1)) return detect(Diag::truth_value_compare, e);
+    }
+    return false;
+  }
+
+  // R7: a truth context (the condition of `if`, `while`, `do`, `for` and `?:`, an operand of `!`, `&&` and `||`, a conversion to `bool`,
+  // the conditions of the annotations, a static assertion's, and item 3's): `x | C` (0023 item 5), and here a `<<` with a signed
+  // result, a `*`, a `?:` with an integer-constant arm that is neither 0 nor 1, an enumerator that is neither 0 nor 1, looking through
+  // parentheses, the arms of `?:` and a comma's right operand.  A literal alone (`if (2)`), an unsigned `<<`, `>>`, `a << b != 0` and
+  // a variable of enumeration type are accepted.
+  // `*` through the arms of `?:` only when both arms are `*` and at a conversion to `bool` (`conversion`; GCC's C mode); `*` directly
+  // (through parentheses) or as a comma's right operand is rejected in every truth context.
+  // `truth_operands_`: the operands that are truth contexts by themselves (the front end's bool conversion of a condition, an operand
+  // of `&&`, `!`, ...): their own conversion to `bool` is not one of the conversions R7 means.
+  std::set<an_expr_node_ptr> truth_operands_;
+  void truth_context(an_expr_node_ptr operand, bool conversion_to_bool = false) {
+    if (!conversion_to_bool && operand != nullptr) truth_operands_.insert(operand);
+    detect_or_as_truth_value(operand);
+    detect_int_in_truth(operand, 0, false, conversion_to_bool);
+  }
+  void detect_int_in_truth(an_expr_node_ptr operand, int depth, bool in_arm, bool conv) {
+    an_expr_node_ptr n = peel_condition(operand);
+    if (n == nullptr || depth > 16 || detected_.count(n) != 0) return;
+    auto non_boolean_constant = [](an_expr_node_ptr x) {
+      x = peel_condition(x);
+      __int128 v = 0;
+      return x != nullptr && x->kind == enk_constant && x->variant.constant.ptr != nullptr && x->variant.constant.ptr->kind == ck_integer &&
+             constant_int128(x->variant.constant.ptr, &v) && v != 0 && v != 1;
+    };
+    if (n->kind == enk_constant) {
+      if (n->variant.constant.ptr != nullptr && is_enumerator(n->variant.constant.ptr) && non_boolean_constant(n))
+        detect(Diag::int_in_truth_context, n);
+      return;
+    }
+    if (n->kind != enk_operation) return;
+    auto nops = operands_of(n);
+    switch (n->variant.operation.kind) {
+      case eok_shiftl: {
+        VType t = vtype(n->type);
+        if (t.ok && t.t.is_int() && !is_enum_type(t.t) && t.t.int_type->is_signed) detect(Diag::int_in_truth_context, n);
+        return;
+      }
+      case eok_multiply:
+        if (!in_arm) detect(Diag::int_in_truth_context, n);
+        return;
+      case eok_question: {
+        if (nops.size() != 3) return;
+        if (non_boolean_constant(nops[1]) || non_boolean_constant(nops[2])) {
+          detect(Diag::int_in_truth_context, n);
+          return;
+        }
+        auto is_product = [](an_expr_node_ptr x) {
+          x = peel_condition(x);
+          return x != nullptr && x->kind == enk_operation && x->variant.operation.kind == eok_multiply;
+        };
+        if (conv && is_product(nops[1]) && is_product(nops[2])) {
+          detect(Diag::int_in_truth_context, n);
+          return;
+        }
+        detect_int_in_truth(nops[1], depth + 1, true, conv);
+        detect_int_in_truth(nops[2], depth + 1, true, conv);
+        return;
+      }
+      case eok_comma:
+        if (!nops.empty()) detect_int_in_truth(nops.back(), depth + 1, in_arm, conv);
+        return;
+      default: return;
+    }
+  }
+
+  // ---- R9-R13 (decision 0025 item 6; P50, P50b) ----
+  // R9: the right operand of `&&` or `||` is an integer constant that is not a truth value, unless the left operand is a `bool` node.
+  // The left operand counts as `bool` after the front end's own conversions are peeled and when it is not a comparison, `!`, `&&` or `||`
+  // (C types those `int`, so that one verdict holds in both modes).  A constant left operand does not matter.
+  // The operand as written under the front end's own conversions and folding: generated casts are peeled and a folded constant is
+  // replaced by its original expression (C++ folds `4` in `x && 4` into `true`, whose `expr` is the bool conversion of the `4`).
+  static an_expr_node_ptr unfold_generated(an_expr_node_ptr n) {
+    for (int guard = 0; guard < 16; ++guard) {
+      n = peel_generated_conversions(n);
+      if (n == nullptr || n->kind != enk_constant) break;
+      a_constant_ptr c = n->variant.constant.ptr;
+      if (c == nullptr || c->kind != ck_integer || c->expr == nullptr || c->local_expr_ref || is_enumerator(c)) break;
+      an_expr_node_ptr o = expr_node_from_constant(c);
+      if (o == nullptr || o == n) break;
+      n = o;
+    }
+    return n;
+  }
+  // In code, an `&&` or `||` that comes from a macro expansion is exempt from R9 and R11 (all four compilers are silent), as in R5; the
+  // exemption never applies in annotations, which the compilers do not see.
+  bool operator_from_macro(an_expr_node_ptr e) const { return !cx_.contract && !cx_.annotation && !written_outside_macros(e); }
+  bool detect_constant_logical_operand(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
+    if (operator_from_macro(e)) return false;
+    an_expr_node_ptr r = peel_generated_conversions(ops[1]);
+    if (r == nullptr || r->kind != enk_constant || r->variant.constant.ptr == nullptr || r->variant.constant.ptr->kind != ck_integer) return false;
+    an_expr_node_ptr u = unfold_generated(ops[1]);
+    if (u == nullptr || u->type == nullptr || detected_.count(u) != 0 || detected_.count(r) != 0) return false;  // R7 said it already
+    if (u->kind == enk_operation) {
+      const an_expr_operator_kind k = u->variant.operation.kind;
+      if (is_comparison_kind(k) || k == eok_not || k == eok_land || k == eok_lor || k == eok_bool_cast) return false;  // `x && !4`, `x && 2 > 1`
+    }
+    VType rt = vtype(u->type);
+    if (rt.ok && rt.t.is_bool()) return false;  // `x && true`
+    an_expr_node_ptr l = peel_generated_conversions(ops[0]);
+    if (l != nullptr && l->type != nullptr) {
+      VType lt = vtype(l->type);
+      bool int_valued = false;  // C++ types a comparison `bool`, C `int`: neither exempts
+      if (l->kind == enk_operation) {
+        const an_expr_operator_kind k = l->variant.operation.kind;
+        int_valued = is_comparison_kind(k) || k == eok_not || k == eok_land || k == eok_lor;
+      }
+      if (lt.ok && lt.t.is_bool() && !int_valued) return false;
+    }
+    return detect(Diag::constant_logical_operand, e);
+  }
+
+  // R10 (code only): a comparison of an integer constant with an operand whose type cannot hold the constant.  The operand's type is the type
+  // after the generated conversions: narrower than `int`, the comparison is made in `int`, so any value outside the type's range
+  // counts; `int` or wider, only a constant of a wider type does (`x < 3000000000LL`; `u == -1` is a sign comparison, not this).  An
+  // enumeration operand has its value range.  `bool` is R6's.
+  static bool parse_i128(const std::string& d, __int128* out) {
+    size_t i = 0;
+    bool neg = false;
+    if (i < d.size() && (d[i] == '-' || d[i] == '+')) neg = d[i++] == '-';
+    if (i >= d.size() || d.size() - i > 36) return false;
+    __int128 v = 0;
+    for (; i < d.size(); ++i) {
+      if (d[i] < '0' || d[i] > '9') return false;
+      v = v * 10 + (d[i] - '0');
+    }
+    *out = neg ? -v : v;
+    return true;
+  }
+  bool detect_constant_out_of_range(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
+    if (cx_.contract || cx_.annotation) return false;  // code only: a wrong constant in a contract is for verification to report
+    for (int i = 0; i < 2; ++i) {
+      __int128 c = 0;
+      a_constant_ptr k = integer_constant_operand(ops[1 - i]);
+      // A literal or an enumerator, not another named constant (`c == DEF` with a `const enum color DEF`: all compilers are silent).
+      if (!literal_or_enumerator(ops[1 - i]) || !constant_int128(k, &c)) continue;
+      an_expr_node_ptr o = peel_generated_conversions(ops[i]);
+      if (o == nullptr || o->type == nullptr || o->kind == enk_constant) continue;
+      VType t = vtype(o->type);
+      if (!t.ok || !t.t.is_int() || t.t.int_type == nullptr) continue;
+      __int128 lo = 0, hi = 0;
+      if (is_enum_type(t.t)) {
+        if (!parse_i128(t.t.int_type->lo, &lo) || !parse_i128(t.t.int_type->hi, &hi)) continue;
+      } else {
+        const int bits = t.t.int_type->bits;
+        if (bits <= 0 || bits > 64) continue;
+        lo = t.t.int_type->is_signed ? -(((__int128)1) << (bits - 1)) : 0;
+        hi = t.t.int_type->is_signed ? (((__int128)1) << (bits - 1)) - 1 : (((__int128)1) << bits) - 1;
+        if (bits >= prog_.c_int_bits()) {
+          an_expr_node_ptr cn = peel_generated_conversions(ops[1 - i]);
+          VType ct = cn != nullptr && cn->type != nullptr ? vtype(cn->type) : VType();
+          if (!ct.ok || !ct.t.is_int() || ct.t.int_type == nullptr || ct.t.int_type->bits <= bits) continue;
+        }
+      }
+      if (c < lo || c > hi) return detect(Diag::constant_out_of_range_compare, e);
+    }
+    return false;
+  }
+
+  // R11: the two operands of an `&&` (or `||`) are comparisons of the same variable or parameter with integer constants, and the `&&`
+  // is unsatisfiable (the `||` always true) over the integers.  Code only: the compilers never see annotations, and some tests state a
+  // contradictory precondition on purpose.
+  struct VarCompare {
+    an_expr_node_ptr var = nullptr;
+    an_expr_node_ptr cmp = nullptr;
+    an_expr_operator_kind op = eok_eq;  // with the variable on the left
+    __int128 c = 0;
+  };
+  // A literal (possibly negated) or an enumerator: not another folded named constant (`const int K = 5`; clang is silent on `x > K && x < 3`).
+  static bool literal_or_enumerator(an_expr_node_ptr n) {
+    n = peel_generated_conversions(n);
+    if (n == nullptr || n->kind != enk_constant || n->variant.constant.ptr == nullptr || n->variant.constant.ptr->kind != ck_integer) return false;
+    a_constant_ptr c = n->variant.constant.ptr;
+    if (is_enumerator(c) || (c->expr == nullptr && !c->local_expr_ref)) return true;
+    if (c->local_expr_ref) return false;
+    an_expr_node_ptr o = expr_node_from_constant(c);
+    for (int guard = 0; o != nullptr && guard < 8 && o->kind == enk_operation && operands_of(o).size() == 1 &&
+                        (o->variant.operation.kind == eok_negate || o->variant.operation.kind == eok_unary_plus ||
+                         (o->variant.operation.kind == eok_cast && o->compiler_generated));
+         ++guard)
+      o = o->variant.operation.operands;
+    return o != nullptr && o->kind == enk_constant && o->variant.constant.ptr != nullptr && o->variant.constant.ptr->kind == ck_integer &&
+           (is_enumerator(o->variant.constant.ptr) || (o->variant.constant.ptr->expr == nullptr && !o->variant.constant.ptr->local_expr_ref));
+  }
+  bool var_compare(an_expr_node_ptr operand, VarCompare* out) {
+    an_expr_node_ptr n = peel_condition(operand);
+    if (n == nullptr || n->kind != enk_operation || !is_comparison_kind(n->variant.operation.kind)) return false;
+    auto nops = operands_of(n);
+    if (nops.size() != 2) return false;
+    for (int i = 0; i < 2; ++i) {
+      an_expr_node_ptr v = peel_generated_conversions(nops[i]);
+      if (v == nullptr || (v->kind != enk_variable && v->kind != enk_param_ref)) continue;
+      __int128 c = 0;
+      if (!literal_or_enumerator(nops[1 - i]) || !constant_int128(integer_constant_operand(nops[1 - i]), &c)) continue;
+      an_expr_operator_kind op = n->variant.operation.kind;
+      if (i == 1) {  // `5 < x` is `x > 5`
+        switch (op) {
+          case eok_lt: op = eok_gt; break;
+          case eok_le: op = eok_ge; break;
+          case eok_gt: op = eok_lt; break;
+          case eok_ge: op = eok_le; break;
+          default: break;
+        }
+      }
+      out->var = v;
+      out->cmp = n;
+      out->op = op;
+      out->c = c;
+      return true;
+    }
+    return false;
+  }
+  static bool var_compare_holds(const VarCompare& a, __int128 x) {
+    switch (a.op) {
+      case eok_eq: return x == a.c;
+      case eok_ne: return x != a.c;
+      case eok_lt: return x < a.c;
+      case eok_le: return x <= a.c;
+      case eok_gt: return x > a.c;
+      default: return x >= a.c;
+    }
+  }
+  bool detect_overlapping_comparisons(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops, bool is_and) {
+    if (cx_.contract || cx_.annotation || operator_from_macro(e)) return false;
+    VarCompare a, b;
+    if (!var_compare(ops[0], &a) || !var_compare(ops[1], &b)) return false;
+    bool has_object = false;
+    if (!same_pure_expr(a.var, b.var, &has_object)) return false;
+    // The truth value of both is constant between the constants: test each constant, its neighbours and the two ends.
+    const __int128 inf = ((__int128)1) << 100;
+    const __int128 pts[] = {-inf, a.c - 1, a.c, a.c + 1, b.c - 1, b.c, b.c + 1, inf};
+    bool all = true, any = false;
+    for (__int128 x : pts) {
+      const bool va = var_compare_holds(a, x), vb = var_compare_holds(b, x);
+      if (is_and) any = any || (va && vb);
+      else all = all && (va || vb);
+    }
+    if (is_and ? any : !all) return false;
+    return detect(Diag::overlapping_comparisons, e);
+  }
+
+  // R12: `if (a) if (b) x; else y;` (the `else` binds to the inner `if`).  The outer `if` has no `else`; its body, through the
+  // front end's own blocks, `while` and `for` bodies and labels, is an `if` with an `else`; a written block, a `switch` or a `do` stops
+  // the walk.  Reported at the `else`.
+  static a_statement_ptr last_statement(a_statement_ptr b) {
+    a_statement_ptr last = nullptr;
+    for (a_statement_ptr c = b->variant.block.statements; c != nullptr; c = c->next) last = c;
+    return last;
+  }
+  // The statement a dependent statement stands for once the front end's own blocks are peeled (null when none or a written block).
+  static a_statement_ptr peel_generated_blocks(a_statement_ptr st) {
+    for (int guard = 0; st != nullptr && guard < 64 && st->kind == stmk_block && st->compiler_generated; ++guard) st = last_statement(st);
+    return st;
+  }
+  void detect_dangling_else(a_statement_ptr s) {
+    if (s->variant.if_stmt.else_statement != nullptr) return;
+    a_statement_ptr st = peel_generated_blocks(s->variant.if_stmt.then_statement);
+    for (int guard = 0; st != nullptr && guard < 64; ++guard) {
+      switch (st->kind) {
+        case stmk_if:
+          if (st->variant.if_stmt.else_statement != nullptr) {
+            reject(Diag::dangling_else, st->variant.if_stmt.else_position.seq != 0 ? st->variant.if_stmt.else_position : st->position, "");
+            return;
+          }
+          st = peel_generated_blocks(st->variant.if_stmt.then_statement);
+          break;
+        case stmk_while: st = peel_generated_blocks(st->variant.loop_statement); break;
+        case stmk_for: st = peel_generated_blocks(st->variant.for_loop.statement); break;
+        default: return;  // a written block, `switch`, `do`, anything else
+      }
+    }
+  }
+
+  // R13: the body of an `if` without an `else` or of a `switch` is an empty statement; reported at the `;`.  Loops are not (clang warns on
+  // `while (c);` only when the next statement is on the same line or indented deeper, and the IL keeps no indentation; GCC never).  Not when
+  // the `;` comes from a macro expansion (clang is silent there; GCC warns only with -Wextra), nor `if (x) ; else y;`, `else ;` and
+  // `do ; while (c);` (silent or -Wextra only).  clang warns only when the `;` is on the line of the `)`, which the IL does not keep
+  // (broader, listed).
+  void detect_empty_body(a_statement_ptr body) {
+    a_statement_ptr st = peel_generated_blocks(body);
+    if (st == nullptr || st->kind != stmk_empty || st->is_fallthrough_statement) return;
+    const a_source_position& p = st->position;
+    if (p.seq == 0 || p.orig_seq != p.seq || p.orig_column != p.column) return;
+    reject(Diag::empty_body, p, "");
   }
 
   // The operators themselves (decision 0023 items 1, 3, 4): after the detectors, the operands are encoded and an enumeration
@@ -4333,6 +4871,29 @@ void Encoder::run(const IlEntities& ents) {
   cx_ = Ctx();
   for (a_routine_ptr r : to_verify_) encode_body(r);
   require_measures_in_cycles();
+  check_block_static_assertions(ents);
+}
+
+// Decision 0025 item 5 (amends 0024 item 2): once nothing has been rejected, every static assertion of a verified file that a function
+// memory region holds must have reached encode_block_static_assertion, except in a `predicate` or `pure` routine's region (not encoded
+// until M4.5f).  Anything else, a region no routine owns included, is reported: the encoder never passes what it did not check.
+void Encoder::check_block_static_assertions(const IlEntities& ents) {
+  if (reported_count() != 0) return;  // a rejected statement's sub-statements may never have been walked
+  std::map<a_memory_region_number, std::vector<a_routine_ptr>> by_region;
+  for (a_routine_ptr r : ents.routines)
+    if (r->memory_region != NULL_region_number) by_region[r->memory_region].push_back(r);
+  for (const auto& entry : ents.region_static_assertions) {
+    a_static_assertion_ptr sa = entry.second;
+    if (!static_assertion_in_verified_file(sa) || block_sa_seen_.count(sa) != 0) continue;
+    bool spec = false;
+    auto it = by_region.find(entry.first);
+    if (it != by_region.end())
+      for (a_routine_ptr r : it->second) spec = spec || is_spec_routine(r);
+    if (spec) continue;
+    cx_ = Ctx();
+    cx_.stmt_pos = sa->position;
+    reject(Diag::unsupported_declaration, sa->position, "a static assertion this version does not check (decision 0024 item 2)");
+  }
 }
 
 // 0013 item 4: a function that can reach itself through calls of verified functions needs a measure.

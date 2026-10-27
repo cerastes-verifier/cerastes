@@ -239,3 +239,5 @@ never interleave, but their order is unspecified, and a program is correct only 
 - The emitted Viper of every program accepted before M4.3b is unchanged.
 
 *2026-10-23, amended by 0022 (M4.4a): item 3 ("where it is decided") — an unsigned operation creates a check rather than wrapping (except a conversion of a constant that fits, 0022 item 4), and a conversion into an unsigned parameter is checked, so `g(f(x), h(y))` with `unsigned` parameters can be `unsequenced_calls` as the `short` form already is (0022 item 10).*
+
+*2026-10-26, amended by 0025 (M4.4c): item 1 — a `void` `?:` in statement position is an `if` (0025 item 3); items 3, 9 and 10 — writes and snapshots are not in the family F: each is placed right after the last member of its set in π, and `unsequenced_calls` names only checks and branches (0025 item 2).*

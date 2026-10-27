@@ -3129,6 +3129,25 @@ EVASIONS = ("||", "; true", ";true", "set +e", "continue-on-error", "if:")
 # pin was added); the pin only goes up.
 VIR_CASES_FLOOR = 141
 
+# Decision 0016 item 14: check.sh reads its tier from CERASTES_CHECK_BASE once, into pr_base, and
+# these are the only active lines (stripped) that may name either; the final lines print "all
+# green" only when pr_base is empty, so a PR-tier run never reads as the full check.
+CHECK_SH_PR_BASE = 'pr_base="${CERASTES_CHECK_BASE:-}"'
+CHECK_SH_PR_BASE_USES = (
+    CHECK_SH_PR_BASE,
+    'if [[ -n "$pr_base" ]]; then',
+    "printf 'check.sh: the PR tier, against %s (decision 0016 item 14)\\n' \"$pr_base\"",
+    'python3 scripts/run_tests.py --pr-base="$pr_base"',
+    'python3 scripts/run_tests.py --pr-base="$pr_base" --expect-passed "$vir_cases" build/vir-selftest',
+)
+CHECK_SH_GREEN = (
+    'if [[ -n "$pr_base" ]]; then',
+    "printf '\\ncheck.sh: green in the PR tier (not the full check)\\n'",
+    "else",
+    "printf '\\ncheck.sh: all green\\n'",
+    "fi",
+)
+
 
 def check_sh_problems(text):
     """What is wrong with how scripts/check.sh runs the doc lint and the docs
@@ -3159,10 +3178,26 @@ def check_sh_problems(text):
     # binary under test is verified against the tree after the tests ran
     edg = index(r"^\s*python3 scripts/edg_tree\.py check\s*$", "the EDG tree guard")
     boot = index(r"^\s*scripts/bootstrap\.sh --build-only\s*$", "the build step")
-    tests = index(r"^\s*python3 scripts/run_tests\.py\s*$", "the test run")
+    tests = index(r'^\s*python3 scripts/run_tests\.py --pr-base="\$pr_base"\s*$', "the test run")
     verify = index(r"^\s*python3 scripts/edg_tree\.py describe --verify-build\s*$",
                    "the build verification")
     green = index(r"all green", "the final green line")
+    # decision 0016 item 14: the tier
+    pr_base = index(r"^" + re.escape(CHECK_SH_PR_BASE) + r"$", "the reading of CERASTES_CHECK_BASE")
+    for l in lines:
+        if re.search(r"pr_base|CERASTES_CHECK_BASE", l) and l.strip() not in CHECK_SH_PR_BASE_USES:
+            problems.append(f"pr_base and CERASTES_CHECK_BASE only in the pinned lines: {l.strip()}")
+        if "CERASTES_CHECK_BASE" in l and l != CHECK_SH_PR_BASE:
+            problems.append(f"CERASTES_CHECK_BASE only in the reading of it: {l.strip()}")
+    if sum(1 for l in lines if "all green" in l) != 1:
+        problems.append("exactly one active line may print `all green`")
+    body = [l.strip() for l in lines if l.strip()]
+    ends = [i for i in range(len(body)) if tuple(body[i:i + len(CHECK_SH_GREEN)]) == CHECK_SH_GREEN]
+    if len(ends) != 1:
+        problems.append("the final lines must print `all green` only when pr_base is empty, "
+                        "exactly as pinned")
+    if None not in (pr_base, edg) and not pr_base < edg:
+        problems.append("CERASTES_CHECK_BASE must be read before the EDG tree guard")
     # M3: the self-test of the walker oracle runs with the harness self-test (the
     # end-to-end classes must fail, not skip: CERASTES_REQUIRE_E2E), and the
     # oracle itself checks every walker golden after the tests ran
@@ -3200,8 +3235,8 @@ def check_sh_problems(text):
     vir_mkdir = index(r"^\s*mkdir -p build/vir-selftest\s*$", "the creation of build/vir-selftest")
     vir_gen = index(r'^\s*vir_out="\$\(build/cerastes-vir-selftest build/vir-selftest\)"\s*$',
                     "the VIR self-test")
-    vir_run = index(r'^\s*python3 scripts/run_tests\.py --expect-passed "\$vir_cases" '
-                    r"build/vir-selftest\s*$", "the run of the VIR cases")
+    vir_run = index(r'^\s*python3 scripts/run_tests\.py --pr-base="\$pr_base" --expect-passed '
+                    r'"\$vir_cases" build/vir-selftest\s*$', "the run of the VIR cases")
     vir_lint = index(r"^\s*python3 scripts/lint_viper\.py build/vir-selftest/\*\.vpr\s*$",
                      "the lint of the VIR cases")
     # the case count is pinned: the tool's own number is read from its output, must be at least
@@ -3296,6 +3331,10 @@ class WiringCheckTests(unittest.TestCase):
     SH = """\
 #!/usr/bin/env bash
 set -euo pipefail
+pr_base="${CERASTES_CHECK_BASE:-}"
+if [[ -n "$pr_base" ]]; then
+  printf 'check.sh: the PR tier, against %s (decision 0016 item 14)\\n' "$pr_base"
+fi
 step "edg tree"
 python3 scripts/edg_tree.py check
 step "build"
@@ -3309,7 +3348,7 @@ python3 scripts/test_walker_oracle.py
 python3 scripts/test_lint_viper.py
 python3 scripts/test_mutate.py
 step "tests"
-python3 scripts/run_tests.py
+python3 scripts/run_tests.py --pr-base="$pr_base"
 step "viper lint"
 python3 scripts/lint_viper.py
 step "vir self-test"
@@ -3323,7 +3362,7 @@ if [[ ! "$vir_cases" =~ ^[0-9]+$ ]] || (( vir_cases < VIR_CASES_MIN )); then
   echo "check.sh: the VIR self-test stated too few cases" >&2
   exit 1
 fi
-python3 scripts/run_tests.py --expect-passed "$vir_cases" build/vir-selftest
+python3 scripts/run_tests.py --pr-base="$pr_base" --expect-passed "$vir_cases" build/vir-selftest
 python3 scripts/lint_viper.py build/vir-selftest/*.vpr
 step "walker oracle"
 python3 scripts/walker_oracle.py
@@ -3331,7 +3370,11 @@ step "docs"
 scripts/build_docs.sh
 python3 scripts/check_doc_examples.py --html build/doc
 python3 scripts/edg_tree.py describe --verify-build
-printf '\\ncheck.sh: all green\\n'
+if [[ -n "$pr_base" ]]; then
+  printf '\\ncheck.sh: green in the PR tier (not the full check)\\n'
+else
+  printf '\\ncheck.sh: all green\\n'
+fi
 """
     YML = """\
 jobs:
@@ -3398,7 +3441,7 @@ jobs:
         verify = "python3 scripts/edg_tree.py describe --verify-build\n"
         green = "printf '\\ncheck.sh: all green\\n'\n"
         boot = "scripts/bootstrap.sh --build-only\n"
-        tests = "python3 scripts/run_tests.py\n"
+        tests = 'python3 scripts/run_tests.py --pr-base="$pr_base"\n'
         mutations = {
             "guard commented out": self.SH.replace(guard, "# " + guard),
             "guard removed": self.SH.replace(guard, ""),
@@ -3421,9 +3464,51 @@ jobs:
             "no final green line": self.SH.replace(green, "printf 'done\\n'\n"),
             "tests removed": self.SH.replace(tests, ""),
             "tests commented out": self.SH.replace(tests, "# " + tests),
-            "tests with a path": self.SH.replace(tests, "python3 scripts/run_tests.py tests/il\n"),
+            "tests with a path": self.SH.replace(tests, 'python3 scripts/run_tests.py --pr-base="$pr_base" tests/il\n'),
         }
         mutations.update(self.walker_oracle_mutations())
+        for what, text in mutations.items():
+            with self.subTest(what):
+                self.assertNotEqual(text, self.SH, "mutation did not apply")
+                self.assertTrue(check_sh_problems(text), what)
+
+    def test_tier_wiring_mutations_are_found(self):
+        # decision 0016 item 14: the full check unless CERASTES_CHECK_BASE is set, and `all green`
+        # only for the full check
+        reading = 'pr_base="${CERASTES_CHECK_BASE:-}"\n'
+        guard = "python3 scripts/edg_tree.py check\n"
+        tests = 'python3 scripts/run_tests.py --pr-base="$pr_base"\n'
+        vrun = 'python3 scripts/run_tests.py --pr-base="$pr_base" --expect-passed "$vir_cases" build/vir-selftest\n'
+        pr_green = "  printf '\\ncheck.sh: green in the PR tier (not the full check)\\n'\n"
+        green = "printf '\\ncheck.sh: all green\\n'\n"
+        block = self.SH[self.SH.index('if [[ -n "$pr_base" ]]; then\n  printf \'\\n'):]
+        mutations = {
+            "the reading removed": self.SH.replace(reading, ""),
+            "the reading commented out": self.SH.replace(reading, "# " + reading),
+            "a hard-coded base": self.SH.replace(reading, 'pr_base="origin/main"\n'),
+            "a default base": self.SH.replace(reading, 'pr_base="${CERASTES_CHECK_BASE:-main}"\n'),
+            "the reading after the EDG tree guard": self.SH.replace(reading, "").replace(guard, guard + reading),
+            "pr_base assigned again": self.SH.replace('step "tests"\n', 'pr_base=main\nstep "tests"\n'),
+            "pr_base read from input": self.SH.replace('step "tests"\n', 'read -r pr_base < /dev/null\nstep "tests"\n'),
+            "pr_base set by printf -v": self.SH.replace('step "tests"\n', 'printf -v pr_base main\nstep "tests"\n'),
+            "the variable exported first": self.SH.replace(reading, "export CERASTES_CHECK_BASE=main\n" + reading),
+            "the variable defaulted first": self.SH.replace(reading, ': "${CERASTES_CHECK_BASE:=main}"\n' + reading),
+            "the tests with a fixed base": self.SH.replace(tests, "python3 scripts/run_tests.py --pr-base=main\n"),
+            "the tests with the variable": self.SH.replace(
+                tests, 'python3 scripts/run_tests.py --pr-base="$CERASTES_CHECK_BASE"\n'),
+            "the tests without the base": self.SH.replace(tests, "python3 scripts/run_tests.py\n"),
+            "the vir run with a fixed base": self.SH.replace(vrun, vrun.replace('"$pr_base"', "main")),
+            "the vir run without the base": self.SH.replace(vrun, vrun.replace(' --pr-base="$pr_base"', "")),
+            "an early exit in the PR tier": self.SH.replace(tests, '[[ -z "$pr_base" ]] || exit 0\n' + tests),
+            "the tests skipped in the PR tier": self.SH.replace(
+                tests, 'if [[ -z "$pr_base" ]]; then\n' + tests + "fi\n"),
+            "all green in the PR tier too": self.SH.replace(pr_green, "  " + green),
+            "all green whatever the tier": self.SH.replace(block, green),
+            "the branches swapped": self.SH.replace(block, block.replace(
+                'if [[ -n "$pr_base" ]]; then', 'if [[ -z "$pr_base" ]]; then')),
+            "a second all green line": self.SH + green,
+            "the PR-tier line removed": self.SH.replace(pr_green, ""),
+        }
         for what, text in mutations.items():
             with self.subTest(what):
                 self.assertNotEqual(text, self.SH, "mutation did not apply")
@@ -3435,7 +3520,7 @@ jobs:
         oracle_test = "python3 scripts/test_walker_oracle.py\n"
         oracle = "python3 scripts/walker_oracle.py\n"
         export = "export CERASTES_REQUIRE_E2E=1\n"
-        tests = "python3 scripts/run_tests.py\n"
+        tests = 'python3 scripts/run_tests.py --pr-base="$pr_base"\n'
         verify = "python3 scripts/edg_tree.py describe --verify-build\n"
         out = {}
         lint_test = "python3 scripts/test_lint_viper.py\n"
@@ -3463,7 +3548,7 @@ jobs:
         rm = "rm -rf build/vir-selftest\n"
         mkdir = "mkdir -p build/vir-selftest\n"
         gen = 'vir_out="$(build/cerastes-vir-selftest build/vir-selftest)"\n'
-        vrun = 'python3 scripts/run_tests.py --expect-passed "$vir_cases" build/vir-selftest\n'
+        vrun = 'python3 scripts/run_tests.py --pr-base="$pr_base" --expect-passed "$vir_cases" build/vir-selftest\n'
         vlint = "python3 scripts/lint_viper.py build/vir-selftest/*.vpr\n"
         for name, line in (("vir rm", rm), ("vir mkdir", mkdir), ("vir self-test", gen),
                            ("vir run", vrun), ("vir lint", vlint)):
@@ -3473,25 +3558,25 @@ jobs:
             out[f"{name} ; true"] = self.SH.replace(line, line[:-1] + "; true\n")
             out[f"{name} in the background"] = self.SH.replace(line, line[:-1] + " &\n")
         out["vir run into the harness's directory"] = self.SH.replace(
-            vrun, 'python3 scripts/run_tests.py --expect-passed "$vir_cases" build/vpr\n')
+            vrun, 'python3 scripts/run_tests.py --pr-base="$pr_base" --expect-passed "$vir_cases" build/vpr\n')
         out["vir run with another directory"] = self.SH.replace(
-            vrun, 'python3 scripts/run_tests.py --expect-passed "$vir_cases" tests/viper-smoke\n')
+            vrun, 'python3 scripts/run_tests.py --pr-base="$pr_base" --expect-passed "$vir_cases" tests/viper-smoke\n')
         out["vir run without the pinned count"] = self.SH.replace(
-            vrun, "python3 scripts/run_tests.py build/vir-selftest\n")
+            vrun, 'python3 scripts/run_tests.py --pr-base="$pr_base" build/vir-selftest\n')
         # decision 0016: CI sets the job count (CERASTES_JOBS), so this line must not carry any
         # `-j`: a hard-coded count would start 8 Silicon JVMs on a 7 GB runner
         out["vir run with a hard-coded -j 8"] = self.SH.replace(
-            vrun, 'python3 scripts/run_tests.py -j 8 --expect-passed "$vir_cases" build/vir-selftest\n')
+            vrun, 'python3 scripts/run_tests.py --pr-base="$pr_base" -j 8 --expect-passed "$vir_cases" build/vir-selftest\n')
         out["vir run with -j 3"] = self.SH.replace(
-            vrun, 'python3 scripts/run_tests.py -j 3 --expect-passed "$vir_cases" build/vir-selftest\n')
+            vrun, 'python3 scripts/run_tests.py --pr-base="$pr_base" -j 3 --expect-passed "$vir_cases" build/vir-selftest\n')
         out["vir run with --jobs 8"] = self.SH.replace(
-            vrun, 'python3 scripts/run_tests.py --jobs 8 --expect-passed "$vir_cases" build/vir-selftest\n')
+            vrun, 'python3 scripts/run_tests.py --pr-base="$pr_base" --jobs 8 --expect-passed "$vir_cases" build/vir-selftest\n')
         out["vir run with -j 8 after the count"] = self.SH.replace(
-            vrun, 'python3 scripts/run_tests.py --expect-passed "$vir_cases" -j 8 build/vir-selftest\n')
+            vrun, 'python3 scripts/run_tests.py --pr-base="$pr_base" --expect-passed "$vir_cases" -j 8 build/vir-selftest\n')
         out["vir run with another count"] = self.SH.replace(
-            vrun, 'python3 scripts/run_tests.py --expect-passed 1 build/vir-selftest\n')
+            vrun, 'python3 scripts/run_tests.py --pr-base="$pr_base" --expect-passed 1 build/vir-selftest\n')
         out["vir run with the count of the minimum"] = self.SH.replace(
-            vrun, 'python3 scripts/run_tests.py --expect-passed "$VIR_CASES_MIN" build/vir-selftest\n')
+            vrun, 'python3 scripts/run_tests.py --pr-base="$pr_base" --expect-passed "$VIR_CASES_MIN" build/vir-selftest\n')
         out["vir self-test output not captured"] = self.SH.replace(
             gen, "build/cerastes-vir-selftest build/vir-selftest\n")
         out["vir lint of the harness's directory"] = self.SH.replace(
@@ -3538,8 +3623,8 @@ jobs:
             "floor commented out": self.SH.replace(floor, "# " + floor),
             "floor not a number": self.SH.replace(floor, "VIR_CASES_MIN=$vir_cases\n"),
             "floor after the generation": self.SH.replace(floor, "").replace(
-                'python3 scripts/run_tests.py --expect-passed', floor
-                + 'python3 scripts/run_tests.py --expect-passed', 1),
+                'python3 scripts/run_tests.py --pr-base="$pr_base" --expect-passed', floor
+                + 'python3 scripts/run_tests.py --pr-base="$pr_base" --expect-passed', 1),
             "count not printed": self.SH.replace(printed, ""),
             "count line removed": self.SH.replace(count, ""),
             "count line commented out": self.SH.replace(count, "# " + count),
@@ -3564,7 +3649,7 @@ jobs:
         lines = [l for l in active_lines(self.SH) if l.strip()]
         guard = lines.index("python3 scripts/edg_tree.py check")
         self.assertLess(guard, lines.index("scripts/bootstrap.sh --build-only"))
-        self.assertLess(lines.index("python3 scripts/run_tests.py"),
+        self.assertLess(lines.index('python3 scripts/run_tests.py --pr-base="$pr_base"'),
                         lines.index("python3 scripts/edg_tree.py describe --verify-build"))
         self.assertLess(lines.index("python3 scripts/edg_tree.py describe --verify-build"),
                         len(lines) - 1)
@@ -4226,7 +4311,14 @@ def ci_sh_problems(text):
     return problems
 
 
-CI_YML_ON = ("  pull_request:", "  push:", "    branches: [main]", "  workflow_dispatch:")
+CI_YML_ON = ("  pull_request:", "  push:", "    branches: [main]", "  workflow_dispatch:", "  schedule:",
+             "    - cron: '0 7 * * *'")
+# decision 0016 item 14: a pull request is compared with its base, a push with the commit before it,
+# and the schedule and workflow_dispatch get the empty base, the full check
+CI_YML_CHECK_BASE = ("${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha"
+                     " || github.event_name == 'push' && github.event.before || '' }}")
+# decision 0016 item 9: max(150, 1.5 x the 145 min of the last full run on main), rounded up
+CI_YML_MAX_TIMEOUT = 220
 CI_YML_PERMISSIONS = ("  contents: read",)
 CI_YML_CONCURRENCY = (
     "  group: ${{ github.event_name == 'pull_request' && format('ci-pr-{0}', github.event.pull_request.number)"
@@ -4257,6 +4349,8 @@ CI_YML_CANONICAL = (
     '  push:',
     '    branches: [main]',
     '  workflow_dispatch:',
+    '  schedule:',
+    "    - cron: '0 7 * * *'",
     'permissions:',
     '  contents: read',
     'concurrency:',
@@ -4266,10 +4360,11 @@ CI_YML_CANONICAL = (
     '  check:',
     '    name: check (macOS, Command Line Tools 27.0)',
     '    runs-on: xcode-27',
-    '    timeout-minutes: 150',
+    '    timeout-minutes: 220',
     '    env:',
     '      DEVELOPER_DIR: /Library/Developer/CommandLineTools',
     '      CERASTES_JOBS: 3',
+    '      CERASTES_CHECK_BASE: ' + CI_YML_CHECK_BASE,
     '    steps:',
     '      - name: Checkout',
     '        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
@@ -4363,11 +4458,12 @@ def _yml_keys(block, indent):
 
 
 def ci_workflow_problems(text):
-    """What is wrong with .github/workflows/ci.yml (decision 0016), parsed as text: the triggers,
-    permissions and concurrency exactly as pinned; one job with only the five allowed keys
-    (so no job-level `if:`, `continue-on-error`, `strategy`, `container`, `needs`, `defaults`);
-    the runner, the timeout and the job environment; every action pinned to a commit SHA; the
-    checkout; and plain `scripts/ci.sh` then `scripts/check.sh` steps that cannot be ignored."""
+    """What is wrong with .github/workflows/ci.yml (decision 0016), parsed as text: the triggers
+    (the nightly schedule included), permissions and concurrency exactly as pinned; one job with
+    only the five allowed keys (so no job-level `if:`, `continue-on-error`, `strategy`,
+    `container`, `needs`, `defaults`); the runner, the timeout and the job environment (the tier's
+    CERASTES_CHECK_BASE, item 14); every action pinned to a commit SHA; the checkout; and plain
+    `scripts/ci.sh` then `scripts/check.sh` steps that cannot be ignored."""
     lines = active_lines(text)
     problems = non_ascii_problems(text)
     # the whole active text, pinned but for the SHAs, the names, the timeout and the job count: what
@@ -4398,7 +4494,7 @@ def ci_workflow_problems(text):
         problems.append(f"the top-level keys must be exactly {sorted(CI_YML_TOP_KEYS)}, not {sorted(sections)}")
     if tuple(sections.get("on", ())) != CI_YML_ON:
         problems.append("`on:` must be exactly pull_request (no filters), push to branches [main] "
-                        "only, and workflow_dispatch")
+                        "only, workflow_dispatch and the nightly schedule")
     if tuple(sections.get("permissions", ())) != CI_YML_PERMISSIONS:
         problems.append("`permissions:` must be exactly `contents: read`")
     if tuple(sections.get("concurrency", ())) != CI_YML_CONCURRENCY:
@@ -4426,8 +4522,9 @@ def ci_workflow_problems(text):
     if scalars.get("runs-on") != "xcode-27":
         problems.append("`runs-on` must be `xcode-27`")
     timeout = scalars.get("timeout-minutes", "")
-    if not re.fullmatch(r"[1-9][0-9]*", timeout) or int(timeout) > 150:
-        problems.append("`timeout-minutes` must be an integer of at most 150 (decision 0016 item 9)")
+    if not re.fullmatch(r"[1-9][0-9]*", timeout) or int(timeout) > CI_YML_MAX_TIMEOUT:
+        problems.append(f"`timeout-minutes` must be an integer of at most {CI_YML_MAX_TIMEOUT} "
+                        "(decision 0016 item 9)")
     # the job environment
     env_lines, section = [], None
     for l in jobs:
@@ -4438,8 +4535,13 @@ def ci_workflow_problems(text):
     env_pairs = _yml_keys(env_lines, 6)
     env_names = [k for k, _ in env_pairs]
     env = dict(env_pairs)
-    if len(env_names) != len(set(env_names)) or set(env_names) != {"DEVELOPER_DIR", "CERASTES_JOBS"}:
-        problems.append("the job environment must be exactly DEVELOPER_DIR and CERASTES_JOBS")
+    if len(env_names) != len(set(env_names)) \
+            or set(env_names) != {"DEVELOPER_DIR", "CERASTES_JOBS", "CERASTES_CHECK_BASE"}:
+        problems.append("the job environment must be exactly DEVELOPER_DIR, CERASTES_JOBS and "
+                        "CERASTES_CHECK_BASE")
+    if env.get("CERASTES_CHECK_BASE") != CI_YML_CHECK_BASE:
+        problems.append("CERASTES_CHECK_BASE must be exactly the pinned expression: the PR tier for "
+                        "pull requests and pushes only (decision 0016 item 14)")
     if env.get("DEVELOPER_DIR") != CI_YML_CLT:
         problems.append(f"DEVELOPER_DIR must be {CI_YML_CLT} (the Command Line Tools, not an Xcode)")
     if not re.fullmatch(r"[1-9][0-9]*", env.get("CERASTES_JOBS", "")):
@@ -4557,7 +4659,9 @@ class CiGuardTests(unittest.TestCase):
                 ("concurrency group", line_with("  group:")),
                 ("cancel-in-progress", line_with("  cancel-in-progress:")),
                 ("jobs", "jobs:\n"), ("job name", "    name: check (macOS, Command Line Tools 27.0)\n"),
-                ("runs-on", "    runs-on: xcode-27\n"), ("timeout", "    timeout-minutes: 150\n"),
+                ("runs-on", "    runs-on: xcode-27\n"), ("timeout", "    timeout-minutes: 220\n"),
+                ("schedule", "  schedule:\n    - cron: '0 7 * * *'\n"), ("cron", "    - cron: '0 7 * * *'\n"),
+                ("CERASTES_CHECK_BASE", line_with("      CERASTES_CHECK_BASE:")),
                 ("job env", "    env:\n"), ("DEVELOPER_DIR", "      DEVELOPER_DIR: /Library/Developer/CommandLineTools\n"),
                 ("CERASTES_JOBS", "      CERASTES_JOBS: 3\n"), ("steps", "    steps:\n"),
                 ("fetch-depth", "          fetch-depth: 0\n"), ("submodules", "          submodules: recursive\n"),
@@ -4604,7 +4708,7 @@ class CiGuardTests(unittest.TestCase):
             "      - name: Save the Silicon build\n", self.CHECK_STEP + "      - name: Save the Silicon build\n")
         out["cache save before ci.sh"] = Y.replace(self.CI_STEP, "").replace(
             self.CHECK_STEP, self.CI_STEP + self.CHECK_STEP)
-        sub("job-level if before the steps", "    timeout-minutes: 150\n", "    timeout-minutes: 150\n    if: false\n")
+        sub("job-level if before the steps", "    timeout-minutes: 220\n", "    timeout-minutes: 220\n    if: false\n")
         sub("job-level if just before steps", "    steps:\n", "    if: false\n    steps:\n")
         out["job-level if at the end"] = Y.rstrip("\n") + "\n    if: false\n"
         out["job-level quoted if at the end"] = Y.rstrip("\n") + "\n    'if': false\n"
@@ -4612,18 +4716,18 @@ class CiGuardTests(unittest.TestCase):
                            ("container", "ubuntu"), ("needs", "other"), ("defaults", "{run: {shell: sh}}"),
                            ("permissions", "{contents: write}"), ("environment", "prod"), ("services", "{}"),
                            ("outputs", "{}")):
-            sub(f"job-level {key} before the steps", "    timeout-minutes: 150\n",
-                f"    timeout-minutes: 150\n    {key}: {value}\n")
+            sub(f"job-level {key} before the steps", "    timeout-minutes: 220\n",
+                f"    timeout-minutes: 220\n    {key}: {value}\n")
             out[f"job-level {key} at the end"] = Y.rstrip("\n") + f"\n    {key}: {value}\n"
         sub("a second job", "jobs:\n  check:\n", "jobs:\n  other:\n    runs-on: xcode-27\n    steps: []\n  check:\n")
         sub("a repeated runs-on", "    runs-on: xcode-27\n", "    runs-on: xcode-27\n    runs-on: xcode-27\n")
         sub("another runner", "runs-on: xcode-27", "runs-on: macos-26")
         sub("a runner list", "runs-on: xcode-27", "runs-on: [self-hosted, xcode-27]")
-        sub("timeout 151", "timeout-minutes: 150", "timeout-minutes: 151")
-        sub("timeout 240, the old value", "timeout-minutes: 150", "timeout-minutes: 240")
-        sub("timeout 361", "timeout-minutes: 150", "timeout-minutes: 361")
-        sub("timeout quoted", "timeout-minutes: 150", "timeout-minutes: '150'")
-        sub("timeout an expression", "timeout-minutes: 150", "timeout-minutes: ${{ vars.T }}")
+        sub("timeout 221", "timeout-minutes: 220", "timeout-minutes: 221")
+        sub("timeout 240, the S2 value", "timeout-minutes: 220", "timeout-minutes: 240")
+        sub("timeout 361", "timeout-minutes: 220", "timeout-minutes: 361")
+        sub("timeout quoted", "timeout-minutes: 220", "timeout-minutes: '220'")
+        sub("timeout an expression", "timeout-minutes: 220", "timeout-minutes: ${{ vars.T }}")
         sub("an Xcode developer dir", "DEVELOPER_DIR: /Library/Developer/CommandLineTools",
             "DEVELOPER_DIR: /Applications/Xcode_27.app/Contents/Developer")
         sub("CERASTES_JOBS 0", "CERASTES_JOBS: 3", "CERASTES_JOBS: 0")
@@ -4661,7 +4765,22 @@ class CiGuardTests(unittest.TestCase):
         sub("tags on push", "    branches: [main]\n", "    branches: [main]\n    tags: ['v*']\n")
         sub("push to every branch", "    branches: [main]\n", "")
         sub("push to another branch", "branches: [main]", "branches: [ci]")
-        sub("a schedule", "  workflow_dispatch:\n", "  workflow_dispatch:\n  schedule:\n    - cron: '0 0 * * *'\n")
+        sub("another cron", "cron: '0 7 * * *'", "cron: '0 7 * * 0'")
+        sub("a second cron", "    - cron: '0 7 * * *'\n", "    - cron: '0 7 * * *'\n    - cron: '0 19 * * *'\n")
+        sub("a second schedule", "  workflow_dispatch:\n", "  workflow_dispatch:\n  schedule:\n    - cron: '0 0 * * *'\n")
+        # decision 0016 item 14: the full check for the schedule and workflow_dispatch
+        sub("the schedule in the PR tier", "github.event.before || '' }}", "github.event.before || 'origin/main' }}")
+        sub("every run in the PR tier", line_with("      CERASTES_CHECK_BASE:"),
+            "      CERASTES_CHECK_BASE: ${{ github.event.pull_request.base.sha || github.event.before || 'main' }}\n")
+        sub("pull requests against their head", "github.event.pull_request.base.sha", "github.event.pull_request.head.sha")
+        sub("pushes against themselves", "github.event.before", "github.sha")
+        sub("a fixed base", line_with("      CERASTES_CHECK_BASE:"), "      CERASTES_CHECK_BASE: main\n")
+        sub("the base from a repository variable", line_with("      CERASTES_CHECK_BASE:"),
+            "      CERASTES_CHECK_BASE: ${{ vars.BASE }}\n")
+        sub("the base repeated", line_with("      CERASTES_CHECK_BASE:"),
+            line_with("      CERASTES_CHECK_BASE:") + "      CERASTES_CHECK_BASE: main\n")
+        sub("the base on the check step", self.CHECK_RUN,
+            self.CHECK_RUN + "        env:\n          CERASTES_CHECK_BASE: main\n")
         sub("pull_request_target", "  pull_request:\n", "  pull_request_target:\n")
         sub("inputs on workflow_dispatch", "  workflow_dispatch:\n", "  workflow_dispatch:\n    inputs: {}\n")
         sub("cancel-in-progress true", "cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
@@ -4756,7 +4875,7 @@ class CiGuardTests(unittest.TestCase):
                 ("another SHA", self.YML.replace("3d3c42e5aac5ba805825da76410c181273ba90b1", sha)),
                 ("a step renamed", self.YML.replace("name: Check everything", "name: Run the checks")),
                 ("a comment added", self.YML.replace("jobs:\n", "jobs:\n  # a comment\n")),
-                ("a shorter timeout", self.YML.replace("timeout-minutes: 150", "timeout-minutes: 120")),
+                ("a shorter timeout", self.YML.replace("timeout-minutes: 220", "timeout-minutes: 120")),
                 ("CERASTES_JOBS 4", self.YML.replace("CERASTES_JOBS: 3", "CERASTES_JOBS: 4")),
                 ("the job renamed", self.YML.replace("name: check (macOS", "name: build (macOS")),
                 ("a trailing comment on a SHA", self.YML.replace("# v7.0.1", "# v7.0.2")),
@@ -5144,6 +5263,131 @@ class EndToEndTests(unittest.TestCase):
     def test_expected_verified_fails(self):
         status, out = self.run_harness("// expect: verified")
         self.assertEqual(status, 1, out)
+
+    def test_the_pr_tier_leaves_its_unselected_silicon_runs_to_the_full_check(self):
+        # decision 0016 item 14: no Outcome for a run the tier leaves out, a count in the summary,
+        # and --expect-passed counts it as passed (the VIR self-test in the PR tier)
+        ok = str(rt.ROOT / "tests" / "viper-smoke" / "ok.vpr")
+        nothing_changed = rt.PrTier("0" * 40, set())
+        with mock.patch.object(rt, "pr_tier", return_value=nothing_changed), \
+                mock.patch.object(rt, "in_pr_sample", return_value=False):
+            status, out, err = self.run_main_capturing("--pr-base", "main", ok)
+            self.assertEqual(status, 0, out + err)
+            self.assertIn("Silicon runs for 0 of 1 tests", out)
+            self.assertIn("0 passed, 0 failed, 0 skipped, 1 Silicon runs left to the full check (PR tier)", out)
+            status, out, err = self.run_main_capturing("--pr-base", "main", "--expect-passed", "1", ok)
+            self.assertEqual(status, 0, out + err)
+            status, out, err = self.run_main_capturing("--pr-base", "main", "--expect-passed", "2", ok)
+            self.assertEqual(status, 1, out + err)
+            self.assertIn("expected exactly 2 passing tests, got 0 and 1 left to the full check", err)
+        with mock.patch.object(rt, "pr_tier", return_value=nothing_changed), \
+                mock.patch.object(rt, "in_pr_sample", return_value=True):
+            status, out, err = self.run_main_capturing("--pr-base", "main", "--expect-passed", "1", ok)
+            self.assertEqual(status, 0, out + err)
+            self.assertIn("1 passed, 0 failed, 0 skipped, 0 Silicon runs left to the full check", out)
+        # an empty base is the full run, and says nothing about a tier
+        status, out, err = self.run_main_capturing("--pr-base", "", ok)
+        self.assertEqual(status, 0, out + err)
+        self.assertIn("1 passed, 0 failed", out)
+        self.assertNotIn("PR tier", out)
+
+    def test_a_base_git_cannot_resolve_is_a_usage_error(self):
+        ok = str(rt.ROOT / "tests" / "viper-smoke" / "ok.vpr")
+        status, out, err = self.run_main_capturing("--pr-base", "no-such-ref-anywhere", ok)
+        self.assertEqual(status, 2, out + err)
+        self.assertIn("--pr-base no-such-ref-anywhere: `git merge-base no-such-ref-anywhere HEAD` failed", err)
+
+
+class PrTierTests(unittest.TestCase):
+    """--pr-base (decision 0016 item 14): which of the tests that reach Silicon the PR tier runs."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, self.tmp)
+
+    def write(self, name, text="// expect: verified\n"):
+        f = self.tmp / name
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(text)
+        return f
+
+    def git(self, *args):
+        subprocess.run(["git", "-c", "user.name=tier", "-c", "user.email=tier@example.invalid",
+                        "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", *args],
+                       cwd=self.tmp, check=True, capture_output=True)
+
+    def test_only_silicon_runs_are_left_out(self):
+        for name, header, reaches in (
+                ("v.c", "// expect: verified\n", True),
+                ("e.c", "// expect: error postcondition @ L3\n", True),
+                ("r.c", "// expect: rejected unsupported_expression @ L3\n", False),
+                ("f.c", "// expect: frontend-ok\n", False),
+                ("g.c", "// expect: golden\n", False),
+                ("s.vpr", "// expect: verified\n", True)):
+            with self.subTest(name):
+                f = self.write(name, header)
+                exp = rt.read_header(f)
+                self.assertIsInstance(exp, rt.Expectation)
+                self.assertEqual(rt.reaches_silicon(f, exp), reaches)
+        self.assertFalse(rt.reaches_silicon(self.write("bad.c", "// expect: nonsense\n"),
+                                            rt.read_header(self.tmp / "bad.c")))
+
+    def test_the_sample_is_a_hash_of_the_path_relative_to_the_root(self):
+        f = rt.ROOT / "tests" / "scalar" / "bit_mask.c"
+        digest = hashlib.sha256(b"tests/scalar/bit_mask.c").hexdigest()
+        self.assertEqual(rt.in_pr_sample(f), int(digest, 16) % rt.PR_SAMPLE == 0)
+        self.assertEqual(rt.in_pr_sample(rt.ROOT / "tests" / "scalar" / ".." / "scalar" / "bit_mask.c"),
+                         rt.in_pr_sample(f))
+
+    def test_the_sample_is_about_one_in_eight_of_the_real_tests(self):
+        sel = rt.discover(rt.default_paths())
+        silicon = [f for f in sel.tests if rt.reaches_silicon(f, rt.read_header(f))]
+        self.assertGreater(len(silicon), 500)
+        sampled = sum(1 for f in silicon if rt.in_pr_sample(f))
+        self.assertTrue(len(silicon) / 16 < sampled < len(silicon) / 4, (sampled, len(silicon)))
+
+    def test_what_the_tier_selects(self):
+        changed = self.write("area/changed.c")
+        helper = self.write("area/headers/h.h", "int h(void);\n")
+        includer = self.write("area/includer.c", '// expect: verified\n#include "headers/h.h"\n')
+        through = self.write("area/through.c", '// expect: verified\n#include "headers/i.h"\n')
+        self.write("area/headers/i.h", '#include "h.h"\n')
+        commented = self.write("area/commented.c", '// expect: verified\n// #include "headers/h.h"\n')
+        other = self.write("area/other.c")
+        example = next((rt.ROOT / rt.DOC_EXAMPLES).rglob("*.c"))
+        tier = rt.PrTier("0" * 40, {changed, helper})
+        with mock.patch.object(rt, "in_pr_sample", return_value=False):
+            for f, selected in ((changed, True), (includer, True), (through, True), (commented, False),
+                                (other, False), (example, True)):
+                with self.subTest(f.name):
+                    self.assertEqual(tier.selects(f), selected)
+        with mock.patch.object(rt, "in_pr_sample", return_value=True):
+            self.assertTrue(tier.selects(other))
+
+    def test_the_changed_files_are_those_since_the_merge_base(self):
+        self.git("init", "-q", "-b", "main")
+        a, b, c = self.write("a.c"), self.write("b.c"), self.write("old/c.c")
+        self.write("d.c")
+        self.git("add", ".")
+        self.git("commit", "-q", "-m", "base")
+        self.git("switch", "-q", "-c", "topic")
+        a.write_text("// expect: verified\nint a;\n")  # committed on the topic
+        self.git("commit", "-q", "-am", "a")
+        self.git("switch", "-q", "main")
+        (self.tmp / "d.c").write_text("// expect: verified\nint d;\n")  # main's own change
+        self.git("commit", "-q", "-am", "d")
+        self.git("switch", "-q", "topic")
+        b.write_text("// expect: verified\nint b;\n")  # not committed
+        new = self.write("new.c")  # not even added
+        self.git("mv", "old/c.c", "moved.c")  # a rename: both paths
+        base = subprocess.run(["git", "merge-base", "main", "HEAD"], cwd=self.tmp, check=True,
+                              capture_output=True, text=True).stdout.strip()
+        with mock.patch.object(rt, "ROOT", self.tmp):
+            tier = rt.pr_tier("main")
+            self.assertEqual(tier.base, base)
+            self.assertEqual(tier.changed, {a, b, new, self.tmp / "moved.c", c})
+            with self.assertRaisesRegex(rt.UsageError, "--pr-base nosuch: `git merge-base nosuch HEAD` failed"):
+                rt.pr_tier("nosuch")
 
 
 def _real_front_end_available():
@@ -5693,6 +5937,7 @@ FIXTURE_TAGS = {
     "nonviable_because_arg_mismatch": 3326, "static_assert": 1574,
     "comparison_details": 3453, "exp_semicolon": 65,
     "declared_but_not_referenced": 177, "integer_sign_change": 68,
+    "assign_where_compare_meant": 187,
     "cannot_open_file": 1696, "cl_invalid_option": 571,
 }
 
@@ -9815,6 +10060,56 @@ class EvaluateVerifyTests(unittest.TestCase):
         self.assertFails(self.evaluate(["error overflow @ L5"], 1, OVERFLOW_ERROR, warning),
                          "a front-end diagnostic in a run that reached Silicon")
 
+    VWARN = f'"{VF}", line 4 (col. 3): warning #187-D: use of "=" where "==" may have been intended\n'
+
+    def test_a_verified_test_that_lists_its_warning_passes_when_it_is_printed(self):
+        expects = ["verified", "frontend-warning assign_where_compare_meant @ L4"]
+        self.assertEqual(self.evaluate(expects, 0, VERIFIED_LINE, self.VWARN), [])
+
+    def test_a_listed_warning_that_is_not_printed_fails_a_verified_test(self):
+        expects = ["verified", "frontend-warning assign_where_compare_meant @ L4"]
+        self.assertFails(self.evaluate(expects, 0, VERIFIED_LINE, ""),
+                         "missing warning: expected assign_where_compare_meant @ L4")
+
+    def test_an_extra_warning_fails_a_verified_test_that_lists_another(self):
+        expects = ["verified", "frontend-warning assign_where_compare_meant @ L4"]
+        other = f'"{VF}", line 3 (col. 3): warning #161-D: unrecognized #pragma\n'
+        self.assertFails(self.evaluate(expects, 0, VERIFIED_LINE, other + self.VWARN),
+                         "unexpected warning")
+        self.assertFails(self.evaluate(expects, 0, VERIFIED_LINE, self.VWARN * 2),
+                         "unexpected warning")
+
+    def test_a_listed_warning_at_the_wrong_line_or_tag_fails_a_verified_test(self):
+        self.assertFails(self.evaluate(["verified", "frontend-warning assign_where_compare_meant @ L5"],
+                                       0, VERIFIED_LINE, self.VWARN), "wrong line")
+        other = f'"{VF}", line 4 (col. 3): warning #177-D: variable "x" was declared but never referenced\n'
+        self.assertFails(self.evaluate(["verified", "frontend-warning assign_where_compare_meant @ L4"],
+                                       0, VERIFIED_LINE, other), "wrong diagnostic at this line")
+
+    def test_an_error_test_may_list_its_warnings(self):
+        expects = ["error overflow @ L5", "frontend-warning assign_where_compare_meant @ L4"]
+        self.assertEqual(self.evaluate(expects, 1, OVERFLOW_ERROR, self.VWARN), [])
+        self.assertFails(self.evaluate(expects, 1, OVERFLOW_ERROR, ""), "missing warning")
+        self.assertFails(self.evaluate(["error overflow @ L5"], 1, OVERFLOW_ERROR, self.VWARN),
+                         "a front-end diagnostic in a run that reached Silicon")
+        # the errors are still compared when the warnings match
+        self.assertFails(self.evaluate(["error check @ L5", expects[1]], 1, OVERFLOW_ERROR, self.VWARN),
+                         "overflow")
+
+    def test_listed_warnings_do_not_excuse_other_stderr_output(self):
+        expects = ["verified", "frontend-warning assign_where_compare_meant @ L4"]
+        self.assertFails(self.evaluate(expects, 0, VERIFIED_LINE, self.VWARN + "odd\n"),
+                         "unrecognized front-end output: odd")
+        self.assertFails(self.evaluate(expects, 0, VERIFIED_LINE, self.VWARN + VERIFIED_LINE),
+                         "unrecognized front-end output")
+        # a verdict on stdout is still required
+        self.assertFails(self.evaluate(expects, 0, "", self.VWARN), "exactly one")
+
+    def test_without_warning_lines_the_message_is_unchanged(self):
+        self.assertFails(self.evaluate(["verified"], 0, VERIFIED_LINE, self.VWARN),
+                         "a front-end diagnostic in a run that reached Silicon (a warning "
+                         "is unexpected output; tests are warning-free)")
+
     def test_verified_needs_exit_zero_and_the_line(self):
         self.assertFails(self.evaluate(["verified"], 0, ""), "exactly one")
         self.assertFails(self.evaluate(["verified"], 0, VERIFIED_LINE + VERIFIED_LINE), "exactly one")
@@ -10063,12 +10358,79 @@ class EvaluateVerifyTests(unittest.TestCase):
         text = "// expect: frontend-warning declared_but_not_referenced @ L9\n// mode: c23\nint x;\n"
         self.assertEqual(rt.parse_header(text, ".c").kind, "frontend-diag")
 
-    def test_a_warning_line_does_not_mix_with_other_outcomes(self):
-        for other in ("verified", "error overflow @ L5"):
-            text = (f"// expect: {other}\n// expect: frontend-warning declared_but_not_referenced @ L9\n"
-                    "// mode: c23\nint x;\n")
+    def test_a_verified_or_error_test_may_list_the_warnings_it_expects(self):
+        # decision 0025 item 4: the warning lines accompany `verified` and `error` like `rejected`
+        text = ("// expect: verified\n// expect: frontend-warning assign_where_compare_meant @ L9\n"
+                "// expect: frontend-warning assign_where_compare_meant @ L10\n// mode: c23\nint x;\n")
+        exp = rt.parse_header(text, ".c")
+        self.assertEqual(exp.kind, "verified")
+        self.assertEqual([(d.severity, d.tag, d.line) for d in exp.diags],
+                         [("warning", "assign_where_compare_meant", 9),
+                          ("warning", "assign_where_compare_meant", 10)])
+        text = ("// expect: error overflow @ L5\n// expect: error check @ L6\n"
+                "// expect: frontend-warning assign_where_compare_meant @ L9\n// mode: c23\nint x;\n")
+        exp = rt.parse_header(text, ".c")
+        self.assertEqual(exp.kind, "error")
+        self.assertEqual([(e.category, e.line) for e in exp.errors], [("overflow", 5), ("check", 6)])
+        self.assertEqual([(d.severity, d.tag, d.line) for d in exp.diags],
+                         [("warning", "assign_where_compare_meant", 9)])
+        self.assertTrue(rt.expects_failure(exp))
+        # native-ok still accompanies, and the sole-outcome rule still counts the other lines
+        text = ("// expect: verified\n// expect: native-ok\n"
+                "// expect: frontend-warning assign_where_compare_meant @ L9\nint x;\n")
+        self.assertTrue(rt.parse_header(text, ".c").native_ok)
+        with self.assertRaises(rt.HeaderError) as ctx:
+            rt.parse_header("// expect: verified\n// expect: verified\n"
+                            "// expect: frontend-warning assign_where_compare_meant @ L9\nint x;\n", ".c")
+        self.assertIn("only outcome line", str(ctx.exception))
+
+    def test_a_warning_line_still_does_not_mix_with_the_other_kinds(self):
+        warn = "// expect: frontend-warning assign_where_compare_meant @ L9\n"
+        for other in ("frontend-ok", "golden", "frontend-refused x"):
+            text = f"// expect: {other}\n{warn}// mode: c23\nint x;\n"
             with self.subTest(other), self.assertRaises(rt.HeaderError):
                 rt.parse_header(text, ".c")
+        # frontend-error and frontend-warning lines alone are a front-end test (above); a
+        # frontend-error line cannot accompany a verified or error test, with or without the
+        # warning lines
+        for other in ("verified", "error overflow @ L5"):
+            for extra in ("", warn):
+                text = (f"// expect: {other}\n// expect: frontend-error exp_semicolon @ L9\n"
+                        f"{extra}// mode: c23\nint x;\n")
+                with self.subTest(f"{other} / {extra.strip()}"), self.assertRaises(rt.HeaderError) as ctx:
+                    rt.parse_header(text, ".c")
+                self.assertIn("mix", str(ctx.exception))
+        # a verified test that mixes in a rejection or an error is still refused
+        for text in ("// expect: verified\n// expect: error overflow @ L5\n" + warn,
+                     "// expect: verified\n// expect: rejected cerastes-comma_without_effect @ L5\n" + warn,
+                     "// expect: error overflow @ L5\n// expect: rejected cerastes-comma_without_effect @ L5\n" + warn):
+            with self.subTest(text), self.assertRaises(rt.HeaderError):
+                rt.parse_header(text + "int x;\n", ".c")
+
+    def test_a_verified_or_error_test_may_list_only_the_allowed_warnings(self):
+        # decision 0025 item 4: the list is closed (VERIFY_WARNING_TAGS); a `rejected` test may list any
+        self.assertEqual(rt.VERIFY_WARNING_TAGS, {"assign_where_compare_meant"})
+        for outcome in ("verified", "error overflow @ L5"):
+            text = f"// expect: {outcome}\n// expect: frontend-warning declared_but_not_referenced @ L9\nint x;\n"
+            with self.subTest(outcome), self.assertRaises(rt.HeaderError) as ctx:
+                rt.parse_header(text, ".c")
+            self.assertIn("not allowed in a `verified` or `error` test", str(ctx.exception))
+            self.assertIn("assign_where_compare_meant", str(ctx.exception))
+            # one allowed and one other tag: still refused
+            text = (f"// expect: {outcome}\n// expect: frontend-warning assign_where_compare_meant @ L8\n"
+                    "// expect: frontend-warning declared_but_not_referenced @ L9\nint x;\n")
+            with self.subTest(f"{outcome} mixed"), self.assertRaises(rt.HeaderError):
+                rt.parse_header(text, ".c")
+        text = ("// expect: rejected cerastes-comma_without_effect @ L9\n"
+                "// expect: frontend-warning declared_but_not_referenced @ L9\nint x;\n")
+        self.assertEqual(rt.parse_header(text, ".c").kind, "rejected")
+
+    def test_a_vpr_test_takes_no_warning_lines(self):
+        for outcome in ("verified", "error postcondition:assertion.false @ L3"):
+            text = (f"// expect: {outcome}\n// expect: frontend-warning assign_where_compare_meant @ L9\n")
+            with self.subTest(outcome), self.assertRaises(rt.HeaderError) as ctx:
+                rt.parse_header(text, ".vpr")
+            self.assertIn("does not apply to .vpr", str(ctx.exception))
 
     def test_rejected_output_checks_are_those_of_frontend_tests(self):
         no_summary = REJECTION.split("\n")[0] + "\n"
@@ -10973,6 +11335,10 @@ class VerifyRunTests(FakeVerifierCase):
             self.assertEqual(rt.required_env(headers(text, "a.cpp")), ["CERASTES_VERIFY"])
         self.assertEqual(rt.required_env(headers("// expect: rejected undefined_identifier @ L3\n")),
                          ["CERASTES_VERIFY", "CERASTES_EDG_GEN"])
+        # listed warnings need the tags of the registry too
+        self.assertEqual(rt.required_env(headers(
+            "// expect: verified\n// expect: frontend-warning assign_where_compare_meant @ L3\n")),
+            ["CERASTES_VERIFY", "CERASTES_EDG_GEN"])
         # a .vpr test needs Silicon, not the driver
         self.assertEqual(rt.required_env(headers("// expect: verified\n", "a.vpr")),
                          ["CERASTES_JAVA", "SILICON_JAR", "Z3_EXE"])
@@ -12248,6 +12614,25 @@ class RealDriverTests(unittest.TestCase):
                     self.assertEqual(run.stdout, "")
                     self.assertIn(f"{name}:{line}: internal check: static assertion condition as written "
                                   "differs from the front end's", run.stderr)
+
+    def test_the_dropped_block_static_assertions_are_rejected_by_the_cross_check(self):
+        # 0025 item 5: after the bodies are encoded, every block-scope static assertion that EDG's walk
+        # of a routine's region lists must have reached the encoder.  The hook drops them all, so the
+        # cross-check fires: the run is not accepted (exit 2, with its message); the twin is the same
+        # file without the hook (exit 0), in both modes.  If the check stopped looking inside bodies,
+        # an assertion in a loop or a switch body could be skipped unseen.
+        for name in ("static_assert_block.c", "static_assert_nested.c"):
+            path = REAL_ROOT / "tests" / "scalar" / name
+            for mode in ("c23", "c++20"):
+                with self.subTest(name, mode=mode):
+                    run = self.run_driver("verify", str(path), f"--std={mode}")
+                    self.assertEqual((run.returncode, run.stderr), (0, ""), run.stdout)
+                    self.assertIn(": verified (", run.stdout)
+                    run = self.run_driver("verify", str(path), f"--std={mode}",
+                                          "--cerastes_verify_selftest=drop_block_static_assertion")
+                    self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+                    self.assertEqual(run.stdout, "")
+                    self.assertIn("a static assertion this version does not check", run.stderr)
 
     def test_the_hook_that_perturbs_nothing_is_not_verified(self):
         # a program with no named constant and no case value gives perturb_folded nothing to move: the

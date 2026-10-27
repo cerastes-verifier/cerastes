@@ -24,8 +24,8 @@ struct VerifyOutput {
 
 struct VerifyConfig {
   bool on = false;
-  // The self-test hook of 0011 item 13 ("" for none): drop_assert, weaken_invariant, constant_without_expr,
-  // silicon_timeout.
+  // The self-test hook of 0011 item 13 ("" for none): the names and what each does are listed above is_hook in
+  // src/driver/verify_main.cpp, the one place that accepts them.
   std::string hook;
   // Canonical (realpath) system directories: the driver's own system include directories, without
   // /usr/local/include (a user directory).  A file under one of them is a system file.

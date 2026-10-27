@@ -4,6 +4,11 @@
 #
 # Build, lint and test everything.  Must be green at the end of every session.
 # Requires a prior scripts/bootstrap.sh.
+#
+# CERASTES_CHECK_BASE unset or empty (the default, and what every session ends with): the full
+# check.  CI's pull requests and pushes set it to the commit they are compared with (decision 0016
+# item 14): the PR tier, in which both test runs below make Silicon runs only for the tests changed
+# since that commit, the doc examples and a fixed sample; the nightly CI run is the full check.
 
 set -euo pipefail
 
@@ -11,6 +16,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 step() { printf '\n==== %s\n' "$*"; }
+
+pr_base="${CERASTES_CHECK_BASE:-}"
+if [[ -n "$pr_base" ]]; then
+  printf 'check.sh: the PR tier, against %s (decision 0016 item 14)\n' "$pr_base"
+fi
 
 step "edg tree"
 python3 scripts/edg_tree.py check
@@ -44,7 +54,7 @@ python3 scripts/test_lint_viper.py
 python3 scripts/test_mutate.py
 
 step "tests"
-python3 scripts/run_tests.py
+python3 scripts/run_tests.py --pr-base="$pr_base"
 
 step "viper lint"
 # the Viper that the tests above left in build/vpr (invariant 4)
@@ -56,7 +66,7 @@ step "vir self-test"
 # The case count is pinned twice: the tool must state at least VIR_CASES_MIN cases (a smaller
 # set must not pass), and the harness must pass exactly the number it stated (a case lost on
 # the way, or a file that is not run, must not pass either).
-VIR_CASES_MIN=671
+VIR_CASES_MIN=686
 rm -rf build/vir-selftest
 mkdir -p build/vir-selftest
 vir_out="$(build/cerastes-vir-selftest build/vir-selftest)"
@@ -66,7 +76,7 @@ if [[ ! "$vir_cases" =~ ^[0-9]+$ ]] || (( vir_cases < VIR_CASES_MIN )); then
   echo "check.sh: the VIR self-test stated ${vir_cases:-no number of} cases; at least $VIR_CASES_MIN are expected" >&2
   exit 1
 fi
-python3 scripts/run_tests.py --expect-passed "$vir_cases" build/vir-selftest
+python3 scripts/run_tests.py --pr-base="$pr_base" --expect-passed "$vir_cases" build/vir-selftest
 python3 scripts/lint_viper.py build/vir-selftest/*.vpr
 
 step "walker oracle"
@@ -78,4 +88,8 @@ scripts/build_docs.sh
 python3 scripts/check_doc_examples.py --html build/doc
 
 python3 scripts/edg_tree.py describe --verify-build
-printf '\ncheck.sh: all green\n'
+if [[ -n "$pr_base" ]]; then
+  printf '\ncheck.sh: green in the PR tier (not the full check)\n'
+else
+  printf '\ncheck.sh: all green\n'
+fi

@@ -56,6 +56,7 @@ it verifies and what it does not:
   pass:[C++]20, with locals (with or without an initializer: a read before the
   first assignment is an error), arithmetic, comparisons and logical operators,
   assignments and `pass:[++]`/`--` used as values and the comma operator,
+  `?:` with `void` arms as a statement,
   `if`/`else`, `switch`, `while`, `do` and `for` loops with invariants and
   termination measures, `break` and `continue`, forward `goto`, recursion with
   measures, `return`, named constants (`const` globals), enumerations and their constants, calls of functions that
@@ -70,8 +71,8 @@ it verifies and what it does not:
 * *Reported:* thirteen kinds of error, each at a line of your source, with what it
   means and how to fix it on xref:error-messages.adoc[Error messages].
 * *Rejected with a diagnostic, never approximated:* everything else, among it
-  pointers, references, classes, templates, a backward `goto` and
-  floating point
+  pointers, references, classes, templates, a backward `goto`,
+  floating point, and the shapes the compilers warn about
   (xref:verifying.adoc#not-supported[the list]).
 * *Parsed and checked, not verified:* the annotations beyond `requires`,
   `ensures`, `invariant`, `decreases` and `check`: `fold`, `unfold`, predicates, pure

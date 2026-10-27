@@ -439,6 +439,132 @@ void define_calls_in_expressions() {
     f->body = k.blk({k.decl(x, k.num(k.i32, "0")), k.ret(k.comma(k.asgE(x, k.num(k.i32, "1")), k.v(x)))});
     k.done(f);
   });
+  // ---- writes and snapshots outside the chain (decision 0025 item 2) ----
+  // A write or a snapshot cannot fail, so it is not in F: it goes right after the member of its set that comes last in pi, and two of
+  // them with different calls need no order between the calls.
+  twin("calls_two_writes", "(x = g(a)) + (y = g(b)): two writes of different calls, neither depends on the other", [=](Kit& k, bool wrong) {
+    Function* g = g_id(k);
+    Function* c = k.fn("c", k.i32, {{"a", k.i32}, {"b", k.i32}});
+    k.req(c, k.range(k.F(c, 0), k.i32, "0", "100"));
+    k.req(c, k.range(k.F(c, 1), k.i32, "0", "100"));
+    k.ens(c, k.eq(k.R(c), k.add(k.F(c, 0), wrong ? k.add(k.F(c, 1), I(k, "1")) : k.F(c, 1))));
+    Var* x = k.local(c, "x", k.i32);
+    Var* y = k.local(c, "y", k.i32);
+    const Stmt* r = k.ret(k.add(k.v(x), k.v(y)));
+    c->body = k.blk({k.decl(x, I(k, "0")), k.decl(y, I(k, "0")),
+                     k.es(k.add(k.asgE(x, k.call(g, {k.pv(c, 0)})), k.asgE(y, k.call(g, {k.pv(c, 1)})))), r});
+    k.done(c);
+    return r;
+  });
+  twin("calls_write_after_unrelated_call", "f(b) < (x = g(a)): the write depends on g only, f comes first in creation order and no check depends on both",
+       [=](Kit& k, bool wrong) {
+         Function* g = g_id(k);
+         Function* f = t1(k, "f");
+         Function* c = k.fn("c", k.i32, {{"a", k.i32}, {"b", k.i32}});
+         k.req(c, k.range(k.F(c, 0), k.i32, "0", "100"));
+         k.ens(c, k.eq(k.R(c), wrong ? k.add(k.F(c, 0), I(k, "1")) : k.F(c, 0)));
+         Var* x = k.local(c, "x", k.i32);
+         const Stmt* r = k.ret(k.v(x));
+         c->body = k.blk({k.decl(x, I(k, "0")), k.es(k.lt(k.call(f, {k.pv(c, 1)}), k.asgE(x, k.call(g, {k.pv(c, 0)})))), r});
+         k.done(c);
+         return r;
+       });
+  twin("calls_initialized_snapshots", "(x = g(a), x) + (y = g(b), y) with initialized x and y: the snapshots have no flag check, so no set joins the two calls",
+       [=](Kit& k, bool wrong) {
+         Function* g = g_id(k);
+         Function* c = k.fn("c", k.i32, {{"a", k.i32}, {"b", k.i32}});
+         k.req(c, k.range(k.F(c, 0), k.i32, "0", "100"));
+         k.req(c, k.range(k.F(c, 1), k.i32, "0", "100"));
+         k.ens(c, k.eq(k.R(c), k.add(k.F(c, 0), wrong ? k.add(k.F(c, 1), I(k, "1")) : k.F(c, 1))));
+         Var* x = k.local(c, "x", k.i32);
+         Var* y = k.local(c, "y", k.i32);
+         const Stmt* r = k.ret(k.add(k.comma(k.asgE(x, k.call(g, {k.pv(c, 0)})), k.v(x)), k.comma(k.asgE(y, k.call(g, {k.pv(c, 1)})), k.v(y))));
+         c->body = k.blk({k.decl(x, I(k, "0")), k.decl(y, I(k, "0")), r});
+         k.done(c);
+         return r;
+       });
+
+  // ---- the flag read is an access of its local (decision 0025 item 1) ----
+  // int x; int y = (x = (sink(f(a) > 0 && x > 0), 2)); return y + x;
+  // A comma drops its left operand's calls, so the write has an empty set; the check of the flag read has the set {f}.  The write must
+  // still follow the check: C reads x uninitialized when f(a) > 0.  Variant 0: the read can happen; 1: requires a <= 0 (it cannot);
+  // 2: x is initialized (no flag).
+  auto guarded_flag_read = [=](Kit& k, int variant) {
+    Function* f = g_id(k);
+    Function* sink = t1(k, "sink");
+    Function* c = k.fn("c", k.i32, {{"a", k.i32}});
+    if (variant == 1) k.req(c, k.le_c(k.F(c, 0), k.i32, "0"));
+    Var* x = k.local(c, "x", k.i32);
+    Var* y = k.local(c, "y", k.i32);
+    const Expr* rd = k.v(x);
+    const Expr* arg = k.bi(k.i32, k.land(k.gt(k.call(f, {k.pv(c, 0)}), I(k, "0")), k.gt(rd, I(k, "0"))));
+    const Expr* value = k.asgE(x, k.comma(k.call(sink, {arg}), I(k, "2")));
+    c->body = k.blk({k.decl(x, variant == 2 ? I(k, "0") : nullptr), k.decl(y, value), k.ret(k.add(k.v(y), k.v(x)))});
+    k.done(c);
+    if (variant == 0) k.fail("uninitialized", rd->loc);
+  };
+  lc("uninit_write_after_guarded_read_comma", "int x; y = (x = (sink(f(a) > 0 && x > 0), 2)): the write follows the check of the guarded read (finding A)",
+     [=](Kit& k) { guarded_flag_read(k, 0); });
+  lc("uninit_write_after_guarded_read_comma_path_precise", "the same with requires a <= 0: f(a) > 0 cannot hold, so the read does not happen",
+     [=](Kit& k) { guarded_flag_read(k, 1); });
+  lc("uninit_write_after_guarded_read_comma_initialized", "the same with int x = 0: no flag, nothing to check", [=](Kit& k) { guarded_flag_read(k, 2); });
+  // int x; y = (((f(a) > 0 && x > 0), 1) && ((x = 1) == 1)); the write is in a branch, after the comma dropped f.
+  auto guarded_flag_read_branch = [=](Kit& k, bool possible) {
+    Function* f = g_id(k);
+    Function* c = k.fn("c", k.i32, {{"a", k.i32}});
+    if (!possible) k.req(c, k.le_c(k.F(c, 0), k.i32, "0"));
+    Var* x = k.local(c, "x", k.i32);
+    Var* y = k.local(c, "y", k.i32);
+    const Expr* rd = k.v(x);
+    const Expr* left = k.comma(k.bi(k.i32, k.land(k.gt(k.call(f, {k.pv(c, 0)}), I(k, "0")), k.gt(rd, I(k, "0")))), I(k, "1"));
+    const Expr* value = k.bi(k.i32, k.land(k.tb(left), k.eq(k.asgE(x, I(k, "1")), I(k, "1"))));
+    c->body = k.blk({k.decl(x, nullptr), k.decl(y, value), k.ret(k.add(k.v(y), k.v(x)))});
+    k.done(c);
+    if (possible) k.fail("uninitialized", rd->loc);
+  };
+  lc("uninit_write_in_branch_after_guarded_read", "int x; y = (((f(a) > 0 && x > 0), 1) && ((x = 1) == 1)): the branch with the write follows the check",
+     [=](Kit& k) { guarded_flag_read_branch(k, true); });
+  lc("uninit_write_in_branch_after_guarded_read_path_precise", "the same with requires a <= 0", [=](Kit& k) { guarded_flag_read_branch(k, false); });
+  // int c(int a): int x = 0; x = g(a) as a value; return x;  The hook moves the write before g, which its set contains.
+  auto write_after_call = [=](Kit& k, bool want_ok) {
+    Function* g = g_id(k);
+    Function* c = k.fn("c", k.i32, {{"a", k.i32}});
+    if (want_ok) k.ens(c, k.eq(k.R(c), k.F(c, 0)));
+    Var* x = k.local(c, "x", k.i32);
+    c->body = k.blk({k.decl(x, I(k, "0")), k.es(k.asgE(x, k.call(g, {k.pv(c, 0)}))), k.ret(k.v(x))});
+    k.done(c);
+  };
+  rh("hook_perturb_write_slot", "a write or a snapshot of a full expression is emitted before a fixed point of its set", [=](Kit& k) {
+    k.lower_options.perturb_write_slot = true;
+    write_after_call(k, false);
+  });
+  // The flag read is an access (decision 0025 item 1): without it the write of the comma case precedes the check, and the order check says so.
+  rh("hook_drop_flag_access", "an access to a local was emitted before an earlier access", [=](Kit& k) {
+    k.lower_options.drop_flag_access = true;
+    guarded_flag_read(k, 0);
+  });
+  // A write that a later item depends on must be emitted before it: int x; h(b) < 100 / (x = g(a)).  The divisor check has the set {g}, the
+  // write's; the hook moves the write to the last slot, behind the check.
+  auto write_then_dependent_check = [=](Kit& k, bool want_ok) {
+    Function* g = g_id(k);
+    Function* h = t1(k, "h");
+    Function* c = k.fn("c", k.i32, {{"a", k.i32}, {"b", k.i32}});
+    k.req(c, k.range(k.F(c, 0), k.i32, "1", "100"));
+    if (want_ok) k.ens(c, k.eq(k.R(c), k.F(c, 0)));
+    Var* x = k.local(c, "x", k.i32);
+    c->body = k.blk({k.decl(x, I(k, "0")),
+                     k.es(k.lt(k.call(h, {k.pv(c, 1)}), k.div(I(k, "100"), k.asgE(x, k.call(g, {k.pv(c, 0)}))))), k.ret(k.v(x))});
+    k.done(c);
+  };
+  rh("hook_delay_write_slot", "is emitted after an item that follows it", [=](Kit& k) {
+    k.lower_options.delay_write_slot = true;
+    write_then_dependent_check(k, false);
+  });
+  lc("calls_write_delay_hook_off", "h(b) < 100 / (x = g(a)); return x: without the hook the write precedes the divisor check", [=](Kit& k) {
+    write_then_dependent_check(k, true);
+  });
+  lc("calls_write_slot_hook_off", "(x = g(a)); return x: without the hook the write follows g", [=](Kit& k) { write_after_call(k, true); });
+
   // The fixed points emitted before an item are exactly its set (check_fixed_order); the hook swaps the first two fixed points.
   auto nested_with_requires = [=](Kit& k) {
     Function* g = t1(k, "g");
@@ -582,14 +708,25 @@ void define_calls_in_expressions_rejections() {
     c->body = k.blk({k.ret(k.call(g, {k.cv(k.i16, k.call(f, {k.pv(c, 0)})), k.cv(k.i16, k.call(h, {k.pv(c, 1)}))}))});
     k.done(c);
   });
-  rl("calls_rej_two_writes", kUnordered, [=](Kit& k) {
+  // Decision 0025 item 2: two writes no longer conflict (calls_rej_two_writes is retired).  What stays rejected: the checks of flagged
+  // snapshots and a branch with a write are in F.
+  rl("calls_rej_flagged_snapshots", kUnordered, [=](Kit& k) {
     Function* f = t1(k, "f");
     Function* g = t1(k, "g");
     Function* c = k.fn("c", k.vd, {{"a", k.i32}, {"b", k.i32}});
     Var* x = k.local(c, "x", k.i32);
     Var* y = k.local(c, "y", k.i32);
-    c->body = k.blk({k.decl(x, I(k, "0")), k.decl(y, I(k, "0")),
-                     k.es(k.add(k.asgE(x, k.call(f, {k.pv(c, 0)})), k.asgE(y, k.call(g, {k.pv(c, 1)}))))});
+    c->body = k.blk({k.decl(x, nullptr), k.decl(y, nullptr),
+                     k.es(k.add(k.comma(k.asgE(x, k.call(f, {k.pv(c, 0)})), k.v(x)), k.comma(k.asgE(y, k.call(g, {k.pv(c, 1)})), k.v(y))))});
+    k.done(c);
+  });
+  rl("calls_rej_branch_with_write", kUnordered, [=](Kit& k) {
+    Function* f = t1(k, "f");
+    Function* g = t1(k, "g");
+    Function* c = k.fn("c", k.i32, {{"a", k.i32}, {"b", k.i32}});
+    Var* x = k.local(c, "x", k.i32);
+    const Expr* branch = k.bi(k.i32, k.land(k.gt(k.call(f, {k.pv(c, 0)}), I(k, "0")), k.ne(k.asgE(x, I(k, "1")), I(k, "0"))));
+    c->body = k.blk({k.decl(x, I(k, "0")), k.ret(k.add(branch, k.div(I(k, "100"), k.call(g, {k.pv(c, 1)}))))});
     k.done(c);
   });
   rl("calls_rej_loop_condition", kUnordered, [=](Kit& k) {

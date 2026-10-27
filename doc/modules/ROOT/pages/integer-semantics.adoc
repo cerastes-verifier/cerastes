@@ -328,7 +328,10 @@ also in annotations (as for xref:verifying.adoc#side-effects[side effects]):
   (`+f() & g()+` for `bool` results);
 * a comparison of a masked value with a constant it can never equal
   (`+(x & 2) == 1+`), and `+x | 4+` used as a condition;
-* `+2 ^ 32+` and `+10 ^ 3+`, which are not powers, however the constants are written.
+* `+2 ^ 32+` and `+10 ^ 3+`, which are not powers, however the constants are written;
+* `&`, `|` or `+^+` of two truth values compared with a constant other than 0
+  and 1 (`+(p ^ q) == 2+`), like any truth value
+  (xref:verifying.adoc#warning-shapes[Shapes the compilers warn about]).
 
 == Annotations mean their C value
 
@@ -436,7 +439,11 @@ computes `c - 1` in `unsigned int` for `enum color` (so 0 - 1 is the largest
 an enumeration value that the compiler converts to an integer for arithmetic,
 for a unary operator, for a shift or for an arm of `?:`. Write the conversion
 yourself (`(int)c - 1`) to say which you mean. Compound assignment, `pass:[++]`
-and `--` on an enumeration are rejected too.
+and `--` on an enumeration are rejected too. Arithmetic on enumerators of two
+different enumerations (`pass:[RED + NA]`) and a `?:` whose arms are
+(`x ? RED : NA`) are rejected in both modes, as pass:[C++]20 deprecates them
+(xref:verifying.adoc#warning-shapes[Shapes the compilers warn about]); convert
+one side (`pass:[(int)RED + NA]`).
 
 An `==` or `!=` between an enumeration value and a signed integer that may be
 negative is rejected, in both modes. In C an enumeration without negative

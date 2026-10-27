@@ -1,6 +1,9 @@
-# The full check: scripts/ci.sh (runner setup: asserts the toolchain, installs what is
-# missing, bootstraps) and then scripts/check.sh (build, lint, self-tests, tests, mutation
-# validation, docs) on every pull request, every push to main and on request.
+# scripts/ci.sh (runner setup: asserts the toolchain, installs what is missing, bootstraps)
+# and then scripts/check.sh (build, lint, self-tests, tests, mutation validation, docs).
+# Two tiers (decision 0016 item 14): pull requests and pushes to main run the PR tier
+# (CERASTES_CHECK_BASE is the commit they are compared with: Silicon runs only for the
+# tests changed since it, the doc examples and a fixed sample, and every other run); the
+# nightly schedule and workflow_dispatch run the full check (CERASTES_CHECK_BASE empty).
 # Decision record: internal/decisions/0016-ci.md.
 #
 # The runner is GitHub's xcode-27 image, whose Command Line Tools are the toolchain the
@@ -17,6 +20,10 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # 07:00 UTC every night, on main, whether or not main changed: image drift and
+  # intermittent results show up without a commit
+  schedule:
+    - cron: '0 7 * * *'
 
 permissions:
   contents: read
@@ -34,10 +41,11 @@ jobs:
   check:
     name: check (macOS, Command Line Tools 27.0)
     runs-on: xcode-27
-    timeout-minutes: 150
+    timeout-minutes: 220
     env:
       DEVELOPER_DIR: /Library/Developer/CommandLineTools
       CERASTES_JOBS: 3
+      CERASTES_CHECK_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'push' && github.event.before || '' }}
     steps:
       # Full history, with every remote branch of the submodules: edg_tree.py needs
       # origin/cerastes of third_party/edg and the pin's ancestry in it (decision 0009).

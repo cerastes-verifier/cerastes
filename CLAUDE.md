@@ -5,9 +5,12 @@ User docs: doc/ (Antora) → https://cerastes.dev/cerastes/doc/ (decision 0004)
 
 ## Commands
 - Bootstrap: scripts/bootstrap.sh   (idempotent; macOS on Apple silicon)
-- Everything: scripts/check.sh   (must be green before ending a session)
+- Everything: scripts/check.sh   (must be green before ending a session; the full check,
+  CERASTES_CHECK_BASE unset)
 - CI: .github/workflows/ci.yml runs scripts/ci.sh (toolchain asserts, bootstrap) then check.sh on
-  GitHub's xcode-27 with the owner's Command Line Tools (decision 0016); CERASTES_JOBS sets the default -j
+  GitHub's xcode-27 with the owner's Command Line Tools (decision 0016); CERASTES_JOBS sets the default -j;
+  pull requests and pushes run the PR tier (CERASTES_CHECK_BASE, 0016 item 14), the full check runs
+  nightly at 07:00 UTC and on workflow_dispatch
 - Tests only: python3 scripts/run_tests.py [file|dir ...]   (-v shows tool output)
 - Harness self-test: python3 scripts/test_run_tests.py
 - EDG front end (stock): scripts/cpfe.sh --c++20 [cpfe options] <file>   (adds system headers)

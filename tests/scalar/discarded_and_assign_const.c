@@ -1,7 +1,7 @@
 // expect: verified
 // expect: native-ok
 // mode: c23, c++20
-// Pins: 0020 item 5 (audit round 2): a discarded ?: that assigns a constant in an arm is accepted, the zero constant included. The same assignment as the right operand of a discarded && cannot be a verified test: EDG prints its #187 for a constant assigned in a truth context (accepted for a nonzero constant or a bool target, rejected as value_not_used for zero to an int)
+// Pins: 0020 item 5 (audit round 2): a discarded ?: that assigns a constant in an arm is accepted, the zero constant included. The same assignment as the right operand of a discarded && cannot be a verified test: EDG prints its #187 for a constant assigned in a truth context (accepted for a nonzero constant or a bool target, rejected as value_not_used for zero to an int). Since 0025 item 4 the same assignment as the right operand of a discarded && or || is a verified test that lists the warning: discarded_and_assign_warn.c
 #include <cerastes.h>
 
 int cond_two(int a, int y)

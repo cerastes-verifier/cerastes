@@ -12,7 +12,8 @@ expectations (grammar in tests/README.md):
     //                                                    frontend-warning lines may list its warnings)
     // expect: frontend-ok
     // expect: frontend-error <diag> @ L<line>           (one line per diagnostic)
-    // expect: frontend-warning <diag> @ L<line>
+    // expect: frontend-warning <diag> @ L<line>        (also lists the warnings of a verified or
+    //                                                    error test)
     // expect: frontend-refused <substring>              (needs cerastes-fe-options)
     // cerastes-fe-options: <options>                    (only with frontend-refused)
     // expect: golden
@@ -94,6 +95,16 @@ not exist is an error (exit 2) that names it, so a vanished examples directory
 cannot silently drop the doc tests.  Paths named on the command line replace
 the defaults.
 
+`--pr-base <ref>` runs the PR tier of CI (decision 0016 item 14): a test
+that reaches Silicon (a `.vpr` test, or a `verified` or `error` test) runs
+only when it changed since `git merge-base <ref> HEAD` (the working tree and
+untracked files included), includes a helper header that changed, is a doc
+example, or is in a fixed sample of 1 in PR_SAMPLE chosen by a hash of its
+path; every other run (rejections, front-end and golden tests, native-ok
+compilations) is made as usual.  The summary counts the Silicon runs left to
+the full check, and `--expect-passed` counts them as passed.  An empty <ref>
+(check.sh's default) is the full run.
+
 The exit status is 1 if any test fails and 2 on usage or environment errors
 (including when no test is selected).
 """
@@ -136,7 +147,10 @@ SKIP_ALLOWED = [Path("tests/differential/verifast")]
 # What a run with no path arguments covers, relative to ROOT.  Documentation
 # examples are tests: dropping the second entry would silently stop running
 # them, so the harness self-test pins this constant and a run without paths.
-DEFAULT_PATHS = (Path("tests"), Path("doc/modules/ROOT/examples"))
+DOC_EXAMPLES = Path("doc/modules/ROOT/examples")
+DEFAULT_PATHS = (Path("tests"), DOC_EXAMPLES)
+# The PR tier's fixed sample (decision 0016 item 14): 1 in PR_SAMPLE of the tests that reach Silicon.
+PR_SAMPLE = 8
 SILICON_TIMEOUT_S = 600
 # The largest front-end test (the libc++ headers in the cerastes configuration) takes about 70 s of CPU, which a
 # loaded machine stretches past 120 s; a hang still fails, after ten minutes.
@@ -283,6 +297,10 @@ _REJECTED_RE = re.compile(r"^rejected\s+(?P<tag>" + _DIAG_TAG + r")" + _AT)
 _DIAG_RE = re.compile(r"^frontend-(?P<severity>error|warning)\s+(?P<tag>" + _DIAG_TAG
                       + r")\s+@\s+L(?P<line>[1-9][0-9]*)$")
 CERASTES_TAG_PREFIX = "cerastes-"
+# The EDG warnings a `verified` or `error` test may list (decision 0025 item 4, owner question 31).  A
+# closed list: a warning in a verified program is otherwise a finding to fix, never to list.  #187
+# fires on `a && (y = 2);`, a shape that every compiler accepts silently and that cerastes verifies.
+VERIFY_WARNING_TAGS = frozenset({"assign_where_compare_meant"})
 
 # The categories of `// expect: error <category> @ L<n>` in a C or C++ test:
 # the table of decision 0011 item 10, which the driver, this harness, the
@@ -432,10 +450,19 @@ def parse_header(text: str, suffix: str) -> Expectation:
                                       header_file(m.group("file"), lineno, suffix)))
         else:
             raise HeaderError(f"L{lineno}: cannot parse `expect: {body}`")
-    if kinds == {"rejected", "frontend-diag"} and not fe_error_lines:
-        # `frontend-warning` lines of a `rejected` test: the front-end warnings that the run is
-        # expected to print besides its errors (the multiset of (tag, line) must match exactly)
-        kinds = {"rejected"}
+    if kinds - {"frontend-diag"} in ({"rejected"}, {"verified"}, {"error"}) \
+            and "frontend-diag" in kinds and not fe_error_lines:
+        # `frontend-warning` lines of a `rejected`, `verified` or `error` test: the front-end
+        # warnings that the run is expected to print (the multiset of (tag, line) must match
+        # exactly).  A `frontend-error` line cannot accompany them (it is its own kind).
+        kinds -= {"frontend-diag"}
+        if kinds != {"rejected"}:
+            for d in diags:
+                if d.tag not in VERIFY_WARNING_TAGS:
+                    raise HeaderError(
+                        f"`frontend-warning {d.tag}` is not allowed in a `verified` or `error` test "
+                        "(allowed: " + ", ".join(sorted(VERIFY_WARNING_TAGS)) + "); fix the warning, "
+                        "or ask for the tag to be added to VERIFY_WARNING_TAGS with a decision")
     if not kinds:
         raise HeaderError("`expect: native-ok` accompanies an outcome (golden, "
                           "frontend-error, ...); it is not a test by itself")
@@ -443,7 +470,8 @@ def parse_header(text: str, suffix: str) -> Expectation:
         raise HeaderError("expectations mix " + ", ".join(sorted(kinds)) +
                           "; a test has exactly one kind of outcome")
     (kind,) = kinds
-    if kind in _SOLE_KINDS and len(expects) - native_ok != 1:
+    if kind in _SOLE_KINDS and len(expects) - native_ok - len(diags) != 1:
+        # (`diags` holds only `frontend-warning` lines here: any other mix was refused above)
         raise HeaderError(f"`expect: {kind}` must be the only outcome line")
 
     twin = None
@@ -521,6 +549,9 @@ def parse_header(text: str, suffix: str) -> Expectation:
             raise HeaderError("`mode:` does not apply to .vpr files")
         if kind not in ("verified", "error"):
             raise HeaderError(f"`expect: {kind}` does not apply to .vpr files")
+        if diags:
+            raise HeaderError("`expect: frontend-warning` does not apply to .vpr files (Silicon "
+                              "runs no front end)")
     else:
         for mode in modes:
             if mode not in MODE_OPTIONS:
@@ -1537,7 +1568,7 @@ class VerifyParse:
     problems: list[str]  # output that cannot be classified
 
 
-def parse_verify_output(stdout: str, stderr: str) -> VerifyParse:
+def parse_verify_output(stdout: str, stderr: str, warnings_listed: bool = False) -> VerifyParse:
     """Parse the output of a `cerastes verify` run that ended with status 0 or 1.
 
     Decision 0011 item 9: the verdict line, the errors and their notes are on
@@ -1548,7 +1579,8 @@ def parse_verify_output(stdout: str, stderr: str) -> VerifyParse:
     with no error before it, an EDG diagnostic (they go to stderr), and any
     other line in column 0 are problems.  Anything on stderr is a problem: a
     verdict or an error there is on the wrong stream, and a front-end diagnostic
-    (a warning in a test) is unexpected output; tests are warning-free.
+    (a warning in a test) is unexpected output, unless the test lists its warnings
+    (`warnings_listed`: the caller compares stderr with them; decision 0025 item 4).
     """
     verified: list[str] = []
     functions: list[int] = []
@@ -1584,7 +1616,7 @@ def parse_verify_output(stdout: str, stderr: str) -> VerifyParse:
         else:
             after_error = False
             problems.append(f"unrecognized driver output: {raw}")
-    for raw in stderr.split("\n"):
+    for raw in ([] if warnings_listed else stderr.split("\n")):
         if not raw.strip() or raw[0] in " \t":
             continue
         if _VERIFY_DIAG_RE.match(raw) or _VERIFIED_LINE_RE.match(raw):
@@ -1612,7 +1644,9 @@ def evaluate_verify(run: ToolRun, exp: Expectation, registry: TagRegistry | None
     `filename` is the test path as given on the command line (the file of its
     own messages).  Exit status 3, any status other than 0 to 2, a crash and a
     timeout fail whatever the test expects.  `registry` names the EDG tags of a
-    rejection (required for a `rejected` test).
+    rejection (required for a `rejected` test) and of the listed `frontend-warning`
+    lines of a `verified` or `error` test: then stderr must hold exactly those
+    warnings (decision 0025 item 4); without such lines any warning fails.
     """
     if run.returncode is None:
         return [f"cerastes verify {run.error}"]
@@ -1641,8 +1675,12 @@ def evaluate_verify(run: ToolRun, exp: Expectation, registry: TagRegistry | None
                             f"nothing there): {run.stdout.strip().splitlines()[0]}")
         return problems + fe_output_problems(run.stderr, exp.diags, registry, filename)
 
-    parsed = parse_verify_output(run.stdout, run.stderr)
+    listed = bool(exp.diags)  # `frontend-warning` lines: stderr must hold exactly these warnings
+    parsed = parse_verify_output(run.stdout, run.stderr, warnings_listed=listed)
     problems = list(parsed.problems)
+    if listed:
+        assert registry is not None
+        problems += fe_output_problems(run.stderr, exp.diags, registry, filename)
     if code == VERIFY_OK:
         if parsed.errors:
             problems.append("exit status 0 but the output has `error:` lines")
@@ -2073,6 +2111,7 @@ class RunOptions:
     update_golden: bool = False
     native: NativeSetup | None = None  # the compilers of the native-ok checks
     registry: TagRegistry | None = None  # the tags of the frontend-error checks
+    unselected: frozenset[Path] = frozenset()  # resolved tests whose Silicon runs the PR tier leaves out
 
 
 ENV_SH: Path | None = None  # the env file; None: ROOT/build/env.sh (self-tests point it elsewhere)
@@ -2250,6 +2289,8 @@ def run_verify(path: Path, exp: Expectation, env: dict[str, str],
     test (see the module docstring and evaluate_verify)."""
     if opts.update_golden:
         return []  # not a golden test: nothing to update
+    if path.resolve() in opts.unselected:
+        return []  # left to the full check by the PR tier
     outcomes = []
     for mode in exp.modes:
         vpr = vpr_path(path, mode)
@@ -2272,7 +2313,7 @@ def run_one(path: Path, exp: Expectation | HeaderError, env: dict[str, str],
     if isinstance(exp, HeaderError):
         return [Outcome(rel(path), [f"bad header: {exp}"])]
     if path.suffix == ".vpr":
-        return run_silicon(path, exp, env)
+        return [] if path.resolve() in opts.unselected else run_silicon(path, exp, env)
     if exp.kind == "golden":
         outcomes = run_golden(path, exp, env, opts)
     elif exp.kind == "frontend-diag":
@@ -2451,10 +2492,9 @@ def in_headers_dir(path: Path, base: Path) -> bool:
     return False
 
 
-def helper_bodies_included(test: Path) -> list[Path]:
-    """The helper headers with a function body that `test` includes, directly or
-    through other helpers (comments and `#if 0` aside): the files whose bodies the
-    driver must verify with the test."""
+def helpers_included(test: Path) -> list[Path]:
+    """The helper headers that `test` includes, directly or through other helpers
+    (comments and `#if 0` aside), resolved."""
     out: list[Path] = []
     seen: set[Path] = set()
     todo = [test.resolve()]
@@ -2465,12 +2505,72 @@ def helper_bodies_included(test: Path) -> list[Path]:
                 continue
             seen.add(g)
             todo.append(g)
-            try:
-                if has_function_body(g.read_bytes().decode("utf-8", "replace")):
-                    out.append(g)
-            except OSError:
-                pass
+            out.append(g)
     return out
+
+
+def helper_bodies_included(test: Path) -> list[Path]:
+    """The helper headers with a function body that `test` includes, directly or
+    through other helpers (comments and `#if 0` aside): the files whose bodies the
+    driver must verify with the test."""
+    out: list[Path] = []
+    for g in helpers_included(test):
+        try:
+            if has_function_body(g.read_bytes().decode("utf-8", "replace")):
+                out.append(g)
+        except OSError:
+            pass
+    return out
+
+
+# ---------------------------------------------------------------------------
+# The PR tier (decision 0016 item 14)
+# ---------------------------------------------------------------------------
+
+def reaches_silicon(path: Path, exp: Expectation | HeaderError) -> bool:
+    """Whether a run of the test reaches Silicon: a `.vpr` test, or a `verified` or
+    `error` test (a `rejected` one stops in the front end)."""
+    return isinstance(exp, Expectation) and (
+        path.suffix == ".vpr" or (is_verify_test(path, exp) and vpr_expected(exp)))
+
+
+def silicon_runs(path: Path, exp: Expectation) -> int:
+    """The Silicon runs of a test that reaches Silicon: one per mode, one for a `.vpr` test."""
+    return 1 if path.suffix == ".vpr" else len(exp.modes)
+
+
+def in_pr_sample(test: Path) -> bool:
+    """Whether `test` is in the PR tier's fixed sample: 1 in PR_SAMPLE by a hash of its
+    path relative to the repository root, so that adding a file moves no other in or out."""
+    digest = hashlib.sha256(Path(rel(test)).as_posix().encode()).hexdigest()
+    return int(digest, 16) % PR_SAMPLE == 0
+
+
+@dataclasses.dataclass
+class PrTier:
+    base: str  # the merge base, a full commit name
+    changed: set[Path]  # resolved files changed since `base`, the working tree included
+
+    def selects(self, test: Path) -> bool:
+        """Whether the PR tier makes the Silicon runs of `test`."""
+        return (test.resolve() in self.changed or _under(test, DOC_EXAMPLES) or in_pr_sample(test)
+                or any(h in self.changed for h in helpers_included(test)))
+
+
+def pr_tier(ref: str) -> PrTier:
+    """The PR tier against `ref`: the files that differ between `git merge-base <ref>
+    HEAD` and the working tree, and the untracked ones (a new test not yet committed
+    is a changed test).  A ref git cannot resolve is a UsageError."""
+    def git(*args: str) -> str:
+        proc = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True)
+        if proc.returncode != 0:
+            raise UsageError(f"--pr-base {ref}: `git {' '.join(args)}` failed"
+                             + (f": {proc.stderr.strip()}" if proc.stderr.strip() else ""))
+        return proc.stdout
+    base = git("merge-base", ref, "HEAD").strip()
+    names = (git("diff", "--name-only", "--no-renames", "-z", base, "--").split("\0")
+             + git("ls-files", "--others", "--exclude-standard", "-z").split("\0"))
+    return PrTier(base, {(ROOT / n).resolve() for n in names if n})
 
 
 def helper_problems(helpers: list[Path]) -> list[tuple[Path, str]]:
@@ -2655,7 +2755,7 @@ def required_env(headers: dict[Path, Expectation | HeaderError]) -> list[str]:
             names += ["CERASTES_JAVA", "SILICON_JAR", "Z3_EXE"]
         elif exp.kind in VERIFY_KINDS:
             names += ["CERASTES_VERIFY"]
-            if exp.kind == "rejected":
+            if exp.kind == "rejected" or exp.diags:
                 names += ["CERASTES_EDG_GEN"]  # the tags of the expected diagnostics
         elif exp.kind == "frontend-ok":
             names += ["CPFE", "EDG_CLANG_VER_SCRAPE"]
@@ -2711,11 +2811,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expect-passed", type=int, metavar="N",
                         help="fail unless exactly N tests passed and none failed: for a "
                              "directory whose size a generator states (check.sh pins the "
-                             "VIR self-test's case count with it)")
+                             "VIR self-test's case count with it); with --pr-base, the "
+                             "Silicon runs left to the full check count as passed")
     parser.add_argument("--update-golden", action="store_true",
                         help="write the golden files of the selected golden tests "
                              "instead of comparing (review the diff; never in "
                              "check.sh)")
+    parser.add_argument("--pr-base", metavar="REF", default="",
+                        help="the PR tier of CI (decision 0016 item 14): Silicon runs only for the "
+                             "tests changed since `git merge-base REF HEAD`, the doc examples and a "
+                             f"fixed 1-in-{PR_SAMPLE} sample, every other run as usual; an empty REF "
+                             "(check.sh's default) runs everything")
     args = parser.parse_args(argv)
     if args.count_error_twins:
         print(count_error_twins())
@@ -2795,9 +2901,22 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     opts = RunOptions(verbose=args.verbose, update_golden=args.update_golden)
+    left = 0  # the Silicon runs the PR tier leaves to the full check
+    if args.pr_base:
+        try:
+            tier = pr_tier(args.pr_base)
+        except UsageError as err:
+            print(f"run_tests.py: {err}", file=sys.stderr)
+            return 2
+        silicon = [f for f, e in headers.items() if reaches_silicon(f, e)]
+        opts.unselected = frozenset(f.resolve() for f in silicon if not tier.selects(f))
+        left = sum(silicon_runs(f, headers[f]) for f in silicon if f.resolve() in opts.unselected)
+        print(f"PR tier: merge base {tier.base[:12]}, {len(tier.changed)} files changed; "
+              f"Silicon runs for {len(silicon) - len(opts.unselected)} of {len(silicon)} tests")
     outcomes: list[Outcome] = []
     verify_tests = [(f, e) for f, e in headers.items()
-                    if isinstance(e, Expectation) and is_verify_test(f, e)]
+                    if isinstance(e, Expectation) and is_verify_test(f, e)
+                    and f.resolve() not in opts.unselected]
     # A run that must produce Viper starts from an empty build/vpr/ with its
     # MANIFEST, so scripts/lint_viper.py can require every file of this run.
     if not args.update_golden and any(vpr_expected(e) for _, e in verify_tests):
@@ -2854,10 +2973,13 @@ def main(argv: list[str] | None = None) -> int:
             f"{c.family} {opts.native.runs.get(c.family, 0)}" for c in opts.native.compilers)
     if args.update_golden:
         summary += f", {updated} goldens updated, {unchanged} unchanged"
+    if args.pr_base:
+        summary += f", {left} Silicon runs left to the full check (PR tier)"
     print(f"\n{summary}")
-    if args.expect_passed is not None and not failed and passed != args.expect_passed:
+    if args.expect_passed is not None and not failed and passed + left != args.expect_passed:
         print(f"run_tests.py: expected exactly {args.expect_passed} passing tests, "
-              f"got {passed}", file=sys.stderr)
+              f"got {passed}" + (f" and {left} left to the full check" if args.pr_base else ""),
+              file=sys.stderr)
         return 1
     return 1 if failed else 0
 

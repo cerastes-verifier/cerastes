@@ -595,3 +595,288 @@ tests/scalar/enum_eq_truth_cond.c:31:16:swap-incdec:x++->++x	the value of x++ is
 tests/scalar/char_literal_unreachable.c:11:11:literal:10->11	under requires x <= 10 the branch x > 11 is as unreachable as x > 10; the wrapped literal stays on an excluded path, which is what the test pins
 tests/scalar/char_literal_unreachable.c:13:5:delete-stmt:return c;->;	the deleted statement is the only one of the unreachable branch; no path changes
 tests/scalar/enum_fixed_negative.c:32:24:literal:0->1	(enum EI)1, like 0, is a value of the fixed int enumeration that is not an enumerator (IM = -2, IP = 3): pick takes the default arm and returns 0 either way
+# M4.4c (2026-10-26): 284 entries added from the mutation runs of the 12 new and changed positives, after uninit_guarded_comma.c, void_conditional_for.c and warn_accepted_neighbours.c were strengthened in place (twin negative/uninit_guarded_comma_pre.c); reviewed: Opus soundness auditor, 2026-10-26 (every reason group read against its source, each weaker-requires entry against its function body; no survivor hides an encoder hole in 0025 items 1, 2, 3 or 5; 6 proposed entries killed instead by strengthening (an exact contract for not_eq_and_bools, pos(i) as step_alone's step), the 15 survivors of the re-runs accepted, 26 reasons corrected; that each entry survives is checked by the acceptance run, not by this review)
+doc/modules/ROOT/examples/verifying/call_writes.c:10:33:relop:>->>=	the comparison constant equals the cap value, so at the threshold both branches give the same value: the contract is unchanged
+doc/modules/ROOT/examples/verifying/call_writes.c:10:35:literal:1000->999	the comparison constant equals the cap value, so at the threshold both branches give the same value: the contract is unchanged
+doc/modules/ROOT/examples/verifying/call_writes.c:14:33:relop:>->>=	the comparison constant equals the cap value, so at the threshold both branches give the same value: the contract is unchanged
+doc/modules/ROOT/examples/verifying/call_writes.c:14:35:literal:500->499	the comparison constant equals the cap value, so at the threshold both branches give the same value: the contract is unchanged
+doc/modules/ROOT/examples/verifying/call_writes.c:18:38:relop:>->>=	the comparison constant equals the cap value, so at the threshold both branches give the same value: the contract is unchanged
+doc/modules/ROOT/examples/verifying/call_writes.c:18:40:literal:1000->999	the comparison constant equals the cap value, so at the threshold both branches give the same value: the contract is unchanged
+doc/modules/ROOT/examples/verifying/call_writes.c:18:62:relop:>->>=	the comparison constant equals the cap value, so at the threshold both branches give the same value: the contract is unchanged
+doc/modules/ROOT/examples/verifying/call_writes.c:18:64:literal:500->499	the comparison constant equals the cap value, so at the threshold both branches give the same value: the contract is unchanged
+doc/modules/ROOT/examples/verifying/void_conditional.c:11:3:delete-stmt:(void)x;->;	a (void) cast statement has no effect; only its absence changes nothing the verifier reads
+doc/modules/ROOT/examples/verifying/void_conditional.c:15:25:relop:<-><=	weaker precondition of the callee pos/neg: its body (void)x does not depend on it and every caller still establishes the original one
+doc/modules/ROOT/examples/verifying/void_conditional.c:15:27:literal:0->1	weaker precondition of the callee pos/neg: its body (void)x does not depend on it and every caller still establishes the original one
+doc/modules/ROOT/examples/verifying/void_conditional.c:17:3:delete-stmt:(void)y;->;	a (void) cast statement has no effect; only its absence changes nothing the verifier reads
+doc/modules/ROOT/examples/verifying/void_conditional.c:21:31:literal:0->1	stronger requires (it implies the original): a verified body stays verified under it
+doc/modules/ROOT/examples/verifying/void_conditional.c:24:3:delete-stmt:c ? pos(x) : neg(y);->;	deleting a void call that has a precondition and no effect removes only its obligations: the function's value is unchanged
+doc/modules/ROOT/examples/verifying/void_conditional.c:29:30:drop-conjunct:&& n < 100->	weaker bound: the loop counts i up to n with i++ below n, so no overflow or measure check needs it; a weaker requires cannot fail a verified body unless the extra inputs overflow, and they do not
+doc/modules/ROOT/examples/verifying/void_conditional.c:29:33:drop-conjunct:n < 100 &&->	weaker bound: the loop counts i up to n with i++ below n, so no overflow or measure check needs it; a weaker requires cannot fail a verified body unless the extra inputs overflow, and they do not
+doc/modules/ROOT/examples/verifying/void_conditional.c:29:35:relop:<-><=	weaker bound: the loop counts i up to n with i++ below n, so no overflow or measure check needs it; a weaker requires cannot fail a verified body unless the extra inputs overflow, and they do not
+doc/modules/ROOT/examples/verifying/void_conditional.c:29:37:literal:100->101	weaker bound: the loop counts i up to n with i++ below n, so no overflow or measure check needs it; a weaker requires cannot fail a verified body unless the extra inputs overflow, and they do not
+doc/modules/ROOT/examples/verifying/void_conditional.c:29:41:drop-conjunct:&& (c == 0 || n > 0)->	redundant conjunct: the step runs only after an iteration, where the invariant 0 <= i and the condition i < n give n > 0, so pos(n) holds without it
+doc/modules/ROOT/examples/verifying/void_conditional.c:29:47:relop:==->!=	the step runs only after an iteration (i < n), so n > 0 holds there whatever this requires says
+doc/modules/ROOT/examples/verifying/void_conditional.c:29:50:literal:0->1	the step runs only after an iteration (i < n), so n > 0 holds there whatever this requires says
+doc/modules/ROOT/examples/verifying/void_conditional.c:29:57:relop:>->>=	c == 0 || n >= 0 is implied by 0 <= n; pos(n) still holds, since the step runs only after an iteration, where 0 <= i < n gives n > 0
+doc/modules/ROOT/examples/verifying/void_conditional.c:33:22:drop-conjunct:0 <= i &&->	weaker invariant: the exit proof and the measure n - i only need i <= n; i only counts up from 0
+doc/modules/ROOT/examples/verifying/void_conditional.c:35:22:drop-comma:(c ? pos(n) : (void)0),->	deleting the step's void call removes only its precondition obligation
+doc/modules/ROOT/examples/verifying/void_conditional.c:35:27:swap-arms:pos(n) : (void)0->(void)0 : pos(n)	n > 0 holds in the step (it runs after an iteration), so pos(n) is acceptable in either arm
+doc/modules/ROOT/examples/verifying/void_conditional.c:35:42:literal:0->1	(void)1 is an expression statement without effect, like (void)0
+doc/modules/ROOT/examples/verifying/void_conditional.c:9:25:relop:>->>=	weaker precondition of the callee pos/neg: its body (void)x does not depend on it and every caller still establishes the original one
+tests/scalar/call_two_writes.c:13:33:relop:>->>=	the comparison constant equals the cap value, so at the threshold both branches give the same value: the contract is unchanged
+tests/scalar/call_two_writes.c:13:35:literal:500->499	the comparison constant equals the cap value, so at the threshold both branches give the same value: the contract is unchanged
+tests/scalar/call_two_writes.c:18:38:relop:>->>=	the comparison constant equals the cap value, so at the threshold both branches give the same value: the contract is unchanged
+tests/scalar/call_two_writes.c:18:40:literal:1000->999	the comparison constant equals the cap value, so at the threshold both branches give the same value: the contract is unchanged
+tests/scalar/call_two_writes.c:18:62:relop:>->>=	the comparison constant equals the cap value, so at the threshold both branches give the same value: the contract is unchanged
+tests/scalar/call_two_writes.c:18:64:literal:500->499	the comparison constant equals the cap value, so at the threshold both branches give the same value: the contract is unchanged
+tests/scalar/call_two_writes.c:29:33:relop:>->>=	the comparison constant equals the cap value, so at the threshold both branches give the same value: the contract is unchanged
+tests/scalar/call_two_writes.c:29:35:literal:1000->999	the comparison constant equals the cap value, so at the threshold both branches give the same value: the contract is unchanged
+tests/scalar/call_two_writes.c:29:61:relop:>->>=	the comparison constant equals the cap value, so at the threshold both branches give the same value: the contract is unchanged
+tests/scalar/call_two_writes.c:29:63:literal:500->499	the comparison constant equals the cap value, so at the threshold both branches give the same value: the contract is unchanged
+tests/scalar/call_two_writes.c:39:33:relop:>->>=	the comparison constant equals the cap value, so at the threshold both branches give the same value: the contract is unchanged
+tests/scalar/call_two_writes.c:39:35:literal:1000->999	the comparison constant equals the cap value, so at the threshold both branches give the same value: the contract is unchanged
+tests/scalar/call_two_writes.c:39:57:relop:>->>=	the comparison constant equals the cap value, so at the threshold both branches give the same value: the contract is unchanged
+tests/scalar/call_two_writes.c:39:59:literal:500->499	the comparison constant equals the cap value, so at the threshold both branches give the same value: the contract is unchanged
+tests/scalar/call_two_writes.c:41:11:literal:0->1	dead initial value: x and y are stored by the next statement before any read; the initializer only avoids the uninitialized flag
+tests/scalar/call_two_writes.c:42:11:literal:0->1	dead initial value: x and y are stored by the next statement before any read; the initializer only avoids the uninitialized flag
+tests/scalar/call_two_writes.c:9:33:relop:>->>=	the comparison constant equals the cap value, so at the threshold both branches give the same value: the contract is unchanged
+tests/scalar/call_two_writes.c:9:35:literal:1000->999	the comparison constant equals the cap value, so at the threshold both branches give the same value: the contract is unchanged
+tests/scalar/overlap_in_annotations.c:10:33:relop:>->>=	the variant is still a tautology (the two ranges still cover every int), so the body's constant 1 satisfies it
+tests/scalar/overlap_in_annotations.c:10:35:literal:0->1	the variant is still a tautology (the two ranges still cover every int), so the body's constant 1 satisfies it
+tests/scalar/overlap_in_annotations.c:10:42:relop:<-><=	the variant is still a tautology (the two ranges still cover every int), so the body's constant 1 satisfies it
+tests/scalar/overlap_in_annotations.c:10:44:literal:10->11	the variant is still a tautology (the two ranges still cover every int), so the body's constant 1 satisfies it
+tests/scalar/overlap_in_annotations.c:10:44:literal:10->9	the variant is still a tautology (the two ranges still cover every int), so the body's constant 1 satisfies it
+tests/scalar/overlap_in_annotations.c:12:3:delete-stmt:(void)a;->;	a (void) cast statement has no effect; only its absence changes nothing the verifier reads
+tests/scalar/range_in_annotations.c:9:25:drop-conjunct:r != 300 &&->	weaker or equal postcondition: r != 300 (or 299, 301) holds for every unsigned char result and r == c is the real content; the body returns c
+tests/scalar/range_in_annotations.c:9:30:literal:300->299	weaker or equal postcondition: r != 300 (or 299, 301) holds for every unsigned char result and r == c is the real content; the body returns c
+tests/scalar/range_in_annotations.c:9:30:literal:300->301	weaker or equal postcondition: r != 300 (or 299, 301) holds for every unsigned char result and r == c is the real content; the body returns c
+tests/scalar/range_in_annotations.c:9:34:drop-conjunct:&& r == c->	weaker or equal postcondition: r != 300 (or 299, 301) holds for every unsigned char result and r == c is the real content; the body returns c
+tests/scalar/range_in_annotations.c:9:34:swap-logic:&&->||	weaker or equal postcondition: r != 300 (or 299, 301) holds for every unsigned char result and r == c is the real content; the body returns c
+tests/scalar/static_assert_nested.c:13:22:drop-conjunct:0 <= i &&->	weaker invariant: the exit proof and the measure n - i only need i <= n; i only counts up from 0
+tests/scalar/static_assert_nested.c:40:5:delete-stmt:break;->;	default: is the last switch label, so break and falling out of the switch are the same
+tests/scalar/static_assert_nested.c:47:30:drop-conjunct:&& n <= 100->	weaker bound on n: the loop only counts i up to n (i++ stays below n) and returns i, so no overflow needs the bound
+tests/scalar/static_assert_nested.c:47:38:literal:100->101	weaker bound on n: the loop only counts i up to n (i++ stays below n) and returns i, so no overflow needs the bound
+tests/scalar/static_assert_nested.c:52:22:drop-conjunct:0 <= i &&->	weaker invariant: the exit proof and the measure n - i only need i <= n; i only counts up from 0
+tests/scalar/static_assert_nested.c:55:11:relop:>->>=	the guard decides only a branch whose sole statement is a block static assertion, which is checked in the function's prologue whatever the path (0024 item 2), so the mutant hides no check and leaves the value unchanged
+tests/scalar/static_assert_nested.c:55:13:literal:0->1	the guard decides only a branch whose sole statement is a block static assertion, which is checked in the function's prologue whatever the path (0024 item 2), so the mutant hides no check and leaves the value unchanged
+tests/scalar/static_assert_nested.c:9:30:drop-conjunct:&& n <= 100->	weaker bound on n: the loop only counts i up to n (i++ stays below n) and returns i, so no overflow needs the bound
+tests/scalar/static_assert_nested.c:9:38:literal:100->101	weaker bound on n: the loop only counts i up to n (i++ stays below n) and returns i, so no overflow needs the bound
+tests/scalar/static_assert_pure_body.c:13:3:delete-stmt:return x + x;->;	the body of a pure function is not encoded before M4.5f, so deleting its return changes nothing the verifier reads
+tests/scalar/static_assert_pure_body.c:17:23:drop-conjunct:0 <= a &&->	weaker bound on a: a + 1 does not overflow for the extra inputs (a <= 101, or any negative a)
+tests/scalar/static_assert_pure_body.c:17:38:literal:100->101	weaker bound on a: a + 1 does not overflow for the extra inputs (a <= 101, or any negative a)
+tests/scalar/uninit_guarded_comma.c:10:27:relop:==->!=	the result of g is discarded: its postcondition feeds nothing
+tests/scalar/uninit_guarded_comma.c:13:27:relop:==->!=	f's result only feeds a guard that is false anyway (x is 0 where it is read), so a different f changes nothing
+tests/scalar/uninit_guarded_comma.c:20:17:drop-comma:g(f(a) > 0 && x > 0),->	deleting the discarded call g removes only its precondition obligation
+tests/scalar/uninit_guarded_comma.c:20:19:drop-conjunct:f(a) > 0 &&->	the guard stays false whatever this variant is, because x is 0 where it is read (g still gets 0)
+tests/scalar/uninit_guarded_comma.c:20:19:swap-logical:f(a) > 0 && x > 0->x > 0 && f(a) > 0	the guard stays false whatever this variant is, because x is 0 where it is read (g still gets 0)
+tests/scalar/uninit_guarded_comma.c:20:24:relop:>->>=	the guard stays false whatever this variant is, because x is 0 where it is read (g still gets 0)
+tests/scalar/uninit_guarded_comma.c:20:26:literal:0->1	the guard stays false whatever this variant is, because x is 0 where it is read (g still gets 0)
+tests/scalar/uninit_guarded_comma.c:20:35:literal:0->1	the guard stays false whatever this variant is, because x is 0 where it is read (g still gets 0)
+tests/scalar/uninit_guarded_comma.c:30:17:drop-comma:g(f(a) > 0 && x > 0),->	deleting the discarded call g removes only its precondition obligation
+tests/scalar/uninit_guarded_comma.c:30:19:drop-conjunct:f(a) > 0 &&->	the guard stays false whatever this variant is, because x is 0 where it is read (g still gets 0)
+tests/scalar/uninit_guarded_comma.c:30:19:swap-logical:f(a) > 0 && x > 0->x > 0 && f(a) > 0	the guard stays false whatever this variant is, because x is 0 where it is read (g still gets 0)
+tests/scalar/uninit_guarded_comma.c:30:24:relop:>->>=	the guard stays false whatever this variant is, because x is 0 where it is read (g still gets 0)
+tests/scalar/uninit_guarded_comma.c:30:26:literal:0->1	the guard stays false whatever this variant is, because x is 0 where it is read (g still gets 0)
+tests/scalar/uninit_guarded_comma.c:30:35:literal:0->1	the guard stays false whatever this variant is, because x is 0 where it is read (g still gets 0)
+tests/scalar/uninit_guarded_comma.c:39:19:drop-comma:g(f(a) > 0 && x > 0),->	deleting the discarded call g removes only its precondition obligation
+tests/scalar/uninit_guarded_comma.c:39:21:drop-conjunct:f(a) > 0 &&->	the guard stays false whatever this variant is, because x is 0 where it is read (g still gets 0)
+tests/scalar/uninit_guarded_comma.c:39:21:swap-logical:f(a) > 0 && x > 0->x > 0 && f(a) > 0	the guard stays false whatever this variant is, because x is 0 where it is read (g still gets 0)
+tests/scalar/uninit_guarded_comma.c:39:26:relop:>->>=	the guard stays false whatever this variant is, because x is 0 where it is read (g still gets 0)
+tests/scalar/uninit_guarded_comma.c:39:28:literal:0->1	the guard stays false whatever this variant is, because x is 0 where it is read (g still gets 0)
+tests/scalar/uninit_guarded_comma.c:39:37:literal:0->1	the guard stays false whatever this variant is, because x is 0 where it is read (g still gets 0)
+tests/scalar/uninit_guarded_comma.c:48:12:drop-conjunct:(g(f(a) > 0 && x > 0), 1) &&->	the left operand of && is a comma ending in 1, always true: dropping it leaves y and x unchanged and removes only the calls f and g (no effect) and g's precondition obligation
+tests/scalar/uninit_guarded_comma.c:48:13:drop-comma:g(f(a) > 0 && x > 0),->	deleting the discarded call g removes only its precondition obligation
+tests/scalar/uninit_guarded_comma.c:48:15:drop-conjunct:f(a) > 0 &&->	the guard stays false whatever this variant is, because x is 0 where it is read (g still gets 0)
+tests/scalar/uninit_guarded_comma.c:48:15:swap-logical:f(a) > 0 && x > 0->x > 0 && f(a) > 0	the guard stays false whatever this variant is, because x is 0 where it is read (g still gets 0)
+tests/scalar/uninit_guarded_comma.c:48:20:relop:>->>=	the guard stays false whatever this variant is, because x is 0 where it is read (g still gets 0)
+tests/scalar/uninit_guarded_comma.c:48:22:literal:0->1	the guard stays false whatever this variant is, because x is 0 where it is read (g still gets 0)
+tests/scalar/uninit_guarded_comma.c:48:31:literal:0->1	the guard stays false whatever this variant is, because x is 0 where it is read (g still gets 0)
+tests/scalar/uninit_guarded_comma.c:48:35:literal:1->2	the comma's value only decides the && (any nonzero value is true), so y is still 1
+tests/scalar/uninit_guarded_comma.c:57:17:drop-comma:g(f(a) > 0 ? x : 0),->	deleting the discarded call g removes only its precondition obligation
+tests/scalar/uninit_guarded_comma.c:57:24:relop:>->>=	g gets 0 whichever arm the condition picks, because x is 0 where it is read
+tests/scalar/uninit_guarded_comma.c:57:26:literal:0->1	g gets 0 whichever arm the condition picks, because x is 0 where it is read
+tests/scalar/uninit_guarded_comma.c:57:30:swap-arms:x : 0->0 : x	g gets 0 whichever arm the condition picks, because x is 0 where it is read
+tests/scalar/void_conditional.c:11:3:delete-stmt:(void)x;->;	a (void) cast statement has no effect; only its absence changes nothing the verifier reads
+tests/scalar/void_conditional.c:15:25:relop:<-><=	weaker precondition of the callee pos/neg: its body (void)x does not depend on it and every caller still establishes the original one
+tests/scalar/void_conditional.c:15:27:literal:0->1	weaker precondition of the callee pos/neg: its body (void)x does not depend on it and every caller still establishes the original one
+tests/scalar/void_conditional.c:17:3:delete-stmt:(void)y;->;	a (void) cast statement has no effect; only its absence changes nothing the verifier reads
+tests/scalar/void_conditional.c:28:31:literal:0->1	stronger requires (it implies the original): a verified body stays verified under it
+tests/scalar/void_conditional.c:31:3:delete-stmt:c ? pos(x) : neg(y);->;	deleting a void call that has a precondition and no effect removes only its obligations: the function's value is unchanged
+tests/scalar/void_conditional.c:37:31:literal:0->1	stronger requires (it implies the original): a verified body stays verified under it
+tests/scalar/void_conditional.c:40:11:literal:0->1	dead initial value: z = 1 in the same statement list overwrites it before any read
+tests/scalar/void_conditional.c:41:3:drop-comma:(c ? pos(x) : neg(y)),->	deleting the discarded void call removes only its precondition obligation
+tests/scalar/void_conditional.c:50:22:literal:0->1	(void)1 is an expression statement without effect, like (void)0
+tests/scalar/void_conditional.c:50:3:delete-stmt:c ? pos(x) : (void)0;->;	deleting a void call that has a precondition and no effect removes only its obligations: the function's value is unchanged
+tests/scalar/void_conditional.c:58:13:literal:0->1	(void)1 is an expression statement without effect, like (void)0
+tests/scalar/void_conditional.c:58:3:delete-stmt:c ? (void)0 : neg(y);->;	deleting a void call that has a precondition and no effect removes only its obligations: the function's value is unchanged
+tests/scalar/void_conditional.c:64:23:drop-conjunct:0 <= c &&->	weaker bound on c or d: c + d stays inside int for the extra inputs (c and d are at most 1001 and have no lower bound that matters, c + d cannot underflow), so the exact contract still holds
+tests/scalar/void_conditional.c:64:23:literal:0->1	stronger requires (it implies the original): a verified body stays verified under it
+tests/scalar/void_conditional.c:64:25:relop:<=-><	stronger requires (it implies the original): a verified body stays verified under it
+tests/scalar/void_conditional.c:64:35:relop:<=-><	stronger requires (it implies the original): a verified body stays verified under it
+tests/scalar/void_conditional.c:64:38:literal:1000->1001	weaker bound on c or d: c + d stays inside int for the extra inputs (c and d are at most 1001 and have no lower bound that matters, c + d cannot underflow), so the exact contract still holds
+tests/scalar/void_conditional.c:64:38:literal:1000->999	stronger requires (it implies the original): a verified body stays verified under it
+tests/scalar/void_conditional.c:64:43:drop-conjunct:&& 0 <= d->	weaker bound on c or d: c + d stays inside int for the extra inputs (c and d are at most 1001 and have no lower bound that matters, c + d cannot underflow), so the exact contract still holds
+tests/scalar/void_conditional.c:64:46:drop-conjunct:0 <= d &&->	weaker bound on c or d: c + d stays inside int for the extra inputs (c and d are at most 1001 and have no lower bound that matters, c + d cannot underflow), so the exact contract still holds
+tests/scalar/void_conditional.c:64:46:literal:0->1	stronger requires (it implies the original): a verified body stays verified under it
+tests/scalar/void_conditional.c:64:48:relop:<=-><	stronger requires (it implies the original): a verified body stays verified under it
+tests/scalar/void_conditional.c:64:58:relop:<=-><	stronger requires (it implies the original): a verified body stays verified under it
+tests/scalar/void_conditional.c:64:61:literal:1000->1001	weaker bound on c or d: c + d stays inside int for the extra inputs (c and d are at most 1001 and have no lower bound that matters, c + d cannot underflow), so the exact contract still holds
+tests/scalar/void_conditional.c:64:61:literal:1000->999	stronger requires (it implies the original): a verified body stays verified under it
+tests/scalar/void_conditional.c:64:77:swap-logic:||->&&	stronger requires (it implies the original): a verified body stays verified under it
+tests/scalar/void_conditional.c:64:89:literal:0->1	stronger requires (it implies the original): a verified body stays verified under it
+tests/scalar/void_conditional.c:67:37:literal:0->1	(void)1 is an expression statement without effect, like (void)0
+tests/scalar/void_conditional.c:67:3:delete-stmt:c ? (d ? pos(x) : neg(y)) : (void)0;->;	deleting a void call that has a precondition and no effect removes only its obligations: the function's value is unchanged
+tests/scalar/void_conditional.c:73:35:literal:0->1	stronger requires (it implies the original): a verified body stays verified under it
+tests/scalar/void_conditional.c:76:3:delete-stmt:id(a) > 0 ? pos(x) : neg(y);->;	deleting a void call that has a precondition and no effect removes only its obligations: the function's value is unchanged
+tests/scalar/void_conditional.c:85:16:relop:>->>=	weaker assertion (x >= 0): it still holds on the path (x > 0 is required there)
+tests/scalar/void_conditional.c:85:29:literal:0->1	(void)1 is an expression statement without effect, like (void)0
+tests/scalar/void_conditional.c:85:3:delete-stmt:c ? assert(x > 0) : (void)0;->;	deleting the assert removes only a check
+tests/scalar/void_conditional.c:9:25:relop:>->>=	weaker precondition of the callee pos/neg: its body (void)x does not depend on it and every caller still establishes the original one
+tests/scalar/void_conditional_for.c:10:3:delete-stmt:(void)x;->;	a (void) cast statement has no effect; only its absence changes nothing the verifier reads
+tests/scalar/void_conditional_for.c:14:25:relop:<-><=	weaker precondition of neg, which nothing in this file calls: its body (void)y does not depend on it
+tests/scalar/void_conditional_for.c:14:27:literal:0->1	weaker precondition of neg, which nothing in this file calls: its body (void)y does not depend on it
+tests/scalar/void_conditional_for.c:16:3:delete-stmt:(void)y;->;	a (void) cast statement has no effect; only its absence changes nothing the verifier reads
+tests/scalar/void_conditional_for.c:27:30:drop-conjunct:&& n < 100->	weaker bound on n: the loop counts i up to n, so no overflow or measure check needs it
+tests/scalar/void_conditional_for.c:27:33:drop-conjunct:n < 100 &&->	weaker bound on n: the loop counts i up to n, so no overflow or measure check needs it
+tests/scalar/void_conditional_for.c:27:35:relop:<-><=	weaker bound on n: the loop counts i up to n, so no overflow or measure check needs it
+tests/scalar/void_conditional_for.c:27:37:literal:100->101	weaker bound on n: the loop counts i up to n, so no overflow or measure check needs it
+tests/scalar/void_conditional_for.c:31:22:drop-conjunct:0 <= i &&->	weaker invariant: the exit proof and the measure n - i only need i <= n; i only counts up from 0
+tests/scalar/void_conditional_for.c:33:22:drop-comma:(c ? pos(m) : (void)0),->	deleting the step's void call removes only its precondition obligation
+tests/scalar/void_conditional_for.c:33:42:literal:0->1	(void)1 is an expression statement without effect, like (void)0
+tests/scalar/void_conditional_for.c:40:30:drop-conjunct:&& n < 100->	weaker bound on n: the body's i++ stays below n and the step's pos(i) does no arithmetic, so no overflow or measure check needs it
+tests/scalar/void_conditional_for.c:40:35:relop:<-><=	weaker bound on n: the loop counts i up to n, so no overflow or measure check needs it
+tests/scalar/void_conditional_for.c:40:37:literal:100->101	weaker bound on n: the loop counts i up to n, so no overflow or measure check needs it
+tests/scalar/void_conditional_for.c:46:21:swap-arms:pos(i) : (void)0->(void)0 : pos(i)	both arms run after the body's i++, where i >= 1, so pos(i) holds whichever arm calls it
+tests/scalar/void_conditional_for.c:46:36:literal:0->1	(void)1 is an expression statement without effect, like (void)0
+tests/scalar/void_conditional_for.c:8:25:relop:>->>=	weaker precondition of the callee pos/neg: its body (void)x does not depend on it and every caller still establishes the original one
+tests/scalar/warn_accepted_neighbours.c:189:25:relop:<-><=	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:189:27:literal:100->101	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:190:35:literal:1->0	x + 1 == x + 2 is false for every x; the variants (x + 0 or x + 3 on a side) are false too
+tests/scalar/warn_accepted_neighbours.c:190:44:literal:2->3	x + 1 == x + 2 is false for every x; the variants (x + 0 or x + 3 on a side) are false too
+tests/scalar/warn_accepted_neighbours.c:192:14:literal:1->0	x + 1 == x + 2 is false for every x; the variants (x + 0 or x + 3 on a side) are false too
+tests/scalar/warn_accepted_neighbours.c:192:23:literal:2->3	x + 1 == x + 2 is false for every x; the variants (x + 0 or x + 3 on a side) are false too
+tests/scalar/warn_accepted_neighbours.c:312:25:relop:<-><=	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:312:27:literal:1000->1001	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:312:27:literal:1000->999	stronger requires (it implies the original): a verified body stays verified under it
+tests/scalar/warn_accepted_neighbours.c:312:37:relop:<-><=	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:312:39:literal:3->2	stronger requires (it implies the original): a verified body stays verified under it
+tests/scalar/warn_accepted_neighbours.c:312:39:literal:3->4	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:322:23:drop-conjunct:0 <= a &&->	weaker requires without 0 <= a: >> of a negative value is defined (arithmetic, 0010 item 8) and the contract tests the same a >> b as the body
+tests/scalar/warn_accepted_neighbours.c:322:30:drop-conjunct:&& a <= 100->	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:322:33:drop-conjunct:a <= 100 &&->	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:322:38:literal:100->101	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:322:60:literal:4->5	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:332:38:literal:100->101	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:332:60:literal:4->5	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:342:24:literal:1000->1001	weaker requires (-1001 <= a instead of -1000 <= a): a * b stays within 1001 * 1000 in magnitude, inside int, so the exact contract still holds
+tests/scalar/warn_accepted_neighbours.c:342:42:literal:1000->1001	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:342:51:literal:1000->1001	weaker requires (-1001 <= b instead of -1000 <= b): a * b stays within 1001 * 1000 in magnitude, inside int, so the exact contract still holds
+tests/scalar/warn_accepted_neighbours.c:342:69:literal:1000->1001	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:352:24:literal:1000->1001	weaker requires (-1001 <= a instead of -1000 <= a): a * b stays within 1001 * 1000 in magnitude, inside int, so the exact contract still holds
+tests/scalar/warn_accepted_neighbours.c:352:42:literal:1000->1001	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:352:51:literal:1000->1001	weaker requires (-1001 <= b instead of -1000 <= b): a * b stays within 1001 * 1000 in magnitude, inside int, so the exact contract still holds
+tests/scalar/warn_accepted_neighbours.c:352:69:literal:1000->1001	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:362:24:literal:1000->1001	weaker requires (-1001 <= a instead of -1000 <= a): a * b stays within 1001 * 1000 in magnitude, inside int, so the exact contract still holds
+tests/scalar/warn_accepted_neighbours.c:362:42:literal:1000->1001	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:362:51:literal:1000->1001	weaker requires (-1001 <= b instead of -1000 <= b): a * b stays within 1001 * 1000 in magnitude, inside int, so the exact contract still holds
+tests/scalar/warn_accepted_neighbours.c:362:69:literal:1000->1001	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:392:38:literal:100->101	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:392:60:literal:2->3	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:392:80:literal:2->3	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:400:23:drop-conjunct:0 <= x &&->	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:400:35:relop:<-><=	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:400:37:literal:100->101	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:404:18:literal:0->1	(void)1 is an expression statement without effect, like (void)0
+tests/scalar/warn_accepted_neighbours.c:404:28:literal:0->1	(void)1 is an expression statement without effect, like (void)0
+tests/scalar/warn_accepted_neighbours.c:428:14:swap-arms:(int)RED : NA->NA : (int)RED	RED and NA are both 0, so the two arms are equal
+tests/scalar/warn_accepted_neighbours.c:440:31:literal:4->3	any nonzero constant is true (4, 3, 5 alike), and dropping a true operand leaves the value (for a bool b, b && 4 is b)
+tests/scalar/warn_accepted_neighbours.c:440:31:literal:4->5	any nonzero constant is true (4, 3, 5 alike), and dropping a true operand leaves the value (for a bool b, b && 4 is b)
+tests/scalar/warn_accepted_neighbours.c:442:10:literal:4->3	any nonzero constant is true (4, 3, 5 alike), and dropping a true operand leaves the value (for a bool b, b && 4 is b)
+tests/scalar/warn_accepted_neighbours.c:442:10:literal:4->5	any nonzero constant is true (4, 3, 5 alike), and dropping a true operand leaves the value (for a bool b, b && 4 is b)
+tests/scalar/warn_accepted_neighbours.c:446:33:drop-conjunct:&& 4->	any nonzero constant is true (4, 3, 5 alike), and dropping a true operand leaves the value (for a bool b, b && 4 is b)
+tests/scalar/warn_accepted_neighbours.c:446:36:literal:4->3	any nonzero constant is true (4, 3, 5 alike), and dropping a true operand leaves the value (for a bool b, b && 4 is b)
+tests/scalar/warn_accepted_neighbours.c:446:36:literal:4->5	any nonzero constant is true (4, 3, 5 alike), and dropping a true operand leaves the value (for a bool b, b && 4 is b)
+tests/scalar/warn_accepted_neighbours.c:448:12:drop-conjunct:&& 4->	any nonzero constant is true (4, 3, 5 alike), and dropping a true operand leaves the value (for a bool b, b && 4 is b)
+tests/scalar/warn_accepted_neighbours.c:448:15:literal:4->3	any nonzero constant is true (4, 3, 5 alike), and dropping a true operand leaves the value (for a bool b, b && 4 is b)
+tests/scalar/warn_accepted_neighbours.c:448:15:literal:4->5	any nonzero constant is true (4, 3, 5 alike), and dropping a true operand leaves the value (for a bool b, b && 4 is b)
+tests/scalar/warn_accepted_neighbours.c:454:10:drop-conjunct:x &&->	!3, !4 and !5 are all 0, and dropping x leaves 0 as well: the value is 0 either way
+tests/scalar/warn_accepted_neighbours.c:454:16:literal:4->3	!3, !4 and !5 are all 0, and dropping x leaves 0 as well: the value is 0 either way
+tests/scalar/warn_accepted_neighbours.c:454:16:literal:4->5	!3, !4 and !5 are all 0, and dropping x leaves 0 as well: the value is 0 either way
+tests/scalar/warn_accepted_neighbours.c:458:36:literal:2->3	the variant (2 > 1 with another constant or >=) is still true, so the value is x != 0 either way
+tests/scalar/warn_accepted_neighbours.c:458:38:relop:>->>=	the variant (2 > 1 with another constant or >=) is still true, so the value is x != 0 either way
+tests/scalar/warn_accepted_neighbours.c:458:40:literal:1->0	the variant (2 > 1 with another constant or >=) is still true, so the value is x != 0 either way
+tests/scalar/warn_accepted_neighbours.c:45:38:literal:100->101	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:45:60:literal:100->101	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:45:82:literal:4->5	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:460:15:literal:2->3	the variant (2 > 1 with another constant or >=) is still true, so the value is x != 0 either way
+tests/scalar/warn_accepted_neighbours.c:460:17:relop:>->>=	the variant (2 > 1 with another constant or >=) is still true, so the value is x != 0 either way
+tests/scalar/warn_accepted_neighbours.c:460:19:literal:1->0	the variant (2 > 1 with another constant or >=) is still true, so the value is x != 0 either way
+tests/scalar/warn_accepted_neighbours.c:472:36:literal:1->0	uc + 1 is at most 256, so the comparison with 299, 300 or 301 (or uc + 0, uc + 2) is false either way
+tests/scalar/warn_accepted_neighbours.c:472:36:literal:1->2	uc + 1 is at most 256, so the comparison with 299, 300 or 301 (or uc + 0, uc + 2) is false either way
+tests/scalar/warn_accepted_neighbours.c:472:41:literal:300->299	uc + 1 is at most 256, so the comparison with 299, 300 or 301 (or uc + 0, uc + 2) is false either way
+tests/scalar/warn_accepted_neighbours.c:472:41:literal:300->301	uc + 1 is at most 256, so the comparison with 299, 300 or 301 (or uc + 0, uc + 2) is false either way
+tests/scalar/warn_accepted_neighbours.c:474:15:literal:1->0	uc + 1 is at most 256, so the comparison with 299, 300 or 301 (or uc + 0, uc + 2) is false either way
+tests/scalar/warn_accepted_neighbours.c:474:15:literal:1->2	uc + 1 is at most 256, so the comparison with 299, 300 or 301 (or uc + 0, uc + 2) is false either way
+tests/scalar/warn_accepted_neighbours.c:474:20:literal:300->299	uc + 1 is at most 256, so the comparison with 299, 300 or 301 (or uc + 0, uc + 2) is false either way
+tests/scalar/warn_accepted_neighbours.c:474:20:literal:300->301	uc + 1 is at most 256, so the comparison with 299, 300 or 301 (or uc + 0, uc + 2) is false either way
+tests/scalar/warn_accepted_neighbours.c:504:31:drop-conjunct:z &&->	x > 5 && x < 3 (and each variant: >=, <=, 4/6, 2/4) is unsatisfiable, so the value is 0 either way
+tests/scalar/warn_accepted_neighbours.c:504:38:relop:>->>=	x > 5 && x < 3 (and each variant: >=, <=, 4/6, 2/4) is unsatisfiable, so the value is 0 either way
+tests/scalar/warn_accepted_neighbours.c:504:40:literal:5->4	x > 5 && x < 3 (and each variant: >=, <=, 4/6, 2/4) is unsatisfiable, so the value is 0 either way
+tests/scalar/warn_accepted_neighbours.c:504:40:literal:5->6	x > 5 && x < 3 (and each variant: >=, <=, 4/6, 2/4) is unsatisfiable, so the value is 0 either way
+tests/scalar/warn_accepted_neighbours.c:504:47:relop:<-><=	x > 5 && x < 3 (and each variant: >=, <=, 4/6, 2/4) is unsatisfiable, so the value is 0 either way
+tests/scalar/warn_accepted_neighbours.c:504:49:literal:3->2	x > 5 && x < 3 (and each variant: >=, <=, 4/6, 2/4) is unsatisfiable, so the value is 0 either way
+tests/scalar/warn_accepted_neighbours.c:504:49:literal:3->4	x > 5 && x < 3 (and each variant: >=, <=, 4/6, 2/4) is unsatisfiable, so the value is 0 either way
+tests/scalar/warn_accepted_neighbours.c:506:17:relop:>->>=	x > 5 && x < 3 (and each variant: >=, <=, 4/6, 2/4) is unsatisfiable, so the value is 0 either way
+tests/scalar/warn_accepted_neighbours.c:506:19:literal:5->4	x > 5 && x < 3 (and each variant: >=, <=, 4/6, 2/4) is unsatisfiable, so the value is 0 either way
+tests/scalar/warn_accepted_neighbours.c:506:19:literal:5->6	x > 5 && x < 3 (and each variant: >=, <=, 4/6, 2/4) is unsatisfiable, so the value is 0 either way
+tests/scalar/warn_accepted_neighbours.c:506:26:relop:<-><=	x > 5 && x < 3 (and each variant: >=, <=, 4/6, 2/4) is unsatisfiable, so the value is 0 either way
+tests/scalar/warn_accepted_neighbours.c:506:28:literal:3->2	x > 5 && x < 3 (and each variant: >=, <=, 4/6, 2/4) is unsatisfiable, so the value is 0 either way
+tests/scalar/warn_accepted_neighbours.c:506:28:literal:3->4	x > 5 && x < 3 (and each variant: >=, <=, 4/6, 2/4) is unsatisfiable, so the value is 0 either way
+tests/scalar/warn_accepted_neighbours.c:52:38:literal:100->101	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:52:60:literal:100->101	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:52:82:literal:4->5	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:545:11:literal:0->1	dead initial value: every path assigns x before the return
+tests/scalar/warn_accepted_neighbours.c:559:11:literal:0->1	dead initial value: every path assigns x before the return
+tests/scalar/warn_accepted_neighbours.c:570:23:drop-conjunct:0 <= x &&->	the requires is not needed: empty_then_else only tests and assigns x (no arithmetic), so its exact contract holds for every int
+tests/scalar/warn_accepted_neighbours.c:570:30:drop-conjunct:&& x < 100->	the requires is not needed: empty_then_else only tests and assigns x (no arithmetic), so its exact contract holds for every int
+tests/scalar/warn_accepted_neighbours.c:570:30:swap-logic:&&->||	the requires is not needed: empty_then_else only tests and assigns x (no arithmetic), so its exact contract holds for every int
+tests/scalar/warn_accepted_neighbours.c:570:35:relop:<-><=	the requires is not needed: empty_then_else only tests and assigns x (no arithmetic), so its exact contract holds for every int
+tests/scalar/warn_accepted_neighbours.c:570:37:literal:100->101	the requires is not needed: empty_then_else only tests and assigns x (no arithmetic), so its exact contract holds for every int
+tests/scalar/warn_accepted_neighbours.c:581:23:drop-conjunct:0 <= x &&->	the requires is not needed: empty_block only tests and returns x (no arithmetic), so its exact contract holds for every int
+tests/scalar/warn_accepted_neighbours.c:581:30:drop-conjunct:&& x < 100->	the requires is not needed: empty_block only tests and returns x (no arithmetic), so its exact contract holds for every int
+tests/scalar/warn_accepted_neighbours.c:581:30:swap-logic:&&->||	the requires is not needed: empty_block only tests and returns x (no arithmetic), so its exact contract holds for every int
+tests/scalar/warn_accepted_neighbours.c:581:35:relop:<-><=	the requires is not needed: empty_block only tests and returns x (no arithmetic), so its exact contract holds for every int
+tests/scalar/warn_accepted_neighbours.c:581:37:literal:100->101	the requires is not needed: empty_block only tests and returns x (no arithmetic), so its exact contract holds for every int
+tests/scalar/warn_accepted_neighbours.c:592:30:drop-conjunct:&& x < 100->	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:592:35:relop:<-><=	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:592:37:literal:100->101	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:59:38:literal:100->101	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:59:60:literal:2->3	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:59:80:literal:2->3	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:603:30:drop-conjunct:&& n < 100->	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:603:35:relop:<-><=	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:603:37:literal:100->101	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:607:22:drop-conjunct:0 <= i &&->	weaker invariant: the exit proof and the measure n - i only need i <= n; i only counts up from 0
+tests/scalar/warn_accepted_neighbours.c:633:12:drop-conjunct:&& 4->	any nonzero constant is true (4, 3, 5 alike), and dropping a true operand leaves the value (for a bool b, b && 4 is b)
+tests/scalar/warn_accepted_neighbours.c:633:15:literal:4->3	any nonzero constant is true (4, 3, 5 alike), and dropping a true operand leaves the value (for a bool b, b && 4 is b)
+tests/scalar/warn_accepted_neighbours.c:633:15:literal:4->5	any nonzero constant is true (4, 3, 5 alike), and dropping a true operand leaves the value (for a bool b, b && 4 is b)
+tests/scalar/warn_accepted_neighbours.c:640:12:relop:>->>=	each variant is still a tautology (the two ranges still cover every int)
+tests/scalar/warn_accepted_neighbours.c:640:14:literal:5->4	each variant is still a tautology (the two ranges still cover every int)
+tests/scalar/warn_accepted_neighbours.c:640:21:relop:<-><=	each variant is still a tautology (the two ranges still cover every int)
+tests/scalar/warn_accepted_neighbours.c:640:23:literal:6->7	each variant is still a tautology (the two ranges still cover every int)
+tests/scalar/warn_accepted_neighbours.c:649:12:relop:>->>=	x > 5 && x < 3 (and each variant) is unsatisfiable, so the value is 0 either way
+tests/scalar/warn_accepted_neighbours.c:649:21:relop:<-><=	x > 5 && x < 3 (and each variant) is unsatisfiable, so the value is 0 either way
+tests/scalar/warn_accepted_neighbours.c:649:23:literal:3->2	x > 5 && x < 3 (and each variant) is unsatisfiable, so the value is 0 either way
+tests/scalar/warn_accepted_neighbours.c:649:23:literal:3->4	x > 5 && x < 3 (and each variant) is unsatisfiable, so the value is 0 either way
+tests/scalar/warn_accepted_neighbours.c:66:38:literal:100->101	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:66:60:literal:2->3	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:66:80:literal:2->3	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:73:38:literal:100->101	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:73:60:literal:2->3	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:73:80:literal:2->3	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:80:23:drop-conjunct:0 <= a &&->	weaker requires without 0 <= a: a + b cannot overflow (b is in 0..100) and >> of a negative sum is defined (arithmetic, 0010 item 8); the contract computes the same (a + b) >> c
+tests/scalar/warn_accepted_neighbours.c:80:38:literal:100->101	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:80:42:drop-conjunct:&& 0 <= b->	weaker requires without 0 <= b: a + b cannot overflow (a is in 0..100) and >> of a negative sum is defined (arithmetic, 0010 item 8); the contract computes the same (a + b) >> c
+tests/scalar/warn_accepted_neighbours.c:80:45:drop-conjunct:0 <= b &&->	weaker requires without 0 <= b: a + b cannot overflow (a is in 0..100) and >> of a negative sum is defined (arithmetic, 0010 item 8); the contract computes the same (a + b) >> c
+tests/scalar/warn_accepted_neighbours.c:80:60:literal:100->101	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
+tests/scalar/warn_accepted_neighbours.c:80:82:literal:4->5	weaker bound: every sum, product and shift of this function stays inside int for the extra inputs too (a relaxed bound is at most 1001*1000 or (101 + 100) << 4), so its exact-value contract still holds
