@@ -197,6 +197,20 @@ session for M4.4c with Q37 last and a cut order; the planning review found a pla
 (finding A), fixed first (§11 "M4.4c planning"). The approved plan is
 `~/.claude/plans/using-plan-md-and-handoff-md-wild-rainbow.md`.
 
+**M4.4c is done (2026-10-26, branch `m4.4c-writes-void-warnings`, based on local `main` `8bff6ba`; result in
+`internal/status.md`).** Record 0025: finding A fixed (an `uninitialized` check in a guarded operand is an access of its
+local); writes and snapshots leave F (Q28); a `void` `?:` in statement position is an `if` (Q30); `verified` and
+`error` tests may list front-end warnings (Q31); the static-assertion cross-check covers function bodies (Q40); 13
+`-Wall` shape rules R1–R13 (Q37, and five more families the owner added during the session). A new session **M4.4e**
+sweeps every default and `-Wall` warning of clang and GCC (owner, during the session; record 0027).
+
+**Owner steps after M4.4c, in this order:**
+1. **Handoff answers.** Your §11 answers 40–42 were uncommitted in the main checkout's `internal/handoff.md`; this
+   branch carries them. Drop the main checkout's copy before merging:
+   `git -C ~/Documents/cerastes/cerastes checkout internal/handoff.md`.
+2. **This branch.** Push it and open its PR: `git push origin m4.4c-writes-void-warnings` (the session never pushes).
+3. **Questions.** Answer §11 questions 43–46. Then M4.4d (§8.1, record 0026), then M4.4e (record 0027).
+
 ## 1. State in one paragraph
 
 The owner split M4.2 into **M4.2a** (forward `goto`, functions that do not return, `assert`), **M4.2b** (named
@@ -827,6 +841,34 @@ harness cases, a C++ float condition test). Notes not taken:
 6. **Minor:** a typedef whose first reason is not an array (`typedef unsigned _BitInt(8) fn(char a[3]);`) is not rejected
    at the typedef (any use is); `_Static_assert(1.5, "")` names its type in C (`unsupported_type`) but not in C++
    (`unsupported_expression`); the M4.5f gap of assertions in a `pure` body has no pinning test.
+
+**M4.4c audit notes (2026-10-26)** (audit rounds 1 and 2 and the re-check; items not taken):
+- *Shapes accepted and listed* (record 0025 item 6, "still accepted"): `RED == RED` (the front end folds it to 1 without
+  an expression); clang's `-Wparentheses-equality`, `-Wswitch-bool`, `-Wfor-loop-analysis`, `-Wmisleading-indentation`
+  (clang and GCC), GCC's `-Wmultistatement-macros`, clang's `-Wempty-body` on loops; R10 with a named constant
+  (`uc == DEF`, `const int DEF = 300;`, clang's C++ mode warns) or a constant expression (`uc == 256 + 44`); R7 does
+  not look into a `?:` arm that is a comma ending in a constant. All are for **M4.4e** (§4.2).
+- *Rejected more broadly than the compilers, listed:* R13's `;` on the line after the condition and an empty macro
+  invocation as the body (`if (x > 0) LOG("positive");`), since the IL keeps no position for the `)`; R7's `*` through
+  both `?:` arms in every conversion to `bool` (GCC's C mode only); R9 on a 0 or 1 right operand from a macro
+  (`x && ONE`) and R11 on an operand from a macro under a written `&&` (`x > LIM && x < 3`), where clang is silent
+  (the re-check after audit round 2).
+- *Rules that skip annotations:* R10 and R11 apply in code only (wrong or vacuous contracts are reported by
+  verification; error tests use them on purpose); R5 and R9 apply in annotations whatever the macros. §8 question 44.
+- *Untested accepted shapes:* `else ;` and `do ; while (c);` (GCC's `-Wextra` warns, so no `native-ok` positive can
+  hold them).
+- *Mode differences, not meanings:* `x = ((void)(a > 0 && x > 0), 2)` reports `uninitialized` in C and is rejected in
+  C++ ("comma … folded to a constant"); `x ? RED : GREEN` as a value is accepted in C and rejected in C++ (0018 item 8).
+- *Fail-closed checks of item 2* now read the placement emission uses, and three VIR hooks reach them; a set computed
+  too large (the unsound direction) is still invisible to them (M4.3b note 4): the pins guard it
+  (`call_write_noreturn_divzero.c`, `never_returns_call_divzero.c`, …).
+- *Planning's finding A* existed since M4.3a; no test had the shape. M4.5b must revisit item 2's placement (callees that
+  see globals or address-taken locals) with item 1's kinds of access.
+- *From the mutation review:* R1–R13 do not reach the body of a `pure` or `predicate` function (not verified before
+  M4.5f; the Verifying page says so), and `static_assert_pure_body.c`'s listed entry goes stale then; the doc example
+  `verifying/void_conditional.c` keeps a redundant requires conjunct `(c == 0 || n > 0)` (four listed equivalents; the
+  `m > 0` pattern of `void_conditional_for.c` would make it needed); a body `p | q` against an exact `&` contract runs to
+  the timeout (0023's documented limit), so `not_eq_and_bools` states its contract with `&&`.
 
 ## 7. Known gaps carried
 
@@ -1679,3 +1721,21 @@ Each has a recommended answer. Answer inline, as before.
   Q37's shapes.
 - **The cleanup:** at the end of M4.4c, `internal/status.md`, this file and `plan.md` are trimmed to what is live; a line
   in each names the commit that holds the full text.
+
+**M4.4c, 2026-10-26:**
+
+43. **M4.4e, the warning sweep** (your answer during M4.4c). Its method: list every warning clang 21 enables by default
+    or under `-Wall` and every GCC 16 `-Wall` warning (from the compilers' own flag lists), keep those that can fire on
+    the language cerastes accepts, measure each on both modes, and reject the remaining shapes with one rule per family
+    (record 0027), or list them. When: after M4.4d, or before it? *Recommended: right after M4.4d (planned, small), and
+    before M4.5a, so pointers start from a complete list; with an M8 entry for what the IL cannot see (layout-only
+    warnings such as misleading indentation, if P-probes show no column data).*
+44. **R10 and R11 skip annotations** (record 0025 item 6): a contract with an out-of-range or contradictory comparison is
+    a wrong contract that verification reports, and three error tests use one on purpose. Keep that (one exception to
+    0023's "the rules apply in annotations"), or apply them in annotations too and change those tests' contracts in
+    place? *Recommended: keep.*
+45. **R13's broader shapes** (a `;` on the next line, an empty macro body) are rejected although clang is silent there,
+    since the IL keeps no `)` position. Keep (the M4.4b rule for shapes the IL cannot match), or accept them until the
+    sweep finds a layout source? *Recommended: keep.*
+46. **One verdict for `x ? RED : GREEN` used as an `int`** (accepted in C, rejected in C++ by 0018 item 8): reject it in C
+    too? *Recommended: yes, in M4.4e (it is the enumeration half of `-Wenum-compare`'s family), with a test per mode.*
