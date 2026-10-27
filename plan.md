@@ -137,7 +137,7 @@ history of `internal/status.md`).
 
 | Session | Scope | Needs |
 |---|---|---|
-| **M4.4d Exact sets** | exact sets for preconditions and commas, with today's sets as the fallback, so no accepted program becomes rejected (old handoff §11 question 27; record 0026) | M4.4c |
+| **M4.4d Exact sets** | exact sets for preconditions and commas, with today's sets as the fallback, so no accepted program becomes rejected (old handoff §11 question 27; record 0026); constant masks as remainders, the fix of the `bit_mask.c [c23]` hang (owner, 2026-10-27, handoff §8 question 47) | M4.4c |
 | **M4.4e The warning sweep** | every default and `-Wall` warning of clang 21 and GCC 16 that can fire on the language cerastes accepts, measured in both modes and rejected like the compilers (one rule per family) or listed; M4.4c's listed shapes first (owner, 2026-10-26; record 0027) | M4.4d |
 | **M4.5 Pointers** (sessions a–f, below) | the memory model for C | M4.1–M4.3 |
 | **M4.6 Chars and strings** | string literals as read-only arrays, `char` buffers, `strlen`/`memcpy`/`memcmp`/`strcmp` contracts, `main(argc, argv)` | M4.5e |
@@ -195,6 +195,9 @@ a system header (old handoff §11 question 39: "Skip it for now, but we need to 
 concepts. Add before M5."). This session decides how such conditions are encoded or checked, so that M5's integral
 `T` and M6's requirement contracts rest on a known reading of type traits. One session of ≤ 4 h, after M4.8 and before
 M5a; its scope is planned at its own planning (handoff §4.6).
+
+Also before M5 (owner, 2026-10-27, handoff §8 question 11): `mutate.py`'s classifier learns to read local declarations
+(typed locals), with its own audit, in M5.0 or a session of its own (handoff §4.6).
 
 ---
 

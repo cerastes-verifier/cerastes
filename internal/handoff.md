@@ -78,7 +78,8 @@ test: `tests/scalar/bit_mask.c [c23]` hit the driver's 300 s Silicon limit. That
   `m > 0` pattern of `void_conditional_for.c` would make it needed); a body `p | q` against an exact `&` contract runs to
   the timeout (0023's documented limit), so `not_eq_and_bools` states its contract with `&&`.
 
-**From S4** (the CI failure on PR #11, investigated on the owner's Mac; nothing changed yet):
+**From S4** (the CI failure on PR #11, investigated on the owner's Mac; candidate 1 is taken in M4.4d, §4.1, owner
+2026-10-27, §8 question 47; reproducible solver runs, question 48, are deferred):
 - *The `bit_mask.c [c23]` hang.* One Z3 query in `f_low_word__1__wf` (the well-formedness method of `low_word`'s
   contract), the conversion bound `!((c_uand_64(p_v__0, 4294967295) < 0) || (4294967295 < c_uand_64(...)))`, never
   answers: `c_uand_64` unfolds 64 halvings, and whether Z3 gets through depends on what the same prover process checked
@@ -162,17 +163,26 @@ not taken go to §3); single-file runs while working (`build/cerastes verify` di
 builds serialized (`lockf build/<session>/build.lock cmake --build build/cmake`); `check.sh` at most twice; anything
 that needs the x86-64 box is its own session. Record numbers are the next free ones when written (0026 is next).
 
-### 4.1 M4.4d Exact sets (record 0026)
+### 4.1 M4.4d Exact sets and constant masks (record 0026)
 
-**M4.4d Exact sets** (record 0026; old §11 question 27).
-- **Measure first** with a prototype: exact precondition sets also move preconditions in pre-M4.3b programs
-  (`f(a, g(b))`), and any expectation change other than the approved one stops the work.
-- **Two steps:** exact sets (a precondition gets PRE(c), and a comma's value carries its floor), else today's sets. A
-  rejection reports step 2's conflict.
-- **The mechanism** (decided in the record): dual sets through `LV`/`Obl`/`Effect`/`Full::pre`/`last_*`/`floor_`/`since`,
-  or lowering twice with a rollback.
-- **Tests:** `h((validate(y), y))`, `100 / (validate(y), y)`, `(nr(0), 1) && 100 / d`, and `h(f(x), y) + 100 / g(z)`
-  (accepted by the fallback). `reject_unsequenced_split_requires.c` is retired (pre-approved).
+**M4.4d Exact sets** (record 0026; old §11 question 27). Planned 2026-10-27 (plan
+`~/.claude/plans/using-plan-md-and-my-fuzzy-sky.md`), about 5 h, branch `m4.4d-exact-sets`.
+- **Measure first** with a prototype (M1, the full suite): exact precondition sets also move preconditions in pre-M4.3b
+  programs (`f(a, g(b))`), and any expectation change other than the approved one stops the work.
+- **Two steps, per Full** (each full expression and each branch's own full expression): exact sets (a precondition gets
+  PRE(c), and a comma's value carries its floor), else today's sets. A rejection reports step 2's conflict.
+- **The mechanism:** dual sets (exact, base) in one lowering pass; `flush` projects the Full onto the chosen half, so
+  π, placement and the fail-closed checks are unchanged code. (Lowering twice with a rollback was rejected: too much
+  state to restore.)
+- **Tests:** `h((validate(y), y))`, `100 / (validate(y), y)`, `(nr(0), 1) && 100 / d`, `take(f(x), h(y))` with one
+  `requires` per argument (now accepted), and `h(f(x), y) + 100 / g(z)` (accepted by the fallback); pins that would
+  verify if a set were too large. `reject_unsequenced_split_requires.c` is retired (pre-approved).
+- **Constant masks as remainders** (§8 question 47, owner 2026-10-27: folded into M4.4d; record 0026 part B, amends
+  0023 item 2): `a & (2^k - 1)` is `a % 2^k` and `a & ~(2^k - 1)` is `a - a % 2^k` (Viper's `%`), for exactly those
+  constants; measured on the programs that call `c_[u]and_N` (M2), checked against the prelude functions (S22), and the
+  `bit_mask.c [c23]` hang rerun with one verifier.
+- **Team:** il-analyst `src/vir` and `src/viper/emit.cpp`; edg-backend the VIR self-test cases (written from the record);
+  test-mutator tests and mutation; the Opus auditor two rounds.
 
 ### 4.2 M4.4e The warning sweep (owner, 2026-10-26, during M4.4c; record 0027)
 
@@ -267,7 +277,8 @@ contracts, `main(argc, argv)`; ports of `tutorial_solutions/strlen.c`, `memcpy.c
 `examples/functions/functions.c`.
 
 **M4.8 C parity close-out:** the VeriFast C differential set (the ports above, run with VeriFast in Docker as M5c
-sets up, or recorded outcomes), the full mutation run over the M4 tests, the Memory and ownership page complete,
+sets up, or recorded outcomes), the full mutation run over the M4 tests and the verified doc examples never mutated
+before (owner, 2026-10-27, §8 question 10), the Memory and ownership page complete,
 M4's acceptance (plan.md), and the deferred list for M8 (unions, floating point, `volatile`/`_Atomic`/`_BitInt`/
 vector types, variadic functions and `printf`, several translation units, concurrency).
 
@@ -278,6 +289,11 @@ skips a static assertion whose condition calls a function, uses a type trait (`e
 template such as `std::is_integral_v<T>`), a concept-id, or names an entity of a system header (`std::numeric_limits`).
 M5.0 decides how cerastes reads such conditions (and type traits elsewhere: contracts, `if constexpr`), so that M5's
 integral `T` and M6's requirement contracts rest on it. Planned at its own planning, ≤ 4 h.
+
+**Before M5: typed locals in the mutation classifier** (owner, 2026-10-27, §8 question 11: "Not now, but annotate that
+this needs to be addressed before M5"). `mutate.py`'s classifier does not read local declarations, so about 20 listed
+equivalents (e.g. `assert_holds.c`) rest on a reviewer's reading; teach it to read them, with its own audit, before M5a
+(in M5.0 or a session of its own).
 
 **From P38 (M4.4a, record 0022 item 3):** a non-type template argument keeps no `expr` in this configuration
 (`BACKING_EXPR_FOR_NONTYPE_TEMPL_ARG` is false), so `t<0u - 1u>()` reaches an instance as the plain constant
@@ -414,6 +430,8 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
   of a jump into an `if` branch is unproven, S9d); a label that is the whole branch of an `if` without braces; GNU
   computed `goto`; `quick_exit`, `__builtin_trap`, `__builtin_unreachable`/`unreachable()`, `std::terminate`; an
   `assert` in a `for` increment; glibc's `assert` expansion. Each is rejected with a diagnostic and an M8 entry.
+  A `goto` into a block or an `if` branch is lifted only when a ported example needs it, after a Silicon spike with
+  must-fail twins (owner, 2026-10-27, §8 question 5).
 
 ## 6. Process notes
 
@@ -463,12 +481,23 @@ and in the commit named at the top.
 
 5. **A `goto` into a block or an `if` branch** stays rejected (0015 item 2; stricter than C). Lift it only when a ported
    example needs it, after a Silicon spike with must-fail twins? *Recommended: yes.*
+
+Yes
+
 10. **The verified doc examples that have never been mutated:** mutate them in M4.8's run, or in a short session before?
     *Recommended: M4.8, with the M4 tests.*
+
+M4.8 with the M4 tests.
+
 11. **Typed locals in the mutation classifier** (about 20 listed entries, e.g. `assert_holds.c`): teach it to read local
     declarations? *Recommended: not now; every new bucket rule needs its own audit.*
+
+Not now, but annotate that this needs to be addressed before M5.
+
 12. **A full mutation run in CI** (about 85 min locally, far more on the 3-core runner)? *Recommended: no; a per-session
     acceptance step, with `--validate` in `check.sh`.*
+
+Already done.
 
 **M4.4c, 2026-10-26:**
 
@@ -478,15 +507,26 @@ and in the commit named at the top.
     (record 0027), or list them. When: after M4.4d, or before it? *Recommended: right after M4.4d (planned, small), and
     before M4.5a, so pointers start from a complete list; with an M8 entry for what the IL cannot see (layout-only
     warnings such as misleading indentation, if P-probes show no column data).*
+
+Follow recommendation
+
 44. **R10 and R11 skip annotations** (record 0025 item 6): a contract with an out-of-range or contradictory comparison is
     a wrong contract that verification reports, and three error tests use one on purpose. Keep that (one exception to
     0023's "the rules apply in annotations"), or apply them in annotations too and change those tests' contracts in
     place? *Recommended: keep.*
+
+Follow recommendation
+
 45. **R13's broader shapes** (a `;` on the next line, an empty macro body) are rejected although clang is silent there,
     since the IL keeps no `)` position. Keep (the M4.4b rule for shapes the IL cannot match), or accept them until the
     sweep finds a layout source? *Recommended: keep.*
+
+Follow recommendation
+
 46. **One verdict for `x ? RED : GREEN` used as an `int`** (accepted in C, rejected in C++ by 0018 item 8): reject it in C
     too? *Recommended: yes, in M4.4e (it is the enumeration half of `-Wenum-compare`'s family), with a test per mode.*
+
+Follow recommendation
 
 **S4, 2026-10-27:**
 
@@ -494,8 +534,15 @@ and in the commit named at the top.
     amendment of 0023 with its tests and an audit), in a short session of its own before M4.4d? And PR #11: merge it
     over the explained red run, or rerun it first? *Recommended: the encoder rule, in its own session before M4.4d; merge
     PR #11 as it is (the failure predates M4.4c and is explained; a rerun that passes would prove nothing).*
+
+Already done.
+
+*(Planning, 2026-10-27: the encoder rule had not landed, so the owner folded it into M4.4d, §4.1.)*
+
 48. **Reproducible solver runs:** pass `--numberOfParallelVerifiers 1` (each program's prover history fixed, so an
     intermittent hang becomes a failure every time, at some cost in time) or an `--assertTimeout` (a bound per query that
     fails closed) to Silicon in the driver? Either changes every test's run and needs a full-suite measurement first.
     *Recommended: measure `--numberOfParallelVerifiers 1` on the whole suite in the bit_mask session and decide on the
     numbers; no `--assertTimeout` (a resource bound can turn a slow proof into a failure).*
+
+Defer.
