@@ -1,54 +1,63 @@
-# Handoff after M4.4c — writes outside the chain, `void` `?:` statements, `-Wall` shapes (2026-10-26) — and S4, CI tiers (2026-10-27)
+# Handoff after M4.4d — exact sets for preconditions and commas, constant masks as remainders (2026-10-27)
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
 rediscover. It was trimmed at the end of M4.4c (owner, 2026-10-26) to what is live: the full text up to M4.4c, with the
-finished sessions' plans, results and answered questions, is `git show 1fcc43b:internal/handoff.md`; earlier handoffs
+finished sessions' plans, results and answered questions, is `git show 1fcc43b:internal/handoff.md` (M4.4c's and S4's
+own sections: `git show fce46de:internal/handoff.md`); earlier handoffs
 are `git show 60d3fbe:internal/handoff.md` (M4.1) and `git show a4da52c:internal/handoff.md` (M3 close-out).
 
 ## 1. State
 
-M4.4c is done on branch `m4.4c-writes-void-warnings` (based on local `main` `8bff6ba`, which merges M4.4b2; result in
-`internal/status.md`). Record 0025:
-- **Finding A** (planning review): an `uninitialized` check inside a guarded operand could be emitted after a later write
-  of the same local (`int x; int y = (x = (g(f(a) > 0 && x > 0), 2));` verified). Fixed: the check's set is an access
-  of the local.
-- **Writes and snapshots leave the chain** (old §11 question 28): `(x = f(a)) + (y = g(b))` verifies.
-- **A `void` `?:` in statement position is an `if`** (question 30).
-- **`verified` and `error` tests may list front-end warnings** (question 31), from a closed list (#187 today).
-- **The static-assertion cross-check covers function bodies** (question 40).
-- **The `-Wall` shapes** (question 37, and five more families the owner added during the session): 13 rules, R1–R13.
+M4.4d is done on branch `m4.4d-exact-sets` (based on local `main` `fce46de`, which merges M4.4c and S4; result in
+`internal/status.md`). Record 0026:
+- **Part A, exact sets in two steps** (old §11 question 27): a callee's `requires` has the set PRE(c), and a comma's value
+  carries its floor; each full expression, and each branch's own, uses the exact family when it is a chain, else
+  today's (the base family, the previous version's Viper exactly), else rejects with today's conflict. Dual sets in one
+  lowering pass; hooks `force_base_sets` (lowering and driver: every full expression takes step 2) and `drop_exact_set`
+  (breaks the base ⊆ exact check).
+- **Part B, constant masks as remainders** (§8 question 47): `a & (2^k − 1)` is `a % 2^k` and `a & ~(2^k − 1)` is
+  `2^k * (a \ 2^k)`; the `bit_mask.c [c23]` hang is gone (72 one-verifier runs).
 
-The EDG pin is unchanged (`f0ed5525af`); the EDG box session (§4.3) is still pending. M4.4b2's PR #10 was merged on
-GitHub during the session; this branch starts from local `main` `8bff6ba`, the same tree.
+The EDG pin is unchanged (`f0ed5525af`); the EDG box session (§4.3) is still pending.
 
-**S4 (2026-10-27), branch `s4-ci-tiers`** (from local `main` `cfceccb`, which merges M4.4c; decision 0016 item 14): CI
-runs the full `check.sh` every night at 07:00 UTC and on `workflow_dispatch`, and a PR tier on pull requests and pushes
-to `main` (`CERASTES_CHECK_BASE`; `run_tests.py --pr-base`). It started from M4.4c's PR #11, whose CI run failed on one
-test: `tests/scalar/bit_mask.c [c23]` hit the driver's 300 s Silicon limit. That is a fragile Z3 query, not M4.4c (§3,
-"From S4"; §8 question 47).
+## 2. Owner steps after M4.4d, in this order
 
-## 2. Owner steps after M4.4c, in this order
-
-1. **Handoff answers.** Your old §11 answers 40–42 were uncommitted in the main checkout's `internal/handoff.md`; this
-   branch carries them. Drop the main checkout's copy before merging:
-   `git -C ~/Documents/cerastes/cerastes checkout internal/handoff.md`.
-2. **M4.4b2** is merged (PR #10). If `main` on GitHub and local `main` differ only by that merge commit, fetch and
-   merge before opening this branch's PR.
-3. **This branch.** Push it and open its PR: `git push origin m4.4c-writes-void-warnings` (the session never pushes).
-   CI runs `check.sh` as locally (the suite grew by about 230 files).
-4. **Questions.** Answer §8 (questions 43–48). Then M4.4d (§4.1, record 0026), then M4.4e (§4.2).
-
-**After S4:**
-5. **PR #11's red run** (run `40434946397`) is the `bit_mask.c [c23]` hang of §3 ("From S4"): its Viper is
-   byte-identical to the local one and to M4.4b1's, so M4.4c did not cause it. Decision 0016 item 10 leaves a rerun or
-   a merge over it to you (§8 question 47).
-6. **This branch** contains M4.4c (it starts from local `main`). Merge PR #11 first, then push and open the PR:
-   `git push origin s4-ci-tiers`. That PR's run is the first PR-tier run (a pull request runs the workflow of its merge
-   commit); its job time gives the measured number for 0016 item 9. The first full nightly runs at 07:00 UTC after the
-   merge.
+1. **Your uncommitted edits in the main checkout.** This branch carries them: the §8 answers 5, 10–12 and 43–48
+   (`43f0f81`) and EDG bug 0022 moved to `internal/edg_bugs/upstreamed/` with its references (`9610c94`). Drop the main
+   checkout's copies before merging:
+   `cd ~/Documents/cerastes/cerastes && git restore --staged internal/edg_bugs && git restore internal/edg_bugs
+   internal/decisions/0019-uninitialized-locals.md internal/il-inventory.md internal/handoff.md && rm
+   internal/edg_bugs/upstreamed/0022-suppressed-note-internal-error.md`.
+2. **PR #11** (M4.4c and S4): its rerun (`40506997678`) was in progress when M4.4d started. Merge it if green; a red run
+   on `bit_mask.c [c23]` alone is the known hang, which this branch fixes.
+3. **This branch.** Push it and open its PR: `git push origin m4.4d-exact-sets` (the session never pushes). The PR tier
+   runs the changed tests (about 56 new files), the doc examples and the sample.
+4. **Questions.** Answer §8 (questions 49–52). Then M4.4e (§4.2, record 0027).
 
 ## 3. Open audit notes (condensed; the full notes are in the commit named above)
+
+**From M4.4d** (audit rounds 1 and 2 and the re-audit; items not taken):
+- *Masks that are constants only through a call argument* (round 2 note 4): `f(v, 4294967295u)` with
+  `requires((v & m) == v)` rewrites the explicit check lowering writes at the call, but Silicon's own check of the
+  callee's precondition still reads `c_uand_64(p_v, p_m)` and may run to the timeout (exit 3, never a verdict; a probe
+  took 90 s). Record 0026 item 9 and the Integer semantics page say only a mask written as a constant is decided. §8
+  question 51.
+- *The fallback keeps today's false alarms* where step 2 is used (0026 item 6); no existing test is accepted by step 2
+  (M1), so none shows one. §8 question 50.
+- *The mask positives were not mutated* (the plan's cut 1: a mutated constant lands on an undecided shape and runs to
+  the 300 s timeout). M4.8's run over the M4 tests takes them (§8 question 49).
+- *The lint of `%` and `\`* (round 2 note 9) reads only the divisor: it cannot tell a C `%` by a power of two emitted as
+  Viper's `%`, and it exempts the prelude bodies by name (`c_rem`, `c_urem`; `c_div`, `c_udiv`, `c_shr`). The guarantee
+  is structural: `low::mod_pow2`/`div_pow2` are the only constructors, and user functions are named `f_<name>__<id>`.
+- *The VIR mask cases pass with either encoding by design* (round 2 note 10); `test_a_constant_mask_is_emitted_as_a_
+  remainder_not_as_a_bit_function` checks the emitted text.
+- *Two failing `requires` clauses at one call print the same message twice* (seen on the retired test under exact sets;
+  0011 item 9's harness rule fails such a test): tests choose contracts that fail once (`call_split_requires_pre.c`).
+- *A duplicate VIR case:* `calls_drop_exact_set_hook_off` is the program and expectation of `calls_fixed_order_hook_off`
+  (harmless).
+- *For M4.5b* (0026 item 15): step 1 places a write of a comma's value in C's order; step 2 keeps 0025 item 2's
+  placement, whose caveat (callees do not see locals) applies to it in particular.
 
 **From M4.4c** (audit rounds 1 and 2; items not taken):
 - *Shapes accepted and listed* (record 0025 item 6, "still accepted"): `RED == RED` (the front end folds it to 1 without
@@ -78,24 +87,9 @@ test: `tests/scalar/bit_mask.c [c23]` hit the driver's 300 s Silicon limit. That
   `m > 0` pattern of `void_conditional_for.c` would make it needed); a body `p | q` against an exact `&` contract runs to
   the timeout (0023's documented limit), so `not_eq_and_bools` states its contract with `&&`.
 
-**From S4** (the CI failure on PR #11, investigated on the owner's Mac; nothing changed yet):
-- *The `bit_mask.c [c23]` hang.* One Z3 query in `f_low_word__1__wf` (the well-formedness method of `low_word`'s
-  contract), the conversion bound `!((c_uand_64(p_v__0, 4294967295) < 0) || (4294967295 < c_uand_64(...)))`, never
-  answers: `c_uand_64` unfolds 64 halvings, and whether Z3 gets through depends on what the same prover process checked
-  before. Silicon's parallel verifiers make that order vary, so the hang is intermittent (CI run `40434946397`; 1 of 48
-  local runs at 12 at once), and with `--numberOfParallelVerifiers 1` it is deterministic in c23 (10 of 10) and absent
-  in c++20 (0 of 5: c23's `(cond ? 1 : 0) != 0` wrapping changes the history). Silicon's `assertTimeout` defaults to 0,
-  so nothing stops the query; Z3 was busy, not deadlocked (jstack: the worker in `ProverStdIO.readUnsat`). Its twin
-  `negative/bit_mask_post.c [c23]` has the same `low_word` and hangs the same way; a one-verifier sweep of the 89
-  programs that use the bitwise functions found no other hang (the 128-bit tests are slow, 43–75 s, but finish).
-- *Candidate fixes* (§8 question 47): (1) the encoder writes a mask by `2^k - 1` as `x % 2^k` and by `~(2^k - 1)` as
-  `x - x % 2^k` (exact identities on unbounded integers, since Viper's `%` by a positive divisor is the non-negative
-  floor remainder; for exactly those constants with k at most the width; the conversion checks unchanged): on scratch
-  copies 5 of 5 pass with one verifier and 16 of 16 with random seeds (slowest 14.1 s against 42.7 s); it amends 0023
-  and needs a must-verify/must-fail pair and an audit. (2) Silicon options: `--numberOfParallelVerifiers 1` makes every
-  run reproducible (this test would fail every time instead of sometimes), and `--assertTimeout` bounds each query by a
-  resource limit and fails closed (exit 3); both change solver behaviour for the whole suite. (3) Splitting the test
-  shortens the history but leaves the query fragile.
+**From S4** (closed in M4.4d): the `bit_mask.c [c23]` hang (one Z3 query on `c_uand_64` whose answer depended on the
+prover's history) is gone with record 0026 part B; reproducible solver runs (`--numberOfParallelVerifiers 1`,
+`--assertTimeout`, §8 question 48) are deferred. The investigation is in `git show fce46de:internal/handoff.md`.
 
 **Carried from earlier sessions** (each still open; the session that wrote it in brackets):
 - *Recognition by name or shape.* `assert` is recognised by its macOS expansion and `__assert_rtn` (S3 note 1: a user
@@ -160,21 +154,17 @@ probes, IL evidence, Silicon spikes, `src/vir` + `src/viper`; test-mutator: test
 `lint_viper.py`) and the Opus soundness-auditor (one round per diff plus a re-audit of blocking fixes; should-fix items
 not taken go to §3); single-file runs while working (`build/cerastes verify` directly: `run_tests.py` locks `build/vpr`);
 builds serialized (`lockf build/<session>/build.lock cmake --build build/cmake`); `check.sh` at most twice; anything
-that needs the x86-64 box is its own session. Record numbers are the next free ones when written (0026 is next).
+that needs the x86-64 box is its own session. Record numbers are the next free ones when written (0027 is next).
 
-### 4.1 M4.4d Exact sets (record 0026)
+### 4.1 M4.4d Exact sets and constant masks (record 0026): done
 
-**M4.4d Exact sets** (record 0026; old §11 question 27).
-- **Measure first** with a prototype: exact precondition sets also move preconditions in pre-M4.3b programs
-  (`f(a, g(b))`), and any expectation change other than the approved one stops the work.
-- **Two steps:** exact sets (a precondition gets PRE(c), and a comma's value carries its floor), else today's sets. A
-  rejection reports step 2's conflict.
-- **The mechanism** (decided in the record): dual sets through `LV`/`Obl`/`Effect`/`Full::pre`/`last_*`/`floor_`/`since`,
-  or lowering twice with a rollback.
-- **Tests:** `h((validate(y), y))`, `100 / (validate(y), y)`, `(nr(0), 1) && 100 / d`, and `h(f(x), y) + 100 / g(z)`
-  (accepted by the fallback). `reject_unsequenced_split_requires.c` is retired (pre-approved).
+Done on 2026-10-27 (`internal/status.md`; plan `~/.claude/plans/using-plan-md-and-my-fuzzy-sky.md`).
 
 ### 4.2 M4.4e The warning sweep (owner, 2026-10-26, during M4.4c; record 0027)
+
+Owner (2026-10-27, §8 questions 43–46, as recommended): M4.4e comes right after M4.4d and before M4.5a, with an M8 entry
+for what the IL cannot see; R10 and R11 keep skipping annotations; R13's broader shapes stay rejected; `x ? RED : GREEN`
+used as an `int` is rejected in C too, with a test per mode.
 
 M4.4c's audits kept finding default and `-Wall` warnings that no rule covers (record 0025 item 6, "still accepted"),
 because no one had swept the compilers' complete lists. M4.4e does it once:
@@ -267,7 +257,8 @@ contracts, `main(argc, argv)`; ports of `tutorial_solutions/strlen.c`, `memcpy.c
 `examples/functions/functions.c`.
 
 **M4.8 C parity close-out:** the VeriFast C differential set (the ports above, run with VeriFast in Docker as M5c
-sets up, or recorded outcomes), the full mutation run over the M4 tests, the Memory and ownership page complete,
+sets up, or recorded outcomes), the full mutation run over the M4 tests and the verified doc examples never mutated
+before (owner, 2026-10-27, §8 question 10), the Memory and ownership page complete,
 M4's acceptance (plan.md), and the deferred list for M8 (unions, floating point, `volatile`/`_Atomic`/`_BitInt`/
 vector types, variadic functions and `printf`, several translation units, concurrency).
 
@@ -278,6 +269,11 @@ skips a static assertion whose condition calls a function, uses a type trait (`e
 template such as `std::is_integral_v<T>`), a concept-id, or names an entity of a system header (`std::numeric_limits`).
 M5.0 decides how cerastes reads such conditions (and type traits elsewhere: contracts, `if constexpr`), so that M5's
 integral `T` and M6's requirement contracts rest on it. Planned at its own planning, ≤ 4 h.
+
+**Before M5: typed locals in the mutation classifier** (owner, 2026-10-27, §8 question 11: "Not now, but annotate that
+this needs to be addressed before M5"). `mutate.py`'s classifier does not read local declarations, so about 20 listed
+equivalents (e.g. `assert_holds.c`) rest on a reviewer's reading; teach it to read them, with its own audit, before M5a
+(in M5.0 or a session of its own).
 
 **From P38 (M4.4a, record 0022 item 3):** a non-type template argument keeps no `expr` in this configuration
 (`BACKING_EXPR_FOR_NONTYPE_TEMPL_ARG` is false), so `t<0u - 1u>()` reaches an instance as the plain constant
@@ -414,6 +410,8 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
   of a jump into an `if` branch is unproven, S9d); a label that is the whole branch of an `if` without braces; GNU
   computed `goto`; `quick_exit`, `__builtin_trap`, `__builtin_unreachable`/`unreachable()`, `std::terminate`; an
   `assert` in a `for` increment; glibc's `assert` expansion. Each is rejected with a diagnostic and an M8 entry.
+  A `goto` into a block or an `if` branch is lifted only when a ported example needs it, after a Silicon spike with
+  must-fail twins (owner, 2026-10-27, §8 question 5).
 
 ## 6. Process notes
 
@@ -442,60 +440,27 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
 - **A test that loses an `expect:` line** (pre-approved) keeps its line numbers with a comment in its place
   (M4.4c, the four `reject_assert_shape_*.c`).
 
-## 7. Acceptance of M4.4c
+## 7. Acceptance of M4.4d
 
-| # | Command | Result |
-|---|---|---|
-| 1 | `scripts/check.sh` #2 (16:37–17:19, after audit round 2's fixes) | **all green**: self-tests harness 981 (skipped 1), oracle 79, lint 190, mutate 291; tests 5386 passed, 0 failed, 1 skipped (native-ok: Apple clang 1019, GCC 1019); 1820 `.vpr` lint clean; VIR self-test 686/686 (+ 203 rejection cases); walker oracle 135 goldens, 1922 facts, 0 failed; docs 0 problems; `mutate.py --validate` 325 tests, 11241 mutants |
-| 2 | `scripts/check.sh` #1 (15:50–16:23) | 5378 passed, 6 failed: R10 fired in three error tests (contracts on narrow results, a named constant), which the agents' sweep had skipped; R10 became code-only, with literals and enumerators only |
-| 3 | `diff -rq -x MANIFEST build/m4.4c-baseline-vpr build/vpr`; the VIR self-test against `build/m4.4c-baseline-vir` | all 1768 `.vpr` and maps of the baseline identical, none missing, 104 new; the 671 old VIR cases identical |
-| 4 | `run_tests.py --check-headers`, `--count-error-twins`; `build/cerastes --selftest` | 2027/2027 (with the mutation twin); 323; 94 checks |
-| 5 | `mutate.py -j 8` over the 10 new positives and 2 doc examples (no external cap; logs `build/m4.4c/mutate1.log`–`mutate4.log`) | run 1: 1619 mutants, 979 killed, 186 safe-direction, 149 stillborn, 303 survivors, 2 tool failures (Silicon timeouts of a body `p \| q` against an exact `&` contract; that contract now uses `&&`); three files strengthened in place and re-run (0 tool failures), one new twin; **284 reviewed equivalents, 0 unexplained** (Opus: 26 reasons corrected, 6 proposed entries killed by strengthening instead); `mutate.py --validate` 325 tests, 11277 mutants, 863 entries |
-| 6 | audits (Opus) | round 1 (record, P46–P48): 0 blocking, every should-fix taken; round 2 (code, tests): 0 blocking, 3 should-fix (2 fixed, 1 listed: M4.4e, owner); re-check: 0 blocking, 1 should-fix (three shapes, listed for M4.4e) |
-| 7 | wall-clock | 14:36–21:30 (planning before), about 7 h against the planned 5 h: the mutation run and its review took about 4 h of it |
+The table is the one in `internal/status.md` (M4.4d, "Acceptance"); M4.4c's is in `git show fce46de:internal/handoff.md`.
 
 ## 8. Questions for the owner
 
-Each has a recommended answer. Answer inline, as before. Answered questions (1–42) are recorded in the decision records
-and in the commit named at the top.
+Each has a recommended answer. Answer inline, as before. Answered questions (1–48) are recorded in the decision records,
+in the commit named at the top and in `43f0f81` (questions 5, 10–12 and 43–48).
 
-**Open from earlier sessions:**
+**M4.4d, 2026-10-27:**
 
-5. **A `goto` into a block or an `if` branch** stays rejected (0015 item 2; stricter than C). Lift it only when a ported
-   example needs it, after a Silicon spike with must-fail twins? *Recommended: yes.*
-10. **The verified doc examples that have never been mutated:** mutate them in M4.8's run, or in a short session before?
-    *Recommended: M4.8, with the M4 tests.*
-11. **Typed locals in the mutation classifier** (about 20 listed entries, e.g. `assert_holds.c`): teach it to read local
-    declarations? *Recommended: not now; every new bucket rule needs its own audit.*
-12. **A full mutation run in CI** (about 85 min locally, far more on the 3-core runner)? *Recommended: no; a per-session
-    acceptance step, with `--validate` in `check.sh`.*
-
-**M4.4c, 2026-10-26:**
-
-43. **M4.4e, the warning sweep** (your answer during M4.4c). Its method: list every warning clang 21 enables by default
-    or under `-Wall` and every GCC 16 `-Wall` warning (from the compilers' own flag lists), keep those that can fire on
-    the language cerastes accepts, measure each on both modes, and reject the remaining shapes with one rule per family
-    (record 0027), or list them. When: after M4.4d, or before it? *Recommended: right after M4.4d (planned, small), and
-    before M4.5a, so pointers start from a complete list; with an M8 entry for what the IL cannot see (layout-only
-    warnings such as misleading indentation, if P-probes show no column data).*
-44. **R10 and R11 skip annotations** (record 0025 item 6): a contract with an out-of-range or contradictory comparison is
-    a wrong contract that verification reports, and three error tests use one on purpose. Keep that (one exception to
-    0023's "the rules apply in annotations"), or apply them in annotations too and change those tests' contracts in
-    place? *Recommended: keep.*
-45. **R13's broader shapes** (a `;` on the next line, an empty macro body) are rejected although clang is silent there,
-    since the IL keeps no `)` position. Keep (the M4.4b rule for shapes the IL cannot match), or accept them until the
-    sweep finds a layout source? *Recommended: keep.*
-46. **One verdict for `x ? RED : GREEN` used as an `int`** (accepted in C, rejected in C++ by 0018 item 8): reject it in C
-    too? *Recommended: yes, in M4.4e (it is the enumeration half of `-Wenum-compare`'s family), with a test per mode.*
-
-**S4, 2026-10-27:**
-
-47. **The `bit_mask.c [c23]` hang** (§3, "From S4"): fix it with the encoder's mask-as-remainder rule (candidate 1, an
-    amendment of 0023 with its tests and an audit), in a short session of its own before M4.4d? And PR #11: merge it
-    over the explained red run, or rerun it first? *Recommended: the encoder rule, in its own session before M4.4d; merge
-    PR #11 as it is (the failure predates M4.4c and is explained; a rerun that passes would prove nothing).*
-48. **Reproducible solver runs:** pass `--numberOfParallelVerifiers 1` (each program's prover history fixed, so an
-    intermittent hang becomes a failure every time, at some cost in time) or an `--assertTimeout` (a bound per query that
-    fails closed) to Silicon in the driver? Either changes every test's run and needs a full-suite measurement first.
-    *Recommended: measure `--numberOfParallelVerifiers 1` on the whole suite in the bit_mask session and decide on the
-    numbers; no `--assertTimeout` (a resource bound can turn a slow proof into a failure).*
+49. **Mutating the mask positives** (cut today): a mutated mask constant (`255` → `256`) lands on a shape Z3 does not
+    decide, and each such mutant runs to the 300 s timeout. In M4.8's run over the M4 tests, run them with mutants of a
+    mask constant counted as "undecided (0023 item 2)", reviewed like the safe-direction bucket? *Recommended: yes, in
+    M4.8.*
+50. **A note when the fallback is used:** an error reported in a full expression that took step 2 may be a false alarm
+    (0026 item 6). Print a note with it ("checked with the smaller sets: C may not reach this")? *Recommended: not now;
+    no test takes step 2 to be accepted; revisit with the ports in M4.8.*
+51. **Masks passed as arguments** (§3, M4.4d): a mask that is a parameter of the callee still reaches Silicon's own
+    precondition check as `c_uand_N` and may time out. *Recommended: leave it documented; revisit if a port needs it
+    (M5's integral `T` will meet masks over a parameter type).*
+52. **`|` and `^` with a constant mask** (`x | 0xFF`, `x ^ 0xFF`) keep their prelude functions, so symbolic claims about
+    them stay undecided. Extend the rule (`x | (2^k − 1) = x − x % 2^k + 2^k − 1`, `x ^ (2^k − 1) = x − 2·(x % 2^k) +
+    2^k − 1`)? *Recommended: not now; when a ported example (M4.6 chars, M4.8) needs it, with its own spike.*

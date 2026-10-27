@@ -26,8 +26,8 @@ enum class UnOp { Neg, Not };
 enum class BinOp { Add, Sub, Mul, Lt, Le, Gt, Ge, Eq, Ne, And, Or, Implies };
 
 struct LExpr {
-  enum class Kind { IntLit, BoolLit, Var, Un, Bin, Ite, Fn } kind = Kind::IntLit;
-  std::string text;          // IntLit: a decimal (possibly negative); Var: the name; Fn: the prelude function
+  enum class Kind { IntLit, BoolLit, Var, Un, Bin, Ite, Fn, ModPow2, DivPow2 } kind = Kind::IntLit;
+  std::string text;          // IntLit: a decimal (possibly negative); Var: the name; Fn: the prelude function; ModPow2, DivPow2: the divisor, 2^k, a decimal
   bool bool_value = false;   // BoolLit
   UnOp un = UnOp::Neg;
   BinOp bin = BinOp::Add;
@@ -43,6 +43,13 @@ E not_(E a);
 E bin(BinOp op, E a, E b);
 E ite(E c, E a, E b);
 E fn(std::string prelude_name, std::vector<E> args);
+// a % 2^k, Viper's `%` (the non-negative remainder for a positive divisor).  The only way to build a `%`: the divisor is a power of two
+// (k >= 0), which is what decision 0026 item 7 needs for a constant mask, so it cannot stand for a C `%` (C's `%` goes through the
+// prelude, decision 0010).
+E mod_pow2(E a, int k);
+// a \ 2^k, Viper's integer division (the floor quotient for a positive divisor), so that 2^k * (a \ 2^k) is a with its low k bits cleared
+// (a - a % 2^k) without naming a twice (decision 0026 item 7).  Like mod_pow2 it is the only way to build a `\`, with a power-of-two divisor.
+E div_pow2(E a, int k);
 E and_(E a, E b);                 // null operands are "true"
 E implies(E guard_or_null, E c);  // `c` when the guard is null
 // lo <= e && e <= hi  (for contracts and invariants)

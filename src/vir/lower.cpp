@@ -12,6 +12,12 @@
 //    call) of its set and before every other fixed point.  The sets of the obligations and of the branches (the family
 //    F) must form a chain; if they do not, the program is rejected (`LowerResult::rejections`).  A write or a snapshot
 //    is not in F (decision 0025 item 2): it goes right after the last member of its set in the order of the fixed points.
+//  * Every set carries two halves (decision 0026 part A; `Deps`): the EXACT one, what C completes before the item (a
+//    `requires` clause has PRE of its call, the value of a comma carries its floor), and the BASE one, the smaller sets
+//    of decision 0021 item 10 as M4.4c had them.  Each full expression is flushed in two steps: if its family F over
+//    the exact halves is a chain, those are its sets; otherwise, if F over the base halves is a chain, those are (and the
+//    placement is what M4.4c emitted); otherwise it is rejected, with the base family's conflict.  `flush` projects the
+//    full expression onto the half it chooses (`FlatFull`), so the placement and the fail-closed checks run on plain sets.
 //  * Statements are lowered by `Fn::stmt()`.
 #include "lower.h"
 
@@ -78,32 +84,182 @@ E range_obligation(const E& v, const IntType& t) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// Constant masks (decision 0026 part B)
+// ---------------------------------------------------------------------------------------------------------------
+
+// Exact integers for the evaluation of a lowered constant operand: a sign and a magnitude of decimal digits.  Values reach 2^128 and
+// beyond (2^N - 1 for N = 128, and products of such values), so no host integer is used.
+struct Z {
+  bool neg = false;
+  std::string mag = "0";  // digits without leading zeros
+};
+
+int mag_cmp(const std::string& a, const std::string& b) {
+  if (a.size() != b.size()) return a.size() < b.size() ? -1 : 1;
+  return a < b ? -1 : (a > b ? 1 : 0);
+}
+std::string mag_add(const std::string& a, const std::string& b) {
+  std::string r;
+  int carry = 0;
+  for (size_t i = 0; i < std::max(a.size(), b.size()) || carry != 0; ++i) {
+    const int x = i < a.size() ? a[a.size() - 1 - i] - '0' : 0;
+    const int y = i < b.size() ? b[b.size() - 1 - i] - '0' : 0;
+    r += static_cast<char>('0' + (x + y + carry) % 10);
+    carry = (x + y + carry) / 10;
+  }
+  std::reverse(r.begin(), r.end());
+  return r.empty() ? "0" : r;
+}
+std::string mag_sub(const std::string& a, const std::string& b) {  // a >= b
+  std::string r;
+  int borrow = 0;
+  for (size_t i = 0; i < a.size(); ++i) {
+    int x = a[a.size() - 1 - i] - '0' - borrow;
+    const int y = i < b.size() ? b[b.size() - 1 - i] - '0' : 0;
+    borrow = x < y ? 1 : 0;
+    if (x < y) x += 10;
+    r += static_cast<char>('0' + x - y);
+  }
+  std::reverse(r.begin(), r.end());
+  const size_t first = r.find_first_not_of('0');
+  return first == std::string::npos ? "0" : r.substr(first);
+}
+std::string mag_mul(const std::string& a, const std::string& b) {
+  if (a == "0" || b == "0") return "0";
+  std::vector<int> d(a.size() + b.size(), 0);
+  for (size_t i = 0; i < a.size(); ++i)
+    for (size_t j = 0; j < b.size(); ++j) d[i + j] += (a[a.size() - 1 - i] - '0') * (b[b.size() - 1 - j] - '0');
+  int carry = 0;
+  for (int& x : d) {
+    x += carry;
+    carry = x / 10;
+    x %= 10;
+  }
+  std::string r;
+  for (auto it = d.rbegin(); it != d.rend(); ++it) r += static_cast<char>('0' + *it);
+  return r.substr(r.find_first_not_of('0'));
+}
+Z z_neg(const Z& a) { return a.mag == "0" ? a : Z{!a.neg, a.mag}; }
+Z z_add(const Z& a, const Z& b) {
+  if (a.neg == b.neg) return Z{a.neg, mag_add(a.mag, b.mag)};
+  const int c = mag_cmp(a.mag, b.mag);
+  if (c == 0) return Z{};
+  return c > 0 ? Z{a.neg, mag_sub(a.mag, b.mag)} : Z{b.neg, mag_sub(b.mag, a.mag)};
+}
+Z z_mul(const Z& a, const Z& b) {
+  Z r{a.neg != b.neg, mag_mul(a.mag, b.mag)};
+  if (r.mag == "0") r.neg = false;
+  return r;
+}
+std::string z_text(const Z& a) { return a.neg ? "-" + a.mag : a.mag; }
+
+// The value of a lowered operand that is a closed expression of integer literals: Add, Sub, Mul, Neg and `c_pow2` of a literal (what
+// a constant, a `~`, a shift, a cast of constants and the parentheses of them lower to; cerastes never wraps, so a cast changes no
+// value).  False for anything else: such an operand is not a constant mask and keeps the prelude function (decision 0026 item 7).
+bool closed_value(const E& e, Z& out) {
+  if (!e) return false;
+  switch (e->kind) {
+    case low::LExpr::Kind::IntLit: {
+      if (!vir::dec::valid(e->text)) return false;
+      out = vir::dec::negative(e->text) ? Z{true, e->text.substr(1)} : Z{false, e->text};
+      return true;
+    }
+    case low::LExpr::Kind::Un: {
+      Z a;
+      if (e->un != low::UnOp::Neg || !closed_value(e->a, a)) return false;
+      out = z_neg(a);
+      return true;
+    }
+    case low::LExpr::Kind::Bin: {
+      Z a, b;
+      if (e->bin != low::BinOp::Add && e->bin != low::BinOp::Sub && e->bin != low::BinOp::Mul) return false;
+      if (!closed_value(e->a, a) || !closed_value(e->b, b)) return false;
+      out = e->bin == low::BinOp::Add ? z_add(a, b) : (e->bin == low::BinOp::Sub ? z_add(a, z_neg(b)) : z_mul(a, b));
+      return true;
+    }
+    case low::LExpr::Kind::Fn: {
+      Z n;
+      if (e->text != "c_pow2" || e->args.size() != 1 || !closed_value(e->args[0], n) || n.neg || n.mag.size() > 3) return false;
+      const int k = std::atoi(n.mag.c_str());
+      if (k > 128) return false;  // the prelude's c_pow2 is 2^128 from n = 128 on (pow2_table), not 2^n
+      out = Z{false, vir::dec::pow2(k)};
+      return true;
+    }
+    default: return false;
+  }
+}
+
+// `other & mask` of a computed type `t` (32, 64 or 128 bits), written without the prelude function when `mask` is a constant of the
+// forms of decision 0026 item 7, else null.  With M the value of `mask` (in the type's range, or it is not rewritten):
+//   M = 2^k - 1      ->  other % 2^k            (0 <= k <= N unsigned, 0 <= k <= N - 1 signed)
+//   M = -2^k signed, or 2^N - 2^k unsigned  ->  2^k * (other \ 2^k)   (other with its low k bits cleared, naming it once)
+// Viper's `%` by a positive divisor is the non-negative remainder, which is the two's complement value of the low k bits of every
+// operand in the type's range, and `\` the floor quotient, with a = d * (a \ d) + a % d (decision 0026 item 8).
+E mask_as_remainder(const IntType& t, const E& other, const E& mask) {
+  Z m;
+  if (!closed_value(mask, m)) return nullptr;
+  const std::string text = z_text(m);
+  if (!vir::dec::in_range(text, vir::dec::range_of(t))) return nullptr;
+  for (int k = 0; k <= t.bits; ++k)
+    if (!m.neg && text == vir::dec::dec1(vir::dec::pow2(k))) return low::mod_pow2(other, k);
+  for (int k = 0; k <= t.bits; ++k) {
+    const std::string p = vir::dec::pow2(k);
+    const Z complement = t.is_signed ? Z{true, p} : z_add(Z{false, vir::dec::pow2(t.bits)}, Z{true, p});
+    if (text == z_text(complement)) return low::bin(low::BinOp::Mul, low::int_lit(vir::dec::pow2(k)), low::div_pow2(other, k));
+  }
+  return nullptr;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // The lowering context
 // ---------------------------------------------------------------------------------------------------------------
 
 // The fixed points of a full expression that C must have completed before an item is evaluated (decision 0021 item 3): their ids,
 // in creation order.  Always closed downward (it holds the PRE of each member).
-using Deps = std::set<int>;
+using Ids = std::set<int>;
 
-Deps join(const Deps& a, const Deps& b) {
-  Deps r = a;
+// A set of fixed points in two versions (decision 0026 item 3), kept side by side through the whole lowering: join and `add` apply to
+// both halves, and only the two places of 0026 item 1 give them different contents.  Neither half is larger than what C completes
+// before the item (0021 item 3); EXACT is all of it only for the two sets of 0026 item 1 (a `requires` clause's and a comma's value),
+// and every other set is smaller than that in both halves (0021 item 10).  BASE is the set that decisions 0021 item 10 and 0020 E6 used
+// before M4.4d.  Both are sound (a smaller set is safe), and EXACT contains BASE (every difference only adds fixed points; `flush`
+// checks it).  `flush` chooses the half per full expression and projects.
+struct Deps {
+  Ids ex, base;
+  void add(int id) { ex.insert(id); base.insert(id); }
+};
+
+Ids join(const Ids& a, const Ids& b) {
+  Ids r = a;
   r.insert(b.begin(), b.end());
   return r;
 }
+Deps join(const Deps& a, const Deps& b) { return Deps{join(a.ex, b.ex), join(a.base, b.base)}; }
+
+enum class Half { Exact, Base };
+const Ids& half_of(const Deps& d, Half h) { return h == Half::Exact ? d.ex : d.base; }
 
 struct LV {
   E e;      // the Viper value
   Deps dep; // the fixed points whose results it mentions (D of each, so the set is closed)
 };
 
-struct Obl {
+// The items of a full expression are templates over the set type: lowering builds them with `Deps` (both halves), `flush` projects
+// them onto one half (`Ids`).  `Obl`, `Effect` and `Full` are the lowering's; `FlatObl`, `FlatEffect` and `FlatFull` are what the
+// placement, emission and fail-closed checks run on.
+// Every field that is not a set is in a `...Core`, which `project` copies whole: a field added there reaches the projected item without
+// being listed.  A new field that holds a set goes in the templated part, and in `project`.
+struct OblCore {
   E guard;   // may be null
   E cond;
   low::Meta meta;
-  Deps dep;         // its set: emitted after the fixed points of the set, before every other
   size_t seq = 0;   // creation order within the Full (items of one slot keep it)
   int term_of = -1; // the fixed point (a call) whose explicit termination check this is (decision 0021 item 4), else -1
   int flag_of = -1; // the local (Var id) whose `uninitialized` flag this reads, else -1: a read of that local (decision 0025 item 1)
+};
+template <class S>
+struct BasicObl : OblCore {
+  S dep;            // its set: emitted after the fixed points of the set, before every other
 };
 
 struct CallItem {
@@ -124,22 +280,28 @@ struct CallItem {
 // the member of their set that comes last in pi.  Within one slot, items keep creation order; an item with an empty set comes before the
 // first fixed point.  A callee that does not return cannot hide a check C may evaluate before the call (decision 0012 item 6): a
 // callee can neither read nor write a local, and the sequencing rule leaves unsequenced operands no shared local.
-struct Effect {
-  enum class Kind {
-    Call,      // a call (CallItem): a fixed point
-    Write,     // `name := value`, then `flag := true` when `flag` is set: an assignment used as a value
-    Snapshot,  // `name := value` where `name` is a fresh temporary and `value` the current value of a local this expression writes
-    Branch     // `stmts`: the guarded operand of `&&`, `||` or `?:` with its own effects, as an `if`, assigning a temporary
-  } kind = Kind::Call;
+enum class EffectKind {
+  Call,      // a call (CallItem): a fixed point
+  Write,     // `name := value`, then `flag := true` when `flag` is set: an assignment used as a value
+  Snapshot,  // `name := value` where `name` is a fresh temporary and `value` the current value of a local this expression writes
+  Branch     // `stmts`: the guarded operand of `&&`, `||` or `?:` with its own effects, as an `if`, assigning a temporary
+};
+
+struct EffectCore {
+  using Kind = EffectKind;
+  Kind kind = Kind::Call;
   CallItem call;
   std::string name;
   E value;
   std::string flag;
   std::vector<low::LStmt> stmts;
   int fixed = -1;                // the id of the fixed point (a Call, or a Branch with a call); -1 for the movable items
-  Deps deps;                     // movable items: their set; fixed points: PRE (what C completes before it)
   size_t seq = 0;                // creation order within the Full
   std::set<int> reads, writes;   // the locals (Var ids) a snapshot or write, or a branch's inner effects, read and write
+};
+template <class S>
+struct BasicEffect : EffectCore {
+  S deps;                        // movable items: their set; fixed points: PRE (what C completes before it)
 };
 
 // What a rejection says about a fixed point.
@@ -150,17 +312,47 @@ struct FixedInfo {
 };
 
 // What one full expression leaves behind.
-struct Full {
-  std::vector<Obl> obls;
-  std::vector<Effect> effects;
+struct FullCore {
   int nfixed = 0;                       // fixed points so far: the next one's id
-  std::vector<Deps> pre;                // PRE of each fixed point, by id
   std::vector<size_t> fixed_effect;     // the index in `effects` of each fixed point, by id
   std::vector<FixedInfo> info;          // by id
   size_t next_seq = 0;
-  std::map<int, Deps> last_write;       // Var id -> the set of the latest write (item order of the expression so far)
-  std::map<int, Deps> last_access;      // Var id -> the union of the sets of the accesses (snapshots and writes) of it so far
 };
+template <class S>
+struct BasicFull : FullCore {
+  std::vector<BasicObl<S>> obls;
+  std::vector<BasicEffect<S>> effects;
+  std::vector<S> pre;                   // PRE of each fixed point, by id
+  std::map<int, S> last_write;          // Var id -> the set of the latest write (item order of the expression so far)
+  std::map<int, S> last_access;         // Var id -> the union of the sets of the accesses (snapshots and writes) of it so far
+};
+
+using Obl = BasicObl<Deps>;
+using Effect = BasicEffect<Deps>;
+using Full = BasicFull<Deps>;
+using FlatObl = BasicObl<Ids>;
+using FlatEffect = BasicEffect<Ids>;
+using FlatFull = BasicFull<Ids>;
+
+// The full expression on one half of its sets (the step `flush` chose); the last_write/last_access records are not needed after lowering.
+FlatFull project(const Full& full, Half h) {
+  FlatFull r;
+  static_cast<FullCore&>(r) = full;
+  for (const Obl& o : full.obls) {
+    FlatObl x;
+    static_cast<OblCore&>(x) = o;
+    x.dep = half_of(o.dep, h);
+    r.obls.push_back(std::move(x));
+  }
+  for (const Effect& fx : full.effects) {
+    FlatEffect x;
+    static_cast<EffectCore&>(x) = fx;
+    x.deps = half_of(fx.deps, h);
+    r.effects.push_back(std::move(x));
+  }
+  for (const Deps& d : full.pre) r.pre.push_back(half_of(d, h));
+  return r;
+}
 
 // How Local/Formal/Result are read.
 struct Env {
@@ -399,12 +591,15 @@ class Lowerer {
 
   // ---- obligations ----
 
-  void obl(Full& full, const E& guard, const Deps& gdep, E cond, const Deps& cdep, low::Meta m) {
+  // `exact_set`, when given, is joined into the EXACT half of the set (decision 0026 item 1: a `requires` clause's obligation has PRE of
+  // its call); the BASE half is always the guard's, the value's and the floor's.
+  void obl(Full& full, const E& guard, const Deps& gdep, E cond, const Deps& cdep, low::Meta m, const Ids* exact_set = nullptr) {
     Obl o;
     o.guard = guard;
     o.cond = std::move(cond);
     o.meta = std::move(m);
     o.dep = join(join(gdep, cdep), floor_);  // floor_: after the left operand of a comma, what it depends on came first (E6)
+    if (exact_set != nullptr) o.dep.ex = join(o.dep.ex, *exact_set);
     o.seq = full.next_seq++;
     full.obls.push_back(std::move(o));
   }
@@ -608,6 +803,13 @@ class Lowerer {
         const IntType& t = *e.type.int_type;
         if (t.is_enum || (t.bits != 32 && t.bits != 64 && t.bits != 128))
           internal_error(e.loc, "a bitwise operator on a " + std::to_string(t.bits) + "-bit type (the encoder converts to a computed type of 32, 64 or 128 bits)");
+        // Decision 0026 item 7: a constant mask (either operand, as lowered; both operands are lowered as before, so their obligations
+        // stay) is a remainder; anything else keeps the prelude function, which is exact for every operand.
+        if (e.bop == BinaryOp::BitAnd) {
+          E r = mask_as_remainder(t, a.e, b.e);
+          if (r == nullptr) r = mask_as_remainder(t, b.e, a.e);
+          if (r != nullptr) return {r, dep};
+        }
         const char* op = e.bop == BinaryOp::BitAnd ? "and" : (e.bop == BinaryOp::BitOr ? "or" : "xor");
         const std::string name = std::string("c_") + (t.is_signed ? "" : "u") + op + "_" + std::to_string(t.bits);
         use(name);
@@ -655,7 +857,7 @@ class Lowerer {
     Deps r;
     for (size_t k = effect_from; k < full.effects.size(); ++k) {
       r = join(r, full.effects[k].deps);
-      if (full.effects[k].fixed >= 0) r.insert(full.effects[k].fixed);
+      if (full.effects[k].fixed >= 0) r.add(full.effects[k].fixed);
     }
     for (size_t k = obl_from; k < full.obls.size(); ++k) r = join(r, full.obls[k].dep);
     return r;
@@ -699,6 +901,8 @@ class Lowerer {
     for (const Expr* a : e.args) args.push_back(lower(*a, env, nullptr, {}, full));
     // PRE(c): what C completes before it makes the call: the comma floor, and everything its arguments use or contain (the items
     // created while they were lowered, the fixed points among them, and what the argument values depend on).
+    // Decision 0026 item 1: it is the EXACT set of each `requires` clause's obligation (below).  The BASE set of a clause, which step 2
+    // of `flush` falls back to, is the one of 0021 item 10: only what the clause's argument values depend on, and the floor.
     Deps pre = join(floor_, since(full, effect_from, obl_from));
     for (const LV& a : args) pre = join(pre, a.dep);
     // The callee's `requires`, over the argument values, are obligations at the call (0012 item 6).
@@ -715,7 +919,13 @@ class Lowerer {
       m.has_note = true;
       m.note_loc = c.loc.known() ? c.loc : callee.loc;
       m.note_text = "this is the requirement of `" + callee.c_name + "`";
-      obl(full, nullptr, {}, v.e, v.dep, std::move(m));
+      // EXACT (decision 0026 item 1): C completes everything in PRE(c) before it makes the call, so the clause is asserted after all of it.
+      // BASE (step 2): only the argument values the clause reads, and the floor (0021 item 10).
+      obl(full, nullptr, {}, v.e, v.dep, std::move(m), &pre.ex);
+      if (opt_.drop_exact_set && !exact_dropped_ && !full.obls.back().dep.base.empty()) {  // self-test hook (decision 0026)
+        full.obls.back().dep.ex.clear();
+        exact_dropped_ = true;
+      }
     }
     CallItem item;
     item.method = method_name(callee);
@@ -757,7 +967,7 @@ class Lowerer {
     full.info.push_back(FixedInfo{report_at_ != nullptr ? *report_at_ : e.loc, callee.c_name, "the call to \"" + callee.c_name + "\""});
     full.effects.push_back(std::move(fx));
     Deps d = pre;
-    d.insert(id);
+    d.add(id);
     return {value, d};
   }
 
@@ -889,6 +1099,9 @@ class Lowerer {
   }
 
   // `a, b`: `a` for its effects and obligations, then `b`; whatever follows the left operand is placed after its last effect (E6).
+  // The set of the value (decision 0026 item 1): EXACT, its own set and the floor in force while `b` was lowered, which is what C
+  // completes before the value exists; BASE (the fallback of step 2), its own set only, as before M4.4d.  Everything inside `b`
+  // has the floor in both halves.
   LV comma(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full) {
     if (!in_full_) {
       internal_error(e.loc, "a comma outside a full expression reached lowering");
@@ -902,6 +1115,11 @@ class Lowerer {
     // right operand (decision 0021: what the left operand created, fixed points included).
     floor_ = join(floor_, since(full, effect_from, obl_from));
     LV b = lower(*e.b, env, guard, gdep, full);
+    // The value of the comma exists only after its left operand is complete, and everything in the enclosing floor completed before the
+    // comma began: the floor in force while the right operand was lowered.  EXACT carries it (decision 0026 item 1; the guard of a lazy
+    // operand, a divisor, an argument that uses the value then follow the left operand's calls).  BASE is the right operand's own set
+    // (0020 E6 as M4.4c had it): the floor ends with the comma.
+    b.dep.ex = join(b.dep.ex, floor_.ex);
     floor_ = saved;
     return b;
   }
@@ -959,7 +1177,7 @@ class Lowerer {
       full.fixed_effect.push_back(full.effects.size());
       full.info.push_back(std::move(info));
       value = slot;
-      value.insert(id);
+      value.add(id);
     }
     for (int id : writes) full.last_write[id] = value;
     for (int id : reads) touch(full, id, value);
@@ -1049,19 +1267,19 @@ class Lowerer {
     bool ordinary = false;
     int term_call = -1;
   };
-  static SetOrigin origin_of(const Full& full, const Deps& set) {
+  static SetOrigin origin_of(const FlatFull& full, const Ids& set) {
     SetOrigin o;
-    for (const Obl& x : full.obls) {
+    for (const FlatObl& x : full.obls) {
       if (x.dep != set) continue;
       if (x.term_of >= 0) { if (o.term_call < 0) o.term_call = x.term_of; }
       else o.ordinary = true;
     }
-    for (const Effect& fx : full.effects) {
-      if (fx.kind != Effect::Kind::Branch) continue;
+    for (const FlatEffect& fx : full.effects) {
+      if (fx.kind != FlatEffect::Kind::Branch) continue;
       if (fx.fixed < 0) {
         if (fx.deps == set) o.ordinary = true;
       } else {
-        Deps d = fx.deps;
+        Ids d = fx.deps;
         d.insert(fx.fixed);
         if (d == set) o.ordinary = true;
       }
@@ -1073,7 +1291,7 @@ class Lowerer {
   // family, `a` not a subset of `b`.  One fixed point of each side witnesses it; the report is at the later-created one.  A side whose set
   // only a recursive call's termination check has is worded by that call (nothing visible depends on the witness alone): `the call to "h"
   // and the recursive call to "f" (its termination check needs "g" first) are not ordered`.
-  void report_conflict(const Full& full, const Deps& a, const Deps& b) {
+  void report_conflict(const FlatFull& full, const Ids& a, const Ids& b) {
     int p = -1, q = -1;
     for (int x : a)
       if (b.count(x) == 0) { p = x; break; }
@@ -1120,9 +1338,70 @@ class Lowerer {
     std::vector<int> eff;
   };
 
-  // Write a full expression (decision 0021 item 3; 0012 item 6, 0020 item 7 for the shape of the items; decision 0025 item 2).  The
-  // family F of the sets of the checks (every obligation's, the explicit termination checks among them), of the call-free branches, and
-  // D(B) of every branch that holds a call, must form a chain under inclusion; the fixed points are then ordered pi: those of the
+  // The family F of a full expression on one half of its sets (decision 0021 item 3, decision 0025 item 2): the sets of every obligation
+  // (the explicit termination checks among them), of the call-free branches, and D(B) of every branch that holds a call; sorted by size,
+  // without duplicates.  A write or a snapshot is not in F, and a call is a fixed point.
+  static std::vector<Ids> family(const FlatFull& full) {
+    std::vector<Ids> sets;
+    for (const FlatObl& o : full.obls) sets.push_back(o.dep);
+    for (const FlatEffect& fx : full.effects) {
+      if (fx.kind != FlatEffect::Kind::Branch) continue;
+      if (fx.fixed < 0) {
+        sets.push_back(fx.deps);
+      } else {
+        Ids d = fx.deps;
+        d.insert(fx.fixed);
+        sets.push_back(std::move(d));
+      }
+    }
+    std::sort(sets.begin(), sets.end(), [](const Ids& a, const Ids& b) { return a.size() != b.size() ? a.size() < b.size() : a < b; });
+    sets.erase(std::unique(sets.begin(), sets.end()), sets.end());
+    return sets;
+  }
+
+  // The index i of the first neighbours sets[i], sets[i + 1] with sets[i] not a subset of sets[i + 1], or kChain when F is a chain under inclusion.
+  static constexpr size_t kChain = ~size_t{0};
+  static size_t first_break(const std::vector<Ids>& sets) {
+    for (size_t i = 0; i + 1 < sets.size(); ++i)
+      if (!std::includes(sets[i + 1].begin(), sets[i + 1].end(), sets[i].begin(), sets[i].end())) return i;
+    return kChain;
+  }
+
+  // The fail-closed check of decision 0026 item 3: every base half is contained in its exact half, for every item of the full expression
+  // (the set of each obligation and effect, and PRE of each fixed point).  Step 2 relies on it (it is today's smaller set), and so does the
+  // claim that a rejection after step 1 failed is the base family's.  A violation is an internal error (hook: `drop_exact_set`).
+  void check_halves(const Full& full) {
+    auto inside = [](const Deps& d) { return std::includes(d.ex.begin(), d.ex.end(), d.base.begin(), d.base.end()); };
+    bool ok = true;
+    for (const Obl& o : full.obls) ok = ok && inside(o.dep);
+    for (const Effect& fx : full.effects) ok = ok && inside(fx.deps);
+    for (const Deps& d : full.pre) ok = ok && inside(d);
+    if (!ok) internal_error(SrcLoc{}, "the base half of a set of a full expression is not contained in its exact half");
+  }
+
+  // Write a full expression in two steps (decision 0026 item 2).  Step 1: project it onto the EXACT halves of its sets (what C completes
+  // before each item) and test that F is a chain; if it is, those are its sets for everything that follows.  Step 2: otherwise project it
+  // onto the BASE halves (the smaller sets of 0021 item 10, as M4.4c had them): if F is a chain, those are its sets (and the placement is
+  // what M4.4c emitted, apart from the constant masks of 0026 part B).  Otherwise the program is refused with the base family's conflict (today's message and position; nothing is
+  // reported by step 1).  Both choices are sound (a smaller set is safe, 0021 item 10); each full expression, and the inner one of each
+  // branch with effects, decides on its own.  `LowerOptions::force_base_sets` skips step 1.
+  void flush(const Full& full, std::vector<low::LStmt>& out) {
+    check_halves(full);
+    FlatFull flat = project(full, Half::Exact);
+    std::vector<Ids> sets = family(flat);
+    size_t broken = first_break(sets);
+    const bool exact_chain = broken == kChain && !opt_.force_base_sets;  // self-test hook force_base_sets: skip step 1
+    if (!exact_chain) {
+      flat = project(full, Half::Base);
+      sets = family(flat);
+      broken = first_break(sets);
+      if (broken != kChain) report_conflict(flat, sets[broken], sets[broken + 1]);
+    }
+    emit_full(flat, sets, broken == kChain, out);
+  }
+
+  // Write a full expression on the chosen sets (decision 0021 item 3; 0012 item 6, 0020 item 7 for the shape of the items; decision 0025
+  // item 2).  `sets` is its family F, `chain` whether F is a chain under inclusion; the fixed points are then ordered pi: those of the
   // smallest set, then those each larger set adds, then the rest, each group in creation order.  Every set of F is a prefix of pi, and
   // an obligation or a call-free branch is emitted right after the |S|-th fixed point of its set S and before every other: a callee that
   // does not return hides only what C cannot evaluate before it returns.  A write or a snapshot cannot fail, so its set is not in F: it
@@ -1130,35 +1409,14 @@ class Lowerer {
   // after the same fixed point keep creation order.  An item with an empty set comes first.  A fixed point is a hoisted call, or a
   // branch (an `if` for a guarded operand with effects).  A movable effect is `v := value` (and its flag) for a write, a snapshot of a
   // local that the expression writes, or an `if` for a call-free guarded operand.  Where the sets of F form no chain the program is
-  // refused (`rejections`) and the rest is written in creation order, so that lowering finishes.
-  void flush(Full& full, std::vector<low::LStmt>& out) {
+  // refused (`rejections`, by flush) and the rest is written in creation order, so that lowering finishes.
+  void emit_full(FlatFull& full, const std::vector<Ids>& sets, bool chain, std::vector<low::LStmt>& out) {
     const int n = full.nfixed;
-    std::vector<Deps> sets;
-    for (const Obl& o : full.obls) sets.push_back(o.dep);
-    for (const Effect& fx : full.effects) {
-      if (fx.kind != Effect::Kind::Branch) continue;  // a write or a snapshot is not in F (decision 0025 item 2); a call is a fixed point
-      if (fx.fixed < 0) {
-        sets.push_back(fx.deps);
-      } else {
-        Deps d = fx.deps;
-        d.insert(fx.fixed);
-        sets.push_back(std::move(d));
-      }
-    }
-    std::sort(sets.begin(), sets.end(), [](const Deps& a, const Deps& b) { return a.size() != b.size() ? a.size() < b.size() : a < b; });
-    sets.erase(std::unique(sets.begin(), sets.end()), sets.end());
-    bool chain = true;
-    for (size_t i = 0; i + 1 < sets.size(); ++i) {
-      if (std::includes(sets[i + 1].begin(), sets[i + 1].end(), sets[i].begin(), sets[i].end())) continue;
-      report_conflict(full, sets[i], sets[i + 1]);
-      chain = false;
-      break;
-    }
     // pi: the fixed points in the order they are emitted.
     std::vector<int> pi;
     std::vector<char> placed(static_cast<size_t>(n), 0);
     if (chain) {
-      for (const Deps& s : sets)
+      for (const Ids& s : sets)
         for (int id : s)
           if (placed[static_cast<size_t>(id)] == 0) { placed[static_cast<size_t>(id)] = 1; pi.push_back(id); }
     }
@@ -1169,34 +1427,34 @@ class Lowerer {
     for (size_t k = 0; k < pi.size(); ++k) pos[static_cast<size_t>(pi[k])] = static_cast<int>(k);
     // The slot of an item of F: right after pi[|S| - 1] (-1: before every fixed point).  Of a write or a snapshot: right after the member
     // of its set that comes last in pi (-1 for an empty set).
-    auto prefix_slot = [n](const Deps& s) { return std::min(static_cast<int>(s.size()) - 1, n - 1); };
-    auto last_member = [&pos](const Deps& s) {
+    auto prefix_slot = [n](const Ids& s) { return std::min(static_cast<int>(s.size()) - 1, n - 1); };
+    auto last_member = [&pos](const Ids& s) {
       int m = -1;
       for (int id : s) m = std::max(m, pos[static_cast<size_t>(id)]);
       return m;
     };
     Placement place;
-    for (const Obl& o : full.obls) place.obl.push_back(prefix_slot(o.dep));
+    for (const FlatObl& o : full.obls) place.obl.push_back(prefix_slot(o.dep));
     bool perturbed = false;
     bool delayed = false;
     // Whether an item created after `w` has a set that contains w's set.
-    auto depended_on = [&full](const Effect& w) {
-      auto contains = [&w](const Deps& big) { return std::includes(big.begin(), big.end(), w.deps.begin(), w.deps.end()); };
-      for (const Obl& o : full.obls)
+    auto depended_on = [&full](const FlatEffect& w) {
+      auto contains = [&w](const Ids& big) { return std::includes(big.begin(), big.end(), w.deps.begin(), w.deps.end()); };
+      for (const FlatObl& o : full.obls)
         if (o.seq > w.seq && contains(o.dep)) return true;
-      for (const Effect& x : full.effects)
+      for (const FlatEffect& x : full.effects)
         if (&x != &w && x.seq > w.seq && contains(x.deps)) return true;
       return false;
     };
-    for (const Effect& fx : full.effects) {
+    for (const FlatEffect& fx : full.effects) {
       int slot = -2;
       if (fx.fixed < 0) {
-        slot = fx.kind == Effect::Kind::Branch ? prefix_slot(fx.deps) : last_member(fx.deps);
-        if (opt_.perturb_write_slot && !perturbed && fx.kind == Effect::Kind::Write && !fx.deps.empty()) {  // self-test hook (0025)
+        slot = fx.kind == FlatEffect::Kind::Branch ? prefix_slot(fx.deps) : last_member(fx.deps);
+        if (opt_.perturb_write_slot && !perturbed && fx.kind == FlatEffect::Kind::Write && !fx.deps.empty()) {  // self-test hook (0025)
           slot = -1;
           perturbed = true;
         }
-        if (opt_.delay_write_slot && !delayed && fx.kind == Effect::Kind::Write && !fx.deps.empty() && depended_on(fx)) {  // self-test hook (0025)
+        if (opt_.delay_write_slot && !delayed && fx.kind == FlatEffect::Kind::Write && !fx.deps.empty() && depended_on(fx)) {  // self-test hook (0025)
           slot = n - 1;
           delayed = true;
         }
@@ -1217,7 +1475,7 @@ class Lowerer {
       std::sort(items.begin(), items.end());
       for (const auto& it : items) {
         if (it.second.first) {
-          Obl& o = full.obls[it.second.second];
+          FlatObl& o = full.obls[it.second.second];
           // The explicit termination check of a call (decision 0021 item 4) is written only when another fixed point, outside its set,
           // comes before the call: it then asserts what Silicon's own check at the call could not reach.  Not written: nothing is
           // counted (the self-test hook counts asserts) and no temporary is made.
@@ -1225,22 +1483,22 @@ class Lowerer {
           emit_assert(out, low::implies(o.guard, o.cond), o.meta);
           continue;
         }
-        Effect& fx = full.effects[it.second.second];
+        FlatEffect& fx = full.effects[it.second.second];
         switch (fx.kind) {
-          case Effect::Kind::Call: break;
-          case Effect::Kind::Write:
+          case FlatEffect::Kind::Call: break;
+          case FlatEffect::Kind::Write:
             assign(out, fx.name, fx.value);
             if (!fx.flag.empty()) assign(out, fx.flag, low::bool_lit(true));
             break;
-          case Effect::Kind::Snapshot: assign(out, fx.name, fx.value); break;
-          case Effect::Kind::Branch:
+          case FlatEffect::Kind::Snapshot: assign(out, fx.name, fx.value); break;
+          case FlatEffect::Kind::Branch:
             for (low::LStmt& st : fx.stmts) out.push_back(std::move(st));
             break;
         }
       }
       if (slot + 1 < n) {
-        Effect& fx = full.effects[full.fixed_effect[static_cast<size_t>(pi[static_cast<size_t>(slot + 1)])]];
-        if (fx.kind == Effect::Kind::Branch) {
+        FlatEffect& fx = full.effects[full.fixed_effect[static_cast<size_t>(pi[static_cast<size_t>(slot + 1)])]];
+        if (fx.kind == FlatEffect::Kind::Branch) {
           for (low::LStmt& st : fx.stmts) out.push_back(std::move(st));
           continue;
         }
@@ -1264,32 +1522,32 @@ class Lowerer {
   // check hidden by a call that does not return), so it is an internal error.  For a write and a snapshot (decision 0025 item 2): every
   // member of its set is emitted before it, and every item created later whose set (for a fixed point: its PRE) contains that set is
   // emitted after it.  `place` is the placement emission uses.
-  void check_fixed_order(const Full& full, const std::vector<int>& pi, const std::vector<int>& pos, const Placement& place) {
-    auto prefix_is = [&pi](const Deps& s) {
+  void check_fixed_order(const FlatFull& full, const std::vector<int>& pi, const std::vector<int>& pos, const Placement& place) {
+    auto prefix_is = [&pi](const Ids& s) {
       if (s.size() > pi.size()) return false;
       for (size_t k = 0; k < s.size(); ++k)
         if (s.count(pi[k]) == 0) return false;
       return true;
     };
     constexpr const char* kSet = "the fixed points emitted before an item of a full expression are not exactly the set it depends on";
-    for (const Obl& o : full.obls)
+    for (const FlatObl& o : full.obls)
       if (!prefix_is(o.dep)) { internal_error(SrcLoc{}, kSet); return; }
-    for (const Effect& fx : full.effects)
-      if (fx.fixed < 0 && fx.kind == Effect::Kind::Branch && !prefix_is(fx.deps)) { internal_error(SrcLoc{}, kSet); return; }
+    for (const FlatEffect& fx : full.effects)
+      if (fx.fixed < 0 && fx.kind == FlatEffect::Kind::Branch && !prefix_is(fx.deps)) { internal_error(SrcLoc{}, kSet); return; }
     for (int id = 0; id < full.nfixed; ++id) {
-      const Deps& pre = full.pre[static_cast<size_t>(id)];
+      const Ids& pre = full.pre[static_cast<size_t>(id)];
       for (int p : pre)
         if (pos[static_cast<size_t>(p)] >= pos[static_cast<size_t>(id)]) {
           internal_error(SrcLoc{}, "a fixed point of a full expression is emitted before something it follows");
           return;
         }
-      const Effect& fx = full.effects[full.fixed_effect[static_cast<size_t>(id)]];
-      if (fx.kind == Effect::Kind::Branch && !(pos[static_cast<size_t>(id)] == static_cast<int>(pre.size()) && prefix_is(pre))) {
+      const FlatEffect& fx = full.effects[full.fixed_effect[static_cast<size_t>(id)]];
+      if (fx.kind == FlatEffect::Kind::Branch && !(pos[static_cast<size_t>(id)] == static_cast<int>(pre.size()) && prefix_is(pre))) {
         internal_error(SrcLoc{}, "a branch with a call is not emitted right after what its condition depends on");
         return;
       }
     }
-    for (const Obl& o : full.obls)  // a recursive call without a written explicit check: right after its PRE
+    for (const FlatObl& o : full.obls)  // a recursive call without a written explicit check: right after its PRE
       if (o.term_of >= 0 && pos[static_cast<size_t>(o.term_of)] == static_cast<int>(o.dep.size()) && !prefix_is(o.dep)) {
         internal_error(SrcLoc{}, "a recursive call is emitted without its explicit termination check and not right after what it depends on");
         return;
@@ -1299,10 +1557,10 @@ class Lowerer {
     using Order = std::tuple<int, int, size_t>;
     auto movable = [](int slot, size_t seq) { return Order{slot, 0, seq}; };
     auto fixed_at = [](int p) { return Order{p - 1, 1, 0}; };
-    auto contains = [](const Deps& big, const Deps& small) { return std::includes(big.begin(), big.end(), small.begin(), small.end()); };
+    auto contains = [](const Ids& big, const Ids& small) { return std::includes(big.begin(), big.end(), small.begin(), small.end()); };
     for (size_t i = 0; i < full.effects.size(); ++i) {
-      const Effect& w = full.effects[i];
-      if (w.fixed >= 0 || w.kind == Effect::Kind::Branch) continue;
+      const FlatEffect& w = full.effects[i];
+      if (w.fixed >= 0 || w.kind == FlatEffect::Kind::Branch) continue;
       const int slot = place.eff[i];
       for (int id : w.deps)
         if (pos[static_cast<size_t>(id)] > slot) {
@@ -1312,11 +1570,11 @@ class Lowerer {
       const Order mine = movable(slot, w.seq);
       constexpr const char* kLater = "a write or a snapshot of a full expression is emitted after an item that follows it";
       for (size_t k = 0; k < full.obls.size(); ++k) {
-        const Obl& o = full.obls[k];
+        const FlatObl& o = full.obls[k];
         if (o.seq > w.seq && contains(o.dep, w.deps) && !(movable(place.obl[k], o.seq) > mine)) { internal_error(SrcLoc{}, kLater); return; }
       }
       for (size_t k = 0; k < full.effects.size(); ++k) {
-        const Effect& x = full.effects[k];
+        const FlatEffect& x = full.effects[k];
         if (k == i || x.seq <= w.seq || !contains(x.deps, w.deps)) continue;
         const Order theirs = x.fixed >= 0 ? fixed_at(pos[static_cast<size_t>(x.fixed)]) : movable(place.eff[k], x.seq);
         if (!(theirs > mine)) { internal_error(SrcLoc{}, kLater); return; }
@@ -1330,7 +1588,7 @@ class Lowerer {
   // same local would change a value, so it is an internal error rather than a wrong Viper program.  The key of an item is its place in the
   // emitted order: a movable item in slot s comes after pi[s] (key 2s + 1) and before pi[s + 1] (key 2s + 3), so its key is 2s + 2, the
   // same as 2|S| for an item of F; the fixed point at index i has the key 2i + 1.
-  void check_variable_order(const Full& full, const std::vector<int>& pos, const Placement& place) {
+  void check_variable_order(const FlatFull& full, const std::vector<int>& pos, const Placement& place) {
     struct Access {
       int id;
       bool write;
@@ -1339,7 +1597,7 @@ class Lowerer {
     };
     std::vector<Access> all;
     for (size_t i = 0; i < full.effects.size(); ++i) {
-      const Effect& fx = full.effects[i];
+      const FlatEffect& fx = full.effects[i];
       if (fx.reads.empty() && fx.writes.empty()) continue;
       const int key = fx.fixed >= 0 ? 2 * pos[static_cast<size_t>(fx.fixed)] + 1 : 2 * (place.eff[i] + 1);
       for (int id : fx.reads) all.push_back({id, false, key, fx.seq});
@@ -2107,6 +2365,7 @@ class Lowerer {
   // The full expression being lowered (decision 0020): the locals it writes (every read of one is a snapshot), the comma floor (E6),
   // and the old-value nodes of `x++` whose read is shared.
   bool in_full_ = false;
+  bool exact_dropped_ = false;  // the self-test hook `drop_exact_set` has fired
   std::set<int> written_;
   Deps floor_;
   std::map<const Expr*, LV> shared_;

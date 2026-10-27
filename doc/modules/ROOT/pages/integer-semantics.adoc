@@ -297,14 +297,31 @@ include::example$integer-semantics/bitwise_conversion.c[tag=source]
 Likewise, `+x & -x+` (the lowest set bit) is an `overflow` error for an `unsigned
 int` `x` that is not 0, at the unary minus; for a signed `x > 0` it is fine.
 
-What the prover decides about bitwise results is limited in this version. It
-decides every expression of constants, the range of a result, a result named in
-a contract (`r == (a & b)`), a bound by a constant mask (`+u & 255+` is at most
-255), and, for `x >= 0`, `+x & 1+` is `x % 2` and `+x & 255+` is `x % 256`. It
-does not decide other relations between a masked value and arithmetic on the same
-variable, or identities that need the bits of a variable in general:
-`+v & 0xFFFFFFFF == v % 4294967296+` for a 64-bit `v`, `+(u | 4) & 4 == 4+`,
-`+x & ~15 == x - x % 16+`, `+x & x == x+`,
+A mask by a constant of the form 2^k^ - 1 (`1`, `255`, `0xFFFFFFFF`, `INT_MAX`)
+keeps the low k bits of the other operand, and a mask by its complement (`~15`,
+`~0xFFu` with an `unsigned int` operand, `INT_MIN`) clears them. The constant is
+taken in the type the operation computes in, after the usual arithmetic
+conversions: with an `unsigned long long` operand, `~0xFFu` is 0xFFFFFF00, which
+is neither form. cerastes reads such a mask as the remainder by 2^k^ (always
+between 0 and 2^k^ - 1, for a negative operand too) or the operand minus that
+remainder, which is what the bits give, so what it means is decided for every
+operand, as long as the mask is written as a constant in the expression (a mask
+passed as an argument is not): `+v & 0xFFFFFFFF == v % 4294967296+` for an `unsigned long
+long v`, `+x & ~15 == x - x % 16+` for `x >= 0`, and `+x & 255+` for a negative
+`x` (it is `x % 256 + 256` when that remainder is not 0, since C's `%` keeps the
+sign of `x`):
+
+[source,c]
+----
+include::example$integer-semantics/mask_remainder.c[tag=source]
+----
+
+What the prover decides about other bitwise results is limited in this version.
+It decides every expression of constants, the range of a result, a result named in
+a contract (`r == (a & b)`), and a bound by a constant mask (`+u & 255+` is at
+most 255). It does not decide other relations between a bitwise result and
+arithmetic on the same variable, or identities that need the bits of a variable in
+general: `+(u | 4) & 4 == 4+`, `+x & x == x+`,
 `+(a ^ b) ^ b == a+` (the swap by XOR), `+u & m <= m+` for a variable mask `m`,
 or the bounds of `+x & -x+`; nor, for `+__int128+`, a constant operand written as a
 shift of a constant other than 1 (`+(__int128)2 << 100+`; write `+(__int128)1 << 101+`).

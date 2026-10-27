@@ -5010,6 +5010,7 @@ void verify_encode() {
   if (cfg.hook == "drop_assert") lo.drop_assert = 0;
   if (cfg.hook.compare(0, 12, "drop_assert=") == 0) lo.drop_assert = std::atoi(cfg.hook.c_str() + 12);
   lo.perturb_fixed_order = cfg.hook == "perturb_fixed_order";
+  lo.force_base_sets = cfg.hook == "force_base_sets";
   vir::LowerResult lowered = vir::lower_program(program, lo);
   if (!lowered.errors.empty()) {
     cfg.out.internal_inconsistency = true;  // a tool failure, exit status 3 (decision 0022 item 12)

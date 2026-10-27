@@ -51,6 +51,14 @@ status 1) on:
   first, then the value: `d_v := false` and then `v := 0`), so a variable cannot be reset to a value that
   is then taken for a determinate one; and a flag is assigned nothing but `true` and `false`.  The
   snapshot of a loop (`ds_<name> := d_<name>`) and the reads of a flag are not assignments to it;
+* a `%` (Viper's modulo: the Euclidean remainder, never C's `%`) or a `\\` (Viper's floor division, never C's `/`)
+  that is not Viper's exact mask or bit-function form (decision 0026 item 7: `a & (2^k-1)` is `a % 2^k`,
+  `a & ~(2^k-1)` is `2^k * (a \\ 2^k)`): outside the bodies of the prelude functions that use the operator (`%`:
+  `c_rem`, `c_urem`; `\\`: `c_div`, `c_udiv`, `c_shr`; by name), the divisor of every `%` and `\\` must be a plain
+  decimal literal that is a power of two, 1 or more (`x % 256`, `16 * (x \\ 16)`).  The lint checks the form of the
+  divisor only: that no C `%` or `/` is emitted as Viper's is guaranteed by `low::mod_pow2` and `low::div_pow2`
+  (src/vir/lowered.cpp) being the only constructors of them, not by this rule (a C `/ 16` emitted as `\\ 16` would
+  pass it); a `%` or `\\` whose divisor the rule cannot read as such a literal is reported too;
 * an empty input set, and a MANIFEST that names a file which is not there.  The
   manifest is the set of files scripts/run_tests.py expects: its first line is
   `# run-id: <id>` (printed by the run), then one file per line.  Fewer files
@@ -356,6 +364,51 @@ def bit_range_ensures_lines(src: Source, decls: list[Decl]) -> set[int]:
     return out
 
 
+# The prelude functions whose bodies use Viper's `%` and `\` (src/viper/prelude.cpp), by operator.  `%`: `c_urem` guards
+# `a >= 0 && b > 0` and `c_rem` calls it with the absolute values.  `\`: `c_div` and `c_udiv` divide by the variable `b`
+# in the same guarded way, `c_shr` by `c_pow2(n)`.  The bitwise functions `c_[u]<and|or|xor>_<N>` also use `\`, but only
+# with a power-of-two literal (`a \ 2`, `a \ 2^64`), so they need no exemption and are held to the rule.
+DIVISION_PRELUDE = {"%": frozenset({"c_rem", "c_urem"}), "\\": frozenset({"c_div", "c_udiv", "c_shr"})}
+DIVISOR_RE = re.compile(r"\s*(?P<lit>[0-9]+)(?![\w.$'])")
+DIVISION_WHAT = {
+    "%": "Viper's Euclidean remainder and is emitted only by a constant mask (`a % 2^k`)",
+    "\\": "Viper's floor division and is emitted only by a bit function or a constant mask (`2^k * (a \\ 2^k)`)",
+}
+
+
+def lint_remainders(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    """Decision 0026 item 7: Viper's `%` and `\\` are the Euclidean remainder and the floor division (a remainder in
+    `[0, divisor)` for a positive divisor), C's `%` and `/` truncate, and the two must never be confused: C's go
+    through `c_rem`/`c_urem` and `c_div`/`c_udiv`.  The emitted ones outside those prelude bodies are the constant-mask
+    rewrite (`a % 2^k`, `2^k * (a \\ 2^k)`) and the bit functions' `\\ 2^j`, whose divisor is a power of two.  So outside the
+    bodies of the prelude functions that use the operator (`DIVISION_PRELUDE`, by name), every `%` and `\\` must be
+    followed by a plain decimal literal 2^k (k >= 0, no sign, no parentheses, no leading zeros); anything the rule
+    cannot read as that fails."""
+    exempt: dict[str, set[int]] = {op: set() for op in DIVISION_PRELUDE}
+    for d in decls:
+        if d.kind == "function" and d.has_body:
+            for op, names in DIVISION_PRELUDE.items():
+                if d.name in names:
+                    exempt[op].update(range(d.body_line, d.end_line + 1))
+    for lineno, code in enumerate(src.code, start=1):
+        for m in re.finditer(r"[%\\]", code):
+            op = m.group()
+            if lineno in exempt[op]:
+                continue
+            names = " and ".join(f"`{n}`" for n in sorted(DIVISION_PRELUDE[op]))
+            d = DIVISOR_RE.match(code, m.end())
+            if d is None:
+                add(lineno, f"a `{op}` whose divisor is not a decimal literal: outside the prelude's {names}, "
+                            f"`{op}` is {DIVISION_WHAT[op]}, with a power of two as divisor (decision 0026 item 7)")
+                continue
+            lit = d.group("lit")
+            n = int(lit)
+            if (len(lit) > 1 and lit[0] == "0") or n < 1 or n & (n - 1):
+                add(lineno, f"a `{op}` with the divisor `{lit}`: outside the prelude's {names}, the divisor of "
+                            f"`{op}` must be a power of two, 1 or more, written as a decimal literal "
+                            "(decision 0026 item 7)")
+
+
 def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
              map_name: str | None = None) -> list[str]:
     """Problems of one Viper file with its position map (None: the map is missing)."""
@@ -428,6 +481,7 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     lint_termination_clauses(src, decls, add, measures)
     lint_jumps(src, decls, add)
     lint_flags(src, add)
+    lint_remainders(src, decls, add)
 
     if map_text is None:
         problems.append(f"{name}: no position map ({map_name or name + MAP_SUFFIX})")

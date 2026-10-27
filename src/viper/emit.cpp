@@ -50,6 +50,14 @@ std::string expr(const E& e, bool top = false) {
       std::string s = expr(e->a) + " ? " + expr(e->b) + " : " + expr(e->c);
       return top ? s : "(" + s + ")";
     }
+    case LExpr::Kind::ModPow2: {  // decision 0026 item 7: `a % 2^k`, the divisor a positive power-of-two literal
+      std::string s = expr(e->a) + " % " + e->text;
+      return top ? s : "(" + s + ")";
+    }
+    case LExpr::Kind::DivPow2: {  // decision 0026 item 7: `a \ 2^k`, the divisor a positive power-of-two literal
+      std::string s = expr(e->a) + " \\ " + e->text;
+      return top ? s : "(" + s + ")";
+    }
     case LExpr::Kind::Fn: {
       std::string s = e->text + "(";
       for (size_t i = 0; i < e->args.size(); ++i) s += (i != 0 ? ", " : "") + expr(e->args[i], true);
