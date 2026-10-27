@@ -188,7 +188,7 @@ object would be indeterminate at the target. With this record that object is ord
      overridden note is displayed (P30). That output is inconsistent and cannot be pinned by a test. The failure is a
      tool failure (exit status 3), never a verdict, and the program is one C++ refuses anyway, so these shapes stayed
      exit status 3 until the fix was in the pin.
-   - **The EDG side.** The bug is `internal/edg_bugs/0022-suppressed-note-internal-error.md`, reproduced on unmodified
+   - **The EDG side.** The bug is `../edg_bugs/upstreamed/0022-suppressed-note-internal-error.md`, reproduced on unmodified
      upstream `main` (`ec2f12cffa`). Its fix is one commit on the fork branch `0022`, based on upstream `main`: a
      suppressed note is left out of its error. The owner merged it into the fork's `cerastes` (`f0ed5525af`, with
      upstream `ec2f12cffa`) and the pin moved there in the same session (2026-10-22): the C++ shapes now give one error

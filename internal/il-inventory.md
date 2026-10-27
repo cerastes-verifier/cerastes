@@ -2201,7 +2201,7 @@ with the front end and verify mode's options (`edg2656/fe.sh`).
 - **Upstream.** Reproduced with stock `cpfe` on upstream `main` `ec2f12cffa` (`repro-before.txt`). Fixed on fork
   branch `0022` (`3b05dd5c43`): `add_more_info_list` frees a note whose severity is `es_none`. The `GH-*` test fails
   before and passes after, natively (`edgy-before-vs-recording.txt`, `edgy-after.txt`). The bug file is
-  `internal/edg_bugs/0022-suppressed-note-internal-error.md`.
+  `edg_bugs/upstreamed/0022-suppressed-note-internal-error.md`.
 - **Incidental, not pursued:** `constexpr int z = (-2147483647 - 1) / -1;` (and `% -1`) gives no diagnostic at all in
   this front end (probes `cxx_note_1`, `cxx_note_2`). cerastes encodes initializers as written (0017), so it does not
   rely on the fold.
