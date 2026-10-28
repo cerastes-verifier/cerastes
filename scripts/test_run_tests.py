@@ -3114,7 +3114,7 @@ def active_lines(text, comment="#"):
 
 
 def non_ascii_problems(text):
-    """A guarded file (check.sh, ci.sh, ci.yml, docs.yml) holds printable ASCII, tab and newline
+    """A guarded file (check.sh, ci.sh, ci-linux.sh, ci.yml, docs.yml) holds printable ASCII, tab and newline
     only: Unicode spaces, CR and FF look like blanks to this self-test and not to bash or YAML,
     so a payload can hide behind them in what looks like a comment."""
     return [f"line {n}: U+{ord(c):04X} is not printable ASCII, tab or newline"
@@ -4227,21 +4227,225 @@ CI_SH_CANONICAL = (
     'df -h "$ROOT"',
 )
 
+CI_SH_SPEC = {"canonical": CI_SH_CANONICAL, "pinned": CI_SH_PINNED, "constants": CI_SH_CONSTANTS,
+              "functions": CI_SH_FUNCTIONS, "locals": CI_SH_LOCALS, "want": CI_SH_WANT,
+              "or_lines": (CI_SH_GCC_INSTALL,), "env_loop": CI_SH_ENV_LOOP}
 
-def ci_sh_problems(text):
-    """What is wrong with scripts/ci.sh as the runner's assertion script (decision 0016): every
-    assertion pinned line by line, in order, with no way to make one pass or skip it (an early
-    `exit`, `|| true`, a background `&`, a changed `want`, `set +e`, a moved or loosened line)."""
+# ci-linux.sh (decision 0031), pinned the same way as ci.sh: the expected values (Ubuntu 26.04 on
+# x86-64, glibc 2.43, the clang 21 and GCC 16 packages and banners, EDG's emulated clang version)
+# are literal lines here, not read from the file under test.
+# BEGIN CI_LINUX_SH
+CI_LINUX_SH_WANT = 'want() { printf \'ci-linux.sh: %s\\n\' "$*" >&2; exit 1; }'
+CI_LINUX_SH_ENV_LOOP = 'for var in JAVA_TOOL_OPTIONS _JAVA_OPTIONS JDK_JAVA_OPTIONS JAVA_OPTS SBT_OPTS CC CXX CFLAGS CXXFLAGS CPPFLAGS LDFLAGS CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH LIBRARY_PATH LD_LIBRARY_PATH LD_PRELOAD GCC_EXEC_PREFIX COMPILER_PATH CERASTES_EDG_SRC; do'
+CI_LINUX_SH_PINNED = (
+    'set -euo pipefail',
+    'ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"',
+    'cd "$ROOT"',
+    'OS_ID=ubuntu',
+    'OS_VERSION=26.04',
+    'ARCH=x86_64',
+    'GLIBC_VERSION=2.43',
+    'CLANG_MAJOR=21',
+    "CLANG_BANNER='Ubuntu clang version 21.1.8 (6ubuntu1)'",
+    'LLVM_PACKAGE_VERSION=1:21.1.8-6ubuntu1',
+    'GCC_MAJOR=16',
+    'GCC_PACKAGE_VERSION=16-20260322-1ubuntu1',
+    'GCC_VERSION=16.0.1',
+    'EDG_CLANG_VER=210108',
+    'MIN_FREE_GB=6',
+    'export DEBIAN_FRONTEND=noninteractive',
+    'want() { printf \'ci-linux.sh: %s\\n\' "$*" >&2; exit 1; }',
+    '[[ "$os_id" == "$OS_ID" && "$os_version" == "$OS_VERSION" ]] || want "the OS is $os_id $os_version, expected $OS_ID $OS_VERSION"',
+    '[[ "$(uname -m)" == "$ARCH" ]] || want "the machine is $(uname -m), expected $ARCH"',
+    'free_gb="$(df -BG --output=avail "$ROOT" | sed -n \'2s/[^0-9]//gp\')" || want "df failed"',
+    '[[ "$free_gb" =~ ^[0-9]+$ ]] || want "cannot read the free disk space (df gave \'$free_gb\')"',
+    '[[ "$free_gb" -ge "$MIN_FREE_GB" ]] || want "only $free_gb GB free on $ROOT; the build and the tests need $MIN_FREE_GB GB"',
+    'for var in JAVA_TOOL_OPTIONS _JAVA_OPTIONS JDK_JAVA_OPTIONS JAVA_OPTS SBT_OPTS CC CXX CFLAGS CXXFLAGS CPPFLAGS LDFLAGS CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH LIBRARY_PATH LD_LIBRARY_PATH LD_PRELOAD GCC_EXEC_PREFIX COMPILER_PATH CERASTES_EDG_SRC; do',
+    '[[ -z "${!var+set}" ]] || want "$var is set; the build must not depend on it (decisions 0016, 0031)"',
+    'done',
+    '[[ -n "${JAVA_HOME_17_X64:-}" ]] || want "JAVA_HOME_17_X64 is not set; the image\'s JDK 17 is the one bootstrap uses"',
+    'sudo apt-get update -q',
+    'sudo apt-get install -y -q --no-install-recommends "gcc-$GCC_MAJOR" "g++-$GCC_MAJOR" \\',
+    '[[ "$got" == "$LLVM_PACKAGE_VERSION" ]] || want "$pkg is \'${got:-<not installed>}\', expected $LLVM_PACKAGE_VERSION"',
+    '[[ "$got" == "$GCC_PACKAGE_VERSION" ]] || want "$pkg is \'${got:-<not installed>}\', expected $GCC_PACKAGE_VERSION"',
+    'glibc="$(ldd --version | sed -n \'1s/.* //p\')" || want "ldd --version failed"',
+    '[[ "$glibc" == "$GLIBC_VERSION" ]] || want "glibc is $glibc, expected $GLIBC_VERSION (the headers EDG parses)"',
+    'clang_cc="$(command -v "clang-$CLANG_MAJOR")" || want "clang-$CLANG_MAJOR is not on PATH"',
+    'clang_cxx="$(command -v "clang++-$CLANG_MAJOR")" || want "clang++-$CLANG_MAJOR is not on PATH"',
+    '[[ "$clang_cc" == "/usr/bin/clang-$CLANG_MAJOR" && "$clang_cxx" == "/usr/bin/clang++-$CLANG_MAJOR" ]] \\',
+    '|| want "clang-$CLANG_MAJOR is $clang_cc and clang++-$CLANG_MAJOR $clang_cxx, expected the packages\' /usr/bin ones"',
+    'banner="$("$tool" --version | sed -n 1p)" || want "$tool --version failed"',
+    '[[ "$banner" == "$CLANG_BANNER" ]] || want "$tool is \'$banner\', expected \'$CLANG_BANNER\'"',
+    'gxx="$(command -v "g++-$GCC_MAJOR")" || want "g++-$GCC_MAJOR not found"',
+    'gcc_cc="$(command -v "gcc-$GCC_MAJOR")" || want "gcc-$GCC_MAJOR not found"',
+    'got="$("$tool" -dumpfullversion)" || want "$tool -dumpfullversion failed"',
+    '[[ "$got" == "$GCC_VERSION" ]] || want "$tool is $got, expected $GCC_VERSION"',
+    'gcc_highest="$(compgen -c gcc- | sed -n \'s/^gcc-\\([0-9][0-9]*\\)$/\\1/p\' | sort -n | tail -1)" || want "cannot list the gcc-NN on PATH"',
+    '[[ "$gcc_highest" == "$GCC_MAJOR" ]] || want "the highest gcc-NN on PATH is gcc-$gcc_highest, expected gcc-$GCC_MAJOR (the native-ok runs use the highest)"',
+    'edg_shallow="$(git -C third_party/edg rev-parse --is-shallow-repository)" || want "third_party/edg is not an initialized submodule"',
+    '[[ "$edg_shallow" == false ]] || want "third_party/edg is a shallow clone; the checkout needs fetch-depth: 0"',
+    'git -C third_party/edg rev-parse -q --verify refs/remotes/origin/cerastes >/dev/null || want "third_party/edg has no origin/cerastes; the submodule clone must keep all remote branches"',
+    'python3 scripts/edg_tree.py check',
+    'scripts/bootstrap.sh',
+    '. build/env.sh',
+    '[[ "$CERASTES_CLANG_CXX" == "$clang_cxx" ]] || want "build/env.sh has CERASTES_CLANG_CXX=$CERASTES_CLANG_CXX, expected $clang_cxx"',
+    '[[ "$CERASTES_GCC_CXX" == "$gxx" ]] || want "build/env.sh has CERASTES_GCC_CXX=$CERASTES_GCC_CXX, expected $gxx"',
+    '[[ "$EDG_CLANG_VER_SCRAPE" == "$EDG_CLANG_VER" ]] || want "build/env.sh has EDG_CLANG_VER_SCRAPE=$EDG_CLANG_VER_SCRAPE, expected $EDG_CLANG_VER"',
+    '[[ ":$EDG_CLANG_INCL_SCRAPE:" == *":/usr/lib/llvm-$CLANG_MAJOR/include/c++/v1:"* ]] \\',
+    '|| want "the C++ include directories do not name libc++ $CLANG_MAJOR: $EDG_CLANG_INCL_SCRAPE"',
+    '[[ "$EDG_CLANG_INCL_SCRAPE" != *"/c++/$GCC_MAJOR"* && "$EDG_CLANG_INCL_SCRAPE" != *"include/c++/1"[0-9]* ]] \\',
+    '|| want "the C++ include directories name libstdc++: $EDG_CLANG_INCL_SCRAPE"',
+)
+CI_LINUX_SH_CONSTANTS = ('OS_ID', 'OS_VERSION', 'ARCH', 'GLIBC_VERSION', 'CLANG_MAJOR', 'CLANG_BANNER', 'LLVM_PACKAGE_VERSION', 'GCC_MAJOR', 'GCC_PACKAGE_VERSION', 'GCC_VERSION', 'EDG_CLANG_VER', 'MIN_FREE_GB')
+CI_LINUX_SH_FUNCTIONS = ('step', 'want', 'ver', 'pkg_version')
+CI_LINUX_SH_LOCALS = ('clang_cc', 'clang_cxx', 'edg_shallow', 'free_gb', 'gcc_cc', 'gcc_highest', 'glibc', 'gxx', 'os_id', 'os_version')
+CI_LINUX_SH_CANONICAL = (
+    'set -euo pipefail',
+    'ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"',
+    'cd "$ROOT"',
+    'OS_ID=ubuntu',
+    'OS_VERSION=26.04',
+    'ARCH=x86_64',
+    'GLIBC_VERSION=2.43',
+    'CLANG_MAJOR=21',
+    "CLANG_BANNER='Ubuntu clang version 21.1.8 (6ubuntu1)'",
+    'LLVM_PACKAGE_VERSION=1:21.1.8-6ubuntu1',
+    'GCC_MAJOR=16',
+    'GCC_PACKAGE_VERSION=16-20260322-1ubuntu1',
+    'GCC_VERSION=16.0.1',
+    'EDG_CLANG_VER=210108',
+    'MIN_FREE_GB=6',
+    'export DEBIAN_FRONTEND=noninteractive',
+    'step() { printf \'\\n==== %s\\n\' "$*"; }',
+    'want() { printf \'ci-linux.sh: %s\\n\' "$*" >&2; exit 1; }',
+    'ver() {',
+    '  local tool="$1"',
+    '  shift',
+    '  if command -v "$tool" >/dev/null; then',
+    '    printf \'%-8s %s\\n\' "$tool" "$("$tool" "$@" 2>&1 | sed -n 1p)"',
+    '  else',
+    '    printf \'%-8s <missing>\\n\' "$tool"',
+    '  fi',
+    '}',
+    'pkg_version() { dpkg-query -W -f=\'${Status} ${Version}\\n\' "$1" 2>/dev/null | sed -n \'s/^install ok installed //p\'; }',
+    'step "machine"',
+    'uname -a',
+    'cat /etc/os-release',
+    'df -h "$ROOT"',
+    'printf \'image:   %s %s\\n\' "${ImageOS:-local}" "${ImageVersion:-local}"',
+    'os_id="$(. /etc/os-release && printf \'%s\' "$ID")"',
+    'os_version="$(. /etc/os-release && printf \'%s\' "$VERSION_ID")"',
+    '[[ "$os_id" == "$OS_ID" && "$os_version" == "$OS_VERSION" ]] || want "the OS is $os_id $os_version, expected $OS_ID $OS_VERSION"',
+    '[[ "$(uname -m)" == "$ARCH" ]] || want "the machine is $(uname -m), expected $ARCH"',
+    'free_gb="$(df -BG --output=avail "$ROOT" | sed -n \'2s/[^0-9]//gp\')" || want "df failed"',
+    '[[ "$free_gb" =~ ^[0-9]+$ ]] || want "cannot read the free disk space (df gave \'$free_gb\')"',
+    '[[ "$free_gb" -ge "$MIN_FREE_GB" ]] || want "only $free_gb GB free on $ROOT; the build and the tests need $MIN_FREE_GB GB"',
+    'step "environment"',
+    'for var in JAVA_TOOL_OPTIONS _JAVA_OPTIONS JDK_JAVA_OPTIONS JAVA_OPTS SBT_OPTS CC CXX CFLAGS CXXFLAGS CPPFLAGS LDFLAGS CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH LIBRARY_PATH LD_LIBRARY_PATH LD_PRELOAD GCC_EXEC_PREFIX COMPILER_PATH CERASTES_EDG_SRC; do',
+    '  [[ -z "${!var+set}" ]] || want "$var is set; the build must not depend on it (decisions 0016, 0031)"',
+    'done',
+    'printf \'CERASTES_JOBS=%s\\n\' "${CERASTES_JOBS:-<unset>}"',
+    '[[ -n "${JAVA_HOME_17_X64:-}" ]] || want "JAVA_HOME_17_X64 is not set; the image\'s JDK 17 is the one bootstrap uses"',
+    'step "packages"',
+    'sudo apt-get update -q',
+    'sudo apt-get install -y -q --no-install-recommends "gcc-$GCC_MAJOR" "g++-$GCC_MAJOR" \\',
+    '  "clang-$CLANG_MAJOR" "libc++-$CLANG_MAJOR-dev" "libc++abi-$CLANG_MAJOR-dev" shellcheck',
+    'for pkg in "clang-$CLANG_MAJOR" "libc++-$CLANG_MAJOR-dev" "libc++abi-$CLANG_MAJOR-dev"; do',
+    '  got="$(pkg_version "$pkg")"',
+    '  [[ "$got" == "$LLVM_PACKAGE_VERSION" ]] || want "$pkg is \'${got:-<not installed>}\', expected $LLVM_PACKAGE_VERSION"',
+    'done',
+    'for pkg in "gcc-$GCC_MAJOR" "g++-$GCC_MAJOR"; do',
+    '  got="$(pkg_version "$pkg")"',
+    '  [[ "$got" == "$GCC_PACKAGE_VERSION" ]] || want "$pkg is \'${got:-<not installed>}\', expected $GCC_PACKAGE_VERSION"',
+    'done',
+    'step "toolchain"',
+    'glibc="$(ldd --version | sed -n \'1s/.* //p\')" || want "ldd --version failed"',
+    '[[ "$glibc" == "$GLIBC_VERSION" ]] || want "glibc is $glibc, expected $GLIBC_VERSION (the headers EDG parses)"',
+    'clang_cc="$(command -v "clang-$CLANG_MAJOR")" || want "clang-$CLANG_MAJOR is not on PATH"',
+    'clang_cxx="$(command -v "clang++-$CLANG_MAJOR")" || want "clang++-$CLANG_MAJOR is not on PATH"',
+    '[[ "$clang_cc" == "/usr/bin/clang-$CLANG_MAJOR" && "$clang_cxx" == "/usr/bin/clang++-$CLANG_MAJOR" ]] \\',
+    '  || want "clang-$CLANG_MAJOR is $clang_cc and clang++-$CLANG_MAJOR $clang_cxx, expected the packages\' /usr/bin ones"',
+    'for tool in "$clang_cc" "$clang_cxx"; do',
+    '  banner="$("$tool" --version | sed -n 1p)" || want "$tool --version failed"',
+    '  [[ "$banner" == "$CLANG_BANNER" ]] || want "$tool is \'$banner\', expected \'$CLANG_BANNER\'"',
+    'done',
+    'gxx="$(command -v "g++-$GCC_MAJOR")" || want "g++-$GCC_MAJOR not found"',
+    'gcc_cc="$(command -v "gcc-$GCC_MAJOR")" || want "gcc-$GCC_MAJOR not found"',
+    'for tool in "$gcc_cc" "$gxx"; do',
+    '  got="$("$tool" -dumpfullversion)" || want "$tool -dumpfullversion failed"',
+    '  [[ "$got" == "$GCC_VERSION" ]] || want "$tool is $got, expected $GCC_VERSION"',
+    'done',
+    'gcc_highest="$(compgen -c gcc- | sed -n \'s/^gcc-\\([0-9][0-9]*\\)$/\\1/p\' | sort -n | tail -1)" || want "cannot list the gcc-NN on PATH"',
+    '[[ "$gcc_highest" == "$GCC_MAJOR" ]] || want "the highest gcc-NN on PATH is gcc-$gcc_highest, expected gcc-$GCC_MAJOR (the native-ok runs use the highest)"',
+    'printf \'clang:   %s %s\\ng++:     %s %s\\nglibc:   %s\\n\' "$clang_cxx" "$CLANG_BANNER" "$gxx" "$GCC_VERSION" "$glibc"',
+    'ver python3 --version',
+    'ver bash --version',
+    'ver git --version',
+    'ver cmake --version',
+    'ver ninja --version',
+    'ver node --version',
+    'ver npm --version',
+    'ver shellcheck --version',
+    'step "edg tree"',
+    'edg_shallow="$(git -C third_party/edg rev-parse --is-shallow-repository)" || want "third_party/edg is not an initialized submodule"',
+    '[[ "$edg_shallow" == false ]] || want "third_party/edg is a shallow clone; the checkout needs fetch-depth: 0"',
+    'git -C third_party/edg rev-parse -q --verify refs/remotes/origin/cerastes >/dev/null || want "third_party/edg has no origin/cerastes; the submodule clone must keep all remote branches"',
+    'python3 scripts/edg_tree.py check',
+    'step "bootstrap"',
+    'scripts/bootstrap.sh',
+    'step "build/env.sh"',
+    '. build/env.sh',
+    '[[ "$CERASTES_CLANG_CXX" == "$clang_cxx" ]] || want "build/env.sh has CERASTES_CLANG_CXX=$CERASTES_CLANG_CXX, expected $clang_cxx"',
+    '[[ "$CERASTES_GCC_CXX" == "$gxx" ]] || want "build/env.sh has CERASTES_GCC_CXX=$CERASTES_GCC_CXX, expected $gxx"',
+    '[[ "$EDG_CLANG_VER_SCRAPE" == "$EDG_CLANG_VER" ]] || want "build/env.sh has EDG_CLANG_VER_SCRAPE=$EDG_CLANG_VER_SCRAPE, expected $EDG_CLANG_VER"',
+    '[[ ":$EDG_CLANG_INCL_SCRAPE:" == *":/usr/lib/llvm-$CLANG_MAJOR/include/c++/v1:"* ]] \\',
+    '  || want "the C++ include directories do not name libc++ $CLANG_MAJOR: $EDG_CLANG_INCL_SCRAPE"',
+    '[[ "$EDG_CLANG_INCL_SCRAPE" != *"/c++/$GCC_MAJOR"* && "$EDG_CLANG_INCL_SCRAPE" != *"include/c++/1"[0-9]* ]] \\',
+    '  || want "the C++ include directories name libstdc++: $EDG_CLANG_INCL_SCRAPE"',
+    'step "toolchain report"',
+    '{',
+    '  printf \'image:   %s %s\\n\' "${ImageOS:-local}" "${ImageVersion:-local}"',
+    '  printf \'os:      %s %s %s\\n\' "$os_id" "$os_version" "$(uname -m)"',
+    '  printf \'glibc:   %s (libc6-dev %s, linux-libc-dev %s)\\n\' "$glibc" "$(pkg_version libc6-dev)" "$(pkg_version linux-libc-dev)"',
+    '  printf \'clang:   %s (%s)\\n\' "$CLANG_BANNER" "$LLVM_PACKAGE_VERSION"',
+    '  printf \'gcc:     %s %s (%s)\\n\' "$gxx" "$GCC_VERSION" "$GCC_PACKAGE_VERSION"',
+    '  printf \'cxx inc: %s\\n\' "$EDG_CLANG_INCL_SCRAPE"',
+    '  printf \'c inc:   %s\\n\' "$EDG_CLANG_CINCL_SCRAPE"',
+    '  printf \'java:    %s\\n\' "$("$CERASTES_JAVA" -version 2>&1 | sed -n 2p)"',
+    '  printf \'z3:      %s\\n\' "$("$Z3_EXE" --version)"',
+    '  ver python3 --version',
+    '  ver bash --version',
+    '  ver cmake --version',
+    '  ver ninja --version',
+    '  ver node --version',
+    '  printf \'jobs:    %s\\n\' "${CERASTES_JOBS:-<unset>}"',
+    '} | tee build/ci-toolchain.txt',
+    'df -h "$ROOT"',
+)
+CI_LINUX_SH_SPEC = {"canonical": CI_LINUX_SH_CANONICAL, "pinned": CI_LINUX_SH_PINNED,
+                    "constants": CI_LINUX_SH_CONSTANTS, "functions": CI_LINUX_SH_FUNCTIONS,
+                    "locals": CI_LINUX_SH_LOCALS, "want": CI_LINUX_SH_WANT, "or_lines": (),
+                    "env_loop": CI_LINUX_SH_ENV_LOOP}
+# END CI_LINUX_SH
+
+
+def ci_sh_problems(text, spec=None):
+    """What is wrong with scripts/ci.sh as the runner's assertion script (decision 0016), or with
+    scripts/ci-linux.sh given CI_LINUX_SH_SPEC (decision 0031): every assertion pinned line by line,
+    in order, with no way to make one pass or skip it (an early `exit`, `|| true`, a background `&`,
+    a changed `want`, `set +e`, a moved or loosened line)."""
+    spec = spec or CI_SH_SPEC
+    canonical, pinned_lines, want_def = spec["canonical"], spec["pinned"], spec["want"]
     lines = [l for l in active_lines(text) if l.strip()]
     stripped = [l.strip() for l in lines]
     problems = non_ascii_problems(text)
     # the whole active text, pinned: what the rules below cannot name (a `break`, a redefined
     # `realpath`, a reassigned constant, an extra command) still cannot get in
-    if tuple(lines) != CI_SH_CANONICAL:
-        first = next((i for i, (a, b) in enumerate(zip(lines, CI_SH_CANONICAL)) if a != b),
-                     min(len(lines), len(CI_SH_CANONICAL)))
+    if tuple(lines) != canonical:
+        first = next((i for i, (a, b) in enumerate(zip(lines, canonical)) if a != b),
+                     min(len(lines), len(canonical)))
         got = lines[first] if first < len(lines) else "(end of file)"
-        want = CI_SH_CANONICAL[first] if first < len(CI_SH_CANONICAL) else "(end of file)"
+        want = canonical[first] if first < len(canonical) else "(end of file)"
         problems.append(f"the active text differs from the pinned text at its line {first + 1}: "
                         f"`{got}`, expected `{want}` (only comments may change without the self-test)")
     if not stripped or stripped[0] != "set -euo pipefail":
@@ -4251,7 +4455,7 @@ def ci_sh_problems(text):
             problems.append(f"`set` after the first line: {l}")
     # every pinned line, in file order
     pos, previous = -1, "the start"
-    for pinned in CI_SH_PINNED:
+    for pinned in pinned_lines:
         found = next((i for i in range(pos + 1, len(stripped)) if stripped[i] == pinned), None)
         if found is None:
             where = "is missing" if pinned not in stripped else f"is out of order (after {previous})"
@@ -4259,7 +4463,7 @@ def ci_sh_problems(text):
         else:
             pos, previous = found, pinned[:40]
     # the expected values are assigned once, and before anything uses them
-    for name in CI_SH_CONSTANTS:
+    for name in spec["constants"]:
         defs = [i for i, l in enumerate(stripped) if re.match(rf"(?:export |readonly |declare )?{name}=", l)]
         if len(defs) != 1:
             problems.append(f"{name} must be assigned exactly once (it is assigned {len(defs)} times)")
@@ -4269,11 +4473,11 @@ def ci_sh_problems(text):
             if use is not None and use < defs[0]:
                 problems.append(f"{name} is used before it is assigned")
     # want() is the only way out of a failed assertion: one definition, and it exits 1
-    if [l for l in stripped if re.match(r"(?:function\s+)?want\s*(?:\(\)|\{)", l)] != [CI_SH_WANT]:
-        problems.append(f"want() must be defined once, as `{CI_SH_WANT}`")
+    if [l for l in stripped if re.match(r"(?:function\s+)?want\s*(?:\(\)|\{)", l)] != [want_def]:
+        problems.append(f"want() must be defined once, as `{want_def}`")
     for l in stripped:
         m = re.match(r"(?:function\s+)?([A-Za-z_][\w-]*)\s*\(\)", l)
-        if m and m.group(1) not in CI_SH_FUNCTIONS:
+        if m and m.group(1) not in spec["functions"]:
             problems.append(f"unexpected function `{m.group(1)}`")
         if re.search(r"\b(?:alias|trap)\b|\bunset\s+-f\b|\breadonly\s+-f\b", l):
             problems.append(f"cannot redefine or intercept a command: {l}")
@@ -4282,7 +4486,7 @@ def ci_sh_problems(text):
         problems.append("scripts/bootstrap.sh must run exactly once, with no options (not --build-only)")
     # nothing leaves early, hides a failure or runs in the background
     for l in stripped:
-        if l == CI_SH_WANT:
+        if l == want_def:
             continue
         if re.search(r"\bexit\b", l):
             problems.append(f"`exit` outside want(): {l}")
@@ -4292,10 +4496,10 @@ def ci_sh_problems(text):
             problems.append(f"a failure is hidden: {l}")
         if re.search(r"(?<![&>|])&(?![&>])", l):
             problems.append(f"a command in the background (`&`): {l}")
-        if "||" in l and l != CI_SH_GCC_INSTALL \
+        if "||" in l and l not in spec["or_lines"] \
                 and (l.count("||") != 1 or not re.search(r'\|\| want ".*"$', l)):
             problems.append(f"`||` only as `... || want \"...\"` (and the gcc install): {l}")
-        if "CERASTES_EDG_SRC" in l and l != CI_SH_ENV_LOOP:
+        if "CERASTES_EDG_SRC" in l and l != spec["env_loop"]:
             problems.append(f"CERASTES_EDG_SRC outside the assertion that it is unset: {l}")
     for l in lines:
         if l[0] in " \t{}":
@@ -4303,10 +4507,10 @@ def ci_sh_problems(text):
         first = l.split()[0]
         if first in CI_SH_TOP_LEVEL_FORBIDDEN:
             problems.append(f"top-level `{first}`: {l}")
-        if first == "export" and l not in CI_SH_PINNED:
+        if first == "export" and l not in pinned_lines:
             problems.append(f"an export that is not pinned: {l}")
-        if re.match(r"[A-Za-z_]\w*=", l) and l not in CI_SH_PINNED \
-                and not re.match(rf"(?:{'|'.join(CI_SH_LOCALS)})=", l):
+        if re.match(r"[A-Za-z_]\w*=", l) and l not in pinned_lines \
+                and not re.match(rf"(?:{'|'.join(spec['locals'])})=", l):
             problems.append(f"an assignment that is not pinned: {l}")
     return problems
 
@@ -4329,6 +4533,14 @@ CI_YML_TOP_KEYS = {"name", "on", "permissions", "concurrency", "jobs"}
 CI_YML_JOB_KEYS = {"name", "runs-on", "timeout-minutes", "env", "steps"}
 CI_YML_STEP_KEYS = {"name", "id", "uses", "with", "run", "if"}
 CI_YML_CLT = "/Library/Developer/CommandLineTools"
+# The jobs, in file order (decision 0031: the Linux job beside the macOS one): the runner, the job
+# environment (DEVELOPER_DIR on macOS only) and the setup script that runs before scripts/check.sh.
+CI_YML_JOBS = (
+    ("check", {"runs-on": "xcode-27", "env": ("DEVELOPER_DIR", "CERASTES_JOBS", "CERASTES_CHECK_BASE"),
+               "setup": "scripts/ci.sh"}),
+    ("check-linux", {"runs-on": "ubuntu-26.04", "env": ("CERASTES_JOBS", "CERASTES_CHECK_BASE"),
+                     "setup": "scripts/ci-linux.sh"}),
+)
 # the only steps that may carry an `if:`, and the expression each must carry, verbatim: the save
 # runs on a cache miss, the upload (build/vpr, which the acceptance compares byte for byte) always,
 # even when the run is cancelled
@@ -4420,6 +4632,69 @@ CI_YML_CANONICAL = (
     '            build/*.log',
     '          if-no-files-found: warn',
     '          retention-days: 14',
+    # decision 0031: the Linux job
+    '  check-linux:',
+    '    name: check (Linux, Ubuntu 26.04 x86-64)',
+    '    runs-on: ubuntu-26.04',
+    '    timeout-minutes: 220',
+    '    env:',
+    '      CERASTES_JOBS: 4',
+    '      CERASTES_CHECK_BASE: ' + CI_YML_CHECK_BASE,
+    '    steps:',
+    '      - name: Checkout',
+    '        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
+    '        with:',
+    '          fetch-depth: 0',
+    '          submodules: recursive',
+    '          persist-credentials: false',
+    '      - name: Set up Python',
+    '        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97',
+    '        with:',
+    "          python-version: '3.14'",
+    '      - name: Set up Node',
+    '        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1',
+    '        with:',
+    '          node-version-file: doc/.node-version',
+    '          cache: npm',
+    '          cache-dependency-path: doc/package-lock.json',
+    '      - name: Silicon cache key',
+    '        id: silicon-key',
+    '        run: |',
+    '          silicon_head="$(git rev-parse HEAD:third_party/silicon)"',
+    '          silver_head="$(git -C third_party/silicon rev-parse HEAD:silver)"',
+    '          echo "key=silicon-v1-${{ runner.os }}-${{ runner.arch }}-${silicon_head}-${silver_head}-${{ hashFiles(\'scripts/bootstrap.sh\') }}" >> "$GITHUB_OUTPUT"',
+    '      - name: Restore the Silicon build',
+    '        id: silicon-cache',
+    '        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9',
+    '        with:',
+    '          path: |',
+    '            third_party/silicon/target/scala-2.13/silicon.jar',
+    '            build/silicon.stamp',
+    '          key: ${{ steps.silicon-key.outputs.key }}',
+    '      - name: Set up the toolchain',
+    '        run: scripts/ci-linux.sh',
+    '      - name: Save the Silicon build',
+    "        if: steps.silicon-cache.outputs.cache-hit != 'true'",
+    '        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9',
+    '        with:',
+    '          path: |',
+    '            third_party/silicon/target/scala-2.13/silicon.jar',
+    '            build/silicon.stamp',
+    '          key: ${{ steps.silicon-key.outputs.key }}',
+    '      - name: Check everything',
+    '        run: scripts/check.sh',
+    '      - name: Upload the evidence',
+    '        if: ${{ always() }}',
+    '        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9',
+    '        with:',
+    '          name: ci-linux-${{ github.run_id }}-${{ github.run_attempt }}',
+    '          path: |',
+    '            build/vpr',
+    '            build/env.sh',
+    '            build/ci-toolchain.txt',
+    '            build/*.log',
+    '          if-no-files-found: warn',
+    '          retention-days: 14',
 )
 
 
@@ -4459,11 +4734,12 @@ def _yml_keys(block, indent):
 
 def ci_workflow_problems(text):
     """What is wrong with .github/workflows/ci.yml (decision 0016), parsed as text: the triggers
-    (the nightly schedule included), permissions and concurrency exactly as pinned; one job with
-    only the five allowed keys (so no job-level `if:`, `continue-on-error`, `strategy`,
-    `container`, `needs`, `defaults`); the runner, the timeout and the job environment (the tier's
-    CERASTES_CHECK_BASE, item 14); every action pinned to a commit SHA; the checkout; and plain
-    `scripts/ci.sh` then `scripts/check.sh` steps that cannot be ignored."""
+    (the nightly schedule included), permissions and concurrency exactly as pinned; exactly the jobs
+    of CI_YML_JOBS, in order (decision 0031), each with only the five allowed keys (so no job-level
+    `if:`, `continue-on-error`, `strategy`, `container`, `needs`, `defaults`); each job's runner,
+    timeout and environment (the tier's CERASTES_CHECK_BASE, item 14); every action pinned to a
+    commit SHA; the checkout; and plain setup-script then `scripts/check.sh` steps that cannot be
+    ignored."""
     lines = active_lines(text)
     problems = non_ascii_problems(text)
     # the whole active text, pinned but for the SHAs, the names, the timeout and the job count: what
@@ -4505,12 +4781,30 @@ def ci_workflow_problems(text):
         for bad in CI_YML_FORBIDDEN:
             if bad in l:
                 problems.append(f"`{bad}` is not allowed in ci.yml: {l.strip()}")
-    # one job with five keys
+    # the jobs of CI_YML_JOBS, in order, each checked against its own spec
     jobs = sections.get("jobs", [])
     job_names = [k for k, _ in _yml_keys(jobs, 2)]
-    if len(job_names) != 1 or None in job_names:
-        problems.append(f"exactly one job is expected, found {job_names}")
+    expected_jobs = [name for name, _ in CI_YML_JOBS]
+    if job_names != expected_jobs:
+        problems.append(f"the jobs must be exactly {expected_jobs}, in that order, found {job_names}")
         return problems
+    blocks, cur = {}, None
+    for l in jobs:
+        m = re.match(r"^ {2}([\w-]+):\s*$", l)
+        if m:
+            cur = m.group(1)
+            blocks[cur] = []
+        elif cur is not None:
+            blocks[cur].append(l)
+    for name, spec in CI_YML_JOBS:
+        problems.extend(f"job `{name}`: {p}" for p in _ci_job_problems(blocks[name], spec))
+    return problems
+
+
+def _ci_job_problems(jobs, spec):
+    """What is wrong with one job of ci.yml (the lines under its `  <id>:` header) against its
+    entry of CI_YML_JOBS."""
+    problems = []
     job_keys = _yml_keys(jobs, 4)
     names = [k for k, _ in job_keys]
     if len(names) != len(set(names)):
@@ -4519,8 +4813,8 @@ def ci_workflow_problems(text):
         problems.append(f"the job's keys must be exactly {sorted(CI_YML_JOB_KEYS)}, not {sorted(set(names), key=str)} "
                         "(no job-level `if:`, `strategy`, `container`, `needs`, `defaults`)")
     scalars = dict(job_keys)
-    if scalars.get("runs-on") != "xcode-27":
-        problems.append("`runs-on` must be `xcode-27`")
+    if scalars.get("runs-on") != spec["runs-on"]:
+        problems.append(f"`runs-on` must be `{spec['runs-on']}`")
     timeout = scalars.get("timeout-minutes", "")
     if not re.fullmatch(r"[1-9][0-9]*", timeout) or int(timeout) > CI_YML_MAX_TIMEOUT:
         problems.append(f"`timeout-minutes` must be an integer of at most {CI_YML_MAX_TIMEOUT} "
@@ -4535,14 +4829,12 @@ def ci_workflow_problems(text):
     env_pairs = _yml_keys(env_lines, 6)
     env_names = [k for k, _ in env_pairs]
     env = dict(env_pairs)
-    if len(env_names) != len(set(env_names)) \
-            or set(env_names) != {"DEVELOPER_DIR", "CERASTES_JOBS", "CERASTES_CHECK_BASE"}:
-        problems.append("the job environment must be exactly DEVELOPER_DIR, CERASTES_JOBS and "
-                        "CERASTES_CHECK_BASE")
+    if len(env_names) != len(set(env_names)) or set(env_names) != set(spec["env"]):
+        problems.append(f"the job environment must be exactly {', '.join(spec['env'])}")
     if env.get("CERASTES_CHECK_BASE") != CI_YML_CHECK_BASE:
         problems.append("CERASTES_CHECK_BASE must be exactly the pinned expression: the PR tier for "
                         "pull requests and pushes only (decision 0016 item 14)")
-    if env.get("DEVELOPER_DIR") != CI_YML_CLT:
+    if "DEVELOPER_DIR" in spec["env"] and env.get("DEVELOPER_DIR") != CI_YML_CLT:
         problems.append(f"DEVELOPER_DIR must be {CI_YML_CLT} (the Command Line Tools, not an Xcode)")
     if not re.fullmatch(r"[1-9][0-9]*", env.get("CERASTES_JOBS", "")):
         problems.append("CERASTES_JOBS must be a positive integer")
@@ -4575,7 +4867,7 @@ def ci_workflow_problems(text):
                 with_lines.append(l)
         parsed.append((d, dict(_yml_keys(with_lines, 10)), step))
     # every action is pinned to a commit
-    for l in lines:
+    for l in jobs:
         m = re.search(r"\buses:\s*(\S+)", l)
         if m and not re.fullmatch(r"[\w.-]+/[\w./-]+@[0-9a-f]{40}", m.group(1)):
             problems.append(f"an action must be pinned to a 40-hex commit SHA: {m.group(1)}")
@@ -4588,7 +4880,7 @@ def ci_workflow_problems(text):
             if checkouts[0].get(key) != value:
                 problems.append(f"the checkout needs `{key}: {value}`")
     # `if:` only where the file says so, and nowhere else
-    if len([l for l in lines if re.match(r"^\s*(?:- )?[\"']?if[\"']?\s*:", l)]) != sum(1 for d, _, _ in parsed if "if" in d):
+    if len([l for l in jobs if re.match(r"^\s*(?:- )?[\"']?if[\"']?\s*:", l)]) != sum(1 for d, _, _ in parsed if "if" in d):
         problems.append("`if:` outside a step's own keys")
     for d, _, step in parsed:
         if "if" in d and not d.get("uses", "").startswith(CI_YML_IF_ALLOWED):
@@ -4599,7 +4891,7 @@ def ci_workflow_problems(text):
     if not any(d.get("uses", "").startswith("actions/upload-artifact@") for d, _, _ in parsed):
         problems.append("an actions/upload-artifact step is expected")
 
-    # scripts/ci.sh, the cache save, then scripts/check.sh
+    # the setup script (scripts/ci.sh, scripts/ci-linux.sh), the cache save, then scripts/check.sh
     def run_index(command):
         hits = [i for i, (d, _, _) in enumerate(parsed) if d.get("run") == command]
         if len(hits) != 1:
@@ -4609,14 +4901,18 @@ def ci_workflow_problems(text):
         if extra:
             problems.append(f"the `{command}` step must have only `name` and `run`, not {extra}")
         return hits[0]
-    ci_i, check_i = run_index("scripts/ci.sh"), run_index("scripts/check.sh")
+    setup = spec["setup"]
+    ci_i, check_i = run_index(setup), run_index("scripts/check.sh")
+    for other in {s["setup"] for _, s in CI_YML_JOBS} - {setup}:
+        if any(d.get("run") == other for d, _, _ in parsed):
+            problems.append(f"`{other}` is the setup of another job")
     saves = [i for i, (d, _, _) in enumerate(parsed) if d.get("uses", "").startswith("actions/cache/save@")]
     if None not in (ci_i, check_i) and not ci_i < check_i:
-        problems.append("scripts/ci.sh must run before scripts/check.sh")
+        problems.append(f"{setup} must run before scripts/check.sh")
     if len(saves) != 1:
         problems.append("exactly one actions/cache/save step is expected")
     elif None not in (ci_i, check_i) and not ci_i < saves[0] < check_i:
-        problems.append("the cache save must come after ci.sh and before check.sh")
+        problems.append(f"the cache save must come after {setup} and before check.sh")
     return problems
 
 
@@ -5066,6 +5362,150 @@ class CiGuardTests(unittest.TestCase):
         self.assertTrue(ci_workflow_problems("name: CI\n"))
         self.assertTrue(ci_sh_problems(""))
         self.assertTrue(ci_sh_problems("#!/usr/bin/env bash\nset -euo pipefail\n"))
+        self.assertTrue(ci_sh_problems("", CI_LINUX_SH_SPEC))
+        # each script is wrong for the other job
+        self.assertTrue(ci_sh_problems(self.SH, CI_LINUX_SH_SPEC))
+        self.assertTrue(ci_sh_problems(self.LINUX_SH))
+
+    # ----- the Linux job (decision 0031) -----
+
+    LINUX_SH_PATH = REAL_ROOT / "scripts" / "ci-linux.sh"
+    LINUX_JOB = "  check-linux:\n"
+
+    @property
+    def LINUX_SH(self):
+        return self.LINUX_SH_PATH.read_bytes().decode("utf-8")
+
+    def linux_job(self):
+        return self.YML[self.YML.index(self.LINUX_JOB):]
+
+    def test_the_real_linux_script_is_fine(self):
+        self.assertEqual(ci_sh_problems(self.LINUX_SH, CI_LINUX_SH_SPEC), [])
+
+    def test_every_pinned_line_is_in_the_real_linux_script(self):
+        active = [l.strip() for l in active_lines(self.LINUX_SH)]
+        for pinned in CI_LINUX_SH_PINNED:
+            with self.subTest(pinned[:50]):
+                self.assertIn(pinned, active)
+        self.assertGreaterEqual(len(CI_LINUX_SH_PINNED), 50)
+
+    def test_linux_workflow_mutations_are_found(self):
+        Y, job = self.YML, self.linux_job()
+        head = Y[:Y.index(self.LINUX_JOB)]
+        out = {}
+
+        def sub(name, old, new):
+            self.assertIn(old, job, f"{name}: the text to mutate is not in the Linux job")
+            out[name] = head + job.replace(old, new, 1)
+        out["the Linux job removed"] = head.rstrip("\n") + "\n"
+        out["the jobs swapped"] = Y.replace(head[head.index("  check:\n"):], "").rstrip("\n") + "\n" + \
+            head[head.index("  check:\n"):]
+        out["a third job"] = Y.rstrip("\n") + "\n  other:\n    runs-on: ubuntu-26.04\n    steps: []\n"
+        sub("the Linux job renamed by id", self.LINUX_JOB, "  linux:\n")
+        sub("another Ubuntu", "runs-on: ubuntu-26.04", "runs-on: ubuntu-24.04")
+        sub("ubuntu-latest", "runs-on: ubuntu-26.04", "runs-on: ubuntu-latest")
+        sub("an arm runner", "runs-on: ubuntu-26.04", "runs-on: ubuntu-26.04-arm")
+        sub("a container", "    runs-on: ubuntu-26.04\n", "    runs-on: ubuntu-26.04\n    container: ubuntu:26.04\n")
+        sub("needs the macOS job", "    runs-on: ubuntu-26.04\n", "    runs-on: ubuntu-26.04\n    needs: check\n")
+        sub("a job-level if", "    steps:\n", "    if: false\n    steps:\n")
+        sub("continue-on-error on the job", "    steps:\n", "    continue-on-error: true\n    steps:\n")
+        sub("timeout 221", "timeout-minutes: 220", "timeout-minutes: 221")
+        sub("DEVELOPER_DIR in the Linux env", "      CERASTES_JOBS: 4\n",
+            "      DEVELOPER_DIR: /Library/Developer/CommandLineTools\n      CERASTES_JOBS: 4\n")
+        sub("CERASTES_JOBS 0", "CERASTES_JOBS: 4", "CERASTES_JOBS: 0")
+        sub("the base removed", next(l + "\n" for l in job.split("\n") if "CERASTES_CHECK_BASE:" in l), "")
+        sub("a fixed base", next(l + "\n" for l in job.split("\n") if "CERASTES_CHECK_BASE:" in l),
+            "      CERASTES_CHECK_BASE: main\n")
+        sub("CC in the env", "      CERASTES_JOBS: 4\n", "      CERASTES_JOBS: 4\n      CC: gcc\n")
+        sub("the macOS setup script", "run: scripts/ci-linux.sh", "run: scripts/ci.sh")
+        sub("both setup scripts", "        run: scripts/ci-linux.sh\n",
+            "        run: scripts/ci-linux.sh\n      - name: Again\n        run: scripts/ci.sh\n")
+        sub("ci-linux.sh || true", "run: scripts/ci-linux.sh\n", "run: scripts/ci-linux.sh || true\n")
+        sub("ci-linux.sh with an option", "run: scripts/ci-linux.sh\n", "run: scripts/ci-linux.sh --x\n")
+        sub("ci-linux.sh removed", "      - name: Set up the toolchain\n        run: scripts/ci-linux.sh\n", "")
+        sub("ci-linux.sh after check.sh", "      - name: Set up the toolchain\n        run: scripts/ci-linux.sh\n", "")
+        out["ci-linux.sh after check.sh"] = out["ci-linux.sh after check.sh"].replace(
+            "        run: scripts/check.sh\n", "        run: scripts/check.sh\n"
+            "      - name: Set up the toolchain\n        run: scripts/ci-linux.sh\n")
+        sub("check.sh || true", "run: scripts/check.sh\n", "run: scripts/check.sh || true\n")
+        sub("check.sh with continue-on-error", "        run: scripts/check.sh\n",
+            "        run: scripts/check.sh\n        continue-on-error: true\n")
+        sub("check.sh removed", "      - name: Check everything\n        run: scripts/check.sh\n", "")
+        sub("a shell on check.sh", "        run: scripts/check.sh\n", "        run: scripts/check.sh\n        shell: sh\n")
+        sub("CERASTES_EDG_SRC on a step", "        run: scripts/check.sh\n",
+            "        run: scripts/check.sh\n        env:\n          CERASTES_EDG_SRC: /x\n")
+        sub("a shallow checkout", "fetch-depth: 0", "fetch-depth: 1")
+        sub("a tag instead of a SHA", "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "actions/checkout@v7")
+        sub("the cache save without its if", "        if: steps.silicon-cache.outputs.cache-hit != 'true'\n", "")
+        sub("the upload without always()", "        if: ${{ always() }}\n", "        if: success()\n")
+        sub("the upload without build/vpr", "            build/vpr\n", "")
+        sub("the macOS artifact name", "name: ci-linux-${{ github.run_id }}", "name: ci-${{ github.run_id }}")
+        sub("an added step", "      - name: Upload the evidence\n",
+            "      - name: Print\n        run: echo hi\n      - name: Upload the evidence\n")
+        self.assertGreaterEqual(len(out), 35)
+        for what, text in out.items():
+            with self.subTest(what):
+                self.assertNotEqual(text, Y, "the mutation did not apply")
+                self.assertTrue(ci_workflow_problems(text), what)
+
+    def test_linux_script_mutations_are_found(self):
+        S = self.LINUX_SH
+        out = {}
+
+        def sub(name, old, new):
+            self.assertIn(old, S, f"{name}: the text to mutate is not in ci-linux.sh")
+            self.assertNotIn(name, out)
+            out[name] = S.replace(old, new, 1)
+        for const, old, new in (("OS_VERSION", "OS_VERSION=26.04", "OS_VERSION=24.04"),
+                                ("ARCH", "ARCH=x86_64", "ARCH=aarch64"),
+                                ("GLIBC_VERSION", "GLIBC_VERSION=2.43", "GLIBC_VERSION=2.39"),
+                                ("CLANG_MAJOR", "CLANG_MAJOR=21", "CLANG_MAJOR=22"),
+                                ("CLANG_BANNER", "(6ubuntu1)'", "(7ubuntu1)'"),
+                                ("LLVM_PACKAGE_VERSION", "LLVM_PACKAGE_VERSION=1:21.1.8-6ubuntu1",
+                                 "LLVM_PACKAGE_VERSION=1:21.1.8-7ubuntu1"),
+                                ("GCC_MAJOR", "GCC_MAJOR=16", "GCC_MAJOR=15"),
+                                ("GCC_PACKAGE_VERSION", "GCC_PACKAGE_VERSION=16-20260322-1ubuntu1",
+                                 "GCC_PACKAGE_VERSION=16.2.0-3ubuntu1"),
+                                ("GCC_VERSION", "GCC_VERSION=16.0.1", "GCC_VERSION=16.2.0"),
+                                ("EDG_CLANG_VER", "EDG_CLANG_VER=210108", "EDG_CLANG_VER=210000"),
+                                ("MIN_FREE_GB", "MIN_FREE_GB=6", "MIN_FREE_GB=0")):
+            sub(f"{const} changed", old, new)
+        sub("a constant assigned again later", 'step "bootstrap"\n', 'step "bootstrap"\nGCC_MAJOR=15\n')
+        sub("want only warns", CI_LINUX_SH_WANT, CI_LINUX_SH_WANT.replace(" exit 1;", ""))
+        sub("a second want", CI_LINUX_SH_WANT, CI_LINUX_SH_WANT + "\nwant() { :; }")
+        sub("an early exit 0", 'step "machine"\n', 'step "machine"\nexit 0\n')
+        sub("a top-level if", 'step "toolchain"\n', 'step "toolchain"\nif false; then\n')
+        sub("set +e", 'step "machine"\n', 'step "machine"\nset +e\n')
+        sub("the apt install hidden", "shellcheck\n", "shellcheck || true\n")
+        sub("an upgrade", "sudo apt-get install -y -q --no-install-recommends",
+            "sudo apt-get upgrade -y -q && sudo apt-get install -y -q --no-install-recommends")
+        sub("another package installed", " shellcheck\n", " shellcheck gcc-15\n")
+        sub("the OS assertion never failing", '|| want "the OS is', '|| :; want "the OS is')
+        sub("the glibc assertion warns only", '|| want "glibc is', '|| echo "glibc is')
+        sub("the banner loop over clang only", 'for tool in "$clang_cc" "$clang_cxx"; do', 'for tool in "$clang_cc"; do')
+        sub("the package loop without libc++", 'for pkg in "clang-$CLANG_MAJOR" "libc++-$CLANG_MAJOR-dev" ',
+            'for pkg in "clang-$CLANG_MAJOR" ')
+        sub("the highest GCC unchecked", '[[ "$gcc_highest" == "$GCC_MAJOR" ]]', '[[ -n "$gcc_highest" ]]')
+        sub("libstdc++ allowed", '[[ "$EDG_CLANG_INCL_SCRAPE" != *"/c++/$GCC_MAJOR"*', '[[ -n "$EDG_CLANG_INCL_SCRAPE"')
+        sub("CERASTES_EDG_SRC dropped from the loop", " COMPILER_PATH CERASTES_EDG_SRC; do", " COMPILER_PATH; do")
+        sub("LD_PRELOAD dropped from the loop", " LD_PRELOAD ", " ")
+        sub("CERASTES_EDG_SRC exported", 'step "machine"\n', 'step "machine"\nexport CERASTES_EDG_SRC=/x\n')
+        sub("bootstrap with --build-only", "\nscripts/bootstrap.sh\n", "\nscripts/bootstrap.sh --build-only\n")
+        sub("a plain extra command", 'step "toolchain"\n', 'step "toolchain"\nuname -a\n')
+        sub("a truncation of check.sh", 'step "toolchain"\n', 'step "toolchain"\n: > scripts/check.sh\n')
+        sub("a function shadowing a command", 'step "toolchain"\n', 'step "toolchain"\nldd() { echo 2.43; }\n')
+        sub("a command in the background", "scripts/bootstrap.sh\n", "scripts/bootstrap.sh &\n")
+        sub("the EDG tree check removed", "python3 scripts/edg_tree.py check\n", "")
+        sub("the libc++ scrape unchecked", '*":/usr/lib/llvm-$CLANG_MAJOR/include/c++/v1:"*', '*":"*')
+        self.assertGreaterEqual(len(out), 35)
+        for what, text in out.items():
+            with self.subTest(what):
+                self.assertNotEqual(text, S, "the mutation did not apply")
+                self.assertTrue(ci_sh_problems(text, CI_LINUX_SH_SPEC), what)
+        for what, text in (("a comment", S.replace('step "machine"\n', '# note\nstep "machine"\n')),
+                           ("blank lines", S.replace('step "toolchain"\n', '\n\nstep "toolchain"\n'))):
+            with self.subTest(what):
+                self.assertEqual(ci_sh_problems(text, CI_LINUX_SH_SPEC), [])
 
 
 class RealDocTreeTests(unittest.TestCase):
@@ -5088,10 +5528,14 @@ class RealDocTreeTests(unittest.TestCase):
             self.assertEqual(cde.main([]), 0, out.getvalue())
 
     def test_ci_workflow_and_script_pass_their_guards(self):
-        # decision 0016: the real ci.yml and scripts/ci.sh are what CiGuardTests pins
+        # decision 0016: the real ci.yml and scripts/ci.sh are what CiGuardTests pins (and
+        # scripts/ci-linux.sh, decision 0031)
         self.assertEqual(ci_workflow_problems((REAL_ROOT / ".github" / "workflows" / "ci.yml").read_bytes().decode("utf-8")), [])
         self.assertEqual(ci_sh_problems((REAL_ROOT / "scripts" / "ci.sh").read_bytes().decode("utf-8")), [])
-        for name in (".github/workflows/ci.yml", ".github/workflows/docs.yml", "scripts/ci.sh", "scripts/check.sh"):
+        self.assertEqual(ci_sh_problems((REAL_ROOT / "scripts" / "ci-linux.sh").read_bytes().decode("utf-8"),
+                                        CI_LINUX_SH_SPEC), [])
+        for name in (".github/workflows/ci.yml", ".github/workflows/docs.yml", "scripts/ci.sh", "scripts/ci-linux.sh",
+                     "scripts/check.sh"):
             self.assertEqual(non_ascii_problems((REAL_ROOT / name).read_bytes().decode("utf-8")), [], name)
 
     def test_check_sh_runs_the_lint_the_build_and_the_html_check(self):
@@ -5177,7 +5621,7 @@ class E2EGateTests(unittest.TestCase):
                      "DocBuildWarningsTests", "TreeScriptTwinTests", "EdgTreeToolTests",
                      "RealTagTableTests", "RealDiagnosticTests", "RealNativeTests",
                      "RealRefusedTests", "RealTagCoverageTests", "ChecksSelftestTests",
-                     "PrinterPathTests"):
+                     "PrinterPathTests", "SystemHeaderMacroTests", "PlatformTagRunTests"):
             self.assertRegex(source, rf"@e2e_gate\([^@]*?\)\nclass {name}\b", name)
 
 
@@ -7301,6 +7745,16 @@ class BannerTests(unittest.TestCase):
             "GCC", "Apple clang version 21 (GCC compatible)\n"))
         self.assertIn("does not say", rt.banner_problem("GCC", ""))
         self.assertIn("does not say", rt.banner_problem("Apple clang", "\n"))
+        # Ubuntu's GCC names the FSF on its second line, not GCC on its first (decision 0031)
+        self.assertIsNone(rt.banner_problem("GCC", "g++-16 (Ubuntu 16-20260322-1ubuntu1) 16.0.1 20260322 (experimental)\n"
+                                                   "Copyright (C) 2026 Free Software Foundation, Inc.\n"))
+        self.assertIn("does not say GCC", rt.banner_problem("GCC", "g++-16 (Ubuntu 16-20260322-1ubuntu1) 16.0.1\n"))
+        self.assertIn("does not say GCC", rt.banner_problem(
+            "GCC", "Ubuntu clang version 21.1.8 (6ubuntu1)\nCopyright (C) 2026 Free Software Foundation, Inc.\n"))
+        # the Linux job's clang (decision 0031)
+        self.assertIsNone(rt.banner_problem("clang", "Ubuntu clang version 21.1.8 (6ubuntu1)\n"))
+        self.assertIn("does not say clang", rt.banner_problem("clang", REAL_BANNERS["GCC"]))
+        self.assertIn("does not say clang", rt.banner_problem("clang", "\n"))
 
     def test_only_the_first_line_counts(self):
         self.assertIsNotNone(rt.banner_problem("GCC", "tool 1.0\nbuilt with GCC\n"))
@@ -7355,6 +7809,8 @@ class NativeCase(FakeFrontEndCase):
         sdk = mock.patch.object(rt, "sdk_root", return_value="/fake/sdk")
         sdk.start()
         self.addCleanup(sdk.stop)
+        # the SDK reaches Apple clang only; the Linux job's clang gets none (decision 0031)
+        self.CLANG_SDK = "/fake/sdk" if rt.CLANG_FAMILY == "Apple clang" else "-"
 
     def native_test(self, name, *lines, extra="// expect: native-ok",
                     outcome="// expect: golden"):
@@ -7379,14 +7835,14 @@ class NativeRunTests(NativeCase):
         t = self.native_test("a.cpp", "int f();")
         status, out, _ = self.run_harness(t)
         self.assertEqual(status, 0, out)
-        self.assertIn(f"PASS  {rt.rel(t)} [c++20] native-ok: Apple clang", out)
+        self.assertIn(f"PASS  {rt.rel(t)} [c++20] native-ok: {rt.CLANG_FAMILY}", out)
         self.assertIn(f"PASS  {rt.rel(t)} [c++20] native-ok: GCC", out)
-        self.assertTrue(self.summary(out).endswith("native-ok runs: Apple clang 1, GCC 1"),
+        self.assertTrue(self.summary(out).endswith(f"native-ok runs: {rt.CLANG_FAMILY} 1, GCC 1"),
                         self.summary(out))
         flags = ("-x c++ -std=c++20 -Wall -Wextra -Werror -U__CERASTES__ -I /fake/include "
                  f"-c -o /dev/null {rt.rel(t)}")
         self.assertEqual(self.compiles_of(t), [
-            f"fake_clang_cxx SDKROOT=/fake/sdk {flags}", f"fake_gcc_cxx SDKROOT=- {flags}"])
+            f"fake_clang_cxx SDKROOT={self.CLANG_SDK} {flags}", f"fake_gcc_cxx SDKROOT=- {flags}"])
 
     def test_c_files_use_the_c_compilers_and_c23(self):
         t = self.native_test("a.c", "int f(void);")
@@ -7395,8 +7851,8 @@ class NativeRunTests(NativeCase):
         flags = ("-x c -std=c23 -Wall -Wextra -Werror -U__CERASTES__ -I /fake/include "
                  f"-c -o /dev/null {rt.rel(t)}")
         self.assertEqual(self.compiles_of(t), [
-            f"fake_clang_cc SDKROOT=/fake/sdk {flags}", f"fake_gcc_cc SDKROOT=- {flags}"])
-        self.assertIn("native-ok: Apple clang", out)
+            f"fake_clang_cc SDKROOT={self.CLANG_SDK} {flags}", f"fake_gcc_cc SDKROOT=- {flags}"])
+        self.assertIn(f"native-ok: {rt.CLANG_FAMILY}", out)
 
     def test_each_mode_is_compiled_in_its_language(self):
         t = self.native_test("m.cpp", "int f();", extra="// expect: native-ok\n// mode: c++20, c23")
@@ -7406,14 +7862,14 @@ class NativeRunTests(NativeCase):
         self.assertEqual(len(calls), 4, calls)
         self.assertEqual(sum("-x c++ -std=c++20" in c for c in calls), 2)
         self.assertEqual(sum("-x c -std=c23" in c for c in calls), 2)
-        self.assertTrue(self.summary(out).endswith("native-ok runs: Apple clang 2, GCC 2"))
+        self.assertTrue(self.summary(out).endswith(f"native-ok runs: {rt.CLANG_FAMILY} 2, GCC 2"))
 
     def test_a_rejected_file_fails_only_that_compiler(self):
         t = self.native_test("g.cpp", "int f();", "// native-fail: gcc")
         status, out, _ = self.run_harness(t)
         self.assertEqual(status, 1, out)
         self.assertIn(f"FAIL  {rt.rel(t)} [c++20] native-ok: GCC", out)
-        self.assertIn(f"PASS  {rt.rel(t)} [c++20] native-ok: Apple clang", out)
+        self.assertIn(f"PASS  {rt.rel(t)} [c++20] native-ok: {rt.CLANG_FAMILY}", out)
         self.assertIn("GCC rejected the file (exit status 1)", out)
         self.assertIn("fake: error: unused variable", out)
         self.assertIn(f"PASS  {rt.rel(t)} [c++20]\n", out)  # the golden itself still passes
@@ -7428,7 +7884,7 @@ class NativeRunTests(NativeCase):
         t = self.native_test("n.cpp", "int f();", "// native-noise: clang")
         status, out, _ = self.run_harness(t)
         self.assertEqual(status, 1, out)
-        self.assertIn("Apple clang printed diagnostics", out)
+        self.assertIn(f"{rt.CLANG_FAMILY} printed diagnostics", out)
         self.assertIn("fake: warning: noise", out)
         self.assertIn(f"PASS  {rt.rel(t)} [c++20] native-ok: GCC", out)
 
@@ -7495,7 +7951,7 @@ class NativeRunTests(NativeCase):
         t = self.native_test("k.cpp", "int f();")
         self.run_harness(t)
         calls = self.compiles_of(t)
-        self.assertTrue(calls[0].startswith("fake_clang_cxx SDKROOT=/fake/sdk "), calls)
+        self.assertTrue(calls[0].startswith(f"fake_clang_cxx SDKROOT={self.CLANG_SDK} "), calls)
         self.assertTrue(calls[1].startswith("fake_gcc_cxx SDKROOT=- "), calls)
         self.log.unlink()
         with mock.patch.dict(os.environ, {"SDKROOT": "/user/sdk"}):
@@ -7511,9 +7967,9 @@ class NativeCanaryTests(NativeCase):
         b = self.native_test("b.cpp", "int f();")
         status, out, _ = self.run_harness(a, b)
         self.assertEqual(status, 0, out)
-        self.assertIn("PASS  canary native-ok [Apple clang, c++]", out)
+        self.assertIn(f"PASS  canary native-ok [{rt.CLANG_FAMILY}, c++]", out)
         self.assertIn("PASS  canary native-ok [GCC, c++]", out)
-        self.assertNotIn("[Apple clang, c]", out)  # no C test, no C canary
+        self.assertNotIn(f"[{rt.CLANG_FAMILY}, c]", out)  # no C test, no C canary
         calls = self.calls()
         self.assertEqual(sum(c.endswith(" --version") for c in calls), 2)
         # per compiler: a clean snippet and one with an unused variable
@@ -7522,13 +7978,13 @@ class NativeCanaryTests(NativeCase):
         self.assertEqual(sum("canary_attribute.cpp" in c for c in calls), 2)
         self.assertEqual(sum("--version" in c for c in calls), 2)
         self.assertEqual(len(self.compiles_of(a)) + len(self.compiles_of(b)), 4)
-        self.assertTrue(out.index("canary native-ok [Apple clang") < out.index(rt.rel(a)))
+        self.assertTrue(out.index(f"canary native-ok [{rt.CLANG_FAMILY}") < out.index(rt.rel(a)))
 
     def test_a_c_test_adds_the_c_canary(self):
         t = self.native_test("c.c", "int f(void);")
         status, out, _ = self.run_harness(t)
         self.assertEqual(status, 0, out)
-        self.assertIn("PASS  canary native-ok [Apple clang, c]", out)
+        self.assertIn(f"PASS  canary native-ok [{rt.CLANG_FAMILY}, c]", out)
         self.assertIn("canary_fail.c ", " ".join(self.calls()) + " ")
 
     def canary_failure(self, env, family_label, needle):
@@ -7546,16 +8002,17 @@ class NativeCanaryTests(NativeCase):
         return out
 
     def test_a_banner_of_the_wrong_family(self):
-        self.canary_failure({"FAKE_BANNER_clang": "clang version 18 (Homebrew)"},
-                            "Apple clang", "does not say Apple clang")
+        wrong = "clang version 18 (Homebrew)" if rt.CLANG_FAMILY == "Apple clang" else "gcc (GCC) 16.0.1"
+        self.canary_failure({"FAKE_BANNER_clang": wrong},
+                            rt.CLANG_FAMILY, f"does not say {rt.CLANG_FAMILY}")
         self.canary_failure({"FAKE_BANNER_gcc": "Apple clang version 21 (clang-2100)"},
                             "GCC", "does not say GCC")
 
     def test_a_compiler_that_accepts_everything(self):
         out = self.canary_failure({"FAKE_ACCEPT_ALL_gcc": "1"}, "GCC",
                                   "an unused variable was not rejected")
-        self.assertIn("PASS  canary native-ok [Apple clang, c++]", out)
-        self.canary_failure({"FAKE_ACCEPT_ALL_clang": "1"}, "Apple clang",
+        self.assertIn(f"PASS  canary native-ok [{rt.CLANG_FAMILY}, c++]", out)
+        self.canary_failure({"FAKE_ACCEPT_ALL_clang": "1"}, rt.CLANG_FAMILY,
                             "an unused variable was not rejected")
 
     def test_a_compiler_that_accepts_an_unknown_attribute(self):
@@ -7563,8 +8020,8 @@ class NativeCanaryTests(NativeCase):
         # `[[cerastes::...]]` left in a file pass as ordinary code
         out = self.canary_failure({"FAKE_ACCEPT_ATTR_gcc": "1"}, "GCC",
                                   "an unknown scoped attribute ([[unreg_ns::x]]) was not rejected")
-        self.assertIn("PASS  canary native-ok [Apple clang, c++]", out)
-        self.canary_failure({"FAKE_ACCEPT_ATTR_clang": "1"}, "Apple clang",
+        self.assertIn(f"PASS  canary native-ok [{rt.CLANG_FAMILY}, c++]", out)
+        self.canary_failure({"FAKE_ACCEPT_ATTR_clang": "1"}, rt.CLANG_FAMILY,
                             "an unknown scoped attribute")
 
     def test_the_c_canary_has_the_attribute_snippet_too(self):
@@ -7574,15 +8031,15 @@ class NativeCanaryTests(NativeCase):
         os.environ["FAKE_ACCEPT_ATTR_clang"] = "1"
         status, out, _ = self.run_harness(t)
         self.assertEqual(status, 1, out)
-        self.assertIn("FAIL  canary native-ok [Apple clang, c]", out)
+        self.assertIn(f"FAIL  canary native-ok [{rt.CLANG_FAMILY}, c]", out)
 
     def test_a_compiler_that_rejects_everything(self):
-        self.canary_failure({"FAKE_REJECT_ALL_clang": "1"}, "Apple clang",
+        self.canary_failure({"FAKE_REJECT_ALL_clang": "1"}, rt.CLANG_FAMILY,
                             "a clean snippet did not compile")
 
     def test_a_compiler_that_cannot_be_run(self):
         gone = str(self.dir.parent / "bin" / "nope")
-        self.canary_failure({"CERASTES_CLANG_CXX": gone}, "Apple clang", "could not be run")
+        self.canary_failure({"CERASTES_CLANG_CXX": gone}, rt.CLANG_FAMILY, "could not be run")
 
     def test_a_broken_compiler_never_makes_a_failing_file_pass(self):
         # An accept-everything GCC would let this file through; the canary
@@ -7608,12 +8065,12 @@ class NativeEnvironmentTests(NativeCase):
         self.set_env(CERASTES_GCC_CC="", CERASTES_GCC_CXX="")
         status, out, _ = self.run_harness(a, b)
         self.assertEqual(status, 0, out)
-        self.assertEqual(out.count("native-ok: GCC not installed; Apple clang only"), 1)
-        self.assertTrue(self.summary(out).endswith("native-ok runs: Apple clang 2"),
+        self.assertEqual(out.count(f"native-ok: GCC not installed; {rt.CLANG_FAMILY} only"), 1)
+        self.assertTrue(self.summary(out).endswith(f"native-ok runs: {rt.CLANG_FAMILY} 2"),
                         self.summary(out))
         self.assertNotIn("GCC", out.replace("native-ok: GCC not installed", ""))
         self.assertFalse(any(c.startswith("fake_gcc") for c in self.calls()))
-        self.assertEqual(rt.GCC_MISSING_NOTE, "native-ok: GCC not installed; Apple clang only")
+        self.assertEqual(rt.GCC_MISSING_NOTE, f"native-ok: GCC not installed; {rt.CLANG_FAMILY} only")
 
     def test_a_named_gcc_that_is_missing_fails(self):
         t = self.native_test("a.cpp", "int f();")
@@ -7624,7 +8081,7 @@ class NativeEnvironmentTests(NativeCase):
         self.assertNotIn("GCC not installed", out)
         self.assertIn("FAIL  canary native-ok [GCC, c++]", out)
         self.assertIn(f"FAIL  {rt.rel(t)} [c++20] native-ok: GCC", out)
-        self.assertIn(f"PASS  {rt.rel(t)} [c++20] native-ok: Apple clang", out)
+        self.assertIn(f"PASS  {rt.rel(t)} [c++20] native-ok: {rt.CLANG_FAMILY}", out)
 
     def run_with_env(self, env):
         t = self.native_test("e.cpp", "int f();")
@@ -8812,7 +9269,7 @@ class RealNativeTests(MemoisedStamp, unittest.TestCase):
         self.env = rt.load_env()
 
     def families(self):
-        out = ["Apple clang"]
+        out = [rt.CLANG_FAMILY]
         if self.env.get("CERASTES_GCC_CC"):
             out.append("GCC")
         return out
@@ -8832,9 +9289,9 @@ class RealNativeTests(MemoisedStamp, unittest.TestCase):
     def test_the_real_canaries_pass(self):
         setup = rt.NativeSetup(self.env["CERASTES_INCLUDE_DIR"], [])
         for comp, lang, mode in (
-                (rt.NativeCompiler("Apple clang", self.env["CERASTES_CLANG_CC"],
+                (rt.NativeCompiler(rt.CLANG_FAMILY, self.env["CERASTES_CLANG_CC"],
                                    self.env["CERASTES_CLANG_CXX"]), "c++", "c++20"),
-                (rt.NativeCompiler("Apple clang", self.env["CERASTES_CLANG_CC"],
+                (rt.NativeCompiler(rt.CLANG_FAMILY, self.env["CERASTES_CLANG_CC"],
                                    self.env["CERASTES_CLANG_CXX"]), "c", "c23")):
             self.assertEqual(rt.native_canary(comp, lang, mode, self.env, setup.include_dir), [])
         if self.env.get("CERASTES_GCC_CC"):
@@ -8866,7 +9323,7 @@ class RealNativeTests(MemoisedStamp, unittest.TestCase):
     def test_a_c_file_in_c23(self):
         status, out = self.run_test("ok.c", "#include <stdio.h>\nint add1(int x) { return x + 1; }\n")
         self.assertEqual(status, 0, out)
-        self.assertIn("native-ok: Apple clang", out)
+        self.assertIn(f"native-ok: {rt.CLANG_FAMILY}", out)
 
     def test_a_warning_fails_every_compiler(self):
         status, out = self.run_test("w.cpp", "int f() { int unused = 0; return 1; }\n")
@@ -8893,8 +9350,8 @@ class RealNativeTests(MemoisedStamp, unittest.TestCase):
         path = self.dir / name
         path.write_text(body)
         lang, mode = "c++", "c++20"
-        comp = (rt.NativeCompiler("Apple clang", self.env["CERASTES_CLANG_CC"],
-                                  self.env["CERASTES_CLANG_CXX"]) if family == "Apple clang"
+        comp = (rt.NativeCompiler(rt.CLANG_FAMILY, self.env["CERASTES_CLANG_CC"],
+                                  self.env["CERASTES_CLANG_CXX"]) if family == rt.CLANG_FAMILY
                 else rt.NativeCompiler("GCC", self.env["CERASTES_GCC_CC"],
                                        self.env["CERASTES_GCC_CXX"]))
         return rt.run_tool(rt.native_command(comp.exe(lang), lang, mode,
@@ -9044,7 +9501,7 @@ class NativeEnvironmentAuthorityTests(NativeCase):
         self.assertEqual(status, 0, out)
         self.assertNotIn("GCC not installed", out)
         self.assertIn(f"PASS  {rt.rel(t)} [c++20] native-ok: GCC", out)
-        self.assertTrue(self.summary(out).endswith("Apple clang 1, GCC 1"), self.summary(out))
+        self.assertTrue(self.summary(out).endswith(f"{rt.CLANG_FAMILY} 1, GCC 1"), self.summary(out))
         self.assertIn("ignoring the inherited CERASTES_GCC_CC", err)
 
     def test_a_foreign_include_directory_is_ignored(self):
@@ -9883,6 +10340,47 @@ class COnlyHeaderTests(unittest.TestCase):
                 ("after code", "// expect: verified\nint x;\n// c-only: a\n", ".c")):
             with self.subTest(what), self.assertRaises(rt.HeaderError):
                 rt.parse_header(text, suffix)
+
+
+class PlatformTagTests(unittest.TestCase):
+    """`; platform: macos|linux` on a `mode:` or `c-only:` line (decision 0031): the test runs only on that platform."""
+
+    def test_grammar(self):
+        exp = rt.parse_header("// expect: verified\n// mode: c23, c++20; platform: macos\n", ".c")
+        self.assertEqual((exp.modes, exp.platform), (["c23", "c++20"], "macos"))
+        exp = rt.parse_header("// expect: verified\n// c-only: a; b; platform: linux\n", ".c")
+        self.assertEqual((exp.c_only, exp.platform, exp.modes), ("a; b", "linux", ["c23"]))
+        self.assertIsNone(rt.parse_header("// expect: verified\n// mode: c23\n", ".c").platform)
+        self.assertEqual(rt.parse_header("// expect: verified\n// c-only: a; b\n", ".c").c_only, "a; b")
+        self.assertIn(rt.HOST_PLATFORM, rt.PLATFORMS)
+
+    def test_bad_headers(self):
+        for what, text in (
+                ("another platform", "// expect: verified\n// mode: c23; platform: windows\n"),
+                ("another key", "// expect: verified\n// mode: c23; os: macos\n"),
+                ("no value", "// expect: verified\n// mode: c23; platform:\n"),
+                ("twice", "// expect: verified\n// mode: c23; platform: macos\n// c-only: a; platform: macos\n"),
+                ("another platform on c-only", "// expect: verified\n// c-only: a; platform: bsd\n")):
+            with self.subTest(what), self.assertRaises(rt.HeaderError):
+                rt.parse_header(text, ".c")
+
+
+
+@e2e_gate((rt.ROOT / "build" / "env.sh").exists(), "build/env.sh missing; run scripts/bootstrap.sh")
+class PlatformTagRunTests(unittest.TestCase):
+    """The harness skips a test of the other platform by name (decision 0031)."""
+
+    def test_a_test_of_the_other_platform_is_skipped_by_name(self):
+        other = next(x for x in rt.PLATFORMS if x != rt.HOST_PLATFORM)
+        with tempfile.TemporaryDirectory(dir=REAL_ROOT / "build") as tmp:
+            t = Path(tmp) / "elsewhere.c"
+            t.write_text(f"// expect: verified\n// mode: c23; platform: {other}\nint f(void) {{ return 0; }}\n")
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                status = rt.main([str(t)])
+            self.assertEqual(status, 0, out.getvalue())
+            self.assertIn(f"SKIP  {rt.rel(t)}: runs on {other} only (decision 0031)", out.getvalue())
+            self.assertTrue(out.getvalue().rstrip().endswith("0 passed, 0 failed, 1 skipped"), out.getvalue())
 
 
 class VerifyTagValidationTests(unittest.TestCase):
@@ -11404,7 +11902,7 @@ class VerifyNativeTests(VerifierMixin, NativeCase):
                          sorted([f"fake_clang_cxx {cxx}", f"fake_gcc_cxx {cxx}",
                                  f"fake_clang_cc {c}", f"fake_gcc_cc {c}"]))
         self.assertIn(f"PASS  {rt.rel(t)} [c++20] native-ok: GCC", out)
-        self.assertIn(f"PASS  {rt.rel(t)} [c23] native-ok: Apple clang", out)
+        self.assertIn(f"PASS  {rt.rel(t)} [c23] native-ok: {rt.CLANG_FAMILY}", out)
         self.assertIn("canary native-ok [GCC, c++]", out)
         self.assertIn("canary native-ok [GCC, c]", out)
 
@@ -13078,6 +13576,119 @@ class RealTagCoverageTests(unittest.TestCase):
         self.assertGreater(len(defined), 10)
         self.assertEqual(tag_coverage_problems(defined, self.used_tags(),
                                                UNTESTED_BY_FRONTEND_ERROR), [])
+
+
+@e2e_gate(_real_front_end_available() and _real_tables_available(),
+          "CERASTES_FE, scripts/cerastes-fe.sh or the generated headers missing; "
+          "run scripts/bootstrap.sh")
+class SystemHeaderMacroTests(unittest.TestCase):
+    """Decision 0008 item 2 as amended by record 0031 item 9: in a system file, an #undef of a predefined macro whose
+    next directive for that name is its identical #define in the same file changes nothing (glibc's <stdint.h> and
+    __INT64_C), and so does that #define; anything else stays annotation_macro_changed.  The must-fail cases report in
+    a header, which no expect line can name, so they are here; the positive is
+    tests/annotations/macros/system_header_redefinition.cpp."""
+
+    PRAGMA = "#pragma GCC system_header\n"
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+        self.env = rt.load_env()
+        self.registry = rt.load_registry(self.env)
+
+    def changed(self, header, extra_header=None, main=None):
+        """The annotation_macro_changed errors (file name, line) of a C++ file that includes `header` (and `g.h`, when
+        given, after it); the front end's status must agree (0 with none, EDG's error status otherwise)."""
+        (self.dir / "h.h").write_text(header)
+        if extra_header is not None:
+            (self.dir / "g.h").write_text(extra_header)
+        path = self.dir / "t.cpp"
+        path.write_text(main if main is not None else
+                        '#include "h.h"\n' + ('#include "g.h"\n' if extra_header is not None else "") +
+                        "#include <cerastes.h>\nint half(int x) CERASTES_REQUIRES(x >= 0);\n")
+        run = rt.run_tool([*rt.FE_COMMAND, "--c++20", *rt.DIAG_OPTIONS, str(path)], self.env, rt.FRONTEND_TIMEOUT_S)
+        parsed = rt.parse_fe_diagnostics(run.stderr)
+        self.assertEqual(parsed.problems, [], run.stderr)
+        out = [(Path(d.file).name, d.line) for d in parsed.diags
+               if d.severity == "error" and d.tag(self.registry) == rt.CERASTES_TAG_PREFIX + "annotation_macro_changed"]
+        others = [d for d in parsed.diags if d.severity == "error"
+                  and d.tag(self.registry) != rt.CERASTES_TAG_PREFIX + "annotation_macro_changed"]
+        self.assertEqual(others, [], run.stderr)
+        self.assertEqual(run.returncode, rt.EDG_ERRORS_STATUS if out else 0, run.stderr)
+        return out
+
+    def predefined_texts(self):
+        """The predefined macros' texts of this platform's front end, by name (from --il_display)."""
+        probe = self.dir / "probe.cpp"
+        probe.write_text("int probe;\n")
+        run = rt.run_tool([*rt.FE_COMMAND, "--c++20", "--il_display", str(probe)], self.env, rt.FRONTEND_TIMEOUT_S)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        # il_display writes the text as a C string: \" and \\ are its only escapes in these
+        return {m.group(1): m.group(0)[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+                for m in re.finditer(r'"#define (\w+)(?:\(| ).*"$', run.stdout, re.M)}
+
+    def test_the_identical_redefinition_is_no_change(self):
+        self.assertEqual(self.changed(self.PRAGMA + "#undef __CHAR_BIT__\n#define __CHAR_BIT__  8\n"), [])
+        self.assertEqual(self.changed(self.PRAGMA + "#define __CHAR_BIT__ 8\n"), [])
+
+    def test_another_value_is_a_change(self):
+        self.assertEqual(self.changed(self.PRAGMA + "#undef __CHAR_BIT__\n#define __CHAR_BIT__ 9\n"),
+                         [("h.h", 2), ("h.h", 3)])
+
+    def test_an_undef_without_the_redefinition_is_a_change(self):
+        self.assertEqual(self.changed(self.PRAGMA + "#undef __CHAR_BIT__\n"), [("h.h", 2)])
+
+    def test_the_redefinition_in_another_file_does_not_count(self):
+        self.assertEqual(self.changed(self.PRAGMA + "#undef __CHAR_BIT__\n",
+                                      self.PRAGMA + "#define __CHAR_BIT__ 8\n"), [("h.h", 2), ("g.h", 2)])
+
+    def test_the_redefinition_in_a_second_inclusion_does_not_count(self):
+        # audit (S5): user code between two inclusions of one header would run with the macro undefined
+        header = self.PRAGMA + "#ifndef H_ONCE\n#define H_ONCE\n#undef __CHAR_BIT__\n#else\n#define __CHAR_BIT__ 8\n#endif\n"
+        main = ('#include "h.h"\n#include <cerastes.h>\n#if __CHAR_BIT__ == 8\n#define MY_BITS 8\n#else\n'
+                '#define MY_BITS 9\n#endif\n#include "h.h"\nint g(int x) CERASTES_REQUIRES(x < MY_BITS);\n')
+        self.assertEqual(self.changed(header, main=main), [("h.h", 4), ("h.h", 6)])
+
+    def test_a_file_included_in_between_breaks_the_pair(self):
+        self.assertEqual(self.changed(self.PRAGMA + '#undef __CHAR_BIT__\n#include "g.h"\n#define __CHAR_BIT__ 8\n',
+                                      "extern int from_g;\n"), [("h.h", 2), ("h.h", 4)])
+
+    def test_a_string_with_other_spacing_is_a_change(self):
+        # audit (S5): the comparison is EDG's normalized text, exact; string literals keep their spaces
+        texts = self.predefined_texts()
+        self.assertIn("__clang_version__", texts)
+        value = texts["__clang_version__"][len("#define __clang_version__ "):]
+        self.assertTrue(value.startswith('"') and value.endswith('"'), value)
+        spaced = value[:-1] + ' "'
+        self.assertEqual(self.changed(self.PRAGMA + "#undef __clang_version__\n#define __clang_version__ " + value + "\n"), [])
+        self.assertEqual(self.changed(self.PRAGMA + "#undef __clang_version__\n#define __clang_version__ " + spaced + "\n"),
+                         [("h.h", 2), ("h.h", 3)])
+
+    def test_a_function_like_predefinition(self):
+        # glibc's __INT64_C is the reason for the rule; macOS predefines no function-like macro with a text, and that is
+        # pinned here too, so that the case cannot appear there untested
+        texts = {n: t for n, t in self.predefined_texts().items() if t.startswith(f"#define {n}(")}
+        if rt.CLANG_FAMILY == "Apple clang":
+            self.assertEqual(texts, {})
+            return
+        self.assertIn("__INT64_C", texts)
+        text = texts["__INT64_C"]
+        self.assertEqual(self.changed(self.PRAGMA + "#undef __INT64_C\n" + text + "\n"), [])
+        other = text.replace("(c)", "(d)").replace(" c ", " d ")
+        self.assertNotEqual(other, text)
+        self.assertEqual(self.changed(self.PRAGMA + "#undef __INT64_C\n" + other + "\n"), [("h.h", 2), ("h.h", 3)])
+
+    def test_a_function_like_redefinition_of_an_object_like_macro_is_a_change(self):
+        self.assertEqual(self.changed(self.PRAGMA + "#undef __CHAR_BIT__\n#define __CHAR_BIT__() 8\n"),
+                         [("h.h", 2), ("h.h", 3)])
+
+    def test_a_user_header_gets_no_exception(self):
+        self.assertEqual(self.changed("#undef __CHAR_BIT__\n#define __CHAR_BIT__ 8\n"), [("h.h", 1), ("h.h", 2)])
+
+    def test_before_the_pragma_the_header_is_a_user_file(self):
+        self.assertEqual(self.changed("#undef __CHAR_BIT__\n" + self.PRAGMA + "#define __CHAR_BIT__ 8\n"),
+                         [("h.h", 1), ("h.h", 3)])
 
 
 @e2e_gate(_real_front_end_available() and _real_tables_available(),

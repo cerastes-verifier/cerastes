@@ -121,6 +121,7 @@ Every test file starts with expectation lines that `scripts/run_tests.py` checks
 | S4 CI tiers | 2026-10-27 | 0016 (item 14) | pull requests and pushes to `main` run a PR tier (Silicon for the changed tests, the doc examples and a fixed 1-in-8 sample; every other run); the full check every night at 07:00 UTC and on dispatch |
 | M4.4d Exact sets, constant masks | 2026-10-27 | 0026 | a precondition and a comma's value get their exact sets, today's sets as the fallback (one `requires` per argument accepted); constant masks as remainders, the `bit_mask.c [c23]` hang fixed |
 | M4.5a Memory-model design · `\|`/`^` masks | 2026-10-27 | 0027–0030 | the C memory model designed and audited (a pointer as a `Ref` over a `Block` domain with four axioms, member blocks, liveness, explicit checks; fixtures in `tests/viper-smoke/memory/`), `[[cerastes::owning]]`, P4222's markers, C's spec functions, vlibc; `\|`/`^` with constant masks decided; M4.4e moved to M8, S5 Linux CI first |
+| S5 Linux CI | 2026-10-28 | 0031 | a second CI job, `check-linux`, on `ubuntu-26.04` x86-64 in both tiers (`scripts/ci-linux.sh`); `bootstrap.sh` for Linux (clang 21 over libc++ 21 and glibc 2.43, Ubuntu's GCC 16 snapshot, sbt and Z3 by checksum); glibc's `assert`; five Embedded C extensions off in `edg_config` so both front ends accept the same language |
 
 The finished milestones' plans (goals, tasks, acceptance) are in the commit named above; `internal/status.md` has a
 row per session.
@@ -139,8 +140,7 @@ history of `internal/status.md`).
 
 | Session | Scope | Needs |
 |---|---|---|
-| **S5 Linux CI** | a `ubuntu-26.04` x86-64 job beside `xcode-27` (owner, 2026-10-27, during M4.5a: "the first sub phase should be adding Linux support to the CI"); 0016 item 13's list; MSVC deferred to M8 | M4.5a |
-| **M4.5 Pointers** (sessions b1–f3, below) | the memory model for C (records 0028–0030) | M4.5a, S5 |
+| **M4.5 Pointers** (sessions b1–f3, below) | the memory model for C (records 0028–0030) | M4.5a, S5 (done) |
 | **M4.6 Chars and strings** | string literals as read-only arrays, `char` buffers, vlibc's `<string.h>` (`strlen`/`memcpy`/`memcmp`/`strcmp` contracts and verified implementations), `main(argc, argv)` | M4.5e2, M4.5f3 |
 | **M4.7 Function pointers** | contracts on function types, calls through pointers ("the pointer satisfies the type") | M4.5b1 |
 | **M4.8 C parity close-out** | the VeriFast C differential set, the M4 mutation run, the Memory and ownership page complete, M4's acceptance, the deferred list for M8 | all |
@@ -320,8 +320,8 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
   - **Platforms beyond macOS and x86-64 Linux** (owner, 2026-10-27, during M4.5a: "If MSVC is easy add it, if not
     defer"). MSVC is not easy: it needs a second EDG configuration besides 0002's Clang emulation, a Windows bootstrap
     without bash, a driver without `posix_spawn`, Windows builds of the JDK 17 and Z3 pins, and an MSVC `native-ok`
-    matrix. arm64 Linux (`ubuntu-24.04-arm`) adds a second set of target facts (`wchar_t` is unsigned there). S5 covers
-    `ubuntu-24.04` x86-64 only.
+    matrix. arm64 Linux (`ubuntu-26.04-arm`) adds a second set of target facts (plain `char` and `wchar_t` are unsigned
+    there). S5 covered `ubuntu-26.04` x86-64 only (record 0031; the owner moved it from 24.04).
   - **The warning sweep (was M4.4e;** owner, 2026-10-27, M4.5a planning: "warnings will impact much more than just
     what we have now"). Every default and `-Wall` warning of clang 21 and GCC 16 that can fire on the language
     cerastes accepts, measured in both modes and rejected like the compilers (one rule per family) or listed; record

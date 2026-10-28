@@ -1,5 +1,5 @@
 // expect: rejected cerastes-unsupported_expression @ L10
-// mode: c23, c++20
+// mode: c23, c++20; platform: macos
 // twin: tests/scalar/const_global.c
 // Pins: 0017 item 2: a global declared in a system file is rejected at its use (a value is not a contract)
 #include <stdio.h>

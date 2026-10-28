@@ -26,8 +26,8 @@ The integer types are `bool`, `char`, `signed char`, `unsigned char`, `short`,
 `int`, `long`, `long long` and their unsigned forms, `wchar_t`, `char8_t`,
 `char16_t`, `char32_t`, and `+__int128+` with `+unsigned __int128+`. Their sizes
 and whether plain `char` is signed come from the compiler's description of the
-target (on macOS for Apple silicon `int` is 32 bits, `long` is 64 and plain
-`char` is signed), never from constants inside cerastes.
+target (on macOS for Apple silicon and on x86-64 Linux `int` is 32 bits, `long`
+is 64 and plain `char` is signed), never from constants inside cerastes.
 
 A value of a type is always inside its range. A parameter is assumed to be in
 the range of its type when the function starts, and cerastes proves that every

@@ -16,9 +16,9 @@ in both places.
 | EDG front end | the owner's fork `mborland/compiler`, branch `cerastes` (decision 0009, since 2026-10-14; submodule URL https://github.com/mborland/compiler.git), currently at the fork's `f0ed5525af135a139630d9b5840bd13b7d2d158c` (2026-10-22): the cerastes series merged with upstream `edgcpp/compiler` `main` `ec2f12cffa` ("Add codecov reporting []"), through the fix branch of EDG bug 0022. The base was upstream `034385ba0a` (`7.0-33`) in M2; see "Pin history" | submodule `third_party/edg`; stock preset `macos-arm-clang-debug`, built out of tree in `build/edg` |
 | Silicon | `viperproject/silicon` tag `v.26.08-release` = `6b540aa45e5af214f4727b7be463ce84b328fabd` | submodule `third_party/silicon`; `sbt assembly` → `target/scala-2.13/silicon.jar` |
 | Silver | `viperproject/silver` `f02e7010639f314447d74732146644565aa8d135` (`v.26.08-release`, the commit Silicon's tag records) | nested submodule `third_party/silicon/silver` |
-| Z3 | 4.16.0, `z3-4.16.0-arm64-osx-15.7.3.zip`, SHA-256 `41828fa07d5cb77bfaee326e8e6dac074f26329c09c633f9e66012bb917cf8ae` | downloaded from the Z3 GitHub release into `build/tools/`, checksum verified |
-| JDK | Homebrew `openjdk@17` (17.0.20.1) | `brew install openjdk@17` |
-| sbt | 1.6.2 (Silicon's `project/build.properties`), started by the Homebrew `sbt` 2.0.10 launcher | `brew install sbt` |
+| Z3 | 4.16.0, `z3-4.16.0-arm64-osx-15.7.3.zip`, SHA-256 `41828fa07d5cb77bfaee326e8e6dac074f26329c09c633f9e66012bb917cf8ae`; on x86-64 Linux (S5, decision 0031) `z3-4.16.0-x64-glibc-2.39.zip`, SHA-256 `7288c49a5bd6dbafd7b0b0d1f65956b91672da24b08f09242919af159be3418e` | downloaded from the Z3 GitHub release into `build/tools/`, checksum verified |
+| JDK | Homebrew `openjdk@17` (17.0.20.1); on Linux the JDK 17 that `JAVA_HOME_17_X64` names (GitHub's image: Temurin 17.0.20+1), else `/usr/lib/jvm/java-17-openjdk-amd64` | `brew install openjdk@17`; on Linux the image's or `apt` |
+| sbt | 1.6.2 (Silicon's `project/build.properties`), started by the Homebrew `sbt` 2.0.10 launcher; on Linux the same 2.0.10 launcher, `sbt-2.0.10.zip`, SHA-256 `6ff28e1dea38d1de48ea3d4e903f0380b85b19f945a103e30ec4298717c90cd7` | `brew install sbt`; on Linux downloaded from sbt's GitHub release into `build/tools/`, checksum verified |
 | Scala | 2.13.18 (silver's `build.sbt`) | fetched by sbt |
 | VeriFast (differential tests, M5) | `mborland/verifast` branch `generic2` = `0fb63506a51cae559ae92348eb54ba7f7be0bf6d`: upstream `master` plus `a18da574` (generic templates) and `0fb63506` (concepts) | not built by bootstrap; see below |
 | Antora (user docs, M1.5) | `antora`, `@antora/cli`, `@antora/site-generator` 3.2.1; `@antora/lunr-extension` 1.0.0-alpha.13 | exact pins in `doc/package.json`, locked by `doc/package-lock.json`; `npm ci` in `doc/` by bootstrap |
@@ -33,6 +33,8 @@ affects verification results:
 | Tool | Version used in M0 |
 |---|---|
 | Host compiler and SDK (builds EDG; supplies the headers EDG parses) | Apple clang 21.0.0 (clang-2100.3.34.2), Command Line Tools 27.0.0.0.1788430756, macOS SDK 27.0 (build `26A425`), macOS 27.0.1 (26A434). CI selects the same Command Line Tools on GitHub's `xcode-27` image and asserts the package version, the clang banner and the SDK version and build (`scripts/ci.sh`, 0016 item 2) |
+| Linux host toolchain (S5, decision 0031) | GitHub's `ubuntu-26.04` image (`20261023.163.3` when S5 planned it), x86-64, glibc 2.43; Ubuntu's `clang-21`, `libc++-21-dev`, `libc++abi-21-dev` `1:21.1.8-6ubuntu1` (banner `Ubuntu clang version 21.1.8 (6ubuntu1)`, EDG emulates 210108); EDG's preset `linux-clang-debug` with ASan and the runtime library off. `scripts/ci-linux.sh` installs what is missing and asserts each version |
+| GCC on Linux (the native-ok runs) | Ubuntu 26.04's `gcc-16`/`g++-16` `16-20260322-1ubuntu1`, a trunk snapshot (`16.0.1 20260322 (experimental)`): the newest GCC 16 that 26.04 packages (owner, handoff question 57); GCC 16.2.0 starts with Ubuntu 26.10 |
 | GCC (the native-ok runs, 0008) | Homebrew `gcc` 16.2.0, the macOS 27 bottle (`--build=aarch64-apple-darwin27`, sysroot `/Library/Developer/CommandLineTools/SDKs/MacOSX27.sdk`, i.e. SDK 27.0); reinstalled by the owner on 2026-10-21, before which it was the macOS 26 bottle with sysroot SDK 26.5. CI installs the same formula and asserts 16.2.0 and that its sysroot is the asserted SDK (0016 item 3) |
 | CMake / Ninja | 4.4.3 / 1.13.2 (CI: the image's, 4.4.4 / 1.13.2) |
 | Python | 3.14.7 (the scripts need 3.9 or later; CI uses 3.14 through `actions/setup-python`, the image's cached 3.14.8) |
@@ -196,6 +198,12 @@ binary in a container and checks its outcomes against the recorded ones
   compiler and SDK", "GCC" and "Python" record it. A change of the image's
   tools fails the job until the owner moves the assertion and this record
   together.
+
+- **Linux CI (S5, 2026-10-28; decision 0031).** No pin moves. New Linux pins: Z3's
+  x86-64 glibc asset, sbt 2.0.10 by download, the image's JDK 17, Ubuntu's clang 21
+  and libc++ 21, and the GCC 16 snapshot of Ubuntu 26.04. `scripts/bootstrap.sh`
+  holds them in its `Linux-x86_64` case and `scripts/ci-linux.sh` asserts them; change
+  a value in both and here together.
 
 - **EDG bug 0022 and upstream `ec2f12cffa` (M4.2c, 2026-10-22).** `97c2141be9` →
   `f0ed5525af`, the owner's merge of branch `0022` (`3b05dd5c43`, the fix of EDG bug

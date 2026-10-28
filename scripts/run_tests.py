@@ -50,7 +50,8 @@ generated err_data.h/err_codes.h of the active EDG build ($CERASTES_EDG_GEN).
 `frontend-refused` tests run the cerastes front end with the options of
 `// cerastes-fe-options:` instead of a mode option and require that the driver
 refuses them: see tests/README.md.
-`native-ok` also compiles the file with Apple clang and, when installed, GCC,
+`native-ok` also compiles the file with Apple clang (clang on Linux, decision 0031)
+and, when installed, GCC,
 with -Wall -Wextra -Werror and no __CERASTES__; each compiler has an
 anti-vacuity canary.  `// twin:` ties a must-fail test under
 tests/annotations/negative/ to the positive test it was derived from.  Every
@@ -271,6 +272,9 @@ class Expectation:
     refused: str | None = None  # frontend-refused: a substring of the refusal message
     fe_options: list[str] = dataclasses.field(default_factory=list)  # cerastes-fe-options
     c_only: str | None = None  # `// c-only: <reason>`: a .c test that does not run in c++20
+    # `// mode: ...; platform: macos|linux` (decision 0031): a test of one platform's system headers by design,
+    # run only there and reported as skipped elsewhere
+    platform: str | None = None
 
 
 # Kinds that stand alone: each must be the only outcome line of its test
@@ -283,6 +287,12 @@ _TWIN_RE = re.compile(r"^//\s*twin:\s*(.*?)\s*$")
 _TWIN_EXEMPT_RE = re.compile(r"^//\s*twin-exempt:\s*(.*?)\s*$")
 _FE_OPTIONS_RE = re.compile(r"^//\s*cerastes-fe-options:\s*(.*?)\s*$")
 _C_ONLY_RE = re.compile(r"^//\s*c-only:\s*(.*?)\s*$")
+# The platforms of `; platform:` on a `// mode:` line, and the one this harness runs on (decision 0031).
+PLATFORMS = ("macos", "linux")
+HOST_PLATFORM = "macos" if sys.platform == "darwin" else "linux"
+_PLATFORM_RE = re.compile(r"^platform:\s*(\S+)$")
+# the same suffix on a `// c-only:` line, whose reason may hold a `;` of its own
+_C_ONLY_PLATFORM_RE = re.compile(r"^(?P<reason>.*?);\s*platform:\s*(?P<platform>\S+)$")
 _REFUSED_FE_RE = re.compile(r"^frontend-refused\s+(?P<substring>\S.*)$")
 # `@ L<n>` is a line of the test file; `@ <repository-relative file>:L<n>` a line of a
 # user header the test includes (decision 0011 item 4: headers are verified too).
@@ -370,6 +380,7 @@ def parse_header(text: str, suffix: str) -> Expectation:
     fe_options_lines: list[tuple[int, str]] = []
     c_only_lines: list[tuple[int, str]] = []
     modes: list[str] = []
+    platforms: list[str] = []
     in_header = True
     for lineno, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
@@ -377,7 +388,14 @@ def parse_header(text: str, suffix: str) -> Expectation:
             if m := _EXPECT_RE.match(line):
                 expects.append((lineno, m.group(1)))
             elif m := _MODE_RE.match(line):
-                modes.extend(s.strip() for s in m.group(1).split(","))
+                listed, sep, rest = m.group(1).partition(";")
+                if sep:
+                    pm = _PLATFORM_RE.match(rest.strip())
+                    if pm is None or pm.group(1) not in PLATFORMS:
+                        raise HeaderError(f"L{lineno}: after `;` a `mode:` line takes only `platform: "
+                                          + "|".join(PLATFORMS) + "`")
+                    platforms.append(pm.group(1))
+                modes.extend(s.strip() for s in listed.split(","))
             elif m := _TWIN_RE.match(line):
                 twins.append((lineno, m.group(1)))
             elif m := _TWIN_EXEMPT_RE.match(line):
@@ -385,7 +403,13 @@ def parse_header(text: str, suffix: str) -> Expectation:
             elif m := _FE_OPTIONS_RE.match(line):
                 fe_options_lines.append((lineno, m.group(1)))
             elif m := _C_ONLY_RE.match(line):
-                c_only_lines.append((lineno, m.group(1)))
+                body = m.group(1)
+                if pm := _C_ONLY_PLATFORM_RE.match(body):
+                    if pm.group("platform") not in PLATFORMS:
+                        raise HeaderError(f"L{lineno}: `platform:` takes " + " or ".join(PLATFORMS))
+                    platforms.append(pm.group("platform"))
+                    body = pm.group("reason")
+                c_only_lines.append((lineno, body))
             continue
         in_header = False
         if (_EXPECT_RE.match(line) or _MODE_RE.match(line) or _TWIN_RE.match(line)
@@ -560,8 +584,10 @@ def parse_header(text: str, suffix: str) -> Expectation:
         if len(set(modes)) != len(modes):
             raise HeaderError("a mode is listed twice")
         modes = [] if kind == "frontend-refused" else (modes or DEFAULT_MODES[suffix])
+    if len(platforms) > 1:
+        raise HeaderError("more than one `platform:`")
     return Expectation(kind, errors, modes, diags, native_ok, twin, twin_exempt,
-                       refused, fe_options, c_only)
+                       refused, fe_options, c_only, platforms[0] if platforms else None)
 
 
 def _under(path: Path, directory: Path) -> bool:
@@ -1868,12 +1894,14 @@ CANARY_PASS = "int canary(void) { return 1; }\n"
 # reject it: that is what keeps a `[[cerastes::...]]` left in the source from
 # passing as ordinary code.  Valid C23 and C++.
 CANARY_ATTRIBUTE = "[[unreg_ns::x]] int canary_v;\n"
-GCC_MISSING_NOTE = "native-ok: GCC not installed; Apple clang only"
+# The native clang: Apple clang on macOS, the LLVM clang of the Linux job elsewhere (decision 0031).
+CLANG_FAMILY = "Apple clang" if sys.platform == "darwin" else "clang"
+GCC_MISSING_NOTE = f"native-ok: GCC not installed; {CLANG_FAMILY} only"
 
 
 @dataclasses.dataclass
 class NativeCompiler:
-    family: str  # "Apple clang" or "GCC"
+    family: str  # CLANG_FAMILY or "GCC"
     cc: str
     cxx: str
 
@@ -1926,8 +1954,15 @@ def banner_problem(family: str, version_output: str) -> str | None:
     first = version_output.strip().splitlines()[0] if version_output.strip() else ""
     if family == "Apple clang":
         ok = "Apple clang" in first
+    elif family == "clang":
+        ok = re.search(r"\bclang version\b", first) is not None
     else:
-        ok = re.search(r"\bGCC\b", first) is not None and "clang" not in first.lower()
+        # Homebrew's first line says GCC; Ubuntu's ("gcc-16 (Ubuntu 16-20260322-1ubuntu1) 16.0.1") does not, and
+        # the FSF's copyright line that follows it is what identifies GCC there (decision 0031)
+        lines = version_output.strip().splitlines()
+        second = lines[1] if len(lines) > 1 else ""
+        ok = ((re.search(r"\bGCC\b", first) is not None or "Free Software Foundation" in second)
+              and "clang" not in first.lower())
     return None if ok else f"`--version` does not say {family}: {first!r}"
 
 
@@ -1983,7 +2018,7 @@ def prepare_native(env: dict[str, str],
     if missing:
         raise UsageError(f"{', '.join(missing)} not set (an empty value means GCC is not "
                          "installed); run scripts/bootstrap.sh first")
-    compilers = [NativeCompiler("Apple clang", env["CERASTES_CLANG_CC"],
+    compilers = [NativeCompiler(CLANG_FAMILY, env["CERASTES_CLANG_CC"],
                                 env["CERASTES_CLANG_CXX"])]
     gcc_cc, gcc_cxx = env["CERASTES_GCC_CC"], env["CERASTES_GCC_CXX"]
     setup = NativeSetup(env["CERASTES_INCLUDE_DIR"], compilers)
@@ -2900,6 +2935,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"run_tests.py: {err}", file=sys.stderr)
         return 2
 
+    # decision 0031: a test of another platform's system headers is skipped here, by name
+    elsewhere = [f for f in sel.tests if isinstance(headers[f], Expectation)
+                 and headers[f].platform not in (None, HOST_PLATFORM)]
+    for f in elsewhere:
+        print(f"SKIP  {rel(f)}: runs on {headers[f].platform} only (decision 0031)")
+        del headers[f]
+    sel.tests = [f for f in sel.tests if f in headers]
+
     opts = RunOptions(verbose=args.verbose, update_golden=args.update_golden)
     left = 0  # the Silicon runs the PR tier leaves to the full check
     if args.pr_base:
@@ -2967,7 +3010,7 @@ def main(argv: list[str] | None = None) -> int:
     updated = sum(1 for o in outcomes if not o.problems and o.label == "UPDATED")
     unchanged = sum(1 for o in outcomes if not o.problems and o.label == "UNCHANGED")
     passed = len(outcomes) - failed - updated - unchanged
-    summary = f"{passed} passed, {failed} failed, {len(sel.skipped)} skipped"
+    summary = f"{passed} passed, {failed} failed, {len(sel.skipped) + len(elsewhere)} skipped"
     if opts.native is not None:
         summary += ", native-ok runs: " + ", ".join(
             f"{c.family} {opts.native.runs.get(c.family, 0)}" for c in opts.native.compilers)

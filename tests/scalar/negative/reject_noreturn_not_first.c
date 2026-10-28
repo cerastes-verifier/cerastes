@@ -1,5 +1,5 @@
 // expect: rejected attr_must_also_appear_in_first_declaration @ L9
-// mode: c23, c++20
+// mode: c23, c++20; platform: macos
 // twin: tests/scalar/noreturn_abort.c
 // Pins: 0015 item 5: a user cannot mark a library function noreturn afterwards: [[noreturn]] must be on the first declaration
 // The front end rejects it (both modes); the library's abs stays an ordinary function.

@@ -57,10 +57,17 @@ require GENERATE_LINKAGE_SPEC_BLOCKS 1
 require GENERATE_MICROSOFT_IF_EXISTS_ENTRIES 1
 require NONCLASS_TEMPLATE_INSTANTIATIONS_IN_SOURCE_SEQUENCE_LISTS 0
 require CLASS_TEMPLATE_INSTANTIATIONS_IN_SOURCE_SEQUENCE_LISTS 0
+# S5 (decision 0031 item 7): the stock Linux configuration's extensions, off as on macOS.
+require EMBEDDED_C_ALLOWED 0
+require FIXED_POINT_ALLOWED 0
+require NAMED_ADDRESS_SPACES_ALLOWED 0
+require NAMED_REGISTERS_ALLOWED 0
+require DEFAULT_PASS_STDARG_REFERENCES_TO_GENERATED_CODE 0
 require AUTOMATIC_TEMPLATE_INSTANTIATION 0
 require FUNCTION_PROTOTYPE_INSTANTIATION_DEFERRAL_ALLOWED 0
-# From the stock macOS configuration (cmake_defines.h), not edg_config: EDG bug
-# 0007's fix.  It changes the IL layout (tk_vector and other kinds).
+# From the stock configuration (cmake_defines.h, the same value on macOS and Linux,
+# decision 0031 item 7), not edg_config: EDG bug 0007's fix.  It changes the IL
+# layout (tk_vector and other kinds).
 require GNU_VECTOR_TYPES_ALLOWED 1
 
 if [[ $fail -ne 0 ]]; then

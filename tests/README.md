@@ -354,6 +354,17 @@ pages (`DUAL_MODE_DIRS`; the documentation examples are tests too) lists both mo
 checks it. A test that is only C says why: `// c-only: <reason>` (`.c` files only;
 not with `c++20` in `mode:`). Negative tests are covered too.
 
+A test of one platform's system headers by design ends its `mode:` or `c-only:` line with
+`; platform: macos` or `; platform: linux` (decision 0031; owner, 2026-10-28): it runs only on that
+platform and is reported elsewhere as `SKIP  <test>: runs on <platform> only (decision 0031)`, counted
+in the summary's skips; `--check-headers` checks it everywhere. The suffix goes on an existing line so
+that no line of the test moves. It is for a test that names what only one C library declares
+(`__assert_rtn`, `idtype_t` in strict C23, `sys_nerr`, a redeclaration that glibc's `noexcept` or
+`__nothrow__` changes): every other test must give the same outcome on both platforms. The eight
+tagged in S5 are `platform: macos`: `tests/scalar/negative/reject_assert_shape_{no_not,second_arg,third}.c`,
+`reject_enum_system.c`, `reject_enum_system_use.c`, `reject_global_system_const.c`,
+`reject_noreturn_not_first.c` and `reject_quick_exit_user_declared.c`.
+
 ### Categories for C and C++ tests
 
 The categories of `// expect: error <category> @ L<line>` in a `.c` or `.cpp`
@@ -547,7 +558,8 @@ so that a typo cannot silently change a job count. An explicit `-j` always wins 
 so a bad value stops only a run that needs the default (`--check-headers` and `mutate.py --validate` run
 nothing in parallel). `scripts/check.sh` passes no `-j`, so the variable sets its job count too (the VIR
 self-test run included: the self-test guard rejects any `-j` on that line). Each worker may start a Silicon JVM,
-which is why CI sets `CERASTES_JOBS=3`: three fit the 7 GB of its runner, eight do not. `scripts/walker_oracle.py` keeps its own default
+which is why CI sets `CERASTES_JOBS=3`: three fit the 7 GB of its runner, eight do not (the Linux job, with 4
+cores and 16 GB, sets 4). `scripts/walker_oracle.py` keeps its own default
 (`min(8, cores)`, for its front-end runs only) and does not read `CERASTES_JOBS`.
 
 ## The PR tier (`--pr-base`, `CERASTES_CHECK_BASE`)
@@ -948,13 +960,18 @@ runner's setup and toolchain assertions) and then `scripts/check.sh`, the full
 check every night at 07:00 UTC and on `workflow_dispatch`, the PR tier on pull
 requests and pushes to `main` ([The PR tier](#the-pr-tier---pr-base-cerastes_check_base)),
 so the examples run as tests there too (every one, in both tiers), on GitHub's `xcode-27` runner with
-`CERASTES_JOBS=3` (decision 0016). The harness self-test pins the active text of both files:
-`ci_workflow_problems` and `ci_sh_problems` compare every active line (comments and blank lines dropped) with
-a pinned copy, so an extra step, an extra command, a `break` in a loop or a reassigned constant fails it;
-only comments, the `uses:` SHAs, the step and job names, `timeout-minutes` and `CERASTES_JOBS` may change in
-ci.yml, and only comments in ci.sh. Structured rules (the triggers, `contents: read`, one job with only five keys,
-the runner, SHA-pinned actions, the checkout options, plain `scripts/ci.sh` then `scripts/check.sh` steps;
-every toolchain assertion as a pinned line, in order, with no early `exit` or `|| true`) give the diagnostics.
+`CERASTES_JOBS=3` (decision 0016). A second job, `check-linux`, runs `scripts/ci-linux.sh` and then the same
+`scripts/check.sh` in both tiers on GitHub's `ubuntu-26.04` x86-64 runner with `CERASTES_JOBS=4` (decision 0031):
+every test must give the same outcome on both platforms. There the native-ok runs use `clang-21` (labelled
+`clang` instead of `Apple clang`, `CLANG_FAMILY` in `run_tests.py`) and Ubuntu's `gcc-16`. The harness self-test
+pins the active text of the three files: `ci_workflow_problems` and `ci_sh_problems` (given `CI_LINUX_SH_SPEC` for
+`ci-linux.sh`) compare every active line (comments and blank lines dropped) with a pinned copy, so an extra step,
+an extra command, a `break` in a loop or a reassigned constant fails it; only comments, the `uses:` SHAs, the step
+and job names, `timeout-minutes` and `CERASTES_JOBS` may change in ci.yml, and only comments in the two scripts.
+Structured rules (the triggers, `contents: read`, exactly the jobs `check` and `check-linux`, each with only five
+keys, its runner and its environment, SHA-pinned actions, the checkout options, plain setup-script then
+`scripts/check.sh` steps; every toolchain assertion as a pinned line, in order, with no early `exit` or
+`|| true`) give the diagnostics.
 The docs workflow (`docs.yml`) still builds
 and deploys the docs: it runs the source lint, `scripts/build_docs.sh` (which
 fails on any Antora warning) and the `--html` check, but not the examples as

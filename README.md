@@ -23,6 +23,8 @@ scripts/check.sh       # build, lint, harness self-test, tests
 
 Bootstrap needs Homebrew and the Xcode Command Line Tools. It is idempotent.
 The tool versions it pins are listed in `internal/decisions/0001-toolchain-pins.md`.
+x86-64 Linux (Ubuntu 26.04) is supported too: the packages to install first are
+on the Installation page of the user docs.
 
 ## License
 

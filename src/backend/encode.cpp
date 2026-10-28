@@ -2331,9 +2331,10 @@ class Encoder {
            o->variant.constant.ptr->expr == nullptr && !o->variant.constant.ptr->local_expr_ref && is_zero_constant(o);
   }
 
-  // The system function the SDK's `assert` calls on failure: declared in a system file, C linkage, void, does not return.
-  static bool is_assert_failure_function(a_routine_ptr r) {
-    if (r == nullptr || r->source_corresp.name == nullptr || std::strcmp(r->source_corresp.name, "__assert_rtn") != 0) return false;
+  // The system function `assert` calls on failure, `name` (`__assert_rtn` in the macOS SDK, `__assert_fail` in glibc, decision
+  // 0031 item 5): declared in a system file, C linkage, void, does not return.
+  static bool is_assert_failure_function(a_routine_ptr r, const char* name) {
+    if (r == nullptr || r->source_corresp.name == nullptr || std::strcmp(r->source_corresp.name, name) != 0) return false;
     const a_source_position decl = r->source_corresp.decl_position;
     if (decl.seq == 0 || in_verified_file(decl) || r->source_corresp.is_class_member) return false;
     if (r->source_corresp.name_linkage != nlk_external) return false;
@@ -2341,10 +2342,53 @@ class Encoder {
     return x != nullptr && x->does_not_return && has_type_kind(return_type(r), tk_void);
   }
 
+  // `(void)0` as the macro writes it (`void(0)` in glibc's C++ form is the same node).
+  static bool is_void_zero(an_expr_node_ptr e) {
+    return is_operation(e, eok_cast, 1) && has_type_kind(e->type, tk_void) && is_plain_zero(operands_of(e)[0]);
+  }
+
+  // `e` of `assert(e)` when `s` is exactly one of the two system expansions, otherwise null; anything else stays rejected as before.
+  static an_expr_node_ptr assert_condition(an_expr_node_ptr s) {
+    if (an_expr_node_ptr e = sdk_assert_condition(s)) return e;
+    return glibc_assert_condition(s);
+  }
+
+  // `e` of `assert(e)`, when `s` is exactly glibc's expansion (decision 0031 item 5; glibc 2.43):
+  //   C23:  (((void) sizeof (__assert_single_arg (e)), e) ? (void) (0) : __assert_fail (...))
+  //   C++:  (static_cast<bool> (e) ? void (0) : __assert_fail (...))
+  // The `sizeof` is folded to a constant whose original expression must be the `sizeof` (it is never evaluated); the C++
+  // conversion to bool, which EDG leaves out when `e` is already a bool, does not change the truth value that the
+  // condition tests.
+  static an_expr_node_ptr glibc_assert_condition(an_expr_node_ptr s) {
+    if (!is_operation(s, eok_question, 3) || !has_type_kind(s->type, tk_void)) return nullptr;
+    auto q = operands_of(s);
+    if (!is_void_zero(q[1])) return nullptr;
+    an_expr_node_ptr failure = q[2];
+    if (failure == nullptr || failure->kind != enk_operation || failure->variant.operation.kind != eok_call) return nullptr;
+    if (!is_assert_failure_function(direct_callee(failure), "__assert_fail")) return nullptr;
+    an_expr_node_ptr cond = q[0];
+    if (is_operation(cond, eok_comma, 2)) {
+      auto c = operands_of(cond);
+      if (!is_operation(c[0], eok_cast, 1) || !has_type_kind(c[0]->type, tk_void)) return nullptr;
+      // the macro's `sizeof (__assert_single_arg (e))`: a folded constant whose original expression is the `sizeof`.  Any
+      // other constant there, `(void)(INT_MAX + 1)` among them, is code the matcher would not encode (audit, S5).
+      an_expr_node_ptr size = operands_of(c[0])[0];
+      if (size == nullptr || size->kind != enk_constant || !has_type_kind(size->type, tk_integer)) return nullptr;
+      a_constant_ptr k = size->variant.constant.ptr;
+      if (k == nullptr || k->expr == nullptr || k->local_expr_ref) return nullptr;
+      an_expr_node_ptr original = expr_node_from_constant(k);
+      if (original == nullptr || original->kind != enk_sizeof) return nullptr;
+      return c[1];
+    }
+    if (is_operation(cond, eok_bool_cast, 1) || (is_operation(cond, eok_cast, 1) && is_bool_type(skip_typerefs(cond->type))))
+      return operands_of(cond)[0];
+    return cond;
+  }
+
   // `e` of `assert(e)`, when `s` is exactly the SDK's expansion
   //   (__builtin_expect(!(e), 0) ? __assert_rtn(...) : (void)0)
-  // (C++ puts a bool conversion on the condition); otherwise null.  Anything else stays rejected as before.
-  static an_expr_node_ptr assert_condition(an_expr_node_ptr s) {
+  // (C++ puts a bool conversion on the condition); otherwise null.
+  static an_expr_node_ptr sdk_assert_condition(an_expr_node_ptr s) {
     if (!is_operation(s, eok_question, 3) || !has_type_kind(s->type, tk_void)) return nullptr;
     auto q = operands_of(s);
     an_expr_node_ptr cond = q[0];
@@ -2365,11 +2409,8 @@ class Encoder {
     if (!is_plain_zero(args[2])) return nullptr;
     an_expr_node_ptr failure = q[1];
     if (failure == nullptr || failure->kind != enk_operation || failure->variant.operation.kind != eok_call) return nullptr;
-    if (!is_assert_failure_function(direct_callee(failure))) return nullptr;
-    an_expr_node_ptr fallthrough = q[2];
-    if (!is_operation(fallthrough, eok_cast, 1) || !has_type_kind(fallthrough->type, tk_void) ||
-        !is_plain_zero(operands_of(fallthrough)[0]))
-      return nullptr;
+    if (!is_assert_failure_function(direct_callee(failure), "__assert_rtn")) return nullptr;
+    if (!is_void_zero(q[2])) return nullptr;
     return operands_of(negated)[0];
   }
 
@@ -2414,7 +2455,7 @@ class Encoder {
         return;
       }
       // `assert(cond)` from <assert.h> (decision 0015 item 6): `cond` is code, evaluated as an `if` condition is; the
-      // arguments of `__assert_rtn` are never encoded.
+      // arguments of `__assert_rtn` (`__assert_fail`) are never encoded.
       if (cx_.in_for_step) {
         // A check in a loop's step is an internal error of check_program: reject it here, at the source.
         reject(Diag::unsupported_expression, pos, "an assert in the increment of a for loop");

@@ -2,8 +2,9 @@
 # Part of cerastes, under the Apache License v2.0 with LLVM Exceptions.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #
-# Idempotent macOS (Apple silicon) bootstrap: installs prerequisites, checks
-# out the submodules, builds EDG (stock, for scripts/cpfe.sh, and the cerastes
+# Idempotent bootstrap for macOS on Apple silicon and, from S5, x86-64 Linux (decision
+# 0031): installs prerequisites (on Linux it checks them; scripts/ci-linux.sh installs
+# them on the runner), checks out the submodules, builds EDG (stock, for scripts/cpfe.sh, and the cerastes
 # configuration, build/cerastes-fe and build/cerastes, the `verify` driver, which gets the
 # tool locations of Silicon, Z3 and the JDK at configure time; with CERASTES_EDG_SRC set, another EDG tree
 # in build/override, decision 0005), builds Silicon, fetches the pinned Z3,
@@ -12,7 +13,7 @@
 # change a pin here and there together.
 #
 # Usage: scripts/bootstrap.sh [--build-only] [--force-silicon]
-#   --build-only     skip Homebrew, the Z3 download and `npm ci`.  It still
+#   --build-only     skip Homebrew, the Z3 and sbt downloads and `npm ci`.  It still
 #                    initializes missing submodules, rebuilds EDG, cerastes-fe
 #                    and (when its stamp is stale) Silicon, where sbt may fetch
 #                    dependencies, and rewrites build/env.sh.  Stale or missing
@@ -32,11 +33,28 @@ BUILD="$ROOT/build"
 TOOLS="$BUILD/tools"
 
 # ---- Pins -------------------------------------------------------------------
-EDG_PRESET=macos-arm-clang-debug
+PLATFORM="$(uname -s)-$(uname -m)"
 JDK_FORMULA=openjdk@17          # sbt 1.6.2 (pinned by Silicon) fails on JDK 27
 Z3_VERSION=4.16.0               # the version Silicon's CI tests against
-Z3_ASSET=z3-4.16.0-arm64-osx-15.7.3
-Z3_SHA256=41828fa07d5cb77bfaee326e8e6dac074f26329c09c633f9e66012bb917cf8ae
+case "$PLATFORM" in
+  Darwin-arm64)
+    EDG_PRESET=macos-arm-clang-debug
+    Z3_ASSET=z3-4.16.0-arm64-osx-15.7.3
+    Z3_SHA256=41828fa07d5cb77bfaee326e8e6dac074f26329c09c633f9e66012bb917cf8ae ;;
+  Linux-x86_64)
+    # decision 0031: EDG's Linux preset in Clang emulation, built and scraped with
+    # clang-$LINUX_CLANG_MAJOR over libc++ (the C++ library macOS has); JDK 17 and the
+    # sbt launcher of the owner's Mac, which Homebrew provides there.
+    EDG_PRESET=linux-clang-debug
+    LINUX_CLANG_MAJOR=21
+    Z3_ASSET=z3-4.16.0-x64-glibc-2.39
+    Z3_SHA256=7288c49a5bd6dbafd7b0b0d1f65956b91672da24b08f09242919af159be3418e
+    SBT_VERSION=2.0.10
+    SBT_SHA256=6ff28e1dea38d1de48ea3d4e903f0380b85b19f945a103e30ec4298717c90cd7
+    SBT_URL="https://github.com/sbt/sbt/releases/download/v$SBT_VERSION/sbt-$SBT_VERSION.zip" ;;
+  *) printf 'bootstrap.sh: error: %s\n' "only macOS on Apple silicon and x86-64 Linux are supported (this is $PLATFORM)" >&2
+     exit 1 ;;
+esac
 Z3_URL="https://github.com/Z3Prover/z3/releases/download/z3-$Z3_VERSION/$Z3_ASSET.zip"
 
 DOC_NODE_VERSION_FILE="$ROOT/doc/.node-version"   # Node major; CI reads it too
@@ -47,7 +65,7 @@ for arg in "$@"; do
   case "$arg" in
     --build-only) BUILD_ONLY=1 ;;
     --force-silicon) FORCE_SILICON=1 ;;
-    -h|--help) sed -n '5,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '5,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "bootstrap.sh: unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -56,13 +74,44 @@ log() { printf '==> %s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
 die() { printf 'bootstrap.sh: error: %s\n' "$*" >&2; exit 1; }
 
-[[ "$(uname -s)" == Darwin ]] || die "only macOS is supported"
-[[ "$(uname -m)" == arm64 ]] || die "only Apple silicon is supported (EDG preset $EDG_PRESET)"
-
 mkdir -p "$BUILD" "$TOOLS"
 
-# ---- 1. Homebrew prerequisites ----------------------------------------------
-if [[ $BUILD_ONLY -eq 0 ]]; then
+# The SHA-256 of a file (shasum on macOS, coreutils on Linux).
+sha256_of() {
+  if [[ "$PLATFORM" == Linux-* ]]; then sha256sum "$1" | awk '{print $1}'; else shasum -a 256 "$1" | awk '{print $1}'; fi
+}
+
+# A release archive in build/tools, checked against its pinned SHA-256 before it is used.
+fetch_pinned() {
+  local url="$1" sha="$2" out="$3"
+  curl --fail --silent --show-error --location "$url" --output "$out.part"
+  [[ "$(sha256_of "$out.part")" == "$sha" ]] \
+    || { rm -f "$out.part"; die "$(basename "$out") failed its SHA-256 check"; }
+  mv "$out.part" "$out"
+}
+
+# ---- 1. Prerequisites (Homebrew on macOS; checked on Linux) ------------------
+if [[ "$PLATFORM" == Linux-* ]]; then
+  # Installed by the system's packages (scripts/ci-linux.sh on the runner); never here.
+  for tool in cmake ninja python3 shellcheck node npm curl unzip "clang-$LINUX_CLANG_MAJOR" "clang++-$LINUX_CLANG_MAJOR"; do
+    command -v "$tool" >/dev/null || die "$tool is missing (on the runner scripts/ci-linux.sh installs it; decision 0031)"
+  done
+  JAVA_HOME="${JAVA_HOME_17_X64:-/usr/lib/jvm/java-17-openjdk-amd64}"
+  "$JAVA_HOME/bin/java" -version 2>&1 | head -1 | grep -q '"17\.' \
+    || die "no JDK 17 at $JAVA_HOME (set JAVA_HOME_17_X64, as GitHub's runner does)"
+  JDK_FORMULA="jdk17 $("$JAVA_HOME/bin/java" -version 2>&1 | sed -n 2p)"
+  SBT_DIR="$TOOLS/sbt-$SBT_VERSION"
+  if [[ ! -x "$SBT_DIR/bin/sbt" ]]; then
+    [[ $BUILD_ONLY -eq 0 ]] || die "the pinned sbt is missing; run scripts/bootstrap.sh"
+    log "downloading sbt $SBT_VERSION"
+    fetch_pinned "$SBT_URL" "$SBT_SHA256" "$TOOLS/sbt-$SBT_VERSION.zip"
+    rm -rf "$SBT_DIR" "$TOOLS/sbt"
+    unzip -q "$TOOLS/sbt-$SBT_VERSION.zip" -d "$TOOLS"
+    mv "$TOOLS/sbt" "$SBT_DIR"
+    rm -f "$TOOLS/sbt-$SBT_VERSION.zip"
+  fi
+  PATH="$SBT_DIR/bin:$PATH"
+elif [[ $BUILD_ONLY -eq 0 ]]; then
   command -v brew >/dev/null || die "Homebrew is required: https://brew.sh"
   xcode-select -p >/dev/null 2>&1 || die "Xcode Command Line Tools are required: xcode-select --install"
   # cmake, ninja, python and shellcheck are satisfied by any copy on PATH; sbt
@@ -86,8 +135,10 @@ if [[ $BUILD_ONLY -eq 0 ]]; then
     fi
   done
 fi
-JAVA_HOME="$(brew --prefix "$JDK_FORMULA")/libexec/openjdk.jdk/Contents/Home"
-[[ -x "$JAVA_HOME/bin/java" ]] || die "JDK not found at $JAVA_HOME (brew install $JDK_FORMULA)"
+if [[ "$PLATFORM" == Darwin-* ]]; then
+  JAVA_HOME="$(brew --prefix "$JDK_FORMULA")/libexec/openjdk.jdk/Contents/Home"
+  [[ -x "$JAVA_HOME/bin/java" ]] || die "JDK not found at $JAVA_HOME (brew install $JDK_FORMULA)"
+fi
 export JAVA_HOME
 
 # ---- 2. Submodules ------------------------------------------------------------
@@ -150,9 +201,23 @@ if { [[ -n "$stamped_tree" && "$stamped_tree" != "$EDG_SRC" ]]; } \
   rm -rf "$EDG_BUILD" "$CERASTES_BUILD"
 fi
 
+# The compilers: Apple clang through the preset's CC and CXX on macOS; clang-$LINUX_CLANG_MAJOR
+# by path on Linux (the preset names plain clang, which may be another version there).  Two
+# stock settings that differ by platform are set as on macOS (decision 0031 item 3): no
+# AddressSanitizer (EDG's default for Linux debug builds), and no EDG C++ runtime library,
+# which nothing here links (the Linux preset builds it for eight targets, with a plain
+# `clang` that rejects its bf16 literals).
+EDG_COMPILERS=()
+EDG_STOCK_OPTIONS=()
+if [[ "$PLATFORM" == Linux-* ]]; then
+  EDG_COMPILERS=("-DCMAKE_C_COMPILER=$(command -v "clang-$LINUX_CLANG_MAJOR")"
+                 "-DCMAKE_CXX_COMPILER=$(command -v "clang++-$LINUX_CLANG_MAJOR")")
+  EDG_STOCK_OPTIONS=(-DEDG_CPFE_USE_ASAN=OFF -DEDG_BUILD_LIB=OFF)
+fi
 if [[ ! -f "$EDG_BUILD/build.ninja" ]]; then
   log "cmake --preset $EDG_PRESET (out of tree: $(rel "$EDG_BUILD"))"
-  cmake -S "$EDG_SRC" --preset "$EDG_PRESET" -B "$EDG_BUILD" > "$OUT/edg-configure.log" 2>&1 \
+  cmake -S "$EDG_SRC" --preset "$EDG_PRESET" -B "$EDG_BUILD" ${EDG_COMPILERS[@]+"${EDG_COMPILERS[@]}"} \
+    ${EDG_STOCK_OPTIONS[@]+"${EDG_STOCK_OPTIONS[@]}"} > "$OUT/edg-configure.log" 2>&1 \
     || { tail -20 "$OUT/edg-configure.log"; die "EDG configure failed ($(rel "$OUT")/edg-configure.log)"; }
 fi
 log "ninja -C $(rel "$EDG_BUILD")"
@@ -194,10 +259,7 @@ if [[ ! -x "$Z3_EXE" ]]; then
   [[ $BUILD_ONLY -eq 0 ]] || die "pinned Z3 is missing; run scripts/bootstrap.sh"
   log "downloading Z3 $Z3_VERSION"
   zip="$TOOLS/$Z3_ASSET.zip"
-  curl --fail --silent --show-error --location "$Z3_URL" --output "$zip.part"
-  echo "$Z3_SHA256  $zip.part" | shasum -a 256 -c --status \
-    || { rm -f "$zip.part"; die "Z3 download failed its SHA-256 check"; }
-  mv "$zip.part" "$zip"
+  fetch_pinned "$Z3_URL" "$Z3_SHA256" "$zip"
   rm -rf "$Z3_DIR"
   unzip -q "$zip" -d "$TOOLS"
   rm -f "$zip"
@@ -219,8 +281,7 @@ fi
 doc_stamp() {
   # package.json and the lockfile, plus the node major.
   printf 'lock %s\npackage %s\nnode %s\n' \
-    "$(shasum -a 256 "$DOC_DIR/package-lock.json" | awk '{print $1}')" \
-    "$(shasum -a 256 "$DOC_DIR/package.json" | awk '{print $1}')" "$NODE_MAJOR"
+    "$(sha256_of "$DOC_DIR/package-lock.json")" "$(sha256_of "$DOC_DIR/package.json")" "$NODE_MAJOR"
 }
 # npm writes node_modules/.package-lock.json when it installs; it equals the
 # lockfile's content for the installed tree only if nothing was changed by hand
@@ -255,12 +316,23 @@ ANTORA_VERSION="$(cd "$DOC_DIR" && npx --no-install antora --version 2>/dev/null
   || die "antora is not runnable from doc/node_modules"
 
 # ---- 6. build/env.sh --------------------------------------------------------------
-# EDG has no standard library of its own on macOS; it parses the system libc++
-# and SDK headers while emulating the installed clang.
+# EDG has no standard library of its own; it parses the system libc++ and C
+# headers (the SDK's on macOS, glibc's on Linux) while emulating the installed
+# clang.  On Linux the scrape runs clang-$LINUX_CLANG_MAJOR, for C++ through a wrapper
+# that adds -stdlib=libc++ (decision 0031 item 3; clang's default there is libstdc++).
 SCRAPE="$EDG_SRC/dev_tools/bin/edg-scrape-compiler"
-EDG_CLANG_INCL_SCRAPE="$(python3 "$SCRAPE" clang --lang c++ includes)"
-EDG_CLANG_CINCL_SCRAPE="$(python3 "$SCRAPE" clang --lang c includes)"
-EDG_CLANG_VER_SCRAPE="$(python3 "$SCRAPE" clang version)"
+SCRAPE_CC=()
+SCRAPE_CXX=()
+if [[ "$PLATFORM" == Linux-* ]]; then
+  printf '#!/usr/bin/env bash\nexec %q -stdlib=libc++ "$@"\n' "$(command -v "clang++-$LINUX_CLANG_MAJOR")" \
+    > "$TOOLS/clang++-libc++"
+  chmod +x "$TOOLS/clang++-libc++"
+  SCRAPE_CC=(--compiler-path "$(command -v "clang-$LINUX_CLANG_MAJOR")")
+  SCRAPE_CXX=(--compiler-path "$TOOLS/clang++-libc++")
+fi
+EDG_CLANG_INCL_SCRAPE="$(python3 "$SCRAPE" clang ${SCRAPE_CXX[@]+"${SCRAPE_CXX[@]}"} --lang c++ includes)"
+EDG_CLANG_CINCL_SCRAPE="$(python3 "$SCRAPE" clang ${SCRAPE_CC[@]+"${SCRAPE_CC[@]}"} --lang c includes)"
+EDG_CLANG_VER_SCRAPE="$(python3 "$SCRAPE" clang ${SCRAPE_CC[@]+"${SCRAPE_CC[@]}"} version)"
 # EDG_BASE as chosen by EDG's CMake (its host default for the preset).
 EDG_BASE="$(sed -n 's/^export EDG_BASE="\(.*\)"$/\1/p' "$EDG_BUILD/environment.sh")"
 [[ -d "$EDG_BASE" ]] || die "cannot determine EDG_BASE from $(rel "$EDG_BUILD")/environment.sh"
@@ -273,7 +345,7 @@ EDG_BASE="$(sed -n 's/^export EDG_BASE="\(.*\)"$/\1/p' "$EDG_BUILD/environment.s
 # explicitly so a stale cache cannot keep old ones.  This comes after the tools
 # are known; the EDG stamp is written once both builds succeeded.
 log "cmake -S . -B $(rel "$CERASTES_BUILD")"
-cmake -S "$ROOT" -B "$CERASTES_BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+cmake -S "$ROOT" -B "$CERASTES_BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Debug ${EDG_COMPILERS[@]+"${EDG_COMPILERS[@]}"} \
   "-DCERASTES_EDG_SRC=$EDG_SRC" "-DCERASTES_EDG_GEN=$EDG_BUILD/src/includes" \
   "-DCERASTES_OUTPUT_DIR=$OUT" \
   "-DCERASTES_JAVA=$JAVA_HOME/bin/java" "-DCERASTES_SILICON_JAR=$SILICON_JAR" "-DCERASTES_Z3_EXE=$Z3_EXE" \
@@ -290,11 +362,26 @@ ninja -C "$CERASTES_BUILD" > "$OUT/cerastes-build.log" 2>&1 \
 python3 "$ROOT/scripts/edg_tree.py" stamp "$EDG_SRC" > "$EDG_STAMP.part"
 mv "$EDG_STAMP.part" "$EDG_STAMP"
 
-# Native compilers for `// expect: native-ok` tests: Apple clang, and the
-# highest-numbered Homebrew GCC (gcc-NN with a g++-NN of the same number) if any.
-CLANG_CC="$(xcrun -f clang)"
-CLANG_CXX="$(xcrun -f clang++)"
-"$CLANG_CXX" --version 2>&1 | head -1 | grep -q 'Apple clang' || die "$CLANG_CXX is not Apple clang"
+# Native compilers for `// expect: native-ok` tests: Apple clang (clang-$LINUX_CLANG_MAJOR on
+# Linux), and the highest-numbered GCC (gcc-NN with a g++-NN of the same number) if any.
+if [[ "$PLATFORM" == Linux-* ]]; then
+  CLANG_CC="$(command -v "clang-$LINUX_CLANG_MAJOR")"
+  CLANG_CXX="$(command -v "clang++-$LINUX_CLANG_MAJOR")"
+  "$CLANG_CXX" --version 2>&1 | head -1 | grep -q "clang version $LINUX_CLANG_MAJOR\\." \
+    || die "$CLANG_CXX is not clang $LINUX_CLANG_MAJOR"
+else
+  CLANG_CC="$(xcrun -f clang)"
+  CLANG_CXX="$(xcrun -f clang++)"
+  "$CLANG_CXX" --version 2>&1 | head -1 | grep -q 'Apple clang' || die "$CLANG_CXX is not Apple clang"
+fi
+# A GCC says so on its first line (Homebrew's "(Homebrew GCC 16.2.0)") or, as Ubuntu's
+# "gcc-16 (Ubuntu 16-20260322-1ubuntu1) 16.0.1" does not, names the FSF on its second.
+is_gcc() {
+  local out
+  out="$("$1" --version 2>&1)" || return 1
+  [[ "$(sed -n 1p <<<"$out")" != *clang* ]] || return 1
+  sed -n 1p <<<"$out" | grep -q 'GCC' || sed -n 2p <<<"$out" | grep -q 'Free Software Foundation'
+}
 GCC_CC=""
 GCC_CXX=""
 gcc_best=0
@@ -307,8 +394,8 @@ for dir in "${path_dirs[@]}"; do
     (( num > gcc_best )) || continue
     gxx="$(command -v "g++-$num" || true)"
     [[ -n "$gxx" ]] || continue
-    "$cand" --version 2>&1 | head -1 | grep -q 'GCC' || continue
-    "$gxx" --version 2>&1 | head -1 | grep -q 'GCC' || continue
+    is_gcc "$cand" || continue
+    is_gcc "$gxx" || continue
     gcc_best="$num"; GCC_CC="$cand"; GCC_CXX="$gxx"
   done
 done
