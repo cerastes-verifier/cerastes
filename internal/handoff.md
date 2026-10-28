@@ -1,41 +1,66 @@
-# Handoff after M4.4d — exact sets for preconditions and commas, constant masks as remainders (2026-10-27)
+# Handoff after M4.5a — the memory model for C by design (records 0027–0030) (2026-10-27)
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
 rediscover. It was trimmed at the end of M4.4c (owner, 2026-10-26) to what is live: the full text up to M4.4c, with the
 finished sessions' plans, results and answered questions, is `git show 1fcc43b:internal/handoff.md` (M4.4c's and S4's
-own sections: `git show fce46de:internal/handoff.md`); earlier handoffs
+own sections: `git show fce46de:internal/handoff.md`; M4.4d's: `git show 9017105:internal/handoff.md`); earlier handoffs
 are `git show 60d3fbe:internal/handoff.md` (M4.1) and `git show a4da52c:internal/handoff.md` (M3 close-out).
 
 ## 1. State
 
-M4.4d is done on branch `m4.4d-exact-sets` (based on local `main` `fce46de`, which merges M4.4c and S4; result in
-`internal/status.md`). Record 0026:
-- **Part A, exact sets in two steps** (old §11 question 27): a callee's `requires` has the set PRE(c), and a comma's value
-  carries its floor; each full expression, and each branch's own, uses the exact family when it is a chain, else
-  today's (the base family, the previous version's Viper exactly), else rejects with today's conflict. Dual sets in one
-  lowering pass; hooks `force_base_sets` (lowering and driver: every full expression takes step 2) and `drop_exact_set`
-  (breaks the base ⊆ exact check).
-- **Part B, constant masks as remainders** (§8 question 47): `a & (2^k − 1)` is `a % 2^k` and `a & ~(2^k − 1)` is
-  `2^k * (a \ 2^k)`; the `bit_mask.c [c23]` hang is gone (72 one-verifier runs).
+M4.5a is done on branch `m4.5a-memory-design` (based on local `main` `9017105`, which merges M4.4d; result in
+`internal/status.md`; plan `~/.claude/plans/using-plan-md-and-my-streamed-glacier.md`):
+- **Record 0027** (handoff §8 question 52, "do it now"): `|` and `^` with a constant mask are decided, as `&` was in
+  0026: `|` inline (`%`/`\` forms), `^` as prelude functions `c_[u]xor_[c]mask_N_k` with a range postcondition (an
+  inline `let` form timed out on nested chains). Code, tests, VIR cases, docs.
+- **Records 0028–0030** (design only, no pointer code): the memory model (E2, four axioms, member blocks, liveness),
+  the ownership annotations (`[[cerastes::owning]]`, P4222's markers in the `cerastes::` spelling, C's spec functions,
+  `owns_block`, `live`) and vlibc. The encoding is pinned by the fixtures in `tests/viper-smoke/memory/`, which
+  `check.sh` runs. Four Opus audit rounds on the records (§3).
+- **Plan:** M4.4e (the warning sweep) is an M8 entry; **S5 Linux CI** comes first, then M4.5b1–f3 (`plan.md`, §4.4).
 
-The EDG pin is unchanged (`f0ed5525af`); the EDG box session (§4.3) is still pending.
+The EDG pin is unchanged (`f0ed5525af`); no fork commit is needed by records 0028–0030 (P52, P53, P54). The EDG box
+session (§4.3) is still pending.
 
-## 2. Owner steps after M4.4d, in this order
+## 2. Owner steps after M4.5a, in this order
 
-1. **Your uncommitted edits in the main checkout.** This branch carries them: the §8 answers 5, 10–12 and 43–48
-   (`43f0f81`) and EDG bug 0022 moved to `internal/edg_bugs/upstreamed/` with its references (`9610c94`). Drop the main
-   checkout's copies before merging:
-   `cd ~/Documents/cerastes/cerastes && git restore --staged internal/edg_bugs && git restore internal/edg_bugs
-   internal/decisions/0019-uninitialized-locals.md internal/il-inventory.md internal/handoff.md && rm
-   internal/edg_bugs/upstreamed/0022-suppressed-note-internal-error.md`.
-2. **PR #11** (M4.4c and S4): its rerun (`40506997678`) was in progress when M4.4d started. Merge it if green; a red run
-   on `bit_mask.c [c23]` alone is the known hang, which this branch fixes.
-3. **This branch.** Push it and open its PR: `git push origin m4.4d-exact-sets` (the session never pushes). The PR tier
-   runs the changed tests (about 56 new files), the doc examples and the sample.
-4. **Questions.** Answer §8 (questions 49–52). Then M4.5a (owner, 2026-10-27: M4.4e deferred to M8, §4.2).
+1. **The main checkout's copy of this file.** This branch carries your §8 answers 49–52 (commit `b231f32`); drop the
+   main checkout's uncommitted copy before merging: `git -C ~/Documents/cerastes/cerastes checkout internal/handoff.md`.
+2. **PR #12** (M4.4d): merge it if green.
+3. **This branch.** Push it and open its PR: `git push origin m4.5a-memory-design` (the session never pushes).
+4. **vlibc.** Create the empty repository `cerastes-verifier/vlibc` (Apache-2.0 WITH LLVM-exception) before M4.5d1
+   (record 0030).
+5. **Questions.** Answer §8 (questions 53–58). Then S5 Linux CI (§4.4).
 
 ## 3. Open audit notes (condensed; the full notes are in the commit named above)
+
+**From M4.5a** (four Opus rounds on records 0028–0030: round 2 five blocking, round 3 three blocking, round 4 one
+reopened, all fixed in the records; every should-fix item taken in the text; the code of 0027: round 4, no blocking item).
+What the next sessions must carry out, beyond the records' text:
+- *Round 4's reopened item (P1) was fixed in record 0028 item 1 but not re-audited* (the cap): C's implicit conversions
+  between incompatible pointer types (EDG warnings #42, #144, #167 and the assignment variant) must become errors in C's
+  verify mode, and every pointer conversion node, compiler-generated or not, falls under item 1's `void*` rules; M4.5b1
+  lands it with must-fail tests (`ps == px`, `int *px = ps;`, an incompatible argument, `int *q = v;`) and its audit
+  re-checks it.
+- *Registered attributes are skipped by `check_attributes`* (`encode.cpp:418`): register each target in the session that
+  implements it (0029 item 1), never earlier.
+- *P51 facts for M4.5b1:* the IL's `address_taken` flag on variables; no lvalue-to-rvalue node (`*p` is `indirect`, an
+  lvalue only on the left of `=`); null is a folded constant in every spelling, `int *b = &G;` a `ck_address` constant
+  with the tree in its `expr`; C and C++ differ in comparison result types, conditions (`bool_cast` in C++), assignment
+  as an lvalue (C++) and implicit `void*` conversions (C only). Not probed: `register`, VLAs, compound literals,
+  `restrict`, `sizeof(arr)` and `address_taken`.
+- *P55 for M4.5d1:* the attribute allow-list rejects a system declaration's attributes (`[[const]]`, `[[alloc_size]]`,
+  `[[__cold__]]`) once a user or vlibc file redeclares the function; check by the attribute's own position.
+- *EDG, not chased* (memory: only bugs that block cerastes): in C23, `typeof(*cp)` for a `const int* cp` drops `const`
+  (clang keeps it; P53, five shapes). Harmless for `cerastes_old`.
+- *Costs to watch:* liveness checks at every pointer use cost about 1.5–1.7× time and text on S26's scale program; deep
+  `^` mask chains (0027): range claims are fast to depth 32, identities only to the measured depth (record 0027 item 4).
+- *Completeness gaps accepted by the records:* `&s.x < &s.y` reported (members are different blocks); signed/unsigned
+  and enumeration variants through `void*` cannot be written; a list traversal's truth tests need liveness inside
+  M4.5f2's predicates; `forperm` sees only top-level tokens.
+- *The fixtures in `tests/viper-smoke/memory/`* are hand-written Viper of the chosen encoding (E2, four axioms, member
+  blocks, liveness); M4.5b1 compares the encoder's output with them and changes them only with a record.
 
 **From M4.4d** (audit rounds 1 and 2 and the re-audit; items not taken):
 - *Masks that are constants only through a call argument* (round 2 note 4): `f(v, 4294967295u)` with
@@ -156,9 +181,10 @@ not taken go to §3); single-file runs while working (`build/cerastes verify` di
 builds serialized (`lockf build/<session>/build.lock cmake --build build/cmake`); `check.sh` at most twice; anything
 that needs the x86-64 box is its own session. Record numbers are the next free ones when written (0027 is next).
 
-### 4.1 M4.4d Exact sets and constant masks (record 0026): done
+### 4.1 M4.4d (record 0026) and M4.5a (records 0027–0030): done
 
-Done on 2026-10-27 (`internal/status.md`; plan `~/.claude/plans/using-plan-md-and-my-fuzzy-sky.md`).
+Both done on 2026-10-27 (`internal/status.md`; plans `~/.claude/plans/using-plan-md-and-my-fuzzy-sky.md` and
+`~/.claude/plans/using-plan-md-and-my-streamed-glacier.md`).
 
 ### 4.2 The warning sweep: deferred to M8 (owner, 2026-10-27, M4.5a planning)
 
@@ -181,73 +207,134 @@ preprocessing expression with no diagnostic for an unsigned wrap (`#if 0u - 1 > 
 discretionary diagnostic, distinct from #61, for a preprocessing expression whose arithmetic wraps or overflows, with
 `GH-*` tests and the full box suites before the pin moves; the cerastes driver then makes it an error in verify mode.
 
-### 4.4 M4.5 Pointers (sessions a–f)
+### 4.4 S5 Linux CI, then M4.5 Pointers (sessions b1–f3; designed in M4.5a, records 0027–0030)
 
-**M4.5 Pointers** (one 4.x, sessions a–f).
+**What M4.5a decided** (details in the records; evidence in `il-inventory.md` "M4.5a"; the encoding pinned by the 33
+fixtures in `tests/viper-smoke/memory/`):
+- **0028, the memory model: E2** (owner, after S24). A pointer is a Viper `Ref`, NULL `null`; a `Block` domain with
+  `loc`, `len`, `block_of`, `offset_of`, `member`, `lvloc` and **four axioms** (`loc_inv`, `loc_nonnull`, `member_inv`,
+  `member_lv`), each to get its own record and lint tag in M4.5b1; one field per C object type plus 0019's flag per
+  cell (`v_int`/`d_int`); `WF(p)` (with bounds) on pointer parameters, results and cells instead of a surjectivity
+  axiom; quantified permissions over the absolute slot index, one quantifier per member over arrays of structs;
+  globals as `unique` 0-ary domain functions with a trusted `program_start`, and calls to `main` rejected; **each struct
+  member and inner array a block of its own** (owner, after audit round 2: bounds per sub-object); the heap token at
+  slot −1; **a liveness cell per top-level block** at slot −2, checked before every arithmetic, comparison and truth
+  test of a pointer, carried by `owns`/`reads`/`live(p)` (owner, after audit round 2: dangling pointers are reported);
+  leaks by `forperm`; `reads` by ghost fractions (`rd := min(perm…)/(n+1)`); explicit checks before every operation and
+  at every return, `a != b` asserted at entry per pair of owned places, and `insufficient.permission` accepted only on
+  rows marked as range checks (owner, after S25); sequencing on cells by name or pointer, and calls against the cells
+  they own (0028 items 12–13).
+- **0029, the annotations:** `[[cerastes::owning]]` (an owning pointer; owner, renamed from `owns` the same day), P4222's
+  markers as `[[cerastes::uninit]]`, `ref_to_uninit`, `must_init` with `--strict-init`; C's spec functions
+  `cerastes_owns(*p)`, `cerastes_reads`, `cerastes_owns_range`, `cerastes_live(p)`, `cerastes_old(e)` (a `typeof` macro) and
+  `cerastes_forall(f, free...)` with a named predicate or pure function; no EDG fork commit (P52, P53, P54).
+- **0030, vlibc:** `cerastes-verifier/vlibc` (the owner creates it), contract headers and verified implementations;
+  explicit `<vlibc/…>` and a transparent `<stdlib.h>` shim in verify mode; trust by path.
+- **The VeriFast port inventory** is `build/m4.5a/ports.md` in the M4.5a worktree (gitignored; its conclusions are below
+  per session). `malloc_block.c` holds no `malloc` (an address-taken struct local); `insertion_sort.c` is a linked list
+  whose ghost machinery is not portable as written (an array insertion sort in M4.5e2 replaces it as a benchmark); 14 of
+  the 22 files run VeriFast with `-disable_overflow_check`, so their ports need `requires` bounds; `functions.c`'s
+  predicate families and constructors, consumed fractions, backward `goto` and `open_module` are M8 entries.
 
-VerCors summary (this session's study of `utwente-fmt/vercors` `dev`, 2026-10-20; ideas only — MPL-2.0, no files
-copied): a C pointer is a value of a `pointer` ADT pairing an abstract `block` with an integer offset
-(`res/universal/res/adt/pointer.pvl`); `ptr_deref(p)` = `loc(pointer_block(p), pointer_offset(p))` gives a Viper
-`Ref`, and each element type has its own Viper field; a nullable pointer is `Option<pointer>` (every dereference
-checks non-null); `ptr_add` is abstract with postconditions (a one-past-the-end pointer cannot be formed);
-`\pointer(p, n, perm)` desugars to non-null, bounds and a quantified permission over `p[0..n)`; address-taken
-locals become 1-element non-null blocks (`VariableToPointer`); structs are by-value classes whose fields are
-pointers to field cells; `malloc` is accepted only as `(T*)malloc(n*sizeof(T))`, `free` exhales the block's
-permissions; relational pointer comparison across blocks is false instead of an error. Caveats to avoid: the prelude
-is axiom-heavy and three axioms look inconsistent outside their triggers (`pointer.pvl` stride axiom, `option.pvl`
-`some(option_get(opt)) == opt` unguarded, `const_pointer.pvl` injectivity); `int` and `short` share one field (issue
-#1357, effective types); `free(&local)` verifies (#1237); integer overflow unchecked by default; no `switch`, `do`,
-enums, unions or string literals. VeriFast's C coverage (its own front end) is the parity target: points-to chunks,
-`malloc_block`, `chars`, predicates with `open`/`close`, lemmas, `/*@truncating@*/` casts, string and `malloc`
-contracts in `bin/*.h`; canonical examples to port are listed per session below.
+**S5 Linux CI** (owner, 2026-10-27, during M4.5a: "the first sub phase should be adding Linux support to the CI. If MSVC
+is easy add it, if not defer"; `ubuntu-24.04` x86-64 only; MSVC and arm64 Linux are M8 entries). ≤ 4 h; its own record
+(the next free number). Work, from 0016 item 13 and M4.5a's survey:
+- `bootstrap.sh` for Linux: the JDK 17 and Z3 4.16.0 x86-64 builds pinned by checksum in 0001; EDG built out of tree as
+  on the box; the system include directories scraped from the Linux compilers (`tool_paths.h`, 0011 item 3); clang 21
+  and GCC 16 for `native-ok` and for the scrape (whether `ubuntu-24.04` can install GCC 16 is the first thing to
+  check: stop and ask if not); libstdc++ or libc++ for the C++ tests (EDG in Clang emulation over libstdc++ is the
+  risk; libc++ matches macOS).
+- `src/driver/silicon.cpp`: the clang-only `__builtin_available(macOS 26.0, *)` and `posix_spawn_file_actions_addchdir`
+  get a glibc path (`posix_spawn_file_actions_addchdir_np`, glibc ≥ 2.29).
+- The encoder: glibc's `assert` expansion (`__assert_fail`, in C and in C++), amending 0015 item 6 (32 test files
+  include `<assert.h>`).
+- `check_edg_config.sh`'s Linux `GNU_VECTOR_TYPES_ALLOWED`; `check_edg_options.sh`.
+- The suite: of 2034 test and doc-example files that include a header, 77 include `<stdbool.h>`, 32 `<stdlib.h>`
+  (`abort`/`exit`: glibc declares them with `__THROW`/`__attribute__`s), 32 `<assert.h>`, 8 `<limits.h>`, and about 30
+  C++ files include `<concepts>`, `<type_traits>`, `<vector>`, `<array>`, `<variant>` and others. Every test must give
+  the same outcome on both platforms; **any test whose outcome differs stops the session** (no per-platform expectation
+  without an owner decision). Walker goldens that list system-header facts may need a platform-neutral form.
+- `.github/workflows/ci.yml`: a second job in both tiers (0016 item 14), and VeriFast's Linux binary in M5c's Docker
+  step can then run on this runner.
+- P55's glibc half (how a vlibc shim meets glibc's `<stdlib.h>`) is measured here, ahead of M4.5d1.
 
-- **M4.5a Design** (no encoder code): records for (1) the memory model — cells and typed value fields (one field per
-  C type, never shared between `int` and `short`), the pointer representation (block + offset, or one ref per cell
-  with an explicit block-length ghost), NULL, provenance and one-past-the-end, address-taken locals, how
-  permissions map to `owns`/`reads`; (2) **the C spec syntax**: today `owns`, `reads`, `old`, `owns_range`, `forall`
-  are C++ only (`include/cerastes.h:61-75`, 0008 item 6) and `forall` needs a lambda, which C lacks — options:
-  declared functions taking `const void*` (the IL keeps the typed argument under the conversion), `_Generic`
-  macros, or a binder-introducing attribute (EDG's result-name mechanism, 0007 item 6); (3) the new error categories
-  (permission, null dereference, out of bounds, invalid free, …) and their messages in source terms. Silicon spikes
-  for each candidate encoding, including the axioms each needs. If an EDG fork commit is needed, a box session is
-  added before M4.5b. (4) **P4222R1's markers** (`[[uninit]]`, `[[ref_to_uninit]]`) and the stricter mode that asks for
-  them (owner, 2026-10-22, old §11 question 21: "as early as possible", in M4.5; what is left goes to M7): how they attach
-  (an attribute on a definition and on a pointer parameter), and how 0019's flag follows the cell. (5) With pointers,
-  0020 item 4's sequencing rule must become a check on objects, not names (`*p = (*q)++` may alias): a path-precise
-  category then (0020 item 4).
-- **M4.5b Pointers to scalars and globals:** `&x`, `*p`, NULL, pointer parameters with `owns`/`reads`/`old(*p)`,
-  pointer equality, an aliasing trap that must fail, mutable globals and `static` locals as cells with frames; ports
-  of VeriFast's `examples/swap.c`, `examples/address_of_local.c`, `examples/globals.c`; keep pointer arithmetic out of C
-  enumerator initializers or extend 0018 item 10's rule to it (§3, M4.2b2 note 1).
-- **M4.5c Structs:** field cells, `.`/`->`, struct values (copies, initializers, by-value parameters and results),
-  nested structs, pointers to fields; ports of `tutorial_solutions/account.c`, `deposit.c`.
-- **M4.5d malloc and free:** trusted contracts for `malloc`, `calloc`, `realloc`, `free`, `abort`, `exit` (system
-  files are used only through contracts, 0011 item 4), allocation blocks, ownership on free, leaks (record); ports of
-  `tutorial_solutions/malloc_block.c`, `examples/cell.c`.
-- **M4.5e Arrays and pointer arithmetic:** local arrays, `a[i]`, `p + i`, `p - q`, comparisons within one object,
-  `owns_range` and quantified permissions, `forall` in C; ports of `examples/carrays.c`, `examples/insertion_sort.c`,
-  array sum and max.
-  **From P38 (M4.4a, record 0022 item 3):** a braced initializer with more than 1000 elements keeps no `expr` for its
-  elements (`REDUCE_BACKING_EXPRESSION_USE`), only an `orig_type`. Read every element through `constant_value`, which
-  rejects that shape, never through `ck_aggregate`'s values directly, or a wrapping element would pass unchecked.
-- **M4.5f Predicates and pure functions:** predicate and pure bodies encoded (0011 item 4 lifted), `fold`/`unfold`,
-  recursive predicates; a linked list (push, pop, length), `tutorial_solutions/stack.c`, `reverse`. Lemmas and ghost
-  inductive data are open design points (`internal/upstream/attribute-registration.md` Appendix A): a record decides
-  whether they are in M4.
+**M4.5b1 Pointers to scalars and address-taken locals.** The four axiom records and the lint tags
+(`// cerastes:domain-ok`, `// cerastes:axiom-ok`); amendments of 0011 item 10 (four categories), 0012 item 12 (pointer
+types to scalars accepted), 0020 item 4. Address-taken locals (the IL's flag, P51) as one-slot blocks from a trusted
+allocation, the scope-exit check (`lifetime`); `&x`, `*p`, NULL (`NULL`, `0`, C23 and C++ `nullptr`); pointer
+parameters and results with `WF`, `owns`/`reads` (the ghost `rd`)/`old` in both spellings; `[[cerastes::owning]]` on
+parameters and functions (registered then, targets `p` and `r`: `check_attributes` skips registered attributes, so
+never earlier); `==`/`!=`; the explicit checks of 0028 item 11 (single cells; the marked range rows come with M4.5e1);
+sequencing on objects (0028 item 12) and the placement rule (item 13). Liveness (0028 item 3a) and `cerastes_live`/`cerastes::live`;
+calls to `main` rejected. Categories `permission`, `null-dereference`, `lifetime`, `unsequenced`, `pointer-comparison`
+(the `==` exception). Ports: the tutorial's `swap`, `inc`, `address_of_local.c`'s scalar functions (its
+`should_fail` at L158, L174, L185: a cell a callee consumed, reported at the closing brace). The Memory and ownership
+page starts; Error messages gains four sections. Emitted Viper is compared with the fixtures' shapes. Stop rules: any
+existing test's Viper changes (0028 item 1 promises none); a shape where the operation's own Viper error comes first.
+If the session will not fit 4 h, `reads` and C's spellings move to a b1′.
+
+**M4.5b2 Globals, `static` locals, initialization through pointers.** Mutable globals as `GB_g()` blocks, `program_start`
+for `main`, frames through contracts (`owns(g)`); `static` locals (0028 item 5: the implicit `owns` or a rejection in a
+recursive cycle); 0025 item 2's placement revisited with globals; 0019's flag per cell; `[[cerastes::uninit]]`,
+`ref_to_uninit`, `must_init` (registered then) and `--strict-init` (0029 item 2). Ports: `global_points_to_syntax.c`
+(adapted: no `leak`), `globals.c`'s scalar part.
+
+**M4.5c Structs.** Members as blocks of their own (0028 item 16), `.` and `->`, struct values (copies, initializers,
+by-value parameters and results), nested structs, pointers to members, `owns(*s)`, non-recursive owning fields
+(`[[cerastes::owning]]` target `d`). Ports: `malloc_block.c` (the address-taken struct local; its `free(&local)` twin
+waits for M4.5d2), the struct half of `swap.c`.
+
+**M4.5d1 vlibc** (needs the repository; any time after M4.5a, best after S5). The repository's layout
+(`include/vlibc/*.h`, the shim directory, `src/`, CMake, `LICENSE`, CI compiling every header with clang and GCC in both
+modes), `third_party/vlibc` pinned (0001), the driver's include order and the vlibc-file trust rule (0030 items 3–4,
+P55), `abort`/`exit`/`_Exit` moved out of `trusted_libc_reason` with their tests' Viper unchanged.
+
+**M4.5d2 `malloc` and `free`.** vlibc's contracts (`malloc` `ref_to_uninit`, `calloc` initialized, `realloc`, `free`),
+heap blocks with the slot −1 token, the free checks (`invalid-free`), the leak rule by `forperm` and a record on `main`'s
+leaks (`leak`), owning locals and globals (`[[cerastes::owning]]` target `v`). Ports: `account.c`, `deposit.c`,
+`swap.c`, `globals.c`, `malloc_block.c`'s `free` twin.
+
+**M4.5e1 Arrays.** Local arrays as blocks, `a[i]`, array parameters, `owns_range` as quantified permissions over the
+absolute slot, the marked range rows in the driver (owner, after S25), `forall` in C (0029 item 4: its planning decides
+between pure functions with contracts and moving M4.5f1 first), sum and max. P38: a braced initializer with more than
+1000 elements keeps no `expr` for its elements (`REDUCE_BACKING_EXPRESSION_USE`), only an `orig_type`; read every
+element through `constant_value`, which rejects that shape, never through `ck_aggregate`'s values directly, or a
+wrapping element would pass unchecked. M4.4b2's types computed from a constant (`sizeof`, `typeof`, typedefs). Port:
+`carrays.c` (lists → `forall`; its `should_fail` at L35 and L42: below and one past the end).
+
+**M4.5e2 Pointer arithmetic.** `p + i`, `p - i`, `p - q`, relational comparisons within one object, one-past-the-end,
+the `==` exception of 0028 item 3, `malloc(n * sizeof(T))`; `out-of-bounds`, `pointer-comparison`. Port: an array
+insertion sort (in place of `insertion_sort.c`).
+
+**M4.5f1 Predicates and pure functions.** Bodies encoded (0011 item 4 lifted), `fold`/`unfold`, non-recursive
+predicates. Port: `cell.c`. §3's notes on R1–R13 not reaching `pure`/`predicate` bodies and `static_assert_pure_body.c`
+go stale here.
+
+**M4.5f2 Recursive predicates.** A linked list (push, pop, length), recursive owning fields (`next`), leaks inside
+predicates (0028 item 6). Ports: `stack.c`, `sum.c`, `popn.c`.
+
+**M4.5f3 Lemmas and ghost sequences.** Its record decides whether lemma functions and ghost sequences are in M4 (they
+are needed for content specifications: `strlen`'s zero-terminated string, `memcpy`'s and `memcmp`'s contents).
+`internal/upstream/attribute-registration.md` Appendix A lists the open design points. Ports: `reverse.c`, `sum_full.c`,
+`push_all.c`.
 
 ### 4.5 M4.6–M4.8
 
-**M4.6 Chars and strings:** string literals as read-only arrays, `char` buffers, `strlen`/`memcpy`/`memcmp`/`strcmp`
-contracts, `main(argc, argv)`; ports of `tutorial_solutions/strlen.c`, `memcpy.c`, `memcmp.c`.
+**M4.6 Chars and strings:** string literals as read-only arrays, `char` buffers, vlibc's `<string.h>` (`strlen`,
+`memcpy`, `memcmp`, `strcmp`: contracts, and implementations verified in vlibc's CI), `main(argc, argv)`; character
+access to other objects stays rejected (0028 item 1); `c | 0x20`-style case bits are decided (0027). Ports:
+`strlen.c`, `memcpy.c`, `memcmp.c`. Open point: a zero-terminated buffer of unknown length needs a recursive predicate or a
+built-in notion (M4.5f3 decides).
 
 **M4.7 Function pointers:** contracts on function types, calls through pointers; ports of `tutorial_solutions/byref.c`,
-`examples/functions/functions.c`.
+`examples/functions/functions.c` (without its predicate families, an M8 entry).
 
 **M4.8 C parity close-out:** the VeriFast C differential set (the ports above, run with VeriFast in Docker as M5c
 sets up, or recorded outcomes), the full mutation run over the M4 tests and the verified doc examples never mutated
-before (owner, 2026-10-27, §8 question 10), the Memory and ownership page complete,
-M4's acceptance (plan.md), and the deferred list for M8 (unions, floating point, `volatile`/`_Atomic`/`_BitInt`/
-vector types, variadic functions and `printf`, several translation units, concurrency).
+before (owner, 2026-10-27, §8 question 10), the mask positives with mutants of a mask constant counted as "undecided"
+(§8 question 49), the Memory and ownership page complete, M4's acceptance (plan.md), and the deferred list for M8
+(unions, floating point, `volatile`/`_Atomic`/`_BitInt`/vector types, variadic functions and `printf`, several
+translation units, concurrency).
 
 ### 4.6 M5.0 and M5 — type traits and generic templates (designed in the M4.1 session)
 
@@ -427,16 +514,17 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
 - **A test that loses an `expect:` line** (pre-approved) keeps its line numbers with a comment in its place
   (M4.4c, the four `reject_assert_shape_*.c`).
 
-## 7. Acceptance of M4.4d
+## 7. Acceptance of M4.5a
 
-The table is the one in `internal/status.md` (M4.4d, "Acceptance"); M4.4c's is in `git show fce46de:internal/handoff.md`.
+The table is the one in `internal/status.md` (M4.5a, "Acceptance"); M4.4d's is in `git show 9017105:internal/status.md`.
 
 ## 8. Questions for the owner
 
 Each has a recommended answer. Answer inline, as before. Answered questions (1–48) are recorded in the decision records,
-in the commit named at the top and in `43f0f81` (questions 5, 10–12 and 43–48).
+in the commit named at the top and in `43f0f81` (questions 5, 10–12 and 43–48); 49–52 are answered below (`b231f32`) and
+recorded in records 0027 and handoff §3–§4.
 
-**M4.4d, 2026-10-27:**
+**M4.4d, 2026-10-27 (answered):**
 
 49. **Mutating the mask positives** (cut today): a mutated mask constant (`255` → `256`) lands on a shape Z3 does not
     decide, and each such mutant runs to the 300 s timeout. In M4.8's run over the M4 tests, run them with mutants of a
@@ -466,7 +554,8 @@ Do it now since we know it needs handled
 **M4.5a planning, 2026-10-27** (owner; plan `~/.claude/plans/using-plan-md-and-my-streamed-glacier.md`):
 - **M4.4e is deferred to M8** (§4.2).
 - **Q52 is folded into M4.5a** (record 0027, code in `src/vir`), as Q47 was into M4.4d.
-- **`[[cerastes::owns]]` is an owning pointer** wherever it appears: on a parameter the callee borrows the pointee
+- **`[[cerastes::owning]]` is an owning pointer** (spelled `owning`, owner's correction the same day: "instead of a
+  pointer as owns make it owning e.g. `[[owning]] int* x;`"; `owns` stays the contract function) wherever it appears: on a parameter the callee borrows the pointee
   (`p == NULL || owns(*p)` on entry and exit); on a function, the caller receives its result's pointee; on a local or
   global, the holder frees it or hands it on before its lifetime ends (the leak check); on a struct field, owning the
   struct owns `*s->f`. Phased over M4.5b–f (record 0029). "Much like how P4222 allows `[[uninit]] int x;`", in
@@ -476,3 +565,30 @@ Do it now since we know it needs handled
   of those options"). Our ports of `malloc`/`free` live there, not in this repository as VeriFast's do (record 0030).
 - **P4222's markers** are spelled `[[cerastes::uninit]]`, `[[cerastes::ref_to_uninit]]`, `[[cerastes::must_init]]`,
   checked when written, with an opt-in strict mode (record 0029).
+- **Linux CI first** (owner, during M4.5a: "the first sub phase should be adding Linux support to the CI. If MSVC is
+  easy add it, if not defer"): a support session **S5 Linux CI** right after M4.5a and before M4.5b1, on `ubuntu-24.04`
+  x86-64 only (arm64 an M8 entry); 0016 item 13 lists the work. **MSVC is deferred to M8:** not easy (a second EDG
+  configuration besides the Clang emulation of 0002, a Windows bootstrap without bash, `posix_spawn` in the driver,
+  Windows builds of the JDK 17/Z3 pins, an MSVC `native-ok` matrix). M4.5a writes S5's plan (§4).
+
+**M4.5a, 2026-10-27:**
+
+53. **`void*` until an address model** (record 0028 item 1, audit rounds 3–4): an object and its first member share an
+    address in C but not in the encoding, so a `void*` may only be tested against null or passed on as an argument, a
+    `T*` becomes `void*` only as a call argument, and a `void*` becomes `T*` only from an allocation's result. Generic
+    `void*` code (callbacks with a context pointer, `qsort`-style interfaces) is rejected until M4.7/M8. *Recommended:
+    accept; revisit with M4.7's function pointers.*
+54. **Leaks at `main`'s exit** (record 0028 item 6): VeriFast reports blocks `main` still holds at exit, with a `leak`
+    command to waive one. *Recommended: report them too, with an explicit waiver annotation designed in M4.5d2.*
+55. **The cost of liveness** (record 0028 item 3a): checking every use of a pointer value costs about 1.5–1.7× time and
+    text on S26's scale program. *Recommended: keep it (dangling pointers are reported); revisit only if a port's time
+    is unacceptable.*
+56. **`static` locals** (record 0028 item 5): their permission must reach the function. *Recommended: an implicit
+    `owns` of the function's `static` locals, propagated to its callers' contracts, and a rejection inside a recursive
+    cycle; M4.5b2 decides the details.*
+57. **S5's toolchain**: GCC 16 and clang 21 may not be packaged for `ubuntu-24.04`. *Recommended: the toolchain PPA or
+    apt.llvm.org first, then a pinned container image; stop and ask if neither works.*
+58. **A rehearsal machine for S5**: the box runs EDG suites in `~/edg-cerastes` only (memory). *Recommended: allow a
+    separate `~/cerastes-ci` checkout on the box to rehearse the Linux job; otherwise S5 iterates on GitHub's runner
+    only (slower).*
+
