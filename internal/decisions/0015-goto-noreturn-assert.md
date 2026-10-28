@@ -178,3 +178,5 @@ correctness (0013).
 *2026-10-22, amended by 0019 (M4.2c): item 2 — a `goto` may jump past a declaration without an initializer (the variable has no value at the label until it is assigned, `uninitialized`); one past a declaration with an initializer stays rejected.*
 
 *2026-10-23, amended by 0021 (M4.3b): item 6 — an `assert` condition may hold calls in guarded operands and unsequenced calls, under 0021's dependency-chain rule; side effects stay refused in it.*
+
+*2026-10-27, amended by 0030 (M4.5a, effective from M4.5d1): item 5 — the trusted table moves to vlibc's `<stdlib.h>`: a C library function's contract comes from a vlibc declaration, and `noreturn` from vlibc, not the SDK's attributes (0030 item 4).*

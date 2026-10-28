@@ -4553,3 +4553,408 @@ complement masks (284 KB at depth 14). The form is now `2^k * (a \ 2^k)` (`low::
   every run gives its expected outcome in about 1.6 s.
 - **Nesting** (`nest/`): 14 nested complement masks emit about 1 KB (976–1078 bytes), linear in the depth.
 - **Lint:** `lint_viper.py`, extended to `\`, is clean on every `.vpr` above.
+
+## M4.5a: memory-model design (records 0027–0030)
+
+Spikes and probes of the M4.5a session; evidence under `build/m4.5a/` (not committed). Measurements are on the
+worktree `.claude/worktrees/m4.2b1`, branch `m4.5a-memory-design`; Silicon and Z3 are the pinned tools of `build/env.sh`
+(Z3 4.16.0). Silicon was run directly on hand-written `.vpr` with `--numberOfParallelVerifiers 1` (the machine
+was shared with a running baseline, so timings are slower than a quiet machine's).
+
+### S23: the `|`/`^` constant-mask identities (record 0027 item 1) **PASS: no form differs from the prelude function anywhere**
+
+Evidence in `build/m4.5a/spikes/s23/`. The prelude functions are those the current binary emits
+(`build/cerastes verify s23/all.c --std=c23 --keep-vpr=...`, a file calling `|` and `^` at int, unsigned, long long,
+unsigned long long, `__int128`, `unsigned __int128`: all twelve `c_[u]{or,xor}_{32,64,128}` are present in `s23/all`;
+the 128-bit ones call the 64-bit ones, so every file carries all twelve).
+
+- **Silicon evaluation** (`gen_silicon.py`, `s23_c_*.vpr`, 12 files): 4728 closed asserts `c_[u]op_N(a, M) == form(a)`
+  and the swapped order `c_[u]op_N(M, a) == form(a)`, at N = 32, 64, 128, signed and unsigned, both `|` and `^`, both
+  mask shapes (`2^k − 1` and the complement), k ∈ {0, 1, 8, 16, N/2, N − 1, N} where 0027 item 1 allows it, operands
+  at the range bounds, ±1, 2^k − 1, 2^k, −2^k, ±(2^k ± 1), half the bounds and 6 random ones per (N, k). The `^` forms
+  are written with the let exactly as lowering would emit them: `(let t == (x) in (2^k * (t \ 2^k) + ((2^k - 1) -
+  t % 2^k)))` and, for the complement, `(let t == (x) in ((t % 2^k - 2^k) - 2^k * (t \ 2^k)))` (signed) and
+  `(let t == (x) in ((t % 2^k + (2^N - 2^k)) - 2^k * (t \ 2^k)))` (unsigned); the `|` forms are `(2^k * (x \ 2^k) +
+  (2^k - 1))`, `((x % 2^k) - 2^k)` and `((x % 2^k) + (2^N - 2^k))`. All 12 files: `Silicon finished verification
+  successfully` (34–44 s each, three in parallel). A control (`control_wrong.vpr`, three claims off by one in three
+  separate methods) reports 3 `Assert might fail`. A Python two's complement reference (`a | M`, `a ^ M` masked to N
+  bits) agrees with the form on all 4728, and every form value lies in the type's range (0 mismatches, 0 out of range).
+- **Z3 4.16.0, QF_BV, every operand** (`z3gen.py`, `z3/*.smt2`, one query per N, signedness, `|`/`^`, shape and every
+  allowed k, not just the sampled ones): the operand a is N bits, extended by 4 bits; L = `bvsmod(a, 2^k)` (the
+  non-negative remainder, SMT-LIB's `mod` for a positive divisor), H = `bvsdiv(a − L, 2^k)` (exact division, SMT-LIB's
+  `div`); the form is computed in N + 4 bits and compared with the N-bit `bvor`/`bvxor` of a and M, extended the same
+  way, and with the type's range. **1804 queries, all unsat** (32.7 s wall, four threads). A control (the `^` mask form
+  with its outer `+` turned into `−`, `z3nm/control_wrong.smt2`) is sat.
+- **Near misses are not masks.**
+  - Exhaustive at N = 8 (`nearmiss.py`; every M, every x, every k, both shapes, `|` and `^`, signed and unsigned): exactly the 16
+    values that are masks (the nine `2^k − 1` and the nine complements of 0027 item 1, `0` and the all-ones value in
+    both lists) admit a working form, no other M does, and every (shape, k) the recogniser would assign works.
+  - At N = 32, Z3 (`z3nm/`, 2468 queries: the forms with M replaced by 254, 256, 2, 4, −254, −255, −3, −257, 768,
+    0x7fffff00 signed and 254, 256, 2, 4, 2^31, 2^32 − 2, 4294967042, 2^32 − 257, 768 unsigned, every k, both shapes,
+    `|` and `^`): 2464 sat (a counterexample exists), 4 unsat, and the four are not near misses: 2^31 and 2^32 − 2 are
+    the unsigned complement masks of k = 31 and k = 1.
+  - With Silicon on the prelude functions (`nearmiss_ok.vpr`, 13 closed asserts `!=`, all verify, 30 s; its `==` twin
+    `nearmiss_ctl.vpr` fails): `x | 254`, `x ^ 254`, `x | 256`, `x ^ 256` at x = 0 differ from the k = 8 and k = 9 mask
+    forms, `| 2` from k = 1 and k = 2, `| −254`, `| −255`, `^ −254` from the k = 8 complement, `| 255` and `^ 255`
+    from the k = 7 mask form. So the recogniser's insistence on the exact value is necessary.
+- **Claims decided quickly** (`sym_ok.vpr`: 20 methods in one file, 128 bit included, **8.0 s** for all of them; the
+  claims are written in the rewritten form, nested lets with a fresh name each): `(x ^ 255) ^ 255 == x` for `int`,
+  `unsigned`, `long long` and `__int128`; the chain `(((x ^ 255) ^ 15) ^ 3) ^ 255 == (x ^ 15) ^ 3`; `(x ^ ~255) ^ ~255
+  == x` for `int`, `unsigned` and `unsigned long long` (k = 32 on the latter); `(x | 255) == x − x % 256 + 255` for
+  x ≥ 0, `(x | 255) ≥ x`, `(x | 255) | 255 == x | 255` and `(x | 255) % 256 == 255`; `x | ~15 == x % 16 − 16`,
+  `x | ~15 ∈ [−16, 0)`, `(x | ~15) % 16 == x % 16`; for an unsigned 64-bit v, `(v | 0xFFFFFFFF) % 2^32 == 2^32 − 1`
+  and `≥ 2^32 − 1`, and `v % 2^32 == 2^32 − 1 ⇒ (v | 0xFFFFFFFF) == v`; `u ^ ~0xFFu == (u % 256 + 4294967040) −
+  256 * (u \ 256)` and `(u ^ ~0xFFu) % 256 == u % 256`. Six wrong claims (`sym_wrong_*.vpr`: the chain `== x + 1`,
+  `(x | 255) == … + 254`, `x | ~15 == x % 16 − 15`, `(v | 0xFFFFFFFF) == v`, `u ^ ~0xFFu == u % 256`, `(x ^ 255) ^ 127
+  == x`) each report `Assert might fail` (assertion.false) in 5–7 s. With the prelude function instead
+  (`prelude_claim.vpr`: `c_or_32(x, 255) == x − x % 256 + 255` for 0 ≤ x), Silicon had not finished after 90 s (killed;
+  the case 0027 exists for).
+- **A constraint on `low::let_mask`, found by this spike (`letscope.vpr`):** Viper rejects a `let` whose name is already
+  bound in an enclosing scope. Nested lets with one name (`(let t == ((let t == (x) in t + 1)) in t + 1)`, and a let
+  inside the body of a let) give `duplicate identifier \`t\`` and `ambiguous identifier \`t\``, and so does a let whose
+  name is a method parameter or local (`method m(t: Int) { assert (let t == (t) in t) == t }`). Sibling lets with the
+  same name (`(let t == (x) in t + 1) + (let t == (x) in t + 2)`) and the same name in two statements are accepted. So
+  "a fresh name per function" in 0027 item 3 must mean a name unique among every enclosing let and every variable in
+  scope, not only unique per function body in sequence: a per-function counter with a prefix no encoder variable uses
+  (`m_1`, `m_2`, …, as in `sym_ok.vpr`) satisfies it, and a single name `t` fails exactly for the nested chain item 4
+  wants decided.
+
+### P53: the C spelling of the spec functions (record 0029 items 3–4) **PASS: every form parses, no EDG fork commit needed; one walker case and one qualifier loss noted**
+
+Evidence in `build/m4.5a/P53.md` and `build/m4.5a/spikes/p53/` (inputs `p1.c`…`p3.cpp`, il_display dumps `*.il`, trees
+`*.tree` from `iltree.py`, which prints the il_display expression nodes). The probe header declares `bool
+cerastes_owns(...);` (and `reads`, `owns_range`, `forall`) after the real `<cerastes.h>`; all inputs compile warning-free
+under clang and gcc-16 in C23 and C++20.
+- **`owns(place)` keeps the place** (`scripts/cerastes-fe.sh --c23 --il_display p1.c`): for `int* p`, `owns(*p)` is
+  `eok_call(enk_routine cerastes_owns, eok_indirect type=int orig_lvalue_type=int(enk_param_ref 1 type=int *))`. A `char`,
+  `bool`, `unsigned char` or `short` pointee is wrapped in `eok_cast type=int compiler_generated` (and `float` in
+  `type=double`), the default argument promotion; a struct pointee (`eok_indirect type=struct S`), `s->x`
+  (`eok_points_to_field`), a global (`enk_variable g`), `**pp`, `p[0]` and `*(p + 1)` come through with no cast.
+  `owns(p)` is a bare `enk_param_ref 1 type=int *` (no `eok_indirect`), so the pointee form and the cell of the pointer
+  variable differ; `owns(&*p)` is folded to the same bare `enk_param_ref`. An rvalue has no `orig_lvalue_type`
+  (`*p + 1`, `3`, `p + 1`), the test for "a place". `owns_range(buf, n)` keeps `enk_param_ref 1`, `2`. C++20 gives the same
+  trees.
+- **`old` as `#define cerastes_old(e) (*(typeof(e)*)cerastes_old_(&(e)))`** (`const void* cerastes_old_(const void*)`)
+  parses in C23 and C++20 in `ensures`. The chain is `eok_indirect(eok_cast type=T *(eok_call(enk_routine cerastes_old_,
+  eok_cast const void * compiler_generated(<arg>))))`; `<arg>` is `eok_address_of` of the place for `s->x`, `p[0]`, `p`,
+  and the bare pointer for `*p` (the front end folds `&(*p)` to `p`); for a global it is `enk_constant (const void *)(&g)`
+  with `kind: ck_address`, `address.kind: abk_variable`, `variable: g`, `address.offset: 0` (il_def.h:3645, 3685). A struct
+  place (`old(*s).y`) parses. `old(*p + 1)` and `old(5)` are rejected by EDG itself: `error: expression must be an lvalue`.
+  **Qualifier loss:** `typeof(*cp)` with `const int* cp` is `int` in EDG's C23 (five shapes, `q2.c`: `typeof(*cp) v = 1; v =
+  2;` accepted; clang errors on all five), while `typeof(ci)` of a const object keeps `const` (`q1.c`); harmless for `old`
+  (a value), noted, not chased. A `_Generic` fallback (one `cerastes_old_i/_c/_b/_u` function per type) parses, is an
+  `enk_c11_generic` callee (il_def.h:13679) and is **refused by the annotation walker** (`error: this version cannot check
+  this part of an annotation: an expression of kind enk_c11_generic`), so adopting it needs a walker case; the `typeof`
+  form needs none.
+- **`forall` with a named function:** in C23, `cerastes_forall(nonneg, a, n)` keeps the designator as `enk_routine nonneg`
+  (type = the function pointer type) among the variadic arguments; `&nonneg` is `eok_address_of(enk_routine nonneg)`.
+  In C++20 the existing `cerastes::forall(nonneg, a, n)` parses, the function arriving as `enk_constant &nonneg` and a
+  lambda as `enk_lambda`.
+- **EDG fork commit: not needed.** Back-end work only: strip `compiler_generated` promotion casts around a place; read
+  the `ck_address` constant and the folded `&*p` as the `old` place; header declarations in C mode.
+
+### S24: pointer encodings (record 0028) **PASS for E2 (recommended); E1 cannot extend to arrays; E3 works at a higher text cost**
+
+Evidence in `build/m4.5a/spikes/s24/` (generators `gen_e1.py`, `gen_e2.py`, `gen_e3.py`; outputs `e1/`, `e2/`, `e3/` with
+the Silicon output next to each `.vpr`; `check.py` compares each file's `// expect:` lines with Silicon's errors; `vacuity.py`;
+`ablate.sh`; `scale.py`). Every program is Viper as the encoder would emit it: one Viper field per C object type (`v_int`,
+`v_ptr_int`, …), a ghost init flag per cell (`d_int`, decision 0019 item 13), explicit `assert`s before every access
+(`p != null`, `perm(p.v_int) > none`, `== write`), bodyless trusted methods for allocation, Silicon 1.1-SNAPSHOT
+(`6b540aa4`), `--numberOfParallelVerifiers 1`. **The E2 battery is kept as 33 fixtures in `tests/viper-smoke/memory/`**
+(20 `e2_*`, 12 `s25_*` and `e2_array_elem_swap_fail`), run with `python3 scripts/run_tests.py tests/viper-smoke/memory`:
+33 passed, 0 failed.
+
+**The candidates as written**
+- **E1** (`e1/`, no domain, no axiom): a pointer is a Ref per object; NULL is `null`; an allocation is a trusted method;
+  globals are ghost reference parameters threaded from `program_start() returns (g, h)`; a block kind is a ghost field
+  `kind_` (a permission the owner holds); a struct is one Ref with a Viper field per member (S1); a pointer to a member
+  needs a ghost field holding the member's Ref (`sub_y`, `e1/struct_subref.vpr`); an array is a whole object with a
+  `Seq[Int]` field (`e1/array_whole.vpr`). There is no `p + i` (no Ref for the next cell without a function), no `p - q`
+  and no free of a pointer inside a block: **E1 is kept only for the battery items that have no arithmetic.**
+- **E2** (`e2/`): a pointer is a Ref, NULL `null`; `domain Block` with `loc(b, i): Ref`, `len(b)`, `kind(b)`,
+  `block_of(r)`, `offset_of(r)` and two axioms (below). `p + i` is `loc(block_of(p), offset_of(p) + i)` after
+  `0 <= offset_of(p) + i <= len(block_of(p))` (one past the end is a valid pointer, not a valid dereference). Valid pointers
+  enter a method by a `WF(p)` clause (`p == null || p == loc(block_of(p), offset_of(p))`) in the requires of every pointer
+  parameter and in the contents of every pointer-typed cell; allocation results carry it. Globals are 0-ary domain
+  functions `GB_g(): Block` (the cell is `loc(GB_g(), 0)`), given their value and permission by a trusted
+  `program_start()`. A struct is S1 (one Ref, one Viper field per member) or S3 (consecutive slots of its block: `&p->y` is
+  `loc(block_of(p), offset_of(p) + 1)`, no new function or axiom; both kept in `e2/struct.vpr`). An allocation is a
+  trusted bodyless method (`// cerastes:trusted-contract`) returning a fresh block with its cells at full permission;
+  heap blocks also give a token `acc(loc(block_of(r), -1).tok)` at slot -1 (a slot C code can never name, so zero-length
+  blocks have one too). Arrays are quantified permissions over the absolute slot index
+  (`forall k :: { loc(block_of(a), k) } offset_of(a) <= k && k < offset_of(a) + n ==> acc(loc(block_of(a), k).v_int) && ...`).
+- **E3** (`e3/`): a pointer value is a Viper `adt Ptr { PNull() P(blk: Block, off: Int) }`; the cell is `loc(p.blk, p.off)`
+  (the same `Block` domain and two axioms). Silicon accepts `adt` (`adt_probe.vpr`).
+
+**Verdicts** (all as expected; `—` = not written or not expressible)
+
+| battery item | E1 | E2 | E3 |
+|---|---|---|---|
+| (1) `swap` with `owns` both and `old`; `swap_wrong` fails (`postcondition:assertion.false`) | verifies / fails | verifies / fails | verifies / fails |
+| `swap(&x, &x)`: the explicit separation check `x != x` | fails (`assert:assertion.false`) | fails | fails |
+| (2) aliasing trap: separate ownership verifies `check(*p == 1)`; `q` may be `p` fails at the check; unowned `*q = 2` fails at the write's permission check | all three | all three | first two |
+| (3) address-taken local: the callee that gives permission back verifies; the callee that keeps it fails at the scope-exit check and at a later read | both | both | — |
+| (4) globals with a frame: `main` starts from `program_start`; an untouched global survives `untouched()`; a function that writes `g` without owning it, and one that consumed `g`, fail | ghost parameter | domain constant | — |
+| (5) struct with two int fields; `p->x++` keeps `p->y`; `&p->y` | S1 yes; `&p->y` only by a `sub_y` ghost Ref | S1 and S3 (S3: `&p->y` works) | — |
+| (6) malloc/free: free(NULL) ok; double free, `free(&local)` and `free(p + 1)` fail; use after free fails | single cell only (no offsets) | all (n cells, offsets) | — |
+| (7) array sum with a loop invariant over quantified permissions; one past the end; zero length; `a[n]` fails; `p + (n+1)` fails; wrong bound fails | whole array via `Seq`; no `p + i` | all | all |
+| `swap(a, a + 1)` inside an array (split and merge of the quantified chunk) | — | verifies (6.6 s for the file, see below) | — |
+| (8) `p - q`, `p < q` within one block verify; across blocks and two locals fail (`assert:assertion.false`) | — | verifies / fails | verifies / fails |
+| (9) consistency: every axiom's terms instantiated, then `assert false` | no axioms | fails with exactly that error | fails with exactly that error |
+| pointer loaded from a cell, then arithmetic | — | verifies with `WF` in the cell's contract; **fails without it** | verifies, no side condition |
+
+**Silicon reasons.** Every failure above is reported at the line of the explicit check, `Assert might fail` with reason
+`assertion.false` (or `Postcondition … might not hold` with `assertion.false` for a violated `ensures`), never the
+operation's own `insufficient.permission` or `receiver.null` — except in the two shapes S25(b) lists below (permission
+checks that quantify over a range, and a bounds check that is not followed by the cell's permission check).
+
+**Measurements.** Per file every candidate takes 1.6–2.5 s (a Silicon start is about 1.5 s of it; E1 1.6–1.9 s, E2 1.6–2.3 s
+for the 20 files, array sum 2.0 s, E3 1.7–2.4 s). The one slow file is `e2_array_elem_swap_fail` (6.6 s: it splits one
+cell off the quantified chunk and merges it back). `scale.py` (a method with K address-taken locals, all initialised,
+K − 1 neighbour swaps through the swap contract, checks, scope exits): K = 1, 4, 8, 16: E1 1.48, 1.67, 2.09, 3.74 s; E2 1.54,
+1.79, 2.14, 3.41 s; E3 1.62, 1.96, 2.10, 4.41 s. Text for the same items (bytes): `swap` E1 1985, E2 2636, E3 2554;
+`alias_trap` 1081, 1703, 1478 (E2's prelude also holds the struct and malloc fields); the array sum 1404 (whole array),
+3392, 2542; the `scale` program at K = 16 5495, 6049, 8334. So the time does not separate the candidates at this scale; the
+text is E1 < E2 < E3 for scalars, and E3 pays its `loc(p.blk, p.off)` at every access.
+
+**Vacuity.** `vacuity.py` inserts `assert false` as the first statement of every method body of every must-verify file:
+Silicon reports exactly one error per method (E2: 9 files, E1: 8, E3: 5 files; 0 problems), so no precondition is
+contradictory and no prelude is inconsistent at that point.
+
+**The axioms E2 needs (the full list is two), each shown necessary and satisfiable on its own.**
+Ablation (`ablate.sh`: the 19 files of the first battery run with an axiom removed or added):
+- `loc_inv`: `forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i`. **Needed:**
+  with it removed (or with no axiom at all) 10 of 19 files change verdict (swap, escape, malloc_free, struct, ptr_diff,
+  array_sum and its twin, double_free_fail, …). It gives `WF` of every pointer built by `loc` (allocation results, `p + i`,
+  `&p->y`), injectivity of every quantified-permission receiver `loc(block_of(a), k)` (Silicon's `qp.not.injective`), and
+  `block_of`/`offset_of` of a derived pointer. Triggered only by `loc(b, i)`.
+- `loc_nonnull`: `forall b, i :: { loc(b, i) } loc(b, i) != null`. **Needed in one place:** `&x != NULL` without holding
+  permission (`global_frame_fail`: with the axiom removed the `G_g != null` check fails instead of the permission check).
+  While a cell's permission is held, Silicon already knows its receiver is non-null.
+- **Not needed:** `len_nonneg` (`forall b :: { len(b) } len(b) >= 0`): dropping it changes no verdict in the battery (only the
+  consistency method that asserts it), because every owned range states `offset + n <= len` with `0 <= offset`, `n >= 0` and every allocation
+  states `len == n >= 0`. **Not adopted:** the surjectivity axiom (`forall r :: { block_of(r) } r != null ==> r == loc(block_of(r), offset_of(r))`):
+  it is consistent (below) and, added, makes `load_ptr_nowf_fail` verify (the only file that changes), but the `WF` clause
+  in every pointer-typed contract does the same work as a hypothesis the caller must prove, with no axiom (VerCors's
+  unguarded `stride > 0` and address bounds, the pattern the brief says to avoid, do not occur).
+- **Each axiom alone and the sets are satisfiable:** `consistency_terms_fail.vpr` (terms of `loc`, `len`, `kind`,
+  `block_of`, `offset_of`, including on `null`, `loc(c, 0)` of an arbitrary block and `loc(block_of(loc(b, 3)), j)`, then
+  `assert false`) gives exactly one error, the `assert false`, for each of `{inv}`, `{nonnull}`, `{lennn}`, `{surj}`,
+  `{inv, nonnull}`, `{inv, nonnull, lennn}`, `{inv, nonnull, surj}`, all four and none (9 subsets, Silicon 1.1-SNAPSHOT).
+  A model: `Ref` = `null` ∪ (`Block` × `Int`) with `loc(b, i) = (b, i)` (and, for `surj`, nothing else); `len`, `kind`
+  arbitrary.
+- E3's `adt` is Silicon's own constructor/destructor/exhaustiveness axioms; the `Block` domain keeps the same two. The lint
+  (`scripts/lint_viper.py`) refuses any `domain` today (and does not know `adt`): either candidate needs a tagged
+  prelude rule (record 0028).
+
+**Questions of the brief answered**
+- *Do loads of pointer-typed cells force a surjectivity axiom?* No, **provided `WF` is part of the contract of every
+  pointer parameter, result and cell content** (`e2_load_ptr`: verifies; `e2_load_ptr_nowf_fail`: fails at the first
+  `loc(block_of(q), offset_of(q) + 0)` access because `q`'s own cell cannot be named). A store must then prove `WF` of the
+  stored value (true for `null`, `loc(…)`, and any value that was itself `WF`). An externally defined function's contract
+  gets `ensures WF(r)` and a function called from outside the unit `requires WF(p)`, both the one-translation-unit trust
+  of 0012. The cost of forgetting it is incompleteness, never unsoundness.
+- *Block kind (stack/static/heap): function or ghost field?* A domain function `kind(b)` constrained only by the
+  allocation's postcondition costs no permission and is available for every pointer; E1's ghost field `kind_` needs a
+  permission the owner holds and `free` consumes. But **the token alone suffices**: `free(&local)` fails the token check
+  (`free_local_token.vpr`: `perm(loc(block_of(x), -1).tok) == write` is false for a stack block), so `kind` can be dropped
+  (a message "free of a pointer that is not from malloc" needs no more); kept in the fixtures for the diagnostic.
+- *Globals: ghost parameter or domain constant?* Domain constants need no threading and no axiom (distinct globals are
+  distinct by their permissions, as two stack blocks are), and a function that does not mention `g` cannot change it because the
+  caller keeps its own permission across the call. A ghost parameter has to be added to every function that reaches `g`
+  through the call graph (E1's `global_frame.vpr` does it for two functions).
+- *The qp split:* `swap(a, a + 1)` inside an array verifies (6.6 s for the file): Silicon takes the single cells out of the
+  quantified chunk and puts them back.
+
+**Recommendation: E2**, with `WF` in contracts, no surjectivity axiom, the two axioms `loc_inv` and `loc_nonnull`, no
+`len_nonneg`, struct = S3 (slots) where a pointer to a member is wanted and S1 where not, globals as domain constants,
+allocation and free as trusted methods with a slot -1 token. E1 cannot do arrays; E3 does the same with more text and the
+same domain axioms, and its one advantage (no `WF` obligations) is bought with an `adt` the lint must also learn.
+Caveats found: (a) a QP receiver must be written over the absolute slot index `k` (the trigger `{ loc(block_of(a), offset_of(a) + i) }`
+is refused by Viper: "not a valid Trigger"); (b) `perm(...)` may not occur under a quantifier in an `assert` ("found
+incompatible type `<impure>`"), so "the whole block is owned" at a `free` or a call is only an `assert forall … acc(…)`, see S25(b);
+(c) Viper has no `||` with an impure operand (`p != null ==> acc(...)` instead of `p == null || acc(...)`).
+
+### S25: permissions, errors, leaks, uninitialized cells (record 0028 parts B, C, E) **PASS; two shapes need a driver decision**
+
+Evidence in `build/m4.5a/spikes/s25/` (`gen_s25.py`, `gen_b.py`, `out/`, `b/`); the files of (a), (c)–(f) are fixtures
+`s25_*.vpr` in `tests/viper-smoke/memory/`, the E2 prelude.
+- **(a) `reads(*p)`.** *A ghost `Perm` parameter* (`requires none < rd && rd < write && acc(p.v_int, rd) && acc(p.d_int, rd)`,
+  `ensures acc(p.v_int, rd) && acc(p.d_int, rd)`): the caller passes `1/2`, `1/3`, `1/4` in succession and **gets full permission
+  back** (the write after the calls passes its `perm == write` check, `s25_a_reads`); a callee that nests a call with `rd / 2` verifies; a callee that writes
+  fails at its `perm(p.v_int) == write` check (`s25_a_reads_fail`: `assert:assertion.false`). *`wildcard`* (`acc(p.v_int,
+  wildcard)` in both clauses): **the caller does not get the full permission back** (`s25_a_wildcard_fail`: `assert perm(x.v_int) ==
+  write` fails), because the postcondition inhales a fresh positive amount, not the one the precondition took. So `reads` needs the
+  ghost `rd` (the caller chooses it, e.g. a fraction of what it holds; the callee verifies for every `0 < rd < write`).
+- **(b) Explicit checks** (`gen_b.py`: 13 shapes, each failing, the raw operation follows the check, in two styles:
+  `assert cond` and `if (!(cond)) { assert false }`; `b/b_plain.out`, `b/b_guard.out`; the plain style is the fixture
+  `s25_b_explicit_checks.vpr`): null read and write, read unowned, write with a fraction, uninitialized read, `a[n]`, call
+  with `x` for both owned arguments, call without permission, scope exit with half the permission, free without a token,
+  `p - q` across blocks: **every one is reported at the explicit check with reason `assertion.false`, and the operation's own error
+  does not follow** (Silicon assumes a failed assertion afterwards, and a `perm(...) > none` or `== write` assumed of a cell that has no chunk is
+  false, so the path ends; a failed pure check lets the path continue, but the operation is then reachable only where the
+  checks passed). The two styles gave the same errors (17 each, with the extra method below), except for the quantified shape 1. **Shapes where this fails:**
+  1. *A range of owned cells* (`OWNR(a, n)` required by a callee, a free of a whole block): `perm(...)` may not occur under
+     a quantifier, so the check is `assert forall k :: … ==> acc(…)`; it is reported as `Assert might fail` with reason
+     **`insufficient.permission`**, which `src/driver/report.cpp:119-130` refuses (it accepts only `assertion.false`). The
+     guard style cannot express it. The driver needs an amended rule: accept `insufficient.permission` of `assert.failed` when the
+     position-map row of that line says it is a permission check the encoder wrote (the line identifies the check, so it
+     is path-precise); or accept it at the call line. Not decided here.
+  2. *A bounds check without the cell's permission check* (`oob_read`): the failed bounds check is assumed afterwards and
+     the read then fails with `assignment:insufficient.permission` as a second error. With both checks emitted (`oob_read_full`)
+     there are two errors, both explicit, on two different feasible paths (out of bounds; in bounds but not owned).
+     So the encoder must emit every check the operation needs; the raw operation must never be the first to fail.
+- **(c) Leaks by `forperm`** (`s25_c_leaks`, `_fail`): with the slot -1 token, `assert forperm t: Ref [t.tok] :: false` at the
+  end of a method that frees everything it allocated verifies, in two shapes; it fails (`assertion.false`, at the assert's line) for a block
+  that is never freed, for one of two blocks, and for a method that returns the wrong block. A method that returns an owning pointer
+  is exempted by naming the result: `forperm t: Ref [t.tok] :: r != null && t == loc(block_of(r), -1)` (verifies in
+  `make`); an owning parameter that is consumed (`consume` frees it) verifies. About 2.0 s per file. Limits: `forperm` sees
+  top-level chunks only, so a token inside a folded predicate instance (a list node) is invisible to it: the leak check there
+  is M4.5f's (the postcondition would name the predicate). Whether a leak is an error at all is the owner's decision (C permits it).
+- **(d) The init flag** (`s25_d_init`, `_fail`): `owns(*p)` in a requires is `acc(p.v_int) && acc(p.d_int) && p.d_int`;
+  `[[cerastes::ref_to_uninit]]` drops `p.d_int` from the requires; `must_init` adds `p.d_int` (and the value) to the ensures: the caller
+  then reads the cell. Without `must_init` the caller learns nothing and its read fails at the explicit check; a callee that
+  claims `must_init` and does not write fails its postcondition (`postcondition:assertion.false`); a callee that reads a
+  `ref_to_uninit` parameter fails at the explicit flag check; passing an uninitialized cell where `owns(*p)` is required
+  fails the caller's check; all `assertion.false` at explicit lines.
+- **(e) Sequencing on objects** (`s25_e_seq`, `_fail`): `*p = (*q)++` emits `assert p != q` before the two writes; it verifies when both
+  are owned (separation gives `p != q`) and fails when `q` may be `p` (`assert:assertion.false` at that line), category `unsequenced`.
+- **(f) Owning pointers** (`s25_f_owning`, `_fail`): a borrowed `[[cerastes::owning]] int* p` is `p != null ==> INIT(p)` in both
+  clauses (it may change the value: `owns`, not `reads`); a result that owns is `ensures r != null ==> INIT(r) && token && …` (the
+  caller frees or returns it); an owning parameter that is consumed puts the token in the requires and nothing back. Fail
+  twins: use after the callee consumed the pointer (explicit read check), a result never freed (leak check), a borrow that
+  returns less (`postcondition:insufficient.permission`, a Viper reason because the lost permission is in the postcondition itself).
+
+### After audit round 2 (fixtures aligned to record 0028; `build/m4.5a/spikes/r2/`)
+
+The fixtures of `tests/viper-smoke/memory/` were regenerated from `r2/gen_r2.py` and `r2/gen_s25r2.py` (38 fixtures; 38 passed, 0 failed;
+the old set is in `build/m4.5a/spikes/round1/fixtures/`). Expectation lines are the design's: every changed or new one is listed below.
+- **B5 (explicit checks at calls and returns).** Every must-verify method that returns permission now ends with the explicit check of
+  each permission clause of its postcondition (`assert perm(p.v_int) == write && perm(p.d_int) == write`, `assert p.d_int`; a conditional
+  clause as `assert r != null ==> …`; a reads clause `perm(p.v_int) >= rd`; a range `assert INITR(a, n)`, a marked row), and every call is
+  preceded by the explicit check of the callee's permission clauses; Silicon's own postcondition check never fails first. Twins:
+  `swap_drops` (`e2_swap_fail`), `borrow_gives_back_less` (`s25_f_owning_fail`: was `postcondition:insufficient.permission`, now `assert:assertion.false`
+  at the return check), `peek_returns_less`, `drops_a_cell` (range, `assert:insufficient.permission`), `call_range_short`. **A finding:** with two pointers that
+  may alias, a failed explicit check is followed by Silicon's own `postcondition:insufficient.permission` unless the separation of the owned
+  places was asserted at method entry (`assert a != b`, provable from the requires): Silicon does not derive `a != b` from two full permissions
+  once one of them has been exhaled (`r2/guardtest/`: plain and guard styles both cascade without the entry assert, neither with it; one pointer never cascades).
+  Lowering must therefore emit, at entry, one provable `assert p != q` per pair of owned places of the same field (the fixtures do, in `swap`,
+  `swap_drops`, `alias_trap`, `caller_two_places`).
+- **S8 (no `kind`).** `kind` is gone from the prelude, the allocations and `free`. `free(&local)` is caught by the token check
+  (`e2_double_free_fail`, `free_a_local`), the offset by `offset_of(p) == 0`, the partly owned block by `assert forall … acc(…)` on a marked row
+  (`free_partly_owned`, `assert:insufficient.permission`, new). `s25_b_explicit_checks` no longer has `oob_read` (a bounds check with no permission check; it stays
+  as evidence in S25(b) above); the array twin `oob_read` in `e2_array_sum_fail` now writes both checks (two errors, one per path).
+- **S1.** `WF(p)` = `p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p)))` and `owns(*p)`
+  includes `offset_of(p) < len(block_of(p))` (`OWN`/`INIT`/`UNINIT`, `SOWN`, the pointer-cell contracts). New `e2_ptr_compare` (verifies): `p == q` for two owned
+  pointers, `p == NULL` with no check, `e == q` for one past the end against a pointer of the same block; `e2_ptr_compare_fail`: one past the end of a's block compared with an owned
+  pointer `q`, and with an unowned `q`, fail at the explicit `pointer-comparison` check (`p == null || q == null || block_of(p) == block_of(q) || (offset_of(p) < len(block_of(p)) && offset_of(q) < len(block_of(q)))`).
+- **S2.** `unique function GB_g(): Block` (and `GB_h`), `len(GB_g()) == 1` is part of `owns(g)` (`INIT_G`, and of `program_start`'s ensures). New `e2_global_addr`:
+  `&g != &h` and `&g != NULL` hold with no permission held, `&g + 1` is formed without a false alarm in a function that owns g; `e2_global_addr_fail`: `&g + 2` fails the bound, `&g + 1`
+  without owning g fails (the length is a clause of owns, not a fact). `unique` adds Silicon's own pairwise-distinctness axioms: the consistency runs include them.
+- **S3 (vacuity, consistency).** `vacuity2.py`: `assert false` at the start of every method body, at the END of every body and right AFTER every trusted call
+  (allocation, `program_start`, `malloc`), one variant per point, over the 38 fixtures' must-verify files: 104 points (44 start, 44 end, 16 after a call),
+  each reports exactly the inserted error (0 unreachable). New `e2_consistency_calls_fail` (calls `program_start`, the local allocation, `malloc(3)` and `malloc(0)`, uses `forperm`
+  and the unique globals, then `assert false`): exactly that error, for `{inv, nonnull}`, `{inv}`, `{nonnull}`, `{inv, nonnull, lennn}`, `{inv, nonnull, surj}` and `{}` (the call
+  methods need `inv`, so the subsets without it also fail the well-formedness of the contracts, as expected; `r2/cons_*/`). `consistency_terms_fail` gives exactly one error for the same six
+  subsets. The missing output for `cons_inv_nonnull` is `build/m4.5a/spikes/s24/cons_inv_nonnull/consistency_terms_fail.out` (one error, the `assert false`).
+- **S4 (reads).** The caller sets `rd := (perm(place_1) < perm(place_2) ? perm(place_1) : perm(place_2)) / (n + 1)` after the explicit checks `perm(place_i) >= rd`. `s25_a_reads`
+  now verifies: `f(p, q)` at two different amounts, `f(p, p)` with `reads(*a), reads(*b)` (one `rd`, `n = 2`, divisor 3: the callee holds `2rd` on one cell), a callee `holder` that is
+  itself a reads function holding only `ro` and passes `perm/3` on, a caller regaining full permission after each call (writes again), a nested `rd / 2`. `s25_a_reads_fail`:
+  a callee that writes under a fraction, one that returns less (`perm >= rd` fails at its return check), a caller holding a fraction calling a callee that needs `owns` (fails at the explicit check of the call).
+
+### S26: member blocks and the liveness token (owner decisions 2026-10-27 on audit items B1 and B3) **PASS for both; one extra axiom is needed if member blocks are to share a liveness token**
+
+Evidence in `build/m4.5a/spikes/s26/` (`gen_m.py` members, `gen_l.py` liveness, `ml/` the combination, `s3/` the slot layout for comparison, `scale/`; outputs next to
+each `.vpr`). Fixtures: `tests/viper-smoke/memory/s26_member_*.vpr` (11), `s26_live_*.vpr` (9), `s26_member_live*.vpr` (3); `e2_struct.vpr` and
+`e2_struct_fail.vpr` (the S1/S3 slot structs) were **removed** and are replaced by `s26_member_struct*`; every other fixture is unchanged. The directory has 61 fixtures; 61 passed, 0 failed.
+
+**(A) Member blocks.** The prelude domain gains `member(r: Ref, k: Int): Block`, `parent_of(b: Block): Ref`, `index_of(b: Block): Int` and the axiom
+`member_inv: forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k`; three axioms in all (`loc_inv`, `loc_nonnull`, `member_inv`).
+A struct object is a slot `s` of its block; member k is the block `member(s, k)`, its cell `loc(member(s, k), 0)`; a struct-typed member is a block of one slot that is the inner object; `int a[2][3]` is a block of two
+row slots, row i is `member(loc(b, i), 0)` of length 3. `owns(*s)` states `len(member(s, k)) == n_k` (a contract clause) and the members' cells.
+- **Verdicts** (all as designed): `&s.y` and `p->y` work (`bump_y_via_pointer`); `&s.x + 1` is formed with no false alarm (bounds `0 <= 1 <= len(member(s, 0))`) and
+  `*(&s.x + 1)` fails the explicit bounds check (`assert:assertion.false`); `&s.x + 1 == &s.y` fails the explicit `pointer-comparison` check (item 3); y not owned fails at the read; a nested struct `{ struct S s; int z; }`: `bump_x(&t->s)`
+  accepts the inner object pointer as it is, a twin that also changes `z` fails its postcondition; `int a[2][3]`: `a[1][0]` works, `&a[0][3]` is formed, `a[0][3]` fails the bound, `&a[0][3] == &a[1][0]` fails the pointer-comparison check,
+  `a[2][0]` fails the row bound; row 0's sum with a loop invariant over a two-variable quantified permission verifies; an array of structs with one quantified permission per member
+  over `loc(member(loc(block_of(a), k), j), 0)` verifies a loop sum of the x members, the split of one element's two cells and the merge back (`swap_xy_of_first`), `a[n].x` fails (bounds, then permission on the path where the bound holds),
+  a range clause with a missing member cell fails as `assert:insufficient.permission` on a marked row; `malloc(sizeof(struct S))` and `free` check the token, offset 0 and every member's cell (one by one, no quantifier: a
+  missing `y` cell fails at that check), `free(&p->y)` fails the token check, a double free fails, `malloc(n * sizeof(struct S))` hands out `AOSOWN(r, n)` and the whole-range check is a marked row.
+- **Receiver injectivity for arrays of structs: Silicon proves it** (no `qp.not.injective`): `loc(member(loc(b, i), k), 0)` is injective in i by `loc_inv`, `member_inv`, `loc_inv`. **The triggers needed:** one quantifier per member and per field,
+  each with the trigger `{ loc(member(loc(block_of(a), k), j), 0) }` of its own receiver (a single `forall` with two `acc` of different members and the trigger of the first fails, "loop invariant might not hold on entry … insufficient permission to access
+  loc(member(loc(block_of(a), k), 1), 0).v_int", `exp/e4.vpr`; the same two quantifiers written apart verify, `exp/e1`–`e3`); the pure length facts `len(member(loc(block_of(a), k), j)) == n_j` carry the trigger `{ member(loc(block_of(a), k), 0) }`;
+  a row of a matrix must be written `member(loc(block_of(a), 0), 0)`, not `member(loc(block_of(a), offset_of(a) + 0), 0)` (arithmetic in a trigger is refused, "not a valid Trigger"), so the contract of `int a[2][3]` fixes `offset_of(a) == 0` for the outer array or the QP is written over the absolute index.
+- **Axioms.** Without `member_inv` (`abl_no_member_inv`): 7 of the 13 files change verdict (the array of structs, its twin, the matrix and its twin, the malloc'd-struct array, the malloc'd-struct twin and the consistency calls file; the single struct and nested struct do not need it): necessary.
+  The consistency method (`consistency_terms_fail`: terms of `loc`, `member`, `parent_of`, `index_of`, `block_of`, `offset_of`, `len`, including on `null` and nested `parent_of(member(r, k))`, then `assert false`) gives exactly one error for each of the 8 subsets of
+  `{loc_inv, loc_nonnull, member_inv}`; `consistency_calls_fail` (the trusted allocations, `forperm`) for the full set. A model: `Ref` = `null` ∪ `loc(Block, Int)`, `Block` = top-level blocks ∪ `member(Ref, Int)`, the free term algebra.
+  Vacuity (`vacuity2.py`): 27 points (start, end, after a trusted call) of the must-verify files: all reachable.
+- **Time and text against the slot layout (S3)** (`s3/array_of_structs_s3.vpr`: the same two methods, slots `2i`, `2i + 1`, quantifiers over the absolute slot with `(k - offset_of(a)) % 2` conditions; Silicon-reported time, three runs, alternating, on a loaded machine): array of structs member 3.7, 3.7, 4.6 s against slots 4.0, 4.0, 4.2 s;
+  text 4009 against 4189 bytes. The struct file (5 methods, member layout) 2.8–2.9 s against the round-2 slot file (S1 and S3 methods) 2.6–2.7 s. No difference worth a decision.
+- **Open:** a `struct` of `n` members costs `n` block lengths in every contract (`SLEN`) and one quantifier per member in an array of structs; a union would need a decision of its own (not probed).
+
+**(B) The liveness token.** A ghost field `lv: Bool` at slot −2 of every block, full permission from the allocation (the trusted allocation methods and `malloc` ensure it), `scope_exit` and `free` require and consume it whole
+(`assert perm(LVC(p)) == write`, the `lifetime` / `invalid-free` checks); `owns(*p)` and `live(p)` carry `acc(loc(block_of(p), -2).lv, l)` with a ghost `l` per pointer (`none < l < write`), the caller choosing
+`l := perm(loc(block_of(p), -2).lv) / (n + 1)`; every pointer `+`/`-`, relational comparison, `==`/`!=` and bool conversion first asserts `p != null ==> perm(loc(block_of(p), -2).lv) > none`.
+- **Verdicts** (all as designed): `swap` and the caller with two stack locals verify with the fractions; `swap_adjacent` (two cells of one block: fractions `perm/3` each, the call checks `perm(lv) >= la + (same block ? lb : none)`) verifies,
+  a swap that gives back half of a fraction fails its return check, `swap_wrong` its postcondition; the array sum with liveness carried by `owns` verifies (the loop's `a + i` checks it), without the clause it fails at that check
+  (`s26_live_array_sum_nolive_fail`); `bool same_obj_less(a, b)` with `live(a) && live(b)` verifies, with no liveness clause it fails at the lifetime check; `free(p); if (p == q)` fails, `free(p); if (p == NULL)` fails too (`p`'s value is indeterminate after the free,
+  C 6.2.4p2; the owner's rule "== with a non-null operand"), `{ int x; p = &x; } p + 0` fails; **a callee that keeps a liveness fraction blocks the caller's free** (`assert perm(lv) == write` fails: `invalid-free`), the callee that gives it back lets the free verify
+  (and the leak check passes); `null_plus_zero` shows the C rule (`a + 0` on a null `a` fails `assert a != null`; **C++ allows `null + 0` and `null - null`**, so the check `a != null` is written for C only, and in C++ only when the offset is not 0 / for `-` unless both are null).
+- **Cost** (Silicon-reported time, the same machine under load, three runs): the scale program (K address-taken locals, K − 1 neighbour swaps, checks, scope exits) K = 1, 4, 8, 16: without liveness 2.2, 2.8, 3.4, 6.0–8.1 s and 2.3, 3.7, 5.7, 9.8 KB; with liveness 2.8, 4.3, 5.1, 10.8–12.7 s and 4.1, 6.6, 9.9, 16.8 KB:
+  about 1.5–1.7 times the time and text at K = 16. `swap` file 3.8–4.3 s with liveness (it also holds `swap_adjacent`, so it is not the same program) against 2.9 s; the array sum 3.6–4.3 s against 3.6–3.7 s (text 4.0 against 3.4 KB).
+- **Vacuity** (`vacuity2.py` on `s26/l`): 23 points (10 start, 10 end, 3 after a trusted call), all reachable.
+- **Liveness and member blocks (found by this spike).** A member block is a block, so a pointer `&s.y` has `block_of` = `member(s, 1)` and the check reads `loc(member(s, 1), -2).lv`, which no allocation created. Two ways: (1) a liveness token per member block,
+  created with the struct, consumed at its scope exit and free, and one fraction per member block in every `owns(*s)` (cost: n tokens and n ghost fractions per struct pointer); (2) **one fourth axiom** `member_lv: forall r, k :: { member(r, k) } lvloc(member(r, k)) == lvloc(block_of(r))`
+  with a function `lvloc(b: Block): Ref` that a top-level allocation sets to `loc(b, -2)` (`s26_member_live*.vpr`: `&s.x + 1`, a `live(a) && live(b)` callee on two pointers into `x`'s block, the check after the struct's scope ends fails; the
+  consistency method with the four axioms gives exactly one error). Option 2 keeps one token per object and one fraction per mention, at the price of a fourth axiom (model: `lvloc(top) = loc(top, -2)`, `lvloc(member(r, k)) = lvloc(block_of(r))`); needs the owner's choice.
+- **Not done:** liveness is carried only in the `s26_live_*` and `s26_member_live*` fixtures; the other fixtures (`e2_*`, `s25_*`) do not carry it, so the directory pins the record's pre-liveness encoding next to the new one until record 0028 is amended; the `static` locals' and
+  globals' tokens (`program_start` would give each global block its liveness token; `lifetime` of a global never ends) and a `reads` function that holds a fraction while its caller frees are as for locals.
+
+### S26 final (fixtures uniform with the final design of record 0028; `build/m4.5a/spikes/final/`)
+
+`tests/viper-smoke/memory/` was regenerated from one library (`final/lib.py`) and four generators (`gen_base.py`, `gen_s25.py`, `gen_mem.py`, `gen_live.py`, plus `gen_b.py`): **55 fixtures (24 `e2_*`, 12 `s25_*`, 11 `s26_member_*`, 2 `s26_member_live*`, 6 `s26_live_*`;
+24 must-verify, 31 must-fail with 93 expected errors); 55 passed, 0 failed.** The old set is `final/before/`. Every fixture carries the final prelude: the four axioms (`loc_inv`, `loc_nonnull`, `member_inv`, `member_lv`, the last with the record's trigger `{ lvloc(member(r, k)) }`; it
+works for the array of structs and the nested struct), liveness (`lvloc(b) == loc(b, -2)` set by every allocation, program_start and malloc; the token is a field `lv`), structs as member blocks (S1 and the slot layout are gone), `owns_block`.
+- **What every fixture now does.** `owns(*p)`/`reads(*p)`/`live(p)` carry ghost fractions (`l_p` per pointer for owns; one `rd` for the cells and the liveness cells of a reads function); the caller chooses `perm(lv)/(n + 1)`; every call, return, scope exit and free checks the liveness clauses one by one
+  (`perm(lvloc(block_of(p)).lv) >= l_p + (lvloc(block_of(p)) == lvloc(block_of(q)) ? l_q : none)` for every other clause that may share the cell); every pointer `+`, `-`, comparison, `==`/`!=` and copy/store/pass/return first asserts `p != null ==> perm(lvloc(block_of(p)).lv) > none`
+  (item (c): `s26_live_lifetime_fail` now has `free(p); if (p == q)` with both operands in that form, `p == NULL` after the free, and a copy, a store, an argument and a result of a dangling pointer, each failing at its explicit check). Globals: `program_start` gives each `GB_` block its token, `owns(g)` states
+  `len(GB_g()) == 1 && lvloc(GB_g()) == loc(GB_g(), -2)` and carries a fraction (`e2_global_*`). Entry separation is `assert a != null && b != null ==> a != b` for pairs of single owned places only, none for ranges.
+- **`owns_block(p)`** (the macro `BLK`: offset 0, the token, the whole liveness token with `lvloc(b) == loc(b, -2)`, every cell and flag of every slot): `malloc` ensures `r != null ==> BLK(r)`, `free` requires `p != null ==> BLK(p)`; an owning result is `ensures r != null ==> BLK(r)`; an owning parameter is a borrow.
+  `s25_f_owning`: `make_owned` returns it (return checks one by one, the cell range a marked row), the caller reads, lends it to `borrow(p, l_p)` and frees it, the leak check passes. `s25_f_owning_fail`: use after free, a leak, a borrow that returns less, a callee that returns a pointer it only borrows (the token check fails: `returns_a_borrowed_pointer`),
+  a borrower that tries to free (`borrower_frees`). A struct's `owns_block` (`SBLK`) lists every member's cell (`s26_member_malloc_struct*`); an array of structs' range is a marked row.
+- **A finding that the liveness design needs (new).** Silicon cannot consume a fraction chosen as `perm(lv)/(n + 1)` from two chunks whose receivers may be one cell unless it knows which: `peek_two(p, q, r, lf4, lf5)` failed with `insufficient permission to access lvloc(block_of(p)).lv`
+  although the amounts are exact; with `l_p / 3` (a known fraction) it verifies, and so it does with a **no-op case split on the liveness cells** (`if (lvloc(block_of(p)) == lvloc(block_of(q))) { }`) before the fractions are computed (`final/exp/`). Two details: the split must be on `lvloc` (a function of the block, not injective), not on `block_of`
+  (a split on blocks changed nothing, and was the reason for a cascade of Silicon's own postcondition error after a failed explicit return check of two liveness clauses); and a failed `assert` is not assumed afterwards when it compares `perm` terms. Lowering therefore emits the split for every pair of liveness clauses (at a method's entry and before each call:
+  25 splits in the fixtures); with it `swap_returns_less` (two pointers, a failed explicit lv return check) fails at that check only (`e2_swap_fail`). The reads rule of item (g) is implemented as `rd := min(perm(place_i), perm(lv_j)) / (k + 1)` over all `k` fractions taken (cells and liveness cells), with the case split on cell pairs too (`s25_a_reads`: `f(p, q)`, `f(p, p)`, a holder of a fraction, a nested call; twins for a writer, a return-less callee, a liveness return-less callee, an owns callee called with a fraction).
+- **Consistency and vacuity.** `e2_consistency_terms_fail` (the terms of every axiom, then `assert false`): **exactly one error for each of the 16 subsets of the four axioms**; `e2_consistency_calls_fail` (`program_start` with the `unique` globals and their tokens, the local allocation, `malloc(3)` and `malloc(0)` with token and liveness, `forperm`, the liveness cells, then `assert false`):
+  exactly that one error with the four axioms (and with `{inv, nonnull}` plus any of the other two). `vacuity2.py` over the regenerated sets (`out`, `s25`, `mem`, `live`): **139 points (61 method starts, 61 ends, 17 after a trusted call), all reachable.**
+- **Cost** (Silicon-reported time, interleaved, two runs, a machine with a load average above 100, so only ratios mean anything): `swap` file 7.2 KB against 3.1 KB (before liveness), 20.9–26.5 s against 15.3–19.9 s; the array sum 4.9 against 3.4 KB, 20.0–20.7 against 18.4–22.1 s; the array of structs 5.8 against 4.1 KB, 23.5–24.4 against 23.6–24.5 s.
+- **Expect-line changes against the previous 61 fixtures** (category counts per file; line numbers moved in all regenerated files): `e2_swap_fail` asserts 2 → 3 (`use_returns_less`, `swap_returns_less`: liveness return checks; `swap_drops`, `swap_same` kept), `s25_a_reads_fail` 3 → 4 (`peek_returns_less_liveness`), `s25_f_owning_fail` 3 → 5 (the owns_block shapes replace
+  `client_uses_after_consume`/`consume`: use after free, leak, borrow gives back less, returns a borrowed pointer, borrower frees), `s26_live_lifetime_fail` 4 → 8 (item (c): copy, store, pass, return of a dangling pointer; both operands checked). Removed: `s26_live_swap`, `s26_live_swap_fail`, `s26_live_array_sum` (now `e2_swap`, `e2_swap_fail`, `e2_array_sum`, which carry liveness),
+  `s26_member_consistency_*` and `s26_member_live_consistency_fail` (now the four-axiom `e2_consistency_*`). The other 49 files keep their categories; `s26_member_live*` and `s26_live_same*` keep their names and outcomes.
+
+### S23b: the `^` mask forms as prelude functions (record 0027 item 3)
+
+Evidence in `build/m4.5a/spikes/s23b/` (`fn_8.vpr`, `fn_16.vpr`, `fn_32.vpr`, `fn_id.vpr`; the orchestrator's spike after M3
+found nested `^` chains in the inline `let` form running past 200 s at depth 8). Each `^` mask as a Viper function with the
+form as its body and `ensures in_range(a) ==> in_range(result)` (no `requires`), a chain of `c_xor_lo_s32_k` calls over an
+`int` parameter, the method's `ensures` the `int` range: depth 8, 16 and 32 each verify in about 2 s (Silicon 1.1-SNAPSHOT
+`6b540aa4`, `--numberOfParallelVerifiers 1`); `fn_id.vpr` proves `f8(f8(x)) == x`, an eight-call chain that cancels in
+pairs, and `f8(x) == x - 2 * (x % 256) + 255`, and refutes the wrong twin (`… + 254`) in 1.6 s. In the emitted program
+(the method's own `ensures`, C++'s `Bool` equality) an alternating signed chain's identity is slower: see record 0027
+item 4 and edg-backend's M3 (`build/m4.5a/M3.md`).
+
+### M3 (record 0027): the `.vpr` diff against the baseline, function form (edg-backend; `build/m4.5a/M3.md`)
+
+98 baseline `.vpr` (50 sources) call `c_[u](and|or|xor)_N`; 198 sources rerun (those, every `bit_*`/`*mask*` test, the
+integer-semantics doc examples): 587 passed, 0 failed. Of the 197 `.vpr` in both runs, 30 changed, each calling
+`c_[u]or_N`/`c_[u]xor_N` with a constant mask before and fewer prelude calls or a mask-function call now; 167 identical; 0
+unexplained; 0 verdict or error-line changes. VIR: 835 old cases, 35 changed (each explained), 800 identical, no outcome
+change; `(let ` in 0 files (the first, `let`-form run measured 30 and 35 changes too, then was superseded by item 3's
+function form). Range claims through nested `^` chains: depth 1–32 in 1–12 s; emitted size `int` N = 1/8/32: 574/1231/1639
+bytes. Identity threshold (`build/m4.5a/xor-threshold.md`, serial, `--timeout 120`, load 9–15 for the `int` rerun):
+`unsigned` decided at depths 2–8 in both orders and modes (2.7–9.3 s; one refutation 23.1 s); `int` adjacent-cancelling
+2/4/6/8: c23 2.7/2.7/3.3/4.6 s, c++20 2.6/2.7/2.8/timeout; `int` alternating: depth 4 c23 2.8 s, c++20 117.4 s; depth 8
+timeout in both. With the method's automatic range `ensures` removed by hand the worst cases take 1.95–15.4 s; swapping the
+C and C++ forms of the `ensures` (`((res == x) ? 1 : 0) != 0` vs `res == x`) moves the cases between seconds and a timeout.
+The tests keep identities within these limits (`mask_or_xor_round_trip.c`: depth 2 and the paired depth 4; the VIR "pairs",
+"complements" and "eight_range" cases).

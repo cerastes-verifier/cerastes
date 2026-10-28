@@ -1747,6 +1747,128 @@ class BitwisePreludeTests(unittest.TestCase):
         self.assertTrue(any("`domain D`" in p for p in probs), probs)
 
 
+class XorMaskPreludeTests(unittest.TestCase):
+    """The mask functions of `^` (decision 0027 item 3 as revised) carry one range implication as `ensures`, which needs
+    no position map entry; the exemption is exact, so every other shape is still reported (each twin of an accepted form)."""
+
+    @staticmethod
+    def mask_function(name="c_xor_mask_32_8", ensures="auto", signature="(a: Int): Int", extra=(), body=r"(256 * (a \ 256)) + (255 - (a % 256))"):
+        width = int(name.split("_")[-2]) if name.split("_")[-2].isdigit() else 32
+        if ensures == "auto":
+            lo, hi = (0, 2 ** width - 1) if name.startswith("c_uxor") else (-2 ** (width - 1), 2 ** (width - 1) - 1)
+            t = f"({lo})" if lo < 0 else str(lo)
+            ensures = f"ensures ({t} <= a && a <= {hi}) ==> ({t} <= result && result <= {hi})"
+        lines = [f"function {name}{signature}"] + [f"  {l}" for l in ([ensures] if ensures else []) + list(extra)]
+        return "\n".join(lines + ["{", f"  {body}", "}"]) + "\n"
+
+    def problems(self, text):
+        return lint_vpr_other(text, "", "t.vpr", "t.vpr.map")
+
+    def test_the_emitted_form_of_every_mask_function_is_accepted(self):
+        for u in ("", "u"):
+            for c in ("", "c"):
+                for width in (32, 64, 128):
+                    for k in (0, 1, 8, width - 1) + ((width,) if u else ()):
+                        name = f"c_{u}xor_{c}mask_{width}_{k}"
+                        with self.subTest(name):
+                            self.assertEqual(self.problems(self.mask_function(name)), [])
+
+    def test_the_text_is_what_the_emitter_writes(self):
+        text = self.mask_function("c_xor_cmask_32_4")
+        self.assertIn("ensures ((-2147483648) <= a && a <= 2147483647) ==> ((-2147483648) <= result && result <= 2147483647)", text)
+        self.assertEqual(self.problems(text), [])
+        unsigned = self.mask_function("c_uxor_mask_32_32")
+        self.assertIn("ensures (0 <= a && a <= 4294967295) ==> (0 <= result && result <= 4294967295)", unsigned)
+        self.assertEqual(self.problems(unsigned), [])
+
+    def test_a_range_of_another_shape_is_reported(self):
+        for ensures in ("ensures ((-2147483648) <= a && a <= 2147483647) ==> ((-2147483648) <= result && result <= 2147483646)",
+                        "ensures ((-2147483648) <= a && a <= 2147483646) ==> ((-2147483648) <= result && result <= 2147483647)",
+                        "ensures ((-2147483647) <= a && a <= 2147483647) ==> ((-2147483648) <= result && result <= 2147483647)",
+                        "ensures ((-2147483648) <= a && a <= 2147483647) ==> ((-2147483647) <= result && result <= 2147483647)",
+                        "ensures (-2147483648) <= result && result <= 2147483647",          # the bit function's form
+                        "ensures ((-2147483648) <= a && a <= 2147483647) ==> (result <= 2147483647)",
+                        "ensures ((-2147483648) <= a && a <= 2147483647) && ((-2147483648) <= result && result <= 2147483647)",
+                        "ensures true"):
+            with self.subTest(ensures):
+                probs = self.problems(self.mask_function("c_xor_mask_32_8", ensures))
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("`ensures` line has no entry in the position map", probs[0])
+
+    def test_the_unsigned_function_needs_the_unsigned_range_and_the_width_its_own(self):
+        signed = "ensures ((-2147483648) <= a && a <= 2147483647) ==> ((-2147483648) <= result && result <= 2147483647)"
+        self.assertEqual(len(self.problems(self.mask_function("c_uxor_mask_32_8", signed))), 1)
+        unsigned = "ensures (0 <= a && a <= 4294967295) ==> (0 <= result && result <= 4294967295)"
+        self.assertEqual(len(self.problems(self.mask_function("c_xor_mask_32_8", unsigned))), 1)
+        self.assertEqual(len(self.problems(self.mask_function("c_xor_mask_64_8", signed))), 1)
+
+    def test_a_different_name_shape_is_not_exempt(self):
+        for name in ("c_xor_mask_32", "c_xor_mask_32_", "c_xor_mask_32_x", "c_xor_mask_16_8", "c_xor_masks_32_8",
+                     "c_xor_mask_32_8x", "c_or_mask_32_8", "c_and_mask_32_8", "c_uxor_mmask_32_8", "my_c_xor_mask_32_8",
+                     "c_xor_cmask_32_-1"):
+            with self.subTest(name):
+                text = (f"function {name}(a: Int): Int\n  ensures ((-2147483648) <= a && a <= 2147483647) ==> "
+                        "((-2147483648) <= result && result <= 2147483647)\n{\n  a\n}\n")
+                probs = self.problems(text)
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("`ensures` line has no entry in the position map", probs[0])
+
+    def test_k_out_of_range_or_written_oddly_is_not_exempt(self):
+        # k > N, a leading zero, a signed k = N (not a value of the type), a sign, a space and an empty k
+        for name in ("c_uxor_mask_32_33", "c_xor_mask_32_32", "c_xor_cmask_32_32", "c_uxor_cmask_64_65", "c_xor_mask_128_128",
+                     "c_xor_mask_32_08", "c_xor_mask_32_00", "c_uxor_cmask_32_0008", "c_xor_mask_32_+8", "c_xor_mask_32_8 ",
+                     "c_xor_mask_32_", "c_xor_mask_32_1000", "c_xor_mask_32_999"):
+            with self.subTest(name):
+                text = (f"function {name}(a: Int): Int\n  ensures ((-2147483648) <= a && a <= 2147483647) ==> "
+                        "((-2147483648) <= result && result <= 2147483647)\n{\n  a\n}\n")
+                probs = self.problems(text)
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("`ensures` line has no entry in the position map", probs[0])
+        # and the unsigned k = N the prelude allows, with its own range, is accepted (the twin of the refusals above)
+        self.assertEqual(self.problems(self.mask_function("c_uxor_cmask_32_32")), [])
+        self.assertEqual(self.problems(self.mask_function("c_xor_mask_32_31")), [])
+
+    def test_a_second_ensures_is_reported(self):
+        probs = self.problems(self.mask_function("c_xor_mask_32_8", extra=("ensures result == 0",)))
+        self.assertEqual(len(probs), 2, probs)  # neither is exempt once there are two
+        first = self.mask_function("c_xor_mask_32_8").split("\n")[1].strip()
+        self.assertEqual(len(self.problems(self.mask_function("c_xor_mask_32_8", extra=(first,)))), 2)
+
+    def test_a_requires_or_decreases_is_reported(self):
+        for extra in ("requires a >= 0", "requires true", "decreases a"):
+            with self.subTest(extra):
+                probs = self.problems(self.mask_function("c_xor_mask_32_8", extra=(extra,)))
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn(extra.split()[0], probs[0])
+
+    def test_a_different_signature_is_not_exempt(self):
+        for signature in ("(x: Int): Int", "(a: Int, b: Int): Int", "(a: Int): Bool", "(a: Int)"):
+            with self.subTest(signature):
+                probs = self.problems(self.mask_function("c_xor_mask_32_8", signature=signature))
+                self.assertGreaterEqual(len(probs), 1, probs)
+
+    def test_a_body_that_divides_by_a_variable_is_still_reported(self):
+        # the exemption is only for the ensures line: the body is held to the remainder rule (power-of-two literals)
+        probs = self.problems(self.mask_function("c_xor_mask_32_8", body=r"(a \ b) + (255 - (a % 256))"))
+        self.assertTrue(any("divisor" in p for p in probs), probs)
+
+    def test_a_bodyless_mask_function_is_reported(self):
+        probs = self.problems("function c_xor_mask_32_8(a: Int): Int\n  ensures ((-2147483648) <= a && a <= 2147483647) ==> "
+                              "((-2147483648) <= result && result <= 2147483647)\n")
+        self.assertTrue(any("bodyless" in p for p in probs), probs)
+
+    def test_a_method_of_that_name_is_not_exempt(self):
+        text = ("method c_xor_mask_32_8(a: Int) returns (r: Int)\n  ensures ((-2147483648) <= a && a <= 2147483647) ==> "
+                "((-2147483648) <= r && r <= 2147483647)\n  decreases\n{\n}\n")
+        self.assertTrue(any("`ensures` line has no entry in the position map" in p for p in self.problems(text)))
+
+    def test_only_the_range_line_is_exempt(self):
+        method = "method m__1(x: Int) returns (res: Int)\n  ensures res > x\n  decreases\n{\n  res := x + 1\n}\n"
+        probs = self.problems(self.mask_function("c_xor_mask_32_8") + method)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("t.vpr:7:", probs[0])  # the method's ensures, not the function's (line 2)
+
+
 class RemainderTests(unittest.TestCase):
     """Decision 0026 item 7: Viper's `%` is the Euclidean remainder and C's is not, so outside the prelude's
     `c_rem` and `c_urem` the divisor of every emitted `%` must be a decimal power of two (the constant-mask

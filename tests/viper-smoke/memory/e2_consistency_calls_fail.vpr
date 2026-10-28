@@ -1,0 +1,84 @@
+// expect: error assert:assertion.false @ L83
+// S24 candidate FINAL: consistency_calls_fail
+// Final design: a pointer is a Ref; Block domain with four axioms (loc_inv, loc_nonnull, member_inv, member_lv); ghost init flag per cell; liveness token lvloc(b) at slot -2; explicit checks at every access, call, return and pointer use.
+//
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field tok: Bool
+field lv: Bool
+
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define OWN(p) (offset_of(p) < len(block_of(p)) && acc(p.v_int) && acc(p.d_int))
+define INIT(p) (OWN(p) && p.d_int)
+define UNINIT(p) (OWN(p) && !p.d_int)
+define LVQ(p) lvloc(block_of(p))
+define LV(p, l) (acc(lvloc(block_of(p)).lv, l))
+define BLK(p) (offset_of(p) == 0 && acc(loc(block_of(p), -1).tok) && loc(block_of(p), -1).tok && lvloc(block_of(p)) == loc(block_of(p), -2) && acc(lvloc(block_of(p)).lv) && (forall i: Int :: { loc(block_of(p), i) } 0 <= i && i < len(block_of(p)) ==> acc(loc(block_of(p), i).v_int) && acc(loc(block_of(p), i).d_int)))
+define RDP(p, r) (offset_of(p) < len(block_of(p)) && acc(p.v_int, r) && acc(p.d_int, r) && p.d_int)
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: the cell and the block's liveness token (lvloc(b) == loc(b, -2)), full permission
+method alloc_int() returns (r: Ref)
+  ensures r != null && WF(r) && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures UNINIT(r) && lvloc(block_of(r)) == loc(block_of(r), -2) && acc(lvloc(block_of(r)).lv)
+
+domain Globals {
+  unique function GB_g(): Block
+  unique function GB_h(): Block
+}
+define G_g loc(GB_g(), 0)
+define G_h loc(GB_h(), 0)
+define INIT_G (len(GB_g()) == 1 && lvloc(GB_g()) == loc(GB_g(), -2) && INIT(G_g))
+define INIT_H (len(GB_h()) == 1 && lvloc(GB_h()) == loc(GB_h(), -2) && INIT(G_h))
+// cerastes:trusted-contract program start: every global holds its initial value, full permission, and its liveness token (lvloc(b) == loc(b, -2))
+method program_start()
+  ensures INIT_G && G_g.v_int == 0 && acc(lvloc(GB_g()).lv)
+  ensures INIT_H && G_h.v_int == 7 && acc(lvloc(GB_h()).lv)
+
+// cerastes:trusted-contract malloc of n ints: owns_block(r) (the free token at slot -1, the whole liveness token with lvloc(b) == loc(b, -2), every cell and flag), the cells uninitialised
+method malloc_int(n: Int) returns (r: Ref)
+  requires n >= 0
+  ensures r != null ==> WF(r) && r == loc(block_of(r), 0) && len(block_of(r)) == n && BLK(r)
+  ensures r != null ==> (forall i: Int :: { loc(block_of(r), i) } 0 <= i && i < n ==> !loc(block_of(r), i).d_int)
+
+// cerastes:trusted-contract free: requires p == null || owns_block(p), and consumes it
+method free_int(p: Ref)
+  requires p != null ==> BLK(p)
+
+// Calls every trusted method (program_start, the local allocation, malloc), uses forperm, the unique globals and the liveness tokens, then asserts false: exactly that error.
+method calls()
+{
+  program_start()
+  var x: Ref
+  x := alloc_int()
+  var p: Ref
+  p := malloc_int(3)
+  var z: Ref
+  z := malloc_int(0)
+  assert x != null && G_g != null && G_h != null && G_g != G_h && x != G_g && lvloc(block_of(x)) != lvloc(GB_g())
+  assert forperm t: Ref [t.tok] :: t == t
+  if (p != null) {
+    assert offset_of(p) == 0 && len(block_of(p)) == 3 && loc(block_of(p), 3) != null && lvloc(block_of(p)) == loc(block_of(p), -2)
+    assert p != x && p != G_g
+  }
+  if (z != null) {
+    assert len(block_of(z)) == 0 && p != z
+  }
+  assert false
+}

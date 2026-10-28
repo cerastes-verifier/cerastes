@@ -214,3 +214,5 @@ intermittently (CI run `40434946397`; with one verifier, deterministically).
 - A callee may split its contract into one `requires` per argument.
 - A mask by a constant `2^k − 1` or its complement, written as a constant, is decided for every operand, and the
   intermittent `bit_mask.c [c23]` hang is gone.
+
+*2026-10-27, amended by 0027 (M4.5a): items 7–10 — the same mask recognition writes `|` and `^` too (0027 items 1–3); "every `|` and `^` keeps its function" now holds only for masks that are not of the two forms. Amended by 0028 (M4.5a, effective from M4.5b1): item 15 — writes and snapshots of a cell are never moved across a call whose contract reaches cells (0028 item 13).*

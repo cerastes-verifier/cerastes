@@ -1,0 +1,67 @@
+// expect: error assert:assertion.false @ L59
+// expect: error assert:assertion.false @ L66
+// S24 candidate FINAL: global_addr_fail
+// Final design: a pointer is a Ref; Block domain with four axioms (loc_inv, loc_nonnull, member_inv, member_lv); ghost init flag per cell; liveness token lvloc(b) at slot -2; explicit checks at every access, call, return and pointer use.
+//
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field tok: Bool
+field lv: Bool
+
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define OWN(p) (offset_of(p) < len(block_of(p)) && acc(p.v_int) && acc(p.d_int))
+define INIT(p) (OWN(p) && p.d_int)
+define UNINIT(p) (OWN(p) && !p.d_int)
+define LVQ(p) lvloc(block_of(p))
+define LV(p, l) (acc(lvloc(block_of(p)).lv, l))
+define BLK(p) (offset_of(p) == 0 && acc(loc(block_of(p), -1).tok) && loc(block_of(p), -1).tok && lvloc(block_of(p)) == loc(block_of(p), -2) && acc(lvloc(block_of(p)).lv) && (forall i: Int :: { loc(block_of(p), i) } 0 <= i && i < len(block_of(p)) ==> acc(loc(block_of(p), i).v_int) && acc(loc(block_of(p), i).d_int)))
+define RDP(p, r) (offset_of(p) < len(block_of(p)) && acc(p.v_int, r) && acc(p.d_int, r) && p.d_int)
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: the cell and the block's liveness token (lvloc(b) == loc(b, -2)), full permission
+method alloc_int() returns (r: Ref)
+  ensures r != null && WF(r) && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures UNINIT(r) && lvloc(block_of(r)) == loc(block_of(r), -2) && acc(lvloc(block_of(r)).lv)
+
+domain Globals {
+  unique function GB_g(): Block
+  unique function GB_h(): Block
+}
+define G_g loc(GB_g(), 0)
+define G_h loc(GB_h(), 0)
+define INIT_G (len(GB_g()) == 1 && lvloc(GB_g()) == loc(GB_g(), -2) && INIT(G_g))
+define INIT_H (len(GB_h()) == 1 && lvloc(GB_h()) == loc(GB_h(), -2) && INIT(G_h))
+// cerastes:trusted-contract program start: every global holds its initial value, full permission, and its liveness token (lvloc(b) == loc(b, -2))
+method program_start()
+  ensures INIT_G && G_g.v_int == 0 && acc(lvloc(GB_g()).lv)
+  ensures INIT_H && G_h.v_int == 7 && acc(lvloc(GB_h()).lv)
+
+method two_past_g(l_g: Perm)
+  requires none < l_g && l_g < write && INIT_G && LV(G_g, l_g)
+{
+  assert G_g != null ==> perm(lvloc(block_of(G_g)).lv) > none // lifetime
+  assert 0 <= offset_of(G_g) + 2 && offset_of(G_g) + 2 <= len(block_of(G_g)) // &g + 2 is out of bounds
+}
+
+method one_past_g_without_owning(l_g: Perm)   // live(g) only: len(GB_g()) is a clause of owns, not a fact
+  requires none < l_g && l_g < write && LV(G_g, l_g)
+{
+  assert G_g != null ==> perm(lvloc(block_of(G_g)).lv) > none // lifetime
+  assert 0 <= offset_of(G_g) + 1 && offset_of(G_g) + 1 <= len(block_of(G_g))
+}

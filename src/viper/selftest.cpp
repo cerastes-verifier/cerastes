@@ -864,6 +864,7 @@ void define_side_effect_rejections();
 void define_calls_in_expressions();
 void define_calls_in_expressions_rejections();
 void define_bitwise();
+void define_bitwise_or_xor_masks();
 void define_bitwise_rejections();
 void define_static_assertions();
 void define_static_assertion_rejections();
@@ -873,6 +874,7 @@ void define_static_assertion_rejections();
 #include "selftest_cases3.inc"
 #include "selftest_cases4.inc"
 #include "selftest_cases5.inc"
+#include "selftest_cases6.inc"
 
 namespace {
 
@@ -1032,6 +1034,7 @@ int main(int argc, char** argv) {
   define_calls_in_expressions();
   define_calls_in_expressions_rejections();
   define_bitwise();
+  define_bitwise_or_xor_masks();
   define_bitwise_rejections();
   define_static_assertions();
   define_static_assertion_rejections();

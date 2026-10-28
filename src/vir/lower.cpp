@@ -189,23 +189,47 @@ bool closed_value(const E& e, Z& out) {
   }
 }
 
-// `other & mask` of a computed type `t` (32, 64 or 128 bits), written without the prelude function when `mask` is a constant of the
-// forms of decision 0026 item 7, else null.  With M the value of `mask` (in the type's range, or it is not rewritten):
-//   M = 2^k - 1      ->  other % 2^k            (0 <= k <= N unsigned, 0 <= k <= N - 1 signed)
-//   M = -2^k signed, or 2^N - 2^k unsigned  ->  2^k * (other \ 2^k)   (other with its low k bits cleared, naming it once)
+enum class MaskOp { And, Or, Xor };
+
+// `other & mask`, `other | mask` and `other ^ mask` of a computed type `t` (32, 64 or 128 bits), written without the prelude function
+// when `mask` is a constant of the forms of decision 0026 item 7 (`&`) and decision 0027 item 1 (`|`, `^`), else null.  With M the
+// value of `mask` (in the type's range, or it is not rewritten), H = other \ 2^k and L = other % 2^k, and where a value is both forms
+// the first row is used:
+//   M = 2^k - 1 (0 <= k <= N unsigned, 0 <= k <= N - 1 signed):   `&`: L;   `|`: 2^k * H + (2^k - 1);   `^`: 2^k * H + ((2^k - 1) - L)
+//   M = -2^k signed, or 2^N - 2^k unsigned (the same k):   `&`: 2^k * H (other with its low k bits cleared, naming it once);
+//     `|` signed: L - 2^k;  `|` unsigned: L + (2^N - 2^k);  `^` signed: (L - 2^k) - 2^k * H;  `^` unsigned: (L + (2^N - 2^k)) - 2^k * H
 // Viper's `%` by a positive divisor is the non-negative remainder, which is the two's complement value of the low k bits of every
-// operand in the type's range, and `\` the floor quotient, with a = d * (a \ d) + a % d (decision 0026 item 8).
-E mask_as_remainder(const IntType& t, const E& other, const E& mask) {
+// operand in the type's range, and `\` the floor quotient, with a = d * (a \ d) + a % d (decision 0026 item 8).  The `|` and `&` forms
+// name `other` once and are inline.  The `^` forms need both H and L, so they are a call of the prelude function c_[u]xor_[c]mask_N_k
+// (decision 0027 item 3, whose body is the form over its parameter: `other` is named once at the call); `used` receives its name.
+E mask_rewrite(MaskOp op, const IntType& t, const E& other, const E& mask, const std::function<void(const std::string&)>& used) {
   Z m;
   if (!closed_value(mask, m)) return nullptr;
   const std::string text = z_text(m);
   if (!vir::dec::in_range(text, vir::dec::range_of(t))) return nullptr;
-  for (int k = 0; k <= t.bits; ++k)
-    if (!m.neg && text == vir::dec::dec1(vir::dec::pow2(k))) return low::mod_pow2(other, k);
+  using low::BinOp;
+  auto xor_fn = [&](bool complement, int k) {
+    const std::string name = std::string("c_") + (t.is_signed ? "" : "u") + "xor_" + (complement ? "cmask" : "mask") + "_" +
+                             std::to_string(t.bits) + "_" + std::to_string(k);
+    used(name);
+    return low::fn(name, {other});
+  };
+  for (int k = 0; k <= t.bits; ++k) {
+    if (m.neg || text != vir::dec::dec1(vir::dec::pow2(k))) continue;
+    const std::string p = vir::dec::pow2(k);
+    if (op == MaskOp::And) return low::mod_pow2(other, k);
+    if (op == MaskOp::Or) return low::bin(BinOp::Add, low::bin(BinOp::Mul, low::int_lit(p), low::div_pow2(other, k)), low::int_lit(text));
+    return xor_fn(false, k);
+  }
   for (int k = 0; k <= t.bits; ++k) {
     const std::string p = vir::dec::pow2(k);
     const Z complement = t.is_signed ? Z{true, p} : z_add(Z{false, vir::dec::pow2(t.bits)}, Z{true, p});
-    if (text == z_text(complement)) return low::bin(low::BinOp::Mul, low::int_lit(vir::dec::pow2(k)), low::div_pow2(other, k));
+    if (text != z_text(complement)) continue;
+    if (op == MaskOp::And) return low::bin(BinOp::Mul, low::int_lit(p), low::div_pow2(other, k));
+    if (op == MaskOp::Xor) return xor_fn(true, k);
+    // `|`: the low part with the complement's high bits set: L - 2^k signed, L + (2^N - 2^k) unsigned.
+    return t.is_signed ? low::bin(BinOp::Sub, low::mod_pow2(other, k), low::int_lit(p))
+                       : low::bin(BinOp::Add, low::mod_pow2(other, k), low::int_lit(text));
   }
   return nullptr;
 }
@@ -803,11 +827,14 @@ class Lowerer {
         const IntType& t = *e.type.int_type;
         if (t.is_enum || (t.bits != 32 && t.bits != 64 && t.bits != 128))
           internal_error(e.loc, "a bitwise operator on a " + std::to_string(t.bits) + "-bit type (the encoder converts to a computed type of 32, 64 or 128 bits)");
-        // Decision 0026 item 7: a constant mask (either operand, as lowered; both operands are lowered as before, so their obligations
-        // stay) is a remainder; anything else keeps the prelude function, which is exact for every operand.
-        if (e.bop == BinaryOp::BitAnd) {
-          E r = mask_as_remainder(t, a.e, b.e);
-          if (r == nullptr) r = mask_as_remainder(t, b.e, a.e);
+        // Decision 0026 item 7 (`&`) and decision 0027 item 1 (`|`, `^`): a constant mask (either operand, as lowered; both operands
+        // are lowered as before, so their obligations stay) is a remainder or a quotient; anything else keeps the prelude function,
+        // which is exact for every operand.
+        {
+          const MaskOp mop = e.bop == BinaryOp::BitAnd ? MaskOp::And : (e.bop == BinaryOp::BitOr ? MaskOp::Or : MaskOp::Xor);
+          const std::function<void(const std::string&)> used = [this](const std::string& n) { use(n); };
+          E r = mask_rewrite(mop, t, a.e, b.e, used);
+          if (r == nullptr) r = mask_rewrite(mop, t, b.e, a.e, used);
           if (r != nullptr) return {r, dep};
         }
         const char* op = e.bop == BinaryOp::BitAnd ? "and" : (e.bop == BinaryOp::BitOr ? "or" : "xor");

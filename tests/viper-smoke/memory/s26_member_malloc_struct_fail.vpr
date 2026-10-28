@@ -1,0 +1,110 @@
+// expect: error assert:assertion.false @ L79
+// expect: error assert:assertion.false @ L97
+// expect: error assert:assertion.false @ L108
+// S24 candidate FINAL: malloc_struct_fail
+// Final design: a pointer is a Ref; Block domain with four axioms (loc_inv, loc_nonnull, member_inv, member_lv); ghost init flag per cell; liveness token lvloc(b) at slot -2; explicit checks at every access, call, return and pointer use. Structs and arrays: every member and inner array is a block (member(r, k)).
+//
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field tok: Bool
+field lv: Bool
+
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define OWN(p) (offset_of(p) < len(block_of(p)) && acc(p.v_int) && acc(p.d_int))
+define INIT(p) (OWN(p) && p.d_int)
+define UNINIT(p) (OWN(p) && !p.d_int)
+define LVQ(p) lvloc(block_of(p))
+define LV(p, l) (acc(lvloc(block_of(p)).lv, l))
+define BLK(p) (offset_of(p) == 0 && acc(loc(block_of(p), -1).tok) && loc(block_of(p), -1).tok && lvloc(block_of(p)) == loc(block_of(p), -2) && acc(lvloc(block_of(p)).lv) && (forall i: Int :: { loc(block_of(p), i) } 0 <= i && i < len(block_of(p)) ==> acc(loc(block_of(p), i).v_int) && acc(loc(block_of(p), i).d_int)))
+define RDP(p, r) (offset_of(p) < len(block_of(p)) && acc(p.v_int, r) && acc(p.d_int, r) && p.d_int)
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: the cell and the block's liveness token (lvloc(b) == loc(b, -2)), full permission
+method alloc_int() returns (r: Ref)
+  ensures r != null && WF(r) && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures UNINIT(r) && lvloc(block_of(r)) == loc(block_of(r), -2) && acc(lvloc(block_of(r)).lv)
+
+define CELLOWN(c) (offset_of(c) < len(block_of(c)) && acc(c.v_int) && acc(c.d_int) && c.d_int)
+define CELLUN(c) (offset_of(c) < len(block_of(c)) && acc(c.v_int) && acc(c.d_int) && !c.d_int)
+define MX(s) loc(member(s, 0), 0)
+define MY(s) loc(member(s, 1), 0)
+define SLEN(s) (len(member(s, 0)) == 1 && len(member(s, 1)) == 1)
+define SINIT(s) (SLEN(s) && CELLOWN(MX(s)) && CELLOWN(MY(s)))
+define SUNINIT(s) (SLEN(s) && CELLUN(MX(s)) && CELLUN(MY(s)))
+
+// cerastes:trusted-contract allocation of an address-taken local struct S { int x; int y; } (a one-slot block; its members are blocks of their own; the liveness token is the root block's)
+method alloc_S() returns (r: Ref)
+  ensures r != null && WF(r) && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures SUNINIT(r) && lvloc(block_of(r)) == loc(block_of(r), -2) && acc(lvloc(block_of(r)).lv)
+
+define SBLK(p) (offset_of(p) == 0 && acc(loc(block_of(p), -1).tok) && loc(block_of(p), -1).tok && lvloc(block_of(p)) == loc(block_of(p), -2) && acc(lvloc(block_of(p)).lv) && len(block_of(p)) == 1 && SLEN(p)
+  && acc(MX(p).v_int) && acc(MX(p).d_int) && acc(MY(p).v_int) && acc(MY(p).d_int))
+
+// cerastes:trusted-contract malloc(sizeof(struct S)): owns_block(r) (token, whole liveness, every member's cell), the cells uninitialised
+method malloc_S() returns (r: Ref)
+  ensures r != null ==> WF(r) && r == loc(block_of(r), 0) && SBLK(r) && offset_of(MX(r)) < len(block_of(MX(r))) && offset_of(MY(r)) < len(block_of(MY(r))) && !MX(r).d_int && !MY(r).d_int
+
+// cerastes:trusted-contract free of one struct: requires p == null || owns_block(p)
+method free_S(p: Ref)
+  requires p != null ==> SBLK(p)
+
+method free_missing_member()   // y's cell was given away before the free: every member is checked
+{
+  var p: Ref
+  p := malloc_S()
+  if (p != null) {
+    exhale acc(MY(p).v_int) && acc(MY(p).d_int)
+    assert p == null || offset_of(p) == 0
+    assert p == null || (perm(loc(block_of(p), -1).tok) == write && loc(block_of(p), -1).tok)
+    assert p == null || lvloc(block_of(p)) == loc(block_of(p), -2)
+    assert p == null || perm(lvloc(block_of(p)).lv) == write // invalid-free
+    assert p == null || (len(block_of(p)) == 1 && SLEN(p))
+    assert p == null || (perm(MX(p).v_int) == write && perm(MX(p).d_int) == write)
+    assert perm(MY(p).v_int) == write && perm(MY(p).d_int) == write
+  }
+}
+
+method double_free_struct()
+{
+  var p: Ref
+  p := malloc_S()
+  if (p != null) {
+    assert p == null || offset_of(p) == 0
+    assert p == null || (perm(loc(block_of(p), -1).tok) == write && loc(block_of(p), -1).tok)
+    assert p == null || lvloc(block_of(p)) == loc(block_of(p), -2)
+    assert p == null || perm(lvloc(block_of(p)).lv) == write // invalid-free
+    assert p == null || (len(block_of(p)) == 1 && SLEN(p))
+    assert p == null || (perm(MX(p).v_int) == write && perm(MX(p).d_int) == write)
+    assert p == null || (perm(MY(p).v_int) == write && perm(MY(p).d_int) == write)
+    free_S(p)
+    assert p == null || offset_of(p) == 0
+    assert p == null || (perm(loc(block_of(p), -1).tok) == write && loc(block_of(p), -1).tok)
+  }
+}
+
+method free_member_pointer()   // free(&p->y): not at the start of an allocation (the pointer's block is y's block, which has no token)
+{
+  var p: Ref
+  p := malloc_S()
+  if (p != null) {
+    var q: Ref := loc(member(p, 1), 0)
+    assert offset_of(q) == 0
+    assert perm(loc(block_of(q), -1).tok) == write && loc(block_of(q), -1).tok
+  }
+}
