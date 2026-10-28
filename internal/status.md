@@ -55,6 +55,11 @@ testing. During the session: **the eight tests that name what only the macOS SDK
   The self-test's second skip is the built-site check, which skips until `check.sh`'s docs step has built
   `build/doc` (it passes on Linux once the site exists); a fresh runner skips it on both platforms.
 - **Not yet seen:** the job on GitHub's real `ubuntu-26.04` runner (its image, its 4 cores and the 220-minute limit).
+- **The first run on GitHub's runner** (the PR, PR tier) stopped at `ci-linux.sh`'s environment step:
+  `actions/setup-python` exports `LD_LIBRARY_PATH` on Linux, which the assertion refuses (the rehearsal had no
+  such step: its Python was Ubuntu's 3.14.4). Fixed in a follow-up commit: the Linux job has no `setup-python`
+  and uses the image's `/usr/bin/python3` (record 0031 item 2), the assertion unchanged; `CiGuardTests` pins it.
+  The GCC 16 snapshot was not involved, and stays.
 
 **Surprises**
 - GNU ld's one pass over static archives (`back_end()` undefined); Ubuntu's GCC banner has no "GCC"; glibc's

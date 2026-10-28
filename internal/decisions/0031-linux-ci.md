@@ -35,8 +35,8 @@ Facts checked while planning (2026-10-28):
 ## Decision
 
 1. **The job.** `.github/workflows/ci.yml` gets a second job, `check-linux`, after `check`: `runs-on: ubuntu-26.04`,
-   the same triggers, permissions, concurrency, checkout, Python and Node steps, Silicon cache (its key carries
-   `runner.os`, so the two jobs never share a jar), `timeout-minutes: 220` and the same `CERASTES_CHECK_BASE`
+   the same triggers, permissions, concurrency, checkout and Node steps (no Python step, item 2), Silicon cache (its
+   key carries `runner.os`, so the two jobs never share a jar), `timeout-minutes: 220` and the same `CERASTES_CHECK_BASE`
    expression, so both tiers of 0016 item 14 run on both platforms. `CERASTES_JOBS: 4` (GitHub's Linux runner for a
    public repository has 4 cores and 16 GB). The setup step runs `scripts/ci-linux.sh`, then `scripts/check.sh` runs
    unchanged; the evidence is uploaded as `ci-linux-<run>-<attempt>`. No `needs:`: the jobs run in parallel and each
@@ -63,8 +63,13 @@ Facts checked while planning (2026-10-28):
      and GNU tar 1.35 failed in the rehearsal container (`Function not implemented` under Rosetta).
    - **Z3** 4.16.0 `z3-4.16.0-x64-glibc-2.39.zip`, SHA-256 `7288c49a…3418e` (GitHub's digest; the same source gives the
      pinned macOS asset's digest exactly).
-   - Python and Node come from the same `setup-python` and `setup-node` steps as on macOS; CMake and Ninja are the
-     image's, recorded in the log, not pinned (as in 0001).
+   - **Python is the image's own** (Ubuntu's `/usr/bin/python3`, 3.14), the one the rehearsal used (the box's
+     image: `python3.14` `3.14.4-1ubuntu0.2`, no `LD_LIBRARY_PATH`). The Linux job has no `setup-python` step: on
+     Linux that action exports `LD_LIBRARY_PATH` (its toolcache Python's `lib`), which the environment assertion
+     refuses, and the first run on GitHub's runner stopped there (2026-10-28, the PR tier). The assertion stays as it
+     is: `check.sh` runs in the job's environment too, and the binaries it builds and runs must not depend on a
+     library path. Node comes from the same `setup-node` step as on macOS (it changes only `PATH`); CMake and Ninja
+     are the image's, recorded in the log, not pinned (as in 0001).
 3. **EDG on Linux.** `bootstrap.sh` uses EDG's `linux-clang-debug` preset (Clang emulation, as 0002 chose on macOS;
    target `linux-x86_64`, EDG_BASE `bases/docker/dev-env/clang`, EDG's default for that preset) and passes
    `/usr/bin/clang-21` and `/usr/bin/clang++-21` as the compilers (the preset names plain `clang`, which the image may

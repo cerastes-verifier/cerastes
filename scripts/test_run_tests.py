@@ -4647,10 +4647,7 @@ CI_YML_CANONICAL = (
     '          fetch-depth: 0',
     '          submodules: recursive',
     '          persist-credentials: false',
-    '      - name: Set up Python',
-    '        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97',
-    '        with:',
-    "          python-version: '3.14'",
+    # no setup-python: on Linux it exports LD_LIBRARY_PATH, which ci-linux.sh refuses (decision 0031 item 2)
     '      - name: Set up Node',
     '        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1',
     '        with:',
@@ -5435,6 +5432,9 @@ class CiGuardTests(unittest.TestCase):
         sub("CERASTES_EDG_SRC on a step", "        run: scripts/check.sh\n",
             "        run: scripts/check.sh\n        env:\n          CERASTES_EDG_SRC: /x\n")
         sub("a shallow checkout", "fetch-depth: 0", "fetch-depth: 1")
+        sub("setup-python, which exports LD_LIBRARY_PATH", "      - name: Set up Node\n",
+            "      - name: Set up Python\n        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97\n"
+            "        with:\n          python-version: '3.14'\n      - name: Set up Node\n")
         sub("a tag instead of a SHA", "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "actions/checkout@v7")
         sub("the cache save without its if", "        if: steps.silicon-cache.outputs.cache-hit != 'true'\n", "")
         sub("the upload without always()", "        if: ${{ always() }}\n", "        if: success()\n")

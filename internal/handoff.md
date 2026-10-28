@@ -28,6 +28,10 @@ S5 is done on branch `s5-linux-ci` (based on local `main` `72e30b3`, which merge
   `~/cerastes-ci` and the image `cerastes-s5:runner` stay on the box (§8 question 62).
 - **Not yet seen:** a run on GitHub's real `ubuntu-26.04` runner (the session never pushes; §2), in particular how long
   its full check takes on 4 vCPUs (§8 question 63).
+- **The first run on GitHub's runner** (this branch's PR, PR tier) stopped at `ci-linux.sh`'s environment step:
+  `LD_LIBRARY_PATH is set`, exported by `actions/setup-python` on Linux. The follow-up commit drops that step from
+  the Linux job, which now uses the image's Python 3.14 as the rehearsal did (record 0031 item 2); the assertion
+  is unchanged. Push the branch again (§2 step 1).
 
 The EDG pin is unchanged (`f0ed5525af`). M4.5a's state (records 0027–0030, the fixtures in `tests/viper-smoke/memory/`)
 is as its handoff left it; §3 and §4.4 carry what M4.5b1–f3 need.
