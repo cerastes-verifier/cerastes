@@ -1,0 +1,182 @@
+// expect: error assert:assertion.false @ L75
+// expect: error assert:assertion.false @ L91
+// expect: error assert:assertion.false @ L107
+// expect: error assert:assertion.false @ L124
+// expect: error assert:assertion.false @ L144
+// expect: error assert:assertion.false @ L161
+// expect: error assert:assertion.false @ L175
+// expect: error assert:assertion.false @ L181
+// S24 candidate FINAL: lifetime_fail
+// Final design: a pointer is a Ref; Block domain with four axioms (loc_inv, loc_nonnull, member_inv, member_lv); ghost init flag per cell; liveness token lvloc(b) at slot -2; explicit checks at every access, call, return and pointer use. Liveness-specific shapes.
+//
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field tok: Bool
+field lv: Bool
+
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define OWN(p) (offset_of(p) < len(block_of(p)) && acc(p.v_int) && acc(p.d_int))
+define INIT(p) (OWN(p) && p.d_int)
+define UNINIT(p) (OWN(p) && !p.d_int)
+define LVQ(p) lvloc(block_of(p))
+define LV(p, l) (acc(lvloc(block_of(p)).lv, l))
+define BLK(p) (offset_of(p) == 0 && acc(loc(block_of(p), -1).tok) && loc(block_of(p), -1).tok && lvloc(block_of(p)) == loc(block_of(p), -2) && acc(lvloc(block_of(p)).lv) && (forall i: Int :: { loc(block_of(p), i) } 0 <= i && i < len(block_of(p)) ==> acc(loc(block_of(p), i).v_int) && acc(loc(block_of(p), i).d_int)))
+define RDP(p, r) (offset_of(p) < len(block_of(p)) && acc(p.v_int, r) && acc(p.d_int, r) && p.d_int)
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: the cell and the block's liveness token (lvloc(b) == loc(b, -2)), full permission
+method alloc_int() returns (r: Ref)
+  ensures r != null && WF(r) && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures UNINIT(r) && lvloc(block_of(r)) == loc(block_of(r), -2) && acc(lvloc(block_of(r)).lv)
+
+// cerastes:trusted-contract allocation of an address-taken local of type int*
+method alloc_ptr() returns (r: Ref)
+  ensures r != null && WF(r) && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures offset_of(r) < len(block_of(r)) && acc(r.v_ptr_int) && acc(r.d_ptr_int) && !r.d_ptr_int && lvloc(block_of(r)) == loc(block_of(r), -2) && acc(lvloc(block_of(r)).lv)
+
+// cerastes:trusted-contract malloc of n ints: owns_block(r) (the free token at slot -1, the whole liveness token with lvloc(b) == loc(b, -2), every cell and flag), the cells uninitialised
+method malloc_int(n: Int) returns (r: Ref)
+  requires n >= 0
+  ensures r != null ==> WF(r) && r == loc(block_of(r), 0) && len(block_of(r)) == n && BLK(r)
+  ensures r != null ==> (forall i: Int :: { loc(block_of(r), i) } 0 <= i && i < n ==> !loc(block_of(r), i).d_int)
+
+// cerastes:trusted-contract free: requires p == null || owns_block(p), and consumes it
+method free_int(p: Ref)
+  requires p != null ==> BLK(p)
+
+method use_after_free_compare(q: Ref, l_q: Perm)   // free(p); if (p == q): both operands are checked, in the record's form
+  requires none < l_q && l_q < write && WF(q) && q != null && LV(q, l_q)
+{
+  var p: Ref
+  p := malloc_int(1)
+  if (p != null) {
+    assert p == null || offset_of(p) == 0 // free at an offset
+    assert p == null || (perm(loc(block_of(p), -1).tok) == write && loc(block_of(p), -1).tok) // token: invalid, double or non-heap free
+    assert p == null || perm(lvloc(block_of(p)).lv) == write // invalid-free: a liveness fraction is still held elsewhere
+    assert p == null || lvloc(block_of(p)) == loc(block_of(p), -2)
+    assert p != null ==> (forall i: Int :: { loc(block_of(p), i) } 0 <= i && i < len(block_of(p)) ==> acc(loc(block_of(p), i).v_int) && acc(loc(block_of(p), i).d_int))  // marked row (range)
+    free_int(p)
+    assert p != null ==> perm(lvloc(block_of(p)).lv) > none // lifetime: operand p
+    assert q != null ==> perm(lvloc(block_of(q)).lv) > none // lifetime: operand q
+  }
+}
+
+method use_after_free_null_compare()
+{
+  var p: Ref
+  p := malloc_int(1)
+  if (p != null) {
+    assert p == null || offset_of(p) == 0 // free at an offset
+    assert p == null || (perm(loc(block_of(p), -1).tok) == write && loc(block_of(p), -1).tok) // token: invalid, double or non-heap free
+    assert p == null || perm(lvloc(block_of(p)).lv) == write // invalid-free: a liveness fraction is still held elsewhere
+    assert p == null || lvloc(block_of(p)) == loc(block_of(p), -2)
+    assert p != null ==> (forall i: Int :: { loc(block_of(p), i) } 0 <= i && i < len(block_of(p)) ==> acc(loc(block_of(p), i).v_int) && acc(loc(block_of(p), i).d_int))  // marked row (range)
+    free_int(p)
+    assert p != null ==> perm(lvloc(block_of(p)).lv) > none // free(p); if (p == NULL): p's value is indeterminate after the free (C 6.2.4p2)
+  }
+}
+
+method copy_dangling_pointer()
+{
+  var p: Ref
+  p := malloc_int(1)
+  if (p != null) {
+    assert p == null || offset_of(p) == 0 // free at an offset
+    assert p == null || (perm(loc(block_of(p), -1).tok) == write && loc(block_of(p), -1).tok) // token: invalid, double or non-heap free
+    assert p == null || perm(lvloc(block_of(p)).lv) == write // invalid-free: a liveness fraction is still held elsewhere
+    assert p == null || lvloc(block_of(p)) == loc(block_of(p), -2)
+    assert p != null ==> (forall i: Int :: { loc(block_of(p), i) } 0 <= i && i < len(block_of(p)) ==> acc(loc(block_of(p), i).v_int) && acc(loc(block_of(p), i).d_int))  // marked row (range)
+    free_int(p)
+    var q: Ref := p // a copy of a dangling pointer value
+    assert p != null ==> perm(lvloc(block_of(p)).lv) > none // lifetime: the value is read
+  }
+}
+
+method store_dangling_pointer()   // *c = p after free(p)
+{
+  var p: Ref
+  var c: Ref
+  c := alloc_ptr()
+  p := malloc_int(1)
+  if (p != null) {
+    assert p == null || offset_of(p) == 0 // free at an offset
+    assert p == null || (perm(loc(block_of(p), -1).tok) == write && loc(block_of(p), -1).tok) // token: invalid, double or non-heap free
+    assert p == null || perm(lvloc(block_of(p)).lv) == write // invalid-free: a liveness fraction is still held elsewhere
+    assert p == null || lvloc(block_of(p)) == loc(block_of(p), -2)
+    assert p != null ==> (forall i: Int :: { loc(block_of(p), i) } 0 <= i && i < len(block_of(p)) ==> acc(loc(block_of(p), i).v_int) && acc(loc(block_of(p), i).d_int))  // marked row (range)
+    free_int(p)
+    assert p != null ==> perm(lvloc(block_of(p)).lv) > none // lifetime: the value stored is read
+    c.v_ptr_int := p
+  }
+}
+
+method takes_ptr(p: Ref, l_p: Perm)
+  requires none < l_p && l_p < write && WF(p) && LV(p, l_p)
+  ensures LV(p, l_p)
+
+method pass_dangling_pointer()   // f(p) after free(p)
+{
+  var p: Ref
+  p := malloc_int(1)
+  if (p != null) {
+    assert p == null || offset_of(p) == 0 // free at an offset
+    assert p == null || (perm(loc(block_of(p), -1).tok) == write && loc(block_of(p), -1).tok) // token: invalid, double or non-heap free
+    assert p == null || perm(lvloc(block_of(p)).lv) == write // invalid-free: a liveness fraction is still held elsewhere
+    assert p == null || lvloc(block_of(p)) == loc(block_of(p), -2)
+    assert p != null ==> (forall i: Int :: { loc(block_of(p), i) } 0 <= i && i < len(block_of(p)) ==> acc(loc(block_of(p), i).v_int) && acc(loc(block_of(p), i).d_int))  // marked row (range)
+    free_int(p)
+    assert p != null ==> perm(lvloc(block_of(p)).lv) > none // lifetime: the argument is read
+    takes_ptr(p, 1 / 2)
+  }
+}
+
+method return_dangling_pointer() returns (r: Ref)   // return p after free(p)
+{
+  var p: Ref
+  r := null
+  p := malloc_int(1)
+  if (p != null) {
+    assert p == null || offset_of(p) == 0 // free at an offset
+    assert p == null || (perm(loc(block_of(p), -1).tok) == write && loc(block_of(p), -1).tok) // token: invalid, double or non-heap free
+    assert p == null || perm(lvloc(block_of(p)).lv) == write // invalid-free: a liveness fraction is still held elsewhere
+    assert p == null || lvloc(block_of(p)) == loc(block_of(p), -2)
+    assert p != null ==> (forall i: Int :: { loc(block_of(p), i) } 0 <= i && i < len(block_of(p)) ==> acc(loc(block_of(p), i).v_int) && acc(loc(block_of(p), i).d_int))  // marked row (range)
+    free_int(p)
+    assert p != null ==> perm(lvloc(block_of(p)).lv) > none // lifetime: the result is read
+    r := p
+  }
+}
+
+method escaped_local_plus_zero()   // { int x; p = &x; } p + 0
+{
+  var x: Ref
+  var p: Ref
+  x := alloc_int()
+  p := x
+  assert perm(x.v_int) == write && perm(x.d_int) == write
+  assert perm(lvloc(block_of(x)).lv) == write // lifetime: the liveness token comes back whole
+  exhale acc(x.v_int) && acc(x.d_int) && acc(lvloc(block_of(x)).lv)
+  assert p != null ==> perm(lvloc(block_of(p)).lv) > none // lifetime: the block's liveness token is gone with the scope
+}
+
+method null_plus_zero(a: Ref)   // C: a + 0 on a null a is undefined (C++ allows null + 0 and null - null: the check is written for C only)
+  requires WF(a)
+{
+  assert a != null // C 6.5.6p8
+}

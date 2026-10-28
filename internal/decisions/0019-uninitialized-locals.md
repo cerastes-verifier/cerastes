@@ -284,3 +284,5 @@ object would be indeterminate at the target. With this record that object is ord
 *2026-10-22, amended by 0020 (M4.3a): item 4 — a write inside an expression sets the flag at its point in the evaluation order (a write effect, 0020 item 7), and the locals a loop assigns include those written in its expressions; item 6 — a jump past a declaration with an initializer is refused in both modes (owner, handoff §11 question 22), so the later record that item 6 left open will not come; item 13 — its M4.3 part is done.*
 
 *2026-10-26, amended by 0025 (M4.4c): item 13 — the `uninitialized` check of a snapshot of a flagged local counts as an access of the local with the check's own set, so a later write in the same full expression follows it (finding A, 0025 item 1).*
+
+*2026-10-27, amended by 0028 and 0029 (M4.5a, effective from M4.5b1/M4.5b2): item 13 — the flag follows the cell as a ghost field beside its value (0028 item 14); item 2's stricter mode is `--strict-init` with P4222's markers in the `cerastes::` spelling (0029 item 2).*

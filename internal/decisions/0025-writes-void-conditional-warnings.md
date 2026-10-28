@@ -263,3 +263,5 @@ for `uninitialized` checks (item 1).
 - The emitted Viper of programs with a write or snapshot of a call result may change; their verdicts do not.
 
 *2026-10-27, amended by 0026 (M4.4d): item 2 — with the exact sets (0026 step 1) a comma's value carries its floor, so the write of `x = (g(a), 2)` now follows `g`; the remark that it may be emitted before `g` describes step 2.*
+
+*2026-10-27, amended by 0028 (M4.5a, effective from M4.5b1): item 2 — writes and snapshots of a cell are never moved across a call whose contract reaches cells; Viper locals keep this placement (0028 item 13).*

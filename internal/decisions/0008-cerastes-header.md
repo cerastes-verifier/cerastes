@@ -154,3 +154,5 @@ Probe facts (M2 Phase 1):
   original positions too. Tests keep invocations on one line for readability.
 
 *2026-10-20: milestone numbers follow the renumbering of 2026-10-20 (plan.md: old M4 → M5, M5 → M6, M6 → M4.5 for C and M7 for C++, M7 → M8).*
+
+*2026-10-27, amended by 0029 (M4.5a, effective from M4.5b1): item 6 — C gets the spec functions as `cerastes_owns`, `cerastes_reads`, `cerastes_owns_range`, `cerastes_owns_block`, `cerastes_live` (C23 variadic declarations), `cerastes_old` (a `typeof` macro) and `cerastes_forall` with a named predicate or pure function, declared in both modes (0029 items 3–4).*

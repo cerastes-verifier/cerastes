@@ -1,0 +1,241 @@
+// expect: verified
+// S24 candidate FINAL: a_reads
+// Final design: a pointer is a Ref; Block domain with four axioms (loc_inv, loc_nonnull, member_inv, member_lv); ghost init flag per cell; liveness token lvloc(b) at slot -2; explicit checks at every access, call, return and pointer use.
+//
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field tok: Bool
+field lv: Bool
+
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  axiom member_lv { forall r: Ref, k: Int :: { member(r, k) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define OWN(p) (offset_of(p) < len(block_of(p)) && acc(p.v_int) && acc(p.d_int))
+define INIT(p) (OWN(p) && p.d_int)
+define UNINIT(p) (OWN(p) && !p.d_int)
+define LVQ(p) lvloc(block_of(p))
+define LV(p, l) (acc(lvloc(block_of(p)).lv, l))
+define BLK(p) (offset_of(p) == 0 && acc(loc(block_of(p), -1).tok) && loc(block_of(p), -1).tok && lvloc(block_of(p)) == loc(block_of(p), -2) && acc(lvloc(block_of(p)).lv) && (forall i: Int :: { loc(block_of(p), i) } 0 <= i && i < len(block_of(p)) ==> acc(loc(block_of(p), i).v_int) && acc(loc(block_of(p), i).d_int)))
+define RDP(p, r) (offset_of(p) < len(block_of(p)) && acc(p.v_int, r) && acc(p.d_int, r) && p.d_int)
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: the cell and the block's liveness token (lvloc(b) == loc(b, -2)), full permission
+method alloc_int() returns (r: Ref)
+  ensures r != null && WF(r) && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures UNINIT(r) && lvloc(block_of(r)) == loc(block_of(r), -2) && acc(lvloc(block_of(r)).lv)
+
+
+method peek(p: Ref, rd: Perm) returns (v: Int)   // reads(*p): rd for the cell and for the liveness cell
+  requires none < rd && rd < write
+  requires WF(p) && p != null && RDP(p, rd) && LV(p, rd)
+  ensures RDP(p, rd) && LV(p, rd) && v == p.v_int
+{
+  assert p != null
+  assert perm(p.v_int) > none
+  assert perm(p.d_int) > none && p.d_int
+  v := p.v_int
+  assert perm(p.v_int) >= rd && perm(p.d_int) >= rd
+  assert p.d_int
+  assert perm(lvloc(block_of(p)).lv) >= rd
+}
+
+method peek_two(a: Ref, b: Ref, rd: Perm) returns (v: Int)   // reads(*a), reads(*b): one rd for the method
+  requires none < rd && rd < write
+  requires WF(a) && WF(b) && a != null && b != null && RDP(a, rd) && RDP(b, rd) && LV(a, rd) && LV(b, rd)
+  ensures RDP(a, rd) && RDP(b, rd) && LV(a, rd) && LV(b, rd) && v == a.v_int + b.v_int
+{
+  assert a != null
+  assert perm(a.v_int) > none
+  assert perm(a.d_int) > none && a.d_int
+  assert b != null
+  assert perm(b.v_int) > none
+  assert perm(b.d_int) > none && b.d_int
+  v := a.v_int + b.v_int
+  assert perm(a.v_int) >= rd + (a == b ? rd : none) && perm(a.d_int) >= rd + (a == b ? rd : none)
+  assert a.d_int
+  assert perm(b.v_int) >= rd + (b == a ? rd : none) && perm(b.d_int) >= rd + (b == a ? rd : none)
+  assert b.d_int
+  assert perm(lvloc(block_of(a)).lv) >= rd + (lvloc(block_of(a)) == lvloc(block_of(b)) ? rd : none)
+  assert perm(lvloc(block_of(b)).lv) >= rd + (lvloc(block_of(b)) == lvloc(block_of(a)) ? rd : none)
+}
+
+method caller_regains()
+{
+  var x: Ref
+  x := alloc_int()
+  assert x != null
+  assert perm(x.v_int) == write && perm(x.d_int) == write
+  x.v_int := 7
+  x.d_int := true
+  var v: Int
+  assert x != null
+  assert perm(x.v_int) > none && perm(x.d_int) > none && x.d_int
+  assert perm(lvloc(block_of(x)).lv) > none
+  var rd1: Perm := (perm(x.v_int) < perm(lvloc(block_of(x)).lv) ? perm(x.v_int) : perm(lvloc(block_of(x)).lv)) / 3
+  assert perm(x.v_int) >= rd1 && perm(x.d_int) >= rd1
+  assert x.d_int
+  assert perm(lvloc(block_of(x)).lv) >= rd1
+  v := peek(x, rd1)
+  assert x != null
+  assert perm(x.v_int) > none && perm(x.d_int) > none && x.d_int
+  assert perm(lvloc(block_of(x)).lv) > none
+  var rd2: Perm := (perm(x.v_int) < perm(lvloc(block_of(x)).lv) ? perm(x.v_int) : perm(lvloc(block_of(x)).lv)) / 3
+  assert perm(x.v_int) >= rd2 && perm(x.d_int) >= rd2
+  assert x.d_int
+  assert perm(lvloc(block_of(x)).lv) >= rd2
+  v := peek(x, rd2)
+  // full permission is back (the cell and the liveness token): the write that follows is allowed
+  assert x != null
+  assert perm(x.v_int) == write && perm(x.d_int) == write
+  x.v_int := v + 1
+  x.d_int := true
+  assert x != null
+  assert perm(x.v_int) > none
+  assert perm(x.d_int) > none && x.d_int
+  assert x.v_int == 8 && v == 7
+  assert perm(x.v_int) == write && perm(x.d_int) == write
+  assert perm(lvloc(block_of(x)).lv) == write // lifetime: the liveness token comes back whole
+  exhale acc(x.v_int) && acc(x.d_int) && acc(lvloc(block_of(x)).lv)
+}
+
+// the callee may pass its own fractions on
+method peek_nested(p: Ref, rd: Perm) returns (v: Int)
+  requires none < rd && rd < write
+  requires WF(p) && p != null && RDP(p, rd) && LV(p, rd)
+  ensures RDP(p, rd) && LV(p, rd) && v == p.v_int
+{
+  assert p != null
+  assert perm(p.v_int) > none && perm(p.d_int) > none && p.d_int
+  assert perm(lvloc(block_of(p)).lv) > none
+  var rd3: Perm := (perm(p.v_int) < perm(lvloc(block_of(p)).lv) ? perm(p.v_int) : perm(lvloc(block_of(p)).lv)) / 3
+  assert perm(p.v_int) >= rd3 && perm(p.d_int) >= rd3
+  assert p.d_int
+  assert perm(lvloc(block_of(p)).lv) >= rd3
+  v := peek(p, rd3)
+  assert perm(p.v_int) >= rd && perm(p.d_int) >= rd
+  assert p.d_int
+  assert perm(lvloc(block_of(p)).lv) >= rd
+}
+
+// two reads places that are different pointers, held at different amounts
+method caller_two_places(p: Ref, q: Ref, l_p: Perm, l_q: Perm) returns (v: Int)
+  requires none < l_p && l_p < write && none < l_q && l_q < write
+  requires WF(p) && WF(q) && INIT(p) && INIT(q) && LV(p, l_p) && LV(q, l_q)
+  ensures INIT(p) && INIT(q) && LV(p, l_p) && LV(q, l_q)
+{
+  if (lvloc(block_of(p)) == lvloc(block_of(q))) { } // case split on the liveness cells
+  assert p != null && q != null ==> p != q // entry: separation of two single owned places of one field (provable; keeps a failed explicit check from cascading)
+  if (p == q) { } // case split on the cells
+  if (lvloc(block_of(p)) == lvloc(block_of(q))) { } // case split on the liveness cells
+  assert p != null
+  assert q != null
+  assert perm(p.v_int) > none && perm(p.d_int) > none && p.d_int
+  assert perm(q.v_int) > none && perm(q.d_int) > none && q.d_int
+  assert perm(lvloc(block_of(p)).lv) > none
+  assert perm(lvloc(block_of(q)).lv) > none
+  var rd4: Perm := (((perm(p.v_int) < perm(q.v_int) ? perm(p.v_int) : perm(q.v_int)) < perm(lvloc(block_of(p)).lv) ? (perm(p.v_int) < perm(q.v_int) ? perm(p.v_int) : perm(q.v_int)) : perm(lvloc(block_of(p)).lv)) < perm(lvloc(block_of(q)).lv) ? ((perm(p.v_int) < perm(q.v_int) ? perm(p.v_int) : perm(q.v_int)) < perm(lvloc(block_of(p)).lv) ? (perm(p.v_int) < perm(q.v_int) ? perm(p.v_int) : perm(q.v_int)) : perm(lvloc(block_of(p)).lv)) : perm(lvloc(block_of(q)).lv)) / 5
+  assert perm(p.v_int) >= rd4 + (p == q ? rd4 : none) && perm(p.d_int) >= rd4 + (p == q ? rd4 : none)
+  assert p.d_int
+  assert perm(q.v_int) >= rd4 + (q == p ? rd4 : none) && perm(q.d_int) >= rd4 + (q == p ? rd4 : none)
+  assert q.d_int
+  assert perm(lvloc(block_of(p)).lv) >= rd4 + (lvloc(block_of(p)) == lvloc(block_of(q)) ? rd4 : none)
+  assert perm(lvloc(block_of(q)).lv) >= rd4 + (lvloc(block_of(q)) == lvloc(block_of(p)) ? rd4 : none)
+  v := peek_two(p, q, rd4)
+  // the same place in both reads clauses: f(p, p)
+  if (lvloc(block_of(p)) == lvloc(block_of(p))) { } // case split on the liveness cells
+  assert p != null
+  assert p != null
+  assert perm(p.v_int) > none && perm(p.d_int) > none && p.d_int
+  assert perm(p.v_int) > none && perm(p.d_int) > none && p.d_int
+  assert perm(lvloc(block_of(p)).lv) > none
+  assert perm(lvloc(block_of(p)).lv) > none
+  var rd5: Perm := (((perm(p.v_int) < perm(p.v_int) ? perm(p.v_int) : perm(p.v_int)) < perm(lvloc(block_of(p)).lv) ? (perm(p.v_int) < perm(p.v_int) ? perm(p.v_int) : perm(p.v_int)) : perm(lvloc(block_of(p)).lv)) < perm(lvloc(block_of(p)).lv) ? ((perm(p.v_int) < perm(p.v_int) ? perm(p.v_int) : perm(p.v_int)) < perm(lvloc(block_of(p)).lv) ? (perm(p.v_int) < perm(p.v_int) ? perm(p.v_int) : perm(p.v_int)) : perm(lvloc(block_of(p)).lv)) : perm(lvloc(block_of(p)).lv)) / 5
+  assert perm(p.v_int) >= rd5 + (p == p ? rd5 : none) && perm(p.d_int) >= rd5 + (p == p ? rd5 : none)
+  assert p.d_int
+  assert perm(p.v_int) >= rd5 + (p == p ? rd5 : none) && perm(p.d_int) >= rd5 + (p == p ? rd5 : none)
+  assert p.d_int
+  assert perm(lvloc(block_of(p)).lv) >= rd5 + (lvloc(block_of(p)) == lvloc(block_of(p)) ? rd5 : none)
+  assert perm(lvloc(block_of(p)).lv) >= rd5 + (lvloc(block_of(p)) == lvloc(block_of(p)) ? rd5 : none)
+  v := peek_two(p, p, rd5)
+  // full permission back on both
+  assert p != null
+  assert perm(p.v_int) == write && perm(p.d_int) == write
+  p.v_int := 1
+  p.d_int := true
+  assert q != null
+  assert perm(q.v_int) == write && perm(q.d_int) == write
+  q.v_int := 2
+  q.d_int := true
+  assert perm(p.v_int) == write && perm(p.d_int) == write
+  assert p.d_int
+  assert perm(q.v_int) == write && perm(q.d_int) == write
+  assert q.d_int
+  assert perm(lvloc(block_of(p)).lv) >= l_p + (lvloc(block_of(p)) == lvloc(block_of(q)) ? l_q : none)
+  assert perm(lvloc(block_of(q)).lv) >= l_q + (lvloc(block_of(q)) == lvloc(block_of(p)) ? l_p : none)
+}
+
+// a caller that itself holds only a fraction (it is a reads function too)
+method holder(p: Ref, ro: Perm) returns (v: Int)
+  requires none < ro && ro < write
+  requires WF(p) && p != null && RDP(p, ro) && LV(p, ro)
+  ensures RDP(p, ro) && LV(p, ro)
+{
+  if (lvloc(block_of(p)) == lvloc(block_of(p))) { } // case split on the liveness cells
+  assert p != null
+  assert p != null
+  assert perm(p.v_int) > none && perm(p.d_int) > none && p.d_int
+  assert perm(p.v_int) > none && perm(p.d_int) > none && p.d_int
+  assert perm(lvloc(block_of(p)).lv) > none
+  assert perm(lvloc(block_of(p)).lv) > none
+  var rd6: Perm := (((perm(p.v_int) < perm(p.v_int) ? perm(p.v_int) : perm(p.v_int)) < perm(lvloc(block_of(p)).lv) ? (perm(p.v_int) < perm(p.v_int) ? perm(p.v_int) : perm(p.v_int)) : perm(lvloc(block_of(p)).lv)) < perm(lvloc(block_of(p)).lv) ? ((perm(p.v_int) < perm(p.v_int) ? perm(p.v_int) : perm(p.v_int)) < perm(lvloc(block_of(p)).lv) ? (perm(p.v_int) < perm(p.v_int) ? perm(p.v_int) : perm(p.v_int)) : perm(lvloc(block_of(p)).lv)) : perm(lvloc(block_of(p)).lv)) / 5
+  assert perm(p.v_int) >= rd6 + (p == p ? rd6 : none) && perm(p.d_int) >= rd6 + (p == p ? rd6 : none)
+  assert p.d_int
+  assert perm(p.v_int) >= rd6 + (p == p ? rd6 : none) && perm(p.d_int) >= rd6 + (p == p ? rd6 : none)
+  assert p.d_int
+  assert perm(lvloc(block_of(p)).lv) >= rd6 + (lvloc(block_of(p)) == lvloc(block_of(p)) ? rd6 : none)
+  assert perm(lvloc(block_of(p)).lv) >= rd6 + (lvloc(block_of(p)) == lvloc(block_of(p)) ? rd6 : none)
+  v := peek_two(p, p, rd6)
+  assert perm(p.v_int) >= ro && perm(p.d_int) >= ro
+  assert p.d_int
+  assert perm(lvloc(block_of(p)).lv) >= ro
+}
+
+method caller_of_holder()
+{
+  var x: Ref
+  x := alloc_int()
+  assert x != null
+  assert perm(x.v_int) == write && perm(x.d_int) == write
+  x.v_int := 3
+  x.d_int := true
+  var v: Int
+  assert x != null
+  assert perm(x.v_int) > none && perm(x.d_int) > none && x.d_int
+  assert perm(lvloc(block_of(x)).lv) > none
+  var rd7: Perm := (perm(x.v_int) < perm(lvloc(block_of(x)).lv) ? perm(x.v_int) : perm(lvloc(block_of(x)).lv)) / 3
+  assert perm(x.v_int) >= rd7 && perm(x.d_int) >= rd7
+  assert x.d_int
+  assert perm(lvloc(block_of(x)).lv) >= rd7
+  v := holder(x, rd7)
+  assert x != null
+  assert perm(x.v_int) == write && perm(x.d_int) == write
+  x.v_int := v
+  x.d_int := true
+  assert perm(x.v_int) == write && perm(x.d_int) == write
+  assert perm(lvloc(block_of(x)).lv) == write // lifetime: the liveness token comes back whole
+  exhale acc(x.v_int) && acc(x.d_int) && acc(lvloc(block_of(x)).lv)
+}

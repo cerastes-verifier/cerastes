@@ -481,3 +481,5 @@ summarized here):
   the contract; a definition may repeat it but cannot strengthen or weaken it.
 
 *2026-10-20: milestone numbers follow the renumbering of 2026-10-20 (plan.md: old M4 → M5, M5 → M6, M6 → M4.5 for C and M7 for C++, M7 → M8).*
+
+*2026-10-27, amended by 0029 (M4.5a, effective from M4.5e1): item 9 — `forall`'s body may also be a named `predicate` or `pure` function whose first parameter is the quantified variable (`cerastes_forall(f, free...)` in C, `cerastes::forall(f, free...)` in C++; 0029 item 4); `owns_block` and `live` join the spec functions (0029 item 3).*

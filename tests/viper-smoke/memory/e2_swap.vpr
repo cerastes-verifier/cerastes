@@ -1,0 +1,150 @@
+// expect: verified
+// S24 candidate FINAL: swap
+// Final design: a pointer is a Ref; Block domain with four axioms (loc_inv, loc_nonnull, member_inv, member_lv); ghost init flag per cell; liveness token lvloc(b) at slot -2; explicit checks at every access, call, return and pointer use.
+//
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field tok: Bool
+field lv: Bool
+
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define OWN(p) (offset_of(p) < len(block_of(p)) && acc(p.v_int) && acc(p.d_int))
+define INIT(p) (OWN(p) && p.d_int)
+define UNINIT(p) (OWN(p) && !p.d_int)
+define LVQ(p) lvloc(block_of(p))
+define LV(p, l) (acc(lvloc(block_of(p)).lv, l))
+define BLK(p) (offset_of(p) == 0 && acc(loc(block_of(p), -1).tok) && loc(block_of(p), -1).tok && lvloc(block_of(p)) == loc(block_of(p), -2) && acc(lvloc(block_of(p)).lv) && (forall i: Int :: { loc(block_of(p), i) } 0 <= i && i < len(block_of(p)) ==> acc(loc(block_of(p), i).v_int) && acc(loc(block_of(p), i).d_int)))
+define RDP(p, r) (offset_of(p) < len(block_of(p)) && acc(p.v_int, r) && acc(p.d_int, r) && p.d_int)
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: the cell and the block's liveness token (lvloc(b) == loc(b, -2)), full permission
+method alloc_int() returns (r: Ref)
+  ensures r != null && WF(r) && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures UNINIT(r) && lvloc(block_of(r)) == loc(block_of(r), -2) && acc(lvloc(block_of(r)).lv)
+
+define RANGE(a, n) (offset_of(a) >= 0 && offset_of(a) + n <= len(block_of(a)))
+define CELL(a, i) loc(block_of(a), offset_of(a) + i)
+define OWNR(a, n) (forall k: Int :: { loc(block_of(a), k) } offset_of(a) <= k && k < offset_of(a) + n ==> acc(loc(block_of(a), k).v_int) && acc(loc(block_of(a), k).d_int))
+define INITR(a, n) (OWNR(a, n) && (forall k: Int :: { loc(block_of(a), k) } offset_of(a) <= k && k < offset_of(a) + n ==> loc(block_of(a), k).d_int))
+define BETWEEN(a, n, lo, hi) (forall k: Int :: { loc(block_of(a), k) } offset_of(a) <= k && k < offset_of(a) + n ==> lo <= loc(block_of(a), k).v_int && loc(block_of(a), k).v_int <= hi)
+
+method swap(a: Ref, b: Ref, l_a: Perm, l_b: Perm)
+  requires none < l_a && l_a < write
+  requires none < l_b && l_b < write
+  requires WF(a) && WF(b) && INIT(a) && INIT(b) && LV(a, l_a) && LV(b, l_b)
+  ensures INIT(a) && INIT(b) && LV(a, l_a) && LV(b, l_b)
+  ensures a.v_int == old(b.v_int) && b.v_int == old(a.v_int)
+{
+  if (lvloc(block_of(a)) == lvloc(block_of(b))) { } // case split on the liveness cells
+  assert a != null && b != null ==> a != b // entry: separation of two single owned places of one field (provable; keeps a failed explicit check from cascading)
+  var t: Int
+  assert a != null
+  assert perm(a.v_int) > none
+  assert perm(a.d_int) > none && a.d_int
+  t := a.v_int
+  assert b != null
+  assert perm(b.v_int) > none
+  assert perm(b.d_int) > none && b.d_int
+  assert a != null
+  assert perm(a.v_int) == write && perm(a.d_int) == write
+  a.v_int := b.v_int
+  a.d_int := true
+  assert b != null
+  assert perm(b.v_int) == write && perm(b.d_int) == write
+  b.v_int := t
+  b.d_int := true
+  // return: the permission clauses of the postcondition
+  assert perm(a.v_int) == write && perm(a.d_int) == write
+  assert a.d_int
+  assert perm(b.v_int) == write && perm(b.d_int) == write
+  assert b.d_int
+  assert perm(lvloc(block_of(a)).lv) >= l_a + (lvloc(block_of(a)) == lvloc(block_of(b)) ? l_b : none)
+  assert perm(lvloc(block_of(b)).lv) >= l_b + (lvloc(block_of(b)) == lvloc(block_of(a)) ? l_a : none)
+}
+
+method caller()
+{
+  var x: Ref
+  var y: Ref
+  x := alloc_int()
+  y := alloc_int()
+  assert x != null
+  assert perm(x.v_int) == write && perm(x.d_int) == write
+  x.v_int := 1
+  x.d_int := true
+  assert y != null
+  assert perm(y.v_int) == write && perm(y.d_int) == write
+  y.v_int := 2
+  y.d_int := true
+  assert x != y // call: separation of the two owns, then each owns clause
+  assert x != null
+  assert perm(x.v_int) == write && perm(x.d_int) == write
+  assert x.d_int
+  assert y != null
+  assert perm(y.v_int) == write && perm(y.d_int) == write
+  assert y.d_int
+  if (lvloc(block_of(x)) == lvloc(block_of(y))) { } // case split on the liveness cells
+  assert perm(lvloc(block_of(x)).lv) > none
+  var lf1: Perm := perm(lvloc(block_of(x)).lv) / 3
+  assert perm(lvloc(block_of(y)).lv) > none
+  var lf2: Perm := perm(lvloc(block_of(y)).lv) / 3
+  assert perm(lvloc(block_of(x)).lv) >= lf1 + (lvloc(block_of(x)) == lvloc(block_of(y)) ? lf2 : none)
+  assert perm(lvloc(block_of(y)).lv) >= lf2 + (lvloc(block_of(y)) == lvloc(block_of(x)) ? lf1 : none)
+  swap(x, y, lf1, lf2)
+  assert x != null
+  assert perm(x.v_int) > none
+  assert perm(x.d_int) > none && x.d_int
+  assert y != null
+  assert perm(y.v_int) > none
+  assert perm(y.d_int) > none && y.d_int
+  assert x.v_int == 2 && y.v_int == 1
+  assert perm(x.v_int) == write && perm(x.d_int) == write
+  assert perm(lvloc(block_of(x)).lv) == write // lifetime: the liveness token comes back whole
+  exhale acc(x.v_int) && acc(x.d_int) && acc(lvloc(block_of(x)).lv)
+  assert perm(y.v_int) == write && perm(y.d_int) == write
+  assert perm(lvloc(block_of(y)).lv) == write // lifetime: the liveness token comes back whole
+  exhale acc(y.v_int) && acc(y.d_int) && acc(lvloc(block_of(y)).lv)
+}
+
+// two owns of cells of the same block in one contract: both fractions come from the one liveness token and sum correctly
+method swap_adjacent(a: Ref, n: Int, l_a: Perm)
+  requires n >= 2 && none < l_a && l_a < write && WF(a) && a != null && RANGE(a, n) && INITR(a, n) && LV(a, l_a)
+  ensures INITR(a, n) && LV(a, l_a)
+{
+  assert a != null ==> perm(lvloc(block_of(a)).lv) > none // lifetime
+  var p0: Ref := loc(block_of(a), offset_of(a))
+  var p1: Ref := loc(block_of(a), offset_of(a) + 1)
+  assert p0 != p1
+  assert p0 != null
+  assert perm(p0.v_int) == write && perm(p0.d_int) == write
+  assert p0.d_int
+  assert p1 != null
+  assert perm(p1.v_int) == write && perm(p1.d_int) == write
+  assert p1.d_int
+  if (lvloc(block_of(p0)) == lvloc(block_of(p1))) { } // case split on the liveness cells
+  assert perm(lvloc(block_of(p0)).lv) > none
+  var lf3: Perm := perm(lvloc(block_of(p0)).lv) / 3
+  assert perm(lvloc(block_of(p1)).lv) > none
+  var lf4: Perm := perm(lvloc(block_of(p1)).lv) / 3
+  assert perm(lvloc(block_of(p0)).lv) >= lf3 + (lvloc(block_of(p0)) == lvloc(block_of(p1)) ? lf4 : none)
+  assert perm(lvloc(block_of(p1)).lv) >= lf4 + (lvloc(block_of(p1)) == lvloc(block_of(p0)) ? lf3 : none)
+  swap(p0, p1, lf3, lf4)
+  assert INITR(a, n)
+  assert perm(lvloc(block_of(a)).lv) >= l_a
+}

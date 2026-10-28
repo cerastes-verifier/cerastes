@@ -274,3 +274,5 @@ Ordinary C writes `while (i++ < n)`, `for (i = 0, j = n; i < j; i++, j--)`, `if 
 *2026-10-26, amended by 0025 (M4.4c): item 1 — a `void` `?:` in statement position is an `if` (0025 item 3), and counts as having an effect for the comma rule; item 5 — the other `-Wall` shapes are rejected (0025 item 6, R1–R13); item 7 (E2–E3) — writes and snapshots are placed by the last member of their set and leave 0021's family (0025 item 2), and a flagged snapshot's check is an access (0025 item 1).*
 
 *2026-10-27, amended by 0026 (M4.4d): item 7 (E6) — with the exact sets (0026 step 1), the value of a comma carries its floor, so an item that uses the value follows the comma's left operand; the sentence "items that use the comma's value are not bound by it" now describes step 2 only, and `(never_returns(0), 1) && 100 / d` verifies.*
+
+*2026-10-27, amended by 0028 (M4.5a, effective from M4.5b1): item 4 — for cells (address-taken locals, globals, places through pointers) the check is path-precise on objects, category `unsequenced` (0028 item 12); item 8 — calls are checked against the accesses and the other calls they are not sequenced with (0028 item 13).*

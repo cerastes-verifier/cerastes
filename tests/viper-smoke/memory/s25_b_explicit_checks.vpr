@@ -1,0 +1,166 @@
+// expect: error assert:assertion.false @ L84
+// expect: error assert:assertion.false @ L85
+// expect: error assert:assertion.false @ L91
+// expect: error assert:assertion.false @ L92
+// expect: error assert:assertion.false @ L99
+// expect: error assert:assertion.false @ L106
+// expect: error assert:assertion.false @ L113
+// expect: error assert:assertion.false @ L120
+// expect: error assert:assertion.false @ L121
+// expect: error assert:assertion.false @ L128
+// expect: error assert:assertion.false @ L135
+// expect: error assert:insufficient.permission @ L142
+// expect: error assert:assertion.false @ L149
+// expect: error assert:assertion.false @ L156
+// expect: error assert:assertion.false @ L163
+// S25(b), explicit checks before every operation (record 0028 item 11; internal/il-inventory.md, M4.5a): one failing shape per method, style "assert cond".
+// Every error is the explicit check (assertion.false) except the range-permission shape (call_range_short: assert forall .. acc(..), a marked row, insufficient.permission).
+// Not pinned here: a bounds check without the cell's permission check (the raw read would fail second; record 0028 item 11 forbids it).
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field tok: Bool
+field lv: Bool
+
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  axiom member_lv { forall r: Ref, k: Int :: { member(r, k) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define OWN(p) (offset_of(p) < len(block_of(p)) && acc(p.v_int) && acc(p.d_int))
+define INIT(p) (OWN(p) && p.d_int)
+define UNINIT(p) (OWN(p) && !p.d_int)
+define LVQ(p) lvloc(block_of(p))
+define LV(p, l) (acc(lvloc(block_of(p)).lv, l))
+define BLK(p) (offset_of(p) == 0 && acc(loc(block_of(p), -1).tok) && loc(block_of(p), -1).tok && lvloc(block_of(p)) == loc(block_of(p), -2) && acc(lvloc(block_of(p)).lv) && (forall i: Int :: { loc(block_of(p), i) } 0 <= i && i < len(block_of(p)) ==> acc(loc(block_of(p), i).v_int) && acc(loc(block_of(p), i).d_int)))
+define RDP(p, r) (offset_of(p) < len(block_of(p)) && acc(p.v_int, r) && acc(p.d_int, r) && p.d_int)
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: the cell and the block's liveness token (lvloc(b) == loc(b, -2)), full permission
+method alloc_int() returns (r: Ref)
+  ensures r != null && WF(r) && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures UNINIT(r) && lvloc(block_of(r)) == loc(block_of(r), -2) && acc(lvloc(block_of(r)).lv)
+
+// cerastes:trusted-contract malloc of n ints: owns_block(r) (the free token at slot -1, the whole liveness token with lvloc(b) == loc(b, -2), every cell and flag), the cells uninitialised
+method malloc_int(n: Int) returns (r: Ref)
+  requires n >= 0
+  ensures r != null ==> WF(r) && r == loc(block_of(r), 0) && len(block_of(r)) == n && BLK(r)
+  ensures r != null ==> (forall i: Int :: { loc(block_of(r), i) } 0 <= i && i < n ==> !loc(block_of(r), i).d_int)
+
+// cerastes:trusted-contract free: requires p == null || owns_block(p), and consumes it
+method free_int(p: Ref)
+  requires p != null ==> BLK(p)
+
+define RANGE(a, n) (offset_of(a) >= 0 && offset_of(a) + n <= len(block_of(a)))
+define OWNR(a, n) (forall k: Int :: { loc(block_of(a), k) } offset_of(a) <= k && k < offset_of(a) + n ==> acc(loc(block_of(a), k).v_int) && acc(loc(block_of(a), k).d_int))
+
+method swap(a: Ref, b: Ref, l_a: Perm, l_b: Perm)
+  requires none < l_a && l_a < write && none < l_b && l_b < write
+  requires INIT(a) && INIT(b) && LV(a, l_a) && LV(b, l_b)
+  ensures INIT(a) && INIT(b) && LV(a, l_a) && LV(b, l_b)
+
+method use(p: Ref, l_p: Perm)
+  requires none < l_p && l_p < write
+  requires INIT(p) && LV(p, l_p)
+  ensures INIT(p) && LV(p, l_p)
+
+method use_range(a: Ref, n: Int, l_a: Perm)
+  requires none < l_a && l_a < write && n >= 0 && WF(a) && a != null && RANGE(a, n) && OWNR(a, n) && LV(a, l_a)
+  ensures OWNR(a, n) && LV(a, l_a)
+
+method null_read(p: Ref) returns (v: Int)
+{
+  assert p != null
+  assert perm(p.v_int) > none
+  v := p.v_int
+}
+
+method null_write(p: Ref)
+{
+  assert p != null
+  assert perm(p.v_int) == write
+  p.v_int := 1
+}
+
+method read_unowned(p: Ref) returns (v: Int)
+  requires p != null
+{
+  assert perm(p.v_int) > none
+  v := p.v_int
+}
+
+method write_readonly(p: Ref)
+  requires p != null && acc(p.v_int, 1/2)
+{
+  assert perm(p.v_int) == write
+  p.v_int := 1
+}
+
+method uninit_read(p: Ref) returns (v: Int)
+  requires p != null && OWN(p)
+{
+  assert perm(p.d_int) > none && p.d_int
+  v := p.v_int
+}
+
+method oob_read_full(a: Ref, n: Int) returns (v: Int)
+  requires n >= 0 && WF(a) && a != null && RANGE(a, n) && OWNR(a, n)
+{
+  assert offset_of(a) + n < len(block_of(a))
+  assert perm(loc(block_of(a), offset_of(a) + n).v_int) > none
+  v := loc(block_of(a), offset_of(a) + n).v_int
+}
+
+method call_separation(x: Ref, l_x: Perm)
+  requires none < l_x && l_x < write && WF(x) && INIT(x) && LV(x, l_x)
+{
+  assert x != x
+  swap(x, x, l_x / 3, l_x / 3)
+}
+
+method call_noperm(p: Ref, l_p: Perm)
+  requires none < l_p && l_p < write && p != null && LV(p, l_p)
+{
+  assert perm(p.v_int) == write && perm(p.d_int) == write && p.d_int
+  use(p, l_p)
+}
+
+method call_range_short(a: Ref, n: Int, l_a: Perm)
+  requires none < l_a && l_a < write && n >= 1 && WF(a) && a != null && RANGE(a, n) && OWNR(a, n - 1) && LV(a, l_a)
+{
+  assert OWNR(a, n)
+  use_range(a, n, l_a)
+}
+
+method scope_exit(x: Ref)
+  requires x != null && acc(x.v_int, 1/2) && acc(x.d_int, 1/2)
+{
+  assert perm(x.v_int) == write && perm(x.d_int) == write
+  exhale acc(x.v_int) && acc(x.d_int)
+}
+
+method free_double(p: Ref)
+  requires p != null && WF(p) && offset_of(p) == 0
+{
+  assert perm(loc(block_of(p), -1).tok) == write && loc(block_of(p), -1).tok
+  free_int(p)
+}
+
+method ptr_diff_blocks(p: Ref, q: Ref) returns (d: Int)
+  requires WF(p) && WF(q) && p != null && q != null
+{
+  assert block_of(p) == block_of(q)
+  d := offset_of(p) - offset_of(q)
+}
+
