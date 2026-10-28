@@ -1,6 +1,8 @@
 # cerastes — C/C++ verifier (EDG → Viper/Silicon → Z3)
 
 Plan: @plan.md   Status: internal/status.md (session log; read when needed)
+Session plans: .claude/plans/<milestone>-<topic>.md (the approved plan of each session, e.g.
+  m4-5b1b-pointer-params.md; from M4.5b1b)
 User docs: doc/ (Antora) → https://cerastes.dev/cerastes/doc/ (decision 0004)
 
 ## Commands

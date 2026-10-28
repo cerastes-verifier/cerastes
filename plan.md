@@ -153,14 +153,14 @@ plan and the VeriFast ports it takes.
 
 | Session | Scope | Needs |
 |---|---|---|
-| **M4.5b1b Pointer parameters and contracts** | `WF`; `owns`/`reads`/`live`/`old(*p)` in both modes (C's `cerastes_` forms, 0029 item 3); ghost amounts, case splits, the framing check; call and return permission checks; `&param`; category `pointer-comparison` | M4.5b1a (done) |
+| **M4.5b1b Pointer parameters, results and contracts** | pointer parameters and results (`restrict` only with `owns`), `&param`; `WF`; `owns`/`reads`/`live`/`old(*p)` in both modes (C's `cerastes_` forms, 0029 item 3); ghost amounts per atom, case splits; the framing of contracts decided per path; call, return and entry permission checks; category `pointer-comparison` (plan `.claude/plans/m4-5b1b-pointer-params.md`) | M4.5b1a (done) |
 | **M4.5b1c Ownership, sequencing, loops** | `[[cerastes::owning]]` on parameters and functions, `owns_block`; sequencing on objects (`unsequenced`) and the call placement rule; cells in loops (hybrid permission invariants); `T**`; jumps out of cell scopes; the aliasing trap; the ports (`swap`, `inc`, `address_of_local.c`); the page completed | M4.5b1b |
 | **M4.5b2 Globals, statics, initialization through pointers** | mutable globals and `static` locals as blocks with frames; `main` owns the globals; 0025 item 2's placement revisited; 0019's flag per cell; `[[cerastes::uninit]]`, `ref_to_uninit`, `must_init` and `--strict-init` | M4.5b1c |
 | **M4.5c Structs** | field cells, `.` and `->`, struct values (copies, initializers, by-value parameters and results), nested structs, pointers to fields, `owns(*s)`, non-recursive owning fields | M4.5b1c |
 | **M4.5d1 vlibc** | the repository (the owner creates `cerastes-verifier/vlibc`), its layout, license and CI; the submodule pin; explicit and transparent includes; the trust rule; `abort`/`exit`/`_Exit` moved out of the encoder's table | M4.5a (any time) |
 | **M4.5d2 `malloc` and `free`** | vlibc's contracts for `malloc`, `calloc`, `realloc`, `free`; heap blocks; the free checks; leaks (a record; `forperm`); owning locals and globals; `invalid-free`, `leak` | M4.5c, M4.5d1 |
 | **M4.5e1 Arrays** | local arrays, `a[i]`, array parameters, `owns_range` and quantified permissions, `forall` in C (0029 item 4), sum and max; P38's braced initializers over 1000 elements; M4.4b2's types computed from constants | M4.5b1c |
-| **M4.5e2 Pointer arithmetic** | `p + i`, `p - q`, comparisons within one object, one-past-the-end, `malloc(n * sizeof(T))`; `out-of-bounds`, `pointer-comparison` | M4.5e1, M4.5d2 |
+| **M4.5e2 Pointer arithmetic** | `p + i`, `p - q`, comparisons within one object, one-past-the-end, `malloc(n * sizeof(T))`; `out-of-bounds`; relational comparisons and `p - q` under `pointer-comparison` (the category lands in M4.5b1b) | M4.5e1, M4.5d2 |
 | **M4.5f1 Predicates and pure functions** | predicate and pure bodies encoded (0011 item 4 lifted), `fold`/`unfold`, non-recursive predicates | M4.5c, M4.5d2 |
 | **M4.5f2 Recursive predicates** | recursive predicates; a linked list (push, pop, length); recursive owning fields | M4.5f1 |
 | **M4.5f3 Lemmas and ghost sequences** | lemma functions and ghost sequences for content specifications (M4.6's string contracts); its record decides whether all of it is in M4 | M4.5f2 |
@@ -371,6 +371,10 @@ internal/decisions/. Use plan mode: propose a task breakdown for M<k>, list the
 exact acceptance commands you will run, and name any decision records you
 expect to write. Do not modify files until I approve the plan.
 ```
+
+**The approved plan** (owner, 2026-10-28): its first execution step saves it in the repository as
+`.claude/plans/<milestone>-<topic>.md`, the branch name with `.` written as `-` (`m4-5b1b-pointer-params.md`), committed
+with the planning commit and named in the status entry and the handoff.
 
 **During the session**
 - Delegate must-fail twins and mutants to the `test-mutator` subagent.
