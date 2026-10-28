@@ -28,8 +28,9 @@ Facts checked while planning (2026-10-28):
   2.43 (`libc6-dev` `2.43-2ubuntu2.4`).
 - The toolchain PPA (`ubuntu-toolchain-r/test`) has no GCC 16 for `resolute`.
 - The goldens name libc++'s inline namespace (`std::__1::integral`, 10 goldens), so libstdc++ would change them.
-- The box (`192.168.1.167`) did not answer during the session (no ping, SSH timed out), so the rehearsal ran in an
-  `ubuntu:26.04` amd64 container on the owner's Mac (Docker Desktop, Rosetta, 4 CPUs, 8 GB).
+- The box (`192.168.1.167`) did not answer for most of the session (no ping, SSH timed out), so the rehearsal ran in
+  an `ubuntu:26.04` amd64 container on the owner's Mac (Docker Desktop, Rosetta, 4 CPUs, 8 GB). It came back before
+  the end, and the full check then ran there natively in the same image (item 6).
 
 ## Decision
 
@@ -125,6 +126,14 @@ Facts checked while planning (2026-10-28):
      trusted libc methods take their parameter names from the system declaration (`exit(int __status)` on glibc,
      `exit(int)` on macOS: `p___status__0` against `p_arg__0`); and position maps that name the system header of an
      internal check (`/usr/include/stdlib.h:752` against the SDK's `_abort.h:33`).
+   - **The full check on Linux** (2026-10-28, `05b2b8b`, on the box in an `ubuntu:26.04` container, x86-64, `-j 8`):
+     `ci-linux.sh` green, then `check.sh` all green in 79 minutes (tests 5752 passed, 0 failed, 9 skipped: the 8
+     tagged tests and VeriFast's originals; native-ok runs clang 1078, GCC 1078; VIR self-test 1123). Against the
+     Mac's full run of the same commit, every outcome is the same except the 8 tagged tests (14 runs on macOS, 8 named
+     skips on Linux). Of the 4057 `.vpr` and map files, 71 differ, all of the three benign kinds above: `MANIFEST`, 18
+     `.vpr` with the system declarations' parameter names, and 52 maps with system paths. The harness self-test
+     skips one more test there (the built site's check, before `check.sh` has built `build/doc`); a fresh runner on
+     either platform skips it too.
 7. **The stock configuration differs; cerastes's does not.** cerastes's EDG build takes EDG's generated
    `cmake_defines.h` from the stock build (0002, `USE_CMAKE_DEFINES`), and the Linux one differs from macOS's in 72
    macros that are not per target: EDG's own code-generation and feature switches (`FIXED_POINT_ALLOWED`,

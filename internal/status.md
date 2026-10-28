@@ -3,80 +3,78 @@
 Session log, newest first. Each entry says what is done, what is not, any surprises, the decision records added and
 the exact first step for the next session. Trimmed at the end of M4.4c (owner, 2026-10-26) to the latest entry and a
 history table; the full log up to M4.4c is `git show 1fcc43b:internal/status.md`, M4.4c's entry is
-`git show fce46de:internal/status.md`, and M4.4d's `git show 9017105:internal/status.md`.
+`git show fce46de:internal/status.md`, M4.4d's `git show 9017105:internal/status.md`, and M4.5a's
+`git show 72e30b3:internal/status.md`.
 
-## M4.5a — The memory model for C by design; `|` and `^` with constant masks (2026-10-27): done on branch `m4.5a-memory-design`
+## S5 — Linux CI (2026-10-28): done on branch `s5-linux-ci`
 
-Read `internal/handoff.md` next: §2 the owner steps, §3 the open notes ("From M4.5a"), §4.4 S5 and M4.5b1–f3, §8 the new
-questions (53–58).
+Read `internal/handoff.md` next: §2 the owner steps (push, then a full run on GitHub's Linux runner), §3 "From S5", §8
+questions 59–63.
 
-**Owner decisions (2026-10-27, planning and during the session)**
-- **Planning:** M4.4e (the warning sweep) deferred to M8; Q49–Q51 as recommended; **Q52** folded into M4.5a (record
-  0027); `[[cerastes::owns]]` as an **owning pointer** (renamed `[[cerastes::owning]]` the same day, "instead of a pointer
-  as owns make it owning"); **vlibc** as contract headers, verified implementations, explicit `<vlibc/…>` and a
-  transparent `<stdlib.h>` shim ("combine all 3"); P4222's markers in the `cerastes::` spelling, opt-in strict mode.
-- **During the session:** **S5 Linux CI** (`ubuntu-24.04` x86-64) right after M4.5a, before M4.5b1; MSVC and arm64 Linux
-  to M8. After S24: encoding **E2**. After S25: `insufficient.permission` accepted on marked range rows only. After audit
-  round 2: **member blocks** (bounds per sub-object) and a **liveness token** with `live(p)`. After S26: a fourth axiom,
-  `member_lv`.
+**Owner decisions (2026-10-28):** handoff questions 53–56 as recommended (a port time of 10× is when liveness is
+revisited); **57:** `ubuntu-26.04`, else the newest toolchains in that image; **58:** the box may be used for any
+testing. During the session: **the eight tests that name what only the macOS SDK declares** get `; platform: macos`.
 
 **Done**
-- **Record 0027** (amends 0023 item 2, 0026 items 7–10): `|` with a constant mask inline (`%`/`\` forms), `^` as prelude
-  functions `c_[u]xor_[c]mask_N_k` with a range-guarded postcondition (S23, S23b: an inline `let` timed out on nested
-  chains); range claims through chains decided at every depth measured, identities to measured depths (item 4).
-  **Code:** `src/vir/lower.cpp` (`mask_rewrite`), `src/viper/prelude.{cpp,h}`; lint exemption for the mask functions.
-- **Records 0028–0030** (design only), each audited: 0028 the memory model (E2: a pointer as a `Ref` over a `Block`
-  domain with four axioms `loc_inv`, `loc_nonnull`, `member_inv`, `member_lv`; one field per C type; `WF` clauses; member
-  blocks; liveness at slot −2; the heap token at slot −1 and `owns_block`; leaks by `forperm`; `reads` by ghost
-  fractions; explicit checks and marked range rows; `void*` restricted; sequencing on cells and calls; eight new
-  categories), 0029 the annotations (`[[cerastes::owning]]`, `cerastes::uninit`/`ref_to_uninit`/`must_init` with
-  `--strict-init`, C's `cerastes_owns`/`reads`/`owns_range`/`owns_block`/`live`/`old`/`forall`), 0030 vlibc. No EDG fork
-  commit needed (P52–P54).
-- **Fixtures:** `tests/viper-smoke/memory/`, 55 hand-written Viper files of the chosen encoding (24 must-verify, 31
-  must-fail), run by `check.sh`.
-- **Tests:** 11 positives and 35 twins `tests/scalar/[negative/]mask_or_xor_*`, the doc example
-  `integer-semantics/mask_or_xor.c`; VIR cases 835 → 1123 (`VIR_CASES_MIN` 1123); harness and lint tests.
-- **Docs:** Integer semantics (`|`, `^`, chains); `internal/encoding.md` §2. Nothing user-visible about memory yet.
-- **Plan:** `plan.md` (M4 table, S5, M4.5b1–f3, M8 entries); handoff §4.4 with each session's plan and the VeriFast
-  port inventory's conclusions.
+- **Record 0031** (amends 0001, 0008 item 2, 0015 item 6, 0016 item 13): a second job, `check-linux`, on GitHub's
+  `ubuntu-26.04` x86-64 image, in both tiers, `CERASTES_JOBS: 4`; `scripts/ci-linux.sh` asserts Ubuntu 26.04 on
+  x86-64, glibc 2.43, Ubuntu's clang 21.1.8 and libc++ 21 (`1:21.1.8-6ubuntu1`), GCC 16 (`16-20260322-1ubuntu1`, the
+  snapshot 26.04 packages), the image's JDK 17, EDG's emulated clang 210108 and libc++ include directories, and
+  installs what is missing from Ubuntu's archive.
+- **`bootstrap.sh` on Linux:** EDG's `linux-clang-debug` with clang-21, ASan and EDG's runtime library off (as macOS's
+  stock build); the scrape through clang++-21 with `-stdlib=libc++`; Z3's x64 glibc asset and the sbt 2.0.10 launcher
+  by SHA-256; `is_gcc` for Ubuntu's banner; `sha256_of`/`fetch_pinned`; bash 3.2-safe empty arrays.
+- **Code:** glibc's two `assert` expansions (`encode.cpp`, the C23 comma's constant must be the folded `sizeof`);
+  `posix_spawn_file_actions_addchdir_np` off Apple; a `$<LINK_GROUP:RESCAN,…>` for GNU ld; five Embedded C
+  extensions off in `edg_config` (both front ends compile the same 386 options); in a system file, an `#undef` of a
+  predefined macro and its exact redefinition in the same inclusion are no change (glibc's `__INT64_C`; by path in
+  verify mode).
+- **Harness:** `CLANG_FAMILY` (`clang` on Linux), GCC banners by the FSF line, `; platform: macos|linux` on a
+  `mode:`/`c-only:` line; `CiGuardTests` pins both jobs and `ci-linux.sh` (`ci_sh_problems` with a spec); new
+  `PlatformTagTests`, `SystemHeaderMacroTests` (11 cases) and banner cases; the test
+  `tests/annotations/macros/system_header_redefinition.cpp`.
+- **Docs:** Installation gains a Linux section; Overview, Integer semantics, `README.md`, `tests/README.md`.
 
 **Acceptance**
-| # | Command | Result |
-|---|---|---|
-| 1 | `scripts/check.sh` #1 | **all green** (19:12–20:23): harness self-tests 999 + 79 + 228 + 291 OK; tests 5763 passed, 0 failed, 1 skipped (`native-ok` Apple clang 1077, GCC 1077); Viper lint 2028 files clean; VIR self-test 1123 passed, 206 rejection cases, 0 problems; walker oracle 135 goldens, 1922 facts, 0 failed; docs 161 code blocks, 0 problems. `DriverCategoryDocsTests` rerun after the 0011 footer: OK. No second run |
-| 2 | Baseline (`run_tests.py -j 8`, before any build) | 5566 passed, 0 failed, 1 skipped; 1934 `.vpr` |
-| 3 | M3 (`build/m4.5a/M3.md`) | 198 sources rerun: 587 passed; 30 `.vpr` changed, each an `\|`/`^` constant mask; VIR 35 of 835 old cases changed, each explained; 0 verdict changes; no `let` |
-| 4 | S23, S23b | 4728 Silicon asserts and 1804 Z3 bit-vector proofs: every form equals the prelude function; chains of 8/16/32 in about 2 s as functions |
-| 5 | The new tests (both modes, `native-ok` clang and GCC) | 146 runs passed; VIR 1123/1123; `--check-headers` 2184/2184; `--count-error-twins` 349 |
-| 6 | `run_tests.py tests/viper-smoke/memory` | 55 passed; the four axioms' 16 subsets each give one error in the consistency method; vacuity 139 points all reachable |
-| 7 | Audits (Opus) | round 2 (0028): 5 blocking, 8 should-fix; round 3 (re-audit, 0029, 0030): 3 blocking, 14 should-fix; round 4 (re-audit, 0027's code): 1 reopened (C's implicit pointer conversions, fixed in the text, not re-audited: M4.5b1), 0 blocking on the code, 4 should-fix; all taken |
-| 8 | wall-clock | 13:55–20:30 (planning before), against the planned 5 h: the audit rounds and the chain thresholds took the rest |
-
-**Not done / deferred**
-- Mutation of the mask positives (handoff §8 question 49: M4.8's run).
-- The driver and encoder changes the records ask of M4.5b1 (the `--diag_error` for C's incompatible pointer
-  conversions, the axiom records and lint tags) and of M4.5d1 (the attribute allow-list by position).
+- The rehearsal (Docker on the Mac, `ubuntu:26.04` amd64, Rosetta, 4 CPUs; the box was not answering then): `ci-linux.sh`
+  green; `check.sh` in the PR tier against `72e30b3`: every step green after the fixes, the tests 3999 passed and 12
+  failed before the platform tag, then the affected areas rerun with it (179 passed, 8 skipped); walker oracle 0 of
+  1924 facts failed; VIR self-test 127 of 1123 cases run (the rest left to the full check); docs green.
+- Against the Mac's full run of the same tree (5763 passed): every outcome the Linux run made agreed but those 12; of
+  653 `.vpr` and map files, 17 differ, all benign (record 0031 item 6).
+- The final `check.sh` on the Mac (the full check, `05b2b8b`): **all green** (harness self-test 1017 tests, 1 skip;
+  tests 5766 passed, 0 failed, 1 skipped; VIR self-test 1123; walker oracle and docs green). The first run that
+  session stopped in the self-test: `SystemHeaderMacroTests` had been inserted under `ChecksSelftestTests`'s
+  `@e2e_gate`, which `E2EGateTests` caught; fixed before the second.
+- **The full check on Linux**, natively on the box once it answered (`05b2b8b`, an `ubuntu:26.04` container
+  `cerastes-s5`, `CERASTES_JOBS=8`): `ci-linux.sh` green with the rehearsal's toolchain report; `check.sh` **all
+  green** in 79 min (harness self-test 1017 tests, 2 skips; tests 5752 passed, 0 failed, 9 skipped; native-ok runs
+  clang 1078, GCC 1078; VIR self-test 1123; walker oracle 0 of 1924 facts failed; docs green). Against the Mac's
+  final run: every outcome the same but the 8 tagged tests (14 runs there, 8 named skips here); of 4057 `.vpr` and
+  map files, 71 differ, all benign (`MANIFEST`; 18 `.vpr` with system parameter names; 52 maps with system paths).
+  The self-test's second skip is the built-site check, which skips until `check.sh`'s docs step has built
+  `build/doc` (it passes on Linux once the site exists); a fresh runner skips it on both platforms.
+- **Not yet seen:** the job on GitHub's real `ubuntu-26.04` runner (its image, its 4 cores and the 220-minute limit).
 
 **Surprises**
-- **Nested `^` chains:** exact `let` forms timed out at depth 8 because Z3 had to prove the whole term's range;
-  functions with a proved range postcondition fixed ranges, but identities through signed chains still hit Z3 heuristics,
-  sensitive to the postcondition's shape (C's `int`-valued `==` against C++'s `Bool`).
-- **Four audit rounds on the memory model** found real holes each time: bounds per sub-object, two calls ordered against
-  each other, dangling pointers, an object and its first member through `void*`, then C's implicit pointer conversions.
-- **Silicon details** the encoder must respect: Viper refuses `perm` under a quantifier (range checks fail with
-  `insufficient.permission`), refuses arithmetic in triggers, needs `a != b` at entry and an `lvloc` case split before
-  fractions so it never reports a cascade.
+- GNU ld's one pass over static archives (`back_end()` undefined); Ubuntu's GCC banner has no "GCC"; glibc's
+  `<stdint.h>` undefines and redefines predefined macros, which 0008's rule refused; EDG's stock Linux configuration
+  compiles in Embedded C (7 more options); its runtime library does not build with clang 21 (`bf16` literals); GNU tar
+  fails under Rosetta.
+- Two Opus audits each found blocking holes (an unencoded overflow beside glibc's `sizeof`; a macro window that let a
+  user file verify, and pairs across inclusions); all fixed and re-audited.
 
-**Decision records added:** 0027-or-xor-constant-masks, 0028-memory-model, 0029-ownership-annotations, 0030-vlibc.
+**Decision records added:** 0031-linux-ci.
 
-**First step for the next session (S5 Linux CI).** Confirm that the owner merged PR #12 and this branch's PR and that CI
-is green on `main`; check that GCC 16 and clang 21 can be installed on `ubuntu-24.04` (handoff §8 question 57). Then
-handoff §4.4, "S5 Linux CI".
+**First step for the next session (M4.5b1).** Confirm that the owner pushed this branch and that both CI jobs are green
+on it (a full run by dispatch, with the Linux job's time: handoff §8 question 63), or take the Linux job's evidence
+back to a short S5 follow-up; then handoff §4.4, "M4.5b1".
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 
 | Session | Date | Branch, merge | Records | Outcome |
 |---|---|---|---|---|
+| S5 Linux CI | 2026-10-28 | `s5-linux-ci` | 0031 | `check-linux` on `ubuntu-26.04` in both tiers; Linux bootstrap; glibc `assert`; the same EDG language on both platforms; eight macOS-only tests tagged |
 | M4.5a Memory-model design, `\|`/`^` masks | 2026-10-27 | `m4.5a-memory-design` | 0027–0030 | the C memory model designed and audited (E2, four axioms, member blocks, liveness), ownership annotations, vlibc; `\|`/`^` constant masks decided; S5 Linux CI next |
 | M4.4d Exact sets, constant masks | 2026-10-27 | `m4.4d-exact-sets` | 0026 | preconditions and comma values get exact sets, with today's as the fallback; one `requires` per argument accepted; constant masks as remainders, the `bit_mask.c [c23]` hang gone; hooks `force_base_sets`, `drop_exact_set` |
 | M4.4c Writes outside the chain, `void` `?:`, `-Wall` shapes | 2026-10-26 | `m4.4c-writes-void-warnings` | 0025 | finding A fixed (a flagged read is an access); writes and snapshots leave the chain; a `void` `?:` statement is an `if`; warnings in `verified`/`error` tests; the static-assertion cross-check in bodies; 13 `-Wall` shape rules; M4.4e planned |
