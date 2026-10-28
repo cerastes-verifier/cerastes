@@ -79,6 +79,14 @@ Probe facts (M2 Phase 1):
        allowed. A directive that changes no macro (an `#undef` of an
        undefined name, an identical redefinition) is not recorded by EDG and
        is harmless. The diagnostic is reported at the directive.
+       *Amended in S5 (2026-10-28, record 0031 item 9):* in a system file
+       (by EDG's flag, and in verify mode by path as well, 0011 item 4), an `#undef` of a predefined
+       macro whose next directive for that name is a `#define` of exactly
+       the predefinition's text, in the same inclusion and with no file
+       included in between, is no change, and neither is that `#define`;
+       glibc's `<stdint.h>` undefines `__INT64_C` and `__UINT64_C` and
+       defines them again as the compiler does. Everywhere else, and for any
+       other definition, the rule is unchanged.
    - **When the attributes are available:** each macro expands to exactly its
      attribute (0006). `CERASTES_PREDICATE` expands to
      `[[cerastes::predicate]] inline` and `CERASTES_PURE` to

@@ -1,12 +1,14 @@
 = Installation
 
-cerastes is built from source. There is no binary release. The only
-supported platform is macOS on Apple silicon: `scripts/bootstrap.sh` stops
-with an error on any other system.
+cerastes is built from source. There is no binary release. Two platforms are
+supported: macOS on Apple silicon, and Linux on x86-64, which was checked on
+Ubuntu 26.04 (see <<linux>>). `scripts/bootstrap.sh` stops with an error on
+any other system. Both give the same result for every test and every example
+in this documentation.
 
 == Requirements
 
-* macOS on Apple silicon (`arm64`).
+* macOS on Apple silicon (`arm64`). For Linux, see <<linux>>.
 * https://brew.sh[Homebrew].
 * The Xcode Command Line Tools (`xcode-select --install`). EDG parses the
   system pass:[C++] library and SDK headers that they provide, and the build uses
@@ -76,6 +78,38 @@ by hand, load them into your shell:
 The output is `Z3 version 4.16.0 - 64 bit`. The versions of every pinned tool
 are in the
 https://github.com/cerastes-verifier/cerastes/blob/main/internal/decisions/0001-toolchain-pins.md[toolchain pin record].
+
+[#linux]
+== Linux (x86-64)
+
+On Linux the bootstrap script installs nothing itself: it checks that the
+tools are there and stops with an error naming the first one that is missing.
+On Ubuntu 26.04, install them with `apt`:
+
+[source,sh]
+----
+sudo apt-get install --no-install-recommends git curl unzip cmake ninja-build \
+  python3 nodejs npm shellcheck openjdk-17-jdk-headless \
+  clang-21 libc++-21-dev libc++abi-21-dev gcc-16 g++-16
+----
+
+Then clone the repository and run `scripts/bootstrap.sh` as above. On Linux
+it:
+
+* builds EDG's front ends with `clang-21` and has them parse the
+  pass:[libc++] 21 headers and glibc's, as they parse the pass:[libc++] and
+  SDK headers on macOS;
+* uses the JDK 17 that `JAVA_HOME_17_X64` names, or else
+  `/usr/lib/jvm/java-17-openjdk-amd64`;
+* downloads sbt 2.0.10 and Z3 4.16.0 into `build/tools` and checks the
+  SHA-256 of each;
+* compiles the `native-ok` tests with `clang-21` and the highest-numbered
+  `gcc-NN` on your `PATH`.
+
+The documentation is built with the Node major in `doc/.node-version` (26),
+as on macOS; another major gives a warning. Ubuntu 26.04 packages
+GCC 16 as a snapshot from before its release (`gcc-16` 16.0.1); it is what the
+Linux checks use.
 
 == Check the installation
 
@@ -179,8 +213,8 @@ include. The code examples on these pages are test files, which
 
 == Known limitations
 
-* *macOS on Apple silicon only.* `scripts/bootstrap.sh` refuses to run
-  elsewhere.
+* *macOS on Apple silicon and x86-64 Linux only.* `scripts/bootstrap.sh`
+  refuses to run elsewhere. Linux on arm64 and Windows are not supported yet.
 * *Some SDK headers do not parse.* With the macOS SDK 27.0 that was checked,
   the pass:[libc++] headers that were tried parse, among them `<algorithm>`, `<string>`,
   `<vector>`, `<iostream>`, `<map>`, `<format>`, `<ranges>` and `<filesystem>`.
@@ -189,5 +223,5 @@ include. The code examples on these pages are test files, which
   This is a limitation of the EDG front end at the pinned commit, not of
   cerastes itself.
 * *The system headers are not pinned.* EDG reads the headers of the Command
-  Line Tools that are installed on your machine, so a different SDK version
-  can change what parses.
+  Line Tools that are installed on your machine (on Linux, those of glibc and
+  pass:[libc++]), so a different SDK or library version can change what parses.

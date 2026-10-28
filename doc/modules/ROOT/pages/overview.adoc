@@ -84,7 +84,7 @@ it verifies and what it does not:
 What supports it:
 
 * A bootstrap script that builds the whole toolchain on macOS with Apple
-  silicon (xref:installation.adoc[Installation]).
+  silicon and on x86-64 Linux (xref:installation.adoc[Installation]).
 * A test harness that runs `cerastes verify`, the front end and Viper files, and
   checks the errors they report, including the line.
 * The annotation layer: nine annotations, written with the macros of

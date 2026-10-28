@@ -138,11 +138,17 @@ correctness (0013).
    (a loop's step holds no checks). Every node of the expansion is positioned at the macro invocation (P22), so obligations and the check are
    reported at the line of the `assert`. The arguments of `__assert_rtn` (`__func__`, the file name, the line, the text) are never encoded: the
    call is unreachable once the assert holds. Any other use of `__builtin_expect` or `__assert_rtn` is rejected.
+   *Amended in S5 (2026-10-28, record 0031 item 5):* glibc 2.43's two expansions are recognised too, by the same rules
+   (`e` is code, a side effect in it is rejected, the failure call's arguments are never encoded): in C23
+   `(((void) sizeof (__assert_single_arg (e)), e) ? (void) (0) : __assert_fail (…))`, whose comma's left operand must be
+   a `void` cast of a folded integer constant whose original expression is the `sizeof`, and in C++ `(static_cast<bool> (e) ? void (0) : __assert_fail (…))`, whose
+   conversion to `bool` is looked through (it does not change the truth value); `__assert_fail` must be a system
+   function as `__assert_rtn` must. `assert_condition` tries the SDK's shape, then glibc's.
    Under `NDEBUG` the statement is `(void)0`, so nothing is checked — C's meaning. A result holds for the
    configuration verified: with asserts on, what follows an `assert(p(x))` may rely on `p(x)`; an `NDEBUG` build of
    the same code is a different program (the Verifying page says so). A user macro with the same
-   expansion means the same thing. glibc's expansion (`__assert_fail`) is not recognised yet (the CI session, if it
-   adds Linux).
+   expansion means the same thing. glibc's expansion (`__assert_fail`) is recognised from S5 (the amendment above,
+   record 0031 item 5).
 7. **Categories.** New: `noreturn` — "a function declared not to return may return", reported at the reachable
    `return` or closing brace (0011 item 10). `check` also covers a failing `assert`.
 8. **IL facts relied on** (`internal/il-inventory.md`, "M4.2a", all confirmed): (P19) a user `goto` is a

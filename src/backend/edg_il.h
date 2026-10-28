@@ -47,6 +47,12 @@ CERASTES_REQUIRE_(FULLY_RESOLVED_MACRO_POSITIONS, 1);
 CERASTES_REQUIRE_(INCLUDE_EDG_TEST_ATTRIBUTES, 0);
 // M4.4b2 (decision 0024): file-scope static assertions exist in the IL only on the source sequence lists.
 CERASTES_REQUIRE_(GENERATE_SOURCE_SEQUENCE_LISTS, 1);
+// S5 (decision 0031 item 7): the same language on macOS and Linux.
+CERASTES_REQUIRE_(EMBEDDED_C_ALLOWED, 0);
+CERASTES_REQUIRE_(FIXED_POINT_ALLOWED, 0);
+CERASTES_REQUIRE_(NAMED_ADDRESS_SPACES_ALLOWED, 0);
+CERASTES_REQUIRE_(NAMED_REGISTERS_ALLOWED, 0);
+CERASTES_REQUIRE_(DEFAULT_PASS_STDARG_REFERENCES_TO_GENERATED_CODE, 0);
 // Derived:
 CERASTES_REQUIRE_(AUTOMATIC_TEMPLATE_INSTANTIATION, 0);
 CERASTES_REQUIRE_(FUNCTION_PROTOTYPE_INSTANTIATION_DEFERRAL_ALLOWED, 0);
@@ -55,7 +61,7 @@ CERASTES_REQUIRE_(GENERATE_LINKAGE_SPEC_BLOCKS, 1);
 CERASTES_REQUIRE_(GENERATE_MICROSOFT_IF_EXISTS_ENTRIES, 1);
 CERASTES_REQUIRE_(TEMPLATE_INSTANTIATIONS_IN_SOURCE_SEQUENCE_LISTS, 0);
 static_assert(DEFAULT_INSTANTIATION_MODE == tim_used, "DEFAULT_INSTANTIATION_MODE must be tim_used");
-// From the stock macOS configuration (cmake_defines.h), not edg_config: the
+// From the stock configuration (cmake_defines.h, macOS and Linux alike), not edg_config: the
 // fix of EDG bug 0007 (internal/edg_bugs).  It adds type, attribute and token
 // kinds (tk_vector, ...) and so changes the IL layout; libc++'s
 // <__algorithm/simd_utils.h> needs it.

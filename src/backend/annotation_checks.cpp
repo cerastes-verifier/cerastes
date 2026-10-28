@@ -1021,13 +1021,68 @@ std::string macro_name(a_macro_ptr m) {
   return std::string(t, e);
 }
 
+// The logical file record of a directive (a `#pragma GCC system_header` starts a record of its own), or null.
+a_source_file_ptr directive_file(a_macro_ptr m) {
+  if (m->is_command_line_definition || m->source_corresp.decl_position.seq == 0) return nullptr;
+  a_const_char* file = nullptr;
+  a_const_char* full = nullptr;
+  a_line_number line = 0;
+  a_boolean at_end = FALSE;
+  return conv_seq_to_file_and_line(m->source_corresp.decl_position.seq, &file, &full, &line, &at_end);
+}
+
+// A directive in a system file: EDG's flag on its file record (a --sys_include directory, or the pragma from its line
+// on), which is what walk mode calls a system file everywhere (render.cpp); verify mode also requires 0011 item 4's rule
+// by path, under which /usr/local/include, the -I directories and a user file that a system header includes are user
+// files (audit, S5).
+bool directive_in_system_file(a_macro_ptr m) {
+  a_source_file_ptr f = directive_file(m);
+  if (f == nullptr || !f->from_system_include_dir) return false;
+  return !verify_config().on || !in_verified_file(m->source_corresp.decl_position);
+}
+
+// Whether a file record (an inclusion, or a pragma's record) starts strictly between two positions of the unit.
+bool file_starts_between(a_source_file_ptr f, a_seq_number after, a_seq_number before) {
+  for (; f != nullptr; f = f->next) {
+    if (f->first_seq_number > after && f->first_seq_number < before) return true;
+    if (file_starts_between(f->first_child_file, after, before)) return true;
+  }
+  return false;
+}
+
 void check_macros_in_il() {
   std::set<std::string> predefined;
+  std::map<std::string, a_macro_ptr> predefinition;  // the last predefinition of each name: the state user code starts in
   for (a_macro_ptr m = il_header.macros; m != nullptr; m = m->next)
     if (m->is_predefined && !m->is_undef) {
       const std::string n = macro_name(m);
-      if (!n.empty()) predefined.insert(n);
+      if (!n.empty()) predefined.insert(n), predefinition[n] = m;
     }
+  // S5 (decision 0008 item 2, amended by record 0031 item 9): in a system file, an #undef of a predefined macro whose
+  // next directive for that name is a #define of exactly the predefinition's text, in the same inclusion and with no
+  // file included in between, is no change, and neither is that #define.  glibc's <stdint.h> undefines __INT64_C and
+  // __UINT64_C and defines them again as the compiler did.  EDG's text is normalized (`c##L` and `c ## L` both read
+  // "c ## L"; string literals are kept as written), so the comparison is exact.
+  auto is_predefinition_text = [&](a_macro_ptr m, const std::string& n) {
+    auto p = predefinition.find(n);
+    return p != predefinition.end() && !m->is_undef && m->object_like == p->second->object_like && m->text != nullptr &&
+           p->second->text != nullptr && p->second->text[0] != '\0' && std::strcmp(m->text, p->second->text) == 0;
+  };
+  std::set<a_macro_ptr> no_change;
+  for (a_macro_ptr m = il_header.macros; m != nullptr; m = m->next) {
+    if (m->is_predefined || !m->is_undef || !directive_in_system_file(m)) continue;
+    const std::string n = macro_name(m);
+    if (n.empty() || predefinition.count(n) == 0) continue;
+    a_macro_ptr next = m->next;
+    while (next != nullptr && macro_name(next) != n) next = next->next;
+    if (next == nullptr || !is_predefinition_text(next, n) || !directive_in_system_file(next)) continue;
+    a_source_file_ptr f = directive_file(m);
+    if (f == nullptr || directive_file(next) != f) continue;  // the same inclusion, the same record
+    const a_seq_number from = m->source_corresp.decl_position.seq, to = next->source_corresp.decl_position.seq;
+    if (to <= from || file_starts_between(il_header.primary_source_file, from, to)) continue;
+    no_change.insert(m);
+    no_change.insert(next);
+  }
   const std::string& header = real_cerastes_header();
   for (a_macro_ptr m = il_header.macros; m != nullptr; m = m->next) {
     if (m->is_predefined && !m->is_undef) continue;  // the predefinition itself
@@ -1035,6 +1090,7 @@ void check_macros_in_il() {
     if (n.empty() || !is_protected_macro_name(n, predefined)) continue;
     // `-D__CERASTES__` (the front end's own definition) has its own check.
     if (n == "__CERASTES__") continue;
+    if (no_change.count(m) != 0) continue;
     if (!m->is_command_line_definition) {
       const std::string where = physical_path(m->source_corresp.decl_position);
       if (!header.empty() && where == header) continue;

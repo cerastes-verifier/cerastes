@@ -1,50 +1,30 @@
 // expect: error postcondition @ L29
 // mode: c23, c++20
-// twin: tests/scalar/mask_or_xor_round_trip.c
+// twin: tests/scalar/mask_or_xor_chain.c
 // Pins: 0027 item 3: the chain keeps the bits above the masks, so r / 256 is x / 256, not one more
 #include <cerastes.h>
 
-int xor_round_trip(int x)
-    CERASTES_ENSURES(r, r == x)
-{
-  return (x ^ 255) ^ 255;
-}
-
-unsigned xor_round_trip_unsigned(unsigned u)
-    CERASTES_ENSURES(r, r == u)
-{
-  return (u ^ 4294967295u) ^ 4294967295u;
-}
-
-int xor_round_trip_complement(int x)
-    CERASTES_ENSURES(r, r == x)
-{
-  return (x ^ ~15) ^ ~15;
-}
+// The other functions of mask_or_xor_round_trip.c are not repeated here: one mask chain per file: queried one after another in one prover, these methods made Z3 run to the time limit on CI (prover history; M4.5b1a follow-up, record 0027 item 4). These comment lines keep the line numbers.
+//
+//
+//
+//
+//
+//
+//
+//
+//
+//
+//
+//
+//
+//
+//
+//
 
 int xor_chain(int x)
     CERASTES_REQUIRES(0 <= x)
     CERASTES_ENSURES(r, r / 256 == x / 256 + 1)
 {
   return ((x ^ 255) ^ 15) ^ 3;
-}
-
-int xor_chain_value(void)
-    CERASTES_ENSURES(r, r == 151)
-{
-  int x = 100;
-  return ((x ^ 255) ^ 15) ^ 3;
-}
-
-int xor_chain4(int x)
-    CERASTES_ENSURES(r, r == x)
-{
-  return (((x ^ 255) ^ 255) ^ 15) ^ 15;
-}
-
-int xor_chain8_range(int x)
-    CERASTES_REQUIRES(0 <= x)
-    CERASTES_ENSURES(r, 0 <= r)
-{
-  return ((((((((x ^ 255) ^ 15) ^ 255) ^ 15) ^ 255) ^ 15) ^ 255) ^ 15);
 }

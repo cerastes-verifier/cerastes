@@ -78,6 +78,15 @@ target_compile_definitions(edg_config INTERFACE
   # also turns on GENERATE_LINKAGE_SPEC_BLOCKS and GENERATE_MICROSOFT_IF_EXISTS_ENTRIES (host_envir.h:1734-1768)
   # and adds fields to the variable, routine, type, statement and source-correspondence structs (layout-affecting).
   GENERATE_SOURCE_SEQUENCE_LISTS=1
+  # S5 (decision 0031 item 7): the extensions that EDG's stock Linux configuration turns on and macOS's does not
+  # (TR 18037's Embedded C: fixed-point types, named address spaces and registers; stdarg references in generated
+  # code), off on every platform, so that both front ends accept the same language and compile in the same options
+  # (scripts/check_edg_options.sh).  The values are macOS's stock ones: its build does not change.
+  EMBEDDED_C_ALLOWED=0
+  FIXED_POINT_ALLOWED=0
+  NAMED_ADDRESS_SPACES_ALLOWED=0
+  NAMED_REGISTERS_ALLOWED=0
+  DEFAULT_PASS_STDARG_REFERENCES_TO_GENERATED_CODE=0
   EDG_MAIN=edg_main
   USE_CMAKE_DEFINES)
 

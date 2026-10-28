@@ -1,4 +1,4 @@
-# Handoff after M4.5a — the memory model for C by design (records 0027–0030) (2026-10-27)
+# Handoff after S5 — Linux CI (record 0031) (2026-10-28); M4.5a's memory-model design before it (records 0027–0030)
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
@@ -9,31 +9,71 @@ are `git show 60d3fbe:internal/handoff.md` (M4.1) and `git show a4da52c:internal
 
 ## 1. State
 
-M4.5a is done on branch `m4.5a-memory-design` (based on local `main` `9017105`, which merges M4.4d; result in
-`internal/status.md`; plan `~/.claude/plans/using-plan-md-and-my-streamed-glacier.md`):
-- **Record 0027** (handoff §8 question 52, "do it now"): `|` and `^` with a constant mask are decided, as `&` was in
-  0026: `|` inline (`%`/`\` forms), `^` as prelude functions `c_[u]xor_[c]mask_N_k` with a range postcondition (an
-  inline `let` form timed out on nested chains). Code, tests, VIR cases, docs.
-- **Records 0028–0030** (design only, no pointer code): the memory model (E2, four axioms, member blocks, liveness),
-  the ownership annotations (`[[cerastes::owning]]`, P4222's markers in the `cerastes::` spelling, C's spec functions,
-  `owns_block`, `live`) and vlibc. The encoding is pinned by the fixtures in `tests/viper-smoke/memory/`, which
-  `check.sh` runs. Four Opus audit rounds on the records (§3).
-- **Plan:** M4.4e (the warning sweep) is an M8 entry; **S5 Linux CI** comes first, then M4.5b1–f3 (`plan.md`, §4.4).
+S5 is done on branch `s5-linux-ci` (based on local `main` `72e30b3`, which merges M4.5a's PR #13; result in
+`internal/status.md`):
+- **Record 0031** (amends 0001, 0015 item 6, 0016 item 13): a second CI job, `check-linux`, on GitHub's `ubuntu-26.04`
+  x86-64 image (owner, §8 question 57), in both tiers, set up by `scripts/ci-linux.sh`; `bootstrap.sh` for Linux;
+  glibc's two `assert` expansions; the `posix_spawn` chdir and a link group for GNU ld; five Embedded C extensions off
+  in `edg_config` so that both front ends accept the same language and compile in the same 386 options.
+- **The rehearsal** ran in an `ubuntu:26.04` amd64 container on the owner's Mac (Docker Desktop, Rosetta, 4 CPUs),
+  because the box was not answering then (no ping, SSH timed out). `ci-linux.sh` passed every assertion there, and the PR
+  tier of `check.sh` against `72e30b3` agreed with the Mac's full run on every outcome but 12 runs of 8 tests that name
+  what only the macOS SDK declares; with your answer (§8, "platform tag") they are `platform: macos` and the rest
+  passes (record 0031 item 6). Of the `.vpr` both produced, only parameter names of trusted libc methods and the
+  system paths in maps differ.
+- **The full check on Linux** ran natively once the box answered (`05b2b8b`, `ubuntu:26.04` container on x86-64,
+  `-j 8`): `ci-linux.sh` green, `check.sh` all green in 79 min (5752 passed, 0 failed, 9 skipped). Every outcome
+  equals the Mac's full run but the 8 tagged tests' 14 runs (named skips there); 71 of 4057 `.vpr` and map files
+  differ, all of the three benign kinds (record 0031 item 6). The container is removed; the checkout
+  `~/cerastes-ci` and the image `cerastes-s5:runner` stay on the box (§8 question 62).
+- **Not yet seen:** a run on GitHub's real `ubuntu-26.04` runner (the session never pushes; §2), in particular how long
+  its full check takes on 4 vCPUs (§8 question 63).
+- **The first run on GitHub's runner** (this branch's PR, PR tier) stopped at `ci-linux.sh`'s environment step:
+  `LD_LIBRARY_PATH is set`, exported by `actions/setup-python` on Linux. The follow-up commit drops that step from
+  the Linux job, which now uses the image's Python 3.14 as the rehearsal did (record 0031 item 2); the assertion
+  is unchanged. Push the branch again (§2 step 1).
 
-The EDG pin is unchanged (`f0ed5525af`); no fork commit is needed by records 0028–0030 (P52, P53, P54). The EDG box
-session (§4.3) is still pending.
+The EDG pin is unchanged (`f0ed5525af`). M4.5a's state (records 0027–0030, the fixtures in `tests/viper-smoke/memory/`)
+is as its handoff left it; §3 and §4.4 carry what M4.5b1–f3 need.
 
-## 2. Owner steps after M4.5a, in this order
+## 2. Owner steps after S5, in this order
 
-1. **The main checkout's copy of this file.** This branch carries your §8 answers 49–52 (commit `b231f32`); drop the
-   main checkout's uncommitted copy before merging: `git -C ~/Documents/cerastes/cerastes checkout internal/handoff.md`.
-2. **PR #12** (M4.4d): merge it if green.
-3. **This branch.** Push it and open its PR: `git push origin m4.5a-memory-design` (the session never pushes).
-4. **vlibc.** Create the empty repository `cerastes-verifier/vlibc` (Apache-2.0 WITH LLVM-exception) before M4.5d1
-   (record 0030).
-5. **Questions.** Answer §8 (questions 53–58). Then S5 Linux CI (§4.4).
+1. **This branch.** Push it and open its PR (draft first, as for S2: 0016 item 4): `git push origin s5-linux-ci`. The PR
+   runs both jobs in the PR tier.
+2. **The full check on Linux.** From the branch, dispatch the CI workflow (`gh workflow run CI --ref s5-linux-ci`, or
+   the Actions page): both jobs run the full check. A first run that differs from the rehearsal (an assertion of
+   `ci-linux.sh` on the real image, a test outcome) is drift (0016 item 10): it comes back to a session with the
+   job's evidence, never a loosened assertion. The values most likely to differ on the real image: the clang banner
+   and package version if the image's `clang-21` is not Ubuntu's archive build, and `libc6-dev`'s version (reported,
+   not asserted). Watch the Linux job's time: the macOS job's full check took 145 min on 3 cores (0016 item 9), and
+   on 4 vCPUs the Linux one may reach the 220-minute limit (question 63); a timed-out job still uploads its logs.
+3. **Required checks.** Once both jobs are green twice, decide whether `check (Linux, Ubuntu 26.04 x86-64)` becomes a
+   required check on `main` (§8 question 61).
+4. **Questions.** Answer §8 (questions 59–62). Then M4.5b1 (§4.4).
 
 ## 3. Open audit notes (condensed; the full notes are in the commit named above)
+
+**From S5** (one Opus round on the encoder diff: one blocking item, fixed and re-audited; record 0031 items 5–7):
+- *Fixed:* glibc's C23 matcher first accepted any folded constant as the comma's left operand, so a hand-written
+  `((void)(INT_MAX + 1), x >= 0) ? (void)0 : __assert_fail(…)` would have verified with its overflow unencoded; the
+  constant's original expression must now be the `sizeof`.
+- *Should fix, not taken:* a hand-written `((void)sizeof(x++), x) ? (void)0 : __assert_fail(…)` on Linux matches and
+  verifies; the general path would reject it as `side_effect_not_evaluated` (0020 item 5). Sound (the `sizeof`'s
+  operand is never evaluated), but more permissive than the rest of the encoder: require the `sizeof`'s operand to be
+  a call of the system `__assert_single_arg`.
+- *Tests:* the glibc matcher's near misses (a `(void)1` success arm, a non-`sizeof` comma operand, `__assert_fail` in
+  the success arm, another noreturn function) can only run against glibc (§8 question 59).
+- *Driver, pre-existing:* `posix_spawn_file_actions_addchdir(_np)`'s result is not checked and Silicon is given the
+  relative `program.vpr`; if adding the action failed (ENOMEM), Silicon would run in the caller's directory. Passing
+  the absolute path removes it. `LC_ALL=en_US.UTF-8` may not exist on a bare Ubuntu; no `.vpr` holds non-ASCII bytes.
+- *Per-platform `.vpr`, no test today:* C++'s `assert((bool)x)` loses the user's cast on Linux; `assert(E::b)` with a
+  scoped enumeration compiles only under glibc (record 0031 item 5).
+- *Target differences that stay* (record 0031 item 7): `__thread` and the x86 GNU attributes are accepted on Linux only.
+- *Second round, on the macro exemption (record 0031 item 9; two blocking items, fixed and re-audited):* system files by
+  EDG's flag alone (a user file that a system header includes got the exemption and verified), and a pair across two
+  inclusions; also exact text instead of tokens. **For M4.5d1:** vlibc's headers come through `--sys_include` (0030
+  item 4), so EDG flags them as system; its library class must count as a verified file for this exemption, or be
+  excluded from it, before vlibc lands (add it to 0030 item 4's audit list).
 
 **From M4.5a** (four Opus rounds on records 0028–0030: round 2 five blocking, round 3 three blocking, round 4 one
 reopened, all fixed in the records; every should-fix item taken in the text; the code of 0027: round 4, no blocking item).
@@ -236,7 +276,8 @@ fixtures in `tests/viper-smoke/memory/`):
   the 22 files run VeriFast with `-disable_overflow_check`, so their ports need `requires` bounds; `functions.c`'s
   predicate families and constructors, consumed fractions, backward `goto` and `open_module` are M8 entries.
 
-**S5 Linux CI** (owner, 2026-10-27, during M4.5a: "the first sub phase should be adding Linux support to the CI. If MSVC
+**S5 Linux CI: done (2026-10-28, record 0031; the plan as M4.5a wrote it follows, for the record).** (owner,
+2026-10-27, during M4.5a: "the first sub phase should be adding Linux support to the CI. If MSVC
 is easy add it, if not defer"; `ubuntu-24.04` x86-64 only; MSVC and arm64 Linux are M8 entries). ≤ 4 h; its own record
 (the next free number). Work, from 0016 item 13 and M4.5a's survey:
 - `bootstrap.sh` for Linux: the JDK 17 and Z3 4.16.0 x86-64 builds pinned by checksum in 0001; EDG built out of tree as
@@ -483,7 +524,8 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
 - From M4.2a (0015): a `goto` that enters a block, an `if` branch or a switch body (C allows it; Silicon's handling
   of a jump into an `if` branch is unproven, S9d); a label that is the whole branch of an `if` without braces; GNU
   computed `goto`; `quick_exit`, `__builtin_trap`, `__builtin_unreachable`/`unreachable()`, `std::terminate`; an
-  `assert` in a `for` increment; glibc's `assert` expansion. Each is rejected with a diagnostic and an M8 entry.
+  `assert` in a `for` increment. Each is rejected with a diagnostic and an M8 entry (glibc's `assert` expansion is
+  recognised since S5, record 0031 item 5).
   A `goto` into a block or an `if` branch is lifted only when a ported example needs it, after a Silicon spike with
   must-fail twins (owner, 2026-10-27, §8 question 5).
 
@@ -514,15 +556,17 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
 - **A test that loses an `expect:` line** (pre-approved) keeps its line numbers with a comment in its place
   (M4.4c, the four `reject_assert_shape_*.c`).
 
-## 7. Acceptance of M4.5a
+## 7. Acceptance of S5
 
-The table is the one in `internal/status.md` (M4.5a, "Acceptance"); M4.4d's is in `git show 9017105:internal/status.md`.
+The list is the one in `internal/status.md` (S5, "Acceptance"); M4.5a's is in `git show 72e30b3:internal/status.md`,
+M4.4d's in `git show 9017105:internal/status.md`.
 
 ## 8. Questions for the owner
 
 Each has a recommended answer. Answer inline, as before. Answered questions (1–48) are recorded in the decision records,
 in the commit named at the top and in `43f0f81` (questions 5, 10–12 and 43–48); 49–52 are answered below (`b231f32`) and
-recorded in records 0027 and handoff §3–§4.
+recorded in records 0027 and handoff §3–§4; 53–58 are answered below (`9ac7ca7`; 57 and 58 used by S5, record 0031).
+Open: 59–63.
 
 **M4.4d, 2026-10-27 (answered):**
 
@@ -563,6 +607,9 @@ Do it now since we know it needs handled
 - **vlibc** (`cerastes-verifier/vlibc`, created by the owner): contract headers and verified implementations; a user's
   `#include <vlibc/stdlib.h>` is used, and a bare `<stdlib.h>` is transparently replaced in verify mode ("combine all 3
   of those options"). Our ports of `malloc`/`free` live there, not in this repository as VeriFast's do (record 0030).
+
+vlibc has been created and is available in ~/Documents/cerastes/vlibc. When we need to do math functions I have also created a vlibm much the same way.
+
 - **P4222's markers** are spelled `[[cerastes::uninit]]`, `[[cerastes::ref_to_uninit]]`, `[[cerastes::must_init]]`,
   checked when written, with an opt-in strict mode (record 0029).
 - **Linux CI first** (owner, during M4.5a: "the first sub phase should be adding Linux support to the CI. If MSVC is
@@ -578,17 +625,62 @@ Do it now since we know it needs handled
     `T*` becomes `void*` only as a call argument, and a `void*` becomes `T*` only from an allocation's result. Generic
     `void*` code (callbacks with a context pointer, `qsort`-style interfaces) is rejected until M4.7/M8. *Recommended:
     accept; revisit with M4.7's function pointers.*
+
+Follow recommendations.
+
 54. **Leaks at `main`'s exit** (record 0028 item 6): VeriFast reports blocks `main` still holds at exit, with a `leak`
     command to waive one. *Recommended: report them too, with an explicit waiver annotation designed in M4.5d2.*
+
+Follow recommendations.
+
 55. **The cost of liveness** (record 0028 item 3a): checking every use of a pointer value costs about 1.5–1.7× time and
     text on S26's scale program. *Recommended: keep it (dangling pointers are reported); revisit only if a port's time
     is unacceptable.*
+
+Follow recommendations. A port time of 10x is when to revisit.
+
 56. **`static` locals** (record 0028 item 5): their permission must reach the function. *Recommended: an implicit
     `owns` of the function's `static` locals, propagated to its callers' contracts, and a rejection inside a recursive
     cycle; M4.5b2 decides the details.*
+
+Follow recommendations.
+
 57. **S5's toolchain**: GCC 16 and clang 21 may not be packaged for `ubuntu-24.04`. *Recommended: the toolchain PPA or
     apt.llvm.org first, then a pinned container image; stop and ask if neither works.*
+
+ubuntu-26.04 is available with github actions. If this doesn't work, then use the newest toolchains availble in that container
+
 58. **A rehearsal machine for S5**: the box runs EDG suites in `~/edg-cerastes` only (memory). *Recommended: allow a
     separate `~/cerastes-ci` checkout on the box to rehearse the Linux job; otherwise S5 iterates on GitHub's runner
     only (slower).*
+
+The box is allowed to be used for any testing you need.
+
+**S5, 2026-10-28:**
+
+Answered during the session: **the eight macOS-only tests** (12 runs that fail on Linux because they name what only
+the macOS SDK declares): "Platform tag" — `; platform: macos` on their `mode:`/`c-only:` line (record 0031 item 6,
+`tests/README.md`).
+
+59. **glibc twins for the macOS-only tests.** The glibc `assert` matcher's near misses (a `(void)1` success arm, a comma
+    operand that is not the `sizeof`, `__assert_fail` in the success arm, another noreturn function) and P55's
+    `quick_exit` redeclaration can only run against glibc. *Recommended: add them as `platform: linux` tests in M4.5d1,
+    with P55's fix (vlibc's shim meets glibc's `<stdlib.h>` there anyway), and tighten the `sizeof` operand to
+    `__assert_single_arg` then (§3).*
+60. **GCC 16 on Linux is a snapshot** (`16.0.1 20260322`, Ubuntu 26.04's newest; 16.2.0 only from 26.10). *Recommended:
+    keep it while the native-ok runs agree with the Mac's GCC 16.2.0 (they did in the rehearsal: 1078 runs each); move
+    to 16.2.0 when 26.04 gets it or the image moves, as a pin change of 0001, 0031 and `ci-linux.sh` together.*
+61. **Required checks.** *Recommended: make `check (Linux, Ubuntu 26.04 x86-64)` a required check on `main` after its
+    first two green runs (one full, by dispatch or nightly; one PR tier), like `check (macOS, …)`.*
+62. **The box's Linux checkout.** The box did not answer for most of the session, so the rehearsal used Docker on the
+    Mac (the PR tier took 43 min there under Rosetta); when it came back, the full check ran on it natively in 79 min
+    at `-j 8`. Its checkout `~/cerastes-ci` (5.8 GB) and image `cerastes-s5:runner` (3.2 GB) are still there, on a
+    disk 92% full (35 GB free). *Recommended: keep both until GitHub's Linux job is green twice (they reproduce a
+    runner difference in minutes), then the next session that uses the box removes them.*
+63. **The Linux job's time limit.** The job has the macOS job's `timeout-minutes: 220` (0016 item 9: max(150, 1.5 ×
+    the longest full check seen), and the guard allows at most 220). The box ran the full check in 79 min on 16
+    threads, but GitHub's runner has 4 vCPUs, and the macOS job already takes 145 min on 3 cores, so the Linux full
+    check may exceed 220. *Recommended: run the first dispatch as is; if the Linux job takes more than 147 min (220 /
+    1.5) or times out, a short session applies item 9's rule to that job alone (its own bound in the guard, below
+    GitHub's 360-minute job limit) from the run's evidence; the PR tier is not affected (43 min under Rosetta).*
 

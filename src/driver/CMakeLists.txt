@@ -1,5 +1,16 @@
+# EDG's cfe_main (edg_fe) calls back_end() (cerastes_backend), which calls back into EDG.  GNU ld reads each static
+# archive once, left to right, so on Linux the two are a group it rescans (decision 0031 item 4); macOS's linker
+# resolves the cycle itself.
+if(APPLE)
+  set(CERASTES_FE_LIBS cerastes_backend edg_fe)
+  set(CERASTES_VERIFY_LIBS cerastes_backend cerastes_vir cerastes_viper edg_fe)
+else()
+  set(CERASTES_FE_LIBS "$<LINK_GROUP:RESCAN,cerastes_backend,edg_fe>")
+  set(CERASTES_VERIFY_LIBS "$<LINK_GROUP:RESCAN,cerastes_backend,edg_fe>" cerastes_vir cerastes_viper)
+endif()
+
 add_executable(cerastes-fe main.cpp edg_args.cpp)
-target_link_libraries(cerastes-fe PRIVATE cerastes_backend edg_fe)
+target_link_libraries(cerastes-fe PRIVATE ${CERASTES_FE_LIBS})
 target_compile_features(cerastes-fe PRIVATE cxx_std_20)
 target_compile_options(cerastes-fe PRIVATE -Wall -Wextra -Werror)
 
@@ -19,7 +30,7 @@ if(CERASTES_JAVA AND CERASTES_SILICON_JAR AND CERASTES_Z3_EXE AND CERASTES_CLANG
   add_executable(cerastes
     verify_main.cpp edg_args.cpp silicon.cpp silicon_output.cpp report.cpp pipeline.cpp selftest.cpp)
   target_include_directories(cerastes PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
-  target_link_libraries(cerastes PRIVATE cerastes_backend cerastes_vir cerastes_viper edg_fe)
+  target_link_libraries(cerastes PRIVATE ${CERASTES_VERIFY_LIBS})
   target_compile_features(cerastes PRIVATE cxx_std_20)
   target_compile_options(cerastes PRIVATE -Wall -Wextra -Werror)
 else()
