@@ -21,7 +21,7 @@ domain Block {
   axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
   axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
   axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
-  axiom member_lv { forall r: Ref, k: Int :: { member(r, k) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
 }
 
 define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))

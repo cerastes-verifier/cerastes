@@ -60,6 +60,8 @@ std::string formal_name(const Function& f, int k) {
   return "p_" + sanitize(n.empty() ? "arg" : n) + "__" + std::to_string(k);
 }
 std::string local_name(const Var& v) { return "v_" + sanitize(v.name) + "__" + std::to_string(v.id); }
+// The Viper type of a VIR type: a pointer is a Ref (decision 0032 item 5).
+low::LType ltype(const Type& t) { return t.is_bool() ? low::LType::Bool : (t.is_ptr() ? low::LType::Ref : low::LType::Int); }
 const char* kEndLabel = "l_end";
 const char* kResult = "res";
 
@@ -395,6 +397,7 @@ class Lowerer {
     for (const Function& f : prog_.functions())
       if (!f.requires_.empty() || !f.ensures_.empty() || !f.decreases_.empty()) wf_method(f);
     check_cycles();
+    alloc_methods();
     LowerResult r;
     r.program = std::move(out_);
     r.errors = std::move(errors_);
@@ -403,6 +406,50 @@ class Lowerer {
   }
 
  private:
+  // The trusted allocation of each cell type used (decision 0032 item 4; 0028 item 17), before every other method: a fresh one-slot block, its
+  // cell uninitialized (full permission to the value and the flag, the flag false), and its liveness cell with `lvloc(b) == loc(b, -2)`.
+  // The map rows of its clauses are at the first address-taken declaration of the type.
+  void alloc_methods() {
+    std::vector<low::LMethod> methods;
+    for (const auto& [suffix, at] : alloc_at_) {
+      const Type& t = cell_type_of_.at(suffix);
+      const E r = low::var("r");
+      const E b = block_of(r);
+      auto clause = [&](E expr) {
+        low::LClause c;
+        c.expr = std::move(expr);
+        for (const char* id : {"not.wellformed", "postcondition.violated"}) {
+          low::Meta m;
+          m.category = "internal";
+          m.loc = at;
+          m.message = std::string("internal check: ") + (std::string(id) == "not.wellformed" ? "well-formedness of" : "Silicon's own check of") +
+                      " the trusted contract of the allocation of a variable of type `" + t.str() + "` whose address is taken";
+          c.checks.push_back(low::Check{id, std::move(m)});
+        }
+        return c;
+      };
+      using low::BinOp;
+      low::LMethod m;
+      m.name = "alloc_" + suffix;
+      m.trusted_reason = "allocation of an address-taken local of type " + t.str() +
+                         ": a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)";
+      m.results.push_back(low::LVar{"r", low::LType::Ref});
+      m.requires_.clear();
+      m.ensures_.push_back(clause(low::bin(BinOp::And, low::bin(BinOp::And, low::bin(BinOp::Ne, r, low::null_()),
+                                                          low::bin(BinOp::Eq, r, low::dom("loc", {b, low::int_lit("0")}))),
+                                           low::bin(BinOp::Eq, low::dom("len", {b}), low::int_lit("1")))));
+      E rest = low::bin(BinOp::Eq, live_cell(r), low::dom("loc", {b, low::int_lit("-2")}));
+      rest = low::bin(BinOp::And, rest, low::acc(r, "v_" + suffix));
+      rest = low::bin(BinOp::And, rest, low::acc(r, "d_" + suffix));
+      rest = low::bin(BinOp::And, rest, low::not_(cell_flag(r, t)));
+      rest = low::bin(BinOp::And, rest, low::acc(live_cell(r), "lv"));
+      m.ensures_.push_back(clause(rest));
+      m.decreases_assumed = true;  // 0013 item 5
+      methods.push_back(std::move(m));
+    }
+    out_.methods.insert(out_.methods.begin(), std::make_move_iterator(methods.begin()), std::make_move_iterator(methods.end()));
+  }
+
   // ---- recursion cycles (decision 0021 item 4) ----
 
   // The functions a statement or expression calls (every Call node, dead code included: Silicon's call graph has an edge for every
@@ -418,6 +465,7 @@ class Lowerer {
   static void calls_in_stmt(const Stmt* s, std::vector<const Function*>& out, bool skip_nested, bool top = true) {
     if (s == nullptr) return;
     calls_in_expr(s->expr, out);
+    calls_in_expr(s->addr, out);  // a Store's address (decision 0032)
     for (const Clause& c : s->invariants) calls_in_expr(c.expr, out);
     for (const Clause& c : s->measure) calls_in_expr(c.expr, out);
     if (skip_nested && !top) return;
@@ -545,6 +593,12 @@ class Lowerer {
     std::set<int> flagged;
     std::vector<low::LVar> snapshots;
     int nloop = 0;
+    // The blocks that declare cells and are open at the statement being lowered, outermost first (decision 0032 item 8).
+    struct Scope {
+      std::vector<const Var*> cells;  // in declaration order
+      SrcLoc end;                     // the closing brace
+    };
+    std::vector<Scope> scopes;
   };
 
   void internal_error(const SrcLoc& loc, std::string what) { errors_.push_back(Diag{loc, std::move(what)}); }
@@ -557,8 +611,8 @@ class Lowerer {
 
   static void find_flagged(const Stmt& s, std::set<int>& out) {
     switch (s.kind) {
-      case Stmt::Kind::Decl:
-        if (s.expr == nullptr && s.var != nullptr) out.insert(s.var->id);
+      case Stmt::Kind::Decl:  // a cell's flag is a field of the cell (decision 0032 item 4, 0019 item 13), not a local
+        if (s.expr == nullptr && s.var != nullptr && !s.var->address_taken) out.insert(s.var->id);
         break;
       case Stmt::Kind::If:
         if (s.then_body != nullptr) find_flagged(*s.then_body, out);
@@ -586,6 +640,7 @@ class Lowerer {
   // not in it.  It only keeps the variable inside its type's range (0019 item 5).
   E dummy_value(const Var& v) {
     if (v.type.is_bool()) return low::bool_lit(false);
+    if (v.type.is_ptr()) return low::null_();
     const dec::Range r = dec::range_of(*v.type.int_type);
     return low::int_lit(dec::in_range("0", r) ? "0" : r.lo);
   }
@@ -628,9 +683,228 @@ class Lowerer {
     full.obls.push_back(std::move(o));
   }
 
+  // ---- the memory model (decision 0032; decision 0028 items 1-4 and 11) ----
+
+  // The field-name suffix `<t>` of a cell type (decision 0032 item 5): the VIR type by width and signedness (`long` and `long long` share
+  // `long`), an enumeration by its own, numbered name.  It never ends in `__<digits>`, so `v_<t>` cannot be the name of a local.
+  std::string cell_suffix(const Type& t) {
+    if (t.is_bool()) return "bool";
+    const IntType& it = *t.int_type;
+    if (it.is_enum) {
+      auto found = enum_suffix_.find(&it);
+      if (found == enum_suffix_.end()) {
+        std::string name = "enum_" + std::to_string(enum_suffix_.size() + 1) + "_" + sanitize(it.name);
+        const size_t us = name.rfind("__");
+        if (us != std::string::npos && name.find_first_not_of("0123456789", us + 2) == std::string::npos) name += "_e";
+        found = enum_suffix_.emplace(&it, std::move(name)).first;
+      }
+      return found->second;
+    }
+    switch (it.bits) {
+      case 8: return it.is_signed ? "schar" : "uchar";
+      case 16: return it.is_signed ? "short" : "ushort";
+      case 32: return it.is_signed ? "int" : "uint";
+      case 64: return it.is_signed ? "long" : "ulong";
+      case 128: return it.is_signed ? "i128" : "u128";
+      default: return (it.is_signed ? "i" : "u") + std::to_string(it.bits);
+    }
+  }
+
+  // Record that the program uses cells of type `t` (its fields, and the memory prelude); `at` is a position of the first use that the
+  // trusted `alloc_<t>` method's map rows can name: the earliest address-taken declaration of the type (a cell's type).
+  std::string use_cell_type(const Type& t) {
+    const std::string suffix = cell_suffix(t);
+    out_.memory = true;
+    out_.cell_types[suffix] = t.is_bool() ? low::LType::Bool : low::LType::Int;
+    cell_type_of_[suffix] = t;
+    return suffix;
+  }
+
+  void alloc_site(const Type& t, const SrcLoc& at) {
+    const std::string suffix = use_cell_type(t);
+    const auto it = alloc_at_.find(suffix);
+    const bool earlier = it == alloc_at_.end() || (at.file == it->second.file && (at.line < it->second.line || (at.line == it->second.line && at.column < it->second.column)));
+    if (earlier) alloc_at_[suffix] = at;
+  }
+
+  // `recv.v_<t>`, `recv.d_<t>`, `perm(recv.v_<t>)`, `lvloc(block_of(recv)).lv`.
+  E cell_value(const E& recv, const Type& t) { return low::field(recv, "v_" + use_cell_type(t)); }
+  E cell_flag(const E& recv, const Type& t) { return low::field(recv, "d_" + use_cell_type(t)); }
+  E value_perm(const E& recv, const Type& t) { return low::perm_of(recv, "v_" + use_cell_type(t)); }
+  E flag_perm(const E& recv, const Type& t) { return low::perm_of(recv, "d_" + use_cell_type(t)); }
+  E block_of(const E& ptr) { out_.memory = true; return low::dom("block_of", {ptr}); }
+  E live_cell(const E& ptr) { out_.memory = true; return low::dom("lvloc", {block_of(ptr)}); }
+  E live_perm(const E& ptr) { return low::perm_of(live_cell(ptr), "lv"); }
+  // perm(recv.v_<t>) > none
+  E may_read(const E& recv, const Type& t) { return low::bin(low::BinOp::Gt, value_perm(recv, t), low::no_perm()); }
+  // The write permission on both fields as ONE atomic assertion: !(perm(v) != write || perm(d) != write [|| perm(lv) != write]).
+  E may_write(const E& recv, const Type& t, bool with_liveness) {
+    using low::BinOp;
+    E bad = low::bin(BinOp::Or, low::bin(BinOp::Ne, value_perm(recv, t), low::write_perm()), low::bin(BinOp::Ne, flag_perm(recv, t), low::write_perm()));
+    if (with_liveness) bad = low::bin(BinOp::Or, bad, low::bin(BinOp::Ne, live_perm(recv), low::write_perm()));
+    return low::not_(bad);
+  }
+
+  static std::string quoted(const std::string& text, const char* fallback) {
+    return text.empty() ? std::string(fallback) : "`" + text + "`";
+  }
+
+  // The cells declared directly in a block (a Decl of an address-taken variable), in declaration order.
+  static std::vector<const Var*> cells_of(const Stmt& block) {
+    std::vector<const Var*> cells;
+    for (const Stmt* c : block.stmts)
+      if (c != nullptr && c->kind == Stmt::Kind::Decl && c->var != nullptr && c->var->address_taken) cells.push_back(c->var);
+    return cells;
+  }
+
+  // `x := alloc_<t>()` at the entry of the block that declares the cell `x` (decision 0032 item 4).
+  void alloc_cell(std::vector<low::LStmt>& out, const Var& x) {
+    alloc_site(x.type, x.loc);
+    low::LStmt c;
+    c.kind = low::LStmt::Kind::Call;
+    c.name = "alloc_" + cell_suffix(x.type);
+    c.target = var_name(x);
+    c.check = low::Check{"call.precondition", meta("internal", x.loc, "internal check: Silicon's own check of the allocation of `" + x.name + "`")};
+    out.push_back(std::move(c));
+  }
+
+  // Leaving the scope of `cells` (decision 0032 item 8): full permission to each cell, its flag and its liveness cell is back (`lifetime`),
+  // then all three are exhaled; the cells in reverse declaration order.
+  void scope_exit(std::vector<low::LStmt>& out, const std::vector<const Var*>& cells, const SrcLoc& at) {
+    for (size_t k = cells.size(); k-- > 0;) {
+      const Var& x = *cells[k];
+      const E r = low::var(var_name(x));
+      emit_assert(out, may_write(r, x.type, true),
+                  meta("lifetime", at, "the address of `" + x.name + "` may still be in use when its lifetime ends"));
+      low::LStmt ex;
+      ex.kind = low::LStmt::Kind::Exhale;
+      ex.expr = low::bin(low::BinOp::And, low::bin(low::BinOp::And, low::acc(r, "v_" + cell_suffix(x.type)), low::acc(r, "d_" + cell_suffix(x.type))),
+                         low::acc(live_cell(r), "lv"));
+      out.push_back(std::move(ex));
+    }
+  }
+
+  void field_assign(std::vector<low::LStmt>& out, const std::string& recv, const std::string& field, E value) {
+    low::LStmt s;
+    s.kind = low::LStmt::Kind::FieldAssign;
+    s.name = recv;
+    s.field = field;
+    s.expr = std::move(value);
+    out.push_back(std::move(s));
+  }
+
+  // `x.v_<t> := value; x.d_<t> := true` for a Ref variable (the lint requires the flag write to follow the value's directly).
+  void write_fields(std::vector<low::LStmt>& out, const std::string& recv, const Type& t, E value) {
+    const std::string suffix = use_cell_type(t);
+    field_assign(out, recv, "v_" + suffix, std::move(value));
+    field_assign(out, recv, "d_" + suffix, low::bool_lit(true));
+  }
+
+  // A cell read by name: its own permission is the function's (`internal`), then the flag (`uninitialized`), value `x.v_<t>`.
+  LV read_cell(const Expr& e, const E& guard, const Deps& gdep, Full& full) {
+    const E r = low::var(var_name(*e.var));
+    obl(full, guard, gdep, may_read(r, e.var->type), {},
+        meta("internal", e.loc, "internal check: the function holds the permission to its own variable `" + e.var->name + "`"));
+    obl(full, guard, gdep, cell_flag(r, e.var->type), {},
+        meta("uninitialized", e.loc, "`" + e.var->name + "` may be read here before it is given a value"));
+    return {cell_value(r, e.var->type), {}};
+  }
+
+  // A cell written by name (`x = e;`, the declaration's initializer, `x += e;`), after the full expression of its value: the permission is
+  // the function's (`internal`), then both fields are written.
+  void write_cell(std::vector<low::LStmt>& out, const Var& x, const E& value, const SrcLoc& at) {
+    const E r = low::var(var_name(x));
+    emit_assert(out, may_write(r, x.type, false),
+                meta("internal", at, "internal check: the function holds the permission to its own variable `" + x.name + "`"));
+    write_fields(out, var_name(x), x.type, value);
+  }
+
+  // `*p` as a read (decision 0032 item 6): the null check, the permission check (which is also the liveness check of this use, 0028 item
+  // 3a), the flag; the value `p.v_<t>`.
+  LV deref(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full) {
+    LV p = lower(*e.a, env, guard, gdep, full);
+    const std::string ptr_text = e.a->c_text;
+    const std::string place = e.c_text.empty() ? (ptr_text.empty() ? std::string() : "*" + ptr_text) : e.c_text;
+    const Type& t = e.type;
+    obl(full, guard, gdep, low::bin(low::BinOp::Ne, p.e, low::null_()), p.dep,
+        meta("null-dereference", e.loc, "dereferences " + quoted(ptr_text, "the pointer") + ", which may be null"));
+    obl(full, guard, gdep, may_read(p.e, t), p.dep,
+        meta("permission", e.loc,
+             "reads " + quoted(place, "the object the pointer points to") + " without owning it: the object it points to may have ended"));
+    obl(full, guard, gdep, cell_flag(p.e, t), p.dep,
+        meta("uninitialized", e.loc, quoted(place, "the object the pointer points to") + " may be read here before it is given a value"));
+    return {cell_value(p.e, t), p.dep};
+  }
+
+  // Any other use of a pointer value (`==`, `!=`, a truth test, a copy): `p != null ==> perm(lvloc(block_of(p)).lv) > none` (`lifetime`),
+  // skipped for `&x` and a null constant, which cannot have a dead object (decision 0032 item 6).
+  static bool address_or_null(const Expr& e) {
+    if (e.kind == Expr::Kind::AddrOf || e.kind == Expr::Kind::Null) return true;
+    return e.kind == Expr::Kind::Cond && e.b != nullptr && e.c != nullptr && address_or_null(*e.b) && address_or_null(*e.c);
+  }
+
+  void ptr_use(const Expr& operand, const LV& v, const E& guard, const Deps& gdep, Full& full) {
+    if (address_or_null(operand)) return;
+    const E live = low::bin(low::BinOp::Gt, live_perm(v.e), low::no_perm());
+    obl(full, guard, gdep, low::implies(low::bin(low::BinOp::Ne, v.e, low::null_()), live), v.dep,
+        meta("lifetime", operand.loc, "uses " + quoted(operand.c_text, "the pointer") + " after the object it points to may have ended"));
+  }
+
+  // 0028 item 3's exception for `==` and `!=` (decision 0032 item 7): two non-null pointers into different blocks, one of them one past the
+  // end of its block, are not decided by the model.  In b1a every pointer is null or offset 0 of a one-slot block, so it is provable; as an
+  // `internal` row, a failure is a bug (exit 3).  Never for a null operand.
+  void one_past_end(const Expr& e, const LV& a, const LV& b, const E& guard, const Deps& gdep, const Deps& dep, Full& full) {
+    using low::BinOp;
+    if (e.a->kind == Expr::Kind::Null || e.b->kind == Expr::Kind::Null) return;
+    out_.memory = true;
+    auto past = [&](const E& p) { return low::bin(BinOp::Eq, low::dom("offset_of", {p}), low::dom("len", {block_of(p)})); };
+    E bad = low::bin(BinOp::And, low::bin(BinOp::Ne, a.e, low::null_()), low::bin(BinOp::Ne, b.e, low::null_()));
+    bad = low::bin(BinOp::And, bad, low::bin(BinOp::Ne, block_of(a.e), block_of(b.e)));
+    bad = low::bin(BinOp::And, bad, low::bin(BinOp::Or, past(a.e), past(b.e)));
+    obl(full, guard, gdep, low::not_(bad), dep,
+        meta("internal", e.loc, "internal check: a comparison of pointers one of which is one past the end of its object (decision 0028 item 3)"));
+  }
+
+  static bool shares_node(const Expr& root, const Expr* needle) {
+    if (root.kind == Expr::Kind::Deref && root.a == needle) return true;
+    for (const Expr* x : {root.a, root.b, root.c})
+      if (x != nullptr && shares_node(*x, needle)) return true;
+    for (const Expr* x : root.args)
+      if (x != nullptr && shares_node(*x, needle)) return true;
+    return false;
+  }
+
+  // `*addr = value;` and its compound forms (decision 0032 items 6 and 9): the address and the value in one full expression, then (a
+  // non-variable address copied into a Ref temporary) the null check, the write permission on both fields, the two writes.  A compound
+  // store's value reads `*addr` through the same node: the pointer is lowered once and the read reuses its value (`shared_`).
+  void store(const Stmt& s, std::vector<low::LStmt>& out) {
+    const bool compound = shares_node(*s.expr, s.addr);  // the value reads `*addr` through the same node: the pointer is evaluated once
+    const std::vector<LV> vs = full_exprs({s.addr, s.expr}, out, nullptr, compound);
+    E recv = vs[0].e;
+    if (recv->kind != low::LExpr::Kind::Var) {
+      const std::string t = new_temp(low::LType::Ref);
+      assign(out, t, recv);
+      recv = low::var(t);
+    }
+    const Type& t = s.expr->type;
+    const std::string ptr_text = s.addr->c_text;
+    const std::string place = ptr_text.empty() ? std::string() : "*" + ptr_text;
+    // Always checked: the read of a compound store checked the same value, but the write's own check costs nothing and is never skipped.
+    emit_assert(out, low::bin(low::BinOp::Ne, recv, low::null_()),
+                meta("null-dereference", s.loc, "dereferences " + quoted(ptr_text, "the pointer") + ", which may be null"));
+    emit_assert(out, may_write(recv, t, false),
+                meta("permission", s.loc,
+                     "writes " + quoted(place, "the object the pointer points to") + " without owning it: the object it points to may have ended"));
+    write_fields(out, recv->text, t, vs[1].e);
+  }
+
   // ---- expressions ----
 
   LV lower(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full) {
+    if (!shared_.empty()) {  // a node used twice (the pointer of a compound store, decision 0032 item 9): lowered once
+      const auto it = shared_.find(&e);
+      if (it != shared_.end() && e.kind != Expr::Kind::Local) return it->second;
+    }
     switch (e.kind) {
       case Expr::Kind::Const:
         if (e.type.is_bool()) return {low::bool_lit(e.value == "true"), {}};
@@ -640,6 +914,7 @@ class Lowerer {
           const auto it = shared_.find(&e);  // the old value of `x++`: read once (decision 0020)
           if (it != shared_.end()) return it->second;
         }
+        if (e.var->address_taken) return read_cell(e, guard, gdep, full);
         if (in_full_ && written_.count(e.var->id) != 0) return snapshot(e, guard, gdep, full);
         if (flagged(*e.var))  // a read of a local declared without an initializer: its flag must be set (decision 0019 item 4)
           obl(full, guard, gdep, low::var(flag_name(*e.var)), {},
@@ -656,7 +931,7 @@ class Lowerer {
       case Expr::Kind::Unary: return unary(e, env, guard, gdep, full);
       case Expr::Kind::Binary: return binary(e, env, guard, gdep, full);
       case Expr::Kind::Cond: {
-        if (has_effect(*e.b) || has_effect(*e.c)) return branch_cond(e, env, guard, gdep, full);
+        if (e.type.is_ptr() || has_effect(*e.b) || has_effect(*e.c)) return branch_cond(e, env, guard, gdep, full);
         LV c = lower(*e.a, env, guard, gdep, full);
         E gt = low::and_(guard, c.e);
         E gf = low::and_(guard, low::not_(c.e));
@@ -668,6 +943,10 @@ class Lowerer {
       case Expr::Kind::Convert: return convert(e, env, guard, gdep, full);
       case Expr::Kind::ToBool: {
         LV a = lower(*e.a, env, guard, gdep, full);
+        if (e.a->type.is_ptr()) {  // a pointer as a truth value is `p != null` (decision 0032 item 7), a use of its value
+          ptr_use(*e.a, a, guard, gdep, full);
+          return {low::bin(low::BinOp::Ne, a.e, low::null_()), a.dep};
+        }
         return {low::bin(low::BinOp::Ne, a.e, low::int_lit("0")), a.dep};
       }
       case Expr::Kind::BoolToInt: {
@@ -691,6 +970,15 @@ class Lowerer {
       case Expr::Kind::Call: return call(e, env, guard, gdep, full);
       case Expr::Kind::AssignE: return assign_value(e, env, guard, gdep, full);
       case Expr::Kind::Comma: return comma(e, env, guard, gdep, full);
+      case Expr::Kind::Null: return {low::null_(), {}};
+      case Expr::Kind::AddrOf: {  // the cell's Ref: a pointer value, no obligation of its own (decision 0032 item 6)
+        if (e.var == nullptr || !e.var->address_taken) {
+          internal_error(e.loc, "the address of a variable that is not a cell reached lowering");
+          return {low::null_(), {}};
+        }
+        return {low::var(var_name(*e.var)), {}};
+      }
+      case Expr::Kind::Deref: return deref(e, env, guard, gdep, full);
     }
     internal_error(e.loc, "unknown expression kind");
     return {low::int_lit("0"), {}};
@@ -753,6 +1041,12 @@ class Lowerer {
     if (lazy_or) { gb = low::and_(guard, low::not_(a.e)); gbd = join(gdep, a.dep); }
     LV b = lower(*e.b, env, gb, gbd, full);
     const Deps dep = join(a.dep, b.dep);
+    if ((e.bop == BinaryOp::Eq || e.bop == BinaryOp::Ne) && e.a->type.is_ptr()) {
+      // Decision 0032 items 6 and 7: both operands are uses of a pointer value, then the one-past-the-end exception of 0028 item 3.
+      ptr_use(*e.a, a, guard, gdep, full);
+      ptr_use(*e.b, b, guard, gdep, full);
+      one_past_end(e, a, b, guard, gdep, dep, full);
+    }
     switch (e.bop) {
       case BinaryOp::LAnd: return {low::bin(BinOp::And, a.e, b.e), dep};
       case BinaryOp::LOr: return {low::bin(BinOp::Or, a.e, b.e), dep};
@@ -980,7 +1274,7 @@ class Lowerer {
     E value;
     if (!callee.ret.is_void()) {
       item.target = "t__" + std::to_string(fn_.ntemp++);
-      fn_.temps.push_back(low::LVar{item.target, callee.ret.is_bool()});
+      fn_.temps.push_back(low::LVar{item.target, ltype(callee.ret)});
       value = low::var(item.target);
     }
     Effect fx;
@@ -1027,8 +1321,12 @@ class Lowerer {
 
   // ---- effects used as values (decision 0020) ----
 
+  // A `?:` of pointer type counts: it is lowered as an `if` that assigns a temporary, so that each path holds one pointer (a Ref variable
+  // with a plain value) and Silicon finds the permission of a cell through it: an `ite` term as the receiver of a field access does not
+  // (S-probe of M4.5b1a: "insufficient permission to access" right after asserts that `perm` is `write`).
   static bool has_effect(const Expr& e) {
     if (e.kind == Expr::Kind::AssignE || e.kind == Expr::Kind::Comma || e.kind == Expr::Kind::Call) return true;
+    if (e.kind == Expr::Kind::Cond && e.type.is_ptr()) return true;
     for (const Expr* x : {e.a, e.b, e.c})
       if (x != nullptr && has_effect(*x)) return true;
     for (const Expr* x : e.args)
@@ -1045,9 +1343,9 @@ class Lowerer {
       if (x != nullptr) collect_writes(*x, out);
   }
 
-  std::string new_temp(bool is_bool) {
+  std::string new_temp(low::LType type) {
     const std::string t = "t__" + std::to_string(fn_.ntemp++);
-    fn_.temps.push_back(low::LVar{t, is_bool});
+    fn_.temps.push_back(low::LVar{t, type});
     return t;
   }
 
@@ -1056,7 +1354,7 @@ class Lowerer {
   // set, its guard's and the comma floor's), and that set, not just the snapshot's, is what a later write of the local must follow
   // (decision 0025 item 1: a comma drops its left operand's calls, so a later write could otherwise be emitted before the check).
   LV snapshot(const Expr& e, const E& guard, const Deps& gdep, Full& full) {
-    const std::string t = new_temp(e.var->type.is_bool());
+    const std::string t = new_temp(ltype(e.var->type));
     const int id = e.var->id;
     // A read after a write of the same local follows that write's set; the comma floor too.
     const auto w = full.last_write.find(id);
@@ -1106,6 +1404,7 @@ class Lowerer {
     }
     LV stored = lower(*e.a, env, guard, gdep, full);
     if (e.b != nullptr) shared_.erase(e.b);
+    if (e.var->type.is_ptr()) ptr_use(*e.a, stored, guard, gdep, full);  // a pointer copy uses the value (decision 0032 item 6)
     // The write follows what its value depends on, the comma floor and every earlier access to the same local.
     const int id = e.var->id;
     const auto a = full.last_access.find(id);
@@ -1136,7 +1435,10 @@ class Lowerer {
     }
     const size_t effect_from = full.effects.size();
     const size_t obl_from = full.obls.size();
-    lower(*e.a, env, guard, gdep, full);
+    {
+      const LV left = lower(*e.a, env, guard, gdep, full);
+      if (e.a->type.is_ptr()) ptr_use(*e.a, left, guard, gdep, full);  // a discarded pointer value is a use (decision 0032 item 6)
+    }
     const Deps saved = floor_;
     // Only what the left operand itself depends on or contains: a call elsewhere in the enclosing expression is unsequenced with the
     // right operand (decision 0021: what the left operand created, fixed points included).
@@ -1226,7 +1528,7 @@ class Lowerer {
     const size_t effect_from = full.effects.size();
     const size_t obl_from = full.obls.size();
     LV a = lower(*e.a, env, guard, gdep, full);
-    const std::string t = new_temp(true);
+    const std::string t = new_temp(low::LType::Bool);
     Effect fx;
     fx.kind = Effect::Kind::Branch;
     assign(fx.stmts, t, a.e);
@@ -1256,7 +1558,7 @@ class Lowerer {
     const size_t effect_from = full.effects.size();
     const size_t obl_from = full.obls.size();
     LV c = lower(*e.a, env, guard, gdep, full);
-    const std::string t = new_temp(e.type.is_bool());
+    const std::string t = new_temp(ltype(e.type));
     Effect fx;
     fx.kind = Effect::Kind::Branch;
     low::LStmt i;
@@ -1656,18 +1958,31 @@ class Lowerer {
     return env;
   }
 
-  LV full_expr(const Expr& e, std::vector<low::LStmt>& out) {
+  // Several expressions in ONE full expression (a store's address and value, decision 0032 item 9); the others are one expression.
+  // `copy_of`, when given, is the first expression, whose pointer value is being copied: its liveness check joins the full expression.
+  std::vector<LV> full_exprs(const std::vector<const Expr*>& es, std::vector<low::LStmt>& out, const Expr* copy_of = nullptr,
+                             bool share_first = false) {
     Full full;
     const std::set<int> saved_written = std::move(written_);
     const bool saved_in_full = in_full_;
     written_.clear();
-    collect_writes(e, written_);
+    for (const Expr* e : es) collect_writes(*e, written_);
     in_full_ = true;
-    LV v = lower(e, body_env(), nullptr, {}, full);
+    std::vector<LV> vs;
+    for (const Expr* e : es) {
+      vs.push_back(lower(*e, body_env(), nullptr, {}, full));
+      if (share_first && vs.size() == 1) shared_[e] = vs.front();  // the later expressions read this node's value, not a second evaluation
+    }
+    if (share_first) shared_.erase(es.front());
+    if (copy_of != nullptr) ptr_use(*copy_of, vs.front(), nullptr, {}, full);
     in_full_ = saved_in_full;
     written_ = saved_written;
     flush(full, out);
-    return v;
+    return vs;
+  }
+
+  LV full_expr(const Expr& e, std::vector<low::LStmt>& out, bool pointer_copy = false) {
+    return full_exprs({&e}, out, pointer_copy ? &e : nullptr).front();
   }
 
   // ---- statements ----
@@ -1684,17 +1999,24 @@ class Lowerer {
     switch (s.kind) {
       case Stmt::Kind::Decl:
       case Stmt::Kind::Assign: {
+        if (s.var->address_taken) {  // a cell: written by name (decision 0032 item 6); a Decl without an initializer writes nothing
+          if (s.expr == nullptr) break;
+          LV v = full_expr(*s.expr, out);
+          write_cell(out, *s.var, v.e, s.loc);
+          break;
+        }
         if (s.expr == nullptr) {  // a Decl without an initializer (check_program allows no other)
           reset(out, *s.var);
           break;
         }
-        LV v = full_expr(*s.expr, out);
+        LV v = full_expr(*s.expr, out, s.var->type.is_ptr());  // a pointer copy is a use of the pointer's value
         assign(out, var_name(*s.var), v.e);
         if (flagged(*s.var)) assign(out, flag_name(*s.var), low::bool_lit(true));
         break;
       }
       case Stmt::Kind::ExprStmt:
-        full_expr(*s.expr, out);  // only its obligations and calls matter
+        // Only its obligations and calls matter; a pointer value that is evaluated and discarded is still a use of it (decision 0032 item 6).
+        full_expr(*s.expr, out, s.expr->type.is_ptr());
         break;
       case Stmt::Kind::If: {
         LV c = full_expr(*s.expr, out);
@@ -1707,19 +2029,29 @@ class Lowerer {
         break;
       }
       case Stmt::Kind::While: loop(s, out); break;
+      case Stmt::Kind::Store: store(s, out); break;
       case Stmt::Kind::Return: ret(s, out); break;
       case Stmt::Kind::Check: {
         LV v = full_expr(*s.expr, out);
         emit_assert(out, v.e, meta("check", s.loc, s.from_assert ? "this `assert` may not hold" : "this `check` may not hold"));
         break;
       }
-      case Stmt::Kind::Block:
+      case Stmt::Kind::Block: {
+        // The cells declared directly in this block are allocated when it is entered (decision 0032 item 4).
+        const std::vector<const Var*> cells = cells_of(s);
+        for (const Var* c : cells) alloc_cell(out, *c);
+        if (!cells.empty()) fn_.scopes.push_back(Fn::Scope{cells, s.end_loc});
         // A goto past a declaration lands in this block with the variable in scope: it starts indeterminate at the block's
         // entry (decision 0019 item 4).
         for (const Stmt* c : s.stmts)
-          if (c->kind == Stmt::Kind::Decl && c->expr == nullptr) reset(out, *c->var);
+          if (c->kind == Stmt::Kind::Decl && c->expr == nullptr && !c->var->address_taken) reset(out, *c->var);
         for (const Stmt* c : s.stmts) stmt(*c, out);
+        if (!cells.empty()) {  // fall-through: reported at the closing brace (decision 0032 item 8)
+          scope_exit(out, cells, s.end_loc);
+          fn_.scopes.pop_back();
+        }
         break;
+      }
       case Stmt::Kind::Switch: switch_stmt(s, out); break;
       case Stmt::Kind::Case:
         internal_error(s.loc, "a case label outside the body of its switch reached lowering");
@@ -1807,11 +2139,14 @@ class Lowerer {
     const std::string n = std::to_string(s.jump_id);
     LV v = full_expr(*s.expr, out);
     const std::string t = "t__" + std::to_string(fn_.ntemp++);
-    fn_.temps.push_back(low::LVar{t, false});
+    fn_.temps.push_back(low::LVar{t, low::LType::Int});
     assign(out, t, v.e);
+    // The cells of the body are allocated before the dispatch: a case label may jump past their declarations (decision 0032 item 4).
+    const std::vector<const Var*> body_cells = cells_of(*s.body);
+    for (const Var* c : body_cells) alloc_cell(out, *c);
     // A case label may jump past a declaration of the body without an initializer: reset them before the dispatch (0019 item 4).
     for (const Stmt* c : s.body->stmts)
-      if (c->kind == Stmt::Kind::Decl && c->expr == nullptr) reset(out, *c->var);
+      if (c->kind == Stmt::Kind::Decl && c->expr == nullptr && !c->var->address_taken) reset(out, *c->var);
     std::set<int> breaks, continues;
     collect_jumps(*s.body, breaks, continues);
     // The case values' obligations and the guards that each equals the front end's value are in the prologue of the method
@@ -1832,6 +2167,10 @@ class Lowerer {
       }
       ++index;
     }
+    if (!body_cells.empty()) {
+      if (breaks.count(s.jump_id) != 0) internal_error(s.loc, "a `break` out of a switch body that declares a cell reached lowering (decision 0032 item 10)");
+      fn_.scopes.push_back(Fn::Scope{body_cells, s.body->end_loc});
+    }
     const bool need_break_label = !has_default || breaks.count(s.jump_id) != 0;
     jump(out, has_default ? "l_default__" + n : "l_brk__" + n);
     index = 0;
@@ -1840,7 +2179,11 @@ class Lowerer {
       else stmt(*c, out);
       ++index;
     }
-    if (need_break_label) label(out, "l_brk__" + n);
+    if (need_break_label) label(out, "l_brk__" + n);  // before the scope exit: the dispatch of an unmatched value passes through it
+    if (!body_cells.empty()) {
+      scope_exit(out, body_cells, s.body->end_loc);
+      fn_.scopes.pop_back();
+    }
   }
 
   void ret(const Stmt& s, std::vector<low::LStmt>& out) {
@@ -1848,6 +2191,8 @@ class Lowerer {
       LV v = full_expr(*s.expr, out);
       assign(out, kResult, v.e);
     }
+    // Leaving every open block that holds cells: innermost first (decision 0032 item 8), after the value and before the postconditions.
+    for (size_t k = fn_.scopes.size(); k-- > 0;) scope_exit(out, fn_.scopes[k].cells, s.loc);
     if (fn_.f->noreturn) {
       // decision 0015 item 4: a function declared not to return must not return; a reachable `return` is the error.
       emit_assert(out, low::bool_lit(false),
@@ -1966,7 +2311,7 @@ class Lowerer {
       if (declared.count(id) != 0 || fn_.flagged.count(id) == 0) continue;
       const Var& v = *fn_.f->locals()[static_cast<size_t>(id)];
       const std::string snap = "ds_" + var_name(v) + "__" + std::to_string(loop_number);
-      fn_.snapshots.push_back(low::LVar{snap, true});
+      fn_.snapshots.push_back(low::LVar{snap, low::LType::Bool});
       assign(out, snap, low::var(flag_name(v)));
       low::LInvariant inv;
       inv.expr = low::implies(low::var(snap), low::var(flag_name(v)));
@@ -2254,8 +2599,8 @@ class Lowerer {
     m.name = fn_.method;
     m.comment = "C/C++ function `" + f.c_name + "`";
     for (size_t k = 0; k < f.params.size(); ++k)
-      m.formals.push_back(low::LVar{formal_name(f, static_cast<int>(k)), f.params[k].type.is_bool()});
-    if (!f.ret.is_void()) m.results.push_back(low::LVar{kResult, f.ret.is_bool()});
+      m.formals.push_back(low::LVar{formal_name(f, static_cast<int>(k)), ltype(f.params[k].type)});
+    if (!f.ret.is_void()) m.results.push_back(low::LVar{kResult, ltype(f.ret)});
 
     // requires: the parameters' type ranges, then the user's (0012 item 1).
     for (size_t k = 0; k < f.params.size(); ++k) {
@@ -2322,8 +2667,12 @@ class Lowerer {
     end.kind = low::LStmt::Kind::Label;
     end.name = kEndLabel;
     m.body.push_back(std::move(end));
-    for (const auto& v : f.locals()) m.locals.push_back(low::LVar{fn_.var_names[static_cast<size_t>(v->id)], v->type.is_bool()});
-    for (int id : fn_.flagged) m.locals.push_back(low::LVar{flag_name(*f.locals()[static_cast<size_t>(id)]), true});
+    for (const auto& v : f.locals()) {
+      // A cell's Viper local holds the Ref of its one-slot block (decision 0032 item 4).
+      m.locals.push_back(low::LVar{fn_.var_names[static_cast<size_t>(v->id)], v->address_taken ? low::LType::Ref : ltype(v->type)});
+      if (v->address_taken || v->type.is_ptr()) out_.memory = true;
+    }
+    for (int id : fn_.flagged) m.locals.push_back(low::LVar{flag_name(*f.locals()[static_cast<size_t>(id)]), low::LType::Bool});
     for (const low::LVar& t : fn_.snapshots) m.locals.push_back(t);
     for (const low::LVar& t : fn_.temps) m.locals.push_back(t);
     out_.methods.push_back(std::move(m));
@@ -2339,8 +2688,8 @@ class Lowerer {
     m.name = fn_.method + "__wf";
     m.comment = "well-formedness of the contract of C/C++ function `" + f.c_name + "`";
     for (size_t k = 0; k < f.params.size(); ++k)
-      m.formals.push_back(low::LVar{formal_name(f, static_cast<int>(k)), f.params[k].type.is_bool()});
-    if (!f.ret.is_void()) m.formals.push_back(low::LVar{kResult, f.ret.is_bool()});
+      m.formals.push_back(low::LVar{formal_name(f, static_cast<int>(k)), ltype(f.params[k].type)});
+    if (!f.ret.is_void()) m.formals.push_back(low::LVar{kResult, ltype(f.ret)});
     for (size_t k = 0; k < f.params.size(); ++k) {
       if (!f.params[k].type.is_int()) continue;
       m.requires_.push_back(clause_checks(range_check(low::var(formal_name(f, static_cast<int>(k))), *f.params[k].type.int_type),
@@ -2398,6 +2747,11 @@ class Lowerer {
   std::map<const Expr*, LV> shared_;
   std::map<int, std::string> user_names_;  // the user's name of each label of the current function, by id
   std::set<int> user_targets_;  // the ids of the user labels some goto of the current function targets
+  // The memory model's bookkeeping (decision 0032 item 5): the suffix of each enumeration's cell fields, the Type of each cell-type suffix
+  // used, and where the first address-taken declaration of each type is (the map rows of its `alloc_<t>`).
+  std::map<const IntType*, std::string> enum_suffix_;
+  std::map<std::string, Type> cell_type_of_;
+  std::map<std::string, SrcLoc> alloc_at_;
 };
 
 }  // namespace

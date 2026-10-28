@@ -314,12 +314,13 @@ VERIFY_WARNING_TAGS = frozenset({"assign_where_compare_meant"})
 
 # The categories of `// expect: error <category> @ L<n>` in a C or C++ test:
 # the table of decision 0011 item 10, which the driver, this harness, the
-# error-messages page and the tests share.  Adding one changes all four (a
-# self-test compares this set with the decision record and tests/README.md).
+# error-messages page and the tests share.  Adding one changes all of them (a
+# self-test compares this set with the decision record, tests/README.md and the
+# error-messages page).
 DRIVER_CATEGORIES = frozenset({
     "precondition", "postcondition", "check", "invariant-entry", "invariant-preserved",
     "overflow", "division-by-zero", "shift", "conversion", "missing-return", "termination",
-    "noreturn", "uninitialized"})
+    "noreturn", "uninitialized", "null-dereference", "permission", "lifetime"})
 # The outcomes whose test runs `cerastes verify` (when it is a C or C++ file).
 VERIFY_KINDS = ("verified", "error", "rejected")
 
@@ -329,27 +330,32 @@ POSITIVE_KINDS = ("golden", "verified")
 # test that includes <cerastes.h>, must carry `// expect: native-ok`.
 NATIVE_POLICY_DIRS = (Path("tests/annotations"),
                       Path("tests/scalar"),
+                      Path("tests/memory"),
                       Path("doc/modules/ROOT/examples/annotations"),
                       Path("doc/modules/ROOT/examples/ordinary-compilers"),
                       # the examples of the M3 pages (verifying, error messages, integer
                       # semantics): positives build with ordinary compilers too
                       Path("doc/modules/ROOT/examples/verifying"),
                       Path("doc/modules/ROOT/examples/error-messages"),
-                      Path("doc/modules/ROOT/examples/integer-semantics"))
+                      Path("doc/modules/ROOT/examples/integer-semantics"),
+                      # the Memory and ownership page (decision 0032)
+                      Path("doc/modules/ROOT/examples/memory"))
 NEGATIVE_DIR = Path("tests/annotations/negative")
 SCALAR_NEGATIVE_DIR = Path("tests/scalar/negative")
+MEMORY_NEGATIVE_DIR = Path("tests/memory/negative")
 # Every directory of must-fail twins; a test under one needs `twin:` and must
 # expect an error.
-NEGATIVE_DIRS = (NEGATIVE_DIR, SCALAR_NEGATIVE_DIR)
+NEGATIVE_DIRS = (NEGATIVE_DIR, SCALAR_NEGATIVE_DIR, MEMORY_NEGATIVE_DIR)
 # The twin rule of invariant 2 in the other direction, per area: every
 # positive test under the first directory (outside the second) is the `twin:`
 # of a test under the second, or says why not with `twin-exempt:`.
 TWIN_AREAS = ((Path("tests/annotations"), NEGATIVE_DIR),
-              (Path("tests/scalar"), SCALAR_NEGATIVE_DIR))
+              (Path("tests/scalar"), SCALAR_NEGATIVE_DIR),
+              (Path("tests/memory"), MEMORY_NEGATIVE_DIR))
 # In these areas a positive test needs a twin that expects an `error` (a runtime
 # verification failure of the encoding rule it exercises): a `rejected` twin shows
 # that a construct is refused, not that the rule is checked, so it does not count.
-ERROR_TWIN_AREAS = (Path("tests/scalar"),)
+ERROR_TWIN_AREAS = (Path("tests/scalar"), Path("tests/memory"))
 _CERASTES_H_RE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*[<"]cerastes\.h[>"]', re.MULTILINE)
 
 
@@ -602,9 +608,11 @@ def _under(path: Path, directory: Path) -> bool:
 # `.c` tests under these directories run in both languages (c23 as C, c++20 as C++)
 # unless they carry `// c-only: <reason>`.
 DUAL_MODE_DIRS = (Path("tests/scalar"),
+                  Path("tests/memory"),
                   Path("doc/modules/ROOT/examples/verifying"),
                   Path("doc/modules/ROOT/examples/error-messages"),
-                  Path("doc/modules/ROOT/examples/integer-semantics"))
+                  Path("doc/modules/ROOT/examples/integer-semantics"),
+                  Path("doc/modules/ROOT/examples/memory"))
 
 
 def policy_problem(path: Path, text: str, exp: Expectation) -> str | None:

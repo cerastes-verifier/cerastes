@@ -4,7 +4,7 @@ Developer reference for the encoder (plan.md: "Design VIR and document it in `en
 milestone). The decisions behind it are 0010 (integer semantics), 0011 (driver), 0012 (scalar encoding), 0014
 (control flow), 0015 (forward `goto`, functions that do not return, `assert`), 0017 (named constants and case values).
 This file says *how*; those records say *what* and *why*. Status: M3 (scalar code), M4.1 (control flow), M4.2a and
-M4.2b1. Sections marked *(M3-n)* are
+M4.2b1; pointers inside one function since M4.5b1a (decisions 0028, 0032). Sections marked *(M3-n)* are
 filled in at that checkpoint.
 
 ## 1. Pipeline and layering
@@ -39,7 +39,10 @@ Front-end agnostic. The encoder builds a `Program` with a `Builder`; `check_prog
   never interned, equal only to itself, with the size and signedness of its underlying (C++) or compatible (C)
   type and its own value range `[lo, hi]`, which `dec::range_of` returns, so every range rule below (parameters,
   results, automatic loop invariants, constants) uses the value range.
-- `Type = Void | Bool | Int(IntType)`.
+- `Type = Void | Bool | Int(IntType) | Ptr(pointee)` (`Ptr` since M4.5b1a, decision 0032: interned by
+  `Program::pointer_to`, equal when the pointees are; a pointee is `Bool` or `Int`, enumerations included). `check.cpp`
+  accepts `Ptr` only for locals that are not address-taken and for expressions: never for parameters or results, never
+  for an address-taken local (`T**` cells are M4.5b1c).
 - `Expr` (pure, typed): `Const(decimal | true/false)`, `Local(var)`, `Formal(k)`, `Result`, `Old(e)`,
   `Unary{Neg, Plus, Not, BitNot}`, `Binary{Add, Sub, Mul, Div, Rem, Shl, Shr, Lt, Le, Gt, Ge, Eq, Ne, LAnd, LOr, BitAnd,
   BitOr, BitXor}` (the bitwise operators appended in M4.4b1, decision 0023),
@@ -69,6 +72,22 @@ Front-end agnostic. The encoder builds a `Program` with a `Builder`; `check_prog
   declared not to return. There is no statement for falling off the end: lowering appends the epilogue of the function
   (`missing-return` for a non-`void` function, the `ensures` for a `void` one). `main`'s generated `return 0`
   is an ordinary `Return`.
+- **Memory (M4.5b1a, decision 0032).** `Var::address_taken` (set by `Function::mark_address_taken` from the IL's
+  `address_taken` flag, P51/P57) makes a local a *cell* (lowering, §3). Expressions `Null` (a pointer-typed null
+  constant; in `==`/`!=` and as a `?:` arm it may carry another pointer type, which lowering ignores), `AddrOf(var)`
+  (`&x` of an address-taken, non-parameter local) and `Deref(a)` (a read of `*a`; its type is the pointee). The
+  statement `Store(addr, expr)` writes `*addr`; `Builder::store`, `compound_store` and `inc_dec_store` build `*p = e`,
+  `*p op= e` and `++*p`/`(*p)--`, the compound forms reading a `Deref` that shares the `addr` node, so the pointer is
+  evaluated once. `Expr::c_text` is the source spelling messages use (`p`, `*p`, `&x`; empty when unknown).
+  `Stmt::end_loc` is a `Block`'s closing brace (required on a block that declares a cell: its scope exit is reported
+  there). Assign and Decl of a cell keep their kinds; lowering dispatches on the flag. `check.cpp`: `==`/`!=` of two
+  pointers of one type (a `Null` takes the other's), `ToBool` of a pointer, `Cond` with pointer arms; no arithmetic,
+  ordering, bitwise or `Convert` on a pointer; no pointer node in contracts, invariants, measures, named constants or
+  case values; no `AssignE` on a cell; and **`vir::memory_problems(Function)`** (`check.h`), used by the encoder for its
+  diagnostics and by `check_program` as the backstop, finds decision 0032 item 10's shapes: a loop (any form) holding a
+  pointer-typed node, a cell, `AddrOf`, `Deref` or `Store`; a `Return` in a loop while a cell of an enclosing block is
+  live; a `Break`/`Continue`/`Goto` leaving a block that declares a cell; a cell-declaring block without `end_loc`.
+  `sequence_problems` treats `Store(addr, value)` as two unsequenced operands.
 - `Function { id, c_name, params[], ret, requires[], ensures[], body?, trusted_reason, loc, end_loc }`; a null
   body is a trusted contract (`trusted_reason` required). Each parameter has a *local copy* (`param_var(k)`)
   that the body reads and assigns; contracts read the formal (`Formal(k)`, the entry value).
@@ -287,6 +306,25 @@ a postcondition, the range of their type (`ensures lo <= result && result <= hi`
 body and nothing assumes (owner, 2026-10-24; the lint accepts exactly that clause there). Claims that need symbolic bit
 identities are not decided by Z3 (the run ends at `--timeout`, exit 3; 0023 item 2).
 
+**Memory (M4.5b1a, decision 0032).** A *cell* (an address-taken local) is a Viper `Ref` local `v_<name>__<id>`
+holding the address of a one-slot block; `find_flagged` skips cells, whose 0019 flag is the field `d_<t>`. Each
+`Block` that declares cells (and each switch, before its dispatch) allocates them on entry, `v_x := alloc_<t>()`; a
+`Decl` with an initializer writes it. Checks, in order, each one atomic (`!(a || b)`), under the operation's guard:
+
+| Operation | Emitted |
+|---|---|
+| read `x` (a cell) | `perm(x.v_<t>) > none` (`internal`), the flag (`uninitialized`); value `x.v_<t>` |
+| write `x` (statement) | `!(perm(x.v_<t>) != write \|\| perm(x.d_<t>) != write)` (`internal`); `x.v_<t> := e`, `x.d_<t> := true` |
+| read `*p` | `p != null` (`null-dereference`), `perm(p.v_<t>) > none` (`permission`), the flag (`uninitialized`); value `p.v_<t>` |
+| `Store` | the address and the value in one full expression; after `flush` a non-variable address is copied to a `Ref` temporary; `!= null` (skipped after a compound store's own read), write permission on both fields (`permission`), then the field writes |
+| use of a pointer value (`==`, `!=`, truth test, copy) | `p != null ==> perm(lvloc(block_of(p)).lv) > none` (`lifetime`), skipped for `&x`, a null constant and a `?:` of only those; after `==`/`!=` the one-past-the-end row (`internal`), skipped when an operand is null |
+| scope exit (fall-through at the block's `end_loc`, `return` after its value and before the postconditions) | per cell, in reverse order: `!(perm(v) != write \|\| perm(d) != write \|\| perm(lv) != write)` (`lifetime`), `exhale acc(v) && acc(d) && acc(lvloc(block_of(x)).lv)` |
+
+A pointer-typed `?:` is lowered as an `if` assigning a `Ref` temporary, never a Viper `ite`: Silicon does not accept an
+`ite` term as a field receiver (it reports insufficient permission even after `perm == write` asserts). Heap reads are
+plain values with obligations: in b1a no call reaches a cell and a cell is written only at statement level (0032 items
+9–10), so no snapshot is needed.
+
 ## 4. Viper shape
 
 ```
@@ -313,6 +351,15 @@ method f_f__0(p_a__0: Int, p_b__1: Int) returns (res: Int)
 method f_g__1(...) returns (res: Int) requires ... ensures ...
 method f_f__0__wf(p_a__0: Int, ..., res: Int)              // well-formedness of the contract
 ```
+
+**Memory prelude** (M4.5b1a; only when the program has a pointer type or a cell, so every other program keeps its
+Viper): `field v_<t>` and `field d_<t>: Bool` per cell type, sorted, and `field lv: Bool`; `// cerastes:domain-ok 0028`
+and `domain Block` with `loc`, `len`, `block_of`, `offset_of`, `member`, `parent_of`, `index_of`, `lvloc` and the four
+axioms, each after `// cerastes:axiom-ok 0033`…`0036` (`lint_viper.py` pins the domain, the names and the texts);
+then one trusted method per cell type, `alloc_<t>() returns (r: Ref)`, whose `ensures` are 0032 item 4's (its map
+rows at the first cell of that type). `<t>` is `bool`, `schar`/`uchar`, `short`/`ushort`, `int`/`uint`, `long`/`ulong`,
+`i128`/`u128` (else `i<bits>`/`u<bits>`), or `enum_<n>_<name>` for an enumeration (`_e` appended when the name would end
+in `__<digits>`). One pair per VIR type: `long` and `long long` share one (0032 items 3 and 5 say why that is sound).
 
 Names: every identifier has a prefix that says what it is: functions `f_<name>__<id>` (and `...__wf`), formals
 `p_<name>__<k>`, locals `v_<name>__<id>`, temporaries `t__<k>`, the result `res`, labels `l_end`, prelude

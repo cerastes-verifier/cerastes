@@ -27,12 +27,13 @@ class that runs the real driver is added with the driver (M3-3).
 | `edg-smoke/` | The pinned EDG front end parses C++20 and C23 against the system headers | `scripts/cpfe.sh` |
 | `il/` | Golden tests of the IL walker (`--cerastes_walk`): the Gate G1 probes (`g1/`), annotation-free copies of the VeriFast tests (`verifast-plain/`), contrast probes that expose a vacuous pass (`contrast/`) and walker smoke tests | `scripts/cerastes-fe.sh` |
 | `scalar/` | M3: scalar code through `cerastes verify` (`verified` positives, each with a must-fail twin in `scalar/negative/`) | `build/cerastes verify` |
+| `memory/` | M4.5b1a: pointers to address-taken locals inside one function (decision 0032): `verified` positives, each with a must-fail twin in `memory/negative/` that fails for one reason at one line (the twin rule as in `scalar/`: an `error` twin in every mode), and the `rejected` pins of what b1b and b1c lift (each has a `// Pins:` line) | `build/cerastes verify` |
 | `differential/verifast/` | Nothing yet: unmodified reference copies of VeriFast's template tests, with no `expect:` headers. Skipped (`.harness-skip`) | none |
 | `../doc/modules/ROOT/examples/` | The code examples of the user documentation, which are ordinary tests (not under `tests/`, but run by default with it) | by the example's `expect:` kind |
 
-`annotations/` and `scalar/` each have a `negative/` directory of must-fail twins
-(see [Twins](#twins)). Later milestones add `templates/`, `concepts/` and
-`memory/`, and the differential tests against VeriFast in M5 (see plan.md).
+`annotations/`, `scalar/` and `memory/` each have a `negative/` directory of must-fail twins
+(see [Twins](#twins)). Later milestones add `templates/` and `concepts/`,
+and the differential tests against VeriFast in M5 (see plan.md).
 
 ## Header format
 
@@ -348,8 +349,8 @@ never run). `--check-headers` reports both.
 
 ### `.c` tests run in both languages
 
-A `.c` test under `tests/scalar/` and under the three example directories of the M3
-pages (`DUAL_MODE_DIRS`; the documentation examples are tests too) lists both modes,
+A `.c` test under `tests/scalar/`, under `tests/memory/` and under the example directories of the M3
+pages and of the Memory and ownership page (`DUAL_MODE_DIRS`; the documentation examples are tests too) lists both modes,
 `// mode: c23, c++20`, because the code is valid C and C++ and the dual run is what
 checks it. A test that is only C says why: `// c-only: <reason>` (`.c` files only;
 not with `c++20` in `mode:`). Negative tests are covered too.
@@ -387,7 +388,10 @@ and the harness self-test compares this table with the decision record.
 | `missing-return` | a non-`void` function may reach its end without `return` | the closing brace |
 | `termination` | a termination measure (`decreases`) may be negative or may not decrease (decision 0013) | the loop's `decreases` clause, or the recursive call |
 | `noreturn` | a function declared `[[noreturn]]` or `_Noreturn` may return (decision 0015) | the reachable `return`, or the closing brace |
-| `uninitialized` | a local declared without an initializer may be read before it is given a value (decision 0019) | the read |
+| `uninitialized` | a local declared without an initializer may be read before it is given a value (decision 0019); an address-taken local's cell is read before it is written (decision 0032) | the read |
+| `null-dereference` | `*p` may be applied to a null pointer (decision 0032 item 6) | the `*` |
+| `permission` | `*p` reads or writes an object the function no longer owns, because the object it points to may have ended (a block's local read after the block); with the contracts of M4.5b1b also an object it never owned (decision 0032 item 6) | the `*` |
+| `lifetime` | a pointer is used (compared, tested, copied) after the object it points to may have ended; at a scope exit, the address of the local may still be in use (decision 0032 item 6) | the use of the pointer; the scope's closing brace or `return` |
 
 ## Every back-end diagnostic has a test
 
@@ -520,10 +524,11 @@ __CERASTES__`, `diagnostic push|pop|error` stay allowed).
 **Policy.** `native-ok` is required (a header error, also with
 `--check-headers`) of every positive test (`golden`, later `verified`) in the
 directories listed in `NATIVE_POLICY_DIRS` in `scripts/run_tests.py`:
-`tests/annotations`, `tests/scalar`, `doc/modules/ROOT/examples/annotations`,
+`tests/annotations`, `tests/scalar`, `tests/memory`, `doc/modules/ROOT/examples/annotations`,
 `doc/modules/ROOT/examples/ordinary-compilers` and the examples of the M3 pages,
 `doc/modules/ROOT/examples/verifying`, `doc/modules/ROOT/examples/error-messages` and
-`doc/modules/ROOT/examples/integer-semantics` (with their subdirectories), and
+`doc/modules/ROOT/examples/integer-semantics`, and the examples of the Memory and ownership page,
+`doc/modules/ROOT/examples/memory` (with their subdirectories), and
 of every positive test, wherever it is, whose source has an
 `#include <cerastes.h>` (or `"cerastes.h"`) line. Negative tests are exempt. `expect: frontend-ok` is a header error in these
 directories (stock cpfe does not define `__CERASTES__`, so the annotations
@@ -701,9 +706,11 @@ and not from the file.
 ## Twins
 
 Every test under `tests/annotations/negative/` (`NEGATIVE_DIR`, with its
-subdirectories) and under `tests/scalar/negative/` (`SCALAR_NEGATIVE_DIR`; both
-in `NEGATIVE_DIRS`) is the must-fail twin of a positive test and names it:
-`// twin: tests/annotations/<name>.cpp` or `// twin: tests/scalar/<name>.c`, a
+subdirectories), under `tests/scalar/negative/` (`SCALAR_NEGATIVE_DIR`) and under
+`tests/memory/negative/` (`MEMORY_NEGATIVE_DIR`; all in `NEGATIVE_DIRS`) is the must-fail twin
+of a positive test and names it:
+`// twin: tests/annotations/<name>.cpp`, `// twin: tests/scalar/<name>.c` or
+`// twin: tests/memory/<name>.c`, a
 repository-relative path. A missing
 `twin:` line is a header error, and so is a twin that does not exist, is itself
 under `negative/`, is the test itself, has a bad header, or has an outcome other
@@ -717,8 +724,8 @@ error (`frontend-error`, `error` or `rejected`). `golden`, `verified`,
 document a warning live in `tests/annotations/warnings/`.
 
 The rule also runs the other way (invariant 2: every encoding rule has a
-must-fail test), in each of the two areas (`TWIN_AREAS`). Every positive test
-(`golden` or `verified`) under `tests/annotations/` (resp. `tests/scalar/`)
+must-fail test), in each of the three areas (`TWIN_AREAS`). Every positive test
+(`golden` or `verified`) under `tests/annotations/` (resp. `tests/scalar/`, `tests/memory/`)
 outside its `negative/` must be named as the `twin:` of at least one test under
 that area's `negative/`, or say why not with
 `// twin-exempt: <reason>` (a non-empty reason; not allowed together with
@@ -727,7 +734,7 @@ that no negative test names is reported as a header error (`bad header:`),
 also by `--check-headers`, whatever subset of the tests was selected: the
 check reads the whole tree of an area whenever a selected test is in it.
 
-In `tests/scalar/` (`ERROR_TWIN_AREAS`) the twin must expect an `error` and must run
+In `tests/scalar/` and `tests/memory/` (`ERROR_TWIN_AREAS`) the twin must expect an `error` and must run
 in every mode of its positive (a twin that runs in c23 only says nothing about the
 c++20 run of a dual-mode positive; two twins, one per mode, are enough): a
 `rejected` twin shows that a construct is refused, not that the encoding rule of
@@ -736,6 +743,12 @@ that the test has only a `rejected` twin). The acceptance count of pairs counts
 only those: `python3 scripts/run_tests.py --count-error-twins` prints the number
 of positive tests of `tests/scalar/` with at least one `error` twin (a positive
 test with `twin-exempt:` is not counted).
+
+The `rejected` tests of `tests/memory/negative/` that pin what a later session lifts (decision 0032
+item 10: pointer parameters, loops over cells, ...) carry a `// Pins:` line that names the item and the
+session that re-expects the test (`re-expected by b1b` or `by b1c`); they are the only tests of the area that
+a later session may retire or re-expect (owner, 2026-10-28), and each is the `twin:` of the positive test
+whose rule the rejected construct would extend.
 
 **Pinning the size of a generated directory.** `python3 scripts/run_tests.py --expect-passed N
 <dir>` fails unless exactly `N` tests passed and none failed. `scripts/check.sh` uses it for the

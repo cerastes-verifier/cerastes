@@ -135,6 +135,24 @@ enum class Ctx {
   Ensures    // an `ensures`: Formal, Result, Old
 };
 
+// Whether a Block declares a cell directly (an address-taken variable's Decl): lowering allocates it at the Block's entry.
+bool declares_cell(const Stmt& b) {
+  for (const Stmt* c : b.stmts)
+    if (c != nullptr && c->kind == Stmt::Kind::Decl && c->var != nullptr && c->var->address_taken) return true;
+  return false;
+}
+
+// A node that b1a keeps out of contracts, invariants, measures, named constants, case values and loops (decision 0032 items 9 and 10):
+// of pointer type, a Null/AddrOf/Deref, or a read of a cell.
+bool pointer_node(const Expr& e) {
+  if (e.type.is_ptr()) return true;
+  switch (e.kind) {
+    case Expr::Kind::Null: case Expr::Kind::AddrOf: case Expr::Kind::Deref: return true;
+    case Expr::Kind::Local: return e.var != nullptr && e.var->address_taken;
+    default: return false;
+  }
+}
+
 class Checker {
  public:
   explicit Checker(const Program& p) : prog_(p) {
@@ -152,10 +170,29 @@ class Checker {
 
   static bool is_enum(const Type& t) { return t.is_int() && t.int_type != nullptr && t.int_type->is_enum; }
 
-  static bool value_type(const Type& t) {
+  static bool scalar_type(const Type& t) {
     if (t.is_bool()) return true;
     return t.is_int() && t.int_type != nullptr && t.int_type->bits >= 1 && t.int_type->bits <= 128;
   }
+
+  // A pointer type decision 0032 item 2 accepts (for a local that is not address-taken and for an expression): its pointee is a bool,
+  // an integer type or an enumeration.
+  static bool accepted_pointer(const Type& t) { return t.is_ptr() && t.pointee != nullptr && scalar_type(*t.pointee); }
+
+  // Why a pointer type is not accepted (empty when it is, or when `t` is no pointer).
+  static std::string pointer_reason(const Type& t) {
+    if (!t.is_ptr() || accepted_pointer(t)) return "";
+    if (t.pointee != nullptr && t.pointee->is_ptr()) return "a pointer to a pointer (decision 0032 item 2)";
+    return "a pointer to " + (t.pointee != nullptr ? t.pointee->str() : std::string("an unknown type")) +
+           " (decision 0032 item 2)";
+  }
+
+  // `allow_ptr`: a pointer type counts (locals and expressions); parameters, results, named constants and the like pass false.
+  static bool value_type(const Type& t, bool allow_ptr = false) {
+    if (allow_ptr && t.is_ptr()) return accepted_pointer(t);
+    return scalar_type(t);
+  }
+
 
   void function(const Function& f) {
     fn_ = &f;
@@ -164,13 +201,23 @@ class Checker {
     jump_ids_.clear();
     targets_.clear();
     scopes_.clear();
+    no_ptr_ = false;
     scopes_.emplace_back();
     for (const auto& v : f.locals())
       if (v->is_param_copy) scopes_.back().insert(v->id);
-    if (!(f.ret.is_void() || value_type(f.ret))) err(f.loc, "the return type of '" + f.c_name + "' is not void, bool or an integer type");
-    for (size_t k = 0; k < f.params.size(); ++k)
-      if (!value_type(f.params[k].type))
+    if (f.ret.is_ptr()) err(f.loc, "the return type of '" + f.c_name + "' is a pointer (decision 0032 item 2)");
+    else if (!(f.ret.is_void() || value_type(f.ret))) err(f.loc, "the return type of '" + f.c_name + "' is not void, bool or an integer type");
+    for (size_t k = 0; k < f.params.size(); ++k) {
+      if (f.params[k].type.is_ptr())
+        err(f.params[k].loc, "parameter " + std::to_string(k + 1) + " of '" + f.c_name + "' is a pointer (decision 0032 item 2)");
+      else if (!value_type(f.params[k].type))
         err(f.params[k].loc, "parameter " + std::to_string(k + 1) + " of '" + f.c_name + "' is not a bool or an integer type");
+    }
+    for (const auto& v : f.locals()) {
+      if (!v->address_taken) continue;
+      if (v->is_param_copy) err(v->loc, "the address of parameter '" + v->name + "' is taken (decision 0032 item 4)");
+      else if (v->type.is_ptr()) err(v->loc, "the address of the pointer variable '" + v->name + "' is taken (decision 0032 item 2)");
+    }
     if (!f.loc.known()) err(f.loc, "function '" + f.c_name + "' has no source position");
     if (!f.end_loc.known() && f.body != nullptr) err(f.loc, "function '" + f.c_name + "' has no closing-brace position");
     if (f.body == nullptr && f.trusted_reason.empty())
@@ -198,6 +245,8 @@ class Checker {
                            " (decision 0015 item 2)");
       }
       stmt(*f.body);
+      // The rules of decision 0032 item 10 that keep pointers and cells out of what b1a lowers (the encoder reports them first).
+      for (const MemoryProblem& m : memory_problems(f)) err(m.loc, m.what);
       // The backstop of the encoder's own report (decision 0020 item 4): a modification unsequenced with another access.
       for (const SequenceProblem& p : sequence_problems(f))
         err(p.at != nullptr ? p.at->loc : f.loc, "unsequenced modification of '" + p.variable +
@@ -245,7 +294,9 @@ class Checker {
         err(c.init->loc, "the condition of " + name + " mentions a variable, a parameter, the result, `old` or a call");
         return;
       }
+      no_ptr_ = true;
       expr(*c.init, Ctx::Annot, false);
+      no_ptr_ = false;
       if (c.init->type != c.type) err(c.init->loc, "the condition of " + name + " has type " + c.init->type.str() + ", not bool");
       return;
     }
@@ -262,7 +313,9 @@ class Checker {
       err(c.init->loc, "the initializer of " + name + " mentions a variable, a parameter, the result, `old` or a call");
       return;
     }
+    no_ptr_ = true;
     expr(*c.init, Ctx::Annot, false);
+    no_ptr_ = false;
     if (c.init->type != c.type) err(c.init->loc, "the initializer of " + name + " has type " + c.init->type.str() + ", not " + c.type.str());
   }
 
@@ -281,7 +334,10 @@ class Checker {
       return;
     }
     if (!c.loc.known()) err(c.loc, std::string("a ") + what + " clause has no source position");
+    const bool saved = no_ptr_;
+    no_ptr_ = true;  // a contract or an invariant holds no pointer (decision 0032 item 10)
     expr(*c.expr, ctx, false);
+    no_ptr_ = saved;
     if (!c.expr->type.is_bool()) err(c.expr->loc, std::string("the ") + what + " clause is not a bool");
   }
 
@@ -293,7 +349,10 @@ class Checker {
       return;
     }
     if (!c.loc.known()) err(c.loc, std::string("a ") + what + " component has no source position");
+    const bool saved = no_ptr_;
+    no_ptr_ = true;
     expr(*c.expr, ctx, false);
+    no_ptr_ = saved;
     if (!c.expr->type.is_int()) err(c.expr->loc, std::string("a ") + what + " component of type " + c.expr->type.str() + " (a measure is an integer)");
   }
 
@@ -304,7 +363,11 @@ class Checker {
       err(loc, "variable '" + v.name + "' does not belong to function '" + fn_->c_name + "'");
       return;
     }
-    if (!value_type(v.type)) err(loc, "variable '" + v.name + "' is not a bool or an integer");
+    if (v.type.is_ptr()) {
+      if (!accepted_pointer(v.type)) err(loc, "variable '" + v.name + "' is " + pointer_reason(v.type));
+    } else if (!value_type(v.type)) {
+      err(loc, "variable '" + v.name + "' is not a bool or an integer");
+    }
     if (!declared_.insert(v.id).second) err(loc, "variable '" + v.name + "' is declared twice");
     scopes_.back().insert(v.id);
   }
@@ -360,6 +423,7 @@ class Checker {
         if (s.jump_id < 0) err(s.loc, "a loop with a negative jump id");
         else if (s.jump_id > 0) register_id(s.jump_id, s.loc);
         if (s.form == LoopForm::DoWhile && s.jump_id <= 0) err(s.loc, "a `do` loop without a jump id (its exit test jumps to a label named by it)");
+
         // A side effect or a call in a loop condition runs at every evaluation (decisions 0020 and 0021), except in the condition of a
         // `do ... while (0)`, which is no loop: there a call is refused (Ctx::Annot).
         expr(*s.expr, s.form == LoopForm::DoOnce ? Ctx::Annot : Ctx::LoopCond, false);
@@ -378,7 +442,9 @@ class Checker {
         for (const Clause& c : s.invariants) {
           if (c.expr == nullptr) { err(c.loc, "an invariant without an expression"); continue; }
           if (!c.loc.known()) err(c.loc, "an invariant has no source position");
+          no_ptr_ = true;
           expr(*c.expr, Ctx::Annot, false);
+          no_ptr_ = false;
           if (!c.expr->type.is_bool()) err(c.expr->loc, "an invariant is not a bool");
         }
         if (s.measure.empty() && !once) err(s.loc, "a loop without a termination measure (decreases, decision 0013)");
@@ -404,6 +470,8 @@ class Checker {
         if (!s.body->loc.known()) err(s.body->loc, "statement without a source position");
         targets_.push_back(Target{s.jump_id, false});
         scopes_.emplace_back();
+        if (declares_cell(*s.body) && !s.body->end_loc.known())
+          err(s.body->loc, "the body of a switch declares a cell but has no closing-brace position (decision 0032 item 8)");
         std::set<std::string> values;
         int defaults = 0;
         bool declaration_seen = false;
@@ -419,7 +487,9 @@ class Checker {
             } else {
               // The value is any call-free integer expression of the scrutinee's type (the encoder uses the case constant's
               // original expression, 0010 item 12); EDG guarantees that the folded values are distinct.
+              no_ptr_ = true;
               expr(*c->expr, Ctx::Annot, false);
+              no_ptr_ = false;
               if (!c->expr->type.is_int()) err(c->loc, "a case value that is not an integer");
               else if (c->expr->type != s.expr->type)
                 err(c->loc, "a case value of type " + c->expr->type.str() + " in a switch on " + s.expr->type.str());
@@ -479,11 +549,22 @@ class Checker {
       }
       case Stmt::Kind::Block: {
         scopes_.emplace_back();
+        if (declares_cell(s) && !s.end_loc.known())
+          err(s.loc, "a block that declares a variable whose address is taken has no closing-brace position (decision 0032 item 8)");
         for (const Stmt* c : s.stmts) {
           if (c == nullptr) { err(s.loc, "a null statement in a block"); continue; }
           child(*c);
         }
         scopes_.pop_back();
+        break;
+      }
+      case Stmt::Kind::Store: {
+        if (s.addr == nullptr || s.expr == nullptr) { err(s.loc, "a store without an address or a value"); return; }
+        expr(*s.addr, Ctx::Body, false);
+        expr(*s.expr, Ctx::Body, false);
+        if (!s.addr->type.is_ptr()) err(s.addr->loc, "a store through a " + s.addr->type.str() + ", not a pointer");
+        else if (accepted_pointer(s.addr->type) && s.expr->type != *s.addr->type.pointee)
+          err(s.expr->loc, "a store of a " + s.expr->type.str() + " through a " + s.addr->type.str() + " (the pointee is " + s.addr->type.pointee->str() + ")");
         break;
       }
       case Stmt::Kind::Goto:
@@ -516,8 +597,14 @@ class Checker {
     if (e.type.is_void()) {
       if (e.kind != Expr::Kind::Call) err(e.loc, "an expression of type void that is not a call");
       else if (!void_ok) err(e.loc, "the value of a void call is used");
+    } else if (e.type.is_ptr()) {
+      if (!accepted_pointer(e.type)) err(e.loc, "an expression of type " + e.type.str() + ", " + pointer_reason(e.type));
     } else if (!value_type(e.type)) {
       err(e.loc, "an expression of an unsupported type");
+    }
+    if (pointer_node(e)) {
+      if (ctx == Ctx::Requires || ctx == Ctx::Ensures || no_ptr_)
+        err(e.loc, "a pointer (or a variable whose address is taken) in a contract, an invariant, a measure, a constant or a case value (decision 0032 item 10)");
     }
     auto sub = [&](const Expr* x) {
       if (x == nullptr) { err(e.loc, "a missing operand"); return false; }
@@ -572,16 +659,38 @@ class Checker {
         expr(*e.b, ctx, false);
         expr(*e.c, ctx, false);
         if (!e.a->type.is_bool()) err(e.loc, "the condition of `?:` is " + e.a->type.str() + ", not bool (convert it with to_bool)");
-        if (e.b->type != e.c->type) err(e.loc, "the branches of `?:` have different types " + e.b->type.str() + " and " + e.c->type.str());
-        if (e.type != e.b->type) err(e.loc, "`?:` has the wrong type");
+        {
+          // A Null arm takes the other arm's pointer type (decision 0032 item 7).
+          const bool b_null = e.b->kind == Expr::Kind::Null && e.c->type.is_ptr();
+          const bool c_null = e.c->kind == Expr::Kind::Null && e.b->type.is_ptr();
+          if (e.b->type != e.c->type && !b_null && !c_null)
+            err(e.loc, "the branches of `?:` have different types " + e.b->type.str() + " and " + e.c->type.str());
+          if (e.type != (b_null ? e.c->type : e.b->type)) err(e.loc, "`?:` has the wrong type");
+        }
+        break;
+      case Expr::Kind::Null:
+        if (!e.type.is_ptr()) err(e.loc, "a null pointer constant of type " + e.type.str());
+        break;
+      case Expr::Kind::AddrOf:
+        if (e.var == nullptr || !owned(*e.var) || !visible(*e.var)) { err(e.loc, "the address of a variable that is not declared here"); break; }
+        if (!e.var->address_taken) err(e.loc, "internal: the address of '" + e.var->name + "', which is not marked address-taken (decision 0032 item 4)");
+        if (e.var->is_param_copy) err(e.loc, "the address of parameter '" + e.var->name + "' (decision 0032 item 4)");
+        if (!scalar_type(e.var->type)) err(e.loc, "the address of '" + e.var->name + "', whose type " + e.var->type.str() + " is not a bool or an integer");
+        else if (!e.type.is_ptr() || e.type.pointee == nullptr || *e.type.pointee != e.var->type) err(e.loc, "the address of '" + e.var->name + "' has the wrong type");
+        break;
+      case Expr::Kind::Deref:
+        if (!sub(e.a)) break;
+        if (!e.a->type.is_ptr()) err(e.loc, "a dereference of a " + e.a->type.str() + ", not a pointer");
+        else if (e.a->type.pointee == nullptr || e.type != *e.a->type.pointee) err(e.loc, "a dereference whose type is not the pointee's");
         break;
       case Expr::Kind::Convert:
         if (!sub(e.a)) break;
+        if (e.a->type.is_ptr() || e.type.is_ptr()) { err(e.loc, "a conversion between " + e.a->type.str() + " and " + e.type.str() + " (decision 0032 item 3)"); break; }
         if (!e.a->type.is_int() || !e.type.is_int()) err(e.loc, "a conversion between " + e.a->type.str() + " and " + e.type.str() + " (use to_bool / bool_to_int for bool)");
         break;
       case Expr::Kind::ToBool:
         if (!sub(e.a)) break;
-        if (!e.a->type.is_int()) err(e.loc, "to_bool of a " + e.a->type.str());
+        if (!e.a->type.is_int() && !e.a->type.is_ptr()) err(e.loc, "to_bool of a " + e.a->type.str());
         if (!e.type.is_bool()) err(e.loc, "to_bool does not give a bool");
         break;
       case Expr::Kind::BoolToInt:
@@ -621,6 +730,7 @@ class Checker {
     if (e.var == nullptr || e.a == nullptr) { err(e.loc, "an assignment used as a value without a variable or a value"); return; }
     if (!owned(*e.var)) err(e.loc, "variable '" + e.var->name + "' does not belong to function '" + fn_->c_name + "'");
     else if (!visible(*e.var)) err(e.loc, "assignment to '" + e.var->name + "', which is not declared here");
+    if (e.var->address_taken) err(e.loc, "an assignment used as a value to '" + e.var->name + "', a variable whose address is taken (decision 0032 item 9)");
     if (e.type != e.var->type) err(e.loc, "an assignment used as a value has type " + e.type.str() + ", not the variable's " + e.var->type.str());
     expr(*e.a, ctx, false);
     if (e.a->type != e.var->type)
@@ -731,7 +841,13 @@ class Checker {
         if (!e.type.is_bool()) err(e.loc, "a comparison gives " + e.type.str() + ", not bool (wrap it with bool_to_int for C)");
         break;
       case BinaryOp::Eq: case BinaryOp::Ne:
-        if (a != b || !(a.is_int() || a.is_bool())) err(e.loc, "equality operands have types " + a.str() + " and " + b.str() + ": both must be the same integer type or both bool");
+        if (a.is_ptr() && b.is_ptr()) {
+          // Two pointers of one type; a Null takes the other side's type (decision 0032 item 7).
+          if (a != b && e.a->kind != Expr::Kind::Null && e.b->kind != Expr::Kind::Null)
+            err(e.loc, "equality operands have types " + a.str() + " and " + b.str() + ": pointers of different types (decision 0032 item 3)");
+        } else if (a != b || !(a.is_int() || a.is_bool())) {
+          err(e.loc, "equality operands have types " + a.str() + " and " + b.str() + ": both must be the same integer type, both bool or both pointers of one type");
+        }
         if (!e.type.is_bool()) err(e.loc, "an equality gives " + e.type.str() + ", not bool (wrap it with bool_to_int for C)");
         break;
       case BinaryOp::LAnd: case BinaryOp::LOr:
@@ -775,6 +891,7 @@ class Checker {
   std::set<int> jump_ids_;
   std::vector<Target> targets_;  // the loops and switches around the statement being checked, innermost last
   std::vector<std::set<int>> scopes_;
+  bool no_ptr_ = false;  // checking a contract clause, invariant, measure, constant or case value: no pointer node
   std::vector<Diag> diags_;
 };
 
@@ -882,6 +999,164 @@ std::vector<GotoProblem> goto_problems(const Function& f) {
 
 namespace {
 
+// Decision 0032 item 10: what b1a keeps out of the lowering.  One walk over the body, the same for the encoder (which reports first, at
+// the node's own position) and for check_program (the backstop).
+class MemoryWalker {
+ public:
+  explicit MemoryWalker(const Function& f) : f_(f) {}
+
+  std::vector<MemoryProblem> run() {
+    if (f_.body == nullptr) return {};
+    stmt(f_.body);
+    gotos();
+    return std::move(out_);
+  }
+
+ private:
+  using Kind = MemoryProblem::Kind;
+
+  void report(const SrcLoc& loc, Kind k, std::string what, const Stmt* loop = nullptr) {
+    out_.push_back(MemoryProblem{loc, k, std::move(what), loop});
+  }
+  // The first pointer node, cell or store in a loop is one problem, reported at the outermost loop statement itself.
+  void loop_problem() {
+    loop_reported_ = true;
+    report(outer_loop_->loc, Kind::pointer_in_loop, "a loop that uses a pointer, `&`, `*` or a variable whose address is taken (decision 0032)",
+           outer_loop_);
+  }
+
+  void expr(const Expr* e) {
+    if (e == nullptr) return;
+    if (loop_depth_ > 0 && !loop_reported_ && pointer_node(*e)) loop_problem();
+    for (const Expr* x : {e->a, e->b, e->c}) expr(x);
+    for (const Expr* x : e->args) expr(x);
+  }
+
+  void loop_cell(const Stmt& s) {
+    if (loop_depth_ > 0 && !loop_reported_ && s.var != nullptr && (s.var->address_taken || s.var->type.is_ptr())) loop_problem();
+  }
+
+  bool cell_in_scope() const {
+    for (const BlockRec& b : blocks_)
+      if (b.has_cell) return true;
+    return false;
+  }
+
+  void block(const Stmt& s) {
+    blocks_.push_back(BlockRec{declares_cell(s), targets_.size()});
+    for (const Stmt* c : s.stmts) stmt(c);
+    blocks_.pop_back();
+  }
+
+  void stmt(const Stmt* sp) {
+    if (sp == nullptr) return;
+    const Stmt& s = *sp;
+    switch (s.kind) {
+      case Stmt::Kind::Decl:
+      case Stmt::Kind::Assign:
+        loop_cell(s);
+        expr(s.expr);
+        break;
+      case Stmt::Kind::Store:
+        if (loop_depth_ > 0 && !loop_reported_) loop_problem();
+        expr(s.addr);
+        expr(s.expr);
+        break;
+      case Stmt::Kind::ExprStmt:
+      case Stmt::Kind::Check: expr(s.expr); break;
+      case Stmt::Kind::Return:
+        if (loop_depth_ > 0 && cell_in_scope())
+          report(s.loc, Kind::return_in_loop,
+                 "a `return` inside a loop while a variable whose address is taken is in scope (decision 0032)");
+        expr(s.expr);
+        break;
+      case Stmt::Kind::If:
+        expr(s.expr);
+        stmt(s.then_body);
+        stmt(s.else_body);
+        break;
+      case Stmt::Kind::While:
+        if (loop_depth_++ == 0) {
+          loop_reported_ = false;
+          outer_loop_ = &s;
+        }
+        expr(s.expr);
+        targets_.push_back(Target{s.jump_id, true});
+        stmt(s.body);
+        targets_.pop_back();
+        stmt(s.step);
+        if (--loop_depth_ == 0) loop_reported_ = false;
+        break;
+      case Stmt::Kind::Switch:
+        expr(s.expr);
+        targets_.push_back(Target{s.jump_id, false});
+        if (s.body != nullptr) block(*s.body);
+        targets_.pop_back();
+        break;
+      case Stmt::Kind::Block: block(s); break;
+      case Stmt::Kind::Break:
+      case Stmt::Kind::Continue: {
+        // The jump leaves every Block entered after its target; one that declares a cell is not accepted (lowering writes the scope exit at
+        // fall-through and `return` only).
+        size_t idx = targets_.size();
+        for (size_t k = targets_.size(); k > 0; --k)
+          if (targets_[k - 1].id == s.jump_id && (s.kind == Stmt::Kind::Break || targets_[k - 1].is_loop)) { idx = k - 1; break; }
+        if (idx == targets_.size()) break;  // no target: reported elsewhere
+        for (const BlockRec& b : blocks_)
+          if (b.has_cell && b.targets > idx) {
+            report(s.loc, Kind::jump_out,
+                   std::string("a `") + (s.kind == Stmt::Kind::Break ? "break" : "continue") +
+                       "` that leaves the scope of a variable whose address is taken (decision 0032)");
+            break;
+          }
+        break;
+      }
+      case Stmt::Kind::Case: case Stmt::Kind::Goto: case Stmt::Kind::Label: break;
+    }
+  }
+
+  // A Goto leaves every Block nested inside the Block that holds its Label (goto_problems accepts only a label that is a direct statement of
+  // an ancestor Block of the goto).  Gotos goto_problems rejects are skipped: they are reported there.
+  void gotos() {
+    GotoWalk w;
+    w.walk(f_.body, nullptr, 0);
+    for (const GotoWalk::Info& g : w.gotos) {
+      const GotoWalk::Info* target = nullptr;
+      for (const GotoWalk::Info& l : w.labels)
+        if (l.stmt->jump_id == g.stmt->jump_id) { target = &l; break; }
+      if (target == nullptr || target->parent_block == nullptr) continue;
+      size_t from = g.path.size();  // the index in g.path of the Block holding the label
+      for (size_t k = 0; k < g.path.size(); ++k)
+        if (g.path[k].block == target->parent_block) { from = k; break; }
+      for (size_t k = from + 1; k < g.path.size(); ++k)
+        if (declares_cell(*g.path[k].block)) {
+          report(g.stmt->loc, Kind::jump_out, "a `goto` that leaves the scope of a variable whose address is taken (decision 0032)");
+          break;
+        }
+    }
+  }
+
+  struct BlockRec {
+    bool has_cell;
+    size_t targets;  // targets_.size() when the Block was entered
+  };
+  struct Target {
+    int id;
+    bool is_loop;
+  };
+  const Function& f_;
+  std::vector<MemoryProblem> out_;
+  std::vector<BlockRec> blocks_;
+  std::vector<Target> targets_;
+  int loop_depth_ = 0;
+  const Stmt* outer_loop_ = nullptr;  // the outermost loop being walked
+  bool loop_reported_ = false;        // one report per outermost loop (at the loop statement, which names what is wrong)
+};
+
+}  // namespace
+
+namespace {
+
 // The sequencing rule (decision 0020 item 4; the comment at SequenceProblem in vir.h): the locals each operand writes and reads.
 struct Wr {
   std::map<int, const Expr*> w;   // var id -> an AssignE writing it, anywhere inside
@@ -929,6 +1204,8 @@ class Sequencer {
     if (e == nullptr) return out;
     switch (e->kind) {
       case Expr::Kind::Const: case Expr::Kind::Formal: case Expr::Kind::Result: break;
+      case Expr::Kind::Null: case Expr::Kind::AddrOf: break;  // an address is no access to the object (decision 0032)
+      case Expr::Kind::Deref: absorb(out, expr(e->a), false); break;
       case Expr::Kind::Local:
         if (e->var != nullptr) out.r.insert(e->var->id);
         break;
@@ -1002,6 +1279,14 @@ class Sequencer {
         if (s->expr != nullptr) store(s->var, s->expr);
         break;
       case Stmt::Kind::ExprStmt: case Stmt::Kind::Return: case Stmt::Kind::Check: expr(s->expr); break;
+      case Stmt::Kind::Store: {
+        // `*addr = value`: the two are unsequenced operands (decision 0032 item 9), as the operands of a Binary are, so `*p = (p = q, 1)`
+        // is a conflict like any other Viper-local one; and the stored value may not write a local the address reads.
+        const Wr a = expr(s->addr);
+        const Wr v = expr(s->expr);
+        pair(a, v);
+        break;
+      }
       case Stmt::Kind::If:
         expr(s->expr);
         stmt(s->then_body);
@@ -1031,5 +1316,7 @@ class Sequencer {
 }  // namespace
 
 std::vector<SequenceProblem> sequence_problems(const Function& f) { return Sequencer(f).run(); }
+
+std::vector<MemoryProblem> memory_problems(const Function& f) { return MemoryWalker(f).run(); }
 
 }  // namespace cerastes::vir

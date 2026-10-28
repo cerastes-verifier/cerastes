@@ -143,6 +143,9 @@ Decision 0002 fixed the integration: EDG's front end compiled into our binary, w
     | `termination` | a termination measure may be negative or may not decrease (decision 0013) | the loop's `decreases` (loops), or the recursive call with a note at the callee's `decreases` |
     | `noreturn` | a function declared not to return (`[[noreturn]]`, `_Noreturn`) may return (decision 0015) | the reachable `return`, or the closing brace |
     | `uninitialized` | a local declared without an initializer may be read before it is given a value (decision 0019) | the read |
+    | `null-dereference` | a pointer that may be null is dereferenced (decision 0032) | the `*` |
+    | `permission` | a place is read or written without the permission to it, for example through a pointer whose object has ended (decision 0032) | the access |
+    | `lifetime` | a pointer is used after its object may have ended, or an object's address may still be in use when its lifetime ends (decision 0032) | the use; the closing brace or `return` that ends the lifetime |
 
 11. **Silicon** is run as `java -Xss128m -jar silicon.jar --z3Exe <z3> --numberOfErrorsToReport 0 <file.vpr>`
     (the same command the harness uses for `.vpr` tests), from a private temporary directory. Its verdict is
@@ -195,3 +198,5 @@ Decision 0002 fixed the integration: EDG's front end compiled into our binary, w
 *2026-10-26, amended by 0025 (M4.4c): item 13 — a new driver hook, `drop_block_static_assertion` (block-scope static assertions ignored by the encoder, so the in-function cross-check rejects them: exit 2); the VIR self-test gains the lowering hooks `perturb_write_slot`, `delay_write_slot` and `drop_flag_access`.*
 
 *2026-10-27, amended by 0028 (M4.5a, effective from M4.5b1): items 9–10 — eight new categories (0028 item 10), and the driver accepts `insufficient.permission` on position-map rows marked as range permission checks, nowhere else (0028 item 11). Amended by 0030 (M4.5a, effective from M4.5d1): item 4 — vlibc's directories are a library class, first on the include path but verified like user files (0030 item 4).*
+
+*2026-10-28, amended by 0032 (M4.5b1a): item 10 — three of 0028's categories land: `null-dereference` (a pointer that may be null is dereferenced; at the `*`), `permission` (a place is read or written without the permission to it; at the access) and `lifetime` (a pointer is used after its object may have ended, or an object's address may still be in use when its lifetime ends; at the use, or at the closing brace or `return` that ends the lifetime); the other five land with their sessions. Item 9 is unchanged in M4.5b1a: the driver still accepts only `assertion.false` (and the termination reasons); the marked range rows come with M4.5e1. In C verify mode EDG's #42, #144, #167 and #513 (incompatible object pointer types) are errors (0032 item 3).*

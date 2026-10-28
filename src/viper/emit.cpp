@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #include "emit.h"
 
+#include <map>
+
 #include "posmap.h"
 #include "prelude.h"
 
@@ -58,11 +60,18 @@ std::string expr(const E& e, bool top = false) {
       std::string s = expr(e->a) + " \\ " + e->text;
       return top ? s : "(" + s + ")";
     }
-    case LExpr::Kind::Fn: {
+    case LExpr::Kind::Fn:
+    case LExpr::Kind::Dom: {  // a prelude function, or a function of the Block domain (decision 0028 item 2)
       std::string s = e->text + "(";
       for (size_t i = 0; i < e->args.size(); ++i) s += (i != 0 ? ", " : "") + expr(e->args[i], true);
       return s + ")";
     }
+    case LExpr::Kind::Null: return "null";
+    case LExpr::Kind::Field: return expr(e->a) + "." + e->text;
+    case LExpr::Kind::PermOf: return "perm(" + expr(e->a) + "." + e->text + ")";
+    case LExpr::Kind::Write: return "write";
+    case LExpr::Kind::NoPerm: return "none";
+    case LExpr::Kind::Acc: return "acc(" + expr(e->a) + "." + e->text + ")";
   }
   return "?";
 }
@@ -110,7 +119,9 @@ class Printer {
   std::vector<MapEntry> map_;
 };
 
-std::string decl(const low::LVar& v) { return v.name + ": " + (v.is_bool ? "Bool" : "Int"); }
+const char* type_name(low::LType t) { return t == low::LType::Bool ? "Bool" : (t == low::LType::Ref ? "Ref" : "Int"); }
+
+std::string decl(const low::LVar& v) { return v.name + ": " + type_name(v.type); }
 
 void stmts(Printer& p, const std::vector<low::LStmt>& body, int indent);
 
@@ -148,6 +159,8 @@ void stmt(Printer& p, const low::LStmt& s, int indent) {
       stmts(p, s.then_body, indent + 1);
       p.line(indent, "}");
       break;
+    case K::FieldAssign: p.line(indent, s.name + "." + s.field + " := " + expr(s.expr, true)); break;
+    case K::Exhale: p.line(indent, "exhale " + expr(s.expr, true)); break;
     case K::Goto: p.line(indent, "goto " + s.name); break;
     case K::Label: p.line(indent, "label " + s.name); break;
     case K::Comment: p.line(indent, "// " + s.name); break;
@@ -196,6 +209,11 @@ void method(Printer& p, const low::LMethod& m) {
 Emitted emit(const low::LProgram& program, const EmitOptions& options) {
   Printer p(options);
   p.line(0, "// cerastes: Viper emitted from VIR (internal/encoding.md); do not edit");
+  if (program.memory) {
+    std::map<std::string, std::string> cells;
+    for (const auto& [suffix, t] : program.cell_types) cells[suffix] = type_name(t);
+    p.raw(memory_prelude_text(cells));
+  }
   const std::string prelude = prelude_text(program.prelude_used);
   p.raw(prelude);
   for (const low::LMethod& m : program.methods) method(p, m);

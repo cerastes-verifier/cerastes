@@ -9,6 +9,7 @@ std::string Type::str() const {
     case Kind::Void: return "void";
     case Kind::Bool: return "bool";
     case Kind::Int: return int_type != nullptr ? int_type->name : "<int>";
+    case Kind::Ptr: return (pointee != nullptr ? pointee->str() : std::string("<?>")) + "*";
   }
   return "?";
 }
@@ -31,6 +32,18 @@ Var* Function::new_local(std::string name, Type type, SrcLoc loc) {
   v->loc = std::move(loc);
   locals_.push_back(std::move(v));
   return locals_.back().get();
+}
+
+void Function::mark_address_taken(const Var* v) {
+  if (v == nullptr || v->id < 0 || static_cast<size_t>(v->id) >= locals_.size() || locals_[static_cast<size_t>(v->id)].get() != v) return;
+  locals_[static_cast<size_t>(v->id)]->address_taken = true;
+}
+
+Type Program::pointer_to(const Type& pointee) {
+  for (const Type& t : pointees_)
+    if (t == pointee) return Type{Type::Kind::Ptr, nullptr, &t};
+  pointees_.push_back(pointee);
+  return Type{Type::Kind::Ptr, nullptr, &pointees_.back()};
 }
 
 const IntType* Program::int_type(const std::string& name, int bits, bool is_signed) {
@@ -207,7 +220,9 @@ const Expr* Builder::binary(BinaryOp op, const Expr* a, const Expr* b, SrcLoc lo
 }
 
 const Expr* Builder::cond(const Expr* c, const Expr* a, const Expr* b, SrcLoc loc) {
-  Expr* e = fresh(p_, Expr::Kind::Cond, a->type, std::move(loc));
+  // A Null arm takes the other arm's pointer type (decision 0032 item 7).
+  const Type t = a->kind == Expr::Kind::Null && b->type.is_ptr() ? b->type : a->type;
+  Expr* e = fresh(p_, Expr::Kind::Cond, t, std::move(loc));
   e->a = c;
   e->b = a;
   e->c = b;
@@ -249,6 +264,29 @@ const Expr* Builder::report_at(const Expr* a, SrcLoc loc, std::string note) {
 
 const Expr* Builder::spelled(const Expr* e, std::string c_type_name) {
   const_cast<Expr*>(e)->c_type_name = std::move(c_type_name);
+  return e;
+}
+
+const Expr* Builder::text(const Expr* e, std::string c_text) {
+  const_cast<Expr*>(e)->c_text = std::move(c_text);
+  return e;
+}
+
+const Expr* Builder::null_const(Type ptr_type, SrcLoc loc) {
+  return fresh(p_, Expr::Kind::Null, ptr_type, std::move(loc));
+}
+
+const Expr* Builder::addr_of(const Var* v, SrcLoc loc) {
+  Expr* e = fresh(p_, Expr::Kind::AddrOf, p_.pointer_to(v->type), std::move(loc));
+  e->var = v;
+  e->c_text = "&" + v->name;
+  return e;
+}
+
+const Expr* Builder::deref(const Expr* addr, SrcLoc loc) {
+  Expr* e = fresh(p_, Expr::Kind::Deref, addr->type.is_ptr() && addr->type.pointee != nullptr ? *addr->type.pointee : addr->type, std::move(loc));
+  e->a = addr;
+  if (!addr->c_text.empty()) e->c_text = "*" + addr->c_text;
   return e;
 }
 
@@ -367,11 +405,35 @@ const Stmt* Builder::block(std::vector<const Stmt*> stmts, SrcLoc loc) {
   return s;
 }
 
-const Expr* Builder::compound_value(const Var* x, const Expr* xval, BinaryOp op, const Expr* rhs, SrcLoc loc) {
-  if (!x->type.is_int() || !rhs->type.is_int()) return rhs;  // ill-typed on purpose
+const Stmt* Builder::block(std::vector<const Stmt*> stmts, SrcLoc loc, SrcLoc end_loc) {
+  Stmt* s = const_cast<Stmt*>(block(std::move(stmts), std::move(loc)));
+  s->end_loc = std::move(end_loc);
+  return s;
+}
+
+const Stmt* Builder::store(const Expr* addr, const Expr* value, SrcLoc loc) {
+  Stmt* s = fresh_stmt(p_, Stmt::Kind::Store, std::move(loc));
+  s->addr = addr;
+  s->expr = value;
+  return s;
+}
+
+const Stmt* Builder::compound_store(const Expr* addr, BinaryOp op, const Expr* rhs, SrcLoc loc) {
+  const Expr* cur = deref(addr, loc);  // shares `addr`
+  return store(addr, compound_value(cur->type, cur, op, rhs, loc), loc);
+}
+
+const Stmt* Builder::inc_dec_store(const Expr* addr, bool increment, SrcLoc loc) {
+  const IntType* c_int = p_.int_type_of(p_.c_int_bits(), true);
+  const Expr* one = int_const(Type::integer(c_int), "1", loc);
+  return compound_store(addr, increment ? BinaryOp::Add : BinaryOp::Sub, one, std::move(loc));
+}
+
+const Expr* Builder::compound_value(const Type& xt, const Expr* xval, BinaryOp op, const Expr* rhs, SrcLoc loc) {
+  if (!xt.is_int() || !rhs->type.is_int()) return rhs;  // ill-typed on purpose
   // An enumeration operand (decision 0018 item 8): the arithmetic on it, which check_program rejects; never promoted here.
-  if (x->type.int_type->is_enum || rhs->type.int_type->is_enum) return binary(op, xval, rhs, loc);
-  const IntType* tx = x->type.int_type;
+  if (xt.int_type->is_enum || rhs->type.int_type->is_enum) return binary(op, xval, rhs, loc);
+  const IntType* tx = xt.int_type;
   const IntType* px = promoted(p_, tx);
   const Expr* left;
   const Expr* right;
@@ -386,14 +448,14 @@ const Expr* Builder::compound_value(const Var* x, const Expr* xval, BinaryOp op,
     right = convert(Type::integer(c), rhs, false, loc);
   }
   const Expr* v = binary(op, left, right, loc);
-  return convert(x->type, v, false, loc);
+  return convert(xt, v, false, loc);
 }
 
 const Stmt* Builder::compound_assign(const Var* x, BinaryOp op, const Expr* rhs, SrcLoc loc) {
   if (!x->type.is_int() || !rhs->type.is_int()) return assign(x, rhs, loc);  // ill-typed on purpose
   // An enumeration operand: compound_value gives the ill-typed `x op rhs`, which check_program rejects.
   const Expr* xval = local(x, loc);
-  return assign(x, compound_value(x, xval, op, rhs, loc), loc);
+  return assign(x, compound_value(x->type, xval, op, rhs, loc), loc);
 }
 
 const Stmt* Builder::inc_dec(const Var* x, bool increment, SrcLoc loc) {
@@ -411,14 +473,14 @@ const Expr* Builder::assign_expr(const Var* v, const Expr* value, SrcLoc loc) {
 
 const Expr* Builder::compound_assign_expr(const Var* x, BinaryOp op, const Expr* rhs, SrcLoc loc) {
   const Expr* xval = local(x, loc);
-  return assign_expr(x, compound_value(x, xval, op, rhs, loc), std::move(loc));
+  return assign_expr(x, compound_value(x->type, xval, op, rhs, loc), std::move(loc));
 }
 
 const Expr* Builder::inc_dec_expr(const Var* x, bool increment, bool post, SrcLoc loc) {
   const IntType* c_int = p_.int_type_of(p_.c_int_bits(), true);
   const Expr* one = int_const(Type::integer(c_int), "1", loc);
   const Expr* old_value = local(x, loc);  // one node: the stored value and (for x++) the node's value share it
-  const Expr* value = compound_value(x, old_value, increment ? BinaryOp::Add : BinaryOp::Sub, one, loc);
+  const Expr* value = compound_value(x->type, old_value, increment ? BinaryOp::Add : BinaryOp::Sub, one, loc);
   Expr* e = const_cast<Expr*>(assign_expr(x, value, std::move(loc)));
   if (post) {
     e->b = old_value;

@@ -2,8 +2,9 @@
 
 cerastes is a deductive verifier for C and pass:[C++]. It is in development.
 Today `cerastes verify` verifies functions over the integer types and `bool`,
-against contracts you write in the source; templates, pointers, classes and
-the rest of the languages are not verified yet. This page says what it is
+against contracts you write in the source, and pointers to such values inside one
+function; templates, pointer parameters, classes and the rest of the languages
+are not verified yet. This page says what it is
 meant to be and what exists today.
 
 == Design
@@ -68,10 +69,13 @@ it verifies and what it does not:
   The integer rules (overflow is an error, signed or unsigned: nothing wraps; a
   conversion must be exact; a value of an enumeration is one of its values) are on
   xref:integer-semantics.adoc[Integer semantics].
-* *Reported:* thirteen kinds of error, each at a line of your source, with what it
+* *Pointers inside one function:* pointers to local variables, `&`, `*`, null
+  pointers, `==` and `!=`, with null dereferences and dangling pointers reported
+  (xref:memory.adoc[Memory and ownership]).
+* *Reported:* sixteen kinds of error, each at a line of your source, with what it
   means and how to fix it on xref:error-messages.adoc[Error messages].
 * *Rejected with a diagnostic, never approximated:* everything else, among it
-  pointers, references, classes, templates, a backward `goto`,
+  pointer parameters and results, references, classes, templates, a backward `goto`,
   floating point, and the shapes the compilers warn about
   (xref:verifying.adoc#not-supported[the list]).
 * *Parsed and checked, not verified:* the annotations beyond `requires`,

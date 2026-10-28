@@ -176,3 +176,5 @@ verifies; Viper's `\` and `%` on `Int` are Euclidean (`(-7)\2 == -4`, `(-7)%2 ==
 *2026-10-23, amended by 0022 (M4.4a): item 11 — the prelude has no `c_wrap`: unsigned arithmetic and conversions into unsigned types are checked, never wrapped.*
 
 *2026-10-27, amended by 0026 (M4.4d): item 6 — a callee's `requires` clauses are placed by PRE(c), everything the call's arguments use or contain, when the exact sets of the full expression form a chain, and by the argument values they read otherwise (0026 items 1–2).*
+
+*2026-10-28, amended by 0032 (M4.5b1a): item 12 — pointers to integers, `bool` and accepted enumerations are accepted as the types of locals and expressions, with `&`, `*`, null pointer constants, `==`, `!=`, truth tests and `?:` of pointers, and a local whose address is taken is an object in memory; pointer parameters and results, pointers to pointers, `void*`, struct, union and function pointers, and pointer conversions other than adding qualifiers stay rejected (0032 items 2–3, 10).*

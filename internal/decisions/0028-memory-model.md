@@ -332,3 +332,5 @@ axiom by the index range.
   reason besides `assertion.false`, on marked rows only.
 - `live(p)` and `owns_block(p)` are new spec functions (record 0029).
 - `void*` is usable only as an argument, a null test and an allocation's result until M8's address model.
+
+*2026-10-28, amended by 0032 (M4.5b1a): item 1 — the value and flag fields are one pair per VIR type (VIR interns integer types by width and signedness, so `long` and `long long` share one), sound because no accepted conversion lets a pointer to one reach an object of the other, decided on EDG's types (0032 items 3, 5); `restrict`, `volatile` and `_Atomic` pointers are rejected. Item 4 — an address-taken local is allocated when its block is entered (C23 6.2.4p6), and before a `switch`'s dispatch for one declared in its body; its declaration stores the initializer or leaves the flag false. Items 2 and 17 — the four axioms have their records, 0033–0036, and lint tags; M4.5b1 is split into b1a (0032), b1b and b1c.*

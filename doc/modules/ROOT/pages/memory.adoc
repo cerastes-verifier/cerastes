@@ -1,0 +1,96 @@
+= Memory and ownership
+
+This page says what cerastes proves about programs that use pointers. For every
+access through a pointer it proves that the access is defined: the pointer is
+not null, the object it points to still exists, and the function has the right
+to read or write it. A use of a pointer whose object has ended is an error too,
+even when nothing is read through it, as C and pass:[C++] say.
+
+This version covers pointers to integers, `bool` and enumerations held in local
+variables, inside one function. Pointer parameters and results, and the
+annotations that describe what a function owns (`owns`, `reads`), come in a
+later version; <<not-yet>> lists what is still rejected.
+
+== Objects whose address is taken
+
+A local variable whose address is never taken is a plain value, as before. A
+local whose address is taken anywhere in the function (`&x`) is an *object in
+memory*: it exists from the moment its block is entered until the block ends,
+and it is reached by name or through any pointer to it. Reading or writing it
+through a pointer is the same as reading or writing it by name:
+
+[source,c]
+----
+include::example$memory/pointer_to_local.c[tag=source]
+----
+
+Each object starts without a value unless its declaration has an initializer,
+and reading it first is reported as
+xref:error-messages.adoc#_uninitialized[`uninitialized`], whether the read is by
+name or through a pointer. Arithmetic through a pointer is checked like any
+other (xref:integer-semantics.adoc[Integer semantics]): `pass:[(*p)++]` overflows
+exactly when `pass:[x++]` would.
+
+== Null pointers
+
+A null pointer is written `NULL`, `0` or `nullptr`, in C and in pass:[C++]. A
+pointer that may be null must not be dereferenced: such a read or write is
+reported as xref:error-messages.adoc#_null_dereference[`null-dereference`].
+Testing the pointer first is enough, since cerastes follows the paths of the
+program:
+
+[source,c]
+----
+include::example$memory/null_guarded.c[tag=source]
+----
+
+A pointer used as a condition (`if (p)`, `!p`, `p && …`) means `p != NULL`.
+
+== Comparing pointers
+
+`==` and `!=` compare pointers as C does: two pointers to different objects are
+never equal, and a pointer to an object is never null. `CERASTES_CHECK` and
+`assert` may use pointers like the code around them:
+
+[source,c]
+----
+include::example$memory/address_comparison.c[tag=source]
+----
+
+Comparisons of order (`<`, `>`), arithmetic on pointers and conversions between
+pointer types are not supported yet, and contracts cannot mention pointers yet.
+
+== Lifetimes and dangling pointers
+
+An object in memory ends when its block ends. After that, a pointer to it is
+*dangling*: reading or writing through it is reported as
+xref:error-messages.adoc#_permission[`permission`], and any other use of its
+value, even a test, a comparison or a copy, is reported as
+xref:error-messages.adoc#_lifetime[`lifetime`], because C and pass:[C++] make
+the value of such a pointer indeterminate:
+
+[source,c]
+----
+include::example$memory/dangling_pointer.c[tag=source]
+----
+
+[#not-yet]
+== What is not supported yet
+
+These are rejected with a diagnostic, never approximated
+(xref:verifying.adoc#not-supported[the full list]):
+
+* pointer parameters and results, and so passing a pointer to a function;
+* the address of a parameter, a pointer to a pointer, and the address of a
+  pointer variable;
+* `void *`, and pointers to structures, unions and functions;
+* conversions between pointer types other than adding `const`, comparisons of
+  order and arithmetic on pointers;
+* a loop that uses a pointer or an object whose address is taken;
+* a `return` inside a loop while an object whose address is taken is in scope,
+  and a `goto`, `break` or `continue` that leaves the block of such an object;
+* a write to an object whose address is taken anywhere but as a statement of
+  its own (`x = 1;`, `*p += 2;`, `pass:[(*p)++;]` are fine; `pass:[y = x++;]` is not).
+
+In C, the compiler's warnings about pointers of incompatible types
+(`long *q = &i;` for an `int i`) are errors under `cerastes verify`.

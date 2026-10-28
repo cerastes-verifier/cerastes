@@ -224,6 +224,29 @@ class Kit {
   Clause cl(const Expr* e) { return Clause{e, at()}; }
   Var* local(Function* f, const std::string& n, Type t) { return f->new_local(n, t, at()); }
 
+  // ---- pointers and cells (decision 0032) ----
+  Type ptr(Type pointee) { return prog.pointer_to(pointee); }
+  // A cell: a local whose address is taken (an object in a one-slot block).
+  Var* cell(Function* f, const std::string& n, Type t) {
+    Var* x = f->new_local(n, t, at());
+    f->mark_address_taken(x);
+    return x;
+  }
+  const Expr* nul(Type ptr_type) { return b.null_const(ptr_type, at()); }
+  const Expr* addr(const Var* x) { return b.addr_of(x, at()); }
+  const Expr* deref(const Expr* a) { return b.deref(a, at()); }
+  // A read of a variable with its source spelling for messages (a pointer variable `p`).
+  const Expr* pn(const Var* x) { return b.text(b.local(x, at()), x->name); }
+  const Stmt* store(const Expr* a, const Expr* value) { return b.store(a, value, at()); }
+  const Stmt* cstore(const Expr* a, BinaryOp op, const Expr* rhs) { return b.compound_store(a, op, rhs, at()); }
+  const Stmt* idstore(const Expr* a, bool increment) { return b.inc_dec_store(a, increment, at()); }
+  // A block with the position of its closing brace (needed when it declares a cell, decision 0032 item 8).
+  const Stmt* blkc(std::vector<const Stmt*> s) {
+    const SrcLoc open = at();
+    const SrcLoc close = at();
+    return b.block(std::move(s), open, close);
+  }
+
   void req(Function* f, const Expr* e) { f->requires_.push_back(cl(e)); }
   void ens(Function* f, const Expr* e) { f->ensures_.push_back(cl(e)); }
   void dec(Function* f, const Expr* e) { f->decreases_.push_back(cl(e)); }
@@ -868,6 +891,8 @@ void define_bitwise_or_xor_masks();
 void define_bitwise_rejections();
 void define_static_assertions();
 void define_static_assertion_rejections();
+void define_memory();
+void define_memory_rejections();
 }  // namespace
 
 #include "selftest_cases2.inc"
@@ -875,6 +900,7 @@ void define_static_assertion_rejections();
 #include "selftest_cases4.inc"
 #include "selftest_cases5.inc"
 #include "selftest_cases6.inc"
+#include "selftest_cases7.inc"
 
 namespace {
 
@@ -1038,6 +1064,8 @@ int main(int argc, char** argv) {
   define_bitwise_rejections();
   define_static_assertions();
   define_static_assertion_rejections();
+  define_memory();
+  define_memory_rejections();
   int bad = 0;
   for (const Case& c : lowering_cases()) {
     std::string problem;
