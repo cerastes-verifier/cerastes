@@ -61,7 +61,9 @@ The EDG pin is unchanged (`f0ed5525af`).
   fixed texts cite "(decision 0012)" (the carried note on record citations below applies); the type message still says
   "only integer types, bool and the enumerations … are" although pointers to them are now accepted in locals.
 
-**CI flake on `main` (M4.5b1 planning, 2026-10-28; owner: ignore for now).** Three of 0027's `^` round-trip
+**CI flake on `main` (M4.5b1 planning, 2026-10-28): fixed after M4.5b1a** (owner: "fix or remove the single consistently
+failing CI test"; record 0027's amendment: prover history across the family's seven mask-chain methods; now one chain
+per file, no expectation changed). The note as written: Three of 0027's `^` round-trip
 must-fail tests have each run to the 300 s timeout once in C23 on GitHub's macOS runner, one per run:
 `mask_or_xor_round_trip_chain_three_post.c` (M4.5a's merge push, run `40686322936`), `..._chain_high_part_post.c` (the
 nightly `40700798811`) and `..._chain_value_off_by_one_post.c` (S5's PR, `40739057963`; its Linux job was green). They
