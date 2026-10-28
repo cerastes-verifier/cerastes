@@ -563,6 +563,9 @@ Do it now since we know it needs handled
 - **vlibc** (`cerastes-verifier/vlibc`, created by the owner): contract headers and verified implementations; a user's
   `#include <vlibc/stdlib.h>` is used, and a bare `<stdlib.h>` is transparently replaced in verify mode ("combine all 3
   of those options"). Our ports of `malloc`/`free` live there, not in this repository as VeriFast's do (record 0030).
+
+vlibc has been created and is available in ~/Documents/cerastes/vlibc. When we need to do math functions I have also created a vlibm much the same way.
+
 - **P4222's markers** are spelled `[[cerastes::uninit]]`, `[[cerastes::ref_to_uninit]]`, `[[cerastes::must_init]]`,
   checked when written, with an opt-in strict mode (record 0029).
 - **Linux CI first** (owner, during M4.5a: "the first sub phase should be adding Linux support to the CI. If MSVC is
@@ -578,17 +581,33 @@ Do it now since we know it needs handled
     `T*` becomes `void*` only as a call argument, and a `void*` becomes `T*` only from an allocation's result. Generic
     `void*` code (callbacks with a context pointer, `qsort`-style interfaces) is rejected until M4.7/M8. *Recommended:
     accept; revisit with M4.7's function pointers.*
+
+Follow recommendations.
+
 54. **Leaks at `main`'s exit** (record 0028 item 6): VeriFast reports blocks `main` still holds at exit, with a `leak`
     command to waive one. *Recommended: report them too, with an explicit waiver annotation designed in M4.5d2.*
+
+Follow recommendations.
+
 55. **The cost of liveness** (record 0028 item 3a): checking every use of a pointer value costs about 1.5–1.7× time and
     text on S26's scale program. *Recommended: keep it (dangling pointers are reported); revisit only if a port's time
     is unacceptable.*
+
+Follow recommendations. A port time of 10x is when to revisit.
+
 56. **`static` locals** (record 0028 item 5): their permission must reach the function. *Recommended: an implicit
     `owns` of the function's `static` locals, propagated to its callers' contracts, and a rejection inside a recursive
     cycle; M4.5b2 decides the details.*
+
+Follow recommendations.
+
 57. **S5's toolchain**: GCC 16 and clang 21 may not be packaged for `ubuntu-24.04`. *Recommended: the toolchain PPA or
     apt.llvm.org first, then a pinned container image; stop and ask if neither works.*
+
+ubuntu-26.04 is available with github actions. If this doesn't work, then use the newest toolchains availble in that container
+
 58. **A rehearsal machine for S5**: the box runs EDG suites in `~/edg-cerastes` only (memory). *Recommended: allow a
     separate `~/cerastes-ci` checkout on the box to rehearse the Linux job; otherwise S5 iterates on GitHub's runner
     only (slower).*
 
+The box is allowed to be used for any testing you need.

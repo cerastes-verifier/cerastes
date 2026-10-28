@@ -139,7 +139,7 @@ history of `internal/status.md`).
 
 | Session | Scope | Needs |
 |---|---|---|
-| **S5 Linux CI** | a `ubuntu-24.04` x86-64 job beside `xcode-27` (owner, 2026-10-27, during M4.5a: "the first sub phase should be adding Linux support to the CI"); 0016 item 13's list; MSVC deferred to M8 | M4.5a |
+| **S5 Linux CI** | a `ubuntu-26.04` x86-64 job beside `xcode-27` (owner, 2026-10-27, during M4.5a: "the first sub phase should be adding Linux support to the CI"); 0016 item 13's list; MSVC deferred to M8 | M4.5a |
 | **M4.5 Pointers** (sessions b1–f3, below) | the memory model for C (records 0028–0030) | M4.5a, S5 |
 | **M4.6 Chars and strings** | string literals as read-only arrays, `char` buffers, vlibc's `<string.h>` (`strlen`/`memcpy`/`memcmp`/`strcmp` contracts and verified implementations), `main(argc, argv)` | M4.5e2, M4.5f3 |
 | **M4.7 Function pointers** | contracts on function types, calls through pointers ("the pointer satisfies the type") | M4.5b1 |
