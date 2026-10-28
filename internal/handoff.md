@@ -49,9 +49,17 @@ is as its handoff left it; §3 and §4.4 carry what M4.5b1–f3 need.
    on 4 vCPUs the Linux one may reach the 220-minute limit (question 63); a timed-out job still uploads its logs.
 3. **Required checks.** Once both jobs are green twice, decide whether `check (Linux, Ubuntu 26.04 x86-64)` becomes a
    required check on `main` (§8 question 61).
-4. **Questions.** Answer §8 (questions 59–62). Then M4.5b1 (§4.4).
+4. **Questions.** Answer §8 (questions 59–63: answered 2026-10-28). Then M4.5b1a (§4.4).
 
 ## 3. Open audit notes (condensed; the full notes are in the commit named above)
+
+**CI flake on `main` (M4.5b1 planning, 2026-10-28; owner: ignore for now).** Three of 0027's `^` round-trip
+must-fail tests have each run to the 300 s timeout once in C23 on GitHub's macOS runner, one per run:
+`mask_or_xor_round_trip_chain_three_post.c` (M4.5a's merge push, run `40686322936`), `..._chain_high_part_post.c` (the
+nightly `40700798811`) and `..._chain_value_off_by_one_post.c` (S5's PR, `40739057963`; its Linux job was green). They
+pass locally. Record 0027 item 4 measured false claims refuted in 2–5 s and noted that C's `((res == x) ? 1 : 0) != 0`
+alone moves a case between 3 s and a timeout; the runner's 3 cores make it worse. A future session may reproduce it
+under load (`-j 3`, parallel verifiers) before deciding.
 
 **From S5** (one Opus round on the encoder diff: one blocking item, fixed and re-audited; record 0031 items 5–7):
 - *Fixed:* glibc's C23 matcher first accepted any folded constant as the comma's left operand, so a hand-written
@@ -299,20 +307,41 @@ is easy add it, if not defer"; `ubuntu-24.04` x86-64 only; MSVC and arm64 Linux 
   step can then run on this runner.
 - P55's glibc half (how a vlibc shim meets glibc's `<stdlib.h>`) is measured here, ahead of M4.5d1.
 
-**M4.5b1 Pointers to scalars and address-taken locals.** The four axiom records and the lint tags
-(`// cerastes:domain-ok`, `// cerastes:axiom-ok`); amendments of 0011 item 10 (four categories), 0012 item 12 (pointer
-types to scalars accepted), 0020 item 4. Address-taken locals (the IL's flag, P51) as one-slot blocks from a trusted
-allocation, the scope-exit check (`lifetime`); `&x`, `*p`, NULL (`NULL`, `0`, C23 and C++ `nullptr`); pointer
-parameters and results with `WF`, `owns`/`reads` (the ghost `rd`)/`old` in both spellings; `[[cerastes::owning]]` on
-parameters and functions (registered then, targets `p` and `r`: `check_attributes` skips registered attributes, so
-never earlier); `==`/`!=`; the explicit checks of 0028 item 11 (single cells; the marked range rows come with M4.5e1);
-sequencing on objects (0028 item 12) and the placement rule (item 13). Liveness (0028 item 3a) and `cerastes_live`/`cerastes::live`;
-calls to `main` rejected. Categories `permission`, `null-dereference`, `lifetime`, `unsequenced`, `pointer-comparison`
-(the `==` exception). Ports: the tutorial's `swap`, `inc`, `address_of_local.c`'s scalar functions (its
-`should_fail` at L158, L174, L185: a cell a callee consumed, reported at the closing brace). The Memory and ownership
-page starts; Error messages gains four sections. Emitted Viper is compared with the fixtures' shapes. Stop rules: any
-existing test's Viper changes (0028 item 1 promises none); a shape where the operation's own Viper error comes first.
-If the session will not fit 4 h, `reads` and C's spellings move to a b1′.
+**M4.5b1 is three sessions** (owner, 2026-10-28, M4.5b1 planning: a design pass put the session above at well over
+27 agent-hours for `src/vir` and `src/viper` alone; plan `~/.claude/plans/using-plan-md-and-handoff-md-temporal-map.md`).
+Each rejects what a later one makes precise (fail closed). **Pre-approved** (owner): b1b and b1c may retire or re-expect
+exactly the b1a rejection tests listed for them in b1a's status entry, and no others; an existing test whose only point
+was "pointers are rejected" is retired where its construct is accepted (listed).
+
+**M4.5b1a The model and address-taken locals inside one function** (record 0032; axiom records 0033–0036). The `Block`
+domain with the four axioms and the lint tags (`// cerastes:domain-ok`, `// cerastes:axiom-ok`; `new` refused);
+address-taken locals (the IL's flag, P51) as one-slot blocks from a trusted `alloc_T`, allocated at block entry (C23
+6.2.4p6, amending 0028 item 4) and before a switch's dispatch; the scope exit at fall-through and `return` (`lifetime`);
+`&x`, `*p` reads, statement-level writes, NULL in every spelling, `==`/`!=` (the one-past-the-end exception as an
+internal row), truth tests, pointer locals, `?:`; explicit checks (`null-dereference`, `permission`, `lifetime`, the
+flag); C's incompatible pointer types (#42, #144, #513, #167) as errors in verify mode. Rejected until later: pointer
+parameters and results, `&param`, `T**`, `void*`, struct pointers, pointer casts, loops that hold a pointer node or a
+cell, `return` in a loop while a cell is live, `goto`/`break` out of a cell's scope, writes to cells inside expressions.
+The Memory and ownership page starts; Error messages gains three sections. P51 lands in `il-inventory.md`.
+
+**M4.5b1b Pointer parameters and contracts.** `WF(p)` on pointer parameters and results; `owns`/`reads`/`live`/`old(*p)`
+in both spellings (`<cerastes.h>`'s `cerastes_` forms and `cerastes::live`, 0029 item 3), with the ghost amounts, the
+caller's choice of fractions and the case splits (0028 item 8); the framing check of contracts; the call's and the
+return's permission clauses one by one; the entry separation; `&param`; `pointer-comparison` (the internal row of b1a
+becomes the category); the consuming callee whose caller fails its scope-exit `lifetime` check (b1a's missing twin).
+Range facts of a cell's value belong in `owns`/`reads` (design pass: without them Silicon's own range clauses fail
+first). `cerastes_old(x)` of a by-value parameter stays a Viper local (pin it, 0029 item 3). The Annotations page's
+spec-function table is rewritten.
+
+**M4.5b1c Ownership, sequencing, loops, ports.** `[[cerastes::owning]]` on parameters and functions (registered then,
+targets `p` and `r`: `check_attributes` skips registered attributes, so never earlier) and `owns_block`; sequencing on
+objects (0028 item 12, `unsequenced`) and the placement rule (item 13); cells in loops with **hybrid permission
+invariants** (owner, 2026-10-28: automatic for places reached through an address-taken local or a pointer parameter the
+function never reassigns, `owns`/`reads` in `CERASTES_INVARIANT` for everything else; a missing one is reported at the
+access); `T**`; `goto`/`break` out of a cell's scope; the aliasing trap. Ports: `address_of_local.c`'s `inc` (no
+tutorial `swap`/`inc` file exists), `swap.c` L4-11, `address_of_local.c`'s scalar functions (its `should_fail` at L158,
+L174, L185: a cell a callee consumed, reported at the closing brace). The Memory and ownership page completed. If it
+will not fit 4 h, the ports move to M4.8.
 
 **M4.5b2 Globals, `static` locals, initialization through pointers.** Mutable globals as `GB_g()` blocks, `program_start`
 for `main`, frames through contracts (`owns(g)`); `static` locals (0028 item 5: the implicit `owns` or a rejection in a
@@ -667,16 +696,28 @@ the macOS SDK declares): "Platform tag" — `; platform: macos` on their `mode:`
     `quick_exit` redeclaration can only run against glibc. *Recommended: add them as `platform: linux` tests in M4.5d1,
     with P55's fix (vlibc's shim meets glibc's `<stdlib.h>` there anyway), and tighten the `sizeof` operand to
     `__assert_single_arg` then (§3).*
+
+Follow recommendation. Tests should be portable to the greatest extent possible.
+
 60. **GCC 16 on Linux is a snapshot** (`16.0.1 20260322`, Ubuntu 26.04's newest; 16.2.0 only from 26.10). *Recommended:
     keep it while the native-ok runs agree with the Mac's GCC 16.2.0 (they did in the rehearsal: 1078 runs each); move
     to 16.2.0 when 26.04 gets it or the image moves, as a pin change of 0001, 0031 and `ci-linux.sh` together.*
+
+Keep it for now. In the future we need to support a few older compilers anyway.
+
 61. **Required checks.** *Recommended: make `check (Linux, Ubuntu 26.04 x86-64)` a required check on `main` after its
     first two green runs (one full, by dispatch or nightly; one PR tier), like `check (macOS, …)`.*
+
+I have made the check required.
+
 62. **The box's Linux checkout.** The box did not answer for most of the session, so the rehearsal used Docker on the
     Mac (the PR tier took 43 min there under Rosetta); when it came back, the full check ran on it natively in 79 min
     at `-j 8`. Its checkout `~/cerastes-ci` (5.8 GB) and image `cerastes-s5:runner` (3.2 GB) are still there, on a
     disk 92% full (35 GB free). *Recommended: keep both until GitHub's Linux job is green twice (they reproduce a
     runner difference in minutes), then the next session that uses the box removes them.*
+
+Instead of the box you may use ssh matt@clang4.cpp.al from here on out. The key is `~/.ssh/id_rsa`.
+
 63. **The Linux job's time limit.** The job has the macOS job's `timeout-minutes: 220` (0016 item 9: max(150, 1.5 ×
     the longest full check seen), and the guard allows at most 220). The box ran the full check in 79 min on 16
     threads, but GitHub's runner has 4 vCPUs, and the macOS job already takes 145 min on 3 cores, so the Linux full
@@ -684,3 +725,4 @@ the macOS SDK declares): "Platform tag" — `; platform: macos` on their `mode:`
     1.5) or times out, a short session applies item 9's rule to that job alone (its own bound in the guard, below
     GitHub's 360-minute job limit) from the run's evidence; the PR tier is not affected (43 min under Rosetta).*
 
+Follow recommendation.
