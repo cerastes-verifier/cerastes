@@ -12450,6 +12450,43 @@ int pick(int x) CERASTES_ENSURES(r, r >= 0 && r <= 1)
 """
 
 
+# The emitted Viper of the constant-mask tests (decision 0027 item 7).  `|` and `^` by a constant mask are
+# remainder forms, never a call of the prelude function `c_[u]or_N` / `c_[u]xor_N`; the verdict tests cannot see
+# which of the two was emitted (the function verifies too, but Z3 decides almost nothing through it), so the text is read.
+BIT_OR_XOR_CALL = re.compile(r"\bc_u?(?:or|xor)_(?:32|64|128)\(")
+
+
+# `^` by a constant mask is a call of a small prelude function per mask (decision 0027 item 3 as revised):
+# `c_[u]xor_mask_N_k(x)` is x ^ (2^k - 1), `c_[u]xor_cmask_N_k(x)` is x ^ ~(2^k - 1); its body is the remainder form
+BIT_XOR_MASK_CALL = re.compile(r"\bc_u?xor_c?mask_(?:32|64|128)_\d+\(")
+
+
+def xor_mask_calls(text):
+    """The calls of the mask functions of `^` in the methods of an emitted program."""
+    return BIT_XOR_MASK_CALL.findall(viper_methods(text))
+
+
+def viper_methods(text):
+    """The methods of an emitted program (the prelude functions before them hold bit weights and calls of their own)."""
+    return text[text.index("\nmethod "):] if "\nmethod " in text else text
+
+
+def bit_or_xor_calls(text):
+    """The calls of the prelude functions of `|` and `^` in the methods of an emitted program."""
+    return BIT_OR_XOR_CALL.findall(viper_methods(text))
+
+
+def viper_method_text(text, name):
+    """The text of the method of the C function `name` (`method f_<name>__<n>(`), up to its closing brace (a line of its own)."""
+    m = re.search(rf"^method f_{re.escape(name)}__\d+\(", text, re.M)
+    if m is None:
+        raise AssertionError(f"no method for `{name}` in the emitted Viper")
+    end = text.find("\n}\n", m.end())
+    if end < 0:
+        raise AssertionError(f"the method for `{name}` has no closing brace line")
+    return text[m.start():end + 2]
+
+
 @e2e_gate(_real_verifier_available(), "CERASTES_VERIFY missing; run scripts/bootstrap.sh")
 class RealDriverTests(unittest.TestCase):
     """The real `build/cerastes`: its own self-test, the exit statuses and streams of runs, the refused
@@ -12725,6 +12762,77 @@ class RealDriverTests(unittest.TestCase):
         self.assertNotRegex(methods, r"% 25[46]\b")
         self.assertNotRegex(methods, r"\b25[46] \* \(")
 
+    def test_or_xor_with_a_constant_mask_are_remainders_not_bit_functions(self):
+        # 0027 items 1, 3 and 7: `x | (2^k-1)` and the complement forms are written with `\\` and `%` in the method;
+        # `x ^ (2^k-1)` and `x ^ ~(2^k-1)` are calls of the mask functions `c_[u]xor_mask_N_k` / `c_[u]xor_cmask_N_k`
+        # (whose bodies are the remainder forms), no `let` anywhere; and none of them calls `c_[u]or_N` or `c_[u]xor_N`.
+        # The verdict tests cannot see this (the bit function verifies too, it is what left the claims undecided), so the
+        # emitted text is checked: if the rewrite stopped firing, these fail while every verified test still passes.
+        # The twin is a near miss.
+        for mode in ("c23", "c++20"):
+            with self.subTest(mode=mode):
+                text = self.kept_vpr("mask_or_xor_low_byte.c", mode)
+                self.assertEqual(bit_or_xor_calls(text), [], text)
+                self.assertNotIn("(let ", text)
+                methods = viper_methods(text)
+                # five `|` forms inline in the methods
+                self.assertGreaterEqual(len(re.findall(r"\b256 \* \(+[\w$']+ \\ 256\)", methods)), 5, methods)
+                # five `^` forms: calls of the mask functions, whose bodies hold the remainder form
+                self.assertGreaterEqual(len(xor_mask_calls(text)), 5, text)
+                self.assertRegex(text, r"[\w$']+ % 256\b")
+                self.assertRegex(text, r"\b256 \* \(+[\w$']+ \\ 256\)")
+                text = self.kept_vpr("mask_or_xor_low_byte_left.c", mode)
+                self.assertEqual(bit_or_xor_calls(text), [], text)
+                self.assertNotIn("(let ", text)
+                self.assertGreaterEqual(len(xor_mask_calls(text)), 3, text)                    # the three `^` forms
+                text = self.kept_vpr("mask_or_xor_word.c", mode)
+                self.assertEqual(bit_or_xor_calls(text), [], text)
+                self.assertNotIn("(let ", text)
+                self.assertGreaterEqual(len(xor_mask_calls(text)), 2, text)
+                self.assertRegex(text, r"\b4294967296 \* \(+[\w$']+ \\ 4294967296\)")
+                text = self.kept_vpr("mask_or_xor_complement.c", mode)
+                self.assertEqual(bit_or_xor_calls(text), [], text)
+                self.assertNotIn("(let ", text)
+                self.assertGreaterEqual(len(re.findall(r"\bc_u?xor_cmask_(?:32|64|128)_\d+\(", viper_methods(text))), 2, text)
+                self.assertRegex(viper_methods(text), r"[\w$']+ % 16\b")                          # x | ~15 keeps the low nibble
+                self.assertIn("4294967040", text)                                                # ~0xFFu in the unsigned forms
+                # k = 0 of the complement: x ^ -1, x ^ ~0 are `c_xor_cmask_32_0`; the unsigned u ^ ~0u is the all-ones mask
+                text = self.kept_vpr("mask_or_xor_minus_one.c", mode)
+                self.assertEqual(bit_or_xor_calls(text), [], text)
+                self.assertNotIn("(let ", text)
+                self.assertGreaterEqual(len(re.findall(r"\bc_xor_cmask_32_0\(", viper_methods(text))), 3, text)   # x ^ -1, x ^ ~0, -1 ^ x
+                self.assertGreaterEqual(len(re.findall(r"\bc_uxor_mask_32_32\(", viper_methods(text))), 1, text)
+                for name in ("mask_or_xor_extremes.c", "mask_or_xor_wide.c", "mask_or_xor_mixed.c", "mask_or_xor_loop.c"):
+                    text = self.kept_vpr(name, mode)
+                    self.assertEqual(bit_or_xor_calls(text), [], text)
+                    self.assertNotIn("(let ", text)
+                # a mask that is not 2^k - 1 or its complement is the prelude function, whatever the nearby constants
+                text = self.kept_vpr("mask_or_xor_near_miss.c", mode)
+                methods = viper_methods(text)
+                self.assertGreaterEqual(len(re.findall(r"\bc_or_32\(", methods)), 2, text)    # x | 254, in the body and the contract
+                self.assertGreaterEqual(len(re.findall(r"\bc_xor_32\(", methods)), 2, text)   # x ^ 256
+                self.assertEqual(xor_mask_calls(text), [], text)
+                self.assertNotRegex(methods, r"% 25[46]\b")
+                self.assertNotRegex(methods, r"\\ 25[46]\b")
+                self.assertNotRegex(methods, r"\b25[46] \* \(")
+
+    def test_a_chain_of_xor_masks_grows_linearly_in_the_emitted_text(self):
+        # 0027 item 3 (revised): each `^` by a constant mask is one call of a mask function, so a chain of eight masks has
+        # exactly eight calls, each argument written once, and its text grows by one call per level.  An encoding that
+        # names the operand twice per level (0026 audit round 2) would double it at every level: 2^8 copies instead of 8.
+        text = self.kept_vpr("mask_or_xor_round_trip.c")
+        chain8 = viper_method_text(text, "xor_chain8_range")
+        chain3 = viper_method_text(text, "xor_chain")
+        self.assertEqual(bit_or_xor_calls(chain8), [], chain8)
+        self.assertNotIn("(let ", text)
+        self.assertEqual(len(xor_mask_calls(chain8)), 8, chain8)
+        self.assertEqual(len(xor_mask_calls(chain3)), 3, chain3)
+        # the operand is written once, and the nested expression is one call per level (measured: 149 characters for
+        # eight levels; the method as a whole is no measure, its contract text differs from the three-mask chain's)
+        expr = next(l.strip() for l in chain8.splitlines() if l.strip().startswith("res :="))
+        self.assertEqual(expr.count("v_x__0"), 1, expr)
+        self.assertLess(len(expr), 8 * 24, expr)
+
     def test_keep_vpr_writes_both_files(self):
         run = self.run_driver("verify", "one.cpp", "--keep-vpr")
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
@@ -12811,6 +12919,48 @@ VERIFY_HOOK_ONLY_TAGS = {
                               "report it (RealDriverTests, test_the_perturbed_call_order_is_an_internal_inconsistency_exit_3)",
 }
 UNTESTED_BY_FRONTEND_ERROR = {**SELFTEST_ONLY_TAGS, **NO_REPRODUCER_TAGS, **STDIN_ONLY_TAGS, **VERIFY_HOOK_ONLY_TAGS}
+
+
+class OrXorMaskTextTwinTests(unittest.TestCase):
+    """The emitted-text checks of the constant-mask tests fail when they are weakened (fixture texts)."""
+
+    PRELUDE = "function c_uxor_32(a: Int, b: Int): Int\n{\n  (a + b)\n}\n"
+    METHOD = ("\n// C/C++ function `f`\nmethod f_f__0(p_x__0: Int) returns (res: Int)\n{\n  res := %s\n}\n")
+
+    def test_a_call_of_the_bit_function_in_a_method_is_found(self):
+        for name in ("c_or_32", "c_uor_32", "c_xor_32", "c_uxor_32", "c_or_64", "c_uxor_128"):
+            with self.subTest(name):
+                text = self.PRELUDE + self.METHOD % f"{name}(v_x__0, 255)"
+                self.assertEqual(bit_or_xor_calls(text), [f"{name}("])
+
+    def test_the_prelude_function_alone_is_not_a_call(self):
+        # the definition of the function sits before the methods; a program that keeps it for another operator is not flagged
+        text = self.PRELUDE + self.METHOD % "256 * (v_x__0 \\ 256) + 255"
+        self.assertEqual(bit_or_xor_calls(text), [])
+
+    def test_other_functions_are_not_found(self):
+        for name in ("c_and_32", "c_rem", "c_xor", "c_xor_8", "my_c_or_32"):
+            with self.subTest(name):
+                self.assertEqual(bit_or_xor_calls(self.PRELUDE + self.METHOD % f"{name}(v_x__0, 255)"), [])
+
+    def test_a_call_of_a_mask_function_in_a_method_is_found(self):
+        for name in ("c_xor_mask_32_8", "c_uxor_mask_64_32", "c_xor_cmask_32_4", "c_uxor_cmask_128_8"):
+            with self.subTest(name):
+                text = self.PRELUDE + self.METHOD % f"{name}(v_x__0)"
+                self.assertEqual(xor_mask_calls(text), [f"{name}("])
+                self.assertEqual(bit_or_xor_calls(text), [])      # not the bit-chain function
+
+    def test_the_bit_function_is_not_a_mask_function(self):
+        for name in ("c_xor_32", "c_uxor_64", "c_xor_mask_32", "c_xor_mask_32_x", "my_c_xor_mask_32_8"):
+            with self.subTest(name):
+                self.assertEqual(xor_mask_calls(self.PRELUDE + self.METHOD % f"{name}(v_x__0, 255)"), [])
+
+    def test_a_method_is_cut_at_its_closing_brace(self):
+        text = (self.METHOD % "c_xor_32(a, 1)").replace("f_f__0", "f_g__0") + (self.METHOD % "v_x__0")
+        self.assertIn("c_xor_32(", viper_method_text(text, "g"))
+        self.assertNotIn("c_xor_32(", viper_method_text(text, "f"))
+        with self.assertRaises(AssertionError):
+            viper_method_text(text, "absent")
 
 
 def tag_coverage_problems(defined, used, allowed):

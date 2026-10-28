@@ -257,3 +257,5 @@ literals with only a warning, and 0022 item 5 still gives a few shapes different
 *2026-10-26, amended by 0025 (M4.4c): item 4 — two enumerations in `+ - * / %` and as the arms of `?:` are rejected too (0025 item 6, R8); item 5 — the truth-value comparisons it listed as not rejected (`(p ^ q) == 2`) are now rejected (0025 item 6, R6).*
 
 *2026-10-27, amended by 0026 (M4.4d): item 2 — `a & m` with a constant mask `m = 2^k − 1` is written `a % 2^k`, and with `m = ~(2^k − 1)` `a − a % 2^k` (Viper's Euclidean `%`), for every width and both signednesses (0026 items 7–8); `v & 0xFFFFFFFF == v % 4294967296`, `x & ~15 == x − x % 16` for `x ≥ 0` and the range check of a masked result are decided now, and leave the list of what Z3 does not decide.*
+
+*2026-10-27, amended by 0027 (M4.5a): item 2 — `x | m` and `x ^ m` with a constant mask (2^k − 1 or its complement) are written without `c_[u]or_N`/`c_[u]xor_N`: `|` inline, `^` as the prelude functions `c_[u]xor_[c]mask_N_k` (0027 items 1–3); claims about them over a variable are decided, chains as 0027 item 4 measures, and leave the list of what Z3 does not decide.*

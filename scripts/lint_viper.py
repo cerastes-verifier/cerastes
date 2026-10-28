@@ -341,6 +341,18 @@ def decreases_measures(src: Source) -> dict[int, str]:
 BIT_FUNCTION_RE = re.compile(r"^c_(?P<u>u?)(?P<op>and|or|xor)_(?P<width>32|64|128)$")
 
 
+# The mask functions of `^` (decision 0027 item 3 as revised): `c_[u]xor_mask_N_k(a)` is a ^ (2^k - 1) and
+# `c_[u]xor_cmask_N_k(a)` is a ^ ~(2^k - 1); their bodies are remainder forms, their one `ensures` is a range implication.
+# Exactly what `parse_xor_mask_fn` (src/viper/prelude.cpp) reads, tightened: k is a decimal without leading zeros, with
+# `0 <= k <= N` for the unsigned functions and `0 <= k <= N - 1` for the signed ones (a signed `2^N` is not a value of the type).
+XOR_MASK_FUNCTION_RE = re.compile(r"^c_(?P<u>u?)xor_(?P<c>c?)mask_(?P<width>32|64|128)_(?P<k>0|[1-9][0-9]{0,2})$")
+
+
+def xor_mask_function_ok(name: str) -> bool:
+    m = XOR_MASK_FUNCTION_RE.match(name)
+    return m is not None and int(m.group("k")) <= int(m.group("width")) - (0 if m.group("u") else 1)
+
+
 def bit_range_ensures_lines(src: Source, decls: list[Decl]) -> set[int]:
     """The lines of the range postconditions that a bitwise prelude function may carry without a position map
     entry (decision 0012 item 11, amended for 0023): in `function c_[u]<op>_<N>(a: Int, b: Int): Int` the single
@@ -349,6 +361,9 @@ def bit_range_ensures_lines(src: Source, decls: list[Decl]) -> set[int]:
     `ensures` line, and a second one in the same function, is not exempt."""
     out: set[int] = set()
     for d in decls:
+        if d.kind == "function" and d.has_body and xor_mask_function_ok(d.name):
+            out |= xor_mask_range_ensures_line(src, d)
+            continue
         m = BIT_FUNCTION_RE.match(d.name) if d.kind == "function" else None
         if m is None or not d.has_body:
             continue
@@ -362,6 +377,24 @@ def bit_range_ensures_lines(src: Source, decls: list[Decl]) -> set[int]:
         if len(lines) == 1 and " ".join(src.code[lines[0] - 1].split()) == want:
             out.add(lines[0])
     return out
+
+
+def xor_mask_range_ensures_line(src: Source, d: Decl) -> set[int]:
+    """The single range postcondition of `function c_[u]xor_[c]mask_N_k(a: Int): Int`, exactly
+    `ensures (LO <= a && a <= HI) ==> (LO <= result && result <= HI)` with `[LO, HI]` the range of the N-bit type
+    (`LO` in parentheses when negative); empty when the header, the line or the count of `ensures` lines differs."""
+    m = XOR_MASK_FUNCTION_RE.match(d.name)
+    head = " ".join(src.code[d.line - 1].split())
+    if m is None or not xor_mask_function_ok(d.name) or head != f"function {d.name}(a: Int): Int":
+        return set()
+    width = int(m.group("width"))
+    lo, hi = (0, 2 ** width - 1) if m.group("u") else (-2 ** (width - 1), 2 ** (width - 1) - 1)
+    lo_text = f"({lo})" if lo < 0 else str(lo)
+    want = f"ensures ({lo_text} <= a && a <= {hi}) ==> ({lo_text} <= result && result <= {hi})"
+    lines = [n for n in range(d.line + 1, d.body_line) if src.code[n - 1].strip().startswith("ensures")]
+    if len(lines) == 1 and " ".join(src.code[lines[0] - 1].split()) == want:
+        return {lines[0]}
+    return set()
 
 
 # The prelude functions whose bodies use Viper's `%` and `\` (src/viper/prelude.cpp), by operator.  `%`: `c_urem` guards

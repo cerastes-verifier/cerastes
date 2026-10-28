@@ -80,6 +80,37 @@ std::string bit_composite_body(const BitFn& f) {
   return bit_fn_name(f.op, h, true) + "(a, b) + " + p + " * " + bit_fn_name(f.op, h, f.is_unsigned) + "(a \\ " + p + ", b \\ " + p + ")";
 }
 
+// The `^` constant-mask functions (decision 0027 item 3): c_[u]xor_mask_N_k is `x ^ (2^k - 1)` and c_[u]xor_cmask_N_k is `x ^ ~(2^k - 1)` for
+// x of the signed (c_) or unsigned (c_u) computed type of N bits (N = 32, 64, 128).  The lowering emits k in 0 <= k <= N unsigned and
+// 0 <= k <= N - 1 signed for c_[u]xor_mask (the mask 2^k - 1), and in 0 <= k <= N - 1 signed (the mask -2^k, so k = 0 is `x ^ -1`) and
+// 1 <= k <= N - 1 unsigned (the mask 2^N - 2^k; k = 0 and k = N are the masks 2^N - 1 and 0, which are c_uxor_mask_N_N and c_uxor_mask_N_0)
+// for c_[u]xor_cmask (decision 0027 item 1: the first row that matches is used).  The bodies are decision 0027 item 1's forms over the parameter `a`, naming it twice (once through `\`
+// and once through `%`, with power-of-two literal divisors, so lint_viper.py's rule holds); the one `ensures` is guarded by the range of
+// the argument, so the function is total and has no `requires`.
+struct XorMaskFn {
+  bool complement = false;
+  int width = 0;
+  int k = 0;
+  bool is_unsigned = false;
+};
+
+bool parse_xor_mask_fn(const std::string& name, XorMaskFn& f) {
+  for (const bool u : {false, true})
+    for (const bool c : {false, true}) {
+      const std::string prefix = std::string("c_") + (u ? "u" : "") + "xor_" + (c ? "cmask" : "mask") + "_";
+      if (name.compare(0, prefix.size(), prefix) != 0) continue;
+      const size_t us = name.find('_', prefix.size());
+      if (us == std::string::npos) return false;
+      const std::string w = name.substr(prefix.size(), us - prefix.size()), k = name.substr(us + 1);
+      for (const int width : {32, 64, 128})
+        if (w == std::to_string(width) && !k.empty() && k.size() <= 3 && k.find_first_not_of("0123456789") == std::string::npos) {
+          f = XorMaskFn{c, width, std::atoi(k.c_str()), u};
+          return f.k <= width;
+        }
+    }
+  return false;
+}
+
 }  // namespace
 
 std::set<std::string> prelude_closure(const std::set<std::string>& used) {
@@ -135,6 +166,26 @@ std::string prelude_text(const std::set<std::string>& used) {
     fn(bit_fn_name(f.op, f.width, f.is_unsigned) + "(a: Int, b: Int): Int\n  ensures " + (dec::negative(r.lo) ? "(" + r.lo + ")" : r.lo) +
            " <= result && result <= " + r.hi,
        f.width != 128 ? bit_leaf_body(f) : bit_composite_body(f));
+  }
+  // The `^` constant-mask functions (decision 0027 item 3): independent of the others.
+  for (const std::string& n : all) {
+    namespace dec = cerastes::vir::dec;
+    XorMaskFn f;
+    if (!parse_xor_mask_fn(n, f)) continue;
+    const dec::Range r = f.is_unsigned ? dec::Range{"0", dec::dec1(dec::pow2(f.width))}
+                                       : dec::Range{dec::neg(dec::pow2(f.width - 1)), dec::dec1(dec::pow2(f.width - 1))};
+    const std::string lo = dec::negative(r.lo) ? "(" + r.lo + ")" : r.lo;
+    const std::string pk = dec::pow2(f.k);
+    const std::string high = "(" + pk + " * (a \\ " + pk + "))";   // x with its low k bits cleared
+    std::string body;
+    if (!f.complement) {
+      body = high + " + (" + dec::dec1(pk) + " - (a % " + pk + "))";   // 2^k * H + ((2^k - 1) - L)
+    } else if (f.is_unsigned) {
+      body = "((a % " + pk + ") + (" + dec::pow2(f.width) + " - " + pk + ")) - " + high;   // (L + (2^N - 2^k)) - 2^k * H
+    } else {
+      body = "((a % " + pk + ") - " + pk + ") - " + high;   // (L - 2^k) - 2^k * H
+    }
+    fn(n + "(a: Int): Int\n  ensures (" + lo + " <= a && a <= " + r.hi + ") ==> (" + lo + " <= result && result <= " + r.hi + ")", body);
   }
   return t;
 }

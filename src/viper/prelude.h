@@ -27,6 +27,9 @@ namespace cerastes::viper {
 //                   signed ones.  N = 128 is c_u<op>_64(a, b) + 2^64 * c_[u]<op>_64(a \ 2^64, b \ 2^64) (prelude_closure adds
 //                   the 64-bit functions).  Each has one `ensures`, the range of its type: the only postconditions in the
 //                   prelude, proved by Silicon against the body (never assumed); no `requires`, no `decreases`, no axiom.
+//   c_[u]xor_mask_N_k, c_[u]xor_cmask_N_k   (decision 0027 item 3) x ^ (2^k - 1) and x ^ ~(2^k - 1) for x of the signed/unsigned computed type
+//                   of N bits: one parameter, the body is the exact form over `a` (a floor quotient and a remainder by the power-of-two literal
+//                   2^k), and one `ensures`, the range of the type guarded by the range of the argument (total, no `requires`).
 std::string prelude_text(const std::set<std::string>& used);
 
 // The prelude functions that `name` calls.
