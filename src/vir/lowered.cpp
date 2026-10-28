@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #include "lowered.h"
 
+#include <stdexcept>
+
 #include "dec.h"
 
 namespace cerastes::low {
@@ -65,6 +67,46 @@ E ite(E c, E a, E b) {
 E fn(std::string prelude_name, std::vector<E> args) {
   auto e = make(LExpr::Kind::Fn);
   e->text = std::move(prelude_name);
+  e->args = std::move(args);
+  return e;
+}
+
+E null_() { return make(LExpr::Kind::Null); }
+
+E field(E recv, std::string field_name) {
+  auto e = make(LExpr::Kind::Field);
+  e->text = std::move(field_name);
+  e->a = std::move(recv);
+  return e;
+}
+
+E perm_of(E recv, std::string field_name) {
+  auto e = make(LExpr::Kind::PermOf);
+  e->text = std::move(field_name);
+  e->a = std::move(recv);
+  return e;
+}
+
+E write_perm() { return make(LExpr::Kind::Write); }
+E no_perm() { return make(LExpr::Kind::NoPerm); }
+
+E acc(E recv, std::string field_name) {
+  auto e = make(LExpr::Kind::Acc);
+  e->text = std::move(field_name);
+  e->a = std::move(recv);
+  return e;
+}
+
+bool is_domain_function(const std::string& name) {
+  for (const char* n : {"loc", "len", "block_of", "offset_of", "member", "parent_of", "index_of", "lvloc"})
+    if (name == n) return true;
+  return false;
+}
+
+E dom(const std::string& domain_function, std::vector<E> args) {
+  if (!is_domain_function(domain_function)) throw std::logic_error("`" + domain_function + "` is not a function of the Block domain");
+  auto e = make(LExpr::Kind::Dom);
+  e->text = domain_function;
   e->args = std::move(args);
   return e;
 }

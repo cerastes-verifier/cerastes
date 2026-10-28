@@ -1985,7 +1985,7 @@ class ErrorMessagesPageTests(DocLintCase):
         self.assertEqual(self.CATEGORIES, sorted([
             "precondition", "postcondition", "check", "invariant-entry", "invariant-preserved",
             "overflow", "division-by-zero", "shift", "conversion", "missing-return", "termination",
-            "noreturn", "uninitialized"]))
+            "noreturn", "uninitialized", "null-dereference", "permission", "lifetime"]))
 
     def test_it_is_inactive_without_the_page_and_without_verify_tests(self):
         self.assertEqual(self.messages(), [])
@@ -6582,10 +6582,10 @@ class NativePolicyTests(RootedCase):
         # Dropping a directory would let its tests skip the ordinary compilers.
         self.assertEqual(
             [str(d) for d in rt.NATIVE_POLICY_DIRS],
-            ["tests/annotations", "tests/scalar", "doc/modules/ROOT/examples/annotations",
+            ["tests/annotations", "tests/scalar", "tests/memory", "doc/modules/ROOT/examples/annotations",
              "doc/modules/ROOT/examples/ordinary-compilers",
              "doc/modules/ROOT/examples/verifying", "doc/modules/ROOT/examples/error-messages",
-             "doc/modules/ROOT/examples/integer-semantics"])
+             "doc/modules/ROOT/examples/integer-semantics", "doc/modules/ROOT/examples/memory"])
         self.assertEqual(rt.POSITIVE_KINDS, ("golden", "verified"))
 
     def test_a_positive_test_in_a_policy_directory_needs_native_ok(self):
@@ -10152,7 +10152,7 @@ class VerifyHeaderTests(unittest.TestCase):
         self.assertEqual(rt.DRIVER_CATEGORIES, frozenset({
             "precondition", "postcondition", "check", "invariant-entry", "invariant-preserved",
             "overflow", "division-by-zero", "shift", "conversion", "missing-return", "termination",
-            "noreturn", "uninitialized"}))
+            "noreturn", "uninitialized", "null-dereference", "permission", "lifetime"}))
         self.assertEqual(rt.VERIFY_KINDS, ("verified", "error", "rejected"))
 
     def test_every_category_parses_in_c_and_cpp(self):
@@ -11947,10 +11947,12 @@ class ScalarAreaTests(RootedCase):
 
     def test_the_areas_are_pinned(self):
         self.assertEqual(str(rt.SCALAR_NEGATIVE_DIR), "tests/scalar/negative")
-        self.assertEqual(rt.NEGATIVE_DIRS, (rt.NEGATIVE_DIR, rt.SCALAR_NEGATIVE_DIR))
+        self.assertEqual(str(rt.MEMORY_NEGATIVE_DIR), "tests/memory/negative")
+        self.assertEqual(rt.NEGATIVE_DIRS, (rt.NEGATIVE_DIR, rt.SCALAR_NEGATIVE_DIR, rt.MEMORY_NEGATIVE_DIR))
         self.assertEqual([(str(a), str(n)) for a, n in rt.TWIN_AREAS],
                          [("tests/annotations", "tests/annotations/negative"),
-                          ("tests/scalar", "tests/scalar/negative")])
+                          ("tests/scalar", "tests/scalar/negative"),
+                          ("tests/memory", "tests/memory/negative")])
 
     def test_a_positive_scalar_test_needs_native_ok(self):
         for directory in ("tests/scalar", "tests/scalar/sub/deeper"):
@@ -12144,9 +12146,10 @@ class DualModeTests(RootedCase):
 
     def test_the_directories_are_pinned(self):
         self.assertEqual([str(d) for d in rt.DUAL_MODE_DIRS], [
-            "tests/scalar", "doc/modules/ROOT/examples/verifying",
+            "tests/scalar", "tests/memory", "doc/modules/ROOT/examples/verifying",
             "doc/modules/ROOT/examples/error-messages",
-            "doc/modules/ROOT/examples/integer-semantics"])
+            "doc/modules/ROOT/examples/integer-semantics",
+            "doc/modules/ROOT/examples/memory"])
 
     def test_the_documentation_examples_of_the_m3_pages_are_covered(self):
         for page in ("verifying", "error-messages", "integer-semantics"):
@@ -12172,6 +12175,74 @@ class DualModeTests(RootedCase):
         # the neighbouring directories are free
         self.assertIsInstance(self.header("doc/modules/ROOT/examples/verifying2/a.c",
                                           "// expect: verified\n"), rt.Expectation)
+
+
+class MemoryAreaTests(RootedCase):
+    """tests/memory (decision 0032) is an area like tests/scalar: its `.c` tests run in both languages, its
+    positives need native-ok and a must-fail twin that expects an `error` in every mode, and its twins live in
+    tests/memory/negative.  Each rule has a twin here that fails if the area is dropped from the harness's tables."""
+
+    POSITIVE = "// expect: verified\n// expect: native-ok\n// mode: c23, c++20\nint f(void);\n"
+    NEG = "tests/memory/negative"
+
+    def header(self, rel, text):
+        return rt.read_header(self.put(rel, text))
+
+    def problems(self):
+        return {str(f.relative_to(self.root)): m for f, m in rt.cross_file_problems()}
+
+    def test_a_memory_c_test_runs_in_both_modes(self):
+        self.put("tests/memory/p.c", self.POSITIVE)
+        for rel in ("tests/memory/a.c", f"{self.NEG}/a.c", "doc/modules/ROOT/examples/memory/a.c"):
+            with self.subTest(rel):
+                err = self.header(rel, "// expect: error check @ L9\n// twin: tests/memory/p.c\n")
+                self.assertIsInstance(err, rt.HeaderError)
+                self.assertIn("must run in both modes", str(err))
+
+    def test_a_positive_memory_test_needs_native_ok(self):
+        for rel in ("tests/memory/a.c", "doc/modules/ROOT/examples/memory/a.c"):
+            with self.subTest(rel):
+                err = self.header(rel, "// expect: verified\n// mode: c23, c++20\n")
+                self.assertIsInstance(err, rt.HeaderError)
+                self.assertIn("native-ok", str(err))
+
+    def test_a_memory_positive_needs_an_error_twin_in_the_memory_negative_directory(self):
+        self.put("tests/memory/a.c", self.POSITIVE)
+        found = self.problems()
+        self.assertEqual(list(found), ["tests/memory/a.c"])
+        self.assertIn("under tests/memory/negative/", found["tests/memory/a.c"])
+        self.put(f"{self.NEG}/e.c", "// expect: error null-dereference @ L9\n// mode: c23, c++20\n"
+                                    "// twin: tests/memory/a.c\nint g(void);\n")
+        self.assertEqual(self.problems(), {})
+
+    def test_a_rejected_twin_is_not_an_error_twin_in_the_memory_area(self):
+        self.put("tests/memory/a.c", self.POSITIVE)
+        self.put(f"{self.NEG}/r.c", "// expect: rejected cerastes-unsupported_type @ L9\n"
+                                    "// mode: c23, c++20\n// twin: tests/memory/a.c\nint g(void);\n")
+        found = self.problems()
+        self.assertIn("it has only a `rejected` twin", found["tests/memory/a.c"])
+
+    def test_an_error_twin_of_the_memory_area_must_run_in_both_modes(self):
+        self.put("tests/memory/a.c", self.POSITIVE)
+        self.put(f"{self.NEG}/e.c", "// expect: error permission @ L9\n// c-only: test\n"
+                                    "// twin: tests/memory/a.c\nint g(void);\n")
+        self.assertIn("no `error` twin runs in c++20", self.problems()["tests/memory/a.c"])
+
+    def test_the_scalar_negative_directory_is_not_the_memory_twin_directory(self):
+        self.put("tests/memory/a.c", self.POSITIVE)
+        self.put("tests/scalar/negative/e.c", "// expect: error check @ L9\n// mode: c23, c++20\n"
+                                              "// twin: tests/memory/a.c\nint g(void);\n")
+        self.assertEqual(list(self.problems()), ["tests/memory/a.c"])
+
+    def test_a_memory_negative_test_needs_a_twin_and_an_error(self):
+        err = self.header(f"{self.NEG}/n.c", "// expect: error check @ L9\n// mode: c23, c++20\n")
+        self.assertIsInstance(err, rt.HeaderError)
+        self.assertIn("needs `// twin:", str(err))
+        self.put("tests/memory/a.c", self.POSITIVE)
+        err = self.header(f"{self.NEG}/m.c", "// expect: verified\n// expect: native-ok\n"
+                                             "// mode: c23, c++20\n// twin: tests/memory/a.c\n")
+        self.assertIsInstance(err, rt.HeaderError)
+        self.assertIn("must expect at least one error", str(err))
 
 
 class ErrorTwinTests(RootedCase):
@@ -12274,7 +12345,7 @@ class ErrorTwinTests(RootedCase):
         self.assertEqual(self.problems(), {})
 
     def test_the_areas_are_pinned(self):
-        self.assertEqual([str(a) for a in rt.ERROR_TWIN_AREAS], ["tests/scalar"])
+        self.assertEqual([str(a) for a in rt.ERROR_TWIN_AREAS], ["tests/scalar", "tests/memory"])
 
     def test_the_acceptance_count_counts_error_twins_only(self):
         for name in "abcd":

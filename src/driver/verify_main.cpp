@@ -351,6 +351,10 @@ int verify_command(int argc, char** argv) {
   // C; already an error in C++) and #3255 (C: a UTF-16 literal such as `u'\U0001F600'` does not fit and is truncated; C++ has
   // a hard error #1535 of its own).  The diagnostic pragmas that could lower them again are rejected in verified files.
   edg.push_back("--diag_error=1422,1654,26,3255");
+  // C: pointers of incompatible object types are warnings in EDG's C mode and errors in C++ (decision 0032 item 3; P56, audit round 4's
+  // reopened item): #42 (`pi == pl`), #144 (`long *pl = pi;`, and `int *c = pc;` from a `const int *`), #513 (`pl = pi;`) and #167 (an
+  // incompatible argument).  A conversion the front end accepts there would otherwise reach the encoder as a node it must reject.
+  if (c_mode) edg.push_back("--diag_error=42,144,167,513");
   for (const std::string& d : a.includes) edg.push_back("-I" + d);
   for (const std::string& m : a.macro_options) edg.push_back(m);
   edg.push_back(a.file);

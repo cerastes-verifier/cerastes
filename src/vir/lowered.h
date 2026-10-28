@@ -6,6 +6,7 @@
 // Names are final Viper identifiers; every check that can fail carries what a user must be told about it.
 #pragma once
 
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
@@ -26,13 +27,16 @@ enum class UnOp { Neg, Not };
 enum class BinOp { Add, Sub, Mul, Lt, Le, Gt, Ge, Eq, Ne, And, Or, Implies };
 
 struct LExpr {
-  enum class Kind { IntLit, BoolLit, Var, Un, Bin, Ite, Fn, ModPow2, DivPow2 } kind = Kind::IntLit;
-  std::string text;          // IntLit: a decimal (possibly negative); Var: the name; Fn: the prelude function; ModPow2, DivPow2: the divisor, 2^k, a decimal
+  // Null, Field, PermOf, Write, NoPerm, Acc and Dom are the memory model's (decision 0032 item 5; decision 0028 item 2); they appear only in
+  // a program that has a cell or a pointer, and `LProgram::memory` says so.
+  enum class Kind { IntLit, BoolLit, Var, Un, Bin, Ite, Fn, ModPow2, DivPow2, Null, Field, PermOf, Write, NoPerm, Acc, Dom } kind = Kind::IntLit;
+  std::string text;          // IntLit: a decimal (possibly negative); Var: the name; Fn: the prelude function; ModPow2, DivPow2: the divisor, 2^k, a decimal;
+                             // Field, PermOf, Acc: the Viper field (`v_int`, `d_int`, `lv`); Dom: the domain function (`loc`, `len`, ...)
   bool bool_value = false;   // BoolLit
   UnOp un = UnOp::Neg;
   BinOp bin = BinOp::Add;
-  E a, b, c;                 // operands; Ite: condition, then, else
-  std::vector<E> args;       // Fn
+  E a, b, c;                 // operands; Ite: condition, then, else; Field, PermOf, Acc: the receiver (a Ref expression in `a`)
+  std::vector<E> args;       // Fn, Dom
 };
 
 E int_lit(std::string decimal);
@@ -43,6 +47,17 @@ E not_(E a);
 E bin(BinOp op, E a, E b);
 E ite(E c, E a, E b);
 E fn(std::string prelude_name, std::vector<E> args);
+// The memory model (decision 0032 item 5).
+E null_();                                  // Viper's `null`
+E field(E recv, std::string field_name);    // `recv.field` (a heap read: the lowering has checked the permission before)
+E perm_of(E recv, std::string field_name);  // `perm(recv.field)`
+E write_perm();                             // `write`
+E no_perm();                                // `none`
+E acc(E recv, std::string field_name);      // `acc(recv.field)`, in an `exhale` only
+// An application of one of the Block domain's functions (`loc`, `len`, `block_of`, `offset_of`, `member`, `parent_of`, `index_of`,
+// `lvloc`); any other name is refused (std::logic_error), so lowering cannot spell a domain function the prelude does not declare.
+E dom(const std::string& domain_function, std::vector<E> args);
+bool is_domain_function(const std::string& name);
 // a % 2^k, Viper's `%` (the non-negative remainder for a positive divisor).  The only way to build a `%`: the divisor is a power of two
 // (k >= 0), which is what decision 0026 item 7 needs for a constant mask, so it cannot stand for a C `%` (C's `%` goes through the
 // prelude, decision 0010).
@@ -88,8 +103,10 @@ struct LInvariant {
 };
 
 struct LStmt {
-  enum class Kind { Assign, Assert, Call, If, While, Goto, Label, Block, Comment } kind = Kind::Block;
-  std::string name;            // Assign: target; Call: the method; Goto, Label: the label; Comment: the text
+  // FieldAssign and Exhale are the memory model's (decision 0032): `name.field := expr` (name: a Ref variable) and `exhale expr`.
+  enum class Kind { Assign, Assert, Call, If, While, Goto, Label, Block, Comment, FieldAssign, Exhale } kind = Kind::Block;
+  std::string name;            // Assign: target; Call: the method; Goto, Label: the label; Comment: the text; FieldAssign: the receiver variable
+  std::string field;           // FieldAssign: the field written
   E expr;                      // Assign: value; Assert: the condition; If, While: the condition
   Check check;                 // Assert; Call (its call.precondition backstop)
   bool has_termination = false;  // Call: the callee has a termination measure, so Silicon may report termination.failed here
@@ -105,9 +122,12 @@ struct LStmt {
 
 // ---- methods and the program ------------------------------------------------------------------------------------
 
+// The Viper type of a variable: Int, Bool, or Ref (a pointer; an address-taken local, which holds its cell).
+enum class LType { Int, Bool, Ref };
+
 struct LVar {
   std::string name;
-  bool is_bool = false;
+  LType type = LType::Int;
 };
 
 struct LClause {
@@ -136,6 +156,10 @@ struct LMethod {
 struct LProgram {
   std::vector<LMethod> methods;
   std::set<std::string> prelude_used;    // the prelude functions the methods call (emit.cpp adds their dependencies)
+  // The memory prelude (decision 0032 item 5), emitted only when `memory` is set: the fields `v_<t>: <type>` and `d_<t>: Bool` of each cell
+  // type `<t>` (the key; the value is the type of `v_<t>`), `field lv: Bool`, and the Block domain with its four axioms.
+  bool memory = false;
+  std::map<std::string, LType> cell_types;
 };
 
 }  // namespace cerastes::low

@@ -131,6 +131,37 @@ std::set<std::string> prelude_closure(const std::set<std::string>& used) {
   return all;
 }
 
+std::string memory_prelude_text(const std::map<std::string, std::string>& cell_types) {
+  std::string t = "\n// the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell\n";
+  for (const auto& [suffix, type] : cell_types) {
+    t += "field v_" + suffix + ": " + type + "\n";
+    t += "field d_" + suffix + ": Bool\n";
+  }
+  t += "field lv: Bool\n";
+  t += R"(
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+)";
+  return t;
+}
+
 std::string prelude_text(const std::set<std::string>& used) {
   const std::set<std::string> all = prelude_closure(used);
   std::string t;

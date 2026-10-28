@@ -1,57 +1,75 @@
-# Handoff after S5 — Linux CI (record 0031) (2026-10-28); M4.5a's memory-model design before it (records 0027–0030)
+# Handoff after M4.5b1a — the memory model and address-taken locals inside one function (records 0032–0036) (2026-10-28)
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
 rediscover. It was trimmed at the end of M4.4c (owner, 2026-10-26) to what is live: the full text up to M4.4c, with the
 finished sessions' plans, results and answered questions, is `git show 1fcc43b:internal/handoff.md` (M4.4c's and S4's
-own sections: `git show fce46de:internal/handoff.md`; M4.4d's: `git show 9017105:internal/handoff.md`); earlier handoffs
+own sections: `git show fce46de:internal/handoff.md`; M4.4d's: `git show 9017105:internal/handoff.md`; S5's §1–§2 and
+§7: `git show 794e960:internal/handoff.md`); earlier handoffs
 are `git show 60d3fbe:internal/handoff.md` (M4.1) and `git show a4da52c:internal/handoff.md` (M3 close-out).
 
 ## 1. State
 
-S5 is done on branch `s5-linux-ci` (based on local `main` `72e30b3`, which merges M4.5a's PR #13; result in
+M4.5b1a is done on branch `m4.5b1a-pointers` (based on local `main` `794e960`, which merges S5; result in
 `internal/status.md`):
-- **Record 0031** (amends 0001, 0015 item 6, 0016 item 13): a second CI job, `check-linux`, on GitHub's `ubuntu-26.04`
-  x86-64 image (owner, §8 question 57), in both tiers, set up by `scripts/ci-linux.sh`; `bootstrap.sh` for Linux;
-  glibc's two `assert` expansions; the `posix_spawn` chdir and a link group for GNU ld; five Embedded C extensions off
-  in `edg_config` so that both front ends accept the same language and compile in the same 386 options.
-- **The rehearsal** ran in an `ubuntu:26.04` amd64 container on the owner's Mac (Docker Desktop, Rosetta, 4 CPUs),
-  because the box was not answering then (no ping, SSH timed out). `ci-linux.sh` passed every assertion there, and the PR
-  tier of `check.sh` against `72e30b3` agreed with the Mac's full run on every outcome but 12 runs of 8 tests that name
-  what only the macOS SDK declares; with your answer (§8, "platform tag") they are `platform: macos` and the rest
-  passes (record 0031 item 6). Of the `.vpr` both produced, only parameter names of trusted libc methods and the
-  system paths in maps differ.
-- **The full check on Linux** ran natively once the box answered (`05b2b8b`, `ubuntu:26.04` container on x86-64,
-  `-j 8`): `ci-linux.sh` green, `check.sh` all green in 79 min (5752 passed, 0 failed, 9 skipped). Every outcome
-  equals the Mac's full run but the 8 tagged tests' 14 runs (named skips there); 71 of 4057 `.vpr` and map files
-  differ, all of the three benign kinds (record 0031 item 6). The container is removed; the checkout
-  `~/cerastes-ci` and the image `cerastes-s5:runner` stay on the box (§8 question 62).
-- **Not yet seen:** a run on GitHub's real `ubuntu-26.04` runner (the session never pushes; §2), in particular how long
-  its full check takes on 4 vCPUs (§8 question 63).
-- **The first run on GitHub's runner** (this branch's PR, PR tier) stopped at `ci-linux.sh`'s environment step:
-  `LD_LIBRARY_PATH is set`, exported by `actions/setup-python` on Linux. The follow-up commit drops that step from
-  the Linux job, which now uses the image's Python 3.14 as the rehearsal did (record 0031 item 2); the assertion
-  is unchanged. Push the branch again (§2 step 1).
+- **Record 0032** (the slice of 0028 that needs no contract) and **records 0033–0036** (the four axioms). Pointers to
+  integers, `bool` and enumerations in locals and expressions; address-taken locals as one-slot blocks allocated at
+  block entry; `&`, `*`, statement-level writes, NULL, `==`/`!=`, truth tests, `?:`; `null-dereference`, `permission`,
+  `lifetime`; scope exits at fall-through and `return`; C's incompatible pointer types as errors. Everything that needs a
+  contract, a loop over memory or a jump out of a cell's block is rejected (record 0032 item 10) and pinned.
+- **Audits:** round 1 on the records (one blocking item, `restrict` on the pointer itself; eight should-fix items, all
+  taken), round 2 on the code (one blocking item, a discarded pointer value without its liveness check; three should-fix
+  items, all taken), and one re-audit of the round-2 fixes. What was not taken is in §3.
+- **S5's PR #14** was open at the start, its Linux job green and its macOS job red only on a 0027 mask timeout (§3).
 
-The EDG pin is unchanged (`f0ed5525af`). M4.5a's state (records 0027–0030, the fixtures in `tests/viper-smoke/memory/`)
-is as its handoff left it; §3 and §4.4 carry what M4.5b1–f3 need.
+The EDG pin is unchanged (`f0ed5525af`).
 
-## 2. Owner steps after S5, in this order
+## 2. Owner steps after M4.5b1a, in this order
 
-1. **This branch.** Push it and open its PR (draft first, as for S2: 0016 item 4): `git push origin s5-linux-ci`. The PR
-   runs both jobs in the PR tier.
-2. **The full check on Linux.** From the branch, dispatch the CI workflow (`gh workflow run CI --ref s5-linux-ci`, or
-   the Actions page): both jobs run the full check. A first run that differs from the rehearsal (an assertion of
-   `ci-linux.sh` on the real image, a test outcome) is drift (0016 item 10): it comes back to a session with the
-   job's evidence, never a loosened assertion. The values most likely to differ on the real image: the clang banner
-   and package version if the image's `clang-21` is not Ubuntu's archive build, and `libc6-dev`'s version (reported,
-   not asserted). Watch the Linux job's time: the macOS job's full check took 145 min on 3 cores (0016 item 9), and
-   on 4 vCPUs the Linux one may reach the 220-minute limit (question 63); a timed-out job still uploads its logs.
-3. **Required checks.** Once both jobs are green twice, decide whether `check (Linux, Ubuntu 26.04 x86-64)` becomes a
-   required check on `main` (§8 question 61).
-4. **Questions.** Answer §8 (questions 59–62). Then M4.5b1 (§4.4).
+1. **S5** (PR #14), if not merged yet: merge it (its macOS failure is the known mask flake, §3).
+2. **This branch.** Push it and open its PR: `git push origin m4.5b1a-pointers`. Both CI jobs run the PR tier; the mask
+   flake may show again on macOS.
+3. **The main checkout's `internal/handoff.md`** carries your answers to questions 59–63, which this branch committed
+   (`c1f0448`): drop the local copy (`git checkout internal/handoff.md`) before pulling.
+4. **Questions.** Answer §8 (question 64). Then M4.5b1b (§4.4).
 
 ## 3. Open audit notes (condensed; the full notes are in the commit named above)
+
+**From M4.5b1a** (audit round 1 on records 0032–0036, round 2 on the code, a re-audit of round 2's fixes):
+- *Not pinned:* a bare `p;` with `p` dangling reports `lifetime` (checked by hand), but no test holds it: EDG also warns
+  #174 (`expr_has_no_effect`), and #550 in C++, which a test with an `error` line may not list
+  (`VERIFY_WARNING_TAGS` is closed). The `(void)p;` twins pin the rule.
+- *The scope-exit check cannot fail in b1a* (record 0032 item 8; round 2 agreed after trying fall-through, nested
+  returns, switch bodies, `goto` inside the block, `abort`, `break` out of loops that hold no pointer): its must-fail
+  twin, a callee that consumes the cell, is b1b's first test. M4.8's mutation run will count a mutant of that assert as
+  a survivor until then; record it as explained.
+- *Evidence not committed by M4.5a:* P52, P54 and P55 exist only as `build/m4.5a/P5{2,4,5}.md` in the worktree; record
+  0029 cites them as in `il-inventory.md`. b1b needs P52 (the `owning` attribute's IL) and should add it; P54 goes with
+  M4.5b2, P55 with M4.5d1. P51 was added in b1a, with a correction: the address of a static-storage object folds to an
+  address constant in every position, not only in initializers.
+- *Pointer `?:` as an `if`:* Silicon refuses a Viper `ite` of `Ref`s as a field receiver (insufficient permission even
+  after `perm == write` asserts), so lowering assigns a temporary in an `if` (`internal/encoding.md` §3). Keep it when
+  b1b passes pointers to calls.
+- *For b1c:* a compound store now lowers its address once (round 2); b1c's writes inside expressions rely on it.
+  Round 2 also pinned a cell that stays live across a loop that does not touch it (`cell_across_loop.c`): Viper keeps
+  the cell's value across the loop because the loop's invariant does not mention it; b1c's automatic invariants must
+  keep that frame.
+- *Over-strict, fail closed (re-audit):* `*(g() ? &x : &y) += 1` is refused as "a call that is reachable twice" (the
+  compound store's address holds a call) and `*(q = p) += 1` as unsequenced; both are defined C. Revisit with b1c's
+  writes inside expressions; the wording is misleading for the first.
+- *Messages:* the new rejections reuse `unsupported_type`, `unsupported_expression` and `unsupported_statement`, whose
+  fixed texts cite "(decision 0012)" (the carried note on record citations below applies); the type message still says
+  "only integer types, bool and the enumerations … are" although pointers to them are now accepted in locals.
+
+**CI flake on `main` (M4.5b1 planning, 2026-10-28): fixed after M4.5b1a** (owner: "fix or remove the single consistently
+failing CI test"; record 0027's amendment: prover history across the family's seven mask-chain methods; now one chain
+per file, no expectation changed). The note as written: Three of 0027's `^` round-trip
+must-fail tests have each run to the 300 s timeout once in C23 on GitHub's macOS runner, one per run:
+`mask_or_xor_round_trip_chain_three_post.c` (M4.5a's merge push, run `40686322936`), `..._chain_high_part_post.c` (the
+nightly `40700798811`) and `..._chain_value_off_by_one_post.c` (S5's PR, `40739057963`; its Linux job was green). They
+pass locally. Record 0027 item 4 measured false claims refuted in 2–5 s and noted that C's `((res == x) ? 1 : 0) != 0`
+alone moves a case between 3 s and a timeout; the runner's 3 cores make it worse. A future session may reproduce it
+under load (`-j 3`, parallel verifiers) before deciding.
 
 **From S5** (one Opus round on the encoder diff: one blocking item, fixed and re-audited; record 0031 items 5–7):
 - *Fixed:* glibc's C23 matcher first accepted any folded constant as the comma's left operand, so a hand-written
@@ -299,20 +317,44 @@ is easy add it, if not defer"; `ubuntu-24.04` x86-64 only; MSVC and arm64 Linux 
   step can then run on this runner.
 - P55's glibc half (how a vlibc shim meets glibc's `<stdlib.h>`) is measured here, ahead of M4.5d1.
 
-**M4.5b1 Pointers to scalars and address-taken locals.** The four axiom records and the lint tags
-(`// cerastes:domain-ok`, `// cerastes:axiom-ok`); amendments of 0011 item 10 (four categories), 0012 item 12 (pointer
-types to scalars accepted), 0020 item 4. Address-taken locals (the IL's flag, P51) as one-slot blocks from a trusted
-allocation, the scope-exit check (`lifetime`); `&x`, `*p`, NULL (`NULL`, `0`, C23 and C++ `nullptr`); pointer
-parameters and results with `WF`, `owns`/`reads` (the ghost `rd`)/`old` in both spellings; `[[cerastes::owning]]` on
-parameters and functions (registered then, targets `p` and `r`: `check_attributes` skips registered attributes, so
-never earlier); `==`/`!=`; the explicit checks of 0028 item 11 (single cells; the marked range rows come with M4.5e1);
-sequencing on objects (0028 item 12) and the placement rule (item 13). Liveness (0028 item 3a) and `cerastes_live`/`cerastes::live`;
-calls to `main` rejected. Categories `permission`, `null-dereference`, `lifetime`, `unsequenced`, `pointer-comparison`
-(the `==` exception). Ports: the tutorial's `swap`, `inc`, `address_of_local.c`'s scalar functions (its
-`should_fail` at L158, L174, L185: a cell a callee consumed, reported at the closing brace). The Memory and ownership
-page starts; Error messages gains four sections. Emitted Viper is compared with the fixtures' shapes. Stop rules: any
-existing test's Viper changes (0028 item 1 promises none); a shape where the operation's own Viper error comes first.
-If the session will not fit 4 h, `reads` and C's spellings move to a b1′.
+**M4.5b1 is three sessions** (owner, 2026-10-28, M4.5b1 planning: a design pass put the session above at well over
+27 agent-hours for `src/vir` and `src/viper` alone; plan `~/.claude/plans/using-plan-md-and-handoff-md-temporal-map.md`).
+Each rejects what a later one makes precise (fail closed). **Pre-approved** (owner): b1b and b1c may retire or re-expect
+exactly the b1a rejection tests listed for them in b1a's status entry, and no others; an existing test whose only point
+was "pointers are rejected" is retired where its construct is accepted (listed).
+
+**M4.5b1a The model and address-taken locals inside one function: done (2026-10-28; records 0032–0036, the status
+entry). The plan as written follows.** The `Block`
+domain with the four axioms and the lint tags (`// cerastes:domain-ok`, `// cerastes:axiom-ok`; `new` refused);
+address-taken locals (the IL's flag, P51) as one-slot blocks from a trusted `alloc_T`, allocated at block entry (C23
+6.2.4p6, amending 0028 item 4) and before a switch's dispatch; the scope exit at fall-through and `return` (`lifetime`);
+`&x`, `*p` reads, statement-level writes, NULL in every spelling, `==`/`!=` (the one-past-the-end exception as an
+internal row), truth tests, pointer locals, `?:`; explicit checks (`null-dereference`, `permission`, `lifetime`, the
+flag); C's incompatible pointer types (#42, #144, #513, #167) as errors in verify mode. Rejected until later: pointer
+parameters and results, `&param`, `T**`, `void*`, struct pointers, pointer casts, loops that hold a pointer node or a
+cell, `return` in a loop while a cell is live, `goto`/`break` out of a cell's scope, writes to cells inside expressions.
+The Memory and ownership page starts; Error messages gains three sections. P51 lands in `il-inventory.md`.
+
+**M4.5b1b Pointer parameters and contracts.** Pre-approved flips (owner): `tests/scalar/negative/reject_pointer.c`,
+`tests/memory/negative/reject_{address_of_param,implicit_function_pointer_argument,pointer_param,pointer_result}.c`.
+Its first test is the consuming callee that makes b1a's scope-exit check fail (§3). `WF(p)` on pointer parameters and results; `owns`/`reads`/`live`/`old(*p)`
+in both spellings (`<cerastes.h>`'s `cerastes_` forms and `cerastes::live`, 0029 item 3), with the ghost amounts, the
+caller's choice of fractions and the case splits (0028 item 8); the framing check of contracts; the call's and the
+return's permission clauses one by one; the entry separation; `&param`; `pointer-comparison` (the internal row of b1a
+becomes the category); the consuming callee whose caller fails its scope-exit `lifetime` check (b1a's missing twin).
+Range facts of a cell's value belong in `owns`/`reads` (design pass: without them Silicon's own range clauses fail
+first). `cerastes_old(x)` of a by-value parameter stays a Viper local (pin it, 0029 item 3). The Annotations page's
+spec-function table is rewritten.
+
+**M4.5b1c Ownership, sequencing, loops, ports.** Pre-approved flips (owner): `tests/memory/negative/reject_{address_of_pointer,break_out_of_switch_with_cell,cell_in_invariant,cell_in_measure,cell_postfix_value,goto_out_of_cell_scope,loop_cell,loop_pointer,pointer_to_pointer,return_in_loop_with_cell,write_in_assignment_value}.c`. `[[cerastes::owning]]` on parameters and functions (registered then,
+targets `p` and `r`: `check_attributes` skips registered attributes, so never earlier) and `owns_block`; sequencing on
+objects (0028 item 12, `unsequenced`) and the placement rule (item 13); cells in loops with **hybrid permission
+invariants** (owner, 2026-10-28: automatic for places reached through an address-taken local or a pointer parameter the
+function never reassigns, `owns`/`reads` in `CERASTES_INVARIANT` for everything else; a missing one is reported at the
+access); `T**`; `goto`/`break` out of a cell's scope; the aliasing trap. Ports: `address_of_local.c`'s `inc` (no
+tutorial `swap`/`inc` file exists), `swap.c` L4-11, `address_of_local.c`'s scalar functions (its `should_fail` at L158,
+L174, L185: a cell a callee consumed, reported at the closing brace). The Memory and ownership page completed. If it
+will not fit 4 h, the ports move to M4.8.
 
 **M4.5b2 Globals, `static` locals, initialization through pointers.** Mutable globals as `GB_g()` blocks, `program_start`
 for `main`, frames through contracts (`owns(g)`); `static` locals (0028 item 5: the implicit `owns` or a rejection in a
@@ -541,6 +583,13 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
   self-test into `build/<session>-baseline-vir`) before any build; agents edit meanwhile but build only after it, with
   `lockf build/<session>/build.lock cmake --build build/cmake`, and nothing builds while `check.sh` runs. A session that
   moves the pin runs `check.sh` once early.
+- **A baseline that agents cannot disturb** (M4.5b1a): run it from the main checkout's own build (`main` there, its own
+  `build/` and `build/vpr`), copying its `build/vpr` into the worktree's `build/<session>-baseline-vpr`. Then the
+  worktree's build is free for the implementers from the start; in M4.5b1a an agent's build relinked `build/cerastes`
+  under a baseline that shared it. Run `scripts/bootstrap.sh` in the worktree first when it was last built for another
+  branch (a stale EDG stamp stops `run_tests.py`).
+- **Twins and Silicon's continuation:** after a failed check Silicon goes on with the failing value unconstrained, so a
+  twin whose failed read flows into an `ensures` fails twice; give such twins an `ensures` that holds for any value.
 - **Compiler matrices** (P41, P48, P50): clang and GCC, both modes, three tiers (no flag, `-Wall`, `-Wall -Wextra`); the
   union rule of 0020 item 5 rejects what warns at the first two tiers. Measure the near misses too, natively: a positive
   that holds them must compile with `-Wall -Wextra -Werror`.
@@ -556,17 +605,16 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
 - **A test that loses an `expect:` line** (pre-approved) keeps its line numbers with a comment in its place
   (M4.4c, the four `reject_assert_shape_*.c`).
 
-## 7. Acceptance of S5
+## 7. Acceptance of M4.5b1a
 
-The list is the one in `internal/status.md` (S5, "Acceptance"); M4.5a's is in `git show 72e30b3:internal/status.md`,
-M4.4d's in `git show 9017105:internal/status.md`.
+The list is the one in `internal/status.md` (M4.5b1a, "Acceptance"); S5's is in `git show 794e960:internal/status.md`.
 
 ## 8. Questions for the owner
 
 Each has a recommended answer. Answer inline, as before. Answered questions (1–48) are recorded in the decision records,
 in the commit named at the top and in `43f0f81` (questions 5, 10–12 and 43–48); 49–52 are answered below (`b231f32`) and
-recorded in records 0027 and handoff §3–§4; 53–58 are answered below (`9ac7ca7`; 57 and 58 used by S5, record 0031).
-Open: 59–63.
+recorded in records 0027 and handoff §3–§4; 53–58 are answered below (`9ac7ca7`; 57 and 58 used by S5, record 0031);
+59–63 are answered below (`c1f0448`, used by M4.5b1 planning). Open: 64.
 
 **M4.4d, 2026-10-27 (answered):**
 
@@ -667,20 +715,42 @@ the macOS SDK declares): "Platform tag" — `; platform: macos` on their `mode:`
     `quick_exit` redeclaration can only run against glibc. *Recommended: add them as `platform: linux` tests in M4.5d1,
     with P55's fix (vlibc's shim meets glibc's `<stdlib.h>` there anyway), and tighten the `sizeof` operand to
     `__assert_single_arg` then (§3).*
+
+Follow recommendation. Tests should be portable to the greatest extent possible.
+
 60. **GCC 16 on Linux is a snapshot** (`16.0.1 20260322`, Ubuntu 26.04's newest; 16.2.0 only from 26.10). *Recommended:
     keep it while the native-ok runs agree with the Mac's GCC 16.2.0 (they did in the rehearsal: 1078 runs each); move
     to 16.2.0 when 26.04 gets it or the image moves, as a pin change of 0001, 0031 and `ci-linux.sh` together.*
+
+Keep it for now. In the future we need to support a few older compilers anyway.
+
 61. **Required checks.** *Recommended: make `check (Linux, Ubuntu 26.04 x86-64)` a required check on `main` after its
     first two green runs (one full, by dispatch or nightly; one PR tier), like `check (macOS, …)`.*
+
+I have made the check required.
+
 62. **The box's Linux checkout.** The box did not answer for most of the session, so the rehearsal used Docker on the
     Mac (the PR tier took 43 min there under Rosetta); when it came back, the full check ran on it natively in 79 min
     at `-j 8`. Its checkout `~/cerastes-ci` (5.8 GB) and image `cerastes-s5:runner` (3.2 GB) are still there, on a
     disk 92% full (35 GB free). *Recommended: keep both until GitHub's Linux job is green twice (they reproduce a
     runner difference in minutes), then the next session that uses the box removes them.*
+
+Instead of the box you may use ssh matt@clang4.cpp.al from here on out. The key is `~/.ssh/id_rsa`.
+
 63. **The Linux job's time limit.** The job has the macOS job's `timeout-minutes: 220` (0016 item 9: max(150, 1.5 ×
     the longest full check seen), and the guard allows at most 220). The box ran the full check in 79 min on 16
     threads, but GitHub's runner has 4 vCPUs, and the macOS job already takes 145 min on 3 cores, so the Linux full
     check may exceed 220. *Recommended: run the first dispatch as is; if the Linux job takes more than 147 min (220 /
     1.5) or times out, a short session applies item 9's rule to that job alone (its own bound in the guard, below
     GitHub's 360-minute job limit) from the run's evidence; the PR tier is not affected (43 min under Rosetta).*
+
+Follow recommendation.
+
+**M4.5b1a, 2026-10-28:**
+
+64. **`restrict` pointers** are rejected (record 0032 item 2; audit round 1: `int *restrict p = &x;` then `x = 2;
+    return *p;` is undefined, C23 6.7.3.1, and would verify). `restrict` is common on library parameters
+    (`memcpy(void *restrict, …)`), which vlibc's contracts will meet in M4.5d1/M4.6. *Recommended: keep rejecting it in
+    user code until a session models it (an M8 inventory entry), and let vlibc's trusted declarations carry it, since a
+    trusted contract states its own separation (`owns` of both ranges implies they do not overlap).*
 

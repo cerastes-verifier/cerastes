@@ -4,4 +4,5 @@
 * xref:ordinary-compilers.adoc[Building with ordinary compilers]
 * xref:verifying.adoc[Verifying a program]
 * xref:integer-semantics.adoc[Integer semantics]
+* xref:memory.adoc[Memory and ownership]
 * xref:error-messages.adoc[Error messages]

@@ -9,7 +9,7 @@ at the line of the C or pass:[C++] source that causes it:
 <file>:<line>: note: <what the note says>
 ----
 
-The *category* names what could not be proved. There are thirteen, and each has a
+The *category* names what could not be proved. There are sixteen, and each has a
 section below. A *note* line follows an error when a second place matters: the
 clause of a contract that failed, or the callee's clause that a call does not
 meet. Errors are sorted by file, line and category, and the exit status is 1
@@ -370,4 +370,94 @@ every way to it:
 [source,c]
 ----
 include::example$error-messages/uninitialized_fixed.c[tag=source]
+----
+
+== null-dereference
+
+A pointer that may be null is dereferenced: read or written through `*p`. It
+is reported at the dereference.
+
+Dereferencing a null pointer is undefined behaviour in C and pass:[C++]. Look for
+a path on which the pointer is still null when it is used: an initialization to
+`NULL` that a branch does not replace, or a pointer chosen by a condition
+(`p = c ? &x : NULL`).
+
+[source,c]
+----
+include::example$error-messages/null_dereference_error.c[tag=source]
+----
+
+[source,console]
+----
+null_dereference_error.c:14: error: null-dereference: dereferences `p`, which may be null
+----
+
+*How to fix it.* Test the pointer on every path that reaches the dereference.
+cerastes follows the paths of the program, so a test anywhere before the use is
+enough, as long as the pointer does not change in between:
+
+[source,c]
+----
+include::example$error-messages/null_dereference_fixed.c[tag=source]
+----
+
+== permission
+
+A place is read or written through a pointer without the right to it. In this
+version that means the object the pointer points to may have ended: a pointer
+to a local variable used after the variable's block. It is reported at the read
+or the write.
+
+A local variable exists only until its block ends; a pointer to it is then
+*dangling*, and reading or writing through it is undefined behaviour in C and
+pass:[C++]. xref:memory.adoc[Memory and ownership] describes the lifetimes
+cerastes checks.
+
+[source,c]
+----
+include::example$error-messages/permission_error.c[tag=source]
+----
+
+[source,console]
+----
+permission_error.c:13: error: permission: reads `*p` without owning it: the object it points to may have ended
+----
+
+*How to fix it.* Use the pointer only while its object exists: read through it
+inside the block, or declare the object in a block that lasts as long as the
+pointer is used:
+
+[source,c]
+----
+include::example$error-messages/permission_fixed.c[tag=source]
+----
+
+== lifetime
+
+A pointer is used after the object it points to may have ended, or an object's
+address may still be in use when its lifetime ends. A use is reported where the
+pointer's value is used; the end of a lifetime at the closing brace or the
+`return` that ends it.
+
+After its object ends, the value of a pointer is indeterminate in C and
+pass:[C++], and *any* use of it is undefined, not only a dereference: a
+comparison (even with `NULL`), a copy, or a test of its truth. Look for a
+pointer that is still used after the block of the variable it points to.
+
+[source,c]
+----
+include::example$error-messages/lifetime_error.c[tag=source]
+----
+
+[source,console]
+----
+lifetime_error.c:14: error: lifetime: uses `p` after the object it points to may have ended
+----
+
+*How to fix it.* Finish every use of the pointer while its object exists, or give
+the pointer a new value before it is used again:
+
+[source,c]
+----
+include::example$error-messages/lifetime_fixed.c[tag=source]
 ----

@@ -122,6 +122,7 @@ Every test file starts with expectation lines that `scripts/run_tests.py` checks
 | M4.4d Exact sets, constant masks | 2026-10-27 | 0026 | a precondition and a comma's value get their exact sets, today's sets as the fallback (one `requires` per argument accepted); constant masks as remainders, the `bit_mask.c [c23]` hang fixed |
 | M4.5a Memory-model design · `\|`/`^` masks | 2026-10-27 | 0027–0030 | the C memory model designed and audited (a pointer as a `Ref` over a `Block` domain with four axioms, member blocks, liveness, explicit checks; fixtures in `tests/viper-smoke/memory/`), `[[cerastes::owning]]`, P4222's markers, C's spec functions, vlibc; `\|`/`^` with constant masks decided; M4.4e moved to M8, S5 Linux CI first |
 | S5 Linux CI | 2026-10-28 | 0031 | a second CI job, `check-linux`, on `ubuntu-26.04` x86-64 in both tiers (`scripts/ci-linux.sh`); `bootstrap.sh` for Linux (clang 21 over libc++ 21 and glibc 2.43, Ubuntu's GCC 16 snapshot, sbt and Z3 by checksum); glibc's `assert`; five Embedded C extensions off in `edg_config` so both front ends accept the same language |
+| M4.5b1a The model, address-taken locals | 2026-10-28 | 0032–0036 | the `Block` domain and its four axioms with lint tags; address-taken locals as one-slot blocks (allocated at block entry, scope exit checked), `&`, `*`, NULL, `==`/`!=`, liveness inside one function; `null-dereference`, `permission`, `lifetime`; C's incompatible pointer types as errors; the Memory and ownership page |
 
 The finished milestones' plans (goals, tasks, acceptance) are in the commit named above; `internal/status.md` has a
 row per session.
@@ -142,7 +143,7 @@ history of `internal/status.md`).
 |---|---|---|
 | **M4.5 Pointers** (sessions b1–f3, below) | the memory model for C (records 0028–0030) | M4.5a, S5 (done) |
 | **M4.6 Chars and strings** | string literals as read-only arrays, `char` buffers, vlibc's `<string.h>` (`strlen`/`memcpy`/`memcmp`/`strcmp` contracts and verified implementations), `main(argc, argv)` | M4.5e2, M4.5f3 |
-| **M4.7 Function pointers** | contracts on function types, calls through pointers ("the pointer satisfies the type") | M4.5b1 |
+| **M4.7 Function pointers** | contracts on function types, calls through pointers ("the pointer satisfies the type") | M4.5b1b |
 | **M4.8 C parity close-out** | the VeriFast C differential set, the M4 mutation run, the Memory and ownership page complete, M4's acceptance, the deferred list for M8 | all |
 
 **M4.5 Pointers** (one 4.x for pointers, owner, 2026-10-20; the C parts of the former memory-model milestone; split
@@ -152,12 +153,13 @@ plan and the VeriFast ports it takes.
 
 | Session | Scope | Needs |
 |---|---|---|
-| **M4.5b1 Pointers to scalars** | address-taken locals as one-element blocks (scope-exit `lifetime` check); `&x`, `*p`, NULL; pointer parameters with `owns`/`reads`/`old(*p)` in both modes (C's `cerastes_` forms, 0029 item 3); `[[cerastes::owning]]` on parameters and functions; equality; the aliasing trap; sequencing on objects; categories `permission`, `null-dereference`, `lifetime`, `unsequenced`; the encoding's lint tag; the Memory and ownership page | S5 |
-| **M4.5b2 Globals, statics, initialization through pointers** | mutable globals and `static` locals as blocks with frames; `main` owns the globals; 0025 item 2's placement revisited; 0019's flag per cell; `[[cerastes::uninit]]`, `ref_to_uninit`, `must_init` and `--strict-init` | M4.5b1 |
-| **M4.5c Structs** | field cells, `.` and `->`, struct values (copies, initializers, by-value parameters and results), nested structs, pointers to fields, `owns(*s)`, non-recursive owning fields | M4.5b1 |
+| **M4.5b1b Pointer parameters and contracts** | `WF`; `owns`/`reads`/`live`/`old(*p)` in both modes (C's `cerastes_` forms, 0029 item 3); ghost amounts, case splits, the framing check; call and return permission checks; `&param`; category `pointer-comparison` | M4.5b1a (done) |
+| **M4.5b1c Ownership, sequencing, loops** | `[[cerastes::owning]]` on parameters and functions, `owns_block`; sequencing on objects (`unsequenced`) and the call placement rule; cells in loops (hybrid permission invariants); `T**`; jumps out of cell scopes; the aliasing trap; the ports (`swap`, `inc`, `address_of_local.c`); the page completed | M4.5b1b |
+| **M4.5b2 Globals, statics, initialization through pointers** | mutable globals and `static` locals as blocks with frames; `main` owns the globals; 0025 item 2's placement revisited; 0019's flag per cell; `[[cerastes::uninit]]`, `ref_to_uninit`, `must_init` and `--strict-init` | M4.5b1c |
+| **M4.5c Structs** | field cells, `.` and `->`, struct values (copies, initializers, by-value parameters and results), nested structs, pointers to fields, `owns(*s)`, non-recursive owning fields | M4.5b1c |
 | **M4.5d1 vlibc** | the repository (the owner creates `cerastes-verifier/vlibc`), its layout, license and CI; the submodule pin; explicit and transparent includes; the trust rule; `abort`/`exit`/`_Exit` moved out of the encoder's table | M4.5a (any time) |
 | **M4.5d2 `malloc` and `free`** | vlibc's contracts for `malloc`, `calloc`, `realloc`, `free`; heap blocks; the free checks; leaks (a record; `forperm`); owning locals and globals; `invalid-free`, `leak` | M4.5c, M4.5d1 |
-| **M4.5e1 Arrays** | local arrays, `a[i]`, array parameters, `owns_range` and quantified permissions, `forall` in C (0029 item 4), sum and max; P38's braced initializers over 1000 elements; M4.4b2's types computed from constants | M4.5b1 |
+| **M4.5e1 Arrays** | local arrays, `a[i]`, array parameters, `owns_range` and quantified permissions, `forall` in C (0029 item 4), sum and max; P38's braced initializers over 1000 elements; M4.4b2's types computed from constants | M4.5b1c |
 | **M4.5e2 Pointer arithmetic** | `p + i`, `p - q`, comparisons within one object, one-past-the-end, `malloc(n * sizeof(T))`; `out-of-bounds`, `pointer-comparison` | M4.5e1, M4.5d2 |
 | **M4.5f1 Predicates and pure functions** | predicate and pure bodies encoded (0011 item 4 lifted), `fold`/`unfold`, non-recursive predicates | M4.5c, M4.5d2 |
 | **M4.5f2 Recursive predicates** | recursive predicates; a linked list (push, pop, length); recursive owning fields | M4.5f1 |

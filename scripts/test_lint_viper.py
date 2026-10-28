@@ -2090,6 +2090,461 @@ class FloorDivisionTests(unittest.TestCase):
         self.assertIn("the divisor `15`", probs[0])
 
 
+class MemoryModelTests(unittest.TestCase):
+    """Decision 0028 item 2 and decision 0032 item 11: the `Block` domain (`// cerastes:domain-ok 0028`) and exactly
+    its four axioms (`loc_inv` 0033, `loc_nonnull` 0034, `member_inv` 0035, `member_lv` 0036, each with its exact
+    text and `// cerastes:axiom-ok <its record>`, comment lines directly above, the record's file there) are
+    accepted, Viper's `new` is refused, the flag of a cell is a field written `<recv>.d_<t> := true` directly after
+    `<recv>.v_<t> := ...`, and a `Ref` local's dummy is `null`.  Each rule has a twin that breaks exactly it, the
+    fixture is the emitter's shape (tests/viper-smoke/memory/e2_swap.vpr)."""
+
+    DOMAIN_TAG = "// cerastes:domain-ok 0028"
+    AXIOMS = [("loc_inv", "0033"), ("loc_nonnull", "0034"), ("member_inv", "0035"), ("member_lv", "0036")]
+
+    @staticmethod
+    def strict(lines):
+        return lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+
+    @staticmethod
+    def axiom_line(name):
+        return "  " + lv.BLOCK_AXIOMS[name][1]
+
+    def fixture(self, domain_tag=None, tags=None, texts=None, domain="domain Block {", drop=(), extra=()):
+        """`tags` and `texts` override, by axiom name, the record of the tag and the text of the axiom; `drop`
+        names axioms to leave out, `extra` lines are added to the domain."""
+        d = self.DOMAIN_TAG if domain_tag is None else domain_tag
+        axiom_lines = []
+        for name, record in self.AXIOMS:
+            if name in drop:
+                continue
+            tag = (tags or {}).get(name, "  // cerastes:axiom-ok " + record)
+            axiom_lines += [tag, *(texts or {}).get(name, self.axiom_line(name)).split("\n")]
+        lines = [
+            "field v_int: Int",
+            "field d_int: Bool",
+            "field lv: Bool",
+            "",
+            *([d] if isinstance(d, str) else d),
+            domain,
+            "  function loc(b: Block, i: Int): Ref",
+            "  function block_of(r: Ref): Block",
+            *axiom_lines,
+            *extra,
+            "}",
+            "",
+            "// cerastes:trusted-contract allocation of an address-taken local of type int",
+            *self.alloc_lines(),
+            "method f__1()",
+            "  decreases",
+            "{",
+            "  var x: Ref",
+            "  var p: Ref",
+            Check("  x := alloc_int()", PRE, "internal"),
+            "  p := null",
+            Check("  assert x != null", A, "null-dereference"),
+            "  x.v_int := 1",
+            "  x.d_int := true",
+            "  exhale acc(x.v_int) && acc(x.d_int)",
+            "}",
+        ]
+        return lines
+
+    @staticmethod
+    def alloc_lines(suffix="int", header=None, ensures=None, extra=()):
+        """The lines of `alloc_<suffix>` as the emitter prints them (Check lines for the `ensures`)."""
+        want = lv.alloc_contract(suffix)
+        texts = ensures if ensures is not None else want[1:3]
+        return [header or "method " + want[0].split(" ", 1)[1].replace("{", ""), *[Check("  " + t, P, "internal") for t in texts],
+                *extra, "  decreases _"]
+
+    def test_the_tagged_model_is_clean(self):
+        self.assertEqual(self.strict(self.fixture()), [])
+
+    def test_the_text_of_the_axioms_is_the_records(self):
+        # the lint's table is the text of the records (0033-0036) and of 0028 item 2
+        for name, record in self.AXIOMS:
+            text = next(Path(__file__).resolve().parent.parent.joinpath("internal", "decisions").glob(f"{record}-*.md")).read_text()
+            normalized = " ".join(text.split())
+            self.assertIn(lv.BLOCK_AXIOMS[name][1], normalized, name)
+            self.assertEqual(lv.BLOCK_AXIOMS[name][0], record)
+        self.assertEqual(sorted(lv.BLOCK_AXIOMS), sorted(n for n, _ in self.AXIOMS))
+
+    def test_whitespace_in_an_axiom_does_not_matter(self):
+        text = "  axiom   loc_nonnull   {   forall b: Block, i: Int ::   { loc(b, i) }\n      loc(b, i)  !=  null   }"
+        self.assertEqual(self.strict(self.fixture(texts={"loc_nonnull": text})), [])
+
+    def test_functions_inside_the_domain_are_not_bodyless_top_level_functions(self):
+        lines = self.fixture()
+        self.assertTrue(any(isinstance(l, str) and l.startswith("  function loc") for l in lines))
+        self.assertEqual(self.strict(lines), [])
+        # the same function at top level is refused
+        lines.append("function loc2(b: Int): Int")
+        probs = self.strict(lines)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("bodyless `function loc2`", probs[0])
+
+    def test_exhale_is_not_restricted(self):
+        lines = self.fixture()
+        self.assertTrue(any(isinstance(l, str) and "exhale" in l for l in lines))
+        self.assertEqual(self.strict(lines), [])
+
+    def test_inhale_and_assume_are_still_refused_without_their_tag(self):
+        lines = self.fixture()
+        lines.insert(lines.index("  p := null"), "  inhale acc(x.v_int)")
+        probs = self.strict(lines)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`inhale` without `// cerastes:inhale-ok", probs[0])
+
+    # --- the domain's tag ---
+
+    def test_a_domain_without_the_tag_is_a_problem(self):
+        lines = self.fixture()
+        i = lines.index(self.DOMAIN_TAG)
+        del lines[i]
+        probs = self.strict(lines)
+        # the domain, and its four axioms with it
+        self.assertEqual(len(probs), 5, probs)
+        self.assertIn("`domain Block`", probs[0])
+        self.assertTrue(probs[0].startswith(f"t.vpr:{i + 1}:"), probs)
+        self.assertTrue(all("`axiom`" in p for p in probs[1:]), probs)
+
+    def test_a_domain_tag_with_another_record_is_a_problem(self):
+        # a record that does not exist, one that exists but is not 0028, a malformed one, none
+        for tag in ("9999", "0012", "0033", "28", "abcd", "00280", ""):
+            with self.subTest(tag):
+                probs = self.strict(self.fixture(domain_tag=("// cerastes:domain-ok " + tag).rstrip()))
+                self.assertTrue(any("must name decision 0028" in p for p in probs), probs)
+                self.assertTrue(any("`domain Block`" in p for p in probs), probs)
+
+    def test_a_domain_tag_must_be_directly_above(self):
+        tag = self.DOMAIN_TAG
+        # a blank line between, the tag below, the tag on the domain's own line, the tag in a block comment
+        for variant in ("blank", "below", "same line", "block comment", "code between"):
+            with self.subTest(variant):
+                lines = self.fixture(domain_tag="")
+                i = lines.index("domain Block {")
+                del lines[i - 1]
+                if variant == "blank":
+                    lines[i - 1:i - 1] = [tag, ""]
+                elif variant == "below":
+                    lines.insert(i, tag)
+                elif variant == "same line":
+                    lines[i - 1] = "domain Block { " + tag
+                elif variant == "block comment":
+                    lines.insert(i - 1, "/* " + tag + " */")
+                else:
+                    lines[i - 1:i - 1] = [tag, "field w: Int"]
+                probs = self.strict(lines)
+                self.assertTrue(any("`domain Block`" in p for p in probs), probs)
+
+    def test_the_tag_may_sit_in_a_run_of_comment_lines(self):
+        lines = self.fixture(domain_tag=["// the memory model", self.DOMAIN_TAG, "// and why"])
+        self.assertEqual(self.strict(lines), [])
+
+    def test_only_a_domain_named_block_is_accepted(self):
+        probs = self.strict(self.fixture(domain="domain Other {"))
+        self.assertTrue(any("`domain Other`" in p for p in probs), probs)
+
+    def test_the_axiom_tag_is_not_a_domain_tag_and_the_reverse(self):
+        probs = self.strict(self.fixture(domain_tag="// cerastes:axiom-ok 0028"))
+        self.assertTrue(any("`domain Block`" in p for p in probs), probs)
+        probs = self.strict(self.fixture(tags={"loc_inv": "  // cerastes:domain-ok 0033"}))
+        self.assertTrue(any("`axiom`:" in p for p in probs), probs)
+
+    # --- the axioms' tags and texts ---
+
+    def test_an_axiom_without_the_tag_is_a_problem_at_its_line(self):
+        lines = self.fixture()
+        i = lines.index(self.axiom_line("loc_nonnull"))
+        del lines[i - 1]
+        probs = self.strict(lines)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`axiom`", probs[0])
+        self.assertTrue(probs[0].startswith(f"t.vpr:{i}:"), probs)
+
+    def test_an_axiom_tag_with_another_record_is_a_problem(self):
+        # a record that does not exist, another axiom's record, the domain's, a malformed one, none
+        for name, record in self.AXIOMS:
+            other = next(r for n, r in self.AXIOMS if n != name)
+            for tag in ("9999", other, "0028", "33", ""):
+                with self.subTest(axiom=name, tag=tag):
+                    probs = self.strict(self.fixture(tags={name: ("  // cerastes:axiom-ok " + tag).rstrip()}))
+                    self.assertEqual(len(probs), 2, probs)
+                    self.assertIn(f"must name decision {record} for `axiom {name}`", probs[0])
+                    self.assertIn("`axiom`:", probs[1])
+
+    def test_an_axiom_tag_must_be_directly_above(self):
+        lines = self.fixture()
+        i = lines.index(self.axiom_line("loc_inv"))
+        lines.insert(i, "")  # the tag, a blank line, the axiom
+        probs = self.strict(lines)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`axiom`", probs[0])
+
+    def test_a_fifth_axiom_is_a_problem_even_with_a_tag(self):
+        for tag in ("0033", "0028", "0012"):
+            with self.subTest(tag):
+                extra = ["  // cerastes:axiom-ok " + tag, "  axiom bad { false }"]
+                probs = self.strict(self.fixture(extra=extra))
+                self.assertTrue(any("`axiom bad` is not one of the memory model's four axioms" in p for p in probs), probs)
+                self.assertTrue(any("`axiom`:" in p for p in probs), probs)
+
+    def test_the_same_axiom_twice_is_a_problem(self):
+        extra = ["  // cerastes:axiom-ok 0034", self.axiom_line("loc_nonnull")]
+        probs = self.strict(self.fixture(extra=extra))
+        self.assertTrue(any("`axiom loc_nonnull` twice" in p for p in probs), probs)
+
+    def test_an_altered_axiom_body_is_a_problem(self):
+        alterations = {
+            "loc_inv": [("block_of(loc(b, i)) == b &&", "block_of(loc(b, i)) == b ||"),
+                        ("{ loc(b, i) }", "{ block_of(loc(b, i)) }"), ("&& offset_of(loc(b, i)) == i", "")],
+            "loc_nonnull": [("!= null", "== null"), ("i: Int", "i: Bool"), ("forall", "exists")],
+            "member_inv": [("parent_of(member(r, k)) == r", "true"), ("index_of(member(r, k)) == k", "k == k")],
+            "member_lv": [("{ lvloc(member(r, k)) }", "{ member(r, k) }"),
+                          ("lvloc(member(r, k)) == lvloc(block_of(r))", "true")],
+        }
+        for name, edits in alterations.items():
+            for old, new in edits:
+                with self.subTest(axiom=name, edit=old):
+                    text = self.axiom_line(name)
+                    self.assertIn(old, text)
+                    probs = self.strict(self.fixture(texts={name: text.replace(old, new)}))
+                    self.assertEqual(len(probs), 2, probs)
+                    self.assertIn(f"`axiom {name}` is not the text of decision", probs[0])
+
+    def test_an_axiom_that_is_false_with_a_good_tag_is_a_problem(self):
+        probs = self.strict(self.fixture(texts={"loc_inv": "  axiom loc_inv { false }"}))
+        self.assertEqual(len(probs), 2, probs)
+
+    def test_a_missing_axiom_is_a_problem_at_the_domain(self):
+        for name, _record in self.AXIOMS:
+            with self.subTest(name):
+                lines = self.fixture(drop=(name,))
+                probs = self.strict(lines)
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn(f"lacks `axiom {name}`", probs[0])
+                self.assertTrue(probs[0].startswith(f"t.vpr:{lines.index('domain Block {') + 1}:"), probs)
+
+    def test_a_tagged_axiom_outside_a_domain_is_a_problem(self):
+        lines = self.fixture()
+        lines += ["// cerastes:axiom-ok 0033", self.axiom_line("loc_inv").strip()]
+        probs = self.strict(lines)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`axiom`", probs[0])
+
+    def test_a_tagged_axiom_in_a_domain_that_is_refused_is_refused_too(self):
+        lines = self.fixture()
+        del lines[lines.index(self.DOMAIN_TAG)]
+        probs = self.strict(lines)
+        self.assertEqual(len([p for p in probs if "`axiom`:" in p]), 4, probs)
+        self.assertEqual(len([p for p in probs if p.startswith("t.vpr:5: `domain Block`")]), 1, probs)
+
+    def test_the_record_must_have_a_file(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            for _name, record in self.AXIOMS:
+                (Path(tmp) / f"{record}-a-record.md").write_text("# record\n")
+            (Path(tmp) / "0028-memory-model.md").write_text("# 0028\n")
+            with mock.patch.object(lv, "DECISIONS_DIR", Path(tmp)):
+                self.assertTrue(lv.record_exists("0033"))
+                self.assertFalse(lv.record_exists("0778"))
+                self.assertFalse(lv.record_exists(None))
+                self.assertEqual(self.strict(self.fixture()), [])
+                (Path(tmp) / "0035-a-record.md").unlink()
+                probs = self.strict(self.fixture())
+                self.assertTrue(any("must name decision 0035 for `axiom member_inv`" in p for p in probs), probs)
+                (Path(tmp) / "0028-memory-model.md").unlink()
+                probs = self.strict(self.fixture())
+                self.assertTrue(any("must name decision 0028" in p for p in probs), probs)
+
+    def test_the_real_records_of_the_model_resolve(self):
+        for record in ("0028", "0032", "0033", "0034", "0035", "0036"):
+            self.assertTrue(lv.record_exists(record), record)
+
+    # --- the trusted allocation `alloc_<t>` (decision 0032 item 4) ---
+
+    def with_alloc(self, **kw):
+        lines = self.fixture()
+        i = lines.index("method alloc_int() returns (r: Ref)")
+        j = lines.index("  decreases _", i)
+        lines[i:j + 1] = self.alloc_lines(**kw)
+        return lines
+
+    def test_the_emitters_allocation_is_clean_for_every_suffix(self):
+        for suffix in ("int", "bool", "uchar", "enum_1_color", "long"):
+            with self.subTest(suffix):
+                lines = self.fixture()
+                i = lines.index("method alloc_int() returns (r: Ref)")
+                j = lines.index("  decreases _", i)
+                lines[i:j + 1] = [f"method alloc_{suffix}() returns (r: Ref)",
+                                  *[Check("  " + t, P, "internal") for t in lv.alloc_contract(suffix)[1:3]], "  decreases _"]
+                self.assertEqual(self.strict(lines), [])
+
+    def test_the_real_emitters_text_is_the_pinned_one(self):
+        # the shape in tests/viper-smoke and in the emitted programs: parenthesized, `(-2)`
+        self.assertEqual(lv.alloc_contract("int")[1],
+                         "ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)")
+        self.assertIn("(!r.d_int)) && acc(lvloc(block_of(r)).lv)", lv.alloc_contract("int")[2])
+
+    def test_an_altered_allocation_contract_is_a_problem(self):
+        good = lv.alloc_contract("int")
+        alterations = {
+            "dropped !r.d": [good[1], good[2].replace(" && (!r.d_int))", ")")],
+            "extra fact": [good[1], good[2] + " && r.v_int == 0"],
+            "ensures false": [good[1], good[2], "ensures false"],
+            "first line weakened": [good[1].replace(" && (len(block_of(r)) == 1)", ""), good[2]],
+            "wrong suffix": [good[1], good[2].replace("r.d_int", "r.d_bool")],
+            "the liveness permission dropped": [good[1], good[2].replace(" && acc(lvloc(block_of(r)).lv)", "")],
+            "only one ensures": [good[1]],
+            "swapped": [good[2], good[1]],
+        }
+        for what, ensures in alterations.items():
+            with self.subTest(what):
+                probs = self.strict(self.with_alloc(ensures=[e for e in ensures]))
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("`method alloc_int` is not the trusted allocation", probs[0])
+
+    def test_an_extra_clause_or_a_body_on_an_allocation_is_a_problem(self):
+        for what, extra in (("requires", ["  requires true"]), ("ensures", ["  ensures true"])):
+            with self.subTest(what):
+                lines = self.with_alloc()
+                i = lines.index("  decreases _", lines.index("method alloc_int() returns (r: Ref)"))
+                lines[i:i] = [Check(extra[0], P if what == "ensures" else WF, "internal")]
+                probs = self.strict(lines)
+                self.assertTrue(any("not the trusted allocation" in p for p in probs), probs)
+        lines = self.with_alloc()
+        i = lines.index("  decreases _", lines.index("method alloc_int() returns (r: Ref)"))
+        lines[i + 1:i + 1] = ["{", "}"]
+        probs = self.strict(lines)
+        self.assertTrue(any("not the trusted allocation" in p for p in probs), probs)
+
+    def test_a_method_named_alloc_something_else_is_a_problem(self):
+        lines = self.fixture()
+        lines.append("// cerastes:trusted-contract an allocation that is not")
+        lines += ["method alloc_other() returns (r: Ref)", Check("  ensures r != null", P, "internal"), "  decreases _"]
+        probs = self.strict(lines)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`method alloc_other` is not the trusted allocation", probs[0])
+        # a malformed suffix, or no suffix at all
+        for name in ("alloc_", "alloc_a-b"):
+            with self.subTest(name):
+                probs = lv.lint_vpr(f"// cerastes:trusted-contract x\nmethod {name}() returns (r: Ref)\n  decreases _\n", "", "t.vpr", "t.vpr.map")
+                self.assertTrue(any("not the trusted allocation" in p for p in probs), probs)
+
+    def test_other_methods_are_not_alloc(self):
+        lines = self.fixture()
+        self.assertEqual(self.strict(lines), [])
+        lines.append("method allocate_it()")
+        lines.append("  decreases")
+        lines.append("{")
+        lines.append("}")
+        self.assertEqual(self.strict(lines), [])
+
+    # --- Viper's `new` ---
+
+    def test_new_is_refused(self):
+        for line in ("  x := new(v_int, d_int)", "  x := new (v_int)", "  x := new(*)"):
+            with self.subTest(line):
+                lines = self.fixture()
+                lines.insert(lines.index("  p := null"), line)
+                probs = self.strict(lines)
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("`new(...)`", probs[0])
+                self.assertIn("decision 0028 item 2", probs[0])
+
+    def test_new_is_refused_without_a_domain_too(self):
+        probs = lv.lint_vpr("method m() {\n  x := new(f)\n}\n", "", "t.vpr", "t.vpr.map")
+        self.assertTrue(any("`new(...)`" in p for p in probs), probs)
+
+    def test_names_that_contain_new_and_comments_are_fine(self):
+        for line in ("  x := renew(1)", "  x := new_cell(1)", "  x := y.new", "  // x := new(f)", "  /* new(f) */"):
+            with self.subTest(line):
+                text = f"function renew(a: Int): Int {{ a }}\nfunction new_cell(a: Int): Int {{ a }}\nmethod m() {{\n{line}\n}}\n"
+                self.assertTrue(all("`new(...)`" not in p for p in lv.lint_vpr(text, "", "t.vpr", "t.vpr.map")))
+
+    # --- the flag of a cell ---
+
+    def test_a_field_flag_written_after_the_value_is_clean(self):
+        self.assertEqual(self.strict(self.fixture()), [])
+
+    def test_a_field_flag_with_blank_lines_and_comments_between_is_clean(self):
+        lines = self.fixture()
+        lines.insert(lines.index("  x.d_int := true"), "")
+        lines.insert(lines.index("  x.d_int := true"), "  // the flag")
+        self.assertEqual(self.strict(lines), [])
+
+    def test_a_field_flag_set_without_the_write_of_its_cell_is_a_problem(self):
+        lines = self.fixture()
+        lines.insert(lines.index("  x.d_int := true"), "  p := x")
+        probs = self.strict(lines)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`x.d_int := true` does not directly follow a write `x.v_int := ...`", probs[0])
+        self.assertIn("decision 0032 item 11", probs[0])
+
+    def test_a_field_flag_after_the_write_of_another_cell_or_type_is_a_problem(self):
+        for write in ("  p.v_int := 1", "  x.v_bool := true", "  x.v_ptr_int := p"):
+            with self.subTest(write):
+                lines = self.fixture()
+                lines[lines.index("  x.v_int := 1")] = write
+                probs = self.strict(lines)
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("does not directly follow a write", probs[0])
+
+    def test_a_field_flag_is_assigned_only_true(self):
+        for value in ("false", "x.d_int", "p != null", "(true)"):
+            with self.subTest(value):
+                lines = self.fixture()
+                lines[lines.index("  x.d_int := true")] = f"  x.d_int := {value}"
+                probs = self.strict(lines)
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("is assigned", probs[0])
+
+    def test_a_field_flag_assignment_must_stand_alone(self):
+        for line in ("  x.v_int := 1; x.d_int := true", "  x.d_int := true; x.v_int := 1",
+                     "  if (p != null) { x.d_int := true }", "  x.d_int := true x.d_int := true"):
+            with self.subTest(line):
+                lines = self.fixture()
+                lines[lines.index("  x.d_int := true")] = line
+                probs = self.strict(lines)
+                self.assertTrue(any("does not stand alone" in p or "does not directly follow" in p
+                                    for p in probs), probs)
+                self.assertTrue(all("is assigned" not in p for p in probs), probs)
+
+    def test_the_local_flag_rule_is_unchanged_by_the_field_form(self):
+        # a local flag set after a write of a field of the same name is still a problem
+        lines = self.fixture()
+        lines.insert(lines.index("  exhale acc(x.v_int) && acc(x.d_int)"), "  var d_x: Bool")
+        lines.insert(lines.index("  exhale acc(x.v_int) && acc(x.d_int)"), "  x.v_x := 1")
+        lines.insert(lines.index("  exhale acc(x.v_int) && acc(x.d_int)"), "  d_x := true")
+        probs = self.strict(lines)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`d_x := true` does not directly follow a write `x := ...`", probs[0])
+
+    def test_a_ref_local_is_reset_to_null(self):
+        lines = self.fixture()
+        i = lines.index("  p := null")
+        lines[i:i] = ["  var d_p: Bool", "  d_p := false"]
+        self.assertEqual(self.strict(lines), [])
+
+    def test_the_dummy_of_a_reset_is_still_a_literal(self):
+        for value in ("q", "null || true", "nullx", "x"):
+            with self.subTest(value):
+                lines = self.fixture()
+                i = lines.index("  p := null")
+                lines[i:i] = ["  var d_p: Bool", "  d_p := false"]
+                lines[i + 2] = f"  p := {value}"
+                probs = self.strict(lines)
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("is not directly followed by `p := <literal>`", probs[0])
+
+    def test_a_reset_to_null_of_another_variable_is_a_problem(self):
+        lines = self.fixture()
+        i = lines.index("  p := null")
+        lines[i:i] = ["  var d_p: Bool", "  d_p := false", "  x := null"]
+        probs = self.strict(lines)
+        self.assertEqual(len(probs), 1, probs)
+
+
 class SelfTestHygieneTests(unittest.TestCase):
     """A test method defined twice in one class replaces the first, which then never runs (it happened here:
     two `test_labels_followed_by_no_deletable_statement_give_no_mutant`)."""

@@ -17,8 +17,14 @@ status 1) on:
 * a bodyless `method` without `// cerastes:trusted-contract <reason>` on its
   `method` line or in the comment lines right above it (decision 0012 item 1:
   the contracts of functions defined in other units);
-* any `domain`, any `axiom`, any bodyless `function` (the prelude has bodies
-  only, decision 0012 item 11);
+* any `domain` but `domain Block` preceded directly by `// cerastes:domain-ok 0028`, any `axiom` but the four of
+  `BLOCK_AXIOMS` inside it (`loc_inv` 0033, `loc_nonnull` 0034, `member_inv` 0035, `member_lv` 0036: each once, with
+  its exact text, whitespace-normalized, and `// cerastes:axiom-ok <its record>` directly above; the comment lines
+  right above; the record has a file internal/decisions/NNNN-*.md: decision 0028 item 2, 0032 item 11), any method named `alloc_<t>`
+  that is not the trusted allocation of decision 0032 item 4 (bodyless, exactly its header, two `ensures` lines and `decreases _`,
+  as the emitter prints them), any bodyless
+  top-level `function` (the prelude has bodies only, decision 0012 item 11; the functions inside the `Block`
+  domain are not top-level), and Viper's `new(...)` anywhere (its results would not satisfy `WF`);
 * an `assert`, `requires`, `ensures` or `invariant` line, or a call of a method
   declared in the file, with no entry in the position map for its `.vpr` line
   (every check is on its own line and has an entry, decision 0012 item 13).  The one exception
@@ -50,7 +56,10 @@ status 1) on:
   directly precede `<name> := <dummy>`, an integer literal or `true`/`false` (the emitter writes the flag
   first, then the value: `d_v := false` and then `v := 0`), so a variable cannot be reset to a value that
   is then taken for a determinate one; and a flag is assigned nothing but `true` and `false`.  The
-  snapshot of a loop (`ds_<name> := d_<name>`) and the reads of a flag are not assignments to it;
+  snapshot of a loop (`ds_<name> := d_<name>`) and the reads of a flag are not assignments to it.  A dummy
+  may also be `null` (the dummy of a `Ref` local).  The flag of an address-taken cell is a field (decision 0032
+  item 11): `<recv>.d_<t> := true` standing alone on its line and directly after `<recv>.v_<t> := ...` (the
+  same receiver and `<t>`), nothing else is assigned to a field flag (the allocation gives `false`);
 * a `%` (Viper's modulo: the Euclidean remainder, never C's `%`) or a `\\` (Viper's floor division, never C's `/`)
   that is not Viper's exact mask or bit-function form (decision 0026 item 7: `a & (2^k-1)` is `a % 2^k`,
   `a & ~(2^k-1)` is `2^k * (a \\ 2^k)`): outside the bodies of the prelude functions that use the operator (`%`:
@@ -103,6 +112,12 @@ MAP_ERROR_IDS = frozenset(viper_id for _text, viper_id, _cat in rt._VIPER_ERRORS
 
 INHALE_TAG_RE = re.compile(r"//\s*cerastes:inhale-ok\b[ \t]*(?P<reason>\S.*)?$")
 TRUSTED_TAG_RE = re.compile(r"//\s*cerastes:trusted-contract\b[ \t]*(?P<reason>\S.*)?$")
+DOMAIN_TAG_RE = re.compile(r"//\s*cerastes:domain-ok\b[ \t]*(?P<record>\S+)?")
+AXIOM_TAG_RE = re.compile(r"//\s*cerastes:axiom-ok\b[ \t]*(?P<record>\S+)?")
+DECISIONS_DIR = ROOT / "internal" / "decisions"
+BLOCK_DOMAIN_RE = re.compile(r"^\s*domain\s+Block\s*\{")
+AXIOM_DECL_RE = re.compile(r"^\s*axiom\s+(?P<name>[A-Za-z_$][\w$']*)\s*\{")
+NEW_RE = re.compile(r"(?<![\w$'.])new\s*\(")
 INHALE_WORD_RE = re.compile(r"\b(inhale|assume)\b")
 CHECK_LINE_RE = re.compile(r"^\s*(assert|requires|ensures|invariant|decreases)\b")
 CHECK_WORD_RE = re.compile(r"\b(assert|requires|ensures|invariant|decreases)\b")
@@ -442,6 +457,152 @@ def lint_remainders(src: Source, decls: list[Decl], add: Callable[[int, str], No
                             "(decision 0026 item 7)")
 
 
+def tag_above(src: Source, line: int, tag_re: re.Pattern):
+    """The match of `tag_re` in the run of comment-only lines directly above `line` (1-based), or None.
+    A blank line or a line with code ends the run."""
+    i = line - 2
+    while i >= 0 and not src.code[i].strip() and src.comments[i]:
+        if m := tag_re.search(src.comments[i]):
+            return m
+        i -= 1
+    return None
+
+
+def record_exists(record: str | None) -> bool:
+    """Whether `record` is a number NNNN with a decision record internal/decisions/NNNN-*.md."""
+    if record is None or not re.fullmatch(r"[0-9]{4}", record):
+        return False
+    return any(DECISIONS_DIR.glob(f"{record}-*.md"))
+
+
+def block_close_line(src: Source, d: Decl) -> int:
+    """The line of the `}` that closes the body of `d` (the last line of the file if it never closes)."""
+    depth = 0
+    for lineno in range(d.body_line or d.line, len(src.code) + 1):
+        for ch in src.code[lineno - 1]:
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return lineno
+    return len(src.code)
+
+
+# The memory model's domain and axioms, exactly (decision 0028 item 2, records 0033-0036): the domain is tagged
+# `domain-ok 0028`, each of the four axioms has its own record and this text (whitespace-normalized).  Anything else
+# in the domain's axioms is refused, a fifth axiom and an altered body included.
+DOMAIN_RECORD = "0028"
+BLOCK_AXIOMS: dict[str, tuple[str, str]] = {
+    "loc_inv": ("0033", "axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } "
+                        "block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }"),
+    "loc_nonnull": ("0034", "axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }"),
+    "member_inv": ("0035", "axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } "
+                           "parent_of(member(r, k)) == r && index_of(member(r, k)) == k }"),
+    "member_lv": ("0036", "axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } "
+                          "lvloc(member(r, k)) == lvloc(block_of(r)) }"),
+}
+
+
+def lint_domain(src: Source, d: Decl, add: Callable[[int, str], None]) -> bool:
+    """Whether the `domain` at `d` is the memory model's: named `Block`, with a body and with
+    `// cerastes:domain-ok 0028` directly above (the record exists).  A tag that names another record
+    is reported here (and the domain is then refused with it)."""
+    if d.name != "Block" or not d.has_body or not BLOCK_DOMAIN_RE.match(src.code[d.line - 1]):
+        return False
+    tag = tag_above(src, d.line, DOMAIN_TAG_RE)
+    if tag is None:
+        return False
+    if tag.group("record") != DOMAIN_RECORD or not record_exists(DOMAIN_RECORD):
+        add(d.line, f"`// cerastes:domain-ok {tag.group('record') or ''}` must name decision {DOMAIN_RECORD} "
+                    "(internal/decisions/0028-*.md must exist)")
+        return False
+    return True
+
+
+def axiom_text(src: Source, lineno: int) -> str:
+    """The text of the axiom that starts at `lineno`, up to its closing brace, whitespace-normalized."""
+    depth = 0
+    parts: list[str] = []
+    for ln in range(lineno, len(src.code) + 1):
+        parts.append(src.code[ln - 1])
+        depth += src.code[ln - 1].count("{") - src.code[ln - 1].count("}")
+        if depth <= 0:
+            break
+    return " ".join(" ".join(parts).split())
+
+
+def tagged_axiom_lines(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> set[int]:
+    """The lines of the axioms that are accepted: inside an accepted `domain Block`, exactly the four of
+    `BLOCK_AXIOMS`, each once, each with its record in `// cerastes:axiom-ok <record>` directly above (the record
+    exists) and its exact text.  A missing one is reported at the domain."""
+    ok: set[int] = set()
+    for d in decls:
+        if d.kind != "domain" or not lint_domain(src, d, lambda _l, _w: None):
+            continue
+        seen: set[str] = set()
+        for lineno in range(d.line + 1, block_close_line(src, d) + 1):
+            m = AXIOM_DECL_RE.match(src.code[lineno - 1])
+            if not m:
+                continue
+            name = m.group("name")
+            if name not in BLOCK_AXIOMS:
+                add(lineno, f"`axiom {name}` is not one of the memory model's four axioms "
+                            f"({', '.join(BLOCK_AXIOMS)}; decision 0028 item 2)")
+                continue
+            record, text = BLOCK_AXIOMS[name]
+            if name in seen:
+                add(lineno, f"`axiom {name}` twice in the domain")
+                continue
+            seen.add(name)
+            tag = tag_above(src, lineno, AXIOM_TAG_RE)
+            if tag is None:
+                continue  # the generic refusal of an untagged axiom reports it
+            if tag.group("record") != record or not record_exists(record):
+                add(lineno, f"`// cerastes:axiom-ok {tag.group('record') or ''}` must name decision {record} for "
+                            f"`axiom {name}` (internal/decisions/{record}-*.md must exist)")
+                continue
+            if axiom_text(src, lineno) != text:
+                add(lineno, f"`axiom {name}` is not the text of decision {record}: `{text}`")
+                continue
+            ok.add(lineno)
+        for name in BLOCK_AXIOMS:
+            if name not in seen:
+                add(d.line, f"`domain Block` lacks `axiom {name}` (decision {BLOCK_AXIOMS[name][0]}): the emitter "
+                            "writes all four")
+    return ok
+
+
+# The trusted allocation of an address-taken local of type `<t>` (decision 0032 item 4), exactly as the emitter prints it: any method named
+# `alloc_<t>` has this header and these two postconditions (whitespace-normalized), `decreases _` and nothing else.
+ALLOC_PREFIX = "alloc_"
+ALLOC_SUFFIX_RE = re.compile(r"^[A-Za-z0-9_]+$")
+
+
+def alloc_contract(suffix: str) -> list[str]:
+    return [
+        f"method alloc_{suffix}() returns (r: Ref)",
+        "ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)",
+        f"ensures ((((lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(r.v_{suffix})) && acc(r.d_{suffix})) && "
+        f"(!r.d_{suffix})) && acc(lvloc(block_of(r)).lv)",
+        "decreases _",
+    ]
+
+
+def lint_allocations(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    """Decision 0032 item 4: a bodyless method `alloc_<t>` is trusted (the tag rule), so its contract is pinned: a different
+    postcondition (a dropped `!r.d_<t>`, an extra fact, `ensures false`, another suffix) is an unsound assumption."""
+    for d in decls:
+        if d.kind != "method" or not d.name.startswith(ALLOC_PREFIX):
+            continue
+        suffix = d.name[len(ALLOC_PREFIX):]
+        lines = [" ".join(src.code[n - 1].split()) for n in range(d.line, d.end_line + 1) if src.code[n - 1].strip()]
+        if d.has_body or not ALLOC_SUFFIX_RE.match(suffix) or lines != alloc_contract(suffix or "_"):
+            add(d.line, f"`method {d.name}` is not the trusted allocation of decision 0032 item 4: it must be bodyless with "
+                        "exactly the header, the two `ensures` lines and `decreases _` that the emitter prints for "
+                        f"`alloc_{suffix or '<t>'}` (`ensures ((r != null) && ...` with the fields `v_{suffix or '<t>'}`/`d_{suffix or '<t>'}`)")
+
+
 def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
              map_name: str | None = None) -> list[str]:
     """Problems of one Viper file with its position map (None: the map is missing)."""
@@ -465,7 +626,10 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
             add(d.line, "`import`: an emitted file is self-contained (the lint reads only this "
                         "file, so an imported one would escape it)")
         elif d.kind == "domain":
-            add(d.line, f"`domain {d.name}`: the prelude has no domains (decision 0012 item 11)")
+            if not lint_domain(src, d, add):
+                add(d.line, f"`domain {d.name}`: the prelude has no domains but the memory model's `domain Block` "
+                            "with `// cerastes:domain-ok <record>` right above it (decision 0012 item 11, "
+                            "decision 0028 item 2)")
         elif d.kind == "function" and not d.has_body:
             add(d.line, f"bodyless `function {d.name}`: functions need bodies "
                         "(decision 0012 item 11)")
@@ -476,9 +640,15 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
                             "<reason>` (decision 0012 item 1)")
             elif not tag.group("reason"):
                 add(d.line, "`// cerastes:trusted-contract` needs a reason")
+    ok_axioms = tagged_axiom_lines(src, decls, add)
     for lineno, code in enumerate(src.code, start=1):
-        if re.search(r"\baxiom\b", code):
-            add(lineno, "`axiom`: the prelude has no axioms (decision 0012 item 11)")
+        if re.search(r"\baxiom\b", code) and lineno not in ok_axioms:
+            add(lineno, "`axiom`: the prelude has no axioms but the ones of the memory model's Block domain, "
+                        "each with `// cerastes:axiom-ok <record>` right above it (decision 0012 item 11, "
+                        "decision 0028 item 2)")
+        if NEW_RE.search(code):
+            add(lineno, "`new(...)`: its result is not `WF` (decision 0028 item 2); objects come from the "
+                        "trusted `alloc_T` methods")
 
     methods = {d.name for d in decls if d.kind == "method"}
     call_re = CallStatement()
@@ -515,6 +685,7 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     lint_jumps(src, decls, add)
     lint_flags(src, add)
     lint_remainders(src, decls, add)
+    lint_allocations(src, decls, add)
 
     if map_text is None:
         problems.append(f"{name}: no position map ({map_name or name + MAP_SUFFIX})")
@@ -655,7 +826,9 @@ def lint_jumps(src: Source, decls: list[Decl], add: Callable[[int, str], None]) 
 FLAG_ASSIGN_RE = re.compile(r"^\s*d_(?P<name>[A-Za-z_$][\w$']*)\s*:=(?P<value>.*)$")
 FLAG_ANYWHERE_RE = re.compile(r"(?<![\w$'])d_[\w$']*\s*:=")
 FLAG_DECL_INIT_RE = re.compile(r"(?<![\w$'])var\s+d_[\w$']*\s*:\s*Bool\s*:=")
-DUMMY_VALUE_RE = re.compile(r"^\s*(?:-?\s*\d+|\(\s*-\s*\d+\s*\)|true|false)\s*;?\s*$")
+DUMMY_VALUE_RE = re.compile(r"^\s*(?:-?\s*\d+|\(\s*-\s*\d+\s*\)|true|false|null)\s*;?\s*$")
+# The flag of an address-taken cell is a field of the cell (decision 0032 item 11): `<recv>.d_<t> := <value>`.
+FIELD_FLAG_RE = re.compile(r"^\s*(?P<recv>[A-Za-z_$][\w$']*)\.d_(?P<name>[A-Za-z_$][\w$']*)\s*:=(?P<value>.*)$")
 
 
 def lint_flags(src: Source, add: Callable[[int, str], None]) -> None:
@@ -671,6 +844,24 @@ def lint_flags(src: Source, add: Callable[[int, str], None]) -> None:
         if FLAG_DECL_INIT_RE.search(code):
             add(lineno, "a flag is declared without an initializer (`var d_<name>: Bool`): it holds a value only "
                         "after a reset (decision 0019 item 5)")
+        fm = FIELD_FLAG_RE.match(code)
+        if fm is not None and len(FLAG_ANYWHERE_RE.findall(code)) == 1:
+            recv, name = fm.group("recv"), fm.group("name")
+            value = fm.group("value").strip().rstrip(";").strip()
+            if ";" in value:
+                add(lineno, "an assignment to a flag does not stand alone on its line: the flag rule reads "
+                            "one statement per line (decision 0019 item 5)")
+            elif value != "true":
+                add(lineno, f"`{recv}.d_{name}` is assigned `{value}`: the flag of a cell is assigned only `true`, "
+                            "by the write of its value (the allocation gives `false`; decision 0032 item 11, "
+                            "decision 0019 item 5)")
+            else:
+                prev = lines[k - 1][1] if k > 0 else ""
+                if not re.match(r"^\s*" + re.escape(recv) + r"\.v_" + re.escape(name) + r"\s*:=", prev):
+                    add(lineno, f"`{recv}.d_{name} := true` does not directly follow a write `{recv}.v_{name} := ...`: "
+                                "a flag is set only by the write of its cell (decision 0032 item 11, "
+                                "decision 0019 item 5)")
+            continue
         m = FLAG_ASSIGN_RE.match(code)
         if len(FLAG_ANYWHERE_RE.findall(code)) > (1 if m else 0) or (m is None and FLAG_ANYWHERE_RE.search(code)):
             add(lineno, "an assignment to a flag does not stand alone on its line: the flag rule reads "

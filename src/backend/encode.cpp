@@ -113,6 +113,7 @@ class Encoder {
     // Annotation mode (a `requires` or `ensures` of the routine):
     bool contract = false;
     bool annotation = false;  // a `check` or an `invariant` of a statement
+    bool check_clause = false;  // ... and it is a `check`: evaluated like code where it stands, so `&x` and `*p` are allowed (decision 0032)
     Annot annot = Annot::none;
     bool binder_present = false;
     int old_depth = 0;
@@ -217,8 +218,29 @@ class Encoder {
       l.file = d.file;
       l.line = static_cast<int>(d.line);
       l.column = static_cast<int>(d.col);
+      diag_positions_.emplace(std::make_tuple(l.file, l.line, l.column), d);  // for reject_loc
     }
     return l;
+  }
+  // The positions loc_of produced, to report at a VIR node's own SrcLoc (the item-10 rejections of decision 0032).
+  mutable std::map<std::tuple<std::string, int, int>, DiagPos> diag_positions_;
+
+  // Whether some rejection was already reported on the line of `p`.
+  bool rejection_on_line(const a_source_position& p) {
+    const DiagPos dp = position_for(p);
+    for (const auto& r : rejected_)
+      if (std::get<1>(r) == dp.file && std::get<2>(r) == dp.line) return true;
+    return false;
+  }
+
+  // As reject(), at a VIR node's position (one that loc_of made).
+  void reject_loc(Diag d, const SrcLoc& l, const std::string& what) {
+    auto it = diag_positions_.find(std::make_tuple(l.file, l.line, l.column));
+    if (it != diag_positions_.end()) {
+      reject_at(d, it->second, what);
+      return;
+    }
+    reject_at(d, position_for(cx_.stmt_pos), what);
   }
 
   void reject(Diag d, const a_source_position& p, const std::string& what) {
@@ -331,7 +353,16 @@ class Encoder {
   }
 
   // ---- types ----------------------------------------------------------------------------------------------
-  VType vtype(a_type_ptr type) {
+  static bool is_pointer_type(a_type_ptr type) {
+    if (type == nullptr) return false;
+    a_type_ptr t = skip_typerefs(type);
+    return t != nullptr && t->kind == tk_pointer && !t->variant.pointer.is_reference;
+  }
+
+  // `allow_ptr`: a pointer type to a bool, an integer or an enumeration is a VIR pointer type (decision 0032 item 2): the type of a
+  // local that is not itself address-taken and of an expression.  Everywhere else (a parameter or result, `check_signature`; the
+  // places that read only scalars) a pointer is as unsupported as before.
+  VType vtype(a_type_ptr type, bool allow_ptr = false) {
     VType r;
     if (type == nullptr) {
       r.name = "<unknown>";
@@ -392,14 +423,42 @@ class Encoder {
       case tk_array:
         r.diag = Diag::unsupported_declaration;
         return r;
+      case tk_pointer: {
+        // A C++ reference is as unsupported as before.
+        if (t->variant.pointer.is_reference) return r;
+        if (!allow_ptr) {
+          r.name += " (a pointer as a parameter or a result)";
+          return r;
+        }
+        if ((q & TQ_RESTRICT) != 0) {  // C23 6.7.3.1: a write through another name would be undefined
+          r.name += " (a restrict-qualified pointer)";
+          return r;
+        }
+        a_type_ptr pointee = t->variant.pointer.type;
+        const a_type_qualifier_set pq = pointee != nullptr ? f_get_type_qualifiers(pointee, TRUE) : 0;
+        if (pointee == nullptr || (pq & (TQ_VOLATILE | TQ_C11_ATOMIC)) != 0) {
+          r.name += " (a pointer to a volatile or _Atomic object)";
+          return r;
+        }
+        VType e = vtype(pointee);
+        if (!e.ok || e.t.is_void()) {
+          r.name += e.t.is_void() && e.ok ? " (a pointer to void)"
+                                          : " (a pointer to a type other than bool, an integer or an enumeration)";
+          r.silent = e.silent;
+          return r;
+        }
+        r.ok = true;
+        r.t = prog_.pointer_to(e.t);
+        return r;
+      }
       default:
         return r;
     }
   }
 
   // A value type (not void) or a rejection at `p`.
-  bool value_type(a_type_ptr type, const a_source_position& p, VType* out) {
-    VType t = vtype(type);
+  bool value_type(a_type_ptr type, const a_source_position& p, VType* out, bool allow_ptr = false) {
+    VType t = vtype(type, allow_ptr);
     if (!t.ok || t.t.is_void()) {
       if (t.ok) {
         t.ok = false;
@@ -545,7 +604,7 @@ class Encoder {
   const Expr* clause_bool(const Expr* x, const a_source_position& p) {
     if (x == nullptr) return nullptr;
     if (x->type.is_bool()) return x;
-    if (x->type.is_int()) return b_.to_bool(x, loc_of(p));
+    if (x->type.is_int() || x->type.is_ptr()) return b_.to_bool(x, loc_of(p));  // a pointer is true when it is not null (decision 0032 item 7)
     reject(Diag::unsupported_expression, p, "a condition that is not a number or a bool");
     return nullptr;
   }
@@ -787,6 +846,23 @@ class Encoder {
     if (c->kind != ck_integer) {
       reject(Diag::unsupported_expression, pos, "a constant that is not an integer or a bool");
       return nullptr;
+    }
+    // A pointer-typed integer constant (decision 0032 item 4, P51/P57): the null pointer constant in every spelling folds to one with the
+    // value 0; `(int *)4` folds to the same kind with another value and is not a pointer this version can model.  The original
+    // expression is not encoded (a null constant has no obligation), so the casts it holds are never met.
+    if (is_pointer_type(c->type)) {
+      VType pt = vtype(c->type, true);
+      if (!pt.ok) {
+        // A pointer type this version rejects (`int **`, a pointer to a struct): it arose in a declaration, a `&` or a conversion that
+        // is rejected on its own; a constant of that type adds no second report on the line.  With none there, it is reported here.
+        if (!rejection_on_line(pos)) reject_type(pt, pos);
+        return nullptr;
+      }
+      if (decimal_value(c) != "0") {
+        reject(Diag::unsupported_expression, pos, "an integer used as a pointer");
+        return nullptr;
+      }
+      return b_.null_const(pt.t, loc_of(pos));
     }
     // An enumerator is its value (decision 0018 item 9), whatever the initializer that gave it: recognized before the folded
     // constant's original expression is read, so the initializer is encoded once (in the prologue), not at each use.  Any other
@@ -1134,7 +1210,7 @@ class Encoder {
   const Expr* finish(an_expr_node_ptr e, const Expr* x) {
     if (x == nullptr) return nullptr;
     VType nt;
-    if (!value_type(e->type, e->position, &nt)) return nullptr;
+    if (!value_type(e->type, e->position, &nt, true)) return nullptr;
     if (x->type != nt.t) {
       reject(Diag::unsupported_expression, e->position, "an operation whose type is not what its operands give");
       return nullptr;
@@ -1182,13 +1258,22 @@ class Encoder {
       reject(Diag::unsupported_declaration, v->source_corresp.decl_position, "a local variable used in its own initializer");
       return nullptr;
     }
-    return b_.local(it->second, loc_of(e->position));
+    const Expr* local = b_.local(it->second, loc_of(e->position));
+    if (it->second->type.is_ptr()) b_.text(local, it->second->name);  // for the messages of decision 0032 item 6
+    return local;
   }
 
   // A reference to a `const`/`constexpr` local from a case value (C++, decision 0017 item 6): the local becomes a function
   // local constant once (its initializer checked as written in the function's prologue), and the use is its value.  Null
   // with `*failed` false when `v` is not such a local (the use stays a local read, which the case label then rejects).
   const Expr* local_const_use(a_variable_ptr v, const a_source_position& pos, bool* failed) {
+    if (v->address_taken && (cx_.local_const_inits.count(v) != 0 || cx_.local_consts.count(v) != 0)) {
+      // A constant a case value names is checked as written in the prologue and its uses are literals; a cell of the same name could
+      // be written through its address (decision 0032 item 4), so the two are not combined.
+      reject(Diag::unsupported_expression, pos, "a case value that names a constant whose address is taken");
+      *failed = true;
+      return nullptr;
+    }
     auto done = cx_.local_consts.find(v);
     if (done != cx_.local_consts.end()) return value_literal(done->second.type, done->second.value, pos);
     auto in = cx_.local_const_inits.find(v);
@@ -1285,6 +1370,7 @@ class Encoder {
     }
     // The type first, so that the message names the real reason (an array of const is not "not const").
     VType vt = vtype(v->type);
+    if (!vt.ok && is_pointer_type(v->type) && !vt.silent) vt.name = render_type(skip_typerefs(v->type)) + " (a pointer global variable)";
     if (!vt.ok || vt.t.is_void()) {
       if (vt.ok) vt.name = "void";
       reject_type(vt, p);
@@ -1545,6 +1631,20 @@ class Encoder {
         return nullptr;
       }
     }
+    if (a->type.is_ptr() || c->type.is_ptr()) {
+      // Decision 0032 item 7: two pointers of one type (a null constant takes the other side's) compared for equality.
+      const bool equality = op == vir::BinaryOp::Eq || op == vir::BinaryOp::Ne;
+      if (!equality) {
+        reject(Diag::unsupported_expression, e->position, "an ordering comparison of pointers");
+        return nullptr;
+      }
+      if (!(a->type.is_ptr() && c->type.is_ptr()) ||
+          (a->type != c->type && a->kind != Expr::Kind::Null && c->kind != Expr::Kind::Null)) {
+        reject(Diag::unsupported_expression, e->position, "a comparison of a pointer with something that is not a pointer of the same type");
+        return nullptr;
+      }
+      return logical_result(e, b_.binary(op, a, c, loc_of(e->position)));
+    }
     if (detect_constant_out_of_range(e, ops)) return nullptr;  // R10: after the enumeration and sign rules, which report their own
     return logical_result(e, b_.binary(op, a, c, loc_of(e->position)));
   }
@@ -1590,9 +1690,49 @@ class Encoder {
     return b_.old(x, loc_of(e->position));
   }
 
+  // A conversion node with a pointer operand or result (decision 0032 item 3): the allow-list is a null pointer constant becoming `T*`
+  // (a folded constant never reaches here; a written `(int *)0` of an unfolded operand does) and a conversion that only adds
+  // qualifiers to the pointee (`int *` to `const int *`).  Everything else, compiler-generated or written, is rejected.
+  const Expr* pointer_conversion(an_expr_node_ptr e, an_expr_node_ptr operand) {
+    const bool to_ptr = is_pointer_type(e->type);
+    const bool from_ptr = is_pointer_type(operand->type);
+    VType to;
+    if (to_ptr && !value_type(e->type, e->position, &to, true)) return nullptr;
+    if (to_ptr && !from_ptr) {
+      // An integer constant zero becoming a pointer.
+      an_expr_node_ptr c = operand;
+      if (c->kind == enk_constant && c->variant.constant.ptr != nullptr && c->variant.constant.ptr->kind == ck_integer &&
+          decimal_value(c->variant.constant.ptr) == "0" && !is_pointer_type(c->variant.constant.ptr->type)) {
+        a_type_ptr ot = skip_typerefs(c->variant.constant.ptr->type);
+        if (ot != nullptr && ot->kind == tk_integer && !ot->variant.integer.enum_type) return b_.null_const(to.t, loc_of(e->position));
+      }
+    } else if (to_ptr && from_ptr) {
+      a_type_ptr tp = skip_typerefs(e->type)->variant.pointer.type;
+      a_type_ptr fp = skip_typerefs(operand->type)->variant.pointer.type;
+      VType from;
+      if (tp != nullptr && fp != nullptr && value_type(operand->type, operand->position, &from, true) &&
+          f_identical_types(tp, fp, ITF_IGNORE_TOP_LEVEL_QUALIFIERS) != 0) {
+        const a_type_qualifier_set tq = f_get_type_qualifiers(tp, TRUE);
+        const a_type_qualifier_set fq = f_get_type_qualifiers(fp, TRUE);
+        if ((fq & ~tq) == 0) {
+          const Expr* x = expr(operand);
+          if (x == nullptr) return nullptr;
+          if (x->type != to.t) {
+            reject(Diag::unsupported_expression, e->position, "a conversion whose operand has another type than the IL says");
+            return nullptr;
+          }
+          return x;  // the same VIR type: qualifiers are not part of it
+        }
+      }
+    }
+    reject(Diag::unsupported_expression, e->position, "a conversion to or from a pointer type");
+    return nullptr;
+  }
+
   const Expr* conversion(an_expr_node_ptr e) {
     auto ops = operands_of(e);
     if (!operand_count(e, 1, ops)) return nullptr;
+    if (is_pointer_type(e->type) || is_pointer_type(ops[0]->type)) return pointer_conversion(e, ops[0]);
     VType to;
     if (!value_type(e->type, e->position, &to)) return nullptr;
     VType from;
@@ -1675,6 +1815,64 @@ class Encoder {
       return nullptr;
     }
     return c;
+  }
+
+  // `&x` of a local scalar (decision 0032 item 4).  The unevaluated operand of `sizeof` never gets here: its value is the folded literal.
+  const Expr* address_of(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
+    if (!operand_count(e, 1, ops)) return nullptr;
+    an_expr_node_ptr o = ops[0];
+    if (cx_.contract || (cx_.annotation && !cx_.check_clause) || cx_.const_depth > 0) {
+      reject(Diag::unsupported_expression, e->position, "taking an address in a contract, an invariant or a measure, or in an expression the compiler folded to a constant");
+      return nullptr;
+    }
+    if (o->kind != enk_variable || o->variant.variable.ptr == nullptr) {
+      reject(Diag::unsupported_expression, e->position, "taking the address of anything but a local variable");
+      return nullptr;
+    }
+    a_variable_ptr v = o->variant.variable.ptr;
+    if (cx_.rejected_vars.count(v) != 0) return nullptr;  // diagnosed at its declaration
+    auto it = cx_.vars.find(v);
+    if (it == cx_.vars.end()) {
+      reject(Diag::unsupported_expression, e->position, "taking the address of a variable that is not a local of this function");
+      return nullptr;
+    }
+    if (v->is_parameter) {
+      reject(Diag::unsupported_expression, e->position, "taking the address of a parameter");
+      return nullptr;
+    }
+    if (it->second->type.is_ptr()) {
+      reject(Diag::unsupported_expression, e->position, "taking the address of a pointer variable");
+      return nullptr;
+    }
+    if (cx_.declaring == v || cx_.pending.count(v) != 0) {
+      reject(Diag::unsupported_declaration, v->source_corresp.decl_position, "a local variable used in its own initializer");
+      return nullptr;
+    }
+    if (!v->address_taken || !it->second->address_taken) {
+      // Fail closed: the front end flags every variable whose address is taken (P51, P57).
+      verify_config().out.internal_inconsistency = true;  // a tool failure, exit status 3 (decision 0022 item 12)
+      reject(Diag::internal_inconsistency, e->position, "the address of a variable the front end did not flag as address-taken (decision 0032 item 4)");
+      return nullptr;
+    }
+    return finish(e, b_.addr_of(it->second, loc_of(e->position)));
+  }
+
+  // `*p` as a read (decision 0032 item 6).  A write goes through assign_target; an lvalue `*p` anywhere else (`&*p`, `(*p).f`) is not accepted.
+  const Expr* indirect_read(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
+    if (!operand_count(e, 1, ops)) return nullptr;
+    if (e->is_lvalue || cx_.contract || (cx_.annotation && !cx_.check_clause) || cx_.const_depth > 0) {
+      reject(Diag::unsupported_expression, e->position,
+             e->is_lvalue ? "a dereference used as anything but a value or the target of an assignment"
+                          : "a dereference in a contract, an invariant or a measure, or in an expression the compiler folded to a constant");
+      return nullptr;
+    }
+    const Expr* a = expr(ops[0]);
+    if (a == nullptr) return nullptr;
+    if (!a->type.is_ptr()) {
+      reject(Diag::unsupported_expression, e->position, "a dereference of something that is not a pointer to a bool or an integer");
+      return nullptr;
+    }
+    return finish(e, b_.deref(a, loc_of(e->position)));
   }
 
   const Expr* operation(an_expr_node_ptr e) {
@@ -1760,6 +1958,8 @@ class Encoder {
         return logical_result(e, a);
       }
       case eok_call: return call(e);
+      case eok_address_of: return address_of(e, ops);
+      case eok_indirect: return indirect_read(e, ops);
       case eok_ref_indirect:
         if (cx_.contract && ops.size() == 1 && ops[0]->kind == enk_operation && ops[0]->variant.operation.kind == eok_call) {
           a_routine_ptr callee = direct_callee(ops[0]);
@@ -1776,11 +1976,39 @@ class Encoder {
   using Out = std::vector<const Stmt*>;
 
   const Stmt* block_of(Out&& v, const a_source_position& p) { return b_.block(std::move(v), loc_of(p)); }
+  // The closing brace of a compound statement (`final_position`, il_def.h:15873): where leaving the scope of its cells is reported
+  // (decision 0032 item 8); unknown for a block the compiler made.
+  SrcLoc end_of(const a_source_position& p) { return p.seq != 0 ? loc_of(p) : SrcLoc(); }
+  SrcLoc block_end(a_statement_ptr s) {
+    if (s != nullptr && s->kind == stmk_block && s->variant.block.extra_info != nullptr)
+      return end_of(s->variant.block.extra_info->final_position);
+    return SrcLoc();
+  }
+  const Stmt* block_of(Out&& v, const a_source_position& p, SrcLoc end) { return b_.block(std::move(v), loc_of(p), std::move(end)); }
 
   const Stmt* sub_statement(a_statement_ptr s, const a_source_position& p) {
     Out out;
     statement(s, out);
-    return block_of(std::move(out), p);
+    return cell_block(std::move(out), p, s);
+  }
+
+  // The block the encoder makes around the statements of a sub-statement.  When they declare a cell directly (C++: `if (c) int x = 5,
+  // *p = &x;`, whose declaration the front end wraps in a block it gives no position), the block ends where that statement does
+  // (decision 0032 item 8); with no position there it is rejected.
+  const Stmt* cell_block(Out&& v, const a_source_position& p, a_statement_ptr sub) {
+    const Stmt* decl = nullptr;
+    for (const Stmt* x : v)
+      if (x->kind == Stmt::Kind::Decl && x->var != nullptr && x->var->address_taken) {
+        decl = x;
+        break;
+      }
+    if (decl == nullptr) return block_of(std::move(v), p);
+    SrcLoc end = sub != nullptr ? end_of(sub->end_position) : SrcLoc();
+    if (!end.known()) {
+      reject_loc(Diag::unsupported_statement, decl->loc, "a declaration whose address is taken in a block without a closing position");
+      return block_of(std::move(v), p);
+    }
+    return block_of(std::move(v), p, std::move(end));
   }
 
   // The "does not return" flag of `r` is the user's claim: the first declaration is at a known position in a file that
@@ -1887,10 +2115,25 @@ class Encoder {
       return;
     }
     cx_.annotation = true;
+    cx_.check_clause = true;
     truth_context(arg);  // decision 0023 item 5: `check(x | 4)`
     const Expr* c = clause_bool(expr(arg), arg->position);
+    cx_.check_clause = false;
     cx_.annotation = false;
     if (c != nullptr) out.push_back(b_.check(c, loc_of(s->position)));
+  }
+
+  // The first node of `e` that is a pointer or reads a cell (decision 0032 item 10: none in a contract, invariant or measure).
+  static const Expr* pointer_node_in(const Expr* e) {
+    if (e == nullptr) return nullptr;
+    if (e->type.is_ptr() || e->kind == Expr::Kind::Null || e->kind == Expr::Kind::AddrOf || e->kind == Expr::Kind::Deref ||
+        (e->kind == Expr::Kind::Local && e->var != nullptr && e->var->address_taken))
+      return e;
+    for (const Expr* x : {e->a, e->b, e->c})
+      if (const Expr* f = pointer_node_in(x)) return f;
+    for (const Expr* x : e->args)
+      if (const Expr* f = pointer_node_in(x)) return f;
+    return nullptr;
   }
 
   // The `invariant` and `decreases` clauses written before a loop.  A loop without a measure is rejected (0013 item 3).
@@ -1908,6 +2151,12 @@ class Encoder {
         const size_t before = measure.size();
         encode_measure(a, measure);
         cx_.annotation = false;
+        for (size_t i = before; i < measure.size(); ++i)
+          if (const Expr* bad = pointer_node_in(measure[i].expr)) {
+            reject_loc(Diag::unsupported_expression, bad->loc, "a pointer or a variable whose address is taken in a loop measure");
+            measure.resize(before);
+            break;
+          }
         if (measure.size() == before) ok = false;
         continue;
       }
@@ -1934,6 +2183,11 @@ class Encoder {
       const SrcLoc clause_loc = loc_of(a->position);
       cx_.annotation = false;
       if (c == nullptr) {
+        ok = false;
+        continue;
+      }
+      if (const Expr* bad = pointer_node_in(c)) {
+        reject_loc(Diag::unsupported_expression, bad->loc, "a pointer or a variable whose address is taken in a loop invariant");
         ok = false;
         continue;
       }
@@ -1978,7 +2232,7 @@ class Encoder {
         continue;
       }
       const bool vla = v->is_vla || v->has_variably_modified_type;
-      VType vt = vtype(v->type);
+      VType vt = vtype(v->type, true);
       if (!vt.ok || vt.t.is_void()) {
         if (vt.ok) vt.name = "void";
         reject_type(vt, at);
@@ -1998,6 +2252,9 @@ class Encoder {
       vir::Var* var = cx_.fn->new_local(nm ? nm : "", vt.t, loc_of(at));
       var->c_type_name = vt.name;
       cx_.vars[v] = var;
+      // Decision 0032 item 4: a local the front end flags `address_taken` is a cell.  A pointer local never is: its address is rejected at
+      // the `&`, so it stays a Viper local here.
+      if (v->address_taken && !vt.t.is_ptr()) cx_.fn->mark_address_taken(var);
       if (v->init_kind == initk_none) {
         // initk_none and no `stmk_init` statement (P28): the declaration alone, with no initializer expression.
         out.push_back(b_.decl(var, nullptr, loc_of(at)));
@@ -2119,7 +2376,9 @@ class Encoder {
 
   // What an assignment-like node says, checked the same way at statement level and as a value.
   struct AssignParts {
-    vir::Var* v = nullptr;                  // the local written
+    vir::Var* v = nullptr;                  // the local written (null for a write through a pointer)
+    const Expr* addr = nullptr;             // a write through a pointer (decision 0032): the pointer, `*addr` is written
+    vir::Type target = vir::Type::void_type();  // the type of what is written
     const Expr* x = nullptr;                // `=` and compound: the (converted) right-hand side; null for `++`/`--`
     vir::BinaryOp op = vir::BinaryOp::Add;  // compound assignment
     bool increment = false;                 // `++`/`--`
@@ -2155,26 +2414,65 @@ class Encoder {
     return true;
   }
 
-  AssignRes assignment_parts(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops, AssignParts* p) {
+  // The left operand of an assignment, compound assignment or `++`/`--`: a local (`p->v`) or `*ptr` (`p->addr`, decision 0032 item 3).
+  // `stmt_level`: the node is the whole expression statement; anywhere else a write to a cell or through a pointer is rejected (item 9).
+  bool assign_target(an_expr_node_ptr lhs, AssignParts* p, bool stmt_level) {
+    if (lhs->kind == enk_operation && lhs->variant.operation.kind == eok_indirect) {
+      if (!stmt_level) {
+        reject(Diag::unsupported_expression, lhs->position, "a write through a pointer used as a value, or inside an expression");
+        return false;
+      }
+      auto lops = operands_of(lhs);
+      if (!operand_count(lhs, 1, lops)) return false;
+      p->addr = expr(lops[0]);
+      if (p->addr == nullptr) return false;
+      if (!p->addr->type.is_ptr()) {
+        reject(Diag::unsupported_expression, lhs->position, "a write through something that is not a pointer to a bool or an integer");
+        return false;
+      }
+      p->target = *p->addr->type.pointee;
+      return true;
+    }
+    p->v = lvalue_var(lhs);
+    if (p->v == nullptr) return false;
+    if (p->v->address_taken && !stmt_level) {
+      reject(Diag::unsupported_expression, lhs->position,
+             "a write to \"" + p->v->name + "\", a variable whose address is taken, inside an expression");
+      p->v = nullptr;
+      return false;
+    }
+    p->target = p->v->type;
+    return true;
+  }
+
+  AssignRes assignment_parts(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops, AssignParts* p, bool stmt_level = false) {
     const an_expr_operator_kind k = e->variant.operation.kind;
     const SrcLoc l = loc_of(e->position);
     if (k == eok_assign) {
       if (ops.size() != 2) return AssignRes::malformed;
       check_self_assignment(e, ops);
-      p->v = lvalue_var(ops[0]);
+      const bool target_ok = assign_target(ops[0], p, stmt_level);
       allow_enum_conversion(ops[1]);  // decision 0018 item 6 (iii)
       p->x = expr(ops[1]);
-      return p->v == nullptr || p->x == nullptr ? AssignRes::rejected : AssignRes::ok;
+      if (!target_ok || p->x == nullptr) return AssignRes::rejected;
+      if ((p->addr != nullptr || p->target.is_ptr()) && p->x->type != p->target) {
+        reject(Diag::unsupported_expression, e->position, "an assignment whose value has another type than its target");
+        return AssignRes::rejected;
+      }
+      return AssignRes::ok;
     }
     if (is_incdec_kind(k)) {
       if (ops.size() != 1) return AssignRes::malformed;
-      p->v = lvalue_var(ops[0]);
-      if (p->v == nullptr) return AssignRes::rejected;
-      if (!p->v->type.is_int()) {
+      if (!assign_target(ops[0], p, stmt_level)) return AssignRes::rejected;
+      if (p->target.is_ptr()) {
+        reject(Diag::unsupported_expression, e->position, "an increment or decrement of a pointer");
+        return AssignRes::rejected;
+      }
+      if (!p->target.is_int()) {
         reject(Diag::unsupported_expression, e->position, "an increment or decrement of a bool");
         return AssignRes::rejected;
       }
-      if (is_enum_type(p->v->type)) {
+      if (is_enum_type(p->target)) {
         reject(Diag::unsupported_expression, e->position, "an increment or decrement of an enumeration (decision 0018 item 8)");
         return AssignRes::rejected;
       }
@@ -2183,14 +2481,14 @@ class Encoder {
     }
     // A compound assignment.
     if (ops.size() != 2) return AssignRes::malformed;
-    p->v = lvalue_var(ops[0]);
+    const bool target_ok = assign_target(ops[0], p, stmt_level);
     p->x = expr(ops[1]);
-    if (p->v == nullptr || p->x == nullptr) return AssignRes::rejected;
-    if (!p->v->type.is_int()) {
+    if (!target_ok || p->x == nullptr) return AssignRes::rejected;
+    if (!p->target.is_int()) {
       reject(Diag::unsupported_expression, e->position, "a compound assignment to a bool");
       return AssignRes::rejected;
     }
-    if (is_enum_type(p->v->type) || is_enum_type(p->x->type)) {
+    if (is_enum_type(p->target) || is_enum_type(p->x->type)) {
       // Both compute in the promoted type, which differs between C and C++ (decision 0018 item 8).
       reject(Diag::unsupported_expression, e->position, "a compound assignment to or with an enumeration value (decision 0018 item 8)");
       return AssignRes::rejected;
@@ -2243,7 +2541,7 @@ class Encoder {
     }
     const an_expr_operator_kind k = e->variant.operation.kind;
     AssignParts a;
-    const AssignRes res = assignment_parts(e, ops, &a);
+    const AssignRes res = assignment_parts(e, ops, &a, /*stmt_level=*/false);
     if (res == AssignRes::malformed) {
       operand_count(e, is_incdec_kind(k) ? 1 : 2, ops);
       return nullptr;
@@ -2295,6 +2593,25 @@ class Encoder {
       const a_source_position at = pos != cx_.assign_positions.end() ? pos->second : cx_.stmt_pos;
       reject(Diag::unsequenced_modification, at, sp.variable);
     }
+  }
+
+  // The rejections of vir::memory_problems (decision 0032 item 10): a loop at its keyword, a `return` or a jump at itself.
+  void report_memory_problems(vir::Function* f) {
+    for (const vir::MemoryProblem& m : vir::memory_problems(*f)) {
+      std::string what = m.what;
+      const std::string tail = " (decision 0032)";  // the diagnostic's own format ends with its record
+      if (what.size() > tail.size() && what.compare(what.size() - tail.size(), tail.size(), tail) == 0) what.resize(what.size() - tail.size());
+      auto kw = m.loop != nullptr ? loop_keyword_.find(m.loop) : loop_keyword_.end();
+      if (kw != loop_keyword_.end()) reject_at(Diag::unsupported_statement, kw->second, what);
+      else reject_loc(Diag::unsupported_statement, m.loc, what);
+    }
+  }
+
+  // The keyword position of each loop built, for the rejection of a loop that holds pointers (decision 0032 item 10).
+  std::map<const Stmt*, DiagPos> loop_keyword_;
+  const Stmt* note_loop(const Stmt* loop, a_statement_ptr s) {
+    loop_keyword_[loop] = loop_keyword_position(s);
+    return loop;
   }
 
   // ---- assert (decision 0015 item 6, P22) ----------------------------------------------------------------------
@@ -2478,8 +2795,15 @@ class Encoder {
         // An assignment, compound assignment or `++`/`--` at the top of an expression statement stays a VIR statement (decision
         // 0020 item 6): code without nested effects builds the VIR it always did.
         AssignParts a;
-        const AssignRes r = assignment_parts(e, ops, &a);
+        const AssignRes r = assignment_parts(e, ops, &a, /*stmt_level=*/true);
         if (r == AssignRes::rejected) return;
+        if (r == AssignRes::ok && a.addr != nullptr) {
+          // A write through a pointer (decision 0032 item 3): `*p = e;`, `*p op= e;`, `++*p;`, `(*p)--;`.
+          if (k == eok_assign) out.push_back(b_.store(a.addr, a.x, l));
+          else if (is_incdec_kind(k)) out.push_back(b_.inc_dec_store(a.addr, a.increment, l));
+          else out.push_back(b_.compound_store(a.addr, a.op, a.x, l));
+          return;
+        }
         if (r == AssignRes::ok) {
           if (k == eok_assign) out.push_back(b_.assign(a.v, a.x, l));
           else if (is_incdec_kind(k)) out.push_back(b_.inc_dec(a.v, a.increment, l));
@@ -3187,7 +3511,7 @@ class Encoder {
         }
     }
     if (sw_rule1_failed) ok = false;
-    if (ok) out.push_back(b_.switch_stmt(scrut, block_of(std::move(inner), body->position), id, loc_of(s->position)));
+    if (ok) out.push_back(b_.switch_stmt(scrut, block_of(std::move(inner), body->position, block_end(body)), id, loc_of(s->position)));
   }
 
   void statement(a_statement_ptr s, Out& out) {
@@ -3216,7 +3540,7 @@ class Encoder {
           // so that a variable declared by it is in scope for the rest.
           for (const Stmt* x : inner) out.push_back(x);
         } else {
-          out.push_back(block_of(std::move(inner), s->position));
+          out.push_back(block_of(std::move(inner), s->position, block_end(s)));
         }
         return;
       }
@@ -3251,8 +3575,7 @@ class Encoder {
         cx_.targets.push_back(make_target(s, false, id, s->variant.loop_statement));
         const Stmt* body = sub_statement(s->variant.loop_statement, s->position);
         cx_.targets.pop_back();
-        if (c != nullptr && inv_ok)
-          out.push_back(b_.loop(c, std::move(inv), std::move(measure), body, nullptr, vir::LoopForm::While, id, loc_of(s->position)));
+        if (c != nullptr && inv_ok) out.push_back(note_loop(b_.loop(c, std::move(inv), std::move(measure), body, nullptr, vir::LoopForm::While, id, loc_of(s->position)), s));
         return;
       }
       case stmk_end_test_while: {
@@ -3272,8 +3595,8 @@ class Encoder {
         const Stmt* body = sub_statement(s->variant.loop_statement, s->position);
         cx_.targets.pop_back();
         if (c != nullptr && inv_ok)
-          out.push_back(b_.loop(c, std::move(inv), std::move(measure), body, nullptr,
-                                once ? vir::LoopForm::DoOnce : vir::LoopForm::DoWhile, id, loc_of(s->position)));
+          out.push_back(note_loop(b_.loop(c, std::move(inv), std::move(measure), body, nullptr,
+                                          once ? vir::LoopForm::DoOnce : vir::LoopForm::DoWhile, id, loc_of(s->position)), s));
         return;
       }
       case stmk_for: {
@@ -3306,12 +3629,12 @@ class Encoder {
         cx_.in_for_step = false;
         const Stmt* step_stmt = step.empty() ? nullptr : step.size() == 1 ? step[0] : block_of(std::move(step), fl->increment->position);
         if (c != nullptr && inv_ok)
-          whole.push_back(b_.loop(c, std::move(inv), std::move(measure), block_of(std::move(body), s->position), step_stmt,
-                                  vir::LoopForm::While, id, loc_of(s->position)));
+          whole.push_back(note_loop(b_.loop(c, std::move(inv), std::move(measure), cell_block(std::move(body), s->position, s->variant.for_loop.statement), step_stmt,
+                                            vir::LoopForm::While, id, loc_of(s->position)), s));
         if (fl->initialization == nullptr) {
           for (const Stmt* x : whole) out.push_back(x);
         } else if (!whole.empty()) {
-          out.push_back(block_of(std::move(whole), s->position));
+          out.push_back(block_of(std::move(whole), s->position, end_of(s->end_position)));
         }
         return;
       }
@@ -3415,11 +3738,12 @@ class Encoder {
     statement(sp->assoc_block, out);
     for (a_variable_ptr v : cx_.pending)
       reject(Diag::unsupported_declaration, v->source_corresp.decl_position, "an initialization this version cannot read");
-    f->body = b_.block(std::move(out), loc_of(r->source_corresp.decl_position));
+    f->body = b_.block(std::move(out), loc_of(r->source_corresp.decl_position), f->end_loc);
     // Only a complete function body can be judged: after a rejection a label or a declaration may be missing.
     if (reported_count() == reported_before) {
       report_goto_problems(f);
       report_sequence_problems(f);
+      report_memory_problems(f);
     }
     cx_ = Ctx();
   }

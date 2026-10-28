@@ -286,3 +286,5 @@ object would be indeterminate at the target. With this record that object is ord
 *2026-10-26, amended by 0025 (M4.4c): item 13 — the `uninitialized` check of a snapshot of a flagged local counts as an access of the local with the check's own set, so a later write in the same full expression follows it (finding A, 0025 item 1).*
 
 *2026-10-27, amended by 0028 and 0029 (M4.5a, effective from M4.5b1/M4.5b2): item 13 — the flag follows the cell as a ghost field beside its value (0028 item 14); item 2's stricter mode is `--strict-init` with P4222's markers in the `cerastes::` spelling (0029 item 2).*
+
+*2026-10-28, amended by 0032 (M4.5b1a): item 13 — done for address-taken locals: the flag is the field `d_<t>` of the cell, false from the allocation at block entry until a write; a `goto` past the declaration finds it false (0032 item 4).*

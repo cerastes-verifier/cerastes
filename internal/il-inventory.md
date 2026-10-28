@@ -4619,6 +4619,115 @@ the 128-bit ones call the 64-bit ones, so every file carries all twelve).
   (`m_1`, `m_2`, …, as in `sym_ok.vpr`) satisfies it, and a single name `t` fails exactly for the nested chain item 4
   wants decided.
 
+### P51: the IL shapes of the C pointer constructs (record 0028) **PASS: every construct parses and keeps the node it needs; one correction to the original item 3 (below)**
+
+Evidence in `build/m4.5a/P51.md` and `build/m4.5a/p51/` (inputs `t1.c t2.c t2.cpp t3.c`; `ilsum.py <dump> <function>` prints
+the expression trees compactly). Re-run on 2026-10-28 in M4.5b1a (copies and dumps in `build/m4.5b1a/p57/p51/`, `ilvars.py`
+and `rawnode.py` in `build/m4.5b1a/p57/` list the variables and print raw nodes) with `scripts/cerastes-fe.sh --c23
+--il_display` on `t1.c`, `t2.c`, `t3.c` and `--c++20 --il_display` on `t1.c`, `t2.cpp`; every excerpt below is from that run
+and equals the 2026-10-27 one. **Claims re-run today:** the `address_taken` flag (all of `t3.c`), the folded null constants
+(`t2.c`/`t2.cpp` `nulls`, `nulls23`), the C versus C++ differences (`t1.c` in both modes, `t2.c` under `--c++20`), the folded
+address constants (`t1.c`), and the other table rows below that name `t1.c`/`t2.c` lines. **Not re-run, copied from P51.md:**
+`--cerastes_walk` shows no bodies; the `register`/VLA/compound-literal/`restrict` gaps. Tree notation: `op(operands){type:flags@column}`,
+`L` = `is_lvalue`, `g` = `compiler_generated`; `const[int 0]{int *}` is an `enk_constant` whose constant has kind
+`ck_integer` and a pointer type.
+
+1. **No lvalue-to-rvalue node.** A read is the same node with `is_lvalue` clear (`an_expr_node.is_lvalue`, il_def.h:14942;
+   the glvalue type is kept in `orig_lvalue_type`, il_def.h:14917). `t1.c:13` `*p = 1;` against `t1.c:15` `int r = *p;`:
+   ```
+   L19769: assign(indirect(var p{int *:@4}){int:L@3}, const[int 1]{int:@8}){int:@6}
+   init r: indirect(var p{int *:@12}){int:@11}
+   ```
+   and the raw node of `var p` in `p == NULL` has `orig_lvalue_type: ... int *` and no `is_lvalue` line
+   (`build/m4.5b1a/p57/p57e.c:9`, `rawnode.py ... fe eok_eq 356`).
+2. **`address_taken` is a flag on the variable** (`a_variable.address_taken`, il_def.h:11389; the same name on `a_routine`
+   :12358 and on a GNU label :13529 is another field). `il_display` prints the line only when the bit is set, so absent means
+   FALSE. `t3.c`, `ilvars.py t3.il addr`:
+   ```
+   variable param  address_taken=TRUE ...   (t3.c:22 p = &param)      variable l5  address_taken=TRUE  (t3.c:17 &l5.f)
+   variable pp2    address_taken=-    ...   (never addressed)         variable l6  address_taken=TRUE  (t3.c:18 l6.a decays)
+   variable l1     address_taken=TRUE ...   (t3.c:14 p = &l1)         variable l7  address_taken=TRUE  (t3.c:19 *&l7)
+   variable l2     address_taken=-    ...   (never addressed)         variable l8  address_taken=TRUE  (t3.c:20 use(&l8))
+   variable l3     address_taken=TRUE ...   (t3.c:15 p = l3 decay)    variable p, z address_taken=-
+   variable l4     address_taken=TRUE ...   (t3.c:16 &l4[1])
+   ```
+   The static local `l9` (`t3.c:21 p = &l9`) is in the file-scope region (`storage_class: sc_static`, `address_taken: TRUE`,
+   `t3.il:3205-3213`). The flag is set by walking the addressing path of an lvalue (`x.i` marks `x`, `p->i` does not); in C++ binding a
+   reference also sets it. **Conservative**: P57 below measures that an unevaluated `sizeof(&x)` does not set it, a `const` local and a
+   `&x` in a dead branch do.
+3. **Folded address constants (corrected today).** `int *b = &G;` and `int *d = &arr[2];` come as `dik_constant`/`enk_constant`
+   with `ck_address` (il_def.h:3645; `address.kind abk_variable`, `address.variable`, `address.offset` in bytes, `&arr[2]` = 8) and the
+   original tree stays as the constant's `expr:`. `t1.c:9-11`:
+   ```
+   init b: const[addr(G off=0)]
+   init d: const[addr(arr off=8)]
+   ```
+   **P51.md's "non-initializer uses stay `address_of(...)`" is wrong for globals and static locals** (new probe
+   `build/m4.5b1a/p57/p57i.c`, both modes): the address of a global, of a global array element with a constant index and of a static local
+   folds in every position (assignment `p = &G` and `p = &arr[1]`, `p == &G`, `&G != 0`), and a comparison that is decided by the
+   address (`&G != 0`) folds to the constant `1`:
+   ```
+   L6: assign(var p{int *:L@3}, const[addr(G off=0)]{int *:@7}){int *:@5}        (p57i.c:6)
+   L7: assign(var p{int *:L@3}, const[addr(arr off=4)]{int *:@7}){int *:@5}      (p57i.c:7)
+   init r: eq(var p{int *:@11}, const[addr(G off=0)]{int *:@16}){int:@13}        (p57i.c:8)
+   L9: add_assign(var r..., question(var c, const[int 1], const[int 1])...)       (p57i.c:9: `c ? 1 : (&G != 0)`)
+   ```
+   `t3.c:21` (`p = &l9`, a static local) is the same. Only the address of an automatic variable (including a local array element,
+   `p57g.c:8`) stays `address_of(var)`/`address_of(subscript(array_to_pointer(var a), 2))`. An encoder that reads a global's address
+   must therefore handle the `ck_address` constant in any operand position, or read the constant's `expr`.
+4. **Null pointers are folded constants** (the shape and the exact fields: P57 (e) below). `t2.c:7-11` in C23:
+   ```
+   L19763: cast(cast(const[int 0]{int:@12}){void *:@12}){int *:g@12}     (int *a = NULL; the constant's expr:)
+   init a: const[int 0]      init b: const[int 0]      init c: const[int 0]
+   init d: eq(var p{int *:@11}, const[int 0]{int *:@16}){int:@13}
+   init e: ne(var p{int *:@11}, const[int 0]{int *:@16}){int:@13}
+   ```
+   The C++ `NULL` is `__null`: `L22257: cast(const[?]{long:@12}){int *:g@12}` (`t2.cpp:7`); `nullptr` is
+   `cast(const[?]{std::nullptr_t:@33}){int *:g@33}` (`t2.cpp:14`; C23 the same with `nullptr_t`). After folding every spelling is
+   `eq(var p, const[int 0]{int *})` (`t2.cpp:10`: `init d: cast(eq(var p..., const[int 0]{int *:@16}){bool:@13}){int:g@11}`).
+5. **C versus C++** (`t1.c` in both modes). Comparisons and `!` are `int` in C and `bool` in C++ (wrapped in `cast(...){int:g}`); a
+   truth-test condition is a bare `var p` in C and `bool_cast(var p){bool:g}` in C++; an assignment is an rvalue in C and an lvalue in
+   C++ (`assign(...){int:L}`):
+   ```
+   C23:   L19784: assign(var r{int:L@3}, not(var p{int *:@8}){int:@7}){int:@5}      L19785: var p{int *:@7}
+   C++20: L22278: assign(var r{int:L@3}, cast(not(bool_cast(var p{int *:@8}){bool:g@8}){bool:@7}){int:g@7}){int:L@5}
+          L22279: bool_cast(var p{int *:@7}){bool:g@7}
+   ```
+   `void *` to `T *` is an implicit `cast{g}` in C (`t2.c:18`, `init q: cast(call(malloc, const[int 4UL]{size_t}){void *}){int *:g@12}`)
+   and an error in C++ (`scripts/cerastes-fe.sh --c++20 --il_display t2.c`: `t2.c:9` and `t2.c:18`: `error: a value of type "void *"
+   cannot be used to initialize an entity of type ...`, no IL).
+
+Table (C23 unless marked; all rows re-run on `t1.c`/`t2.c` today and equal to the original):
+
+| Construct | Tree (kinds are `enk_operation` `eok_*` unless said) | Notes |
+|---|---|---|
+| `&x` local/param | `address_of(var x{L}){T*}` | sets `x.address_taken`; il_def.h:13864 |
+| `&G` global | `const[addr(G off=0)]` in every position (item 3, corrected) | `address_of(var G{L})` stays as the constant's `expr:` |
+| `&s.f` | `address_of(dot_field(var s{L}, field f){L}){int*}` | marks `s`; `t1.c:10` |
+| `&sp->g` | `address_of(points_to_field(var sp, field g){L}){int*}` | `t1.c:12` |
+| `&arr[2]` | global: `const[addr(arr off=8)]`; local: `address_of(subscript(array_to_pointer(var a){g}, 2){L})` | `t1.c:11`; `p57g.c:8` |
+| `*p` read / write | `indirect(var p){int}` / `assign(indirect(var p){L}, v)`; `*p += 2`: `add_assign(indirect(var p){L}, 2)` | `**c`: `indirect(indirect(var c))`; `t2.c:25` |
+| `p->f`, `s.f`, `(*p).f` | `points_to_field(var sp, field f){int}`; `dot_field(var s{L}, field f)`; `dot_field(indirect(var sp){struct S:L}, field f)` | `t1.c:16-18` |
+| `a[i]`, `i[a]` | `subscript(array_to_pointer(var arr{g}), var i)`; operands as written | `t1.c:19-20` |
+| `p + i`, `i + p`, `p - i`, `p - q` | `padd(var p, var i)`, `padd(var i, var p)`, `psubtract(var p, var i)`, `pdiff(var p, var q){long}` | `t1.c:21-24` |
+| `p < q`, `p == q` | `lt`/`eq` of pointer operands; C++ `cast(lt(...){bool}){int:g}` | `t1.c:25-26` |
+| `p == NULL`, `!p`, `if (p)`, `p ? 1 : 0` | items 4 and 5 | |
+| `(T*)malloc(n*sizeof(T))`, `free(p)` | `cast(call(routine malloc, multiply(cast(var n){unsigned long:g}, const[int 4UL]))){void*}){int*}` (the `(T*)` cast is not `g`); `call(enk_routine free, cast(var p){void*:g}){void}` | `sizeof(T)` is folded to `const 4UL` (the `enk_sizeof` is the constant's `expr`); `t2.c:17,19` |
+| `const int *a`, `int *const b`, `int **c` | `*a`: `indirect(var a{const int*}){int}`; `*b = 1`: `assign(indirect(var b{int*}){L}, 1)`; `*c = b`: `assign(indirect(var c{int**}){int*:L}, var b)` | cv only in the node type; `t2.c:22-27` |
+| struct copy, struct result | `assign(var t{struct S:L}, var s{struct S}){struct S}` (one node, no memcpy); `init u: call(routine mk, 3){struct S}` | `t2.c:28-35` |
+| pointer in a field | `assign(points_to_field(var sp, field q){int*:L}, address_of(dot_field(var s, field f){L}))`; `*sp->q = 4`: `assign(indirect(points_to_field(var sp, field q)){L}, 4)` | `t2.c:32-33` |
+| string literal | `array_to_pointer(const[?]{char [4]:L}){char*:g}`; `"abc"[1]` folds to `const[int 98]`; `const char *s = "abc"` is `const[addr( off=0)]` | `t2.c:36-38` |
+| `sizeof *p`, `sizeof(int*)` | folded to `const 4UL`, `8UL`, the add `12UL`, the `enk_sizeof` as `expr:` | the operand is not evaluated; `t2.c:54` |
+| address-taken local in a loop | `x` declared in the body block; `init p: address_of(var x{L})`; `x.address_taken` | no per-iteration marker; `t2.c:40-47`, `ilvars.py t2.c23.il loop`: `variable x address_taken=TRUE` |
+| array decay `int *p = a` | `array_to_pointer(var a{int [3]:L}){int*:g}`; sets `a.address_taken` | `t2.c:50`, `t3.c:15` |
+
+**Positions.** Every `an_expr_node` keeps `position.seq`/`position.column` (the column of the operator or token) and, for nodes written in
+the source, `expr_range` (start/end seq and column); a compiler-generated node has only `position`. A folded constant keeps the original
+expression's range on its `enk_constant` node (`rawnode.py` output for `p == NULL`: `start.orig_seq`/`end.orig_column` in the raw
+node). Variables keep `decl_position`, `identifier_range`, `specifiers_range`, `declarator_range`.
+
+**Not probed:** `register` locals, VLAs, compound literals, `restrict` (the questions of `sizeof(&x)` and a dead branch are answered in P57).
+
 ### P53: the C spelling of the spec functions (record 0029 items 3–4) **PASS: every form parses, no EDG fork commit needed; one walker case and one qualifier loss noted**
 
 Evidence in `build/m4.5a/P53.md` and `build/m4.5a/spikes/p53/` (inputs `p1.c`…`p3.cpp`, il_display dumps `*.il`, trees
@@ -4912,7 +5021,7 @@ row slots, row i is `member(loc(b, i), 0)` of length 3. `owns(*s)` states `len(m
 ### S26 final (fixtures uniform with the final design of record 0028; `build/m4.5a/spikes/final/`)
 
 `tests/viper-smoke/memory/` was regenerated from one library (`final/lib.py`) and four generators (`gen_base.py`, `gen_s25.py`, `gen_mem.py`, `gen_live.py`, plus `gen_b.py`): **55 fixtures (24 `e2_*`, 12 `s25_*`, 11 `s26_member_*`, 2 `s26_member_live*`, 6 `s26_live_*`;
-24 must-verify, 31 must-fail with 93 expected errors); 55 passed, 0 failed.** The old set is `final/before/`. Every fixture carries the final prelude: the four axioms (`loc_inv`, `loc_nonnull`, `member_inv`, `member_lv`, the last with the record's trigger `{ lvloc(member(r, k)) }`; it
+24 must-verify, 31 must-fail with 93 expected errors); 55 passed, 0 failed.** The old set is `final/before/`. Every fixture carries the final prelude: the four axioms (`loc_inv`, `loc_nonnull`, `member_inv`, `member_lv`, the last with the record's trigger `{ lvloc(member(r, k)) }` in the 43 `e2_*`/`s26_*` fixtures, while the 12 `s25_*` kept `{ member(r, k) }` until M4.5b1a changed them with record 0036 (correction, M4.5b1a audit round 1); it
 works for the array of structs and the nested struct), liveness (`lvloc(b) == loc(b, -2)` set by every allocation, program_start and malloc; the token is a field `lv`), structs as member blocks (S1 and the slot layout are gone), `owns_block`.
 - **What every fixture now does.** `owns(*p)`/`reads(*p)`/`live(p)` carry ghost fractions (`l_p` per pointer for owns; one `rd` for the cells and the liveness cells of a reads function); the caller chooses `perm(lv)/(n + 1)`; every call, return, scope exit and free checks the liveness clauses one by one
   (`perm(lvloc(block_of(p)).lv) >= l_p + (lvloc(block_of(p)) == lvloc(block_of(q)) ? l_q : none)` for every other clause that may share the cell); every pointer `+`, `-`, comparison, `==`/`!=` and copy/store/pass/return first asserts `p != null ==> perm(lvloc(block_of(p)).lv) > none`
@@ -4959,3 +5068,174 @@ C and C++ forms of the `ensures` (`((res == x) ? 1 : 0) != 0` vs `res == x`) mov
 The tests keep identities within these limits (`mask_or_xor_round_trip.c`: depth 2; `mask_or_xor_chain4.c`: the paired
 depth 4, a file of its own since the M4.5b1a follow-up, record 0027's amendment: one mask chain per file; the VIR "pairs",
 "complements" and "eight_range" cases).
+
+## M4.5b1a: the memory model inside one function (records 0032–0036)
+
+Probes of the M4.5b1a session; evidence under `build/m4.5b1a/p57/` (not committed): the inputs `p56.c`, `p56b.c`, `p57a.c`,
+`p57e.c`, `p57f.c`, `p57g.c`, `p57h.c`, `p57i.c`, the dumps `*.c23.il`/`*.c++20.il` from `scripts/cerastes-fe.sh --c23|--c++20
+--il_display`, and the scratch tools `ilvars.py` (variables with their `address_taken`, blocks with their positions), `rawnode.py` (raw
+nodes of one expression) and `p51/ilsum.py` (compact trees). Same worktree, branch `m4.5b1a-pointers`; EDG fork pin
+`f0ed5525af`. `il_display` omits a bit field that is clear, so a missing `address_taken` line is FALSE (`ilvars.py` prints `-`).
+
+### P56: incompatible object pointer types in C **PASS: four warnings in C23, errors in C++20; `--diag_error=42,144,167,513` makes the C23 ones errors and changes nothing else**
+
+`p56.c` (13 lines; `scripts/cerastes-fe.sh --c23 --display_error_number build/m4.5b1a/p57/p56.c`, exit 0):
+```
+p56.c, line 4: warning #42-D: operand types are incompatible ("int *" and "long *")          int r = pi == pl;
+p56.c, line 5: warning #144-D: a value of type "int *" cannot be used to initialize an entity of type "long *"      long *a = pi;
+p56.c, line 6: warning #144-D: a value of type "const int *" cannot be used to initialize an entity of type "int *"   int *c = pc;
+p56.c, line 7: warning #513-D: a value of type "int *" cannot be assigned to an entity of type "long *"              pl = pi;
+p56.c, line 8: warning #167-D: argument of type "int *" is incompatible with parameter of type "long *"              take_long(pi);
+```
+- **Not diagnosed in C23:** line 9 `int *d = v;` (`void *v`), line 10 `take_void(pi);` (`int *` to a `void *` parameter) and line 11
+  `const int *e = pi;` (adds `const`): no line for them in the output above.
+- **C++20** (same file, `--c++20`, exit 2): `error #42` (line 4), `error #144` (lines 5, 6 and 9: the `void *` to `int *` of line 9 is an
+  error there), `error #513` (7), `error #167` (8), "6 errors detected"; lines 10 and 11 are accepted.
+- **More shapes** (`p56b.c`, C23): every one is `#144-D` at lines 3-9 and `#42-D` at line 10: `unsigned *a = pi;` (signedness), `int *b = pu;`,
+  `char *c = pi;`, `int *d = pe;` (`enum E *`), `unsigned char *e = pch;`, `int *f = pb;` (`_Bool *`), `const int **g2 = ppi;`, and `pi == pu`.
+- **`--diag_error=42,144,167,513`** (`--c23 --display_error_number`, exit 2): the same five lines of `p56.c` print `error #42-D`, `error #144-D`
+  (twice), `error #513-D`, `error #167-D`, "5 errors detected"; `p56b.c`: eight errors, and its seven `warning #177-D` (unused variable) lines
+  are still warnings. The `-D` suffix is EDG's "discretionary" mark, which this option overrides.
+- **Nothing else changes in a scalar program.** `tests/scalar/call_int_params.c`, `--c23 --display_error_number` with and without the
+  option: identical output, exit 0 (`build/m4.5b1a/p57/cip.base`, `cip.err`). Across all 1507 `.c` files under `tests/` and `doc/`
+  (`--c23 --display_error_number`, output and exit code compared with and without the option; log `sweep.log`): **0 differ**, so none of the
+  four diagnostics fires on any existing C file and the option changes no other construct's diagnostics there.
+- **Not shown:** the option's effect in `cerastes verify` (the driver passes front-end options elsewhere; not read); function-pointer
+  and struct-pointer mismatches (rejected earlier by record 0032 item 2).
+
+### P57: the IL facts b1a's lowering reads **PASS for (a)-(d), (f), (g); (e) confirms P51's folded null and gives the exact node; one correction to P51 item 3**
+
+Every claim: probe file:line, the output, and the `il_def.h` field.
+
+**(a) `address_taken` on a `const int` local: set.** `p57a.c:3-4` `const int k = 5; const int *p = &k;`, both modes
+(`ilvars.py p57a.c23.il fa`, same for `p57a.c++20.il`):
+```
+variable k      address_taken=TRUE  storage=sc_auto ... type=const int
+variable p      address_taken=-     storage=sc_auto ... type=const int *
+init p: address_of(var k{const int:L@19}){const int *:@18}
+```
+`a_variable.address_taken`, il_def.h:11389. `k` is not folded to a constant: `init k: const[int 5]` is its initializer, but its reads are `var k`.
+
+**(b) `&x` only inside `sizeof(&x)`: NOT set.** `p57a.c:9` `return sizeof(&x);` (`fb`), both modes:
+```
+variable x      address_taken=-     storage=sc_auto param=- used=- type=int
+L9: address_of(var x{int:L@18}){int *:@17}     L9: enk_sizeof {unsigned long:@10}     L9: const[int 8UL]{unsigned long:@10}
+```
+The `address_of` node is reachable only as the folded constant's `expr:`; `x` has neither `address_taken` nor `used`. The control `p57a.c:13`
+`(int)sizeof(x)` (`fb2`) gives the same `address_taken=-  used=-`. So the flag does not see the operand of `sizeof`; this settles P51's "not
+probed" item.
+
+**(c) `*&x`: set, and the tree is not simplified.** `p57a.c:17` `return *&x;` (`fc`), both modes:
+```
+variable x      address_taken=TRUE  ...
+L17: indirect(address_of(var x{int:L@12}){int *:@11}){int:@10}
+```
+(also `t3.c:19` `int z = *&l7;`, P51 item 2: `init z: indirect(address_of(var l7{int:L@13}){int *:@12}){int:@11}`).
+
+**(d) `p = &x;` inside `if (0)`: set; the dead branch is kept.** `p57a.c:22-23` (`fd`), both modes: `variable x address_taken=TRUE`; the
+`stmk_if` is present with the condition `L22: const[int 0]{int:@7}` in C23 (`bool_cast(const[int 0]{int:@7}){bool:g@7}` and
+`const[int 0]{bool:@7}` in C++20) and the assignment `L23: assign(var p{int *:L@5}, address_of(var x{int:L@10}){int *:@9}){int *:L@7}`
+is in the IL. The flag is purely syntactic. Control `fd2` (`if (c)`, `p57a.c:30-31`): the same; control `fe` (`p57a.c:35-38`, no `&`): `x`, `y`
+both `address_taken=-`.
+
+**(e) Null and truth tests (`p57e.c`, `p57h.c`; both modes).** P51 item 4's folded-null claim is **confirmed in every position tried**:
+```
+p57e.c:5  init p: question(var c{int:@12}, address_of(var x{int:L@17}){int *:@16}, const[int 0]{int *:@21}){int *:@14}      (C23)
+          init p: question(bool_cast(var c{int:@12}){bool:g@12}, address_of(...){int *}, const[int 0]{int *:@21}){int *:@14}    (C++20)
+p57e.c:9  eq(var p{int *:@7}, const[int 0]{int *:@12}){int:@9}      p57e.c:10 ne(var p{int *:@7}, const[int 0]{int *:@12}){int:@9}
+p57e.c:18-19  assign(var p{int *:L@3}, const[int 0]{int *:@7}){int *:@5}   (`p = 0;` and `p = NULL;`)
+p57e.c:11-14  init n0: const[int 0]   init n1: const[int 0]   init n2: const[int 0]
+p57e.c:29-34 (`nullptr`)  init n: const[int 0]   init d: eq(var q{int *:@11}, const[int 0]{int *:@16}){int:@13}   assign(var q, const[int 0]{int *:@7})
+p57h.c:6  eq(const[int 0]{int *:@12}, var p{int *:@20})  (NULL on the left; operands as written)
+p57h.c:8-9  init cq: cast(question(var c, var p, const[int 0]{int *:@27}){int *}){const int *:g}    init cn: const[int 0]   (const[int 0]{const int *} in `ne(var cq, ...)`)
+```
+The exact node the encoder sees: an `enk_expr_node` of kind `enk_constant`, `type` the pointer type (`int *`, `const int *`), whose
+`constant` has `kind: ck_integer` (il_def.h:3627), `integer_value: 0` (il_def.h:5039), the pointer `type`, `expr:` the unfolded tree
+(`cast(const[?]{long}){int *:g}` for C++ `NULL`, `cast(cast(const[int 0]{int}){void *}){int *:g}` for C, `cast(const[?]{nullptr_t}){int *:g}`
+for `nullptr`), and the flags `implicit_cast`, `is_reinterpret_like_cast` (il_def.h:4839) and `null_pointer_constant_ruled_out` (il_def.h:4857)
+all TRUE (`rawnode.py p57e.c23.il fe eok_eq 356`; a scan of every pointer-typed constant of `fe` and `fn` in both modes: 26 constants, all
+`ck_integer`, `integer_value 0`, `null_pointer_constant_ruled_out TRUE`). **The flags do not tell a null from another integer constant:**
+`p57g.c:9` `int *s = (int *)4;` is `init s: const[int 4U]`, `ck_integer`, `integer_value: 4U`, pointer type, the same three flags plus
+`explicit_cast_applied` TRUE. So the test is `ck_integer` of a pointer type with `integer_value == 0`; an `integer_value != 0` pointer constant
+must be rejected (it is a cast of an integer to a pointer). Truth tests (`an_expr_node` kinds, il_def.h:14032 `eok_not`, 13998 `eok_bool_cast`):
+```
+                       C23                                          C++20
+p57e.c:7  if (p)       L354: var p{int *:@7}                        bool_cast(var p{int *:@7}){bool:g@7}
+p57e.c:8  if (!p)      not(var p{int *:@8}){int:@7}                 cast(not(bool_cast(var p){bool:g}){bool}){int:g}
+p57e.c:21 p ? 1 : 0    question(var p{int *:@8}, 1, 0){int}         question(bool_cast(var p){bool:g}, 1, 0){int}
+p57e.c:22 p && c       land(var p{int *:@8}, var c{int:@13}){int}   cast(land(bool_cast(var p){bool:g}, bool_cast(var c){bool:g}){bool}){int:g}
+p57e.c:24 while (p)    L367: var p{int *:@10}                       bool_cast(var p{int *:@10}){bool:g@10}
+```
+**A qualifier-adding conversion is a `cast` node with `compiler_generated`, nothing else** (`p57h.c:7` `const int *cp = p;`, `p57h.c:11`
+`r += cp == p;`): `init cp: cast(var p{int *:@19}){const int *:g@19}`; `eq(var cp{const int *:@8}, cast(var p{int *:@14}){const int *:g@14})`; the raw
+node has `operation.kind: eok_cast`, `operation.type_kind: tk_pointer` (il_def.h:15134) and `compiler_generated: TRUE`, no conversion-kind field,
+so "only adds qualifiers" is decided by comparing the two pointee types without their cv-qualifiers. `p57h.c:9` `(const int *)NULL` is folded
+to `const[int 0]` like the others; the explicit cast written in the source is not `g`: `L356: cast(cast(const[int 0]){void *}){const int *:@19}`.
+
+**(f) The closing brace of a block: readable for every user-written block; a `for` with a declaration needs the statement's end.** For
+`{ ... }` blocks the `stmk_block` statement carries `final_position` (`a_block.final_position`, il_def.h:15873, reached as
+`variant.block.extra_info`, il_def.h:16764 — the access `encode.cpp:523` uses for the function body) and the statement's own `end_position`
+(il_def.h:16531, present because `EXTRA_SOURCE_POSITIONS_IN_IL` is 1 in `cmake/EdgFrontEnd.cmake:60` and asserted at `src/backend/edg_il.h:41`);
+the two are equal. `p57f.c` has no includes, so `seq` equals the source line (with includes `seq` is a larger ordinal that `loc_of` maps). `ilvars.py
+p57f.c23.il plain`, C23, with the source text of each position:
+```
+block pos=5:3   end_position=9:3   final_position=9:3   assoc_scope=yes   `{ int y ...}` at 5 closes at 9:3 (`  }`)
+block pos=10:10 end_position=14:3  final_position=14:3  assoc_scope=yes   `if (c) {` ... line 14
+block pos=16:11 end_position=21:3  final_position=21:3  assoc_scope=yes   `case 1: {` ... line 21
+block pos=15:14 end_position=24:3  final_position=24:3  assoc_scope=yes   the `switch (c) {` body ... line 24
+block pos=25:19 end_position=30:3  final_position=30:3  assoc_scope=yes   `while (c > 100) {` ... line 30
+block pos=31:31 end_position=34:3  final_position=34:3  assoc_scope=yes   `for (...) {` body ... line 34
+block pos=35:3  end_position=36:3  final_position=36:3  assoc_scope=NULL  `{` `}` (empty)
+block pos=37:3  end_position=37:10 final_position=37:10 assoc_scope=NULL  `{ a++; }` (no declaration)
+block pos=2:18  end_position=39:1  final_position=39:1  assoc_scope=NULL  the function body
+```
+C++20 gives the same user-written blocks and positions. Blocks the front end adds (`compiler_generated: TRUE`) have **no positions at all** (`pos=-:-
+final_position=-:-`): in C23 five of them (four with a scope, one without), in C++20 one (no scope); which statement each wraps was not probed. A block with a declaration has `assoc_scope` (`a_scope.assoc_block`, il_def.h:18451 gives the way back); the function body has none.
+**A `for` with a declaration** (`p57f.c:31` `for (int i = 0; ...)`): the variable `i` lives in a scope whose `assoc_block` is the compiler-generated block
+with no position in C23 (`variable i parent scope kind sck_block, assoc_block gen=True pos []`) and is `NULL` in C++20 (the scope is the loop's
+`for_init_scope`, il_def.h:15930); the `stmk_for` statement's `end_position` is the loop body's `}`: `stmk_for [position 31:3, end_position 34:3]`, in
+both modes. So a scope exit of a variable declared in a `for` header is reported at the `for` statement's `end_position`; a scope exit of a user block
+at its `final_position` (equivalently its `end_position`). A scope exit with no user-written `}` at all (the function's own parameters) is the function
+body's `final_position` already used for parameters (`encode.cpp:523`).
+
+**(g) `int *p = &x;` against `int *p; p = &x;` for a local `x`: both `address_of(var x{L})`, never a `ck_address`.** `p57g.c:4` and `:5-6`:
+```
+init p: address_of(var x{int:L@13}){int *:@12}                                   (dik_expression)
+L6: assign(var q{int *:L@3}, address_of(var x{int:L@8}){int *:@7}){int *:@5}     (C++20: ...){int *:L@5})
+variable x      address_taken=TRUE ...
+```
+The `ck_address` form belongs to variables with static storage (globals and static locals, in every position, not only initializers), as the corrected P51
+item 3 states: `p57g.c:10-11` `static int g; int *t = &g;` gives `init t: const[addr(g off=0)]`, and `p57i.c`'s assignments of `&G`/`&arr[1]` fold likewise;
+a local array element is `init r: address_of(subscript(array_to_pointer(var a{int [4]:L@13}){int *:g@13}, const[int 2]{int:@15}){int:L@14}){int *:@12}`
+(`p57g.c:8`) and `a` gets `address_taken=TRUE`.
+
+### M4.5b1a: emitted Viper against the fixtures (the lowering of record 0032)
+
+Evidence in `build/m4.5b1a/out/` (`<test>.<mode>.vpr` and `.map` of every `tests/memory/` and `tests/memory/negative/` test, from `build/cerastes verify
+<file> --std=<mode> --keep-vpr=...`; the runner is `build/m4.5b1a/scratch/runmem.py`, its log `out/runmem.log`) and, for shapes the tests do not reach, a hand-built VIR
+program (`build/m4.5b1a/scratch/main.cpp`, verdicts by Silicon 1.1-SNAPSHOT `6b540aa4`, Z3 4.16.0). `lint_viper.py` is clean on all 70 emitted files. The fixtures are
+`tests/viper-smoke/memory/e2_swap.vpr` (`caller`) and `s26_live_lifetime_fail.vpr` (`escaped_local_plus_zero`, `copy_dangling_pointer`).
+
+What is the same as the fixtures, line for line in meaning:
+- **The prelude:** one `field v_<t>`/`d_<t>` per cell type, `field lv: Bool`, `// cerastes:domain-ok 0028` and `domain Block` with the eight functions and the four axioms, each
+  under its `// cerastes:axiom-ok 003x` (axiom text identical to the fixtures'; `member_lv` triggered by `lvloc(member(r, k))`).
+- **`alloc_<t>`:** trusted, bodyless, `decreases _`, the fixture's postcondition (`r != null`, `r == loc(block_of(r), 0)`, `len == 1`, `lvloc(block_of(r)) == loc(block_of(r), -2)`, `acc` of the
+  value, the flag with `!r.d_<t>`, and the liveness cell), in two `ensures` lines whose map rows are at the first address-taken declaration of the type.
+- **A cell read** (`write_then_read.c`): `assert perm(x.v_int) > none`, `assert x.d_int`, then `res := x.v_int` (fixture: `assert perm(a.v_int) > none`, `assert perm(a.d_int) > none && a.d_int`,
+  `t := a.v_int`); **a write through a pointer** (`write_through_pointer.c`): `assert p != null`, the write-permission assert, `p.v_int := e`, `p.d_int := true` on the next line (the lint's flag rule).
+- **A dangling use** (`lifetime_copy_after_block.c`): the scope exit asserts and exhales, and the use is `assert p != null ==> perm(lvloc(block_of(p)).lv) > none` before the copy and before `==`, as in the
+  fixtures' `escaped_local_plus_zero` and `copy_dangling_pointer`; it fails as `lifetime` at the use. A dereference after the exhale fails as `permission` (one error, the liveness check being the permission check).
+- **A scope exit** (`scope_exits.c`): at fall-through and at each `return`, after the value, innermost block first, cells in reverse order, before the postcondition asserts.
+
+What differs, and why:
+- **No `define`s:** WF, INIT, LV and the rest are written inline (0032 item 5); `WF` is not emitted at all in b1a (no pointer enters a method through a contract), `alloc_<t>` states the part of it that holds.
+- **One atomic assert instead of two or `&&`:** `assert !(perm(x.v_int) != write || perm(x.d_int) != write [|| perm(lvloc(block_of(x)).lv) != write])`, where the fixtures write `assert perm(x.v_int) == write && perm(x.d_int) == write` and a separate
+  `assert perm(lvloc(...).lv) == write`: the scope-exit check is one `lifetime` row (0032 item 6), and Silicon would report each conjunct of an asserted `&&` as its own error.
+- **No case split on liveness cells** (`if (lvloc(block_of(x)) == lvloc(block_of(y))) { }`) and no ghost amounts: they belong to calls and contracts (b1b).
+- **A one-past-the-end row** before `==`/`!=` of two non-null pointers, an `internal` assert (provable: every pointer is null or offset 0 of a one-slot block); the fixtures' `e2_ptr_compare` makes it a check only where a pointer may be at `len`.
+- **A pointer `?:` is an `if` assigning a temporary, not a Viper `?:` term.** Found with a hand-built program: after `p := (c ? x : y)` the asserts `perm(p.v_int) == write` verify, but `p.v_int := 3` fails with `Assignment might fail. There might be insufficient permission to access p.v_int` (an `ite` term as the receiver of a heap access).
+  With the `if`, each path holds one pointer and the write verifies; the same holds for the address of a store (`*(c ? p : q) = 4` copies the pointer to a temporary after the `if`).
+- **`-2` prints as `(-2)`** (the emitter parenthesizes negative literals) and **a trusted method's map rows are `internal`** (the lint wants a C position on every clause line).
+
+Silicon reasons: every failure the tests reach is `assertion.false` (`assert.failed` rows); none of `insufficient.permission`, `receiver.null` or `exhale.failed` occurred in the 121 runs. Silicon stops a path at a failed `assert` only when the assertion makes the path infeasible (a null dereference after `p := null`); in
+`goto_past_cell_read.c` it goes on with an unconstrained `x.v_int`, so its `ensures` fails too (see the status entry).

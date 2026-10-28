@@ -58,26 +58,33 @@ struct IntType {
 };
 
 struct Type {
-  enum class Kind { Void, Bool, Int };
+  // Ptr (decision 0032 item 2): a pointer to `pointee`.  Accepted by check_program for a local variable that is not itself address-taken
+  // and for an expression, with a Bool or Int pointee (an enumeration included); every other pointer type (a pointee that is a pointer,
+  // void or a struct; a pointer parameter or result) is built as is and rejected there (M4.5b1b/c).
+  enum class Kind { Void, Bool, Int, Ptr };
   Kind kind = Kind::Void;
   const IntType* int_type = nullptr;  // Kind::Int only; owned by the Program
+  const Type* pointee = nullptr;      // Kind::Ptr only; interned by Program::pointer_to, owned by the Program
 
-  static Type void_type() { return Type{Kind::Void, nullptr}; }
-  static Type bool_type() { return Type{Kind::Bool, nullptr}; }
-  static Type integer(const IntType* t) { return Type{Kind::Int, t}; }
+  static Type void_type() { return Type{Kind::Void, nullptr, nullptr}; }
+  static Type bool_type() { return Type{Kind::Bool, nullptr, nullptr}; }
+  static Type integer(const IntType* t) { return Type{Kind::Int, t, nullptr}; }
 
   bool is_void() const { return kind == Kind::Void; }
   bool is_bool() const { return kind == Kind::Bool; }
   bool is_int() const { return kind == Kind::Int; }
-  // Same VIR type (Int types: same bits and signedness; an enumeration only itself).
+  bool is_ptr() const { return kind == Kind::Ptr; }
+  // Same VIR type (Int types: same bits and signedness; an enumeration only itself; pointers: same pointee type, so `long*` and
+  // `long long*` are one type, as `long` and `long long` are).
   bool operator==(const Type& o) const {
     if (kind != o.kind) return false;
+    if (kind == Kind::Ptr) return pointee != nullptr && o.pointee != nullptr && *pointee == *o.pointee;
     if (kind != Kind::Int) return true;
     if (int_type->is_enum || o.int_type->is_enum) return int_type == o.int_type;
     return int_type->bits == o.int_type->bits && int_type->is_signed == o.int_type->is_signed;
   }
   bool operator!=(const Type& o) const { return !(*this == o); }
-  std::string str() const;  // "bool", "void", or the int type's name
+  std::string str() const;  // "bool", "void", the int type's name, or the pointee's followed by "*" ("int*", "bool**")
 };
 
 // ---- expressions -----------------------------------------------------------------------------------------
@@ -119,7 +126,14 @@ struct Expr {
                  // (the new value, `type` = `var`'s type), or, when `yields_old`, the old value `b` (x++, x--).  `b` is null or the one
                  // `Local var` node that `a` also uses for the old value: the lowering reads it once.  Allowed in code and in a loop
                  // condition, never in an annotation; reachable once per function; see `sequence_problems`.
-    Comma        // `a`, then `b` (decision 0020): `type` = `b`'s type, never void; `a` may be a void call; a sequence point between them
+    Comma,       // `a`, then `b` (decision 0020): `type` = `b`'s type, never void; `a` may be a void call; a sequence point between them
+    // ---- pointers (decision 0032; appended, so every earlier kind keeps its place) ----
+    Null,        // the null pointer constant: `type` is a Ptr.  In `==`/`!=` and as an arm of `?:` it takes the other operand's type: check_program
+                 // accepts a Null of any pointer type there (decision 0032 item 7), and the value is `null` whatever the type.
+    AddrOf,      // `&var`: type = Ptr(var's type); `var` must be a local of this function with `address_taken` (a cell, decision 0032 item 4;
+                 // check_program refuses anything else).  A pointer value: no obligation of its own.
+    Deref        // `*a` used as a READ (a: a Ptr; type = the pointee).  Obligations: the null check, the permission check and the flag
+                 // (decision 0032 item 6).  A write through a pointer is the statement Stmt::Store, never a Deref.
   };
   Kind kind = Kind::Const;
   Type type;     // the type of the value (Void only for a Call of a void function)
@@ -137,6 +151,10 @@ struct Expr {
   // for messages only; empty means "use type.str()".  IntTypes are interned by shape, so the spelling the
   // user wrote lives here: set it on Convert nodes and on constants where it helps (Builder::spelled).
   std::string c_type_name;
+  // The source spelling of this node for messages (decision 0032 item 6): `p` on a pointer Local, `&x` on an AddrOf, `*p` on a Deref
+  // (Builder::deref derives it from the operand's when that has one).  Optional: empty means "unknown" and the lowering words the
+  // message without the name.  It never affects the verification.  Set it with Builder::text.
+  std::string c_text;
   const Function* callee = nullptr;        // Call
   std::vector<const Expr*> args;           // Call: already converted to the parameter types
   bool yields_old = false;                 // AssignE: the value is the old value `b` (x++, x--), not the new one
@@ -176,12 +194,19 @@ struct Stmt {
     Break,     // break: leaves the loop or switch whose `jump_id` is `jump_id`
     Continue,  // continue: goes to the end of the iteration of the loop whose `jump_id` is `jump_id`
     Goto,      // goto: a user `goto` to the Label whose `jump_id` is `jump_id` (decision 0015 item 2; goto_problems)
-    Label      // a user label `label_name:` with id `jump_id` (a direct statement of a Block)
+    Label,     // a user label `label_name:` with id `jump_id` (a direct statement of a Block)
+    Store      // `*addr = expr` (decision 0032): a write through a pointer.  `addr` is a Ptr expression, `expr` has the pointee's type.  The
+               // two are unsequenced operands (sequence_problems).  `*p op= e`, `++*p` and `(*p)--` are Stores whose `expr` reads a Deref that
+               // SHARES the `addr` node (Builder::compound_store, inc_dec_store): the lowering evaluates the pointer once.  The target's
+               // spelling for messages is "*" + addr->c_text.
   };
   Kind kind = Kind::Block;
   SrcLoc loc;
   const Var* var = nullptr;                 // Decl, Assign
   const Expr* expr = nullptr;               // see Kind
+  const Expr* addr = nullptr;               // Store: the pointer written through
+  SrcLoc end_loc;                           // Block: the closing brace (decision 0032 item 8: where leaving the block's scope is reported);
+                                            // required (known) by check_program on a Block that declares a cell; unknown elsewhere is fine
   const Stmt* then_body = nullptr;          // If
   const Stmt* else_body = nullptr;          // If
   std::vector<Clause> invariants;           // While: the user's `invariant` clauses, in order
@@ -213,6 +238,11 @@ struct Var {
   std::string c_type_name;   // the C/C++ spelling of the type, for messages (empty: use type.str())
   bool is_param_copy = false;  // the local copy of a parameter (0012 item 2)
   int param_index = -1;        // for a parameter copy
+  // The program takes this variable's address (EDG's `address_taken`, decision 0032 item 4): the variable is a CELL, an object in a
+  // one-slot block that a pointer may reach.  Set with Function::mark_address_taken.  Assign and Decl of it keep their kinds (the
+  // lowering dispatches on the flag), an AssignE of it is refused (item 9), and check_program refuses it on a parameter copy (M4.5b1b)
+  // and on a pointer variable (M4.5b1c).
+  bool address_taken = false;
 };
 
 // A named constant (decision 0017): a file-scope `const` object (global), or a `const` local of a function that a case
@@ -286,6 +316,9 @@ struct Function {
   // Declare a local.  The pointer stays valid for the life of the Function.
   Var* new_local(std::string name, Type type, SrcLoc loc);
   const std::vector<std::unique_ptr<Var>>& locals() const { return locals_; }
+  // Mark `v` (a local of this function) as address-taken: a cell (decision 0032 item 4).  A foreign pointer is ignored; check_program
+  // reports the unmarked `&v` of a foreign variable.
+  void mark_address_taken(const Var* v);
 
  private:
   std::vector<std::unique_ptr<Var>> locals_;  // all Vars (parameter copies and locals)
@@ -310,6 +343,10 @@ class Program {
   // `is_signed` are the underlying (C++) or compatible (C) type's; [lo, hi] is the value range, within that type.
   const IntType* enum_type(const std::string& name, int bits, bool is_signed, bool is_scoped, const std::string& lo,
                            const std::string& hi);
+
+  // The pointer type to `pointee`, interned (two pointer types with equal pointees share one `Type` object for the pointee).  The pointee
+  // is copied into the Program, so a temporary is fine.
+  Type pointer_to(const Type& pointee);
 
   // The width of C's `int` on this target (EDG's `sizeof(int) * CHAR_BIT`); integer promotion is relative to
   // it.  Set it once, before building; the default is 32.
@@ -339,6 +376,7 @@ class Program {
   int c_int_bits_ = 32;
   int next_jump_id_ = 1;
   std::deque<std::unique_ptr<IntType>> int_types_;
+  std::deque<Type> pointees_;                        // the interned pointee types of pointer_to
   std::deque<std::unique_ptr<IntType>> enum_types_;  // apart from int_types_, so int_type() never returns one
   std::deque<Function> functions_;
   std::deque<NamedConst> named_consts_;
@@ -359,6 +397,8 @@ class Program {
 //    sequence point separates them: the write lies inside the left operand of a Comma, the first operand of an LAnd/LOr, the
 //    condition of a Cond or an argument of a Call.  (A compound assignment needs no extra rule: its expansion reads the target as
 //    an operand of a Binary.)  A read of the target is no conflict; neither is the read of an AssignE's own target in its own `a`.
+//  * a Store (decision 0032 item 9) is two unsequenced operands, its `addr` and its `expr`, like the operands of a Binary: the value writing a
+//    local that the address reads (`*p = (p = q, 1)`) is a conflict.
 struct SequenceProblem {
   const Expr* at = nullptr;  // the AssignE whose write conflicts
   std::string variable;      // the local's source name
@@ -422,6 +462,16 @@ class Builder {
   const Expr* report_at(const Expr* a, SrcLoc loc, std::string note = "");
   // Record how the program spells the node's type ("signed char"); returns `e`.  For messages only.
   const Expr* spelled(const Expr* e, std::string c_type_name);
+  // Record the node's source spelling (`Expr::c_text`: "p", "*p", "&x"); returns `e`.  For messages only.
+  const Expr* text(const Expr* e, std::string c_text);
+
+  // Pointers (decision 0032).  `ptr_type` is a Ptr type from Program::pointer_to.
+  const Expr* null_const(Type ptr_type, SrcLoc loc);
+  // `&v`: type Ptr(v->type); c_text "&" + v->name.  `v` must be a cell (Function::mark_address_taken) for check_program to accept it.
+  const Expr* addr_of(const Var* v, SrcLoc loc);
+  // `*addr` as a read: type = addr's pointee (an ill-typed `addr` is built with its own type and rejected by check_program); c_text
+  // "*" + addr->c_text when the operand has one.
+  const Expr* deref(const Expr* addr, SrcLoc loc);
 
   // Statements.
   // `init` null: a local declared without an initializer (decision 0019).
@@ -447,6 +497,15 @@ class Builder {
   const Stmt* goto_stmt(int label_id, SrcLoc loc);
   const Stmt* label_stmt(int label_id, std::string name, SrcLoc loc);
   const Stmt* block(std::vector<const Stmt*> stmts, SrcLoc loc);
+  // A Block with the position of its closing brace, where leaving the scope of its cells is reported (decision 0032 item 8).
+  const Stmt* block(std::vector<const Stmt*> stmts, SrcLoc loc, SrcLoc end_loc);
+  // `*addr = value` (decision 0032): `value` has the pointee's type.
+  const Stmt* store(const Expr* addr, const Expr* value, SrcLoc loc);
+  // `*addr op= rhs`, `++*addr` and `(*addr)--` as Stores, with the computation and the conversions of compound_assign (below): the
+  // stored value is `(T)((C)(*addr) op (C)rhs)` where `*addr` is a Deref sharing the `addr` node.  The pointee must be an Int (anything
+  // else is built ill-typed and rejected by check_program).
+  const Stmt* compound_store(const Expr* addr, BinaryOp op, const Expr* rhs, SrcLoc loc);
+  const Stmt* inc_dec_store(const Expr* addr, bool increment, SrcLoc loc);
 
   // Effects used as values (decision 0020).  The statement forms below stay as they are: a top-level assignment is an `Assign`.
   // `value` has `v`'s type (the encoder converts it as for `assign`).  The node's type is `v`'s; its value is `value`.
@@ -473,8 +532,9 @@ class Builder {
   const Stmt* inc_dec(const Var* x, bool increment, SrcLoc loc);
 
  private:
-  // `(T_x)((C)xval op (C)rhs)`: the stored value of a compound assignment (see compound_assign); `xval` is the read of `x`.
-  const Expr* compound_value(const Var* x, const Expr* xval, BinaryOp op, const Expr* rhs, SrcLoc loc);
+  // `(T_x)((C)xval op (C)rhs)`: the stored value of a compound assignment (see compound_assign); `xval` is the read of the object, of
+  // type `xt`.
+  const Expr* compound_value(const Type& xt, const Expr* xval, BinaryOp op, const Expr* rhs, SrcLoc loc);
   Program& p_;
 };
 

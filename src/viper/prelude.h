@@ -7,6 +7,7 @@
 // (and what they need) are emitted.
 #pragma once
 
+#include <map>
 #include <set>
 #include <string>
 
@@ -31,6 +32,12 @@ namespace cerastes::viper {
 //                   of N bits: one parameter, the body is the exact form over `a` (a floor quotient and a remainder by the power-of-two literal
 //                   2^k), and one `ensures`, the range of the type guarded by the range of the argument (total, no `requires`).
 std::string prelude_text(const std::set<std::string>& used);
+
+// The memory model's prelude (decision 0032 item 5, decision 0028 item 2), for a program that has a cell or a pointer: a pair of fields
+// `v_<t>`, `d_<t>` for each cell type `<t>` (the key; the value is the Viper type of `v_<t>`: "Int", "Bool" or "Ref"), `field lv: Bool`
+// (the liveness cell), and `domain Block` with its eight functions and its four axioms (records 0033 to 0036), each tagged for the lint
+// (`// cerastes:domain-ok 0028`, `// cerastes:axiom-ok <record>`).  The fields come in the sorted order of the keys.
+std::string memory_prelude_text(const std::map<std::string, std::string>& cell_types);
 
 // The prelude functions that `name` calls.
 std::set<std::string> prelude_closure(const std::set<std::string>& used);
