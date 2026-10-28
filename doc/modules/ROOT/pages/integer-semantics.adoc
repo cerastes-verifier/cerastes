@@ -332,6 +332,9 @@ Through a chain of such masks, a bound on the result is decided at any depth, an
 in adjacent pairs (`+(((x ^ 255) ^ 255) ^ 15) ^ 15 == x+`, to six masks for a signed type, at every depth measured for
 an unsigned one). An identity through a signed chain whose masks alternate
 (`+(((x ^ 255) ^ 15) ^ 255) ^ 15 == x+`), or a longer one, may run to the time limit, like the undecided shapes below.
+These limits hold for one such function at a time: several functions with deep chains in one file can take much
+longer together, since the prover carries what it learned from one function to the next. If a file with several runs
+to the time limit, verify the chains in files of their own.
 
 What the prover decides about other bitwise results is limited in this version.
 It decides every expression of constants, the range of a result, a result named in

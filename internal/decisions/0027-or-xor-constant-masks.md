@@ -104,3 +104,18 @@ them. The same two masks as 0026 part B give exact forms for `|` and `^`.
 
 - Character code that sets, clears or flips bits by constant masks (M4.6) is decided.
 - The prelude gains, on demand, one small function per `^` mask form used, besides `c_[u]xor_N`.
+
+*2026-10-28, amended (M4.5b1a follow-up, the owner's "fix or remove the single consistently failing CI test", PR #14):
+item 4 — the thresholds were measured one claim per prover. Several mask-chain methods verified one after another on
+one prover can make a later query run to the time limit (prover history): the seven functions of
+`mask_or_xor_round_trip.c` and its twins verified in 1–2 s each alone and in 2 s together at Silicon's default
+parallelism on a 16-core machine, but with one verifier (`--numberOfParallelVerifiers 1`) `..._chain_high_part_post.c`
+and `..._chain_value_off_by_one_post.c` ran to the limit every time, and with two or three verifiers (GitHub's macOS
+runner has three cores) they did so on some runs; dropping any one of several functions removed the hang. Three of
+these twins timed out on CI in C23, one per run. The family now has one chain per file (`mask_or_xor_round_trip.c` with
+the three depth-2 round trips, `mask_or_xor_chain.c`, `mask_or_xor_chain_value.c`, `mask_or_xor_chain4.c`,
+`mask_or_xor_chain8_range.c`, each twin with only its own function, its other lines comments, no expectation changed):
+every file verifies or fails as expected in 1–3 s with one, two or three verifiers in both modes. The claims of item 4
+stand, each for a function verified on its own; the Integer semantics page says that several such chains in one file
+may take longer.*
+

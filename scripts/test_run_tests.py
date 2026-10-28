@@ -13318,11 +13318,14 @@ class RealDriverTests(unittest.TestCase):
         # 0027 item 3 (revised): each `^` by a constant mask is one call of a mask function, so a chain of eight masks has
         # exactly eight calls, each argument written once, and its text grows by one call per level.  An encoding that
         # names the operand twice per level (0026 audit round 2) would double it at every level: 2^8 copies instead of 8.
-        text = self.kept_vpr("mask_or_xor_round_trip.c")
+        # (the two chains are in files of their own since the M4.5b1a follow-up: one mask chain per file, 0027 item 4)
+        text = self.kept_vpr("mask_or_xor_chain8_range.c")
         chain8 = viper_method_text(text, "xor_chain8_range")
-        chain3 = viper_method_text(text, "xor_chain")
+        text3 = self.kept_vpr("mask_or_xor_chain.c")
+        chain3 = viper_method_text(text3, "xor_chain")
         self.assertEqual(bit_or_xor_calls(chain8), [], chain8)
         self.assertNotIn("(let ", text)
+        self.assertNotIn("(let ", text3)
         self.assertEqual(len(xor_mask_calls(chain8)), 8, chain8)
         self.assertEqual(len(xor_mask_calls(chain3)), 3, chain3)
         # the operand is written once, and the nested expression is one call per level (measured: 149 characters for

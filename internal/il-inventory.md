@@ -4956,5 +4956,6 @@ bytes. Identity threshold (`build/m4.5a/xor-threshold.md`, serial, `--timeout 12
 2/4/6/8: c23 2.7/2.7/3.3/4.6 s, c++20 2.6/2.7/2.8/timeout; `int` alternating: depth 4 c23 2.8 s, c++20 117.4 s; depth 8
 timeout in both. With the method's automatic range `ensures` removed by hand the worst cases take 1.95–15.4 s; swapping the
 C and C++ forms of the `ensures` (`((res == x) ? 1 : 0) != 0` vs `res == x`) moves the cases between seconds and a timeout.
-The tests keep identities within these limits (`mask_or_xor_round_trip.c`: depth 2 and the paired depth 4; the VIR "pairs",
+The tests keep identities within these limits (`mask_or_xor_round_trip.c`: depth 2; `mask_or_xor_chain4.c`: the paired
+depth 4, a file of its own since the M4.5b1a follow-up, record 0027's amendment: one mask chain per file; the VIR "pairs",
 "complements" and "eight_range" cases).
