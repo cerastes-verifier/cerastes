@@ -145,23 +145,25 @@ history of `internal/status.md`).
 | **M4.5 Pointers** (sessions b1–f3, below) | the memory model for C (records 0028–0030) | M4.5a, S5 (done) |
 | **M4.6 Chars and strings** | string literals as read-only arrays, `char` buffers, vlibc's `<string.h>` (`strlen`/`memcpy`/`memcmp`/`strcmp` contracts and verified implementations), `main(argc, argv)` | M4.5e2, M4.5f3 |
 | **M4.7 Function pointers** | contracts on function types, calls through pointers ("the pointer satisfies the type") | M4.5b1b |
-| **M4.8 C parity close-out** | the VeriFast C differential set, the M4 mutation run, the Memory and ownership page complete, M4's acceptance, the deferred list for M8 | all |
+| **M4.8 C parity close-out** | the VeriFast C differential set, the M4 mutation run, the Memory and ownership page complete, M4's acceptance, the deferred list for M8; the cost of aliasing `reads`/`live` parameters (handoff question 66: fixed here) | all |
 
 **M4.5 Pointers** (one 4.x for pointers, owner, 2026-10-20; the C parts of the former memory-model milestone; split
 further in M4.5a, owner, 2026-10-27: "this can be expanded if you see fit"). M4.5a designed it (records 0028 memory
 model, 0029 ownership annotations and C spec functions, 0030 vlibc); `internal/handoff.md` §4.4 has each session's
-plan and the VeriFast ports it takes.
+plan and the VeriFast ports it takes. M4.5b1c is three sessions, and owning results move to M4.5d2 (owner, 2026-10-29,
+M4.5b1c planning: `owns_block` needs the heap token and a whole-block permission, which nothing creates before `malloc`).
 
 | Session | Scope | Needs |
 |---|---|---|
-| **M4.5b1b Pointer parameters, results and contracts** (done) | pointer parameters and results (`restrict` only with `owns`), `&param`; `WF`; `owns`/`reads`/`live`/`old(*p)` in both modes (C's `cerastes_` forms, 0029 item 3); ghost amounts per atom, case splits; the framing of contracts decided per path; call, return and entry permission checks; category `pointer-comparison` (plan `.claude/plans/m4-5b1b-pointer-params.md`) | M4.5b1a (done) |
-| **M4.5b1c Ownership, sequencing, loops** | `[[cerastes::owning]]` on parameters and functions, `owns_block`; sequencing on objects (`unsequenced`) and the call placement rule; cells in loops (hybrid permission invariants); `T**`; jumps out of cell scopes; the aliasing trap; the ports (`swap`, `inc`, `address_of_local.c`); the page completed | M4.5b1b |
-| **M4.5b2 Globals, statics, initialization through pointers** | mutable globals and `static` locals as blocks with frames; `main` owns the globals; 0025 item 2's placement revisited; 0019's flag per cell; `[[cerastes::uninit]]`, `ref_to_uninit`, `must_init` and `--strict-init` | M4.5b1c |
-| **M4.5c Structs** | field cells, `.` and `->`, struct values (copies, initializers, by-value parameters and results), nested structs, pointers to fields, `owns(*s)`, non-recursive owning fields | M4.5b1c |
+| **M4.5b1c1 Loops and jumps** | cells and pointers in loops with automatic permission invariants ("every place held", owner); `owns`/`reads`/`live` in `CERASTES_INVARIANT`; memory in invariants and measures, a function's `decreases(*p)`; `goto`/`break`/`continue`/`return` out of a cell's scope; the `address_of_local.c` ports these make possible (plan `.claude/plans/m4-5b1c1-loops.md`) | M4.5b1b (done) |
+| **M4.5b1c2 Sequencing and placement** | writes to cells inside expressions; sequencing on objects (`unsequenced`, 0028 item 12); 0028 item 13's call placement (lifts 0037 item 8); `return &local;` rejected like the compilers (handoff question 65); `c ? owns(*p) : reads(*p)` path-precise (question 67) | M4.5b1c1 |
+| **M4.5b1c3 `T**`, owning parameters, `*result`** | `T**`; `[[cerastes::owning]]` on parameters (target `p`); `*result` as a value, framed by `result == p`; `swap.c` and the aliasing trap; `address_of_local.c`'s `int**` functions; the Memory and ownership page completed | M4.5b1c2 |
+| **M4.5b2 Globals, statics, initialization through pointers** | mutable globals and `static` locals as blocks with frames; `main` owns the globals; 0025 item 2's placement revisited; 0019's flag per cell; `[[cerastes::uninit]]`, `ref_to_uninit`, `must_init` and `--strict-init` | M4.5b1c3 |
+| **M4.5c Structs** | field cells, `.` and `->`, struct values (copies, initializers, by-value parameters and results), nested structs, pointers to fields, `owns(*s)`, non-recursive owning fields | M4.5b1c3 |
 | **M4.5d1 vlibc** | the repository (the owner creates `cerastes-verifier/vlibc`), its layout, license and CI; the submodule pin; explicit and transparent includes; the trust rule; `abort`/`exit`/`_Exit` moved out of the encoder's table | M4.5a (any time) |
-| **M4.5d2 `malloc` and `free`** | vlibc's contracts for `malloc`, `calloc`, `realloc`, `free`; heap blocks; the free checks; leaks (a record; `forperm`); owning locals and globals; `invalid-free`, `leak` | M4.5c, M4.5d1 |
-| **M4.5e1 Arrays** | local arrays, `a[i]`, array parameters, `owns_range` and quantified permissions, `forall` in C (0029 item 4), sum and max; P38's braced initializers over 1000 elements; M4.4b2's types computed from constants | M4.5b1c |
-| **M4.5e2 Pointer arithmetic** | `p + i`, `p - q`, comparisons within one object, one-past-the-end, `malloc(n * sizeof(T))`; `out-of-bounds`; relational comparisons and `p - q` under `pointer-comparison` (the category lands in M4.5b1b) | M4.5e1, M4.5d2 |
+| **M4.5d2 `malloc` and `free`** | vlibc's contracts for `malloc`, `calloc`, `realloc`, `free`; heap blocks; the free checks; leaks (a record; `forperm`); owning locals and globals; owning results (from b1c, owner 2026-10-29: `[[cerastes::owning]]` on functions, target `r`; `owns_block`; `owns(*result)`; `ensures` atoms with no `requires` partner); `invalid-free`, `leak` | M4.5c, M4.5d1 |
+| **M4.5e1 Arrays** | local arrays, `a[i]`, array parameters, `owns_range` and quantified permissions, `forall` in C (0029 item 4), sum and max; P38's braced initializers over 1000 elements; M4.4b2's types computed from constants | M4.5b1c3 |
+| **M4.5e2 Pointer arithmetic** | `p + i`, `p - q`, comparisons within one object, one-past-the-end, `malloc(n * sizeof(T))`; `out-of-bounds`; relational comparisons and `p - q` under `pointer-comparison` | M4.5e1, M4.5d2 |
 | **M4.5f1 Predicates and pure functions** | predicate and pure bodies encoded (0011 item 4 lifted), `fold`/`unfold`, non-recursive predicates | M4.5c, M4.5d2 |
 | **M4.5f2 Recursive predicates** | recursive predicates; a linked list (push, pop, length); recursive owning fields | M4.5f1 |
 | **M4.5f3 Lemmas and ghost sequences** | lemma functions and ghost sequences for content specifications (M4.6's string contracts); its record decides whether all of it is in M4 | M4.5f2 |
