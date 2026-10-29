@@ -4,87 +4,89 @@ Session log, newest first. Each entry says what is done, what is not, any surpri
 the exact first step for the next session. Trimmed at the end of M4.4c (owner, 2026-10-26) to the latest entry and a
 history table; the full log up to M4.4c is `git show 1fcc43b:internal/status.md`, M4.4c's entry is
 `git show fce46de:internal/status.md`, M4.4d's `git show 9017105:internal/status.md`, M4.5a's
-`git show 72e30b3:internal/status.md`, and S5's `git show 794e960:internal/status.md`.
+`git show 72e30b3:internal/status.md`, S5's `git show 794e960:internal/status.md`, and M4.5b1a's
+`git show bdc6bd0:internal/status.md`.
 
-## M4.5b1a — the memory model and address-taken locals inside one function (2026-10-28): done on branch `m4.5b1a-pointers`
+## M4.5b1b — pointer parameters, results and contracts (2026-10-28/29): done on branch `m4.5b1b-pointer-params`
 
-Read `internal/handoff.md` next: §3 "From M4.5b1a", §4.4 (M4.5b1b and b1c, with the pre-approved flips), §8 question 64.
+Plan: `.claude/plans/m4-5b1b-pointer-params.md` (from now on each approved plan is saved there, named by milestone).
+Read `internal/handoff.md` next: §3 "From M4.5b1b", §4.4 (M4.5b1c, with its pre-approved flips), §8.
 
-**Owner decisions (2026-10-28, M4.5b1 planning):** M4.5b1 is three sessions (b1a, b1b, b1c; a design pass put the single
-session at well over 27 agent-hours for `src/vir` and `src/viper` alone); b1b and b1c may retire or re-expect exactly
-the b1a rejection tests listed below for them; an existing test whose only point was "pointers are rejected" is retired
-where its construct is accepted (none was: `reject_pointer.c` is a pointer parameter, still rejected, now b1b's); loops
-over memory in b1c get hybrid permission invariants; the 0027 mask timeouts on GitHub's macOS runner are ignored for
-now (handoff §3); handoff questions 59–63 as recommended, with `ssh matt@clang4.cpp.al` replacing the box.
+**Owner decisions (2026-10-28/29):** no cuts and no time cap (pointer results and `&param` stayed in b1b); the framing of
+contracts decided per path by Silicon; a missing permission at a call or a return is `permission`; handoff question
+64: `restrict` accepted only on a parameter the contract owns (tightened after audit round 2: every other pointer
+parameter of the same type needs an atom of its own); approved plans in `.claude/plans/<milestone>-<topic>.md`; the
+exponential cost of aliasing `reads`/`live` parameters documented, not redesigned; `tests/scalar/negative/
+reject_header_pointer.c` (and its header `bad_pointer.h`) retired, its construct now accepted.
 
 **Done**
-- **Record 0032** (amends 0011 items 9–10, 0012 item 12, 0019 item 13, 0020 item 4, 0028 items 1 and 4), revised after
-  two Opus audit rounds: pointers to integers, `bool` and enumerations as the types of locals and expressions;
-  address-taken locals (the IL's `address_taken`, P51/P57) as one-slot blocks from a trusted `alloc_<t>`, allocated at
-  block entry (C23 6.2.4p6) and before a switch's dispatch; `&x`, `*p`, statement-level writes (`*p = e;`, `*p op= e;`,
-  `(*p)++;`), NULL in every spelling, `==`/`!=`, truth tests, pointer locals, `?:`; `CERASTES_CHECK`/`assert` may use
-  them; explicit checks `null-dereference`, `permission`, `lifetime` (every use of a pointer value, a discarded one
-  included), the flag (`uninitialized`); scope exits at fall-through and `return`; the one-past-the-end comparison row
-  as `internal`; the conversion allow-list on EDG's types (null to `T*`, adding qualifiers) and C's #42/#144/#167/#513
-  as errors in verify mode (audit round 4 of M4.5a's reopened item); rejected until b1b/b1c/later: pointer parameters,
-  results and globals, `&param`, `T**`, `void*`, struct/union/function pointers, `restrict`/`volatile`/`_Atomic`
-  pointers, pointer casts, address constants, string and compound literals, loops touching memory, `return` in a loop
-  with a live cell, jumps out of a cell's block, cell writes inside expressions, pointers in contracts, invariants and
-  measures.
-- **Records 0033–0036:** the `Block` domain's four axioms (`loc_inv`, `loc_nonnull`, `member_inv`, `member_lv`), each
-  with its lint tag; the 12 `s25_*` fixtures moved to 0028's `member_lv` trigger (55 fixtures pass, no outcome changed).
-- **Code:** VIR `Ptr`, `Null`, `AddrOf`, `Deref`, `Store`, `Var::address_taken`, `Block::end_loc`, `memory_problems`
-  (`vir.h`, `check.cpp`); the encoder (`encode.cpp`); lowering of cells, checks, liveness and scope exits with a typed
-  `LVar` (`Ref`), `Field`, `PermOf`, `Acc`, `FieldAssign`, `Exhale` (`lower.cpp`, `lowered.h`); the memory prelude
-  (fields, the domain with tags, `alloc_<t>`) emitted only when used (`emit.cpp`, `prelude.cpp`); a pointer `?:` is an
-  `if` (Silicon refuses an `ite` field receiver); C's `--diag_error=42,144,167,513` (`verify_main.cpp`).
-- **Lint:** the domain pinned to `Block`/`domain-ok 0028`, exactly the four axioms with their records and texts,
-  `alloc_<t>`'s contract pinned, `new` refused, field flags.
-- **Harness:** three categories in the five copies; `tests/memory` an area (dual mode, native policy, twins);
-  `MemoryAreaTests`.
-- **Tests:** `tests/memory/` (23 positives, 69 negatives and pins); the VIR self-test's `selftest_cases7.inc` (36
-  lowering, 20 rejection cases; `VIR_CASES_MIN` 1159).
-- **Docs:** the new page "Memory and ownership"; Error messages: `null-dereference`, `permission`, `lifetime`
-  ("sixteen"); Verifying's list of what is not supported; `internal/encoding.md` §2–§4; P51 (never committed by M4.5a),
-  P56, P57 and the fixture comparison in `il-inventory.md`.
+- **Record 0037** (accepted; revised after audit round 1 on the design, S27, audit round 2 on the code and its
+  re-audit), amending 0008, 0011, 0012, 0028, 0029 and 0032: pointer parameters and results with `WF`; `&param`;
+  `owns(*p)`, `reads(*p)`, `live(p)`, `old(*p)`, `*p` in contracts in C++ (`cerastes::`) and C (`cerastes_owns`,
+  `cerastes_reads`, `cerastes_live`, the `cerastes_old` macro over `__typeof__`); one ghost `Perm` amount per atom, the
+  caller's amounts `(g ? m : write)/(N + 1)`, sums at returns and calls; framing checked per path in `f__wf` with each
+  contract heap read guarded by its own ite chain; explicit `permission` checks at calls and returns, separation,
+  `lvloc` and cell case splits (at calls, after pointer-returning calls, at entry); `pointer-comparison` (code only;
+  contract `==` is the model's identity); by-name cell checks as `permission`; `restrict` on owned C parameters; the
+  call placement rule until b1c.
+- **Code:** `include/cerastes.h` (C spellings, `cerastes::live`); `src/backend` (encode.cpp: signatures, atoms,
+  `finish_atoms`, `contract_truth`, placement, `restrict`, `old` forms, `measure_rejected_`; `unsupported_annotation`);
+  `src/vir` (`Atom`, `contract_atoms`, `restrict_backed`, `placement_problems`, the `no_ptr_` split; lowered `Perm`,
+  `Old`, `Acc` with an amount, `PermDiv`, `CaseSplit`; lower.cpp's contract modes); `src/viper/emit.cpp`.
+- **Lint:** ghost amounts pinned (`none < a && a < write` before any use), `wildcard` refused.
+- **Harness:** `pointer-comparison` in the category copies; README.
+- **Tests:** `tests/memory/` 16 positives and 45 negatives and pins (both modes; `restrict` C-only); the VIR self-test's
+  `selftest_cases8.inc` (45 lowering, 7 rejection cases), the four `mem_rej_*` flipped, `VIR_CASES_MIN` 1204.
+- **Docs:** Memory and ownership ("Pointer parameters and contracts", the limits), Annotations (the spec-function
+  table), Error messages ("seventeen", `pointer-comparison`, `permission`'s new places), Verifying; `internal/encoding.md`
+  §2–§3; `il-inventory.md`: P52, P54, P55 (copied from M4.5a's evidence), P58, S27.
 
-**Pre-approved flips** (owner): **b1b** may retire or re-expect `tests/scalar/negative/reject_pointer.c` and
-`tests/memory/negative/reject_{address_of_param,implicit_function_pointer_argument,pointer_param,pointer_result}.c`;
-**b1c** `tests/memory/negative/reject_{address_of_pointer,break_out_of_switch_with_cell,cell_in_invariant,cell_in_measure,cell_postfix_value,goto_out_of_cell_scope,loop_cell,loop_pointer,pointer_to_pointer,return_in_loop_with_cell,write_in_assignment_value}.c`.
-The other pins name later milestones (M4.5b2, M4.5c, M4.5d2, M8) and are not pre-approved.
+**Flips (pre-approved):** retired `tests/scalar/negative/reject_pointer.c`,
+`tests/memory/negative/reject_{pointer_param,pointer_result,address_of_param}.c`; by owner decision during the session,
+`tests/scalar/negative/reject_header_pointer.c` and `tests/scalar/headers/bad_pointer.h`.
+`reject_implicit_function_pointer_argument.c` unchanged. b1a's memory maps changed only in the two rows' category
+(0037 items 11–12).
+
+**Pre-approved for b1c** (new b1b pins it lifts): `tests/memory/negative/reject_{atom_on_result,call_beside_access,call_compound_target,ensures_atom_no_partner,result_value,two_memory_calls,heap_read_decreases}.c`,
+plus b1a's list (handoff §4.4).
 
 **Acceptance**
-- The baseline (`main` `794e960`, from the main checkout's own build): 5766 passed, 0 failed, 1 skipped.
-- `check.sh` (the full check, once, after both audit rounds' fixes): **all green**. Harness self-test 1024 tests (1
-  skip), lint self-test green; tests **6081 passed, 0 failed, 1 skipped** (native-ok runs: Apple clang 1136, GCC 1136);
-  VIR self-test **1159** cases (229 rejection cases); walker oracle 136 goldens, 1924 facts, 0 failed; docs green.
-- **Viper unchanged for every existing program:** `diff -r` of `build/vpr` against the baseline: no file differs; the
-  only additions are `tests/memory/` and the new doc examples (error-messages, memory). The VIR self-test output: no
-  case differs; 36 `mem_*` cases added.
-- `tests/memory/`: every test gives exactly its `expect:` lines in both modes (also run one by one by il-analyst,
-  edg-backend and the auditor); `tests/viper-smoke/memory`: 55 passed after the trigger change.
-- The Linux job was not run in the session (no host work); the PR's CI runs it.
+- The baseline (`bdc6bd0`, a temporary worktree `.claude/worktrees/b1b-base`): 6105 passed, 0 failed, 1 skipped; VIR
+  self-test 1159.
+- `check.sh` (the full check, once, `CERASTES_CHECK_BASE` unset, 49 min): **all green**. Harness self-test 1024 tests
+  (1 skip), lint self-test 285, mutate self-test 291; tests **6298 passed, 0 failed, 1 skipped** (native-ok runs: Apple
+  clang 1183, GCC 1183); VIR self-test **1204** lowering and 232 rejection cases, 0 problems, lint clean; walker oracle
+  136 goldens, 1924 facts, 0 failed; docs and `check_doc_examples --html` green.
+- **Viper against the baseline:** `diff -r` of `build/vpr`: no `.vpr` differs and none is missing; 192 files added (the
+  new tests and doc examples); 122 `.map` files of b1a's memory tests and doc examples differ only in two row kinds,
+  308 by-name cell rows `internal` → `permission` and 36 one-past-the-end rows `internal` → `pointer-comparison`
+  (record 0037 items 11–12). The VIR self-test output: 90 files added (45 `ptr_*` cases), 35 `mem_*` maps differ only in
+  the same two row kinds (113 rows), no `.vpr` differs.
+- `tests/memory`, the scalar negatives and the memory and error-messages doc examples: 2847 passed, 0 failed, run
+  alone before `check.sh`. The Linux job was not run in the session (no host work); the PR's CI runs it.
 
 **Surprises**
-- The first baseline in the worktree was invalidated: a stale EDG stamp (bootstrap refreshed it), then an agent's
-  build relinked `build/cerastes` mid-run. The baseline was rerun from the main checkout's build, which also freed the
-  worktree for the implementers.
-- P51 was never committed by M4.5a (only `build/m4.5a/P51.md`); P52, P54 and P55 are still only there (handoff §3).
-- Silicon refuses a Viper `ite` of `Ref`s as a field receiver, hence the `if` for a pointer `?:`.
-- Two audit rounds found blocking holes: `restrict` on the pointer itself, and a discarded pointer value (`(void)p;`)
-  without its liveness check; both fixed, the second re-audited.
-- Two orphaned Z3 processes from earlier sessions (20–22 h old) were stopped.
+- Silicon refuses a heap read under a disjunctive guard (S27 P6): one guard per disjunct.
+- Audit round 1 found two false proofs in the first framing design (a whole conjunct guarded; a separation fact across
+  a `requires` atom and its partner); audit round 2 found two exit-3 shapes and an unsound `restrict` (permissions
+  follow cells, not provenance); its re-audit found the entry cell splits' path explosion, moved to the calls.
+- A pointer result known only by a disjunction (`r == p || r == q`) needs case splits before Silicon can read through
+  it; contract comparisons with a result had to become model identity.
+- Silicon's time grows exponentially with aliasing `reads`/`live` parameters of one type (six time out).
+- Heavy machine load (averages up to 215) from parallel Silicon runs distorted timings; quiet re-measurements are in
+  record 0037.
 
-**Decision records added:** 0032-pointers-inside-one-function, 0033-axiom-loc-inv, 0034-axiom-loc-nonnull,
-0035-axiom-member-inv, 0036-axiom-member-lv.
+**Decision records added:** 0037-pointer-parameters-and-contracts.
 
-**First step for the next session (M4.5b1b).** Confirm the owner pushed this branch and both CI jobs are green on its PR
-(the 0027 mask timeouts on macOS are the known flake, handoff §3); then handoff §4.4, "M4.5b1b".
+**First step for the next session (M4.5b1c).** Confirm the owner merged PR #15 and pushed this branch with both CI
+jobs green on its PR; then plan b1c from handoff §4.4 (its planning decides whether it splits), saving the plan as
+`.claude/plans/m4-5b1c-<topic>.md`.
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 
 | Session | Date | Branch, merge | Records | Outcome |
 |---|---|---|---|---|
+| M4.5b1b Pointer parameters and contracts | 2026-10-28/29 | `m4.5b1b-pointer-params` | 0037 | pointer parameters and results, `&param`; `owns`/`reads`/`live`/`old` in both spellings with ghost amounts; framing per path; `permission` at calls and returns; `pointer-comparison`; `restrict` on owned C parameters |
 | M4.5b1a The model, address-taken locals | 2026-10-28 | `m4.5b1a-pointers` | 0032–0036 | the `Block` domain and its four axioms; address-taken locals as blocks, `&`, `*`, NULL, `==`, liveness and scope exits inside one function; `null-dereference`, `permission`, `lifetime`; C's incompatible pointer types as errors |
 | S5 Linux CI | 2026-10-28 | `s5-linux-ci` | 0031 | `check-linux` on `ubuntu-26.04` in both tiers; Linux bootstrap; glibc `assert`; the same EDG language on both platforms; eight macOS-only tests tagged |
 | M4.5a Memory-model design, `\|`/`^` masks | 2026-10-27 | `m4.5a-memory-design` | 0027–0030 | the C memory model designed and audited (E2, four axioms, member blocks, liveness), ownership annotations, vlibc; `\|`/`^` constant masks decided; S5 Linux CI next |

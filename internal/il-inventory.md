@@ -4762,6 +4762,56 @@ under clang and gcc-16 in C23 and C++20.
 - **EDG fork commit: not needed.** Back-end work only: strip `compiler_generated` promotion casts around a place; read
   the `ck_address` constant and the folded `&*p` as the `old` place; header declarations in C mode.
 
+### P52, P54, P55: attribute positions, P4222's markers, vlibc include mechanics (records 0029, 0030) **PASS (copied in M4.5b1b from `build/m4.5a/P52.md`, `P54.md`, `P55.md`, which records 0029 and 0030 cited but never committed; not re-run)**
+
+Evidence in `build/m4.5a/P52.md`, `P54.md`, `P55.md` (not committed) and `build/m4.5a/proto/` (a throwaway copy of the tree with extra rows in `register_attributes.cpp`, built into
+`build/m4.5a/proto/out/`; inputs `probes/*.{c,cpp}`, `probes2/`, raw outputs `raw/`, one line per case `summary.txt`) and `build/m4.5a/vlibc-proto/` (throwaway headers). No tracked file was touched; no EDG fork commit.
+Registration used, in EDG's signature grammar (record 0007): `{"owning", "?(X)", "r|v|p|d", RAF_ENTITY_ATTACHED}` (a routine, variable, parameter or field; no argument list, or one unevaluated
+expression; `owning()` is a syntax error, #29), `{"uninit", "", "v", ...}`, `{"ref_to_uninit", "", "p|v|r", RAF_ENTITY_ATTACHED}`, `{"must_init", "", "p", RAF_NO_FLAGS}`.
+
+**P52: where `[[cerastes::owning]]` lands (72 cases, both modes, identical unless noted).**
+- **Parameter**, leading or trailing: on the `param-type` of each declaration that spells it (`param_type.attributes`), not on the variable's `source_corresp.attributes`; the definition's variable sees the union over all
+  declarations (`variable.assoc_param_type`, il_def.h:11234). **Local, global, `static` local, field:** `source_corresp.attributes` of the variable or field. **Function:** `routine.source_corresp.attributes` and the
+  `src-seq-secondary-decl.attributes` of that declaration; after the parameter list (`char* make(int n) [[owning]]`) it is accepted only because of `RAF_ENTITY_ATTACHED` (otherwise #1835).
+- Two declarators: a leading attribute covers both (`[[owning]] char *a, *b;`), a trailing one its own declarator. A typedef'd pointer type takes it as an entity attribute.
+- **EDG refuses by itself:** the type position (`char* [[owning]] x`, #1835: a registration cannot name a type target), inside the declaration specifiers (`static [[owning]] char* y;`, #1866), inside a `typedef` (#1866),
+  on a `typedef` declaration (#1835), `owning(n)` with a later parameter or an undeclared name (#20), `owning(1, 2)` (#18, #40).
+- **Accepted by registration, to be refused by the encoder:** a non-pointer entity (`[[owning]] int x`), a function that returns no pointer, a duplicate (`[[owning]] [[owning]] char* g;` records two nodes).
+- **Redeclarations accumulate** (parameters, variables, functions); `RAF_MUST_MATCH` is honoured for the function position only (`owning_mm(1)` then `owning_mm(2)` is #3607), not for parameters and variables
+  (`mm_param_diff`, `mm_var_diff_args` keep both), so the encoder checks that every declaration of an entity carries the same `owning` and count.
+- **Macros:** a user macro that expands to the attribute works in every position; the attribute's position is the macro body's (`position.orig_*` holds the use). A user `#define CERASTES_OWNING` is
+  `annotation_macro_changed` (`annotation_checks.cpp`), so `<cerastes.h>` defines it. The attribute and the C++ function template `cerastes::owns` do not clash.
+- **Today's driver** (the prototype) silently ignored an accepted `owning`, `uninit`, `ref_to_uninit` or `must_init` (`check_attributes` skips registered `cerastes` attributes, `encode.cpp`:418 then): a registration needs
+  its encoder handling in the same commit.
+
+**P54: P4222's markers.**
+- `uninit`: accepted on a local definition, leading or trailing, a pointer, array or struct local, `for ([[uninit]] int i; ; )`; registered `v:+a!` EDG itself refuses a global or a `static` local (#1862 "requires an automatic
+  variable"; `v:+l!` gives #1864 for a global) and registration refuses a parameter, field or function (#1835). A definition with an initializer is accepted by registration: the encoder rejects it.
+- `ref_to_uninit`: parameter (leading or trailing, accumulating over declarations like `owning`), local pointer, global pointer, function (leading, after the declarator-id, after the parameter list); a field is refused (#1835);
+  a non-pointer parameter and an `int**` parameter are accepted by registration. `must_init`: a parameter only (#1835 elsewhere); a non-pointer parameter is accepted by registration.
+- Combinations `[[ref_to_uninit]] [[owning]] int* p` and `[[uninit]] [[owning]] int* p` record both. `must_init` with `ref_to_uninit` on one parameter is contradictory and recorded: the encoder rejects it. None is
+  must-match across redeclarations. A macro spelling works in every position.
+
+**P55: can a vlibc shim come before the system headers (record 0030).**
+- **Only `--sys_include` order does it.** The driver and `scripts/cerastes-fe.sh` pass every system directory as `--sys_include=<dir>` in the scraped order (`verify_main.cpp`:300-312; C: `/usr/local/include`, the clang
+  resource dir, the SDK `usr/include`, the CLT `usr/include`; C++ adds libc++ second), then `include/`, then the user's `-I` dirs. A directory with `stdlib.h` containing `#error shim-found` is hit when passed first as
+  `--sys_include` and not hit as `-I<dir>` (EDG searches `-I` after the system directories for `<...>`), so `cerastes verify -I<shim>` cannot shadow `<stdlib.h>`; the driver must prepend a `--sys_include=<vlibc>/shim`.
+  `<vlibc/stdlib.h>` (explicit, through `-I<vlibc-root>`) works as a user header.
+- **`#include_next <stdlib.h>` from the shim works in both modes** (C23: the SDK's; C++20 through libc++'s wrapper, which does its own `#include_next`). Headers that pull `<stdlib.h>`: C++ `<cstdlib> <string> <vector>
+  <memory> <algorithm> <utility>` (so every C++ program with a standard header loads the shim; a shim error breaks all of them); not C or C++ `<string.h> <stdio.h> <stddef.h> <stdint.h> <limits.h> <assert.h> <math.h>`. The SDK
+  declares `malloc/calloc/realloc/free` in `<malloc/_malloc.h>` (`_stdlib.h`:144) and `abort` in `<_abort.h>` (:145); `<malloc/malloc.h>`, `<alloca.h>` and `__builtin_malloc` bypass a `<stdlib.h>` shim. The shim needs its
+  own include guard.
+- **Contracts on redeclarations** (record 0007 must-match: an empty contract list changes nothing): a shim declaring `void* malloc(size_t) CERASTES_REQUIRES(n > 0)` before, after or both works in C23; in C++20 the
+  before and both forms fail (#337, linkage) unless inside `extern "C"`, the after form works. The contracts apply at calls (`abs`, `exit` in a user `<vlibc/stdlib.h>`: the precondition error at the call with a note at the
+  shim's line); `exit`'s contract is honoured although `exit` is in `trusted_libc_reason`'s table (`encode.cpp`:1802-1829), since the table returns null when the first declaration is in a verified file.
+  **Problem (C++20 with a user-file redeclaration):** the verifier then holds the system declaration's attributes to the allow-list (`allowed_attribute_name`, `encode.cpp`:60) and rejects `[[const]]` (`abs`) and
+  `[[alloc_size(1)]]` (`malloc`); a redeclaration of `abort` before the system header exposes `[[__cold__]]` in both modes. Redeclaring after the system header was accepted. Fix: check an attribute by its position's
+  file, not the routine's, or extend the allow-list.
+- **System versus user:** `system_directories()` (`verify_config.cpp`:34) counts every `sys_includes` directory (canonical) but `/usr/local/include` and the `-I` dirs as system, so a shim directory passed that way
+  would be system: its bodies unverified and its declarations trusted, and `in_system` (EDG's flag; `annotation_checks.cpp`:1066-1075) would reject `predicate`/`pure` in it
+  (`spec_marker_in_system_file`). The recommendation: pass it as `--sys_include` but keep it out of `cfg.system_dirs`, replace `in_system` by a path rule, check attributes by position, and verify vlibc's own `.c`
+  files as ordinary user files. A pointer-typed shim declaration was rejected then by `unsupported_type`: only scalar functions could be exercised before M4.5b.
+
 ### S24: pointer encodings (record 0028) **PASS for E2 (recommended); E1 cannot extend to arrays; E3 works at a higher text cost**
 
 Evidence in `build/m4.5a/spikes/s24/` (generators `gen_e1.py`, `gen_e2.py`, `gen_e3.py`; outputs `e1/`, `e2/`, `e3/` with
@@ -5239,3 +5289,169 @@ What differs, and why:
 
 Silicon reasons: every failure the tests reach is `assertion.false` (`assert.failed` rows); none of `insufficient.permission`, `receiver.null` or `exhale.failed` occurred in the 121 runs. Silicon stops a path at a failed `assert` only when the assertion makes the path infeasible (a null dereference after `p := null`); in
 `goto_past_cell_read.c` it goes on with an unconstrained `x.v_int`, so its `ensures` fails too (see the status entry).
+
+## M4.5b1b: pointer parameters and contracts (record 0037)
+
+Probes of the M4.5b1b session; evidence under `build/m4.5b1b/` (not committed): `p58/` for the IL probes (inputs `a.c`, `b.c`, `c.c`, `d.cpp`, `e.c`, `e2.cpp`, `e3.c`, `f.c`, `fcpp.cpp`, `g.c`, `gcpp.c`, `acpp.c`, the probe
+header `pc.h`; dumps `*.c23.il`/`*.c++20.il` from `scripts/cerastes-fe.sh --c23|--c++20 --il_display -I build/m4.5b1b/p58`; walker listings `*.walk` from `--cerastes_walk`; the scratch tools `ilvars.py` and `ilsum.py`, copies of
+P57's; `nat.sh` and `typeof_matrix.out` for the native compilers) and `s27/` for the Silicon spike (`.vpr` inputs, `.out` the exact Silicon output, `sv.sh` the invocation of `scripts/run_tests.py`'s `run_silicon`: `java -Xss128m -jar
+silicon.jar --z3Exe z3 --numberOfErrorsToReport 0 <file>`, `cls.py` the category and reason as `run_tests.py`'s `classify` gives them). Same worktree, branch `m4.5b1b-pointer-params`. Silicon 1.1-SNAPSHOT `6b540aa4`, Z3 4.16.0
+from `build/env.sh`; native compilers Apple clang 21.0.0 and Homebrew GCC 16.2.0. The probe header `pc.h` is `<cerastes.h>` plus, for both modes, `bool cerastes_owns(...); bool cerastes_reads(...); bool
+cerastes_live(...); const void* cerastes_old_(const void*);` inside `extern "C"` for C++ (and `<stddef.h>` for `NULL`), the macro `cerastes_old(e)` (`__typeof__` in C++, `typeof` in C) and, **for the probes only**, `namespace cerastes {
+template <class T> bool live(const T* p) noexcept; }` (`<cerastes.h>` has no `live` yet). C files are run with `--c++20` as well as `--c23` (the front end treats a `.c` file as C++ in that mode, as P51 did); `e2.cpp` is a `.cpp` copy of `e.c` and
+its walker listing equals `e.c`'s under `--c++20` with positions stripped.
+
+### P58: the IL of pointer parameters, results, `&param`, and the spec functions in contracts **PASS for (a)-(g); five facts differ from what the plan or P53 assumed (marked CORRECTION or NOTE)**
+
+**(a) A pointer parameter, and where `restrict` sits** (`a.c`; `acpp.c` is `a.c` with `__restrict`; `python3 ilvars.py a.c23.il f3`). Parameters are ordinary `a_variable`s with `is_parameter` TRUE (il_def.h:11392) and a
+`param-type` entry (`assoc_param_type`, :11234); there is **no separate copy of the parameter** (one variable per parameter in both modes, `byaddr` below). `address_taken` stays `-` for every one:
+```
+C23:   f1 p type=int *              f2 p type=const int *     f3 p type=int *__restrict__     f4 p type=int *const      f5 p type=const int *__restrict__
+C++20: f1 p type=int *              f2 p type=const int *     f3 p type=int *__restrict__     f4 p type=int *const      f5 p type=const int *__restrict__   (acpp.c: `__restrict`)
+```
+- **`restrict` and top-level `const` are qualifiers of the pointer type itself:** the type node is `kind: tk_typeref`, `typeref_type: int *`, `qualifiers: __restrict__` (il_def.h:10761; `TQ_RESTRICT` :6290), and the variable's `type` and `declared_type` are that node in
+  both modes (`variable.type= int *__restrict__ | var.declared_type= int *__restrict__`). `int *const p` is the same shape with `const`. `f_get_type_qualifiers` (as `encode.cpp`:433 uses) sees it.
+- **CORRECTION for any reader of the parameter entry in C++20:** the `param-type` of a C++ routine has its **top-level qualifiers removed** (il_def.h:6395-6398, :6476 `a_param_type.qualifiers`): `param_type.type= int *`,
+  `param_type.declared_type= int *__restrict__`, `param_type.qualifiers= __restrict__` for `f3`; `const` for `f4`. In C23 the `param_type.type` keeps the qualifier (`int *__restrict__`, `qualifiers` not printed). So read `restrict` from
+  **the parameter variable's `type`** (works in both modes, for definitions) or from `param_type.qualifiers | qualifiers(param_type.type)` (for a declaration without a body).
+- **NOTE, the walker's type strings differ by mode:** a `param 1 p` node inside a contract prints `int *__restrict__` in C23 and `int *` in C++20 (`g.c`/`gcpp.c` `k`), so do not detect `restrict` from the walker text.
+- **`restrict` is not C++:** `scripts/cerastes-fe.sh --c++20` on `int f3(int *restrict p)` is `error: expected a ")"` (`a.c` lines 5, 7; exit 2, no IL); `clang++ -std=c++20` and `g++-16 -std=c++20` refuse it too (`error: expected ')'`,
+  `expected ',' or '...' before 'p'`, `a.c:5:22`). `__restrict` is accepted by all of them. So a test of `restrict` can only be `mode: c23`, or spell `__restrict` for C++ (which the cerastes macro layer does not provide).
+
+**(b) A pointer result and `return p;` / `return &x;`** (`b.c`; `python3 ilsum.py b.c23.il id`, `b.c++20.il id`). The `stmk_return` expression is the bare node, in both modes, with no lvalue-to-rvalue node:
+```
+id   C23 L136: var p{int *:@26}        C++20 L2183: var p{int *:@26}         (return p;)
+loc  C23 L137: address_of(var x{int:L@37}){int *:@36}    C++20 L2184: the same  (return &x; with `int x = 1;`; EDG warns "returning pointer to local variable", exit 0)
+cid  C23 L138: var p{const int *:@39}     C++20 L2185: var p{const int *:@39}   (const int *cid(const int *p))
+```
+**(c) `&a` of an `int` parameter** (`c.c`; `ilvars.py c.c23.il byaddr`, both modes): `variable a address_taken=TRUE storage=sc_auto param=TRUE used=TRUE type=int` (`a_variable.address_taken`, il_def.h:11389), for `int byaddr(int a) {
+int *q = &a; *q = 1; return a; }` (`init q: address_of(var a{int:L@31}){int *:@30}`) and for `return &a;` (`retaddr`); `noaddr` (only `return a;`) has `address_taken=-`. The flag is set on the parameter's own variable, the only
+variable of that parameter; `q` is `address_taken=-`. Reads of `a` after the store are `var a{int:@49}`.
+
+**(d) C++ `cerastes::owns(*p)`, `reads`, `live`, `old` in contracts** (`d.cpp`; `scripts/cerastes-fe.sh --c++20 --cerastes_walk -I build/m4.5b1b/p58 d.cpp`, exit 0). For `int *p`:
+```
+requires: op eok_call type=bool / routine cerastes::owns args <T=int>: bool (*)(const int &) noexcept
+            op eok_reference_to type=const int &          (il_def.h:13865)
+              op eok_lvalue_adjust type=const int lvalue  (:13909, compiler-generated)
+                op eok_indirect type=int lvalue           (:13873)
+                  param 1 p: int *
+ensures:  op eok_ref_indirect type=int                    (:13874)   <- cerastes::old(*p) + 1
+            op eok_call type=const int & / routine cerastes::old args <T=int>
+              op eok_reference_to type=const int &  ->  op eok_lvalue_adjust type=const int lvalue  ->  op eok_indirect type=int lvalue  ->  param 1 p
+          plain *p in the ensures: op eok_indirect type=int  (an rvalue; the walker prints `lvalue` for the place under owns/old)
+```
+- For `const int *p` (`peek`) there is **no `eok_lvalue_adjust`**: `eok_reference_to(eok_indirect type=const int lvalue(param p: const int *))`. `reads` is the same shape as `owns`.
+- `cerastes::old(p)` of a pointer parameter (`same`): `eok_ref_indirect type=int *(eok_call old args <T=int *>: int *const &(*)(int *const &)(eok_reference_to type=int *const &(eok_lvalue_adjust type=int *const lvalue(param 1 p: int * lvalue))))`.
+  `cerastes::live(p)` with the probe-only `live(const T*)`: `eok_call(routine cerastes::live args <T=int>: bool (*)(const int *) noexcept, eok_cast type=const int * cast=implicit(param 1 p: int *))` — **NOTE: that signature
+  puts an implicit qualification cast around the argument** (allowed by 0032 item 3, but the atom recognizer must look through it); a `live(T* p)` declaration has none.
+- The il_display side of the same nodes (`d.c++20.il`, one of the `old` calls): `eok_lvalue_adjust` has `compiler_generated: TRUE`, `is_lvalue: TRUE`, `type: const int`; `eok_reference_to` has `type: const int &`, `compiler_generated: TRUE`;
+  `eok_ref_indirect` has `type: int`, **`orig_lvalue_type: const int`** (il_def.h:14917), `compiler_generated: TRUE`.
+- **By-value `old` does not take an address:** `cerastes::old(x)` for `int x` (`bump`) and `cerastes::old(p)` leave `address_taken=-` (`ilvars.py d.c++20.il bump`, `same`); a reference bound in a contract does not set the flag. The p parameters of `inc`, `peek`
+  `same` are `address_taken=-`.
+
+**(e) C spellings in both modes** (`e.c`, `e3.c`; `--c23` and `--c++20`, exit 0, `e.c23.walk`, `e.c++20.walk`). For `int *p`:
+```
+cerastes_owns(*p)   op eok_call type=bool / routine cerastes_owns: bool (*)(...) / op eok_indirect type=int(param 1 p: int *)          (C23 and C++20; no cast for int; P53's wrapper cast only for char/bool/short)
+cerastes_reads(*p)  the same with routine cerastes_reads and `const int *p`: eok_indirect type=int(param 1 p: const int *)
+cerastes_live(p)    op eok_call / routine cerastes_live: bool (*)(...) / param 1 p: int *                                              (the bare parameter, no cast, in both modes)
+cerastes_old(*p)    C23:   eok_indirect type=int(eok_cast type=int * cast=c-style(eok_call type=const void * cerastes_old_(eok_cast type=const void * implicit(param 1 p: int *))))
+                    C++20: eok_indirect type=int(eok_cast type=int * cast=c-style(eok_call ... cerastes_old_(eok_cast type=const void * implicit(
+                              eok_address_of type=int *(eok_indirect type=int lvalue(param 1 p: int *))))))
+cerastes_old(p)     both:  eok_indirect type=int *(eok_cast type=int ** cast=c-style(eok_call ... cerastes_old_(eok_cast implicit(eok_address_of type=int **(param 1 p: int * lvalue)))))
+cerastes_old(x)     both:  eok_indirect type=int(eok_cast type=int * cast=c-style(eok_call ... (eok_cast implicit(eok_address_of type=int *(param 1 x: int lvalue)))))      (x a by-value int)
+cerastes_old(p[0]), cerastes_old(s->x)   both: eok_address_of(eok_subscript ... / eok_points_to_field(param 1 s: S * , field x)) ; cerastes_old(g): enk_constant const (const void *)(&g)   (e3.c)
+```
+- **CORRECTION to P53 (and to record 0029 item 3, "the front end folding `&*p` to `p`"):** the fold holds in **C23 only**. In **C++20** the same macro gives `eok_address_of(eok_indirect(param p){lvalue})` (`e.c++20.walk` lines 33-35 against `e.c23.walk`
+  `param 1 p: int *` directly under the `eok_cast`). The encoder must read **both** `param p` (type `T *`) and `eok_address_of(eok_indirect(param p))` as the place `*p`; `address_of(param p)` (type `T **`) is `old(p)`, and `address_of(param x)` for a by-value
+  `x` is `old(x)`. The probe in `e2.cpp` (a real `.cpp`) agrees with `e.c --c++20`.
+- **`address_taken` stays `-` for every use of `cerastes_old` and the spec functions** in both modes (`ilvars.py e.c23.il inc|peek|same|bump|bump2`, `e.c++20.il`: `p` and `x` all `address_taken=-`, `used=TRUE`): P53's claim for `cerastes_old(x)` is confirmed
+  in C++20 too, and extends to `cerastes_old(p)`.
+- **NOTE, positions:** the nodes the `cerastes_old` macro creates (`eok_indirect`, `eok_cast`, `eok_call`, `eok_address_of`) have the position of the **macro body** (`pc.h:L16:26`, `L16:52`, `L16:53` in C23; `L14:...` in C++20; the real header's line
+  for `<cerastes.h>`), not of the use; the user's operands keep their own (`L5:66`). A diagnostic about an `old` node must take the position of its operand or of the attribute.
+- **The `typeof` question.** EDG accepts `typeof(e)` and `__typeof__(e)` in both `--c23` and `--c++20` (`typeof_matrix.out`: `exit 0` for all four combinations, `e.c++20.walk` from the real macro). The macro is never expanded natively (contracts expand to
+  nothing, `nat.out`: all eight `-fsyntax-only` runs `rc=0` on `e.c`), but expanded in code (`int t(int *p) { return cerastes_old(*p) + cerastes_old(p[0]); }`, `exp.cpp`): **`clang++ -std=c++20` and `g++-16 -std=c++20` refuse `typeof`**
+  (`use of undeclared identifier 'typeof'`, `'typeof' was not declared in this scope`) and accept `__typeof__`; clang and gcc-16 in `-std=c23` accept both. So the shared macro must use **`__typeof__`** in both languages (EDG, clang, gcc: all accept it in all four modes);
+  `typeof` in the header would make a C++ translation unit that expands the macro outside a contract fail natively. `decltype` is C++-only.
+
+**(f) Guards as contract IL** (`f.c`, `fcpp.cpp`; `f.c23.walk`, `f.c++20.walk`):
+```
+p == NULL || cerastes_owns(*p)   C23: eok_lor type=int(eok_eq type=int(param 1 p: int *, const 0 type=int *), eok_call cerastes_owns(eok_indirect type=int(param p)))
+                                 C++20: the same with type=bool on eok_lor and eok_eq, and `cerastes::owns` with the reference_to/lvalue_adjust chain of (d)
+p == NULL || *p > 0              C23: eok_lor(eok_eq(param p, const 0 type=int *), eok_gt type=int(eok_indirect type=int(param p), const 0 type=int))
+p ? cerastes_owns(*p) : 1        C23: eok_question type=int(param 1 p: int *, eok_cast type=int cast=implicit(eok_call cerastes_owns(...)), const 1 type=int)
+                                 C++20: eok_bool_cast type=bool(eok_question type=int(eok_bool_cast type=bool(param p), eok_cast type=int cast=implicit(eok_call ...), const 1 type=int))
+q != NULL && cerastes_owns(*q)   eok_land(eok_ne(param 2 q, const 0 type=int *), eok_call ...)   (bool in C++20, int in C23)
+p == NULL || cerastes_live(p)    eok_lor(eok_eq(param p, const 0 type=int *), eok_call cerastes_live(param 1 p))
+```
+The null in `p == NULL` is the folded `const 0 type=int *` of P57 (e). **NOTE for the atom recognizer:** the `?:` arm that holds an atom is wrapped in an **implicit `bool` to `int` `eok_cast`** in both modes (the other arm `1` is an `int`, so the call's `bool` is converted); in C++20 the whole conditional is wrapped in
+`eok_bool_cast` when it is a conjunct. A contract written `p ? cerastes_owns(*p) : true` or `p ? ... : 1 > 0` changes which arm carries the cast. `||` and `&&` have no such cast; their operands are the nodes themselves.
+
+**(g) Attribute positions** (`g.c`, `gcpp.c`, `d.cpp`, `e.c`, `f.c`). Every `requires`/`ensures` (trailing the declarator, as `tests/scalar/narrow_cast.c` writes them) is `attr [[cerastes::requires]] on routine` in the walker, on the routine, with a pointer parameter, a `const` or `restrict`
+pointer parameter, and on a declaration (`int h(int *p) CERASTES_REQUIRES(cerastes_owns(*p));`) followed by an attribute-free definition (`h` reports the contract once, `g.c`): unchanged from the scalar case. The `ensures` result binder has the function's
+return type (`binder r: int *` for `same`).
+
+### S27: contracts, framing and per-atom amounts on Silicon (record 0037 items 6–8) **PASS for the per-atom amounts and the guarded forms; one CONTRADICTION of item 7 (a disjunctive frame) with its fix; the other findings are pins**
+
+Evidence in `build/m4.5b1b/s27/`: `p1a`–`p1c`, `p2a`–`p2c`, `p3`, `p4a`–`p4c`, `p5a`–`p5d`, `p5d_or`, `p5v`, `p6a`, `p6b` (`.vpr` and the `.out` beside each). `p5*` use the E2 prelude of `tests/viper-smoke/memory/e2_swap.vpr` (lines 5-39, `prelude.vpr`); the others
+use one field `v: Int`. Reasons are `classify`'s `category:reason`. Silicon's wording is quoted where it decides something.
+
+**P1: a contract that reads a cell it does not frame.**
+```
+method a(p: Ref) requires acc(p.v) ensures p.v == 0 {}      p1a.vpr:5   wellformedness:insufficient.permission  "Contract might not be well-formed. There might be insufficient permission to access p.v"
+method b(p: Ref) ensures old(p.v) == 0 {}                   p1b.vpr:4   wellformedness:insufficient.permission  (the same message)
+method d(p) requires acc(p.v) ensures p.v == old(p.v) + 1 && acc(p.v)   p1c.vpr:12   wellformedness:insufficient.permission   (the read before the acc in one conjunction)
+method c(p) requires acc(p.v) ensures acc(p.v) && p.v == old(p.v) + 1   verifies
+```
+So a postcondition's plain read is framed only by an `acc` that **precedes it in that postcondition** (the precondition's permission does not frame it), conjuncts are checked left to right, and `old(p.v)` is framed by the precondition (`c`, and `m9` below). The category is `wellformedness`
+(`src/driver/silicon_output.cpp`:21, "Contract might not be well-formed", reason `not.wellformed`), which the driver does not accept today: exit 3, the backstop of item 7.
+
+**P2: call sites.**
+```
+g(p) requires acc(p.v) ensures p.v == 1 ; c1(x) requires acc(x.v) { g(x) }      p2a.vpr:6 wellformedness:insufficient.permission (g's own contract) AND p2a.vpr:14 call:insufficient.permission  "Method call might fail. There might be insufficient permission to access x.v"
+h(p, q) requires acc(p.v) && q.v > 0:  p2b.vpr:4 wellformedness (q.v, h's own contract);  c2 (caller holds x and y) verifies; c3 (caller lacks y) p2b.vpr:17 precondition:insufficient.permission "access y.v";
+   c4 h(x, x) with x.v > 0 held VERIFIES (the read is evaluated against the permission the call has not yet consumed);  c5 h(x, y); h(y, x): p2b.vpr:30 precondition:insufficient.permission "access x.v" (the first call consumed x)
+g2 with ensures acc(p.v) && p.v == 1:  c1 (holds x) verifies; c1b (holds nothing)  p2c.vpr:21 precondition:insufficient.permission  "access x.v"
+```
+So an unframed `ensures` fails at **every caller** as `call:insufficient.permission` (the call's `inhale` of the postcondition) besides its own `wellformedness`; a missing permission at a call is `precondition:insufficient.permission` (the driver's `call.precondition`): both are Silicon's own reasons, which the
+explicit checks of item 8 must precede (exit 3 otherwise). A value precondition that Silicon cannot prove is `precondition:assertion.false` (P3).
+
+**P3: the guarded form** `requires acc(p.v) && (q == p ==> q.v > 0)` (`k`, `p3.vpr`) **is well-formed** (no error at line 5). Callers: `k(x, x)` with `x.v > 0` verifies; `k(x, y)` with `x != y` verifies; `k(x, y)` with `x`, `y` unrelated: p3.vpr:25 `precondition:assertion.false` "Assertion
+y == x ==> y.v > 0 might not hold" (a value failure, not a permission one). The same clauses in the **other order** (`requires q == p ==> q.v > 0` before `requires acc(p.v)`, `k2`) are `wellformedness:insufficient.permission` (p3.vpr:30): order matters across clauses. A callee `k3` that returns only `acc(p.v)`, called twice as
+`k3(x, x)`, fails the second call's `x == x ==> x.v > 0` (p3.vpr:45, `precondition:assertion.false`): **an `ensures acc(p.v)` without a value clause gives the caller no value** (a fresh heap value), as the record's `owns` without `==` should.
+
+**P4: the order of the amount bounds** (`p4a`-`p4c`). `requires acc(p.v, rd)` followed by `requires none < rd`: `wellformedness:negative.permission` "Fraction rd might be negative." (p4a.vpr:5); the same with the bounds conjoined **after** the `acc` in one clause (`r3`, p4c.vpr:5) and with no bound at all
+(`r4`, p4c.vpr:11) fail alike. `requires none < rd && rd < write` **before** `requires acc(p.v, rd)` (and the `ensures acc(p.v, rd)`, whose well-formedness sees the precondition's pure facts) is well-formed (`r2`, p4b.vpr). Callers of `r2`: `r2(x, 1/2)` and `r2(x, perm(x.v) / 3)` verify and the caller writes `x.v := 5`
+afterwards (the full permission came back); `r2(x, write)` p4b.vpr:23 `precondition:assertion.false` "Assertion write < write might not hold"; `r2(x, none)` p4b.vpr:29 `precondition:assertion.false` "none < none". So the bounds come first, and a bad amount is a value failure (an explicit `assert` of the bounds at the call gives it its own row).
+
+**P5: per-atom amounts** (`p5a.vpr`, **verifies**; E2 prelude). `peek_two(a, b, ra, rb)` has two `reads` atoms, `RDA(p, r)` = `p != null && WF(p) && offset_of(p) < len(block_of(p)) && acc(p.v_int, r) && acc(p.d_int, r) && p.d_int && acc(lvloc(block_of(p)).lv, r)`, each with `none < r && r < write` placed first,
+`ensures` repeating both atoms with the same amounts, then `res == a.v_int + b.v_int` (framed by the ensures atoms), the case splits `if (a == b) { }` and `if (lvloc(block_of(a)) == lvloc(block_of(b))) { }`, and the return check for each of the three clauses per atom
+`perm(a.v_int) >= ra + (a == b ? rb : none)` (and `d_int`, and `perm(lvloc(block_of(a)).lv) >= ra + (lvloc(block_of(a)) == lvloc(block_of(b)) ? rb : none)`), symmetric for `b`.
+- `caller_same` (`f(x, x)`, both amounts `min(perm(cell), perm(lv)) / 3`) verifies, the callee's result is known (`assert s == 6`), and the caller regains write permission (`x.v_int := 4`, `perm(lvloc(..).lv) == write`) and ends the cell's scope. `caller_diff` (`f(x, y)`) verifies the same. `caller_frac`
+  (the caller itself holds `f` of each of two possibly equal cells, passes `min(...)/3` and asserts `perm(x.v_int) >= f + (x == y ? f : none)` afterwards) verifies. The amount bounds `none < ra && ra < write` are provable by Silicon without an explicit assert (`min/3` of a positive permission at most `write`).
+- Twin `p5b.vpr` (the callee `exhale`s `acc(a.v_int, ra) && acc(a.d_int, ra)` before the return checks): **exactly one error, p5b.vpr:60 `assert:assertion.false` at the explicit return check** `perm(a.v_int) >= ra + (a == b ? rb : none)`; no `postcondition` error follows (only one error is reported, although the same exhale also falsifies the later `d_int` and `lv` checks: the failed `perm` assert makes the path infeasible, as S25(b) found).
+  Vacuity `p5v.vpr` (`assert false` at the end of each of the four methods): four errors, one per method, so every method's end is reachable.
+- **The guard-false amount** (`p5c.vpr`, **verifies**, `p5d.vpr` for its twins). `p != null ==> LIVEQ(p, a)` in `requires` and `ensures` (`LIVEQ(p, r)` = `p != null && WF(p) && acc(lvloc(block_of(p)).lv, r)`), the return check `assert p != null ==> perm(lvloc(block_of(p)).lv) >= a`, and the caller's amount
+  `a := (p != null ? perm(lvloc(block_of(p)).lv) : write) / 2`: `caller_null` (`p := null`, the amount is `write / 2`, the atom is vacuous) verifies; `caller_owned` verifies and the cell's scope ends with `perm(lv) == write`; `caller_param` (an unknown `p` that may be null, holding `f` under the same guard) verifies;
+  `opt2(p, q, a, b)` with two guarded atoms (`/ 3` each, return checks `perm(lv_p) >= a + (q != null && lvloc(block_of(p)) == lvloc(block_of(q)) ? b : none)`) verifies with `p` null and `q` a live cell, and with `x`, `x` (`caller_same_live`). Twin `p5d.vpr`: with `p` non-null and no liveness held, the
+  explicit `assert p != null ==> perm(lvloc(block_of(p)).lv) > none` fails (p5d.vpr:43 `assert:assertion.false`); `assert false` after `opt(null, ...)` fails (p5d.vpr:58), so the null path is reachable.
+- **Viper refuses `acc` under `||`** (`p5d_or.vpr`: `requires p == null || LIVEQ(p, a)`): `found incompatible type <impure>, expected Bool` (p5d_or.vpr:42), a type error with no verdict (`unknown:unknown` for `classify`, so exit 3); the lowering must write `!left ==> atom` (item 5) as `p5c` does.
+
+**P6 (item 7's own-contract form, found while checking the above; `p6a.vpr`, `p6b.vpr`). THE FIRST CONTRADICTION OF RECORD ITEM 7:** "emits each heap-reading pure conjunct as `F ==> conjunct`, where F is the framing formula" breaks when F is a **disjunction** of the earlier atoms' conditions. Silicon's own well-formedness
+check cannot resolve a read whose receiver equals one of two atoms' under a disjunctive condition:
+```
+m2:  requires acc(p.v) && acc(q.v)                       requires (r == p || r == q) ==> r.v > 0       p6a.vpr:15  wellformedness:insufficient.permission  "access r.v"      FAILS
+m5:  requires p != null ==> acc(p.v)   requires q != null ==> acc(q.v)
+     requires ((p != null && r == p) || (q != null && r == q)) ==> r.v > 0                            p6a.vpr:37  wellformedness:insufficient.permission  "access r.v"      FAILS
+m6:  requires acc(p.v) && acc(q.v)   requires r == p ==> r.v > 0   requires r == q ==> r.v > 0         well-formed
+m7:  requires p != null ==> acc(p.v)  requires q != null ==> acc(q.v)
+     requires (p != null && r == p) ==> r.v > 0   requires (q != null && r == q) ==> r.v > 0          well-formed
+m1 (one atom, the same guard: p != null ==> acc(p.v) ; p != null ==> p.v > 0), m3 (r == p ==> r.v > 0 after acc(p.v)):  well-formed
+m4 (atom under p != null, read under q != null)   p6a.vpr:29  wellformedness:insufficient.permission  "access q.v"     (a mismatched guard fails, as the plan expects)
+```
+**The fix, equivalent in meaning:** emit the framed conjunct once **per frame disjunct** — `∧_i (g_i && q_i == p ==> conjunct)` (the chain `m6`/`m7`), not `(∨_i …) ==> conjunct`. Silicon then takes each implication's condition as one path condition that names one chunk. With one atom per field (every case in the plan's tests but `f(&x, &x)`
+style two-atom contracts) the disjunction has one disjunct and the plan's form already works (`m1`, `m3`).
+More pins from `p6b.vpr` (all as the plan's item 7 expects): the **ensures** form with plain reads framed by earlier ensures atoms and `old` reads framed by the requires atoms (`m8`: `ensures acc(p.v) && acc(q.v)`, `ensures r == p ==> r.v == old(r.v)`, `ensures r == q ==> r.v == old(r.v)`) is well-formed; `old(p.v)` in an `ensures` with only a `requires acc(p.v)`
+(`m9`) is well-formed; a guarded `old` read under the same guard as both atoms (`m11`) is well-formed; a **plain** ensures read with no ensures atom (`m10`: `requires acc(p.v)`, `ensures res == p.v`) fails `wellformedness:insufficient.permission` (p6b.vpr:32), and an `old(q.v)` of an unframed `q` (`m12`) fails (p6b.vpr:50): these are the cases `f__wf`
+must report as `permission` before Silicon's own check can.
+
+Nothing else in item 6 (the `(g ? m : write) / (N + 1)` amounts, one `Perm` per atom, the return check with `Σ_{j≠i}`) is contradicted: it verifies, including `f(x, x)`, a fraction-holding caller and a guard-false amount.

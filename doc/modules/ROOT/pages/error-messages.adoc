@@ -9,7 +9,7 @@ at the line of the C or pass:[C++] source that causes it:
 <file>:<line>: note: <what the note says>
 ----
 
-The *category* names what could not be proved. There are sixteen, and each has a
+The *category* names what could not be proved. There are seventeen, and each has a
 section below. A *note* line follows an error when a second place matters: the
 clause of a contract that failed, or the callee's clause that a call does not
 meet. Errors are sorted by file, line and category, and the exit status is 1
@@ -403,10 +403,18 @@ include::example$error-messages/null_dereference_fixed.c[tag=source]
 
 == permission
 
-A place is read or written through a pointer without the right to it. In this
-version that means the object the pointer points to may have ended: a pointer
-to a local variable used after the variable's block. It is reported at the read
-or the write.
+A place is read or written without the right to it. It is reported where the
+right is missing:
+
+* at a read or a write through a pointer whose object may have ended (a pointer
+  to a local variable used after the variable's block), or of a local variable
+  whose object a function it was passed to kept;
+* at a call, when the caller does not hold what the callee's `requires` asks
+  for (`owns(*p)`, `reads(*p)`, `live(p)`), or passes one object to two
+  parameters of which one owns it;
+* at a `return`, when the function does not hold what its `ensures` promises;
+* at a contract clause that reads `*p` where no `owns` or `reads` of `*p`
+  comes before it (xref:memory.adoc#contracts[Memory and ownership]).
 
 A local variable exists only until its block ends; a pointer to it is then
 *dangling*, and reading or writing through it is undefined behaviour in C and
@@ -425,7 +433,8 @@ permission_error.c:13: error: permission: reads `*p` without owning it: the obje
 
 *How to fix it.* Use the pointer only while its object exists: read through it
 inside the block, or declare the object in a block that lasts as long as the
-pointer is used:
+pointer is used. At a call or a `return`, make the contracts agree: give the
+callee what it asks for, or return what the `ensures` promises:
 
 [source,c]
 ----
@@ -460,4 +469,36 @@ the pointer a new value before it is used again:
 [source,c]
 ----
 include::example$error-messages/lifetime_fixed.c[tag=source]
+----
+
+== pointer-comparison
+
+`==` or `!=` compares two pointers that may point into different objects, one of
+them one past the end of its object. It is reported at the operator. (In a
+contract, `==` and `!=` of pointers mean "the same object and place", and are
+never reported.)
+
+C allows a pointer one past the end of an object, and leaves open whether it
+compares equal to a pointer to another object that happens to follow it in
+memory; cerastes reports such a comparison rather than choose an answer. A
+pointer that a function may read through (`owns(*p)`, `reads(*p)`) points into
+its object, never one past its end; a pointer known only to be `live(p)` may be
+either. A comparison with `NULL` is never reported.
+
+[source,c]
+----
+include::example$error-messages/pointer_comparison_error.c[tag=source]
+----
+
+[source,console]
+----
+pointer_comparison_error.c:11: error: pointer-comparison: compares `p` and `q`, which may point into different objects, one of them one past its end
+----
+
+*How to fix it.* Say in the contract that the pointers point into their objects,
+for example with `reads`, or compare only pointers into one object:
+
+[source,c]
+----
+include::example$error-messages/pointer_comparison_fixed.c[tag=source]
 ----

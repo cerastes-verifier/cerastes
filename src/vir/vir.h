@@ -58,9 +58,9 @@ struct IntType {
 };
 
 struct Type {
-  // Ptr (decision 0032 item 2): a pointer to `pointee`.  Accepted by check_program for a local variable that is not itself address-taken
-  // and for an expression, with a Bool or Int pointee (an enumeration included); every other pointer type (a pointee that is a pointer,
-  // void or a struct; a pointer parameter or result) is built as is and rejected there (M4.5b1b/c).
+  // Ptr (decisions 0032 item 2, 0037 items 2-3): a pointer to `pointee`.  Accepted by check_program for a local variable that is not
+  // itself address-taken, for an expression, for a parameter and for a result, with a Bool or Int pointee (an enumeration included);
+  // every other pointer type (a pointee that is a pointer, void or a struct) is built as is and rejected there (M4.5b1c and later).
   enum class Kind { Void, Bool, Int, Ptr };
   Kind kind = Kind::Void;
   const IntType* int_type = nullptr;  // Kind::Int only; owned by the Program
@@ -107,6 +107,10 @@ enum class BinaryOp {
                             // (the encoder) inserts the usual arithmetic conversions
 };
 
+// The permission an `Atom` stands for (decision 0037 item 6).  `Owns` and `Reads` take a place `*p` (p a pointer parameter) and `Live` the
+// pointer `p`.
+enum class AtomKind { Owns, Reads, Live };
+
 struct Expr {
   enum class Kind {
     Const,       // `value`: a decimal integer (Int type; must lie in the type's range) or "true"/"false" (Bool)
@@ -132,8 +136,18 @@ struct Expr {
                  // accepts a Null of any pointer type there (decision 0032 item 7), and the value is `null` whatever the type.
     AddrOf,      // `&var`: type = Ptr(var's type); `var` must be a local of this function with `address_taken` (a cell, decision 0032 item 4;
                  // check_program refuses anything else).  A pointer value: no obligation of its own.
-    Deref        // `*a` used as a READ (a: a Ptr; type = the pointee).  Obligations: the null check, the permission check and the flag
+    Deref,       // `*a` used as a READ (a: a Ptr; type = the pointee).  Obligations: the null check, the permission check and the flag
                  // (decision 0032 item 6).  A write through a pointer is the statement Stmt::Store, never a Deref.
+                 // In a CONTRACT (decision 0037 item 5; Ctx::Requires/Ensures): `a` is a `Formal` of pointer type and nothing else (a place other
+                 // than `*param` is rejected, b1c and later).  In a `requires` it reads the cell's value on entry, in an `ensures` its value on
+                 // return, and `Old(Deref(Formal p))` its value on entry; lowering frames each read per path (item 7).
+    // ---- permissions in contracts (decision 0037 item 5; appended) ----
+    Atom         // `atom` of the pointer `a` (a Ptr `Formal`: the parameter whose pointee is meant; in an `ensures` its entry value), a Bool;
+                 // contracts only, never inside `Old`.  Owns: `owns(*p)`, Reads: `reads(*p)` (a Bool/Int pointee), Live: `live(p)`.  `amount`
+                 // names its ghost permission amount (item 6): the atoms of the `requires`, in evaluation order (contract_atoms), are
+                 // numbered 0, 1, ...; an atom of an `ensures` carries the number of the `requires` atom it returns (the same kind and the
+                 // same parameter, each partner at most once).  Positions (item 5): contract_atoms collects exactly the allowed ones; any
+                 // other Atom is a check_program error.
   };
   Kind kind = Kind::Const;
   Type type;     // the type of the value (Void only for a Call of a void function)
@@ -157,6 +171,8 @@ struct Expr {
   std::string c_text;
   const Function* callee = nullptr;        // Call
   std::vector<const Expr*> args;           // Call: already converted to the parameter types
+  AtomKind atom = AtomKind::Owns;          // Atom
+  int amount = -1;                         // Atom: the number of the atom's ghost amount (see Kind::Atom)
   bool yields_old = false;                 // AssignE: the value is the old value `b` (x++, x--), not the new one
 };
 
@@ -240,8 +256,9 @@ struct Var {
   int param_index = -1;        // for a parameter copy
   // The program takes this variable's address (EDG's `address_taken`, decision 0032 item 4): the variable is a CELL, an object in a
   // one-slot block that a pointer may reach.  Set with Function::mark_address_taken.  Assign and Decl of it keep their kinds (the
-  // lowering dispatches on the flag), an AssignE of it is refused (item 9), and check_program refuses it on a parameter copy (M4.5b1b)
-  // and on a pointer variable (M4.5b1c).
+  // lowering dispatches on the flag), an AssignE of it is refused (item 9), and check_program refuses it on a pointer variable
+  // (M4.5b1c).  On a PARAMETER COPY (decision 0037 item 4) the flag is accepted (a scalar parameter): the copy is allocated as a
+  // one-slot block at entry and holds the formal's value; the body's scope exit releases it; contracts keep reading the Formal.
   bool address_taken = false;
 };
 
@@ -271,9 +288,12 @@ struct NamedConst {
 
 struct Param {
   std::string name;  // may be empty (unnamed parameter)
-  Type type;         // Bool or Int
+  Type type;         // Bool, Int or a pointer to one of them (decision 0037 item 2)
   SrcLoc loc;
   std::string c_type_name;  // the C/C++ spelling of the type, for messages (empty: use type.str())
+  // `T *restrict p` (decision 0037 item 2): accepted only when the `requires` holds `owns(*p)` as a top-level conjunct or as `p == NULL ||
+  // owns(*p)` and the `ensures` returns the same atom; check_program repeats the rule as a backstop (the encoder reports it first).
+  bool is_restrict = false;
 };
 
 struct Function {
@@ -281,7 +301,7 @@ struct Function {
   std::string c_name;                // for messages and generated identifiers
   SrcLoc loc;                        // the declaration (what a precondition note points at when a clause has no loc)
   SrcLoc end_loc;                    // the closing brace of the body (missing-return, void postconditions)
-  Type ret = Type::void_type();      // Void, Bool or Int
+  Type ret = Type::void_type();      // Void, Bool, Int or a pointer to Bool/Int (decision 0037 item 3: `ensures WF(result)` from lowering)
   std::vector<Param> params;
   std::vector<Clause> requires_;     // the user's `requires`, in order; mention Formal parameters only
   std::vector<Clause> ensures_;      // the user's `ensures`, in order; Formal, Result and Old
@@ -405,6 +425,38 @@ struct SequenceProblem {
 };
 std::vector<SequenceProblem> sequence_problems(const Function& f);
 
+// ---- permissions in contracts (decision 0037 items 5-7) ---------------------------------------------------------------
+
+// One `Atom` of a contract with the conditions under which it holds.  `guards` are the conditions of the enclosing `||` and `?:` (in
+// evaluation order, outermost first): the atom is asserted where every `cond == holds`: for `a || atom` the guard is (`a`, false) (lowered
+// `!a ==> atom`: Viper refuses `acc` under `||`), for `c ? atom : x` it is (`c`, true), for `c ? x : atom` it is (`c`, false).  Each `cond`
+// reads no heap (no Deref, no Atom) and mentions Formals, Old of Formals, the Result and constants only.  The atoms of an enclosing `&&`
+// add no guard.
+struct AtomGuard {
+  const Expr* cond = nullptr;
+  bool holds = true;
+};
+struct AtomSite {
+  const Expr* atom = nullptr;       // the Atom node
+  bool in_ensures = false;
+  int clause = 0;                   // the index in Function::requires_ or ensures_
+  std::vector<AtomGuard> guards;
+};
+// The atoms of `f`'s contract in allowed positions, the `requires` first and then the `ensures`, each clause in evaluation order (left
+// operand first; the arms of `?:` then-arm first).  An Atom in a position the record forbids (under `!`, inside `==`, as an argument, on
+// the left of `||`, under `Old`, ...) is not listed: check_program reports it.  The k-th `requires` site's `amount` is k.
+std::vector<AtomSite> contract_atoms(const Function& f);
+// The number of ghost amounts of `f` (the atoms of its `requires`).
+int requires_atom_count(const Function& f);
+// Whether `f`'s contract backs `restrict` on parameter `param` (decision 0037 item 2): an `Owns` atom of that parameter in the `requires`, the `Owns`
+// atom with the same `amount` in the `ensures`, and, for EVERY OTHER pointer parameter of the same pointee type, an `Owns` or `Reads` atom of its own
+// in the `requires` (permissions follow cells, not provenance: without it a second pointer to the same cell could be written through).  Each atom is
+// unguarded or guarded by exactly `q == NULL` being false (`q == NULL || owns(*q)`).  The atoms must already be numbered.  When it is false,
+// `*offender` (if given) is the other parameter that has no atom, or -1 when `param`'s own `owns` is the missing part.
+bool restrict_backed(const Function& f, int param, int* offender = nullptr);
+// Whether the expression reads the heap: it contains a `Deref` or an `Atom` (an `Old` of one included).
+bool reads_heap(const Expr& e);
+
 // ---- user gotos (decision 0015 item 2) -------------------------------------------------------------------------
 
 // Why a Goto is not accepted.  A Goto with label id L is accepted iff the Label with that id is a direct statement of a
@@ -464,6 +516,9 @@ class Builder {
   const Expr* spelled(const Expr* e, std::string c_type_name);
   // Record the node's source spelling (`Expr::c_text`: "p", "*p", "&x"); returns `e`.  For messages only.
   const Expr* text(const Expr* e, std::string c_text);
+  // An atom of a contract (decision 0037 item 5): `ptr` is a `Formal` of pointer type (c_text "p" when the encoder set it), `amount` the
+  // number of the ghost amount (see Expr::Kind::Atom).  Type Bool.  c_text: "owns(*p)", "reads(*p)" or "live(p)" when `ptr` has a spelling.
+  const Expr* atom(AtomKind kind, const Expr* ptr, int amount, SrcLoc loc);
 
   // Pointers (decision 0032).  `ptr_type` is a Ptr type from Program::pointer_to.
   const Expr* null_const(Type ptr_type, SrcLoc loc);

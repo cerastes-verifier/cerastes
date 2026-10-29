@@ -168,3 +168,5 @@ says the flag follows the cell once pointers come.
 - C contracts read `cerastes_owns(*p)` where C++ reads `cerastes::owns(*p)`; vlibc's headers use the C spelling.
 - P4222's markers are available to C and C++ code in the `cerastes::` spelling. A later move to the paper's unqualified
   spelling, if P4222 is adopted, is a registration change plus a fork commit.
+
+*2026-10-28, amended by 0037 (M4.5b1b): item 3 — `<cerastes.h>` declares `cerastes_owns`, `cerastes_reads`, `cerastes_live`, `cerastes_old_` and `cerastes_old` (over `__typeof__`, which C++20 compilers accept where they refuse `typeof`); `cerastes_owns_range`, `cerastes_owns_block` and `cerastes_forall` come with the sessions that give them a meaning (M4.5e1, M4.5d2). P58: in C23 `cerastes_old(*p)` reaches the IL as the bare pointer (the front end folds `&*p`), in C++20 as `&*p` (`eok_address_of` of the `indirect`); `old(p)` and `old(x)` as `&p`, `&x`; none sets `address_taken`. Item 5 — `live(p)` implies `p != NULL` (as `owns(*p)` does): a function that accepts NULL writes `p == NULL || live(p)`.*

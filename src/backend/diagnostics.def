@@ -94,6 +94,9 @@ CERASTES_DIAG(unsupported_declaration, error,
 CERASTES_DIAG(unsupported_type, error,
               "type \"%s\" is not supported by \"cerastes verify\": only integer types, bool and the enumerations of the verified "
               "files are (decisions 0012 and 0018)")
+// A permission atom or a place the memory model does not read yet (decision 0037 items 5 and 15); the message says which session lifts it.
+CERASTES_DIAG(unsupported_annotation, error,
+              "%s is not supported by \"cerastes verify\" (decision 0037)")
 CERASTES_DIAG(unsupported_attribute, error,
               "the attribute %s is not supported by \"cerastes verify\": it can change what the code means "
               "(decision 0011 item 7)")

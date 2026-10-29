@@ -272,6 +272,21 @@ const Expr* Builder::text(const Expr* e, std::string c_text) {
   return e;
 }
 
+const Expr* Builder::atom(AtomKind kind, const Expr* ptr, int amount, SrcLoc loc) {
+  Expr* e = fresh(p_, Expr::Kind::Atom, Type::bool_type(), std::move(loc));
+  e->atom = kind;
+  e->a = ptr;
+  e->amount = amount;
+  if (ptr != nullptr && !ptr->c_text.empty()) {
+    switch (kind) {
+      case AtomKind::Owns: e->c_text = "owns(*" + ptr->c_text + ")"; break;
+      case AtomKind::Reads: e->c_text = "reads(*" + ptr->c_text + ")"; break;
+      case AtomKind::Live: e->c_text = "live(" + ptr->c_text + ")"; break;
+    }
+  }
+  return e;
+}
+
 const Expr* Builder::null_const(Type ptr_type, SrcLoc loc) {
   return fresh(p_, Expr::Kind::Null, ptr_type, std::move(loc));
 }
@@ -494,6 +509,128 @@ const Expr* Builder::comma(const Expr* a, const Expr* b, SrcLoc loc) {
   e->a = a;
   e->b = b;
   return e;
+}
+
+
+// ---- permissions in contracts (decision 0037 items 5-7) -----------------------------------------------------------------------
+
+namespace {
+
+// Walks one clause in evaluation order and collects the atoms in the positions decision 0037 item 5 allows: the clause itself, an operand of
+// `&&` (no guard), the right operand of `||` whose left operand reads no heap (guard: the left is false), an arm of `?:` whose condition
+// reads no heap (guard: the condition is true / false).  The walk goes on through the right operand of `||` and the arms of `?:`, so that a
+// conjunction of atoms may stand there.
+class AtomCollector {
+ public:
+  AtomCollector(std::vector<AtomSite>& out, bool in_ensures, int clause) : out_(out), in_ensures_(in_ensures), clause_(clause) {}
+
+  void walk(const Expr* e) {
+    if (e == nullptr) return;
+    switch (e->kind) {
+      case Expr::Kind::Atom: {
+        AtomSite s;
+        s.atom = e;
+        s.in_ensures = in_ensures_;
+        s.clause = clause_;
+        s.guards = guards_;
+        out_.push_back(std::move(s));
+        break;
+      }
+      case Expr::Kind::Binary:
+        if (e->bop == BinaryOp::LAnd) {
+          walk(e->a);
+          walk(e->b);
+        } else if (e->bop == BinaryOp::LOr && e->a != nullptr && !reads_heap(*e->a)) {
+          guards_.push_back(AtomGuard{e->a, false});
+          walk(e->b);
+          guards_.pop_back();
+        }
+        break;
+      case Expr::Kind::Cond:
+        if (e->a != nullptr && !reads_heap(*e->a)) {
+          guards_.push_back(AtomGuard{e->a, true});
+          walk(e->b);
+          guards_.pop_back();
+          guards_.push_back(AtomGuard{e->a, false});
+          walk(e->c);
+          guards_.pop_back();
+        }
+        break;
+      default: break;
+    }
+  }
+
+ private:
+  std::vector<AtomSite>& out_;
+  bool in_ensures_;
+  int clause_;
+  std::vector<AtomGuard> guards_;
+};
+
+}  // namespace
+
+bool reads_heap(const Expr& e) {
+  if (e.kind == Expr::Kind::Deref || e.kind == Expr::Kind::Atom) return true;
+  for (const Expr* x : {e.a, e.b, e.c})
+    if (x != nullptr && reads_heap(*x)) return true;
+  for (const Expr* x : e.args)
+    if (x != nullptr && reads_heap(*x)) return true;
+  return false;
+}
+
+std::vector<AtomSite> contract_atoms(const Function& f) {
+  std::vector<AtomSite> out;
+  for (size_t k = 0; k < f.requires_.size(); ++k) AtomCollector(out, false, static_cast<int>(k)).walk(f.requires_[k].expr);
+  for (size_t k = 0; k < f.ensures_.size(); ++k) AtomCollector(out, true, static_cast<int>(k)).walk(f.ensures_[k].expr);
+  return out;
+}
+
+bool restrict_backed(const Function& f, int param, int* offender) {
+  // The site's guard is none, or exactly `q == NULL` being false.
+  auto null_guard = [&](const AtomSite& s, int q) {
+    if (s.guards.empty()) return true;
+    if (s.guards.size() != 1 || s.guards[0].holds) return false;
+    const Expr* c = s.guards[0].cond;
+    // The condition is `q == NULL` as the encoder builds it in either language: C wraps the comparison's value in `bool_to_int`/`to_bool`.
+    while (c != nullptr && (c->kind == Expr::Kind::ToBool || c->kind == Expr::Kind::BoolToInt)) c = c->a;
+    if (c == nullptr || c->kind != Expr::Kind::Binary || c->bop != BinaryOp::Eq) return false;
+    const Expr* l = c->a;
+    const Expr* r = c->b;
+    if (l != nullptr && l->kind == Expr::Kind::Null) std::swap(l, r);
+    return l != nullptr && r != nullptr && l->kind == Expr::Kind::Formal && l->index == q && r->kind == Expr::Kind::Null;
+  };
+  if (offender != nullptr) *offender = -1;
+  const std::vector<AtomSite> sites = contract_atoms(f);
+  bool own = false;
+  for (const AtomSite& r : sites) {
+    if (r.in_ensures || r.atom->atom != AtomKind::Owns || r.atom->a == nullptr || r.atom->a->kind != Expr::Kind::Formal ||
+        r.atom->a->index != param || !null_guard(r, param))
+      continue;
+    for (const AtomSite& e : sites)
+      if (e.in_ensures && e.atom->atom == AtomKind::Owns && e.atom->amount == r.atom->amount && null_guard(e, param)) own = true;
+  }
+  if (!own) return false;
+  const Type& mine = f.params[static_cast<size_t>(param)].type;
+  for (size_t q = 0; q < f.params.size(); ++q) {
+    if (static_cast<int>(q) == param || !f.params[q].type.is_ptr() || f.params[q].type != mine) continue;
+    bool covered = false;
+    for (const AtomSite& r : sites)
+      if (!r.in_ensures && (r.atom->atom == AtomKind::Owns || r.atom->atom == AtomKind::Reads) && r.atom->a != nullptr &&
+          r.atom->a->kind == Expr::Kind::Formal && r.atom->a->index == static_cast<int>(q) && null_guard(r, static_cast<int>(q)))
+        covered = true;
+    if (!covered) {
+      if (offender != nullptr) *offender = static_cast<int>(q);
+      return false;
+    }
+  }
+  return true;
+}
+
+int requires_atom_count(const Function& f) {
+  int n = 0;
+  for (const AtomSite& s : contract_atoms(f))
+    if (!s.in_ensures) ++n;
+  return n;
 }
 
 }  // namespace cerastes::vir

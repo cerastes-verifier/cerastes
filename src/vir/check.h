@@ -33,6 +33,17 @@ struct MemoryProblem {
 };
 std::vector<MemoryProblem> memory_problems(const Function& f);
 
+// Decision 0037 item 8 (placement until M4.5b1c): a full expression that holds a call of a function with a permission atom in its `requires`
+// has no other access to a cell (a `Deref`, a read of an address-taken variable by name) outside that call's arguments, and no second such
+// call.  The target of a statement's own store is no expression and is no access; the read of a compound assignment's target is one.  `loc` is
+// the offending access or second call, `what` says it in the user's terms (naming M4.5b1c and decision 0028 item 13).  The encoder reports
+// each as `unsupported_expression`; check_program repeats them as a backstop.
+struct PlacementProblem {
+  SrcLoc loc;
+  std::string what;
+};
+std::vector<PlacementProblem> placement_problems(const Function& f);
+
 // Checks every function of the program; returns all violations in a deterministic order (functions in
 // definition order, nodes in evaluation order).  An empty result means `lower_program` may be called.
 std::vector<Diag> check_program(const Program& program);
