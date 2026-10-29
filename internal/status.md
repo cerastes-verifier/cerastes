@@ -4,88 +4,90 @@ Session log, newest first. Each entry says what is done, what is not, any surpri
 the exact first step for the next session. Trimmed at the end of M4.4c (owner, 2026-10-26) to the latest entry and a
 history table; the full log up to M4.4c is `git show 1fcc43b:internal/status.md`, M4.4c's entry is
 `git show fce46de:internal/status.md`, M4.4d's `git show 9017105:internal/status.md`, M4.5a's
-`git show 72e30b3:internal/status.md`, S5's `git show 794e960:internal/status.md`, and M4.5b1a's
-`git show bdc6bd0:internal/status.md`.
+`git show 72e30b3:internal/status.md`, S5's `git show 794e960:internal/status.md`, M4.5b1a's
+`git show bdc6bd0:internal/status.md`, and M4.5b1b's `git show 8003dca:internal/status.md`.
 
-## M4.5b1b — pointer parameters, results and contracts (2026-10-28/29): done on branch `m4.5b1b-pointer-params`
+## M4.5b1c1 — loops and jumps over memory (2026-10-29): done on branch `m4.5b1c1-loops`
 
-Plan: `.claude/plans/m4-5b1b-pointer-params.md` (from now on each approved plan is saved there, named by milestone).
-Read `internal/handoff.md` next: §3 "From M4.5b1b", §4.4 (M4.5b1c, with its pre-approved flips), §8.
+Plan: `.claude/plans/m4-5b1c1-loops.md`. Read `internal/handoff.md` next: §3 "From M4.5b1c1", §4.4 (b1c2, b1c3 with
+their flips), §8.
 
-**Owner decisions (2026-10-28/29):** no cuts and no time cap (pointer results and `&param` stayed in b1b); the framing of
-contracts decided per path by Silicon; a missing permission at a call or a return is `permission`; handoff question
-64: `restrict` accepted only on a parameter the contract owns (tightened after audit round 2: every other pointer
-parameter of the same type needs an atom of its own); approved plans in `.claude/plans/<milestone>-<topic>.md`; the
-exponential cost of aliasing `reads`/`live` parameters documented, not redesigned; `tests/scalar/negative/
-reject_header_pointer.c` (and its header `bad_pointer.h`) retired, its construct now accepted.
+**Owner decisions (2026-10-29):** M4.5b1c is three sessions (b1c1 loops and jumps; b1c2 sequencing and placement,
+questions 65 and 67; b1c3 `T**`, owning parameters, `*result`); owning results (`owning` on functions, `owns_block`,
+`owns(*result)`, `ensures` atoms with no partner) move to M4.5d2; loop frames are "every place held"; S28 F3 (a
+`return`/outward `goto` in a loop forces the automatic invariant; it removes a false `permission` b1b reported) and
+F1/F2 (the flag rows) accepted; question 66: the cost of aliasing parameters is fixed in M4.8; question 68: b1c3 may
+re-expect the three pinned false alarms of reassigned parameters; x86-64 test runs go to `matt@clang4.cpp.al`
+automatically, not Docker on the Mac (no Linux run this session: CI covers it).
 
 **Done**
-- **Record 0037** (accepted; revised after audit round 1 on the design, S27, audit round 2 on the code and its
-  re-audit), amending 0008, 0011, 0012, 0028, 0029 and 0032: pointer parameters and results with `WF`; `&param`;
-  `owns(*p)`, `reads(*p)`, `live(p)`, `old(*p)`, `*p` in contracts in C++ (`cerastes::`) and C (`cerastes_owns`,
-  `cerastes_reads`, `cerastes_live`, the `cerastes_old` macro over `__typeof__`); one ghost `Perm` amount per atom, the
-  caller's amounts `(g ? m : write)/(N + 1)`, sums at returns and calls; framing checked per path in `f__wf` with each
-  contract heap read guarded by its own ite chain; explicit `permission` checks at calls and returns, separation,
-  `lvloc` and cell case splits (at calls, after pointer-returning calls, at entry); `pointer-comparison` (code only;
-  contract `==` is the model's identity); by-name cell checks as `permission`; `restrict` on owned C parameters; the
-  call placement rule until b1c.
-- **Code:** `include/cerastes.h` (C spellings, `cerastes::live`); `src/backend` (encode.cpp: signatures, atoms,
-  `finish_atoms`, `contract_truth`, placement, `restrict`, `old` forms, `measure_rejected_`; `unsupported_annotation`);
-  `src/vir` (`Atom`, `contract_atoms`, `restrict_backed`, `placement_problems`, the `no_ptr_` split; lowered `Perm`,
-  `Old`, `Acc` with an amount, `PermDiv`, `CaseSplit`; lower.cpp's contract modes); `src/viper/emit.cpp`.
-- **Lint:** ghost amounts pinned (`none < a && a < write` before any use), `wildcard` refused.
-- **Harness:** `pointer-comparison` in the category copies; README.
-- **Tests:** `tests/memory/` 16 positives and 45 negatives and pins (both modes; `restrict` C-only); the VIR self-test's
-  `selftest_cases8.inc` (45 lowering, 7 rejection cases), the four `mem_rej_*` flipped, `VIR_CASES_MIN` 1204.
-- **Docs:** Memory and ownership ("Pointer parameters and contracts", the limits), Annotations (the spec-function
-  table), Error messages ("seventeen", `pointer-comparison`, `permission`'s new places), Verifying; `internal/encoding.md`
-  §2–§3; `il-inventory.md`: P52, P54, P55 (copied from M4.5a's evidence), P58, S27.
+- **Record 0038** (accepted; revised after P59, S28, audit round 1 on the design: five blocking items, audit round 2 on
+  the code: one blocking item, and its re-audit: one blocking item, fixed and checked by tests and the auditor's
+  repros), amending 0012, 0014, 0019, 0028, 0029, 0032 and 0037: loops over memory with an automatic invariant (every
+  cell of every open scope and the places of unassigned pointer parameters, snapshot amounts, entry case splits,
+  de-duplication and separation guards, values kept when no write can reach them, flag-guarded ranges, flag rows);
+  iteration checks at the back edge (`permission`); conditions that touch memory in the top-test shape; invariants and
+  loop measures over memory in contract mode with explicit framing (`permission`) and flag obligations
+  (`uninitialized`); case splits for pointers the loop assigns; scope exits at `break`/`continue`/`goto`
+  (`lifetime`); `&x` in an annotation without `address_taken` rejected (was exit 3).
+- **Cuts** (the plan's stop rules): written atoms in `CERASTES_INVARIANT` → b1c3; a function's `decreases(*p)` → b1c2;
+  both stay rejected, with what each needs in handoff §3.
+- **Code:** `src/vir/lower.cpp` (`loop()`, `LoopWrites`, `loop_places`, `CMode::Inv`, `inv_cell`, `leave_to()`,
+  `jump_depth`, `label_depths()`); `src/backend/encode.cpp` (loop and jump rejections lifted, `loop_clause`, atoms in
+  invariants and measures rejected, `&x` in annotations, `*p` in loop clauses, loop body `end_loc`, messages naming
+  b1c2/b1c3/d2); `src/vir/check.cpp`, `check.h`, `vir.h` (the memory walker removed; atoms only in contracts).
+- **Lint:** `Perm` locals pinned (snapshots only, never assigned inside a loop whose invariant uses them), `perm`
+  refused in invariants; 27 new self-tests.
+- **Tests:** `tests/memory/` 28 positives, 41 twins and 8 rejection pins; the port `tests/memory/verifast/
+  address_of_local.c` (VeriFast `0fb63506`, its three `should_fail` lines as `lifetime`); VIR self-test
+  `selftest_cases9.inc` (59 lowering cases, 3 rejection cases; the seven loop and jump `mem_rej_*` of cases7 flipped to
+  lowering cases), `VIR_CASES_MIN` 1263; four doc examples.
+- **Docs:** Memory and ownership ("Loops", "Leaving a block", the not-yet list), Error messages (`permission`,
+  `lifetime`), Annotations (invariants over memory), Verifying; `internal/encoding.md` §3; `il-inventory.md` P59, S28;
+  `tests/README.md`.
 
-**Flips (pre-approved):** retired `tests/scalar/negative/reject_pointer.c`,
-`tests/memory/negative/reject_{pointer_param,pointer_result,address_of_param}.c`; by owner decision during the session,
-`tests/scalar/negative/reject_header_pointer.c` and `tests/scalar/headers/bad_pointer.h`.
-`reject_implicit_function_pointer_argument.c` unchanged. b1a's memory maps changed only in the two rows' category
-(0037 items 11–12).
-
-**Pre-approved for b1c** (new b1b pins it lifts): `tests/memory/negative/reject_{atom_on_result,call_beside_access,call_compound_target,ensures_atom_no_partner,result_value,two_memory_calls,heap_read_decreases}.c`,
-plus b1a's list (handoff §4.4).
+**Flips (pre-approved):** retired `tests/memory/negative/reject_{break_out_of_switch_with_cell,cell_in_invariant,
+cell_in_measure,goto_out_of_cell_scope,loop_cell,loop_pointer,return_in_loop_with_cell}.c`, each replaced by a positive
+of the same shape; `reject_heap_read_decreases.c` kept (cut 1). The remaining pins' `Pins:` comments name b1c2, b1c3
+or M4.5d2; no `expect:` line of an existing test changed.
 
 **Acceptance**
-- The baseline (`bdc6bd0`, a temporary worktree `.claude/worktrees/b1b-base`): 6105 passed, 0 failed, 1 skipped; VIR
-  self-test 1159.
-- `check.sh` (the full check, once, `CERASTES_CHECK_BASE` unset, 49 min): **all green**. Harness self-test 1024 tests
-  (1 skip), lint self-test 285, mutate self-test 291; tests **6298 passed, 0 failed, 1 skipped** (native-ok runs: Apple
-  clang 1183, GCC 1183); VIR self-test **1204** lowering and 232 rejection cases, 0 problems, lint clean; walker oracle
-  136 goldens, 1924 facts, 0 failed; docs and `check_doc_examples --html` green.
-- **Viper against the baseline:** `diff -r` of `build/vpr`: no `.vpr` differs and none is missing; 192 files added (the
-  new tests and doc examples); 122 `.map` files of b1a's memory tests and doc examples differ only in two row kinds,
-  308 by-name cell rows `internal` → `permission` and 36 one-past-the-end rows `internal` → `pointer-comparison`
-  (record 0037 items 11–12). The VIR self-test output: 90 files added (45 `ptr_*` cases), 35 `mem_*` maps differ only in
-  the same two row kinds (113 rows), no `.vpr` differs.
-- `tests/memory`, the scalar negatives and the memory and error-messages doc examples: 2847 passed, 0 failed, run
-  alone before `check.sh`. The Linux job was not run in the session (no host work); the PR's CI runs it.
+- The baseline (`main` `9782bd4`, in the main checkout): 6298 passed, 0 failed, 1 skipped; VIR self-test 1204.
+- **Viper against the baseline:** every one of the 2256 kept `.vpr` and `.map` files regenerated byte-identical (no
+  existing program's Viper changed); the 1204 baseline VIR cases byte-identical, 59 added.
+- `tests/memory`: 699 passed, 0 failed (before the last test pair); with the memory fixtures and the memory and
+  error-messages doc examples, the plan's acceptance set passed (878 before the last two fixes), and all of it again in
+  `check.sh`.
+- `check.sh` (the full check, `CERASTES_CHECK_BASE` unset; twice: the first stopped at the harness self-test on `main`'s
+  Dependabot SHA, see Surprises): **all green** in about 55 min. Harness self-test 1024 tests (1 skip), lint self-test
+  307, mutate self-test 291; tests **6571 passed, 0 failed, 1 skipped** (native-ok runs: Apple clang 1245, GCC 1245);
+  VIR self-test **1263** lowering and 229 rejection cases, 0 problems, all 1263 through Silicon, lint clean (2404 files);
+  walker oracle 136 goldens, 1924 facts, 0 failed; docs and `check_doc_examples --html` green. No Linux run (CI covers
+  it, owner).
 
 **Surprises**
-- Silicon refuses a heap read under a disjunctive guard (S27 P6): one guard per disjunct.
-- Audit round 1 found two false proofs in the first framing design (a whole conjunct guarded; a separation fact across
-  a `requires` atom and its partner); audit round 2 found two exit-3 shapes and an unsound `restrict` (permissions
-  follow cells, not provenance); its re-audit found the entry cell splits' path explosion, moved to the calls.
-- A pointer result known only by a disjunction (`r == p || r == q`) needs case splits before Silicon can read through
-  it; contract comparisons with a result had to become model identity.
-- Silicon's time grows exponentially with aliasing `reads`/`live` parameters of one type (six time out).
-- Heavy machine load (averages up to 215) from parallel Silicon runs distorted timings; quiet re-measurements are in
-  record 0037.
+- Viper refuses `perm` in an invariant, so a loop condition's permission and liveness checks cannot be invariant
+  clauses (audit round 1, B1): conditions that touch memory moved to the top-test shape.
+- On a path where a guarded atom does not hold, Silicon cannot tell a parameter from a fresh cell: guards and case
+  splits against every cell were needed (audit round 2, B1, and the re-audit).
+- A `return` inside an int-only loop of a function with `owns(*p)` was a false `permission` error since b1b (S28 F3).
+- `&x` in an annotation does not set the front end's `address_taken` (P59); b1a's encoder exited 3 on it.
+- An invariant that states a cell's value gave no flag fact until invariant reads kept their flag obligation.
+- `main` itself failed `check.sh`'s harness self-test since the Dependabot merge (PR #16, `fca0cbc`): `CiGuardTests`
+  pins `ci.yml`'s action SHAs, and the bump changed only `ci.yml`. The first `check.sh` stopped there; the self-test's
+  model and record 0001 now carry `actions/setup-python` v7.1.0 (handoff §6).
 
-**Decision records added:** 0037-pointer-parameters-and-contracts.
+**Decision records added:** 0038-loops-and-jumps.
 
-**First step for the next session (M4.5b1c).** Confirm the owner merged PR #15 and pushed this branch with both CI
-jobs green on its PR; then plan b1c from handoff §4.4 (its planning decides whether it splits), saving the plan as
-`.claude/plans/m4-5b1c-<topic>.md`.
+**First step for the next session (M4.5b1c2).** Confirm the owner pushed `main` and merged this branch with both CI jobs
+green; then plan b1c2 from handoff §4.4 (sequencing and placement, questions 65 and 67, and the function measures cut
+from b1c1), saving the plan as `.claude/plans/m4-5b1c2-<topic>.md`.
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 
 | Session | Date | Branch, merge | Records | Outcome |
 |---|---|---|---|---|
+| M4.5b1c1 Loops and jumps | 2026-10-29 | `m4.5b1c1-loops` | 0038 | loops over memory with automatic permission invariants ("every place held"), invariants and loop measures over memory, scope exits at jumps; written atoms in invariants cut to b1c3, function measures over memory to b1c2; the `address_of_local.c` port |
 | M4.5b1b Pointer parameters and contracts | 2026-10-28/29 | `m4.5b1b-pointer-params` | 0037 | pointer parameters and results, `&param`; `owns`/`reads`/`live`/`old` in both spellings with ghost amounts; framing per path; `permission` at calls and returns; `pointer-comparison`; `restrict` on owned C parameters |
 | M4.5b1a The model, address-taken locals | 2026-10-28 | `m4.5b1a-pointers` | 0032–0036 | the `Block` domain and its four axioms; address-taken locals as blocks, `&`, `*`, NULL, `==`, liveness and scope exits inside one function; `null-dereference`, `permission`, `lifetime`; C's incompatible pointer types as errors |
 | S5 Linux CI | 2026-10-28 | `s5-linux-ci` | 0031 | `check-linux` on `ubuntu-26.04` in both tiers; Linux bootstrap; glibc `assert`; the same EDG language on both platforms; eight macOS-only tests tagged |
