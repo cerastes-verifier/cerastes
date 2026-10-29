@@ -6,10 +6,10 @@ not null, the object it points to still exists, and the function has the right
 to read or write it. A use of a pointer whose object has ended is an error too,
 even when nothing is read through it, as C and pass:[C++] say.
 
-This version covers pointers to integers, `bool` and enumerations held in local
-variables, inside one function. Pointer parameters and results, and the
-annotations that describe what a function owns (`owns`, `reads`), come in a
-later version; <<not-yet>> lists what is still rejected.
+This version covers pointers to integers, `bool` and enumerations: in local
+variables, as parameters and as results, with contracts that say which objects
+a function may read or write (<<contracts>>). <<not-yet>> lists what is still
+rejected.
 
 == Objects whose address is taken
 
@@ -58,7 +58,15 @@ include::example$memory/address_comparison.c[tag=source]
 ----
 
 Comparisons of order (`<`, `>`), arithmetic on pointers and conversions between
-pointer types are not supported yet, and contracts cannot mention pointers yet.
+pointer types are not supported yet.
+
+A pointer may also point *one past the end* of an object, and C does not say
+whether such a pointer equals a pointer to another object that happens to follow
+it in memory. So when `==` or `!=` compares two pointers that may point into
+different objects, one of them one past its end, cerastes reports
+xref:error-messages.adoc#_pointer_comparison[`pointer-comparison`] instead of
+choosing an answer. Inside one function this cannot happen; a pointer parameter
+can (<<contracts>>).
 
 == Lifetimes and dangling pointers
 
@@ -74,15 +82,100 @@ the value of such a pointer indeterminate:
 include::example$memory/dangling_pointer.c[tag=source]
 ----
 
+[#contracts]
+== Pointer parameters and contracts
+
+A function that takes a pointer says in its contract what it may do with the
+object the pointer points to. Three specification functions, from `<cerastes.h>`,
+state it; in C they are spelled `cerastes_owns`, `cerastes_reads` and
+`cerastes_live`, in pass:[C++] also `cerastes::owns`, `cerastes::reads` and
+`cerastes::live` (the C spelling works in both, so a header shared by C and
+pass:[C++] writes one):
+
+[cols="2,5"]
+|===
+| Written | Means
+
+| `cerastes_owns(*p)`
+| `p` is not null and points to an object that exists, holds a value, and that
+the function may read and write; in `ensures`, the function gives it back
+
+| `cerastes_reads(*p)`
+| the same, but the function may only read the object; others may read it too
+
+| `cerastes_live(p)`
+| `p` is not null and points into an object that exists; the function may
+compare and copy `p` but not read through it
+|===
+
+The caller must hold what the callee's `requires` asks for, at the call, and the
+callee must hold what its `ensures` promises, at every `return`; either failure
+is reported as xref:error-messages.adoc#_permission[`permission`]. Whatever the
+caller holds that the callee's contract does not name keeps its value across
+the call. `cerastes_old(*p)` (in pass:[C++] also `cerastes::old(*p)`) in an
+`ensures` is the value `*p` had when the function was entered:
+
+[source,c]
+----
+include::example$memory/pointer_parameter.c[tag=source]
+----
+
+A function that only reads takes `cerastes_reads`: the caller lends it the
+right to read and can write the object again as soon as the call returns, and
+two `reads` of the same object may be passed to one call:
+
+[source,c]
+----
+include::example$memory/reads_parameter.c[tag=source]
+----
+
+A pointer that may be null is described by a condition, `p == NULL ||
+cerastes_owns(*p)`, and the function tests it before it dereferences `p`:
+
+[source,c]
+----
+include::example$memory/null_or_owned.c[tag=source]
+----
+
+A few more rules:
+
+* A contract may read `*p` only where an `owns` or `reads` of `*p` comes before
+  it, on that path; otherwise the contract itself is reported as
+  xref:error-messages.adoc#_permission[`permission`] ("the contract of `f` reads
+  `*p` without owning it"). In an `ensures`, `*p` is the value when the function
+  returns, so the `ensures` needs its own `owns` or `reads` of `*p`;
+  `cerastes_old(*p)` needs the one in `requires`.
+* Returning or comparing a pointer parameter uses its value, so the contract must
+  say that its object exists: `cerastes_live(p)`, or an `owns` or `reads` of `*p`.
+  A pointer result may be related to the parameters (`ensures(r, r == p || r ==
+  q)`).
+* A function that takes `cerastes_owns(*p)` in its `requires` and does not give
+  it back in its `ensures` keeps the object. If that object is a local variable
+  of the caller, the caller cannot end its lifetime: the closing brace of the
+  variable's block is reported as xref:error-messages.adoc#_lifetime[`lifetime`].
+* In C, a `restrict` pointer parameter is accepted when the contract owns its
+  object and gives it back: owning it already means that nothing else reaches
+  the object during the call, which is what `restrict` promises.
+* The address of a parameter may be taken (`int *q = &a;`): the parameter is
+  then an object in memory, like a local.
+* Verification time grows quickly with the number of pointer parameters of
+  one type that only `reads` or `live` describe, since any of them may point to
+  the same object: four take a few seconds, five tens of seconds, and six or
+  more may reach the time limit (an error, never a wrong answer).
+
 [#not-yet]
 == What is not supported yet
 
 These are rejected with a diagnostic, never approximated
 (xref:verifying.adoc#not-supported[the full list]):
 
-* pointer parameters and results, and so passing a pointer to a function;
-* the address of a parameter, a pointer to a pointer, and the address of a
-  pointer variable;
+* a pointer to a pointer, and the address of a pointer variable;
+* `owns`, `reads` or a value through a pointer result (`*r`), and contracts
+  that name objects other than those the parameters point to;
+* a call of a function whose contract owns or reads an object in the same
+  expression as another use of an object in memory (`x + f(&x)`), or two such
+  calls in one expression;
+* `restrict` except on a C parameter whose contract owns its object;
 * `void *`, and pointers to structures, unions and functions;
 * conversions between pointer types other than adding `const`, comparisons of
   order and arithmetic on pointers;

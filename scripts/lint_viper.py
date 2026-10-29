@@ -68,6 +68,11 @@ status 1) on:
   divisor only: that no C `%` or `/` is emitted as Viper's is guaranteed by `low::mod_pow2` and `low::div_pow2`
   (src/vir/lowered.cpp) being the only constructors of them, not by this rule (a C `/ 16` emitted as `\\ 16` would
   pass it); a `%` or `\\` whose divisor the rule cannot read as such a literal is reported too;
+* the ghost amounts of the memory model (decision 0037 items 6 and 14): every `Perm` formal of a method has exactly one
+  `requires none < a && a < write` (parentheses and spaces ignored) and no other clause of the method mentions `a`
+  before it (a clause that reads the amount before its bounds is not well-formed for Silicon, and an amount without
+  the bounds could be `write` or `none`); `wildcard` (an amount Silicon chooses, which is an unchecked assumption) is
+  refused anywhere.  The case split `if (<condition>) { }` is plain Viper and needs no rule;
 * an empty input set, and a MANIFEST that names a file which is not there.  The
   manifest is the set of files scripts/run_tests.py expects: its first line is
   `# run-id: <id>` (printed by the run), then one file per line.  Fewer files
@@ -603,6 +608,74 @@ def lint_allocations(src: Source, decls: list[Decl], add: Callable[[int, str], N
                         f"`alloc_{suffix or '<t>'}` (`ensures ((r != null) && ...` with the fields `v_{suffix or '<t>'}`/`d_{suffix or '<t>'}`)")
 
 
+# The ghost amounts (decision 0037 items 6 and 14): a method's `Perm` formals are the amounts of the atoms of its contract.
+WILDCARD_RE = re.compile(r"(?<![\w$'.])wildcard(?![\w$'])")
+PERM_FORMAL_RE = re.compile(r"^\s*(?P<name>[A-Za-z_$][\w$']*)\s*:\s*Perm\s*$")
+CLAUSE_START_RE = re.compile(r"^\s*(requires|ensures|invariant|decreases)\b")
+
+
+def method_formals(src: Source, d: Decl) -> list[str]:
+    """The text of each formal of a method (the first parenthesis of its header, split at top-level commas)."""
+    header = []
+    for n in range(d.line, d.end_line + 1):
+        line = src.code[n - 1]
+        if CLAUSE_START_RE.match(line) or line.strip().startswith("{"):
+            break
+        header.append(line)
+    text = " ".join(header)
+    start = text.find("(", text.find(d.name) + len(d.name))
+    if start < 0:
+        return []
+    depth, parts, cur = 0, [], []
+    for ch in text[start:]:
+        if ch == "(":
+            depth += 1
+            if depth == 1:
+                continue
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                break
+        if depth == 1 and ch == ",":
+            parts.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    parts.append("".join(cur))
+    return [x for x in parts if x.strip()]
+
+
+def lint_ghost_amounts(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    for lineno, code in enumerate(src.code, start=1):
+        if WILDCARD_RE.search(code):
+            add(lineno, "`wildcard`: an amount Silicon chooses is an assumption (decision 0037 item 14); ghost amounts "
+                        "are `Perm` formals with `requires none < a && a < write`")
+    for d in decls:
+        if d.kind != "method":
+            continue
+        amounts = [m.group("name") for f in method_formals(src, d) if (m := PERM_FORMAL_RE.match(f))]
+        for a in amounts:
+            word = re.compile(r"(?<![\w$'.])" + re.escape(a) + r"(?![\w$'])")
+            bounds = re.sub(r"[\s()]", "", f"none<{a}&&{a}<write")
+            bound_lines = []
+            first_mention = 0
+            for n in range(d.line + 1, d.end_line + 1):
+                line = src.code[n - 1]
+                if not CLAUSE_START_RE.match(line):
+                    continue
+                if re.sub(r"[\s()]", "", line.strip()[len("requires"):]) == bounds and line.strip().startswith("requires"):
+                    bound_lines.append(n)
+                elif word.search(line) and not first_mention:
+                    first_mention = n
+            if len(bound_lines) != 1:
+                add(d.line, f"`method {d.name}`: the ghost amount `{a}` must have exactly one `requires none < {a} && {a} < write` "
+                            f"(decision 0037 items 6 and 14), found {len(bound_lines)}")
+            elif first_mention and first_mention < bound_lines[0]:
+                add(first_mention, f"`method {d.name}`: a clause mentions the ghost amount `{a}` before its bounds "
+                                   f"`requires none < {a} && {a} < write` (line {bound_lines[0]}; Silicon's well-formedness check "
+                                   "needs the bounds first, decision 0037 item 6)")
+
+
 def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
              map_name: str | None = None) -> list[str]:
     """Problems of one Viper file with its position map (None: the map is missing)."""
@@ -686,6 +759,7 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     lint_flags(src, add)
     lint_remainders(src, decls, add)
     lint_allocations(src, decls, add)
+    lint_ghost_amounts(src, decls, add)
 
     if map_text is None:
         problems.append(f"{name}: no position map ({map_name or name + MAP_SUFFIX})")

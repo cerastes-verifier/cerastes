@@ -88,6 +88,20 @@ Front-end agnostic. The encoder builds a `Program` with a `Builder`; `check_prog
   pointer-typed node, a cell, `AddrOf`, `Deref` or `Store`; a `Return` in a loop while a cell of an enclosing block is
   live; a `Break`/`Continue`/`Goto` leaving a block that declares a cell; a cell-declaring block without `end_loc`.
   `sequence_problems` treats `Store(addr, value)` as two unsequenced operands.
+- **Contracts over memory (M4.5b1b, decision 0037).** Pointer `Param`s and a pointer `Function::ret` (P58: no
+  separate copy in the IL; `Param::is_restrict` from the parameter variable's type, C only). `Expr::Kind::Atom`
+  (`AtomKind` `Owns`/`Reads`/`Live`, `a` = the pointer `Formal`, `amount` = the index of the `requires` atom, 0..N-1 in
+  evaluation order; an `ensures` atom carries its `requires` partner's `amount`, same kind and parameter) appears only in
+  `requires`/`ensures`; `contract_atoms(f)` lists the atoms with their guards (`AtomGuard {cond, holds}`: the left of an
+  `||` with `holds == false`, a `?:` condition either way; `&&` adds none), `requires_atom_count(f)` gives N,
+  `reads_heap(e)` tells whether an expression holds a `Deref` or an `Atom`. Heap reads in a contract are `Deref(Formal
+  p)` (pre-state in a `requires`, post-state in an `ensures`) and `Old(Deref(Formal p))`. `check.cpp` splits `no_ptr_`:
+  contracts may hold pointer `Formal`/`Result`, `Null`, pointer `Cond`, `==`/`!=`, `ToBool`, `Deref(Formal)`, atoms
+  and `Old`; invariants, measures, named constants and case values still hold none. Backstops: atom positions, numbering
+  and partners, duplicates, `restrict_backed(f, k)` (0037 item 2), and `placement_problems(f)` (0037 item 8: a call of
+  a function with an atom beside another cell access or a second such call). `&param`: `address_taken` on a scalar
+  parameter's copy (a pointer-typed one stays refused, b1c).
+
 - `Function { id, c_name, params[], ret, requires[], ensures[], body?, trusted_reason, loc, end_loc }`; a null
   body is a trusted contract (`trusted_reason` required). Each parameter has a *local copy* (`param_var(k)`)
   that the body reads and assigns; contracts read the formal (`Formal(k)`, the entry value).
@@ -324,6 +338,32 @@ A pointer-typed `?:` is lowered as an `if` assigning a `Ref` temporary, never a 
 `ite` term as a field receiver (it reports insufficient permission even after `perm == write` asserts). Heap reads are
 plain values with obligations: in b1a no call reaches a cell and a cell is written only at statement level (0032 items
 9–10), so no snapshot is needed.
+
+**Contracts over memory (M4.5b1b, decision 0037).** Contract lowering has four modes: the method's own clauses, the
+`f__wf` method, a call (the callee's clauses over the arguments) and a return (the function's `ensures`). An atom is
+`acc` with its ghost amount `amt_<k>` (a `Perm` formal per `requires` atom, bounded `none < amt_k && amt_k < write`
+before the user's clauses); `owns(*p)` adds `p != null`, `WF(p)`, `offset_of(p) < len(block_of(p))`, full `acc` of
+`v_<t>`/`d_<t>`, the flag and the value range, and the liveness cell at the amount; `reads` the same at the amount;
+`live` the liveness cell. `left || atom` becomes `!left ==> atom`. Pointer parameters get `requires WF(p)`, pointer
+results `ensures WF(res)`. Each heap read of a contract is guarded by itself: the chain `(D_1 ? p.v : (D_2 ? p.v :
+… : 0))` over its framing disjuncts (omitted when trivially framed); `Old(Deref)` is Viper `old(...)` inside it.
+
+`f__wf`: the contract's heap reads are ghost value formals `hv_<param>_pre`/`_post` with their ranges; each read is
+asserted framed (`permission`, "the contract of `f` reads `*p` without owning it") under the earlier clauses plus the
+added facts (two `owns` of one field in one clause list differ; aliasing places of one state have equal values; a
+`reads` place's post value is its pre value); no flag, liveness or pointer-comparison obligations there.
+
+Entry: `lvloc` case splits per atom pair, guarded `owns`/`owns` separation (`internal`), and case splits of each
+pointer parameter without an atom against those with one. A call (all items under the call's exact set): each callee
+atom part by part under its guard (`permission`), pairwise separation of `owns`/`owns` and `owns`/`reads` (`permission`),
+`lvloc` and cell case splits, the amounts `(g_k ? m_k : write) / (N + 1)` inline as call arguments (`m_k` the liveness
+cell's permission, for `reads` the minimum with the value and flag cells), the sum checks, the value preconditions
+(`precondition`), the call; after a call returning a pointer, case splits of the result against the cells in scope and
+the pointer parameters with atoms. A return: separation of the `ensures`' atoms, each atom part by part with the sums
+(`permission`), `WF`/`offset < len`/`WF(res)` (`internal`), then the value `ensures` (`postcondition`). `&param`: the
+copy is allocated at entry, stored from the formal, and leaves at the body's scope exits. A cell read or written by
+name is checked as `permission` (a callee may have kept it); the one-past-the-end row is `pointer-comparison`, in code
+only (in a contract `==` is the model's identity).
 
 ## 4. Viper shape
 

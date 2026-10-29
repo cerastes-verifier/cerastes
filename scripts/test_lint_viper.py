@@ -2545,6 +2545,125 @@ class MemoryModelTests(unittest.TestCase):
         self.assertEqual(len(probs), 1, probs)
 
 
+class GhostAmountTests(unittest.TestCase):
+    """Decision 0037 items 6 and 14: the `Perm` formals of a method are the amounts of the atoms of its contract.  Each has
+    exactly one `requires none < a && a < write`, before any clause that mentions it (Silicon's well-formedness check
+    reports `negative.permission` otherwise: tests/viper-smoke targets, S27), `wildcard` is refused, the case split
+    `if (...) { }` is plain Viper, and `inhale`/`assume` stay refused.  Each rule has a twin that breaks exactly it."""
+
+    BOUNDS_0 = "  requires (none < amt_0) && (amt_0 < write)"
+    BOUNDS_1 = "  requires (none < amt_1) && (amt_1 < write)"
+    ATOM_0 = "  requires (p != null) && acc(lvloc(block_of(p)).lv, amt_0)"
+
+    @staticmethod
+    def strict(lines):
+        return lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+
+    def fixture(self, header="method f__1(p: Ref, amt_0: Perm, amt_1: Perm)", clauses=None, body=None):
+        clauses = clauses if clauses is not None else [self.BOUNDS_0, self.BOUNDS_1, self.ATOM_0,
+                                                       "  requires acc(lvloc(block_of(p)).lv, amt_1)"]
+        return [
+            "field lv: Bool",
+            header,
+            *[Check(c, WF, "internal") for c in clauses],
+            Check("  ensures acc(lvloc(block_of(p)).lv, amt_0)", P, "permission"),
+            "  decreases",
+            "{",
+            *(body if body is not None else ["  if (lvloc(block_of(p)) == lvloc(block_of(p))) { }"]),
+            "}",
+        ]
+
+    def test_the_emitters_shape_is_clean(self):
+        self.assertEqual(self.strict(self.fixture()), [])
+
+    def test_the_spelling_of_the_bounds_does_not_matter(self):
+        for b in ("  requires none < amt_0 && amt_0 < write", "  requires ((none < amt_0) && (amt_0 < write))"):
+            with self.subTest(b=b):
+                self.assertEqual(self.strict(self.fixture(clauses=[b, self.BOUNDS_1, self.ATOM_0])), [])
+
+    def test_a_missing_bound_is_a_problem(self):
+        probs = self.strict(self.fixture(clauses=[self.BOUNDS_0, self.ATOM_0, "  requires acc(lvloc(block_of(p)).lv, amt_1)"]))
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("ghost amount `amt_1` must have exactly one", probs[0])
+
+    def test_a_half_bound_or_another_bound_is_a_problem(self):
+        for b in ("  requires none < amt_1", "  requires amt_1 < write", "  requires (none < amt_1) && (amt_1 <= write)",
+                  "  requires (none <= amt_1) && (amt_1 < write)", "  requires (none < amt_0) && (amt_0 < write)",
+                  "  requires (amt_1 < write) && (none < amt_1)", "  requires (none < amt_1) && (amt_1 < write) && true"):
+            with self.subTest(b=b):
+                probs = self.strict(self.fixture(clauses=[self.BOUNDS_0, b, self.ATOM_0,
+                                                          "  requires acc(lvloc(block_of(p)).lv, amt_1)"]))
+                self.assertTrue(any("ghost amount `amt_1`" in p for p in probs), probs)
+
+    def test_a_bound_in_an_ensures_is_a_problem(self):
+        lines = self.fixture(clauses=[self.BOUNDS_0, self.ATOM_0, "  requires acc(lvloc(block_of(p)).lv, amt_1)"])
+        i = lines.index("  decreases")
+        lines[i:i] = [Check(self.BOUNDS_1.replace("requires", "ensures"), P, "internal")]
+        probs = self.strict(lines)
+        self.assertTrue(any("ghost amount `amt_1` must have exactly one" in p for p in probs), probs)
+
+    def test_two_bounds_are_a_problem(self):
+        probs = self.strict(self.fixture(clauses=[self.BOUNDS_0, self.BOUNDS_1, self.BOUNDS_0, self.ATOM_0,
+                                                  "  requires acc(lvloc(block_of(p)).lv, amt_1)"]))
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("found 2", probs[0])
+
+    def test_a_clause_that_reads_an_amount_before_its_bounds_is_a_problem(self):
+        probs = self.strict(self.fixture(clauses=[self.BOUNDS_0, self.ATOM_0, self.BOUNDS_1,
+                                                  "  requires acc(lvloc(block_of(p)).lv, amt_1)"]))
+        self.assertEqual(probs, [], "an atom of amt_0 before the bounds of amt_1 is fine: only a mention of amt_1 counts")
+        for first in ("  requires acc(lvloc(block_of(p)).lv, amt_0)", "  requires p != null ==> amt_0 > none"):
+            with self.subTest(first=first):
+                probs = self.strict(self.fixture(clauses=[first, self.BOUNDS_0, self.BOUNDS_1,
+                                                          "  requires acc(lvloc(block_of(p)).lv, amt_1)"]))
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("mentions the ghost amount `amt_0` before its bounds", probs[0])
+
+    def test_a_longer_name_that_contains_an_amount_is_not_a_mention(self):
+        clauses = ["  requires p != null ==> amt_00 > none", self.BOUNDS_0, self.BOUNDS_1, self.ATOM_0,
+                   "  requires acc(lvloc(block_of(p)).lv, amt_1)"]
+        self.assertEqual(self.strict(self.fixture(clauses=clauses)), [])
+
+    def test_only_perm_formals_are_amounts(self):
+        lines = self.fixture(header="method f__1(p: Ref, n: Int, amt_0: Perm, amt_1: Perm)")
+        self.assertEqual(self.strict(lines), [])
+        lines = self.fixture(header="method f__1(p: Ref, amt_0: Perm, amt_1: Perm) returns (res: Perm)")
+        self.assertEqual(self.strict(lines), [])
+
+    def test_a_header_over_several_lines_is_read(self):
+        lines = self.fixture(header="method f__1(p: Ref,\n    amt_0: Perm, amt_1: Perm)",
+                             clauses=[self.BOUNDS_0, self.ATOM_0])
+        probs = self.strict(lines)
+        self.assertTrue(any("ghost amount `amt_1`" in p for p in probs), probs)
+
+    def test_a_method_without_amounts_has_no_rule(self):
+        self.assertEqual(self.strict(self.fixture(header="method f__1(p: Ref)", clauses=["  requires p != null"])), [])
+
+    def test_wildcard_is_refused(self):
+        for text in ("  requires acc(lvloc(block_of(p)).lv, wildcard)", "  var w: Perm := wildcard"):
+            with self.subTest(text=text):
+                lines = self.fixture()
+                i = lines.index("{")
+                lines[i + 1:i + 1] = [text]
+                probs = [x for x in self.strict(lines) if "wildcard" in x]
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("decision 0037 item 14", probs[0])
+
+    def test_a_name_that_contains_wildcard_is_not_the_keyword(self):
+        lines = self.fixture(body=["  var v_wildcard__0: Int", "  var wildcards: Int"])
+        self.assertEqual(self.strict(lines), [])
+
+    def test_the_case_split_line_is_accepted_and_inhale_is_still_refused(self):
+        lines = self.fixture(body=["  if (lvloc(block_of(p)) == lvloc(block_of(p))) { }", "  if (p == p) { }"])
+        self.assertEqual(self.strict(lines), [])
+        lines = self.fixture(body=["  inhale acc(lvloc(block_of(p)).lv, amt_0)"])
+        probs = self.strict(lines)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`inhale` without", probs[0])
+        lines = self.fixture(body=["  assume amt_0 == amt_1"])
+        self.assertTrue(any("`assume` without" in p for p in self.strict(lines)))
+
+
 class SelfTestHygieneTests(unittest.TestCase):
     """A test method defined twice in one class replaces the first, which then never runs (it happened here:
     two `test_labels_followed_by_no_deletable_statement_give_no_mutant`)."""

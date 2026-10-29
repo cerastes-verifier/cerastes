@@ -16,6 +16,7 @@
 // Each lowering rule has at least one case that must verify and one that must fail (invariant 2).
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -893,6 +894,8 @@ void define_static_assertions();
 void define_static_assertion_rejections();
 void define_memory();
 void define_memory_rejections();
+void define_pointer_contracts();
+void define_pointer_contract_rejections();
 }  // namespace
 
 #include "selftest_cases2.inc"
@@ -901,6 +904,7 @@ void define_memory_rejections();
 #include "selftest_cases5.inc"
 #include "selftest_cases6.inc"
 #include "selftest_cases7.inc"
+#include "selftest_cases8.inc"
 
 namespace {
 
@@ -967,6 +971,10 @@ bool run_lowering_case(const Case& c, const std::string& dir, std::string& probl
   }
   cerastes::viper::Emitted first = cerastes::viper::emit(lr.program);
   const std::vector<MapRow> rows = parse_map(first.map);
+  if (std::getenv("CERASTES_SELFTEST_DUMP") != nullptr) {  // debugging aid: keep the program of a case whose expectations do not match
+    std::ofstream(dir + "/" + c.name + ".dump.vpr", std::ios::binary | std::ios::trunc) << first.vpr;
+    std::ofstream(dir + "/" + c.name + ".dump.map", std::ios::binary | std::ios::trunc) << first.map;
+  }
   // Which Viper lines must fail.
   std::vector<std::pair<int, std::string>> fails;  // (relative vpr line, harness category)
   for (const Expect& e : k.expects) {
@@ -978,6 +986,7 @@ bool run_lowering_case(const Case& c, const std::string& dir, std::string& probl
     if (hits.size() != e.count) {
       problem = "expected " + std::to_string(e.count) + " check(s) of category " + e.category + " at line " + std::to_string(e.line) +
                 " in the position map, found " + std::to_string(hits.size());
+      for (size_t hi = 0; hi < hits.size() && hi < 40; ++hi) problem += "\n    [" + std::to_string(hi) + "] vpr line " + std::to_string(hits[hi]->vpr_line) + " " + hits[hi]->id + ": " + hits[hi]->msg;
       return false;
     }
     for (size_t hi = 0; hi < hits.size(); ++hi) {
@@ -1066,6 +1075,8 @@ int main(int argc, char** argv) {
   define_static_assertion_rejections();
   define_memory();
   define_memory_rejections();
+  define_pointer_contracts();
+  define_pointer_contract_rejections();
   int bad = 0;
   for (const Case& c : lowering_cases()) {
     std::string problem;

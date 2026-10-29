@@ -459,31 +459,45 @@ inside a template, and so is any such call in a file that does not include
 `reads`, `forall`, `owns_range`) whose callee depends on a template parameter
 is taken to be the specification function whenever `<cerastes.h>` is
 included, even if argument-dependent lookup would find a function of yours:
-qualify your own functions there (this errs on the side of rejecting). The
-five functions:
+qualify your own functions there (this errs on the side of rejecting). A sixth,
+`live`, is declared for pointers. C has no namespaces, so `<cerastes.h>` also
+declares the C spellings `cerastes_owns`, `cerastes_reads`, `cerastes_live` and
+`cerastes_old` (a macro), in C and in pass:[C++] alike. The functions:
 
-[cols="2,5"]
+[cols="2,2,5"]
 |===
-| Function | What it will mean
+| Function | C spelling | What it means
 
-| `owns(place)`
-| full permission to read and write `place`
+| `owns(*p)`
+| `cerastes_owns(*p)`
+| `p` is not null and the function may read and write `*p`, which holds a value
+(xref:memory.adoc#contracts[Memory and ownership])
 
-| `reads(place)`
-| permission to read `place`
+| `reads(*p)`
+| `cerastes_reads(*p)`
+| `p` is not null and the function may read `*p`
+
+| `live(p)`
+| `cerastes_live(p)`
+| `p` is not null and points into an object that still exists
 
 | `old(e)`
-| the value of `e` on entry, in `ensures`
+| `cerastes_old(e)`
+| the value of `e` on entry, in `ensures`; `e` is a parameter or `*p`
 
 | `owns_range(p, n)`
-| permission to the `n` elements starting at `p`
+| (later)
+| permission to the `n` elements starting at `p` (not supported yet)
 
 | `forall(body, free...)`
-| for every value of the first parameter of `body`
+| (later)
+| for every value of the first parameter of `body` (not supported yet)
 |===
 
-Today they only have to type-check (and `cerastes verify` accepts only `old`); a later milestone gives `owns`, `reads`
-and `owns_range` their meaning, in the memory model.
+`owns`, `reads` and `live` name a pointer parameter, as `*p` or `p`, and may
+appear in a contract as a conjunct, after `p == NULL ||`, or as an arm of `?:`
+whose condition does not read memory. `cerastes verify` does not accept
+`owns_range` and `forall` yet.
 
 [source,cpp]
 ----

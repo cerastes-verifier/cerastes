@@ -86,6 +86,74 @@ E range_obligation(const E& v, const IntType& t) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// Contracts with pointers (decision 0037): structural helpers over lowered expressions
+// ---------------------------------------------------------------------------------------------------------------
+
+// Structural equality of two lowered expressions (a null is "true", equal only to a null).
+bool same_expr(const E& a, const E& b) {
+  if (a == b) return true;
+  if (!a || !b) return false;
+  if (a->kind != b->kind || a->text != b->text || a->bool_value != b->bool_value || a->un != b->un || a->bin != b->bin) return false;
+  if (!same_expr(a->a, b->a) || !same_expr(a->b, b->b) || !same_expr(a->c, b->c)) return false;
+  if (a->args.size() != b->args.size()) return false;
+  for (size_t i = 0; i < a->args.size(); ++i)
+    if (!same_expr(a->args[i], b->args[i])) return false;
+  return true;
+}
+
+// The conjuncts of `e` (left-associated `&&` flattened); empty for a null (true).
+void conjuncts(const E& e, std::vector<E>& out) {
+  if (!e) return;
+  if (e->kind == low::LExpr::Kind::Bin && e->bin == low::BinOp::And) {
+    conjuncts(e->a, out);
+    conjuncts(e->b, out);
+    return;
+  }
+  out.push_back(e);
+}
+
+// Whether every conjunct of `d` is a conjunct of `guard`: `guard ==> d` structurally.
+bool implied_by(const E& d, const E& guard) {
+  std::vector<E> dc, gc;
+  conjuncts(d, dc);
+  conjuncts(guard, gc);
+  for (const E& x : dc) {
+    bool found = false;
+    for (const E& y : gc)
+      if (same_expr(x, y)) { found = true; break; }
+    if (!found) return false;
+  }
+  return true;
+}
+
+// Whether a lowered Bool expression is always true by its shape (an atom of a value clause lowers to `true`): a literal, a conjunction of two,
+// a disjunction with one, a conditional with both arms.
+bool always_true(const E& e) {
+  if (!e) return true;
+  switch (e->kind) {
+    case low::LExpr::Kind::BoolLit: return e->bool_value;
+    case low::LExpr::Kind::Bin:
+      if (e->bin == low::BinOp::And) return always_true(e->a) && always_true(e->b);
+      if (e->bin == low::BinOp::Or) return always_true(e->a) || always_true(e->b);
+      if (e->bin == low::BinOp::Implies) return always_true(e->b);
+      return false;
+    case low::LExpr::Kind::Ite: return always_true(e->b) && always_true(e->c);
+    default: return false;
+  }
+}
+
+bool has_atom(const Expr& e) {
+  if (e.kind == Expr::Kind::Atom) return true;
+  for (const Expr* x : {e.a, e.b, e.c})
+    if (x != nullptr && has_atom(*x)) return true;
+  for (const Expr* x : e.args)
+    if (x != nullptr && has_atom(*x)) return true;
+  return false;
+}
+
+E min_perm(const E& a, const E& b) { return low::ite(low::bin(low::BinOp::Lt, a, b), a, b); }
+
+// ---------------------------------------------------------------------------------------------------------------
 // Constant masks (decision 0026 part B)
 // ---------------------------------------------------------------------------------------------------------------
 
@@ -282,6 +350,8 @@ struct OblCore {
   size_t seq = 0;   // creation order within the Full (items of one slot keep it)
   int term_of = -1; // the fixed point (a call) whose explicit termination check this is (decision 0021 item 4), else -1
   int flag_of = -1; // the local (Var id) whose `uninitialized` flag this reads, else -1: a read of that local (decision 0025 item 1)
+  // Non-empty: a statement item (a case split, decision 0037 item 8), emitted in the item's place instead of an assert; `cond` and `meta` are unused.
+  std::vector<low::LStmt> stmts;
 };
 template <class S>
 struct BasicObl : OblCore {
@@ -295,6 +365,7 @@ struct CallItem {
   low::Check check;
   bool has_termination = false;
   low::Check termination;
+  std::vector<low::LStmt> after;  // emitted right after the call: the case splits on a pointer result (decision 0037 item 3)
 };
 
 // One effect of a full expression (decision 0020 items 5 and 7, decision 0021 item 3, decision 0025 item 2).  The FIXED POINTS are the
@@ -804,7 +875,7 @@ class Lowerer {
   LV read_cell(const Expr& e, const E& guard, const Deps& gdep, Full& full) {
     const E r = low::var(var_name(*e.var));
     obl(full, guard, gdep, may_read(r, e.var->type), {},
-        meta("internal", e.loc, "internal check: the function holds the permission to its own variable `" + e.var->name + "`"));
+        meta("permission", e.loc, "reads `" + e.var->name + "` without owning it: a callee may have kept its object"));
     obl(full, guard, gdep, cell_flag(r, e.var->type), {},
         meta("uninitialized", e.loc, "`" + e.var->name + "` may be read here before it is given a value"));
     return {cell_value(r, e.var->type), {}};
@@ -815,13 +886,14 @@ class Lowerer {
   void write_cell(std::vector<low::LStmt>& out, const Var& x, const E& value, const SrcLoc& at) {
     const E r = low::var(var_name(x));
     emit_assert(out, may_write(r, x.type, false),
-                meta("internal", at, "internal check: the function holds the permission to its own variable `" + x.name + "`"));
+                meta("permission", at, "writes `" + x.name + "` without owning it: a callee may have kept its object"));
     write_fields(out, var_name(x), x.type, value);
   }
 
   // `*p` as a read (decision 0032 item 6): the null check, the permission check (which is also the liveness check of this use, 0028 item
   // 3a), the flag; the value `p.v_<t>`.
   LV deref(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full) {
+    if (cmode_ != CMode::None) return contract_read(e, env, guard, gdep, full);
     LV p = lower(*e.a, env, guard, gdep, full);
     const std::string ptr_text = e.a->c_text;
     const std::string place = e.c_text.empty() ? (ptr_text.empty() ? std::string() : "*" + ptr_text) : e.c_text;
@@ -844,6 +916,7 @@ class Lowerer {
   }
 
   void ptr_use(const Expr& operand, const LV& v, const E& guard, const Deps& gdep, Full& full) {
+    if (cmode_ != CMode::None) return;  // a contract has no heap and no liveness to check (decision 0037 item 7)
     if (address_or_null(operand)) return;
     const E live = low::bin(low::BinOp::Gt, live_perm(v.e), low::no_perm());
     obl(full, guard, gdep, low::implies(low::bin(low::BinOp::Ne, v.e, low::null_()), live), v.dep,
@@ -862,7 +935,9 @@ class Lowerer {
     bad = low::bin(BinOp::And, bad, low::bin(BinOp::Ne, block_of(a.e), block_of(b.e)));
     bad = low::bin(BinOp::And, bad, low::bin(BinOp::Or, past(a.e), past(b.e)));
     obl(full, guard, gdep, low::not_(bad), dep,
-        meta("internal", e.loc, "internal check: a comparison of pointers one of which is one past the end of its object (decision 0028 item 3)"));
+        meta("pointer-comparison", e.loc,
+             "compares " + quoted(e.a->c_text, "a pointer") + " and " + quoted(e.b->c_text, "a pointer") +
+                 ", which may point into different objects, one of them one past its end"));
   }
 
   static bool shares_node(const Expr& root, const Expr* needle) {
@@ -898,6 +973,215 @@ class Lowerer {
     write_fields(out, recv->text, t, vs[1].e);
   }
 
+  // ---- contracts with pointers (decision 0037) ----
+
+  // How a contract expression is being lowered.  Method: a clause of the function's own Viper method (atoms are `acc` assertions, reads are heap
+  // reads, `old` is Viper's); Wf: the well-formedness method (no heap: reads are ghost value formals, atoms their pure facts); Call: a callee's
+  // value `requires` over the argument values at a call (the atoms were asserted one by one, so they lower to `true`); Ret: a value `ensures`
+  // asserted at a `return` (atoms were asserted, `old` is Viper's).  None: code, an invariant, a measure.
+  enum class CMode { None, Method, Wf, Call, Ret };
+
+  struct FnAtoms {
+    std::vector<AtomSite> sites;               // contract_atoms: the requires atoms first
+    std::map<const Expr*, size_t> index;       // the Atom node -> its position in `sites`
+    int nreq = 0;                              // the number of requires atoms (the ghost amounts)
+  };
+
+  const FnAtoms& atoms_of(const Function& f) {
+    const auto it = atoms_.find(&f);
+    if (it != atoms_.end()) return it->second;
+    FnAtoms fa;
+    fa.sites = contract_atoms(f);
+    for (size_t i = 0; i < fa.sites.size(); ++i) {
+      fa.index[fa.sites[i].atom] = i;
+      if (!fa.sites[i].in_ensures) ++fa.nreq;
+    }
+    return atoms_.emplace(&f, std::move(fa)).first->second;
+  }
+
+  // Restores the contract context at the end of a scope.
+  struct CtxSave {
+    Lowerer& l;
+    CMode mode;
+    const Function* f;
+    bool ens, old;
+    size_t seen;
+    explicit CtxSave(Lowerer& lw) : l(lw), mode(lw.cmode_), f(lw.cf_), ens(lw.cens_), old(lw.cold_), seen(lw.cseen_) {}
+    ~CtxSave() {
+      l.cmode_ = mode;
+      l.cf_ = f;
+      l.cens_ = ens;
+      l.cold_ = old;
+      l.cseen_ = seen;
+    }
+  };
+
+  // The position in `sites` of the first atom at or after clause `clause` of the requires (`ens` false) or ensures list.
+  static size_t first_site(const FnAtoms& fa, bool ens, int clause) {
+    for (size_t i = 0; i < fa.sites.size(); ++i) {
+      const AtomSite& s = fa.sites[i];
+      if (s.in_ensures == ens && s.clause >= clause) return i;
+      if (s.in_ensures && !ens) return i;
+    }
+    return fa.sites.size();
+  }
+
+  void set_ctx(const Function& f, CMode mode, bool ens, int clause) {
+    cmode_ = mode;
+    cf_ = &f;
+    cens_ = ens;
+    cold_ = false;
+    cseen_ = first_site(atoms_of(f), ens, clause);
+  }
+
+  static std::string amount_name(int k) { return "amt_" + std::to_string(k); }
+
+  // `p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p)))`: decision 0028 item 2, inline.
+  E wf_expr(const E& p) {
+    using low::BinOp;
+    out_.memory = true;
+    const E off = low::dom("offset_of", {p});
+    E inner = low::bin(BinOp::Eq, p, low::dom("loc", {block_of(p), off}));
+    inner = low::bin(BinOp::And, inner, low::bin(BinOp::Le, low::int_lit("0"), off));
+    inner = low::bin(BinOp::And, inner, low::bin(BinOp::Le, off, low::dom("len", {block_of(p)})));
+    return low::bin(BinOp::Or, low::bin(BinOp::Eq, p, low::null_()), inner);
+  }
+  E in_block(const E& p) {  // offset_of(p) < len(block_of(p))
+    return low::bin(low::BinOp::Lt, low::dom("offset_of", {p}), low::dom("len", {block_of(p)}));
+  }
+  // The range of a cell's value as one atomic condition (none for bool).
+  E cell_range(const E& p, const Type& t) {
+    if (!t.is_bool()) return range_obligation(cell_value(p, t), *t.int_type);
+    return nullptr;
+  }
+
+  static const Type& site_pointee(const AtomSite& s) { return *s.atom->a->type.pointee; }
+  static int site_param(const AtomSite& s) { return s.atom->a->index; }
+  static bool site_takes_cell(const AtomSite& s) { return s.atom->atom != AtomKind::Live; }
+
+  // The guard of a site over `env`'s formals: the conjunction of its `||`/`?:` conditions (null: unconditional).
+  E site_guard(const AtomSite& s, const Env& env) {
+    E g;
+    CtxSave save(*this);
+    cmode_ = CMode::Wf;  // a guard is lowered as a pure contract expression whatever the context (a pointer `?:` is an ite, never an effect)
+    for (const AtomGuard& x : s.guards) {
+      Full scratch;
+      LV v = lower(*x.cond, env, nullptr, {}, scratch);
+      g = low::and_(g, x.holds ? v.e : low::not_(v.e));
+    }
+    return g;
+  }
+
+  // Two atoms that must not name one cell: two `owns`, or an `owns` and a `reads`, of one field (decision 0037 items 8 and 10).
+  bool exclusive_pair(const AtomSite& a, const AtomSite& b) {
+    if (!site_takes_cell(a) || !site_takes_cell(b)) return false;
+    if (a.atom->atom == AtomKind::Reads && b.atom->atom == AtomKind::Reads) return false;
+    return cell_suffix(site_pointee(a)) == cell_suffix(site_pointee(b));
+  }
+
+  // An atom (decision 0037 items 5 and 6) in the context being lowered.
+  LV atom(const Expr& e, const Env& env) {
+    using low::BinOp;
+    const FnAtoms& fa = atoms_of(*cf_);
+    const auto it = fa.index.find(&e);
+    if (it == fa.index.end()) {
+      internal_error(e.loc, "a permission atom in a position the contract rules forbid reached lowering");
+      return {low::bool_lit(true), {}};
+    }
+    const size_t idx = it->second;
+    cseen_ = std::max(cseen_, idx + 1);
+    if (cmode_ == CMode::Call || cmode_ == CMode::Ret) return {low::bool_lit(true), {}};  // asserted one by one at the call or the return
+    const AtomSite& site = fa.sites[idx];
+    const E p = env.formals[static_cast<size_t>(site_param(site))];
+    const Type& t = site_pointee(site);
+    E pure = low::and_(low::bin(BinOp::Ne, p, low::null_()), wf_expr(p));
+    if (site_takes_cell(site)) pure = low::and_(pure, in_block(p));
+    if (cmode_ == CMode::Wf) {
+      // Two full atoms of one list name two cells (the fact Silicon derives from the two `acc`s), added after the second one (decision 0037 item 7).
+      if (e.atom == AtomKind::Owns)
+        for (size_t i = 0; i < idx; ++i) {
+          const AtomSite& o = fa.sites[i];
+          if (o.in_ensures != site.in_ensures || o.atom->atom != AtomKind::Owns || site_param(o) == site_param(site)) continue;
+          if (cell_suffix(site_pointee(o)) != cell_suffix(t)) continue;
+          pure = low::and_(pure, low::implies(site_guard(o, env), low::bin(BinOp::Ne, env.formals[static_cast<size_t>(site_param(o))], p)));
+        }
+      return {pure, {}};
+    }
+    if (e.amount < 0) {
+      internal_error(e.loc, "a permission atom without its ghost amount reached lowering");
+      return {low::bool_lit(true), {}};
+    }
+    const E amount = low::var(amount_name(e.amount));
+    E r = pure;
+    if (site_takes_cell(site)) {
+      const bool owns = e.atom == AtomKind::Owns;
+      const std::string sfx = use_cell_type(t);
+      r = low::and_(r, owns ? low::acc(p, "v_" + sfx) : low::acc(p, "v_" + sfx, amount));
+      r = low::and_(r, owns ? low::acc(p, "d_" + sfx) : low::acc(p, "d_" + sfx, amount));
+      r = low::and_(r, cell_flag(p, t));
+      if (!t.is_bool()) r = low::and_(r, range_check(cell_value(p, t), *t.int_type));
+    }
+    r = low::and_(r, low::acc(live_cell(p), "lv", amount));
+    return {r, {}};
+  }
+
+  static std::string ghost_name(int param, bool post) { return "hv_" + std::to_string(param) + (post ? "_post" : "_pre"); }
+
+  // A read of `*p` in a contract (decision 0037 item 7).  Wf: a ghost value formal, and the framing obligation; otherwise the heap read, guarded
+  // by itself: the chain `(D_1 ? read : (D_2 ? read : ... : dummy))` over the framing disjuncts of the earlier atoms of the same field, or the
+  // plain read when the framing is trivial (an unconditional atom on the same place) or implied by the guard the read is evaluated under.
+  LV contract_read(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full) {
+    using low::BinOp;
+    if (e.a == nullptr || e.a->kind != Expr::Kind::Formal) {
+      internal_error(e.loc, "a dereference in a contract of anything but a pointer parameter reached lowering");
+      return {low::int_lit("0"), {}};
+    }
+    const int k = e.a->index;
+    const E p = env.formals[static_cast<size_t>(k)];
+    const Type& t = e.type;
+    const bool post = cens_ && !cold_;
+    const FnAtoms& fa = atoms_of(*cf_);
+    const std::string sfx = use_cell_type(t);
+    std::vector<E> ds;  // the framing disjuncts D_i; a null one is `true`
+    for (size_t i = 0; i < fa.sites.size(); ++i) {
+      const AtomSite& s = fa.sites[i];
+      if (!site_takes_cell(s)) continue;
+      if (post) {
+        if (!s.in_ensures || i >= cseen_) continue;
+      } else {
+        if (s.in_ensures) continue;
+        if (!cens_ && i >= cseen_) continue;
+      }
+      if (cell_suffix(site_pointee(s)) != sfx) continue;
+      E d = site_guard(s, env);
+      if (site_param(s) != k) d = low::and_(d, low::bin(BinOp::Eq, env.formals[static_cast<size_t>(site_param(s))], p));
+      ds.push_back(d);
+    }
+    bool trivial = false;
+    for (const E& d : ds)
+      if (!d || implied_by(d, guard)) trivial = true;
+    if (cmode_ == CMode::Wf) {
+      const std::pair<int, bool> key{k, post};
+      wf_ghosts_[key] = t;
+      if (!trivial) {
+        E any;
+        for (const E& d : ds) any = any ? low::bin(BinOp::Or, any, d) : d;
+        if (!any) any = low::bool_lit(false);
+        obl(full, guard, gdep, any, {},
+            meta("permission", e.loc,
+                 "the contract of `" + cf_->c_name + "` reads " + quoted(e.c_text.empty() ? std::string() : e.c_text, "a pointer's object") +
+                     " without owning it"));
+      }
+      return {low::var(ghost_name(k, post)), {}};
+    }
+    E read = cell_value(p, t);
+    if (cold_ && (cmode_ == CMode::Method || cmode_ == CMode::Ret)) read = low::old_(read);
+    if (trivial) return {read, {}};
+    E v = t.is_bool() ? low::bool_lit(false) : low::int_lit("0");
+    for (size_t i = ds.size(); i-- > 0;) v = low::ite(ds[i], read, v);
+    return {v, {}};
+  }
+
   // ---- expressions ----
 
   LV lower(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full) {
@@ -927,11 +1211,18 @@ class Lowerer {
       case Expr::Kind::Result:
         return {env.result, {}};
       case Expr::Kind::Old:
+        if (cmode_ != CMode::None && reads_heap(*e.a)) {  // old(*p): the cell's value on entry (decision 0037 item 5)
+          const bool saved = cold_;
+          cold_ = true;
+          LV r = lower(*e.a, env, guard, gdep, full);
+          cold_ = saved;
+          return r;
+        }
         return lower(*e.a, env, guard, gdep, full);
       case Expr::Kind::Unary: return unary(e, env, guard, gdep, full);
       case Expr::Kind::Binary: return binary(e, env, guard, gdep, full);
       case Expr::Kind::Cond: {
-        if (e.type.is_ptr() || has_effect(*e.b) || has_effect(*e.c)) return branch_cond(e, env, guard, gdep, full);
+        if (cmode_ == CMode::None && (e.type.is_ptr() || has_effect(*e.b) || has_effect(*e.c))) return branch_cond(e, env, guard, gdep, full);
         LV c = lower(*e.a, env, guard, gdep, full);
         E gt = low::and_(guard, c.e);
         E gf = low::and_(guard, low::not_(c.e));
@@ -979,6 +1270,12 @@ class Lowerer {
         return {low::var(var_name(*e.var)), {}};
       }
       case Expr::Kind::Deref: return deref(e, env, guard, gdep, full);
+      case Expr::Kind::Atom:
+        if (cmode_ == CMode::None) {
+          internal_error(e.loc, "a permission atom outside a contract reached lowering");
+          return {low::bool_lit(true), {}};
+        }
+        return atom(e, env);
     }
     internal_error(e.loc, "unknown expression kind");
     return {low::int_lit("0"), {}};
@@ -1033,7 +1330,7 @@ class Lowerer {
     using low::BinOp;
     const bool lazy_and = e.bop == BinaryOp::LAnd;
     const bool lazy_or = e.bop == BinaryOp::LOr;
-    if ((lazy_and || lazy_or) && has_effect(*e.b)) return branch_logical(e, env, guard, gdep, full);
+    if ((lazy_and || lazy_or) && cmode_ == CMode::None && has_effect(*e.b)) return branch_logical(e, env, guard, gdep, full);
     LV a = lower(*e.a, env, guard, gdep, full);
     E gb = guard;
     Deps gbd = gdep;
@@ -1045,11 +1342,19 @@ class Lowerer {
       // Decision 0032 items 6 and 7: both operands are uses of a pointer value, then the one-past-the-end exception of 0028 item 3.
       ptr_use(*e.a, a, guard, gdep, full);
       ptr_use(*e.b, b, guard, gdep, full);
-      one_past_end(e, a, b, guard, gdep, dep, full);
+      if (cmode_ == CMode::None) one_past_end(e, a, b, guard, gdep, dep, full);  // in a contract `==` is identity in the model (decision 0037 item 12)
     }
     switch (e.bop) {
-      case BinaryOp::LAnd: return {low::bin(BinOp::And, a.e, b.e), dep};
-      case BinaryOp::LOr: return {low::bin(BinOp::Or, a.e, b.e), dep};
+      case BinaryOp::LAnd:
+        if ((cmode_ == CMode::Call || cmode_ == CMode::Ret) && !atoms_of(*cf_).sites.empty()) {  // an atom lowers to `true` here (asserted one by one): keep the value part alone
+          if (always_true(a.e)) return {b.e, dep};
+          if (always_true(b.e)) return {a.e, dep};
+        }
+        return {low::bin(BinOp::And, a.e, b.e), dep};
+      case BinaryOp::LOr:
+        // Viper refuses `acc` under `||`: `a || atom` is `!a ==> atom` (decision 0037 item 5).
+        if (cmode_ == CMode::Method && has_atom(*e.b)) return {low::bin(BinOp::Implies, low::not_(a.e), b.e), dep};
+        return {low::bin(BinOp::Or, a.e, b.e), dep};
       case BinaryOp::Lt: return {low::bin(BinOp::Lt, a.e, b.e), dep};
       case BinaryOp::Le: return {low::bin(BinOp::Le, a.e, b.e), dep};
       case BinaryOp::Gt: return {low::bin(BinOp::Gt, a.e, b.e), dep};
@@ -1213,6 +1518,159 @@ class Lowerer {
     return any ? low::not_(none) : low::bool_lit(false);
   }
 
+  // The explicit checks of the permissions a callee's atoms need at a call (decision 0037 item 8): each part of each atom under its guard,
+  // the separation of atoms that must not share a cell, the case splits, the amounts' bounds and the sums over the cells they are taken from.
+  // They are obligations of the call with the exact set PRE(c), in the order they are created.  Returns the ghost amounts, one per `requires`
+  // atom, `(g ? m : write) / (N + 1)` (decision 0037 item 6).
+  std::vector<E> call_atoms(const Expr& e, const Function& callee, const std::vector<LV>& args, const Env& cenv, const Deps& pre, Full& full) {
+    using low::BinOp;
+    std::vector<E> amounts;
+    const FnAtoms& fa = atoms_of(callee);
+    const size_t n = static_cast<size_t>(fa.nreq);
+    if (n == 0) return amounts;
+    Deps adep;
+    for (const LV& a : args) adep = join(adep, a.dep);
+    struct S {
+      const AtomSite* site = nullptr;
+      E p, g;
+      const Type* t = nullptr;
+      std::string place;
+    };
+    std::vector<S> ss;
+    for (size_t i = 0; i < n; ++i) {  // the requires atoms come first in `sites`
+      S x;
+      x.site = &fa.sites[i];
+      const int j = site_param(*x.site);
+      x.p = cenv.formals[static_cast<size_t>(j)];
+      x.g = site_guard(*x.site, cenv);
+      x.t = &site_pointee(*x.site);
+      const std::string txt = e.args[static_cast<size_t>(j)]->c_text;
+      x.place = txt.empty() ? std::string() : (txt[0] == '&' ? txt.substr(1) : "*" + txt);
+      ss.push_back(std::move(x));
+    }
+    auto text_of = [&](const S& x) {
+      const std::string pl = quoted(x.place, "the object the pointer points to");
+      switch (x.site->atom->atom) {
+        case AtomKind::Owns: return "calls `" + callee.c_name + "`, which needs to own " + pl + ", without owning it";
+        case AtomKind::Reads: return "calls `" + callee.c_name + "`, which needs to read " + pl + ", without the permission to read it";
+        case AtomKind::Live: {
+          const Expr& arg = *e.args[static_cast<size_t>(site_param(*x.site))];
+          const std::string who = arg.kind == Expr::Kind::Null ? std::string("the null pointer")
+                                  : arg.c_text.empty()         ? std::string("the pointer")
+                                                               : "`" + arg.c_text + "`";
+          return "calls `" + callee.c_name + "`, which needs " + who + " to point to a live object";
+        }
+      }
+      return std::string();
+    };
+    auto add = [&](const E& guard, E cond, const std::string& message) {
+      obl(full, guard, adep, std::move(cond), {}, meta("permission", e.loc, message), &pre.ex);
+    };
+    auto split = [&](E cond) {
+      obl(full, nullptr, adep, low::bool_lit(true), {}, meta("internal", e.loc, "internal check: a case split"), &pre.ex);
+      low::LStmt st;
+      st.kind = low::LStmt::Kind::CaseSplit;
+      st.expr = std::move(cond);
+      full.obls.back().stmts.push_back(std::move(st));
+    };
+    const E none = low::no_perm(), write = low::write_perm();
+    // 1. each part of each atom, under its guard
+    for (const S& x : ss) {
+      const std::string m = text_of(x);
+      const Type& t = *x.t;
+      add(x.g, low::bin(BinOp::Ne, x.p, low::null_()), m);
+      add(x.g, wf_expr(x.p), m);
+      if (site_takes_cell(*x.site)) {
+        add(x.g, in_block(x.p), m);
+        const bool owns = x.site->atom->atom == AtomKind::Owns;
+        add(x.g, low::bin(owns ? BinOp::Eq : BinOp::Gt, value_perm(x.p, t), owns ? write : none), m);
+        add(x.g, low::bin(owns ? BinOp::Eq : BinOp::Gt, flag_perm(x.p, t), owns ? write : none), m);
+        add(x.g, cell_flag(x.p, t), m);
+        if (const E r = cell_range(x.p, t)) add(x.g, r, m);
+      }
+      add(x.g, low::bin(BinOp::Gt, live_perm(x.p), none), m);
+    }
+    // 2. the separation of atoms that must not name one cell: `swap(&x, &x)` fails here
+    for (size_t i = 0; i < ss.size(); ++i)
+      for (size_t j = i + 1; j < ss.size(); ++j) {
+        if (!exclusive_pair(*ss[i].site, *ss[j].site)) continue;
+        const std::string pl = quoted(ss[i].place, "the object the pointer points to");
+        add(low::and_(ss[i].g, ss[j].g), low::bin(BinOp::Ne, ss[i].p, ss[j].p),
+            "passes " + pl + " to `" + callee.c_name + "` twice, but one of the two places is to be owned and they may be the same object");
+      }
+    // 3. the case splits: on the liveness cells of every pair of atoms, on the cells of every pair of `reads`
+    for (size_t i = 0; i < ss.size(); ++i)
+      for (size_t j = i + 1; j < ss.size(); ++j)
+        if (!same_expr(ss[i].p, ss[j].p)) split(low::bin(BinOp::Eq, live_cell(ss[i].p), live_cell(ss[j].p)));
+    for (size_t i = 0; i < ss.size(); ++i)
+      for (size_t j = i + 1; j < ss.size(); ++j) {
+        const AtomSite& a = *ss[i].site;
+        const AtomSite& b = *ss[j].site;
+        if (a.atom->atom == AtomKind::Reads && b.atom->atom == AtomKind::Reads && cell_suffix(site_pointee(a)) == cell_suffix(site_pointee(b)) &&
+            !same_expr(ss[i].p, ss[j].p))
+          split(low::bin(BinOp::Eq, ss[i].p, ss[j].p));
+      }
+    // 3b. each pointer argument that feeds a cell atom, against each `reads` parameter of the caller of the same field: the caller may hold the
+    // argument's cell as that parameter's, at a fraction, and Silicon takes a fraction computed from two chunks only when it knows which (S26).
+    // Only the paths that reach a call branch (decision 0037 item 9, the re-audit's blow-up of entry splits).
+    {
+      const FnAtoms& caller = atoms_of(*fn_.f);
+      std::vector<std::pair<E, E>> done;
+      for (const S& x : ss) {
+        if (!site_takes_cell(*x.site)) continue;
+        for (int i = 0; i < caller.nreq; ++i) {
+          const AtomSite& cs = caller.sites[static_cast<size_t>(i)];
+          if (cs.atom->atom != AtomKind::Reads || cell_suffix(site_pointee(cs)) != cell_suffix(*x.t)) continue;
+          const E q = low::var(formal_name(*fn_.f, site_param(cs)));
+          if (same_expr(x.p, q)) continue;
+          bool seen = false;
+          for (const auto& d : done)
+            if (same_expr(d.first, x.p) && same_expr(d.second, q)) seen = true;
+          if (seen) continue;
+          done.emplace_back(x.p, q);
+          split(low::bin(BinOp::Eq, x.p, q));
+        }
+      }
+    }
+    // 4. the amounts
+    for (const S& x : ss) {
+      const Type& t = *x.t;
+      E m = live_perm(x.p);
+      if (x.site->atom->atom == AtomKind::Reads) m = min_perm(min_perm(value_perm(x.p, t), flag_perm(x.p, t)), m);
+      amounts.push_back(low::perm_div(x.g ? low::ite(x.g, m, write) : m, static_cast<int>(n) + 1));
+    }
+    for (size_t i = 0; i < ss.size(); ++i) {
+      const std::string m = text_of(ss[i]);
+      add(nullptr, low::bin(BinOp::Lt, none, amounts[i]), m);
+      add(nullptr, low::bin(BinOp::Lt, amounts[i], write), m);
+    }
+    // 5. the sums over each cell an atom takes a fraction of (decision 0037 item 8, audit round 1 S3)
+    auto term = [&](const E& cond, const E& amount) { return cond ? low::ite(cond, amount, none) : amount; };
+    for (size_t i = 0; i < ss.size(); ++i) {
+      const std::string m = text_of(ss[i]);
+      const Type& t = *ss[i].t;
+      if (ss[i].site->atom->atom == AtomKind::Reads) {
+        for (const bool flag : {false, true}) {
+          E total = amounts[i];
+          for (size_t j = 0; j < ss.size(); ++j) {
+            if (j == i || ss[j].site->atom->atom != AtomKind::Reads || cell_suffix(site_pointee(*ss[j].site)) != cell_suffix(t)) continue;
+            E same = same_expr(ss[i].p, ss[j].p) ? nullptr : low::bin(BinOp::Eq, ss[i].p, ss[j].p);
+            total = low::bin(BinOp::Add, total, term(low::and_(ss[j].g, same), amounts[j]));
+          }
+          add(ss[i].g, low::bin(BinOp::Ge, flag ? flag_perm(ss[i].p, t) : value_perm(ss[i].p, t), total), m);
+        }
+      }
+      E total = amounts[i];
+      for (size_t j = 0; j < ss.size(); ++j) {
+        if (j == i) continue;
+        E same = same_expr(ss[i].p, ss[j].p) ? nullptr : low::bin(BinOp::Eq, live_cell(ss[i].p), live_cell(ss[j].p));
+        total = low::bin(BinOp::Add, total, term(low::and_(ss[j].g, same), amounts[j]));
+      }
+      add(ss[i].g, low::bin(BinOp::Ge, live_perm(ss[i].p), total), m);
+    }
+    return amounts;
+  }
+
   LV call(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full) {
     const Function& callee = *e.callee;
     if (guard != nullptr) internal_error(e.loc, "a call in a conditionally evaluated operand reached lowering");
@@ -1232,10 +1690,22 @@ class Lowerer {
       cenv.formals.push_back(a.e);
       cenv.formal_dep.push_back(a.dep);
     }
-    for (const Clause& c : callee.requires_) {
+    // The permissions the callee's atoms need (decision 0037 item 8): explicit, atomic, in order, before the value preconditions, all with the
+    // exact set PRE(c) like them.
+    std::vector<E> amounts = call_atoms(e, callee, args, cenv, pre, full);
+    for (size_t k = 0; k < e.args.size(); ++k)
+      if (e.args[k]->type.is_ptr()) ptr_use(*e.args[k], args[k], nullptr, {}, full);  // a pointer argument is a use (decision 0032 item 6)
+    for (size_t ci = 0; ci < callee.requires_.size(); ++ci) {
+      const Clause& c = callee.requires_[ci];
       Full scratch;  // the clause's own obligations belong to the callee's well-formedness method
-      LV v = lower(*c.expr, cenv, nullptr, {}, scratch);
+      LV v;
+      {
+        CtxSave save(*this);
+        set_ctx(callee, CMode::Call, false, static_cast<int>(ci));
+        v = lower(*c.expr, cenv, nullptr, {}, scratch);
+      }
       pure_full(scratch, *c.expr, "a precondition");
+      if (has_atom(*c.expr) && always_true(v.e)) continue;  // nothing but atoms: asserted above
       low::Meta m = meta("precondition", e.loc, "the precondition of `" + callee.c_name + "` may not hold");
       m.has_note = true;
       m.note_loc = c.loc.known() ? c.loc : callee.loc;
@@ -1251,6 +1721,7 @@ class Lowerer {
     CallItem item;
     item.method = method_name(callee);
     for (const LV& a : args) item.args.push_back(a.e);
+    for (const E& a : amounts) item.args.push_back(a);  // the ghost amounts, after the user's arguments
     low::Meta backstop = meta("internal", e.loc, "internal check: Silicon's own check of the precondition of `" + callee.c_name + "`");
     item.check = low::Check{"call.precondition", std::move(backstop)};
     const int id = full.nfixed++;
@@ -1276,6 +1747,7 @@ class Lowerer {
       item.target = "t__" + std::to_string(fn_.ntemp++);
       fn_.temps.push_back(low::LVar{item.target, ltype(callee.ret)});
       value = low::var(item.target);
+      if (callee.ret.is_ptr()) result_splits(callee.ret, value, item.after);
     }
     Effect fx;
     fx.kind = Effect::Kind::Call;
@@ -1809,6 +2281,10 @@ class Lowerer {
           // comes before the call: it then asserts what Silicon's own check at the call could not reach.  Not written: nothing is
           // counted (the self-test hook counts asserts) and no temporary is made.
           if (o.term_of >= 0 && pos[static_cast<size_t>(o.term_of)] <= static_cast<int>(o.dep.size())) continue;
+          if (!o.stmts.empty()) {
+            for (const low::LStmt& st : o.stmts) out.push_back(st);
+            continue;
+          }
           emit_assert(out, low::implies(o.guard, o.cond), o.meta);
           continue;
         }
@@ -1841,6 +2317,7 @@ class Lowerer {
         s.has_termination = c.has_termination;
         s.termination = c.termination;
         out.push_back(std::move(s));
+        for (const low::LStmt& st : c.after) out.push_back(st);
       }
     }
   }
@@ -2188,7 +2665,7 @@ class Lowerer {
 
   void ret(const Stmt& s, std::vector<low::LStmt>& out) {
     if (s.expr != nullptr) {
-      LV v = full_expr(*s.expr, out);
+      LV v = full_expr(*s.expr, out, s.expr->type.is_ptr());  // a returned pointer is a use of its value (decision 0037 item 3)
       assign(out, kResult, v.e);
     }
     // Leaving every open block that holds cells: innermost first (decision 0032 item 8), after the value and before the postconditions.
@@ -2206,14 +2683,179 @@ class Lowerer {
     out.push_back(std::move(g));
   }
 
-  // Assert each user `ensures` at the point where the function returns (0012 item 9).
-  void postconditions(const SrcLoc& at, std::vector<low::LStmt>& out) {
+  static E amount_bounds(const std::string& name) {
+    return low::bin(low::BinOp::And, low::bin(low::BinOp::Lt, low::no_perm(), low::var(name)),
+                    low::bin(low::BinOp::Lt, low::var(name), low::write_perm()));
+  }
+
+  // A pointer the function obtained from elsewhere (a call's result, a parameter without an atom of its own) is some cell the function holds, but
+  // Silicon finds the permission through a Ref only when it knows which one: a no-op `if (r == X) { }` for each cell X in scope and each pointer
+  // parameter with an atom, of the same field, branches on it (decision 0037 item 3, the owner's choice after the exit 3 of `*pick(...)`).
+  void result_splits(const Type& ptr_type, const E& r, std::vector<low::LStmt>& out) {
+    if (ptr_type.pointee == nullptr || ptr_type.pointee->is_void()) return;
+    const std::string sfx = cell_suffix(*ptr_type.pointee);
+    auto split = [&](const E& x) {
+      low::LStmt st;
+      st.kind = low::LStmt::Kind::CaseSplit;
+      st.expr = low::bin(low::BinOp::Eq, r, x);
+      out.push_back(std::move(st));
+    };
+    for (const Fn::Scope& sc : fn_.scopes)
+      for (const Var* cell : sc.cells)
+        if (cell_suffix(cell->type) == sfx) split(low::var(var_name(*cell)));
+    const FnAtoms& fa = atoms_of(*fn_.f);
+    std::set<int> done;
+    for (int i = 0; i < fa.nreq; ++i) {
+      const AtomSite& site = fa.sites[static_cast<size_t>(i)];
+      if (!site_takes_cell(site) || cell_suffix(site_pointee(site)) != sfx || !done.insert(site_param(site)).second) continue;
+      split(low::var(formal_name(*fn_.f, site_param(site))));
+    }
+  }
+
+  // The entry of a method with atoms (decision 0037 item 9): the case splits on the liveness cells of every pair of atoms of the `requires`, and
+  // the separation of every pair of `owns` atoms of one field under both guards (an `internal` row: provable from the `requires`).
+  void entry_checks(const Function& f, std::vector<low::LStmt>& out) {
+    const FnAtoms& fa = atoms_of(f);
+    const size_t n = static_cast<size_t>(fa.nreq);
+    if (n == 0) return;
     const Env env = contract_env();
-    for (const Clause& c : fn_.f->ensures_) {
+    std::vector<E> g;
+    for (size_t i = 0; i < n; ++i) g.push_back(site_guard(fa.sites[i], env));
+    auto p = [&](size_t i) { return env.formals[static_cast<size_t>(site_param(fa.sites[i]))]; };
+    for (size_t i = 0; i < n; ++i)
+      for (size_t j = i + 1; j < n; ++j) {
+        if (site_param(fa.sites[i]) == site_param(fa.sites[j])) continue;
+        low::LStmt st;
+        st.kind = low::LStmt::Kind::CaseSplit;
+        st.expr = low::bin(low::BinOp::Eq, live_cell(p(i)), live_cell(p(j)));
+        out.push_back(std::move(st));
+      }
+    // A pointer parameter without an atom of its own may be the place an atom names: split on each one of the same field.
+    std::set<int> with_atom;
+    for (size_t i = 0; i < n; ++i) with_atom.insert(site_param(fa.sites[i]));
+    for (size_t k = 0; k < f.params.size(); ++k) {
+      const Type& t = f.params[k].type;
+      if (!t.is_ptr() || with_atom.count(static_cast<int>(k)) != 0 || t.pointee == nullptr || t.pointee->is_void()) continue;
+      std::set<int> seen;
+      for (size_t i = 0; i < n; ++i) {
+        const AtomSite& a = fa.sites[i];
+        if (!site_takes_cell(a) || cell_suffix(site_pointee(a)) != cell_suffix(*t.pointee) || !seen.insert(site_param(a)).second) continue;
+        low::LStmt st;
+        st.kind = low::LStmt::Kind::CaseSplit;
+        st.expr = low::bin(low::BinOp::Eq, env.formals[k], p(i));
+        out.push_back(std::move(st));
+      }
+    }
+    for (size_t i = 0; i < n; ++i)
+      for (size_t j = i + 1; j < n; ++j) {
+        const AtomSite& a = fa.sites[i];
+        const AtomSite& b = fa.sites[j];
+        if (a.atom->atom != AtomKind::Owns || b.atom->atom != AtomKind::Owns || site_param(a) == site_param(b)) continue;
+        if (cell_suffix(site_pointee(a)) != cell_suffix(site_pointee(b))) continue;
+        emit_assert(out, low::implies(low::and_(g[i], g[j]), low::bin(low::BinOp::Ne, p(i), p(j))),
+                    meta("internal", fn_.f->loc, "internal check: two places the contract of `" + fn_.f->c_name + "` owns are different"));
+      }
+  }
+
+  // The `ensures` atoms at a return (decision 0037 item 10): the separation of the atoms that must not share a cell, then each atom under its
+  // guard, part by part, with the sums of item 6; the facts about WF and the block's length as internal rows.
+  void atom_returns(const SrcLoc& at, std::vector<low::LStmt>& out, const Env& env) {
+    using low::BinOp;
+    const Function& f = *fn_.f;
+    const FnAtoms& fa = atoms_of(f);
+    std::vector<size_t> ens;
+    for (size_t i = 0; i < fa.sites.size(); ++i)
+      if (fa.sites[i].in_ensures) ens.push_back(i);
+    if (ens.empty()) return;
+    std::vector<E> g, p;
+    for (size_t i : ens) {
+      g.push_back(site_guard(fa.sites[i], env));
+      p.push_back(env.formals[static_cast<size_t>(site_param(fa.sites[i]))]);
+    }
+    auto name = [&](size_t k) {  // the user's spelling of the place, for messages
+      const std::string& c = fa.sites[ens[k]].atom->a->c_text;
+      return c.empty() ? std::string() : "*" + c;
+    };
+    auto perm_meta = [&](const std::string& message, size_t k) {
+      low::Meta m = meta("permission", at, message);
+      const Clause& cl = f.ensures_[static_cast<size_t>(fa.sites[ens[k]].clause)];
+      if (cl.loc.known()) {
+        m.has_note = true;
+        m.note_loc = cl.loc;
+        m.note_text = "this is the postcondition";
+      }
+      return m;
+    };
+    auto internal = [&](const std::string& what) { return meta("internal", at, "internal check: " + what); };
+    const E none = low::no_perm(), write = low::write_perm();
+    for (size_t a = 0; a < ens.size(); ++a)
+      for (size_t b = a + 1; b < ens.size(); ++b) {
+        if (!exclusive_pair(fa.sites[ens[a]], fa.sites[ens[b]])) continue;
+        emit_assert(out, low::implies(low::and_(g[a], g[b]), low::bin(BinOp::Ne, p[a], p[b])),
+                    perm_meta("returns " + quoted(name(a), "the object the pointer points to") + " and " + quoted(name(b), "the object the pointer points to") +
+                                  " as owned places, but they may be the same object",
+                              a));
+      }
+    auto term = [&](const E& cond, const E& amount) { return cond ? low::ite(cond, amount, none) : amount; };
+    for (size_t k = 0; k < ens.size(); ++k) {
+      const AtomSite& site = fa.sites[ens[k]];
+      const Type& t = site_pointee(site);
+      const E amt = low::var(amount_name(site.atom->amount));
+      const bool owns = site.atom->atom == AtomKind::Owns, reads = site.atom->atom == AtomKind::Reads;
+      const std::string pl = quoted(name(k), "the object the pointer points to");
+      const std::string msg = owns ? "returns without owning " + pl + ", which its contract promises"
+                              : reads ? "returns without the permission to read " + pl + ", which it borrowed"
+                                      : "returns without " + quoted(site.atom->a->c_text, "the pointer") + " pointing to a live object, which its contract promises";
+      auto add = [&](E cond, const low::Meta& m) { emit_assert(out, low::implies(g[k], std::move(cond)), m); };
+      add(low::bin(BinOp::Ne, p[k], low::null_()), perm_meta(msg, k));
+      add(wf_expr(p[k]), internal("WF of a pointer parameter"));
+      if (site_takes_cell(site)) {
+        add(in_block(p[k]), internal("a pointer parameter points into its block"));
+        if (owns) {
+          add(low::bin(BinOp::Eq, value_perm(p[k], t), write), perm_meta(msg, k));
+          add(low::bin(BinOp::Eq, flag_perm(p[k], t), write), perm_meta(msg, k));
+        } else {
+          for (const bool flag : {false, true}) {
+            E total = amt;
+            for (size_t j = 0; j < ens.size(); ++j) {
+              if (j == k || fa.sites[ens[j]].atom->atom != AtomKind::Reads || cell_suffix(site_pointee(fa.sites[ens[j]])) != cell_suffix(t)) continue;
+              E same = same_expr(p[k], p[j]) ? nullptr : low::bin(BinOp::Eq, p[k], p[j]);
+              total = low::bin(BinOp::Add, total, term(low::and_(g[j], same), low::var(amount_name(fa.sites[ens[j]].atom->amount))));
+            }
+            add(low::bin(BinOp::Ge, flag ? flag_perm(p[k], t) : value_perm(p[k], t), total), perm_meta(msg, k));
+          }
+        }
+        add(cell_flag(p[k], t), perm_meta(msg, k));
+        if (const E r = cell_range(p[k], t)) add(r, perm_meta(msg, k));
+      }
+      E total = amt;
+      for (size_t j = 0; j < ens.size(); ++j) {
+        if (j == k) continue;
+        E same = same_expr(p[k], p[j]) ? nullptr : low::bin(BinOp::Eq, live_cell(p[k]), live_cell(p[j]));
+        total = low::bin(BinOp::Add, total, term(low::and_(g[j], same), low::var(amount_name(fa.sites[ens[j]].atom->amount))));
+      }
+      add(low::bin(BinOp::Ge, live_perm(p[k]), total), perm_meta(msg, k));
+    }
+  }
+
+  // Assert each user `ensures` at the point where the function returns (0012 item 9), after the permissions it promises (decision 0037 item 10).
+  void postconditions(const SrcLoc& at, std::vector<low::LStmt>& out) {
+    const Function& f = *fn_.f;
+    const Env env = contract_env();
+    atom_returns(at, out, env);
+    if (f.ret.is_ptr()) emit_assert(out, wf_expr(env.result), meta("internal", at, "internal check: the pointer a function returns is well-formed"));
+    for (size_t ci = 0; ci < f.ensures_.size(); ++ci) {
+      const Clause& c = f.ensures_[ci];
       Full scratch;
-      LV v = lower(*c.expr, env, nullptr, {}, scratch);
+      LV v;
+      {
+        CtxSave save(*this);
+        set_ctx(f, CMode::Ret, true, static_cast<int>(ci));
+        v = lower(*c.expr, env, nullptr, {}, scratch);
+      }
       pure_full(scratch, *c.expr, "a postcondition");
-      low::Meta m = meta("postcondition", at, "the postcondition of `" + fn_.f->c_name + "` may not hold");
+      if (has_atom(*c.expr) && always_true(v.e)) continue;  // nothing but atoms: asserted above
+      low::Meta m = meta("postcondition", at, "the postcondition of `" + f.c_name + "` may not hold");
       m.has_note = true;
       m.note_loc = c.loc;
       m.note_text = "this is the postcondition";
@@ -2598,28 +3240,49 @@ class Lowerer {
     low::LMethod m;
     m.name = fn_.method;
     m.comment = "C/C++ function `" + f.c_name + "`";
+    const FnAtoms& fa = atoms_of(f);
     for (size_t k = 0; k < f.params.size(); ++k)
       m.formals.push_back(low::LVar{formal_name(f, static_cast<int>(k)), ltype(f.params[k].type)});
+    for (int k = 0; k < fa.nreq; ++k) m.formals.push_back(low::LVar{amount_name(k), low::LType::Perm});  // the ghost amounts (decision 0037 item 6)
     if (!f.ret.is_void()) m.results.push_back(low::LVar{kResult, ltype(f.ret)});
 
-    // requires: the parameters' type ranges, then the user's (0012 item 1).
+    // requires: the parameters' type ranges, the ghost amounts' bounds (before every clause that names one), WF of the pointers, then the
+    // user's (0012 item 1; decision 0037 items 2 and 6).
     for (size_t k = 0; k < f.params.size(); ++k) {
       if (!f.params[k].type.is_int()) continue;
       m.requires_.push_back(clause_checks(range_check(low::var(formal_name(f, static_cast<int>(k))), *f.params[k].type.int_type),
                                           f.loc, false, f.c_name));
     }
+    for (int k = 0; k < fa.nreq; ++k) m.requires_.push_back(clause_checks(amount_bounds(amount_name(k)), f.loc, false, f.c_name));
+    for (size_t k = 0; k < f.params.size(); ++k) {
+      if (!f.params[k].type.is_ptr()) continue;
+      m.requires_.push_back(clause_checks(wf_expr(low::var(formal_name(f, static_cast<int>(k)))), f.loc, false, f.c_name));
+    }
     const Env cenv = contract_env();
-    for (const Clause& c : f.requires_) {
+    for (size_t ci = 0; ci < f.requires_.size(); ++ci) {
+      const Clause& c = f.requires_[ci];
       Full scratch;
-      LV v = lower(*c.expr, cenv, nullptr, {}, scratch);
+      LV v;
+      {
+        CtxSave save(*this);
+        set_ctx(f, CMode::Method, false, static_cast<int>(ci));
+        v = lower(*c.expr, cenv, nullptr, {}, scratch);
+      }
       pure_full(scratch, *c.expr, "a precondition");
       m.requires_.push_back(clause_checks(v.e, c.loc.known() ? c.loc : f.loc, false, f.c_name));
     }
     if (f.ret.is_int())
       m.ensures_.push_back(clause_checks(range_check(low::var(kResult), *f.ret.int_type), f.loc, true, f.c_name));
-    for (const Clause& c : f.ensures_) {
+    if (f.ret.is_ptr()) m.ensures_.push_back(clause_checks(wf_expr(low::var(kResult)), f.loc, true, f.c_name));
+    for (size_t ci = 0; ci < f.ensures_.size(); ++ci) {
+      const Clause& c = f.ensures_[ci];
       Full scratch;
-      LV v = lower(*c.expr, cenv, nullptr, {}, scratch);
+      LV v;
+      {
+        CtxSave save(*this);
+        set_ctx(f, CMode::Method, true, static_cast<int>(ci));
+        v = lower(*c.expr, cenv, nullptr, {}, scratch);
+      }
       pure_full(scratch, *c.expr, "a postcondition");
       m.ensures_.push_back(clause_checks(v.e, c.loc.known() ? c.loc : f.loc, true, f.c_name));
     }
@@ -2645,9 +3308,21 @@ class Lowerer {
       m.decreases_check = low::Check{"termination.failed", std::move(dm)};
     }
     m.has_body = true;
-    // The parameters' local copies (0012 item 2).
-    for (size_t k = 0; k < f.params.size(); ++k)
-      assign(m.body, var_name(*f.param_var(static_cast<int>(k))), low::var(formal_name(f, static_cast<int>(k))));
+    // The parameters' local copies (0012 item 2); an address-taken parameter is copied into a fresh one-slot block (decision 0037 item 4), whose
+    // scope is the body's.
+    std::vector<const Var*> param_cells;
+    for (size_t k = 0; k < f.params.size(); ++k) {
+      const Var& copy = *f.param_var(static_cast<int>(k));
+      if (copy.address_taken) {
+        param_cells.push_back(&copy);
+        alloc_cell(m.body, copy);
+        write_fields(m.body, var_name(copy), copy.type, low::var(formal_name(f, static_cast<int>(k))));
+      } else {
+        assign(m.body, var_name(copy), low::var(formal_name(f, static_cast<int>(k))));
+      }
+    }
+    if (!param_cells.empty()) fn_.scopes.push_back(Fn::Scope{param_cells, f.end_loc});
+    entry_checks(f, m.body);
     prologue(m.body, &f);
     user_targets_.clear();
     user_names_.clear();
@@ -2658,6 +3333,7 @@ class Lowerer {
       emit_assert(m.body, low::bool_lit(false),
                   meta("noreturn", f.end_loc, "`" + f.c_name + "` is declared not to return, but control may reach its end"));
     } else if (f.ret.is_void()) {
+      if (!param_cells.empty()) scope_exit(m.body, param_cells, f.end_loc);  // fall-through (decision 0037 item 4)
       postconditions(f.end_loc, m.body);
     } else {
       emit_assert(m.body, low::bool_lit(false),
@@ -2684,34 +3360,31 @@ class Lowerer {
     fn_ = Fn{};
     fn_.f = &f;
     fn_.method = method_name(f);
+    const FnAtoms& fa = atoms_of(f);
+    wf_ghosts_.clear();
     low::LMethod m;
     m.name = fn_.method + "__wf";
     m.comment = "well-formedness of the contract of C/C++ function `" + f.c_name + "`";
-    for (size_t k = 0; k < f.params.size(); ++k)
-      m.formals.push_back(low::LVar{formal_name(f, static_cast<int>(k)), ltype(f.params[k].type)});
-    if (!f.ret.is_void()) m.formals.push_back(low::LVar{kResult, ltype(f.ret)});
-    for (size_t k = 0; k < f.params.size(); ++k) {
-      if (!f.params[k].type.is_int()) continue;
-      m.requires_.push_back(clause_checks(range_check(low::var(formal_name(f, static_cast<int>(k))), *f.params[k].type.int_type),
-                                          f.loc, false, f.c_name + " (well-formedness)"));
-    }
-    if (f.ret.is_int())
-      m.requires_.push_back(clause_checks(range_check(low::var(kResult), *f.ret.int_type), f.loc, false, f.c_name + " (well-formedness)"));
     m.has_body = true;
     prologue(m.body, &f);  // the same checks as the function's own method (the driver removes identical reports); a function whose
                            // `requires` is unsatisfiable never reaches its own prologue
     const Env env = contract_env();
     E prior;
-    auto go = [&](const Clause& c) {
+    auto go = [&](const Clause& c, bool ens, int idx) {
       Full full;
-      LV v = lower(*c.expr, env, nullptr, {}, full);
+      LV v;
+      {
+        CtxSave save(*this);
+        set_ctx(f, CMode::Wf, ens, idx);
+        v = lower(*c.expr, env, nullptr, {}, full);
+      }
       pure_full(full, *c.expr, "a contract clause");
       for (Obl& o : full.obls) emit_assert(m.body, low::implies(low::and_(prior, o.guard), o.cond), o.meta);
       prior = low::and_(prior, v.e);
     };
-    for (const Clause& c : f.requires_) go(c);
+    for (size_t k = 0; k < f.requires_.size(); ++k) go(f.requires_[k], false, static_cast<int>(k));
     E requires_only = prior;
-    for (const Clause& c : f.ensures_) go(c);
+    for (size_t k = 0; k < f.ensures_.size(); ++k) go(f.ensures_[k], true, static_cast<int>(k));
     // The measure is evaluated over the entry values: its obligations are checked under the requires (0013 item 7).
     for (const Clause& c : f.decreases_) {
       Full full;
@@ -2725,9 +3398,61 @@ class Lowerer {
       nothing.name = "the contract has nothing that can be undefined";
       m.body.push_back(std::move(nothing));
     }
+    // The formals and what the method assumes: the parameters, the ghost amounts, the result, the ghost values of the reads of the contract.
+    const std::string what = f.c_name + " (well-formedness)";
+    for (size_t k = 0; k < f.params.size(); ++k)
+      m.formals.push_back(low::LVar{formal_name(f, static_cast<int>(k)), ltype(f.params[k].type)});
+    for (int k = 0; k < fa.nreq; ++k) m.formals.push_back(low::LVar{amount_name(k), low::LType::Perm});
+    if (!f.ret.is_void()) m.formals.push_back(low::LVar{kResult, ltype(f.ret)});
+    for (const auto& [key, t] : wf_ghosts_) m.formals.push_back(low::LVar{ghost_name(key.first, key.second), t.is_bool() ? low::LType::Bool : low::LType::Int});
+    for (int k = 0; k < fa.nreq; ++k) m.requires_.push_back(clause_checks(amount_bounds(amount_name(k)), f.loc, false, what));
+    for (size_t k = 0; k < f.params.size(); ++k) {
+      if (f.params[k].type.is_ptr()) m.requires_.push_back(clause_checks(wf_expr(low::var(formal_name(f, static_cast<int>(k)))), f.loc, false, what));
+      if (!f.params[k].type.is_int()) continue;
+      m.requires_.push_back(clause_checks(range_check(low::var(formal_name(f, static_cast<int>(k))), *f.params[k].type.int_type), f.loc, false, what));
+    }
+    if (f.ret.is_int()) m.requires_.push_back(clause_checks(range_check(low::var(kResult), *f.ret.int_type), f.loc, false, what));
+    if (f.ret.is_ptr()) m.requires_.push_back(clause_checks(wf_expr(low::var(kResult)), f.loc, false, what));
+    for (const auto& [key, t] : wf_ghosts_)
+      if (!t.is_bool())
+        m.requires_.push_back(clause_checks(range_check(low::var(ghost_name(key.first, key.second)), *t.int_type), f.loc, false, what));
+    // Facts Silicon derives that the ghost values must not lack (decision 0037 item 7): two places that are one cell have one value in a state,
+    // and a cell a `reads` atom borrows, returned by a `reads` atom, has the value it had.
+    for (auto a = wf_ghosts_.begin(); a != wf_ghosts_.end(); ++a)
+      for (auto b = std::next(a); b != wf_ghosts_.end(); ++b) {
+        if (a->first.second != b->first.second || cell_suffix(a->second) != cell_suffix(b->second)) continue;
+        const E pa = env.formals[static_cast<size_t>(a->first.first)], pb = env.formals[static_cast<size_t>(b->first.first)];
+        m.requires_.push_back(clause_checks(
+            low::implies(low::bin(low::BinOp::Eq, pa, pb),
+                         low::bin(low::BinOp::Eq, low::var(ghost_name(a->first.first, a->first.second)), low::var(ghost_name(b->first.first, b->first.second)))),
+            f.loc, false, what));
+      }
+    for (const auto& [key, t] : wf_ghosts_) {
+      if (!key.second || wf_ghosts_.count({key.first, false}) == 0) continue;
+      E gr, ge;
+      bool have_r = false, have_e = false;
+      for (const AtomSite& s : fa.sites) {
+        if (s.atom->atom != AtomKind::Reads || site_param(s) != key.first) continue;
+        if (!s.in_ensures && !have_r) { gr = site_guard(s, env); have_r = true; }
+        if (s.in_ensures && !have_e) { ge = site_guard(s, env); have_e = true; }
+      }
+      if (!have_r || !have_e) continue;
+      m.requires_.push_back(clause_checks(
+          low::implies(low::and_(gr, ge), low::bin(low::BinOp::Eq, low::var(ghost_name(key.first, true)), low::var(ghost_name(key.first, false)))),
+          f.loc, false, what));
+    }
     out_.methods.push_back(std::move(m));
   }
 
+  // The contract being lowered (decision 0037): the mode, the function whose atoms the sites are, whether it is an `ensures`, whether under `old`,
+  // and how many atoms (of `contract_atoms(*cf_)`) the lowering has passed so far.
+  CMode cmode_ = CMode::None;
+  const Function* cf_ = nullptr;
+  bool cens_ = false;
+  bool cold_ = false;
+  size_t cseen_ = 0;
+  std::map<const Function*, FnAtoms> atoms_;
+  std::map<std::pair<int, bool>, Type> wf_ghosts_;  // the ghost value formals of the `__wf` method being built: (parameter, post-state) -> pointee type
   const Program& prog_;
   LowerOptions opt_;
   low::LProgram out_;

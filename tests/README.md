@@ -27,7 +27,7 @@ class that runs the real driver is added with the driver (M3-3).
 | `edg-smoke/` | The pinned EDG front end parses C++20 and C23 against the system headers | `scripts/cpfe.sh` |
 | `il/` | Golden tests of the IL walker (`--cerastes_walk`): the Gate G1 probes (`g1/`), annotation-free copies of the VeriFast tests (`verifast-plain/`), contrast probes that expose a vacuous pass (`contrast/`) and walker smoke tests | `scripts/cerastes-fe.sh` |
 | `scalar/` | M3: scalar code through `cerastes verify` (`verified` positives, each with a must-fail twin in `scalar/negative/`) | `build/cerastes verify` |
-| `memory/` | M4.5b1a: pointers to address-taken locals inside one function (decision 0032): `verified` positives, each with a must-fail twin in `memory/negative/` that fails for one reason at one line (the twin rule as in `scalar/`: an `error` twin in every mode), and the `rejected` pins of what b1b and b1c lift (each has a `// Pins:` line) | `build/cerastes verify` |
+| `memory/` | M4.5b1a and b1b: pointers to address-taken locals (decision 0032) and pointer parameters, results and contracts (decision 0037: `owns`, `reads`, `live`, `old`, framing, `restrict`, `&param`): `verified` positives, each with a must-fail twin in `memory/negative/` that fails for one reason at one line (the twin rule as in `scalar/`: an `error` twin in every mode), and the `rejected` pins of what b1c and later sessions lift (each has a `// Pins:` line) | `build/cerastes verify` |
 | `differential/verifast/` | Nothing yet: unmodified reference copies of VeriFast's template tests, with no `expect:` headers. Skipped (`.harness-skip`) | none |
 | `../doc/modules/ROOT/examples/` | The code examples of the user documentation, which are ordinary tests (not under `tests/`, but run by default with it) | by the example's `expect:` kind |
 
@@ -390,8 +390,9 @@ and the harness self-test compares this table with the decision record.
 | `noreturn` | a function declared `[[noreturn]]` or `_Noreturn` may return (decision 0015) | the reachable `return`, or the closing brace |
 | `uninitialized` | a local declared without an initializer may be read before it is given a value (decision 0019); an address-taken local's cell is read before it is written (decision 0032) | the read |
 | `null-dereference` | `*p` may be applied to a null pointer (decision 0032 item 6) | the `*` |
-| `permission` | `*p` reads or writes an object the function no longer owns, because the object it points to may have ended (a block's local read after the block); with the contracts of M4.5b1b also an object it never owned (decision 0032 item 6) | the `*` |
+| `permission` | `*p` reads or writes an object the function no longer owns, because the object it points to may have ended (a block's local read after the block) or because a callee kept it (decision 0032 item 6, 0037 item 11); a call needs a permission the caller does not hold, a `return` does not give back what its `ensures` promises, a contract clause reads `*p` without an earlier `owns`/`reads` of it (decision 0037 items 7, 8, 10) | the `*`, the call, the `return`, the contract clause |
 | `lifetime` | a pointer is used (compared, tested, copied) after the object it points to may have ended; at a scope exit, the address of the local may still be in use (decision 0032 item 6) | the use of the pointer; the scope's closing brace or `return` |
+| `pointer-comparison` | `==`/`!=` of pointers that may point into different objects, one of them one past its end (decision 0037 item 12; `owns`/`reads` of both exclude it, `live` alone does not) | the operator, or the contract clause |
 
 ## Every back-end diagnostic has a test
 
@@ -744,9 +745,9 @@ only those: `python3 scripts/run_tests.py --count-error-twins` prints the number
 of positive tests of `tests/scalar/` with at least one `error` twin (a positive
 test with `twin-exempt:` is not counted).
 
-The `rejected` tests of `tests/memory/negative/` that pin what a later session lifts (decision 0032
-item 10: pointer parameters, loops over cells, ...) carry a `// Pins:` line that names the item and the
-session that re-expects the test (`re-expected by b1b` or `by b1c`); they are the only tests of the area that
+The `rejected` tests of `tests/memory/negative/` that pin what a later session lifts (decisions 0032
+item 10 and 0037 item 15: loops over cells, owning results, ...) carry a `// Pins:` line that names the item and the
+session that re-expects the test (`re-expected by b1c`, `by M4.5d2`, ...); they are the only tests of the area that
 a later session may retire or re-expect (owner, 2026-10-28), and each is the `twin:` of the positive test
 whose rule the rejected construct would extend.
 
