@@ -344,6 +344,11 @@ include::example$annotations/loops.cpp[tag=for]
 The invariant is written before the loop, and nowhere else: not on the loop
 body and not after it.
 
+An invariant may read objects in memory and compare pointers
+(xref:memory.adoc#loops[Memory and ownership]): the loop holds every object in
+memory the function holds, and the invariant states their values. `owns`,
+`reads` and `live` are not accepted in an invariant yet.
+
 == Termination measures: decreases
 
 `decreases(e1, ..., en)` says why a loop or a recursion ends. It has one or more
@@ -497,7 +502,8 @@ declares the C spellings `cerastes_owns`, `cerastes_reads`, `cerastes_live` and
 `owns`, `reads` and `live` name a pointer parameter, as `*p` or `p`, and may
 appear in a contract as a conjunct, after `p == NULL ||`, or as an arm of `?:`
 whose condition does not read memory. `cerastes verify` does not accept
-`owns_range` and `forall` yet.
+`owns_range` and `forall` yet, nor `owns`, `reads` and `live` in a loop invariant
+or a measure.
 
 [source,cpp]
 ----

@@ -73,6 +73,12 @@ status 1) on:
   before it (a clause that reads the amount before its bounds is not well-formed for Silicon, and an amount without
   the bounds could be `write` or `none`); `wildcard` (an amount Silicon chooses, which is an unchecked assumption) is
   refused anywhere.  The case split `if (<condition>) { }` is plain Viper and needs no rule;
+* the ghost amounts of loops (decision 0038 item 9, amending 0037 item 14): a `Perm` **local** (`var k: Perm`; the
+  snapshots `kv := perm(x.v_int)` that a loop's invariant uses as the amount of an `acc`) is assigned only `perm(...)`,
+  `none`, `write` or a conditional `c ? a : b` of those (never `wildcard`, never arithmetic, never another variable:
+  the snapshot is what the method holds), and is never assigned inside a loop whose invariant mentions it (a
+  havocked amount could exceed `write` and make the body vacuous); `acc(x.f, k)` with such an amount is allowed in
+  an invariant, `perm(...)` in an invariant is refused (Viper refuses it; the snapshot is the way);
 * an empty input set, and a MANIFEST that names a file which is not there.  The
   manifest is the set of files scripts/run_tests.py expects: its first line is
   `# run-id: <id>` (printed by the run), then one file per line.  Fewer files
@@ -676,6 +682,192 @@ def lint_ghost_amounts(src: Source, decls: list[Decl], add: Callable[[int, str],
                                    "needs the bounds first, decision 0037 item 6)")
 
 
+# The ghost amounts of loops (decision 0038 item 9): snapshots of `perm(...)` in `Perm` locals, used as amounts in invariants.
+PERM_LOCAL_RE = re.compile(r"(?<![\w$'.])var\s+(?P<names>[A-Za-z_$][\w$']*(?:\s*,\s*[A-Za-z_$][\w$']*)*)\s*:\s*Perm\b"
+                           r"(?P<rest>.*)$")
+PERM_CALL_RE = re.compile(r"(?<![\w$'.])perm\s*\(")
+
+
+def perm_local_names(src: Source, d: Decl) -> set[str]:
+    """The `Perm` locals of a method with a body: its `var <name>: Perm` lines after the opening brace (the formals and
+    the results of the header are not locals)."""
+    names: set[str] = set()
+    if not d.has_body:
+        return names
+    for n in range(d.body_line, d.end_line + 1):
+        if m := PERM_LOCAL_RE.search(src.code[n - 1]):
+            names |= {x.strip() for x in m.group("names").split(",")}
+    return names
+
+
+def _statement_rhs(code: str, start: int) -> str:
+    """The text of an assignment's right-hand side that starts at `start`: up to a top-level `;` or `}` or the line's end."""
+    depth = 0
+    for i in range(start, len(code)):
+        ch = code[i]
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+        elif depth == 0 and ch in ";}":
+            return code[start:i].strip()
+    return code[start:].strip()
+
+
+def _strip_outer_parens(text: str) -> str:
+    text = text.strip()
+    while text.startswith("(") and text.endswith(")"):
+        depth = 0
+        for i, ch in enumerate(text):
+            depth += ch == "("
+            depth -= ch == ")"
+            if depth == 0 and i < len(text) - 1:
+                return text
+        text = text[1:-1].strip()
+    return text
+
+
+def perm_value_ok(text: str) -> bool:
+    """Whether `text` is `perm(...)`, `none`, `write` or a conditional `c ? a : b` of those (parentheses anywhere)."""
+    text = _strip_outer_parens(text)
+    if text in ("none", "write"):
+        return True
+    m = PERM_CALL_RE.match(text)
+    if m:
+        depth = 0
+        for i in range(m.end() - 1, len(text)):
+            depth += text[i] == "("
+            depth -= text[i] == ")"
+            if depth == 0:
+                return i == len(text) - 1
+        return False
+    depth, q = 0, -1
+    for i, ch in enumerate(text):
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+        elif ch == "?" and depth == 0:
+            q = i
+            break
+    if q < 0:
+        return False
+    depth, nested, colon = 0, 0, -1
+    for i in range(q + 1, len(text)):
+        ch = text[i]
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+        elif depth == 0 and ch == "?":
+            nested += 1
+        elif depth == 0 and ch == ":":
+            if nested == 0:
+                colon = i
+                break
+            nested -= 1
+    if colon < 0:
+        return False
+    return perm_value_ok(text[q + 1:colon]) and perm_value_ok(text[colon + 1:])
+
+
+def while_loops(src: Source, d: Decl):
+    """[(line of `while`, the tokens of its `invariant` clauses, the tokens of its body)] of a method with a body; a token is
+    (text, line).  The body is between the braces that open it and the matching `}` (a quantifier's trigger set `:: { f(x) }`
+    is not a body)."""
+    tokens: list[tuple[str, int]] = []
+    for lineno in range(d.line, d.end_line + 1):
+        tokens += [(m.group(), lineno) for m in TOKEN_RE.finditer(src.code[lineno - 1])]
+    out = []
+    n = len(tokens)
+    for k, (text, lineno) in enumerate(tokens):
+        if text != "while" or (k and tokens[k - 1][0] in ("::", "'")):
+            continue
+        i = k + 1
+        if i < n and tokens[i][0] == "(":
+            depth = 0
+            while i < n:
+                depth += tokens[i][0] == "("
+                depth -= tokens[i][0] == ")"
+                i += 1
+                if depth == 0:
+                    break
+        inv: list[tuple[str, int]] = []
+        clause = ""
+        trigger_end = -2
+        while i < n:
+            t = tokens[i][0]
+            prev = tokens[i - 1][0] if i else ""
+            if t == "{":
+                if prev == "::" or i - 1 == trigger_end:
+                    level = 0
+                    while i < n:
+                        level += tokens[i][0] == "{"
+                        level -= tokens[i][0] == "}"
+                        if level == 0:
+                            break
+                        if clause == "invariant":
+                            inv.append(tokens[i])
+                        i += 1
+                    trigger_end = i
+                    i += 1
+                    continue
+                break
+            if t in ("invariant", "decreases"):
+                clause = t
+            elif clause == "invariant":
+                inv.append(tokens[i])
+            i += 1
+        body: list[tuple[str, int]] = []
+        if i < n and tokens[i][0] == "{":
+            level = 0
+            j = i
+            while j < n:
+                level += tokens[j][0] == "{"
+                level -= tokens[j][0] == "}"
+                body.append(tokens[j])
+                j += 1
+                if level == 0:
+                    break
+        out.append((lineno, inv, body))
+    return out
+
+
+def lint_perm_locals(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    """Decision 0038 item 9: the amounts of a loop's invariant are `Perm` locals that snapshot what the method holds.  A
+    local is assigned only `perm(...)`, `none`, `write` or a conditional of those (an assignment of anything else, `wildcard`
+    included, could give the invariant an amount that the method does not hold or above `write`); it is never assigned inside
+    a loop whose invariant mentions it (the loop head havocs what the body assigns, so the amount could exceed `write`
+    and make the body vacuous); and `perm(...)` is not written in an invariant (Viper refuses it: the snapshot is the way)."""
+    for d in decls:
+        if d.kind != "method" or not d.has_body:
+            continue
+        names = perm_local_names(src, d)
+        for n in range(d.body_line, d.end_line + 1):
+            code = src.code[n - 1]
+            if (m := PERM_LOCAL_RE.search(code)) and ":=" in m.group("rest"):
+                rhs = _statement_rhs(m.group("rest"), m.group("rest").index(":=") + 2)
+                if not perm_value_ok(rhs) and not WILDCARD_RE.search(rhs):  # wildcard: reported by its own rule
+                    add(n, f"`Perm` local `{m.group('names')}` is initialized with `{rhs}`: a snapshot is `perm(...)`, `none`, "
+                           "`write` or a conditional of those (decision 0038 item 9)")
+            for name in sorted(names):
+                for a in re.finditer(r"(?<![\w$'.])" + re.escape(name) + r"\s*:=", code):
+                    rhs = _statement_rhs(code, a.end())
+                    if not perm_value_ok(rhs) and not WILDCARD_RE.search(rhs):  # wildcard: reported by its own rule
+                        add(n, f"`Perm` local `{name}` is assigned `{rhs}`: a snapshot is `perm(...)`, `none`, `write` or a "
+                               "conditional of those, never arithmetic or another variable (decision 0038 item 9; `wildcard` has its own rule)")
+        for line, inv, body in while_loops(src, d):
+            used = {t for t, _ln in inv} & names
+            for k, (t, ln) in enumerate(inv):
+                if t == "perm" and k + 1 < len(inv) and inv[k + 1][0] == "(" and (k == 0 or inv[k - 1][0] != "."):
+                    add(ln, "`perm(...)` in a loop invariant: Viper refuses it (decision 0038 item 9); the invariant uses a "
+                            "`Perm` local snapshotted before the loop")
+            for k, (t, ln) in enumerate(body):
+                if t in used and k + 1 < len(body) and body[k + 1][0] == ":=" and (k == 0 or body[k - 1][0] != "."):
+                    add(ln, f"`Perm` local `{t}` is assigned inside the loop of line {line}, whose invariant uses it as an "
+                            "amount: the loop head havocs what the body assigns (decision 0038 item 9)")
+
+
 def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
              map_name: str | None = None) -> list[str]:
     """Problems of one Viper file with its position map (None: the map is missing)."""
@@ -760,6 +952,7 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     lint_remainders(src, decls, add)
     lint_allocations(src, decls, add)
     lint_ghost_amounts(src, decls, add)
+    lint_perm_locals(src, decls, add)
 
     if map_text is None:
         problems.append(f"{name}: no position map ({map_name or name + MAP_SUFFIX})")

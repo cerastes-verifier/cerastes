@@ -8,8 +8,8 @@ even when nothing is read through it, as C and pass:[C++] say.
 
 This version covers pointers to integers, `bool` and enumerations: in local
 variables, as parameters and as results, with contracts that say which objects
-a function may read or write (<<contracts>>). <<not-yet>> lists what is still
-rejected.
+a function may read or write (<<contracts>>), in loops (<<loops>>) and across
+jumps (<<leaving>>). <<not-yet>> lists what is still rejected.
 
 == Objects whose address is taken
 
@@ -163,6 +163,78 @@ A few more rules:
   the same object: four take a few seconds, five tens of seconds, and six or
   more may reach the time limit (an error, never a wrong answer).
 
+[#loops]
+== Loops
+
+A loop may use pointers and objects in memory like any other code. Its body
+gets, without any annotation, every object in memory the function holds when
+the loop starts: the local variables whose address is taken (in every block
+that is open there, including those declared later in it), the parameters whose
+address is taken, and the object each pointer parameter points to, when the
+function never assigns that parameter. As for a local variable that the loop
+assigns, the loop's invariant states what the loop does to their values:
+
+[source,c]
+----
+include::example$memory/loop_through_pointer.c[tag=source]
+----
+
+What the invariant does not state is known in two cases only:
+
+* An object keeps its value across the loop when no write in the loop can reach
+  it: no assignment to it by name, no write through a pointer to its type, and
+  no call of a function whose contract owns an object of its type. A write
+  through a pointer counts against every object of that type, since cerastes does
+  not follow where each pointer points:
++
+[source,c]
+----
+include::example$memory/loop_havoc.c[tag=source]
+----
++
+cerastes reports the `ensures` of `havoc`: the write through `pl` may have
+changed `keep`. Stating the value in the invariant is enough:
++
+[source,c]
+----
+include::example$memory/loop_havoc_fixed.c[tag=source]
+----
+* An object that held a value when the loop started still holds one. An object
+  that the loop gives its first value is known to hold one after the loop only
+  when the invariant states its value (`i == 0 || x == i`); an invariant that
+  reads an object that holds no value yet is reported as
+  xref:error-messages.adoc#_uninitialized[`uninitialized`].
+
+Every iteration must end holding what the loop started with: a function called
+in the loop that keeps one of these objects is reported as
+xref:error-messages.adoc#_permission[`permission`] at the closing brace of the
+loop's body. An invariant or a measure may read objects in memory
+(`CERASTES_INVARIANT(x == i)`, `CERASTES_DECREASES(*p)`), compare pointers and
+take addresses; it reads only what the loop holds, and an invariant that reads
+an object the loop does not hold is reported as
+xref:error-messages.adoc#_permission[`permission`]. A pointer that the loop
+assigns needs an invariant saying where it points (`p == &x || p == &y`). The
+address of a variable in an annotation (`p == &x`) is accepted only when the
+code takes that address too.
+
+A pointer parameter that the function assigns does not take its object into
+loops yet: using that object inside a loop, or returning from inside a loop when
+the `ensures` gives it back, is reported as
+xref:error-messages.adoc#_permission[`permission`].
+
+[#leaving]
+== Leaving a block
+
+`break`, `continue`, `goto` and `return` end the lifetime of every object in
+memory whose block they leave, as the closing brace does. A function that kept
+such an object is reported at the jump as
+xref:error-messages.adoc#_lifetime[`lifetime`]:
+
+[source,c]
+----
+include::example$memory/leave_block.c[tag=source]
+----
+
 [#not-yet]
 == What is not supported yet
 
@@ -175,13 +247,12 @@ These are rejected with a diagnostic, never approximated
 * a call of a function whose contract owns or reads an object in the same
   expression as another use of an object in memory (`x + f(&x)`), or two such
   calls in one expression;
+* `owns`, `reads` and `live` in a loop invariant, and a function's `decreases`
+  that reads an object in memory;
 * `restrict` except on a C parameter whose contract owns its object;
 * `void *`, and pointers to structures, unions and functions;
 * conversions between pointer types other than adding `const`, comparisons of
   order and arithmetic on pointers;
-* a loop that uses a pointer or an object whose address is taken;
-* a `return` inside a loop while an object whose address is taken is in scope,
-  and a `goto`, `break` or `continue` that leaves the block of such an object;
 * a write to an object whose address is taken anywhere but as a statement of
   its own (`x = 1;`, `*p += 2;`, `pass:[(*p)++;]` are fine; `pass:[y = x++;]` is not).
 

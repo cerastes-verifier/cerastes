@@ -162,3 +162,5 @@ decrease from each iteration to the next (0013).
 *2026-10-23, amended by 0022 (M4.4a): item 6 — `case -1` over an `unsigned int` scrutinee (C) is a `conversion` error, not `4294967295`.*
 
 *2026-10-26, amended by 0025 (M4.4c): item 2 — a `for` step may also be an `if` whose two arms are steps (a `void` `?:` in the step, 0025 item 3).*
+
+*2026-10-29, amended by 0038 (M4.5b1c1): item 4 — a `break`, `continue` or `goto` that leaves a block holding cells first writes those cells' scope exits (0032 item 8), innermost first, at the jump; a loop that touches memory carries the automatic invariant of 0038 item 3, and its condition, when it touches memory, uses the top-test shape (0038 item 2).*

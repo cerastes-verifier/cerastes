@@ -487,71 +487,7 @@ void define_memory_rejections() {
     k.done(f);
   });
 
-  // ---- item 10: loops, returns in loops, jumps out of a cell's block, a block without its closing brace ----
-  // A function whose body declares the cell `x` and a pointer `p` to it and an int `i`, then `rest`.
-  auto cell_fn = [=](Kit& k, const std::function<std::vector<const Stmt*>(Kit&, Function*, Var*, Var*, Var*)>& rest) {
-    Function* f = k.fn("f", k.i32, {{"n", k.i32}});
-    Var* x = k.cell(f, "x", k.i32);
-    Var* p = k.local(f, "p", PT(k));
-    Var* i = k.local(f, "i", k.i32);
-    std::vector<const Stmt*> body = {k.decl(x, N(k, "0")), k.decl(p, k.addr(x)), k.decl(i, k.pv(f, 0))};
-    for (const Stmt* s : rest(k, f, x, p, i)) body.push_back(s);
-    f->body = k.blkc(body);
-    k.done(f);
-  };
-  auto count_down = [=](Kit& k, Var* i, const Stmt* body) {
-    return k.whl(k.gt(k.v(i), N(k, "0")), {}, {k.cl(k.v(i))}, body);
-  };
-  auto step = [=](Kit& k, Var* i) { return k.asg(i, k.sub(k.v(i), N(k, "1"))); };
-  rc("mem_rej_loop_with_a_pointer_node", "a loop that uses a pointer", [=](Kit& k) {
-    cell_fn(k, [=](Kit& k, Function*, Var*, Var* p, Var* i) {
-      return std::vector<const Stmt*>{count_down(k, i, k.blk({k.iff(k.ne(k.pn(p), k.nul(PT(k))), k.blk({step(k, i)}))})), k.ret(N(k, "0"))};
-    });
-  });
-  rc("mem_rej_loop_with_a_cell", "a loop that uses a pointer", [=](Kit& k) {
-    cell_fn(k, [=](Kit& k, Function*, Var* x, Var*, Var* i) {
-      return std::vector<const Stmt*>{count_down(k, i, k.blk({k.asg(x, N(k, "1")), step(k, i)})), k.ret(N(k, "0"))};
-    });
-  });
-  rc("mem_rej_loop_with_a_dereference", "a loop that uses a pointer", [=](Kit& k) {
-    cell_fn(k, [=](Kit& k, Function*, Var*, Var* p, Var* i) {
-      return std::vector<const Stmt*>{count_down(k, i, k.blk({k.asg(i, k.sub(k.v(i), k.deref(k.pn(p))))})), k.ret(N(k, "0"))};
-    });
-  });
-  rc("mem_rej_loop_with_an_address", "a loop that uses a pointer", [=](Kit& k) {
-    cell_fn(k, [=](Kit& k, Function* f, Var* x, Var*, Var* i) {
-      Var* q = k.local(f, "q", PT(k));
-      return std::vector<const Stmt*>{k.decl(q, k.nul(PT(k))), count_down(k, i, k.blk({k.asg(q, k.addr(x)), step(k, i)})), k.ret(N(k, "0"))};
-    });
-  });
-  rc("mem_rej_return_in_a_loop_with_a_live_cell", "a `return` inside a loop", [=](Kit& k) {
-    cell_fn(k, [=](Kit& k, Function*, Var*, Var*, Var* i) {
-      return std::vector<const Stmt*>{count_down(k, i, k.blk({k.iff(k.eq(k.v(i), N(k, "50")), k.blk({k.ret(N(k, "1"))})), step(k, i)})),
-                                      k.ret(N(k, "0"))};
-    });
-  });
-  rc("mem_rej_goto_out_of_a_cell_block", "that leaves the scope of a variable whose address is taken", [=](Kit& k) {
-    Function* f = k.fn("f", k.i32, {{"a", k.i32}});
-    Var* total = k.local(f, "total", k.i32);
-    Var* x = k.cell(f, "x", k.i32);
-    Var* p = k.local(f, "p", PT(k));
-    const int id = k.jid();
-    const Stmt* inner = k.blkc({k.decl(x, k.pv(f, 0)), k.decl(p, k.addr(x)),
-                                k.iff(k.gt(k.deref(k.pn(p)), N(k, "5")), k.blk({k.go(id)})), k.asg(total, k.v(x))});
-    f->body = k.blk({k.decl(total, N(k, "0")), inner, k.lab(id), k.ret(k.v(total))});
-    k.done(f);
-  });
-  rc("mem_rej_break_out_of_a_switch_with_a_cell", "that leaves the scope of a variable whose address is taken", [=](Kit& k) {
-    Function* f = k.fn("f", k.i32, {{"code", k.i32}});
-    Var* total = k.local(f, "total", k.i32);
-    Var* x = k.cell(f, "x", k.i32);
-    Var* p = k.local(f, "p", PT(k));
-    const int id = k.jid();
-    const Stmt* body = k.blkc({k.decl(x, nullptr), k.decl(p, nullptr), k.cs(N(k, "0")), k.asg(p, k.addr(x)), k.store(k.pn(p), N(k, "5")),
-                               k.asg(total, k.v(x)), k.brk(id), k.dflt(), k.asg(total, N(k, "1"))});
-    f->body = k.blk({k.decl(total, N(k, "0")), k.sw(k.pv(f, 0), body, id), k.ret(k.v(total))});
-    k.done(f);
-  });
+  // ---- item 10: a block without its closing brace (the loops and the jumps of item 10 are lowering cases since decision 0038: selftest_cases9.inc) ----
   rc("mem_rej_cell_block_without_a_closing_brace", "has no closing-brace position", [=](Kit& k) {
     Function* f = k.fn("f", k.vd);
     Var* x = k.cell(f, "x", k.i32);

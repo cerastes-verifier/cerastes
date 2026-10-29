@@ -288,3 +288,5 @@ object would be indeterminate at the target. With this record that object is ord
 *2026-10-27, amended by 0028 and 0029 (M4.5a, effective from M4.5b1/M4.5b2): item 13 — the flag follows the cell as a ghost field beside its value (0028 item 14); item 2's stricter mode is `--strict-init` with P4222's markers in the `cerastes::` spelling (0029 item 2).*
 
 *2026-10-28, amended by 0032 (M4.5b1a): item 13 — done for address-taken locals: the flag is the field `d_<t>` of the cell, false from the allocation at block entry until a write; a `goto` past the declaration finds it false (0032 item 4).*
+
+*2026-10-29, amended by 0038 (M4.5b1c1): item 4 — for a cell (an address-taken local or parameter copy) the snapshot device moves to the field: `ds := false; if (kd > none) { ds := x.d_T }` before a loop that touches memory, and the invariant `kd > none && ds ==> x.d_T`; the flag is only known to stay true, so after a loop that first initializes an outer cell a read is `uninitialized` unless the invariant states the value.*

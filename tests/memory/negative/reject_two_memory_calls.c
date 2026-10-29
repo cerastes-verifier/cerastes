@@ -1,7 +1,7 @@
 // expect: rejected cerastes-unsupported_expression @ L20
 // mode: c23, c++20
 // twin: tests/memory/owns_inc.c
-// Pins: 0037 items 8 and 15: two calls with permission atoms in one full expression are rejected (re-expected by b1c)
+// Pins: 0037 items 8 and 15: two calls with permission atoms in one full expression are rejected (re-expected by M4.5b1c2)
 #include <cerastes.h>
 #include <stddef.h>
 
