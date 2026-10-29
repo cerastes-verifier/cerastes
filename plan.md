@@ -7,8 +7,9 @@ One Claude Code session per milestone, or per sub-milestone when a milestone doe
 `internal/status.md`, `internal/handoff.md` and the decision records, and ends by leaving the repo green and
 `internal/status.md` updated so the next session can start cold.
 
-This file was trimmed to what is live at the end of M4.4c (owner, 2026-10-26): the plans of the finished milestones,
-the superseded text and the appendices are in `git show 1fcc43b:plan.md`. The milestones were renumbered on 2026-10-20
+This file was trimmed to what is live at the end of M4.4c (owner, 2026-10-26), and is reconciled with the handoff at
+each session's start (the last: M4.5b1c2, 2026-10-29): the plans of the finished milestones, the superseded text and the
+appendices are in `git show 1fcc43b:plan.md`. The milestones were renumbered on 2026-10-20
 (the rest of C became M4; generic templates M5, concepts M6, C++ memory M7, inventory M8, evaluation M9); history
 entries keep the numbers they were written with.
 
@@ -150,13 +151,13 @@ history of `internal/status.md`).
 
 **M4.5 Pointers** (one 4.x for pointers, owner, 2026-10-20; the C parts of the former memory-model milestone; split
 further in M4.5a, owner, 2026-10-27: "this can be expanded if you see fit"). M4.5a designed it (records 0028 memory
-model, 0029 ownership annotations and C spec functions, 0030 vlibc); `internal/handoff.md` §4.4 has each session's
+model, 0029 ownership annotations and C spec functions, 0030 vlibc); `internal/handoff.md` §4.2 has each session's
 plan and the VeriFast ports it takes. M4.5b1c is three sessions, and owning results move to M4.5d2 (owner, 2026-10-29,
 M4.5b1c planning: `owns_block` needs the heap token and a whole-block permission, which nothing creates before `malloc`).
 
 | Session | Scope | Needs |
 |---|---|---|
-| **M4.5b1c2 Sequencing and placement** | writes to cells inside expressions; sequencing on objects (`unsequenced`, 0028 item 12); 0028 item 13's call placement (lifts 0037 item 8); `return &local;` rejected like the compilers (handoff question 65); `c ? owns(*p) : reads(*p)` path-precise (question 67); a function's `decreases(*p)` (from b1c1, record 0038 item 8) | M4.5b1c1 (done) |
+| **M4.5b1c2 Sequencing and placement** (in progress; plan `.claude/plans/m4-5b1c2-sequencing.md`) | writes to cells inside expressions; sequencing on objects (`unsequenced`, 0028 item 12); 0028 item 13's call placement (lifts 0037 item 8); `return &local;` rejected like the compilers (handoff question 65); `c ? owns(*p) : reads(*p)` path-precise (question 67); a function's `decreases(*p)` (from b1c1, record 0038 item 8) | M4.5b1c1 (done) |
 | **M4.5b1c3 `T**`, owning parameters, `*result`** | `T**`; `[[cerastes::owning]]` on parameters (target `p`); `*result` as a value, framed by `result == p`; `owns`/`reads`/`live` in `CERASTES_INVARIANT` (from b1c1, record 0038 item 5); `swap.c` and the aliasing trap; `address_of_local.c`'s `int**` functions; the Memory and ownership page completed | M4.5b1c2 |
 | **M4.5b2 Globals, statics, initialization through pointers** | mutable globals and `static` locals as blocks with frames; `main` owns the globals; 0025 item 2's placement revisited; 0019's flag per cell; `[[cerastes::uninit]]`, `ref_to_uninit`, `must_init` and `--strict-init` | M4.5b1c3 |
 | **M4.5c Structs** | field cells, `.` and `->`, struct values (copies, initializers, by-value parameters and results), nested structs, pointers to fields, `owns(*s)`, non-recursive owning fields | M4.5b1c3 |
@@ -197,10 +198,10 @@ M4.4b2 skips a static assertion whose condition calls a function (a `constexpr` 
 a system header (old handoff §11 question 39: "Skip it for now, but we need to address type traits before we get into
 concepts. Add before M5."). This session decides how such conditions are encoded or checked, so that M5's integral
 `T` and M6's requirement contracts rest on a known reading of type traits. One session of ≤ 4 h, after M4.8 and before
-M5a; its scope is planned at its own planning (handoff §4.6).
+M5a; its scope is planned at its own planning (handoff §4.4).
 
 Also before M5 (owner, 2026-10-27, handoff §8 question 11): `mutate.py`'s classifier learns to read local declarations
-(typed locals), with its own audit, in M5.0 or a session of its own (handoff §4.6).
+(typed locals), with its own audit, in M5.0 or a session of its own (handoff §4.4).
 
 ---
 
@@ -330,8 +331,8 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
   - **The warning sweep (was M4.4e;** owner, 2026-10-27, M4.5a planning: "warnings will impact much more than just
     what we have now"). Every default and `-Wall` warning of clang 21 and GCC 16 that can fire on the language
     cerastes accepts, measured in both modes and rejected like the compilers (one rule per family) or listed; record
-    0025 item 6's "still accepted" shapes and handoff §3's M4.4c notes first. Its record takes the next free number
-    when it runs (0027 went to M4.5a).
+    0025 item 6's "still accepted" shapes and handoff §3's M4.4c notes first; its old plan is
+    `git show 9017105:internal/handoff.md` §4.2. Its record takes the next free number when it runs.
 - **User docs:** publish a "Language support" page in `doc/` from the inventory. It shows what is supported and unsupported, by standard. The difficulty assessment stays in the planning file.
 
 **Acceptance:** complete records of features that are and are not implemented with annotated difficulty sorted by language standard.

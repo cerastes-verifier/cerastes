@@ -1,54 +1,41 @@
-# Handoff after M4.5b1c1 — loops and jumps over memory (record 0038) (2026-10-29); M4.5b1b before it (record 0037)
+# Handoff during M4.5b1c2 — sequencing and placement over memory (record 0039); M4.5b1c1 before it (record 0038)
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
-rediscover. It is trimmed to what is live (owner, 2026-10-26; again at M4.5b1b and M4.5b1c1 planning): the text before
-M4.5b1c1's trim, with M4.5b1b's state, its acceptance and questions 64–67, is `git show 8003dca:internal/handoff.md`;
-before that `git show bdc6bd0:internal/handoff.md` (S5's and M4.5b1a's plans, questions 49–63); up to M4.4c
-`git show 1fcc43b:internal/handoff.md` (M4.4c's and S4's own sections: `git show fce46de:internal/handoff.md`; M4.4d's:
-`git show 9017105:internal/handoff.md`; S5's §1–§2 and §7: `git show 794e960:internal/handoff.md`); earlier handoffs are
-`git show 60d3fbe:internal/handoff.md` (M4.1) and `git show a4da52c:internal/handoff.md` (M3 close-out). Session plans
-approved from M4.5b1a on are in `.claude/plans/`.
+rediscover, and holds only what is live (owner, 2026-10-26; consolidated again at M4.5b1c2's start, 2026-10-29): the
+text before this consolidation is `git show eab4058:internal/handoff.md`, whose header names every earlier version.
+Session plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session consumes move into its plan.
 
 ## 1. State
 
-- **M4.5b1a** (records 0032–0036) is merged into `main` (PR #15, `0293112`).
-- **M4.5b1b** (record 0037) is merged into the local `main` (`9782bd4`), not yet pushed (`origin/main` is `fca0cbc`).
-- **M4.5b1c1** is done on branch `m4.5b1c1-loops` (from `9782bd4`; result in `internal/status.md`; plan
-  `.claude/plans/m4-5b1c1-loops.md`): record 0038. Loops and jumps over memory; written atoms in invariants cut to
-  b1c3, a function's `decreases(*p)` to b1c2 (§3, §4.4).
-- **Audits:** round 1 on record 0038 (five blocking, eight should-fix; the blocking items and the should-fix items of
-  the parts kept taken), round 2 on the code (one blocking, two should-fix; taken), one re-audit (one blocking, fixed
-  and checked by the tests and the auditor's repros, not re-audited: the cap). What was not taken is in §3.
+- **On `origin/main`** (`234ede3`): M4.5b1a (PR #15), M4.5b1b (PR #17) and the Python pins (PR #18).
+- **M4.5b1c1** (record 0038) is merged into the local `main` (`eab4058`), not yet pushed; its branch
+  `m4.5b1c1-loops` is pushed.
+- **M4.5b1c2** is in progress on branch `m4.5b1c2-sequencing` (from `eab4058`; plan
+  `.claude/plans/m4-5b1c2-sequencing.md`): record 0039.
 
-The EDG pin is unchanged (`f0ed5525af`).
+The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 23 commits behind upstream `main` (§4.1).
 
-## 2. Owner steps after M4.5b1c1, in this order
+## 2. Owner steps
 
-1. **`main`**: push it (b1b's merge, `9782bd4`).
-2. **The main checkout** has your answers to questions 65–67 uncommitted in `internal/handoff.md`; they are recorded on
-   this branch. Discard them there (`git checkout -- internal/handoff.md`) before merging.
-3. **This branch**: push it and open its PR (`git push origin m4.5b1c1-loops`); both CI jobs run the PR tier (no
-   Linux run in the session: CI covers it, owner).
-4. Then M4.5b1c2 (§4.4).
+1. **`main`**: push it (b1c1's merge, `eab4058`).
+2. After M4.5b1c2: push its branch and open its PR; both CI jobs run the PR tier.
 
 ## 3. Open audit notes (condensed; the full notes are in the commit named above)
 
 **From M4.5b1c1** (audit round 1 on record 0038, round 2 on the code, one re-audit whose blocking item was fixed and
 checked by the tests and the auditor's repros, not re-audited: the cap; items not taken and open points):
-- *Cut parts and what they need* (record 0038 items 5 and 8, from S28 and the audits): **b1c3's written atoms** in
+- *Cut part and what it needs* (record 0038 item 5, from S28 and the audits; b1c2's function measures moved into its
+  plan): **b1c3's written atoms** in
   `CERASTES_INVARIANT`: `NOTAUTO(q)` by `Ref` for value and flag and by liveness cell for liveness (round 1 S1), the
   atom's own flag and range reads chain-guarded (S2), case splits of `q` against every automatic place at the loop head
   (S28 P8), amounts and checks as a call's and a return's with `WF` and bounds as `permission` rows at the back edge
   (S4), separation of two written atoms, and P8's tie (`q0 := q`, `(q0 == r) == (q == r)`) so a reassigned `q` gives its
-  permission back after the loop. **b1c2's function measures** that read memory: no `old` in the emitted `decreases`
-  (S28 P6: Silicon reads the caller's measure in its entry heap already), `f__wf`'s framing as the only well-formedness
-  check, non-recursive functions included (Silicon checks none), the method's `decreases` reads chain-guarded and 0021
-  item 4's explicit check after the call's permission checks and case splits (round 1 B5).
+  permission back after the loop.
 - *Pinned false alarms* (record 0038, Consequences): a parameter the function reassigns keeps its place out of every
   loop, so `loop_reassigned_param_access.c`, `loop_reassigned_param_return.c` and `loop_invariant_reads_unowned.c`
   (all `tests/memory/negative/`) expect `permission` errors on correct programs; b1c3's written atoms let the user say
-  it (§4.4, b1c3's flips; question 68).
+  it (§4.2, b1c3's flips; question 68).
 - *Cost:* the entry case splits multiply loop verification: one guarded parameter and one cell 2.7 s, two and one 8.3 s,
   two and three 37 s, one and six 10 s (re-audit, load 20-50); four aliasing `reads` parameters with a loop about 50 s
   under load (S28 P3). Tests stay at three or fewer. For M4.8 with question 66.
@@ -73,12 +60,8 @@ checked by the tests and the auditor's repros, not re-audited: the cap; items no
   time out (exit 3, documented). b1c1's audit round 2 re-read `call_atoms`' splits, also inside loops, and found no exit
   3 (a `reads` call through a pointer the loop reassigns, 2.3 s; two aliasing `reads` and an `owns` parameter, 6 s).
   The cost itself is fixed in M4.8 (§8 question 66).
-- *Over-strict, fail closed:* `c ? owns(*p) : reads(*p)` is rejected with the `owns`+`reads` rule although the guards
-  exclude each other (b1c2 makes it path-precise, §8 question 67); `restrict` beside a same-typed parameter with only
-  `live` is rejected even when the function never dereferences it.
-- *Not pinned:* C's `return &x;` raises EDG warning #1056 (`returning_ptr_to_local_variable`), which
-  `VERIFY_WARNING_TAGS` does not admit, so the dangling-result test returns through a local (`int *p = &x; return p;`).
-  b1c2 rejects `return &local;` like the compilers (§8 question 65).
+- *Over-strict, fail closed:* `restrict` beside a same-typed parameter with only `live` is rejected even when the
+  function never dereferences it. (`c ? owns(*p) : reads(*p)` and `return &local;` are b1c2's: its plan.)
 - *By-name cell checks are now `permission`* (record 0037 item 11): an encoder bug that dropped a cell's permission
   would now read as a user error instead of exit 3; a VIR self-test hook could pin it (round 1 note).
 - *`f__wf`'s added facts* (aliasing values equal, a `reads` place's post value equals its pre value, `owns` pairs
@@ -92,18 +75,12 @@ checked by the tests and the auditor's repros, not re-audited: the cap; items no
   #174 (`expr_has_no_effect`), and #550 in C++, which a test with an `error` line may not list
   (`VERIFY_WARNING_TAGS` is closed). The `(void)p;` twins pin the rule.
 - *Evidence for later sessions* (in `il-inventory.md` since b1b): P52 is b1c3's (`owning`), P54 M4.5b2's, P55 M4.5d1's.
-- *For b1c2:* a compound store now lowers its address once (round 2); b1c2's writes inside expressions rely on it.
-- *Over-strict, fail closed (re-audit):* `*(g() ? &x : &y) += 1` is refused as "a call that is reachable twice" (the
-  compound store's address holds a call) and `*(q = p) += 1` as unsequenced; both are defined C. Revisit with b1c2's
-  writes inside expressions; the wording is misleading for the first.
+  (The compound store's notes are b1c2's: its plan.)
 - *Messages:* the new rejections reuse `unsupported_type`, `unsupported_expression` and `unsupported_statement`, whose
   fixed texts cite "(decision 0012)" (the carried note on record citations below applies); the type message still says
   "only integer types, bool and the enumerations … are" although pointers to them are now accepted in locals.
 
 **From S5** (one Opus round on the encoder diff: one blocking item, fixed and re-audited; record 0031 items 5–7):
-- *Fixed:* glibc's C23 matcher first accepted any folded constant as the comma's left operand, so a hand-written
-  `((void)(INT_MAX + 1), x >= 0) ? (void)0 : __assert_fail(…)` would have verified with its overflow unencoded; the
-  constant's original expression must now be the `sizeof`.
 - *Should fix, not taken:* a hand-written `((void)sizeof(x++), x) ? (void)0 : __assert_fail(…)` on Linux matches and
   verifies; the general path would reject it as `side_effect_not_evaluated` (0020 item 5). Sound (the `sizeof`'s
   operand is never evaluated), but more permissive than the rest of the encoder: require the `sizeof`'s operand to be
@@ -155,15 +132,13 @@ What the next sessions must carry out, beyond the records' text:
   0011 item 9's harness rule fails such a test): tests choose contracts that fail once (`call_split_requires_pre.c`).
 - *A duplicate VIR case:* `calls_drop_exact_set_hook_off` is the program and expectation of `calls_fixed_order_hook_off`
   (harmless).
-- *For b1c2* (0026 item 15): step 1 places a write of a comma's value in C's order; step 2 keeps 0025 item 2's
-  placement, whose caveat (callees do not see locals) applies to it in particular.
 
 **From M4.4c** (audit rounds 1 and 2; items not taken):
 - *Shapes accepted and listed* (record 0025 item 6, "still accepted"): `RED == RED` (the front end folds it to 1 without
   an expression); clang's `-Wparentheses-equality`, `-Wswitch-bool`, `-Wfor-loop-analysis`, `-Wmisleading-indentation`
   (clang and GCC), GCC's `-Wmultistatement-macros`, clang's `-Wempty-body` on loops; R10 with a named constant
   (`uc == DEF`, `const int DEF = 300;`, clang's C++ mode warns) or a constant expression (`uc == 256 + 44`); R7 does
-  not look into a `?:` arm that is a comma ending in a constant. All are for the warning sweep, now in **M8** (§4.2).
+  not look into a `?:` arm that is a comma ending in a constant. All are for the warning sweep, now an **M8** entry (`plan.md`).
 - *Rejected more broadly than the compilers, listed:* R13's `;` on the line after the condition and an empty macro
   invocation as the body (`if (x > 0) LOG("positive");`), since the IL keeps no position for the `)`; R7's `*` through
   both `?:` arms in every conversion to `bool` (GCC's C mode only); R9 on a 0 or 1 right operand from a macro
@@ -178,17 +153,13 @@ What the next sessions must carry out, beyond the records' text:
 - *Fail-closed checks of item 2* now read the placement emission uses, and three VIR hooks reach them; a set computed
   too large (the unsound direction) is still invisible to them (M4.3b note 4): the pins guard it
   (`call_write_noreturn_divzero.c`, `never_returns_call_divzero.c`, …).
-- *Planning's finding A* existed since M4.3a; no test had the shape. Item 2's placement (callees that see address-taken
-  locals, then globals) is revisited with item 1's kinds of access in b1c2 (0028 item 13) and M4.5b2.
+- *Planning's finding A* existed since M4.3a; no test had the shape. Item 2's placement is revisited with item 1's kinds
+  of access for globals in M4.5b2 (address-taken locals: b1c2's plan).
 - *From the mutation review:* R1–R13 do not reach the body of a `pure` or `predicate` function (not verified before
   M4.5f; the Verifying page says so), and `static_assert_pure_body.c`'s listed entry goes stale then; the doc example
   `verifying/void_conditional.c` keeps a redundant requires conjunct `(c == 0 || n > 0)` (four listed equivalents; the
   `m > 0` pattern of `void_conditional_for.c` would make it needed); a body `p | q` against an exact `&` contract runs to
   the timeout (0023's documented limit), so `not_eq_and_bools` states its contract with `&&`.
-
-**From S4** (closed in M4.4d): the `bit_mask.c [c23]` hang (one Z3 query on `c_uand_64` whose answer depended on the
-prover's history) is gone with record 0026 part B; reproducible solver runs (`--numberOfParallelVerifiers 1`,
-`--assertTimeout`, §8 question 48) are deferred. The investigation is in `git show fce46de:internal/handoff.md`.
 
 **Carried from earlier sessions** (each still open; the session that wrote it in brackets):
 - *Recognition by name or shape.* `assert` is recognised by its macOS expansion and `__assert_rtn` (S3 note 1: a user
@@ -211,11 +182,6 @@ prover's history) is gone with record 0026 part B; reproducible solver runs (`--
 - *Who wrote a flag.* The noreturn trust checks a routine's first declaration and the attribute entries (M4.2a note 1);
   source sequence lists are on since M4.4b2, so the check can now be made exact (and the libc table's "declared only in
   system files", 0015 item 5).
-- *Pointers will reopen two holes (M4.5).* C enumerator lists: pointer arithmetic in an enumerator value
-  (`(int)(long)((typeof(N) *)0 + 1)`) observes EDG's C++ typing of earlier enumerators; keep pointers out of C enumerator
-  initializers or apply 0018 item 10's node-type rule (M4.2b2 note 1). Sequencing: 0020 item 4 checks names, so
-  `*p = (*q)++` needs a check on objects (old §11 question 26's answer: M4.5a; b1c2, 0028 item 12). And 0025 item 2's placement of
-  writes rests on callees not seeing locals (b1c2 and M4.5b2 revisit it with item 1's kinds of access).
 - *Accepted shapes worth a test* (fail closed or listed): `0 && (x = 1)`, `1 || x++` (EDG folds them; rejected),
   `assert((note(x), x >= 0))` (rejected by `check_program`), `decltype(x++)` (accepted, clang warns) (M4.3a notes 5, 7);
   `a && (y = x = 1);` and a discarded `a && (flag = x);` with a `bool` target are over-rejected (M4.3b note 5); a
@@ -258,17 +224,10 @@ automatically (owner, 2026-10-29: not Docker multi-arch on the Mac, which is onl
 Record numbers are the next free ones when written (0039 is next). The
 approved plan is saved as `.claude/plans/<milestone>-<topic>.md` (plan.md, "Session protocol").
 
-### 4.1 Finished sessions
+Finished sessions: their plans are in `.claude/plans/` (from M4.5b1a on), their results in `internal/status.md` and the
+commits it names. The warning sweep (was M4.4e) is an M8 entry in `plan.md`.
 
-Their plans and results are in `internal/status.md` and the commits it names; from M4.5b1b on, plans are in
-`.claude/plans/`.
-
-### 4.2 The warning sweep: an M8 entry
-
-Deferred to M8 (owner, 2026-10-27; `plan.md`'s M8 known entries); its old plan is `git show 9017105:internal/handoff.md`
-§4.2.
-
-### 4.3 EDG box session (pending since M4.2c)
+### 4.1 EDG box session (pending since M4.2c)
 
 **EDG box session after M4.2c** (owner, 2026-10-22). The owner merged `0022` into the fork's `cerastes`
 (`f0ed5525af`, which also brings upstream `main` `ec2f12cffa`, 11 commits after `21065e551e`) and M4.2c moved the pin
@@ -281,8 +240,11 @@ preprocessing expression with no diagnostic for an unsigned wrap (`#if 0u - 1 > 
 #61, a warning verify mode suppresses for bodies; nothing reaches the IL (`preproc.c:460-491`). A fork commit adds a
 discretionary diagnostic, distinct from #61, for a preprocessing expression whose arithmetic wraps or overflows, with
 `GH-*` tests and the full box suites before the pin moves; the cerastes driver then makes it an error in verify mode.
+(4) **The upstream merge** (owner, 2026-10-29, M4.5b1c2 planning: deferred to this session rather than done at a
+session start): the fork's `cerastes` is 23 commits behind upstream `main` (`5e001111a4` at the last fetch); merge it
+(never rebase), run the full suites on the box, then move the pin with `check.sh` green and the goldens' diffs reviewed.
 
-### 4.4 M4.5 Pointers (sessions b1–f3; designed in M4.5a)
+### 4.2 M4.5 Pointers (sessions b1–f3; designed in M4.5a)
 
 **The design** is records 0028 (the memory model: E2, the `Block` domain, liveness, explicit checks), 0029 (the
 annotations and C's spec functions), 0030 (vlibc), 0032 (b1a's slice) and 0033–0036 (the four axioms); evidence in
@@ -294,35 +256,15 @@ ghost machinery is not portable as written (an array insertion sort in M4.5e2 re
 files run VeriFast with `-disable_overflow_check`, so their ports need `requires` bounds; `functions.c`'s predicate
 families and constructors, consumed fractions, backward `goto` and `open_module` are M8 entries.
 
-**M4.5b1 is three sessions** (owner, 2026-10-28, M4.5b1 planning: a design pass put the session above at well over
-27 agent-hours for `src/vir` and `src/viper` alone; plan `.claude/plans/m4-5b1a-pointers.md`).
-Each rejects what a later one makes precise (fail closed). **Pre-approved** (owner): b1b and b1c may retire or re-expect
-exactly the b1a rejection tests listed for them in b1a's status entry, and no others; an existing test whose only point
-was "pointers are rejected" is retired where its construct is accepted (listed).
+**M4.5b1 and M4.5b1c** were split by the owner (2026-10-28 and 2026-10-29): b1a, b1b and b1c1 are done (records
+0032–0038; plans in `.claude/plans/`); owning results (`owning` on functions, `owns_block`, `owns(*result)`, `ensures`
+atoms with no partner) moved to M4.5d2. Each session rejects what a later one makes precise (fail closed).
+**Pre-approved** (owner): a session may retire or re-expect exactly the rejection pins listed for it below, and no
+others; a pin whose construct stays rejected keeps its `expect:` line, and only its message and `Pins:` comment name the
+new session.
 
-**M4.5b1a The model and address-taken locals inside one function: done** (2026-10-28; records 0032–0036; plan
-`.claude/plans/m4-5b1a-pointers.md`).
-
-**M4.5b1b Pointer parameters, results and contracts: done** (2026-10-29; record 0037; plan
-`.claude/plans/m4-5b1b-pointer-params.md`).
-
-**M4.5b1c is three sessions, and owning results move to M4.5d2** (owner, 2026-10-29, M4.5b1c planning: the scope above
-was larger than b1b's; `owns_block` needs the heap token and a whole-block quantified permission, which nothing creates
-before `malloc`). The owner's pre-approved flips of b1a's and b1b's pins are assigned below, each to the session that
-lifts its construct; a pin whose construct stays rejected keeps its `expect:` line, and only its message and `Pins:`
-comment name the new session.
-
-**M4.5b1c1 Loops and jumps: done** (2026-10-29; record 0038; plan `.claude/plans/m4-5b1c1-loops.md`; status entry).
-Loop frames are **"every place held"** (owner); a `return` or outward `goto` in a loop forces the automatic invariant
-(owner, S28 F3); the flag rows of S28 F1/F2 (owner). Cut by the plan's stop rules: written atoms in invariants → b1c3,
-a function's `decreases(*p)` → b1c2 (§3 has what each needs).
-
-**M4.5b1c2 Sequencing and placement.** Writes to cells inside expressions (`y = x++`, `*p = (*q)++`, `f(x = 1)`);
-sequencing on objects (0028 item 12, `unsequenced`); 0028 item 13's placement, lifting record 0037 item 8's fail-closed
-rule (§3: the compound store's address lowered once; `*(g() ? &x : &y) += 1`; 0025 item 2's and 0026 item 15's
-placement); `return &local;` rejected like the compilers (§8 question 65: EDG's #1056, clang `-Wreturn-stack-address`,
-GCC `-Wreturn-local-addr`); `c ? owns(*p) : reads(*p)` accepted when the guards exclude each other on every path (§8
-question 67); **from b1c1 (cut 1):** a function's `decreases` that reads memory (record 0038 item 8, §3). Flips:
+**M4.5b1c2 Sequencing and placement: in progress** (plan `.claude/plans/m4-5b1c2-sequencing.md`, with the notes of
+§3 it consumes; record 0039). Flips:
 `tests/memory/negative/reject_{cell_postfix_value,write_in_assignment_value,call_beside_access,call_compound_target,two_memory_calls,heap_read_decreases}.c`.
 
 **M4.5b1c3 `T**`, owning parameters, `*result`.** `T**` and the address of a pointer local; `[[cerastes::owning]]` on
@@ -385,7 +327,7 @@ are needed for content specifications: `strlen`'s zero-terminated string, `memcp
 `internal/upstream/attribute-registration.md` Appendix A lists the open design points. Ports: `reverse.c`, `sum_full.c`,
 `push_all.c`.
 
-### 4.5 M4.6–M4.8
+### 4.3 M4.6–M4.8
 
 **M4.6 Chars and strings:** string literals as read-only arrays, `char` buffers, vlibc's `<string.h>` (`strlen`,
 `memcpy`, `memcmp`, `strcmp`: contracts, and implementations verified in vlibc's CI), `main(argc, argv)`; character
@@ -405,7 +347,7 @@ and the deferred list for M8
 (unions, floating point, `volatile`/`_Atomic`/`_BitInt`/vector types, variadic functions and `printf`, several
 translation units, concurrency).
 
-### 4.6 M5.0 and M5 — type traits and generic templates (designed in the M4.1 session)
+### 4.4 M5.0 and M5 — type traits and generic templates (designed in the M4.1 session)
 
 **M5.0 Type traits** (owner, 2026-10-26, old §11 question 39; `plan.md` "Before M5"). After M4.8 and before M5a. M4.4b2
 skips a static assertion whose condition calls a function, uses a type trait (`enk_builtin_operation`, a variable
@@ -604,12 +546,14 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
 ## 7. Acceptance
 
 Each session's acceptance commands are in its plan (`.claude/plans/`); the results of finished sessions are in
-`internal/status.md` (M4.5b1b's: `git show 8003dca:internal/status.md`).
+`internal/status.md` (the latest entry) and the commits its history names.
 
 ## 8. Questions for the owner
 
-Each has a recommended answer. Answer inline, as before. Answered questions 1–68 are recorded in the decision records
-and in the handoffs named at the top (64–67: `git show 8003dca:internal/handoff.md` §8; 65: b1c2 rejects
-`return &local;` like the compilers; 66: the cost of aliasing parameters is fixed in M4.8; 67: b1c2 makes the
-`owns`+`reads` rule path-precise; 68, at M4.5b1c1: b1c3 may re-expect the three pinned false alarms of reassigned
-parameters, §4.4). None is open.
+Each has a recommended answer. Answer inline, as before. Answered questions 1–71 are recorded in the decision records,
+the session plans and the handoffs reachable from the one named at the top. The latest: 65 (`return &local;` rejected
+like the compilers), 66 (the cost of aliasing parameters, M4.8), 67 (the `owns`+`reads` rule path-precise), 68 (b1c3
+may re-expect the three pinned false alarms of reassigned parameters, §4.2); at M4.5b1c2's planning (2026-10-29): 69
+(the upstream EDG merge and the pin move wait for the box session, §4.1), 70 (unsequenced accesses that name one object
+are rejected like the compilers, `unsequenced_modification`; the shapes that depend on aliasing are path-precise
+`unsequenced`), 71 (b1c2 has no time cap and no cuts). None is open.
