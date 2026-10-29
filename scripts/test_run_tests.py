@@ -4586,7 +4586,7 @@ CI_YML_CANONICAL = (
     '          submodules: recursive',
     '          persist-credentials: false',
     '      - name: Set up Python',
-    '        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97',
+    '        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0',
     '        with:',
     "          python-version: '3.14'",
     '      - name: Set up Node',
@@ -5035,7 +5035,7 @@ class CiGuardTests(unittest.TestCase):
         sub("CERASTES_EDG_SRC on a step", ci_run, ci_run + "        env:\n          CERASTES_EDG_SRC: /x\n")
         sub("update-golden in the command", check_run, "        run: scripts/check.sh --update-golden\n")
         sub("a tag instead of a SHA", "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "actions/checkout@v7")
-        sub("a branch instead of a SHA", "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+        sub("a branch instead of a SHA", "actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0",
             "actions/setup-python@main")
         sub("a short SHA", "actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9", "actions/cache/save@55cc834")
         sub("an upper-case SHA", "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
@@ -5434,7 +5434,7 @@ class CiGuardTests(unittest.TestCase):
             "        run: scripts/check.sh\n        env:\n          CERASTES_EDG_SRC: /x\n")
         sub("a shallow checkout", "fetch-depth: 0", "fetch-depth: 1")
         sub("setup-python, which exports LD_LIBRARY_PATH", "      - name: Set up Node\n",
-            "      - name: Set up Python\n        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97\n"
+            "      - name: Set up Python\n        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0\n"
             "        with:\n          python-version: '3.14'\n      - name: Set up Node\n")
         sub("a tag instead of a SHA", "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "actions/checkout@v7")
         sub("the cache save without its if", "        if: steps.silicon-cache.outputs.cache-hit != 'true'\n", "")
