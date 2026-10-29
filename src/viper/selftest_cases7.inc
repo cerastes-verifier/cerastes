@@ -413,16 +413,6 @@ void define_memory_rejections() {
   auto N = [](Kit& k, const char* v) { return k.num(k.i32, v); };
 
   // ---- item 2: pointer types ----
-  rc("mem_rej_pointer_parameter", "parameter 1 of 'f' is a pointer", [=](Kit& k) {
-    Function* f = k.fn("f", k.vd, {{"p", PT(k)}});
-    f->body = k.blk({});
-    k.done(f);
-  });
-  rc("mem_rej_pointer_result", "the return type of 'f' is a pointer", [=](Kit& k) {
-    Function* f = k.fn("f", PT(k));
-    f->body = k.blk({k.ret(k.nul(PT(k)))});
-    k.done(f);
-  });
   rc("mem_rej_pointer_to_pointer", "a pointer to a pointer", [=](Kit& k) {
     Function* f = k.fn("f", k.vd);
     Var* pp = k.local(f, "pp", k.ptr(PT(k)));
@@ -433,12 +423,6 @@ void define_memory_rejections() {
     Function* f = k.fn("f", k.vd);
     Var* v = k.local(f, "v", k.ptr(k.vd));
     f->body = k.blk({k.decl(v, nullptr)});
-    k.done(f);
-  });
-  rc("mem_rej_pointer_in_contract", "a pointer (or a variable whose address is taken) in a contract", [=](Kit& k) {
-    Function* f = k.fn("f", k.vd);
-    k.ens(f, k.eq(k.nul(PT(k)), k.nul(PT(k))));
-    f->body = k.blk({});
     k.done(f);
   });
 
@@ -460,12 +444,6 @@ void define_memory_rejections() {
   });
 
   // ---- item 4: addresses ----
-  rc("mem_rej_address_of_parameter", "the address of parameter", [=](Kit& k) {
-    Function* f = k.fn("f", k.vd, {{"a", k.i32}});
-    f->mark_address_taken(f->param_var(0));
-    f->body = k.blk({});
-    k.done(f);
-  });
   rc("mem_rej_address_of_pointer_variable", "the address of the pointer variable", [=](Kit& k) {
     Function* f = k.fn("f", k.vd);
     Var* p = k.local(f, "p", PT(k));

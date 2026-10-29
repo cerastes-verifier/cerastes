@@ -192,3 +192,5 @@ object pointer types (#42, #144, #513, #167), and `int *q = v;` from a `void*` i
 - The prelude gains its first domain, axioms and fields, only for programs that use them.
 - Pointer parameters, loops over memory and several jumps stay rejected until b1b and b1c.
 - C's incompatible pointer conversions are errors in verify mode.
+
+*2026-10-28, amended by 0037 (M4.5b1b): item 2 — pointer parameters and results are accepted (0037 items 2–3); `restrict` on a C parameter whose contract owns its pointee. Item 4 — `&param` is accepted (0037 item 4). Item 6 — the checks of a cell read or written by name are category `permission`, since a callee can now keep a cell. Item 7 — the one-past-the-end row is category `pointer-comparison`. Item 10 — the table's first two rows (a pointer parameter or result; `&param`) are lifted by 0037; the others stay b1c's, and 0037 item 15 adds its own rejections.*

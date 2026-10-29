@@ -142,12 +142,12 @@ bool declares_cell(const Stmt& b) {
   return false;
 }
 
-// A node that b1a keeps out of contracts, invariants, measures, named constants, case values and loops (decision 0032 items 9 and 10):
-// of pointer type, a Null/AddrOf/Deref, or a read of a cell.
+// A node that b1a keeps out of invariants, measures, named constants, case values and loops (decision 0032 items 9 and 10), and b1b out of
+// all but the contract nodes of decision 0037 item 5: of pointer type, a Null/AddrOf/Deref/Atom, or a read of a cell.
 bool pointer_node(const Expr& e) {
   if (e.type.is_ptr()) return true;
   switch (e.kind) {
-    case Expr::Kind::Null: case Expr::Kind::AddrOf: case Expr::Kind::Deref: return true;
+    case Expr::Kind::Null: case Expr::Kind::AddrOf: case Expr::Kind::Deref: case Expr::Kind::Atom: return true;
     case Expr::Kind::Local: return e.var != nullptr && e.var->address_taken;
     default: return false;
   }
@@ -202,21 +202,30 @@ class Checker {
     targets_.clear();
     scopes_.clear();
     no_ptr_ = false;
+    old_depth_ = 0;
     scopes_.emplace_back();
     for (const auto& v : f.locals())
       if (v->is_param_copy) scopes_.back().insert(v->id);
-    if (f.ret.is_ptr()) err(f.loc, "the return type of '" + f.c_name + "' is a pointer (decision 0032 item 2)");
-    else if (!(f.ret.is_void() || value_type(f.ret))) err(f.loc, "the return type of '" + f.c_name + "' is not void, bool or an integer type");
+    // Decision 0037 items 2-3: a parameter or a result may be a pointer to a bool, an integer or an enumeration.
+    if (f.ret.is_ptr()) {
+      if (!accepted_pointer(f.ret)) err(f.loc, "the return type of '" + f.c_name + "' is " + pointer_reason(f.ret));
+    } else if (!(f.ret.is_void() || value_type(f.ret))) {
+      err(f.loc, "the return type of '" + f.c_name + "' is not void, bool, an integer type or a pointer to one");
+    }
     for (size_t k = 0; k < f.params.size(); ++k) {
-      if (f.params[k].type.is_ptr())
-        err(f.params[k].loc, "parameter " + std::to_string(k + 1) + " of '" + f.c_name + "' is a pointer (decision 0032 item 2)");
-      else if (!value_type(f.params[k].type))
-        err(f.params[k].loc, "parameter " + std::to_string(k + 1) + " of '" + f.c_name + "' is not a bool or an integer type");
+      if (f.params[k].type.is_ptr()) {
+        if (!accepted_pointer(f.params[k].type))
+          err(f.params[k].loc, "parameter " + std::to_string(k + 1) + " of '" + f.c_name + "' is " + pointer_reason(f.params[k].type));
+      } else if (!value_type(f.params[k].type)) {
+        err(f.params[k].loc, "parameter " + std::to_string(k + 1) + " of '" + f.c_name + "' is not a bool, an integer type or a pointer to one");
+      }
+      if (f.params[k].is_restrict && !f.params[k].type.is_ptr())
+        err(f.params[k].loc, "parameter " + std::to_string(k + 1) + " of '" + f.c_name + "' is `restrict` but not a pointer");
     }
     for (const auto& v : f.locals()) {
-      if (!v->address_taken) continue;
-      if (v->is_param_copy) err(v->loc, "the address of parameter '" + v->name + "' is taken (decision 0032 item 4)");
-      else if (v->type.is_ptr()) err(v->loc, "the address of the pointer variable '" + v->name + "' is taken (decision 0032 item 2)");
+      // A parameter's copy may be address-taken (decision 0037 item 4); a pointer variable's address is b1c's (decision 0032 item 2).
+      if (v->address_taken && v->type.is_ptr())
+        err(v->loc, "the address of the pointer variable '" + v->name + "' is taken (decision 0032 item 2)");
     }
     if (!f.loc.known()) err(f.loc, "function '" + f.c_name + "' has no source position");
     if (!f.end_loc.known() && f.body != nullptr) err(f.loc, "function '" + f.c_name + "' has no closing-brace position");
@@ -229,6 +238,7 @@ class Checker {
     for (const Clause& c : f.requires_) clause(c, Ctx::Requires, "requires");
     for (const Clause& c : f.ensures_) clause(c, Ctx::Ensures, "ensures");
     for (const Clause& c : f.decreases_) measure(c, Ctx::Requires, "decreases");
+    atoms(f);
     if (f.noreturn && !f.ensures_.empty())
       err(f.ensures_.front().loc, "an `ensures` on '" + f.c_name + "', which is declared not to return (decision 0015 item 4)");
     if (f.body != nullptr) {
@@ -247,6 +257,7 @@ class Checker {
       stmt(*f.body);
       // The rules of decision 0032 item 10 that keep pointers and cells out of what b1a lowers (the encoder reports them first).
       for (const MemoryProblem& m : memory_problems(f)) err(m.loc, m.what);
+      for (const PlacementProblem& m : placement_problems(f)) err(m.loc, m.what);  // decision 0037 item 8
       // The backstop of the encoder's own report (decision 0020 item 4): a modification unsequenced with another access.
       for (const SequenceProblem& p : sequence_problems(f))
         err(p.at != nullptr ? p.at->loc : f.loc, "unsequenced modification of '" + p.variable +
@@ -328,14 +339,83 @@ class Checker {
     if (c.label_name.empty()) err(c.loc, "a label without a name");
   }
 
+  // Decision 0037 items 5, 6 and 2: the atoms of the contract stand in allowed positions, are numbered, and pair up; `restrict` is backed by
+  // an `owns` that the `ensures` returns.
+  static void collect_atoms(const Expr* e, std::set<const Expr*>& all) {
+    if (e == nullptr) return;
+    if (e->kind == Expr::Kind::Atom) all.insert(e);
+    for (const Expr* x : {e->a, e->b, e->c}) collect_atoms(x, all);
+    for (const Expr* x : e->args) collect_atoms(x, all);
+  }
+
+  void atoms(const Function& f) {
+    std::set<const Expr*> all;
+    for (const Clause& c : f.requires_) collect_atoms(c.expr, all);
+    for (const Clause& c : f.ensures_) collect_atoms(c.expr, all);
+    for (const Clause& c : f.decreases_) collect_atoms(c.expr, all);
+    const std::vector<AtomSite> sites = contract_atoms(f);
+    std::set<const Expr*> placed;
+    for (const AtomSite& s : sites) placed.insert(s.atom);
+    for (const Expr* a : all)
+      if (placed.count(a) == 0)
+        err(a->loc, "a permission atom in a position decision 0037 item 5 does not allow (a top-level conjunct, the right of `||` or an arm of `?:` whose condition reads no heap)");
+    if (placed.size() != sites.size()) err(f.loc, "a permission atom reachable twice in the contract of '" + f.c_name + "'");
+    // Requires atoms are numbered in evaluation order; no two of one kind on one parameter (the partner would be ambiguous).
+    std::vector<const AtomSite*> req;
+    for (const AtomSite& s : sites)
+      if (!s.in_ensures) req.push_back(&s);
+    for (size_t k = 0; k < req.size(); ++k) {
+      const Expr& a = *req[k]->atom;
+      if (a.amount != static_cast<int>(k)) err(a.loc, "the permission atoms of the `requires` are not numbered in order (decision 0037 item 6)");
+      if (a.a == nullptr || a.a->kind != Expr::Kind::Formal) continue;
+      for (size_t j = 0; j < k; ++j) {
+        const Expr& b = *req[j]->atom;
+        if (b.a != nullptr && b.a->kind == Expr::Kind::Formal && b.atom == a.atom && b.a->index == a.a->index)
+          err(a.loc, "the same permission atom twice in a `requires` (decision 0037 item 6)");
+      }
+    }
+    // `owns(*p)` and `reads(*p)` of one parameter in one clause list would hold the same cell twice, with and without an amount (item 6).
+    for (size_t i = 0; i < sites.size(); ++i)
+      for (size_t j = 0; j < i; ++j) {
+        const Expr& a = *sites[i].atom;
+        const Expr& b = *sites[j].atom;
+        if (sites[i].in_ensures == sites[j].in_ensures && a.a != nullptr && b.a != nullptr && a.a->kind == Expr::Kind::Formal &&
+            b.a->kind == Expr::Kind::Formal && a.a->index == b.a->index &&
+            ((a.atom == AtomKind::Owns && b.atom == AtomKind::Reads) || (a.atom == AtomKind::Reads && b.atom == AtomKind::Owns)))
+          err(a.loc, "`owns` and `reads` of the same parameter in one contract (decision 0037 item 5)");
+      }
+    std::set<int> used;
+    for (const AtomSite& s : sites) {
+      if (!s.in_ensures) continue;
+      const Expr& a = *s.atom;
+      if (a.amount < 0 || static_cast<size_t>(a.amount) >= req.size()) {
+        err(a.loc, "an `ensures` atom without a `requires` atom to return (decision 0037 item 6)");
+        continue;
+      }
+      const Expr& partner = *req[static_cast<size_t>(a.amount)]->atom;
+      if (partner.atom != a.atom || partner.a == nullptr || a.a == nullptr || partner.a->kind != Expr::Kind::Formal ||
+          a.a->kind != Expr::Kind::Formal || partner.a->index != a.a->index)
+        err(a.loc, "an `ensures` atom whose partner in the `requires` is of another kind or on another parameter (decision 0037 item 6)");
+      if (!used.insert(a.amount).second) err(a.loc, "two `ensures` atoms return the same `requires` atom (decision 0037 item 6)");
+    }
+    // `restrict` (item 2): backed by an `owns` that the `ensures` returns.
+    for (size_t k = 0; k < f.params.size(); ++k)
+      if (f.params[k].is_restrict && !restrict_backed(f, static_cast<int>(k)))
+        err(f.params[k].loc, "parameter " + std::to_string(k + 1) + " of '" + f.c_name +
+                                 "' is `restrict` without `owns(*p)` in its `requires` and `ensures` (decision 0037 item 2)");
+  }
+
   void clause(const Clause& c, Ctx ctx, const char* what) {
     if (c.expr == nullptr) {
       err(c.loc, std::string("a ") + what + " clause without an expression");
       return;
     }
     if (!c.loc.known()) err(c.loc, std::string("a ") + what + " clause has no source position");
+    // A `requires` or `ensures` may hold the pointer nodes of decision 0037 item 5 (a pointer parameter, the result, NULL, `*p` of a
+    // parameter, the atoms); an invariant, a measure, a constant and a case value still hold none (decision 0032 item 10), which
+    // `measure` and the loop and constant checks say by setting no_ptr_.
     const bool saved = no_ptr_;
-    no_ptr_ = true;  // a contract or an invariant holds no pointer (decision 0032 item 10)
+    no_ptr_ = false;
     expr(*c.expr, ctx, false);
     no_ptr_ = saved;
     if (!c.expr->type.is_bool()) err(c.expr->loc, std::string("the ") + what + " clause is not a bool");
@@ -603,8 +683,11 @@ class Checker {
       err(e.loc, "an expression of an unsupported type");
     }
     if (pointer_node(e)) {
-      if (ctx == Ctx::Requires || ctx == Ctx::Ensures || no_ptr_)
-        err(e.loc, "a pointer (or a variable whose address is taken) in a contract, an invariant, a measure, a constant or a case value (decision 0032 item 10)");
+      const bool contract = ctx == Ctx::Requires || ctx == Ctx::Ensures;
+      if (no_ptr_)
+        err(e.loc, "a pointer (or a variable whose address is taken) in an invariant, a measure, a constant or a case value (decision 0032 item 10)");
+      else if (contract && e.kind == Expr::Kind::AddrOf)
+        err(e.loc, "an address in a contract (decision 0037 item 5: a contract names a pointer parameter, never `&x`)");
     }
     auto sub = [&](const Expr* x) {
       if (x == nullptr) { err(e.loc, "a missing operand"); return false; }
@@ -639,7 +722,9 @@ class Checker {
       case Expr::Kind::Old:
         if (ctx != Ctx::Ensures) { err(e.loc, "`old` outside an `ensures`"); break; }
         if (e.a != nullptr && mentions_result_or_local(*e.a)) err(e.loc, "`old` of the result (it has no value on entry)");
+        ++old_depth_;
         if (sub(e.a) && e.a->type != e.type) err(e.loc, "`old` changes the type");
+        --old_depth_;
         break;
       case Expr::Kind::Unary:
         if (!sub(e.a)) break;
@@ -674,7 +759,6 @@ class Checker {
       case Expr::Kind::AddrOf:
         if (e.var == nullptr || !owned(*e.var) || !visible(*e.var)) { err(e.loc, "the address of a variable that is not declared here"); break; }
         if (!e.var->address_taken) err(e.loc, "internal: the address of '" + e.var->name + "', which is not marked address-taken (decision 0032 item 4)");
-        if (e.var->is_param_copy) err(e.loc, "the address of parameter '" + e.var->name + "' (decision 0032 item 4)");
         if (!scalar_type(e.var->type)) err(e.loc, "the address of '" + e.var->name + "', whose type " + e.var->type.str() + " is not a bool or an integer");
         else if (!e.type.is_ptr() || e.type.pointee == nullptr || *e.type.pointee != e.var->type) err(e.loc, "the address of '" + e.var->name + "' has the wrong type");
         break;
@@ -682,6 +766,18 @@ class Checker {
         if (!sub(e.a)) break;
         if (!e.a->type.is_ptr()) err(e.loc, "a dereference of a " + e.a->type.str() + ", not a pointer");
         else if (e.a->type.pointee == nullptr || e.type != *e.a->type.pointee) err(e.loc, "a dereference whose type is not the pointee's");
+        if ((ctx == Ctx::Requires || ctx == Ctx::Ensures) && e.a->kind != Expr::Kind::Formal)
+          err(e.loc, "a dereference in a contract of something other than a pointer parameter (decision 0037 item 5)");
+        break;
+      case Expr::Kind::Atom:
+        // Decision 0037 item 5: owns(*p), reads(*p) and live(p) of a pointer parameter p, in a contract, outside `old`.  Where it may
+        // stand and how it pairs with its partner is checked by `atoms`.
+        if (ctx != Ctx::Requires && ctx != Ctx::Ensures) { err(e.loc, "a permission atom outside a contract"); break; }
+        if (old_depth_ > 0) { err(e.loc, "a permission atom under `old`"); break; }
+        if (!e.type.is_bool()) err(e.loc, "a permission atom is not a bool");
+        if (!sub(e.a)) break;
+        if (e.a->kind != Expr::Kind::Formal || !accepted_pointer(e.a->type))
+          err(e.loc, "a permission atom of something other than a pointer parameter (decision 0037 item 5)");
         break;
       case Expr::Kind::Convert:
         if (!sub(e.a)) break;
@@ -891,7 +987,8 @@ class Checker {
   std::set<int> jump_ids_;
   std::vector<Target> targets_;  // the loops and switches around the statement being checked, innermost last
   std::vector<std::set<int>> scopes_;
-  bool no_ptr_ = false;  // checking a contract clause, invariant, measure, constant or case value: no pointer node
+  bool no_ptr_ = false;  // checking an invariant, measure, constant or case value: no pointer node (a contract clause may hold some, decision 0037)
+  int old_depth_ = 0;    // inside an `Old`
   std::vector<Diag> diags_;
 };
 
@@ -1157,6 +1254,102 @@ class MemoryWalker {
 
 namespace {
 
+// Decision 0037 item 8: the placement rule for calls of functions that hold permissions (see PlacementProblem in check.h).
+class Placement {
+ public:
+  explicit Placement(const Function& f) : f_(f) {}
+
+  std::vector<PlacementProblem> run() {
+    if (f_.body != nullptr) stmt(f_.body);
+    return std::move(out_);
+  }
+
+ private:
+  bool memory_call(const Expr& e) {
+    if (e.kind != Expr::Kind::Call || e.callee == nullptr) return false;
+    auto it = memo_.find(e.callee);
+    if (it == memo_.end()) it = memo_.emplace(e.callee, requires_atom_count(*e.callee) > 0).first;
+    return it->second;
+  }
+
+  static bool access(const Expr& e) {
+    return e.kind == Expr::Kind::Deref || (e.kind == Expr::Kind::Local && e.var != nullptr && e.var->address_taken);
+  }
+
+  void calls(const Expr* e, std::vector<const Expr*>& out) {
+    if (e == nullptr) return;
+    if (memory_call(*e)) out.push_back(e);
+    for (const Expr* x : {e->a, e->b, e->c}) calls(x, out);
+    for (const Expr* x : e->args) calls(x, out);
+  }
+
+  // The accesses outside the arguments of `call`.
+  void outside(const Expr* e, const Expr* call, std::vector<const Expr*>& out) {
+    if (e == nullptr) return;
+    if (access(*e)) out.push_back(e);
+    if (e == call) return;  // its arguments are sequenced before the call
+    for (const Expr* x : {e->a, e->b, e->c}) outside(x, call, out);
+    for (const Expr* x : e->args) outside(x, call, out);
+  }
+
+  void full(std::initializer_list<const Expr*> roots) {
+    std::vector<const Expr*> mem;
+    for (const Expr* r : roots) calls(r, mem);
+    if (mem.empty()) return;
+    const std::string callee = mem[0]->callee->c_name;
+    if (mem.size() > 1) {
+      out_.push_back(PlacementProblem{mem[1]->loc, "a second call of a function whose contract holds a permission ('" + mem[1]->callee->c_name +
+                                                       "') in one expression, beside the call of '" + callee +
+                                                       "': write them as separate statements (decision 0037 item 8; M4.5b1c lifts this, decision 0028 item 13)"});
+      return;
+    }
+    std::vector<const Expr*> acc;
+    for (const Expr* r : roots) outside(r, mem[0], acc);
+    if (!acc.empty())
+      out_.push_back(PlacementProblem{acc[0]->loc, "an access to an object in the same expression as the call of '" + callee +
+                                                       "', whose contract holds a permission: write them as separate statements "
+                                                       "(decision 0037 item 8; M4.5b1c lifts this, decision 0028 item 13)"});
+  }
+
+  void stmt(const Stmt* s) {
+    if (s == nullptr) return;
+    switch (s->kind) {
+      case Stmt::Kind::Decl: case Stmt::Kind::Assign: case Stmt::Kind::ExprStmt: case Stmt::Kind::Return: case Stmt::Kind::Check:
+        full({s->expr});
+        break;
+      case Stmt::Kind::Store: full({s->addr, s->expr}); break;
+      case Stmt::Kind::If:
+        full({s->expr});
+        stmt(s->then_body);
+        stmt(s->else_body);
+        break;
+      case Stmt::Kind::While:
+        full({s->expr});
+        stmt(s->body);
+        stmt(s->step);
+        break;
+      case Stmt::Kind::Switch:
+        full({s->expr});
+        stmt(s->body);
+        break;
+      case Stmt::Kind::Block:
+        for (const Stmt* c : s->stmts) stmt(c);
+        break;
+      case Stmt::Kind::Case: case Stmt::Kind::Break: case Stmt::Kind::Continue: case Stmt::Kind::Goto: case Stmt::Kind::Label: break;
+    }
+  }
+
+  const Function& f_;
+  std::vector<PlacementProblem> out_;
+  std::map<const Function*, bool> memo_;
+};
+
+}  // namespace
+
+std::vector<PlacementProblem> placement_problems(const Function& f) { return Placement(f).run(); }
+
+namespace {
+
 // The sequencing rule (decision 0020 item 4; the comment at SequenceProblem in vir.h): the locals each operand writes and reads.
 struct Wr {
   std::map<int, const Expr*> w;   // var id -> an AssignE writing it, anywhere inside
@@ -1203,7 +1396,7 @@ class Sequencer {
     Wr out;
     if (e == nullptr) return out;
     switch (e->kind) {
-      case Expr::Kind::Const: case Expr::Kind::Formal: case Expr::Kind::Result: break;
+      case Expr::Kind::Const: case Expr::Kind::Formal: case Expr::Kind::Result: case Expr::Kind::Atom: break;  // an atom is contract-only
       case Expr::Kind::Null: case Expr::Kind::AddrOf: break;  // an address is no access to the object (decision 0032)
       case Expr::Kind::Deref: absorb(out, expr(e->a), false); break;
       case Expr::Kind::Local:

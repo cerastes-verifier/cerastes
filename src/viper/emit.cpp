@@ -29,6 +29,7 @@ const char* bin_text(BinOp op) {
     case BinOp::And: return "&&";
     case BinOp::Or: return "||";
     case BinOp::Implies: return "==>";
+    case BinOp::PermDiv: return "/";
   }
   return "?";
 }
@@ -71,7 +72,8 @@ std::string expr(const E& e, bool top = false) {
     case LExpr::Kind::PermOf: return "perm(" + expr(e->a) + "." + e->text + ")";
     case LExpr::Kind::Write: return "write";
     case LExpr::Kind::NoPerm: return "none";
-    case LExpr::Kind::Acc: return "acc(" + expr(e->a) + "." + e->text + ")";
+    case LExpr::Kind::Acc: return "acc(" + expr(e->a) + "." + e->text + (e->b ? ", " + expr(e->b, true) : std::string()) + ")";
+    case LExpr::Kind::Old: return "old(" + expr(e->a, true) + ")";
   }
   return "?";
 }
@@ -119,7 +121,15 @@ class Printer {
   std::vector<MapEntry> map_;
 };
 
-const char* type_name(low::LType t) { return t == low::LType::Bool ? "Bool" : (t == low::LType::Ref ? "Ref" : "Int"); }
+const char* type_name(low::LType t) {
+  switch (t) {
+    case low::LType::Bool: return "Bool";
+    case low::LType::Ref: return "Ref";
+    case low::LType::Perm: return "Perm";
+    case low::LType::Int: return "Int";
+  }
+  return "Int";
+}
 
 std::string decl(const low::LVar& v) { return v.name + ": " + type_name(v.type); }
 
@@ -161,6 +171,7 @@ void stmt(Printer& p, const low::LStmt& s, int indent) {
       break;
     case K::FieldAssign: p.line(indent, s.name + "." + s.field + " := " + expr(s.expr, true)); break;
     case K::Exhale: p.line(indent, "exhale " + expr(s.expr, true)); break;
+    case K::CaseSplit: p.line(indent, "if (" + expr(s.expr, true) + ") { }"); break;
     case K::Goto: p.line(indent, "goto " + s.name); break;
     case K::Label: p.line(indent, "label " + s.name); break;
     case K::Comment: p.line(indent, "// " + s.name); break;

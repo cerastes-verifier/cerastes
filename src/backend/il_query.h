@@ -30,7 +30,7 @@ bool is_call_kind(an_expr_operator_kind k);
 // The routine called by a call expression whose callee is named directly, or null.
 a_routine_ptr direct_callee(an_expr_node_ptr e);
 
-// The names of cerastes's own specification functions ("cerastes::owns", ...).
+// The names of cerastes's own specification functions ("cerastes::owns", ... and the C spellings "cerastes_owns", ...).
 bool is_spec_function_name(const std::string& n);
 
 // A routine marked predicate or pure, on its own attribute list or its root template's (an instance of a

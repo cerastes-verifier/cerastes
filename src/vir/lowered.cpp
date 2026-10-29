@@ -97,6 +97,25 @@ E acc(E recv, std::string field_name) {
   return e;
 }
 
+E acc(E recv, std::string field_name, E amount) {
+  auto e = make(LExpr::Kind::Acc);
+  e->text = std::move(field_name);
+  e->a = std::move(recv);
+  e->b = std::move(amount);
+  return e;
+}
+
+E old_(E a) {
+  auto e = make(LExpr::Kind::Old);
+  e->a = std::move(a);
+  return e;
+}
+
+E perm_div(E a, int divisor) {
+  if (divisor <= 0) throw std::logic_error("a permission is divided by a positive literal");
+  return bin(BinOp::PermDiv, std::move(a), int_lit(std::to_string(divisor)));
+}
+
 bool is_domain_function(const std::string& name) {
   for (const char* n : {"loc", "len", "block_of", "offset_of", "member", "parent_of", "index_of", "lvloc"})
     if (name == n) return true;

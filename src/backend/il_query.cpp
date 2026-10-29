@@ -31,8 +31,10 @@ a_routine_ptr direct_callee(an_expr_node_ptr e) {
 }
 
 bool is_spec_function_name(const std::string& n) {
-  return n == "cerastes::owns" || n == "cerastes::reads" || n == "cerastes::old" ||
-         n == "cerastes::forall" || n == "cerastes::owns_range";
+  return n == "cerastes::owns" || n == "cerastes::reads" || n == "cerastes::old" || n == "cerastes::live" ||
+         n == "cerastes::forall" || n == "cerastes::owns_range" ||
+         // The C spellings of <cerastes.h> (decisions 0029 item 3, 0037 item 5): declared at file scope in both languages.
+         n == "cerastes_owns" || n == "cerastes_reads" || n == "cerastes_live" || n == "cerastes_old_";
 }
 
 bool marked(a_routine_ptr r, Annot k) {

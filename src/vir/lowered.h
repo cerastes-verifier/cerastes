@@ -24,12 +24,15 @@ struct LExpr;
 using E = std::shared_ptr<const LExpr>;
 
 enum class UnOp { Neg, Not };
-enum class BinOp { Add, Sub, Mul, Lt, Le, Gt, Ge, Eq, Ne, And, Or, Implies };
+// PermDiv (decision 0037 item 6): a Perm divided by an Int literal (Viper's `/` on a permission); the only way to build it is `perm_div`.
+enum class BinOp { Add, Sub, Mul, Lt, Le, Gt, Ge, Eq, Ne, And, Or, Implies, PermDiv };
 
 struct LExpr {
   // Null, Field, PermOf, Write, NoPerm, Acc and Dom are the memory model's (decision 0032 item 5; decision 0028 item 2); they appear only in
-  // a program that has a cell or a pointer, and `LProgram::memory` says so.
-  enum class Kind { IntLit, BoolLit, Var, Un, Bin, Ite, Fn, ModPow2, DivPow2, Null, Field, PermOf, Write, NoPerm, Acc, Dom } kind = Kind::IntLit;
+  // a program that has a cell or a pointer, and `LProgram::memory` says so.  Old (decision 0037 items 6-7) is Viper's `old(a)`, in an
+  // `ensures` and in a method body (the state at entry).  Acc has an optional amount in `b` (a Perm expression; null: full permission), and
+  // Ite, PermOf, Write, NoPerm and PermDiv are the Perm-valued expressions (`LType::Perm` variables hold them).
+  enum class Kind { IntLit, BoolLit, Var, Un, Bin, Ite, Fn, ModPow2, DivPow2, Null, Field, PermOf, Write, NoPerm, Acc, Dom, Old } kind = Kind::IntLit;
   std::string text;          // IntLit: a decimal (possibly negative); Var: the name; Fn: the prelude function; ModPow2, DivPow2: the divisor, 2^k, a decimal;
                              // Field, PermOf, Acc: the Viper field (`v_int`, `d_int`, `lv`); Dom: the domain function (`loc`, `len`, ...)
   bool bool_value = false;   // BoolLit
@@ -53,7 +56,10 @@ E field(E recv, std::string field_name);    // `recv.field` (a heap read: the lo
 E perm_of(E recv, std::string field_name);  // `perm(recv.field)`
 E write_perm();                             // `write`
 E no_perm();                                // `none`
-E acc(E recv, std::string field_name);      // `acc(recv.field)`, in an `exhale` only
+E acc(E recv, std::string field_name);      // `acc(recv.field)`, in an `exhale` or a contract
+E acc(E recv, std::string field_name, E amount);  // `acc(recv.field, amount)`, a contract clause (decision 0037 item 6)
+E old_(E a);                                // `old(a)`: the value in the state at entry (an `ensures`, or the body of a method)
+E perm_div(E a, int divisor);               // `a / divisor`, a Perm over a positive Int literal (decision 0037 item 6)
 // An application of one of the Block domain's functions (`loc`, `len`, `block_of`, `offset_of`, `member`, `parent_of`, `index_of`,
 // `lvloc`); any other name is refused (std::logic_error), so lowering cannot spell a domain function the prelude does not declare.
 E dom(const std::string& domain_function, std::vector<E> args);
@@ -104,7 +110,8 @@ struct LInvariant {
 
 struct LStmt {
   // FieldAssign and Exhale are the memory model's (decision 0032): `name.field := expr` (name: a Ref variable) and `exhale expr`.
-  enum class Kind { Assign, Assert, Call, If, While, Goto, Label, Block, Comment, FieldAssign, Exhale } kind = Kind::Block;
+  enum class Kind { Assign, Assert, Call, If, While, Goto, Label, Block, Comment, FieldAssign, Exhale, CaseSplit } kind = Kind::Block;
+  // CaseSplit (decision 0037 items 8-9): the no-op `if (<expr>) { }`, one line, that makes Silicon branch on whether two terms are equal.
   std::string name;            // Assign: target; Call: the method; Goto, Label: the label; Comment: the text; FieldAssign: the receiver variable
   std::string field;           // FieldAssign: the field written
   E expr;                      // Assign: value; Assert: the condition; If, While: the condition
@@ -122,8 +129,9 @@ struct LStmt {
 
 // ---- methods and the program ------------------------------------------------------------------------------------
 
-// The Viper type of a variable: Int, Bool, or Ref (a pointer; an address-taken local, which holds its cell).
-enum class LType { Int, Bool, Ref };
+// The Viper type of a variable: Int, Bool, Ref (a pointer; an address-taken local, which holds its cell) or Perm (a ghost amount).
+// Perm: a ghost permission amount (decision 0037 item 6): a formal `none < a && a < write`, or a local that holds one.
+enum class LType { Int, Bool, Ref, Perm };
 
 struct LVar {
   std::string name;
