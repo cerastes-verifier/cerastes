@@ -1,4 +1,4 @@
-# Handoff at the start of M4.5b1b — pointer parameters, results and contracts (record 0037) (2026-10-28); M4.5b1a before it (records 0032–0036)
+# Handoff after M4.5b1b — pointer parameters, results and contracts (record 0037) (2026-10-29); M4.5b1a before it (records 0032–0036)
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
@@ -11,21 +11,45 @@ Session plans approved from M4.5b1b on are in `.claude/plans/` (M4.5b1a's is `.c
 
 ## 1. State
 
-- **M4.5b1a** is done on branch `m4.5b1a-pointers` (`bdc6bd0`, based on `main` `794e960`; PR #15 open, its Linux job
-  green, its macOS job pending at planning): record 0032 and the four axiom records 0033–0036 (`internal/status.md`).
-- **M4.5b1b** runs on branch `m4.5b1b-pointer-params`, from `bdc6bd0`; its plan is
-  `.claude/plans/m4-5b1b-pointer-params.md` (owner decisions at planning: no cuts, no time cap; framing decided per path;
-  `permission` at calls and returns; question 64 answered, §8). Later commits of PR #15 are merged in, never rebased.
+- **M4.5b1a** is done on branch `m4.5b1a-pointers` (`bdc6bd0`; PR #15, open at the start of b1b with its Linux job
+  green): record 0032 and the axiom records 0033–0036.
+- **M4.5b1b** is done on branch `m4.5b1b-pointer-params` (from `bdc6bd0`; result in `internal/status.md`; plan
+  `.claude/plans/m4-5b1b-pointer-params.md`): record 0037. Pointer parameters and results, `&param`, the spec functions
+  in both spellings with ghost amounts, framing per path, explicit `permission` checks at calls and returns,
+  `pointer-comparison`, `restrict` on owned C parameters; the call placement rule and the other pins of record 0037 item
+  15 until b1c.
+- **Audits:** round 1 on record 0037 (two blocking, seven should-fix; all taken), round 2 on the code (three blocking,
+  two should-fix; all taken), and one re-audit, which found the entry cell splits' path explosion; its fix (splits at
+  the calls) was checked by timing, not re-audited (the cap). What was not taken is in §3.
 
 The EDG pin is unchanged (`f0ed5525af`).
 
-## 2. Owner steps
+## 2. Owner steps after M4.5b1b, in this order
 
-1. **PR #15** (`m4.5b1a-pointers`): merge it once both CI jobs are green (the 0027 mask timeouts are fixed in
-   `9a0d4a5`; a macOS-only mask timeout is the known flake).
-2. **M4.5b1b's branch**: pushed and opened as a PR at the end of the session (§1).
+1. **PR #15** (`m4.5b1a-pointers`): merge it once both CI jobs are green.
+2. **This branch**: push it and open its PR (`git push origin m4.5b1b-pointer-params`); it contains b1a's commits until
+   #15 is merged. Both CI jobs run the PR tier.
+3. **Questions:** §8 (65–67). Then M4.5b1c (§4.4).
 
 ## 3. Open audit notes (condensed; the full notes are in the commit named above)
+
+**From M4.5b1b** (audit round 1 on record 0037, round 2 on the code, one re-audit; items not taken and open points):
+- *The cell splits at calls were checked by timing, not re-audited* (the cap): moving the `reads` pairs' case splits
+  from the entry to the calls (record 0037 items 8–9) restored four- and five-parameter times (5.7 s, 22 s); six still
+  time out (exit 3, documented). b1c's audit should re-read `call_atoms`' splits.
+- *Over-strict, fail closed:* `c ? owns(*p) : reads(*p)` is rejected with the `owns`+`reads` rule although the guards
+  exclude each other; `restrict` beside a same-typed parameter with only `live` is rejected even when the function never
+  dereferences it.
+- *Not pinned:* C's `return &x;` raises EDG warning #1056 (`returning_ptr_to_local_variable`), which
+  `VERIFY_WARNING_TAGS` does not admit, so the dangling-result test returns through a local (`int *p = &x; return p;`)
+  (§8 question 65).
+- *By-name cell checks are now `permission`* (record 0037 item 11): an encoder bug that dropped a cell's permission
+  would now read as a user error instead of exit 3; a VIR self-test hook could pin it (round 1 note).
+- *`f__wf`'s added facts* (aliasing values equal, a `reads` place's post value equals its pre value, `owns` pairs
+  distinct within one clause list) are trusted reasoning about the model; the audit rounds checked them by
+  counterexample search, not by proof.
+- *C++'s `p == NULL ? d : *p` with a `const` pointee* stays rejected (an lvalue `?:`, already in b1a), now with a
+  readable message.
 
 **From M4.5b1a** (audit round 1 on records 0032–0036, round 2 on the code, a re-audit of round 2's fixes):
 - *Not pinned:* a bare `p;` with `p` dangling reports `lifetime` (checked by hand), but no test holds it: EDG also warns
@@ -254,7 +278,7 @@ was "pointers are rejected" is retired where its construct is accepted (listed).
 **M4.5b1a The model and address-taken locals inside one function: done** (2026-10-28; records 0032–0036; plan
 `.claude/plans/m4-5b1a-pointers.md`).
 
-**M4.5b1b Pointer parameters, results and contracts** (record 0037): the plan is `.claude/plans/m4-5b1b-pointer-params.md`
+**M4.5b1b Pointer parameters, results and contracts: done** (2026-10-29; record 0037; status entry). The plan is `.claude/plans/m4-5b1b-pointer-params.md`
 (owner, at planning: no cuts and no time cap; the framing of contracts decided per path by Silicon; a missing
 permission at a call or a return is `permission`; `restrict` only on parameters the contract owns, §8 question 64).
 Pre-approved flips: `tests/scalar/negative/reject_pointer.c`,
@@ -262,7 +286,7 @@ Pre-approved flips: `tests/scalar/negative/reject_pointer.c`,
 the category column of b1a's memory rows (the one-past-the-end row becomes `pointer-comparison`, the by-name cell checks
 `permission`).
 
-**M4.5b1c Ownership, sequencing, loops, ports.** Pre-approved flips (owner): `tests/memory/negative/reject_{address_of_pointer,break_out_of_switch_with_cell,cell_in_invariant,cell_in_measure,cell_postfix_value,goto_out_of_cell_scope,loop_cell,loop_pointer,pointer_to_pointer,return_in_loop_with_cell,write_in_assignment_value}.c`. `[[cerastes::owning]]` on parameters and functions (registered then,
+**M4.5b1c Ownership, sequencing, loops, ports.** Pre-approved flips (owner): `tests/memory/negative/reject_{address_of_pointer,break_out_of_switch_with_cell,cell_in_invariant,cell_in_measure,cell_postfix_value,goto_out_of_cell_scope,loop_cell,loop_pointer,pointer_to_pointer,return_in_loop_with_cell,write_in_assignment_value}.c` (b1a's) and `tests/memory/negative/reject_{atom_on_result,call_beside_access,call_compound_target,ensures_atom_no_partner,result_value,two_memory_calls,heap_read_decreases}.c` (b1b's). Besides its own scope it takes over from b1b: atoms on `*result` and `*result` as a value (with owning results), `ensures` atoms without a `requires` partner, 0028 item 13's placement (lifting record 0037 item 8's fail-closed rule), and loops over pointer parameters (hybrid invariants). Its planning decides whether it splits; it re-reads b1b's call-site case splits (§3). `[[cerastes::owning]]` on parameters and functions (registered then,
 targets `p` and `r`: `check_attributes` skips registered attributes, so never earlier) and `owns_block`; sequencing on
 objects (0028 item 12, `unsequenced`) and the placement rule (item 13); cells in loops with **hybrid permission
 invariants** (owner, 2026-10-28: automatic for places reached through an address-taken local or a pointer parameter the
@@ -505,6 +529,8 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
   worktree's build is free for the implementers from the start; in M4.5b1a an agent's build relinked `build/cerastes`
   under a baseline that shared it. Run `scripts/bootstrap.sh` in the worktree first when it was last built for another
   branch (a stale EDG stamp stops `run_tests.py`).
+- **Parallel Silicon runs saturate the Mac** (M4.5b1b: load averages up to 215 while an agent ran a test directory and
+  another timed programs): time single programs only on a quiet machine, and say so with each timing.
 - **Twins and Silicon's continuation:** after a failed check Silicon goes on with the failing value unconstrained, so a
   twin whose failed read flows into an `ensures` fails twice; give such twins an `ensures` that holds for any value.
 - **Compiler matrices** (P41, P48, P50): clang and GCC, both modes, three tiers (no flag, `-Wall`, `-Wall -Wextra`); the
@@ -522,14 +548,15 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
 - **A test that loses an `expect:` line** (pre-approved) keeps its line numbers with a comment in its place
   (M4.4c, the four `reject_assert_shape_*.c`).
 
-## 7. Acceptance of M4.5b1a
+## 7. Acceptance of M4.5b1b
 
-The list is the one in `internal/status.md` (M4.5b1a, "Acceptance"); S5's is in `git show 794e960:internal/status.md`.
+The list is the one in `internal/status.md` (M4.5b1b, "Acceptance"); M4.5b1a's is in `git show bdc6bd0:internal/status.md`,
+S5's in `git show 794e960:internal/status.md`.
 
 ## 8. Questions for the owner
 
 Each has a recommended answer. Answer inline, as before. Answered questions 1–63 are recorded in the decision records
-and in the handoffs named at the top (49–63: `git show bdc6bd0:internal/handoff.md` §8). Open: none.
+and in the handoffs named at the top (49–63: `git show bdc6bd0:internal/handoff.md` §8); 64 below. Open: 65–67.
 
 **M4.5b1a, 2026-10-28:**
 
@@ -541,4 +568,17 @@ and in the handoffs named at the top (49–63: `git show bdc6bd0:internal/handof
 
 Answered at M4.5b1b planning (owner, 2026-10-28): accept `T *restrict p` on a parameter only when the contract gives
 `owns(*p)`; reject it everywhere else (record 0037 item 2).
+
+**M4.5b1b, 2026-10-29:**
+
+65. **EDG warning #1056 in verified tests** (`return &x;`, "returning pointer to local variable"; §3). `VERIFY_WARNING_TAGS`
+    admits only `assign_where_compare_meant`, so a test cannot hold the direct form, and today a user's `return &x;`
+    prints the warning beside the caller's `lifetime` error. *Recommended: reject `return &local;` in M4.5b1c like the
+    compilers' warnings (clang `-Wreturn-stack-address`, GCC `-Wreturn-local-addr`, both on by default), the owner's rule
+    for warning-level hazards; the escape through a local copy stays a `lifetime` error at the caller's use.*
+66. **The cost of aliasing parameters** (record 0037, Consequences): six `reads`/`live` parameters of one type time out.
+    *Recommended: leave it documented until a port needs more; then spike Silicon's joins (`--moreJoins`) or a
+    per-call split order in M4.8.*
+67. **`c ? owns(*p) : reads(*p)`** is rejected by the `owns`+`reads` rule although its guards exclude each other (§3).
+    *Recommended: keep rejecting until a port needs it.*
 
