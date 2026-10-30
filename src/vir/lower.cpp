@@ -1229,7 +1229,28 @@ class Lowerer {
   }
 
   static const Type& site_pointee(const AtomSite& s) { return *s.atom->a->type.pointee; }
-  static int site_param(const AtomSite& s) { return s.atom->a->index; }
+  // A site is identified by a key and a receiver, never by a formal index directly (decision 0041 item 8).  The key: the formal index k >= 0 of
+  // a parameter place; a negative key is the place `result` (see `place_of`); keys >= kGlobalKeyBase are for global places (unused so far).
+  static constexpr int kGlobalKeyBase = 1 << 20;
+  static int site_key(const AtomSite& s) { return s.atom->a->index; }
+  static bool site_is_global(const AtomSite& s) { return site_key(s) >= kGlobalKeyBase; }
+  // The place's pointer in `env` (a global's would be its address, not a formal).
+  static E site_ref(const AtomSite& s, const Env& env) { return place_of(env, site_key(s)); }
+  // The same pointer as a variable of the function being lowered (its own formals).
+  E site_var(const AtomSite& s) const { return low::var(formal_name(*fn_.f, site_key(s))); }
+  // The argument of a call that a site's pointer parameter receives (a global site has none).
+  static const Expr& site_arg(const AtomSite& s, const Expr& call) { return *call.args[static_cast<size_t>(site_key(s))]; }
+  // The user's spelling of the place a site names in the contract: `*p` for a parameter's pointee (empty if unknown), `g` for a global.
+  static std::string site_text(const AtomSite& s) {
+    const std::string& c = s.atom->a->c_text;
+    return c.empty() ? std::string() : (site_is_global(s) ? c : "*" + c);
+  }
+  // The same, from the argument a call passes: `x` for `&x`, `*q` for `q`.
+  static std::string site_call_text(const AtomSite& s, const Expr& call) {
+    if (site_is_global(s)) return site_text(s);
+    const std::string& txt = site_arg(s, call).c_text;
+    return txt.empty() ? std::string() : (txt[0] == '&' ? txt.substr(1) : "*" + txt);
+  }
   static bool site_takes_cell(const AtomSite& s) { return s.atom->atom != AtomKind::Live; }
 
   // The guard of a site over `env`'s formals: the conjunction of its `||`/`?:` conditions (null: unconditional).
@@ -1265,7 +1286,7 @@ class Lowerer {
     cseen_ = std::max(cseen_, idx + 1);
     if (cmode_ == CMode::Call || cmode_ == CMode::Ret) return {low::bool_lit(true), {}};  // asserted one by one at the call or the return
     const AtomSite& site = fa.sites[idx];
-    const E p = env.formals[static_cast<size_t>(site_param(site))];
+    const E p = site_ref(site, env);
     const Type& t = site_pointee(site);
     E pure = low::and_(low::bin(BinOp::Ne, p, low::null_()), wf_expr(p));
     if (site_takes_cell(site)) pure = low::and_(pure, in_block(p));
@@ -1274,9 +1295,9 @@ class Lowerer {
       if (e.atom == AtomKind::Owns)
         for (size_t i = 0; i < idx; ++i) {
           const AtomSite& o = fa.sites[i];
-          if (o.in_ensures != site.in_ensures || o.atom->atom != AtomKind::Owns || site_param(o) == site_param(site)) continue;
+          if (o.in_ensures != site.in_ensures || o.atom->atom != AtomKind::Owns || site_key(o) == site_key(site)) continue;
           if (cell_suffix(site_pointee(o)) != cell_suffix(t)) continue;
-          pure = low::and_(pure, low::implies(site_guard(o, env), low::bin(BinOp::Ne, env.formals[static_cast<size_t>(site_param(o))], p)));
+          pure = low::and_(pure, low::implies(site_guard(o, env), low::bin(BinOp::Ne, site_ref(o, env), p)));
         }
       return {pure, {}};
     }
@@ -1309,12 +1330,12 @@ class Lowerer {
     if (!site_takes_cell(site)) return;
     for (size_t i = 0; i < it->second; ++i) {
       const AtomSite& o = fa.sites[i];
-      if (o.in_ensures != site.in_ensures || !site_takes_cell(o) || site_param(o) != site_param(site) || o.atom->atom == site.atom->atom) continue;
+      if (o.in_ensures != site.in_ensures || !site_takes_cell(o) || site_key(o) != site_key(site) || o.atom->atom == site.atom->atom) continue;
       if (cell_suffix(site_pointee(o)) != cell_suffix(site_pointee(site))) continue;
       const AtomSite& own = o.atom->atom == AtomKind::Owns ? o : site;
       const AtomSite& rd = o.atom->atom == AtomKind::Owns ? site : o;
       const E both = low::and_(site_guard(own, env), site_guard(rd, env));
-      const std::string txt = e.a != nullptr && !e.a->c_text.empty() ? "*" + e.a->c_text : std::string();
+      const std::string txt = e.a != nullptr ? site_text(site) : std::string();
       obl(full, guard, gdep, both ? low::not_(both) : low::bool_lit(false), {},
           meta("permission", e.loc, "the contract of `" + cf_->c_name + "` both owns " + quoted(txt, "an object") + " and reads it on one path"));
     }
@@ -1351,7 +1372,7 @@ class Lowerer {
       }
       if (cell_suffix(site_pointee(s)) != sfx) continue;
       E d = site_guard(s, env);
-      if (site_param(s) != k) d = low::and_(d, low::bin(BinOp::Eq, env.formals[static_cast<size_t>(site_param(s))], p));
+      if (site_key(s) != k) d = low::and_(d, low::bin(BinOp::Eq, site_ref(s, env), p));
       ds.push_back(d);
     }
     bool trivial = false;
@@ -2101,12 +2122,10 @@ class Lowerer {
     for (size_t i = 0; i < n; ++i) {  // the requires atoms come first in `sites`
       S x;
       x.site = &fa.sites[i];
-      const int j = site_param(*x.site);
-      x.p = cenv.formals[static_cast<size_t>(j)];
+      x.p = site_ref(*x.site, cenv);
       x.g = site_guard(*x.site, cenv);
       x.t = &site_pointee(*x.site);
-      const std::string txt = e.args[static_cast<size_t>(j)]->c_text;
-      x.place = txt.empty() ? std::string() : (txt[0] == '&' ? txt.substr(1) : "*" + txt);
+      x.place = site_call_text(*x.site, e);
       ss.push_back(std::move(x));
     }
     auto text_of = [&](const S& x) {
@@ -2115,7 +2134,7 @@ class Lowerer {
         case AtomKind::Owns: return "calls `" + callee.c_name + "`, which needs to own " + pl + ", without owning it";
         case AtomKind::Reads: return "calls `" + callee.c_name + "`, which needs to read " + pl + ", without the permission to read it";
         case AtomKind::Live: {
-          const Expr& arg = *e.args[static_cast<size_t>(site_param(*x.site))];
+          const Expr& arg = site_arg(*x.site, e);
           const std::string who = arg.kind == Expr::Kind::Null ? std::string("the null pointer")
                                   : arg.c_text.empty()         ? std::string("the pointer")
                                                                : "`" + arg.c_text + "`";
@@ -2156,7 +2175,7 @@ class Lowerer {
       for (size_t j = i + 1; j < ss.size(); ++j) {
         if (!exclusive_pair(*ss[i].site, *ss[j].site)) continue;
         const std::string pl = quoted(ss[i].place, "the object the pointer points to");
-        if (site_param(*ss[i].site) == site_param(*ss[j].site))  // one parameter under two atoms: their guards must exclude each other (decision 0039 item 7)
+        if (site_key(*ss[i].site) == site_key(*ss[j].site))  // one parameter under two atoms: their guards must exclude each other (decision 0039 item 7)
           add(low::and_(ss[i].g, ss[j].g), low::bin(BinOp::Ne, ss[i].p, ss[j].p),
               "passes " + pl + " to `" + callee.c_name + "`, whose contract both owns and reads it on this path");
         else
@@ -2186,7 +2205,7 @@ class Lowerer {
         for (int i = 0; i < caller.nreq; ++i) {
           const AtomSite& cs = caller.sites[static_cast<size_t>(i)];
           if (cs.atom->atom != AtomKind::Reads || cell_suffix(site_pointee(cs)) != cell_suffix(*x.t)) continue;
-          const E q = low::var(formal_name(*fn_.f, site_param(cs)));
+          const E q = site_var(cs);
           if (same_expr(x.p, q)) continue;
           bool seen = false;
           for (const auto& d : done)
@@ -2351,13 +2370,11 @@ class Lowerer {
         const AtomSite& site = fa.sites[static_cast<size_t>(i)];
         if (!site_takes_cell(site)) continue;
         Acc::Atom k;
-        const int j = site_param(site);
-        k.place = cenv.formals[static_cast<size_t>(j)];
+        k.place = site_ref(site, cenv);
         k.guard = site_guard(site, cenv);
         k.owns = site.atom->atom == AtomKind::Owns;
         k.field = fkey(site_pointee(site));
-        const std::string txt = e.args[static_cast<size_t>(j)]->c_text;
-        k.text = txt.empty() ? std::string() : (txt[0] == '&' ? txt.substr(1) : "*" + txt);
+        k.text = site_call_text(site, e);
         fx.tags.push_back(MemTag{0, k.field, true, k.owns, path_, {}});
         ca.atoms.push_back(std::move(k));
       }
@@ -3483,8 +3500,8 @@ class Lowerer {
     std::set<int> done;
     for (int i = 0; i < fa.nreq; ++i) {
       const AtomSite& site = fa.sites[static_cast<size_t>(i)];
-      if (!site_takes_cell(site) || cell_suffix(site_pointee(site)) != sfx || !done.insert(site_param(site)).second) continue;
-      split(low::var(formal_name(*fn_.f, site_param(site))));
+      if (!site_takes_cell(site) || cell_suffix(site_pointee(site)) != sfx || !done.insert(site_key(site)).second) continue;
+      split(site_var(site));
     }
   }
 
@@ -3497,10 +3514,10 @@ class Lowerer {
     const Env env = contract_env();
     std::vector<E> g;
     for (size_t i = 0; i < n; ++i) g.push_back(site_guard(fa.sites[i], env));
-    auto p = [&](size_t i) { return env.formals[static_cast<size_t>(site_param(fa.sites[i]))]; };
+    auto p = [&](size_t i) { return site_ref(fa.sites[i], env); };
     for (size_t i = 0; i < n; ++i)
       for (size_t j = i + 1; j < n; ++j) {
-        if (site_param(fa.sites[i]) == site_param(fa.sites[j])) continue;
+        if (site_key(fa.sites[i]) == site_key(fa.sites[j])) continue;
         low::LStmt st;
         st.kind = low::LStmt::Kind::CaseSplit;
         st.expr = low::bin(low::BinOp::Eq, live_cell(p(i)), live_cell(p(j)));
@@ -3508,14 +3525,14 @@ class Lowerer {
       }
     // A pointer parameter without an atom of its own may be the place an atom names: split on each one of the same field.
     std::set<int> with_atom;
-    for (size_t i = 0; i < n; ++i) with_atom.insert(site_param(fa.sites[i]));
+    for (size_t i = 0; i < n; ++i) with_atom.insert(site_key(fa.sites[i]));
     for (size_t k = 0; k < f.params.size(); ++k) {
       const Type& t = f.params[k].type;
       if (!t.is_ptr() || with_atom.count(static_cast<int>(k)) != 0 || t.pointee == nullptr || t.pointee->is_void()) continue;
       std::set<int> seen;
       for (size_t i = 0; i < n; ++i) {
         const AtomSite& a = fa.sites[i];
-        if (!site_takes_cell(a) || cell_suffix(site_pointee(a)) != cell_suffix(*t.pointee) || !seen.insert(site_param(a)).second) continue;
+        if (!site_takes_cell(a) || cell_suffix(site_pointee(a)) != cell_suffix(*t.pointee) || !seen.insert(site_key(a)).second) continue;
         low::LStmt st;
         st.kind = low::LStmt::Kind::CaseSplit;
         st.expr = low::bin(low::BinOp::Eq, env.formals[k], p(i));
@@ -3526,7 +3543,7 @@ class Lowerer {
       for (size_t j = i + 1; j < n; ++j) {
         const AtomSite& a = fa.sites[i];
         const AtomSite& b = fa.sites[j];
-        if (a.atom->atom != AtomKind::Owns || b.atom->atom != AtomKind::Owns || site_param(a) == site_param(b)) continue;
+        if (a.atom->atom != AtomKind::Owns || b.atom->atom != AtomKind::Owns || site_key(a) == site_key(b)) continue;
         if (cell_suffix(site_pointee(a)) != cell_suffix(site_pointee(b))) continue;
         emit_assert(out, low::implies(low::and_(g[i], g[j]), low::bin(low::BinOp::Ne, p(i), p(j))),
                     meta("internal", fn_.f->loc, "internal check: two places the contract of `" + fn_.f->c_name + "` owns are different"));
@@ -3546,11 +3563,10 @@ class Lowerer {
     std::vector<E> g, p;
     for (size_t i : ens) {
       g.push_back(site_guard(fa.sites[i], env));
-      p.push_back(env.formals[static_cast<size_t>(site_param(fa.sites[i]))]);
+      p.push_back(site_ref(fa.sites[i], env));
     }
     auto name = [&](size_t k) {  // the user's spelling of the place, for messages
-      const std::string& c = fa.sites[ens[k]].atom->a->c_text;
-      return c.empty() ? std::string() : "*" + c;
+      return site_text(fa.sites[ens[k]]);
     };
     auto perm_meta = [&](const std::string& message, size_t k) {
       low::Meta m = meta("permission", at, message);
@@ -3807,8 +3823,8 @@ class Lowerer {
     std::set<int> atom_params, value_params;
     for (int i = 0; i < fa.nreq; ++i) {
       const AtomSite& site = fa.sites[static_cast<size_t>(i)];
-      atom_params.insert(site_param(site));
-      if (site_takes_cell(site)) value_params.insert(site_param(site));
+      atom_params.insert(site_key(site));
+      if (site_takes_cell(site)) value_params.insert(site_key(site));
     }
     if (with_atoms != nullptr) with_atoms->assign(atom_params.begin(), atom_params.end());
     auto name = [&](Place& pl, const std::string& tag) {
@@ -3832,7 +3848,7 @@ class Lowerer {
       const std::string& c = f.params[static_cast<size_t>(k)].name;
       pl.label = c.empty() ? std::string() : "*" + c;
       for (const AtomSite& site : fa.sites)
-        if (site_param(site) == k && !site.atom->a->c_text.empty()) { pl.label = "*" + site.atom->a->c_text; break; }
+        if (site_key(site) == k && !site_text(site).empty()) { pl.label = site_text(site); break; }
       name(pl, formal_name(f, k));
       pl.gv = low::bin(low::BinOp::Ne, pl.recv, low::null_());
       pl.gl = pl.gv;
@@ -4185,7 +4201,7 @@ class Lowerer {
       const FnAtoms& fa = atoms_of(*fn_.f);
       std::set<int> value_params;
       for (int i = 0; i < fa.nreq; ++i)
-        if (site_takes_cell(fa.sites[static_cast<size_t>(i)])) value_params.insert(site_param(fa.sites[static_cast<size_t>(i)]));
+        if (site_takes_cell(fa.sites[static_cast<size_t>(i)])) value_params.insert(site_key(fa.sites[static_cast<size_t>(i)]));
       std::set<std::pair<int, int>> split_cells, split_lives;
       for (const Place* a : pparams)
         for (int k : atom_params) {
@@ -4809,7 +4825,7 @@ class Lowerer {
           const AtomSite& partner = fa.sites[static_cast<size_t>(site.atom->amount)];
           const E ge = site_guard(site, env), gp = site_guard(partner, env);
           if (!gp || same_expr(ge, gp)) continue;
-          const std::string txt = site.atom->a != nullptr && !site.atom->a->c_text.empty() ? "*" + site.atom->a->c_text : std::string();
+          const std::string txt = site.atom->a != nullptr ? site_text(site) : std::string();
           emit_assert(m.body, low::implies(prior, low::implies(ge, gp)),
                       meta("permission", site.atom->loc.known() ? site.atom->loc : c.loc,
                            "the contract of `" + f.c_name + "` returns " + quoted(txt, "an object") + " on a path where its `requires` did not take it"));
@@ -4881,13 +4897,13 @@ class Lowerer {
           E gr2, ge2;
           bool have_r2 = false, have_e2 = false;
           for (const AtomSite& s : fa.sites) {
-            if (s.atom->atom != AtomKind::Reads || site_param(s) != k2.first) continue;
+            if (s.atom->atom != AtomKind::Reads || site_key(s) != k2.first) continue;
             if (!s.in_ensures && !have_r2) { gr2 = site_guard(s, env); have_r2 = true; }
             if (s.in_ensures && !have_e2) { ge2 = site_guard(s, env); have_e2 = true; }
           }
           if (!have_r2 || !have_e2) continue;
           m.requires_.push_back(clause_checks(
-              low::implies(low::and_(low::and_(gr2, ge2), low::bin(low::BinOp::Eq, env.result, env.formals[static_cast<size_t>(k2.first)])),
+              low::implies(low::and_(low::and_(gr2, ge2), low::bin(low::BinOp::Eq, env.result, place_of(env, k2.first))),
                            low::bin(low::BinOp::Eq, low::var(ghost_name(-1, true)), low::var(ghost_name(k2.first, false)))),
               f.loc, false, what));
         }
@@ -4897,7 +4913,7 @@ class Lowerer {
       E gr, ge;
       bool have_r = false, have_e = false;
       for (const AtomSite& s : fa.sites) {
-        if (s.atom->atom != AtomKind::Reads || site_param(s) != key.first) continue;
+        if (s.atom->atom != AtomKind::Reads || site_key(s) != key.first) continue;
         if (!s.in_ensures && !have_r) { gr = site_guard(s, env); have_r = true; }
         if (s.in_ensures && !have_e) { ge = site_guard(s, env); have_e = true; }
       }
