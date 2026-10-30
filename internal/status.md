@@ -5,88 +5,86 @@ the exact first step for the next session. Trimmed at the end of M4.4c (owner, 2
 history table; the full log up to M4.4c is `git show 1fcc43b:internal/status.md`, M4.4c's entry is
 `git show fce46de:internal/status.md`, M4.4d's `git show 9017105:internal/status.md`, M4.5a's
 `git show 72e30b3:internal/status.md`, S5's `git show 794e960:internal/status.md`, M4.5b1a's
-`git show bdc6bd0:internal/status.md`, and M4.5b1b's `git show 8003dca:internal/status.md`.
+`git show bdc6bd0:internal/status.md`, M4.5b1b's `git show 8003dca:internal/status.md`, and M4.5b1c1's
+`git show eab4058:internal/status.md`.
 
-## M4.5b1c1 — loops and jumps over memory (2026-10-29): done on branch `m4.5b1c1-loops`
+## M4.5b1c2 — sequencing and placement over memory (2026-10-29): done on branch `m4.5b1c2-sequencing`
 
-Plan: `.claude/plans/m4-5b1c1-loops.md`. Read `internal/handoff.md` next: §3 "From M4.5b1c1", §4.4 (b1c2, b1c3 with
-their flips), §8.
+Plan: `.claude/plans/m4-5b1c2-sequencing.md`. Read `internal/handoff.md` next: §3 "From M4.5b1c2", §4.2 (b1c3 with its
+flips), §8.
 
-**Owner decisions (2026-10-29):** M4.5b1c is three sessions (b1c1 loops and jumps; b1c2 sequencing and placement,
-questions 65 and 67; b1c3 `T**`, owning parameters, `*result`); owning results (`owning` on functions, `owns_block`,
-`owns(*result)`, `ensures` atoms with no partner) move to M4.5d2; loop frames are "every place held"; S28 F3 (a
-`return`/outward `goto` in a loop forces the automatic invariant; it removes a false `permission` b1b reported) and
-F1/F2 (the flag rows) accepted; question 66: the cost of aliasing parameters is fixed in M4.8; question 68: b1c3 may
-re-expect the three pinned false alarms of reassigned parameters; x86-64 test runs go to `matt@clang4.cpp.al`
-automatically, not Docker on the Mac (no Linux run this session: CI covers it).
+**Owner decisions (2026-10-29):** the upstream EDG merge (23 commits) and the pin move wait for the box session
+(question 69); unsequenced accesses that name one object are rejected like the compilers (`unsequenced_modification`),
+the aliasing shapes are path-precise `unsequenced` (70); no time cap and no cuts (71); an `ensures` atom is returned only
+where its `requires` partner was taken, checked in `f__wf` for every contract (72, after audit round 1's S7). Step 1
+consolidated the handoff and `plan.md` (the notes this session consumed moved into its plan's "Inputs").
 
 **Done**
-- **Record 0038** (accepted; revised after P59, S28, audit round 1 on the design: five blocking items, audit round 2 on
-  the code: one blocking item, and its re-audit: one blocking item, fixed and checked by tests and the auditor's
-  repros), amending 0012, 0014, 0019, 0028, 0029, 0032 and 0037: loops over memory with an automatic invariant (every
-  cell of every open scope and the places of unassigned pointer parameters, snapshot amounts, entry case splits,
-  de-duplication and separation guards, values kept when no write can reach them, flag-guarded ranges, flag rows);
-  iteration checks at the back edge (`permission`); conditions that touch memory in the top-test shape; invariants and
-  loop measures over memory in contract mode with explicit framing (`permission`) and flag obligations
-  (`uninitialized`); case splits for pointers the loop assigns; scope exits at `break`/`continue`/`goto`
-  (`lifetime`); `&x` in an annotation without `address_taken` rejected (was exit 3).
-- **Cuts** (the plan's stop rules): written atoms in `CERASTES_INVARIANT` → b1c3; a function's `decreases(*p)` → b1c2;
-  both stay rejected, with what each needs in handoff §3.
-- **Code:** `src/vir/lower.cpp` (`loop()`, `LoopWrites`, `loop_places`, `CMode::Inv`, `inv_cell`, `leave_to()`,
-  `jump_depth`, `label_depths()`); `src/backend/encode.cpp` (loop and jump rejections lifted, `loop_clause`, atoms in
-  invariants and measures rejected, `&x` in annotations, `*p` in loop clauses, loop body `end_loc`, messages naming
-  b1c2/b1c3/d2); `src/vir/check.cpp`, `check.h`, `vir.h` (the memory walker removed; atoms only in contracts).
-- **Lint:** `Perm` locals pinned (snapshots only, never assigned inside a loop whose invariant uses them), `perm`
-  refused in invariants; 27 new self-tests.
-- **Tests:** `tests/memory/` 28 positives, 41 twins and 8 rejection pins; the port `tests/memory/verifast/
-  address_of_local.c` (VeriFast `0fb63506`, its three `should_fail` lines as `lifetime`); VIR self-test
-  `selftest_cases9.inc` (59 lowering cases, 3 rejection cases; the seven loop and jump `mem_rej_*` of cases7 flipped to
-  lowering cases), `VIR_CASES_MIN` 1263; four doc examples.
-- **Docs:** Memory and ownership ("Loops", "Leaving a block", the not-yet list), Error messages (`permission`,
-  `lifetime`), Annotations (invariants over memory), Verifying; `internal/encoding.md` §3; `il-inventory.md` P59, S28;
-  `tests/README.md`.
+- **Record 0039** (accepted; revised after P60, audit round 1 on the design: three blocking items, B1 a snapshot's set
+  without its guard, B2 one key per field joining unsequenced accesses' sets, B3 missing pins; audit round 2 on the code:
+  one blocking item, R2-B1, a write in the left operand of `&&`/`||`/`?:` not ordered before the right operand's reads, a
+  wrong verdict; one re-audit: no blocking item), amending 0011, 0020, 0021, 0025, 0026, 0028, 0032, 0037 and 0038:
+  writes to cells inside expressions (`AssignE` on a cell, the new `StoreE`), E3 for memory (guarded snapshots), keys
+  per syntactic object; sequencing on objects (the static half rejects a cell or `*v` named twice, `*&x` as `x`; the
+  rest path-precise, category `unsequenced`, the eighteenth); calls beside accesses and two memory calls (0028 item 13;
+  0037 item 8's placement rule removed); the left operand of `&&`/`||`/`?:` as a floor for cell accesses; a
+  fail-closed memory-order check with three hooks; compound stores whose address has a side effect; R14
+  `return_local_address`; `c ? owns(*p) : reads(*p)` path-precise and partners by path in `f__wf`; a function's
+  `decreases(*p)` (framed in `f__wf`, chain-guarded, the explicit termination check under `old`).
+- **Code:** `src/vir/vir.h`, `vir.cpp` (`StoreE`, Builder), `check.cpp`, `check.h` (`Placement` removed, the
+  Sequencer's `*v` objects, measures over memory); `src/vir/lower.cpp`, `lower.h` (`cell_write`, `mem_read`,
+  `register_access`, `order_rel`, `check_memory_order`, `overlap_obligations`, the hooks `perturb_memory_order`,
+  `drop_snapshot_guard_set`, `drop_left_floor`); `src/backend/encode.cpp`, `diagnostics.def` (`assign_target`, R14,
+  the measure deref).
+- **Tests:** `tests/memory/` 23 positives and 42 negatives (twins, the audits' pins, five R14 rejections, the static
+  rejections); VIR self-test `selftest_cases10.inc` (67 cases; `VIR_CASES_MIN` 1317); six doc examples.
+- **Docs:** Memory and ownership ("Writes and calls inside expressions", conditional ownership, measures over memory,
+  returned addresses, the not-yet list), Error messages (`unsequenced`, eighteen categories; `permission`), Verifying
+  (`unsequenced_modification` on cells, R14), Annotations; `internal/encoding.md` §3 and §8; `il-inventory.md` P60, P61,
+  S29; the category in `scripts/run_tests.py`, `scripts/test_run_tests.py`, `tests/README.md` and 0011's table.
 
-**Flips (pre-approved):** retired `tests/memory/negative/reject_{break_out_of_switch_with_cell,cell_in_invariant,
-cell_in_measure,goto_out_of_cell_scope,loop_cell,loop_pointer,return_in_loop_with_cell}.c`, each replaced by a positive
-of the same shape; `reject_heap_read_decreases.c` kept (cut 1). The remaining pins' `Pins:` comments name b1c2, b1c3
-or M4.5d2; no `expect:` line of an existing test changed.
+**Flips (pre-approved):** retired `tests/memory/negative/reject_{cell_postfix_value,two_memory_calls,heap_read_decreases}.c`
+(each replaced by a positive of the same shape) and `reject_{call_beside_access,call_compound_target}.c` (replaced by
+negatives named for their shape, `error unsequenced` at the same line); `reject_write_in_assignment_value.c` re-expected
+in place as `rejected cerastes-unsequenced_modification @ L11` (P61 A4: GCC warns); VIR self-test
+`mem_rej_cell_assignment_as_value` and `mem_rej_cell_postfix_increment_as_value` became lowering cases. No other
+existing test's `expect:` line changed.
 
 **Acceptance**
-- The baseline (`main` `9782bd4`, in the main checkout): 6298 passed, 0 failed, 1 skipped; VIR self-test 1204.
-- **Viper against the baseline:** every one of the 2256 kept `.vpr` and `.map` files regenerated byte-identical (no
-  existing program's Viper changed); the 1204 baseline VIR cases byte-identical, 59 added.
-- `tests/memory`: 699 passed, 0 failed (before the last test pair); with the memory fixtures and the memory and
-  error-messages doc examples, the plan's acceptance set passed (878 before the last two fixes), and all of it again in
-  `check.sh`.
-- `check.sh` (the full check, `CERASTES_CHECK_BASE` unset; twice: the first stopped at the harness self-test on `main`'s
-  Dependabot SHA, see Surprises): **all green** in about 55 min. Harness self-test 1024 tests (1 skip), lint self-test
-  307, mutate self-test 291; tests **6571 passed, 0 failed, 1 skipped** (native-ok runs: Apple clang 1245, GCC 1245);
-  VIR self-test **1263** lowering and 229 rejection cases, 0 problems, all 1263 through Silicon, lint clean (2404 files);
-  walker oracle 136 goldens, 1924 facts, 0 failed; docs and `check_doc_examples --html` green. No Linux run (CI covers
-  it, owner).
+- The baseline (`main` `eab4058`, in the main checkout): 6571 passed, 0 failed, 1 skipped; VIR self-test 1263.
+- **Viper against the baseline:** every one of the 2404 kept `.vpr` and `.map` files regenerated byte-identical with the
+  final binary (no existing program's Viper changed).
+- `tests/memory` and the memory, error-messages and verifying doc examples: 1205 passed, 0 failed (native-ok 261 each);
+  VIR self-test 1317 lowering and 240 rejection cases, 0 problems; harness self-test 1024 (1 skip), lint self-test 307,
+  `--check-headers` 2493; `build_docs.sh` and `check_doc_examples --html` green.
+- `check.sh` (the full check, `CERASTES_CHECK_BASE` unset; once): **all green** in about 53 min. Harness self-test 1024
+  tests (1 skip), lint self-test 307; tests **6815 passed, 0 failed, 1 skipped** (native-ok runs: Apple clang 1301, GCC
+  1301); VIR self-test **1317** lowering and 240 rejection cases, 0 problems, all 1317 through Silicon, lint clean (2526
+  files); walker oracle 136 goldens, 1924 facts, 0 failed; docs and `check_doc_examples --html` green. `build/vpr`
+  against the baseline: 0 files differ, 244 added. No Linux run (CI covers it).
 
 **Surprises**
-- Viper refuses `perm` in an invariant, so a loop condition's permission and liveness checks cannot be invariant
-  clauses (audit round 1, B1): conditions that touch memory moved to the top-test shape.
-- On a path where a guarded atom does not hold, Silicon cannot tell a parameter from a fresh cell: guards and case
-  splits against every cell were needed (audit round 2, B1, and the re-audit).
-- A `return` inside an int-only loop of a function with `owns(*p)` was a false `permission` error since b1b (S28 F3).
-- `&x` in an annotation does not set the front end's `address_taken` (P59); b1a's encoder exited 3 on it.
-- An invariant that states a cell's value gave no flag fact until invariant reads kept their flag obligation.
-- `main` itself failed `check.sh`'s harness self-test since the Dependabot merge (PR #16, `fca0cbc`): `CiGuardTests`
-  pins `ci.yml`'s action SHAs, and the bump changed only `ci.yml`. The first `check.sh` stopped there; the self-test's
-  model and record 0001 now carry `actions/setup-python` v7.1.0 (handoff §6).
+- P60 C1: `x = bump(&x);` and `x = (bump(&x), 2);` were already accepted (a statement's own store beside a memory call)
+  and keep their Viper; 0025 item 2's hazard only exists for writes inside expressions.
+- GCC's `-Wsequence-point` warns on shapes C++17 defines (`x = x++`, `*p = (*p)++`) and compares lvalues as written
+  (`(p = q, (*p)++ + *p)`), so the static half rejects them in both modes; clang names objects only.
+- Audit round 2's R2-B1 was a wrong verdict: a guard's value set does not carry the stores C completes in it.
+- A test, not the audit, found that an item 3 obligation's set carried a write's whole value computation into the
+  comma floor, so the explicit termination check of a later recursive call was not printed (fixed: an access's set is
+  its place value's; checked by the tests and the VIR self-test, not re-audited: the cap).
 
-**Decision records added:** 0038-loops-and-jumps.
+**Decision records added:** 0039-sequencing-and-placement.
 
-**First step for the next session (M4.5b1c2).** Confirm the owner pushed `main` and merged this branch with both CI jobs
-green; then plan b1c2 from handoff §4.4 (sequencing and placement, questions 65 and 67, and the function measures cut
-from b1c1), saving the plan as `.claude/plans/m4-5b1c2-<topic>.md`.
+**First step for the next session (M4.5b1c3).** Confirm the owner pushed `main` and merged this branch with both CI jobs
+green; then plan b1c3 from handoff §4.2 (`T**`, `[[cerastes::owning]]` on parameters, `*result` as a value, written
+atoms in loop invariants, the aliasing trap, `swap.c`, `address_of_local.c`'s `int**` functions, the Memory and
+ownership page completed, question 68's re-expectations), saving the plan as `.claude/plans/m4-5b1c3-<topic>.md`.
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 
 | Session | Date | Branch, merge | Records | Outcome |
 |---|---|---|---|---|
+| M4.5b1c2 Sequencing and placement | 2026-10-29 | `m4.5b1c2-sequencing` | 0039 | writes to cells inside expressions, sequencing on objects (`unsequenced`; same-object shapes rejected like the compilers), calls beside accesses, `return &local;` rejected (R14), `c ? owns : reads` path-precise and partners by path, function measures over memory |
 | M4.5b1c1 Loops and jumps | 2026-10-29 | `m4.5b1c1-loops` | 0038 | loops over memory with automatic permission invariants ("every place held"), invariants and loop measures over memory, scope exits at jumps; written atoms in invariants cut to b1c3, function measures over memory to b1c2; the `address_of_local.c` port |
 | M4.5b1b Pointer parameters and contracts | 2026-10-28/29 | `m4.5b1b-pointer-params` | 0037 | pointer parameters and results, `&param`; `owns`/`reads`/`live`/`old` in both spellings with ghost amounts; framing per path; `permission` at calls and returns; `pointer-comparison`; `restrict` on owned C parameters |
 | M4.5b1a The model, address-taken locals | 2026-10-28 | `m4.5b1a-pointers` | 0032–0036 | the `Block` domain and its four axioms; address-taken locals as blocks, `&`, `*`, NULL, `==`, liveness and scope exits inside one function; `null-dereference`, `permission`, `lifetime`; C's incompatible pointer types as errors |

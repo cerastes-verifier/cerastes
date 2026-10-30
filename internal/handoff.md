@@ -1,4 +1,4 @@
-# Handoff during M4.5b1c2 — sequencing and placement over memory (record 0039); M4.5b1c1 before it (record 0038)
+# Handoff after M4.5b1c2 — sequencing and placement over memory (record 0039) (2026-10-29); M4.5b1c1 before it (record 0038)
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
@@ -11,17 +11,44 @@ Session plans approved from M4.5b1a on are in `.claude/plans/`; the notes a sess
 - **On `origin/main`** (`234ede3`): M4.5b1a (PR #15), M4.5b1b (PR #17) and the Python pins (PR #18).
 - **M4.5b1c1** (record 0038) is merged into the local `main` (`eab4058`), not yet pushed; its branch
   `m4.5b1c1-loops` is pushed.
-- **M4.5b1c2** is in progress on branch `m4.5b1c2-sequencing` (from `eab4058`; plan
-  `.claude/plans/m4-5b1c2-sequencing.md`): record 0039.
+- **M4.5b1c2** is done on branch `m4.5b1c2-sequencing` (from `eab4058`; result in `internal/status.md`; plan
+  `.claude/plans/m4-5b1c2-sequencing.md`): record 0039, no cuts.
+- **Audits:** round 1 on record 0039 (three blocking, nine should-fix; all taken, S7 by the owner as question 72), round
+  2 on the code (one blocking, R2-B1, a wrong verdict, fixed; five should-fix, taken), one re-audit (no blocking item;
+  three should-fix, taken). A later fix found by a test (the termination check's set) was checked by the tests, not
+  re-audited (the cap). What was not taken is in §3.
 
 The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 23 commits behind upstream `main` (§4.1).
 
 ## 2. Owner steps
 
 1. **`main`**: push it (b1c1's merge, `eab4058`).
-2. After M4.5b1c2: push its branch and open its PR; both CI jobs run the PR tier.
+2. **This branch**: push it and open its PR (`git push origin m4.5b1c2-sequencing`); both CI jobs run the PR tier (no
+   Linux run in the session: CI covers it).
+3. Then M4.5b1c3 (§4.2).
 
 ## 3. Open audit notes (condensed; the full notes are in the commit named above)
+
+**From M4.5b1c2** (audit round 1 on record 0039, round 2 on the code, one re-audit; `build/m4.5b1c2/audit{1,2}.md` in the
+worktree, gitignored; items not taken and open points):
+- *Not re-audited* (the cap): the fix of the missed explicit termination check (an item 3 obligation's set held the
+  earlier write's whole value computation, so the comma floor carried `nr` into the recursive call's PRE; an access's
+  set is now its place value's, a call's its arguments'). Smaller sets are the safe direction (0021 item 10); pinned by
+  `tests/memory/negative/noreturn_call_in_expression_termination.c` and `seq_noreturn_recursive_call_same`.
+- *What the fail-closed check cannot see* (record 0039 item 4): obligations that read cells and inline reads are not
+  effects and rely on their sets and on item 2's inline classification; a set that is too large is invisible (0026
+  item 4), and the audits' pins guard it. In step 2, `(y = *f(), 1) && (*q = 5)` (a left operand whose value ignores
+  its read) becomes exit 3 through check (ii), never a wrong verdict.
+- *Fragility* (round 2, note 2): `Acc::owner` can point at a dead stack `Full` of a then-arm while the else-arm is
+  lowered; safe today since `order_rel` returns "unordered arms" first; a heap-stable `Full` id would be sturdier.
+- *Over-strict, listed:* `(*p = f(a)) + (*q = g(b))` stays `unsequenced_calls` (a cell write's checks are items of F,
+  unlike a Viper local's write, 0025 item 2); a caller that breaks an exclusion resting on a value `requires` is
+  reported `permission` at the call's separation check before the `precondition` (0037 item 8's order).
+- *By design* (owner, questions 65 and 70): `return p = &x;` and `int *r = &x; return r;` warn only through GCC's
+  optimizer, so they stay accepted and the caller's first use fails `lifetime`; EDG's #1056 still prints beside an R14
+  rejection where it fires.
+- *Cost:* the slowest new tests take 9-14 s under load 150-175 (about 3 s at load 47); none near 60 s.
+- *Tooling:* `build/cerastes verify --keep-vpr` with no path writes `<stem>.vpr` into the current directory (P60).
 
 **From M4.5b1c1** (audit round 1 on record 0038, round 2 on the code, one re-audit whose blocking item was fixed and
 checked by the tests and the auditor's repros, not re-audited: the cap; items not taken and open points):
@@ -221,7 +248,7 @@ not taken go to §3); single-file runs while working (`build/cerastes verify` di
 builds serialized (`lockf build/<session>/build.lock cmake --build build/cmake`); `check.sh` at most twice; the EDG
 suites on the x86-64 host are their own session, but any x86-64 test run a session needs goes to `matt@clang4.cpp.al`
 automatically (owner, 2026-10-29: not Docker multi-arch on the Mac, which is only the fallback when the host is down).
-Record numbers are the next free ones when written (0039 is next). The
+Record numbers are the next free ones when written (0040 is next). The
 approved plan is saved as `.claude/plans/<milestone>-<topic>.md` (plan.md, "Session protocol").
 
 Finished sessions: their plans are in `.claude/plans/` (from M4.5b1a on), their results in `internal/status.md` and the
@@ -263,9 +290,8 @@ atoms with no partner) moved to M4.5d2. Each session rejects what a later one ma
 others; a pin whose construct stays rejected keeps its `expect:` line, and only its message and `Pins:` comment name the
 new session.
 
-**M4.5b1c2 Sequencing and placement: in progress** (plan `.claude/plans/m4-5b1c2-sequencing.md`, with the notes of
-§3 it consumes; record 0039). Flips:
-`tests/memory/negative/reject_{cell_postfix_value,write_in_assignment_value,call_beside_access,call_compound_target,two_memory_calls,heap_read_decreases}.c`.
+**M4.5b1c2 Sequencing and placement: done** (2026-10-29; record 0039; plan `.claude/plans/m4-5b1c2-sequencing.md`;
+status entry), with all its flips.
 
 **M4.5b1c3 `T**`, owning parameters, `*result`.** `T**` and the address of a pointer local; `[[cerastes::owning]]` on
 parameters (registered then, target `p` only: `check_attributes` skips registered attributes, so never earlier; P52),
@@ -556,4 +582,5 @@ like the compilers), 66 (the cost of aliasing parameters, M4.8), 67 (the `owns`+
 may re-expect the three pinned false alarms of reassigned parameters, §4.2); at M4.5b1c2's planning (2026-10-29): 69
 (the upstream EDG merge and the pin move wait for the box session, §4.1), 70 (unsequenced accesses that name one object
 are rejected like the compilers, `unsequenced_modification`; the shapes that depend on aliasing are path-precise
-`unsequenced`), 71 (b1c2 has no time cap and no cuts). None is open.
+`unsequenced`), 71 (b1c2 has no time cap and no cuts), 72 (after audit round 1's S7: an `ensures` atom is returned only
+where its `requires` partner was taken, checked in `f__wf` for every contract, record 0039 item 7). None is open.
