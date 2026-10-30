@@ -1,35 +1,32 @@
-# Handoff after M4.5b1c3 — pointers to pointers, owning parameters, `*result`, written atoms (record 0040) (2026-10-30); M4.5b1c2 before it (record 0039)
+# Handoff after M4.5b1c3 — pointers to pointers, owning parameters, `*result`, written atoms (record 0040) (2026-10-30); M4.5b2a in progress
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
-rediscover, and holds only what is live (owner, 2026-10-26; consolidated again at M4.5b1c3's start, 2026-10-30): the
-text before this consolidation is `git show c0f8823:internal/handoff.md`, whose header names every earlier version.
+rediscover, and holds only what is live (owner, 2026-10-26; consolidated again at M4.5b2a's start, 2026-10-30): the
+text before this consolidation is `git show 5ffb1a2:internal/handoff.md`, whose header names every earlier version.
 Session plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session consumes move into its plan.
 
 ## 1. State
 
-- **On `origin/main`** (`a5e3e30`): everything through M4.5b1c2 (PR #20, merged 2026-10-30, both CI jobs green). The
-  main checkout's local `main` is at `7dda635`, a local merge of the same branch with the same tree, superseded by
-  `a5e3e30`.
-- **M4.5b1c3** is done on branch `m4.5b1c3-pointers-to-pointers` (from `a5e3e30`; result in `internal/status.md`; plan
-  `.claude/plans/m4-5b1c3-pointers-to-pointers.md`): record 0040, no cuts. M4.5b1 is complete.
-- **Audits:** round 1 on record 0040 (four blocking, seven should-fix, five notes; all taken), round 2 on the code (one
-  blocking, B1, a wrong verdict through trusted contracts across `const`, fixed fail closed; four should-fix: three
-  taken, S4 a pinned false alarm, question 79), one re-audit of the blocking fix (two more routes: casts and `?:` in a
-  contract, `owns` of a `const` place; fixed fail closed, checked by the tests and the auditor's probes, not
-  re-audited: the cap). What was not taken is in §3.
+- **On `origin/main`** (`a5e3e30`): everything through M4.5b1c2 (PR #20).
+- **M4.5b1c3** is done on branch `m4.5b1c3-pointers-to-pointers` (`5ffb1a2`, pushed; PR #21 open, CI pending at
+  M4.5b2a's start; record 0040; plan `.claude/plans/m4-5b1c3-pointers-to-pointers.md`). M4.5b1 is complete. The main
+  checkout's local `main` is at `774fde4`, a local merge of that branch.
+- **M4.5b2 is split in two** (at M4.5b2a's planning, 2026-10-30; sizing per question 77): **M4.5b2a** (globals and
+  `static` locals, record 0041) is in progress on branch `m4.5b2a-globals`, from `5ffb1a2` since PR #21 had not merged
+  (plan `.claude/plans/m4-5b2a-globals.md`); **M4.5b2b** (P4222's markers and `--strict-init`, record 0042) is next
+  (§4.2).
 
 The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits behind upstream `main` (§4.1).
 
 ## 2. Owner steps
 
-1. **`main`**: the main checkout's `7dda635` and `origin/main`'s `a5e3e30` hold the same tree; reset the local `main` to
-   `origin/main` (`git reset --hard origin/main` in the main checkout drops only the local merge commit) before the
-   next merge.
-2. **This branch**: push it and open its PR (`git push origin m4.5b1c3-pointers-to-pointers`); both CI jobs run the PR
-   tier (no Linux run in the session: CI covers it).
-3. Answer questions 78 and 79 (§8).
-4. Then M4.5b2 (§4.2).
+1. **PR #21** (M4.5b1c3): merge it once both CI jobs are green.
+2. **`main`**: reset the main checkout's local `main` to `origin/main` (`git reset --hard origin/main` drops only the
+   local merge commit `774fde4`), which also drops its uncommitted `internal/handoff.md` edit: the answers to questions
+   78 and 79 it held are carried in M4.5b2a's branch (§8).
+3. **M4.5b2a's branch**, at its end: push it and open its PR (`git push origin m4.5b2a-globals`); based on `5ffb1a2`, it
+   shows only its own commits once PR #21 has merged.
 
 ## 3. Open audit notes (condensed; the full notes are in the commit named above)
 
@@ -124,9 +121,7 @@ checked by the tests and the auditor's repros, not re-audited: the cap; items no
 - *Not pinned:* a bare `p;` with `p` dangling reports `lifetime` (checked by hand), but no test holds it: EDG also warns
   #174 (`expr_has_no_effect`), and #550 in C++, which a test with an `error` line may not list
   (`VERIFY_WARNING_TAGS` is closed). The `(void)p;` twins pin the rule.
-- *Evidence for later sessions* (in `il-inventory.md` since b1b): P54 is M4.5b2's, P55 M4.5d1's (P52, `owning`, is
-  b1c3's: its plan).
-  (The compound store's notes are b1c2's: its plan.)
+- *Evidence for later sessions* (in `il-inventory.md` since b1b): P55 is M4.5d1's (P54 is M4.5b2b's, §4.2).
 - *Messages:* the new rejections reuse `unsupported_type`, `unsupported_expression` and `unsupported_statement`, whose
   fixed texts cite "(decision 0012)" (the carried note on record citations below applies); the type message still says
   "only integer types, bool and the enumerations … are" although pointers to them are now accepted in locals.
@@ -154,7 +149,8 @@ checked by the tests and the auditor's repros, not re-audited: the cap; items no
 reopened, all fixed in the records; every should-fix item taken in the text; the code of 0027: round 4, no blocking item).
 What the next sessions must carry out, beyond the records' text:
 - *Registered attributes are skipped by `check_attributes`* (`encode.cpp:485`): register each target in the session that
-  implements it (0029 item 1), never earlier: `p` in b1c3 (its plan), `d` in M4.5c, `r` and `v` in M4.5d2.
+  implements it (0029 item 1), never earlier: `owning`'s `d` in M4.5c, `r` and `v` in M4.5d2; P4222's markers in
+  M4.5b2b (`uninit` `v`, `ref_to_uninit` and `must_init` `p`) and `ref_to_uninit`'s `v` and `r` in M4.5d2.
 - *P55 for M4.5d1:* the attribute allow-list rejects a system declaration's attributes (`[[const]]`, `[[alloc_size]]`,
   `[[__cold__]]`) once a user or vlibc file redeclares the function; check by the attribute's own position.
 - *EDG, not chased* (memory: only bugs that block cerastes): in C23, `typeof(*cp)` for a `const int* cp` drops `const`
@@ -204,8 +200,6 @@ What the next sessions must carry out, beyond the records' text:
 - *Fail-closed checks of item 2* now read the placement emission uses, and three VIR hooks reach them; a set computed
   too large (the unsound direction) is still invisible to them (M4.3b note 4): the pins guard it
   (`call_write_noreturn_divzero.c`, `never_returns_call_divzero.c`, …).
-- *Planning's finding A* existed since M4.3a; no test had the shape. Item 2's placement is revisited with item 1's kinds
-  of access for globals in M4.5b2 (address-taken locals: b1c2's plan).
 - *From the mutation review:* R1–R13 do not reach the body of a `pure` or `predicate` function (not verified before
   M4.5f; the Verifying page says so), and `static_assert_pure_body.c`'s listed entry goes stale then; the doc example
   `verifying/void_conditional.c` keeps a redundant requires conjunct `(c == 0 || n > 0)` (four listed equivalents; the
@@ -272,7 +266,7 @@ not taken go to §3); single-file runs while working (`build/cerastes verify` di
 builds serialized (`lockf build/<session>/build.lock cmake --build build/cmake`); `check.sh` at most twice; the EDG
 suites on the x86-64 host are their own session, but any x86-64 test run a session needs goes to `matt@clang4.cpp.al`
 automatically (owner, 2026-10-29: not Docker multi-arch on the Mac, which is only the fallback when the host is down).
-Record numbers are the next free ones when written (0040 is b1c3's, 0041 next). The
+Record numbers are the next free ones when written (0041 is M4.5b2a's, 0042 M4.5b2b's). The
 approved plan is saved as `.claude/plans/<milestone>-<topic>.md` (plan.md, "Session protocol").
 
 Finished sessions: their plans are in `.claude/plans/` (from M4.5b1a on), their results in `internal/status.md` and the
@@ -315,15 +309,40 @@ atoms with no partner) moved to M4.5d2. Each session rejects what a later one ma
 paragraph points at one), and no others; a pin whose construct stays rejected keeps its `expect:` line, and only its message and `Pins:` comment name the
 new session.
 
-**M4.5b1c3 `T**`, owning parameters, `*result`, written atoms in invariants: done** (2026-10-30; record 0040; plan
-`.claude/plans/m4-5b1c3-pointers-to-pointers.md`; status entry), with all its flips (question 73 kept
-`reject_atom_in_do_once_invariant.c`). M4.5b1 is complete.
+**M4.5b2 is two sessions** (at M4.5b2a's planning, 2026-10-30; the whole row was about 1,300–1,500 changed lines and 55
+tests, more than one context). 0019's flag per cell is done (b1a–b1c3); what the row adds beyond it is below.
 
-**M4.5b2 Globals, `static` locals, initialization through pointers.** Mutable globals as `GB_g()` blocks, `program_start`
-for `main`, frames through contracts (`owns(g)`); `static` locals (0028 item 5: the implicit `owns` or a rejection in a
-recursive cycle); 0025 item 2's placement revisited with globals; 0019's flag per cell; `[[cerastes::uninit]]`,
-`ref_to_uninit`, `must_init` (registered then) and `--strict-init` (0029 item 2). Ports: `global_points_to_syntax.c`
-(adapted: no `leak`), `globals.c`'s scalar part.
+**M4.5b2a Globals and `static` locals** (in progress; record 0041; plan `.claude/plans/m4-5b2a-globals.md`, which holds
+its scope, owner decisions 80, 81 and 84, and its inputs): mutable globals as `GB_g()` blocks, `program_start` for
+`main`, frames through contracts (`owns(g)`, `reads(g)`), `static` locals by an implicit `owns` (question 80), 0025 item
+2's placement for globals. Flips (pre-approved, question 81): `tests/scalar/negative/reject_global.c`,
+`tests/scalar/negative/reject_static_local.c` and `tests/memory/negative/reject_pointer_global.c` retired, each
+replaced by a positive of the same shape; `reject_address_of_const_global.c` and `reject_case_const_address_taken.cpp`
+stay rejected naming M4.6, `reject_owns_of_param_cell.c` naming no session. Ports: `global_points_to_syntax.c`,
+`globals.c`'s scalar part.
+
+**M4.5b2b Initialization through pointers** (record 0042; plan it from this paragraph). P4222's markers (0029 item 2;
+P54 in `il-inventory.md`): `[[cerastes::uninit]]` on an automatic local (target `v`, registered `v:+a!`; it documents
+intent, 0019 already proves every read; with an initializer `uninit_initialized`), `[[cerastes::ref_to_uninit]]` and
+`[[cerastes::must_init]]` on pointer parameters (target `p` only, `RAF_NO_FLAGS` as `owning`: `RAF_ENTITY_ATTACHED`
+with `p` alone aborts EDG at startup; registered in the same commit as their handling, `check_attributes` skips
+registered attributes): `ref_to_uninit` drops the flag from the parameter's `owns(*p)` in the `requires` and promises no
+flag value in the `ensures`; `must_init` promises it (`postcondition` on a path that leaves `*p` uninitialized); both on
+one parameter, a duplicate, a non-pointer, `void*`, a `const` pointee or a mismatch between declarations rejected
+(`annotation_mismatch`'s text generalised from `owning`); macros `CERASTES_UNINIT`, `CERASTES_REF_TO_UNINIT`,
+`CERASTES_MUST_INIT`. **Owner decisions** (2026-10-30, at M4.5b2a's planning): question 82, the call's flag row
+(`call_atoms`' `add(x.g, cell_flag(x.p, t), m)`, category `permission` today) becomes `uninitialized` at the argument,
+naming the parameter, which changes the `.map` (not the `.vpr`) of every program calling an `owns`/`reads` function and
+the VIR self-test's row-count pins at the argument (`selftest_cases8.inc:73`, `selftest_cases11.inc:137-138`, possibly
+:232, :287, :380, :401, :423): those pins are b2b's pre-approved flips, re-expected with the new category, and no others;
+question 83, under `--strict-init` an argument to a `ref_to_uninit`/`must_init` parameter must be `&x` of a
+`[[cerastes::uninit]]` local or the caller's own marked parameter passed unchanged, anything else rejected statically
+(`uninit_ref_initialized`). `--strict-init` (a driver option through `VerifyConfig`, 0019 item 2) also requires
+`[[cerastes::uninit]]` on every local definition without an initializer (`uninit_unmarked`); tests pass it through a new
+`// verify-options:` header (`run_tests.py`, `test_run_tests.py`, `tests/README.md`). Open design points for its record
+(M4.5b2a's design check, risk 10): a contract read of a `ref_to_uninit` pointee (`*p` or `old(*p)` where the flag is not
+promised; `f__wf`'s ghosts do not check the flag): rejected, or an `uninitialized` row; the markers beside `owning`'s
+desugared atom. `ref_to_uninit` on locals and functions (targets `v`, `r`) is M4.5d2's.
 
 **M4.5c Structs.** Members as blocks of their own (0028 item 16), `.` and `->`, struct values (copies, initializers,
 by-value parameters and results), nested structs, pointers to members, `owns(*s)`, non-recursive owning fields
@@ -338,7 +357,9 @@ P55), `abort`/`exit`/`_Exit` moved out of `trusted_libc_reason` with their tests
 
 **M4.5d2 `malloc` and `free`.** vlibc's contracts (`malloc` `ref_to_uninit`, `calloc` initialized, `realloc`, `free`),
 heap blocks with the slot −1 token, the free checks (`invalid-free`), the leak rule by `forperm` and a record on `main`'s
-leaks (`leak`), owning locals and globals (`[[cerastes::owning]]` target `v`), and **owning results** (from b1c, owner
+leaks (`leak`), owning locals and globals (`[[cerastes::owning]]` target `v`), `[[cerastes::ref_to_uninit]]` on pointer
+locals and functions (targets `v`, `r`: `malloc`'s result and a local receiving it; from M4.5b2b's planning), and
+**owning results** (from b1c, owner
 2026-10-29): `[[cerastes::owning]]` on functions (target `r`), `owns_block`, `owns(*result)` and `ensures` atoms with no
 `requires` partner (a callee handing a place's permission to its caller: an output ghost amount). Flips:
 `tests/memory/negative/reject_{atom_on_result,ensures_atom_no_partner}.c`. Ports: `account.c`, `deposit.c`, `swap.c`'s
@@ -375,7 +396,14 @@ are needed for content specifications: `strlen`'s zero-terminated string, `memcp
 `memcpy`, `memcmp`, `strcmp`: contracts, and implementations verified in vlibc's CI), `main(argc, argv)`; character
 access to other objects stays rejected (0028 item 1); `c | 0x20`-style case bits are decided (0027). Ports:
 `strlen.c`, `memcpy.c`, `memcmp.c`. Open point: a zero-terminated buffer of unknown length needs a recursive predicate or a
-built-in notion (M4.5f3 decides).
+built-in notion (M4.5f3 decides). **`const` objects in the model** (owner, 2026-10-30, question 78, the recommendation):
+field names ignore `const`, so record 0040 item 2 rejects, in a contract, every pointer conversion that changes pointee
+qualifiers, every comparison across them and every `owns`/`owning` of a `const` place (fail closed, after M4.5b1c3's
+audit round 2 B1 and its re-audit); `char *strchr(const char *s, int c)` with `ensures(r == NULL || r points into s)`
+needs them. M4.6 models a `const` object as a cell the function holds below `write` after its initializer (record 0028
+amended: allocation, scope exit and `owns` of a `const` place), then lifts those rules; `&K` of a `const` global and an
+address-taken `const` local (M4.5b2a's pins `reject_address_of_const_global.c`, `reject_case_const_address_taken.cpp`)
+come with it.
 
 **M4.7 Function pointers:** contracts on function types, calls through pointers; ports of `tutorial_solutions/byref.c`,
 `examples/functions/functions.c` (without its predicate families, an M8 entry).
@@ -384,7 +412,10 @@ built-in notion (M4.5f3 decides).
 sets up, or recorded outcomes), the full mutation run over the M4 tests and the verified doc examples never mutated
 before (owner, 2026-10-27, §8 question 10), the mask positives with mutants of a mask constant counted as "undecided"
 (§8 question 49), the cost of aliasing `reads`/`live` parameters (§8 question 66: fix it here, e.g. Silicon's joins
-or a per-call split order; record 0037, Consequences), the Memory and ownership page complete, M4's acceptance (plan.md),
+or a per-call split order; record 0037, Consequences), with it the false alarm of written atoms on moved pointers (owner,
+2026-10-30, question 79, the recommendation: per-place liveness amounts at the loop head, or the share named by the
+parameter's ghost amount; pinned by `tests/memory/negative/loop_written_moved_owns_false_alarm.c`, §3), the Memory and
+ownership page complete, M4's acceptance (plan.md),
 and the deferred list for M8
 (unions, floating point, `volatile`/`_Atomic`/`_BitInt`/vector types, variadic functions and `printf`, several
 translation units, concurrency).
@@ -595,7 +626,7 @@ Each session's acceptance commands are in its plan (`.claude/plans/`); the resul
 
 ## 8. Questions for the owner
 
-Each has a recommended answer. Answer inline, as before. Answered questions 1–77 are recorded in the decision records,
+Each has a recommended answer. Answer inline, as before. Answered questions 1–84 are recorded in the decision records,
 the session plans and the handoffs reachable from the one named at the top. The latest: 65 (`return &local;` rejected
 like the compilers), 66 (the cost of aliasing parameters, M4.8), 67 (the `owns`+`reads` rule path-precise), 68 (b1c3
 may re-expect the three pinned false alarms of reassigned parameters, §4.2); at M4.5b1c2's planning (2026-10-29): 69
@@ -608,16 +639,12 @@ planning (2026-10-30): 73 (atoms in a `do … while (0)` invariant stay rejected
 || owns(*p)` on the same parameter is merged; `reads`, `live` or another guard beside it is rejected), 76 (pointers to
 pointers at any depth), 77 (sessions sized to one context, under about 12 h unless a reason is given).
 
-Open (from M4.5b1c3's audits):
+At M4.5b2a's planning (2026-10-30): 78 (`const` objects are modelled in M4.6, the recommendation; §4.3), 79 (written
+atoms on moved pointers are fixed in M4.8 with question 66, the recommendation; §4.3), 80 (a `static` local's
+permission reaches its function by an implicit `owns` in its contract and in every caller's, `main` from
+`program_start`), 81 (M4.5b2a's flips, §4.2), 82 (the call's flag row becomes `uninitialized`, in M4.5b2b, §4.2), 83
+(under `--strict-init` an initialized pointee passed to a `ref_to_uninit` parameter is a static rejection, M4.5b2b,
+§4.2), 84 (initial values by linkage: internal linkage and C's external linkage get the initializer's value, C++'s
+external linkage an unknown one; M4.5b2a's plan).
 
-78. **`const` objects in the model.** Field names ignore `const`, so record 0040 rejects every conversion and every
-    contract comparison that could hand out an unqualified pointer to a `const` object (fail closed). M4.6's vlibc needs
-    `char *strchr(const char *s, int c)` with `ensures(r == NULL || r points into s)`, which that rule rejects.
-    The rules that stand until then (record 0040 item 2, after the re-audit): in a contract, no pointer conversion that
-    changes pointee qualifiers and no comparison across them, and no `owns`/`owning` of a `const` place (`reads`
-    instead). *Recommended:* in M4.6, model a `const` object as a cell the function holds below `write` after its
-    initializer (record 0028 amended: allocation, scope exit and `owns` of a `const` place), then lift those rules.
-79. **Written atoms on moved pointers** (audit S4): the liveness amount stays the entry place's, so moving an owned
-    pointer between two parameters' objects in a loop is a false alarm (pinned). *Recommended:* fix it in M4.8 with
-    question 66's cost work (per-place liveness amounts at the loop head, or the share named by the parameter's ghost
-    amount), since both touch how loops and calls split shared liveness cells.
+No question is open.

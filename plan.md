@@ -9,7 +9,7 @@ it was ≤ 4 h from 2026-10-20): M4.1, M4.5a, M5a, …. Each session starts from
 `internal/status.md` updated so the next session can start cold.
 
 This file was trimmed to what is live at the end of M4.4c (owner, 2026-10-26), and is reconciled with the handoff at
-each session's start (the last: M4.5b1c3, 2026-10-30): the plans of the finished milestones, the superseded text and the
+each session's start (the last: M4.5b2a, 2026-10-30): the plans of the finished milestones, the superseded text and the
 appendices are in `git show 1fcc43b:plan.md`. The milestones were renumbered on 2026-10-20
 (the rest of C became M4; generic templates M5, concepts M6, C++ memory M7, inventory M8, evaluation M9); history
 entries keep the numbers they were written with.
@@ -148,9 +148,9 @@ history of `internal/status.md`).
 | Session | Scope | Needs |
 |---|---|---|
 | **M4.5 Pointers** (sessions b1–f3, below) | the memory model for C (records 0028–0030) | M4.5a, S5 (done) |
-| **M4.6 Chars and strings** | string literals as read-only arrays, `char` buffers, vlibc's `<string.h>` (`strlen`/`memcpy`/`memcmp`/`strcmp` contracts and verified implementations), `main(argc, argv)` | M4.5e2, M4.5f3 |
+| **M4.6 Chars and strings** | string literals as read-only arrays, `char` buffers, vlibc's `<string.h>` (`strlen`/`memcpy`/`memcmp`/`strcmp` contracts and verified implementations), `main(argc, argv)`; `const` objects as cells held below `write` after their initializer, lifting record 0040 item 2's contract rules across `const` (owner, 2026-10-30, handoff question 78) | M4.5e2, M4.5f3 |
 | **M4.7 Function pointers** | contracts on function types, calls through pointers ("the pointer satisfies the type") | M4.5b1b |
-| **M4.8 C parity close-out** | the VeriFast C differential set, the M4 mutation run, the Memory and ownership page complete, M4's acceptance, the deferred list for M8; the cost of aliasing `reads`/`live` parameters (handoff question 66: fixed here) | all |
+| **M4.8 C parity close-out** | the VeriFast C differential set, the M4 mutation run, the Memory and ownership page complete, M4's acceptance, the deferred list for M8; the cost of aliasing `reads`/`live` parameters (handoff question 66: fixed here), with the false alarm of written atoms on moved pointers (question 79) | all |
 
 **M4.5 Pointers** (one 4.x for pointers, owner, 2026-10-20; the C parts of the former memory-model milestone; split
 further in M4.5a, owner, 2026-10-27: "this can be expanded if you see fit"). M4.5a designed it (records 0028 memory
@@ -160,10 +160,11 @@ M4.5b1c planning: `owns_block` needs the heap token and a whole-block permission
 
 | Session | Scope | Needs |
 |---|---|---|
-| **M4.5b2 Globals, statics, initialization through pointers** | mutable globals and `static` locals as blocks with frames; `main` owns the globals; 0025 item 2's placement revisited; 0019's flag per cell; `[[cerastes::uninit]]`, `ref_to_uninit`, `must_init` and `--strict-init` | M4.5b1c3 (done) |
+| **M4.5b2a Globals and `static` locals** | mutable globals and `static` locals as blocks with frames (`static` locals by an implicit `owns`, handoff question 80); `main` owns the globals (`program_start`; initial values by linkage, question 84); 0025 item 2's placement revisited for globals (plan `.claude/plans/m4-5b2a-globals.md`) | M4.5b1c3 (done) |
+| **M4.5b2b Initialization through pointers** | `[[cerastes::uninit]]`, `ref_to_uninit` and `must_init` on parameters, `--strict-init` (questions 82, 83); 0019's flag per cell is done since M4.5b1 | M4.5b2a |
 | **M4.5c Structs** | field cells, `.` and `->`, struct values (copies, initializers, by-value parameters and results), nested structs, pointers to fields, `owns(*s)`, non-recursive owning fields; places reached through a heap read in contracts (`owns(**pp)`, `**pp`; owner, 2026-10-30, question 74) | M4.5b1c3 |
 | **M4.5d1 vlibc** | the repository (the owner creates `cerastes-verifier/vlibc`), its layout, license and CI; the submodule pin; explicit and transparent includes; the trust rule; `abort`/`exit`/`_Exit` moved out of the encoder's table | M4.5a (any time) |
-| **M4.5d2 `malloc` and `free`** | vlibc's contracts for `malloc`, `calloc`, `realloc`, `free`; heap blocks; the free checks; leaks (a record; `forperm`); owning locals and globals; owning results (from b1c, owner 2026-10-29: `[[cerastes::owning]]` on functions, target `r`; `owns_block`; `owns(*result)`; `ensures` atoms with no `requires` partner); `invalid-free`, `leak` | M4.5c, M4.5d1 |
+| **M4.5d2 `malloc` and `free`** | vlibc's contracts for `malloc`, `calloc`, `realloc`, `free`; heap blocks; the free checks; leaks (a record; `forperm`); owning locals and globals; `[[cerastes::ref_to_uninit]]` on locals and functions (targets `v`, `r`); owning results (from b1c, owner 2026-10-29: `[[cerastes::owning]]` on functions, target `r`; `owns_block`; `owns(*result)`; `ensures` atoms with no `requires` partner); `invalid-free`, `leak` | M4.5c, M4.5d1 |
 | **M4.5e1 Arrays** | local arrays, `a[i]`, array parameters, `owns_range` and quantified permissions, `forall` in C (0029 item 4), sum and max; P38's braced initializers over 1000 elements; M4.4b2's types computed from constants | M4.5b1c3 |
 | **M4.5e2 Pointer arithmetic** | `p + i`, `p - q`, comparisons within one object, one-past-the-end, `malloc(n * sizeof(T))`; `out-of-bounds`; relational comparisons and `p - q` under `pointer-comparison` | M4.5e1, M4.5d2 |
 | **M4.5f1 Predicates and pure functions** | predicate and pure bodies encoded (0011 item 4 lifted), `fold`/`unfold`, non-recursive predicates | M4.5c, M4.5d2 |
