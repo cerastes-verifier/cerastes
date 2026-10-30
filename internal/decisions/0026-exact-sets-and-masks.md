@@ -216,3 +216,5 @@ intermittently (CI run `40434946397`; with one verifier, deterministically).
   intermittent `bit_mask.c [c23]` hang is gone.
 
 *2026-10-27, amended by 0027 (M4.5a): items 7–10 — the same mask recognition writes `|` and `^` too (0027 items 1–3); "every `|` and `^` keeps its function" now holds only for masks that are not of the two forms. Amended by 0028 (M4.5a, effective from M4.5b1): item 15 — writes and snapshots of a cell are never moved across a call whose contract reaches cells (0028 item 13).*
+
+*2026-10-29, amended by 0039 (M4.5b1c2): item 15 — closed for cells: a cell write's set holds every fixed point of its operands in both halves, so step 2 no longer puts it before a call C makes first (0039 items 2 and 4); writes of Viper locals keep 0025 item 2's placement.*

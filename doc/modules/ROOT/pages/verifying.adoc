@@ -343,6 +343,14 @@ even where pass:[C++]17 defines it (`x = pass:[x++]`):
 include::example$verifying/unsequenced.c[tag=source]
 ----
 
+The same holds for an object in memory that the expression names twice in the
+same way: a variable whose address is taken, or `*p` through one pointer
+variable `p` (`*p = pass:[(*p)++]`, `pass:[(*p)++] + *p`), which GCC's
+`-Wsequence-point` reports. Two accesses that name objects in different ways but
+may meet (`*p = pass:[(*q)++]`) are checked per path instead, and reported as
+xref:error-messages.adoc#_unsequenced[`unsequenced`]
+(xref:memory.adoc#expressions[Memory and ownership]).
+
 The operators that sequence their operands are `&&`, `||`, `,` and the condition
 of `?:`; both arms of `?:` count as modifying what either arm modifies. The
 operands of the other operators, and the arguments of a call, are not
@@ -419,7 +427,11 @@ verified yet, so these rules do not reach it either):
   (`if (a) if (b) x = 1; else x = 2;`): write the braces;
 * a lone `;` as the body of an `if` without `else` or of a `switch`
   (`if (x > 0);`), even on the next line or after a macro that expands to
-  nothing: write `{}`.
+  nothing: write `{}`;
+* returning the address of a local variable or a parameter (`return &x;`, also
+  through parentheses, a cast, either arm of `?:` or the right operand of `,`),
+  which clang's `-Wreturn-stack-address` and GCC's `-Wreturn-local-addr` report
+  (xref:memory.adoc[Memory and ownership]).
 
 [source,c]
 ----

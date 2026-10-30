@@ -9,7 +9,7 @@ at the line of the C or pass:[C++] source that causes it:
 <file>:<line>: note: <what the note says>
 ----
 
-The *category* names what could not be proved. There are seventeen, and each has a
+The *category* names what could not be proved. There are eighteen, and each has a
 section below. A *note* line follows an error when a second place matters: the
 clause of a contract that failed, or the callee's clause that a call does not
 meet. Errors are sorted by file, line and category, and the exit status is 1
@@ -414,7 +414,10 @@ right is missing:
   parameters of which one owns it;
 * at a `return`, when the function does not hold what its `ensures` promises;
 * at a contract clause that reads `*p` where no `owns` or `reads` of `*p`
-  comes before it (xref:memory.adoc#contracts[Memory and ownership]);
+  comes before it, at a contract that both owns and reads `*p` on one path, at
+  an `ensures` that gives back `*p` on a path where the `requires` did not take
+  it, and at a termination measure that reads `*p` without owning it
+  (xref:memory.adoc#contracts[Memory and ownership]);
 * at the closing brace of a loop's body, when an iteration ends without an
   object the loop started with (a function called in the loop kept it), and at
   a loop invariant or measure that reads an object the loop does not hold
@@ -505,4 +508,41 @@ for example with `reads`, or compare only pointers into one object:
 [source,c]
 ----
 include::example$error-messages/pointer_comparison_fixed.c[tag=source]
+----
+
+== unsequenced
+
+Two accesses to one object, at least one of them a write, that C leaves
+unordered; or an access to an object and a call that may change it, in an order
+C leaves open. It is reported at the later access or call.
+
+C and pass:[C++] do not say in which order the operands of most operators are
+evaluated, and a write and another access to the same object with no sequence
+point between them is undefined behaviour (`*p = pass:[(*q)++]` when `p` and `q` point
+to one object). A call is not interleaved with the rest of its expression, but
+C leaves open whether it comes before or after an operand beside it, so in
+`x + bump(&x)` the value read from `x` depends on that choice. cerastes reports
+both whenever the two may be one object on some path, rather than choose an
+order. When the source names the object twice (`pass:[x++] + x`, `*p = pass:[(*p)++]`), the
+compilers warn, and cerastes rejects the expression
+(xref:verifying.adoc#side-effects[`unsequenced_modification`])
+instead.
+
+[source,c]
+----
+include::example$error-messages/unsequenced_error.c[tag=source]
+----
+
+[source,console]
+----
+unsequenced_error.c:18: error: unsequenced: accesses `x`, which the call to `bump` may change, in an order C leaves unspecified
+----
+
+*How to fix it.* Write the two accesses, or the access and the call, as separate
+statements in the order you mean, or make sure that the pointers point to
+different objects:
+
+[source,c]
+----
+include::example$error-messages/unsequenced_fixed.c[tag=source]
 ----

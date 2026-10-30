@@ -1,7 +1,8 @@
-// expect: rejected cerastes-unsupported_expression @ L19
+// expect: verified
+// expect: native-ok
 // mode: c23, c++20
-// twin: tests/memory/owns_inc.c
-// Pins: 0037 items 8 and 15: the read of a compound assignment's target is an access (x += f(&x); re-expected by M4.5b1c2)
+// The same program, fixed: the call is its own statement, so the read of x follows it.
+// tag::source[]
 #include <cerastes.h>
 #include <stddef.h>
 
@@ -13,9 +14,11 @@ int bump(int *p)
   return *p;
 }
 
-int compound(void)
+int sum(void)
+    CERASTES_ENSURES(r, r == 4)
 {
   int x = 1;
-  x += bump(&x);
-  return x;
+  int v = bump(&x);
+  return x + v;
 }
+// end::source[]

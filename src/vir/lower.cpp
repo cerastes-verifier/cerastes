@@ -22,6 +22,7 @@
 #include "lower.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <deque>
 #include <functional>
 #include <map>
@@ -381,7 +382,23 @@ enum class EffectKind {
   Call,      // a call (CallItem): a fixed point
   Write,     // `name := value`, then `flag := true` when `flag` is set: an assignment used as a value
   Snapshot,  // `name := value` where `name` is a fresh temporary and `value` the current value of a local this expression writes
-  Branch     // `stmts`: the guarded operand of `&&`, `||` or `?:` with its own effects, as an `if`, assigning a temporary
+  Branch,    // `stmts`: the guarded operand of `&&`, `||` or `?:` with its own effects, as an `if`, assigning a temporary
+  Store      // `stmts`: a write of a cell used as a value (decision 0039 item 2): the receiver copy and the two field writes; movable like a Write
+};
+
+// The position of an access in the expression tree: the nodes from the root of its full expression to the node that makes the access, each with
+// its slot in its parent (0: `a`, 1: `b`, 2: `c`, 3 + k: `args[k]`).  Decision 0039 item 4's order between two accesses is read from two paths.
+using Path = std::vector<std::pair<const Expr*, int>>;
+
+// What an effect (or the effects inside a branch) accesses, for decision 0039 item 4's fail-closed check of the order against the tree:
+// a cell write or snapshot (`call` false) or a memory call, on the cell field `field`, at `path`.
+struct MemTag {
+  int key = 0;
+  std::string field;
+  bool call = false;
+  bool write = false;
+  Path path;
+  std::vector<Path> after;  // the access reads through values computed at these nodes (a shared address): it follows what is inside them
 };
 
 struct EffectCore {
@@ -394,7 +411,8 @@ struct EffectCore {
   std::vector<low::LStmt> stmts;
   int fixed = -1;                // the id of the fixed point (a Call, or a Branch with a call); -1 for the movable items
   size_t seq = 0;                // creation order within the Full
-  std::set<int> reads, writes;   // the locals (Var ids) a snapshot or write, or a branch's inner effects, read and write
+  std::set<int> reads, writes;   // the locals (Var ids) a snapshot or write, or a branch's inner effects, read and write; the keys (< 0) of cell accesses
+  std::vector<MemTag> tags;      // the cell accesses and memory calls of the effect, or of a branch's inner effects (decision 0039 item 4)
 };
 template <class S>
 struct BasicEffect : EffectCore {
@@ -783,7 +801,10 @@ class Lowerer {
     o.cond = std::move(cond);
     o.meta = std::move(m);
     o.dep = join(join(gdep, cdep), floor_);  // floor_: after the left operand of a comma, what it depends on came first (E6)
-    if (exact_set != nullptr) o.dep.ex = join(o.dep.ex, *exact_set);
+    if (exact_set != nullptr) {
+      o.dep.ex = join(o.dep.ex, *exact_set);
+      if (call_pre_both_) o.dep.base = join(o.dep.base, *exact_set);  // decision 0039 item 2 (audit S3): the arguments write a cell
+    }
     o.seq = full.next_seq++;
     full.obls.push_back(std::move(o));
   }
@@ -912,7 +933,7 @@ class Lowerer {
         meta("permission", e.loc, "reads `" + e.var->name + "` without owning it: a callee may have kept its object"));
     obl(full, guard, gdep, cell_flag(r, e.var->type), {},
         meta("uninitialized", e.loc, "`" + e.var->name + "` may be read here before it is given a value"));
-    return {cell_value(r, e.var->type), {}};
+    return mem_read(e, key_of_cell(*e.var), r, e.var->type, e.var->name, guard, gdep, {}, full);
   }
 
   // ---- loop invariants and measures over memory (decision 0038 item 6) ----
@@ -1033,7 +1054,7 @@ class Lowerer {
              "reads " + quoted(place, "the object the pointer points to") + " without owning it: the object it points to may have ended"));
     obl(full, guard, gdep, cell_flag(p.e, t), p.dep,
         meta("uninitialized", e.loc, quoted(place, "the object the pointer points to") + " may be read here before it is given a value"));
-    return {cell_value(p.e, t), p.dep};
+    return mem_read(e, key_of_addr(*e.a), p.e, t, place, guard, gdep, p.dep, full, e.a);
   }
 
   // Any other use of a pointer value (`==`, `!=`, a truth test, a copy): `p != null ==> perm(lvloc(block_of(p)).lv) > none` (`lifetime`),
@@ -1082,7 +1103,10 @@ class Lowerer {
   // store's value reads `*addr` through the same node: the pointer is lowered once and the read reuses its value (`shared_`).
   void store(const Stmt& s, std::vector<low::LStmt>& out) {
     const bool compound = shares_node(*s.expr, s.addr);  // the value reads `*addr` through the same node: the pointer is evaluated once
-    const std::vector<LV> vs = full_exprs({s.addr, s.expr}, out, nullptr, compound);
+    StoreTarget target;
+    target.addr = s.addr;
+    target.loc = s.loc;
+    const std::vector<LV> vs = full_exprs({s.addr, s.expr}, out, nullptr, compound, &target);
     E recv = vs[0].e;
     if (recv->kind != low::LExpr::Kind::Var) {
       const std::string t = new_temp(low::LType::Ref);
@@ -1254,6 +1278,27 @@ class Lowerer {
     return {r, {}};
   }
 
+  // Decision 0039 item 7: an `owns(*p)` and a `reads(*p)` of one parameter in one clause list are allowed where their guards exclude each other; the
+  // `__wf` method asserts `prior ==> !(g_o && g_r)` at the later of the two.  Two atoms of one kind on one place are the checker's.
+  void overlap_obligations(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full) {
+    const FnAtoms& fa = atoms_of(*cf_);
+    const auto it = fa.index.find(&e);
+    if (it == fa.index.end()) return;
+    const AtomSite& site = fa.sites[it->second];
+    if (!site_takes_cell(site)) return;
+    for (size_t i = 0; i < it->second; ++i) {
+      const AtomSite& o = fa.sites[i];
+      if (o.in_ensures != site.in_ensures || !site_takes_cell(o) || site_param(o) != site_param(site) || o.atom->atom == site.atom->atom) continue;
+      if (cell_suffix(site_pointee(o)) != cell_suffix(site_pointee(site))) continue;
+      const AtomSite& own = o.atom->atom == AtomKind::Owns ? o : site;
+      const AtomSite& rd = o.atom->atom == AtomKind::Owns ? site : o;
+      const E both = low::and_(site_guard(own, env), site_guard(rd, env));
+      const std::string txt = e.a != nullptr && !e.a->c_text.empty() ? "*" + e.a->c_text : std::string();
+      obl(full, guard, gdep, both ? low::not_(both) : low::bool_lit(false), {},
+          meta("permission", e.loc, "the contract of `" + cf_->c_name + "` both owns " + quoted(txt, "an object") + " and reads it on one path"));
+    }
+  }
+
   static std::string ghost_name(int param, bool post) { return "hv_" + std::to_string(param) + (post ? "_post" : "_pre"); }
 
   // A read of `*p` in a contract (decision 0037 item 7).  Wf: a ghost value formal, and the framing obligation; otherwise the heap read, guarded
@@ -1298,8 +1343,10 @@ class Lowerer {
         if (!any) any = low::bool_lit(false);
         obl(full, guard, gdep, any, {},
             meta("permission", e.loc,
-                 "the contract of `" + cf_->c_name + "` reads " + quoted(e.c_text.empty() ? std::string() : e.c_text, "a pointer's object") +
-                     " without owning it"));
+                 cmeasure_ ? "the termination measure of `" + cf_->c_name + "` reads " + quoted(e.c_text.empty() ? std::string() : e.c_text, "a pointer's object") +
+                                 " without owning it"
+                           : "the contract of `" + cf_->c_name + "` reads " + quoted(e.c_text.empty() ? std::string() : e.c_text, "a pointer's object") +
+                                 " without owning it"));
       }
       return {low::var(ghost_name(k, post)), {}};
     }
@@ -1311,9 +1358,357 @@ class Lowerer {
     return {v, {}};
   }
 
+
+  // ---- cell accesses inside expressions (decision 0039) ----
+
+  struct Acc {
+    int key = 0;
+    std::string field;
+    bool write = false;
+    bool call = false;
+    E place;                        // a read or a write: the Ref
+    std::string text;               // the user's spelling of the place
+    E guard;                        // the condition under which it happens (null: always), branch conditions included
+    Deps dep;                       // what its place and guard use
+    Path path;
+    SrcLoc loc;
+    std::vector<Path> after;        // see MemTag::after
+    const void* owner = nullptr;    // the Full the access was recorded in; a closed branch's accesses move to the enclosing one
+    struct Atom { E place, guard; bool owns = false; std::string field, text; };
+    std::string callee;
+    std::vector<Atom> atoms;        // a memory call's atoms
+  };
+  struct BranchCtx {
+    const void* outer = nullptr;    // the Full the branch effect will be added to
+    Deps extra;                     // what the branch must follow beyond its condition (the places of earlier accesses its checks name)
+  };
+
+  // Whether the cell accesses of the node being lowered are tracked: code in a full expression (a contract and an annotation have no heap effects).
+  bool track_mem() const { return in_full_ && cmode_ == CMode::None; }
+
+  // The cell field of a type, as an identity that does not number an enumeration the way `cell_suffix` does (a name is only made when the program
+  // needs one, so the Viper of a program without a store inside an expression stays as it was).
+  static std::string fkey(const Type& t) {
+    if (t.is_bool()) return "bool";
+    const IntType& it = *t.int_type;
+    if (it.is_enum) return "enum@" + std::to_string(reinterpret_cast<uintptr_t>(&it));
+    return std::to_string(it.bits) + (it.is_signed ? "s" : "u");
+  }
+
+  int key_id(const std::string& k) {
+    auto it = key_ids_.find(k);
+    if (it == key_ids_.end()) it = key_ids_.emplace(k, -static_cast<int>(key_ids_.size()) - 1).first;
+    return it->second;
+  }
+  int key_of_cell(const Var& v) { return key_id("c:" + std::to_string(v.id)); }
+  // The object a write or a read through the pointer expression `a` names (decision 0039 item 2): `&x` is the cell x, a pointer variable `v` is `*v`,
+  // anything else is an object of its own.
+  int key_of_addr(const Expr& a) {
+    if (a.kind == Expr::Kind::AddrOf && a.var != nullptr && a.var->address_taken) return key_of_cell(*a.var);
+    if (a.kind == Expr::Kind::Local && a.var != nullptr && !a.var->address_taken) return key_id("v:" + std::to_string(a.var->id));
+    return -1000000 - (++next_other_key_);
+  }
+
+  // The cell fields of the atoms of `callee`'s `requires` that reach a value cell (`owns` and `reads`): its memory calls (decision 0039 item 4).
+  std::set<std::string> memory_fields(const Function& callee) {
+    std::set<std::string> r;
+    for (const AtomSite& s : atoms_of(callee).sites)
+      if (!s.in_ensures && site_takes_cell(s)) r.insert(fkey(site_pointee(s)));
+    return r;
+  }
+
+  static bool writes_cell(const Expr* e) {
+    if (e == nullptr) return false;
+    if (e->kind == Expr::Kind::StoreE || (e->kind == Expr::Kind::AssignE && e->var != nullptr && e->var->address_taken)) return true;
+    for (const Expr* x : {e->a, e->b, e->c})
+      if (writes_cell(x)) return true;
+    for (const Expr* x : e->args)
+      if (writes_cell(x)) return true;
+    return false;
+  }
+
+  // Whether an expression writes a cell or holds a memory call: what makes it a floor for the cell accesses after it (audit round 2, R2-B1).
+  bool touches_cells(const Expr* e) {
+    if (e == nullptr) return false;
+    if (e->kind == Expr::Kind::StoreE || (e->kind == Expr::Kind::AssignE && e->var != nullptr && e->var->address_taken)) return true;
+    if (e->kind == Expr::Kind::Call && e->callee != nullptr && !memory_fields(*e->callee).empty()) return true;
+    for (const Expr* x : {e->a, e->b, e->c})
+      if (touches_cells(x)) return true;
+    for (const Expr* x : e->args)
+      if (touches_cells(x)) return true;
+    return false;
+  }
+
+  // The writes of cells and the memory calls of a full expression, by field (E3's trigger, decision 0039 item 2): branch bodies included.
+  void mem_scan(const Expr* e) {
+    if (e == nullptr) return;
+    if (e->kind == Expr::Kind::AssignE && e->var != nullptr && e->var->address_taken) mem_w_.insert(fkey(e->var->type));
+    if (e->kind == Expr::Kind::StoreE) mem_w_.insert(fkey(e->type));
+    if (e->kind == Expr::Kind::Call && e->callee != nullptr)
+      for (const std::string& f : memory_fields(*e->callee)) ++mem_calls_[f];
+    for (const Expr* x : {e->a, e->b, e->c}) mem_scan(x);
+    for (const Expr* x : e->args) mem_scan(x);
+  }
+
+  bool needs_snapshot(const std::string& f) const {
+    if (mem_w_.count(f) != 0) return true;
+    const auto c = mem_calls_.find(f);
+    if (c == mem_calls_.end()) return false;
+    const auto d = mem_depth_.find(f);
+    return c->second > (d == mem_depth_.end() ? 0 : d->second);
+  }
+
+  // Decision 0039 item 4: the order C gives two accesses, from their paths (`p` created first): 1 `p` is before `q`, 2 they are never both made (the
+  // arms of one `?:`), 0 C does not order them.  An operand comes before its operation (a node's own access follows what is inside it), the left of
+  // `&&`, `||` and `,` and the condition of `?:` before the rest; every other pair of operands is unsequenced.
+  // `pw`, `qw`: the access is a write of a cell (not a call).  A write inside the operands of another write (`*p = (*q)++`) is ordered with it only by
+  // a sequence point between them, as 0020 item 4's stored-expression rule has it: the value computations are ordered, the side effects are not.
+  static int order_rel(const Path& p, bool pw, const Path& q, bool qw, const std::vector<Path>& q_after) {
+    for (const Path& u : q_after)  // `q` reads through a value computed at u: what is inside u comes first (audit S2)
+      if (u.size() <= p.size() && std::equal(u.begin(), u.end(), p.begin())) return 1;
+    size_t i = 0;
+    while (i < p.size() && i < q.size() && p[i].first == q[i].first) ++i;
+    if (i == q.size() && i < p.size() && pw && qw) {  // q's node is an ancestor of p's: a sequence point on the way down orders the two writes
+      for (size_t l = i; l < p.size(); ++l) {
+        const Expr* par = l == 0 ? nullptr : p[l - 1].first;
+        if (par == nullptr) continue;  // the statement's own store: the roots are its operands
+        const int slot = p[l].second;
+        if (par->kind == Expr::Kind::Call) return 1;
+        if (slot == 0 && (par->kind == Expr::Kind::Comma || par->kind == Expr::Kind::Cond ||
+                          (par->kind == Expr::Kind::Binary && (par->bop == BinaryOp::LAnd || par->bop == BinaryOp::LOr))))
+          return 1;
+      }
+      return 0;
+    }
+    if (i == q.size() || i == p.size()) return 1;
+    if (i == 0) return 0;
+    const Expr* n = p[i - 1].first;
+    const int sp = p[i].second, sq = q[i].second;
+    switch (n->kind) {
+      case Expr::Kind::Binary:
+        return (n->bop == BinaryOp::LAnd || n->bop == BinaryOp::LOr) && sp < sq ? 1 : 0;
+      case Expr::Kind::Comma: return sp < sq ? 1 : 0;
+      case Expr::Kind::Cond:
+        if (sp == 0 && sq > 0) return 1;
+        if (sp > 0 && sq > 0 && sp != sq) return 2;
+        return 0;
+      default: return 0;
+    }
+  }
+
+  E and_guard(const E& g) const {
+    E r = g;
+    for (const E& b : branch_guards_) r = low::and_(r, b);
+    return r;
+  }
+
+  // Record an access and make the obligations of decision 0039 items 3 and 4 against every earlier access of the field that C does not order with
+  // it: `g_a && g_b ==> place_a != place_b`, category `unsequenced`, at this (the later-created) access.  An earlier access recorded in an enclosing
+  // full expression is named in a branch's set (audit S5): the branch follows what its places use.
+  void register_access(Acc a, Full& full, const E& pure_guard) {
+    a.guard = and_guard(pure_guard);
+    a.path = path_;
+    a.owner = &full;
+    const size_t n = accs_.size();
+    for (size_t k = 0; k < n; ++k) {
+      const Acc& b = accs_[k];
+      if (!a.call && !b.call && b.field != a.field) continue;
+      if (order_rel(b.path, b.write && !b.call, a.path, a.write && !a.call, a.after) != 0) continue;
+      auto dep_of = [&](const Acc& x) {
+        if (x.owner == &full) return x.dep;
+        for (BranchCtx& c : branch_ctx_)
+          if (c.outer == x.owner) {
+            c.extra = join(c.extra, x.dep);
+            break;
+          }
+        return Deps{};
+      };
+      auto emit = [&](E cond, E g, const std::string& message, const Acc& other, const SrcLoc* at = nullptr) {
+        obl(full, g, {}, std::move(cond), join(dep_of(other), a.dep), meta("unsequenced", at != nullptr ? *at : a.loc, message));
+      };
+      const E g_ab = low::and_(a.guard, b.guard);
+      if (!a.call && !b.call) {
+        if (!a.write && !b.write) continue;
+        if (a.key == b.key) continue;  // the static rule (0039 item 3) leaves no unsequenced conflicting pair of one object
+        const Acc& w = a.write ? a : b;
+        const Acc& r = a.write ? b : a;
+        emit(low::bin(low::BinOp::Ne, b.place, a.place), g_ab,
+             "modifies " + quoted(w.text, "the object `*(...)` designates") + " and accesses " + quoted(r.text, "the object `*(...)` designates") +
+                 " with no sequence point between, and they may be one object",
+             b);
+      } else if (a.call != b.call) {
+        const Acc& x = a.call ? b : a;
+        const Acc& c = a.call ? a : b;
+        for (const Acc::Atom& k : c.atoms) {
+          if (k.field != x.field) continue;
+          if (!k.owns && !x.write) continue;
+          const std::string callee = quoted(c.callee, "a function");
+          const std::string what = x.write ? "writes " + quoted(x.text, "the object `*(...)` designates") + ", which the call to " + callee + (k.owns ? " may change, " : " reads, ")
+                                           : "accesses " + quoted(x.text, "the object `*(...)` designates") + ", which the call to " + callee + " may change, ";
+          emit(low::bin(low::BinOp::Ne, x.place, k.place), low::and_(low::and_(x.guard, k.guard), c.guard), what + "in an order C leaves unspecified", b, &x.loc);  // at the access
+        }
+      } else {
+        for (const Acc::Atom& k1 : b.atoms)
+          for (const Acc::Atom& k2 : a.atoms) {
+            if (k1.field != k2.field || (!k1.owns && !k2.owns)) continue;
+            emit(low::bin(low::BinOp::Ne, k1.place, k2.place), low::and_(low::and_(k1.guard, k2.guard), g_ab),
+                 "the calls to " + quoted(b.callee, "a function") + " and " + quoted(a.callee, "a function") + " may both access " +
+                     quoted(k2.text.empty() ? k1.text : k2.text, "the same object") + ", in an order C leaves unspecified",
+                 b);
+          }
+      }
+    }
+    accs_.push_back(std::move(a));
+  }
+
+  // A cell read in code (by name or through a pointer; the obligations were made): the value, read where its consumer is emitted, or (E3 for memory,
+  // decision 0039 item 2) a snapshot `t := g ? r.v_T : 0` when the full expression writes a cell of the field or holds a memory call of the field
+  // that does not contain the read in its arguments.  The snapshot follows its guard's set (audit B1), the comma floor, its receiver's set and the
+  // earlier writes of its key.
+  LV mem_read(const Expr& e, int key, const E& recv, const Type& t, const std::string& text, const E& guard, const Deps& gdep, const Deps& pdep,
+              Full& full, const Expr* via = nullptr) {
+    const E value = cell_value(recv, t);
+    if (!track_mem()) return {value, pdep};
+    Acc a;
+    a.key = key;
+    a.field = fkey(t);
+    a.place = recv;
+    a.text = text;
+    a.dep = join(gdep, pdep);
+    a.loc = e.loc;
+    std::vector<Path> after;
+    if (via != nullptr && shared_.count(via) != 0 && shared_path_.count(via) != 0) after.push_back(shared_path_[via]);
+    a.after = after;
+    register_access(std::move(a), full, guard);
+    if (!needs_snapshot(fkey(t))) return {value, pdep};
+    const std::string tmp = new_temp(ltype(t));
+    const auto lw = full.last_write.find(key);
+    Deps slot = join(floor_, pdep);
+    if (!opt_.drop_snapshot_guard_set) slot = join(slot, gdep);
+    if (lw != full.last_write.end()) slot = join(slot, lw->second);
+    Effect fx;
+    fx.kind = Effect::Kind::Snapshot;
+    fx.name = tmp;
+    fx.value = guard ? low::ite(guard, value, inv_dummy(t)) : value;
+    fx.deps = slot;
+    fx.seq = full.next_seq++;
+    fx.reads.insert(key);
+    fx.tags.push_back(MemTag{key, fkey(t), false, false, path_, after});
+    full.effects.push_back(std::move(fx));
+    touch(full, key, slot);
+    return {low::var(tmp), slot};
+  }
+
+  // A write of a cell used as a value (`AssignE` of a cell, `StoreE`; decision 0039 item 2): the operands, then the obligations with the write's
+  // set (the null check for a pointer, the write permission), then the write as a movable effect.  The set holds the comma floor, the operands' sets,
+  // every fixed point created in the operands (both halves, audit S3) and every earlier access of the key.
+  LV cell_write(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full) {
+    if (guard != nullptr) {
+      internal_error(e.loc, "an effect in a conditionally evaluated pure operand reached lowering");
+      return {low::int_lit("0"), {}};
+    }
+    if (!in_full_) {
+      internal_error(e.loc, "a write inside an expression outside a full expression reached lowering");
+      return {low::int_lit("0"), {}};
+    }
+    const bool store = e.kind == Expr::Kind::StoreE;
+    const size_t effect_from = full.effects.size(), obl_from = full.obls.size();
+    LV addr;
+    const Type& t = store ? e.type : e.var->type;
+    int key;
+    std::string text;
+    if (store) {
+      addr = lower(*e.c, env, guard, gdep, full);
+      key = key_of_addr(*e.c);
+      const std::string ptr_text = e.c->c_text;
+      text = ptr_text.empty() ? std::string() : "*" + ptr_text;
+      if (e.b != nullptr || shares_node(*e.a, e.c)) {  // a compound store's value reads `*addr` through this node: one evaluation
+        shared_[e.c] = addr;
+        Path where = path_;
+        where.emplace_back(e.c, 2);  // the slot of `c` in a StoreE
+        shared_path_[e.c] = where;
+      }
+    } else {
+      addr = {low::var(var_name(*e.var)), {}};
+      key = key_of_cell(*e.var);
+      text = e.var->name;
+    }
+    LV old_value;
+    if (e.b != nullptr) {
+      old_value = lower(*e.b, env, guard, gdep, full);
+      shared_[e.b] = old_value;
+    }
+    LV stored = lower(*e.a, env, guard, gdep, full);
+    if (e.b != nullptr) shared_.erase(e.b);
+    if (store) {
+      shared_.erase(e.c);
+      shared_path_.erase(e.c);
+    }
+    const Deps operands = since(full, effect_from, obl_from);
+    const auto la = full.last_access.find(key);
+    Deps wset = join(join(join(floor_, stored.dep), addr.dep), operands);
+    if (la != full.last_access.end()) wset = join(wset, la->second);
+    Acc acc;
+    acc.key = key;
+    acc.field = fkey(t);
+    acc.write = true;
+    acc.place = addr.e;
+    acc.text = text;
+    acc.dep = addr.dep;  // what the place value uses, not the value computation: an obligation naming this write must not follow the stored value's calls (0021 item 4)
+    acc.loc = e.loc;
+    register_access(std::move(acc), full, nullptr);
+    if (store)
+      obl(full, nullptr, {}, low::bin(low::BinOp::Ne, addr.e, low::null_()), wset,
+          meta("null-dereference", e.loc, "dereferences " + quoted(e.c->c_text, "the pointer") + ", which may be null"));
+    obl(full, nullptr, {}, may_write(addr.e, t, false), wset,
+        meta("permission", e.loc,
+             store ? "writes " + quoted(text, "the object the pointer points to") + " without owning it: the object it points to may have ended"
+                   : "writes `" + text + "` without owning it: a callee may have kept its object"));
+    Effect fx;
+    fx.kind = Effect::Kind::Store;
+    std::string recv_name;
+    if (addr.e->kind == low::LExpr::Kind::Var) {
+      recv_name = addr.e->text;
+    } else {
+      recv_name = new_temp(low::LType::Ref);
+      assign(fx.stmts, recv_name, addr.e);
+    }
+    write_fields(fx.stmts, recv_name, t, stored.e);
+    fx.deps = wset;
+    fx.seq = full.next_seq++;
+    fx.writes.insert(key);
+    fx.tags.push_back(MemTag{key, fkey(t), false, true, path_, {}});
+    full.effects.push_back(std::move(fx));
+    full.last_write[key] = wset;
+    touch(full, key, wset);
+    if (store) {
+      const Type& pt = e.type;
+      if (pt.is_ptr()) internal_error(e.loc, "a write of a pointer through a pointer reached lowering");
+    }
+    return e.yields_old ? old_value : stored;
+  }
+
   // ---- expressions ----
 
+  // `lower` records the node's place in the tree (decision 0039 item 4) and lowers it.
   LV lower(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full) {
+    int slot = 0;
+    if (!path_.empty()) {
+      const Expr* par = path_.back().first;
+      if (par->a == &e) slot = 0;
+      else if (par->b == &e) slot = 1;
+      else if (par->c == &e) slot = 2;
+      else
+        for (size_t k = 0; k < par->args.size(); ++k)
+          if (par->args[k] == &e) slot = 3 + static_cast<int>(k);
+    }
+    path_.emplace_back(&e, slot);
+    LV r = lower_node(e, env, guard, gdep, full);
+    path_.pop_back();
+    return r;
+  }
+
+  LV lower_node(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full) {
     if (!shared_.empty()) {  // a node used twice (the pointer of a compound store, decision 0032 item 9): lowered once
       const auto it = shared_.find(&e);
       if (it != shared_.end() && e.kind != Expr::Kind::Local) return it->second;
@@ -1352,10 +1747,13 @@ class Lowerer {
       case Expr::Kind::Binary: return binary(e, env, guard, gdep, full);
       case Expr::Kind::Cond: {
         if (cmode_ == CMode::None && (e.type.is_ptr() || has_effect(*e.b) || has_effect(*e.c))) return branch_cond(e, env, guard, gdep, full);
+        const size_t cond_effect_from = full.effects.size(), cond_obl_from = full.obls.size();
         LV c = lower(*e.a, env, guard, gdep, full);
         E gt = low::and_(guard, c.e);
         E gf = low::and_(guard, low::not_(c.e));
-        const Deps gd = join(gdep, c.dep);
+        Deps gd = join(gdep, c.dep);
+        // A condition that writes a cell or calls a function that may is complete, effects included, before the arms read a cell (audit R2-B1).
+        if (track_mem() && !opt_.drop_left_floor && touches_cells(e.a)) gd = join(gd, since(full, cond_effect_from, cond_obl_from));
         LV t = lower(*e.b, env, gt, gd, full);
         LV f = lower(*e.c, env, gf, gd, full);
         return {low::ite(c.e, t.e, f.e), join(join(c.dep, t.dep), f.dep)};
@@ -1388,7 +1786,10 @@ class Lowerer {
         return a;
       }
       case Expr::Kind::Call: return call(e, env, guard, gdep, full);
-      case Expr::Kind::AssignE: return assign_value(e, env, guard, gdep, full);
+      case Expr::Kind::AssignE:
+        if (e.var != nullptr && e.var->address_taken) return cell_write(e, env, guard, gdep, full);
+        return assign_value(e, env, guard, gdep, full);
+      case Expr::Kind::StoreE: return cell_write(e, env, guard, gdep, full);
       case Expr::Kind::Comma: return comma(e, env, guard, gdep, full);
       case Expr::Kind::Null: return {low::null_(), {}};
       case Expr::Kind::AddrOf: {  // the cell's Ref: a pointer value, no obligation of its own (decision 0032 item 6)
@@ -1404,7 +1805,11 @@ class Lowerer {
           internal_error(e.loc, "a permission atom outside a contract reached lowering");
           return {low::bool_lit(true), {}};
         }
-        return atom(e, env);
+        {
+          LV r = atom(e, env);
+          if (cmode_ == CMode::Wf) overlap_obligations(e, env, guard, gdep, full);
+          return r;
+        }
     }
     internal_error(e.loc, "unknown expression kind");
     return {low::int_lit("0"), {}};
@@ -1460,11 +1865,15 @@ class Lowerer {
     const bool lazy_and = e.bop == BinaryOp::LAnd;
     const bool lazy_or = e.bop == BinaryOp::LOr;
     if ((lazy_and || lazy_or) && cmode_ == CMode::None && has_effect(*e.b)) return branch_logical(e, env, guard, gdep, full);
+    const size_t left_effect_from = full.effects.size(), left_obl_from = full.obls.size();
     LV a = lower(*e.a, env, guard, gdep, full);
     E gb = guard;
     Deps gbd = gdep;
     if (lazy_and) { gb = low::and_(guard, a.e); gbd = join(gdep, a.dep); }
     if (lazy_or) { gb = low::and_(guard, low::not_(a.e)); gbd = join(gdep, a.dep); }
+    // The left operand's cell writes and memory calls are complete, with everything they follow, before the right operand reads a cell (audit R2-B1);
+    // in both halves, whatever the left operand's value carries.
+    if ((lazy_and || lazy_or) && track_mem() && !opt_.drop_left_floor && touches_cells(e.a)) gbd = join(gbd, since(full, left_effect_from, left_obl_from));
     LV b = lower(*e.b, env, gb, gbd, full);
     const Deps dep = join(a.dep, b.dep);
     if ((e.bop == BinaryOp::Eq || e.bop == BinaryOp::Ne) && e.a->type.is_ptr()) {
@@ -1724,8 +2133,12 @@ class Lowerer {
       for (size_t j = i + 1; j < ss.size(); ++j) {
         if (!exclusive_pair(*ss[i].site, *ss[j].site)) continue;
         const std::string pl = quoted(ss[i].place, "the object the pointer points to");
-        add(low::and_(ss[i].g, ss[j].g), low::bin(BinOp::Ne, ss[i].p, ss[j].p),
-            "passes " + pl + " to `" + callee.c_name + "` twice, but one of the two places is to be owned and they may be the same object");
+        if (site_param(*ss[i].site) == site_param(*ss[j].site))  // one parameter under two atoms: their guards must exclude each other (decision 0039 item 7)
+          add(low::and_(ss[i].g, ss[j].g), low::bin(BinOp::Ne, ss[i].p, ss[j].p),
+              "passes " + pl + " to `" + callee.c_name + "`, whose contract both owns and reads it on this path");
+        else
+          add(low::and_(ss[i].g, ss[j].g), low::bin(BinOp::Ne, ss[i].p, ss[j].p),
+              "passes " + pl + " to `" + callee.c_name + "` twice, but one of the two places is to be owned and they may be the same object");
       }
     // 3. the case splits: on the liveness cells of every pair of atoms, on the cells of every pair of `reads`
     for (size_t i = 0; i < ss.size(); ++i)
@@ -1806,7 +2219,11 @@ class Lowerer {
     (void)gdep;
     const size_t effect_from = full.effects.size(), obl_from = full.obls.size();
     std::vector<LV> args;
+    // A read in the arguments of a memory call on its field is sequenced before the call: it is no snapshot's reason (decision 0039 item 2).
+    const std::set<std::string> mfields = track_mem() ? memory_fields(callee) : std::set<std::string>{};
+    for (const std::string& f : mfields) ++mem_depth_[f];
     for (const Expr* a : e.args) args.push_back(lower(*a, env, nullptr, {}, full));
+    for (const std::string& f : mfields) --mem_depth_[f];
     // PRE(c): what C completes before it makes the call: the comma floor, and everything its arguments use or contain (the items
     // created while they were lowered, the fixed points among them, and what the argument values depend on).
     // Decision 0026 item 1: it is the EXACT set of each `requires` clause's obligation (below).  The BASE set of a clause, which step 2
@@ -1821,6 +2238,10 @@ class Lowerer {
     }
     // The permissions the callee's atoms need (decision 0037 item 8): explicit, atomic, in order, before the value preconditions, all with the
     // exact set PRE(c) like them.
+    bool args_write_cell = false;
+    for (const Expr* a : e.args) args_write_cell = args_write_cell || writes_cell(a);
+    const bool saved_both = call_pre_both_;
+    call_pre_both_ = args_write_cell;  // audit S3: the arguments write a cell, so the checks of the call follow the write in both halves
     std::vector<E> amounts = call_atoms(e, callee, args, cenv, pre, full);
     for (size_t k = 0; k < e.args.size(); ++k)
       if (e.args[k]->type.is_ptr()) ptr_use(*e.args[k], args[k], nullptr, {}, full);  // a pointer argument is a use (decision 0032 item 6)
@@ -1847,6 +2268,7 @@ class Lowerer {
         exact_dropped_ = true;
       }
     }
+    call_pre_both_ = saved_both;
     CallItem item;
     item.method = method_name(callee);
     for (const LV& a : args) item.args.push_back(a.e);
@@ -1884,6 +2306,31 @@ class Lowerer {
     fx.fixed = id;
     fx.deps = pre;
     fx.seq = full.next_seq++;
+    if (track_mem() && !mfields.empty()) {
+      // A memory call is an access to the cells of its atoms (decision 0039 item 4): an `owns` atom may write, a `reads` atom reads.
+      Acc ca;
+      ca.call = true;
+      ca.callee = callee.c_name;
+      for (const LV& arg : args) ca.dep = join(ca.dep, arg.dep);  // the places the atoms name, not everything PRE(c) holds
+      ca.loc = e.loc;
+      const FnAtoms& fa = atoms_of(callee);
+      for (int i = 0; i < fa.nreq; ++i) {
+        const AtomSite& site = fa.sites[static_cast<size_t>(i)];
+        if (!site_takes_cell(site)) continue;
+        Acc::Atom k;
+        const int j = site_param(site);
+        k.place = cenv.formals[static_cast<size_t>(j)];
+        k.guard = site_guard(site, cenv);
+        k.owns = site.atom->atom == AtomKind::Owns;
+        k.field = fkey(site_pointee(site));
+        const std::string txt = e.args[static_cast<size_t>(j)]->c_text;
+        k.text = txt.empty() ? std::string() : (txt[0] == '&' ? txt.substr(1) : "*" + txt);
+        fx.tags.push_back(MemTag{0, k.field, true, k.owns, path_, {}});
+        ca.atoms.push_back(std::move(k));
+      }
+      ca.field = ca.atoms.empty() ? std::string() : ca.atoms.front().field;
+      register_access(std::move(ca), full, nullptr);
+    }
     full.pre.push_back(pre);
     full.fixed_effect.push_back(full.effects.size());
     full.info.push_back(FixedInfo{report_at_ != nullptr ? *report_at_ : e.loc, callee.c_name, "the call to \"" + callee.c_name + "\""});
@@ -1900,14 +2347,29 @@ class Lowerer {
     std::vector<E> n, m;
     for (const Clause& c : callee.decreases_) {
       Full scratch;  // its own obligations belong to the callee's well-formedness method
-      LV v = lower(*c.expr, cenv, nullptr, {}, scratch);
+      LV v;
+      {
+        CtxSave save(*this);
+        // The callee's measure over the arguments in the current heap, chain-guarded over the callee's atoms at the arguments (decision 0039 item 8).
+        if (reads_heap(*c.expr)) set_ctx(callee, CMode::Method, false, static_cast<int>(callee.requires_.size()));
+        v = lower(*c.expr, cenv, nullptr, {}, scratch);
+      }
       pure_full(scratch, *c.expr, "a termination measure");
       n.push_back(v.e);
     }
     const Env own = contract_env();
     for (const Clause& c : fn_.f->decreases_) {
       Full scratch;
-      LV v = lower(*c.expr, own, nullptr, {}, scratch);
+      LV v;
+      {
+        CtxSave save(*this);
+        // The caller's measure under `old(...)`: its entry heap, framed by the caller's `requires`.
+        if (reads_heap(*c.expr)) {
+          set_ctx(*fn_.f, CMode::Method, false, static_cast<int>(fn_.f->requires_.size()));
+          cold_ = true;
+        }
+        v = lower(*c.expr, own, nullptr, {}, scratch);
+      }
       pure_full(scratch, *c.expr, "a termination measure");
       m.push_back(v.e);
     }
@@ -1926,7 +2388,7 @@ class Lowerer {
   // with a plain value) and Silicon finds the permission of a cell through it: an `ite` term as the receiver of a field access does not
   // (S-probe of M4.5b1a: "insufficient permission to access" right after asserts that `perm` is `write`).
   static bool has_effect(const Expr& e) {
-    if (e.kind == Expr::Kind::AssignE || e.kind == Expr::Kind::Comma || e.kind == Expr::Kind::Call) return true;
+    if (e.kind == Expr::Kind::AssignE || e.kind == Expr::Kind::StoreE || e.kind == Expr::Kind::Comma || e.kind == Expr::Kind::Call) return true;
     if (e.kind == Expr::Kind::Cond && e.type.is_ptr()) return true;
     for (const Expr* x : {e.a, e.b, e.c})
       if (x != nullptr && has_effect(*x)) return true;
@@ -1937,7 +2399,7 @@ class Lowerer {
 
   // The locals a full expression writes (its AssignE targets, those in guarded operands included).
   static void collect_writes(const Expr& e, std::set<int>& out) {
-    if (e.kind == Expr::Kind::AssignE && e.var != nullptr) out.insert(e.var->id);
+    if (e.kind == Expr::Kind::AssignE && e.var != nullptr && !e.var->address_taken) out.insert(e.var->id);  // a cell's write is a memory effect (0039)
     for (const Expr* x : {e.a, e.b, e.c})
       if (x != nullptr) collect_writes(*x, out);
     for (const Expr* x : e.args)
@@ -2058,11 +2520,13 @@ class Lowerer {
   // `t := value`.  Its obligations are asserted inside the branch, so C's guard is the branch itself.  `first_call` is set to the
   // description of its first fixed point when it has any (decision 0021: such a branch is a fixed point of the enclosing expression).
   std::vector<low::LStmt> branch_body(const Expr& e, const Env& env, const std::string& t, std::set<int>& reads, std::set<int>& writes,
-                                      FixedInfo& first_call, bool& has_fixed) {
+                                      FixedInfo& first_call, bool& has_fixed, const E& bguard, std::vector<MemTag>& tags) {
     const Deps saved = floor_;
     floor_ = {};
     Full inner;
+    branch_guards_.push_back(bguard);  // the accesses inside happen only on this arm (decision 0039 item 3)
     LV v = lower(e, env, nullptr, {}, inner);
+    branch_guards_.pop_back();
     floor_ = saved;
     if (inner.nfixed != 0 && !has_fixed) {
       has_fixed = true;
@@ -2071,6 +2535,7 @@ class Lowerer {
     for (const Effect& fx : inner.effects) {
       reads.insert(fx.reads.begin(), fx.reads.end());
       writes.insert(fx.writes.begin(), fx.writes.end());
+      tags.insert(tags.end(), fx.tags.begin(), fx.tags.end());
     }
     std::vector<low::LStmt> body;
     flush(inner, body);
@@ -2083,7 +2548,7 @@ class Lowerer {
   // fixed point (decision 0021 item 3): it also follows everything created while its condition operand was lowered (`effect_from`,
   // `obl_from`), and its value has D(B) = PRE(B) + B.  A call-free branch is a movable item with the set of 0020.
   Deps add_branch(Full& full, Effect&& fx, const Deps& cond_dep, const std::set<int>& reads, const std::set<int>& writes, bool has_fixed,
-                  FixedInfo info, size_t effect_from, size_t obl_from) {
+                  FixedInfo info, size_t effect_from, size_t obl_from, size_t acc_from) {
     Deps slot = join(floor_, cond_dep);
     for (int id : reads) {
       const auto w = full.last_write.find(id);
@@ -2113,6 +2578,11 @@ class Lowerer {
     for (int id : reads) touch(full, id, value);
     for (int id : writes) touch(full, id, value);
     full.effects.push_back(std::move(fx));
+    // The cell accesses made inside the branch now belong to this full expression, with the branch's value as what they depend on (audit S5).
+    for (size_t k = acc_from; k < accs_.size(); ++k) {
+      accs_[k].owner = &full;
+      accs_[k].dep = value;
+    }
     return value;
   }
 
@@ -2129,6 +2599,8 @@ class Lowerer {
     const size_t effect_from = full.effects.size();
     const size_t obl_from = full.obls.size();
     LV a = lower(*e.a, env, guard, gdep, full);
+    Deps left_floor;  // audit R2-B1: the left operand's cell writes and memory calls come before the branch
+    if (track_mem() && !opt_.drop_left_floor && touches_cells(e.a)) left_floor = since(full, effect_from, obl_from);
     const std::string t = new_temp(low::LType::Bool);
     Effect fx;
     fx.kind = Effect::Kind::Branch;
@@ -2139,10 +2611,14 @@ class Lowerer {
     std::set<int> reads, writes;
     FixedInfo first;
     bool has_fixed = false;
-    i.then_body = branch_body(*e.b, env, t, reads, writes, first, has_fixed);
+    const size_t acc_from = accs_.size();
+    branch_ctx_.push_back(BranchCtx{&full, {}});
+    i.then_body = branch_body(*e.b, env, t, reads, writes, first, has_fixed, i.expr, fx.tags);
+    const Deps extra = branch_ctx_.back().extra;
+    branch_ctx_.pop_back();
     fx.stmts.push_back(std::move(i));
     if (has_fixed) first.what += e.bop == BinaryOp::LAnd ? " in the right operand of `&&`" : " in the right operand of `||`";
-    const Deps value = add_branch(full, std::move(fx), a.dep, reads, writes, has_fixed, first, effect_from, obl_from);
+    const Deps value = add_branch(full, std::move(fx), join(join(a.dep, extra), left_floor), reads, writes, has_fixed, first, effect_from, obl_from, acc_from);
     return {low::var(t), value};
   }
 
@@ -2159,6 +2635,8 @@ class Lowerer {
     const size_t effect_from = full.effects.size();
     const size_t obl_from = full.obls.size();
     LV c = lower(*e.a, env, guard, gdep, full);
+    Deps cond_floor;  // audit R2-B1
+    if (track_mem() && !opt_.drop_left_floor && touches_cells(e.a)) cond_floor = since(full, effect_from, obl_from);
     const std::string t = new_temp(ltype(e.type));
     Effect fx;
     fx.kind = Effect::Kind::Branch;
@@ -2168,11 +2646,15 @@ class Lowerer {
     std::set<int> reads, writes;
     FixedInfo first;
     bool has_fixed = false;
-    i.then_body = branch_body(*e.b, env, t, reads, writes, first, has_fixed);
-    i.else_body = branch_body(*e.c, env, t, reads, writes, first, has_fixed);
+    const size_t acc_from = accs_.size();
+    branch_ctx_.push_back(BranchCtx{&full, {}});
+    i.then_body = branch_body(*e.b, env, t, reads, writes, first, has_fixed, c.e, fx.tags);
+    i.else_body = branch_body(*e.c, env, t, reads, writes, first, has_fixed, low::not_(c.e), fx.tags);
+    const Deps extra = branch_ctx_.back().extra;
+    branch_ctx_.pop_back();
     fx.stmts.push_back(std::move(i));
     if (has_fixed) first.what += " in an arm of `?:`";
-    const Deps value = add_branch(full, std::move(fx), c.dep, reads, writes, has_fixed, first, effect_from, obl_from);
+    const Deps value = add_branch(full, std::move(fx), join(join(c.dep, extra), cond_floor), reads, writes, has_fixed, first, effect_from, obl_from, acc_from);
     return {low::var(t), value};
   }
 
@@ -2367,6 +2849,7 @@ class Lowerer {
     for (const FlatObl& o : full.obls) place.obl.push_back(prefix_slot(o.dep));
     bool perturbed = false;
     bool delayed = false;
+    bool mem_perturbed = false;
     // Whether an item created after `w` has a set that contains w's set.
     auto depended_on = [&full](const FlatEffect& w) {
       auto contains = [&w](const Ids& big) { return std::includes(big.begin(), big.end(), w.deps.begin(), w.deps.end()); };
@@ -2384,6 +2867,10 @@ class Lowerer {
           slot = -1;
           perturbed = true;
         }
+        if (opt_.perturb_memory_order && !mem_perturbed && fx.kind == FlatEffect::Kind::Store && !fx.deps.empty()) {  // self-test hook (0039)
+          slot = -1;
+          mem_perturbed = true;
+        }
         if (opt_.delay_write_slot && !delayed && fx.kind == FlatEffect::Kind::Write && !fx.deps.empty() && depended_on(fx)) {  // self-test hook (0025)
           slot = n - 1;
           delayed = true;
@@ -2394,6 +2881,7 @@ class Lowerer {
     if (chain) {
       check_variable_order(full, pos, place);
       check_fixed_order(full, pi, pos, place);
+      check_memory_order(full, pos, place);
     }
     for (int slot = -1; slot < n; ++slot) {
       // The items of this slot, obligations and movable effects, in creation order.
@@ -2426,6 +2914,7 @@ class Lowerer {
             break;
           case FlatEffect::Kind::Snapshot: assign(out, fx.name, fx.value); break;
           case FlatEffect::Kind::Branch:
+          case FlatEffect::Kind::Store:
             for (low::LStmt& st : fx.stmts) out.push_back(std::move(st));
             break;
         }
@@ -2555,6 +3044,36 @@ class Lowerer {
       }
   }
 
+  // The fail-closed check of decision 0039 item 4 (audit S4 (ii)): for each write or snapshot of a cell field and each memory call on that field
+  // that C orders with it, read from the expression tree (the paths of the accesses), the emitted order agrees.  Per key, the order of the writes
+  // and snapshots is `check_variable_order`'s (keys are negative ids there).  An E5 branch counts as the accesses inside it (its tags).
+  void check_memory_order(const FlatFull& full, const std::vector<int>& pos, const Placement& place) {
+    auto key_of = [&](size_t i) {
+      const FlatEffect& fx = full.effects[i];
+      return fx.fixed >= 0 ? 2 * pos[static_cast<size_t>(fx.fixed)] + 1 : 2 * (place.eff[i] + 1);
+    };
+    for (size_t i = 0; i < full.effects.size(); ++i)
+      for (size_t j = 0; j < full.effects.size(); ++j) {
+        if (i == j || full.effects[i].seq > full.effects[j].seq) continue;  // `i` was created first
+        const FlatEffect& x = full.effects[i];
+        const FlatEffect& y = full.effects[j];
+        for (const MemTag& a : x.tags)
+          for (const MemTag& b : y.tags) {
+            if (a.field != b.field) continue;
+            // A call and a cell write or snapshot of one field, or two cell accesses of one field and different keys (one a write) that C orders (audit R2-B1).
+            const bool call_pair = a.call != b.call;
+            const bool access_pair = !a.call && !b.call && a.key != b.key && (a.write || b.write);
+            if (!call_pair && !access_pair) continue;
+            if (order_rel(a.path, a.write && !a.call, b.path, b.write && !b.call, b.after) != 1) continue;
+            if (key_of(i) > key_of(j)) {
+              internal_error(SrcLoc{}, call_pair ? "a cell access of a full expression was emitted on the wrong side of a memory call (decision 0039 item 4)"
+                                                 : "a cell access of a full expression was emitted on the wrong side of another access C orders before it (decision 0039 item 4)");
+              return;
+            }
+          }
+      }
+  }
+
   Env body_env() const { return Env{}; }
 
   Env contract_env() const {
@@ -2566,20 +3085,60 @@ class Lowerer {
 
   // Several expressions in ONE full expression (a store's address and value, decision 0032 item 9); the others are one expression.
   // `copy_of`, when given, is the first expression, whose pointer value is being copied: its liveness check joins the full expression.
+  // A statement's own store of a cell (`x = e;`, `*p = e;`): no effect, no E3 trigger (audit S6), but an access for item 3's pairs: its side effect is
+  // unsequenced with a write inside `e` that no sequence point separates from it (`*p = (*q)++;`).
+  struct StoreTarget {
+    const Var* var = nullptr;   // a cell by name
+    const Expr* addr = nullptr; // or the address of `*addr = ...`, the first root
+    SrcLoc loc;
+  };
   std::vector<LV> full_exprs(const std::vector<const Expr*>& es, std::vector<low::LStmt>& out, const Expr* copy_of = nullptr,
-                             bool share_first = false) {
+                             bool share_first = false, const StoreTarget* target = nullptr) {
     Full full;
     const std::set<int> saved_written = std::move(written_);
     const bool saved_in_full = in_full_;
     written_.clear();
     for (const Expr* e : es) collect_writes(*e, written_);
+    accs_.clear();  // decision 0039: the cell accesses and memory calls of this full expression
+    mem_w_.clear();
+    mem_calls_.clear();
+    mem_depth_.clear();
+    branch_guards_.clear();
+    branch_ctx_.clear();
+    path_.clear();
+    for (const Expr* e : es) mem_scan(e);
     in_full_ = true;
     std::vector<LV> vs;
     for (const Expr* e : es) {
       vs.push_back(lower(*e, body_env(), nullptr, {}, full));
-      if (share_first && vs.size() == 1) shared_[e] = vs.front();  // the later expressions read this node's value, not a second evaluation
+      if (share_first && vs.size() == 1) {  // the later expressions read this node's value, not a second evaluation
+        shared_[e] = vs.front();
+        shared_path_[e] = Path{{e, 0}};
+      }
     }
-    if (share_first) shared_.erase(es.front());
+    if (share_first) {
+      shared_.erase(es.front());
+      shared_path_.erase(es.front());
+    }
+    if (target != nullptr) {
+      Acc a;
+      a.write = true;
+      a.loc = target->loc;
+      if (target->var != nullptr) {
+        a.key = key_of_cell(*target->var);
+        a.field = fkey(target->var->type);
+        a.place = low::var(var_name(*target->var));
+        a.text = target->var->name;
+      } else if (target->addr->type.pointee != nullptr) {
+        a.key = key_of_addr(*target->addr);
+        a.field = fkey(*target->addr->type.pointee);
+        a.place = vs.front().e;
+        a.dep = vs.front().dep;
+        a.text = target->addr->c_text.empty() ? std::string() : "*" + target->addr->c_text;
+      }
+      path_.clear();
+      if (!a.field.empty()) register_access(std::move(a), full, nullptr);
+    }
     if (copy_of != nullptr) ptr_use(*copy_of, vs.front(), nullptr, {}, full);
     in_full_ = saved_in_full;
     written_ = saved_written;
@@ -2607,7 +3166,10 @@ class Lowerer {
       case Stmt::Kind::Assign: {
         if (s.var->address_taken) {  // a cell: written by name (decision 0032 item 6); a Decl without an initializer writes nothing
           if (s.expr == nullptr) break;
-          LV v = full_expr(*s.expr, out);
+          StoreTarget target;
+          target.var = s.var;
+          target.loc = s.loc;
+          LV v = full_exprs({s.expr}, out, nullptr, false, s.kind == Stmt::Kind::Assign ? &target : nullptr).front();
           write_cell(out, *s.var, v.e, s.loc);
           break;
         }
@@ -2966,6 +3528,7 @@ class Lowerer {
     for (size_t a = 0; a < ens.size(); ++a)
       for (size_t b = a + 1; b < ens.size(); ++b) {
         if (!exclusive_pair(fa.sites[ens[a]], fa.sites[ens[b]])) continue;
+        if (same_expr(p[a], p[b])) continue;  // one parameter's owns and reads: `f__wf` asserts their guards exclude each other (decision 0039 item 7)
         emit_assert(out, low::implies(low::and_(g[a], g[b]), low::bin(BinOp::Ne, p[a], p[b])),
                     perm_meta("returns " + quoted(name(a), "the object the pointer points to") + " and " + quoted(name(b), "the object the pointer points to") +
                                   " as owned places, but they may be the same object",
@@ -3088,7 +3651,8 @@ class Lowerer {
     if (e->type.is_ptr()) return true;
     switch (e->kind) {
       case Expr::Kind::Local: if (e->var != nullptr && (e->var->address_taken || e->var->type.is_ptr())) return true; break;
-      case Expr::Kind::AddrOf: case Expr::Kind::Deref: case Expr::Kind::Atom: return true;
+      case Expr::Kind::AddrOf: case Expr::Kind::Deref: case Expr::Kind::Atom: case Expr::Kind::StoreE: return true;
+      case Expr::Kind::AssignE: if (e->var != nullptr && e->var->address_taken) return true; break;  // a cell written inside an expression (0039 item 2)
       default: break;
     }
     for (const Expr* x : {e->a, e->b, e->c})
@@ -3150,6 +3714,8 @@ class Lowerer {
 
   void writes_in_expr(const Expr* e, LoopWrites& w) {
     if (e == nullptr) return;
+    if (e->kind == Expr::Kind::AssignE && e->var != nullptr && e->var->address_taken) w.cells.insert(e->var->id);  // decision 0039 item 2
+    if (e->kind == Expr::Kind::StoreE) w.fields.insert(cell_suffix(e->type));
     if (e->kind == Expr::Kind::Call && e->callee != nullptr)
       for (const AtomSite& site : atoms_of(*e->callee).sites)
         if (!site.in_ensures && site.atom->atom == AtomKind::Owns) w.fields.insert(cell_suffix(site_pointee(site)));
@@ -3879,7 +4445,13 @@ class Lowerer {
     }
     for (const Clause& c : f.decreases_) {
       Full scratch;  // its own obligations belong to the well-formedness method
-      LV v = lower(*c.expr, cenv, nullptr, {}, scratch);
+      LV v;
+      {
+        CtxSave save(*this);
+        // A measure that reads memory is written plainly, each read guarded by its chain over the framing disjuncts (decision 0039 item 8).
+        if (reads_heap(*c.expr)) set_ctx(f, CMode::Method, false, static_cast<int>(f.requires_.size()));
+        v = lower(*c.expr, cenv, nullptr, {}, scratch);
+      }
       pure_full(scratch, *c.expr, "a termination measure");
       m.decreases_.push_back(v.e);
     }
@@ -3970,6 +4542,20 @@ class Lowerer {
       }
       pure_full(full, *c.expr, "a contract clause");
       for (Obl& o : full.obls) emit_assert(m.body, low::implies(low::and_(prior, o.guard), o.cond), o.meta);
+      if (ens) {
+        // Partners by path (decision 0039 item 7, owner question 72): an `ensures` atom returns what its partner `requires` atom took, on every path
+        // where it is returned: `prior ==> (g_ens ==> g_partner)`.  Nothing is written where the partner is unconditional or has the very guard.
+        for (const AtomSite& site : fa.sites) {
+          if (!site.in_ensures || site.clause != idx || site.atom->amount < 0 || site.atom->amount >= fa.nreq) continue;
+          const AtomSite& partner = fa.sites[static_cast<size_t>(site.atom->amount)];
+          const E ge = site_guard(site, env), gp = site_guard(partner, env);
+          if (!gp || same_expr(ge, gp)) continue;
+          const std::string txt = site.atom->a != nullptr && !site.atom->a->c_text.empty() ? "*" + site.atom->a->c_text : std::string();
+          emit_assert(m.body, low::implies(prior, low::implies(ge, gp)),
+                      meta("permission", site.atom->loc.known() ? site.atom->loc : c.loc,
+                           "the contract of `" + f.c_name + "` returns " + quoted(txt, "an object") + " on a path where its `requires` did not take it"));
+        }
+      }
       prior = low::and_(prior, v.e);
     };
     for (size_t k = 0; k < f.requires_.size(); ++k) go(f.requires_[k], false, static_cast<int>(k));
@@ -3978,7 +4564,15 @@ class Lowerer {
     // The measure is evaluated over the entry values: its obligations are checked under the requires (0013 item 7).
     for (const Clause& c : f.decreases_) {
       Full full;
-      LV v = lower(*c.expr, env, nullptr, {}, full);
+      {
+        CtxSave save(*this);
+        if (reads_heap(*c.expr)) {  // decision 0039 item 8: the heap reads of a measure are framed by the requires atoms, over the pre-state ghosts
+          set_ctx(f, CMode::Wf, false, static_cast<int>(f.requires_.size()));
+          cmeasure_ = true;
+        }
+        LV v = lower(*c.expr, env, nullptr, {}, full);
+        cmeasure_ = false;
+      }
       pure_full(full, *c.expr, "a termination measure");
       for (Obl& o : full.obls) emit_assert(m.body, low::implies(low::and_(requires_only, o.guard), o.cond), o.meta);
     }
@@ -4040,6 +4634,7 @@ class Lowerer {
   const Function* cf_ = nullptr;
   bool cens_ = false;
   bool cold_ = false;
+  bool cmeasure_ = false;  // the contract expression is a function's termination measure (decision 0039 item 8)
   size_t cseen_ = 0;
   std::map<const Function*, FnAtoms> atoms_;
   std::map<std::pair<int, bool>, Type> wf_ghosts_;  // the ghost value formals of the `__wf` method being built: (parameter, post-state) -> pointee type
@@ -4060,6 +4655,20 @@ class Lowerer {
   std::set<int> written_;
   Deps floor_;
   std::map<const Expr*, LV> shared_;
+  // ---- decision 0039: cell accesses of the full expression being lowered (branch bodies included) ----
+  // The nodes from the root to the one being lowered (the slot of each in its parent), the accesses made so far, the cell fields the expression writes
+  // and its memory calls by field (E3's trigger), the memory calls whose arguments are being lowered (a read in them is no snapshot's reason), the
+  // conditions of the E5 branches around the node, the full being filled and the branches open around it (their extra sets, audit S5).
+  Path path_;
+  std::map<const Expr*, Path> shared_path_;  // where a shared node (a compound store's address) was lowered the first time
+  std::vector<Acc> accs_;
+  std::set<std::string> mem_w_;
+  std::map<std::string, int> mem_calls_, mem_depth_;
+  std::vector<E> branch_guards_;
+  std::vector<BranchCtx> branch_ctx_;
+  bool call_pre_both_ = false;      // PRE(c) goes into both halves of the call's permission and heap-reading checks (audit S3)
+  std::map<std::string, int> key_ids_;
+  int next_other_key_ = 0;
   std::map<int, std::string> user_names_;  // the user's name of each label of the current function, by id
   std::set<int> user_targets_;  // the ids of the user labels some goto of the current function targets
   // The memory model's bookkeeping (decision 0032 item 5): the suffix of each enumeration's cell fields, the Type of each cell-type suffix

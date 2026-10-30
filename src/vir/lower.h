@@ -54,6 +54,16 @@ struct LowerOptions {
   // Forget the calls inside `if`, loops and blocks when computing the recursion components, as an under-approximation would: the check of
   // the components against the emitted methods must report it (decision 0021 item 4).
   bool cycles_ignore_nested_calls = false;
+  // Move the first write of a cell used as a value, whose set is not empty, before every fixed point, so that the fail-closed check of decision
+  // 0039 item 4 (a cell write is on C's side of every memory call it is ordered with) reports its internal error.
+  bool perturb_memory_order = false;
+  // A snapshot of a cell read does not follow its guard's set (decision 0039 item 2, audit B1): the same check must report it for
+  // `bump(&x) && x == 0`, whose read would be emitted before the call.
+  bool drop_snapshot_guard_set = false;
+  // Skip the join of a left operand's (or a `?:` condition's) cell writes and memory calls into the sets of the right operand's cell reads and
+  // branches (decision 0039 item 2, audit R2-B1): `return ((*pick(q) = 5) == 5) && *q == 5;` would read *q before the store, and the access-pair half of the
+  // fail-closed check (item 4) must report it.
+  bool drop_left_floor = false;
 };
 
 struct LowerResult {

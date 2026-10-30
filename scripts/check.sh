@@ -66,7 +66,7 @@ step "vir self-test"
 # The case count is pinned twice: the tool must state at least VIR_CASES_MIN cases (a smaller
 # set must not pass), and the harness must pass exactly the number it stated (a case lost on
 # the way, or a file that is not run, must not pass either).
-VIR_CASES_MIN=1263
+VIR_CASES_MIN=1317
 rm -rf build/vir-selftest
 mkdir -p build/vir-selftest
 vir_out="$(build/cerastes-vir-selftest build/vir-selftest)"

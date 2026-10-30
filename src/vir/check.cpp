@@ -127,7 +127,7 @@ ConstVal eval_const(const Expr& e) {
 
 // Where an expression sits; decides which nodes are allowed.
 enum class Ctx {
-  Body,      // code: Local, Call, AssignE and Comma allowed (not Formal, Result, Old)
+  Body,      // code: Local, Call, AssignE, StoreE and Comma allowed (not Formal, Result, Old)
   Annot,     // `check` and `invariant`: like Body, but no calls (0011 item 7) and no side effects (decision 0020 item 3)
   LoopCond,  // a loop condition: Body, its effects and calls run at every evaluation (decisions 0020 and 0021)
   Assert,    // C's `assert(e)`: calls as in code, no side effects (decision 0015 item 6, 0020)
@@ -147,7 +147,7 @@ bool declares_cell(const Stmt& b) {
 bool pointer_node(const Expr& e) {
   if (e.type.is_ptr()) return true;
   switch (e.kind) {
-    case Expr::Kind::Null: case Expr::Kind::AddrOf: case Expr::Kind::Deref: case Expr::Kind::Atom: return true;
+    case Expr::Kind::Null: case Expr::Kind::AddrOf: case Expr::Kind::Deref: case Expr::Kind::Atom: case Expr::Kind::StoreE: return true;
     case Expr::Kind::Local: return e.var != nullptr && e.var->address_taken;
     default: return false;
   }
@@ -237,7 +237,7 @@ class Checker {
     }
     for (const Clause& c : f.requires_) clause(c, Ctx::Requires, "requires");
     for (const Clause& c : f.ensures_) clause(c, Ctx::Ensures, "ensures");
-    for (const Clause& c : f.decreases_) measure(c, Ctx::Requires, "decreases");
+    for (const Clause& c : f.decreases_) measure(c, Ctx::Requires, "decreases", /*memory_ok=*/true);
     atoms(f);
     if (f.noreturn && !f.ensures_.empty())
       err(f.ensures_.front().loc, "an `ensures` on '" + f.c_name + "', which is declared not to return (decision 0015 item 4)");
@@ -255,7 +255,6 @@ class Checker {
                            " (decision 0015 item 2)");
       }
       stmt(*f.body);
-      for (const PlacementProblem& m : placement_problems(f)) err(m.loc, m.what);  // decision 0037 item 8
       // The backstop of the encoder's own report (decision 0020 item 4): a modification unsequenced with another access.
       for (const SequenceProblem& p : sequence_problems(f))
         err(p.at != nullptr ? p.at->loc : f.loc, "unsequenced modification of '" + p.variable +
@@ -372,16 +371,8 @@ class Checker {
           err(a.loc, "the same permission atom twice in a `requires` (decision 0037 item 6)");
       }
     }
-    // `owns(*p)` and `reads(*p)` of one parameter in one clause list would hold the same cell twice, with and without an amount (item 6).
-    for (size_t i = 0; i < sites.size(); ++i)
-      for (size_t j = 0; j < i; ++j) {
-        const Expr& a = *sites[i].atom;
-        const Expr& b = *sites[j].atom;
-        if (sites[i].in_ensures == sites[j].in_ensures && a.a != nullptr && b.a != nullptr && a.a->kind == Expr::Kind::Formal &&
-            b.a->kind == Expr::Kind::Formal && a.a->index == b.a->index &&
-            ((a.atom == AtomKind::Owns && b.atom == AtomKind::Reads) || (a.atom == AtomKind::Reads && b.atom == AtomKind::Owns)))
-          err(a.loc, "`owns` and `reads` of the same parameter in one contract (decision 0037 item 5)");
-      }
+    // `owns(*p)` and `reads(*p)` of one parameter in one clause list: lowering asserts per path that they do not both hold (`f__wf`,
+    // decision 0039 item 7), so only a same-kind pair is refused here.
     std::set<int> used;
     for (const AtomSite& s : sites) {
       if (!s.in_ensures) continue;
@@ -421,7 +412,8 @@ class Checker {
 
   // One component of a termination measure: an Int expression (decision 0013 item 1), evaluated like a contract
   // clause (function) or like an invariant (loop).
-  // `memory_ok`: a loop's measure may read memory (decision 0038 item 6); a function's `decreases` may not yet (cut 1 of M4.5b1c1).
+  // `memory_ok`: a loop's measure and a function's `decreases` may read memory (decision 0038 item 6, 0039 item 8); an atom in either is
+  // refused (the atoms check).
   void measure(const Clause& c, Ctx ctx, const char* what, bool memory_ok = false) {
     if (c.expr == nullptr) {
       err(c.loc, std::string("a ") + what + " component without an expression");
@@ -640,7 +632,10 @@ class Checker {
       case Stmt::Kind::Store: {
         if (s.addr == nullptr || s.expr == nullptr) { err(s.loc, "a store without an address or a value"); return; }
         expr(*s.addr, Ctx::Body, false);
+        // A compound store's value reads a Deref that shares the address node (decision 0039 item 5): the address is checked once.
+        shared_addrs_.insert(s.addr);
         expr(*s.expr, Ctx::Body, false);
+        shared_addrs_.erase(s.addr);
         if (!s.addr->type.is_ptr()) err(s.addr->loc, "a store through a " + s.addr->type.str() + ", not a pointer");
         else if (accepted_pointer(s.addr->type) && s.expr->type != *s.addr->type.pointee)
           err(s.expr->loc, "a store of a " + s.expr->type.str() + " through a " + s.addr->type.str() + " (the pointee is " + s.addr->type.pointee->str() + ")");
@@ -762,6 +757,11 @@ class Checker {
         else if (!e.type.is_ptr() || e.type.pointee == nullptr || *e.type.pointee != e.var->type) err(e.loc, "the address of '" + e.var->name + "' has the wrong type");
         break;
       case Expr::Kind::Deref:
+        if (e.a != nullptr && shared_addrs_.count(e.a) != 0) {  // the address of the enclosing store, already checked (decision 0039 item 5)
+          if (!e.a->type.is_ptr()) err(e.loc, "a dereference of a " + e.a->type.str() + ", not a pointer");
+          else if (e.a->type.pointee == nullptr || e.type != *e.a->type.pointee) err(e.loc, "a dereference whose type is not the pointee's");
+          break;
+        }
         if (!sub(e.a)) break;
         if (!e.a->type.is_ptr()) err(e.loc, "a dereference of a " + e.a->type.str() + ", not a pointer");
         else if (e.a->type.pointee == nullptr || e.type != *e.a->type.pointee) err(e.loc, "a dereference whose type is not the pointee's");
@@ -803,6 +803,7 @@ class Checker {
         break;
       case Expr::Kind::Call: call(e, ctx); break;
       case Expr::Kind::AssignE: assign_value(e, ctx); break;
+      case Expr::Kind::StoreE: store_value(e, ctx); break;
       case Expr::Kind::Comma: comma(e, ctx); break;
     }
   }
@@ -829,7 +830,6 @@ class Checker {
     if (e.var == nullptr || e.a == nullptr) { err(e.loc, "an assignment used as a value without a variable or a value"); return; }
     if (!owned(*e.var)) err(e.loc, "variable '" + e.var->name + "' does not belong to function '" + fn_->c_name + "'");
     else if (!visible(*e.var)) err(e.loc, "assignment to '" + e.var->name + "', which is not declared here");
-    if (e.var->address_taken) err(e.loc, "an assignment used as a value to '" + e.var->name + "', a variable whose address is taken (decision 0032 item 9)");
     if (e.type != e.var->type) err(e.loc, "an assignment used as a value has type " + e.type.str() + ", not the variable's " + e.var->type.str());
     expr(*e.a, ctx, false);
     if (e.a->type != e.var->type)
@@ -839,6 +839,35 @@ class Checker {
       if (e.b->kind != Expr::Kind::Local || e.b->var != e.var) err(e.b->loc, "the old value of an assignment is not a read of its own variable");
       else if (!contains_node(*e.a, e.b)) err(e.b->loc, "the old value of an assignment is not the node its stored value reads");
       if (!e.yields_old) err(e.loc, "an assignment with an old value that does not yield it");
+    }
+  }
+
+  // A write through a pointer used as a value (decision 0039 item 2): like an AssignE, with the address `c` in place of the variable.  The
+  // stored value has the pointee's type; the old value, if any, is the one `Deref` node of `c` that the stored value reads.
+  void store_value(const Expr& e, Ctx ctx) {
+    if (!effects_allowed(ctx)) {
+      err(e.loc, "a side effect (a write through a pointer used as a value) in a contract, an annotation or an `assert`");
+      return;
+    }
+    if (!seen_effects_.insert(&e).second) err(e.loc, "a write through a pointer used as a value that is reachable twice (its effect would run twice)");
+    if (e.c == nullptr || e.a == nullptr) { err(e.loc, "a write through a pointer used as a value without an address or a value"); return; }
+    expr(*e.c, ctx, false);
+    shared_addrs_.insert(e.c);
+    expr(*e.a, ctx, false);
+    shared_addrs_.erase(e.c);
+    if (!e.c->type.is_ptr()) {
+      err(e.c->loc, "a store through a " + e.c->type.str() + ", not a pointer");
+      return;
+    }
+    if (!accepted_pointer(e.c->type) || e.c->type.pointee == nullptr) return;
+    if (e.type != *e.c->type.pointee) err(e.loc, "a write through a pointer used as a value has type " + e.type.str() + ", not the pointee's " + e.c->type.pointee->str());
+    if (e.a->type != *e.c->type.pointee)
+      err(e.a->loc, "a store of a " + e.a->type.str() + " through a " + e.c->type.str() + " (the pointee is " + e.c->type.pointee->str() + ")");
+    if (e.yields_old && e.b == nullptr) err(e.loc, "a store that yields the old value without one");
+    if (e.b != nullptr) {
+      if (e.b->kind != Expr::Kind::Deref || e.b->a != e.c) err(e.b->loc, "the old value of a store is not a read of its own address");
+      else if (!contains_node(*e.a, e.b)) err(e.b->loc, "the old value of a store is not the node its stored value reads");
+      if (!e.yields_old) err(e.loc, "a store with an old value that does not yield it");
     }
   }
 
@@ -861,7 +890,7 @@ class Checker {
   // Whether the expression holds an AssignE, a Comma or a Call (the same question as lower.cpp's has_effect): the loop condition then
   // needs the exit jump of the top-test shape (decisions 0020 and 0021).
   static bool has_effect(const Expr& e) {
-    if (e.kind == Expr::Kind::AssignE || e.kind == Expr::Kind::Comma || e.kind == Expr::Kind::Call) return true;
+    if (e.kind == Expr::Kind::AssignE || e.kind == Expr::Kind::StoreE || e.kind == Expr::Kind::Comma || e.kind == Expr::Kind::Call) return true;
     for (const Expr* x : {e.a, e.b, e.c})
       if (x != nullptr && has_effect(*x)) return true;
     for (const Expr* x : e.args)
@@ -887,7 +916,7 @@ class Checker {
 
   static bool mentions_state(const Expr& e) {
     if (e.kind == Expr::Kind::Result || e.kind == Expr::Kind::Local || e.kind == Expr::Kind::Call || e.kind == Expr::Kind::Formal ||
-        e.kind == Expr::Kind::Old || e.kind == Expr::Kind::AssignE || e.kind == Expr::Kind::Comma)
+        e.kind == Expr::Kind::Old || e.kind == Expr::Kind::AssignE || e.kind == Expr::Kind::StoreE || e.kind == Expr::Kind::Comma)
       return true;
     for (const Expr* x : {e.a, e.b, e.c})
       if (x != nullptr && mentions_state(*x)) return true;
@@ -896,7 +925,7 @@ class Checker {
 
   static bool mentions_result_or_local(const Expr& e) {
     if (e.kind == Expr::Kind::Result || e.kind == Expr::Kind::Local || e.kind == Expr::Kind::Call || e.kind == Expr::Kind::AssignE ||
-        e.kind == Expr::Kind::Comma)
+        e.kind == Expr::Kind::StoreE || e.kind == Expr::Kind::Comma)
       return true;
     for (const Expr* x : {e.a, e.b, e.c})
       if (x != nullptr && mentions_result_or_local(*x)) return true;
@@ -982,7 +1011,8 @@ class Checker {
   std::unordered_set<const Function*> functions_;
   const Function* fn_ = nullptr;
   std::set<int> declared_;
-  std::set<const Expr*> seen_effects_;  // the AssignE, Comma and Call nodes met in the current function (each may be reachable once)
+  std::set<const Expr*> seen_effects_;  // the AssignE, StoreE, Comma and Call nodes met in the current function (each may be reachable once)
+  std::set<const Expr*> shared_addrs_;  // the address nodes of the stores being checked: a compound store's Deref shares its address (0039 item 5)
   struct Target {
     int id;
     bool is_loop;
@@ -1099,107 +1129,13 @@ std::vector<GotoProblem> goto_problems(const Function& f) {
 
 namespace {
 
-// Decision 0037 item 8: the placement rule for calls of functions that hold permissions (see PlacementProblem in check.h).
-class Placement {
- public:
-  explicit Placement(const Function& f) : f_(f) {}
-
-  std::vector<PlacementProblem> run() {
-    if (f_.body != nullptr) stmt(f_.body);
-    return std::move(out_);
-  }
-
- private:
-  bool memory_call(const Expr& e) {
-    if (e.kind != Expr::Kind::Call || e.callee == nullptr) return false;
-    auto it = memo_.find(e.callee);
-    if (it == memo_.end()) it = memo_.emplace(e.callee, requires_atom_count(*e.callee) > 0).first;
-    return it->second;
-  }
-
-  static bool access(const Expr& e) {
-    return e.kind == Expr::Kind::Deref || (e.kind == Expr::Kind::Local && e.var != nullptr && e.var->address_taken);
-  }
-
-  void calls(const Expr* e, std::vector<const Expr*>& out) {
-    if (e == nullptr) return;
-    if (memory_call(*e)) out.push_back(e);
-    for (const Expr* x : {e->a, e->b, e->c}) calls(x, out);
-    for (const Expr* x : e->args) calls(x, out);
-  }
-
-  // The accesses outside the arguments of `call`.
-  void outside(const Expr* e, const Expr* call, std::vector<const Expr*>& out) {
-    if (e == nullptr) return;
-    if (access(*e)) out.push_back(e);
-    if (e == call) return;  // its arguments are sequenced before the call
-    for (const Expr* x : {e->a, e->b, e->c}) outside(x, call, out);
-    for (const Expr* x : e->args) outside(x, call, out);
-  }
-
-  void full(std::initializer_list<const Expr*> roots) {
-    std::vector<const Expr*> mem;
-    for (const Expr* r : roots) calls(r, mem);
-    if (mem.empty()) return;
-    const std::string callee = mem[0]->callee->c_name;
-    if (mem.size() > 1) {
-      out_.push_back(PlacementProblem{mem[1]->loc, "a second call of a function whose contract holds a permission ('" + mem[1]->callee->c_name +
-                                                       "') in one expression, beside the call of '" + callee +
-                                                       "': write them as separate statements (decision 0037 item 8; M4.5b1c2 lifts this, decision 0028 item 13)"});
-      return;
-    }
-    std::vector<const Expr*> acc;
-    for (const Expr* r : roots) outside(r, mem[0], acc);
-    if (!acc.empty())
-      out_.push_back(PlacementProblem{acc[0]->loc, "an access to an object in the same expression as the call of '" + callee +
-                                                       "', whose contract holds a permission: write them as separate statements "
-                                                       "(decision 0037 item 8; M4.5b1c2 lifts this, decision 0028 item 13)"});
-  }
-
-  void stmt(const Stmt* s) {
-    if (s == nullptr) return;
-    switch (s->kind) {
-      case Stmt::Kind::Decl: case Stmt::Kind::Assign: case Stmt::Kind::ExprStmt: case Stmt::Kind::Return: case Stmt::Kind::Check:
-        full({s->expr});
-        break;
-      case Stmt::Kind::Store: full({s->addr, s->expr}); break;
-      case Stmt::Kind::If:
-        full({s->expr});
-        stmt(s->then_body);
-        stmt(s->else_body);
-        break;
-      case Stmt::Kind::While:
-        full({s->expr});
-        stmt(s->body);
-        stmt(s->step);
-        break;
-      case Stmt::Kind::Switch:
-        full({s->expr});
-        stmt(s->body);
-        break;
-      case Stmt::Kind::Block:
-        for (const Stmt* c : s->stmts) stmt(c);
-        break;
-      case Stmt::Kind::Case: case Stmt::Kind::Break: case Stmt::Kind::Continue: case Stmt::Kind::Goto: case Stmt::Kind::Label: break;
-    }
-  }
-
-  const Function& f_;
-  std::vector<PlacementProblem> out_;
-  std::map<const Function*, bool> memo_;
-};
-
-}  // namespace
-
-std::vector<PlacementProblem> placement_problems(const Function& f) { return Placement(f).run(); }
-
-namespace {
-
-// The sequencing rule (decision 0020 item 4; the comment at SequenceProblem in vir.h): the locals each operand writes and reads.
+// The sequencing rule (decision 0020 item 4; the comment at SequenceProblem in vir.h): the objects each operand writes and reads.  An object
+// is a local (key: its var id; a cell by name counts as its variable, and `*&x` is `x`) or, decision 0039 item 3, `*v` for a pointer variable
+// `v` as written, whether or not the full expression also writes `v` (key: -(id + 1), one object per `v`).
 struct Wr {
-  std::map<int, const Expr*> w;   // var id -> an AssignE writing it, anywhere inside
+  std::map<int, const Expr*> w;   // object -> an AssignE or StoreE writing it, anywhere inside
   std::map<int, const Expr*> wu;  // the same for the writes no sequence point shields from the expression's value
-  std::set<int> r;                // var ids read
+  std::set<int> r;                // objects read
 };
 
 class Sequencer {
@@ -1215,8 +1151,26 @@ class Sequencer {
   void report(const Expr* at, int var_id) {
     if (!reported_.insert({at, var_id}).second) return;
     const auto& ls = f_.locals();
-    const std::string name = var_id >= 0 && static_cast<size_t>(var_id) < ls.size() ? ls[static_cast<size_t>(var_id)]->name : "?";
+    const int id = var_id >= 0 ? var_id : -var_id - 1;  // `*v`: the pointer variable's id
+    std::string name = static_cast<size_t>(id) < ls.size() ? ls[static_cast<size_t>(id)]->name : "?";
+    if (var_id < 0) name = "*" + name;
     out_.push_back(SequenceProblem{at, name});
+  }
+
+  // The object a place `*addr` is: `x` for `&x`, `*v` for a pointer variable `v` as written (decision 0039 item 3, audit S9); none for any
+  // other address (the path-precise check of lowering covers it).
+  static bool object_of(const Expr* addr, int* key) {
+    while (addr != nullptr && addr->kind == Expr::Kind::ReportAt) addr = addr->a;
+    if (addr == nullptr || addr->var == nullptr) return false;
+    if (addr->kind == Expr::Kind::AddrOf) {
+      *key = addr->var->id;
+      return true;
+    }
+    if (addr->kind == Expr::Kind::Local && addr->var->type.is_ptr()) {
+      *key = -addr->var->id - 1;
+      return true;
+    }
+    return false;
   }
 
   // Two unsequenced operands: a write of one meets a write or a read of the other.
@@ -1243,7 +1197,13 @@ class Sequencer {
     switch (e->kind) {
       case Expr::Kind::Const: case Expr::Kind::Formal: case Expr::Kind::Result: case Expr::Kind::Atom: break;  // an atom is contract-only
       case Expr::Kind::Null: case Expr::Kind::AddrOf: break;  // an address is no access to the object (decision 0032)
-      case Expr::Kind::Deref: absorb(out, expr(e->a), false); break;
+      case Expr::Kind::Deref: {
+        // A compound store's value reads a Deref that shares the store's address node: the address counts once (decision 0039 item 5).
+        if (shared_.count(e->a) == 0) absorb(out, expr(e->a), false);
+        int key = 0;
+        if (object_of(e->a, &key)) out.r.insert(key);
+        break;
+      }
       case Expr::Kind::Local:
         if (e->var != nullptr) out.r.insert(e->var->id);
         break;
@@ -1297,6 +1257,28 @@ class Sequencer {
         }
         break;
       }
+      case Expr::Kind::StoreE: {
+        // `*c := a` as a value: the address and the stored value are unsequenced operands (as for Stmt::Store); a write of the target
+        // object inside the stored value is a conflict; the node writes the object `*c` (when it is one).
+        const Wr ad = expr(e->c);
+        shared_.insert(e->c);
+        const Wr v = expr(e->a);
+        shared_.erase(e->c);
+        pair(ad, v);
+        int key = 0;
+        const bool obj = object_of(e->c, &key);
+        if (obj) {
+          const auto hit = v.wu.find(key);
+          if (hit != v.wu.end()) report(hit->second, key);
+        }
+        absorb(out, ad, false);
+        absorb(out, v, false);
+        if (obj) {
+          out.w[key] = e;
+          out.wu[key] = e;
+        }
+        break;
+      }
     }
     return out;
   }
@@ -1316,13 +1298,22 @@ class Sequencer {
       case Stmt::Kind::Assign:
         if (s->expr != nullptr) store(s->var, s->expr);
         break;
-      case Stmt::Kind::ExprStmt: case Stmt::Kind::Return: case Stmt::Kind::Check: expr(s->expr); break;
+      case Stmt::Kind::ExprStmt: case Stmt::Kind::Return: case Stmt::Kind::Check:
+        expr(s->expr);
+        break;
       case Stmt::Kind::Store: {
         // `*addr = value`: the two are unsequenced operands (decision 0032 item 9), as the operands of a Binary are, so `*p = (p = q, 1)`
         // is a conflict like any other Viper-local one; and the stored value may not write a local the address reads.
         const Wr a = expr(s->addr);
+        shared_.insert(s->addr);  // a compound store's value reads a Deref sharing the address node (decision 0039 item 5)
         const Wr v = expr(s->expr);
+        shared_.erase(s->addr);
         pair(a, v);
+        int key = 0;
+        if (object_of(s->addr, &key)) {  // the target object: a write of it inside the stored value is a conflict (`*p = (*p)++`)
+          const auto hit = v.wu.find(key);
+          if (hit != v.wu.end()) report(hit->second, key);
+        }
         break;
       }
       case Stmt::Kind::If:
@@ -1347,6 +1338,7 @@ class Sequencer {
   }
 
   const Function& f_;
+  std::set<const Expr*> shared_;     // the address nodes of the stores being walked: their Deref reads count the address once
   std::vector<SequenceProblem> out_;
   std::set<std::pair<const Expr*, int>> reported_;
 };

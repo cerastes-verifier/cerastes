@@ -5788,3 +5788,266 @@ no memory gets none") it would stay wrong; with F3's rule (a `return` inside the
 changes from `permission` to verified. That is a change of an accepted program's outcome (the plan's stop rule "existing test whose outcome changes" applies
 only if a test pins it; check `grep -l 'return' tests/memory/negative` for such a pin).
 No test under tests/memory pins that outcome (grep for loops with return and owns/reads atoms: see the list above, empty if none).
+
+## M4.5b1c2: sequencing and placement over memory (record 0039)
+
+Probes P60 (the IL; il-analyst) and P61 (the compiler matrix; test-mutator) and spike S29 (Silicon; test-mutator items
+2-4, il-analyst items 7-8) of the M4.5b1c2 session, branch `m4.5b1c2-sequencing` (worktree `.claude/worktrees/m4.2b1`);
+evidence under `build/m4.5b1c2/` (not committed): `p60/`, `p61/`, `s29/targets/`, `s29/il/`. Silicon 1.1-SNAPSHOT
+`6b540aa4`, Z3 4.16.0 from `build/env.sh`; Apple clang 21.0.0, Homebrew GCC 16.2.0. Timings were taken under heavy load
+(one-minute load averages 130-206) and are upper bounds. Audit round 1 of record 0039 reproduced P61 and extended it
+(GCC also warns on `(p = q, (*p)++ + *p)`, C's `*&x = x++` and `*(*q > 0 ? p : q) = (*q)++`; record 0039 item 3).
+
+### P60: the IL facts record 0039 relies on (items 2-8) **PASS for 1-6 as IL facts; three CONTRADICTIONS/hazards of the plan text (C1-C3), four NOTEs**
+
+Evidence under `build/m4.5b1c2/p60/` (not committed). Branch `m4.5b1c2-sequencing`, nothing built, no source touched. Inputs: `q1.c` (Q1), `q1c.c` (Q1 controls), `q2.c`, `q2_s{2,4,5,6}.c` (Q2), `q3.c`, `q3_c{3,5,5b}.c` (Q3), `q4.c`, `q4b.c`, `q4c.c` (Q4), `q5.c`, `q5b.c`, `q5cpp.cpp` (Q5), `q6.c`, `q6cpp.cpp` (Q6).
+For each `<f>`: `<f>.c23.il` / `<f>.c++20.il` (`scripts/cerastes-fe.sh --c23|--c++20 --il_display -I include`), `.walk` (`--cerastes_walk`), `.err` (EDG warnings), `.verify` (`build/cerastes verify <f> --std=<mode>`), `.base` (the same with the BASELINE binary, see below). `run.sh <input>` produces them; `split.sh <input> <header-lines>` verifies each function alone (`split_<input>/`; `CER=<binary>` selects the binary); `base.sh`; scratch tools `ilsum.py`, `ilvars.py`, `sttree.py` (copies of P59's). `il_def.h` lines are `third_party/edg/src/il_def.h`. "HEAD" source lines are `git show HEAD:<file>` (copies in `head/`), because the worktree sources were being edited by another agent while I ran.
+
+**Conventions.** (1) `ilsum.py` prints `kind(operands){type:flags@column}` with `L` = `is_lvalue`, `g` = `compiler_generated`; the `L<n>` before each tree is `position.seq`, a sequence number: source line = seq - 447 (C23) or seq - 2477 (C++20) for these files (`q1.c`: `w1` is line 6, its `post_incr` has seq 453 in C23 and 2483 in C++20). Columns are source columns. (2) **Before-picture binary:** the worktree's `build/cerastes` was rebuilt at 19:41 and again at 19:57 (other agents) while I ran, so every `verify` was repeated with the main checkout's `/Users/mattborland/Documents/cerastes/cerastes/build/cerastes` (eab4058 code, built 19:41, the session baseline; b164210 differs only in markdown): all `.verify` files (and the split runs of `q1c`, `q4`, `q4c`) are byte-identical to the `.base` files. "Today" below means that binary. (3) Attribute arguments are not in `--il_display` (only `attributes: file-scope attribute@...` on the routine, `q6.c23.il:3690`; P13/P50/P59 method note); Q5's and Q6's argument nodes are therefore from the walker. (4) `build/cerastes verify --keep-vpr` with no path writes `<stem>.vpr` into the **current directory** (it put `q3_c5.vpr` in the worktree root; I moved it to `build/m4.5b1c2/p60/`): a caution for anyone scripting it.
+
+#### Contradictions and hazards (read first)
+
+- **C1. The plan says no program accepted today has a memory call beside an access; two do.** `x = bump(&x)` (`q3.c:14`, `q3_c3.c`) and `x = (bump(&x), 2)` (`q3.c:16`, `q3_c5.c`) are **verified today** in both modes (`q3_c3.c23.base`, `q3_c5.c23.base`: `verified (2 functions; ...)`): `Placement` does not count a statement-level store as an access. So they are not flips; their Viper must stay byte-identical (acceptance item 3) or be named. The plan's item 4 says 0025 item 2 "would emit [the write of `x = (bump(&x), 2)`] before the call". **Today's Viper emits it after the call and is correct:** `q3_c5.vpr:94` `t__0 := f_bump__0(v_x__0, ...)`, then `q3_c5.vpr:96` `v_x__0.v_int := 2`; and with a value that tells the orders apart (`q3_c5b.c:12-13`: `x = (bump(&x), 5)`) `ensures r == 5` verifies and `ensures r == 2` fails `postcondition` at line 13 (both modes). The caveat of 0026 item 15 does not show with this shape today; it can appear only once stores become effects (item 2), so the positive/twin pair pins the order but is not a "wrong before" case.
+- **C2. `return c ? &x : &y;` and `return p = &x;` get no EDG warning** (Q4): #1056 fires only on `&local` reached through parentheses, casts, a comma, `&*&x` (C only) and `&x + 1`, plus `return a;` of a local array and `&a[0]`, `&v.f`. So the `?:` arms can only be recognised by IL shape (item 6 says "by IL shape"; this confirms the warning cannot be the trigger). Today `return c ? &x : p;` (`q4.c:7`) is **rejected `lifetime`** at the return in both modes while `return c ? &x : &y;` (`q4.c:6`) is verified: the new tag must fire before that for the `&x` arm, or the twin for `r4` changes category.
+- **C3. Hazard for item 8: a function's `decreases(*p)` indirect node is `is_lvalue`-flagged** (Q6), unlike `*p` in `requires`/`ensures`; `contract_read` rejects an lvalue-flagged dereference ("a dereference used as anything but a value", HEAD `encode.cpp:1925`) right after the `decreases` reject (HEAD `encode.cpp:1920`). Lifting the first without handling the flag at the top of a measure gives the second message instead of acceptance. The `*p` arm of `p == NULL ? 0 : *p` is an rvalue (no flag).
+
+Not contradictions: the `owns`+`reads` rule is where the plan says (HEAD `encode.cpp:1999-2006`, `check.cpp:375`); the two atoms of one `?:` share their `cond` node (Q5); `*(g() ? &x : &y) += 1` and `*(q = p) += 1` are refused as the plan says, by two different stages (Q2).
+
+#### Q1. Writes to cells inside expressions **PASS (IL facts); every shape is rejected today**
+
+Probe `q1.c` (`w1`..`w11` lines 6-16, `w12` line 18 under `#ifdef __cplusplus`), `int x; int *p = &x;` in each. `address_taken` is TRUE on `x` in every function, set by the `&x` of `p`'s initializer, not by the write (`python3 ilvars.py q1.c23.il w1`: `x address_taken=TRUE storage=sc_auto param=- used=TRUE`, `p address_taken=-`; il_def.h:11389). Control `q1c.c` (no `&x`): `ilvars.py q1c.c23.il k1`: `x address_taken=-`, same node shapes, and the **name** rule applies (`k2` `x = x++;` and `k3` `x++ + x`: `error #cerastes-unsequenced_modification` in both modes; `k1` `int y = x++;` verified).
+
+**Node shapes** (`python3 ilsum.py q1.c23.il <fn>`; `q1.c++20.il` identical except where marked). `operation.kind`: il_def.h:14051 `eok_post_incr`, :14053 `eok_pre_incr`, :14120 `eok_assign`, :14131 `eok_add_assign`, :13873 `eok_indirect`, :14255 `eok_call`:
+```
+w1  y = x++            init y: post_incr(var x{int:L@48}){int:@49}                          (q1.c23.il:14914 operation.kind: eok_post_incr)
+w2  y = (x = 3) + 1    assign(var y{L@47}, add(assign(var x{int:L@52}, const 3){int:@54}, const 1){@59}){int:@49}
+w3  f(x = 1)           call(f, assign(var x{int:L@42}, const 1){int:@44}){int:@41}
+w4  x = *p = 3         assign(var x{L@40}, assign(indirect(var p{int *:@45}){int:L@44}, const 3){int:@47}){int:@42}
+w5  *p = (*q)++        assign(indirect(var p{int *:@65}){int:L@64}, post_incr(indirect(var q{int *:@71}){int:L@70}){int:@73}){int:@67}
+w6  y = (*p)++ + 1     assign(var y, add(post_incr(indirect(var p{@53}){int:L@52}){int:@55}, const 1){@58}){int:@49}
+w7  y = ++*p           assign(var y, pre_incr(indirect(var p{@54}){int:L@53}){int:@51}){int:@49}
+w8  y = (*p += 2)      assign(var y, add_assign(indirect(var p{@53}){int:L@52}, const 2){int:@55}){int:@49}
+w9  r = x++ + *p       init r: add(post_incr(var x{int:L@73}){int:@74}, indirect(var p{int *:@80}){int:@79}){int:@77}      (p = &y, px = &x, so x is a cell)
+w10 x = x++            assign(var x{int:L@41}, post_incr(var x{int:L@45}){int:@46}){int:@43}
+w11 *p = (*p)++        assign(indirect(var p{@42}){int:L@41}, post_incr(indirect(var p{@48}){int:L@47}){int:@50}){int:@44}
+w12 ++*p = 3 (C++)     assign(pre_incr(indirect(var p{@44}){int:L@43}){int:L@41}, const 3){int:L@46}                      (C++20 only, q1.c++20.il L2495)
+```
+- **Target lvalue.** A cell by name is `var x{int:L}` (`enk_variable`, `is_lvalue` TRUE, il_def.h:14942); a pointer target is `eok_indirect` with `is_lvalue` TRUE whose operand is the **bare** `var p` (rvalue, no lvalue-to-rvalue node, as P58). The operand of `++`/`--`/`op=` is that node directly: **no wrapper, no cast, no `eok_lvalue_adjust`** around a postfix or a compound target (w1, w5, w6, w8), in both modes.
+- **Postfix and prefix** are single `eok_post_incr`/`eok_pre_incr` nodes with one operand and `type` `int`; they are not decomposed into an assignment and a temporary, and nothing wraps them (w1, w5, w6, w7).
+- **Positions** (il_def.h:15111 `position`: "When kind == enk_operation, the position at which the operator appears"): the operator's column, not the operand's. `w1`: `post_incr` column 49 is the `++` (`q1.c:6` col 48 is `x`); raw node `q1.c23.il:14914-14923`: `position.column: 49`, `expr_range` 48-50. `w5`: the outer `assign` @67 is the `=`, the `post_incr` @73 the `++` after `(*q)`, the target `indirect` @64 the `*`; the `var` operand keeps its own column. The back end rejects at `lhs->position` (HEAD `encode.cpp:2767`, :2785), i.e. the target's column.
+- **`result_is_not_used`** (il_def.h:14963) is TRUE on the statement-level write and absent on embedded ones (raw `q1.c23.il`: `w2` outer `assign` col 49 TRUE, inner `assign` col 54 false; `w1` `post_incr` false; `w6` outer `assign` TRUE).
+- **NOTE (mode difference):** in C++20 the statement-level `assign`/`add_assign` node is flagged `L` (C++ assignment yields an lvalue: `w2` outer `{int:L@49}`, `w5`, `w6`, `w8`, `s1` `{int:L@57}`); in C23 never. An embedded write whose value is used is not `L` in either mode (`w2` inner, `w4` inner, `w5`'s `post_incr`, `w7`'s `pre_incr`). Nothing in the encoder may read `is_lvalue` of an assignment node.
+- **`w12`** is the only lvalue use (`pre_incr` as the left operand of `assign`, both `L`); today: `error #cerastes-unsupported_expression: an assignment to anything but a local variable` (line 18, C++20 only).
+
+**Today** (`q1.c{23,c++20}.verify`, `.base`; both modes the same): `w1`, `w2`, `w3`, `w10` (`x = x++`): `cerastes-unsupported_expression: a write to "x", a variable whose address is taken, inside an expression (M4.5b1c2: sequencing, decision 0028 item 12)` (HEAD `encode.cpp:2785`); `w4`..`w8`, `w11`: `a write through a pointer used as a value, or inside an expression (...)` (HEAD `encode.cpp:2767`); `w9` (line 14): the first message, for the `x++` on the cell. `x = x++` and `*p = (*p)++` get these messages, **not** `unsequenced_modification`: the translation-stage rejection comes first; the name rule runs after (HEAD `encode.cpp:4082`).
+
+#### Q2. Compound stores with a side effect in the address **PASS: one shared operand node in the IL; the two refusals come from two stages**
+
+Probe `q2.c` (`s1` line 6 `*(q = p) += 1;`, `s2` line 7 `*(g() ? &x : &y) += 1;`, `s3` line 8 `(*(q = p))++;`, `s4` line 9 `*p += 1;` control, `s5` line 10 `*(q = p) = 3;`, `s6` line 11 `*(g() ? &x : &y) = 3;`), both modes.
+```
+s1  add_assign(indirect(assign(var q{int *:L@50}, var p{int *:@54}){int *:@52}){int:L@48}, const 1{@60}){int:@57}
+s2  add_assign(indirect(question(call(g){int:@41}, address_of(var x{int:L@47}){@46}, address_of(var y{int:L@52}){@51}){int *:@44}){int:L@38}, const 1){@55}
+    (C++20: the condition is bool_cast(call g){bool:g@40}: q2.c++20.il, L2484)
+s3  post_incr(indirect(assign(var q{@51}, var p{@55}){int *:@53}){int:L@49}){int:@58}
+```
+- **One node, not two.** The compound/inc-dec node has the operand list [target, rhs]: `q2.c23.il:14623` (`eok_add_assign`, `position.column: 57`) `operands:` points at the `eok_indirect` expr-node (`position.column: 48`, `is_lvalue: TRUE`) whose `next:` is the constant `1`, and no other node refers to that indirect. So EDG hands the address expression to the read and the write **once**; the duplication is the Builder's (HEAD `vir.cpp:436-439` `compound_store`: `deref(addr, loc)  // shares addr`, then `store(addr, ...)`). `s3` is the same single `indirect(assign(...))` under `post_incr`. No `enk_temp_init` or other temporary appears in either mode.
+- **Today** (both modes identical): `s1`, `s3`: `error #cerastes-unsequenced_modification: "q" is modified in this expression and also read or modified elsewhere in it with no sequence point between` (`q2.c:6`, `:8`), from the encoder's report of `vir::sequence_problems` (HEAD `encode.cpp:2935-2940`, tag at :2939): the shared `assign` to `q` counts as two accesses. `s2`: `error #cerastes-unsupported_expression: a call that is reachable twice (it would run twice)` at the call (`q2_s2.c`, line 6), from `check_program`'s `call` (HEAD `check.cpp:960`: the `seen_effects_` insert fails because the shared address holds the call). **Staging:** in `q2.c` (all six functions) only `s1` and `s3` are reported; `s2` appears only when the file has no encoder report (`q2_s2.c` alone). The `check.cpp` backstop for the name rule is HEAD `check.cpp:258-262`.
+- **The plain stores are accepted today:** `q2_s5.c`, `q2_s6.c`, `q2_s4.c`: `verified (2 functions; ...)` in both modes. Only compound and `++`/`--` on a side-effecting address are refused, so lifting item 5 changes no accepted program.
+
+#### Q3. Calls beside accesses **PASS (IL); two of the six shapes are accepted today (C1)**
+
+Probe `q3.c`: `bump` (lines 4-10, the contract of `tests/memory/negative/reject_call_beside_access.c`), `c1` line 12 .. `c6` line 17; `x` (and `y`) cells.
+```
+c1  x + bump(&x)         add(var x{int:@34}, call(bump, address_of(var x{int:L@44}){int *:@43}){int:@42}){int:@36}                (the read of x has no wrapper)
+c2  x += bump(&x)        add_assign(var x{int:L@27}, call(bump, address_of(var x{@38}){@37}){int:@36}){int:@29}
+c3  x = bump(&x)         assign(var x{int:L@27}, call(bump, address_of(var x{int:L@37}){@36}){int:@35}){int:@29}
+c4  bump(&x)+bump(&y)    add(call(bump, address_of(var x{@51})), call(bump, address_of(var y{@62}))){int:@54}
+c5  x = (bump(&x), 2)    assign(var x{int:L@27}, comma(call(bump, address_of(var x{@38}){@37}){int:@36}, const 2{int:@42}){int:@40}){int:@29}
+c6  int r = x && bump(&x) init r: land(var x{int:@35}, call(bump, address_of(var x{int:L@46}){int *:@45}){int:@44}){int:@37}
+                          (C++20: land(bool_cast(var x){bool:g@35}, bool_cast(call){bool:g@40}){bool:@37}, then cast to int)
+```
+(`python3 ilsum.py q3.c23.il c1` .. `c6`; `q3.c++20.il` the same except `c6` and Q1's `L` NOTE.) Operand order in the IL is source order; C leaves the operands of `+` unsequenced, so the order carries no meaning for `c1`/`c4`. `c5`: the `comma` is the **right** operand of `assign` (its value is computed before the store, C23 6.5.17.1). `c6`: `eok_land` with the call in the right operand (conditionally evaluated; `x` is read first, sequenced before it). `c2`: the store target is operand 1 (`var x{L}`), the call operand 2. `c3`: the call is operand 2 of the `assign` and sequenced before the store by value computation.
+**Today** (`q3.c{23,c++20}.base`, both modes the same): `c1`, `c2`, `c6` (lines 12, 13, 17): `error #cerastes-unsupported_expression: an access to an object in the same expression as the call of 'bump', whose contract holds a permission: write them as separate statements (decision 0037 item 8; M4.5b1c2 lifts this, decision 0028 item 13)`; `c4` (line 15): `a second call of a function whose contract holds a permission ('bump') in one expression, beside the call of 'bump': ...` (HEAD `check.cpp:1103-1194` `Placement`, message built at :1154, reported by `check_program` at :258; the encoder-side report is `report_placement_problems`, HEAD `encode.cpp:2944`). **`c3` and `c5` are accepted:** `q3_c3.c`, `q3_c5.c`: `verified`. See C1.
+
+#### Q4. `return &local;` shapes **PASS: #1056/#1057 positions and IL shapes recorded; C2 on what the warning does not cover**
+
+Probe `q4.c` (`r1` line 4 .. `r10` line 13; `int x = 1; int y = 2;` locals, `c` an `int`, `p` an `int *` parameter), `q4b.c` (extra shapes, lines 5-11) and `q4c.c` (the same without the struct, lines 4-9, for the verdicts). Warnings: `scripts/cerastes-fe.sh --c23|--c++20 --display_error_number -I include q4.c`; `error_msg.txt:1138` `ec_returning_ptr_to_local_variable` is #1056, `:1139` `ec_returning_ptr_to_local_temp` #1057; raised at `expr.c:52352` by `check_for_return_of_address_of_local_variable`, called at :52923 with `&result.position`.
+```
+shape                                EDG (both modes)                          returned expression in il_display (C23; C++20 noted)
+r1  return &x;             (l.4)     #1056 col 35                              address_of(var x{int:L@36}){int *:@35}
+r2  return (&x);           (l.5)     #1056 col 35 (the "(")                    address_of(var x{int:L@37}){int *:@36}        (node col 36, warning col 35)
+r3  return c ? &x : &y;    (l.6)     none                                      question(var c, address_of(var x), address_of(var y)){int *:@49}   (C++20 cond: bool_cast(var c){bool:g})
+r4  return c ? &x : p;     (l.7)     none                                      question(var c, address_of(var x), var p{int *:@53}){int *:@46}
+r5  return &a;   (int a)   (l.8)     #1056 col 25                              address_of(var a{int:L@26}){int *:@25}        (a address_taken=TRUE param=TRUE, P58 (c))
+r6  return (int *)&x;      (l.9)     #1056 col 35 (the "(" of the cast)        cast(address_of(var x{int:L@43}){int *:@42}){int *:@35}     (explicit cast, not compiler_generated)
+r7  return (0, &x);        (l.10)    #174 col 36 (the 0), #1056 col 35         comma(const 0, address_of(var x{int:L@40}){@39}){int *:@37}
+r8  return p = &x;         (l.11)    none (#550 "set but never used" only)     assign(var p{int *:L@43}, address_of(var x{int:L@48}){@47}){int *:@45}
+r9  return &*&x;           (l.12)    #1056 col 35                              C23:   address_of(var x{int:L@38}){int *:@37}   (folded)
+                                                                               C++20: address_of(indirect(address_of(var x{int:L@38}){@37}){int:L@36}){int *:@35}   (NOT folded; q4.c++20.il L2489)
+r10 int *p = &x; return p; (l.13)    none                                      var p{int *:@49}; init p: address_of(var x{int:L@39}){int *:@38}
+q4b.c  s1 static `return &s;` (l.5): none                                      address_of(var s{int:L@43})
+       s2 `return &(int){1};` (l.6): #1057                                     address_of(enk_temp_init {int:L@25}){int *:@24}
+       s3 `&a[0]` (l.7), s4 `return a;` (l.8), s5 `&v.f` (l.9), s6 `if (c) return &x;` (l.10), s7 `return &x + 1;` (l.11): #1056 each
+          address_of(subscript(array_to_pointer(var a){g}, const 0)) / array_to_pointer(var a){int *:g} / address_of(dot_field(var v, field f)) / address_of(var x) / padd(address_of(var x), const 1)
+```
+- **Position of #1056/#1057** is the **start of the returned expression** (`result.position`): the `(` of `(&x)` and of the cast, not the `address_of` node's own column (`r2`: node col 36, warning col 35; `r6`: cast col 35, `address_of` col 42; `r7`: warning col 35, comma node col 37). In `r1`, `r5`, `r9` start and node coincide. #1057 is for temporaries (`s2`, a compound literal); a local variable or parameter is #1056.
+- **Not warned by EDG (only the IL shape can reject):** `r3`, `r4` (the `?:` arms), `r8` (assignment value), `r10` (through a local). `r8` and `r10` stay accepted by design (`pick_ret_local.c` style); `r3`/`r4` are item 6's `?:` arms.
+- **Recognition by IL shape:** the `stmk_return` expression (P58 (b): the bare node) holds `address_of(var V)` with `V` a local or parameter (`address_taken` TRUE), reached through `eok_cast`, the right operand of `eok_comma` and the arms of `eok_question` (the last two with no EDG warning for `?:`); C++20's `&*&x` is `address_of(indirect(address_of(var x)))`.
+- **Today** (`split_q4/`, `split_q4c/`, both modes): `r1`, `r2`, `r3`, `r5`, `r6`, `r8`, `r10`: `verified`; `r4`: `error: lifetime: uses the pointer after the object it points to may have ended`; `r7`: `cerastes-comma_without_effect` (rc 2); `r9`: verified in C23, `cerastes-unsupported_expression: taking the address of anything but a local variable` in C++20. Extras (`q4c`): `s1` `unsupported_declaration: a static local variable`, `s2` `unsupported_expression: taking the address of anything but a local variable`, `s3`/`s4` `unsupported_declaration: the type "int [2]"`, `s6` **verified**, `s7` `unsupported_expression: a pointer or reference operation`; `s5` (a struct) `unsupported_declaration: a class, struct or union`.
+
+#### Q5. `c ? owns(*p) : reads(*p)` **PASS: the guards of one `?:` share one `cond` node; the `||`/`&&` form has two distinct nodes**
+
+Probes `q5.c` (C macros through `<cerastes.h>`, both modes: `a1` line 4 `c ? owns : reads`, `a2` line 5 `c ? reads : owns`, `a3` line 6 `(c == 0 || owns) && (c != 0 || reads)`, `a4` line 7 `requires(owns) ensures(c ? owns : reads)`), `q5cpp.cpp` (C++ spelling `cerastes::owns`/`reads`, `b1`..`b3` lines 3-5, `--c++20` only; `--c23` on it fails `identifier "cerastes" is undefined`, as expected), `q5b.c` (different parameters, control). `int *p` and `int c` parameters.
+```
+C23   a1: eok_question type=int(param 1 c, eok_cast type=int cast=implicit(eok_call cerastes_owns(eok_indirect(param 2 p))), eok_cast type=int cast=implicit(eok_call cerastes_reads(eok_indirect(param 2 p))))     (q5.c23.walk:7-23)
+C++20 a1: eok_question type=bool(eok_bool_cast type=bool(param 1 c), eok_call cerastes_owns(...), eok_call cerastes_reads(...))      (no arm casts, both arms are bool; q5.c++20.walk:7-23)
+C++   b1: eok_question type=bool(eok_bool_cast(param c), eok_call cerastes::owns args <T=int>(eok_reference_to(eok_lvalue_adjust(eok_indirect(param 2 p)))), eok_call cerastes::reads ...)     (q5cpp.c++20.walk:7-26; P58 (d) chain)
+a3 (all spellings): eok_land(eok_lor(eok_eq(param c, const 0), eok_call owns(...)), eok_lor(eok_ne(param c, const 0), eok_call reads(...)))     (q5.c23.walk:43-60; eok_eq @L6:44, eok_ne @L6:77)
+```
+- **One `?:`, one condition.** A single `eok_question` has one condition operand and two arms (il_def.h:14244), so the two atoms of `a1`/`a2`/`b1`/`b2` come from one IL node and `Builder::cond` keeps one `Expr* a` (HEAD `encode.cpp:2265-2282`, `vir.cpp:222-229`: `e->a = c`). `AtomCollector`'s `Cond` case (HEAD `vir.cpp:548-558`) pushes `AtomGuard{e->a, true}` for the then-arm and `AtomGuard{e->a, false}` for the else-arm: **the same `cond` pointer in both guards, by construction**. In C23 each arm sits under an implicit `bool`->`int` `eok_cast` (P58 (f)); the collector still finds the atoms (the rejection today is the owns+reads rule, below, so the casts are transparent; `q5b.c` with two different parameters verifies in both modes).
+- **`a3`: no shared node.** `AtomCollector` handles an `LOr` with a heap-free left operand as guard `{e->a, false}` (HEAD `vir.cpp:544`): the two `||` give `(c == 0, false)` and `(c != 0, false)`, two different `Binary` nodes at different positions (`q5.c23.walk:43` ff.). Their exclusivity is semantic (`c != 0 && c == 0` is false for Z3), not structural: only the `f__wf` assert of item 7 proves it; there is no pointer-identity shortcut for this form.
+- **Today** (`q5.c{23,c++20}.base`, `q5cpp.c++20.base`): every one of `a1`..`a4` and `b1`..`b3`: `error #cerastes-unsupported_annotation: "owns" and "reads" of the same parameter in one contract (the cell would be held twice) is not supported by "cerastes verify" (decision 0037)` at lines 4-7 / 3-5 (HEAD `encode.cpp:1999-2006` in `finish_atoms`; its twin HEAD `check.cpp:375-380`). `a4` (`owns` in the `requires`, `c ? owns : reads` in the `ensures`) is refused by the same rule. Control `q5b.c`: `c ? owns(*p) : reads(*q)` and the `||`/`&&` form on **different** parameters: `verified` in both modes.
+
+#### Q6. `decreases(*p)` **PASS (IL); rejected today with one message**
+
+Probes `q6.c` (C macros, both modes: `d1` line 4 `decreases(*p)` recursive, `d2` line 7 `decreases(p == NULL ? 0 : *p)` recursive, `d3` line 10 `decreases(*p)` non-recursive) and `q6cpp.cpp` (`e1` line 3, `e2` line 6, `[[cerastes::decreases(...)]]`, `--c++20`).
+```
+d1 (q6.c23.walk:27-30; q6.c++20.walk:27-30 the same; q6cpp.c++20.walk:31-34)
+  attr [[cerastes::decreases]] on routine @ L4:129 / arg 1 @ L4:148
+    op eok_indirect type_kind=tk_pointer type=int lvalue @ L4:148 / param 1 p: int * @ L4:149
+d2 (q6.c23.walk:69-77)
+  attr [[cerastes::decreases]] on routine @ L7:170 / arg 1 @ L7:189
+    op eok_question type=int @ L7:199                    (C++20: same; the condition's eok_eq is type=bool, no eok_bool_cast)
+      op eok_eq type=int @ L7:191 (param 1 p: int * @ L7:189, const 0 type=int * @ L7:170)      (q6cpp: `nullptr`, const 0 at its own column L6:223)
+      const 0 type=int @ L7:201
+      op eok_indirect type=int @ L7:205 (param 1 p: int * @ L7:206)                             (no `lvalue`: an rvalue arm)
+```
+- The measure's `eok_indirect` is **`lvalue`-flagged when it is the whole argument**, not when it is an arm (C3); its operand is `param 1 p` (not `var p`, as in loop annotations, P59); no cast, no `eok_lvalue_adjust`; the measure sets no flag on `p`. The `*` (`L4:148`) carries the node for `d1`; for `d2` the `?` (`L7:199`) carries the conditional and the `==` is `L7:191`. NOTE: the C23 `NULL` is the folded `const 0 type=int *` with the **macro-site** column (`L7:170`, the attribute's), `nullptr` in C++ its own: a null constant's position is not usable for a diagnostic.
+- Attribute arguments are absent from `--il_display` (convention 3); the walker is the only dump of them.
+- **Today** (`q6.c{23,c++20}.base`, `q6cpp.c++20.base`): `d1`, `d2`, `d3` / `e1`, `e2` (lines 4, 7, 10 / 3, 6), caret at the dereference: `error #cerastes-unsupported_expression: a dereference in a function's termination measure (a function's `decreases` that reads memory is M4.5b1c2's; a loop's measure may read memory)` (HEAD `encode.cpp:1920`, reached through `contract_read` with `cx_.annot == Annot::decreases`). `d2` gets the same message although the dereference is in an arm; recursive and non-recursive forms are rejected alike.
+
+#### Summary
+
+| Question | Verdict |
+|---|---|
+| 1. writes in expressions | PASS: bare `post_incr`/`pre_incr`/`assign`/`op=` over `var x{L}` or `indirect(var p){L}`; operator column; `address_taken` TRUE only through `&x`; all rejected today |
+| 2. compound address | PASS: one operand node in the IL; refusals from two stages (`unsequenced_modification` from the encoder, `reachable twice` from `check_program` at the call); plain stores accepted today |
+| 3. calls beside accesses | PASS (shapes); C1: `c3`, `c5` accepted today, their Viper is correct and must not change |
+| 4. `return &local` | PASS; EDG warns on `&x`, `&param`, parentheses, casts, comma, `&*&x` (C), `&x + 1`, `&a[0]`, `return a`, `&v.f`; not on `?:` arms, `p = &x`, `return p`; C++ `&*&x` unfolded (C2) |
+| 5. `?: owns : reads` | PASS: same `cond` pointer in both guards; `a3` has two distinct nodes; today the same-parameter rule rejects all |
+| 6. `decreases(*p)` | PASS; C3: the whole-argument `*p` is `lvalue`-flagged |
+
+### P61: compiler matrix of unsequenced accesses and returned addresses (record 0039 items 3 and 6)
+
+Evidence: `build/m4.5b1c2/p61/` (`gen.py` regenerates `src/`, `raw/`, `results.json`, `matrix.md`; `o2bc.py` runs the A/B/C shapes under `-O2 -c`, output `o2bc.out`).
+Versions: Apple clang 21.0.0 (clang-2100.3.34.2), arm64-apple-darwin27.0.0; Homebrew GCC 16.2.0 (`gcc-16`, `g++-16`).
+Modes `-std=c23` (C) and `-std=c++20` (C++); tiers D (no flag), A (`-Wall`), E (`-Wall -Wextra`); `-fsyntax-only` everywhere, and for GCC also `-O2 -c -o /dev/null` on the D shapes (and, in `o2bc.py`, on A/B/C for all four compilers).
+Each shape is one function with `int x = 0, y = 0; int *p = &x; int *q = &y;` in scope (D shapes: signatures as listed below); the A/B/C expression is the right side of `r = <expr>;` with `(void)` uses of all locals, so the only warnings are the shape's own (no stray `-Wunused`). The matrix reports only warnings; no shape produced an error and no warning lacked a flag.
+
+#### For the owner
+
+**No B or C shape warns anywhere**: not in clang or GCC, not in C or C++, not at D, A or E, not under `-fsyntax-only` and not under `-O2 -c`. Nothing in B/C needs an owner decision under the union rule; the path-precise `unsequenced` check is the only coverage they get.
+
+Two points the owner may want to know in A and D:
+- GCC warns on shapes the C++20 standard defines. `x = x++` is silent in clang C++ but `-Wsequence-point` at `-Wall` in g++ C++ (C++17 sequences the right operand of `=` first). `*p = (*p)++`, `*p = ++*p` likewise warn in g++ C++ and not in clang. Under 0020 item 5's union they are rejected in C++ too. `*p += (*p)++` is the one A shape that warns in C only (gcc-C `-Wall`); g++ C++ and both clang modes are silent.
+- Some D shapes warn only under GCC's optimizer (`-O2`): `return p = &x;` and `int *r = &x; return r;` (D8, D10), and `c ? &x : &y` / `c ? &x : p` for GCC (D3, D4; clang warns on these at the default tier without `-O`). If "the compilers" means `-fsyntax-only` or clang's front end, D8 and D10 warn nowhere. With `-O2` they warn at every tier including none (`-Wreturn-local-addr` is on by default).
+
+#### Classification
+
+### A (unsequenced accesses naming one object): all ten warn somewhere at D or A, in some mode
+Rule: warned at the no-flag or `-Wall` tier by at least one compiler in at least one mode.
+- A1 `x++ + x`, A3 `x + x++`: clang `-Wunsequenced` (D, both modes); GCC `-Wsequence-point` (A, both modes).
+- A2 `x = x++`: clang `-Wunsequenced` (D, **C only**); GCC `-Wsequence-point` (A, both modes).
+- A4 `*p = (*p)++`, A5 `(*p)++ + (*p)++`, A6 `*p + (*p)++`, A7 `(*p = 1) + *p`, A8 `f2(*p, (*p)++)`, A9 `*p = ++*p`: GCC `-Wsequence-point` (A, both modes); clang silent in both modes at every tier (clang's check names objects syntactically, not through `*p`).
+- A10 `*p += (*p)++`: GCC `-Wsequence-point` (A, **C only**); clang silent; g++ C++ silent.
+Set to reject: **A1-A10 (all)**. Nothing in A is `-Wextra`-only. `-O2` changes nothing (same results).
+
+### D (returned addresses)
+Warned under `-fsyntax-only` (front end), flags: clang `-Wreturn-stack-address` (D, both modes), GCC `-Wreturn-local-addr` (D, both modes):
+- D1 `return &x;`, D2 `return (&x);`, D5 `return &param;` (int param), D6 `return (int *)&x;`, D9 `return &*&x;`: clang and GCC, both modes.
+- D7 `return (0, &x);`: same, plus the comma's own `-Wunused-value` (clang at D, GCC at A, both modes).
+- D3 `return c ? &x : &y;` and D4 `return c ? &x : p;`: clang only (D, both modes; D4's message names `x`, the conditional-arm local); GCC silent under `-fsyntax-only`.
+Warned only under GCC `-O2 -c` (optimizer, `-Wreturn-local-addr`, every tier, both modes; clang is silent):
+- D3, D4 (also the clang case above), D8 `return p = &x;` (p a local pointer), D10 `int *r = &x; return r;`.
+Control D0 (`static int s; return &s;`): silent everywhere, including `-O2`.
+Set to reject (union incl. `-O2`): **D1-D10 (all)**; the subset that warns without the optimizer: D1, D2, D3, D4, D5, D6, D7, D9. D8 and D10 warn only with GCC `-O2`.
+
+### B and C
+No compiler warns at any tier, mode, or optimization level (see "For the owner").
+
+#### Raw cells
+Full per-compiler/mode/tier cells are in `p61/matrix.md` (one section per shape, cell order clang-C, clang-C++, gcc-C, gcc-C++, GCC D shapes also `-O2 -c`) and the compiler output in `p61/raw/<shape>.<compiler-mode>.<tier>.<syntax|O2>.txt`.
+
+### S29 (test-mutator half): hand-written Viper for record 0039 items 2-4
+
+Worktree .../worktrees/m4.2b1 (branch m4.5b1c2-sequencing). Silicon 1.1-SNAPSHOT (6b540aa4), Z3 4.16.0, run as in
+build/m4.5b1c1/s28/sv.sh (copy: s29/sv.sh). Files: s29/targets/*.vpr (generated by s29/gen.py from the real prelude of
+owns_inc.c's emitted Viper; callee `bump` is f_inc__0 with its contract only, no body), s29/src/ (C shapes).
+Re-run: `bash build/m4.5b1c2/s29/sv.sh build/m4.5b1c2/s29/targets/<name>.vpr`.
+
+Machine load was extreme (load average 130-206 during all runs), so timings are inflated; each run is 4-6 s (JVM start).
+
+| Target | File | Predicted | Silicon | Time (load before) | |
+|---|---|---|---|---|---|
+| 1 `int y = x++;` snapshot, then write | t1_ok | verifies | verifies | 5.58 s (131) | PASS |
+| 1 write before snapshot | t1_wrong_order | postcondition fails | 1 error: `Assert might fail ... (res == 5 ? 1 : 0) != 0` @68 (the explicit return-time ensures assert, as emitted) | 5.31 s (150) | PASS |
+| 2 `*p = (*q)++`, p=&x, q=&y | t2_ok | verifies | verifies | 5.65 s (161) | PASS |
+| 2 q = c ? p : &y | t2_alias | one failure at item 3's assert | 1 error: `v_p != v_q` @64 | 5.39 s (169) | PASS |
+| 3 `r = x++ + *p`, p=&y | t3_ok | verifies | verifies | 4.94 s (177) | PASS |
+| 3 p = c ? &x : &y | t3_alias | one failure at `x != p` | 1 error: `v_x != v_p` @64 | 5.07 s (182) | PASS |
+| 4i `x + bump(&x)` | t4i_aliased_arg | `&x != arg` fails once, before the call's checks | 1 error: `v_x != v_x` @59 | 5.19 s (188) | PASS |
+| 4ii `bump(&x) + bump(&y)` | t4ii_pair | verifies | verifies (x != y known from the two write permissions) | 6.05 s (201) | PASS |
+| 4iii `x = (bump(&x), 2)` write after call | t4iii_write_after | verifies | verifies | 4.33 s (203) | PASS |
+| 4iii write before call | t4iii_write_before | postcondition fails | 1 error: `(res == 2 ? 1 : 0) != 0` @76 (res is 3) | 4.34 s (202) | PASS |
+| 4iv `int r = x && bump(&x)`, snapshot before the branch; requires 0 <= v < 100, ensures res == (v != 0) and x == v+1 or v | t4iv_and | verifies | verifies | 4.54 s (206) | PASS |
+
+Controls (not vacuous): ctl_t4iv_wrong (ensures res == 1) fails with Silicon's own `Postcondition of t4iv might not hold`;
+ctl_t1_wrong (x == 7) fails.
+
+#### Contradictions
+
+None. Notes: (1) In every failing target the one error is the explicit assert; no Silicon-own failure comes first
+(permission, null, overflow and callee preconditions all hold on the failing path, and aliasing never loses permission
+since p == q is one full cell). (2) The "postcondition" failures are at the explicit `assert <ensures>` that
+lowering emits before `goto l_end` (as in owns_inc.vpr), not at Silicon's `Postcondition of ... might not hold`; with
+that assert removed Silicon reports the latter (control above). (3) In t4i the snapshot `t := x.v_int` precedes the
+item 4 assert, and the assert precedes the call's checks, so the assert is the only error of its path.
+
+### S29 (il-analyst half: (c) item 7, (d) item 8): hand-written Viper on Silicon **PASS for all 19 targets; no contradiction of 0039 items 7-8; four NOTEs**
+
+Targets and outputs in `build/m4.5b1c2/s29/il/` (`gen.py` writes every `.vpr`; `prelude.vpr` is S28's, with `alloc_int`'s `decreases _`; `sv.sh` runs the pinned Silicon as `run_tests.py` does, one run at a time, each `.out` has the exit status, times and load). Silicon 1.1-SNAPSHOT `6b540aa4`, Z3 4.16.0. Machine load 130-185 throughout (Silicon 6.2-7.9 s, 9.6-11.3 user-seconds per file: the JVM floor). Shapes follow the emitted Viper of `bump`/`peek`/`two` (`build/m4.5b1c2/p60/q3_c5.vpr`, `build/m4.5b1c1/s28/peek_reads.vpr`).
+
+#### (c) `c ? owns(*p) : reads(*p)` (item 7)
+Callee `cr(c, p, a0, a1)`: `requires (c != 0) ==> OWNS(p, a0)`, `requires !(c != 0) ==> READS(p, a1)` (two ghost amounts), `ensures` the same atoms, `res == p.v_int`, `p.v_int == old(p.v_int)`; return checks `perm(p.v_int) >= (g_o ? write : none)`, `perm(p.d_int) >= (g_r ? a1 : none)`, `perm(lv) >= (g_o ? a0 : none) + (g_r ? a1 : none)` (the sum counts the exclusive pair once). `cr__wf` asserts `!(g_o && g_r)`. Callers pass `/3` amounts (k atoms + 1), assert the callee's own pair separation `!((c != 0) && !(c != 0))` first, write the cell after the call and exhale it.
+| target | what | result |
+|---|---|---|
+| `c1_ok` | `call_true` (c = 1), `call_false` (c = 0), `call_any(k)`; write after the call; `res == 3` | **verified** (permission returns for both guards) |
+| `c1b_chain_ensures` | the read in the `ensures` written as the chain `(g_o ? p.v_int : (g_r ? p.v_int : 0))` | verified (the plain read after two guarded atoms in `c1_ok` verifies too, no chain needed there) |
+| `c2_vac` | `assert false` at the end of both callers | exactly two errors, both at the `assert false` (the paths are reachable) |
+| `c3_wrong_value` | `ensures res == 4` | exactly two `Postcondition ... res == 4` errors (callers) |
+| `c4_overlap_wf` | `c \|\| owns` + unconditional `reads` | exactly **one** error: `Assert might fail. Assertion !(!(c != 0) && true)` in `ov__wf` (c4_overlap_wf.vpr@76); the method `ov` itself verifies |
+| `c4b_overlap_vacuous` | the same contract with `requires c == 0` and body `assert false` | only the `__wf` error: **the overlapping contract is vacuous** (inhaled owns + reads exceeds write), so the wf assert is the only thing that finds it |
+| `c5_overlap_call` | a caller of `ov` with `assert !(!(k != 0) && true)` (0037 item 8's pair separation) | two errors: the `__wf` assert and the call-site assert (@88) |
+| `c6_write_under_not_c` | the callee writes `*p` on both paths | exactly one error: `Assertion !(perm(p.v_int) != write \|\| perm(p.d_int) != write)` (the body's `permission` check, @52) |
+| `c7_write_under_c` | the write only under `c != 0` | verified |
+
+#### (d) a function measure over memory (item 8)
+`down(p, a)`: `requires` WF, `OWNS(p, a)`, `p.v_int >= 0`; `ensures OWNS(p, a)`, `p.v_int == 0`, `res == 0`; `decreases p.v_int` (plain, no `old`); body `if (*p > 0) { *p -= 1; return tick() + down(p); }` so that a call (`tick`) precedes the recursive one in emission. The explicit check is printed **after the call's permission checks** and before `t0 := tick()`: `assert !(!((p.v_int < old(p.v_int)) && (old(p.v_int) >= 0)))` (callee's measure in the current heap, caller's under `old`).
+| target | what | result |
+|---|---|---|
+| `d1_ok` | as above, `down__wf` asserts `(NN(p) && hv_0_pre >= 0) ==> (p == p)` | **verified** |
+| `d1_vac` | `assert false` after the call | exactly one error at it |
+| `d2_nodecrease` | the body writes `*p - 0` | exactly one error, **the explicit assert** (d2_nodecrease.vpr@79); Silicon's own check at the call then passes (its condition is assumed) |
+| `d2b_nodecrease_no_explicit` | the same without the explicit assert | one error, Silicon's `Method might not terminate. Termination measure might not decrease` at the call (@80): the backstop |
+| `d3_wf_live_only` | `down__wf` with no atom framing (the case of a contract that only has `live(p)`): framing = `false` | exactly one error, the `__wf` assert `... ==> false` (@112) |
+| `d5_no_tick_ok`, `d5b_no_tick_nodecrease` | no earlier call, no explicit check | verified; one Silicon termination error at the call |
+| `d4_chain_ok` | `decreases (p == null ? 0 : (!(p == null) ? p.v_int : 0))`, `requires !(p == null) ==> OWNS`, recursive call under `p != null` | verified |
+| `d4_chain_vac`, `d4_chain_nodecrease` | `assert false`; `*p - 0` | one error each (at `assert false`; Silicon's termination error at the call) |
+
+**NOTEs.** (1) `old(p.v_int)` inside a method body's `assert` is accepted and means the entry heap (used by the explicit check); in the method's `decreases` it must stay plain (S28 P6). (2) The measure read needs `hv_m` only in the `__wf` method; the ghost `hv_m_pre` of `down__wf` is a free integer there (the framing assert does not use it). (3) A method whose `requires` holds only the liveness amount and whose measure reads `*p` is silent in Silicon (P6d) and fails only at the `__wf` assert, as item 8 says. (4) Amounts at a call with two exclusive atoms on one argument: `/3` (the generic k + 1) works; nothing needs the exclusivity at the call except the separation assert.
+
+No contradiction of item 7 or 8.
+
+#### Additions after audit round 1 (note 6) and owner question 72
+- **`d6_failed_permission_then_measure`** (hand-written, `s29/il/`): `downq(p, q, a)` owns `p` (measure `p.v_int`) and calls itself on `q`, which it does not own, after the explicit permission asserts of `call_atoms`. Silicon reports exactly four errors: the failed asserts `q != null` (@49), `offset_of(q) < len(block_of(q))` (@51), `perm(q.v_int) == write` (@52), and `Method might not terminate. Termination measure might not decrease or might not be bounded` at the call (@59) (the measures of `q` and `p` are unrelated, so this one is legitimate). **There is no `insufficient permission to access q.v_int` error from Silicon evaluating the plain method measure at the call**: the failed asserts are assumed, and the later parts of the check (`perm(q.d_int) == write`, ...) do not fail again. So a call whose explicit permission check failed adds only a `termination`-category report at the call, never an unmapped Silicon error (no exit 3).
+- **Partners by path** (owner question 72): the bad trusted contract `int tr(int c, int *p) requires(c ? owns(*p) : reads(*p)) ensures(r, owns(*p));` fails exactly at the `f__wf` assert (`build/m4.5b1c2/lower/cond4.c`, `error: permission: the contract of tr returns *p on a path where its requires did not take it`, line 7), in both modes, from the real driver (not hand-written).

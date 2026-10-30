@@ -471,21 +471,8 @@ void define_memory_rejections() {
     k.done(f);
   });
 
-  // ---- item 9: a cell is written only as the top-level operation of a statement ----
-  rc("mem_rej_cell_assignment_as_value", "an assignment used as a value to 'x', a variable whose address is taken", [=](Kit& k) {
-    Function* f = k.fn("f", k.vd);
-    Var* x = k.cell(f, "x", k.i32);
-    Var* y = k.local(f, "y", k.i32);
-    f->body = k.blkc({k.decl(x, N(k, "0")), k.decl(y, k.asgE(x, N(k, "1")))});
-    k.done(f);
-  });
-  rc("mem_rej_cell_postfix_increment_as_value", "an assignment used as a value to 'x', a variable whose address is taken", [=](Kit& k) {
-    Function* f = k.fn("f", k.vd);
-    Var* x = k.cell(f, "x", k.i32);
-    Var* y = k.local(f, "y", k.i32);
-    f->body = k.blkc({k.decl(x, N(k, "0")), k.decl(y, k.incE(x))});
-    k.done(f);
-  });
+  // ---- item 9: a cell is written only as the top-level operation of a statement: lifted by decision 0039 item 2 (M4.5b1c2); the two cases that
+  // rejected `y = (x = 1)` and `y = x++` on a cell are the lowering cases seq_cell_assign_value and seq_cell_postfix_value (selftest_cases10.inc) ----
 
   // ---- item 10: a block without its closing brace (the loops and the jumps of item 10 are lowering cases since decision 0038: selftest_cases9.inc) ----
   rc("mem_rej_cell_block_without_a_closing_brace", "has no closing-brace position", [=](Kit& k) {

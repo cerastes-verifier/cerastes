@@ -393,6 +393,7 @@ and the harness self-test compares this table with the decision record.
 | `permission` | `*p` reads or writes an object the function no longer owns, because the object it points to may have ended (a block's local read after the block) or because a callee kept it (decision 0032 item 6, 0037 item 11); a call needs a permission the caller does not hold, a `return` does not give back what its `ensures` promises, a contract clause reads `*p` without an earlier `owns`/`reads` of it (decision 0037 items 7, 8, 10) | the `*`, the call, the `return`, the contract clause |
 | `lifetime` | a pointer is used (compared, tested, copied) after the object it points to may have ended; at a scope exit, the address of the local may still be in use (decision 0032 item 6) | the use of the pointer; the scope's closing brace or `return` |
 | `pointer-comparison` | `==`/`!=` of pointers that may point into different objects, one of them one past its end (decision 0037 item 12; `owns`/`reads` of both exclude it, `live` alone does not) | the operator, or the contract clause |
+| `unsequenced` | two accesses to one object, at least one a write, that C does not order, or an access and a call that may change the object (decisions 0028, 0039) | the later access, or the later call |
 
 ## Every back-end diagnostic has a test
 
