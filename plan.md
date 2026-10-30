@@ -2,13 +2,14 @@
 
 Working name: **`cerastes`**.
 
-One Claude Code session per milestone, or per sub-milestone when a milestone does not fit in a few hours (≤ 4 h; owner,
-2026-10-20): M4.1, M4.5a, M5a, …. Each session starts from `CLAUDE.md`, this file (its own milestone only),
+One Claude Code session per milestone, or per sub-milestone when a milestone does not fit in one session: a session is
+sized to what fits in one context, under about 12 h unless a reason is given (owner, 2026-10-30, handoff question 77;
+it was ≤ 4 h from 2026-10-20): M4.1, M4.5a, M5a, …. Each session starts from `CLAUDE.md`, this file (its own milestone only),
 `internal/status.md`, `internal/handoff.md` and the decision records, and ends by leaving the repo green and
 `internal/status.md` updated so the next session can start cold.
 
 This file was trimmed to what is live at the end of M4.4c (owner, 2026-10-26), and is reconciled with the handoff at
-each session's start (the last: M4.5b1c2, 2026-10-29): the plans of the finished milestones, the superseded text and the
+each session's start (the last: M4.5b1c3, 2026-10-30): the plans of the finished milestones, the superseded text and the
 appendices are in `git show 1fcc43b:plan.md`. The milestones were renumbered on 2026-10-20
 (the rest of C became M4; generic templates M5, concepts M6, C++ memory M7, inventory M8, evaluation M9); history
 entries keep the numbers they were written with.
@@ -126,6 +127,7 @@ Every test file starts with expectation lines that `scripts/run_tests.py` checks
 | M4.5b1a The model, address-taken locals | 2026-10-28 | 0032–0036 | the `Block` domain and its four axioms with lint tags; address-taken locals as one-slot blocks (allocated at block entry, scope exit checked), `&`, `*`, NULL, `==`/`!=`, liveness inside one function; `null-dereference`, `permission`, `lifetime`; C's incompatible pointer types as errors; the Memory and ownership page |
 | M4.5b1b Pointer parameters and contracts | 2026-10-28/29 | 0037 | pointer parameters and results, `&param`; `owns`/`reads`/`live`/`old(*p)` in C and C++ spellings with one ghost amount per atom; the framing of contracts decided per path; `permission` at calls and returns; `pointer-comparison`; `restrict` on owned C parameters (plan `.claude/plans/m4-5b1b-pointer-params.md`) |
 | M4.5b1c1 Loops and jumps | 2026-10-29 | 0038 | cells and pointers in loops with automatic permission invariants ("every place held"), memory in invariants and loop measures, scope exits at `break`/`continue`/`goto`/`return`; written atoms in invariants cut to b1c3, a function's `decreases(*p)` to b1c2; the `address_of_local.c` port (plan `.claude/plans/m4-5b1c1-loops.md`) |
+| M4.5b1c3 Pointers to pointers, owning parameters, `*result` | 2026-10-30 | 0040 | `T**` at any depth (address-taken pointer variables as cells, `WF` in place of a range, case splits after loads); pointer conversions and contract comparisons across `const` rejected (closing a hole since 0037); `[[cerastes::owning]]` on parameters (merged with an explicit `owns`); `*result` as a value; written `owns`/`reads`/`live` in loop invariants, lifting the pinned false alarms of reassigned parameters; `owns(**pp)` to M4.5c; the `swap.c` and `address_of_local.c` ports (plan `.claude/plans/m4-5b1c3-pointers-to-pointers.md`) |
 | M4.5b1c2 Sequencing and placement | 2026-10-29 | 0039 | writes to cells inside expressions (`StoreE`, guarded snapshots, keys per object); sequencing on objects (`unsequenced`, the eighteenth category; same-object shapes rejected like the compilers); calls beside accesses and two memory calls (0037 item 8's rule lifted); `return &local;` rejected (R14); `c ? owns(*p) : reads(*p)` path-precise and partners by path; a function's `decreases(*p)` (plan `.claude/plans/m4-5b1c2-sequencing.md`) |
 
 The finished milestones' plans (goals, tasks, acceptance) are in the commit named above; `internal/status.md` has a
@@ -137,7 +139,7 @@ row per session.
 decision record; non-template code, one translation unit. `.c` tests run in both `c23` and `c++20` where the code is
 valid in both. Strictly C (owner, 2026-10-20): C++ references, `new`/`delete` and classes are M7.
 
-**Sessions.** Each is planned at ≤ 4 h and lands its decision record (invariant 6), must-verify/must-fail pairs
+**Sessions.** Each is sized to one context (question 77) and lands its decision record (invariant 6), must-verify/must-fail pairs
 (invariant 2) and its docs (invariant 9), with one Opus audit round per diff plus a re-audit of blocking fixes and
 `check.sh` at most twice. `internal/handoff.md` holds each session's tasks, agents, acceptance and stop rules.
 Finished sessions are in "Done" above; the remaining ones are below (the splits are recorded in the
@@ -158,9 +160,8 @@ M4.5b1c planning: `owns_block` needs the heap token and a whole-block permission
 
 | Session | Scope | Needs |
 |---|---|---|
-| **M4.5b1c3 `T**`, owning parameters, `*result`** | `T**`; `[[cerastes::owning]]` on parameters (target `p`); `*result` as a value, framed by `result == p`; `owns`/`reads`/`live` in `CERASTES_INVARIANT` (from b1c1, record 0038 item 5); `swap.c` and the aliasing trap; `address_of_local.c`'s `int**` functions; the Memory and ownership page completed | M4.5b1c2 (done) |
-| **M4.5b2 Globals, statics, initialization through pointers** | mutable globals and `static` locals as blocks with frames; `main` owns the globals; 0025 item 2's placement revisited; 0019's flag per cell; `[[cerastes::uninit]]`, `ref_to_uninit`, `must_init` and `--strict-init` | M4.5b1c3 |
-| **M4.5c Structs** | field cells, `.` and `->`, struct values (copies, initializers, by-value parameters and results), nested structs, pointers to fields, `owns(*s)`, non-recursive owning fields | M4.5b1c3 |
+| **M4.5b2 Globals, statics, initialization through pointers** | mutable globals and `static` locals as blocks with frames; `main` owns the globals; 0025 item 2's placement revisited; 0019's flag per cell; `[[cerastes::uninit]]`, `ref_to_uninit`, `must_init` and `--strict-init` | M4.5b1c3 (done) |
+| **M4.5c Structs** | field cells, `.` and `->`, struct values (copies, initializers, by-value parameters and results), nested structs, pointers to fields, `owns(*s)`, non-recursive owning fields; places reached through a heap read in contracts (`owns(**pp)`, `**pp`; owner, 2026-10-30, question 74) | M4.5b1c3 |
 | **M4.5d1 vlibc** | the repository (the owner creates `cerastes-verifier/vlibc`), its layout, license and CI; the submodule pin; explicit and transparent includes; the trust rule; `abort`/`exit`/`_Exit` moved out of the encoder's table | M4.5a (any time) |
 | **M4.5d2 `malloc` and `free`** | vlibc's contracts for `malloc`, `calloc`, `realloc`, `free`; heap blocks; the free checks; leaks (a record; `forperm`); owning locals and globals; owning results (from b1c, owner 2026-10-29: `[[cerastes::owning]]` on functions, target `r`; `owns_block`; `owns(*result)`; `ensures` atoms with no `requires` partner); `invalid-free`, `leak` | M4.5c, M4.5d1 |
 | **M4.5e1 Arrays** | local arrays, `a[i]`, array parameters, `owns_range` and quantified permissions, `forall` in C (0029 item 4), sum and max; P38's braced initializers over 1000 elements; M4.4b2's types computed from constants | M4.5b1c3 |
@@ -197,7 +198,7 @@ M4.4b2 skips a static assertion whose condition calls a function (a `constexpr` 
 (`std::is_integral_v<T>`, `__is_integral(T)`, `std::is_same_v`), names `std::numeric_limits<T>` or another entity of
 a system header (old handoff §11 question 39: "Skip it for now, but we need to address type traits before we get into
 concepts. Add before M5."). This session decides how such conditions are encoded or checked, so that M5's integral
-`T` and M6's requirement contracts rest on a known reading of type traits. One session of ≤ 4 h, after M4.8 and before
+`T` and M6's requirement contracts rest on a known reading of type traits. One session, after M4.8 and before
 M5a; its scope is planned at its own planning (handoff §4.4).
 
 Also before M5 (owner, 2026-10-27, handoff §8 question 11): `mutate.py`'s classifier learns to read local declarations

@@ -719,6 +719,7 @@ void check_fold(an_attribute_ptr a, an_expr_node_ptr root, const std::string& co
 void check_attribute(an_attribute_ptr a, a_routine_ptr owner, a_statement_ptr stmt) {
   Annot k = classify(a);
   if (k == Annot::none) return;
+  if (k == Annot::owning) return;  // a parameter's marker (decision 0040 item 3): the encoder reads it; its argument is no annotation expression
   const std::string context = instance_context(owner);
   // `decreases` before a loop is the loop's measure (like `invariant`); on a function it is a contract.
   const bool function_form = is_contract(k) && stmt == nullptr;

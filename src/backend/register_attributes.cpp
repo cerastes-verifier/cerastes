@@ -55,6 +55,11 @@ const an_attr_registration kAttributes[] = {
     // compile time (a constexpr/consteval use is refused with EDG's own diagnostic, a defaulted function cannot
     // carry the marker).  It reads the attributes the routine has when it is called, so a marker that is only on a
     // later redeclaration does not stop an earlier use (first-declaration gap, M5b; decision 0007).
+    // owning (decisions 0029 item 1 and 0040 item 3): on a parameter, with no argument list or `owning(n)` (an unevaluated expression, M4.5e1:
+    // the encoder rejects it today).  The attribute lands on the parameter's `param_type.attributes` (P52); registration accepts a non-pointer
+    // parameter and a duplicate, and does not honour RAF_MUST_MATCH there, so the encoder checks every declaration.  Target `p` only: a
+    // function, a local, a global and a field wait for M4.5d2 and M4.5c, and EDG refuses them itself until then.
+    {"owning", "?(X)", "p", RAF_NO_FLAGS},
     {"predicate", "", "r", RAF_ENTITY_ATTACHED | RAF_NO_CONSTANT_EVALUATION},
     {"pure", "", "r", RAF_ENTITY_ATTACHED | RAF_NO_CONSTANT_EVALUATION},
     {nullptr, nullptr, nullptr, RAF_NO_FLAGS},

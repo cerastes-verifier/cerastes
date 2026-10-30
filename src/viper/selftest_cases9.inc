@@ -682,15 +682,6 @@ void define_loops_and_jumps() {
 void define_loops_and_jumps_rejections() {
   auto PT = [](Kit& k) { return k.ptr(k.i32); };
   auto N = [](Kit& k, const char* v) { return k.num(k.i32, v); };
-  // void f(int *p) requires owns(*p) { while (i > 0) invariant owns(*p) ... }   (an atom in a loop invariant: M4.5b1c3)
-  rc("mem_rej_atom_in_loop_invariant", "in a loop invariant it is M4.5b1c3's", [=](Kit& k) {
-    Function* f = k.fn("f", k.vd, {{"p", PT(k)}});
-    k.req(f, k.b.atom(AtomKind::Owns, k.b.text(k.F(f, 0), "p"), 0, k.at()));
-    Var* i = k.local(f, "i", k.i32);
-    const Expr* a = k.b.atom(AtomKind::Owns, k.b.text(k.F(f, 0), "p"), 0, k.at());
-    f->body = k.blk({k.decl(i, N(k, "1")), k.whl(k.gt(k.v(i), N(k, "0")), {k.cl(a)}, {k.cl(k.v(i))}, k.blk({k.asg(i, k.sub(k.v(i), N(k, "1")))}))});
-    k.done(f);
-  });
   // an atom in the invariant of a do ... while (0): straight-line code, asserted like a check (never lifted)
   rc("mem_rej_atom_in_do_once_invariant", "a permission atom outside a contract", [=](Kit& k) {
     Function* f = k.fn("f", k.vd, {{"p", PT(k)}});

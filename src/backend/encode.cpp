@@ -13,6 +13,7 @@
 // The IL facts each rule relies on are in internal/il-inventory.md, "M3: scalar code" (probes P1-P15).
 #include "encode.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdlib>
 #include <cctype>
@@ -92,6 +93,7 @@ class Encoder {
   Encoder() : b_(prog_) {}
 
   void run(const IlEntities& ents);
+  const IlEntities* ents_ = nullptr;  // the entities of the run (secondary declarations, decision 0040 item 3)
 
   // After run(): the program, when nothing was rejected.
   vir::Program& program() { return prog_; }
@@ -118,6 +120,8 @@ class Encoder {
     bool check_clause = false;  // ... and it is a `check`: evaluated like code where it stands, so `&x` and `*p` are allowed (decision 0032)
     bool loop_clause = false;   // ... or a loop's `invariant` or `decreases` (decision 0038 item 6): `&x` and `*p` allowed as in a `check`
     bool loop_invariant = false;  // ... and it is an `invariant` (not a measure): selects the message of a permission atom's rejection
+    bool invariant_atoms_ok = false;  // ... of a loop that is not a `do ... while (0)`: a permission atom of a pointer variable is accepted (decision 0040 item 5)
+    std::string binder_name;  // the name of the result in the `ensures` being encoded ("" when it has none), for the messages of `*result`
     Annot annot = Annot::none;
     bool binder_present = false;
     int old_depth = 0;
@@ -363,7 +367,7 @@ class Encoder {
     return t != nullptr && t->kind == tk_pointer && !t->variant.pointer.is_reference;
   }
 
-  // `allow_ptr`: a pointer type to a bool, an integer or an enumeration is a VIR pointer type (decision 0032 item 2): the type of a
+  // `allow_ptr`: a pointer type to a bool, an integer, an enumeration or such a pointer (decisions 0032 item 2, 0040 item 2) is a VIR pointer type: the type of a
   // local that is not itself address-taken and of an expression.  Everywhere else (a parameter or result, `check_signature`; the
   // places that read only scalars) a pointer is as unsupported as before.
   // `allow_restrict` (a parameter, decision 0037 item 2): a `restrict` on the pointer itself is noted in `restrict_q` instead of rejected; the
@@ -449,10 +453,11 @@ class Encoder {
           r.name += " (a pointer to a volatile or _Atomic object)";
           return r;
         }
-        VType e = vtype(pointee);
+        // Decision 0040 item 2: the pointee may be a pointer, at any depth; the innermost pointee is a bool, an integer or an enumeration.
+        VType e = vtype(pointee, /*allow_ptr=*/true);
         if (!e.ok || e.t.is_void()) {
           r.name += e.t.is_void() && e.ok ? " (a pointer to void)"
-                    : is_pointer_type(pointee) ? " (a pointer to a pointer: M4.5b1c3)"
+                    : is_pointer_type(pointee) ? " (a pointer to a pointer whose innermost pointee is not a bool, an integer or an enumeration)"
                                                : " (a pointer to a type other than bool, an integer or an enumeration)";
           r.silent = e.silent;
           return r;
@@ -559,6 +564,9 @@ class Encoder {
     if (a_scope_ptr bs = body_scope(r))
       for (a_variable_ptr v = bs->variant.routine.parameters; v != nullptr; v = v->next)
         var_quals.push_back(v->type != nullptr ? f_get_type_qualifiers(v->type, TRUE) : 0);
+    // Decision 0040 item 3: `owning` on a `void *` or a pointer to function is reported as such, and the type is not reported again.
+    std::set<size_t> owning_reported;
+    if (ours && !read_owning(r, x, &owning_reported)) ok = false;
     size_t pk = 0;
     for (a_param_type_ptr p = x->param_type_list; p != nullptr; p = p->next, ++pk) {
       VType pt = vtype(p->type, true, true, p->qualifiers | (pk < var_quals.size() ? var_quals[pk] : 0));  // decision 0037 item 2: a pointer parameter
@@ -568,7 +576,7 @@ class Encoder {
       }
       if (!pt.ok || pt.t.is_void()) {
         if (pt.ok) pt.name = "void";
-        reject_type(pt, at);
+        if (owning_reported.count(pk) == 0) reject_type(pt, at);
         ok = false;
       }
       if (ours) check_attributes(p->attributes);
@@ -577,6 +585,246 @@ class Encoder {
     return ok;
   }
   std::set<a_routine_ptr> signature_ok_;
+
+  // ---- `[[cerastes::owning]]` on parameters (decisions 0029 item 1, 0040 item 3; P52) --------------------------------------------------
+  struct OwningParam {
+    int index = 0;           // the parameter (0-based)
+    a_source_position pos;   // the attribute (its first node, in source order)
+  };
+  std::map<a_routine_ptr, std::vector<OwningParam>> owning_;  // the owning parameters of the routines whose signatures were read
+
+  // Reads and checks the `owning` of every parameter of `r`: where it lands is the parameter's `param_type.attributes` of each declaration (a
+  // definition's variable sees the union, P52), one node per spelling, so the nodes are mapped to declarations by position.  Rejects (unsupported_annotation,
+  // each with its own message) a non-pointer parameter, a pointer to function, `void *`, `owning(n)` and a duplicate; a declaration that has the
+  // attribute where another has not is annotation_mismatch.  False when it rejected something; `*reported_types` gets the parameters whose pointer
+  // type the rejection already explains.
+  // One written spelling: the same line and column and, for a macro's token, the same place in the macro body.
+  static bool same_spelling(const a_source_position& a, const a_source_position& b) {
+    return a.seq == b.seq && a.column == b.column && a.orig_seq == b.orig_seq && a.orig_column == b.orig_column;
+  }
+  bool read_owning(a_routine_ptr r, a_routine_type_supplement_ptr x, std::set<size_t>* reported_types) {
+    const bool saved_contract = cx_.contract, saved_annotation = cx_.annotation;
+    cx_.contract = cx_.annotation = false;  // a report at a macro's use, not at the macro body in <cerastes.h>
+    struct Restore {
+      Encoder* e; bool c, a;
+      ~Restore() { e->cx_.contract = c; e->cx_.annotation = a; }
+    } restore{this, saved_contract, saved_annotation};
+    std::vector<std::vector<an_attribute_ptr>> nodes;  // per parameter, without repeats
+    // The lists of one declaration's parameters may hold copies of one spelling's node (the routine's type, the definition's declarator, the
+    // definition's variables): a spelling is one node, found by its position.
+    auto add_node = [&](size_t k, an_attribute_ptr a) {
+      if (!is_registered_cerastes(a) || classify(a) != Annot::owning) return;
+      if (nodes.size() <= k) nodes.resize(k + 1);
+      for (an_attribute_ptr o : nodes[k])
+        if (o == a || same_spelling(o->position, a->position)) return;
+      nodes[k].push_back(a);
+    };
+    std::vector<std::string> names;  // a parameter's name from any declaration that gives it (an unnamed one in the first does not hide it)
+    auto note_name = [&](size_t k, const char* n) {
+      if (n == nullptr || *n == '\0') return;
+      if (names.size() <= k) names.resize(k + 1);
+      if (names[k].empty()) names[k] = n;
+    };
+    auto gather = [&](a_param_type_ptr list) {
+      size_t k = 0;
+      for (a_param_type_ptr p = list; p != nullptr; p = p->next, ++k) {
+        if (nodes.size() <= k) nodes.resize(k + 1);
+        note_name(k, p->name);
+        for (an_attribute_ptr a = p->attributes; a != nullptr; a = a->next) add_node(k, a);
+      }
+    };
+    gather(x->param_type_list);
+    if (r->declared_type != nullptr && r->declared_type != r->type) {  // the definition's own declarator (GENERATE_SOURCE_SEQUENCE_LISTS)
+      a_type_ptr dt = skip_typerefs(r->declared_type);
+      if (dt != nullptr && dt->kind == tk_routine && dt->variant.routine.extra_info != nullptr) gather(dt->variant.routine.extra_info->param_type_list);
+    }
+    if (a_scope_ptr bs = body_scope(r)) {
+      size_t k = 0;
+      for (a_variable_ptr v = bs->variant.routine.parameters; v != nullptr; v = v->next, ++k) {
+        if (!v->is_parameter || v->is_this_parameter || v->variant.assoc_param_type == nullptr) continue;
+        note_name(k, v->source_corresp.name);
+        for (an_attribute_ptr a = v->variant.assoc_param_type->attributes; a != nullptr; a = a->next) add_node(k, a);
+      }
+    }
+    bool any = false;
+    for (const auto& n : nodes) any = any || !n.empty();
+    if (!any) return true;
+    // The declarations of the routine, in source order (line, then column; for a macro's tokens the invocation's), each with the type as it was
+    // declared: the defining (or only) one is `source_corresp.decl_position` and the others are the secondary declarations.
+    struct Decl {
+      a_source_position pos;
+      a_type_ptr type = nullptr;
+    };
+    std::vector<Decl> decls;
+    if (r->source_corresp.decl_position.seq != 0) decls.push_back(Decl{r->source_corresp.decl_position, r->type});
+    if (ents_ != nullptr) {
+      auto sd = ents_->secondary_decls.find(r);
+      if (sd != ents_->secondary_decls.end())
+        for (const IlEntities::SecondaryDecl& q : sd->second)
+          if (q.position.seq != 0) decls.push_back(Decl{q.position, q.declared_type});
+    }
+    auto before = [](const a_source_position& a, const a_source_position& b) {
+      return a.seq != b.seq ? a.seq < b.seq : a.column < b.column;
+    };
+    // The front end lists a declaration that is not the routine's definition twice: as `decl_position` and as a secondary declaration (`fn_t f;`,
+    // `void f(int *p);` alone).  The definition is only `decl_position`.  So when the routine has no definition, one secondary entry at the primary's
+    // position is the primary itself.
+    if (r->declared_type == nullptr)
+      for (size_t i = 1; i < decls.size(); ++i)
+        if (!before(decls[0].pos, decls[i].pos) && !before(decls[i].pos, decls[0].pos)) {
+          decls.erase(decls.begin() + static_cast<long>(i));
+          break;
+        }
+    std::stable_sort(decls.begin(), decls.end(), [&](const Decl& a, const Decl& b) { return before(a.pos, b.pos); });
+    // Two declarations that sit at one position (both written by one macro invocation) cannot be told apart.
+    for (size_t i = 1; i < decls.size(); ++i)
+      if (!before(decls[i - 1].pos, decls[i].pos)) {
+        reject(Diag::unsupported_annotation, decls[i].pos,
+               "\"cerastes::owning\" on a parameter of declarations of `" + rname(r) + "` that cerastes cannot tell apart (both written by one macro invocation)");
+        return false;
+      }
+    auto where = [&](const a_source_position& p) {
+      const DiagPos d = diag_position(p);
+      return d.known ? d.file + ":" + std::to_string(d.line) : std::string("an unknown position");
+    };
+    bool ok = true;
+    std::vector<a_param_type_ptr> plist;
+    for (a_param_type_ptr p = x->param_type_list; p != nullptr; p = p->next) plist.push_back(p);
+    for (size_t k = 0; k < nodes.size(); ++k) {
+      auto& ns = nodes[k];
+      if (ns.empty()) continue;
+      std::sort(ns.begin(), ns.end(), [](an_attribute_ptr a, an_attribute_ptr b) {
+        return a->position.seq != b->position.seq ? a->position.seq < b->position.seq : a->position.column < b->position.column;
+      });
+      const std::string pname = k < names.size() && !names[k].empty() ? "\"" + names[k] + "\"" : std::to_string(k + 1);
+      bool bad = false;
+      // The type: a pointer to an object (a pointer to a bool, an integer, an enumeration or a pointer is checked by the parameter's own type).
+      if (k < plist.size() && plist[k]->type != nullptr) {
+        a_type_ptr pt = skip_typerefs(plist[k]->type);
+        if (pt == nullptr || pt->kind != tk_pointer || pt->variant.pointer.is_reference) {
+          reject(Diag::unsupported_annotation, ns[0]->position, "\"cerastes::owning\" on parameter " + pname + " (it is not a pointer)");
+          bad = true;
+        } else {
+          a_type_ptr pe = pt->variant.pointer.type != nullptr ? skip_typerefs(pt->variant.pointer.type) : nullptr;
+          if (pt->variant.pointer.type != nullptr && (f_get_type_qualifiers(pt->variant.pointer.type, TRUE) & TQ_CONST) != 0) {
+            reject(Diag::unsupported_annotation, ns[0]->position,
+                   "\"cerastes::owning\" on parameter " + pname + " (a pointer to a `const` object: a function that only reads `*" +
+                       (pname.empty() || pname[0] != '"' ? std::string("p") : pname.substr(1, pname.size() - 2)) + "` takes `reads`, decision 0040 item 2)");
+            bad = true;
+          } else if (pe != nullptr && pe->kind == tk_routine) {
+            reject(Diag::unsupported_annotation, ns[0]->position, "\"cerastes::owning\" on parameter " + pname + " (a pointer to a function: M4.7)");
+            reported_types->insert(k);
+            bad = true;
+          } else if (pe != nullptr && pe->kind == tk_void) {
+            reject(Diag::unsupported_annotation, ns[0]->position, "\"cerastes::owning\" on parameter " + pname + " (a `void *`: a pointer to an untyped object)");
+            reported_types->insert(k);
+            bad = true;
+          }
+        }
+      }
+      for (an_attribute_ptr a : ns)
+        if (!arguments_of(a).empty()) {
+          reject(Diag::unsupported_annotation, a->position, "\"cerastes::owning(n)\" on parameter " + pname + " (an owned range: M4.5e1)");
+          bad = true;
+          break;
+        }
+      // Per declaration: at most one node, and all or none.  A node a typedef'd function type carries is the declaration's that names the typedef (by
+      // its type); any other lies after the declaration it belongs to and before the next (by line and column).
+      std::vector<int> count(std::max<size_t>(decls.size(), 1), 0);
+      for (an_attribute_ptr a : ns) {
+        // A node that a typedef'd function type carries belongs to every declaration that names the typedef (found by its type).
+        bool by_type = false;
+        for (size_t i = 0; i < decls.size(); ++i) {
+          a_type_ptr t = decls[i].type;
+          if (t == nullptr || t->kind != tk_typeref) continue;
+          a_type_ptr rt = skip_typerefs(t);
+          if (rt == nullptr || rt->kind != tk_routine || rt->variant.routine.extra_info == nullptr) continue;
+          size_t j = 0;
+          bool found = false;
+          for (a_param_type_ptr pp = rt->variant.routine.extra_info->param_type_list; pp != nullptr && !found; pp = pp->next, ++j)
+            if (j == k)
+              for (an_attribute_ptr o = pp->attributes; o != nullptr; o = o->next)
+                if (is_registered_cerastes(o) && classify(o) == Annot::owning && same_spelling(o->position, a->position)) found = true;
+          if (found) {
+            ++count[i];
+            by_type = true;
+          }
+        }
+        if (by_type) continue;
+        size_t d = 0;  // any other node lies after the declaration it belongs to and before the next
+        for (size_t i = 0; i < decls.size(); ++i)
+          if (!before(a->position, decls[i].pos)) d = i;
+        if (count[d]++ == 1) {
+          reject(Diag::unsupported_annotation, a->position, "\"cerastes::owning\" twice on parameter " + pname);
+          bad = true;
+        }
+      }
+      if (decls.size() > 1) {
+        size_t with = decls.size(), without = decls.size();  // the first declaration that has it, and the first that has not
+        for (size_t i = 0; i < decls.size(); ++i) {
+          if (count[i] > 0 && with == decls.size()) with = i;
+          if (count[i] == 0 && without == decls.size()) without = i;
+        }
+        if (with < decls.size() && without < decls.size()) {
+          // Report at the first declaration without it, naming the first with it.
+          reject_args(Diag::annotation_mismatch, decls[without].pos,
+                      {rname(r), pname, "the declaration at " + where(decls[with].pos) + " has it, this one does not"});
+          bad = true;
+        }
+      }
+      if (bad) ok = false;
+      else owning_[r].push_back(OwningParam{static_cast<int>(k), ns[0]->position});
+    }
+    return ok;
+  }
+
+  // Adds the contract an owning parameter stands for (decision 0040 item 3): `p == NULL || owns(*p)` first in the `requires` and first in the
+  // `ensures`, unless that list already holds `owns(*p)` as a top-level conjunct or `p == NULL || owns(*p)` (question 75: the explicit atom
+  // implies it, and the place keeps its one atom); `reads(*p)`, `live(p)` or an `owns(*p)` under another guard of that list is rejected.  It runs
+  // before the atoms are numbered and before `restrict` is checked.
+  void apply_owning(a_routine_ptr r, vir::Function* f) {
+    auto it = owning_.find(r);
+    if (it == owning_.end()) return;
+    const bool saved_contract = cx_.contract, saved_annotation = cx_.annotation;
+    cx_.contract = cx_.annotation = false;
+    std::vector<vir::Clause> add_requires, add_ensures;
+    const std::vector<vir::AtomSite> sites = vir::contract_atoms(*f);
+    for (const OwningParam& o : it->second) {
+      const auto k = static_cast<size_t>(o.index);
+      if (k >= f->params.size() || !f->params[k].type.is_ptr()) continue;  // the signature was rejected
+      const std::string pname = f->params[k].name.empty() ? "arg" + std::to_string(k + 1) : f->params[k].name;
+      for (int list = 0; list < 2; ++list) {
+        if (list == 1 && f->noreturn) continue;  // a function declared not to return has no `ensures` (decision 0015 item 4)
+        bool merge = false, bad = false;
+        for (const vir::AtomSite& st : sites) {
+          if (st.in_ensures != (list == 1) || st.atom->a == nullptr || st.atom->a->kind != Expr::Kind::Formal || st.atom->a->index != o.index) continue;
+          if (st.atom->atom == vir::AtomKind::Owns && vir::atom_guard_shape(st, o.index) != vir::GuardShape::Other) merge = true;
+          else bad = true;
+        }
+        if (bad) {
+          reject(Diag::unsupported_annotation, o.pos,
+                 "\"cerastes::owning\" on `" + pname + "` beside `reads`, `live` or a guarded `owns` of `" + pname + "` in its `" +
+                     (list == 0 ? "requires" : "ensures") + "` (`" + pname + "` is an owning parameter: its contract already holds `" + pname +
+                     " == NULL || owns(*" + pname + ")`)");
+          continue;
+        }
+        if (merge) continue;
+        const SrcLoc l = loc_of(o.pos);
+        const Expr* pf = b_.formal(*f, o.index, l);
+        b_.text(pf, pname);
+        const Expr* eq = b_.binary(vir::BinaryOp::Eq, pf, b_.null_const(f->params[k].type, l), l);
+        const Expr* pf2 = b_.formal(*f, o.index, l);
+        b_.text(pf2, pname);
+        const Expr* atom = b_.atom(vir::AtomKind::Owns, pf2, -1, l);
+        atom_pos_[atom] = o.pos;
+        (list == 0 ? add_requires : add_ensures).push_back(vir::Clause{b_.binary(vir::BinaryOp::LOr, eq, atom, l), l});
+      }
+    }
+    f->requires_.insert(f->requires_.begin(), add_requires.begin(), add_requires.end());
+    f->ensures_.insert(f->ensures_.begin(), add_ensures.begin(), add_ensures.end());
+    cx_.contract = saved_contract;
+    cx_.annotation = saved_annotation;
+  }
 
   // The VIR function of a routine, created with its signature and contract the first time it is needed; null
   // after a rejection.  A routine without a body in a verified file is a trusted contract, which `call` needs
@@ -654,12 +902,21 @@ class Encoder {
     return nullptr;
   }
 
+  static bool holds_atom(const Expr& x) {
+    if (x.kind == Expr::Kind::Atom) return true;
+    for (const Expr* y : {x.a, x.b, x.c})
+      if (y != nullptr && holds_atom(*y)) return true;
+    for (const Expr* y : x.args)
+      if (y != nullptr && holds_atom(*y)) return true;
+    return false;
+  }
+
   const Expr* clause_bool(const Expr* x, const a_source_position& p) {
     if (x == nullptr) return nullptr;
     if (x->type.is_bool()) return x;
     // C gives a logical operation the type `int`: `a && b` reaches here as `bool_to_int(a && b)`.  A contract that holds atoms or reads `*p` keeps
     // its Bool tree, so that the position rule of decision 0037 item 5 sees the conjuncts; programs without such nodes keep their shape.
-    if (cx_.contract && x->type.is_int() && vir::reads_heap(*x))
+    if ((cx_.contract || (cx_.loop_invariant && holds_atom(*x))) && x->type.is_int() && vir::reads_heap(*x))  // a loop invariant too, only when it holds an atom (decision 0040 item 5): every other clause keeps its old shape
       if (const Expr* t = contract_truth(x)) return t;
     if (x->type.is_int() || x->type.is_ptr()) return b_.to_bool(x, loc_of(p));  // a pointer is true when it is not null (decision 0032 item 7)
     reject(Diag::unsupported_expression, p, "a condition that is not a number or a bool");
@@ -676,6 +933,9 @@ class Encoder {
       cx_.contract = true;
       cx_.annot = k;
       cx_.binder_present = has_binder(a);
+      cx_.binder_name.clear();
+      for (const AnnotArg& g : arguments_of(a))
+        if (g.kind == AnnotArg::Kind::binder && g.binder_name != nullptr) cx_.binder_name = g.binder_name;
       cx_.stmt_pos = a->position;
       cx_.old_depth = 0;
       if (k == Annot::decreases) {
@@ -708,6 +968,7 @@ class Encoder {
       vir::Clause cl{c, loc_of(a->position)};
       (k == Annot::requires_ ? f->requires_ : f->ensures_).push_back(cl);
     }
+    apply_owning(r, f);
     finish_atoms(f);
     cx_ = std::move(saved);
   }
@@ -1581,10 +1842,12 @@ class Encoder {
     }
     if (r.kind == ParamRef::Kind::binder && cx_.annot == Annot::ensures) {
       if (cx_.old_depth > 0) {
-        reject(Diag::unsupported_expression, e->position, "\"cerastes::old\" applied to the result");
+        reject(Diag::unsupported_expression, e->position, "\"cerastes::old\" applied to the result (it has no value on entry, decision 0040 item 4)");
         return nullptr;
       }
-      return b_.result(*cx_.fn, loc_of(e->position));
+      const Expr* res = b_.result(*cx_.fn, loc_of(e->position));
+      if (res->type.is_ptr() && !cx_.binder_name.empty()) b_.text(res, cx_.binder_name);  // for the messages of `*result`
+      return res;
     }
     reject(Diag::unsupported_expression, e->position, "a parameter reference this version cannot map");
     return nullptr;
@@ -1658,6 +1921,26 @@ class Encoder {
     return finish(e, b_.binary(op, a, c, loc_of(e->position)));
   }
 
+  // Whether the operands of a comparison, as written (before the front end's conversion to a composite type), are pointers whose pointee types
+  // differ in qualifiers at any level.  A null pointer constant has no pointee of its own and never counts.
+  static bool pointee_qualifiers_differ(an_expr_node_ptr x, an_expr_node_ptr y) {
+    x = peel_place(x);
+    y = peel_place(y);
+    if (x == nullptr || y == nullptr || x->kind == enk_constant || y->kind == enk_constant) return false;
+    a_type_ptr tx = x->type != nullptr ? skip_typerefs(x->type) : nullptr;
+    a_type_ptr ty = y->type != nullptr ? skip_typerefs(y->type) : nullptr;
+    for (int guard = 0; guard < 16; ++guard) {
+      if (tx == nullptr || ty == nullptr || tx->kind != tk_pointer || ty->kind != tk_pointer) return false;
+      a_type_ptr px = tx->variant.pointer.type;
+      a_type_ptr py = ty->variant.pointer.type;
+      if (px == nullptr || py == nullptr) return false;
+      if (f_get_type_qualifiers(px, TRUE) != f_get_type_qualifiers(py, TRUE)) return true;
+      tx = skip_typerefs(px);
+      ty = skip_typerefs(py);
+    }
+    return false;
+  }
+
   const Expr* comparison(an_expr_node_ptr e, vir::BinaryOp op) {
     auto ops = operands_of(e);
     if (!operand_count(e, 2, ops)) return nullptr;
@@ -1698,6 +1981,12 @@ class Encoder {
         reject(Diag::unsupported_expression, e->position, "a comparison of order of enumeration values of an unscoped enumeration (decision 0018 item 7)");
         return nullptr;
       }
+    }
+    if (cx_.contract && (a->type.is_ptr() && c->type.is_ptr()) && pointee_qualifiers_differ(ops[0], ops[1])) {
+      // Decision 0040 item 2 (audit round 2, B1): a trusted contract may not state an equality of pointers whose pointees differ in qualifiers.
+      reject(Diag::unsupported_expression, e->position,
+             "a contract comparing pointers whose pointees differ in qualifiers (it would let a const object be written through the other)");
+      return nullptr;
     }
     if (a->type.is_ptr() || c->type.is_ptr()) {
       // Decision 0032 item 7: two pointers of one type (a null constant takes the other side's) compared for equality.
@@ -1788,6 +2077,10 @@ class Encoder {
     return e;
   }
 
+  static bool is_indirect_node(an_expr_node_ptr n) {
+    return n != nullptr && n->kind == enk_operation && n->variant.operation.kind == eok_indirect;
+  }
+
   enum class SpecFn { none, owns, reads, live, old_c, unsupported };
   static SpecFn spec_fn(a_routine_ptr r) {
     const std::string n = rname(r);
@@ -1803,10 +2096,13 @@ class Encoder {
 
   // `cerastes::owns(*p)`, `cerastes_owns(*p)`, `reads`, `live(p)` in a contract (decision 0037 item 5): an Atom of a pointer parameter.
   const Expr* spec_atom(an_expr_node_ptr e, SpecFn fn, const std::string& name, const std::vector<an_expr_node_ptr>& ops) {
-    // Decision 0038 item 10: a permission atom is a contract's; in a loop's invariant it is M4.5b1c3's, and a measure, `check` and `assert` hold none.
+    // Decision 0038 item 10, 0040 item 5: a permission atom is a contract's or a loop invariant's (not that of a `do ... while (0)`, which is no
+    // loop); a measure, `check` and `assert` hold none.
     if (!cx_.contract) {
+      if (cx_.loop_invariant && cx_.invariant_atoms_ok) return invariant_atom(e, fn, name, ops);
       if (cx_.loop_invariant)
-        reject(Diag::unsupported_annotation, e->position, "\"" + name + "\" in a loop invariant (owns, reads or live in an invariant: M4.5b1c3)");
+        reject(Diag::unsupported_annotation, e->position,
+               "\"" + name + "\" in the invariant of a `do ... while (0)` (straight-line code, asserted once like a `check`; never lifted, decision 0038 item 2, 0040 item 5)");
       else
         reject(Diag::unsupported_annotation, e->position, "\"" + name + "\" in a loop's termination measure (a measure holds no permission atom, decision 0038 item 10)");
       return nullptr;
@@ -1842,6 +2138,11 @@ class Encoder {
         return nullptr;
       }
     }
+    if (pn != nullptr && pn->kind == enk_operation && pn->variant.operation.kind == eok_indirect) {
+      reject(Diag::unsupported_annotation, e->position,
+             "\"" + name + "\" of a place reached through a heap read (`owns(**pp)`, `live(*pp)`: M4.5c, decision 0040 item 6)");
+      return nullptr;
+    }
     if (pn == nullptr || pn->kind != enk_param_ref) {
       reject(Diag::unsupported_annotation, e->position,
              "\"" + name + "\" of something other than a pointer parameter (a local, a global: M4.5b2; the result: M4.5d2)");
@@ -1855,10 +2156,108 @@ class Encoder {
                  (pf->kind == Expr::Kind::Result ? " (an atom on `*result`, an owning result: M4.5d2)" : ""));
       return nullptr;
     }
+    if (fn == SpecFn::owns && pn->type != nullptr) {  // decision 0040 item 2 (re-audit of B1): a contract may not give write permission to a const place
+      a_type_ptr pt = skip_typerefs(pn->type);
+      if (pt != nullptr && pt->kind == tk_pointer && pt->variant.pointer.type != nullptr &&
+          (f_get_type_qualifiers(pt->variant.pointer.type, TRUE) & TQ_CONST) != 0) {
+        reject(Diag::unsupported_annotation, e->position,
+               "\"" + name + "\" of a `const` place (a function that only reads `*p` takes `reads(*p)`, decision 0040 item 2)");
+        return nullptr;
+      }
+    }
     const vir::AtomKind kind = fn == SpecFn::owns ? vir::AtomKind::Owns : fn == SpecFn::reads ? vir::AtomKind::Reads : vir::AtomKind::Live;
     const Expr* atom = b_.atom(kind, pf, -1, loc_of(e->position));
     atom_pos_[atom] = e->position;
     return atom;
+  }
+
+  // `cerastes::owns(*q)`, `reads(*q)`, `live(q)` in the `invariant` of a loop (decision 0040 item 5): an Atom of a pointer variable (a local or a
+  // parameter's copy, a cell included), read at the start of each iteration.  The positions are checked by check_program (vir::loop_atoms).
+  const Expr* invariant_atom(an_expr_node_ptr e, SpecFn fn, const std::string& name, const std::vector<an_expr_node_ptr>& ops) {
+    if (ops.size() != 2) {
+      reject(Diag::unsupported_annotation, e->position, "\"" + name + "\" with other than one argument");
+      return nullptr;
+    }
+    an_expr_node_ptr a = peel_place(ops[1]);
+    an_expr_node_ptr pn = nullptr;  // the pointer variable
+    if (fn == SpecFn::live) {
+      pn = a;
+    } else if (a != nullptr && a->kind == enk_operation && a->variant.operation.kind == eok_indirect && a->variant.operation.operands != nullptr &&
+               a->variant.operation.operands->next == nullptr) {
+      pn = peel_place(a->variant.operation.operands);
+    } else {
+      reject(Diag::unsupported_annotation, e->position,
+             "\"" + name + "\" of a place other than `*q` of a pointer variable (a local, a global, a member or an element: M4.5b2, M4.5c, M4.5e1)");
+      return nullptr;
+    }
+    if (pn != nullptr && pn->kind == enk_operation && pn->variant.operation.kind == eok_indirect) {
+      reject(Diag::unsupported_annotation, e->position,
+             "\"" + name + "\" of a place reached through a heap read (`owns(**pp)`, `live(*pp)`: M4.5c, decision 0040 item 6)");
+      return nullptr;
+    }
+    if (pn == nullptr || pn->kind != enk_variable) {
+      reject(Diag::unsupported_annotation, e->position, "\"" + name + "\" of something other than a pointer variable");
+      return nullptr;
+    }
+    const Expr* q = expr(pn);
+    if (q == nullptr) return nullptr;
+    if (q->kind != Expr::Kind::Local || !q->type.is_ptr()) {
+      reject(Diag::unsupported_annotation, e->position, "\"" + name + "\" of something other than a pointer variable");
+      return nullptr;
+    }
+    if (q->var != nullptr && q->var->address_taken) {  // audit B4: its value is a read of the heap, so the place is reached through a heap read
+      reject(Diag::unsupported_annotation, e->position,
+             "\"" + name + "\" of a pointer variable whose address is taken (a place reached through a heap read: M4.5c, decision 0040 item 6)");
+      return nullptr;
+    }
+    const vir::AtomKind kind = fn == SpecFn::owns ? vir::AtomKind::Owns : fn == SpecFn::reads ? vir::AtomKind::Reads : vir::AtomKind::Live;
+    const Expr* atom = b_.atom(kind, q, -1, loc_of(e->position));
+    atom_pos_[atom] = e->position;
+    return atom;
+  }
+
+  // The atoms of a loop's invariant clauses stand in the positions decision 0037 item 5 allows, and no kind is written twice on one variable
+  // (decision 0040 item 5); check_program repeats both as a backstop.  False when it rejected something.
+  bool check_invariant_atoms(const std::vector<vir::Clause>& invariants) {
+    vir::Stmt tmp;
+    tmp.kind = vir::Stmt::Kind::While;
+    tmp.invariants = invariants;
+    std::set<const Expr*> all;
+    std::function<void(const Expr*)> collect = [&](const Expr* x) {
+      if (x == nullptr) return;
+      if (x->kind == Expr::Kind::Atom) all.insert(x);
+      for (const Expr* y : {x->a, x->b, x->c}) collect(y);
+      for (const Expr* y : x->args) collect(y);
+    };
+    for (const vir::Clause& c : invariants) collect(c.expr);
+    if (all.empty()) return true;
+    const std::vector<vir::AtomSite> sites = vir::loop_atoms(tmp);
+    std::set<const Expr*> placed;
+    for (const vir::AtomSite& st : sites) placed.insert(st.atom);
+    auto spelling = [](const Expr* atom) { return atom->atom == vir::AtomKind::Owns ? "owns" : atom->atom == vir::AtomKind::Reads ? "reads" : "live"; };
+    auto pos_of = [&](const Expr* atom) {
+      auto it = atom_pos_.find(atom);
+      return it != atom_pos_.end() ? it->second : cx_.stmt_pos;
+    };
+    bool ok = true;
+    for (const Expr* a : all)
+      if (placed.count(a) == 0) {
+        reject(Diag::unsupported_annotation, pos_of(a),
+               std::string("\"") + spelling(a) + "\" in this position (it may be a top-level conjunct, the right operand of `||` or an arm of `?:` "
+               "whose left operand or condition reads no heap: Viper cannot express it anywhere else)");
+        ok = false;
+      }
+    for (size_t k = 0; k < sites.size(); ++k)
+      for (size_t j = 0; j < k; ++j) {
+        const Expr& a = *sites[k].atom;
+        const Expr& b = *sites[j].atom;
+        if (a.atom == b.atom && a.a != nullptr && b.a != nullptr && a.a->kind == Expr::Kind::Local && b.a->kind == Expr::Kind::Local && a.a->var == b.a->var) {
+          reject(Diag::unsupported_annotation, pos_of(&a), std::string("\"") + spelling(&a) + "\" of the same pointer twice in the invariants of a loop");
+          ok = false;
+          break;
+        }
+      }
+    return ok;
   }
 
   // `cerastes_old(e)` of the C spelling (decision 0029 item 3, P53): `*(T *)cerastes_old_(&(e))`, the pointer being the place's address.  `ind` is the
@@ -1934,17 +2333,18 @@ class Encoder {
     }
     an_expr_node_ptr pn = peel_place(ops[0]);
     if (pn->kind != enk_param_ref) {
-      reject(Diag::unsupported_annotation, ind->position,
-             "a dereference in a contract of something other than a pointer parameter (a local, a global, a member, an element or the result: "
-             "M4.5b1c3, M4.5b2, M4.5c, M4.5e1)");
+      if (pn->kind == enk_operation && pn->variant.operation.kind == eok_indirect)
+        reject(Diag::unsupported_annotation, ind->position,
+               "a read of `**pp` in a contract (a place reached through a heap read: M4.5c, decision 0040 item 6)");
+      else
+        reject(Diag::unsupported_annotation, ind->position,
+               "a dereference in a contract of something other than a pointer parameter or the result (a local, a global, a member or an element: "
+               "M4.5b2, M4.5c, M4.5e1)");
       return nullptr;
     }
     const Expr* pf = param_reference(pn);
     if (pf == nullptr) return nullptr;
-    if (pf->kind == Expr::Kind::Result) {
-      reject(Diag::unsupported_expression, ind->position, "a dereference of the result in an `ensures` (M4.5b1c3: `*result` as a value; an owning result is M4.5d2)");
-      return nullptr;
-    }
+    // `*result` in an `ensures` is a value (decision 0040 item 4): `param_reference` refuses it under `old`.
     if (!pf->type.is_ptr()) {
       reject(Diag::unsupported_expression, ind->position, "a dereference of something that is not a pointer to a bool or an integer");
       return nullptr;
@@ -2016,6 +2416,24 @@ class Encoder {
     }
   }
 
+  // Whether pointee type `from` becomes `to` by adding qualifiers only, at every pointer level: the same types after peeling pointers, each level's
+  // qualifiers a superset of the source's.  `*below` is set when a level below the first (`level` > 0) gains a qualifier.
+  static bool qualifiers_only_added(a_type_ptr to, a_type_ptr from, int level, bool* below) {
+    if (to == nullptr || from == nullptr || level > 16) return false;
+    const a_type_qualifier_set tq = f_get_type_qualifiers(to, TRUE);
+    const a_type_qualifier_set fq = f_get_type_qualifiers(from, TRUE);
+    if ((fq & ~tq) != 0) return false;
+    if (level > 0 && tq != fq) *below = true;
+    a_type_ptr t = skip_typerefs(to);
+    a_type_ptr f = skip_typerefs(from);
+    if (t == nullptr || f == nullptr) return false;
+    const bool tp = t->kind == tk_pointer && !t->variant.pointer.is_reference;
+    const bool fp = f->kind == tk_pointer && !f->variant.pointer.is_reference;
+    if (tp != fp) return false;
+    if (tp) return qualifiers_only_added(t->variant.pointer.type, f->variant.pointer.type, level + 1, below);
+    return f_identical_types(to, from, ITF_IGNORE_TOP_LEVEL_QUALIFIERS) != 0;
+  }
+
   // A conversion node with a pointer operand or result (decision 0032 item 3): the allow-list is a null pointer constant becoming `T*`
   // (a folded constant never reaches here; a written `(int *)0` of an unfolded operand does) and a conversion that only adds
   // qualifiers to the pointee (`int *` to `const int *`).  Everything else, compiler-generated or written, is rejected.
@@ -2036,18 +2454,41 @@ class Encoder {
       a_type_ptr tp = skip_typerefs(e->type)->variant.pointer.type;
       a_type_ptr fp = skip_typerefs(operand->type)->variant.pointer.type;
       VType from;
-      if (tp != nullptr && fp != nullptr && value_type(operand->type, operand->position, &from, true) &&
-          f_identical_types(tp, fp, ITF_IGNORE_TOP_LEVEL_QUALIFIERS) != 0) {
-        const a_type_qualifier_set tq = f_get_type_qualifiers(tp, TRUE);
-        const a_type_qualifier_set fq = f_get_type_qualifiers(fp, TRUE);
-        if ((fq & ~tq) == 0) {
-          const Expr* x = expr(operand);
-          if (x == nullptr) return nullptr;
-          if (x->type != to.t) {
-            reject(Diag::unsupported_expression, e->position, "a conversion whose operand has another type than the IL says");
-            return nullptr;
+      if (tp != nullptr && fp != nullptr && value_type(operand->type, operand->position, &from, true)) {
+        // The rule for every pointer conversion, written or compiler-generated, in both modes (decision 0028 item 1, 0040 item 2, audit B2): the
+        // target's pointee is the source's with qualifiers added at its top level only.  A qualifier added below it (`int **` to `const int **`,
+        // to `const int *const *`) would let a cell of `int *` be reached as `const int *`: field names ignore const, so `*cpp = &c; *p = 2;`
+        // would verify (every compiler accepts the explicit cast).
+        if (f_identical_types(tp, fp, ITF_IGNORE_TOP_LEVEL_QUALIFIERS) != 0) {
+          const a_type_qualifier_set tq = f_get_type_qualifiers(tp, TRUE);
+          const a_type_qualifier_set fq = f_get_type_qualifiers(fp, TRUE);
+          if ((fq & ~tq) == 0) {
+            if (cx_.contract && tq != fq) {  // decision 0040 item 2 (re-audit of B1): a contract may not add or drop a pointee qualifier, in any conversion
+              reject(Diag::unsupported_expression, e->position,
+                     "a conversion in a contract that adds or drops a qualifier of the pointee (`int *` to `const int *`): the contract would equate a "
+                     "`const` object with a writable one (decision 0040 item 2)");
+              return nullptr;
+            }
+            const Expr* x = expr(operand);
+            if (x == nullptr) return nullptr;
+            if (x->type != to.t) {
+              reject(Diag::unsupported_expression, e->position, "a conversion whose operand has another type than the IL says");
+              return nullptr;
+            }
+            return x;  // the same VIR type: qualifiers are not part of it
           }
-          return x;  // the same VIR type: qualifiers are not part of it
+        }
+        bool below = false;
+        if (qualifiers_only_added(tp, fp, 0, &below) && below) {
+          if (il_header.source_language == sl_C)
+            reject(Diag::unsupported_expression, e->position,
+                   "a conversion that adds a qualifier below the pointee (`int **` to `const int *const *`, `const int **`), which C does not allow: GCC "
+                   "rejects it (-Wincompatible-pointer-types) and clang warns (decisions 0028 item 1, 0040 item 2)");
+          else
+            reject(Diag::unsupported_expression, e->position,
+                   "a conversion that adds a qualifier below the pointee (`int **` to `const int *const *`): C++'s multi-level qualification "
+                   "conversion is not supported yet (decisions 0028 item 1, 0040 item 2; an M8 entry)");
+          return nullptr;
         }
       }
     }
@@ -2172,10 +2613,6 @@ class Encoder {
       reject(Diag::unsupported_expression, e->position, "taking the address of a variable that is not a local of this function");
       return nullptr;
     }
-    if (it->second->type.is_ptr()) {
-      reject(Diag::unsupported_expression, e->position, "taking the address of a pointer variable (M4.5b1c3)");
-      return nullptr;
-    }
     if (cx_.declaring == v || cx_.pending.count(v) != 0) {
       reject(Diag::unsupported_declaration, v->source_corresp.decl_position, "a local variable used in its own initializer");
       return nullptr;
@@ -2205,6 +2642,11 @@ class Encoder {
       reject(Diag::unsupported_expression, e->position,
              e->is_lvalue ? "a dereference used as anything but a value or the target of an assignment"
                           : "a dereference in a contract, an invariant or a measure, or in an expression the compiler folded to a constant");
+      return nullptr;
+    }
+    if (cx_.loop_clause && is_indirect_node(peel_place(ops[0]))) {  // audit B4: `**pp` in an invariant or a measure is a place reached through a heap read
+      reject(Diag::unsupported_expression, e->position,
+             "a read of `**pp` in a loop invariant or measure (a place reached through a heap read: M4.5c, decision 0040 item 6)");
       return nullptr;
     }
     const Expr* a = expr(ops[0]);
@@ -2440,6 +2882,11 @@ class Encoder {
     // the function too (EDG keeps only the first declaration's position).  But the flag must be the user's: see
     // user_declared_noreturn.
     if (user_declared_noreturn(callee)) has_contract = true;
+    // An owning parameter is a contract (decision 0040 item 3: it stands for `p == NULL || owns(*p)` in both lists).
+    if (a_routine_type_supplement_ptr cx = routine_supplement(callee))
+      for (a_param_type_ptr p = cx->param_type_list; p != nullptr && !has_contract; p = p->next)
+        for (an_attribute_ptr at = p->attributes; at != nullptr; at = at->next)
+          if (classify(at) == Annot::owning) has_contract = true;
     if (!has_contract) {
       reject(Diag::call_without_contract, at, rname(callee));
       return nullptr;
@@ -2480,7 +2927,7 @@ class Encoder {
   // The `invariant` and `decreases` clauses written before a loop.  A loop without a measure is rejected (0013 item 3).
   // `require_measure` is false only for `do ... while (0)` (0014 item 5).
   bool encode_loop_clauses(a_statement_ptr s, std::vector<vir::Clause>& invariants, std::vector<vir::Clause>& measure,
-                           bool require_measure = true) {
+                           bool require_measure = true, bool atoms_ok = true) {
     bool ok = true;
     bool has_decreases = false;
     for (an_attribute_ptr a = s->attributes; a != nullptr; a = a->next) {
@@ -2517,10 +2964,12 @@ class Encoder {
       cx_.annotation = true;
       cx_.loop_clause = true;  // decision 0038 item 6: cells by name, `*q`, `&x`, pointer `==`/`!=` and NULL are allowed
       cx_.loop_invariant = true;
+      cx_.invariant_atoms_ok = atoms_ok;
       truth_context(arg);  // decision 0023 item 5: `invariant(x | 4)`
       const Expr* c = clause_bool(expr(arg), arg->position);
       const SrcLoc clause_loc = loc_of(a->position);
       cx_.loop_invariant = false;
+      cx_.invariant_atoms_ok = false;
       cx_.loop_clause = false;
       cx_.annotation = false;
       if (c == nullptr) {
@@ -2529,6 +2978,9 @@ class Encoder {
       }
       invariants.push_back(vir::Clause{c, clause_loc});
     }
+    cx_.annotation = true;  // positions of the arguments of a CERASTES_* macro are the user's own (decision 0006 item 10)
+    if (!check_invariant_atoms(invariants)) ok = false;
+    cx_.annotation = false;
     if (!has_decreases && require_measure) {
       reject_at(Diag::missing_decreases, loop_keyword_position(s),
                 "this loop has no termination measure: write CERASTES_DECREASES(...) before it");
@@ -2588,9 +3040,8 @@ class Encoder {
       vir::Var* var = cx_.fn->new_local(nm ? nm : "", vt.t, loc_of(at));
       var->c_type_name = vt.name;
       cx_.vars[v] = var;
-      // Decision 0032 item 4: a local the front end flags `address_taken` is a cell.  A pointer local never is: its address is rejected at
-      // the `&`, so it stays a Viper local here.
-      if (v->address_taken && !vt.t.is_ptr()) cx_.fn->mark_address_taken(var);
+      // Decision 0032 item 4: a local the front end flags `address_taken` is a cell, a pointer local included (decision 0040 item 2).
+      if (v->address_taken) cx_.fn->mark_address_taken(var);
       if (v->init_kind == initk_none) {
         // initk_none and no `stmk_init` statement (P28): the declaration alone, with no initializer expression.
         out.push_back(b_.decl(var, nullptr, loc_of(at)));
@@ -3943,7 +4394,7 @@ class Encoder {
         // ... unless the condition names a variable or parameter (0017 item 7): then it is a measured loop in both modes.
         const bool once = is_zero_constant(s->expr) && !names_object(s->expr);
         std::vector<vir::Clause> inv, measure;
-        const bool inv_ok = encode_loop_clauses(s, inv, measure, !once);
+        const bool inv_ok = encode_loop_clauses(s, inv, measure, !once, /*atoms_ok=*/!once);
         check_condition(s->expr);
         const Expr* c = as_bool(expr(s->expr), s->expr->position);
         const int id = b_.jump_id();
@@ -4083,9 +4534,9 @@ class Encoder {
     for (a_variable_ptr p = sp->variant.routine.parameters; p != nullptr; p = p->next, ++k) {
       if (static_cast<size_t>(k) >= f->params.size()) break;
       cx_.vars[p] = const_cast<vir::Var*>(f->param_var(k));
-      // Decision 0037 item 4: a parameter whose address is taken is a cell (copied into a one-slot block at entry); a pointer's address is
-      // refused where it is taken.
-      if (p->address_taken && !f->param_var(k)->type.is_ptr()) f->mark_address_taken(f->param_var(k));
+      // Decision 0037 item 4: a parameter whose address is taken is a cell (copied into a one-slot block at entry), a pointer parameter
+      // included (decision 0040 item 2).
+      if (p->address_taken) f->mark_address_taken(f->param_var(k));
       check_attributes(p->source_corresp.attributes);
     }
     if (static_cast<size_t>(k) != f->params.size()) {
@@ -5520,6 +5971,7 @@ void Encoder::declaration_level_checks(const IlEntities& ents) {
 
 void Encoder::run(const IlEntities& ents) {
   prog_.set_c_int_bits(static_cast<int>(targ_sizeof_int) * static_cast<int>(targ_char_bit));
+  ents_ = &ents;
   declaration_level_checks(ents);
   encode_named_constants(ents);
 

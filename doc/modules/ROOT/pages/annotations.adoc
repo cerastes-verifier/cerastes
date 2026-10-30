@@ -259,6 +259,18 @@ It is reported at the specialization. Write the specialization at namespace scop
 include::example$annotations/errors/in_class_specialization.cpp[tag=bad]
 ----
 
+=== Owning parameters
+
+The attribute `cerastes::owning` on a pointer parameter, before its declaration or after
+its name (`CERASTES_OWNING` is the macro form), is the contract
+`p == NULL || owns(*p)` in both the `requires` and the `ensures`: the function
+may be given a null pointer, and otherwise owns the object and gives it back
+(xref:memory.adoc#contracts[Memory and ownership]). Every declaration of the
+function must carry the same `owning` attributes; one that differs is
+`annotation_mismatch`. The attribute applies only to parameters (elsewhere the
+front end reports that it does not apply), and only to pointers to objects
+that are not `const`; `owning(n)` is not supported yet.
+
 === Members, constructors and destructors
 
 In a member function, `this` and the members declared before the function are
@@ -507,9 +519,11 @@ declares the C spellings `cerastes_owns`, `cerastes_reads`, `cerastes_live` and
 appear in a contract as a conjunct, after `p == NULL ||`, or as an arm of `?:`
 whose condition does not read memory. One parameter may be owned on one path and
 read on another (`c ? owns(*p) : reads(*p)`), never both on one path, and an
-`ensures` gives back only what its `requires` took on the same path. `cerastes verify` does not accept
-`owns_range` and `forall` yet, nor `owns`, `reads` and `live` in a loop invariant
-or a measure.
+`ensures` gives back only what its `requires` took on the same path. In a loop
+invariant they may name any pointer variable whose own address is not taken
+(xref:memory.adoc#loops[Loops]). `cerastes verify` does not accept `owns_range`
+and `forall` yet, nor `owns`, `reads` and `live` in a measure or in a
+`do … while (0)` invariant.
 
 [source,cpp]
 ----
@@ -836,7 +850,8 @@ include::example$annotations/errors/old_in_pure.cpp[tag=bad]
 
 === Declarations that disagree
 
-A later declaration with a different contract is `attr_redeclaration_mismatch`:
+A later declaration with a different contract is `attr_redeclaration_mismatch`
+(and one whose `owning` parameters differ, `annotation_mismatch`):
 
 [source,cpp]
 ----

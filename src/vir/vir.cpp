@@ -610,20 +610,30 @@ std::vector<AtomSite> contract_atoms(const Function& f) {
   return out;
 }
 
+std::vector<AtomSite> loop_atoms(const Stmt& s) {
+  std::vector<AtomSite> out;
+  if (s.kind != Stmt::Kind::While || s.form == LoopForm::DoOnce) return out;
+  for (size_t k = 0; k < s.invariants.size(); ++k) AtomCollector(out, false, static_cast<int>(k)).walk(s.invariants[k].expr);
+  return out;
+}
+
+GuardShape atom_guard_shape(const AtomSite& s, int q) {
+  if (s.guards.empty()) return GuardShape::None;
+  if (s.guards.size() != 1 || s.guards[0].holds) return GuardShape::Other;
+  const Expr* c = s.guards[0].cond;
+  // The condition is `q == NULL` as the encoder builds it in either language: C wraps the comparison's value in `bool_to_int`/`to_bool`.
+  while (c != nullptr && (c->kind == Expr::Kind::ToBool || c->kind == Expr::Kind::BoolToInt)) c = c->a;
+  if (c == nullptr || c->kind != Expr::Kind::Binary || c->bop != BinaryOp::Eq) return GuardShape::Other;
+  const Expr* l = c->a;
+  const Expr* r = c->b;
+  if (l != nullptr && l->kind == Expr::Kind::Null) std::swap(l, r);
+  return l != nullptr && r != nullptr && l->kind == Expr::Kind::Formal && l->index == q && r->kind == Expr::Kind::Null ? GuardShape::NullCheck
+                                                                                                                       : GuardShape::Other;
+}
+
 bool restrict_backed(const Function& f, int param, int* offender) {
   // The site's guard is none, or exactly `q == NULL` being false.
-  auto null_guard = [&](const AtomSite& s, int q) {
-    if (s.guards.empty()) return true;
-    if (s.guards.size() != 1 || s.guards[0].holds) return false;
-    const Expr* c = s.guards[0].cond;
-    // The condition is `q == NULL` as the encoder builds it in either language: C wraps the comparison's value in `bool_to_int`/`to_bool`.
-    while (c != nullptr && (c->kind == Expr::Kind::ToBool || c->kind == Expr::Kind::BoolToInt)) c = c->a;
-    if (c == nullptr || c->kind != Expr::Kind::Binary || c->bop != BinaryOp::Eq) return false;
-    const Expr* l = c->a;
-    const Expr* r = c->b;
-    if (l != nullptr && l->kind == Expr::Kind::Null) std::swap(l, r);
-    return l != nullptr && r != nullptr && l->kind == Expr::Kind::Formal && l->index == q && r->kind == Expr::Kind::Null;
-  };
+  auto null_guard = [&](const AtomSite& s, int q) { return atom_guard_shape(s, q) != GuardShape::Other; };
   if (offender != nullptr) *offender = -1;
   const std::vector<AtomSite> sites = contract_atoms(f);
   bool own = false;

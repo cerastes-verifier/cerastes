@@ -413,6 +413,24 @@ g_partner)` (nothing when the partner is unconditional or has the same guard); a
 `explicit_termination` reads the callee's measure in the current heap and the caller's under `old(…)`. A full
 expression with none of these lowers exactly as before.
 
+**Pointers to pointers, `*result` and written atoms (M4.5b1c3, decision 0040).** A cell's field suffix recurses through
+pointer types (`cell_suffix`: `ptr_int`, `ptr_ptr_int`; `fkey`, `use_cell_type` and `ltype` alike), so an address-taken
+pointer variable is a cell with `field v_ptr_<t>: Ref`, its flag and an `alloc_ptr_<t>` method; `WF` takes the place of
+the range wherever a cell's range is emitted (`cell_range`, `cell_range_inv`, an atom's value rows, the `__wf` ghost
+`requires`), and the dummies of chains and snapshots are `null`. A store of a pointer into a cell asserts `WF` of the
+value (`internal`) after the value's liveness check. Every pointer loaded from a cell is a snapshot temporary followed
+by `result_splits`' case splits against the cells in scope, the parameter places and the enclosing loops' written-atom
+places of its pointee's field (0040 item 2, audit B1). `contract_read` accepts the place `Result` (ghost key `-1`,
+`hv_r_post`), and `wf_method` adds its `WF` or range, its equalities with the parameter ghosts of its field, and `g_r &&
+g_e && result == q ==> h_result == h_q_pre` for a `reads` place returned by its partner. Written atoms in a loop's
+invariants come from `vir::loop_atoms` as `WAtom`s with their own ghost amounts: the rows of 0040 item 5 follow the
+automatic conjuncts (`NV`, `NL` with the automatic places' guards and the guarded de-duplication; positivity; flag and
+range for `reads` too; value rows when the loop assigns neither `q` nor anything reaching the field); entry and
+back-edge checks, the separation of every pair with an `owns`, and case splits before the snapshots, at the top of the
+body, after the loop and after `l_brk`. Each atom is also a framing `Place` of `inv_places_` with guard `g && q == r &&
+a_v > none`, and an `Atom` node in `CMode::Inv` lowers to `true` (its meaning is in those rows). 0037 item 8's per-call
+splits also run against the enclosing loops' written `reads` places.
+
 ## 4. Viper shape
 
 ```
@@ -677,6 +695,20 @@ local or `*e` anywhere an assignment may stand: `assignment_value` builds an `As
 `return_local_address` when the returned value, through parentheses, explicit pointer casts, either arm of `?:`, the
 right operand of `,` and `&*`, is `&x` of an automatic local or a parameter; and a dereference in a function's
 `decreases`, lvalue-flagged at the top of the measure (P60 C3), is read like a contract's.
+Since M4.5b1c3 (0040) `vtype` recurses into pointer pointees (`void *`, struct, union and function pointees, and
+`volatile`, `_Atomic` and `restrict` below the top, stay rejected), pointer variables and parameters may be
+address-taken cells, and `pointer_conversion` accepts a conversion only when the target's pointee is the source's with
+qualifiers added at its top level (`qualifiers_only_added` only chooses the message: GCC's `-Wincompatible-pointer-types`
+in C, C++'s multi-level qualification conversion in C++); the driver makes #144 and #167 errors in both modes.
+`contract_read` accepts `*r` of the result binder in an `ensures` (`old(*r)` rejected); `owns(**pp)`, `live(*pp)` and
+`**pp` reads in contracts, invariants and measures are rejected naming M4.5c. `spec_atom`/`invariant_atom` accept atoms
+in a loop's invariants (not in a `do … while (0)` invariant or a measure) on a pointer variable that is not a cell, and
+`check_invariant_atoms` checks their positions. `read_owning` collects `[[cerastes::owning]]` from every declaration's
+parameter types (the definition's `assoc_param_type`, a typedef'd function type merged by the front end), matches the
+declarations (`annotation_mismatch`) and rejects the other shapes; `apply_owning` inserts `p == NULL || owns(*p)` first
+in `requires_` and `ensures_`, merged with an explicit `owns(*p)` or `p == NULL || owns(*p)`, before `restrict_backed`
+runs; an owning parameter counts as a contract in `callee_for_call`. `Sequencer::object_of` keys each depth of `*…*v`
+of one pointer variable as its own object (P62 A8).
 
 **Statements.** Allow-list: blocks (compiler-generated blocks are flattened, so a `for` initialization stays in
 scope), declarations with their `stmk_init`, expression statements (assignment, compound assignment and `++`/`--` of

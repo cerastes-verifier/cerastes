@@ -15,7 +15,8 @@
 // Tampering with the macros of this header is not supported.
 //
 // Write CERASTES_PREDICATE and CERASTES_PURE first in the declaration, before
-// `static`, `constexpr` and the return type.
+// `static`, `constexpr` and the return type.  CERASTES_OWNING marks a pointer parameter: the function owns its
+// pointee unless the pointer is null (decision 0040 item 3).  Write it before the parameter's type or after its name.
 #ifndef CERASTES_H
 #define CERASTES_H
 
@@ -46,6 +47,7 @@
 #  define CERASTES_UNFOLD(...)    [[cerastes::unfold(__VA_ARGS__)]]
 #  define CERASTES_PREDICATE      [[cerastes::predicate]] inline
 #  define CERASTES_PURE           [[cerastes::pure]] inline
+#  define CERASTES_OWNING         [[cerastes::owning]]
 #else
 #  define CERASTES_REQUIRES(...)
 #  define CERASTES_ENSURES(...)
@@ -56,6 +58,7 @@
 #  define CERASTES_UNFOLD(...)
 #  define CERASTES_PREDICATE      inline
 #  define CERASTES_PURE           inline
+#  define CERASTES_OWNING
 #endif
 
 // The C spellings of the specification functions (decisions 0029 item 3, 0037 item 5), declared in C and in C++ alike so that a header shared
