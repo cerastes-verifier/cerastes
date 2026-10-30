@@ -413,15 +413,18 @@ right is missing:
   for (`owns(*p)`, `reads(*p)`, `live(p)`), or passes one object to two
   parameters of which one owns it;
 * at a `return`, when the function does not hold what its `ensures` promises;
-* at a contract clause that reads `*p` where no `owns` or `reads` of `*p`
-  comes before it, at a contract that both owns and reads `*p` on one path, at
+* at a contract clause that reads `*p` (or `*r`, the object a pointer result
+  points to) where no `owns` or `reads` of that object comes before it, at a contract that both owns and reads `*p` on one path, at
   an `ensures` that gives back `*p` on a path where the `requires` did not take
   it, and at a termination measure that reads `*p` without owning it
   (xref:memory.adoc#contracts[Memory and ownership]);
 * at the closing brace of a loop's body, when an iteration ends without an
   object the loop started with (a function called in the loop kept it), and at
   a loop invariant or measure that reads an object the loop does not hold
-  (xref:memory.adoc#loops[Memory and ownership]).
+  (xref:memory.adoc#loops[Memory and ownership]);
+* at a loop invariant's `owns`, `reads` or `live` when the loop starts without
+  what it names, or when two of its `owns` may name one object, and at the
+  closing brace of the loop's body when an iteration ends without it.
 
 A local variable exists only until its block ends; a pointer to it is then
 *dangling*, and reading or writing through it is undefined behaviour in C and

@@ -6,6 +6,7 @@
 // so that there is one answer.
 #pragma once
 
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -73,6 +74,14 @@ struct IlEntities {
   // Decision 0025 item 5: the static assertions each function memory region holds (block scope), with the region's number, in
   // region order and then in the walk's order.
   std::vector<std::pair<a_memory_region_number, a_static_assertion_ptr>> region_static_assertions;
+  // The declarations of a routine other than the one `source_corresp.decl_position` names (a_src_seq_secondary_decl entries whose entity is the routine, il_def.h:2131), in the
+  // order the walk reports them; its first declaration is `source_corresp.decl_position`.  Decision 0040 item 3: where each declaration's parameters
+  // lie, to check that every declaration of a parameter carries the same `cerastes::owning`.
+  struct SecondaryDecl {
+    a_source_position position;
+    a_type_ptr declared_type = nullptr;  // the type as the declaration wrote it (a typedef'd function type stays a typeref)
+  };
+  std::map<a_routine_ptr, std::vector<SecondaryDecl>> secondary_decls;
 };
 IlEntities collect_entities();
 

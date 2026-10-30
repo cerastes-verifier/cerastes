@@ -89,6 +89,11 @@ void collect_entry(char* entry, an_il_entry_kind kind) {
       break;
     }
     case iek_type: g_collect_out->types.push_back(reinterpret_cast<a_type_ptr>(entry)); break;
+    case iek_src_seq_secondary_decl: {
+      auto sd = reinterpret_cast<a_src_seq_secondary_decl_ptr>(entry);
+      if (sd->entity.kind == iek_routine) g_collect_out->secondary_decls[reinterpret_cast<a_routine_ptr>(sd->entity.ptr)].push_back({sd->decl_position, sd->declared_type});
+      break;
+    }
     case iek_asm_entry: {
       auto a = reinterpret_cast<an_asm_entry_ptr>(entry);
       // Only those the file-scope walk reports: an asm statement of a body is in a routine's memory region.

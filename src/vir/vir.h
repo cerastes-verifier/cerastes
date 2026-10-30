@@ -58,9 +58,10 @@ struct IntType {
 };
 
 struct Type {
-  // Ptr (decisions 0032 item 2, 0037 items 2-3): a pointer to `pointee`.  Accepted by check_program for a local variable that is not
-  // itself address-taken, for an expression, for a parameter and for a result, with a Bool or Int pointee (an enumeration included);
-  // every other pointer type (a pointee that is a pointer, void or a struct) is built as is and rejected there (M4.5b1c3 and later).
+  // Ptr (decisions 0032 item 2, 0037 items 2-3, 0040 item 2): a pointer to `pointee`.  Accepted by check_program for a local variable
+  // (address-taken or not), for an expression, for a parameter and for a result, when the pointee is a Bool or Int (an enumeration included)
+  // or itself an accepted pointer, at any depth (`int **`, `int ***`: a pointer variable whose address is taken is a cell of a pointer
+  // type).  Every other pointer type (a pointee that is void or a struct, at any level) is built as is and rejected there (M4.5c and later).
   enum class Kind { Void, Bool, Int, Ptr };
   Kind kind = Kind::Void;
   const IntType* int_type = nullptr;  // Kind::Int only; owned by the Program
@@ -140,17 +141,22 @@ struct Expr {
                  // check_program refuses anything else).  A pointer value: no obligation of its own.
     Deref,       // `*a` used as a READ (a: a Ptr; type = the pointee).  Obligations: the null check, the permission check and the flag
                  // (decision 0032 item 6).  A write through a pointer is the statement Stmt::Store, never a Deref.
-                 // In a CONTRACT (decision 0037 item 5; Ctx::Requires/Ensures): `a` is a `Formal` of pointer type and nothing else (a place other
-                 // than `*param` is rejected, M4.5b1c3 and later).  In a `requires` it reads the cell's value on entry, in an `ensures` its value on
-                 // return, and `Old(Deref(Formal p))` its value on entry; lowering frames each read per path (item 7).
+                 // In a CONTRACT (decision 0037 item 5; Ctx::Requires/Ensures): `a` is a `Formal` of pointer type or, in an `ensures`, the `Result`
+                 // of a function returning a pointer (decision 0040 item 4: `*result` as a value), and nothing else (`**pp`, a local, a global,
+                 // a member: rejected, M4.5c and later).  In a `requires` it reads the cell's value on entry, in an `ensures` its value on
+                 // return, and `Old(Deref(Formal p))` its value on entry; `Old(Deref(Result))` is a check_program error (the result has no value on
+                 // entry).  Lowering frames each read per path (item 7), keyed by the place `p` or `result`.  The value of `*pp` of a `T **`
+                 // parameter is a pointer (a Ptr-typed Deref).
     // ---- permissions in contracts (decision 0037 item 5; appended) ----
     Atom,        // `atom` of the pointer `a` (a Ptr `Formal`: the parameter whose pointee is meant; in an `ensures` its entry value), a Bool;
-                 // contracts only, never inside `Old` (decision 0038 item 10: an atom in a loop invariant, a measure, a `check` or code is a
-                 // check_program error).  Owns: `owns(*p)`, Reads: `reads(*p)` (a Bool/Int pointee), Live: `live(p)`.  `amount`
+                 // in a contract, never inside `Old`; and, from decision 0040 item 5, in the `invariant` clauses of a `While` or `DoWhile` loop,
+                 // where `a` is a `Local` of pointer type (a pointer variable, read at each iteration's start; see loop_atoms).  A measure, a
+                 // `check`, code and the invariant of a `DoOnce` loop hold none (check_program errors).
+                 // Owns: `owns(*p)`, Reads: `reads(*p)` (a pointee that is a Bool, an Int or a pointer), Live: `live(p)`.  `amount`
                  // names its ghost permission amount (item 6): the atoms of the `requires`, in evaluation order (contract_atoms), are
                  // numbered 0, 1, ...; an atom of an `ensures` carries the number of the `requires` atom it returns (the same kind and the
-                 // same parameter, each partner at most once).  Positions (item 5): contract_atoms collects exactly the allowed ones; any
-                 // other Atom is a check_program error.
+                 // same parameter, each partner at most once).  An invariant atom's `amount` is unused (-1; lowering numbers its own).
+                 // Positions (item 5): contract_atoms and loop_atoms collect exactly the allowed ones; any other Atom is a check_program error.
     // ---- a write through a pointer used as a value (decision 0039 item 2; appended) ----
     StoreE       // `*c := a` as a value: `c` is the address (a Ptr), `a` the stored value (already of the pointee's type); the value of the
                  // node is `a` (the new value, `type` = the pointee's type), or, when `yields_old`, the old value `b` (`(*p)++`, `(*p)--`).
@@ -267,9 +273,10 @@ struct Var {
   int param_index = -1;        // for a parameter copy
   // The program takes this variable's address (EDG's `address_taken`, decision 0032 item 4): the variable is a CELL, an object in a
   // one-slot block that a pointer may reach.  Set with Function::mark_address_taken.  Assign, Decl and AssignE of it keep their kinds (the
-  // lowering dispatches on the flag; an AssignE of a cell is accepted from decision 0039 item 2), and check_program refuses it on a pointer variable
-  // (M4.5b1c3).  On a PARAMETER COPY (decision 0037 item 4) the flag is accepted (a scalar parameter): the copy is allocated as a
-  // one-slot block at entry and holds the formal's value; the body's scope exit releases it; contracts keep reading the Formal.
+  // lowering dispatches on the flag; an AssignE of a cell is accepted from decision 0039 item 2).  A pointer variable may be a cell too
+  // (decision 0040 item 2: its field is the pointer-typed `v_ptr_...`).  On a PARAMETER COPY (decision 0037 item 4) the flag is accepted
+  // (a scalar or a pointer parameter): the copy is allocated as a one-slot block at entry and holds the formal's value; the body's scope exit
+  // releases it; contracts keep reading the Formal.
   bool address_taken = false;
 };
 
@@ -462,6 +469,16 @@ struct AtomSite {
 // operand first; the arms of `?:` then-arm first).  An Atom in a position the record forbids (under `!`, inside `==`, as an argument, on
 // the left of `||`, under `Old`, ...) is not listed: check_program reports it.  The k-th `requires` site's `amount` is k.
 std::vector<AtomSite> contract_atoms(const Function& f);
+// The atoms of the `invariant` clauses of loop `s` (a `While` statement) in the positions of decision 0037 item 5 (decision 0040 item 5): in
+// clause order, each clause in evaluation order, with the same guards (their `cond`s read no heap and mention Locals, constants and
+// the like).  `AtomSite::clause` is the index in `s.invariants`, `in_ensures` is false, `atom->amount` is -1.  An atom of an invariant elsewhere
+// (under `!`, as an argument, ...) is not listed: check_program reports it.  Empty for a loop of form DoOnce (check_program refuses its atoms).
+std::vector<AtomSite> loop_atoms(const Stmt& s);
+// The shape of a site's guards for pointer parameter `param`: none (the atom is a top-level conjunct, or an arm of `&&`), exactly `param == NULL` being false
+// (`param == NULL || atom`, with C's `bool_to_int`/`to_bool` wrapping of the comparison accepted), or anything else.  restrict_backed and the encoder's
+// merge of `[[cerastes::owning]]` with an explicit atom (decision 0040 item 3) read it.
+enum class GuardShape { None, NullCheck, Other };
+GuardShape atom_guard_shape(const AtomSite& s, int param);
 // The number of ghost amounts of `f` (the atoms of its `requires`).
 int requires_atom_count(const Function& f);
 // Whether `f`'s contract backs `restrict` on parameter `param` (decision 0037 item 2): an `Owns` atom of that parameter in the `requires`, the `Owns`

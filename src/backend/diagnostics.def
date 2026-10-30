@@ -97,6 +97,10 @@ CERASTES_DIAG(unsupported_type, error,
 // A permission atom or a place the memory model does not read yet (decision 0037 items 5 and 15); the message says which session lifts it.
 CERASTES_DIAG(unsupported_annotation, error,
               "%s is not supported by \"cerastes verify\" (decision 0037)")
+// A parameter's `[[cerastes::owning]]` that one declaration of a function has and another does not (decision 0040 item 3); the arguments are the
+// function, the parameter and where the other declaration is.
+CERASTES_DIAG(annotation_mismatch, error,
+              "the declarations of \"%s\" disagree about \"cerastes::owning\" on parameter %s: %s")
 CERASTES_DIAG(unsupported_attribute, error,
               "the attribute %s is not supported by \"cerastes verify\": it can change what the code means "
               "(decision 0011 item 7)")

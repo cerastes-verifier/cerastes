@@ -413,12 +413,6 @@ void define_memory_rejections() {
   auto N = [](Kit& k, const char* v) { return k.num(k.i32, v); };
 
   // ---- item 2: pointer types ----
-  rc("mem_rej_pointer_to_pointer", "a pointer to a pointer", [=](Kit& k) {
-    Function* f = k.fn("f", k.vd);
-    Var* pp = k.local(f, "pp", k.ptr(PT(k)));
-    f->body = k.blk({k.decl(pp, nullptr)});
-    k.done(f);
-  });
   rc("mem_rej_pointer_to_void", "a pointer to void", [=](Kit& k) {
     Function* f = k.fn("f", k.vd);
     Var* v = k.local(f, "v", k.ptr(k.vd));
@@ -444,13 +438,6 @@ void define_memory_rejections() {
   });
 
   // ---- item 4: addresses ----
-  rc("mem_rej_address_of_pointer_variable", "the address of the pointer variable", [=](Kit& k) {
-    Function* f = k.fn("f", k.vd);
-    Var* p = k.local(f, "p", PT(k));
-    f->mark_address_taken(p);
-    f->body = k.blk({k.decl(p, k.nul(PT(k)))});
-    k.done(f);
-  });
   rc("mem_rej_address_of_unmarked_variable", "internal: the address of 'x', which is not marked address-taken", [=](Kit& k) {
     Function* f = k.fn("f", k.vd);
     Var* x = k.local(f, "x", k.i32);

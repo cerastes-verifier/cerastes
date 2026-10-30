@@ -175,16 +175,19 @@ class Checker {
     return t.is_int() && t.int_type != nullptr && t.int_type->bits >= 1 && t.int_type->bits <= 128;
   }
 
-  // A pointer type decision 0032 item 2 accepts (for a local that is not address-taken and for an expression): its pointee is a bool,
-  // an integer type or an enumeration.
-  static bool accepted_pointer(const Type& t) { return t.is_ptr() && t.pointee != nullptr && scalar_type(*t.pointee); }
+  // A pointer type decisions 0032 item 2 and 0040 item 2 accept: its innermost pointee is a bool, an integer type or an enumeration, through
+  // any number of pointer levels.
+  static bool accepted_pointer(const Type& t) {
+    if (!t.is_ptr() || t.pointee == nullptr) return false;
+    return t.pointee->is_ptr() ? accepted_pointer(*t.pointee) : scalar_type(*t.pointee);
+  }
 
   // Why a pointer type is not accepted (empty when it is, or when `t` is no pointer).
   static std::string pointer_reason(const Type& t) {
     if (!t.is_ptr() || accepted_pointer(t)) return "";
-    if (t.pointee != nullptr && t.pointee->is_ptr()) return "a pointer to a pointer (decision 0032 item 2)";
-    return "a pointer to " + (t.pointee != nullptr ? t.pointee->str() : std::string("an unknown type")) +
-           " (decision 0032 item 2)";
+    const Type* in = &t;
+    while (in->is_ptr() && in->pointee != nullptr) in = in->pointee;
+    return "a pointer to " + (in->is_ptr() ? std::string("an unknown type") : in->str()) + " (decisions 0032 item 2, 0040 item 2)";
   }
 
   // `allow_ptr`: a pointer type counts (locals and expressions); parameters, results, named constants and the like pass false.
@@ -221,11 +224,6 @@ class Checker {
       }
       if (f.params[k].is_restrict && !f.params[k].type.is_ptr())
         err(f.params[k].loc, "parameter " + std::to_string(k + 1) + " of '" + f.c_name + "' is `restrict` but not a pointer");
-    }
-    for (const auto& v : f.locals()) {
-      // A parameter's copy may be address-taken (decision 0037 item 4); a pointer variable's address is b1c3's (decision 0032 item 2).
-      if (v->address_taken && v->type.is_ptr())
-        err(v->loc, "the address of the pointer variable '" + v->name + "' is taken (decision 0032 item 2)");
     }
     if (!f.loc.known()) err(f.loc, "function '" + f.c_name + "' has no source position");
     if (!f.end_loc.known() && f.body != nullptr) err(f.loc, "function '" + f.c_name + "' has no closing-brace position");
@@ -394,6 +392,30 @@ class Checker {
                                  "' is `restrict` without `owns(*p)` in its `requires` and `ensures` (decision 0037 item 2)");
   }
 
+  // Decision 0040 item 5: the atoms of a loop's invariant stand in the allowed positions (the same rule as a contract's) and no kind is
+  // written twice on one variable.
+  void loop_atom_sites(const Stmt& s) {
+    std::set<const Expr*> all;
+    for (const Clause& c : s.invariants) collect_atoms(c.expr, all);
+    const std::vector<AtomSite> sites = loop_atoms(s);
+    std::set<const Expr*> placed;
+    for (const AtomSite& st : sites) placed.insert(st.atom);
+    if (s.form == LoopForm::DoOnce) return;  // refused one by one in expr()
+    for (const Expr* a : all)
+      if (placed.count(a) == 0)
+        err(a->loc, "a permission atom in a position decision 0037 item 5 does not allow (a top-level conjunct, the right of `||` or an arm of `?:` whose condition reads no heap)");
+    if (placed.size() != sites.size()) err(s.loc, "a permission atom of an invariant reachable twice");
+    for (size_t k = 0; k < sites.size(); ++k) {
+      const Expr& a = *sites[k].atom;
+      if (a.a == nullptr || a.a->kind != Expr::Kind::Local) continue;
+      for (size_t j = 0; j < k; ++j) {
+        const Expr& b = *sites[j].atom;
+        if (b.a != nullptr && b.a->kind == Expr::Kind::Local && b.atom == a.atom && b.a->var == a.a->var)
+          err(a.loc, "the same permission atom twice in the invariant of a loop (decision 0040 item 5)");
+      }
+    }
+  }
+
   void clause(const Clause& c, Ctx ctx, const char* what) {
     if (c.expr == nullptr) {
       err(c.loc, std::string("a ") + what + " clause without an expression");
@@ -514,11 +536,15 @@ class Checker {
           if (c.expr == nullptr) { err(c.loc, "an invariant without an expression"); continue; }
           if (!c.loc.known()) err(c.loc, "an invariant has no source position");
           // Decision 0038 item 6: an invariant may hold pointer nodes, cells by name, `&x` and `*q` (read like code, with the framing
-          // lowering gives them), so no_ptr_ stays false.  A permission atom is refused (the Atom case): M4.5b1c3.
+          // lowering gives them), so no_ptr_ stays false.  A permission atom is accepted in a loop's invariant (decision 0040 item 5), not in
+          // that of a `do ... while (0)`: it is asserted once like a `check`.
+          in_invariant_ = !once;
           expr(*c.expr, Ctx::Annot, false);
+          in_invariant_ = false;
           if (!c.expr->type.is_bool()) err(c.expr->loc, "an invariant is not a bool");
         }
         if (s.measure.empty() && !once) err(s.loc, "a loop without a termination measure (decreases, decision 0013)");
+        loop_atom_sites(s);
         for (const Clause& c : s.measure) measure(c, Ctx::Annot, "decreases", /*memory_ok=*/true);
         targets_.push_back(Target{s.jump_id, true});
         scoped(s.body);
@@ -753,7 +779,8 @@ class Checker {
       case Expr::Kind::AddrOf:
         if (e.var == nullptr || !owned(*e.var) || !visible(*e.var)) { err(e.loc, "the address of a variable that is not declared here"); break; }
         if (!e.var->address_taken) err(e.loc, "internal: the address of '" + e.var->name + "', which is not marked address-taken (decision 0032 item 4)");
-        if (!scalar_type(e.var->type)) err(e.loc, "the address of '" + e.var->name + "', whose type " + e.var->type.str() + " is not a bool or an integer");
+        if (!scalar_type(e.var->type) && !accepted_pointer(e.var->type))
+          err(e.loc, "the address of '" + e.var->name + "', whose type " + e.var->type.str() + " is not a bool, an integer or a pointer to one");
         else if (!e.type.is_ptr() || e.type.pointee == nullptr || *e.type.pointee != e.var->type) err(e.loc, "the address of '" + e.var->name + "' has the wrong type");
         break;
       case Expr::Kind::Deref:
@@ -765,22 +792,26 @@ class Checker {
         if (!sub(e.a)) break;
         if (!e.a->type.is_ptr()) err(e.loc, "a dereference of a " + e.a->type.str() + ", not a pointer");
         else if (e.a->type.pointee == nullptr || e.type != *e.a->type.pointee) err(e.loc, "a dereference whose type is not the pointee's");
-        if ((ctx == Ctx::Requires || ctx == Ctx::Ensures) && e.a->kind != Expr::Kind::Formal)
-          err(e.loc, "a dereference in a contract of something other than a pointer parameter (decision 0037 item 5)");
+        if ((ctx == Ctx::Requires || ctx == Ctx::Ensures) && e.a->kind != Expr::Kind::Formal && !(ctx == Ctx::Ensures && e.a->kind == Expr::Kind::Result))
+          err(e.loc, "a dereference in a contract of something other than a pointer parameter or, in an `ensures`, the result (decisions 0037 item 5, 0040 items 4 and 6)");
         break;
       case Expr::Kind::Atom:
         // Decision 0037 item 5: owns(*p), reads(*p) and live(p) of a pointer parameter p, in a contract, outside `old`.  Where it may
-        // stand and how it pairs with its partner is checked by `atoms`.  Decision 0038 item 10: an atom in a loop invariant (M4.5b1c3), a
-        // measure, a `check` or code is refused here, the backstop of the encoder's rejection.
-        if (ctx != Ctx::Requires && ctx != Ctx::Ensures) {
-          err(e.loc, "a permission atom outside a contract (decision 0038 item 10: in a loop invariant it is M4.5b1c3's)");
+        // stand and how it pairs with its partner is checked by `atoms`.  Decision 0040 item 5: the same of a pointer variable (a Local) in the
+        // invariant of a loop (not a `do ... while (0)`); `loop_atom_sites` checks the positions.  A measure, a `check` and code hold none
+        // (decision 0038 item 10): refused here, the backstop of the encoder's rejection.
+        if (ctx != Ctx::Requires && ctx != Ctx::Ensures && !(ctx == Ctx::Annot && in_invariant_)) {
+          err(e.loc, "a permission atom outside a contract and a loop invariant (decision 0038 item 10: a measure, a `check` and code hold none; a `do ... while (0)` invariant, never)");
           break;
         }
         if (old_depth_ > 0) { err(e.loc, "a permission atom under `old`"); break; }
         if (!e.type.is_bool()) err(e.loc, "a permission atom is not a bool");
         if (!sub(e.a)) break;
-        if (e.a->kind != Expr::Kind::Formal || !accepted_pointer(e.a->type))
-          err(e.loc, "a permission atom of something other than a pointer parameter (decision 0037 item 5)");
+        if (in_invariant_ ? e.a->kind != Expr::Kind::Local : e.a->kind != Expr::Kind::Formal)
+          err(e.loc, in_invariant_ ? "a permission atom of an invariant of something other than a pointer variable (decision 0040 item 5)"
+                                   : "a permission atom of something other than a pointer parameter (decision 0037 item 5)");
+        else if (!accepted_pointer(e.a->type))
+          err(e.loc, "a permission atom of something that is not a pointer to a bool, an integer or a pointer");
         break;
       case Expr::Kind::Convert:
         if (!sub(e.a)) break;
@@ -1012,6 +1043,7 @@ class Checker {
   const Function* fn_ = nullptr;
   std::set<int> declared_;
   std::set<const Expr*> seen_effects_;  // the AssignE, StoreE, Comma and Call nodes met in the current function (each may be reachable once)
+  bool in_invariant_ = false;  // checking a loop invariant clause: a permission atom of a pointer variable is accepted (decision 0040 item 5)
   std::set<const Expr*> shared_addrs_;  // the address nodes of the stores being checked: a compound store's Deref shares its address (0039 item 5)
   struct Target {
     int id;
@@ -1148,26 +1180,48 @@ class Sequencer {
   }
 
  private:
+  // An object key: a local's id (>= 0), or, for the place `*v`, `**v`, ... of a pointer variable `v` (decision 0039 item 3, 0040 A8: each depth is its
+  // own object), `-(id + 1) - stride * (depth - 1)`.
+  static constexpr int kDepthStride = 1 << 20;
+  static int deref_key(int var_id, int depth) { return -(var_id + 1) - kDepthStride * (depth - 1); }
+
   void report(const Expr* at, int var_id) {
     if (!reported_.insert({at, var_id}).second) return;
     const auto& ls = f_.locals();
-    const int id = var_id >= 0 ? var_id : -var_id - 1;  // `*v`: the pointer variable's id
+    int id = var_id;
+    int depth = 0;
+    if (var_id < 0) {  // `*v`, `**v`, ...: the pointer variable's id and the depth
+      const int m = -var_id - 1;
+      id = m % kDepthStride;
+      depth = m / kDepthStride + 1;
+    }
     std::string name = static_cast<size_t>(id) < ls.size() ? ls[static_cast<size_t>(id)]->name : "?";
-    if (var_id < 0) name = "*" + name;
+    name.insert(0, static_cast<size_t>(depth), '*');
     out_.push_back(SequenceProblem{at, name});
   }
 
-  // The object a place `*addr` is: `x` for `&x`, `*v` for a pointer variable `v` as written (decision 0039 item 3, audit S9); none for any
-  // other address (the path-precise check of lowering covers it).
+  // The object a place `*addr` is: `x` for `&x`, `*v` for a pointer variable `v` as written (decision 0039 item 3, audit S9), and `**v`, `***v`, ... when
+  // the address is itself a read through `v` (`addr` = `*v`, `**v`: decision 0040, P62 A8); none for any other address (the path-precise check of
+  // lowering covers it).
   static bool object_of(const Expr* addr, int* key) {
-    while (addr != nullptr && addr->kind == Expr::Kind::ReportAt) addr = addr->a;
-    if (addr == nullptr || addr->var == nullptr) return false;
-    if (addr->kind == Expr::Kind::AddrOf) {
+    int depth = 0;  // the reads through the variable that the address is made of
+    for (;;) {
+      while (addr != nullptr && addr->kind == Expr::Kind::ReportAt) addr = addr->a;
+      if (addr == nullptr) return false;
+      if (addr->kind == Expr::Kind::Deref && depth < 16) {
+        ++depth;
+        addr = addr->a;
+        continue;
+      }
+      break;
+    }
+    if (addr->var == nullptr) return false;
+    if (addr->kind == Expr::Kind::AddrOf && depth == 0) {
       *key = addr->var->id;
       return true;
     }
     if (addr->kind == Expr::Kind::Local && addr->var->type.is_ptr()) {
-      *key = -addr->var->id - 1;
+      *key = deref_key(addr->var->id, depth + 1);
       return true;
     }
     return false;

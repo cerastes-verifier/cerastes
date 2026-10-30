@@ -709,6 +709,20 @@ class Lowerer {
     E gv, gl;                   // the guards of the value/flag and of the liveness conjuncts (null: true)
     std::string kv, kd, kl, vs, ds;  // the ghost snapshots
     bool reach = false;         // a write in the loop can reach the value
+    E wg;                       // a written atom's place (decision 0040 item 5): the atom's guard (null: true)
+  };
+  // A written atom of a loop invariant (decision 0040 item 5): `owns(*q)`, `reads(*q)` or `live(q)` of a pointer variable `q`, with its ghost
+  // amounts (taken at the loop's entry).
+  struct WAtom {
+    AtomKind kind = AtomKind::Owns;
+    E q, g;                     // the pointer variable, and the atom's guard (null: true)
+    Type pt;                    // q's pointee
+    std::string sfx;            // the cell field suffix of the pointee (not for Live)
+    std::string text;           // `*q`, or `q` for Live
+    SrcLoc loc;
+    std::string av, ad, al;     // the ghost amounts
+    std::string vs;             // the value snapshot (decision 0040 item 5, "Values"); empty: none (the loop assigns q, or Live)
+    bool reach = false;         // a write in the loop can reach the value
   };
   // A heap read of an invariant or a measure, for the explicit framing assert (decision 0038 item 6).
   struct InvRead {
@@ -814,6 +828,7 @@ class Lowerer {
   // The field-name suffix `<t>` of a cell type (decision 0032 item 5): the VIR type by width and signedness (`long` and `long long` share
   // `long`), an enumeration by its own, numbered name.  It never ends in `__<digits>`, so `v_<t>` cannot be the name of a local.
   std::string cell_suffix(const Type& t) {
+    if (t.is_ptr()) return "ptr_" + cell_suffix(*t.pointee);  // a pointer-typed object: its field is named by its pointee, at any depth (decision 0040 item 2)
     if (t.is_bool()) return "bool";
     const IntType& it = *t.int_type;
     if (it.is_enum) {
@@ -841,7 +856,7 @@ class Lowerer {
   std::string use_cell_type(const Type& t) {
     const std::string suffix = cell_suffix(t);
     out_.memory = true;
-    out_.cell_types[suffix] = t.is_bool() ? low::LType::Bool : low::LType::Int;
+    out_.cell_types[suffix] = ltype(t);
     cell_type_of_[suffix] = t;
     return suffix;
   }
@@ -940,10 +955,11 @@ class Lowerer {
 
   // The loop's places and the heap reads recorded so far, set by loop() around the lowering of an invariant or a measure.
   const std::vector<Place>* inv_places_ = nullptr;
+  std::vector<const WAtom*> active_w_;  // the written atoms of the loops being lowered, outermost first
   std::vector<InvRead> inv_reads_;
   std::string inv_what_ = "invariant";  // "invariant" or "measure": the word of the messages
 
-  static E inv_dummy(const Type& t) { return t.is_bool() ? low::bool_lit(false) : low::int_lit("0"); }
+  static E inv_dummy(const Type& t) { return t.is_ptr() ? low::null_() : (t.is_bool() ? low::bool_lit(false) : low::int_lit("0")); }
   E inv_amount_positive(const Place& pl) { return low::bin(low::BinOp::Gt, low::var(pl.kv), low::no_perm()); }
 
   // A cell read by name in an invariant or a measure: the value, guarded by its own condition `kv > none` (a chain of one disjunct), and its flag as an
@@ -994,7 +1010,7 @@ class Lowerer {
       // The flag, chain-guarded the same way (see inv_cell): an `uninitialized` obligation clause.
       E f = low::bool_lit(false);
       for (size_t i = ps.size(); i-- > 0;)
-        f = low::ite(low::and_(low::bin(low::BinOp::Eq, p.e, ps[i]->recv), low::bin(low::BinOp::Gt, low::var(ps[i]->kd), low::no_perm())),
+        f = low::ite(low::and_(ps[i]->wg, low::and_(low::bin(low::BinOp::Eq, p.e, ps[i]->recv), low::bin(low::BinOp::Gt, low::var(ps[i]->kd), low::no_perm()))),
                      cell_flag(p.e, t), f);
       obl(full, guard, gdep, f, p.dep,
           meta("uninitialized", e.loc, "this loop " + inv_what_ + " reads " + quoted(r.text, "an object") + " before it is given a value"));
@@ -1007,7 +1023,7 @@ class Lowerer {
 
   // `q == place && kv > none`: the pointer designates the place, which the loop holds.
   E inv_place_disjunct(const E& q, const Place& pl) {
-    return low::bin(low::BinOp::And, low::bin(low::BinOp::Eq, q, pl.recv), inv_amount_positive(pl));
+    return low::and_(pl.wg, low::bin(low::BinOp::And, low::bin(low::BinOp::Eq, q, pl.recv), inv_amount_positive(pl)));
   }
 
   // The explicit framing condition of one read (decision 0038 item 6): `prior && guard ==> OR_i D_i`.
@@ -1064,10 +1080,13 @@ class Lowerer {
     return e.kind == Expr::Kind::Cond && e.b != nullptr && e.c != nullptr && address_or_null(*e.b) && address_or_null(*e.c);
   }
 
-  void ptr_use(const Expr& operand, const LV& v, const E& guard, const Deps& gdep, Full& full) {
+  // `with_wf`: the use is a store into a pointer cell, whose value must also be well-formed (decision 0040 item 2): `WF(v)` joins the same row, so a
+  // pointer nothing says is well-formed (a reassigned pointer after a loop with no invariant about it) is the user's `lifetime` error, never an internal one.
+  void ptr_use(const Expr& operand, const LV& v, const E& guard, const Deps& gdep, Full& full, bool with_wf = false) {
     if (cmode_ != CMode::None) return;  // a contract has no heap and no liveness to check (decision 0037 item 7)
     if (address_or_null(operand)) return;
-    const E live = low::bin(low::BinOp::Gt, live_perm(v.e), low::no_perm());
+    E live = low::bin(low::BinOp::Gt, live_perm(v.e), low::no_perm());
+    if (with_wf) live = low::not_(low::bin(low::BinOp::Or, low::not_(live), low::not_(wf_expr(v.e))));  // one atomic assertion
     obl(full, guard, gdep, low::implies(low::bin(low::BinOp::Ne, v.e, low::null_()), live), v.dep,
         meta("lifetime", operand.loc, "uses " + quoted(operand.c_text, "the pointer") + " after the object it points to may have ended"));
   }
@@ -1106,7 +1125,7 @@ class Lowerer {
     StoreTarget target;
     target.addr = s.addr;
     target.loc = s.loc;
-    const std::vector<LV> vs = full_exprs({s.addr, s.expr}, out, nullptr, compound, &target);
+    const std::vector<LV> vs = full_exprs({s.addr, s.expr}, out, nullptr, compound, &target, s.expr->type.is_ptr() ? s.expr : nullptr);
     E recv = vs[0].e;
     if (recv->kind != low::LExpr::Kind::Var) {
       const std::string t = new_temp(low::LType::Ref);
@@ -1204,6 +1223,7 @@ class Lowerer {
   }
   // The range of a cell's value as one atomic condition (none for bool).
   E cell_range(const E& p, const Type& t) {
+    if (t.is_ptr()) return wf_expr(cell_value(p, t));  // WF takes the place of the range (decision 0040 item 2)
     if (!t.is_bool()) return range_obligation(cell_value(p, t), *t.int_type);
     return nullptr;
   }
@@ -1272,7 +1292,8 @@ class Lowerer {
       r = low::and_(r, owns ? low::acc(p, "v_" + sfx) : low::acc(p, "v_" + sfx, amount));
       r = low::and_(r, owns ? low::acc(p, "d_" + sfx) : low::acc(p, "d_" + sfx, amount));
       r = low::and_(r, cell_flag(p, t));
-      if (!t.is_bool()) r = low::and_(r, range_check(cell_value(p, t), *t.int_type));
+      if (t.is_ptr()) r = low::and_(r, wf_expr(cell_value(p, t)));
+      else if (!t.is_bool()) r = low::and_(r, range_check(cell_value(p, t), *t.int_type));
     }
     r = low::and_(r, low::acc(live_cell(p), "lv", amount));
     return {r, {}};
@@ -1299,19 +1320,21 @@ class Lowerer {
     }
   }
 
-  static std::string ghost_name(int param, bool post) { return "hv_" + std::to_string(param) + (post ? "_post" : "_pre"); }
+  // The ghost value of a read of `*p` for parameter `p`, or (param -1) of `*result` (decision 0040 item 4).
+  static std::string ghost_name(int param, bool post) { return param < 0 ? "hv_r_post" : "hv_" + std::to_string(param) + (post ? "_post" : "_pre"); }
+  static E place_of(const Env& env, int k) { return k < 0 ? env.result : env.formals[static_cast<size_t>(k)]; }
 
   // A read of `*p` in a contract (decision 0037 item 7).  Wf: a ghost value formal, and the framing obligation; otherwise the heap read, guarded
   // by itself: the chain `(D_1 ? read : (D_2 ? read : ... : dummy))` over the framing disjuncts of the earlier atoms of the same field, or the
   // plain read when the framing is trivial (an unconditional atom on the same place) or implied by the guard the read is evaluated under.
   LV contract_read(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full) {
     using low::BinOp;
-    if (e.a == nullptr || e.a->kind != Expr::Kind::Formal) {
-      internal_error(e.loc, "a dereference in a contract of anything but a pointer parameter reached lowering");
+    if (e.a == nullptr || (e.a->kind != Expr::Kind::Formal && e.a->kind != Expr::Kind::Result)) {
+      internal_error(e.loc, "a dereference in a contract of anything but a pointer parameter or the result reached lowering");
       return {low::int_lit("0"), {}};
     }
-    const int k = e.a->index;
-    const E p = env.formals[static_cast<size_t>(k)];
+    const int k = e.a->kind == Expr::Kind::Result ? -1 : e.a->index;  // -1: the place `result` (decision 0040 item 4)
+    const E p = place_of(env, k);
     const Type& t = e.type;
     const bool post = cens_ && !cold_;
     const FnAtoms& fa = atoms_of(*cf_);
@@ -1353,7 +1376,7 @@ class Lowerer {
     E read = cell_value(p, t);
     if (cold_ && (cmode_ == CMode::Method || cmode_ == CMode::Ret)) read = low::old_(read);
     if (trivial) return {read, {}};
-    E v = t.is_bool() ? low::bool_lit(false) : low::int_lit("0");
+    E v = inv_dummy(t);
     for (size_t i = ds.size(); i-- > 0;) v = low::ite(ds[i], read, v);
     return {v, {}};
   }
@@ -1389,6 +1412,7 @@ class Lowerer {
   // The cell field of a type, as an identity that does not number an enumeration the way `cell_suffix` does (a name is only made when the program
   // needs one, so the Viper of a program without a store inside an expression stays as it was).
   static std::string fkey(const Type& t) {
+    if (t.is_ptr()) return "ptr(" + fkey(*t.pointee) + ")";
     if (t.is_bool()) return "bool";
     const IntType& it = *t.int_type;
     if (it.is_enum) return "enum@" + std::to_string(reinterpret_cast<uintptr_t>(&it));
@@ -1580,7 +1604,7 @@ class Lowerer {
     if (via != nullptr && shared_.count(via) != 0 && shared_path_.count(via) != 0) after.push_back(shared_path_[via]);
     a.after = after;
     register_access(std::move(a), full, guard);
-    if (!needs_snapshot(fkey(t))) return {value, pdep};
+    if (!needs_snapshot(fkey(t)) && !t.is_ptr()) return {value, pdep};
     const std::string tmp = new_temp(ltype(t));
     const auto lw = full.last_write.find(key);
     Deps slot = join(floor_, pdep);
@@ -1590,6 +1614,7 @@ class Lowerer {
     fx.kind = Effect::Kind::Snapshot;
     fx.name = tmp;
     fx.value = guard ? low::ite(guard, value, inv_dummy(t)) : value;
+    if (t.is_ptr()) result_splits(t, low::var(tmp), fx.stmts);  // a pointer loaded from a cell is split like a call's pointer result (decision 0040 item 2, audit B1)
     fx.deps = slot;
     fx.seq = full.next_seq++;
     fx.reads.insert(key);
@@ -1644,6 +1669,7 @@ class Lowerer {
       shared_.erase(e.c);
       shared_path_.erase(e.c);
     }
+    if (t.is_ptr()) ptr_use(*e.a, stored, guard, gdep, full, true);  // a pointer stored in a cell is a use of its value, and must be well-formed (decision 0040 item 2)
     const Deps operands = since(full, effect_from, obl_from);
     const auto la = full.last_access.find(key);
     Deps wset = join(join(join(floor_, stored.dep), addr.dep), operands);
@@ -1681,10 +1707,6 @@ class Lowerer {
     full.effects.push_back(std::move(fx));
     full.last_write[key] = wset;
     touch(full, key, wset);
-    if (store) {
-      const Type& pt = e.type;
-      if (pt.is_ptr()) internal_error(e.loc, "a write of a pointer through a pointer reached lowering");
-    }
     return e.yields_old ? old_value : stored;
   }
 
@@ -1801,7 +1823,8 @@ class Lowerer {
       }
       case Expr::Kind::Deref: return deref(e, env, guard, gdep, full);
       case Expr::Kind::Atom:
-        if (cmode_ == CMode::None || cmode_ == CMode::Inv) {
+        if (cmode_ == CMode::Inv) return {low::bool_lit(true), {}};  // a written atom's rows are the loop's own (decision 0040 item 5)
+        if (cmode_ == CMode::None) {
           internal_error(e.loc, "a permission atom outside a contract reached lowering");
           return {low::bool_lit(true), {}};
         }
@@ -2171,6 +2194,16 @@ class Lowerer {
           if (seen) continue;
           done.emplace_back(x.p, q);
           split(low::bin(BinOp::Eq, x.p, q));
+        }
+        // the same against the `reads` places of the enclosing loops' written atoms (decision 0040 item 5, audit N4)
+        for (const WAtom* a : active_w_) {
+          if (a->kind != AtomKind::Reads || a->sfx != cell_suffix(*x.t) || same_expr(x.p, a->q)) continue;
+          bool seen = false;
+          for (const auto& d : done)
+            if (same_expr(d.first, x.p) && same_expr(d.second, a->q)) seen = true;
+          if (seen) continue;
+          done.emplace_back(x.p, a->q);
+          split(low::bin(BinOp::Eq, x.p, a->q));
         }
       }
     }
@@ -2912,7 +2945,10 @@ class Lowerer {
             assign(out, fx.name, fx.value);
             if (!fx.flag.empty()) assign(out, fx.flag, low::bool_lit(true));
             break;
-          case FlatEffect::Kind::Snapshot: assign(out, fx.name, fx.value); break;
+          case FlatEffect::Kind::Snapshot:
+            assign(out, fx.name, fx.value);
+            for (const low::LStmt& st : fx.stmts) out.push_back(st);  // a loaded pointer's case splits
+            break;
           case FlatEffect::Kind::Branch:
           case FlatEffect::Kind::Store:
             for (low::LStmt& st : fx.stmts) out.push_back(std::move(st));
@@ -3093,7 +3129,7 @@ class Lowerer {
     SrcLoc loc;
   };
   std::vector<LV> full_exprs(const std::vector<const Expr*>& es, std::vector<low::LStmt>& out, const Expr* copy_of = nullptr,
-                             bool share_first = false, const StoreTarget* target = nullptr) {
+                             bool share_first = false, const StoreTarget* target = nullptr, const Expr* use_second = nullptr, bool use_wf = false) {
     Full full;
     const std::set<int> saved_written = std::move(written_);
     const bool saved_in_full = in_full_;
@@ -3139,7 +3175,8 @@ class Lowerer {
       path_.clear();
       if (!a.field.empty()) register_access(std::move(a), full, nullptr);
     }
-    if (copy_of != nullptr) ptr_use(*copy_of, vs.front(), nullptr, {}, full);
+    if (copy_of != nullptr) ptr_use(*copy_of, vs.front(), nullptr, {}, full, use_wf);
+    if (use_second != nullptr) ptr_use(*use_second, vs[1], nullptr, {}, full, true);  // a pointer stored through a pointer is a use, and must be well-formed (decision 0040 item 2)
     in_full_ = saved_in_full;
     written_ = saved_written;
     flush(full, out);
@@ -3169,7 +3206,7 @@ class Lowerer {
           StoreTarget target;
           target.var = s.var;
           target.loc = s.loc;
-          LV v = full_exprs({s.expr}, out, nullptr, false, s.kind == Stmt::Kind::Assign ? &target : nullptr).front();
+          LV v = full_exprs({s.expr}, out, s.var->type.is_ptr() ? s.expr : nullptr, false, s.kind == Stmt::Kind::Assign ? &target : nullptr, nullptr, true).front();
           write_cell(out, *s.var, v.e, s.loc);
           break;
         }
@@ -3440,6 +3477,8 @@ class Lowerer {
     for (const Fn::Scope& sc : fn_.scopes)
       for (const Var* cell : sc.cells)
         if (cell_suffix(cell->type) == sfx) split(low::var(var_name(*cell)));
+    for (const WAtom* a : active_w_)
+      if (a->kind != AtomKind::Live && a->sfx == sfx) split(a->q);  // the places of the enclosing loops' written atoms (decision 0040 item 5)
     const FnAtoms& fa = atoms_of(*fn_.f);
     std::set<int> done;
     for (int i = 0; i < fa.nreq; ++i) {
@@ -3858,6 +3897,192 @@ class Lowerer {
     out.push_back(std::move(st));
   }
 
+  // ---- written atoms in loop invariants (decision 0040 item 5) ----
+
+  std::vector<WAtom> written_atoms(const Stmt& s, int loop_number, const std::set<int>& assigned, const std::set<int>& declared, const LoopWrites& writes) {
+    std::vector<WAtom> out;
+    for (const AtomSite& site : loop_atoms(s)) {
+      WAtom a;
+      a.kind = site.atom->atom;
+      const Expr& qa = *site.atom->a;
+      a.q = qa.kind == Expr::Kind::Local && qa.var != nullptr ? low::var(var_name(*qa.var)) : lower_pure(qa);
+      a.g = site_guard(site, body_env());
+      a.pt = *qa.type.pointee;
+      a.sfx = a.kind == AtomKind::Live ? std::string() : cell_suffix(a.pt);
+      a.text = a.kind == AtomKind::Live ? qa.c_text : "*" + qa.c_text;
+      a.loc = site.atom->loc;
+      const std::string tag = std::to_string(out.size()) + "__" + std::to_string(loop_number);
+      a.av = "aw_v" + tag;
+      a.ad = "aw_d" + tag;
+      a.al = "aw_l" + tag;
+      const bool moved = qa.var != nullptr && assigned.count(qa.var->id) != 0 && declared.count(qa.var->id) == 0;
+      if (a.kind != AtomKind::Live && !moved) a.vs = "aw_s" + tag;
+      a.reach = a.kind != AtomKind::Live && (writes.fields.count(a.sfx) != 0 || !writes.cells.empty());
+      out.push_back(std::move(a));
+    }
+    return out;
+  }
+
+  E lower_pure(const Expr& x) {
+    CtxSave save(*this);
+    cmode_ = CMode::Wf;
+    Full scratch;
+    return lower(x, body_env(), nullptr, {}, scratch).e;
+  }
+
+  // NOTAUTO for the value and flag cells: `q` is no automatic place of its field (a place with a false guard holds nothing, so it does not count), nor
+  // the place of an earlier `reads` atom of a true guard (audit B3, S1).
+  E written_notauto_v(const std::vector<WAtom>& w, size_t j, const std::vector<Place>& places) {
+    using low::BinOp;
+    const WAtom& a = w[j];
+    E r;
+    for (const Place& pl : places)
+      if (pl.value && pl.suffix == a.sfx) r = low::and_(r, low::implies(pl.gv, low::bin(BinOp::Ne, a.q, pl.recv)));
+    if (a.kind == AtomKind::Reads)
+      for (size_t k = 0; k < j; ++k)
+        if (w[k].kind != AtomKind::Live && w[k].sfx == a.sfx) r = low::and_(r, low::implies(w[k].g, low::bin(BinOp::Ne, a.q, w[k].q)));
+    return r;
+  }
+  // NOTAUTO for the liveness cell: its block is no automatic place's (a true `gl`), nor an earlier atom's (a true guard).
+  E written_notauto_l(const std::vector<WAtom>& w, size_t j, const std::vector<Place>& places) {
+    using low::BinOp;
+    const WAtom& a = w[j];
+    E r;
+    for (const Place& pl : places) r = low::and_(r, low::implies(pl.gl, low::bin(BinOp::Ne, live_cell(a.q), live_cell(pl.recv))));
+    for (size_t k = 0; k < j; ++k) r = low::and_(r, low::implies(w[k].g, low::bin(BinOp::Ne, live_cell(a.q), live_cell(w[k].q))));
+    return r;
+  }
+
+  // The no-op case splits (S28 P8): the atom's place against every automatic place of its field and against an earlier atom's, and its liveness cell
+  // against every other liveness cell.
+  void written_splits(const std::vector<WAtom>& w, const std::vector<Place>& places, std::vector<low::LStmt>& out) {
+    using low::BinOp;
+    for (size_t j = 0; j < w.size(); ++j) {
+      const WAtom& a = w[j];
+      for (const Place& pl : places) {
+        if (a.kind != AtomKind::Live && pl.value && pl.suffix == a.sfx) case_split(out, low::bin(BinOp::Eq, a.q, pl.recv));
+        case_split(out, low::bin(BinOp::Eq, live_cell(a.q), live_cell(pl.recv)));
+      }
+      for (size_t k = 0; k < j; ++k) {
+        if (a.kind != AtomKind::Live && w[k].kind != AtomKind::Live && w[k].sfx == a.sfx) case_split(out, low::bin(BinOp::Eq, a.q, w[k].q));
+        case_split(out, low::bin(BinOp::Eq, live_cell(a.q), live_cell(w[k].q)));
+      }
+    }
+  }
+
+  // The ghost amounts, taken at the entry (decision 0040 item 5): `owns` takes write, `reads` what is held, every kind the liveness cell's.
+  void written_amounts(const std::vector<WAtom>& w, std::vector<low::LStmt>& out) {
+    for (const WAtom& a : w) {
+      if (a.kind != AtomKind::Live) {
+        fn_.snapshots.push_back(low::LVar{a.av, low::LType::Perm});
+        fn_.snapshots.push_back(low::LVar{a.ad, low::LType::Perm});
+        assign(out, a.av, a.kind == AtomKind::Owns ? low::write_perm() : value_perm(a.q, a.pt));
+        assign(out, a.ad, a.kind == AtomKind::Owns ? low::write_perm() : flag_perm(a.q, a.pt));
+      }
+      fn_.snapshots.push_back(low::LVar{a.al, low::LType::Perm});
+      assign(out, a.al, live_perm(a.q));
+    }
+  }
+  // The value snapshots (decision 0040 item 5, "Values"): the value the place holds at the entry, when it is held there.  Taken after the splits
+  // and the amounts, under the atom's guard and NOTAUTO (an automatic place's own snapshot covers the others).
+  void written_values(const std::vector<WAtom>& w, const std::vector<Place>& places, std::vector<low::LStmt>& out) {
+    for (size_t j = 0; j < w.size(); ++j) {
+      const WAtom& a = w[j];
+      if (a.vs.empty()) continue;
+      fn_.snapshots.push_back(low::LVar{a.vs, ltype(a.pt)});
+      low::LStmt st;
+      st.kind = low::LStmt::Kind::If;
+      st.expr = low::and_(low::and_(a.g, written_notauto_v(w, j, places)), low::bin(low::BinOp::Gt, value_perm(a.q, a.pt), low::no_perm()));
+      assign(st.then_body, a.vs, cell_value(a.q, a.pt));
+      out.push_back(std::move(st));
+    }
+  }
+
+  // The invariant conjuncts of the written atoms, after the automatic ones.
+  void written_rows(const std::vector<WAtom>& w, const std::vector<Place>& places, const SrcLoc& at, std::vector<low::LInvariant>& out) {
+    using low::BinOp;
+    const E none = low::no_perm(), write = low::write_perm();
+    for (size_t j = 0; j < w.size(); ++j) {
+      const WAtom& a = w[j];
+      const bool live = a.kind == AtomKind::Live, owns = a.kind == AtomKind::Owns;
+      E basic = low::and_(low::bin(BinOp::Ne, a.q, low::null_()), wf_expr(a.q));
+      if (!live) basic = low::and_(basic, in_block(a.q));
+      out.push_back(auto_invariant(low::implies(a.g, basic), at));
+      const E nv = low::and_(a.g, written_notauto_v(w, j, places)), nl = low::and_(a.g, written_notauto_l(w, j, places));
+      if (!live) {
+        out.push_back(auto_invariant(low::implies(nv, low::and_(low::bin(BinOp::Gt, low::var(a.av), none), low::bin(BinOp::Gt, low::var(a.ad), none))), at));
+        E acc = low::and_(low::acc(a.q, "v_" + a.sfx, low::var(a.av)), low::acc(a.q, "d_" + a.sfx, low::var(a.ad)));
+        acc = low::and_(acc, cell_flag(a.q, a.pt));
+        if (const E r = cell_range_inv(a.q, a.pt)) acc = low::and_(acc, r);
+        out.push_back(auto_invariant(low::implies(nv, acc), at));
+        if (!a.vs.empty()) {
+          const E same = low::bin(BinOp::Eq, cell_value(a.q, a.pt), low::var(a.vs));
+          out.push_back(auto_invariant(low::implies(a.reach ? low::and_(nv, low::bin(BinOp::Lt, low::var(a.av), write)) : nv, same), at));
+        }
+        for (const Place& pl : places) {
+          if (!pl.value || pl.suffix != a.sfx) continue;
+          const E hold = owns ? low::and_(low::bin(BinOp::Eq, low::var(pl.kv), write), low::bin(BinOp::Eq, low::var(pl.kd), write))
+                              : low::and_(low::bin(BinOp::Gt, low::var(pl.kv), none), low::bin(BinOp::Gt, low::var(pl.kd), none));
+          out.push_back(auto_invariant(low::implies(low::and_(low::and_(a.g, pl.gv), low::bin(BinOp::Eq, a.q, pl.recv)), hold), at));
+        }
+      }
+      out.push_back(auto_invariant(low::implies(nl, low::bin(BinOp::Gt, low::var(a.al), none)), at));
+      out.push_back(auto_invariant(low::implies(nl, low::acc(live_cell(a.q), "lv", low::var(a.al))), at));
+      for (const Place& pl : places)
+        out.push_back(auto_invariant(
+            low::implies(low::and_(low::and_(a.g, pl.gl), low::bin(BinOp::Eq, a.q, pl.recv)), low::bin(BinOp::Gt, low::var(pl.kl), none)), at));
+    }
+  }
+
+  // The explicit checks (decision 0028 item 11: Silicon's own invariant checks never fail first), at the entry and, with `back`, at the end of an
+  // iteration (reported at `at`, the body's closing brace); then the separation of the pairs that may not share a place.
+  void written_checks(const std::vector<WAtom>& w, const std::vector<Place>& places, bool back, const SrcLoc& at, std::vector<low::LStmt>& out) {
+    using low::BinOp;
+    const E none = low::no_perm(), write = low::write_perm();
+    for (size_t j = 0; j < w.size(); ++j) {
+      const WAtom& a = w[j];
+      const bool live = a.kind == AtomKind::Live, owns = a.kind == AtomKind::Owns;
+      const std::string pl = quoted(a.text, "the object the pointer points to");
+      const std::string what = owns ? "owning " + pl : live ? quoted(a.text, "the pointer") + " pointing to a live object" : "the permission to read " + pl;
+      const std::string msg = back ? "an iteration of this loop ends without " + what + ", which its invariant needs"
+                                   : "enters this loop without " + what + ", which its invariant needs";
+      const SrcLoc where = back ? at : a.loc;
+      auto add = [&](E cond) { emit_assert(out, low::implies(a.g, std::move(cond)), meta("permission", where, msg)); };
+      add(low::bin(BinOp::Ne, a.q, low::null_()));
+      add(wf_expr(a.q));
+      if (!live) add(in_block(a.q));
+      if (!live) {
+        if (back) {
+          add(low::bin(BinOp::Ge, value_perm(a.q, a.pt), low::var(a.av)));
+          add(low::bin(BinOp::Ge, flag_perm(a.q, a.pt), low::var(a.ad)));
+        } else if (owns) {
+          add(low::bin(BinOp::Eq, value_perm(a.q, a.pt), write));
+          add(low::bin(BinOp::Eq, flag_perm(a.q, a.pt), write));
+        } else {
+          add(low::bin(BinOp::Gt, value_perm(a.q, a.pt), none));
+          add(low::bin(BinOp::Gt, flag_perm(a.q, a.pt), none));
+        }
+        add(cell_flag(a.q, a.pt));
+        if (const E r = cell_range(a.q, a.pt)) add(r);
+        emit_assert(out, low::implies(low::and_(a.g, written_notauto_v(w, j, places)),
+                                      low::and_(low::bin(BinOp::Gt, low::var(a.av), none), low::bin(BinOp::Gt, low::var(a.ad), none))),
+                    meta("permission", where, msg));
+      }
+      add(back ? low::bin(BinOp::Ge, live_perm(a.q), low::var(a.al)) : low::bin(BinOp::Gt, live_perm(a.q), none));
+      emit_assert(out, low::implies(low::and_(a.g, written_notauto_l(w, j, places)), low::bin(BinOp::Gt, low::var(a.al), none)), meta("permission", where, msg));
+    }
+    for (size_t j = 0; j < w.size(); ++j)
+      for (size_t k = 0; k < j; ++k) {
+        const WAtom& a = w[j];
+        const WAtom& b = w[k];
+        if (a.kind == AtomKind::Live || b.kind == AtomKind::Live || a.sfx != b.sfx) continue;
+        if (a.kind != AtomKind::Owns && b.kind != AtomKind::Owns) continue;
+        emit_assert(out, low::implies(low::and_(a.g, b.g), low::bin(BinOp::Ne, a.q, b.q)),
+                    meta("permission", back ? at : a.loc,
+                         "the invariant of this loop owns " + quoted(b.text, "an object") + " and " + quoted(a.text, "an object") + ", which may be one object"));
+      }
+  }
+
   // A loop.  Its invariants are, in order: the automatic range invariant of each outer local the loop assigns; the automatic permission
   // invariants of the loop's places (decision 0038 item 3); then, for each user invariant, the obligations of its own expression (guarded by the
   // earlier user invariants) and the invariant itself; then the obligations of the loop condition (guarded by all user
@@ -3901,6 +4126,10 @@ class Lowerer {
       frame = has_return || outward;
     }
     if (!frame) places.clear();
+    std::vector<WAtom> wats = written_atoms(s, loop_number, assigned, declared, writes);  // decision 0040 item 5
+    std::vector<low::LStmt> wsplits;
+    const size_t active_before = active_w_.size();
+    for (const WAtom& a : wats) active_w_.push_back(&a);
 
     // A condition with a side effect, a call or a memory access is evaluated inside the body, at the top (the `do` shape of 0014 item 5 moved
     // up): the invariants and the measure stay where C evaluates the condition, and its obligations are asserted at every evaluation.
@@ -3987,7 +4216,7 @@ class Lowerer {
         if (!pl.value) continue;
         fn_.snapshots.push_back(low::LVar{pl.kv, low::LType::Perm});
         fn_.snapshots.push_back(low::LVar{pl.kd, low::LType::Perm});
-        fn_.snapshots.push_back(low::LVar{pl.vs, pl.type.is_bool() ? low::LType::Bool : low::LType::Int});
+        fn_.snapshots.push_back(low::LVar{pl.vs, ltype(pl.type)});
         fn_.snapshots.push_back(low::LVar{pl.ds, low::LType::Bool});
         assign(entry, pl.kv, value_perm(pl.recv, pl.type));
         assign(entry, pl.kd, flag_perm(pl.recv, pl.type));
@@ -4035,10 +4264,34 @@ class Lowerer {
       }
     }
 
+    std::vector<Place> inv_all = places;  // the loop's places, then the written atoms' (the framing chains of decision 0038 item 6)
+    if (!wats.empty()) {
+      written_splits(wats, places, wsplits);
+      entry.insert(entry.begin(), wsplits.begin(), wsplits.end());
+      written_amounts(wats, entry);
+      written_values(wats, places, entry);
+      written_checks(wats, places, false, s.loc, entry);
+      written_rows(wats, places, s.loc, w.invariants);
+      for (const WAtom& a : wats) {
+        if (a.kind == AtomKind::Live) continue;
+        Place wp;
+        wp.recv = a.q;
+        wp.type = a.pt;
+        wp.value = true;
+        wp.suffix = a.sfx;
+        wp.label = a.text;
+        wp.kv = a.av;
+        wp.kd = a.ad;
+        wp.kl = a.al;
+        wp.wg = a.g;
+        inv_all.push_back(std::move(wp));
+      }
+    }
+
     E prior;  // the conjunction of the user invariants so far
     // Invariants and the measure are lowered in `Inv` mode (decision 0038 item 6): the reads of memory in them are chains over the loop's places.
     const std::vector<Place>* saved_places = inv_places_;
-    inv_places_ = &places;
+    inv_places_ = &inv_all;
     for (const Clause& c : s.invariants) {
       Full full;
       LV v;
@@ -4134,6 +4387,7 @@ class Lowerer {
     std::set<int> breaks, continues;
     collect_jumps(*s.body, breaks, continues);
     const std::string n = std::to_string(s.jump_id);
+    for (const low::LStmt& st : wsplits) w.then_body.push_back(st);
     for (const low::LStmt& st : splits) w.then_body.push_back(st);
     if (top_test) {
       w.expr = low::bool_lit(true);
@@ -4180,14 +4434,19 @@ class Lowerer {
         if (!one || !pl.value) emit_assert(w.then_body, low::implies(pl.gl, low::not_(lacks(live_perm(pl.recv), pl.kl))), meta("permission", at, msg));
       }
     }
+    if (!wats.empty()) written_checks(wats, places, true, s.body != nullptr && s.body->end_loc.known() ? s.body->end_loc : s.loc, w.then_body);
     for (const Framing& f : framings) emit_assert(w.then_body, f.cond, f.meta);  // also when the loop has no place: the read is then unframed
     out.push_back(std::move(w));
+    for (const low::LStmt& st : wsplits) out.push_back(st);
     if (is_do || top_test || breaks.count(s.jump_id) != 0) label(out, "l_brk__" + n);
+    for (const low::LStmt& st : wsplits) out.push_back(st);
     for (low::LStmt& st : splits) out.push_back(std::move(st));
+    active_w_.resize(active_before);
   }
 
   // The range of a cell's value as an invariant conjunct (none for `bool`).
   E cell_range_inv(const E& p, const Type& t) {
+    if (t.is_ptr()) return wf_expr(cell_value(p, t));
     if (!t.is_bool()) return range_check(cell_value(p, t), *t.int_type);
     return nullptr;
   }
@@ -4588,7 +4847,7 @@ class Lowerer {
       m.formals.push_back(low::LVar{formal_name(f, static_cast<int>(k)), ltype(f.params[k].type)});
     for (int k = 0; k < fa.nreq; ++k) m.formals.push_back(low::LVar{amount_name(k), low::LType::Perm});
     if (!f.ret.is_void()) m.formals.push_back(low::LVar{kResult, ltype(f.ret)});
-    for (const auto& [key, t] : wf_ghosts_) m.formals.push_back(low::LVar{ghost_name(key.first, key.second), t.is_bool() ? low::LType::Bool : low::LType::Int});
+    for (const auto& [key, t] : wf_ghosts_) m.formals.push_back(low::LVar{ghost_name(key.first, key.second), ltype(t)});
     for (int k = 0; k < fa.nreq; ++k) m.requires_.push_back(clause_checks(amount_bounds(amount_name(k)), f.loc, false, what));
     for (size_t k = 0; k < f.params.size(); ++k) {
       if (f.params[k].type.is_ptr()) m.requires_.push_back(clause_checks(wf_expr(low::var(formal_name(f, static_cast<int>(k)))), f.loc, false, what));
@@ -4597,21 +4856,43 @@ class Lowerer {
     }
     if (f.ret.is_int()) m.requires_.push_back(clause_checks(range_check(low::var(kResult), *f.ret.int_type), f.loc, false, what));
     if (f.ret.is_ptr()) m.requires_.push_back(clause_checks(wf_expr(low::var(kResult)), f.loc, false, what));
-    for (const auto& [key, t] : wf_ghosts_)
-      if (!t.is_bool())
+    for (const auto& [key, t] : wf_ghosts_) {
+      if (t.is_ptr()) m.requires_.push_back(clause_checks(wf_expr(low::var(ghost_name(key.first, key.second))), f.loc, false, what));
+      else if (!t.is_bool())
         m.requires_.push_back(clause_checks(range_check(low::var(ghost_name(key.first, key.second)), *t.int_type), f.loc, false, what));
+    }
     // Facts Silicon derives that the ghost values must not lack (decision 0037 item 7): two places that are one cell have one value in a state,
     // and a cell a `reads` atom borrows, returned by a `reads` atom, has the value it had.
     for (auto a = wf_ghosts_.begin(); a != wf_ghosts_.end(); ++a)
       for (auto b = std::next(a); b != wf_ghosts_.end(); ++b) {
         if (a->first.second != b->first.second || cell_suffix(a->second) != cell_suffix(b->second)) continue;
-        const E pa = env.formals[static_cast<size_t>(a->first.first)], pb = env.formals[static_cast<size_t>(b->first.first)];
+        const E pa = place_of(env, a->first.first), pb = place_of(env, b->first.first);
         m.requires_.push_back(clause_checks(
             low::implies(low::bin(low::BinOp::Eq, pa, pb),
                          low::bin(low::BinOp::Eq, low::var(ghost_name(a->first.first, a->first.second)), low::var(ghost_name(b->first.first, b->first.second)))),
             f.loc, false, what));
       }
     for (const auto& [key, t] : wf_ghosts_) {
+      if (key.first < 0 && key.second) {
+        // The result's post-state ghost against the pre-state ghost of a `reads` place the function borrows and returns (audit S4, decision 0040
+        // item 4): `g_r && g_e && result == q ==> h_result == h_q_pre`.
+        for (const auto& [k2, t2] : wf_ghosts_) {
+          if (k2.first < 0 || k2.second || cell_suffix(t2) != cell_suffix(t)) continue;
+          E gr2, ge2;
+          bool have_r2 = false, have_e2 = false;
+          for (const AtomSite& s : fa.sites) {
+            if (s.atom->atom != AtomKind::Reads || site_param(s) != k2.first) continue;
+            if (!s.in_ensures && !have_r2) { gr2 = site_guard(s, env); have_r2 = true; }
+            if (s.in_ensures && !have_e2) { ge2 = site_guard(s, env); have_e2 = true; }
+          }
+          if (!have_r2 || !have_e2) continue;
+          m.requires_.push_back(clause_checks(
+              low::implies(low::and_(low::and_(gr2, ge2), low::bin(low::BinOp::Eq, env.result, env.formals[static_cast<size_t>(k2.first)])),
+                           low::bin(low::BinOp::Eq, low::var(ghost_name(-1, true)), low::var(ghost_name(k2.first, false)))),
+              f.loc, false, what));
+        }
+        continue;
+      }
       if (!key.second || wf_ghosts_.count({key.first, false}) == 0) continue;
       E gr, ge;
       bool have_r = false, have_e = false;

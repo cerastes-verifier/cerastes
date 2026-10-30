@@ -6051,3 +6051,217 @@ No contradiction of item 7 or 8.
 #### Additions after audit round 1 (note 6) and owner question 72
 - **`d6_failed_permission_then_measure`** (hand-written, `s29/il/`): `downq(p, q, a)` owns `p` (measure `p.v_int`) and calls itself on `q`, which it does not own, after the explicit permission asserts of `call_atoms`. Silicon reports exactly four errors: the failed asserts `q != null` (@49), `offset_of(q) < len(block_of(q))` (@51), `perm(q.v_int) == write` (@52), and `Method might not terminate. Termination measure might not decrease or might not be bounded` at the call (@59) (the measures of `q` and `p` are unrelated, so this one is legitimate). **There is no `insufficient permission to access q.v_int` error from Silicon evaluating the plain method measure at the call**: the failed asserts are assumed, and the later parts of the check (`perm(q.d_int) == write`, ...) do not fail again. So a call whose explicit permission check failed adds only a `termination`-category report at the call, never an unmapped Silicon error (no exit 3).
 - **Partners by path** (owner question 72): the bad trusted contract `int tr(int c, int *p) requires(c ? owns(*p) : reads(*p)) ensures(r, owns(*p));` fails exactly at the `f__wf` assert (`build/m4.5b1c2/lower/cond4.c`, `error: permission: the contract of tr returns *p on a path where its requires did not take it`, line 7), in both modes, from the real driver (not hand-written).
+
+## M4.5b1c3: pointers to pointers, owning parameters, `*result`, written atoms (record 0040)
+
+Probe P62 (the IL and the compiler matrix of `*pp` shapes; il-analyst) and spike S30 (Silicon; il-analyst) of the M4.5b1c3
+session, branch `m4.5b1c3-pointers-to-pointers` (worktree `.claude/worktrees/m4.2b1`); evidence under `build/m4.5b1c3/`
+(not committed): `p62/`, `s30/`. Silicon 1.1-SNAPSHOT `6b540aa4`, Z3 4.16.0 from `build/env.sh`; Apple clang 21.0.0,
+Homebrew GCC 16.2.0. Record 0040 item 2 takes P62's hazards H1 and H2 (conversions that add qualifiers below the first
+level) and A8 (the static half of sequencing extended to nested dereferences).
+
+### P62: the IL facts record 0040 relies on (pointers to pointers, `*result`, written atoms) **PASS for A1-A4, A6, A7 as IL facts; two HAZARDS (H1, H2) for item 2's conversion rule, one NOTE per remaining question**
+
+Evidence under `build/m4.5b1c3/p62/` (not committed): inputs `a1.c` (A1), `a2.c` (A2), `a3.c` (A3), `a4.c` (A4), `a5.c`, `a5x.cpp` (A5), `a6.c`, `a6cpp.cpp` (A6), `a7.c` (A7), `a8/S1..S7.c` (A8, `a8/matrix.txt`, raw compiler output `a8/S*.<compiler>.<tier>.txt`). For each input `<f>.c23.il` / `<f>.c++20.il` (`scripts/cerastes-fe.sh --c23|--c++20 --il_display --display_error_number -I include`), `.walk` (`--cerastes_walk`), `.err` (EDG diagnostics); `run.sh <input>` produces them; scratch tools `ilsum.py`, `ilvars.py`, `rawnode.py` (copies of P60/P57's). Branch `m4.5b1c3-pointers-to-pointers`, nothing built, no source touched; `build/cerastes-fe` and `build/cerastes` as they were. C inputs run under `--c++20` as well as `--c23`. `il_def.h` lines are `third_party/edg/src/il_def.h`. Tree notation as in P60 (`L` = `is_lvalue`, `g` = `compiler_generated`, `@n` the column). Apple clang 21.0.0, Homebrew GCC 16.2.0 (`gcc-16`, `g++-16`).
+
+#### Hazards (read first)
+
+- **H1. In C++, EDG accepts `int **` to `const int **` (and the same as a call argument) with only a discretionary warning, where clang and g++ reject it; the driver's `--diag_error` list is C-only.** `a5x.cpp:2` `const int **a = pp;` with `--c++20`: `warning #144-D: a value of type "int **" cannot be used to initialize an entity of type "const int **"` (exit 0, IL produced); `a5.c:17` the same, and `a5.c:23` `g2(pp);` (`void g2(const int **q)`): `warning #167-D: argument of type "int **" is incompatible with parameter of type "const int **"`. The other bad conversions of `a5x.cpp` are real errors in C++: line 3 (drop const, `int *const *` to `int **`), 4 (`long **` to `int **`) and 5 (`const int **` to `int **`) are `error #144`. Native: `clang++ -std=c++20`: `error: cannot initialize a variable of type 'const int **' with an lvalue of type 'int **'` (`a5x.cpp:2`), `g++-16`: `error: invalid conversion from 'int**' to 'const int**' [-fpermissive]`. `src/driver/verify_main.cpp:357` has `if (c_mode) edg.push_back("--diag_error=42,144,167,513");`, so in C++ mode the hole reaches the encoder as a compiler-generated pointer cast (A5). **Control:** `scripts/cerastes-fe.sh --c++20 ... --diag_error=144,167 a5.c` makes exactly `a5.c:17` and `a5.c:23` errors (`error #144-D`, `error #167-D`, "2 errors detected") and leaves `a5.c:9`, `:13`, `:22` (the legal qualification conversions) accepted. The classic unsoundness (`const int **c = pp; *c = &constant; **pp = 1;`) needs exactly this conversion, and record 0040 item 2 says only "C's implicit `int**` to `const int**` stays an incompatible-pointer error" (C only). Either `144,167` join the C++ list too (the rest of #144/#167 is already an error in C++) or the encoder rejects the cast by its types.
+- **H2. In C, `int **` to `const int *const *` is accepted with NO EDG diagnostic, while GCC 16 rejects it and clang warns; so the plan's "C's `int**` to `const int**` stays an error" does not cover it.** `a5.c:13` `const int *const *cpp = pp;`, `a5.c:22` `g3(pp);` (`void g3(const int *const *q)`) and `a5.c:28` `if (cq == pp) {}` (`cq` a `const int *const *`): `a5.c23.err` has no #144/#167/#42 for them (only line 17 `#144-D` and line 23 `#167-D`). Native C: `clang -std=c23`: `warning: initializing 'const int *const *' with an expression of type 'int **' discards qualifiers in nested pointer types [-Wincompatible-pointer-types-discards-qualifiers]` (`a5.c:13`; also `:22`) and `warning: comparison of distinct pointer types ... [-Wcompare-distinct-pointer-types]` (`:28`); `gcc-16 -std=c23`: `error: initialization of 'const int * const*' from incompatible pointer type 'int **' [-Wincompatible-pointer-types]` (`:13`, and `:22` "passing argument 1 of 'g3' from incompatible pointer type"), `warning: comparison of distinct pointer types lacks a cast [-Wcompare-distinct-pointer-types]` (`:28`). The IL of these conversions is the same compiler-generated cast as C++'s legal one (A5), so the encoder cannot tell a legal C++ qualification conversion from this C case by the node; only the mode tells. By 0028 item 1 ("every pointer conversion counts"; "strictest when the compilers disagree") the C mode should reject it, in the encoder.
+
+#### A1. `int *p = &x; int **pp = &p; **pp = 5; int z = **pp;`, `*pp = &y`, `*pp = NULL` **PASS, both modes**
+
+Probe `a1.c` (`a1`, lines 2-11). `address_taken` (il_def.h:11389), `python3 ilvars.py a1.c23.il a1` (C++20 identical):
+```
+variable x  address_taken=TRUE   variable y  address_taken=TRUE   variable p  address_taken=TRUE  type=int *
+variable pp address_taken=-      type=int **                      variable z  address_taken=-
+```
+So `address_taken` is set on the pointer local `p` (by `&p` at `a1.c:6`) and not on `pp`; it is set by the `&` as for an integer (P51 item 2). Node shapes (`python3 ilsum.py a1.c23.il a1`; `++` marks the C++20 difference):
+```
+a1.c:7  **pp = 5    assign(indirect(indirect(var pp{int **}){int *}){int:L@3}, const[int 5]{int}){int}     C++20: the assign has {int:L}
+a1.c:8  z = **pp    init z: indirect(indirect(var pp{int **:@13}){int *:@12}){int:@11}                      (both modes)
+a1.c:9  *pp = &y    assign(indirect(var pp{int **}){int *:L@3}, address_of(var y{int:L@10}){int *}){int *}
+a1.c:10 *pp = NULL  assign(indirect(var pp{int **}){int *:L@3}, const[int 0]{int *:@9}){int *}              (C++20 the same; the constant's expr is cast(const[?]{long}){int *:g})
+```
+- **Nesting:** `**pp` is `eok_indirect` of `eok_indirect` of `eok_variable` (il_def.h:13873). The raw nodes of `a1.c:7` (`python3 rawnode.py a1.c23.il a1 eok_indirect 354`): the **inner** `*pp` has `type: int *`, `orig_lvalue_type: int *` and **no** `is_lvalue`; the **outer** has `type: int`, `is_lvalue: TRUE` and no `orig_lvalue_type` line; `var pp` has `orig_lvalue_type: int **`. On the read (`a1.c:8`, `rawnode.py ... eok_indirect 355`) all three nodes have `orig_lvalue_type` and none has `is_lvalue`. So only the outermost node of a store target is the lvalue; the intermediate loads are rvalues (`orig_lvalue_type` marks them as glvalue-derived, il_def.h:14917, :14942), exactly P51 item 1 applied twice. In `*pp = &y` / `*pp = NULL` the target `*pp` is the lvalue of type `int *`.
+- The null stored through `pp` is the folded `const[int 0]{int *}` (P51 item 4, P57 (e)).
+- `a1.c:14-15` (`a2` in the probe file): `**pp = 1` with `pp = &p`, `p` a parameter: same shape, `p` `address_taken=TRUE param=TRUE`.
+
+#### A2. `&p` of a pointer PARAMETER **PASS, both modes; nothing new beyond 0037 item 4 / P58 (c)**
+
+Probes `a1.c:13-16` and `a2.c` (`a2b`, `a2c`, `a2d`). `ilvars.py a2.c23.il a2d`: `variable p address_taken=TRUE storage=sc_auto param=TRUE used=TRUE type=int *`, `variable r ... param=TRUE address_taken=-` (a parameter whose address is not taken stays `-`), `pp address_taken=-`. One variable per parameter, no copy (P58 (a)); the `init pp: address_of(var p{int *:L@15}){int **:@14}` is the same node as for `&a` of an `int` parameter. Variants (`a2.c`, both modes):
+```
+a2b  int *const p, &p     variable p address_taken=TRUE type=int *const        init pc: address_of(var p{int *const:L@21}){int *const *:@20}
+a2c  int **q, &q          variable q address_taken=TRUE type=int **            init qq: address_of(var q{int **:L@16}){int ***:@15}
+```
+So a `const`-qualified pointer parameter keeps `int *const` as the variable's type and `&p` is `int *const *` (qualifiers stay in the node types; the field name rule ignores them). `*pp = r; **pp = 1;` (`a2d`, `a2.c:11-12`): `assign(indirect(var pp){int *:L}, var r{int *})` and the `**pp` store as in A1.
+
+#### A3. VeriFast's `address_of_local`, exactly, and `uintptr_t**` **PASS, both modes**
+
+Probe `a3.c` (the two functions at lines 19-33 and 35-49, `inc`/`inc_uintptr_t` with the contracts of `tests/memory/verifast/address_of_local.c`). `ilvars.py a3.c23.il address_of_local` (C++20 identical):
+```
+variable x address_taken=TRUE type=int   variable ptr address_taken=TRUE type=int *   variable ptrptr address_taken=-  type=int **   variable z address_taken=-
+```
+```
+a3.c:25  init ptrptr: address_of(var ptr{int *:L@23}){int **:@22}
+a3.c:26  inc(*ptrptr)  call(routine inc{void (*)(int *)}, indirect(var ptrptr{int **:@12}){int *:@11}){void:@10}      (C++20 the same)
+```
+**The argument node is a bare `eok_indirect` of `var ptrptr`**, an rvalue (no `is_lvalue`, no `eok_lvalue_adjust`, no `eok_cast`), of type `int *`. The `uintptr_t` function has the same trees with `uintptr_t` types: `variable ptrptr type=uintptr_t **`, `init ptrptr: address_of(var ptr{uintptr_t *:L@29}){uintptr_t **:@28}`, `call(inc_uintptr_t, indirect(var ptrptr{uintptr_t **:@22}){uintptr_t *:@21})`; `init x: const[int 0UL]` (C23, C++20) with the constant's expr `cast(const[int 0]{int}){uintptr_t:g}`. **The typedef chain** (`a3.c23.il`, type `76a20590c0`): `kind: tk_pointer` (il_def.h:5593) with `type_pointed_to` a second `tk_pointer` (`uintptr_t *`), whose pointee is `kind: tk_typeref` (il_def.h:5599, the `type` field at :10739-10745) named `uintptr_t` (`source_corresp name: "uintptr_t"`, `decl_position.seq: 3822`), `typeref_type: unsigned long` (one step on this host; `<stdint.h>` of the macOS SDK has `typedef unsigned long uintptr_t;`). So the field name is computed by skipping typerefs at the leaf and recursing through `tk_pointer`: `v_ptr_ptr_ulong` for the `ptrptr` cell's pointee `uintptr_t *` (the cell `ptr` is `v_ptr_ulong`, `x` is `v_ulong`). The printed type string keeps the typedef (`uintptr_t **`), so any name derived from the printed string would differ; derive it from the type nodes. The `assert` macro expands to `__builtin_expect`/`__assert_rtn` (`a3.c23.il` `L4869`), unchanged from `address_of_local.c`'s existing functions.
+
+#### A4. `int ***ppp` (depth 3) **PASS, both modes**
+
+Probe `a4.c` (`a4`). `ilvars.py a4.c23.il a4`: `x`, `p`, `pp` `address_taken=TRUE`, `ppp` `-`, `z` `-` (each pointer variable whose address is taken, at every level). Trees (C++20 differs only by the assign's `{...:L}`):
+```
+a4.c:6  ***ppp = 7   assign(indirect(indirect(indirect(var ppp{int ***}){int **}){int *}){int:L@3}, const[int 7]){int}
+a4.c:7  z = ***ppp   init z: indirect(indirect(indirect(var ppp{int ***:@14}){int **:@13}){int *:@12}){int:@11}
+a4.c:8  **ppp = p    assign(indirect(indirect(var ppp){int **}){int *:L@3}, var p{int *:@11}){int *}
+a4.c:9  *ppp = pp    assign(indirect(var ppp{int ***}){int **:L@3}, var pp{int **:@10}){int **}
+```
+Each level is one `eok_indirect`; the types peel one `*` per node; only the outermost of a store target is `is_lvalue`. (A first draft of this probe had `*ppp = &pp;` with the wrong type: C23 `warning #144-D: a value of type "int ***" cannot be assigned ...`, C++20 `error #144` and no IL; it is a typo of mine, not a finding beyond 0032 item 3's C-warning/C++-error split.)
+
+#### A5. Qualification conversions **IL facts PASS; the diagnostics are H1 and H2**
+
+Probe `a5.c` (`c1`..`c5`) and `a5x.cpp`. The IL (`python3 ilsum.py a5.c23.il c1..c5`, `a5.c++20.il` identical apart from `{...:L}` flags), the same in both modes:
+```
+a5.c:9   int *const *cp = pp;                 init cp:  cast(var pp{int **:@20}){int *const *:g@20}
+a5.c:13  const int *const *cpp = pp;          init cpp: cast(var pp{int **:@27}){const int *const *:g@27}
+a5.c:17  const int **cpp = pp;                init cpp: cast(var pp{int **:@21}){const int **:g@21}
+a5.c:21-23  g1(pp); g3(pp); g2(pp);            call(g1, cast(var pp{int **}){int *const *:g}) / call(g3, cast(...){const int *const *:g}) / call(g2, cast(...){const int **:g})
+a5.c:28  cq == pp                              eq(var cq{const int *const *}, cast(var pp{int **:@13}){const int *const *:g@13})
+a5.c:26  const int *const *r = cq;             init r: var cq{const int *const *}     (same type: no cast)
+```
+**The conversion node is `eok_cast` (il_def.h:13877), `compiler_generated: TRUE` (il_def.h:15094), `operation.type_kind: tk_pointer`, operand the bare `var pp` of type `int **`, node `type` the target type** (`python3` dump of the node, `a5.c23.il`/`a5.c++20.il`, function `c2`: `type: const int *const *`, `compiler_generated: TRUE`, `kind: enk_operation`, `operation.kind: eok_cast`, `operands: ...`). In C++ it is a qualification conversion and in C an incompatible-pointer conversion, with the identical node (H2); there is no distinct node kind, no `eok_lvalue_adjust`. Which of them EDG diagnoses (`.err` files; `--display_error_number`):
+
+| Shape | C23 | C++20 |
+|---|---|---|
+| `int **` to `int *const *` (`a5.c:9`, `:21`) | accepted, none | accepted, none |
+| `int **` to `const int *const *` (`:13`, `:22`) | accepted, **none** (H2) | accepted, none (legal C++) |
+| `int **` to `const int **` (`:17`, `:23`) | `warning #144-D` / `#167-D` (the driver makes them errors in C) | `warning #144-D` / `#167-D` (**not** errors, H1) |
+| `int *const *` to `int **`; `long **` to `int **`; `const int **` to `int **` (`a5x.cpp:3-5`) | not run in C | `error #144` |
+| `cq == pp` (`:28`, distinct pointer types) | accepted, none (no #42) | accepted, none |
+
+`int *const *` and `const int **` as parameter types (`g1`, `g2`) print as such in the IL (`g1{void (*)(int *const *)}`). Native C compilers on the same file: see H2 (clang warns at the default tier, GCC 16 errors); native C++: both reject only `a5.c:17`/`:23`.
+
+#### A6. `*result` in an `ensures`, both spellings **PASS: `*r` reaches the IL as `eok_indirect` of the binder, an rvalue**
+
+Probes `a6.c` (macros `CERASTES_ENSURES(r, ...)`, run in both modes, `a6.c23.walk`, `a6.c++20.walk`) and `a6cpp.cpp` (`[[cerastes::ensures(r, ...)]]` written out, `a6cpp.c++20.walk`; after removing the `pp_result` function its normalised walk is identical to `a6.c++20.walk`). `*r == 1` (`a6.c:17`, `pick`), `walk` excerpt, C23:
+```
+attr [[cerastes::ensures]] on routine @ L17:5
+  arg 1 binder r: int * @ L17:22
+  arg 2 @ L17:25
+    op eok_land ... op eok_eq @ L17:27 ( binder r: int * @ L17:25 , param 1 p: int * @ L17:30 )          r == p
+    op eok_eq type_kind=tk_integer type=int @ L17:50 ( op eok_indirect type_kind=tk_pointer type=int @ L17:47 ( binder r: int * @ L17:48 ) , const 1 type=int @ L17:53 )     *r == 1
+```
+C++20 the same with `type=bool`. **The `*r` indirect is an rvalue in both modes (no `lvalue` in the walker line; a contract's `owns(*p)` argument is printed `lvalue`)**, and its operand is a bare `binder r` (the same node as the result in `r == p`; arg 1 of the attribute declares it). `pp_result` (`int **` result, `a6.c:34-39`): `op eok_indirect type=int * ( binder r: int ** )` against `old(*q)`.
+- **`cerastes_old(*r)` (C, `a6.c:30` `pick_old_r`, `*p == OLD(*r)`)** survives the front end intact, in the same shape as `old(*p)` of a parameter (`a6.c23.walk:84-90`): `op eok_indirect type=int ( op eok_cast type=int * cast=c-style ( op eok_call type=const void * routine cerastes_old_ ( op eok_cast type=const void * cast=implicit ( binder r: int * ))))`; the `&(*r)` inside the macro is folded to the bare binder. C++ (`cerastes::old(*r)`, `a6.c++20.walk:91-99`): `op eok_ref_indirect type=int ( op eok_call type=const int & routine cerastes::old args <T=int> ( op eok_reference_to ( op eok_lvalue_adjust type=const int lvalue ( op eok_indirect type=int lvalue ( binder r: int * )))))`. So `old(*r)` reaches the encoder and can be rejected there by the binder under the indirect; today `build/cerastes verify a6.c --std=c23`: `error #cerastes-unsupported_expression: "cerastes::old" applied to the result is not supported` (`a6.c:30`), and `a6.c:17`/`:24` give `a dereference of the result in an `ensures` (M4.5b1c3: ...)`. `old(*r)` with `r` a `T**` result is the same shape one level up.
+
+#### A7. Written atoms in `CERASTES_INVARIANT`; `owns(*pp)` / `owns(**pp)` in contracts **PASS: no new node kinds beyond P59**
+
+Probe `a7.c` (`l1`..`l6`, `c1`..`c5`), `a7.c23.walk`, `a7.c++20.walk`. **Variables:** in a loop annotation a pointer local and a (reassigned or not) parameter are both `var q: int * decl=L<n>:<c>` (P59 item 1 NOTE; `l2`, a reassigned parameter: `a7.c23.walk` `var q: int * decl=L22:14`), not `param 1 q`; they are told apart by `is_parameter` only. Shapes (C23; C++20 differences stated):
+- **`OWNS(*q) && i >= 0`** (`l1`, `a7.c:19`): `eok_land( eok_call cerastes_owns( eok_indirect(var q) ), eok_ge ...)`. C++20: `eok_call cerastes::owns args <T=int> ( eok_reference_to ( eok_lvalue_adjust ( eok_indirect lvalue (var q))))`.
+- **`q == NULL || OWNS(*q)`** (`l2`, `:24`): `eok_lor( eok_eq(var q, const 0 type=int *), eok_call cerastes_owns(...))`; C++20 the same with `bool` types.
+- **`c ? OWNS(*q) : READS(*q)`** (`l3`, `:30`): C23: `eok_question ( var c , eok_cast type=int cast=implicit ( eok_call cerastes_owns ) , eok_cast type=int cast=implicit ( eok_call cerastes_reads ) )`: **the arms are `eok_cast` to `int` of the `_Bool` calls, and the condition is the bare `var c`**; C++20: `eok_question type=bool ( eok_bool_cast ( var c ) , eok_call cerastes::owns , eok_call cerastes::reads )` (no casts on the arms, `bool_cast` on the condition). The two arms are separate call nodes over two separate `var q` nodes.
+- **`LIVE(q) && READS(*q)`** (`l4`, `:36`) and **`OWNS(*q) && READS(*s) && LIVE(q)`** (`l5`, `:45`): as P59 item 1 (`cerastes_live` of the bare `var q`; C++20 `cerastes::live` over `eok_cast ... cast=implicit` of `var q`).
+- **`OWNS(*q) && *q == 0`** (`l6`, `:51`): the read `eok_eq( eok_indirect(var q), const 0)`, the indirect an rvalue (no flag), beside the atom.
+- **NOTE (warnings):** EDG warns for a pointer only written or named in annotations: `a7.c:22` `warning #550-D: parameter "q" was set but never used` (`l2`), `:42` `variable "q"`, `:43` `variable "s"` (`l5`), both modes, as in P59. A test of `q` read only in its invariant carries these (or is made to use `q` in the body).
+- **`owns(*pp)` / `owns(**pp)` in a contract** (`c1`..`c5`, `a7.c:55-72`): the **nesting of `eok_indirect` is the whole difference.** C23 `OWNS(*pp)` (`c1`): `eok_call cerastes_owns ( eok_indirect type=int * ( param 1 pp: int ** ) )`; `OWNS(**pp)` (`c2`): `eok_call cerastes_owns ( eok_indirect type=int ( eok_indirect type=int * ( param 1 pp: int ** ) ) )`. C++20 `owns(*pp)` is `cerastes::owns args <T=int *>: bool (*)(int *const &)` over `eok_reference_to type=int *const & ( eok_lvalue_adjust type=int *const lvalue ( eok_indirect type=int * lvalue ( param 1 pp ) ) )`; `owns(**pp)` is `args <T=int>: ... (const int &)` over `eok_lvalue_adjust ( eok_indirect type=int lvalue ( eok_indirect type=int * ( param 1 pp ) ) )` (`a7.c++20.walk:160-171`). **So the encoder tells `*param` from `**param` by the depth of `eok_indirect` over `param` (the inner one is an rvalue, the outer carries `lvalue` in C++), and in C++ also by the template argument `T` (`int *` against `int`).** `c3` (`OWNS(*pp) && *pp != NULL && READS(**pp)`) shows the read `*pp` as a bare rvalue `eok_indirect type=int *` under `eok_ne(..., const 0 type=int *)`, and `c4` `LIVE(*pp)`: C23 `cerastes_live( eok_indirect type=int * (param 1 pp))`, C++20 `cerastes::live args <T=int> ( eok_cast type=const int * cast=implicit ( eok_indirect type=int * (param 1 pp)))`.
+
+#### A8. Sequencing keys: `-Wunsequenced` / `-Wsequence-point` on pointer-to-pointer shapes **PASS: results below; nothing new beyond P61's "clang names objects syntactically"**
+
+Seven shapes (`a8/S1.c`..`S7.c`, `int x = 0, y = 0, r = 0; int *p = &x; int **pp = &p;` and `r = (int)(<shape>);`), tiers D (no flag), A (`-Wall`), E (`-Wall -Wextra`), `-fsyntax-only`, Apple clang 21 and GCC 16.2, `-std=c23` / `-std=c++20`; `a8/matrix.txt`:
+
+| Shape | clang C, C++ (D, A, E) | gcc C | gcc C++ |
+|---|---|---|---|
+| S1 `(*pp = &y, **pp)` | silent | silent | silent |
+| S2 `**pp + (*pp = &y, 0)` | silent | silent | `-Wsequence-point` at A, E (`S2.c:6:25: operation on '* pp' may be undefined`) |
+| S3 `**pp + (**pp = 1)` | silent | `-Wsequence-point` at A, E | `-Wsequence-point` at A, E (`operation on '**pp'`) |
+| S4 `(*pp == (*pp = &y))` | silent | `-Wsequence-point` at A, E | same |
+| S5 `**pp + (p = &y, 0)` (aliasing by name) | silent | silent | silent |
+| S6 `(**pp = (*pp = &y, 5))` | silent | `-Wsequence-point` at A, E | same |
+| S7 `(*pp = &y) == *pp` | silent | `-Wsequence-point` at A, E | same |
+
+Never at the no-flag tier D, in any compiler or mode; **clang never warns on any `pp` shape** (its check names objects syntactically, P61); GCC warns at `-Wall` on the shapes that name `*pp` or `**pp` twice (S3, S4, S6, S7, and S2 only in g++), and on none that reach the same cell by another name (S5) or are sequenced by a comma (S1). EDG itself warns on none of them (`a8` run under `--c23`/`--c++20`: no sequence diagnostic, only #550-D for `y`). By the union rule of 0039 item 3 (a warning at no flag or `-Wall` in some compiler and mode): S2, S3, S4, S6, S7 are rejected as `unsequenced_modification` shapes (`*pp` and `**pp` are objects named twice, like `*p`), S1 and S5 are accepted and left to the path-precise `unsequenced` category. `build/cerastes verify a8/S2.c` today stops earlier at `int **pp`: `error #cerastes-unsupported_type: type "int ** (a pointer to a pointer: M4.5b1c3)" is not supported`.
+
+#### Other notes
+
+- **NOTE (`address_taken` on the pointer, not the pointee chain):** `address_taken` is set on exactly the variable whose `&` is written (`a4.c`: `x`, `p`, `pp` TRUE, `ppp` `-`); the plan's rule "a pointer variable whose address is taken is a cell" is directly readable from the flag, with no contradiction to record 0040 items 2-6.
+- **NOTE (loads are rvalues, no lvalue-to-rvalue node):** P51 item 1 holds at every level: `*pp` read as a pointer is an `eok_indirect` without `is_lvalue` (A1), so the encoder's value/place split for `*pp` is the same as for `*p`.
+
+### S30: Silicon on pointer cells, `*result` and written atoms (record 0040 items 2, 4, 5) **PASS for (a), (b), (c); five findings the record lacks (F1-F5), none an unsound frame**
+
+Evidence under `build/m4.5b1c3/s30/` (not committed): `gen_a.py`, `gen_a2.py`, `gen_a3.py`, `gen_b.py`, `gen_c.py`, `gen_c1.py`..`gen_c3.py` (generators; `prelude.py` has the shared pieces, taken from the real emitted Viper of `emitted/*.vpr`: `cell_across_loop`, `loop_owns_fill`, `live_result`, `swap_owns`, `loop_pointer_write`, `cell_conditional_target`), `targets/*.vpr` with `<t>.out` (Silicon output, exit, wall seconds, load average before) and `.time`; `sv.sh` (copy of S29's) runs the pinned Silicon 1.1-SNAPSHOT `6b540aa4` with Z3 4.16.0. Re-run: `bash build/m4.5b1c3/s30/sv.sh build/m4.5b1c3/s30/targets/<name>.vpr`. Every run was made alone, with `--numberOfErrorsToReport 0` (all errors listed); the machine was loaded (one-minute averages 77-150, the figures in the tables are upper bounds). The hand-written targets follow the emitted shapes of the tests above, with the record's additions (`v_ptr_int`/`d_ptr_int` fields, `alloc_ptr_int`, `WF` for the range, the amounts and checks of item 5). Each OK target has a twin that fails at the one intended assertion (the "first error" below is the first one Silicon lists, in program order); the vacuity controls `c2_vac_tie`, `c3_vac_tied` (`assert false` at the end of the loop body) fail, so the OK targets are not vacuous.
+
+#### (a) Pointer cells (item 2)
+
+| Target | Shape | Result | Silicon time |
+|---|---|---|---|
+| `a1_address_of_local` | VeriFast's `address_of_local`: `x` and `ptr` cells, `ptrptr := ptr`, `inc(*ptrptr)` (call checks on the loaded pointer, amount `perm(lv)/2`), `z == 1`, scope exits | verifies | 5.7 s |
+| `a1_twin_wrong_value` | `z == 2` | `Assert might fail ... v_z == 2` | 6.0 s |
+| `a1_twin_dangling` | `*p` read after the block of `&y` ended: the loaded pointer's own liveness check | `Assertion t != null ==> perm(lvloc(block_of(t)).lv) > none` (the first and only error) | 6.1 s |
+| `a1_twin_null` | `*pp = NULL; **pp = 5` | `Assertion t != null` | 6.2 s |
+| `a2_loop_ptr_cell` | a loop writing `*pp = &y` over automatic places `x`, `y` (int cells) and `p` (the pointer cell), the `WF` row, the user's `p == x \|\| p == y`, then `**pp` | verifies | 7.4 s |
+| `a2_twin_havoc_no_invariant` | no invariant about the cell's value | first error `t != null ==> perm(lvloc(block_of(t)).lv) > none` (the lifetime error of the havoc), then `t != null`, `perm(t.v_int) > none` | 10.4 s |
+| `a2_wf_row_present` / `a2_twin_wf_row_dropped` | after the loop `assert WF(t)` with no user invariant | verifies / `Assertion t == null \|\| t == loc(...) ...` fails | 9.6 s / 11.0 s |
+| `a3_set_ok` | `set(pp, q)`: `requires owns(*pp) && live(q)`, `ensures owns(*pp) && live(q) && *pp == q` (the callee verified with a body; a caller reads `*pp == y` and `**pp`) | verifies | 9.1 s |
+| `a3_twin_callee_stores_null` / `a3_twin_weak_callee_contract` / `a3_twin_caller_without_cell` | callee stores null / ensures without `*pp == q` / the caller's cell already released | `p_pp.v_ptr_int == p_q` / `t == v_y` / `perm(v_ptrptr.v_ptr_int) == write` (each the only error) | 8.3 s / 8.0 s / 6.0 s |
+
+- **F1 (a case split the record lacks): a pointer loaded from a cell needs the same case splits as a call's pointer result (0037 item 3).** After the loop of `a2_loop_ptr_cell` the value of `*pp` is only known to be `x` or `y`; the load `t := pp.v_ptr_int` followed by `t.d_int` fails with `insufficient permission to access t.d_int` unless `if (v_ptr.v_ptr_int == v_x) { }`, `if (... == v_y) { }` (against every automatic place of the loaded pointer's pointee field, and the liveness cells likewise) come first (`a2_twin_no_case_split`: one error at the `t.d_int` read; with the splits it verifies). The same splits belong at the load of a pointer wherever its value is not a known Ref (after a loop, after a call that stores into the cell). Item 2 must say it, next to item 4's callers' splits (`result_splits`, `lower.cpp` :3431).
+- **F2 (the `WF` row is needed and sufficient):** without `kv > none && kd > none && d_ptr_int ==> WF(v_ptr_int)` the loaded pointer after a loop is not `WF` (`a2_twin_wf_row_dropped`); with it `WF(t)` holds with no user invariant (`a2_wf_row_present`).
+- The loaded pointer's liveness check is Silicon-visible: `a1_twin_dangling` fails there and nowhere earlier; the liveness of a stored pointer (`assert v != null ==> perm(lvloc(block_of(v)).lv) > none` before the store) held in every OK target.
+- **F3 (the loop's places include every cell whose address the body stores or whose liveness a store checks).** In the first draft of `a2_loop_ptr_cell` only the pointer cell was in the invariant: the store `*pp = &y` inside the body then failed its liveness check on `y` (`perm(lvloc(block_of(v_y)).lv) > none`), because a Viper loop body sees only what the invariant holds. So `x` and `y` must be automatic places of that loop (they are, by 0038 item 3: every cell with permission in scope). Item 2's "a store ... is a use (liveness)" is covered by 0038 item 3 and needs no new rule, but the loop-place set must contain a cell the loop only *names* through `&y`; check that `loop_places` collects them.
+
+#### (b) `*result` (item 4)
+
+| Target | Shape | Result | Time |
+|---|---|---|---|
+| `b1_pick_ok` | `int *pick(int *p)`: `requires owns(*p)`, `ensures(r, r == p && owns(*p) && *r == old(*p))`: the read `res.v_int` is plain (`res == p` is an earlier conjunct of the same `ensures`, so the guard implies the framing disjunct); the `f__wf` method has the result-keyed ghost `hv_r_post`, the prior fact `res == p_p ==> hv_r_post == hv_0_post` and no framing assert; a caller reads `*q` after `q := pick(&x)` with the split `if (v_q == v_x) { }` and gets the value | verifies | 6.4 s |
+| `b2_twin_wrong_value` | `*r == old(*p) + 1` | the body's `res.v_int == old(p_p.v_int) + 1`; the caller's `v_z == 7` | 6.9 s |
+| `b3_twin_unframed_chain_wf` | `ensures(r, owns(*p) && *r == 1)`: the read is the chain `((p_p == res) ? res.v_int : 0)`; the method verifies (`*p = 1; return p`) | **only the `f__wf` framing assert fails**: `Assertion p_p == res` | 6.1 s |
+| `b4_twin_live_only_wf` | `ensures(r, r == p && live(p) && *r == 1)`: no atom of the field, `any = false` | `Assertion false` in `f__wf` | 5.6 s |
+| `b5_twin_caller_wrong` | caller asserts 8 | `v_z == 8` | 5.8 s |
+
+- **F4 (what the record's example needs):** for `ensures(r, r == p && owns(*p) && *r == 1)` the read `*r` is evaluated under the guard `res == p`, which implies the disjunct `p_p == res`; `contract_read` (`lower.cpp` :1344, `implied_by`) already makes it a plain read and `f__wf` has no framing assert. The chain and the `f__wf` assert are needed only when the guard does not imply it (`b3`). Unframed, the chain in the *method's* `ensures` is `D ? res.v_int : 0`, which a caller reads as `false` on the `!D` path (a vacuous contract), so the `f__wf` assert is what keeps it sound: `b3` shows it fails alone. Item 4 should say the method itself verifies and only `f__wf` reports.
+
+#### (c) Written atoms (item 5)
+
+Setting (all targets): a Viper loop whose invariant holds, in this order, the counter's bounds, the automatic rows of every place the loop holds (cells `x`, `y` and, where a parameter is not reassigned, the parameter's place, with their snapshots `kl kv kd vs ds` and the guards `gv`/`gl` of `lower.cpp` :4018 for a place equal to an earlier one), then each written atom's rows (`atom_rows` in `gen_c.py`: `q != null && WF(q) && bound`; `NOTAUTO ==> acc(q.v_int, a_v) && acc(q.d_int, a_d) && q.d_int && range`; `q == x_i ==> kv_i == write && kd_i == write` (`reads`: `> none`); `AND_i lvloc(q) != L_i ==> acc(lv, a_l)`; `q == x_i ==> kl_i > none`), with ghost `Perm` amounts assigned before the loop; the case splits of item 5 before the snapshots and at the top of the body; the explicit asserts at entry and after the body (the back edge).
+
+| Target | Shape | Result | Time |
+|---|---|---|---|
+| `c1_reassigned_param_owns` | `moved`'s shape: `p` reassigned (`q := p; p := q`), `owns(*p)` and `*p == 5` in the invariant, a read in the body, `ensures owns(*p) && *p == 5` | verifies | 5.7 s |
+| `c1_twin_no_atom` | the same with no atom (the pinned false alarm) | `perm(v_p.v_int) > none` in the body | 5.2 s |
+| `c2_moving_pointer_tie` / `c2_moving_pointer_no_tie` | `q` moves between cells `x` and `y` (a write through `q` each iteration), the user's `q == x \|\| q == y` / none | verifies / verifies (the atom's `NOTAUTO` part covers a `q` outside `x`, `y`) | 9.4 s / 9.1 s |
+| `c3_p8_gap_no_tie` / `c3_p8_gap_tied` | S28 P8 with the record's full rows: `q := p_p` where `p_p` is a reassigned parameter's place (not automatic), `ensures owns(*p_p)`; the tie `(q0 == p_p) == (q == p_p)` | `perm(p_p.v_int) == write` at the end (the gap) / verifies | 8.3 s / 7.1 s |
+| `c4_reads_ok` / `c4_twin_write_under_reads` | `reads(*q)` (amount `perm(q.v_int)` at entry; fractional parameter), read in the body / a store through it | verifies / `!(perm(v_p.v_int) != write \|\| ...)` | 6.5 s / 9.3 s |
+| `c5_live_ok` / `c5_twin_no_atom` | `live(q)`, the body uses the pointer / no atom | verifies / `v_p != null ==> perm(lvloc(block_of(v_p)).lv) > none` | 7.0 s / 7.9 s |
+| `c6_control_distinct` | `owns(*v_p) && owns(*v_s)`, two reassigned-by-copy parameters' places that are automatic places (`p_p`, `p_s`; the splits and guards between them) with `v_p := p_p`, `v_s := p_s` | verifies | 12.7 s |
+| `c6_two_owns_may_be_equal` | `v_p := c1 ? p_p : p_s`, `v_s := c2 ? p_p : p_s`, with the explicit separation assert | **one error, the explicit assert**: `Assertion v_s != v_p` (no Silicon invariant error follows) | 17.0 s |
+| `c6_twin_no_explicit_check` | the same with the explicit separation assert removed | **verifies** (F5) | 13.3 s |
+| `c9_two_reads_may_be_equal` | `reads(*v_p) && reads(*v_s)` on the same shape, `AND_{k<j} q_j != q_k` in the later atom's `NOTAUTO` | verifies (the second atom takes nothing more when the places are one) | 14.6 s |
+| `c7_consuming_call_in_body` / `c7_twin_no_explicit_check` | the body calls `consume(p)` (`requires owns(*p)`, no `ensures`); with / without the back-edge asserts | the back-edge assert `perm(v_p.v_int) >= a_v0` (only error) / Silicon's own `Loop invariant ... might not be preserved` | 5.2 s / 5.5 s |
+| `c8_no_permission_at_entry` / `c8_twin_no_explicit_check` | no `requires` atom for `p`; with / without the entry asserts | first error `assert v_p != null` (then `offset_of < len`, `perm == write` as separate errors, program order) / three Silicon `Loop invariant ... might not hold on entry` | 4.7 s / 5.5 s |
+| `c10_framing_chain_read` / `c10_twin_plain_read` | a user clause reads `*q` after the atom: the chain `((q == x && kv_x > none) ? x.v_int : ((q == y && kv_y > none) ? y.v_int : ((q == q) ? q.v_int : 0)))` / the plain `v_q.v_int` | verifies / `Contract might not be well-formed. ... insufficient permission to access v_q.v_int` | 8.0 s / 7.0 s |
+
+- **F5 (separation is a spec-meaning check, not a soundness one, for automatic places):** two `owns` atoms on `q` and `s` that name the same *automatic* place verify without the explicit separation assert (`c6_twin_no_explicit_check`): both atoms' automatic rows just say `kv == write` of one place. So the explicit `q != s` assert is the only thing that rejects `owns(*q) && owns(*s)` with `q == s`, and it must be emitted at entry and at the back edge for every pair with an `owns` among atoms of one field, automatic or not; for two non-automatic places Silicon's own exhale also fails, so there the assert only reorders the error.
+- **A second-order requirement (F6):** a loop over several parameter places needs, besides item 5's splits, the method-entry split `if (lvloc(block_of(p_p)) == lvloc(block_of(p_s))) { }` and the `gv`/`gl` guards on the second place's `acc` rows, or Silicon fails `Loop invariant acc(lvloc(block_of(p_s)).lv, kl_ps)` on entry in the shared-cell branch (my first draft of `c6_control_distinct`). The existing `lower.cpp` (:3960-3983, :4018-4072) already has both for atoms of parameters; the written atoms must pass through it (their `q`s are not parameters, so their splits are item 5's).
+- **Order of reporting:** every failing explicit assert is one `assert` statement; Silicon continues after a failed assert, so a missing permission at entry gives a *list* of errors in program order (`c8`: `v_p != null`, `offset_of(v_p) < len(...)`, `perm == write`). The first is the atom's, in source terms; the encoder reports one error per annotation position, as for calls.
+- No spike contradicted record 0040 items 2, 4 or 5 in substance; F1 and F3 are additions to item 2 (the loaded pointer's splits; the loop's places), F4 a clarification of item 4, F5 and F6 of item 5.
+
+#### (d) Timings against S28's
+
+S28's small spikes (P4-P8, one automatic place, one atom) took 4.4-7.0 s at load averages above 150 (`il-inventory.md`, S28 timings). S30's equivalents (`c1`, `c4`, `c5`, `c7`, `c8`, `b*`, `a1`) took 4.7-7.0 s at load 77-145; the heavier shapes took 7-17 s: `c2`/`c3` (two cells, one atom) 7-11 s, `a2` (three places) 7.4-11 s, `a3` (call and a body) 8-9 s, and the two-atom/two-parameter spikes `c6`/`c9` 13-17 s (three automatic places, pair splits, two atoms). The JVM and Z3 start is about 4-5 s of every figure. Nothing is out of line with record 0037's and 0038's estimates; the cost grows with the number of atoms times automatic places (splits are quadratic), as item 5 already says.
+
+
+#### Addendum (after audit round 1): the revised rows of item 5 and how they were validated
+
+The hand-written targets above are the first version of item 5's rows. The audit-revised rows (B3, S1, S3, "Values") were not re-spiked by hand: they were built into `src/vir/lower.cpp` (`written_rows`, `written_checks`, `written_splits`, `written_amounts`, `written_values`) and validated end to end, by the real tests and Silicon, one program per property:
+
+| Revision | Row or check | Validated by (both modes, `tests/memory/`) |
+|---|---|---|
+| **B3** positivity | `g && NV ==> a_v > none && a_d > none`, `g && NL ==> a_l > none` as invariant rows and as entry and back-edge asserts; `a_v > none` in the framing disjunct (`Place::wg` and `kv = a_v`); de-dup `AND_{k<j} (g_k ==> q_j != q_k)` | `loop_written_null_start.c` (verifies: `q == NULL` at entry, the atom's guard false) and `negative/loop_written_null_start_wrong.c`; `loop_written_dedup.c` and `negative/loop_written_dedup_separation.c` (a false-guarded earlier atom does not suppress the later one) |
+| **S1** guarded liveness NOTAUTO | `AND_i (gl_i ==> lvloc(block_of(q)) != L_i)`; the automatic liveness row under `gl_i` (`q == x_i && gl_i ==> kl_i > none`) | `loop_atom_automatic.c` and `_cpp.cpp` (a written atom on an automatic parameter place that may be null), `negative/loop_atom_automatic_post.c`; `loop_written_atom_param.c` |
+| **S3** `reads` | the flag and the range or `WF` row, the `kv > none && kd > none` automatic row, taking what is held (`a_v := perm(q.v_T)`) | `loop_written_reads.c`, `loop_written_reads_owned.c`, `negative/loop_written_reads_write.c`, `negative/loop_written_reads_owned_fraction.c`, `negative/loop_written_owns_on_reads.c` |
+| **S2** splits | between liveness cells of any two atoms, and all written-atom splits again after the loop and after `l_brk` | `loop_written_two_atoms.c`, `loop_written_live.c`, `negative/loop_written_two_atoms_sep.c` |
+| **Values** | `vs := q.v_T` at entry under `g && NV && perm(q.v_T) > none`; row `g && NV ==> q.v_T == vs` when no write in the loop can reach field T (`LoopWrites`: fields, or any written cell), otherwise `g && NV && a_v < write ==> q.v_T == vs`; none when the loop assigns `q` | `loop_invariant_reads_unowned.c` (verifies after this change: `owns(*q) && (i == 0 || *q == 0)` with `q` unassigned in the loop; was `invariant-preserved` before); the whole `tests/memory/loop_*` and `negative/loop_*` set: 332 passed, 0 failed |
+
+The failures of the first end-to-end run are in the session reply; the spikes of this document (c1-c10) remain the evidence that the rows are *accepted* by Silicon (shape and splits); the tests above are the evidence for the revised guards, positivity and values. The `*result` rows (S4) were validated by `result_value.c`, `result_value_cpp.cpp` and `negative/result_value_unframed.c`.

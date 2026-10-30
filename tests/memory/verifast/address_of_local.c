@@ -8,11 +8,11 @@
 // `void f(void)`; a label at the end of a block is `end: ;` (C++ needs a statement); `abort()` needs <stdlib.h>; the unused locals are used by an `assert(*ptr == 0);` (the front end warns about an unused local, and tests are warning-free), and the dead block of `test_goto` (VeriFast's `allow_dead_code`) is behind `if (c == 0)` (the front end warns about a statement it finds unreachable) and assigns where VeriFast initializes.  The three `//~ should_fail`
 // lines are errors here, `lifetime` at the closing brace of the function (or of the loop body) whose local the callee kept; `destroy_half` took
 // half a permission in VeriFast and takes a whole one here (decision 0037: one `owns` atom), so `dispose_half_local` and `dispose_half_local2`
-// keep `destroy`'s shape.  Left out: `address_of_local` and `address_of_local_uintptr_t` (an `int **`, M4.5b1c3), `destroy_half` itself, and
+// keep `destroy`'s shape.  `address_of_local` and `address_of_local_uintptr_t` (an `int **`, decision 0040) end the file, as written but for the dropped ghost `int tmp` after `return`.  Left out: `destroy_half` itself, and
 // `looptrouble` (an unsound VeriFast example, a heap of `void *`).  The `native-ok` check is not asked.
 // Line map (this file : VeriFast's):
 //   21 : 1   28 : 8   35 : 15   44 : 64   61 : 77   73 : 89   85 : 102   97 : 115   109 : 129
-//   123 : 145   130 : 158 (should_fail)   132 : 167   137 : 174 (should_fail)   139 : 176   146 : 185 (should_fail)   149 : 189
+//   123 : 145   130 : 158 (should_fail)   132 : 167   137 : 174 (should_fail)   139 : 176   146 : 185 (should_fail)   149 : 189   162 : 26   177 : 45
 #include <cerastes.h>
 #include <assert.h>
 #include <stdint.h>
@@ -157,4 +157,34 @@ void break_statement(void)
     assert(*ptr == 0);
     break;
   }
+}
+
+void address_of_local(void)
+{
+  int x = 0;
+  {
+    int *ptr = &x;
+    {
+      int **ptrptr = &ptr;
+      inc(*ptrptr);
+      int z = x;
+      assert(z == 1);
+    }
+  }
+  return;
+}
+
+void address_of_local_uintptr_t(void)
+{
+  uintptr_t x = 0;
+  {
+    uintptr_t *ptr = &x;
+    {
+      uintptr_t **ptrptr = &ptr;
+      inc_uintptr_t(*ptrptr);
+      uintptr_t z = x;
+      assert(z == 1);
+    }
+  }
+  return;
 }

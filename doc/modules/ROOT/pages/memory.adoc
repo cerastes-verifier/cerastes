@@ -6,8 +6,9 @@ not null, the object it points to still exists, and the function has the right
 to read or write it. A use of a pointer whose object has ended is an error too,
 even when nothing is read through it, as C and pass:[C++] say.
 
-This version covers pointers to integers, `bool` and enumerations: in local
-variables, as parameters and as results, with contracts that say which objects
+This version covers pointers to integers, `bool` and enumerations, and
+pointers to such pointers (<<pointers-to-pointers>>): in local variables, as
+parameters and as results, with contracts that say which objects
 a function may read or write (<<contracts>>), in loops (<<loops>>) and across
 jumps (<<leaving>>). <<not-yet>> lists what is still rejected.
 
@@ -57,8 +58,9 @@ never equal, and a pointer to an object is never null. `CERASTES_CHECK` and
 include::example$memory/address_comparison.c[tag=source]
 ----
 
-Comparisons of order (`<`, `>`), arithmetic on pointers and conversions between
-pointer types are not supported yet.
+Comparisons of order (`<`, `>`) and arithmetic on pointers are not supported
+yet, nor conversions between pointer types other than adding `const` to the
+object pointed to (<<pointers-to-pointers>>).
 
 A pointer may also point *one past the end* of an object, and C does not say
 whether such a pointer equals a pointer to another object that happens to follow
@@ -90,6 +92,38 @@ warn about it: the object ends as the function returns
 such an address returned through a variable (`int *p = &x; return p;`) is
 reported where the caller first uses it, as
 xref:error-messages.adoc#_lifetime[`lifetime`].
+
+[#pointers-to-pointers]
+== Pointers to pointers
+
+A pointer variable whose address is taken is an object in memory like any
+other, so pointers to pointers (`+int **+`, and deeper) follow the same rules:
+`*pp` reads or writes the pointer that `pp` points to, `+**pp+` the object that
+pointer points to, and each step is checked:
+
+[source,c]
+----
+include::example$memory/pointer_to_pointer.c[tag=source]
+----
+
+Writing `*pp` changes where `p` points. When the pointer stored in `*pp` is
+dangling, reading or writing `+**pp+` is reported as
+xref:error-messages.adoc#_permission[`permission`] and any other use of `*pp`
+as xref:error-messages.adoc#_lifetime[`lifetime`], as for any pointer. In a
+loop, a write through a pointer to a pointer may change every pointer of that
+type, as a write through an `int *` may change every `int` (<<loops>>).
+
+A conversion may add `const` to the object a pointer points to (`+int **+` to
+`int *const *`), but not further down. `+int **+` to `+const int **+` would let a
+`const` object be written through the original pointer, so it is rejected even
+when written as a cast, which compilers accept without a warning; `+int **+` to
+`const int *const *`, which pass:[C++] allows and C does not, is rejected in
+both languages for now.
+
+Two uses of one such object that C does not order, one of them a write
+(`pass:[**pp + (**pp = 1)]`, `(*pp = &y) == *pp`), are rejected, as GCC's
+`-Wsequence-point` warns about them
+(xref:verifying.adoc#side-effects[Side effects in expressions]).
 
 [#contracts]
 == Pointer parameters and contracts
@@ -146,6 +180,24 @@ cerastes_owns(*p)`, and the function tests it before it dereferences `p`:
 include::example$memory/null_or_owned.c[tag=source]
 ----
 
+The attribute `cerastes::owning` on a pointer parameter (or `CERASTES_OWNING`, a macro
+that other compilers read as nothing) says the same in one word: the parameter
+may be null, and when it is not, the function owns its object and gives it back,
+exactly as `p == NULL || cerastes_owns(*p)` in both the `requires` and the
+`ensures` would. The attribute goes before the parameter's declaration or after
+its name, and the contract's other clauses may read `*p` where `p != NULL`:
+
+[source,c]
+----
+include::example$memory/owning_parameter.c[tag=source]
+----
+
+Beside the attribute, an explicit `cerastes_owns(*p)` (which also says that `p`
+is not null) or `p == NULL || cerastes_owns(*p)` takes the attribute's place in
+its clause list; `cerastes_reads(*p)`, `cerastes_live(p)` or an `owns` under
+another condition is rejected. Every declaration of the function carries the
+same `owning` attributes, on the same parameters.
+
 A few more rules:
 
 * A contract may read `*p` only where an `owns` or `reads` of `*p` comes before
@@ -157,7 +209,21 @@ A few more rules:
 * Returning or comparing a pointer parameter uses its value, so the contract must
   say that its object exists: `cerastes_live(p)`, or an `owns` or `reads` of `*p`.
   A pointer result may be related to the parameters (`ensures(r, r == p || r ==
-  q)`).
+  q)`), and its object read as `*r` where an `owns` or `reads` of that object
+  comes before it (`ensures(r, r == p && cerastes_owns(*p) && *r == 0)`).
+* A parameter of type `+int **+` may own the pointer it points to
+  (`cerastes_owns(*pp)`), and its contract may say where that pointer points
+  (`*pp == q`, `cerastes_old(*pp)`). A contract cannot yet say that the object
+  `*pp` points to exists, so the function can store into `*pp` but can use the
+  pointer it reads from `*pp` only when it is null.
+* A contract may not compare pointers whose objects differ in `const`
+  (`r == v` for `int *r` and `const int *v`, or `*pp == v`), nor convert a
+  pointer to one whose object differs in `const` (`(const int *)r`), nor own an
+  object it reaches through a pointer to `const` (`cerastes_owns(*v)` for
+  `const int *v`; a function that only reads it takes `cerastes_reads(*v)`).
+  Otherwise a function whose body is elsewhere could hand its caller a pointer
+  through which a `const` object is written, or write one itself, which C leaves
+  undefined. Each is rejected.
 * A function that takes `cerastes_owns(*p)` in its `requires` and does not give
   it back in its `ensures` keeps the object. If that object is a local variable
   of the caller, the caller cannot end its lifetime: the closing brace of the
@@ -278,10 +344,31 @@ assigns needs an invariant saying where it points (`p == &x || p == &y`). The
 address of a variable in an annotation (`p == &x`) is accepted only when the
 code takes that address too.
 
-A pointer parameter that the function assigns does not take its object into
-loops yet: using that object inside a loop, or returning from inside a loop when
-the `ensures` gives it back, is reported as
-xref:error-messages.adoc#_permission[`permission`].
+A pointer that the function assigns (a pointer local, or a parameter it
+reassigns) takes nothing into a loop by itself. The invariant says what the loop
+holds through it, with `cerastes_owns(*q)`, `cerastes_reads(*q)` or
+`cerastes_live(q)` as in a contract: the loop must hold it when it starts and at
+the end of every iteration, and gives it back after the loop. Without it, an
+access inside the loop is reported as
+xref:error-messages.adoc#_permission[`permission`]:
+
+[source,c]
+----
+include::example$memory/loop_written_ownership.c[tag=source]
+----
+
+Ownership that the loop lacks is reported as
+xref:error-messages.adoc#_permission[`permission`], at the invariant when the
+loop starts without it, and at the closing brace of the body when an iteration
+ends without it. When the loop moves such a pointer
+(`q = &y;`), the invariant must also say where it may point
+(`q == &x || q == &y`), and what the loop held comes back after the loop only for
+the object `q` points to then. Two `owns` of objects that may be one are
+reported too. A loop that moves an owned pointer from the object of one pointer
+parameter to the object of another may be reported at the end of an iteration
+even when it is correct, since the share of each object's lifetime that the
+caller lends may differ; keep one pointer per parameter in such loops. An `owns`, `reads` or `live` in a `do … while (0)` invariant, which
+is checked once like a `CERASTES_CHECK`, or in a measure, is rejected.
 
 [#leaving]
 == Leaving a block
@@ -302,14 +389,18 @@ include::example$memory/leave_block.c[tag=source]
 These are rejected with a diagnostic, never approximated
 (xref:verifying.adoc#not-supported[the full list]):
 
-* a pointer to a pointer, and the address of a pointer variable;
-* `owns`, `reads` or a value through a pointer result (`*r`), and contracts
+* `owns`, `reads` or `live` of an object reached through a pointer read from
+  memory (`+cerastes_owns(**pp)+`, `cerastes_live(*pp)`), and `+**pp+` in a contract
+  or an invariant;
+* `owns` or `reads` of the object of a pointer result (`*r`), and contracts
   that name objects other than those the parameters point to;
-* `owns`, `reads` and `live` in a loop invariant;
+* `owns`, `reads` and `live` in a `do … while (0)` invariant or a measure, and on
+  a pointer variable whose own address is taken;
+* the attribute `cerastes::owning` on anything but a parameter, and `owning(n)`;
 * `restrict` except on a C parameter whose contract owns its object;
 * `void *`, and pointers to structures, unions and functions;
-* conversions between pointer types other than adding `const`, comparisons of
-  order and arithmetic on pointers.
+* conversions between pointer types other than adding `const` to the object
+  pointed to, comparisons of order and arithmetic on pointers.
 
 In C, the compiler's warnings about pointers of incompatible types
 (`long *q = &i;` for an `int i`) are errors under `cerastes verify`.

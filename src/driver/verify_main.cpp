@@ -354,7 +354,10 @@ int verify_command(int argc, char** argv) {
   // C: pointers of incompatible object types are warnings in EDG's C mode and errors in C++ (decision 0032 item 3; P56, audit round 4's
   // reopened item): #42 (`pi == pl`), #144 (`long *pl = pi;`, and `int *c = pc;` from a `const int *`), #513 (`pl = pi;`) and #167 (an
   // incompatible argument).  A conversion the front end accepts there would otherwise reach the encoder as a node it must reject.
+  // C++ has #144 and #167 as discretionary warnings for exactly one shape, `int **` to `const int **` (an initializer, an argument), which clang++ and
+  // g++ reject (it would let `*c = &constant` launder a const; decision 0040 item 2, P62 H1); every other #144/#167 there is already an error.
   if (c_mode) edg.push_back("--diag_error=42,144,167,513");
+  else edg.push_back("--diag_error=144,167");
   for (const std::string& d : a.includes) edg.push_back("-I" + d);
   for (const std::string& m : a.macro_options) edg.push_back(m);
   edg.push_back(a.file);
