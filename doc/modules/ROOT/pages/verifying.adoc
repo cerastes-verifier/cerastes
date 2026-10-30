@@ -787,7 +787,8 @@ The constructs that are rejected in this version are:
 * *Types:* pointers other than those xref:memory.adoc[Memory and ownership]
   describes (pointers to pointers, `void *`, `restrict` other than on a C
   parameter the contract owns, and pointers to structures, unions and functions
-  are rejected, and so are pointer conversions other than adding `const`),
+  are rejected, and so are pointer conversions other than adding `const`; its
+  xref:memory.adoc#not-yet[list] names the rest, such as `owns` in a loop invariant),
   references, arrays, floating point, `volatile`, `_BitInt`,
   vector types, enumerations declared in system headers. Array types, `_BitInt`,
   vector types and class templates with a constant argument

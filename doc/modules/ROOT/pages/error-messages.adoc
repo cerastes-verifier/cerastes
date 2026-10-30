@@ -414,7 +414,11 @@ right is missing:
   parameters of which one owns it;
 * at a `return`, when the function does not hold what its `ensures` promises;
 * at a contract clause that reads `*p` where no `owns` or `reads` of `*p`
-  comes before it (xref:memory.adoc#contracts[Memory and ownership]).
+  comes before it (xref:memory.adoc#contracts[Memory and ownership]);
+* at the closing brace of a loop's body, when an iteration ends without an
+  object the loop started with (a function called in the loop kept it), and at
+  a loop invariant or measure that reads an object the loop does not hold
+  (xref:memory.adoc#loops[Memory and ownership]).
 
 A local variable exists only until its block ends; a pointer to it is then
 *dangling*, and reading or writing through it is undefined behaviour in C and
@@ -445,8 +449,8 @@ include::example$error-messages/permission_fixed.c[tag=source]
 
 A pointer is used after the object it points to may have ended, or an object's
 address may still be in use when its lifetime ends. A use is reported where the
-pointer's value is used; the end of a lifetime at the closing brace or the
-`return` that ends it.
+pointer's value is used; the end of a lifetime at the closing brace, or at the
+`return`, `break`, `continue` or `goto` that ends it.
 
 After its object ends, the value of a pointer is indeterminate in C and
 pass:[C++], and *any* use of it is undefined, not only a dereference: a

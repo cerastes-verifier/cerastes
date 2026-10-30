@@ -255,3 +255,5 @@ contracts, call sites, ghost amounts), in `internal/il-inventory.md`, "M4.5b1b".
 - Completeness cost (audit round 1): returning or comparing a pointer parameter is a use, so the contract must give
   `live(p)` (or an `owns`/`reads` of `*p`): `int *id(int *p) { return p; }` without it fails `lifetime`.
 - Ghost amounts appear in every method whose contract has an atom; programs without pointers keep their Viper.
+
+*2026-10-29, amended by 0038 (M4.5b1c1): item 1 — b1c is three sessions (b1c1, b1c2, b1c3) and owning results move to M4.5d2. Item 5 — `owns`, `reads` and `live` are still contract-only (in a loop invariant they are b1c3's); a heap read in a function's `decreases` is b1c2's. Item 15 — the "lifted by" column: placement and a heap read in a `decreases` → b1c2; `*result` as a value → b1c3; an atom on `*result` and an `ensures` atom with no partner → M4.5d2.*

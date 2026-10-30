@@ -670,6 +670,40 @@ class Lowerer {
       SrcLoc end;                     // the closing brace
     };
     std::vector<Scope> scopes;
+    // Decision 0038 item 7: the number of open scopes at the target of each break/continue (by jump id: for a loop the depth at the loop,
+    // for a switch the depth inside its body's scope) and at each user label (by label id), so a jump exits exactly the scopes above them.
+    std::map<int, size_t> jump_depth;
+    std::map<int, size_t> label_depth;
+    // Decision 0038 item 3: the pointer parameters (by index) the function assigns; their formal's place is not automatic.
+    std::set<int> assigned_params;
+  };
+
+  // A place a loop frames (decision 0038 item 3): a cell, or the place a pointer parameter's `requires` atoms name through the formal.
+  struct Place {
+    bool cell = false;
+    const Var* var = nullptr;   // a cell
+    int param = -1;             // a parameter place: the index of the formal
+    E recv;                     // the Ref: the cell's variable or the formal
+    Type type;                  // the cell's type, or the pointee of the parameter
+    bool value = false;         // the value and flag cells are held (a cell; a parameter with an owns/reads atom)
+    std::string suffix;         // the cell field suffix of `type`
+    std::string label;          // the user's spelling, for messages: `x` or `*p`
+    E gv, gl;                   // the guards of the value/flag and of the liveness conjuncts (null: true)
+    std::string kv, kd, kl, vs, ds;  // the ghost snapshots
+    bool reach = false;         // a write in the loop can reach the value
+  };
+  // A heap read of an invariant or a measure, for the explicit framing assert (decision 0038 item 6).
+  struct InvRead {
+    E ptr;                      // the pointer read through (null: a cell by name)
+    const Var* cell = nullptr;
+    Type type;
+    SrcLoc loc;
+    std::string text;           // the place as the user wrote it
+    E guard;                    // the condition under which the read is evaluated
+  };
+  struct Framing {
+    E cond;
+    low::Meta meta;
   };
 
   void internal_error(const SrcLoc& loc, std::string what) { errors_.push_back(Diag{loc, std::move(what)}); }
@@ -881,6 +915,99 @@ class Lowerer {
     return {cell_value(r, e.var->type), {}};
   }
 
+  // ---- loop invariants and measures over memory (decision 0038 item 6) ----
+
+  // The loop's places and the heap reads recorded so far, set by loop() around the lowering of an invariant or a measure.
+  const std::vector<Place>* inv_places_ = nullptr;
+  std::vector<InvRead> inv_reads_;
+  std::string inv_what_ = "invariant";  // "invariant" or "measure": the word of the messages
+
+  static E inv_dummy(const Type& t) { return t.is_bool() ? low::bool_lit(false) : low::int_lit("0"); }
+  E inv_amount_positive(const Place& pl) { return low::bin(low::BinOp::Gt, low::var(pl.kv), low::no_perm()); }
+
+  // A cell read by name in an invariant or a measure: the value, guarded by its own condition `kv > none` (a chain of one disjunct), and its flag as an
+  // `uninitialized` obligation clause (chain-guarded too).  The explicit framing assert (permission) is loop()'s.
+  LV inv_cell(const Expr& e, const E& guard, const Deps& gdep, Full& full) {
+    const Place* pl = nullptr;
+    if (inv_places_ != nullptr)
+      for (const Place& p : *inv_places_)
+        if (p.cell && p.var == e.var) pl = &p;
+    if (pl == nullptr) {
+      internal_error(e.loc, "a cell read in a loop annotation has no place in the loop's frame");
+      return {inv_dummy(e.type), {}};
+    }
+    InvRead r;
+    r.cell = e.var;
+    r.type = e.var->type;
+    r.loc = e.loc;
+    r.text = e.var->name;
+    r.guard = guard;
+    inv_reads_.push_back(std::move(r));
+    // The flag (decision 0038 item 6, amended): an invariant that reads a cell states that it is initialized.  The obligation is an invariant
+    // clause (`uninitialized`), its flag read chain-guarded like the value, so no `perm` appears.
+    obl(full, guard, gdep,
+        low::ite(low::bin(low::BinOp::Gt, low::var(pl->kd), low::no_perm()), cell_flag(low::var(var_name(*e.var)), e.var->type), low::bool_lit(false)), {},
+        meta("uninitialized", e.loc, "this loop " + inv_what_ + " reads `" + e.var->name + "` before it is given a value"));
+    return {low::ite(inv_amount_positive(*pl), cell_value(low::var(var_name(*e.var)), e.var->type), inv_dummy(e.type)), {}};
+  }
+
+  // `*q` in an invariant or a measure: the chain `(q == x_1 && kv_1 > none ? q.v : (q == x_2 && ... : dummy))` over the places of the field.
+  LV inv_deref(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full) {
+    LV p = lower(*e.a, env, guard, gdep, full);
+    const Type& t = e.type;
+    const std::string sfx = cell_suffix(t);
+    InvRead r;
+    r.ptr = p.e;
+    r.type = t;
+    r.loc = e.loc;
+    r.text = e.c_text.empty() ? (e.a->c_text.empty() ? std::string() : "*" + e.a->c_text) : e.c_text;
+    r.guard = guard;
+    inv_reads_.push_back(r);
+    const E read = cell_value(p.e, t);
+    E v = inv_dummy(t);
+    if (inv_places_ != nullptr) {
+      std::vector<const Place*> ps;
+      for (const Place& pl : *inv_places_)
+        if (pl.value && pl.suffix == sfx) ps.push_back(&pl);
+      for (size_t i = ps.size(); i-- > 0;) v = low::ite(inv_place_disjunct(p.e, *ps[i]), read, v);
+      // The flag, chain-guarded the same way (see inv_cell): an `uninitialized` obligation clause.
+      E f = low::bool_lit(false);
+      for (size_t i = ps.size(); i-- > 0;)
+        f = low::ite(low::and_(low::bin(low::BinOp::Eq, p.e, ps[i]->recv), low::bin(low::BinOp::Gt, low::var(ps[i]->kd), low::no_perm())),
+                     cell_flag(p.e, t), f);
+      obl(full, guard, gdep, f, p.dep,
+          meta("uninitialized", e.loc, "this loop " + inv_what_ + " reads " + quoted(r.text, "an object") + " before it is given a value"));
+    } else {
+      obl(full, guard, gdep, low::bool_lit(false), p.dep,
+          meta("uninitialized", e.loc, "this loop " + inv_what_ + " reads " + quoted(r.text, "an object") + " before it is given a value"));
+    }
+    return {v, p.dep};
+  }
+
+  // `q == place && kv > none`: the pointer designates the place, which the loop holds.
+  E inv_place_disjunct(const E& q, const Place& pl) {
+    return low::bin(low::BinOp::And, low::bin(low::BinOp::Eq, q, pl.recv), inv_amount_positive(pl));
+  }
+
+  // The explicit framing condition of one read (decision 0038 item 6): `prior && guard ==> OR_i D_i`.
+  E framing_condition(const InvRead& r, const E& prior) {
+    E any;
+    if (r.cell != nullptr) {
+      for (const Place& pl : *inv_places_)
+        if (pl.cell && pl.var == r.cell) any = inv_amount_positive(pl);
+      if (!any) any = low::bool_lit(false);
+    } else {
+      const std::string sfx = cell_suffix(r.type);
+      for (const Place& pl : *inv_places_) {
+        if (!pl.value || pl.suffix != sfx) continue;
+        const E d = inv_place_disjunct(r.ptr, pl);
+        any = any ? low::bin(low::BinOp::Or, any, d) : d;
+      }
+      if (!any) any = low::bool_lit(false);
+    }
+    return low::implies(low::and_(prior, r.guard), any);
+  }
+
   // A cell written by name (`x = e;`, the declaration's initializer, `x += e;`), after the full expression of its value: the permission is
   // the function's (`internal`), then both fields are written.
   void write_cell(std::vector<low::LStmt>& out, const Var& x, const E& value, const SrcLoc& at) {
@@ -893,6 +1020,7 @@ class Lowerer {
   // `*p` as a read (decision 0032 item 6): the null check, the permission check (which is also the liveness check of this use, 0028 item
   // 3a), the flag; the value `p.v_<t>`.
   LV deref(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full) {
+    if (cmode_ == CMode::Inv) return inv_deref(e, env, guard, gdep, full);
     if (cmode_ != CMode::None) return contract_read(e, env, guard, gdep, full);
     LV p = lower(*e.a, env, guard, gdep, full);
     const std::string ptr_text = e.a->c_text;
@@ -978,8 +1106,9 @@ class Lowerer {
   // How a contract expression is being lowered.  Method: a clause of the function's own Viper method (atoms are `acc` assertions, reads are heap
   // reads, `old` is Viper's); Wf: the well-formedness method (no heap: reads are ghost value formals, atoms their pure facts); Call: a callee's
   // value `requires` over the argument values at a call (the atoms were asserted one by one, so they lower to `true`); Ret: a value `ensures`
-  // asserted at a `return` (atoms were asserted, `old` is Viper's).  None: code, an invariant, a measure.
-  enum class CMode { None, Method, Wf, Call, Ret };
+  // asserted at a `return` (atoms were asserted, `old` is Viper's).  None: code.  Inv: a loop invariant or measure (decision 0038 item 6): `==` is
+  // identity, a pointer use has no liveness check, and a cell or `*q` read is a chain over the framing disjuncts with an `uninitialized` obligation clause for its flag.
+  enum class CMode { None, Method, Wf, Call, Ret, Inv };
 
   struct FnAtoms {
     std::vector<AtomSite> sites;               // contract_atoms: the requires atoms first
@@ -1198,7 +1327,7 @@ class Lowerer {
           const auto it = shared_.find(&e);  // the old value of `x++`: read once (decision 0020)
           if (it != shared_.end()) return it->second;
         }
-        if (e.var->address_taken) return read_cell(e, guard, gdep, full);
+        if (e.var->address_taken) return cmode_ == CMode::Inv ? inv_cell(e, guard, gdep, full) : read_cell(e, guard, gdep, full);
         if (in_full_ && written_.count(e.var->id) != 0) return snapshot(e, guard, gdep, full);
         if (flagged(*e.var))  // a read of a local declared without an initializer: its flag must be set (decision 0019 item 4)
           obl(full, guard, gdep, low::var(flag_name(*e.var)), {},
@@ -1271,7 +1400,7 @@ class Lowerer {
       }
       case Expr::Kind::Deref: return deref(e, env, guard, gdep, full);
       case Expr::Kind::Atom:
-        if (cmode_ == CMode::None) {
+        if (cmode_ == CMode::None || cmode_ == CMode::Inv) {
           internal_error(e.loc, "a permission atom outside a contract reached lowering");
           return {low::bool_lit(true), {}};
         }
@@ -2533,9 +2662,18 @@ class Lowerer {
       case Stmt::Kind::Case:
         internal_error(s.loc, "a case label outside the body of its switch reached lowering");
         break;
-      case Stmt::Kind::Break: jump(out, "l_brk__" + std::to_string(s.jump_id)); break;
-      case Stmt::Kind::Continue: jump(out, "l_cont__" + std::to_string(s.jump_id)); break;
-      case Stmt::Kind::Goto: jump(out, user_label(s)); break;
+      case Stmt::Kind::Break:
+        leave_to(out, fn_.jump_depth, s, s.loc);
+        jump(out, "l_brk__" + std::to_string(s.jump_id));
+        break;
+      case Stmt::Kind::Continue:
+        leave_to(out, fn_.jump_depth, s, s.loc);
+        jump(out, "l_cont__" + std::to_string(s.jump_id));
+        break;
+      case Stmt::Kind::Goto:
+        leave_to(out, fn_.label_depth, s, s.loc);
+        jump(out, user_label(s));
+        break;
       case Stmt::Kind::Label:
         if (user_targets_.count(s.jump_id) != 0) label(out, user_label(s));
         break;
@@ -2543,6 +2681,44 @@ class Lowerer {
   }
 
   // ---- jumps (decision 0014) ----
+
+  // A jump leaves every open block above the depth of its target (decision 0038 item 7): the scope exit of 0032 item 8 for each block that holds
+  // cells, innermost first, reported at the jump.  `depths` maps the jump's id to the number of scopes open at its target.
+  void leave_to(std::vector<low::LStmt>& out, const std::map<int, size_t>& depths, const Stmt& s, const SrcLoc& at) {
+    const auto it = depths.find(s.jump_id);
+    if (it == depths.end()) {
+      internal_error(s.loc, "a jump whose target was not seen reached lowering");
+      return;
+    }
+    for (size_t k = fn_.scopes.size(); k-- > it->second;) scope_exit(out, fn_.scopes[k].cells, at);
+  }
+
+  // The number of scopes open at each user label (the lowering opens a scope for each block, and each switch body, that declares a cell).
+  void label_depths(const Stmt& s, size_t depth) {
+    switch (s.kind) {
+      case Stmt::Kind::Label: fn_.label_depth[s.jump_id] = depth; break;
+      case Stmt::Kind::If:
+        if (s.then_body != nullptr) label_depths(*s.then_body, depth);
+        if (s.else_body != nullptr) label_depths(*s.else_body, depth);
+        break;
+      case Stmt::Kind::While:
+        if (s.body != nullptr) label_depths(*s.body, depth);
+        if (s.step != nullptr) label_depths(*s.step, depth);
+        break;
+      case Stmt::Kind::Switch:
+        if (s.body != nullptr) {
+          const size_t d = depth + (cells_of(*s.body).empty() ? 0 : 1);
+          for (const Stmt* c : s.body->stmts) label_depths(*c, d);
+        }
+        break;
+      case Stmt::Kind::Block: {
+        const size_t d = depth + (cells_of(s).empty() ? 0 : 1);
+        for (const Stmt* c : s.stmts) label_depths(*c, d);
+        break;
+      }
+      default: break;
+    }
+  }
 
   void jump(std::vector<low::LStmt>& out, std::string label) {
     low::LStmt g;
@@ -2644,10 +2820,9 @@ class Lowerer {
       }
       ++index;
     }
-    if (!body_cells.empty()) {
-      if (breaks.count(s.jump_id) != 0) internal_error(s.loc, "a `break` out of a switch body that declares a cell reached lowering (decision 0032 item 10)");
-      fn_.scopes.push_back(Fn::Scope{body_cells, s.body->end_loc});
-    }
+    if (!body_cells.empty()) fn_.scopes.push_back(Fn::Scope{body_cells, s.body->end_loc});
+    // A `break` lands before the body's own scope exit, which runs once at the label: it leaves only the blocks nested inside the body (0038 item 7).
+    fn_.jump_depth[s.jump_id] = fn_.scopes.size();
     const bool need_break_label = !has_default || breaks.count(s.jump_id) != 0;
     jump(out, has_default ? "l_default__" + n : "l_brk__" + n);
     index = 0;
@@ -2905,15 +3080,229 @@ class Lowerer {
     }
   }
 
-  // A loop.  Its invariants are, in order: the automatic range invariant of each outer local the loop assigns;
-  // then, for each user invariant, the obligations of its own expression (guarded by the earlier user
-  // invariants) and the invariant itself; then the obligations of the loop condition (guarded by all user
+  // ---- loops over memory (decision 0038) ----
+
+  // Whether an expression or a statement touches memory: a pointer-typed node, a cell, `&`, `*` or a store (decision 0038 item 3).
+  static bool expr_touches(const Expr* e) {
+    if (e == nullptr) return false;
+    if (e->type.is_ptr()) return true;
+    switch (e->kind) {
+      case Expr::Kind::Local: if (e->var != nullptr && (e->var->address_taken || e->var->type.is_ptr())) return true; break;
+      case Expr::Kind::AddrOf: case Expr::Kind::Deref: case Expr::Kind::Atom: return true;
+      default: break;
+    }
+    for (const Expr* x : {e->a, e->b, e->c})
+      if (expr_touches(x)) return true;
+    for (const Expr* x : e->args)
+      if (expr_touches(x)) return true;
+    return false;
+  }
+
+  static bool stmt_touches(const Stmt* s) {
+    if (s == nullptr) return false;
+    switch (s->kind) {
+      case Stmt::Kind::Store: return true;
+      case Stmt::Kind::Decl: case Stmt::Kind::Assign:
+        if (s->var != nullptr && (s->var->address_taken || s->var->type.is_ptr())) return true;
+        return expr_touches(s->expr);
+      case Stmt::Kind::If: return expr_touches(s->expr) || stmt_touches(s->then_body) || stmt_touches(s->else_body);
+      case Stmt::Kind::While: {
+        if (expr_touches(s->expr) || stmt_touches(s->body) || stmt_touches(s->step)) return true;
+        for (const Clause& c : s->invariants)
+          if (expr_touches(c.expr)) return true;
+        for (const Clause& c : s->measure)
+          if (expr_touches(c.expr)) return true;
+        return false;
+      }
+      case Stmt::Kind::Switch: return expr_touches(s->expr) || stmt_touches(s->body);
+      case Stmt::Kind::Block:
+        for (const Stmt* c : s->stmts)
+          if (stmt_touches(c)) return true;
+        return false;
+      case Stmt::Kind::Case: case Stmt::Kind::Break: case Stmt::Kind::Continue: case Stmt::Kind::Goto: case Stmt::Kind::Label: return false;
+      default: return expr_touches(s->expr);  // ExprStmt, Return, Check
+    }
+  }
+
+  // The `return`s and `goto`s of a statement, and the labels in it (decision 0038 item 3: a `return`, or a `goto` to a label outside the loop).
+  static void exits_of(const Stmt* s, bool& has_return, std::set<int>& gotos, std::set<int>& labels) {
+    if (s == nullptr) return;
+    switch (s->kind) {
+      case Stmt::Kind::Return: has_return = true; break;
+      case Stmt::Kind::Goto: gotos.insert(s->jump_id); break;
+      case Stmt::Kind::Label: labels.insert(s->jump_id); break;
+      case Stmt::Kind::If: exits_of(s->then_body, has_return, gotos, labels); exits_of(s->else_body, has_return, gotos, labels); break;
+      case Stmt::Kind::While: exits_of(s->body, has_return, gotos, labels); exits_of(s->step, has_return, gotos, labels); break;
+      case Stmt::Kind::Switch: exits_of(s->body, has_return, gotos, labels); break;
+      case Stmt::Kind::Block:
+        for (const Stmt* c : s->stmts) exits_of(c, has_return, gotos, labels);
+        break;
+      default: break;
+    }
+  }
+
+  // The writes a loop can make to memory (decision 0038 item 3): the cells it assigns by name, and the cell fields a store through a pointer, or a
+  // call of a function that owns a cell of that field (Viper havocs what a callee owns), can write.
+  struct LoopWrites {
+    std::set<std::string> fields;
+    std::set<int> cells;
+  };
+
+  void writes_in_expr(const Expr* e, LoopWrites& w) {
+    if (e == nullptr) return;
+    if (e->kind == Expr::Kind::Call && e->callee != nullptr)
+      for (const AtomSite& site : atoms_of(*e->callee).sites)
+        if (!site.in_ensures && site.atom->atom == AtomKind::Owns) w.fields.insert(cell_suffix(site_pointee(site)));
+    for (const Expr* x : {e->a, e->b, e->c}) writes_in_expr(x, w);
+    for (const Expr* x : e->args) writes_in_expr(x, w);
+  }
+
+  void writes_in(const Stmt* s, LoopWrites& w) {
+    if (s == nullptr) return;
+    switch (s->kind) {
+      case Stmt::Kind::Store:
+        if (s->addr != nullptr && s->addr->type.pointee != nullptr) w.fields.insert(cell_suffix(*s->addr->type.pointee));
+        writes_in_expr(s->addr, w);
+        writes_in_expr(s->expr, w);
+        break;
+      case Stmt::Kind::Decl: case Stmt::Kind::Assign:
+        if (s->var != nullptr && s->var->address_taken && s->expr != nullptr) w.cells.insert(s->var->id);
+        writes_in_expr(s->expr, w);
+        break;
+      case Stmt::Kind::If:
+        writes_in_expr(s->expr, w);
+        writes_in(s->then_body, w);
+        writes_in(s->else_body, w);
+        break;
+      case Stmt::Kind::While:
+        writes_in_expr(s->expr, w);
+        writes_in(s->body, w);
+        writes_in(s->step, w);
+        break;
+      case Stmt::Kind::Switch:
+        writes_in_expr(s->expr, w);
+        writes_in(s->body, w);
+        break;
+      case Stmt::Kind::Block:
+        for (const Stmt* c : s->stmts) writes_in(c, w);
+        break;
+      case Stmt::Kind::Case: case Stmt::Kind::Break: case Stmt::Kind::Continue: case Stmt::Kind::Goto: case Stmt::Kind::Label: break;
+      default: writes_in_expr(s->expr, w); break;  // ExprStmt, Return, Check
+    }
+  }
+
+  // The places a loop frames (decision 0038 item 3), in order: the parameters' places (the formal's value and flag cells of an `owns`/`reads` atom of
+  // the `requires`, and one liveness cell per parameter with an atom) of the parameters the function never assigns, then every cell of every open
+  // block.  `with_atoms` lists every parameter with an atom (assigned or not), for the case splits.
+  std::vector<Place> loop_places(int loop_number, const LoopWrites& writes, std::vector<int>* with_atoms) {
+    std::vector<Place> places;
+    const Function& f = *fn_.f;
+    const FnAtoms& fa = atoms_of(f);
+    const std::string suffix_of_loop = "__" + std::to_string(loop_number);
+    std::set<int> atom_params, value_params;
+    for (int i = 0; i < fa.nreq; ++i) {
+      const AtomSite& site = fa.sites[static_cast<size_t>(i)];
+      atom_params.insert(site_param(site));
+      if (site_takes_cell(site)) value_params.insert(site_param(site));
+    }
+    if (with_atoms != nullptr) with_atoms->assign(atom_params.begin(), atom_params.end());
+    auto name = [&](Place& pl, const std::string& tag) {
+      pl.kv = "kv_" + tag + suffix_of_loop;
+      pl.kd = "kd_" + tag + suffix_of_loop;
+      pl.kl = "kl_" + tag + suffix_of_loop;
+      pl.vs = "vs_" + tag + suffix_of_loop;
+      pl.ds = "ds_" + tag + suffix_of_loop;
+    };
+    std::vector<size_t> earlier;  // the indexes in `places` of the parameter places so far
+    for (int k : atom_params) {
+      if (fn_.assigned_params.count(k) != 0) continue;
+      const Type& pt = f.params[static_cast<size_t>(k)].type;
+      if (pt.pointee == nullptr) continue;
+      Place pl;
+      pl.param = k;
+      pl.recv = low::var(formal_name(f, k));
+      pl.type = *pt.pointee;
+      pl.value = value_params.count(k) != 0;
+      pl.suffix = cell_suffix(pl.type);
+      const std::string& c = f.params[static_cast<size_t>(k)].name;
+      pl.label = c.empty() ? std::string() : "*" + c;
+      for (const AtomSite& site : fa.sites)
+        if (site_param(site) == k && !site.atom->a->c_text.empty()) { pl.label = "*" + site.atom->a->c_text; break; }
+      name(pl, formal_name(f, k));
+      pl.gv = low::bin(low::BinOp::Ne, pl.recv, low::null_());
+      pl.gl = pl.gv;
+      for (size_t j : earlier) {
+        const Place& o = places[j];
+        if (pl.value && o.value && o.suffix == pl.suffix) pl.gv = low::and_(pl.gv, low::bin(low::BinOp::Ne, pl.recv, o.recv));
+        pl.gl = low::and_(pl.gl, low::implies(low::bin(low::BinOp::Ne, o.recv, low::null_()),
+                                              low::bin(low::BinOp::Ne, live_cell(pl.recv), live_cell(o.recv))));
+      }
+      earlier.push_back(places.size());
+      places.push_back(std::move(pl));
+    }
+    for (const Fn::Scope& sc : fn_.scopes)
+      for (const Var* cell : sc.cells) {
+        Place pl;
+        pl.cell = true;
+        pl.var = cell;
+        pl.recv = low::var(var_name(*cell));
+        pl.type = cell->type;
+        pl.value = true;
+        pl.suffix = cell_suffix(cell->type);
+        pl.label = cell->name;
+        name(pl, var_name(*cell));
+        places.push_back(std::move(pl));
+      }
+    // A parameter place whose atom can be false (`c == 0 || owns(*p)`) holds nothing on that path, and nothing tells Silicon that `p` is not a cell:
+    // its snapshot would pick up the cell's permission and the invariant would demand it twice.  A parameter place is therefore counted only when it
+    // is no cell (when it is one, the cell's own conjunct holds it); audit round 2, B1.
+    for (Place& pl : places) {
+      if (pl.cell) continue;
+      for (const Place& c : places) {
+        if (!c.cell) continue;
+        if (pl.value && c.suffix == pl.suffix) pl.gv = low::and_(pl.gv, low::bin(low::BinOp::Ne, pl.recv, c.recv));
+        pl.gl = low::and_(pl.gl, low::bin(low::BinOp::Ne, live_cell(pl.recv), live_cell(c.recv)));
+      }
+    }
+    for (Place& pl : places) {
+      if (!pl.value) continue;
+      pl.reach = writes.fields.count(pl.suffix) != 0 || (pl.cell && writes.cells.count(pl.var->id) != 0);
+    }
+    return places;
+  }
+
+  // One automatic conjunct: an `internal` row (provable by construction; a failure is a cerastes bug, decision 0038 item 3).
+  low::LInvariant auto_invariant(E expr, const SrcLoc& loc) {
+    low::LInvariant inv;
+    inv.expr = std::move(expr);
+    for (const char* id : {"invariant.not.established", "invariant.not.preserved"}) {
+      low::Meta m;
+      m.category = "internal";
+      m.loc = loc;
+      m.message = "internal check: an automatic permission invariant of this loop (decision 0038 item 3)";
+      inv.checks.push_back(low::Check{id, std::move(m)});
+    }
+    return inv;
+  }
+
+  void case_split(std::vector<low::LStmt>& out, E cond) {
+    low::LStmt st;
+    st.kind = low::LStmt::Kind::CaseSplit;
+    st.expr = std::move(cond);
+    out.push_back(std::move(st));
+  }
+
+  // A loop.  Its invariants are, in order: the automatic range invariant of each outer local the loop assigns; the automatic permission
+  // invariants of the loop's places (decision 0038 item 3); then, for each user invariant, the obligations of its own expression (guarded by the
+  // earlier user invariants) and the invariant itself; then the obligations of the loop condition (guarded by all user
   // invariants).  An obligation as an invariant clause is checked exactly where 0012 item 8 asks: before the
   // first evaluation (on entry) and before each next one (preservation), and it is then known inside the body.
   //
   // Decision 0014: a `do` loop is `while (true)` with the condition's obligations and the exit test at the end of the body
-  // (item 5); a `for` loop's step follows the `continue` label; `do ... while (0)` is no loop at all (do_once).
+  // (item 5); a `for` loop's step follows the `continue` label; `do ... while (0)` is no loop at all (do_once).  Decision 0038 item 2: a
+  // condition that touches memory is tested at the top of the body, like one with a side effect.
   void loop(const Stmt& s, std::vector<low::LStmt>& out) {
+    fn_.jump_depth[s.jump_id] = fn_.scopes.size();  // a break or continue leaves every scope opened inside the loop (decision 0038 item 7)
     if (s.form == LoopForm::DoOnce) {
       do_once(s, out);
       return;
@@ -2926,13 +3315,34 @@ class Lowerer {
     scan(*s.body, assigned, declared);
     if (s.step != nullptr) scan(*s.step, assigned, declared);
     scan_expr(s.expr, assigned);  // the loop's own condition (a side effect in it assigns, decision 0020)
-    // A condition with a side effect is evaluated inside the body, at the top (the `do` shape of 0014 item 5 moved up): the invariants
-    // and the measure stay where C evaluates the condition, and its obligations are asserted at every evaluation.
-    const bool top_test = !is_do && has_effect(*s.expr);
+
+    // Decision 0038 item 3: a loop that touches memory, or whose body leaves the function or a block that holds a place while the function holds
+    // one, carries every place the function holds.
+    const int loop_number = fn_.nloop++;
+    LoopWrites writes;
+    writes_in(&s, writes);
+    std::vector<int> atom_params;
+    std::vector<Place> places = loop_places(loop_number, writes, &atom_params);
+    bool frame = stmt_touches(&s);
+    if (!frame && !places.empty()) {
+      bool has_return = false;
+      std::set<int> gotos, labels;
+      exits_of(s.body, has_return, gotos, labels);
+      exits_of(s.step, has_return, gotos, labels);
+      bool outward = false;
+      for (int g : gotos)
+        if (labels.count(g) == 0) outward = true;
+      frame = has_return || outward;
+    }
+    if (!frame) places.clear();
+
+    // A condition with a side effect, a call or a memory access is evaluated inside the body, at the top (the `do` shape of 0014 item 5 moved
+    // up): the invariants and the measure stay where C evaluates the condition, and its obligations are asserted at every evaluation.
+    const bool top_test = !is_do && (has_effect(*s.expr) || expr_touches(s.expr));
     for (int id : assigned) {
       if (declared.count(id) != 0) continue;
       const Var& v = *fn_.f->locals()[static_cast<size_t>(id)];
-      if (!v.type.is_int()) continue;
+      if (!v.type.is_int() || v.address_taken) continue;  // a cell is a Ref: its range is the place's conjunct (decision 0038 item 3)
       const dec::Range r = dec::range_of(*v.type.int_type);
       low::LInvariant inv;
       inv.expr = low::in_range(low::var(var_name(v)), r.lo, opt_.weaken_auto_invariant ? r.lo : r.hi);
@@ -2948,7 +3358,6 @@ class Lowerer {
 
     // Decision 0019 item 4: Viper havocs the flag of a variable the loop assigns and that is declared outside it.  A snapshot of
     // the flag before the loop and the invariant `snapshot ==> flag` keep a value given before the loop known inside it.
-    const int loop_number = fn_.nloop++;
     for (int id : assigned) {
       if (declared.count(id) != 0 || fn_.flagged.count(id) == 0) continue;
       const Var& v = *fn_.f->locals()[static_cast<size_t>(id)];
@@ -2967,23 +3376,136 @@ class Lowerer {
       if (!opt_.drop_snapshot_invariant) w.invariants.push_back(std::move(inv));
     }
 
+    // The loop's places (decision 0038 item 3): the case splits, the snapshots, then the conjuncts.
+    std::vector<low::LStmt> entry;  // right before the Viper loop
+    std::vector<Framing> framings;
+    if (!places.empty()) {
+      using low::BinOp;
+      // Silicon must branch on which places are one before it reads their permissions (S28 P3): the pairs of parameter places of one field, the
+      // pairs of liveness cells, and a place against every other parameter with an atom of its field.
+      std::vector<const Place*> pparams;
+      for (const Place& pl : places)
+        if (!pl.cell) pparams.push_back(&pl);
+      auto param_type = [&](int k) { return cell_suffix(*fn_.f->params[static_cast<size_t>(k)].type.pointee); };
+      const FnAtoms& fa = atoms_of(*fn_.f);
+      std::set<int> value_params;
+      for (int i = 0; i < fa.nreq; ++i)
+        if (site_takes_cell(fa.sites[static_cast<size_t>(i)])) value_params.insert(site_param(fa.sites[static_cast<size_t>(i)]));
+      std::set<std::pair<int, int>> split_cells, split_lives;
+      for (const Place* a : pparams)
+        for (int k : atom_params) {
+          if (k == a->param) continue;
+          const std::pair<int, int> key{std::min(a->param, k), std::max(a->param, k)};
+          if (a->value && value_params.count(k) != 0 && param_type(k) == a->suffix && split_cells.insert(key).second)
+            case_split(entry, low::bin(BinOp::Eq, low::var(formal_name(*fn_.f, key.second)), low::var(formal_name(*fn_.f, key.first))));
+        }
+      for (const Place* a : pparams)
+        for (int k : atom_params) {
+          if (k == a->param) continue;
+          const std::pair<int, int> key{std::min(a->param, k), std::max(a->param, k)};
+          if (split_lives.insert(key).second)
+            case_split(entry, low::bin(BinOp::Eq, live_cell(low::var(formal_name(*fn_.f, key.second))), live_cell(low::var(formal_name(*fn_.f, key.first)))));
+        }
+      // A parameter place against each cell (B1): its snapshot must not pick up a cell's permission.
+      for (const Place* a : pparams)
+        for (const Place& c : places) {
+          if (!c.cell) continue;
+          if (a->value && c.suffix == a->suffix) case_split(entry, low::bin(BinOp::Eq, a->recv, c.recv));
+        }
+      for (const Place* a : pparams)
+        for (const Place& c : places)
+          if (c.cell) case_split(entry, low::bin(BinOp::Eq, live_cell(a->recv), live_cell(c.recv)));
+      for (const Place& pl : places) {
+        fn_.snapshots.push_back(low::LVar{pl.kl, low::LType::Perm});
+        assign(entry, pl.kl, live_perm(pl.recv));
+        if (!pl.value) continue;
+        fn_.snapshots.push_back(low::LVar{pl.kv, low::LType::Perm});
+        fn_.snapshots.push_back(low::LVar{pl.kd, low::LType::Perm});
+        fn_.snapshots.push_back(low::LVar{pl.vs, pl.type.is_bool() ? low::LType::Bool : low::LType::Int});
+        fn_.snapshots.push_back(low::LVar{pl.ds, low::LType::Bool});
+        assign(entry, pl.kv, value_perm(pl.recv, pl.type));
+        assign(entry, pl.kd, flag_perm(pl.recv, pl.type));
+        assign(entry, pl.ds, low::bool_lit(false));
+        low::LStmt fl;
+        fl.kind = low::LStmt::Kind::If;
+        fl.expr = low::bin(BinOp::Gt, low::var(pl.kd), low::no_perm());
+        assign(fl.then_body, pl.ds, cell_flag(pl.recv, pl.type));
+        entry.push_back(std::move(fl));
+        low::LStmt vl;
+        vl.kind = low::LStmt::Kind::If;
+        vl.expr = low::bin(BinOp::Gt, low::var(pl.kv), low::no_perm());
+        assign(vl.then_body, pl.vs, cell_value(pl.recv, pl.type));
+        entry.push_back(std::move(vl));
+      }
+      // The conjuncts: every `acc` first (so every read after it is framed), then the values and the flags.
+      const E none = low::no_perm(), write = low::write_perm();
+      for (const Place& pl : places) {
+        if (pl.value) {
+          E acc = low::bin(BinOp::And, low::acc(pl.recv, "v_" + pl.suffix, low::var(pl.kv)), low::acc(pl.recv, "d_" + pl.suffix, low::var(pl.kd)));
+          w.invariants.push_back(auto_invariant(low::implies(pl.gv, acc), s.loc));
+        }
+        w.invariants.push_back(auto_invariant(low::implies(pl.gl, low::acc(live_cell(pl.recv), "lv", low::var(pl.kl))), s.loc));
+      }
+      for (const Place& pl : places) {
+        if (!pl.value) continue;
+        const E kv = low::var(pl.kv), kd = low::var(pl.kd);
+        const E v = cell_value(pl.recv, pl.type);
+        const E same = low::bin(BinOp::Eq, v, low::var(pl.vs));
+        // A parameter place's rows are guarded by its `gv` like its `acc` (false only for a null place, or one that is the same Ref as an earlier
+        // place of the field, whose own rows constrain that location with the same snapshot); a cell's `gv` is null (audit re-audit of B1).
+        auto rows = [&](const E& antecedent) { return low::and_(pl.gv, antecedent); };
+        if (!pl.reach) {
+          w.invariants.push_back(auto_invariant(low::implies(rows(low::bin(BinOp::Gt, kv, none)), same), s.loc));
+        } else {
+          w.invariants.push_back(auto_invariant(
+              low::implies(rows(low::and_(low::bin(BinOp::Lt, none, kv), low::bin(BinOp::Lt, kv, write))), same), s.loc));
+          if (const E range = cell_range_inv(pl.recv, pl.type)) {
+            const E held = low::and_(low::and_(low::bin(BinOp::Gt, kv, none), low::bin(BinOp::Gt, kd, none)), cell_flag(pl.recv, pl.type));
+            w.invariants.push_back(auto_invariant(low::implies(rows(held), range), s.loc));
+          }
+        }
+        w.invariants.push_back(auto_invariant(
+            low::implies(rows(low::and_(low::bin(BinOp::Gt, kd, none), low::var(pl.ds))), cell_flag(pl.recv, pl.type)), s.loc));
+      }
+    }
+
     E prior;  // the conjunction of the user invariants so far
+    // Invariants and the measure are lowered in `Inv` mode (decision 0038 item 6): the reads of memory in them are chains over the loop's places.
+    const std::vector<Place>* saved_places = inv_places_;
+    inv_places_ = &places;
     for (const Clause& c : s.invariants) {
       Full full;
-      LV v = lower(*c.expr, body_env(), nullptr, {}, full);
+      LV v;
+      {
+        CtxSave save(*this);
+        cmode_ = CMode::Inv;
+        cf_ = fn_.f;
+        inv_reads_.clear();
+        inv_what_ = "invariant";
+        v = lower(*c.expr, body_env(), nullptr, {}, full);
+      }
+      for (const InvRead& r : inv_reads_) {
+        low::Meta m;
+        m.category = "permission";
+        m.loc = r.loc.known() ? r.loc : c.loc;
+        m.message = r.cell != nullptr ? "this loop invariant reads `" + r.cell->name + "`, whose object a callee kept"
+                                      : "this loop invariant reads " + quoted(r.text, "an object") + ", which this loop does not hold";
+        framings.push_back(Framing{framing_condition(r, prior), std::move(m)});
+      }
+      inv_reads_.clear();
       pure_full(full, *c.expr, "a loop invariant");
       for (Obl& o : full.obls) w.invariants.push_back(obligation_clause(low::and_(prior, o.guard), o));
       low::LInvariant inv;
       inv.expr = v.e;
-      low::Meta entry;
-      entry.category = "invariant-entry";
-      entry.loc = c.loc;
-      entry.message = "this loop invariant may not hold on entry";
+      low::Meta entry_meta;
+      entry_meta.category = "invariant-entry";
+      entry_meta.loc = c.loc;
+      entry_meta.message = "this loop invariant may not hold on entry";
       low::Meta kept;
       kept.category = "invariant-preserved";
       kept.loc = c.loc;
       kept.message = "this loop invariant may not be preserved by an iteration";
-      inv.checks.push_back(low::Check{"invariant.not.established", std::move(entry)});
+      inv.checks.push_back(low::Check{"invariant.not.established", std::move(entry_meta)});
       inv.checks.push_back(low::Check{"invariant.not.preserved", std::move(kept)});
       w.invariants.push_back(std::move(inv));
       prior = low::and_(prior, v.e);
@@ -2994,11 +3516,29 @@ class Lowerer {
     // loop's `decreases`, one line, which Silicon reports a failure at.
     for (const Clause& c : s.measure) {
       Full mfull;
-      LV mv = lower(*c.expr, body_env(), nullptr, {}, mfull);
+      LV mv;
+      {
+        CtxSave save(*this);
+        cmode_ = CMode::Inv;
+        cf_ = fn_.f;
+        inv_reads_.clear();
+        inv_what_ = "measure";
+        mv = lower(*c.expr, body_env(), nullptr, {}, mfull);
+      }
+      for (const InvRead& r : inv_reads_) {
+        low::Meta m;
+        m.category = "permission";
+        m.loc = r.loc.known() ? r.loc : c.loc;
+        m.message = r.cell != nullptr ? "this loop measure reads `" + r.cell->name + "`, whose object a callee kept"
+                                      : "this loop measure reads " + quoted(r.text, "an object") + ", which this loop does not hold";
+        framings.push_back(Framing{framing_condition(r, prior), std::move(m)});
+      }
+      inv_reads_.clear();
       pure_full(mfull, *c.expr, "a loop measure");
       for (Obl& o : mfull.obls) w.invariants.push_back(obligation_clause(low::and_(prior, o.guard), o));
       w.decreases.push_back(mv.e);
     }
+    inv_places_ = saved_places;
     if (!s.measure.empty()) {
       low::Meta m;
       m.category = "termination";
@@ -3007,9 +3547,28 @@ class Lowerer {
       w.decreases_check = low::Check{"termination.failed", std::move(m)};
     }
 
+    // Decision 0038 item 6: a pointer the loop assigns is havocked at the loop head; Silicon does not branch on a disjunction an invariant gives
+    // (`p == &x || p == &y`), so the no-op case splits `if (p == X) { }` against each place of its field come first in the body and after the loop.
+    std::vector<low::LStmt> splits;
+    if (!places.empty()) {
+      for (int id : assigned) {
+        if (declared.count(id) != 0) continue;
+        const Var& v = *fn_.f->locals()[static_cast<size_t>(id)];
+        if (!v.type.is_ptr() || v.type.pointee == nullptr || v.type.pointee->is_void()) continue;
+        const std::string sfx = cell_suffix(*v.type.pointee);
+        for (const Place& pl : places)
+          if (pl.suffix == sfx) case_split(splits, low::bin(low::BinOp::Eq, low::var(var_name(v)), pl.recv));
+      }
+    }
+
+    // The framing of the invariants and the measure, asserted right after the snapshots (decision 0038 item 6).
+    for (const Framing& f : framings) emit_assert(entry, f.cond, f.meta);
+    for (low::LStmt& st : entry) out.push_back(std::move(st));
+
     std::set<int> breaks, continues;
     collect_jumps(*s.body, breaks, continues);
     const std::string n = std::to_string(s.jump_id);
+    for (const low::LStmt& st : splits) w.then_body.push_back(st);
     if (top_test) {
       w.expr = low::bool_lit(true);
       LV cv = full_expr(*s.expr, w.then_body);
@@ -3039,8 +3598,32 @@ class Lowerer {
       jump(exit.then_body, "l_brk__" + n);
       w.then_body.push_back(std::move(exit));
     }
+    // The back edge (decision 0038 items 4 and 6): the loop still holds what it began with, then the invariants' framing.
+    if (!places.empty()) {
+      using low::BinOp;
+      const SrcLoc at = s.body != nullptr && s.body->end_loc.known() ? s.body->end_loc : s.loc;
+      for (const Place& pl : places) {
+        const std::string msg = "an iteration of this loop ends without the permission to " + quoted(pl.label, "an object") + " that it began with";
+        auto lacks = [&](const E& have, const std::string& amount) { return low::bin(BinOp::Lt, have, low::var(amount)); };
+        const bool one = !pl.gv && !pl.gl;
+        if (pl.value) {
+          E bad = low::bin(BinOp::Or, lacks(value_perm(pl.recv, pl.type), pl.kv), lacks(flag_perm(pl.recv, pl.type), pl.kd));
+          if (one) bad = low::bin(BinOp::Or, bad, lacks(live_perm(pl.recv), pl.kl));
+          emit_assert(w.then_body, low::implies(pl.gv, low::not_(bad)), meta("permission", at, msg));
+        }
+        if (!one || !pl.value) emit_assert(w.then_body, low::implies(pl.gl, low::not_(lacks(live_perm(pl.recv), pl.kl))), meta("permission", at, msg));
+      }
+    }
+    for (const Framing& f : framings) emit_assert(w.then_body, f.cond, f.meta);  // also when the loop has no place: the read is then unframed
     out.push_back(std::move(w));
     if (is_do || top_test || breaks.count(s.jump_id) != 0) label(out, "l_brk__" + n);
+    for (low::LStmt& st : splits) out.push_back(std::move(st));
+  }
+
+  // The range of a cell's value as an invariant conjunct (none for `bool`).
+  E cell_range_inv(const E& p, const Type& t) {
+    if (!t.is_bool()) return range_check(cell_value(p, t), *t.int_type);
+    return nullptr;
   }
 
   // `do { B } while (c)` where `c` is a constant zero (decision 0014 item 5): the body runs once and no iteration follows
@@ -3327,6 +3910,13 @@ class Lowerer {
     user_targets_.clear();
     user_names_.clear();
     collect_gotos(*f.body, user_targets_);
+    label_depths(*f.body, fn_.scopes.size());
+    {  // the pointer parameters the body assigns: their formal's place is not automatic in a loop (decision 0038 item 3)
+      std::set<int> assigned, declared;
+      scan(*f.body, assigned, declared);
+      for (size_t k = 0; k < f.params.size(); ++k)
+        if (f.params[k].type.is_ptr() && assigned.count(f.param_var(static_cast<int>(k))->id) != 0) fn_.assigned_params.insert(static_cast<int>(k));
+    }
     stmt(*f.body, m.body);
     // The end of the body: a non-void function must not reach it; a void one returns.
     if (f.noreturn) {

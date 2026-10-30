@@ -1,11 +1,12 @@
-// expect: rejected cerastes-unsupported_expression @ L13
+// expect: verified
+// expect: native-ok
 // mode: c23, c++20
-// twin: tests/memory/cell_across_loop.c
-// Pins: audit round 2 of M4.5b1a, 0032 item 10: a variable whose address is taken (a cell) in a loop invariant is rejected, not read (re-expected by b1c)
+// Pins: 0038 items 3 and 6: a cell in a loop invariant (the shape that b1a rejected): the clause is a fact about the value the place keeps
 #include <cerastes.h>
 
 int invariant_cell(int n)
     CERASTES_REQUIRES(0 <= n && n <= 100)
+    CERASTES_ENSURES(r, r == 0)
 {
   int x = 0;
   int *p = &x;

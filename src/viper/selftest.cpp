@@ -896,6 +896,8 @@ void define_memory();
 void define_memory_rejections();
 void define_pointer_contracts();
 void define_pointer_contract_rejections();
+void define_loops_and_jumps();
+void define_loops_and_jumps_rejections();
 }  // namespace
 
 #include "selftest_cases2.inc"
@@ -905,6 +907,7 @@ void define_pointer_contract_rejections();
 #include "selftest_cases6.inc"
 #include "selftest_cases7.inc"
 #include "selftest_cases8.inc"
+#include "selftest_cases9.inc"
 
 namespace {
 
@@ -1077,6 +1080,8 @@ int main(int argc, char** argv) {
   define_memory_rejections();
   define_pointer_contracts();
   define_pointer_contract_rejections();
+  define_loops_and_jumps();
+  define_loops_and_jumps_rejections();
   int bad = 0;
   for (const Case& c : lowering_cases()) {
     std::string problem;

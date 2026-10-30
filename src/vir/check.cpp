@@ -223,7 +223,7 @@ class Checker {
         err(f.params[k].loc, "parameter " + std::to_string(k + 1) + " of '" + f.c_name + "' is `restrict` but not a pointer");
     }
     for (const auto& v : f.locals()) {
-      // A parameter's copy may be address-taken (decision 0037 item 4); a pointer variable's address is b1c's (decision 0032 item 2).
+      // A parameter's copy may be address-taken (decision 0037 item 4); a pointer variable's address is b1c3's (decision 0032 item 2).
       if (v->address_taken && v->type.is_ptr())
         err(v->loc, "the address of the pointer variable '" + v->name + "' is taken (decision 0032 item 2)");
     }
@@ -255,8 +255,6 @@ class Checker {
                            " (decision 0015 item 2)");
       }
       stmt(*f.body);
-      // The rules of decision 0032 item 10 that keep pointers and cells out of what b1a lowers (the encoder reports them first).
-      for (const MemoryProblem& m : memory_problems(f)) err(m.loc, m.what);
       for (const PlacementProblem& m : placement_problems(f)) err(m.loc, m.what);  // decision 0037 item 8
       // The backstop of the encoder's own report (decision 0020 item 4): a modification unsequenced with another access.
       for (const SequenceProblem& p : sequence_problems(f))
@@ -423,14 +421,15 @@ class Checker {
 
   // One component of a termination measure: an Int expression (decision 0013 item 1), evaluated like a contract
   // clause (function) or like an invariant (loop).
-  void measure(const Clause& c, Ctx ctx, const char* what) {
+  // `memory_ok`: a loop's measure may read memory (decision 0038 item 6); a function's `decreases` may not yet (cut 1 of M4.5b1c1).
+  void measure(const Clause& c, Ctx ctx, const char* what, bool memory_ok = false) {
     if (c.expr == nullptr) {
       err(c.loc, std::string("a ") + what + " component without an expression");
       return;
     }
     if (!c.loc.known()) err(c.loc, std::string("a ") + what + " component has no source position");
     const bool saved = no_ptr_;
-    no_ptr_ = true;
+    no_ptr_ = !memory_ok;
     expr(*c.expr, ctx, false);
     no_ptr_ = saved;
     if (!c.expr->type.is_int()) err(c.expr->loc, std::string("a ") + what + " component of type " + c.expr->type.str() + " (a measure is an integer)");
@@ -522,13 +521,13 @@ class Checker {
         for (const Clause& c : s.invariants) {
           if (c.expr == nullptr) { err(c.loc, "an invariant without an expression"); continue; }
           if (!c.loc.known()) err(c.loc, "an invariant has no source position");
-          no_ptr_ = true;
+          // Decision 0038 item 6: an invariant may hold pointer nodes, cells by name, `&x` and `*q` (read like code, with the framing
+          // lowering gives them), so no_ptr_ stays false.  A permission atom is refused (the Atom case): M4.5b1c3.
           expr(*c.expr, Ctx::Annot, false);
-          no_ptr_ = false;
           if (!c.expr->type.is_bool()) err(c.expr->loc, "an invariant is not a bool");
         }
         if (s.measure.empty() && !once) err(s.loc, "a loop without a termination measure (decreases, decision 0013)");
-        for (const Clause& c : s.measure) measure(c, Ctx::Annot, "decreases");
+        for (const Clause& c : s.measure) measure(c, Ctx::Annot, "decreases", /*memory_ok=*/true);
         targets_.push_back(Target{s.jump_id, true});
         scoped(s.body);
         targets_.pop_back();
@@ -771,8 +770,12 @@ class Checker {
         break;
       case Expr::Kind::Atom:
         // Decision 0037 item 5: owns(*p), reads(*p) and live(p) of a pointer parameter p, in a contract, outside `old`.  Where it may
-        // stand and how it pairs with its partner is checked by `atoms`.
-        if (ctx != Ctx::Requires && ctx != Ctx::Ensures) { err(e.loc, "a permission atom outside a contract"); break; }
+        // stand and how it pairs with its partner is checked by `atoms`.  Decision 0038 item 10: an atom in a loop invariant (M4.5b1c3), a
+        // measure, a `check` or code is refused here, the backstop of the encoder's rejection.
+        if (ctx != Ctx::Requires && ctx != Ctx::Ensures) {
+          err(e.loc, "a permission atom outside a contract (decision 0038 item 10: in a loop invariant it is M4.5b1c3's)");
+          break;
+        }
         if (old_depth_ > 0) { err(e.loc, "a permission atom under `old`"); break; }
         if (!e.type.is_bool()) err(e.loc, "a permission atom is not a bool");
         if (!sub(e.a)) break;
@@ -987,7 +990,7 @@ class Checker {
   std::set<int> jump_ids_;
   std::vector<Target> targets_;  // the loops and switches around the statement being checked, innermost last
   std::vector<std::set<int>> scopes_;
-  bool no_ptr_ = false;  // checking an invariant, measure, constant or case value: no pointer node (a contract clause may hold some, decision 0037)
+  bool no_ptr_ = false;  // checking a function's measure, a constant or a case value: no pointer node (a contract clause or a loop's invariant or measure may hold some, decisions 0037 and 0038)
   int old_depth_ = 0;    // inside an `Old`
   std::vector<Diag> diags_;
 };
@@ -1096,164 +1099,6 @@ std::vector<GotoProblem> goto_problems(const Function& f) {
 
 namespace {
 
-// Decision 0032 item 10: what b1a keeps out of the lowering.  One walk over the body, the same for the encoder (which reports first, at
-// the node's own position) and for check_program (the backstop).
-class MemoryWalker {
- public:
-  explicit MemoryWalker(const Function& f) : f_(f) {}
-
-  std::vector<MemoryProblem> run() {
-    if (f_.body == nullptr) return {};
-    stmt(f_.body);
-    gotos();
-    return std::move(out_);
-  }
-
- private:
-  using Kind = MemoryProblem::Kind;
-
-  void report(const SrcLoc& loc, Kind k, std::string what, const Stmt* loop = nullptr) {
-    out_.push_back(MemoryProblem{loc, k, std::move(what), loop});
-  }
-  // The first pointer node, cell or store in a loop is one problem, reported at the outermost loop statement itself.
-  void loop_problem() {
-    loop_reported_ = true;
-    report(outer_loop_->loc, Kind::pointer_in_loop, "a loop that uses a pointer, `&`, `*` or a variable whose address is taken (decision 0032)",
-           outer_loop_);
-  }
-
-  void expr(const Expr* e) {
-    if (e == nullptr) return;
-    if (loop_depth_ > 0 && !loop_reported_ && pointer_node(*e)) loop_problem();
-    for (const Expr* x : {e->a, e->b, e->c}) expr(x);
-    for (const Expr* x : e->args) expr(x);
-  }
-
-  void loop_cell(const Stmt& s) {
-    if (loop_depth_ > 0 && !loop_reported_ && s.var != nullptr && (s.var->address_taken || s.var->type.is_ptr())) loop_problem();
-  }
-
-  bool cell_in_scope() const {
-    for (const BlockRec& b : blocks_)
-      if (b.has_cell) return true;
-    return false;
-  }
-
-  void block(const Stmt& s) {
-    blocks_.push_back(BlockRec{declares_cell(s), targets_.size()});
-    for (const Stmt* c : s.stmts) stmt(c);
-    blocks_.pop_back();
-  }
-
-  void stmt(const Stmt* sp) {
-    if (sp == nullptr) return;
-    const Stmt& s = *sp;
-    switch (s.kind) {
-      case Stmt::Kind::Decl:
-      case Stmt::Kind::Assign:
-        loop_cell(s);
-        expr(s.expr);
-        break;
-      case Stmt::Kind::Store:
-        if (loop_depth_ > 0 && !loop_reported_) loop_problem();
-        expr(s.addr);
-        expr(s.expr);
-        break;
-      case Stmt::Kind::ExprStmt:
-      case Stmt::Kind::Check: expr(s.expr); break;
-      case Stmt::Kind::Return:
-        if (loop_depth_ > 0 && cell_in_scope())
-          report(s.loc, Kind::return_in_loop,
-                 "a `return` inside a loop while a variable whose address is taken is in scope (decision 0032)");
-        expr(s.expr);
-        break;
-      case Stmt::Kind::If:
-        expr(s.expr);
-        stmt(s.then_body);
-        stmt(s.else_body);
-        break;
-      case Stmt::Kind::While:
-        if (loop_depth_++ == 0) {
-          loop_reported_ = false;
-          outer_loop_ = &s;
-        }
-        expr(s.expr);
-        targets_.push_back(Target{s.jump_id, true});
-        stmt(s.body);
-        targets_.pop_back();
-        stmt(s.step);
-        if (--loop_depth_ == 0) loop_reported_ = false;
-        break;
-      case Stmt::Kind::Switch:
-        expr(s.expr);
-        targets_.push_back(Target{s.jump_id, false});
-        if (s.body != nullptr) block(*s.body);
-        targets_.pop_back();
-        break;
-      case Stmt::Kind::Block: block(s); break;
-      case Stmt::Kind::Break:
-      case Stmt::Kind::Continue: {
-        // The jump leaves every Block entered after its target; one that declares a cell is not accepted (lowering writes the scope exit at
-        // fall-through and `return` only).
-        size_t idx = targets_.size();
-        for (size_t k = targets_.size(); k > 0; --k)
-          if (targets_[k - 1].id == s.jump_id && (s.kind == Stmt::Kind::Break || targets_[k - 1].is_loop)) { idx = k - 1; break; }
-        if (idx == targets_.size()) break;  // no target: reported elsewhere
-        for (const BlockRec& b : blocks_)
-          if (b.has_cell && b.targets > idx) {
-            report(s.loc, Kind::jump_out,
-                   std::string("a `") + (s.kind == Stmt::Kind::Break ? "break" : "continue") +
-                       "` that leaves the scope of a variable whose address is taken (decision 0032)");
-            break;
-          }
-        break;
-      }
-      case Stmt::Kind::Case: case Stmt::Kind::Goto: case Stmt::Kind::Label: break;
-    }
-  }
-
-  // A Goto leaves every Block nested inside the Block that holds its Label (goto_problems accepts only a label that is a direct statement of
-  // an ancestor Block of the goto).  Gotos goto_problems rejects are skipped: they are reported there.
-  void gotos() {
-    GotoWalk w;
-    w.walk(f_.body, nullptr, 0);
-    for (const GotoWalk::Info& g : w.gotos) {
-      const GotoWalk::Info* target = nullptr;
-      for (const GotoWalk::Info& l : w.labels)
-        if (l.stmt->jump_id == g.stmt->jump_id) { target = &l; break; }
-      if (target == nullptr || target->parent_block == nullptr) continue;
-      size_t from = g.path.size();  // the index in g.path of the Block holding the label
-      for (size_t k = 0; k < g.path.size(); ++k)
-        if (g.path[k].block == target->parent_block) { from = k; break; }
-      for (size_t k = from + 1; k < g.path.size(); ++k)
-        if (declares_cell(*g.path[k].block)) {
-          report(g.stmt->loc, Kind::jump_out, "a `goto` that leaves the scope of a variable whose address is taken (decision 0032)");
-          break;
-        }
-    }
-  }
-
-  struct BlockRec {
-    bool has_cell;
-    size_t targets;  // targets_.size() when the Block was entered
-  };
-  struct Target {
-    int id;
-    bool is_loop;
-  };
-  const Function& f_;
-  std::vector<MemoryProblem> out_;
-  std::vector<BlockRec> blocks_;
-  std::vector<Target> targets_;
-  int loop_depth_ = 0;
-  const Stmt* outer_loop_ = nullptr;  // the outermost loop being walked
-  bool loop_reported_ = false;        // one report per outermost loop (at the loop statement, which names what is wrong)
-};
-
-}  // namespace
-
-namespace {
-
 // Decision 0037 item 8: the placement rule for calls of functions that hold permissions (see PlacementProblem in check.h).
 class Placement {
  public:
@@ -1300,7 +1145,7 @@ class Placement {
     if (mem.size() > 1) {
       out_.push_back(PlacementProblem{mem[1]->loc, "a second call of a function whose contract holds a permission ('" + mem[1]->callee->c_name +
                                                        "') in one expression, beside the call of '" + callee +
-                                                       "': write them as separate statements (decision 0037 item 8; M4.5b1c lifts this, decision 0028 item 13)"});
+                                                       "': write them as separate statements (decision 0037 item 8; M4.5b1c2 lifts this, decision 0028 item 13)"});
       return;
     }
     std::vector<const Expr*> acc;
@@ -1308,7 +1153,7 @@ class Placement {
     if (!acc.empty())
       out_.push_back(PlacementProblem{acc[0]->loc, "an access to an object in the same expression as the call of '" + callee +
                                                        "', whose contract holds a permission: write them as separate statements "
-                                                       "(decision 0037 item 8; M4.5b1c lifts this, decision 0028 item 13)"});
+                                                       "(decision 0037 item 8; M4.5b1c2 lifts this, decision 0028 item 13)"});
   }
 
   void stmt(const Stmt* s) {
@@ -1509,7 +1354,5 @@ class Sequencer {
 }  // namespace
 
 std::vector<SequenceProblem> sequence_problems(const Function& f) { return Sequencer(f).run(); }
-
-std::vector<MemoryProblem> memory_problems(const Function& f) { return MemoryWalker(f).run(); }
 
 }  // namespace cerastes::vir

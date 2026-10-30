@@ -2664,6 +2664,172 @@ class GhostAmountTests(unittest.TestCase):
         self.assertTrue(any("`assume` without" in p for p in self.strict(lines)))
 
 
+class LoopAmountTests(unittest.TestCase):
+    """Decision 0038 item 9 (amending 0037 item 14): the amounts of a loop's invariant are `Perm` locals that snapshot what the
+    method holds.  A `Perm` local is assigned only `perm(...)`, `none`, `write` or a conditional of those; it is never assigned
+    inside a loop whose invariant mentions it; `acc` with such an amount is allowed in an invariant and `perm(...)` is not.
+    Each rule has a twin that breaks exactly it, so weakening a rule fails here."""
+
+    SNAP = ["  kv := perm(x.v_int)", "  kd := perm(x.d_int)"]
+    INV_ACC = "    invariant acc(x.v_int, kv) && acc(x.d_int, kd)"
+    INV_VAL = "    invariant kv > none ==> x.v_int == vs"
+
+    @staticmethod
+    def strict(lines):
+        return lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+
+    def fixture(self, snapshot=None, invariants=None, body=None, locals_=None, between=None):
+        invs = invariants if invariants is not None else [self.INV_ACC, self.INV_VAL]
+        return [
+            "field v_int: Int",
+            "field d_int: Bool",
+            "method f__1(x: Ref, n: Int) returns (res: Perm)",
+            Check("  requires n >= 0", WF, "internal"),
+            "  decreases",
+            "{",
+            *(locals_ if locals_ is not None else ["  var kv: Perm", "  var kd: Perm", "  var vs: Int", "  var i: Int"]),
+            *(snapshot if snapshot is not None else self.SNAP),
+            "  if (kv > none) { vs := x.v_int }",
+            "  i := 0",
+            "  while (i < n)",
+            *[Check(t, INV, "internal") for t in invs],
+            Check("    decreases n - i", "termination.failed", "termination"),
+            "  {",
+            *(body if body is not None else ["    i := i + 1"]),
+            "  }",
+            *(between if between is not None else []),
+            "}",
+        ]
+
+    def test_the_emitters_shape_is_clean(self):
+        self.assertEqual(self.strict(self.fixture()), [])
+
+    def test_acc_with_a_snapshot_amount_is_allowed_in_an_invariant(self):
+        probs = self.strict(self.fixture(invariants=[self.INV_ACC, "    invariant acc(lvloc(block_of(x)).lv, kd)"]))
+        self.assertEqual(probs, [])
+
+    def test_the_allowed_values(self):
+        for value in ("perm(x.v_int)", "none", "write", "(perm(x.v_int))", "kd > none ? perm(x.v_int) : none",
+                      "(kd > none) ? write : ((vs > 0) ? none : perm(x.d_int))", "perm(lvloc(block_of(x)).lv)"):
+            with self.subTest(value=value):
+                self.assertEqual(self.strict(self.fixture(snapshot=[f"  kv := {value}", "  kd := none"])), [])
+
+    def test_a_declaration_with_an_allowed_initializer_is_clean(self):
+        locals_ = ["  var kv: Perm := perm(x.v_int)", "  var kd: Perm := none", "  var vs: Int", "  var i: Int"]
+        self.assertEqual(self.strict(self.fixture(locals_=locals_, snapshot=[])), [])
+
+    def test_any_other_value_is_a_problem(self):
+        for value in ("perm(x.v_int) / 2", "kd", "res", "write - kv", "perm(x.v_int) + perm(x.d_int)", "1 / 2",
+                      "perm(x.v_int) < perm(x.d_int) ? perm(x.v_int) : res", "kd > none ? 1 / 2 : none",
+                      "perm(x.v_int) perm(x.d_int)", "none none", "(none) / 2"):
+            with self.subTest(value=value):
+                probs = self.strict(self.fixture(snapshot=[f"  kv := {value}", "  kd := none"]))
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("`Perm` local `kv` is assigned", probs[0])
+                self.assertIn("decision 0038 item 9", probs[0])
+
+    def test_a_bad_initializer_in_a_declaration_is_a_problem(self):
+        locals_ = ["  var kv: Perm := perm(x.v_int) / 2", "  var kd: Perm := none", "  var vs: Int", "  var i: Int"]
+        probs = self.strict(self.fixture(locals_=locals_, snapshot=[]))
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("is initialized with", probs[0])
+
+    def test_wildcard_is_one_problem_not_two(self):
+        probs = self.strict(self.fixture(snapshot=["  kv := wildcard", "  kd := none"]))
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`wildcard`", probs[0])
+
+    def test_a_one_line_conditional_assignment_is_read(self):
+        ok = self.fixture(snapshot=["  kv := none", "  if (n > 0) { kd := perm(x.d_int) }"])
+        self.assertEqual(self.strict(ok), [])
+        bad = self.fixture(snapshot=["  kv := none", "  if (n > 0) { kd := kv / 2 }"])
+        probs = self.strict(bad)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`Perm` local `kd` is assigned `kv / 2`", probs[0])
+
+    def test_a_result_of_type_perm_is_not_a_local(self):
+        self.assertEqual(self.strict(self.fixture(between=["  res := kv / 2"])), [])
+
+    def test_a_field_that_is_named_like_a_local_is_not_an_assignment(self):
+        self.assertEqual(self.strict(self.fixture(body=["    i := i + 1", "    x.kv := 1"])), [])
+
+    def test_a_perm_local_assigned_in_a_loop_whose_invariant_uses_it_is_a_problem(self):
+        for body in (["    kv := perm(x.v_int)", "    i := i + 1"], ["    i := i + 1", "    kv := none"],
+                     ["    if (i > 0) {", "      kd := write", "    }", "    i := i + 1"]):
+            with self.subTest(body=body):
+                probs = self.strict(self.fixture(body=body))
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("is assigned inside the loop of line", probs[0])
+
+    def test_a_loop_may_assign_a_perm_local_that_its_invariant_does_not_use(self):
+        locals_ = ["  var kv: Perm", "  var kd: Perm", "  var vs: Int", "  var i: Int", "  var other: Perm"]
+        self.assertEqual(self.strict(self.fixture(locals_=locals_, body=["    other := perm(x.v_int)", "    i := i + 1"])), [])
+
+    def test_an_assignment_before_or_after_the_loop_is_fine(self):
+        self.assertEqual(self.strict(self.fixture(between=["  kv := none", "  kd := perm(x.d_int)"])), [])
+
+    def test_the_invariant_use_may_be_a_guard_not_an_amount(self):
+        probs = self.strict(self.fixture(invariants=["    invariant 0 <= i", self.INV_VAL], body=["    kv := none", "    i := i + 1"]))
+        self.assertEqual(len(probs), 1, probs)
+
+    def test_a_name_that_contains_a_local_is_not_a_use(self):
+        locals_ = ["  var kv: Perm", "  var kd: Perm", "  var vs: Int", "  var i: Int", "  var kv2: Perm"]
+        probs = self.strict(self.fixture(locals_=locals_, invariants=[self.INV_ACC], body=["    kv2 := none", "    i := i + 1"]))
+        self.assertEqual(probs, [])
+
+    def test_the_inner_loop_snapshot_in_an_outer_body_is_fine_and_the_outer_one_is_not(self):
+        inner = ["    kv2 := perm(x.v_int)", "    j := 0",
+                 "    while (j < n)",
+                 Check("      invariant acc(x.v_int, kv2)", INV, "internal"),
+                 Check("      decreases n - j", "termination.failed", "termination"),
+                 "    {", "      j := j + 1", "    }", "    i := i + 1"]
+        locals_ = ["  var kv: Perm", "  var kd: Perm", "  var vs: Int", "  var i: Int", "  var j: Int", "  var kv2: Perm"]
+        self.assertEqual(self.strict(self.fixture(locals_=locals_, body=inner)), [])
+        inner_bad = inner[:6] + ["      kv := none"] + inner[6:]
+        probs = self.strict(self.fixture(locals_=locals_, body=inner_bad))
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`Perm` local `kv` is assigned inside the loop", probs[0])
+        inner_bad2 = inner[:6] + ["      kv2 := none"] + inner[6:]
+        probs = self.strict(self.fixture(locals_=locals_, body=inner_bad2))
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`Perm` local `kv2` is assigned inside the loop", probs[0])
+
+    def test_a_trigger_set_in_the_invariant_does_not_hide_the_body(self):
+        inv = "    invariant (forall k: Int :: { loc(b, k) } 0 <= k ==> acc(x.v_int, kv))"
+        # (the older `while`-without-`decreases` rule reads the body's `{` as the first one on a line: a trigger set
+        # in an invariant is a false positive there, so it is filtered out here)
+        lines = self.fixture(invariants=[inv], body=["    kv := none", "    i := i + 1"])
+        probs = [p for p in self.strict(lines) if "without a `decreases`" not in p]
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("is assigned inside the loop", probs[0])
+
+    def test_perm_in_an_invariant_is_a_problem(self):
+        for inv in ("    invariant perm(x.v_int) == write", "    invariant kv > none ==> perm(x.d_int) >= kd",
+                    "    invariant (perm (x.v_int) > none)"):
+            with self.subTest(inv=inv):
+                probs = self.strict(self.fixture(invariants=[self.INV_ACC, inv]))
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("`perm(...)` in a loop invariant", probs[0])
+
+    def test_perm_elsewhere_is_fine(self):
+        body = ["    assert perm(x.v_int) >= kv", "    i := i + 1"]
+        self.assertEqual(self.strict(self.fixture(body=[Check(body[0], A, "permission"), body[1]])), [])
+        self.assertEqual(self.strict(self.fixture(between=[Check("  assert perm(x.v_int) == write", A, "permission")])), [])
+
+    def test_a_name_that_contains_perm_is_not_the_function(self):
+        self.assertEqual(self.strict(self.fixture(invariants=[self.INV_ACC, "    invariant x.perm(1) == 2 || kperm(x) > 0"])), [])
+
+    def test_a_perm_in_a_method_contract_is_not_a_loop_invariant(self):
+        lines = self.fixture()
+        lines.insert(lines.index("  decreases"), Check("  requires perm(x.v_int) == write", WF, "internal"))
+        self.assertEqual(self.strict(lines), [])
+
+    def test_inhale_and_assume_stay_refused_next_to_a_snapshot(self):
+        probs = self.strict(self.fixture(snapshot=["  inhale acc(x.v_int, kv)", "  kv := none", "  kd := none"]))
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`inhale` without", probs[0])
+
+
 class SelfTestHygieneTests(unittest.TestCase):
     """A test method defined twice in one class replaces the first, which then never runs (it happened here:
     two `test_labels_followed_by_no_deletable_statement_give_no_mutant`)."""

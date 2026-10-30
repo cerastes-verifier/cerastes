@@ -180,3 +180,5 @@ verifies; Viper's `\` and `%` on `Int` are Euclidean (`(-7)\2 == -4`, `(-7)%2 ==
 *2026-10-28, amended by 0032 (M4.5b1a): item 12 — pointers to integers, `bool` and accepted enumerations are accepted as the types of locals and expressions, with `&`, `*`, null pointer constants, `==`, `!=`, truth tests and `?:` of pointers, and a local whose address is taken is an object in memory; pointer parameters and results, pointers to pointers, `void*`, struct, union and function pointers, and pointer conversions other than adding qualifiers stay rejected (0032 items 2–3, 10).*
 
 *2026-10-28, amended by 0037 (M4.5b1b): item 12 — pointer parameters and results (pointers to integers, `bool` and enumerations) are accepted, with the contracts of 0037; `restrict` only on a C parameter whose contract owns its pointee.*
+
+*2026-10-29, amended by 0038 (M4.5b1c1): item 8 — a loop condition that touches memory (a pointer node, a cell, `&`, `*`) is lowered in 0020 item 7's top-test shape, its checks asserts at every evaluation, since Viper refuses `perm` in an invariant clause; no invariant or measure clause holds `perm`.*

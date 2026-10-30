@@ -365,6 +365,32 @@ copy is allocated at entry, stored from the formal, and leaves at the body's sco
 name is checked as `permission` (a callee may have kept it); the one-past-the-end row is `pointer-comparison`, in code
 only (in a contract `==` is the model's identity).
 
+**Loops and jumps over memory (M4.5b1c1, decision 0038).** `loop()` computes the loop's places and writes (`LoopWrites`:
+the cell fields a store by name, a store through a pointer, or a call whose `requires` owns a pointer of that field
+reaches, over the condition, body, step and every nested statement). The places are the `requires` atoms' places of
+the pointer parameters the function never assigns (value and flag cells for `owns`/`reads`, one liveness cell per
+parameter, through the formal) and every cell of `fn_.scopes`, `&param` copies included. When the loop touches memory,
+or the function holds a place and the body has a `return` or a `goto` out of the loop, lowering writes right before the
+Viper `while`: case splits of each parameter place against every other parameter with an atom of its field (value and
+liveness cell), then the ghost snapshots `kv_<n>`, `kd_<n>`, `kl_<n>` (`perm(...)`), `ds_<n>` (under `kd > none`) and
+`vs_<n>` (under `kv > none`), then the entry framing asserts. The automatic invariants (all `internal` rows) come first:
+`acc(v, kv) && acc(d, kd)` and the liveness `acc` under the de-duplication guards (parameter places of one cell suffix
+by `Ref`; liveness cells over all parameters with atoms), then per place the value (`kv > none ==> v == vs` when no write
+reaches its field, else `none < kv && kv < write ==> v == vs` and the flag-guarded range), then the flag (`kd > none &&
+ds ==> d`). A condition that touches memory takes the `top_test` shape. The body starts with the case splits `if (p ==
+X) { }` of every pointer variable the loop assigns against the places of its field (repeated after the loop); it ends,
+after the `continue` label, the step and a `do` loop's exit test, with one `permission` assert per place (`perm(v) >= kv
+&& perm(d) >= kd && perm(lv) >= kl` in De Morgan form) at the body's closing brace, then the framing asserts. Invariants
+and loop measures are lowered in `CMode::Inv`: `==` is identity, no liveness or flag obligation, a cell read by name is
+`(kv > none ? x.v : 0)` and `*q` a chain over the places of its field; each read's framing `prior && guard ==> OR_i (q ==
+place_i && kv_i > none)` is asserted after the entry snapshots and at the back edge (`permission`). A loop that touches
+no memory, and has no `return`/outward `goto` while the function holds a place, lowers exactly as before.
+
+Jumps: `leave_to()` writes the scope exits of every block a `break`, `continue` or `goto` leaves, innermost first, at the
+jump; `Fn::jump_depth` records the scope depth at each loop (a `continue` through a `switch` also leaves the switch
+body's block) and inside each switch body (a switch `break` lands before the body's own exit), and `label_depths()`
+the depth of each user label. A `return` exits every open scope as before.
+
 ## 4. Viper shape
 
 ```

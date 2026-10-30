@@ -116,6 +116,8 @@ class Encoder {
     bool contract = false;
     bool annotation = false;  // a `check` or an `invariant` of a statement
     bool check_clause = false;  // ... and it is a `check`: evaluated like code where it stands, so `&x` and `*p` are allowed (decision 0032)
+    bool loop_clause = false;   // ... or a loop's `invariant` or `decreases` (decision 0038 item 6): `&x` and `*p` allowed as in a `check`
+    bool loop_invariant = false;  // ... and it is an `invariant` (not a measure): selects the message of a permission atom's rejection
     Annot annot = Annot::none;
     bool binder_present = false;
     int old_depth = 0;
@@ -450,7 +452,8 @@ class Encoder {
         VType e = vtype(pointee);
         if (!e.ok || e.t.is_void()) {
           r.name += e.t.is_void() && e.ok ? " (a pointer to void)"
-                                          : " (a pointer to a type other than bool, an integer or an enumeration)";
+                    : is_pointer_type(pointee) ? " (a pointer to a pointer: M4.5b1c3)"
+                                               : " (a pointer to a type other than bool, an integer or an enumeration)";
           r.silent = e.silent;
           return r;
         }
@@ -1800,8 +1803,16 @@ class Encoder {
 
   // `cerastes::owns(*p)`, `cerastes_owns(*p)`, `reads`, `live(p)` in a contract (decision 0037 item 5): an Atom of a pointer parameter.
   const Expr* spec_atom(an_expr_node_ptr e, SpecFn fn, const std::string& name, const std::vector<an_expr_node_ptr>& ops) {
+    // Decision 0038 item 10: a permission atom is a contract's; in a loop's invariant it is M4.5b1c3's, and a measure, `check` and `assert` hold none.
+    if (!cx_.contract) {
+      if (cx_.loop_invariant)
+        reject(Diag::unsupported_annotation, e->position, "\"" + name + "\" in a loop invariant (owns, reads or live in an invariant: M4.5b1c3)");
+      else
+        reject(Diag::unsupported_annotation, e->position, "\"" + name + "\" in a loop's termination measure (a measure holds no permission atom, decision 0038 item 10)");
+      return nullptr;
+    }
     if (cx_.annot == Annot::decreases) {
-      reject(Diag::unsupported_expression, e->position, "a permission atom (\"" + name + "\") in a termination measure (a measure that reads memory is M4.5b1c or later)");
+      reject(Diag::unsupported_expression, e->position, "a permission atom (\"" + name + "\") in a termination measure (a measure holds no permission atom, decision 0038 item 10)");
       return nullptr;
     }
     if (ops.size() != 2) {
@@ -1827,19 +1838,21 @@ class Encoder {
       } else {
         reject(Diag::unsupported_annotation, e->position,
                "\"" + name + "\" of a place other than `*p` of a pointer parameter (`*local`, a global, a member, an element or `*result`: "
-               "M4.5b2, M4.5c, M4.5e1, M4.5b1c)");
+               "M4.5b2, M4.5c, M4.5e1, M4.5d2)");
         return nullptr;
       }
     }
     if (pn == nullptr || pn->kind != enk_param_ref) {
       reject(Diag::unsupported_annotation, e->position,
-             "\"" + name + "\" of something other than a pointer parameter (a local, a global or the result: M4.5b1c, M4.5b2)");
+             "\"" + name + "\" of something other than a pointer parameter (a local, a global: M4.5b2; the result: M4.5d2)");
       return nullptr;
     }
     const Expr* pf = param_reference(pn);
     if (pf == nullptr) return nullptr;
     if (!pf->type.is_ptr() || pf->kind != Expr::Kind::Formal) {
-      reject(Diag::unsupported_annotation, e->position, "\"" + name + "\" of something other than a pointer parameter");
+      reject(Diag::unsupported_annotation, e->position,
+             "\"" + name + "\" of something other than a pointer parameter" +
+                 (pf->kind == Expr::Kind::Result ? " (an atom on `*result`, an owning result: M4.5d2)" : ""));
       return nullptr;
     }
     const vir::AtomKind kind = fn == SpecFn::owns ? vir::AtomKind::Owns : fn == SpecFn::reads ? vir::AtomKind::Reads : vir::AtomKind::Live;
@@ -1904,7 +1917,7 @@ class Encoder {
   // `old` its value on entry, an `ensures` its value on return).  `ind` is the dereference.
   const Expr* contract_read(an_expr_node_ptr ind, const std::vector<an_expr_node_ptr>& ops) {
     if (cx_.annot == Annot::decreases) {
-      reject(Diag::unsupported_expression, ind->position, "a dereference in a termination measure (a measure that reads memory is M4.5b1c or later)");
+      reject(Diag::unsupported_expression, ind->position, "a dereference in a function's termination measure (a function's `decreases` that reads memory is M4.5b1c2's; a loop's measure may read memory)");
       return nullptr;
     }
     if (ind->is_lvalue) {
@@ -1925,13 +1938,13 @@ class Encoder {
     if (pn->kind != enk_param_ref) {
       reject(Diag::unsupported_annotation, ind->position,
              "a dereference in a contract of something other than a pointer parameter (a local, a global, a member, an element or the result: "
-             "M4.5b1c, M4.5b2, M4.5c, M4.5e1)");
+             "M4.5b1c3, M4.5b2, M4.5c, M4.5e1)");
       return nullptr;
     }
     const Expr* pf = param_reference(pn);
     if (pf == nullptr) return nullptr;
     if (pf->kind == Expr::Kind::Result) {
-      reject(Diag::unsupported_expression, ind->position, "a dereference of the result in an `ensures` (an owning result is M4.5b1c)");
+      reject(Diag::unsupported_expression, ind->position, "a dereference of the result in an `ensures` (M4.5b1c3: `*result` as a value; an owning result is M4.5d2)");
       return nullptr;
     }
     if (!pf->type.is_ptr()) {
@@ -2001,7 +2014,7 @@ class Encoder {
       if (partner < 0) {
         reject(Diag::unsupported_annotation, pos_of(st.atom),
                std::string("an `ensures` \"") + spelling(st.atom) + "\" with no \"" + spelling(st.atom) +
-                   "\" of the same parameter in the `requires` (a permission a function creates, such as an owning result, is M4.5b1c)");
+                   "\" of the same parameter in the `requires` (a permission a function creates, such as an owning result, is M4.5d2)");
         continue;
       }
       if (!used.insert(partner).second) {
@@ -2100,8 +2113,9 @@ class Encoder {
       reject(Diag::unsupported_expression, e->position, "a call of \"" + name + "\" that the compiler evaluated at compile time");
       return nullptr;
     }
-    if (cx_.contract) {
-      // Decision 0037 item 5: the permission atoms, by entity, in both spellings; before 0006's rejection of every other call.
+    if (cx_.contract || cx_.loop_clause) {
+      // Decision 0037 item 5: the permission atoms, by entity, in both spellings (spec_atom refuses them outside a contract, decision 0038
+      // item 10); before 0006's rejection of every other call.
       const SpecFn fn = spec_fn(callee);
       if (fn == SpecFn::owns || fn == SpecFn::reads || fn == SpecFn::live) return spec_atom(e, fn, name, ops);
       if (fn == SpecFn::unsupported) {
@@ -2152,7 +2166,7 @@ class Encoder {
   const Expr* address_of(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
     if (!operand_count(e, 1, ops)) return nullptr;
     an_expr_node_ptr o = ops[0];
-    if (cx_.contract || (cx_.annotation && !cx_.check_clause) || cx_.const_depth > 0) {
+    if (cx_.contract || (cx_.annotation && !cx_.check_clause && !cx_.loop_clause) || cx_.const_depth > 0) {
       reject(Diag::unsupported_expression, e->position, "taking an address in a contract, an invariant or a measure, or in an expression the compiler folded to a constant");
       return nullptr;
     }
@@ -2168,7 +2182,7 @@ class Encoder {
       return nullptr;
     }
     if (it->second->type.is_ptr()) {
-      reject(Diag::unsupported_expression, e->position, "taking the address of a pointer variable");
+      reject(Diag::unsupported_expression, e->position, "taking the address of a pointer variable (M4.5b1c3)");
       return nullptr;
     }
     if (cx_.declaring == v || cx_.pending.count(v) != 0) {
@@ -2176,7 +2190,13 @@ class Encoder {
       return nullptr;
     }
     if (!v->address_taken || !it->second->address_taken) {
-      // Fail closed: the front end flags every variable whose address is taken (P51, P57).
+      // The front end flags the variables whose address the CODE takes (P51, P57); an annotation's `&x` does not flag it (P59), so `x` is no
+      // cell and has no block to point to (decision 0038 item 6).
+      if (cx_.annotation) {
+        reject(Diag::unsupported_expression, e->position, "the address of `" + it->second->name + "` in an annotation, where the code never takes it");
+        return nullptr;
+      }
+      // Fail closed: the front end flags every variable whose address is taken in code.
       verify_config().out.internal_inconsistency = true;  // a tool failure, exit status 3 (decision 0022 item 12)
       reject(Diag::internal_inconsistency, e->position, "the address of a variable the front end did not flag as address-taken (decision 0032 item 4)");
       return nullptr;
@@ -2188,7 +2208,9 @@ class Encoder {
   const Expr* indirect_read(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
     if (!operand_count(e, 1, ops)) return nullptr;
     if (cx_.contract && cx_.const_depth == 0) return contract_read(e, ops);  // decision 0037 items 5 and 7
-    if (e->is_lvalue || cx_.contract || (cx_.annotation && !cx_.check_clause) || cx_.const_depth > 0) {
+    // A loop clause's `*p` is the attribute argument itself, unevaluated, so the front end leaves it an lvalue (P59 item 3, no conversion
+    // around it): it is read as the value, as a contract's plain `*p` is (decision 0038 item 6).  `&*p` never gets here (address_of).
+    if ((e->is_lvalue && !cx_.loop_clause) || cx_.contract || (cx_.annotation && !cx_.check_clause && !cx_.loop_clause) || cx_.const_depth > 0) {
       reject(Diag::unsupported_expression, e->position,
              e->is_lvalue ? "a dereference used as anything but a value or the target of an assignment"
                           : "a dereference in a contract, an invariant or a measure, or in an expression the compiler folded to a constant");
@@ -2319,23 +2341,31 @@ class Encoder {
   }
   const Stmt* block_of(Out&& v, const a_source_position& p, SrcLoc end) { return b_.block(std::move(v), loc_of(p), std::move(end)); }
 
-  const Stmt* sub_statement(a_statement_ptr s, const a_source_position& p) {
+  const Stmt* sub_statement(a_statement_ptr s, const a_source_position& p, bool loop_body = false) {
     Out out;
     statement(s, out);
-    return cell_block(std::move(out), p, s);
+    return cell_block(std::move(out), p, s, loop_body);
   }
 
   // The block the encoder makes around the statements of a sub-statement.  When they declare a cell directly (C++: `if (c) int x = 5,
   // *p = &x;`, whose declaration the front end wraps in a block it gives no position), the block ends where that statement does
-  // (decision 0032 item 8); with no position there it is rejected.
-  const Stmt* cell_block(Out&& v, const a_source_position& p, a_statement_ptr sub) {
+  // (decision 0032 item 8); with no position there it is rejected.  `loop_body`: the block is a loop's body; one written with braces carries
+  // the closing brace as its `end_loc` whether or not it declares a cell (decision 0038 item 4 reports the iteration check there); a body
+  // without braces keeps none.
+  const Stmt* cell_block(Out&& v, const a_source_position& p, a_statement_ptr sub, bool loop_body = false) {
     const Stmt* decl = nullptr;
     for (const Stmt* x : v)
       if (x->kind == Stmt::Kind::Decl && x->var != nullptr && x->var->address_taken) {
         decl = x;
         break;
       }
-    if (decl == nullptr) return block_of(std::move(v), p);
+    if (decl == nullptr) {
+      if (loop_body && sub != nullptr && sub->kind == stmk_block && !sub->compiler_generated) {
+        SrcLoc brace = block_end(sub);
+        if (brace.known()) return block_of(std::move(v), p, std::move(brace));
+      }
+      return block_of(std::move(v), p);
+    }
     SrcLoc end = sub != nullptr ? end_of(sub->end_position) : SrcLoc();
     if (!end.known()) {
       reject_loc(Diag::unsupported_statement, decl->loc, "a declaration whose address is taken in a block without a closing position");
@@ -2456,19 +2486,6 @@ class Encoder {
     if (c != nullptr) out.push_back(b_.check(c, loc_of(s->position)));
   }
 
-  // The first node of `e` that is a pointer or reads a cell (decision 0032 item 10: none in a contract, invariant or measure).
-  static const Expr* pointer_node_in(const Expr* e) {
-    if (e == nullptr) return nullptr;
-    if (e->type.is_ptr() || e->kind == Expr::Kind::Null || e->kind == Expr::Kind::AddrOf || e->kind == Expr::Kind::Deref ||
-        (e->kind == Expr::Kind::Local && e->var != nullptr && e->var->address_taken))
-      return e;
-    for (const Expr* x : {e->a, e->b, e->c})
-      if (const Expr* f = pointer_node_in(x)) return f;
-    for (const Expr* x : e->args)
-      if (const Expr* f = pointer_node_in(x)) return f;
-    return nullptr;
-  }
-
   // The `invariant` and `decreases` clauses written before a loop.  A loop without a measure is rejected (0013 item 3).
   // `require_measure` is false only for `do ... while (0)` (0014 item 5).
   bool encode_loop_clauses(a_statement_ptr s, std::vector<vir::Clause>& invariants, std::vector<vir::Clause>& measure,
@@ -2481,15 +2498,11 @@ class Encoder {
       if (k == Annot::decreases) {
         has_decreases = true;
         cx_.annotation = true;
+        cx_.loop_clause = true;  // decision 0038 item 6: a loop measure may read memory
         const size_t before = measure.size();
         encode_measure(a, measure);
+        cx_.loop_clause = false;
         cx_.annotation = false;
-        for (size_t i = before; i < measure.size(); ++i)
-          if (const Expr* bad = pointer_node_in(measure[i].expr)) {
-            reject_loc(Diag::unsupported_expression, bad->loc, "a pointer or a variable whose address is taken in a loop measure");
-            measure.resize(before);
-            break;
-          }
         if (measure.size() == before) ok = false;
         continue;
       }
@@ -2511,16 +2524,15 @@ class Encoder {
         continue;
       }
       cx_.annotation = true;
+      cx_.loop_clause = true;  // decision 0038 item 6: cells by name, `*q`, `&x`, pointer `==`/`!=` and NULL are allowed
+      cx_.loop_invariant = true;
       truth_context(arg);  // decision 0023 item 5: `invariant(x | 4)`
       const Expr* c = clause_bool(expr(arg), arg->position);
       const SrcLoc clause_loc = loc_of(a->position);
+      cx_.loop_invariant = false;
+      cx_.loop_clause = false;
       cx_.annotation = false;
       if (c == nullptr) {
-        ok = false;
-        continue;
-      }
-      if (const Expr* bad = pointer_node_in(c)) {
-        reject_loc(Diag::unsupported_expression, bad->loc, "a pointer or a variable whose address is taken in a loop invariant");
         ok = false;
         continue;
       }
@@ -2752,7 +2764,7 @@ class Encoder {
   bool assign_target(an_expr_node_ptr lhs, AssignParts* p, bool stmt_level) {
     if (lhs->kind == enk_operation && lhs->variant.operation.kind == eok_indirect) {
       if (!stmt_level) {
-        reject(Diag::unsupported_expression, lhs->position, "a write through a pointer used as a value, or inside an expression");
+        reject(Diag::unsupported_expression, lhs->position, "a write through a pointer used as a value, or inside an expression (M4.5b1c2: sequencing, decision 0028 item 12)");
         return false;
       }
       auto lops = operands_of(lhs);
@@ -2770,7 +2782,7 @@ class Encoder {
     if (p->v == nullptr) return false;
     if (p->v->address_taken && !stmt_level) {
       reject(Diag::unsupported_expression, lhs->position,
-             "a write to \"" + p->v->name + "\", a variable whose address is taken, inside an expression");
+             "a write to \"" + p->v->name + "\", a variable whose address is taken, inside an expression (M4.5b1c2: sequencing, decision 0028 item 12)");
       p->v = nullptr;
       return false;
     }
@@ -2928,31 +2940,12 @@ class Encoder {
     }
   }
 
-  // The rejections of vir::memory_problems (decision 0032 item 10): a loop at its keyword, a `return` or a jump at itself.
-  void report_memory_problems(vir::Function* f) {
-    for (const vir::MemoryProblem& m : vir::memory_problems(*f)) {
-      std::string what = m.what;
-      const std::string tail = " (decision 0032)";  // the diagnostic's own format ends with its record
-      if (what.size() > tail.size() && what.compare(what.size() - tail.size(), tail.size(), tail) == 0) what.resize(what.size() - tail.size());
-      auto kw = m.loop != nullptr ? loop_keyword_.find(m.loop) : loop_keyword_.end();
-      if (kw != loop_keyword_.end()) reject_at(Diag::unsupported_statement, kw->second, what);
-      else reject_loc(Diag::unsupported_statement, m.loc, what);
-    }
-  }
-
   // The rejections of vir::placement_problems (decision 0037 item 8): an access beside a call that holds permissions, or a second such call.
   void report_placement_problems(vir::Function* f) {
     for (const vir::PlacementProblem& m : vir::placement_problems(*f)) {
       std::string what = m.what;
       reject_loc(Diag::unsupported_expression, m.loc, what);
     }
-  }
-
-  // The keyword position of each loop built, for the rejection of a loop that holds pointers (decision 0032 item 10).
-  std::map<const Stmt*, DiagPos> loop_keyword_;
-  const Stmt* note_loop(const Stmt* loop, a_statement_ptr s) {
-    loop_keyword_[loop] = loop_keyword_position(s);
-    return loop;
   }
 
   // ---- assert (decision 0015 item 6, P22) ----------------------------------------------------------------------
@@ -3914,9 +3907,9 @@ class Encoder {
         const Expr* c = as_bool(expr(s->expr), s->expr->position);
         const int id = b_.jump_id();
         cx_.targets.push_back(make_target(s, false, id, s->variant.loop_statement));
-        const Stmt* body = sub_statement(s->variant.loop_statement, s->position);
+        const Stmt* body = sub_statement(s->variant.loop_statement, s->position, /*loop_body=*/true);
         cx_.targets.pop_back();
-        if (c != nullptr && inv_ok) out.push_back(note_loop(b_.loop(c, std::move(inv), std::move(measure), body, nullptr, vir::LoopForm::While, id, loc_of(s->position)), s));
+        if (c != nullptr && inv_ok) out.push_back(b_.loop(c, std::move(inv), std::move(measure), body, nullptr, vir::LoopForm::While, id, loc_of(s->position)));
         return;
       }
       case stmk_end_test_while: {
@@ -3933,11 +3926,11 @@ class Encoder {
         const Expr* c = as_bool(expr(s->expr), s->expr->position);
         const int id = b_.jump_id();
         cx_.targets.push_back(make_target(s, false, id, s->variant.loop_statement));
-        const Stmt* body = sub_statement(s->variant.loop_statement, s->position);
+        const Stmt* body = sub_statement(s->variant.loop_statement, s->position, /*loop_body=*/true);
         cx_.targets.pop_back();
         if (c != nullptr && inv_ok)
-          out.push_back(note_loop(b_.loop(c, std::move(inv), std::move(measure), body, nullptr,
-                                          once ? vir::LoopForm::DoOnce : vir::LoopForm::DoWhile, id, loc_of(s->position)), s));
+          out.push_back(b_.loop(c, std::move(inv), std::move(measure), body, nullptr,
+                                once ? vir::LoopForm::DoOnce : vir::LoopForm::DoWhile, id, loc_of(s->position)));
         return;
       }
       case stmk_for: {
@@ -3970,8 +3963,8 @@ class Encoder {
         cx_.in_for_step = false;
         const Stmt* step_stmt = step.empty() ? nullptr : step.size() == 1 ? step[0] : block_of(std::move(step), fl->increment->position);
         if (c != nullptr && inv_ok)
-          whole.push_back(note_loop(b_.loop(c, std::move(inv), std::move(measure), cell_block(std::move(body), s->position, s->variant.for_loop.statement), step_stmt,
-                                            vir::LoopForm::While, id, loc_of(s->position)), s));
+          whole.push_back(b_.loop(c, std::move(inv), std::move(measure), cell_block(std::move(body), s->position, s->variant.for_loop.statement, /*loop_body=*/true), step_stmt,
+                                  vir::LoopForm::While, id, loc_of(s->position)));
         if (fl->initialization == nullptr) {
           for (const Stmt* x : whole) out.push_back(x);
         } else if (!whole.empty()) {
@@ -4087,7 +4080,6 @@ class Encoder {
     if (reported_count() == reported_before) {
       report_goto_problems(f);
       report_sequence_problems(f);
-      report_memory_problems(f);
       report_placement_problems(f);
     }
     cx_ = Ctx();

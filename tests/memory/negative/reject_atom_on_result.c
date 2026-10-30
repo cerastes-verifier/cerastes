@@ -1,7 +1,7 @@
 // expect: rejected cerastes-unsupported_annotation @ L10
 // mode: c23, c++20
 // twin: tests/memory/live_result.c
-// Pins: 0037 item 15: an atom on *result is rejected until owning results (re-expected by M4.5d2 or b1c)
+// Pins: 0037 item 15: an atom on *result is rejected until owning results (re-expected by M4.5d2, with owning results)
 #include <cerastes.h>
 #include <stddef.h>
 

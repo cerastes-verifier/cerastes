@@ -5455,3 +5455,336 @@ More pins from `p6b.vpr` (all as the plan's item 7 expects): the **ensures** for
 must report as `permission` before Silicon's own check can.
 
 Nothing else in item 6 (the `(g ? m : write) / (N + 1)` amounts, one `Perm` per atom, the return check with `Σ_{j≠i}`) is contradicted: it verifies, including `f(x, x)`, a fraction-holding caller and a guard-false amount.
+
+## M4.5b1c1: loops and jumps over memory (record 0038)
+
+Probe P59 and spike S28 of the M4.5b1c1 session, branch `m4.5b1c1-loops` (worktree `.claude/worktrees/m4.2b1`); evidence under `build/m4.5b1c1/` (not committed): `p59/` for the IL probes, `s28/` for the Silicon runs (il-analyst: P3-P6, P8), `s28/targets/` and `s28/emitted/` (test-mutator: P1, P2, P7). Silicon 1.1-SNAPSHOT `6b540aa4`, Z3 4.16.0 from `build/env.sh`. Audit round 1 of record 0038 reproduced and extended S28 (its runs `e1`-`e12` are in the session scratchpad, not kept); its findings are folded into the record, not repeated here. Timings were taken under heavy load (one-minute load averages 50-245) and are upper bounds.
+
+### P59: the IL of atoms, places and measures in loop annotations, and of jumps out of cell blocks (record 0038 items 3-8) **PASS for 1, 3, 4; item 2 has one CORRECTION (`&x` in an annotation does not set `address_taken`; today's encoder exits 3 on it); six NOTEs**
+
+Evidence under `build/m4.5b1c1/p59/` (not committed): inputs `a.c` (item 1), `b.c` (item 2), `c.c`, `d.c` (item 3), `e.c`, `f.c`, `g.c`, `h.c` (item 4), `cpp.cpp`; for each input `<f>.c23.il` and `<f>.c++20.il` (`scripts/cerastes-fe.sh --c23|--c++20 --il_display -I include`), `<f>.<mode>.walk` (`--cerastes_walk`), `.err`
+(warnings); `run.sh <input>` produces all of them; scratch tools `ilvars.py` and `ilsum.py` (copies of P57's) and `sttree.py` (prints the statement tree of one function of an `il_display` dump: kinds, positions, `assoc_scope`, `final_position`, label flags). The real `include/cerastes.h` is used (`-I include`; EDG
+warns once, "include was specified as both a system and non-system include directory", harmless). C inputs are run with `--c++20` as well as `--c23`. Branch `m4.5b1c1-loops`, Silicon not involved. `il_def.h` lines are `third_party/edg/src/il_def.h`.
+
+**Method note (as P13/P50 found):** `il_display` does not print the attribute entries or their arguments, only the statement's `attributes:` pointer (`a.c23.il:14138`: `attributes:              file-scope attribute@7c996a3c30` on the `kind: stmk_while` statement at `position.seq 119`, il_def.h:16548). The argument nodes below
+are therefore from the walker (`--cerastes_walk`), the variable and block facts from `il_display`.
+
+**1. `owns`, `reads`, `live` before a `while`** (`a.c`, functions `la lb lc` with a pointer local `q`, `pa pb pc` with a pointer parameter `q`; `a.c23.walk`, `a.c++20.walk`). The invariant is one `attr [[cerastes::invariant]]` on the `stmk_while` and the measure a second attr (`[[cerastes::decreases]]`) on the same statement, in source order.
+- **C23, `cerastes_owns(*q)`** (`a.c23.walk:3-9` local, `:42-51` parameter), the same for both:
+```
+stmt stmk_while @ L19:3 attr [[cerastes::invariant]] @ L17:3
+  arg 1 @ L7:17
+    op eok_call type_kind=tk_unknown type=bool @ L7:30
+      routine cerastes_owns: bool (*)(...) @ L7:17
+      op eok_indirect type_kind=tk_pointer type=int @ L17:27
+        var q: int * decl=L15:8 @ L17:28            (pa: `var q: int * decl=L38:14`)
+```
+  `cerastes_reads(*q)`: the same (`a.c23.walk:15-23`; for a `const int *q` parameter `var q: const int *`, `:57-66`). `cerastes_live(q)`: `eok_call` of `cerastes_live` with the **bare** `var q: int *` and no cast (`:29-36`, `:72-80`). The pointee `int` has no `eok_cast` wrapper (P58 (e): only `char`/`bool`/`short` get one).
+- **C++20, `cerastes::owns(*q)`, `cerastes::reads(*q)`** (`a.c++20.walk:1-11` local `la`, `:47-58` parameter `pa`; `[[cerastes::invariant(cerastes::owns(*q))]]` written out gives the same nodes, `cpp.c++20.walk:1-11`):
+```
+op eok_call type=bool / routine cerastes::owns args <T=int>: bool (*)(const int &) noexcept @ L3:17
+  op eok_reference_to type=const int & @ L17:27
+    op eok_lvalue_adjust type=const int lvalue @ L17:27
+      op eok_indirect type=int lvalue @ L17:27
+        var q: int * decl=L15:8 @ L17:28
+```
+  For `const int *q` (`pb`) there is no `eok_lvalue_adjust`: `eok_reference_to(eok_indirect type=const int lvalue(var q: const int *))` (`a.c++20.walk:71-74`). `cerastes::live(q)` is `eok_call` of `routine cerastes::live args <T=int>: bool (*)(const int *) noexcept` over **`op eok_cast type=const int * cast=implicit`** around `var q: int *`
+  (`a.c++20.walk:39-41`, `:87-89`); in C23 no cast. All three agree with P58 (d)/(e): the atom recognizer of contracts needs no change for the invariant, except for one thing:
+- **NOTE (variable kind):** inside a loop annotation a pointer parameter is `var q: int * decl=L38:14` (an ordinary `a_variable` reached by name), **not** `param 1 q` as in a `requires`/`ensures` (`a.c23.walk:51` against `d.c23.walk:31`, `param 1 p: int *`). The invariant reader sees the same variable node as the body, so a parameter and a local are distinguished only by the variable's `is_parameter`
+  (il_def.h:11392; `ilvars.py a.c23.il pa`: `variable q ... param=TRUE`, `la`: `param=-`). `address_taken` is `-` for the pointer `q` in all six functions in both modes.
+- **NOTE (`used`):** a pointer or cell mentioned **only** in a loop annotation is not `used`: `ilvars.py a.c23.il la` prints `variable q ... used=-` and EDG warns `variable "q" was set but never used` (`a.c23.err`, warnings at source lines 15, 23 and 31 of `a.c`, the three pointer locals; the parameter case `pa` has `used=-` and no warning). The flag is
+  in il_def.h:11381-11383. A test whose pointer is read only in its invariant is a warning-bearing test (decision 0025's `-Wall` shapes: the warning is EDG's, not ours; check `native-ok` and the warning expectation before writing such a test).
+- **NOTE (loop position):** in C++20 the `stmk_while`'s position is the **first attribute's** (`stmt stmk_while @ L17:3 attr [[cerastes::invariant]] @ L17:3`, `a.c++20.walk:3`) and in C23 the `while` keyword (`@ L19:3`, `a.c23.walk:3`), as P14 found for `do`; the `Clause::loc` of each attribute argument is its own position in both modes (the macro body's, as P58 notes).
+
+**2. Memory in invariants** (`b.c`; `b.c23.walk`, `b.c++20.walk`; functions `t1..t6`). Nodes (identical in both modes except the `int`/`bool` result type of comparisons):
+```
+p == &x || p == &y   (t1, b.c23.walk:5-15)
+  op eok_lor type=int @ L8:30   (C++20: type=bool)
+    op eok_eq type=int @ L8:24 ( var p: int * @ L8:22 , op eok_address_of type=int * @ L8:27 ( var x: int decl=L5:7 lvalue @ L8:28 ) )
+    op eok_eq type=int @ L8:35 ( var p @ L8:33 , op eok_address_of type=int * @ L8:38 ( var y: int decl=L5:14 lvalue @ L8:39 ) )
+x == 0   (t2, :24-28)     op eok_eq type=int ( var x: int decl=L14:7 @ L17:22 , const 0 type=int )        the variable is a bare `var`, no lvalue flag, no cast
+*q > 0   (t3, :38-43)     op eok_gt type=int ( op eok_indirect type=int ( var q: int * decl=L23:14 @ L25:23 ) , const 0 type=int )   (the indirect is an rvalue here; no lvalue-to-rvalue node)
+```
+- **CORRECTION to the plan (item 6: "`&x` … in an invariant"; also to record 0032 item 4's "`check(&x != &y)`"): a use in an attribute does not set `address_taken`.** `t5` (`&x` only in `CERASTES_INVARIANT(p != &x)`, `b.c:41`) and `t6` (`&x` only in `CERASTES_CHECK(p != &x);`, `b.c:49`):
+```
+ilvars.py b.c23.il t5:   variable x      address_taken=-     storage=sc_auto param=- used=TRUE type=int      (b.c++20.il: used=-)
+ilvars.py b.c23.il t6:   variable x      address_taken=-     ...
+t1 (x, y initialised through `c ? &x : &y`):  variable x address_taken=TRUE, variable y address_taken=TRUE      t2 (`int *p = &x;`): x TRUE; t4 (x only in `x == 0`): x `-`, used=-
+```
+  So `address_taken` reflects only the executed code. Today's encoder reacts with exit 3 (fail closed, but not a diagnostic): `build/cerastes verify c.c --std=c23` and `--std=c++20` on `int t6(int *p) CERASTES_REQUIRES(cerastes_owns(*p)) { int x = 0; CERASTES_CHECK(p != &x); return x; }`:
+```
+"c.c", line 5: error #cerastes-internal_inconsistency: an internal inconsistency: the address of a variable the front end did not flag as address-taken (decision 0032 item 4) (the program was not checked; decision 0022 item 12)
+    CERASTES_CHECK(p != &x);          cerastes: error: internal inconsistency in the encoder (the program was not checked)         exit 3
+```
+  A written `&x` of a non-cell in an invariant will do the same; the encoder should reject it by name (`unsupported_expression`: "takes the address of `x`, which the program never uses") before it reaches the internal check, or the record should say it is exit 3 (it is not a user error to avoid: the program is correct C).
+- `x == 0` with `x` a cell (`t2`) reads `var x` by name: the plain `Var` node of a cell, as in code. `kv > none ==> x == vs` therefore does not need a new node kind in the encoder.
+
+**3. Measures** (`d.c`; `d.c23.walk`, `d.c++20.walk`). `decreases(k)` with `k` a cell (`m1`, `k` `address_taken=TRUE`), `decreases(*p)` on a loop (`m2`, `p` a pointer local to a cell) and on a function (`down`, `int *p` parameter), both modes:
+```
+decreases(k)    d.c23.walk:8-10:   stmt stmk_while @ L14:3 attr [[cerastes::decreases]] @ L13:3 / arg 1 @ L13:22 / var k: int decl=L10:7 lvalue @ L13:22          (a bare `var`, the lvalue flag printed, no cast)
+decreases(*p)   d.c23.walk:19-21:  arg 1 @ L22:22 / op eok_indirect type_kind=tk_pointer type=int lvalue @ L22:22 / var p: int * decl=L20:8 @ L22:23
+function        d.c23.walk:48-50:  attr [[cerastes::decreases]] on routine @ L29:5 / arg 1 @ L29:24 / op eok_indirect type=int lvalue @ L29:24 / param 1 p: int * @ L29:25      (C++20 the same, d.c++20.walk)
+```
+So a measure's heap read is an `eok_indirect` flagged `lvalue` (an lvalue used as a value; the same shape as a contract's plain `*p`, the walker prints `lvalue` for a place under the attribute). In a loop annotation the pointer is `var p`, in the function's `decreases` it is `param 1 p`. No `eok_cast` and no `eok_lvalue_adjust`. A `decreases` heap read does not set any flag (`ilvars.py d.c23.il down`: `variable p address_taken=- param=TRUE used=TRUE`).
+
+**4. Jumps and returns inside a loop body that declares a cell** (`e.c`, `f.c`, `g.c`, `h.c`; `python3 sttree.py <dump> <function>`). The statement shapes P13 (generated `break`/`continue`), P15 (switch) and P19 (user `goto`) describe are unchanged when the body declares an address-taken local; nothing new reaches the encoder. Facts the lowering of record 0038 item 7 relies on, every one seen
+in both modes (C23 wraps more in compiler-generated blocks, as P13 says):
+- **Positions of the cell's block** (`ilvars.py e.c23.il lp`): `block pos=108:17 end_position=115:3 final_position=115:3 assoc_scope=yes` for the user's `{ ... }` of the loop body; `final_position` is the closing brace, the position item 7's scope exit needs (the same field P57 found). `stmk_decl` of the cell and of the pointer are direct statements of that block
+  (`sttree.py e.c++20.il lp`: `stmk_block @108:17 scope=yes final=115:3` holding `stmk_decl @109:5`, `stmk_init @109:11`, ...). Cells (`variable c address_taken=TRUE`) are in the blocks with `scope=yes`; blocks with `scope=no` (generated `if` then-blocks, a user block with no declaration, e.g. `stmk_block @109:20 scope=no final=109:40`, `h.c++20.il nb2`) hold no cell.
+- **`continue`** is `stmk_goto ... gen label{continue_label}` (position of the `continue` text: `stmk_goto @112:18`, `lp`). **Its label statement is outside the user's body block in every shape with a declaration in the body** (both modes): the body block `[d1e0]` is the child of a generated block that ends with `stmk_label ... {continue_label}` (`sttree.py e.c++20.il lp`: the generated
+  `stmk_block @- gen scope=no` holds `stmk_block @108:17 scope=yes` then `stmk_label @- label@e6d0{continue_label}`; C23 the same, `e.c23.il`). Same for `for` (the `increment` runs after the label, `fr`), `do ... while` (`dw`) and for a cell in a nested block of the body (`nb`, `nb2`, label after the body block). **When the body block declares nothing at all the label is
+  the last statement inside the body block** (`g.c nodecl`: `stmk_label @- label@1ba0{continue_label}` as the last child of `stmk_block @105:17 scope=no`). Either way the continue leaves exactly the blocks between it and the body block, and the label's own placement does not matter for cells: a body block that declares no cell has nothing to exit (confirmed: `scope=no`).
+- **`break`** of a loop: `stmk_goto gen label{break_label}`; the `stmk_label` is the next sibling after the `stmk_while` in its parent (C++20) or after it inside the generated `scope=yes` wrapper block (C23), `e.c++20.il lp`, `e.c23.il lp`: P13's rule, unchanged. **`break` of a `switch`**: label `{break_label,switch_break_label}` is the sibling after the `stmk_switch`
+  (`sw`, both modes), **outside the switch body block**: a `break` from the case block `stmk_block @145:11 scope=yes final=150:3` (the cell's) leaves the case block and the switch body block `@144:14 scope=yes final=157:3`. A cell declared directly in the switch body (`swl`, `int d; int *q;` at `h.c:20-21`, `stmk_decl @121:7` under `stmk_block @120:16`)
+  is therefore also left by that `break` in the IL; plan item 7 ("a switch's `break` lands before the body's scope exit, so it exits only the blocks nested inside the case") is a lowering choice (exit the body's cells at its `}` for both ways out), equivalent to the IL as long as lowering writes that exit once at the body's closing brace for break and fall-through alike; the source position for such an exit is `final_position` of the
+  body block (`final=132:5` in `swl`).
+- **`continue` through a `switch` in a loop** (`swl`): the goto's label `{continue_label}` is after the loop-body block (`stmk_label @- label@64f0{continue_label}` after `stmk_block @118:17`, C++20; C23 outside the generated wrapper), so a `continue` in `case 1: { int c...}` leaves the case block, **the switch body block (which holds the cell `d`)**, and the loop body block. A scope-exit list built from "the blocks left, innermost first" must walk through the switch.
+- **Forward outward `goto`** (`gt`): plain `stmk_goto @124:18` (no `compiler_generated`, no `break_label`/`continue_label` flags), the `stmk_label @127:1` a sibling after the loop in the function block, both modes (P19 unchanged). **`return`** inside the body is `stmk_return @136:18` under the generated then-block, `rt`, both modes: no new node.
+- **`do { ... } while (c)`** (`dw`): `stmk_end_test_while @122:3` with the body `@122:6 scope=yes final=128:3` and the continue label after it; the condition is evaluated after the label, outside the body block (P13/P14 unchanged).
+
+None of these shapes needs a field the walkers do not already read.
+
+**Summary for the record.** (1) The atoms' places in invariants are the nodes of P58 with `var q` for a parameter; (2) **contradicts the plan on one point**: `&x` (invariant, `check`) leaves `address_taken` unset, so an invariant `p == &x` is legal only when the code also takes `&x`; the encoder must produce a diagnostic, not exit 3; (3) measures are bare
+`var k` (lvalue) and `eok_indirect` (lvalue), no wrapper; (4) no new statement shape: the continue label is outside the body block whenever the body block declares something, and a break of a switch leaves the switch body block.
+
+### S28 (il-analyst half: P3, P4, P5, P6, P8): loops over memory on Silicon (record 0038 items 3-6, 8) **PASS for P3, P4, P5 and P6's measure; three CONTRADICTIONS/gaps of the plan text (P3 case splits, P6 `old` and well-formedness, P8 post-loop ownership) with their fixes; every finding below is a run**
+
+Evidence under `build/m4.5b1c1/s28/` (not committed; the test-mutator's P1, P2, P7 are in `targets/` and `emitted/` there and are not repeated). Silicon 1.1-SNAPSHOT `6b540aa4`, Z3 4.16.0 from `build/env.sh`, run as `scripts/run_tests.py`'s `run_silicon` does (`$CERASTES_JAVA -Xss128m -jar $SILICON_JAR --z3Exe $Z3_EXE --numberOfErrorsToReport 0 <file>`) by
+`sv.sh <file.vpr>`, which writes `<file>.out` (output, exit status, `/usr/bin/time -p` of the whole process tree, load averages before) and `<file>.time`. `prelude.vpr` is the prelude, fields, `Block` domain and `alloc_int` that `build/cerastes verify tests/memory/owns_inc.c --keep-vpr` emits (`owns_inc.vpr` up to `f_inc`); the hand-written
+methods follow the emitted shapes (the `reads` atom of `peek_reads.vpr`'s `two`, the case split `if (lvloc(block_of(p)) == lvloc(block_of(q))) { }`, the snapshots and checks of `targets/p1_break_framed.vpr`). `gen_p3.py` generates P3; `p4/ p5/ p6/ p8/` hold the rest, each `.vpr` with its `.out`.
+**Timing caveat (the machine was not quiet, see the table):** the load average was 52 when I started and 110-245 from the third run on (other agents, the baselines); every timing below carries its load. The wall clock is inflated by that load; the CPU seconds (`user`) are the more stable figure. I could not get a quiet machine. A trivial method costs
+about 8.4 user-seconds of JVM start-up here (`p4a`..`p6i` all land at 8-10 user seconds), so subtract that.
+
+#### P3: parameter de-duplication for 2, 3, 4 aliasing `reads` parameters (record 0038 item 3) **PASS, with one gap in the plan text: the case split `if (p_i == p_j) { }` is needed before the entry snapshot**
+
+Generator `gen_p3.py k variant out.vpr`, files `p3/k{2,3,4}_{rec,split,gval,noloop,noguard,vac}.vpr`. The method has k `Ref` parameters `p1..pk` with ghost amounts `a1..ak` (`none < a < write`), one `requires` per WF and one `reads` atom per parameter (`RDA` of `peek_reads.vpr`: `!= null`, WF, `offset_of < len`, `acc(p.v_int, a) && acc(p.d_int, a)`,
+the flag, the range, `acc(lvloc(block_of(p)).lv, a)`), `0 <= *p_i <= 1000`, the same atoms in the `ensures`; a loop `while (i < n)` with `decreases n - i` that reads every `*p_i` (with the checks of `peek`: `!= null`, `perm > none`, the flag, the sum's overflow); snapshots before the loop `kv_i := perm(p_i.v_int)`, `kd_i`, `kl_i := perm(lvloc(block_of(p_i)).lv)`,
+`vs_i := p_i.v_int`; the invariant (variant `rec` = exactly item 3):
+```
+invariant (true && p_i != p_1 && ... && p_i != p_{i-1}) ==> acc(p_i.v_int, kv_i) && acc(p_i.d_int, kd_i)
+invariant (true && lvloc(block_of(p_i)) != lvloc(block_of(p_1)) && ...) ==> acc(lvloc(block_of(p_i)).lv, kl_i)
+invariant kv_i > none ==> p_i.v_int == vs_i          invariant kd_i > none ==> p_i.d_int
+```
+plus the iteration-end checks `assert perm(p_i.v_int) >= kv_i` (and `d_int`, the liveness cell) before the closing brace, and the `ensures`' return checks of `peek_reads.vpr` (`perm(p_i.v_int) >= a_i + Σ_{j≠i} (p_i == p_j ? a_j : none)`, and the `lvloc` form).
+- **First run FAILED** (`p3/k2_rec.vpr` before the fix, run 1): `Loop invariant true ==> acc(p1.v_int, kv1) && acc(p1.d_int, kd1) might not hold on entry. There might be insufficient permission to access p1.v_int (k2_rec.vpr@70.15--70.66)`. Reason: `kv1 := perm(p1.v_int)` is `a1 + (p1 == p2 ? a2 : none)` when the aliasing is open, and Silicon's exhale
+  takes permission only from chunks whose receiver it can prove equal. **Fix, in all the variants below:** the no-op case splits `if (p_i == p_j) { }` (cells) and `if (lvloc(block_of(p_i)) == lvloc(block_of(p_j))) { }` for every pair, **before** the snapshots, as at a call (0037 item 8). The plan text (item 3) names the guard and the snapshots but not these splits.
+- **Results with the entry splits** (all `exit=0`): `k2_rec`, `k3_rec`, `k4_rec`: verify. Variant `split` (the splits repeated at the top of the loop body) and `gval` (the value conjuncts guarded by the same `G_i` as the `acc`, i.e. `G_i && kv_i > none ==> p_i.v_int == vs_i`) verify too for k = 2, 3, 4. **So the plan's value conjunct
+  `kv_i > none ==> p_i.v_int == vs_i` is accepted as written, without a guard and without splits in the body** (it reads `p_i.v_int` where the earlier `acc(p_j...)` frames it; the run does not show why S27 P6's "disjunctive frame" failure does not arise here, only that it does not, for k = 2, 3, 4).
+- **Non-vacuity** (`p3/k3_vac.vpr`: `assert false` at the end of the body and after the loop): exactly two errors, `Assertion false might not hold` at `k3_vac.vpr@126.12` and `@128.10`. **Aliasing paths are reachable inside the loop and the proof is for all of them** (`p3/k3_alias_reachable.vpr`: `assert p3 != p1`, `assert p3 != p2`, `assert p2 != p1` as the first statements
+  of the body of `k3_rec`: three errors, `@99.12`, `@100.12`, `@101.12`).
+- **Twin, the guard is needed** (`p3/k2_noguard.vpr`: `G_i` and the liveness guard replaced by `true`): two errors at the entry, `Loop invariant true ==> acc(p2.v_int, kv2) && acc(p2.d_int, kd2) might not hold on entry. There might be insufficient permission to access p2.v_int (@73.15--73.66)` and the same for `acc(lvloc(block_of(p2)).lv, kl2)` (`@74.15--74.58`):
+  Silicon's own reason, so cerastes' explicit entry check would have to come first if it is ever wrong (item 4: establishment is `internal`).
+- **Timing** (`p3/timing.log`; one Silicon at a time; **not quiet**: load averages before each run are in the last column; `user` is CPU seconds of the java process and Z3):
+
+| file | verdict | Silicon's | real | user | load before (1/5/15 min) |
+|---|---|---|---|---|---|
+| `k2_noloop` (the method without the loop, the entry splits and snapshots only) | verified | 6.02 s | 6.45 | 9.91 | 195.9 177.5 121.5 |
+| `k2_rec` | verified | 6.90 s | 7.27 | 10.63 | 194.2 177.4 121.8 |
+| `k3_noloop` | verified | 8.37 s | 8.74 | 12.05 | 188.5 176.5 121.8 |
+| `k3_rec` | verified | 12.27 s | 12.62 | 15.20 | 188.0 176.8 122.5 |
+| `k4_noloop` | verified | 15.92 s | 16.37 | 18.97 | 185.6 176.9 123.5 |
+| `k4_rec` | verified | 47.79 s | 48.17 | 32.75 | 182.2 176.6 124.3 |
+| `k4_split` | verified | 53.97 s | 54.36 | 33.99 | 181.6 177.2 127.5 |
+| `k4_gval` | verified | 58.30 s | 58.73 | 34.43 | 236.9 192.3 135.9 |
+
+  Earlier runs of the same files (load 64-111 at first, then 110): `k2_rec` 7.28 s, `k3_rec` 15.0 s, `k4_rec` 52.3 s, `k4_split` 61 s, `k4_gval` 77 s. Compare record 0037's quiet-machine figure for four `reads` parameters, 5.7 s: the loop adds roughly **+0.7 (k=2), +3 (k=3) and +14 (k=4) CPU seconds over the same method without a loop**, and `k4_noloop` itself (entry splits, snapshots, checks) costs 11 CPU seconds
+  over the JVM floor, i.e. the exponential entry cost dominates; the loop's invariant (guards `G_i` branch the invariant too) roughly doubles k = 4. Tests stay at four or fewer, as 0037 says; **three is cheap, four with a loop is the practical limit**, and a loop in a function with four aliasing `reads` parameters should be a test of its own. Re-time on a quiet machine before quoting.
+
+#### P4: a heap read in the loop condition and in the loop's `decreases` (record 0038 item 6) **PASS**
+
+`p4/p4a_ok.vpr`: a cell `x` (`alloc_int`, written 5, snapshots `kv kd kl ds`), `while (x.v_int > 0)` with the automatic invariant `acc(x.v_int, kv) && acc(x.d_int, kd) && acc(lvloc(block_of(x)).lv, kl)`, `kv > none ==> range`, `ds ==> x.d_int`, a user `0 <= x.v_int`, `decreases x.v_int`, the body decrements `x.v_int` after the
+write checks and the back-edge `perm >= kv` checks, and `ensures res == 0` (needs the exit state): **verifies** (Silicon's 5.51 s, user 8.91, load 162). So Silicon's termination plugin accepts a heap read as a loop measure, framed by the invariant, and the condition `x.v_int > 0` bounds it below.
+- **Failing variant** (`p4b_nodecrease.vpr`: the body writes `x.v_int - 0`): one error, **`Loop might not terminate. Termination measure might not decrease or might not be bounded. (p4b_nodecrease.vpr@57.15--57.22)`**, the position of the `x.v_int` after `decreases` (line 57: `    decreases x.v_int`): the driver's `termination` category at the measure (`silicon_output.cpp:31`).
+- **An unframed read is ill-formed, and where Silicon reports it depends on the position:**
+  - in an invariant clause (`p4c`: the `acc(x.v_int, kv)` removed, the range invariant kept): `Contract might not be well-formed. There might be insufficient permission to access x.v_int (p4c_unframed_measure.vpr@54.15--54.78)` at the first clause that reads (`wellformedness`: not accepted by the driver today, exit 3);
+  - in the **measure** (`p4e`: no clause reads `x.v_int`; `decreases x.v_int + i`): **`Assignment might fail. There might be insufficient permission to access x.v_int (p4e_measure_unframed.vpr@51.15--51.26)`**, at the measure expression (the plugin copies the measure into a ghost variable; category `assignment`, not `wellformedness`);
+  - in the **condition** (`p4f`: `while (i > 0 && x.v_int > 0)`): two errors at the condition, `While statement might fail. ... insufficient permission to access x.v_int` and `Conditional statement might fail. ...` (both `@48.10--48.30`).
+  All three are Silicon's own reasons that the framing check of item 6 (explicit, `permission`) must precede.
+- Note: without any `decreases` on the loop in a method that has one, Silicon reports `Method might not terminate. Required termination condition might not hold` at the whole loop (`p4d_read_cond_no_acc.vpr@52.3--66.4`): existing behaviour (0013), unchanged by memory.
+
+#### P5: chain-guarded invariant reads (record 0038 item 6) **PASS; the plain forms fail as S27 P6 predicts**
+
+`p5/*.vpr`: cells `x` (value 1) and `y` (value 2) in the automatic invariant with `kvx kvy ...`; a `Ref` local `q` assigned in the loop (`q := (i % 2 == 0) ? x : y`, so Viper havocs it) and initialised to `x`.
+- `p5a_chain_ok`: `invariant ((q == x ? q.v_int : (q == y ? q.v_int : 0)) > 0)` **verifies** (well-formed and preserved). `p5b_chain_explicit_ok` adds `assert q == x || q == y` before the loop and before the back edge: **verifies**. `p5g_vac` (`assert false` after the loop, framing asserts in place): one error at the `assert false` (the loop exit is reachable).
+- `p5e_per_disjunct`: `invariant q == x ==> q.v_int > 0` and `invariant q == y ==> q.v_int > 0` (one conjunct per disjunct, S27's m6/m7 form) **verifies** as well, so either form is available; the chain is a single clause.
+- **The plain forms fail:** `p5c` (`(q == x || q == y) ==> q.v_int > 0`): `Contract might not be well-formed. There might be insufficient permission to access q.v_int (@70.15--70.49)` **and** `Loop invariant ... might not be preserved. There might be insufficient permission to access q.v_int` (same position); `p5d` (a bare `q.v_int > 0`): `Contract might not be well-formed ... access q.v_int (@70.15--70.26)`.
+  Same finding as S27 P6, for loop invariants.
+- **The explicit framing assert goes first** (`p5h`: `q := z`, a third cell outside the automatic invariant; the assert `q == x || q == y` before the loop): one error, `Assert might fail. Assertion q == x || q == y might not hold. (p5h_unframed_q_explicit.vpr@67.10--67.26)`. Without the assert (`p5i`) Silicon's own failure comes first and says nothing about framing: `Loop invariant (q == x ? q.v_int : (q == y ? q.v_int : 0)) > 0 might not hold on entry. Assertion ... might not hold. (@74.17--74.63)`.
+  So the `permission` assert is what turns this into a source-term message; keep it before the loop and before the back edge as item 6 says.
+- `p5f_body_read_of_q`: with `assert q == x || q == y` and the case splits `if (q == x) { } else { }` at the top of the body, a body read `res := q.v_int` after `assert perm(q.v_int) > none` verifies.
+
+#### P6: a function measure that reads the heap (record 0038 item 8) **PASS for the measure; two CONTRADICTIONS of the plan's reading (no `old`; no well-formedness check by Silicon)**
+
+`p6/*.vpr`: `down(p: Ref, a: Perm)` with `requires`: bounds, WF, the full `owns` atom of `p` with amount `a` on the liveness cell, `p.v_int >= 0`; `ensures`: the atom and `p.v_int == 0`; `decreases p.v_int`; body `if (p.v_int > 0) { p.v_int := p.v_int - 1; p.d_int := true; down(p, a) }`.
+- `p6a_decreasing`: **verifies.** `p6b_nondecreasing` (`if (p.v_int > 0) { down(p, a) }`): `Method might not terminate. Termination measure might not decrease or might not be bounded. (@45.5--45.15)` at the call. `p6e_call_before_write` (call, then the write): that error plus the postcondition error.
+  **Reading:** at the call Silicon evaluates the **callee's** measure over the arguments in the **current heap** and compares it with the **caller's** measure as of the method's **entry** (`p6a` passes only because the callee's `p.v_int` is the decremented value while the caller's is the entry value; `p6i`, the same without the ghost amount, verifies; `p6f_vac`: `assert false` after the call is reachable). This matches item 8's explicit check ("callee's measure over the arguments in the current heap with the caller's measure over its entry heap").
+- **CONTRADICTION: `old` in a method's `decreases` is not the entry heap, and must not be emitted.** `p6c_old_measure_decreasing` (`decreases old(p.v_int)`, the decreasing body of `p6a`): accepted syntactically, and fails: `Method might not terminate. Termination measure might not decrease or might not be bounded. (p6c_old_measure_decreasing.vpr@47.5--47.15)` at the call. Silicon evaluates the callee's `old(...)` against the **caller's** old state (the same entry value),
+  so the two measures are equal. The measure is written plainly (`decreases p.v_int`); Silicon reads it in the method's pre-state itself.
+- **GAP: Silicon does not check a method measure for well-formedness against the `requires`.** `p6d_no_permission` (`requires p != null`, `decreases p.v_int`, empty body): **verifies**, no error. The read only fails where it is evaluated, at a recursive call whose caller holds no permission: `p6g` (`method down(p) requires p != null decreases p.v_int { down(p) }`): `Method might not terminate. There might be insufficient permission to access p.v_int (p6g_no_permission_recursive.vpr@39.3--39.10)` at the call (reason
+  `insufficient.permission` of the `termination` row). A call from a caller that lacks the callee's `acc` fails in the callee's precondition first (`p6h`: `The precondition of method down might not hold. There might be insufficient permission to access p.v_int (@44.3--44.10)`). So a measure that is not framed by its own `requires` is silent in a non-recursive method and ill-framed in a recursive one; **the explicit check in `f__wf` that item 8 asks for is the only check**,
+  and it must also cover a function that is never recursive (a later caller in another unit could be).
+
+#### P8: a written atom guarded by `NOTAUTO` (record 0038 item 5) **PASS with the case splits; one completeness gap (the permission after the loop)**
+
+`p8/*.vpr`: a parameter place `r` (`requires` the full `owns` atom, amount `ar` on the liveness cell), cells `x` and `y` in the automatic invariant (`kvx kdx klx ...`), a `Ref` local `q` that is **havoced** (assigned in the body: `if (q == x) { q := y } else { if (q == y) { q := x } }`, so q stays inside `{x, y}` or stays `r`), the invariant
+```
+0 <= i && i <= n,  acc(x...)/acc(y...) with their snapshots,  q == x || q == y || q == r,
+(q != x && q != y) ==> (acc(q.v_int) && acc(q.d_int) && q.d_int && acc(lvloc(block_of(q)).lv, klq))        [klq := perm(lvloc(block_of(q)).lv) at entry]
+```
+and the body `assert q != null; assert perm(q.v_int) == write && perm(q.d_int) == write; q.v_int := 1; q.d_int := true`.
+- **Without the case splits Silicon does not find the permission** (`p8a_any_nosplit`, `p8c_q_is_x`, `p8d_q_is_r`, all three entry choices): `Assignment might fail. There might be insufficient permission to access q.v_int (@80.5--80.17)`: in the branch where the guard is false the path condition is `q == x || q == y`, a disjunction.
+- **With `if (q == x) { }` and `if (q == y) { }` at the top of the body Silicon finds it in every case:** `p8b_any_split` (`q := c1 ? x : (c2 ? y : r)`: q may be `x`, `y` or `r`): **verifies**; `p8c_q_is_x_split` (`q == x` at entry: the atom's guard is false at entry): **verifies**; `p8d_q_is_r_split` (`q == r` at entry): **verifies**; `p8g_any_split_vac` (`assert false` at the body's end): one error, the end is reachable.
+  The cell case splits of 0028 item 8 / 0037 item 8 are required at the loop head, for each automatic place of the field, whenever a pointer variable the loop writes through may be one of them.
+- **Twins:** `p8e_q_is_x_unguarded_atom_split` (the atom without `NOTAUTO`, `q := x`): `Loop invariant acc(q.v_int, write) && (...) might not hold on entry. There might be insufficient permission to access q.v_int (@74.16--74.90)`, so the guard is needed; `p8f_q_is_r_no_atom_split` (`q := r`, no atom, invariant `true`): `Assert might fail. Assertion perm(q.v_int) == write might not hold. (@81.12--81.60)`,
+  the explicit access check (the owner's rule: the missing atom is reported at the access).
+- **GAP (not a contradiction of the text, a consequence to document):** with `ensures` = the same `owns` atom on `r` (`p8h_ens_range`; the atom of the invariant has the range clause), **the postcondition fails**: `Postcondition of f might not hold. There might be insufficient permission to access r.v_int (p8h_ens_range.vpr@40.12--40.299)`. Silicon's exit state is "the frame plus the invariant for the exit `q`"; the permission to `r`'s cell was exhaled at entry
+  through the atom when `q == r` at entry, but nothing says that `q` at exit is `r` again (the guard may be false at exit when `q` ended in `{x, y}`), so it does not come back. A tie fixes it (`p8i_ens_range_tied`: `var q0: Ref; q0 := q` before the loop and `invariant (q0 == r) == (q == r)`): **verifies**. For a loop that never assigns `q` (the common case) Viper does not havoc `q` and no tie is needed; for a reassigned pointer
+  the user's invariant has to say where it ends (a documentation line for the "Loops" section, and the test of the plan's row "reassigned parameter's place reached through a pointer local" should keep `q` unassigned or state the tie). Two written atoms on **different** variables that may be equal (`owns(*q)` and `owns(*s)` with `q == s`) are never in one state: at entry or at the back edge the second exhale fails with Silicon's own reason; item 5's text has `NOTAUTO` against automatic places only, so an explicit `q != s` check (category `permission`)
+  is the only way to keep that failure in source terms (not tested here).
+
+#### Timings and load (summary)
+
+All Silicon runs of this document were made one at a time. Load averages before the runs: 52/30/15 at the start (`uptime` 12:03), 64 at the first P3 run, 111-135 during `k4_*`, 150-250 for P4-P8 and the timing set (the 1-minute figure was 245 at 12:25). Silicon's own time for the small spikes (`p4`-`p8`) was 4.4-7.0 s (user 8.2-10.7 s), all at load > 150. The only quiet-machine figures available are record 0037's.
+
+### S28 (test-mutator half): P1, P2, P7 as hand-written Viper
+
+Worktree: /Users/mattborland/Documents/cerastes/cerastes/.claude/worktrees/m4.2b1 (branch m4.5b1c1-loops).
+Silicon 1.1-SNAPSHOT (6b540aa4), Z3 4.16.0, `--numberOfErrorsToReport 0`; each run is 4-8 s (JVM start dominates).
+
+Files: `build/m4.5b1c1/s28/targets/` (gitignored). `gen.sh` regenerates every target from `prelude.vpr` (the real prelude
+of `build/cerastes verify tests/memory/cell_across_loop.c --keep-vpr`: fields, `Block` domain with its four axioms,
+`alloc_int`) plus the bodies in `gen.sh`, `gen_p2.sh`, `gen_p2b.sh`, `gen_p2c.sh`, `gen_p1b.sh`, `gen_p7.sh`.
+Emitted Viper of the three starting tests is in `build/m4.5b1c1/s28/emitted/` (`cell_across_loop.vpr`,
+`consume_owned.vpr`, `scope_exits.vpr`, `peek_reads.vpr`). Every Silicon output is in `targets/results.txt`
+(re-run: `build/m4.5b1c1/s28/targets/run.sh <file.vpr>`; the command inside is
+`$CERASTES_JAVA -Xss128m -jar $SILICON_JAR --z3Exe $Z3_EXE --numberOfErrorsToReport 0 <file>`).
+
+Conventions of the targets: the scope exit is `assert !(((perm(y.v_int) != write) || (perm(y.d_int) != write)) || (perm(lvloc(block_of(y)).lv) != write))`
+then `exhale (acc(y.v_int) && acc(y.d_int)) && acc(lvloc(block_of(y)).lv)` (as `scope_exits.vpr`). The consuming callee
+`consume(r, amt)` is `consume_owned.c`'s `dispose` (requires `acc(r.v_int) && acc(r.d_int) && r.d_int && acc(lvloc(block_of(r)).lv, amt)`,
+no ensures); the loop calls it as `consume(x, perm(lvloc(block_of(x)).lv) / 2)`. Back-edge asserts (`BACK`):
+`assert perm(x.v_int) >= kv`, `... >= kd`, `perm(lvloc(block_of(x)).lv) >= kl`.
+
+#### General facts about Silicon (observed)
+
+- G1. Silicon stops a path at its first failure: one error per path, so an explicit assert placed before a statement
+  whose own check would also fail is the only error of that path. `p2_consume_fail.vpr` (BACK asserts) reports 1 error
+  (`Assertion perm(x.v_int) >= kv might not hold. (p2_consume_fail.vpr@75.12--75.31)`); the same file without the BACK
+  asserts, `p2_consume_fail_noassert.vpr`, reports Silicon's own reason:
+  `Loop invariant acc(x.v_int, kv) && (acc(x.d_int, kd) && acc(lvloc(block_of(x)).lv, kl)) might not be preserved. There might be insufficient permission to access x.v_int (p2_consume_fail_noassert.vpr@68.15--68.85)`.
+- G2. Failures on different paths of one method are all reported, in source order: `p2_two_paths_fail.vpr`:
+  `[0] Assert might fail. Assertion perm(x.v_int) >= kv might not hold. (...@75.12--75.31)`,
+  `[1] Assert might fail. Assertion x.v_int == 8 might not hold. (...@79.10--79.22)`.
+- G3. Inside a loop body Silicon holds only the invariant's permissions (the frame outside is kept and merged back
+  on every exit). So a body that touches a cell absent from the invariant fails with Silicon's own reason, e.g.
+  `p1_break_fail_unframed.vpr`: `Assignment might fail. There might be insufficient permission to access x.v_int (...@58.5--58.27)`.
+
+#### P1: the frame at a `break` / a `return`
+
+Command for each: `build/m4.5b1c1/s28/targets/run.sh build/m4.5b1c1/s28/targets/<name>.vpr`.
+
+| File | Shape | Silicon |
+|---|---|---|
+| `p1_break_ok.vpr` | x outside, invariant `0 <= i && i <= n` only, `goto l_brk` from the body; after the label assert `perm(x.v_int) > none`, `x.d_int`, `x.v_int == 7`, then scope exit | `Silicon finished verification successfully in 4.86s.` |
+| `p1_break_framed.vpr` | the same with the P2 automatic invariant; after the label `assert perm(x.v_int) == write && perm(x.d_int) == write && perm(lvloc(block_of(x)).lv) == write` and `x.v_int == 7` | verified: the break edge restores the whole permission and the value |
+| `p1_break_fail_value.vpr` | x outside, `assert x.v_int == 8` after the label | `1 error: Assert might fail. Assertion x.v_int == 8 might not hold. (...@61.10--61.22)` |
+| `p1_break_fail_unframed.vpr` | the body writes x with x not in the invariant | `1 error`: G3's message |
+| `p1_break_framed_consumed_fail.vpr` | x in the automatic invariant, `consume(x, ...)` then `goto l_brk` on one branch; scope exit of x after the label | `1 error: Assert might fail. Assertion !(perm(x.v_int) != write || perm(x.d_int) != write || perm(lvloc(block_of(x)).lv) != write) might not hold. (...@84.10--84.109)`, at x's scope exit after the label (not at the break, not at the call; Silicon does not check the invariant on an out edge) |
+| `p1_break_unframed_consumed_fail.vpr` | the same with x not in the invariant | `1 error: The precondition of method consume might not hold. Assertion none < perm(lvloc(block_of(x)).lv) / 2 might not hold. (...@56.7--56.50)` |
+| `p1_return_framed.vpr` | `return` (scope exit of x, `res`, `assert res == 7`, `goto l_end`) inside the loop; x in the automatic invariant | verified |
+| `p1_return_unframed.vpr` | the same, x NOT in the invariant | `1 error: Assert might fail. Assertion !(perm(x.v_int) != write || perm(x.d_int) != write || perm(lvloc(block_of(x)).lv) != write) might not hold. (...@58.14--58.113)`: the scope exit at the return, inside the body, fails |
+| `p1_return_param_framed.vpr` / `p1_return_param_unframed.vpr` | a parameter `p` with `acc(p.v_int, amt)...` in requires and ensures; `return` inside the loop with the postcondition's explicit asserts `assert perm(p.v_int) >= amt` | framed: verified; unframed: `1 error: Assert might fail. Assertion perm(p.v_int) >= amt might not hold. (...@67.14--67.34)` |
+
+Verdict P1: Silicon keeps the permission AND the value of a cell the invariant does not mention across a `break`
+(`p1_break_ok.vpr` verifies `x.v_int == 7` after the label). With the automatic invariant, the break edge also gives
+back the full permission (`perm == write`). A `return` inside a loop needs the frame INSIDE the body (G3).
+
+#### P2: the automatic invariant
+
+Snapshot (before the loop): `kv := perm(x.v_int)`, `kd := perm(x.d_int)`, `kl := perm(lvloc(block_of(x)).lv)`,
+`vs := 0; if (kv > none) { vs := x.v_int }`, `ds := false; if (kd > none) { ds := x.d_int }` (the guards are needed, F2 below).
+Invariant (`HEAD_READ`): `acc(x.v_int, kv) && acc(x.d_int, kd) && acc(lvloc(block_of(x)).lv, kl)`,
+`kv > none ==> x.v_int == vs`, `ds ==> x.d_int`. `HEAD_RANGE` replaces the equality by
+`(kv > none && ds) ==> (-2147483648 <= x.v_int && x.v_int <= 2147483647)`.
+
+| File | Shape | Silicon |
+|---|---|---|
+| `p2_read_ok.vpr` | loop reads x; after the loop `x.v_int == 7`, perm write, `res == 7` | verified |
+| `p2_write_ok.vpr` | loop writes `x.v_int := i`, `HEAD_RANGE`; after: `perm == write`, `x.d_int` | verified |
+| `p2_write_fail_overflow.vpr` | loop does `x.v_int + 1` with `HEAD_RANGE`; explicit overflow assert | `1 error: Assert might fail. Assertion !(x.v_int + 1 < -2147483648 || 2147483647 < x.v_int + 1) might not hold. (...@74.12--74.72)` |
+| `p2_write_fail_value.vpr` | after a loop that writes x with `HEAD_RANGE`, `assert x.v_int == 7` | `1 error: ... x.v_int == 7 might not hold. (...@80.10--80.22)` |
+| `p2_consume_fail.vpr` | body calls `consume(x, ...)`, BACK asserts | `1 error: Assertion perm(x.v_int) >= kv might not hold. (...@75.12--75.31)`: the explicit back-edge assert is first and only |
+| `p2_consume_branch_fail.vpr` | the same, `if (i == 3) { consume(...) }` | `1 error: Assertion perm(x.v_int) >= kv might not hold. (...@77.12--77.31)` |
+| `p2_consume_fail_noassert.vpr` | without BACK | G1's `invariant not preserved` text (Silicon's own reason; `insufficient permission to access x.v_int`) |
+| `p2_consumed_before_ok.vpr` | x consumed before the loop (kv == none, kd == none), the body does not touch x; snapshot, `HEAD_READ`, BACK | verified (`ds := false`, `vs := 0`; `acc(x.v_int, none)` is fine) |
+| `p2_consumed_before_fail_read.vpr` | the same, the body reads x | `1 error: Assert might fail. Assertion perm(x.v_int) > none might not hold. (...@74.12--74.32)` (the explicit assert; Silicon's own `insufficient permission` is never reached) |
+| `p2_reads_callee_ok.vpr` | a reads callee (`peek_reads.c`'s shape: `acc(r.v_int, amt)` in requires and ensures) in the loop; after: `x.v_int == 7` | verified: the value and the permission survive a reads call, equality invariant included |
+| `p2_owns_callee_equality_fail.vpr` | an owns-and-returns callee (`poke`: `acc(r.v_int)` in requires and ensures, no value clause) in the loop with the equality invariant, BACK asserts | `1 error: Loop invariant kv > none ==> x.v_int == vs might not be preserved. Assertion kv > none ==> x.v_int == vs might not hold. (...@83.15--83.42)`: Silicon's own reason, no explicit assert precedes it (the value rows are `internal`; this is why they must be the range after such a call) |
+| `p2_owns_callee_range_ok.vpr` | the same with `HEAD_RANGE` | verified, `perm(x.v_int) == write` after |
+| `p2_nested_ok.vpr` | two nested loops, each with its own snapshot (`kv`, `kv2`, ...: the inner one taken inside the outer body) | verified |
+| `p2_nested_inner_consume_fail.vpr` | the inner body consumes x | `1 error: Assertion perm(x.v_int) >= kv2 might not hold. (...@97.14--97.34)` (the inner back-edge assert; the outer's is not reached on that path) |
+| `p2_nested_outer_consume_fail.vpr` | the outer body consumes x after the inner loop | `1 error: Assertion perm(x.v_int) >= kv might not hold. (...@102.12--102.31)` |
+
+Verdict P2: verifying and failing versions behave as the record says (explicit back-edge assert first and only),
+EXCEPT the three findings F1-F3 below.
+
+#### P7: scope exits at jumps out of a body that declares cells (outer cell x in the automatic invariant, y and z in the body)
+
+`ALLOC_Y` at the body's start (`y := alloc_int()`, init), `label l_cont` before the step, exits as `scope_exits.vpr`.
+
+| File | Shape | Silicon |
+|---|---|---|
+| `p7_break_ok.vpr` | `if (i == 5) { exit y; goto l_brk }`, closing-brace exit of y; after the label x still readable and exits | verified |
+| `p7_break_fail.vpr` | `consume(y, ...)` before the exit at the break | `1 error: Assertion !(perm(y.v_int) != write || ...) might not hold. (...@81.14--81.113)`: the exit assert at the jump |
+| `p7_continue_ok.vpr` / `p7_continue_fail.vpr` | `goto l_cont` (label before `i := i + 1`) | ok verified; fail: `1 error ... (...@81.14--81.113)`, the exit assert at the continue |
+| `p7_goto_out_ok.vpr` / `p7_goto_out_fail.vpr` | forward `goto l_out` to a label after the loop | ok verified; fail: `1 error ... (...@81.14--81.113)` |
+| `p7_fallthrough_fail.vpr` | y consumed, the body falls through to its closing-brace exit | `1 error ... (...@80.12--80.111)`, the closing-brace exit |
+| `p7_return_ok.vpr` / `p7_return_fail.vpr` | `return` inside the body: exit y, then exit x (in the invariant), `assert res == 7`, `goto l_end` | ok verified; fail: `1 error ... perm(y.v_int) ... (...@82.14--82.113)`: y's exit, before x's |
+| `p7_nested_goto_ok.vpr` | y in the body, z in an inner block, `goto l_out` exits z then y | verified |
+| `p7_nested_both_consumed_fail.vpr` | both consumed | `1 error: Assertion !(perm(z.v_int) != write || ...) might not hold. (...@87.14--87.113)`: only the innermost (z), first |
+| `p7_nested_outer_consumed_fail.vpr` | only y consumed | `1 error ... perm(y.v_int) ... (...@88.14--88.113)`: z's exit passes, y's fails |
+
+Verdict P7: scope exits at `break`, `continue`, forward `goto` and `return` verify when the cells are intact and fail
+at the jump's own exit assert (before Silicon's own reasons; one error per path, innermost cell first) when a callee
+consumed a cell. A cell declared in the body is allocated and exited per iteration without any loop-invariant mention.
+
+#### Findings that contradict or sharpen plan record items 3, 4, 7
+
+- F1 (item 3, values): `kv > none ==> lo <= x.v_int <= hi` does NOT hold at loop entry for an uninitialized cell:
+  `alloc_int` leaves the value unconstrained (only `!r.d_int`). `p2_flag_uninit_unguarded_range.vpr`:
+  `Loop invariant kv > none ==> -2147483648 <= x.v_int && x.v_int <= 2147483647 might not hold on entry. (...@65.15--65.78)`.
+  The range row must be guarded by the flag snapshot: `(kv > none && ds) ==> range`; `p2_flag_uninit_ok.vpr` (uninitialized cell, same loop)
+  then verifies. The equality row (`kv > none ==> x.v_int == vs`) needs no flag guard (`vs` is whatever was held).
+- F2 (item 3, flag snapshot): `ds := x.d_int` must itself be guarded, `ds := false; if (kd > none) { ds := x.d_int }`: after a callee consumed the cell,
+  `p2_flag_unguarded_consumed.vpr`: `Assignment might fail. There might be insufficient permission to access x.d_int (...@64.3--64.16)`
+  (the task text's unguarded form). The flag invariant is monotone (`ds ==> x.d_int`), so `!x.d_int` is not known after a loop
+  (`p2_uninit_written_then_read_fail.vpr`: a loop that writes x on an uninitialized cell, then a read: `Assertion x.d_int might not hold (...@78.10--78.17)`,
+  fails at the explicit `d_int` assert, i.e. category `uninitialized`, which is right: the loop may not have run).
+- F3 (item 3 "a loop that touches no memory gets none" and item 7): a `return` inside a loop (and any `goto` that leaves a cell's block or a
+  contract's atoms) emits its scope exits and the postcondition's permission asserts INSIDE the body, where Silicon holds only the invariant.
+  With a cell outside the loop that the body never names, `p1_return_unframed.vpr` fails at the scope exit in the body (...@58.14--58.113),
+  and with a pointer parameter's atoms `p1_return_param_unframed.vpr` fails at the postcondition's `assert perm(p.v_int) >= amt` (...@67.14--67.34).
+  So "touches memory" must include "contains a `return` (or an outward `goto`) while a cell is in scope or the contract has atoms":
+  such a loop needs the automatic invariant even if its condition/body name no memory. `break`/`continue` need no frame for cells outside the loop
+  (`p1_break_ok.vpr`). This also changes the "Viper of every program accepted today stays the same" claim only for programs that are rejected today
+  (0032 item 10 rejects a return in a loop with a live cell), and a return in a loop of a function with a contract atom: check which is accepted today.
+- Item 4 (confirmed with a refinement): the explicit back-edge asserts come before Silicon's `invariant.not.preserved` on the same path (G1). Silicon does
+  not check the invariant on an out edge, so a callee that consumes an outer cell on a `break`/`return` path is reported at the LATER scope exit or read
+  of that cell, not at the call and not at the break (`p1_break_framed_consumed_fail.vpr@84`: the function's exit of x after the label). The plan's item 7 text
+  ("reported at the jump (`lifetime`)") holds for the cells the jump leaves; for an outer cell that stays alive, the failure surfaces at its own later exit.
+- Item 3 values, owns call: `kv > none ==> x.v_int == vs` fails Silicon's own invariant check after a callee that owns the cell and ensures nothing about
+  the value (`p2_owns_callee_equality_fail.vpr@83`), so the havoc rule (range after a call whose contract owns a cell of that type) is required; a reads
+  callee needs no havoc (`p2_reads_callee_ok.vpr`).
+- Nothing contradicts the Perm-snapshot form itself: `kv := perm(x.v_int)` etc. are accepted, `acc(x.v_int, none)` is fine, nested loops with their own
+  snapshots verify.
+
+#### F3 confirmed on today's build (a loop that names no memory, a return inside it)
+
+File: /private/tmp/claude-501/-Users-mattborland-Documents-cerastes-cerastes/38c924e0-657c-4ab9-bf92-1b96ac1a57d9/scratchpad/f3/ret_in_loop.c (a function with `cerastes_owns(*p)` in requires and ensures, a loop over ints with `return 0;` inside).
+Command: `cd /private/tmp/claude-501/-Users-mattborland-Documents-cerastes-cerastes/38c924e0-657c-4ab9-bf92-1b96ac1a57d9/scratchpad/f3 && /Users/mattborland/Documents/cerastes/cerastes/.claude/worktrees/m4.2b1/build/cerastes verify ret_in_loop.c`.
+Output: `ret_in_loop.c:11: error: permission: returns without owning `*p`, which its contract promises` / `ret_in_loop.c:4: note: this is the postcondition`.
+So today's build already gives a wrong (incomplete) `permission` error for it: the frame is not in the body. Under item 3 as written ("a loop that touches
+no memory gets none") it would stay wrong; with F3's rule (a `return` inside the loop counts as touching every place the return's checks name) its outcome
+changes from `permission` to verified. That is a change of an accepted program's outcome (the plan's stop rule "existing test whose outcome changes" applies
+only if a test pins it; check `grep -l 'return' tests/memory/negative` for such a pin).
+No test under tests/memory pins that outcome (grep for loops with return and owns/reads atoms: see the list above, empty if none).

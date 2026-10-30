@@ -1,7 +1,7 @@
 // expect: rejected cerastes-unsupported_expression @ L10
 // mode: c23, c++20
 // twin: tests/memory/live_result.c
-// Pins: 0037 items 5 and 15: *result as a value is rejected until owning results (re-expected by b1c)
+// Pins: 0037 items 5 and 15: *result as a value is rejected (re-expected by M4.5b1c3, the first session with `*result` as a value)
 #include <cerastes.h>
 #include <stddef.h>
 
