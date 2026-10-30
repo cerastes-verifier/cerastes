@@ -1,4 +1,4 @@
-# Handoff during M4.5b1c3 — pointers to pointers, owning parameters, `*result`, written atoms (record 0040) (2026-10-30); M4.5b1c2 before it (record 0039)
+# Handoff after M4.5b1c3 — pointers to pointers, owning parameters, `*result`, written atoms (record 0040) (2026-10-30); M4.5b1c2 before it (record 0039)
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
@@ -11,8 +11,13 @@ Session plans approved from M4.5b1a on are in `.claude/plans/`; the notes a sess
 - **On `origin/main`** (`a5e3e30`): everything through M4.5b1c2 (PR #20, merged 2026-10-30, both CI jobs green). The
   main checkout's local `main` is at `7dda635`, a local merge of the same branch with the same tree, superseded by
   `a5e3e30`.
-- **M4.5b1c3** is in progress on branch `m4.5b1c3-pointers-to-pointers` (from `a5e3e30`; plan
-  `.claude/plans/m4-5b1c3-pointers-to-pointers.md`; record 0040).
+- **M4.5b1c3** is done on branch `m4.5b1c3-pointers-to-pointers` (from `a5e3e30`; result in `internal/status.md`; plan
+  `.claude/plans/m4-5b1c3-pointers-to-pointers.md`): record 0040, no cuts. M4.5b1 is complete.
+- **Audits:** round 1 on record 0040 (four blocking, seven should-fix, five notes; all taken), round 2 on the code (one
+  blocking, B1, a wrong verdict through trusted contracts across `const`, fixed fail closed; four should-fix: three
+  taken, S4 a pinned false alarm, question 79), one re-audit of the blocking fix (two more routes: casts and `?:` in a
+  contract, `owns` of a `const` place; fixed fail closed, checked by the tests and the auditor's probes, not
+  re-audited: the cap). What was not taken is in §3.
 
 The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits behind upstream `main` (§4.1).
 
@@ -21,10 +26,40 @@ The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits beh
 1. **`main`**: the main checkout's `7dda635` and `origin/main`'s `a5e3e30` hold the same tree; reset the local `main` to
    `origin/main` (`git reset --hard origin/main` in the main checkout drops only the local merge commit) before the
    next merge.
-2. At the end of b1c3: push its branch and open its PR; both CI jobs run the PR tier.
-3. Then M4.5b2 (§4.2).
+2. **This branch**: push it and open its PR (`git push origin m4.5b1c3-pointers-to-pointers`); both CI jobs run the PR
+   tier (no Linux run in the session: CI covers it).
+3. Answer questions 78 and 79 (§8).
+4. Then M4.5b2 (§4.2).
 
 ## 3. Open audit notes (condensed; the full notes are in the commit named above)
+
+**From M4.5b1c3** (audit round 1 on record 0040, round 2 on the code, one re-audit; `build/m4.5b1c3/audit{1,2}.md` in the
+worktree, gitignored; items not taken and open points):
+- *A false alarm, pinned* (round 2 S4): a written atom whose pointer the loop moves keeps its entry liveness amount, so
+  a correct swap loop over two reassigned parameters (`owns(*q) && owns(*r)`, the parameters lent at different
+  fractions) is reported at the back edge and the return
+  (`tests/memory/negative/loop_written_moved_owns_false_alarm.c`); §8 question 79.
+- *`const` objects* (round 2 B1, fixed fail closed): a contract comparing pointers whose pointees differ in qualifiers is
+  rejected, which also closes the hole `int *unconst(const int *v) ensures(r, r == v)` that verified since 0037. The
+  principled model (`const` cells held below `write` after their initializer) is §8 question 78, for M4.6's
+  `strchr`-style contracts.
+- *Not re-audited* (the cap): the second B1 fix (in a contract, every pointer conversion that changes pointee
+  qualifiers, and `owns`/`owning` of a `const` place, rejected); pinned by `reject_contract_qualifier_*.c`/`.cpp`,
+  `reject_owns_const_*.c` and `reject_owning_const_int.c` from the auditor's probes (`build/m4.5b1c3/audit2.md`).
+- *Messages:* an `annotation_mismatch` between declarations written by one macro names the parameter by position
+  ("1") instead of by name (re-audit, cosmetic).
+- *Positions* (round 2 N3): with a `continue` in the body, a written atom's back-edge error is reported at the loop
+  statement, not at the body's closing brace (the jump's merge point has no position).
+- *By design* (round 2 N4): C++'s `*p = (**pp = 5)` is `unsequenced`, though C++17 sequences an assignment's right
+  operand first (0039's choice for both modes).
+- *The VIR self-test's written-atom cases* pin failing rows by index (`fail_only(category, loc, count, index)`, since one
+  check emits about ten rows at one line): a change in the order lowering emits those rows breaks them, not a
+  verdict.
+- *Over-strict, listed:* C++'s multi-level qualification conversion (`int**` → `const int* const*`) is rejected in both
+  modes (M8 entry, record 0040 item 2); a definition must repeat its prototype's `owning` (stricter than 0006 item 6's
+  contract-less declaration); two declarations of one function that cerastes cannot tell apart (one macro invocation on
+  one line) with `owning` are rejected; a `T**` callee cannot use the pointer it loads from `*pp` (`live(*pp)` is
+  M4.5c's, question 74).
 
 **From M4.5b1c2** (audit round 1 on record 0039, round 2 on the code, one re-audit; `build/m4.5b1c2/audit{1,2}.md` in the
 worktree, gitignored; items not taken and open points):
@@ -280,10 +315,9 @@ atoms with no partner) moved to M4.5d2. Each session rejects what a later one ma
 paragraph points at one), and no others; a pin whose construct stays rejected keeps its `expect:` line, and only its message and `Pins:` comment name the
 new session.
 
-**M4.5b1c3 `T**`, owning parameters, `*result`, written atoms in invariants:** plan
-`.claude/plans/m4-5b1c3-pointers-to-pointers.md` (record 0040), which holds its flips. Question 73 took
-`reject_atom_in_do_once_invariant.c` out of them: an atom in a `do … while (0)` invariant stays rejected, like one in a
-`check`.
+**M4.5b1c3 `T**`, owning parameters, `*result`, written atoms in invariants: done** (2026-10-30; record 0040; plan
+`.claude/plans/m4-5b1c3-pointers-to-pointers.md`; status entry), with all its flips (question 73 kept
+`reject_atom_in_do_once_invariant.c`). M4.5b1 is complete.
 
 **M4.5b2 Globals, `static` locals, initialization through pointers.** Mutable globals as `GB_g()` blocks, `program_start`
 for `main`, frames through contracts (`owns(g)`); `static` locals (0028 item 5: the implicit `owns` or a rejection in a
@@ -545,7 +579,10 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
 - **Commits.** `git add <paths> && git commit` commits everything staged, including an earlier `git rm`: delete a retired
   test in the working tree, and stage the deletion only in the commit that lands its feature. No Claude trailer; never
   push.
-- **Doc pitfalls.** `[[noreturn]]` in text becomes an anchor even inside `+…+`; `__name` in backticks needs `+…+`; a
+- **Doc pitfalls.** `[[cerastes::owning]]` in prose becomes an anchor (with `::`, even `+…+` and `{empty}` leave one, and
+  `check_doc_examples`' source lint refuses `++…++`): name the attribute (`cerastes::owning`) and let the example show
+  the brackets; a code span holding `**` needs `+…+`, or `pass:[…]` when it also holds ` + `; a backtick next to a double quote
+  (`` `*q`" ``) is a curved quote and breaks the span (M4.5b1c3). `[[noreturn]]` in text becomes an anchor even inside `+…+`; `__name` in backticks needs `+…+`; a
   possessive after a code span breaks the next span; `pass:[…]` holding `<` or `>` is refused by
   `check_doc_examples.py` (write `+…+`). `build_docs.sh` and `check_doc_examples.py --html build/doc` catch them.
 - **A test that loses an `expect:` line** (pre-approved) keeps its line numbers with a comment in its place
@@ -569,4 +606,18 @@ where its `requires` partner was taken, checked in `f__wf` for every contract, r
 planning (2026-10-30): 73 (atoms in a `do … while (0)` invariant stay rejected, like atoms in a `check`), 74
 (`owns(**pp)` and reads of `**pp` in a contract move to M4.5c), 75 (`owning` beside an explicit `owns(*p)` or `p == NULL
 || owns(*p)` on the same parameter is merged; `reads`, `live` or another guard beside it is rejected), 76 (pointers to
-pointers at any depth), 77 (sessions sized to one context, under about 12 h unless a reason is given). None is open.
+pointers at any depth), 77 (sessions sized to one context, under about 12 h unless a reason is given).
+
+Open (from M4.5b1c3's audits):
+
+78. **`const` objects in the model.** Field names ignore `const`, so record 0040 rejects every conversion and every
+    contract comparison that could hand out an unqualified pointer to a `const` object (fail closed). M4.6's vlibc needs
+    `char *strchr(const char *s, int c)` with `ensures(r == NULL || r points into s)`, which that rule rejects.
+    The rules that stand until then (record 0040 item 2, after the re-audit): in a contract, no pointer conversion that
+    changes pointee qualifiers and no comparison across them, and no `owns`/`owning` of a `const` place (`reads`
+    instead). *Recommended:* in M4.6, model a `const` object as a cell the function holds below `write` after its
+    initializer (record 0028 amended: allocation, scope exit and `owns` of a `const` place), then lift those rules.
+79. **Written atoms on moved pointers** (audit S4): the liveness amount stays the entry place's, so moving an owned
+    pointer between two parameters' objects in a loop is a false alarm (pinned). *Recommended:* fix it in M4.8 with
+    question 66's cost work (per-place liveness amounts at the loop head, or the share named by the parameter's ghost
+    amount), since both touch how loops and calls split shared liveness cells.
