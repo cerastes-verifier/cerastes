@@ -129,7 +129,9 @@ struct Expr {
     AssignE,     // an assignment used as a value (decision 0020): `var` := `a` (already of `var`'s type); the value of the node is `a`
                  // (the new value, `type` = `var`'s type), or, when `yields_old`, the old value `b` (x++, x--).  `b` is null or the one
                  // `Local var` node that `a` also uses for the old value: the lowering reads it once.  Allowed in code and in a loop
-                 // condition, never in an annotation; reachable once per function; see `sequence_problems`.
+                 // condition, never in an annotation; reachable once per function; see `sequence_problems`.  `var` may be a cell (an
+                 // address-taken local; decision 0039 item 2): the write is then a write effect of the full expression with the
+                 // permission and flag obligations of a cell write, and a read of `var` is a place read (E3 for memory).
     Comma,       // `a`, then `b` (decision 0020): `type` = `b`'s type, never void; `a` may be a void call; a sequence point between them
     // ---- pointers (decision 0032; appended, so every earlier kind keeps its place) ----
     Null,        // the null pointer constant: `type` is a Ptr.  In `==`/`!=` and as an arm of `?:` it takes the other operand's type: check_program
@@ -142,13 +144,21 @@ struct Expr {
                  // than `*param` is rejected, M4.5b1c3 and later).  In a `requires` it reads the cell's value on entry, in an `ensures` its value on
                  // return, and `Old(Deref(Formal p))` its value on entry; lowering frames each read per path (item 7).
     // ---- permissions in contracts (decision 0037 item 5; appended) ----
-    Atom         // `atom` of the pointer `a` (a Ptr `Formal`: the parameter whose pointee is meant; in an `ensures` its entry value), a Bool;
+    Atom,        // `atom` of the pointer `a` (a Ptr `Formal`: the parameter whose pointee is meant; in an `ensures` its entry value), a Bool;
                  // contracts only, never inside `Old` (decision 0038 item 10: an atom in a loop invariant, a measure, a `check` or code is a
                  // check_program error).  Owns: `owns(*p)`, Reads: `reads(*p)` (a Bool/Int pointee), Live: `live(p)`.  `amount`
                  // names its ghost permission amount (item 6): the atoms of the `requires`, in evaluation order (contract_atoms), are
                  // numbered 0, 1, ...; an atom of an `ensures` carries the number of the `requires` atom it returns (the same kind and the
                  // same parameter, each partner at most once).  Positions (item 5): contract_atoms collects exactly the allowed ones; any
                  // other Atom is a check_program error.
+    // ---- a write through a pointer used as a value (decision 0039 item 2; appended) ----
+    StoreE       // `*c := a` as a value: `c` is the address (a Ptr), `a` the stored value (already of the pointee's type); the value of the
+                 // node is `a` (the new value, `type` = the pointee's type), or, when `yields_old`, the old value `b` (`(*p)++`, `(*p)--`).
+                 // `b` is null or the one `Deref` node of `c` that `a` also reads for the old value, so the pointer is lowered once, as for
+                 // Stmt::Store (Builder::compound_store_expr, inc_dec_store_expr share the `c` node).  Allowed wherever AssignE is (code and
+                 // a loop condition), never in an annotation; reachable once per function; see `sequence_problems`.  A write effect of
+                 // the full expression: the null, permission and flag obligations of a write through `c`.  The spelling of the target for
+                 // messages is "*" + c->c_text.
   };
   Kind kind = Kind::Const;
   Type type;     // the type of the value (Void only for a Call of a void function)
@@ -174,7 +184,7 @@ struct Expr {
   std::vector<const Expr*> args;           // Call: already converted to the parameter types
   AtomKind atom = AtomKind::Owns;          // Atom
   int amount = -1;                         // Atom: the number of the atom's ghost amount (see Kind::Atom)
-  bool yields_old = false;                 // AssignE: the value is the old value `b` (x++, x--), not the new one
+  bool yields_old = false;                 // AssignE, StoreE: the value is the old value `b` (x++, x--), not the new one
 };
 
 // ---- statements ------------------------------------------------------------------------------------------------
@@ -256,8 +266,8 @@ struct Var {
   bool is_param_copy = false;  // the local copy of a parameter (0012 item 2)
   int param_index = -1;        // for a parameter copy
   // The program takes this variable's address (EDG's `address_taken`, decision 0032 item 4): the variable is a CELL, an object in a
-  // one-slot block that a pointer may reach.  Set with Function::mark_address_taken.  Assign and Decl of it keep their kinds (the
-  // lowering dispatches on the flag), an AssignE of it is refused (item 9), and check_program refuses it on a pointer variable
+  // one-slot block that a pointer may reach.  Set with Function::mark_address_taken.  Assign, Decl and AssignE of it keep their kinds (the
+  // lowering dispatches on the flag; an AssignE of a cell is accepted from decision 0039 item 2), and check_program refuses it on a pointer variable
   // (M4.5b1c3).  On a PARAMETER COPY (decision 0037 item 4) the flag is accepted (a scalar parameter): the copy is allocated as a
   // one-slot block at entry and holds the formal's value; the body's scope exit releases it; contracts keep reading the Formal.
   bool address_taken = false;
@@ -407,21 +417,26 @@ class Program {
 
 // ---- sequencing (decision 0020) -----------------------------------------------------------------------------------
 
-// A modification of a local that is unsequenced with another access to it in one full expression (C23 6.5.1p3, C++ before C++17;
-// cerastes uses C's rules in both modes).  `at` is the AssignE whose write conflicts (report there); `variable` is the local's
-// source name.  The rule (decision 0020 item 4), with W the locals an operand writes (AssignE targets) and R the locals it reads:
+// A modification of an object that is unsequenced with another access to it in one full expression (C23 6.5.1p3, C++ before C++17;
+// cerastes uses C's rules in both modes).  `at` is the AssignE or StoreE whose write conflicts (report there); `variable` is the
+// object's source name: a local (a cell by name counts as its variable, and `*&x` is `x`) or, from decision 0039 item 3, `*v` for a
+// pointer variable `v` as written (one object per `v`, written by a Store or StoreE through `v`, read by a Deref of `v`, whether or not
+// the full expression also writes `v`; any other address is the path-precise check of lowering instead).  The rule
+// (decision 0020 item 4), with W the objects an operand writes (AssignE and StoreE targets) and R the objects it reads:
 //  * the operands of every Binary other than LAnd/LOr, and the arguments of a Call among themselves, are unsequenced: a conflict
 //    if W(p) meets W(q) or R(q) (or the other way round);
 //  * a Cond's condition is sequenced before its arms, a Comma's left before its right, LAnd/LOr's left before their right (no
 //    check); the two arms of a Cond are not checked against each other, but the Cond as a whole counts as W/R = their union;
-//  * a plain store (an AssignE, an Assign or a Decl) conflicts with a write of its own target inside the stored expression unless a
+//  * a plain store (an AssignE, a StoreE, an Assign, a Store or a Decl) conflicts with a write of its own target inside the stored expression unless a
 //    sequence point separates them: the write lies inside the left operand of a Comma, the first operand of an LAnd/LOr, the
 //    condition of a Cond or an argument of a Call.  (A compound assignment needs no extra rule: its expansion reads the target as
 //    an operand of a Binary.)  A read of the target is no conflict; neither is the read of an AssignE's own target in its own `a`.
-//  * a Store (decision 0032 item 9) is two unsequenced operands, its `addr` and its `expr`, like the operands of a Binary: the value writing a
-//    local that the address reads (`*p = (p = q, 1)`) is a conflict.
+//  * a Store (decision 0032 item 9) and a StoreE are two unsequenced operands, their address and their value, like the operands of a Binary:
+//    the value writing a local that the address reads (`*p = (p = q, 1)`) is a conflict.
+//  * a compound store's value reads a Deref that shares the store's address node (decision 0039 item 5): the address counts once, so
+//    `*(q = p) += 1` is no conflict.
 struct SequenceProblem {
-  const Expr* at = nullptr;  // the AssignE whose write conflicts
+  const Expr* at = nullptr;  // the AssignE or StoreE whose write conflicts
   std::string variable;      // the local's source name
 };
 std::vector<SequenceProblem> sequence_problems(const Function& f);
@@ -571,6 +586,12 @@ class Builder {
   // `++x` (post false: the new value), `x++` (post true: the old value, yields_old); `--` likewise.  The old value is one shared
   // `Local x` node (`b`), also used inside the stored expression.
   const Expr* inc_dec_expr(const Var* x, bool increment, bool post, SrcLoc loc);
+  // `*addr = value` as a value (decision 0039 item 2): a StoreE of type `value`'s type (the pointee's); `value` has the pointee's type.
+  const Expr* store_expr(const Expr* addr, const Expr* value, SrcLoc loc);
+  // `*addr op= rhs` as a value (the new value), with compound_store's computation: the stored value reads a Deref sharing `addr`.
+  const Expr* compound_store_expr(const Expr* addr, BinaryOp op, const Expr* rhs, SrcLoc loc);
+  // `++*addr` (post false: the new value), `(*addr)++` (post true: the old value, yields_old with `b` the shared Deref); `--` likewise.
+  const Expr* inc_dec_store_expr(const Expr* addr, bool increment, bool post, SrcLoc loc);
   // `a, b`: the value of `b` after `a`.  `a` may be a void call; `b` must not be void.
   const Expr* comma(const Expr* a, const Expr* b, SrcLoc loc);
 

@@ -224,3 +224,7 @@ CERASTES_DIAG(dangling_else, error,
 CERASTES_DIAG(empty_body, error,
               "the body of this statement is an empty statement, so the statement does nothing (-Wempty-body): write "
               "`{}` if that is meant (decision 0025)")
+// A returned address of an automatic local or a parameter (decision 0039 item 6, R14; P61).
+CERASTES_DIAG(return_local_address, error,
+              "this `return` gives back the address of \"%s\", whose lifetime ends when the function returns "
+              "(-Wreturn-stack-address, -Wreturn-local-addr): return a value, or a pointer the caller gave (decision 0039)")

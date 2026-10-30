@@ -82,6 +82,15 @@ the value of such a pointer indeterminate:
 include::example$memory/dangling_pointer.c[tag=source]
 ----
 
+Returning the address of a local variable or a parameter (`return &x;`, also
+through parentheses, a cast, either arm of `?:` or the right operand of `,`) is
+rejected, as clang's `-Wreturn-stack-address` and GCC's `-Wreturn-local-addr`
+warn about it: the object ends as the function returns
+(xref:verifying.adoc#warning-shapes[Shapes the compilers warn about]). A copy of
+such an address returned through a variable (`int *p = &x; return p;`) is
+reported where the caller first uses it, as
+xref:error-messages.adoc#_lifetime[`lifetime`].
+
 [#contracts]
 == Pointer parameters and contracts
 
@@ -158,10 +167,62 @@ A few more rules:
   the object during the call, which is what `restrict` promises.
 * The address of a parameter may be taken (`int *q = &a;`): the parameter is
   then an object in memory, like a local.
+* A contract may own an object on one path and only read it on another
+  (`c ? cerastes_owns(*p) : cerastes_reads(*p)`), but not do both on one path,
+  and its `ensures` may give back only what its `requires` took on the same
+  path; either mistake is reported at the contract as
+  xref:error-messages.adoc#_permission[`permission`], even for a function whose
+  body is elsewhere:
++
+[source,c]
+----
+include::example$memory/conditional_ownership.c[tag=source]
+----
+* A function's `decreases` may read an object its `requires` owns or reads; it
+  is compared, as for integers, between the function's entry and each recursive
+  call:
++
+[source,c]
+----
+include::example$memory/measure_over_memory.c[tag=source]
+----
 * Verification time grows quickly with the number of pointer parameters of
   one type that only `reads` or `live` describe, since any of them may point to
   the same object: four take a few seconds, five tens of seconds, and six or
   more may reach the time limit (an error, never a wrong answer).
+
+[#expressions]
+== Writes and calls inside expressions
+
+An object in memory may be written inside an expression, as a variable can
+(xref:verifying.adoc#side-effects[Side effects in expressions]): `y = pass:[x++]`,
+`f(*p = 1)` and `pass:[(*p)++] + 1` are fine, and so is a call of a function whose
+contract owns or reads an object, next to other uses of objects in memory:
+
+[source,c]
+----
+include::example$memory/expression_write.c[tag=source]
+----
+
+C does not say in which order the operands of most operators are evaluated. Two
+accesses to one object without a sequence point between them, one of them a
+write, are undefined behaviour, and a call next to an access to an object that
+the call may change gives a result that depends on an order C leaves open. When
+the source names the object twice (`pass:[x++] + x`, `*p = pass:[(*p)++]`), the compilers
+warn and cerastes rejects the expression
+(xref:verifying.adoc#side-effects[`unsequenced_modification`]). When it names it
+in two ways that may meet (`*p = pass:[(*q)++]`, `x + bump(&x)`, `bump(p) + peek(q)`),
+cerastes checks, on each path, that they are different objects, and reports
+xref:error-messages.adoc#_unsequenced[`unsequenced`] where they may not be:
+
+[source,c]
+----
+include::example$memory/call_beside.c[tag=source]
+----
+
+A call and the accesses written in its own arguments, a statement's own
+assignment of the call's result (`x = bump(&x);`), and accesses separated by `,`,
+`&&`, `||` or the condition of `?:` have a fixed order, and are not reported.
 
 [#loops]
 == Loops
@@ -244,17 +305,11 @@ These are rejected with a diagnostic, never approximated
 * a pointer to a pointer, and the address of a pointer variable;
 * `owns`, `reads` or a value through a pointer result (`*r`), and contracts
   that name objects other than those the parameters point to;
-* a call of a function whose contract owns or reads an object in the same
-  expression as another use of an object in memory (`x + f(&x)`), or two such
-  calls in one expression;
-* `owns`, `reads` and `live` in a loop invariant, and a function's `decreases`
-  that reads an object in memory;
+* `owns`, `reads` and `live` in a loop invariant;
 * `restrict` except on a C parameter whose contract owns its object;
 * `void *`, and pointers to structures, unions and functions;
 * conversions between pointer types other than adding `const`, comparisons of
-  order and arithmetic on pointers;
-* a write to an object whose address is taken anywhere but as a statement of
-  its own (`x = 1;`, `*p += 2;`, `pass:[(*p)++;]` are fine; `pass:[y = x++;]` is not).
+  order and arithmetic on pointers.
 
 In C, the compiler's warnings about pointers of incompatible types
 (`long *q = &i;` for an `int i`) are errors under `cerastes verify`.

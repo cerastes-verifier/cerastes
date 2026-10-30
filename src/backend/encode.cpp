@@ -1916,11 +1916,9 @@ class Encoder {
   // The `*p` of a contract (decision 0037 items 5 and 7): a read of a pointer parameter's cell, in the state the clause reads (a `requires` and
   // `old` its value on entry, an `ensures` its value on return).  `ind` is the dereference.
   const Expr* contract_read(an_expr_node_ptr ind, const std::vector<an_expr_node_ptr>& ops) {
-    if (cx_.annot == Annot::decreases) {
-      reject(Diag::unsupported_expression, ind->position, "a dereference in a function's termination measure (a function's `decreases` that reads memory is M4.5b1c2's; a loop's measure may read memory)");
-      return nullptr;
-    }
-    if (ind->is_lvalue) {
+    // A function's `decreases(*p)` is the attribute argument itself, unevaluated, so the front end leaves a bare `*p` an lvalue (as for a loop
+    // clause, P59 item 3): it is read as the value (decision 0039 item 8).
+    if (ind->is_lvalue && cx_.annot != Annot::decreases) {
       reject(Diag::unsupported_expression, ind->position, "a dereference used as anything but a value");
       return nullptr;
     }
@@ -1996,15 +1994,8 @@ class Encoder {
             reject(Diag::unsupported_annotation, pos_of(st.atom), std::string("\"") + spelling(st.atom) + "\" of the same parameter twice in a `requires`");
         req.push_back(&st);
       }
-    // `owns(*p)` and `reads(*p)` of one parameter in one clause list (item 5): the same cell held twice, with and without an amount.
-    for (size_t i = 0; i < sites.size(); ++i)
-      for (size_t j = 0; j < i; ++j) {
-        const Expr* a = sites[i].atom;
-        const Expr* b = sites[j].atom;
-        if (sites[i].in_ensures == sites[j].in_ensures && a->a->index == b->a->index &&
-            ((a->atom == vir::AtomKind::Owns && b->atom == vir::AtomKind::Reads) || (a->atom == vir::AtomKind::Reads && b->atom == vir::AtomKind::Owns)))
-          reject(Diag::unsupported_annotation, pos_of(a), "\"owns\" and \"reads\" of the same parameter in one contract (the cell would be held twice)");
-      }
+    // `owns(*p)` and `reads(*p)` of one parameter in one clause list are accepted (decision 0039 item 7): lowering asserts per path that they
+    // do not both hold.
     std::set<int> used;
     for (const vir::AtomSite& st : sites) {
       if (!st.in_ensures) continue;
@@ -2760,13 +2751,10 @@ class Encoder {
   }
 
   // The left operand of an assignment, compound assignment or `++`/`--`: a local (`p->v`) or `*ptr` (`p->addr`, decision 0032 item 3).
-  // `stmt_level`: the node is the whole expression statement; anywhere else a write to a cell or through a pointer is rejected (item 9).
-  bool assign_target(an_expr_node_ptr lhs, AssignParts* p, bool stmt_level) {
+  // A write to a cell or through a pointer may stand anywhere an assignment may (decision 0039 item 2): the caller builds a statement or an
+  // expression.
+  bool assign_target(an_expr_node_ptr lhs, AssignParts* p) {
     if (lhs->kind == enk_operation && lhs->variant.operation.kind == eok_indirect) {
-      if (!stmt_level) {
-        reject(Diag::unsupported_expression, lhs->position, "a write through a pointer used as a value, or inside an expression (M4.5b1c2: sequencing, decision 0028 item 12)");
-        return false;
-      }
       auto lops = operands_of(lhs);
       if (!operand_count(lhs, 1, lops)) return false;
       p->addr = expr(lops[0]);
@@ -2780,23 +2768,17 @@ class Encoder {
     }
     p->v = lvalue_var(lhs);
     if (p->v == nullptr) return false;
-    if (p->v->address_taken && !stmt_level) {
-      reject(Diag::unsupported_expression, lhs->position,
-             "a write to \"" + p->v->name + "\", a variable whose address is taken, inside an expression (M4.5b1c2: sequencing, decision 0028 item 12)");
-      p->v = nullptr;
-      return false;
-    }
     p->target = p->v->type;
     return true;
   }
 
-  AssignRes assignment_parts(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops, AssignParts* p, bool stmt_level = false) {
+  AssignRes assignment_parts(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops, AssignParts* p) {
     const an_expr_operator_kind k = e->variant.operation.kind;
     const SrcLoc l = loc_of(e->position);
     if (k == eok_assign) {
       if (ops.size() != 2) return AssignRes::malformed;
       check_self_assignment(e, ops);
-      const bool target_ok = assign_target(ops[0], p, stmt_level);
+      const bool target_ok = assign_target(ops[0], p);
       allow_enum_conversion(ops[1]);  // decision 0018 item 6 (iii)
       p->x = expr(ops[1]);
       if (!target_ok || p->x == nullptr) return AssignRes::rejected;
@@ -2808,7 +2790,7 @@ class Encoder {
     }
     if (is_incdec_kind(k)) {
       if (ops.size() != 1) return AssignRes::malformed;
-      if (!assign_target(ops[0], p, stmt_level)) return AssignRes::rejected;
+      if (!assign_target(ops[0], p)) return AssignRes::rejected;
       if (p->target.is_ptr()) {
         reject(Diag::unsupported_expression, e->position, "an increment or decrement of a pointer");
         return AssignRes::rejected;
@@ -2826,7 +2808,7 @@ class Encoder {
     }
     // A compound assignment.
     if (ops.size() != 2) return AssignRes::malformed;
-    const bool target_ok = assign_target(ops[0], p, stmt_level);
+    const bool target_ok = assign_target(ops[0], p);
     p->x = expr(ops[1]);
     if (!target_ok || p->x == nullptr) return AssignRes::rejected;
     if (!p->target.is_int()) {
@@ -2868,7 +2850,7 @@ class Encoder {
   }
 
   // An assignment, compound assignment or `++`/`--` whose value is used (decision 0020 item 1): an AssignE.  Its IL position is
-  // kept for vir::sequence_problems.  P33: the node is directly the operand, with the left operand's type, and any conversion
+  // kept for vir::sequence_problems (a write through a pointer is a StoreE, decision 0039 item 2).  P33: the node is directly the operand, with the left operand's type, and any conversion
   // the use needs is a generated cast around it.
   const Expr* assignment_value(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
     if (cx_.contract || cx_.annotation || cx_.const_depth > 0) {
@@ -2886,16 +2868,23 @@ class Encoder {
     }
     const an_expr_operator_kind k = e->variant.operation.kind;
     AssignParts a;
-    const AssignRes res = assignment_parts(e, ops, &a, /*stmt_level=*/false);
+    const AssignRes res = assignment_parts(e, ops, &a);
     if (res == AssignRes::malformed) {
       operand_count(e, is_incdec_kind(k) ? 1 : 2, ops);
       return nullptr;
     }
     if (res != AssignRes::ok) return nullptr;
     const SrcLoc l = loc_of(e->position);
-    const Expr* r = k == eok_assign        ? b_.assign_expr(a.v, a.x, l)
-                    : is_incdec_kind(k)    ? b_.inc_dec_expr(a.v, a.increment, k == eok_post_incr || k == eok_post_decr, l)
-                                           : b_.compound_assign_expr(a.v, a.op, a.x, l);
+    const bool post = k == eok_post_incr || k == eok_post_decr;
+    const Expr* r;
+    if (a.addr != nullptr)  // a write through a pointer used as a value (decision 0039 item 2)
+      r = k == eok_assign ? b_.store_expr(a.addr, a.x, l)
+          : is_incdec_kind(k) ? b_.inc_dec_store_expr(a.addr, a.increment, post, l)
+                              : b_.compound_store_expr(a.addr, a.op, a.x, l);
+    else
+      r = k == eok_assign        ? b_.assign_expr(a.v, a.x, l)
+          : is_incdec_kind(k)    ? b_.inc_dec_expr(a.v, a.increment, post, l)
+                                 : b_.compound_assign_expr(a.v, a.op, a.x, l);
     cx_.assign_positions[r] = e->position;
     return finish(e, r);
   }
@@ -2937,14 +2926,6 @@ class Encoder {
       auto pos = cx_.assign_positions.find(sp.at);
       const a_source_position at = pos != cx_.assign_positions.end() ? pos->second : cx_.stmt_pos;
       reject(Diag::unsequenced_modification, at, sp.variable);
-    }
-  }
-
-  // The rejections of vir::placement_problems (decision 0037 item 8): an access beside a call that holds permissions, or a second such call.
-  void report_placement_problems(vir::Function* f) {
-    for (const vir::PlacementProblem& m : vir::placement_problems(*f)) {
-      std::string what = m.what;
-      reject_loc(Diag::unsupported_expression, m.loc, what);
     }
   }
 
@@ -3129,7 +3110,7 @@ class Encoder {
         // An assignment, compound assignment or `++`/`--` at the top of an expression statement stays a VIR statement (decision
         // 0020 item 6): code without nested effects builds the VIR it always did.
         AssignParts a;
-        const AssignRes r = assignment_parts(e, ops, &a, /*stmt_level=*/true);
+        const AssignRes r = assignment_parts(e, ops, &a);
         if (r == AssignRes::rejected) return;
         if (r == AssignRes::ok && a.addr != nullptr) {
           // A write through a pointer (decision 0032 item 3): `*p = e;`, `*p op= e;`, `++*p;`, `(*p)--;`.
@@ -3168,6 +3149,43 @@ class Encoder {
     if (x != nullptr) out.push_back(b_.expr_stmt(x, loc_of(pos)));
   }
 
+  // R14 (decision 0039 item 6): the local or parameter whose address the returned expression is, looked through parentheses (a flag, no
+  // node), pointer conversions (written or generated), both arms of `?:`, the right operand of `,` and `&*`; null when it is none.  A pointer
+  // VARIABLE (`return p;`, `return p = &x;`) is not looked through: the compilers' front ends do not warn, and the escape is the caller's
+  // `lifetime` error (question 65).  The same shapes as P61's D1-D7 and D9.
+  const vir::Var* returned_local_address(an_expr_node_ptr e, int depth) {
+    if (e == nullptr || depth > 16) return nullptr;
+    while (e != nullptr && e->kind == enk_operation && e->variant.operation.kind == eok_cast && e->variant.operation.operands != nullptr &&
+           e->variant.operation.operands->next == nullptr && has_type_kind(e->type, tk_pointer))
+      e = e->variant.operation.operands;
+    if (e == nullptr || e->kind != enk_operation) return nullptr;
+    auto ops = operands_of(e);
+    switch (e->variant.operation.kind) {
+      case eok_question:
+        if (ops.size() != 3) return nullptr;
+        if (const vir::Var* v = returned_local_address(ops[1], depth + 1)) return v;
+        return returned_local_address(ops[2], depth + 1);
+      case eok_comma: return ops.size() == 2 ? returned_local_address(ops[1], depth + 1) : nullptr;
+      case eok_address_of: {
+        if (ops.size() != 1) return nullptr;
+        an_expr_node_ptr o = ops[0];
+        while (o != nullptr && o->kind == enk_operation && o->variant.operation.kind == eok_lvalue_adjust && o->variant.operation.operands != nullptr &&
+               o->variant.operation.operands->next == nullptr)
+          o = o->variant.operation.operands;
+        if (o != nullptr && o->kind == enk_operation && o->variant.operation.kind == eok_indirect) {  // `&*q`: q's own value
+          auto iops = operands_of(o);
+          return iops.size() == 1 ? returned_local_address(iops[0], depth + 1) : nullptr;
+        }
+        if (o == nullptr || o->kind != enk_variable || o->variant.variable.ptr == nullptr) return nullptr;
+        a_variable_ptr v = o->variant.variable.ptr;
+        if (v->storage_class == sc_static || v->storage_class == sc_extern || v->is_thread_local) return nullptr;
+        auto it = cx_.vars.find(v);
+        return it != cx_.vars.end() ? it->second : nullptr;
+      }
+      default: return nullptr;
+    }
+  }
+
   void return_statement(a_statement_ptr s, Out& out) {
     vir::Function* f = cx_.fn;
     if (s->variant.return_dynamic_init != nullptr) {
@@ -3188,6 +3206,10 @@ class Encoder {
     }
     if (f->ret.is_void()) {
       reject(Diag::unsupported_statement, s->position, "a return with a value in a function that returns void");
+      return;
+    }
+    if (const vir::Var* leaked = returned_local_address(s->expr, 0)) {
+      reject(Diag::return_local_address, s->position, leaked->name);  // R14, decision 0039 item 6
       return;
     }
     allow_enum_conversion(s->expr);  // decision 0018 item 6 (iii)
@@ -4080,7 +4102,6 @@ class Encoder {
     if (reported_count() == reported_before) {
       report_goto_problems(f);
       report_sequence_problems(f);
-      report_placement_problems(f);
     }
     cx_ = Ctx();
   }

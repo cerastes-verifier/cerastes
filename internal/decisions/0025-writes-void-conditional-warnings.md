@@ -265,3 +265,5 @@ for `uninitialized` checks (item 1).
 *2026-10-27, amended by 0026 (M4.4d): item 2 — with the exact sets (0026 step 1) a comma's value carries its floor, so the write of `x = (g(a), 2)` now follows `g`; the remark that it may be emitted before `g` describes step 2.*
 
 *2026-10-27, amended by 0028 (M4.5a, effective from M4.5b1): item 2 — writes and snapshots of a cell are never moved across a call whose contract reaches cells; Viper locals keep this placement (0028 item 13).*
+
+*2026-10-29, amended by 0039 (M4.5b1c2): item 2 — writes and snapshots of cells are not placed by this item: a cell write follows every fixed point of its operands in both halves of its set, and a cell snapshot its guard's set, so neither crosses a memory call C orders with it (0039 items 2 and 4). Item 6 — R14, `return_local_address`: `return &x;` of an automatic local or a parameter, through parentheses, casts, either arm of `?:` and the right operand of `,` (clang `-Wreturn-stack-address`, GCC `-Wreturn-local-addr`; P61).*

@@ -382,6 +382,10 @@ in the loop form, may not name a variable that the loop itself declares (the sam
 as for `invariant`). A measure on a function is a contract, so every declaration that
 carries one must carry the same, and it is refused on a predicate. The same macros
 build the file with other compilers: `CERASTES_DECREASES` expands to nothing there.
+A function's measure may read `*p` for a pointer parameter `p` whose `requires`
+owns or reads it (`CERASTES_DECREASES(*p)`), read on entry like the rest of the
+contract; one that reads an object the `requires` does not give is reported as
+`permission` (xref:memory.adoc#contracts[Memory and ownership]).
 
 A measure before anything but a loop, or before a function's declaration instead of
 after its parameter list, is an error:
@@ -501,7 +505,9 @@ declares the C spellings `cerastes_owns`, `cerastes_reads`, `cerastes_live` and
 
 `owns`, `reads` and `live` name a pointer parameter, as `*p` or `p`, and may
 appear in a contract as a conjunct, after `p == NULL ||`, or as an arm of `?:`
-whose condition does not read memory. `cerastes verify` does not accept
+whose condition does not read memory. One parameter may be owned on one path and
+read on another (`c ? owns(*p) : reads(*p)`), never both on one path, and an
+`ensures` gives back only what its `requires` took on the same path. `cerastes verify` does not accept
 `owns_range` and `forall` yet, nor `owns`, `reads` and `live` in a loop invariant
 or a measure.
 

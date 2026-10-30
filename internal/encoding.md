@@ -391,6 +391,28 @@ jump; `Fn::jump_depth` records the scope depth at each loop (a `continue` throug
 body's block) and inside each switch body (a switch `break` lands before the body's own exit), and `label_depths()`
 the depth of each user label. A `return` exits every open scope as before.
 
+**Sequencing and placement over memory (M4.5b1c2, decision 0039).** A cell written inside an expression is an
+`AssignE` on an address-taken `Var` or a `StoreE` (`*c := a`; with `yields_old` its value is the `Deref` `b` of the shared
+address `c`); `cell_write` lowers either as a write effect: the null check (`StoreE`), `perm == write` on both fields
+(`permission`), then `r.v_T := value; r.d_T := true`, after every fixed point of its operands in both halves of its set.
+Each access has a key (`key_of_cell`, `key_of_addr`: the cell's variable, `*v` per pointer variable, `*&x` as `x`, a key
+of its own for any other address); `check_variable_order` runs per key. `mem_scan` collects the fields a full expression
+writes (writes inside it, never the statement's own store) and the fields of its memory calls (`memory_fields`: a callee
+whose `requires` owns or reads a pointer of that field); `needs_snapshot` then makes `mem_read` emit a guarded snapshot
+`t := g ? r.v_T : 0` whose set holds its guard's, or leaves the read inline as before. `register_access` records each
+access and call with its tree path; `order_rel` decides from two paths whether C orders them (a sequence point, an
+operand before its operator, a call's arguments before the call, a store after its operands) and, when it does not,
+lowering emits the path-precise `unsequenced` obligation (`g_A && g_B ==> place_A != place_B`, or against a callee
+atom's argument; inside the E5 branch that computes a place, or after it with D(B)). `check_memory_order` then checks,
+from the paths, that every cell write and snapshot is emitted on C's side of each memory call C orders with it (exit 3;
+hooks `perturb_memory_order`, `drop_snapshot_guard_set`). A call whose arguments write a cell takes PRE(c) in both
+halves for its permission and heap-reading checks. In `f__wf`, `overlap_obligations` asserts `prior ==> !(g_o && g_r)`
+for an `owns`/`reads` pair on one parameter in one clause list, and each `ensures` atom asserts `prior ==> (g_ens ==>
+g_partner)` (nothing when the partner is unconditional or has the same guard); a function's measure is lowered in
+`CMode::Wf` over the pre-state ghosts with its framing assert; the method's `decreases` is plain and chain-guarded;
+`explicit_termination` reads the callee's measure in the current heap and the caller's under `old(…)`. A full
+expression with none of these lowers exactly as before.
+
 ## 4. Viper shape
 
 ```
@@ -648,7 +670,13 @@ statements (written versus compiler-generated blocks, P50b): in `logical`, `bina
 and static-assertion conditions). A `void` `?:` in statement position (an expression statement, a discarded comma
 operand, a `for` step) is encoded as an `If` whose arms are expression statements in blocks (0025 item 3). Lowering's rejections
 (`LowerResult::rejections`, 0021 item 3) are reported as `unsequenced_calls`. Everything else is
-`unsupported_expression` with a description of the operator (pointer and member operations).
+`unsupported_expression` with a description of the operator (pointer and member operations). Since M4.5b1c2 (0039) `assign_target` takes an address-taken
+local or `*e` anywhere an assignment may stand: `assignment_value` builds an `AssignE` on the cell or a `StoreE`
+(`store_expr`, `compound_store_expr`, `inc_dec_store_expr`, sharing the address node); `sequence_problems` counts a cell
+(and `*&x`) by its variable and `*v` once per pointer variable `v`; `return_statement` rejects R14
+`return_local_address` when the returned value, through parentheses, explicit pointer casts, either arm of `?:`, the
+right operand of `,` and `&*`, is `&x` of an automatic local or a parameter; and a dereference in a function's
+`decreases`, lvalue-flagged at the top of the measure (P60 C3), is read like a contract's.
 
 **Statements.** Allow-list: blocks (compiler-generated blocks are flattened, so a `for` initialization stays in
 scope), declarations with their `stmk_init`, expression statements (assignment, compound assignment and `++`/`--` of

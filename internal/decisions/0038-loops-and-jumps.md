@@ -220,3 +220,5 @@ S28 (Silicon's loops with permissions, frames at out-edges, scope exits at jumps
   splits like a call's (S28 P3: four parameters with a loop took about 50 s under load; record 0037, Consequences;
   M4.8 fixes their cost). Tests stay at three or fewer such parameters in a loop.
 - Jumps out of a cell's scope report a callee that kept the cell at the jump.
+
+*2026-10-29, amended by 0039 (M4.5b1c2): item 3 — writes to cells inside expressions are stores for "touches memory" and "a write can reach a place". Items 8 and 10 — a function's `decreases(*p)` is lifted (0039 item 8).*

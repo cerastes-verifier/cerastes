@@ -504,6 +504,31 @@ const Expr* Builder::inc_dec_expr(const Var* x, bool increment, bool post, SrcLo
   return e;
 }
 
+const Expr* Builder::store_expr(const Expr* addr, const Expr* value, SrcLoc loc) {
+  Expr* e = fresh(p_, Expr::Kind::StoreE, value->type, std::move(loc));
+  e->c = addr;
+  e->a = value;
+  return e;
+}
+
+const Expr* Builder::compound_store_expr(const Expr* addr, BinaryOp op, const Expr* rhs, SrcLoc loc) {
+  const Expr* cur = deref(addr, loc);  // shares `addr`
+  return store_expr(addr, compound_value(cur->type, cur, op, rhs, loc), std::move(loc));
+}
+
+const Expr* Builder::inc_dec_store_expr(const Expr* addr, bool increment, bool post, SrcLoc loc) {
+  const IntType* c_int = p_.int_type_of(p_.c_int_bits(), true);
+  const Expr* one = int_const(Type::integer(c_int), "1", loc);
+  const Expr* old_value = deref(addr, loc);  // one node: the stored value and (for (*p)++) the node's value share it; it shares `addr`
+  const Expr* value = compound_value(old_value->type, old_value, increment ? BinaryOp::Add : BinaryOp::Sub, one, loc);
+  Expr* e = const_cast<Expr*>(store_expr(addr, value, std::move(loc)));
+  if (post) {
+    e->b = old_value;
+    e->yields_old = true;
+  }
+  return e;
+}
+
 const Expr* Builder::comma(const Expr* a, const Expr* b, SrcLoc loc) {
   Expr* e = fresh(p_, Expr::Kind::Comma, b->type, std::move(loc));
   e->a = a;
