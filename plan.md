@@ -333,7 +333,8 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
   - **The warning sweep (was M4.4e;** owner, 2026-10-27, M4.5a planning: "warnings will impact much more than just
     what we have now"). Every default and `-Wall` warning of clang 21 and GCC 16 that can fire on the language
     cerastes accepts, measured in both modes and rejected like the compilers (one rule per family) or listed; record
-    0025 item 6's "still accepted" shapes and handoff §3's M4.4c notes first; its old plan is
+    0025 item 6's "still accepted" shapes and handoff §3's M4.4c notes first, and EDG's #550 on a global that only
+    contracts read (M4.5b2a; the compilers are silent); its old plan is
     `git show 9017105:internal/handoff.md` §4.2. Its record takes the next free number when it runs.
 - **User docs:** publish a "Language support" page in `doc/` from the inventory. It shows what is supported and unsupported, by standard. The difficulty assessment stays in the planning file.
 

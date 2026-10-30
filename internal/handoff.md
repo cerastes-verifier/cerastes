@@ -1,4 +1,4 @@
-# Handoff after M4.5b1c3 — pointers to pointers, owning parameters, `*result`, written atoms (record 0040) (2026-10-30); M4.5b2a in progress
+# Handoff after M4.5b1c3 — pointers to pointers, owning parameters, `*result`, written atoms (record 0040) (2026-10-30); M4.5b2a done (record 0041)
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
@@ -12,10 +12,13 @@ Session plans approved from M4.5b1a on are in `.claude/plans/`; the notes a sess
 - **M4.5b1c3** is done on branch `m4.5b1c3-pointers-to-pointers` (`5ffb1a2`, pushed; PR #21 open, CI pending at
   M4.5b2a's start; record 0040; plan `.claude/plans/m4-5b1c3-pointers-to-pointers.md`). M4.5b1 is complete. The main
   checkout's local `main` is at `774fde4`, a local merge of that branch.
-- **M4.5b2 is split in two** (at M4.5b2a's planning, 2026-10-30; sizing per question 77): **M4.5b2a** (globals and
-  `static` locals, record 0041) is in progress on branch `m4.5b2a-globals`, from `5ffb1a2` since PR #21 had not merged
-  (plan `.claude/plans/m4-5b2a-globals.md`); **M4.5b2b** (P4222's markers and `--strict-init`, record 0042) is next
-  (§4.2).
+- **M4.5b2 is split in two** (at M4.5b2a's planning, 2026-10-30; sizing per question 77). **M4.5b2a** (globals and
+  `static` locals) is done on branch `m4.5b2a-globals`, from `5ffb1a2` since PR #21 had not merged (result in
+  `internal/status.md`; plan `.claude/plans/m4-5b2a-globals.md`): record 0041, no cuts. **M4.5b2b** (P4222's markers and
+  `--strict-init`, record 0042) is next (§4.2).
+- **Audits:** round 1 on record 0041 (two blocking, ten should-fix, thirteen notes; all taken but N9, by design), round
+  2 on the code (no blocking item, about 230 probes; four should-fix, all taken; so no re-audit). What was not taken is in
+  §3.
 
 The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits behind upstream `main` (§4.1).
 
@@ -25,10 +28,35 @@ The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits beh
 2. **`main`**: reset the main checkout's local `main` to `origin/main` (`git reset --hard origin/main` drops only the
    local merge commit `774fde4`), which also drops its uncommitted `internal/handoff.md` edit: the answers to questions
    78 and 79 it held are carried in M4.5b2a's branch (§8).
-3. **M4.5b2a's branch**, at its end: push it and open its PR (`git push origin m4.5b2a-globals`); based on `5ffb1a2`, it
-   shows only its own commits once PR #21 has merged.
+3. **M4.5b2a's branch**: push it and open its PR (`git push origin m4.5b2a-globals`); based on `5ffb1a2`, it shows only
+   its own commits once PR #21 has merged; both CI jobs run the PR tier (no Linux run in the session: CI covers it).
+4. Then M4.5b2b (§4.2).
 
 ## 3. Open audit notes (condensed; the full notes are in the commit named above)
+
+**From M4.5b2a** (audit round 1 on record 0041: two blocking, ten should-fix, thirteen notes, all taken but N9; audit
+round 2 on the code: no blocking item, about 230 probes and no wrong verdict, SF1–SF4 taken, so no re-audit;
+`build/m4.5b2a/audit{1,2}.md` in the worktree, gitignored; items not taken and open points):
+- *A front-end warning compilers do not give:* EDG's #550 ("variable "g" was set but never used") fires on a global that
+  code only writes and only contracts read (annotation uses do not count, P59); clang and GCC are silent for globals.
+  The tests read such globals in code; for the warning sweep (M8, `plan.md`).
+- *By design* (audit 1 N9): C++17 sequences `g += f()` (the right operand first); 0039's C rule stays in both modes.
+- *Completeness gaps, listed:* `alloc_<t>` does not ensure `block_of(r) != GB_g()`, so `&x != &g` is not proved in a
+  function that holds nothing of `g` (audit 1 N3); `return &s;` of a `static` local leaves the caller only `WF(r)`, so
+  its uses are `lifetime` (`static_local_return_address_use.c`, until M4.5d2's `ensures` atoms); a loop over `reads(*p)`
+  and a global written by name may need intermediate asserts for Silicon to keep `*p`'s value (audit 2 N2,
+  `l_reads_p_owns_g.c` in the scratchpad, prover incompleteness, not the encoding); over-strict rejections: `bool b =
+  &g`, `!&g`, `&g == NULL`, `static int b = (&g == &h)`, C++ `static int *p = &a` of a `static` local (audit 2 N6).
+- *Hazard, no case known:* Silicon continuing past a failed explicit check and tripping over its own check on a store
+  through an unknown pointer gives exit 3 (found once in `main`, fixed by splitting against every held global in
+  `result_splits`; no general guard).
+- *Messages:* `main(int, char **)` in a unit with globals is not the entry and fails closed, but its message asks for
+  `reads(g)` in a contract on `main`, which is rejected (audit 2 N3; M4.6 makes `main(argc, argv)` the entry); `int
+  *volatile gp` is named "volatile int *" (N7).
+- *Not on an allow-list, no wrong verdict:* asm labels on globals (the assembler refuses duplicates in one unit); a user
+  `environ`/`__progname` without the system header (fine on macOS, Linux unchecked; audit 2 N5).
+- *For later sessions:* M4.5f1 encodes `pure` bodies, which now reject globals and `static` locals (0041 item 12);
+  M4.7 must keep `&main` rejected so `program_start` is reached once (audit 1 N10).
 
 **From M4.5b1c3** (audit round 1 on record 0040, round 2 on the code, one re-audit; `build/m4.5b1c3/audit{1,2}.md` in the
 worktree, gitignored; items not taken and open points):
@@ -312,14 +340,11 @@ new session.
 **M4.5b2 is two sessions** (at M4.5b2a's planning, 2026-10-30; the whole row was about 1,300–1,500 changed lines and 55
 tests, more than one context). 0019's flag per cell is done (b1a–b1c3); what the row adds beyond it is below.
 
-**M4.5b2a Globals and `static` locals** (in progress; record 0041; plan `.claude/plans/m4-5b2a-globals.md`, which holds
-its scope, owner decisions 80, 81 and 84, and its inputs): mutable globals as `GB_g()` blocks, `program_start` for
-`main`, frames through contracts (`owns(g)`, `reads(g)`), `static` locals by an implicit `owns` (question 80), 0025 item
-2's placement for globals. Flips (pre-approved, question 81): `tests/scalar/negative/reject_global.c`,
-`tests/scalar/negative/reject_static_local.c` and `tests/memory/negative/reject_pointer_global.c` retired, each
-replaced by a positive of the same shape; `reject_address_of_const_global.c` and `reject_case_const_address_taken.cpp`
-stay rejected naming M4.6, `reject_owns_of_param_cell.c` naming no session. Ports: `global_points_to_syntax.c`,
-`globals.c`'s scalar part.
+**M4.5b2a Globals and `static` locals: done** (2026-10-30; record 0041; plan `.claude/plans/m4-5b2a-globals.md`; status
+entry), with question 81's flips: `reject_global.c`, `reject_static_local.c` and `reject_pointer_global.c` retired for
+positives of the same shape (`global_declared_unused.c`, `static_local_unused.c`, `global_pointer_declared_unused.c`);
+`reject_address_of_const_global.c` and `reject_case_const_address_taken.cpp` name M4.6, `reject_owns_of_param_cell.c` no
+session. Ports: `tests/memory/verifast/global_points_to_syntax.c`, `globals.c` (scalar part).
 
 **M4.5b2b Initialization through pointers** (record 0042; plan it from this paragraph). P4222's markers (0029 item 2;
 P54 in `il-inventory.md`): `[[cerastes::uninit]]` on an automatic local (target `v`, registered `v:+a!`; it documents
