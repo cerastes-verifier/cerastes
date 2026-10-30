@@ -409,6 +409,9 @@ right is missing:
 * at a read or a write through a pointer whose object may have ended (a pointer
   to a local variable used after the variable's block), or of a local variable
   whose object a function it was passed to kept;
+* at a read or a write of a global variable that the function's contract does
+  not name (`cerastes_owns(g)` or `cerastes_reads(g)`;
+  xref:memory.adoc#globals[Global variables]);
 * at a call, when the caller does not hold what the callee's `requires` asks
   for (`owns(*p)`, `reads(*p)`, `live(p)`), or passes one object to two
   parameters of which one owns it;
@@ -524,7 +527,9 @@ evaluated, and a write and another access to the same object with no sequence
 point between them is undefined behaviour (`*p = pass:[(*q)++]` when `p` and `q` point
 to one object). A call is not interleaved with the rest of its expression, but
 C leaves open whether it comes before or after an operand beside it, so in
-`x + bump(&x)` the value read from `x` depends on that choice. cerastes reports
+`x + bump(&x)` the value read from `x` depends on that choice; so does `g + f()`
+when `f` may change the global `g`, and `f() + f()` when `f` has a `static` local
+(xref:memory.adoc#static-locals[`static` local variables]). cerastes reports
 both whenever the two may be one object on some path, rather than choose an
 order. When the source names the object twice (`pass:[x++] + x`, `*p = pass:[(*p)++]`), the
 compilers warn, and cerastes rejects the expression

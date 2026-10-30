@@ -617,7 +617,10 @@ Until it is fixed, such an error hides the other errors of the file. The `case` 
 are checked the same way, at its start, so a bad `case` value is reported even
 where the `switch` is never reached.
 
-Rejected: a global variable that is not `const`; a `const` declared `extern`
+A global variable that is not `const` is an object in memory, read and written
+through contracts (xref:memory.adoc#globals[Memory and ownership]).
+
+Rejected: a `const` declared `extern`
 and not defined in the file; in C, `const int z;` without an initializer (another
 file may define `z`, and the linker would use its value: write `= 0`, or make it
 `static`); a weak constant (`+__attribute__((weak))+`, `+#pragma weak+`), whose
@@ -684,6 +687,7 @@ every run that reaches the prover (exit status 0, 1 or 3), whatever the
 verdict. They are for people who want to see what was checked; the reports
 already point at your source, never at the Viper file.
 
+[#one-unit]
 == The single-unit assumption
 
 A result is for one translation unit. A contract you declare for a function
@@ -692,6 +696,15 @@ that is defined elsewhere, in another source file or in a library, is
 checks that the definition satisfies it. The success line says so. The
 definition is checked when the file that contains it is verified; a library
 function that is never verified is trusted for good.
+
+The same holds for the file's global variables
+(xref:memory.adoc#globals[Memory and ownership]): a function defined elsewhere
+changes only the globals its contract names; code that runs before `main` in
+another file (in pass:[C++], the initialization of its globals; in C, a GNU
+`constructor` function) calls none of this file's functions and changes none of
+its globals; and no other file calls `main`. Where another file could set a
+global's initial value through its own definition or initialization, `main`
+does not know it.
 
 [source,cpp]
 ----
@@ -782,9 +795,10 @@ The constructs that are rejected in this version are:
   `switch` with an init-statement or with a declaration in its condition, and the
   forms of `switch` listed in <<control-flow>>.
 * *Declarations:* a `const` local with no initializer, a local initialized
-  from itself (`int x = x;`), `static`, `thread_local` and
-  `extern` locals, global variables other than the constants of <<constants>>,
-  arrays, classes, unions,
+  from itself (`int x = x;`), `static const` and `static constexpr` locals,
+  `thread_local` and `extern` locals and globals, `volatile` globals, globals
+  defined in another file (`extern` with no definition here), arrays, classes,
+  unions,
   an enumeration declared in a function, a class or a template, or with a
   `bool` underlying type or an enumerator outside the range of `int`, an
   enumeration declared without its enumerators and without an underlying type,

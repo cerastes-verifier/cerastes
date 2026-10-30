@@ -119,7 +119,7 @@ E perm_div(E a, int divisor) {
 bool is_domain_function(const std::string& name) {
   for (const char* n : {"loc", "len", "block_of", "offset_of", "member", "parent_of", "index_of", "lvloc"})
     if (name == n) return true;
-  return false;
+  return name.compare(0, 3, "GB_") == 0;  // a global's block constant (decision 0041 item 4)
 }
 
 E dom(const std::string& domain_function, std::vector<E> args) {

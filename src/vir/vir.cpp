@@ -1,6 +1,7 @@
 // Part of cerastes, under the Apache License v2.0 with LLVM Exceptions.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #include "vir.h"
+#include <cctype>
 
 namespace cerastes::vir {
 
@@ -37,6 +38,27 @@ Var* Function::new_local(std::string name, Type type, SrcLoc loc) {
 void Function::mark_address_taken(const Var* v) {
   if (v == nullptr || v->id < 0 || static_cast<size_t>(v->id) >= locals_.size() || locals_[static_cast<size_t>(v->id)].get() != v) return;
   locals_[static_cast<size_t>(v->id)]->address_taken = true;
+}
+
+Global* Program::add_global(std::string c_name, Type type, SrcLoc loc, const Function* owner) {
+  Global& g = globals_.emplace_back();
+  g.id = static_cast<int>(globals_.size()) - 1;
+  g.c_name = std::move(c_name);
+  g.type = type;
+  g.loc = std::move(loc);
+  g.owner = owner;
+  return &g;
+}
+
+std::string Global::viper_name() const {
+  auto ident = [](const std::string& s) {
+    std::string r;
+    for (char ch : s) r += (std::isalnum(static_cast<unsigned char>(ch)) != 0 || ch == '_') ? ch : '_';
+    return r;
+  };
+  std::string n = "GB_";
+  if (owner != nullptr) n += ident(owner->c_name) + "__";
+  return n + ident(c_name) + "__" + std::to_string(id);
 }
 
 Type Program::pointer_to(const Type& pointee) {
@@ -287,6 +309,23 @@ const Expr* Builder::atom(AtomKind kind, const Expr* ptr, int amount, SrcLoc loc
   return e;
 }
 
+const Expr* Builder::global_atom(AtomKind kind, const Expr* global_addr, int amount, SrcLoc loc, bool implicit) {
+  Expr* e = fresh(p_, Expr::Kind::Atom, Type::bool_type(), std::move(loc));
+  e->atom = kind;
+  e->a = global_addr;
+  e->amount = amount;
+  e->implicit_atom = implicit;
+  if (global_addr != nullptr && global_addr->global != nullptr) {
+    const std::string& n = global_addr->global->c_name;
+    switch (kind) {
+      case AtomKind::Owns: e->c_text = "owns(" + n + ")"; break;
+      case AtomKind::Reads: e->c_text = "reads(" + n + ")"; break;
+      case AtomKind::Live: e->c_text = "live(&" + n + ")"; break;
+    }
+  }
+  return e;
+}
+
 const Expr* Builder::null_const(Type ptr_type, SrcLoc loc) {
   return fresh(p_, Expr::Kind::Null, ptr_type, std::move(loc));
 }
@@ -298,10 +337,18 @@ const Expr* Builder::addr_of(const Var* v, SrcLoc loc) {
   return e;
 }
 
+const Expr* Builder::global_addr(const Global* g, SrcLoc loc) {
+  Expr* e = fresh(p_, Expr::Kind::GlobalAddr, p_.pointer_to(g->type), std::move(loc));
+  e->global = g;
+  e->c_text = "&" + g->c_name;
+  return e;
+}
+
 const Expr* Builder::deref(const Expr* addr, SrcLoc loc) {
   Expr* e = fresh(p_, Expr::Kind::Deref, addr->type.is_ptr() && addr->type.pointee != nullptr ? *addr->type.pointee : addr->type, std::move(loc));
   e->a = addr;
-  if (!addr->c_text.empty()) e->c_text = "*" + addr->c_text;
+  if (addr->kind == Expr::Kind::GlobalAddr && addr->global != nullptr) e->c_text = addr->global->c_name;  // `*&g` is `g`
+  else if (!addr->c_text.empty()) e->c_text = "*" + addr->c_text;
   return e;
 }
 
@@ -601,6 +648,18 @@ bool reads_heap(const Expr& e) {
   for (const Expr* x : e.args)
     if (x != nullptr && reads_heap(*x)) return true;
   return false;
+}
+
+int atom_place_key(const Expr& atom) {
+  if (atom.a == nullptr) return kNoPlaceKey;
+  if (atom.a->kind == Expr::Kind::Formal) return atom.a->index;
+  if (atom.a->kind == Expr::Kind::GlobalAddr && atom.a->global != nullptr) return kGlobalSiteBase + atom.a->global->id;
+  return kNoPlaceKey;
+}
+
+std::string place_text(const Expr& addr) {
+  if (addr.kind == Expr::Kind::GlobalAddr && addr.global != nullptr) return addr.global->c_name;
+  return addr.c_text.empty() ? std::string() : "*" + addr.c_text;
 }
 
 std::vector<AtomSite> contract_atoms(const Function& f) {

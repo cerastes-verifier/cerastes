@@ -489,14 +489,15 @@ declares the C spellings `cerastes_owns`, `cerastes_reads`, `cerastes_live` and
 |===
 | Function | C spelling | What it means
 
-| `owns(*p)`
-| `cerastes_owns(*p)`
+| `owns(*p)`, `owns(g)`
+| `cerastes_owns(*p)`, `cerastes_owns(g)`
 | `p` is not null and the function may read and write `*p`, which holds a value
-(xref:memory.adoc#contracts[Memory and ownership])
+(xref:memory.adoc#contracts[Memory and ownership]); for a global variable `g`,
+the function may read and write `g` (xref:memory.adoc#globals[Global variables])
 
-| `reads(*p)`
-| `cerastes_reads(*p)`
-| `p` is not null and the function may read `*p`
+| `reads(*p)`, `reads(g)`
+| `cerastes_reads(*p)`, `cerastes_reads(g)`
+| `p` is not null and the function may read `*p`; or it may read the global `g`
 
 | `live(p)`
 | `cerastes_live(p)`
@@ -504,7 +505,7 @@ declares the C spellings `cerastes_owns`, `cerastes_reads`, `cerastes_live` and
 
 | `old(e)`
 | `cerastes_old(e)`
-| the value of `e` on entry, in `ensures`; `e` is a parameter or `*p`
+| the value of `e` on entry, in `ensures`; `e` is a parameter, `*p` or a global
 
 | `owns_range(p, n)`
 | (later)
@@ -515,13 +516,14 @@ declares the C spellings `cerastes_owns`, `cerastes_reads`, `cerastes_live` and
 | for every value of the first parameter of `body` (not supported yet)
 |===
 
-`owns`, `reads` and `live` name a pointer parameter, as `*p` or `p`, and may
+`owns` and `reads` name a global variable, or, like `live`, a pointer parameter, as `*p` or `p`, and may
 appear in a contract as a conjunct, after `p == NULL ||`, or as an arm of `?:`
 whose condition does not read memory. One parameter may be owned on one path and
 read on another (`c ? owns(*p) : reads(*p)`), never both on one path, and an
 `ensures` gives back only what its `requires` took on the same path. In a loop
 invariant they may name any pointer variable whose own address is not taken
-(xref:memory.adoc#loops[Loops]). `cerastes verify` does not accept `owns_range`
+(xref:memory.adoc#loops[Loops]), but not a global, which every loop of a
+function that holds it keeps already. `cerastes verify` does not accept `owns_range`
 and `forall` yet, nor `owns`, `reads` and `live` in a measure or in a
 `do … while (0)` invariant.
 

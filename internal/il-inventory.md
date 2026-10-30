@@ -6265,3 +6265,218 @@ The hand-written targets above are the first version of item 5's rows. The audit
 | **Values** | `vs := q.v_T` at entry under `g && NV && perm(q.v_T) > none`; row `g && NV ==> q.v_T == vs` when no write in the loop can reach field T (`LoopWrites`: fields, or any written cell), otherwise `g && NV && a_v < write ==> q.v_T == vs`; none when the loop assigns `q` | `loop_invariant_reads_unowned.c` (verifies after this change: `owns(*q) && (i == 0 || *q == 0)` with `q` unassigned in the loop; was `invariant-preserved` before); the whole `tests/memory/loop_*` and `negative/loop_*` set: 332 passed, 0 failed |
 
 The failures of the first end-to-end run are in the session reply; the spikes of this document (c1-c10) remain the evidence that the rows are *accepted* by Silicon (shape and splits); the tests above are the evidence for the revised guards, positivity and values. The `*result` rows (S4) were validated by `result_value.c`, `result_value_cpp.cpp` and `negative/result_value_unframed.c`.
+
+## M4.5b2a: mutable globals and `static` locals (record 0041)
+
+Probe P63 (the IL of globals, `static` locals, `&g` and `g` in contracts, `main`, and the compiler matrix of same-object
+shapes on globals; il-analyst) and spike S31 (Silicon) of the M4.5b2a session (2026-10-30). Evidence under
+`build/m4.5b2a/` in the worktree (gitignored). Record 0041 takes P63's hazards H1-H8.
+
+### P63: the IL facts record 0041 relies on (mutable globals, `static` locals, `&g`, `g` in contracts, `main`) **PASS for A1-A8 as IL facts; no outright CONTRADICTION of items 2-11; eight HAZARDS (H1-H8) the reader and the lowering must handle, six NOTEs**
+
+Evidence under `build/m4.5b2a/p63/` (not committed). Probe inputs `a1.c`, `a1b.c`, `a1n.cpp`, `a1c.cpp` (A1), `a2.c`, `a2b.c`, `a2c.cpp`, `a2d.c` (A2), `a3.c`, `a3x.cpp` (A3), `a4.c`, `a4b.c`, `a4c.c` (A4), `a5.c`, `a5x.cpp` (A5), `a6.c`, `a6b.c`, `a6x.cpp` (A6), `a7.c`, `a7n.cpp`, `a7b.cpp`, `a7c.cpp` (A7), `a8/` (A8), `a9.c`, `a9b.c` (A9). For each input `<f>.c23.il` / `<f>.c++20.il` (`scripts/cerastes-fe.sh --c23|--c++20 --il_display --display_error_number -I include`), `.walk` (`--cerastes_walk`), `.err`; `run.sh <input>` produces them (a `.cpp` runs C++20 only; **a `.c` runs both modes, so a `.c` and a `.cpp` with the same base name overwrite each other's `.c++20.*`; that is why `a1n.cpp`, `a3x.cpp`, `a7n.cpp` exist**). Scratch readers: `gvars.py` (file-scope variable fields), `cons.py` (one line per initializer constant), `etree.py` (the expression trees of a function with raw node kinds, constants' `expr:` shown as `<orig expr: ...>`), `slocals.py` (static locals and their init entries), `routines.py`, plus P62's `ilsum.py`, `ilvars.py`, `rawnode.py`, `sttree.py`. Branch `m4.5b2a-globals`, nothing built or touched in the tree (`build/cerastes-fe` as it was). Both modes for every C probe. `il_def.h` lines are `third_party/edg/src/il_def.h`. Notation: `{T L g @c}` = type, `is_lvalue`, `compiler_generated`, column. `seq` of a position is a running source-sequence number (it equals the line only in a file with no includes; `a1.c` has none, `a2.c` includes `<stddef.h>` and shows seq 352...), so evidence below cites the probe line.
+
+#### Hazards (read first)
+
+- **H1. `&g` has two node shapes, and the shape depends on the context and the mode; in C++ some comparisons of addresses are folded to an integer.** `a4.c` (C23, `etree.py a4.c23.il <fn>`; C++20 the same unless stated):
+  ```
+  a4.c:10 return &g;            eok_address_of(enk_variable g {int L}) {int *}                       (bare)
+  a4.c:11 return *&g;           eok_indirect(eok_address_of(enk_variable g {int L}) {int *}) {int}    (bare; not folded to g)
+  a4.c:20 *&g = 9;              eok_assign(eok_indirect(eok_address_of(enk_variable g)), const 9)     (bare)
+  a4.c:15 return &g + 1;        eok_padd(eok_address_of(enk_variable g) {int *}, enk_constant ck_integer 1) {int *}   (bare)
+  a4.c:12 p = &g;               eok_assign(enk_variable p, enk_constant ck_address address.kind=abk_variable variable=g off=0 <orig expr: eok_address_of(enk_variable g {int L})> {int *})
+  a4.c:13 callee(&g);           eok_call(routine callee, enk_constant ck_address ... variable=g off=0 <orig expr: eok_address_of(...)> {int *})
+  a4.c:14 &g == p               eok_eq(enk_constant ck_address ... variable=g off=0 <orig expr: eok_address_of(...)>, enk_variable p)        (C++: wrapped in eok_cast to int)
+  a4.c:16 &g != &h              C23: eok_ne(enk_constant ck_address g, enk_constant ck_address h)      C++20: enk_constant ck_integer integer_value=1 <orig expr: eok_cast(enk_constant ck_integer 1 <orig expr: eok_ne(ck_address g, ck_address h)>)>
+  a4.c:19 (c ? &g : &h) == gp   C23: eok_question(var c, enk_constant ck_address g, enk_constant ck_address h)     C++20: eok_question(eok_bool_cast(var c), eok_address_of(var g), eok_address_of(var h))   (bare arms)
+  ```
+  So `&g` is `eok_address_of` over `enk_variable` (return value, `*`/`+` operand, assignment target), or an `enk_constant` of `ck_address`/`abk_variable` (assignment source, call argument, comparison operand, conditional arm in C; the constant's `expr:` keeps the original `eok_address_of` tree), and C++ differs from C in the conditional's arms. `&g != &h` is `ck_integer 1` in C++ and `&g == &g` / `&g == 0` are `ck_integer` 1 / 0 in both modes (`a4b.c:5` `e2`, `:8` `e5`, with the folded tree in `expr:`). `&g + 1` as a comparison operand or call argument is `enk_constant ck_address ... off=4` (`a4b.c:4` `e1`, `:7` `e4`; `<orig expr: eok_padd(eok_address_of(var g), const 1)>`). `&*&g` is a constant `ck_address g off=0` in both modes (C `<orig>` is `eok_address_of(var g)`, C++ keeps `eok_address_of(eok_indirect(eok_address_of(var g)))`, `a4b.c:9`). **The encoder must accept both shapes everywhere an address is read (`address_of`, `constant`), and treat a folded integer comparison as a value it must still accept (0024's reader).**
+- **H2. An `enk_constant ck_address` is not always `&g` written: in C, a later read of a const pointer local initialized with `&g` is folded to the same constant, with `<orig expr: enk_variable p>`.** `a4b.c:15` `void e12(void) { int *const p = &g; (void)p; }`: C23 `eok_cast(enk_constant ck_address address.kind=abk_variable variable=g off=0  <orig expr: enk_variable p {int * @43}> {int * @43}) {void}`; C++20 `eok_cast(enk_variable p {int *const @43})`. The constant's `expr:` tells them apart (`eok_address_of` against `enk_variable`).
+- **H3. An explicit pointer cast of `&h` is a `ck_address` with the same `variable` and `offset` as `&h` and only the constant's `type` changed: the reader must compare the constant's pointee type with the variable's type, in initializers and in code.** `a2d.c:2-4`: `char *cp = (char *)&h0;` is `kind: ck_address`, `address.kind: abk_variable`, `variable: h0`, `address.offset: 0`, `type: char *`, constant text `(char *)(&h0)` (`cons.py a2d.c23.il`, C++20 identical); likewise `long *`, `void *`, `unsigned int *`, and `long **` over `&q` (`a2d.c:9`, `pql`). No diagnostic from EDG in either mode. In code, `a4c.c:2` `(char *)&g == p`: `eok_eq(enk_constant ck_address ... variable=g off=0 <orig expr: eok_cast(enk_constant ck_address ... <orig: eok_address_of(var g)> {int *}) {char *}> {char * @26}, var p)`. `const` is stripped the same way: `a2.c:22` `int *gp7 = (int *)&k;` (`const int k`) is `ck_address`, `variable: k`, `type: int *`, `orig_type: const int *`, so "the address of a const object" must be tested on the target variable's own type, not the constant's.
+- **H4. A null pointer initializer is a `ck_integer` of value 0 whose `type` is the pointer type; the existing `ck_integer`-only reader (`encode.cpp:1721`) would read it as an integer.** `cons.py a2.c23.il`: `gp3 | int * | initk_static | (int *)0 | ck_integer`, `gp4 (NULL)` the same text `(int *)0` with `explicit_cast_applied: TRUE` (C's `((void*)0)`); `a2b.c:3` C23 `nullptr` is `(int *)nullptr` `ck_integer` value 0; C++20 `NULL` is `(int *)__null` `ck_integer` value 0 with `null_keyword: TRUE`, **`is_simple_zero` absent** (`a2.c++20`, `gp4`), while `0` and `(int *)0` have `is_simple_zero: TRUE`; a function pointer null is the same (`fp`, `(int (*)(void))0`). So a null is: `kind == ck_integer`, `type` a pointer, `integer_value` 0. `is_simple_zero` is not the test.
+- **H5. `&h - 0` and `&h + 0` keep `ck_address` with offset 0 but a non-NULL `subobject_path`; `&h + 1` is offset 4 (bytes) with `subobject_path` `is_offset`, `ptr_offset: 1`.** `a2.c:28` `int *gp10 = &h1 - 0;` (constant text `&h1`): `address.offset: 0`, `subobject_path: file-scope subobject-path` with `ptr_offset: 0`; `a2.c:20` `gp6 = &h0 + 1`: `address.offset: 4`, `ptr_offset: 1` (il_def.h:5219 `subobject_path`, :5216 `offset` in bytes, :4647 `ptr_offset`). `one_past_the_end` (il_def.h:5144) is not printed for it. The reader should reject on `address.offset != 0` (a `subobject_path != NULL` with `ptr_offset == 0` is the same address as `&h`).
+- **H6. A static local's initializer is not on the variable when `init_kind == initk_function_local`; it is in a `local-static-variable-init` entry on the scope's `local_static_variable_inits`.** `slocals.py a6b.c23.il` (C++20 the same, `a6b.c++20.il`, and `a6x.cpp`): `f::count = 0` and `f4::c4 = 1`, `f3::c3 = 5` are `initk_static` with the constant on the variable; `f3::p = &c3` (`a6.c:3`), `f5::c5 = 2 + 3` (`:5`), `f11::b` (`static unsigned char b = 1`) and `bb` (`static _Bool bb = 1`) are `initk_function_local` and the entry says `init_kind=initk_static constant=&c3 ck=ck_address ... variable=c3 off=0`, `constant=5 ck=ck_integer`, `constant=(unsigned char)1U`, `constant=(bool)1U`; the C++ dynamic `static int s = ext();` (`a6x.cpp:2`) is `init_kind=initk_dynamic` with `dynamic ... dik=dik_expression` (il_def.h:11074 `a_local_static_variable_init`, :18548 the scope list, :11747-11754 `init_kind` and the empty variant). A `static int c = 0` or `1` (literal of the variable's own type) stays on the variable (`initk_static`).
+- **H7. A C++ `constexpr` call in a global's initializer is folded: `initk_static`, a `ck_integer`, and the `expr:` of the constant is the `eok_call` tree.** `a3x.cpp:5` `int g3 = cf();` (`constexpr int cf()`): `init_kind: initk_static`, constant `4`, `expr` node `operation.kind: eok_call`, `operation.type_kind: tk_unknown`; `a3x.cpp:4` `sizeof(int)` and `:6` `2 * sizeof(long)` are `ck_integer` 4 and 16 under a generated `eok_cast`. 0017's reader (calls rejected in a constant, `const_depth`) would refuse `g3` although the front end has its value (the value is correct; the encoder must choose to read the value or refuse).
+- **H8. A `dik_constant` initializer of an automatic `int *q = &g` / `&v`, which 0032 never met for locals.** `a4.c:12` `int *p = &g;`: `variable p init_kind=initk_dynamic ... dynamic-init p kind=dik_constant` with the `ck_address` constant (`a6b.c:9`, `int *q = &v` with `v` a static local: `dynamic-init ... kind: dik_constant`, `constant: &v`, `ck_address`, `abk_variable`, `variable: v`, `address.offset: 0`, `subobject_path: NULL`). For `&x` of an automatic `x` the initializer is `dik_expression`; the local-initializer reader meets `dik_constant` only now.
+
+#### A1. File-scope mutable globals **PASS: all fields readable; "defined in this unit" is `declared_type != NULL`**
+
+Probes `a1.c` (C), `a1b.c`, `a1n.cpp`, `a1c.cpp`; `python3 gvars.py <dump> <names>`. Fields are `a_variable` (il_def.h:11217): `storage_class` (:11254), `declared_storage_class` (:11269), `init_kind` (:11747, enum :11017-11030), `initializer.constant` (:11754, printed as `constant:`), `has_explicit_initializer` (:11624), `declared_type` (:11814), `is_inline` (:11542), `is_thread_local` (:11722), `address_taken` (:11389); `source_corresp.name_linkage` (:3388; `nlk_none`/`nlk_internal`/`nlk_cplusplus_external`/`nlk_external` print as `no`/`internal`/`C++`/`C`, il_def.h:511-519), `source_corresp.decl_position`, `source_corresp.parent_scope` (:3302, `sck_file`/`sck_namespace`, :18212), `source_corresp.enclosing_routine` (:3317).
+
+| Probe (line) | mode | `storage_class` | `declared_storage_class` | `init_kind` (value) | `declared_type` | `name_linkage` | position of the variable |
+|---|---|---|---|---|---|---|---|
+| `a1.c:1` `int g1 = 3;` | C23 | `sc_unspecified` | `sc_unspecified` | `initk_static` (`ck_integer` 3) | `int` | `C` (external) | 1:5 |
+| `a1.c:2` `static int g2 = 3;` | C23 | `sc_static` | `sc_static` | `initk_static` (3) | `int` | `internal` | 2:12 |
+| `a1.c:3` `int g3;` (tentative) | C23 | `sc_unspecified` | `sc_unspecified` | `initk_none` | `int` | `C` | 3:5 |
+| `a1.c:4-5` `int g4; int g4;` | C23 | as g3 | | `initk_none` | `int` | `C` | **one variable**, at 4:5 (the first); both lines are `entity: variable g4` in the source sequence |
+| `a1.c:6-7` `extern int g5; int g5 = 5;` | C23 | `sc_unspecified` | `sc_unspecified` | `initk_static` (5) | `int` | `C` | **one variable at 7:5, the definition**; line 6 is a `src-seq-secondary-decl` (`decl_position 6:12`, `declared_storage_class: sc_extern`, `first_declaration: TRUE`, il_def.h:2131, :2214) |
+| `a1.c:8` `extern int g6;` alone | C23 | **`sc_extern`** | `sc_unspecified` | `initk_none` | **`NULL`** | `C` | 8:12 |
+| `a1b.c:1` `extern int h7 = 7;` | C23 | `sc_unspecified` | `sc_extern` | `initk_static` (7) | `int` | `C` | 1:12 |
+| `a1b.c:2` `static int s1;` | C23 | `sc_static` | `sc_static` | `initk_none` | `int` | `internal` | 2:12 |
+| `a1b.c:4-5` `extern int t; int t;` | C23 | `sc_unspecified` | `sc_unspecified` | `initk_none` | `int` | `C` | one variable at 5:5 |
+| `a1b.c:6-7` `int u; int u = 4;` | C23 | `sc_unspecified` | | `initk_static` (4) | `int` | `C` | one variable at 7:5 |
+| `a1.cpp` (`a1n.cpp:1`) `namespace n { int g = 1; }` | C++20 | `sc_unspecified` | `sc_unspecified` | `initk_static` (1) | `int` | `C++` | 1:19, `parent_scope` `kind: sck_namespace`, `assoc_namespace: n` |
+| `a1n.cpp:2` `namespace { int un = 2; }` | C++20 | **`sc_static`** | `sc_unspecified` | `initk_static` (2) | `int` | `internal` | 2:17; the scope's namespace has `internal_linkage: TRUE` and no `name:` |
+| `a1n.cpp:3` `inline int in = 1;` | C++20 | `sc_unspecified` | `sc_unspecified` | `initk_static` (1) | `int` | `C++` | 3:12, **`is_inline: TRUE`**, `parent_scope kind: sck_file` |
+| `a1n.cpp:4` `static int st = 3;` | C++20 | `sc_static` | `sc_static` | `initk_static` | `int` | `internal` | 4:12 |
+| `a1n.cpp:5` `int e = 4;` | C++20 | `sc_unspecified` | `sc_unspecified` | `initk_static` (4) | `int` | `C++` | 5:5 |
+| `a1n.cpp:6-7` `extern int x; int x = 5;` | C++20 | `sc_unspecified` | | `initk_static` (5) | `int` | `C++` | one variable at 7:5 |
+| `a1n.cpp:8` `extern int ex;` alone | C++20 | `sc_extern` | `sc_unspecified` | `initk_none` | `NULL` | `C++` | 8:12 |
+| `a1n.cpp:9` `extern "C" int ec = 1;` | C++20 | `sc_unspecified` | `sc_unspecified` | `initk_static` | `int` | **`C`** | 9:16 |
+| `a1n.cpp:10` `namespace n { extern int nx; }` | C++20 | `sc_extern` | | `initk_none` | `NULL` | `C++` | 10:26 |
+| `a1n.cpp:11` `const int k = 3;` | C++20 | `sc_static` | `sc_unspecified` | `initk_static` (3) | `const int` | `internal`, `constant_valued: TRUE` | 11:11 |
+| `a1c.cpp:1` `int z;` | C++20 | `sc_unspecified` | `sc_unspecified` | `initk_none` | `int` | `C++` | 1:5 |
+| `a1c.cpp:2` `static int zs;` | C++20 | `sc_static` | `sc_static` | `initk_none` | `int` | `internal` | 2:12 |
+| `a1c.cpp:4-5` `extern int ea; int ea;` | C++20 | `sc_unspecified` | | `initk_none` | `int` | `C++` | one variable at 5:5 |
+| `a1.c:4-5` and `a1b.c:6-7` (two tentative / tentative + definition) | **C++20** | | | | | | **error #3369 "variable has already been defined"**, no IL (`a1.c++20.err`: `a1.c line 5: error #3369: variable "g4" has already been`; `a1b.c++20.err` for `u`) |
+
+Facts the encoder reads:
+- **Linkage:** `source_corresp.name_linkage == nlk_internal` for `static`, an unnamed namespace, and a C++ `const` (which is also `storage_class sc_static`); otherwise external. External is `nlk_external` in C but **`nlk_cplusplus_external` in C++, except that `extern "C" int ec = 1;` in C++ has `name_linkage C`** (`a1n.cpp:9`), so question 84's "external in C++" must be decided by `il_header.source_language`, not by `name_linkage == nlk_external`.
+- **Storage class:** `storage_class` is the effective one (`sc_static` for an unnamed-namespace variable and a C++ `const`, `sc_unspecified` for `extern int h7 = 7;`, whose written `extern` is only in `declared_storage_class`).
+- **Defined in this unit:** `declared_type != NULL` (il_def.h:11814: "NULL if there is no defining declaration"; the three extern-only declarations have `declared_type: NULL` and every defined one has a type). Equivalent in all probes: `!(storage_class == sc_extern && init_kind == initk_none)`. The current 0017 test `init_kind == initk_none && storage_class == sc_extern` (`encode.cpp:1749`) is right for all of these.
+- **A tentative definition and a C++ default-initialized definition have the same IL** (`initk_none`, `declared_type` set, `sc_unspecified`/`sc_static`) in both languages; both are zero-initialized (static storage). `initk_zero` was never produced for a scalar (`int br = {0}; int be = {};`, `int br{};` are `initk_static` constant 0; il_def.h:11021 says it "also serves to distinguish a tentative definition", but not in this configuration).
+- **One variable entity per object:** two tentative definitions, `extern` then a definition (also a block-scope `extern int late;` before the file-scope definition, `a9b.c:1-2`: `cons.py a9b.c23.il late` gives the one variable `initk_static 4`, position 2:5), tentative then initialized: a single `a_variable`; its `decl_position` is the first tentative definition or **the defining declaration** (`g5` 7:5, `t` 5:5, `u` 7:5), not the first appearance. The other declarations are `src-seq-secondary-decl` entries (the same type as routines' secondary declarations in `il_query.cpp:94`, which today collects only routines).
+- **Unreferenced globals are kept:** `a9.c:1` `int unused = 5;` `needed: TRUE`; `a9.c:2` `static int us = 1;` `referenced: FALSE`, `needed: FALSE`, still a variable of the file scope with `init_kind initk_static`.
+- **`const` against mutable** (what `is_const_object`, `encode.cpp:1627`, reads: `f_get_type_qualifiers(v->type, TRUE) & TQ_CONST` or `v->is_constexpr`): `a1b.c:8` `const int k` type `const int` (`tk_typeref` over `int`); `:9` `int *const cp = 0` type `int *const`, a **const object** (kind `tk_typeref` with `qualifiers: const`, il_def.h:6249 `a_type_qualifier`), mutable `const int *pc` (`:10`) type `const int *` is a `tk_pointer` whose pointee is const: **mutable**; `static const int sk` (`:11`) `sc_static`, const. The `volatile int gv` type prints `volatile int`, `_Atomic int ga` prints `_Atomic(int)`, `_Thread_local int tl` has `is_thread_local: TRUE` (`a9.c:3-5`, C23); `int arr[3]` `int [3]`, `struct S gs` `struct S`, `void *vp` `void *` all `initk_none` (`a9.c:6-8`).
+- **Position:** `source_corresp.decl_position` (`seq`, `column`) is the identifier's position; for `g1` it is `1:5` (the column of `g1`), not of the specifier.
+
+#### A2. Initializer constants **PASS: `initializer.constant` (printed `constant:`), kinds `ck_integer` / `ck_address`; null is `ck_integer`**
+
+Probe `a2.c` (both modes), `python3 cons.py a2.c23.il <names>`; fields of `a_constant` (il_def.h:3627 `ck_integer`, :3645 `ck_address`): `kind`, `type`, `integer_value` (printed with a suffix: `7U`, `-1L`), `expr` (the original expression when the value was computed), and for `ck_address`: `address.kind` (:3685 `abk_variable`, `abk_constant`), `variable`, `address.offset` (bytes, :5216), `subobject_path` (:5219). Every line below is the variable's `init_kind: initk_static` unless stated:
+
+| Probe | C23 | C++20 |
+|---|---|---|
+| `a2.c:5` `int ga = 2 + 3;` | `ck_integer` 5, `expr:` present | same |
+| `u = 7u` | `ck_integer`, `integer_value: 7U`, type `unsigned int` | same |
+| `bool b = true` (C: `_Bool b = 1`) | `ck_integer` text `(bool)1U`, type `bool`, `orig_type: int` | `ck_integer` text `true`, type `bool` |
+| `enum E e = B;` | `ck_integer` text `(enum E)1U`, type `enum E` | `ck_integer` text `B`, type `E` |
+| `char c = 'a';` | `ck_integer` text `(char)97`, type `char`, `orig_type: int` | `ck_integer` text `'a'` |
+| `long lg = -1L`, `int gneg = -5` | `ck_integer` `-1L`, `-5` | same |
+| `int *gp1 = &h0;` (h0 defined before) | `ck_address`, `abk_variable`, `variable: h0`, `address.offset: 0`, `subobject_path: NULL`, `null_pointer_constant_ruled_out: TRUE` | same |
+| `int *gp2 = &h1;` (`extern int h1;` before, defined after) | `ck_address`, `variable: h1`, **the same `a_variable` entity as the later definition** (`@79b16a80e0` in both lines of `gvars.py`), offset 0 | same |
+| `int *gp3 = 0;` / `(int *)0` | `ck_integer` 0, `type: int *`, `is_simple_zero: TRUE` | same |
+| `int *gp4 = NULL;` | `ck_integer` 0 (`(int *)0`, `explicit_cast_applied`), `type: int *` | `ck_integer` 0 (`(int *)__null`), `null_keyword: TRUE`, no `is_simple_zero` |
+| `int *np = nullptr;` (`a2b.c:3`) | `ck_integer` 0 `(int *)nullptr` | same |
+| `int *gp5;` | `init_kind: initk_none`, no constant | same |
+| `int **gpp = &gp1;` | `ck_address`, `variable: gp1`, type `int **`, offset 0 | same |
+| `int *gp6 = &h0 + 1;` | `ck_address`, `variable: h0`, **`address.offset: 4`, `subobject_path` `is_offset`, `ptr_offset: 1`** (H5) | same |
+| `int *gp10 = &h1 - 0;` | `ck_address`, `variable: h1`, offset 0, `subobject_path` `ptr_offset: 0` (H5) | same |
+| `const int k = 5; int *gp7 = (int *)&k;` | `ck_address`, `variable: k`, type `int *` (H3) | same |
+| `const int *gp8 = &k;` | `ck_address`, `variable: k`, type `const int *` | same |
+| `const char *s = "x";` | `ck_address`, **`address.kind: abk_constant`** with a `constant:` of the string, type `const char *` | same |
+| `int (*fp)(void) = 0;` | `ck_integer` 0, pointer type, `is_simple_zero: TRUE` | same |
+| `int *const cpz = &h;` (`a2b.c:7`) | `ck_address`, `variable: h` (a const-qualified pointer is a const object, so under 0017) | same |
+| `int br = {0};` | `ck_integer` 0, `is_simple_zero: TRUE` | same (`int br{}` has no `is_simple_zero`) |
+| `int be = {};` (C23) | `ck_integer` 0 | same |
+
+`ck_ptr_to_member` did not occur (no pointer to member was written). **Fields to read:** `v->init_kind`, `v->initializer.constant` (`constant->kind`, `constant->type`, `constant->variant.address.kind`, `.variant.address.variant.variable`, `.offset`, `.subobject_path`), **and `constant->type` against the variable's type** (H3, H4). A global's own `address_taken` is set by an `&g` initializer elsewhere (`h0`, `h1`, `gp1`, `k` have `address_taken: TRUE` in `a2.c`, `gpp` does not).
+
+#### A3. C++ initializers that are not constants **PASS**
+
+Probe `a3x.cpp` (C++20), `cons.py a3x.c++20.il`:
+- `a3x.cpp:3` `int g1 = f();`: `init_kind: initk_dynamic`, `dynamic: file-scope dynamic-init`, whose `kind: dik_expression` and `expression:` the call (il_def.h:3962 `a_dynamic_init_kind`, :11052 the union's `dynamic`); no `constant:`. `a3x.cpp:8` `int g5 = h;` (h a mutable global) and `:9` `int *g6 = new int(3);` are `initk_dynamic` too (`g5`, `g6`).
+- `a3x.cpp:4` `int g2 = sizeof(int);` is `initk_static`, `ck_integer` 4, `expr:` a generated `eok_cast` over the constant (`type_kind: tk_integer`); `:6` `2 * sizeof(long)` is 16; `:10` `(int)sizeof(char) + 1` is 2. **`:5` `int g3 = cf();` (a `constexpr` function) is `initk_static` with the folded value 4 (H7).**
+- C23: `a3.c:2` `int g1 = f();` is `error #59: function call is not allowed in a constant expression`, and `a3.c:5` `int g5 = h;` is `error #28: expression must have a constant value`; no IL, so in C a dynamic initializer cannot reach the encoder.
+
+#### A4. Uses in code **PASS; see H1, H2, H8**
+
+Probe `a4.c`, `a4b.c`, `etree.py`. A read `g` is `enk_variable g` with `orig_lvalue_type: int` (`a4.c:5`) and no `is_lvalue` (an rvalue, not folded to the initial value, as P51 says for locals); a write target and `g++`/`++g` operand are `enk_variable g {int L}` (`a4.c:6` `eok_assign(enk_variable g {int L}, const 1)`, `:7` `eok_post_incr(enk_variable g {int L})`, `:8` `eok_pre_incr`, `:9` `eok_add_assign`); **C++20 differs only in the `{...:L}` flag of the assign/compound-assign result and the `bool` wrapper of comparisons, as in P51/P62**. `*gp` (a pointer global read) is `eok_indirect(enk_variable gp orig_lvalue_type=int *)` (`a4.c:17`); `gp = &h; *gp = 7;` (`:18`) is `eok_assign(enk_variable gp {int * L}, enk_constant ck_address ... variable=h ...)` and `eok_assign(eok_indirect(enk_variable gp) {int L}, const 7)`. `&g` forms: H1. `callee(&g)` is the constant (`:13`). `address_taken` is `TRUE` on `g` in every probe that writes `&g` in code (`a4.c`), **and not reliable otherwise** (A5, A9 note).
+
+#### A5. Uses in contracts **PASS: everything reaches the IL; `old(g)` differs by mode**
+
+Probes `a5.c` (C spellings, run in both modes) and `a5x.cpp` (`cerastes::`), `--cerastes_walk` (`a5.c23.walk`, `a5.c++20.walk`, `a5x.c++20.walk`). A global in a contract is `var g: int decl=L2:5` (the walker prints the declaration position; there is no `param`/`binder`), an `enk_variable` whose variable has `enclosing_routine NULL`.
+- **C `cerastes_owns(g)` / `cerastes_reads(g)` (`a5.c:5`, `:6`):** `op eok_call type=bool ( routine cerastes_owns: bool (*)(...) , var g: int decl=L2:5 )`; **the argument is the bare `var g`, an rvalue, unlike `owns(*p)` whose argument is `op eok_indirect`**. In C++ mode the same C spelling prints the same.
+- **C++ `cerastes::owns(g)` (`a5x.cpp:5`):** `routine cerastes::owns args <T=int>: bool (*)(const int &) noexcept` over `op eok_reference_to type=const int & ( op eok_lvalue_adjust type=const int lvalue ( var g: int decl=L2:5 lvalue ) )`; `cerastes::reads` the same; a pointer global `cerastes::owns(gp)` has `<T=int *>` and `int *const &` over `eok_lvalue_adjust type=int *const lvalue ( var gp lvalue )` (`a5x.cpp:17`).
+- **`old(g)`, C (`a5.c:9`, `cerastes_old(g)` = `(*(__typeof__(g)*)cerastes_old_(&(g)))`):** `op eok_indirect type=int ( op eok_cast type=int * cast=c-style ( op eok_call type=const void * routine cerastes_old_ ( const (const void *)(&g) type=const void * )))`: **the `&g` is an `enk_constant`, `ck_address`, `address.kind abk_variable`, `variable: g`, `address.offset: 0`, `subobject_path: NULL`, type `const void *`** (`a5.c23.il` `constant@7b6e076820`, with `expr:` the cast tree) in both modes. For a parameter `old(*p)` has no such constant (P62 A6).
+- **`old(g)`, C++ (`a5x.cpp:9`):** `op eok_ref_indirect type=int ( op eok_call type=const int & routine cerastes::old args <T=int> ( op eok_reference_to ( op eok_lvalue_adjust type=const int lvalue ( var g lvalue ))))`: the plain variable under `lvalue_adjust`, no address constant.
+- **`g > 0`, `g == ...`, `g < 100`** (`a5.c:8`, `:11`): `op eok_gt ( var g , const 0 )`, plain `var g` rvalue operands; **`CERASTES_DECREASES(g)` (`a5.c:15`, `a5x.cpp:14`): `attr [[cerastes::decreases]] arg 1 var g: int decl=L2:5 lvalue`** (the only form of `g` carrying `lvalue` in C).
+- **`CERASTES_INVARIANT(g >= 0)` (`a5.c:21`):** `stmt stmk_while @ L22 attr [[cerastes::invariant]] arg 1 op eok_ge ( var g , const 0 )`, both modes (same shape as P59 for locals).
+- **`cerastes_owns(gp) && cerastes_owns(*gp)` (`a5.c:25`):** `op eok_call cerastes_owns ( var gp: int * decl=L4:6 )` and `op eok_call cerastes_owns ( op eok_indirect type=int ( var gp ) )` (C++ `T=int *` and `T=int`, `eok_indirect type=int lvalue ( var gp )`), the P62 A7 shape with a global base.
+- **`cerastes_live(&g)` (C spelling, `a5.c:28`):** `op eok_address_of type=int * ( var g lvalue )` (both modes). C++ `cerastes::live(&g)` (`a5x.cpp:20`) prints `const (const int *)(&g) type=const int *`, the address constant (H1's second shape under a conversion). `cerastes::live(g)` is `error #304` (`live` takes a pointer).
+- **`cerastes_owns(*&g)`** (`a5.c:29`): `eok_indirect ( eok_address_of ( var g lvalue ) )`.
+- **NOTE (`address_taken` and contracts):** `a5.c23.il`/`a5.c++20.il` have **no** `address_taken` on `g` (although `&(g)` and `&g` appear in `old(g)` and `live(&g)`), `h` `TRUE` (from `gp = &h`); `a5x.c++20.il` has `address_taken: TRUE` on `g` and `gp` (reference binding and `live(&g)`). So `address_taken` is not a reliable flag for a global: it does not need to be, since every global and static local is a block.
+
+#### A6. `static` locals **PASS: readable; the initializer sits in a scope list (H6)**
+
+Probes `a6.c` (C23), `a6b.c` (both modes; `a6.c` has `_Bool`, an error in C++20), `a6x.cpp`; `python3 slocals.py <dump>`; `python3 sttree.py`. Facts, **identical in C23 and C++20 for the shared shapes** (`diff` of `slocals.py a6b.c23.il` and `a6b.c++20.il` is empty; the trees differ only in `{bool}` against `{int}` of conditions):
+- **Telling it apart from an automatic:** `source_corresp.enclosing_routine` is the routine (`file-scope routine: f`), `is_local_to_function: TRUE`, `parent_via_local_scope_ref: TRUE` (so `parent_scope` is NULL, il_def.h:3407), **`name_linkage: no`**, **`storage_class: sc_static`** (an automatic is `sc_auto`: `etree.py` prints `storage_class=sc_auto` for `n`, `q`, `x`). Its position is its own declaration (`f::count 1:26`, `f3::p 3:48`), not the function's. It is a variable in the routine's `scope-orphaned-list-header` (`orphaned_variables: ... count`, il_def.h:16978), and a `stmk_decl` in the body's statement list (`sttree.py a6b.c23.il f3`: two `stmk_decl` for `c3` and `p`), with no `stmk_init` (an automatic's initializer `int x = ca;` has a `stmk_init`, `f6`).
+- **Initializer** (H6): `a6.c:1` `static int count = 0;` `init_kind: initk_static`, constant 0, `is_simple_zero`; `a6.c:2` `static int c2;` `initk_none` (zero, static storage); `a6.c:3` `static int *p = &c3;` `initk_function_local`, entry `constant=&c3 ck=ck_address ... variable=c3 off=0`; `a6.c:5` `static int c5 = 2 + 3;` `initk_function_local`, entry `constant=5`; `a6.c:7` `static const int k = 9;` `initk_static`, and **a use of `k` is folded to `enk_constant ck_integer integer_value=9 <orig expr: enk_variable k>`** (`etree.py a6.c23.il f7`); `a6x.cpp:2` `static int s = ext();` `initk_function_local`, entry `init_kind=initk_dynamic`, `dik_expression`; `a6x.cpp:9` `static int *np = nullptr;` entry `constant=(int *)nullptr ck_integer`.
+- **`thread_local`:** `a6.c:11` `static _Thread_local int t` and `a6x.cpp:4` `static thread_local int t`: `is_thread_local: TRUE`, `storage_class: sc_static`, `init_kind: initk_static`.
+- **Recursion:** `a6.c:4` `f4(int n)` with `static int c4 = 1;` and the recursive call: `c4` is one variable (`initk_static`), `etree.py` shows `eok_call(routine f4 ...)` between its reads and the write; nothing in the IL ties the call to the static.
+- **Address flag:** `address_taken: TRUE` on a static local whose `&` is written (`f3::c3` through the `static int *p = &c3` entry, `f9::v` through `int *q = &v`), `-` otherwise; meaningful for code, not needed (every static local is a block).
+- **Several statics in one function, same name:** `a6.c:8` `f8` has two variables named `u1` in nested blocks (`slocals.py`: two `f8::u1` lines, positions 8:27 and 8:48); EDG warns `#177-D variable "u1" was declared but never referenced` for the outer. `GB_<name>__<id>` needs the id, as the plan has.
+
+#### A7. `main` **PASS; `is_main` (`encode.cpp:511`) does match `ns::main`**
+
+Probes `a7.c` (C23 and C++20), `a7n.cpp` (global `main`, `ns::main`, `S::main`), `a7b.cpp`, `a7c.cpp`; `python3 routines.py <dump> main`:
+```
+a7.c23    main pos=1:5  name_linkage=C   is_class_member=- defined=TRUE parent_scope.kind=sck_file       type=int (void)
+a7.c++20  main pos=1:5  name_linkage=C++ is_class_member=- defined=TRUE parent_scope.kind=sck_file       type=int ()
+a7n.cpp   main pos=1:20 name_linkage=C++ is_class_member=- defined=TRUE parent_scope.kind=sck_namespace assoc_namespace=ns
+a7n.cpp   main pos=2:23 name_linkage=C++ is_class_member=TRUE defined=TRUE parent_scope.kind=sck_class_struct_union   (struct S { static int main(); })
+a7n.cpp   main pos=3:5  name_linkage=C++ is_class_member=- defined=TRUE parent_scope.kind=sck_file
+a7b.cpp:1 extern "C" { int main(int, char **) {...} }   name_linkage=C++ (not C), warning #2949-D, parent_scope.kind=sck_file
+a7b.cpp:2 namespace ns { int main(); }                  parent_scope.kind=sck_namespace assoc_namespace=ns, defined=FALSE
+```
+`is_main` reads `source_corresp.name == "main"` and `!source_corresp.is_class_member` only, so it is true for `ns::main` (the `--cerastes_walk` lists it as `routine ns::main plain body @ L1:20`, `a7n.c++20.walk`). **The global-namespace `main` is the routine with `name == "main"`, `is_class_member` false and `source_corresp.parent_scope->kind == sck_file`** (il_def.h:18214, :3302; `ns::main` is `sck_namespace`, `S::main` is a class member); `type` is `int (void)` in C and `int ()` in C++ for the no-parameter form, `int (int, char **)` for the other.
+
+#### A8. Compiler matrix of same-object unsequenced shapes on a global **PASS: results below (rule of 0039 item 3: a warning at no flag or `-Wall` in some compiler and mode)**
+
+`a8/gen.py` writes `a8/src/<id>.{ext,stat}.{c,cpp}` (one shape in `int fn(...)` with `r = (int)(<shape>);`, `g` external or `static`, `int *gp = &g;`, `p` a parameter where the shape uses it, `int bump(void) { g += 1; return g; }`), runs Apple clang 21.0.0 (`clang`/`clang++` of `/usr/bin`; `xcrun --find clang` is the Command Line Tools'), Homebrew GCC 16.2.0 (`gcc-16`, `g++-16`), `-std=c23`/`-std=c++20`, tiers D (none), A (`-Wall`), E (`-Wall -Wextra`), `-fsyntax-only` and for GCC also `-O2 -c -o /dev/null` at D (`a8/results.json`, `a8/matrix.md`, `a8/raw/<id>.<link>.<compiler>.<tier>.<syntax|O2>.txt`, 504 runs). No run produced an error; external and `static` `g` give identical cells for every shape.
+
+| Shape | clang C | clang C++ | gcc C | g++ C++ | Verdict (union) |
+|---|---|---|---|---|---|
+| G1 `g++ + g`, G3 `g + g++`, G4 `(g = 1) + g` | `-Wunsequenced` at D, A, E | `-Wunsequenced` at D, A, E | `-Wsequence-point` at A, E | `-Wsequence-point` at A, E | **reject** |
+| G2 `g = g++`, G11 `g = (g = 1)` | `-Wunsequenced` at D | **silent** | `-Wsequence-point` A, E | `-Wsequence-point` A, E | **reject** (as P61's A2: clang C++ silent, g++ warns) |
+| G12 `g += g++` | `-Wunsequenced` at D | silent | `-Wsequence-point` A, E | **silent** | **reject** (clang C, gcc C) |
+| G5 `*&g + g++`, G18 `(*&g = 1) + g` | silent | silent | `-Wsequence-point` A, E | **silent** | **reject** (gcc C only: GCC resolves `*&g` to `g` in C, not in C++) |
+| G6 `g++ + *p`, G7 `*p + g++`, G10 `*p = g++` (p a parameter), G8 `g++ + *gp`, G9 `*gp + g++` (`gp = &g`) | silent | silent | silent | silent | path-precise `unsequenced` only |
+| G13 `g + bump()`, G14 `bump() + g`, G15 `g++ + bump()`, G16 `bump() + bump()`, G17 `g + g` | silent | silent | silent | silent | not rejected as a shape (the call rule of 0020/0039 item 4 applies) |
+
+GCC `-O2 -c` at D: silent for every shape (`-Wsequence-point` is `-Wall` only). Nothing is `-Wextra`-only. Same classification as locals in P61 (A1-A10) for G1-G4, G2, G11; the new fact is G5/G18 (`*&g`, gcc-C only) and that G8/G9 (`*gp`) behave like B shapes (silent), so item 10's "`*&g` read as `g`" rejects the G5/G18 shapes in both modes (by the union), and `g++ + *p`/`*gp` is `unsequenced` path-precisely only.
+
+#### A9. Other surprises (notes)
+
+- **N1. A block-scope `extern int ext_in_block;` is a file-scope `a_variable`** (`enclosing_routine: NULL`, `storage_class: sc_extern`, `declared_type: NULL`, `a9.c:10`), indistinguishable from a file-scope `extern int x;` by the variable; it is a `stmk_decl` in the function (`encode.cpp:3016` rejects it there today). With a definition later in the file it is the same entity as the definition (`a9b.c`).
+- **N2. `volatile`, `_Atomic`, `_Thread_local` globals are plain `a_variable` entries** whose type prints `volatile int` / `_Atomic(int)` and `is_thread_local: TRUE` (`a9.c:3-5`); array, struct and `void *` globals have `initk_none` and their types (`a9.c:6-8`); the existing type check (`vtype`) sees them first.
+- **N3. A C `static` global that is never referenced is still an `a_variable` of the file scope** (`referenced: FALSE`, `needed: FALSE`, A1); whether `ents.variables` (il_query.h:66, "those not declared inside a routine") lists it was not probed here.
+- **N4. C `int g = 0;` and `int g;` differ in IL** only by `init_kind` (`initk_static` with `is_simple_zero` against `initk_none`); both are 0 at start (C 6.7.10p10).
+- **N5. `inline int in = 1;` (C++17)** has `is_inline: TRUE` and external linkage (`C++`); it is defined once with that value, like any external C++ global for question 84.
+- **N6. Folded `ck_integer` reads of `const` objects:** a use of a `const` global/static local (`static const int k = 9;`, `a6.c:7`) is `enk_constant ck_integer` with `<orig expr: enk_variable k>`, as 0017 item 5 already handles for named constants.
+
+#### Check against record 0041 items 2-11
+
+No CONTRADICTION that needs the owner; the following need to be in the record or the code:
+1. **Item 6 (`&g` is `GlobalAddr`)** and item 5 (reader): read both node shapes of `&g` (H1), the const-pointer fold (H2), and compare the address constant's `type` with its target (H3); a null is a `ck_integer 0` of pointer type (H4); `address.offset != 0` rejects (H5). A static local's address in a function (`static int *p = &c3`) is also a `ck_address` to a variable that is not a global (`variable: c3`, a static local), so item 5's "an accepted global" must include static locals for in-function initializers.
+2. **Item 2 and question 84:** use `declared_type != NULL` (not only `sc_extern`/`initk_none`) for "defined in this unit"; "external in C++" is `source_language != C && name_linkage != nlk_internal` (an `extern "C"` variable in C++ has `name_linkage C`); an unnamed-namespace variable and a C++ `const` are `nlk_internal`/`sc_static`.
+3. **Item 11:** the initializer of a static local is in the scope's `local_static_variable_inits` for `initk_function_local` (H6), and `is_thread_local` is a variable flag.
+4. **Item 10:** the Sequencer's rejection list for globals is G1-G5, G11, G12, G18 (A8); G6-G10 and the call shapes are not rejected as shapes.
+5. **Item 7:** `old(g)` is a constant `&g` under `cerastes_old_` in C (both modes), a plain `var g` under `cerastes::old` in C++ (A5).
+
+Not covered by P63 (no need for the record's items): a global of enum or `bool` type in contracts beyond `g > 0`; `owns` on `bool`/`char` globals; `reads(g)` of a `const` global; locals shadowing a global; multi-file `extern` declarations in system headers (`in_verified_file`).
+
+### S31: Silicon on `program_start`, global atoms, implicit `static` atoms, global places in loops and the liveness disjunct (record 0041 items 4–12) **PASS for (a)–(e); one finding for loops (F1), none an unsound frame**
+
+Hand-written targets in the shape record 0041 says the encoder emits (test-mutator; `tests/viper-smoke/memory/s31_*.vpr`,
+17 files, each with its `expect:` lines; `python3 scripts/run_tests.py` 17 passed): the `Block` domain of
+`memory_prelude_text` with `unique function GB_<name>__<id>(): Block` inside it; a bodyless `program_start()` with the
+trusted-contract tag, its first `ensures` row the global facts (`len(GB_g()) == 1 && lvloc(GB_g()) == loc(GB_g(), -2)`),
+then one row per global; every other method takes the facts as its first `requires`, `main` none.
+- (a) `s31_a_program_start` verifies (two globals read and written by `main`, `&g != &h` with no permission held);
+  `s31_a_vacuity_fail` (after `program_start`, an `alloc_int` call and the facts) and `s31_a_vacuity_facts_fail` fail
+  exactly their `assert false`: the trusted contract and the facts are consistent with the four axioms and `unique`.
+- (b) `s31_b_global_atoms` verifies (a callee with `owns(g)` and one ghost amount, a `reads(g)` callee whose caller keeps
+  the value, a callee not naming `g` as a frame, `two(p)` with `owns(*p) && owns(g)` and its `__wf` methods); the twins
+  fail once each: `s31_b_havoc_fail` (a callee owning `g` with no `ensures` on it), `s31_b_noperm_fail`,
+  `s31_b_reads_write_fail`, `s31_b_separation_fail` (`two(&g)`: the separation check at the call).
+- (c) `s31_c_static_recursion` verifies (the implicit `owns(s)` through `f`, a recursive `r` reaching `f`, and `main`);
+  `s31_c_static_overflow_fail` (an unbounded `s++`, the value unknown on entry) and `s31_c_static_unheld_fail` (a caller
+  without the implicit atom: `permission` at the call, the fail-closed direction of a missed edge) fail once each.
+- (d) `s31_d_global_loop` and `s31_d_global_loop_ptr` verify; their twins fail once each. **F1:** a loop in a function
+  holding `owns(*p) && owns(g)` fails "invariant might not hold on entry" for the liveness cell unless the loop head
+  case-splits `lvloc(block_of(p)) == lvloc(GB_g())` and guards the second place's liveness conjunct, as 0038 item 3 does
+  for two parameter places (record 0041 item 8's N4 bullet: loops included).
+- (e) `s31_e_liveness_disjunct` verifies (`&g` compared with a parameter in a function holding nothing);
+  `s31_e_liveness_disjunct_fail` fails only the liveness check of a pointer whose block is not a global's. Cost, at load
+  averages 64–274: with 2, 8 and 20 globals about 4.5 s, 4.7–5.2 s and 9.5–10.8 s; without the disjunct 4.8–5.6 s
+  (`address_compare`'s baseline 6.0 s at similar load): the disjunct is kept (record 0041 item 6).

@@ -1,0 +1,60 @@
+// expect: error assert:assertion.false @ L57
+// S31 (b) twin: reads(g) gives a fraction of the value and flag cells, so the write check (full permission) in the body fails.
+// S31 (b) twin: a reads(g) callee writes g
+// Shape: what the encoder will emit for a unit with globals (decision 0041 items 4-12): the memory prelude of src/viper/prelude.cpp
+// (memory_prelude_text) with a `unique function GB_<name>__<id>(): Block` per global inside `domain Block`, a bodyless program_start()
+// (one ensures row per global, in declaration order, preceded by the pure global facts), and the facts as the first requires of every other method.
+
+// the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  unique function GB_g__1(): Block
+  unique function GB_h__2(): Block
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_int() returns (r: Ref)
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)
+  ensures ((((lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(r.v_int)) && acc(r.d_int)) && (!r.d_int)) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract program start: every global and static local holds its initial value with full permission, and its liveness cell (decision 0041 item 4); the pure facts first
+method program_start()
+  ensures ((len(GB_g__1()) == 1) && (lvloc(GB_g__1()) == loc(GB_g__1(), (-2)))) && ((len(GB_h__2()) == 1) && (lvloc(GB_h__2()) == loc(GB_h__2(), (-2))))
+  ensures (((acc(loc(GB_g__1(), 0).v_int) && acc(loc(GB_g__1(), 0).d_int)) && loc(GB_g__1(), 0).d_int) && (loc(GB_g__1(), 0).v_int == 3)) && acc(lvloc(GB_g__1()).lv)
+  ensures (((acc(loc(GB_h__2(), 0).v_int) && acc(loc(GB_h__2(), 0).d_int)) && loc(GB_h__2(), 0).d_int) && (loc(GB_h__2(), 0).v_int == 7)) && acc(lvloc(GB_h__2()).lv)
+  decreases _
+
+// C/C++ function `bad`: requires(reads(g)) ensures(reads(g)), the body writes g
+method f_bad__0(amt_0: Perm)
+  requires ((len(GB_g__1()) == 1) && (lvloc(GB_g__1()) == loc(GB_g__1(), (-2)))) && ((len(GB_h__2()) == 1) && (lvloc(GB_h__2()) == loc(GB_h__2(), (-2))))
+  requires (none < amt_0) && (amt_0 < write)
+  requires ((((((((loc(GB_g__1(), 0) != null) && ((loc(GB_g__1(), 0) == null) || (((loc(GB_g__1(), 0) == loc(block_of(loc(GB_g__1(), 0)), offset_of(loc(GB_g__1(), 0)))) && (0 <= offset_of(loc(GB_g__1(), 0)))) && (offset_of(loc(GB_g__1(), 0)) <= len(block_of(loc(GB_g__1(), 0))))))) && (offset_of(loc(GB_g__1(), 0)) < len(block_of(loc(GB_g__1(), 0))))) && acc(loc(GB_g__1(), 0).v_int, amt_0)) && acc(loc(GB_g__1(), 0).d_int, amt_0)) && loc(GB_g__1(), 0).d_int) && (((-2147483648) <= loc(GB_g__1(), 0).v_int) && (loc(GB_g__1(), 0).v_int <= 2147483647))) && acc(lvloc(block_of(loc(GB_g__1(), 0))).lv, amt_0))
+  ensures ((((((((loc(GB_g__1(), 0) != null) && ((loc(GB_g__1(), 0) == null) || (((loc(GB_g__1(), 0) == loc(block_of(loc(GB_g__1(), 0)), offset_of(loc(GB_g__1(), 0)))) && (0 <= offset_of(loc(GB_g__1(), 0)))) && (offset_of(loc(GB_g__1(), 0)) <= len(block_of(loc(GB_g__1(), 0))))))) && (offset_of(loc(GB_g__1(), 0)) < len(block_of(loc(GB_g__1(), 0))))) && acc(loc(GB_g__1(), 0).v_int, amt_0)) && acc(loc(GB_g__1(), 0).d_int, amt_0)) && loc(GB_g__1(), 0).d_int) && (((-2147483648) <= loc(GB_g__1(), 0).v_int) && (loc(GB_g__1(), 0).v_int <= 2147483647))) && acc(lvloc(block_of(loc(GB_g__1(), 0))).lv, amt_0))
+  decreases
+{
+  assert loc(GB_g__1(), 0) != null
+  assert !((perm(loc(GB_g__1(), 0).v_int) != write) || (perm(loc(GB_g__1(), 0).d_int) != write)) // FAIL
+  loc(GB_g__1(), 0).v_int := 5
+  loc(GB_g__1(), 0).d_int := true
+}

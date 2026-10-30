@@ -431,6 +431,22 @@ body, after the loop and after `l_brk`. Each atom is also a framing `Place` of `
 a_v > none`, and an `Atom` node in `CMode::Inv` lowers to `true` (its meaning is in those rows). 0037 item 8's per-call
 splits also run against the enclosing loops' written `reads` places.
 
+**Globals and `static` locals (M4.5b2a, decision 0041).** A mutable global or `static` local is a `vir::Global` in
+`Program` (not a `Var`: `Var::id` is unique per function), and `&g` is the expression `GlobalAddr`; a read is
+`Deref(GlobalAddr)`, a write a `Store`/`StoreE` through it, an atom `Atom(a = GlobalAddr)`. Atom sites are keyed by
+`site_key` (a formal's index, `-1` the result, `kGlobalSiteBase + id` a global) with the receiver `site_ref`
+(`loc(GB_g__<id>(), 0)` for a global, which has no argument at a call). Every method of a unit with globals except the
+entry's takes the facts `len(GB_g()) == 1 && lvloc(GB_g()) == loc(GB_g(), -2)` as its first `requires`; the entry
+(`Program::entry`, the file-scope `main`) calls `program_start()` first. A global's initializer as written is checked in
+every prologue, as a named constant's is (no value guard for an unknown value). A use of a pointer gains the liveness
+disjunct `lvloc(block_of(p)) == lvloc(GB_g())` per global (an operand that is `GlobalAddr` itself has no liveness
+check). In loops a held global (from written and implicit `requires` atoms; every global in the entry) is an automatic
+place `kl_GB_g__<id>__<loop>`; a write by name reaches only that global, a write through a pointer every place of the
+field. No separation check, case split or `__wf` fact is emitted between two globals (`unique` blocks); a global and a
+`*p` atom of one field are split and guarded as two parameter places are. A `static` local's declaration emits
+nothing; the encoder appends the implicit `owns(s)` (`implicit_atom`) to its function and, by reverse reachability over
+the call edges, to every caller except the entry. `__wf` ghosts of a global read are `hv_g<id>_pre`/`_post`.
+
 ## 4. Viper shape
 
 ```
@@ -466,6 +482,11 @@ then one trusted method per cell type, `alloc_<t>() returns (r: Ref)`, whose `en
 rows at the first cell of that type). `<t>` is `bool`, `schar`/`uchar`, `short`/`ushort`, `int`/`uint`, `long`/`ulong`,
 `i128`/`u128` (else `i<bits>`/`u<bits>`), or `enum_<n>_<name>` for an enumeration (`_e` appended when the name would end
 in `__<digits>`). One pair per VIR type: `long` and `long long` share one (0032 items 3 and 5 say why that is sound).
+With globals (0041 item 4), the domain also holds one `unique function GB_<name>__<id>(): Block` per global and
+`static` local (the text is unchanged without them), and a trusted bodyless `program_start()` follows the `alloc_<t>`
+methods in every unit with a global: its first `ensures` row is the global facts, then one row per global, positioned at
+its declaration (`acc` of the value and flag cells, the flag, the value or a range/`WF` row for an unknown one, `acc` of
+the liveness cell), ending in `decreases _`; `lint_viper.py`'s `lint_globals` pins it.
 
 Names: every identifier has a prefix that says what it is: functions `f_<name>__<id>` (and `...__wf`), formals
 `p_<name>__<k>`, locals `v_<name>__<id>`, temporaries `t__<k>`, the result `res`, labels `l_end`, prelude

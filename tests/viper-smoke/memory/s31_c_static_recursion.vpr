@@ -1,0 +1,176 @@
+// expect: verified
+// S31 (c), decision 0041 item 12: the static local `count` of f is the block GB_f__count__1; f and r (which calls f and itself) get an implicit owns(count)
+// (a ghost amount for the liveness cell) in requires and ensures; main holds it from program_start. The value is unknown on each entry, f's bound makes count++ safe.
+// No inhale: the recursion passes half of the held liveness amount to each callee.
+// S31 (c): an implicit owns of a static local through f, a recursive r that reaches f, and main
+// Shape: what the encoder will emit for a unit with globals (decision 0041 items 4-12): the memory prelude of src/viper/prelude.cpp
+// (memory_prelude_text) with a `unique function GB_<name>__<id>(): Block` per global inside `domain Block`, a bodyless program_start()
+// (one ensures row per global, in declaration order, preceded by the pure global facts), and the facts as the first requires of every other method.
+
+// the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  unique function GB_f__count__1(): Block
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_int() returns (r: Ref)
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)
+  ensures ((((lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(r.v_int)) && acc(r.d_int)) && (!r.d_int)) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract program start: every global and static local holds its initial value with full permission, and its liveness cell (decision 0041 item 4); the pure facts first
+method program_start()
+  ensures ((len(GB_f__count__1()) == 1) && (lvloc(GB_f__count__1()) == loc(GB_f__count__1(), (-2))))
+  ensures (((acc(loc(GB_f__count__1(), 0).v_int) && acc(loc(GB_f__count__1(), 0).d_int)) && loc(GB_f__count__1(), 0).d_int) && (loc(GB_f__count__1(), 0).v_int == 0)) && acc(lvloc(GB_f__count__1()).lv)
+  decreases _
+
+// C/C++ function `f`: static int count = 0; if (count < 100) count++;   (the implicit atom owns(count) in requires and ensures, decision 0041 item 12)
+method f_f__0(amt_0: Perm)
+  requires ((len(GB_f__count__1()) == 1) && (lvloc(GB_f__count__1()) == loc(GB_f__count__1(), (-2))))
+  requires (none < amt_0) && (amt_0 < write)
+  requires ((((((((loc(GB_f__count__1(), 0) != null) && ((loc(GB_f__count__1(), 0) == null) || (((loc(GB_f__count__1(), 0) == loc(block_of(loc(GB_f__count__1(), 0)), offset_of(loc(GB_f__count__1(), 0)))) && (0 <= offset_of(loc(GB_f__count__1(), 0)))) && (offset_of(loc(GB_f__count__1(), 0)) <= len(block_of(loc(GB_f__count__1(), 0))))))) && (offset_of(loc(GB_f__count__1(), 0)) < len(block_of(loc(GB_f__count__1(), 0))))) && acc(loc(GB_f__count__1(), 0).v_int)) && acc(loc(GB_f__count__1(), 0).d_int)) && loc(GB_f__count__1(), 0).d_int) && (((-2147483648) <= loc(GB_f__count__1(), 0).v_int) && (loc(GB_f__count__1(), 0).v_int <= 2147483647))) && acc(lvloc(block_of(loc(GB_f__count__1(), 0))).lv, amt_0))
+  ensures ((((((((loc(GB_f__count__1(), 0) != null) && ((loc(GB_f__count__1(), 0) == null) || (((loc(GB_f__count__1(), 0) == loc(block_of(loc(GB_f__count__1(), 0)), offset_of(loc(GB_f__count__1(), 0)))) && (0 <= offset_of(loc(GB_f__count__1(), 0)))) && (offset_of(loc(GB_f__count__1(), 0)) <= len(block_of(loc(GB_f__count__1(), 0))))))) && (offset_of(loc(GB_f__count__1(), 0)) < len(block_of(loc(GB_f__count__1(), 0))))) && acc(loc(GB_f__count__1(), 0).v_int)) && acc(loc(GB_f__count__1(), 0).d_int)) && loc(GB_f__count__1(), 0).d_int) && (((-2147483648) <= loc(GB_f__count__1(), 0).v_int) && (loc(GB_f__count__1(), 0).v_int <= 2147483647))) && acc(lvloc(block_of(loc(GB_f__count__1(), 0))).lv, amt_0))
+  decreases
+{
+  assert loc(GB_f__count__1(), 0) != null
+  assert perm(loc(GB_f__count__1(), 0).v_int) > none
+  assert loc(GB_f__count__1(), 0).d_int
+  if (loc(GB_f__count__1(), 0).v_int < 100) {
+    assert loc(GB_f__count__1(), 0) != null
+    assert perm(loc(GB_f__count__1(), 0).v_int) > none
+    assert loc(GB_f__count__1(), 0).d_int
+    assert !((((loc(GB_f__count__1(), 0).v_int + 1) < (-2147483648)) || (2147483647 < (loc(GB_f__count__1(), 0).v_int + 1))))
+    assert loc(GB_f__count__1(), 0) != null
+    assert !((perm(loc(GB_f__count__1(), 0).v_int) != write) || (perm(loc(GB_f__count__1(), 0).d_int) != write))
+    loc(GB_f__count__1(), 0).v_int := loc(GB_f__count__1(), 0).v_int + 1
+    loc(GB_f__count__1(), 0).d_int := true
+  }
+  assert loc(GB_f__count__1(), 0) != null
+  assert ((loc(GB_f__count__1(), 0) == null) || (((loc(GB_f__count__1(), 0) == loc(block_of(loc(GB_f__count__1(), 0)), offset_of(loc(GB_f__count__1(), 0)))) && (0 <= offset_of(loc(GB_f__count__1(), 0)))) && (offset_of(loc(GB_f__count__1(), 0)) <= len(block_of(loc(GB_f__count__1(), 0))))))
+  assert offset_of(loc(GB_f__count__1(), 0)) < len(block_of(loc(GB_f__count__1(), 0)))
+  assert perm(loc(GB_f__count__1(), 0).v_int) == write
+  assert perm(loc(GB_f__count__1(), 0).d_int) == write
+  assert loc(GB_f__count__1(), 0).d_int
+  assert !((loc(GB_f__count__1(), 0).v_int < (-2147483648)) || (2147483647 < loc(GB_f__count__1(), 0).v_int))
+  assert perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) >= amt_0
+}
+
+// C/C++ function `r`: void r(int n) requires(0 <= n && n <= 10) decreases(n) { if (n > 0) { f(); r(n - 1); } }   (reaches f, so it gets the implicit atom)
+method f_r__1(p_n: Int, amt_0: Perm)
+  requires ((len(GB_f__count__1()) == 1) && (lvloc(GB_f__count__1()) == loc(GB_f__count__1(), (-2))))
+  requires ((-2147483648) <= p_n) && (p_n <= 2147483647)
+  requires (none < amt_0) && (amt_0 < write)
+  requires (0 <= p_n) && (p_n <= 10)
+  requires ((((((((loc(GB_f__count__1(), 0) != null) && ((loc(GB_f__count__1(), 0) == null) || (((loc(GB_f__count__1(), 0) == loc(block_of(loc(GB_f__count__1(), 0)), offset_of(loc(GB_f__count__1(), 0)))) && (0 <= offset_of(loc(GB_f__count__1(), 0)))) && (offset_of(loc(GB_f__count__1(), 0)) <= len(block_of(loc(GB_f__count__1(), 0))))))) && (offset_of(loc(GB_f__count__1(), 0)) < len(block_of(loc(GB_f__count__1(), 0))))) && acc(loc(GB_f__count__1(), 0).v_int)) && acc(loc(GB_f__count__1(), 0).d_int)) && loc(GB_f__count__1(), 0).d_int) && (((-2147483648) <= loc(GB_f__count__1(), 0).v_int) && (loc(GB_f__count__1(), 0).v_int <= 2147483647))) && acc(lvloc(block_of(loc(GB_f__count__1(), 0))).lv, amt_0))
+  ensures ((((((((loc(GB_f__count__1(), 0) != null) && ((loc(GB_f__count__1(), 0) == null) || (((loc(GB_f__count__1(), 0) == loc(block_of(loc(GB_f__count__1(), 0)), offset_of(loc(GB_f__count__1(), 0)))) && (0 <= offset_of(loc(GB_f__count__1(), 0)))) && (offset_of(loc(GB_f__count__1(), 0)) <= len(block_of(loc(GB_f__count__1(), 0))))))) && (offset_of(loc(GB_f__count__1(), 0)) < len(block_of(loc(GB_f__count__1(), 0))))) && acc(loc(GB_f__count__1(), 0).v_int)) && acc(loc(GB_f__count__1(), 0).d_int)) && loc(GB_f__count__1(), 0).d_int) && (((-2147483648) <= loc(GB_f__count__1(), 0).v_int) && (loc(GB_f__count__1(), 0).v_int <= 2147483647))) && acc(lvloc(block_of(loc(GB_f__count__1(), 0))).lv, amt_0))
+  decreases p_n
+{
+  if (p_n > 0) {
+    assert loc(GB_f__count__1(), 0) != null
+    assert ((loc(GB_f__count__1(), 0) == null) || (((loc(GB_f__count__1(), 0) == loc(block_of(loc(GB_f__count__1(), 0)), offset_of(loc(GB_f__count__1(), 0)))) && (0 <= offset_of(loc(GB_f__count__1(), 0)))) && (offset_of(loc(GB_f__count__1(), 0)) <= len(block_of(loc(GB_f__count__1(), 0))))))
+    assert offset_of(loc(GB_f__count__1(), 0)) < len(block_of(loc(GB_f__count__1(), 0)))
+    assert perm(loc(GB_f__count__1(), 0).v_int) == write
+    assert perm(loc(GB_f__count__1(), 0).d_int) == write
+    assert loc(GB_f__count__1(), 0).d_int
+    assert !((loc(GB_f__count__1(), 0).v_int < (-2147483648)) || (2147483647 < loc(GB_f__count__1(), 0).v_int))
+    assert perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) > none
+    assert none < (perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) / 2)
+    assert (perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) / 2) < write
+    assert perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) >= (perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) / 2)
+    f_f__0(perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) / 2)
+    assert !((((p_n - 1) < (-2147483648)) || (2147483647 < (p_n - 1))))
+    assert loc(GB_f__count__1(), 0) != null
+    assert ((loc(GB_f__count__1(), 0) == null) || (((loc(GB_f__count__1(), 0) == loc(block_of(loc(GB_f__count__1(), 0)), offset_of(loc(GB_f__count__1(), 0)))) && (0 <= offset_of(loc(GB_f__count__1(), 0)))) && (offset_of(loc(GB_f__count__1(), 0)) <= len(block_of(loc(GB_f__count__1(), 0))))))
+    assert offset_of(loc(GB_f__count__1(), 0)) < len(block_of(loc(GB_f__count__1(), 0)))
+    assert perm(loc(GB_f__count__1(), 0).v_int) == write
+    assert perm(loc(GB_f__count__1(), 0).d_int) == write
+    assert loc(GB_f__count__1(), 0).d_int
+    assert !((loc(GB_f__count__1(), 0).v_int < (-2147483648)) || (2147483647 < loc(GB_f__count__1(), 0).v_int))
+    assert perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) > none
+    assert none < (perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) / 2)
+    assert (perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) / 2) < write
+    assert perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) >= (perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) / 2)
+    assert (0 <= (p_n - 1)) && ((p_n - 1) <= 10)
+    f_r__1(p_n - 1, perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) / 2)
+  }
+  assert loc(GB_f__count__1(), 0) != null
+  assert ((loc(GB_f__count__1(), 0) == null) || (((loc(GB_f__count__1(), 0) == loc(block_of(loc(GB_f__count__1(), 0)), offset_of(loc(GB_f__count__1(), 0)))) && (0 <= offset_of(loc(GB_f__count__1(), 0)))) && (offset_of(loc(GB_f__count__1(), 0)) <= len(block_of(loc(GB_f__count__1(), 0))))))
+  assert offset_of(loc(GB_f__count__1(), 0)) < len(block_of(loc(GB_f__count__1(), 0)))
+  assert perm(loc(GB_f__count__1(), 0).v_int) == write
+  assert perm(loc(GB_f__count__1(), 0).d_int) == write
+  assert loc(GB_f__count__1(), 0).d_int
+  assert !((loc(GB_f__count__1(), 0).v_int < (-2147483648)) || (2147483647 < loc(GB_f__count__1(), 0).v_int))
+  assert perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) >= amt_0
+}
+
+// C/C++ function `main` (holds the static local from program_start)
+method f_main__2()
+  decreases
+{
+  program_start()
+  assert loc(GB_f__count__1(), 0) != null
+  assert ((loc(GB_f__count__1(), 0) == null) || (((loc(GB_f__count__1(), 0) == loc(block_of(loc(GB_f__count__1(), 0)), offset_of(loc(GB_f__count__1(), 0)))) && (0 <= offset_of(loc(GB_f__count__1(), 0)))) && (offset_of(loc(GB_f__count__1(), 0)) <= len(block_of(loc(GB_f__count__1(), 0))))))
+  assert offset_of(loc(GB_f__count__1(), 0)) < len(block_of(loc(GB_f__count__1(), 0)))
+  assert perm(loc(GB_f__count__1(), 0).v_int) == write
+  assert perm(loc(GB_f__count__1(), 0).d_int) == write
+  assert loc(GB_f__count__1(), 0).d_int
+  assert !((loc(GB_f__count__1(), 0).v_int < (-2147483648)) || (2147483647 < loc(GB_f__count__1(), 0).v_int))
+  assert perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) > none
+  assert none < (perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) / 2)
+  assert (perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) / 2) < write
+  assert perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) >= (perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) / 2)
+  f_f__0(perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) / 2)
+  assert loc(GB_f__count__1(), 0) != null
+  assert ((loc(GB_f__count__1(), 0) == null) || (((loc(GB_f__count__1(), 0) == loc(block_of(loc(GB_f__count__1(), 0)), offset_of(loc(GB_f__count__1(), 0)))) && (0 <= offset_of(loc(GB_f__count__1(), 0)))) && (offset_of(loc(GB_f__count__1(), 0)) <= len(block_of(loc(GB_f__count__1(), 0))))))
+  assert offset_of(loc(GB_f__count__1(), 0)) < len(block_of(loc(GB_f__count__1(), 0)))
+  assert perm(loc(GB_f__count__1(), 0).v_int) == write
+  assert perm(loc(GB_f__count__1(), 0).d_int) == write
+  assert loc(GB_f__count__1(), 0).d_int
+  assert !((loc(GB_f__count__1(), 0).v_int < (-2147483648)) || (2147483647 < loc(GB_f__count__1(), 0).v_int))
+  assert perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) > none
+  assert none < (perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) / 2)
+  assert (perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) / 2) < write
+  assert perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) >= (perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) / 2)
+  assert (0 <= 3) && (3 <= 10)
+  f_r__1(3, perm(lvloc(block_of(loc(GB_f__count__1(), 0))).lv) / 2)
+}
+
+// well-formedness of the contract of C/C++ function `f`
+method f_f__0__wf(amt_0: Perm)
+  requires ((len(GB_f__count__1()) == 1) && (lvloc(GB_f__count__1()) == loc(GB_f__count__1(), (-2))))
+  requires (none < amt_0) && (amt_0 < write)
+  decreases
+{
+  // the contract has nothing that can be undefined
+}
+
+// well-formedness of the contract of C/C++ function `r`
+method f_r__1__wf(p_n: Int, amt_0: Perm)
+  requires ((len(GB_f__count__1()) == 1) && (lvloc(GB_f__count__1()) == loc(GB_f__count__1(), (-2))))
+  requires ((-2147483648) <= p_n) && (p_n <= 2147483647)
+  requires (none < amt_0) && (amt_0 < write)
+  decreases
+{
+  // the contract has nothing that can be undefined
+}

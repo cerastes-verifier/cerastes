@@ -1,5 +1,5 @@
 // expect: verified
-// S24 candidate FINAL: global_addr
+// S24 candidate FINAL: global_addr -- superseded by s31_*.vpr (decision 0041 item 4, audit N5), which pin the emitted shape; kept as S24's evidence
 // Final design: a pointer is a Ref; Block domain with four axioms (loc_inv, loc_nonnull, member_inv, member_lv); ghost init flag per cell; liveness token lvloc(b) at slot -2; explicit checks at every access, call, return and pointer use.
 //
 field v_int: Int

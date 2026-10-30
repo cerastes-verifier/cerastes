@@ -61,7 +61,8 @@ E acc(E recv, std::string field_name, E amount);  // `acc(recv.field, amount)`, 
 E old_(E a);                                // `old(a)`: the value in the state at entry (an `ensures`, or the body of a method)
 E perm_div(E a, int divisor);               // `a / divisor`, a Perm over a positive Int literal (decision 0037 item 6)
 // An application of one of the Block domain's functions (`loc`, `len`, `block_of`, `offset_of`, `member`, `parent_of`, `index_of`,
-// `lvloc`); any other name is refused (std::logic_error), so lowering cannot spell a domain function the prelude does not declare.
+// `lvloc`) or a global's block constant (`GB_<...>`, no arguments, decision 0041); any other name is refused (std::logic_error), so lowering
+// cannot spell a domain function the prelude does not declare.
 E dom(const std::string& domain_function, std::vector<E> args);
 bool is_domain_function(const std::string& name);
 // a % 2^k, Viper's `%` (the non-negative remainder for a positive divisor).  The only way to build a `%`: the divisor is a power of two
@@ -168,6 +169,9 @@ struct LProgram {
   // type `<t>` (the key; the value is the type of `v_<t>`), `field lv: Bool`, and the Block domain with its four axioms.
   bool memory = false;
   std::map<std::string, LType> cell_types;
+  // The Viper names of the globals' block constants, `GB_<name>__<id>` (decision 0041 item 4), in declaration order: declared `unique function
+  // GB_...(): Block` inside the Block domain (only with `memory`).
+  std::vector<std::string> globals;
 };
 
 }  // namespace cerastes::low

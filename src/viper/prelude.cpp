@@ -131,7 +131,7 @@ std::set<std::string> prelude_closure(const std::set<std::string>& used) {
   return all;
 }
 
-std::string memory_prelude_text(const std::map<std::string, std::string>& cell_types) {
+std::string memory_prelude_text(const std::map<std::string, std::string>& cell_types, const std::vector<std::string>& globals) {
   std::string t = "\n// the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell\n";
   for (const auto& [suffix, type] : cell_types) {
     t += "field v_" + suffix + ": " + type + "\n";
@@ -149,7 +149,7 @@ domain Block {
   function parent_of(b: Block): Ref
   function index_of(b: Block): Int
   function lvloc(b: Block): Ref
-  // cerastes:axiom-ok 0033
+@GLOBALS@  // cerastes:axiom-ok 0033
   axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
   // cerastes:axiom-ok 0034
   axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
@@ -159,6 +159,11 @@ domain Block {
   axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
 }
 )";
+  // The globals' block constants (decision 0041 item 4): `unique`, so two globals are two blocks.  Nothing is added without globals.
+  std::string gb;
+  for (const std::string& g : globals) gb += "  unique function " + g + "(): Block\n";
+  const size_t at = t.find("@GLOBALS@");
+  t.replace(at, 9, gb);
   return t;
 }
 

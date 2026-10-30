@@ -82,6 +82,12 @@ struct IlEntities {
     a_type_ptr declared_type = nullptr;  // the type as the declaration wrote it (a typedef'd function type stays a typeref)
   };
   std::map<a_routine_ptr, std::vector<SecondaryDecl>> secondary_decls;
+  // Decision 0041 item 2: the other declarations of a file-scope variable (a_src_seq_secondary_decl entries whose entity is the variable): one in a
+  // system file makes the variable shared with the runtime (`environ`), which is rejected.
+  std::map<a_variable_ptr, std::vector<a_source_position>> variable_secondary_decls;
+  // Decision 0041 item 5 (P63 H6): the initializer of a `static` local whose `init_kind` is `initk_function_local` is the
+  // local-static-variable-init entry of its scope, not the variable's own; the entries by variable.
+  std::map<a_variable_ptr, a_local_static_variable_init_ptr> static_local_inits;
 };
 IlEntities collect_entities();
 
