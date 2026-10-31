@@ -147,7 +147,7 @@ bool declares_cell(const Stmt& b) {
 bool pointer_node(const Expr& e) {
   if (e.type.is_ptr()) return true;
   switch (e.kind) {
-    case Expr::Kind::Null: case Expr::Kind::AddrOf: case Expr::Kind::Deref: case Expr::Kind::Atom: case Expr::Kind::StoreE: return true;
+    case Expr::Kind::Null: case Expr::Kind::AddrOf: case Expr::Kind::GlobalAddr: case Expr::Kind::Deref: case Expr::Kind::Atom: case Expr::Kind::StoreE: return true;
     case Expr::Kind::Local: return e.var != nullptr && e.var->address_taken;
     default: return false;
   }
@@ -161,6 +161,8 @@ class Checker {
 
   std::vector<Diag> run() {
     for (const NamedConst& c : prog_.named_consts()) named_const(c, "the named constant");
+    for (const Global& g : prog_.globals()) global(g);
+    entry();
     for (const Function& f : prog_.functions()) function(f);
     return std::move(diags_);
   }
@@ -197,6 +199,83 @@ class Checker {
   }
 
 
+  // A mutable global or `static` local (decision 0041 items 2-5, 12): a value type, a position, an owner that is a function of the program, and
+  // an initial value of the right shape.  The initializer as written is checked like a named constant's (call-free, no variable, exactly the type).
+  void global(const Global& g) {
+    const std::string name = "the global '" + g.c_name + "'";
+    const auto& gs = prog_.globals();
+    if (g.id < 0 || static_cast<size_t>(g.id) >= gs.size() || &gs[static_cast<size_t>(g.id)] != &g) err(g.loc, name + " has an id that is not its index");
+    if (g.c_name.empty()) err(g.loc, "a global without a name");
+    if (!g.loc.known()) err(g.loc, name + " has no source position");
+    if (g.type.is_ptr()) {
+      if (!accepted_pointer(g.type)) err(g.loc, name + " is " + pointer_reason(g.type));
+    } else if (!value_type(g.type)) {
+      err(g.loc, name + " is not a bool, an integer or a pointer to one");
+    }
+    if (g.owner != nullptr && functions_.count(g.owner) == 0) err(g.loc, name + " is a `static` local of a function that is not in the program");
+    switch (g.init_kind) {
+      case Global::Init::Value:
+        if (g.type.is_ptr()) { err(g.loc, name + " is a pointer with an integer initial value (use Null or Addr)"); break; }
+        if (!front_end_value_fits(g.value, g.type)) err(g.loc, "the front end's value of " + name + " ('" + g.value + "') is not a value of " + g.type.str());
+        if (g.init == nullptr) {
+          if (g.value != "0") err(g.loc, name + " has no initializer but a value other than 0");
+          break;
+        }
+        if (mentions_state(*g.init)) {
+          err(g.init->loc, "the initializer of " + name + " mentions a variable, a parameter, the result, `old` or a call");
+          break;
+        }
+        no_ptr_ = true;
+        expr(*g.init, Ctx::Annot, false);  // call-free, closed; a pointer node (a read of another global) is refused by no_ptr_
+        no_ptr_ = false;
+        if (g.init->type != g.type) err(g.init->loc, "the initializer of " + name + " has type " + g.init->type.str() + ", not " + g.type.str());
+        break;
+      case Global::Init::Null:
+        if (!g.type.is_ptr()) err(g.loc, name + " is not a pointer but has the initial value null");
+        break;
+      case Global::Init::Addr: {
+        if (!g.type.is_ptr() || g.type.pointee == nullptr) { err(g.loc, name + " is not a pointer but has the initial value `&target`"); break; }
+        const Global* t = g.target;
+        if (t == nullptr || t->id < 0 || static_cast<size_t>(t->id) >= gs.size() || &gs[static_cast<size_t>(t->id)] != t)
+          err(g.loc, "the initial value of " + name + " is the address of a global that is not in the program");
+        else if (*g.type.pointee != t->type)
+          err(g.loc, "the initial value of " + name + " is the address of '" + t->c_name + "', of type " + t->type.str() + ", not " + g.type.pointee->str() +
+                         " (a pointer conversion, decision 0040 item 2)");
+        break;
+      }
+      case Global::Init::Unknown:
+        // Decision 0041 item 5: an unknown initial value may still carry its initializer as written (a bool, integer or enumeration global): the
+        // prologue checks its obligations at their positions; no value is stated (nothing to guard).
+        if (g.init != nullptr) {
+          if (g.type.is_ptr()) { err(g.init->loc, "the initializer of " + name + " is an expression for a pointer (use Null or Addr)"); break; }
+          if (mentions_state(*g.init)) {
+            err(g.init->loc, "the initializer of " + name + " mentions a variable, a parameter, the result, `old` or a call");
+            break;
+          }
+          no_ptr_ = true;
+          expr(*g.init, Ctx::Annot, false);
+          no_ptr_ = false;
+          if (g.init->type != g.type) err(g.init->loc, "the initializer of " + name + " has type " + g.init->type.str() + ", not " + g.type.str());
+        }
+        break;
+    }
+    if (g.init_kind != Global::Init::Value && g.init_kind != Global::Init::Unknown && g.init != nullptr) err(g.loc, name + " has an initializer expression but a value that is not an integer or a bool");
+    if (g.init_kind != Global::Init::Addr && g.target != nullptr) err(g.loc, name + " names a target but its initial value is not an address");
+  }
+
+  // `Program::entry` (decision 0041 item 4): the global-namespace `main`, a function of the program that is verified, has no parameters (the
+  // `main(argc, argv)` forms are M4.6's) and no contract (a contract on `main` and a call of `main` stay rejected, 0028 item 5).
+  void entry() {
+    const Function* m = prog_.entry();
+    if (m == nullptr) return;
+    if (functions_.count(m) == 0) { err(SrcLoc{}, "the entry function is not in the program"); return; }
+    if (!m->params.empty()) err(m->loc, "the entry function '" + m->c_name + "' has parameters (decision 0041 item 4)");
+    // An `ensures` on `main` has always been accepted (checked at its returns, 0012 item 9; an atom in it has no `requires` partner and is refused by `atoms`);
+    // a `requires` (the encoder's `contract_on_main`) and a measure are not.
+    if (!m->requires_.empty() || !m->decreases_.empty())
+      err(m->loc, "a `requires` or a measure on the entry function '" + m->c_name + "' (decision 0028 item 5: program_start is inhaled once)");
+  }
+
   void function(const Function& f) {
     fn_ = &f;
     declared_.clear();
@@ -206,6 +285,7 @@ class Checker {
     scopes_.clear();
     no_ptr_ = false;
     old_depth_ = 0;
+    ok_globals_.clear();
     scopes_.emplace_back();
     for (const auto& v : f.locals())
       if (v->is_param_copy) scopes_.back().insert(v->id);
@@ -362,10 +442,11 @@ class Checker {
     for (size_t k = 0; k < req.size(); ++k) {
       const Expr& a = *req[k]->atom;
       if (a.amount != static_cast<int>(k)) err(a.loc, "the permission atoms of the `requires` are not numbered in order (decision 0037 item 6)");
-      if (a.a == nullptr || a.a->kind != Expr::Kind::Formal) continue;
+      const int place = atom_place_key(a);  // a parameter's index or a global's key (decision 0041 item 8)
+      if (place == kNoPlaceKey) continue;
       for (size_t j = 0; j < k; ++j) {
         const Expr& b = *req[j]->atom;
-        if (b.a != nullptr && b.a->kind == Expr::Kind::Formal && b.atom == a.atom && b.a->index == a.a->index)
+        if (b.atom == a.atom && atom_place_key(b) == place)
           err(a.loc, "the same permission atom twice in a `requires` (decision 0037 item 6)");
       }
     }
@@ -380,11 +461,19 @@ class Checker {
         continue;
       }
       const Expr& partner = *req[static_cast<size_t>(a.amount)]->atom;
-      if (partner.atom != a.atom || partner.a == nullptr || a.a == nullptr || partner.a->kind != Expr::Kind::Formal ||
-          a.a->kind != Expr::Kind::Formal || partner.a->index != a.a->index)
-        err(a.loc, "an `ensures` atom whose partner in the `requires` is of another kind or on another parameter (decision 0037 item 6)");
+      if (partner.atom != a.atom || atom_place_key(partner) == kNoPlaceKey || atom_place_key(a) == kNoPlaceKey ||
+          atom_place_key(partner) != atom_place_key(a))
+        err(a.loc, "an `ensures` atom whose partner in the `requires` is of another kind or on another parameter or global (decisions 0037 item 6, 0041 item 8)");
+      else if (partner.implicit_atom != a.implicit_atom)
+        err(a.loc, "an `ensures` atom and its `requires` partner are not both the implicit atom of a `static` local (decision 0041 item 12)");
       if (!used.insert(a.amount).second) err(a.loc, "two `ensures` atoms return the same `requires` atom (decision 0037 item 6)");
     }
+    // Decision 0041 item 12: the implicit atoms of `static` locals go to no entry function (it holds them from `program_start`) and no `ensures`
+    // of a `noreturn` function.
+    for (const AtomSite& s : sites)
+      if (s.atom->implicit_atom && (&f == prog_.entry() || (s.in_ensures && f.noreturn)))
+        err(s.atom->loc, "an implicit `static` local atom on " + std::string(&f == prog_.entry() ? "the entry function" : "the `ensures` of a `noreturn` function") +
+                             " (decision 0041 item 12)");
     // `restrict` (item 2): backed by an `owns` that the `ensures` returns.
     for (size_t k = 0; k < f.params.size(); ++k)
       if (f.params[k].is_restrict && !restrict_backed(f, static_cast<int>(k)))
@@ -708,6 +797,8 @@ class Checker {
         err(e.loc, "a pointer (or a variable whose address is taken) in an invariant, a measure, a constant or a case value (decision 0032 item 10)");
       else if (contract && e.kind == Expr::Kind::AddrOf)
         err(e.loc, "an address in a contract (decision 0037 item 5: a contract names a pointer parameter, never `&x`)");
+      else if (contract && e.kind == Expr::Kind::GlobalAddr && e.global != nullptr && e.global->owner != nullptr && ok_globals_.count(&e) == 0)
+        err(e.loc, "the address of the `static` local '" + e.global->c_name + "' in a contract (its name is not in scope there, decision 0041 item 12)");
     }
     auto sub = [&](const Expr* x) {
       if (x == nullptr) { err(e.loc, "a missing operand"); return false; }
@@ -783,7 +874,21 @@ class Checker {
           err(e.loc, "the address of '" + e.var->name + "', whose type " + e.var->type.str() + " is not a bool, an integer or a pointer to one");
         else if (!e.type.is_ptr() || e.type.pointee == nullptr || *e.type.pointee != e.var->type) err(e.loc, "the address of '" + e.var->name + "' has the wrong type");
         break;
+      case Expr::Kind::GlobalAddr: {
+        const Global* g = e.global;
+        const auto& gs = prog_.globals();
+        if (g == nullptr || g->id < 0 || static_cast<size_t>(g->id) >= gs.size() || &gs[static_cast<size_t>(g->id)] != g) {
+          err(e.loc, "the address of a global that is not in the program");
+          break;
+        }
+        if (!e.type.is_ptr() || e.type.pointee == nullptr || *e.type.pointee != g->type) err(e.loc, "the address of '" + g->c_name + "' has the wrong type");
+        // A `static` local is named only by its function's body (decision 0041 item 12); a contract of any function may hold its implicit atom.
+        if (g->owner != nullptr && ctx != Ctx::Requires && ctx != Ctx::Ensures && g->owner != fn_)
+          err(e.loc, "the `static` local '" + g->c_name + "' of '" + g->owner->c_name + "' used in '" + fn_->c_name + "'");
+        break;
+      }
       case Expr::Kind::Deref:
+        if (e.a != nullptr && e.a->kind == Expr::Kind::GlobalAddr && (ctx == Ctx::Requires || ctx == Ctx::Ensures)) ok_globals_.insert(e.a);  // the read of `g`
         if (e.a != nullptr && shared_addrs_.count(e.a) != 0) {  // the address of the enclosing store, already checked (decision 0039 item 5)
           if (!e.a->type.is_ptr()) err(e.loc, "a dereference of a " + e.a->type.str() + ", not a pointer");
           else if (e.a->type.pointee == nullptr || e.type != *e.a->type.pointee) err(e.loc, "a dereference whose type is not the pointee's");
@@ -792,8 +897,11 @@ class Checker {
         if (!sub(e.a)) break;
         if (!e.a->type.is_ptr()) err(e.loc, "a dereference of a " + e.a->type.str() + ", not a pointer");
         else if (e.a->type.pointee == nullptr || e.type != *e.a->type.pointee) err(e.loc, "a dereference whose type is not the pointee's");
-        if ((ctx == Ctx::Requires || ctx == Ctx::Ensures) && e.a->kind != Expr::Kind::Formal && !(ctx == Ctx::Ensures && e.a->kind == Expr::Kind::Result))
-          err(e.loc, "a dereference in a contract of something other than a pointer parameter or, in an `ensures`, the result (decisions 0037 item 5, 0040 items 4 and 6)");
+        if ((ctx == Ctx::Requires || ctx == Ctx::Ensures) && e.a->kind != Expr::Kind::Formal && e.a->kind != Expr::Kind::GlobalAddr &&
+            !(ctx == Ctx::Ensures && e.a->kind == Expr::Kind::Result))
+          err(e.loc, "a dereference in a contract of something other than a pointer parameter, a global or, in an `ensures`, the result (decisions 0037 item 5, 0040 items 4 and 6, 0041 item 7)");
+        else if ((ctx == Ctx::Requires || ctx == Ctx::Ensures) && e.a->kind == Expr::Kind::GlobalAddr && e.a->global != nullptr && e.a->global->owner != nullptr)
+          err(e.loc, "a read of the `static` local '" + e.a->global->c_name + "' in a contract (its name is not in scope there, decision 0041 item 12)");
         break;
       case Expr::Kind::Atom:
         // Decision 0037 item 5: owns(*p), reads(*p) and live(p) of a pointer parameter p, in a contract, outside `old`.  Where it may
@@ -806,12 +914,23 @@ class Checker {
         }
         if (old_depth_ > 0) { err(e.loc, "a permission atom under `old`"); break; }
         if (!e.type.is_bool()) err(e.loc, "a permission atom is not a bool");
+        if (e.a != nullptr && e.a->kind == Expr::Kind::GlobalAddr && !in_invariant_) ok_globals_.insert(e.a);  // `owns(g)` / `reads(g)` of a contract
         if (!sub(e.a)) break;
-        if (in_invariant_ ? e.a->kind != Expr::Kind::Local : e.a->kind != Expr::Kind::Formal)
+        if (e.implicit_atom && !(e.atom == AtomKind::Owns && e.a->kind == Expr::Kind::GlobalAddr && e.a->global != nullptr && e.a->global->owner != nullptr))
+          err(e.loc, "an implicit atom that is not the `owns` of a `static` local (decision 0041 item 12)");
+        if (in_invariant_ && e.a->kind == Expr::Kind::GlobalAddr) {
+          err(e.loc, "a permission atom on a global in a loop invariant (decision 0041 item 10: the globals the function holds are in every loop's invariant already)");
+          break;
+        }
+        if (in_invariant_ ? e.a->kind != Expr::Kind::Local : (e.a->kind != Expr::Kind::Formal && e.a->kind != Expr::Kind::GlobalAddr))
           err(e.loc, in_invariant_ ? "a permission atom of an invariant of something other than a pointer variable (decision 0040 item 5)"
-                                   : "a permission atom of something other than a pointer parameter (decision 0037 item 5)");
+                                   : "a permission atom of something other than a pointer parameter or a global (decisions 0037 item 5, 0041 item 7)");
         else if (!accepted_pointer(e.a->type))
           err(e.loc, "a permission atom of something that is not a pointer to a bool, an integer or a pointer");
+        else if (e.a->kind == Expr::Kind::GlobalAddr && e.atom == AtomKind::Live)
+          err(e.loc, "`live` of the address of a global (decision 0041 item 7: a global's liveness is never in doubt)");
+        else if (e.a->kind == Expr::Kind::GlobalAddr && e.a->global != nullptr && e.a->global->owner != nullptr && !e.implicit_atom)
+          err(e.loc, "a permission atom the user wrote on the `static` local '" + e.a->global->c_name + "' (its name is not in scope in a contract, decision 0041 item 12)");
         break;
       case Expr::Kind::Convert:
         if (!sub(e.a)) break;
@@ -1025,6 +1144,7 @@ class Checker {
       err(e.loc, "a call in a contract");
     if (e.callee == nullptr || functions_.count(e.callee) == 0) { err(e.loc, "a call of a function that is not in the program"); return; }
     const Function& f = *e.callee;
+    if (&f == prog_.entry()) err(e.loc, "a call of '" + f.c_name + "', the entry function (decision 0028 item 5: a call of `main` is rejected)");
     if (e.args.size() != f.params.size()) {
       err(e.loc, "call of '" + f.c_name + "' with " + std::to_string(e.args.size()) + " arguments, " +
                      std::to_string(f.params.size()) + " expected");
@@ -1044,6 +1164,7 @@ class Checker {
   std::set<int> declared_;
   std::set<const Expr*> seen_effects_;  // the AssignE, StoreE, Comma and Call nodes met in the current function (each may be reachable once)
   bool in_invariant_ = false;  // checking a loop invariant clause: a permission atom of a pointer variable is accepted (decision 0040 item 5)
+  std::set<const Expr*> ok_globals_;  // the GlobalAddr nodes that stand under a Deref or an Atom of a contract: where a `static` local's address may appear (its implicit atom; decision 0041 items 7, 12)
   std::set<const Expr*> shared_addrs_;  // the address nodes of the stores being checked: a compound store's Deref shares its address (0039 item 5)
   struct Target {
     int id;
@@ -1184,10 +1305,18 @@ class Sequencer {
   // own object), `-(id + 1) - stride * (depth - 1)`.
   static constexpr int kDepthStride = 1 << 20;
   static int deref_key(int var_id, int depth) { return -(var_id + 1) - kDepthStride * (depth - 1); }
+  // A global or `static` local (decision 0041 item 11) is its own object: key `kGlobalKeyBase + id`, above every local's id; a Wr map and the reports
+  // decode it through `gnames_`, which `expr` fills when it meets the GlobalAddr (every access to the object contains one).
+  static constexpr int kGlobalKeyBase = 1 << 28;
 
   void report(const Expr* at, int var_id) {
     if (!reported_.insert({at, var_id}).second) return;
     const auto& ls = f_.locals();
+    if (var_id >= kGlobalKeyBase) {
+      const auto g = gnames_.find(var_id);
+      out_.push_back(SequenceProblem{at, g != gnames_.end() ? g->second : "?"});
+      return;
+    }
     int id = var_id;
     int depth = 0;
     if (var_id < 0) {  // `*v`, `**v`, ...: the pointer variable's id and the depth
@@ -1214,6 +1343,10 @@ class Sequencer {
         continue;
       }
       break;
+    }
+    if (addr->kind == Expr::Kind::GlobalAddr && depth == 0 && addr->global != nullptr) {  // `g`; `*gp` through a pointer global is the path-precise check
+      *key = kGlobalKeyBase + addr->global->id;
+      return true;
     }
     if (addr->var == nullptr) return false;
     if (addr->kind == Expr::Kind::AddrOf && depth == 0) {
@@ -1251,6 +1384,9 @@ class Sequencer {
     switch (e->kind) {
       case Expr::Kind::Const: case Expr::Kind::Formal: case Expr::Kind::Result: case Expr::Kind::Atom: break;  // an atom is contract-only
       case Expr::Kind::Null: case Expr::Kind::AddrOf: break;  // an address is no access to the object (decision 0032)
+      case Expr::Kind::GlobalAddr:
+        if (e->global != nullptr) gnames_[kGlobalKeyBase + e->global->id] = e->global->c_name;
+        break;
       case Expr::Kind::Deref: {
         // A compound store's value reads a Deref that shares the store's address node: the address counts once (decision 0039 item 5).
         if (shared_.count(e->a) == 0) absorb(out, expr(e->a), false);
@@ -1394,6 +1530,7 @@ class Sequencer {
   const Function& f_;
   std::set<const Expr*> shared_;     // the address nodes of the stores being walked: their Deref reads count the address once
   std::vector<SequenceProblem> out_;
+  std::map<int, std::string> gnames_;  // a global's object key -> its name
   std::set<std::pair<const Expr*, int>> reported_;
 };
 

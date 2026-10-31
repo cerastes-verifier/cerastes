@@ -92,6 +92,12 @@ void collect_entry(char* entry, an_il_entry_kind kind) {
     case iek_src_seq_secondary_decl: {
       auto sd = reinterpret_cast<a_src_seq_secondary_decl_ptr>(entry);
       if (sd->entity.kind == iek_routine) g_collect_out->secondary_decls[reinterpret_cast<a_routine_ptr>(sd->entity.ptr)].push_back({sd->decl_position, sd->declared_type});
+      if (sd->entity.kind == iek_variable) g_collect_out->variable_secondary_decls[reinterpret_cast<a_variable_ptr>(sd->entity.ptr)].push_back(sd->decl_position);
+      break;
+    }
+    case iek_local_static_variable_init: {
+      auto li = reinterpret_cast<a_local_static_variable_init_ptr>(entry);
+      if (li->variable != nullptr) g_collect_out->static_local_inits[li->variable] = li;
       break;
     }
     case iek_asm_entry: {

@@ -10,7 +10,8 @@ This version covers pointers to integers, `bool` and enumerations, and
 pointers to such pointers (<<pointers-to-pointers>>): in local variables, as
 parameters and as results, with contracts that say which objects
 a function may read or write (<<contracts>>), in loops (<<loops>>) and across
-jumps (<<leaving>>). <<not-yet>> lists what is still rejected.
+jumps (<<leaving>>); and global and `static` local variables (<<globals>>,
+<<static-locals>>). <<not-yet>> lists what is still rejected.
 
 == Objects whose address is taken
 
@@ -257,6 +258,71 @@ include::example$memory/measure_over_memory.c[tag=source]
   the same object: four take a few seconds, five tens of seconds, and six or
   more may reach the time limit (an error, never a wrong answer).
 
+[#globals]
+== Global variables
+
+A global variable that is not `const` is an object in memory that exists for
+the whole run of the program. `main` starts with every global of the file, each
+holding its initial value; any other function reaches a global only through its
+contract, which names it the way it names `*p`: `cerastes_owns(count)` to read
+and write it, `cerastes_reads(count)` to read it. A function whose contract does
+not name a global cannot change it, so its caller keeps the global's value
+across the call. A function that reads or writes a global its contract does not
+name is reported as xref:error-messages.adoc#_permission[`permission`]:
+
+[source,c]
+----
+include::example$memory/global_variable.c[tag=source]
+----
+
+`cerastes_old(count)` in an `ensures` is the global's value when the function
+was entered, and a contract may compare a pointer with its address
+(`r == &count`). The address of a global can be taken, stored and passed like
+the address of a local (`int *p = &count;`); it never dangles.
+
+*Initial values.* `main` knows a global's initial value when the file is the
+only one that can set it:
+
+* a global declared `static` (or, in pass:[C++], in an unnamed namespace) starts
+  with its initializer's value, `0` or a null pointer without one;
+* in C, so does any global with an initializer;
+* a C global without an initializer and not `static` (`int count;`) starts with an
+  unknown value, since another file may define it with a value (compilers that
+  merge such definitions, `-fcommon`, are the default on macOS);
+* in pass:[C++], a global that is not `static` starts with an unknown value,
+  since another file's initialization may change it before `main` runs, and so
+  does a global whose address is the initial value of such a global.
+
+The rest of the program is assumed to keep to this file's contracts: code that
+runs before `main` in another file calls none of this file's functions, and a
+function of another file declared here changes only what its contract names
+(xref:verifying.adoc#one-unit[one translation unit]). Globals of other files
+(`extern int count;` with no definition here), arrays and structures are not
+supported yet.
+
+[#static-locals]
+== `static` local variables
+
+A `static` local variable is a global whose name only its function sees, so no
+contract can name it. cerastes gives the function the right to it implicitly,
+and the same right to every function that calls it, directly or not; `main`
+holds it from the start. Its initializer runs once, before `main`, and nothing
+is known about its value when the function is entered, since another call may
+have changed it:
+
+[source,c]
+----
+include::example$memory/static_local.c[tag=source]
+----
+
+Since every caller holds the variable across the call, two calls that both
+reach the function and that C does not order (`next_id() + next_id()`) are
+reported as xref:error-messages.adoc#_unsequenced[`unsequenced`]: the result
+depends on which runs first. A function may return the address of its
+`static` local, but its callers cannot use the pointer yet (it is reported as
+xref:error-messages.adoc#_lifetime[`lifetime`]). A `static const` local is not
+supported yet.
+
 [#expressions]
 == Writes and calls inside expressions
 
@@ -393,7 +459,10 @@ These are rejected with a diagnostic, never approximated
   memory (`+cerastes_owns(**pp)+`, `cerastes_live(*pp)`), and `+**pp+` in a contract
   or an invariant;
 * `owns` or `reads` of the object of a pointer result (`*r`), and contracts
-  that name objects other than those the parameters point to;
+  that name objects other than those the parameters point to and the global
+  variables (`+cerastes_owns(*gp)+` through a pointer global included);
+* globals defined in another file, `volatile`, `_Atomic` and thread-local
+  globals, `static const` locals, and global arrays and structures;
 * `owns`, `reads` and `live` in a `do … while (0)` invariant or a measure, and on
   a pointer variable whose own address is taken;
 * the attribute `cerastes::owning` on anything but a parameter, and `owning(n)`;

@@ -92,6 +92,7 @@ struct Type {
 
 struct Function;
 struct Var;
+struct Global;
 
 // Neg, Plus: Int -> that IntType (Neg checks the result's range).  Not: Bool -> Bool.
 // BitNot (decision 0023): Int -> that IntType, typed like Neg; `~a` is `-1 - a` (signed) or `MAX - a` (unsigned), always in range,
@@ -142,8 +143,8 @@ struct Expr {
     Deref,       // `*a` used as a READ (a: a Ptr; type = the pointee).  Obligations: the null check, the permission check and the flag
                  // (decision 0032 item 6).  A write through a pointer is the statement Stmt::Store, never a Deref.
                  // In a CONTRACT (decision 0037 item 5; Ctx::Requires/Ensures): `a` is a `Formal` of pointer type or, in an `ensures`, the `Result`
-                 // of a function returning a pointer (decision 0040 item 4: `*result` as a value), and nothing else (`**pp`, a local, a global,
-                 // a member: rejected, M4.5c and later).  In a `requires` it reads the cell's value on entry, in an `ensures` its value on
+                 // of a function returning a pointer (decision 0040 item 4: `*result` as a value), or a GlobalAddr of a file-scope global (decision 0041 item 7:
+                 // the read of `g`), and nothing else (`**pp`, `*gp`, a local, a member: rejected, M4.5c and later).  In a `requires` it reads the cell's value on entry, in an `ensures` its value on
                  // return, and `Old(Deref(Formal p))` its value on entry; `Old(Deref(Result))` is a check_program error (the result has no value on
                  // entry).  Lowering frames each read per path (item 7), keyed by the place `p` or `result`.  The value of `*pp` of a `T **`
                  // parameter is a pointer (a Ptr-typed Deref).
@@ -157,14 +158,26 @@ struct Expr {
                  // numbered 0, 1, ...; an atom of an `ensures` carries the number of the `requires` atom it returns (the same kind and the
                  // same parameter, each partner at most once).  An invariant atom's `amount` is unused (-1; lowering numbers its own).
                  // Positions (item 5): contract_atoms and loop_atoms collect exactly the allowed ones; any other Atom is a check_program error.
+                 // Decision 0041: in a contract `a` may also be a GlobalAddr (`owns(g)`, `reads(g)`; the Owns of a `static` local's implicit atom has
+                 // `implicit_atom`).  An atom pairs with its `requires` partner by place (atom_place_key), not by the parameter's index.
     // ---- a write through a pointer used as a value (decision 0039 item 2; appended) ----
-    StoreE       // `*c := a` as a value: `c` is the address (a Ptr), `a` the stored value (already of the pointee's type); the value of the
+    StoreE,      // `*c := a` as a value: `c` is the address (a Ptr), `a` the stored value (already of the pointee's type); the value of the
                  // node is `a` (the new value, `type` = the pointee's type), or, when `yields_old`, the old value `b` (`(*p)++`, `(*p)--`).
                  // `b` is null or the one `Deref` node of `c` that `a` also reads for the old value, so the pointer is lowered once, as for
                  // Stmt::Store (Builder::compound_store_expr, inc_dec_store_expr share the `c` node).  Allowed wherever AssignE is (code and
                  // a loop condition), never in an annotation; reachable once per function; see `sequence_problems`.  A write effect of
                  // the full expression: the null, permission and flag obligations of a write through `c`.  The spelling of the target for
                  // messages is "*" + c->c_text.
+    // ---- globals (decision 0041; appended) ----
+    GlobalAddr   // `&g` of the mutable global or `static` local `global` (Program::globals()): type = Ptr(global->type); a pointer value with no obligation
+                 // (a global's block is allocated for the whole run: no allocation, no scope exit).  A read of `g` is `Deref(GlobalAddr)`, a write
+                 // `Store`/`StoreE` with a GlobalAddr address, an atom `Atom(owns/reads, GlobalAddr)`; `*&g` is the same tree.  In CODE it stands where
+                 // AddrOf does (a pointer value, the address of a Deref/Store/StoreE); a `static` local's GlobalAddr only in its owner function.  In a CONTRACT
+                 // (Ctx::Requires/Ensures) it is a pointer value like any other (`p == &g`, `r == &g`, decision 0041 item 7), the operand of a Deref (the read
+                 // of `g`) or of an Atom (`owns(g)`, `reads(g)`); a static local's address stays out of contracts except as its implicit atom (Owns with
+                 // `implicit_atom`).  In a loop's invariant or measure and a function's `decreases` it is accepted like any pointer node (decision 0038 item 6: `g >= 0`, `gp == &g`
+                 // read the loop's places, framed by lowering); in a named constant, a global's initializer or a case value it is a check_program error (no_ptr_).
+                 // `Atom(Live, GlobalAddr)` and a GlobalAddr atom in a loop's invariant are check_program errors (the encoder reports them first).
   };
   Kind kind = Kind::Const;
   Type type;     // the type of the value (Void only for a Call of a void function)
@@ -191,6 +204,9 @@ struct Expr {
   AtomKind atom = AtomKind::Owns;          // Atom
   int amount = -1;                         // Atom: the number of the atom's ghost amount (see Kind::Atom)
   bool yields_old = false;                 // AssignE, StoreE: the value is the old value `b` (x++, x--), not the new one
+  const Global* global = nullptr;          // GlobalAddr (decision 0041): the global; owned by the Program
+  bool implicit_atom = false;              // Atom: added by the encoder for a `static` local (decision 0041 item 12), not written by the user: an Owns
+                                           // of a GlobalAddr whose global has an `owner`; messages say "the `static` local `s` of `f`"
 };
 
 // ---- statements ------------------------------------------------------------------------------------------------
@@ -304,6 +320,39 @@ struct NamedConst {
   Kind kind = Kind::Constant;  // appended with a default: every existing construction is unchanged
 };
 
+// A mutable global variable or a `static` local (decision 0041 items 2-5, 12): one block of the program, named by a `unique` 0-ary Viper function
+// `GB_...(): Block`, its cell `loc(GB_g(), 0)`.  It is not a `Var` (a Var's id is unique per function only); it is reached through
+// `Expr::Kind::GlobalAddr`.  Created with Program::add_global, in declaration order (the order of `program_start`'s rows and of the prelude); the
+// initial-value fields are filled by the encoder after every global exists (an `&h` initializer may name a later global).
+struct Global {
+  // The value the global has when the program starts (decision 0041 item 3), for the trusted `program_start`.
+  //  Value:   a bool or an integer (also an enumeration): `value`, EDG's value (a decimal literal of `type`, "0"/"1" for bool; "0" for a tentative
+  //           definition and for a definition with no initializer), and `init`, the initializer as written (checked in every method's prologue
+  //           like a named constant's, 0017 item 4: closed, call-free, exactly `type`; null: nothing to check).
+  //  Null:    a pointer whose value is null (no initializer, or a null constant).
+  //  Addr:    a pointer whose value is `&target` (`target`: another Global of the program, `type` = Ptr(target->type)).
+  //  Unknown: initialized and in range (`WF` for a pointer) but not known: external linkage in C++, the transitive escape, a C tentative definition
+  //           (question 84).  `init` may still hold the initializer as written (a bool, integer or enumeration): the prologue checks its obligations
+  //           like a Value global's, with no guard against a value; `program_start` states the range only.
+  enum class Init { Value, Null, Addr, Unknown };
+  int id = 0;                       // the index in Program::globals(); unique in the Program; part of the Viper name
+  std::string c_name;               // the C/C++ name as messages say it (`g`, `count`, `ns::g`)
+  Type type;                        // Bool, Int (an enumeration included) or an accepted pointer
+  SrcLoc loc;                       // the defining declaration (the position of its `program_start` row)
+  const Function* owner = nullptr;  // a `static` local: the function whose body names it (decision 0041 item 12); null for a file/namespace-scope global
+  Init init_kind = Init::Value;
+  const Expr* init = nullptr;       // Init::Value: the initializer as written, or null
+  std::string value = "0";          // Init::Value: EDG's value
+  const Global* target = nullptr;   // Init::Addr
+  std::string c_type_name;          // the C/C++ spelling of the type, for messages (empty: use type.str())
+
+  bool is_static_local() const { return owner != nullptr; }
+  // The Viper name of the block constant: `GB_<name>__<id>` for a global, `GB_<function>__<name>__<id>` for a `static` local, with every character
+  // that is not a letter, digit or underscore of `c_name` and the function's name written `_` (the id keeps the names distinct).  Always a valid
+  // Viper identifier and unique in the Program.
+  std::string viper_name() const;
+};
+
 struct Param {
   std::string name;  // may be empty (unnamed parameter)
   Type type;         // Bool, Int or a pointer to one of them (decision 0037 item 2)
@@ -406,6 +455,15 @@ class Program {
   NamedConst* add_static_assertion(SrcLoc loc, const Expr* condition);
   const std::deque<NamedConst>& named_consts() const { return named_consts_; }
 
+  // The mutable globals and `static` locals (decision 0041), in declaration order; `id` is the index.  `owner` (a `static` local's function) may be
+  // null; the pointer stays valid for the life of the Program.  Set the initial value (Global::init_kind and the fields it names) on the result.
+  Global* add_global(std::string c_name, Type type, SrcLoc loc, const Function* owner = nullptr);
+  const std::deque<Global>& globals() const { return globals_; }
+  // The global-namespace `main` (decision 0041 item 4), or null: the function whose method calls `program_start()` first.  Set by the encoder; it
+  // must be a function of this Program (check_program).
+  void set_entry(const Function* f) { entry_ = f; }
+  const Function* entry() const { return entry_; }
+
   // Arena (used by the Builder).
   Expr* new_expr() { return &exprs_.emplace_back(); }
   Stmt* new_stmt() { return &stmts_.emplace_back(); }
@@ -418,6 +476,8 @@ class Program {
   std::deque<std::unique_ptr<IntType>> enum_types_;  // apart from int_types_, so int_type() never returns one
   std::deque<Function> functions_;
   std::deque<NamedConst> named_consts_;
+  std::deque<Global> globals_;
+  const Function* entry_ = nullptr;
   std::deque<Expr> exprs_;
   std::deque<Stmt> stmts_;
 };
@@ -426,7 +486,8 @@ class Program {
 
 // A modification of an object that is unsequenced with another access to it in one full expression (C23 6.5.1p3, C++ before C++17;
 // cerastes uses C's rules in both modes).  `at` is the AssignE or StoreE whose write conflicts (report there); `variable` is the
-// object's source name: a local (a cell by name counts as its variable, and `*&x` is `x`) or, from decision 0039 item 3, `*v` for a
+// object's source name: a local (a cell by name counts as its variable, and `*&x` is `x`), a global or `static` local (decision 0041 item 11: one object
+// per Global, named by its `c_name`, and `*&g` is `g`) or, from decision 0039 item 3, `*v` for a
 // pointer variable `v` as written (one object per `v`, written by a Store or StoreE through `v`, read by a Deref of `v`, whether or not
 // the full expression also writes `v`; any other address is the path-precise check of lowering instead).  The rule
 // (decision 0020 item 4), with W the objects an operand writes (AssignE and StoreE targets) and R the objects it reads:
@@ -489,6 +550,16 @@ int requires_atom_count(const Function& f);
 bool restrict_backed(const Function& f, int param, int* offender = nullptr);
 // Whether the expression reads the heap: it contains a `Deref` or an `Atom` (an `Old` of one included).
 bool reads_heap(const Expr& e);
+// The place a permission atom names (decision 0041 item 8: the sites of 0037 are keyed by place, not by the parameter's index): the parameter's index
+// (>= 0) for an atom on a `Formal`, `kGlobalSiteBase + global->id` for an atom on a `GlobalAddr`, `kNoPlaceKey` for anything else (an invariant's
+// `Local`).  Two atoms name one place iff their keys are equal and not `kNoPlaceKey`; `kResultSiteKey` is reserved for lowering's result site.
+constexpr int kGlobalSiteBase = 1 << 20;
+constexpr int kResultSiteKey = -1;
+constexpr int kNoPlaceKey = -2;
+int atom_place_key(const Expr& atom);
+// The spelling of the place a Store/StoreE/Deref through `addr` writes or reads, for messages: the global's name for a `GlobalAddr` (`g`), "*" + `c_text`
+// otherwise (empty when the operand has no spelling).
+std::string place_text(const Expr& addr);
 
 // ---- user gotos (decision 0015 item 2) -------------------------------------------------------------------------
 
@@ -552,11 +623,16 @@ class Builder {
   // An atom of a contract (decision 0037 item 5): `ptr` is a `Formal` of pointer type (c_text "p" when the encoder set it), `amount` the
   // number of the ghost amount (see Expr::Kind::Atom).  Type Bool.  c_text: "owns(*p)", "reads(*p)" or "live(p)" when `ptr` has a spelling.
   const Expr* atom(AtomKind kind, const Expr* ptr, int amount, SrcLoc loc);
+  // An atom on a global (decision 0041): `ptr` is a GlobalAddr; c_text "owns(g)" / "reads(g)".  `implicit` marks the Owns the encoder adds for a `static`
+  // local (item 12).  Same as atom() otherwise (the atom's `a` is the GlobalAddr).
+  const Expr* global_atom(AtomKind kind, const Expr* global_addr, int amount, SrcLoc loc, bool implicit = false);
 
   // Pointers (decision 0032).  `ptr_type` is a Ptr type from Program::pointer_to.
   const Expr* null_const(Type ptr_type, SrcLoc loc);
   // `&v`: type Ptr(v->type); c_text "&" + v->name.  `v` must be a cell (Function::mark_address_taken) for check_program to accept it.
   const Expr* addr_of(const Var* v, SrcLoc loc);
+  // `&g` of a global or `static` local (decision 0041): type Ptr(g->type); c_text "&" + g->c_name.  `deref` of it has c_text `g`.
+  const Expr* global_addr(const Global* g, SrcLoc loc);
   // `*addr` as a read: type = addr's pointee (an ill-typed `addr` is built with its own type and rejected by check_program); c_text
   // "*" + addr->c_text when the operand has one.
   const Expr* deref(const Expr* addr, SrcLoc loc);

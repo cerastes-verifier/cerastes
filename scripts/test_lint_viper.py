@@ -2830,6 +2830,294 @@ class LoopAmountTests(unittest.TestCase):
         self.assertIn("`inhale` without", probs[0])
 
 
+class GlobalsTests(unittest.TestCase):
+    """Decision 0041 item 4: `unique function GB_<ident>(): Block` only inside `domain Block`; the trusted `program_start()` pinned row by
+    row (the facts row first, then exactly one row per declared `GB_` function, each with a value of its type); the facts as the first
+    `requires` of every method but `main`'s (the one whose first statement is `program_start()`); `program_start()` called once, first.
+    The fixture is the emitter's shape (tests/viper-smoke/memory/s31_*.vpr, fully parenthesized as the emitter prints); each twin breaks one
+    thing."""
+
+    MM = MemoryModelTests
+    NAMES = ["GB_g__1", "GB_h__2", "GB_p__3"]
+
+    @staticmethod
+    def facts(names=None):
+        names = GlobalsTests.NAMES if names is None else names
+        return " && ".join(f"((len({n}()) == 1) && (lvloc({n}()) == loc({n}(), (-2))))" for n in names)
+
+    @staticmethod
+    def row(g, suffix, value):
+        c = f"loc({g}(), 0)"
+        return f"(((acc({c}.v_{suffix}) && acc({c}.d_{suffix})) && {c}.d_{suffix}) && {value}) && acc(lvloc({g}()).lv)"
+
+    def rows(self):
+        return [
+            self.row("GB_g__1", "int", "(loc(GB_g__1(), 0).v_int == 3)"),
+            self.row("GB_h__2", "int", "(((-2147483648) <= loc(GB_h__2(), 0).v_int) && (loc(GB_h__2(), 0).v_int <= 2147483647))"),
+            self.row("GB_p__3", "ptr_int", "(loc(GB_p__3(), 0).v_ptr_int == loc(GB_h__2(), 0))"),
+        ]
+
+    def fixture(self, names=None, facts=None, rows=None, ps_header="method program_start()", ps_tag=True, ps_extra=(), ps_decreases="  decreases _",
+                domain_extra=(), f_requires=None, main_lines=None):
+        names = self.NAMES if names is None else names
+        lines = [
+            "field v_int: Int",
+            "field d_int: Bool",
+            "field v_ptr_int: Ref",
+            "field d_ptr_int: Bool",
+            "field lv: Bool",
+            "",
+            "// cerastes:domain-ok 0028",
+            "domain Block {",
+            "  function loc(b: Block, i: Int): Ref",
+            "  function block_of(r: Ref): Block",
+            *[f"  unique function {n}(): Block" for n in names],
+            *domain_extra,
+            *[x for name, record in MemoryModelTests.AXIOMS for x in ("  // cerastes:axiom-ok " + record, MemoryModelTests.axiom_line(name))],
+            "}",
+            "",
+            "// cerastes:trusted-contract allocation of an address-taken local of type int",
+            *MemoryModelTests.alloc_lines(),
+        ]
+        if ps_tag:
+            lines.append("// cerastes:trusted-contract program start: the initial state of every global (decision 0041 item 4)")
+        lines.append(ps_header)
+        lines.append(Check("  ensures " + (self.facts(names) if facts is None else facts), P, "internal"))
+        lines += [Check("  ensures " + r, P, "internal") for r in (self.rows() if rows is None else rows)]
+        lines += [*ps_extra, ps_decreases]
+        lines += [
+            "method f__1(amt_0: Perm)",
+            Check("  requires " + (self.facts(names) if f_requires is None else f_requires), WF, "internal"),
+            Check("  requires (none < amt_0) && (amt_0 < write)", WF, "internal"),
+            "  decreases",
+            "{",
+            "  var x: Ref",
+            Check("  x := alloc_int()", PRE, "internal"),
+            "  exhale acc(x.v_int) && acc(x.d_int) && acc(lvloc(block_of(x)).lv)",
+            "}",
+            "method main__2()",
+            "  decreases",
+            "{",
+            "  var y: Int",
+            *(main_lines if main_lines is not None else [Check("  program_start()", PRE, "internal"), "  y := 1"]),
+            "}",
+            "method main__2__wf()",
+            "  decreases",
+            "{",
+            "}",
+        ]
+        return lines
+
+    @staticmethod
+    def strict(lines):
+        return lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+
+    def one(self, lines, fragment):
+        probs = self.strict(lines)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn(fragment, probs[0])
+
+    def some(self, lines, fragment):
+        probs = self.strict(lines)
+        self.assertTrue(any(fragment in p for p in probs), probs)
+
+    def test_the_emitters_shape_is_clean(self):
+        self.assertEqual(self.strict(self.fixture()), [])
+
+    def test_a_plain_spelling_of_the_same_rows_is_clean(self):
+        rows = ["acc(loc(GB_g__1(), 0).v_int) && acc(loc(GB_g__1(), 0).d_int) && loc(GB_g__1(), 0).d_int && loc(GB_g__1(), 0).v_int == 3 && acc(lvloc(GB_g__1()).lv)",
+                self.rows()[1], self.rows()[2]]
+        self.assertEqual(self.strict(self.fixture(rows=rows)), [])
+
+    def test_known_and_unknown_values_of_every_field_type_are_clean(self):
+        names = ["GB_a__1", "GB_b__2", "GB_c__3", "GB_d__4", "GB_e__5"]
+        lines = self.fixture(names=names, rows=[
+            self.row("GB_a__1", "int", "(loc(GB_a__1(), 0).v_int == (-5))"),
+            self.row("GB_b__2", "ptr_int", "(loc(GB_b__2(), 0).v_ptr_int == null)"),
+            self.row("GB_c__3", "ptr_int", "((loc(GB_c__3(), 0).v_ptr_int == null) || (((loc(GB_c__3(), 0).v_ptr_int == loc(block_of(loc(GB_c__3(), 0).v_ptr_int), offset_of(loc(GB_c__3(), 0).v_ptr_int))) && (0 <= offset_of(loc(GB_c__3(), 0).v_ptr_int))) && (offset_of(loc(GB_c__3(), 0).v_ptr_int) <= len(block_of(loc(GB_c__3(), 0).v_ptr_int)))))"),
+            self.row("GB_d__4", "int", "(loc(GB_d__4(), 0).v_int == 0)"),
+            self.row("GB_e__5", "int", "(((-128) <= loc(GB_e__5(), 0).v_int) && (loc(GB_e__5(), 0).v_int <= 127))"),
+        ])
+        self.assertEqual(self.strict(lines), [])
+        # an unknown bool: no value row at all; a known one is `== true`
+        bl = self.fixture(names=["GB_a__1", "GB_b__2"], rows=[
+            "((acc(loc(GB_a__1(), 0).v_bool) && acc(loc(GB_a__1(), 0).d_bool)) && loc(GB_a__1(), 0).d_bool) && acc(lvloc(GB_a__1()).lv)",
+            self.row("GB_b__2", "bool", "(loc(GB_b__2(), 0).v_bool == true)")])
+        bl[0:0] = ["field v_bool: Bool", "field d_bool: Bool"]
+        self.assertEqual(self.strict(bl), [])
+
+    # --- `unique` ---
+
+    def test_unique_outside_the_domain_is_refused(self):
+        lines = self.fixture()
+        lines.append("unique function GB_z__9(): Block")
+        self.some(lines, "`unique`: admitted only as `unique function GB_<name>(): Block` inside `domain Block`")
+
+    def test_unique_of_another_function_in_the_domain_is_refused(self):
+        for text in ("  unique function other(): Block", "  unique function GB_z__9(): Int", "  unique function GB_z__9(x: Int): Block"):
+            with self.subTest(text):
+                self.one(self.fixture(domain_extra=[text]), "`unique`: admitted only as")
+
+    def test_a_gb_function_that_is_not_unique_is_refused(self):
+        self.some(self.fixture(domain_extra=["  function GB_z__9(): Block"]), "must be `unique`")
+
+    def test_a_gb_function_twice_is_refused(self):
+        self.some(self.fixture(domain_extra=["  unique function GB_g__1(): Block"]), "declared twice")
+
+    # --- program_start's contract ---
+
+    def test_a_duplicate_row_is_refused(self):
+        rows = self.rows()
+        self.one(self.fixture(rows=rows + [rows[0]]), "a second `program_start` row for `GB_g__1`")
+
+    def test_a_missing_row_is_refused(self):
+        self.one(self.fixture(rows=self.rows()[:2]), "has no row for `GB_p__3`")
+
+    def test_a_row_for_an_undeclared_global_is_refused(self):
+        rows = self.rows() + [self.row("GB_x__9", "int", "(loc(GB_x__9(), 0).v_int == 0)")]
+        self.one(self.fixture(rows=rows), "a `program_start` row is")
+
+    def test_another_value_is_refused(self):
+        c = "loc(GB_g__1(), 0)"
+        bad = {
+            "not a literal": f"({c}.v_int == loc(GB_h__2(), 0).v_int)",
+            "a disjunction": f"(({c}.v_int == 3) || true)",
+            "a bound only": f"({c}.v_int <= 3)",
+            "an inverted range": f"((7 <= {c}.v_int) && ({c}.v_int <= 3))",
+            "true as an Int": f"({c}.v_int == true)",
+            "the wrong cell": "(loc(GB_h__2(), 0).v_int == 3)",
+        }
+        for what, value in bad.items():
+            with self.subTest(what):
+                rows = self.rows()
+                rows[0] = self.row("GB_g__1", "int", value)
+                self.some(self.fixture(rows=rows), "the value of the `program_start` row of `GB_g__1`")
+
+    def test_extra_conjuncts_or_a_dropped_part_of_a_row_are_refused(self):
+        rows = self.rows()
+        for what, row in {"extra fact": rows[0] + " && false", "no flag": rows[0].replace(" && loc(GB_g__1(), 0).d_int)", ")"),
+                          "no liveness": rows[0].replace(" && acc(lvloc(GB_g__1()).lv)", ""),
+                          "half the permission": rows[0].replace("acc(loc(GB_g__1(), 0).v_int)", "acc(loc(GB_g__1(), 0).v_int, 1/2)")}.items():
+            with self.subTest(what):
+                self.some(self.fixture(rows=[row, *rows[1:]]), "a `program_start` row is")
+
+    def test_a_pointer_row_targets_a_declared_global_of_the_pointee_type(self):
+        rows = self.rows()
+        cases = {"undeclared": ("(loc(GB_p__3(), 0).v_ptr_int == loc(GB_x__9(), 0))", "points at `GB_x__9`"),
+                 "itself, whose field is a pointer's": ("(loc(GB_p__3(), 0).v_ptr_int == loc(GB_p__3(), 0))", "points at `GB_p__3`")}
+        for what, (value, frag) in cases.items():
+            with self.subTest(what):
+                self.some(self.fixture(rows=[rows[0], rows[1], self.row("GB_p__3", "ptr_int", value)]), frag)
+
+    def test_the_facts_row_is_pinned(self):
+        bad = {
+            "len 2": self.facts().replace("(len(GB_g__1()) == 1)", "(len(GB_g__1()) == 2)"),
+            "the liveness cell elsewhere": self.facts().replace("loc(GB_h__2(), (-2))", "loc(GB_h__2(), (-1))"),
+            "a global missing": self.facts(self.NAMES[:2]),
+            "a global twice": self.facts(self.NAMES + self.NAMES[:1]),
+            "a disjunct": self.facts() + " || true",
+        }
+        for what, facts in bad.items():
+            with self.subTest(what):
+                self.one(self.fixture(facts=facts), "its first `ensures` row must be the global facts")
+
+    def test_the_facts_may_be_in_another_order(self):
+        self.assertEqual(self.strict(self.fixture(facts=self.facts(list(reversed(self.NAMES))))), [])
+
+    def test_the_header_the_tag_and_the_clauses_of_program_start_are_pinned(self):
+        self.some(self.fixture(ps_tag=False), "bodyless `method program_start` without `// cerastes:trusted-contract")
+        self.some(self.fixture(ps_header="method program_start() returns (r: Int)"), "it must be a bodyless `method program_start()`")
+        self.some(self.fixture(ps_extra=[Check("  requires true", WF, "internal")]), "`ensures` rows and a final `decreases _`")
+        self.some(self.fixture(ps_decreases="  decreases"), "`ensures` rows and a final `decreases _`")
+        lines = self.fixture()
+        i = lines.index("  decreases _", lines.index("method program_start()"))
+        lines[i + 1:i + 1] = ["{", "}"]
+        self.some(lines, "it must be a bodyless `method program_start()`")
+
+    def test_program_start_without_globals_is_refused(self):
+        lines = self.fixture(names=[], facts="true", rows=[])
+        self.some(lines, "`method program_start` in a program with no `unique function GB_...`")
+
+    def test_two_program_starts_are_refused(self):
+        lines = self.fixture()
+        lines += ["// cerastes:trusted-contract another", "method program_start()", "  decreases _"]
+        self.some(lines, "exactly one `method program_start()`")
+
+    # --- the facts of every other method; the one call of program_start ---
+
+    def test_a_method_without_the_facts_is_refused(self):
+        lines = self.fixture()
+        i = find(lines, "requires " + self.facts())
+        lines.pop(i)
+        self.one(lines, "`method f__1` of a program with globals must take the global facts as its first `requires`")
+
+    def test_a_method_with_the_facts_second_or_changed_is_refused(self):
+        lines = self.fixture()
+        i = find(lines, "requires " + self.facts())
+        lines[i], lines[i + 1] = lines[i + 1], lines[i]
+        self.one(lines, "must take the global facts as its first `requires`")
+        self.one(self.fixture(f_requires=self.facts(self.NAMES[:2])), "must take the global facts as its first `requires`")
+        self.one(self.fixture(f_requires=self.facts() + " && true"), "must take the global facts as its first `requires`")
+
+    def test_a_method_with_no_requires_at_all_is_refused(self):
+        lines = self.fixture()
+        i = find(lines, "requires " + self.facts())
+        del lines[i:i + 2]
+        self.some(lines, "`method f__1` of a program with globals must take the global facts")
+
+    def test_the_method_that_starts_the_program_needs_no_facts_but_must_start_first(self):
+        # `var` declarations may precede the call, a statement may not
+        self.assertEqual(self.strict(self.fixture(main_lines=["  var z: Int", Check("  program_start()", PRE, "internal")])), [])
+        self.some(self.fixture(main_lines=["  y := 1", Check("  program_start()", PRE, "internal")]),
+                  "`program_start()` is called only as the first statement of `main`'s method")
+
+    def test_program_start_called_twice_is_refused(self):
+        lines = self.fixture(main_lines=[Check("  program_start()", PRE, "internal"), Check("  program_start()", PRE, "internal")])
+        self.some(lines, "`program_start()` is called once")
+
+    def test_a_call_of_the_entry_method_is_refused(self):
+        # a call right after program_start (the audit's mutant: `res := f_main(...)`), from the entry itself, and from another method
+        lines = self.fixture(main_lines=[Check("  program_start()", PRE, "internal"), Check("  main__2()", PRE, "internal")])
+        self.some(lines, "a call of the entry method `main__2`")
+        lines = self.fixture()
+        i = find(lines, "x := alloc_int()")
+        lines.insert(i + 1, Check("  main__2()", PRE, "internal"))
+        self.some(lines, "a call of the entry method `main__2`")
+        # a method whose name only starts like the entry's is not a call of it
+        self.assertEqual(self.strict(self.fixture(main_lines=[Check("  program_start()", PRE, "internal"), "  var main__2__x: Int"])), [])
+
+    def test_the_entry_method_takes_no_requires(self):
+        lines = self.fixture()
+        i = lines.index("method main__2()")
+        lines.insert(i + 1, Check("  requires true", WF, "internal"))
+        self.some(lines, "starts the program (its first statement is `program_start()`): it takes no `requires`")
+
+    def test_program_start_called_by_a_method_that_takes_the_facts_is_refused(self):
+        lines = self.fixture()
+        i = find(lines, "x := alloc_int()")
+        lines.insert(i + 1, Check("  program_start()", PRE, "internal"))
+        self.some(lines, "`program_start()` is called once")
+        self.some(lines, "`program_start()` is called only as the first statement")
+
+    def test_a_program_without_globals_is_not_linted_for_facts(self):
+        self.assertEqual(self.strict(MemoryModelTests().fixture()), [])
+
+    # --- the flag of a global's cell ---
+
+    def test_the_flag_of_a_globals_cell_is_set_by_its_write_only(self):
+        g = "loc(GB_g__1(), 0)"
+        ok = [f"  {g}.v_int := 1", f"  {g}.d_int := true"]
+        lines = self.fixture()
+        lines[lines.index("  y := 1"):lines.index("  y := 1")] = ok
+        self.assertEqual(self.strict(lines), [])
+        for what, bad, frag in (("no write before", ["  y := 2", f"  {g}.d_int := true"], "does not directly follow a write"),
+                                ("false", [f"  {g}.v_int := 1", f"  {g}.d_int := false"], "is assigned `false`")):
+            with self.subTest(what):
+                lines = self.fixture()
+                lines[lines.index("  y := 1"):lines.index("  y := 1")] = bad
+                self.some(lines, frag)
+
+
 class SelfTestHygieneTests(unittest.TestCase):
     """A test method defined twice in one class replaces the first, which then never runs (it happened here:
     two `test_labels_followed_by_no_deletable_statement_give_no_mutant`)."""

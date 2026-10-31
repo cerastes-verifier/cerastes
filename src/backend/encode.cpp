@@ -139,6 +139,9 @@ class Encoder {
     // User labels: one VIR id per label entity (decision 0015 item 2); the C/C++ position of each user `goto`, for the
     // diagnostics of vir::goto_problems.
     bool in_for_step = false;  // encoding the increment of a `for` loop
+    // Decision 0041 item 6 (audit B2): while the original expression of a folded address constant is encoded (const_depth is raised with it), `&g`
+    // inside it is read as `GlobalAddr`; `addr_const` counts those levels.
+    int addr_const = 0;
     // Case values (decision 0017 items 5-6): while a case label's value (or the initializer of a local constant it names)
     // is encoded, a use of a variable is noted, and in C++ a `const` local with a constant initializer is a function
     // local constant, whose uses are literals.
@@ -175,6 +178,22 @@ class Encoder {
   std::map<a_variable_ptr, NamedInfo> named_;
   std::set<a_variable_ptr> rejected_globals_;  // file-scope variables rejected at their declaration: uses are not diagnosed again
   a_variable_ptr encoding_named_ = nullptr;     // the named constant whose initializer is being encoded
+
+  // Mutable globals and `static` locals (decision 0041): the variables that are blocks of the program, by variable.
+  std::map<a_variable_ptr, vir::Global*> gmap_;
+  // Where a global's initial value is `&target` (kept for the escape rule of item 3, even when the global's own value turns unknown).
+  std::map<const vir::Global*, vir::Global*> addr_init_;
+  struct PendingGlobal {
+    a_variable_ptr v;
+    vir::Global* g;
+    a_constant_ptr c;  // the initializer constant (null: none)
+    bool dynamic;      // C++: initialized by code (rejected)
+  };
+  std::vector<PendingGlobal> pending_globals_;
+  vir::Global* global_of(a_variable_ptr v) const {
+    auto it = gmap_.find(v);
+    return it == gmap_.end() ? nullptr : it->second;
+  }
 
   // Enumerations (decision 0018): one VIR type per enumeration type entry, and what was decided about it.
   struct EnumInfo {
@@ -1165,6 +1184,7 @@ class Encoder {
       reject(Diag::unsupported_expression, pos, "the address of a label (GNU)");
       return nullptr;
     }
+    if (c->kind == ck_address && c->variant.address.kind == abk_variable) return address_constant(c, pos);  // `&g` (decision 0041 items 5-6)
     if (c->kind != ck_integer) {
       reject(Diag::unsupported_expression, pos, "a constant that is not an integer or a bool");
       return nullptr;
@@ -1553,6 +1573,7 @@ class Encoder {
         return nullptr;
       }
       if (rejected_globals_.count(v) != 0) return nullptr;  // diagnosed at its declaration
+      if (vir::Global* g = global_of(v)) return global_read(g, e);
     }
     if (v == nullptr || cx_.contract) {
       reject(Diag::unsupported_expression, e->position, "a variable reference that cannot be read");
@@ -1583,6 +1604,17 @@ class Encoder {
     const Expr* local = b_.local(it->second, loc_of(e->position));
     if (it->second->type.is_ptr()) b_.text(local, it->second->name);  // for the messages of decision 0032 item 6
     return local;
+  }
+
+  // A read of a mutable global or `static` local (decision 0041 item 6): `*&g`, with its permission, flag and range checks at lowering.
+  const Expr* global_read(vir::Global* g, an_expr_node_ptr e) {
+    if (cx_.const_depth > 0) {
+      reject(Diag::unsupported_expression, e->position,
+             "the value of the variable \"" + g->c_name + "\" in a constant expression (a mutable variable is never one)");
+      return nullptr;
+    }
+    const SrcLoc l = loc_of(e->position);
+    return b_.deref(b_.global_addr(g, l), l);
   }
 
   // A reference to a `const`/`constexpr` local from a case value (C++, decision 0017 item 6): the local becomes a function
@@ -1666,6 +1698,7 @@ class Encoder {
       else if (it.sa != nullptr) encode_file_static_assertion(it.sa);
       else encode_named_enumerator(it.c);
     }
+    resolve_global_inits(c_mode);
     cx_ = Ctx();
   }
 
@@ -1690,17 +1723,22 @@ class Encoder {
         return;
       }
     }
+    if (v->is_template_variable || v->template_info != nullptr || v->is_prototype_instantiation) {  // before the type, which may be the dependent `T`
+      refuse("a variable template (M5)");
+      return;
+    }
     // The type first, so that the message names the real reason (an array of const is not "not const").
-    VType vt = vtype(v->type);
-    if (!vt.ok && is_pointer_type(v->type) && !vt.silent) vt.name = render_type(skip_typerefs(v->type)) + " (a pointer global variable)";
+    const bool mutable_obj = !is_const_object(v);  // decision 0041: a mutable global is a block of the program, a pointer one included
+    VType vt = vtype(v->type, mutable_obj);
+    if (!vt.ok && !mutable_obj && is_pointer_type(v->type) && !vt.silent) vt.name = render_type(skip_typerefs(v->type)) + " (a pointer global variable)";
     if (!vt.ok || vt.t.is_void()) {
       if (vt.ok) vt.name = "void";
       reject_type(vt, p);
       rejected_globals_.insert(v);
       return;
     }
-    if (!is_const_object(v)) {
-      refuse("a global variable that is not const (mutable globals come with M4.5b)");
+    if (mutable_obj) {
+      encode_mutable_global(v, c_mode, vt);
       return;
     }
     if (v->source_corresp.is_class_member) {
@@ -1766,6 +1804,399 @@ class Encoder {
     named_[v] = NamedInfo{vt.t, value};
     // No initializer: nothing is checked, so perturb_folded leaves the value 0 (check_program rejects a perturbed one).
     prog_.add_named_const(name, vt.t, loc_of(p), init, init != nullptr ? maybe_perturb(vt.t, value) : value);
+  }
+
+  // ---- mutable globals and `static` locals (decision 0041) --------------------------------------------------------------------
+  // The common checks of a variable that becomes a block of the program; creates the Global (initial value filled by read_global_init).  Null, after
+  // a rejection at the declaration, when it is not one (uses are not diagnosed again).
+  vir::Global* make_global(a_variable_ptr v, const VType& vt, vir::Function* owner) {
+    const a_source_position p = v->source_corresp.decl_position;
+    const char* nm = v->source_corresp.name;
+    auto refuse = [&](const std::string& why) -> vir::Global* {
+      reject(Diag::unsupported_declaration, p, why);
+      rejected_globals_.insert(v);
+      return nullptr;
+    };
+    if (v->source_corresp.is_class_member) return refuse("a static data member (M7)");
+    if (v->is_template_variable || v->template_info != nullptr || v->is_prototype_instantiation) return refuse("a variable template (M5)");
+    if (v->is_thread_local) return refuse(owner != nullptr ? "a thread_local static local variable" : "a thread_local global variable (M8)");
+    if (v->is_weak || v->is_weakref) return refuse("a weak global variable (another unit may replace it at link time)");
+    if (owner == nullptr) {
+      // Defined in this unit (P63 A1): an `extern` declaration with no definition has no `declared_type`.
+      if (v->declared_type == nullptr) return refuse("a global variable defined in another translation unit (M8)");
+      if (ents_ != nullptr) {
+        auto sd = ents_->variable_secondary_decls.find(v);
+        if (sd != ents_->variable_secondary_decls.end())
+          for (const a_source_position& q : sd->second)
+            if (declared_in_system(q))
+              return refuse("a global variable that is also declared in a system file (the runtime may use it: `environ`, `optind`; decision 0041 item 2)");
+      }
+    }
+    vir::Global* g = prog_.add_global(nm ? nm : "?", vt.t, loc_of(p), owner);
+    g->c_type_name = vt.name;
+    gmap_[v] = g;
+    return g;
+  }
+
+  // A mutable file-scope variable of a verified file (decision 0041 item 2): a block of the program.  Its initializer is read after every global exists
+  // (resolve_global_inits), since `&h` may name a later one.
+  void encode_mutable_global(a_variable_ptr v, bool c_mode, const VType& vt) {
+    (void)c_mode;
+    const a_source_position p = v->source_corresp.decl_position;
+    vir::Global* g = make_global(v, vt, nullptr);
+    if (g == nullptr) return;
+    PendingGlobal pg{v, g, nullptr, false};
+    switch (v->init_kind) {
+      case initk_none:
+      case initk_zero: break;
+      case initk_static:
+        pg.c = v->initializer.constant;
+        if (pg.c == nullptr) {
+          reject(Diag::unsupported_declaration, p, "an initializer this version cannot read");
+          rejected_globals_.insert(v);
+          return;
+        }
+        break;
+      case initk_dynamic: pg.dynamic = true; break;
+      default:
+        reject(Diag::unsupported_declaration, p, "a global variable whose initialization this version cannot read");
+        rejected_globals_.insert(v);
+        return;
+    }
+    pending_globals_.push_back(pg);
+  }
+
+  // The global an address constant names at offset 0 (decision 0041 item 5, P63 H3-H5), or null after a rejection at `pos`.  With `pointee_of` (the
+  // constant's own type), a type that is not the variable's type must differ by qualifiers added at the pointee's top level (decision 0040 item 2).
+  vir::Global* address_target(a_constant_ptr c, const a_source_position& pos, bool check_pointee) {
+    const auto& ad = c->variant.address;
+    if (ad.kind == abk_routine) {
+      reject(Diag::unsupported_expression, pos, "the address of a function (M4.7)");
+      return nullptr;
+    }
+    if (ad.kind == abk_constant || ad.kind == abk_temporary) {
+      reject(Diag::unsupported_expression, pos, "the address of a string literal or of a constant (M4.6)");
+      return nullptr;
+    }
+    if (ad.kind != abk_variable || ad.variant.variable == nullptr) {
+      reject(Diag::unsupported_expression, pos, "an address constant that is not the address of a variable");
+      return nullptr;
+    }
+    a_variable_ptr var = ad.variant.variable;
+    vir::Global* g = global_of(var);
+    if (g == nullptr) {
+      if (rejected_globals_.count(var) != 0) return nullptr;  // diagnosed at its declaration
+      if (named_.count(var) != 0)
+        reject(Diag::unsupported_expression, pos, "the address of a `const` object (const objects as cells come with M4.6, decision 0041 item 2)");
+      else
+        reject(Diag::unsupported_expression, pos, "the address of a variable that is not a global or a `static` local of this unit (decision 0041 item 5)");
+      return nullptr;
+    }
+    if (ad.offset != 0 || ad.subobject_path != nullptr) {
+      reject(Diag::unsupported_expression, pos, "an address that is not exactly `&" + g->c_name + "` (pointer arithmetic or a subobject: M4.5e2)");
+      return nullptr;
+    }
+    if (check_pointee) {
+      a_type_ptr ct = c->type != nullptr ? skip_typerefs(c->type) : nullptr;
+      a_type_ptr pt = (ct != nullptr && ct->kind == tk_pointer && !ct->variant.pointer.is_reference) ? ct->variant.pointer.type : nullptr;
+      bool ok = false;
+      if (pt != nullptr && var->type != nullptr && f_identical_types(pt, var->type, ITF_IGNORE_TOP_LEVEL_QUALIFIERS) != 0) {
+        const a_type_qualifier_set tq = f_get_type_qualifiers(pt, TRUE);
+        const a_type_qualifier_set fq = f_get_type_qualifiers(var->type, TRUE);
+        ok = (fq & ~tq) == 0;
+      }
+      if (!ok) {
+        reject(Diag::unsupported_expression, pos,
+               "a pointer conversion of the address of `" + g->c_name + "` (only qualifiers may be added at the pointee's top level, decision 0040 item 2)");
+        return nullptr;
+      }
+    }
+    return g;
+  }
+
+  // The value of an address constant: `&g` (decision 0041 items 5-6).  A constant whose original expression is recorded is encoded from it, never
+  // from the front end's value (audit B2: the C++ front end folds `&g == &h` and `&g + 1 == &h`); one with none (an initializer) is read directly.
+  const Expr* address_constant(a_constant_ptr c, const a_source_position& pos) {
+    VType t;
+    if (!value_type(c->type, pos, &t, true)) return nullptr;
+    an_expr_node_ptr original = (c->expr != nullptr || c->local_expr_ref) ? expr_node_from_constant(c) : nullptr;
+    if (original != nullptr) {
+      ++cx_.const_depth;  // calls in it ran at compile time: rejected by `call`
+      ++cx_.addr_const;
+      const Expr* x = expr(original);
+      --cx_.addr_const;
+      --cx_.const_depth;
+      if (x == nullptr) return nullptr;
+      if (x->type != t.t) {
+        reject(Diag::unsupported_expression, pos, "a folded constant whose original expression has another type");
+        return nullptr;
+      }
+      return x;
+    }
+    vir::Global* g = address_target(c, pos, true);
+    if (g == nullptr) return nullptr;
+    const Expr* a = b_.global_addr(g, loc_of(pos));
+    if (a->type != t.t) {
+      reject(Diag::unsupported_expression, pos, "an address constant whose type is not the pointer to the variable's type");
+      return nullptr;
+    }
+    return a;
+  }
+
+  // The initial value of a mutable global or `static` local (decision 0041 items 3 and 5).  False after a rejection at its declaration.
+  bool read_global_init(a_variable_ptr v, vir::Global* g, a_constant_ptr c, bool dynamic, bool c_mode) {
+    const a_source_position p = v->source_corresp.decl_position;
+    const bool local = g->owner != nullptr;
+    auto refuse = [&](const std::string& why) {
+      reject(Diag::unsupported_declaration, p, why);
+      rejected_globals_.insert(v);
+      return false;
+    };
+    if (dynamic)
+      return refuse(local ? "a `static` local variable whose initializer is not a constant expression (dynamic initialization)"
+                          : "a global variable whose initializer is not a constant expression (dynamic initialization)");
+    const vir::Type t = g->type;
+    if (t.is_ptr()) {
+      if (c == nullptr) {
+        g->init_kind = vir::Global::Init::Null;
+      } else if (c->kind == ck_integer && is_pointer_type(c->type)) {  // a null pointer constant in every spelling (P63 H4)
+        if (decimal_value(c) != "0") return refuse("an integer used as a pointer");
+        g->init_kind = vir::Global::Init::Null;
+      } else if (c->kind == ck_address) {
+        vir::Global* target = address_target(c, p, true);
+        if (target == nullptr) {
+          rejected_globals_.insert(v);
+          return false;
+        }
+        if (*t.pointee != target->type) return refuse("an initializer that is the address of a variable of another type (a pointer conversion, decision 0040 item 2)");
+        g->init_kind = vir::Global::Init::Addr;
+        g->target = target;
+        addr_init_[g] = target;
+      } else {
+        return refuse("a pointer initializer other than null or the address of a global (decision 0041 item 5)");
+      }
+    } else {
+      g->init_kind = vir::Global::Init::Value;
+      g->value = "0";
+      if (c != nullptr) {
+        if (c->kind != ck_integer || is_pointer_type(c->type)) return refuse("an initializer this version cannot read");
+        if (c_mode) {
+          an_expr_node probe{};
+          probe.kind = enk_constant;
+          probe.variant.constant.ptr = c;
+          if (names_object(&probe)) {
+            reject(Diag::unsupported_expression, p, "in C, an initializer that names another object (it is not a constant expression in C)");
+            rejected_globals_.insert(v);
+            return false;
+          }
+        }
+        ++cx_.const_depth;  // a constant expression: no calls (`call` rejects them, also those the front end folded, P63 H7)
+        const Expr* init = constant_initializer(c, p);
+        --cx_.const_depth;
+        if (init == nullptr) {
+          rejected_globals_.insert(v);
+          return false;
+        }
+        if (init->type != t) return refuse("an initializer whose type is not the variable's type");
+        g->init = init;
+        g->value = maybe_perturb(t, constant_text(c, t));
+      }
+    }
+    // The value is known where the unit can know it (item 3): internal linkage and a `static` local, and C's external linkage with an initializer.
+    if (!local && v->source_corresp.name_linkage != nlk_internal && (!c_mode || c == nullptr)) make_unknown(g);
+    return true;
+  }
+
+  // The value is not stated in `program_start`, but the initializer as written (`init`) stays: its obligations are checked in every prologue
+  // like any initializer's (decision 0017 item 4), so `unsigned g = -1;` is a `conversion` error whatever the linkage.
+  static void make_unknown(vir::Global* g) {
+    g->init_kind = vir::Global::Init::Unknown;
+    g->target = nullptr;
+  }
+
+  // The file-scope globals' initial values, then the escape rule (decision 0041 item 3, audit B1).
+  void resolve_global_inits(bool c_mode) {
+    for (const PendingGlobal& pg : pending_globals_) {
+      cx_ = Ctx();
+      cx_.stmt_pos = pg.v->source_corresp.decl_position;
+      read_global_init(pg.v, pg.g, pg.c, pg.dynamic, c_mode);
+    }
+    pending_globals_.clear();
+    cx_ = Ctx();
+    // A global whose address is the initial value of a global whose value is unknown is unknown too, transitively: another unit's initializer may write
+    // through it before `main`.
+    std::vector<vir::Global*> work;
+    for (const auto& [g, t] : addr_init_)
+      if (g->init_kind == vir::Global::Init::Unknown) work.push_back(t);
+    std::set<vir::Global*> done;
+    while (!work.empty()) {
+      vir::Global* t = work.back();
+      work.pop_back();
+      if (!done.insert(t).second) continue;
+      make_unknown(t);
+      auto it = addr_init_.find(t);
+      if (it != addr_init_.end()) work.push_back(it->second);
+    }
+  }
+
+  // A `static` local (decision 0041 item 12): a Global owned by the current function, its initial value as for a global (item 5).  The declaration emits no
+  // code: the initializer runs once, before `main` (`program_start`).
+  void static_local_decl(a_variable_ptr v, const a_source_position& at) {
+    if (is_const_object(v)) {
+      reject(Diag::unsupported_declaration, at,
+             "a `static const` or `static constexpr` local variable (const objects as cells come with M4.6, decision 0041 item 2)");
+      cx_.rejected_vars.insert(v);
+      return;
+    }
+    VType vt = vtype(v->type, true);
+    if (!vt.ok || vt.t.is_void()) {
+      if (vt.ok) vt.name = "void";
+      reject_type(vt, at);
+      cx_.rejected_vars.insert(v);
+      return;
+    }
+    vir::Global* g = make_global(v, vt, cx_.fn);
+    if (g == nullptr) {
+      cx_.rejected_vars.insert(v);
+      return;
+    }
+    a_constant_ptr c = nullptr;
+    bool dynamic = false;
+    bool bad = false;
+    switch (v->init_kind) {
+      case initk_none:
+      case initk_zero: break;
+      case initk_static:
+        c = v->initializer.constant;
+        bad = c == nullptr;
+        break;
+      case initk_function_local: {  // P63 H6: the entry of the scope's `local_static_variable_inits`
+        a_local_static_variable_init_ptr li = nullptr;
+        if (ents_ != nullptr) {
+          auto it = ents_->static_local_inits.find(v);
+          if (it != ents_->static_local_inits.end()) li = it->second;
+        }
+        if (li == nullptr) {
+          bad = true;
+        } else if (li->init_kind == initk_static) {
+          c = li->initializer.constant;
+          bad = c == nullptr;
+        } else if (li->init_kind == initk_dynamic) {
+          dynamic = true;
+        } else {
+          bad = true;
+        }
+        break;
+      }
+      default: bad = true; break;
+    }
+    if (bad) {
+      reject(Diag::unsupported_declaration, at, "an initializer this version cannot read");
+      rejected_globals_.insert(v);
+      cx_.rejected_vars.insert(v);
+      return;
+    }
+    if (c != nullptr) {
+      an_expr_node probe{};
+      probe.kind = enk_constant;
+      probe.variant.constant.ptr = c;
+      if (names_local(&probe)) {
+        reject(Diag::unsupported_declaration, at, "a `static` local variable whose initializer names a local constant or variable (decision 0041 item 2)");
+        rejected_globals_.insert(v);
+        cx_.rejected_vars.insert(v);
+        return;
+      }
+    }
+    Ctx saved = std::move(cx_);
+    cx_ = Ctx();
+    cx_.fn = saved.fn;
+    cx_.routine = saved.routine;
+    cx_.stmt_pos = at;
+    const bool ok = read_global_init(v, g, c, dynamic, il_header.source_language == sl_C);
+    cx_ = std::move(saved);
+    if (!ok) cx_.rejected_vars.insert(v);
+  }
+
+  // The implicit `owns(s)` of every `static` local (decision 0041 item 12, question 80): in the contract of its function and of every function that
+  // reaches it through the encoder's call edges, as one atom per local in `requires` and in `ensures` (a set per function: a recursive function reaches
+  // itself).  `Program::entry` is skipped (it holds them from `program_start`), and a `noreturn` function gets no `ensures` atom.  Run after every body is
+  // encoded and before anything lowers or checks a contract.
+  void add_static_local_atoms() {
+    std::map<const vir::Function*, std::vector<vir::Global*>> by_owner;
+    for (const vir::Global& g : prog_.globals())
+      if (g.owner != nullptr) by_owner[g.owner].push_back(const_cast<vir::Global*>(&g));
+    if (by_owner.empty()) return;
+    std::map<const vir::Function*, a_routine_ptr> routine_of;
+    for (const auto& [r, f] : fns_)
+      if (f != nullptr) routine_of[f] = r;
+    std::map<a_routine_ptr, std::vector<a_routine_ptr>> callers;  // the reverse of edges_
+    for (const auto& [caller, callees] : edges_)
+      for (a_routine_ptr callee : callees) callers[callee].push_back(caller);
+    std::map<vir::Function*, std::set<int>> need;  // by function, the ids of the statics (ordered by id)
+    for (const auto& [owner, gs] : by_owner) {
+      auto ro = routine_of.find(owner);
+      if (ro == routine_of.end()) continue;
+      std::set<a_routine_ptr> seen{ro->second};
+      std::vector<a_routine_ptr> todo{ro->second};
+      while (!todo.empty()) {
+        a_routine_ptr r = todo.back();
+        todo.pop_back();
+        for (a_routine_ptr c : callers[r])
+          if (seen.insert(c).second) todo.push_back(c);
+      }
+      for (a_routine_ptr r : seen) {
+        auto fi = fns_.find(r);
+        if (fi == fns_.end() || fi->second == nullptr || fi->second == prog_.entry()) continue;
+        for (vir::Global* g : gs) need[fi->second].insert(g->id);
+      }
+    }
+    for (auto& [f, ids] : need) {
+      int n = vir::requires_atom_count(*f);
+      for (int id : ids) {
+        const vir::Global* g = &prog_.globals()[static_cast<size_t>(id)];
+        const SrcLoc l = f->loc;
+        f->requires_.push_back(vir::Clause{b_.global_atom(vir::AtomKind::Owns, b_.global_addr(g, l), n, l, true), l});
+        if (!f->noreturn) f->ensures_.push_back(vir::Clause{b_.global_atom(vir::AtomKind::Owns, b_.global_addr(g, l), n, l, true), l});
+        ++n;
+      }
+    }
+  }
+
+  // A `pure` or `predicate` body is not encoded (0011 item 4), so nothing else would see a mutable global or a `static` local in it: rejected here until
+  // M4.5f1 encodes those bodies with the permissions a global needs (decision 0041 item 12; audit round 2, SF2).  Named constants stay allowed.
+  static Encoder*& spec_scan_self() {
+    static Encoder* p = nullptr;
+    return p;
+  }
+  static void spec_scan_statement(a_statement_ptr s, an_expr_or_stmt_traversal_block_ptr) {
+    if (s->kind != stmk_decl) return;
+    for (an_il_entity_list_entry_ptr en = s->variant.decl.entities; en != nullptr; en = en->next) {
+      if (en->entity.kind != iek_variable) continue;
+      a_variable_ptr v = reinterpret_cast<a_variable_ptr>(en->entity.ptr);
+      if (v->storage_class == sc_static && v->source_corresp.enclosing_routine != nullptr)
+        spec_scan_self()->reject(Diag::unsupported_declaration, v->source_corresp.decl_position,
+                                 "a `static` local variable in a pure or predicate function (decision 0041 item 12)");
+    }
+  }
+  static void spec_scan_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr) {
+    if (e->kind != enk_variable || e->variant.variable.ptr == nullptr) return;
+    if (spec_scan_self()->global_of(e->variant.variable.ptr) != nullptr)
+      spec_scan_self()->reject(Diag::unsupported_expression, e->position,
+                               "a pure or predicate function that reads or writes a global variable (decision 0041 item 12)");
+  }
+  void reject_globals_in_spec_body(a_routine_ptr r) {
+    a_scope_ptr sp = body_scope(r);
+    if (sp == nullptr || sp->assoc_block == nullptr) return;
+    cx_ = Ctx();
+    cx_.routine = r;
+    cx_.stmt_pos = r->source_corresp.decl_position;
+    an_expr_or_stmt_traversal_block tb;
+    clear_expr_or_stmt_traversal_block(&tb);
+    tb.process_statement = spec_scan_statement;
+    tb.process_expr = spec_scan_expr;
+    spec_scan_self() = this;
+    traverse_statement(sp->assoc_block, &tb);
+    spec_scan_self() = nullptr;
   }
 
   // An enumerator with a written initializer (decision 0018 item 10): a named constant of the unit, its initializer encoded by
@@ -2041,7 +2472,7 @@ class Encoder {
         inner->variant.operation.operands != nullptr && inner->variant.operation.operands->next == nullptr) {
       an_expr_node_ptr pn = peel_place(inner->variant.operation.operands);
       if (pn->kind != enk_param_ref) {
-        reject(Diag::unsupported_annotation, e->position, "\"cerastes::old\" of a place other than `*p` of a pointer parameter (a global, a member or an element: M4.5b2, M4.5c, M4.5e1)");
+        reject(Diag::unsupported_annotation, e->position, "\"cerastes::old\" of a place other than `*p` of a pointer parameter (through a pointer global, a member or an element: M4.5c, M4.5e1)");
         return nullptr;
       }
       ++cx_.old_depth;
@@ -2054,8 +2485,14 @@ class Encoder {
       }
       return b_.old(b_.deref(pf, loc_of(e->position)), loc_of(e->position));
     }
+    // `old(g)` of a mutable global (decision 0041 item 7): its value on entry.
+    if (inner != nullptr && inner->kind == enk_variable && inner->variant.variable.ptr != nullptr)
+      if (vir::Global* g = global_of(inner->variant.variable.ptr)) {
+        const SrcLoc l = loc_of(e->position);
+        return b_.old(b_.deref(b_.global_addr(g, l), l), l);
+      }
     if (inner == nullptr || inner->kind != enk_param_ref) {
-      reject(Diag::unsupported_expression, e->position, "\"cerastes::old\" of anything but a parameter");
+      reject(Diag::unsupported_expression, e->position, "\"cerastes::old\" of anything but a parameter or a global");
       return nullptr;
     }
     ++cx_.old_depth;
@@ -2079,6 +2516,34 @@ class Encoder {
 
   static bool is_indirect_node(an_expr_node_ptr n) {
     return n != nullptr && n->kind == enk_operation && n->variant.operation.kind == eok_indirect;
+  }
+
+  // `&g` as the IL writes it in an annotation: `eok_address_of` over the variable of a mutable global (peeling the front end's wrappers).
+  vir::Global* global_of_address_of(an_expr_node_ptr n) const {
+    n = peel_place(n);
+    if (n == nullptr || n->kind != enk_operation || n->variant.operation.kind != eok_address_of || n->variant.operation.operands == nullptr ||
+        n->variant.operation.operands->next != nullptr)
+      return nullptr;
+    an_expr_node_ptr in = peel_place(n->variant.operation.operands);
+    return (in != nullptr && in->kind == enk_variable && in->variant.variable.ptr != nullptr) ? global_of(in->variant.variable.ptr) : nullptr;
+  }
+  // The global a place of a contract names (decision 0041 item 7): the variable `g` (C: bare; C++: under a reference binding), or `*&g`.
+  vir::Global* global_place(an_expr_node_ptr a) const {
+    a = peel_place(a);
+    if (a == nullptr) return nullptr;
+    if (a->kind == enk_variable && a->variant.variable.ptr != nullptr) return global_of(a->variant.variable.ptr);
+    if (is_indirect_node(a) && a->variant.operation.operands != nullptr && a->variant.operation.operands->next == nullptr)
+      return global_of_address_of(a->variant.operation.operands);
+    return nullptr;
+  }
+  // The address constant `&g` of `cerastes_old(g)`'s C spelling (P63 A5: `const void *` constant, abk_variable, offset 0).
+  vir::Global* global_of_address_constant(an_expr_node_ptr n) const {
+    n = peel_place(n);
+    if (n == nullptr || n->kind != enk_constant || n->variant.constant.ptr == nullptr) return nullptr;
+    a_constant_ptr c = n->variant.constant.ptr;
+    if (c->kind != ck_address || c->variant.address.kind != abk_variable || c->variant.address.variant.variable == nullptr) return nullptr;
+    if (c->variant.address.offset != 0 || c->variant.address.subobject_path != nullptr) return nullptr;
+    return global_of(c->variant.address.variant.variable);
   }
 
   enum class SpecFn { none, owns, reads, live, old_c, unsupported };
@@ -2121,6 +2586,19 @@ class Encoder {
     }
     an_expr_node_ptr a = peel_place(ops[1]);
     an_expr_node_ptr pn = nullptr;  // the parameter reference
+    // `owns(g)` / `reads(g)` of a mutable global (decision 0041 item 7); `live(&g)` is never written, a global's liveness is not in doubt.
+    if (fn != SpecFn::live) {
+      if (vir::Global* g = global_place(a)) {
+        const vir::AtomKind gk = fn == SpecFn::owns ? vir::AtomKind::Owns : vir::AtomKind::Reads;
+        const Expr* atom = b_.global_atom(gk, b_.global_addr(g, loc_of(e->position)), -1, loc_of(e->position));
+        atom_pos_[atom] = e->position;
+        return atom;
+      }
+    } else if (global_of_address_of(a) != nullptr || global_of_address_constant(a) != nullptr) {
+      reject(Diag::unsupported_annotation, e->position,
+             "\"" + name + "\" of the address of a global (a global's liveness is never in doubt: `reads(g)` or `owns(g)`, decision 0041 item 7)");
+      return nullptr;
+    }
     if (fn == SpecFn::live) {
       pn = a;
     } else {
@@ -2133,8 +2611,8 @@ class Encoder {
         return nullptr;
       } else {
         reject(Diag::unsupported_annotation, e->position,
-               "\"" + name + "\" of a place other than `*p` of a pointer parameter (`*local`, a global, a member, an element or `*result`: "
-               "M4.5b2, M4.5c, M4.5e1, M4.5d2)");
+               "\"" + name + "\" of a place other than `*p` of a pointer parameter or a global variable (`*local`, a member, an element or `*result`: "
+               "M4.5c, M4.5e1, M4.5d2)");
         return nullptr;
       }
     }
@@ -2143,9 +2621,14 @@ class Encoder {
              "\"" + name + "\" of a place reached through a heap read (`owns(**pp)`, `live(*pp)`: M4.5c, decision 0040 item 6)");
       return nullptr;
     }
+    if (pn != nullptr && pn->kind == enk_variable && pn->variant.variable.ptr != nullptr && global_of(pn->variant.variable.ptr) != nullptr) {
+      reject(Diag::unsupported_annotation, e->position,
+             "\"" + name + "\" of a place reached through a pointer global (`owns(*gp)`, `live(gp)`: a place reached through a heap read, M4.5c, decision 0041 item 7)");
+      return nullptr;
+    }
     if (pn == nullptr || pn->kind != enk_param_ref) {
       reject(Diag::unsupported_annotation, e->position,
-             "\"" + name + "\" of something other than a pointer parameter (a local, a global: M4.5b2; the result: M4.5d2)");
+             "\"" + name + "\" of something other than a pointer parameter or a global (a local: never; the result: M4.5d2)");
       return nullptr;
     }
     const Expr* pf = param_reference(pn);
@@ -2180,6 +2663,11 @@ class Encoder {
     }
     an_expr_node_ptr a = peel_place(ops[1]);
     an_expr_node_ptr pn = nullptr;  // the pointer variable
+    if (global_place(a) != nullptr || (fn == SpecFn::live && (global_of_address_of(a) != nullptr || global_of_address_constant(a) != nullptr))) {
+      reject(Diag::unsupported_annotation, e->position,
+             "\"" + name + "\" of a global in a loop invariant (a global the function holds is in every loop's invariant already, decision 0041 item 10)");
+      return nullptr;
+    }
     if (fn == SpecFn::live) {
       pn = a;
     } else if (a != nullptr && a->kind == enk_operation && a->variant.operation.kind == eok_indirect && a->variant.operation.operands != nullptr &&
@@ -2187,7 +2675,7 @@ class Encoder {
       pn = peel_place(a->variant.operation.operands);
     } else {
       reject(Diag::unsupported_annotation, e->position,
-             "\"" + name + "\" of a place other than `*q` of a pointer variable (a local, a global, a member or an element: M4.5b2, M4.5c, M4.5e1)");
+             "\"" + name + "\" of a place other than `*q` of a pointer variable (a local, a member or an element: M4.5c, M4.5e1)");
       return nullptr;
     }
     if (pn != nullptr && pn->kind == enk_operation && pn->variant.operation.kind == eok_indirect) {
@@ -2294,8 +2782,12 @@ class Encoder {
       }
     }
     if (param == nullptr) {
+      // `old(g)` of a mutable global (decision 0041 item 7): `&g` is an address constant (P63 A5, both modes) or `eok_address_of` over the variable.
+      vir::Global* g = global_of_address_constant(x);
+      if (g == nullptr) g = global_of_address_of(x);
+      if (g != nullptr) return finish(ind, b_.old(b_.deref(b_.global_addr(g, l), l), l));
       reject(Diag::unsupported_annotation, where,
-             "\"cerastes_old\" of a place other than a parameter or `*p` of a pointer parameter (a global, a member or an element: M4.5b2, M4.5c, M4.5e1)");
+             "\"cerastes_old\" of a place other than a parameter, `*p` of a pointer parameter or a global (through a pointer global, a member or an element: M4.5c, M4.5e1)");
       return nullptr;
     }
     ++cx_.old_depth;
@@ -2332,14 +2824,21 @@ class Encoder {
       }
     }
     an_expr_node_ptr pn = peel_place(ops[0]);
+    if (vir::Global* g = global_of_address_of(pn)) {  // `*&g` is `g` (decision 0041 item 6)
+      const SrcLoc l = loc_of(ind->position);
+      return finish(ind, b_.deref(b_.global_addr(g, l), l));
+    }
     if (pn->kind != enk_param_ref) {
       if (pn->kind == enk_operation && pn->variant.operation.kind == eok_indirect)
         reject(Diag::unsupported_annotation, ind->position,
                "a read of `**pp` in a contract (a place reached through a heap read: M4.5c, decision 0040 item 6)");
+      else if (pn->kind == enk_variable && pn->variant.variable.ptr != nullptr && global_of(pn->variant.variable.ptr) != nullptr)
+        reject(Diag::unsupported_annotation, ind->position,
+               "a read of `*gp` of a pointer global in a contract (a place reached through a heap read: M4.5c, decision 0041 item 7)");
       else
         reject(Diag::unsupported_annotation, ind->position,
-               "a dereference in a contract of something other than a pointer parameter or the result (a local, a global, a member or an element: "
-               "M4.5b2, M4.5c, M4.5e1)");
+               "a dereference in a contract of something other than a pointer parameter or the result (a local, a member or an element: "
+               "M4.5c, M4.5e1)");
       return nullptr;
     }
     const Expr* pf = param_reference(pn);
@@ -2390,8 +2889,9 @@ class Encoder {
       if (!st.in_ensures) {
         const_cast<Expr*>(st.atom)->amount = static_cast<int>(req.size());
         for (const vir::AtomSite* o : req)
-          if (o->atom->atom == st.atom->atom && o->atom->a->index == st.atom->a->index)
-            reject(Diag::unsupported_annotation, pos_of(st.atom), std::string("\"") + spelling(st.atom) + "\" of the same parameter twice in a `requires`");
+          if (o->atom->atom == st.atom->atom && vir::atom_place_key(*o->atom) == vir::atom_place_key(*st.atom))
+            reject(Diag::unsupported_annotation, pos_of(st.atom),
+                   std::string("\"") + spelling(st.atom) + "\" of the same " + (st.atom->a->kind == Expr::Kind::GlobalAddr ? "global" : "parameter") + " twice in a `requires`");
         req.push_back(&st);
       }
     // `owns(*p)` and `reads(*p)` of one parameter in one clause list are accepted (decision 0039 item 7): lowering asserts per path that they
@@ -2401,15 +2901,17 @@ class Encoder {
       if (!st.in_ensures) continue;
       int partner = -1;
       for (const vir::AtomSite* o : req)
-        if (o->atom->atom == st.atom->atom && o->atom->a->index == st.atom->a->index) partner = o->atom->amount;
+        if (o->atom->atom == st.atom->atom && vir::atom_place_key(*o->atom) == vir::atom_place_key(*st.atom)) partner = o->atom->amount;
       if (partner < 0) {
         reject(Diag::unsupported_annotation, pos_of(st.atom),
-               std::string("an `ensures` \"") + spelling(st.atom) + "\" with no \"" + spelling(st.atom) +
-                   "\" of the same parameter in the `requires` (a permission a function creates, such as an owning result, is M4.5d2)");
+               std::string("an `ensures` \"") + spelling(st.atom) + "\" with no \"" + spelling(st.atom) + "\" of the same " +
+                   (st.atom->a->kind == Expr::Kind::GlobalAddr ? "global" : "parameter") +
+                   " in the `requires` (a permission a function creates, such as an owning result, is M4.5d2)");
         continue;
       }
       if (!used.insert(partner).second) {
-        reject(Diag::unsupported_annotation, pos_of(st.atom), std::string("\"") + spelling(st.atom) + "\" of the same parameter twice in an `ensures`");
+        reject(Diag::unsupported_annotation, pos_of(st.atom),
+               std::string("\"") + spelling(st.atom) + "\" of the same " + (st.atom->a->kind == Expr::Kind::GlobalAddr ? "global" : "parameter") + " twice in an `ensures`");
         continue;
       }
       const_cast<Expr*>(st.atom)->amount = partner;
@@ -2598,7 +3100,24 @@ class Encoder {
   const Expr* address_of(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
     if (!operand_count(e, 1, ops)) return nullptr;
     an_expr_node_ptr o = ops[0];
-    if (cx_.contract || (cx_.annotation && !cx_.check_clause && !cx_.loop_clause) || cx_.const_depth > 0) {
+    // `&g` of a mutable global or `static` local (decision 0041 item 6): `GlobalAddr`, a pointer value with no obligation, also in a contract (item 7)
+    // and inside the original expression of a folded address constant.
+    if (o->kind == enk_variable && o->variant.variable.ptr != nullptr) {
+      a_variable_ptr gv = o->variant.variable.ptr;
+      if (rejected_globals_.count(gv) != 0) return nullptr;  // diagnosed at its declaration
+      if (named_.count(gv) != 0) {
+        reject(Diag::unsupported_expression, e->position, "the address of a `const` object (const objects as cells come with M4.6, decision 0041 item 2)");
+        return nullptr;
+      }
+      if (vir::Global* g = global_of(gv)) {
+        if (cx_.const_depth > cx_.addr_const || (cx_.annotation && !cx_.contract && !cx_.check_clause && !cx_.loop_clause)) {
+          reject(Diag::unsupported_expression, e->position, "taking an address in an invariant or a measure, or in an expression the compiler folded to a constant");
+          return nullptr;
+        }
+        return finish(e, b_.global_addr(g, loc_of(e->position)));
+      }
+    }
+    if (cx_.contract || (cx_.annotation && !cx_.check_clause && !cx_.loop_clause) || cx_.const_depth > cx_.addr_const) {
       reject(Diag::unsupported_expression, e->position, "taking an address in a contract, an invariant or a measure, or in an expression the compiler folded to a constant");
       return nullptr;
     }
@@ -3011,6 +3530,11 @@ class Encoder {
       a_variable_ptr v = reinterpret_cast<a_variable_ptr>(t.ptr);
       const a_source_position at = v->source_corresp.decl_position;
       check_attributes(v->source_corresp.attributes);
+      // Decision 0041 item 12 (P63 A6): a `static` local of an accepted type is a block of the program; its declaration emits nothing.
+      if (v->storage_class == sc_static && !v->is_thread_local && v->source_corresp.enclosing_routine != nullptr) {
+        static_local_decl(v, at);
+        continue;
+      }
       if (v->storage_class == sc_static || v->storage_class == sc_extern || v->is_thread_local) {
         reject(Diag::unsupported_declaration, at,
                v->storage_class == sc_extern ? "an extern declaration in a function"
@@ -3122,7 +3646,7 @@ class Encoder {
       reject(Diag::unsupported_expression, e->position, "an assignment to anything but a local variable");
       return nullptr;
     }
-    if (cx_.rejected_vars.count(e->variant.variable.ptr) != 0) return nullptr;
+    if (cx_.rejected_vars.count(e->variant.variable.ptr) != 0 || rejected_globals_.count(e->variant.variable.ptr) != 0) return nullptr;
     auto it = cx_.vars.find(e->variant.variable.ptr);
     if (it == cx_.vars.end()) {
       reject(Diag::unsupported_expression, e->position, "an assignment to a variable that is not a local of this function");
@@ -3216,6 +3740,18 @@ class Encoder {
       }
       p->target = *p->addr->type.pointee;
       return true;
+    }
+    // A mutable global or `static` local is written through its address (decision 0041 item 6): a Store through `GlobalAddr`.
+    if (lhs->kind == enk_variable && lhs->variant.variable.ptr != nullptr) {
+      if (vir::Global* g = global_of(lhs->variant.variable.ptr)) {
+        if (cx_.const_depth > 0) {
+          reject(Diag::unsupported_expression, lhs->position, "an assignment to a variable in a constant expression");
+          return false;
+        }
+        p->addr = b_.global_addr(g, loc_of(lhs->position));
+        p->target = g->type;
+        return true;
+      }
     }
     p->v = lvalue_var(lhs);
     if (p->v == nullptr) return false;
@@ -3759,6 +4295,28 @@ class Encoder {
     if (c == nullptr || c->kind != ck_integer) return false;
     a_number_buffer buf = decimal_str_for_integer_constant(c);
     return std::string(buf.as_temp_characters()) == "0";
+  }
+
+  // Whether an expression names a variable local to a function (or a parameter), following every folded constant's original expression: a `static`
+  // local's initializer may not (decision 0041 item 2, audit N7: the prologue holds closed initializers).
+  static bool names_local(an_expr_node_ptr e, int depth = 0) {
+    if (e == nullptr || depth > 64) return false;
+    switch (e->kind) {
+      case enk_param_ref: return true;
+      case enk_variable: return e->variant.variable.ptr != nullptr && e->variant.variable.ptr->source_corresp.enclosing_routine != nullptr;
+      case enk_constant: {
+        a_constant_ptr c = e->variant.constant.ptr;
+        if (c == nullptr || (c->expr == nullptr && !c->local_expr_ref)) return false;
+        if (is_enumerator(c)) return false;
+        an_expr_node_ptr o = expr_node_from_constant(c);
+        return o != nullptr && o != e && names_local(o, depth + 1);
+      }
+      case enk_operation:
+        for (an_expr_node_ptr o = e->variant.operation.operands; o != nullptr; o = o->next)
+          if (names_local(o, depth + 1)) return true;
+        return false;
+      default: return false;
+    }
   }
 
   // Whether an expression names a variable or a parameter, following every folded constant's original expression (0017 item 7).
@@ -6012,7 +6570,10 @@ void Encoder::run(const IlEntities& ents) {
       a_routine_type_supplement_ptr rx = routine_supplement(r);
       check_attributes(r->source_corresp.attributes, rx != nullptr && rx->does_not_return);
     }
-    if (is_spec_routine(r)) continue;  // specification, never run: its body is not encoded (0011 item 4)
+    if (is_spec_routine(r)) {  // specification, never run: its body is not encoded (0011 item 4)
+      if (body != nullptr) reject_globals_in_spec_body(r);
+      continue;
+    }
     if (r->is_weak || r->is_weakref) {
       // `#pragma weak f` sets the flag without an attribute entry: another unit's definition replaces this one at link time.
       reject(Diag::unsupported_declaration, decl, "a weak function (another unit may replace its definition)");
@@ -6040,11 +6601,17 @@ void Encoder::run(const IlEntities& ents) {
         if (classify(a) == Annot::ensures) reject(Diag::ensures_on_noreturn, a->position, "");
     }
     if (body != nullptr) {
-      if (function_of(r, true, decl) != nullptr) to_verify_.push_back(r);
+      if (function_of(r, true, decl) != nullptr) {
+        to_verify_.push_back(r);
+        // Decision 0041 item 4 (P63 A7): the global-namespace `main` receives the globals from `program_start`.  `ns::main` is an ordinary function.
+        a_scope_ptr ps = r->source_corresp.parent_scope;
+        if (is_main(r) && ps != nullptr && ps->kind == sck_file && fns_[r]->params.empty()) prog_.set_entry(fns_[r]);
+      }
     }
   }
   cx_ = Ctx();
   for (a_routine_ptr r : to_verify_) encode_body(r);
+  add_static_local_atoms();  // decision 0041 item 12: before any contract is read to classify calls or loops
   require_measures_in_cycles();
   check_block_static_assertions(ents);
 }

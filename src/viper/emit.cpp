@@ -223,7 +223,7 @@ Emitted emit(const low::LProgram& program, const EmitOptions& options) {
   if (program.memory) {
     std::map<std::string, std::string> cells;
     for (const auto& [suffix, t] : program.cell_types) cells[suffix] = type_name(t);
-    p.raw(memory_prelude_text(cells));
+    p.raw(memory_prelude_text(cells, program.globals));
   }
   const std::string prelude = prelude_text(program.prelude_used);
   p.raw(prelude);

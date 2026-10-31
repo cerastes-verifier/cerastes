@@ -1,0 +1,121 @@
+// expect: verified
+// S31 (d), decision 0041 item 10: in main every global is an automatic place of the loop (from program_start): g, which no write in the loop can reach,
+// keeps its value; h is written by name, so only its permissions are kept and the user's invariant gives its value.
+// S31 (d): a loop in main over globals; g is not written (value kept), h is written (permissions kept, value by the user's invariant)
+// Shape: what the encoder will emit for a unit with globals (decision 0041 items 4-12): the memory prelude of src/viper/prelude.cpp
+// (memory_prelude_text) with a `unique function GB_<name>__<id>(): Block` per global inside `domain Block`, a bodyless program_start()
+// (one ensures row per global, in declaration order, preceded by the pure global facts), and the facts as the first requires of every other method.
+
+// the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  unique function GB_g__1(): Block
+  unique function GB_h__2(): Block
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_int() returns (r: Ref)
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)
+  ensures ((((lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(r.v_int)) && acc(r.d_int)) && (!r.d_int)) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract program start: every global and static local holds its initial value with full permission, and its liveness cell (decision 0041 item 4); the pure facts first
+method program_start()
+  ensures ((len(GB_g__1()) == 1) && (lvloc(GB_g__1()) == loc(GB_g__1(), (-2)))) && ((len(GB_h__2()) == 1) && (lvloc(GB_h__2()) == loc(GB_h__2(), (-2))))
+  ensures (((acc(loc(GB_g__1(), 0).v_int) && acc(loc(GB_g__1(), 0).d_int)) && loc(GB_g__1(), 0).d_int) && (loc(GB_g__1(), 0).v_int == 3)) && acc(lvloc(GB_g__1()).lv)
+  ensures (((acc(loc(GB_h__2(), 0).v_int) && acc(loc(GB_h__2(), 0).d_int)) && loc(GB_h__2(), 0).d_int) && (loc(GB_h__2(), 0).v_int == 7)) && acc(lvloc(GB_h__2()).lv)
+  decreases _
+
+// C/C++ function `main`: int i = 0; while (i < 10) { h = h + 1; i = i + 1; }  then g == 3 && h == 17
+method f_main__0()
+  decreases
+{
+  var v_i__0: Int
+  var kl_g__1: Perm
+  var kv_g__1: Perm
+  var kd_g__1: Perm
+  var vs_g__1: Int
+  var ds_g__1: Bool
+  var kl_h__2: Perm
+  var kv_h__2: Perm
+  var kd_h__2: Perm
+  var vs_h__2: Int
+  var ds_h__2: Bool
+  program_start()
+  v_i__0 := 0
+  kl_g__1 := perm(lvloc(block_of(loc(GB_g__1(), 0))).lv)
+  kv_g__1 := perm(loc(GB_g__1(), 0).v_int)
+  kd_g__1 := perm(loc(GB_g__1(), 0).d_int)
+  ds_g__1 := false
+  if (kd_g__1 > none) {
+    ds_g__1 := loc(GB_g__1(), 0).d_int
+  }
+  if (kv_g__1 > none) {
+    vs_g__1 := loc(GB_g__1(), 0).v_int
+  }
+  kl_h__2 := perm(lvloc(block_of(loc(GB_h__2(), 0))).lv)
+  kv_h__2 := perm(loc(GB_h__2(), 0).v_int)
+  kd_h__2 := perm(loc(GB_h__2(), 0).d_int)
+  ds_h__2 := false
+  if (kd_h__2 > none) {
+    ds_h__2 := loc(GB_h__2(), 0).d_int
+  }
+  if (kv_h__2 > none) {
+    vs_h__2 := loc(GB_h__2(), 0).v_int
+  }
+  while (v_i__0 < 10)
+    invariant ((-2147483648) <= v_i__0) && (v_i__0 <= 2147483647)
+    invariant acc(loc(GB_g__1(), 0).v_int, kv_g__1) && acc(loc(GB_g__1(), 0).d_int, kd_g__1)
+    invariant acc(lvloc(block_of(loc(GB_g__1(), 0))).lv, kl_g__1)
+    invariant (kv_g__1 > none) ==> (loc(GB_g__1(), 0).v_int == vs_g__1)
+    invariant ((kd_g__1 > none) && ds_g__1) ==> loc(GB_g__1(), 0).d_int
+    invariant acc(loc(GB_h__2(), 0).v_int, kv_h__2) && acc(loc(GB_h__2(), 0).d_int, kd_h__2)
+    invariant acc(lvloc(block_of(loc(GB_h__2(), 0))).lv, kl_h__2)
+    invariant ((none < kv_h__2) && (kv_h__2 < write)) ==> (loc(GB_h__2(), 0).v_int == vs_h__2)
+    invariant (((kv_h__2 > none) && (kd_h__2 > none)) && loc(GB_h__2(), 0).d_int) ==> (((-2147483648) <= loc(GB_h__2(), 0).v_int) && (loc(GB_h__2(), 0).v_int <= 2147483647))
+    invariant ((kd_h__2 > none) && ds_h__2) ==> loc(GB_h__2(), 0).d_int
+    invariant (0 <= v_i__0) && (v_i__0 <= 10)
+    invariant ((kv_h__2 > none) ? loc(GB_h__2(), 0).v_int : 0) == (7 + v_i__0)
+    decreases 10 - v_i__0
+  {
+    assert loc(GB_h__2(), 0) != null
+    assert perm(loc(GB_h__2(), 0).v_int) > none
+    assert loc(GB_h__2(), 0).d_int
+    assert !((((loc(GB_h__2(), 0).v_int + 1) < (-2147483648)) || (2147483647 < (loc(GB_h__2(), 0).v_int + 1))))
+    assert loc(GB_h__2(), 0) != null
+    assert !((perm(loc(GB_h__2(), 0).v_int) != write) || (perm(loc(GB_h__2(), 0).d_int) != write))
+    loc(GB_h__2(), 0).v_int := loc(GB_h__2(), 0).v_int + 1
+    loc(GB_h__2(), 0).d_int := true
+    assert !((((v_i__0 + 1) < (-2147483648)) || (2147483647 < (v_i__0 + 1))))
+    v_i__0 := v_i__0 + 1
+    assert !(((perm(loc(GB_g__1(), 0).v_int) < kv_g__1) || (perm(loc(GB_g__1(), 0).d_int) < kd_g__1)) || (perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) < kl_g__1))
+    assert !(((perm(loc(GB_h__2(), 0).v_int) < kv_h__2) || (perm(loc(GB_h__2(), 0).d_int) < kd_h__2)) || (perm(lvloc(block_of(loc(GB_h__2(), 0))).lv) < kl_h__2))
+  }
+  assert loc(GB_g__1(), 0) != null
+  assert perm(loc(GB_g__1(), 0).v_int) > none
+  assert loc(GB_g__1(), 0).d_int
+  assert loc(GB_h__2(), 0) != null
+  assert perm(loc(GB_h__2(), 0).v_int) > none
+  assert loc(GB_h__2(), 0).d_int
+  assert (loc(GB_g__1(), 0).v_int == 3) && (loc(GB_h__2(), 0).v_int == 17)
+}

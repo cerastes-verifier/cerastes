@@ -487,6 +487,7 @@ class Lowerer {
       if (!f.requires_.empty() || !f.ensures_.empty() || !f.decreases_.empty()) wf_method(f);
     check_cycles();
     alloc_methods();
+    program_start_method();
     LowerResult r;
     r.program = std::move(out_);
     r.errors = std::move(errors_);
@@ -537,6 +538,53 @@ class Lowerer {
       methods.push_back(std::move(m));
     }
     out_.methods.insert(out_.methods.begin(), std::make_move_iterator(methods.begin()), std::make_move_iterator(methods.end()));
+  }
+
+  // The trusted `program_start` (decision 0041 item 4), after the allocation methods: the global facts first, then for each global and `static` local, in
+  // declaration order, one row at its declaration: full permission to its value and flag cells, the flag set, its initial value (or its range, `WF` for a
+  // pointer, when the unit does not know it), and its liveness cell.  Emitted for every unit with a global (the lint pins one `program_start` per such program); only the entry function calls it.
+  void program_start_method() {
+    if (!has_globals()) return;
+    out_.memory = true;
+    for (const Global& g : prog_.globals()) out_.globals.push_back(g.viper_name());
+    low::LMethod m;
+    m.name = "program_start";
+    m.trusted_reason = "program start: every global and static local holds its initial value with full permission, and its liveness cell (decision 0041 item 4); the pure facts first";
+    m.decreases_assumed = true;  // 0013 item 5
+    auto clause = [&](E expr, const SrcLoc& at, const std::string& what) {
+      low::LClause c;
+      c.expr = std::move(expr);
+      for (const char* id : {"not.wellformed", "postcondition.violated"}) {
+        low::Meta mt;
+        mt.category = "internal";
+        mt.loc = at;
+        mt.message = std::string("internal check: ") + (std::string(id) == "not.wellformed" ? "well-formedness of" : "Silicon's own check of") +
+                     " the trusted contract of program_start for " + what;
+        c.checks.push_back(low::Check{id, std::move(mt)});
+      }
+      return c;
+    };
+    m.ensures_.push_back(clause(global_facts(), prog_.globals().front().loc, "the facts of the globals"));
+    for (const Global& g : prog_.globals()) {
+      const E recv = global_ref(g.id);
+      const Type& t = g.type;
+      const std::string sfx = use_cell_type(t);
+      E row = low::and_(low::and_(low::acc(recv, "v_" + sfx), low::acc(recv, "d_" + sfx)), cell_flag(recv, t));
+      switch (g.init_kind) {
+        case Global::Init::Value: row = low::and_(row, low::bin(low::BinOp::Eq, cell_value(recv, t), literal_of(t, g.value))); break;
+        case Global::Init::Null: row = low::and_(row, low::bin(low::BinOp::Eq, cell_value(recv, t), low::null_())); break;
+        case Global::Init::Addr:
+          row = low::and_(row, low::bin(low::BinOp::Eq, cell_value(recv, t), g.target != nullptr ? global_ref(g.target->id) : low::null_()));
+          break;
+        case Global::Init::Unknown:
+          if (const E r = cell_range_inv(recv, t)) row = low::and_(row, r);
+          break;
+      }
+      row = low::and_(row, low::acc(low::dom("lvloc", {global_block(g.id)}), "lv"));
+      m.ensures_.push_back(clause(row, g.loc, "`" + g.c_name + "`"));
+    }
+    // After the allocation methods (they come first, decision 0032 item 4).
+    out_.methods.insert(out_.methods.begin() + static_cast<std::ptrdiff_t>(alloc_at_.size()), std::move(m));
   }
 
   // ---- recursion cycles (decision 0021 item 4) ----
@@ -1023,6 +1071,7 @@ class Lowerer {
 
   // `q == place && kv > none`: the pointer designates the place, which the loop holds.
   E inv_place_disjunct(const E& q, const Place& pl) {
+    if (is_global_ref(q) && same_expr(q, pl.recv)) return low::and_(pl.wg, inv_amount_positive(pl));  // a global's own place: `q == q` is true (decision 0041)
     return low::and_(pl.wg, low::bin(low::BinOp::And, low::bin(low::BinOp::Eq, q, pl.recv), inv_amount_positive(pl)));
   }
 
@@ -1054,6 +1103,8 @@ class Lowerer {
     write_fields(out, var_name(x), x.type, value);
   }
 
+  static bool is_global_addr(const Expr& a) { return a.kind == Expr::Kind::GlobalAddr && a.global != nullptr; }
+
   // `*p` as a read (decision 0032 item 6): the null check, the permission check (which is also the liveness check of this use, 0028 item
   // 3a), the flag; the value `p.v_<t>`.
   LV deref(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full) {
@@ -1067,7 +1118,8 @@ class Lowerer {
         meta("null-dereference", e.loc, "dereferences " + quoted(ptr_text, "the pointer") + ", which may be null"));
     obl(full, guard, gdep, may_read(p.e, t), p.dep,
         meta("permission", e.loc,
-             "reads " + quoted(place, "the object the pointer points to") + " without owning it: the object it points to may have ended"));
+             is_global_addr(*e.a) ? "reads `" + place + "` without owning it: `" + fn_.f->c_name + "` needs `reads(" + place + ")` or `owns(" + place + ")` in its contract"
+                                  : "reads " + quoted(place, "the object the pointer points to") + " without owning it: the object it points to may have ended"));
     obl(full, guard, gdep, cell_flag(p.e, t), p.dep,
         meta("uninitialized", e.loc, quoted(place, "the object the pointer points to") + " may be read here before it is given a value"));
     return mem_read(e, key_of_addr(*e.a), p.e, t, place, guard, gdep, p.dep, full, e.a);
@@ -1076,7 +1128,7 @@ class Lowerer {
   // Any other use of a pointer value (`==`, `!=`, a truth test, a copy): `p != null ==> perm(lvloc(block_of(p)).lv) > none` (`lifetime`),
   // skipped for `&x` and a null constant, which cannot have a dead object (decision 0032 item 6).
   static bool address_or_null(const Expr& e) {
-    if (e.kind == Expr::Kind::AddrOf || e.kind == Expr::Kind::Null) return true;
+    if (e.kind == Expr::Kind::AddrOf || e.kind == Expr::Kind::Null || e.kind == Expr::Kind::GlobalAddr) return true;
     return e.kind == Expr::Kind::Cond && e.b != nullptr && e.c != nullptr && address_or_null(*e.b) && address_or_null(*e.c);
   }
 
@@ -1086,6 +1138,8 @@ class Lowerer {
     if (cmode_ != CMode::None) return;  // a contract has no heap and no liveness to check (decision 0037 item 7)
     if (address_or_null(operand)) return;
     E live = low::bin(low::BinOp::Gt, live_perm(v.e), low::no_perm());
+    // A unit with globals: a pointer into a global's block is live whatever the function holds (decision 0041 item 6).
+    if (const E g = global_live_disjunct(v.e)) live = low::bin(low::BinOp::Or, live, g);
     if (with_wf) live = low::not_(low::bin(low::BinOp::Or, low::not_(live), low::not_(wf_expr(v.e))));  // one atomic assertion
     obl(full, guard, gdep, low::implies(low::bin(low::BinOp::Ne, v.e, low::null_()), live), v.dep,
         meta("lifetime", operand.loc, "uses " + quoted(operand.c_text, "the pointer") + " after the object it points to may have ended"));
@@ -1134,13 +1188,15 @@ class Lowerer {
     }
     const Type& t = s.expr->type;
     const std::string ptr_text = s.addr->c_text;
-    const std::string place = ptr_text.empty() ? std::string() : "*" + ptr_text;
+    const std::string place = place_text(*s.addr);
     // Always checked: the read of a compound store checked the same value, but the write's own check costs nothing and is never skipped.
     emit_assert(out, low::bin(low::BinOp::Ne, recv, low::null_()),
                 meta("null-dereference", s.loc, "dereferences " + quoted(ptr_text, "the pointer") + ", which may be null"));
     emit_assert(out, may_write(recv, t, false),
                 meta("permission", s.loc,
-                     "writes " + quoted(place, "the object the pointer points to") + " without owning it: the object it points to may have ended"));
+                     is_global_addr(*s.addr)
+                         ? "writes `" + place + "` without owning it: `" + fn_.f->c_name + "` needs `owns(" + place + ")` in its contract"
+                         : "writes " + quoted(place, "the object the pointer points to") + " without owning it: the object it points to may have ended"));
     write_fields(out, recv->text, t, vs[1].e);
   }
 
@@ -1229,7 +1285,37 @@ class Lowerer {
   }
 
   static const Type& site_pointee(const AtomSite& s) { return *s.atom->a->type.pointee; }
-  static int site_param(const AtomSite& s) { return s.atom->a->index; }
+  // A site is identified by a key and a receiver, never by a formal index directly (decision 0041 item 8).  The key (atom_place_key): the formal index
+  // k >= 0 of a parameter place; a negative key is the place `result` (see `place_of`); keys >= kGlobalKeyBase are global places (`g`: its id is
+  // key - kGlobalKeyBase), whose receiver is `loc(GB_g(), 0)`.
+  static constexpr int kGlobalKeyBase = kGlobalSiteBase;  // vir.h: the keys of global places start here
+  static int site_key(const AtomSite& s) { return atom_place_key(*s.atom); }
+  static bool site_is_global(const AtomSite& s) { return site_key(s) >= kGlobalKeyBase; }
+  // The place's pointer in `env` (a global's is its address, not a formal).
+  E site_ref(const AtomSite& s, const Env& env) const { return place_of(env, site_key(s)); }
+  // The same pointer as a variable of the function being lowered (its own formals; a global's address).
+  E site_var(const AtomSite& s) const { return site_is_global(s) ? place_of(Env{}, site_key(s)) : low::var(formal_name(*fn_.f, site_key(s))); }
+  // The argument of a call that a site's pointer parameter receives (a global site has none).
+  static const Expr& site_arg(const AtomSite& s, const Expr& call) { return *call.args[static_cast<size_t>(site_key(s))]; }
+  // The user's spelling of the place a site names in the contract: `*p` for a parameter's pointee (empty if unknown), `g` for a global.
+  static std::string site_text(const AtomSite& s) {
+    if (site_is_global(s)) return s.atom->a->global != nullptr ? s.atom->a->global->c_name : std::string();
+    const std::string& c = s.atom->a->c_text;
+    return c.empty() ? std::string() : "*" + c;
+  }
+  // What a message calls a site's place: the quoted spelling, or for the implicit atom of a `static` local "the `static` local `s` of `f`" (decision 0041
+  // item 12; `quoted_text` is what the caller would have quoted).
+  static std::string site_phrase(const AtomSite& s, const std::string& quoted_text) {
+    if (s.atom->implicit_atom && s.atom->a->global != nullptr && s.atom->a->global->owner != nullptr)
+      return "the `static` local `" + s.atom->a->global->c_name + "` of `" + s.atom->a->global->owner->c_name + "`";
+    return quoted_text;
+  }
+  // The same, from the argument a call passes: `x` for `&x`, `*q` for `q`.
+  static std::string site_call_text(const AtomSite& s, const Expr& call) {
+    if (site_is_global(s)) return site_text(s);  // a global's call text is its own name
+    const std::string& txt = site_arg(s, call).c_text;
+    return txt.empty() ? std::string() : (txt[0] == '&' ? txt.substr(1) : "*" + txt);
+  }
   static bool site_takes_cell(const AtomSite& s) { return s.atom->atom != AtomKind::Live; }
 
   // The guard of a site over `env`'s formals: the conjunction of its `||`/`?:` conditions (null: unconditional).
@@ -1249,6 +1335,7 @@ class Lowerer {
   bool exclusive_pair(const AtomSite& a, const AtomSite& b) {
     if (!site_takes_cell(a) || !site_takes_cell(b)) return false;
     if (a.atom->atom == AtomKind::Reads && b.atom->atom == AtomKind::Reads) return false;
+    if (site_is_global(a) && site_is_global(b) && site_key(a) != site_key(b)) return false;  // two globals are two `unique` blocks (decision 0041 item 8)
     return cell_suffix(site_pointee(a)) == cell_suffix(site_pointee(b));
   }
 
@@ -1265,7 +1352,7 @@ class Lowerer {
     cseen_ = std::max(cseen_, idx + 1);
     if (cmode_ == CMode::Call || cmode_ == CMode::Ret) return {low::bool_lit(true), {}};  // asserted one by one at the call or the return
     const AtomSite& site = fa.sites[idx];
-    const E p = env.formals[static_cast<size_t>(site_param(site))];
+    const E p = site_ref(site, env);
     const Type& t = site_pointee(site);
     E pure = low::and_(low::bin(BinOp::Ne, p, low::null_()), wf_expr(p));
     if (site_takes_cell(site)) pure = low::and_(pure, in_block(p));
@@ -1274,9 +1361,10 @@ class Lowerer {
       if (e.atom == AtomKind::Owns)
         for (size_t i = 0; i < idx; ++i) {
           const AtomSite& o = fa.sites[i];
-          if (o.in_ensures != site.in_ensures || o.atom->atom != AtomKind::Owns || site_param(o) == site_param(site)) continue;
+          if (o.in_ensures != site.in_ensures || o.atom->atom != AtomKind::Owns || site_key(o) == site_key(site)) continue;
+          if (site_is_global(o) && site_is_global(site)) continue;  // `unique` blocks
           if (cell_suffix(site_pointee(o)) != cell_suffix(t)) continue;
-          pure = low::and_(pure, low::implies(site_guard(o, env), low::bin(BinOp::Ne, env.formals[static_cast<size_t>(site_param(o))], p)));
+          pure = low::and_(pure, low::implies(site_guard(o, env), low::bin(BinOp::Ne, site_ref(o, env), p)));
         }
       return {pure, {}};
     }
@@ -1309,31 +1397,75 @@ class Lowerer {
     if (!site_takes_cell(site)) return;
     for (size_t i = 0; i < it->second; ++i) {
       const AtomSite& o = fa.sites[i];
-      if (o.in_ensures != site.in_ensures || !site_takes_cell(o) || site_param(o) != site_param(site) || o.atom->atom == site.atom->atom) continue;
+      if (o.in_ensures != site.in_ensures || !site_takes_cell(o) || site_key(o) != site_key(site) || o.atom->atom == site.atom->atom) continue;
       if (cell_suffix(site_pointee(o)) != cell_suffix(site_pointee(site))) continue;
       const AtomSite& own = o.atom->atom == AtomKind::Owns ? o : site;
       const AtomSite& rd = o.atom->atom == AtomKind::Owns ? site : o;
       const E both = low::and_(site_guard(own, env), site_guard(rd, env));
-      const std::string txt = e.a != nullptr && !e.a->c_text.empty() ? "*" + e.a->c_text : std::string();
+      const std::string txt = e.a != nullptr ? site_text(site) : std::string();
       obl(full, guard, gdep, both ? low::not_(both) : low::bool_lit(false), {},
           meta("permission", e.loc, "the contract of `" + cf_->c_name + "` both owns " + quoted(txt, "an object") + " and reads it on one path"));
     }
   }
 
   // The ghost value of a read of `*p` for parameter `p`, or (param -1) of `*result` (decision 0040 item 4).
-  static std::string ghost_name(int param, bool post) { return param < 0 ? "hv_r_post" : "hv_" + std::to_string(param) + (post ? "_post" : "_pre"); }
-  static E place_of(const Env& env, int k) { return k < 0 ? env.result : env.formals[static_cast<size_t>(k)]; }
+  static std::string ghost_name(int param, bool post) {
+    if (param >= kGlobalKeyBase) return "hv_g" + std::to_string(param - kGlobalKeyBase) + (post ? "_post" : "_pre");  // a global's read (decision 0041)
+    return param < 0 ? "hv_r_post" : "hv_" + std::to_string(param) + (post ? "_post" : "_pre");
+  }
+  E place_of(const Env& env, int k) const {
+    if (k >= kGlobalKeyBase) return global_ref(k - kGlobalKeyBase);
+    return k < 0 ? env.result : env.formals[static_cast<size_t>(k)];
+  }
+
+  // ---- globals (decision 0041) ----
+
+  // The block constant of global `id`: `GB_<name>__<id>()`; its address `loc(GB_g(), 0)`.
+  E global_block(int id) const { return low::dom(prog_.globals()[static_cast<size_t>(id)].viper_name(), {}); }
+  E global_ref(int id) const { return low::dom("loc", {global_block(id), low::int_lit("0")}); }
+  static bool is_global_ref(const E& e) {
+    return e != nullptr && e->kind == low::LExpr::Kind::Dom && e->text == "loc" && e->args.size() == 2 && e->args[0]->kind == low::LExpr::Kind::Dom &&
+           e->args[0]->text.compare(0, 3, "GB_") == 0;
+  }
+  bool has_globals() const { return !prog_.globals().empty(); }
+  // The pure facts of every global (decision 0041 item 4): one block of one slot whose liveness cell is `loc(b, -2)`; null without globals.
+  E global_facts() {
+    E r;
+    for (const Global& g : prog_.globals()) {
+      const E b = global_block(g.id);
+      out_.memory = true;
+      r = low::and_(r, low::and_(low::bin(low::BinOp::Eq, low::dom("len", {b}), low::int_lit("1")),
+                                 low::bin(low::BinOp::Eq, low::dom("lvloc", {b}), low::dom("loc", {b, low::int_lit("-2")}))));
+    }
+    return r;
+  }
+  // The liveness disjunct of a unit with globals (decision 0041 item 6): `lvloc(block_of(p)) == lvloc(GB_g())` for some global; null without globals.
+  E global_live_disjunct(const E& p) {
+    E r;
+    for (const Global& g : prog_.globals()) {
+      const E d = low::bin(low::BinOp::Eq, live_cell(p), low::dom("lvloc", {global_block(g.id)}));
+      r = r ? low::bin(low::BinOp::Or, r, d) : d;
+    }
+    return r;
+  }
+  // The type of the place a site key names: a parameter's pointee, or a global's own type.
+  Type key_pointee(int k) const {
+    if (k >= kGlobalKeyBase) return prog_.globals()[static_cast<size_t>(k - kGlobalKeyBase)].type;
+    return *fn_.f->params[static_cast<size_t>(k)].type.pointee;
+  }
+  static bool key_is_global(int k) { return k >= kGlobalKeyBase; }
 
   // A read of `*p` in a contract (decision 0037 item 7).  Wf: a ghost value formal, and the framing obligation; otherwise the heap read, guarded
   // by itself: the chain `(D_1 ? read : (D_2 ? read : ... : dummy))` over the framing disjuncts of the earlier atoms of the same field, or the
   // plain read when the framing is trivial (an unconditional atom on the same place) or implied by the guard the read is evaluated under.
   LV contract_read(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full) {
     using low::BinOp;
-    if (e.a == nullptr || (e.a->kind != Expr::Kind::Formal && e.a->kind != Expr::Kind::Result)) {
-      internal_error(e.loc, "a dereference in a contract of anything but a pointer parameter or the result reached lowering");
+    if (e.a == nullptr || (e.a->kind != Expr::Kind::Formal && e.a->kind != Expr::Kind::Result && e.a->kind != Expr::Kind::GlobalAddr)) {
+      internal_error(e.loc, "a dereference in a contract of anything but a pointer parameter, a global or the result reached lowering");
       return {low::int_lit("0"), {}};
     }
-    const int k = e.a->kind == Expr::Kind::Result ? -1 : e.a->index;  // -1: the place `result` (decision 0040 item 4)
+    // -1: the place `result` (decision 0040 item 4); a global is a place of its own (decision 0041 item 7)
+    const int k = e.a->kind == Expr::Kind::Result ? -1 : (e.a->kind == Expr::Kind::GlobalAddr ? kGlobalKeyBase + e.a->global->id : e.a->index);
     const E p = place_of(env, k);
     const Type& t = e.type;
     const bool post = cens_ && !cold_;
@@ -1351,7 +1483,7 @@ class Lowerer {
       }
       if (cell_suffix(site_pointee(s)) != sfx) continue;
       E d = site_guard(s, env);
-      if (site_param(s) != k) d = low::and_(d, low::bin(BinOp::Eq, env.formals[static_cast<size_t>(site_param(s))], p));
+      if (site_key(s) != k) d = low::and_(d, low::bin(BinOp::Eq, site_ref(s, env), p));
       ds.push_back(d);
     }
     bool trivial = false;
@@ -1428,6 +1560,7 @@ class Lowerer {
   // The object a write or a read through the pointer expression `a` names (decision 0039 item 2): `&x` is the cell x, a pointer variable `v` is `*v`,
   // anything else is an object of its own.
   int key_of_addr(const Expr& a) {
+    if (a.kind == Expr::Kind::GlobalAddr && a.global != nullptr) return key_id("g:" + std::to_string(a.global->id));  // a global is one object (decision 0041 item 11)
     if (a.kind == Expr::Kind::AddrOf && a.var != nullptr && a.var->address_taken) return key_of_cell(*a.var);
     if (a.kind == Expr::Kind::Local && a.var != nullptr && !a.var->address_taken) return key_id("v:" + std::to_string(a.var->id));
     return -1000000 - (++next_other_key_);
@@ -1645,8 +1778,7 @@ class Lowerer {
     if (store) {
       addr = lower(*e.c, env, guard, gdep, full);
       key = key_of_addr(*e.c);
-      const std::string ptr_text = e.c->c_text;
-      text = ptr_text.empty() ? std::string() : "*" + ptr_text;
+      text = place_text(*e.c);
       if (e.b != nullptr || shares_node(*e.a, e.c)) {  // a compound store's value reads `*addr` through this node: one evaluation
         shared_[e.c] = addr;
         Path where = path_;
@@ -1688,7 +1820,8 @@ class Lowerer {
           meta("null-dereference", e.loc, "dereferences " + quoted(e.c->c_text, "the pointer") + ", which may be null"));
     obl(full, nullptr, {}, may_write(addr.e, t, false), wset,
         meta("permission", e.loc,
-             store ? "writes " + quoted(text, "the object the pointer points to") + " without owning it: the object it points to may have ended"
+             store ? (is_global_addr(*e.c) ? "writes `" + text + "` without owning it: `" + fn_.f->c_name + "` needs `owns(" + text + ")` in its contract"
+                                           : "writes " + quoted(text, "the object the pointer points to") + " without owning it: the object it points to may have ended")
                    : "writes `" + text + "` without owning it: a callee may have kept its object"));
     Effect fx;
     fx.kind = Effect::Kind::Store;
@@ -1821,6 +1954,12 @@ class Lowerer {
         }
         return {low::var(var_name(*e.var)), {}};
       }
+      case Expr::Kind::GlobalAddr:  // `&g`: the address of the global's cell, a pointer value with no obligation (decision 0041 item 6)
+        if (e.global == nullptr) {
+          internal_error(e.loc, "the address of a global without a global reached lowering");
+          return {low::null_(), {}};
+        }
+        return {global_ref(e.global->id), {}};
       case Expr::Kind::Deref: return deref(e, env, guard, gdep, full);
       case Expr::Kind::Atom:
         if (cmode_ == CMode::Inv) return {low::bool_lit(true), {}};  // a written atom's rows are the loop's own (decision 0040 item 5)
@@ -2101,21 +2240,19 @@ class Lowerer {
     for (size_t i = 0; i < n; ++i) {  // the requires atoms come first in `sites`
       S x;
       x.site = &fa.sites[i];
-      const int j = site_param(*x.site);
-      x.p = cenv.formals[static_cast<size_t>(j)];
+      x.p = site_ref(*x.site, cenv);
       x.g = site_guard(*x.site, cenv);
       x.t = &site_pointee(*x.site);
-      const std::string txt = e.args[static_cast<size_t>(j)]->c_text;
-      x.place = txt.empty() ? std::string() : (txt[0] == '&' ? txt.substr(1) : "*" + txt);
+      x.place = site_call_text(*x.site, e);
       ss.push_back(std::move(x));
     }
     auto text_of = [&](const S& x) {
-      const std::string pl = quoted(x.place, "the object the pointer points to");
+      const std::string pl = site_phrase(*x.site, quoted(x.place, "the object the pointer points to"));
       switch (x.site->atom->atom) {
         case AtomKind::Owns: return "calls `" + callee.c_name + "`, which needs to own " + pl + ", without owning it";
         case AtomKind::Reads: return "calls `" + callee.c_name + "`, which needs to read " + pl + ", without the permission to read it";
         case AtomKind::Live: {
-          const Expr& arg = *e.args[static_cast<size_t>(site_param(*x.site))];
+          const Expr& arg = site_arg(*x.site, e);
           const std::string who = arg.kind == Expr::Kind::Null ? std::string("the null pointer")
                                   : arg.c_text.empty()         ? std::string("the pointer")
                                                                : "`" + arg.c_text + "`";
@@ -2156,7 +2293,7 @@ class Lowerer {
       for (size_t j = i + 1; j < ss.size(); ++j) {
         if (!exclusive_pair(*ss[i].site, *ss[j].site)) continue;
         const std::string pl = quoted(ss[i].place, "the object the pointer points to");
-        if (site_param(*ss[i].site) == site_param(*ss[j].site))  // one parameter under two atoms: their guards must exclude each other (decision 0039 item 7)
+        if (site_key(*ss[i].site) == site_key(*ss[j].site))  // one parameter under two atoms: their guards must exclude each other (decision 0039 item 7)
           add(low::and_(ss[i].g, ss[j].g), low::bin(BinOp::Ne, ss[i].p, ss[j].p),
               "passes " + pl + " to `" + callee.c_name + "`, whose contract both owns and reads it on this path");
         else
@@ -2166,13 +2303,13 @@ class Lowerer {
     // 3. the case splits: on the liveness cells of every pair of atoms, on the cells of every pair of `reads`
     for (size_t i = 0; i < ss.size(); ++i)
       for (size_t j = i + 1; j < ss.size(); ++j)
-        if (!same_expr(ss[i].p, ss[j].p)) split(low::bin(BinOp::Eq, live_cell(ss[i].p), live_cell(ss[j].p)));
+        if (!same_expr(ss[i].p, ss[j].p) && !(site_is_global(*ss[i].site) && site_is_global(*ss[j].site))) split(low::bin(BinOp::Eq, live_cell(ss[i].p), live_cell(ss[j].p)));
     for (size_t i = 0; i < ss.size(); ++i)
       for (size_t j = i + 1; j < ss.size(); ++j) {
         const AtomSite& a = *ss[i].site;
         const AtomSite& b = *ss[j].site;
         if (a.atom->atom == AtomKind::Reads && b.atom->atom == AtomKind::Reads && cell_suffix(site_pointee(a)) == cell_suffix(site_pointee(b)) &&
-            !same_expr(ss[i].p, ss[j].p))
+            !same_expr(ss[i].p, ss[j].p) && !(site_is_global(a) && site_is_global(b)))
           split(low::bin(BinOp::Eq, ss[i].p, ss[j].p));
       }
     // 3b. each pointer argument that feeds a cell atom, against each `reads` parameter of the caller of the same field: the caller may hold the
@@ -2186,7 +2323,7 @@ class Lowerer {
         for (int i = 0; i < caller.nreq; ++i) {
           const AtomSite& cs = caller.sites[static_cast<size_t>(i)];
           if (cs.atom->atom != AtomKind::Reads || cell_suffix(site_pointee(cs)) != cell_suffix(*x.t)) continue;
-          const E q = low::var(formal_name(*fn_.f, site_param(cs)));
+          const E q = site_var(cs);
           if (same_expr(x.p, q)) continue;
           bool seen = false;
           for (const auto& d : done)
@@ -2351,13 +2488,11 @@ class Lowerer {
         const AtomSite& site = fa.sites[static_cast<size_t>(i)];
         if (!site_takes_cell(site)) continue;
         Acc::Atom k;
-        const int j = site_param(site);
-        k.place = cenv.formals[static_cast<size_t>(j)];
+        k.place = site_ref(site, cenv);
         k.guard = site_guard(site, cenv);
         k.owns = site.atom->atom == AtomKind::Owns;
         k.field = fkey(site_pointee(site));
-        const std::string txt = e.args[static_cast<size_t>(j)]->c_text;
-        k.text = txt.empty() ? std::string() : (txt[0] == '&' ? txt.substr(1) : "*" + txt);
+        k.text = site_call_text(site, e);
         fx.tags.push_back(MemTag{0, k.field, true, k.owns, path_, {}});
         ca.atoms.push_back(std::move(k));
       }
@@ -3170,7 +3305,7 @@ class Lowerer {
         a.field = fkey(*target->addr->type.pointee);
         a.place = vs.front().e;
         a.dep = vs.front().dep;
-        a.text = target->addr->c_text.empty() ? std::string() : "*" + target->addr->c_text;
+        a.text = place_text(*target->addr);
       }
       path_.clear();
       if (!a.field.empty()) register_access(std::move(a), full, nullptr);
@@ -3483,9 +3618,13 @@ class Lowerer {
     std::set<int> done;
     for (int i = 0; i < fa.nreq; ++i) {
       const AtomSite& site = fa.sites[static_cast<size_t>(i)];
-      if (!site_takes_cell(site) || cell_suffix(site_pointee(site)) != sfx || !done.insert(site_param(site)).second) continue;
-      split(low::var(formal_name(*fn_.f, site_param(site))));
+      if (!site_takes_cell(site) || cell_suffix(site_pointee(site)) != sfx || !done.insert(site_key(site)).second) continue;
+      split(site_var(site));
     }
+    // The entry function holds every global (program_start): a pointer it obtained may be any of them (decision 0041 item 10).
+    if (fn_.f == prog_.entry())
+      for (const Global& g : prog_.globals())
+        if (cell_suffix(g.type) == sfx && done.insert(kGlobalKeyBase + g.id).second) split(global_ref(g.id));
   }
 
   // The entry of a method with atoms (decision 0037 item 9): the case splits on the liveness cells of every pair of atoms of the `requires`, and
@@ -3497,10 +3636,11 @@ class Lowerer {
     const Env env = contract_env();
     std::vector<E> g;
     for (size_t i = 0; i < n; ++i) g.push_back(site_guard(fa.sites[i], env));
-    auto p = [&](size_t i) { return env.formals[static_cast<size_t>(site_param(fa.sites[i]))]; };
+    auto p = [&](size_t i) { return site_ref(fa.sites[i], env); };
     for (size_t i = 0; i < n; ++i)
       for (size_t j = i + 1; j < n; ++j) {
-        if (site_param(fa.sites[i]) == site_param(fa.sites[j])) continue;
+        if (site_key(fa.sites[i]) == site_key(fa.sites[j])) continue;
+        if (site_is_global(fa.sites[i]) && site_is_global(fa.sites[j])) continue;  // two globals are two `unique` blocks
         low::LStmt st;
         st.kind = low::LStmt::Kind::CaseSplit;
         st.expr = low::bin(low::BinOp::Eq, live_cell(p(i)), live_cell(p(j)));
@@ -3508,14 +3648,14 @@ class Lowerer {
       }
     // A pointer parameter without an atom of its own may be the place an atom names: split on each one of the same field.
     std::set<int> with_atom;
-    for (size_t i = 0; i < n; ++i) with_atom.insert(site_param(fa.sites[i]));
+    for (size_t i = 0; i < n; ++i) with_atom.insert(site_key(fa.sites[i]));
     for (size_t k = 0; k < f.params.size(); ++k) {
       const Type& t = f.params[k].type;
       if (!t.is_ptr() || with_atom.count(static_cast<int>(k)) != 0 || t.pointee == nullptr || t.pointee->is_void()) continue;
       std::set<int> seen;
       for (size_t i = 0; i < n; ++i) {
         const AtomSite& a = fa.sites[i];
-        if (!site_takes_cell(a) || cell_suffix(site_pointee(a)) != cell_suffix(*t.pointee) || !seen.insert(site_param(a)).second) continue;
+        if (!site_takes_cell(a) || cell_suffix(site_pointee(a)) != cell_suffix(*t.pointee) || !seen.insert(site_key(a)).second) continue;
         low::LStmt st;
         st.kind = low::LStmt::Kind::CaseSplit;
         st.expr = low::bin(low::BinOp::Eq, env.formals[k], p(i));
@@ -3526,7 +3666,8 @@ class Lowerer {
       for (size_t j = i + 1; j < n; ++j) {
         const AtomSite& a = fa.sites[i];
         const AtomSite& b = fa.sites[j];
-        if (a.atom->atom != AtomKind::Owns || b.atom->atom != AtomKind::Owns || site_param(a) == site_param(b)) continue;
+        if (a.atom->atom != AtomKind::Owns || b.atom->atom != AtomKind::Owns || site_key(a) == site_key(b)) continue;
+        if (site_is_global(a) && site_is_global(b)) continue;
         if (cell_suffix(site_pointee(a)) != cell_suffix(site_pointee(b))) continue;
         emit_assert(out, low::implies(low::and_(g[i], g[j]), low::bin(low::BinOp::Ne, p(i), p(j))),
                     meta("internal", fn_.f->loc, "internal check: two places the contract of `" + fn_.f->c_name + "` owns are different"));
@@ -3546,11 +3687,10 @@ class Lowerer {
     std::vector<E> g, p;
     for (size_t i : ens) {
       g.push_back(site_guard(fa.sites[i], env));
-      p.push_back(env.formals[static_cast<size_t>(site_param(fa.sites[i]))]);
+      p.push_back(site_ref(fa.sites[i], env));
     }
     auto name = [&](size_t k) {  // the user's spelling of the place, for messages
-      const std::string& c = fa.sites[ens[k]].atom->a->c_text;
-      return c.empty() ? std::string() : "*" + c;
+      return site_text(fa.sites[ens[k]]);
     };
     auto perm_meta = [&](const std::string& message, size_t k) {
       low::Meta m = meta("permission", at, message);
@@ -3579,7 +3719,7 @@ class Lowerer {
       const Type& t = site_pointee(site);
       const E amt = low::var(amount_name(site.atom->amount));
       const bool owns = site.atom->atom == AtomKind::Owns, reads = site.atom->atom == AtomKind::Reads;
-      const std::string pl = quoted(name(k), "the object the pointer points to");
+      const std::string pl = site_phrase(site, quoted(name(k), "the object the pointer points to"));
       const std::string msg = owns ? "returns without owning " + pl + ", which its contract promises"
                               : reads ? "returns without the permission to read " + pl + ", which it borrowed"
                                       : "returns without " + quoted(site.atom->a->c_text, "the pointer") + " pointing to a live object, which its contract promises";
@@ -3685,9 +3825,12 @@ class Lowerer {
   // ---- loops over memory (decision 0038) ----
 
   // Whether an expression or a statement touches memory: a pointer-typed node, a cell, `&`, `*` or a store (decision 0038 item 3).
-  static bool expr_touches(const Expr* e) {
+  bool expr_touches(const Expr* e) {
     if (e == nullptr) return false;
     if (e->type.is_ptr()) return true;
+    // A call whose callee has an atom in its `requires` touches memory even with no pointer argument: an atom on a global or an implicit `static`
+    // local's (decision 0041; audit SF1).  A callee with a parameter atom has a pointer argument, so nothing changes for programs without globals.
+    if (e->kind == Expr::Kind::Call && e->callee != nullptr && requires_atom_count(*e->callee) > 0) return true;
     switch (e->kind) {
       case Expr::Kind::Local: if (e->var != nullptr && (e->var->address_taken || e->var->type.is_ptr())) return true; break;
       case Expr::Kind::AddrOf: case Expr::Kind::Deref: case Expr::Kind::Atom: case Expr::Kind::StoreE: return true;
@@ -3701,7 +3844,7 @@ class Lowerer {
     return false;
   }
 
-  static bool stmt_touches(const Stmt* s) {
+  bool stmt_touches(const Stmt* s) {
     if (s == nullptr) return false;
     switch (s->kind) {
       case Stmt::Kind::Store: return true;
@@ -3749,15 +3892,22 @@ class Lowerer {
   struct LoopWrites {
     std::set<std::string> fields;
     std::set<int> cells;
+    std::set<int> globals;  // the globals (ids) written by name, or owned by a callee's atom (decision 0041 item 10): a write through any other pointer is by field
   };
 
   void writes_in_expr(const Expr* e, LoopWrites& w) {
     if (e == nullptr) return;
     if (e->kind == Expr::Kind::AssignE && e->var != nullptr && e->var->address_taken) w.cells.insert(e->var->id);  // decision 0039 item 2
-    if (e->kind == Expr::Kind::StoreE) w.fields.insert(cell_suffix(e->type));
+    if (e->kind == Expr::Kind::StoreE) {
+      if (e->c != nullptr && is_global_addr(*e->c)) w.globals.insert(e->c->global->id);
+      else w.fields.insert(cell_suffix(e->type));
+    }
     if (e->kind == Expr::Kind::Call && e->callee != nullptr)
-      for (const AtomSite& site : atoms_of(*e->callee).sites)
-        if (!site.in_ensures && site.atom->atom == AtomKind::Owns) w.fields.insert(cell_suffix(site_pointee(site)));
+      for (const AtomSite& site : atoms_of(*e->callee).sites) {
+        if (site.in_ensures || site.atom->atom != AtomKind::Owns) continue;
+        if (site_is_global(site)) w.globals.insert(site_key(site) - kGlobalKeyBase);
+        else w.fields.insert(cell_suffix(site_pointee(site)));
+      }
     for (const Expr* x : {e->a, e->b, e->c}) writes_in_expr(x, w);
     for (const Expr* x : e->args) writes_in_expr(x, w);
   }
@@ -3766,7 +3916,8 @@ class Lowerer {
     if (s == nullptr) return;
     switch (s->kind) {
       case Stmt::Kind::Store:
-        if (s->addr != nullptr && s->addr->type.pointee != nullptr) w.fields.insert(cell_suffix(*s->addr->type.pointee));
+        if (s->addr != nullptr && is_global_addr(*s->addr)) w.globals.insert(s->addr->global->id);
+        else if (s->addr != nullptr && s->addr->type.pointee != nullptr) w.fields.insert(cell_suffix(*s->addr->type.pointee));
         writes_in_expr(s->addr, w);
         writes_in_expr(s->expr, w);
         break;
@@ -3796,6 +3947,22 @@ class Lowerer {
     }
   }
 
+  // The places the function holds on entry that a loop frames: the parameters (and globals) with an atom in the `requires`, and in the entry function
+  // every global and `static` local of the unit (it holds them from program_start, decision 0041 item 10); `value_keys`: those whose value cells are held.
+  void held_keys(std::set<int>& atom_keys, std::set<int>& value_keys) {
+    const FnAtoms& fa = atoms_of(*fn_.f);
+    for (int i = 0; i < fa.nreq; ++i) {
+      const AtomSite& site = fa.sites[static_cast<size_t>(i)];
+      atom_keys.insert(site_key(site));
+      if (site_takes_cell(site)) value_keys.insert(site_key(site));
+    }
+    if (fn_.f == prog_.entry())
+      for (const Global& g : prog_.globals()) {
+        atom_keys.insert(kGlobalKeyBase + g.id);
+        value_keys.insert(kGlobalKeyBase + g.id);
+      }
+  }
+
   // The places a loop frames (decision 0038 item 3), in order: the parameters' places (the formal's value and flag cells of an `owns`/`reads` atom of
   // the `requires`, and one liveness cell per parameter with an atom) of the parameters the function never assigns, then every cell of every open
   // block.  `with_atoms` lists every parameter with an atom (assigned or not), for the case splits.
@@ -3805,11 +3972,8 @@ class Lowerer {
     const FnAtoms& fa = atoms_of(f);
     const std::string suffix_of_loop = "__" + std::to_string(loop_number);
     std::set<int> atom_params, value_params;
-    for (int i = 0; i < fa.nreq; ++i) {
-      const AtomSite& site = fa.sites[static_cast<size_t>(i)];
-      atom_params.insert(site_param(site));
-      if (site_takes_cell(site)) value_params.insert(site_param(site));
-    }
+    held_keys(atom_params, value_params);
+    (void)fa;
     if (with_atoms != nullptr) with_atoms->assign(atom_params.begin(), atom_params.end());
     auto name = [&](Place& pl, const std::string& tag) {
       pl.kv = "kv_" + tag + suffix_of_loop;
@@ -3820,24 +3984,31 @@ class Lowerer {
     };
     std::vector<size_t> earlier;  // the indexes in `places` of the parameter places so far
     for (int k : atom_params) {
-      if (fn_.assigned_params.count(k) != 0) continue;
-      const Type& pt = f.params[static_cast<size_t>(k)].type;
-      if (pt.pointee == nullptr) continue;
+      const bool global = key_is_global(k);
+      if (!global && fn_.assigned_params.count(k) != 0) continue;
+      if (!global && f.params[static_cast<size_t>(k)].type.pointee == nullptr) continue;
       Place pl;
       pl.param = k;
-      pl.recv = low::var(formal_name(f, k));
-      pl.type = *pt.pointee;
+      pl.recv = global ? global_ref(k - kGlobalKeyBase) : low::var(formal_name(f, k));
+      pl.type = key_pointee(k);
       pl.value = value_params.count(k) != 0;
       pl.suffix = cell_suffix(pl.type);
-      const std::string& c = f.params[static_cast<size_t>(k)].name;
-      pl.label = c.empty() ? std::string() : "*" + c;
-      for (const AtomSite& site : fa.sites)
-        if (site_param(site) == k && !site.atom->a->c_text.empty()) { pl.label = "*" + site.atom->a->c_text; break; }
-      name(pl, formal_name(f, k));
-      pl.gv = low::bin(low::BinOp::Ne, pl.recv, low::null_());
-      pl.gl = pl.gv;
+      if (global) {
+        pl.label = prog_.globals()[static_cast<size_t>(k - kGlobalKeyBase)].c_name;
+        name(pl, prog_.globals()[static_cast<size_t>(k - kGlobalKeyBase)].viper_name());
+        // A global's address is never null: no guard of its own (decision 0041 item 10); the guards below keep it apart from a parameter's place.
+      } else {
+        const std::string& c = f.params[static_cast<size_t>(k)].name;
+        pl.label = c.empty() ? std::string() : "*" + c;
+        for (const AtomSite& site : fa.sites)
+          if (site_key(site) == k && !site_text(site).empty()) { pl.label = site_text(site); break; }
+        name(pl, formal_name(f, k));
+        pl.gv = low::bin(low::BinOp::Ne, pl.recv, low::null_());
+        pl.gl = pl.gv;
+      }
       for (size_t j : earlier) {
         const Place& o = places[j];
+        if (global && key_is_global(o.param)) continue;  // two globals are two `unique` blocks
         if (pl.value && o.value && o.suffix == pl.suffix) pl.gv = low::and_(pl.gv, low::bin(low::BinOp::Ne, pl.recv, o.recv));
         pl.gl = low::and_(pl.gl, low::implies(low::bin(low::BinOp::Ne, o.recv, low::null_()),
                                               low::bin(low::BinOp::Ne, live_cell(pl.recv), live_cell(o.recv))));
@@ -3871,7 +4042,8 @@ class Lowerer {
     }
     for (Place& pl : places) {
       if (!pl.value) continue;
-      pl.reach = writes.fields.count(pl.suffix) != 0 || (pl.cell && writes.cells.count(pl.var->id) != 0);
+      pl.reach = writes.fields.count(pl.suffix) != 0 || (pl.cell && writes.cells.count(pl.var->id) != 0) ||
+                 (!pl.cell && key_is_global(pl.param) && writes.globals.count(pl.param - kGlobalKeyBase) != 0);
     }
     return places;
   }
@@ -4181,25 +4353,24 @@ class Lowerer {
       std::vector<const Place*> pparams;
       for (const Place& pl : places)
         if (!pl.cell) pparams.push_back(&pl);
-      auto param_type = [&](int k) { return cell_suffix(*fn_.f->params[static_cast<size_t>(k)].type.pointee); };
-      const FnAtoms& fa = atoms_of(*fn_.f);
-      std::set<int> value_params;
-      for (int i = 0; i < fa.nreq; ++i)
-        if (site_takes_cell(fa.sites[static_cast<size_t>(i)])) value_params.insert(site_param(fa.sites[static_cast<size_t>(i)]));
+      auto param_type = [&](int k) { return cell_suffix(key_pointee(k)); };
+      auto kref = [&](int k) { return key_is_global(k) ? global_ref(k - kGlobalKeyBase) : low::var(formal_name(*fn_.f, k)); };
+      std::set<int> held_atoms, value_params;
+      held_keys(held_atoms, value_params);
       std::set<std::pair<int, int>> split_cells, split_lives;
       for (const Place* a : pparams)
         for (int k : atom_params) {
-          if (k == a->param) continue;
+          if (k == a->param || (key_is_global(k) && key_is_global(a->param))) continue;  // two globals are two `unique` blocks
           const std::pair<int, int> key{std::min(a->param, k), std::max(a->param, k)};
           if (a->value && value_params.count(k) != 0 && param_type(k) == a->suffix && split_cells.insert(key).second)
-            case_split(entry, low::bin(BinOp::Eq, low::var(formal_name(*fn_.f, key.second)), low::var(formal_name(*fn_.f, key.first))));
+            case_split(entry, low::bin(BinOp::Eq, kref(key.second), kref(key.first)));
         }
       for (const Place* a : pparams)
         for (int k : atom_params) {
-          if (k == a->param) continue;
+          if (k == a->param || (key_is_global(k) && key_is_global(a->param))) continue;
           const std::pair<int, int> key{std::min(a->param, k), std::max(a->param, k)};
           if (split_lives.insert(key).second)
-            case_split(entry, low::bin(BinOp::Eq, live_cell(low::var(formal_name(*fn_.f, key.second))), live_cell(low::var(formal_name(*fn_.f, key.first)))));
+            case_split(entry, low::bin(BinOp::Eq, live_cell(kref(key.second)), live_cell(kref(key.first))));
         }
       // A parameter place against each cell (B1): its snapshot must not pick up a cell's permission.
       for (const Place* a : pparams)
@@ -4551,7 +4722,8 @@ class Lowerer {
     return false;
   }
 
-  void named_const_check(const NamedConst& c, std::vector<low::LStmt>& out) {
+  // `guard`: also assert that the initializer as written equals the front end's value (false for a global whose value is unknown, decision 0041 item 5).
+  void named_const_check(const NamedConst& c, std::vector<low::LStmt>& out, bool guard = true) {
     if (c.init == nullptr) return;
     // A static assertion (decision 0024 item 2) is checked like a named constant whose value is true: the condition's obligations,
     // then the guard that it holds (skipped for the bare literal `true`).
@@ -4562,7 +4734,7 @@ class Lowerer {
     LV v = lower(*c.init, body_env(), nullptr, {}, full);
     if (!closed_result(full, *c.init, what)) return;
     for (Obl& o : full.obls) emit_assert(out, low::implies(o.guard, o.cond), o.meta);
-    if (bare_const_equals(*c.init, c.value)) return;
+    if (!guard || bare_const_equals(*c.init, c.value)) return;
     internal_guard(out, v.e, c.type, c.value, c.loc,
                    assertion ? std::string("internal check: static assertion condition as written differs from the front end's (it holds)")
                              : "internal check: the value of `" + c.c_name + "` as written differs from the front end's");
@@ -4616,6 +4788,18 @@ class Lowerer {
   // `__wf` method) its local constants and its case values.
   void prologue(std::vector<low::LStmt>& out, const Function* own) {
     for (const NamedConst& c : prog_.named_consts()) named_const_check(c, out);
+    // Decision 0041 item 5: a global's initializer as written is checked like a named constant's (a mutable global is never folded at its uses).
+    for (const Global& g : prog_.globals()) {
+      if ((g.init_kind != Global::Init::Value && g.init_kind != Global::Init::Unknown) || g.init == nullptr) continue;
+      NamedConst c;
+      c.id = g.id;
+      c.c_name = g.c_name;
+      c.type = g.type;
+      c.loc = g.loc;
+      c.init = g.init;
+      c.value = g.value;
+      named_const_check(c, out, g.init_kind == Global::Init::Value);
+    }
     if (own == nullptr) return;
     for (const NamedConst& c : own->local_consts()) named_const_check(c, out);
     case_checks(own->body, out);
@@ -4654,8 +4838,11 @@ class Lowerer {
     for (int k = 0; k < fa.nreq; ++k) m.formals.push_back(low::LVar{amount_name(k), low::LType::Perm});  // the ghost amounts (decision 0037 item 6)
     if (!f.ret.is_void()) m.results.push_back(low::LVar{kResult, ltype(f.ret)});
 
-    // requires: the parameters' type ranges, the ghost amounts' bounds (before every clause that names one), WF of the pointers, then the
-    // user's (0012 item 1; decision 0037 items 2 and 6).
+    // requires: the facts of the unit's globals (decision 0041 item 4: not `main`'s, which gets them from program_start), the parameters' type
+    // ranges, the ghost amounts' bounds (before every clause that names one), WF of the pointers, then the user's (0012 item 1; decision 0037
+    // items 2 and 6).
+    if (&f != prog_.entry())
+      if (const E facts = global_facts()) m.requires_.push_back(clause_checks(facts, f.loc, false, f.c_name));
     for (size_t k = 0; k < f.params.size(); ++k) {
       if (!f.params[k].type.is_int()) continue;
       m.requires_.push_back(clause_checks(range_check(low::var(formal_name(f, static_cast<int>(k))), *f.params[k].type.int_type),
@@ -4722,6 +4909,13 @@ class Lowerer {
       m.decreases_check = low::Check{"termination.failed", std::move(dm)};
     }
     m.has_body = true;
+    if (&f == prog_.entry() && has_globals()) {  // decision 0041 item 4: the globals are given their initial state first
+      low::LStmt c;
+      c.kind = low::LStmt::Kind::Call;
+      c.name = "program_start";
+      c.check = low::Check{"call.precondition", meta("internal", f.loc, "internal check: Silicon's own check of the call of program_start")};
+      m.body.push_back(std::move(c));
+    }
     // The parameters' local copies (0012 item 2); an address-taken parameter is copied into a fresh one-slot block (decision 0037 item 4), whose
     // scope is the body's.
     std::vector<const Var*> param_cells;
@@ -4809,7 +5003,7 @@ class Lowerer {
           const AtomSite& partner = fa.sites[static_cast<size_t>(site.atom->amount)];
           const E ge = site_guard(site, env), gp = site_guard(partner, env);
           if (!gp || same_expr(ge, gp)) continue;
-          const std::string txt = site.atom->a != nullptr && !site.atom->a->c_text.empty() ? "*" + site.atom->a->c_text : std::string();
+          const std::string txt = site.atom->a != nullptr ? site_text(site) : std::string();
           emit_assert(m.body, low::implies(prior, low::implies(ge, gp)),
                       meta("permission", site.atom->loc.known() ? site.atom->loc : c.loc,
                            "the contract of `" + f.c_name + "` returns " + quoted(txt, "an object") + " on a path where its `requires` did not take it"));
@@ -4848,6 +5042,8 @@ class Lowerer {
     for (int k = 0; k < fa.nreq; ++k) m.formals.push_back(low::LVar{amount_name(k), low::LType::Perm});
     if (!f.ret.is_void()) m.formals.push_back(low::LVar{kResult, ltype(f.ret)});
     for (const auto& [key, t] : wf_ghosts_) m.formals.push_back(low::LVar{ghost_name(key.first, key.second), ltype(t)});
+    if (&f != prog_.entry())
+      if (const E facts = global_facts()) m.requires_.push_back(clause_checks(facts, f.loc, false, what));
     for (int k = 0; k < fa.nreq; ++k) m.requires_.push_back(clause_checks(amount_bounds(amount_name(k)), f.loc, false, what));
     for (size_t k = 0; k < f.params.size(); ++k) {
       if (f.params[k].type.is_ptr()) m.requires_.push_back(clause_checks(wf_expr(low::var(formal_name(f, static_cast<int>(k)))), f.loc, false, what));
@@ -4866,6 +5062,7 @@ class Lowerer {
     for (auto a = wf_ghosts_.begin(); a != wf_ghosts_.end(); ++a)
       for (auto b = std::next(a); b != wf_ghosts_.end(); ++b) {
         if (a->first.second != b->first.second || cell_suffix(a->second) != cell_suffix(b->second)) continue;
+        if (key_is_global(a->first.first) && key_is_global(b->first.first)) continue;  // two globals are two blocks
         const E pa = place_of(env, a->first.first), pb = place_of(env, b->first.first);
         m.requires_.push_back(clause_checks(
             low::implies(low::bin(low::BinOp::Eq, pa, pb),
@@ -4881,13 +5078,13 @@ class Lowerer {
           E gr2, ge2;
           bool have_r2 = false, have_e2 = false;
           for (const AtomSite& s : fa.sites) {
-            if (s.atom->atom != AtomKind::Reads || site_param(s) != k2.first) continue;
+            if (s.atom->atom != AtomKind::Reads || site_key(s) != k2.first) continue;
             if (!s.in_ensures && !have_r2) { gr2 = site_guard(s, env); have_r2 = true; }
             if (s.in_ensures && !have_e2) { ge2 = site_guard(s, env); have_e2 = true; }
           }
           if (!have_r2 || !have_e2) continue;
           m.requires_.push_back(clause_checks(
-              low::implies(low::and_(low::and_(gr2, ge2), low::bin(low::BinOp::Eq, env.result, env.formals[static_cast<size_t>(k2.first)])),
+              low::implies(low::and_(low::and_(gr2, ge2), low::bin(low::BinOp::Eq, env.result, place_of(env, k2.first))),
                            low::bin(low::BinOp::Eq, low::var(ghost_name(-1, true)), low::var(ghost_name(k2.first, false)))),
               f.loc, false, what));
         }
@@ -4897,7 +5094,7 @@ class Lowerer {
       E gr, ge;
       bool have_r = false, have_e = false;
       for (const AtomSite& s : fa.sites) {
-        if (s.atom->atom != AtomKind::Reads || site_param(s) != key.first) continue;
+        if (s.atom->atom != AtomKind::Reads || site_key(s) != key.first) continue;
         if (!s.in_ensures && !have_r) { gr = site_guard(s, env); have_r = true; }
         if (s.in_ensures && !have_e) { ge = site_guard(s, env); have_e = true; }
       }

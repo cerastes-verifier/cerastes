@@ -614,6 +614,203 @@ def lint_allocations(src: Source, decls: list[Decl], add: Callable[[int, str], N
                         f"`alloc_{suffix or '<t>'}` (`ensures ((r != null) && ...` with the fields `v_{suffix or '<t>'}`/`d_{suffix or '<t>'}`)")
 
 
+# Globals and `static` locals (decision 0041 item 4): each is a `unique function GB_<ident>(): Block` of `domain Block`, and the trusted
+# `program_start()` gives `main` their initial state.  That method is an assumption (invariant 4), so its contract is pinned row by row, as
+# `alloc_<t>` is; the pure facts about the blocks (`len(GB_x()) == 1 && lvloc(GB_x()) == loc(GB_x(), -2)`, true in 0028 item 2's model) are
+# a hypothesis that every other method takes as its first `requires` and its callers discharge, never an axiom.
+UNIQUE_RE = re.compile(r"(?<![\w$'])unique(?![\w$'])")
+GB_DECL_RE = re.compile(r"^\s*unique\s+function\s+(?P<name>GB_[A-Za-z0-9_$']+)\(\)\s*:\s*Block\s*$")
+GB_FUNCTION_RE = re.compile(r"^\s*function\s+GB_")
+FIELD_DECL_RE = re.compile(r"^\s*field\s+v_(?P<suffix>[A-Za-z0-9_$']+)\s*:\s*(?P<type>[A-Za-z]+)\s*$")
+PROGRAM_START = "program_start"
+PROGRAM_START_CALL_RE = re.compile(r"(?<![\w$'])program_start\s*\(")
+INT_LITERAL_RE = r"-?[0-9]+"
+
+
+def norm_viper(text: str) -> str:
+    """`text` without whitespace and without grouping parentheses (a `(` that does not follow a name is a group; the
+    parentheses of a call or of `GB_x()` stay), so that the emitter's full parenthesization and a plain spelling
+    of the same `&&` chain compare equal."""
+    out: list[str] = []
+    stack: list[bool] = []  # True: a call's parenthesis, kept
+    prev = ""
+    for ch in text:
+        if ch.isspace():
+            continue
+        if ch == "(":
+            keep = bool(prev) and (prev.isalnum() or prev in "_$'")
+            stack.append(keep)
+            if keep:
+                out.append(ch)
+        elif ch == ")":
+            if (stack.pop() if stack else True):
+                out.append(ch)
+        else:
+            out.append(ch)
+        prev = ch
+    return "".join(out)
+
+
+def global_facts_atoms(names: list[str]) -> list[str]:
+    atoms: list[str] = []
+    for n in names:
+        atoms += [norm_viper(f"len({n}()) == 1"), norm_viper(f"lvloc({n}()) == loc({n}(), -2)")]
+    return sorted(atoms)
+
+
+def clause_texts(src: Source, d: Decl) -> list[tuple[str, int, str]]:
+    """(keyword, first line, text after the keyword) of each clause of the header of the method `d`; a clause that runs over
+    several lines is joined."""
+    out: list[tuple[str, int, str]] = []
+    end = d.body_line - 1 if d.has_body else d.end_line
+    for n in range(d.line, max(d.line, end) + 1):
+        code = src.code[n - 1]
+        m = CLAUSE_START_RE.match(code)
+        if m:
+            out.append((m.group(1), n, code[m.end():]))
+        elif out and code.strip() and not code.strip().startswith("{"):
+            k, ln, text = out[-1]
+            out[-1] = (k, ln, text + " " + code)
+    return out
+
+
+def first_statement(src: Source, d: Decl) -> tuple[str, int]:
+    """The text and line of the first statement of the body of `d`: after the `var` declarations."""
+    for n in range(d.body_line + 1, d.end_line + 1):
+        code = src.code[n - 1].strip()
+        if code and not code.startswith("var ") and not code.startswith("var\t"):
+            return code, n
+    return "", 0
+
+
+def lint_globals(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    ok_domains = [d for d in decls if d.kind == "domain" and lint_domain(src, d, lambda _l, _w: None)]
+    in_domain: set[int] = set()
+    for d in ok_domains:
+        in_domain.update(range(d.line + 1, block_close_line(src, d) + 1))
+    gbs: dict[str, int] = {}  # name -> line, in declaration order
+    for lineno, code in enumerate(src.code, start=1):
+        if not UNIQUE_RE.search(code):
+            if GB_FUNCTION_RE.match(code) and lineno in in_domain:
+                add(lineno, "a `GB_` function of `domain Block` must be `unique`: two distinct globals are two blocks "
+                            "(decision 0041 item 4)")
+            continue
+        m = GB_DECL_RE.match(code)
+        if m is None or lineno not in in_domain:
+            add(lineno, "`unique`: admitted only as `unique function GB_<name>(): Block` inside `domain Block` "
+                        "(decision 0041 item 4); distinctness anywhere else would be an assumption")
+        elif m.group("name") in gbs:
+            add(lineno, f"`unique function {m.group('name')}` declared twice")
+        else:
+            gbs[m.group("name")] = lineno
+    ps = [d for d in decls if d.kind == "method" and d.name == PROGRAM_START]
+    if not gbs:
+        for d in ps:
+            add(d.line, "`method program_start` in a program with no `unique function GB_...`: it exists only for globals "
+                        "(decision 0041 item 4)")
+        return
+    if len(ps) != 1:
+        add(min(gbs.values()), "a program with globals (`unique function GB_...`) has exactly one `method program_start()` "
+                               f"(decision 0041 item 4), found {len(ps)}")
+    fields = {m.group("suffix"): m.group("type") for l in src.code if (m := FIELD_DECL_RE.match(l))}
+    facts_atoms = global_facts_atoms(list(gbs))
+    for d in ps:
+        want_head = "method program_start()"
+        header = " ".join(src.code[d.line - 1].split())
+        clauses = clause_texts(src, d)
+        problem = None
+        if d.has_body or header != want_head:
+            problem = f"it must be a bodyless `{want_head}`"
+        elif trusted_tag(src, d.line) is None:
+            problem = "it must carry `// cerastes:trusted-contract <reason>`"
+        elif not clauses or clauses[-1][0] != "decreases" or norm_viper(clauses[-1][2]) != "_" \
+                or any(k != "ensures" for k, _l, _t in clauses[:-1]):
+            problem = "its clauses are `ensures` rows and a final `decreases _`, nothing else"
+        elif len(clauses) < 2 or sorted(norm_viper(clauses[0][2]).split("&&")) != facts_atoms:
+            problem = ("its first `ensures` row must be the global facts: `len(GB_x()) == 1 && lvloc(GB_x()) == loc(GB_x(), -2)` "
+                       "for each declared `GB_x`, each once")
+        if problem:
+            add(d.line, f"`method program_start` is not the trusted start of decision 0041 item 4: {problem}")
+            continue
+        rows: dict[str, tuple[int, str, str | None]] = {}  # global -> (line, field suffix, target of a `loc(GB_h(), 0)` value)
+        for _k, ln, text in clauses[1:-1]:
+            row = norm_viper(text)
+            m = re.match(r"acc\(loc\((?P<g>GB_[\w$']+)\(\),0\)\.v_(?P<s>[\w$']+)\)&&acc\(loc\((?P=g)\(\),0\)\.d_(?P=s)\)&&"
+                         r"loc\((?P=g)\(\),0\)\.d_(?P=s)&&(?P<rest>.*)$", row)
+            g = m.group("g") if m else ""
+            tail = f"acc(lvloc({g}()).lv)"
+            if m is None or g not in gbs or not (m.group("rest") == tail or m.group("rest").endswith("&&" + tail)):
+                add(ln, "a `program_start` row is `acc(<cell>.v_T) && acc(<cell>.d_T) && <cell>.d_T && <value> && "
+                        "acc(lvloc(GB_x()).lv)` for a declared `GB_x`, <cell> being `loc(GB_x(), 0)`")
+                continue
+            suffix, c = m.group("s"), f"loc({g}(),0)"
+            mid = m.group("rest")[:-len(tail)].rstrip("&")
+            kind, target, good = fields.get(suffix), None, False
+            if kind == "Int":
+                good = re.fullmatch(re.escape(c) + rf"\.v_{suffix}==" + INT_LITERAL_RE, mid) is not None
+                if not good and (r := re.fullmatch(rf"({INT_LITERAL_RE})<={re.escape(c)}\.v_{suffix}&&{re.escape(c)}\.v_{suffix}<=({INT_LITERAL_RE})", mid)):
+                    good = int(r.group(1)) <= int(r.group(2))
+            elif kind == "Bool":
+                good = mid in ("", f"{c}.v_{suffix}==true", f"{c}.v_{suffix}==false")
+            elif kind == "Ref" and suffix.startswith("ptr_"):
+                v = f"{c}.v_{suffix}"
+                wf = f"{v}==null||{v}==loc(block_of({v}),offset_of({v}))&&0<=offset_of({v})&&offset_of({v})<=len(block_of({v}))"
+                if mid in (f"{v}==null", wf):
+                    good = True
+                elif r := re.fullmatch(re.escape(v) + r"==loc\((GB_[\w$']+)\(\),0\)", mid):
+                    target, good = r.group(1), True
+            if not good:
+                add(ln, f"the value of the `program_start` row of `{g}` (field `v_{suffix}`{'' if kind else ', not declared'}) is not "
+                        "a literal of its type, `null`, `loc(GB_h(), 0)` of a declared global, or an unknown value's range / `WF`")
+                continue
+            if g in rows:
+                add(ln, f"a second `program_start` row for `{g}` (two full permissions would make `main` vacuous)")
+                continue
+            rows[g] = (ln, suffix, target)
+        for g, (ln, suffix, target) in rows.items():
+            if target is not None and (target not in rows or rows[target][1] != suffix[len("ptr_"):]):
+                add(ln, f"the row of `{g}` points at `{target}`, which is not a declared global of the pointee's field "
+                        f"`v_{suffix[len('ptr_'):]}` (decision 0041 item 4)")
+        for g in gbs:
+            if g not in rows:
+                add(d.line, f"`method program_start` has no row for `{g}` (decision 0041 item 4: one row per global)")
+    # `program_start` is reached once, as the first statement of `main`; every other method takes the facts
+    methods = [d for d in decls if d.kind == "method"]
+    ps_lines = {d.line for d in ps}
+    calls = [n for n, code in enumerate(src.code, start=1) if PROGRAM_START_CALL_RE.search(code) and n not in ps_lines]
+    entries: list[Decl] = []
+    for n in calls:
+        owner = next((d for d in methods if d.line <= n <= d.end_line), None)
+        if owner is not None and owner.has_body and first_statement(src, owner) == ("program_start()", n):
+            entries.append(owner)
+        else:
+            add(n, "`program_start()` is called only as the first statement of `main`'s method (decision 0041 item 4)")
+    if len(calls) > 1:
+        add(calls[1], "`program_start()` is called once (a second call would hold every global's permission twice)")
+    # The entry method is reached by the program's start only: a call of it (from another method or from itself, after `program_start()`) would
+    # run `program_start()` again and inhale every global's permission twice, and it takes no `requires` (it holds the globals from `program_start`).
+    decl_lines = {d.line for d in methods}
+    for e in entries:
+        if any(k == "requires" for k, _l, _t in clause_texts(src, e)):
+            add(e.line, f"`method {e.name}` starts the program (its first statement is `program_start()`): it takes no `requires` "
+                        "(decision 0041 item 4)")
+        call = re.compile(r"(?<![\w$'.])" + re.escape(e.name) + r"\s*\(")
+        for n, code in enumerate(src.code, start=1):
+            if n not in decl_lines and call.search(code):
+                add(n, f"a call of the entry method `{e.name}`: it runs `program_start()` once, as the program starts; a call would "
+                       "inhale every global's permission again (decision 0041 item 4)")
+    exempt = {PROGRAM_START} | {e.name for e in entries} | {e.name + "__wf" for e in entries}
+    for d in methods:
+        if d.name in exempt or d.name.startswith(ALLOC_PREFIX):
+            continue
+        reqs = [(ln, t) for k, ln, t in clause_texts(src, d) if k == "requires"]
+        if not reqs or sorted(norm_viper(reqs[0][1]).split("&&")) != facts_atoms:
+            add(reqs[0][0] if reqs else d.line,
+                f"`method {d.name}` of a program with globals must take the global facts as its first `requires` "
+                "(`len(GB_x()) == 1 && lvloc(GB_x()) == loc(GB_x(), -2)` for each global, before the amounts' rows; "
+                "decision 0041 item 4)")
+
+
 # The ghost amounts (decision 0037 items 6 and 14): a method's `Perm` formals are the amounts of the atoms of its contract.
 WILDCARD_RE = re.compile(r"(?<![\w$'.])wildcard(?![\w$'])")
 PERM_FORMAL_RE = re.compile(r"^\s*(?P<name>[A-Za-z_$][\w$']*)\s*:\s*Perm\s*$")
@@ -951,6 +1148,7 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     lint_flags(src, add)
     lint_remainders(src, decls, add)
     lint_allocations(src, decls, add)
+    lint_globals(src, decls, add)
     lint_ghost_amounts(src, decls, add)
     lint_perm_locals(src, decls, add)
 
@@ -1095,7 +1293,9 @@ FLAG_ANYWHERE_RE = re.compile(r"(?<![\w$'])d_[\w$']*\s*:=")
 FLAG_DECL_INIT_RE = re.compile(r"(?<![\w$'])var\s+d_[\w$']*\s*:\s*Bool\s*:=")
 DUMMY_VALUE_RE = re.compile(r"^\s*(?:-?\s*\d+|\(\s*-\s*\d+\s*\)|true|false|null)\s*;?\s*$")
 # The flag of an address-taken cell is a field of the cell (decision 0032 item 11): `<recv>.d_<t> := <value>`.
-FIELD_FLAG_RE = re.compile(r"^\s*(?P<recv>[A-Za-z_$][\w$']*)\.d_(?P<name>[A-Za-z_$][\w$']*)\s*:=(?P<value>.*)$")
+# A global's cell is `loc(GB_<name>(), 0)` (decision 0041 item 4): the same rule, the receiver is that term.
+GLOBAL_CELL_RE = r"loc\(\s*GB_[\w$']+\(\)\s*,\s*0\s*\)"
+FIELD_FLAG_RE = re.compile(r"^\s*(?P<recv>[A-Za-z_$][\w$']*|" + GLOBAL_CELL_RE + r")\.d_(?P<name>[A-Za-z_$][\w$']*)\s*:=(?P<value>.*)$")
 
 
 def lint_flags(src: Source, add: Callable[[int, str], None]) -> None:

@@ -60,7 +60,7 @@ it verifies and what it does not:
   `?:` with `void` arms as a statement,
   `if`/`else`, `switch`, `while`, `do` and `for` loops with invariants and
   termination measures, `break` and `continue`, forward `goto`, recursion with
-  measures, `return`, named constants (`const` globals), enumerations and their constants, calls of functions that
+  measures, `return`, named constants (`const` globals), global and `static` local variables through contracts, enumerations and their constants, calls of functions that
   have a contract or a body in the
   same file (anywhere in an expression, also in guarded operands and loop
   conditions, when C's order of calls cannot hide a check), functions that do not return (`+[[noreturn]]+`, `abort`, `exit`),
