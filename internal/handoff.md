@@ -1,4 +1,4 @@
-# Handoff after M4.5b2a — globals and `static` locals (record 0041) (2026-10-30); M4.5b2b in progress (record 0042, 2026-11-02)
+# Handoff after M4.5b2b — initialization through pointers (record 0042) (2026-11-02)
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
@@ -10,19 +10,24 @@ notes a session consumes move into its plan.
 
 ## 1. State
 
-- **On `origin/main`** (`38877b4`): everything through M4.5b2a (PR #21 M4.5b1c3, PR #22 M4.5b2a). M4.5b1 and M4.5b2a are
-  complete; the local `main` of the main checkout is the same commit.
-- **M4.5b2b** (P4222's markers, `--strict-init`, record 0042) is in progress on branch `m4.5b2b-init-markers` in the
-  worktree `.claude/worktrees/m4.5b2b`, from `38877b4` (plan `.claude/plans/m4-5b2b-init-markers.md`). Its baseline is
-  taken in the detached worktree `.claude/worktrees/m4.5b2b-base` at `38877b4`, so the main checkout is not touched.
+- **On `origin/main`** (`38877b4`): everything through M4.5b2a (PR #21 M4.5b1c3, PR #22 M4.5b2a).
+- **M4.5b2b** (P4222's markers, `--strict-init`, the call's flag row as `uninitialized`; record 0042; plan
+  `.claude/plans/m4-5b2b-init-markers.md`) is done on branch `m4.5b2b-init-markers` (local commits, from `38877b4`) in
+  the worktree `.claude/worktrees/m4.5b2b`; its baseline worktree `.claude/worktrees/m4.5b2b-base` (detached at
+  `38877b4`) is no longer needed. M4.5b2 is complete. Result in `internal/status.md`.
+- **Audits:** round 1 on record 0042 (no blocking item; seven should-fix items and eight notes, all taken), round 2 on
+  the code (no blocking item, no unsound verdict; four should-fix items, all taken, S2 through owner question 89; so no
+  re-audit). What was not taken is in §3.
 
 The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits behind upstream `main` (§4.1).
 
 ## 2. Owner steps
 
-None during M4.5b2b. At its end: push `m4.5b2b-init-markers` and open its PR (the status entry gives the commands);
-after the merge, `git merge --ff-only origin/main` in the main checkout, and `git worktree remove` of the two session
-worktrees.
+1. **M4.5b2b's branch:** push it and open its PR (`git -C .claude/worktrees/m4.5b2b push origin m4.5b2b-init-markers`);
+   both CI jobs run the PR tier (no Linux run in the session: CI covers it).
+2. **After the merge:** `git merge --ff-only origin/main` in the main checkout, then `git worktree remove
+   .claude/worktrees/m4.5b2b` and `git worktree remove .claude/worktrees/m4.5b2b-base`.
+3. Then M4.5c (§4.2), or M4.5d1 once the vlibc repository exists.
 
 ## 3. Open notes, by the session that consumes them
 
@@ -37,6 +42,8 @@ P4222's markers, P54 and the b2b design points).
 - Struct copies must not clear the flag of a cell the function holds: record 0042's `internal` row for `ref_to_uninit`
   (`old(flag) ==> flag`, question 87) relies on it [b2b].
 - Accepted completeness gap: `&s.x < &s.y` is reported (members are different blocks) [M4.5a].
+- Struct copies and field writes keep record 0042 item 5's loop row `held && flag ==> range` inductive (it is on every
+  loop place since question 89) [b2b].
 
 **M4.5d1 vlibc**
 - P55: the attribute allow-list rejects a system declaration's attributes (`[[const]]`, `[[alloc_size]]`, `[[__cold__]]`)
@@ -44,6 +51,8 @@ P4222's markers, P54 and the b2b design points).
 - vlibc's headers come through `--sys_include`, so EDG flags them as system: the macro exemption of record 0031 item 9
   must count vlibc's library class as a verified file or exclude it before vlibc lands (add it to 0030 item 4's audit
   list) [S5].
+- The rejection of a marker (`owning`, `must_init`, `ref_to_uninit`) on a user redeclaration of a system function reads
+  only secondary declarations in verified files: revisit it when vlibc's own headers carry markers [b2b].
 
 **M4.5d2 `malloc` and `free`**
 - Register `owning`'s `r` and `v` and `ref_to_uninit`'s `v` and `r` here, in the commit that handles them [M4.5a, b2b].
@@ -51,6 +60,9 @@ P4222's markers, P54 and the b2b design points).
   `g` [b2a audit 1 N3].
 - `return &s;` of a `static` local leaves the caller only `WF(r)`, so its uses are `lifetime`
   (`static_local_return_address_use.c`) until `ensures` atoms land [b2a].
+- Record 0042's `internal` row for `ref_to_uninit` (`(g_r && old(flag)) ==> flag`) can fail after a real `permission`
+  error only where another chunk may hold the same place, which nothing creates today; re-check it once a cell can be
+  reached through a fresh heap chunk (`malloc` after `keep(p)`) [b2b audit 1 N1].
 
 **M4.5e1/e2 Arrays and pointer arithmetic:** P38's braced initializers (§4.2); signed/unsigned and enumeration variants
 through `void*` cannot be written [M4.5a].
@@ -65,7 +77,9 @@ through `void*` cannot be written [M4.5a].
   contract on `main`, which is rejected; M4.6 makes `main(argc, argv)` the entry [b2a audit 2 N3].
 - `const` objects as cells (question 78, §4.3); `c | 0x20` case bits (0027).
 
-**M4.7 Function pointers:** keep `&main` rejected, so `program_start` is reached once [b2a audit 1 N10].
+**M4.7 Function pointers:** keep `&main` rejected, so `program_start` is reached once [b2a audit 1 N10]; a marker in a
+function-pointer typedef (`typedef void (*fp)(int *p CERASTES_MUST_INIT);`) reaches no function today and must be read
+(or rejected) when calls through pointers arrive [b2b audit 2 S4].
 
 **M4.8 C parity close-out**
 - The cost of aliasing `reads`/`live` parameters (question 66): the cell splits at calls were checked by timing, not
@@ -80,7 +94,10 @@ through `void*` cannot be written [M4.5a].
 - Exit-3 hazard, no case known: Silicon continuing past a failed explicit check and tripping over its own check on a
   store through an unknown pointer (found once in `main`, fixed by splitting against every held global in
   `result_splits`; no general guard) [b2a].
-- Mutation: the mask positives were never mutated (question 49), nor the verified doc examples (question 10) [M4.4d].
+- Mutation: the mask positives were never mutated (question 49), nor the verified doc examples (question 10) [M4.4d];
+  the markers' expected mutants are a dropped marker and `must_init`/`ref_to_uninit` swapped; the `g_r` guard of
+  `ref_to_uninit`'s kept-flag row is never exercised by a test (`f__wf` reports the shapes that would need it first)
+  [b2b audit 1 N8, audit 2 N5].
 - From the mutation review: the doc example `verifying/void_conditional.c` keeps a redundant `requires` conjunct (four
   listed equivalents); a body `p | q` against an exact `&` contract runs to the timeout (0023's limit), so
   `not_eq_and_bools` states its contract with `&&` [M4.4c].
@@ -118,6 +135,12 @@ through `void*` cannot be written [M4.5a].
   `a && (y = x = 1);` and a discarded `a && (flag = x);` with a `bool` target [M4.3b note 5]; the pragma rule rejects
   harmless `#pragma clang/GCC diagnostic` (an allow-list would lift it) [M4.2b1 note 1].
 - C++'s `p == NULL ? d : *p` with a `const` pointee stays rejected (an lvalue `?:`), with a readable message [b1b].
+- `--strict-init` reads declarations, not paths (record 0042 item 8): it accepts an `uninit` local that was already
+  given a value, a second `init(&x)` and a marked parameter passed on after a write, and rejects a null argument, a
+  pointer local holding `&x`, a reassigned marked parameter and `init(c ? &x : &y)`; C++'s `&*q` is rejected in code
+  (since 0032) where C folds it to `q` [b2b].
+- An uncalled `owning` declaration is not checked (`owning` beside `reads(*p)` is reported only once the function is
+  called or defined); uncalled `must_init`/`ref_to_uninit` declarations are [b2b audit 2 S4].
 - Mode differences, not meanings: `x = ((void)(a > 0 && x > 0), 2)` is `uninitialized` in C and rejected in C++; `x ? RED :
   GREEN` as a value accepted in C and rejected in C++ (0018 item 8) [M4.4c]; `c >= +GREEN` accepted in C, rejected in C++
   [M4.2c note 1].
@@ -137,7 +160,11 @@ through `void*` cannot be written [M4.5a].
   called "a static local variable" [M4.2b1 note 2]; C's `case -1:` over an enumeration prints 4294967295 [M4.4a note 7];
   `d == (x ? (y, RED) : GREEN)` gives one diagnostic in C, two in C++ [M4.4b1 note 2]; lowering's
   internal-inconsistency diagnostics have no position; two failing `requires` clauses at one call print the same
-  message twice (tests choose contracts that fail once) [M4.4d].
+  message twice (tests choose contracts that fail once) [M4.4d]; prototype `must_init` and definition `ref_to_uninit` give
+  two `annotation_mismatch` errors (one per attribute), and two marker errors with one tag on one line collapse to one
+  (`reject()`'s de-duplication); the markers' rejections end "(decision 0037)" like every `unsupported_annotation`; an
+  unframed post-state read through an alias of a `ref_to_uninit` parameter (`ensures(*q == 1)`, `q == p`) is
+  `permission` in `f__wf` and also `postcondition` at the return [b2b].
 - *Positions:* with a `continue` in the body, a written atom's back-edge error is reported at the loop statement
   [b1c3 N3]; a loop body without braces likewise (no test) [b1c1 S5]; in C++20 a loop's IL position is its first
   attribute's (P59).
@@ -207,7 +234,7 @@ not taken go to §3); single-file runs while working (`build/cerastes verify` di
 builds serialized (`lockf build/<session>/build.lock cmake --build build/cmake`); `check.sh` at most twice; the EDG
 suites on the x86-64 host are their own session, but any x86-64 test run a session needs goes to `matt@clang4.cpp.al`
 automatically (owner, 2026-10-29: not Docker multi-arch on the Mac, which is only the fallback when the host is down).
-Record numbers are the next free ones when written (0042 is M4.5b2b's, 0043 the next free one). The
+Record numbers are the next free ones when written (0043 is the next free one). The
 approved plan is saved as `.claude/plans/<milestone>-<topic>.md` (plan.md, "Session protocol").
 
 Finished sessions: their plans are in `.claude/plans/` (from M4.5b1a on), their results in `internal/status.md` and the
@@ -252,9 +279,9 @@ new session.
 
 **M4.5b2 is two sessions** (split at M4.5b2a's planning, 2026-10-30). **M4.5b2a** (globals and `static` locals) is done
 (record 0041; plan `.claude/plans/m4-5b2a-globals.md`; flips of question 81). **M4.5b2b** (P4222's markers
-`[[cerastes::uninit]]`, `ref_to_uninit` and `must_init` on parameters, `--strict-init`, the call's flag row as
-`uninitialized`; record 0042) is in progress: its plan `.claude/plans/m4-5b2b-init-markers.md` holds its scope, inputs
-(P54, questions 82–83 and 85–88, the self-test pins it re-expects) and flips.
+`[[cerastes::uninit]]`, `ref_to_uninit` and `must_init` on parameters, `--strict-init` with the `// verify-options:`
+header, the call's flag row as `uninitialized`) is done (record 0042; plan `.claude/plans/m4-5b2b-init-markers.md`; the
+six pre-approved self-test pins of questions 82 and 85; question 89's loop row in every function).
 
 **M4.5c Structs.** Members as blocks of their own (0028 item 16), `.` and `->`, struct values (copies, initializers,
 by-value parameters and results), nested structs, pointers to members, `owns(*s)`, non-recursive owning fields
@@ -567,6 +594,10 @@ row becomes `uninitialized`, global and `static`-local atoms included; `selftest
 question 82's pre-approved re-expected pins), 86 (contract reads of a marked parameter's pointee are rejected statically,
 `*p` in a `must_init` parameter's `ensures` excepted), 87 (after a `ref_to_uninit` call an initialized pointee stays
 initialized: `old(flag) ==> flag`, amending 0028 item 14), 88 (a marker needs an `owns(*p)` atom, explicit or from
-`owning`, and `must_init` one in the `ensures` too; `reads(*p)` beside a marker is rejected).
+`owning`, and `must_init` one in the `ensures` too; `reads(*p)` beside a marker is rejected). During M4.5b2b, after its
+audit round 2: 89 (the loop row `held && flag ==> range` on every place a loop does not reach, in every function: it
+changes the Viper of existing programs with such loops, an added invariant line and no verdict, and fixes 0038's exit 3
+on nested loops; re-expecting a VIR self-test pin pre-approved only where its row count at a loop grows by exactly the
+added rows, which none needed).
 
 No question is open.
