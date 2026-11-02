@@ -15,6 +15,62 @@ std::string Type::str() const {
   return "?";
 }
 
+void scan_assigned_expr(const Expr* e, std::set<int>& assigned) {
+  if (e == nullptr) return;
+  if (e->kind == Expr::Kind::AssignE && e->var != nullptr) assigned.insert(e->var->id);
+  for (const Expr* x : {e->a, e->b, e->c}) scan_assigned_expr(x, assigned);
+  for (const Expr* x : e->args) scan_assigned_expr(x, assigned);
+}
+
+void scan_assigned(const Stmt& s, std::set<int>& assigned, std::set<int>& declared) {
+  switch (s.kind) {
+    case Stmt::Kind::Decl:
+      declared.insert(s.var->id);
+      scan_assigned_expr(s.expr, assigned);
+      break;
+    case Stmt::Kind::Assign:
+      assigned.insert(s.var->id);
+      scan_assigned_expr(s.expr, assigned);
+      break;
+    case Stmt::Kind::ExprStmt: case Stmt::Kind::Return: case Stmt::Kind::Check: scan_assigned_expr(s.expr, assigned); break;
+    case Stmt::Kind::If:
+      scan_assigned_expr(s.expr, assigned);
+      if (s.then_body != nullptr) scan_assigned(*s.then_body, assigned, declared);
+      if (s.else_body != nullptr) scan_assigned(*s.else_body, assigned, declared);
+      break;
+    case Stmt::Kind::While:
+      scan_assigned_expr(s.expr, assigned);
+      if (s.body != nullptr) scan_assigned(*s.body, assigned, declared);
+      if (s.step != nullptr) scan_assigned(*s.step, assigned, declared);
+      break;
+    case Stmt::Kind::Switch:
+      scan_assigned_expr(s.expr, assigned);
+      if (s.body != nullptr) scan_assigned(*s.body, assigned, declared);
+      break;
+    case Stmt::Kind::Block:
+      for (const Stmt* c : s.stmts) scan_assigned(*c, assigned, declared);
+      break;
+    case Stmt::Kind::Store:  // `*addr = expr`: either operand may hold an assignment (`*(p = q) = 1`, `*p = (q = r, 1)`)
+      scan_assigned_expr(s.addr, assigned);
+      scan_assigned_expr(s.expr, assigned);
+      break;
+    case Stmt::Kind::Case:  // a constant (or none): no assignment, scanned so that every Stmt kind with an expression is covered
+      scan_assigned_expr(s.expr, assigned);
+      break;
+    case Stmt::Kind::Break: case Stmt::Kind::Continue: case Stmt::Kind::Goto: case Stmt::Kind::Label: break;  // no expression
+  }
+}
+
+std::set<int> assigned_params(const Function& f) {
+  std::set<int> out;
+  if (f.body == nullptr) return out;
+  std::set<int> assigned, declared;
+  scan_assigned(*f.body, assigned, declared);
+  for (size_t k = 0; k < f.params.size(); ++k)
+    if (f.params[k].type.is_ptr() && assigned.count(f.param_var(static_cast<int>(k))->id) != 0) out.insert(static_cast<int>(k));
+  return out;
+}
+
 int Function::add_param(std::string name, Type type, SrcLoc loc) {
   const int k = static_cast<int>(params.size());
   params.push_back(Param{name, type, loc, std::string()});

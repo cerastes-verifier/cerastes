@@ -720,6 +720,8 @@ void check_attribute(an_attribute_ptr a, a_routine_ptr owner, a_statement_ptr st
   Annot k = classify(a);
   if (k == Annot::none) return;
   if (k == Annot::owning) return;  // a parameter's marker (decision 0040 item 3): the encoder reads it; its argument is no annotation expression
+  // The initialization markers (decision 0042): no argument list; the encoder reads them on the parameter or the local.
+  if (k == Annot::uninit || k == Annot::ref_to_uninit || k == Annot::must_init) return;
   const std::string context = instance_context(owner);
   // `decreases` before a loop is the loop's measure (like `invariant`); on a function it is a contract.
   const bool function_form = is_contract(k) && stmt == nullptr;
@@ -1004,6 +1006,7 @@ bool is_protected_macro_name(const std::string& n, const std::set<std::string>& 
   static const char* const fixed[] = {"cerastes",  "requires", "ensures", "invariant", "check",
                                       "fold",      "unfold",   "predicate", "pure",     "decreases", "old",
                                       "owns",      "reads",    "live",    "forall",  "owns_range", "CERASTES_H",
+                                      "owning",    "uninit",   "ref_to_uninit", "must_init",
                                       "cerastes_owns", "cerastes_reads", "cerastes_live", "cerastes_old_", "cerastes_old"};
   for (const char* f : fixed)
     if (n == f) return true;

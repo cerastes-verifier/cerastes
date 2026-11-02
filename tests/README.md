@@ -27,7 +27,7 @@ class that runs the real driver is added with the driver (M3-3).
 | `edg-smoke/` | The pinned EDG front end parses C++20 and C23 against the system headers | `scripts/cpfe.sh` |
 | `il/` | Golden tests of the IL walker (`--cerastes_walk`): the Gate G1 probes (`g1/`), annotation-free copies of the VeriFast tests (`verifast-plain/`), contrast probes that expose a vacuous pass (`contrast/`) and walker smoke tests | `scripts/cerastes-fe.sh` |
 | `scalar/` | M3: scalar code through `cerastes verify` (`verified` positives, each with a must-fail twin in `scalar/negative/`) | `build/cerastes verify` |
-| `memory/` | M4.5b1 (b1a–b1c3): pointers to address-taken locals (decision 0032), pointer parameters, results and contracts (decision 0037: `owns`, `reads`, `live`, `old`, framing, `restrict`, `&param`), loops and jumps over memory (decision 0038: automatic loop invariants, invariants and measures over memory, scope exits at `break`/`continue`/`goto`/`return`), sequencing over memory (decision 0039) and pointers to pointers, `[[cerastes::owning]]` parameters, `*result` and written atoms in loop invariants (decision 0040; `memory/verifast/` holds ports of VeriFast's C examples with their adaptation header and line map): `verified` positives, each with a must-fail twin in `memory/negative/` that fails for one reason at one line (the twin rule as in `scalar/`: an `error` twin in every mode), and the `rejected` pins of what later sessions lift (M4.5b2 on) (each has a `// Pins:` line) | `build/cerastes verify` |
+| `memory/` | M4.5b1 (b1a–b1c3): pointers to address-taken locals (decision 0032), pointer parameters, results and contracts (decision 0037: `owns`, `reads`, `live`, `old`, framing, `restrict`, `&param`), loops and jumps over memory (decision 0038: automatic loop invariants, invariants and measures over memory, scope exits at `break`/`continue`/`goto`/`return`), sequencing over memory (decision 0039) and pointers to pointers, `[[cerastes::owning]]` parameters, `*result` and written atoms in loop invariants (decision 0040), initialization through pointers (decision 0042: `uninit`, `ref_to_uninit`, `must_init`, the call's flag row, `--strict-init` through `// verify-options:`; `memory/verifast/` holds ports of VeriFast's C examples with their adaptation header and line map): `verified` positives, each with a must-fail twin in `memory/negative/` that fails for one reason at one line (the twin rule as in `scalar/`: an `error` twin in every mode), and the `rejected` pins of what later sessions lift (M4.5b2 on) (each has a `// Pins:` line) | `build/cerastes verify` |
 | `differential/verifast/` | Nothing yet: unmodified reference copies of VeriFast's template tests, with no `expect:` headers. Skipped (`.harness-skip`) | none |
 | `../doc/modules/ROOT/examples/` | The code examples of the user documentation, which are ordinary tests (not under `tests/`, but run by default with it) | by the example's `expect:` kind |
 
@@ -53,6 +53,7 @@ line of code is an error, so an expectation can never be silently ignored.
 // expect: frontend-warning <diag> @ L<line>
 // expect: frontend-refused <substring>
 // cerastes-fe-options: <options>
+// verify-options: <options>                (verified, error and rejected tests only; see Verify options)
 // expect: golden
 // expect: native-ok
 // mode: c++20 | c23
@@ -94,6 +95,9 @@ line of code is an error, so an expectation can never be silently ignored.
   with `-Wall -Wextra -Werror` and without `__CERASTES__`. It accompanies an
   outcome line and is a header error alone, twice or in a `.vpr` file. See
   [Ordinary compilers](#ordinary-compilers-native-ok).
+- **`verify-options: <options>`**: options added to the `cerastes verify` command of a
+  `verified`, `error` or `rejected` test. A closed list: today only `--strict-init`. See
+  [Verify options](#verify-options).
 - **`twin: <path>`**: the positive test a must-fail test was derived from.
   See [Twins](#twins).
 - **`mode:`**: the language modes to run a C or C++ test in, comma-separated
@@ -329,6 +333,32 @@ refuse a `.vpr` file that the current MANIFEST does not list (a stale file).
 `rejected` tests write no Viper and are not in the manifest. A test outside the
 repository (the harness self-test) writes under `build/vpr/external/`.
 `--update-golden` leaves verify tests alone, and does not clear `build/vpr/`.
+
+### Verify options
+
+`// verify-options: --strict-init` (decision 0042) adds the words after the colon to the
+`cerastes verify` command of each mode of the test, after `--keep-vpr=...`:
+
+```
+build/cerastes verify <test path> --std=<c++20|c23> --keep-vpr=build/vpr/<test path>.<mode>.vpr --strict-init
+```
+
+It is how a test runs the verifier in an opt-in mode (`--strict-init`: every local without an initializer
+must be marked `uninit`, and an argument to a marked parameter must be a marked local's address or the caller's own
+marked parameter). The rules, each pinned by the harness self-test:
+
+- it is valid only with `verified`, `error` or `rejected`, in a `.c` or `.cpp` test: with `frontend-*`,
+  `golden`, `frontend-refused` (which has `cerastes-fe-options:` of its own) or in a `.vpr` file it is a header error;
+- one line at most, in the leading comment block, with at least one option and no option twice;
+- each option must be on the closed list `VERIFY_OPTIONS_ALLOWED` in `scripts/run_tests.py` (today
+  `--strict-init`); any other word, a misspelling or a standard such as `--std=c23` (the harness chooses
+  it from `mode:`) is a header error. A new driver option is added to the list together with its self-test;
+- the options are the same in every mode of the test, and no other test of the run gets them;
+- `scripts/mutate.py` verifies a `verified` test's mutants with the same options as its original, so that a
+  mutant is judged under the language its test is written for.
+
+The same program without the line is a different test: a twin that shows the option is what rejects a program
+carries the line, and its positive does not (or the other way around), each with its own `expect:` lines.
 
 ### Helper headers
 

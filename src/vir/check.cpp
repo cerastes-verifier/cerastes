@@ -479,6 +479,54 @@ class Checker {
       if (f.params[k].is_restrict && !restrict_backed(f, static_cast<int>(k)))
         err(f.params[k].loc, "parameter " + std::to_string(k + 1) + " of '" + f.c_name +
                                  "' is `restrict` without `owns(*p)` in its `requires` and `ensures` (decision 0037 item 2)");
+    init_markers(f, sites);
+  }
+
+  // The reads `*p` (`Deref(Formal k)`) of a contract expression, each with whether it stands under `Old`.
+  static void marked_reads(const Expr* e, bool in_old, int k, std::vector<std::pair<const Expr*, bool>>& out) {
+    if (e == nullptr) return;
+    if (e->kind == Expr::Kind::Deref && e->a != nullptr && e->a->kind == Expr::Kind::Formal && e->a->index == k) out.push_back({e, in_old});
+    for (const Expr* x : {e->a, e->b, e->c}) marked_reads(x, in_old || e->kind == Expr::Kind::Old, k, out);
+    for (const Expr* x : e->args) marked_reads(x, in_old || e->kind == Expr::Kind::Old, k, out);
+  }
+
+  // The initialization markers (decision 0042 item 4), repeated as a backstop of the encoder: a marker on a pointer parameter whose `requires`
+  // owns `*p` (and, for `must_init`, whose `ensures` does), no `reads(*p)` beside it, `must_init` not on a `noreturn` function, and none of the
+  // contract reads of item 6.
+  void init_markers(const Function& f, const std::vector<AtomSite>& sites) {
+    for (size_t i = 0; i < f.params.size(); ++i) {
+      const Param& pr = f.params[i];
+      if (pr.init == InitMarker::None) continue;
+      const int k = static_cast<int>(i);
+      const std::string who = "parameter " + std::to_string(i + 1) + " of '" + f.c_name + "'";
+      if (!pr.type.is_ptr()) {
+        err(pr.loc, who + " is marked `ref_to_uninit` or `must_init` but is not a pointer");
+        continue;
+      }
+      if (pr.init == InitMarker::MustInit && f.noreturn) {
+        err(pr.loc, who + " is `must_init` on a `noreturn` function (decision 0042 item 4)");
+        continue;
+      }
+      bool owns_in = false, owns_out = false, reads_any = false;
+      for (const AtomSite& s : sites) {
+        if (s.atom->a == nullptr || s.atom->a->kind != Expr::Kind::Formal || s.atom->a->index != k) continue;
+        if (s.atom->atom == AtomKind::Owns) (s.in_ensures ? owns_out : owns_in) = true;
+        else if (s.atom->atom == AtomKind::Reads) reads_any = true;
+      }
+      if (!owns_in) err(pr.loc, who + " is marked `ref_to_uninit` or `must_init` without `owns(*p)` in its `requires` (decision 0042 item 4)");
+      if (pr.init == InitMarker::MustInit && !owns_out) err(pr.loc, who + " is `must_init` without `owns(*p)` in its `ensures` (decision 0042 item 4)");
+      if (reads_any) err(pr.loc, who + " is marked `ref_to_uninit` or `must_init` beside `reads(*p)` (decision 0042 item 4)");
+      // The reads that decision 0042 item 6 refuses: in a `requires` or `decreases`, under `Old`, and in the `ensures` of a `RefToUninit` parameter.
+      std::vector<std::pair<const Expr*, bool>> reads;
+      for (const Clause& c : f.requires_) marked_reads(c.expr, false, k, reads);
+      for (const Clause& c : f.decreases_) marked_reads(c.expr, false, k, reads);
+      for (const auto& r : reads) err(r.first->loc, who + " is marked `ref_to_uninit` or `must_init` and a contract reads `*p` (decision 0042 item 6)");
+      reads.clear();
+      for (const Clause& c : f.ensures_) marked_reads(c.expr, false, k, reads);
+      for (const auto& r : reads)
+        if (r.second || pr.init == InitMarker::RefToUninit)
+          err(r.first->loc, who + " is marked `ref_to_uninit` or `must_init` and an `ensures` reads `*p` where its flag is not promised (decision 0042 item 6)");
+    }
   }
 
   // Decision 0040 item 5: the atoms of a loop's invariant stand in the allowed positions (the same rule as a contract's) and no kind is

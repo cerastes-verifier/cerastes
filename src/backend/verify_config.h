@@ -27,6 +27,9 @@ struct VerifyConfig {
   // The self-test hook of 0011 item 13 ("" for none): the names and what each does are listed above is_hook in
   // src/driver/verify_main.cpp, the one place that accepts them.
   std::string hook;
+  // `--strict-init` (decision 0042 item 8): every local without an initializer must carry `[[cerastes::uninit]]`, and an argument of a
+  // `ref_to_uninit`/`must_init` parameter must be `&x` of such a local or the caller's own marked parameter passed unchanged.
+  bool strict_init = false;
   // Canonical (realpath) system directories: the driver's own system include directories, without
   // /usr/local/include (a user directory).  A file under one of them is a system file.
   std::vector<std::string> system_dirs;

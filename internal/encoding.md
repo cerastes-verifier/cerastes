@@ -447,6 +447,18 @@ field. No separation check, case split or `__wf` fact is emitted between two glo
 nothing; the encoder appends the implicit `owns(s)` (`implicit_atom`) to its function and, by reverse reachability over
 the call edges, to every caller except the entry. `__wf` ghosts of a global read are `hv_g<id>_pre`/`_post`.
 
+**Initialization through pointers (M4.5b2b, decision 0042).** `vir::Param::init` (`None`, `RefToUninit`, `MustInit`)
+marks a pointer parameter; `site_marker` gives the marker of an `owns` site on a parameter (never a global or implicit
+site). A marked `requires` atom is `acc(p.v_T) && acc(p.d_T) && (p.d_T ==> range)` with no flag (no range row for a
+`bool` cell, `WF` for a pointer cell); a `must_init` `ensures` atom is the plain one; a `ref_to_uninit` `ensures` atom
+has `((g_r && old(p.d_T)) ==> p.d_T) && (p.d_T ==> range)`, `g_r` the `requires` partner's guard. `contract_read` never
+frames a read by a marked site (pre-state always, post-state for `ref_to_uninit`). In `call_atoms` a marked atom has no
+flag row and the range row `p.d_T ==> range`; every other cell atom's flag row is `uninitialized` (`uninit_text`). In
+`atom_returns` `must_init`'s flag row is `postcondition` and `ref_to_uninit`'s is the `internal` row
+`(g_r && old(p.d_T)) ==> p.d_T`, each in the place of the flag row it replaces. A function with a marked parameter or a
+call of one (`Fn::init_range_rows`, `uses_init_markers`) gives every loop place `held && flag ==> range`, reached or not.
+The assigned-parameter scan is `vir::assigned_params` (shared with the encoder's strict check; it counts stores too).
+
 ## 4. Viper shape
 
 ```
@@ -728,7 +740,15 @@ in a loop's invariants (not in a `do … while (0)` invariant or a measure) on a
 parameter types (the definition's `assoc_param_type`, a typedef'd function type merged by the front end), matches the
 declarations (`annotation_mismatch`) and rejects the other shapes; `apply_owning` inserts `p == NULL || owns(*p)` first
 in `requires_` and `ensures_`, merged with an explicit `owns(*p)` or `p == NULL || owns(*p)`, before `restrict_backed`
-runs; an owning parameter counts as a contract in `callee_for_call`. `Sequencer::object_of` keys each depth of `*…*v`
+runs; an owning parameter counts as a contract in `callee_for_call`. `read_marker` does the same for
+`ref_to_uninit` and `must_init` (decision 0042; `markers_`, then `Param::init` in `function_of` before the contract is
+encoded, so `reject_marked_read` refuses `*p`, `old(*p)` and `decreases(*p)` where the flag is not promised;
+`check_marker_atoms` after `apply_owning` and `finish_atoms`); `reject_markers_in_spec_function` and
+`reject_markers_on_system_redeclaration` refuse the three parameter attributes where no signature is read. `uninit` is
+read in `declaration()` (`uninit_initialized`; `Ctx::uninit_marked`). Under `VerifyConfig::strict_init`,
+`declaration()` rejects an unmarked local without an initializer (`uninit_unmarked`) and `strict_init_arguments` in
+`call()` accepts only `AddrOf` of a marked local or the caller's marked parameter's copy, settled after the body with
+`vir::assigned_params` (`uninit_ref_initialized`). `Sequencer::object_of` keys each depth of `*…*v`
 of one pointer variable as its own object (P62 A8).
 
 **Statements.** Allow-list: blocks (compiler-generated blocks are flattened, so a `for` initialization stays in

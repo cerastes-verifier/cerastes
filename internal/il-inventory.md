@@ -5667,7 +5667,9 @@ no ensures); the loop calls it as `consume(x, perm(lvloc(block_of(x)).lv) / 2)`.
 
 #### General facts about Silicon (observed)
 
-- G1. Silicon stops a path at its first failure: one error per path, so an explicit assert placed before a statement
+- G1. *(Corrected in M4.5b2b, record 0042 audit round 2: Silicon stops a path at a failed `assert` only when assuming it
+  makes the path infeasible, as the M4.5b1a note on Silicon's reasons says; otherwise it goes on with the assertion
+  assumed. The observation below holds for its case, where the failing assertion contradicts what is known.)* Silicon stops a path at its first failure: one error per path, so an explicit assert placed before a statement
   whose own check would also fail is the only error of that path. `p2_consume_fail.vpr` (BACK asserts) reports 1 error
   (`Assertion perm(x.v_int) >= kv might not hold. (p2_consume_fail.vpr@75.12--75.31)`); the same file without the BACK
   asserts, `p2_consume_fail_noassert.vpr`, reports Silicon's own reason:
@@ -6480,3 +6482,60 @@ then one row per global; every other method takes the facts as its first `requir
   `s31_e_liveness_disjunct_fail` fails only the liveness check of a pointer whose block is not a global's. Cost, at load
   averages 64–274: with 2, 8 and 20 globals about 4.5 s, 4.7–5.2 s and 9.5–10.8 s; without the disjunct 4.8–5.6 s
   (`address_compare`'s baseline 6.0 s at similar load): the disjunct is kept (record 0041 item 6).
+
+## M4.5b2b: initialization through pointers (record 0042)
+
+### P64: P54 re-run on the real registration (record 0042 items 2–8) **PASS; no contradiction of P54; one mode difference (`&*q`)**
+
+Evidence in `build/m4.5b2b/P64/` (not committed): `P64.md` (every claim with its probe line, an excerpt of the output and
+the `il_def.h` field), the probes `p01`–`p12`, the runner `run_all.sh` (both modes, every probe), `ildump.py` and the raw
+outputs `out/<probe>.<mode>.{il,walk,diags,attrs,calls,vars}`. Registration under test: `{"uninit","","v:+a!"}`,
+`{"ref_to_uninit","","p"}`, `{"must_init","","p"}`, all `RAF_NO_FLAGS`; commands `scripts/cerastes-fe.sh --c23|--c++20
+--display_error_number --il_display <probe>` and the same with `--cerastes_walk`. Fields: `an_attribute` (il_def.h 3162,
+`kind` 3166, `syntactic_location` 3172), `a_param_type.attributes` (6544), `a_source_correspondence.attributes` (3614),
+`a_routine_type_supplement.param_type_list` (7401) and `assoc_routine` (7421), `a_variable.init_kind` (11747),
+`storage_class` (11254), `address_taken` (11389).
+
+- **A. Parameters (both modes identical).** The markers land on the `param-type` of each declaration that writes them,
+  leading (`syntactic_location=prefix`) or trailing (`declarator-id`), on `int **`, beside `owning`, through
+  `CERASTES_*` and user macros (`position.seq` the use, `orig_seq` the macro body). Redeclarations accumulate on the
+  routine's param-type (no must-match; prototype plus definition, three declarations, different markers on two), and each
+  declaration's own function type keeps its own markers, so declarations can be compared one by one. A marker in a
+  typedef'd function type reaches the routine declared through it, also when the definition's list has none (A8).
+  Registration accepts, for the encoder to reject: both markers, a marker twice, a non-pointer, a `const` pointee,
+  `void *`, a variadic function, a marker inside a function-pointer parameter's own list (on the inner function type), a
+  C++ reference parameter, members and templates; `int *const p` and a leading marker on `int p[]` are pointer
+  parameters. EDG refuses (#1835) an unnamed parameter's marker, a trailing marker on an array parameter and one after a
+  function declarator.
+- **B. `uninit` on locals (both modes).** On `source_corresp.attributes` of the variable, leading and trailing, on every
+  shape (scalar, pointer, `int **`, enum, `bool`, `char`, array, struct, a `for` init). A leading marker over `int a, b
+  = 1;` reaches both declarators; `init_kind` tells them apart (`initk_none` without an initializer, `initk_dynamic` for
+  `= 1`, `= {}`, `(3)` and C++ `int x{}`). Twice is recorded twice. `--il_display` prints a function-scope variable's
+  attribute only as a pointer; the walker shows its name.
+- **C. EDG's own refusals (both modes, exit 2):** `uninit` on a global or a `static` local #1862 ("requires an automatic
+  variable"); on a parameter, a field or a function #1835; `ref_to_uninit` and `must_init` on a local, a global, a
+  function or a field #1835. P54's "`ref_to_uninit` accepted on a local pointer, a global pointer and a function" came
+  from its wider prototype registration (targets `p|v|r`); with `p` alone EDG refuses all three, as record 0042 item 2
+  expects.
+- **D. Call arguments (strict mode, item 8).** `&x` is `eok_address_of` over the variable (the marker is on the variable,
+  not in the expression); a parameter passed on and a pointer local holding `&x` are both a bare `enk_variable`, so the
+  encoder decides from what the variable is (the VIR argument: the parameter's copy); `NULL`, `0` and `nullptr` are a
+  pointer-typed `enk_constant`, `ck_integer`, value 0. **Mode difference:** C23 folds `&*q` to `q` (a parameter passed
+  on), C++20 keeps `eok_address_of` over `eok_indirect`, which the encoder rejects in code everywhere since 0032 (record
+  0042 item 8). A cast `(int *)&x` is `eok_cast` over the address; `&r[0]` an address of a subscript.
+
+### S32: Silicon on the markers' shapes (record 0042 items 5–7) **PASS for (a)–(f); the vacuity run fails as it must**
+
+Hand-written fixtures, kept: `tests/viper-smoke/memory/s32_{a..f}_*.vpr` (11 files, each with its `// expect:` lines; run
+with `python3 scripts/run_tests.py tests/viper-smoke/memory`), reviewed against what lowering emits (only the
+parenthesisation differs). (a) A `must_init` callee whose `requires` holds the permissions and `p.d_int ==> range` but
+no flag verifies; its twin returning without the write fails at the flag row. (b) `ref_to_uninit`'s `ensures` with
+`old(p.d_int) ==> p.d_int` and `p.d_int ==> range`: the callee verifies, and a caller's initialized cell stays readable
+after the call; the twin reading an uninitialized cell after the call fails its flag assert. (c) A fresh `alloc_int` cell
+(flag false) passed to the `ref_to_uninit` callee with no flag row and the range row as `flag ==> range` verifies; with
+the unconditional range row it fails. (d) The vacuity run: `assert false` after the new `requires`/`ensures` shapes fails
+in all three methods. (e) A loop in a `must_init` callee over the place verifies with the write before the loop; the twin
+writing only inside the loop fails (record 0042 item 10's completeness cost). (f) Audit round 1's S1: a place the loop
+does not reach, then a marked call: verifies with the invariant `held && flag ==> range`, fails at the call's range row
+without it. The fixture `s25_d_init.vpr` is marked superseded by these (its `maybe_init` encodes 0028 item 14's first
+reading, no flag value at all).

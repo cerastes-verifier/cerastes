@@ -727,6 +727,28 @@ class RunTests(RunCase):
             # relative includes of the test resolve from the copy: -I<the test's directory>
             self.assertEqual(call[3], f"-I{self.dir}")
 
+    def test_the_verify_options_of_a_test_reach_its_original_and_every_mutant(self):
+        # `// verify-options: --strict-init` (decision 0042): a mutant of such a test is judged under the same
+        # option as its original, or a mutant would be accepted or rejected for the wrong language; a test without
+        # the line gets no option, and the command stays the four-word one above
+        self.all_killed()
+        with_option = self.put("a.c", GOOD.replace("// expect: verified\n",
+                                                   "// expect: verified\n// verify-options: --strict-init\n"))
+        without = self.put("b.c")
+        self.assertEqual(self.run_main(with_option, without)[0], 0)
+        by_name = {}
+        for call in self.calls():
+            by_name.setdefault(Path(call[1]).name, []).append(call)
+        self.assertEqual(len(by_name["a.c"]), 5)  # the original and its four mutants
+        self.assertEqual(len(by_name["b.c"]), 5)
+        for call in by_name["a.c"]:
+            self.assertEqual(call[-1], "--strict-init", call)
+            self.assertEqual(call.count("--strict-init"), 1, call)
+            self.assertEqual(call[3], f"-I{self.dir}")
+        for call in by_name["b.c"]:
+            self.assertNotIn("--strict-init", call)
+            self.assertEqual(len(call), 4)
+
     def test_the_test_file_is_never_touched(self):
         self.all_killed()
         t = self.put("a.c")

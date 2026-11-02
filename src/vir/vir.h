@@ -24,6 +24,7 @@
 
 #include <deque>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -353,6 +354,11 @@ struct Global {
   std::string viper_name() const;
 };
 
+// P4222's initialization markers on a pointer parameter (decision 0042 item 4).  `RefToUninit`: the pointee need not have a value on entry
+// (`[[cerastes::ref_to_uninit]]`); `MustInit`: the same, and it has one on return (`[[cerastes::must_init]]`).  Either needs an `owns(*p)` atom
+// in the `requires`, and MustInit one in the `ensures` as well (check_program repeats the rule as a backstop; the encoder reports it first).
+enum class InitMarker { None, RefToUninit, MustInit };
+
 struct Param {
   std::string name;  // may be empty (unnamed parameter)
   Type type;         // Bool, Int or a pointer to one of them (decision 0037 item 2)
@@ -361,6 +367,9 @@ struct Param {
   // `T *restrict p` (decision 0037 item 2): accepted only when the `requires` holds `owns(*p)` as a top-level conjunct or as `p == NULL ||
   // owns(*p)` and the `ensures` returns the same atom; check_program repeats the rule as a backstop (the encoder reports it first).
   bool is_restrict = false;
+  // `[[cerastes::ref_to_uninit]]` / `[[cerastes::must_init]]` on a pointer parameter (decision 0042 item 4).  Set by the encoder before the
+  // contract is read, so a written read of the pointee is rejected there.
+  InitMarker init = InitMarker::None;
 };
 
 struct Function {
@@ -508,6 +517,16 @@ struct SequenceProblem {
   std::string variable;      // the local's source name
 };
 std::vector<SequenceProblem> sequence_problems(const Function& f);
+
+// The locals a statement or an expression assigns, and the locals a statement declares (the targets of Assign statements and AssignE nodes;
+// a Decl's `expr` counts for its AssignEs).  Every expression counts, a nested loop's condition and a `do` condition included (decision 0020).
+// Every Stmt kind that carries an expression is scanned, a Store's `addr` and `expr` included (`*(p = q) = 1`); the loop rule of decision 0038 item 3
+// and `--strict-init`'s "passed unchanged" (decision 0042 item 8) use this one function.
+void scan_assigned_expr(const Expr* e, std::set<int>& assigned);
+void scan_assigned(const Stmt& s, std::set<int>& assigned, std::set<int>& declared);
+// The indices of `f`'s pointer parameters that the body assigns (their formal's place is not automatic in a loop, decision 0038 item 3;
+// `--strict-init`'s "passed on unchanged", decision 0042 item 7).  Empty for a function without a body.
+std::set<int> assigned_params(const Function& f);
 
 // ---- permissions in contracts (decision 0037 items 5-7) ---------------------------------------------------------------
 

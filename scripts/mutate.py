@@ -1727,6 +1727,7 @@ class Subject:
     source: str
     mutants: list[Mutant]
     safe: frozenset = frozenset()  # ids of the mutants in the safe-direction bucket (when they survive)
+    verify_options: tuple = ()  # the test's `// verify-options:`, passed to every run of its mutants too
 
 
 class Problem(Exception):
@@ -1792,7 +1793,10 @@ def generate(chosen: list[tuple[Path, list[str]]]) -> tuple[list[Subject], list[
             if m.id in seen:
                 problems.append(f"{m.id}: generated twice")
             seen[m.id] = name
-        subjects.append(Subject(f, modes, src, muts, frozenset(m.id for m in muts if is_safe_direction(m, src))))
+        exp = rt.read_header(f)
+        options = tuple(exp.verify_options) if isinstance(exp, rt.Expectation) else ()
+        subjects.append(Subject(f, modes, src, muts, frozenset(m.id for m in muts if is_safe_direction(m, src)),
+                                options))
     return subjects, problems
 
 
@@ -1828,11 +1832,14 @@ def verify_base(env: dict[str, str]) -> list[str]:
     return rt.VERIFY_COMMAND if rt.VERIFY_COMMAND is not None else [env["CERASTES_VERIFY"]]
 
 
-def run_verifier(env: dict[str, str], file: Path, mode: str, include_dir: Path) -> rt.ToolRun:
+def run_verifier(env: dict[str, str], file: Path, mode: str, include_dir: Path,
+                 options: tuple = ()) -> rt.ToolRun:
     """Verify `file`, a copy of a test: `-I <the test's directory>` makes the includes
-    that are relative to the test (`#include "headers/h.h"`) resolve from the copy."""
+    that are relative to the test (`#include "headers/h.h"`) resolve from the copy.  `options` are
+    the test's `// verify-options:`: a mutant of a test that needs `--strict-init` is verified with it,
+    or it would be judged under a different language than its original."""
     cmd = [*verify_base(env), "verify", str(file), rt.VERIFY_STD_OPTIONS[mode],
-           f"-I{include_dir}"]
+           f"-I{include_dir}", *options]
     return rt.run_tool(cmd, env, rt.VERIFY_TIMEOUT_S)
 
 
@@ -1889,7 +1896,8 @@ def run_all(subjects: list[Subject], env: dict[str, str], jobs: int, workdir: Pa
         d.mkdir(parents=True, exist_ok=True)
         f = d / s.path.name
         rt.write_exact(f, s.source if m is None else m.apply(s.source))
-        run = run_verifier(env, f, mode, s.path.parent)
+        # (no fifth argument for a test without options: the verifier's signature stays the four-argument one)
+        run = run_verifier(env, f, mode, s.path.parent, *([s.verify_options] if s.verify_options else []))
         shutil.rmtree(d, ignore_errors=True)
         return item, status_of(run)
 

@@ -6,93 +6,87 @@ history table; the full log up to M4.4c is `git show 1fcc43b:internal/status.md`
 `git show fce46de:internal/status.md`, M4.4d's `git show 9017105:internal/status.md`, M4.5a's
 `git show 72e30b3:internal/status.md`, S5's `git show 794e960:internal/status.md`, M4.5b1a's
 `git show bdc6bd0:internal/status.md`, M4.5b1b's `git show 8003dca:internal/status.md`, M4.5b1c1's
-`git show eab4058:internal/status.md`, M4.5b1c2's `git show a5e3e30:internal/status.md`, and M4.5b1c3's
-`git show 5ffb1a2:internal/status.md`.
+`git show eab4058:internal/status.md`, M4.5b1c2's `git show a5e3e30:internal/status.md`, M4.5b1c3's
+`git show 5ffb1a2:internal/status.md`, and M4.5b2a's `git show 38877b4:internal/status.md`.
 
-## M4.5b2a — mutable globals and `static` locals (2026-10-30): done on branch `m4.5b2a-globals`
+## M4.5b2b — initialization through pointers (2026-11-02): done on branch `m4.5b2b-init-markers`
 
-Plan: `.claude/plans/m4-5b2a-globals.md`. Read `internal/handoff.md` next: §3 "From M4.5b2a", §4.2 (M4.5b2b), §8 (no
-question open).
+Plan: `.claude/plans/m4-5b2b-init-markers.md`. Read `internal/handoff.md` next: §2 (owner steps), §3 (notes by session),
+§4.2 (M4.5c), §8 (no question open).
 
-**Owner decisions (2026-10-30):** `const` objects are M4.6's (question 78); written atoms on moved pointers are M4.8's,
-with question 66 (79); a `static` local's permission reaches its function by an implicit `owns` in its contract and in
-every transitive caller's (80); this session's flips (81); for M4.5b2b, the call's flag row becomes `uninitialized` (82)
-and strict mode's initialized-pointee rule is a static rejection (83); initial values by linkage (84). At planning, the
-M4.5b2 row was split in two (sizing per question 77): this session (globals and `static` locals) and M4.5b2b (P4222's
-markers and `--strict-init`, record 0042). PR #21 (M4.5b1c3) was still open, so the branch starts at `5ffb1a2`.
+**Owner decisions (2026-11-02):** at planning, every call flag row becomes `uninitialized`, global and `static`-local
+atoms included (question 85; three more self-test pins pre-approved), contract reads of a marked pointee are rejected
+statically (86), an initialized pointee stays initialized after a `ref_to_uninit` call (87, amending 0028 item 14), a
+marker needs an `owns(*p)` atom (88); during the session, after audit round 2, the loop row `held && flag ==> range` goes
+on every loop place in every function (89). Step 1 consolidated the handoff (§3 regrouped by the session that consumes
+each note) and `plan.md`. The old session worktree was gone, so the session ran in a new worktree
+`.claude/worktrees/m4.5b2b` and took its baseline in a detached one, `.claude/worktrees/m4.5b2b-base` (`38877b4`).
 
 **Done**
-- **Record 0041** (accepted; revised after P63's hazards H1–H8, audit round 1 on the design (two blocking items: B1 an
-  internal C++ global written before `main` through an escaped pointer, B2 address comparisons the C++ front end folds;
-  ten should-fix items and thirteen notes, all taken but N9, by design), S31, and audit round 2 on the code (no blocking
-  item in about 230 probes; SF1–SF4 taken, so no re-audit)), amending 0017, 0025, 0028, 0032, 0037, 0038 and 0039: each
-  mutable global and `static` local a block named by a `unique` `GB_` function in the `Block` domain; a trusted
-  `program_start()` called first by the file-scope `main`, its first `ensures` the global facts, which are the first
-  `requires` of every other method; initial values by linkage and language, escape through an initializer, C's
-  tentative definitions unknown (`-fcommon`); initializers checked in every prologue, unknown ones included; both IL
-  shapes of `&g`, folded casts as conversions, folded comparisons encoded from their original expression;
-  `owns(g)`/`reads(g)`/`old(g)`/`decreases(g)` and `&g` as a value in contracts; atom sites keyed by place; the liveness
-  disjunct; held globals as loop places; a key per global in the Sequencer and global atoms as memory calls (0025 item
-  2's placement for globals); `static` locals by implicit atoms over the call graph, their declarations emitting
-  nothing; the trust assumptions of a single unit stated.
-- **Code:** `src/vir/lower.cpp` (commit `2466d3c`: atom sites by `site_key`/`site_ref`, no behaviour change, byte-identical
-  on 2718 kept programs; then globals), `vir.h`, `vir.cpp`, `check.cpp`, `lowered.{h,cpp}`; `src/viper/emit.cpp`,
-  `prelude.{h,cpp}`, `selftest.cpp`; `src/backend/encode.cpp` (mutable globals, address constants, initial values, uses,
-  contracts, `static` locals and their propagation, `Program::entry`, the rejections), `il_query.{h,cpp}` (secondary
-  variable declarations, `static` local initializers); `scripts/lint_viper.py` (`lint_globals`).
-- **Tests:** `tests/memory/` 27 positives and 75 negatives (55 error twins, 20 rejections) for globals and `static`
-  locals; the ports `tests/memory/verifast/global_points_to_syntax.c` (both functions) and `globals.c` (scalar part) with
-  twins; S31's 17 fixtures `tests/viper-smoke/memory/s31_*.vpr` (the `e2_global_*` fixtures marked superseded); VIR
-  self-test `selftest_cases12.inc` (32 cases; `VIR_CASES_MIN` 1386); lint self-test 335; two doc examples.
-- **Docs:** Memory and ownership ("Global variables", "`static` local variables", the not-yet list), Annotations (the
-  spec-function table), Error messages (`permission`, `unsequenced`), Verifying (the single-unit assumption's trust
-  assumptions, the rejected list), Overview; `internal/encoding.md` §3 and the memory prelude; `il-inventory.md` P63 and
-  S31.
+- **Record 0042** (accepted; revised after P64, audit round 1 on the design (no blocking item; S1–S7 and N1–N8 taken)
+  and audit round 2 on the code (no blocking item, no unsound verdict; S1–S4 taken, S2 through question 89; so no
+  re-audit)), amending 0019, 0028 item 14, 0029 item 2, 0037 items 7, 8 and 10, 0038 item 3, 0039 item 8, 0040 item 3 and
+  0041's call rows: `[[cerastes::uninit]]` on automatic locals (emits nothing; `uninit_initialized`);
+  `[[cerastes::ref_to_uninit]]` and `[[cerastes::must_init]]` on pointer parameters as `vir::Param::init` (read like
+  `owning` over every declaration; the flag dropped from the `requires` atom with `flag ==> range`; `must_init`'s return
+  row `postcondition`; `ref_to_uninit`'s `(g_r && old(flag)) ==> flag`; contract reads of the pointee rejected by
+  spelling and never framed by a marked site; markers rejected on non-pointers, `void *`, `const` pointees, `noreturn`
+  functions (`must_init`), `pure`/`predicate` functions, system redeclarations, without an `owns` atom or beside
+  `reads`; uncalled marked declarations checked); every call flag row `uninitialized` with its own message;
+  `--strict-init` (`uninit_unmarked`, `uninit_ref_initialized`, static by question 83; the shared scan
+  `vir::assigned_params` now counts assignments inside stores); the loop row on every loop place (question 89), which also
+  fixes 0038's exit 3 on nested loops; `owning` joins the protected macro names and the spec-function and
+  system-redeclaration rejections.
+- **Code:** `src/backend/encode.cpp` (`read_marker`, `check_marker_atoms`, `reject_marked_read`, the spec-function and
+  system-redeclaration rejections, `uninit` in `declaration()`, `strict_init_arguments`), `register_attributes.cpp`,
+  `annotation_il.h`, `annotation_checks.cpp`, `diagnostics.def` (three tags; `annotation_mismatch` names the attribute),
+  `verify_config.h`; `src/driver/verify_main.cpp` (`--strict-init`); `src/vir/vir.{h,cpp}` (`InitMarker`, the scan),
+  `check.cpp` (the backstop), `lower.cpp` (`site_marker` and the rows); `include/cerastes.h` (three macros);
+  `scripts/run_tests.py` and `mutate.py` (the `// verify-options:` header, its near-miss check).
+- **Tests:** `tests/memory` 21 positives and 82 negatives (31 error twins, 51 rejections, EDG's own refusals included);
+  5 macro pins in `tests/annotations/negative`; S32's 11 fixtures (`tests/viper-smoke/memory/s32_*`; `s25_d_init.vpr`
+  marked superseded); VIR self-test `selftest_cases13.inc` (28 cases; `VIR_CASES_MIN` 1414); harness self-tests for the
+  header; 10 doc examples.
+- **Docs:** Memory and ownership ("Initialization through pointers", the not-yet list), Annotations ("Initialization
+  markers", "Declarations that disagree", the protected names), Error messages (`uninitialized` at a call,
+  `postcondition` of `must_init`), Verifying (`--strict-init` and "The strict initialization mode", the marker, the trust
+  note); `internal/encoding.md` §3 and §8; `il-inventory.md` P64 and S32 (G1 corrected).
 
-**Flips (pre-approved, question 81):** retired `tests/scalar/negative/reject_global.c`,
-`tests/scalar/negative/reject_static_local.c` and `tests/memory/negative/reject_pointer_global.c`, each replaced by a
-positive of the same shape with a twin (`global_declared_unused.c`, `static_local_unused.c`,
-`global_pointer_declared_unused.c`); `reject_address_of_const_global.c` and `reject_case_const_address_taken.cpp` keep
-their `expect:` lines, their Pins naming M4.6, and `reject_owns_of_param_cell.c` its, naming no session. No other
-existing test's `expect:` line changed.
+**Flips (pre-approved, questions 82, 85 and 89):** the six VIR self-test pins `selftest_cases8.inc:73`,
+`selftest_cases11.inc:137-138` and `selftest_cases12.inc:113, :206, :283`, re-expected with one fewer `permission` row per
+atom (two at `:206`), same failing rows; question 89 needed no pin. No existing test's `expect:` line changed.
 
 **Acceptance**
-- The baseline (`main` `774fde4`, the tree of `5ffb1a2`, in the main checkout): 7259 passed, 0 failed, 1 skipped; VIR
-  self-test 1354.
-- **Viper against the baseline:** the refactor's binary regenerated all 2718 kept `.vpr`/`.map` files byte-identical; the
-  globals binary likewise, except three `main` tests that a too-strict new check rejected (an `ensures` on the entry),
-  fixed and then byte-identical (end-to-end comparison, `build/m4.5b2a/vprdiff-e2e.txt`).
-- The targeted run (`tests/memory`, `tests/scalar`, `tests/viper-smoke/memory`, four doc example directories): 6336
-  passed, 52 failed, every failure in this session's new tests (a front-end warning, two twins that failed twice, two
-  rejection categories) or the three `main` tests; all fixed and re-run green.
-- `check.sh` (the full check, `CERASTES_CHECK_BASE` unset; twice: the first run stopped at the tests on four test files
-  added after audit round 2, which EDG's #550 made fail; they read their globals in code now): **all green**. Harness
-  self-test 1024 tests (1 skip), 79, lint self-test 335, 291; tests **7577 passed, 0 failed, 1 skipped** (native-ok runs:
-  Apple clang 1448, GCC 1448); Viper lint 2878 files clean; VIR self-test **1386** lowering and 237 rejection cases, 0
-  problems, all 1386 through Silicon; walker oracle 136 goldens, 1924 facts, 0 failed; docs green. `build/vpr` against
-  the baseline: 320 added files, none changed or missing; the VIR self-test against the baseline: added cases only. No
-  Linux run (CI covers it).
+- The baseline (`38877b4`, detached worktree): 7577 passed, 0 failed, 1 skipped; VIR self-test 1386.
+- **Viper against the baseline** (`build/m4.5b2b/mapdiff.py`; every kept program regenerated, and `build/vpr` after
+  `check.sh`): of 2878 kept programs, 286 `.map` files differ only in call flag rows (586 rows, `permission` →
+  `uninitialized`), 92 `.vpr` files gain only question 89's loop rows (130 lines), nothing else differs and nothing is
+  missing; 116 programs added. The VIR self-test: 74 maps in call flag rows, 31 files in loop rows, 28 cases added.
+- `check.sh` (the full check, `CERASTES_CHECK_BASE` unset; once): **all green**. Harness self-test 1044 tests (2 skips), 79,
+  lint self-test 335, mutate self-test 292; tests **7923 passed, 0 failed, 1 skipped** (native-ok runs: Apple clang 1506,
+  GCC 1506); Viper lint 2994 files clean; VIR self-test **1414** lowering and 246 rejection cases, 0 problems, all 1414
+  through Silicon; walker oracle 136 goldens, 1924 facts, 0 failed; docs green. No Linux run (CI covers it).
 
 **Surprises**
-- The front end folds C++ address comparisons (`&g + 1 == &h` to `false`), so a folded constant whose original holds an
-  address is read from the original (audit round 1 B2); casts fold into address constants (P63 H3), and `&g` has two IL
-  shapes (H1).
-- Apple clang 21 passes `-fcommon` by default, so a C tentative definition with external linkage can merge with another
-  file's initialized definition: its value is unknown (audit round 1 S1).
-- EDG warns #550 on a global that only contracts read; the compilers do not (an M8 warning-sweep entry).
-- A new entry rule rejected `ensures` on `main`, caught by the baseline comparison, not by a test of this session.
+- Silicon goes on past a failed assertion with it assumed, stopping a path only when that makes it infeasible; a probe
+  with a fresh cell (whose `!d` contradicted the assumed flag) suggested otherwise, and `il-inventory.md`'s G1 said so.
+  The auditor's loop probe showed the difference; G1 is corrected.
+- 0038's loops lost a reached place's `flag ==> range` across an inner loop, an exit 3 on a correct program since
+  M4.5b1c1, found by audit round 2 and fixed by question 89.
+- A marker inside a function-pointer type lands on the inner function type and reaches no function (inert until M4.7).
 
-**Decision records added:** 0041-globals-and-static-locals.
+**Decision records added:** 0042-initialization-through-pointers.
 
-**First step for the next session (M4.5b2b).** Confirm the owner merged PR #21 and this branch's PR with both CI jobs
-green; then plan M4.5b2b from handoff §4.2 (P4222's markers, `--strict-init`, questions 82 and 83), saving the plan as
-`.claude/plans/m4-5b2b-<topic>.md`.
+**First step for the next session (M4.5c).** Confirm the owner merged this branch's PR with both CI jobs green; then
+plan M4.5c from handoff §4.2 and §3 "M4.5c Structs" (field cells, `.` and `->`, struct values, `owns(*s)`, owning fields
+`d`, and `owns(**pp)`/`live(*pp)` of question 74), saving the plan as `.claude/plans/m4-5c-<topic>.md`.
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 
 | Session | Date | Branch, merge | Records | Outcome |
 |---|---|---|---|---|
-| M4.5b2a Globals and `static` locals | 2026-10-30 | `m4.5b2a-globals` | 0041 | mutable globals and `static` locals as `unique` blocks, `program_start` for `main` with initial values by linkage, frames through `owns(g)`/`reads(g)`, implicit atoms for `static` locals; M4.5b2 split, the markers to M4.5b2b |
+| M4.5b2b Initialization through pointers | 2026-11-02 | `m4.5b2b-init-markers` | 0042 | P4222's markers (`uninit` on locals, `ref_to_uninit`/`must_init` on pointer parameters), every call flag row `uninitialized`, `--strict-init` with the `// verify-options:` header, the loop row on every loop place (question 89, fixing 0038's nested-loop exit 3); M4.5b2 complete |
+| M4.5b2a Globals and `static` locals | 2026-10-30 | `m4.5b2a-globals`, PR #22 `38877b4` | 0041 | mutable globals and `static` locals as `unique` blocks, `program_start` for `main` with initial values by linkage, frames through `owns(g)`/`reads(g)`, implicit atoms for `static` locals; M4.5b2 split, the markers to M4.5b2b |
 | M4.5b1c3 Pointers to pointers, owning, `*result`, written atoms | 2026-10-30 | `m4.5b1c3-pointers-to-pointers` | 0040 | `T**` at any depth and pointer cells, `[[cerastes::owning]]` on parameters, `*result` as a value, written `owns`/`reads`/`live` in loop invariants (question 68's false alarms gone); conversions and contract comparisons across `const` rejected (a hole since 0037 closed); M4.5b1 complete |
 | M4.5b1c2 Sequencing and placement | 2026-10-29 | `m4.5b1c2-sequencing` | 0039 | writes to cells inside expressions, sequencing on objects (`unsequenced`; same-object shapes rejected like the compilers), calls beside accesses, `return &local;` rejected (R14), `c ? owns : reads` path-precise and partners by path, function measures over memory |
 | M4.5b1c1 Loops and jumps | 2026-10-29 | `m4.5b1c1-loops` | 0038 | loops over memory with automatic permission invariants ("every place held"), invariants and loop measures over memory, scope exits at jumps; written atoms in invariants cut to b1c3, function measures over memory to b1c2; the `address_of_local.c` port |

@@ -62,6 +62,9 @@ constexpr const char kUsage[] =
     "  --std=c++20|c23          the language (default: c23 for .c files, c++20 otherwise)\n"
     "  --keep-vpr[=<path>]      keep the Viper program: <path> and <path>.map (default <stem>.vpr)\n"
     "  --timeout=<seconds>      wall-clock limit for Silicon (default 300)\n"
+    "  --strict-init            P4222's strict profile: every local without an initializer is marked\n"
+    "                           [[cerastes::uninit]], and an argument of a ref_to_uninit/must_init parameter\n"
+    "                           is &x of such a local or the caller's own marked parameter passed on\n"
     "  --help, --version\n"
     "\n"
     "exit status: 0 verified, 1 verification errors, 2 the program is not accepted, 3 tool failure\n";
@@ -74,6 +77,7 @@ struct Args {
   bool keep = false;
   std::string keep_path;
   int timeout = 300;
+  bool strict_init = false;  // --strict-init (decision 0042 item 8)
   std::string hook;
 };
 
@@ -151,6 +155,8 @@ int parse_args(int argc, char** argv, Args& a) {
       a.keep = true;
       a.keep_path = s.substr(11);
       if (a.keep_path.empty()) return refuse("--keep-vpr= needs a path");
+    } else if (s == "--strict-init") {
+      a.strict_init = true;
     } else if (s.rfind("--timeout=", 0) == 0) {
       const std::string v = s.substr(10);
       char* end = nullptr;
@@ -389,6 +395,7 @@ int verify_command(int argc, char** argv) {
   cerastes::VerifyConfig& cfg = cerastes::verify_config();
   cfg.on = true;
   cfg.hook = a.hook;
+  cfg.strict_init = a.strict_init;
   cfg.system_dirs = cerastes::system_directories(sys_includes, a.includes);
   cfg.cerastes_header = cerastes::canonical_path(std::string(CERASTES_TOOL_INCLUDE_DIR) + "/cerastes.h");
 

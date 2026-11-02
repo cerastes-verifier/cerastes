@@ -17,6 +17,9 @@
 // Write CERASTES_PREDICATE and CERASTES_PURE first in the declaration, before
 // `static`, `constexpr` and the return type.  CERASTES_OWNING marks a pointer parameter: the function owns its
 // pointee unless the pointer is null (decision 0040 item 3).  Write it before the parameter's type or after its name.
+// CERASTES_UNINIT marks an automatic local declared without an initializer (documentation, checked by --strict-init);
+// CERASTES_REF_TO_UNINIT and CERASTES_MUST_INIT mark a pointer parameter whose pointee need not have a value on entry, and
+// (must_init) has one on return (P4222's markers, decision 0042).  Each parameter marker needs an owns(*p) in the contract.
 #ifndef CERASTES_H
 #define CERASTES_H
 
@@ -48,6 +51,9 @@
 #  define CERASTES_PREDICATE      [[cerastes::predicate]] inline
 #  define CERASTES_PURE           [[cerastes::pure]] inline
 #  define CERASTES_OWNING         [[cerastes::owning]]
+#  define CERASTES_UNINIT         [[cerastes::uninit]]
+#  define CERASTES_REF_TO_UNINIT  [[cerastes::ref_to_uninit]]
+#  define CERASTES_MUST_INIT      [[cerastes::must_init]]
 #else
 #  define CERASTES_REQUIRES(...)
 #  define CERASTES_ENSURES(...)
@@ -59,6 +65,9 @@
 #  define CERASTES_PREDICATE      inline
 #  define CERASTES_PURE           inline
 #  define CERASTES_OWNING
+#  define CERASTES_UNINIT
+#  define CERASTES_REF_TO_UNINIT
+#  define CERASTES_MUST_INIT
 #endif
 
 // The C spellings of the specification functions (decisions 0029 item 3, 0037 item 5), declared in C and in C++ alike so that a header shared

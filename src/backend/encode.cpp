@@ -159,6 +159,16 @@ class Encoder {
     std::map<a_variable_ptr, ConstValue> local_consts;  // those a case value named: registered once per function
     std::map<a_label_ptr, int> label_ids;
     std::map<const Stmt*, a_source_position> goto_positions;
+    // Decision 0042: the locals marked `[[cerastes::uninit]]` (a definition without an initializer), and, in `--strict-init`, the arguments that
+    // pass the caller's own marked parameter on to a marked parameter of a callee: each is settled after the body, when it is known whether the
+    // caller assigns that parameter (item 8).
+    std::set<const vir::Var*> uninit_marked;
+    struct StrictPass {
+      int param = 0;  // the caller's parameter index
+      a_source_position at;
+      std::string callee, callee_param;
+    };
+    std::vector<StrictPass> strict_pass;
   };
 
   vir::Program prog_;
@@ -585,7 +595,13 @@ class Encoder {
         var_quals.push_back(v->type != nullptr ? f_get_type_qualifiers(v->type, TRUE) : 0);
     // Decision 0040 item 3: `owning` on a `void *` or a pointer to function is reported as such, and the type is not reported again.
     std::set<size_t> owning_reported;
-    if (ours && !read_owning(r, x, &owning_reported)) ok = false;
+    if (ours) {
+      if (!read_marker(r, x, Annot::owning, &owning_reported)) ok = false;
+      // Decision 0042 item 4: the initialization markers, read the same way.
+      if (!read_marker(r, x, Annot::ref_to_uninit, &owning_reported)) ok = false;
+      if (!read_marker(r, x, Annot::must_init, &owning_reported)) ok = false;
+      if (!check_marker_pairs(r, x)) ok = false;
+    }
     size_t pk = 0;
     for (a_param_type_ptr p = x->param_type_list; p != nullptr; p = p->next, ++pk) {
       VType pt = vtype(p->type, true, true, p->qualifiers | (pk < var_quals.size() ? var_quals[pk] : 0));  // decision 0037 item 2: a pointer parameter
@@ -611,8 +627,20 @@ class Encoder {
     a_source_position pos;   // the attribute (its first node, in source order)
   };
   std::map<a_routine_ptr, std::vector<OwningParam>> owning_;  // the owning parameters of the routines whose signatures were read
+  // The initialization markers of the parameters (decision 0042 item 4), read like `owning`: the marked parameters of the routines whose
+  // signatures were read, in index order.  `function_of` sets `vir::Param::init` from it before the contract is read.
+  struct MarkerParam {
+    int index = 0;
+    a_source_position pos;  // the attribute (its first node, in source order)
+    vir::InitMarker kind = vir::InitMarker::None;
+  };
+  std::map<a_routine_ptr, std::vector<MarkerParam>> markers_;
+  static const char* marker_name(Annot k) {
+    return k == Annot::ref_to_uninit ? "ref_to_uninit" : k == Annot::must_init ? "must_init" : "owning";
+  }
+  static const char* marker_name(vir::InitMarker k) { return k == vir::InitMarker::MustInit ? "must_init" : "ref_to_uninit"; }
 
-  // Reads and checks the `owning` of every parameter of `r`: where it lands is the parameter's `param_type.attributes` of each declaration (a
+  // Reads and checks the `kind` (`owning`, `ref_to_uninit` or `must_init`, decisions 0040 item 3 and 0042 item 4) of every parameter of `r`: where it lands is the parameter's `param_type.attributes` of each declaration (a
   // definition's variable sees the union, P52), one node per spelling, so the nodes are mapped to declarations by position.  Rejects (unsupported_annotation,
   // each with its own message) a non-pointer parameter, a pointer to function, `void *`, `owning(n)` and a duplicate; a declaration that has the
   // attribute where another has not is annotation_mismatch.  False when it rejected something; `*reported_types` gets the parameters whose pointer
@@ -621,7 +649,8 @@ class Encoder {
   static bool same_spelling(const a_source_position& a, const a_source_position& b) {
     return a.seq == b.seq && a.column == b.column && a.orig_seq == b.orig_seq && a.orig_column == b.orig_column;
   }
-  bool read_owning(a_routine_ptr r, a_routine_type_supplement_ptr x, std::set<size_t>* reported_types) {
+  bool read_marker(a_routine_ptr r, a_routine_type_supplement_ptr x, Annot kind, std::set<size_t>* reported_types) {
+    const std::string an = std::string("cerastes::") + marker_name(kind);  // the attribute as a message spells it
     const bool saved_contract = cx_.contract, saved_annotation = cx_.annotation;
     cx_.contract = cx_.annotation = false;  // a report at a macro's use, not at the macro body in <cerastes.h>
     struct Restore {
@@ -632,7 +661,7 @@ class Encoder {
     // The lists of one declaration's parameters may hold copies of one spelling's node (the routine's type, the definition's declarator, the
     // definition's variables): a spelling is one node, found by its position.
     auto add_node = [&](size_t k, an_attribute_ptr a) {
-      if (!is_registered_cerastes(a) || classify(a) != Annot::owning) return;
+      if (!is_registered_cerastes(a) || classify(a) != kind) return;
       if (nodes.size() <= k) nodes.resize(k + 1);
       for (an_attribute_ptr o : nodes[k])
         if (o == a || same_spelling(o->position, a->position)) return;
@@ -699,7 +728,7 @@ class Encoder {
     for (size_t i = 1; i < decls.size(); ++i)
       if (!before(decls[i - 1].pos, decls[i].pos)) {
         reject(Diag::unsupported_annotation, decls[i].pos,
-               "\"cerastes::owning\" on a parameter of declarations of `" + rname(r) + "` that cerastes cannot tell apart (both written by one macro invocation)");
+               "\"" + an + "\" on a parameter of declarations of `" + rname(r) + "` that cerastes cannot tell apart (both written by one macro invocation)");
         return false;
       }
     auto where = [&](const a_source_position& p) {
@@ -721,21 +750,25 @@ class Encoder {
       if (k < plist.size() && plist[k]->type != nullptr) {
         a_type_ptr pt = skip_typerefs(plist[k]->type);
         if (pt == nullptr || pt->kind != tk_pointer || pt->variant.pointer.is_reference) {
-          reject(Diag::unsupported_annotation, ns[0]->position, "\"cerastes::owning\" on parameter " + pname + " (it is not a pointer)");
+          reject(Diag::unsupported_annotation, ns[0]->position, "\"" + an + "\" on parameter " + pname + " (it is not a pointer)");
           bad = true;
         } else {
           a_type_ptr pe = pt->variant.pointer.type != nullptr ? skip_typerefs(pt->variant.pointer.type) : nullptr;
           if (pt->variant.pointer.type != nullptr && (f_get_type_qualifiers(pt->variant.pointer.type, TRUE) & TQ_CONST) != 0) {
-            reject(Diag::unsupported_annotation, ns[0]->position,
-                   "\"cerastes::owning\" on parameter " + pname + " (a pointer to a `const` object: a function that only reads `*" +
-                       (pname.empty() || pname[0] != '"' ? std::string("p") : pname.substr(1, pname.size() - 2)) + "` takes `reads`, decision 0040 item 2)");
+            if (kind == Annot::owning)
+              reject(Diag::unsupported_annotation, ns[0]->position,
+                     "\"cerastes::owning\" on parameter " + pname + " (a pointer to a `const` object: a function that only reads `*" +
+                         (pname.empty() || pname[0] != '"' ? std::string("p") : pname.substr(1, pname.size() - 2)) + "` takes `reads`, decision 0040 item 2)");
+            else
+              reject(Diag::unsupported_annotation, ns[0]->position,
+                     "\"" + an + "\" on parameter " + pname + " (a pointer to a `const` object: nothing could initialize it, decision 0042 item 4)");
             bad = true;
           } else if (pe != nullptr && pe->kind == tk_routine) {
-            reject(Diag::unsupported_annotation, ns[0]->position, "\"cerastes::owning\" on parameter " + pname + " (a pointer to a function: M4.7)");
+            reject(Diag::unsupported_annotation, ns[0]->position, "\"" + an + "\" on parameter " + pname + " (a pointer to a function: M4.7)");
             reported_types->insert(k);
             bad = true;
           } else if (pe != nullptr && pe->kind == tk_void) {
-            reject(Diag::unsupported_annotation, ns[0]->position, "\"cerastes::owning\" on parameter " + pname + " (a `void *`: a pointer to an untyped object)");
+            reject(Diag::unsupported_annotation, ns[0]->position, "\"" + an + "\" on parameter " + pname + " (a `void *`: a pointer to an untyped object)");
             reported_types->insert(k);
             bad = true;
           }
@@ -763,7 +796,7 @@ class Encoder {
           for (a_param_type_ptr pp = rt->variant.routine.extra_info->param_type_list; pp != nullptr && !found; pp = pp->next, ++j)
             if (j == k)
               for (an_attribute_ptr o = pp->attributes; o != nullptr; o = o->next)
-                if (is_registered_cerastes(o) && classify(o) == Annot::owning && same_spelling(o->position, a->position)) found = true;
+                if (is_registered_cerastes(o) && classify(o) == kind && same_spelling(o->position, a->position)) found = true;
           if (found) {
             ++count[i];
             by_type = true;
@@ -774,7 +807,7 @@ class Encoder {
         for (size_t i = 0; i < decls.size(); ++i)
           if (!before(a->position, decls[i].pos)) d = i;
         if (count[d]++ == 1) {
-          reject(Diag::unsupported_annotation, a->position, "\"cerastes::owning\" twice on parameter " + pname);
+          reject(Diag::unsupported_annotation, a->position, "\"" + an + "\" twice on parameter " + pname);
           bad = true;
         }
       }
@@ -787,14 +820,106 @@ class Encoder {
         if (with < decls.size() && without < decls.size()) {
           // Report at the first declaration without it, naming the first with it.
           reject_args(Diag::annotation_mismatch, decls[without].pos,
-                      {rname(r), pname, "the declaration at " + where(decls[with].pos) + " has it, this one does not"});
+                      {rname(r), an, pname, "the declaration at " + where(decls[with].pos) + " has it, this one does not"});
           bad = true;
         }
       }
       if (bad) ok = false;
-      else owning_[r].push_back(OwningParam{static_cast<int>(k), ns[0]->position});
+      else if (kind == Annot::owning) owning_[r].push_back(OwningParam{static_cast<int>(k), ns[0]->position});
+      else markers_[r].push_back(MarkerParam{static_cast<int>(k), ns[0]->position, kind == Annot::must_init ? vir::InitMarker::MustInit : vir::InitMarker::RefToUninit});
     }
     return ok;
+  }
+
+  // Both initialization markers on one parameter are redundant (`must_init` implies `ref_to_uninit`, P4222; decision 0042 item 4).  False when it rejected.
+  bool check_marker_pairs(a_routine_ptr r, a_routine_type_supplement_ptr x) {
+    auto it = markers_.find(r);
+    if (it == markers_.end()) return true;
+    const bool saved_contract = cx_.contract, saved_annotation = cx_.annotation;
+    cx_.contract = cx_.annotation = false;
+    bool ok = true;
+    const auto& ms = it->second;
+    for (size_t i = 0; i < ms.size(); ++i)
+      for (size_t j = i + 1; j < ms.size(); ++j) {
+        if (ms[i].index != ms[j].index || ms[i].kind == ms[j].kind) continue;
+        std::string pname = std::to_string(ms[i].index + 1);
+        int n = 0;
+        for (a_param_type_ptr p = x->param_type_list; p != nullptr; p = p->next, ++n)
+          if (n == ms[i].index && p->name != nullptr && *p->name != '\0') pname = std::string("\"") + p->name + "\"";
+        reject(Diag::unsupported_annotation, ms[j].pos,
+               "\"cerastes::ref_to_uninit\" and \"cerastes::must_init\" both on parameter " + pname + " (redundant: `must_init` already implies `ref_to_uninit`)");
+        ok = false;
+      }
+    cx_.contract = saved_contract;
+    cx_.annotation = saved_annotation;
+    return ok;
+  }
+
+  // Decision 0042 item 4 (owner question 88): a marked parameter's contract holds an `owns(*p)` atom in its `requires` (explicit, guarded or not, or
+  // the clause `cerastes::owning` stands for), `must_init` one in its `ensures` too, and no `reads(*p)` beside either marker; `must_init` on a function
+  // declared not to return is rejected (it has no `ensures`, 0015 item 4).  `contract_rejected`: the contract already had a rejection (finish_atoms or
+  // apply_owning may have refused the atom or the parameter), so the "needs an atom" errors are not added to it.
+  void check_marker_atoms(a_routine_ptr r, vir::Function* f, bool contract_rejected) {
+    auto it = markers_.find(r);
+    if (it == markers_.end()) return;
+    const bool saved_contract = cx_.contract, saved_annotation = cx_.annotation;
+    cx_.contract = cx_.annotation = false;
+    const std::vector<vir::AtomSite> sites = vir::contract_atoms(*f);
+    for (const MarkerParam& m : it->second) {
+      const auto k = static_cast<size_t>(m.index);
+      if (k >= f->params.size() || !f->params[k].type.is_ptr()) continue;
+      const std::string pname = f->params[k].name.empty() ? "arg" + std::to_string(k + 1) : f->params[k].name;
+      const std::string an = std::string("cerastes::") + marker_name(m.kind);
+      if (m.kind == vir::InitMarker::MustInit && f->noreturn) {
+        reject(Diag::unsupported_annotation, m.pos,
+               "\"" + an + "\" on `" + pname + "` of a function declared not to return: it never returns, so `*" + pname + "` would never be checked to have a value");
+        continue;
+      }
+      bool owns_in = false, owns_out = false, reads_beside = false;
+      for (const vir::AtomSite& st : sites) {
+        if (st.atom->a == nullptr || st.atom->a->kind != Expr::Kind::Formal || st.atom->a->index != m.index) continue;
+        if (st.atom->atom == vir::AtomKind::Owns) (st.in_ensures ? owns_out : owns_in) = true;
+        else if (st.atom->atom == vir::AtomKind::Reads) reads_beside = true;
+      }
+      if (contract_rejected) continue;
+      if (reads_beside) {
+        reject(Diag::unsupported_annotation, m.pos,
+               "\"" + an + "\" on `" + pname + "` beside `reads(*" + pname + ")` (a borrowed read of an object that may hold no value; the contract of a marked parameter owns it, decision 0042 item 4)");
+        continue;
+      }
+      if (!owns_in)
+        reject(Diag::unsupported_annotation, m.pos,
+               "\"" + an + "\" on `" + pname + "` without `owns(*" + pname + ")` in its `requires` (without it the function could not write `*" + pname +
+                   "`; ownership and initialization are separate: write `CERASTES_REQUIRES(cerastes_owns(*" + pname + "))` or mark the parameter `cerastes::owning`, decision 0042 item 4)");
+      else if (m.kind == vir::InitMarker::MustInit && !owns_out)
+        reject(Diag::unsupported_annotation, m.pos,
+               "\"" + an + "\" on `" + pname + "` without `owns(*" + pname + ")` in its `ensures` (it promises `*" + pname +
+                   "` has a value on return, which the postcondition must hand back; decision 0042 item 4)");
+    }
+    cx_.contract = saved_contract;
+    cx_.annotation = saved_annotation;
+  }
+
+  // Decision 0042 item 6 (owner question 86): where a marked parameter's flag is not promised the pointee has no value to read, so the contract may not
+  // read `*p`: in a `requires`, in `old(...)` and `decreases`, and in the `ensures` of a `ref_to_uninit` parameter (a `must_init` one's `ensures` may).
+  // `pf` is the formal `p`; true (and reported) when the read is rejected.
+  bool reject_marked_read(const Expr* pf, const a_source_position& at, bool is_old) {
+    if (pf == nullptr || pf->kind != Expr::Kind::Formal || cx_.fn == nullptr || pf->index < 0 ||
+        static_cast<size_t>(pf->index) >= cx_.fn->params.size())
+      return false;
+    const vir::Param& pr = cx_.fn->params[static_cast<size_t>(pf->index)];
+    if (pr.init == vir::InitMarker::None) return false;
+    const bool in_ensures = cx_.annot == Annot::ensures;
+    if (!(is_old || cx_.annot != Annot::ensures || pr.init == vir::InitMarker::RefToUninit)) return false;
+    const std::string pname = pr.name.empty() ? "arg" + std::to_string(static_cast<size_t>(pf->index) + 1) : pr.name;
+    const char* an = marker_name(pr.init);
+    const std::string place = "`*" + pname + "`";
+    const std::string what = is_old ? "a read of `old(*" + pname + ")`" : cx_.annot == Annot::decreases ? "a `decreases(*" + pname + ")`"
+                           : in_ensures ? "a postcondition that reads " + place : "a precondition that reads " + place;
+    reject(Diag::unsupported_annotation, at,
+           what + ", which `cerastes::" + an + "` on `" + pname + "` says may hold no value " +
+               (in_ensures && !is_old ? "on return (only `must_init` promises one)" : "on entry") + " (decision 0042 item 6)");
+    return true;
   }
 
   // Adds the contract an owning parameter stands for (decision 0040 item 3): `p == NULL || owns(*p)` first in the `requires` and first in the
@@ -885,12 +1010,19 @@ class Encoder {
       }
     }
     f->noreturn = x->does_not_return != 0;  // decision 0015 item 4
+    // Decision 0042 item 4: the initialization markers, set before the contract is read so that a written read of the pointee is rejected there.
+    if (auto mk = markers_.find(r); mk != markers_.end())
+      for (const MarkerParam& m : mk->second)
+        if (static_cast<size_t>(m.index) < f->params.size() && f->params[static_cast<size_t>(m.index)].type.is_ptr())
+          f->params[static_cast<size_t>(m.index)].init = m.kind;
     if (!has_body_here) {
       f->trusted_reason = in_verified_file(decl) ? (f->noreturn ? "declared noreturn here, defined in another unit"
                                                                  : "declared here, defined in another unit")
                                                   : "trusted, never verified: declared in a system file";
     }
+    const size_t rejected_before = rejected_.size();
     encode_contract(r, f);
+    check_marker_atoms(r, f, rejected_.size() != rejected_before);
     // Decision 0037 item 2: `restrict` on a pointer parameter is accepted only when the contract owns its pointee and returns it.
     for (int k : restricted) {
       int other = -1;
@@ -2176,6 +2308,13 @@ class Encoder {
       if (v->storage_class == sc_static && v->source_corresp.enclosing_routine != nullptr)
         spec_scan_self()->reject(Diag::unsupported_declaration, v->source_corresp.decl_position,
                                  "a `static` local variable in a pure or predicate function (decision 0041 item 12)");
+      // Decision 0042 item 3 ("never ignored"): the body is not encoded, so a marker on a local would be accepted without a word.
+      for (an_attribute_ptr a = v->source_corresp.attributes; a != nullptr; a = a->next)
+        if (is_registered_cerastes(a) && classify(a) == Annot::uninit) {
+          spec_scan_self()->reject(Diag::unsupported_annotation, a->position,
+                                   "\"cerastes::uninit\" on a local variable of a pure or predicate function (decision 0042 item 3: M4.5f1 decides the markers in specification functions)");
+          break;
+        }
     }
   }
   static void spec_scan_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr) {
@@ -2184,6 +2323,61 @@ class Encoder {
       spec_scan_self()->reject(Diag::unsupported_expression, e->position,
                                "a pure or predicate function that reads or writes a global variable (decision 0041 item 12)");
   }
+  // The first parameter marker (`owning`, `ref_to_uninit`, `must_init`) on a parameter of the function type `t` (typedefs skipped), or null.
+  static bool is_param_marker(Annot k) { return k == Annot::owning || k == Annot::ref_to_uninit || k == Annot::must_init; }
+  static an_attribute_ptr first_param_marker(a_type_ptr t) {
+    a_type_ptr rt = t != nullptr ? skip_typerefs(t) : nullptr;
+    if (rt == nullptr || rt->kind != tk_routine || rt->variant.routine.extra_info == nullptr) return nullptr;
+    for (a_param_type_ptr p = rt->variant.routine.extra_info->param_type_list; p != nullptr; p = p->next)
+      for (an_attribute_ptr a = p->attributes; a != nullptr; a = a->next)
+        if (is_registered_cerastes(a) && is_param_marker(classify(a))) return a;
+    return nullptr;
+  }
+
+  // Decision 0042 item 4 ("never ignored"): a marker (`owning` too) on a parameter of a `pure` or `predicate` function, whose signature is never read (its body is not
+  // encoded), is rejected rather than accepted without a word.
+  void reject_markers_in_spec_function(a_routine_ptr r) {
+    std::vector<an_attribute_ptr> found;
+    found.push_back(first_param_marker(r->type));
+    found.push_back(first_param_marker(r->declared_type));
+    if (ents_ != nullptr) {
+      auto sd = ents_->secondary_decls.find(r);
+      if (sd != ents_->secondary_decls.end())
+        for (const IlEntities::SecondaryDecl& q : sd->second) found.push_back(first_param_marker(q.declared_type));
+    }
+    if (a_scope_ptr bs = body_scope(r))
+      for (a_variable_ptr v = bs->variant.routine.parameters; v != nullptr; v = v->next) {
+        if (!v->is_parameter || v->is_this_parameter || v->variant.assoc_param_type == nullptr) continue;
+        for (an_attribute_ptr a = v->variant.assoc_param_type->attributes; a != nullptr; a = a->next)
+          if (is_registered_cerastes(a) && is_param_marker(classify(a))) found.push_back(a);
+      }
+    for (an_attribute_ptr a : found)
+      if (a != nullptr) {
+        reject(Diag::unsupported_annotation, a->position,
+               std::string("\"cerastes::") + a->name + "\" on a parameter of a pure or predicate function (decision 0042 item 4: M4.5f1 decides " +
+                   (classify(a) == Annot::owning ? "`owning`" : "the markers") + " in specification functions)");
+        return;
+      }
+  }
+
+  // Decision 0042 item 4 ("never ignored"): a marker on a redeclaration, in a verified file, of a function that a system header declares first.  The
+  // function's contract is the header's, so the signature is not read and the marker would be accepted without a word.
+  void reject_markers_on_system_redeclaration(a_routine_ptr r) {
+    if (ents_ == nullptr) return;
+    auto sd = ents_->secondary_decls.find(r);
+    if (sd == ents_->secondary_decls.end()) return;
+    for (const IlEntities::SecondaryDecl& q : sd->second) {
+      if (q.position.seq == 0 || !in_verified_file(q.position)) continue;
+      an_attribute_ptr a = first_param_marker(q.declared_type);
+      if (a == nullptr) continue;
+      reject(Diag::unsupported_annotation, q.position,
+             std::string("\"cerastes::") + a->name + "\" on a parameter of a redeclaration of `" + rname(r) +
+                 "`, which a system header declares first (its contract is the header's, " +
+                 (classify(a) == Annot::owning ? "decision 0040 item 3 as amended by 0042 item 4)" : "decision 0042 item 4)"));
+      return;
+    }
+  }
+
   void reject_globals_in_spec_body(a_routine_ptr r) {
     a_scope_ptr sp = body_scope(r);
     if (sp == nullptr || sp->assoc_block == nullptr) return;
@@ -2483,6 +2677,7 @@ class Encoder {
         reject(Diag::unsupported_expression, e->position, "a dereference of something that is not a pointer to a bool or an integer");
         return nullptr;
       }
+      if (reject_marked_read(pf, e->position, true)) return nullptr;  // decision 0042 item 6
       return b_.old(b_.deref(pf, loc_of(e->position)), loc_of(e->position));
     }
     // `old(g)` of a mutable global (decision 0041 item 7): its value on entry.
@@ -2799,6 +2994,7 @@ class Encoder {
         reject(Diag::unsupported_expression, where, "\"cerastes_old\" of something that is not a place");
         return nullptr;
       }
+      if (reject_marked_read(pf, where, true)) return nullptr;  // decision 0042 item 6
       return finish(ind, b_.old(b_.deref(pf, l), l));
     }
     return finish(ind, b_.old(pf, l));  // `old(x)` of a parameter
@@ -2848,6 +3044,7 @@ class Encoder {
       reject(Diag::unsupported_expression, ind->position, "a dereference of something that is not a pointer to a bool or an integer");
       return nullptr;
     }
+    if (reject_marked_read(pf, ind->position, cx_.old_depth > 0)) return nullptr;  // decision 0042 item 6
     return finish(ind, b_.deref(pf, loc_of(ind->position)));
   }
 
@@ -3087,6 +3284,7 @@ class Encoder {
       args.push_back(a);
     }
     if (!ok) return nullptr;
+    if (verify_config().strict_init) strict_init_arguments(f, args, name, e->position);
     const Expr* c = b_.call(f, std::move(args), loc_of(e->position));
     VType nt = vtype(e->type, true);
     if (!nt.ok || nt.t != f->ret) {
@@ -3094,6 +3292,50 @@ class Encoder {
       return nullptr;
     }
     return c;
+  }
+
+  // `--strict-init` (decision 0042 item 8, owner question 83): every argument of a `ref_to_uninit` or `must_init` parameter is `&x` of a local
+  // marked `uninit`, or the caller's own marked parameter passed unchanged (settled after the body: it must be neither assigned nor
+  // address-taken).  Read from the VIR argument, so C and C++ look alike; anything else is rejected, though it might be fine on a path.
+  void strict_init_arguments(const vir::Function* callee, const std::vector<const Expr*>& args, const std::string& cname, const a_source_position& at) {
+    for (size_t k = 0; k < args.size() && k < callee->params.size(); ++k) {
+      if (callee->params[k].init == vir::InitMarker::None) continue;
+      const Expr* a = args[k];
+      while (a != nullptr && a->kind == Expr::Kind::ReportAt) a = a->a;
+      const std::string pn = callee->params[k].name.empty() ? "arg" + std::to_string(k + 1) : callee->params[k].name;
+      if (a != nullptr && a->kind == Expr::Kind::AddrOf && a->var != nullptr && cx_.uninit_marked.count(a->var) != 0) continue;
+      if (a != nullptr && a->kind == Expr::Kind::Local && a->var != nullptr && a->var->is_param_copy && a->var->param_index >= 0 &&
+          cx_.fn != nullptr && static_cast<size_t>(a->var->param_index) < cx_.fn->params.size() &&
+          cx_.fn->params[static_cast<size_t>(a->var->param_index)].init != vir::InitMarker::None) {
+        cx_.strict_pass.push_back(Ctx::StrictPass{a->var->param_index, at, cname, pn});
+        continue;
+      }
+      std::string text = a != nullptr && !a->c_text.empty() ? "`" + a->c_text + "`" : a != nullptr && a->kind == Expr::Kind::Null ? "a null pointer" : "an argument";
+      std::string why;
+      if (a != nullptr && a->kind == Expr::Kind::AddrOf)
+        why = text + " is not an `uninit` local: mark it `CERASTES_UNINIT` and declare it without an initializer";
+      else if (a != nullptr && a->kind == Expr::Kind::Local && a->var != nullptr && a->var->is_param_copy)
+        why = text + " is a parameter that is not marked `ref_to_uninit` or `must_init`";
+      else
+        why = "only `&x` of an `uninit` local, or the caller's own `ref_to_uninit`/`must_init` parameter passed unchanged, may be passed here (" + text + " may point to an initialized object)";
+      reject(Diag::uninit_ref_initialized, at,
+             "the call to `" + cname + "` passes " + text + " to parameter `" + pn + "`, which is marked `" + marker_name(callee->params[k].init) + "`: " + why);
+    }
+  }
+
+  // After the body: a marked parameter passed on must be neither assigned nor address-taken (decision 0042 item 8).
+  void settle_strict_init(vir::Function* f) {
+    if (cx_.strict_pass.empty()) return;
+    const std::set<int> assigned = vir::assigned_params(*f);
+    for (const Ctx::StrictPass& sp : cx_.strict_pass) {
+      const auto k = static_cast<size_t>(sp.param);
+      const bool taken = f->param_var(sp.param)->address_taken;
+      if (assigned.count(sp.param) == 0 && !taken) continue;
+      const std::string pn = f->params[k].name.empty() ? "arg" + std::to_string(k + 1) : f->params[k].name;
+      reject(Diag::uninit_ref_initialized, sp.at,
+             "the call to `" + sp.callee + "` passes the parameter `" + pn + "` on to its parameter `" + sp.callee_param + "`, but the function " +
+                 (taken ? "takes the address of `" + pn + "`" : "assigns `" + pn + "`") + ": `" + pn + "` is no longer the pointer the caller handed in, so it may point to an initialized object");
+    }
   }
 
   // `&x` of a local scalar (decision 0032 item 4).  The unevaluated operand of `sizeof` never gets here: its value is the folded literal.
@@ -3552,6 +3794,29 @@ class Encoder {
         cx_.rejected_vars.insert(v);
         continue;
       }
+      // Decision 0042 item 3: `[[cerastes::uninit]]` on a definition without an initializer; it changes nothing in VIR.  Under `--strict-init`
+      // (item 8) a definition without an initializer and without the marker is rejected.
+      bool marked = false;
+      {
+        int count = 0;
+        for (an_attribute_ptr a = v->source_corresp.attributes; a != nullptr; a = a->next) {
+          if (!is_registered_cerastes(a) || classify(a) != Annot::uninit) continue;
+          if (++count == 2)
+            reject(Diag::unsupported_annotation, a->position,
+                   std::string("\"cerastes::uninit\" twice on `") + (v->source_corresp.name ? v->source_corresp.name : "?") + "`");
+        }
+        marked = count > 0;
+        if (marked && v->init_kind != initk_none) {
+          reject(Diag::uninit_initialized, at, std::string("`") + (v->source_corresp.name ? v->source_corresp.name : "?") + "`");
+          marked = false;
+        }
+        if (!marked && v->init_kind == initk_none && verify_config().strict_init && !is_const_object(v)) {
+          const std::string n = v->source_corresp.name ? v->source_corresp.name : "?";
+          reject(Diag::uninit_unmarked, at,
+                 "the local variable `" + n + "` is declared without an initializer and without `cerastes::uninit`: write `CERASTES_UNINIT` before its "
+                 "declaration (it starts without a value), or give it one");
+        }
+      }
       // Decision 0019 item 1: a non-const local of an accepted scalar type without an initializer is ordinary; reading it
       // before an assignment is an `uninitialized` verification error (Silicon decides it on each path).  A const one can
       // never be given a value (C++ error #257): still rejected.
@@ -3564,6 +3829,7 @@ class Encoder {
       vir::Var* var = cx_.fn->new_local(nm ? nm : "", vt.t, loc_of(at));
       var->c_type_name = vt.name;
       cx_.vars[v] = var;
+      if (marked) cx_.uninit_marked.insert(var);
       // Decision 0032 item 4: a local the front end flags `address_taken` is a cell, a pointer local included (decision 0040 item 2).
       if (v->address_taken) cx_.fn->mark_address_taken(var);
       if (v->init_kind == initk_none) {
@@ -5111,6 +5377,7 @@ class Encoder {
     if (reported_count() == reported_before) {
       report_goto_problems(f);
       report_sequence_problems(f);
+      settle_strict_init(f);
     }
     cx_ = Ctx();
   }
@@ -6542,7 +6809,13 @@ void Encoder::run(const IlEntities& ents) {
     a_statement_ptr body = verified_body(r);
     const a_source_position decl = r->source_corresp.decl_position;
     const bool declared_here = decl.seq != 0 && in_verified_file(decl);
-    if (body == nullptr && !declared_here) continue;
+    if (body == nullptr && !declared_here) {
+      cx_ = Ctx();
+      cx_.routine = r;
+      cx_.stmt_pos = decl;
+      reject_markers_on_system_redeclaration(r);  // decision 0042 item 4
+      continue;
+    }
     cx_ = Ctx();
     cx_.routine = r;
     cx_.stmt_pos = decl;
@@ -6571,6 +6844,7 @@ void Encoder::run(const IlEntities& ents) {
       check_attributes(r->source_corresp.attributes, rx != nullptr && rx->does_not_return);
     }
     if (is_spec_routine(r)) {  // specification, never run: its body is not encoded (0011 item 4)
+      reject_markers_in_spec_function(r);  // decision 0042 item 4
       if (body != nullptr) reject_globals_in_spec_body(r);
       continue;
     }
@@ -6595,6 +6869,9 @@ void Encoder::run(const IlEntities& ents) {
         if (classify(a) == Annot::requires_) reject(Diag::contract_on_main, a->position, "");
     }
     if (!check_signature(r, decl)) continue;
+    // Decision 0042 item 4: function_of is lazy, so a declaration with a `ref_to_uninit` or `must_init` parameter that nothing calls would never have its
+    // marker rules checked (an `owns(*p)` atom, `must_init`'s partner in the `ensures`, the contract reads).  Force it for exactly those routines.
+    if (markers_.count(r) != 0 && body == nullptr) function_of(r, false, decl);
     if (a_routine_type_supplement_ptr nx = routine_supplement(r); nx != nullptr && nx->does_not_return) {
       // Also for a function that is declared and never called (function_of is lazy): decision 0015 item 4.
       for (an_attribute_ptr a : contracts_of(r))

@@ -1,5 +1,5 @@
 // expect: verified
-// S24 candidate FINAL: d_init
+// S24 candidate FINAL: d_init -- superseded by s32_*.vpr (decision 0042 items 5-7, question 87), which pin the emitted shapes; kept as S24's evidence
 // Final design: a pointer is a Ref; Block domain with four axioms (loc_inv, loc_nonnull, member_inv, member_lv); ghost init flag per cell; liveness token lvloc(b) at slot -2; explicit checks at every access, call, return and pointer use.
 //
 field v_int: Int
@@ -54,7 +54,7 @@ method init_out(p: Ref, l_p: Perm)    // [[cerastes::ref_to_uninit]] [[cerastes:
   assert perm(lvloc(block_of(p)).lv) >= l_p
 }
 
-method maybe_init(p: Ref, l_p: Perm)  // [[cerastes::ref_to_uninit]] without must_init: the caller learns nothing about the flag
+method maybe_init(p: Ref, l_p: Perm)  // [[cerastes::ref_to_uninit]] without must_init: the caller learns nothing new about the flag (superseded: decision 0042 question 87 adds old(flag) ==> flag, see s32_b_ref_to_uninit.vpr)
   requires none < l_p && l_p < write
   requires WF(p) && p != null && OWN(p) && LV(p, l_p)
   ensures OWN(p) && LV(p, l_p)

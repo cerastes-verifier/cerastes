@@ -60,6 +60,14 @@ const an_attr_registration kAttributes[] = {
     // parameter and a duplicate, and does not honour RAF_MUST_MATCH there, so the encoder checks every declaration.  Target `p` only: a
     // function, a local, a global and a field wait for M4.5d2 and M4.5c, and EDG refuses them itself until then.
     {"owning", "?(X)", "p", RAF_NO_FLAGS},
+    // The initialization markers (decision 0042 item 2; P4222's markers in the cerastes spelling; P54, P64).  `uninit` is a declaration
+    // attribute on the definition of an automatic local (`v:+a!`, like `invariant`'s `s:+i!`: EDG itself refuses it on a global, a static
+    // local (#1862), a parameter, a field and a function (#1835)).  `ref_to_uninit` and `must_init` are parameter markers like `owning`
+    // (`p`, no flags: RAF_ENTITY_ATTACHED with `p` alone aborts EDG at startup); the attributes accumulate over redeclarations and
+    // registration accepts a non-pointer parameter, a duplicate and both markers on one parameter, so the encoder checks each declaration.
+    {"uninit", "", "v:+a!", RAF_NO_FLAGS},
+    {"ref_to_uninit", "", "p", RAF_NO_FLAGS},
+    {"must_init", "", "p", RAF_NO_FLAGS},
     {"predicate", "", "r", RAF_ENTITY_ATTACHED | RAF_NO_CONSTANT_EVALUATION},
     {"pure", "", "r", RAF_ENTITY_ATTACHED | RAF_NO_CONSTANT_EVALUATION},
     {nullptr, nullptr, nullptr, RAF_NO_FLAGS},
