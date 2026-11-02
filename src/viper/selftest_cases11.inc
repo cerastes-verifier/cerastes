@@ -134,8 +134,8 @@ void define_pointer_cells() {
   lc("mem_ptrcell_param_set_caller", "int *p = &x; set(&p, &y); return *p == y's value", [=](Kit& k) { set_caller(k, false); });
   lc("mem_ptrcell_param_set_unowned", "the caller holds only live(pp): set's requires owns(*pp) fails at the call", [=](Kit& k) {
     const Expr* c = set_caller(k, true);
-    k.fail_only("permission", c->loc, 17, 2);  // the bound of pp's block (live alone does not give it) and the write permission fail
-    k.fail_only("permission", c->loc, 17, 3);
+    k.fail_only("permission", c->loc, 16, 2);  // the bound of pp's block (live alone does not give it) and the write permission fail
+    k.fail_only("permission", c->loc, 16, 3);
   });
 
   // ---- item 4: *result as a value ----

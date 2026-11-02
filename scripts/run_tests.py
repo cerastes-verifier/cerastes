@@ -16,6 +16,8 @@ expectations (grammar in tests/README.md):
     //                                                    error test)
     // expect: frontend-refused <substring>              (needs cerastes-fe-options)
     // cerastes-fe-options: <options>                    (only with frontend-refused)
+    // verify-options: <options>                         (only with verified, error or rejected;
+    //                                                    today only --strict-init)
     // expect: golden
     // expect: native-ok                                 (accompanies an outcome)
     // mode: c++20 | c23                                 (C and C++ only)
@@ -275,6 +277,9 @@ class Expectation:
     # `// mode: ...; platform: macos|linux` (decision 0031): a test of one platform's system headers by design,
     # run only there and reported as skipped elsewhere
     platform: str | None = None
+    # `// verify-options: --strict-init`: options added to the `cerastes verify` command line of a
+    # verified, error or rejected test (each one of VERIFY_OPTIONS_ALLOWED)
+    verify_options: list[str] = dataclasses.field(default_factory=list)
 
 
 # Kinds that stand alone: each must be the only outcome line of its test
@@ -287,6 +292,13 @@ _TWIN_RE = re.compile(r"^//\s*twin:\s*(.*?)\s*$")
 _TWIN_EXEMPT_RE = re.compile(r"^//\s*twin-exempt:\s*(.*?)\s*$")
 _FE_OPTIONS_RE = re.compile(r"^//\s*cerastes-fe-options:\s*(.*?)\s*$")
 _C_ONLY_RE = re.compile(r"^//\s*c-only:\s*(.*?)\s*$")
+_VERIFY_OPTIONS_RE = re.compile(r"^//\s*verify-options:\s*(.*?)\s*$")
+# A leading-block line that nearly spells the directive (`// verify-option:`, `// verify options:`, `// Verify-Options:`) is a
+# comment to every other rule, so a strict-mode test with a misspelt line would pass without its option: it is a header error.
+_VERIFY_OPTIONS_NEAR_RE = re.compile(r"^//\s*verify[-_ ]?options?\b", re.IGNORECASE)
+# The options a `// verify-options:` line may name: a closed list, like VERIFY_WARNING_TAGS, so that a
+# misspelling is a header error and a new driver option is added here with its self-test.
+VERIFY_OPTIONS_ALLOWED = ("--strict-init",)
 # The platforms of `; platform:` on a `// mode:` line, and the one this harness runs on (decision 0031).
 PLATFORMS = ("macos", "linux")
 HOST_PLATFORM = "macos" if sys.platform == "darwin" else "linux"
@@ -386,6 +398,7 @@ def parse_header(text: str, suffix: str) -> Expectation:
     exempts: list[tuple[int, str]] = []
     fe_options_lines: list[tuple[int, str]] = []
     c_only_lines: list[tuple[int, str]] = []
+    verify_options_lines: list[tuple[int, str]] = []
     modes: list[str] = []
     platforms: list[str] = []
     in_header = True
@@ -409,6 +422,11 @@ def parse_header(text: str, suffix: str) -> Expectation:
                 exempts.append((lineno, m.group(1)))
             elif m := _FE_OPTIONS_RE.match(line):
                 fe_options_lines.append((lineno, m.group(1)))
+            elif m := _VERIFY_OPTIONS_RE.match(line):
+                verify_options_lines.append((lineno, m.group(1)))
+            elif _VERIFY_OPTIONS_NEAR_RE.match(line):
+                raise HeaderError(f"L{lineno}: `{line}` looks like the `// verify-options:` directive but is not exactly "
+                                  "that (a misspelt line is a comment, and the test would run without its options)")
             elif m := _C_ONLY_RE.match(line):
                 body = m.group(1)
                 if pm := _C_ONLY_PLATFORM_RE.match(body):
@@ -421,9 +439,10 @@ def parse_header(text: str, suffix: str) -> Expectation:
         in_header = False
         if (_EXPECT_RE.match(line) or _MODE_RE.match(line) or _TWIN_RE.match(line)
                 or _TWIN_EXEMPT_RE.match(line) or _FE_OPTIONS_RE.match(line)
-                or _C_ONLY_RE.match(line)):
+                or _C_ONLY_RE.match(line) or _VERIFY_OPTIONS_RE.match(line)):
             raise HeaderError(f"L{lineno}: expect:/mode:/twin:/twin-exempt:/c-only:/"
-                              "cerastes-fe-options: lines must be in the leading comment block")
+                              "cerastes-fe-options:/verify-options: lines must be in the leading "
+                              "comment block")
 
     if not expects:
         raise HeaderError("no `// expect:` line in the leading comment block")
@@ -546,6 +565,29 @@ def parse_header(text: str, suffix: str) -> Expectation:
         if suffix == ".vpr":
             raise HeaderError("`expect: frontend-refused` does not apply to .vpr files")
 
+    verify_options: list[str] = []
+    if verify_options_lines:
+        lineno, text = verify_options_lines[0]
+        if kind not in VERIFY_KINDS or suffix == ".vpr":
+            raise HeaderError(f"L{lineno}: `verify-options:` is only valid with `expect: "
+                              + "`, `expect: ".join(VERIFY_KINDS) + "` in a .c or .cpp test (it "
+                              "adds options to the `cerastes verify` command line)")
+        if len(verify_options_lines) != 1:
+            raise HeaderError(f"L{verify_options_lines[1][0]}: more than one `verify-options:` line")
+        try:
+            verify_options = shlex.split(text)
+        except ValueError as err:
+            raise HeaderError(f"L{lineno}: cannot read the options: {err}") from None
+        if not verify_options:
+            raise HeaderError(f"L{lineno}: `verify-options:` takes one or more options")
+        for option in verify_options:
+            if option not in VERIFY_OPTIONS_ALLOWED:
+                raise HeaderError(f"L{lineno}: `verify-options:` does not allow `{option}` "
+                                  "(allowed: " + ", ".join(VERIFY_OPTIONS_ALLOWED) + "; "
+                                  "VERIFY_OPTIONS_ALLOWED in scripts/run_tests.py)")
+        if len(set(verify_options)) != len(verify_options):
+            raise HeaderError(f"L{lineno}: `verify-options:` names an option twice")
+
     twin_exempt = None
     if exempts:
         if len(exempts) != 1:
@@ -594,7 +636,8 @@ def parse_header(text: str, suffix: str) -> Expectation:
     if len(platforms) > 1:
         raise HeaderError("more than one `platform:`")
     return Expectation(kind, errors, modes, diags, native_ok, twin, twin_exempt,
-                       refused, fe_options, c_only, platforms[0] if platforms else None)
+                       refused, fe_options, c_only, platforms[0] if platforms else None,
+                       verify_options)
 
 
 def _under(path: Path, directory: Path) -> bool:
@@ -1758,11 +1801,12 @@ def evaluate_verify(run: ToolRun, exp: Expectation, registry: TagRegistry | None
     return problems
 
 
-def verify_command(env: dict[str, str], path: Path, mode: str, vpr: Path) -> list[str]:
+def verify_command(env: dict[str, str], path: Path, mode: str, vpr: Path,
+                   options: list[str] | tuple[str, ...] = ()) -> list[str]:
     """The `cerastes verify` command for one mode of a test (run from the root):
-    VERIFY_COMMAND, else the program of CERASTES_VERIFY."""
+    VERIFY_COMMAND, else the program of CERASTES_VERIFY, then the test's `// verify-options:`."""
     base = VERIFY_COMMAND if VERIFY_COMMAND is not None else [env["CERASTES_VERIFY"]]
-    return [*base, "verify", rel(path), VERIFY_STD_OPTIONS[mode], f"--keep-vpr={rel(vpr)}"]
+    return [*base, "verify", rel(path), VERIFY_STD_OPTIONS[mode], f"--keep-vpr={rel(vpr)}", *options]
 
 
 def vpr_path(path: Path, mode: str) -> Path:
@@ -2343,7 +2387,7 @@ def run_verify(path: Path, exp: Expectation, env: dict[str, str],
         for f in (vpr, vpr.with_name(vpr.name + ".map")):
             f.unlink(missing_ok=True)
         vpr.parent.mkdir(parents=True, exist_ok=True)
-        run = run_tool(verify_command(env, path, mode, vpr), env, VERIFY_TIMEOUT_S)
+        run = run_tool(verify_command(env, path, mode, vpr, exp.verify_options), env, VERIFY_TIMEOUT_S)
         problems = evaluate_verify(run, exp, opts.registry, rel(path))
         if run.returncode in (VERIFY_OK, VERIFY_ERRORS) and vpr_expected(exp):
             problems += vpr_problems(vpr, rel(path),

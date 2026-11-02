@@ -1,0 +1,113 @@
+// expect: error assert:assertion.false @ L104
+// S32 (f) twin: the same without that invariant. The loop keeps only the value of a partly held cell and `ds ==> flag`, so after it the cell may hold the flag with an out-of-range value, and the range row of the call fails.
+// the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_int() returns (r: Ref)
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)
+  ensures ((((lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(r.v_int)) && acc(r.d_int)) && (!r.d_int)) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// C/C++ function: ref_to_uninit only on p (does not touch *p); ensures `(old(flag)) ==> flag` (question 87), the range only under the flag
+method f_leave_it(p_p__0: Ref, amt_0: Perm) returns (res: Int)
+  requires (none < amt_0) && (amt_0 < write)
+  requires (p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0))))
+  requires (((((((p_p__0 != null) && ((p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0)))))) && (offset_of(p_p__0) < len(block_of(p_p__0)))) && (acc(p_p__0.v_int))) && (acc(p_p__0.d_int))) && (p_p__0.d_int ==> (((-2147483648) <= p_p__0.v_int) && (p_p__0.v_int <= 2147483647)))) && (acc(lvloc(block_of(p_p__0)).lv, amt_0)))
+  ensures ((((((((p_p__0 != null) && ((p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0)))))) && (offset_of(p_p__0) < len(block_of(p_p__0)))) && (acc(p_p__0.v_int))) && (acc(p_p__0.d_int))) && (old(p_p__0.d_int) ==> p_p__0.d_int)) && (p_p__0.d_int ==> (((-2147483648) <= p_p__0.v_int) && (p_p__0.v_int <= 2147483647)))) && (acc(lvloc(block_of(p_p__0)).lv, amt_0)))
+  decreases
+{
+  var v_p__0: Ref
+  v_p__0 := p_p__0
+  res := 0
+  assert p_p__0 != null
+  assert (p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0))))
+  assert offset_of(p_p__0) < len(block_of(p_p__0))
+  assert perm(p_p__0.v_int) == write
+  assert perm(p_p__0.d_int) == write
+  assert old(p_p__0.d_int) ==> p_p__0.d_int
+  assert p_p__0.d_int ==> (((-2147483648) <= p_p__0.v_int) && (p_p__0.v_int <= 2147483647))
+  assert perm(lvloc(block_of(p_p__0)).lv) >= amt_0
+  label l_end
+}
+
+// C/C++ function: void f(int n) { int x; int i = 0; while (i < n) { i += 1; } leave(&x); }: the loop does not reach the cell x, so it keeps only the value
+// of the cell when it is partly held; held && flag ==> range is the invariant the record adds (decision 0042 item 5, audit round 1 S1) for a function that calls a marked one
+method f_unreached(p_n__0: Int)
+  requires (-2147483648 <= p_n__0) && (p_n__0 <= 2147483647)
+  requires (0 <= p_n__0) && (p_n__0 <= 10)
+  decreases
+{
+  var v_x__0: Ref
+  var v_n__0: Int
+  var v_i__1: Int
+  var dummy: Int
+  var kl_x__0: Perm
+  var kv_x__0: Perm
+  var kd_x__0: Perm
+  var vs_x__0: Int
+  var ds_x__0: Bool
+  v_n__0 := p_n__0
+  v_x__0 := alloc_int()
+  assert v_x__0 != null
+  assert (v_x__0 == null) || (((v_x__0 == loc(block_of(v_x__0), offset_of(v_x__0))) && (0 <= offset_of(v_x__0))) && (offset_of(v_x__0) <= len(block_of(v_x__0))))
+  assert offset_of(v_x__0) < len(block_of(v_x__0))
+  assert perm(v_x__0.v_int) == write
+  assert perm(v_x__0.d_int) == write
+  v_i__1 := 0
+  kl_x__0 := perm(lvloc(block_of(v_x__0)).lv)
+  kv_x__0 := perm(v_x__0.v_int)
+  kd_x__0 := perm(v_x__0.d_int)
+  ds_x__0 := false
+  if (kd_x__0 > none) {
+    ds_x__0 := v_x__0.d_int
+  }
+  if (kv_x__0 > none) {
+    vs_x__0 := v_x__0.v_int
+  }
+  while (v_i__1 < v_n__0)
+    invariant (0 <= v_i__1) && (v_i__1 <= v_n__0)
+    invariant (v_x__0 != null) ==> (acc(v_x__0.v_int, kv_x__0) && acc(v_x__0.d_int, kd_x__0))
+    invariant (v_x__0 != null) ==> acc(lvloc(block_of(v_x__0)).lv, kl_x__0)
+    invariant ((v_x__0 != null) && ((none < kv_x__0) && (kv_x__0 < write))) ==> (v_x__0.v_int == vs_x__0)
+    invariant ((v_x__0 != null) && ((kd_x__0 > none) && ds_x__0)) ==> v_x__0.d_int
+    decreases v_n__0 - v_i__1
+  {
+    assert !(((v_i__1 + 1) < (-2147483648)) || (2147483647 < (v_i__1 + 1)))
+    v_i__1 := v_i__1 + 1
+    assert (v_x__0 != null) ==> (!((perm(v_x__0.v_int) < kv_x__0) || (perm(v_x__0.d_int) < kd_x__0)))
+    assert (v_x__0 != null) ==> (!(perm(lvloc(block_of(v_x__0)).lv) < kl_x__0))
+  }
+  // the call of the ref_to_uninit callee: no flag row, the range under the flag
+  assert v_x__0.d_int ==> (((-2147483648) <= v_x__0.v_int) && (v_x__0.v_int <= 2147483647))  // <- fails: the range row of the marked call: without the invariant the loop forgot that a held cell with its flag set is in range
+  assert perm(lvloc(block_of(v_x__0)).lv) > none
+  assert none < (perm(lvloc(block_of(v_x__0)).lv) / 2)
+  assert (perm(lvloc(block_of(v_x__0)).lv) / 2) < write
+  assert perm(lvloc(block_of(v_x__0)).lv) >= (perm(lvloc(block_of(v_x__0)).lv) / 2)
+  dummy := f_leave_it(v_x__0, perm(lvloc(block_of(v_x__0)).lv) / 2)
+  assert !(((perm(v_x__0.v_int) != write) || (perm(v_x__0.d_int) != write)) || (perm(lvloc(block_of(v_x__0)).lv) != write))
+  exhale (acc(v_x__0.v_int) && acc(v_x__0.d_int)) && acc(lvloc(block_of(v_x__0)).lv)
+  label l_end
+}

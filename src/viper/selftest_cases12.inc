@@ -110,7 +110,7 @@ void define_globals() {
     const Expr* c = k.call(bump, {});
     f->body = k.blk({k.es(c)});
     k.done(f);
-    k.fail_only("permission", c->loc, 11, 3);  // the write permission of g: the checks before it pass
+    k.fail_only("permission", c->loc, 10, 3);  // the write permission of g: the checks before it pass
   });
   lc("glob_unowned_write", "a function whose contract names no global writes g: permission at the store", [=](Kit& k) {
     Global* g = glob(k, "g", "3");
@@ -203,7 +203,7 @@ void define_globals() {
   lc("glob_two_atoms", "two(&x) with owns(*p) && owns(g): both full, p != &g inside the callee, the caller learns *p == 1 and g == 2", [=](Kit& k) { two(k, false); });
   lc("glob_two_atoms_alias", "two(&g) passes g's cell as *p and as g: the separation p != &g fails at the call (the aliasing trap)", [=](Kit& k) {
     const Expr* c = two(k, true);
-    k.fail_only("permission", c->loc, 23, 16);  // the separation row: the others pass
+    k.fail_only("permission", c->loc, 21, 14);  // the separation row: the others pass
   });
 
   // ---- item 10: loops ----
@@ -280,7 +280,7 @@ void define_globals() {
   };
   lc("glob_static_recursion", "the static local count of f is held by f and by r (which calls f and itself) as an implicit owns, and by main from program_start", [=](Kit& k) { statics(k, 0); });
   lc("glob_static_overflow", "the value of a static local is unknown on entry: count++ without a bound may overflow", [=](Kit& k) { k.fail("overflow", statics(k, 1)); });
-  lc("glob_static_unheld", "r without the implicit atom holds no permission to count: permission at its call of f", [=](Kit& k) { k.fail_only("permission", statics(k, 2), 11, 3); });
+  lc("glob_static_unheld", "r without the implicit atom holds no permission to count: permission at its call of f", [=](Kit& k) { k.fail_only("permission", statics(k, 2), 10, 3); });
 
   // ---- item 11: g + f() with f owning g ----
   // int bumpr() requires(owns(g) && g < 100) ensures(owns(g)) { return 1; }   int main() { int s = [g|h] + bumpr(); return 0; }

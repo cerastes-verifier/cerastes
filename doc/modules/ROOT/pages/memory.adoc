@@ -258,6 +258,68 @@ include::example$memory/measure_over_memory.c[tag=source]
   the same object: four take a few seconds, five tens of seconds, and six or
   more may reach the time limit (an error, never a wrong answer).
 
+[#initialization]
+== Initialization through pointers
+
+A pointer parameter whose contract owns its object (`cerastes_owns(*p)`) expects an
+object that has a value: the caller gives it one, and the function returns it with
+one. An argument whose object may not have a value yet is reported at the call as
+xref:error-messages.adoc#_uninitialized[`uninitialized`] ("passes `&x` to `set`, whose
+parameter `p` needs `*p` to have a value; it may not have one here"); the same holds
+for `cerastes_reads(*p)`.
+
+Two attributes from the pass:[C++] initialization profile (P4222), in the
+`cerastes::` spelling, let a function receive an object that has no value yet:
+
+* `cerastes::must_init` (the macro `CERASTES_MUST_INIT`): the object may have no
+  value on entry, and the function gives it one before it returns. A path that
+  returns without writing `*p` is reported as
+  xref:error-messages.adoc#_postcondition[`postcondition`] ("returns without
+  initializing `*p`, which `cerastes::must_init` on `p` promises"). After the call
+  the caller may read the object, and the `ensures` may say what it holds.
+* `cerastes::ref_to_uninit` (the macro `CERASTES_REF_TO_UNINIT`): the object may
+  have no value on entry, and the function promises nothing about it on return,
+  except that an object that had a value still has one (its value may have changed).
+
+[source,c]
+----
+include::example$memory/init_must_init.c[tag=source]
+----
+
+[source,c]
+----
+include::example$memory/init_ref_to_uninit.c[tag=source]
+----
+
+The rules:
+
+* The attribute goes before the parameter's declaration or after its name, on a
+  pointer to an object that is not `const` (a `+int **+` parameter's object is the
+  pointer it points to). Its contract owns the object: `cerastes_owns(*p)` in the
+  `requires`, or `cerastes::owning`, and for `must_init` in the `ensures` too.
+  `cerastes_reads(*p)` beside either attribute is rejected, and so are both
+  attributes on one parameter. Every declaration of the function carries the same
+  attributes on the same parameters.
+* Inside the function, `*p` is read only after it is written, on every path, as a
+  local without an initializer is (xref:verifying.adoc#uninitialized[Locals without
+  an initializer]).
+* The contract may not read the object where it may have no value: `*p` in the
+  `requires`, `cerastes_old(*p)`, `*p` in a `decreases`, and `*p` in the `ensures`
+  of a `ref_to_uninit` parameter are rejected; the `ensures` of a `must_init`
+  parameter may read it (`*p == 0` above). A read through another pointer that may
+  equal `p` is reported at the contract as
+  xref:error-messages.adoc#_permission[`permission`].
+* A `must_init` parameter that the function writes only inside a loop is reported,
+  even when the loop always runs: give it a value before the loop.
+* The attributes are rejected on a function that never returns (`must_init`), on a
+  `pure` or `predicate` function, and on a redeclaration of a function a system
+  header declares.
+
+`cerastes::uninit` (the macro `CERASTES_UNINIT`) on a local without an initializer
+states that it starts without a value, and the option `--strict-init` asks for it on
+every such local and for these attributes wherever an object without a value is
+passed (xref:verifying.adoc#strict-init[The strict initialization mode]).
+
 [#globals]
 == Global variables
 
@@ -466,6 +528,8 @@ These are rejected with a diagnostic, never approximated
 * `owns`, `reads` and `live` in a `do … while (0)` invariant or a measure, and on
   a pointer variable whose own address is taken;
 * the attribute `cerastes::owning` on anything but a parameter, and `owning(n)`;
+* `cerastes::ref_to_uninit` on a local or a function (a function returning an object
+  without a value, such as `malloc`), and `cerastes::uninit` on anything but a local;
 * `restrict` except on a C parameter whose contract owns its object;
 * `void *`, and pointers to structures, unions and functions;
 * conversions between pointer types other than adding `const` to the object

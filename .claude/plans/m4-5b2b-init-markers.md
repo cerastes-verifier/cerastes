@@ -56,6 +56,11 @@ Size estimate: about 600–900 changed lines plus about 50 tests. That fits one 
   needs one in the `ensures` too. A marker with no atom, or beside `reads(*p)`, is rejected. Ownership and initialization
   stay orthogonal.
 
+**During the session (2026-11-02, after audit round 2):** **89**, the loop row `held && flag ==> range` on every place a
+loop does not reach, in every function (record 0042 item 5): it changes the Viper of existing programs with such loops
+(added invariant lines, no verdict) and fixes 0038's exit 3 on nested loops; re-expecting a VIR self-test pin is
+pre-approved only where its row count at a loop grows by exactly the added rows.
+
 **Standing:**
 - **82:** the call's flag row becomes `uninitialized`.
 - **83:** strict mode's argument rule is static.

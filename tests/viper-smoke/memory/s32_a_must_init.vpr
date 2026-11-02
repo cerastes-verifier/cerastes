@@ -1,0 +1,87 @@
+// expect: verified
+// S32 (a): `[[cerastes::must_init]]` (record 0042 item 5): the `requires` atom of a marked parameter has the permissions but no flag, and the range only under the flag (an uninitialized cell's value is unconstrained); the `ensures` has the flag, so the return row `p.d_int` is the `postcondition` row.
+// Shape: what the emitter writes for `void init_cell(int *p) must_init` and `int use(void) { int x; init_cell(&x); return x; }`: the caller has no flag row and its range row is `flag ==> range`.
+// the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_int() returns (r: Ref)
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)
+  ensures ((((lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(r.v_int)) && acc(r.d_int)) && (!r.d_int)) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// C/C++ function: void init_cell(int *p) [[cerastes::must_init]] on p: owns(*p) in requires and ensures, *p == 0 ensured
+method f_init_cell(p_p__0: Ref, amt_0: Perm)
+  requires (none < amt_0) && (amt_0 < write)
+  requires (p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0))))
+  requires (((((((p_p__0 != null) && ((p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0)))))) && (offset_of(p_p__0) < len(block_of(p_p__0)))) && (acc(p_p__0.v_int))) && (acc(p_p__0.d_int))) && (p_p__0.d_int ==> (((-2147483648) <= p_p__0.v_int) && (p_p__0.v_int <= 2147483647)))) && (acc(lvloc(block_of(p_p__0)).lv, amt_0)))
+  ensures ((((((((p_p__0 != null) && ((p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0)))))) && (offset_of(p_p__0) < len(block_of(p_p__0)))) && (acc(p_p__0.v_int))) && (acc(p_p__0.d_int))) && (p_p__0.d_int)) && (((-2147483648) <= p_p__0.v_int) && (p_p__0.v_int <= 2147483647))) && (acc(lvloc(block_of(p_p__0)).lv, amt_0))) && (p_p__0.v_int == 0)
+  decreases
+{
+  var v_p__0: Ref
+  v_p__0 := p_p__0
+  assert v_p__0 != null
+  assert !((perm(v_p__0.v_int) != write) || (perm(v_p__0.d_int) != write))
+  v_p__0.v_int := 0
+  v_p__0.d_int := true
+  assert p_p__0 != null
+  assert (p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0))))
+  assert offset_of(p_p__0) < len(block_of(p_p__0))
+  assert perm(p_p__0.v_int) == write
+  assert perm(p_p__0.d_int) == write
+  assert p_p__0.d_int
+  assert !((p_p__0.v_int < (-2147483648)) || (2147483647 < p_p__0.v_int))
+  assert perm(lvloc(block_of(p_p__0)).lv) >= amt_0
+  assert p_p__0.v_int == 0
+  label l_end
+}
+
+// C/C++ function: int use(void) { int x; init_cell(&x); return x; }
+method f_use() returns (res: Int)
+  ensures res == 0
+  decreases
+{
+  var v_x__0: Ref
+  v_x__0 := alloc_int()
+  assert v_x__0 != null
+  assert (v_x__0 == null) || (((v_x__0 == loc(block_of(v_x__0), offset_of(v_x__0))) && (0 <= offset_of(v_x__0))) && (offset_of(v_x__0) <= len(block_of(v_x__0))))
+  assert offset_of(v_x__0) < len(block_of(v_x__0))
+  assert perm(v_x__0.v_int) == write
+  assert perm(v_x__0.d_int) == write
+  // no flag row: the parameter is must_init (the cell is uninitialized here)
+  assert v_x__0.d_int ==> (((-2147483648) <= v_x__0.v_int) && (v_x__0.v_int <= 2147483647))
+  assert perm(lvloc(block_of(v_x__0)).lv) > none
+  assert none < (perm(lvloc(block_of(v_x__0)).lv) / 2)
+  assert (perm(lvloc(block_of(v_x__0)).lv) / 2) < write
+  assert perm(lvloc(block_of(v_x__0)).lv) >= (perm(lvloc(block_of(v_x__0)).lv) / 2)
+  f_init_cell(v_x__0, perm(lvloc(block_of(v_x__0)).lv) / 2)
+  assert perm(v_x__0.v_int) > none
+  assert v_x__0.d_int
+  res := v_x__0.v_int
+  assert !(((perm(v_x__0.v_int) != write) || (perm(v_x__0.d_int) != write)) || (perm(lvloc(block_of(v_x__0)).lv) != write))
+  exhale (acc(v_x__0.v_int) && acc(v_x__0.d_int)) && acc(lvloc(block_of(v_x__0)).lv)
+  assert res == 0
+  label l_end
+}

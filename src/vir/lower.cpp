@@ -1317,6 +1317,13 @@ class Lowerer {
     return txt.empty() ? std::string() : (txt[0] == '&' ? txt.substr(1) : "*" + txt);
   }
   static bool site_takes_cell(const AtomSite& s) { return s.atom->atom != AtomKind::Live; }
+  // The initialization marker (decision 0042 item 4) a site carries: the `owns(*p)` atom of a parameter `p` of `f` that is marked `ref_to_uninit` or
+  // `must_init`.  Every other site (a `reads` or `live` atom, a global's, `*result`'s) is unmarked.
+  static InitMarker site_marker(const Function& f, const AtomSite& s) {
+    const int k = site_key(s);
+    if (k < 0 || k >= kGlobalKeyBase || s.atom->atom != AtomKind::Owns || static_cast<size_t>(k) >= f.params.size()) return InitMarker::None;
+    return f.params[static_cast<size_t>(k)].init;
+  }
 
   // The guard of a site over `env`'s formals: the conjunction of its `||`/`?:` conditions (null: unconditional).
   E site_guard(const AtomSite& s, const Env& env) {
@@ -1377,11 +1384,21 @@ class Lowerer {
     if (site_takes_cell(site)) {
       const bool owns = e.atom == AtomKind::Owns;
       const std::string sfx = use_cell_type(t);
+      // Decision 0042 item 5: a marked parameter's pointee need not have a value on entry, so its `requires` atom has no flag row and states the
+      // range (or WF) under the flag; `must_init`'s `ensures` atom is the plain one; `ref_to_uninit`'s `ensures` atom keeps a flag that was set
+      // (`old(flag) ==> flag`, on the paths where the `requires` partner took the cell) and states the range under the flag.
+      const InitMarker mk = site_marker(*cf_, site);
+      const bool plain = mk == InitMarker::None || (mk == InitMarker::MustInit && site.in_ensures);
       r = low::and_(r, owns ? low::acc(p, "v_" + sfx) : low::acc(p, "v_" + sfx, amount));
       r = low::and_(r, owns ? low::acc(p, "d_" + sfx) : low::acc(p, "d_" + sfx, amount));
-      r = low::and_(r, cell_flag(p, t));
-      if (t.is_ptr()) r = low::and_(r, wf_expr(cell_value(p, t)));
-      else if (!t.is_bool()) r = low::and_(r, range_check(cell_value(p, t), *t.int_type));
+      if (!plain && site.in_ensures && e.amount >= 0 && e.amount < atoms_of(*cf_).nreq) {
+        E kept = low::old_(cell_flag(p, t));
+        if (const E gp = site_guard(atoms_of(*cf_).sites[static_cast<size_t>(e.amount)], env)) kept = low::and_(gp, kept);
+        r = low::and_(r, low::implies(kept, cell_flag(p, t)));
+      }
+      if (plain) r = low::and_(r, cell_flag(p, t));
+      const E range = t.is_ptr() ? wf_expr(cell_value(p, t)) : (!t.is_bool() ? range_check(cell_value(p, t), *t.int_type) : E());
+      if (range) r = low::and_(r, plain ? range : low::implies(cell_flag(p, t), range));
     }
     r = low::and_(r, low::acc(live_cell(p), "lv", amount));
     return {r, {}};
@@ -1482,6 +1499,9 @@ class Lowerer {
         if (!cens_ && i >= cseen_) continue;
       }
       if (cell_suffix(site_pointee(s)) != sfx) continue;
+      // Decision 0042 item 5: a marked atom's site never covers a read of the pre-state, and covers one of the post-state only for `must_init`
+      // (the cell has a value on return); a read through an alias of a marked parameter then fails the framing like any unowned read.
+      if (const InitMarker mk = site_marker(*cf_, s); mk != InitMarker::None && !(post && mk == InitMarker::MustInit)) continue;
       E d = site_guard(s, env);
       if (site_key(s) != k) d = low::and_(d, low::bin(BinOp::Eq, site_ref(s, env), p));
       ds.push_back(d);
@@ -2261,8 +2281,22 @@ class Lowerer {
       }
       return std::string();
     };
-    auto add = [&](const E& guard, E cond, const std::string& message) {
-      obl(full, guard, adep, std::move(cond), {}, meta("permission", e.loc, message), &pre.ex);
+    auto add_as = [&](const char* category, const E& guard, E cond, const std::string& message) {
+      obl(full, guard, adep, std::move(cond), {}, meta(category, e.loc, message), &pre.ex);
+    };
+    auto add = [&](const E& guard, E cond, const std::string& message) { add_as("permission", guard, std::move(cond), message); };
+    // The row that the cell the callee takes has a value (decision 0042 item 6, owner questions 82 and 85): category `uninitialized`, worded for the
+    // argument the parameter's place receives, or for the global the callee needs.
+    auto uninit_text = [&](const S& x) {
+      if (site_is_global(*x.site))
+        return "calls `" + callee.c_name + "`, which needs " + site_phrase(*x.site, quoted(x.place, "a global")) + " to have a value";
+      const Expr& arg = site_arg(*x.site, e);
+      const std::string who = arg.kind == Expr::Kind::Null ? std::string("the null pointer")
+                              : arg.c_text.empty()         ? std::string("a pointer")
+                                                           : "`" + arg.c_text + "`";
+      const std::string& pname = callee.params[static_cast<size_t>(site_key(*x.site))].name;
+      return "passes " + who + " to `" + callee.c_name + "`, whose parameter " + (pname.empty() ? std::string() : "`" + pname + "` ") + "needs " +
+             quoted(site_text(*x.site), "the object it points to") + " to have a value; it may not have one here";
     };
     auto split = [&](E cond) {
       obl(full, nullptr, adep, low::bool_lit(true), {}, meta("internal", e.loc, "internal check: a case split"), &pre.ex);
@@ -2283,8 +2317,13 @@ class Lowerer {
         const bool owns = x.site->atom->atom == AtomKind::Owns;
         add(x.g, low::bin(owns ? BinOp::Eq : BinOp::Gt, value_perm(x.p, t), owns ? write : none), m);
         add(x.g, low::bin(owns ? BinOp::Eq : BinOp::Gt, flag_perm(x.p, t), owns ? write : none), m);
-        add(x.g, cell_flag(x.p, t), m);
-        if (const E r = cell_range(x.p, t)) add(x.g, r, m);
+        // A marked parameter's atom has no flag row, and its range holds under the flag (decision 0042 item 5).
+        if (site_marker(callee, *x.site) == InitMarker::None) {
+          add_as("uninitialized", x.g, cell_flag(x.p, t), uninit_text(x));
+          if (const E r = cell_range(x.p, t)) add(x.g, r, m);
+        } else if (const E r = cell_range(x.p, t)) {
+          add(x.g, low::implies(cell_flag(x.p, t), r), m);
+        }
       }
       add(x.g, low::bin(BinOp::Gt, live_perm(x.p), none), m);
     }
@@ -3703,6 +3742,12 @@ class Lowerer {
       return m;
     };
     auto internal = [&](const std::string& what) { return meta("internal", at, "internal check: " + what); };
+    // The same with a category of its own, for `must_init`'s promise (decision 0042 item 5); the note points at the postcondition like perm_meta's.
+    auto cat_meta = [&](const char* category, const std::string& message, size_t k) {
+      low::Meta m = perm_meta(message, k);
+      m.category = category;
+      return m;
+    };
     const E none = low::no_perm(), write = low::write_perm();
     for (size_t a = 0; a < ens.size(); ++a)
       for (size_t b = a + 1; b < ens.size(); ++b) {
@@ -3742,8 +3787,29 @@ class Lowerer {
             add(low::bin(BinOp::Ge, flag ? flag_perm(p[k], t) : value_perm(p[k], t), total), perm_meta(msg, k));
           }
         }
-        add(cell_flag(p[k], t), perm_meta(msg, k));
-        if (const E r = cell_range(p[k], t)) add(r, perm_meta(msg, k));
+        // Decision 0042 item 5.  `must_init`: the flag row is the promise (`postcondition`) and the range holds under it, so a missing write is reported
+        // once.  `ref_to_uninit`: a flag that was set on entry is still set (`internal`: nothing makes a held cell indeterminate again), and the range holds
+        // under the flag.
+        const InitMarker mk = site_marker(f, site);
+        if (mk == InitMarker::None) {
+          add(cell_flag(p[k], t), perm_meta(msg, k));
+          if (const E r = cell_range(p[k], t)) add(r, perm_meta(msg, k));
+        } else {
+          if (mk == InitMarker::MustInit) {
+            const std::string& pname = f.params[static_cast<size_t>(site_key(site))].name;
+            add(cell_flag(p[k], t),
+                cat_meta("postcondition",
+                         "returns without initializing " + quoted(name(k), "the object the pointer points to") + ", which `cerastes::must_init` on " +
+                             (pname.empty() ? std::string("the parameter") : "`" + pname + "`") + " promises",
+                         k));
+          } else {
+            E kept = low::old_(cell_flag(p[k], t));
+            if (site.atom->amount >= 0 && site.atom->amount < fa.nreq)
+              if (const E gp = site_guard(fa.sites[static_cast<size_t>(site.atom->amount)], env)) kept = low::and_(gp, kept);
+            add(low::implies(kept, cell_flag(p[k], t)), internal("a pointee that had a value on entry keeps it"));
+          }
+          if (const E r = cell_range(p[k], t)) add(low::implies(cell_flag(p[k], t), r), perm_meta(msg, k));
+        }
       }
       E total = amt;
       for (size_t j = 0; j < ens.size(); ++j) {
@@ -3777,48 +3843,6 @@ class Lowerer {
       m.note_loc = c.loc;
       m.note_text = "this is the postcondition";
       emit_assert(out, v.e, std::move(m));
-    }
-  }
-
-  // The locals an expression assigns (the targets of its AssignE nodes).
-  static void scan_expr(const Expr* e, std::set<int>& assigned) {
-    if (e == nullptr) return;
-    if (e->kind == Expr::Kind::AssignE && e->var != nullptr) assigned.insert(e->var->id);
-    for (const Expr* x : {e->a, e->b, e->c}) scan_expr(x, assigned);
-    for (const Expr* x : e->args) scan_expr(x, assigned);
-  }
-
-  // Locals that a loop assigns but does not declare: the ones whose values cross iterations.  Every expression counts, a nested
-  // loop's condition and a `do` condition included (decision 0020).
-  static void scan(const Stmt& s, std::set<int>& assigned, std::set<int>& declared) {
-    switch (s.kind) {
-      case Stmt::Kind::Decl:
-        declared.insert(s.var->id);
-        scan_expr(s.expr, assigned);
-        break;
-      case Stmt::Kind::Assign:
-        assigned.insert(s.var->id);
-        scan_expr(s.expr, assigned);
-        break;
-      case Stmt::Kind::ExprStmt: case Stmt::Kind::Return: case Stmt::Kind::Check: scan_expr(s.expr, assigned); break;
-      case Stmt::Kind::If:
-        scan_expr(s.expr, assigned);
-        if (s.then_body != nullptr) scan(*s.then_body, assigned, declared);
-        if (s.else_body != nullptr) scan(*s.else_body, assigned, declared);
-        break;
-      case Stmt::Kind::While:
-        scan_expr(s.expr, assigned);
-        if (s.body != nullptr) scan(*s.body, assigned, declared);
-        if (s.step != nullptr) scan(*s.step, assigned, declared);
-        break;
-      case Stmt::Kind::Switch:
-        scan_expr(s.expr, assigned);
-        if (s.body != nullptr) scan(*s.body, assigned, declared);
-        break;
-      case Stmt::Kind::Block:
-        for (const Stmt* c : s.stmts) scan(*c, assigned, declared);
-        break;
-      default: break;
     }
   }
 
@@ -4275,9 +4299,9 @@ class Lowerer {
     w.kind = low::LStmt::Kind::While;
 
     std::set<int> assigned, declared;
-    scan(*s.body, assigned, declared);
-    if (s.step != nullptr) scan(*s.step, assigned, declared);
-    scan_expr(s.expr, assigned);  // the loop's own condition (a side effect in it assigns, decision 0020)
+    scan_assigned(*s.body, assigned, declared);
+    if (s.step != nullptr) scan_assigned(*s.step, assigned, declared);
+    scan_assigned_expr(s.expr, assigned);  // the loop's own condition (a side effect in it assigns, decision 0020)
 
     // Decision 0038 item 3: a loop that touches memory, or whose body leaves the function or a block that holds a place while the function holds
     // one, carries every place the function holds.
@@ -4425,10 +4449,15 @@ class Lowerer {
         } else {
           w.invariants.push_back(auto_invariant(
               low::implies(rows(low::and_(low::bin(BinOp::Lt, none, kv), low::bin(BinOp::Lt, kv, write))), same), s.loc));
-          if (const E range = cell_range_inv(pl.recv, pl.type)) {
-            const E held = low::and_(low::and_(low::bin(BinOp::Gt, kv, none), low::bin(BinOp::Gt, kd, none)), cell_flag(pl.recv, pl.type));
-            w.invariants.push_back(auto_invariant(low::implies(rows(held), range), s.loc));
-          }
+        }
+        // Every value place keeps `held && flag ==> range`, one the loop reaches or not (owner question 89, audit round 2; decision 0042 item 5): a
+        // place the loop does not reach keeps only its value, so after the loop a cell whose flag was false on entry could hold `d` with an out-of-range
+        // value, and a `flag ==> range` row after the loop (a marked parameter's call or return rows) would fail on a correct program; and an outer
+        // loop's row would be lost across an inner loop that only reads.  Inductive: a write is range-checked, and an uninitialized cell satisfies it
+        // vacuously.
+        if (const E range = cell_range_inv(pl.recv, pl.type)) {
+          const E held = low::and_(low::and_(low::bin(BinOp::Gt, kv, none), low::bin(BinOp::Gt, kd, none)), cell_flag(pl.recv, pl.type));
+          w.invariants.push_back(auto_invariant(low::implies(rows(held), range), s.loc));
         }
         w.invariants.push_back(auto_invariant(
             low::implies(rows(low::and_(low::bin(BinOp::Gt, kd, none), low::var(pl.ds))), cell_flag(pl.recv, pl.type)), s.loc));
@@ -4936,12 +4965,8 @@ class Lowerer {
     user_names_.clear();
     collect_gotos(*f.body, user_targets_);
     label_depths(*f.body, fn_.scopes.size());
-    {  // the pointer parameters the body assigns: their formal's place is not automatic in a loop (decision 0038 item 3)
-      std::set<int> assigned, declared;
-      scan(*f.body, assigned, declared);
-      for (size_t k = 0; k < f.params.size(); ++k)
-        if (f.params[k].type.is_ptr() && assigned.count(f.param_var(static_cast<int>(k))->id) != 0) fn_.assigned_params.insert(static_cast<int>(k));
-    }
+    // the pointer parameters the body assigns: their formal's place is not automatic in a loop (decision 0038 item 3)
+    fn_.assigned_params = assigned_params(f);
     stmt(*f.body, m.body);
     // The end of the body: a non-void function must not reach it; a void one returns.
     if (f.noreturn) {

@@ -81,6 +81,30 @@ postcondition_error.cpp:8: note: this is the postcondition
 include::example$error-messages/postcondition_fixed.cpp[tag=source]
 ----
 
+A parameter marked `cerastes::must_init` promises that its object has a value when
+the function returns (xref:memory.adoc#initialization[Initialization through
+pointers]). A path that returns without writing it is reported at that `return` (or
+the closing brace), with a note at the `ensures`:
+
+[source,c]
+----
+include::example$error-messages/postcondition_must_init_error.c[tag=source]
+----
+
+[source,console]
+----
+postcondition_must_init_error.c:14: error: postcondition: returns without initializing `*p`, which `cerastes::must_init` on `p` promises
+postcondition_must_init_error.c:9: note: this is the postcondition
+----
+
+*How to fix it.* Write `*p` on every path, or mark the parameter
+`cerastes::ref_to_uninit` if the function may leave it without a value:
+
+[source,c]
+----
+include::example$error-messages/postcondition_must_init_fixed.c[tag=source]
+----
+
 == check
 
 A `CERASTES_CHECK` may not hold. It is reported at the check.
@@ -370,6 +394,30 @@ every way to it:
 [source,c]
 ----
 include::example$error-messages/uninitialized_fixed.c[tag=source]
+----
+
+The same holds for an object passed to a function whose contract owns or reads it
+(`cerastes_owns(*p)`, `cerastes_reads(*p)`, or a global variable it names): the
+function expects it to have a value, and an argument that may have none is reported
+at the call:
+
+[source,c]
+----
+include::example$error-messages/uninitialized_argument_error.c[tag=source]
+----
+
+[source,console]
+----
+uninitialized_argument_error.c:14: error: uninitialized: passes `&x` to `set`, whose parameter `p` needs `*p` to have a value; it may not have one here
+----
+
+*How to fix it.* Give the object a value before the call, or, if the function gives
+it one, mark the parameter `cerastes::must_init`
+(xref:memory.adoc#initialization[Initialization through pointers]):
+
+[source,c]
+----
+include::example$error-messages/uninitialized_argument_fixed.c[tag=source]
 ----
 
 == null-dereference

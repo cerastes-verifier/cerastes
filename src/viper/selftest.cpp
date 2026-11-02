@@ -903,6 +903,7 @@ void define_sequencing_rejections();
 void define_pointer_cells();
 void define_written_atoms();
 void define_globals();
+void define_init_markers();
 }  // namespace
 
 #include "selftest_cases2.inc"
@@ -916,6 +917,7 @@ void define_globals();
 #include "selftest_cases10.inc"
 #include "selftest_cases11.inc"
 #include "selftest_cases12.inc"
+#include "selftest_cases13.inc"
 
 namespace {
 
@@ -1095,6 +1097,7 @@ int main(int argc, char** argv) {
   define_pointer_cells();
   define_written_atoms();
   define_globals();
+  define_init_markers();
   int bad = 0;
   for (const Case& c : lowering_cases()) {
     std::string problem;

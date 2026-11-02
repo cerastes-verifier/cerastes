@@ -28,7 +28,7 @@
 
 namespace cerastes {
 
-enum class Annot { none, requires_, ensures, invariant, check, fold, unfold, predicate, pure, decreases, owning };
+enum class Annot { none, requires_, ensures, invariant, check, fold, unfold, predicate, pure, decreases, owning, uninit, ref_to_uninit, must_init };
 
 inline bool is_registered_cerastes(an_attribute_ptr a) {
   return a->kind == ak_registered && a->namespace_name != nullptr &&
@@ -41,7 +41,8 @@ inline Annot classify(an_attribute_ptr a) {
       {"requires", Annot::requires_}, {"ensures", Annot::ensures},     {"invariant", Annot::invariant},
       {"check", Annot::check},        {"fold", Annot::fold},           {"unfold", Annot::unfold},
       {"predicate", Annot::predicate}, {"pure", Annot::pure},      {"decreases", Annot::decreases},
-      {"owning", Annot::owning},
+      {"owning", Annot::owning}, {"uninit", Annot::uninit}, {"ref_to_uninit", Annot::ref_to_uninit},
+      {"must_init", Annot::must_init},
   };
   for (const auto& n : kNames)
     if (std::strcmp(a->name, n.name) == 0) return n.kind;

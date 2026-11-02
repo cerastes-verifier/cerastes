@@ -59,6 +59,11 @@ dialect that was changed behind its back.
 | Keep the generated Viper program and its position map. See
   <<keep-vpr>>.
 
+| `--strict-init`
+| The strict initialization mode: every local without an initializer must be
+  marked `CERASTES_UNINIT`, and only such a local's address is passed to a parameter
+  that receives an object without a value. See <<strict-init>>.
+
 | `--timeout=<seconds>`
 | The wall-clock limit for the proof search. The default is 300. Reaching it is
   a failure of the tool, not a verdict on your program (exit status 3).
@@ -299,6 +304,57 @@ copying an indeterminate `unsigned char` is allowed there and an error here,
 and an expression statement that only names the variable (`x;` or
 `(void)x;`) does not read it in pass:[C++], while cerastes counts it as a read,
 as C does. An operand of `sizeof` is never a read.
+
+The attribute `cerastes::uninit` (the macro `CERASTES_UNINIT`) on such a local
+states that it starts without a value. It changes nothing in what is checked, and
+it is rejected on a local that has an initializer:
+
+[source,c]
+----
+include::example$verifying/uninit_marker.c[tag=source]
+----
+
+A function can give a value to a local of its caller through a pointer parameter
+marked `cerastes::must_init` or `cerastes::ref_to_uninit`
+(xref:memory.adoc#initialization[Initialization through pointers]).
+
+[#strict-init]
+=== The strict initialization mode
+
+With `--strict-init`, cerastes also asks for what P4222's profile asks for, as
+written in the source:
+
+* every definition of a local without an initializer carries `CERASTES_UNINIT`
+  (`cerastes-uninit_unmarked` otherwise); a `static` local is not asked;
+* every argument of a parameter marked `cerastes::must_init` or
+  `cerastes::ref_to_uninit` is the address of such a local (`&x`), or the calling
+  function's own marked parameter passed on unchanged
+  (`cerastes-uninit_ref_initialized` otherwise).
+
+[source,c]
+----
+include::example$verifying/strict_init.c[tag=source]
+----
+
+Without the marker, the same local is rejected:
+
+[source,c]
+----
+include::example$verifying/strict_init_unmarked.c[tag=source]
+----
+
+Both rules read the declarations, not the paths, so the mode accepts a few
+programs that pass an object that already has a value (`x = 1; init(&x);`, a second
+`init(&x)`, a marked parameter passed on after it was written) and rejects a few
+harmless ones (a null pointer, a pointer variable holding `&x`, a marked parameter
+that is reassigned, `init(c ? &x : &y)`). Without the option every program means
+the same; the option only rejects more. The checks of the default mode, on every
+path, apply in both.
+
+[source,c]
+----
+include::example$verifying/strict_init_initialized_argument.c[tag=source]
+----
 
 [#side-effects]
 == Side effects in expressions
@@ -705,6 +761,11 @@ another file (in pass:[C++], the initialization of its globals; in C, a GNU
 its globals; and no other file calls `main`. Where another file could set a
 global's initial value through its own definition or initialization, `main`
 does not know it.
+
+A function defined elsewhere with a `cerastes::ref_to_uninit` parameter is also
+trusted to leave an object that had a value with one
+(xref:memory.adoc#initialization[Initialization through pointers]); in pass:[C++]
+such a definition could store an indeterminate `unsigned char` there.
 
 [source,cpp]
 ----

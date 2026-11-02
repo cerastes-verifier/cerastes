@@ -11021,6 +11021,21 @@ class VerifyPathsTests(unittest.TestCase):
                 ["/opt/cerastes/build/cerastes", "verify", "tests/scalar/a.c", std,
                  f"--keep-vpr=build/vpr/tests/scalar/a.c.{mode}.vpr"])
 
+    def test_the_command_line_carries_the_verify_options(self):
+        # `// verify-options:` (the Expectation's verify_options) are the last words of the command; without them
+        # the command is the one above, and the options are never added to the program or placed before `verify`
+        t = rt.ROOT / "tests" / "memory" / "a.c"
+        for mode, std in (("c23", "--std=c23"), ("c++20", "--std=c++20")):
+            vpr = rt.vpr_path(t, mode)
+            with self.subTest(mode):
+                self.assertEqual(
+                    rt.verify_command(self.ENV, t, mode, vpr, ["--strict-init"]),
+                    ["/opt/cerastes/build/cerastes", "verify", "tests/memory/a.c", std,
+                     f"--keep-vpr=build/vpr/tests/memory/a.c.{mode}.vpr", "--strict-init"])
+                self.assertEqual(rt.verify_command(self.ENV, t, mode, vpr, []),
+                                 rt.verify_command(self.ENV, t, mode, vpr))
+                self.assertNotIn("--strict-init", rt.verify_command(self.ENV, t, mode, vpr))
+
     def test_verify_command_wins_over_the_environment(self):
         t = rt.ROOT / "tests" / "scalar" / "a.c"
         with mock.patch.object(rt, "VERIFY_COMMAND", ["python3", "fake.py"]):
@@ -11884,6 +11899,185 @@ class VerifyRunTests(FakeVerifierCase):
         self.run_harness(t)
         self.assertEqual([p.name for p in self.dir.iterdir()], ["a.c"])  # no golden written
         self.assertNotIn("needs the cerastes driver", self.run_harness(t)[1])
+
+
+class VerifyOptionsHeaderTests(unittest.TestCase):
+    """`// verify-options:` (decision 0042): options added to the `cerastes verify` command of a verified, error or
+    rejected test.  Each refusal below is a twin of the accepted shape: a header that stopped refusing it would
+    let a typo, or an option on a test that never runs the verifier, pass silently."""
+
+    OPT = "// verify-options: --strict-init\n"
+    OUTCOMES = {"verified": "// expect: verified\n",
+                "error": "// expect: error uninitialized @ L9\n",
+                "rejected": "// expect: rejected undefined_identifier @ L9\n"}
+
+    def parse(self, text, suffix=".c"):
+        return rt.parse_header(text, suffix)
+
+    def test_the_allow_list_holds_only_strict_init(self):
+        self.assertEqual(rt.VERIFY_OPTIONS_ALLOWED, ("--strict-init",))
+
+    def test_every_verify_kind_takes_it_in_c_and_in_cpp(self):
+        for kind, expect in self.OUTCOMES.items():
+            for suffix in (".c", ".cpp"):
+                with self.subTest(kind, suffix=suffix):
+                    exp = self.parse(expect + self.OPT, suffix)
+                    self.assertEqual(exp.kind, kind)
+                    self.assertEqual(exp.verify_options, ["--strict-init"])
+                    # the position of the line in the block does not matter, and mode: still applies
+                    exp = self.parse(self.OPT + "// mode: c23\n" + expect, suffix)
+                    self.assertEqual((exp.verify_options, exp.modes), (["--strict-init"], ["c23"]))
+
+    def test_no_line_no_options(self):
+        for expect in self.OUTCOMES.values():
+            self.assertEqual(self.parse(expect).verify_options, [])
+
+    def test_it_accompanies_native_ok_and_listed_warnings(self):
+        text = ("// expect: verified\n// expect: native-ok\n"
+                "// expect: frontend-warning assign_where_compare_meant @ L9\n" + self.OPT)
+        exp = self.parse(text)
+        self.assertEqual((exp.kind, exp.native_ok, exp.verify_options), ("verified", True, ["--strict-init"]))
+
+    def test_the_frontend_kinds_and_golden_refuse_it(self):
+        bad = {
+            "frontend-ok": "// expect: frontend-ok\n",
+            "golden": "// expect: golden\n",
+            "frontend-error": "// expect: frontend-error undefined_identifier @ L3\n",
+            "frontend-warning only": "// expect: frontend-warning assign_where_compare_meant @ L3\n",
+            "frontend-refused": "// expect: frontend-refused x\n// cerastes-fe-options: --c11\n",
+        }
+        for what, expect in bad.items():
+            with self.subTest(what), self.assertRaises(rt.HeaderError) as ctx:
+                self.parse(expect + self.OPT)
+            self.assertIn("verify-options", str(ctx.exception))
+            self.parse(expect)  # the same header without the line is fine: the line is what is refused
+
+    def test_a_vpr_file_refuses_it(self):
+        for expect in ("// expect: verified\n", "// expect: error assert:assertion.false @ L3\n"):
+            with self.subTest(expect), self.assertRaises(rt.HeaderError) as ctx:
+                self.parse(expect + self.OPT, ".vpr")
+            self.assertIn("verify-options", str(ctx.exception))
+            self.parse(expect, ".vpr")
+
+    def test_an_option_outside_the_allow_list_is_refused(self):
+        for word in ("--strict-inti", "--strict_init", "--strict-init=1", "-strict-init", "--keep-vpr=x",
+                     "--std=c23", "-I.", "--std=c++20", "strict-init", "x.c", "--help", "--"):
+            with self.subTest(word), self.assertRaises(rt.HeaderError) as ctx:
+                self.parse("// expect: verified\n// verify-options: " + word + "\n")
+            self.assertIn("does not allow", str(ctx.exception))
+        # one good word does not excuse a bad neighbour, before or after
+        for text in ("--strict-init --bogus", "--bogus --strict-init"):
+            with self.subTest(text), self.assertRaises(rt.HeaderError):
+                self.parse("// expect: verified\n// verify-options: " + text + "\n")
+
+    def test_the_line_takes_at_least_one_option_and_names_each_once(self):
+        for text in ("", "   "):
+            with self.subTest(repr(text)), self.assertRaises(rt.HeaderError):
+                self.parse("// expect: verified\n// verify-options:" + text + "\n")
+        with self.assertRaises(rt.HeaderError) as ctx:
+            self.parse("// expect: verified\n// verify-options: --strict-init --strict-init\n")
+        self.assertIn("twice", str(ctx.exception))
+        with self.assertRaises(rt.HeaderError):  # a quote that never closes
+            self.parse('// expect: verified\n// verify-options: "--strict-init\n')
+
+    def test_a_misspelt_directive_is_a_header_error(self):
+        # a near miss is a plain comment to every other rule, so a strict-mode test would silently run without its option
+        for line in ("// verify-option: --strict-init", "// verify options: --strict-init", "// Verify-Options: --strict-init",
+                     "// verify_options: --strict-init", "// verifyoptions: --strict-init", "// verify-options --strict-init",
+                     "//  VERIFY-OPTIONS: --strict-init"):
+            with self.subTest(line), self.assertRaises(rt.HeaderError) as ctx:
+                self.parse("// expect: verified\n" + line + "\n")
+            self.assertIn("verify-options", str(ctx.exception))
+        # twin: the exact spelling (with or without spaces after the slashes, as for the other directives) and an unrelated comment are fine
+        for line in ("// verify-options: --strict-init", "//verify-options: --strict-init"):
+            self.assertEqual(self.parse("// expect: verified\n" + line + "\n").verify_options, ["--strict-init"])
+        self.assertEqual(self.parse("// expect: verified\n// options for the verifier are elsewhere\n").verify_options, [])
+        # after the leading block it is code or an ordinary comment, never a header line
+        self.assertEqual(self.parse("// expect: verified\nint x;\n// verify options: x\n").verify_options, [])
+
+    def test_one_line_at_most(self):
+        with self.assertRaises(rt.HeaderError) as ctx:
+            self.parse("// expect: verified\n" + self.OPT + self.OPT)
+        self.assertIn("more than one", str(ctx.exception))
+
+    def test_it_belongs_in_the_leading_comment_block(self):
+        with self.assertRaises(rt.HeaderError) as ctx:
+            self.parse("// expect: verified\nint x;\n" + self.OPT)
+        self.assertIn("leading comment block", str(ctx.exception))
+
+    def test_a_verify_test_with_it_is_still_a_verify_test(self):
+        exp = self.parse("// expect: error uninitialized @ L9\n" + self.OPT)
+        self.assertTrue(rt.expects_failure(exp))
+        self.assertEqual([(e.category, e.line) for e in exp.errors], [("uninitialized", 9)])
+        self.assertEqual(rt.required_env({Path("a.c"): exp}), ["CERASTES_VERIFY"])
+
+    def test_the_readme_documents_it(self):
+        text = (REAL_ROOT / "tests" / "README.md").read_text()
+        for needle in ("verify-options:", "--strict-init", "VERIFY_OPTIONS_ALLOWED"):
+            with self.subTest(needle):
+                self.assertIn(needle, text)
+
+
+class VerifyOptionsRunTests(VerifierMixin, DiagRunCase):
+    """rt.main() with the fake `cerastes verify`: the option reaches the command of every mode of the test that
+    has the header, and of no other test of the same run."""
+
+    def options_test(self, name, options="--strict-init", modes="c++20, c23"):
+        f = rt.rel(self.dir / name)
+        return self.write(name, f"// out: {f}: {VERIFIED_DETAIL}",
+                          header=f"// expect: verified\n// mode: {modes}\n// verify-options: {options}")
+
+    def test_the_option_reaches_every_mode(self):
+        t = self.options_test("a.c")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+        calls = self.verify_calls()
+        self.assertEqual(sorted(c["argv"][2] for c in calls), ["--std=c++20", "--std=c23"])
+        for call in calls:
+            self.assertEqual(call["argv"][-1], "--strict-init", call)
+            self.assertEqual(call["argv"].count("--strict-init"), 1, call)
+
+    def test_a_test_without_the_header_gets_no_option(self):
+        with_option = self.options_test("a.c", modes="c23")
+        without = self.vtest("b.c", ["verified"], self.ok("b.c"))
+        status, out, _ = self.run_harness(with_option, without)
+        self.assertEqual(status, 0, out)
+        by_test = {c["argv"][1]: c["argv"] for c in self.verify_calls()}
+        self.assertIn("--strict-init", by_test[rt.rel(with_option)])
+        self.assertNotIn("--strict-init", by_test[rt.rel(without)])
+
+    def test_an_error_and_a_rejection_test_get_it_too(self):
+        e = self.write("e.c", f"// out: {self.line('e.c', 5, 'uninitialized')}", "// exit: 1",
+                       header="// expect: error uninitialized @ L5\n// verify-options: --strict-init")
+        f = rt.rel(self.dir / "r.c")
+        r = self.write("r.c", "// exit: 2", "// novpr",
+                       f'// err: "{f}", line 5 (col. 12): error #20: m',
+                       f'// err: 1 error detected in the compilation of "{f}".',
+                       header="// expect: rejected undefined_identifier @ L5\n// verify-options: --strict-init")
+        status, out, _ = self.run_harness(e, r)
+        self.assertEqual(status, 0, out)
+        calls = self.verify_calls()
+        self.assertEqual(len(calls), 2)
+        for call in calls:
+            self.assertEqual(call["argv"][-1], "--strict-init", call)
+
+    def test_a_bad_option_is_a_bad_header_and_the_verifier_never_runs(self):
+        t = self.options_test("a.c", options="--strict-inti")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 1, out)
+        self.assertIn("bad header", out)
+        self.assertIn("does not allow `--strict-inti`", out)
+        self.assertEqual(self.verify_calls(), [])
+
+    def test_check_headers_reads_it_and_runs_nothing(self):
+        good = self.options_test("a.c")
+        bad = self.write("b.c", header="// expect: golden\n// verify-options: --strict-init")
+        status, out, _ = self.run_harness("--check-headers", good)
+        self.assertEqual(status, 0, out)
+        status, out, _ = self.run_harness("--check-headers", bad)
+        self.assertEqual(status, 1, out)
+        self.assertIn("verify-options", out)
+        self.assertEqual(self.verify_calls(), [])
 
 
 class VerifyNativeTests(VerifierMixin, NativeCase):
@@ -12943,6 +13137,77 @@ class ClassifyRealSiliconTests(unittest.TestCase):
                 self.assertGreaterEqual(len(errors), minimum, output)   # fail_kinds: 11, padded indices
                 self.assertEqual(driver_view(self.driver, output, run.returncode, self.tmp),
                                  harness_view(output, run.returncode))
+
+
+UNINIT_MARKED = """#include <cerastes.h>
+
+int pick(int c)
+    CERASTES_ENSURES(r, r == 1 || r == 2)
+{
+  %(a)s int x%(t)s;
+  if (c %(cmp)s 0) {
+    x = 1;
+  } else {
+    x = 2;
+  }
+  return x;
+}
+
+int loop(void)
+    CERASTES_ENSURES(r, r == 1)
+{
+  int s = 0;
+  CERASTES_INVARIANT(0 <= s && s <= 1)
+  CERASTES_DECREASES(1 - s)
+  for (%(a)s int i%(t)s; s < 1;) {
+    i = s;
+    s = i + 1;
+  }
+  return s;
+}
+"""
+
+
+@e2e_gate(_real_verifier_available() and _real_silicon_available(),
+          "CERASTES_VERIFY, Java, Silicon or Z3 missing; run scripts/bootstrap.sh")
+class UninitMarkerEmitsNothingTests(unittest.TestCase):
+    """Decision 0042 item 3: `[[cerastes::uninit]]` on a local changes nothing in the emitted Viper.  The program
+    with the marker (leading and trailing position, in a `for` init) and the same program without it (the marker's
+    text is replaced by blanks, so no line or column moves) give the same `.vpr` and the same position map, in
+    both modes; the program with a different condition gives a different one, so the comparison is not vacuous."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.env = rt.load_env()
+        tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(tmp.cleanup)
+        cls.tmp = Path(tmp.name)
+
+    def vpr(self, name, text, mode):
+        src = self.tmp / name
+        src.write_text(text)
+        out = self.tmp / f"{name}.{mode}.vpr"
+        run = subprocess.run([self.env["CERASTES_VERIFY"], "verify", str(src), rt.VERIFY_STD_OPTIONS[mode],
+                              f"--keep-vpr={out}"], capture_output=True, text=True, env=self.env,
+                             timeout=rt.VERIFY_TIMEOUT_S)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        return out.read_text(), out.with_name(out.name + ".map").read_text().replace(str(src), "<file>")
+
+    def test_the_marker_changes_neither_the_viper_nor_the_map(self):
+        marked = UNINIT_MARKED % {"a": "CERASTES_UNINIT", "t": "", "cmp": "!="}
+        blank = " " * len("CERASTES_UNINIT")
+        plain = UNINIT_MARKED % {"a": blank, "t": "", "cmp": "!="}
+        trailing = UNINIT_MARKED % {"a": blank, "t": " CERASTES_UNINIT", "cmp": "!="}
+        for mode in ("c23", "c++20"):
+            with self.subTest(mode):
+                base = self.vpr("plain.c", plain, mode)
+                for name, text in (("marked.c", marked), ("trailing.c", trailing)):
+                    got = self.vpr(name, text, mode)
+                    self.assertEqual(got[0], base[0], name)
+                    self.assertEqual(got[1], base[1], name)
+                # twin: a different body is a different program
+                other = UNINIT_MARKED % {"a": blank, "t": "", "cmp": "=="}
+                self.assertNotEqual(self.vpr("other.c", other, mode)[0], base[0])
 
 
 # The fewest checks `cerastes --selftest` may run (it printed 94 when this was written).  Raise it

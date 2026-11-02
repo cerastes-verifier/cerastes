@@ -271,6 +271,41 @@ function must carry the same `owning` attributes; one that differs is
 front end reports that it does not apply), and only to pointers to objects
 that are not `const`; `owning(n)` is not supported yet.
 
+=== Initialization markers
+
+Three attributes from the pass:[C++] initialization profile (P4222), in the
+`cerastes::` spelling, each with a macro form for other compilers:
+
+[cols="2,2,5"]
+|===
+| Attribute | Macro | Meaning
+
+| `cerastes::uninit`
+| `CERASTES_UNINIT`
+| On a local without an initializer: it starts without a value. Every read is
+  checked as for any such local; with an initializer the attribute is
+  `cerastes-uninit_initialized` (xref:verifying.adoc#uninitialized[Locals without an
+  initializer]).
+
+| `cerastes::must_init`
+| `CERASTES_MUST_INIT`
+| On a pointer parameter whose contract owns its object: the object may have no
+  value on entry, and has one on return.
+
+| `cerastes::ref_to_uninit`
+| `CERASTES_REF_TO_UNINIT`
+| On a pointer parameter whose contract owns its object: the object may have no
+  value on entry; on return an object that had a value still has one.
+|===
+
+The parameter attributes go before the parameter's declaration or after its name,
+as `owning` does, and every declaration of the function carries the same ones
+(xref:memory.adoc#initialization[Initialization through pointers]). The option
+`--strict-init` asks for them as P4222 does (xref:verifying.adoc#strict-init[The
+strict initialization mode]). Elsewhere (`uninit` on a global, a `static` local or
+a parameter; the parameter attributes on a local or a function) the front end
+reports that they do not apply.
+
 === Members, constructors and destructors
 
 In a member function, `this` and the members declared before the function are
@@ -853,7 +888,8 @@ include::example$annotations/errors/old_in_pure.cpp[tag=bad]
 === Declarations that disagree
 
 A later declaration with a different contract is `attr_redeclaration_mismatch`
-(and one whose `owning` parameters differ, `annotation_mismatch`):
+(and one whose `owning`, `must_init` or `ref_to_uninit` parameters differ,
+`annotation_mismatch`):
 
 [source,cpp]
 ----
@@ -942,7 +978,7 @@ anywhere in the translation unit and outside `<cerastes.h>` itself, of one of th
 `cerastes-annotation_macro_changed`, reported at the directive:
 
 * `cerastes`, an attribute name (`requires`, `ensures`, `invariant`, `check`, `fold`, `unfold`,
-  `predicate`, `pure`) and a specification-function name (`old`, `owns`, `reads`, `forall`,
+  `predicate`, `pure`, `owning`, `uninit`, `must_init`, `ref_to_uninit`) and a specification-function name (`old`, `owns`, `reads`, `forall`,
   `owns_range`): `+#define ensures requires+` would turn every postcondition into a precondition;
 * `+CERASTES_H+` and every `+CERASTES_*+` macro, which are the header's own;
 * every predefined macro of the front end, among them `+__cplusplus+`,

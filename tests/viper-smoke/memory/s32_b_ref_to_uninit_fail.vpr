@@ -1,0 +1,88 @@
+// expect: error assert:assertion.false @ L83
+// S32 (b) twin: the same callee, but the cell is uninitialized before the call, and `ref_to_uninit` alone does not promise a value: the read after the call fails its flag row (`uninitialized`).
+// the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_int() returns (r: Ref)
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)
+  ensures ((((lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(r.v_int)) && acc(r.d_int)) && (!r.d_int)) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// C/C++ function: ref_to_uninit only on p (writes *p, then reads it); ensures `(old(flag)) ==> flag` (question 87), the range only under the flag
+method f_maybe_init(p_p__0: Ref, amt_0: Perm) returns (res: Int)
+  requires (none < amt_0) && (amt_0 < write)
+  requires (p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0))))
+  requires (((((((p_p__0 != null) && ((p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0)))))) && (offset_of(p_p__0) < len(block_of(p_p__0)))) && (acc(p_p__0.v_int))) && (acc(p_p__0.d_int))) && (p_p__0.d_int ==> (((-2147483648) <= p_p__0.v_int) && (p_p__0.v_int <= 2147483647)))) && (acc(lvloc(block_of(p_p__0)).lv, amt_0)))
+  ensures ((((((((p_p__0 != null) && ((p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0)))))) && (offset_of(p_p__0) < len(block_of(p_p__0)))) && (acc(p_p__0.v_int))) && (acc(p_p__0.d_int))) && (old(p_p__0.d_int) ==> p_p__0.d_int)) && (p_p__0.d_int ==> (((-2147483648) <= p_p__0.v_int) && (p_p__0.v_int <= 2147483647)))) && (acc(lvloc(block_of(p_p__0)).lv, amt_0)))
+  decreases
+{
+  var v_p__0: Ref
+  v_p__0 := p_p__0
+  res := 0
+  assert v_p__0 != null
+  assert !((perm(v_p__0.v_int) != write) || (perm(v_p__0.d_int) != write))
+  v_p__0.v_int := 7
+  v_p__0.d_int := true
+  assert v_p__0 != null
+  assert perm(v_p__0.v_int) > none
+  assert v_p__0.d_int
+  res := v_p__0.v_int
+  assert p_p__0 != null
+  assert (p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0))))
+  assert offset_of(p_p__0) < len(block_of(p_p__0))
+  assert perm(p_p__0.v_int) == write
+  assert perm(p_p__0.d_int) == write
+  assert old(p_p__0.d_int) ==> p_p__0.d_int
+  assert p_p__0.d_int ==> (((-2147483648) <= p_p__0.v_int) && (p_p__0.v_int <= 2147483647))
+  assert perm(lvloc(block_of(p_p__0)).lv) >= amt_0
+  label l_end
+}
+
+// C/C++ function: int uninit_read(void) { int x; maybe(&x); return x; }
+method f_uninit_read() returns (res: Int)
+  decreases
+{
+  var v_x__0: Ref
+  v_x__0 := alloc_int()
+  assert v_x__0 != null
+  assert (v_x__0 == null) || (((v_x__0 == loc(block_of(v_x__0), offset_of(v_x__0))) && (0 <= offset_of(v_x__0))) && (offset_of(v_x__0) <= len(block_of(v_x__0))))
+  assert offset_of(v_x__0) < len(block_of(v_x__0))
+  assert perm(v_x__0.v_int) == write
+  assert perm(v_x__0.d_int) == write
+  // the argument's rows: no flag row (ref_to_uninit), the range under the flag
+  assert v_x__0.d_int ==> (((-2147483648) <= v_x__0.v_int) && (v_x__0.v_int <= 2147483647))
+  assert perm(lvloc(block_of(v_x__0)).lv) > none
+  assert none < (perm(lvloc(block_of(v_x__0)).lv) / 2)
+  assert (perm(lvloc(block_of(v_x__0)).lv) / 2) < write
+  assert perm(lvloc(block_of(v_x__0)).lv) >= (perm(lvloc(block_of(v_x__0)).lv) / 2)
+  res := f_maybe_init(v_x__0, perm(lvloc(block_of(v_x__0)).lv) / 2)
+  assert perm(v_x__0.v_int) > none
+  assert v_x__0.d_int  // <- fails: reads `x` after a call that did not promise to initialize it
+  res := v_x__0.v_int
+  assert !(((perm(v_x__0.v_int) != write) || (perm(v_x__0.d_int) != write)) || (perm(lvloc(block_of(v_x__0)).lv) != write))
+  exhale (acc(v_x__0.v_int) && acc(v_x__0.d_int)) && acc(lvloc(block_of(v_x__0)).lv)
+  label l_end
+}

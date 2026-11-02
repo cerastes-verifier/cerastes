@@ -70,7 +70,7 @@ void define_pointer_contracts() {
     const Expr* c = k.call(inc, {k.pn(f->param_var(0))});
     f->body = k.blk({k.es(c)});
     k.done(f);
-    k.fail_only("permission", c->loc, 11, 3);  // of the 11 rows of the call, the fourth: perm(p.v_int) == write
+    k.fail_only("permission", c->loc, 10, 3);  // of the 10 rows of the call, the fourth: perm(p.v_int) == write
   });
 
   // ---- swap: two owns atoms, the separation of the two places (items 8, 9) ----
