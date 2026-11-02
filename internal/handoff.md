@@ -1,4 +1,4 @@
-# Handoff during M4.5c1 — struct objects (record 0043) (2026-11-02)
+# Handoff after M4.5c1 — struct objects (record 0043) (2026-11-02)
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
@@ -14,9 +14,13 @@ notes a session consumes move into its plan.
 - **On `origin/main`** (`38877b4`): everything through M4.5b2a (PR #21 M4.5b1c3, PR #22 M4.5b2a).
 - **M4.5b2b** (record 0042) is pushed as `m4.5b2b-init-markers` (`1bfa705`); its PR is the owner's step 1 below. The local
   `main` `853fccd` is a local merge of it.
-- **M4.5c1** (struct objects; record 0043; plan `.claude/plans/m4-5c1-struct-objects.md`) is in progress on branch
-  `m4.5c1-struct-objects` (from `1bfa705`) in the worktree `.claude/worktrees/m4.5c1`, with its baseline in the detached
-  worktree `.claude/worktrees/m4.5c1-base` (`1bfa705`). M4.5c is two sessions (question 90): c1 now, c2 next.
+- **M4.5c1** (struct objects; record 0043; plan `.claude/plans/m4-5c1-struct-objects.md`) is done on branch
+  `m4.5c1-struct-objects` (local commits from `1bfa705`, so it stacks on b2b's branch) in the worktree
+  `.claude/worktrees/m4.5c1`; its baseline worktree `.claude/worktrees/m4.5c1-base` (detached at `1bfa705`) is no longer
+  needed. M4.5c is two sessions (question 90): M4.5c2 is next. Result in `internal/status.md`.
+- **Audits:** round 1 on record 0043 (four blocking items, B2 a `restrict` hole since 0037, all taken), round 2 on the
+  code (one blocking item, an initializer writing its own object, and three should-fix items, all taken), one re-audit
+  (all closed; one new should-fix, C++ compound-literal initializers, taken). What was not taken is in §3.
 
 The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits behind upstream `main` (§4.1).
 
@@ -25,7 +29,11 @@ The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits beh
 1. **M4.5b2b's branch:** open its PR (`m4.5b2b-init-markers`, pushed); both CI jobs run the PR tier. After the merge,
    `git merge --ff-only origin/main` in the main checkout (the local merge `853fccd` is then replaced), and `git worktree
    remove .claude/worktrees/m4.5b2b` and `.claude/worktrees/m4.5b2b-base`.
-2. M4.5c1's own steps come at its end (its branch stacks on b2b's).
+2. **M4.5c1's branch, after b2b's merge:** push it (`git -C .claude/worktrees/m4.5c1 push origin m4.5c1-struct-objects`)
+   and open its PR against `main` (its base is b2b's tip `1bfa705`, so once b2b is merged the PR shows only c1's commits);
+   both CI jobs run the PR tier (no Linux run in the session). After the merge, `git merge --ff-only origin/main` in the
+   main checkout and `git worktree remove .claude/worktrees/m4.5c1` and `.claude/worktrees/m4.5c1-base`.
+3. Then M4.5c2 (§4.2), or M4.5d1 once the vlibc repository exists.
 
 ## 3. Open notes, by the session that consumes them
 
@@ -36,6 +44,12 @@ P4222's markers, P54 and the b2b design points).
 **M4.5c2 Struct values and places through a heap read** (M4.5c1 consumed the copies' flag note and the loop-row note)
 - Places reached through a heap read: `owns(**pp)`, `live(*pp)`, `**pp` in contracts (question 74, §4.2); a `T**` callee
   cannot use the pointer it loads from `*pp` until then [b1c3].
+- Left to c2 by record 0043 item 15 (each pinned, naming M4.5c2): by-value struct parameters and results, `f().x`, struct
+  globals and `static` struct locals (`program_start` rows per leaf; struct-pointer globals already have their `WF_S` row,
+  audit round 2 S2), compound literals (`&(int){5}`, C++ `S s = (S){…}`), `S s = S{…}`/`S()`, written atoms on struct places
+  in loop invariants (0040 item 5 is per cell), a function's `decreases(p->x)`, `p->q->x` in contracts [c1].
+- When `live(*pp)` and places through a heap read land, re-check `restrict_hazard` (audit round 2 S1 closed it for loaded
+  struct pointers; the alias path reached `return *p` with value 2 and was stopped only by `lifetime`) [c1 audit 2 S1].
 
 **M4.5d1 vlibc**
 - P55: the attribute allow-list rejects a system declaration's attributes (`[[const]]`, `[[alloc_size]]`, `[[__cold__]]`)
@@ -51,6 +65,9 @@ P4222's markers, P54 and the b2b design points).
   the commit that handles them; `check_attributes` skips registered attributes [M4.5a, b2b, c1 planning].
 - Records 0029 and 0042 cite P4222R2 (2026-07-11); P4418R0 cites P4222R3 (2026-10-22): check R3 against them at d2's
   planning [c1 planning].
+- `malloc(sizeof(struct S))`: `sizeof` folds to EDG's ABI size, not the model's member blocks; d2's typed view of an
+  allocated struct must give the member lengths and the slot facts of record 0043 items 4 and 8 (`WF_S` is an invariant of
+  every trusted method) [c1 P65 N5].
 - `alloc_<t>` does not ensure `block_of(r) != GB_g()`, so `&x != &g` is not proved in a function that holds nothing of
   `g` [b2a audit 1 N3].
 - `return &s;` of a `static` local leaves the caller only `WF(r)`, so its uses are `lifetime`
@@ -114,6 +131,13 @@ function-pointer typedef (`typedef void (*fp)(int *p CERASTES_MUST_INIT);`) reac
   existing Viper) [M4.4b1 note 6].
 
 **M8 Inventory** (the warning sweep is an M8 entry in `plan.md`)
+- From M4.5c1 (record 0043): rejected or over-strict — out-of-order C designators (valid C; EDG #2904-D, C++ requires the
+  order), brace elision over a nested struct (`-Wmissing-braces`), a nested braced element whose braces flag EDG drops
+  (C++ `S s8{1, {s8.a, 0}}`, rejected as elision), a struct copy in a `for` step, `&s.x`/`&s.t` of an `uninit` struct
+  local under `--strict-init`, `{.y = (*&s).x}` in a struct's own initializer (it forms `&s`), `&p->x` with only `live(p)`
+  (`null-dereference`: `p` may be one past the end); not measured — member self-assignment `s.x = s.x` and
+  self-comparison `s.x == s.x`; accepted with no native positive possible (`-Wextra` only) — a positional list shorter
+  than the struct and C++'s `{0}`; positions — own-initializer rejections at the declaration's line [c1].
 - Warnings: EDG's #550 on a global that code only writes and only contracts read (clang and GCC are silent; tests read
   such globals in code) [b2a]; record 0025 item 6's "still accepted" shapes (`RED == RED`, clang's
   `-Wparentheses-equality`, `-Wswitch-bool`, `-Wfor-loop-analysis`, `-Wmisleading-indentation`, GCC's
@@ -144,6 +168,11 @@ function-pointer typedef (`typedef void (*fp)(int *p CERASTES_MUST_INIT);`) reac
   (fine on macOS, Linux unchecked) [b2a audit 2 N5].
 
 **Standing** (no session; act when the code is next touched)
+- *Fail-closed corners from M4.5c1:* `overlap_pairs` compares only the two addresses when both pointee types are equal,
+  the `one_type` path filter skips reads-sum terms, `f__wf`'s equal-ghost skip for one root with two paths: complete only
+  while types prevent `p == &q->t`, a miss costing Silicon's own error (exit 3), never an assumed fact (record 0043 item
+  9) [c1 audit 2 N2]; storing `&p->t` into a cell skips `ptr_use`'s early `WF_S` row, asserted where it is assumed
+  [c1 audit 2 N3].
 - *By design:* C++17 sequences `g += f()` and `*p = (**pp = 5)` (the right operand first), but 0039's C rule stays in both
   modes [b2a N9, b1c3 N4]; `return p = &x;` and `int *r = &x; return r;` stay accepted (the caller's first use fails
   `lifetime`; questions 65, 70) and EDG's #1056 prints beside an R14 rejection [b1c2]; in an invariant `==` is identity
@@ -279,8 +308,8 @@ new session.
 header, the call's flag row as `uninitialized`) is done (record 0042; plan `.claude/plans/m4-5b2b-init-markers.md`; the
 six pre-approved self-test pins of questions 82 and 85; question 89's loop row in every function).
 
-**M4.5c is two sessions** (owner, 2026-11-02, question 90). **M4.5c1** (struct objects; record 0043) is planned in
-`.claude/plans/m4-5c1-struct-objects.md`: struct types and member blocks (0028 item 16), struct locals as blocks, `.`,
+**M4.5c is two sessions** (owner, 2026-11-02, question 90). **M4.5c1** (struct objects; record 0043) is done (plan
+`.claude/plans/m4-5c1-struct-objects.md`; flips of questions 93 and 94): struct types and member blocks (0028 item 16), struct locals as blocks, `.`,
 `->`, nested structs, pointers to members, braced initializers, copies inside a function (each member read, question 92),
 `struct S *` objects, contract atoms and values on struct places, P4222's markers on struct objects; its flips are
 question 93's; ports `malloc_block.c` (its `free(&local)` twin waits for M4.5d2) and `swap.c`'s `point_mirror`.
@@ -572,6 +601,9 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
   (`` `*q`" ``) is a curved quote and breaks the span (M4.5b1c3). `[[noreturn]]` in text becomes an anchor even inside `+…+`; `__name` in backticks needs `+…+`; a
   possessive after a code span breaks the next span; `pass:[…]` holding `<` or `>` is refused by
   `check_doc_examples.py` (write `+…+`). `build_docs.sh` and `check_doc_examples.py --html build/doc` catch them.
+- **Test generators** (M4.5c1): a script that writes many tests must live in `build/<session>/`, not `/tmp`, and must not
+  be rerun after any test it wrote was edited by hand: a regeneration in M4.5c1 silently restored an owner-approved
+  `expect:` change and failed `check.sh`. After the first full run the files in the tree are the source of truth.
 - **A test that loses an `expect:` line** (pre-approved) keeps its line numbers with a comment in its place
   (M4.4c, the four `reject_assert_shape_*.c`).
 
@@ -618,6 +650,8 @@ At M4.5c1's planning (2026-11-02; 90, 92 and 93 the recommendations; recorded in
 two sessions: c1 struct objects with copies inside a function, c2 struct values, struct globals and places through a heap
 read; copies are the pre-agreed cut to c2), 91 (owning fields move to M4.5d2, which also covers the rest of P4418R0's
 invalidation profile), 92 (a struct copy reads every member: an uninitialized one is `uninitialized` at the copy), 93
-(c1's flips: `reject_struct.c` retired, `global_struct.c`'s `@ L8` line dropped, seven pins re-messaged).
+(c1's flips: `reject_struct.c` retired, `global_struct.c`'s `@ L8` line dropped, seven pins re-messaged). During
+M4.5c1: 94 (the new must-fail test `struct_bodiless_frame.c` drops its `check @ L22` line: after a call to a function
+whose contract fails framing, the caller's state is not checked further, 0037 item 7).
 
 No question is open.
