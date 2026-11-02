@@ -9,7 +9,7 @@ it was ≤ 4 h from 2026-10-20): M4.1, M4.5a, M5a, …. Each session starts from
 `internal/status.md` updated so the next session can start cold.
 
 This file was trimmed to what is live at the end of M4.4c (owner, 2026-10-26), and is reconciled with the handoff at
-each session's start (the last: M4.5b2b, 2026-11-02): the plans of the finished milestones, the superseded text and the
+each session's start (the last: M4.5c1, 2026-11-02): the plans of the finished milestones, the superseded text and the
 appendices are in `git show 1fcc43b:plan.md`. The milestones were renumbered on 2026-10-20
 (the rest of C became M4; generic templates M5, concepts M6, C++ memory M7, inventory M8, evaluation M9); history
 entries keep the numbers they were written with.
@@ -158,16 +158,18 @@ history of `internal/status.md`).
 further in M4.5a, owner, 2026-10-27: "this can be expanded if you see fit"). M4.5a designed it (records 0028 memory
 model, 0029 ownership annotations and C spec functions, 0030 vlibc); `internal/handoff.md` §4.2 has each session's
 plan and the VeriFast ports it takes. M4.5b1c is three sessions, and owning results move to M4.5d2 (owner, 2026-10-29,
-M4.5b1c planning: `owns_block` needs the heap token and a whole-block permission, which nothing creates before `malloc`).
+M4.5b1c planning: `owns_block` needs the heap token and a whole-block permission, which nothing creates before `malloc`). M4.5c is two sessions (owner, 2026-11-02, question 90: about 3,000 changed lines),
+and owning fields move to M4.5d2 with the rest of P4418R0's invalidation profile (question 91).
 
 | Session | Scope | Needs |
 |---|---|---|
-| **M4.5c Structs** | field cells, `.` and `->`, struct values (copies, initializers, by-value parameters and results), nested structs, pointers to fields, `owns(*s)`, non-recursive owning fields; places reached through a heap read in contracts (`owns(**pp)`, `**pp`; owner, 2026-10-30, question 74) | M4.5b1c3 |
+| **M4.5c1 Struct objects** | struct types (C structures, member blocks), struct locals as blocks, `.`, `->`, nested structs, pointers to members, braced initializers, copies inside a function, `struct S *` locals, parameters, results and cells, `owns(*s)`/`reads(*s)`/`owns(s->x)`/`s->x`/`old(s->x)` in contracts, P4222's markers on struct objects; ports `malloc_block.c`, `swap.c`'s `point_mirror` (plan `.claude/plans/m4-5c1-struct-objects.md`) | M4.5b1c3 |
+| **M4.5c2 Struct values and places through a heap read** | by-value struct parameters and results (the tuple of the members), `f().x`, struct globals and `static` struct locals; places reached through a heap read in contracts and invariants: `owns(**pp)`, `reads(**pp)`, `live(*pp)`, reads of `**pp` and `*gp`, `owns(*gp)`, `*s->q` of a pointer member, an atom on `*q` where `q` is a cell (owner, 2026-10-30, question 74) | M4.5c1 |
 | **M4.5d1 vlibc** | the repository (the owner creates `cerastes-verifier/vlibc`), its layout, license and CI; the submodule pin; explicit and transparent includes; the trust rule; `abort`/`exit`/`_Exit` moved out of the encoder's table | M4.5a (any time) |
-| **M4.5d2 `malloc` and `free`** | vlibc's contracts for `malloc`, `calloc`, `realloc`, `free`; heap blocks; the free checks; leaks (a record; `forperm`); owning locals and globals; `[[cerastes::ref_to_uninit]]` on locals and functions (targets `v`, `r`); owning results (from b1c, owner 2026-10-29: `[[cerastes::owning]]` on functions, target `r`; `owns_block`; `owns(*result)`; `ensures` atoms with no `requires` partner); `invalid-free`, `leak` | M4.5c, M4.5d1 |
-| **M4.5e1 Arrays** | local arrays, `a[i]`, array parameters, `owns_range` and quantified permissions, `forall` in C (0029 item 4), sum and max; P38's braced initializers over 1000 elements; M4.4b2's types computed from constants | M4.5b1c3 |
+| **M4.5d2 `malloc` and `free`** | vlibc's contracts for `malloc`, `calloc`, `realloc`, `free`; heap blocks; the free checks; leaks (a record; `forperm`); owning locals and globals; `[[cerastes::ref_to_uninit]]` on locals and functions (targets `v`, `r`); owning results (from b1c, owner 2026-10-29: `[[cerastes::owning]]` on functions, target `r`; `owns_block`; `owns(*result)`; `ensures` atoms with no `requires` partner); `invalid-free`, `leak`; non-recursive owning fields (`[[cerastes::owning]]` target `d`, from M4.5c, question 91); the rest of P4418R0's invalidation profile (owner, 2026-11-02, question 91: its guarantees, `[[owner]]`'s transfer rules, `[[not_invalidating]]`, `no_dangling()`; spellings and meaning decided at its planning; C++'s parts are M7's) | M4.5c2, M4.5d1 |
+| **M4.5e1 Arrays** | local arrays, `a[i]`, array parameters, `owns_range` and quantified permissions, `forall` in C (0029 item 4), sum and max; P38's braced initializers over 1000 elements; M4.4b2's types computed from constants; inner arrays and arrays of structs on M4.5c1's member blocks | M4.5c1 |
 | **M4.5e2 Pointer arithmetic** | `p + i`, `p - q`, comparisons within one object, one-past-the-end, `malloc(n * sizeof(T))`; `out-of-bounds`; relational comparisons and `p - q` under `pointer-comparison` | M4.5e1, M4.5d2 |
-| **M4.5f1 Predicates and pure functions** | predicate and pure bodies encoded (0011 item 4 lifted), `fold`/`unfold`, non-recursive predicates | M4.5c, M4.5d2 |
+| **M4.5f1 Predicates and pure functions** | predicate and pure bodies encoded (0011 item 4 lifted), `fold`/`unfold`, non-recursive predicates | M4.5c2, M4.5d2 |
 | **M4.5f2 Recursive predicates** | recursive predicates; a linked list (push, pop, length); recursive owning fields | M4.5f1 |
 | **M4.5f3 Lemmas and ghost sequences** | lemma functions and ghost sequences for content specifications (M4.6's string contracts); its record decides whether all of it is in M4 | M4.5f2 |
 

@@ -1,33 +1,31 @@
-# Handoff after M4.5b2b — initialization through pointers (record 0042) (2026-11-02)
+# Handoff during M4.5c1 — struct objects (record 0043) (2026-11-02)
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
 rediscover, and holds only what is live (owner, 2026-10-26; consolidated again at M4.5b2b's start, 2026-11-02: §3 is
-regrouped by the session that consumes each note). The text before this consolidation is
-`git show 38877b4:internal/handoff.md`, whose header names every earlier version (each note below keeps its origin in
+regrouped by the session that consumes each note; updated at M4.5c1's start). The text before M4.5c1 is
+`git show 1bfa705:internal/handoff.md`, and before M4.5b2b `git show 38877b4:internal/handoff.md`, whose header names every
+earlier version (each note below keeps its origin in
 brackets, so its full wording can be found there). Session plans approved from M4.5b1a on are in `.claude/plans/`; the
 notes a session consumes move into its plan.
 
 ## 1. State
 
 - **On `origin/main`** (`38877b4`): everything through M4.5b2a (PR #21 M4.5b1c3, PR #22 M4.5b2a).
-- **M4.5b2b** (P4222's markers, `--strict-init`, the call's flag row as `uninitialized`; record 0042; plan
-  `.claude/plans/m4-5b2b-init-markers.md`) is done on branch `m4.5b2b-init-markers` (local commits, from `38877b4`) in
-  the worktree `.claude/worktrees/m4.5b2b`; its baseline worktree `.claude/worktrees/m4.5b2b-base` (detached at
-  `38877b4`) is no longer needed. M4.5b2 is complete. Result in `internal/status.md`.
-- **Audits:** round 1 on record 0042 (no blocking item; seven should-fix items and eight notes, all taken), round 2 on
-  the code (no blocking item, no unsound verdict; four should-fix items, all taken, S2 through owner question 89; so no
-  re-audit). What was not taken is in §3.
+- **M4.5b2b** (record 0042) is pushed as `m4.5b2b-init-markers` (`1bfa705`); its PR is the owner's step 1 below. The local
+  `main` `853fccd` is a local merge of it.
+- **M4.5c1** (struct objects; record 0043; plan `.claude/plans/m4-5c1-struct-objects.md`) is in progress on branch
+  `m4.5c1-struct-objects` (from `1bfa705`) in the worktree `.claude/worktrees/m4.5c1`, with its baseline in the detached
+  worktree `.claude/worktrees/m4.5c1-base` (`1bfa705`). M4.5c is two sessions (question 90): c1 now, c2 next.
 
 The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits behind upstream `main` (§4.1).
 
 ## 2. Owner steps
 
-1. **M4.5b2b's branch:** push it and open its PR (`git -C .claude/worktrees/m4.5b2b push origin m4.5b2b-init-markers`);
-   both CI jobs run the PR tier (no Linux run in the session: CI covers it).
-2. **After the merge:** `git merge --ff-only origin/main` in the main checkout, then `git worktree remove
-   .claude/worktrees/m4.5b2b` and `git worktree remove .claude/worktrees/m4.5b2b-base`.
-3. Then M4.5c (§4.2), or M4.5d1 once the vlibc repository exists.
+1. **M4.5b2b's branch:** open its PR (`m4.5b2b-init-markers`, pushed); both CI jobs run the PR tier. After the merge,
+   `git merge --ff-only origin/main` in the main checkout (the local merge `853fccd` is then replaced), and `git worktree
+   remove .claude/worktrees/m4.5b2b` and `.claude/worktrees/m4.5b2b-base`.
+2. M4.5c1's own steps come at its end (its branch stacks on b2b's).
 
 ## 3. Open notes, by the session that consumes them
 
@@ -35,15 +33,9 @@ One line per note, its origin in brackets (session and audit item); the full wor
 Notes that a session consumes move into its plan's "Inputs" (M4.5b2b took the call's flag row, the registration rule for
 P4222's markers, P54 and the b2b design points).
 
-**M4.5c Structs**
+**M4.5c2 Struct values and places through a heap read** (M4.5c1 consumed the copies' flag note and the loop-row note)
 - Places reached through a heap read: `owns(**pp)`, `live(*pp)`, `**pp` in contracts (question 74, §4.2); a `T**` callee
   cannot use the pointer it loads from `*pp` until then [b1c3].
-- Register `owning`'s target `d` here, never earlier: `check_attributes` skips registered attributes [M4.5a].
-- Struct copies must not clear the flag of a cell the function holds: record 0042's `internal` row for `ref_to_uninit`
-  (`old(flag) ==> flag`, question 87) relies on it [b2b].
-- Accepted completeness gap: `&s.x < &s.y` is reported (members are different blocks) [M4.5a].
-- Struct copies and field writes keep record 0042 item 5's loop row `held && flag ==> range` inductive (it is on every
-  loop place since question 89) [b2b].
 
 **M4.5d1 vlibc**
 - P55: the attribute allow-list rejects a system declaration's attributes (`[[const]]`, `[[alloc_size]]`, `[[__cold__]]`)
@@ -55,7 +47,10 @@ P4222's markers, P54 and the b2b design points).
   only secondary declarations in verified files: revisit it when vlibc's own headers carry markers [b2b].
 
 **M4.5d2 `malloc` and `free`**
-- Register `owning`'s `r` and `v` and `ref_to_uninit`'s `v` and `r` here, in the commit that handles them [M4.5a, b2b].
+- Register `owning`'s `r`, `v` and `d` (owning fields moved here, question 91) and `ref_to_uninit`'s `v` and `r` here, in
+  the commit that handles them; `check_attributes` skips registered attributes [M4.5a, b2b, c1 planning].
+- Records 0029 and 0042 cite P4222R2 (2026-07-11); P4418R0 cites P4222R3 (2026-10-22): check R3 against them at d2's
+  planning [c1 planning].
 - `alloc_<t>` does not ensure `block_of(r) != GB_g()`, so `&x != &g` is not proved in a function that holds nothing of
   `g` [b2a audit 1 N3].
 - `return &s;` of a `static` local leaves the caller only `WF(r)`, so its uses are `lifetime`
@@ -65,7 +60,8 @@ P4222's markers, P54 and the b2b design points).
   reached through a fresh heap chunk (`malloc` after `keep(p)`) [b2b audit 1 N1].
 
 **M4.5e1/e2 Arrays and pointer arithmetic:** P38's braced initializers (§4.2); signed/unsigned and enumeration variants
-through `void*` cannot be written [M4.5a].
+through `void*` cannot be written [M4.5a]; accepted completeness gap for e2's relational comparisons: `&s.x < &s.y` is
+reported, since members are different blocks [M4.5a].
 
 **M4.5f1/f2 Predicates**
 - `pure` bodies now reject globals and `static` locals (0041 item 12) [b2a]; R1–R13 do not reach `pure`/`predicate`
@@ -234,7 +230,7 @@ not taken go to §3); single-file runs while working (`build/cerastes verify` di
 builds serialized (`lockf build/<session>/build.lock cmake --build build/cmake`); `check.sh` at most twice; the EDG
 suites on the x86-64 host are their own session, but any x86-64 test run a session needs goes to `matt@clang4.cpp.al`
 automatically (owner, 2026-10-29: not Docker multi-arch on the Mac, which is only the fallback when the host is down).
-Record numbers are the next free ones when written (0043 is the next free one). The
+Record numbers are the next free ones when written (0043 is M4.5c1's, 0044 the next free one). The
 approved plan is saved as `.claude/plans/<milestone>-<topic>.md` (plan.md, "Session protocol").
 
 Finished sessions: their plans are in `.claude/plans/` (from M4.5b1a on), their results in `internal/status.md` and the
@@ -283,11 +279,17 @@ new session.
 header, the call's flag row as `uninitialized`) is done (record 0042; plan `.claude/plans/m4-5b2b-init-markers.md`; the
 six pre-approved self-test pins of questions 82 and 85; question 89's loop row in every function).
 
-**M4.5c Structs.** Members as blocks of their own (0028 item 16), `.` and `->`, struct values (copies, initializers,
-by-value parameters and results), nested structs, pointers to members, `owns(*s)`, non-recursive owning fields
-(`[[cerastes::owning]]` target `d`), and places reached through a heap read in contracts: `owns(**pp)`, `live(*pp)`
-and reads of `**pp` (owner, 2026-10-30, question 74; b1c3 rejects them naming M4.5c). Ports: `malloc_block.c` (the address-taken struct local; its `free(&local)` twin
-waits for M4.5d2), the struct half of `swap.c`.
+**M4.5c is two sessions** (owner, 2026-11-02, question 90). **M4.5c1** (struct objects; record 0043) is planned in
+`.claude/plans/m4-5c1-struct-objects.md`: struct types and member blocks (0028 item 16), struct locals as blocks, `.`,
+`->`, nested structs, pointers to members, braced initializers, copies inside a function (each member read, question 92),
+`struct S *` objects, contract atoms and values on struct places, P4222's markers on struct objects; its flips are
+question 93's; ports `malloc_block.c` (its `free(&local)` twin waits for M4.5d2) and `swap.c`'s `point_mirror`.
+**M4.5c2** (struct values and places through a heap read): by-value struct parameters and results (a struct value as the
+tuple of its members), `f().x`, struct globals and `static` struct locals (0041's scope row), and places reached through a
+heap read in contracts and invariants: `owns(**pp)`, `reads(**pp)`, `live(*pp)` and reads of `**pp` (question 74; b1c3
+rejects them, c1 re-messages them naming c2), `*gp` and `owns(*gp)`, `*s->q` of a pointer member, an atom on `*q` where
+`q` is a cell; compound literals are decided there. Owning fields (`[[cerastes::owning]]` target `d`) moved to M4.5d2
+(question 91).
 
 **M4.5d1 vlibc** (needs the repository; any time after M4.5a, best after S5). The repository's layout
 (`include/vlibc/*.h`, the shim directory, `src/`, CMake, `LICENSE`, CI compiling every header with clang and GCC in both
@@ -300,7 +302,18 @@ leaks (`leak`), owning locals and globals (`[[cerastes::owning]]` target `v`), `
 locals and functions (targets `v`, `r`: `malloc`'s result and a local receiving it; from M4.5b2b's planning), and
 **owning results** (from b1c, owner
 2026-10-29): `[[cerastes::owning]]` on functions (target `r`), `owns_block`, `owns(*result)` and `ensures` atoms with no
-`requires` partner (a callee handing a place's permission to its caller: an output ghost amount). Flips:
+`requires` partner (a callee handing a place's permission to its caller: an output ghost amount). **Owning fields** (from M4.5c,
+owner 2026-11-02, question 91): `[[cerastes::owning]]` on struct fields (target `d`), owning the struct holding
+`owns_block` of the field's pointee when it is not null (0029 item 1; acyclic here, recursive in M4.5f2). **The rest of
+P4418R0's invalidation profile** (owner, 2026-11-02, question 91; Stroustrup, "An invalidation profile", 2026-10-22,
+https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2026/p4418r0, wording in P4417R0): its guarantees (a pointer is
+dereferenced only if it points to an existing object; no pointer escapes beyond the lifetime of what it points to; a
+non-static owner is deleted exactly once), `[[owner]]`'s rules (§8: an owner must be freed or passed on to another owner; a
+non-owner must not be freed; owner to owner transfers the obligation and leaves an alias; owner to non-owner makes an
+alias; an allocation's result is an owner), `[[not_invalidating]]` (a function that does not invalidate an argument,
+checked at its definition) and `no_dangling()`; d2's planning decides their `cerastes::` spellings (as 0029 did for
+P4222) and what each adds over contracts that return their permissions; C++'s parts (references, containers, iterators,
+`new`/`delete`, smart pointers) are M7's. Flips:
 `tests/memory/negative/reject_{atom_on_result,ensures_atom_no_partner}.c`. Ports: `account.c`, `deposit.c`, `swap.c`'s
 `main`, `globals.c`, `malloc_block.c`'s `free` twin.
 
@@ -309,7 +322,8 @@ absolute slot, the marked range rows in the driver (owner, after S25), `forall` 
 between pure functions with contracts and moving M4.5f1 first), sum and max. P38: a braced initializer with more than
 1000 elements keeps no `expr` for its elements (`REDUCE_BACKING_EXPRESSION_USE`), only an `orig_type`; read every
 element through `constant_value`, which rejects that shape, never through `ck_aggregate`'s values directly, or a
-wrapping element would pass unchecked. M4.4b2's types computed from a constant (`sizeof`, `typeof`, typedefs). Port:
+wrapping element would pass unchecked. M4.4b2's types computed from a constant (`sizeof`, `typeof`, typedefs). Inner arrays and arrays of
+structs use M4.5c1's member blocks (0028 item 16). Port:
 `carrays.c` (lists → `forall`; its `should_fail` at L35 and L42: below and one past the end).
 
 **M4.5e2 Pointer arithmetic.** `p + i`, `p - i`, `p - q`, relational comparisons within one object, one-past-the-end,
@@ -599,5 +613,11 @@ audit round 2: 89 (the loop row `held && flag ==> range` on every place a loop d
 changes the Viper of existing programs with such loops, an added invariant line and no verdict, and fixes 0038's exit 3
 on nested loops; re-expecting a VIR self-test pin pre-approved only where its row count at a loop grows by exactly the
 added rows, which none needed).
+
+At M4.5c1's planning (2026-11-02; 90, 92 and 93 the recommendations; recorded in its plan and record 0043): 90 (M4.5c is
+two sessions: c1 struct objects with copies inside a function, c2 struct values, struct globals and places through a heap
+read; copies are the pre-agreed cut to c2), 91 (owning fields move to M4.5d2, which also covers the rest of P4418R0's
+invalidation profile), 92 (a struct copy reads every member: an uninitialized one is `uninitialized` at the copy), 93
+(c1's flips: `reject_struct.c` retired, `global_struct.c`'s `@ L8` line dropped, seven pins re-messaged).
 
 No question is open.
