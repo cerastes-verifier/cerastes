@@ -6539,3 +6539,330 @@ writing only inside the loop fails (record 0042 item 10's completeness cost). (f
 does not reach, then a marked call: verifies with the invariant `held && flag ==> range`, fails at the call's range row
 without it. The fixture `s25_d_init.vpr` is marked superseded by these (its `maybe_init` encodes 0028 item 14's first
 reading, no flag value at all).
+
+## M4.5c1: struct objects (record 0043)
+
+### P65: the IL facts record 0043 relies on (items 2-9) **PASS for 1-9 as IL facts; no contradiction of P51 and no stop condition of the plan (no member kind lost, no initializer element lost, no non-trivial C++ copy shown as `eok_assign`); six HAZARDS (H1-H6) the encoder must handle, nine NOTEs**
+
+Evidence in `build/m4.5c1/p65/` (not committed): the probes (`t1.c` C types, `t2.cpp` C++ class features, `ty1.c`, `inc1.c`, `m1.c`-`m3.c`
+members and `address_taken`, `i1.c`-`i6.c`, `i3.cpp`, `i5.cpp` initializers, `c1.c`/`c2.cpp` copies, `z1.c` `sizeof`, `k1.c`-`k4.c`/`k3.cpp`
+contracts, `mk1.c`-`mk4.c` markers, `sp1.c` struct pointers), the runner `run.sh <probe> [c23|c++20]` (`scripts/cerastes-fe.sh --c23|--c++20
+--display_error_number --il_display`; outputs `out/<probe>.<mode>.{il,diag,sum}`), `ilsum.py <il> <probe> [type,...]` (compact trees in P51's
+notation `op(operands){type<-orig_lvalue_type:flags@Lline:col}`, `L` is_lvalue, `g` compiler_generated, `u` result_is_not_used; constants
+`const[int 1]`, aggregates `aggr{...}[type flags]`, designators `desig(.f)`, non-constant elements `dyn(...)`; types with fields, class
+supplement and member routines; attributes of the `cerastes` namespace) and `classify.py <il> <probe>` (a candidate item-2 predicate over
+the printed fields only). All runs 2026-11-02 with the worktree's `build/cerastes-fe` (EDG fork `f0ed5525af`), both modes on every `.c`
+probe, `--c++20` only on `.cpp`. "Same in both modes" means the two trees were diffed after dropping `struct ` and C++'s `L` on assignment
+results (the known C/C++ difference, P51 item 5). il_def.h lines are of `third_party/edg/src/il_def.h` at that commit. Warnings
+(`#177-D`, `#550-D` for unused locals) are left out of the excerpts.
+
+**1. Types: PASS. Every kind of item 2 is told apart from printed fields; no member kind is lost.** `classify.py` (type kind, field list,
+per-field flags, class flags, routine list, source file) gives ACCEPT/REJECT for the 24 types of `t1.c` and the 21 of `t2.cpp` as
+record 0043 item 2 lists: ACCEPT for `Plain` L4, `Node` L5, `Nest` L6, `PS` L23, `HasInc` L21 (a pointer to an incomplete struct, N7), the unnamed nested struct type of `AnonS` (itself
+rejected through its anonymous member) and `Packed` L24 (N1: item 2 does not list it); every other type REJECT with the reasons in the tables below.
+
+| Kind (probe:line) | What `il_display` prints (excerpt) | Field |
+|---|---|---|
+| int/`bool`/enum (`t1.c:4`) | `field x : int offset=0`, `field b : bool offset=4`, `field e : enum E offset=8` (C++: `e : E`) | `a_field` il_def.h:11905 (`type`, `offset`) |
+| pointer, self-reference (`t1.c:5`) | `field next : struct Node * offset=8`; type flag `has_pointer_component: TRUE` | il_def.h:10618 |
+| nested struct (`t1.c:6`) | `field p : struct Plain offset=0`; `Nest size=16` | `a_type.kind tk_struct` |
+| union (`t1.c:7-8`) | `TYPE U tk_union`; as member `field u : union U` | `a_type.kind tk_union` |
+| bit-field (`t1.c:9`) | `field a : int ... is_bit_field=TRUE bit_size=3 bit_field_is_signed=TRUE`; `field b : unsigned int ... offset_bit_remainder=3 bit_size=5` | `a_field.is_bit_field` :11962, `bit_size` :11936 |
+| array (`t1.c:10`) | `field a : int [4]`; the member's type is `tk_array`, `element_type int`, `number_of_elements 4` | `a_type.kind tk_array` |
+| flexible array (`t1.c:11`) | `field d : int [] offset=4`; the type is `tk_array`, `incomplete: TRUE`, `number_of_elements: 0` | :9810 `incomplete`. **`contains_flexible_array_member` (:10622) is not printed by `il_display`** (il_display.c has no line for it), so a probe cannot show it; the last member's incomplete array type is the printed evidence |
+| `const` / `volatile` / `_Atomic` member (`t1.c:12-14`, and `int *const cp` `:22`) | `field c : const int`, `field v : volatile int`, `field a : _Atomic(int)`; the member's type is `kind: tk_typeref`, `typeref_type: int`, `qualifiers: const` / `volatile` / `_Atomic` | typeref variant :10739. Class flags `any_const_member` :10448 (also TRUE for `int *const`) and `any_volatile_member` :10452; **`_Atomic` has no class flag**, only the member's typeref qualifier |
+| anonymous struct/union member (`t1.c:15-16`) | `field ? : struct <unnamed@...> offset=4 ... is_anonymous_parent_object=TRUE` (C++ union: also `compiler_generated=TRUE`); the containing class supplement prints `has_anonymous_union_member: TRUE`; the member's type prints `originally_unnamed`, `is_nonstd_anonymous_union_type` | `a_field.is_anonymous_parent_object` :11966, supplement :8976, type :10500/:10506 |
+| `void *` member (`t1.c:17`) | `field p : void * offset=0` (`tk_pointer`, `type_pointed_to: void`) | |
+| function-pointer member (`t1.c:18`) | `field f : void (*)(int) offset=0` (`tk_pointer` to a `tk_routine` type `void (int)`) | |
+| empty struct (`t1.c:19`) | no `field_list`; `is_empty_class: TRUE`, `no_proper_data: TRUE`; **C size 0, C++ size 1** | :10598, :10606 |
+| incomplete (`t1.c:20-21`) | `TYPE Inc ... incomplete`, no fields; `HasInc` has `field ip : struct Inc * offset=0` and is complete. EDG itself refuses a dereference or an object of it: `inc1.c:3,5,6` `error #70: incomplete type "struct Inc" is not allowed` / `#833` (both modes; `(void)*u` at `inc1.c:4` is an error in C and accepted in C++) | `a_type.incomplete` |
+| `FILE` from `<stdio.h>` (`t1.c:27`) | `TYPE __sFILE tk_struct size=152 ... [_stdio.h system=TRUE]`: its `decl_position.seq` lies in a `source-file` record with `from_system_include_dir: TRUE` (the existing `seq_is_in_system_header` test); the parameter's type prints as `FILE *` (a typedef, `tk_typeref`, to `struct __sFILE`) | `a_source_file.from_system_include_dir` :218 |
+| block-scope definition (`t1.c:28`, `t2.cpp:22`) | `TYPE Local ... is_local_to_function: TRUE`, `parent_via_local_scope_ref: TRUE`; its fields print `is_local_to_function=TRUE`; it lives in the function's memory region (region 2) | :3396 |
+| `__attribute__((packed))` (`t1.c:24`) | `TYPE Packed size=5 align=1 ... is_packed: TRUE max_member_alignment: 1` | type :10636, field :11954 (NOTE N1: item 2 does not list it) |
+| unnamed struct type of a named member (`ty1.c:3`) | `field in : struct <unnamed@...>` with **no** `is_anonymous_parent_object`: a nested struct, accepted by `classify.py` | |
+
+C++20 (`t2.cpp`, signals in the class's `class-type-supplement` and `assoc_scope.routines`; the class itself prints `tk_struct`, or `tk_class` for
+the keyword `class`, `Priv` :9):
+
+| Feature (probe:line) | Signal |
+|---|---|
+| plain aggregate (`Plain` :1, `Node` :2, `Nest` :3, `Base` :7) | `assoc_scope.routines` holds only `operator=` (copy and move) with `compiler_generated=TRUE is_trivial_copy_function=TRUE`; no base, no virtual, all `access=as_public` |
+| member function (`WithMf` :4) | a routine without `compiler_generated`: `get : int () const  ... defined=TRUE` |
+| constructor (`WithCtor` :5) | `special_kind=sfk_constructor` without `compiler_generated`; `WithDefCtor() = default` (:6) is also user-declared: `is_defaulted=TRUE is_trivial_default_constructor=TRUE`, no `compiler_generated` |
+| destructor, user copy/assign (`Dtor` :15, `UserCopy` :16, `UserAssign` :17) | `sfk_destructor` / `sfk_constructor` / `sfk_operator` without `compiler_generated`; `DelCopy` :18 `is_deleted=TRUE` |
+| base class (`Derived` :8) | supplement `base_classes: base-class: Base (in Derived)` (il_def.h:8748) |
+| access specifier (`Priv` :9, `Acc` :10) | field `access=as_private` (`Priv` is `tk_class`) |
+| `static` data member (`StaticM` :11) | not in `field_list`; `assoc_scope.variables = count` |
+| default member initializer (`DefInit` :12) | supplement `has_field_initializer: TRUE` (:9009), field `has_initializer=TRUE` (:12019); the implicit default constructor is `compiler_generated` but not trivial |
+| reference member (`RefM` :13) | `field r : int &` (`tk_pointer`, `is_reference`); the implicit `operator=` is `compiler_generated ... is_deleted=TRUE` |
+| virtual (`Virt` :14) | type flag `any_virtual_functions: TRUE` (:10475); routine `f ... is_virtual=TRUE` |
+| member template (`TplHolder` :19) | routine `m ... is_template_function=TRUE is_prototype_instantiation=TRUE` |
+
+The class test that `classify.py` applies and that rejects every row above except the first: *every routine in `assoc_scope.routines` is
+`compiler_generated` and has `is_trivial_copy_function`, `is_trivial_default_constructor` or `is_trivial_destructor` and is not `is_deleted`
+(il_def.h:12458, 12492, 12497, 12502, 12999); no `base_classes`; no virtual; no `has_field_initializer`; no `static` variable in the
+scope; every field public.* `c2.cpp:1-10` gives ACCEPT for `Plain`, `Base`, `WithMem` and REJECT for the others, `DT` with a user destructor and `DefA` with a
+defaulted `operator=` included.
+
+**The index `k` of a member** is its position in the struct type's `field_list` (`a_type.variant.class_struct_union`), a `next` chain in
+declaration order (`a1.c`, `struct S { int x; int y; }`):
+```
+type@...ee70 struct S   field_list: field@...f3b0: x     field@...f3b0 x: next: field@...f640: y, offset: 0    field@...f640 y: next: NULL, offset: 4
+```
+A member reached through `enk_field` has `field` pointing at that `a_field`; the containing struct is the field's `source_corresp.parent_scope`, a scope
+of `kind: sck_class_struct_union` whose `assoc_type` is the struct (`a1.c`: `parent_scope: file-scope scope@...f1c0`, `assoc_type: ... struct S`), and
+equally the type of the first operand of the `dot_field`/`points_to_field`. A nested path `s.t.x` is two `enk_field` selections (item 3); its
+index path is `[index of t in S, index of x in T]`. Fields are in declaration order with no gaps (an unnamed bit-field would be an entry; an anonymous member is rejected).
+
+**2. `address_taken`: PASS (both modes identical).** `m1.c` (`ilsum` `VAR` lines; `-` means the flag line is absent, so FALSE):
+
+| Source | Variable | `address_taken` |
+|---|---|---|
+| `m1.c:3` `s1.x = 1; return s1.x;` | `s1` | absent (FALSE): `s.x` without `&` does not mark `s` |
+| `:4` `int *p = &s2.x;` | `s2` | `address_taken=TRUE` |
+| `:5` `struct S *p = &s3;` | `s3` | TRUE |
+| `:6`, `:10`, `:11`, `:12` `p4->x`, `(*p8).x`, `&p9->x`, `&p10->t` | `p4`, `p8`, `p9`, `p10` (parameters) | absent: `p->x` and `&p->x` never mark `p` |
+| `:7` `s5.t.x = 1; return s5.t.x;` | `s5` | absent |
+| `:8` `&s6.t`, `:9` `&s7.t.y` | `s6`, `s7` | TRUE (the whole root is marked) |
+| `:14` `(&s12)->x` | `s12` | TRUE |
+| `:15` `sizeof(&s13.x)` | `s13` | absent (unevaluated, as P57) |
+| `sp1.c:8-9` `a = &s; pp = &a;` | `s`, `a` | TRUE for both (`s` by `&s`, the struct pointer `a` by `&a`) |
+
+(`a_variable.address_taken` il_def.h:11389.) So a struct local is only marked by `&` on it or on a path under it; record 0043 item 4 allocates
+every struct local as a block regardless, and needs no flag.
+
+**3. Member access: PASS; shapes as P51's table rows, same in both modes.** `m2.c` (`struct S { int x; int y; struct T t; struct S *next; int *q; }`,
+`g1(struct S *p, struct S s)`); `eok_dot_field` is declared at il_def.h:14181 (not 14174), `eok_points_to_field` :14185, `enk_field` :13583. Both take
+two operands, the second an `enk_field` whose `field` is the `a_field`; the raw nodes of `a1.c:4` `s.x = 1`:
+```
+expr-node@..c6c0  type: struct S  is_lvalue: TRUE  kind: enk_variable  variable: s
+expr-node@..c730  type: int       next: NULL       kind: enk_field     field: x
+expr-node@..c7a0  type: int       is_lvalue: TRUE  kind: enk_operation operation.kind: eok_dot_field  operands: ..c6c0   (operation.type_kind: tk_unknown)
+```
+| Source (`m2.c` line) | Tree |
+|---|---|
+| `s.x` rvalue (:5) | `dot_field(var s{struct S:L}, field x{int}){int<-same}`: the rvalue has `orig_lvalue_type` and no `L`; no lvalue-to-rvalue node |
+| `p->x` (:6) | `points_to_field(var p{struct S *<-same}, field x{int}){int<-same}` |
+| `(*p).x` (:7) | `dot_field(indirect(var p){struct S:L}, field x)` |
+| `s.t.x` (:8) | `dot_field(dot_field(var s{struct S:L}, field t{struct T}){struct T:L}, field x)` |
+| `p->t.x` (:9) | `dot_field(points_to_field(var p, field t{struct T}){struct T:L}, field x)` |
+| `(&s)->x` (:10) | `points_to_field(address_of(var s{struct S:L}){struct S *}, field x)` |
+| `=` target (:11-15) | `assign(dot_field(var s, field x){int:L}, const[int 1])`, `assign(points_to_field(var p, field x){int:L}, ...)`, `assign(dot_field(indirect(var p){struct S:L}, field y){int:L}, ...)`, `assign(dot_field(dot_field(var s, t){struct T:L}, x){int:L}, ...)`, `assign(dot_field(points_to_field(var p, t){struct T:L}, y){int:L}, ...)` |
+| `+=`, `-=`, `++`, `--` (:16-19) | `add_assign(dot_field(...){int:L}, const 6)`, `subtract_assign(points_to_field(...){int:L}, ...)`, `post_incr(dot_field(...){int:L})`, `pre_decr(points_to_field(...){int:L})` |
+| `&` (:21-27) | `address_of(dot_field(var s, field x){int:L}){int *}`, `address_of(points_to_field(var p, x){int:L})`, `address_of(points_to_field(var p, field t{struct T}){struct T:L}){struct T *}`, `address_of(dot_field(var s, t){struct T:L})`, `address_of(var s{struct S:L}){struct S *}`, `address_of(dot_field(indirect(var p){struct S:L}, field y))`, `address_of(dot_field(points_to_field(var p, t){struct T:L}, y))` |
+| a pointer member (:28-33) | `points_to_field(var p, field next{struct S *}){struct S *<-same}`, `points_to_field(points_to_field(var p, next){struct S *<-same}, field x)`, `assign(indirect(points_to_field(var p, field q{int *}){int *<-same}){int:L}, const 1)`, `indirect(dot_field(var s, field q))`, `assign(points_to_field(var p, field next){struct S *:L}, var p)`, `assign(points_to_field(var p, q){int *:L}, address_of(points_to_field(var p, x){int:L}){int *})` |
+
+The member's own type is the node type (`{int}`, `{struct T}`, `{struct S *}`); there are no casts around a member access. A member read in
+arithmetic is converted like a variable (`m3.c:5` `cast(dot_field(var s, field c{char}){char<-same}){int:g}`, `:7` `cast(points_to_field(var p, field e{enum E}){enum E<-same}){unsigned int:g}`
+in C and `{int:g}` in C++); members of `char`, `bool`, enum and `unsigned` type assign without a cast on the member (`m3.c:8-11`). The `m2.c` trees differ between the
+modes only in the `L` flag of assignment results and in the four implicit `operator=` routines C++ adds (item 5). The `L` flag is set on a member read in a write
+position and on the intermediate `{struct T:L}` of `s.t.x` and `p->t.x`; the final read has `orig_lvalue_type`.
+
+**4. Initializers: PASS; every element is kept, in source order.** An automatic struct local is `init_kind: initk_dynamic` with `dynamic: dynamic-init`, plus a
+`stmk_decl` followed by a `stmk_init` whose `dynamic_init` is the same node (`i1.c:4-6`); with no initializer, `init_kind: initk_none` and only the `stmk_decl`
+(`a1.c:3`, `i3.cpp:29` `S s16;`). The initializer is a `dik_constant` over a `ck_aggregate` (all elements constant), or a `dik_nonconstant_aggregate` over a
+`ck_aggregate` whose non-constant elements are `ck_dynamic_init` constants (each holding a `dik_expression`) and whose `has_dynamic_init_component` is TRUE. Aggregate
+fields: `first_constant`..`last_constant` chained by `next` (il_def.h:5310-5311), flags `explicit_braces_on_aggregate` :4889, `uses_designated_initializers` :4908,
+`is_partially_initialized` :4154 (on the aggregate and on the `dynamic-init`), `is_braced_initializer`; kinds `dik_constant` :3969, `dik_nonconstant_aggregate` :3983,
+`ck_aggregate` :3661, `ck_designator` :3667, `ck_dynamic_init` :3656. Trees (`ilsum`, C23 unless marked):
+
+| Source | Element list in the IL |
+|---|---|
+| `{1, 2}` (`i2.c:8`) | `dik_constant: aggr{const[int 1], const[int 2]}[struct S explicit_braces_on_aggregate]` |
+| `{.y = 2}` (:9) | `aggr{desig(.y is_field_designator), const[int 2]}[... uses_designated_initializers is_partially_initialized]`: **the unmentioned `x` is absent** |
+| `{.y = 1, .x = 2}` (:10) | `aggr{desig(.y), 1, desig(.x), 2}`: **source order, not field order**; EDG warns `#2904-D out-of-order initializers are nonstandard in C++` (both modes) |
+| `{}` (:11) | `aggr{}[struct S explicit_braces_on_aggregate is_partially_initialized]` (C23 and C++20 `i3.cpp:10-11`) |
+| `{0}` (:12), `{1}` (:13) | `aggr{const[int 0]{int is_simple_zero}}`, `aggr{const[int 1]}`: **trailing members absent** |
+| `{{1, 2}, 3}` (:14) | `aggr{aggr{1, 2}[struct T explicit_braces_on_aggregate], 3}` |
+| brace elision `{1, 2, 3}` (:15) | `aggr{aggr{1, 2}[struct T], 3}`: **EDG builds the nested aggregate; the inner one has no `explicit_braces_on_aggregate`**; `i4.c:12` `{1,2,3,4}` for two nested structs likewise; `i4.c:6` `struct N n = {0}` (first member a struct) gives `aggr{aggr{const[int 0]}[struct T is_partially_initialized]}` |
+| `{.t = {1, 2}, .z = 3}` (:16) | `aggr{desig(.t), aggr{1, 2}[struct T explicit_braces_on_aggregate], desig(.z), 3}` |
+| `{.t.y = 2}` (:17), `{.z = 3, .t.x = 1}` (:18) | a designator path becomes a nested aggregate: `aggr{desig(.t), aggr{desig(.y), 2}[struct T uses_designated_initializers is_partially_initialized]}`; `aggr{desig(.z), 3, desig(.t), aggr{desig(.x), 1}}` |
+| `{a, g(b)}` (:19) | `dik_nonconstant_aggregate: aggr{dyn(dik_expression: var a), dyn(dik_expression: call(routine g, var b))}[... has_dynamic_init_component]`; `{g(a), g(b)}` (:20), `{a++, a++}` (:21): left to right as written |
+| constant and dynamic mixed (`i2.c:24` `{a + 1, -1}`) | `aggr{dyn(dik_expression: add(var a, const 1)), const[int -1]}` |
+| pointer members (:22-23) | `{1, 0}`: `const[int 0]{int * is_simple_zero implicit_cast ...}` (a null pointer constant of pointer type); `{1, &a}`: `dyn(dik_expression: address_of(var a))`; `i6.c:4` `{1, &g}` (a global): `dik_constant ... const[addr abk_variable off=0]{int *}` as an element |
+| enum, `bool` (`i2.c:28`) | `aggr{const[int 1], const[int 1U]{enum <unnamed>}, const[int 1U]{bool}}` |
+| `{.y = g(a), .x = g(b)}` (:25) | `aggr{desig(.y), dyn(call g(var a)), desig(.x), dyn(call g(var b))}`: designator order, so the **evaluation order of C is the list order as printed** |
+| positional after a designator (`i4.c:8` `{.b = 1, 2}`) | `aggr{desig(.b), 1, 2}`: the `2` continues after `b` (the cursor rule), nothing marks it |
+| `{1, .a = 2}` (`i4.c:9`), `{.a = 1, .a = 2}` (:10) | both elements stay in the list (`aggr{1, desig(.a), 2}`, `aggr{desig(.a), 1, desig(.a), 2}`); `#2904-D` fires on both and on `{.c = 3, .a = 1, .b = 2}` (:11) |
+
+`ck_designator.field` is the `a_field` (il_def.h:5548-5549); il_display prints its name. C++20 (`i3.cpp`): `S s1{1, 2}` and `S s2 = {1, 2}` (:8-9), `{}`, `{0}`, `{1}`
+(:10-13), the nested and non-constant forms (:17-23, :31) and `E e1{1, E::K1, true}` (:32) are the same shapes as C; `S s7{.x = 1, .y = 2}` (:14) is
+`aggr{desig(.x), 1, desig(.y), 2}`; `S s13(1, 2)` (:26) is `dik_constant: aggr{1, 2}[S]` with no `is_braced_initializer` and no `explicit_braces_on_aggregate`;
+`S s14 = S{1, 2}` (:27) `aggr{1, 2}[S explicit_braces_on_aggregate implicit_cast explicit_cast_applied]`; `S s15 = S()` (:28) `aggr{const[int 0], const[int 0]}[S explicit_cast_applied]` (zeros
+written out); `S s16;` (:29) `initk_none`. **H1 (mode difference): in C++20 a designated list that skips a member gets an explicit
+compiler-generated zero in the skipped place**: `S s8{.y = 2}` (:15) is `aggr{const[int 0]{int}, desig(.y), const[int 2]}`, `i5.cpp:4` `S s3{.y = 1, .x = 2}` is `aggr{0, desig(.y), 1, desig(.x), 2}` and `i5.cpp:5`
+`Q q1{.b = 1, 2}` is `aggr{0, desig(.b), 1, 2}`; in C the same lists have no filler (`i2.c:9`). The filler constant has **no `decl_position`** (the written constants and designators have
+`decl_position.seq`), and a later designator can name the same field (`x` above), so "a field initialized twice" cannot be told from the list shape alone: the cursor rule (a
+designator sets the cursor to its field, every other element takes the cursor field and advances it, the last store to a leaf wins) gives the
+right values in all rows above, and a duplicate check must skip the fillers. `i5.cpp:6` `{.a = 1, .a = 2}` in C++ and `i4.c:10` in C have the same duplicate in the IL.
+
+**5. Copies: PASS; trivial C++ copies are plain `eok_assign` or a `dik_expression`.** `c1.c` (C23, `struct S { int x; int y; struct T t; struct S *next; }`, `cp(struct S *p, struct S *q, struct S s)`):
+```
+:5  t = s            assign(var t{struct S:L}, var s{struct S<-same}){struct S:u}
+:6  struct S u = s;  init u: dik_expression: var s{struct S<-same}
+:7  *p = *q          assign(indirect(var p){struct S:L}, indirect(var q){struct S<-same}){struct S:u}
+:8  *p = s           assign(indirect(var p){struct S:L}, var s{struct S<-same})
+:9  s = *p           assign(var s{struct S:L}, indirect(var p){struct S<-same})
+:10 p->t = s.t       assign(points_to_field(var p, field t){struct T:L}, dot_field(var s, field t){struct T<-same}){struct T:u}
+:11 *p = *p          assign(indirect(var p){struct S:L}, indirect(var p){struct S<-same})
+:12 struct S v = *p; init v: dik_expression: indirect(var p){struct S<-same}
+:13 (t = s).x        init r: dot_field(assign(var t{struct S:L}, var s){struct S}, field x{int})
+:14 struct S w = (t = s);   init w: dik_expression: assign(var t{struct S:L}, var s){struct S}
+:15 t = (struct S){1, 2}    assign(var t{struct S:L}, enk_temp_init(){struct S<-same})
+```
+In C the `assign` result is an rvalue (`{struct S}`, `{struct S:u}` as a statement); in C++ it is an lvalue (`{S:Lu}` as a statement, `{S:L}` as the operand of `.x` at :13, `{S<-same}` as the initializer of `w` at :14); the rest is identical. The struct `assign` has
+`operation.type_kind: tk_struct` (`c1.c`, all 9 in both modes) and no call or memcpy: il_def.h:14120 documents it as the bitwise copy ("In lowered C++ IL or in C ... a normal C struct copy"). A compound
+literal is `enk_temp_init` (il_def.h:13585), as P51 noted for C.
+
+C++20 (`c2.cpp`, `Plain { int x; int y; }`): **every trivially copyable class is copied by `eok_assign` or by `dik_expression`, never by a call**: `Plain` `:12` `Plain a2 = a;` `init a2: dik_expression: var a`, `:13` `assign(var a2{Plain:L}, var a){Plain:Lu}`,
+`:24-27` `Plain a3(a)`, `Plain a4{a}`, `Plain a5 = Plain(a)`, `static_cast<Plain>(a)` are all `dik_expression: var a`. **A non-trivial copy is a call:** `UA` (user `operator=`) `:15` `ref_indirect(dot_member_call(routine operator=, var b2, reference_to(lvalue_adjust(var b){const UA:Lg}){const UA &:g}){UA &}){UA:Lgu}`;
+`UC` (user copy constructor) `:16` `dik_constructor ... routine=UC args=reference_to(lvalue_adjust(var c)) is_implicit_copy_for_copy_initialization=TRUE`; `VF` (virtual) `:21` `dot_member_call(routine operator={VF &(*)(const VF &) noexcept}, ...)`, an
+implicit operator that is not trivial. **H2: the expression alone does not prove triviality of the class**: `DT` (user destructor, `:17-18`), `Der` (a base, `:19-20`), `DefA` (defaulted `operator=`, `:22`) and `WithMem` (`:23`) are copied by plain `eok_assign` / `dik_expression: var`, so the class-level test of item 1 is the guard; the shape
+`eok_assign` with `operation.type_kind: tk_struct` is only the necessary half.
+
+**6. `sizeof` and `offsetof`: PASS; folded in every position, both modes.** `z1.c:5-13` (`struct S { int x; char c; struct T t; struct S *next; }`): `init a: dik_constant: const[int 24UL]{unsigned long}` for `sizeof(struct S)` (:5), `sizeof s` (:6), `sizeof *p` (:11); `offsetof(struct S, t)` (:7) `8UL`,
+`offsetof(struct S, t.y)` (:8) `12UL`, `sizeof(s.t)` (:9) `8UL`, `sizeof(p->x)` (:10) `4UL`; non-constant uses stay arithmetic over the folded constant: `n * sizeof(struct S)` (:12) `multiply(cast(var n){unsigned long:g}, const[int 24UL])`, `n * offsetof(struct S, c)` (:13)
+`... const[int 4UL]`. Both `_Static_assert`s of `z1.c:16-17` pass. These are EDG's ABI sizes (24 for five members), not the model's: see N5.
+
+**7. Contract places: PASS.** `k2.c` (C spellings via `CERASTES_REQUIRES/ENSURES`, `struct S { int x; int y; struct T t; struct S *next; int *q; }`; the function `aN` is at probe line N+4) and `k3.cpp` (`cerastes::`), attributes printed with `ilsum`'s `ATTR` lines
+(`loc=post func`); parameter references are `enk_param_ref` (`param_ref.param_num`, `levels_up`: 0 in `requires`, 1 in `ensures`, and the result binder `r` of `ensures(r, ...)` is `{1, 0}`, an `attribute-arg` of `kind: token` before the expression: `k2.c:13`). C23 and C++20 give the same C-spelling trees except the one H3 below:
+
+| Source | Argument tree (types and `<-same` dropped) |
+|---|---|
+| `owns(*s)` (`k2.c:5`) | `call(routine cerastes_owns, indirect(param_ref 1)){struct S}`: a struct pointee has **no promotion cast**; `reads(*s)` :8 the same; `live(s)` :9 a bare `param_ref 1` |
+| `owns(s->x)` (:6) | `call(cerastes_owns, points_to_field(param_ref 1, field x))`: a `points_to_field`, no `address_of`, no `indirect` |
+| `owns(s->t)` (:7) | `points_to_field(param_ref 1, field t{struct T}){struct T}` (the whole nested struct as a place) |
+| `owns(s->t.x)`, `reads(s->t.y)` (:14) | `dot_field(points_to_field(param_ref 1, field t){struct T:L}, field x)` |
+| `owns((*s).x)` (:15) | `dot_field(indirect(param_ref 1){struct S:L}, field x)`: a different tree from `s->x` for the same place |
+| reads `s->x > 0`, `s->t.x > 0` (:12) | `gt(points_to_field(param_ref 1, field x), const[int 0])`, `gt(dot_field(points_to_field(param_ref 1, field t), field x), ...)` |
+| `old(s->x)` (:10) | `eq(points_to_field(param_ref 1, field x), indirect(cast(call(routine cerastes_old_, cast(address_of(points_to_field(param_ref 1, field x))){const void *:g})){int *}){int<-same})`; `old(s->t.x)` (:16) the same with `address_of(dot_field(points_to_field(...), x))`; `old(s->next)` the same over `field next` |
+| `old(*s).x` (:11) | `dot_field(indirect(cast(call(routine cerastes_old_, cast(param_ref 1){const void *:g}){const void *}){struct S *}){struct S:L}, field x)` in C23 |
+| `old(*s).t.x` (:26), `old(s->t).x` (:27), `old(*s).x == 1` (:29) | `dot_field(dot_field(indirect(cast(call(cerastes_old_, cast(param_ref 1)))), field t), field x)`; `dot_field(indirect(cast(call(cerastes_old_, cast(address_of(points_to_field(param_ref 1, field t)))))), field x)`; `dot_field(indirect(cast(call(...))), field x)` |
+| `r->x` in `ensures(r, ...)` (:13) | `<token r> ;; land(call(cerastes_owns, indirect(param_ref 1 up=0)), eq(points_to_field(param_ref 1 up=0, field x), const 1))`: the binder is `param_ref 1`, `levels_up 0` (parameters are `levels_up 1`) |
+| `owns(s->next)`, `owns(s->q)` (:17) | `points_to_field(param_ref 1, field next{struct S *}){struct S *}`, `... field q{int *}`: a pointer member as a cell |
+| heap reads (c2) (:20, :22, :28) | `owns(*s->next)`: `indirect(points_to_field(param_ref 1, field next))`; `owns(*s->q)`: `indirect(points_to_field(param_ref 1, field q))`; `owns(**pp)`: `indirect(indirect(param_ref 1))`; `s->next->x` (:21): `points_to_field(points_to_field(param_ref 1, field next), field x)` |
+| `s->next != NULL` (:19), `live(s->next)` (:18) | `ne(points_to_field(param_ref 1, field next), const[int 0]{S * ...})`; `call(cerastes_live, points_to_field(param_ref 1, field next))` |
+| two atoms (:24-25) | `owns(*t) && owns(*s)`: two `indirect(param_ref k)`; `owns(*s) && owns(*q)` with `int *q` the same shape: nothing in the call shows the pointee types differ except the node type |
+
+**H3 (mode difference, as P64's `&*q`):** the macro `cerastes_old(e)` is `(*(__typeof__(e)*)cerastes_old_(&(e)))`; for `old(*s)` the front end folds `&(*s)` to `s` in C23 (`cast(param_ref 1)`) and keeps `address_of(indirect(param_ref 1))` in C++20
+(`k2.c:11`, `:26`, `:29` differ only there). **So `old(*p).x` is the same place as `old(p->x)` as a fact, and it is decidable from the IL, but the tree differs**: the argument of `cerastes_old_` is the whole `*p`
+(a bare parameter or `address_of(indirect(param))`), and the member path is the `dot_field` chain outside the `indirect(cast(call(...)))`. `old(s->t).x` is the same with `address_of(points_to_field(param, t))` inside and
+a `dot_field` outside. Record 0043 item 9 may therefore accept `old(*p).x` (peel the chain, then fold the path) or keep rejecting it; both are implementable.
+
+**C++ spellings (`k3.cpp`, probe line = b-number + 4; same places):** `cerastes::owns(*s)` is `call(routine owns, reference_to(lvalue_adjust(indirect(param_ref 1))))`, `owns(s->x)` `reference_to(lvalue_adjust(points_to_field(param_ref 1, field x)))`,
+`owns(s->t.x)` `reference_to(lvalue_adjust(dot_field(points_to_field(...), field x)))`, `live(s)` `call(routine live, cast(param_ref 1))`; `old(s->x)` is `ref_indirect(call(routine old, reference_to(lvalue_adjust(points_to_field(param_ref 1, field x)))))`,
+`old(*s).x` (`k3.cpp:11`) `dot_field(ref_indirect(call(routine old, reference_to(lvalue_adjust(indirect(param_ref 1))))), field x)`, `old(*s).t.x` (:15) a `dot_field(dot_field(ref_indirect(...), t), x)`, `old(s->t).x` (:14) with `points_to_field(param_ref 1, field t)` inside. The wrappers
+`reference_to(lvalue_adjust(...))` and `ref_indirect(...)` are the ones the existing walker already peels for scalars (P53).
+**Promotion of scalar members** (`k4.c:5`, `struct S { char c; short sh; bool b; enum E e; unsigned u; }`): `owns(s->c)`, `reads(s->b)`, `owns(s->sh)` come as `cast(points_to_field(param_ref 1, field c){char<-same}){int:g}` (`compiler_generated` promotion cast around the member place, as P53 found for `*p`);
+`owns(s->e)` has the cast in C++20 only; `owns(s->u)` none; the same casts appear around `s->c` in `s->c == cerastes_old(s->c)` and around the `old` result. The existing "strip `compiler_generated` casts around a place" rule covers it.
+
+**8. Markers and `owning`: PASS; the same landing as `int *` (P64).** `mk1.c` (both modes):
+`void m1(struct S *p CERASTES_REF_TO_UNINIT)` (:5), `m2 ... CERASTES_MUST_INIT` (:7), `m3(struct S *p CERASTES_OWNING)` (:9), `m4(CERASTES_OWNING struct S *p)` (:10), `m5(... CERASTES_MUST_INIT CERASTES_OWNING)` (:11), `m8(struct S **pp CERASTES_OWNING)` (:15), `m9` (:16), `m10(struct S *p CERASTES_MUST_INIT)`
+with `CERASTES_REQUIRES(cerastes_owns(p->t))` (:17-18). The walker and `ilsum` show `[[cerastes::ref_to_uninit]]`, `must_init`, `owning` with `loc=declarator-id` (trailing) or `loc=prefix` (leading `m4`), two attribute blocks each (P64 A), the
+function type printing `void (struct S *)`; `m5` carries both markers. EDG accepts all of them on a `struct S *` and `struct S **` parameter. **`CERASTES_UNINIT` on a struct local is accepted** in both modes, leading (`mk1.c:13` `CERASTES_UNINIT struct S s;`) and trailing the declarator
+(`:14` `struct S s CERASTES_UNINIT;`): the variable's `attributes` is non-NULL (`variable s ... attributes: file-scope attribute@...`), `init_kind: initk_none`, and the walker prints `attr [[cerastes::uninit]] on variable s @ L13:17` and `@ L14:28`. Placed between the type and the declarator
+(`mk5.c:3` `struct S CERASTES_UNINIT s;`) it is EDG error #1835 `attribute "cerastes::uninit" does not apply here` in both modes (it appertains to the type). **`owning` on a struct field is refused by EDG in both modes**, leading and trailing: `mk2.c:3` `struct F { CERASTES_OWNING struct S *p; };` and `mk3.c:3` `struct F { struct S *p CERASTES_OWNING; int y; };`:
+```
+error #1835: attribute "cerastes::owning" does not apply here
+```
+`ref_to_uninit` on a struct local is #1835 too (`mk4.c:3`).
+
+**9. Struct pointers: PASS; the shapes of P51 with a struct pointee.** `sp1.c` (both modes; `struct S **pp`, results, comparisons, conversions):
+```
+:8  struct S *a = &s;      init a: address_of(var s{struct S:L}){struct S *}          s and a: address_taken=TRUE (:9 pp = &a)
+:9  struct S **pp = &a;    init pp: address_of(var a{struct S *:L}){struct S **}
+:10 struct S *b = *pp;     init b: indirect(var pp{struct S **<-same}){struct S *<-same}
+:11 *pp = p;               assign(indirect(var pp){struct S *:L}, var p){struct S *:u}
+:12 p == NULL              eq(var p, const[int 0]{struct S * is_simple_zero implicit_cast explicit_cast_applied null_pointer_constant_ruled_out}){int}   (:13 ne, :14 not(var p){int})
+:15 (int *)&s              cast(address_of(var s{struct S:L}){struct S *}){int *}           (explicit: not compiler_generated)
+:16 (struct T *)p          cast(var p{struct S *<-same}){struct T *}
+:17 void *vp = p;          cast(var p){void *:g}      :18 (void *)p  cast(var p){void *}      :19 (struct S *)vp  cast(var vp{void *<-same}){struct S *}
+:20 NULL, :21 0            dik_constant: const[int 0]{struct S * ... null_pointer_constant_ruled_out}
+:22 id(p)                  call(routine id{struct S *(*)(struct S *)}, var p){struct S *};  the routines print `struct S *(struct S *)`
+:23 p == b                 eq(var p, var b){int};   :24 p->next  points_to_field(var p, field next{struct S *}){struct S *<-same};   :25 s.next = &s  assign(dot_field(var s, field next){struct S *:L}, address_of(var s))
+:26 if (p)                 the condition is `var p{struct S *<-same}` in C and `bool_cast(var p){bool:g}` in C++
+```
+C++ wraps comparisons and `!` in `cast(...){int:g}` over a `bool` as P51 item 5. A `struct S *` result is a pointer-typed `return` and call result exactly like `int *` (`sp1.c:4-5`, `:22`).
+
+**What the encoder reads (summary).**
+- Struct type: `kind tk_struct|tk_class|tk_union`, `incomplete`, `is_local_to_function`, `field_list` (index k = position in the `next` chain), per field `type` (strip `tk_typeref`, noting `qualifiers`; `tk_array`, `tk_pointer` + `is_reference`/pointee kind `tk_void`/`tk_routine`, `tk_struct`, `tk_union`), `is_bit_field`, `is_anonymous_parent_object`; class: `is_empty_class`, `is_packed`; system file by `seq_is_in_system_header(decl_position.seq)`; C++: `base_classes`, `any_virtual_functions`, `has_field_initializer`, the `assoc_scope` `variables` (static members) and `routines` (all `compiler_generated` and trivial) and the member `access`.
+- Access: `eok_dot_field`, `eok_points_to_field` (operand 2 = `enk_field`, `field` = the `a_field`), nested by operand 1; `(*p).x` is `dot_field(indirect(p))`; `address_of` over either; no casts; the lvalue flag only on write positions and intermediates.
+- Initializer: `variable.dynamic` (`dik_constant` | `dik_nonconstant_aggregate` | `dik_expression` for a copy | `dik_constructor` rejected) over `ck_aggregate` elements in source order with `ck_designator` (field pointer) elements, nested aggregates for elided braces and designator paths, unmentioned trailing members absent, C++ fillers without `decl_position`.
+- Copy: `eok_assign` with `operation.type_kind: tk_struct`, `dik_expression` of a struct-typed source; anything else (`dot_member_call` of `operator=`, `dik_constructor`) is the non-trivial case.
+- Contracts: places are `indirect(p)`, `points_to_field`, `dot_field(points_to_field ...)`, `dot_field(indirect ...)`, wrapped in `cast{g}` (scalar members, C), `reference_to(lvalue_adjust(...))` (C++), and for `old` in `indirect(cast(call(cerastes_old_, ...)))` / `ref_indirect(call(old, ...))` with the member path outside for `old(*p).path`.
+
+**Hazards (the encoder must handle; none contradicts an item of the plan).**
+- **H1** C++20 designated lists carry compiler-generated zero fillers (item 4); a duplicate-designator check must ignore them, and the cursor rule must be the semantics.
+- **H2** The class-level test, not the copy expression, guards triviality (item 5); a class with a user destructor, a base or a defaulted `operator=` is copied by plain `eok_assign`.
+- **H3** `old(*p)` folds `&*p` in C23 and not in C++20 (item 7).
+- **H4** In C++20 each struct adds two implicit routines to the file: `routine T::operator= plain implicit nobody @ L1:8` for the copy and the move assignment (`--cerastes_walk m2.c --c++20` lists four for two structs; `ilsum` `ROUTINE L1 operator= : T &(const T &) defined=FALSE`; `compiler_generated=TRUE`, `is_trivial_copy_function=TRUE`). Every loop over the file's routines (the walker prints them, an encoder pass over uncalled declarations would reach them) must skip routines with `compiler_generated`; in C there are none.
+- **H5** `typedef struct { ... } Pt;` has no tag in C23 (`ty1.c:1` `TYPE ?`), and C++20 names it `Pt` (`TYPE Pt`): a name for `ptr_struct_<n>_<tag>` and `alloc_struct_<n>_<tag>` needs a fallback to the typedef name or to `n` in C (`Pt` is a `tk_typeref` named `Pt` whose `typeref_type` is `struct <unnamed@...>`, `ty1.c:1`), or the two modes name the same program differently.
+- **H6** EDG diagnoses out-of-order and repeated designators with `#2904-D` in both modes (and the usual `#177`/`#550`); tests that use them carry a warning on their lines.
+
+**Notes.**
+- **N1** `__attribute__((packed))` (`is_packed`, type :10636 and field :11954) is not in item 2's rejection list; the model's `&p->i` of a packed member is a misaligned pointer. Recommend rejecting packed structs (M8) in item 2.
+- **N2** `contains_flexible_array_member` (il_def.h:10622) is not printed by `il_display`; a flexible member is recognised by the last member's incomplete array type, and the encoder (in process) can read the flag.
+- **N3** `_Atomic` members have no class flag; only the member's typeref `qualifiers: _Atomic`. `const`/`volatile` have both.
+- **N4** Anonymous members are `is_anonymous_parent_object` on the field; the *struct* type they hold also prints `is_nonstd_anonymous_union_type` (a GNU C struct), so test the field, not the member's kind. A named member of an unnamed struct type is a plain nested struct (`ty1.c:3`).
+- **N5** `sizeof(struct S)` and `offsetof` fold to EDG's ABI values (24 for `struct S` of `z1.c`), which are unrelated to the model's member blocks: `malloc(sizeof(struct S))` (M4.5d2) must size by the model, not by this constant.
+- **N6** il_def.h line numbers in the plan text: `eok_dot_field` is :14181 and `eok_points_to_field` :14185 at the pinned fork commit (the plan cites 14174/14178).
+- **N7** Struct pointers to an incomplete struct are legal parameters and locals (`inc1.c:7`); only a dereference or an object is an EDG error (#70/#833), so the encoder sees only the pointer.
+- **N8** C: `struct S {}` has size 0 and C++ size 1 (both `is_empty_class`); a plain C `Empty` is already rejected by item 2.
+- **N9** `{0}` for a struct whose first member is a struct (`i4.c:6`) expands through the elided braces (`aggr{aggr{0}[T]}`), so "zero-fill the unmentioned members" must recurse into nested structs and pointers (null) for every absent trailing element, in both modes.
+
+### P66: compiler matrix of member sequencing shapes and uninitialized struct use (record 0043 items 6, 7, 12; test-mutator)
+
+Evidence: `build/m4.5c1/p66/` (`gen.py` regenerates `src/`, `raw/<shape>.<compiler-mode>.<tier>.<syntax|O2>.txt` and `results.json`; the table below is built from `results.json`).
+Versions: Apple clang 21.0.0 (clang-2100.3.34.2, `/Library/Developer/CommandLineTools/usr/bin/clang` and `clang++`), arm64-apple-darwin27.0.0; Homebrew GCC 16.2.0 (`gcc-16`, `g++-16`).
+Modes `-std=c23` (C) and `-std=c++20` (C++); tiers D (no flag), A (`-Wall`), E (`-Wall -Wextra`); `-fsyntax-only` everywhere, and `-O2 -c -o /dev/null` (the flow warnings) for all four compilers at every tier.
+Each shape is one function over `struct S { int x; int y; }; struct T { struct S t; int z; };`. M shapes: `int r = <expr>; (void)s; return r;` with `struct S s = {0, 0};` (M9/M10 `struct T s = {{0, 0}, 0};`; M6-M8 take `struct S *p, struct S *q` as parameters), so the only warnings are the shape's own. U shapes: `int f(void)` with the listed body.
+The matrix reports only warnings; no shape produced an error and no warning lacked a flag.
+
+#### For the owner
+
+- **Clang is silent on every M shape, in both modes at every tier** (`-Wunsequenced` names objects syntactically, P61, and does not see a member access: `s.x + (s.x = 1)` and `x++ + x` differ here). GCC's `-Wsequence-point` warns at `-Wall` (A, E; never at D) in **both** modes, `-fsyntax-only` and `-O2` alike, on every shape that names one member object twice with a write: M1, M3, M4, M5, M6, M8, M9.
+- **No compiler warns** on M2 `s.x + (s.y = 1)`, M7 `p->x + (q->x = 1)` and M10 `s.t.x + (s.t.y = 1)`: different members of one object, or two pointers (the path-precise `unsequenced` check is their only coverage, 0039 item 3).
+- By the union rule of 0039 item 3 (a warning at no flag or `-Wall` in some compiler and mode): **M1, M3, M4, M5, M6, M8, M9 are `unsequenced_modification` rejections** (the plan's twin `s.x + (s.x = 1)` is one: the plan's "if P66 shows a warning" holds, by GCC at `-Wall` only); M2, M7, M10 are accepted; M7 is `unsequenced` path-precisely when `p == q` is possible. Nothing in M is `-Wextra`-only. `-O2` changes nothing. `p->x` twice (M6, M8) and `s.t.x` twice (M9) are named objects like `*p` and `s.x`: object keys with member paths (record 0043 item 12).
+- **Uninitialized use** (U): the whole-struct copy of an unset struct (U1) warns in clang C only at `-Wall` (`-Wuninitialized`, both `-fsyntax-only` and `-O2`; clang C++ is silent); GCC warns only with `-O2` (`-Wall` and up; `-fsyntax-only` is silent). The read of an unset member (U3, U4) warns in GCC at `-Wall -O2` only; clang never. **U2 (copy of a partly initialized struct) warns nowhere**: cerastes's `uninitialized` at that copy (question 92: a copy reads every member) is stricter than every compiler. It is an error category, not a rejection, so the union rule does not apply.
+- **EDG itself** (`scripts/cpfe.sh --c23` / `--c++20 --no_code_gen`, stock): silent on every M shape except `#550` (variable set but never used) on M4 in C++ only; warns `#549` ("variable `s` is used before its value is set") on U1 and U3 in both modes; silent on U2 and U4. The M shapes therefore reach the back end without a front-end diagnostic, as in P61/A8.
+
+#### Matrix
+
+Cell = flag and the first tier that warns; `(-O2 only)` = silent under `-fsyntax-only`. Columns: clang C, clang C++, GCC C, GCC C++.
+
+| Shape | Source | clang-C | clang-C++ | gcc-C | gcc-C++ |
+|---|---|---|---|---|---|
+| M1 | `s.x + (s.x = 1)` | silent | silent | `-Wsequence-point` from A | `-Wsequence-point` from A |
+| M2 | `s.x + (s.y = 1)` | silent | silent | silent | silent |
+| M3 | `s.x++ + s.x` | silent | silent | `-Wsequence-point` from A | `-Wsequence-point` from A |
+| M4 | `(s.x = 1) + (s.x = 2)` | silent | silent | `-Wsequence-point` from A | `-Wsequence-point` from A |
+| M5 | `s.x = s.x++` | silent | silent | `-Wsequence-point` from A | `-Wsequence-point` from A |
+| M6 | `p->x + (p->x = 1)` | silent | silent | `-Wsequence-point` from A | `-Wsequence-point` from A |
+| M7 | `p->x + (q->x = 1)` | silent | silent | silent | silent |
+| M8 | `p->x = p->x++` | silent | silent | `-Wsequence-point` from A | `-Wsequence-point` from A |
+| M9 | `s.t.x + (s.t.x = 1)` | silent | silent | `-Wsequence-point` from A | `-Wsequence-point` from A |
+| M10 | `s.t.x + (s.t.y = 1)` | silent | silent | silent | silent |
+| U1 | `struct S s; struct S t = s; return t.x;` | `-Wuninitialized` from A | silent | `-Wuninitialized` from A (`-O2` only) | `-Wuninitialized` from A (`-O2` only) |
+| U2 | `struct S s; s.x = 1; struct S t = s; return t.x;` | silent | silent | silent | silent |
+| U3 | `struct S s; return s.y;` | silent | silent | `-Wuninitialized` from A (`-O2` only) | `-Wuninitialized` from A (`-O2` only) |
+| U4 | `struct S s; s.x = 1; return s.y;` | silent | silent | `-Wuninitialized` from A (`-O2` only) | `-Wuninitialized` from A (`-O2` only) |
+
+#### Classification
+
+- **Reject (`unsequenced_modification`):** M1, M3, M4, M5, M6, M8, M9 (GCC `-Wall`, both modes).
+- **Accept; `unsequenced` by path:** M7 (`p`/`q` may alias); M2 and M10 need no check (distinct member objects).
+- **U1-U4:** all accepted by the front end; U1, U3 (EDG `#549`) and U4 are `uninitialized` errors by 0019/0043 (a read of a leaf whose flag is false); U2 is `uninitialized` at the copy by question 92 only.
+
+### S33: Silicon on record 0043's shapes (nested allocation, leaf overlap, loop liveness, copies, `must_init` over a struct, member-address `WF`) **PASS for (a)-(g); every vacuity run fails as it must; one completeness finding (g), answered by item 8's `WF_S`**
+
+Evidence: `tests/viper-smoke/memory/s33_*.vpr` (22 files: a positive and a twin per case, and one `_vacuity_fail` per case), hand-written by test-mutator in the emitted style (the four axioms with their tags, one assert per atomic check, ghost `Perm` amounts, trusted `alloc_struct_0_S` and `alloc_struct_1_T`); generator in `build/m4.5c1/s33/`. Each passes `python3 scripts/run_tests.py <file>` alone (5–16 s each, the vacuity files about 15 s). Silicon never failed first with its own reason.
+
+- **(a) nested allocation** (`struct T { struct S s; int z; }`): the allocation's root facts, every member block's `len == 1`, every leaf uninitialized; writes and reads of `t.s.x`, `t.z`; `&t.s` to a callee owning `*s`; the scope exit (every leaf and the liveness cell at `write`, exhaled). Twin: the read of the unwritten `t.z` fails at its flag assert.
+- **(b) the leaf-overlap trap:** `f(&s, &t.x)` against `requires owns(*s) && owns(*q)` (S's leaves, an `int`) verifies; `f(&s, &s.x)` fails at the caller's explicit `assert q != loc(member(s, 0), 0)`, the only error. Control: without that assert Silicon fails first at the call with its own `insufficient.permission` (exit 3 territory): the explicit separation by leaf is what keeps it out.
+- **(c) nested overlap:** `g(&t, &u.s)` verifies; `g(&t, &t.s)` fails at `assert s != loc(member(t, 0), 0)`, the only error (the same control).
+- **(d) loop liveness:** one `acc(lvloc(block_of(s)).lv, kl)` row per root block verifies; one row per leaf fails on entry (`invariant-entry:insufficient.permission`, the second row: twice the snapshot amount over one cell).
+- **(e) copies:** read every source leaf (permission, flag) into temporaries, then write every destination leaf (flag set): `t = s` and the exact self-copy `*p = *p` (also through a call) verify; a source leaf with its flag false fails at its flag assert. A fresh cell has no range fact, so the twin calls nothing after the copy.
+- **(f) `must_init` over a struct:** the leaves' permissions without flags on entry, every leaf's flag promised; writing both verifies, writing one fails at the return row of the other's flag.
+- **(g) member-address `WF`:** `&p->y` = `loc(member(p, 1), 0)` passed to a callee with `requires WF(q)` and `owns(*q)` verifies when the caller's atom states `len(member(p, 1)) == 1`; with only `live(p)`, or the leaf permissions without the length facts, `WF(q)` fails — only its conjunct `offset_of(q) <= len(block_of(q))` (the others follow from `loc_inv`). So record 0043 item 8's `WF_S` carries the member lengths with every struct pointer (`live(p)` included).
+- **(h) vacuity:** each method cloned with `assert false` at its start and end, after each allocation and after each call: every one fails at its expected line (a 5, b 5, c 5, d 3, e 6, f 5, g 5 errors).
+- **Controls:** a wrong value in (a), (b), (c), (e), (f) fails exactly there; dropping the loop's `ds ==> flag` row in (d) fails the read after the loop.

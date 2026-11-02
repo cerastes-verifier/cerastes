@@ -139,6 +139,7 @@ class Encoder {
     // User labels: one VIR id per label entity (decision 0015 item 2); the C/C++ position of each user `goto`, for the
     // diagnostics of vir::goto_problems.
     bool in_for_step = false;  // encoding the increment of a `for` loop
+    int in_conditional_arm = 0;  // inside an arm of a `void` `?:` statement: a struct copy there is rejected (decision 0043 item 7, audit B3)
     // Decision 0041 item 6 (audit B2): while the original expression of a folded address constant is encoded (const_depth is raised with it), `&g`
     // inside it is read as `GlobalAddr`; `addr_const` counts those levels.
     int addr_const = 0;
@@ -214,6 +215,57 @@ class Encoder {
     std::string name;                    // the type as a message names it when !ok
   };
   std::map<a_type_ptr, EnumInfo> enums_;
+
+  // Structures (decision 0043 item 2): one VIR struct type per EDG class entry of a verified file, and what was decided about it.  A rejected
+  // definition is reported once, at the definition (or at the member), so the uses of its type stay silent (`silent`), as for enumerations.
+  struct StructInfo {
+    bool ok = false;
+    bool silent = false;  // !ok and already reported at the definition
+    vir::Type type = vir::Type::void_type();
+    Diag diag = Diag::unsupported_type;  // the diagnostic when !ok and !silent (a system struct, at its use)
+    std::string name;                    // the type as a message names it when !ok
+  };
+  std::map<a_type_ptr, StructInfo> structs_;
+  // The class-scope entities that make a C++ class more than a C-like aggregate (decision 0043 item 2), by class: member functions the user wrote,
+  // static data members and member types.  Filled on first use from the entities of the run.
+  std::map<a_type_ptr, std::string> class_features_;
+  std::map<a_type_ptr, std::string> class_implicit_;  // implicit special members that are not trivial or are deleted
+  bool class_features_done_ = false;
+  void collect_class_features();
+  const StructInfo& struct_info(a_type_ptr t);
+  static bool is_struct_kind(a_type_ptr t) { return t != nullptr && (t->kind == tk_struct || t->kind == tk_class); }
+  // The VIR type of an object of struct type `type` (a struct local, a member, a pointee) or a rejection (decision 0043).
+  VType struct_vtype(a_type_ptr type) {
+    VType r;
+    a_type_ptr t = type != nullptr ? skip_typerefs(type) : nullptr;
+    if (t == nullptr) {
+      r.name = "<unknown>";
+      return r;
+    }
+    r.name = render_type(t);
+    const a_type_qualifier_set q = f_get_type_qualifiers(type, TRUE);
+    if ((q & TQ_VOLATILE) != 0) {
+      r.name = "volatile " + r.name;
+      return r;
+    }
+    if ((q & TQ_C11_ATOMIC) != 0) {
+      r.name = "_Atomic " + r.name;
+      return r;
+    }
+    const StructInfo& si = struct_info(t);
+    r.ok = si.ok;
+    r.silent = si.silent;
+    r.diag = si.diag;
+    if (si.ok) r.t = si.type;
+    else if (!si.name.empty()) r.name = si.name;
+    return r;
+  }
+  // As vtype(type, true), but a struct type is an object type here: the type of a local or of a pointee.
+  VType vtype_object(a_type_ptr type) {
+    a_type_ptr t = type != nullptr ? skip_typerefs(type) : nullptr;
+    if (is_struct_kind(t)) return struct_vtype(type);
+    return vtype(type, true);
+  }
   // The enumerators with a written initializer of the enumerations that passed their checks (decision 0018 item 10): each is
   // a named constant of the unit, checked in the prologue.
   std::vector<a_constant_ptr> pending_enumerators_;
@@ -459,6 +511,17 @@ class Encoder {
       case tk_class:
       case tk_struct:
       case tk_union:
+        r.diag = Diag::unsupported_declaration;
+        if (t->kind == tk_union) {
+          r.name += " (a union: effective types, M8)";
+        } else {
+          // A verified struct used as a value (a by-value parameter or result, an operand) is `unsupported_type`, naming M4.5c2; the declaration of a struct
+          // global or `static` local says `unsupported_declaration` (its callers change the tag); a struct that is itself rejected keeps the old tag.
+          const bool closure = t->variant.class_struct_union.extra_info != nullptr && t->variant.class_struct_union.extra_info->is_lambda_closure_class;
+          if (!closure && !t->incomplete && struct_info(t).ok) r.diag = Diag::unsupported_type;
+          r.name += " (a struct used as a value, a global or a `static` local: by-value parameters and results, struct globals and `static` struct locals are M4.5c2, decision 0043 items 8 and 15)";
+        }
+        return r;
       case tk_array:
         r.diag = Diag::unsupported_declaration;
         return r;
@@ -483,11 +546,12 @@ class Encoder {
           return r;
         }
         // Decision 0040 item 2: the pointee may be a pointer, at any depth; the innermost pointee is a bool, an integer or an enumeration.
-        VType e = vtype(pointee, /*allow_ptr=*/true);
+        VType e = vtype_object(pointee);
         if (!e.ok || e.t.is_void()) {
           r.name += e.t.is_void() && e.ok ? " (a pointer to void)"
-                    : is_pointer_type(pointee) ? " (a pointer to a pointer whose innermost pointee is not a bool, an integer or an enumeration)"
-                                               : " (a pointer to a type other than bool, an integer or an enumeration)";
+                    : is_pointer_type(pointee) ? " (a pointer to a pointer whose innermost pointee is not a bool, an integer, an enumeration or a verified struct)"
+                    : is_struct_kind(skip_typerefs(pointee)) ? " (a pointer to " + e.name + ", which is not a verified struct)"
+                                                             : " (a pointer to a type other than bool, an integer, an enumeration or a verified struct)";
           r.silent = e.silent;
           return r;
         }
@@ -537,6 +601,20 @@ class Encoder {
   }
 
   // ---- routines -----------------------------------------------------------------------------------------------
+  // A parameter that is a pointer to a struct (any depth): the contract of an uncalled declaration with one is encoded too (decision 0043 item 9), so
+  // its member atoms are checked like a called one's.
+  static bool has_struct_pointer_param(a_routine_ptr r) {
+    a_routine_type_supplement_ptr x = routine_supplement(r);
+    if (x == nullptr) return false;
+    for (a_param_type_ptr p = x->param_type_list; p != nullptr; p = p->next) {
+      a_type_ptr t = p->type != nullptr ? skip_typerefs(p->type) : nullptr;
+      for (int guard = 0; t != nullptr && t->kind == tk_pointer && !t->variant.pointer.is_reference && guard < 16; ++guard)
+        t = t->variant.pointer.type != nullptr ? skip_typerefs(t->variant.pointer.type) : nullptr;
+      if (is_struct_kind(t)) return true;
+    }
+    return false;
+  }
+
   static bool is_main(a_routine_ptr r) {
     return r->source_corresp.name != nullptr && std::strcmp(r->source_corresp.name, "main") == 0 &&
            !r->source_corresp.is_class_member;
@@ -876,12 +954,24 @@ class Encoder {
         continue;
       }
       bool owns_in = false, owns_out = false, reads_beside = false;
+      bool member_beside = false;
       for (const vir::AtomSite& st : sites) {
-        if (st.atom->a == nullptr || st.atom->a->kind != Expr::Kind::Formal || st.atom->a->index != m.index) continue;
+        if (st.atom->a == nullptr) continue;
+        const Expr* root = vir::member_root(st.atom->a);
+        if (root->kind != Expr::Kind::Formal || root->index != m.index) continue;
+        if (root != st.atom->a) {  // an atom on a member of the marked pointee (decision 0043 item 9)
+          member_beside = true;
+          continue;
+        }
         if (st.atom->atom == vir::AtomKind::Owns) (st.in_ensures ? owns_out : owns_in) = true;
         else if (st.atom->atom == vir::AtomKind::Reads) reads_beside = true;
       }
       if (contract_rejected) continue;
+      if (member_beside) {
+        reject(Diag::unsupported_annotation, m.pos,
+               "\"" + an + "\" on `" + pname + "` beside an atom on a member of `*" + pname + "` (a marker needs a whole `owns(*" + pname + ")`, decision 0043 item 9)");
+        continue;
+      }
       if (reads_beside) {
         reject(Diag::unsupported_annotation, m.pos,
                "\"" + an + "\" on `" + pname + "` beside `reads(*" + pname + ")` (a borrowed read of an object that may hold no value; the contract of a marked parameter owns it, decision 0042 item 4)");
@@ -903,7 +993,7 @@ class Encoder {
   // Decision 0042 item 6 (owner question 86): where a marked parameter's flag is not promised the pointee has no value to read, so the contract may not
   // read `*p`: in a `requires`, in `old(...)` and `decreases`, and in the `ensures` of a `ref_to_uninit` parameter (a `must_init` one's `ensures` may).
   // `pf` is the formal `p`; true (and reported) when the read is rejected.
-  bool reject_marked_read(const Expr* pf, const a_source_position& at, bool is_old) {
+  bool reject_marked_read(const Expr* pf, const a_source_position& at, bool is_old, const std::string& member_place = "") {
     if (pf == nullptr || pf->kind != Expr::Kind::Formal || cx_.fn == nullptr || pf->index < 0 ||
         static_cast<size_t>(pf->index) >= cx_.fn->params.size())
       return false;
@@ -913,8 +1003,9 @@ class Encoder {
     if (!(is_old || cx_.annot != Annot::ensures || pr.init == vir::InitMarker::RefToUninit)) return false;
     const std::string pname = pr.name.empty() ? "arg" + std::to_string(static_cast<size_t>(pf->index) + 1) : pr.name;
     const char* an = marker_name(pr.init);
-    const std::string place = "`*" + pname + "`";
-    const std::string what = is_old ? "a read of `old(*" + pname + ")`" : cx_.annot == Annot::decreases ? "a `decreases(*" + pname + ")`"
+    const std::string place = member_place.empty() ? "`*" + pname + "`" : "`" + member_place + "`";
+    const std::string shown = member_place.empty() ? "*" + pname : member_place;
+    const std::string what = is_old ? "a read of `old(" + shown + ")`" : cx_.annot == Annot::decreases ? "a `decreases(" + shown + ")`"
                            : in_ensures ? "a postcondition that reads " + place : "a precondition that reads " + place;
     reject(Diag::unsupported_annotation, at,
            what + ", which `cerastes::" + an + "` on `" + pname + "` says may hold no value " +
@@ -941,13 +1032,16 @@ class Encoder {
         if (list == 1 && f->noreturn) continue;  // a function declared not to return has no `ensures` (decision 0015 item 4)
         bool merge = false, bad = false;
         for (const vir::AtomSite& st : sites) {
-          if (st.in_ensures != (list == 1) || st.atom->a == nullptr || st.atom->a->kind != Expr::Kind::Formal || st.atom->a->index != o.index) continue;
-          if (st.atom->atom == vir::AtomKind::Owns && vir::atom_guard_shape(st, o.index) != vir::GuardShape::Other) merge = true;
+          if (st.in_ensures != (list == 1) || st.atom->a == nullptr) continue;
+          const Expr* oroot = vir::member_root(st.atom->a);
+          if (oroot->kind != Expr::Kind::Formal || oroot->index != o.index) continue;
+          if (oroot != st.atom->a) bad = true;  // an atom on a member of an owning pointee (decision 0043 item 9)
+          else if (st.atom->atom == vir::AtomKind::Owns && vir::atom_guard_shape(st, o.index) != vir::GuardShape::Other) merge = true;
           else bad = true;
         }
         if (bad) {
           reject(Diag::unsupported_annotation, o.pos,
-                 "\"cerastes::owning\" on `" + pname + "` beside `reads`, `live` or a guarded `owns` of `" + pname + "` in its `" +
+                 "\"cerastes::owning\" on `" + pname + "` beside `reads`, `live`, an atom on a member or a guarded `owns` of `" + pname + "` in its `" +
                      (list == 0 ? "requires" : "ensures") + "` (`" + pname + "` is an owning parameter: its contract already holds `" + pname +
                      " == NULL || owns(*" + pname + ")`)");
           continue;
@@ -1026,6 +1120,12 @@ class Encoder {
     // Decision 0037 item 2: `restrict` on a pointer parameter is accepted only when the contract owns its pointee and returns it.
     for (int k : restricted) {
       int other = -1;
+      if (const std::string hazard = vir::restrict_hazard(*f, k); !hazard.empty()) {  // decision 0043 item 10 (audit B2)
+        reject(Diag::unsupported_annotation, at,
+               "a `restrict` parameter `" + (f->params[static_cast<size_t>(k)].name.empty() ? "arg" + std::to_string(k + 1) : f->params[static_cast<size_t>(k)].name) +
+                   "`: " + hazard + " (decision 0043 item 10: `restrict` stays rejected here until M8 models it)");
+        continue;
+      }
       if (vir::restrict_backed(*f, k, &other)) continue;
       auto pname = [&](int i) { return f->params[static_cast<size_t>(i)].name.empty() ? "arg" + std::to_string(i + 1) : f->params[static_cast<size_t>(i)].name; };
       if (other < 0)
@@ -1733,6 +1833,12 @@ class Encoder {
       reject(Diag::unsupported_declaration, v->source_corresp.decl_position, "a local variable used in its own initializer");
       return nullptr;
     }
+    if (it->second->type.is_struct()) {
+      reject(Diag::unsupported_expression, e->position,
+             "the struct `" + it->second->name + "` used as a value (a struct is reached through its members, `&s` and whole-struct copies; "
+             "struct values across calls are M4.5c2, decision 0043 items 7 and 8)");
+      return nullptr;
+    }
     const Expr* local = b_.local(it->second, loc_of(e->position));
     if (it->second->type.is_ptr()) b_.text(local, it->second->name);  // for the messages of decision 0032 item 6
     return local;
@@ -1862,6 +1968,7 @@ class Encoder {
     // The type first, so that the message names the real reason (an array of const is not "not const").
     const bool mutable_obj = !is_const_object(v);  // decision 0041: a mutable global is a block of the program, a pointer one included
     VType vt = vtype(v->type, mutable_obj);
+    if (!vt.ok && vt.diag == Diag::unsupported_type && is_struct_kind(skip_typerefs(v->type))) vt.diag = Diag::unsupported_declaration;  // a struct global: M4.5c2
     if (!vt.ok && !mutable_obj && is_pointer_type(v->type) && !vt.silent) vt.name = render_type(skip_typerefs(v->type)) + " (a pointer global variable)";
     if (!vt.ok || vt.t.is_void()) {
       if (vt.ok) vt.name = "void";
@@ -1949,7 +2056,16 @@ class Encoder {
       rejected_globals_.insert(v);
       return nullptr;
     };
-    if (v->source_corresp.is_class_member) return refuse("a static data member (M7)");
+    if (v->source_corresp.is_class_member) {
+      // The class is reported once, at its definition (struct_info); a static member of a rejected class adds no second report.
+      a_scope_ptr ps = v->source_corresp.parent_scope;
+      a_type_ptr oc = ps != nullptr && ps->kind == sck_class_struct_union ? ps->variant.assoc_type : nullptr;
+      if (oc != nullptr && is_struct_kind(oc) && !struct_info(oc).ok && struct_info(oc).silent) {
+        rejected_globals_.insert(v);
+        return nullptr;
+      }
+      return refuse("a static data member (M7)");
+    }
     if (v->is_template_variable || v->template_info != nullptr || v->is_prototype_instantiation) return refuse("a variable template (M5)");
     if (v->is_thread_local) return refuse(owner != nullptr ? "a thread_local static local variable" : "a thread_local global variable (M8)");
     if (v->is_weak || v->is_weakref) return refuse("a weak global variable (another unit may replace it at link time)");
@@ -2181,6 +2297,7 @@ class Encoder {
       return;
     }
     VType vt = vtype(v->type, true);
+    if (!vt.ok && vt.diag == Diag::unsupported_type && is_struct_kind(skip_typerefs(v->type))) vt.diag = Diag::unsupported_declaration;  // a `static` struct local: M4.5c2
     if (!vt.ok || vt.t.is_void()) {
       if (vt.ok) vt.name = "void";
       reject_type(vt, at);
@@ -2520,6 +2637,9 @@ class Encoder {
       case enk_lambda:
         reject(Diag::unsupported_declaration, e->position, "a lambda expression");
         return nullptr;
+      case enk_temp_init:
+        reject(Diag::unsupported_expression, e->position, "a compound literal (M4.5c2, decision 0043 item 15)");
+        return nullptr;
       default:
         reject(Diag::unsupported_expression, e->position, std::string("an expression of kind ") + name_of(static_cast<an_expr_node_kind>(e->kind)));
         return nullptr;
@@ -2661,12 +2781,22 @@ class Encoder {
     an_expr_node_ptr inner = arg->variant.operation.operands;
     while (inner != nullptr && inner->kind == enk_operation && inner->variant.operation.kind == eok_lvalue_adjust)
       inner = inner->variant.operation.operands;
+    // `old(p->x)`, `old(p->t.x)` (decision 0043 item 9): the member's value on entry.
+    if (is_member_node(inner)) {
+      ++cx_.old_depth;
+      const Expr* a = contract_place_address(inner);
+      --cx_.old_depth;
+      if (a == nullptr) return nullptr;
+      if (reject_marked_read(vir::member_root(a), e->position, true, vir::place_text(*a))) return nullptr;
+      const Expr* rd = b_.deref(a, loc_of(e->position));
+      return finish(e, b_.old(rd, loc_of(e->position)));
+    }
     // `old(*p)` of a pointer parameter (decision 0037 item 5): the cell's value on entry.
     if (inner != nullptr && inner->kind == enk_operation && inner->variant.operation.kind == eok_indirect &&
         inner->variant.operation.operands != nullptr && inner->variant.operation.operands->next == nullptr) {
       an_expr_node_ptr pn = peel_place(inner->variant.operation.operands);
       if (pn->kind != enk_param_ref) {
-        reject(Diag::unsupported_annotation, e->position, "\"cerastes::old\" of a place other than `*p` of a pointer parameter (through a pointer global, a member or an element: M4.5c, M4.5e1)");
+        reject(Diag::unsupported_annotation, e->position, "\"cerastes::old\" of a place other than `*p` of a pointer parameter (through a pointer global or a heap read: M4.5c2; an element: M4.5e1)");
         return nullptr;
       }
       ++cx_.old_depth;
@@ -2675,6 +2805,10 @@ class Encoder {
       if (pf == nullptr) return nullptr;
       if (!pf->type.is_ptr()) {
         reject(Diag::unsupported_expression, e->position, "a dereference of something that is not a pointer to a bool or an integer");
+        return nullptr;
+      }
+      if (pf->type.pointee != nullptr && pf->type.pointee->is_struct()) {
+        reject(Diag::unsupported_annotation, e->position, "`old(*p)` of a whole struct (write `old(p->x)` for a member's old value, decision 0043 item 9)");
         return nullptr;
       }
       if (reject_marked_read(pf, e->position, true)) return nullptr;  // decision 0042 item 6
@@ -2711,6 +2845,74 @@ class Encoder {
 
   static bool is_indirect_node(an_expr_node_ptr n) {
     return n != nullptr && n->kind == enk_operation && n->variant.operation.kind == eok_indirect;
+  }
+
+  // A place of a contract rooted at a pointer parameter or the result, as an address expression (decision 0043 item 9; P65 item 7): `*p` of a pointer to a
+  // struct (the whole object), `p->m`, `(*p).m`, `p->t.m` (a member path over the parameter), `r->m` of the result in an `ensures`.  The root is the
+  // Formal or Result node; a place reached through another read (`p->q->x`, `**pp`, `*gp`) is M4.5c2's, and `old(*p).x` is rejected with a pointer to
+  // `old(p->x)`.  Null (reported) otherwise.
+  an_expr_node_ptr place_root_ = nullptr;  // the parameter reference the last contract_place_address reached
+  std::set<std::pair<const vir::Function*, int>> const_member_owns_reported_;  // (function, parameter) whose `owns` of a member of a const struct was reported
+  const Expr* contract_place_address(an_expr_node_ptr n, int depth = 0) {
+    n = peel_place(n);
+    if (n == nullptr || depth > 16) return nullptr;
+    const a_source_position at = n->position;
+    auto heap_read = [&]() {
+      reject(Diag::unsupported_annotation, at,
+             "a place reached through another read (`p->q->x`, `*p->q`, `**pp`): a place reached through a heap read is M4.5c2, decision 0043 item 9");
+      return nullptr;
+    };
+    auto old_member = [&]() {
+      reject(Diag::unsupported_annotation, at,
+             "a member of `old(*p)` (the old value of a whole struct): write `old(p->x)` for the member's old value, decision 0043 item 9");
+      return nullptr;
+    };
+    if (n->kind == enk_param_ref) {
+      place_root_ = n;
+      return param_reference(n);
+    }
+    // `S{1, 2}.x`, `f().x`, a compound literal: a member of a temporary (a struct value: M4.5c2).
+    if (n->type != nullptr && is_struct_kind(skip_typerefs(n->type)) &&
+        (n->kind == enk_temp_init || (n->kind == enk_operation && (n->variant.operation.kind == eok_cast || n->variant.operation.kind == eok_call ||
+                                                                   n->variant.operation.kind == eok_comma || n->variant.operation.kind == eok_question)))) {
+      reject(Diag::unsupported_annotation, at, "a member of a temporary (struct values: M4.5c2, decision 0043 item 15)");
+      return nullptr;
+    }
+    if (n->kind != enk_operation) return heap_read();
+    const an_expr_operator_kind k = n->variant.operation.kind;
+    auto ops = operands_of(n);
+    if (k == eok_ref_indirect) return old_member();  // C++: `old(*p).x` is dot_field(ref_indirect(call(old, ...)))
+    if (k == eok_indirect) {
+      if (ops.size() != 1) return heap_read();
+      an_expr_node_ptr in = peel_place(ops[0]);
+      if (in->kind == enk_param_ref) {
+        place_root_ = in;
+        const Expr* pf = param_reference(in);
+        if (pf == nullptr) return nullptr;
+        if (!pf->type.is_ptr() || pf->type.pointee == nullptr || !pf->type.pointee->is_struct()) {
+          reject(Diag::unsupported_annotation, at, "a member of something that is not a pointer to a verified struct");
+          return nullptr;
+        }
+        return pf;
+      }
+      if (in->kind == enk_operation && (in->variant.operation.kind == eok_cast || in->variant.operation.kind == eok_call)) return old_member();  // C: `*(T *)cerastes_old_(...)`
+      return heap_read();
+    }
+    if (k == eok_points_to_field) {
+      if (ops.size() != 2) return heap_read();
+      an_expr_node_ptr in = peel_place(ops[0]);
+      if (in->kind != enk_param_ref) return in->kind == enk_operation && in->variant.operation.kind == eok_cast ? old_member() : heap_read();
+      place_root_ = in;
+      const Expr* pf = param_reference(in);
+      if (pf == nullptr) return nullptr;
+      return member_of(pf, ops[1], at);
+    }
+    if (k == eok_dot_field) {
+      if (ops.size() != 2) return heap_read();
+      const Expr* base = contract_place_address(ops[0], depth + 1);
+      return member_of(base, ops[1], at);
+    }
+    return heap_read();
   }
 
   // `&g` as the IL writes it in an annotation: `eok_address_of` over the variable of a mutable global (peeling the front end's wrappers).
@@ -2794,6 +2996,29 @@ class Encoder {
              "\"" + name + "\" of the address of a global (a global's liveness is never in doubt: `reads(g)` or `owns(g)`, decision 0041 item 7)");
       return nullptr;
     }
+    if (fn != SpecFn::live && is_member_node(a)) {
+      // `owns(p->x)`, `reads(p->t)`, `owns(p->t.x)`, `owns((*p).x)` (decision 0043 item 9): an atom on a member place of a pointer parameter.
+      const Expr* addr = contract_place_address(a);
+      if (addr == nullptr) return nullptr;
+      const Expr* rootE = vir::member_root(addr);
+      if (rootE->kind != Expr::Kind::Formal) {
+        reject(Diag::unsupported_annotation, e->position, "\"" + name + "\" of a member of `*result` (an atom on `*result`, an owning result: M4.5d2)");
+        return nullptr;
+      }
+      if (fn == SpecFn::owns) {  // decision 0040 item 2 / 0043 item 2: no write permission to a const object
+        a_type_ptr rt = place_root_ != nullptr && place_root_->type != nullptr ? skip_typerefs(place_root_->type) : nullptr;
+        if (rt != nullptr && rt->kind == tk_pointer && rt->variant.pointer.type != nullptr &&
+            (f_get_type_qualifiers(rt->variant.pointer.type, TRUE) & TQ_CONST) != 0) {
+          if (!const_member_owns_reported_.insert({cx_.fn, rootE->index}).second) return nullptr;  // once per parameter: the first atom says it
+          reject(Diag::unsupported_annotation, e->position, "\"" + name + "\" of a member of a `const` struct (a function that only reads it takes `reads`, decisions 0040 item 2, 0043 item 2)");
+          return nullptr;
+        }
+      }
+      const vir::AtomKind kind = fn == SpecFn::owns ? vir::AtomKind::Owns : vir::AtomKind::Reads;
+      const Expr* atom = b_.atom(kind, addr, -1, loc_of(e->position));
+      atom_pos_[atom] = e->position;
+      return atom;
+    }
     if (fn == SpecFn::live) {
       pn = a;
     } else {
@@ -2806,19 +3031,24 @@ class Encoder {
         return nullptr;
       } else {
         reject(Diag::unsupported_annotation, e->position,
-               "\"" + name + "\" of a place other than `*p` of a pointer parameter or a global variable (`*local`, a member, an element or `*result`: "
-               "M4.5c, M4.5e1, M4.5d2)");
+               "\"" + name + "\" of a place other than `*p` of a pointer parameter or a global variable (`*local`, an element or `*result`: M4.5e1, M4.5d2; a place reached through a heap read: "
+               "M4.5c2, decision 0043 item 15)");
         return nullptr;
       }
     }
     if (pn != nullptr && pn->kind == enk_operation && pn->variant.operation.kind == eok_indirect) {
       reject(Diag::unsupported_annotation, e->position,
-             "\"" + name + "\" of a place reached through a heap read (`owns(**pp)`, `live(*pp)`: M4.5c, decision 0040 item 6)");
+             "\"" + name + "\" of a place reached through a heap read (`owns(**pp)`, `live(*pp)`: M4.5c2, decision 0040 item 6)");
       return nullptr;
     }
     if (pn != nullptr && pn->kind == enk_variable && pn->variant.variable.ptr != nullptr && global_of(pn->variant.variable.ptr) != nullptr) {
       reject(Diag::unsupported_annotation, e->position,
-             "\"" + name + "\" of a place reached through a pointer global (`owns(*gp)`, `live(gp)`: a place reached through a heap read, M4.5c, decision 0041 item 7)");
+             "\"" + name + "\" of a place reached through a pointer global (`owns(*gp)`, `live(gp)`: a place reached through a heap read, M4.5c2, decision 0041 item 7)");
+      return nullptr;
+    }
+    if (pn != nullptr && is_member_node(pn)) {  // `owns(*p->next)`, `live(p->next)`: through a pointer member
+      reject(Diag::unsupported_annotation, e->position,
+             "\"" + name + "\" of a place reached through a pointer member (`owns(*p->next)`, `live(p->next)`): a place reached through a heap read is M4.5c2, decision 0043 item 15");
       return nullptr;
     }
     if (pn == nullptr || pn->kind != enk_param_ref) {
@@ -2870,12 +3100,12 @@ class Encoder {
       pn = peel_place(a->variant.operation.operands);
     } else {
       reject(Diag::unsupported_annotation, e->position,
-             "\"" + name + "\" of a place other than `*q` of a pointer variable (a local, a member or an element: M4.5c, M4.5e1)");
+             "\"" + name + "\" of a place other than `*q` of a pointer variable (a member of a struct or a struct pointer: M4.5c2, decision 0043 item 15; a local or an element: M4.5e1)");
       return nullptr;
     }
     if (pn != nullptr && pn->kind == enk_operation && pn->variant.operation.kind == eok_indirect) {
       reject(Diag::unsupported_annotation, e->position,
-             "\"" + name + "\" of a place reached through a heap read (`owns(**pp)`, `live(*pp)`: M4.5c, decision 0040 item 6)");
+             "\"" + name + "\" of a place reached through a heap read (`owns(**pp)`, `live(*pp)`: M4.5c2, decision 0040 item 6)");
       return nullptr;
     }
     if (pn == nullptr || pn->kind != enk_variable) {
@@ -2890,7 +3120,12 @@ class Encoder {
     }
     if (q->var != nullptr && q->var->address_taken) {  // audit B4: its value is a read of the heap, so the place is reached through a heap read
       reject(Diag::unsupported_annotation, e->position,
-             "\"" + name + "\" of a pointer variable whose address is taken (a place reached through a heap read: M4.5c, decision 0040 item 6)");
+             "\"" + name + "\" of a pointer variable whose address is taken (a place reached through a heap read: M4.5c2, decision 0040 item 6)");
+      return nullptr;
+    }
+    if (fn != SpecFn::live && q->type.pointee != nullptr && q->type.pointee->is_struct()) {
+      reject(Diag::unsupported_annotation, e->position,
+             "\"" + name + "\" of a struct place in a loop invariant (0040 item 5's machinery is per cell; the held struct places are every loop's automatic places already: M4.5c2, decision 0043 item 15)");
       return nullptr;
     }
     const vir::AtomKind kind = fn == SpecFn::owns ? vir::AtomKind::Owns : fn == SpecFn::reads ? vir::AtomKind::Reads : vir::AtomKind::Live;
@@ -2976,13 +3211,23 @@ class Encoder {
         deref = true;
       }
     }
+    if (param == nullptr && x->kind == enk_operation && x->variant.operation.kind == eok_address_of && x->variant.operation.operands != nullptr &&
+        x->variant.operation.operands->next == nullptr && is_member_node(peel_place(x->variant.operation.operands))) {
+      // `cerastes_old(p->x)` (decision 0043 item 9): the address of a member place of a parameter.
+      ++cx_.old_depth;
+      const Expr* a = contract_place_address(peel_place(x->variant.operation.operands));
+      --cx_.old_depth;
+      if (a == nullptr) return nullptr;
+      if (reject_marked_read(vir::member_root(a), where, true, vir::place_text(*a))) return nullptr;
+      return finish(ind, b_.old(b_.deref(a, l), l));
+    }
     if (param == nullptr) {
       // `old(g)` of a mutable global (decision 0041 item 7): `&g` is an address constant (P63 A5, both modes) or `eok_address_of` over the variable.
       vir::Global* g = global_of_address_constant(x);
       if (g == nullptr) g = global_of_address_of(x);
       if (g != nullptr) return finish(ind, b_.old(b_.deref(b_.global_addr(g, l), l), l));
       reject(Diag::unsupported_annotation, where,
-             "\"cerastes_old\" of a place other than a parameter, `*p` of a pointer parameter or a global (through a pointer global, a member or an element: M4.5c, M4.5e1)");
+             "\"cerastes_old\" of a place other than a parameter, `*p` of a pointer parameter or a global (through a pointer global or a heap read: M4.5c2; an element: M4.5e1)");
       return nullptr;
     }
     ++cx_.old_depth;
@@ -2992,6 +3237,10 @@ class Encoder {
     if (deref) {  // `old(*p)`
       if (!pf->type.is_ptr()) {
         reject(Diag::unsupported_expression, where, "\"cerastes_old\" of something that is not a place");
+        return nullptr;
+      }
+      if (pf->type.pointee != nullptr && pf->type.pointee->is_struct()) {
+        reject(Diag::unsupported_annotation, where, "`old(*p)` of a whole struct (write `old(p->x)` for a member's old value, decision 0043 item 9)");
         return nullptr;
       }
       if (reject_marked_read(pf, where, true)) return nullptr;  // decision 0042 item 6
@@ -3027,14 +3276,14 @@ class Encoder {
     if (pn->kind != enk_param_ref) {
       if (pn->kind == enk_operation && pn->variant.operation.kind == eok_indirect)
         reject(Diag::unsupported_annotation, ind->position,
-               "a read of `**pp` in a contract (a place reached through a heap read: M4.5c, decision 0040 item 6)");
+               "a read of `**pp` in a contract (a place reached through a heap read: M4.5c2, decision 0040 item 6)");
       else if (pn->kind == enk_variable && pn->variant.variable.ptr != nullptr && global_of(pn->variant.variable.ptr) != nullptr)
         reject(Diag::unsupported_annotation, ind->position,
-               "a read of `*gp` of a pointer global in a contract (a place reached through a heap read: M4.5c, decision 0041 item 7)");
+               "a read of `*gp` of a pointer global in a contract (a place reached through a heap read: M4.5c2, decision 0041 item 7)");
       else
         reject(Diag::unsupported_annotation, ind->position,
-               "a dereference in a contract of something other than a pointer parameter or the result (a local, a member or an element: "
-               "M4.5c, M4.5e1)");
+               "a dereference in a contract of something other than a pointer parameter or the result (a local or an element: M4.5e1; a place reached "
+               "through a heap read: M4.5c2)");
       return nullptr;
     }
     const Expr* pf = param_reference(pn);
@@ -3042,6 +3291,10 @@ class Encoder {
     // `*result` in an `ensures` is a value (decision 0040 item 4): `param_reference` refuses it under `old`.
     if (!pf->type.is_ptr()) {
       reject(Diag::unsupported_expression, ind->position, "a dereference of something that is not a pointer to a bool or an integer");
+      return nullptr;
+    }
+    if (pf->type.pointee != nullptr && pf->type.pointee->is_struct()) {
+      reject(Diag::unsupported_annotation, ind->position, "a whole struct value in a contract (`*p` of a struct: compare or read its members, decision 0043 item 9)");
       return nullptr;
     }
     if (reject_marked_read(pf, ind->position, cx_.old_depth > 0)) return nullptr;  // decision 0042 item 6
@@ -3086,11 +3339,26 @@ class Encoder {
       if (!st.in_ensures) {
         const_cast<Expr*>(st.atom)->amount = static_cast<int>(req.size());
         for (const vir::AtomSite* o : req)
-          if (o->atom->atom == st.atom->atom && vir::atom_place_key(*o->atom) == vir::atom_place_key(*st.atom))
+          if (o->atom->atom == st.atom->atom && vir::atom_place(*o->atom).valid() && vir::atom_place(*o->atom) == vir::atom_place(*st.atom))
             reject(Diag::unsupported_annotation, pos_of(st.atom),
                    std::string("\"") + spelling(st.atom) + "\" of the same " + (st.atom->a->kind == Expr::Kind::GlobalAddr ? "global" : "parameter") + " twice in a `requires`");
         req.push_back(&st);
       }
+    // Decision 0043 item 9 (audit B1): in one clause list two atoms on one root whose paths are related by prefix but different (`owns(*p) &&
+    // owns(p->x)`, `owns(p->t) && reads(p->t.x)`) would ask twice for one cell: rejected.  Two atoms on one place stay allowed or rejected as before.
+    for (int list = 0; list < 2; ++list)
+      for (size_t i = 0; i < sites.size(); ++i)
+        for (size_t j = 0; j < i; ++j) {
+          if (sites[i].in_ensures != (list == 1) || sites[j].in_ensures != (list == 1)) continue;
+          const vir::PlaceKey a = vir::atom_place(*sites[i].atom), b = vir::atom_place(*sites[j].atom);
+          if (!a.valid() || a.root != b.root || a.path == b.path) continue;
+          const bool a_in_b = a.path.size() < b.path.size() && std::equal(a.path.begin(), a.path.end(), b.path.begin());
+          const bool b_in_a = b.path.size() < a.path.size() && std::equal(b.path.begin(), b.path.end(), a.path.begin());
+          if (a_in_b || b_in_a)
+            reject(Diag::unsupported_annotation, pos_of(sites[i].atom),
+                   "\"" + sites[i].atom->c_text + "\" and \"" + sites[j].atom->c_text + "\" name overlapping places in one clause list (one holds the other's cells too): "
+                   "write one atom on the whole place, or atoms on disjoint members (decision 0043 item 9)");
+        }
     // `owns(*p)` and `reads(*p)` of one parameter in one clause list are accepted (decision 0039 item 7): lowering asserts per path that they
     // do not both hold.
     std::set<int> used;
@@ -3098,7 +3366,7 @@ class Encoder {
       if (!st.in_ensures) continue;
       int partner = -1;
       for (const vir::AtomSite* o : req)
-        if (o->atom->atom == st.atom->atom && vir::atom_place_key(*o->atom) == vir::atom_place_key(*st.atom)) partner = o->atom->amount;
+        if (o->atom->atom == st.atom->atom && vir::atom_place(*o->atom).valid() && vir::atom_place(*o->atom) == vir::atom_place(*st.atom)) partner = o->atom->amount;
       if (partner < 0) {
         reject(Diag::unsupported_annotation, pos_of(st.atom),
                std::string("an `ensures` \"") + spelling(st.atom) + "\" with no \"" + spelling(st.atom) + "\" of the same " +
@@ -3189,6 +3457,19 @@ class Encoder {
                    "conversion is not supported yet (decisions 0028 item 1, 0040 item 2; an M8 entry)");
           return nullptr;
         }
+      }
+    }
+    {
+      auto struct_pointer = [](a_type_ptr t) {
+        a_type_ptr u = t != nullptr ? skip_typerefs(t) : nullptr;
+        a_type_ptr pt = u != nullptr && u->kind == tk_pointer && !u->variant.pointer.is_reference ? u->variant.pointer.type : nullptr;
+        return is_struct_kind(pt != nullptr ? skip_typerefs(pt) : nullptr);
+      };
+      if (struct_pointer(e->type) || struct_pointer(operand->type)) {
+        reject(Diag::unsupported_expression, e->position,
+               "a conversion between a pointer to a struct and a pointer to another type (`(int *)&s`, `(struct T *)p`): `&s` and `&s.x` would be one address "
+               "in C and two in the model (decisions 0028 item 1, 0043 item 5)");
+        return nullptr;
       }
     }
     reject(Diag::unsupported_expression, e->position, "a conversion to or from a pointer type");
@@ -3338,6 +3619,135 @@ class Encoder {
     }
   }
 
+  // ---- structures: places and members (decision 0043 item 5; P51: `s.f` is dot_field(var s, field f), `p->f` points_to_field(p, f), `(*p).f`
+  // dot_field(indirect(p), f), each lvalue node of the chain marked is_lvalue, the outermost read not) ----------------------------------------
+  // The member of the struct that `base` (a pointer to a struct) points to which the field node `fnode` names: `&base->m`.
+  const Expr* member_of(const Expr* base, an_expr_node_ptr fnode, const a_source_position& at) {
+    if (base == nullptr) return nullptr;
+    if (!base->type.is_ptr() || base->type.pointee == nullptr || !base->type.pointee->is_struct() || base->type.pointee->struct_type == nullptr) {
+      reject(Diag::unsupported_expression, at, "a member access on something that is not a struct or a pointer to a verified struct");
+      return nullptr;
+    }
+    const vir::StructType& st = *base->type.pointee->struct_type;
+    a_field_ptr f = fnode != nullptr && fnode->kind == enk_field ? fnode->variant.field.ptr : nullptr;
+    const char* name = f != nullptr ? f->source_corresp.name : nullptr;
+    if (name != nullptr)
+      for (size_t k = 0; k < st.members.size(); ++k)
+        if (st.members[k].name == name) return b_.member_addr(base, static_cast<int>(k), loc_of(at));
+    reject(Diag::unsupported_expression, at, "a member of " + st.c_name + " that this version cannot read");
+    return nullptr;
+  }
+
+  // The address of the object an lvalue designates, for a struct object or a member of one: `s` (a struct local) is `&s`, `*p` is `p`,
+  // `e.m` is the member `m` of the object at the address of `e`, `p->m` the member of `*p`.  Null (reported) otherwise.
+  const Expr* place_address(an_expr_node_ptr e) {
+    if (e == nullptr) return nullptr;
+    if (cx_.contract) {
+      reject(Diag::unsupported_annotation, e->position, "a member place in a contract (this version reads the places of decision 0043 item 9 in a later step)");
+      return nullptr;
+    }
+    if (e->kind == enk_variable && e->variant.variable.ptr != nullptr) {
+      a_variable_ptr v = e->variant.variable.ptr;
+      if (cx_.rejected_vars.count(v) != 0 || rejected_globals_.count(v) != 0) return nullptr;  // diagnosed at its declaration
+      auto it = cx_.vars.find(v);
+      if (it == cx_.vars.end()) {
+        const char* n = v->source_corresp.name;
+        reject(Diag::unsupported_expression, e->position,
+               std::string("a member of \"") + (n ? n : "?") + "\", which is not a struct local or a pointer of this function (struct globals and `static` struct locals are M4.5c2, decision 0043 item 15)");
+        return nullptr;
+      }
+      if (!it->second->type.is_struct()) {
+        reject(Diag::unsupported_expression, e->position, "a member access on `" + it->second->name + "`, which is not a struct");
+        return nullptr;
+      }
+      // A struct local's own initializer may read its members (`struct S s = {1, s.x};`: an uninitialized member in C; C++ has stored the earlier ones).
+      if (cx_.pending.count(v) != 0) {
+        reject(Diag::unsupported_declaration, v->source_corresp.decl_position, "a local variable used in its own initializer");
+        return nullptr;
+      }
+      return b_.addr_of(it->second, loc_of(e->position));
+    }
+    if (e->kind == enk_operation) {
+      const an_expr_operator_kind k = e->variant.operation.kind;
+      auto ops = operands_of(e);
+      if (k == eok_indirect) {  // `*p` of a pointer to a struct: the place is the pointer's value
+        if (!operand_count(e, 1, ops)) return nullptr;
+        const Expr* a = expr(ops[0]);
+        if (a == nullptr) return nullptr;
+        if (!a->type.is_ptr() || a->type.pointee == nullptr || !a->type.pointee->is_struct()) {
+          reject(Diag::unsupported_expression, e->position, "a dereference of something that is not a pointer to a verified struct");
+          return nullptr;
+        }
+        return a;
+      }
+      if (k == eok_dot_field) {  // `e.m`
+        if (!operand_count(e, 2, ops)) return nullptr;
+        return member_of(place_address(ops[0]), ops[1], e->position);
+      }
+      if (k == eok_points_to_field) {  // `p->m`
+        if (!operand_count(e, 2, ops)) return nullptr;
+        return member_of(expr(ops[0]), ops[1], e->position);
+      }
+    }
+    reject(Diag::unsupported_expression, e->position, "a struct place this version cannot read (only a struct local, `*p` and `.`/`->` chains of them)");
+    return nullptr;
+  }
+
+  static bool is_member_node(an_expr_node_ptr e) {
+    return e != nullptr && e->kind == enk_operation &&
+           (e->variant.operation.kind == eok_dot_field || e->variant.operation.kind == eok_points_to_field);
+  }
+
+  // A read `p->x`, `(*p).t.x` or `r->x` in a contract (decision 0043 item 9): the leaf cell through its member-address chain over the parameter or the
+  // result, in the state the clause reads.  A function's `decreases` and a read of a marked parameter's pointee are rejected.
+  const Expr* contract_member_read(an_expr_node_ptr e) {
+    if (cx_.annot == Annot::decreases) {
+      reject(Diag::unsupported_annotation, e->position, "a member read in a function's `decreases` (M4.5c2, decision 0043 item 9)");
+      return nullptr;
+    }
+    if (e->is_lvalue) {
+      reject(Diag::unsupported_expression, e->position, "a member access used as anything but a value");
+      return nullptr;
+    }
+    if (is_struct_kind(e->type != nullptr ? skip_typerefs(e->type) : nullptr)) {
+      reject(Diag::unsupported_annotation, e->position, "a whole struct value in a contract (compare or read its members, decision 0043 item 9)");
+      return nullptr;
+    }
+    const Expr* a = contract_place_address(e);
+    if (a == nullptr) return nullptr;
+    if (reject_marked_read(vir::member_root(a), e->position, cx_.old_depth > 0, vir::place_text(*a))) return nullptr;  // decision 0042 item 6 by path
+    return finish(e, b_.deref(a, loc_of(e->position)));
+  }
+
+  // A read `s.x`, `p->x`, `(*p).x`, `s.t.x`: the leaf cell through its member-address chain (decision 0043 item 5).
+  const Expr* member_read(an_expr_node_ptr e) {
+    if (e->variant.operation.kind == eok_dot_field) {  // `S{1, 2}.x`, `f().x`: a member of a temporary (struct values: M4.5c2)
+      auto mops = operands_of(e);
+      an_expr_node_ptr b = mops.empty() ? nullptr : mops[0];
+      if (b != nullptr && b->type != nullptr && is_struct_kind(skip_typerefs(b->type)) &&
+          (b->kind == enk_temp_init || (b->kind == enk_operation && (b->variant.operation.kind == eok_cast || b->variant.operation.kind == eok_call ||
+                                                                      b->variant.operation.kind == eok_comma || b->variant.operation.kind == eok_question)))) {
+        reject(Diag::unsupported_expression, e->position, "a member of a temporary (struct values: M4.5c2, decision 0043 item 15)");
+        return nullptr;
+      }
+    }
+    if (cx_.contract && cx_.const_depth == 0) return contract_member_read(e);  // decision 0043 item 9
+    if ((e->is_lvalue && !cx_.loop_clause) || cx_.contract || (cx_.annotation && !cx_.check_clause && !cx_.loop_clause) || cx_.const_depth > 0) {
+      reject(Diag::unsupported_expression, e->position,
+             e->is_lvalue ? "a member access used as anything but a value, the target of an assignment or the operand of `&`"
+                          : "a member access in a contract, an invariant or a measure, or in an expression the compiler folded to a constant");
+      return nullptr;
+    }
+    if (is_struct_kind(e->type != nullptr ? skip_typerefs(e->type) : nullptr)) {
+      reject(Diag::unsupported_expression, e->position,
+             "a struct member that is itself a struct, used as a value (a nested struct is reached through its leaves; whole-struct copies are assignments and initializers)");
+      return nullptr;
+    }
+    const Expr* a = place_address(e);
+    if (a == nullptr) return nullptr;
+    return finish(e, b_.deref(a, loc_of(e->position)));
+  }
+
   // `&x` of a local scalar (decision 0032 item 4).  The unevaluated operand of `sizeof` never gets here: its value is the folded literal.
   const Expr* address_of(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops) {
     if (!operand_count(e, 1, ops)) return nullptr;
@@ -3363,8 +3773,17 @@ class Encoder {
       reject(Diag::unsupported_expression, e->position, "taking an address in a contract, an invariant or a measure, or in an expression the compiler folded to a constant");
       return nullptr;
     }
+    if (is_member_node(o)) {  // `&s.x`, `&p->x`, `&s.t`: the member-address chain as a pointer value (decision 0043 item 5)
+      const Expr* a = place_address(o);
+      if (a != nullptr && in_own_initializer(a)) return nullptr;
+      return a == nullptr ? nullptr : finish(e, a);
+    }
+    if (o->kind == enk_temp_init) {
+      reject(Diag::unsupported_expression, e->position, "the address of a compound literal (an object that is not a local variable: M4.5c2, decision 0043 item 15)");
+      return nullptr;
+    }
     if (o->kind != enk_variable || o->variant.variable.ptr == nullptr) {
-      reject(Diag::unsupported_expression, e->position, "taking the address of anything but a local variable");
+      reject(Diag::unsupported_expression, e->position, "taking the address of anything but a local variable or a member of a struct");
       return nullptr;
     }
     a_variable_ptr v = o->variant.variable.ptr;
@@ -3407,13 +3826,19 @@ class Encoder {
     }
     if (cx_.loop_clause && is_indirect_node(peel_place(ops[0]))) {  // audit B4: `**pp` in an invariant or a measure is a place reached through a heap read
       reject(Diag::unsupported_expression, e->position,
-             "a read of `**pp` in a loop invariant or measure (a place reached through a heap read: M4.5c, decision 0040 item 6)");
+             "a read of `**pp` in a loop invariant or measure (a place reached through a heap read: M4.5c2, decision 0040 item 6)");
       return nullptr;
     }
     const Expr* a = expr(ops[0]);
     if (a == nullptr) return nullptr;
     if (!a->type.is_ptr()) {
       reject(Diag::unsupported_expression, e->position, "a dereference of something that is not a pointer to a bool or an integer");
+      return nullptr;
+    }
+    if (a->type.pointee != nullptr && a->type.pointee->is_struct()) {
+      reject(Diag::unsupported_expression, e->position,
+             "a struct value read through a pointer (a struct is reached through its members; whole-struct copies are assignments and initializers, "
+             "decision 0043 item 7)");
       return nullptr;
     }
     return finish(e, b_.deref(a, loc_of(e->position)));
@@ -3509,6 +3934,8 @@ class Encoder {
         return nullptr;
       case eok_address_of: return address_of(e, ops);
       case eok_indirect: return indirect_read(e, ops);
+      case eok_dot_field:
+      case eok_points_to_field: return member_read(e);
       case eok_ref_indirect:
         if (cx_.contract && ops.size() == 1 && ops[0]->kind == enk_operation && ops[0]->variant.operation.kind == eok_call) {
           a_routine_ptr callee = direct_callee(ops[0]);
@@ -3786,13 +4213,27 @@ class Encoder {
         continue;
       }
       const bool vla = v->is_vla || v->has_variably_modified_type;
-      VType vt = vtype(v->type, true);
+      VType vt = vtype_object(v->type);
       if (!vt.ok || vt.t.is_void()) {
         if (vt.ok) vt.name = "void";
         reject_type(vt, at);
         if (vla) cx_.suppress = true;  // what follows (the size, the deallocation) is the compiler's
         cx_.rejected_vars.insert(v);
         continue;
+      }
+      if (vt.t.is_struct()) {
+        // Decision 0043 item 4: a struct local is a block of its struct type (always a cell).  A `const` one waits for M4.6; an initializer is expanded
+        // into leaf stores (item 6).
+        if ((f_get_type_qualifiers(v->type, TRUE) & TQ_CONST) != 0) {
+          reject(Diag::unsupported_declaration, at, "a `const` struct local (const objects come with M4.6, decision 0043 item 2)");
+          cx_.rejected_vars.insert(v);
+          continue;
+        }
+        if (v->init_kind != initk_none && v->init_kind != initk_dynamic && v->init_kind != initk_static) {
+          reject(Diag::unsupported_declaration, at, "this kind of struct initialization");
+          cx_.rejected_vars.insert(v);
+          continue;
+        }
       }
       // Decision 0042 item 3: `[[cerastes::uninit]]` on a definition without an initializer; it changes nothing in VIR.  Under `--strict-init`
       // (item 8) a definition without an initializer and without the marker is rejected.
@@ -3831,10 +4272,13 @@ class Encoder {
       cx_.vars[v] = var;
       if (marked) cx_.uninit_marked.insert(var);
       // Decision 0032 item 4: a local the front end flags `address_taken` is a cell, a pointer local included (decision 0040 item 2).
-      if (v->address_taken) cx_.fn->mark_address_taken(var);
-      if (v->init_kind == initk_none) {
-        // initk_none and no `stmk_init` statement (P28): the declaration alone, with no initializer expression.
+      if (v->address_taken || vt.t.is_struct()) cx_.fn->mark_address_taken(var);  // a struct local is always a cell (decision 0043 item 4)
+      if (v->init_kind == initk_none || vt.t.is_struct()) {
+        // initk_none and no `stmk_init` statement (P28): the declaration alone, with no initializer expression.  A struct local is declared alone in
+        // every case: its initializer is leaf stores (decision 0043 item 6), at the `stmk_init` (dynamic) or at once (a constant).
         out.push_back(b_.decl(var, nullptr, loc_of(at)));
+        if (vt.t.is_struct() && v->init_kind == initk_static) struct_initializer(v, var, nullptr, v->initializer.constant, at, out);
+        else if (vt.t.is_struct() && v->init_kind == initk_dynamic) cx_.pending.insert(v);
       } else if (v->init_kind == initk_static) {
         // A constant initializer with no `stmk_init` statement.
         if (is_const_object(v) && v->initializer.constant != nullptr)
@@ -3882,6 +4326,364 @@ class Encoder {
     return x;
   }
 
+
+  // ---- struct initializers and copies (decision 0043 items 6 and 7) ------------------------------------------------------------
+  // Whether the place `addr` is a member of the struct local whose initializer is being encoded (decision 0043 item 6, audit B1): a write to it, or its address,
+  // inside that initializer is rejected (reads stay accepted: `{1, s.x}`).  Reported at the variable's declaration.
+  bool in_own_initializer(const Expr* addr) {
+    if (cx_.declaring == nullptr) return false;
+    const Expr* root = vir::member_root(addr);
+    if (root == nullptr || root->kind != Expr::Kind::AddrOf || root->var == nullptr) return false;
+    auto it = cx_.vars.find(cx_.declaring);
+    if (it == cx_.vars.end() || it->second != root->var) return false;
+    reject(Diag::unsupported_declaration, cx_.declaring->source_corresp.decl_position, "a local variable used in its own initializer");
+    return true;
+  }
+
+  // The chain `&root->m1->...->mn` for the member path `path` (each member address built over the same root node).
+  const Expr* leaf_address(const Expr* root, const std::vector<int>& path, const SrcLoc& l) {
+    const Expr* a = root;
+    for (int k : path) a = b_.member_addr(a, k, l);
+    return a;
+  }
+
+  // The value an unmentioned leaf has: zero, `false` or null, as for an object with static storage (item 6).
+  const Expr* zero_leaf(const vir::Type& t, const a_source_position& at) {
+    const SrcLoc l = loc_of(at);
+    if (t.is_bool()) return b_.bool_const(false, l);
+    if (t.is_ptr()) return b_.null_const(t, l);
+    if (is_enum_type(t) && !vir::dec::in_range("0", vir::dec::range_of(*t.int_type))) {
+      reject(Diag::unsupported_declaration, at, "a member of an enumeration type whose values do not include 0, left out of an initializer list (it would be zero; decision 0043 item 6)");
+      return nullptr;
+    }
+    return b_.int_const(t, "0", l);
+  }
+
+  // One element of an initializer list: the leaf it initializes and its constant or expression, in list order.
+  struct InitElem {
+    std::vector<int> path;
+    a_constant_ptr c = nullptr;
+    an_expr_node_ptr e = nullptr;
+    a_source_position at{};
+  };
+
+  // The elements of the aggregate constant `agg` for struct `st` (P65 item 4): the cursor rule (a designator sets the cursor to its field, every
+  // other element initializes the cursor's member and advances it), nested aggregates for nested structs, no element for an absent trailing member.
+  bool collect_init_elems(const vir::StructType& st, std::vector<int>& prefix, a_constant_ptr agg, std::vector<InitElem>& out, const a_source_position& at,
+                          bool elided = false) {
+    size_t cursor = 0;
+    bool ok = true;
+    bool after_designator = false;
+    long last_member = -1;  // the member the previous element initialized (a designator must not go back: out of declaration order, both modes)
+    for (a_constant_ptr c = agg->variant.aggregate.first_constant; c != nullptr; c = c->next) {
+      const a_source_position cp = c->source_corresp.decl_position.seq != 0 ? c->source_corresp.decl_position : at;
+      if (c->kind == ck_designator) {
+        a_field_ptr f = c->variant.designator.is_field_designator && !c->variant.designator.is_generic ? c->variant.designator.variant.field : nullptr;
+        const char* name = f != nullptr ? f->source_corresp.name : nullptr;
+        bool found = false;
+        if (name != nullptr)
+          for (size_t k = 0; k < st.members.size(); ++k)
+            if (st.members[k].name == name) {
+              cursor = k;
+              found = true;
+            }
+        if (!found) {
+          reject(Diag::unsupported_declaration, cp, "a designator in an initializer list that this version cannot read");
+          return false;
+        }
+        // C: a designator that goes back (`{.y = 1, .x = 2}`) is out of declaration order (EDG warns #2904-D; C++ requires the order): rejected.
+        if (static_cast<long>(cursor) <= last_member) {
+          reject(Diag::unsupported_expression, cp, "a designator out of declaration order in an initializer list (`{.y = 1, .x = 2}`; decision 0043 item 6)");
+          return false;
+        }
+        after_designator = true;
+        continue;
+      }
+      if (cursor >= st.members.size()) {
+        reject(Diag::unsupported_declaration, cp, "an initializer list with more elements than the struct has members");
+        return false;
+      }
+      const vir::Type& mt = st.members[cursor].type;
+      prefix.push_back(static_cast<int>(cursor));
+      last_member = static_cast<long>(cursor);
+      const bool by_designator = after_designator;
+      after_designator = false;
+      if (mt.is_struct()) {
+        if (c->kind == ck_aggregate) {
+          // Brace elision over a nested struct (`struct T t = {1, 2, 3};`: -Wmissing-braces) is rejected, except C's universal `{0}` (a lone zero).
+          const bool elision = !c->explicit_braces_on_aggregate && !by_designator;
+          if (elision && !(agg->variant.aggregate.first_constant == c && c->next == nullptr)) {
+            reject(Diag::unsupported_expression, cp, "a nested struct initialized without its own braces (brace elision, -Wmissing-braces): write the inner braces (decision 0043 item 6)");
+            ok = false;
+          } else if (!collect_init_elems(*mt.struct_type, prefix, c, out, cp, elided || elision)) {
+            ok = false;
+          }
+        } else {
+          reject(Diag::unsupported_declaration, cp, "a struct member initialized from a struct value in an initializer list (struct values: M4.5c2, decision 0043 item 6)");
+          ok = false;
+        }
+      } else {
+        InitElem el;
+        el.path = prefix;
+        el.at = cp;
+        if (c->kind == ck_dynamic_init) {
+          a_dynamic_init_ptr dyn = c->variant.dynamic_init.ptr;
+          if (dyn == nullptr || dyn->kind != dik_expression) {
+            reject(Diag::unsupported_declaration, cp, "an initializer element this version cannot read");
+            ok = false;
+          } else {
+            el.e = dyn->variant.expression;
+            if (elided) {
+              reject(Diag::unsupported_expression, cp, "a nested struct initialized without its own braces (brace elision, -Wmissing-braces): write the inner braces (decision 0043 item 6)");
+              ok = false;
+            }
+            out.push_back(el);
+          }
+        } else if (c->kind == ck_integer || c->kind == ck_address) {
+          el.c = c;
+          if (elided && !(c->kind == ck_integer && decimal_value(c) == "0")) {  // only `{0}` may elide braces
+            reject(Diag::unsupported_expression, cp, "a nested struct initialized without its own braces (brace elision, -Wmissing-braces): write the inner braces (decision 0043 item 6)");
+            ok = false;
+          }
+          out.push_back(el);
+        } else {
+          reject(Diag::unsupported_declaration, cp, "an initializer element this version cannot read");
+          ok = false;
+        }
+      }
+      prefix.pop_back();
+      ++cursor;
+    }
+    return ok;
+  }
+
+  // `lhs = src` of two structs, and the initializer `T t = src;` (item 7): the bases are evaluated once (a base that is not a variable's address or
+  // a local pointer is read into a temporary first), every source leaf is read into a temporary, then every destination leaf is written.
+  // `dest` is the destination's address (a chain of member addresses over a base) and `src_node` an lvalue of the same structure type.
+  void copy_struct(const Expr* dest, an_expr_node_ptr dest_node, an_expr_node_ptr src_node, const a_source_position& at, Out& out) {
+    if (dest == nullptr) return;
+    // The source: an lvalue of the structure's type (decision 0043 item 7); a `?:`, comma, assignment, call or compound literal is a struct value.
+    an_expr_node_ptr sn = src_node;
+    const bool lvalue_shape = sn != nullptr && (sn->kind == enk_variable || is_member_node(sn) ||
+                                                (sn->kind == enk_operation && sn->variant.operation.kind == eok_indirect));
+    if (!lvalue_shape) {
+      reject(Diag::unsupported_expression, sn != nullptr ? sn->position : at,
+             "a struct copied from a struct value that is not a variable, `*p` or a member (a `?:`, a comma, an assignment, a call or a compound literal: M4.5c2, decision 0043 item 7)");
+      return;
+    }
+    const bool d_effect = dest_node != nullptr && first_effect(dest_node) != nullptr;
+    const bool s_effect = first_effect(sn) != nullptr;
+    const SrcLoc l = loc_of(at);
+    const Expr* src = place_address(sn);
+    if (src == nullptr) return;
+    if (!dest->type.is_ptr() || !src->type.is_ptr() || dest->type.pointee == nullptr || src->type.pointee == nullptr || *dest->type.pointee != *src->type.pointee ||
+        !dest->type.pointee->is_struct()) {
+      reject(Diag::unsupported_expression, at, "a struct copy whose two sides are not of one verified struct type");
+      return;
+    }
+    auto simple_root = [&](const Expr* a) {
+      const Expr* r = vir::member_root(a);
+      return r->kind == Expr::Kind::AddrOf || r->kind == Expr::Kind::Local;
+    };
+    if ((d_effect || s_effect) && !(simple_root(dest) && simple_root(src))) {
+      reject(Diag::unsequenced_calls, at, "the two sides of a struct copy, one with a side effect and the other not a plain variable or pointer, whose order C leaves open");
+      return;
+    }
+    auto stable = [&](const Expr* a) {
+      std::vector<int> path;
+      const Expr* root = vir::member_root(a, &path);
+      if (root->kind != Expr::Kind::AddrOf && root->kind != Expr::Kind::Local) {
+        vir::Var* t = cx_.fn->new_local("copy_base", root->type, l);
+        out.push_back(b_.decl(t, root, l));
+        const Expr* lt = b_.local(t, l);
+        b_.text(lt, root->c_text.empty() ? "<pointer>" : root->c_text);
+        root = lt;
+      }
+      return leaf_address(root, path, l);
+    };
+    const Expr* s_place = stable(src);
+    const Expr* d_place = stable(dest);
+    const std::vector<vir::StructLeaf> leaves = vir::struct_leaves(*src->type.pointee->struct_type);
+    std::vector<vir::Var*> tmps;
+    for (const vir::StructLeaf& lf : leaves) {
+      vir::Var* t = cx_.fn->new_local("copy_" + std::to_string(tmps.size()), lf.type, l);
+      tmps.push_back(t);
+      out.push_back(b_.decl(t, b_.deref(leaf_address(s_place, lf.path, l), l), l));
+    }
+    for (size_t i = 0; i < leaves.size(); ++i) out.push_back(b_.store(leaf_address(d_place, leaves[i].path, l), b_.local(tmps[i], l), l));
+  }
+
+  // An assignment `lhs = rhs` of two structures as an expression statement (item 7).
+  void struct_assignment_statement(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops, Out& out) {
+    if (ops.size() != 2) return;
+    if (cx_.in_for_step) {
+      reject(Diag::unsupported_expression, e->position, "a struct copy in the increment of a `for` loop (it needs temporaries a step cannot declare)");
+      return;
+    }
+    if (cx_.in_conditional_arm > 0) {
+      reject(Diag::unsupported_expression, e->position, "a struct copy in an arm of a `?:` (a copy is an expression statement, an initializer or a `for` init: decision 0043 item 7)");
+      return;
+    }
+    if (cx_.contract || cx_.annotation || cx_.const_depth > 0) {
+      reject(Diag::unsupported_expression, e->position, "an assignment in an annotation, or in an expression the compiler folded to a constant");
+      return;
+    }
+    const Expr* dest = place_address(ops[0]);
+    if (dest == nullptr) return;
+    copy_struct(dest, ops[0], ops[1], e->position, out);
+  }
+
+  // The initializer of a struct local (item 6): `dik_expression` of a struct lvalue is a copy; `dik_constant` and `dik_nonconstant_aggregate` over an
+  // aggregate store every leaf.  C: every element is evaluated into a temporary before any leaf is stored (the object has no value until the list is
+  // evaluated); C++: each element is stored before the next is evaluated.
+  void struct_initializer(a_variable_ptr v, vir::Var* var, a_dynamic_init_ptr d, a_constant_ptr static_init, const a_source_position& at, Out& out) {
+    cx_.declaring = v;
+    cx_.pending.erase(v);
+    struct Reset {
+      Ctx& c;
+      ~Reset() { c.declaring = nullptr; }
+    } reset{cx_};
+    const vir::StructType& st = *var->type.struct_type;
+    const SrcLoc l = loc_of(at);
+    const Expr* root = b_.addr_of(var, l);
+    if (d != nullptr && d->kind == dik_expression) {  // `struct S t = s;`, `= *p`: a copy
+      copy_struct(root, nullptr, d->variant.expression, at, out);
+      return;
+    }
+    a_constant_ptr agg = nullptr;
+    if (d != nullptr && (d->kind == dik_constant || d->kind == dik_nonconstant_aggregate)) agg = d->variant.constant.ptr;
+    else if (d == nullptr) agg = static_init;
+    else if (d->kind != dik_zero) {
+      reject(Diag::unsupported_declaration, at, "this kind of struct initialization (a constructor, a call or a temporary: C++ class features M7, struct values M4.5c2)");
+      return;
+    }
+    // A compound literal `S s = (S){...}` is a struct value (M4.5c2, decision 0043 item 15): the declaration's dynamic init and its aggregate say so, before and after
+    // the pre-fold substitution below.
+    auto compound = [&](a_constant_ptr c) { return c != nullptr && c->is_compound_literal; };
+    if ((d != nullptr && d->is_compound_literal) || compound(agg)) {
+      reject(Diag::unsupported_declaration, at, "a compound literal as an initializer (a struct value: M4.5c2, decision 0043 item 15)");
+      return;
+    }
+    // C++ may have folded the whole list into constants (`S s = {.x = (s.y = 5)};` is `{5, 0}`): EDG keeps the dynamic initializer it folded under the
+    // aggregate's `expr` (an `enk_initializer`, il_def.h:15711).  The original list is what is encoded, so an effect the fold dropped (a write to a member of
+    // the object being declared among them) is seen and judged as written (decision 0043 item 6, audit B1).
+    if (agg != nullptr && agg->kind == ck_aggregate) {
+      an_expr_node_ptr orig = (agg->expr != nullptr || agg->local_expr_ref) ? expr_node_from_constant(agg) : nullptr;
+      if (orig != nullptr && orig->kind == enk_initializer && orig->variant.initializer.dyn_init != nullptr) {
+        a_dynamic_init_ptr od = orig->variant.initializer.dyn_init;
+        if ((od->kind == dik_nonconstant_aggregate || od->kind == dik_constant) && od->variant.constant.ptr != nullptr &&
+            od->variant.constant.ptr->kind == ck_aggregate)
+          agg = od->variant.constant.ptr;
+      }
+      if (compound(agg) || (orig != nullptr && orig->kind == enk_initializer && orig->variant.initializer.dyn_init != nullptr &&
+                            orig->variant.initializer.dyn_init->is_compound_literal)) {
+        reject(Diag::unsupported_declaration, at, "a compound literal as an initializer (a struct value: M4.5c2, decision 0043 item 15)");
+        return;
+      }
+    }
+    std::vector<InitElem> elems;
+    if (agg != nullptr) {
+      if (agg->kind != ck_aggregate) {
+        reject(Diag::unsupported_declaration, at, "a struct initializer that is not a braced list");
+        return;
+      }
+      if (agg->explicit_parentheses_on_aggregate || agg->explicit_cast_applied) {  // `S s(1, 2)` is told by its parentheses flag, never by a missing braces flag (a braced list may lack it)
+        reject(Diag::unsupported_declaration, at,
+               "a struct initialized with parentheses (`S s(1, 2)`: M7) or from a temporary (`S s = S{...}`, `S s = S()`: M4.5c2), decision 0043 item 6");
+        return;
+      }
+      std::vector<int> prefix;
+      if (!collect_init_elems(st, prefix, agg, elems, at)) return;
+    }
+    const bool c_mode = il_header.source_language == sl_C;
+    // A subobject initialized twice (C, audit B4): the overridden initializer is unevaluated in C23 and evaluated by EDG.  C++ refuses it itself; the zero
+    // fillers of a C++20 designated list (P65 H1) are never a duplicate.
+    if (c_mode) {
+      std::set<std::vector<int>> seen;
+      for (const InitElem& el : elems)
+        if (!seen.insert(el.path).second) {
+          reject(Diag::unsupported_declaration, el.at, "a member initialized twice in one initializer list (decision 0043 item 6)");
+          return;
+        }
+    }
+    size_t dynamic = 0;
+    bool effect = false;
+    for (const InitElem& el : elems)
+      if (el.e != nullptr) {
+        ++dynamic;
+        if (first_effect(el.e) != nullptr) effect = true;
+      }
+    if (c_mode && dynamic >= 2 && effect) {
+      reject(Diag::unsequenced_calls, at, "two elements of an initializer list, one of them with a side effect, whose order C leaves open");
+      return;
+    }
+    // Evaluate: every element's value (a constant is read like a scalar initializer, under the front end's fold), then the stores.
+    struct Ev {
+      const Expr* value = nullptr;
+      vir::Var* tmp = nullptr;
+    };
+    std::vector<Ev> ev(elems.size());
+    std::set<std::vector<int>> set_leaves;
+    auto leaf_type = [&](const InitElem& el) { return vir::struct_member_type(st, el.path); };
+    auto element_value = [&](const InitElem& el) -> const Expr* {
+      const vir::Type lt = leaf_type(el);
+      const Expr* x = nullptr;
+      if (el.e != nullptr) {
+        allow_enum_conversion(el.e);  // decision 0018 item 6 (iii)
+        x = expr(el.e);
+      } else {
+        x = constant_initializer(el.c, el.at);
+      }
+      if (x == nullptr) return nullptr;
+      if (x->type != lt) {
+        reject(Diag::unsupported_expression, el.at, "an initializer element whose type is not its member's type");
+        return nullptr;
+      }
+      return x;
+    };
+    bool ok = true;
+    if (c_mode) {
+      for (size_t i = 0; i < elems.size(); ++i) {
+        const Expr* x = element_value(elems[i]);
+        if (x == nullptr) {
+          ok = false;
+          continue;
+        }
+        if (elems[i].e != nullptr) {
+          ev[i].tmp = cx_.fn->new_local("init_" + std::to_string(i), x->type, l);
+          out.push_back(b_.decl(ev[i].tmp, x, loc_of(elems[i].at)));
+        } else {
+          ev[i].value = x;
+        }
+      }
+      if (!ok) return;
+      for (size_t i = 0; i < elems.size(); ++i) {
+        const SrcLoc el = loc_of(elems[i].at);
+        out.push_back(b_.store(leaf_address(root, elems[i].path, el), ev[i].tmp != nullptr ? b_.local(ev[i].tmp, el) : ev[i].value, el));
+        set_leaves.insert(elems[i].path);
+      }
+    } else {
+      for (size_t i = 0; i < elems.size(); ++i) {
+        const Expr* x = element_value(elems[i]);
+        if (x == nullptr) {
+          ok = false;
+          continue;
+        }
+        const SrcLoc el = loc_of(elems[i].at);
+        out.push_back(b_.store(leaf_address(root, elems[i].path, el), x, el));
+        set_leaves.insert(elems[i].path);
+      }
+      if (!ok) return;
+    }
+    // The leaves the list does not mention are zero (recursively through nested structs, P65 N9).
+    for (const vir::StructLeaf& lf : vir::struct_leaves(st)) {
+      if (set_leaves.count(lf.path) != 0) continue;
+      const Expr* z = zero_leaf(lf.type, at);
+      if (z == nullptr) return;
+      out.push_back(b_.store(leaf_address(root, lf.path, l), z, l));
+    }
+  }
+
   void init_statement(a_statement_ptr s, Out& out) {
     a_dynamic_init_ptr d = s->variant.dynamic_init;
     if (d == nullptr || d->variable == nullptr) {
@@ -3892,6 +4694,10 @@ class Encoder {
     auto it = cx_.vars.find(v);
     if (it == cx_.vars.end() || cx_.pending.count(v) == 0) return;  // rejected at its declaration
     const a_source_position at = v->source_corresp.decl_position.seq ? v->source_corresp.decl_position : s->position;
+    if (it->second->type.is_struct()) {  // decision 0043 item 6
+      struct_initializer(v, it->second, d, nullptr, s->position.seq ? s->position : at, out);
+      return;
+    }
     if (d->kind == dik_expression) {
       initializer(v, it->second, d->variant.expression, nullptr, s->position.seq ? s->position : at, out);
     } else if (d->kind == dik_constant) {
@@ -4005,6 +4811,26 @@ class Encoder {
         return false;
       }
       p->target = *p->addr->type.pointee;
+      if (p->target.is_struct()) {
+        reject(Diag::unsupported_expression, lhs->position, "an assignment of a whole struct (decision 0043 item 7: not read by this version yet)");
+        return false;
+      }
+      return true;
+    }
+    // A member `s.x`, `p->x`, `s.t.x` is a leaf cell, written through its member-address chain (decision 0043 item 5).
+    if (is_member_node(lhs)) {
+      if (cx_.const_depth > 0) {
+        reject(Diag::unsupported_expression, lhs->position, "an assignment to a member in a constant expression");
+        return false;
+      }
+      p->addr = place_address(lhs);
+      if (p->addr == nullptr) return false;
+      if (in_own_initializer(p->addr)) return false;
+      p->target = *p->addr->type.pointee;
+      if (p->target.is_struct()) {
+        reject(Diag::unsupported_expression, lhs->position, "an assignment of a whole struct (decision 0043 item 7: not read by this version yet)");
+        return false;
+      }
       return true;
     }
     // A mutable global or `static` local is written through its address (decision 0041 item 6): a Store through `GlobalAddr`.
@@ -4021,6 +4847,10 @@ class Encoder {
     }
     p->v = lvalue_var(lhs);
     if (p->v == nullptr) return false;
+    if (p->v->type.is_struct()) {
+      reject(Diag::unsupported_expression, lhs->position, "an assignment of a whole struct (decision 0043 item 7: not read by this version yet)");
+      return false;
+    }
     p->target = p->v->type;
     return true;
   }
@@ -4120,6 +4950,11 @@ class Encoder {
       return nullptr;
     }
     const an_expr_operator_kind k = e->variant.operation.kind;
+    if (k == eok_assign && is_struct_kind(e->type != nullptr ? skip_typerefs(e->type) : nullptr)) {
+      reject(Diag::unsupported_expression, e->position,
+             "a struct copy used as a value (`(t = s).x`, `u = (t = s)`): a copy is an expression statement, an initializer or a `for` init (decision 0043 item 7)");
+      return nullptr;
+    }
     AssignParts a;
     const AssignRes res = assignment_parts(e, ops, &a);
     if (res == AssignRes::malformed) {
@@ -4313,8 +5148,10 @@ class Encoder {
     Out t, f;
     const a_source_position tp = ops[1]->position.seq ? ops[1]->position : pos;
     const a_source_position fp = ops[2]->position.seq ? ops[2]->position : pos;
+    ++cx_.in_conditional_arm;
     expression_statement(ops[1], tp, t, /*voided=*/true);
     expression_statement(ops[2], fp, f, /*voided=*/true);
+    --cx_.in_conditional_arm;
     if (c != nullptr) out.push_back(b_.if_stmt(c, block_of(std::move(t), tp), block_of(std::move(f), fp), loc_of(e->position)));
   }
 
@@ -4359,6 +5196,10 @@ class Encoder {
       const an_expr_operator_kind k = e->variant.operation.kind;
       auto ops = operands_of(e);
       const SrcLoc l = loc_of(e->position);
+      if (k == eok_assign && is_struct_kind(e->type != nullptr ? skip_typerefs(e->type) : nullptr)) {  // a struct copy (decision 0043 item 7)
+        struct_assignment_statement(e, ops, out);
+        return;
+      }
       if (is_encoded_assignment_kind(k)) {
         // An assignment, compound assignment or `++`/`--` at the top of an expression statement stays a VIR statement (decision
         // 0020 item 6): code without nested effects builds the VIR it always did.
@@ -4425,6 +5266,16 @@ class Encoder {
         while (o != nullptr && o->kind == enk_operation && o->variant.operation.kind == eok_lvalue_adjust && o->variant.operation.operands != nullptr &&
                o->variant.operation.operands->next == nullptr)
           o = o->variant.operation.operands;
+        // `&s.x`, `&s.t` (decision 0043 item 5, R14): the address of a member of a local struct is inside the local; `&(&s)->x` is `&s`'s value.
+        for (int hops = 0; hops < 16 && o != nullptr && o->kind == enk_operation && o->variant.operation.kind == eok_dot_field; ++hops) {
+          auto dops = operands_of(o);
+          if (dops.size() != 2) return nullptr;
+          o = dops[0];
+        }
+        if (o != nullptr && o->kind == enk_operation && o->variant.operation.kind == eok_points_to_field) {
+          auto pops = operands_of(o);
+          return pops.size() == 2 ? returned_local_address(pops[0], depth + 1) : nullptr;
+        }
         if (o != nullptr && o->kind == enk_operation && o->variant.operation.kind == eok_indirect) {  // `&*q`: q's own value
           auto iops = operands_of(o);
           return iops.size() == 1 ? returned_local_address(iops[0], depth + 1) : nullptr;
@@ -6736,14 +7587,221 @@ const Encoder::EnumInfo& Encoder::enum_info(a_type_ptr t) {
   return ei;
 }
 
+// The class-scope entities of C++ classes that a verified aggregate does not have (decision 0043 item 2), by class: the member functions the user
+// wrote (the compiler's implicit special members of a C-like aggregate are trivial and are no feature), static data members, member types.
+void Encoder::collect_class_features() {
+  if (class_features_done_ || ents_ == nullptr) return;
+  class_features_done_ = true;
+  auto owner = [](a_scope_ptr sp) -> a_type_ptr {
+    return sp != nullptr && sp->kind == sck_class_struct_union ? sp->variant.assoc_type : nullptr;
+  };
+  for (a_routine_ptr r : ents_->routines) {
+    a_type_ptr c = owner(r->source_corresp.parent_scope);
+    if (c == nullptr || class_features_.count(c) != 0) continue;
+    if (!r->compiler_generated) {
+      class_features_[c] = "a member function, a constructor or a destructor (C++ class features: M7)";
+    } else if ((!r->is_trivial_copy_function && !r->is_trivial_default_constructor && !r->is_trivial_destructor) || r->is_deleted) {
+      // P65 item 1: the implicit special members of a C-like aggregate are trivial and not deleted (H2: the class decides, never a copy's expression).
+      // Reported after the members, and only when no member's own rejection explains it (a const or reference member deletes the copy assignment).
+      class_implicit_[c] = "an implicitly declared special member that is not trivial or is deleted (C++ class features: M7)";
+    }
+  }
+  for (a_variable_ptr v : ents_->variables)
+    if (a_type_ptr c = owner(v->source_corresp.parent_scope))
+      if (class_features_.count(c) == 0) class_features_[c] = "a static data member (C++ class features: M7)";
+  for (a_type_ptr t : ents_->types)
+    if (a_type_ptr c = owner(t->source_corresp.parent_scope))
+      if (class_features_.count(c) == 0) class_features_[c] = "a member type or a nested class (C++ class features: M7)";
+}
+
+// The VIR type of a struct type entry (decision 0043 items 2 and 3), made once; every rejection of a definition in a verified file is reported
+// here, at the definition or at the member, so the uses stay silent.  A struct is registered before its members are read, so a self-referential
+// pointer member (`struct node *next`) finds it.
+const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t) {
+  auto found = structs_.find(t);
+  if (found != structs_.end()) return found->second;
+  StructInfo& si = structs_[t];
+  const a_source_position p = t->source_corresp.decl_position;
+  std::string spelled = render_type(t);
+  // P65 H5: `typedef struct { ... } Pt;` has no tag in C23 and the name `Pt` in C++20; both modes name it by the typedef when there is no tag.
+  std::string tag = t->source_corresp.name != nullptr ? t->source_corresp.name : "";
+  if (tag.empty() && ents_ != nullptr)
+    for (a_type_ptr ty : ents_->types)
+      if (ty->kind == tk_typeref && ty->source_corresp.name != nullptr && skip_typerefs(ty) == t) {
+        tag = ty->source_corresp.name;
+        spelled = tag;
+        break;
+      }
+  if (p.seq == 0 || !in_verified_file(p)) {
+    si.name = spelled + " (a struct declared in a system file; system files are used only through contracts)";
+    return si;  // reported at the use
+  }
+  if (t->incomplete) {
+    si.name = spelled + " (an incomplete struct type)";
+    return si;
+  }
+  si.silent = true;
+  Ctx saved_cx = std::move(cx_);  // a use may reach here in the middle of a function
+  cx_ = Ctx();
+  cx_.stmt_pos = p;
+  bool ok = true;
+  auto refuse = [&](const a_source_position& at, const std::string& why) {
+    reject(Diag::unsupported_declaration, at, why);
+    ok = false;
+  };
+  collect_class_features();
+  const auto& cs = t->variant.class_struct_union;
+  const a_class_type_supplement_ptr x = cs.extra_info;
+  if (t->source_corresp.enclosing_routine != nullptr) {
+    refuse(p, "a struct defined in a block (M8, decision 0043 item 2)");
+  } else if (t->source_corresp.parent_scope != nullptr && t->source_corresp.parent_scope->kind == sck_func_prototype) {
+    refuse(p, "a struct defined in a parameter list (M8, decision 0043 item 2)");
+  } else if (t->source_corresp.parent_scope != nullptr && t->source_corresp.parent_scope->kind != sck_file &&
+             t->source_corresp.parent_scope->kind != sck_namespace) {
+    refuse(p, "a struct defined inside a class (C++ class features: M7, decision 0043 item 2)");
+  }
+  if (cs.is_template_class || cs.is_prototype_instantiation || cs.is_nonreal_class || (x != nullptr && x->template_arg_list != nullptr))
+    refuse(p, "a class template or an instance of one (M5)");
+  if (x != nullptr && (x->base_classes != nullptr || x->direct_base_classes != nullptr))
+    refuse(p, "a struct with a base class (C++ class features: M7, decision 0043 item 2)");
+  if (cs.any_virtual_functions) refuse(p, "a struct with virtual functions (C++ class features: M7, decision 0043 item 2)");
+  if (cs.is_packed) refuse(p, "a `packed` struct (a member's address may be misaligned: M8, decision 0043 item 2)");
+  if (cs.is_empty_class) refuse(p, "an empty struct (decision 0043 item 2)");
+  if (x != nullptr && x->has_field_initializer) refuse(p, "a struct with a default member initializer (C++ class features: M7, decision 0043 item 2)");
+  if (x != nullptr && (x->friends != nullptr || x->befriending_classes != nullptr)) refuse(p, "a struct with a friend declaration (C++ class features: M7, decision 0043 item 2)");
+  if (auto cf = class_features_.find(t); cf != class_features_.end()) refuse(p, "a struct with " + cf->second);
+  vir::StructType* st = prog_.add_struct(tag, spelled, loc_of(p));
+  si.ok = true;  // provisional: a member may point back at the struct
+  si.type = vir::Type::structure(st);
+  size_t members = 0;
+  bool packed_layout = false;
+  bool non_public = false;
+  for (a_field_ptr f = cs.field_list; f != nullptr; f = f->next) {
+    const a_source_position fp = f->source_corresp.decl_position.seq != 0 ? f->source_corresp.decl_position : p;
+    cx_.stmt_pos = fp;
+    const char* fname = f->source_corresp.name;
+    const std::string who = fname != nullptr ? "the member `" + std::string(fname) + "` of " + spelled : "an unnamed member of " + spelled;
+    ++members;
+    if (f->is_bit_field) {
+      refuse(fp, "a bit-field (" + who + "; M8, decision 0043 item 2)");
+      continue;
+    }
+    if (f->is_anonymous_parent_object || fname == nullptr) {
+      refuse(fp, "an anonymous struct or union member (" + who + "; M8, decision 0043 item 2)");
+      continue;
+    }
+    if (f->compiler_generated) {
+      refuse(fp, "a compiler-generated member (" + who + "; decision 0043 item 2)");
+      continue;
+    }
+    if (f->is_mutable) {
+      refuse(fp, "a `mutable` member (" + who + "; C++ class features: M7)");
+      continue;
+    }
+    if (f->has_no_unique_address_attribute) {
+      refuse(fp, "a `[[no_unique_address]]` member (" + who + "; C++ class features: M7)");
+      continue;
+    }
+    if (f->source_corresp.access != as_public) {  // a class feature: reported at the definition, once
+      if (!non_public) refuse(p, "a struct with a member that is not public (" + who + "; C++ class features: M7, decision 0043 item 2)");
+      non_public = true;
+      continue;
+    }
+    const auto before = reported_count();
+    check_attributes(f->source_corresp.attributes);
+    if (reported_count() != before) ok = false;
+    const a_type_qualifier_set fq = f_get_type_qualifiers(f->type, TRUE);
+    a_type_ptr u = skip_typerefs(f->type);
+    // A member laid out off its type's alignment, or a struct aligned below its members (`#pragma pack`, `packed`): a member's address may be misaligned (audit S3).
+    if (u != nullptr) {
+      if (u->alignment != 0 && f->offset % u->alignment != 0) packed_layout = true;
+      if (u->alignment > t->alignment) packed_layout = true;
+    }
+    if ((fq & TQ_CONST) != 0) {
+      refuse(fp, "a `const` member (" + who + "; const objects come with M4.6, decision 0043 item 2)");
+      continue;
+    }
+    if ((fq & (TQ_VOLATILE | TQ_C11_ATOMIC)) != 0) {
+      refuse(fp, "a `volatile` or `_Atomic` member (" + who + "; M8, decision 0043 item 2)");
+      continue;
+    }
+    if (u == nullptr) {
+      refuse(fp, "a member whose type this version cannot read (" + who + ")");
+      continue;
+    }
+    VType mt;
+    switch (u->kind) {
+      case tk_array:
+        refuse(fp, "an array member or a flexible array member (" + who + "; arrays come with M4.5e1, decision 0043 item 2)");
+        continue;
+      case tk_union:
+        refuse(fp, "a union member (" + who + "; unions are M8, decision 0043 item 2)");
+        continue;
+      case tk_struct:
+      case tk_class:
+        mt = struct_vtype(f->type);
+        if (!mt.ok) {
+          if (!mt.silent) refuse(fp, who + " has the struct type " + mt.name + ", which is not a verified struct");
+          else ok = false;  // reported at its own definition
+          continue;
+        }
+        break;
+      case tk_pointer: {
+        if (u->variant.pointer.is_reference) {
+          refuse(fp, "a reference member (" + who + "; C++ class features: M7)");
+          continue;
+        }
+        a_type_ptr pointee = u->variant.pointer.type;
+        a_type_ptr pu = pointee != nullptr ? skip_typerefs(pointee) : nullptr;
+        if (pu != nullptr && pu->kind == tk_routine) {
+          refuse(fp, "a pointer-to-function member (" + who + "; function pointers come with M4.7, decision 0043 item 2)");
+          continue;
+        }
+        mt = vtype(f->type, true);
+        if (!mt.ok) {
+          if (!mt.silent) refuse(fp, "a member that is " + (pu != nullptr && pu->kind == tk_void ? std::string("a `void *`") : "of the type " + mt.name) +
+                                         " (" + who + "; decision 0043 item 2)");
+          else ok = false;
+          continue;
+        }
+        break;
+      }
+      default:
+        mt = vtype(f->type, true);
+        if (!mt.ok || mt.t.is_void()) {
+          if (!mt.silent) refuse(fp, "a member of the type " + mt.name + " (" + who + "; decision 0043 item 2)");
+          else ok = false;
+          continue;
+        }
+        break;
+    }
+    prog_.add_member(st, fname, mt.t, loc_of(fp));
+  }
+  if (members == 0 && ok) refuse(p, "an empty struct (decision 0043 item 2)");
+  if (ok) {
+    if (auto ci = class_implicit_.find(t); ci != class_implicit_.end()) refuse(p, "a struct with " + ci->second);
+  }
+  if (packed_layout) refuse(p, "a struct laid out by packing (`#pragma pack`, `packed`: a member is not aligned to its type, so its address may be misaligned; M8, decision 0043 item 2)");
+  if (ok) {
+    si.silent = false;
+  } else {
+    si.ok = false;
+    si.type = vir::Type::void_type();
+  }
+  cx_ = std::move(saved_cx);
+  return si;
+}
+
 void Encoder::declaration_level_checks(const IlEntities& ents) {
+  std::set<std::pair<std::string, a_scope_ptr>> defined_tags;  // the struct tags defined so far, per scope (decision 0043 item 2)
   // Types, variables and templates declared in verified files (0012 item 12).
   for (a_type_ptr t : ents.types) {
     // Attributes written in a verified file on a type of any kind (a typedef, the unnamed type of
     // `int __attribute__((x)) f(int)`) are held to the allow-list; the position of the attribute decides, since the
     // type may have none.
     for (an_attribute_ptr a = t->source_corresp.attributes; a != nullptr; a = a->next)
-      if (a->position.seq != 0 && in_verified_file(a->position) && !is_vector_type_attribute(a)) {
+      if (a->position.seq != 0 && in_verified_file(a->position) && !is_vector_type_attribute(a) &&
+          !(is_struct_kind(t) && a->name != nullptr && (std::strcmp(a->name, "packed") == 0 || std::strcmp(a->name, "__packed__") == 0))) {  // `packed` on a struct: struct_info reports it
         cx_ = Ctx();
         cx_.stmt_pos = a->position;
         an_attribute_ptr one_next = a->next;
@@ -6775,7 +7833,19 @@ void Encoder::declaration_level_checks(const IlEntities& ents) {
       enum_info(u);  // decision 0018: accepted at file or namespace scope, else rejected here, once
       continue;
     }
-    reject(Diag::unsupported_declaration, p, "a class, struct or union");
+    if (u->kind == tk_union) {
+      reject(Diag::unsupported_declaration, p, "a union (effective types: M8)");
+      continue;
+    }
+    // C23 lets a tag be defined twice with compatible content; the two entries are two VIR types whose pointers would not compare (N3037: M8).
+    if (is_struct_kind(u) && u->source_corresp.name != nullptr && !u->incomplete && u->source_corresp.enclosing_routine == nullptr) {
+      const auto key = std::make_pair(std::string(u->source_corresp.name), u->source_corresp.parent_scope);
+      if (!defined_tags.insert(key).second) {
+        reject(Diag::unsupported_declaration, p, "a second definition of the struct tag `" + key.first + "` (C23's compatible redefinition: M8, decision 0043 item 2)");
+        continue;
+      }
+    }
+    struct_info(u);  // decision 0043: a verified structure is accepted, anything else is rejected here, once
   }
   // File-scope variables are classified by encode_named_constants (decision 0017).
   for (an_asm_entry_ptr a : ents.asm_entries) {
@@ -6871,7 +7941,7 @@ void Encoder::run(const IlEntities& ents) {
     if (!check_signature(r, decl)) continue;
     // Decision 0042 item 4: function_of is lazy, so a declaration with a `ref_to_uninit` or `must_init` parameter that nothing calls would never have its
     // marker rules checked (an `owns(*p)` atom, `must_init`'s partner in the `ensures`, the contract reads).  Force it for exactly those routines.
-    if (markers_.count(r) != 0 && body == nullptr) function_of(r, false, decl);
+    if (body == nullptr && (markers_.count(r) != 0 || has_struct_pointer_param(r))) function_of(r, false, decl);  // decision 0043: also its member atoms (the const struct pointee rule)
     if (a_routine_type_supplement_ptr nx = routine_supplement(r); nx != nullptr && nx->does_not_return) {
       // Also for a function that is declared and never called (function_of is lazy): decision 0015 item 4.
       for (an_attribute_ptr a : contracts_of(r))

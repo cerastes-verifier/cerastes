@@ -11,8 +11,59 @@ std::string Type::str() const {
     case Kind::Bool: return "bool";
     case Kind::Int: return int_type != nullptr ? int_type->name : "<int>";
     case Kind::Ptr: return (pointee != nullptr ? pointee->str() : std::string("<?>")) + "*";
+    case Kind::Struct: return struct_type != nullptr ? (struct_type->c_name.empty() ? "struct " + struct_type->tag : struct_type->c_name) : "<struct>";
   }
   return "?";
+}
+
+namespace {
+void collect_leaves(const StructType& s, std::vector<int>& path, const std::string& text, bool first_arrow, std::vector<StructLeaf>& out, int depth) {
+  if (depth > 64) return;  // a by-value cycle is a check_program error; do not recurse forever
+  for (size_t k = 0; k < s.members.size(); ++k) {
+    const StructMember& m = s.members[k];
+    const std::string name = m.name.empty() ? "<" + std::to_string(k) + ">" : m.name;
+    std::string t = text.empty() ? name : text + (first_arrow ? "->" : ".") + name;
+    path.push_back(static_cast<int>(k));
+    if (m.type.is_struct() && m.type.struct_type != nullptr) collect_leaves(*m.type.struct_type, path, t, false, out, depth + 1);
+    else out.push_back(StructLeaf{path, m.type, std::move(t)});
+    path.pop_back();
+  }
+}
+
+void collect_slots(const StructType& a, const StructType& b, std::vector<int>& path, std::vector<std::vector<int>>& out, int depth) {
+  if (depth > 64) return;
+  if (&a == &b) out.push_back(path);
+  for (size_t k = 0; k < a.members.size(); ++k) {
+    const Type& t = a.members[k].type;
+    if (!t.is_struct() || t.struct_type == nullptr) continue;
+    path.push_back(static_cast<int>(k));
+    collect_slots(*t.struct_type, b, path, out, depth + 1);
+    path.pop_back();
+  }
+}
+}  // namespace
+
+std::vector<StructLeaf> struct_leaves(const StructType& s, const std::string& root_text, bool arrow) {
+  std::vector<StructLeaf> out;
+  std::vector<int> path;
+  collect_leaves(s, path, root_text, arrow, out, 0);
+  return out;
+}
+
+std::vector<std::vector<int>> struct_slots_of(const StructType& a, const StructType& b) {
+  std::vector<std::vector<int>> out;
+  std::vector<int> path;
+  collect_slots(a, b, path, out, 0);
+  return out;
+}
+
+Type struct_member_type(const StructType& s, const std::vector<int>& path) {
+  Type cur = Type::structure(&s);
+  for (int k : path) {
+    if (!cur.is_struct() || cur.struct_type == nullptr || k < 0 || static_cast<size_t>(k) >= cur.struct_type->members.size()) return Type::void_type();
+    cur = cur.struct_type->members[static_cast<size_t>(k)].type;
+  }
+  return cur;
 }
 
 void scan_assigned_expr(const Expr* e, std::set<int>& assigned) {
@@ -119,9 +170,26 @@ std::string Global::viper_name() const {
 
 Type Program::pointer_to(const Type& pointee) {
   for (const Type& t : pointees_)
-    if (t == pointee) return Type{Type::Kind::Ptr, nullptr, &t};
+    if (t == pointee) return Type{Type::Kind::Ptr, nullptr, &t, nullptr};
   pointees_.push_back(pointee);
-  return Type{Type::Kind::Ptr, nullptr, &pointees_.back()};
+  return Type{Type::Kind::Ptr, nullptr, &pointees_.back(), nullptr};
+}
+
+StructType* Program::add_struct(const std::string& tag, const std::string& c_name, SrcLoc loc) {
+  StructType& st = structs_.emplace_back();
+  st.id = static_cast<int>(structs_.size()) - 1;
+  st.tag = tag;
+  std::string clean;
+  for (char ch : tag) clean += (std::isalnum(static_cast<unsigned char>(ch)) != 0 || ch == '_') ? ch : '_';
+  st.name = "struct_" + std::to_string(st.id) + "_" + (clean.empty() ? "anon" : clean);
+  st.c_name = c_name;
+  st.loc = std::move(loc);
+  return &st;
+}
+
+int Program::add_member(StructType* s, std::string name, Type type, SrcLoc loc) {
+  s->members.push_back(StructMember{std::move(name), type, std::move(loc)});
+  return static_cast<int>(s->members.size()) - 1;
 }
 
 const IntType* Program::int_type(const std::string& name, int bits, bool is_signed) {
@@ -355,7 +423,10 @@ const Expr* Builder::atom(AtomKind kind, const Expr* ptr, int amount, SrcLoc loc
   e->atom = kind;
   e->a = ptr;
   e->amount = amount;
-  if (ptr != nullptr && !ptr->c_text.empty()) {
+  if (ptr != nullptr && ptr->kind == Expr::Kind::MemberAddr) {  // decision 0043: `owns(p->x)`, `reads(p->t)`
+    const std::string place = place_text(*ptr);
+    if (!place.empty()) e->c_text = std::string(kind == AtomKind::Owns ? "owns(" : "reads(") + place + ")";
+  } else if (ptr != nullptr && !ptr->c_text.empty()) {
     switch (kind) {
       case AtomKind::Owns: e->c_text = "owns(*" + ptr->c_text + ")"; break;
       case AtomKind::Reads: e->c_text = "reads(*" + ptr->c_text + ")"; break;
@@ -404,7 +475,44 @@ const Expr* Builder::deref(const Expr* addr, SrcLoc loc) {
   Expr* e = fresh(p_, Expr::Kind::Deref, addr->type.is_ptr() && addr->type.pointee != nullptr ? *addr->type.pointee : addr->type, std::move(loc));
   e->a = addr;
   if (addr->kind == Expr::Kind::GlobalAddr && addr->global != nullptr) e->c_text = addr->global->c_name;  // `*&g` is `g`
+  else if (addr->kind == Expr::Kind::MemberAddr) e->c_text = place_text(*addr);  // `*&p->x` is `p->x`
   else if (!addr->c_text.empty()) e->c_text = "*" + addr->c_text;
+  return e;
+}
+
+namespace {
+// The place spelling of a MemberAddr (decision 0043 item 14): `p->x` for a pointer operand, `s.x` for the address of a struct local, `s.t.x` for a
+// nested member, `g.x` for a global.  Empty when the operand has no spelling.
+std::string member_place(const Expr& ma) {
+  const Expr* op = ma.a;
+  if (op == nullptr || !op->type.is_ptr() || op->type.pointee == nullptr || !op->type.pointee->is_struct() || op->type.pointee->struct_type == nullptr) return "";
+  const StructType& st = *op->type.pointee->struct_type;
+  const size_t k = ma.index >= 0 ? static_cast<size_t>(ma.index) : st.members.size();
+  if (k >= st.members.size()) return "";
+  const std::string name = st.members[k].name.empty() ? "<" + std::to_string(k) + ">" : st.members[k].name;
+  if (op->kind == Expr::Kind::MemberAddr) {
+    const std::string base = member_place(*op);
+    return base.empty() ? std::string() : base + "." + name;
+  }
+  if (op->kind == Expr::Kind::AddrOf && op->var != nullptr) return op->var->name + "." + name;
+  if (op->kind == Expr::Kind::GlobalAddr && op->global != nullptr) return op->global->c_name + "." + name;
+  if (op->c_text.empty()) return "";
+  bool simple = true;
+  for (char ch : op->c_text) simple = simple && (std::isalnum(static_cast<unsigned char>(ch)) != 0 || ch == '_' || ch == ':');
+  return (simple ? op->c_text : "(" + op->c_text + ")") + "->" + name;
+}
+}  // namespace
+
+const Expr* Builder::member_addr(const Expr* a, int index, SrcLoc loc) {
+  Type t = a->type;  // ill-typed on purpose when `a` is no pointer to a struct or the index is out of range
+  if (a->type.is_ptr() && a->type.pointee != nullptr && a->type.pointee->is_struct() && a->type.pointee->struct_type != nullptr && index >= 0 &&
+      static_cast<size_t>(index) < a->type.pointee->struct_type->members.size())
+    t = p_.pointer_to(a->type.pointee->struct_type->members[static_cast<size_t>(index)].type);
+  Expr* e = fresh(p_, Expr::Kind::MemberAddr, t, std::move(loc));
+  e->a = a;
+  e->index = index;
+  const std::string place = member_place(*e);
+  if (!place.empty()) e->c_text = "&" + place;
   return e;
 }
 
@@ -661,6 +769,7 @@ class AtomCollector {
         s.in_ensures = in_ensures_;
         s.clause = clause_;
         s.guards = guards_;
+        s.path = atom_place(*e).path;
         out_.push_back(std::move(s));
         break;
       }
@@ -706,15 +815,34 @@ bool reads_heap(const Expr& e) {
   return false;
 }
 
+const Expr* member_root(const Expr* e, std::vector<int>* path) {
+  std::vector<int> rev;
+  while (e != nullptr && e->kind == Expr::Kind::MemberAddr) {
+    rev.push_back(e->index);
+    e = e->a;
+  }
+  if (path != nullptr) path->assign(rev.rbegin(), rev.rend());
+  return e;
+}
+
+PlaceKey atom_place(const Expr& atom) {
+  PlaceKey k;
+  if (atom.a == nullptr) return k;
+  const Expr* root = member_root(atom.a, &k.path);
+  if (root == nullptr) return k;
+  if (root->kind == Expr::Kind::Formal) k.root = root->index;
+  else if (root->kind == Expr::Kind::GlobalAddr && root->global != nullptr) k.root = kGlobalSiteBase + root->global->id;
+  return k;
+}
+
 int atom_place_key(const Expr& atom) {
-  if (atom.a == nullptr) return kNoPlaceKey;
-  if (atom.a->kind == Expr::Kind::Formal) return atom.a->index;
-  if (atom.a->kind == Expr::Kind::GlobalAddr && atom.a->global != nullptr) return kGlobalSiteBase + atom.a->global->id;
-  return kNoPlaceKey;
+  const PlaceKey k = atom_place(atom);
+  return k.path.empty() ? k.root : kNoPlaceKey;
 }
 
 std::string place_text(const Expr& addr) {
   if (addr.kind == Expr::Kind::GlobalAddr && addr.global != nullptr) return addr.global->c_name;
+  if (addr.kind == Expr::Kind::MemberAddr) return member_place(addr);
   return addr.c_text.empty() ? std::string() : "*" + addr.c_text;
 }
 
@@ -746,10 +874,57 @@ GuardShape atom_guard_shape(const AtomSite& s, int q) {
                                                                                                                        : GuardShape::Other;
 }
 
+namespace {
+// Whether an object of type `t` can hold, transitively, a pointer to `target` (a `target *`, a `target **`, ...): `t` is such a pointer or reaches one
+// through a struct (leaves, and the structs that pointer leaves point to).
+bool may_hold_pointer_to(const Type& t, const Type& target, std::set<const StructType*>& seen) {
+  const Type* base = &t;
+  int steps = 0;  // pointer levels between the object and the struct reached
+  while (base->is_ptr() && base->pointee != nullptr) {
+    if (*base->pointee == target) return true;
+    base = base->pointee;
+    ++steps;
+  }
+  if (base->is_struct() && base->struct_type != nullptr) {
+    const std::vector<StructLeaf> leaves = struct_leaves(*base->struct_type);
+    // A pointer to a struct that has a cell of the target's field (any depth of nesting): a pointer loaded from the object reaches that cell (audit S1).
+    if (steps > 0)
+      for (const StructLeaf& l : leaves)
+        if (l.type == target) return true;
+    if (seen.insert(base->struct_type).second)
+      for (const StructLeaf& l : leaves)
+        if (may_hold_pointer_to(l.type, target, seen)) return true;
+  }
+  return false;
+}
+}  // namespace
+
+std::string restrict_hazard(const Function& f, int param) {
+  const Type& mine = f.params[static_cast<size_t>(param)].type;
+  if (!mine.is_ptr() || mine.pointee == nullptr) return "";
+  if (mine.pointee->is_struct()) return "it points to a struct (`restrict` on a struct pointer: M8)";
+  auto name = [&](int i) { return f.params[static_cast<size_t>(i)].name.empty() ? "arg" + std::to_string(i + 1) : f.params[static_cast<size_t>(i)].name; };
+  for (size_t q = 0; q < f.params.size(); ++q) {
+    if (static_cast<int>(q) == param || !f.params[q].type.is_ptr() || f.params[q].type.pointee == nullptr) continue;
+    std::set<const StructType*> seen;
+    if (may_hold_pointer_to(*f.params[q].type.pointee, *mine.pointee, seen))
+      return "the object of `" + name(static_cast<int>(q)) + "` can hold a `" + mine.str() + "`, and a pointer loaded from it is not based on `" + name(param) + "`";
+  }
+  for (const AtomSite& s : contract_atoms(f)) {
+    const Expr* root = s.atom->a != nullptr ? member_root(s.atom->a) : nullptr;
+    if (root == nullptr || root->kind != Expr::Kind::GlobalAddr || root->global == nullptr) continue;
+    std::set<const StructType*> seen;
+    if (may_hold_pointer_to(root->global->type, *mine.pointee, seen))
+      return "the global `" + root->global->c_name + "` named by the contract can hold a `" + mine.str() + "`, and a pointer loaded from it is not based on `" + name(param) + "`";
+  }
+  return "";
+}
+
 bool restrict_backed(const Function& f, int param, int* offender) {
   // The site's guard is none, or exactly `q == NULL` being false.
   auto null_guard = [&](const AtomSite& s, int q) { return atom_guard_shape(s, q) != GuardShape::Other; };
   if (offender != nullptr) *offender = -1;
+  if (!restrict_hazard(f, param).empty()) return false;
   const std::vector<AtomSite> sites = contract_atoms(f);
   bool own = false;
   for (const AtomSite& r : sites) {
@@ -761,8 +936,20 @@ bool restrict_backed(const Function& f, int param, int* offender) {
   }
   if (!own) return false;
   const Type& mine = f.params[static_cast<size_t>(param)].type;
+  // Decision 0043 item 10: `restrict` stays on scalar and pointer pointees; a struct pointee is refused (M8).
+  if (mine.is_ptr() && mine.pointee != nullptr && mine.pointee->is_struct()) return false;
+  // A pointer parameter of another pointee type may still reach `param`'s cell when its pointee is a struct with a leaf of `param`'s pointee type
+  // (`int *q` can point at `s->x`), so such a parameter needs its own atom like a same-typed one (the "field" rule of item 10).
+  auto reaches = [&](const Type& qt) {
+    if (qt == mine) return true;
+    if (!qt.is_ptr() || qt.pointee == nullptr || !qt.pointee->is_struct() || qt.pointee->struct_type == nullptr || !mine.is_ptr() || mine.pointee == nullptr)
+      return false;
+    for (const StructLeaf& l : struct_leaves(*qt.pointee->struct_type))
+      if (l.type == *mine.pointee) return true;
+    return false;
+  };
   for (size_t q = 0; q < f.params.size(); ++q) {
-    if (static_cast<int>(q) == param || !f.params[q].type.is_ptr() || f.params[q].type != mine) continue;
+    if (static_cast<int>(q) == param || !f.params[q].type.is_ptr() || !reaches(f.params[q].type)) continue;
     bool covered = false;
     for (const AtomSite& r : sites)
       if (!r.in_ensures && (r.atom->atom == AtomKind::Owns || r.atom->atom == AtomKind::Reads) && r.atom->a != nullptr &&

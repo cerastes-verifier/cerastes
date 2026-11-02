@@ -528,7 +528,9 @@ declares the C spellings `cerastes_owns`, `cerastes_reads`, `cerastes_live` and
 | `cerastes_owns(*p)`, `cerastes_owns(g)`
 | `p` is not null and the function may read and write `*p`, which holds a value
 (xref:memory.adoc#contracts[Memory and ownership]); for a global variable `g`,
-the function may read and write `g` (xref:memory.adoc#globals[Global variables])
+the function may read and write `g` (xref:memory.adoc#globals[Global variables]);
+for a pointer to a structure, `owns(*p)` covers every member and `owns(+p->x+)`
+one member (xref:memory.adoc#structures[Structures])
 
 | `reads(*p)`, `reads(g)`
 | `cerastes_reads(*p)`, `cerastes_reads(g)`
@@ -540,7 +542,8 @@ the function may read and write `g` (xref:memory.adoc#globals[Global variables])
 
 | `old(e)`
 | `cerastes_old(e)`
-| the value of `e` on entry, in `ensures`; `e` is a parameter, `*p` or a global
+| the value of `e` on entry, in `ensures`; `e` is a parameter, `*p`, a member
+`+p->x+` of a parameter's structure, or a global
 
 | `owns_range(p, n)`
 | (later)
@@ -551,7 +554,9 @@ the function may read and write `g` (xref:memory.adoc#globals[Global variables])
 | for every value of the first parameter of `body` (not supported yet)
 |===
 
-`owns` and `reads` name a global variable, or, like `live`, a pointer parameter, as `*p` or `p`, and may
+`owns` and `reads` name a global variable, or, like `live`, a pointer parameter, as `*p` or `p`, or a
+member of the structure a parameter points to (`+p->x+`, `+p->t+`, `+p->t.y+`; two atoms on one
+parameter must not overlap, as `+owns(*p) && owns(p->x)+` would), and may
 appear in a contract as a conjunct, after `p == NULL ||`, or as an arm of `?:`
 whose condition does not read memory. One parameter may be owned on one path and
 read on another (`c ? owns(*p) : reads(*p)`), never both on one path, and an

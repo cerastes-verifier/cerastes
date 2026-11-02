@@ -231,7 +231,11 @@ A few more rules:
   variable's block is reported as xref:error-messages.adoc#_lifetime[`lifetime`].
 * In C, a `restrict` pointer parameter is accepted when the contract owns its
   object and gives it back: owning it already means that nothing else reaches
-  the object during the call, which is what `restrict` promises.
+  the object during the call, which is what `restrict` promises. It is rejected
+  when another parameter, or a global the contract names, could hold a pointer
+  of the same type (a pointer to a pointer, a structure with a pointer member,
+  a pointer global): a pointer read from there is not based on the `restrict`
+  one, and the compilers may assume it never reaches the same object.
 * The address of a parameter may be taken (`int *q = &a;`): the parameter is
   then an object in memory, like a local.
 * A contract may own an object on one path and only read it on another
@@ -319,6 +323,75 @@ The rules:
 states that it starts without a value, and the option `--strict-init` asks for it on
 every such local and for these attributes wherever an object without a value is
 passed (xref:verifying.adoc#strict-init[The strict initialization mode]).
+
+[#structures]
+== Structures
+
+A structure whose members are integers, `bool`, enumerations, pointers and other
+such structures can be a local, the object a pointer points to, and the subject
+of a contract. Each member is an object of its own: `pt.x` and `pt.y` are
+different objects, and `&pt.x` points to `pt.x` only. A structure local is
+created without a value when it has no initializer; a braced initializer gives
+every member a value, zero for the members it does not name. A member is read,
+written, and passed by address like any other object:
+
+[source,c]
+----
+include::example$memory/struct_local.c[tag=source]
+----
+
+`cerastes_owns(*p)` of a pointer to a structure owns every member, and
+`cerastes_old(+p->x+)` is the value a member had on entry. A function that swaps
+two members passes their addresses on, which is VeriFast's `point_mirror`:
+
+[source,c]
+----
+include::example$memory/struct_parameter.c[tag=source]
+----
+
+A contract may also name one member, `cerastes_owns(+p->count+)` or
+`cerastes_reads(+p->count+)`: the callee then may touch that member only, and
+the caller keeps the others with their values:
+
+[source,c]
+----
+include::example$memory/struct_member_owns.c[tag=source]
+----
+
+Separation is decided by the objects two parameters can reach, whatever their
+types: a pointer to a structure and a pointer to an `int` reach one object when
+the `int` is one of the structure's members. Passing `&pt` and `&pt.x` to two
+owning parameters is reported as
+xref:error-messages.adoc#_permission[`permission`] at the call:
+
+[source,c]
+----
+include::example$memory/struct_overlap.c[tag=source]
+----
+
+Copying a structure (`t = s;`, `+*p = *q;+`, `struct point t = s;`) reads every
+member: a member without a value is reported as
+xref:error-messages.adoc#_uninitialized[`uninitialized`] at the copy, even
+though C lets a partly initialized structure be copied. A copy is a statement or
+an initializer; its value cannot be used (`(t = s).x` is rejected). In C a
+structure's initializer is evaluated before the object has a value, so
+`struct point pt = {1, pt.x};` reads `pt.x` without a value; in pass:[C++] the
+members are initialized in order.
+
+The markers of <<initialization>> work on structures: `cerastes::uninit` on a
+structure local, and `cerastes::ref_to_uninit` and `cerastes::must_init` on a
+pointer to a structure, where `must_init` promises every member.
+
+Not supported yet, each rejected with a diagnostic: unions, bit-fields, array
+members, `const`, `volatile` and `_Atomic` members, anonymous members, members
+that are `void *` or pointers to functions, `packed` structures, structures
+from system headers (such as `FILE`), structures defined inside a function, and
+in pass:[C++] every class feature beyond a C structure (member functions,
+constructors, base classes, access control, `static` members, default member
+initializers). Passing or returning a structure by value, structure globals,
+initializers that elide the braces of an inner structure
+(`struct line l = {1, 2, 3, 4};`) and, in C, designators out of declaration
+order are rejected too.
 
 [#globals]
 == Global variables
@@ -525,13 +598,23 @@ These are rejected with a diagnostic, never approximated
   variables (`+cerastes_owns(*gp)+` through a pointer global included);
 * globals defined in another file, `volatile`, `_Atomic` and thread-local
   globals, `static const` locals, and global arrays and structures;
+* structures passed or returned by value, structure globals and `static`
+  structure locals, and the structure features listed in <<structures>>;
+* `owns`, `reads` and `live` of a structure's member in a loop invariant, a
+  member of an object reached through a pointer member (`+p->q->x+`) in a
+  contract, and a function's `decreases` that reads a member;
 * `owns`, `reads` and `live` in a `do … while (0)` invariant or a measure, and on
   a pointer variable whose own address is taken;
-* the attribute `cerastes::owning` on anything but a parameter, and `owning(n)`;
+* the attribute `cerastes::owning` on anything but a parameter (on a structure's
+  member, it is planned with `malloc` and `free`), and `owning(n)`;
 * `cerastes::ref_to_uninit` on a local or a function (a function returning an object
   without a value, such as `malloc`), and `cerastes::uninit` on anything but a local;
 * `restrict` except on a C parameter whose contract owns its object;
-* `void *`, and pointers to structures, unions and functions;
+* `void *`, and pointers to unions, to functions and to structures that are not
+  supported;
+* `restrict` beside a parameter or global that can hold a pointer of the same
+  type (a pointer to a pointer, a structure with a pointer member, a pointer
+  global), and on a pointer to a structure;
 * conversions between pointer types other than adding `const` to the object
   pointed to, comparisons of order and arithmetic on pointers.
 

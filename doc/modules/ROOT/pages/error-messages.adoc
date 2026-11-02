@@ -411,6 +411,12 @@ include::example$error-messages/uninitialized_argument_error.c[tag=source]
 uninitialized_argument_error.c:14: error: uninitialized: passes `&x` to `set`, whose parameter `p` needs `*p` to have a value; it may not have one here
 ----
 
+A structure's members each have their own value: reading a member that was never
+given one is reported at the read (`s.y`, `+p->y+`), and so is copying a structure
+one of whose members has no value, at the copy (`t = s;`: "copies `s`, whose
+member `s.y` may not have a value"), although C allows such a copy
+(xref:memory.adoc#structures[Structures]).
+
 *How to fix it.* Give the object a value before the call, or, if the function gives
 it one, mark the parameter `cerastes::must_init`
 (xref:memory.adoc#initialization[Initialization through pointers]):
@@ -422,8 +428,10 @@ include::example$error-messages/uninitialized_argument_fixed.c[tag=source]
 
 == null-dereference
 
-A pointer that may be null is dereferenced: read or written through `*p`. It
-is reported at the dereference.
+A pointer that may be null is dereferenced: read or written through `*p`, or
+through a member access `+p->x+`. It is reported at the dereference. Taking the
+address of a member, `+&p->x+`, is reported too when `p` may be null or point
+past the end of its object.
 
 Dereferencing a null pointer is undefined behaviour in C and pass:[C++]. Look for
 a path on which the pointer is still null when it is used: an initialization to
@@ -462,7 +470,9 @@ right is missing:
   xref:memory.adoc#globals[Global variables]);
 * at a call, when the caller does not hold what the callee's `requires` asks
   for (`owns(*p)`, `reads(*p)`, `live(p)`), or passes one object to two
-  parameters of which one owns it;
+  parameters of which one owns it, whatever their types: `&s` and `&s.x` reach
+  one object when `x` is a member of `s`
+  (xref:memory.adoc#structures[Structures]);
 * at a `return`, when the function does not hold what its `ensures` promises;
 * at a contract clause that reads `*p` (or `*r`, the object a pointer result
   points to) where no `owns` or `reads` of that object comes before it, at a contract that both owns and reads `*p` on one path, at
@@ -508,6 +518,10 @@ A pointer is used after the object it points to may have ended, or an object's
 address may still be in use when its lifetime ends. A use is reported where the
 pointer's value is used; the end of a lifetime at the closing brace, or at the
 `return`, `break`, `continue` or `goto` that ends it.
+
+A structure's members end with it: a pointer to `s.x` is dangling after the
+block of `s`, and the closing brace reports `s.x` when a function it was passed
+to kept it.
 
 After its object ends, the value of a pointer is indeterminate in C and
 pass:[C++], and *any* use of it is undefined, not only a dereference: a

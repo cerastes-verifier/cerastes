@@ -1,0 +1,294 @@
+// expect: error assert:assertion.false @ L89
+// expect: error assert:assertion.false @ L126
+// expect: error assert:assertion.false @ L178
+// expect: error assert:assertion.false @ L236
+// expect: error assert:assertion.false @ L293
+// S33 (g) vacuity (h): s33_g_member_wf.vpr with an `assert false` at the start, after the call and at the end of each method (one clone per point): every one must FAIL.
+// Hand-written in the emitted style (see the positive fixture).
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0043 items 3, 9): WF; a leaf's range; a leaf at allocation (uninitialized); a leaf owned (full permission, flag set, range); a leaf owned without its flag (must_init's requires); one liveness fraction
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNG(c) ((-2147483648) <= c.v_int && c.v_int <= 2147483647)
+define LEAFU(c) (acc(c.v_int) && acc(c.d_int) && !c.d_int)
+define LEAF(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNG(c))
+define LEAFN(c) (acc(c.v_int) && acc(c.d_int) && (c.d_int ==> RNG(c)))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+// struct S { int x; int y; }: member 0 is x, member 1 is y; struct T { struct S s; int z; }: member 0 is the slot of the nested S, member 1 is z
+define MX(s) loc(member(s, 0), 0)
+define MY(s) loc(member(s, 1), 0)
+define TS(t) loc(member(t, 0), 0)
+define TZ(t) loc(member(t, 1), 0)
+define SLEN(s) (len(member(s, 0)) == 1 && len(member(s, 1)) == 1)
+define SOWN(s) (SLEN(s) && LEAF(MX(s)) && LEAF(MY(s)))
+define TLEN(t) (len(member(t, 0)) == 1 && len(member(t, 1)) == 1)
+define TOWN(t) (TLEN(t) && SOWN(TS(t)) && LEAF(TZ(t)))
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+
+// cerastes:trusted-contract allocation of a struct S local: a one-slot block; each member is a block of length 1 whose leaf is uninitialized with full permission; the liveness token is the root block's (record 0043 item 4)
+method alloc_struct_0_S() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures len(member(r, 0)) == 1 && acc(loc(member(r, 0), 0).v_int) && acc(loc(member(r, 0), 0).d_int) && !loc(member(r, 0), 0).d_int
+  ensures len(member(r, 1)) == 1 && acc(loc(member(r, 1), 0).v_int) && acc(loc(member(r, 1), 0).d_int) && !loc(member(r, 1), 0).d_int
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// void bump_int(int *q) [owns(*q)]: *q = 9
+method bump_int(q: Ref, a: Perm)
+  requires none < a && a < write
+  requires WF(q)
+  requires ROOT(q) && LEAF(q) && LVF(q, a)
+  ensures ROOT(q) && LEAF(q) && LVF(q, a) && q.v_int == 9
+  decreases
+{
+  assert q != null
+  assert perm(q.v_int) == write && perm(q.d_int) == write
+  q.v_int := 9
+  q.d_int := true
+  assert q != null
+  assert WF(q)
+  assert offset_of(q) < len(block_of(q))
+  assert perm(q.v_int) == write
+  assert perm(q.d_int) == write
+  assert q.d_int
+  assert RNG(q)
+  assert perm(lvloc(block_of(q)).lv) >= a
+  assert q.v_int == 9
+}
+
+// void bump_int(int *q) [owns(*q)]: *q = 9
+method bump_int_v0(q: Ref, a: Perm)
+  requires none < a && a < write
+  requires WF(q)
+  requires ROOT(q) && LEAF(q) && LVF(q, a)
+  ensures ROOT(q) && LEAF(q) && LVF(q, a) && q.v_int == 9
+  decreases
+{
+  assert false // <- fails: vacuity
+  assert q != null
+  assert perm(q.v_int) == write && perm(q.d_int) == write
+  q.v_int := 9
+  q.d_int := true
+  assert q != null
+  assert WF(q)
+  assert offset_of(q) < len(block_of(q))
+  assert perm(q.v_int) == write
+  assert perm(q.d_int) == write
+  assert q.d_int
+  assert RNG(q)
+  assert perm(lvloc(block_of(q)).lv) >= a
+  assert q.v_int == 9
+}
+
+// void bump_int(int *q) [owns(*q)]: *q = 9
+method bump_int_v1(q: Ref, a: Perm)
+  requires none < a && a < write
+  requires WF(q)
+  requires ROOT(q) && LEAF(q) && LVF(q, a)
+  ensures ROOT(q) && LEAF(q) && LVF(q, a) && q.v_int == 9
+  decreases
+{
+  assert q != null
+  assert perm(q.v_int) == write && perm(q.d_int) == write
+  q.v_int := 9
+  q.d_int := true
+  assert q != null
+  assert WF(q)
+  assert offset_of(q) < len(block_of(q))
+  assert perm(q.v_int) == write
+  assert perm(q.d_int) == write
+  assert q.d_int
+  assert RNG(q)
+  assert perm(lvloc(block_of(q)).lv) >= a
+  assert q.v_int == 9
+  assert false // <- fails: vacuity
+}
+
+// void touch_y(struct S *p) [owns(*p)]: bump_int(&p->y). The owns atom states len(member(p, 1)) == 1, which makes WF(&p->y) provable (0 <= 0 && 0 <= len(member(p, 1)))
+method touch_y(p: Ref, l: Perm)
+  requires none < l && l < write
+  requires WF(p)
+  requires ROOT(p) && SOWN(p) && LVF(p, l)
+  ensures ROOT(p) && SOWN(p) && LVF(p, l) && MY(p).v_int == 9 && MX(p).v_int == old(MX(p).v_int)
+  decreases
+{
+  var ox: Int := loc(member(p, 0), 0).v_int
+  var q: Ref
+  q := loc(member(p, 1), 0)   // q = &p->y
+  assert p != null
+  assert perm(lvloc(block_of(p)).lv) > none   // lifetime: &p->y is arithmetic on p (0028 item 3a)
+  assert WF(q)
+  assert q != null
+  assert offset_of(q) < len(block_of(q))
+  assert perm(q.v_int) == write && perm(q.d_int) == write
+  assert q.d_int
+  assert RNG(q)
+  assert perm(lvloc(block_of(q)).lv) > none
+  var a_q: Perm := perm(lvloc(block_of(q)).lv) / 2
+  assert none < a_q && a_q < write
+  assert perm(lvloc(block_of(q)).lv) >= a_q
+  bump_int(q, a_q)
+  assert p != null
+  assert WF(p)
+  assert offset_of(p) < len(block_of(p))
+  assert len(member(p, 0)) == 1 && len(member(p, 1)) == 1
+  assert perm(loc(member(p, 0), 0).v_int) == write
+  assert perm(loc(member(p, 0), 0).d_int) == write
+  assert loc(member(p, 0), 0).d_int
+  assert RNG(loc(member(p, 0), 0))
+  assert perm(loc(member(p, 1), 0).v_int) == write
+  assert perm(loc(member(p, 1), 0).d_int) == write
+  assert loc(member(p, 1), 0).d_int
+  assert RNG(loc(member(p, 1), 0))
+  assert perm(lvloc(block_of(p)).lv) >= l
+  assert loc(member(p, 1), 0).v_int == 9
+  assert loc(member(p, 0), 0).v_int == ox
+}
+
+// void touch_y(struct S *p) [owns(*p)]: bump_int(&p->y). The owns atom states len(member(p, 1)) == 1, which makes WF(&p->y) provable (0 <= 0 && 0 <= len(member(p, 1)))
+method touch_y_v0(p: Ref, l: Perm)
+  requires none < l && l < write
+  requires WF(p)
+  requires ROOT(p) && SOWN(p) && LVF(p, l)
+  ensures ROOT(p) && SOWN(p) && LVF(p, l) && MY(p).v_int == 9 && MX(p).v_int == old(MX(p).v_int)
+  decreases
+{
+  assert false // <- fails: vacuity
+  var ox: Int := loc(member(p, 0), 0).v_int
+  var q: Ref
+  q := loc(member(p, 1), 0)   // q = &p->y
+  assert p != null
+  assert perm(lvloc(block_of(p)).lv) > none   // lifetime: &p->y is arithmetic on p (0028 item 3a)
+  assert WF(q)
+  assert q != null
+  assert offset_of(q) < len(block_of(q))
+  assert perm(q.v_int) == write && perm(q.d_int) == write
+  assert q.d_int
+  assert RNG(q)
+  assert perm(lvloc(block_of(q)).lv) > none
+  var a_q: Perm := perm(lvloc(block_of(q)).lv) / 2
+  assert none < a_q && a_q < write
+  assert perm(lvloc(block_of(q)).lv) >= a_q
+  bump_int(q, a_q)
+  assert p != null
+  assert WF(p)
+  assert offset_of(p) < len(block_of(p))
+  assert len(member(p, 0)) == 1 && len(member(p, 1)) == 1
+  assert perm(loc(member(p, 0), 0).v_int) == write
+  assert perm(loc(member(p, 0), 0).d_int) == write
+  assert loc(member(p, 0), 0).d_int
+  assert RNG(loc(member(p, 0), 0))
+  assert perm(loc(member(p, 1), 0).v_int) == write
+  assert perm(loc(member(p, 1), 0).d_int) == write
+  assert loc(member(p, 1), 0).d_int
+  assert RNG(loc(member(p, 1), 0))
+  assert perm(lvloc(block_of(p)).lv) >= l
+  assert loc(member(p, 1), 0).v_int == 9
+  assert loc(member(p, 0), 0).v_int == ox
+}
+
+// void touch_y(struct S *p) [owns(*p)]: bump_int(&p->y). The owns atom states len(member(p, 1)) == 1, which makes WF(&p->y) provable (0 <= 0 && 0 <= len(member(p, 1)))
+method touch_y_v1(p: Ref, l: Perm)
+  requires none < l && l < write
+  requires WF(p)
+  requires ROOT(p) && SOWN(p) && LVF(p, l)
+  ensures ROOT(p) && SOWN(p) && LVF(p, l) && MY(p).v_int == 9 && MX(p).v_int == old(MX(p).v_int)
+  decreases
+{
+  var ox: Int := loc(member(p, 0), 0).v_int
+  var q: Ref
+  q := loc(member(p, 1), 0)   // q = &p->y
+  assert p != null
+  assert perm(lvloc(block_of(p)).lv) > none   // lifetime: &p->y is arithmetic on p (0028 item 3a)
+  assert WF(q)
+  assert q != null
+  assert offset_of(q) < len(block_of(q))
+  assert perm(q.v_int) == write && perm(q.d_int) == write
+  assert q.d_int
+  assert RNG(q)
+  assert perm(lvloc(block_of(q)).lv) > none
+  var a_q: Perm := perm(lvloc(block_of(q)).lv) / 2
+  assert none < a_q && a_q < write
+  assert perm(lvloc(block_of(q)).lv) >= a_q
+  bump_int(q, a_q)
+  assert false // <- fails: vacuity
+  assert p != null
+  assert WF(p)
+  assert offset_of(p) < len(block_of(p))
+  assert len(member(p, 0)) == 1 && len(member(p, 1)) == 1
+  assert perm(loc(member(p, 0), 0).v_int) == write
+  assert perm(loc(member(p, 0), 0).d_int) == write
+  assert loc(member(p, 0), 0).d_int
+  assert RNG(loc(member(p, 0), 0))
+  assert perm(loc(member(p, 1), 0).v_int) == write
+  assert perm(loc(member(p, 1), 0).d_int) == write
+  assert loc(member(p, 1), 0).d_int
+  assert RNG(loc(member(p, 1), 0))
+  assert perm(lvloc(block_of(p)).lv) >= l
+  assert loc(member(p, 1), 0).v_int == 9
+  assert loc(member(p, 0), 0).v_int == ox
+}
+
+// void touch_y(struct S *p) [owns(*p)]: bump_int(&p->y). The owns atom states len(member(p, 1)) == 1, which makes WF(&p->y) provable (0 <= 0 && 0 <= len(member(p, 1)))
+method touch_y_v2(p: Ref, l: Perm)
+  requires none < l && l < write
+  requires WF(p)
+  requires ROOT(p) && SOWN(p) && LVF(p, l)
+  ensures ROOT(p) && SOWN(p) && LVF(p, l) && MY(p).v_int == 9 && MX(p).v_int == old(MX(p).v_int)
+  decreases
+{
+  var ox: Int := loc(member(p, 0), 0).v_int
+  var q: Ref
+  q := loc(member(p, 1), 0)   // q = &p->y
+  assert p != null
+  assert perm(lvloc(block_of(p)).lv) > none   // lifetime: &p->y is arithmetic on p (0028 item 3a)
+  assert WF(q)
+  assert q != null
+  assert offset_of(q) < len(block_of(q))
+  assert perm(q.v_int) == write && perm(q.d_int) == write
+  assert q.d_int
+  assert RNG(q)
+  assert perm(lvloc(block_of(q)).lv) > none
+  var a_q: Perm := perm(lvloc(block_of(q)).lv) / 2
+  assert none < a_q && a_q < write
+  assert perm(lvloc(block_of(q)).lv) >= a_q
+  bump_int(q, a_q)
+  assert p != null
+  assert WF(p)
+  assert offset_of(p) < len(block_of(p))
+  assert len(member(p, 0)) == 1 && len(member(p, 1)) == 1
+  assert perm(loc(member(p, 0), 0).v_int) == write
+  assert perm(loc(member(p, 0), 0).d_int) == write
+  assert loc(member(p, 0), 0).d_int
+  assert RNG(loc(member(p, 0), 0))
+  assert perm(loc(member(p, 1), 0).v_int) == write
+  assert perm(loc(member(p, 1), 0).d_int) == write
+  assert loc(member(p, 1), 0).d_int
+  assert RNG(loc(member(p, 1), 0))
+  assert perm(lvloc(block_of(p)).lv) >= l
+  assert loc(member(p, 1), 0).v_int == 9
+  assert loc(member(p, 0), 0).v_int == ox
+  assert false // <- fails: vacuity
+}

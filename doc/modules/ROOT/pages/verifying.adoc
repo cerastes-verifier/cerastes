@@ -858,8 +858,9 @@ The constructs that are rejected in this version are:
 * *Declarations:* a `const` local with no initializer, a local initialized
   from itself (`int x = x;`), `static const` and `static constexpr` locals,
   `thread_local` and `extern` locals and globals, `volatile` globals, globals
-  defined in another file (`extern` with no definition here), arrays, classes,
-  unions,
+  defined in another file (`extern` with no definition here), arrays, classes
+  other than the C structures xref:memory.adoc#structures[Structures] describes
+  (and structures passed or returned by value, or as globals), unions,
   an enumeration declared in a function, a class or a template, or with a
   `bool` underlying type or an enumerator outside the range of `int`, an
   enumeration declared without its enumerators and without an underlying type,
@@ -873,7 +874,8 @@ The constructs that are rejected in this version are:
   `std::terminate`).
 * *Types:* pointers other than those xref:memory.adoc[Memory and ownership]
   describes (`void *`, `restrict` other than on a C parameter the contract owns,
-  and pointers to structures, unions and functions are rejected, and so are
+  and pointers to unions, to functions and to structures that are not supported
+  are rejected, and so are
   pointer conversions other than adding `const` to the object pointed to; its
   xref:memory.adoc#not-yet[list] names the rest, such as `+owns(**pp)+`),
   references, arrays, floating point, `volatile`, `_BitInt`,
