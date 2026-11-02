@@ -1,286 +1,199 @@
-# Handoff after M4.5b1c3 — pointers to pointers, owning parameters, `*result`, written atoms (record 0040) (2026-10-30); M4.5b2a done (record 0041)
+# Handoff after M4.5b2a — globals and `static` locals (record 0041) (2026-10-30); M4.5b2b in progress (record 0042, 2026-11-02)
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
-rediscover, and holds only what is live (owner, 2026-10-26; consolidated again at M4.5b2a's start, 2026-10-30): the
-text before this consolidation is `git show 5ffb1a2:internal/handoff.md`, whose header names every earlier version.
-Session plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session consumes move into its plan.
+rediscover, and holds only what is live (owner, 2026-10-26; consolidated again at M4.5b2b's start, 2026-11-02: §3 is
+regrouped by the session that consumes each note). The text before this consolidation is
+`git show 38877b4:internal/handoff.md`, whose header names every earlier version (each note below keeps its origin in
+brackets, so its full wording can be found there). Session plans approved from M4.5b1a on are in `.claude/plans/`; the
+notes a session consumes move into its plan.
 
 ## 1. State
 
-- **On `origin/main`** (`a5e3e30`): everything through M4.5b1c2 (PR #20).
-- **M4.5b1c3** is done on branch `m4.5b1c3-pointers-to-pointers` (`5ffb1a2`, pushed; PR #21 open, CI pending at
-  M4.5b2a's start; record 0040; plan `.claude/plans/m4-5b1c3-pointers-to-pointers.md`). M4.5b1 is complete. The main
-  checkout's local `main` is at `774fde4`, a local merge of that branch.
-- **M4.5b2 is split in two** (at M4.5b2a's planning, 2026-10-30; sizing per question 77). **M4.5b2a** (globals and
-  `static` locals) is done on branch `m4.5b2a-globals`, from `5ffb1a2` since PR #21 had not merged (result in
-  `internal/status.md`; plan `.claude/plans/m4-5b2a-globals.md`): record 0041, no cuts. **M4.5b2b** (P4222's markers and
-  `--strict-init`, record 0042) is next (§4.2).
-- **Audits:** round 1 on record 0041 (two blocking, ten should-fix, thirteen notes; all taken but N9, by design), round
-  2 on the code (no blocking item, about 230 probes; four should-fix, all taken; so no re-audit). What was not taken is in
-  §3.
+- **On `origin/main`** (`38877b4`): everything through M4.5b2a (PR #21 M4.5b1c3, PR #22 M4.5b2a). M4.5b1 and M4.5b2a are
+  complete; the local `main` of the main checkout is the same commit.
+- **M4.5b2b** (P4222's markers, `--strict-init`, record 0042) is in progress on branch `m4.5b2b-init-markers` in the
+  worktree `.claude/worktrees/m4.5b2b`, from `38877b4` (plan `.claude/plans/m4-5b2b-init-markers.md`). Its baseline is
+  taken in the detached worktree `.claude/worktrees/m4.5b2b-base` at `38877b4`, so the main checkout is not touched.
 
 The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits behind upstream `main` (§4.1).
 
 ## 2. Owner steps
 
-1. **PR #21** (M4.5b1c3): merge it once both CI jobs are green.
-2. **`main`**: reset the main checkout's local `main` to `origin/main` (`git reset --hard origin/main` drops only the
-   local merge commit `774fde4`), which also drops its uncommitted `internal/handoff.md` edit: the answers to questions
-   78 and 79 it held are carried in M4.5b2a's branch (§8).
-3. **M4.5b2a's branch**: push it and open its PR (`git push origin m4.5b2a-globals`); based on `5ffb1a2`, it shows only
-   its own commits once PR #21 has merged; both CI jobs run the PR tier (no Linux run in the session: CI covers it).
-4. Then M4.5b2b (§4.2).
+None during M4.5b2b. At its end: push `m4.5b2b-init-markers` and open its PR (the status entry gives the commands);
+after the merge, `git merge --ff-only origin/main` in the main checkout, and `git worktree remove` of the two session
+worktrees.
 
-## 3. Open audit notes (condensed; the full notes are in the commit named above)
+## 3. Open notes, by the session that consumes them
 
-**From M4.5b2a** (audit round 1 on record 0041: two blocking, ten should-fix, thirteen notes, all taken but N9; audit
-round 2 on the code: no blocking item, about 230 probes and no wrong verdict, SF1–SF4 taken, so no re-audit;
-`build/m4.5b2a/audit{1,2}.md` in the worktree, gitignored; items not taken and open points):
-- *A front-end warning compilers do not give:* EDG's #550 ("variable "g" was set but never used") fires on a global that
-  code only writes and only contracts read (annotation uses do not count, P59); clang and GCC are silent for globals.
-  The tests read such globals in code; for the warning sweep (M8, `plan.md`).
-- *By design* (audit 1 N9): C++17 sequences `g += f()` (the right operand first); 0039's C rule stays in both modes.
-- *Completeness gaps, listed:* `alloc_<t>` does not ensure `block_of(r) != GB_g()`, so `&x != &g` is not proved in a
-  function that holds nothing of `g` (audit 1 N3); `return &s;` of a `static` local leaves the caller only `WF(r)`, so
-  its uses are `lifetime` (`static_local_return_address_use.c`, until M4.5d2's `ensures` atoms); a loop over `reads(*p)`
-  and a global written by name may need intermediate asserts for Silicon to keep `*p`'s value (audit 2 N2,
-  `l_reads_p_owns_g.c` in the scratchpad, prover incompleteness, not the encoding); over-strict rejections: `bool b =
-  &g`, `!&g`, `&g == NULL`, `static int b = (&g == &h)`, C++ `static int *p = &a` of a `static` local (audit 2 N6).
-- *Hazard, no case known:* Silicon continuing past a failed explicit check and tripping over its own check on a store
-  through an unknown pointer gives exit 3 (found once in `main`, fixed by splitting against every held global in
-  `result_splits`; no general guard).
-- *Messages:* `main(int, char **)` in a unit with globals is not the entry and fails closed, but its message asks for
-  `reads(g)` in a contract on `main`, which is rejected (audit 2 N3; M4.6 makes `main(argc, argv)` the entry); `int
-  *volatile gp` is named "volatile int *" (N7).
-- *Not on an allow-list, no wrong verdict:* asm labels on globals (the assembler refuses duplicates in one unit); a user
-  `environ`/`__progname` without the system header (fine on macOS, Linux unchecked; audit 2 N5).
-- *For later sessions:* M4.5f1 encodes `pure` bodies, which now reject globals and `static` locals (0041 item 12);
-  M4.7 must keep `&main` rejected so `program_start` is reached once (audit 1 N10).
+One line per note, its origin in brackets (session and audit item); the full wording is in the commit named above.
+Notes that a session consumes move into its plan's "Inputs" (M4.5b2b took the call's flag row, the registration rule for
+P4222's markers, P54 and the b2b design points).
 
-**From M4.5b1c3** (audit round 1 on record 0040, round 2 on the code, one re-audit; `build/m4.5b1c3/audit{1,2}.md` in the
-worktree, gitignored; items not taken and open points):
-- *A false alarm, pinned* (round 2 S4): a written atom whose pointer the loop moves keeps its entry liveness amount, so
-  a correct swap loop over two reassigned parameters (`owns(*q) && owns(*r)`, the parameters lent at different
-  fractions) is reported at the back edge and the return
-  (`tests/memory/negative/loop_written_moved_owns_false_alarm.c`); §8 question 79.
-- *`const` objects* (round 2 B1, fixed fail closed): a contract comparing pointers whose pointees differ in qualifiers is
-  rejected, which also closes the hole `int *unconst(const int *v) ensures(r, r == v)` that verified since 0037. The
-  principled model (`const` cells held below `write` after their initializer) is §8 question 78, for M4.6's
-  `strchr`-style contracts.
-- *Not re-audited* (the cap): the second B1 fix (in a contract, every pointer conversion that changes pointee
-  qualifiers, and `owns`/`owning` of a `const` place, rejected); pinned by `reject_contract_qualifier_*.c`/`.cpp`,
-  `reject_owns_const_*.c` and `reject_owning_const_int.c` from the auditor's probes (`build/m4.5b1c3/audit2.md`).
-- *Messages:* an `annotation_mismatch` between declarations written by one macro names the parameter by position
-  ("1") instead of by name (re-audit, cosmetic).
-- *Positions* (round 2 N3): with a `continue` in the body, a written atom's back-edge error is reported at the loop
-  statement, not at the body's closing brace (the jump's merge point has no position).
-- *By design* (round 2 N4): C++'s `*p = (**pp = 5)` is `unsequenced`, though C++17 sequences an assignment's right
-  operand first (0039's choice for both modes).
-- *The VIR self-test's written-atom cases* pin failing rows by index (`fail_only(category, loc, count, index)`, since one
-  check emits about ten rows at one line): a change in the order lowering emits those rows breaks them, not a
-  verdict.
-- *Over-strict, listed:* C++'s multi-level qualification conversion (`int**` → `const int* const*`) is rejected in both
-  modes (M8 entry, record 0040 item 2); a definition must repeat its prototype's `owning` (stricter than 0006 item 6's
-  contract-less declaration); two declarations of one function that cerastes cannot tell apart (one macro invocation on
-  one line) with `owning` are rejected; a `T**` callee cannot use the pointer it loads from `*pp` (`live(*pp)` is
-  M4.5c's, question 74).
+**M4.5c Structs**
+- Places reached through a heap read: `owns(**pp)`, `live(*pp)`, `**pp` in contracts (question 74, §4.2); a `T**` callee
+  cannot use the pointer it loads from `*pp` until then [b1c3].
+- Register `owning`'s target `d` here, never earlier: `check_attributes` skips registered attributes [M4.5a].
+- Struct copies must not clear the flag of a cell the function holds: record 0042's `internal` row for `ref_to_uninit`
+  (`old(flag) ==> flag`, question 87) relies on it [b2b].
+- Accepted completeness gap: `&s.x < &s.y` is reported (members are different blocks) [M4.5a].
 
-**From M4.5b1c2** (audit round 1 on record 0039, round 2 on the code, one re-audit; `build/m4.5b1c2/audit{1,2}.md` in the
-worktree, gitignored; items not taken and open points):
-- *Not re-audited* (the cap): the fix of the missed explicit termination check (an item 3 obligation's set held the
-  earlier write's whole value computation, so the comma floor carried `nr` into the recursive call's PRE; an access's
-  set is now its place value's, a call's its arguments'). Smaller sets are the safe direction (0021 item 10); pinned by
-  `tests/memory/negative/noreturn_call_in_expression_termination.c` and `seq_noreturn_recursive_call_same`.
-- *What the fail-closed check cannot see* (record 0039 item 4): obligations that read cells and inline reads are not
-  effects and rely on their sets and on item 2's inline classification; a set that is too large is invisible (0026
-  item 4), and the audits' pins guard it. In step 2, `(y = *f(), 1) && (*q = 5)` (a left operand whose value ignores
-  its read) becomes exit 3 through check (ii), never a wrong verdict.
-- *Fragility* (round 2, note 2): `Acc::owner` can point at a dead stack `Full` of a then-arm while the else-arm is
-  lowered; safe today since `order_rel` returns "unordered arms" first; a heap-stable `Full` id would be sturdier.
-- *Over-strict, listed:* `(*p = f(a)) + (*q = g(b))` stays `unsequenced_calls` (a cell write's checks are items of F,
-  unlike a Viper local's write, 0025 item 2); a caller that breaks an exclusion resting on a value `requires` is
-  reported `permission` at the call's separation check before the `precondition` (0037 item 8's order).
-- *By design* (owner, questions 65 and 70): `return p = &x;` and `int *r = &x; return r;` warn only through GCC's
-  optimizer, so they stay accepted and the caller's first use fails `lifetime`; EDG's #1056 still prints beside an R14
-  rejection where it fires.
-- *Cost:* the slowest new tests take 9-14 s under load 150-175 (about 3 s at load 47); none near 60 s.
-- *Tooling:* `build/cerastes verify --keep-vpr` with no path writes `<stem>.vpr` into the current directory (P60).
+**M4.5d1 vlibc**
+- P55: the attribute allow-list rejects a system declaration's attributes (`[[const]]`, `[[alloc_size]]`, `[[__cold__]]`)
+  once a user or vlibc file redeclares the function; check an attribute by its own position [M4.5a].
+- vlibc's headers come through `--sys_include`, so EDG flags them as system: the macro exemption of record 0031 item 9
+  must count vlibc's library class as a verified file or exclude it before vlibc lands (add it to 0030 item 4's audit
+  list) [S5].
 
-**From M4.5b1c1** (audit round 1 on record 0038, round 2 on the code, one re-audit whose blocking item was fixed and
-checked by the tests and the auditor's repros, not re-audited: the cap; items not taken and open points):
-- (The cut part, written atoms in `CERASTES_INVARIANT`, and the pinned false alarms of reassigned parameters are
-  b1c3's: its plan's "Inputs".)
-- *Cost:* the entry case splits multiply loop verification: one guarded parameter and one cell 2.7 s, two and one 8.3 s,
-  two and three 37 s, one and six 10 s (re-audit, load 20-50); four aliasing `reads` parameters with a loop about 50 s
-  under load (S28 P3). Tests stay at three or fewer. For M4.8 with question 66.
-- *Not pinned:* a loop body without braces has no closing position, so its back-edge error is reported at the loop
-  statement (round 1 S5; lowering's fallback, no test); in C++20 a loop's IL position is its first attribute's (P59).
-- *Messages:* `cerastes_old(*p)` in a loop invariant is rejected, but in C as "a conversion to or from a pointer type"
-  with a `const void *` type error and in C++ as `old_outside_ensures` (round 2 note 5); the new rejections end with
-  their diagnostic's fixed record ("(decision 0012)", "(decision 0037)") though 0038 decides them (re-audit note 4; the
-  carried note on record citations).
-- *By design:* in an invariant `==` is identity with no liveness check, so an invariant may compare a dangling pointer
-  (round 2 note 7); every use in code keeps its check.
-- *Lint* (round 2 note 8): a `Perm` local as a non-first target of a multi-target call (`a, kv := m()`) is not seen (the
-  emitter never writes it); an invariant's `acc` amount is not required to be a `Perm` local. The lint's
-  "while without decreases" rule reads the first line holding `{` as the body, so a trigger set in an invariant is a
-  false positive (pre-existing; the test filters it).
-- *Corrected:* `CERASTES_CHECK(&x != &y)` exited 3 when the code never takes `&x` (the front end does not flag a use in
-  an annotation, P59); it is `unsupported_expression` now (0032 item 4 amended).
+**M4.5d2 `malloc` and `free`**
+- Register `owning`'s `r` and `v` and `ref_to_uninit`'s `v` and `r` here, in the commit that handles them [M4.5a, b2b].
+- `alloc_<t>` does not ensure `block_of(r) != GB_g()`, so `&x != &g` is not proved in a function that holds nothing of
+  `g` [b2a audit 1 N3].
+- `return &s;` of a `static` local leaves the caller only `WF(r)`, so its uses are `lifetime`
+  (`static_local_return_address_use.c`) until `ensures` atoms land [b2a].
 
-**From M4.5b1b** (audit round 1 on record 0037, round 2 on the code, one re-audit; items not taken and open points):
-- *The cell splits at calls were checked by timing, not re-audited* (the cap): moving the `reads` pairs' case splits
-  from the entry to the calls (record 0037 items 8–9) restored four- and five-parameter times (5.7 s, 22 s); six still
-  time out (exit 3, documented). b1c1's audit round 2 re-read `call_atoms`' splits, also inside loops, and found no exit
-  3 (a `reads` call through a pointer the loop reassigns, 2.3 s; two aliasing `reads` and an `owns` parameter, 6 s).
-  The cost itself is fixed in M4.8 (§8 question 66).
-- *Over-strict, fail closed:* `restrict` beside a same-typed parameter with only `live` is rejected even when the
-  function never dereferences it. (`c ? owns(*p) : reads(*p)` and `return &local;` are b1c2's: its plan.)
-- *By-name cell checks are now `permission`* (record 0037 item 11): an encoder bug that dropped a cell's permission
-  would now read as a user error instead of exit 3; a VIR self-test hook could pin it (round 1 note).
-- *`f__wf`'s added facts* (aliasing values equal, a `reads` place's post value equals its pre value, `owns` pairs
-  distinct within one clause list) are trusted reasoning about the model; the audit rounds checked them by
-  counterexample search, not by proof.
-- *C++'s `p == NULL ? d : *p` with a `const` pointee* stays rejected (an lvalue `?:`, already in b1a), now with a
-  readable message.
+**M4.5e1/e2 Arrays and pointer arithmetic:** P38's braced initializers (§4.2); signed/unsigned and enumeration variants
+through `void*` cannot be written [M4.5a].
 
-**From M4.5b1a** (audit round 1 on records 0032–0036, round 2 on the code, a re-audit of round 2's fixes):
-- *Not pinned:* a bare `p;` with `p` dangling reports `lifetime` (checked by hand), but no test holds it: EDG also warns
-  #174 (`expr_has_no_effect`), and #550 in C++, which a test with an `error` line may not list
-  (`VERIFY_WARNING_TAGS` is closed). The `(void)p;` twins pin the rule.
-- *Evidence for later sessions* (in `il-inventory.md` since b1b): P55 is M4.5d1's (P54 is M4.5b2b's, §4.2).
-- *Messages:* the new rejections reuse `unsupported_type`, `unsupported_expression` and `unsupported_statement`, whose
-  fixed texts cite "(decision 0012)" (the carried note on record citations below applies); the type message still says
-  "only integer types, bool and the enumerations … are" although pointers to them are now accepted in locals.
+**M4.5f1/f2 Predicates**
+- `pure` bodies now reject globals and `static` locals (0041 item 12) [b2a]; R1–R13 do not reach `pure`/`predicate`
+  bodies, and `static_assert_pure_body.c`'s listed entry goes stale when bodies are encoded [M4.4c].
+- A list traversal's truth tests need liveness inside f2's predicates; `forperm` sees only top-level tokens [M4.5a].
 
-**From S5** (one Opus round on the encoder diff: one blocking item, fixed and re-audited; record 0031 items 5–7):
-- *Should fix, not taken:* a hand-written `((void)sizeof(x++), x) ? (void)0 : __assert_fail(…)` on Linux matches and
-  verifies; the general path would reject it as `side_effect_not_evaluated` (0020 item 5). Sound (the `sizeof`'s
-  operand is never evaluated), but more permissive than the rest of the encoder: require the `sizeof`'s operand to be
-  a call of the system `__assert_single_arg`.
-- *Tests:* the glibc matcher's near misses (a `(void)1` success arm, a non-`sizeof` comma operand, `__assert_fail` in
-  the success arm, another noreturn function) can only run against glibc (§8 question 59).
-- *Driver, pre-existing:* `posix_spawn_file_actions_addchdir(_np)`'s result is not checked and Silicon is given the
-  relative `program.vpr`; if adding the action failed (ENOMEM), Silicon would run in the caller's directory. Passing
-  the absolute path removes it. `LC_ALL=en_US.UTF-8` may not exist on a bare Ubuntu; no `.vpr` holds non-ASCII bytes.
-- *Per-platform `.vpr`, no test today:* C++'s `assert((bool)x)` loses the user's cast on Linux; `assert(E::b)` with a
-  scoped enumeration compiles only under glibc (record 0031 item 5).
-- *Target differences that stay* (record 0031 item 7): `__thread` and the x86 GNU attributes are accepted on Linux only.
-- *Second round, on the macro exemption (record 0031 item 9; two blocking items, fixed and re-audited):* system files by
-  EDG's flag alone (a user file that a system header includes got the exemption and verified), and a pair across two
-  inclusions; also exact text instead of tokens. **For M4.5d1:** vlibc's headers come through `--sys_include` (0030
-  item 4), so EDG flags them as system; its library class must count as a verified file for this exemption, or be
-  excluded from it, before vlibc lands (add it to 0030 item 4's audit list).
+**M4.6 Chars and strings**
+- `main(int, char **)` in a unit with globals is not the entry and fails closed, but its message asks for `reads(g)` in a
+  contract on `main`, which is rejected; M4.6 makes `main(argc, argv)` the entry [b2a audit 2 N3].
+- `const` objects as cells (question 78, §4.3); `c | 0x20` case bits (0027).
 
-**From M4.5a** (four Opus rounds on records 0028–0030: round 2 five blocking, round 3 three blocking, round 4 one
-reopened, all fixed in the records; every should-fix item taken in the text; the code of 0027: round 4, no blocking item).
-What the next sessions must carry out, beyond the records' text:
-- *Registered attributes are skipped by `check_attributes`* (`encode.cpp:485`): register each target in the session that
-  implements it (0029 item 1), never earlier: `owning`'s `d` in M4.5c, `r` and `v` in M4.5d2; P4222's markers in
-  M4.5b2b (`uninit` `v`, `ref_to_uninit` and `must_init` `p`) and `ref_to_uninit`'s `v` and `r` in M4.5d2.
-- *P55 for M4.5d1:* the attribute allow-list rejects a system declaration's attributes (`[[const]]`, `[[alloc_size]]`,
-  `[[__cold__]]`) once a user or vlibc file redeclares the function; check by the attribute's own position.
-- *EDG, not chased* (memory: only bugs that block cerastes): in C23, `typeof(*cp)` for a `const int* cp` drops `const`
-  (clang keeps it; P53, five shapes). Harmless for `cerastes_old`.
+**M4.7 Function pointers:** keep `&main` rejected, so `program_start` is reached once [b2a audit 1 N10].
+
+**M4.8 C parity close-out**
+- The cost of aliasing `reads`/`live` parameters (question 66): the cell splits at calls were checked by timing, not
+  re-audited (four and five parameters 5.7 s and 22 s, six time out with exit 3, documented) [b1b]; entry case splits
+  multiply loop verification (one guarded parameter and one cell 2.7 s, two and three 37 s; four aliasing `reads` with a
+  loop about 50 s under load); tests stay at three or fewer [b1c1]; the slowest b1c2 tests take 9–14 s under load 150–175
+  [b1c2].
+- Written atoms on moved pointers (question 79): a written atom whose pointer the loop moves keeps its entry liveness
+  amount, a pinned false alarm (`tests/memory/negative/loop_written_moved_owns_false_alarm.c`) [b1c3 round 2 S4].
+- A loop over `reads(*p)` and a global written by name may need intermediate asserts for Silicon to keep `*p`'s value
+  (prover incompleteness, not the encoding) [b2a audit 2 N2].
+- Exit-3 hazard, no case known: Silicon continuing past a failed explicit check and tripping over its own check on a
+  store through an unknown pointer (found once in `main`, fixed by splitting against every held global in
+  `result_splits`; no general guard) [b2a].
+- Mutation: the mask positives were never mutated (question 49), nor the verified doc examples (question 10) [M4.4d].
+- From the mutation review: the doc example `verifying/void_conditional.c` keeps a redundant `requires` conjunct (four
+  listed equivalents); a body `p | q` against an exact `&` contract runs to the timeout (0023's limit), so
+  `not_eq_and_bools` states its contract with `&&` [M4.4c].
+- Masks that are constants only through a call argument (`f(v, 4294967295u)` with `requires((v & m) == v)`): Silicon's own
+  precondition check may run to the timeout (exit 3; question 51); the exact-set fallback keeps today's false alarms
+  (question 50) [M4.4d].
+
+**M5.0 and M5** (also §4.4)
+- `mutate.py`'s classifier does not read local declarations (about 20 listed equivalents rest on a reviewer's reading),
+  before M5a; a user C++ function named `assert` would be bucketed by `mutate.py` [S3 note 1].
+- Templates [M2 audit B]: a predicate called inside a `forall` lambda in a function template's contract is falsely
+  rejected (`spec_call_in_code`); the `operator=` branch of `spec_marker_on_special_member` lost its test; P changes
+  overload choice where constant evaluation is a substitution failure (two tests to add); 2–3 tests for the back end's
+  constant-context pass in never-instantiated templates; a class-scope `static_assert(q(sizeof(T)))` in a
+  never-instantiated class template is accepted (harmless); EDG at P leaves an error node without a diagnostic for a
+  `decltype(p)` lambda parameter (`annotation_substitution_error` is load-bearing, M5b fork commit R).
+- A closed 128-bit claim over a shifted constant other than 1 is undecided (folding `k * c_pow2(n)` would change
+  existing Viper) [M4.4b1 note 6].
+
+**M8 Inventory** (the warning sweep is an M8 entry in `plan.md`)
+- Warnings: EDG's #550 on a global that code only writes and only contracts read (clang and GCC are silent; tests read
+  such globals in code) [b2a]; record 0025 item 6's "still accepted" shapes (`RED == RED`, clang's
+  `-Wparentheses-equality`, `-Wswitch-bool`, `-Wfor-loop-analysis`, `-Wmisleading-indentation`, GCC's
+  `-Wmultistatement-macros`, clang's `-Wempty-body` on loops, R10 with a named constant or a constant expression, R7 not
+  looking into a `?:` arm that is a comma ending in a constant); untested shapes `else ;` and `do ; while (c);` [M4.4c].
+- Rejected more broadly than the compilers [M4.4c]: R13's `;` on the line after the condition and an empty macro
+  invocation as the body; R7's `*` through both `?:` arms in every conversion to `bool`; R9 on a 0 or 1 right operand from
+  a macro and R11 on an operand from a macro under a written `&&`. R10 and R11 apply in code only, R5 and R9 in
+  annotations too (question 44).
+- Over-strict, listed: `bool b = &g`, `!&g`, `&g == NULL`, `static int b = (&g == &h)`, C++ `static int *p = &a` of a
+  `static` local [b2a audit 2 N6]; C++'s multi-level qualification conversion (`int**` → `const int* const*`), a
+  definition that must repeat its prototype's `owning`, two indistinguishable declarations with `owning` [b1c3];
+  `(*p = f(a)) + (*q = g(b))` stays `unsequenced_calls`, a caller breaking an exclusion resting on a value `requires` is
+  reported `permission` before `precondition` [b1c2]; `restrict` beside a same-typed parameter with only `live` [b1b];
+  `a && (y = x = 1);` and a discarded `a && (flag = x);` with a `bool` target [M4.3b note 5]; the pragma rule rejects
+  harmless `#pragma clang/GCC diagnostic` (an allow-list would lift it) [M4.2b1 note 1].
+- C++'s `p == NULL ? d : *p` with a `const` pointee stays rejected (an lvalue `?:`), with a readable message [b1b].
+- Mode differences, not meanings: `x = ((void)(a > 0 && x > 0), 2)` is `uninitialized` in C and rejected in C++; `x ? RED :
+  GREEN` as a value accepted in C and rejected in C++ (0018 item 8) [M4.4c]; `c >= +GREEN` accepted in C, rejected in C++
+  [M4.2c note 1].
+- Not on an allow-list, no wrong verdict: asm labels on globals; a user `environ`/`__progname` without the system header
+  (fine on macOS, Linux unchecked) [b2a audit 2 N5].
+
+**Standing** (no session; act when the code is next touched)
+- *By design:* C++17 sequences `g += f()` and `*p = (**pp = 5)` (the right operand first), but 0039's C rule stays in both
+  modes [b2a N9, b1c3 N4]; `return p = &x;` and `int *r = &x; return r;` stay accepted (the caller's first use fails
+  `lifetime`; questions 65, 70) and EDG's #1056 prints beside an R14 rejection [b1c2]; in an invariant `==` is identity
+  with no liveness check [b1c1 note 7].
+- *Messages:* `int *volatile gp` is named "volatile int *" [b2a N7]; an `annotation_mismatch` between declarations written
+  by one macro names the parameter by position [b1c3]; `cerastes_old(*p)` in a loop invariant is rejected in C as "a
+  conversion to or from a pointer type", in C++ as `old_outside_ensures` [b1c1]; rejection texts end "(decision 0012)" or
+  "(decision 0037)" where a later record decides them, and the type message still says "only integer types, bool and the
+  enumerations … are" [M4.2a–M4.2c, b1a, b1c1]; a block-scope `extern const` naming an internal-linkage C++ constant is
+  called "a static local variable" [M4.2b1 note 2]; C's `case -1:` over an enumeration prints 4294967295 [M4.4a note 7];
+  `d == (x ? (y, RED) : GREEN)` gives one diagnostic in C, two in C++ [M4.4b1 note 2]; lowering's
+  internal-inconsistency diagnostics have no position; two failing `requires` clauses at one call print the same
+  message twice (tests choose contracts that fail once) [M4.4d].
+- *Positions:* with a `continue` in the body, a written atom's back-edge error is reported at the loop statement
+  [b1c3 N3]; a loop body without braces likewise (no test) [b1c1 S5]; in C++20 a loop's IL position is its first
+  attribute's (P59).
+- *Fail-closed checks and their limits:* the memory-order check cannot see obligations that read cells, inline reads, or
+  a set that is too large (0039 item 4, 0026 item 4; pinned by the audits' probes) [b1c2]; the termination-set fix was
+  not re-audited (smaller sets are the safe direction; `noreturn_call_in_expression_termination.c`) [b1c2]; item 2's
+  checks of M4.4c read the placement emission uses, a set computed too large is still invisible (pins
+  `call_write_noreturn_divzero.c`, `never_returns_call_divzero.c`) [M4.4c]; `Acc::owner` can point at a dead stack `Full`
+  of a then-arm while the else-arm is lowered (safe today; a heap-stable id would be sturdier) [b1c2 note 2].
+- *Trusted reasoning checked by counterexample, not proof:* `f__wf`'s added facts (aliasing values equal, a `reads`
+  place's post value equals its pre value, `owns` pairs distinct in one clause list) [b1b]; by-name cell checks are
+  `permission`, so an encoder bug dropping a cell's permission would read as a user error (a VIR hook could pin it) [b1b].
+- *Not re-audited* (the cap): b1c3's second B1 fix (in a contract, every pointer conversion changing pointee
+  qualifiers, and `owns`/`owning` of a `const` place, rejected; pinned by `reject_contract_qualifier_*`,
+  `reject_owns_const_*`, `reject_owning_const_int.c`) [b1c3].
+- *Self-test pins:* the VIR self-test's written-atom cases pin failing rows by index (`fail_only(category, loc, count,
+  index)`), so a change in row order breaks them, not a verdict [b1c3]; the VIR mask cases pass with either encoding by
+  design [M4.4d round 2 note 10]; `calls_drop_exact_set_hook_off` duplicates `calls_fixed_order_hook_off` (harmless)
+  [M4.4d].
+- *Lint:* a `Perm` local as a non-first target of a multi-target call is not seen, an invariant's `acc` amount is not
+  required to be a `Perm` local, and the "while without decreases" rule reads the first line holding `{` as the body
+  [b1c1 note 8, M4.2a note 7]; the lint of `%` and `\` reads only the divisor and exempts the prelude bodies by name (the
+  guarantee is structural: `low::mod_pow2`/`div_pow2`) [M4.4d]; `lint_flags` checks the flag on the line after the write
+  only [M4.3a note 3].
+- *Tooling:* `build/cerastes verify --keep-vpr` with no path writes `<stem>.vpr` into the current directory (P60) [b1c2];
+  `mutate.py` does not mutate namespace-scope initializers, a literal mutated past `9223372036854775807` changes type,
+  `--list` is slow under load, a mutation wrapper's cap must stay above the driver's `--timeout` (or Silicon processes are
+  orphaned), `drop-complement` on a C++ destructor and `swap-bitwise` on `(T)&x` give stillborn mutants [M4.2b1 note 7,
+  S3 note 2, M4.2a note 6, M4.4b1 notes 4, 7]; the walker oracle cannot tell an orphan closure copy from the used one, a
+  phantom `on type <unnamed>` line could pass, and it lists neither a first declaration's own attribute after the
+  parameter list nor one on a template definition [M2 audit B note 6, M4.4b2 note 5].
+- *Driver and platforms* [S5]: `posix_spawn_file_actions_addchdir(_np)`'s result is not checked and Silicon is given the
+  relative `program.vpr` (passing the absolute path removes it); `LC_ALL=en_US.UTF-8` may not exist on a bare Ubuntu;
+  C++'s `assert((bool)x)` loses the user's cast on Linux, `assert(E::b)` with a scoped enumeration compiles only under
+  glibc; `__thread` and the x86 GNU attributes are accepted on Linux only (0031 item 7); a hand-written
+  `((void)sizeof(x++), x) ? (void)0 : __assert_fail(…)` on Linux matches and verifies (sound; require the `sizeof`'s
+  operand to be a call of `__assert_single_arg`); the glibc matcher's near misses can only run against glibc
+  (question 59).
+- *Recognition by name or shape:* `assert` by its macOS expansion and `__assert_rtn`; the character-literal trigger
+  compares VIR type names (`int_kind` would be sturdier) [S3, M4.4b2 note 3]; the noreturn trust checks a routine's first
+  declaration (source sequence lists, on since M4.4b2, can now make it exact, and the libc table's "declared only in
+  system files") [M4.2a note 1].
+- *Fail-closed corners and unreached guards:* `names_object` false on an unknown node kind; a C case value of an unknown
+  shape; defensive branches with no test (M4.1's undetermined `break`/`continue` target, a non-integer scrutinee, a case
+  value of another type; a declaration directly in an unflattened generated block; a `cerastes::` attribute on a label;
+  `comparison()`'s raw operands of two enumerations; "an enumerator whose enumeration this version cannot find";
+  `enum_case_value`'s constant without `expr`; the exit-3 paths for emitter problems and "encoded twice", only
+  `--selftest` sets the flag) [M4.1–M4.4a].
+- *Accepted shapes worth a test:* `0 && (x = 1)`, `1 || x++` (folded, rejected); `assert((note(x), x >= 0))` (rejected by
+  `check_program`); `decltype(x++)` (accepted, clang warns); a `_Noreturn int main` in C23 (only C++ tested); a typedef
+  whose first reason is not an array is rejected only at a use; `_Static_assert(1.5, "")` names its type in C but not in
+  C++ [M4.3a, M4.2a, M4.4b2]. Not pinned: a bare `p;` with `p` dangling reports `lifetime` (EDG's #174, and #550 in C++,
+  keep it out of `error` tests; the `(void)p;` twins pin the rule) [b1a].
 - *Costs to watch:* liveness checks at every pointer use cost about 1.5–1.7× time and text on S26's scale program; deep
-  `^` mask chains (0027): range claims are fast to depth 32, identities only to the measured depth (record 0027 item 4).
-- *Completeness gaps accepted by the records:* `&s.x < &s.y` reported (members are different blocks); signed/unsigned
-  and enumeration variants through `void*` cannot be written; a list traversal's truth tests need liveness inside
-  M4.5f2's predicates; `forperm` sees only top-level tokens.
-**From M4.4d** (audit rounds 1 and 2 and the re-audit; items not taken):
-- *Masks that are constants only through a call argument* (round 2 note 4): `f(v, 4294967295u)` with
-  `requires((v & m) == v)` rewrites the explicit check lowering writes at the call, but Silicon's own check of the
-  callee's precondition still reads `c_uand_64(p_v, p_m)` and may run to the timeout (exit 3, never a verdict; a probe
-  took 90 s). Record 0026 item 9 and the Integer semantics page say only a mask written as a constant is decided. §8
-  question 51.
-- *The fallback keeps today's false alarms* where step 2 is used (0026 item 6); no existing test is accepted by step 2
-  (M1), so none shows one. §8 question 50.
-- *The mask positives were not mutated* (the plan's cut 1: a mutated constant lands on an undecided shape and runs to
-  the 300 s timeout). M4.8's run over the M4 tests takes them (§8 question 49).
-- *The lint of `%` and `\`* (round 2 note 9) reads only the divisor: it cannot tell a C `%` by a power of two emitted as
-  Viper's `%`, and it exempts the prelude bodies by name (`c_rem`, `c_urem`; `c_div`, `c_udiv`, `c_shr`). The guarantee
-  is structural: `low::mod_pow2`/`div_pow2` are the only constructors, and user functions are named `f_<name>__<id>`.
-- *The VIR mask cases pass with either encoding by design* (round 2 note 10); `test_a_constant_mask_is_emitted_as_a_
-  remainder_not_as_a_bit_function` checks the emitted text.
-- *Two failing `requires` clauses at one call print the same message twice* (seen on the retired test under exact sets;
-  0011 item 9's harness rule fails such a test): tests choose contracts that fail once (`call_split_requires_pre.c`).
-- *A duplicate VIR case:* `calls_drop_exact_set_hook_off` is the program and expectation of `calls_fixed_order_hook_off`
-  (harmless).
-
-**From M4.4c** (audit rounds 1 and 2; items not taken):
-- *Shapes accepted and listed* (record 0025 item 6, "still accepted"): `RED == RED` (the front end folds it to 1 without
-  an expression); clang's `-Wparentheses-equality`, `-Wswitch-bool`, `-Wfor-loop-analysis`, `-Wmisleading-indentation`
-  (clang and GCC), GCC's `-Wmultistatement-macros`, clang's `-Wempty-body` on loops; R10 with a named constant
-  (`uc == DEF`, `const int DEF = 300;`, clang's C++ mode warns) or a constant expression (`uc == 256 + 44`); R7 does
-  not look into a `?:` arm that is a comma ending in a constant. All are for the warning sweep, now an **M8** entry (`plan.md`).
-- *Rejected more broadly than the compilers, listed:* R13's `;` on the line after the condition and an empty macro
-  invocation as the body (`if (x > 0) LOG("positive");`), since the IL keeps no position for the `)`; R7's `*` through
-  both `?:` arms in every conversion to `bool` (GCC's C mode only); R9 on a 0 or 1 right operand from a macro
-  (`x && ONE`) and R11 on an operand from a macro under a written `&&` (`x > LIM && x < 3`), where clang is silent
-  (the re-check after audit round 2).
-- *Rules that skip annotations:* R10 and R11 apply in code only (wrong or vacuous contracts are reported by
-  verification; error tests use them on purpose); R5 and R9 apply in annotations whatever the macros. §8 question 44.
-- *Untested accepted shapes:* `else ;` and `do ; while (c);` (GCC's `-Wextra` warns, so no `native-ok` positive can
-  hold them).
-- *Mode differences, not meanings:* `x = ((void)(a > 0 && x > 0), 2)` reports `uninitialized` in C and is rejected in
-  C++ ("comma … folded to a constant"); `x ? RED : GREEN` as a value is accepted in C and rejected in C++ (0018 item 8).
-- *Fail-closed checks of item 2* now read the placement emission uses, and three VIR hooks reach them; a set computed
-  too large (the unsound direction) is still invisible to them (M4.3b note 4): the pins guard it
-  (`call_write_noreturn_divzero.c`, `never_returns_call_divzero.c`, …).
-- *From the mutation review:* R1–R13 do not reach the body of a `pure` or `predicate` function (not verified before
-  M4.5f; the Verifying page says so), and `static_assert_pure_body.c`'s listed entry goes stale then; the doc example
-  `verifying/void_conditional.c` keeps a redundant requires conjunct `(c == 0 || n > 0)` (four listed equivalents; the
-  `m > 0` pattern of `void_conditional_for.c` would make it needed); a body `p | q` against an exact `&` contract runs to
-  the timeout (0023's documented limit), so `not_eq_and_bools` states its contract with `&&`.
-
-**Carried from earlier sessions** (each still open; the session that wrote it in brackets):
-- *Recognition by name or shape.* `assert` is recognised by its macOS expansion and `__assert_rtn` (S3 note 1: a user
-  C++ function named `assert` would be bucketed by `mutate.py`). The character-literal trigger compares VIR type names
-  (`int`, `char`, `wchar_t`); `int_kind` would be sturdier (M4.4b2 note 3).
-- *Messages.* Rejection texts still end "(decision 0012)" where a later record decides them (M4.2a–M4.2c notes); a
-  block-scope `extern const` naming an internal-linkage C++ constant is called "a static local variable" (M4.2b1 note 2);
-  `c >= +GREEN` is accepted in C and rejected in C++ (the front end drops the `+` in C; M4.2c note 1); C's `case -1:`
-  over an enumeration prints 4294967295 in `case_not_in_enumeration` (M4.4a note 7); for `d == (x ? (y, RED) : GREEN)`
-  C reports one diagnostic and C++ two (M4.4b1 note 2); lowering's internal-inconsistency diagnostics have no
-  position.
-- *Fail-closed corners and unreached guards.* `names_object` returns false on an unknown node kind (M4.2b1 note 3); a C
-  case value of an unknown shape is rejected (M4.2b2 note 4); `?:` of enumeration type is rejected in C++ while C reads
-  `x ? RED : GREEN` as `int` (0018 item 8; EDG rejects it in C++, accepts it in C); defensive branches with no test:
-  three in M4.1's encoder (an undetermined `break`/`continue` target, a non-integer scrutinee, a case value of another
-  type), a declaration directly in an unflattened generated block, a `cerastes::` attribute on a label (M4.2a note 2),
-  `comparison()`'s raw operands of two enumerations, "an enumerator whose enumeration this version cannot find" (M4.2b2
-  note 3), `enum_case_value`'s constant without `expr` (M4.4a note 3), the exit-3 paths for emitter problems and
-  "encoded twice" (M4.4a note 2: only `--selftest` sets the flag).
-- *Who wrote a flag.* The noreturn trust checks a routine's first declaration and the attribute entries (M4.2a note 1);
-  source sequence lists are on since M4.4b2, so the check can now be made exact (and the libc table's "declared only in
-  system files", 0015 item 5).
-- *Accepted shapes worth a test* (fail closed or listed): `0 && (x = 1)`, `1 || x++` (EDG folds them; rejected),
-  `assert((note(x), x >= 0))` (rejected by `check_program`), `decltype(x++)` (accepted, clang warns) (M4.3a notes 5, 7);
-  `a && (y = x = 1);` and a discarded `a && (flag = x);` with a `bool` target are over-rejected (M4.3b note 5); a
-  `_Noreturn int main` in C23 (EDG's #3271 also prints; only C++ tested; M4.2a note 5); a typedef whose first reason is
-  not an array (`typedef unsigned _BitInt(8) fn(char a[3]);`) is rejected only at a use; `_Static_assert(1.5, "")` names
-  its type in C but not in C++; no test pins an assertion in a `pure` body before M4.4c (M4.4b2 note 6: now
-  `static_assert_pure_body.c`).
-- *Tooling.* `mutate.py` does not mutate namespace-scope initializers (M4.2b1 note 7); a literal mutated past
-  `9223372036854775807` changes type (S3 note 2); `--list` is slow under load (M4.2a note 6); the lint's
-  "while without decreases" rule reads up to the first `{` (M4.2a note 7); `lint_flags` checks the flag on the line after
-  the write only (M4.3a note 3); a mutation wrapper's cap must stay above the driver's `--timeout`, or Silicon processes
-  are orphaned (M4.4b1 note 7; `run_tool` could send SIGTERM first); `drop-complement` on a C++ destructor and
-  `swap-bitwise` on `(T)&x` give stillborn mutants (M4.4b1 note 4).
-- *Walker oracle.* It cannot tell an orphan closure copy from the used one (audit B note 6); a phantom `on type
-  <unnamed>` line could pass, since already-matched entries stay in the pool (M4.4b2 note 5); the walker lists neither a
-  first declaration's own attribute after the parameter list nor one on a template definition.
-- *Templates (M5).* Audit B (M2): a predicate called inside a `forall` lambda in a function template's contract is
-  falsely rejected (`spec_call_in_code`, leftover closure copies); the `operator=` branch of
-  `spec_marker_on_special_member` lost its test; P changes overload choice where constant evaluation is a substitution
-  failure (two tests to add); 2–3 tests for the back end's constant-context pass in never-instantiated templates; a
-  class-scope `static_assert(q(sizeof(T)))` in a never-instantiated class template is accepted (harmless). EDG at P
-  leaves an error node without a diagnostic for a `decltype(p)` lambda parameter; `annotation_substitution_error` is
-  load-bearing (M5b fork commit R). A closed 128-bit claim over a shifted constant other than 1 is undecided (M4.4b1
-  note 6: folding `k * c_pow2(n)` would change existing Viper).
-- *Pragmas.* The pragma rule rejects harmless `#pragma clang/GCC diagnostic` in user code; an allow-list of pragmas that
-  cannot change meaning would lift it (M4.2b1 note 1).
+  `^` mask chains are fast to depth 32 for range claims, identities only to the measured depth (0027 item 4) [M4.5a].
+- *EDG, not chased:* in C23, `typeof(*cp)` for a `const int* cp` drops `const` (P53; harmless for `cerastes_old`) [M4.5a].
 
 ## 4. Session plans
 
@@ -294,7 +207,7 @@ not taken go to §3); single-file runs while working (`build/cerastes verify` di
 builds serialized (`lockf build/<session>/build.lock cmake --build build/cmake`); `check.sh` at most twice; the EDG
 suites on the x86-64 host are their own session, but any x86-64 test run a session needs goes to `matt@clang4.cpp.al`
 automatically (owner, 2026-10-29: not Docker multi-arch on the Mac, which is only the fallback when the host is down).
-Record numbers are the next free ones when written (0041 is M4.5b2a's, 0042 M4.5b2b's). The
+Record numbers are the next free ones when written (0042 is M4.5b2b's, 0043 the next free one). The
 approved plan is saved as `.claude/plans/<milestone>-<topic>.md` (plan.md, "Session protocol").
 
 Finished sessions: their plans are in `.claude/plans/` (from M4.5b1a on), their results in `internal/status.md` and the
@@ -337,37 +250,11 @@ atoms with no partner) moved to M4.5d2. Each session rejects what a later one ma
 paragraph points at one), and no others; a pin whose construct stays rejected keeps its `expect:` line, and only its message and `Pins:` comment name the
 new session.
 
-**M4.5b2 is two sessions** (at M4.5b2a's planning, 2026-10-30; the whole row was about 1,300–1,500 changed lines and 55
-tests, more than one context). 0019's flag per cell is done (b1a–b1c3); what the row adds beyond it is below.
-
-**M4.5b2a Globals and `static` locals: done** (2026-10-30; record 0041; plan `.claude/plans/m4-5b2a-globals.md`; status
-entry), with question 81's flips: `reject_global.c`, `reject_static_local.c` and `reject_pointer_global.c` retired for
-positives of the same shape (`global_declared_unused.c`, `static_local_unused.c`, `global_pointer_declared_unused.c`);
-`reject_address_of_const_global.c` and `reject_case_const_address_taken.cpp` name M4.6, `reject_owns_of_param_cell.c` no
-session. Ports: `tests/memory/verifast/global_points_to_syntax.c`, `globals.c` (scalar part).
-
-**M4.5b2b Initialization through pointers** (record 0042; plan it from this paragraph). P4222's markers (0029 item 2;
-P54 in `il-inventory.md`): `[[cerastes::uninit]]` on an automatic local (target `v`, registered `v:+a!`; it documents
-intent, 0019 already proves every read; with an initializer `uninit_initialized`), `[[cerastes::ref_to_uninit]]` and
-`[[cerastes::must_init]]` on pointer parameters (target `p` only, `RAF_NO_FLAGS` as `owning`: `RAF_ENTITY_ATTACHED`
-with `p` alone aborts EDG at startup; registered in the same commit as their handling, `check_attributes` skips
-registered attributes): `ref_to_uninit` drops the flag from the parameter's `owns(*p)` in the `requires` and promises no
-flag value in the `ensures`; `must_init` promises it (`postcondition` on a path that leaves `*p` uninitialized); both on
-one parameter, a duplicate, a non-pointer, `void*`, a `const` pointee or a mismatch between declarations rejected
-(`annotation_mismatch`'s text generalised from `owning`); macros `CERASTES_UNINIT`, `CERASTES_REF_TO_UNINIT`,
-`CERASTES_MUST_INIT`. **Owner decisions** (2026-10-30, at M4.5b2a's planning): question 82, the call's flag row
-(`call_atoms`' `add(x.g, cell_flag(x.p, t), m)`, category `permission` today) becomes `uninitialized` at the argument,
-naming the parameter, which changes the `.map` (not the `.vpr`) of every program calling an `owns`/`reads` function and
-the VIR self-test's row-count pins at the argument (`selftest_cases8.inc:73`, `selftest_cases11.inc:137-138`, possibly
-:232, :287, :380, :401, :423): those pins are b2b's pre-approved flips, re-expected with the new category, and no others;
-question 83, under `--strict-init` an argument to a `ref_to_uninit`/`must_init` parameter must be `&x` of a
-`[[cerastes::uninit]]` local or the caller's own marked parameter passed unchanged, anything else rejected statically
-(`uninit_ref_initialized`). `--strict-init` (a driver option through `VerifyConfig`, 0019 item 2) also requires
-`[[cerastes::uninit]]` on every local definition without an initializer (`uninit_unmarked`); tests pass it through a new
-`// verify-options:` header (`run_tests.py`, `test_run_tests.py`, `tests/README.md`). Open design points for its record
-(M4.5b2a's design check, risk 10): a contract read of a `ref_to_uninit` pointee (`*p` or `old(*p)` where the flag is not
-promised; `f__wf`'s ghosts do not check the flag): rejected, or an `uninitialized` row; the markers beside `owning`'s
-desugared atom. `ref_to_uninit` on locals and functions (targets `v`, `r`) is M4.5d2's.
+**M4.5b2 is two sessions** (split at M4.5b2a's planning, 2026-10-30). **M4.5b2a** (globals and `static` locals) is done
+(record 0041; plan `.claude/plans/m4-5b2a-globals.md`; flips of question 81). **M4.5b2b** (P4222's markers
+`[[cerastes::uninit]]`, `ref_to_uninit` and `must_init` on parameters, `--strict-init`, the call's flag row as
+`uninitialized`; record 0042) is in progress: its plan `.claude/plans/m4-5b2b-init-markers.md` holds its scope, inputs
+(P54, questions 82–83 and 85–88, the self-test pins it re-expects) and flips.
 
 **M4.5c Structs.** Members as blocks of their own (0028 item 16), `.` and `->`, struct values (copies, initializers,
 by-value parameters and results), nested structs, pointers to members, `owns(*s)`, non-recursive owning fields
@@ -516,8 +403,8 @@ refusing an accumulating attribute that first appears on a later declaration (ch
 paths — check member and template paths; GH tests in `tests/tests/changes/GH-*.sft.cpp` with an `-ok` companion,
 `src/Changes`, `doc/source/ext_intf.rst`); cerastes registers it for `predicate`/`pure`
 (`register_attributes.cpp:51-52`). Fork commit R: EDG diagnoses series L's silent error node for a `decltype(p)`
-lambda parameter (§3, *Templates*); the `decltype` tests move from `cerastes-annotation_substitution_error` to EDG's diagnostic
-at the same line (owner's rule). Plus the close-out audit B's missing tests (§3, *Templates*). Fail-before/pass-after,
+lambda parameter (§3, "M5.0 and M5"); the `decltype` tests move from `cerastes-annotation_substitution_error` to EDG's diagnostic
+at the same line (owner's rule). Plus the close-out audit B's missing tests (§3, "M5.0 and M5"). Fail-before/pass-after,
 Opus audit, the full box suites (baseline mismatches `cwg1835`, `cwg2881`), pin move, 0006/0007 and the upstream
 draft amended. Stop rules: box unavailable → topic branch, pin moved in a short follow-up; new box mismatch → no pin
 move.
@@ -602,15 +489,18 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
 - **What keeps a session short:** fixed scope with stop rules; the owner's decisions and pre-approved expectation
   changes asked up front, each with a concrete default; the record written while the probes' results come in, audited in
   the background; three agents with disjoint files; single-file runs during the work.
-- **Worktree.** Sessions run in the worktree `.claude/worktrees/m4.2b1` on their own branch (`git checkout -b <branch>
-  main`); its submodules were cloned with `--reference` to the main checkout's module stores. A shell `cd` elsewhere may
-  leave the worktree: name it in every command.
+- **Worktree.** Each session creates its own worktree, `.claude/worktrees/<session>` on its branch from `origin/main`
+  (`git worktree add .claude/worktrees/m4.5b2b -b <branch> origin/main`; the old `.claude/worktrees/m4.2b1` is gone since
+  M4.5b2b), with its submodules cloned with `--reference` to the main checkout's module stores (`third_party/edg`,
+  `third_party/silicon`, then `silver` inside it), then `scripts/bootstrap.sh`. A shell `cd` elsewhere may leave the
+  worktree: name it in every command.
 - **Builds and baselines.** Take the baseline (`run_tests.py -j 8`, `build/vpr` → `build/<session>-baseline-vpr`, the VIR
   self-test into `build/<session>-baseline-vir`) before any build; agents edit meanwhile but build only after it, with
   `lockf build/<session>/build.lock cmake --build build/cmake`, and nothing builds while `check.sh` runs. A session that
   moves the pin runs `check.sh` once early.
-- **A baseline that agents cannot disturb** (M4.5b1a): run it from the main checkout's own build (`main` there, its own
-  `build/` and `build/vpr`), copying its `build/vpr` into the worktree's `build/<session>-baseline-vpr`. Then the
+- **A baseline that agents cannot disturb** (M4.5b1a; from M4.5b2b in a detached worktree of its own,
+  `.claude/worktrees/<session>-base` at the starting commit, so the main checkout is never touched): its own `build/` and
+  `build/vpr`, copied into the session worktree's `build/<session>-baseline-vpr`. Then the
   worktree's build is free for the implementers from the start; in M4.5b1a an agent's build relinked `build/cerastes`
   under a baseline that shared it. Run `scripts/bootstrap.sh` in the worktree first when it was last built for another
   branch (a stale EDG stamp stops `run_tests.py`).
@@ -671,5 +561,12 @@ permission reaches its function by an implicit `owns` in its contract and in eve
 (under `--strict-init` an initialized pointee passed to a `ref_to_uninit` parameter is a static rejection, M4.5b2b,
 §4.2), 84 (initial values by linkage: internal linkage and C's external linkage get the initializer's value, C++'s
 external linkage an unknown one; M4.5b2a's plan).
+
+At M4.5b2b's planning (2026-11-02, each the recommendation; recorded in its plan and record 0042): 85 (every call flag
+row becomes `uninitialized`, global and `static`-local atoms included; `selftest_cases12.inc:113, :206, :283` join
+question 82's pre-approved re-expected pins), 86 (contract reads of a marked parameter's pointee are rejected statically,
+`*p` in a `must_init` parameter's `ensures` excepted), 87 (after a `ref_to_uninit` call an initialized pointee stays
+initialized: `old(flag) ==> flag`, amending 0028 item 14), 88 (a marker needs an `owns(*p)` atom, explicit or from
+`owning`, and `must_init` one in the `ensures` too; `reads(*p)` beside a marker is rejected).
 
 No question is open.
