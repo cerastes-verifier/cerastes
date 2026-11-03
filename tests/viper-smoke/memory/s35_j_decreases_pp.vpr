@@ -1,0 +1,145 @@
+// expect: verified
+// S35 (j) decreases_pp: a recursive `countdown(int **pp)` with `decreases(**pp)`: the method's measure `p_pp.v_ptr_int.v_int` (plain: owns(*pp) frames the load), the caller's explicit check at the recursive call (the callee's measure at the arguments in the current heap < the caller's under `old`, and 0 <= it) and Viper's own termination check (record 0045 item 8)
+// Hand-written in the emitted style: explicit atomic asserts before every access, call and return (0028 item 11), ghost Perm amounts (0037 item 6), the four axioms with their tags; the allocation methods are the trusted ones (record 0032 item 4).
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0037 items 6-7, 0040 item 2): WF; an int range; a cell owned (root, full permission, flag set, range or WF of the pointer, the liveness amount); live
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNGV(v) ((-2147483648) <= v && v <= 2147483647)
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+define CI(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNGV(c.v_int))
+define CP(c) (acc(c.v_ptr_int) && acc(c.d_ptr_int) && c.d_ptr_int && WF(c.v_ptr_int))
+define OWNI(p, a) (ROOT(p) && CI(p) && LVF(p, a))
+define OWNP(p, a) (ROOT(p) && CP(p) && LVF(p, a))
+define LIVE(p, a) (p != null && WF(p) && LVF(p, a))
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_int() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(r.v_int) && acc(r.d_int) && !r.d_int && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract allocation of an address-taken local of type int*: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_ptr_int() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(r.v_ptr_int) && acc(r.d_ptr_int) && !r.d_ptr_int && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// void countdown(int **pp) requires(owns(*pp) && owns(**pp) && **pp >= 0) ensures(owns(*pp) && *pp == old(*pp) && owns(**pp) && **pp == 0) decreases(**pp) { if (**pp > 0) { **pp -= 1; countdown(pp); } }
+// the method's measure is the read of **pp in the entry heap (the chain is framed by the unconditional owns(*pp), so it is plain); the recursive call's measure is the callee's at the arguments in the current heap against the caller's under old
+method f_countdown__0(p_pp: Ref, a0: Perm, a1: Perm)
+  requires (none < a0) && (a0 < write)
+  requires (none < a1) && (a1 < write)
+  requires WF(p_pp)
+  requires OWNP(p_pp, a0) && OWNI(p_pp.v_ptr_int, a1) && p_pp.v_ptr_int.v_int >= 0
+  ensures OWNP(p_pp, a0) && p_pp.v_ptr_int == old(p_pp.v_ptr_int) && OWNI(p_pp.v_ptr_int, a1) && p_pp.v_ptr_int.v_int == 0
+  decreases p_pp.v_ptr_int.v_int
+{
+  var eb_1: Ref
+  var t0: Ref
+  var t1: Int
+  eb_1 := p_pp.v_ptr_int
+  if (lvloc(block_of(p_pp)) == lvloc(block_of(eb_1))) { }
+  assert p_pp != null
+  assert perm(p_pp.v_ptr_int) > none
+  assert p_pp.d_ptr_int
+  t0 := p_pp.v_ptr_int
+  assert t0 != null
+  assert perm(t0.v_int) > none
+  assert t0.d_int
+  t1 := t0.v_int
+  if (t1 > 0) {
+    assert p_pp != null
+    assert perm(p_pp.v_ptr_int) > none
+    assert p_pp.d_ptr_int
+    t0 := p_pp.v_ptr_int
+    assert t0 != null
+    assert perm(t0.v_int) > none
+    assert t0.d_int
+    assert !((t0.v_int - 1 < (-2147483648)) || (2147483647 < t0.v_int - 1))
+    assert !((perm(t0.v_int) != write) || (perm(t0.d_int) != write))
+    t0.v_int := t0.v_int - 1
+    t0.d_int := true
+    // countdown(pp): the rows in clause order, the amounts, the explicit termination check, the call
+    assert p_pp != null
+    assert WF(p_pp)
+    assert offset_of(p_pp) < len(block_of(p_pp))
+    assert perm(p_pp.v_ptr_int) == write
+    assert perm(p_pp.d_ptr_int) == write
+    assert p_pp.d_ptr_int
+    assert WF(p_pp.v_ptr_int)
+    assert p_pp.v_ptr_int != null
+    assert WF(p_pp.v_ptr_int)
+    assert offset_of(p_pp.v_ptr_int) < len(block_of(p_pp.v_ptr_int))
+    assert perm(p_pp.v_ptr_int.v_int) == write
+    assert perm(p_pp.v_ptr_int.d_int) == write
+    assert p_pp.v_ptr_int.d_int
+    assert RNGV(p_pp.v_ptr_int.v_int)
+    if (lvloc(block_of(p_pp)) == lvloc(block_of(p_pp.v_ptr_int))) { }
+    assert p_pp.v_ptr_int.v_int >= 0
+    assert none < (perm(lvloc(block_of(p_pp)).lv) / 3)
+    assert (perm(lvloc(block_of(p_pp)).lv) / 3) < write
+    assert none < (perm(lvloc(block_of(p_pp.v_ptr_int)).lv) / 3)
+    assert (perm(lvloc(block_of(p_pp.v_ptr_int)).lv) / 3) < write
+    assert perm(lvloc(block_of(p_pp)).lv) >= ((perm(lvloc(block_of(p_pp)).lv) / 3) + ((lvloc(block_of(p_pp)) == lvloc(block_of(p_pp.v_ptr_int))) ? (perm(lvloc(block_of(p_pp.v_ptr_int)).lv) / 3) : none))
+    assert perm(lvloc(block_of(p_pp.v_ptr_int)).lv) >= ((perm(lvloc(block_of(p_pp.v_ptr_int)).lv) / 3) + ((lvloc(block_of(p_pp.v_ptr_int)) == lvloc(block_of(p_pp))) ? (perm(lvloc(block_of(p_pp)).lv) / 3) : none))
+    assert (p_pp.v_ptr_int.v_int < old(p_pp.v_ptr_int.v_int)) && (0 <= old(p_pp.v_ptr_int.v_int))
+    f_countdown__0(p_pp, perm(lvloc(block_of(p_pp)).lv) / 3, perm(lvloc(block_of(p_pp.v_ptr_int)).lv) / 3)
+  }
+  // return rows: pass 0, atom 1 with the sums, the tie, atom 2, the value
+  assert perm(p_pp.v_ptr_int) > none
+  assert p_pp != null
+  assert WF(p_pp)
+  assert offset_of(p_pp) < len(block_of(p_pp))
+  assert perm(p_pp.v_ptr_int) == write
+  assert perm(p_pp.d_ptr_int) == write
+  assert p_pp.d_ptr_int
+  assert WF(p_pp.v_ptr_int)
+  assert perm(lvloc(block_of(p_pp)).lv) >= (a0 + ((lvloc(block_of(p_pp)) == lvloc(block_of(p_pp.v_ptr_int))) ? a1 : none))
+  assert p_pp.v_ptr_int == old(p_pp.v_ptr_int)
+  assert p_pp.v_ptr_int != null
+  assert WF(p_pp.v_ptr_int)
+  assert offset_of(p_pp.v_ptr_int) < len(block_of(p_pp.v_ptr_int))
+  assert perm(p_pp.v_ptr_int.v_int) == write
+  assert perm(p_pp.v_ptr_int.d_int) == write
+  assert p_pp.v_ptr_int.d_int
+  assert RNGV(p_pp.v_ptr_int.v_int)
+  assert perm(lvloc(block_of(p_pp.v_ptr_int)).lv) >= (a1 + ((lvloc(block_of(p_pp.v_ptr_int)) == lvloc(block_of(p_pp))) ? a0 : none))
+  assert p_pp.v_ptr_int.v_int == 0
+}
+
+// well-formedness of the contract of countdown: the measure **pp is read in the entry state under owns(*pp), nothing in the contract can be undefined
+method f_countdown__0__wf(p_pp: Ref, a0: Perm, a1: Perm, hv_0_pre: Ref, hv_0_post: Ref, hv_1_pre: Int, hv_1_post: Int)
+  requires (none < a0) && (a0 < write)
+  requires (none < a1) && (a1 < write)
+  requires WF(p_pp) && WF(hv_0_pre) && WF(hv_0_post) && RNGV(hv_1_pre) && RNGV(hv_1_post)
+  decreases
+{
+  // the measure's load of *pp is framed by owns(*pp) on every path
+  assert true ==> true
+}

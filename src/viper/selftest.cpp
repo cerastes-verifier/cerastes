@@ -923,6 +923,8 @@ void define_struct_objects();
 void define_struct_values();
 void define_struct_literals();
 void define_struct_globals();
+void define_heap_read_places();
+void define_heap_read_place_rejections();
 }  // namespace
 
 #include "selftest_cases2.inc"
@@ -939,6 +941,7 @@ void define_struct_globals();
 #include "selftest_cases13.inc"
 #include "selftest_cases14.inc"
 #include "selftest_cases15.inc"
+#include "selftest_cases16.inc"
 
 namespace {
 
@@ -1123,6 +1126,8 @@ int main(int argc, char** argv) {
   define_struct_values();
   define_struct_literals();
   define_struct_globals();
+  define_heap_read_places();
+  define_heap_read_place_rejections();
   int bad = 0;
   for (const Case& c : lowering_cases()) {
     std::string problem;

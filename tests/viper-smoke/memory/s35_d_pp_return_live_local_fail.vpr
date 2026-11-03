@@ -1,0 +1,234 @@
+// expect: error assert:assertion.false @ L164
+// S35 (d) twin of s35_d_pp_return.vpr: `setlive` stores `&z` of a local into `*pp` and returns: the scope exit of `z` takes its liveness token, so the return row of `live(*pp)` fails (record 0045 item 6)
+// Hand-written in the emitted style (see the positive fixture).
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0037 items 6-7, 0040 item 2): WF; an int range; a cell owned (root, full permission, flag set, range or WF of the pointer, the liveness amount); live
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNGV(v) ((-2147483648) <= v && v <= 2147483647)
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+define CI(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNGV(c.v_int))
+define CP(c) (acc(c.v_ptr_int) && acc(c.d_ptr_int) && c.d_ptr_int && WF(c.v_ptr_int))
+define OWNI(p, a) (ROOT(p) && CI(p) && LVF(p, a))
+define OWNP(p, a) (ROOT(p) && CP(p) && LVF(p, a))
+define LIVE(p, a) (p != null && WF(p) && LVF(p, a))
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_int() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(r.v_int) && acc(r.d_int) && !r.d_int && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract allocation of an address-taken local of type int*: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_ptr_int() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(r.v_ptr_int) && acc(r.d_ptr_int) && !r.d_ptr_int && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// void keep(int **pp) requires(owns(*pp)) ensures(owns(*pp) && *pp == old(*pp)) {}   (take, below, takes *pp for good)
+method f_keep__0(p_pp: Ref, a0: Perm)
+  requires (none < a0) && (a0 < write)
+  requires WF(p_pp)
+  requires OWNP(p_pp, a0)
+  ensures OWNP(p_pp, a0) && p_pp.v_ptr_int == old(p_pp.v_ptr_int)
+  decreases
+{
+  assert p_pp != null
+  assert WF(p_pp)
+  assert offset_of(p_pp) < len(block_of(p_pp))
+  assert perm(p_pp.v_ptr_int) == write
+  assert perm(p_pp.d_ptr_int) == write
+  assert p_pp.d_ptr_int
+  assert WF(p_pp.v_ptr_int)
+  assert perm(lvloc(block_of(p_pp)).lv) >= a0
+  assert p_pp.v_ptr_int == old(p_pp.v_ptr_int)
+}
+
+// void give(int *q, int **pp) requires(owns(*q) && owns(*pp) && owns(**pp)) ensures(owns(*q) && owns(*pp) && *pp == old(*pp) && owns(**pp)) { keep(pp); }
+// the return has a load-rooted place (**pp) and a separation row of the int places (q != *pp): that row reads *pp, so pass 0 first asserts the cell that frames it is still held
+method f_give__1(p_pp: Ref, p_q: Ref, a0: Perm, a1: Perm, a2: Perm)
+  requires (none < a0) && (a0 < write)
+  requires (none < a1) && (a1 < write)
+  requires (none < a2) && (a2 < write)
+  requires WF(p_pp) && WF(p_q)
+  requires OWNI(p_q, a0) && OWNP(p_pp, a1) && OWNI(p_pp.v_ptr_int, a2)
+  ensures OWNI(p_q, a0) && OWNP(p_pp, a1) && p_pp.v_ptr_int == old(p_pp.v_ptr_int) && OWNI(p_pp.v_ptr_int, (p_pp.v_ptr_int == old(p_pp.v_ptr_int) ? a2 : (p_pp.v_ptr_int == p_q ? a0 : a2)))
+  decreases
+{
+  var eb_2: Ref
+  eb_2 := p_pp.v_ptr_int
+  if (lvloc(block_of(p_q)) == lvloc(block_of(p_pp))) { }
+  if (lvloc(block_of(p_q)) == lvloc(block_of(eb_2))) { }
+  if (lvloc(block_of(p_pp)) == lvloc(block_of(eb_2))) { }
+  assert p_q != eb_2
+  // keep(pp): the rows, the amount (half of the pointer cell's liveness), the call
+  assert p_pp != null
+  assert WF(p_pp)
+  assert offset_of(p_pp) < len(block_of(p_pp))
+  assert perm(p_pp.v_ptr_int) == write
+  assert perm(p_pp.d_ptr_int) == write
+  assert p_pp.d_ptr_int
+  assert WF(p_pp.v_ptr_int)
+  assert none < (perm(lvloc(block_of(p_pp)).lv) / 2)
+  assert (perm(lvloc(block_of(p_pp)).lv) / 2) < write
+  assert perm(lvloc(block_of(p_pp)).lv) >= (perm(lvloc(block_of(p_pp)).lv) / 2)
+  f_keep__0(p_pp, perm(lvloc(block_of(p_pp)).lv) / 2)
+  // return rows: pass 0, the separation row, the per-atom rows in clause order
+  assert perm(p_pp.v_ptr_int) > none
+  assert p_q != p_pp.v_ptr_int
+  assert p_q != null
+  assert WF(p_q)
+  assert offset_of(p_q) < len(block_of(p_q))
+  assert perm(p_q.v_int) == write
+  assert perm(p_q.d_int) == write
+  assert p_q.d_int
+  assert RNGV(p_q.v_int)
+  assert perm(lvloc(block_of(p_q)).lv) >= (a0 + ((lvloc(block_of(p_q)) == lvloc(block_of(p_pp))) ? a1 : none) + ((lvloc(block_of(p_q)) == lvloc(block_of(p_pp.v_ptr_int))) ? (p_pp.v_ptr_int == old(p_pp.v_ptr_int) ? a2 : (p_pp.v_ptr_int == p_q ? a0 : a2)) : none))
+  assert p_pp != null
+  assert WF(p_pp)
+  assert offset_of(p_pp) < len(block_of(p_pp))
+  assert perm(p_pp.v_ptr_int) == write
+  assert perm(p_pp.d_ptr_int) == write
+  assert p_pp.d_ptr_int
+  assert WF(p_pp.v_ptr_int)
+  assert perm(lvloc(block_of(p_pp)).lv) >= (a1 + ((lvloc(block_of(p_pp)) == lvloc(block_of(p_q))) ? a0 : none) + ((lvloc(block_of(p_pp)) == lvloc(block_of(p_pp.v_ptr_int))) ? (p_pp.v_ptr_int == old(p_pp.v_ptr_int) ? a2 : (p_pp.v_ptr_int == p_q ? a0 : a2)) : none))
+  assert p_pp.v_ptr_int == old(p_pp.v_ptr_int)
+  assert p_pp.v_ptr_int != null
+  assert WF(p_pp.v_ptr_int)
+  assert offset_of(p_pp.v_ptr_int) < len(block_of(p_pp.v_ptr_int))
+  assert perm(p_pp.v_ptr_int.v_int) == write
+  assert perm(p_pp.v_ptr_int.d_int) == write
+  assert p_pp.v_ptr_int.d_int
+  assert RNGV(p_pp.v_ptr_int.v_int)
+  assert perm(lvloc(block_of(p_pp.v_ptr_int)).lv) >= ((p_pp.v_ptr_int == old(p_pp.v_ptr_int) ? a2 : (p_pp.v_ptr_int == p_q ? a0 : a2)) + ((lvloc(block_of(p_pp.v_ptr_int)) == lvloc(block_of(p_q))) ? a0 : none) + ((lvloc(block_of(p_pp.v_ptr_int)) == lvloc(block_of(p_pp))) ? a1 : none))
+}
+
+// void setlive(int **pp) requires(owns(*pp) && live(*pp)) ensures(owns(*pp) && live(*pp)) { int z; *pp = &z; }
+method f_setlive__2(p_pp: Ref, a0: Perm, a1: Perm)
+  requires (none < a0) && (a0 < write)
+  requires (none < a1) && (a1 < write)
+  requires WF(p_pp)
+  requires OWNP(p_pp, a0) && LIVE(p_pp.v_ptr_int, a1)
+  ensures OWNP(p_pp, a0) && LIVE(p_pp.v_ptr_int, a1)
+  decreases
+{
+  var eb_1: Ref
+  var t0: Ref
+  eb_1 := p_pp.v_ptr_int
+  if (lvloc(block_of(p_pp)) == lvloc(block_of(eb_1))) { }
+  var v_z: Ref
+  v_z := alloc_int()
+  assert !((perm(p_pp.v_ptr_int) != write) || (perm(p_pp.d_ptr_int) != write))
+  p_pp.v_ptr_int := v_z
+  p_pp.d_ptr_int := true
+  // scope exit of z (its liveness token goes with it)
+  assert !(((perm(v_z.v_int) != write) || (perm(v_z.d_int) != write)) || (perm(lvloc(block_of(v_z)).lv) != write))
+  exhale (acc(v_z.v_int) && acc(v_z.d_int)) && acc(lvloc(block_of(v_z)).lv)
+  // return rows
+  assert perm(p_pp.v_ptr_int) > none
+  assert p_pp != null
+  assert WF(p_pp)
+  assert offset_of(p_pp) < len(block_of(p_pp))
+  assert perm(p_pp.v_ptr_int) == write
+  assert perm(p_pp.d_ptr_int) == write
+  assert p_pp.d_ptr_int
+  assert WF(p_pp.v_ptr_int)
+  assert perm(lvloc(block_of(p_pp)).lv) >= a0
+  assert p_pp.v_ptr_int != null
+  assert WF(p_pp.v_ptr_int)
+  assert perm(lvloc(block_of(p_pp.v_ptr_int)).lv) >= a1 // <- fails
+}
+
+// void take(int **pp) requires(owns(*pp)) {}   (takes *pp for good)
+method f_take__3(p_pp: Ref, a0: Perm)
+  requires (none < a0) && (a0 < write)
+  requires WF(p_pp)
+  requires OWNP(p_pp, a0)
+  decreases
+{
+}
+
+// void gd(int **pp, int *q, int *r) requires(owns(*pp) && (*pp == NULL || owns(*q)) && owns(*r)) ensures(owns(*pp) && *pp == old(*pp) && (*pp == NULL || owns(*q)) && owns(*r)) { keep(pp); }
+// no ensures PLACE loads, but the guard of owns(*q) reads *pp: the separation row of the int places q and r is guarded by it, so it reads *pp before any per-atom row: pass 0 asserts the cell the guard reads first
+method f_gd__4(p_pp: Ref, p_q: Ref, p_r: Ref, a0: Perm, a1: Perm, a2: Perm)
+  requires (none < a0) && (a0 < write)
+  requires (none < a1) && (a1 < write)
+  requires (none < a2) && (a2 < write)
+  requires WF(p_pp) && WF(p_q) && WF(p_r)
+  requires OWNP(p_pp, a0)
+  requires (!(p_pp.v_ptr_int == null)) ==> OWNI(p_q, a1)
+  requires OWNI(p_r, a2)
+  ensures OWNP(p_pp, a0) && p_pp.v_ptr_int == old(p_pp.v_ptr_int)
+  ensures (!(p_pp.v_ptr_int == null)) ==> OWNI(p_q, a1)
+  ensures OWNI(p_r, a2)
+  decreases
+{
+  if (lvloc(block_of(p_pp)) == lvloc(block_of(p_q))) { }
+  if (lvloc(block_of(p_pp)) == lvloc(block_of(p_r))) { }
+  if (lvloc(block_of(p_q)) == lvloc(block_of(p_r))) { }
+  assert (!(p_pp.v_ptr_int == null)) ==> (p_q != p_r)
+  assert p_pp != null
+  assert WF(p_pp)
+  assert offset_of(p_pp) < len(block_of(p_pp))
+  assert perm(p_pp.v_ptr_int) == write
+  assert perm(p_pp.d_ptr_int) == write
+  assert p_pp.d_ptr_int
+  assert WF(p_pp.v_ptr_int)
+  assert none < (perm(lvloc(block_of(p_pp)).lv) / 2)
+  assert (perm(lvloc(block_of(p_pp)).lv) / 2) < write
+  assert perm(lvloc(block_of(p_pp)).lv) >= (perm(lvloc(block_of(p_pp)).lv) / 2)
+  f_keep__0(p_pp, perm(lvloc(block_of(p_pp)).lv) / 2)
+  // return rows: pass 0 (the guard's cell), the separation row, the per-atom rows
+  assert perm(p_pp.v_ptr_int) > none //<-GP0
+  assert (!(p_pp.v_ptr_int == null)) ==> (p_q != p_r) //<-GSEP
+  assert p_pp != null
+  assert WF(p_pp)
+  assert offset_of(p_pp) < len(block_of(p_pp))
+  assert perm(p_pp.v_ptr_int) == write
+  assert perm(p_pp.d_ptr_int) == write
+  assert p_pp.d_ptr_int
+  assert WF(p_pp.v_ptr_int)
+  assert perm(lvloc(block_of(p_pp)).lv) >= (a0 + ((lvloc(block_of(p_pp)) == lvloc(block_of(p_q))) ? ((!(p_pp.v_ptr_int == null)) ? a1 : none) : none) + ((lvloc(block_of(p_pp)) == lvloc(block_of(p_r))) ? a2 : none))
+  assert p_pp.v_ptr_int == old(p_pp.v_ptr_int)
+  assert (!(p_pp.v_ptr_int == null)) ==> (p_q != null)
+  assert (!(p_pp.v_ptr_int == null)) ==> (WF(p_q))
+  assert (!(p_pp.v_ptr_int == null)) ==> (offset_of(p_q) < len(block_of(p_q)))
+  assert (!(p_pp.v_ptr_int == null)) ==> (perm(p_q.v_int) == write)
+  assert (!(p_pp.v_ptr_int == null)) ==> (perm(p_q.d_int) == write)
+  assert (!(p_pp.v_ptr_int == null)) ==> (p_q.d_int)
+  assert (!(p_pp.v_ptr_int == null)) ==> (RNGV(p_q.v_int))
+  assert (!(p_pp.v_ptr_int == null)) ==> (perm(lvloc(block_of(p_q)).lv) >= (((!(p_pp.v_ptr_int == null)) ? a1 : none) + ((lvloc(block_of(p_q)) == lvloc(block_of(p_pp))) ? a0 : none) + ((lvloc(block_of(p_q)) == lvloc(block_of(p_r))) ? a2 : none)))
+  assert p_r != null
+  assert WF(p_r)
+  assert offset_of(p_r) < len(block_of(p_r))
+  assert perm(p_r.v_int) == write
+  assert perm(p_r.d_int) == write
+  assert p_r.d_int
+  assert RNGV(p_r.v_int)
+  assert perm(lvloc(block_of(p_r)).lv) >= (a2 + ((lvloc(block_of(p_r)) == lvloc(block_of(p_pp))) ? a0 : none) + ((lvloc(block_of(p_r)) == lvloc(block_of(p_q))) ? ((!(p_pp.v_ptr_int == null)) ? a1 : none) : none))
+}

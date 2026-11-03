@@ -877,7 +877,8 @@ The constructs that are rejected in this version are:
   and pointers to unions, to functions and to structures that are not supported
   are rejected, and so are
   pointer conversions other than adding `const` to the object pointed to; its
-  xref:memory.adoc#not-yet[list] names the rest, such as `+owns(**pp)+`),
+  xref:memory.adoc#not-yet[list] names the rest, such as `+owns(*r.q)+` of a
+  returned structure),
   references, arrays, floating point, `volatile`, `_BitInt`,
   vector types, enumerations declared in system headers. Array types, `_BitInt`,
   vector types and class templates with a constant argument

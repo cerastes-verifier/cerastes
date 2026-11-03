@@ -485,6 +485,7 @@ namespace {
 // The place spelling of a MemberAddr (decision 0043 item 14): `p->x` for a pointer operand, `s.x` for the address of a struct local, `s.t.x` for a
 // nested member, `g.x` for a global.  Empty when the operand has no spelling.
 std::string member_place(const Expr& ma) {
+  if (ma.user_spelling && ma.c_text.size() > 1 && ma.c_text[0] == '&') return ma.c_text.substr(1);  // decision 0045 item 12
   const Expr* op = ma.a;
   if (op == nullptr || !op->type.is_ptr() || op->type.pointee == nullptr || !op->type.pointee->is_struct() || op->type.pointee->struct_type == nullptr) return "";
   const StructType& st = *op->type.pointee->struct_type;
@@ -774,9 +775,24 @@ const Expr* Builder::comma(const Expr* a, const Expr* b, SrcLoc loc) {
 
 namespace {
 
+// Whether `e` may be an atom's guard (decision 0045 item 9, owner question 109, amending 0037 item 5): it holds no `Atom`, no call and no side effect.  It
+// may read memory (`*pp == NULL`, `p->q == NULL`): a read through a pointer is framed per path like any contract read, by the atoms before it, and
+// check_program refuses a read outside the place grammar.
+bool guard_ok(const Expr& e) {
+  switch (e.kind) {
+    case Expr::Kind::Atom: case Expr::Kind::Call: case Expr::Kind::AssignE: case Expr::Kind::StoreE: return false;
+    default: break;
+  }
+  for (const Expr* x : {e.a, e.b, e.c})
+    if (x != nullptr && !guard_ok(*x)) return false;
+  for (const Expr* x : e.args)
+    if (x != nullptr && !guard_ok(*x)) return false;
+  return true;
+}
+
 // Walks one clause in evaluation order and collects the atoms in the positions decision 0037 item 5 allows: the clause itself, an operand of
-// `&&` (no guard), the right operand of `||` whose left operand reads no heap (guard: the left is false), an arm of `?:` whose condition
-// reads no heap (guard: the condition is true / false).  The walk goes on through the right operand of `||` and the arms of `?:`, so that a
+// `&&` (no guard), the right operand of `||` whose left operand is a guard (guard_ok; the guard is: the left is false), an arm of `?:` whose condition
+// is a guard (guard: the condition is true / false).  The walk goes on through the right operand of `||` and the arms of `?:`, so that a
 // conjunction of atoms may stand there.
 class AtomCollector {
  public:
@@ -802,14 +818,14 @@ class AtomCollector {
         if (e->bop == BinaryOp::LAnd) {
           walk(e->a);
           walk(e->b);
-        } else if (e->bop == BinaryOp::LOr && e->a != nullptr && !reads_heap(*e->a)) {
+        } else if (e->bop == BinaryOp::LOr && e->a != nullptr && guard_ok(*e->a)) {
           guards_.push_back(AtomGuard{e->a, false});
           walk(e->b);
           guards_.pop_back();
         }
         break;
       case Expr::Kind::Cond:
-        if (e->a != nullptr && !reads_heap(*e->a)) {
+        if (e->a != nullptr && guard_ok(*e->a)) {
           guards_.push_back(AtomGuard{e->a, true});
           walk(e->b);
           guards_.pop_back();

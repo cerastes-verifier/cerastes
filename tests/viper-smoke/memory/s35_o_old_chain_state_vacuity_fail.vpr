@@ -1,0 +1,130 @@
+// expect: error assert:assertion.false @ L129
+// S35 (o) vacuity of s35_o_old_chain_state.vpr: `assert false` at the end of the method must FAIL (record 0045 item 3)
+// Hand-written in the emitted style (see the positive fixture).
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0037 items 6-7, 0040 item 2): WF; an int range; a cell owned (root, full permission, flag set, range or WF of the pointer, the liveness amount); live
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNGV(v) ((-2147483648) <= v && v <= 2147483647)
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+define CI(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNGV(c.v_int))
+define CP(c) (acc(c.v_ptr_int) && acc(c.d_ptr_int) && c.d_ptr_int && WF(c.v_ptr_int))
+define OWNI(p, a) (ROOT(p) && CI(p) && LVF(p, a))
+define OWNP(p, a) (ROOT(p) && CP(p) && LVF(p, a))
+define LIVE(p, a) (p != null && WF(p) && LVF(p, a))
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_int() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(r.v_int) && acc(r.d_int) && !r.d_int && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract allocation of an address-taken local of type int*: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_ptr_int() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(r.v_ptr_int) && acc(r.d_ptr_int) && !r.d_ptr_int && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// void f(int **pp, int *c) requires(owns(*c) && owns(*pp) && (*c == 0 || (owns(**pp) && **pp < 100)))
+//   ensures(owns(*c) && *c == 0 && owns(*pp) && *pp == old(*pp) && (old(*c) == 0 || owns(**pp)) && (old(*c) == 0 || **pp == old(**pp) + 1))
+//   { if (*c != 0) **pp += 1; *c = 0; }
+// old(**pp) is read under the entry guard of its framing disjunct: ONE old over the whole chain (right form)
+method f_f__0(p_pp: Ref, p_c: Ref, a0: Perm, a1: Perm, a2: Perm)
+  requires (none < a0) && (a0 < write)
+  requires (none < a1) && (a1 < write)
+  requires (none < a2) && (a2 < write)
+  requires WF(p_pp) && WF(p_c)
+  requires OWNI(p_c, a0) && OWNP(p_pp, a1)
+  requires (!(p_c.v_int == 0)) ==> OWNI(p_pp.v_ptr_int, a2)
+  requires (!(p_c.v_int == 0)) ==> p_pp.v_ptr_int.v_int < 100
+  ensures OWNI(p_c, a0) && p_c.v_int == 0 && OWNP(p_pp, a1) && p_pp.v_ptr_int == old(p_pp.v_ptr_int)
+  ensures (!(old(p_c.v_int) == 0)) ==> OWNI(p_pp.v_ptr_int, a2)
+  ensures (old(p_c.v_int) == 0) || p_pp.v_ptr_int.v_int == old((!(p_c.v_int == 0)) ? p_pp.v_ptr_int.v_int : 0) + 1
+  decreases
+{
+  var eb_2: Ref
+  var t0: Int
+  var t1: Ref
+  eb_2 := ((!(p_c.v_int == 0)) ? p_pp.v_ptr_int : null)
+  if (lvloc(block_of(p_c)) == lvloc(block_of(p_pp))) { }
+  if (!(p_c.v_int == 0)) {
+    if (lvloc(block_of(p_c)) == lvloc(block_of(eb_2))) { }
+    if (lvloc(block_of(p_pp)) == lvloc(block_of(eb_2))) { }
+  }
+  // if (*c != 0) **pp ...; *c = 0;
+  assert p_c != null
+  assert perm(p_c.v_int) > none
+  assert p_c.d_int
+  t0 := p_c.v_int
+  if (t0 != 0) {
+    assert p_pp != null
+    assert perm(p_pp.v_ptr_int) > none
+    assert p_pp.d_ptr_int
+    t1 := p_pp.v_ptr_int
+    assert t1 != null
+    assert perm(t1.v_int) > none
+    assert t1.d_int
+    assert !((t1.v_int + 1 < (-2147483648)) || (2147483647 < t1.v_int + 1))
+    assert !((perm(t1.v_int) != write) || (perm(t1.d_int) != write))
+    t1.v_int := t1.v_int + 1
+    t1.d_int := true
+  }
+  assert !((perm(p_c.v_int) != write) || (perm(p_c.d_int) != write))
+  p_c.v_int := 0
+  p_c.d_int := true
+  // return rows: pass 0 (the guard of owns(**pp) reads only old(*c); the place loads *pp), the per-atom rows in clause order, each atom's rows under its guard
+  assert perm(p_pp.v_ptr_int) > none
+  assert p_c != null
+  assert WF(p_c)
+  assert offset_of(p_c) < len(block_of(p_c))
+  assert perm(p_c.v_int) == write
+  assert perm(p_c.d_int) == write
+  assert p_c.d_int
+  assert RNGV(p_c.v_int)
+  assert perm(lvloc(block_of(p_c)).lv) >= (a0 + ((lvloc(block_of(p_c)) == lvloc(block_of(p_pp))) ? a1 : none) + ((lvloc(block_of(p_c)) == lvloc(block_of(p_pp.v_ptr_int))) ? ((!(old(p_c.v_int) == 0)) ? a2 : none) : none))
+  assert p_c.v_int == 0
+  assert p_pp != null
+  assert WF(p_pp)
+  assert offset_of(p_pp) < len(block_of(p_pp))
+  assert perm(p_pp.v_ptr_int) == write
+  assert perm(p_pp.d_ptr_int) == write
+  assert p_pp.d_ptr_int
+  assert WF(p_pp.v_ptr_int)
+  assert perm(lvloc(block_of(p_pp)).lv) >= (a1 + ((lvloc(block_of(p_pp)) == lvloc(block_of(p_c))) ? a0 : none) + ((lvloc(block_of(p_pp)) == lvloc(block_of(p_pp.v_ptr_int))) ? ((!(old(p_c.v_int) == 0)) ? a2 : none) : none))
+  assert p_pp.v_ptr_int == old(p_pp.v_ptr_int)
+  assert (!(old(p_c.v_int) == 0)) ==> (p_pp.v_ptr_int != null)
+  assert (!(old(p_c.v_int) == 0)) ==> (WF(p_pp.v_ptr_int))
+  assert (!(old(p_c.v_int) == 0)) ==> (offset_of(p_pp.v_ptr_int) < len(block_of(p_pp.v_ptr_int)))
+  assert (!(old(p_c.v_int) == 0)) ==> (perm(p_pp.v_ptr_int.v_int) == write)
+  assert (!(old(p_c.v_int) == 0)) ==> (perm(p_pp.v_ptr_int.d_int) == write)
+  assert (!(old(p_c.v_int) == 0)) ==> (p_pp.v_ptr_int.d_int)
+  assert (!(old(p_c.v_int) == 0)) ==> (RNGV(p_pp.v_ptr_int.v_int))
+  assert (!(old(p_c.v_int) == 0)) ==> (perm(lvloc(block_of(p_pp.v_ptr_int)).lv) >= (((!(old(p_c.v_int) == 0)) ? a2 : none) + ((lvloc(block_of(p_pp.v_ptr_int)) == lvloc(block_of(p_c))) ? a0 : none) + ((lvloc(block_of(p_pp.v_ptr_int)) == lvloc(block_of(p_pp))) ? a1 : none)))
+  assert (old(p_c.v_int) == 0) || p_pp.v_ptr_int.v_int == old((!(p_c.v_int == 0)) ? p_pp.v_ptr_int.v_int : 0) + 1
+  assert false // <- vacuity
+}

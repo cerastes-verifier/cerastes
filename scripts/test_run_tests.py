@@ -3127,8 +3127,8 @@ EVASIONS = ("||", "; true", ";true", "set +e", "continue-on-error", "if:")
 
 
 # The fewest cases the VIR self-test may be pinned to in check.sh (it generated 141 when the
-# pin was added); the pin only goes up.
-VIR_CASES_FLOOR = 141
+# pin was added, 1493 with M4.5c2b's selftest_cases16.inc); the pin only goes up.
+VIR_CASES_FLOOR = 1493
 
 # Decision 0016 item 14: check.sh reads its tier from CERASTES_CHECK_BASE once, into pr_base, and
 # these are the only active lines (stripped) that may name either; the final lines print "all
@@ -3353,7 +3353,7 @@ python3 scripts/run_tests.py --pr-base="$pr_base"
 step "viper lint"
 python3 scripts/lint_viper.py
 step "vir self-test"
-VIR_CASES_MIN=141
+VIR_CASES_MIN=1493
 rm -rf build/vir-selftest
 mkdir -p build/vir-selftest
 vir_out="$(build/cerastes-vir-selftest build/vir-selftest)"
@@ -3586,7 +3586,7 @@ jobs:
         out["vir run before its generation"] = self.SH.replace(vrun, "").replace(gen, vrun + gen)
         out["vir rm after its generation"] = self.SH.replace(rm, "").replace(gen, gen + rm)
         out["vir mkdir before the rm"] = self.SH.replace(mkdir, "").replace(rm, mkdir + rm)
-        block = self.SH[self.SH.index("VIR_CASES_MIN=141\n"):self.SH.index(vlint) + len(vlint)]
+        block = self.SH[self.SH.index("VIR_CASES_MIN=1493\n"):self.SH.index(vlint) + len(vlint)]
         self.assertIn(rm + mkdir + gen, block)
         out["vir steps before the tests"] = self.SH.replace(block, "").replace(tests, block + tests)
         out["vir steps after the oracle"] = self.SH.replace(block, "").replace(oracle, oracle + block)
@@ -3612,7 +3612,7 @@ jobs:
     def vir_count_pin_mutations(self):
         """Ways to weaken the pin of the VIR self-test's case count: a smaller set of cases
         (a lower floor, no floor check, a check that cannot fail) or a count nobody compares."""
-        floor = "VIR_CASES_MIN=141\n"
+        floor = "VIR_CASES_MIN=1493\n"
         printed = 'printf \'%s\\n\' "$vir_out"\n'
         count = next(l + "\n" for l in self.SH.split("\n") if l.startswith("vir_cases="))
         check = 'if [[ ! "$vir_cases" =~ ^[0-9]+$ ]] || (( vir_cases < VIR_CASES_MIN )); then\n'

@@ -1,7 +1,7 @@
 // expect: verified
 // expect: native-ok
 // mode: c23, c++20
-// Pins: 0043 items 2, 3, 6: a pointer member is a leaf cell of a pointer field; {} leaves it null; the pointer is compared, never dereferenced through the member (M4.5c2)
+// Pins: 0043 items 2, 3, 6: a pointer member is a leaf cell of a pointer field; {} leaves it null; the pointer is compared, never dereferenced through the member (a contract may follow it since M4.5c2b: tests/memory/struct_chain_contract.c)
 #include <cerastes.h>
 #include <stddef.h>
 

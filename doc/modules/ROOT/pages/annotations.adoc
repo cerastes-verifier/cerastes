@@ -393,8 +393,9 @@ body and not after it.
 
 An invariant may read objects in memory and compare pointers
 (xref:memory.adoc#loops[Memory and ownership]): the loop holds every object in
-memory the function holds, and the invariant states their values. `owns`,
-`reads` and `live` are not accepted in an invariant yet.
+memory the function holds, and the invariant states their values; `owns`,
+`reads` and `live` in an invariant say what the loop holds through a pointer the
+function assigns.
 
 == Termination measures: decreases
 
@@ -546,8 +547,9 @@ one member (xref:memory.adoc#structures[Structures])
 | `old(e)`
 | `cerastes_old(e)`
 | the value of `e` on entry, in `ensures`; `e` is a parameter, `*p`, a member
-`+p->x+` of a parameter's structure, a global, or a global structure's member
-`+g.x+`
+`+p->x+` of a parameter's structure, a global, a global structure's member
+`+g.x+`, or a place reached through pointers read from memory (`+**pp+`,
+`+p->q->x+`, `+*gp+`), every read on entry
 
 | `owns_range(p, n)`
 | (later)
@@ -561,13 +563,18 @@ one member (xref:memory.adoc#structures[Structures])
 `owns` and `reads` name a global variable or a member of a global structure (`+g.x+`), or, like
 `live`, a pointer parameter, as `*p` or `p`, or a member of the structure a parameter points to
 (`+p->x+`, `+p->t+`, `+p->t.y+`; two atoms on one parameter must not overlap, as
-`+owns(*p) && owns(p->x)+` would), and may
-appear in a contract as a conjunct, after `p == NULL ||`, or as an arm of `?:`
-whose condition does not read memory. One parameter may be owned on one path and
+`+owns(*p) && owns(p->x)+` would), or an object reached through pointers read from memory
+(`+owns(**pp)+`, `live(*pp)`, `+owns(*gp)+`, `+owns(p->q->x)+`, `+owns(*s.q)+` of a by-value
+parameter's pointer member), after an atom that holds each pointer read on the way
+(xref:memory.adoc#pointers-to-pointers[Pointers to pointers]). They may
+appear in a contract as a conjunct, after a condition and `||`, or as an arm of `?:`; the
+condition may read memory (`+*pp == NULL || owns(**pp)+`) after an atom that holds what it
+reads, and holds no atom itself. One parameter may be owned on one path and
 read on another (`c ? owns(*p) : reads(*p)`), never both on one path, and an
 `ensures` gives back only what its `requires` took on the same path. In a loop
-invariant they may name any pointer variable whose own address is not taken
-(xref:memory.adoc#loops[Loops]), but not a global, which every loop of a
+invariant they may name any pointer variable, the object behind a pointer read from memory
+(`+owns(**pp)+`, `+owns(*gp)+`), and a structure or a member of one (`owns(*q)`, `+owns(q->x)+`)
+(xref:memory.adoc#loops[Loops]), but not a global itself, which every loop of a
 function that holds it keeps already. `cerastes verify` does not accept `owns_range`
 and `forall` yet, nor `owns`, `reads` and `live` in a measure or in a
 `do … while (0)` invariant.

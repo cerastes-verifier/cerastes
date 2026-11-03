@@ -1,0 +1,317 @@
+// expect: error assert:assertion.false @ L298
+// S35 (h) twin of s35_h_gp_member.vpr: `a.next = &a` (a self-loop) at the call `upd(&a)`: the two atoms name the same leaf x, so the separation row `XX(a) != XX(a.next)` fails (the only error) (record 0045 item 3)
+// Hand-written in the emitted style (see the positive fixture).
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field lv: Bool
+field v_ptr_L: Ref
+field d_ptr_L: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  unique function GB_h__0(): Block
+  unique function GB_gp__1(): Block
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0037 items 6-7, 0040 item 2): WF; an int range; a cell owned (root, full permission, flag set, range or WF of the pointer, the liveness amount); live
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNGV(v) ((-2147483648) <= v && v <= 2147483647)
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+define CI(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNGV(c.v_int))
+define CP(c) (acc(c.v_ptr_int) && acc(c.d_ptr_int) && c.d_ptr_int && WF(c.v_ptr_int))
+define OWNI(p, a) (ROOT(p) && CI(p) && LVF(p, a))
+define OWNP(p, a) (ROOT(p) && CP(p) && LVF(p, a))
+define LIVE(p, a) (p != null && WF(p) && LVF(p, a))
+
+// reads atoms: the cell at a fraction (wildcard permission is not used by this fixture: the amount is the ghost a)
+define RDI(p, a) (ROOT(p) && acc(p.v_int, a) && acc(p.d_int, a) && p.d_int && RNGV(p.v_int) && LVF(p, a))
+define RDP(p, a) (ROOT(p) && acc(p.v_ptr_int, a) && acc(p.d_ptr_int, a) && p.d_ptr_int && WF(p.v_ptr_int) && LVF(p, a))
+
+// struct L { struct L *next; int x; }: member 0 is `next` (a pointer cell), member 1 is `x`; WF_S: the member lengths; the leaves of an owned object
+define NX(p) loc(member(p, 0), 0)
+define XX(p) loc(member(p, 1), 0)
+define LL(p) (len(member(p, 0)) == 1 && len(member(p, 1)) == 1)
+define CPL(c) (acc(c.v_ptr_L) && acc(c.d_ptr_L) && c.d_ptr_L && WF(c.v_ptr_L))
+define OWNL(p, a) (ROOT(p) && LL(p) && CPL(NX(p)) && CI(XX(p)) && LVF(p, a))
+define OWNX(q, a) (ROOT(q) && LL(q) && CI(XX(q)) && LVF(q, a))
+define GPC loc(GB_gp__1(), 0)
+define HC loc(GB_h__0(), 0)
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_int() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(r.v_int) && acc(r.d_int) && !r.d_int && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract allocation of an address-taken local of type int*: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_ptr_int() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(r.v_ptr_int) && acc(r.d_ptr_int) && !r.d_ptr_int && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract allocation of a struct L local: a one-slot block; each member is a block of length 1 whose leaf is uninitialized with full permission; the liveness token is the root block's (record 0043 item 4)
+method alloc_struct_L() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures LL(r) && acc(NX(r).v_ptr_L) && acc(NX(r).d_ptr_L) && !NX(r).d_ptr_L
+  ensures acc(XX(r).v_int) && acc(XX(r).d_int) && !XX(r).d_int
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract program start: every global holds its initial value with full permission, and its liveness cell (decision 0041 item 4); the pure facts first
+method program_start()
+  ensures (len(GB_h__0()) == 1 && lvloc(GB_h__0()) == loc(GB_h__0(), -2) && len(GB_gp__1()) == 1 && lvloc(GB_gp__1()) == loc(GB_gp__1(), -2))
+  ensures acc(HC.v_int) && acc(HC.d_int) && HC.d_int && HC.v_int == 7 && acc(lvloc(GB_h__0()).lv)
+  ensures acc(GPC.v_ptr_int) && acc(GPC.d_ptr_int) && GPC.d_ptr_int && GPC.v_ptr_int == HC && acc(lvloc(GB_gp__1()).lv)
+  decreases _
+
+// static int h = 7; static int *gp = &h;
+// void bump(void) requires(reads(gp) && owns(*gp) && *gp < 100) ensures(reads(gp) && owns(*gp) && *gp == old(*gp) + 1) { *gp += 1; }
+// owns(*gp) names the object the global pointer designates: the root of the place is the global's cell (a unique block), the load is the plain read of that cell (framed by reads(gp))
+method f_bump__0(a0: Perm, a1: Perm)
+  requires (len(GB_h__0()) == 1 && lvloc(GB_h__0()) == loc(GB_h__0(), -2) && len(GB_gp__1()) == 1 && lvloc(GB_gp__1()) == loc(GB_gp__1(), -2))
+  requires (none < a0) && (a0 < write)
+  requires (none < a1) && (a1 < write)
+  requires RDP(GPC, a0) && OWNI(GPC.v_ptr_int, a1) && GPC.v_ptr_int.v_int < 100
+  ensures RDP(GPC, a0) && OWNI(GPC.v_ptr_int, a1) && GPC.v_ptr_int.v_int == old(GPC.v_ptr_int.v_int) + 1
+  decreases
+{
+  var eb_1: Ref
+  var t0: Ref
+  eb_1 := GPC.v_ptr_int
+  if (lvloc(block_of(GPC)) == lvloc(block_of(eb_1))) { }
+  assert GPC != null
+  assert perm(GPC.v_ptr_int) > none
+  assert GPC.d_ptr_int
+  t0 := GPC.v_ptr_int
+  assert t0 != null
+  assert perm(t0.v_int) > none
+  assert t0.d_int
+  assert !((t0.v_int + 1 < (-2147483648)) || (2147483647 < t0.v_int + 1))
+  assert !((perm(t0.v_int) != write) || (perm(t0.d_int) != write))
+  t0.v_int := t0.v_int + 1
+  t0.d_int := true
+  // return rows: pass 0, the per-atom rows with the liveness sums, the user's ensures
+  assert perm(GPC.v_ptr_int) > none
+  assert GPC != null
+  assert WF(GPC)
+  assert offset_of(GPC) < len(block_of(GPC))
+  assert perm(GPC.v_ptr_int) >= a0
+  assert perm(GPC.d_ptr_int) >= a0
+  assert GPC.d_ptr_int
+  assert WF(GPC.v_ptr_int)
+  assert perm(lvloc(block_of(GPC)).lv) >= (a0 + ((lvloc(block_of(GPC)) == lvloc(block_of(GPC.v_ptr_int))) ? a1 : none))
+  assert GPC.v_ptr_int != null
+  assert WF(GPC.v_ptr_int)
+  assert offset_of(GPC.v_ptr_int) < len(block_of(GPC.v_ptr_int))
+  assert perm(GPC.v_ptr_int.v_int) == write
+  assert perm(GPC.v_ptr_int.d_int) == write
+  assert GPC.v_ptr_int.d_int
+  assert RNGV(GPC.v_ptr_int.v_int)
+  assert perm(lvloc(block_of(GPC.v_ptr_int)).lv) >= (a1 + ((lvloc(block_of(GPC.v_ptr_int)) == lvloc(block_of(GPC))) ? a0 : none))
+  assert GPC.v_ptr_int.v_int == old(GPC.v_ptr_int.v_int) + 1
+}
+
+// well-formedness of the contract of bump
+method f_bump__0__wf(a0: Perm, a1: Perm, hv_0_pre: Ref, hv_0_post: Ref, hv_1_pre: Int, hv_1_post: Int)
+  requires (len(GB_h__0()) == 1 && lvloc(GB_h__0()) == loc(GB_h__0(), -2) && len(GB_gp__1()) == 1 && lvloc(GB_gp__1()) == loc(GB_gp__1(), -2))
+  requires (none < a0) && (a0 < write)
+  requires (none < a1) && (a1 < write)
+  requires WF(hv_0_pre) && WF(hv_0_post) && RNGV(hv_1_pre) && RNGV(hv_1_post)
+  requires hv_0_post == hv_0_pre
+  decreases
+{
+  assert (hv_1_pre < 100) ==> (!((hv_1_pre + 1 < (-2147483648)) || (2147483647 < hv_1_pre + 1)))
+}
+
+// int main(void) { bump(); check(h == 8); return 0; }
+method f_main__1() returns (res: Int)
+  ensures RNGV(res)
+  decreases
+{
+  program_start()
+  // bump(): reads(gp) at a third of its cell, owns(*gp) (h's cell, through the load of gp) at a third of h's liveness
+  assert GPC != null
+  assert WF(GPC)
+  assert offset_of(GPC) < len(block_of(GPC))
+  assert perm(GPC.v_ptr_int) >= (perm(lvloc(block_of(GPC)).lv) / 3)
+  assert perm(GPC.d_ptr_int) >= (perm(lvloc(block_of(GPC)).lv) / 3)
+  assert GPC.d_ptr_int
+  assert WF(GPC.v_ptr_int)
+  assert perm(lvloc(block_of(GPC)).lv) >= perm(lvloc(block_of(GPC)).lv)
+  assert GPC.v_ptr_int != null
+  assert WF(GPC.v_ptr_int)
+  assert offset_of(GPC.v_ptr_int) < len(block_of(GPC.v_ptr_int))
+  assert perm(GPC.v_ptr_int.v_int) == write
+  assert perm(GPC.v_ptr_int.d_int) == write
+  assert GPC.v_ptr_int.d_int
+  assert RNGV(GPC.v_ptr_int.v_int)
+  assert GPC.v_ptr_int.v_int < 100
+  if (lvloc(block_of(GPC)) == lvloc(block_of(GPC.v_ptr_int))) { }
+  assert none < (perm(lvloc(block_of(GPC)).lv) / 3)
+  assert (perm(lvloc(block_of(GPC)).lv) / 3) < write
+  assert none < (perm(lvloc(block_of(GPC.v_ptr_int)).lv) / 3)
+  assert (perm(lvloc(block_of(GPC.v_ptr_int)).lv) / 3) < write
+  assert perm(lvloc(block_of(GPC)).lv) >= ((perm(lvloc(block_of(GPC)).lv) / 3) + ((lvloc(block_of(GPC)) == lvloc(block_of(GPC.v_ptr_int))) ? (perm(lvloc(block_of(GPC.v_ptr_int)).lv) / 3) : none))
+  assert perm(lvloc(block_of(GPC.v_ptr_int)).lv) >= ((perm(lvloc(block_of(GPC.v_ptr_int)).lv) / 3) + ((lvloc(block_of(GPC.v_ptr_int)) == lvloc(block_of(GPC))) ? (perm(lvloc(block_of(GPC)).lv) / 3) : none))
+  f_bump__0(perm(lvloc(block_of(GPC)).lv) / 3, perm(lvloc(block_of(GPC.v_ptr_int)).lv) / 3)
+  assert perm(HC.v_int) > none
+  assert HC.d_int
+  assert HC.v_int == 8
+  res := 0
+}
+
+// struct L { struct L *next; int x; };
+// int upd(struct L *p) requires(owns(*p) && owns(p->next->x) && p->next->x < 100) ensures(owns(*p) && p->next == old(p->next) && owns(p->next->x) && p->next->x == old(p->next->x) + 1) { p->next->x += 1; }
+// the second atom's place is p . next (a member step), a load, then x of the loaded object: its WF_S (the member lengths) comes with the atom; its leaf overlaps the first atom's leaf x when p->next == p
+method f_upd__2(p_p: Ref, a0: Perm, a1: Perm)
+  requires (none < a0) && (a0 < write)
+  requires (none < a1) && (a1 < write)
+  requires WF(p_p)
+  requires OWNL(p_p, a0)
+  requires OWNX(NX(p_p).v_ptr_L, a1)
+  requires XX(NX(p_p).v_ptr_L).v_int < 100
+  ensures OWNL(p_p, a0) && NX(p_p).v_ptr_L == old(NX(p_p).v_ptr_L)
+  ensures OWNX(NX(p_p).v_ptr_L, a1)
+  ensures XX(NX(p_p).v_ptr_L).v_int == old(XX(NX(p_p).v_ptr_L).v_int) + 1
+  decreases
+{
+  var eb_1: Ref
+  var t0: Ref
+  eb_1 := NX(p_p).v_ptr_L
+  if (lvloc(block_of(p_p)) == lvloc(block_of(eb_1))) { }
+  assert XX(p_p) != XX(eb_1)
+  // p->next->x += 1
+  assert NX(p_p) != null
+  assert perm(NX(p_p).v_ptr_L) > none
+  assert NX(p_p).d_ptr_L
+  t0 := NX(p_p).v_ptr_L
+  assert XX(t0) != null
+  assert perm(XX(t0).v_int) > none
+  assert XX(t0).d_int
+  assert !((XX(t0).v_int + 1 < (-2147483648)) || (2147483647 < XX(t0).v_int + 1))
+  assert !((perm(XX(t0).v_int) != write) || (perm(XX(t0).d_int) != write))
+  XX(t0).v_int := XX(t0).v_int + 1
+  XX(t0).d_int := true
+  // return rows: pass 0, the separation row of the two x leaves, atom 1 (its leaves), the tie, atom 2, the user's ensures
+  assert perm(NX(p_p).v_ptr_L) > none
+  assert XX(p_p) != XX(NX(p_p).v_ptr_L)
+  assert p_p != null
+  assert WF(p_p)
+  assert offset_of(p_p) < len(block_of(p_p))
+  assert LL(p_p)
+  assert perm(NX(p_p).v_ptr_L) == write
+  assert perm(NX(p_p).d_ptr_L) == write
+  assert NX(p_p).d_ptr_L
+  assert WF(NX(p_p).v_ptr_L)
+  assert perm(XX(p_p).v_int) == write
+  assert perm(XX(p_p).d_int) == write
+  assert XX(p_p).d_int
+  assert RNGV(XX(p_p).v_int)
+  assert perm(lvloc(block_of(p_p)).lv) >= (a0 + ((lvloc(block_of(p_p)) == lvloc(block_of(NX(p_p).v_ptr_L))) ? a1 : none))
+  assert NX(p_p).v_ptr_L == old(NX(p_p).v_ptr_L)
+  assert NX(p_p).v_ptr_L != null
+  assert WF(NX(p_p).v_ptr_L)
+  assert offset_of(NX(p_p).v_ptr_L) < len(block_of(NX(p_p).v_ptr_L))
+  assert LL(NX(p_p).v_ptr_L)
+  assert perm(XX(NX(p_p).v_ptr_L).v_int) == write
+  assert perm(XX(NX(p_p).v_ptr_L).d_int) == write
+  assert XX(NX(p_p).v_ptr_L).d_int
+  assert RNGV(XX(NX(p_p).v_ptr_L).v_int)
+  assert perm(lvloc(block_of(NX(p_p).v_ptr_L)).lv) >= (a1 + ((lvloc(block_of(NX(p_p).v_ptr_L)) == lvloc(block_of(p_p))) ? a0 : none))
+  assert XX(NX(p_p).v_ptr_L).v_int == old(XX(NX(p_p).v_ptr_L).v_int) + 1
+}
+
+// well-formedness of the contract of upd: ghosts for p->next (both states, with WF and, when non-null, its member lengths: WF_S of the loaded pointer) and for p->next->x
+method f_upd__2__wf(p_p: Ref, a0: Perm, a1: Perm, hv_0_pre: Ref, hv_0_post: Ref, hv_1_pre: Int, hv_1_post: Int)
+  requires (none < a0) && (a0 < write)
+  requires (none < a1) && (a1 < write)
+  requires WF(p_p) && WF(hv_0_pre) && WF(hv_0_post)
+  requires hv_0_pre == null || LL(hv_0_pre)
+  requires hv_0_post == null || LL(hv_0_post)
+  requires RNGV(hv_1_pre) && RNGV(hv_1_post)
+  decreases
+{
+  assert (hv_1_pre < 100) ==> (!((hv_1_pre + 1 < (-2147483648)) || (2147483647 < hv_1_pre + 1)))
+}
+
+// int use(void) { struct L b; b.x = 5; b.next = NULL; struct L a; a.x = 1; a.next = &a; upd(&a); check(b.x == 6); return b.x; }
+method f_use__3() returns (res: Int)
+  ensures RNGV(res)
+  decreases
+{
+  var v_b: Ref
+  var v_a: Ref
+  v_b := alloc_struct_L()
+  v_a := alloc_struct_L()
+  assert !((perm(XX(v_b).v_int) != write) || (perm(XX(v_b).d_int) != write))
+  XX(v_b).v_int := 5
+  XX(v_b).d_int := true
+  assert !((perm(NX(v_b).v_ptr_L) != write) || (perm(NX(v_b).d_ptr_L) != write))
+  NX(v_b).v_ptr_L := null
+  NX(v_b).d_ptr_L := true
+  assert !((perm(XX(v_a).v_int) != write) || (perm(XX(v_a).d_int) != write))
+  XX(v_a).v_int := 1
+  XX(v_a).d_int := true
+  assert !((perm(NX(v_a).v_ptr_L) != write) || (perm(NX(v_a).d_ptr_L) != write))
+  NX(v_a).v_ptr_L := v_a
+  NX(v_a).d_ptr_L := true
+  // upd(&a): atom 1 (the struct a), atom 2 (the leaf x of a.next), the separation row of the x leaves, the amounts, the call
+  assert v_a != null
+  assert WF(v_a)
+  assert offset_of(v_a) < len(block_of(v_a))
+  assert LL(v_a)
+  assert perm(NX(v_a).v_ptr_L) == write
+  assert perm(NX(v_a).d_ptr_L) == write
+  assert NX(v_a).d_ptr_L
+  assert WF(NX(v_a).v_ptr_L)
+  assert perm(XX(v_a).v_int) == write
+  assert perm(XX(v_a).d_int) == write
+  assert XX(v_a).d_int
+  assert RNGV(XX(v_a).v_int)
+  assert NX(v_a).v_ptr_L != null
+  assert WF(NX(v_a).v_ptr_L)
+  assert offset_of(NX(v_a).v_ptr_L) < len(block_of(NX(v_a).v_ptr_L))
+  assert LL(NX(v_a).v_ptr_L)
+  assert perm(XX(NX(v_a).v_ptr_L).v_int) == write
+  assert perm(XX(NX(v_a).v_ptr_L).d_int) == write
+  assert XX(NX(v_a).v_ptr_L).d_int
+  assert RNGV(XX(NX(v_a).v_ptr_L).v_int)
+  assert XX(v_a) != XX(NX(v_a).v_ptr_L) // <- fails
+  assert NX(v_a).v_ptr_L == null || LL(NX(v_a).v_ptr_L)
+  assert XX(NX(v_a).v_ptr_L).v_int < 100
+  if (lvloc(block_of(v_a)) == lvloc(block_of(NX(v_a).v_ptr_L))) { }
+  assert none < (perm(lvloc(block_of(v_a)).lv) / 3)
+  assert (perm(lvloc(block_of(v_a)).lv) / 3) < write
+  assert none < (perm(lvloc(block_of(NX(v_a).v_ptr_L)).lv) / 3)
+  assert (perm(lvloc(block_of(NX(v_a).v_ptr_L)).lv) / 3) < write
+  assert perm(lvloc(block_of(v_a)).lv) >= ((perm(lvloc(block_of(v_a)).lv) / 3) + ((lvloc(block_of(v_a)) == lvloc(block_of(NX(v_a).v_ptr_L))) ? (perm(lvloc(block_of(NX(v_a).v_ptr_L)).lv) / 3) : none))
+  assert perm(lvloc(block_of(NX(v_a).v_ptr_L)).lv) >= ((perm(lvloc(block_of(NX(v_a).v_ptr_L)).lv) / 3) + ((lvloc(block_of(NX(v_a).v_ptr_L)) == lvloc(block_of(v_a))) ? (perm(lvloc(block_of(v_a)).lv) / 3) : none))
+  f_upd__2(v_a, perm(lvloc(block_of(v_a)).lv) / 3, perm(lvloc(block_of(NX(v_a).v_ptr_L)).lv) / 3)
+  assert perm(XX(v_b).v_int) > none
+  assert XX(v_b).d_int
+  assert XX(v_b).v_int == 6
+  res := XX(v_b).v_int
+  assert perm(NX(v_a).v_ptr_L) == write && perm(NX(v_a).d_ptr_L) == write && perm(XX(v_a).v_int) == write && perm(XX(v_a).d_int) == write && perm(lvloc(block_of(v_a)).lv) == write
+  exhale acc(NX(v_a).v_ptr_L) && acc(NX(v_a).d_ptr_L) && acc(XX(v_a).v_int) && acc(XX(v_a).d_int) && acc(lvloc(block_of(v_a)).lv)
+  assert perm(NX(v_b).v_ptr_L) == write && perm(NX(v_b).d_ptr_L) == write && perm(XX(v_b).v_int) == write && perm(XX(v_b).d_int) == write && perm(lvloc(block_of(v_b)).lv) == write
+  exhale acc(NX(v_b).v_ptr_L) && acc(NX(v_b).d_ptr_L) && acc(XX(v_b).v_int) && acc(XX(v_b).d_int) && acc(lvloc(block_of(v_b)).lv)
+}

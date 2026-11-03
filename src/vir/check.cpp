@@ -513,7 +513,7 @@ class Checker {
     for (const AtomSite& s : sites) placed.insert(s.atom);
     for (const Expr* a : all)
       if (placed.count(a) == 0)
-        err(a->loc, "a permission atom in a position decision 0037 item 5 does not allow (a top-level conjunct, the right of `||` or an arm of `?:` whose condition reads no heap)");
+        err(a->loc, "a permission atom in a position decision 0037 item 5 does not allow (a top-level conjunct, the right of `||` or an arm of `?:` whose condition holds no atom, call or side effect)");
     if (placed.size() != sites.size()) err(f.loc, "a permission atom reachable twice in the contract of '" + f.c_name + "'");
     // Requires atoms are numbered in evaluation order; no two of one kind on one parameter (the partner would be ambiguous).
     std::vector<const AtomSite*> req;
@@ -624,7 +624,7 @@ class Checker {
     if (s.form == LoopForm::DoOnce) return;  // refused one by one in expr()
     for (const Expr* a : all)
       if (placed.count(a) == 0)
-        err(a->loc, "a permission atom in a position decision 0037 item 5 does not allow (a top-level conjunct, the right of `||` or an arm of `?:` whose condition reads no heap)");
+        err(a->loc, "a permission atom in a position decision 0037 item 5 does not allow (a top-level conjunct, the right of `||` or an arm of `?:` whose condition holds no atom, call or side effect)");
     if (placed.size() != sites.size()) err(s.loc, "a permission atom of an invariant reachable twice");
     for (size_t k = 0; k < sites.size(); ++k) {
       const Expr& a = *sites[k].atom;

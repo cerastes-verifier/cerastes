@@ -277,6 +277,10 @@ struct Expr {
   // (Builder::deref derives it from the operand's when that has one).  Optional: empty means "unknown" and the lowering words the
   // message without the name.  It never affects the verification.  Set it with Builder::text.
   std::string c_text;
+  // MemberAddr only (decision 0045 item 12): `c_text` ("&" + the place) is the user's own spelling of a place reached through a load or a pointer leaf
+  // (`&p->q->x`), and `place_text`/`member_place` return it instead of rebuilding `(p->q)->x`.  Set by the encoder for the new places only: every load-free place
+  // and every place of code keeps member_place's text (existing position maps must not change).
+  bool user_spelling = false;
   const Function* callee = nullptr;        // Call
   std::vector<const Expr*> args;           // Call: already converted to the parameter types
   AtomKind atom = AtomKind::Owns;          // Atom
@@ -641,8 +645,8 @@ std::set<int> assigned_params(const Function& f);
 // One `Atom` of a contract with the conditions under which it holds.  `guards` are the conditions of the enclosing `||` and `?:` (in
 // evaluation order, outermost first): the atom is asserted where every `cond == holds`: for `a || atom` the guard is (`a`, false) (lowered
 // `!a ==> atom`: Viper refuses `acc` under `||`), for `c ? atom : x` it is (`c`, true), for `c ? x : atom` it is (`c`, false).  Each `cond`
-// reads no heap (no Deref, no Atom) and mentions Formals, Old of Formals, the Result and constants only.  The atoms of an enclosing `&&`
-// add no guard.
+// holds no Atom, no call and no side effect; from decision 0045 item 9 (owner question 109) it may read memory (`*pp == NULL`, `p->q == NULL`: Deref
+// nodes over the place grammar), which the lowering frames per path like any contract read.  The atoms of an enclosing `&&` add no guard.
 struct AtomGuard {
   const Expr* cond = nullptr;
   bool holds = true;
@@ -669,8 +673,8 @@ struct AtomSite {
 // the left of `||`, under `Old`, ...) is not listed: check_program reports it.  The k-th `requires` site's `amount` is k.
 std::vector<AtomSite> contract_atoms(const Function& f);
 // The atoms of the `invariant` clauses of loop `s` (a `While` statement) in the positions of decision 0037 item 5 (decision 0040 item 5): in
-// clause order, each clause in evaluation order, with the same guards (their `cond`s read no heap and mention Locals, constants and
-// the like).  `AtomSite::clause` is the index in `s.invariants`, `in_ensures` is false, `atom->amount` is -1.  An atom of an invariant elsewhere
+// clause order, each clause in evaluation order, with the same guards (their `cond`s hold no atom, call or side effect, and may read memory
+// like a contract's, decision 0045 item 9).  `AtomSite::clause` is the index in `s.invariants`, `in_ensures` is false, `atom->amount` is -1.  An atom of an invariant elsewhere
 // (under `!`, as an argument, ...) is not listed: check_program reports it.  Empty for a loop of form DoOnce (check_program refuses its atoms).
 std::vector<AtomSite> loop_atoms(const Stmt& s);
 // The shape of a site's guards for pointer parameter `param`: none (the atom is a top-level conjunct, or an arm of `&&`), exactly `param == NULL` being false
@@ -701,6 +705,15 @@ bool reads_heap(const Expr& e);
 // (>= 0) for an atom on a `Formal`, `kGlobalSiteBase + global->id` for an atom on a `GlobalAddr`, `kNoPlaceKey` for anything else (an invariant's
 // `Local`).  Two atoms name one place iff their keys are equal and not `kNoPlaceKey`; `kResultSiteKey` is reserved for lowering's result site.
 constexpr int kGlobalSiteBase = 1 << 20;
+// The ranges of site keys are disjoint (decision 0045 audit S7): a Formal's index in [0, kGlobalSiteBase), a global's `kGlobalSiteBase + id` in
+// [kGlobalSiteBase, kLocalSiteBase), an invariant's pointer variable or cell `kLocalSiteBase + var->id` in [kLocalSiteBase, kDerivedKeyBase), and the
+// lowering's derived keys (one per distinct root and steps, decision 0045 item 2) from kDerivedKeyBase on.  `kResultSiteKey` and `kNoPlaceKey` are negative.
+// Test a key with these helpers, never with a one-sided `>=`.
+constexpr int kLocalSiteBase = 1 << 24;
+constexpr int kDerivedKeyBase = 1 << 28;
+inline bool is_global_site_key(int k) { return k >= kGlobalSiteBase && k < kLocalSiteBase; }
+inline bool is_local_site_key(int k) { return k >= kLocalSiteBase && k < kDerivedKeyBase; }
+inline bool is_derived_site_key(int k) { return k >= kDerivedKeyBase; }
 constexpr int kResultSiteKey = -1;
 constexpr int kNoPlaceKey = -2;
 // The root key of an atom whose place has an EMPTY member path and no steps (`via`); `kNoPlaceKey` for any other place (use `atom_place`).  So a caller that
@@ -719,7 +732,6 @@ constexpr int field_of_step(int step) { return -2 - step; }
 bool steps_have_load(const std::vector<int>& via);
 // The root keys of the places an invariant reaches (a pointer variable or a cell, by the variable's id): `kLocalSiteBase + var->id`.  A plain `Local` pointer
 // variable with no steps and no member path (`owns(*q)`, every invariant atom of decisions 0040-0044) keeps `kNoPlaceKey`: it is compared by variable.
-constexpr int kLocalSiteBase = 1 << 21;
 // The full place of an atom (decisions 0043 item 9, 0045 item 2): the root key of atom_place_key's rule, however long the steps and the path are, the steps
 // and the member path.  The root is a Formal's index, `kGlobalSiteBase + global->id`, `kResultSiteKey` for the Result (an `ensures`), or in an invariant
 // `kLocalSiteBase + var->id`; the atom's `a` is the root under any number of MemberAddr, Deref and Field nodes (an `Old` of a Formal under a Field counts as

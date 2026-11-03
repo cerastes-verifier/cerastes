@@ -1,0 +1,272 @@
+// expect: error assert:assertion.false @ L271
+// S35 (m) vacuity of s35_m_written_struct.vpr: `assert false` at the end of the method must FAIL (record 0045 item 10)
+// Hand-written in the emitted style (see the positive fixture).
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0037 items 6-7, 0040 item 2): WF; an int range; a cell owned (root, full permission, flag set, range or WF of the pointer, the liveness amount); live
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNGV(v) ((-2147483648) <= v && v <= 2147483647)
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+define CI(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNGV(c.v_int))
+define CP(c) (acc(c.v_ptr_int) && acc(c.d_ptr_int) && c.d_ptr_int && WF(c.v_ptr_int))
+define OWNI(p, a) (ROOT(p) && CI(p) && LVF(p, a))
+define OWNP(p, a) (ROOT(p) && CP(p) && LVF(p, a))
+define LIVE(p, a) (p != null && WF(p) && LVF(p, a))
+
+// struct S { int a; int b; }: member 0 is a, member 1 is b; WF_S: the member lengths
+define MA(s) loc(member(s, 0), 0)
+define MB(s) loc(member(s, 1), 0)
+define SLEN(s) (len(member(s, 0)) == 1 && len(member(s, 1)) == 1)
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_int() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(r.v_int) && acc(r.d_int) && !r.d_int && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract allocation of an address-taken local of type int*: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_ptr_int() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(r.v_ptr_int) && acc(r.d_ptr_int) && !r.d_ptr_int && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract allocation of a struct S local: a one-slot block; each member is a block of length 1 whose leaf is uninitialized with full permission; the liveness token is the root block's (record 0043 item 4)
+method alloc_struct_0_S() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures SLEN(r)
+  ensures acc(MA(r).v_int) && acc(MA(r).d_int) && !MA(r).d_int
+  ensures acc(MB(r).v_int) && acc(MB(r).d_int) && !MB(r).d_int
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// int walk_s(int n) requires(0 <= n && n <= 100) ensures(r, r == 1) { struct S s1 = {1, 2}; struct S s2 = {1, 3}; struct S *q = &s1; int i = 0; while (i < n) { q = (q == &s1) ? &s2 : &s1; i += 1; } return q->a; }
+//   loop invariant: 0 <= i && i <= n && s1.a == 1 && s2.a == 1 && (q == &s1 || q == &s2) && owns(*q) && q->a == 1
+// WRITTEN atoms on struct places (question 99): owns(*q) for `struct S *q` is one atom per leaf (an amount aw_v/aw_d per leaf and field), one liveness amount aw_l, WF_S and the member lengths; the automatic places are the four leaves of the two local structs; each atom leaf is NOTAUTO against the places of its field and, when it IS a place, that place is held in full
+method f_walk_s__0(p_n: Int) returns (res: Int)
+  requires RNGV(p_n)
+  requires (0 <= p_n) && (p_n <= 100)
+  ensures RNGV(res)
+  ensures res == 1
+  decreases
+{
+  var v_n: Int
+  var v_i: Int
+  var v_s1: Ref
+  var v_s2: Ref
+  var v_q: Ref
+  var t0: Ref
+  var kl_s1a: Perm
+  var kv_s1a: Perm
+  var kd_s1a: Perm
+  var vs_s1a: Int
+  var ds_s1a: Bool
+  var kv_s1b: Perm
+  var kd_s1b: Perm
+  var vs_s1b: Int
+  var ds_s1b: Bool
+  var kl_s2a: Perm
+  var kv_s2a: Perm
+  var kd_s2a: Perm
+  var vs_s2a: Int
+  var ds_s2a: Bool
+  var kv_s2b: Perm
+  var kd_s2b: Perm
+  var vs_s2b: Int
+  var ds_s2b: Bool
+  var aw_vqa: Perm
+  var aw_dqa: Perm
+  var aw_vqb: Perm
+  var aw_dqb: Perm
+  var aw_lq: Perm
+  v_n := p_n
+  v_i := 0
+  v_s1 := alloc_struct_0_S()
+  v_s2 := alloc_struct_0_S()
+  assert !((perm(MA(v_s1).v_int) != write) || (perm(MA(v_s1).d_int) != write))
+  MA(v_s1).v_int := 1
+  MA(v_s1).d_int := true
+  assert !((perm(MB(v_s1).v_int) != write) || (perm(MB(v_s1).d_int) != write))
+  MB(v_s1).v_int := 2
+  MB(v_s1).d_int := true
+  assert !((perm(MA(v_s2).v_int) != write) || (perm(MA(v_s2).d_int) != write))
+  MA(v_s2).v_int := 1
+  MA(v_s2).d_int := true
+  assert !((perm(MB(v_s2).v_int) != write) || (perm(MB(v_s2).d_int) != write))
+  MB(v_s2).v_int := 3
+  MB(v_s2).d_int := true
+  v_q := v_s1
+  // the loop's entry: the splits of the places' cells and liveness cells, the perm snapshots, the atoms' amounts and rows
+  if (MA(v_s1) == MB(v_s1)) { }
+  if (MA(v_s1) == MA(v_s2)) { }
+  if (MA(v_s1) == MB(v_s2)) { }
+  if (MB(v_s1) == MA(v_s2)) { }
+  if (MB(v_s1) == MB(v_s2)) { }
+  if (MA(v_s2) == MB(v_s2)) { }
+  if (lvloc(block_of(v_s1)) == lvloc(block_of(v_s2))) { }
+  kl_s1a := perm(lvloc(block_of(MA(v_s1))).lv)
+  kv_s1a := perm(MA(v_s1).v_int)
+  kd_s1a := perm(MA(v_s1).d_int)
+  ds_s1a := false
+  if (kd_s1a > none) {
+    ds_s1a := MA(v_s1).d_int
+  }
+  if (kv_s1a > none) {
+    vs_s1a := MA(v_s1).v_int
+  }
+  kv_s1b := perm(MB(v_s1).v_int)
+  kd_s1b := perm(MB(v_s1).d_int)
+  ds_s1b := false
+  if (kd_s1b > none) {
+    ds_s1b := MB(v_s1).d_int
+  }
+  if (kv_s1b > none) {
+    vs_s1b := MB(v_s1).v_int
+  }
+  kl_s2a := perm(lvloc(block_of(MA(v_s2))).lv)
+  kv_s2a := perm(MA(v_s2).v_int)
+  kd_s2a := perm(MA(v_s2).d_int)
+  ds_s2a := false
+  if (kd_s2a > none) {
+    ds_s2a := MA(v_s2).d_int
+  }
+  if (kv_s2a > none) {
+    vs_s2a := MA(v_s2).v_int
+  }
+  kv_s2b := perm(MB(v_s2).v_int)
+  kd_s2b := perm(MB(v_s2).d_int)
+  ds_s2b := false
+  if (kd_s2b > none) {
+    ds_s2b := MB(v_s2).d_int
+  }
+  if (kv_s2b > none) {
+    vs_s2b := MB(v_s2).v_int
+  }
+  aw_vqa := write
+  aw_dqa := write
+  aw_vqb := write
+  aw_dqb := write
+  aw_lq := perm(lvloc(block_of(v_q)).lv)
+  assert v_q != null
+  assert WF(v_q)
+  assert offset_of(v_q) < len(block_of(v_q))
+  assert SLEN(v_q)
+  assert perm(MA(v_q).v_int) == write
+  assert perm(MA(v_q).d_int) == write
+  assert MA(v_q).d_int
+  assert RNGV(MA(v_q).v_int)
+  assert ((MA(v_q) != MA(v_s1)) && (MA(v_q) != MA(v_s2))) ==> ((aw_vqa > none) && (aw_dqa > none))
+  assert perm(MB(v_q).v_int) == write
+  assert perm(MB(v_q).d_int) == write
+  assert MB(v_q).d_int
+  assert RNGV(MB(v_q).v_int)
+  assert ((MB(v_q) != MB(v_s1)) && (MB(v_q) != MB(v_s2))) ==> ((aw_vqb > none) && (aw_dqb > none))
+  assert perm(lvloc(block_of(v_q)).lv) > none
+  assert ((lvloc(block_of(v_q)) != lvloc(block_of(v_s1))) && (lvloc(block_of(v_q)) != lvloc(block_of(v_s2)))) ==> (aw_lq > none)
+  while (v_i < v_n)
+    invariant RNGV(v_i)
+    invariant acc(MA(v_s1).v_int, kv_s1a) && acc(MA(v_s1).d_int, kd_s1a)
+    invariant acc(lvloc(block_of(MA(v_s1))).lv, kl_s1a)
+    invariant ((none < kv_s1a) && (kv_s1a < write)) ==> (MA(v_s1).v_int == vs_s1a)
+    invariant ((kv_s1a > none) && (kd_s1a > none) && MA(v_s1).d_int) ==> (RNGV(MA(v_s1).v_int))
+    invariant ((kd_s1a > none) && ds_s1a) ==> (MA(v_s1).d_int)
+    invariant ((MB(v_s1) != MA(v_s1))) ==> (acc(MB(v_s1).v_int, kv_s1b) && acc(MB(v_s1).d_int, kd_s1b))
+    invariant (((MB(v_s1) != MA(v_s1))) && ((none < kv_s1b) && (kv_s1b < write))) ==> (MB(v_s1).v_int == vs_s1b)
+    invariant (((MB(v_s1) != MA(v_s1))) && ((kv_s1b > none) && (kd_s1b > none) && MB(v_s1).d_int)) ==> (RNGV(MB(v_s1).v_int))
+    invariant (((MB(v_s1) != MA(v_s1))) && ((kd_s1b > none) && ds_s1b)) ==> (MB(v_s1).d_int)
+    invariant ((MA(v_s2) != MA(v_s1)) && (MA(v_s2) != MB(v_s1))) ==> (acc(MA(v_s2).v_int, kv_s2a) && acc(MA(v_s2).d_int, kd_s2a))
+    invariant ((lvloc(block_of(MA(v_s2))) != lvloc(block_of(MA(v_s1)))) && (lvloc(block_of(MA(v_s2))) != lvloc(block_of(MB(v_s1))))) ==> (acc(lvloc(block_of(MA(v_s2))).lv, kl_s2a))
+    invariant (((MA(v_s2) != MA(v_s1)) && (MA(v_s2) != MB(v_s1))) && ((none < kv_s2a) && (kv_s2a < write))) ==> (MA(v_s2).v_int == vs_s2a)
+    invariant (((MA(v_s2) != MA(v_s1)) && (MA(v_s2) != MB(v_s1))) && ((kv_s2a > none) && (kd_s2a > none) && MA(v_s2).d_int)) ==> (RNGV(MA(v_s2).v_int))
+    invariant (((MA(v_s2) != MA(v_s1)) && (MA(v_s2) != MB(v_s1))) && ((kd_s2a > none) && ds_s2a)) ==> (MA(v_s2).d_int)
+    invariant ((MB(v_s2) != MA(v_s1)) && (MB(v_s2) != MB(v_s1)) && (MB(v_s2) != MA(v_s2))) ==> (acc(MB(v_s2).v_int, kv_s2b) && acc(MB(v_s2).d_int, kd_s2b))
+    invariant (((MB(v_s2) != MA(v_s1)) && (MB(v_s2) != MB(v_s1)) && (MB(v_s2) != MA(v_s2))) && ((none < kv_s2b) && (kv_s2b < write))) ==> (MB(v_s2).v_int == vs_s2b)
+    invariant (((MB(v_s2) != MA(v_s1)) && (MB(v_s2) != MB(v_s1)) && (MB(v_s2) != MA(v_s2))) && ((kv_s2b > none) && (kd_s2b > none) && MB(v_s2).d_int)) ==> (RNGV(MB(v_s2).v_int))
+    invariant (((MB(v_s2) != MA(v_s1)) && (MB(v_s2) != MB(v_s1)) && (MB(v_s2) != MA(v_s2))) && ((kd_s2b > none) && ds_s2b)) ==> (MB(v_s2).d_int)
+    invariant (v_q != null) && WF(v_q) && (offset_of(v_q) < len(block_of(v_q))) && SLEN(v_q)
+    invariant ((MA(v_q) != MA(v_s1)) && (MA(v_q) != MA(v_s2))) ==> ((aw_vqa > none) && (aw_dqa > none))
+    invariant ((MA(v_q) != MA(v_s1)) && (MA(v_q) != MA(v_s2))) ==> (((acc(MA(v_q).v_int, aw_vqa) && acc(MA(v_q).d_int, aw_dqa)) && MA(v_q).d_int) && RNGV(MA(v_q).v_int))
+    invariant (MA(v_q) == MA(v_s1)) ==> ((kv_s1a == write) && (kd_s1a == write))
+    invariant (MA(v_q) == MA(v_s2)) ==> ((kv_s2a == write) && (kd_s2a == write))
+    invariant ((MB(v_q) != MB(v_s1)) && (MB(v_q) != MB(v_s2))) ==> ((aw_vqb > none) && (aw_dqb > none))
+    invariant ((MB(v_q) != MB(v_s1)) && (MB(v_q) != MB(v_s2))) ==> (((acc(MB(v_q).v_int, aw_vqb) && acc(MB(v_q).d_int, aw_dqb)) && MB(v_q).d_int) && RNGV(MB(v_q).v_int))
+    invariant (MB(v_q) == MB(v_s1)) ==> ((kv_s1b == write) && (kd_s1b == write))
+    invariant (MB(v_q) == MB(v_s2)) ==> ((kv_s2b == write) && (kd_s2b == write))
+    invariant ((lvloc(block_of(v_q)) != lvloc(block_of(v_s1))) && (lvloc(block_of(v_q)) != lvloc(block_of(v_s2)))) ==> (aw_lq > none)
+    invariant ((lvloc(block_of(v_q)) != lvloc(block_of(v_s1))) && (lvloc(block_of(v_q)) != lvloc(block_of(v_s2)))) ==> acc(lvloc(block_of(v_q)).lv, aw_lq)
+    invariant (lvloc(block_of(v_q)) == lvloc(block_of(v_s1))) ==> (kl_s1a > none)
+    invariant (lvloc(block_of(v_q)) == lvloc(block_of(v_s2))) ==> (kl_s2a > none)
+    invariant ((0 <= v_i) && (v_i <= v_n)) && ((v_q == v_s1) || (v_q == v_s2))
+    invariant ((0 <= v_i) && (v_i <= v_n)) ==> ((kd_s1a > none) ? MA(v_s1).d_int : false)
+    invariant ((0 <= v_i) && (v_i <= v_n)) && (((kv_s1a > none) ? MA(v_s1).v_int : 0) == 1)
+    invariant ((0 <= v_i) && (v_i <= v_n)) ==> ((kd_s2a > none) ? MA(v_s2).d_int : false)
+    invariant ((0 <= v_i) && (v_i <= v_n)) && (((kv_s2a > none) ? MA(v_s2).v_int : 0) == 1)
+    invariant ((0 <= v_i) && (v_i <= v_n)) ==> (((((MA(v_q)) == MA(v_s1)) && (kd_s1a > none)) ? MA(v_q).d_int : ((((MA(v_q)) == MA(v_s2)) && (kd_s2a > none)) ? MA(v_q).d_int : ((aw_dqa > none) ? MA(v_q).d_int : false))))
+    invariant ((0 <= v_i) && (v_i <= v_n)) && ((((((MA(v_q)) == MA(v_s1)) && (kv_s1a > none)) ? MA(v_q).v_int : ((((MA(v_q)) == MA(v_s2)) && (kv_s2a > none)) ? MA(v_q).v_int : ((aw_vqa > none) ? MA(v_q).v_int : 0)))) == 1)
+    decreases v_n - v_i
+  {
+    if (v_q == v_s1) { t0 := v_s2 } else { t0 := v_s1 }
+    v_q := t0
+    assert !((v_i + 1 < (-2147483648)) || (2147483647 < v_i + 1))
+    v_i := v_i + 1
+    assert !((perm(MA(v_s1).v_int) < kv_s1a) || (perm(MA(v_s1).d_int) < kd_s1a))
+    assert !(perm(lvloc(block_of(MA(v_s1))).lv) < kl_s1a)
+    assert ((MB(v_s1) != MA(v_s1))) ==> (!((perm(MB(v_s1).v_int) < kv_s1b) || (perm(MB(v_s1).d_int) < kd_s1b)))
+    assert ((MA(v_s2) != MA(v_s1)) && (MA(v_s2) != MB(v_s1))) ==> (!((perm(MA(v_s2).v_int) < kv_s2a) || (perm(MA(v_s2).d_int) < kd_s2a)))
+    assert ((lvloc(block_of(MA(v_s2))) != lvloc(block_of(MA(v_s1)))) && (lvloc(block_of(MA(v_s2))) != lvloc(block_of(MB(v_s1))))) ==> (!(perm(lvloc(block_of(MA(v_s2))).lv) < kl_s2a))
+    assert ((MB(v_s2) != MA(v_s1)) && (MB(v_s2) != MB(v_s1)) && (MB(v_s2) != MA(v_s2))) ==> (!((perm(MB(v_s2).v_int) < kv_s2b) || (perm(MB(v_s2).d_int) < kd_s2b)))
+    // the written atoms' checks at the back edge
+    assert v_q != null
+    assert WF(v_q)
+    assert offset_of(v_q) < len(block_of(v_q))
+    assert SLEN(v_q)
+    assert perm(MA(v_q).v_int) >= aw_vqa
+    assert perm(MA(v_q).d_int) >= aw_dqa
+    assert MA(v_q).d_int
+    assert RNGV(MA(v_q).v_int)
+    assert ((MA(v_q) != MA(v_s1)) && (MA(v_q) != MA(v_s2))) ==> ((aw_vqa > none) && (aw_dqa > none))
+    assert perm(MB(v_q).v_int) >= aw_vqb
+    assert perm(MB(v_q).d_int) >= aw_dqb
+    assert MB(v_q).d_int
+    assert RNGV(MB(v_q).v_int)
+    assert ((MB(v_q) != MB(v_s1)) && (MB(v_q) != MB(v_s2))) ==> ((aw_vqb > none) && (aw_dqb > none))
+    assert perm(lvloc(block_of(v_q)).lv) >= aw_lq
+    assert ((lvloc(block_of(v_q)) != lvloc(block_of(v_s1))) && (lvloc(block_of(v_q)) != lvloc(block_of(v_s2)))) ==> (aw_lq > none)
+  }
+  // return q->a
+  if (v_q == v_s1) { }
+  if (v_q == v_s2) { }
+  assert MA(v_q) != null
+  assert perm(MA(v_q).v_int) > none
+  assert MA(v_q).d_int
+  res := MA(v_q).v_int
+  assert perm(MA(v_s2).v_int) == write && perm(MA(v_s2).d_int) == write && perm(MB(v_s2).v_int) == write && perm(MB(v_s2).d_int) == write && perm(lvloc(block_of(v_s2)).lv) == write
+  exhale acc(MA(v_s2).v_int) && acc(MA(v_s2).d_int) && acc(MB(v_s2).v_int) && acc(MB(v_s2).d_int) && acc(lvloc(block_of(v_s2)).lv)
+  assert perm(MA(v_s1).v_int) == write && perm(MA(v_s1).d_int) == write && perm(MB(v_s1).v_int) == write && perm(MB(v_s1).d_int) == write && perm(lvloc(block_of(v_s1)).lv) == write
+  exhale acc(MA(v_s1).v_int) && acc(MA(v_s1).d_int) && acc(MB(v_s1).v_int) && acc(MB(v_s1).d_int) && acc(lvloc(block_of(v_s1)).lv)
+  assert false // <- vacuity
+}

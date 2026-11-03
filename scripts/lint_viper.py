@@ -1330,6 +1330,130 @@ def while_loops(src: Source, d: Decl):
     return out
 
 
+GHOST_REF_LOCAL_RE = re.compile(r"(?<![\w$'.])var\s+(?P<names>[A-Za-z_$][\w$']*(?:\s*,\s*[A-Za-z_$][\w$']*)*)\s*:\s*Ref\b")
+EB_NAME_RE = re.compile(r"eb_\d+")
+LB_NAME_RE = re.compile(r"lb_\d+__\d+")
+AW_NAME_RE = re.compile(r"aw_q\d+__\d+")
+REF_FIELD_END_RE = re.compile(r"\.v_ptr_[\w$']+$")
+LEAF_CELL_RE = re.compile(r"^loc\(member\((?P<base>.*), -?\d+\), 0\)$", re.S)
+
+
+def ref_read_ok(text: str, conditional: bool) -> bool:
+    """Whether `text` is `null` or a plain read of a pointer cell's field (`<place>.v_ptr_...`, a `?:` inside the place is
+    part of the place), or, when `conditional` is set, a `c ? a : b` of those (the chain-guarded read of decision 0045 items 4
+    and 6: `ite(<framing guards>, read, null)`)."""
+    text = _strip_outer_parens(text)
+    if text == "null":
+        return True
+    depth, q = 0, -1
+    for i, ch in enumerate(text):
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+        elif ch == "?" and depth == 0:
+            q = i
+            break
+    if q < 0:
+        return bool(REF_FIELD_END_RE.search(text))
+    if not conditional:
+        return False
+    depth, nested, colon = 0, 0, -1
+    for i in range(q + 1, len(text)):
+        ch = text[i]
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+        elif depth == 0 and ch == "?":
+            nested += 1
+        elif depth == 0 and ch == ":":
+            if nested == 0:
+                colon = i
+                break
+            nested -= 1
+    if colon < 0:
+        return False
+    return ref_read_ok(text[q + 1:colon], True) and ref_read_ok(text[colon + 1:], True)
+
+
+def lint_ghost_refs(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    """Decision 0045 item 14: the ghost `Ref` locals that snapshot the object a contract place designates.  `eb_<N>` (the
+    method-entry snapshot of a load-rooted `requires` place) is assigned once, outside every loop, from `null` or a read of a
+    pointer cell (or a conditional of those: the chain-guarded read); `lb_<N>__<L>` (the loop-entry snapshot) only from `null`
+    or a plain read of a pointer cell, outside every loop body (the loop never assigns it, so the loop's automatic place keeps
+    one object); `aw_q<j>__<L>` (a written atom's object at the top of an iteration) is assigned once, from such a read or a
+    conditional of them, and only in the leading statements of a loop body, before anything else of the iteration."""
+    for d in decls:
+        if d.kind != "method" or not d.has_body:
+            continue
+        names: set[str] = set()
+        for n in range(d.body_line, d.end_line + 1):
+            if m := GHOST_REF_LOCAL_RE.search(src.code[n - 1]):
+                names |= {x.strip() for x in m.group("names").split(",")}
+        ghosts = {x for x in names if EB_NAME_RE.fullmatch(x) or LB_NAME_RE.fullmatch(x) or AW_NAME_RE.fullmatch(x)}
+        if not ghosts:
+            continue
+        loops = while_loops(src, d)
+        bodies = [(b[0][1], b[-1][1], b) for _ln, _inv, b in loops if b]   # (line of `{`, line of `}`, tokens)
+        assigns: dict[str, list[tuple[int, str]]] = {g: [] for g in ghosts}
+        for n in range(d.body_line, d.end_line + 1):
+            code = src.code[n - 1]
+            for g in sorted(ghosts):
+                for a in re.finditer(r"(?<![\w$'.])" + re.escape(g) + r"\s*:=", code):
+                    assigns[g].append((n, _statement_rhs(code, a.end())))
+
+        def in_loop(line: int) -> bool:
+            return any(lo < line <= hi for lo, hi, _b in bodies)
+
+        for g in sorted(ghosts):
+            lst = assigns[g]
+            if EB_NAME_RE.fullmatch(g):
+                if len(lst) != 1:
+                    add(d.line, f"ghost `Ref` local `{g}` is assigned {len(lst)} times: the method-entry snapshot is assigned once "
+                                "(decision 0045 item 14)")
+                for n, rhs in lst:
+                    if in_loop(n):
+                        add(n, f"ghost `Ref` local `{g}` is assigned inside a loop: the method-entry snapshot is assigned once at the "
+                               "method's entry (decision 0045 item 14)")
+                    elif not ref_read_ok(rhs, True):
+                        add(n, f"ghost `Ref` local `{g}` is assigned `{rhs}`: a snapshot is `null`, a read of a pointer cell or a "
+                               "conditional of those (decision 0045 item 14)")
+            elif LB_NAME_RE.fullmatch(g):
+                if not 1 <= len(lst) <= 2:
+                    add(d.line, f"ghost `Ref` local `{g}` is assigned {len(lst)} times: `:= null`, then at most one guarded read, "
+                                "right before its loop (decision 0045 item 14)")
+                for k, (n, rhs) in enumerate(lst):
+                    if in_loop(n):
+                        add(n, f"ghost `Ref` local `{g}` is assigned inside a loop: the loop-entry snapshot is assigned only before "
+                               "its loop (decision 0045 item 14)")
+                    elif (k == 0 and rhs != "null") or (k > 0 and not ref_read_ok(rhs, False)):
+                        add(n, f"ghost `Ref` local `{g}` is assigned `{rhs}`: `null` first, then a plain read of a pointer cell "
+                               "(decision 0045 item 14)")
+            else:
+                if len(lst) != 1:
+                    add(d.line, f"ghost `Ref` local `{g}` is assigned {len(lst)} times: a written atom's object is assigned once, "
+                                "at the top of an iteration (decision 0045 item 14)")
+                for n, rhs in lst:
+                    host = [(lo, hi) for lo, hi, _b in bodies if lo < n <= hi]
+                    if not host:
+                        add(n, f"ghost `Ref` local `{g}` is assigned outside a loop body: it holds the written atom's object at the "
+                               "top of each iteration (decision 0045 item 14)")
+                        continue
+                    lo, _hi = min(host, key=lambda h: h[1] - h[0])
+                    # only ghost assignments between the loop's `{` and this one
+                    for m in range(lo + 1, n):
+                        if src.code[m - 1].strip() and not any(re.match(r"\s*" + re.escape(x) + r"\s*:=", src.code[m - 1]) for x in ghosts if AW_NAME_RE.fullmatch(x)):
+                            add(n, f"ghost `Ref` local `{g}` is assigned after other statements of the loop body (line {m}): it is "
+                                   "the first statement of an iteration (decision 0045 item 14)")
+                            break
+                    leaf = LEAF_CELL_RE.match(_strip_outer_parens(rhs))   # a struct atom's leaf cell: loc(member(<chain read>, k), 0)
+                    if not ref_read_ok(leaf.group("base") if leaf else rhs, True):
+                        add(n, f"ghost `Ref` local `{g}` is assigned `{rhs}`: a read of a pointer cell, `null`, a conditional of "
+                               "those or, for a struct atom, a leaf cell `loc(member(<such a read>, k), 0)` (decision 0045 item 14)")
+
+
+
 def lint_perm_locals(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
     """Decision 0038 item 9: the amounts of a loop's invariant are `Perm` locals that snapshot what the method holds.  A
     local is assigned only `perm(...)`, `none`, `write` or a conditional of those (an assignment of anything else, `wildcard`
@@ -1456,6 +1580,7 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     lint_globals(src, decls, add)
     lint_ghost_amounts(src, decls, add)
     lint_perm_locals(src, decls, add)
+    lint_ghost_refs(src, decls, add)
 
     if map_text is None:
         problems.append(f"{name}: no position map ({map_name or name + MAP_SUFFIX})")

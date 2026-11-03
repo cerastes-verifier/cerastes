@@ -1,0 +1,216 @@
+// expect: error assert:assertion.false @ L185
+// S35 (i) twin of s35_i_leaf.vpr: the ensures of `mk` omits `r.q == p`, so its read of `*r.q` is framed by no atom: the method still verifies (its body returns p) and f__wf's framing assert `true ==> (r.q == p)` fails (record 0045 item 9)
+// Hand-written in the emitted style (see the positive fixture).
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0037 items 6-7, 0040 item 2): WF; an int range; a cell owned (root, full permission, flag set, range or WF of the pointer, the liveness amount); live
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNGV(v) ((-2147483648) <= v && v <= 2147483647)
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+define CI(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNGV(c.v_int))
+define CP(c) (acc(c.v_ptr_int) && acc(c.d_ptr_int) && c.d_ptr_int && WF(c.v_ptr_int))
+define OWNI(p, a) (ROOT(p) && CI(p) && LVF(p, a))
+define OWNP(p, a) (ROOT(p) && CP(p) && LVF(p, a))
+define LIVE(p, a) (p != null && WF(p) && LVF(p, a))
+
+// struct P { int *q; }: member 0 is the pointer cell q
+define PQ(s) loc(member(s, 0), 0)
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_int() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(r.v_int) && acc(r.d_int) && !r.d_int && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract allocation of an address-taken local of type int*: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_ptr_int() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(r.v_ptr_int) && acc(r.d_ptr_int) && !r.d_ptr_int && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract allocation of a struct P local: a one-slot block, member 0 a block of length 1 whose pointer leaf is uninitialized with full permission; the liveness token is the root block's (record 0043 item 4)
+method alloc_struct_P() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures len(member(r, 0)) == 1 && acc(PQ(r).v_ptr_int) && acc(PQ(r).d_ptr_int) && !PQ(r).d_ptr_int
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// int deref(struct P s) requires(owns(*s.q) && live(s.q)) ensures(r, owns(*s.q) && live(s.q) && r == *s.q) { return *s.q; }
+// the leaf s.q is the formal p_s__0_m0: a fixed value (the entry value, also in the ensures), so the atoms on it are plain, with no snapshot and no ite
+method f_deref__0(p_s__0_m0: Ref, a0: Perm, a1: Perm) returns (res: Int)
+  requires (none < a0) && (a0 < write)
+  requires (none < a1) && (a1 < write)
+  requires WF(p_s__0_m0)
+  requires OWNI(p_s__0_m0, a0) && LIVE(p_s__0_m0, a1)
+  ensures RNGV(res)
+  ensures OWNI(p_s__0_m0, a0) && LIVE(p_s__0_m0, a1) && res == p_s__0_m0.v_int
+  decreases
+{
+  var v_s: Ref
+  var t0: Ref
+  // the by-value parameter is a struct local filled from its leaf formal (record 0044 item 3)
+  v_s := alloc_struct_P()
+  assert PQ(v_s) != null
+  assert !((perm(PQ(v_s).v_ptr_int) != write) || (perm(PQ(v_s).d_ptr_int) != write))
+  PQ(v_s).v_ptr_int := p_s__0_m0
+  PQ(v_s).d_ptr_int := true
+  if (lvloc(block_of(p_s__0_m0)) == lvloc(block_of(v_s))) { }
+  assert PQ(v_s) != null
+  assert perm(PQ(v_s).v_ptr_int) > none
+  assert PQ(v_s).d_ptr_int
+  t0 := PQ(v_s).v_ptr_int
+  assert t0 != null
+  assert perm(t0.v_int) > none
+  assert t0.d_int
+  res := t0.v_int
+  assert perm(PQ(v_s).v_ptr_int) == write && perm(PQ(v_s).d_ptr_int) == write && perm(lvloc(block_of(v_s)).lv) == write
+  exhale acc(PQ(v_s).v_ptr_int) && acc(PQ(v_s).d_ptr_int) && acc(lvloc(block_of(v_s)).lv)
+  assert p_s__0_m0 != null
+  assert WF(p_s__0_m0)
+  assert offset_of(p_s__0_m0) < len(block_of(p_s__0_m0))
+  assert perm(p_s__0_m0.v_int) == write
+  assert perm(p_s__0_m0.d_int) == write
+  assert p_s__0_m0.d_int
+  assert RNGV(p_s__0_m0.v_int)
+  assert perm(lvloc(block_of(p_s__0_m0)).lv) >= (a0 + ((lvloc(block_of(p_s__0_m0)) == lvloc(block_of(p_s__0_m0))) ? a1 : none))
+  assert p_s__0_m0 != null
+  assert WF(p_s__0_m0)
+  assert perm(lvloc(block_of(p_s__0_m0)).lv) >= (a1 + ((lvloc(block_of(p_s__0_m0)) == lvloc(block_of(p_s__0_m0))) ? a0 : none))
+  assert res == p_s__0_m0.v_int
+}
+
+// int *ident(struct P s) requires(live(s.q)) ensures(r, live(s.q) && r == s.q) { return s.q; }
+// return s.q: the result is a pointer value: its WF is an ensures of the method
+method f_ident__1(p_s__0_m0: Ref, a0: Perm) returns (res: Ref)
+  requires (none < a0) && (a0 < write)
+  requires WF(p_s__0_m0)
+  requires LIVE(p_s__0_m0, a0)
+  ensures WF(res)
+  ensures LIVE(p_s__0_m0, a0) && res == p_s__0_m0
+  decreases
+{
+  var v_s: Ref
+  var t0: Ref
+  // the by-value parameter is a struct local filled from its leaf formal (record 0044 item 3)
+  v_s := alloc_struct_P()
+  assert PQ(v_s) != null
+  assert !((perm(PQ(v_s).v_ptr_int) != write) || (perm(PQ(v_s).d_ptr_int) != write))
+  PQ(v_s).v_ptr_int := p_s__0_m0
+  PQ(v_s).d_ptr_int := true
+  assert PQ(v_s) != null
+  assert perm(PQ(v_s).v_ptr_int) > none
+  assert PQ(v_s).d_ptr_int
+  t0 := PQ(v_s).v_ptr_int
+  res := t0
+  assert perm(PQ(v_s).v_ptr_int) == write && perm(PQ(v_s).d_ptr_int) == write && perm(lvloc(block_of(v_s)).lv) == write
+  exhale acc(PQ(v_s).v_ptr_int) && acc(PQ(v_s).d_ptr_int) && acc(lvloc(block_of(v_s)).lv)
+  assert WF(res)
+  assert p_s__0_m0 != null
+  assert WF(p_s__0_m0)
+  assert perm(lvloc(block_of(p_s__0_m0)).lv) >= a0
+  assert res == p_s__0_m0
+}
+
+// struct P mk(int *p) requires(owns(*p)) ensures(r, owns(*p) && *r.q == 1) { *p = 1; struct P s = {p}; return s; }
+// *r.q is read in the return state, framed like *result (0040 item 4): the disjunct D = (r.q == p) of the atom owns(*p) frames it, the dummy is 0
+method f_mk__2(p_p: Ref, a0: Perm) returns (res_m0: Ref)
+  requires (none < a0) && (a0 < write)
+  requires WF(p_p)
+  requires OWNI(p_p, a0)
+  ensures WF(res_m0)
+  ensures OWNI(p_p, a0) && ((res_m0 == p_p) ? p_p.v_int : 0) == 1
+  decreases
+{
+  var v_s: Ref
+  var t0: Ref
+  assert p_p != null
+  assert !((perm(p_p.v_int) != write) || (perm(p_p.d_int) != write))
+  p_p.v_int := 1
+  p_p.d_int := true
+  v_s := alloc_struct_P()
+  assert PQ(v_s) != null
+  assert !((perm(PQ(v_s).v_ptr_int) != write) || (perm(PQ(v_s).d_ptr_int) != write))
+  PQ(v_s).v_ptr_int := p_p
+  PQ(v_s).d_ptr_int := true
+  assert PQ(v_s) != null
+  assert perm(PQ(v_s).v_ptr_int) > none
+  assert PQ(v_s).d_ptr_int
+  t0 := PQ(v_s).v_ptr_int
+  res_m0 := t0
+  assert perm(PQ(v_s).v_ptr_int) == write && perm(PQ(v_s).d_ptr_int) == write && perm(lvloc(block_of(v_s)).lv) == write
+  exhale acc(PQ(v_s).v_ptr_int) && acc(PQ(v_s).d_ptr_int) && acc(lvloc(block_of(v_s)).lv)
+  assert WF(res_m0)
+  assert p_p != null
+  assert WF(p_p)
+  assert offset_of(p_p) < len(block_of(p_p))
+  assert perm(p_p.v_int) == write
+  assert perm(p_p.d_int) == write
+  assert p_p.d_int
+  assert RNGV(p_p.v_int)
+  assert perm(lvloc(block_of(p_p)).lv) >= a0
+  assert ((res_m0 == p_p) ? p_p.v_int : 0) == 1
+}
+
+// well-formedness of the contract of mk: the read of *r.q in the ensures must be framed by the atom owns(*p) on the path where r.q == p
+method f_mk__2__wf(p_p: Ref, a0: Perm, res_m0: Ref)
+  requires (none < a0) && (a0 < write)
+  requires WF(p_p) && WF(res_m0)
+  decreases
+{
+  assert true ==> (res_m0 == p_p) // <- fails
+}
+
+// int use_mk(void) { int x = 0; struct P r = mk(&x); return *r.q; }   (the caller reads *r.q after the call: x's cell came back)
+method f_use_mk__3() returns (res: Int)
+  ensures RNGV(res)
+  decreases
+{
+  var v_x: Ref
+  var t0: Ref
+  v_x := alloc_int()
+  assert !((perm(v_x.v_int) != write) || (perm(v_x.d_int) != write))
+  v_x.v_int := 0
+  v_x.d_int := true
+  assert v_x != null
+  assert WF(v_x)
+  assert offset_of(v_x) < len(block_of(v_x))
+  assert perm(v_x.v_int) == write
+  assert perm(v_x.d_int) == write
+  assert v_x.d_int
+  assert RNGV(v_x.v_int)
+  assert none < (perm(lvloc(block_of(v_x)).lv) / 2)
+  assert (perm(lvloc(block_of(v_x)).lv) / 2) < write
+  assert perm(lvloc(block_of(v_x)).lv) >= (perm(lvloc(block_of(v_x)).lv) / 2)
+  t0 := f_mk__2(v_x, perm(lvloc(block_of(v_x)).lv) / 2)
+  assert t0 != null
+  assert perm(t0.v_int) > none
+  assert t0.d_int
+  res := t0.v_int
+  assert !(((perm(v_x.v_int) != write) || (perm(v_x.d_int) != write)) || (perm(lvloc(block_of(v_x)).lv) != write))
+  exhale (acc(v_x.v_int) && acc(v_x.d_int)) && acc(lvloc(block_of(v_x)).lv)
+}
