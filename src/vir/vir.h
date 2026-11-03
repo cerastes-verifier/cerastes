@@ -200,7 +200,8 @@ struct Expr {
                  // (decision 0032 item 6).  A write through a pointer is the statement Stmt::Store, never a Deref.
                  // In a CONTRACT (decision 0037 item 5; Ctx::Requires/Ensures): `a` is a `Formal` of pointer type or, in an `ensures`, the `Result`
                  // of a function returning a pointer (decision 0040 item 4: `*result` as a value), or a GlobalAddr of a file-scope global (decision 0041 item 7:
-                 // the read of `g`), and nothing else (`**pp`, `*gp`, a local, a member: rejected, M4.5c and later).  In a `requires` it reads the cell's value on entry, in an `ensures` its value on
+                 // the read of `g`), or (decision 0045 item 2) a place reached through loads and pointer leaves from one of those (`**pp`: Deref(Deref(Formal pp));
+                 // `*gp`: Deref(GlobalAddr gp); `p->q->x`; `*s.q`: Deref(Field(Formal s, q)); `*r.q`), and nothing else (a local, `Old` inside the place).  In a `requires` it reads the cell's value on entry, in an `ensures` its value on
                  // return, and `Old(Deref(Formal p))` its value on entry; `Old(Deref(Result))` is a check_program error (the result has no value on
                  // entry).  Lowering frames each read per path (item 7), keyed by the place `p` or `result`.  The value of `*pp` of a `T **`
                  // parameter is a pointer (a Ptr-typed Deref).
@@ -656,6 +657,12 @@ struct AtomSite {
   int clause = 0;                   // the index in Function::requires_ or ensures_
   std::vector<AtomGuard> guards;
   std::vector<int> path;            // the member path of the atom's place (decision 0043; empty for `*p`, a global, a Local): atom_place(*atom).path
+  // Decision 0045 item 2 (places reached through loads): `via` is the steps from the root to the BASE pointer (atom_place(*atom).via; empty for every place of
+  // decisions 0037-0044), `base` the base pointer expression itself, `member_root(atom->a)`: the Formal, the GlobalAddr or the Result for a place without
+  // steps, otherwise a Deref or a Field node (`**pp`: base `*pp`, via {load}; `p->q->x`: base `p->q` as a loaded pointer, via {q, load}, path {x}).  Lowering
+  // lowers `base`, then applies `path`.
+  std::vector<int> via;
+  const Expr* base = nullptr;
 };
 // The atoms of `f`'s contract in allowed positions, the `requires` first and then the `ensures`, each clause in evaluation order (left
 // operand first; the arms of `?:` then-arm first).  An Atom in a position the record forbids (under `!`, inside `==`, as an argument, on
@@ -684,7 +691,9 @@ bool restrict_backed(const Function& f, int param, int* offender = nullptr);
 // type (`int **`, a struct with an `int *` leaf or struct-pointer leaves that reach one, an `int *` global): a pointer loaded from there is not based on
 // `param`, so a write through it could alias `*param`.  A by-value struct parameter whose leaves can hold such a pointer (an `int *` leaf, or a `struct U *` leaf whose `U`
 // has an `int` leaf, at any depth) is one of those places too (decision 0044 item 11).  restrict_backed is false when this is not empty (the encoder reports it
-// first).  The message names the offender in source terms.
+// first).  The message names the offender in source terms.  Decision 0045 item 10: an atom whose place is reached through loads or pointer leaves (`*gp`, `**pp`,
+// `*s.q`) is judged by its innermost root (place_root): a global by its type, the result by the function's result type, a Formal by the loop over the parameters;
+// any other root of such a place fails closed.  restrict_backed never counts such an atom (it requires the atom's operand to BE the Formal).
 std::string restrict_hazard(const Function& f, int param);
 // Whether the expression reads the heap: it contains a `Deref` or an `Atom` (an `Old` of one included).
 bool reads_heap(const Expr& e);
@@ -694,19 +703,44 @@ bool reads_heap(const Expr& e);
 constexpr int kGlobalSiteBase = 1 << 20;
 constexpr int kResultSiteKey = -1;
 constexpr int kNoPlaceKey = -2;
-// The root key of an atom whose place has an EMPTY member path; `kNoPlaceKey` for a place with a non-empty path (use `atom_place`).  So a caller that
-// predates structs never treats `owns(p->x)` as `owns(*p)`.
+// The root key of an atom whose place has an EMPTY member path and no steps (`via`); `kNoPlaceKey` for any other place (use `atom_place`).  So a caller that
+// predates structs never treats `owns(p->x)` as `owns(*p)`, and one that predates decision 0045 never treats `owns(**pp)` as `owns(*pp)`.
 int atom_place_key(const Expr& atom);
-// The full place of an atom (decision 0043 item 9): the root key of atom_place_key's rule, however long the path is, and the member path.  `a` of the
-// atom is a Formal, a GlobalAddr or (invariants) a Local, optionally under MemberAddr nodes; `valid()` is false for anything else.
+// The steps of a place (decision 0045 item 2).  A place is a root and the steps from it to the BASE pointer (the pointer whose pointee the member tail starts
+// from), then the member tail `path`.  A step is a member index k >= 0 (a MemberAddr: the address of member k of the struct the pointer so far names), kLoadStep
+// (a Deref: the pointer so far is a pointer to a pointer and the step reads the pointer it holds: a LOAD) or `field_step(k)` (a Field of a by-value struct
+// parameter's value or of the result's: the pointer leaf `s.q`, `r.q`).  Examples: `**pp` = (pp, {load}, {}); `p->q->x` = (p, {q, load}, {x}); `*s.q` =
+// (s, {field q}, {}); `*gp` = (global gp, {load}, {}); `(*ps)->data` = (ps, {load}, {data}); `owns(*p)` and `owns(p->t.x)` have no steps.
+constexpr int kLoadStep = -1;
+constexpr int field_step(int member) { return -2 - member; }
+constexpr bool is_field_step(int step) { return step <= -2; }
+constexpr int field_of_step(int step) { return -2 - step; }
+// Whether the steps contain a load (the place is reached through a heap read; a `Field` step alone reads no heap).
+bool steps_have_load(const std::vector<int>& via);
+// The root keys of the places an invariant reaches (a pointer variable or a cell, by the variable's id): `kLocalSiteBase + var->id`.  A plain `Local` pointer
+// variable with no steps and no member path (`owns(*q)`, every invariant atom of decisions 0040-0044) keeps `kNoPlaceKey`: it is compared by variable.
+constexpr int kLocalSiteBase = 1 << 21;
+// The full place of an atom (decisions 0043 item 9, 0045 item 2): the root key of atom_place_key's rule, however long the steps and the path are, the steps
+// and the member path.  The root is a Formal's index, `kGlobalSiteBase + global->id`, `kResultSiteKey` for the Result (an `ensures`), or in an invariant
+// `kLocalSiteBase + var->id`; the atom's `a` is the root under any number of MemberAddr, Deref and Field nodes (an `Old` of a Formal under a Field counts as
+// the Formal when it stands directly under a Field: in an `ensures` a Formal is its entry value either way); `valid()` is false for anything else.  Two atoms name one place iff roots, steps and
+// paths are equal; the key is SYNTACTIC (it decides duplicates and `requires`/`ensures` partners only): overlap, separation and framing are decided on
+// `Ref`s in the evaluated state, never by this key.
 struct PlaceKey {
   int root = kNoPlaceKey;
-  std::vector<int> path;
+  std::vector<int> via;   // the steps from the root to the base pointer (see above); empty for every place without a load or a pointer leaf
+  std::vector<int> path;  // the member indices from the base pointer's pointee; >= 0 only
   bool valid() const { return root != kNoPlaceKey; }
-  bool operator==(const PlaceKey& o) const { return root == o.root && path == o.path; }
+  bool operator==(const PlaceKey& o) const { return root == o.root && via == o.via && path == o.path; }
   bool operator!=(const PlaceKey& o) const { return !(*this == o); }
 };
 PlaceKey atom_place(const Expr& atom);
+// The root of a place expression (decision 0045 item 2): `e` under any number of MemberAddr, Deref and Field nodes (and an `Old` of a Formal directly under a Field), the
+// first node that is none of them (a Formal, Result, GlobalAddr, Local, AddrOf, or anything else, which a caller refuses).  `*steps` (if given) receives the
+// steps from the root outward, members included (so the steps of `member_root`'s path come last).  A read of a cell by name, a `Local` whose variable is
+// `address_taken` (the root, kept as the Local node), counts as a load from the cell's address: its steps start with kLoadStep, as those of `Deref(AddrOf v)`
+// do (root AddrOf), so the two spellings of one read have one key.
+const Expr* place_root(const Expr* e, std::vector<int>* steps = nullptr);
 // Strips MemberAddr nodes from a place expression: the root pointer expression (a Formal, Result, GlobalAddr, Local, AddrOf, ...) and, in `*path`
 // (if given), the member indices from the root outward.
 const Expr* member_root(const Expr* e, std::vector<int>* path = nullptr);

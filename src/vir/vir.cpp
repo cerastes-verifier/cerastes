@@ -1,6 +1,7 @@
 // Part of cerastes, under the Apache License v2.0 with LLVM Exceptions.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #include "vir.h"
+#include <algorithm>
 #include <cctype>
 
 namespace cerastes::vir {
@@ -790,7 +791,10 @@ class AtomCollector {
         s.in_ensures = in_ensures_;
         s.clause = clause_;
         s.guards = guards_;
-        s.path = atom_place(*e).path;
+        const PlaceKey pk = atom_place(*e);
+        s.path = pk.path;
+        s.via = pk.via;
+        s.base = e->a != nullptr ? member_root(e->a) : nullptr;
         out_.push_back(std::move(s));
         break;
       }
@@ -846,19 +850,58 @@ const Expr* member_root(const Expr* e, std::vector<int>* path) {
   return e;
 }
 
+bool steps_have_load(const std::vector<int>& via) { return std::find(via.begin(), via.end(), kLoadStep) != via.end(); }
+
+const Expr* place_root(const Expr* e, std::vector<int>* steps) {
+  std::vector<int> rev;
+  bool under_field = false;  // the node above `e` is a Field: only there is an `Old` of a Formal the Formal (decision 0044 item 3: `old(s).x`)
+  while (e != nullptr) {
+    if (e->kind == Expr::Kind::MemberAddr) rev.push_back(e->index);
+    else if (e->kind == Expr::Kind::Deref) rev.push_back(kLoadStep);
+    else if (e->kind == Expr::Kind::Field) rev.push_back(field_step(e->index));
+    else if (under_field && e->kind == Expr::Kind::Old && e->a != nullptr && e->a->kind == Expr::Kind::Formal) { e = e->a; break; }
+    else break;
+    under_field = e->kind == Expr::Kind::Field;
+    e = e->a;
+  }
+  if (e != nullptr && e->kind == Expr::Kind::Local && e->var != nullptr && e->var->address_taken) rev.push_back(kLoadStep);  // a cell read by name
+  if (steps != nullptr) steps->assign(rev.rbegin(), rev.rend());
+  return e;
+}
+
 PlaceKey atom_place(const Expr& atom) {
   PlaceKey k;
   if (atom.a == nullptr) return k;
-  const Expr* root = member_root(atom.a, &k.path);
+  const Expr* base = member_root(atom.a, &k.path);
+  std::vector<int> steps;
+  const Expr* root = place_root(base, &steps);
   if (root == nullptr) return k;
-  if (root->kind == Expr::Kind::Formal) k.root = root->index;
-  else if (root->kind == Expr::Kind::GlobalAddr && root->global != nullptr) k.root = kGlobalSiteBase + root->global->id;
+  // The steps of the base pointer only: `base` is `atom.a` without its outermost MemberAddr nodes (the member tail), so `place_root(base)` has none of them.
+  k.via = std::move(steps);
+  switch (root->kind) {
+    case Expr::Kind::Formal: k.root = root->index; break;
+    case Expr::Kind::GlobalAddr:
+      if (root->global != nullptr) k.root = kGlobalSiteBase + root->global->id;
+      break;
+    case Expr::Kind::Result:
+      // Only a place reached from the result by a step (`*r.q`, `**r`; an atom on the result itself or on a member of it, `owns(r->x)`, stays keyless: M4.5d2).
+      if (!k.via.empty()) k.root = kResultSiteKey;
+      break;
+    case Expr::Kind::Local:
+      // A plain pointer variable (`owns(*q)` of an invariant) stays keyless, as before decision 0045; a cell read or a member of a variable gets its own key.
+      if (root->var != nullptr && !(k.via.empty() && k.path.empty())) k.root = kLocalSiteBase + root->var->id;
+      break;
+    case Expr::Kind::AddrOf:
+      if (root->var != nullptr) k.root = kLocalSiteBase + root->var->id;
+      break;
+    default: break;
+  }
   return k;
 }
 
 int atom_place_key(const Expr& atom) {
   const PlaceKey k = atom_place(atom);
-  return k.path.empty() ? k.root : kNoPlaceKey;
+  return k.path.empty() && k.via.empty() ? k.root : kNoPlaceKey;
 }
 
 std::string place_text(const Expr& addr) {
@@ -941,11 +984,25 @@ std::string restrict_hazard(const Function& f, int param) {
       return "the object of `" + name(static_cast<int>(q)) + "` can hold a `" + mine.str() + "`, and a pointer loaded from it is not based on `" + name(param) + "`";
   }
   for (const AtomSite& s : contract_atoms(f)) {
-    const Expr* root = s.atom->a != nullptr ? member_root(s.atom->a) : nullptr;
-    if (root == nullptr || root->kind != Expr::Kind::GlobalAddr || root->global == nullptr) continue;
-    std::set<const StructType*> seen;
-    if (may_hold_pointer_to(root->global->type, *mine.pointee, seen))
-      return "the global `" + root->global->c_name + "` named by the contract can hold a `" + mine.str() + "`, and a pointer loaded from it is not based on `" + name(param) + "`";
+    // Decision 0045 item 10: the root of the atom's place under any number of loads, members and pointer leaves (`*gp`, `**pp`, `*s.q`, `*r.q`): a pointer loaded
+    // through it is not based on `param` either.  A Formal root is judged by its type in the loop above; a global by its type; the result by the function's
+    // result type; any other root of a place with steps is a place this check cannot place, which fails closed.
+    if (s.atom->a == nullptr) continue;
+    std::vector<int> steps;
+    const Expr* root = place_root(s.atom->a, &steps);
+    if (root == nullptr) continue;
+    if (root->kind == Expr::Kind::GlobalAddr && root->global != nullptr) {
+      std::set<const StructType*> seen;
+      if (may_hold_pointer_to(root->global->type, *mine.pointee, seen))
+        return "the global `" + root->global->c_name + "` named by the contract can hold a `" + mine.str() + "`, and a pointer loaded from it is not based on `" + name(param) + "`";
+    } else if (root->kind == Expr::Kind::Result) {
+      std::set<const StructType*> seen;
+      if (!f.ret.is_void() && may_hold_pointer_to(f.ret, *mine.pointee, seen))
+        return "the result of `" + f.c_name + "` named by the contract can hold a `" + mine.str() + "`, and a pointer loaded from it is not based on `" + name(param) + "`";
+    } else if (root->kind != Expr::Kind::Formal && !steps.empty()) {
+      return "a place named by the contract is reached through a load from a root `cerastes` cannot place, which could hold a `" + mine.str() +
+             "` that is not based on `" + name(param) + "`";
+    }
   }
   return "";
 }
