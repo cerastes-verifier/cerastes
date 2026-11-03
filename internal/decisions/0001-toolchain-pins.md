@@ -14,6 +14,7 @@ in both places.
 | Component | Pin | Obtained by |
 |---|---|---|
 | EDG front end | the owner's fork `mborland/compiler`, branch `cerastes` (decision 0009, since 2026-10-14; submodule URL https://github.com/mborland/compiler.git), currently at the fork's `f0ed5525af135a139630d9b5840bd13b7d2d158c` (2026-10-22): the cerastes series merged with upstream `edgcpp/compiler` `main` `ec2f12cffa` ("Add codecov reporting []"), through the fix branch of EDG bug 0022. The base was upstream `034385ba0a` (`7.0-33`) in M2; see "Pin history" | submodule `third_party/edg`; stock preset `macos-arm-clang-debug`, built out of tree in `build/edg` |
+| vlibc (C library contracts, decision 0030; from M4.5d1, decision 0046) | `cerastes-verifier/vlibc` `main` at `5962865a20f35c369bfb909a0376b9d26c1ac0e8` (2026-10-29: layout, CMake, tests, CI; `<vlibc/stdlib.h>` with `abort`, `exit` and `_Exit`); submodule URL https://github.com/cerastes-verifier/vlibc.git | submodule `third_party/vlibc` (headers only, nothing to build); guarded by `scripts/vlibc_tree.py`; its trusted contracts listed in `tests/vlibc/trusted_contracts.txt` (decision 0046 item 8) |
 | Silicon | `viperproject/silicon` tag `v.26.08-release` = `6b540aa45e5af214f4727b7be463ce84b328fabd` | submodule `third_party/silicon`; `sbt assembly` → `target/scala-2.13/silicon.jar` |
 | Silver | `viperproject/silver` `f02e7010639f314447d74732146644565aa8d135` (`v.26.08-release`, the commit Silicon's tag records) | nested submodule `third_party/silicon/silver` |
 | Z3 | 4.16.0, `z3-4.16.0-arm64-osx-15.7.3.zip`, SHA-256 `41828fa07d5cb77bfaee326e8e6dac074f26329c09c633f9e66012bb917cf8ae`; on x86-64 Linux (S5, decision 0031) `z3-4.16.0-x64-glibc-2.39.zip`, SHA-256 `7288c49a5bd6dbafd7b0b0d1f65956b91672da24b08f09242919af159be3418e` | downloaded from the Z3 GitHub release into `build/tools/`, checksum verified |
@@ -219,6 +220,12 @@ binary in a container and checks its outcomes against the recorded ones
   `p9_wide_constants_overflow.cpp` pins #61 on a product outside `__int128`. The box
   suites at `f0ed5525af` were not run by the session (owner's merge; the next box
   session).
+
+- **vlibc pinned (M4.5d1, 2026-11-03; decisions 0030, 0046).** New submodule `third_party/vlibc` at `5962865`. A move
+  of this pin is a soundness change: `scripts/vlibc_contracts.py check` fails on any changed trusted contract until
+  `tests/vlibc/trusted_contracts.txt` is updated, and the soundness-auditor reads the diff (0030 item 5). An unpushed
+  vlibc pin is fetched through a remote named `local` (`git -C third_party/vlibc remote add local ~/Documents/cerastes/vlibc`)
+  and reported `NOT YET PUSHED`; `CERASTES_VLIBC_SRC` builds against another checkout (refused on `main`).
 
 ## Dependabot
 

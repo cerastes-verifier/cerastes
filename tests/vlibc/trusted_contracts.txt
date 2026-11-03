@@ -1,0 +1,11 @@
+# The trusted contracts of vlibc (third_party/vlibc, decision 0046 item 8), one line each, sorted by name:
+#   name | header | declaration | tag reason
+# `python3 scripts/vlibc_contracts.py check` compares this file with what vlibc's shim headers declare (check.sh runs it).
+# A change to this file is a golden change under invariant 1: a trusted contract moved, so state the reason and have the
+# soundness-auditor read the diff (record 0030 item 5). Never regenerate it to make the check pass.
+# Regenerate (after the audit): python3 scripts/vlibc_contracts.py list --include-dir third_party/vlibc/include/vlibc
+# and keep these '#' lines on top. Lines starting with '#' and blank lines are ignored by `check`.
+# Written from vlibc at 5962865.
+_Exit | stdlib.h | void _Exit(int status) CERASTES_ENSURES(false); | never returns (C23 7.24.4.5)
+abort | stdlib.h | void abort(void) CERASTES_ENSURES(false); | never returns (C23 7.24.4.1)
+exit | stdlib.h | void exit(int status) CERASTES_ENSURES(false); | never returns (C23 7.24.4.4)

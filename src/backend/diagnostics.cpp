@@ -8,6 +8,8 @@
 #include <set>
 #include <tuple>
 
+#include "render.h"
+
 namespace cerastes {
 namespace {
 
@@ -152,7 +154,8 @@ DiagPos diag_position(const a_source_position& p) {
   DiagPos r;
   a_seq_number seq = p.seq;
   a_column_number col = p.column;
-  if (p.orig_seq != 0 && !seq_is_in_system_header(p.orig_seq)) {
+  // The original position of macro-argument text counts when it lies in a user or a library file (decision 0046 item 3), not in a system one.
+  if (p.orig_seq != 0 && !seq_is_in_system_file(p.orig_seq)) {
     seq = p.orig_seq;
     col = p.orig_column;
   }

@@ -17,13 +17,18 @@ namespace cerastes {
 struct SrcPos {
   bool known = false;
   bool in_primary = false;  // not in an include file (system headers included)
-  bool in_system = false;   // in a system header (EDG's own notion)
+  bool in_system = false;   // in a system header: EDG's own notion, except that in verify mode a library file (0046 item 3) is not one
   std::string file;         // display file name of the position, "" if unknown
   unsigned long line = 0;
   unsigned long col = 0;
   std::string str() const;  // "L<line>:<col>"
 };
 SrcPos resolve(const a_source_position& p);
+
+// EDG's system-header flag of sequence number `seq`, except in verify mode, where a library file (decision 0046 item 3: vlibc's headers,
+// which are system include directories of the front end) is not a system file.  Every use of the flag outside this function is by
+// path (is_system_file, in_verified_file) or reads a file record's own flag for a directive (annotation_checks.cpp).
+bool seq_is_in_system_file(a_seq_number seq);
 
 // "L<line>:<col>" of a position that is part of an annotation or names a lambda,
 // or "-": the original position of text from a macro argument when it lies in a

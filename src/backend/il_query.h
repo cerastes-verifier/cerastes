@@ -53,6 +53,12 @@ std::string physical_path(const a_source_position& p);
 // canonical physical path).
 bool in_verified_file(const a_source_position& p);
 
+// Decision 0046 item 3: sequence number `seq` / the position lies in a library file (a file below vlibc's include/, or the harness's
+// fixture directory with the `library_fixture` hook), by canonical physical path.  Always false outside a verify run and for an unknown
+// or unplaceable position.  A library file is a verified file and never a system file.
+bool seq_in_library_file(a_seq_number seq);
+bool in_library_file(const a_source_position& p);
+
 // The positions of the EDG diagnostic pragmas (`#pragma diag_suppress` and the like, `diagnostic push/pop`, also through
 // `_Pragma` and macros) the front end processed, recorded by the hook install_diag_pragma_recorder() (register_attributes.h)
 // puts in front of EDG's handlers (decision 0017 item 2).  EDG keeps no IL entry for them.

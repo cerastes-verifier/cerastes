@@ -106,6 +106,47 @@ void test_paths(Checks& c) {
   // A user -I directory that is also a system directory makes it a user directory.
   c.eq(system_directories({sys}, {sys}).size(), static_cast<size_t>(0), "a -I directory named as a system directory is a user directory");
   c.eq(system_directories({sys}, {(base / "user/linkdir").string()}).size(), static_cast<size_t>(0), "...also through a symbolic link");
+  // Decision 0046 item 3: library files (vlibc's include/ and, for the harness, a fixture directory) are verified files, never system
+  // files, even when the front end's system include directories contain them or a system directory contains them.
+  touch(base / "lib/include/vlibc/stdlib.h");
+  touch(base / "lib/include/vlibc/sub/x.h");
+  touch(base / "lib/include/other.h");
+  touch(base / "lib/include-evil/y.h");
+  touch(base / "sys/inc/lib/z.h");
+  fs::create_symlink("../lib/include/vlibc/stdlib.h", base / "user/libl.h");
+  fs::create_directory_symlink("../lib/include", base / "user/libdir");
+  const std::string lib = (base / "lib/include").string();
+  const std::vector<std::string> libs = {lib};
+  const std::vector<std::string> sys_with_lib = system_directories(
+      {(base / "lib/include/vlibc").string(), lib, sys, "/usr/local/include"}, {}, libs);
+  c.eq(sys_with_lib, std::vector<std::string>{sys},
+       "system_directories drops a library directory and every directory below it, whatever the front end's include order");
+  auto libfile = [&](const fs::path& p) { return is_library_file(libs, p.string()); };
+  auto sysfile_lib = [&](const fs::path& p) { return is_system_file(sys_with_lib, header, p.string(), libs); };
+  c.expect(libfile(base / "lib/include/vlibc/stdlib.h"), "a header below a library directory is a library file");
+  c.expect(libfile(base / "lib/include/vlibc/sub/x.h"), "a header deeper below a library directory is a library file");
+  c.expect(libfile(base / "lib/include/other.h"), "every file of a library directory is a library file");
+  c.expect(libfile(base / "lib/include/vlibc/../other.h"), "`..` is resolved for a library file");
+  c.expect(libfile(base / "user/libl.h"), "a symbolic link to a library file is a library file (the physical path decides)");
+  c.expect(libfile(base / "user/libdir/other.h"), "a file reached through a symbolic link to a library directory is a library file");
+  c.expect(!libfile(base / "lib/include-evil/y.h"), "a sibling directory with the same prefix is not a library directory");
+  c.expect(!libfile(base / "user/c.h"), "a user header is not a library file");
+  c.expect(!libfile(base / "sys/inc/a.h"), "a system header is not a library file");
+  c.expect(!libfile(base / "lib/include/vlibc/missing.h"), "a file that does not exist is not a library file");
+  c.expect(!is_library_file({}, (base / "lib/include/other.h").string()), "without library directories nothing is a library file");
+  c.expect(!sysfile_lib(base / "lib/include/vlibc/stdlib.h"), "a library file is not a system file");
+  c.expect(!sysfile_lib(base / "lib/include/other.h"), "a library file below a library directory is not a system file");
+  c.expect(sysfile_lib(base / "sys/inc/a.h"), "a system header stays a system file beside a library directory");
+  c.expect(sysfile_lib(base / "sys/inc/lib/z.h"), "a system directory's subdirectory named lib is no library directory");
+  // Even a library directory that a system directory contains: a library file is never a system file (the library wins).
+  c.expect(!is_system_file({lib}, header, (base / "lib/include/vlibc/stdlib.h").string(), libs),
+           "a library file stays a verified file when a system directory names its directory");
+  c.expect(is_system_file({lib}, header, (base / "lib/include/vlibc/stdlib.h").string()),
+           "...which is the library's doing: without library directories the same directory is a system directory");
+  c.expect(sysfile_lib(base / "cer/include/cerastes.h"), "the cerastes header rule is unaffected by library directories");
+  c.expect(!sysfile_lib(base / "cer/include/other.h"), "the other files of cerastes's include directory stay user files");
+  c.expect(!sysfile_lib(base / "user/c.h"), "a user header stays a user file beside library directories");
+
   c.expect(!path_is_under("/a/bc", "/a/b"), "path_is_under compares whole components");
   c.expect(path_is_under("/a/b/c", "/a/b"), "path_is_under: below");
   c.expect(!path_is_under("/a/b", "/a/b"), "path_is_under: the directory itself is not below it");

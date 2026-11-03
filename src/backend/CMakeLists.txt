@@ -11,6 +11,25 @@ add_custom_command(
   DEPENDS "${CMAKE_SOURCE_DIR}/cmake/gen_enum_names.py" "${EDG_SRC}/il_def.h"
   COMMENT "Generating il_names.inc")
 
+# The names the pinned vlibc headers give a contract (decision 0046 item 6: reserved names), generated at configure
+# time into vlibc_names.inc (a fragment of sorted string literals; encode.cpp includes it, the build directory is
+# on the back end's private include path).  The script rewrites the file only when its content changes.  A pin move
+# changes the headers, which re-runs the configure (CMAKE_CONFIGURE_DEPENDS); a script failure fails the configure.
+set(VLIBC_SHIM_DIR "${CERASTES_VLIBC_DIR}/include/vlibc")
+set(VLIBC_NAMES_INC "${CMAKE_CURRENT_BINARY_DIR}/vlibc_names.inc")
+execute_process(
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/vlibc_contracts.py" names
+          --include-dir "${VLIBC_SHIM_DIR}" --out "${VLIBC_NAMES_INC}"
+  RESULT_VARIABLE VLIBC_NAMES_STATUS
+  OUTPUT_VARIABLE VLIBC_NAMES_OUTPUT
+  ERROR_VARIABLE VLIBC_NAMES_OUTPUT)
+if(NOT VLIBC_NAMES_STATUS EQUAL 0)
+  message(FATAL_ERROR "scripts/vlibc_contracts.py names failed for ${VLIBC_SHIM_DIR} (status ${VLIBC_NAMES_STATUS}):\n${VLIBC_NAMES_OUTPUT}")
+endif()
+file(GLOB_RECURSE VLIBC_HEADERS "${CERASTES_VLIBC_DIR}/include/*")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+             ${VLIBC_HEADERS} "${CMAKE_SOURCE_DIR}/scripts/vlibc_contracts.py")
+
 add_library(cerastes_backend STATIC
   back_end.cpp options.cpp register_attributes.cpp run_state.cpp il_names.cpp render.cpp
   expr_tree.cpp diagnostics.cpp annotation_checks.cpp walker.cpp

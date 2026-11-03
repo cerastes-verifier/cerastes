@@ -222,7 +222,7 @@ Audit round 1 runs on the draft in the background while P71 runs.
    - vlibc must never declare `__assert_rtn`/`__assert_fail` first (`encode.cpp:5962`);
    - the self-test hook's exposure (item 10).
 10. **Testing the library class.** A new self-test hook, `--cerastes_verify_selftest=library_fixture`, adds one fixed
-    directory as a second library directory: `<cerastes>/tests/vlibc/fixture/include`, compiled in like
+    directory as a second library directory: `<cerastes>/scripts/testdata/library_fixture/include`, compiled in like
     `CERASTES_TOOL_INCLUDE_DIR`. No other directory can be given library trust. With it, `LibraryFixtureTests` in
     `test_run_tests.py` exercise what vlibc does not hold yet:
     - a `predicate` and a `pure` function in a library header, accepted;
@@ -310,10 +310,13 @@ Any question from an agent, or of mine, stops that work and goes to the owner.
    - P71 on macOS;
    - edg-backend's pin and build;
    - the record draft, with audit round 1 in the background.
-2. **P71 on the box.** Then the include order and the library class. **Commit 2.** Every `.vpr` must be byte-identical,
-   since no call has changed yet.
-3. **Trust, noreturn, reserved names, attributes by position**; `trusted_libc_reason` removed; the tests; `vprdiff.py`.
-   **Commit 3.**
+2. **P71 on the box.** Then the library class and the self-test hook, without the include order. **Commit 2:** the pin,
+   the guard, the library class. Every `.vpr` must be byte-identical.
+   - *Re-sequenced during the session:* the shim on the path alone would make vlibc's `ensures(false)` meet the SDK's
+     `does_not_return` flag (`ensures_on_noreturn` at every call of `abort`). So the include order lands with the trust
+     change in commit 3.
+3. **The include order with trust, noreturn, reserved names and attributes by position**; `trusted_libc_reason` removed;
+   the tests; `vprdiff.py`. **Commit 3.**
 4. **The Linux items** and `LibraryFixtureTests`. Then audit round 2, the fixes and one re-audit. **Commit 4.**
 5. **Docs; `check.sh`** (full, at most twice); a box run of the touched tests; status and handoff. **Last commit.**
 

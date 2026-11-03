@@ -28,10 +28,11 @@ class that runs the real driver is added with the driver (M3-3).
 | `il/` | Golden tests of the IL walker (`--cerastes_walk`): the Gate G1 probes (`g1/`), annotation-free copies of the VeriFast tests (`verifast-plain/`), contrast probes that expose a vacuous pass (`contrast/`) and walker smoke tests | `scripts/cerastes-fe.sh` |
 | `scalar/` | M3: scalar code through `cerastes verify` (`verified` positives, each with a must-fail twin in `scalar/negative/`) | `build/cerastes verify` |
 | `memory/` | M4.5b1 (b1a–b1c3): pointers to address-taken locals (decision 0032), pointer parameters, results and contracts (decision 0037: `owns`, `reads`, `live`, `old`, framing, `restrict`, `&param`), loops and jumps over memory (decision 0038: automatic loop invariants, invariants and measures over memory, scope exits at `break`/`continue`/`goto`/`return`), sequencing over memory (decision 0039) and pointers to pointers, `[[cerastes::owning]]` parameters, `*result` and written atoms in loop invariants (decision 0040), initialization through pointers (decision 0042: `uninit`, `ref_to_uninit`, `must_init`, the call's flag row, `--strict-init` through `// verify-options:`; `memory/verifast/` holds ports of VeriFast's C examples with their adaptation header and line map): `verified` positives, each with a must-fail twin in `memory/negative/` that fails for one reason at one line (the twin rule as in `scalar/`: an `error` twin in every mode), and the `rejected` pins of what later sessions lift (M4.5b2 on) (each has a `// Pins:` line) | `build/cerastes verify` |
+| `vlibc/` | M4.5d1 (decision 0046): vlibc's trusted contracts as `cerastes verify` reads them: the C library through the driver's shim (`<stdlib.h>`, `<cstdlib>`, `<array>`) and `<vlibc/stdlib.h>`, the three trusted functions (`abort`, `exit`, `_Exit`: each positive relies on `ensures(false)`, its twin in `vlibc/negative/` removes the call), the reserved names (`rejected annotation_reserved_library`), a user redeclaration of a platform function, and the `platform: linux` items of decision 0031 item 10; `vlibc/trusted_contracts.txt` is the committed list of every trusted declaration in vlibc's shim headers (name, header, declaration, tag), compared by `python3 scripts/vlibc_contracts.py check --include-dir third_party/vlibc/include/vlibc --list tests/vlibc/trusted_contracts.txt` (`check.sh` runs it): a pin move that changes a trusted contract fails until that file changes, and changing it is a golden change (invariant 1, audited per decision 0030 item 5); its `#` lines and blank lines are ignored. The area is like `scalar/`: `.c` tests run in both modes, positives carry `native-ok` and an `error` twin in `vlibc/negative/` | `build/cerastes verify` |
 | `differential/verifast/` | Nothing yet: unmodified reference copies of VeriFast's template tests, with no `expect:` headers. Skipped (`.harness-skip`) | none |
 | `../doc/modules/ROOT/examples/` | The code examples of the user documentation, which are ordinary tests (not under `tests/`, but run by default with it) | by the example's `expect:` kind |
 
-`annotations/`, `scalar/` and `memory/` each have a `negative/` directory of must-fail twins
+`annotations/`, `scalar/`, `memory/` and `vlibc/` each have a `negative/` directory of must-fail twins
 (see [Twins](#twins)). Later milestones add `templates/` and `concepts/`,
 and the differential tests against VeriFast in M5 (see plan.md).
 
@@ -511,7 +512,7 @@ A test with `// expect: native-ok` is also compiled, for each of its modes and
 by each compiler, with
 
 ```
-<compiler> -x c++ -std=c++20 -Wall -Wextra -Werror -U__CERASTES__ -I <include dir> -c -o /dev/null <file>
+<compiler> -x c++ -std=c++20 -Wall -Wextra -Werror -U__CERASTES__ -I <include dir> -I <vlibc include dir> -c -o /dev/null <file>
 <compiler> -x c   -std=c23   ...        (mode c23)
 ```
 
@@ -519,6 +520,10 @@ The mode, not the suffix, picks the language: a `.c` test that lists
 `// mode: c++20, c23` is compiled as C++ (`-x c++`, by `clang++` and `g++`) in its
 `c++20` run and as C (`-x c`) in its `c23` run, so the dual-mode scalar tests of
 `tests/scalar/` are checked by the compiler of each language.
+
+The second `-I` is vlibc's `include/` (`CERASTES_VLIBC_DIR` of `build/env.sh`, else `third_party/vlibc`; decision 0046), so
+`#include <vlibc/stdlib.h>` builds; never `include/vlibc`, the shim directory, which would put vlibc's headers in front
+of the system ones.
 
 and passes only if the compiler exits with status 0 and prints nothing on
 stdout and stderr. The ordinary compilers never define `__CERASTES__` (the

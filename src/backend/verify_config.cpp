@@ -32,7 +32,8 @@ bool path_is_under(const std::string& path, const std::string& dir) {
 }
 
 std::vector<std::string> system_directories(const std::vector<std::string>& dirs,
-                                            const std::vector<std::string>& user_dirs) {
+                                            const std::vector<std::string>& user_dirs,
+                                            const std::vector<std::string>& library_dirs) {
   std::vector<std::string> users;
   users.push_back(canonical_path("/usr/local/include"));
   for (const std::string& u : user_dirs) users.push_back(canonical_path(u));
@@ -44,6 +45,10 @@ std::vector<std::string> system_directories(const std::vector<std::string>& dirs
     for (const std::string& u : users)
       if (!u.empty() && u == c) user = true;
     if (user) continue;
+    bool library = false;
+    for (const std::string& l : library_dirs)
+      if (!l.empty() && (l == c || path_is_under(c, l))) library = true;
+    if (library) continue;
     bool seen = false;
     for (const std::string& o : out)
       if (o == c) seen = true;
@@ -52,10 +57,22 @@ std::vector<std::string> system_directories(const std::vector<std::string>& dirs
   return out;
 }
 
+bool is_library_file(const std::vector<std::string>& library_dirs, const std::string& path) {
+  std::string c = canonical_path(path);
+  if (c.empty()) return false;
+  for (const std::string& d : library_dirs)
+    if (path_is_under(c, d)) return true;
+  return false;
+}
+
+bool is_library_file(const std::string& path) { return is_library_file(verify_config().library_dirs, path); }
+
 bool is_system_file(const std::vector<std::string>& system_dirs, const std::string& cerastes_header,
-                    const std::string& path) {
+                    const std::string& path, const std::vector<std::string>& library_dirs) {
   std::string c = canonical_path(path);
   if (c.empty()) return false;  // cannot be resolved: not a system file (fail closed)
+  for (const std::string& d : library_dirs)
+    if (path_is_under(c, d)) return false;  // a library file is verified (decision 0046 item 3)
   if (!cerastes_header.empty() && c == cerastes_header) return true;
   for (const std::string& d : system_dirs)
     if (path_is_under(c, d)) return true;
@@ -64,7 +81,7 @@ bool is_system_file(const std::vector<std::string>& system_dirs, const std::stri
 
 bool is_system_file(const std::string& path) {
   const VerifyConfig& c = verify_config();
-  return is_system_file(c.system_dirs, c.cerastes_header, path);
+  return is_system_file(c.system_dirs, c.cerastes_header, path, c.library_dirs);
 }
 
 }  // namespace cerastes

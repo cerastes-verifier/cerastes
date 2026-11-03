@@ -70,8 +70,22 @@ bool in_verified_file(const a_source_position& p) {
   const std::string c = canonical_path(f->full_name);
   if (c.empty()) return true;
   const VerifyConfig& cfg = verify_config();
-  return !is_system_file(cfg.system_dirs, cfg.cerastes_header, c);
+  return !is_system_file(cfg.system_dirs, cfg.cerastes_header, c, cfg.library_dirs);
 }
+
+bool seq_in_library_file(a_seq_number seq) {
+  const VerifyConfig& cfg = verify_config();
+  if (!cfg.on || cfg.library_dirs.empty() || seq == 0) return false;
+  a_source_file_ptr f = physical_file(seq);
+  if (f == nullptr || f->full_name == nullptr) return false;
+  // One answer per file record: the configuration is fixed for the run, and EDG's flag is asked for every position of a header.
+  static std::map<a_source_file_ptr, bool> cache;
+  auto it = cache.find(f);
+  if (it == cache.end()) it = cache.emplace(f, is_library_file(cfg.library_dirs, f->full_name)).first;
+  return it->second;
+}
+
+bool in_library_file(const a_source_position& p) { return seq_in_library_file(p.seq); }
 
 namespace {
 IlEntities* g_collect_out = nullptr;

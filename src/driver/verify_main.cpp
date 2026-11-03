@@ -95,9 +95,13 @@ int refuse(const std::string& message) {
 // (decisions 0021 and 0022 item 12; exit status 3); drop_block_static_assertion: the encoder ignores the static assertions of function
 // bodies (neither records nor encodes them), so that the cross-check of decision 0025 item 5 reports them (exit status 2);
 // force_base_sets: every full expression takes the base sets (today's, decision 0026 item 2 step 2) instead of the exact ones, so the Viper of a
-// program can be compared with the one before exact sets (no change in the verdict, only in how many false alarms remain).
+// program can be compared with the one before exact sets (no change in the verdict, only in how many false alarms remain);
+// library_fixture: the harness's fixture directory (scripts/testdata/library_fixture/include, compiled in) becomes a second library
+// directory (decision 0046 item 10), put first on the front end's system include path so that `#include <name.h>` finds its
+// headers; no other directory can be given library trust.  Refused when the directory does not exist.  The one hook that injects no
+// fault: a run with it verifies and reports as usual.
 bool is_hook(const std::string& h) {
-  if (h == "drop_assert" || h == "weaken_invariant" || h == "constant_without_expr" || h == "perturb_folded" || h == "perturb_fixed_order" || h == "force_base_sets" || h == "drop_block_static_assertion" || h == "silicon_timeout" || h == "abort" || h == "internal_error") return true;
+  if (h == "library_fixture" || h == "drop_assert" || h == "weaken_invariant" || h == "constant_without_expr" || h == "perturb_folded" || h == "perturb_fixed_order" || h == "force_base_sets" || h == "drop_block_static_assertion" || h == "silicon_timeout" || h == "abort" || h == "internal_error") return true;
   if (h.rfind("drop_assert=", 0) != 0 || h.size() == 12) return false;
   for (size_t i = 12; i < h.size(); ++i)
     if (h[i] < '0' || h[i] > '9') return false;
@@ -312,6 +316,17 @@ int verify_command(int argc, char** argv) {
       "-D__CERASTES__=1",  // before the user's options (0008)
       std::string("--clang_version=") + CERASTES_TOOL_CLANG_VERSION,
   };
+  // The library_fixture hook (decision 0046 item 10): the fixture directory is a library directory, ahead of the platform's.
+  std::vector<std::string> library_dirs;
+  if (const std::string vlibc = cerastes::canonical_path(CERASTES_TOOL_VLIBC_INCLUDE_DIR); !vlibc.empty())
+    library_dirs.push_back(vlibc);
+  if (a.hook == "library_fixture") {
+    const std::string fixture = cerastes::canonical_path(CERASTES_TOOL_LIBRARY_FIXTURE_DIR);
+    if (fixture.empty())
+      return refuse(std::string("the library_fixture hook needs the directory ") + CERASTES_TOOL_LIBRARY_FIXTURE_DIR);
+    library_dirs.push_back(fixture);
+    edg.push_back("--sys_include=" + fixture);
+  }
   for (const std::string& d : sys_includes) edg.push_back("--sys_include=" + d);
   // include/ holds <cerastes.h>; as a system include directory, diagnostics for macros used in the caller's file
   // still point at the caller's file (as scripts/cerastes-fe.sh does).
@@ -396,11 +411,12 @@ int verify_command(int argc, char** argv) {
   cfg.on = true;
   cfg.hook = a.hook;
   cfg.strict_init = a.strict_init;
-  cfg.system_dirs = cerastes::system_directories(sys_includes, a.includes);
+  cfg.library_dirs = library_dirs;
+  cfg.system_dirs = cerastes::system_directories(sys_includes, a.includes, library_dirs);
   cfg.cerastes_header = cerastes::canonical_path(std::string(CERASTES_TOOL_INCLUDE_DIR) + "/cerastes.h");
 
   // A system file is never the subject of a run (item 4): verifying one would check, and trust, nothing of ours.
-  if (cerastes::is_system_file(cfg.system_dirs, cfg.cerastes_header, a.file)) {
+  if (cerastes::is_system_file(cfg.system_dirs, cfg.cerastes_header, a.file, cfg.library_dirs)) {
     std::error_code ec;
     std::filesystem::remove_all(diag_dir, ec);
     return refuse("\"" + a.file + "\" is a system file: it is only ever used through its contracts, never verified");
@@ -470,7 +486,9 @@ int verify_command(int argc, char** argv) {
 
   cerastes::PipelineOptions po;
   po.tools = tools;
-  po.hook = a.hook;
+  // Every hook but library_fixture injects a fault: a run with one never ends in `verified` (pipeline.cpp, 0011 item 13).
+  // library_fixture only adds a library directory, so its runs end as any other.
+  po.hook = a.hook == "library_fixture" ? std::string() : a.hook;
   po.timeout_seconds = a.hook == "silicon_timeout" ? 0 : a.timeout;
   po.primary_file = a.file;
   po.functions = cfg.out.functions;

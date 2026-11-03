@@ -9023,7 +9023,7 @@ void reject_line_directives_pass() {
     // A directive in a file that cannot be placed is rejected too (fail closed, decision 0011 item 4).
     const std::string c = (phys != nullptr && phys->full_name != nullptr) ? canonical_path(phys->full_name) : std::string();
     const VerifyConfig& cfg = verify_config();
-    if (!c.empty() && is_system_file(cfg.system_dirs, cfg.cerastes_header, c)) continue;
+    if (!c.empty() && is_system_file(cfg.system_dirs, cfg.cerastes_header, c, cfg.library_dirs)) continue;
     if (phys == nullptr) {
       DiagPos unknown;
       report_at(Diag::line_directive_in_verify, unknown);

@@ -6,8 +6,8 @@
 # 0031): installs prerequisites (on Linux it checks them; scripts/ci-linux.sh installs
 # them on the runner), checks out the submodules, builds EDG (stock, for scripts/cpfe.sh, and the cerastes
 # configuration, build/cerastes-fe and build/cerastes, the `verify` driver, which gets the
-# tool locations of Silicon, Z3 and the JDK at configure time; with CERASTES_EDG_SRC set, another EDG tree
-# in build/override, decision 0005), builds Silicon, fetches the pinned Z3,
+# tool locations of Silicon, Z3 and the JDK and the vlibc checkout, third_party/vlibc or CERASTES_VLIBC_SRC's,
+# at configure time, decision 0046; with CERASTES_EDG_SRC set, another EDG tree in build/override, decision 0005), builds Silicon, fetches the pinned Z3,
 # installs the documentation tool chain (Node, `npm ci` in doc/) and writes
 # build/env.sh.  Every pin is recorded in internal/decisions/0001-toolchain-pins.md;
 # change a pin here and there together.
@@ -153,7 +153,11 @@ ensure_submodules() {
     case "$state" in
       -) log "git submodule update --init $prefix$path"
          git -C "$repo" submodule update --init -- "$path" ;;
-      +) warn "$prefix$path is not at the pinned commit (left as is; check.sh fails on it). Do not check fork commits out there: set CERASTES_EDG_SRC instead (decision 0005)" ;;
+      +) case "$prefix$path" in
+           third_party/vlibc) override=CERASTES_VLIBC_SRC; why="decision 0046" ;;
+           *) override=CERASTES_EDG_SRC; why="decision 0005" ;;
+         esac
+         warn "$prefix$path is not at the pinned commit (left as is; check.sh fails on it). Do not check other commits out there: set $override instead ($why)" ;;
       U) die "$prefix$path has merge conflicts" ;;
     esac
     ensure_submodules "$repo/$path" "$prefix$path/"
@@ -224,6 +228,23 @@ log "ninja -C $(rel "$EDG_BUILD")"
 ninja -C "$EDG_BUILD" > "$OUT/edg-build.log" 2>&1 \
   || { tail -30 "$OUT/edg-build.log"; die "EDG build failed ($(rel "$OUT")/edg-build.log)"; }
 [[ -x "$EDG_BUILD/bin/cpfe" ]] || die "EDG build produced no $(rel "$EDG_BUILD")/bin/cpfe"
+
+# ---- 3b. vlibc ------------------------------------------------------------------
+# The C library with cerastes contracts (decision 0046): third_party/vlibc, or the checkout
+# CERASTES_VLIBC_SRC names (an absolute path; check.sh refuses it on branch main).  Its include/
+# directory is fixed into the driver at configure time, with the names its headers give contracts.
+if [[ -n "${CERASTES_VLIBC_SRC:-}" && "$CERASTES_VLIBC_SRC" != /* ]]; then
+  echo "bootstrap.sh: CERASTES_VLIBC_SRC=$CERASTES_VLIBC_SRC is a relative path; use an absolute path (decision 0046)" >&2
+  exit 2
+fi
+vlibc_resolved="$(python3 "$ROOT/scripts/vlibc_tree.py" resolve)" \
+  || die "CERASTES_VLIBC_SRC is not a usable vlibc tree (see the message above)"
+VLIBC_KIND="${vlibc_resolved%% *}"
+VLIBC_DIR="$(cd "${vlibc_resolved#* }" && pwd -P)"
+[[ -d "$VLIBC_DIR/include/vlibc" ]] || die "no include/vlibc in $VLIBC_DIR (the vlibc submodule is not initialized?)"
+if [[ "$VLIBC_KIND" == override ]]; then
+  warn "using vlibc from CERASTES_VLIBC_SRC=$VLIBC_DIR (decision 0046); check.sh refuses this on branch main"
+fi
 
 # ---- 4. Silicon -----------------------------------------------------------------
 SILICON_SRC="$ROOT/third_party/silicon"
@@ -347,7 +368,7 @@ EDG_BASE="$(sed -n 's/^export EDG_BASE="\(.*\)"$/\1/p' "$EDG_BUILD/environment.s
 log "cmake -S . -B $(rel "$CERASTES_BUILD")"
 cmake -S "$ROOT" -B "$CERASTES_BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Debug ${EDG_COMPILERS[@]+"${EDG_COMPILERS[@]}"} \
   "-DCERASTES_EDG_SRC=$EDG_SRC" "-DCERASTES_EDG_GEN=$EDG_BUILD/src/includes" \
-  "-DCERASTES_OUTPUT_DIR=$OUT" \
+  "-DCERASTES_OUTPUT_DIR=$OUT" "-DCERASTES_VLIBC_DIR=$VLIBC_DIR" \
   "-DCERASTES_JAVA=$JAVA_HOME/bin/java" "-DCERASTES_SILICON_JAR=$SILICON_JAR" "-DCERASTES_Z3_EXE=$Z3_EXE" \
   "-DCERASTES_CLANG_VERSION=$EDG_CLANG_VER_SCRAPE" "-DCERASTES_EDG_BASE=$EDG_BASE" \
   "-DCERASTES_CXX_SYS_INCLUDES=$EDG_CLANG_INCL_SCRAPE" "-DCERASTES_C_SYS_INCLUDES=$EDG_CLANG_CINCL_SCRAPE" \
@@ -412,6 +433,7 @@ export CERASTES_EDG_SRC_ACTIVE="$EDG_SRC"
 export CERASTES_EDG_GEN="$EDG_BUILD/src/includes"
 export CERASTES_EDG_STAMP="$EDG_STAMP"
 export CERASTES_INCLUDE_DIR="$ROOT/include"
+export CERASTES_VLIBC_DIR="$VLIBC_DIR"
 export CERASTES_CLANG_CC="$CLANG_CC"
 export CERASTES_CLANG_CXX="$CLANG_CXX"
 export CERASTES_GCC_CC="$GCC_CC"
@@ -431,6 +453,7 @@ printf '    %-8s %s\n' \
   java "$("$JAVA_HOME/bin/java" -version 2>&1 | head -1)" \
   z3 "$("$Z3_EXE" --version)" \
   edg "$EDG_KIND $EDG_SRC" \
+  vlibc "$VLIBC_KIND $VLIBC_DIR" \
   cpfe "$(rel "$EDG_BUILD")/bin/cpfe" \
   cerastes-fe "$(rel "$OUT")/cerastes-fe" \
   cerastes "$(rel "$OUT")/cerastes" \

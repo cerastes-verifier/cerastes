@@ -4,3 +4,6 @@
 [submodule "third_party/silicon"]
 	path = third_party/silicon
 	url = https://github.com/viperproject/silicon.git
+[submodule "third_party/vlibc"]
+	path = third_party/vlibc
+	url = https://github.com/cerastes-verifier/vlibc.git
