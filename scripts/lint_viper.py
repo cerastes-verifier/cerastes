@@ -860,6 +860,103 @@ def first_statement(src: Source, d: Decl) -> tuple[str, int]:
     return "", 0
 
 
+def leaf_value(fields: dict[str, str], suffix: str, c: str, mid: str) -> tuple[bool, str | None]:
+    """The value part of a `program_start` row for the cell `c` (normalized text) of field suffix `suffix` (decision 0041 item 4):
+    a literal of the type, `null`, the range of an unknown value, `WF` / `WF_S` of an unknown pointer, or `loc(GB_h(), 0)` (returned
+    as the target).  Returns (good, target)."""
+    kind, target, good = fields.get(suffix), None, False
+    if kind == "Int":
+        good = re.fullmatch(re.escape(c) + rf"\.v_{suffix}==" + INT_LITERAL_RE, mid) is not None
+        if not good and (r := re.fullmatch(rf"({INT_LITERAL_RE})<={re.escape(c)}\.v_{suffix}&&{re.escape(c)}\.v_{suffix}<=({INT_LITERAL_RE})", mid)):
+            good = int(r.group(1)) <= int(r.group(2))
+    elif kind == "Bool":
+        good = mid in ("", f"{c}.v_{suffix}==true", f"{c}.v_{suffix}==false")
+    elif kind == "Ref" and suffix.startswith("ptr_"):
+        v = f"{c}.v_{suffix}"
+        wf = f"{v}==null||{v}==loc(block_of({v}),offset_of({v}))&&0<=offset_of({v})&&offset_of({v})<=len(block_of({v}))"
+        guard = rf"{re.escape(v)}!=null&&offset_of\({re.escape(v)}\)<len\(block_of\({re.escape(v)}\)\)"
+        if mid in (f"{v}==null", wf):
+            good = True
+        elif mid.startswith(wf + "&&") and (r := re.fullmatch(guard + r"==>(?P<lens>.*)", mid[len(wf) + 2:])):
+            # a pointer to a struct: WF followed by the guarded WF_S conjunct (decision 0043 item 8)
+            good = struct_wf_lens_problem(r.group("lens").split("&&"), v) is None
+        elif r := re.fullmatch(re.escape(v) + r"==loc\((GB_[\w$']+)\(\),0\)", mid):
+            target, good = r.group(1), True
+    return good, target
+
+
+_LEAF_PERM_RE = re.compile(r"^(?P<l>loc\(member\(.*\),[0-9]+\),0\))\.v_(?P<t>[\w$']+)\)$")
+_LEAF_FLAG_RE = re.compile(r"^(?P<l>loc\(member\(.*\),[0-9]+\),0\))\.d_(?P<t>[\w$']+)\)&&(?P=l)\.d_(?P=t)(?:&&(?P<value>.*))?$")
+
+
+def struct_row(row: str, fields: dict[str, str]) -> tuple[str, list[tuple[tuple[int, ...], str, str | None]]] | str:
+    """The `program_start` row of a struct global (decision 0044 items 8 and 13), normalized: `acc(L.v_t) && acc(L.d_t) && L.d_t && <value>`
+    for every leaf L, then exactly one `acc(lvloc(GB_g()).lv)`, nothing else.  Every L is a canonical chain `loc(member(<chain>, k), 0)` rooted at
+    `loc(GB_g(), 0)` (no `block_of`, `parent_of`, arithmetic), each leaf once and no leaf's chain a prefix of another's.  Returns (the global,
+    [(leaf chain, field suffix, `GB_h` of an address value or None)]) or the reason."""
+    m = re.search(r"&&acc\(lvloc\((GB_[\w$']+)\(\)\)\.lv\)$", row)
+    if m is None:
+        return "it does not end with exactly one `acc(lvloc(GB_x()).lv)`"
+    g = m.group(1)
+    root = f"loc({g}(),0)"
+    parts = row.split("&&acc(")
+    if not parts[0].startswith("acc("):
+        return "it does not start with a permission"
+    parts[0] = parts[0][len("acc("):]
+    if parts[-1] != f"lvloc({g}()).lv)":
+        return f"it does not end with exactly one `acc(lvloc({g}()).lv)`"
+    body = parts[:-1]
+    if not body or len(body) % 2:
+        return "a leaf is not exactly `acc(L.v_t) && acc(L.d_t) && L.d_t && <value>`"
+    leaves: list[tuple[tuple[int, ...], str, str | None]] = []
+    for i in range(0, len(body), 2):
+        pm, fm = _LEAF_PERM_RE.match(body[i]), _LEAF_FLAG_RE.match(body[i + 1])
+        if pm is None or fm is None or pm.group("l") != fm.group("l") or pm.group("t") != fm.group("t"):
+            return "a leaf is not exactly `acc(L.v_t) && acc(L.d_t) && L.d_t && <value>` over one cell `loc(member(X, k), 0)` and one field suffix"
+        chain = parse_struct_chain(pm.group("l"), root)
+        if chain is None or not chain:
+            return f"the leaf `{pm.group('l')}` is not a canonical chain `loc(member(<chain>, k), 0)` rooted at `loc({g}(), 0)`"
+        suffix = pm.group("t")
+        good, target = leaf_value(fields, suffix, pm.group("l"), fm.group("value") or "")
+        if not good:
+            return (f"the value of the leaf `{pm.group('l')}` (field `v_{suffix}`{'' if suffix in fields else ', not declared'}) is not a literal of its "
+                    "type, `null`, `loc(GB_h(), 0)` of a declared global, or an unknown value's range / `WF`")
+        leaves.append((chain, suffix, target))
+    chains = [c for c, _s, _t in leaves]
+    for a in chains:
+        for b in chains:
+            if a != b and b[:len(a)] == a:
+                return f"the leaf {a} is a prefix of the leaf {b}: a nested struct is its leaves, not a cell"
+    if len(chains) != len(set(chains)):
+        return "a leaf twice (two full permissions to one cell would make `main` vacuous)"
+    return g, leaves
+
+
+def slot_text(g: str, chain: tuple[int, ...]) -> str:
+    out = f"loc({g}(),0)"
+    for k in chain:
+        out = f"loc(member({out},{k}),0)"
+    return out
+
+
+def struct_facts_atoms(g: str, leaves: list[tuple[tuple[int, ...], str, str | None]]) -> list[str]:
+    """The member lengths `len(member(X, k)) == 1` of every member block of the row's struct (every prefix of a leaf chain) and its slot facts
+    `X != Y` (Y a nested slot, X the root or a nested slot whose chain Y's chain strictly extends), normalized (decision 0044 item 8)."""
+    blocks = {c[:i] for c, _s, _t in leaves for i in range(1, len(c) + 1)}
+    slots = {c[:i] for c, _s, _t in leaves for i in range(1, len(c))}
+    atoms = [f"len(member({slot_text(g, b[:-1])},{b[-1]}))==1" for b in sorted(blocks)]
+    atoms += [f"{slot_text(g, a)}!={slot_text(g, b)}" for b in sorted(slots) for a in sorted({()} | slots) if len(b) > len(a) and b[:len(a)] == a]
+    return atoms
+
+
+def global_facts_atoms_of(names: list[str], structs: dict[str, list[tuple[tuple[int, ...], str, str | None]]]) -> list[str]:
+    """The facts of the unit (sorted atoms): each global's scalar facts, and each struct global's member lengths and slot facts."""
+    atoms = global_facts_atoms(names)
+    for g, leaves in structs.items():
+        atoms += struct_facts_atoms(g, leaves)
+    return sorted(atoms)
+
+
 def lint_globals(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
     ok_domains = [d for d in decls if d.kind == "domain" and lint_domain(src, d, lambda _l, _w: None)]
     in_domain: set[int] = set()
@@ -890,12 +987,17 @@ def lint_globals(src: Source, decls: list[Decl], add: Callable[[int, str], None]
         add(min(gbs.values()), "a program with globals (`unique function GB_...`) has exactly one `method program_start()` "
                                f"(decision 0041 item 4), found {len(ps)}")
     fields = {m.group("suffix"): m.group("type") for l in src.code if (m := FIELD_DECL_RE.match(l))}
-    facts_atoms = global_facts_atoms(list(gbs))
+    facts_atoms: list[str] | None = global_facts_atoms(list(gbs))  # replaced below by the unit's facts, with the struct globals' lengths and slot facts
     for d in ps:
         want_head = "method program_start()"
         header = " ".join(src.code[d.line - 1].split())
         clauses = clause_texts(src, d)
         problem = None
+        # A row is `acc(<cell>.v_T) && acc(<cell>.d_T) && <cell>.d_T && <value> && acc(lvloc(GB_x()).lv)` of a scalar global, or the
+        # rows of a struct global's leaves (decision 0044 items 8 and 13); first read every row, then the facts they imply.
+        rows: dict[str, tuple[int, str, str | None]] = {}  # global -> (line, field suffix, target of a `loc(GB_h(), 0)` value)
+        srows: dict[str, tuple[int, list[tuple[tuple[int, ...], str, str | None]]]] = {}  # struct global -> (line, leaves)
+        row_problems: list[tuple[int, str]] = []
         if d.has_body or header != want_head:
             problem = f"it must be a bodyless `{want_head}`"
         elif trusted_tag(src, d.line) is None:
@@ -903,57 +1005,74 @@ def lint_globals(src: Source, decls: list[Decl], add: Callable[[int, str], None]
         elif not clauses or clauses[-1][0] != "decreases" or norm_viper(clauses[-1][2]) != "_" \
                 or any(k != "ensures" for k, _l, _t in clauses[:-1]):
             problem = "its clauses are `ensures` rows and a final `decreases _`, nothing else"
-        elif len(clauses) < 2 or sorted(norm_viper(clauses[0][2]).split("&&")) != facts_atoms:
-            problem = ("its first `ensures` row must be the global facts: `len(GB_x()) == 1 && lvloc(GB_x()) == loc(GB_x(), -2)` "
-                       "for each declared `GB_x`, each once")
+        else:
+            for _k, ln, text in clauses[1:-1]:
+                row = norm_viper(text)
+                if row.startswith("acc(loc(member("):
+                    r = struct_row(row, fields)
+                    if isinstance(r, str):
+                        row_problems.append((ln, f"a `program_start` struct row is wrong: {r}"))
+                        continue
+                    g, leaves = r
+                    if g not in gbs:
+                        row_problems.append((ln, f"a `program_start` struct row names `{g}`, which is not a declared `GB_` global"))
+                    elif g in rows or g in srows:
+                        row_problems.append((ln, f"a second `program_start` row for `{g}` (two full permissions would make `main` vacuous)"))
+                    else:
+                        srows[g] = (ln, leaves)
+                    continue
+                m = re.match(r"acc\(loc\((?P<g>GB_[\w$']+)\(\),0\)\.v_(?P<s>[\w$']+)\)&&acc\(loc\((?P=g)\(\),0\)\.d_(?P=s)\)&&"
+                             r"loc\((?P=g)\(\),0\)\.d_(?P=s)&&(?P<rest>.*)$", row)
+                g = m.group("g") if m else ""
+                tail = f"acc(lvloc({g}()).lv)"
+                if m is None or g not in gbs or not (m.group("rest") == tail or m.group("rest").endswith("&&" + tail)):
+                    row_problems.append((ln, "a `program_start` row is `acc(<cell>.v_T) && acc(<cell>.d_T) && <cell>.d_T && <value> && "
+                                             "acc(lvloc(GB_x()).lv)` for a declared `GB_x`, <cell> being `loc(GB_x(), 0)`"))
+                    continue
+                suffix, c = m.group("s"), f"loc({g}(),0)"
+                mid = m.group("rest")[:-len(tail)].rstrip("&")
+                good, target = leaf_value(fields, suffix, c, mid)
+                if not good:
+                    row_problems.append((ln, f"the value of the `program_start` row of `{g}` (field `v_{suffix}`{'' if suffix in fields else ', not declared'}) is not "
+                                             "a literal of its type, `null`, `loc(GB_h(), 0)` of a declared global, or an unknown value's range / `WF`"))
+                    continue
+                if g in rows or g in srows:
+                    row_problems.append((ln, f"a second `program_start` row for `{g}` (two full permissions would make `main` vacuous)"))
+                    continue
+                rows[g] = (ln, suffix, target)
+            # the facts follow the rows: with a row that is wrong or missing the expected facts are unknown, and the row is the problem
+            missing = [g for g in gbs if g not in rows and g not in srows]
+            facts_atoms = None if row_problems or missing else global_facts_atoms_of(list(gbs), {g: lv for g, (_l, lv) in srows.items()})
+            if facts_atoms is not None and (len(clauses) < 2 or sorted(norm_viper(clauses[0][2]).split("&&")) != facts_atoms):
+                problem = ("its first `ensures` row must be the global facts: `len(GB_x()) == 1 && lvloc(GB_x()) == loc(GB_x(), -2)` "
+                           "for each declared `GB_x`, each once, and for each struct global the member lengths `len(member(X, k)) == 1` of every "
+                           "slot of its row and its slot facts `X != Y` (decision 0044 item 8), nothing else")
         if problem:
             add(d.line, f"`method program_start` is not the trusted start of decision 0041 item 4: {problem}")
             continue
-        rows: dict[str, tuple[int, str, str | None]] = {}  # global -> (line, field suffix, target of a `loc(GB_h(), 0)` value)
-        for _k, ln, text in clauses[1:-1]:
-            row = norm_viper(text)
-            m = re.match(r"acc\(loc\((?P<g>GB_[\w$']+)\(\),0\)\.v_(?P<s>[\w$']+)\)&&acc\(loc\((?P=g)\(\),0\)\.d_(?P=s)\)&&"
-                         r"loc\((?P=g)\(\),0\)\.d_(?P=s)&&(?P<rest>.*)$", row)
-            g = m.group("g") if m else ""
-            tail = f"acc(lvloc({g}()).lv)"
-            if m is None or g not in gbs or not (m.group("rest") == tail or m.group("rest").endswith("&&" + tail)):
-                add(ln, "a `program_start` row is `acc(<cell>.v_T) && acc(<cell>.d_T) && <cell>.d_T && <value> && "
-                        "acc(lvloc(GB_x()).lv)` for a declared `GB_x`, <cell> being `loc(GB_x(), 0)`")
-                continue
-            suffix, c = m.group("s"), f"loc({g}(),0)"
-            mid = m.group("rest")[:-len(tail)].rstrip("&")
-            kind, target, good = fields.get(suffix), None, False
-            if kind == "Int":
-                good = re.fullmatch(re.escape(c) + rf"\.v_{suffix}==" + INT_LITERAL_RE, mid) is not None
-                if not good and (r := re.fullmatch(rf"({INT_LITERAL_RE})<={re.escape(c)}\.v_{suffix}&&{re.escape(c)}\.v_{suffix}<=({INT_LITERAL_RE})", mid)):
-                    good = int(r.group(1)) <= int(r.group(2))
-            elif kind == "Bool":
-                good = mid in ("", f"{c}.v_{suffix}==true", f"{c}.v_{suffix}==false")
-            elif kind == "Ref" and suffix.startswith("ptr_"):
-                v = f"{c}.v_{suffix}"
-                wf = f"{v}==null||{v}==loc(block_of({v}),offset_of({v}))&&0<=offset_of({v})&&offset_of({v})<=len(block_of({v}))"
-                guard = rf"{re.escape(v)}!=null&&offset_of\({re.escape(v)}\)<len\(block_of\({re.escape(v)}\)\)"
-                if mid in (f"{v}==null", wf):
-                    good = True
-                elif mid.startswith(wf + "&&") and (r := re.fullmatch(guard + r"==>(?P<lens>.*)", mid[len(wf) + 2:])):
-                    # a pointer to a struct: WF followed by the guarded WF_S conjunct (decision 0043 item 8)
-                    good = struct_wf_lens_problem(r.group("lens").split("&&"), v) is None
-                elif r := re.fullmatch(re.escape(v) + r"==loc\((GB_[\w$']+)\(\),0\)", mid):
-                    target, good = r.group(1), True
-            if not good:
-                add(ln, f"the value of the `program_start` row of `{g}` (field `v_{suffix}`{'' if kind else ', not declared'}) is not "
-                        "a literal of its type, `null`, `loc(GB_h(), 0)` of a declared global, or an unknown value's range / `WF`")
-                continue
-            if g in rows:
-                add(ln, f"a second `program_start` row for `{g}` (two full permissions would make `main` vacuous)")
-                continue
-            rows[g] = (ln, suffix, target)
-        for g, (ln, suffix, target) in rows.items():
-            if target is not None and (target not in rows or rows[target][1] != suffix[len("ptr_"):]):
-                add(ln, f"the row of `{g}` points at `{target}`, which is not a declared global of the pointee's field "
-                        f"`v_{suffix[len('ptr_'):]}` (decision 0041 item 4)")
+        for ln, why in row_problems:
+            add(ln, why)
+        shapes: dict[str, frozenset] = {}  # pointer field suffix -> the shape of the struct globals it points at
+        # every address value `loc(GB_h(), 0)`, of a scalar global's row or of a struct global's leaf: (owner, line, field suffix, target)
+        addrs = [(g, ln, suffix, target) for g, (ln, suffix, target) in rows.items() if target is not None]
+        addrs += [(g, ln, suffix, target) for g, (ln, leaves) in srows.items() for _c, suffix, target in leaves if target is not None]
+        for g, ln, suffix, target in addrs:
+            pointee = suffix[len("ptr_"):]
+            if target in rows:
+                if rows[target][1] != pointee:
+                    add(ln, f"the row of `{g}` points at `{target}`, which is not a declared global of the pointee's field "
+                            f"`v_{pointee}` (decision 0041 item 4)")
+            elif target in srows:
+                shape = frozenset((c, sfx) for c, sfx, _t in srows[target][1])
+                if not pointee.startswith("struct_"):
+                    add(ln, f"`{g}` has an address of the struct global `{target}` in a field `v_{suffix}` that is not a pointer to a struct "
+                            "(decision 0044 item 13: the address of a struct global is the value of a `ptr_struct_<n>_<tag>` field)")
+                elif shapes.setdefault(suffix, shape) != shape:
+                    add(ln, f"the field `v_{suffix}` points at struct globals of two different shapes (`{target}` is not of the pointee's type)")
+            else:
+                add(ln, f"`{g}` points at `{target}`, which is not a declared global with a row (decision 0041 item 4)")
         for g in gbs:
-            if g not in rows:
+            if g not in rows and g not in srows and not row_problems:
                 add(d.line, f"`method program_start` has no row for `{g}` (decision 0041 item 4: one row per global)")
     # `program_start` is reached once, as the first statement of `main`; every other method takes the facts
     methods = [d for d in decls if d.kind == "method"]
@@ -985,7 +1104,7 @@ def lint_globals(src: Source, decls: list[Decl], add: Callable[[int, str], None]
         if d.name in exempt or d.name.startswith(ALLOC_PREFIX):
             continue
         reqs = [(ln, t) for k, ln, t in clause_texts(src, d) if k == "requires"]
-        if not reqs or sorted(norm_viper(reqs[0][1]).split("&&")) != facts_atoms:
+        if facts_atoms is not None and (not reqs or sorted(norm_viper(reqs[0][1]).split("&&")) != facts_atoms):
             add(reqs[0][0] if reqs else d.line,
                 f"`method {d.name}` of a program with globals must take the global facts as its first `requires` "
                 "(`len(GB_x()) == 1 && lvloc(GB_x()) == loc(GB_x(), -2)` for each global, before the amounts' rows; "
@@ -1229,8 +1348,10 @@ def lint_perm_locals(src: Source, decls: list[Decl], add: Callable[[int, str], N
                     add(n, f"`Perm` local `{m.group('names')}` is initialized with `{rhs}`: a snapshot is `perm(...)`, `none`, "
                            "`write` or a conditional of those (decision 0038 item 9)")
             for name in sorted(names):
-                for a in re.finditer(r"(?<![\w$'.])" + re.escape(name) + r"\s*:=", code):
-                    rhs = _statement_rhs(code, a.end())
+                # `name` is a target when `:=` follows it directly or after more targets: `a, b := m(args)` assigns both (decision
+                # 0044 item 13: a multi-target call is one assignment of every target; the first target must be seen too)
+                for a in re.finditer(r"(?<![\w$'.])" + re.escape(name) + r"\s*(?=(?:,\s*[A-Za-z_$][\w$']*\s*)*:=)", code):
+                    rhs = _statement_rhs(code, code.index(":=", a.end()) + 2)
                     if not perm_value_ok(rhs) and not WILDCARD_RE.search(rhs):  # wildcard: reported by its own rule
                         add(n, f"`Perm` local `{name}` is assigned `{rhs}`: a snapshot is `perm(...)`, `none`, `write` or a "
                                "conditional of those, never arithmetic or another variable (decision 0038 item 9; `wildcard` has its own rule)")
@@ -1241,7 +1362,10 @@ def lint_perm_locals(src: Source, decls: list[Decl], add: Callable[[int, str], N
                     add(ln, "`perm(...)` in a loop invariant: Viper refuses it (decision 0038 item 9); the invariant uses a "
                             "`Perm` local snapshotted before the loop")
             for k, (t, ln) in enumerate(body):
-                if t in used and k + 1 < len(body) and body[k + 1][0] == ":=" and (k == 0 or body[k - 1][0] != "."):
+                j = k + 1  # the targets after this one: `kv, other := m(args)` assigns kv as well
+                while j + 1 < len(body) and body[j][0] == "," and re.fullmatch(r"[A-Za-z_$][\w$']*", body[j + 1][0]):
+                    j += 2
+                if t in used and j < len(body) and body[j][0] == ":=" and (k == 0 or body[k - 1][0] != "."):
                     add(ln, f"`Perm` local `{t}` is assigned inside the loop of line {line}, whose invariant uses it as an "
                             "amount: the loop head havocs what the body assigns (decision 0038 item 9)")
 

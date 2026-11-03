@@ -2866,6 +2866,33 @@ class LoopAmountTests(unittest.TestCase):
         locals_ = ["  var kv: Perm", "  var kd: Perm", "  var vs: Int", "  var i: Int", "  var other: Perm"]
         self.assertEqual(self.strict(self.fixture(locals_=locals_, body=["    other := perm(x.v_int)", "    i := i + 1"])), [])
 
+    def test_every_target_of_a_multi_target_call_is_read(self):
+        """Decision 0044 item 13: `a, b := m(args)` assigns every target, so a `Perm` local is a problem as the first, a
+        middle or the last target: a lint that reads only the target next to `:=` (the old rule) misses the first two."""
+        for targets in ("kv, vs", "vs, kv", "vs, kv, i", "kv, vs, i", "kv,vs"):
+            with self.subTest(targets=targets):
+                probs = self.strict(self.fixture(snapshot=[f"  {targets} := other__9(n)", "  kd := none"]))
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("`Perm` local `kv` is assigned `other__9(n)`", probs[0])
+
+    def test_a_multi_target_call_of_non_perm_locals_is_clean(self):
+        self.assertEqual(self.strict(self.fixture(snapshot=["  vs, i := other__9(n)", "  kv := none", "  kd := none"])), [])
+
+    def test_two_perm_targets_are_two_problems(self):
+        probs = self.strict(self.fixture(snapshot=["  kv, kd := other__9(n)"]))
+        self.assertEqual(len(probs), 2, probs)
+        self.assertIn("`Perm` local `kv`", probs[0] + probs[1])
+        self.assertIn("`Perm` local `kd`", probs[0] + probs[1])
+
+    def test_a_multi_target_call_in_a_loop_assigns_each_target_there(self):
+        for targets in ("kv, vs", "vs, kv", "vs, kd, i"):
+            with self.subTest(targets=targets):
+                probs = self.strict(self.fixture(body=[f"    {targets} := other__9(n)"]))
+                self.assertTrue(any("is assigned inside the loop of line" in p for p in probs), probs)
+
+    def test_a_multi_target_call_in_a_loop_of_other_locals_is_clean(self):
+        self.assertEqual(self.strict(self.fixture(body=["    vs, i := other__9(n)"])), [])
+
     def test_an_assignment_before_or_after_the_loop_is_fine(self):
         self.assertEqual(self.strict(self.fixture(between=["  kv := none", "  kd := perm(x.d_int)"])), [])
 
@@ -3279,6 +3306,275 @@ class GlobalsTests(unittest.TestCase):
                 lines = self.fixture()
                 lines[lines.index("  y := 1"):lines.index("  y := 1")] = bad
                 self.some(lines, frag)
+
+
+class StructGlobalTests(unittest.TestCase):
+    """Decision 0044 items 8 and 13: the `program_start` rows of struct globals and the facts that go with them are pinned like
+    `alloc_struct_<n>_<tag>` (decision 0043 item 13): a struct global's row is exactly `acc(L.v_t) && acc(L.d_t) && L.d_t && <value>` for each
+    leaf L (a canonical chain `loc(member(<chain>, k), 0)` rooted at `loc(GB_g(), 0)`, each leaf once, none a prefix of another), then exactly
+    one `acc(lvloc(GB_g()).lv)`; the facts (the first `ensures` of `program_start` and the first `requires` of every other method) are each
+    global's scalar facts, a struct global's followed by the member lengths of every slot of its row and its slot pairs, nothing else.  The
+    fixture is the emitter's shape (build/m4.5c2a/sg/s1.vpr, s2.c23.vpr: `static int h = 7`, `struct P {int a; int *p;} g = {1, &h}` and a nested
+    `struct N {int a; struct S s;} n = {1, {2, 3}}`); each twin breaks one thing."""
+
+    G = GlobalsTests("test_the_emitters_shape_is_clean")
+    NAMES = ["GB_h__1", "GB_g__2", "GB_n__3"]
+    EXTRA = ["field v_ptr_struct_0_P: Ref", "field d_ptr_struct_0_P: Bool"]
+
+    @staticmethod
+    def slot(g, *chain):
+        out = f"loc({g}(), 0)"
+        for k in chain:
+            out = f"loc(member({out}, {k}), 0)"
+        return out
+
+    @classmethod
+    def cell(cls, g, *chain):
+        return f"loc(member({cls.slot(g, *chain[:-1])}, {chain[-1]}), 0)"
+
+    @classmethod
+    def leaf(cls, g, chain, suffix, value, cell=None):
+        c = cell if cell is not None else cls.cell(g, *chain)
+        return f"(((acc({c}.v_{suffix}) && acc({c}.d_{suffix})) && {c}.d_{suffix}) && {value})"
+
+    @classmethod
+    def srow(cls, g, leaves, tail=None):
+        return " && ".join(leaves) + " && " + (tail if tail is not None else f"acc(lvloc({g}()).lv)")
+
+    @classmethod
+    def int_leaf(cls, g, chain, v):
+        c = cls.cell(g, *chain)
+        return cls.leaf(g, chain, "int", f"({c}.v_int == {v})")
+
+    @classmethod
+    def scalar_facts(cls, names):
+        return [f"((len({n}()) == 1) && (lvloc({n}()) == loc({n}(), (-2))))" for n in names]
+
+    @classmethod
+    def g_facts(cls):  # g: leaves (0,) and (1,)
+        r = cls.slot("GB_g__2")
+        return [f"(len(member({r}, 0)) == 1)", f"(len(member({r}, 1)) == 1)"]
+
+    @classmethod
+    def n_facts(cls):  # n: leaves (0,), (1, 0), (1, 1)
+        r, s1 = cls.slot("GB_n__3"), cls.slot("GB_n__3", 1)
+        return [f"(len(member({r}, 0)) == 1)", f"(len(member({r}, 1)) == 1)", f"(len(member({s1}, 0)) == 1)", f"(len(member({s1}, 1)) == 1)",
+                f"({r} != {s1})"]
+
+    @classmethod
+    def facts(cls, g_extra=(), n_extra=(), drop=None):
+        parts = cls.scalar_facts(["GB_h__1"]) + cls.scalar_facts(["GB_g__2"]) + cls.g_facts() + list(g_extra) \
+            + cls.scalar_facts(["GB_n__3"]) + cls.n_facts() + list(n_extra)
+        if drop is not None:
+            parts = [x for x in parts if drop not in x]
+        return " && ".join(parts)
+
+    @classmethod
+    def rows(cls):
+        h = cls.slot("GB_h__1")
+        g_p = cls.cell("GB_g__2", 1)
+        return [
+            cls.row_h(),
+            cls.srow("GB_g__2", [cls.int_leaf("GB_g__2", (0,), 1), cls.leaf("GB_g__2", (1,), "ptr_int", f"({g_p}.v_ptr_int == {h})")]),
+            cls.srow("GB_n__3", [cls.int_leaf("GB_n__3", (0,), 1), cls.int_leaf("GB_n__3", (1, 0), 2), cls.int_leaf("GB_n__3", (1, 1), 3)]),
+        ]
+
+    @classmethod
+    def row_h(cls):
+        return GlobalsTests.row("GB_h__1", "int", "(loc(GB_h__1(), 0).v_int == 7)")
+
+    def fixture(self, rows=None, facts=None, f_requires=None, names=None):
+        lines = self.G.fixture(names=self.NAMES if names is None else names, facts=self.facts() if facts is None else facts,
+                               rows=self.rows() if rows is None else rows, f_requires=self.facts() if f_requires is None else f_requires)
+        lines[0:0] = self.EXTRA
+        return lines
+
+    @staticmethod
+    def strict(lines):
+        return lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+
+    def one(self, lines, fragment):
+        probs = self.strict(lines)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn(fragment, probs[0])
+
+    def some(self, lines, fragment):
+        probs = self.strict(lines)
+        self.assertTrue(any(fragment in p for p in probs), probs)
+
+    def with_row(self, index, row):
+        rows = self.rows()
+        rows[index] = row
+        return self.fixture(rows=rows)
+
+    def test_the_emitters_shape_is_clean(self):
+        self.assertEqual(self.strict(self.fixture()), [])
+
+    def test_a_plain_spelling_is_clean(self):
+        # the same rows and facts without the emitter's grouping parentheses
+        g = "GB_g__2"
+        c0, c1 = self.cell(g, 0), self.cell(g, 1)
+        row = (f"acc({c0}.v_int) && acc({c0}.d_int) && {c0}.d_int && {c0}.v_int == 1 && acc({c1}.v_ptr_int) && acc({c1}.d_ptr_int) && "
+               f"{c1}.d_ptr_int && {c1}.v_ptr_int == loc(GB_h__1(), 0) && acc(lvloc({g}()).lv)")
+        self.assertEqual(self.strict(self.with_row(1, row)), [])
+
+    def test_a_struct_global_with_an_unknown_value_row_is_clean(self):
+        g = "GB_g__2"
+        c0 = self.cell(g, 0)
+        rng = f"(((-2147483648) <= {c0}.v_int) && ({c0}.v_int <= 2147483647))"
+        self.assertEqual(self.strict(self.with_row(1, self.srow(g, [self.leaf(g, (0,), "int", rng), self.leaf(g, (1,), "ptr_int", f"({self.cell(g, 1)}.v_ptr_int == null)")]))), [])
+
+    # --- the row of a struct global ---
+
+    def test_a_duplicated_leaf_is_refused(self):
+        g = "GB_g__2"
+        leaves = [self.int_leaf(g, (0,), 1), self.int_leaf(g, (0,), 1), self.leaf(g, (1,), "ptr_int", f"({self.cell(g, 1)}.v_ptr_int == null)")]
+        self.one(self.with_row(1, self.srow(g, leaves)), "a leaf twice")
+
+    def test_a_duplicated_leaf_spelled_through_block_of_is_refused(self):
+        g = "GB_g__2"
+        c0 = self.cell(g, 0)
+        alias = f"loc(block_of({c0}), offset_of({c0}))"  # the same cell, not in the canonical grammar
+        leaves = [self.int_leaf(g, (0,), 1), self.leaf(g, (0,), "int", f"({alias}.v_int == 1)", cell=alias),
+                  self.leaf(g, (1,), "ptr_int", f"({self.cell(g, 1)}.v_ptr_int == null)")]
+        self.some(self.with_row(1, self.srow(g, leaves)), "struct row is wrong")
+
+    def test_a_leaf_without_its_flag_permission_is_refused(self):
+        g = "GB_g__2"
+        c0 = self.cell(g, 0)
+        bad = f"((acc({c0}.v_int) && {c0}.d_int) && ({c0}.v_int == 1))"
+        self.some(self.with_row(1, self.srow(g, [bad, self.leaf(g, (1,), "ptr_int", f"({self.cell(g, 1)}.v_ptr_int == null)")])), "a leaf is not exactly")
+
+    def test_a_leaf_with_the_flag_not_asserted_is_refused(self):
+        g = "GB_g__2"
+        c0 = self.cell(g, 0)
+        bad = f"(((acc({c0}.v_int) && acc({c0}.d_int)) && !{c0}.d_int) && ({c0}.v_int == 1))"
+        self.some(self.with_row(1, self.srow(g, [bad, self.leaf(g, (1,), "ptr_int", f"({self.cell(g, 1)}.v_ptr_int == null)")])), "a leaf is not exactly")
+
+    def test_an_extra_conjunct_is_refused(self):
+        g = "GB_g__2"
+        row = self.rows()[1]
+        for extra in ("(loc(GB_g__2(), 0) != null)", "(loc(GB_g__2(), 0) == loc(GB_g__2(), 0))", "false"):
+            with self.subTest(extra):
+                bad = row.replace(f"acc(lvloc({g}()).lv)", f"{extra} && acc(lvloc({g}()).lv)")
+                self.some(self.with_row(1, bad), "program_start")
+
+    def test_an_extra_conjunct_after_the_liveness_cell_is_refused(self):
+        g = "GB_g__2"
+        self.some(self.with_row(1, self.rows()[1] + " && true"), "does not end with exactly one")
+
+    def test_an_unrooted_chain_is_refused(self):
+        g = "GB_g__2"
+        other = self.cell("GB_h__1", 0)  # a chain rooted at another global
+        leaves = [self.leaf(g, (0,), "int", f"({other}.v_int == 1)", cell=other), self.leaf(g, (1,), "ptr_int", f"({self.cell(g, 1)}.v_ptr_int == null)")]
+        self.some(self.with_row(1, self.srow(g, leaves)), "struct row is wrong")
+
+    def test_a_chain_with_a_non_literal_member_index_is_refused(self):
+        g = "GB_g__2"
+        c = f"loc(member({self.slot(g)}, 0 + 0), 0)"
+        leaves = [self.leaf(g, (0,), "int", f"({c}.v_int == 1)", cell=c), self.leaf(g, (1,), "ptr_int", f"({self.cell(g, 1)}.v_ptr_int == null)")]
+        self.some(self.with_row(1, self.srow(g, leaves)), "struct row is wrong")
+
+    def test_a_second_liveness_cell_is_refused(self):
+        g = "GB_g__2"
+        self.some(self.with_row(1, self.rows()[1] + f" && acc(lvloc({g}()).lv)"), "a leaf is not exactly")
+
+    def test_a_missing_liveness_cell_is_refused(self):
+        g = "GB_g__2"
+        self.some(self.with_row(1, self.srow(g, self.rows()[1].split(" && acc(lvloc")[:1], tail="true")), "does not end with exactly one")
+
+    def test_a_leaf_that_is_a_prefix_of_another_is_refused(self):
+        g = "GB_n__3"
+        leaves = [self.int_leaf(g, (0,), 1), self.int_leaf(g, (1,), 2), self.int_leaf(g, (1, 0), 2), self.int_leaf(g, (1, 1), 3)]
+        self.some(self.with_row(2, self.srow(g, leaves)), "is a prefix of the leaf")
+
+    def test_the_value_must_be_of_the_leafs_type(self):
+        g = "GB_g__2"
+        c0 = self.cell(g, 0)
+        for value in (f"({c0}.v_int == null)", f"({c0}.v_int == {self.slot('GB_h__1')})", f"({c0}.v_int > 1)", "true"):
+            with self.subTest(value):
+                leaves = [self.leaf(g, (0,), "int", value), self.leaf(g, (1,), "ptr_int", f"({self.cell(g, 1)}.v_ptr_int == null)")]
+                self.some(self.with_row(1, self.srow(g, leaves)), "is not a literal of its type")
+
+    def test_two_rows_for_one_global_are_refused(self):
+        rows = self.rows()
+        self.some(self.fixture(rows=rows + [rows[1]]), "a second `program_start` row for `GB_g__2`")
+
+    def test_a_scalar_row_and_a_struct_row_for_one_global_are_refused(self):
+        rows = self.rows()
+        self.some(self.fixture(rows=rows + [GlobalsTests.row("GB_g__2", "int", "(loc(GB_g__2(), 0).v_int == 1)")]), "a second `program_start` row for `GB_g__2`")
+
+    def test_a_missing_row_is_refused(self):
+        rows = self.rows()
+        self.some(self.fixture(rows=rows[:2]), "has no row for `GB_n__3`")
+
+    def test_a_row_of_an_undeclared_global_is_refused(self):
+        g = "GB_z__9"
+        self.some(self.fixture(rows=self.rows() + [self.srow(g, [self.int_leaf(g, (0,), 1)])]), "not a declared `GB_` global")
+
+    # --- addresses ---
+
+    def test_an_address_leaf_of_the_wrong_type_is_refused(self):
+        g = "GB_g__2"
+        n = self.slot("GB_n__3")
+        cp = self.cell(g, 1)
+        # an `int *` leaf pointing at a struct global
+        bad = self.srow(g, [self.int_leaf(g, (0,), 1), self.leaf(g, (1,), "ptr_int", f"({cp}.v_ptr_int == {n})")])
+        self.some(self.with_row(1, bad), "that is not a pointer to a struct")
+        # a pointer-to-struct leaf pointing at a scalar global
+        row = self.srow(g, [self.int_leaf(g, (0,), 1), self.leaf(g, (1,), "ptr_struct_0_P", f"({cp}.v_ptr_struct_0_P == {self.slot('GB_h__1')})")])
+        self.some(self.with_row(1, row), "which is not a declared global of the pointee's field")
+
+    def test_an_address_leaf_of_the_right_type_is_clean(self):
+        g = "GB_g__2"
+        cp = self.cell(g, 1)
+        row = self.srow(g, [self.int_leaf(g, (0,), 1), self.leaf(g, (1,), "ptr_struct_0_P", f"({cp}.v_ptr_struct_0_P == {self.slot('GB_n__3')})")])
+        self.assertEqual(self.strict(self.with_row(1, row)), [])
+
+    def test_a_struct_pointer_field_may_not_point_at_two_shapes(self):
+        # `ptr_struct_0_P` pointing at the struct global g (two leaves) and at n (three): not one type
+        g, n = "GB_g__2", "GB_n__3"
+        row_g = self.srow(g, [self.int_leaf(g, (0,), 1), self.leaf(g, (1,), "ptr_struct_0_P", f"({self.cell(g, 1)}.v_ptr_struct_0_P == {self.slot(n)})")])
+        row_n = self.srow(n, [self.int_leaf(n, (0,), 1), self.leaf(n, (1, 0), "ptr_struct_0_P", f"({self.cell(n, 1, 0)}.v_ptr_struct_0_P == {self.slot(g)})"),
+                              self.int_leaf(n, (1, 1), 3)])
+        rows = self.rows()
+        rows[1], rows[2] = row_g, row_n
+        self.some(self.fixture(rows=rows), "two different shapes")
+
+    # --- the facts ---
+
+    def test_the_facts_row_is_pinned(self):
+        for what, facts in (
+                ("a missing member length", self.facts(drop=f"len(member({self.slot('GB_g__2')}, 1))")),
+                ("an extra member length", self.facts(g_extra=[f"(len(member({self.slot('GB_g__2')}, 2)) == 1)"])),
+                ("a length of a leaf's own block twice", self.facts(g_extra=[self.g_facts()[0]])),
+                ("a missing slot fact", self.facts(drop=" != ")),
+                ("a reversed slot fact", self.facts(drop=" != ").replace(" && " + "", " && ", 1) + f" && ({self.slot('GB_n__3', 1)} != {self.slot('GB_n__3')})"),
+                ("a slot fact of two leaves", self.facts(n_extra=[f"({self.cell('GB_n__3', 1, 0)} != {self.cell('GB_n__3', 1, 1)})"])),
+                ("a parent_of fact", self.facts(n_extra=["(parent_of(GB_h__1()) == null)"])),
+                ("a missing scalar fact", self.facts(drop="lvloc(GB_h__1())")),
+                ("a length of the root block", self.facts(g_extra=["(len(GB_g__2()) == 1)"]))):
+            with self.subTest(what):
+                lines = self.fixture(facts=facts, f_requires=facts)
+                probs = self.strict(lines)
+                self.assertTrue(probs and all("global facts" in p or "first `requires`" in p for p in probs), (what, probs))
+
+    def test_a_methods_first_requires_missing_a_length_is_refused(self):
+        lines = self.fixture(f_requires=self.facts(drop=f"len(member({self.slot('GB_n__3', 1)}, 1))"))
+        self.one(lines, "must take the global facts as its first `requires`")
+
+    def test_a_methods_first_requires_with_a_scalar_only_facts_row_is_refused(self):
+        lines = self.fixture(f_requires=" && ".join(self.scalar_facts(self.NAMES)))
+        self.one(lines, "must take the global facts as its first `requires`")
+
+    def test_the_facts_follow_the_rows_not_the_declarations(self):
+        # lengths for a struct global whose row has other leaves are the wrong lengths
+        g = "GB_g__2"
+        row = self.srow(g, [self.int_leaf(g, (0,), 1), self.int_leaf(g, (1,), 2), self.int_leaf(g, (2,), 3)])
+        lines = self.with_row(1, row)
+        probs = self.strict(lines)
+        self.assertTrue(any("first `ensures` row must be the global facts" in p for p in probs), probs)
+        self.assertTrue(any("must take the global facts" in p for p in probs), probs)
 
 
 class SelfTestHygieneTests(unittest.TestCase):

@@ -1,7 +1,7 @@
 // expect: rejected cerastes-unsupported_expression @ L13
 // mode: c23, c++20
 // twin: tests/memory/ptrptr_loop_read.c
-// Pins: 0040 item 5 (audit B4, question 74), record 0043 item 15 (re-messaged by M4.5c1): a read of **pp in an invariant is rejected until M4.5c2
+// Pins: 0040 item 5 (audit B4, question 74), record 0043 item 15 (re-messaged by M4.5c1): a read of **pp in an invariant is rejected until M4.5c2b (record 0044 items 1 and 12: only **pp stays rejected in an invariant, by its spelling; p->q->x, *p->q and *gp are accepted and pinned)
 #include <cerastes.h>
 
 void walk(int n)

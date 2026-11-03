@@ -1,0 +1,128 @@
+// expect: error assert:assertion.false @ L76
+// S34 (a) twin of s34_a_result.vpr: `return s;` with `s.y` never written reads an unset member (question 97: a copy reads every member): the flag assert of the read of `s.y` at the return fails (`uninitialized`).
+// Hand-written in the emitted style (see the positive fixture).
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0043 items 3, 9; record 0044 items 3-5, 8): WF; a leaf's range; a leaf at allocation (uninitialized); a leaf owned (full permission, flag set, range); one liveness fraction
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNG(c) ((-2147483648) <= c.v_int && c.v_int <= 2147483647)
+define RNGV(v) ((-2147483648) <= v && v <= 2147483647)
+define LEAFU(c) (acc(c.v_int) && acc(c.d_int) && !c.d_int)
+define LEAF(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNG(c))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+// struct S { int x; int y; }: member 0 is x, member 1 is y; struct T { struct S s; int z; }: member 0 is the slot of the nested S, member 1 is z
+define MX(s) loc(member(s, 0), 0)
+define MY(s) loc(member(s, 1), 0)
+define TS(t) loc(member(t, 0), 0)
+define TZ(t) loc(member(t, 1), 0)
+define SLEN(s) (len(member(s, 0)) == 1 && len(member(s, 1)) == 1)
+define SOWN(s) (SLEN(s) && LEAF(MX(s)) && LEAF(MY(s)))
+define TLEN(t) (len(member(t, 0)) == 1 && len(member(t, 1)) == 1)
+define TOWN(t) (TLEN(t) && SOWN(TS(t)) && LEAF(TZ(t)))
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+define OWNI(p, a) (ROOT(p) && LEAF(p) && LVF(p, a))
+
+
+// cerastes:trusted-contract allocation of a struct S local: a one-slot block; each member is a block of length 1 whose leaf is uninitialized with full permission; the liveness token is the root block's (record 0043 item 4)
+method alloc_struct_0_S() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures len(member(r, 0)) == 1 && acc(loc(member(r, 0), 0).v_int) && acc(loc(member(r, 0), 0).d_int) && !loc(member(r, 0), 0).d_int
+  ensures len(member(r, 1)) == 1 && acc(loc(member(r, 1), 0).v_int) && acc(loc(member(r, 1), 0).d_int) && !loc(member(r, 1), 0).d_int
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// struct S make(int a) requires(true) ensures(r, r.x == a && r.y == 2) { struct S s; s.x = a; s.y = 2; return s; }   (a struct result is one Viper result per leaf, each with its range)
+method f_make__0(p_a: Int) returns (res_m0: Int, res_m1: Int)
+  requires RNGV(p_a)
+  ensures RNGV(res_m0) && RNGV(res_m1)
+  ensures res_m0 == p_a && res_m1 == 2
+  decreases
+{
+  var s: Ref
+  s := alloc_struct_0_S()
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+  loc(member(s, 0), 0).v_int := p_a
+  loc(member(s, 0), 0).d_int := true
+  // return s;: every leaf is read (permission, flag), assigned to its result, then the scope exits
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) > none && perm(loc(member(s, 0), 0).d_int) > none
+  assert loc(member(s, 0), 0).d_int
+  res_m0 := loc(member(s, 0), 0).v_int
+  assert loc(member(s, 1), 0) != null
+  assert perm(loc(member(s, 1), 0).v_int) > none && perm(loc(member(s, 1), 0).d_int) > none
+  assert loc(member(s, 1), 0).d_int // <- fails
+  res_m1 := loc(member(s, 1), 0).v_int
+  assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+  assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+  assert perm(lvloc(block_of(s)).lv) == write
+  exhale acc(loc(member(s, 0), 0).v_int) && acc(loc(member(s, 0), 0).d_int) && acc(loc(member(s, 1), 0).v_int) && acc(loc(member(s, 1), 0).d_int) && acc(lvloc(block_of(s)).lv)
+  assert RNGV(res_m0) && RNGV(res_m1)
+  assert res_m0 == p_a
+  assert res_m1 == 2
+}
+
+// int use_make(void) ensures(r, r == 1) { struct S s = make(1); check(s.x == 1); check(s.y == 2); return s.x; }   (a call of a struct-returning function is a multi-target call)
+method f_use_make__1() returns (res: Int)
+  ensures RNGV(res)
+  ensures res == 1
+  decreases
+{
+  var s: Ref
+  var t__1_m0: Int
+  var t__1_m1: Int
+  s := alloc_struct_0_S()
+  assert RNGV(1)
+  t__1_m0, t__1_m1 := f_make__0(1)
+  // struct s = <call>: each result leaf is stored into its own allocated leaf, the flag set after the value
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+  loc(member(s, 0), 0).v_int := t__1_m0
+  loc(member(s, 0), 0).d_int := true
+  assert loc(member(s, 1), 0) != null
+  assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+  loc(member(s, 1), 0).v_int := t__1_m1
+  loc(member(s, 1), 0).d_int := true
+  // check(s.x == 1)
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) > none && perm(loc(member(s, 0), 0).d_int) > none
+  assert loc(member(s, 0), 0).d_int
+  assert loc(member(s, 0), 0).v_int == 1
+  // check(s.y == 2)
+  assert loc(member(s, 1), 0) != null
+  assert perm(loc(member(s, 1), 0).v_int) > none && perm(loc(member(s, 1), 0).d_int) > none
+  assert loc(member(s, 1), 0).d_int
+  assert loc(member(s, 1), 0).v_int == 2
+  // return s.x
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) > none && perm(loc(member(s, 0), 0).d_int) > none
+  assert loc(member(s, 0), 0).d_int
+  res := loc(member(s, 0), 0).v_int
+  assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+  assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+  assert perm(lvloc(block_of(s)).lv) == write
+  exhale acc(loc(member(s, 0), 0).v_int) && acc(loc(member(s, 0), 0).d_int) && acc(loc(member(s, 1), 0).v_int) && acc(loc(member(s, 1), 0).d_int) && acc(lvloc(block_of(s)).lv)
+  assert res == 1
+}

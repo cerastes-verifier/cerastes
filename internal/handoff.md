@@ -1,39 +1,39 @@
-# Handoff after M4.5c1 — struct objects (record 0043) (2026-11-02)
+# Handoff after M4.5c2a — struct values and struct storage (record 0044) (2026-11-03)
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
 rediscover, and holds only what is live (owner, 2026-10-26; consolidated again at M4.5b2b's start, 2026-11-02: §3 is
-regrouped by the session that consumes each note; updated at M4.5c1's start). The text before M4.5c1 is
-`git show 1bfa705:internal/handoff.md`, and before M4.5b2b `git show 38877b4:internal/handoff.md`, whose header names every
-earlier version (each note below keeps its origin in
+regrouped by the session that consumes each note; updated at M4.5c1's and M4.5c2a's starts). The text before M4.5c2a is
+`git show cbdcce5:internal/handoff.md`, before M4.5c1 `git show 1bfa705:internal/handoff.md`, and before M4.5b2b
+`git show 38877b4:internal/handoff.md`, whose header names every earlier version (each note below keeps its origin in
 brackets, so its full wording can be found there). Session plans approved from M4.5b1a on are in `.claude/plans/`; the
 notes a session consumes move into its plan.
 
 ## 1. State
 
-- **On `origin/main`** (`38877b4`): everything through M4.5b2a (PR #21 M4.5b1c3, PR #22 M4.5b2a).
-- **M4.5b2b** (record 0042) is pushed as `m4.5b2b-init-markers` (`1bfa705`); its PR is the owner's step 1 below. The local
-  `main` `853fccd` is a local merge of it.
-- **M4.5c1** (struct objects; record 0043; plan `.claude/plans/m4-5c1-struct-objects.md`) is done on branch
-  `m4.5c1-struct-objects` (local commits from `1bfa705`, so it stacks on b2b's branch) in the worktree
-  `.claude/worktrees/m4.5c1`; its baseline worktree `.claude/worktrees/m4.5c1-base` (detached at `1bfa705`) is no longer
-  needed. M4.5c is two sessions (question 90): M4.5c2 is next. Result in `internal/status.md`.
-- **Audits:** round 1 on record 0043 (four blocking items, B2 a `restrict` hole since 0037, all taken), round 2 on the
-  code (one blocking item, an initializer writing its own object, and three should-fix items, all taken), one re-audit
-  (all closed; one new should-fix, C++ compound-literal initializers, taken). What was not taken is in §3.
+- **On `origin/main`** (`8f45843`): everything through M4.5c1 (PR #23 M4.5b2b, PR #24 M4.5c1, merged during M4.5c2a).
+  The local `main` `eec198b` is an earlier local merge of c1.
+- **M4.5c2a** (struct values and struct storage; record 0044; plan `.claude/plans/m4-5c2a-struct-values.md`) is done on
+  branch `m4.5c2a-struct-values` (local commits from `cbdcce5`, so it stacks on PR #24) in the worktree
+  `.claude/worktrees/m4.5c2a`; its baseline worktree `.claude/worktrees/m4.5c2a-base` (detached at `cbdcce5`) is no longer
+  needed. M4.5c2 is two sessions (question 95): M4.5c2b is next. Result in `internal/status.md`.
+- **Audits:** round 1 on record 0044 (two blocking items, B1 the elements of `&(T){…}` unsequenced and B2 a `const`
+  literal's address, eight should-fix items, all taken), round 2 on the code (no blocking item; five should-fix items,
+  taken), one re-audit (no blocking item; the global-leaf loop rule outside `main`, taken). What was not taken is in §3.
 
 The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits behind upstream `main` (§4.1).
 
 ## 2. Owner steps
 
-1. **M4.5b2b's branch:** open its PR (`m4.5b2b-init-markers`, pushed); both CI jobs run the PR tier. After the merge,
-   `git merge --ff-only origin/main` in the main checkout (the local merge `853fccd` is then replaced), and `git worktree
-   remove .claude/worktrees/m4.5b2b` and `.claude/worktrees/m4.5b2b-base`.
-2. **M4.5c1's branch, after b2b's merge:** push it (`git -C .claude/worktrees/m4.5c1 push origin m4.5c1-struct-objects`)
-   and open its PR against `main` (its base is b2b's tip `1bfa705`, so once b2b is merged the PR shows only c1's commits);
-   both CI jobs run the PR tier (no Linux run in the session). After the merge, `git merge --ff-only origin/main` in the
-   main checkout and `git worktree remove .claude/worktrees/m4.5c1` and `.claude/worktrees/m4.5c1-base`.
-3. Then M4.5c2 (§4.2), or M4.5d1 once the vlibc repository exists.
+1. **After PR #24 (merged):** in the main checkout, `git reset --keep origin/main` on `main` (the local merge `eec198b` and
+   PR #24's merge `8f45843` have the same two parents, so a fast-forward is not possible), then `git worktree remove
+   .claude/worktrees/m4.5b2b-base`, `.claude/worktrees/m4.5c1` and `.claude/worktrees/m4.5c1-base`.
+2. **M4.5c2a's branch:** push it (`git -C .claude/worktrees/m4.5c2a push origin m4.5c2a-struct-values`)
+   and open its PR against `main` (its base is c1's tip `cbdcce5`, which `origin/main` contains, so the PR shows only
+   c2a's commits); both CI jobs run the PR tier (no Linux run in the session). After the merge, `git merge --ff-only
+   origin/main` in the main checkout and `git worktree remove .claude/worktrees/m4.5c2a` and
+   `.claude/worktrees/m4.5c2a-base`.
+3. Then M4.5c2b (§4.2), or M4.5d1 once the vlibc repository exists.
 
 ## 3. Open notes, by the session that consumes them
 
@@ -41,15 +41,20 @@ One line per note, its origin in brackets (session and audit item); the full wor
 Notes that a session consumes move into its plan's "Inputs" (M4.5b2b took the call's flag row, the registration rule for
 P4222's markers, P54 and the b2b design points).
 
-**M4.5c2 Struct values and places through a heap read** (M4.5c1 consumed the copies' flag note and the loop-row note)
-- Places reached through a heap read: `owns(**pp)`, `live(*pp)`, `**pp` in contracts (question 74, §4.2); a `T**` callee
-  cannot use the pointer it loads from `*pp` until then [b1c3].
-- Left to c2 by record 0043 item 15 (each pinned, naming M4.5c2): by-value struct parameters and results, `f().x`, struct
-  globals and `static` struct locals (`program_start` rows per leaf; struct-pointer globals already have their `WF_S` row,
-  audit round 2 S2), compound literals (`&(int){5}`, C++ `S s = (S){…}`), `S s = S{…}`/`S()`, written atoms on struct places
-  in loop invariants (0040 item 5 is per cell), a function's `decreases(p->x)`, `p->q->x` in contracts [c1].
+**M4.5c2b Places through a heap read** (M4.5c2a consumed by-value structs, struct globals and `static` struct locals,
+compound literals, `S{…}`/`S()` and `decreases(p->x)` into its plan)
+- Places reached through a heap read: `owns(**pp)`, `reads(**pp)`, `live(*pp)`, `**pp` and `*gp` in contracts, `owns(*gp)`
+  (question 74, §4.2); a `T**` callee cannot use the pointer it loads from `*pp` until then [b1c3].
+- `p->q->x` and `*s->q` in contracts [c1]; atoms and reads through a pointer member of a by-value struct (`owns(*s.q)`,
+  `*s.q`, `s.q->x`, `*r.q`) [c2a planning, question 95].
+- Written atoms on struct places in loop invariants (`owns(*q)` for `struct S *q`, `owns(q->x)`; 0040 item 5 is per cell),
+  rewritten together with atoms on cell pointers (question 99) [c1, c2a planning].
 - When `live(*pp)` and places through a heap read land, re-check `restrict_hazard` (audit round 2 S1 closed it for loaded
   struct pointers; the alias path reached `return *p` with value 2 and was stopped only by `lifetime`) [c1 audit 2 S1].
+- A by-value struct's pointer member cannot be used in its callee (`return s.q;` is `lifetime`): `live(s.q)` lands with
+  the heap-read places (documented) [c2a audit 2 N10]. `**pp` in a loop invariant stays rejected by its spelling, while
+  `p->q->x`, `*p->q` and `*gp` there are accepted and pinned (record 0044 item 12, P69): unify when c2b's places land
+  [c2a].
 
 **M4.5d1 vlibc**
 - P55: the attribute allow-list rejects a system declaration's attributes (`[[const]]`, `[[alloc_size]]`, `[[__cold__]]`)
@@ -131,6 +136,16 @@ function-pointer typedef (`typedef void (*fp)(int *p CERASTES_MUST_INIT);`) reac
   existing Viper) [M4.4b1 note 6].
 
 **M8 Inventory** (the warning sweep is an M8 entry in `plan.md`)
+- From M4.5c2a's planning (question 100): struct `?:`, comma and assignment values (`t = c ? s : u;`, `t = (f(), s);`,
+  `(t = f()).x`) stay rejected, over-strict [c2a planning].
+- From M4.5c2a (record 0044's M8 row): rejected or over-strict — a struct object argument, copy source or destination
+  through a loaded pointer or a base with a side effect (`g(*w->q)`, `g(*p++)`, `return *get();`, `(*pp)->t = f();`), a
+  compound literal in a loop condition, a `for` step or a `do` condition, a literal used as an lvalue without `&`,
+  `volatile`/`_Atomic` literals, `&h.x` as a global initializer, a nested member initialized from a struct value
+  (`{s, 1}`), in C++ a value aggregate with an effect beside another non-constant element and a folded `S{…}.x`, C++'s
+  `s = S{s.x++, 0}` (defined in C++17, rejected `unsequenced_modification` with a message saying so), a C++20
+  designated list skipping a nested member (`T{.z = 1}`), and a temporary with a nested struct member as an argument
+  inside a variable's initializer (`int r = get(T{{1, 2}, 3});`: EDG drops its braces there) [c2a, audits].
 - From M4.5c1 (record 0043): rejected or over-strict — out-of-order C designators (valid C; EDG #2904-D, C++ requires the
   order), brace elision over a nested struct (`-Wmissing-braces`), a nested braced element whose braces flag EDG drops
   (C++ `S s8{1, {s8.a, 0}}`, rejected as elision), a struct copy in a `for` step, `&s.x`/`&s.t` of an `uninit` struct
@@ -168,6 +183,14 @@ function-pointer typedef (`typedef void (*fp)(int *p CERASTES_MUST_INIT);`) reac
   (fine on macOS, Linux unchecked) [b2a audit 2 N5].
 
 **Standing** (no session; act when the code is next touched)
+- *From M4.5c2a:* a write by name to a member of a struct LOCAL or a by-value parameter's copy in a loop still reaches
+  every automatic place of its field (0043 item 11); globals got the precise rule (record 0044 item 8), locals would change
+  existing programs' Viper (completeness only) [c2a]. The lint's `Addr` rule for struct-global rows cannot tell two struct
+  types of one shape apart (the `.vpr` names no type on a global; the encoder and `check_program` match the types) [c2a
+  audit 2 S4]. A hidden compound-literal local is named by its type's spelling (`(struct S){...}`), not its source text;
+  a returned struct's dangling pointer leaf is reported without naming the leaf (`a.q`) [c2a audit 2 N9]. The Error
+  messages page and record 0043 item 7 had quoted a copy message ("copies `s`, whose member …") the tool never printed;
+  the page now quotes the printed one [c2a].
 - *Fail-closed corners from M4.5c1:* `overlap_pairs` compares only the two addresses when both pointee types are equal,
   the `one_type` path filter skips reads-sum terms, `f__wf`'s equal-ghost skip for one root with two paths: complete only
   while types prevent `p == &q->t`, a miss costing Silicon's own error (exit 3), never an assumed fact (record 0043 item
@@ -259,7 +282,7 @@ not taken go to §3); single-file runs while working (`build/cerastes verify` di
 builds serialized (`lockf build/<session>/build.lock cmake --build build/cmake`); `check.sh` at most twice; the EDG
 suites on the x86-64 host are their own session, but any x86-64 test run a session needs goes to `matt@clang4.cpp.al`
 automatically (owner, 2026-10-29: not Docker multi-arch on the Mac, which is only the fallback when the host is down).
-Record numbers are the next free ones when written (0043 is M4.5c1's, 0044 the next free one). The
+Record numbers are the next free ones when written (0044 is M4.5c2a's, 0045 the next free one). The
 approved plan is saved as `.claude/plans/<milestone>-<topic>.md` (plan.md, "Session protocol").
 
 Finished sessions: their plans are in `.claude/plans/` (from M4.5b1a on), their results in `internal/status.md` and the
@@ -313,12 +336,15 @@ six pre-approved self-test pins of questions 82 and 85; question 89's loop row i
 `->`, nested structs, pointers to members, braced initializers, copies inside a function (each member read, question 92),
 `struct S *` objects, contract atoms and values on struct places, P4222's markers on struct objects; its flips are
 question 93's; ports `malloc_block.c` (its `free(&local)` twin waits for M4.5d2) and `swap.c`'s `point_mirror`.
-**M4.5c2** (struct values and places through a heap read): by-value struct parameters and results (a struct value as the
-tuple of its members), `f().x`, struct globals and `static` struct locals (0041's scope row), and places reached through a
-heap read in contracts and invariants: `owns(**pp)`, `reads(**pp)`, `live(*pp)` and reads of `**pp` (question 74; b1c3
-rejects them, c1 re-messages them naming c2), `*gp` and `owns(*gp)`, `*s->q` of a pointer member, an atom on `*q` where
-`q` is a cell; compound literals are decided there. Owning fields (`[[cerastes::owning]]` target `d`) moved to M4.5d2
-(question 91).
+**M4.5c2 is two sessions** (owner, 2026-11-02, question 95). **M4.5c2a** (struct values and struct storage; record 0044;
+plan `.claude/plans/m4-5c2a-struct-values.md`) is done: by-value struct parameters and results (a struct value as the tuple of its
+leaves), `f().x`, C++ `S{…}`/`S()` as values, compound literals (question 96), struct globals and `static` struct locals,
+`decreases(p->x)`, `restrict` beside by-value structs; ports `call_in_struct_init.c` and `struct_assignment.c`.
+**M4.5c2b** (places through a heap read): `owns(**pp)`, `reads(**pp)`, `live(*pp)` and reads of `**pp` (question 74; b1c3
+rejects them, c1 and c2a re-message them naming c2b), `*gp` and `owns(*gp)`, `*s->q` and `p->q->x` of a pointer member, an
+atom on `*q` where `q` is a cell, atoms through a pointer member of a by-value struct, written struct atoms in loop
+invariants (question 99), the `restrict` re-check (§3). M4.5d2 needs it (owning fields point through a heap read). Owning
+fields (`[[cerastes::owning]]` target `d`) moved to M4.5d2 (question 91).
 
 **M4.5d1 vlibc** (needs the repository; any time after M4.5a, best after S5). The repository's layout
 (`include/vlibc/*.h`, the shim directory, `src/`, CMake, `LICENSE`, CI compiling every header with clang and GCC in both
@@ -606,6 +632,12 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
   `expect:` change and failed `check.sh`. After the first full run the files in the tree are the source of truth.
 - **A test that loses an `expect:` line** (pre-approved) keeps its line numbers with a comment in its place
   (M4.4c, the four `reject_assert_shape_*.c`).
+- **Builds during a suite run** (M4.5c2a): `lockf` serializes builds, not a build against a running `run_tests.py`; an
+  agent's rebuild replaced `build/cerastes` as the first suite run started. Tell every agent to hold builds before a
+  directory-wide run, and treat a run that overlapped a build as provisional.
+- **Generators and comment fixes** (M4.5c2a): a comment-only fix made by re-running a generator still re-ran it; the
+  agent then compared every generated file's `expect:` lines with its earlier single-run record (0 differed). Fix comments
+  by hand instead.
 
 ## 7. Acceptance
 
@@ -653,5 +685,15 @@ invalidation profile), 92 (a struct copy reads every member: an uninitialized on
 (c1's flips: `reject_struct.c` retired, `global_struct.c`'s `@ L8` line dropped, seven pins re-messaged). During
 M4.5c1: 94 (the new must-fail test `struct_bodiless_frame.c` drops its `check @ L22` line: after a call to a function
 whose contract fails framing, the caller's state is not checked further, 0037 item 7).
+
+At M4.5c2a's planning (2026-11-02, each the recommendation; recorded in its plan and record 0044): 95 (M4.5c2 is two
+sessions: c2a struct values and struct storage now, c2b places through a heap read next), 96 (compound literals: in C
+values and `&(T){…}` as a hidden local of the enclosing block, in C++ values only; storage-class and file-scope literals
+rejected), 97 (passing and returning a struct by value read every member, like a copy: a missing member is
+`uninitialized` at the call or the return), 98 (c2a's flips), 99 (written struct atoms in loop invariants move to c2b,
+their pin re-messaged), 100 (struct `?:`, comma and assignment values stay rejected, naming M8). During M4.5c2a: 101 (the
+VIR self-test rejection cases `struct_param_by_value` and `struct_result_by_value` retired for lowering cases), 102 (the
+expectations of new tests corrected after their first run, listed in the status entry), 103 (the VIR case
+`sglob_static_unheld`'s expected row index 0 → 3, and the VIR self-test step re-run alone instead of a third `check.sh`).
 
 No question is open.

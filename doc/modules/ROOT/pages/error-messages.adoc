@@ -413,9 +413,10 @@ uninitialized_argument_error.c:14: error: uninitialized: passes `&x` to `set`, w
 
 A structure's members each have their own value: reading a member that was never
 given one is reported at the read (`s.y`, `+p->y+`), and so is copying a structure
-one of whose members has no value, at the copy (`t = s;`: "copies `s`, whose
-member `s.y` may not have a value"), although C allows such a copy
-(xref:memory.adoc#structures[Structures]).
+one of whose members has no value, at the copy (`t = s;`), at a call that passes
+it by value (`f(s)`) and at a `return` that returns it (`return s;`), each with
+the member's message (`s.y` may be read here before it is given a value),
+although C allows such a copy (xref:memory.adoc#structures[Structures]).
 
 *How to fix it.* Give the object a value before the call, or, if the function gives
 it one, mark the parameter `cerastes::must_init`
@@ -521,7 +522,11 @@ pointer's value is used; the end of a lifetime at the closing brace, or at the
 
 A structure's members end with it: a pointer to `s.x` is dangling after the
 block of `s`, and the closing brace reports `s.x` when a function it was passed
-to kept it.
+to kept it. In C, the object of a compound literal ends with the block the
+literal is in: `+p = &(int){5};+` inside an `if` leaves `p` dangling after the `if`
+(a read through it is then `permission`, any other use `lifetime`).
+A structure returned by value whose pointer member points to one of the
+function's locals is reported at the caller's first use of that member.
 
 After its object ends, the value of a pointer is indeterminate in C and
 pass:[C++], and *any* use of it is undefined, not only a dereference: a

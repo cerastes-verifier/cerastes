@@ -920,6 +920,9 @@ void define_written_atoms();
 void define_globals();
 void define_init_markers();
 void define_struct_objects();
+void define_struct_values();
+void define_struct_literals();
+void define_struct_globals();
 }  // namespace
 
 #include "selftest_cases2.inc"
@@ -935,6 +938,7 @@ void define_struct_objects();
 #include "selftest_cases12.inc"
 #include "selftest_cases13.inc"
 #include "selftest_cases14.inc"
+#include "selftest_cases15.inc"
 
 namespace {
 
@@ -1116,6 +1120,9 @@ int main(int argc, char** argv) {
   define_globals();
   define_init_markers();
   define_struct_objects();
+  define_struct_values();
+  define_struct_literals();
+  define_struct_globals();
   int bad = 0;
   for (const Case& c : lowering_cases()) {
     std::string problem;

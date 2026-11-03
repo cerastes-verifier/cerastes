@@ -430,8 +430,11 @@ as for `invariant`). A measure on a function is a contract, so every declaration
 carries one must carry the same, and it is refused on a predicate. The same macros
 build the file with other compilers: `CERASTES_DECREASES` expands to nothing there.
 A function's measure may read `*p` for a pointer parameter `p` whose `requires`
-owns or reads it (`CERASTES_DECREASES(*p)`), read on entry like the rest of the
-contract; one that reads an object the `requires` does not give is reported as
+owns or reads it (`CERASTES_DECREASES(*p)`), a member of that object
+(`+CERASTES_DECREASES(p->count)+`) or of a global the `requires` names
+(`+CERASTES_DECREASES(g.count)+`), or a member of a structure passed by value
+(`+CERASTES_DECREASES(s.count)+`), read on entry like the rest of the contract;
+one that reads an object the `requires` does not give is reported as
 `permission` (xref:memory.adoc#contracts[Memory and ownership]).
 
 A measure before anything but a loop, or before a function's declaration instead of
@@ -543,7 +546,8 @@ one member (xref:memory.adoc#structures[Structures])
 | `old(e)`
 | `cerastes_old(e)`
 | the value of `e` on entry, in `ensures`; `e` is a parameter, `*p`, a member
-`+p->x+` of a parameter's structure, or a global
+`+p->x+` of a parameter's structure, a global, or a global structure's member
+`+g.x+`
 
 | `owns_range(p, n)`
 | (later)
@@ -554,9 +558,10 @@ one member (xref:memory.adoc#structures[Structures])
 | for every value of the first parameter of `body` (not supported yet)
 |===
 
-`owns` and `reads` name a global variable, or, like `live`, a pointer parameter, as `*p` or `p`, or a
-member of the structure a parameter points to (`+p->x+`, `+p->t+`, `+p->t.y+`; two atoms on one
-parameter must not overlap, as `+owns(*p) && owns(p->x)+` would), and may
+`owns` and `reads` name a global variable or a member of a global structure (`+g.x+`), or, like
+`live`, a pointer parameter, as `*p` or `p`, or a member of the structure a parameter points to
+(`+p->x+`, `+p->t+`, `+p->t.y+`; two atoms on one parameter must not overlap, as
+`+owns(*p) && owns(p->x)+` would), and may
 appear in a contract as a conjunct, after `p == NULL ||`, or as an arm of `?:`
 whose condition does not read memory. One parameter may be owned on one path and
 read on another (`c ? owns(*p) : reads(*p)`), never both on one path, and an

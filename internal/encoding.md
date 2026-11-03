@@ -484,6 +484,25 @@ lvloc(block_of(b))` against earlier roots; havoc reaches every leaf field a stru
 reach lowering as leaf `Deref`s into temporaries and leaf `Store`s (no VIR of their own). The markers apply per leaf
 (`must_init`'s return row names the missing member).
 
+**Struct values and struct storage (M4.5c2a, decision 0044).** A struct *value* is a tuple of leaves that exists in VIR
+only between producers (`Call` of a struct-returning function, `Aggregate(T, args)` with one argument per leaf,
+`Field(a, k)`, and in contracts `Formal`/`Result`/`Old(Formal)` under a `Field`) and consumers (a call argument, `Return`,
+a struct `Store`, an expression statement of a `Call`, a `Field`; `check_program` admits nothing else, and lowering's
+poison `LV` makes any other use an internal error). Lowering carries a struct value as `LV::leaves`; a by-value parameter
+is one formal per leaf (`p_s__k_m<i>`, one `_m<i>` per path element) with each leaf's range or `WF`/`WF_S` as a
+`requires`, its copy a struct block allocated at entry and filled from the formals through `Ref` temporaries; a struct
+result is one result per leaf (`res_m<i>`) and a call of it a multi-target call (`t__n_m0, t__n_m1 := f(…)`,
+`CallItem::targets`, `LStmt::targets`), with `result_splits` per pointer leaf. `ret()` assigns the result leaves before
+the scope exits; a struct `Store` evaluates its value's leaves into temporaries, then checks the base once and writes
+every destination leaf (permission, value, flag), and `writes_in` counts it as a write of every leaf field. An object
+argument or `return s;` is an `Aggregate` of leaf `Deref`s (question 97: every member read). C++ `S{…}`/`S()` and C
+compound literals used as values are `Aggregate`s; `&(T){…}` in C is a hidden address-taken local declared at the start
+of the literal's block, its evaluation `Comma(StoreE(AddrOf(cl), Aggregate(…)), AddrOf(cl))` (the elements unsequenced,
+then the stores). A struct global's `Global::leaves` give one initial value per leaf; the global facts gain its member
+lengths and slot facts (`struct_lens`; S34: no `parent_of` fact is needed to tell two globals' blocks apart);
+`program_start` has one row per struct global (every leaf's permissions, flag and value, then one `lv`); in `main` its
+leaves are loop places; a `static` struct local is such a global with an implicit struct `owns`.
+
 ## 4. Viper shape
 
 ```

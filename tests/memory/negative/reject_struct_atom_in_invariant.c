@@ -1,7 +1,7 @@
 // expect: rejected cerastes-unsupported_annotation @ L17
 // mode: c23, c++20
 // twin: tests/memory/struct_local.c
-// Pins: 0043 item 15: a written atom on a struct place in a loop invariant is rejected (0040 item 5's machinery is per cell; M4.5c2)
+// Pins: 0043 item 15, record 0044 item 1 (question 99): a written atom on a struct place in a loop invariant is rejected (0040 item 5's machinery is per cell; M4.5c2b)
 #include <cerastes.h>
 
 struct S {

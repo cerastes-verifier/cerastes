@@ -60,7 +60,39 @@ std::string formal_name(const Function& f, int k) {
   const std::string& n = f.params[static_cast<size_t>(k)].name;
   return "p_" + sanitize(n.empty() ? "arg" : n) + "__" + std::to_string(k);
 }
-std::string local_name(const Var& v) { return "v_" + sanitize(v.name) + "__" + std::to_string(v.id); }
+// A compound literal's hidden local (Var::compound_literal, decision 0044 item 7) is named by the literal's spelling; its Viper name is `v_lit__<id>`.
+std::string local_name(const Var& v) {
+  if (v.compound_literal) return "v_lit__" + std::to_string(v.id);
+  return "v_" + sanitize(v.name) + "__" + std::to_string(v.id);
+}
+// Decision 0044 items 3 and 4: a struct value is the tuple of its leaves (struct_leaves order).  A leaf's Viper name is its parameter's (or `res`) with one
+// `_m<k>` per member index on its path: `p_s__0_m0`, `p_s__0_m1_m0`, `res_m1`.
+std::string path_suffix(const std::vector<int>& path) {
+  std::string r;
+  for (int k : path) r += "_m" + std::to_string(k);
+  return r;
+}
+// The number of leaves of a struct (1 for any other type): the width of a value's tuple.
+size_t leaf_count(const Type& t) {
+  if (!t.is_struct()) return 1;
+  size_t n = 0;
+  for (const StructMember& m : t.struct_type->members) n += leaf_count(m.type);
+  return n;
+}
+// The position of member `k` of struct `st` in its tuple of leaves, and its width.
+std::pair<size_t, size_t> leaf_span(const StructType& st, int k) {
+  size_t start = 0;
+  for (int i = 0; i < k; ++i) start += leaf_count(st.members[static_cast<size_t>(i)].type);
+  return {start, leaf_count(st.members[static_cast<size_t>(k)].type)};
+}
+// A struct with a pointer leaf: its value carries pointers the caller must treat as uses (0037 item 3).
+bool has_pointer_leaf(const Type& t) {
+  if (!t.is_struct()) return t.is_ptr();
+  for (const StructMember& m : t.struct_type->members)
+    if (has_pointer_leaf(m.type)) return true;
+  return false;
+}
+const char* kPoison = "__struct_value__";  // the E of a struct-typed LV: a value of a struct is its `leaves`; one that reaches another consumer prints this (decision 0044 item 2)
 // The Viper type of a VIR type: a pointer is a Ref (decision 0032 item 5).
 // A struct has no value of its own (decision 0043 item 3); its only Viper variable is the Ref of its slot, which is what a struct local holds.
 low::LType ltype(const Type& t) { return t.is_bool() ? low::LType::Bool : ((t.is_ptr() || t.is_struct()) ? low::LType::Ref : low::LType::Int); }
@@ -336,8 +368,13 @@ enum class Half { Exact, Base };
 const Ids& half_of(const Deps& d, Half h) { return h == Half::Exact ? d.ex : d.base; }
 
 struct LV {
+  LV() = default;
+  LV(E e_, Deps d_) : e(std::move(e_)), dep(std::move(d_)) {}
   E e;      // the Viper value
   Deps dep; // the fixed points whose results it mentions (D of each, so the set is closed)
+  // A STRUCT value (decision 0044 item 2): its leaves in struct_leaves order, depth first; then `e` is a poison variable (kPoison) that makes any consumer
+  // other than item 2's an internal error (see Lowerer::struct_value).  Empty for every other value.
+  std::vector<E> leaves;
 };
 
 // The items of a full expression are templates over the set type: lowering builds them with `Deps` (both halves), `flush` projects
@@ -363,6 +400,7 @@ struct BasicObl : OblCore {
 struct CallItem {
   std::string method;
   std::string target;  // empty for a void call
+  std::vector<std::string> targets;  // a struct result: one target per leaf (decision 0044 item 4); `target` is then empty
   std::vector<E> args;
   low::Check check;
   bool has_termination = false;
@@ -472,9 +510,12 @@ FlatFull project(const Full& full, Half h) {
 
 // How Local/Formal/Result are read.
 struct Env {
-  std::vector<E> formals;          // Formal(k): a name (contract of the function itself) or an argument value
+  std::vector<E> formals;          // Formal(k): a name (contract of the function itself) or an argument value (null for a by-value struct parameter)
   std::vector<Deps> formal_dep;    // the set of each (empty: none)
-  E result;                        // Result
+  E result;                        // Result (null for a struct result)
+  // Decision 0044 items 3-4: the leaves of each by-value struct parameter (empty for the others), and of a struct result.
+  std::vector<std::vector<E>> formal_leaves;
+  std::vector<E> result_leaves;
 };
 
 class Lowerer {
@@ -489,6 +530,7 @@ class Lowerer {
     check_cycles();
     alloc_methods();
     program_start_method();
+    check_poison();
     LowerResult r;
     r.program = std::move(out_);
     r.errors = std::move(errors_);
@@ -497,6 +539,39 @@ class Lowerer {
   }
 
  private:
+  // Decision 0044 item 2: a struct value (LV::leaves) that reached a consumer other than item 2's carries the poison variable into the output; no Viper may
+  // mention it (an internal error, exit 3, never a silent truncation).
+  static bool poison_in(const E& e) {
+    if (e == nullptr) return false;
+    if (e->kind == low::LExpr::Kind::Var && e->text == kPoison) return true;
+    if (poison_in(e->a) || poison_in(e->b) || poison_in(e->c)) return true;
+    for (const E& x : e->args)
+      if (poison_in(x)) return true;
+    return false;
+  }
+  static bool poison_in(const std::vector<low::LStmt>& body) {
+    for (const low::LStmt& s : body) {
+      if (poison_in(s.expr)) return true;
+      for (const E& x : s.args)
+        if (poison_in(x)) return true;
+      for (const E& x : s.decreases)
+        if (poison_in(x)) return true;
+      for (const low::LInvariant& i : s.invariants)
+        if (poison_in(i.expr)) return true;
+      if (poison_in(s.then_body) || poison_in(s.else_body) || poison_in(s.stmts)) return true;
+    }
+    return false;
+  }
+  void check_poison() {
+    for (const low::LMethod& m : out_.methods) {
+      bool bad = poison_in(m.body);
+      for (const low::LClause& c : m.requires_) bad = bad || poison_in(c.expr);
+      for (const low::LClause& c : m.ensures_) bad = bad || poison_in(c.expr);
+      for (const E& d : m.decreases_) bad = bad || poison_in(d);
+      if (bad) internal_error(SrcLoc{}, "a struct value reached a consumer lowering does not take (decision 0044 item 2) in `" + m.name + "`");
+    }
+  }
+
   // The trusted allocation of each cell type used (decision 0032 item 4; 0028 item 17), before every other method: a fresh one-slot block, its
   // cell uninitialized (full permission to the value and the flag, the flag false), and its liveness cell with `lvloc(b) == loc(b, -2)`.
   // The map rows of its clauses are at the first address-taken declaration of the type.
@@ -633,6 +708,32 @@ class Lowerer {
     for (const Global& g : prog_.globals()) {
       const E recv = global_ref(g.id);
       const Type& t = g.type;
+      if (t.is_struct()) {  // decision 0044 item 8: one row, a conjunct per leaf (each with its own initial value), then the one liveness cell
+        E all;
+        const std::vector<StructLeaf> ls = struct_leaves(*t.struct_type);
+        for (size_t i = 0; i < ls.size(); ++i) {
+          const E cell = chain_ref(recv, ls[i].path);
+          const Type& lt = ls[i].type;
+          const std::string lsfx = use_cell_type(lt);
+          E leaf = low::and_(low::and_(low::acc(cell, "v_" + lsfx), low::acc(cell, "d_" + lsfx)), cell_flag(cell, lt));
+          const GlobalLeaf dflt;
+          const GlobalLeaf& gl = i < g.leaves.size() ? g.leaves[i] : dflt;
+          switch (gl.kind) {
+            case GlobalInit::Value: leaf = low::and_(leaf, low::bin(low::BinOp::Eq, cell_value(cell, lt), literal_of(lt, gl.value))); break;
+            case GlobalInit::Null: leaf = low::and_(leaf, low::bin(low::BinOp::Eq, cell_value(cell, lt), low::null_())); break;
+            case GlobalInit::Addr:
+              leaf = low::and_(leaf, low::bin(low::BinOp::Eq, cell_value(cell, lt), gl.target != nullptr ? global_ref(gl.target->id) : low::null_()));
+              break;
+            case GlobalInit::Unknown:
+              if (const E r = cell_range_inv(cell, lt)) leaf = low::and_(leaf, r);
+              break;
+          }
+          all = low::and_(all, leaf);
+        }
+        all = low::and_(all, low::acc(low::dom("lvloc", {global_block(g.id)}), "lv"));
+        m.ensures_.push_back(clause(all, g.loc, "`" + g.c_name + "`"));
+        continue;
+      }
       const std::string sfx = use_cell_type(t);
       E row = low::and_(low::and_(low::acc(recv, "v_" + sfx), low::acc(recv, "d_" + sfx)), cell_flag(recv, t));
       switch (g.init_kind) {
@@ -1119,6 +1220,14 @@ class Lowerer {
     out.push_back(std::move(c));
   }
 
+  // How a message names a cell or one of its members (`text`): `x`, or for the hidden object of a compound literal (Var::compound_literal, decision 0044 item 7: the encoder names the
+  // local by the literal's spelling) "the compound literal `(struct S){1, 2}`", "a member of the compound
+  // literal `...`" for a member: invariant 7, the hidden local's own name is never printed.
+  static std::string object_phrase(const Var& x, const std::string& text) {
+    if (!x.compound_literal) return "`" + text + "`";
+    return text == x.name ? "the compound literal `" + x.name + "`" : "a member of the compound literal `" + x.name + "`";
+  }
+
   // Leaving the scope of `cells` (decision 0032 item 8): full permission to each cell, its flag and its liveness cell is back (`lifetime`),
   // then all three are exhaled; the cells in reverse declaration order.
   void scope_exit(std::vector<low::LStmt>& out, const std::vector<const Var*>& cells, const SrcLoc& at) {
@@ -1129,11 +1238,11 @@ class Lowerer {
         E gone;
         for (const Cell& c : leaf_cells(r, *x.type.struct_type, x.name, false)) {
           emit_assert(out, may_write(c.recv, c.type, false),
-                      meta("lifetime", at, "the address of `" + c.text + "` may still be in use when its lifetime ends"));
+                      meta("lifetime", at, "the address of " + object_phrase(x, c.text) + " may still be in use when its lifetime ends"));
           gone = low::and_(gone, low::and_(low::acc(c.recv, "v_" + cell_suffix(c.type)), low::acc(c.recv, "d_" + cell_suffix(c.type))));
         }
         emit_assert(out, low::bin(low::BinOp::Eq, live_perm(r), low::write_perm()),
-                    meta("lifetime", at, "the address of `" + x.name + "` may still be in use when its lifetime ends"));
+                    meta("lifetime", at, "the address of " + object_phrase(x, x.name) + " may still be in use when its lifetime ends"));
         low::LStmt ex;
         ex.kind = low::LStmt::Kind::Exhale;
         ex.expr = low::and_(gone, low::acc(live_cell(r), "lv"));
@@ -1141,7 +1250,7 @@ class Lowerer {
         continue;
       }
       emit_assert(out, may_write(r, x.type, true),
-                  meta("lifetime", at, "the address of `" + x.name + "` may still be in use when its lifetime ends"));
+                  meta("lifetime", at, "the address of " + object_phrase(x, x.name) + " may still be in use when its lifetime ends"));
       low::LStmt ex;
       ex.kind = low::LStmt::Kind::Exhale;
       ex.expr = low::bin(low::BinOp::And, low::bin(low::BinOp::And, low::acc(r, "v_" + cell_suffix(x.type)), low::acc(r, "d_" + cell_suffix(x.type))),
@@ -1281,6 +1390,11 @@ class Lowerer {
   }
 
   static bool is_global_addr(const Expr& a) { return a.kind == Expr::Kind::GlobalAddr && a.global != nullptr; }
+  // The address names a global or a member of one (`g`, `g.x`, `g.t.y`): the messages say what the contract needs (decision 0044 item 8).
+  static bool rooted_at_global(const Expr& a) {
+    const Expr* root = member_root(&a, nullptr);
+    return root != nullptr && root->kind == Expr::Kind::GlobalAddr && root->global != nullptr;
+  }
 
   // `*p` as a read (decision 0032 item 6): the null check, the permission check (which is also the liveness check of this use, 0028 item
   // 3a), the flag; the value `p.v_<t>`.
@@ -1298,7 +1412,7 @@ class Lowerer {
           meta("null-dereference", e.loc, "dereferences " + quoted(ptr_text, "the pointer") + ", which may be null"));
     obl(full, guard, gdep, may_read(p.e, t), p.dep,
         meta("permission", e.loc,
-             is_global_addr(*e.a) ? "reads `" + place + "` without owning it: `" + fn_.f->c_name + "` needs `reads(" + place + ")` or `owns(" + place + ")` in its contract"
+             rooted_at_global(*e.a) ? "reads `" + place + "` without owning it: `" + fn_.f->c_name + "` needs `reads(" + place + ")` or `owns(" + place + ")` in its contract"
                                   : "reads " + quoted(place, "the object the pointer points to") + " without owning it: the object it points to may have ended"));
     obl(full, guard, gdep, cell_flag(p.e, t), p.dep,
         meta("uninitialized", e.loc, quoted(place, "the object the pointer points to") + " may be read here before it is given a value"));
@@ -1355,7 +1469,63 @@ class Lowerer {
   // `*addr = value;` and its compound forms (decision 0032 items 6 and 9): the address and the value in one full expression, then (a
   // non-variable address copied into a Ref temporary) the null check, the write permission on both fields, the two writes.  A compound
   // store's value reads `*addr` through the same node: the pointer is lowered once and the read reuses its value (`shared_`).
+  // `*addr = <struct value>;` (decision 0044 item 5): the address and the value in one full expression (the value a call, an aggregate or a member chain over a
+  // call), every value leaf into a temporary before the first destination leaf is written (`s = (struct S){s.y, s.x}`), then the base's null check once and, per
+  // leaf, its write permission and the two field writes through a Ref temporary.
+  void struct_store(const Stmt& s, std::vector<low::LStmt>& out) {
+    const StructType& st = *s.expr->type.struct_type;
+    StoreTarget target;
+    target.addr = s.addr;
+    target.loc = s.loc;
+    target.st = &st;
+    const bool member = s.addr->kind == Expr::Kind::MemberAddr;  // `p->t = f();`: the null check is the chain's (decision 0043 item 5)
+    if (member) place_nodes_[s.addr] = s.loc;
+    agg_wf_ = true;
+    const std::vector<LV> vs = full_exprs({s.addr, s.expr}, out, nullptr, false, &target, nullptr, false, 1, true);
+    agg_wf_ = false;
+    E base = vs[0].e;
+    if (base->kind != low::LExpr::Kind::Var) {
+      const std::string t = new_temp(low::LType::Ref);
+      assign(out, t, base);
+      base = low::var(t);
+    }
+    const auto [root_text, arrow] = struct_dest_root(*s.addr);
+    const std::vector<StructLeaf> plain = struct_leaves(st);
+    const std::vector<StructLeaf> named = struct_leaves(st, root_text, arrow);
+    if (vs[1].leaves.size() != plain.size()) {
+      internal_error(s.loc, "a struct store whose value has a different number of leaves than its destination reached lowering");
+      return;
+    }
+    if (!member)
+      emit_assert(out, low::bin(low::BinOp::Ne, base, low::null_()),
+                  meta("null-dereference", s.loc, "dereferences " + quoted(s.addr->c_text, "the pointer") + ", which may be null"));
+    std::vector<E> values;
+    for (size_t i = 0; i < plain.size(); ++i) {
+      E v = vs[1].leaves[i];
+      if (v->kind != low::LExpr::Kind::Var) {
+        const std::string t = new_temp(ltype(plain[i].type));
+        assign(out, t, v);
+        v = low::var(t);
+      }
+      values.push_back(v);
+    }
+    for (size_t i = 0; i < plain.size(); ++i) {
+      const std::string t = new_temp(low::LType::Ref);
+      assign(out, t, chain_ref(base, plain[i].path));
+      emit_assert(out, may_write(low::var(t), plain[i].type, false),
+                  meta("permission", s.loc,
+                       rooted_at_global(*s.addr)
+                           ? "writes `" + named[i].text + "` without owning it: `" + fn_.f->c_name + "` needs `owns(" + named[i].text + ")` in its contract"
+                           : "writes " + quoted(named[i].text, "the object the pointer points to") + " without owning it: the object it points to may have ended"));
+      write_fields(out, t, plain[i].type, values[i]);
+    }
+  }
+
   void store(const Stmt& s, std::vector<low::LStmt>& out) {
+    if (s.expr->type.is_struct()) {
+      struct_store(s, out);
+      return;
+    }
     const bool compound = shares_node(*s.expr, s.addr);  // the value reads `*addr` through the same node: the pointer is evaluated once
     StoreTarget target;
     target.addr = s.addr;
@@ -1378,7 +1548,7 @@ class Lowerer {
                   meta("null-dereference", s.loc, "dereferences " + quoted(ptr_text, "the pointer") + ", which may be null"));
     emit_assert(out, may_write(recv, t, false),
                 meta("permission", s.loc,
-                     is_global_addr(*s.addr)
+                     rooted_at_global(*s.addr)
                          ? "writes `" + place + "` without owning it: `" + fn_.f->c_name + "` needs `owns(" + place + ")` in its contract"
                          : "writes " + quoted(place, "the object the pointer points to") + " without owning it: the object it points to may have ended"));
     write_fields(out, recv->text, t, vs[1].e);
@@ -1736,6 +1906,8 @@ class Lowerer {
       out_.memory = true;
       r = low::and_(r, low::and_(low::bin(low::BinOp::Eq, low::dom("len", {b}), low::int_lit("1")),
                                  low::bin(low::BinOp::Eq, low::dom("lvloc", {b}), low::dom("loc", {b, low::int_lit("-2")}))));
+      // A struct global (decision 0044 item 8): the member lengths of every slot of `loc(GB_g(), 0)` and the slot facts, right after its own facts (WF_S needs them)
+      if (g.type.is_struct()) r = low::and_(r, struct_lens(global_ref(g.id), *g.type.struct_type));
     }
     return r;
   }
@@ -1871,6 +2043,33 @@ class Lowerer {
     return it->second;
   }
   int key_of_cell(const Var& v) { return key_id("c:" + std::to_string(v.id)); }
+  // The root spelling of the struct object a struct store writes, and whether its members are reached by `->`: `x` of `&x`, `p->t` of `&p->t`, `g` of `&g`, `p` of `p`.
+  static std::pair<std::string, bool> struct_dest_root(const Expr& addr) {
+    if (addr.kind == Expr::Kind::GlobalAddr && addr.global != nullptr) return {addr.global->c_name, false};
+    if (addr.kind == Expr::Kind::MemberAddr) return {place_text(addr), false};
+    if (addr.kind == Expr::Kind::AddrOf && !addr.c_text.empty() && addr.c_text[0] == '&') return {addr.c_text.substr(1), false};
+    return {addr.c_text, true};
+  }
+
+  // The key of the leaf at `more` below the struct object the address `a` names (decision 0043 item 12: `root.path`); an object of its own when the root is a pointer.
+  int key_of_addr_leaf(const Expr& a, const std::vector<int>& more) {
+    std::string k;
+    std::vector<int> path;
+    if (a.kind == Expr::Kind::AddrOf && a.var != nullptr && a.var->address_taken) {
+      k = "c:" + std::to_string(a.var->id);
+    } else if (a.kind == Expr::Kind::GlobalAddr && a.global != nullptr) {
+      k = "g:" + std::to_string(a.global->id);
+    } else if (a.kind == Expr::Kind::MemberAddr) {
+      const Expr* root = member_root(&a, &path);
+      if (root != nullptr && root->kind == Expr::Kind::AddrOf && root->var != nullptr && root->var->address_taken) k = "c:" + std::to_string(root->var->id);
+      else if (root != nullptr && root->kind == Expr::Kind::GlobalAddr && root->global != nullptr) k = "g:" + std::to_string(root->global->id);
+    }
+    if (k.empty()) return -1000000 - (++next_other_key_);
+    for (int x : path) k += "." + std::to_string(x);
+    for (int x : more) k += "." + std::to_string(x);
+    return key_id(k);
+  }
+
   // The object a write or a read through the pointer expression `a` names (decision 0039 item 2): `&x` is the cell x, a pointer variable `v` is `*v`,
   // anything else is an object of its own.
   int key_of_addr(const Expr& a) {
@@ -1933,7 +2132,13 @@ class Lowerer {
   void mem_scan(const Expr* e) {
     if (e == nullptr) return;
     if (e->kind == Expr::Kind::AssignE && e->var != nullptr && e->var->address_taken) mem_w_.insert(fkey(e->var->type));
-    if (e->kind == Expr::Kind::StoreE) mem_w_.insert(fkey(e->type));
+    if (e->kind == Expr::Kind::StoreE) {
+      if (e->type.is_struct()) {  // decision 0044 item 7: a struct write is a write of every leaf field
+        for (const StructLeaf& l : struct_leaves(*e->type.struct_type)) mem_w_.insert(fkey(l.type));
+      } else {
+        mem_w_.insert(fkey(e->type));
+      }
+    }
     if (e->kind == Expr::Kind::Call && e->callee != nullptr)
       for (const std::string& f : memory_fields(*e->callee)) ++mem_calls_[f];
     for (const Expr* x : {e->a, e->b, e->c}) mem_scan(x);
@@ -2090,10 +2295,105 @@ class Lowerer {
     return {low::var(tmp), slot};
   }
 
+  // `*c := <struct value>` used as a value (decision 0044 item 7: the store of a compound literal `&(T){...}`, the left operand of the comma `(*cl := {...}, &cl)`;
+  // check_program admits exactly that shape): the address and the elements are unsequenced operands of the full expression, every element is evaluated first
+  // (audit B1), and then every leaf of the destination is written, zero leaves included.  Like `struct_store` inside an expression: a write access per destination
+  // leaf (the sequencer's keys), the value leaves into temporaries first, per leaf the write permission as an obligation with the write's set, then the leaf
+  // writes through Ref temporaries as one movable `Store` effect.  There is no null check (the address is a hidden local's), and the node's own value, a struct, is not used.
+  LV struct_cell_write(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full) {
+    if (guard != nullptr) {
+      internal_error(e.loc, "an effect in a conditionally evaluated pure operand reached lowering");
+      return struct_value({}, {});
+    }
+    if (!in_full_) {
+      internal_error(e.loc, "a write inside an expression outside a full expression reached lowering");
+      return struct_value({}, {});
+    }
+    if (e.c == nullptr || e.a == nullptr || e.yields_old || e.b != nullptr) {
+      internal_error(e.loc, "a struct write used as a value that is not a plain store reached lowering");
+      return struct_value({}, {});
+    }
+    const StructType& st = *e.type.struct_type;
+    const size_t effect_from = full.effects.size(), obl_from = full.obls.size();
+    const LV addr = lower(*e.c, env, guard, gdep, full);
+    agg_wf_ = true;  // a pointer element stored into a pointer leaf must be well-formed (decision 0040 item 2)
+    const LV stored = lower(*e.a, env, guard, gdep, full);
+    agg_wf_ = false;
+    if (!is_aggregate_value(*e.a)) struct_ptr_uses(*e.a, stored, guard, gdep, full, true);
+    const std::vector<StructLeaf> plain = struct_leaves(st);
+    if (stored.leaves.size() != plain.size()) {
+      internal_error(e.loc, "a struct write whose value has a different number of leaves than its destination reached lowering");
+      return struct_value({}, {});
+    }
+    const std::pair<std::string, bool> root = struct_dest_root(*e.c);
+    const std::vector<StructLeaf> named = struct_leaves(st, root.first, root.second);
+    const Deps operands = since(full, effect_from, obl_from);
+    std::vector<int> keys;
+    Deps wset = join(join(floor_, stored.dep), join(addr.dep, operands));
+    for (const StructLeaf& l : plain) {
+      keys.push_back(key_of_addr_leaf(*e.c, l.path));
+      const auto la = full.last_access.find(keys.back());
+      if (la != full.last_access.end()) wset = join(wset, la->second);
+    }
+    Effect fx;
+    fx.kind = Effect::Kind::Store;
+    for (size_t i = 0; i < plain.size(); ++i) {
+      Acc acc;
+      acc.key = keys[i];
+      acc.field = fkey(plain[i].type);
+      acc.write = true;
+      acc.place = chain_ref(addr.e, plain[i].path);
+      acc.text = named[i].text;
+      acc.dep = addr.dep;
+      acc.loc = e.loc;
+      register_access(std::move(acc), full, nullptr);
+    }
+    // Every element's value into a temporary before the first leaf is written (an element may read a leaf of the destination's own object through an alias).
+    std::string recv_name;
+    if (addr.e->kind == low::LExpr::Kind::Var) {
+      recv_name = addr.e->text;
+    } else {
+      recv_name = new_temp(low::LType::Ref);
+      assign(fx.stmts, recv_name, addr.e);
+    }
+    const E base = low::var(recv_name);
+    std::vector<E> values;
+    for (size_t i = 0; i < plain.size(); ++i) {
+      E v = stored.leaves[i];
+      if (v->kind != low::LExpr::Kind::Var) {
+        const std::string t = new_temp(ltype(plain[i].type));
+        assign(fx.stmts, t, v);
+        v = low::var(t);
+      }
+      values.push_back(v);
+    }
+    for (size_t i = 0; i < plain.size(); ++i) {
+      const E place = chain_ref(base, plain[i].path);
+      obl(full, nullptr, {}, may_write(place, plain[i].type, false), wset,
+          meta("permission", e.loc,
+               "writes " + (e.c->kind == Expr::Kind::AddrOf && e.c->var != nullptr ? object_phrase(*e.c->var, named[i].text) : quoted(named[i].text, "a member of the compound literal")) +
+                   " without owning it: its object may have ended"));
+      const std::string t = new_temp(low::LType::Ref);
+      assign(fx.stmts, t, place);
+      write_fields(fx.stmts, t, plain[i].type, values[i]);
+    }
+    fx.deps = wset;
+    fx.seq = full.next_seq++;
+    for (size_t i = 0; i < plain.size(); ++i) {
+      fx.writes.insert(keys[i]);
+      fx.tags.push_back(MemTag{keys[i], fkey(plain[i].type), false, true, path_, {}});
+      full.last_write[keys[i]] = wset;
+    }
+    full.effects.push_back(std::move(fx));
+    for (int k : keys) touch(full, k, wset);
+    return struct_value(values, wset);
+  }
+
   // A write of a cell used as a value (`AssignE` of a cell, `StoreE`; decision 0039 item 2): the operands, then the obligations with the write's
   // set (the null check for a pointer, the write permission), then the write as a movable effect.  The set holds the comma floor, the operands' sets,
   // every fixed point created in the operands (both halves, audit S3) and every earlier access of the key.
   LV cell_write(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full) {
+    if (e.kind == Expr::Kind::StoreE && e.type.is_struct()) return struct_cell_write(e, env, guard, gdep, full);
     if (guard != nullptr) {
       internal_error(e.loc, "an effect in a conditionally evaluated pure operand reached lowering");
       return {low::int_lit("0"), {}};
@@ -2155,7 +2455,7 @@ class Lowerer {
           meta("null-dereference", e.loc, "dereferences " + quoted(e.c->c_text, "the pointer") + ", which may be null"));
     obl(full, nullptr, {}, may_write(addr.e, t, false), wset,
         meta("permission", e.loc,
-             store ? (is_global_addr(*e.c) ? "writes `" + text + "` without owning it: `" + fn_.f->c_name + "` needs `owns(" + text + ")` in its contract"
+             store ? (rooted_at_global(*e.c) ? "writes `" + text + "` without owning it: `" + fn_.f->c_name + "` needs `owns(" + text + ")` in its contract"
                                            : "writes " + quoted(text, "the object the pointer points to") + " without owning it: the object it points to may have ended")
                    : "writes `" + text + "` without owning it: a callee may have kept its object"));
     Effect fx;
@@ -2220,9 +2520,11 @@ class Lowerer {
         return {low::var(var_name(*e.var)), {}};
       case Expr::Kind::Formal: {
         const size_t k = static_cast<size_t>(e.index);
+        if (e.type.is_struct()) return struct_value(env.formal_leaves[k], k < env.formal_dep.size() ? env.formal_dep[k] : Deps{});
         return {env.formals[k], k < env.formal_dep.size() ? env.formal_dep[k] : Deps{}};
       }
       case Expr::Kind::Result:
+        if (e.type.is_struct()) return struct_value(env.result_leaves, {});
         return {env.result, {}};
       case Expr::Kind::Old:
         if (cmode_ != CMode::None && reads_heap(*e.a)) {  // old(*p): the cell's value on entry (decision 0037 item 5)
@@ -2297,6 +2599,8 @@ class Lowerer {
         }
         return {global_ref(e.global->id), {}};
       case Expr::Kind::Deref: return deref(e, env, guard, gdep, full);
+      case Expr::Kind::Field: return field_of(e, env, guard, gdep, full);
+      case Expr::Kind::Aggregate: return aggregate(e, env, guard, gdep, full);
       case Expr::Kind::Atom:
         if (cmode_ == CMode::Inv) return {low::bool_lit(true), {}};  // a written atom's rows are the loop's own (decision 0040 item 5)
         if (cmode_ == CMode::None) {
@@ -2311,6 +2615,54 @@ class Lowerer {
     }
     internal_error(e.loc, "unknown expression kind");
     return {low::int_lit("0"), {}};
+  }
+
+  // ---- struct values (decision 0044 item 2) ----
+
+  // A struct value as an LV: its leaves, and the poison `e` (a struct value that reaches a consumer other than item 2's prints it; `check_poison` makes that an internal error).
+  static LV struct_value(std::vector<E> leaves, const Deps& dep) {
+    LV r;
+    r.e = low::var(kPoison);
+    r.dep = dep;
+    r.leaves = std::move(leaves);
+    return r;
+  }
+
+  // `a.m` (decision 0044 item 2): the member's leaf (or the leaves of a nested struct member) of the value's tuple; no obligation of its own.
+  LV field_of(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full) {
+    if (e.a == nullptr || !e.a->type.is_struct() || e.index < 0 || static_cast<size_t>(e.index) >= e.a->type.struct_type->members.size()) {
+      internal_error(e.loc, "a member of anything but a struct value and one of its members reached lowering");
+      return {low::int_lit("0"), {}};
+    }
+    const LV a = lower(*e.a, env, guard, gdep, full);
+    const auto [start, width] = leaf_span(*e.a->type.struct_type, e.index);
+    if (a.leaves.size() < start + width) {
+      internal_error(e.loc, "a struct value with fewer leaves than its type reached lowering");
+      return {low::int_lit("0"), {}};
+    }
+    std::vector<E> part(a.leaves.begin() + static_cast<std::ptrdiff_t>(start), a.leaves.begin() + static_cast<std::ptrdiff_t>(start + width));
+    if (e.type.is_struct()) return struct_value(std::move(part), a.dep);
+    return {part.front(), a.dep};
+  }
+
+  // `(T){a0, a1, ...}` as a value: one argument per leaf, lowered as unsequenced siblings (decision 0044 item 2); a pointer leaf is a use of the pointer's value
+  // (a copy into a temporary, decision 0032 item 6), and `agg_wf_` (a struct store's own operand) also requires it to be well-formed (decision 0040 item 2).
+  LV aggregate(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full) {
+    if (cmode_ != CMode::None) {
+      internal_error(e.loc, "an aggregate in a contract reached lowering");
+      return struct_value({}, {});
+    }
+    const bool wf = agg_wf_;
+    agg_wf_ = false;
+    std::vector<E> leaves;
+    Deps dep;
+    for (const Expr* a : e.args) {
+      const LV v = lower(*a, env, guard, gdep, full);
+      if (a->type.is_ptr()) ptr_use(*a, v, guard, gdep, full, wf);
+      leaves.push_back(v.e);
+      dep = join(dep, v.dep);
+    }
+    return struct_value(std::move(leaves), dep);
   }
 
   // `&a->m` (decision 0043 item 5): `loc(member(a, k), 0)`.  A PLACE ACCESS (the consumer put the node in `place_nodes_`: the address of a Deref, a Store or a
@@ -2823,8 +3175,9 @@ class Lowerer {
     // The callee's `requires`, over the argument values, are obligations at the call (0012 item 6).
     Env cenv;
     for (const LV& a : args) {
-      cenv.formals.push_back(a.e);
+      cenv.formals.push_back(a.leaves.empty() ? a.e : nullptr);
       cenv.formal_dep.push_back(a.dep);
+      cenv.formal_leaves.push_back(a.leaves);  // a by-value struct argument: its leaves (decision 0044 item 5)
     }
     // The permissions the callee's atoms need (decision 0037 item 8): explicit, atomic, in order, before the value preconditions, all with the
     // exact set PRE(c) like them.
@@ -2833,8 +3186,11 @@ class Lowerer {
     const bool saved_both = call_pre_both_;
     call_pre_both_ = args_write_cell;  // audit S3: the arguments write a cell, so the checks of the call follow the write in both halves
     std::vector<E> amounts = call_atoms(e, callee, args, cenv, pre, full);
-    for (size_t k = 0; k < e.args.size(); ++k)
+    for (size_t k = 0; k < e.args.size(); ++k) {
       if (e.args[k]->type.is_ptr()) ptr_use(*e.args[k], args[k], nullptr, {}, full);  // a pointer argument is a use (decision 0032 item 6)
+      // A struct argument built by an aggregate had each pointer leaf used when it was lowered; one a call returned has not (decision 0044 item 5).
+      if (e.args[k]->type.is_struct() && !is_aggregate_value(*e.args[k])) struct_ptr_uses(*e.args[k], args[k], nullptr, {}, full, false);
+    }
     for (size_t ci = 0; ci < callee.requires_.size(); ++ci) {
       const Clause& c = callee.requires_[ci];
       Full scratch;  // the clause's own obligations belong to the callee's well-formedness method
@@ -2861,7 +3217,13 @@ class Lowerer {
     call_pre_both_ = saved_both;
     CallItem item;
     item.method = method_name(callee);
-    for (const LV& a : args) item.args.push_back(a.e);
+    for (const LV& a : args) {
+      if (!a.leaves.empty()) {  // a struct argument passes its leaves (decision 0044 item 5)
+        for (const E& l : a.leaves) item.args.push_back(l);
+      } else {
+        item.args.push_back(a.e);
+      }
+    }
     for (const E& a : amounts) item.args.push_back(a);  // the ghost amounts, after the user's arguments
     low::Meta backstop = meta("internal", e.loc, "internal check: Silicon's own check of the precondition of `" + callee.c_name + "`");
     item.check = low::Check{"call.precondition", std::move(backstop)};
@@ -2884,7 +3246,16 @@ class Lowerer {
       internal_error(e.loc, "a call in a recursion cycle to `" + callee.c_name + "`, which has no termination measure, reached lowering");
     }
     E value;
-    if (!callee.ret.is_void()) {
+    std::vector<E> value_leaves;
+    if (callee.ret.is_struct()) {
+      // decision 0044 item 4: one target per leaf, and 0037 item 3's case splits after each pointer leaf
+      for (const StructLeaf& l : struct_leaves(*callee.ret.struct_type)) {
+        const std::string t = new_temp(ltype(l.type));
+        item.targets.push_back(t);
+        value_leaves.push_back(low::var(t));
+        if (l.type.is_ptr()) result_splits(l.type, value_leaves.back(), item.after);
+      }
+    } else if (!callee.ret.is_void()) {
       item.target = "t__" + std::to_string(fn_.ntemp++);
       fn_.temps.push_back(low::LVar{item.target, ltype(callee.ret)});
       value = low::var(item.target);
@@ -2930,7 +3301,31 @@ class Lowerer {
     full.effects.push_back(std::move(fx));
     Deps d = pre;
     d.add(id);
+    if (callee.ret.is_struct()) return struct_value(std::move(value_leaves), d);
     return {value, d};
+  }
+
+  // Whether a struct-valued expression is (a chain of members over) an aggregate: its pointer leaves were used where it was lowered.
+  static bool is_aggregate_value(const Expr& e) {
+    const Expr* x = &e;
+    while (x->kind == Expr::Kind::Field && x->a != nullptr) x = x->a;
+    return x->kind == Expr::Kind::Aggregate;
+  }
+
+  // Each pointer leaf of the struct value `v` (a call's result or a member chain over one) is a use of the pointer, as a pointer argument or a copy is
+  // (decision 0032 item 6): `p != null ==> perm(lvloc(block_of(p)).lv) > none`, with WF for a store into a pointer cell (decision 0040 item 2).
+  void struct_ptr_uses(const Expr& operand, const LV& v, const E& guard, const Deps& gdep, Full& full, bool with_wf) {
+    if (cmode_ != CMode::None || !has_pointer_leaf(operand.type)) return;
+    const std::vector<StructLeaf> ls = operand.type.is_struct() ? struct_leaves(*operand.type.struct_type) : std::vector<StructLeaf>{};
+    for (size_t i = 0; i < ls.size() && i < v.leaves.size(); ++i) {
+      if (!ls[i].type.is_ptr()) continue;
+      E live = low::bin(low::BinOp::Gt, live_perm(v.leaves[i]), low::no_perm());
+      if (const E g = global_live_disjunct(v.leaves[i])) live = low::bin(low::BinOp::Or, live, g);
+      if (with_wf) live = low::not_(low::bin(low::BinOp::Or, low::not_(live), low::not_(wf_expr(v.leaves[i], &ls[i].type))));  // one atomic assertion
+      const std::string text = operand.c_text.empty() ? std::string() : operand.c_text + "." + ls[i].text;
+      obl(full, guard, gdep, low::implies(low::bin(low::BinOp::Ne, v.leaves[i], low::null_()), live), v.dep,
+          meta("lifetime", operand.loc, "uses " + quoted(text, "the pointer") + " after the object it points to may have ended"));
+    }
   }
 
   // Decision 0021 item 4: the explicit check that a recursive call's measure decreases, an obligation with the set PRE(c).  It is
@@ -3526,6 +3921,7 @@ class Lowerer {
         s.kind = low::LStmt::Kind::Call;
         s.name = c.method;
         s.target = c.target;
+        s.targets = c.targets;
         s.args = c.args;
         s.check = c.check;
         s.has_termination = c.has_termination;
@@ -3674,8 +4070,21 @@ class Lowerer {
 
   Env contract_env() const {
     Env env;
-    for (size_t k = 0; k < fn_.f->params.size(); ++k) env.formals.push_back(low::var(formal_name(*fn_.f, static_cast<int>(k))));
-    if (!fn_.f->ret.is_void()) env.result = low::var(kResult);
+    env.formal_leaves.resize(fn_.f->params.size());
+    for (size_t k = 0; k < fn_.f->params.size(); ++k) {
+      const Type& t = fn_.f->params[k].type;
+      if (t.is_struct()) {  // decision 0044 item 3: the leaves are the formals, holding the entry values
+        env.formals.push_back(nullptr);
+        for (const StructLeaf& l : struct_leaves(*t.struct_type)) env.formal_leaves[k].push_back(low::var(formal_name(*fn_.f, static_cast<int>(k)) + path_suffix(l.path)));
+      } else {
+        env.formals.push_back(low::var(formal_name(*fn_.f, static_cast<int>(k))));
+      }
+    }
+    if (fn_.f->ret.is_struct()) {  // decision 0044 item 4
+      for (const StructLeaf& l : struct_leaves(*fn_.f->ret.struct_type)) env.result_leaves.push_back(low::var(std::string(kResult) + path_suffix(l.path)));
+    } else if (!fn_.f->ret.is_void()) {
+      env.result = low::var(kResult);
+    }
     return env;
   }
 
@@ -3687,9 +4096,11 @@ class Lowerer {
     const Var* var = nullptr;   // a cell by name
     const Expr* addr = nullptr; // or the address of `*addr = ...`, the first root
     SrcLoc loc;
+    const StructType* st = nullptr;  // the struct of a struct store (decision 0044 item 5): `addr` is its slot, and every leaf is a write
   };
   std::vector<LV> full_exprs(const std::vector<const Expr*>& es, std::vector<low::LStmt>& out, const Expr* copy_of = nullptr,
-                             bool share_first = false, const StoreTarget* target = nullptr, const Expr* use_second = nullptr, bool use_wf = false) {
+                             bool share_first = false, const StoreTarget* target = nullptr, const Expr* use_second = nullptr, bool use_wf = false,
+                             int struct_use = -1, bool struct_wf = false) {
     Full full;
     const std::set<int> saved_written = std::move(written_);
     const bool saved_in_full = in_full_;
@@ -3735,6 +4146,26 @@ class Lowerer {
       path_.clear();
       if (!a.field.empty()) register_access(std::move(a), full, nullptr);
     }
+    if (target != nullptr && target->st != nullptr) {  // decision 0044 item 5: a struct store writes every destination leaf's key
+      const std::string base_text = struct_dest_root(*target->addr).first;
+      const bool base_arrow = struct_dest_root(*target->addr).second;
+      const std::vector<StructLeaf> rels = struct_leaves(*target->st, base_text, base_arrow);
+      std::vector<StructLeaf> plain = struct_leaves(*target->st);
+      for (size_t i = 0; i < plain.size(); ++i) {
+        Acc a;
+        a.write = true;
+        a.loc = target->loc;
+        a.key = key_of_addr_leaf(*target->addr, plain[i].path);
+        a.field = fkey(plain[i].type);
+        a.place = chain_ref(vs.front().e, plain[i].path);
+        a.dep = vs.front().dep;
+        a.text = rels[i].text;
+        path_.clear();
+        register_access(std::move(a), full, nullptr);
+      }
+    }
+    if (struct_use >= 0 && !is_aggregate_value(*es[static_cast<size_t>(struct_use)]))
+      struct_ptr_uses(*es[static_cast<size_t>(struct_use)], vs[static_cast<size_t>(struct_use)], nullptr, {}, full, struct_wf);
     if (copy_of != nullptr) ptr_use(*copy_of, vs.front(), nullptr, {}, full, use_wf);
     if (use_second != nullptr) ptr_use(*use_second, vs[1], nullptr, {}, full, true);  // a pointer stored through a pointer is a use, and must be well-formed (decision 0040 item 2)
     in_full_ = saved_in_full;
@@ -3998,7 +4429,14 @@ class Lowerer {
   }
 
   void ret(const Stmt& s, std::vector<low::LStmt>& out) {
-    if (s.expr != nullptr) {
+    if (s.expr != nullptr && s.expr->type.is_struct()) {
+      // decision 0044 item 4: every leaf of the value (an aggregate of leaf reads, a call's or a member chain's results) goes into its result, before the scope
+      // exits and the postconditions; a call's pointer leaf is a use of the pointer, as a returned pointer is
+      const LV v = full_exprs({s.expr}, out, nullptr, false, nullptr, nullptr, false, 0).front();
+      const std::vector<StructLeaf> ls = struct_leaves(*s.expr->type.struct_type);
+      if (v.leaves.size() != ls.size()) internal_error(s.loc, "a returned struct value with a different number of leaves than its type reached lowering");
+      for (size_t i = 0; i < ls.size() && i < v.leaves.size(); ++i) assign(out, std::string(kResult) + path_suffix(ls[i].path), v.leaves[i]);
+    } else if (s.expr != nullptr) {
       LV v = full_expr(*s.expr, out, s.expr->type.is_ptr());  // a returned pointer is a use of its value (decision 0037 item 3)
       assign(out, kResult, v.e);
     }
@@ -4072,7 +4510,12 @@ class Lowerer {
     // The entry function holds every global (program_start): a pointer it obtained may be any of them (decision 0041 item 10).
     if (fn_.f == prog_.entry())
       for (const Global& g : prog_.globals())
-        if (cell_suffix(g.type) == sfx && done.insert({kGlobalKeyBase + g.id, {}}).second) split(global_ref(g.id));
+      {
+        std::vector<E> cands;  // a struct global: its slots and leaf cells, as an object of its type (decision 0043 item 9)
+        split_candidates(global_ref(g.id), g.type, target, cands);
+        if (!cands.empty() && done.insert({kGlobalKeyBase + g.id, {}}).second)
+          for (const E& c : cands) split(c);
+      }
   }
 
   // The entry of a method with atoms (decision 0037 item 9): the case splits on the liveness cells of every pair of atoms of the `requires`, and
@@ -4257,6 +4700,12 @@ class Lowerer {
     const Env env = contract_env();
     atom_returns(at, out, env);
     if (f.ret.is_ptr()) emit_assert(out, wf_expr(env.result, &f.ret), meta("internal", at, "internal check: the pointer a function returns is well-formed"));
+    if (f.ret.is_struct()) {
+      const std::vector<StructLeaf> ls = struct_leaves(*f.ret.struct_type);
+      for (size_t i = 0; i < ls.size(); ++i)
+        if (ls[i].type.is_ptr())
+          emit_assert(out, wf_expr(env.result_leaves[i], &ls[i].type), meta("internal", at, "internal check: the pointer a function returns is well-formed"));
+    }
     for (size_t ci = 0; ci < f.ensures_.size(); ++ci) {
       const Clause& c = f.ensures_[ci];
       Full scratch;
@@ -4281,7 +4730,7 @@ class Lowerer {
   // Whether an expression or a statement touches memory: a pointer-typed node, a cell, `&`, `*` or a store (decision 0038 item 3).
   bool expr_touches(const Expr* e) {
     if (e == nullptr) return false;
-    if (e->type.is_ptr()) return true;
+    if (e->type.is_ptr() || (e->type.is_struct() && has_pointer_leaf(e->type))) return true;  // a struct value with a pointer leaf carries pointers (decision 0044)
     // A call whose callee has an atom in its `requires` touches memory even with no pointer argument: an atom on a global or an implicit `static`
     // local's (decision 0041; audit SF1).  A callee with a parameter atom has a pointer argument, so nothing changes for programs without globals.
     if (e->kind == Expr::Kind::Call && e->callee != nullptr && requires_atom_count(*e->callee) > 0) return true;
@@ -4347,14 +4796,60 @@ class Lowerer {
     std::set<std::string> fields;
     std::set<int> cells;
     std::set<int> globals;  // the globals (ids) written by name, or owned by a callee's atom (decision 0041 item 10): a write through any other pointer is by field
+    // A member of a struct global written by name (`g.x = e`, `g.t = f()`; decision 0044 item 8): (global id, the leaf's member path from the global's slot).  The
+    // address is a fixed term (`loc(member(...loc(GB_g(), 0)...), 0)`, no load), so only the place of that very leaf is reached; every other automatic place is another
+    // leaf (distinct member blocks), another global (`unique` blocks) or an object of another block, and a write through a pointer is `fields` as before.
+    std::set<std::pair<int, std::vector<int>>> gleaves;
   };
+
+  // The function holds the leaf `path` of the global `id` as one of its own automatic places (decision 0044 item 8): it is the entry function (every global is held from
+  // program_start), or a `requires` atom of this function names that global at a path that is a prefix of the leaf's (`owns(g)`, `owns(g.t)`, `owns(g.t.y)`).
+  bool holds_global_leaf(int id, const std::vector<int>& path) {
+    if (fn_.f == prog_.entry()) return true;
+    const FnAtoms& fa = atoms_of(*fn_.f);
+    for (int i = 0; i < fa.nreq; ++i) {
+      const AtomSite& site = fa.sites[static_cast<size_t>(i)];
+      if (site_key(site) != kGlobalKeyBase + id || !site_takes_cell(site)) continue;
+      if (site.path.size() <= path.size() && std::equal(site.path.begin(), site.path.end(), path.begin())) return true;
+    }
+    return false;
+  }
+
+  // The address `addr` is a member chain over a global (`&g.x`, `&g.t`, `&g.t.y`; no load on the way, member_root): a store of a value of type `stored` through it writes
+  // exactly the leaves at and below that member of that global.  When the function holds such a leaf as its own place (holds_global_leaf), only that place is reached and
+  // it is recorded in `w.gleaves`; otherwise the global's cell may also be held through a pointer parameter (`owns(*s) && s == &g`), so the write is field-wide as a
+  // write through a pointer is: the leaf's field goes to `w.fields`.  False for every other address.
+  bool note_global_member_write(const Expr& addr, const Type& stored, LoopWrites& w) {
+    if (addr.kind != Expr::Kind::MemberAddr) return false;
+    std::vector<int> path;
+    const Expr* root = member_root(&addr, &path);
+    if (root == nullptr || root->kind != Expr::Kind::GlobalAddr || root->global == nullptr) return false;
+    const int id = root->global->id;
+    auto note = [&](std::vector<int> full, const Type& t) {
+      if (holds_global_leaf(id, full)) w.gleaves.insert({id, std::move(full)});
+      else w.fields.insert(cell_suffix(t));
+    };
+    if (stored.is_struct()) {
+      for (const StructLeaf& l : struct_leaves(*stored.struct_type)) {
+        std::vector<int> full = path;
+        full.insert(full.end(), l.path.begin(), l.path.end());
+        note(std::move(full), l.type);
+      }
+    } else {
+      note(std::move(path), stored);
+    }
+    return true;
+  }
 
   void writes_in_expr(const Expr* e, LoopWrites& w) {
     if (e == nullptr) return;
     if (e->kind == Expr::Kind::AssignE && e->var != nullptr && e->var->address_taken) w.cells.insert(e->var->id);  // decision 0039 item 2
     if (e->kind == Expr::Kind::StoreE) {
       if (e->c != nullptr && is_global_addr(*e->c)) w.globals.insert(e->c->global->id);
-      else w.fields.insert(cell_suffix(e->type));
+      else if (e->c != nullptr && note_global_member_write(*e->c, e->type, w)) {  // by name: exactly that leaf (decision 0044 item 8)
+      } else if (e->type.is_struct()) {  // decision 0044 item 7
+        for (const StructLeaf& l : struct_leaves(*e->type.struct_type)) w.fields.insert(cell_suffix(l.type));
+      } else w.fields.insert(cell_suffix(e->type));
     }
     if (e->kind == Expr::Kind::Call && e->callee != nullptr)
       for (const AtomSite& site : atoms_of(*e->callee).sites) {
@@ -4372,7 +4867,10 @@ class Lowerer {
     switch (s->kind) {
       case Stmt::Kind::Store:
         if (s->addr != nullptr && is_global_addr(*s->addr)) w.globals.insert(s->addr->global->id);
-        else if (s->addr != nullptr && s->addr->type.pointee != nullptr) w.fields.insert(cell_suffix(*s->addr->type.pointee));
+        else if (s->addr != nullptr && s->expr != nullptr && note_global_member_write(*s->addr, s->expr->type, w)) {  // by name: exactly that leaf (decision 0044 item 8)
+        } else if (s->addr != nullptr && s->addr->type.pointee != nullptr && s->addr->type.pointee->is_struct()) {  // decision 0044 item 5: a struct store writes every leaf field
+          for (const StructLeaf& l : struct_leaves(*s->addr->type.pointee->struct_type)) w.fields.insert(cell_suffix(l.type));
+        } else if (s->addr != nullptr && s->addr->type.pointee != nullptr) w.fields.insert(cell_suffix(*s->addr->type.pointee));
         writes_in_expr(s->addr, w);
         writes_in_expr(s->expr, w);
         break;
@@ -4480,7 +4978,20 @@ class Lowerer {
         }
       }
       // The entry function holds every global with no atom (program_start): its one value cell (decision 0041 item 10).
-      if (vcells.empty() && global && value_params.count(k) != 0) vcells.push_back(VCell{Cell{rootref, key_pointee(k), label, {}, ""}, {}});
+      if (global && value_params.count(k) != 0 && key_pointee(k).is_struct() && fn_.f == prog_.entry()) {
+        // decision 0044 item 8: the entry function holds every leaf of a struct global (program_start), each a place of its own; the root slot is what a pointer may equal
+        for (Cell& c : leaf_cells(rootref, *key_pointee(k).struct_type, label, false)) {
+          std::vector<int> full = c.path;
+          bool dup = false;
+          for (const VCell& v : vcells) dup = dup || v.full == full;
+          if (!dup) vcells.push_back(VCell{std::move(c), std::move(full)});
+        }
+        bool seen = false;
+        for (const auto& sl : slots) seen = seen || same_expr(sl.second, rootref);
+        if (!seen) slots.emplace_back(key_pointee(k), rootref);
+      } else if (vcells.empty() && global && value_params.count(k) != 0) {
+        vcells.push_back(VCell{Cell{rootref, key_pointee(k), label, {}, ""}, {}});
+      }
       const size_t first_of_key = places.size();
       auto add_place = [&](Place pl, const std::vector<int>& mpath, bool live) {
         pl.param = k;
@@ -4570,7 +5081,8 @@ class Lowerer {
     for (Place& pl : places) {
       if (!pl.value) continue;
       pl.reach = writes.fields.count(pl.suffix) != 0 || (pl.cell && writes.cells.count(pl.var->id) != 0) ||
-                 (!pl.cell && key_is_global(pl.param) && writes.globals.count(pl.param - kGlobalKeyBase) != 0);
+                 (!pl.cell && key_is_global(pl.param) &&
+                  (writes.globals.count(pl.param - kGlobalKeyBase) != 0 || writes.gleaves.count({pl.param - kGlobalKeyBase, pl.mpath}) != 0));
     }
     return places;
   }
@@ -4889,7 +5401,11 @@ class Lowerer {
       auto key_cells = [&](int k) {
         struct KC { E recv; Type type; std::vector<int> full; };
         std::vector<KC> out_cells;
-        if (key_is_global(k) && value_params.count(k) != 0) {  // a global of the entry function: its one cell
+        if (key_is_global(k) && value_params.count(k) != 0 && key_pointee(k).is_struct() && fn_.f == prog_.entry()) {  // decision 0044 item 8: every leaf of a struct global
+          for (Cell& c : leaf_cells(kref(k), *key_pointee(k).struct_type, std::string(), false)) out_cells.push_back(KC{c.recv, c.type, c.path});
+          return out_cells;
+        }
+        if (key_is_global(k) && value_params.count(k) != 0 && !key_pointee(k).is_struct()) {  // a global of the entry function: its one cell
           out_cells.push_back(KC{kref(k), key_pointee(k), {}});
           return out_cells;
         }
@@ -5359,6 +5875,22 @@ class Lowerer {
     for (const NamedConst& c : prog_.named_consts()) named_const_check(c, out);
     // Decision 0041 item 5: a global's initializer as written is checked like a named constant's (a mutable global is never folded at its uses).
     for (const Global& g : prog_.globals()) {
+      if (g.type.is_struct()) {  // decision 0044 item 8: each leaf's initializer element as written, named `g.x`, checked like a scalar's
+        const std::vector<StructLeaf> ls = struct_leaves(*g.type.struct_type, g.c_name);
+        for (size_t i = 0; i < ls.size() && i < g.leaves.size(); ++i) {
+          const GlobalLeaf& gl = g.leaves[i];
+          if ((gl.kind != GlobalInit::Value && gl.kind != GlobalInit::Unknown) || gl.init == nullptr) continue;
+          NamedConst c;
+          c.id = g.id;
+          c.c_name = ls[i].text;
+          c.type = ls[i].type;
+          c.loc = gl.loc.known() ? gl.loc : g.loc;
+          c.init = gl.init;
+          c.value = gl.value;
+          named_const_check(c, out, gl.kind == GlobalInit::Value);
+        }
+        continue;
+      }
       if ((g.init_kind != Global::Init::Value && g.init_kind != Global::Init::Unknown) || g.init == nullptr) continue;
       NamedConst c;
       c.id = g.id;
@@ -5391,6 +5923,40 @@ class Lowerer {
     return c;
   }
 
+  // Parameter `k` as Viper formals (decision 0044 item 3): itself, or one per leaf of a by-value struct.
+  struct LeafVar {
+    E var;
+    Type type;
+    std::string name;
+    std::vector<int> path;
+  };
+  std::vector<LeafVar> param_vars(const Function& f, int k) const {
+    const Type& t = f.params[static_cast<size_t>(k)].type;
+    std::vector<LeafVar> r;
+    if (t.is_struct()) {
+      for (const StructLeaf& l : struct_leaves(*t.struct_type)) {
+        const std::string n = formal_name(f, k) + path_suffix(l.path);
+        r.push_back(LeafVar{low::var(n), l.type, n, l.path});
+      }
+    } else {
+      r.push_back(LeafVar{low::var(formal_name(f, k)), t, formal_name(f, k), {}});
+    }
+    return r;
+  }
+  // The result as Viper results (decision 0044 item 4): `res`, or `res_m<path>` per leaf of a struct result; empty for void.
+  std::vector<LeafVar> result_vars(const Function& f) const {
+    std::vector<LeafVar> r;
+    if (f.ret.is_struct()) {
+      for (const StructLeaf& l : struct_leaves(*f.ret.struct_type)) {
+        const std::string n = std::string(kResult) + path_suffix(l.path);
+        r.push_back(LeafVar{low::var(n), l.type, n, l.path});
+      }
+    } else if (!f.ret.is_void()) {
+      r.push_back(LeafVar{low::var(kResult), f.ret, kResult, {}});
+    }
+    return r;
+  }
+
   void function(const Function& f) {
     fn_ = Fn{};
     fn_.f = &f;
@@ -5403,25 +5969,26 @@ class Lowerer {
     m.comment = "C/C++ function `" + f.c_name + "`";
     const FnAtoms& fa = atoms_of(f);
     for (size_t k = 0; k < f.params.size(); ++k)
-      m.formals.push_back(low::LVar{formal_name(f, static_cast<int>(k)), ltype(f.params[k].type)});
+      for (const LeafVar& lv : param_vars(f, static_cast<int>(k))) m.formals.push_back(low::LVar{lv.name, ltype(lv.type)});
     for (int k = 0; k < fa.nreq; ++k) m.formals.push_back(low::LVar{amount_name(k), low::LType::Perm});  // the ghost amounts (decision 0037 item 6)
-    if (!f.ret.is_void()) m.results.push_back(low::LVar{kResult, ltype(f.ret)});
+    for (const LeafVar& lv : result_vars(f)) m.results.push_back(low::LVar{lv.name, ltype(lv.type)});
 
     // requires: the facts of the unit's globals (decision 0041 item 4: not `main`'s, which gets them from program_start), the parameters' type
     // ranges, the ghost amounts' bounds (before every clause that names one), WF of the pointers, then the user's (0012 item 1; decision 0037
     // items 2 and 6).
     if (&f != prog_.entry())
       if (const E facts = global_facts()) m.requires_.push_back(clause_checks(facts, f.loc, false, f.c_name));
-    for (size_t k = 0; k < f.params.size(); ++k) {
-      if (!f.params[k].type.is_int()) continue;
-      m.requires_.push_back(clause_checks(range_check(low::var(formal_name(f, static_cast<int>(k))), *f.params[k].type.int_type),
-                                          f.loc, false, f.c_name));
-    }
+    for (size_t k = 0; k < f.params.size(); ++k)
+      for (const LeafVar& lv : param_vars(f, static_cast<int>(k))) {  // a by-value struct: the range of each integer leaf (decision 0044 item 3)
+        if (!lv.type.is_int()) continue;
+        m.requires_.push_back(clause_checks(range_check(lv.var, *lv.type.int_type), f.loc, false, f.c_name));
+      }
     for (int k = 0; k < fa.nreq; ++k) m.requires_.push_back(clause_checks(amount_bounds(amount_name(k)), f.loc, false, f.c_name));
-    for (size_t k = 0; k < f.params.size(); ++k) {
-      if (!f.params[k].type.is_ptr()) continue;
-      m.requires_.push_back(clause_checks(wf_expr(low::var(formal_name(f, static_cast<int>(k))), &f.params[k].type), f.loc, false, f.c_name));
-    }
+    for (size_t k = 0; k < f.params.size(); ++k)
+      for (const LeafVar& lv : param_vars(f, static_cast<int>(k))) {  // and the WF of each pointer leaf
+        if (!lv.type.is_ptr()) continue;
+        m.requires_.push_back(clause_checks(wf_expr(lv.var, &lv.type), f.loc, false, f.c_name));
+      }
     const Env cenv = contract_env();
     for (size_t ci = 0; ci < f.requires_.size(); ++ci) {
       const Clause& c = f.requires_[ci];
@@ -5435,9 +6002,10 @@ class Lowerer {
       pure_full(scratch, *c.expr, "a precondition");
       m.requires_.push_back(clause_checks(v.e, c.loc.known() ? c.loc : f.loc, false, f.c_name));
     }
-    if (f.ret.is_int())
-      m.ensures_.push_back(clause_checks(range_check(low::var(kResult), *f.ret.int_type), f.loc, true, f.c_name));
-    if (f.ret.is_ptr()) m.ensures_.push_back(clause_checks(wf_expr(low::var(kResult), &f.ret), f.loc, true, f.c_name));
+    for (const LeafVar& lv : result_vars(f)) {  // the range of the result, or of each integer leaf of a struct result, and WF of each pointer (decision 0044 item 4)
+      if (lv.type.is_int()) m.ensures_.push_back(clause_checks(range_check(lv.var, *lv.type.int_type), f.loc, true, f.c_name));
+      if (lv.type.is_ptr()) m.ensures_.push_back(clause_checks(wf_expr(lv.var, &lv.type), f.loc, true, f.c_name));
+    }
     for (size_t ci = 0; ci < f.ensures_.size(); ++ci) {
       const Clause& c = f.ensures_[ci];
       Full scratch;
@@ -5490,7 +6058,19 @@ class Lowerer {
     std::vector<const Var*> param_cells;
     for (size_t k = 0; k < f.params.size(); ++k) {
       const Var& copy = *f.param_var(static_cast<int>(k));
-      if (copy.address_taken) {
+      if (copy.address_taken && copy.type.is_struct()) {
+        // decision 0044 item 3: the copy is a struct block like every struct local; each leaf is written from its formal through a Ref temporary, the flag set
+        param_cells.push_back(&copy);
+        alloc_cell(m.body, copy);
+        const E root = low::var(var_name(copy));
+        const std::vector<LeafVar> fv = param_vars(f, static_cast<int>(k));
+        for (const LeafVar& lv : fv) {
+          const std::string t = new_temp(low::LType::Ref);
+          assign(m.body, t, chain_ref(root, lv.path));
+          emit_assert(m.body, may_write(low::var(t), lv.type, false), meta("internal", copy.loc, "internal check: the entry copy of `" + copy.name + "` is writable"));
+          write_fields(m.body, t, lv.type, lv.var);
+        }
+      } else if (copy.address_taken) {
         param_cells.push_back(&copy);
         alloc_cell(m.body, copy);
         write_fields(m.body, var_name(copy), copy.type, low::var(formal_name(f, static_cast<int>(k))));
@@ -5603,21 +6183,23 @@ class Lowerer {
     // The formals and what the method assumes: the parameters, the ghost amounts, the result, the ghost values of the reads of the contract.
     const std::string what = f.c_name + " (well-formedness)";
     for (size_t k = 0; k < f.params.size(); ++k)
-      m.formals.push_back(low::LVar{formal_name(f, static_cast<int>(k)), ltype(f.params[k].type)});
+      for (const LeafVar& lv : param_vars(f, static_cast<int>(k))) m.formals.push_back(low::LVar{lv.name, ltype(lv.type)});
     for (int k = 0; k < fa.nreq; ++k) m.formals.push_back(low::LVar{amount_name(k), low::LType::Perm});
-    if (!f.ret.is_void()) m.formals.push_back(low::LVar{kResult, ltype(f.ret)});
+    for (const LeafVar& lv : result_vars(f)) m.formals.push_back(low::LVar{lv.name, ltype(lv.type)});
     for (const auto& [key, t] : wf_ghosts_) m.formals.push_back(low::LVar{ghost_name(key), ltype(t)});
     if (&f != prog_.entry())
       if (const E facts = global_facts()) m.requires_.push_back(clause_checks(facts, f.loc, false, what));
     for (int k = 0; k < fa.nreq; ++k) m.requires_.push_back(clause_checks(amount_bounds(amount_name(k)), f.loc, false, what));
-    for (size_t k = 0; k < f.params.size(); ++k) {
-      if (f.params[k].type.is_ptr())
-        m.requires_.push_back(clause_checks(wf_expr(low::var(formal_name(f, static_cast<int>(k))), &f.params[k].type), f.loc, false, what));
-      if (!f.params[k].type.is_int()) continue;
-      m.requires_.push_back(clause_checks(range_check(low::var(formal_name(f, static_cast<int>(k))), *f.params[k].type.int_type), f.loc, false, what));
+    for (size_t k = 0; k < f.params.size(); ++k)
+      for (const LeafVar& lv : param_vars(f, static_cast<int>(k))) {
+        if (lv.type.is_ptr()) m.requires_.push_back(clause_checks(wf_expr(lv.var, &lv.type), f.loc, false, what));
+        if (!lv.type.is_int()) continue;
+        m.requires_.push_back(clause_checks(range_check(lv.var, *lv.type.int_type), f.loc, false, what));
+      }
+    for (const LeafVar& lv : result_vars(f)) {
+      if (lv.type.is_int()) m.requires_.push_back(clause_checks(range_check(lv.var, *lv.type.int_type), f.loc, false, what));
+      if (lv.type.is_ptr()) m.requires_.push_back(clause_checks(wf_expr(lv.var, &lv.type), f.loc, false, what));
     }
-    if (f.ret.is_int()) m.requires_.push_back(clause_checks(range_check(low::var(kResult), *f.ret.int_type), f.loc, false, what));
-    if (f.ret.is_ptr()) m.requires_.push_back(clause_checks(wf_expr(low::var(kResult), &f.ret), f.loc, false, what));
     for (const auto& [key, t] : wf_ghosts_) {
       if (t.is_ptr()) m.requires_.push_back(clause_checks(wf_expr(low::var(ghost_name(key)), &t), f.loc, false, what));
       else if (!t.is_bool())
@@ -5723,6 +6305,7 @@ class Lowerer {
   std::map<std::string, const StructType*> struct_alloc_;  // the struct locals' allocations, by `struct_suffix` (a key of alloc_at_ too)
   std::map<const Expr*, SrcLoc> place_nodes_;  // MemberAddr nodes the consumer lowers as a place access (decision 0043 item 5), with the consumer's position: see member_addr
   std::map<std::string, SrcLoc> alloc_at_;
+  bool agg_wf_ = false;  // the aggregate about to be lowered is the value of a struct store: its pointer leaves must be well-formed (decision 0044 item 5)
 };
 
 }  // namespace

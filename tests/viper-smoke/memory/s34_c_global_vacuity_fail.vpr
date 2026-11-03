@@ -1,0 +1,778 @@
+// expect: error assert:assertion.false @ L112
+// expect: error assert:assertion.false @ L159
+// expect: error assert:assertion.false @ L207
+// expect: error assert:assertion.false @ L272
+// expect: error assert:assertion.false @ L289
+// expect: error assert:assertion.false @ L312
+// expect: error assert:assertion.false @ L332
+// expect: error assert:assertion.false @ L352
+// expect: error assert:assertion.false @ L429
+// expect: error assert:assertion.false @ L501
+// expect: error assert:assertion.false @ L595
+// expect: error assert:assertion.false @ L693
+// expect: error assert:assertion.false @ L777
+// S34 (c) vacuity: s34_c_global.vpr with an `assert false` at the start of each method, after each allocation, after each call and at the end of each body, one per cloned method (Silicon reports only the first failing `assert false` on a path): every one must FAIL, so no trusted contract, axiom or fact makes the state contradictory.
+// Hand-written in the emitted style (see the positive fixture).
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  unique function GB_g__1(): Block
+  unique function GB_t__2(): Block
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0043 items 3, 9; record 0044 items 3-5, 8): WF; a leaf's range; a leaf at allocation (uninitialized); a leaf owned (full permission, flag set, range); one liveness fraction
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNG(c) ((-2147483648) <= c.v_int && c.v_int <= 2147483647)
+define RNGV(v) ((-2147483648) <= v && v <= 2147483647)
+define LEAFU(c) (acc(c.v_int) && acc(c.d_int) && !c.d_int)
+define LEAF(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNG(c))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+// struct S { int x; int y; }: member 0 is x, member 1 is y; struct T { struct S s; int z; }: member 0 is the slot of the nested S, member 1 is z
+define MX(s) loc(member(s, 0), 0)
+define MY(s) loc(member(s, 1), 0)
+define TS(t) loc(member(t, 0), 0)
+define TZ(t) loc(member(t, 1), 0)
+define SLEN(s) (len(member(s, 0)) == 1 && len(member(s, 1)) == 1)
+define SOWN(s) (SLEN(s) && LEAF(MX(s)) && LEAF(MY(s)))
+define TLEN(t) (len(member(t, 0)) == 1 && len(member(t, 1)) == 1)
+define TOWN(t) (TLEN(t) && SOWN(TS(t)) && LEAF(TZ(t)))
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+define OWNI(p, a) (ROOT(p) && LEAF(p) && LVF(p, a))
+
+// the unit's globals (record 0044 item 8): `static struct S g;` (GB_g__1) and `static struct T t;` (GB_t__2), both zero-initialized (internal linkage); the facts are every method's first requires and program_start's first ensures
+define GSLOT loc(GB_g__1(), 0)
+define TSLOT loc(GB_t__2(), 0)
+define GFACTS (len(GB_g__1()) == 1 && lvloc(GB_g__1()) == loc(GB_g__1(), -2) && SLEN(GSLOT) && len(GB_t__2()) == 1 && lvloc(GB_t__2()) == loc(GB_t__2(), -2) && TLEN(TSLOT) && SLEN(TS(TSLOT)) && TSLOT != TS(TSLOT))
+// the liveness check of a use of a global's address passes through the GB_ disjunct (record 0041 item 4)
+define LIVE(a) (a != null ==> (perm(lvloc(block_of(a)).lv) > none || lvloc(block_of(a)) == lvloc(GB_g__1()) || lvloc(block_of(a)) == lvloc(GB_t__2())))
+
+
+// cerastes:trusted-contract program start: every global holds its initial value with full permission and its liveness cell (record 0041 item 4); the pure facts first, then one row per global; a struct global's row has every leaf and exactly one liveness fraction (record 0044 item 8)
+method program_start()
+  ensures GFACTS
+  ensures (acc(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) && acc(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) && loc(member(loc(GB_g__1(), 0), 0), 0).d_int && loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 0) && (acc(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) && acc(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) && loc(member(loc(GB_g__1(), 0), 1), 0).d_int && loc(member(loc(GB_g__1(), 0), 1), 0).v_int == 0) && acc(lvloc(GB_g__1()).lv)
+  ensures (acc(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int) && acc(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int) && loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int && loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int == 0) && (acc(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int) && acc(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int) && loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int && loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int == 0) && (acc(loc(member(loc(GB_t__2(), 0), 1), 0).v_int) && acc(loc(member(loc(GB_t__2(), 0), 1), 0).d_int) && loc(member(loc(GB_t__2(), 0), 1), 0).d_int && loc(member(loc(GB_t__2(), 0), 1), 0).v_int == 0) && acc(lvloc(GB_t__2()).lv)
+  decreases _
+
+// void setx(void) requires(owns(g)) ensures(owns(g) && g.x == 5 && g.y == old(g.y)) { g.x = 5; }
+method f_setx__0(amt_0: Perm)
+  requires GFACTS
+  requires none < amt_0 && amt_0 < write
+  requires ROOT(GSLOT) && SOWN(GSLOT) && LVF(GSLOT, amt_0)
+  ensures ROOT(GSLOT) && SOWN(GSLOT) && LVF(GSLOT, amt_0) && MX(GSLOT).v_int == 5 && MY(GSLOT).v_int == old(MY(GSLOT).v_int)
+  decreases
+{
+  var oy: Int := loc(member(loc(GB_g__1(), 0), 1), 0).v_int
+  assert loc(member(loc(GB_g__1(), 0), 0), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) == write
+  loc(member(loc(GB_g__1(), 0), 0), 0).v_int := 5
+  loc(member(loc(GB_g__1(), 0), 0), 0).d_int := true
+  assert loc(GB_g__1(), 0) != null
+  assert WF(loc(GB_g__1(), 0))
+  assert offset_of(loc(GB_g__1(), 0)) < len(block_of(loc(GB_g__1(), 0)))
+  assert len(member(loc(GB_g__1(), 0), 0)) == 1 && len(member(loc(GB_g__1(), 0), 1)) == 1
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) == write
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert RNG(loc(member(loc(GB_g__1(), 0), 0), 0))
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) == write
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(GB_g__1(), 0), 1), 0))
+  assert perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) >= amt_0
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 5
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).v_int == oy
+}
+
+// void setx(void) requires(owns(g)) ensures(owns(g) && g.x == 5 && g.y == old(g.y)) { g.x = 5; }
+method f_setx__0_v0(amt_0: Perm)
+  requires GFACTS
+  requires none < amt_0 && amt_0 < write
+  requires ROOT(GSLOT) && SOWN(GSLOT) && LVF(GSLOT, amt_0)
+  ensures ROOT(GSLOT) && SOWN(GSLOT) && LVF(GSLOT, amt_0) && MX(GSLOT).v_int == 5 && MY(GSLOT).v_int == old(MY(GSLOT).v_int)
+  decreases
+{
+  assert false // <- fails: vacuity
+  var oy: Int := loc(member(loc(GB_g__1(), 0), 1), 0).v_int
+  assert loc(member(loc(GB_g__1(), 0), 0), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) == write
+  loc(member(loc(GB_g__1(), 0), 0), 0).v_int := 5
+  loc(member(loc(GB_g__1(), 0), 0), 0).d_int := true
+  assert loc(GB_g__1(), 0) != null
+  assert WF(loc(GB_g__1(), 0))
+  assert offset_of(loc(GB_g__1(), 0)) < len(block_of(loc(GB_g__1(), 0)))
+  assert len(member(loc(GB_g__1(), 0), 0)) == 1 && len(member(loc(GB_g__1(), 0), 1)) == 1
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) == write
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert RNG(loc(member(loc(GB_g__1(), 0), 0), 0))
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) == write
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(GB_g__1(), 0), 1), 0))
+  assert perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) >= amt_0
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 5
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).v_int == oy
+}
+
+// void setx(void) requires(owns(g)) ensures(owns(g) && g.x == 5 && g.y == old(g.y)) { g.x = 5; }
+method f_setx__0_v1(amt_0: Perm)
+  requires GFACTS
+  requires none < amt_0 && amt_0 < write
+  requires ROOT(GSLOT) && SOWN(GSLOT) && LVF(GSLOT, amt_0)
+  ensures ROOT(GSLOT) && SOWN(GSLOT) && LVF(GSLOT, amt_0) && MX(GSLOT).v_int == 5 && MY(GSLOT).v_int == old(MY(GSLOT).v_int)
+  decreases
+{
+  var oy: Int := loc(member(loc(GB_g__1(), 0), 1), 0).v_int
+  assert loc(member(loc(GB_g__1(), 0), 0), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) == write
+  loc(member(loc(GB_g__1(), 0), 0), 0).v_int := 5
+  loc(member(loc(GB_g__1(), 0), 0), 0).d_int := true
+  assert loc(GB_g__1(), 0) != null
+  assert WF(loc(GB_g__1(), 0))
+  assert offset_of(loc(GB_g__1(), 0)) < len(block_of(loc(GB_g__1(), 0)))
+  assert len(member(loc(GB_g__1(), 0), 0)) == 1 && len(member(loc(GB_g__1(), 0), 1)) == 1
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) == write
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert RNG(loc(member(loc(GB_g__1(), 0), 0), 0))
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) == write
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(GB_g__1(), 0), 1), 0))
+  assert perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) >= amt_0
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 5
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).v_int == oy
+  assert false // <- fails: vacuity
+}
+
+// void setz(void) requires(owns(t)) ensures(owns(t) && t.s.y == 4 && t.z == 6 && t.s.x == old(t.s.x)) { t.s.y = 4; t.z = 6; }   (a nested struct global: the slot facts in GFACTS)
+method f_setz__1(amt_1: Perm)
+  requires GFACTS
+  requires none < amt_1 && amt_1 < write
+  requires ROOT(TSLOT) && TOWN(TSLOT) && LVF(TSLOT, amt_1)
+  ensures ROOT(TSLOT) && TOWN(TSLOT) && LVF(TSLOT, amt_1) && MX(TS(TSLOT)).v_int == old(MX(TS(TSLOT)).v_int) && MY(TS(TSLOT)).v_int == 4 && TZ(TSLOT).v_int == 6
+  decreases
+{
+  var ox: Int := loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0) != null
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int) == write && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int) == write
+  loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int := 4
+  loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int := true
+  assert loc(member(loc(GB_t__2(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_t__2(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_t__2(), 0), 1), 0).d_int) == write
+  loc(member(loc(GB_t__2(), 0), 1), 0).v_int := 6
+  loc(member(loc(GB_t__2(), 0), 1), 0).d_int := true
+  assert loc(GB_t__2(), 0) != null
+  assert WF(loc(GB_t__2(), 0))
+  assert offset_of(loc(GB_t__2(), 0)) < len(block_of(loc(GB_t__2(), 0)))
+  assert len(member(loc(GB_t__2(), 0), 0)) == 1 && len(member(loc(GB_t__2(), 0), 1)) == 1
+  assert len(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0)) == 1 && len(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1)) == 1
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int) == write && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int) == write
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int
+  assert RNG(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0))
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int) == write && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int) == write
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0))
+  assert perm(loc(member(loc(GB_t__2(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_t__2(), 0), 1), 0).d_int) == write
+  assert loc(member(loc(GB_t__2(), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(GB_t__2(), 0), 1), 0))
+  assert perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) >= amt_1
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int == 4
+  assert loc(member(loc(GB_t__2(), 0), 1), 0).v_int == 6
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int == ox
+}
+
+// void setz(void) requires(owns(t)) ensures(owns(t) && t.s.y == 4 && t.z == 6 && t.s.x == old(t.s.x)) { t.s.y = 4; t.z = 6; }   (a nested struct global: the slot facts in GFACTS)
+method f_setz__1_v0(amt_1: Perm)
+  requires GFACTS
+  requires none < amt_1 && amt_1 < write
+  requires ROOT(TSLOT) && TOWN(TSLOT) && LVF(TSLOT, amt_1)
+  ensures ROOT(TSLOT) && TOWN(TSLOT) && LVF(TSLOT, amt_1) && MX(TS(TSLOT)).v_int == old(MX(TS(TSLOT)).v_int) && MY(TS(TSLOT)).v_int == 4 && TZ(TSLOT).v_int == 6
+  decreases
+{
+  assert false // <- fails: vacuity
+  var ox: Int := loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0) != null
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int) == write && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int) == write
+  loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int := 4
+  loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int := true
+  assert loc(member(loc(GB_t__2(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_t__2(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_t__2(), 0), 1), 0).d_int) == write
+  loc(member(loc(GB_t__2(), 0), 1), 0).v_int := 6
+  loc(member(loc(GB_t__2(), 0), 1), 0).d_int := true
+  assert loc(GB_t__2(), 0) != null
+  assert WF(loc(GB_t__2(), 0))
+  assert offset_of(loc(GB_t__2(), 0)) < len(block_of(loc(GB_t__2(), 0)))
+  assert len(member(loc(GB_t__2(), 0), 0)) == 1 && len(member(loc(GB_t__2(), 0), 1)) == 1
+  assert len(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0)) == 1 && len(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1)) == 1
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int) == write && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int) == write
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int
+  assert RNG(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0))
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int) == write && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int) == write
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0))
+  assert perm(loc(member(loc(GB_t__2(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_t__2(), 0), 1), 0).d_int) == write
+  assert loc(member(loc(GB_t__2(), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(GB_t__2(), 0), 1), 0))
+  assert perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) >= amt_1
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int == 4
+  assert loc(member(loc(GB_t__2(), 0), 1), 0).v_int == 6
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int == ox
+}
+
+// void setz(void) requires(owns(t)) ensures(owns(t) && t.s.y == 4 && t.z == 6 && t.s.x == old(t.s.x)) { t.s.y = 4; t.z = 6; }   (a nested struct global: the slot facts in GFACTS)
+method f_setz__1_v1(amt_1: Perm)
+  requires GFACTS
+  requires none < amt_1 && amt_1 < write
+  requires ROOT(TSLOT) && TOWN(TSLOT) && LVF(TSLOT, amt_1)
+  ensures ROOT(TSLOT) && TOWN(TSLOT) && LVF(TSLOT, amt_1) && MX(TS(TSLOT)).v_int == old(MX(TS(TSLOT)).v_int) && MY(TS(TSLOT)).v_int == 4 && TZ(TSLOT).v_int == 6
+  decreases
+{
+  var ox: Int := loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0) != null
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int) == write && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int) == write
+  loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int := 4
+  loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int := true
+  assert loc(member(loc(GB_t__2(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_t__2(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_t__2(), 0), 1), 0).d_int) == write
+  loc(member(loc(GB_t__2(), 0), 1), 0).v_int := 6
+  loc(member(loc(GB_t__2(), 0), 1), 0).d_int := true
+  assert loc(GB_t__2(), 0) != null
+  assert WF(loc(GB_t__2(), 0))
+  assert offset_of(loc(GB_t__2(), 0)) < len(block_of(loc(GB_t__2(), 0)))
+  assert len(member(loc(GB_t__2(), 0), 0)) == 1 && len(member(loc(GB_t__2(), 0), 1)) == 1
+  assert len(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0)) == 1 && len(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1)) == 1
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int) == write && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int) == write
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int
+  assert RNG(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0))
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int) == write && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int) == write
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0))
+  assert perm(loc(member(loc(GB_t__2(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_t__2(), 0), 1), 0).d_int) == write
+  assert loc(member(loc(GB_t__2(), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(GB_t__2(), 0), 1), 0))
+  assert perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) >= amt_1
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int == 4
+  assert loc(member(loc(GB_t__2(), 0), 1), 0).v_int == 6
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int == ox
+  assert false // <- fails: vacuity
+}
+
+// void wfonly(int *p) { }   (a pointer parameter with no atom: only WF(p))
+method f_wfonly__2(p: Ref)
+  requires GFACTS
+  requires WF(p)
+  decreases
+{
+}
+
+// void wfonly(int *p) { }   (a pointer parameter with no atom: only WF(p))
+method f_wfonly__2_v0(p: Ref)
+  requires GFACTS
+  requires WF(p)
+  decreases
+{
+  assert false // <- fails: vacuity
+}
+
+// void pass(void) { wfonly(&g.x); wfonly(&t.s.y); }   (holds nothing of g or t)
+method f_pass__3()
+  requires GFACTS
+  decreases
+{
+  // wfonly(&g.x): the address is a use of g (the liveness check passes by the GB_ disjunct, nothing held), then the callee's WF(p) from the facts alone
+  assert LIVE(loc(member(loc(GB_g__1(), 0), 0), 0))
+  assert WF(loc(member(loc(GB_g__1(), 0), 0), 0))
+  f_wfonly__2(loc(member(loc(GB_g__1(), 0), 0), 0))
+  // wfonly(&t.s.y)
+  assert LIVE(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0))
+  assert WF(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0))
+  f_wfonly__2(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0))
+}
+
+// void pass(void) { wfonly(&g.x); wfonly(&t.s.y); }   (holds nothing of g or t)
+method f_pass__3_v0()
+  requires GFACTS
+  decreases
+{
+  assert false // <- fails: vacuity
+  // wfonly(&g.x): the address is a use of g (the liveness check passes by the GB_ disjunct, nothing held), then the callee's WF(p) from the facts alone
+  assert LIVE(loc(member(loc(GB_g__1(), 0), 0), 0))
+  assert WF(loc(member(loc(GB_g__1(), 0), 0), 0))
+  f_wfonly__2(loc(member(loc(GB_g__1(), 0), 0), 0))
+  // wfonly(&t.s.y)
+  assert LIVE(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0))
+  assert WF(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0))
+  f_wfonly__2(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0))
+}
+
+// void pass(void) { wfonly(&g.x); wfonly(&t.s.y); }   (holds nothing of g or t)
+method f_pass__3_v1()
+  requires GFACTS
+  decreases
+{
+  // wfonly(&g.x): the address is a use of g (the liveness check passes by the GB_ disjunct, nothing held), then the callee's WF(p) from the facts alone
+  assert LIVE(loc(member(loc(GB_g__1(), 0), 0), 0))
+  assert WF(loc(member(loc(GB_g__1(), 0), 0), 0))
+  f_wfonly__2(loc(member(loc(GB_g__1(), 0), 0), 0))
+  assert false // <- fails: vacuity
+  // wfonly(&t.s.y)
+  assert LIVE(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0))
+  assert WF(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0))
+  f_wfonly__2(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0))
+}
+
+// void pass(void) { wfonly(&g.x); wfonly(&t.s.y); }   (holds nothing of g or t)
+method f_pass__3_v2()
+  requires GFACTS
+  decreases
+{
+  // wfonly(&g.x): the address is a use of g (the liveness check passes by the GB_ disjunct, nothing held), then the callee's WF(p) from the facts alone
+  assert LIVE(loc(member(loc(GB_g__1(), 0), 0), 0))
+  assert WF(loc(member(loc(GB_g__1(), 0), 0), 0))
+  f_wfonly__2(loc(member(loc(GB_g__1(), 0), 0), 0))
+  // wfonly(&t.s.y)
+  assert LIVE(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0))
+  assert WF(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0))
+  f_wfonly__2(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0))
+  assert false // <- fails: vacuity
+}
+
+// int main(void) { check(g.x == 0 && g.y == 0); setx(); check(g.x == 5 && g.y == 0); setz(); check(t.s.x == 0 && t.s.y == 4 && t.z == 6); pass(); }
+method f_main__4()
+  decreases
+{
+  program_start()
+  // check(g.x == 0 && g.y == 0)
+  assert loc(member(loc(GB_g__1(), 0), 0), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 0 && loc(member(loc(GB_g__1(), 0), 1), 0).v_int == 0
+  // setx()
+  assert loc(GB_g__1(), 0) != null
+  assert WF(loc(GB_g__1(), 0))
+  assert offset_of(loc(GB_g__1(), 0)) < len(block_of(loc(GB_g__1(), 0)))
+  assert len(member(loc(GB_g__1(), 0), 0)) == 1 && len(member(loc(GB_g__1(), 0), 1)) == 1
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) == write
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert RNG(loc(member(loc(GB_g__1(), 0), 0), 0))
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) == write
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(GB_g__1(), 0), 1), 0))
+  assert perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) > none
+  assert none < (perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) / 2) && (perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) / 2) < write
+  assert perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) >= (perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) / 2)
+  f_setx__0((perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) / 2))
+  // check(g.x == 5 && g.y == 0)
+  assert loc(member(loc(GB_g__1(), 0), 0), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 5 && loc(member(loc(GB_g__1(), 0), 1), 0).v_int == 0
+  // setz()
+  assert loc(GB_t__2(), 0) != null
+  assert WF(loc(GB_t__2(), 0))
+  assert offset_of(loc(GB_t__2(), 0)) < len(block_of(loc(GB_t__2(), 0)))
+  assert len(member(loc(GB_t__2(), 0), 0)) == 1 && len(member(loc(GB_t__2(), 0), 1)) == 1
+  assert len(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0)) == 1 && len(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1)) == 1
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int) == write && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int) == write
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int
+  assert RNG(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0))
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int) == write && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int) == write
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0))
+  assert perm(loc(member(loc(GB_t__2(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_t__2(), 0), 1), 0).d_int) == write
+  assert loc(member(loc(GB_t__2(), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(GB_t__2(), 0), 1), 0))
+  assert perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) > none
+  assert none < (perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) / 2) && (perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) / 2) < write
+  assert perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) >= (perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) / 2)
+  f_setz__1((perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) / 2))
+  // check(t.s.x == 0 && t.s.y == 4 && t.z == 6)
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0) != null
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int) > none && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int) > none
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0) != null
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int) > none && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int) > none
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int
+  assert loc(member(loc(GB_t__2(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_t__2(), 0), 1), 0).v_int) > none && perm(loc(member(loc(GB_t__2(), 0), 1), 0).d_int) > none
+  assert loc(member(loc(GB_t__2(), 0), 1), 0).d_int
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int == 0 && loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int == 4 && loc(member(loc(GB_t__2(), 0), 1), 0).v_int == 6
+  // pass()
+  f_pass__3()
+}
+
+// int main(void) { check(g.x == 0 && g.y == 0); setx(); check(g.x == 5 && g.y == 0); setz(); check(t.s.x == 0 && t.s.y == 4 && t.z == 6); pass(); }
+method f_main__4_v0()
+  decreases
+{
+  assert false // <- fails: vacuity
+  program_start()
+  // check(g.x == 0 && g.y == 0)
+  assert loc(member(loc(GB_g__1(), 0), 0), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 0 && loc(member(loc(GB_g__1(), 0), 1), 0).v_int == 0
+  // setx()
+  assert loc(GB_g__1(), 0) != null
+  assert WF(loc(GB_g__1(), 0))
+  assert offset_of(loc(GB_g__1(), 0)) < len(block_of(loc(GB_g__1(), 0)))
+  assert len(member(loc(GB_g__1(), 0), 0)) == 1 && len(member(loc(GB_g__1(), 0), 1)) == 1
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) == write
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert RNG(loc(member(loc(GB_g__1(), 0), 0), 0))
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) == write
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(GB_g__1(), 0), 1), 0))
+  assert perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) > none
+  assert none < (perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) / 2) && (perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) / 2) < write
+  assert perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) >= (perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) / 2)
+  f_setx__0((perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) / 2))
+  // check(g.x == 5 && g.y == 0)
+  assert loc(member(loc(GB_g__1(), 0), 0), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 5 && loc(member(loc(GB_g__1(), 0), 1), 0).v_int == 0
+  // setz()
+  assert loc(GB_t__2(), 0) != null
+  assert WF(loc(GB_t__2(), 0))
+  assert offset_of(loc(GB_t__2(), 0)) < len(block_of(loc(GB_t__2(), 0)))
+  assert len(member(loc(GB_t__2(), 0), 0)) == 1 && len(member(loc(GB_t__2(), 0), 1)) == 1
+  assert len(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0)) == 1 && len(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1)) == 1
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int) == write && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int) == write
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int
+  assert RNG(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0))
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int) == write && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int) == write
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0))
+  assert perm(loc(member(loc(GB_t__2(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_t__2(), 0), 1), 0).d_int) == write
+  assert loc(member(loc(GB_t__2(), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(GB_t__2(), 0), 1), 0))
+  assert perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) > none
+  assert none < (perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) / 2) && (perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) / 2) < write
+  assert perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) >= (perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) / 2)
+  f_setz__1((perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) / 2))
+  // check(t.s.x == 0 && t.s.y == 4 && t.z == 6)
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0) != null
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int) > none && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int) > none
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0) != null
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int) > none && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int) > none
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int
+  assert loc(member(loc(GB_t__2(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_t__2(), 0), 1), 0).v_int) > none && perm(loc(member(loc(GB_t__2(), 0), 1), 0).d_int) > none
+  assert loc(member(loc(GB_t__2(), 0), 1), 0).d_int
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int == 0 && loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int == 4 && loc(member(loc(GB_t__2(), 0), 1), 0).v_int == 6
+  // pass()
+  f_pass__3()
+}
+
+// int main(void) { check(g.x == 0 && g.y == 0); setx(); check(g.x == 5 && g.y == 0); setz(); check(t.s.x == 0 && t.s.y == 4 && t.z == 6); pass(); }
+method f_main__4_v1()
+  decreases
+{
+  program_start()
+  assert false // <- fails: vacuity
+  // check(g.x == 0 && g.y == 0)
+  assert loc(member(loc(GB_g__1(), 0), 0), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 0 && loc(member(loc(GB_g__1(), 0), 1), 0).v_int == 0
+  // setx()
+  assert loc(GB_g__1(), 0) != null
+  assert WF(loc(GB_g__1(), 0))
+  assert offset_of(loc(GB_g__1(), 0)) < len(block_of(loc(GB_g__1(), 0)))
+  assert len(member(loc(GB_g__1(), 0), 0)) == 1 && len(member(loc(GB_g__1(), 0), 1)) == 1
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) == write
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert RNG(loc(member(loc(GB_g__1(), 0), 0), 0))
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) == write
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(GB_g__1(), 0), 1), 0))
+  assert perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) > none
+  assert none < (perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) / 2) && (perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) / 2) < write
+  assert perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) >= (perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) / 2)
+  f_setx__0((perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) / 2))
+  // check(g.x == 5 && g.y == 0)
+  assert loc(member(loc(GB_g__1(), 0), 0), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 5 && loc(member(loc(GB_g__1(), 0), 1), 0).v_int == 0
+  // setz()
+  assert loc(GB_t__2(), 0) != null
+  assert WF(loc(GB_t__2(), 0))
+  assert offset_of(loc(GB_t__2(), 0)) < len(block_of(loc(GB_t__2(), 0)))
+  assert len(member(loc(GB_t__2(), 0), 0)) == 1 && len(member(loc(GB_t__2(), 0), 1)) == 1
+  assert len(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0)) == 1 && len(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1)) == 1
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int) == write && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int) == write
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int
+  assert RNG(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0))
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int) == write && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int) == write
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0))
+  assert perm(loc(member(loc(GB_t__2(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_t__2(), 0), 1), 0).d_int) == write
+  assert loc(member(loc(GB_t__2(), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(GB_t__2(), 0), 1), 0))
+  assert perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) > none
+  assert none < (perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) / 2) && (perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) / 2) < write
+  assert perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) >= (perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) / 2)
+  f_setz__1((perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) / 2))
+  // check(t.s.x == 0 && t.s.y == 4 && t.z == 6)
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0) != null
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int) > none && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int) > none
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0) != null
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int) > none && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int) > none
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int
+  assert loc(member(loc(GB_t__2(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_t__2(), 0), 1), 0).v_int) > none && perm(loc(member(loc(GB_t__2(), 0), 1), 0).d_int) > none
+  assert loc(member(loc(GB_t__2(), 0), 1), 0).d_int
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int == 0 && loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int == 4 && loc(member(loc(GB_t__2(), 0), 1), 0).v_int == 6
+  // pass()
+  f_pass__3()
+}
+
+// int main(void) { check(g.x == 0 && g.y == 0); setx(); check(g.x == 5 && g.y == 0); setz(); check(t.s.x == 0 && t.s.y == 4 && t.z == 6); pass(); }
+method f_main__4_v2()
+  decreases
+{
+  program_start()
+  // check(g.x == 0 && g.y == 0)
+  assert loc(member(loc(GB_g__1(), 0), 0), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 0 && loc(member(loc(GB_g__1(), 0), 1), 0).v_int == 0
+  // setx()
+  assert loc(GB_g__1(), 0) != null
+  assert WF(loc(GB_g__1(), 0))
+  assert offset_of(loc(GB_g__1(), 0)) < len(block_of(loc(GB_g__1(), 0)))
+  assert len(member(loc(GB_g__1(), 0), 0)) == 1 && len(member(loc(GB_g__1(), 0), 1)) == 1
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) == write
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert RNG(loc(member(loc(GB_g__1(), 0), 0), 0))
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) == write
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(GB_g__1(), 0), 1), 0))
+  assert perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) > none
+  assert none < (perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) / 2) && (perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) / 2) < write
+  assert perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) >= (perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) / 2)
+  f_setx__0((perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) / 2))
+  assert false // <- fails: vacuity
+  // check(g.x == 5 && g.y == 0)
+  assert loc(member(loc(GB_g__1(), 0), 0), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 5 && loc(member(loc(GB_g__1(), 0), 1), 0).v_int == 0
+  // setz()
+  assert loc(GB_t__2(), 0) != null
+  assert WF(loc(GB_t__2(), 0))
+  assert offset_of(loc(GB_t__2(), 0)) < len(block_of(loc(GB_t__2(), 0)))
+  assert len(member(loc(GB_t__2(), 0), 0)) == 1 && len(member(loc(GB_t__2(), 0), 1)) == 1
+  assert len(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0)) == 1 && len(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1)) == 1
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int) == write && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int) == write
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int
+  assert RNG(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0))
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int) == write && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int) == write
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0))
+  assert perm(loc(member(loc(GB_t__2(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_t__2(), 0), 1), 0).d_int) == write
+  assert loc(member(loc(GB_t__2(), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(GB_t__2(), 0), 1), 0))
+  assert perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) > none
+  assert none < (perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) / 2) && (perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) / 2) < write
+  assert perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) >= (perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) / 2)
+  f_setz__1((perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) / 2))
+  // check(t.s.x == 0 && t.s.y == 4 && t.z == 6)
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0) != null
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int) > none && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int) > none
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0) != null
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int) > none && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int) > none
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int
+  assert loc(member(loc(GB_t__2(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_t__2(), 0), 1), 0).v_int) > none && perm(loc(member(loc(GB_t__2(), 0), 1), 0).d_int) > none
+  assert loc(member(loc(GB_t__2(), 0), 1), 0).d_int
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int == 0 && loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int == 4 && loc(member(loc(GB_t__2(), 0), 1), 0).v_int == 6
+  // pass()
+  f_pass__3()
+}
+
+// int main(void) { check(g.x == 0 && g.y == 0); setx(); check(g.x == 5 && g.y == 0); setz(); check(t.s.x == 0 && t.s.y == 4 && t.z == 6); pass(); }
+method f_main__4_v3()
+  decreases
+{
+  program_start()
+  // check(g.x == 0 && g.y == 0)
+  assert loc(member(loc(GB_g__1(), 0), 0), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 0 && loc(member(loc(GB_g__1(), 0), 1), 0).v_int == 0
+  // setx()
+  assert loc(GB_g__1(), 0) != null
+  assert WF(loc(GB_g__1(), 0))
+  assert offset_of(loc(GB_g__1(), 0)) < len(block_of(loc(GB_g__1(), 0)))
+  assert len(member(loc(GB_g__1(), 0), 0)) == 1 && len(member(loc(GB_g__1(), 0), 1)) == 1
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) == write
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert RNG(loc(member(loc(GB_g__1(), 0), 0), 0))
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) == write
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(GB_g__1(), 0), 1), 0))
+  assert perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) > none
+  assert none < (perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) / 2) && (perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) / 2) < write
+  assert perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) >= (perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) / 2)
+  f_setx__0((perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) / 2))
+  // check(g.x == 5 && g.y == 0)
+  assert loc(member(loc(GB_g__1(), 0), 0), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 5 && loc(member(loc(GB_g__1(), 0), 1), 0).v_int == 0
+  // setz()
+  assert loc(GB_t__2(), 0) != null
+  assert WF(loc(GB_t__2(), 0))
+  assert offset_of(loc(GB_t__2(), 0)) < len(block_of(loc(GB_t__2(), 0)))
+  assert len(member(loc(GB_t__2(), 0), 0)) == 1 && len(member(loc(GB_t__2(), 0), 1)) == 1
+  assert len(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0)) == 1 && len(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1)) == 1
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int) == write && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int) == write
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int
+  assert RNG(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0))
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int) == write && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int) == write
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0))
+  assert perm(loc(member(loc(GB_t__2(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_t__2(), 0), 1), 0).d_int) == write
+  assert loc(member(loc(GB_t__2(), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(GB_t__2(), 0), 1), 0))
+  assert perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) > none
+  assert none < (perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) / 2) && (perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) / 2) < write
+  assert perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) >= (perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) / 2)
+  f_setz__1((perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) / 2))
+  assert false // <- fails: vacuity
+  // check(t.s.x == 0 && t.s.y == 4 && t.z == 6)
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0) != null
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int) > none && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int) > none
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0) != null
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int) > none && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int) > none
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int
+  assert loc(member(loc(GB_t__2(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_t__2(), 0), 1), 0).v_int) > none && perm(loc(member(loc(GB_t__2(), 0), 1), 0).d_int) > none
+  assert loc(member(loc(GB_t__2(), 0), 1), 0).d_int
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int == 0 && loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int == 4 && loc(member(loc(GB_t__2(), 0), 1), 0).v_int == 6
+  // pass()
+  f_pass__3()
+}
+
+// int main(void) { check(g.x == 0 && g.y == 0); setx(); check(g.x == 5 && g.y == 0); setz(); check(t.s.x == 0 && t.s.y == 4 && t.z == 6); pass(); }
+method f_main__4_v4()
+  decreases
+{
+  program_start()
+  // check(g.x == 0 && g.y == 0)
+  assert loc(member(loc(GB_g__1(), 0), 0), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 0 && loc(member(loc(GB_g__1(), 0), 1), 0).v_int == 0
+  // setx()
+  assert loc(GB_g__1(), 0) != null
+  assert WF(loc(GB_g__1(), 0))
+  assert offset_of(loc(GB_g__1(), 0)) < len(block_of(loc(GB_g__1(), 0)))
+  assert len(member(loc(GB_g__1(), 0), 0)) == 1 && len(member(loc(GB_g__1(), 0), 1)) == 1
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) == write
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert RNG(loc(member(loc(GB_g__1(), 0), 0), 0))
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) == write
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(GB_g__1(), 0), 1), 0))
+  assert perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) > none
+  assert none < (perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) / 2) && (perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) / 2) < write
+  assert perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) >= (perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) / 2)
+  f_setx__0((perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) / 2))
+  // check(g.x == 5 && g.y == 0)
+  assert loc(member(loc(GB_g__1(), 0), 0), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 5 && loc(member(loc(GB_g__1(), 0), 1), 0).v_int == 0
+  // setz()
+  assert loc(GB_t__2(), 0) != null
+  assert WF(loc(GB_t__2(), 0))
+  assert offset_of(loc(GB_t__2(), 0)) < len(block_of(loc(GB_t__2(), 0)))
+  assert len(member(loc(GB_t__2(), 0), 0)) == 1 && len(member(loc(GB_t__2(), 0), 1)) == 1
+  assert len(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0)) == 1 && len(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1)) == 1
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int) == write && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int) == write
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int
+  assert RNG(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0))
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int) == write && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int) == write
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0))
+  assert perm(loc(member(loc(GB_t__2(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_t__2(), 0), 1), 0).d_int) == write
+  assert loc(member(loc(GB_t__2(), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(GB_t__2(), 0), 1), 0))
+  assert perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) > none
+  assert none < (perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) / 2) && (perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) / 2) < write
+  assert perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) >= (perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) / 2)
+  f_setz__1((perm(lvloc(block_of(loc(GB_t__2(), 0))).lv) / 2))
+  // check(t.s.x == 0 && t.s.y == 4 && t.z == 6)
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0) != null
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int) > none && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int) > none
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).d_int
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0) != null
+  assert perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int) > none && perm(loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int) > none
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).d_int
+  assert loc(member(loc(GB_t__2(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_t__2(), 0), 1), 0).v_int) > none && perm(loc(member(loc(GB_t__2(), 0), 1), 0).d_int) > none
+  assert loc(member(loc(GB_t__2(), 0), 1), 0).d_int
+  assert loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 0), 0).v_int == 0 && loc(member(loc(member(loc(GB_t__2(), 0), 0), 0), 1), 0).v_int == 4 && loc(member(loc(GB_t__2(), 0), 1), 0).v_int == 6
+  // pass()
+  f_pass__3()
+  assert false // <- fails: vacuity
+}

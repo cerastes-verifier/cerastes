@@ -860,7 +860,7 @@ The constructs that are rejected in this version are:
   `thread_local` and `extern` locals and globals, `volatile` globals, globals
   defined in another file (`extern` with no definition here), arrays, classes
   other than the C structures xref:memory.adoc#structures[Structures] describes
-  (and structures passed or returned by value, or as globals), unions,
+  (`const` structure parameters and globals among them), unions,
   an enumeration declared in a function, a class or a template, or with a
   `bool` underlying type or an enumerator outside the range of `int`, an
   enumeration declared without its enumerators and without an underlying type,

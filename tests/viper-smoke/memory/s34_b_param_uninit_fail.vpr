@@ -1,0 +1,138 @@
+// expect: error assert:assertion.false @ L121
+// S34 (b) twin of s34_b_param.vpr: the caller never writes `s.y`, and passing `s` reads every member (question 97): the flag assert of `s.y` at the call fails (`uninitialized`).
+// Hand-written in the emitted style (see the positive fixture).
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0043 items 3, 9; record 0044 items 3-5, 8): WF; a leaf's range; a leaf at allocation (uninitialized); a leaf owned (full permission, flag set, range); one liveness fraction
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNG(c) ((-2147483648) <= c.v_int && c.v_int <= 2147483647)
+define RNGV(v) ((-2147483648) <= v && v <= 2147483647)
+define LEAFU(c) (acc(c.v_int) && acc(c.d_int) && !c.d_int)
+define LEAF(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNG(c))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+// struct S { int x; int y; }: member 0 is x, member 1 is y; struct T { struct S s; int z; }: member 0 is the slot of the nested S, member 1 is z
+define MX(s) loc(member(s, 0), 0)
+define MY(s) loc(member(s, 1), 0)
+define TS(t) loc(member(t, 0), 0)
+define TZ(t) loc(member(t, 1), 0)
+define SLEN(s) (len(member(s, 0)) == 1 && len(member(s, 1)) == 1)
+define SOWN(s) (SLEN(s) && LEAF(MX(s)) && LEAF(MY(s)))
+define TLEN(t) (len(member(t, 0)) == 1 && len(member(t, 1)) == 1)
+define TOWN(t) (TLEN(t) && SOWN(TS(t)) && LEAF(TZ(t)))
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+define OWNI(p, a) (ROOT(p) && LEAF(p) && LVF(p, a))
+
+
+// cerastes:trusted-contract allocation of a struct S local: a one-slot block; each member is a block of length 1 whose leaf is uninitialized with full permission; the liveness token is the root block's (record 0043 item 4)
+method alloc_struct_0_S() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures len(member(r, 0)) == 1 && acc(loc(member(r, 0), 0).v_int) && acc(loc(member(r, 0), 0).d_int) && !loc(member(r, 0), 0).d_int
+  ensures len(member(r, 1)) == 1 && acc(loc(member(r, 1), 0).v_int) && acc(loc(member(r, 1), 0).d_int) && !loc(member(r, 1), 0).d_int
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// int bump(struct S s) requires(s.x < 100) ensures(r, r == s.x + 1) { s.x += 1; return s.x; }   (s.x in the contract is the entry formal: it holds although the body changed the copy)
+method f_bump__0(p_s__0_m0: Int, p_s__0_m1: Int) returns (res: Int)
+  requires RNGV(p_s__0_m0) && RNGV(p_s__0_m1)
+  requires p_s__0_m0 < 100
+  ensures RNGV(res)
+  ensures res == p_s__0_m0 + 1
+  decreases
+{
+  var s: Ref
+  var e__0: Ref
+  var e__1: Ref
+  s := alloc_struct_0_S()
+  // entry: the parameter's copy is a struct block; each leaf is written from its formal through a Ref temporary, the flag set
+  e__0 := loc(member(s, 0), 0)
+  assert e__0 != null
+  assert perm(e__0.v_int) == write && perm(e__0.d_int) == write
+  e__0.v_int := p_s__0_m0
+  e__0.d_int := true
+  e__1 := loc(member(s, 1), 0)
+  assert e__1 != null
+  assert perm(e__1.v_int) == write && perm(e__1.d_int) == write
+  e__1.v_int := p_s__0_m1
+  e__1.d_int := true
+  // s.x += 1
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) > none && perm(loc(member(s, 0), 0).d_int) > none
+  assert loc(member(s, 0), 0).d_int
+  assert !(((loc(member(s, 0), 0).v_int + 1) < (-2147483648)) || (2147483647 < (loc(member(s, 0), 0).v_int + 1)))
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+  loc(member(s, 0), 0).v_int := loc(member(s, 0), 0).v_int + 1
+  loc(member(s, 0), 0).d_int := true
+  // return s.x
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) > none && perm(loc(member(s, 0), 0).d_int) > none
+  assert loc(member(s, 0), 0).d_int
+  res := loc(member(s, 0), 0).v_int
+  assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+  assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+  assert perm(lvloc(block_of(s)).lv) == write
+  exhale acc(loc(member(s, 0), 0).v_int) && acc(loc(member(s, 0), 0).d_int) && acc(loc(member(s, 1), 0).v_int) && acc(loc(member(s, 1), 0).d_int) && acc(lvloc(block_of(s)).lv)
+  assert RNGV(res)
+  assert res == p_s__0_m0 + 1
+}
+
+// int use_bump(void) ensures(r, r == 6) { struct S s = {5, 1}; int t = bump(s); check(s.x == 5); return t; }
+method f_use_bump__1() returns (res: Int)
+  ensures RNGV(res)
+  ensures res == 6
+  decreases
+{
+  var s: Ref
+  var t__1: Int
+  s := alloc_struct_0_S()
+  // struct S s; s.x = 5;   (s.y is never written)
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+  loc(member(s, 0), 0).v_int := 5
+  loc(member(s, 0), 0).d_int := true
+  // bump(s): every leaf of s is read (permission, flag) before the call, then the callee's requires
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) > none && perm(loc(member(s, 0), 0).d_int) > none
+  assert loc(member(s, 0), 0).d_int
+  assert loc(member(s, 1), 0) != null
+  assert perm(loc(member(s, 1), 0).v_int) > none && perm(loc(member(s, 1), 0).d_int) > none
+  assert loc(member(s, 1), 0).d_int // <- fails
+  assert RNGV(loc(member(s, 0), 0).v_int) && RNGV(loc(member(s, 1), 0).v_int)
+  assert loc(member(s, 0), 0).v_int < 100
+  t__1 := f_bump__0(loc(member(s, 0), 0).v_int, loc(member(s, 1), 0).v_int)
+  // check(s.x == 5): the argument was a copy, the callee's change is not seen
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) > none && perm(loc(member(s, 0), 0).d_int) > none
+  assert loc(member(s, 0), 0).d_int
+  assert loc(member(s, 0), 0).v_int == 5
+  // return t
+  res := t__1
+  assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+  assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+  assert perm(lvloc(block_of(s)).lv) == write
+  exhale acc(loc(member(s, 0), 0).v_int) && acc(loc(member(s, 0), 0).d_int) && acc(loc(member(s, 1), 0).v_int) && acc(loc(member(s, 1), 0).d_int) && acc(lvloc(block_of(s)).lv)
+  assert RNGV(res)
+  assert res == 6
+}
