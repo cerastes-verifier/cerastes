@@ -2297,6 +2297,9 @@ class Lowerer {
         }
         return {global_ref(e.global->id), {}};
       case Expr::Kind::Deref: return deref(e, env, guard, gdep, full);
+      case Expr::Kind::Field: case Expr::Kind::Aggregate:  // decision 0044: struct values are lowered by the il-analyst's block
+        internal_error(e.loc, "a struct value (a member of one or an aggregate) reached lowering, which does not lower it yet (decision 0044)");
+        return {low::bool_lit(true), {}};
       case Expr::Kind::Atom:
         if (cmode_ == CMode::Inv) return {low::bool_lit(true), {}};  // a written atom's rows are the loop's own (decision 0040 item 5)
         if (cmode_ == CMode::None) {

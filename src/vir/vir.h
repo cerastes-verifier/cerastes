@@ -66,8 +66,12 @@ struct Type {
   // or itself an accepted pointer, at any depth (`int **`, `int ***`: a pointer variable whose address is taken is a cell of a pointer
   // type).  Every other pointer type (a pointee that is void, at any level) is built as is and rejected there.
   // Struct (decision 0043 item 3; appended): a C structure of the Program (Program::add_struct), the type of a struct local (always a
-  // cell, address-taken) and the pointee of a pointer.  A struct VALUE exists nowhere else in VIR: check_program rejects an expression, a
-  // parameter, a result, a store or an initializer of struct type (copies and initializers are expanded by the encoder into leaf stores).
+  // cell, address-taken) and the pointee of a pointer.  A struct VALUE (decision 0044 item 2: a tuple of the struct's leaves, in struct_leaves
+  // order) exists only between a few producers and consumers, and check_program rejects it in every other position: producers are a `Call` of a
+  // struct-returning function, an `Aggregate`, a struct-typed `Field`, and a `Formal` or the `Result` of a contract directly under a `Field`
+  // (a `Formal` may also sit in an `Old` under a `Field`); consumers are a call argument matching a struct parameter, a `Return` matching a
+  // struct result, a struct `Store` whose value is a `Call`, an `Aggregate` or a `Field` chain over one of them, an `ExprStmt` of a `Call`,
+  // and a `Field`.  A struct local, a copy and an initializer stay expanded by the encoder into leaf stores (decision 0043).
   // Pointers to structs are accepted at any depth like the other pointers (`struct S *`, `struct S **`).
   enum class Kind { Void, Bool, Int, Ptr, Struct };
   Kind kind = Kind::Void;
@@ -231,7 +235,7 @@ struct Expr {
                  // read the loop's places, framed by lowering); in a named constant, a global's initializer or a case value it is a check_program error (no_ptr_).
                  // `Atom(Live, GlobalAddr)` and a GlobalAddr atom in a loop's invariant are check_program errors (the encoder reports them first).
     // ---- structures (decision 0043; appended) ----
-    MemberAddr   // `&a->m`: `a` is a pointer to a struct, `index` the member k of that struct (Type::struct_type->members[k]); type = Ptr(the member's type)
+    MemberAddr,  // `&a->m`: `a` is a pointer to a struct, `index` the member k of that struct (Type::struct_type->members[k]); type = Ptr(the member's type)
                  // (a nested struct member gives a pointer to that struct: `&p->t` is the slot of `t`; `p->t.x` is MemberAddr(MemberAddr(p, t), x)).
                  // Lowering: `loc(member(a, k), 0)`.  c_text: "&" + the member's place spelling (Builder::member_addr: `&p->x`, `&s.x`, `&s.t.x`);
                  // Builder::deref of it spells "p->x" (without the "&").  A struct place is always reached through this node.
@@ -243,6 +247,14 @@ struct Expr {
                  // (decision 0028 item 3a), checking `a != null` and `a`'s liveness.  In a CONTRACT only as a place (the operand of a Deref or an Atom,
                  // through further MemberAddrs) rooted at a Formal, or at the Result in an `ensures` read; atoms and values of struct places are written
                  // `Atom(owns, MemberAddr(Formal p, k))` and `Deref(MemberAddr(Formal p, k))`.  No obligation of its own.
+    // ---- struct values (decision 0044 item 2; appended) ----
+    Field,       // member `index` of the struct VALUE `a` (`a.m`): type = the member's type (a nested struct member is a struct value again: `a.t.y` is
+                 // Field(Field(a, t), y)).  `a` is a struct-typed producer: a Call, an Aggregate, another Field or, in a contract, a Formal or the Result
+                 // (an `Old` of a Formal or of a Field chain over one, in an `ensures`) directly under the Field.  c_text: `a`'s followed by `.m` when `a` has one.
+                 // Lowering reads the member's leaf (or leaves, for a nested struct) of the value's tuple; the node adds no obligation of its own.
+    Aggregate    // a struct value built from its leaves: `type` is a Struct; `args` holds one expression per leaf of the struct in struct_leaves order (depth
+                 // first), each exactly the leaf's VIR type (a pointer leaf's Null has that pointer type).  Allowed in code only (never in a contract).
+                 // The arguments are unsequenced siblings, like the arguments of a call but without a sequence point after them.
   };
   Kind kind = Kind::Const;
   Type type;     // the type of the value (Void only for a Call of a void function)
@@ -391,6 +403,19 @@ struct NamedConst {
 // `GB_...(): Block`, its cell `loc(GB_g(), 0)`.  It is not a `Var` (a Var's id is unique per function only); it is reached through
 // `Expr::Kind::GlobalAddr`.  Created with Program::add_global, in declaration order (the order of `program_start`'s rows and of the prelude); the
 // initial-value fields are filled by the encoder after every global exists (an `&h` initializer may name a later global).
+enum class GlobalInit { Value, Null, Addr, Unknown };
+
+// The initial value of one leaf of a struct global (decision 0044 item 8): the same four kinds as a scalar global's, with the fields each names.  `kind`
+// and the fields it names are read as Global's own are (Global::Init); `loc` is the leaf's position (the initializer element, or the global when
+// the leaf has none), unknown means the global's.
+struct GlobalLeaf {
+  GlobalInit kind = GlobalInit::Value;
+  const Expr* init = nullptr;       // Value, Unknown: the element as written (closed, call-free, exactly the leaf's type), or null
+  std::string value = "0";          // Value: EDG's value, a decimal literal of the leaf's type ("0"/"1" for bool)
+  const Global* target = nullptr;   // Addr: another Global of the program
+  SrcLoc loc;
+};
+
 struct Global {
   // The value the global has when the program starts (decision 0041 item 3), for the trusted `program_start`.
   //  Value:   a bool or an integer (also an enumeration): `value`, EDG's value (a decimal literal of `type`, "0"/"1" for bool; "0" for a tentative
@@ -401,10 +426,10 @@ struct Global {
   //  Unknown: initialized and in range (`WF` for a pointer) but not known: external linkage in C++, the transitive escape, a C tentative definition
   //           (question 84).  `init` may still hold the initializer as written (a bool, integer or enumeration): the prologue checks its obligations
   //           like a Value global's, with no guard against a value; `program_start` states the range only.
-  enum class Init { Value, Null, Addr, Unknown };
+  using Init = GlobalInit;
   int id = 0;                       // the index in Program::globals(); unique in the Program; part of the Viper name
   std::string c_name;               // the C/C++ name as messages say it (`g`, `count`, `ns::g`)
-  Type type;                        // Bool, Int (an enumeration included) or an accepted pointer
+  Type type;                        // Bool, Int (an enumeration included), an accepted pointer or (decision 0044 item 8) a struct of the Program
   SrcLoc loc;                       // the defining declaration (the position of its `program_start` row)
   const Function* owner = nullptr;  // a `static` local: the function whose body names it (decision 0041 item 12); null for a file/namespace-scope global
   Init init_kind = Init::Value;
@@ -412,6 +437,9 @@ struct Global {
   std::string value = "0";          // Init::Value: EDG's value
   const Global* target = nullptr;   // Init::Addr
   std::string c_type_name;          // the C/C++ spelling of the type, for messages (empty: use type.str())
+  // A STRUCT global (decision 0044 item 8): one entry per leaf of the struct in struct_leaves order (depth first), each with its own initial value; the
+  // scalar fields above (`init_kind`, `init`, `value`, `target`) are then unused (check_program: `init` and `target` null).  Empty for every other global.
+  std::vector<GlobalLeaf> leaves;
 
   bool is_static_local() const { return owner != nullptr; }
   // The Viper name of the block constant: `GB_<name>__<id>` for a global, `GB_<function>__<name>__<id>` for a `static` local, with every character
@@ -427,7 +455,7 @@ enum class InitMarker { None, RefToUninit, MustInit };
 
 struct Param {
   std::string name;  // may be empty (unnamed parameter)
-  Type type;         // Bool, Int or a pointer to one of them (decision 0037 item 2)
+  Type type;         // Bool, Int, a pointer to one of them (decision 0037 item 2) or, by value, a struct of the Program (decision 0044 item 3)
   SrcLoc loc;
   std::string c_type_name;  // the C/C++ spelling of the type, for messages (empty: use type.str())
   // `T *restrict p` (decision 0037 item 2): accepted only when the `requires` holds `owns(*p)` as a top-level conjunct or as `p == NULL ||
@@ -443,7 +471,7 @@ struct Function {
   std::string c_name;                // for messages and generated identifiers
   SrcLoc loc;                        // the declaration (what a precondition note points at when a clause has no loc)
   SrcLoc end_loc;                    // the closing brace of the body (missing-return, void postconditions)
-  Type ret = Type::void_type();      // Void, Bool, Int or a pointer to Bool/Int (decision 0037 item 3: `ensures WF(result)` from lowering)
+  Type ret = Type::void_type();      // Void, Bool, Int, a pointer to Bool/Int (decision 0037 item 3: `ensures WF(result)` from lowering) or a struct by value (0044 item 4)
   std::vector<Param> params;
   std::vector<Clause> requires_;     // the user's `requires`, in order; mention Formal parameters only
   std::vector<Clause> ensures_;      // the user's `ensures`, in order; Formal, Result and Old
@@ -650,8 +678,9 @@ bool restrict_backed(const Function& f, int param, int* offender = nullptr);
 // Why `restrict` on pointer parameter `param` is refused whatever its contract owns (decision 0043 item 10, audit B2): empty when nothing is in the way.
 // The pointee of `param` is a struct (M8), or another pointer parameter's object or a global that an atom of the contract names can hold a pointer to the same
 // type (`int **`, a struct with an `int *` leaf or struct-pointer leaves that reach one, an `int *` global): a pointer loaded from there is not based on
-// `param`, so a write through it could alias `*param`.  restrict_backed is false when this is not empty (the encoder reports it first).  The message names the
-// offender in source terms.
+// `param`, so a write through it could alias `*param`.  A by-value struct parameter whose leaves can hold such a pointer (an `int *` leaf, or a `struct U *` leaf whose `U`
+// has an `int` leaf, at any depth) is one of those places too (decision 0044 item 11).  restrict_backed is false when this is not empty (the encoder reports it
+// first).  The message names the offender in source terms.
 std::string restrict_hazard(const Function& f, int param);
 // Whether the expression reads the heap: it contains a `Deref` or an `Atom` (an `Old` of one included).
 bool reads_heap(const Expr& e);
@@ -759,6 +788,11 @@ class Builder {
   // `&a->m` (decision 0043): `a` a pointer to a struct, `index` the member's index; type Ptr(the member's type) (an ill-typed `a` or an index out of range
   // is built with `a`'s type and rejected by check_program).  c_text "&" + the place spelling (see Expr::Kind::MemberAddr); `deref` of it is `p->m`.
   const Expr* member_addr(const Expr* a, int index, SrcLoc loc);
+  // `a.m` (decision 0044 item 2): member `index` of the struct value `a`; type = the member's type (an ill-typed `a` or an index out of range is built with
+  // `a`'s type and rejected by check_program).  c_text: `a`'s followed by `.m` when `a` has one.
+  const Expr* field(const Expr* a, int index, SrcLoc loc);
+  // A struct value of `struct_type` (a Struct type) built from one expression per leaf, in struct_leaves order (see Expr::Kind::Aggregate).
+  const Expr* aggregate(Type struct_type, std::vector<const Expr*> args, SrcLoc loc);
 
   // Statements.
   // `init` null: a local declared without an initializer (decision 0019).

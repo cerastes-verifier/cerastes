@@ -241,66 +241,93 @@ class Checker {
 
   // A mutable global or `static` local (decision 0041 items 2-5, 12): a value type, a position, an owner that is a function of the program, and
   // an initial value of the right shape.  The initializer as written is checked like a named constant's (call-free, no variable, exactly the type).
+  // A struct global (decision 0044 item 8) is a struct of the program with one initial value per leaf, in struct_leaves order, each checked as a
+  // scalar global's is.
   void global(const Global& g) {
     const std::string name = "the global '" + g.c_name + "'";
     const auto& gs = prog_.globals();
     if (g.id < 0 || static_cast<size_t>(g.id) >= gs.size() || &gs[static_cast<size_t>(g.id)] != &g) err(g.loc, name + " has an id that is not its index");
     if (g.c_name.empty()) err(g.loc, "a global without a name");
     if (!g.loc.known()) err(g.loc, name + " has no source position");
+    const bool is_struct = g.type.is_struct();
     if (g.type.is_ptr()) {
       if (!accepted_pointer(g.type)) err(g.loc, name + " is " + pointer_reason(g.type));
+    } else if (is_struct) {
+      if (g.type.struct_type == nullptr || structs_.count(g.type.struct_type) == 0) err(g.loc, name + " is a struct that is not in the program");
     } else if (!value_type(g.type)) {
       err(g.loc, name + " is not a bool, an integer or a pointer to one");
     }
     if (g.owner != nullptr && functions_.count(g.owner) == 0) err(g.loc, name + " is a `static` local of a function that is not in the program");
-    switch (g.init_kind) {
-      case Global::Init::Value:
-        if (g.type.is_ptr()) { err(g.loc, name + " is a pointer with an integer initial value (use Null or Addr)"); break; }
-        if (!front_end_value_fits(g.value, g.type)) err(g.loc, "the front end's value of " + name + " ('" + g.value + "') is not a value of " + g.type.str());
-        if (g.init == nullptr) {
-          if (g.value != "0") err(g.loc, name + " has no initializer but a value other than 0");
+    if (!is_struct) {
+      if (!g.leaves.empty()) err(g.loc, name + " is not a struct but has initial values per member");
+      global_value(name, g.loc, g.type, g.init_kind, g.init, g.value, g.target);
+      return;
+    }
+    if (g.init != nullptr || g.target != nullptr) err(g.loc, name + " is a struct whose initial value is not given per member (decision 0044 item 8)");
+    if (g.type.struct_type == nullptr || structs_.count(g.type.struct_type) == 0) return;
+    const std::vector<StructLeaf> leaves = struct_leaves(*g.type.struct_type, g.c_name);
+    if (g.leaves.size() != leaves.size()) {
+      err(g.loc, name + " has " + std::to_string(g.leaves.size()) + " initial values for the " + std::to_string(leaves.size()) + " leaves of " + g.type.str() +
+                     " (decision 0044 item 8)");
+      return;
+    }
+    for (size_t k = 0; k < leaves.size(); ++k) {
+      const GlobalLeaf& l = g.leaves[k];
+      global_value("the member '" + leaves[k].text + "' of the global '" + g.c_name + "'", l.loc.known() ? l.loc : g.loc, leaves[k].type, l.kind, l.init, l.value, l.target);
+    }
+  }
+
+  // The initial value of one scalar or pointer object of a global (decisions 0041 items 3-5, 0044 item 8): `kind` and the fields it names.
+  void global_value(const std::string& name, const SrcLoc& loc, const Type& type, GlobalInit kind, const Expr* init, const std::string& value, const Global* target) {
+    const auto& gs = prog_.globals();
+    switch (kind) {
+      case GlobalInit::Value:
+        if (type.is_ptr()) { err(loc, name + " is a pointer with an integer initial value (use Null or Addr)"); break; }
+        if (!front_end_value_fits(value, type)) err(loc, "the front end's value of " + name + " ('" + value + "') is not a value of " + type.str());
+        if (init == nullptr) {
+          if (value != "0") err(loc, name + " has no initializer but a value other than 0");
           break;
         }
-        if (mentions_state(*g.init)) {
-          err(g.init->loc, "the initializer of " + name + " mentions a variable, a parameter, the result, `old` or a call");
+        if (mentions_state(*init)) {
+          err(init->loc, "the initializer of " + name + " mentions a variable, a parameter, the result, `old` or a call");
           break;
         }
         no_ptr_ = true;
-        expr(*g.init, Ctx::Annot, false);  // call-free, closed; a pointer node (a read of another global) is refused by no_ptr_
+        expr(*init, Ctx::Annot, false);  // call-free, closed; a pointer node (a read of another global) is refused by no_ptr_
         no_ptr_ = false;
-        if (g.init->type != g.type) err(g.init->loc, "the initializer of " + name + " has type " + g.init->type.str() + ", not " + g.type.str());
+        if (init->type != type) err(init->loc, "the initializer of " + name + " has type " + init->type.str() + ", not " + type.str());
         break;
-      case Global::Init::Null:
-        if (!g.type.is_ptr()) err(g.loc, name + " is not a pointer but has the initial value null");
+      case GlobalInit::Null:
+        if (!type.is_ptr()) err(loc, name + " is not a pointer but has the initial value null");
         break;
-      case Global::Init::Addr: {
-        if (!g.type.is_ptr() || g.type.pointee == nullptr) { err(g.loc, name + " is not a pointer but has the initial value `&target`"); break; }
-        const Global* t = g.target;
+      case GlobalInit::Addr: {
+        if (!type.is_ptr() || type.pointee == nullptr) { err(loc, name + " is not a pointer but has the initial value `&target`"); break; }
+        const Global* t = target;
         if (t == nullptr || t->id < 0 || static_cast<size_t>(t->id) >= gs.size() || &gs[static_cast<size_t>(t->id)] != t)
-          err(g.loc, "the initial value of " + name + " is the address of a global that is not in the program");
-        else if (*g.type.pointee != t->type)
-          err(g.loc, "the initial value of " + name + " is the address of '" + t->c_name + "', of type " + t->type.str() + ", not " + g.type.pointee->str() +
-                         " (a pointer conversion, decision 0040 item 2)");
+          err(loc, "the initial value of " + name + " is the address of a global that is not in the program");
+        else if (*type.pointee != t->type)
+          err(loc, "the initial value of " + name + " is the address of '" + t->c_name + "', of type " + t->type.str() + ", not " + type.pointee->str() +
+                       " (a pointer conversion, decision 0040 item 2)");
         break;
       }
-      case Global::Init::Unknown:
+      case GlobalInit::Unknown:
         // Decision 0041 item 5: an unknown initial value may still carry its initializer as written (a bool, integer or enumeration global): the
         // prologue checks its obligations at their positions; no value is stated (nothing to guard).
-        if (g.init != nullptr) {
-          if (g.type.is_ptr()) { err(g.init->loc, "the initializer of " + name + " is an expression for a pointer (use Null or Addr)"); break; }
-          if (mentions_state(*g.init)) {
-            err(g.init->loc, "the initializer of " + name + " mentions a variable, a parameter, the result, `old` or a call");
+        if (init != nullptr) {
+          if (type.is_ptr()) { err(init->loc, "the initializer of " + name + " is an expression for a pointer (use Null or Addr)"); break; }
+          if (mentions_state(*init)) {
+            err(init->loc, "the initializer of " + name + " mentions a variable, a parameter, the result, `old` or a call");
             break;
           }
           no_ptr_ = true;
-          expr(*g.init, Ctx::Annot, false);
+          expr(*init, Ctx::Annot, false);
           no_ptr_ = false;
-          if (g.init->type != g.type) err(g.init->loc, "the initializer of " + name + " has type " + g.init->type.str() + ", not " + g.type.str());
+          if (init->type != type) err(init->loc, "the initializer of " + name + " has type " + init->type.str() + ", not " + type.str());
         }
         break;
     }
-    if (g.init_kind != Global::Init::Value && g.init_kind != Global::Init::Unknown && g.init != nullptr) err(g.loc, name + " has an initializer expression but a value that is not an integer or a bool");
-    if (g.init_kind != Global::Init::Addr && g.target != nullptr) err(g.loc, name + " names a target but its initial value is not an address");
+    if (kind != GlobalInit::Value && kind != GlobalInit::Unknown && init != nullptr) err(loc, name + " has an initializer expression but a value that is not an integer or a bool");
+    if (kind != GlobalInit::Addr && target != nullptr) err(loc, name + " names a target but its initial value is not an address");
   }
 
   // `Program::entry` (decision 0041 item 4): the global-namespace `main`, a function of the program that is verified, has no parameters (the
@@ -327,6 +354,8 @@ class Checker {
     old_depth_ = 0;
     ok_globals_.clear();
     ok_members_.clear();
+    struct_pos_.clear();
+    field_base_.clear();
     scopes_.emplace_back();
     for (const auto& v : f.locals())
       if (v->is_param_copy) scopes_.back().insert(v->id);
@@ -334,7 +363,8 @@ class Checker {
     if (f.ret.is_ptr()) {
       if (!accepted_pointer(f.ret)) err(f.loc, "the return type of '" + f.c_name + "' is " + pointer_reason(f.ret));
     } else if (f.ret.is_struct()) {
-      err(f.loc, "the return type of '" + f.c_name + "' is a struct by value (decision 0043 item 8: M4.5c2)");
+      // Decision 0044 item 4: a struct result is a tuple of the leaves of a struct of the program.
+      if (f.ret.struct_type == nullptr || structs_.count(f.ret.struct_type) == 0) err(f.loc, "the return type of '" + f.c_name + "' is a struct that is not in the program");
     } else if (!(f.ret.is_void() || value_type(f.ret))) {
       err(f.loc, "the return type of '" + f.c_name + "' is not void, bool, an integer type or a pointer to one");
     }
@@ -343,7 +373,11 @@ class Checker {
         if (!accepted_pointer(f.params[k].type))
           err(f.params[k].loc, "parameter " + std::to_string(k + 1) + " of '" + f.c_name + "' is " + pointer_reason(f.params[k].type));
       } else if (f.params[k].type.is_struct()) {
-        err(f.params[k].loc, "parameter " + std::to_string(k + 1) + " of '" + f.c_name + "' is a struct by value (decision 0043 item 8: M4.5c2)");
+        // Decision 0044 item 3: a by-value struct parameter's local copy is a struct block like every struct local (always address-taken).
+        if (f.params[k].type.struct_type == nullptr || structs_.count(f.params[k].type.struct_type) == 0)
+          err(f.params[k].loc, "parameter " + std::to_string(k + 1) + " of '" + f.c_name + "' is a struct that is not in the program");
+        else if (!f.param_var(static_cast<int>(k))->address_taken)
+          err(f.params[k].loc, "internal: the copy of the struct parameter " + std::to_string(k + 1) + " of '" + f.c_name + "' is not marked address-taken (decision 0044 item 3)");
       } else if (!value_type(f.params[k].type)) {
         err(f.params[k].loc, "parameter " + std::to_string(k + 1) + " of '" + f.c_name + "' is not a bool, an integer type or a pointer to one");
       }
@@ -648,7 +682,6 @@ class Checker {
       // Decision 0043 item 4: a struct local is always a cell of a block of its struct type.
       if (v.type.struct_type == nullptr || structs_.count(v.type.struct_type) == 0) err(loc, "variable '" + v.name + "' is a struct that is not in the program");
       if (!v.address_taken) err(loc, "internal: the struct local '" + v.name + "' is not marked address-taken (decision 0043 item 4)");
-      if (v.is_param_copy) err(loc, "the struct parameter '" + v.name + "' (decision 0043 item 8: M4.5c2)");
     } else if (!value_type(v.type)) {
       err(loc, "variable '" + v.name + "' is not a bool or an integer");
     }
@@ -694,6 +727,7 @@ class Checker {
       }
       case Stmt::Kind::ExprStmt: {
         if (s.expr == nullptr) { err(s.loc, "an expression statement without an expression"); return; }
+        if (s.expr->type.is_struct() && s.expr->kind == Expr::Kind::Call) struct_pos_.insert(s.expr);  // a discarded `f();` of a struct-returning function
         expr(*s.expr, Ctx::Body, true);
         break;
       }
@@ -826,6 +860,7 @@ class Checker {
         } else if (s.expr == nullptr) {
           err(s.loc, "`return;` in non-void function '" + fn_->c_name + "'");
         } else {
+          if (fn_->ret.is_struct() && s.expr->type.is_struct()) struct_pos_.insert(s.expr);  // `return f();`, `return (S){...};`, `return s;` as an Aggregate
           expr(*s.expr, Ctx::Body, false);
           if (s.expr->type != fn_->ret)
             err(s.expr->loc, "return of a " + s.expr->type.str() + " from a function returning " + fn_->ret.str());
@@ -851,14 +886,21 @@ class Checker {
       }
       case Stmt::Kind::Store: {
         if (s.addr == nullptr || s.expr == nullptr) { err(s.loc, "a store without an address or a value"); return; }
+        // Decision 0044 item 2: a struct Store's value is a Call, an Aggregate or a Field chain over one of them (the other copy sources are expanded into
+        // leaf stores by the encoder, decision 0043 item 7); any other struct value there is refused by `expr` as a struct in a position it does not allow.
+        if (s.expr->type.is_struct() && s.addr->type.is_ptr() && s.addr->type.pointee != nullptr && s.addr->type.pointee->is_struct() && struct_source(*s.expr))
+          struct_pos_.insert(s.expr);
         expr(*s.addr, Ctx::Body, false);
         // A compound store's value reads a Deref that shares the address node (decision 0039 item 5): the address is checked once.
         shared_addrs_.insert(s.addr);
         expr(*s.expr, Ctx::Body, false);
         shared_addrs_.erase(s.addr);
         if (!s.addr->type.is_ptr()) err(s.addr->loc, "a store through a " + s.addr->type.str() + ", not a pointer");
-        else if (s.addr->type.pointee != nullptr && s.addr->type.pointee->is_struct())
-          err(s.loc, "a store of a struct value through a " + s.addr->type.str() + " (decision 0043: a struct is written leaf by leaf)");
+        else if (s.addr->type.pointee != nullptr && s.addr->type.pointee->is_struct()) {
+          if (!accepted_pointer(s.addr->type)) err(s.addr->loc, "a store through a " + s.addr->type.str() + ", " + pointer_reason(s.addr->type));
+          else if (s.expr->type != *s.addr->type.pointee)
+            err(s.expr->loc, "a store of a " + s.expr->type.str() + " through a " + s.addr->type.str() + " (the pointee is " + s.addr->type.pointee->str() + ")");
+        }
         else if (accepted_pointer(s.addr->type) && s.expr->type != *s.addr->type.pointee)
           err(s.expr->loc, "a store of a " + s.expr->type.str() + " through a " + s.addr->type.str() + " (the pointee is " + s.addr->type.pointee->str() + ")");
         break;
@@ -896,7 +938,7 @@ class Checker {
     } else if (e.type.is_ptr()) {
       if (!accepted_pointer(e.type)) err(e.loc, "an expression of type " + e.type.str() + ", " + pointer_reason(e.type));
     } else if (e.type.is_struct()) {
-      err(e.loc, "an expression of struct type " + e.type.str() + " (decision 0043: VIR holds no struct value; a struct is reached through MemberAddr places)");
+      struct_value(e, ctx);
     } else if (!value_type(e.type)) {
       err(e.loc, "an expression of an unsupported type");
     }
@@ -944,6 +986,10 @@ class Checker {
       case Expr::Kind::Old:
         if (ctx != Ctx::Ensures) { err(e.loc, "`old` outside an `ensures`"); break; }
         if (e.a != nullptr && mentions_result_or_local(*e.a)) err(e.loc, "`old` of the result (it has no value on entry)");
+        if (e.type.is_struct() && e.a != nullptr) {  // `old(s).x` under a Field (decision 0044 item 3): the operand is a struct value in the same position
+          struct_pos_.insert(e.a);
+          field_base_.insert(e.a);
+        }
         ++old_depth_;
         if (sub(e.a) && e.a->type != e.type) err(e.loc, "`old` changes the type");
         --old_depth_;
@@ -1097,10 +1143,92 @@ class Checker {
       case Expr::Kind::ReportAt:
         if (sub(e.a) && e.type != e.a->type) err(e.loc, "report_at changes the type");
         break;
+      case Expr::Kind::Field: field_value(e, ctx); break;
+      case Expr::Kind::Aggregate: aggregate_value(e, ctx); break;
       case Expr::Kind::Call: call(e, ctx); break;
       case Expr::Kind::AssignE: assign_value(e, ctx); break;
       case Expr::Kind::StoreE: store_value(e, ctx); break;
       case Expr::Kind::Comma: comma(e, ctx); break;
+    }
+  }
+
+  // Whether a struct value is a legal source of a struct Store (decision 0044 item 2): a Call, an Aggregate, or a Field chain over one of them.
+  static bool struct_source(const Expr& e) {
+    const Expr* x = &e;
+    while (x != nullptr && x->kind == Expr::Kind::Field) x = x->a;
+    return x != nullptr && (x->kind == Expr::Kind::Call || x->kind == Expr::Kind::Aggregate);
+  }
+
+  // A struct-typed expression (decision 0044 item 2).  It stands only where a consumer registered it (`struct_pos_`: a call argument, a return, a
+  // struct Store, an expression statement, the operand of a Field) and is itself a producer: a Call, an Aggregate (code only), a Field, or, in a
+  // contract, a Formal, the Result or an Old directly under a Field (`field_base_`).  Anything else, a struct `?:`, comma or assignment value
+  // included (M8), is refused.
+  void struct_value(const Expr& e, Ctx ctx) {
+    const bool contract = ctx == Ctx::Requires || ctx == Ctx::Ensures;
+    if (e.type.struct_type == nullptr || structs_.count(e.type.struct_type) == 0) {
+      err(e.loc, "an expression of the struct type " + e.type.str() + ", which is not in the program");
+      return;
+    }
+    if (struct_pos_.count(&e) == 0) {
+      err(e.loc, "an expression of struct type " + e.type.str() + " in a position decision 0044 item 2 does not allow (a struct value is a call argument, a return, "
+                 "a struct store, an expression statement or the operand of a member; a struct `?:`, comma or assignment value is M8)");
+      return;
+    }
+    switch (e.kind) {
+      case Expr::Kind::Call: case Expr::Kind::Field: break;
+      case Expr::Kind::Aggregate:
+        if (contract) err(e.loc, "an aggregate in a contract (decision 0044 item 2: a contract reads the members of a struct parameter or result)");
+        break;
+      case Expr::Kind::Formal: case Expr::Kind::Result: case Expr::Kind::Old:
+        if (!contract || field_base_.count(&e) == 0)
+          err(e.loc, "a struct parameter, result or `old` used as a whole in a contract (decision 0044 item 3: only a member of it, `s.x`, is a value)");
+        break;
+      default:
+        err(e.loc, "a struct value that is not a call, an aggregate or a member (decision 0044 item 2)");
+        break;
+    }
+  }
+
+  // `a.m` (decision 0044 item 2): member `index` of a struct value; in a contract the operand may be a Formal, the Result or an Old of one.
+  void field_value(const Expr& e, Ctx ctx) {
+    if (e.a == nullptr) { err(e.loc, "a member of a missing operand"); return; }
+    const Type& at = e.a->type;
+    const bool valid = at.is_struct() && at.struct_type != nullptr && structs_.count(at.struct_type) != 0;
+    if (at.is_struct()) {
+      struct_pos_.insert(e.a);
+      if (ctx == Ctx::Requires || ctx == Ctx::Ensures) field_base_.insert(e.a);
+    }
+    expr(*e.a, ctx, false);
+    if (!valid) {
+      err(e.loc, "a member of a " + at.str() + ", not a struct value");
+      return;
+    }
+    const StructType& st = *at.struct_type;
+    if (e.index < 0 || static_cast<size_t>(e.index) >= st.members.size()) {
+      err(e.loc, "member " + std::to_string(e.index) + " of " + st.c_name + ", which has " + std::to_string(st.members.size()) + " members");
+      return;
+    }
+    if (e.type != st.members[static_cast<size_t>(e.index)].type)
+      err(e.loc, "the member '" + st.members[static_cast<size_t>(e.index)].name + "' of " + st.c_name + " has the wrong type");
+  }
+
+  // A struct value built from its leaves (decision 0044 item 2): one argument per leaf, in struct_leaves order, exactly the leaf's type.  Code only.
+  void aggregate_value(const Expr& e, Ctx ctx) {
+    if (!e.type.is_struct() || e.type.struct_type == nullptr || structs_.count(e.type.struct_type) == 0) {
+      err(e.loc, "an aggregate of the type " + e.type.str() + ", not a struct of the program");
+      return;
+    }
+    const std::vector<StructLeaf> leaves = struct_leaves(*e.type.struct_type);
+    if (e.args.size() != leaves.size()) {
+      err(e.loc, "an aggregate of " + e.type.str() + " with " + std::to_string(e.args.size()) + " arguments, " + std::to_string(leaves.size()) + " leaves expected");
+      return;
+    }
+    for (size_t k = 0; k < e.args.size(); ++k) {
+      if (e.args[k] == nullptr) { err(e.loc, "a missing aggregate argument"); continue; }
+      expr(*e.args[k], ctx, false);
+      if (e.args[k]->type != leaves[k].type)
+        err(e.args[k]->loc, "leaf " + std::to_string(k + 1) + " ('" + (leaves[k].text.empty() ? std::string("?") : leaves[k].text) + "') of an aggregate of " + e.type.str() +
+                                " is given a " + e.args[k]->type.str() + ", not a " + leaves[k].type.str());
     }
   }
 
@@ -1166,7 +1294,7 @@ class Checker {
       return;
     }
     if (e.c->type.pointee != nullptr && e.c->type.pointee->is_struct()) {
-      err(e.loc, "a write of a struct value through a " + e.c->type.str() + " used as a value (decision 0043: a struct is written leaf by leaf)");
+      err(e.loc, "a write of a struct value through a " + e.c->type.str() + " used as a value (decision 0044 item 5: a struct assignment used as a value is M8)");
       return;
     }
     if (!accepted_pointer(e.c->type) || e.c->type.pointee == nullptr) return;
@@ -1230,6 +1358,8 @@ class Checker {
       return true;
     for (const Expr* x : {e.a, e.b, e.c})
       if (x != nullptr && mentions_state(*x)) return true;
+    for (const Expr* x : e.args)  // an Aggregate's leaves (a Call returned above)
+      if (x != nullptr && mentions_state(*x)) return true;
     return false;
   }
 
@@ -1238,6 +1368,8 @@ class Checker {
         e.kind == Expr::Kind::StoreE || e.kind == Expr::Kind::Comma)
       return true;
     for (const Expr* x : {e.a, e.b, e.c})
+      if (x != nullptr && mentions_result_or_local(*x)) return true;
+    for (const Expr* x : e.args)  // an Aggregate's leaves (a Call returned above)
       if (x != nullptr && mentions_result_or_local(*x)) return true;
     return false;
   }
@@ -1311,6 +1443,7 @@ class Checker {
     }
     for (size_t k = 0; k < e.args.size(); ++k) {
       if (e.args[k] == nullptr) { err(e.loc, "a missing argument"); continue; }
+      if (k < f.params.size() && f.params[k].type.is_struct() && e.args[k]->type.is_struct()) struct_pos_.insert(e.args[k]);  // decision 0044 item 5
       expr(*e.args[k], ctx, false);
       if (k < f.params.size() && e.args[k]->type != f.params[k].type)
         err(e.args[k]->loc, "argument " + std::to_string(k + 1) + " of '" + f.c_name + "' is " + e.args[k]->type.str() + ", the parameter is " + f.params[k].type.str() + " (convert it)");
@@ -1327,6 +1460,8 @@ class Checker {
   std::set<const Expr*> ok_globals_;  // the GlobalAddr nodes that stand under a Deref or an Atom of a contract: where a `static` local's address may appear (its implicit atom; decision 0041 items 7, 12)
   std::set<const Expr*> ok_members_;  // the MemberAddr nodes that stand in the place of a Deref or an Atom of a contract (decision 0043 item 9)
   std::unordered_set<const StructType*> structs_;  // the program's struct types
+  std::set<const Expr*> struct_pos_;  // the struct-typed nodes a consumer allows (call argument, return, struct Store, expression statement, Field operand; decision 0044 item 2)
+  std::set<const Expr*> field_base_;  // the struct-typed nodes that are the operand of a Field (or of an Old under one) in a contract: a Formal, the Result or an Old may stand there
   std::set<const Expr*> shared_addrs_;  // the address nodes of the stores being checked: a compound store's Deref shares its address (0039 item 5)
   struct Target {
     int id;
@@ -1596,8 +1731,18 @@ class Sequencer {
         break;
       case Expr::Kind::Old: case Expr::Kind::Unary: case Expr::Kind::Convert: case Expr::Kind::ToBool: case Expr::Kind::BoolToInt:
       case Expr::Kind::ReportAt:
+      case Expr::Kind::Field:  // a member of a struct value inherits the value's accesses (decision 0044 item 5)
         absorb(out, expr(e->a), false);
         break;
+      case Expr::Kind::Aggregate: {
+        // The leaves of an aggregate are unsequenced siblings (decision 0044 item 5), like the arguments of a call but with no sequence point after them.
+        std::vector<Wr> leaves;
+        for (const Expr* a : e->args) leaves.push_back(expr(a));
+        for (size_t i = 0; i < leaves.size(); ++i)
+          for (size_t j = i + 1; j < leaves.size(); ++j) pair(leaves[i], leaves[j]);
+        for (const Wr& a : leaves) absorb(out, a, false);
+        break;
+      }
       case Expr::Kind::Binary: {
         const Wr a = expr(e->a);
         const Wr b = expr(e->b);
@@ -1670,6 +1815,25 @@ class Sequencer {
     return out;
   }
 
+  // A struct Store writes every leaf of its destination (decision 0044 item 5): a write of any of those objects inside the stored value is a conflict.
+  void struct_store_leaves(const Expr* addr, const Wr& v) {
+    if (addr == nullptr || !addr->type.is_ptr() || addr->type.pointee == nullptr || !addr->type.pointee->is_struct() || addr->type.pointee->struct_type == nullptr)
+      return;
+    std::vector<int> path;
+    const Expr* root = member_root(addr, &path);
+    int base = 0;
+    if (!object_of_root(root, &base)) return;
+    // Only objects some access has already named have a key (member_key interns on sight), and only those can be written inside the value.
+    for (const StructLeaf& l : struct_leaves(*addr->type.pointee->struct_type)) {
+      std::vector<int> leaf_path = path;
+      leaf_path.insert(leaf_path.end(), l.path.begin(), l.path.end());
+      const auto it = member_keys_.find({base, leaf_path});
+      if (it == member_keys_.end()) continue;
+      const auto hit = v.wu.find(it->second);
+      if (hit != v.wu.end()) report(hit->second, it->second);
+    }
+  }
+
   // A plain store of `value` to `target` (an Assign or a Decl).
   void store(const Var* target, const Expr* value) {
     const Wr v = expr(value);
@@ -1701,6 +1865,7 @@ class Sequencer {
           const auto hit = v.wu.find(key);
           if (hit != v.wu.end()) report(hit->second, key);
         }
+        struct_store_leaves(s->addr, v);
         break;
       }
       case Stmt::Kind::If:

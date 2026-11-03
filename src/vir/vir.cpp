@@ -516,6 +516,27 @@ const Expr* Builder::member_addr(const Expr* a, int index, SrcLoc loc) {
   return e;
 }
 
+const Expr* Builder::field(const Expr* a, int index, SrcLoc loc) {
+  Type t = a->type;  // ill-typed on purpose when `a` is no struct value or the index is out of range
+  std::string text;
+  if (a->type.is_struct() && a->type.struct_type != nullptr && index >= 0 && static_cast<size_t>(index) < a->type.struct_type->members.size()) {
+    const StructMember& m = a->type.struct_type->members[static_cast<size_t>(index)];
+    t = m.type;
+    if (!a->c_text.empty()) text = a->c_text + "." + (m.name.empty() ? "<" + std::to_string(index) + ">" : m.name);
+  }
+  Expr* e = fresh(p_, Expr::Kind::Field, t, std::move(loc));
+  e->a = a;
+  e->index = index;
+  e->c_text = std::move(text);
+  return e;
+}
+
+const Expr* Builder::aggregate(Type struct_type, std::vector<const Expr*> args, SrcLoc loc) {
+  Expr* e = fresh(p_, Expr::Kind::Aggregate, struct_type, std::move(loc));
+  e->args = std::move(args);
+  return e;
+}
+
 const Stmt* Builder::decl(const Var* v, const Expr* init, SrcLoc loc) {
   Stmt* s = fresh_stmt(p_, Stmt::Kind::Decl, std::move(loc));
   s->var = v;
@@ -905,7 +926,16 @@ std::string restrict_hazard(const Function& f, int param) {
   if (mine.pointee->is_struct()) return "it points to a struct (`restrict` on a struct pointer: M8)";
   auto name = [&](int i) { return f.params[static_cast<size_t>(i)].name.empty() ? "arg" + std::to_string(i + 1) : f.params[static_cast<size_t>(i)].name; };
   for (size_t q = 0; q < f.params.size(); ++q) {
-    if (static_cast<int>(q) == param || !f.params[q].type.is_ptr() || f.params[q].type.pointee == nullptr) continue;
+    if (static_cast<int>(q) == param) continue;
+    // Decision 0044 item 11: a by-value struct whose leaves can hold a pointer from which a `T *` can be formed (an `int *` leaf, or a `struct U *` leaf
+    // whose `U` has an `int` leaf, at any depth) is a place beside which `restrict` is refused, as the object of a pointer parameter is.
+    if (f.params[q].type.is_struct()) {
+      std::set<const StructType*> seen;
+      if (may_hold_pointer_to(f.params[q].type, *mine.pointee, seen))
+        return "the by-value struct `" + name(static_cast<int>(q)) + "` can hold a `" + mine.str() + "`, and a pointer loaded from it is not based on `" + name(param) + "`";
+      continue;
+    }
+    if (!f.params[q].type.is_ptr() || f.params[q].type.pointee == nullptr) continue;
     std::set<const StructType*> seen;
     if (may_hold_pointer_to(*f.params[q].type.pointee, *mine.pointee, seen))
       return "the object of `" + name(static_cast<int>(q)) + "` can hold a `" + mine.str() + "`, and a pointer loaded from it is not based on `" + name(param) + "`";
