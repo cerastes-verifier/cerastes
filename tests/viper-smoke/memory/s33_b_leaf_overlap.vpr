@@ -1,0 +1,172 @@
+// expect: verified
+// S33 (b) the leaf-overlap trap (record 0043 item 9, `overlap by slots, never by the atom's pointee type`): f(struct S *s, int *q) owns every leaf of *s and *q; the caller writes the explicit separation assert of the int atom against each int leaf of the struct atom before the call; here f(&s, &t.x).
+// Hand-written in the emitted style: explicit atomic asserts before every access, call and return (0028 item 11), ghost Perm amounts (0037 item 6), the four axioms with their tags; the allocation methods are the trusted ones (record 0043 item 4).
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0043 items 3, 9): WF; a leaf's range; a leaf at allocation (uninitialized); a leaf owned (full permission, flag set, range); a leaf owned without its flag (must_init's requires); one liveness fraction
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNG(c) ((-2147483648) <= c.v_int && c.v_int <= 2147483647)
+define LEAFU(c) (acc(c.v_int) && acc(c.d_int) && !c.d_int)
+define LEAF(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNG(c))
+define LEAFN(c) (acc(c.v_int) && acc(c.d_int) && (c.d_int ==> RNG(c)))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+// struct S { int x; int y; }: member 0 is x, member 1 is y; struct T { struct S s; int z; }: member 0 is the slot of the nested S, member 1 is z
+define MX(s) loc(member(s, 0), 0)
+define MY(s) loc(member(s, 1), 0)
+define TS(t) loc(member(t, 0), 0)
+define TZ(t) loc(member(t, 1), 0)
+define SLEN(s) (len(member(s, 0)) == 1 && len(member(s, 1)) == 1)
+define SOWN(s) (SLEN(s) && LEAF(MX(s)) && LEAF(MY(s)))
+define TLEN(t) (len(member(t, 0)) == 1 && len(member(t, 1)) == 1)
+define TOWN(t) (TLEN(t) && SOWN(TS(t)) && LEAF(TZ(t)))
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+
+// cerastes:trusted-contract allocation of a struct S local: a one-slot block; each member is a block of length 1 whose leaf is uninitialized with full permission; the liveness token is the root block's (record 0043 item 4)
+method alloc_struct_0_S() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures len(member(r, 0)) == 1 && acc(loc(member(r, 0), 0).v_int) && acc(loc(member(r, 0), 0).d_int) && !loc(member(r, 0), 0).d_int
+  ensures len(member(r, 1)) == 1 && acc(loc(member(r, 1), 0).v_int) && acc(loc(member(r, 1), 0).d_int) && !loc(member(r, 1), 0).d_int
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// void f(struct S *s, int *q) [owns(*s), owns(*q)]: s->x = 1; *q = 2
+method f(s: Ref, q: Ref, a_s: Perm, a_q: Perm)
+  requires none < a_s && a_s < write && none < a_q && a_q < write
+  requires WF(s) && WF(q)
+  requires ROOT(s) && SOWN(s) && LVF(s, a_s)
+  requires ROOT(q) && LEAF(q) && LVF(q, a_q)
+  ensures ROOT(s) && SOWN(s) && LVF(s, a_s) && ROOT(q) && LEAF(q) && LVF(q, a_q)
+  ensures MX(s).v_int == 1 && q.v_int == 2 && MY(s).v_int == old(MY(s).v_int)
+  decreases
+{
+  assert loc(member(s, 0), 0) != null && loc(member(s, 1), 0) != null ==> loc(member(s, 0), 0) != loc(member(s, 1), 0)
+  assert loc(member(s, 0), 0) != null && q != null ==> loc(member(s, 0), 0) != q
+  assert loc(member(s, 1), 0) != null && q != null ==> loc(member(s, 1), 0) != q
+  var oy: Int := loc(member(s, 1), 0).v_int
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+  loc(member(s, 0), 0).v_int := 1
+  loc(member(s, 0), 0).d_int := true
+  assert q != null
+  assert perm(q.v_int) == write && perm(q.d_int) == write
+  q.v_int := 2
+  q.d_int := true
+  assert s != null
+  assert WF(s)
+  assert offset_of(s) < len(block_of(s))
+  assert len(member(s, 0)) == 1 && len(member(s, 1)) == 1
+  assert perm(loc(member(s, 0), 0).v_int) == write
+  assert perm(loc(member(s, 0), 0).d_int) == write
+  assert loc(member(s, 0), 0).d_int
+  assert RNG(loc(member(s, 0), 0))
+  assert perm(loc(member(s, 1), 0).v_int) == write
+  assert perm(loc(member(s, 1), 0).d_int) == write
+  assert loc(member(s, 1), 0).d_int
+  assert RNG(loc(member(s, 1), 0))
+  assert perm(lvloc(block_of(s)).lv) >= a_s
+  assert q != null
+  assert WF(q)
+  assert offset_of(q) < len(block_of(q))
+  assert perm(q.v_int) == write
+  assert perm(q.d_int) == write
+  assert q.d_int
+  assert RNG(q)
+  assert perm(lvloc(block_of(q)).lv) >= a_q
+  assert loc(member(s, 0), 0).v_int == 1
+  assert q.v_int == 2
+  assert loc(member(s, 1), 0).v_int == oy
+}
+
+// void call_f(void) { struct S s; struct S t; s.x = 1; s.y = 2; t.x = 3; f(&s, &t.x); ... }
+method call_f()
+  decreases
+{
+  var s: Ref
+  var t: Ref
+  var q: Ref
+  s := alloc_struct_0_S()
+  t := alloc_struct_0_S()
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+  loc(member(s, 0), 0).v_int := 1
+  loc(member(s, 0), 0).d_int := true
+  assert loc(member(s, 1), 0) != null
+  assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+  loc(member(s, 1), 0).v_int := 2
+  loc(member(s, 1), 0).d_int := true
+  assert loc(member(t, 0), 0) != null
+  assert perm(loc(member(t, 0), 0).v_int) == write && perm(loc(member(t, 0), 0).d_int) == write
+  loc(member(t, 0), 0).v_int := 3
+  loc(member(t, 0), 0).d_int := true
+  q := loc(member(t, 0), 0)   // &t.x
+  assert perm(lvloc(block_of(s)).lv) > none   // lifetime of s
+  assert perm(lvloc(block_of(q)).lv) > none   // lifetime of q (a member's liveness is its root's)
+  assert WF(s) && WF(q)
+  assert s != null
+  assert WF(s)
+  assert offset_of(s) < len(block_of(s))
+  assert len(member(s, 0)) == 1 && len(member(s, 1)) == 1
+  assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+  assert loc(member(s, 0), 0).d_int
+  assert RNG(loc(member(s, 0), 0))
+  assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+  assert loc(member(s, 1), 0).d_int
+  assert RNG(loc(member(s, 1), 0))
+  assert q != null
+  assert WF(q)
+  assert offset_of(q) < len(block_of(q))
+  assert perm(q.v_int) == write && perm(q.d_int) == write
+  assert q.d_int
+  assert RNG(q)
+  assert q != loc(member(s, 0), 0)   // separation of the int atom from s's leaves (permission)
+  assert q != loc(member(s, 1), 0)
+  if (lvloc(block_of(s)) == lvloc(block_of(q))) { }   // the case split of 0028 item 8 on the two liveness cells
+  var m: Perm := perm(lvloc(block_of(s)).lv) < perm(lvloc(block_of(q)).lv) ? perm(lvloc(block_of(s)).lv) : perm(lvloc(block_of(q)).lv)
+  var a_s: Perm := m / 3
+  var a_q: Perm := m / 3
+  assert none < a_s && a_s < write && none < a_q && a_q < write
+  assert perm(lvloc(block_of(s)).lv) >= a_s && perm(lvloc(block_of(q)).lv) >= a_q
+  f(s, q, a_s, a_q)
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) > none && perm(loc(member(s, 0), 0).d_int) > none
+  assert loc(member(s, 0), 0).d_int
+  assert loc(member(s, 0), 0).v_int == 1
+  assert q != null
+  assert perm(q.v_int) > none && perm(q.d_int) > none
+  assert q.d_int
+  assert q.v_int == 2
+  assert loc(member(s, 1), 0) != null
+  assert perm(loc(member(s, 1), 0).v_int) > none && perm(loc(member(s, 1), 0).d_int) > none
+  assert loc(member(s, 1), 0).d_int
+  assert loc(member(s, 1), 0).v_int == 2
+  assert perm(loc(member(t, 0), 0).v_int) == write && perm(loc(member(t, 0), 0).d_int) == write
+  assert perm(loc(member(t, 1), 0).v_int) == write && perm(loc(member(t, 1), 0).d_int) == write
+  assert perm(lvloc(block_of(t)).lv) == write
+  exhale acc(loc(member(t, 0), 0).v_int) && acc(loc(member(t, 0), 0).d_int) && acc(loc(member(t, 1), 0).v_int) && acc(loc(member(t, 1), 0).d_int) && acc(lvloc(block_of(t)).lv)
+  assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+  assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+  assert perm(lvloc(block_of(s)).lv) == write
+  exhale acc(loc(member(s, 0), 0).v_int) && acc(loc(member(s, 0), 0).d_int) && acc(loc(member(s, 1), 0).v_int) && acc(loc(member(s, 1), 0).d_int) && acc(lvloc(block_of(s)).lv)
+}

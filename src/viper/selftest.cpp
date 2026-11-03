@@ -236,6 +236,21 @@ class Kit {
   const Expr* nul(Type ptr_type) { return b.null_const(ptr_type, at()); }
   const Expr* addr(const Var* x) { return b.addr_of(x, at()); }
   const Expr* deref(const Expr* a) { return b.deref(a, at()); }
+  // ---- structures (decision 0043) ----
+  // A C structure with the members (name, type) in declaration order; a member may be a pointer or another struct's type.
+  StructType* strukt(const std::string& tag, const std::vector<P>& members) {
+    StructType* s = prog.add_struct(tag, "struct " + tag, at());
+    for (const P& m : members) prog.add_member(s, m.name, m.type, at());
+    return s;
+  }
+  Type st(const StructType* s) { return Type::structure(s); }
+  // A struct local: always a cell, declared without an initializer (its leaves are written by stores).
+  Var* scell(Function* f, const std::string& n, const StructType* s) { return cell(f, n, Type::structure(s)); }
+  // `&a->m` / `&s.m`: the address of member `index` of the struct `a` points to (a nested struct member: a pointer to that struct).
+  const Expr* mem(const Expr* a, int index) { return b.member_addr(a, index, at()); }
+  // `s.m`, `p->m` as a read of the leaf, and `p->m = value` as a store (`base_ptr` is `&s` or the pointer `p`).
+  const Expr* leaf(const Expr* base_ptr, int index) { return deref(mem(base_ptr, index)); }
+  const Stmt* lstore(const Expr* base_ptr, int index, const Expr* value) { return store(mem(base_ptr, index), value); }
   // A read of a variable with its source spelling for messages (a pointer variable `p`).
   const Expr* pn(const Var* x) { return b.text(b.local(x, at()), x->name); }
   const Stmt* store(const Expr* a, const Expr* value) { return b.store(a, value, at()); }
@@ -904,6 +919,7 @@ void define_pointer_cells();
 void define_written_atoms();
 void define_globals();
 void define_init_markers();
+void define_struct_objects();
 }  // namespace
 
 #include "selftest_cases2.inc"
@@ -918,6 +934,7 @@ void define_init_markers();
 #include "selftest_cases11.inc"
 #include "selftest_cases12.inc"
 #include "selftest_cases13.inc"
+#include "selftest_cases14.inc"
 
 namespace {
 
@@ -1098,6 +1115,7 @@ int main(int argc, char** argv) {
   define_written_atoms();
   define_globals();
   define_init_markers();
+  define_struct_objects();
   int bad = 0;
   for (const Case& c : lowering_cases()) {
     std::string problem;

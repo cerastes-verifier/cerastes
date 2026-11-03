@@ -1,0 +1,174 @@
+// expect: verified
+// S33 (e) struct copies (record 0043 item 7): `t = s` reads every source leaf (permission, flag), then writes every destination leaf with its flag set; the exact self-copy `*p = *p` verifies (it reads both leaves before writing them).
+// Hand-written in the emitted style: explicit atomic asserts before every access, call and return (0028 item 11), ghost Perm amounts (0037 item 6), the four axioms with their tags; the allocation methods are the trusted ones (record 0043 item 4).
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0043 items 3, 9): WF; a leaf's range; a leaf at allocation (uninitialized); a leaf owned (full permission, flag set, range); a leaf owned without its flag (must_init's requires); one liveness fraction
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNG(c) ((-2147483648) <= c.v_int && c.v_int <= 2147483647)
+define LEAFU(c) (acc(c.v_int) && acc(c.d_int) && !c.d_int)
+define LEAF(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNG(c))
+define LEAFN(c) (acc(c.v_int) && acc(c.d_int) && (c.d_int ==> RNG(c)))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+// struct S { int x; int y; }: member 0 is x, member 1 is y; struct T { struct S s; int z; }: member 0 is the slot of the nested S, member 1 is z
+define MX(s) loc(member(s, 0), 0)
+define MY(s) loc(member(s, 1), 0)
+define TS(t) loc(member(t, 0), 0)
+define TZ(t) loc(member(t, 1), 0)
+define SLEN(s) (len(member(s, 0)) == 1 && len(member(s, 1)) == 1)
+define SOWN(s) (SLEN(s) && LEAF(MX(s)) && LEAF(MY(s)))
+define TLEN(t) (len(member(t, 0)) == 1 && len(member(t, 1)) == 1)
+define TOWN(t) (TLEN(t) && SOWN(TS(t)) && LEAF(TZ(t)))
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+
+// cerastes:trusted-contract allocation of a struct S local: a one-slot block; each member is a block of length 1 whose leaf is uninitialized with full permission; the liveness token is the root block's (record 0043 item 4)
+method alloc_struct_0_S() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures len(member(r, 0)) == 1 && acc(loc(member(r, 0), 0).v_int) && acc(loc(member(r, 0), 0).d_int) && !loc(member(r, 0), 0).d_int
+  ensures len(member(r, 1)) == 1 && acc(loc(member(r, 1), 0).v_int) && acc(loc(member(r, 1), 0).d_int) && !loc(member(r, 1), 0).d_int
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// void self_copy(struct S *p) [owns(*p)]: *p = *p; ensures the members are unchanged (C's simple assignment allows the exact self-copy)
+method self_copy(p: Ref, a_p: Perm)
+  requires none < a_p && a_p < write
+  requires WF(p)
+  requires ROOT(p) && SOWN(p) && LVF(p, a_p)
+  ensures ROOT(p) && SOWN(p) && LVF(p, a_p) && MX(p).v_int == old(MX(p).v_int) && MY(p).v_int == old(MY(p).v_int)
+  decreases
+{
+  var ox: Int := loc(member(p, 0), 0).v_int
+  var oy: Int := loc(member(p, 1), 0).v_int
+  var cx: Int
+  var cy: Int
+  assert loc(member(p, 0), 0) != null
+  assert perm(loc(member(p, 0), 0).v_int) > none && perm(loc(member(p, 0), 0).d_int) > none
+  assert loc(member(p, 0), 0).d_int
+  cx := loc(member(p, 0), 0).v_int
+  assert loc(member(p, 1), 0) != null
+  assert perm(loc(member(p, 1), 0).v_int) > none && perm(loc(member(p, 1), 0).d_int) > none
+  assert loc(member(p, 1), 0).d_int
+  cy := loc(member(p, 1), 0).v_int
+  assert loc(member(p, 0), 0) != null
+  assert perm(loc(member(p, 0), 0).v_int) == write && perm(loc(member(p, 0), 0).d_int) == write
+  loc(member(p, 0), 0).v_int := cx
+  loc(member(p, 0), 0).d_int := true
+  assert loc(member(p, 1), 0) != null
+  assert perm(loc(member(p, 1), 0).v_int) == write && perm(loc(member(p, 1), 0).d_int) == write
+  loc(member(p, 1), 0).v_int := cy
+  loc(member(p, 1), 0).d_int := true
+  assert p != null
+  assert WF(p)
+  assert offset_of(p) < len(block_of(p))
+  assert len(member(p, 0)) == 1 && len(member(p, 1)) == 1
+  assert perm(loc(member(p, 0), 0).v_int) == write
+  assert perm(loc(member(p, 0), 0).d_int) == write
+  assert loc(member(p, 0), 0).d_int
+  assert RNG(loc(member(p, 0), 0))
+  assert perm(loc(member(p, 1), 0).v_int) == write
+  assert perm(loc(member(p, 1), 0).d_int) == write
+  assert loc(member(p, 1), 0).d_int
+  assert RNG(loc(member(p, 1), 0))
+  assert perm(lvloc(block_of(p)).lv) >= a_p
+  assert loc(member(p, 0), 0).v_int == ox
+  assert loc(member(p, 1), 0).v_int == oy
+}
+
+// void copies(void) { struct S s, t; s.x = 1; s.y = 2; t = s; check(t.x == 1); self_copy(&t); ... }
+method copies()
+  decreases
+{
+  var s: Ref
+  var t: Ref
+  var cx: Int
+  var cy: Int
+  s := alloc_struct_0_S()
+  t := alloc_struct_0_S()
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+  loc(member(s, 0), 0).v_int := 1
+  loc(member(s, 0), 0).d_int := true
+  assert loc(member(s, 1), 0) != null
+  assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+  loc(member(s, 1), 0).v_int := 2
+  loc(member(s, 1), 0).d_int := true
+  // t = s: first every source leaf is read (permission, flag), then every destination leaf is written, flag set
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) > none && perm(loc(member(s, 0), 0).d_int) > none
+  assert loc(member(s, 0), 0).d_int
+  cx := loc(member(s, 0), 0).v_int
+  assert loc(member(s, 1), 0) != null
+  assert perm(loc(member(s, 1), 0).v_int) > none && perm(loc(member(s, 1), 0).d_int) > none
+  assert loc(member(s, 1), 0).d_int
+  cy := loc(member(s, 1), 0).v_int
+  assert loc(member(t, 0), 0) != null
+  assert perm(loc(member(t, 0), 0).v_int) == write && perm(loc(member(t, 0), 0).d_int) == write
+  loc(member(t, 0), 0).v_int := cx
+  loc(member(t, 0), 0).d_int := true
+  assert loc(member(t, 1), 0) != null
+  assert perm(loc(member(t, 1), 0).v_int) == write && perm(loc(member(t, 1), 0).d_int) == write
+  loc(member(t, 1), 0).v_int := cy
+  loc(member(t, 1), 0).d_int := true
+  assert loc(member(t, 0), 0) != null
+  assert perm(loc(member(t, 0), 0).v_int) > none && perm(loc(member(t, 0), 0).d_int) > none
+  assert loc(member(t, 0), 0).d_int
+  assert loc(member(t, 0), 0).v_int == 1
+  assert loc(member(t, 1), 0) != null
+  assert perm(loc(member(t, 1), 0).v_int) > none && perm(loc(member(t, 1), 0).d_int) > none
+  assert loc(member(t, 1), 0).d_int
+  assert loc(member(t, 1), 0).v_int == 2
+  assert WF(t)
+  assert t != null
+  assert WF(t)
+  assert offset_of(t) < len(block_of(t))
+  assert len(member(t, 0)) == 1 && len(member(t, 1)) == 1
+  assert perm(loc(member(t, 0), 0).v_int) == write && perm(loc(member(t, 0), 0).d_int) == write
+  assert loc(member(t, 0), 0).d_int
+  assert RNG(loc(member(t, 0), 0))
+  assert perm(loc(member(t, 1), 0).v_int) == write && perm(loc(member(t, 1), 0).d_int) == write
+  assert loc(member(t, 1), 0).d_int
+  assert RNG(loc(member(t, 1), 0))
+  assert perm(lvloc(block_of(t)).lv) > none
+  var a_t: Perm := perm(lvloc(block_of(t)).lv) / 2
+  assert none < a_t && a_t < write
+  assert perm(lvloc(block_of(t)).lv) >= a_t
+  self_copy(t, a_t)
+  assert loc(member(t, 0), 0) != null
+  assert perm(loc(member(t, 0), 0).v_int) > none && perm(loc(member(t, 0), 0).d_int) > none
+  assert loc(member(t, 0), 0).d_int
+  assert loc(member(t, 0), 0).v_int == 1
+  assert loc(member(t, 1), 0) != null
+  assert perm(loc(member(t, 1), 0).v_int) > none && perm(loc(member(t, 1), 0).d_int) > none
+  assert loc(member(t, 1), 0).d_int
+  assert loc(member(t, 1), 0).v_int == 2
+  assert perm(loc(member(t, 0), 0).v_int) == write && perm(loc(member(t, 0), 0).d_int) == write
+  assert perm(loc(member(t, 1), 0).v_int) == write && perm(loc(member(t, 1), 0).d_int) == write
+  assert perm(lvloc(block_of(t)).lv) == write
+  exhale acc(loc(member(t, 0), 0).v_int) && acc(loc(member(t, 0), 0).d_int) && acc(loc(member(t, 1), 0).v_int) && acc(loc(member(t, 1), 0).d_int) && acc(lvloc(block_of(t)).lv)
+  assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+  assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+  assert perm(lvloc(block_of(s)).lv) == write
+  exhale acc(loc(member(s, 0), 0).v_int) && acc(loc(member(s, 0), 0).d_int) && acc(loc(member(s, 1), 0).v_int) && acc(loc(member(s, 1), 0).d_int) && acc(lvloc(block_of(s)).lv)
+}

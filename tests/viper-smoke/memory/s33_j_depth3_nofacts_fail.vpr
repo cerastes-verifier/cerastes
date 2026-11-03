@@ -1,0 +1,223 @@
+// expect: error invariant-entry:insufficient.permission @ L111
+// S33 (j) twin: no slot facts at all (the four axioms only): the loop's invariant for s.u.s.y fails on entry, as in s33_i_nested_fractions_nofact_fail.vpr.
+// Hand-written in the emitted style (see s33_a_nested.vpr).
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0043 items 3, 9): WF; a leaf's range; a leaf at allocation (uninitialized); a leaf owned (full permission, flag set, range); a leaf owned without its flag (must_init's requires); one liveness fraction
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNG(c) ((-2147483648) <= c.v_int && c.v_int <= 2147483647)
+define LEAFU(c) (acc(c.v_int) && acc(c.d_int) && !c.d_int)
+define LEAF(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNG(c))
+define LEAFN(c) (acc(c.v_int) && acc(c.d_int) && (c.d_int ==> RNG(c)))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+// struct S { int x; int y; }: member 0 is x, member 1 is y; struct T { struct S s; int z; }: member 0 is the slot of the nested S, member 1 is z
+define MX(s) loc(member(s, 0), 0)
+define MY(s) loc(member(s, 1), 0)
+define TS(t) loc(member(t, 0), 0)
+define TZ(t) loc(member(t, 1), 0)
+define SLEN(s) (len(member(s, 0)) == 1 && len(member(s, 1)) == 1)
+define SOWN(s) (SLEN(s) && LEAF(MX(s)) && LEAF(MY(s)))
+define TLEN(t) (len(member(t, 0)) == 1 && len(member(t, 1)) == 1)
+define TOWN(t) (TLEN(t) && SOWN(TS(t)) && LEAF(TZ(t)))
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+
+// cerastes:trusted-contract allocation of a struct S local: a one-slot block; each member is a block of length 1 whose leaf is uninitialized with full permission; the liveness token is the root block's (record 0043 item 4)
+method alloc_struct_0_S() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures len(member(r, 0)) == 1 && acc(loc(member(r, 0), 0).v_int) && acc(loc(member(r, 0), 0).d_int) && !loc(member(r, 0), 0).d_int
+  ensures len(member(r, 1)) == 1 && acc(loc(member(r, 1), 0).v_int) && acc(loc(member(r, 1), 0).d_int) && !loc(member(r, 1), 0).d_int
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract allocation of a struct V local (V { T u; int w; }, T { S s; int z; }, S { int x; int y; }): the slots U = loc(member(r, 0), 0) and S = loc(member(U, 0), 0) are nested; every leaf uninitialized with full permission; the liveness token is the root block's; the slot facts say which nested slots are not the slot above them
+method alloc_struct_2_V() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures len(member(r, 0)) == 1
+  ensures len(member(loc(member(r, 0), 0), 0)) == 1
+  ensures len(member(loc(member(loc(member(r, 0), 0), 0), 0), 0)) == 1 && acc(loc(member(loc(member(loc(member(r, 0), 0), 0), 0), 0), 0).v_int) && acc(loc(member(loc(member(loc(member(r, 0), 0), 0), 0), 0), 0).d_int) && !loc(member(loc(member(loc(member(r, 0), 0), 0), 0), 0), 0).d_int
+  ensures len(member(loc(member(loc(member(r, 0), 0), 0), 0), 1)) == 1 && acc(loc(member(loc(member(loc(member(r, 0), 0), 0), 0), 1), 0).v_int) && acc(loc(member(loc(member(loc(member(r, 0), 0), 0), 0), 1), 0).d_int) && !loc(member(loc(member(loc(member(r, 0), 0), 0), 0), 1), 0).d_int
+  ensures len(member(loc(member(r, 0), 0), 1)) == 1 && acc(loc(member(loc(member(r, 0), 0), 1), 0).v_int) && acc(loc(member(loc(member(r, 0), 0), 1), 0).d_int) && !loc(member(loc(member(r, 0), 0), 1), 0).d_int
+  ensures len(member(r, 1)) == 1 && acc(loc(member(r, 1), 0).v_int) && acc(loc(member(r, 1), 0).d_int) && !loc(member(r, 1), 0).d_int
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// S33 (j): struct V { struct T u; int w; }, struct T { struct S s; int z; }, struct S { int x; int y; }: member 0 of V is the slot U of the nested T, member 0 of U the slot S of the nested S
+define LEAFR(c, a) (acc(c.v_int, a) && acc(c.d_int, a) && c.d_int && RNG(c))
+
+// int read_loop_V(struct V *s, int n) [reads(*s)]: sums s->u.s.y + s->w n times; four leaves at three depths held by fractions
+method read_loop_V(s: Ref, a_s: Perm, n: Int) returns (r: Int)
+  requires none < a_s && a_s < write
+  requires WF(s)
+  requires ROOT(s) && len(member(s, 0)) == 1 && len(member(s, 1)) == 1 && len(member(loc(member(s, 0), 0), 0)) == 1 && len(member(loc(member(s, 0), 0), 1)) == 1 && len(member(loc(member(loc(member(s, 0), 0), 0), 0), 0)) == 1 && len(member(loc(member(loc(member(s, 0), 0), 0), 0), 1)) == 1 && true && LEAFR(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0), a_s) && LEAFR(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0), a_s) && LEAFR(loc(member(loc(member(s, 0), 0), 1), 0), a_s) && LEAFR(loc(member(s, 1), 0), a_s) && LVF(s, a_s)
+  requires 0 <= loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).v_int && loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).v_int <= 1000 && 0 <= loc(member(s, 1), 0).v_int && loc(member(s, 1), 0).v_int <= 1000 && 0 <= n && n <= 10
+  ensures ROOT(s) && len(member(s, 0)) == 1 && len(member(s, 1)) == 1 && len(member(loc(member(s, 0), 0), 0)) == 1 && len(member(loc(member(s, 0), 0), 1)) == 1 && len(member(loc(member(loc(member(s, 0), 0), 0), 0), 0)) == 1 && len(member(loc(member(loc(member(s, 0), 0), 0), 0), 1)) == 1 && true && LEAFR(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0), a_s) && LEAFR(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0), a_s) && LEAFR(loc(member(loc(member(s, 0), 0), 1), 0), a_s) && LEAFR(loc(member(s, 1), 0), a_s) && LVF(s, a_s) && 0 <= r && r <= 20000
+  decreases
+{
+  var i: Int := 0
+  var sm: Int := 0
+  var kl: Perm := perm(lvloc(block_of(s)).lv)
+  var kvx: Perm := perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).v_int)
+  var kdx: Perm := perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).d_int)
+  var dsx: Bool := false
+  var vsx: Int := 0
+  if (kdx > none) { dsx := loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).d_int }
+  if (kvx > none) { vsx := loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).v_int }
+  var kvy: Perm := perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).v_int)
+  var kdy: Perm := perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).d_int)
+  var dsy: Bool := false
+  var vsy: Int := 0
+  if (kdy > none) { dsy := loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).d_int }
+  if (kvy > none) { vsy := loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).v_int }
+  var kvz: Perm := perm(loc(member(loc(member(s, 0), 0), 1), 0).v_int)
+  var kdz: Perm := perm(loc(member(loc(member(s, 0), 0), 1), 0).d_int)
+  var dsz: Bool := false
+  var vsz: Int := 0
+  if (kdz > none) { dsz := loc(member(loc(member(s, 0), 0), 1), 0).d_int }
+  if (kvz > none) { vsz := loc(member(loc(member(s, 0), 0), 1), 0).v_int }
+  var kvw: Perm := perm(loc(member(s, 1), 0).v_int)
+  var kdw: Perm := perm(loc(member(s, 1), 0).d_int)
+  var dsw: Bool := false
+  var vsw: Int := 0
+  if (kdw > none) { dsw := loc(member(s, 1), 0).d_int }
+  if (kvw > none) { vsw := loc(member(s, 1), 0).v_int }
+  while (i < n)
+    invariant 0 <= i && i <= n && 0 <= sm && sm <= 2000 * i
+    invariant acc(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).v_int, kvx) && acc(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).d_int, kdx)
+    invariant (none < kvx && kvx < write) ==> loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).v_int == vsx
+    invariant (kvx > none && kdx > none && loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).d_int) ==> RNG(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0))
+    invariant (kdx > none && dsx) ==> loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).d_int
+    invariant acc(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).v_int, kvy) && acc(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).d_int, kdy) // <- fails[invariant-entry:insufficient.permission]
+    invariant (none < kvy && kvy < write) ==> loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).v_int == vsy
+    invariant (kvy > none && kdy > none && loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).d_int) ==> RNG(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0))
+    invariant (kdy > none && dsy) ==> loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).d_int
+    invariant acc(loc(member(loc(member(s, 0), 0), 1), 0).v_int, kvz) && acc(loc(member(loc(member(s, 0), 0), 1), 0).d_int, kdz)
+    invariant (none < kvz && kvz < write) ==> loc(member(loc(member(s, 0), 0), 1), 0).v_int == vsz
+    invariant (kvz > none && kdz > none && loc(member(loc(member(s, 0), 0), 1), 0).d_int) ==> RNG(loc(member(loc(member(s, 0), 0), 1), 0))
+    invariant (kdz > none && dsz) ==> loc(member(loc(member(s, 0), 0), 1), 0).d_int
+    invariant acc(loc(member(s, 1), 0).v_int, kvw) && acc(loc(member(s, 1), 0).d_int, kdw)
+    invariant (none < kvw && kvw < write) ==> loc(member(s, 1), 0).v_int == vsw
+    invariant (kvw > none && kdw > none && loc(member(s, 1), 0).d_int) ==> RNG(loc(member(s, 1), 0))
+    invariant (kdw > none && dsw) ==> loc(member(s, 1), 0).d_int
+    invariant acc(lvloc(block_of(s)).lv, kl)
+    decreases n - i
+  {
+    assert loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0) != null
+    assert perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).v_int) > none && perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).d_int) > none
+    assert loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).d_int
+    assert loc(member(s, 1), 0) != null
+    assert perm(loc(member(s, 1), 0).v_int) > none && perm(loc(member(s, 1), 0).d_int) > none
+    assert loc(member(s, 1), 0).d_int
+    sm := sm + loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).v_int + loc(member(s, 1), 0).v_int
+    i := i + 1
+    assert perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).v_int) >= kvx && perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).d_int) >= kdx
+    assert perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).v_int) >= kvy && perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).d_int) >= kdy
+    assert perm(loc(member(loc(member(s, 0), 0), 1), 0).v_int) >= kvz && perm(loc(member(loc(member(s, 0), 0), 1), 0).d_int) >= kdz
+    assert perm(loc(member(s, 1), 0).v_int) >= kvw && perm(loc(member(s, 1), 0).d_int) >= kdw
+    assert perm(lvloc(block_of(s)).lv) >= kl
+  }
+  r := sm
+  assert s != null
+  assert WF(s)
+  assert offset_of(s) < len(block_of(s))
+  assert len(member(s, 0)) == 1 && len(member(s, 1)) == 1 && len(member(loc(member(s, 0), 0), 0)) == 1 && len(member(loc(member(s, 0), 0), 1)) == 1 && len(member(loc(member(loc(member(s, 0), 0), 0), 0), 0)) == 1 && len(member(loc(member(loc(member(s, 0), 0), 0), 0), 1)) == 1
+  assert perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).v_int) >= a_s && perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).d_int) >= a_s
+  assert loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).d_int
+  assert RNG(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0))
+  assert perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).v_int) >= a_s && perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).d_int) >= a_s
+  assert loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0))
+  assert perm(loc(member(loc(member(s, 0), 0), 1), 0).v_int) >= a_s && perm(loc(member(loc(member(s, 0), 0), 1), 0).d_int) >= a_s
+  assert loc(member(loc(member(s, 0), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(member(s, 0), 0), 1), 0))
+  assert perm(loc(member(s, 1), 0).v_int) >= a_s && perm(loc(member(s, 1), 0).d_int) >= a_s
+  assert loc(member(s, 1), 0).d_int
+  assert RNG(loc(member(s, 1), 0))
+  assert perm(lvloc(block_of(s)).lv) >= a_s
+  assert 0 <= r && r <= 20000
+}
+
+// int use_V(void): a struct V local held fully, passed to read_loop_V with reads(*s) (N = 1)
+method use_V()
+  decreases
+{
+  var s: Ref
+  var r1: Int
+  s := alloc_struct_2_V()
+  assert loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0) != null
+  assert perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).v_int) == write && perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).d_int) == write
+  loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).v_int := 1
+  loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).d_int := true
+  assert loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0) != null
+  assert perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).v_int) == write && perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).d_int) == write
+  loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).v_int := 2
+  loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).d_int := true
+  assert loc(member(loc(member(s, 0), 0), 1), 0) != null
+  assert perm(loc(member(loc(member(s, 0), 0), 1), 0).v_int) == write && perm(loc(member(loc(member(s, 0), 0), 1), 0).d_int) == write
+  loc(member(loc(member(s, 0), 0), 1), 0).v_int := 3
+  loc(member(loc(member(s, 0), 0), 1), 0).d_int := true
+  assert loc(member(s, 1), 0) != null
+  assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+  loc(member(s, 1), 0).v_int := 4
+  loc(member(s, 1), 0).d_int := true
+  assert perm(lvloc(block_of(s)).lv) > none
+  assert WF(s)
+  var m1: Perm := perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).v_int)
+  if (perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).d_int) < m1) { m1 := perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).d_int) }
+  if (perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).v_int) < m1) { m1 := perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).v_int) }
+  if (perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).d_int) < m1) { m1 := perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).d_int) }
+  if (perm(loc(member(loc(member(s, 0), 0), 1), 0).v_int) < m1) { m1 := perm(loc(member(loc(member(s, 0), 0), 1), 0).v_int) }
+  if (perm(loc(member(loc(member(s, 0), 0), 1), 0).d_int) < m1) { m1 := perm(loc(member(loc(member(s, 0), 0), 1), 0).d_int) }
+  if (perm(loc(member(s, 1), 0).v_int) < m1) { m1 := perm(loc(member(s, 1), 0).v_int) }
+  if (perm(loc(member(s, 1), 0).d_int) < m1) { m1 := perm(loc(member(s, 1), 0).d_int) }
+  if (perm(lvloc(block_of(s)).lv) < m1) { m1 := perm(lvloc(block_of(s)).lv) }
+  var a1: Perm := m1 / 2
+  assert none < a1 && a1 < write
+  assert s != null
+  assert WF(s)
+  assert offset_of(s) < len(block_of(s))
+  assert len(member(s, 0)) == 1 && len(member(s, 1)) == 1 && len(member(loc(member(s, 0), 0), 0)) == 1 && len(member(loc(member(s, 0), 0), 1)) == 1 && len(member(loc(member(loc(member(s, 0), 0), 0), 0), 0)) == 1 && len(member(loc(member(loc(member(s, 0), 0), 0), 0), 1)) == 1
+  assert perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).v_int) >= a1 && perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).d_int) >= a1
+  assert loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).d_int
+  assert RNG(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0))
+  assert perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).v_int) >= a1 && perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).d_int) >= a1
+  assert loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0))
+  assert perm(loc(member(loc(member(s, 0), 0), 1), 0).v_int) >= a1 && perm(loc(member(loc(member(s, 0), 0), 1), 0).d_int) >= a1
+  assert loc(member(loc(member(s, 0), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(member(s, 0), 0), 1), 0))
+  assert perm(loc(member(s, 1), 0).v_int) >= a1 && perm(loc(member(s, 1), 0).d_int) >= a1
+  assert loc(member(s, 1), 0).d_int
+  assert RNG(loc(member(s, 1), 0))
+  assert perm(lvloc(block_of(s)).lv) >= a1
+  assert 0 <= loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).v_int && loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).v_int <= 1000 && 0 <= loc(member(s, 1), 0).v_int && loc(member(s, 1), 0).v_int <= 1000 && 0 <= 3 && 3 <= 10
+  r1 := read_loop_V(s, a1, 3)
+  assert 0 <= r1 && r1 <= 20000
+  assert perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).v_int) == write && perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).d_int) == write
+  assert perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).v_int) == write && perm(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).d_int) == write
+  assert perm(loc(member(loc(member(s, 0), 0), 1), 0).v_int) == write && perm(loc(member(loc(member(s, 0), 0), 1), 0).d_int) == write
+  assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+  assert perm(lvloc(block_of(s)).lv) == write
+  exhale acc(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).v_int) && acc(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 0), 0).d_int) && acc(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).v_int) && acc(loc(member(loc(member(loc(member(s, 0), 0), 0), 0), 1), 0).d_int) && acc(loc(member(loc(member(s, 0), 0), 1), 0).v_int) && acc(loc(member(loc(member(s, 0), 0), 1), 0).d_int) && acc(loc(member(s, 1), 0).v_int) && acc(loc(member(s, 1), 0).d_int) && acc(lvloc(block_of(s)).lv)
+}

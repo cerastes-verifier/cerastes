@@ -2431,6 +2431,107 @@ class MemoryModelTests(unittest.TestCase):
                 probs = lv.lint_vpr(f"// cerastes:trusted-contract x\nmethod {name}() returns (r: Ref)\n  decreases _\n", "", "t.vpr", "t.vpr.map")
                 self.assertTrue(any("not the trusted allocation" in p for p in probs), probs)
 
+    # --- the trusted struct allocation `alloc_struct_<n>_<tag>` (decision 0043 items 4 and 13) ---
+
+    STRUCT_S = [
+        "ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)",
+        "ensures (((len(member(r, 0)) == 1) && acc(loc(member(r, 0), 0).v_int)) && acc(loc(member(r, 0), 0).d_int)) && (!loc(member(r, 0), 0).d_int)",
+        "ensures (((len(member(r, 1)) == 1) && acc(loc(member(r, 1), 0).v_int)) && acc(loc(member(r, 1), 0).d_int)) && (!loc(member(r, 1), 0).d_int)",
+        "ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)",
+    ]
+    # struct T { struct S s; int z; }: the nested slot is loc(member(r, 0), 0); the slot fact is its own clause (or part of the member's)
+    STRUCT_T = [
+        "ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)",
+        "ensures len(member(r, 0)) == 1",
+        "ensures r != loc(member(r, 0), 0)",
+        "ensures (((len(member(loc(member(r, 0), 0), 0)) == 1) && acc(loc(member(loc(member(r, 0), 0), 0), 0).v_int)) && acc(loc(member(loc(member(r, 0), 0), 0), 0).d_int)) && (!loc(member(loc(member(r, 0), 0), 0), 0).d_int)",
+        "ensures (((len(member(loc(member(r, 0), 0), 1)) == 1) && acc(loc(member(loc(member(r, 0), 0), 1), 0).v_int)) && acc(loc(member(loc(member(r, 0), 0), 1), 0).d_int)) && (!loc(member(loc(member(r, 0), 0), 1), 0).d_int)",
+        "ensures (((len(member(r, 1)) == 1) && acc(loc(member(r, 1), 0).v_int)) && acc(loc(member(r, 1), 0).d_int)) && (!loc(member(r, 1), 0).d_int)",
+        "ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)",
+    ]
+
+    def with_struct_alloc(self, ensures, name="alloc_struct_0_S", extra=(), body=False):
+        lines = self.fixture()
+        i = lines.index("method f__1()")
+        block = ["// cerastes:trusted-contract allocation of a local of a struct type", f"method {name}() returns (r: Ref)",
+                 *[Check("  " + t, P, "internal") for t in ensures], *extra, "  decreases _"]
+        if body:
+            block += ["{", "}"]
+        lines[i:i] = block
+        return lines
+
+    def test_the_emitters_struct_allocations_are_clean(self):
+        self.assertEqual(self.strict(self.with_struct_alloc(self.STRUCT_S)), [])
+        self.assertEqual(self.strict(self.with_struct_alloc(self.STRUCT_T, name="alloc_struct_1_T")), [])
+        # the slot fact as a conjunct of the nested member's clause
+        merged = list(self.STRUCT_T)
+        merged[1:3] = ["ensures len(member(r, 0)) == 1 && r != loc(member(r, 0), 0)"]
+        self.assertEqual(self.strict(self.with_struct_alloc(merged, name="alloc_struct_1_T")), [])
+
+    def test_a_struct_allocation_with_a_different_shape_is_a_problem(self):
+        S, T = self.STRUCT_S, self.STRUCT_T
+        dup = list(S)
+        dup.insert(2, S[1])
+        dup_spelled = list(S)
+        dup_spelled.insert(2, S[1].replace("loc(member(r, 0), 0)", "loc(member(loc(block_of(r), 0), 0), 0)").replace("member(r, 0))", "member(loc(block_of(r), 0), 0))"))
+        two_lv = list(S[:3]) + [S[3] + " && acc(lvloc(block_of(r)).lv)"]
+        alterations = {
+            "a duplicated leaf": dup,
+            "a duplicated leaf spelled through block_of": dup_spelled,
+            "a second lv permission": two_lv,
+            "a missing !d": [S[0], S[1].replace(" && (!loc(member(r, 0), 0).d_int)", ""), S[2], S[3]],
+            "len == 2": [S[0], S[1].replace("len(member(r, 0)) == 1", "len(member(r, 0)) == 2"), S[2], S[3]],
+            "an extra conjunct": [S[0], S[1] + " && loc(member(r, 0), 0).v_int == 0", S[2], S[3]],
+            "an unrooted chain": [S[0], S[1].replace("member(r, 0)", "member(q, 0)"), S[2], S[3]],
+            "parent_of inside a chain": [S[0], S[1].replace("member(r, 0), 0).v_int", "member(parent_of(member(r, 0)), 0), 0).v_int"), S[2], S[3]],
+            "a negative index": [S[0], S[1].replace("member(r, 0)", "member(r, -1)"), S[2], S[3]],
+            "an undeclared field suffix": [S[0], S[1].replace("_int", "_long"), S[2], S[3]],
+            "a flag of another suffix": [S[0], S[1].replace("d_int", "d_bool"), S[2], S[3]],
+            "ensures false": list(S) + ["ensures false"],
+            "the liveness clause missing": list(S[:3]),
+            "the root facts weakened": [S[0].replace(" && (len(block_of(r)) == 1)", ""), S[1], S[2], S[3]],
+            "no member block": [S[0], S[3]],
+        }
+        for what, ensures in alterations.items():
+            with self.subTest(what):
+                probs = self.strict(self.with_struct_alloc(ensures))
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("`method alloc_struct_0_S` is not the trusted struct allocation", probs[0])
+
+    def test_a_struct_allocation_needs_exactly_the_slot_facts(self):
+        T = self.STRUCT_T
+        alterations = {
+            "the slot fact missing": T[:2] + T[3:],
+            "the slot fact twice": T[:3] + [T[2]] + T[3:],
+            "a fact in the wrong direction": T[:2] + ["ensures loc(member(r, 0), 0) != r"] + T[3:],
+            "a fact between a leaf-level chain": T[:2] + ["ensures r != loc(member(loc(member(r, 0), 0), 0), 0)"] + T[3:],
+            "a fact with a non-chain": T[:2] + ["ensures r != null"] + T[3:],
+        }
+        for what, ensures in alterations.items():
+            with self.subTest(what):
+                probs = self.strict(self.with_struct_alloc(ensures, name="alloc_struct_1_T"))
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("is not the trusted struct allocation", probs[0])
+
+    def test_a_struct_allocation_with_a_body_or_an_extra_clause_is_a_problem(self):
+        probs = self.strict(self.with_struct_alloc(self.STRUCT_S, body=True))
+        self.assertTrue(any("not the trusted struct allocation" in p for p in probs), probs)
+        lines = self.with_struct_alloc(self.STRUCT_S)
+        i = lines.index("  decreases _", lines.index("method alloc_struct_0_S() returns (r: Ref)"))
+        lines[i:i] = [Check("  requires true", WF, "internal")]
+        probs = self.strict(lines)
+        self.assertTrue(any("not the trusted struct allocation" in p for p in probs), probs)
+
+    def test_a_struct_allocation_is_not_the_scalar_allocation_and_back(self):
+        # alloc_struct_0_S with the scalar `alloc_<t>` text, and alloc_int with a struct's clauses, are both refused
+        scalar = self.alloc_lines(suffix="struct_0_S")[1:3]
+        lines = self.with_struct_alloc([t.text if hasattr(t, "text") else t for t in scalar])
+        probs = self.strict(lines)
+        self.assertTrue(any("not the trusted struct allocation" in p for p in probs), probs)
+        lines = self.with_alloc(ensures=self.STRUCT_S)
+        probs = self.strict(lines)
+        self.assertTrue(any("`method alloc_int` is not the trusted allocation" in p for p in probs), probs)
+
     def test_other_methods_are_not_alloc(self):
         lines = self.fixture()
         self.assertEqual(self.strict(lines), [])
@@ -3008,6 +3109,68 @@ class GlobalsTests(unittest.TestCase):
         for what, (value, frag) in cases.items():
             with self.subTest(what):
                 self.some(self.fixture(rows=[rows[0], rows[1], self.row("GB_p__3", "ptr_int", value)]), frag)
+
+    # --- a struct-pointer global of unknown value: WF, then the guarded WF_S conjunct (decision 0043 item 8, audit round 2 S2) ---
+
+    @staticmethod
+    def struct_pointer_row(lens, g="GB_gp__1", suffix="ptr_struct_0_S", guard=None):
+        v = f"loc({g}(), 0).v_{suffix}"
+        wf = (f"(({v} == null) || ((({v} == loc(block_of({v}), offset_of({v}))) && (0 <= offset_of({v}))) && (offset_of({v}) <= len(block_of({v})))))")
+        guard = guard if guard is not None else f"(({v} != null) && (offset_of({v}) < len(block_of({v}))))"
+        return GlobalsTests.row(g, suffix, f"({wf} && ({guard} ==> ({lens})))")
+
+    @staticmethod
+    def chain(v, *ks):
+        x = v
+        for k in ks[:-1]:
+            x = f"loc(member({x}, {k}), 0)"
+        return x, ks[-1]
+
+    def struct_fixture(self, lens, **kw):
+        lines = self.fixture(names=["GB_gp__1"], rows=[self.struct_pointer_row(lens, **kw)])
+        lines[0:0] = ["field v_ptr_struct_0_S: Ref", "field d_ptr_struct_0_S: Bool"]
+        return lines
+
+    V = "loc(GB_gp__1(), 0).v_ptr_struct_0_S"
+    LENS_S = f"(len(member({V}, 0)) == 1) && (len(member({V}, 1)) == 1)"
+    # struct T { struct S s; int z; }: the member blocks depth first, then the slot fact root != nested slot
+    LENS_T = (f"(((len(member({V}, 0)) == 1) && (len(member(loc(member({V}, 0), 0), 0)) == 1)) && (len(member(loc(member({V}, 0), 0), 1)) == 1)) && "
+              f"(len(member({V}, 1)) == 1) && ({V} != loc(member({V}, 0), 0))")
+
+    def test_a_struct_pointer_row_with_wf_s_is_clean(self):
+        self.assertEqual(self.strict(self.struct_fixture(self.LENS_S)), [])
+        self.assertEqual(self.strict(self.struct_fixture(self.LENS_T)), [])
+
+    def test_a_struct_pointer_row_with_another_shape_is_refused(self):
+        V = self.V
+        bad = {
+            "a wrong length": self.LENS_S.replace("(len(member(%s, 1)) == 1)" % V, "(len(member(%s, 1)) == 2)" % V),
+            "an extra conjunct": self.LENS_S + " && false",
+            "a member twice": self.LENS_S + f" && (len(member({V}, 0)) == 1)",
+            "a nested member without its struct": f"(len(member({V}, 0)) == 1) && (len(member(loc(member({V}, 1), 0), 0)) == 1)",
+            "a block_of inside the chain": self.LENS_S.replace("member(%s, 1)" % V, "member(loc(block_of(%s), 0), 1)" % V),
+        }
+        for what, lens in bad.items():
+            with self.subTest(what):
+                self.some(self.struct_fixture(lens), "the value of the `program_start` row of `GB_gp__1`")
+        T = self.LENS_T
+        bad_t = {
+            "the slot fact missing": T.replace(f" && ({V} != loc(member({V}, 0), 0))", ""),
+            "a reversed slot fact": T.replace(f"({V} != loc(member({V}, 0), 0))", f"(loc(member({V}, 0), 0) != {V})"),
+            "a slot fact twice": T + f" && ({V} != loc(member({V}, 0), 0))",
+            "a slot fact between leaves": T.replace(f"({V} != loc(member({V}, 0), 0))", f"({V} != loc(member(loc(member({V}, 0), 0), 0), 0))"),
+        }
+        for what, lens in bad_t.items():
+            with self.subTest(what):
+                self.some(self.struct_fixture(lens), "the value of the `program_start` row of `GB_gp__1`")
+
+    def test_a_struct_pointer_row_needs_the_guard(self):
+        V = self.V
+        for what, guard in {"no non-null test": f"(offset_of({V}) < len(block_of({V})))",
+                            "a weaker bound": f"(({V} != null) && (offset_of({V}) <= len(block_of({V}))))",
+                            "another pointer": f"(({V} != null) && (offset_of(null) < len(block_of(null))))"}.items():
+            with self.subTest(what):
+                self.some(self.struct_fixture(self.LENS_S, guard=guard), "the value of the `program_start` row of `GB_gp__1`")
 
     def test_the_facts_row_is_pinned(self):
         bad = {

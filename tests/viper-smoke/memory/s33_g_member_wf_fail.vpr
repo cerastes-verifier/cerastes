@@ -1,0 +1,89 @@
+// expect: error assert:assertion.false @ L88
+// S33 (g) twin of s33_g_member_wf.vpr: the caller holds only `live(p)` (a liveness fraction): no len fact is known for `member(p, 1)`, so the call's WF(q) row fails (the offset_of(q) <= len(block_of(q)) conjunct: `len(member(p, 1))` is unconstrained). This twin shows why record 0043 item 8's `WF_S` (the pointer's WF with `len(member(p, k)) == 1` for every member) is part of every atom on `p`, `live(p)` included: without the lengths, `&p->y` is not provably WF.
+// Hand-written in the emitted style (see the positive fixture).
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0043 items 3, 9): WF; a leaf's range; a leaf at allocation (uninitialized); a leaf owned (full permission, flag set, range); a leaf owned without its flag (must_init's requires); one liveness fraction
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNG(c) ((-2147483648) <= c.v_int && c.v_int <= 2147483647)
+define LEAFU(c) (acc(c.v_int) && acc(c.d_int) && !c.d_int)
+define LEAF(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNG(c))
+define LEAFN(c) (acc(c.v_int) && acc(c.d_int) && (c.d_int ==> RNG(c)))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+// struct S { int x; int y; }: member 0 is x, member 1 is y; struct T { struct S s; int z; }: member 0 is the slot of the nested S, member 1 is z
+define MX(s) loc(member(s, 0), 0)
+define MY(s) loc(member(s, 1), 0)
+define TS(t) loc(member(t, 0), 0)
+define TZ(t) loc(member(t, 1), 0)
+define SLEN(s) (len(member(s, 0)) == 1 && len(member(s, 1)) == 1)
+define SOWN(s) (SLEN(s) && LEAF(MX(s)) && LEAF(MY(s)))
+define TLEN(t) (len(member(t, 0)) == 1 && len(member(t, 1)) == 1)
+define TOWN(t) (TLEN(t) && SOWN(TS(t)) && LEAF(TZ(t)))
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+
+// cerastes:trusted-contract allocation of a struct S local: a one-slot block; each member is a block of length 1 whose leaf is uninitialized with full permission; the liveness token is the root block's (record 0043 item 4)
+method alloc_struct_0_S() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures len(member(r, 0)) == 1 && acc(loc(member(r, 0), 0).v_int) && acc(loc(member(r, 0), 0).d_int) && !loc(member(r, 0), 0).d_int
+  ensures len(member(r, 1)) == 1 && acc(loc(member(r, 1), 0).v_int) && acc(loc(member(r, 1), 0).d_int) && !loc(member(r, 1), 0).d_int
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// void bump_int(int *q) [owns(*q)]: *q = 9
+method bump_int(q: Ref, a: Perm)
+  requires none < a && a < write
+  requires WF(q)
+  requires ROOT(q) && LEAF(q) && LVF(q, a)
+  ensures ROOT(q) && LEAF(q) && LVF(q, a) && q.v_int == 9
+  decreases
+{
+  assert q != null
+  assert perm(q.v_int) == write && perm(q.d_int) == write
+  q.v_int := 9
+  q.d_int := true
+  assert q != null
+  assert WF(q)
+  assert offset_of(q) < len(block_of(q))
+  assert perm(q.v_int) == write
+  assert perm(q.d_int) == write
+  assert q.d_int
+  assert RNG(q)
+  assert perm(lvloc(block_of(q)).lv) >= a
+  assert q.v_int == 9
+}
+
+// void touch_y(struct S *p) [live(p)]: bump_int(&p->y). Only live(p) is held: no len fact, so WF(&p->y) is not provable
+method touch_y(p: Ref, l: Perm)
+  requires none < l && l < write
+  requires WF(p)
+  requires p != null && offset_of(p) < len(block_of(p)) && LVF(p, l)
+  decreases
+{
+  var q: Ref
+  q := loc(member(p, 1), 0)   // q = &p->y
+  assert p != null
+  assert perm(lvloc(block_of(p)).lv) > none   // lifetime: &p->y is arithmetic on p (0028 item 3a)
+  assert WF(q) // <- fails
+}

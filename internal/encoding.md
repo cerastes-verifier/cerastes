@@ -459,6 +459,31 @@ flag row and the range row `p.d_T ==> range`; every other cell atom's flag row i
 call of one (`Fn::init_range_rows`, `uses_init_markers`) gives every loop place `held && flag ==> range`, reached or not.
 The assigned-parameter scan is `vir::assigned_params` (shared with the encoder's strict check; it counts stores too).
 
+**Struct objects (M4.5c1, decision 0043).** A `vir::StructType` (interned in `Program`, members in declaration order;
+`struct_leaves` gives each leaf's member path, type and source text, `struct_slots_of`/`struct_contains` the nested
+slots) has no value field; a struct pointer's cell suffix is `ptr_` + `StructType::name` (`ptr_struct_<n>_<tag>`). A
+struct `Var` is always a cell. `MemberAddr(a, k)` lowers to `loc(member(a, k), 0)`; in place position (under a `Deref`,
+`Store`, `StoreE` or another place `MemberAddr`, recorded in `place_nodes_`) the chain's root pointer gets one
+`null-dereference` row, reported at the consumer, and the leaf the permission and flag rows; as a value (`&p->x`) one
+`null-dereference` row `p != null && offset_of(p) < len(block_of(p))` and then `p`'s liveness (`lifetime`). A member
+leaf is written through a `Ref` temporary, so `lint_flags` is unchanged. Each struct type used by a local gets one
+trusted `alloc_struct_<n>_<tag>()` (`alloc_struct_method`): the root facts, then one clause per ancestor/descendant
+slot pair `X != Y`, then per member block in declaration order and depth first `len(member(X, k)) == 1` (and for a
+leaf `acc(L.v_t) && acc(L.d_t) && !L.d_t`), then the liveness clause; the scope exit asserts every leaf and the liveness
+cell at `write` (`lifetime`, naming the leaf) and exhales them. `WF_S(p)` (`WF(p)` and, under `p != null &&
+offset_of(p) < len(block_of(p))`, the member lengths and slot facts) is written wherever a struct pointer's `WF` is.
+Atoms carry a `vir::PlaceKey` (root, member path): `owns(*p)`/`reads(*p)` expand to every leaf with one ghost amount and
+one liveness fraction, member atoms to one leaf or a nested object's leaves; every atom on a struct root gives `p !=
+null`, `WF_S(p)`, `offset_of(p) < len(block_of(p))`. **Overlap is per leaf cell and VIR field**: `exclusive_pair` means
+"a leaf field in common", `overlap_pairs` asserts the cells of one field differ (two atoms on one struct type compare
+their slots); sums at calls and returns are per leaf; `split_candidates` gives the case splits (a struct target against
+nested slots, a scalar target against the leaves of its field); framing has one disjunct per covering leaf; `f__wf`
+ghosts are keyed by root, path and state. A struct atom makes its call a memory call on every leaf field (0039 item 4);
+loops take every leaf as a place, the liveness row on the first leaf of each root under `lvloc(block_of(a)) !=
+lvloc(block_of(b))` against earlier roots; havoc reaches every leaf field a struct atom owns. Copies and initializers
+reach lowering as leaf `Deref`s into temporaries and leaf `Store`s (no VIR of their own). The markers apply per leaf
+(`must_init`'s return row names the missing member).
+
 ## 4. Viper shape
 
 ```
@@ -603,7 +628,8 @@ obligation that comes from a default argument at the call, with a note at the de
 fail closed. Positions of nodes are mapped through `diag_position` (0006 item 10).
 
 **Declarations (rejected with `unsupported_declaration`, at the declaration's first line).** In a verified file: a
-class, struct or union (an enumeration: below; a lambda's closure class is reported at the lambda expression instead); a global
+class, struct or union other than a verified structure (0043 item 2: `struct_info` classifies a class once, by P65's
+fields, members at their own lines; since M4.5c1) (an enumeration: below; a lambda's closure class is reported at the lambda expression instead); a global
 variable that is not a named constant (below); a weak function (`is_weak`/`is_weakref`, 0017 item 2); a file-scope
 `asm`; a template; a `constexpr` or `consteval`
 function; a variadic function; a function without a prototype; a `static`, unnamed-namespace or `inline` function
@@ -734,7 +760,14 @@ address-taken cells, and `pointer_conversion` accepts a conversion only when the
 qualifiers added at its top level (`qualifiers_only_added` only chooses the message: GCC's `-Wincompatible-pointer-types`
 in C, C++'s multi-level qualification conversion in C++); the driver makes #144 and #167 errors in both modes.
 `contract_read` accepts `*r` of the result binder in an `ensures` (`old(*r)` rejected); `owns(**pp)`, `live(*pp)` and
-`**pp` reads in contracts, invariants and measures are rejected naming M4.5c. `spec_atom`/`invariant_atom` accept atoms
+`**pp` reads in contracts, invariants and measures are rejected naming M4.5c2 (since M4.5c1).
+Since M4.5c1 (0043) `vtype` accepts verified structures as cell types and pointees at any depth; `eok_dot_field` and
+`eok_points_to_field` build `MemberAddr` chains (`c_text` such as `p->t.x`); braced initializers expand to one store per
+leaf (each element an assignment conversion read under EDG's fold; in C every element into a temporary first;
+overrides, brace elision and out-of-order C designators rejected); struct copies (`struct_assignment_statement`, only
+in statement position) read every source leaf into temporaries before storing the destination's; contract places and
+atoms take member paths, overlapping atoms on one root are rejected; `vir::restrict_hazard` rejects `restrict` beside
+any place that can hold a pointer of the same pointee type (audit B2). `spec_atom`/`invariant_atom` accept atoms
 in a loop's invariants (not in a `do … while (0)` invariant or a measure) on a pointer variable that is not a cell, and
 `check_invariant_atoms` checks their positions. `read_owning` collects `[[cerastes::owning]]` from every declaration's
 parameter types (the definition's `assoc_param_type`, a typedef'd function type merged by the front end), matches the

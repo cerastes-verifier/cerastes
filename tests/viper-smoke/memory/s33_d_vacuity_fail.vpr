@@ -1,0 +1,301 @@
+// expect: error assert:assertion.false @ L124
+// expect: error assert:assertion.false @ L228
+// expect: error assert:assertion.false @ L300
+// S33 (d) vacuity (h): s33_d_loop_liveness.vpr with an `assert false` after each allocation, after each call, at the start of each callee and at the end of each method body, one per cloned method (Silicon reports only the first failing `assert false` on a path): every one must FAIL, so no trusted contract or axiom makes the state contradictory.
+// Hand-written in the emitted style (see the positive fixture).
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0043 items 3, 9): WF; a leaf's range; a leaf at allocation (uninitialized); a leaf owned (full permission, flag set, range); a leaf owned without its flag (must_init's requires); one liveness fraction
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNG(c) ((-2147483648) <= c.v_int && c.v_int <= 2147483647)
+define LEAFU(c) (acc(c.v_int) && acc(c.d_int) && !c.d_int)
+define LEAF(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNG(c))
+define LEAFN(c) (acc(c.v_int) && acc(c.d_int) && (c.d_int ==> RNG(c)))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+// struct S { int x; int y; }: member 0 is x, member 1 is y; struct T { struct S s; int z; }: member 0 is the slot of the nested S, member 1 is z
+define MX(s) loc(member(s, 0), 0)
+define MY(s) loc(member(s, 1), 0)
+define TS(t) loc(member(t, 0), 0)
+define TZ(t) loc(member(t, 1), 0)
+define SLEN(s) (len(member(s, 0)) == 1 && len(member(s, 1)) == 1)
+define SOWN(s) (SLEN(s) && LEAF(MX(s)) && LEAF(MY(s)))
+define TLEN(t) (len(member(t, 0)) == 1 && len(member(t, 1)) == 1)
+define TOWN(t) (TLEN(t) && SOWN(TS(t)) && LEAF(TZ(t)))
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+
+// cerastes:trusted-contract allocation of a struct S local: a one-slot block; each member is a block of length 1 whose leaf is uninitialized with full permission; the liveness token is the root block's (record 0043 item 4)
+method alloc_struct_0_S() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures len(member(r, 0)) == 1 && acc(loc(member(r, 0), 0).v_int) && acc(loc(member(r, 0), 0).d_int) && !loc(member(r, 0), 0).d_int
+  ensures len(member(r, 1)) == 1 && acc(loc(member(r, 1), 0).v_int) && acc(loc(member(r, 1), 0).d_int) && !loc(member(r, 1), 0).d_int
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// int loop_s(void) { struct S s; s.x = 0; s.y = 0; for (int i = 0; i < 3; i++) { s.x = 1; s.y = 2; } return s.x + s.y; }  (automatic invariants: record 0043 item 11)
+method loop_s()
+  decreases
+{
+  var s: Ref
+  var i: Int
+  s := alloc_struct_0_S()
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+  loc(member(s, 0), 0).v_int := 0
+  loc(member(s, 0), 0).d_int := true
+  assert loc(member(s, 1), 0) != null
+  assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+  loc(member(s, 1), 0).v_int := 0
+  loc(member(s, 1), 0).d_int := true
+  i := 0
+  var kl: Perm := perm(lvloc(block_of(s)).lv)
+  var kvx: Perm := perm(loc(member(s, 0), 0).v_int)
+  var kdx: Perm := perm(loc(member(s, 0), 0).d_int)
+  var dsx: Bool := false
+  if (kdx > none) { dsx := loc(member(s, 0), 0).d_int }
+  var kvy: Perm := perm(loc(member(s, 1), 0).v_int)
+  var kdy: Perm := perm(loc(member(s, 1), 0).d_int)
+  var dsy: Bool := false
+  if (kdy > none) { dsy := loc(member(s, 1), 0).d_int }
+  while (i < 3)
+    invariant 0 <= i && i <= 3
+    invariant acc(loc(member(s, 0), 0).v_int, kvx) && acc(loc(member(s, 0), 0).d_int, kdx)
+    invariant (kvx > none && kdx > none && loc(member(s, 0), 0).d_int) ==> RNG(loc(member(s, 0), 0))
+    invariant (kdx > none && dsx) ==> loc(member(s, 0), 0).d_int
+    invariant acc(loc(member(s, 1), 0).v_int, kvy) && acc(loc(member(s, 1), 0).d_int, kdy)
+    invariant (kvy > none && kdy > none && loc(member(s, 1), 0).d_int) ==> RNG(loc(member(s, 1), 0))
+    invariant (kdy > none && dsy) ==> loc(member(s, 1), 0).d_int
+    invariant acc(lvloc(block_of(s)).lv, kl)   // one row for the root block, however many leaves
+    decreases 3 - i
+  {
+    assert loc(member(s, 0), 0) != null
+    assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+    loc(member(s, 0), 0).v_int := 1
+    loc(member(s, 0), 0).d_int := true
+    assert loc(member(s, 1), 0) != null
+    assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+    loc(member(s, 1), 0).v_int := 2
+    loc(member(s, 1), 0).d_int := true
+    i := i + 1
+    assert perm(loc(member(s, 0), 0).v_int) >= kvx && perm(loc(member(s, 0), 0).d_int) >= kdx
+    assert perm(loc(member(s, 1), 0).v_int) >= kvy && perm(loc(member(s, 1), 0).d_int) >= kdy
+    assert perm(lvloc(block_of(s)).lv) >= kl
+  }
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) > none && perm(loc(member(s, 0), 0).d_int) > none
+  assert loc(member(s, 0), 0).d_int
+  assert loc(member(s, 1), 0) != null
+  assert perm(loc(member(s, 1), 0).v_int) > none && perm(loc(member(s, 1), 0).d_int) > none
+  assert loc(member(s, 1), 0).d_int
+  assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+  assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+  assert perm(lvloc(block_of(s)).lv) == write
+  exhale acc(loc(member(s, 0), 0).v_int) && acc(loc(member(s, 0), 0).d_int) && acc(loc(member(s, 1), 0).v_int) && acc(loc(member(s, 1), 0).d_int) && acc(lvloc(block_of(s)).lv)
+}
+
+// int loop_s(void) { struct S s; s.x = 0; s.y = 0; for (int i = 0; i < 3; i++) { s.x = 1; s.y = 2; } return s.x + s.y; }  (automatic invariants: record 0043 item 11)
+method loop_s_v0()
+  decreases
+{
+  var s: Ref
+  var i: Int
+  s := alloc_struct_0_S()
+  assert false // <- fails: vacuity
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+  loc(member(s, 0), 0).v_int := 0
+  loc(member(s, 0), 0).d_int := true
+  assert loc(member(s, 1), 0) != null
+  assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+  loc(member(s, 1), 0).v_int := 0
+  loc(member(s, 1), 0).d_int := true
+  i := 0
+  var kl: Perm := perm(lvloc(block_of(s)).lv)
+  var kvx: Perm := perm(loc(member(s, 0), 0).v_int)
+  var kdx: Perm := perm(loc(member(s, 0), 0).d_int)
+  var dsx: Bool := false
+  if (kdx > none) { dsx := loc(member(s, 0), 0).d_int }
+  var kvy: Perm := perm(loc(member(s, 1), 0).v_int)
+  var kdy: Perm := perm(loc(member(s, 1), 0).d_int)
+  var dsy: Bool := false
+  if (kdy > none) { dsy := loc(member(s, 1), 0).d_int }
+  while (i < 3)
+    invariant 0 <= i && i <= 3
+    invariant acc(loc(member(s, 0), 0).v_int, kvx) && acc(loc(member(s, 0), 0).d_int, kdx)
+    invariant (kvx > none && kdx > none && loc(member(s, 0), 0).d_int) ==> RNG(loc(member(s, 0), 0))
+    invariant (kdx > none && dsx) ==> loc(member(s, 0), 0).d_int
+    invariant acc(loc(member(s, 1), 0).v_int, kvy) && acc(loc(member(s, 1), 0).d_int, kdy)
+    invariant (kvy > none && kdy > none && loc(member(s, 1), 0).d_int) ==> RNG(loc(member(s, 1), 0))
+    invariant (kdy > none && dsy) ==> loc(member(s, 1), 0).d_int
+    invariant acc(lvloc(block_of(s)).lv, kl)   // one row for the root block, however many leaves
+    decreases 3 - i
+  {
+    assert loc(member(s, 0), 0) != null
+    assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+    loc(member(s, 0), 0).v_int := 1
+    loc(member(s, 0), 0).d_int := true
+    assert loc(member(s, 1), 0) != null
+    assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+    loc(member(s, 1), 0).v_int := 2
+    loc(member(s, 1), 0).d_int := true
+    i := i + 1
+    assert perm(loc(member(s, 0), 0).v_int) >= kvx && perm(loc(member(s, 0), 0).d_int) >= kdx
+    assert perm(loc(member(s, 1), 0).v_int) >= kvy && perm(loc(member(s, 1), 0).d_int) >= kdy
+    assert perm(lvloc(block_of(s)).lv) >= kl
+  }
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) > none && perm(loc(member(s, 0), 0).d_int) > none
+  assert loc(member(s, 0), 0).d_int
+  assert loc(member(s, 1), 0) != null
+  assert perm(loc(member(s, 1), 0).v_int) > none && perm(loc(member(s, 1), 0).d_int) > none
+  assert loc(member(s, 1), 0).d_int
+  assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+  assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+  assert perm(lvloc(block_of(s)).lv) == write
+  exhale acc(loc(member(s, 0), 0).v_int) && acc(loc(member(s, 0), 0).d_int) && acc(loc(member(s, 1), 0).v_int) && acc(loc(member(s, 1), 0).d_int) && acc(lvloc(block_of(s)).lv)
+}
+
+// int loop_s(void) { struct S s; s.x = 0; s.y = 0; for (int i = 0; i < 3; i++) { s.x = 1; s.y = 2; } return s.x + s.y; }  (automatic invariants: record 0043 item 11)
+method loop_s_v1()
+  decreases
+{
+  var s: Ref
+  var i: Int
+  s := alloc_struct_0_S()
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+  loc(member(s, 0), 0).v_int := 0
+  loc(member(s, 0), 0).d_int := true
+  assert loc(member(s, 1), 0) != null
+  assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+  loc(member(s, 1), 0).v_int := 0
+  loc(member(s, 1), 0).d_int := true
+  i := 0
+  var kl: Perm := perm(lvloc(block_of(s)).lv)
+  var kvx: Perm := perm(loc(member(s, 0), 0).v_int)
+  var kdx: Perm := perm(loc(member(s, 0), 0).d_int)
+  var dsx: Bool := false
+  if (kdx > none) { dsx := loc(member(s, 0), 0).d_int }
+  var kvy: Perm := perm(loc(member(s, 1), 0).v_int)
+  var kdy: Perm := perm(loc(member(s, 1), 0).d_int)
+  var dsy: Bool := false
+  if (kdy > none) { dsy := loc(member(s, 1), 0).d_int }
+  while (i < 3)
+    invariant 0 <= i && i <= 3
+    invariant acc(loc(member(s, 0), 0).v_int, kvx) && acc(loc(member(s, 0), 0).d_int, kdx)
+    invariant (kvx > none && kdx > none && loc(member(s, 0), 0).d_int) ==> RNG(loc(member(s, 0), 0))
+    invariant (kdx > none && dsx) ==> loc(member(s, 0), 0).d_int
+    invariant acc(loc(member(s, 1), 0).v_int, kvy) && acc(loc(member(s, 1), 0).d_int, kdy)
+    invariant (kvy > none && kdy > none && loc(member(s, 1), 0).d_int) ==> RNG(loc(member(s, 1), 0))
+    invariant (kdy > none && dsy) ==> loc(member(s, 1), 0).d_int
+    invariant acc(lvloc(block_of(s)).lv, kl)   // one row for the root block, however many leaves
+    decreases 3 - i
+  {
+    assert loc(member(s, 0), 0) != null
+    assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+    loc(member(s, 0), 0).v_int := 1
+    loc(member(s, 0), 0).d_int := true
+    assert loc(member(s, 1), 0) != null
+    assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+    loc(member(s, 1), 0).v_int := 2
+    loc(member(s, 1), 0).d_int := true
+    i := i + 1
+    assert perm(loc(member(s, 0), 0).v_int) >= kvx && perm(loc(member(s, 0), 0).d_int) >= kdx
+    assert perm(loc(member(s, 1), 0).v_int) >= kvy && perm(loc(member(s, 1), 0).d_int) >= kdy
+    assert perm(lvloc(block_of(s)).lv) >= kl
+  }
+  assert false // <- fails: vacuity
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) > none && perm(loc(member(s, 0), 0).d_int) > none
+  assert loc(member(s, 0), 0).d_int
+  assert loc(member(s, 1), 0) != null
+  assert perm(loc(member(s, 1), 0).v_int) > none && perm(loc(member(s, 1), 0).d_int) > none
+  assert loc(member(s, 1), 0).d_int
+  assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+  assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+  assert perm(lvloc(block_of(s)).lv) == write
+  exhale acc(loc(member(s, 0), 0).v_int) && acc(loc(member(s, 0), 0).d_int) && acc(loc(member(s, 1), 0).v_int) && acc(loc(member(s, 1), 0).d_int) && acc(lvloc(block_of(s)).lv)
+}
+
+// int loop_s(void) { struct S s; s.x = 0; s.y = 0; for (int i = 0; i < 3; i++) { s.x = 1; s.y = 2; } return s.x + s.y; }  (automatic invariants: record 0043 item 11)
+method loop_s_v2()
+  decreases
+{
+  var s: Ref
+  var i: Int
+  s := alloc_struct_0_S()
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+  loc(member(s, 0), 0).v_int := 0
+  loc(member(s, 0), 0).d_int := true
+  assert loc(member(s, 1), 0) != null
+  assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+  loc(member(s, 1), 0).v_int := 0
+  loc(member(s, 1), 0).d_int := true
+  i := 0
+  var kl: Perm := perm(lvloc(block_of(s)).lv)
+  var kvx: Perm := perm(loc(member(s, 0), 0).v_int)
+  var kdx: Perm := perm(loc(member(s, 0), 0).d_int)
+  var dsx: Bool := false
+  if (kdx > none) { dsx := loc(member(s, 0), 0).d_int }
+  var kvy: Perm := perm(loc(member(s, 1), 0).v_int)
+  var kdy: Perm := perm(loc(member(s, 1), 0).d_int)
+  var dsy: Bool := false
+  if (kdy > none) { dsy := loc(member(s, 1), 0).d_int }
+  while (i < 3)
+    invariant 0 <= i && i <= 3
+    invariant acc(loc(member(s, 0), 0).v_int, kvx) && acc(loc(member(s, 0), 0).d_int, kdx)
+    invariant (kvx > none && kdx > none && loc(member(s, 0), 0).d_int) ==> RNG(loc(member(s, 0), 0))
+    invariant (kdx > none && dsx) ==> loc(member(s, 0), 0).d_int
+    invariant acc(loc(member(s, 1), 0).v_int, kvy) && acc(loc(member(s, 1), 0).d_int, kdy)
+    invariant (kvy > none && kdy > none && loc(member(s, 1), 0).d_int) ==> RNG(loc(member(s, 1), 0))
+    invariant (kdy > none && dsy) ==> loc(member(s, 1), 0).d_int
+    invariant acc(lvloc(block_of(s)).lv, kl)   // one row for the root block, however many leaves
+    decreases 3 - i
+  {
+    assert loc(member(s, 0), 0) != null
+    assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+    loc(member(s, 0), 0).v_int := 1
+    loc(member(s, 0), 0).d_int := true
+    assert loc(member(s, 1), 0) != null
+    assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+    loc(member(s, 1), 0).v_int := 2
+    loc(member(s, 1), 0).d_int := true
+    i := i + 1
+    assert perm(loc(member(s, 0), 0).v_int) >= kvx && perm(loc(member(s, 0), 0).d_int) >= kdx
+    assert perm(loc(member(s, 1), 0).v_int) >= kvy && perm(loc(member(s, 1), 0).d_int) >= kdy
+    assert perm(lvloc(block_of(s)).lv) >= kl
+  }
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) > none && perm(loc(member(s, 0), 0).d_int) > none
+  assert loc(member(s, 0), 0).d_int
+  assert loc(member(s, 1), 0) != null
+  assert perm(loc(member(s, 1), 0).v_int) > none && perm(loc(member(s, 1), 0).d_int) > none
+  assert loc(member(s, 1), 0).d_int
+  assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+  assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+  assert perm(lvloc(block_of(s)).lv) == write
+  exhale acc(loc(member(s, 0), 0).v_int) && acc(loc(member(s, 0), 0).d_int) && acc(loc(member(s, 1), 0).v_int) && acc(loc(member(s, 1), 0).d_int) && acc(lvloc(block_of(s)).lv)
+  assert false // <- fails: vacuity
+}

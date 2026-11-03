@@ -600,13 +600,190 @@ def alloc_contract(suffix: str) -> list[str]:
     ]
 
 
+STRUCT_ALLOC_RE = re.compile(r"^struct_[0-9]+_[A-Za-z0-9_]+$")
+FIELD_ANY_RE = re.compile(r"^\s*field\s+(?P<kind>[vd])_(?P<suffix>[A-Za-z0-9_$']+)\s*:")
+_STRUCT_INDEX = r"(?:0|[1-9][0-9]*)"
+_CHAIN_LOC_RE = re.compile(rf"^loc\(member\((?P<inner>.*),(?P<k>{_STRUCT_INDEX})\),0\)$")
+_MEMBER_RE = re.compile(rf"^member\((?P<inner>.*),(?P<k>{_STRUCT_INDEX})\)$")
+
+
+def parse_struct_chain(text: str, root: str = "r") -> tuple[int, ...] | None:
+    """`root` (`r` for an allocation, the pointer's value for a `WF_S`) is (); `loc(member(<chain>, k), 0)` is the chain's tuple plus k,
+    with a non-negative literal k and nothing else inside (no `block_of`, `parent_of`, other offset or arithmetic): the grammar of
+    decision 0043 item 13."""
+    if text == root:
+        return ()
+    m = _CHAIN_LOC_RE.match(text)
+    if not m:
+        return None
+    inner = parse_struct_chain(m.group("inner"), root)
+    return None if inner is None else inner + (int(m.group("k")),)
+
+
+def parse_struct_member(text: str, root: str = "r") -> tuple[int, ...] | None:
+    """`member(<chain>, k)` as the tuple of the chain plus k."""
+    m = _MEMBER_RE.match(text)
+    if not m:
+        return None
+    inner = parse_struct_chain(m.group("inner"), root)
+    return None if inner is None else inner + (int(m.group("k")),)
+
+
+def struct_wf_lens_problem(parts: list[str], root: str) -> str | None:
+    """The guarded conjunct of `WF_S(v)` in a `program_start` row (decision 0043 item 8): under `v != null && offset_of(v) < len(block_of(v))`
+    only `len(member(<chain>, k)) == 1` with a literal k, each member block once, a member of a member only inside a nested struct member,
+    and the slot facts `A != B` exactly for the pairs of the root or a nested slot A and a nested slot B below it, chains rooted at the value.
+    Returns the reason, or None."""
+    members: list[tuple[int, ...]] = []
+    facts: list[tuple[tuple[int, ...], tuple[int, ...]]] = []
+    for part in parts:
+        if "!=" in part:
+            a, _, b = part.partition("!=")
+            ca, cb = parse_struct_chain(a, root), parse_struct_chain(b, root)
+            if ca is None or cb is None:
+                return f"the slot fact `{part}` is not between canonical chains rooted at the value"
+            facts.append((ca, cb))
+            continue
+        m = re.fullmatch(r"len\((?P<m>.*)\)==1", part)
+        key = parse_struct_member(m.group("m"), root) if m else None
+        if key is None:
+            return f"`{part}` is not `len(member(<chain>, <literal>)) == 1` or a slot fact"
+        if key in members:
+            return f"the member block {key} twice"
+        members.append(key)
+    mset = set(members)
+    if not mset:
+        return "no member block"
+    for key in mset:
+        if key[:-1] and key[:-1] not in mset:
+            return f"the member block {key} is not inside a nested struct member"
+    structs = {k for k in mset if any(o[:-1] == k for o in mset)}
+    expected = {(a, b) for b in structs for a in {()} | structs if len(b) > len(a) and b[:len(a)] == a}
+    if len(facts) != len(set(facts)):
+        return "a slot fact twice"
+    if set(facts) != expected:
+        return "the slot facts are not exactly the pairs of the root or a nested slot and a nested slot below it"
+    return None
+
+
+def struct_allocation_problem(src: Source, d: Decl, suffix: str) -> str | None:
+    """Decision 0043 items 4 and 13: the trusted allocation `alloc_struct_<n>_<tag>` is pinned by its shape: bodyless, the header
+    and `decreases _`; first the root facts of `alloc_<t>`; then clauses in which each member block has `len(member(X, k)) == 1`,
+    each leaf exactly `acc(L.v_t) && acc(L.d_t) && !L.d_t` with `L = loc(member(X, k), 0)` and one declared suffix `t`, a nested struct
+    member nothing else (its slot is the X of the clauses that follow), and the slot facts `A != B` of item 4, exactly the pairs
+    (A, B) with B a nested slot and A the root or a nested slot whose chain B's chain strictly extends; last the liveness clause
+    with exactly one `lv` permission on the literal `lvloc(block_of(r))`; every chain in the canonical grammar rooted at `r`, every
+    member block and every (receiver, field) once; nothing else.  Returns the reason, or None."""
+    if d.has_body:
+        return "it has a body"
+    lines = [" ".join(src.code[n - 1].split()) for n in range(d.line, d.end_line + 1) if src.code[n - 1].strip()]
+    if len(lines) < 5 or lines[0] != f"method alloc_{suffix}() returns (r: Ref)" or lines[-1] != "decreases _":
+        return "its header, `decreases _` or the number of clauses is not the emitter's"
+    body = lines[1:-1]
+    if not all(l.startswith("ensures ") for l in body):
+        return "it has a clause that is not an `ensures`"
+    root_text = alloc_contract("x")[1]
+    if norm_viper(body[0][len("ensures "):]) != norm_viper(root_text[len("ensures "):]):
+        return "its first `ensures` is not the root facts of `alloc_<t>`"
+    live = norm_viper("lvloc(block_of(r)) == loc(block_of(r), -2) && acc(lvloc(block_of(r)).lv)")
+    if norm_viper(body[-1][len("ensures "):]) != live:
+        return "its last `ensures` is not exactly the liveness token (one `lv` permission on `lvloc(block_of(r))`)"
+    declared = {"v": set(), "d": set()}
+    for line in src.code:
+        m = FIELD_ANY_RE.match(line)
+        if m:
+            declared[m.group("kind")].add(m.group("suffix"))
+    members: set[tuple[int, ...]] = set()
+    structs: set[tuple[int, ...]] = set()  # member blocks with no leaf: their slot is the next chain
+    leaves: set[tuple[tuple[int, ...], str]] = set()
+    facts: list[tuple[tuple[int, ...], tuple[int, ...]]] = []
+    middle = body[1:-1]
+    if not any("len(" in c for c in middle):
+        return "it states no member block"
+    for clause in middle:
+        parts = norm_viper(clause[len("ensures "):]).split("&&")
+        lens: list[tuple[int, ...]] = []
+        accs: dict[str, tuple[tuple[int, ...], str]] = {}
+        nots: list[tuple[tuple[int, ...], str]] = []
+        for part in parts:
+            if "!=" in part:
+                a, _, b = part.partition("!=")
+                ca, cb = parse_struct_chain(a), parse_struct_chain(b)
+                if ca is None or cb is None:
+                    return f"the slot fact `{part}` is not between canonical chains"
+                facts.append((ca, cb))
+                continue
+            m = re.fullmatch(r"len\((?P<m>.*)\)==1", part)
+            if m:
+                key = parse_struct_member(m.group("m"))
+                if key is None:
+                    return f"`{part}` is not `len(member(<chain>, <literal>)) == 1`"
+                lens.append(key)
+                continue
+            m = re.fullmatch(r"acc\((?P<l>.*)\.(?P<f>[vd])_(?P<t>[A-Za-z0-9_$']+)\)", part)
+            if m:
+                lc = parse_struct_chain(m.group("l"))
+                if lc is None or not lc:
+                    return f"`{part}` is not a permission to a canonical leaf"
+                if m.group("f") in accs:
+                    return f"`{part}`: a second {m.group('f')} permission in one clause"
+                accs[m.group("f")] = (lc, m.group("t"))
+                continue
+            m = re.fullmatch(r"!(?P<l>.*)\.d_(?P<t>[A-Za-z0-9_$']+)", part)
+            if m:
+                lc = parse_struct_chain(m.group("l"))
+                if lc is None or not lc:
+                    return f"`{part}` is not `!L.d_<t>` of a canonical leaf"
+                nots.append((lc, m.group("t")))
+                continue
+            return f"`{part}` is not one of the clauses of decision 0043 item 13"
+        if not lens:
+            if accs or nots:
+                return "a leaf's permissions without its member block's `len(...) == 1`"
+            continue  # the slot facts alone
+        if len(lens) != 1:
+            return "two member blocks in one clause"
+        key = lens[0]
+        if key in members:
+            return f"the member block {key} twice"
+        if key[:-1] and key[:-1] not in structs:
+            return f"the member block {key} is not inside a nested struct member"
+        members.add(key)
+        if not accs and not nots:
+            structs.add(key)
+            continue
+        if set(accs) != {"v", "d"} or len(nots) != 1:
+            return "a leaf is not exactly `acc(L.v_t) && acc(L.d_t) && !L.d_t`"
+        (lv_, tv), (ld_, td), (ln_, tn) = accs["v"], accs["d"], nots[0]
+        if not (lv_ == ld_ == ln_ == key and tv == td == tn):
+            return "a leaf's value, flag and `!d` are not one cell `loc(member(X, k), 0)` of one field suffix"
+        if tv not in declared["v"] or tv not in declared["d"]:
+            return f"the field suffix `{tv}` is not declared (`field v_{tv}` and `field d_{tv}`)"
+        if (key, tv) in leaves:
+            return f"the leaf {key} twice"
+        leaves.add((key, tv))
+    expected = {(a, b) for b in structs for a in {()} | structs if len(b) > len(a) and b[:len(a)] == a}
+    if len(facts) != len(set(facts)):
+        return "a slot fact twice"
+    if set(facts) != expected:
+        return ("the slot facts `A != B` are not exactly the pairs of the root or a nested slot A and a nested slot B below it "
+                "(decision 0043 item 4)")
+    return None
+
+
 def lint_allocations(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
     """Decision 0032 item 4: a bodyless method `alloc_<t>` is trusted (the tag rule), so its contract is pinned: a different
-    postcondition (a dropped `!r.d_<t>`, an extra fact, `ensures false`, another suffix) is an unsound assumption."""
+    postcondition (a dropped `!r.d_<t>`, an extra fact, `ensures false`, another suffix) is an unsound assumption.  The struct
+    allocations `alloc_struct_<n>_<tag>` have their own shape (decision 0043 item 13)."""
     for d in decls:
         if d.kind != "method" or not d.name.startswith(ALLOC_PREFIX):
             continue
         suffix = d.name[len(ALLOC_PREFIX):]
+        if STRUCT_ALLOC_RE.match(suffix):
+            why = struct_allocation_problem(src, d, suffix)
+            if why is not None:
+                add(d.line, f"`method {d.name}` is not the trusted struct allocation of decision 0043 items 4 and 13: {why}")
+            continue
         lines = [" ".join(src.code[n - 1].split()) for n in range(d.line, d.end_line + 1) if src.code[n - 1].strip()]
         if d.has_body or not ALLOC_SUFFIX_RE.match(suffix) or lines != alloc_contract(suffix or "_"):
             add(d.line, f"`method {d.name}` is not the trusted allocation of decision 0032 item 4: it must be bodyless with "
@@ -755,8 +932,12 @@ def lint_globals(src: Source, decls: list[Decl], add: Callable[[int, str], None]
             elif kind == "Ref" and suffix.startswith("ptr_"):
                 v = f"{c}.v_{suffix}"
                 wf = f"{v}==null||{v}==loc(block_of({v}),offset_of({v}))&&0<=offset_of({v})&&offset_of({v})<=len(block_of({v}))"
+                guard = rf"{re.escape(v)}!=null&&offset_of\({re.escape(v)}\)<len\(block_of\({re.escape(v)}\)\)"
                 if mid in (f"{v}==null", wf):
                     good = True
+                elif mid.startswith(wf + "&&") and (r := re.fullmatch(guard + r"==>(?P<lens>.*)", mid[len(wf) + 2:])):
+                    # a pointer to a struct: WF followed by the guarded WF_S conjunct (decision 0043 item 8)
+                    good = struct_wf_lens_problem(r.group("lens").split("&&"), v) is None
                 elif r := re.fullmatch(re.escape(v) + r"==loc\((GB_[\w$']+)\(\),0\)", mid):
                     target, good = r.group(1), True
             if not good:

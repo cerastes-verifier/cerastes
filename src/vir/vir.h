@@ -58,36 +58,87 @@ struct IntType {
   std::string lo, hi;      // an enumeration's value range, decimal (dec::range_of)
 };
 
+struct StructType;
+
 struct Type {
   // Ptr (decisions 0032 item 2, 0037 items 2-3, 0040 item 2): a pointer to `pointee`.  Accepted by check_program for a local variable
   // (address-taken or not), for an expression, for a parameter and for a result, when the pointee is a Bool or Int (an enumeration included)
   // or itself an accepted pointer, at any depth (`int **`, `int ***`: a pointer variable whose address is taken is a cell of a pointer
-  // type).  Every other pointer type (a pointee that is void or a struct, at any level) is built as is and rejected there (M4.5c and later).
-  enum class Kind { Void, Bool, Int, Ptr };
+  // type).  Every other pointer type (a pointee that is void, at any level) is built as is and rejected there.
+  // Struct (decision 0043 item 3; appended): a C structure of the Program (Program::add_struct), the type of a struct local (always a
+  // cell, address-taken) and the pointee of a pointer.  A struct VALUE exists nowhere else in VIR: check_program rejects an expression, a
+  // parameter, a result, a store or an initializer of struct type (copies and initializers are expanded by the encoder into leaf stores).
+  // Pointers to structs are accepted at any depth like the other pointers (`struct S *`, `struct S **`).
+  enum class Kind { Void, Bool, Int, Ptr, Struct };
   Kind kind = Kind::Void;
   const IntType* int_type = nullptr;  // Kind::Int only; owned by the Program
   const Type* pointee = nullptr;      // Kind::Ptr only; interned by Program::pointer_to, owned by the Program
+  const StructType* struct_type = nullptr;  // Kind::Struct only; owned by the Program, compared by identity
 
-  static Type void_type() { return Type{Kind::Void, nullptr, nullptr}; }
-  static Type bool_type() { return Type{Kind::Bool, nullptr, nullptr}; }
-  static Type integer(const IntType* t) { return Type{Kind::Int, t, nullptr}; }
+  static Type void_type() { return Type{Kind::Void, nullptr, nullptr, nullptr}; }
+  static Type bool_type() { return Type{Kind::Bool, nullptr, nullptr, nullptr}; }
+  static Type integer(const IntType* t) { return Type{Kind::Int, t, nullptr, nullptr}; }
+  static Type structure(const StructType* s) { return Type{Kind::Struct, nullptr, nullptr, s}; }
 
   bool is_void() const { return kind == Kind::Void; }
   bool is_bool() const { return kind == Kind::Bool; }
   bool is_int() const { return kind == Kind::Int; }
   bool is_ptr() const { return kind == Kind::Ptr; }
+  bool is_struct() const { return kind == Kind::Struct; }
   // Same VIR type (Int types: same bits and signedness; an enumeration only itself; pointers: same pointee type, so `long*` and
-  // `long long*` are one type, as `long` and `long long` are).
+  // `long long*` are one type, as `long` and `long long` are; structs: the same StructType object).
   bool operator==(const Type& o) const {
     if (kind != o.kind) return false;
     if (kind == Kind::Ptr) return pointee != nullptr && o.pointee != nullptr && *pointee == *o.pointee;
+    if (kind == Kind::Struct) return struct_type == o.struct_type;
     if (kind != Kind::Int) return true;
     if (int_type->is_enum || o.int_type->is_enum) return int_type == o.int_type;
     return int_type->bits == o.int_type->bits && int_type->is_signed == o.int_type->is_signed;
   }
   bool operator!=(const Type& o) const { return !(*this == o); }
-  std::string str() const;  // "bool", "void", the int type's name, or the pointee's followed by "*" ("int*", "bool**")
+  std::string str() const;  // "bool", "void", the int type's name, the struct's C name ("struct S"), or the pointee's followed by "*" ("int*", "bool**")
 };
+
+// A member of a C structure, in declaration order (decision 0043 item 2): `type` is a Bool or Int (an enumeration included), an accepted
+// pointer (the innermost pointee may be a struct, also the struct itself: `struct node *next`) or a nested accepted struct.
+struct StructMember {
+  std::string name;
+  Type type;
+  SrcLoc loc;
+};
+
+// A C structure type (decision 0043 items 2 and 3), interned in the Program by Program::add_struct (one object per C type: two structs are
+// the same VIR type iff they are the same object).  Its layout in Viper: an object is a slot, member k is the block `member(slot, k)` of
+// length 1 and a scalar or pointer member the leaf cell `loc(member(slot, k), 0)`; a nested struct member is itself a slot there.  A struct has
+// no value of its own, only leaves.
+struct StructType {
+  int id = 0;           // the index in Program::structs(); part of the Viper name
+  std::string tag;      // the C tag (`S` of `struct S`); may be empty for an untagged struct (named by its typedef: the encoder sets `tag` then)
+  std::string name;     // the unique display and cell name, written like an enumeration's `enum_<n>_<name>`: `struct_<id>_<tag>` with every character
+                        // that is not a letter, digit or underscore of the tag written `_`.  Always a valid Viper identifier part, unique in the Program
+  std::string c_name;   // the C type name for messages ("struct S"; the encoder sets what the program spells)
+  SrcLoc loc;           // the definition
+  std::vector<StructMember> members;  // in declaration order; add with Program::add_member
+};
+
+// One leaf of a struct type: a scalar or pointer member reached through nested struct members (decision 0043 item 3).  `path` is the
+// member indices from the root (the last one the leaf itself), `type` the leaf's Bool, Int or Ptr type, `text` its source spelling.
+struct StructLeaf {
+  std::vector<int> path;
+  Type type;
+  std::string text;
+};
+// The leaves of `s` in declaration order, depth first (a nested struct's leaves in place).  `text` is `root_text` followed by `.name` for each
+// member on the way (`->name` for the first when `arrow`): struct_leaves(s, "t", false) gives "t.x", "t.u.y", struct_leaves(s, "p", true) "p->x", "p->u.y".
+// An empty `root_text` gives "x", "u.y".
+std::vector<StructLeaf> struct_leaves(const StructType& s, const std::string& root_text = "", bool arrow = false);
+// The member paths at which `a` holds a slot of struct type `b`: `{}` (the empty path) when `a` is `b` itself, then each nested member that is `b`
+// (and `b`s nested deeper), in declaration order, depth first.  Empty vector: `a` does not contain `b` (decision 0043 item 9: two struct atoms
+// overlap iff one root is a nested slot of the other).
+std::vector<std::vector<int>> struct_slots_of(const StructType& a, const StructType& b);
+inline bool struct_contains(const StructType& a, const StructType& b) { return !struct_slots_of(a, b).empty(); }
+// The type of the member reached from `s` by `path` (the empty path: `s` itself); a Void type when the path is invalid.
+Type struct_member_type(const StructType& s, const std::vector<int>& path);
 
 // ---- expressions -----------------------------------------------------------------------------------------
 
@@ -170,7 +221,7 @@ struct Expr {
                  // the full expression: the null, permission and flag obligations of a write through `c`.  The spelling of the target for
                  // messages is "*" + c->c_text.
     // ---- globals (decision 0041; appended) ----
-    GlobalAddr   // `&g` of the mutable global or `static` local `global` (Program::globals()): type = Ptr(global->type); a pointer value with no obligation
+    GlobalAddr,  // `&g` of the mutable global or `static` local `global` (Program::globals()): type = Ptr(global->type); a pointer value with no obligation
                  // (a global's block is allocated for the whole run: no allocation, no scope exit).  A read of `g` is `Deref(GlobalAddr)`, a write
                  // `Store`/`StoreE` with a GlobalAddr address, an atom `Atom(owns/reads, GlobalAddr)`; `*&g` is the same tree.  In CODE it stands where
                  // AddrOf does (a pointer value, the address of a Deref/Store/StoreE); a `static` local's GlobalAddr only in its owner function.  In a CONTRACT
@@ -179,6 +230,19 @@ struct Expr {
                  // `implicit_atom`).  In a loop's invariant or measure and a function's `decreases` it is accepted like any pointer node (decision 0038 item 6: `g >= 0`, `gp == &g`
                  // read the loop's places, framed by lowering); in a named constant, a global's initializer or a case value it is a check_program error (no_ptr_).
                  // `Atom(Live, GlobalAddr)` and a GlobalAddr atom in a loop's invariant are check_program errors (the encoder reports them first).
+    // ---- structures (decision 0043; appended) ----
+    MemberAddr   // `&a->m`: `a` is a pointer to a struct, `index` the member k of that struct (Type::struct_type->members[k]); type = Ptr(the member's type)
+                 // (a nested struct member gives a pointer to that struct: `&p->t` is the slot of `t`; `p->t.x` is MemberAddr(MemberAddr(p, t), x)).
+                 // Lowering: `loc(member(a, k), 0)`.  c_text: "&" + the member's place spelling (Builder::member_addr: `&p->x`, `&s.x`, `&s.t.x`);
+                 // Builder::deref of it spells "p->x" (without the "&").  A struct place is always reached through this node.
+                 // PLACE versus VALUE (a convention, no flag; lowering reads the context): a MemberAddr that is the operand `a` of a Deref, the `addr`
+                 // of a Stmt::Store, the `c` of a StoreE or the operand `a` of another MemberAddr that is itself in one of those positions is a PLACE
+                 // ACCESS (`p->x`, `s.t.x`, a read or write of a leaf): it checks `a != null` (null-dereference) and the leaf's permission and flag, and
+                 // nothing about the liveness of `a`'s pointer variable (decision 0032 item 6: a member access is not a use of `p`'s value).  Any
+                 // other MemberAddr is an address used as a VALUE (`&p->x` as an argument, an initializer, a comparison operand): arithmetic on `a`
+                 // (decision 0028 item 3a), checking `a != null` and `a`'s liveness.  In a CONTRACT only as a place (the operand of a Deref or an Atom,
+                 // through further MemberAddrs) rooted at a Formal, or at the Result in an `ensures` read; atoms and values of struct places are written
+                 // `Atom(owns, MemberAddr(Formal p, k))` and `Deref(MemberAddr(Formal p, k))`.  No obligation of its own.
   };
   Kind kind = Kind::Const;
   Type type;     // the type of the value (Void only for a Call of a void function)
@@ -283,7 +347,9 @@ struct Stmt {
 struct Var {
   int id = 0;                // unique within its function
   std::string name;          // the C/C++ name (for messages and generated identifiers)
-  Type type;                 // Bool or Int
+  Type type;                 // Bool, Int, a pointer or (decision 0043 item 4) a struct: a struct local is ALWAYS a cell (`address_taken`, set by the
+                             // encoder; check_program refuses a struct Var without it), declared without an initializer (`Decl` with a null `expr`: its
+                             // leaves are written by Stores, initializers and copies being expanded by the encoder); `AddrOf` of it is the slot
   SrcLoc loc;                // the declaration
   std::string c_type_name;   // the C/C++ spelling of the type, for messages (empty: use type.str())
   bool is_param_copy = false;  // the local copy of a parameter (0012 item 2)
@@ -444,6 +510,14 @@ class Program {
   // is copied into the Program, so a temporary is fine.
   Type pointer_to(const Type& pointee);
 
+  // A new C structure type (decision 0043), never interned by shape: each call makes a distinct type.  `tag` is the C tag (may be empty),
+  // `c_name` the spelling for messages ("struct S").  The members are added afterwards with add_member, so that a member may be a pointer to
+  // the struct itself (`pointer_to(Type::structure(s))`).  `name` is `struct_<id>_<tag>`, sanitized (see StructType::name).
+  StructType* add_struct(const std::string& tag, const std::string& c_name, SrcLoc loc);
+  // Append member `name` of `type` (the next index, declaration order); returns its index.
+  int add_member(StructType* s, std::string name, Type type, SrcLoc loc);
+  const std::deque<StructType>& structs() const { return structs_; }
+
   // The width of C's `int` on this target (EDG's `sizeof(int) * CHAR_BIT`); integer promotion is relative to
   // it.  Set it once, before building; the default is 32.
   void set_c_int_bits(int bits) { c_int_bits_ = bits; }
@@ -486,6 +560,7 @@ class Program {
   std::deque<Function> functions_;
   std::deque<NamedConst> named_consts_;
   std::deque<Global> globals_;
+  std::deque<StructType> structs_;
   const Function* entry_ = nullptr;
   std::deque<Expr> exprs_;
   std::deque<Stmt> stmts_;
@@ -539,11 +614,16 @@ struct AtomGuard {
   const Expr* cond = nullptr;
   bool holds = true;
 };
+// The place an atom names (decision 0043 item 9): a root plus a member path.  The root is as atom_place_key (a parameter's index, `kGlobalSiteBase
+// + id` for a global, `kNoPlaceKey` for anything else, an invariant's `Local` included); the path is the member indices from the root's pointee
+// (empty for `owns(*p)`; `owns(p->t)` is {t}, `owns(p->t.x)` is {t, x}).  Two atoms name one place iff their roots are equal and valid and their
+// paths are equal; they OVERLAP (share cells) by slots, which the lowering decides from the struct types (struct_slots_of), never by this key.
 struct AtomSite {
   const Expr* atom = nullptr;       // the Atom node
   bool in_ensures = false;
   int clause = 0;                   // the index in Function::requires_ or ensures_
   std::vector<AtomGuard> guards;
+  std::vector<int> path;            // the member path of the atom's place (decision 0043; empty for `*p`, a global, a Local): atom_place(*atom).path
 };
 // The atoms of `f`'s contract in allowed positions, the `requires` first and then the `ensures`, each clause in evaluation order (left
 // operand first; the arms of `?:` then-arm first).  An Atom in a position the record forbids (under `!`, inside `==`, as an argument, on
@@ -567,6 +647,12 @@ int requires_atom_count(const Function& f);
 // unguarded or guarded by exactly `q == NULL` being false (`q == NULL || owns(*q)`).  The atoms must already be numbered.  When it is false,
 // `*offender` (if given) is the other parameter that has no atom, or -1 when `param`'s own `owns` is the missing part.
 bool restrict_backed(const Function& f, int param, int* offender = nullptr);
+// Why `restrict` on pointer parameter `param` is refused whatever its contract owns (decision 0043 item 10, audit B2): empty when nothing is in the way.
+// The pointee of `param` is a struct (M8), or another pointer parameter's object or a global that an atom of the contract names can hold a pointer to the same
+// type (`int **`, a struct with an `int *` leaf or struct-pointer leaves that reach one, an `int *` global): a pointer loaded from there is not based on
+// `param`, so a write through it could alias `*param`.  restrict_backed is false when this is not empty (the encoder reports it first).  The message names the
+// offender in source terms.
+std::string restrict_hazard(const Function& f, int param);
 // Whether the expression reads the heap: it contains a `Deref` or an `Atom` (an `Old` of one included).
 bool reads_heap(const Expr& e);
 // The place a permission atom names (decision 0041 item 8: the sites of 0037 are keyed by place, not by the parameter's index): the parameter's index
@@ -575,9 +661,24 @@ bool reads_heap(const Expr& e);
 constexpr int kGlobalSiteBase = 1 << 20;
 constexpr int kResultSiteKey = -1;
 constexpr int kNoPlaceKey = -2;
+// The root key of an atom whose place has an EMPTY member path; `kNoPlaceKey` for a place with a non-empty path (use `atom_place`).  So a caller that
+// predates structs never treats `owns(p->x)` as `owns(*p)`.
 int atom_place_key(const Expr& atom);
+// The full place of an atom (decision 0043 item 9): the root key of atom_place_key's rule, however long the path is, and the member path.  `a` of the
+// atom is a Formal, a GlobalAddr or (invariants) a Local, optionally under MemberAddr nodes; `valid()` is false for anything else.
+struct PlaceKey {
+  int root = kNoPlaceKey;
+  std::vector<int> path;
+  bool valid() const { return root != kNoPlaceKey; }
+  bool operator==(const PlaceKey& o) const { return root == o.root && path == o.path; }
+  bool operator!=(const PlaceKey& o) const { return !(*this == o); }
+};
+PlaceKey atom_place(const Expr& atom);
+// Strips MemberAddr nodes from a place expression: the root pointer expression (a Formal, Result, GlobalAddr, Local, AddrOf, ...) and, in `*path`
+// (if given), the member indices from the root outward.
+const Expr* member_root(const Expr* e, std::vector<int>* path = nullptr);
 // The spelling of the place a Store/StoreE/Deref through `addr` writes or reads, for messages: the global's name for a `GlobalAddr` (`g`), "*" + `c_text`
-// otherwise (empty when the operand has no spelling).
+// otherwise (empty when the operand has no spelling), the member place (`p->x`, `s.t.x`; decision 0043) for a MemberAddr.
 std::string place_text(const Expr& addr);
 
 // ---- user gotos (decision 0015 item 2) -------------------------------------------------------------------------
@@ -655,6 +756,9 @@ class Builder {
   // `*addr` as a read: type = addr's pointee (an ill-typed `addr` is built with its own type and rejected by check_program); c_text
   // "*" + addr->c_text when the operand has one.
   const Expr* deref(const Expr* addr, SrcLoc loc);
+  // `&a->m` (decision 0043): `a` a pointer to a struct, `index` the member's index; type Ptr(the member's type) (an ill-typed `a` or an index out of range
+  // is built with `a`'s type and rejected by check_program).  c_text "&" + the place spelling (see Expr::Kind::MemberAddr); `deref` of it is `p->m`.
+  const Expr* member_addr(const Expr* a, int index, SrcLoc loc);
 
   // Statements.
   // `init` null: a local declared without an initializer (decision 0019).

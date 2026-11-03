@@ -147,7 +147,7 @@ bool declares_cell(const Stmt& b) {
 bool pointer_node(const Expr& e) {
   if (e.type.is_ptr()) return true;
   switch (e.kind) {
-    case Expr::Kind::Null: case Expr::Kind::AddrOf: case Expr::Kind::GlobalAddr: case Expr::Kind::Deref: case Expr::Kind::Atom: case Expr::Kind::StoreE: return true;
+    case Expr::Kind::Null: case Expr::Kind::AddrOf: case Expr::Kind::GlobalAddr: case Expr::Kind::MemberAddr: case Expr::Kind::Deref: case Expr::Kind::Atom: case Expr::Kind::StoreE: return true;
     case Expr::Kind::Local: return e.var != nullptr && e.var->address_taken;
     default: return false;
   }
@@ -157,9 +157,11 @@ class Checker {
  public:
   explicit Checker(const Program& p) : prog_(p) {
     for (const Function& f : p.functions()) functions_.insert(&f);
+    for (const StructType& st : p.structs()) structs_.insert(&st);
   }
 
   std::vector<Diag> run() {
+    for (const StructType& st : prog_.structs()) struct_type(st);
     for (const NamedConst& c : prog_.named_consts()) named_const(c, "the named constant");
     for (const Global& g : prog_.globals()) global(g);
     entry();
@@ -177,23 +179,61 @@ class Checker {
     return t.is_int() && t.int_type != nullptr && t.int_type->bits >= 1 && t.int_type->bits <= 128;
   }
 
-  // A pointer type decisions 0032 item 2 and 0040 item 2 accept: its innermost pointee is a bool, an integer type or an enumeration, through
-  // any number of pointer levels.
-  static bool accepted_pointer(const Type& t) {
+  // A pointer type decisions 0032 item 2, 0040 item 2 and 0043 item 2 accept: its innermost pointee is a bool, an integer type, an enumeration or a
+  // struct of the program (validated once by struct_type, so a self-referential `struct node *next` is no recursion here), through any number of
+  // pointer levels.
+  bool accepted_pointer(const Type& t) const {
     if (!t.is_ptr() || t.pointee == nullptr) return false;
-    return t.pointee->is_ptr() ? accepted_pointer(*t.pointee) : scalar_type(*t.pointee);
+    if (t.pointee->is_ptr()) return accepted_pointer(*t.pointee);
+    if (t.pointee->is_struct()) return t.pointee->struct_type != nullptr && structs_.count(t.pointee->struct_type) != 0;
+    return scalar_type(*t.pointee);
+  }
+
+  // Decision 0043 item 2: a struct of the program is a non-empty list of uniquely named members, each a bool, an integer or an enumeration, an
+  // accepted pointer or a nested struct that does not contain the struct itself by value.
+  bool contains_by_value(const StructType& from, const StructType* target, int depth) const {
+    if (depth > 64) return true;  // an absurd nesting is a cycle for our purposes
+    for (const StructMember& m : from.members) {
+      if (!m.type.is_struct() || m.type.struct_type == nullptr) continue;
+      if (m.type.struct_type == target || contains_by_value(*m.type.struct_type, target, depth + 1)) return true;
+    }
+    return false;
+  }
+  void struct_type(const StructType& st) {
+    const std::string name = "the struct '" + st.c_name + "'";
+    const auto& ss = prog_.structs();
+    if (st.id < 0 || static_cast<size_t>(st.id) >= ss.size() || &ss[static_cast<size_t>(st.id)] != &st) err(st.loc, name + " has an id that is not its index");
+    if (st.name.empty()) err(st.loc, name + " has no display name");
+    if (!st.loc.known()) err(st.loc, name + " has no source position");
+    if (st.members.empty()) err(st.loc, name + " has no members (an empty struct, decision 0043 item 2)");
+    std::set<std::string> names;
+    for (const StructMember& m : st.members) {
+      if (m.name.empty()) err(m.loc.known() ? m.loc : st.loc, name + " has an unnamed member (decision 0043 item 2)");
+      else if (!names.insert(m.name).second) err(m.loc.known() ? m.loc : st.loc, name + " has two members named '" + m.name + "'");
+      if (!m.loc.known()) err(st.loc, "the member '" + m.name + "' of " + name + " has no source position");
+      if (m.type.is_struct()) {
+        if (m.type.struct_type == nullptr || structs_.count(m.type.struct_type) == 0)
+          err(m.loc, "the member '" + m.name + "' of " + name + " is a struct that is not in the program");
+        else if (m.type.struct_type == &st || contains_by_value(*m.type.struct_type, &st, 0))
+          err(m.loc, "the member '" + m.name + "' of " + name + " contains the struct itself by value");
+      } else if (m.type.is_ptr()) {
+        if (!accepted_pointer(m.type)) err(m.loc, "the member '" + m.name + "' of " + name + " is " + pointer_reason(m.type));
+      } else if (!scalar_type(m.type)) {
+        err(m.loc, "the member '" + m.name + "' of " + name + " is not a bool, an integer, a pointer or a struct (decision 0043 item 2)");
+      }
+    }
   }
 
   // Why a pointer type is not accepted (empty when it is, or when `t` is no pointer).
-  static std::string pointer_reason(const Type& t) {
+  std::string pointer_reason(const Type& t) const {
     if (!t.is_ptr() || accepted_pointer(t)) return "";
     const Type* in = &t;
     while (in->is_ptr() && in->pointee != nullptr) in = in->pointee;
-    return "a pointer to " + (in->is_ptr() ? std::string("an unknown type") : in->str()) + " (decisions 0032 item 2, 0040 item 2)";
+    return "a pointer to " + (in->is_ptr() ? std::string("an unknown type") : in->str()) + " (decisions 0032 item 2, 0040 item 2, 0043 item 2)";
   }
 
   // `allow_ptr`: a pointer type counts (locals and expressions); parameters, results, named constants and the like pass false.
-  static bool value_type(const Type& t, bool allow_ptr = false) {
+  bool value_type(const Type& t, bool allow_ptr = false) const {
     if (allow_ptr && t.is_ptr()) return accepted_pointer(t);
     return scalar_type(t);
   }
@@ -286,12 +326,15 @@ class Checker {
     no_ptr_ = false;
     old_depth_ = 0;
     ok_globals_.clear();
+    ok_members_.clear();
     scopes_.emplace_back();
     for (const auto& v : f.locals())
       if (v->is_param_copy) scopes_.back().insert(v->id);
     // Decision 0037 items 2-3: a parameter or a result may be a pointer to a bool, an integer or an enumeration.
     if (f.ret.is_ptr()) {
       if (!accepted_pointer(f.ret)) err(f.loc, "the return type of '" + f.c_name + "' is " + pointer_reason(f.ret));
+    } else if (f.ret.is_struct()) {
+      err(f.loc, "the return type of '" + f.c_name + "' is a struct by value (decision 0043 item 8: M4.5c2)");
     } else if (!(f.ret.is_void() || value_type(f.ret))) {
       err(f.loc, "the return type of '" + f.c_name + "' is not void, bool, an integer type or a pointer to one");
     }
@@ -299,6 +342,8 @@ class Checker {
       if (f.params[k].type.is_ptr()) {
         if (!accepted_pointer(f.params[k].type))
           err(f.params[k].loc, "parameter " + std::to_string(k + 1) + " of '" + f.c_name + "' is " + pointer_reason(f.params[k].type));
+      } else if (f.params[k].type.is_struct()) {
+        err(f.params[k].loc, "parameter " + std::to_string(k + 1) + " of '" + f.c_name + "' is a struct by value (decision 0043 item 8: M4.5c2)");
       } else if (!value_type(f.params[k].type)) {
         err(f.params[k].loc, "parameter " + std::to_string(k + 1) + " of '" + f.c_name + "' is not a bool, an integer type or a pointer to one");
       }
@@ -442,11 +487,11 @@ class Checker {
     for (size_t k = 0; k < req.size(); ++k) {
       const Expr& a = *req[k]->atom;
       if (a.amount != static_cast<int>(k)) err(a.loc, "the permission atoms of the `requires` are not numbered in order (decision 0037 item 6)");
-      const int place = atom_place_key(a);  // a parameter's index or a global's key (decision 0041 item 8)
-      if (place == kNoPlaceKey) continue;
+      const PlaceKey place = atom_place(a);  // a parameter's index or a global's key (decision 0041 item 8) and the member path (decision 0043 item 9)
+      if (!place.valid()) continue;
       for (size_t j = 0; j < k; ++j) {
         const Expr& b = *req[j]->atom;
-        if (b.atom == a.atom && atom_place_key(b) == place)
+        if (b.atom == a.atom && atom_place(b) == place)
           err(a.loc, "the same permission atom twice in a `requires` (decision 0037 item 6)");
       }
     }
@@ -461,8 +506,7 @@ class Checker {
         continue;
       }
       const Expr& partner = *req[static_cast<size_t>(a.amount)]->atom;
-      if (partner.atom != a.atom || atom_place_key(partner) == kNoPlaceKey || atom_place_key(a) == kNoPlaceKey ||
-          atom_place_key(partner) != atom_place_key(a))
+      if (partner.atom != a.atom || !atom_place(partner).valid() || !atom_place(a).valid() || atom_place(partner) != atom_place(a))
         err(a.loc, "an `ensures` atom whose partner in the `requires` is of another kind or on another parameter or global (decisions 0037 item 6, 0041 item 8)");
       else if (partner.implicit_atom != a.implicit_atom)
         err(a.loc, "an `ensures` atom and its `requires` partner are not both the implicit atom of a `static` local (decision 0041 item 12)");
@@ -485,7 +529,10 @@ class Checker {
   // The reads `*p` (`Deref(Formal k)`) of a contract expression, each with whether it stands under `Old`.
   static void marked_reads(const Expr* e, bool in_old, int k, std::vector<std::pair<const Expr*, bool>>& out) {
     if (e == nullptr) return;
-    if (e->kind == Expr::Kind::Deref && e->a != nullptr && e->a->kind == Expr::Kind::Formal && e->a->index == k) out.push_back({e, in_old});
+    if (e->kind == Expr::Kind::Deref) {  // `*p` and, decision 0043, a read of a member place of `p` (`p->x`)
+      const Expr* root = member_root(e->a);
+      if (root != nullptr && root->kind == Expr::Kind::Formal && root->index == k) out.push_back({e, in_old});
+    }
     for (const Expr* x : {e->a, e->b, e->c}) marked_reads(x, in_old || e->kind == Expr::Kind::Old, k, out);
     for (const Expr* x : e->args) marked_reads(x, in_old || e->kind == Expr::Kind::Old, k, out);
   }
@@ -509,8 +556,10 @@ class Checker {
       }
       bool owns_in = false, owns_out = false, reads_any = false;
       for (const AtomSite& s : sites) {
-        if (s.atom->a == nullptr || s.atom->a->kind != Expr::Kind::Formal || s.atom->a->index != k) continue;
-        if (s.atom->atom == AtomKind::Owns) (s.in_ensures ? owns_out : owns_in) = true;
+        const PlaceKey pk = atom_place(*s.atom);
+        if (pk.root != k || (s.atom->a != nullptr && member_root(s.atom->a)->kind != Expr::Kind::Formal)) continue;
+        // `owns(*p)` (the whole pointee) is the atom a marker needs; a `reads` of the pointee or of any member of it beside a marker is refused.
+        if (s.atom->atom == AtomKind::Owns && pk.path.empty()) (s.in_ensures ? owns_out : owns_in) = true;
         else if (s.atom->atom == AtomKind::Reads) reads_any = true;
       }
       if (!owns_in) err(pr.loc, who + " is marked `ref_to_uninit` or `must_init` without `owns(*p)` in its `requires` (decision 0042 item 4)");
@@ -595,6 +644,11 @@ class Checker {
     }
     if (v.type.is_ptr()) {
       if (!accepted_pointer(v.type)) err(loc, "variable '" + v.name + "' is " + pointer_reason(v.type));
+    } else if (v.type.is_struct()) {
+      // Decision 0043 item 4: a struct local is always a cell of a block of its struct type.
+      if (v.type.struct_type == nullptr || structs_.count(v.type.struct_type) == 0) err(loc, "variable '" + v.name + "' is a struct that is not in the program");
+      if (!v.address_taken) err(loc, "internal: the struct local '" + v.name + "' is not marked address-taken (decision 0043 item 4)");
+      if (v.is_param_copy) err(loc, "the struct parameter '" + v.name + "' (decision 0043 item 8: M4.5c2)");
     } else if (!value_type(v.type)) {
       err(loc, "variable '" + v.name + "' is not a bool or an integer");
     }
@@ -618,6 +672,8 @@ class Checker {
     switch (s.kind) {
       case Stmt::Kind::Decl: {
         if (s.var == nullptr) { err(s.loc, "a declaration without a variable"); return; }
+        if (s.var->type.is_struct() && s.expr != nullptr)
+          err(s.loc, "a struct local '" + s.var->name + "' declared with an initializer value (decision 0043: initializers are leaf stores)");
         if (s.expr != nullptr) {  // no initializer: declared only (decision 0019)
           expr(*s.expr, Ctx::Body, false);
           if (s.var->type != s.expr->type)
@@ -630,6 +686,7 @@ class Checker {
         if (s.var == nullptr || s.expr == nullptr) { err(s.loc, "an assignment without a variable or a value"); return; }
         if (!owned(*s.var)) err(s.loc, "variable '" + s.var->name + "' does not belong to function '" + fn_->c_name + "'");
         else if (!visible(*s.var)) err(s.loc, "assignment to '" + s.var->name + "', which is not declared here");
+        if (s.var->type.is_struct()) err(s.loc, "an assignment of a struct value to '" + s.var->name + "' (decision 0043: copies are leaf stores)");
         expr(*s.expr, Ctx::Body, false);
         if (s.var->type != s.expr->type)
           err(s.expr->loc, "assignment to '" + s.var->name + "' of a " + s.expr->type.str() + " where " + s.var->type.str() + " is required");
@@ -800,6 +857,8 @@ class Checker {
         expr(*s.expr, Ctx::Body, false);
         shared_addrs_.erase(s.addr);
         if (!s.addr->type.is_ptr()) err(s.addr->loc, "a store through a " + s.addr->type.str() + ", not a pointer");
+        else if (s.addr->type.pointee != nullptr && s.addr->type.pointee->is_struct())
+          err(s.loc, "a store of a struct value through a " + s.addr->type.str() + " (decision 0043: a struct is written leaf by leaf)");
         else if (accepted_pointer(s.addr->type) && s.expr->type != *s.addr->type.pointee)
           err(s.expr->loc, "a store of a " + s.expr->type.str() + " through a " + s.addr->type.str() + " (the pointee is " + s.addr->type.pointee->str() + ")");
         break;
@@ -836,6 +895,8 @@ class Checker {
       else if (!void_ok) err(e.loc, "the value of a void call is used");
     } else if (e.type.is_ptr()) {
       if (!accepted_pointer(e.type)) err(e.loc, "an expression of type " + e.type.str() + ", " + pointer_reason(e.type));
+    } else if (e.type.is_struct()) {
+      err(e.loc, "an expression of struct type " + e.type.str() + " (decision 0043: VIR holds no struct value; a struct is reached through MemberAddr places)");
     } else if (!value_type(e.type)) {
       err(e.loc, "an expression of an unsupported type");
     }
@@ -845,6 +906,8 @@ class Checker {
         err(e.loc, "a pointer (or a variable whose address is taken) in an invariant, a measure, a constant or a case value (decision 0032 item 10)");
       else if (contract && e.kind == Expr::Kind::AddrOf)
         err(e.loc, "an address in a contract (decision 0037 item 5: a contract names a pointer parameter, never `&x`)");
+      else if (contract && e.kind == Expr::Kind::MemberAddr && ok_members_.count(&e) == 0)
+        err(e.loc, "the address of a member in a contract outside the place of a read or of an atom (decision 0043 item 9: `p->x`, `owns(p->x)`)");
       else if (contract && e.kind == Expr::Kind::GlobalAddr && e.global != nullptr && e.global->owner != nullptr && ok_globals_.count(&e) == 0)
         err(e.loc, "the address of the `static` local '" + e.global->c_name + "' in a contract (its name is not in scope there, decision 0041 item 12)");
     }
@@ -918,8 +981,8 @@ class Checker {
       case Expr::Kind::AddrOf:
         if (e.var == nullptr || !owned(*e.var) || !visible(*e.var)) { err(e.loc, "the address of a variable that is not declared here"); break; }
         if (!e.var->address_taken) err(e.loc, "internal: the address of '" + e.var->name + "', which is not marked address-taken (decision 0032 item 4)");
-        if (!scalar_type(e.var->type) && !accepted_pointer(e.var->type))
-          err(e.loc, "the address of '" + e.var->name + "', whose type " + e.var->type.str() + " is not a bool, an integer or a pointer to one");
+        if (!scalar_type(e.var->type) && !accepted_pointer(e.var->type) && !(e.var->type.is_struct() && structs_.count(e.var->type.struct_type) != 0))
+          err(e.loc, "the address of '" + e.var->name + "', whose type " + e.var->type.str() + " is not a bool, an integer, a struct or a pointer to one");
         else if (!e.type.is_ptr() || e.type.pointee == nullptr || *e.type.pointee != e.var->type) err(e.loc, "the address of '" + e.var->name + "' has the wrong type");
         break;
       case Expr::Kind::GlobalAddr: {
@@ -936,7 +999,7 @@ class Checker {
         break;
       }
       case Expr::Kind::Deref:
-        if (e.a != nullptr && e.a->kind == Expr::Kind::GlobalAddr && (ctx == Ctx::Requires || ctx == Ctx::Ensures)) ok_globals_.insert(e.a);  // the read of `g`
+        if (ctx == Ctx::Requires || ctx == Ctx::Ensures) mark_contract_place(e.a);  // the read of `g`, of `p->x` (decision 0043)
         if (e.a != nullptr && shared_addrs_.count(e.a) != 0) {  // the address of the enclosing store, already checked (decision 0039 item 5)
           if (!e.a->type.is_ptr()) err(e.loc, "a dereference of a " + e.a->type.str() + ", not a pointer");
           else if (e.a->type.pointee == nullptr || e.type != *e.a->type.pointee) err(e.loc, "a dereference whose type is not the pointee's");
@@ -945,11 +1008,16 @@ class Checker {
         if (!sub(e.a)) break;
         if (!e.a->type.is_ptr()) err(e.loc, "a dereference of a " + e.a->type.str() + ", not a pointer");
         else if (e.a->type.pointee == nullptr || e.type != *e.a->type.pointee) err(e.loc, "a dereference whose type is not the pointee's");
-        if ((ctx == Ctx::Requires || ctx == Ctx::Ensures) && e.a->kind != Expr::Kind::Formal && e.a->kind != Expr::Kind::GlobalAddr &&
-            !(ctx == Ctx::Ensures && e.a->kind == Expr::Kind::Result))
-          err(e.loc, "a dereference in a contract of something other than a pointer parameter, a global or, in an `ensures`, the result (decisions 0037 item 5, 0040 items 4 and 6, 0041 item 7)");
-        else if ((ctx == Ctx::Requires || ctx == Ctx::Ensures) && e.a->kind == Expr::Kind::GlobalAddr && e.a->global != nullptr && e.a->global->owner != nullptr)
-          err(e.loc, "a read of the `static` local '" + e.a->global->c_name + "' in a contract (its name is not in scope there, decision 0041 item 12)");
+        {
+          // In a contract the place is `*p`, `*result`, `g` or, decision 0043 item 9, a member of one of them (`p->x`, `r->t.y`): strip the MemberAddrs.
+          const Expr* root = member_root(e.a);
+          if ((ctx == Ctx::Requires || ctx == Ctx::Ensures) && root->kind != Expr::Kind::Formal && root->kind != Expr::Kind::GlobalAddr &&
+              !(ctx == Ctx::Ensures && root->kind == Expr::Kind::Result))
+            err(e.loc, "a dereference in a contract of something other than a pointer parameter, a global or, in an `ensures`, the result, or a member of one of them "
+                       "(decisions 0037 item 5, 0040 items 4 and 6, 0041 item 7, 0043 item 9)");
+          else if ((ctx == Ctx::Requires || ctx == Ctx::Ensures) && root->kind == Expr::Kind::GlobalAddr && root->global != nullptr && root->global->owner != nullptr)
+            err(e.loc, "a read of the `static` local '" + root->global->c_name + "' in a contract (its name is not in scope there, decision 0041 item 12)");
+        }
         break;
       case Expr::Kind::Atom:
         // Decision 0037 item 5: owns(*p), reads(*p) and live(p) of a pointer parameter p, in a contract, outside `old`.  Where it may
@@ -962,24 +1030,54 @@ class Checker {
         }
         if (old_depth_ > 0) { err(e.loc, "a permission atom under `old`"); break; }
         if (!e.type.is_bool()) err(e.loc, "a permission atom is not a bool");
-        if (e.a != nullptr && e.a->kind == Expr::Kind::GlobalAddr && !in_invariant_) ok_globals_.insert(e.a);  // `owns(g)` / `reads(g)` of a contract
+        if (e.a != nullptr && !in_invariant_) mark_contract_place(e.a);  // `owns(g)` / `reads(g)` / `owns(p->x)` of a contract
         if (!sub(e.a)) break;
-        if (e.implicit_atom && !(e.atom == AtomKind::Owns && e.a->kind == Expr::Kind::GlobalAddr && e.a->global != nullptr && e.a->global->owner != nullptr))
-          err(e.loc, "an implicit atom that is not the `owns` of a `static` local (decision 0041 item 12)");
-        if (in_invariant_ && e.a->kind == Expr::Kind::GlobalAddr) {
-          err(e.loc, "a permission atom on a global in a loop invariant (decision 0041 item 10: the globals the function holds are in every loop's invariant already)");
+        {
+          // The place of the atom (decision 0043 item 9): the pointer `a` itself (`owns(*p)`, `live(p)`) or a member address under it (`owns(p->x)`).
+          const Expr* root = member_root(e.a);
+          const bool member = root != e.a;
+          if (e.implicit_atom && !(e.atom == AtomKind::Owns && !member && e.a->kind == Expr::Kind::GlobalAddr && e.a->global != nullptr && e.a->global->owner != nullptr))
+            err(e.loc, "an implicit atom that is not the `owns` of a `static` local (decision 0041 item 12)");
+          if (in_invariant_ && root->kind == Expr::Kind::GlobalAddr) {
+            err(e.loc, "a permission atom on a global in a loop invariant (decision 0041 item 10: the globals the function holds are in every loop's invariant already)");
+            break;
+          }
+          if (in_invariant_ ? e.a->kind != Expr::Kind::Local : (root->kind != Expr::Kind::Formal && root->kind != Expr::Kind::GlobalAddr))
+            err(e.loc, in_invariant_ ? "a permission atom of an invariant of something other than a pointer variable (decision 0040 item 5)"
+                                     : "a permission atom of something other than a pointer parameter or a global, or a member of one (decisions 0037 item 5, 0041 item 7, 0043 item 9)");
+          else if (!accepted_pointer(e.a->type))
+            err(e.loc, "a permission atom of something that is not a pointer to a bool, an integer, a struct or a pointer");
+          else if (member && e.atom == AtomKind::Live)
+            err(e.loc, "`live` of the address of a member (decision 0043 item 9: `live(p)` names the pointer)");
+          else if (root->kind == Expr::Kind::GlobalAddr && e.atom == AtomKind::Live)
+            err(e.loc, "`live` of the address of a global (decision 0041 item 7: a global's liveness is never in doubt)");
+          else if (root->kind == Expr::Kind::GlobalAddr && root->global != nullptr && root->global->owner != nullptr && !e.implicit_atom)
+            err(e.loc, "a permission atom the user wrote on the `static` local '" + root->global->c_name + "' (its name is not in scope in a contract, decision 0041 item 12)");
+        }
+        break;
+      case Expr::Kind::MemberAddr: {
+        // Decision 0043 item 5: `&a->m` of a pointer `a` to a struct and a member index of it; the node is a place or a value by its context
+        // (Expr::Kind::MemberAddr), and in a contract only a place rooted at a parameter, a global or, in an `ensures`, the result.
+        if (!sub(e.a)) break;
+        const Type& at = e.a->type;
+        if (!at.is_ptr() || at.pointee == nullptr || !at.pointee->is_struct() || at.pointee->struct_type == nullptr) {
+          err(e.loc, "the address of a member of a " + at.str() + ", not a pointer to a struct");
           break;
         }
-        if (in_invariant_ ? e.a->kind != Expr::Kind::Local : (e.a->kind != Expr::Kind::Formal && e.a->kind != Expr::Kind::GlobalAddr))
-          err(e.loc, in_invariant_ ? "a permission atom of an invariant of something other than a pointer variable (decision 0040 item 5)"
-                                   : "a permission atom of something other than a pointer parameter or a global (decisions 0037 item 5, 0041 item 7)");
-        else if (!accepted_pointer(e.a->type))
-          err(e.loc, "a permission atom of something that is not a pointer to a bool, an integer or a pointer");
-        else if (e.a->kind == Expr::Kind::GlobalAddr && e.atom == AtomKind::Live)
-          err(e.loc, "`live` of the address of a global (decision 0041 item 7: a global's liveness is never in doubt)");
-        else if (e.a->kind == Expr::Kind::GlobalAddr && e.a->global != nullptr && e.a->global->owner != nullptr && !e.implicit_atom)
-          err(e.loc, "a permission atom the user wrote on the `static` local '" + e.a->global->c_name + "' (its name is not in scope in a contract, decision 0041 item 12)");
+        const StructType& st = *at.pointee->struct_type;
+        if (e.index < 0 || static_cast<size_t>(e.index) >= st.members.size()) {
+          err(e.loc, "the address of member " + std::to_string(e.index) + " of " + st.c_name + ", which has " + std::to_string(st.members.size()) + " members");
+          break;
+        }
+        if (!e.type.is_ptr() || e.type.pointee == nullptr || *e.type.pointee != st.members[static_cast<size_t>(e.index)].type)
+          err(e.loc, "the address of the member '" + st.members[static_cast<size_t>(e.index)].name + "' of " + st.c_name + " has the wrong type");
+        if (ctx == Ctx::Requires || ctx == Ctx::Ensures) {
+          const Expr* root = member_root(&e);
+          if (root->kind != Expr::Kind::Formal && root->kind != Expr::Kind::GlobalAddr && !(ctx == Ctx::Ensures && root->kind == Expr::Kind::Result))
+            err(e.loc, "a member address in a contract that is not rooted at a pointer parameter, a global or, in an `ensures`, the result (decision 0043 item 9)");
+        }
         break;
+      }
       case Expr::Kind::Convert:
         if (!sub(e.a)) break;
         if (e.a->type.is_ptr() || e.type.is_ptr()) { err(e.loc, "a conversion between " + e.a->type.str() + " and " + e.type.str() + " (decision 0032 item 3)"); break; }
@@ -1004,6 +1102,16 @@ class Checker {
       case Expr::Kind::StoreE: store_value(e, ctx); break;
       case Expr::Kind::Comma: comma(e, ctx); break;
     }
+  }
+
+  // In a contract: the place expression `a` of a Deref or an Atom, a chain of MemberAddr nodes over a root, is allowed (decision 0043 item 9); a
+  // GlobalAddr root is the read of `g` (decision 0041 item 7).
+  void mark_contract_place(const Expr* a) {
+    while (a != nullptr && a->kind == Expr::Kind::MemberAddr) {
+      ok_members_.insert(a);
+      a = a->a;
+    }
+    if (a != nullptr && a->kind == Expr::Kind::GlobalAddr) ok_globals_.insert(a);
   }
 
   static bool effects_allowed(Ctx ctx) { return ctx == Ctx::Body || ctx == Ctx::LoopCond; }
@@ -1055,6 +1163,10 @@ class Checker {
     shared_addrs_.erase(e.c);
     if (!e.c->type.is_ptr()) {
       err(e.c->loc, "a store through a " + e.c->type.str() + ", not a pointer");
+      return;
+    }
+    if (e.c->type.pointee != nullptr && e.c->type.pointee->is_struct()) {
+      err(e.loc, "a write of a struct value through a " + e.c->type.str() + " used as a value (decision 0043: a struct is written leaf by leaf)");
       return;
     }
     if (!accepted_pointer(e.c->type) || e.c->type.pointee == nullptr) return;
@@ -1213,6 +1325,8 @@ class Checker {
   std::set<const Expr*> seen_effects_;  // the AssignE, StoreE, Comma and Call nodes met in the current function (each may be reachable once)
   bool in_invariant_ = false;  // checking a loop invariant clause: a permission atom of a pointer variable is accepted (decision 0040 item 5)
   std::set<const Expr*> ok_globals_;  // the GlobalAddr nodes that stand under a Deref or an Atom of a contract: where a `static` local's address may appear (its implicit atom; decision 0041 items 7, 12)
+  std::set<const Expr*> ok_members_;  // the MemberAddr nodes that stand in the place of a Deref or an Atom of a contract (decision 0043 item 9)
+  std::unordered_set<const StructType*> structs_;  // the program's struct types
   std::set<const Expr*> shared_addrs_;  // the address nodes of the stores being checked: a compound store's Deref shares its address (0039 item 5)
   struct Target {
     int id;
@@ -1357,9 +1471,28 @@ class Sequencer {
   // decode it through `gnames_`, which `expr` fills when it meets the GlobalAddr (every access to the object contains one).
   static constexpr int kGlobalKeyBase = 1 << 28;
 
+  // A MEMBER object (decision 0043 item 12): a leaf or a nested struct of a struct place, keyed by its base object's key (`s` for the struct local, `*v` for
+  // the pointer variable `v`, ...) and the member path, so `s.x` and `s.y` are two objects and `s.x` twice is one.  Keys are interned above every other
+  // kind (`kMemberKeyBase + n`, n the order of first sight); `mnames_` spells them.  An address with no object (any other root) has none: lowering's
+  // path-precise check covers it.
+  static constexpr int kMemberKeyBase = 1 << 29;
+  int member_key(int base, const std::vector<int>& path, const std::string& text) {
+    const auto it = member_keys_.find({base, path});
+    if (it != member_keys_.end()) return it->second;
+    const int key = kMemberKeyBase + static_cast<int>(member_keys_.size());
+    member_keys_.emplace(std::make_pair(base, path), key);
+    mnames_[key] = text;
+    return key;
+  }
+
   void report(const Expr* at, int var_id) {
     if (!reported_.insert({at, var_id}).second) return;
     const auto& ls = f_.locals();
+    if (var_id >= kMemberKeyBase) {
+      const auto m = mnames_.find(var_id);
+      out_.push_back(SequenceProblem{at, m != mnames_.end() ? m->second : "?"});
+      return;
+    }
     if (var_id >= kGlobalKeyBase) {
       const auto g = gnames_.find(var_id);
       out_.push_back(SequenceProblem{at, g != gnames_.end() ? g->second : "?"});
@@ -1380,7 +1513,20 @@ class Sequencer {
   // The object a place `*addr` is: `x` for `&x`, `*v` for a pointer variable `v` as written (decision 0039 item 3, audit S9), and `**v`, `***v`, ... when
   // the address is itself a read through `v` (`addr` = `*v`, `**v`: decision 0040, P62 A8); none for any other address (the path-precise check of
   // lowering covers it).
-  static bool object_of(const Expr* addr, int* key) {
+  bool object_of(const Expr* addr, int* key) {
+    // A member place `&s.x`, `&p->x`, `&s.t.x`: the base object of the root (as below, for the address the MemberAddrs stand on) and the member path.
+    std::vector<int> path;
+    const Expr* root = member_root(addr, &path);
+    if (root != addr) {
+      int base = 0;
+      if (path.empty() || !object_of_root(root, &base)) return false;
+      *key = member_key(base, path, place_text(*addr));
+      return true;
+    }
+    return object_of_root(addr, key);
+  }
+
+  static bool object_of_root(const Expr* addr, int* key) {
     int depth = 0;  // the reads through the variable that the address is made of
     for (;;) {
       while (addr != nullptr && addr->kind == Expr::Kind::ReportAt) addr = addr->a;
@@ -1432,6 +1578,9 @@ class Sequencer {
     switch (e->kind) {
       case Expr::Kind::Const: case Expr::Kind::Formal: case Expr::Kind::Result: case Expr::Kind::Atom: break;  // an atom is contract-only
       case Expr::Kind::Null: case Expr::Kind::AddrOf: break;  // an address is no access to the object (decision 0032)
+      case Expr::Kind::MemberAddr:  // an address of a member is no access to it either; the operand's own reads and writes count (`(*pp)->x`, `(p = q)->x`)
+        absorb(out, expr(e->a), false);
+        break;
       case Expr::Kind::GlobalAddr:
         if (e->global != nullptr) gnames_[kGlobalKeyBase + e->global->id] = e->global->c_name;
         break;
@@ -1579,6 +1728,8 @@ class Sequencer {
   std::set<const Expr*> shared_;     // the address nodes of the stores being walked: their Deref reads count the address once
   std::vector<SequenceProblem> out_;
   std::map<int, std::string> gnames_;  // a global's object key -> its name
+  std::map<std::pair<int, std::vector<int>>, int> member_keys_;  // (base object key, member path) -> the member object's key
+  std::map<int, std::string> mnames_;                           // a member object's key -> its spelling (`s.x`, `p->t.y`)
   std::set<std::pair<const Expr*, int>> reported_;
 };
 
