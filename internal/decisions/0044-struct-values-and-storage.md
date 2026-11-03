@@ -6,7 +6,7 @@
   `const` literal may share its object, item 7; should-fix S1 the literal's block for `for`/`switch`/`else`, S2 literals used
   as lvalues, S3 element writes through aliases, S4 side-effect bases beyond arguments, S5 item 12's argument, S6 the
   rejections of item 15, S7 the lint's `Addr` leaf, S8 item 11's wording; notes N1–N7; all taken; `build/m4.5c2a/audit1.md`);
-  S34 (Silicon) pending. During the session the owner answered question 101 (two VIR self-test rejection cases retired for
+  and S34 (Silicon: PASS for (a)–(f), every vacuity clone failing; H8 needs no fact, item 8). During the session the owner answered question 101 (two VIR self-test rejection cases retired for
   lowering cases, item 18). Owner decisions (M4.5c2a
   planning, 2026-11-02; plan `.claude/plans/m4-5c2a-struct-values.md`; handoff questions 95–100, each the
   recommendation):
@@ -180,11 +180,12 @@ results, `f().x`, temporaries (`S{…}`, `S()`, compound literals), and struct o
      block) and 0041 item 7's rule of one atom of a kind per place.
    - **Loops:** a held struct global (every global in `main`) gives every leaf as an automatic place (0041 item 10, 0043
      item 11), one liveness row per root.
-   - **Hazard H8 (completeness, not soundness):** the axioms cannot prove `member(…loc(GB_g(), 0)…) != GB_h()` for two
-     globals. No rule assumes it (the shortcuts that treat two globals as two blocks only skip checks and facts). S34 (d)
-     decides whether Silicon separates such cells from its chunks alone; if it cannot, the facts gain
-     `parent_of(GB_h()) == null` for every global block in a unit with a struct global (true in 0028 item 2's term model:
-     a `GB_` block is not a member block).
+   - **Hazard H8, closed by S34 (d):** two globals' blocks are told apart without a new fact. If a member block of
+     `g`'s slot were `GB_h()`, `member_lv` would give it `g`'s liveness cell `lvloc(GB_g()) == loc(GB_g(), -2)` (0041
+     item 4's fact), while `h`'s fact gives `lvloc(GB_h()) == loc(GB_h(), -2)`; `loc_inv` then makes `GB_g() == GB_h()`,
+     which the `unique` functions refute. S34's loop over a scalar and a struct global and its `&g.x != &h` comparison
+     verify with today's facts plus item 8's member lengths. No rule assumes the distinctness anyway (the shortcuts that
+     treat two globals as two blocks only skip checks and facts).
 9. **`static` struct locals** (amends 0041 item 12). A `static` local of a verified structure is a struct global whose
    name only its function sees: its initializer is item 8's, run once before `main`, and question 80's implicit `owns`
    in its function's and every transitive caller's contract is a struct atom that expands per leaf. A `static const`
@@ -214,7 +215,7 @@ results, `f().x`, temporaries (`S{…}`, `S()`, compound literals), and struct o
       grammar per leaf, exactly one `lv` on `lvloc(GB_g())`, nothing else; an `Addr` value only on a pointer leaf whose
       field names the target's own type (`ptr_struct_<n>_<tag>` of the target struct, `ptr_int` of an `int` target).
     - The facts row is exactly the scalar facts, the member lengths of the unit's struct globals and their slot pairs (and
-      H8's `parent_of` facts, if S34 (d) needs them, exactly one per global block).
+      nothing else; S34 (d) showed H8 needs no `parent_of` fact).
     - `lint_perm_locals` sees every target of a multi-target call (closing a standing gap).
 14. **Categories:** none new. Messages name leaves in source terms: "passes `s`, whose member `s.y` may not have a
     value" (`uninitialized` at a call), "returns `s`, whose member `s.y` …" (at a return), `r.x`, `g.t.y`.
@@ -229,7 +230,9 @@ results, `f().x`, temporaries (`S{…}`, `S()`, compound literals), and struct o
     only `h2(s, s = t)` warns; literal assignments, partly initialized by-value structs and struct-valued calls are
     silent; C++ `&(S){…}` is an error in both compilers); (P69) the invariant heap-read gap (44 programs, 90 runs, no wrong
     verdict, no exit 3); (S34) Silicon on multi-result methods, the by-value entry copy, struct global facts and rows,
-    H8, `static` struct locals and hidden literal objects.
+    H8, `static` struct locals and hidden literal objects (31 fixtures, PASS; two fixture expectations corrected by hand
+    and reported: a twin's continuation errors, and the H8 control, which verified without the `parent_of` fact and is now
+    a positive).
 17. **Tests and documentation.** Must-verify and must-fail pairs for every accepted form in both modes (`.c` files run as
     C23 and C++20 where valid), including the ports of VeriFast's `tests/call_in_struct_init.c` and
     `examples/struct_assignment.c` (`test1`–`test6`); every rejection of item 15. Docs: Memory and ownership

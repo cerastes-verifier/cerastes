@@ -1,0 +1,208 @@
+// expect: error assert:assertion.false @ L170
+// expect: error assert:assertion.false @ L187
+// expect: error assert:assertion.false @ L197
+// S34 (a) twin of s34_a_ptr_result.vpr: the ensures relates the result only to NULL (`res_m0 != null`): in the branch where the result is neither cell the first use of it, the store of the call's pointer into `t.p`, fails its liveness assert (`lifetime`; hand-edited after the Silicon run: the liveness failure at L170 is the cause, the permission failure of `*x` at L187 and the unprovable check at L197 are its consequences in the same branch, so all three are expected; the dereference's permission would fail next).
+// Hand-written in the emitted style (see the positive fixture).
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0043 items 3, 9; record 0044 items 3-5, 8): WF; a leaf's range; a leaf at allocation (uninitialized); a leaf owned (full permission, flag set, range); one liveness fraction
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNG(c) ((-2147483648) <= c.v_int && c.v_int <= 2147483647)
+define RNGV(v) ((-2147483648) <= v && v <= 2147483647)
+define LEAFU(c) (acc(c.v_int) && acc(c.d_int) && !c.d_int)
+define LEAF(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNG(c))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+// struct S { int x; int y; }: member 0 is x, member 1 is y; struct T { struct S s; int z; }: member 0 is the slot of the nested S, member 1 is z
+define MX(s) loc(member(s, 0), 0)
+define MY(s) loc(member(s, 1), 0)
+define TS(t) loc(member(t, 0), 0)
+define TZ(t) loc(member(t, 1), 0)
+define SLEN(s) (len(member(s, 0)) == 1 && len(member(s, 1)) == 1)
+define SOWN(s) (SLEN(s) && LEAF(MX(s)) && LEAF(MY(s)))
+define TLEN(t) (len(member(t, 0)) == 1 && len(member(t, 1)) == 1)
+define TOWN(t) (TLEN(t) && SOWN(TS(t)) && LEAF(TZ(t)))
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+define OWNI(p, a) (ROOT(p) && LEAF(p) && LVF(p, a))
+
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_int() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(r.v_int) && acc(r.d_int) && !r.d_int && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract allocation of a struct P local (struct P { int *p; int v; }): member 0 is a pointer leaf (the fields of int *), member 1 an int leaf; both uninitialized with full permission; the liveness token is the root block's
+method alloc_struct_0_P() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures len(member(r, 0)) == 1 && acc(loc(member(r, 0), 0).v_ptr_int) && acc(loc(member(r, 0), 0).d_ptr_int) && !loc(member(r, 0), 0).d_ptr_int
+  ensures len(member(r, 1)) == 1 && acc(loc(member(r, 1), 0).v_int) && acc(loc(member(r, 1), 0).d_int) && !loc(member(r, 1), 0).d_int
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// struct P pick(int *pa, int *pb) requires(owns(*pa) && owns(*pb)) ensures(r, owns(*pa) && owns(*pb) && (r.p == pa || r.p == pb) && r.v == 0) { struct P s; s.p = pa; s.v = 0; return s; }   (a pointer leaf: ensures WF(res_m0), the caller case-splits, 0037 item 3)
+method f_pick__0(pa: Ref, pb: Ref, a_pa: Perm, a_pb: Perm) returns (res_m0: Ref, res_m1: Int)
+  requires none < a_pa && a_pa < write && none < a_pb && a_pb < write
+  requires WF(pa) && WF(pb)
+  requires OWNI(pa, a_pa) && OWNI(pb, a_pb)
+  ensures WF(res_m0) && RNGV(res_m1)
+  ensures OWNI(pa, a_pa) && OWNI(pb, a_pb) && res_m0 != null && res_m1 == 0
+  decreases
+{
+  var s: Ref
+  if (lvloc(block_of(pa)) == lvloc(block_of(pb))) { } // case split on the liveness cells (0028 item 8)
+  s := alloc_struct_0_P()
+  assert pa != null ==> perm(lvloc(block_of(pa)).lv) > none
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_ptr_int) == write && perm(loc(member(s, 0), 0).d_ptr_int) == write
+  loc(member(s, 0), 0).v_ptr_int := pa
+  loc(member(s, 0), 0).d_ptr_int := true
+  assert loc(member(s, 1), 0) != null
+  assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+  loc(member(s, 1), 0).v_int := 0
+  loc(member(s, 1), 0).d_int := true
+  // return s;: every leaf is read (permission, flag, and a pointer leaf's liveness), assigned to its result, then the scope exits
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_ptr_int) > none && perm(loc(member(s, 0), 0).d_ptr_int) > none
+  assert loc(member(s, 0), 0).d_ptr_int
+  res_m0 := loc(member(s, 0), 0).v_ptr_int
+  assert res_m0 != null ==> perm(lvloc(block_of(res_m0)).lv) > none
+  assert loc(member(s, 1), 0) != null
+  assert perm(loc(member(s, 1), 0).v_int) > none && perm(loc(member(s, 1), 0).d_int) > none
+  assert loc(member(s, 1), 0).d_int
+  res_m1 := loc(member(s, 1), 0).v_int
+  assert perm(loc(member(s, 0), 0).v_ptr_int) == write && perm(loc(member(s, 0), 0).d_ptr_int) == write
+  assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+  assert perm(lvloc(block_of(s)).lv) == write
+  exhale acc(loc(member(s, 0), 0).v_ptr_int) && acc(loc(member(s, 0), 0).d_ptr_int) && acc(loc(member(s, 1), 0).v_int) && acc(loc(member(s, 1), 0).d_int) && acc(lvloc(block_of(s)).lv)
+  assert WF(res_m0)
+  assert RNGV(res_m1)
+  assert pa != null
+  assert WF(pa)
+  assert offset_of(pa) < len(block_of(pa))
+  assert perm(pa.v_int) == write && perm(pa.d_int) == write
+  assert pa.d_int
+  assert RNG(pa)
+  assert perm(lvloc(block_of(pa)).lv) >= a_pa
+  assert pb != null
+  assert WF(pb)
+  assert offset_of(pb) < len(block_of(pb))
+  assert perm(pb.v_int) == write && perm(pb.d_int) == write
+  assert pb.d_int
+  assert RNG(pb)
+  assert perm(lvloc(block_of(pb)).lv) >= a_pb
+  assert res_m0 != null
+  assert res_m1 == 0
+}
+
+// void use_pick(void) { int c1 = 1, c2 = 2; struct P t = pick(&c1, &c2); int *x = t.p; *x = 9; check(c1 == 9 || c2 == 9); }
+method f_use_pick__1()
+  decreases
+{
+  var c1: Ref
+  var c2: Ref
+  var t: Ref
+  var x: Ref
+  var t__1_m0: Ref
+  var t__1_m1: Int
+  c1 := alloc_int()
+  c2 := alloc_int()
+  t := alloc_struct_0_P()
+  // int c1 = 1, c2 = 2;
+  assert c1 != null
+  assert perm(c1.v_int) == write && perm(c1.d_int) == write
+  c1.v_int := 1
+  c1.d_int := true
+  assert c2 != null
+  assert perm(c2.v_int) == write && perm(c2.d_int) == write
+  c2.v_int := 2
+  c2.d_int := true
+  // struct P t = pick(&c1, &c2);
+  assert perm(lvloc(block_of(c1)).lv) > none
+  assert WF(c1)
+  assert c1 != null
+  assert WF(c1)
+  assert offset_of(c1) < len(block_of(c1))
+  assert perm(c1.v_int) == write && perm(c1.d_int) == write
+  assert c1.d_int
+  assert RNG(c1)
+  assert perm(lvloc(block_of(c1)).lv) > none
+  assert none < (perm(lvloc(block_of(c1)).lv) / 2) && (perm(lvloc(block_of(c1)).lv) / 2) < write
+  assert perm(lvloc(block_of(c1)).lv) >= (perm(lvloc(block_of(c1)).lv) / 2)
+  assert perm(lvloc(block_of(c2)).lv) > none
+  assert WF(c2)
+  assert c2 != null
+  assert WF(c2)
+  assert offset_of(c2) < len(block_of(c2))
+  assert perm(c2.v_int) == write && perm(c2.d_int) == write
+  assert c2.d_int
+  assert RNG(c2)
+  assert perm(lvloc(block_of(c2)).lv) > none
+  assert none < (perm(lvloc(block_of(c2)).lv) / 2) && (perm(lvloc(block_of(c2)).lv) / 2) < write
+  assert perm(lvloc(block_of(c2)).lv) >= (perm(lvloc(block_of(c2)).lv) / 2)
+  t__1_m0, t__1_m1 := f_pick__0(c1, c2, (perm(lvloc(block_of(c1)).lv) / 2), (perm(lvloc(block_of(c2)).lv) / 2))
+  // the pointer result: the no-op case split on each int cell in scope (0037 item 3)
+  if (t__1_m0 == c1) { }
+  if (t__1_m0 == c2) { }
+  assert t__1_m0 != null ==> perm(lvloc(block_of(t__1_m0)).lv) > none // <- fails
+  assert loc(member(t, 0), 0) != null
+  assert perm(loc(member(t, 0), 0).v_ptr_int) == write && perm(loc(member(t, 0), 0).d_ptr_int) == write
+  loc(member(t, 0), 0).v_ptr_int := t__1_m0
+  loc(member(t, 0), 0).d_ptr_int := true
+  assert loc(member(t, 1), 0) != null
+  assert perm(loc(member(t, 1), 0).v_int) == write && perm(loc(member(t, 1), 0).d_int) == write
+  loc(member(t, 1), 0).v_int := t__1_m1
+  loc(member(t, 1), 0).d_int := true
+  // int *x = t.p;
+  assert loc(member(t, 0), 0) != null
+  assert perm(loc(member(t, 0), 0).v_ptr_int) > none && perm(loc(member(t, 0), 0).d_ptr_int) > none
+  assert loc(member(t, 0), 0).d_ptr_int
+  x := loc(member(t, 0), 0).v_ptr_int
+  assert x != null ==> perm(lvloc(block_of(x)).lv) > none
+  // *x = 9;
+  assert x != null
+  assert perm(x.v_int) == write && perm(x.d_int) == write
+  x.v_int := 9
+  x.d_int := true
+  // check(c1 == 9 || c2 == 9)
+  assert c1 != null
+  assert perm(c1.v_int) > none && perm(c1.d_int) > none
+  assert c1.d_int
+  assert c2 != null
+  assert perm(c2.v_int) > none && perm(c2.d_int) > none
+  assert c2.d_int
+  assert c1.v_int == 9 || c2.v_int == 9
+  assert perm(loc(member(t, 0), 0).v_ptr_int) == write && perm(loc(member(t, 0), 0).d_ptr_int) == write
+  assert perm(loc(member(t, 1), 0).v_int) == write && perm(loc(member(t, 1), 0).d_int) == write
+  assert perm(lvloc(block_of(t)).lv) == write
+  exhale acc(loc(member(t, 0), 0).v_ptr_int) && acc(loc(member(t, 0), 0).d_ptr_int) && acc(loc(member(t, 1), 0).v_int) && acc(loc(member(t, 1), 0).d_int) && acc(lvloc(block_of(t)).lv)
+  assert perm(c2.v_int) == write && perm(c2.d_int) == write
+  assert perm(lvloc(block_of(c2)).lv) == write
+  exhale acc(c2.v_int) && acc(c2.d_int) && acc(lvloc(block_of(c2)).lv)
+  assert perm(c1.v_int) == write && perm(c1.d_int) == write
+  assert perm(lvloc(block_of(c1)).lv) == write
+  exhale acc(c1.v_int) && acc(c1.d_int) && acc(lvloc(block_of(c1)).lv)
+}

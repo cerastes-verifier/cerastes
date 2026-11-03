@@ -6866,3 +6866,258 @@ Evidence: `tests/viper-smoke/memory/s33_*.vpr` (22 files: a positive and a twin 
 - **(g) member-address `WF`:** `&p->y` = `loc(member(p, 1), 0)` passed to a callee with `requires WF(q)` and `owns(*q)` verifies when the caller's atom states `len(member(p, 1)) == 1`; with only `live(p)`, or the leaf permissions without the length facts, `WF(q)` fails — only its conjunct `offset_of(q) <= len(block_of(q))` (the others follow from `loc_inv`). So record 0043 item 8's `WF_S` carries the member lengths with every struct pointer (`live(p)` included).
 - **(h) vacuity:** each method cloned with `assert false` at its start and end, after each allocation and after each call: every one fails at its expected line (a 5, b 5, c 5, d 3, e 6, f 5, g 5 errors).
 - **Controls:** a wrong value in (a), (b), (c), (e), (f) fails exactly there; dropping the loop's `ds ==> flag` row in (d) fails the read after the loop.
+
+## M4.5c2a: struct values and struct storage (record 0044)
+
+### P67: the IL facts record 0044 relies on (by-value structs, struct results, compound literals, C++ temporaries, struct globals and `static` locals, measures) **PASS for 1-7 as IL facts; no stop condition of the plan (every by-value argument's leaves are visible, no C++ temporary is a constructor call, no literal element is lost); nine HAZARDS (H1-H9) the reader and the encoder must handle, five NOTEs**
+
+Evidence in `build/m4.5c2a/p67/` (not committed). Probes: `q1.c`/`q1x.cpp` (1), `q2.c`, `q2c.c`, `q2d.c`, `q2x.cpp` (2), `q3.c`, `q3x.cpp` (3), `q4.c`, `q4b.c`-`q4h.c`, `q4x.cpp` (4), `q5x.cpp` (5), `q6.c`, `q6b.c`, `q6x.cpp` (6), `q7.c` (7). Runner
+`run.sh <probe> [c23|c++20]` (`scripts/cerastes-fe.sh --c23|--c++20 --display_error_number --il_display`, run from the baseline worktree `m4.5c2a-base`,
+which equals the session's starting commit; outputs `out/<probe>.<mode>.{il,diag,sum}`), `ilsum.py` (P65's, extended with `temp_init[...]` and the
+dynamic-init flags `is_compound_literal`, `is_explicit_cast`, `has_temporary_lifetime`), `show.sh <sum>` (drops the type blocks), `gv.py <il> <probe>` (file-scope
+and `static` variables with `storage_class`, `init_kind`, linkage, `declared_type`, the constant or dynamic initializer, and every `local-static-variable-init` entry).
+Notation as P65: `op(operands){type<-orig_lvalue_type:flags@Lline:col}` with `L` is_lvalue, `g` compiler_generated, `u` result_is_not_used;
+`temp_init[<dynamic-init>]` for `enk_temp_init`. All runs 2026-11-02 with EDG fork `f0ed5525af`, both modes on every `.c` probe, `--c++20` only on `.cpp`.
+`il_def.h` lines are `third_party/edg/src/il_def.h` at that commit. Warnings (`#550-D`, `#177-D`) are left out of the excerpts. "Same in both modes" means the two
+`.sum` files were diffed after dropping `struct ` (C prints it) and the C++ `L` on assignment results; the diff of `q2.c` shows only `(void)` against `()` in
+function types, that of `q3.c` the same and the `return` shape of H1.
+
+#### Hazards (read first)
+
+- **H1. A C++ return of a class type has no `expr`: the value is in the statement's `return_dynamic_init`; C keeps `expr`.** `q3.c:10` `return s;` is, in C23,
+  `return: expr: var s{struct S<-same}`, in C++20 `return: return_dynamic_init: dik_expression: var s{S<-same:@L10:34}`; `q3.c:9` `return f();`
+  `expr: call(routine f){struct S}` against `return_dynamic_init: dik_expression: call(routine f){S}`; `q3.c:11` `return (struct S){1, {2}};` `expr: temp_init[dik_constant
+  is_braced_initializer is_compound_literal: aggr{...}]` against `return_dynamic_init: dik_constant is_braced_initializer is_compound_literal: aggr{...}` (no `temp_init`).
+  `q3x.cpp:4` `return {1, {2}};` is `return_dynamic_init: dik_expression is_braced_initializer: aggr{...}[S explicit_braces_on_aggregate]` (the expression is an `enk_constant`
+  aggregate), `:5` `return S{1, {2}};` `dik_constant is_braced_initializer is_explicit_cast: aggr{...}[S ... explicit_cast_applied]`, `:6` `return S();` `dik_zero is_explicit_cast`
+  (no aggregate), `:7` `return S{};` `dik_constant ... is_partially_initialized is_explicit_cast: aggr{}`. Scalar returns in C++ keep `expr` (`q1.c:9`). `il_def.h:16745`
+  `return_dynamic_init` is documented for "a copy constructor (C++ only)"; for these trivial classes it is non-NULL anyway and `expr` is NULL (`:16592-16597`). **The reader of `return` must
+  take `expr` or `return_dynamic_init` (its `dik_expression`/`dik_constant`/`dik_zero` forms), in C++ for every class-typed return.**
+- **H2. C++ folds compound-literal values that C leaves as `temp_init`.** `q4.c:4` `return (struct S){1, 2}.x;` is `dot_field(temp_init[...]{struct S:L}, field x)` in C23 and
+  `const[int 1]{int null_pointer_constant_ruled_out}` in C++20; `q4.c:14` `(int){5} + (int){6}` is `add(temp_init[...5], temp_init[...6])` in C23 and `dik_constant: const[int 11]` in C++20
+  (the whole initializer folded); `q4.c:10` `struct S s = (struct S){1, 2};` is `dik_expression: temp_init[dik_constant is_braced_initializer is_compound_literal: aggr]` in C23
+  and a plain `dik_constant: aggr{1, 2}[S explicit_braces_on_aggregate]` in C++20. The folds happen only when the whole expression is constant; `q4.c:9` `t = (struct S){1, 2};` keeps its
+  `temp_init` in both modes, `q4.c:5` `return (int){5};` too. **The reader must accept both shapes and the folded constant.**
+- **H3. EDG gives no diagnostic for `&(S){1, 2}` in C++ (or `&(int){5}`), and `return &(int){5};` is only warned in C.** `q4x.cpp:7` `S *p = &(S){1, 2};`, `:10` `int *p = &(int){5};`, `:11`
+  `h(&(S){1, 2});`: exit 0, no message beyond `#550-D`; the IL is the C shape (`address_of(temp_init[... is_compound_literal ...]{S:L})`). `q4.c:16` `return &(int){5};` warns `#1057-D returning
+  pointer to local temporary` in C23 and says nothing in C++20 (`q4.c.c++20.diag`). **The C++ rejection of item 7 (and R14's return rule) must be the encoder's own: nothing in the front end stops
+  either.**
+- **H4. A block-scope compound literal has no variable or scope entity; only its enclosing statement says where it lives, and C wraps its control statements in a compiler-generated block.**
+  Zero `a_variable` blocks of `is_compound_literal` in `q4.c` (both modes) and `q2c.c` (C23), by a scan of the `.il` files. In C23 every `if`, `while`, `do`, `for`, `switch` is
+  `block (compiler_generated) > <statement>` (`q4g.c:2-3` `if (a) {...}` and `while`, even without a literal; `q4h.c:1` `switch`; `q4g.c:5` `do ... while`, `:7` `for`); C++20 has no such block
+  (`q4g.c.c++20.sum` `k1` is `if` directly under the function block). A non-compound substatement of an `if` is a `block (compiler_generated)` in both modes (`q4g.c:4` `if (a) h(&(int){a});`).
+  A literal in the controlling expression is a child of the `if`/`while`/`for`/`switch` statement's `expr` (or the `for`'s `increment`), under C23's wrapping block (`q4.c:11` `c8`, `:12` `c9`, `:18` `c15`
+  `increment: assign(var i, add(indirect(address_of(temp_init[...]{int:L})), const 1))`). **The lifetime of the object of item 7 follows the nearest enclosing `stmk_block`; in C that
+  block is the generated one around the control statement, so the plan's `{Decl; If}` shape is what EDG already shows.**
+- **H5. Which compound literals EDG makes static variables.** `q4d.c:1` `int *gp = &(int){5};` (file scope): `gp` is `initk_static` with a `ck_address` constant, `abk_variable`, `address.offset 0`, whose `variable` is a
+  compiler-generated unnamed `a_variable` (`storage_class: sc_static`, `address_taken: TRUE`, `compiler_generated: TRUE`, `is_compound_literal: TRUE`, `init_kind: initk_static`, constant `(int)5`, `declared_type: NULL`),
+  both modes (`q4d.c.c23.il:2466-2481`, `a_variable.is_compound_literal` `il_def.h:11621`: "generated by the front end to hold a static compound literal"). `q4e.c:2` `struct S gs = (struct S){1, 2};` (file scope)
+  is accepted in both modes and is a plain `initk_static` aggregate `aggr{1, 2}[... explicit_braces_on_aggregate]` with no variable of its own, but its `ck_aggregate` constant carries `is_compound_literal: TRUE` (`q4e.c.c23.il`, raw field; `ilsum` does not print it; `a_constant.is_compound_literal` `il_def.h:4951`). No `a_variable` is made for a block-scope literal.
+- **H6. C and C++ differ in the zero fillers of a literal and in `S()`.** `q2c.c:4` `(struct S){.y = a}`: C23 `aggr{desig(.y), dyn(var a)}` (`x` absent), C++20 `aggr{const[int 0]{int}, desig(.y), dyn(var a)}` (P65 H1 again). `S()` is
+  `temp_init[dik_zero is_explicit_cast has_temporary_lifetime is_functional_notation_cast]` (`q2x.cpp:5`, `q5x.cpp:6`, `q3x.cpp:6`) with no aggregate at all, while the same `S()` as an initializer of a variable is
+  `dik_constant is_explicit_cast: aggr{const[int 0]{int null_pointer_constant_ruled_out}, const[int 0]{...}}[S explicit_cast_applied]` (`q5x.cpp:3`, global `q6x.cpp:8`); `S{}` is `aggr{}[... is_partially_initialized]`.
+  **A zero-fill must handle `dik_zero` as every leaf zero.**
+- **H7. The C++ `S{...}` of an initializer or a return is not a `temp_init`; of an assignment or an argument it is.** `q5x.cpp:2` `S s = S{1, 2};` is `dik_constant: aggr{1, 2}[S explicit_braces_on_aggregate implicit_cast
+  explicit_cast_applied]` (no `is_braced_initializer` on the dynamic-init); `q5x.cpp:5` `t = S{1, 2};`, `q2x.cpp:4` `g(S{1, 2});`, `q3x.cpp:14` `*p = S{1, {2}};` are `temp_init[dik_constant is_braced_initializer is_explicit_cast
+  has_temporary_lifetime: aggr{...}[S ... explicit_cast_applied] is_functional_notation_cast source.type=S]` (`dynamic_init` `il_def.h:15394-15408`, `has_temporary_lifetime` `:4093`, `is_explicit_cast` `:4145`,
+  `is_functional_notation_cast` `:14997`, `source.type` `:15410`), `g({1, 2});` (`q2x.cpp:8`) the same without `is_explicit_cast` and without a position (`{S:}`). A non-constant element stays `dyn(dik_expression: ...)` under
+  `dik_nonconstant_aggregate ... non_constant` (`q5x.cpp:8` `t = S{a, a++}`, `q2x.cpp:9`).
+- **H8. In C++ a `const` class source gets `eok_lvalue_adjust`; C carries the const only in `orig_lvalue_type`.** `q2d.c:3` `g(*p)` with `const struct S *p`: C23 `indirect(var p){struct S<-const struct S}`, C++20 `lvalue_adjust(indirect(var p){const S:L}){S<-same:g}`;
+  the same for `var s` of a `const` parameter (`q2d.c:5`) and for a copy initializer (`:4`). A non-const source has neither (`q2.c:6`). C++ prints a `const` by-value parameter's function type without the top-level `const` (`void (S)`), C keeps it (`void (const struct S)`).
+- **H9. `&h.x` as a global initializer is the same address as `&h` unless `subobject_path` is read.** `q6.c:12` `struct P g7 = {&h2.x, 1}` is `const[addr abk_variable h2 off=0]` with a non-NULL `subobject_path` and the constant's type `int *` with
+  `implicit_cast` (`q6.c:23` `int *gp16 = &h2.y;` is `off=4`, also `subobj`); `q6.c:11` `{&h, 1}` is `off=0` and no `subobject_path`. (`a_constant.address.subobject_path` `il_def.h:5219`.) Item 8 rejects `&h.x`: the test is `subobject_path != NULL` or the
+  constant's type against the variable's (P63 H3, H5), never `offset != 0`.
+
+#### 1. A by-value struct parameter in the body and in contracts: PASS (both modes identical)
+
+`q1.c:4-9` `int get(struct S s) CERASTES_REQUIRES(s.x > 0 && s.t.y == 1) CERASTES_ENSURES(r, r == s.x && r == cerastes_old(s.x) && cerastes_old(s.t.y) == 1) { s.x = s.x + 1; return s.t.z; }` (`struct S { int x; struct T t; int *q; }`).
+
+| Position | Tree |
+|---|---|
+| the parameter (`q1.c:4`) | `VAR s : struct S storage=sc_auto init_kind=initk_none is_parameter used referenced`; the routine type is `int (struct S)` |
+| body read (`q1.c:13-14`) | `dot_field(var s{struct S:L}, field x{int}){int<-same}`; `s.t.y` is `dot_field(dot_field(var s{struct S:L}, field t{struct T}){struct T:L}, field y{int}){int<-same}` (P65 item 3's shapes with `var s`) |
+| body write (`q1.c:8`) | `assign(dot_field(var s{struct S:L}, field x{int}){int:L}, add(dot_field(var s, field x){int<-same}, const[int 1]){int}){int:u}` |
+| `requires` (`q1.c:5`) | `land(gt(dot_field(param_ref 1 up=0{struct S:L}, field x){int<-same}, const 0), eq(dot_field(dot_field(param_ref 1 up=0{struct S:L}, field t{struct T}){struct T:L}, field y){int<-same}, const 1))` |
+| `ensures` (`q1.c:6`) | the result `r` is `param_ref 1 up=0{int<-same}`, the parameter `s` is `param_ref 1{struct S:L}` (`levels_up` 1: the `up=` is printed only when it is not 1; raw `q1.c.c23.il:3547` `param_ref.levels_up: 1`, the requires' `s` `:3153` `0`); `s.x` is `dot_field(param_ref 1{struct S:L}, field x{int}){int<-same}` |
+| `cerastes_old(s.x)`, C spelling | `indirect(cast(call(routine cerastes_old_, cast(address_of(dot_field(param_ref 1{struct S:L}, field x){int:L}){int *}){const void *:g}){const void *}){int *}){int<-same})`; `cerastes_old(s.t.y)` the same with the two-level `dot_field` under `address_of` |
+| `cerastes::old(s.x)`, C++ (`q1x.cpp:6`) | `ref_indirect(call(routine old, reference_to(lvalue_adjust(dot_field(param_ref 1{S:L}, field x){int:L}){const int:Lg}){const int &:g}){const int &}){int<-const int:g}` |
+
+`param_ref` fields `param_num` and `levels_up`: `il_def.h:15617-15644`; `eok_dot_field` `:14181`. In contracts every access to a by-value struct parameter is a `dot_field` chain rooted at `enk_param_ref` (an lvalue `{struct S:L}`), in the body at `enk_variable`.
+No `struct S` rvalue appears alone in either. `q1.c.c++20.sum` differs from C23 in the `bool` types of the comparisons and in `noexcept` on `cerastes_old_`.
+
+#### 2. Struct arguments at a call: PASS (no wrapper, no temporary for an lvalue source; `temp_init` only for a literal or C++ `S{}`/`S()`)
+
+| Source (probe:line) | The argument operand (both modes unless marked) |
+|---|---|
+| `g(s)`, `s` a local (`q2.c:5`), or a parameter (`:9`) | `var s{struct S<-same}` (rvalue of the variable, no `L`, no node around it) |
+| `g(*p)` (`q2.c:6`, `:11`) | `indirect(var p{struct S *<-same}){struct S<-same}` |
+| `g(p->t)` (`q2.c:7`) | `points_to_field(var w{struct W *<-same}, field t{struct S}){struct S<-same}` |
+| `g(w.t)` (`q2.c:10`) | `dot_field(var w{struct W:L}, field t{struct S}){struct S<-same}` |
+| `g(p[0])` (`q2.c:12`) | `subscript(var p, const 0){struct S<-same}` |
+| `g(f())` (`q2.c:8`) | `call(routine f){struct S}`: **no `temp_init` in C++ either** (guaranteed elision; `q2x.cpp:7`) |
+| `g((struct S){1, 2})` C (`q2c.c:3`); the same text in C++ | `temp_init[dik_constant is_braced_initializer is_compound_literal: aggr{const 1, const 2}[S explicit_braces_on_aggregate]]{S<-same}` |
+| `g((struct S){.y = a})` (`q2c.c:4`), `g((struct S){a++, a++})` (`:5`) | `temp_init[dik_nonconstant_aggregate is_braced_initializer [is_partially_initialized] non_constant is_compound_literal: aggr{[desig(.y),] dyn(dik_expression: var a)...}]`; elements left to right as written; C++ adds the `const[int 0]` filler of H6 |
+| C++ `g(S{1, 2})` (`q2x.cpp:4`) | `temp_init[dik_constant is_braced_initializer is_explicit_cast has_temporary_lifetime: aggr{1, 2}[S ... explicit_cast_applied] is_functional_notation_cast source.type=S]{S}` (H7) |
+| C++ `g(S())` (`q2x.cpp:5`) | `temp_init[dik_zero is_explicit_cast has_temporary_lifetime is_functional_notation_cast]{S}` |
+| C++ `g(s)` (`q2x.cpp:6`), `g(f())` (`:7`), `g({1, 2})` (`:8`) | `var s{S<-same}`; `call(routine f){S}`; `temp_init[dik_constant is_braced_initializer has_temporary_lifetime: aggr{1, 2}]{S:}` |
+| a `const` source (`q2d.c:3`, `:5`) | H8 |
+
+No copy-constructor call (`eok_call` of a member routine) and no `dik_constructor` appears in any C++ probe (the dynamic-init kinds that occur in all the probes are `dik_constant`, `dik_expression`, `dik_nonconstant_aggregate`, `dik_zero`);
+`enk_temp_init` is `il_def.h:13585`.
+
+#### 3. Struct results: PASS
+
+Common to both modes unless marked (`q3.c`, `struct T { int y; }; struct S { int x; struct T t; }`, `f` returns `{1, {2}}`):
+
+| Source (`q3.c` line) | IL |
+|---|---|
+| `f().x` (:4) | `dot_field(call(routine f){struct S}, field x{int}){int}`: the call is an rvalue `{struct S:}`, no `temp_init`, no `L`; **same in C++** (`q3x.cpp:12` `f().t.y`) |
+| `f().t.y` (:5) | `dot_field(dot_field(call(routine f){struct S}, field t{struct T}){struct T}, field y{int}){int}` |
+| `struct T t = f().t;` (:14) | `dik_expression: dot_field(call(routine f), field t{struct T})` |
+| `struct S s = f();` (:6) | `init_kind=initk_dynamic ... dik_expression: call(routine f{...}){struct S}` (a `stmk_decl` then `stmk_init`, as P65 item 4); C++ the same (no copy constructor, no `temp_init`) |
+| `t = f();` (:7), `s = f(); s = f();` (:15) | `assign(var t{struct S:L}, call(routine f){struct S}){struct S:u}` (C++: the result `{S:Lu}`) |
+| `*p = f();` (:8) | `assign(indirect(var p){struct S:L}, call(routine f){struct S}){struct S:u}` |
+| `return f();` (:9) | C: `expr: call(routine f)`; C++: `return_dynamic_init: dik_expression: call(routine f)` (H1) |
+| `return s;` (:10) | C: `expr: var s{struct S<-same}`; C++ `return_dynamic_init: dik_expression: var s{S<-same}` (H1) |
+| `return (struct S){1, {2}};` (:11) | C: `expr: temp_init[dik_constant is_braced_initializer is_compound_literal: aggr{1, aggr{2}[struct T explicit_braces_on_aggregate]}]{struct S<-same}`; C++: `return_dynamic_init: dik_constant is_braced_initializer is_compound_literal: aggr{...}` (H1) |
+| `f();` (:12) | `expr: call(routine f){struct S:u}` (`result_is_not_used`, no cast) |
+| `(void)f();` (:13) | `expr: cast(call(routine f){struct S:u}){void:u}` |
+| C++ `return {1, {2}};`, `S{...}`, `S()`, `S{}` (`q3x.cpp:4-7`) | H1 |
+| C++ `*p = S{1, {2}};` (`q3x.cpp:14`) | `assign(indirect(var p){S:L}, temp_init[... is_functional_notation_cast source.type=S]{S<-same}){S:Lu}` (H7) |
+
+`stmk_return.expr` `il_def.h:16592`, `return_dynamic_init` `:16745`; `eok_call` `:14255`; `result_is_not_used` is the `u` flag. A struct-valued call node has `type: struct S` and no `orig_lvalue_type`; its function type prints `struct S (void)` (C) and `S ()` (C++).
+
+#### 4. Compound literals: PASS; H2-H6 apply
+
+| Source (probe:line) | `enk_temp_init` fields |
+|---|---|
+| `(struct S){1, 2}` as a value (`q4.c:9` `t = (struct S){1, 2};`; `q2c.c:3`) | `kind: enk_temp_init`, `dynamic_init` -> `dik_constant`, flags `is_braced_initializer is_compound_literal` (raw `q2c.c.c23.il:12080-12085`, `a_dynamic_init.is_compound_literal` `il_def.h:4148`), constant `aggr{1, 2}[struct S explicit_braces_on_aggregate]` (`a_constant.is_compound_literal` `:4951`); `source.type: NULL`; no `L` (`{struct S<-same}`); no `has_temporary_lifetime` in C or for `(S){...}` in C++ |
+| `(int){5}` as a value (`q4.c:5`, `:14`) | `temp_init[dik_constant is_braced_initializer is_compound_literal: const[int 5]{int}]{int<-same}` (a scalar literal is a `ck_integer`, not an aggregate); `(int){}` (`:15`) is `const[int 0]{int}`; `(int){a}` is `dik_expression is_braced_initializer is_compound_literal: var a` |
+| `&(int){5}` (`q4.c:6`), `&(struct S){1, 2}` (`:7`) | `address_of(temp_init[...]{int:L}){int *}`: **the node is an lvalue under `&` (`{int:L}`)**, a value elsewhere; `&(struct S){1, 2}.y` (`:8`) `address_of(dot_field(temp_init[...]{struct S:L}, field y{int}){int:L})`; `h(&(struct S){1, 2})` (`:13`) the same under the call |
+| `(S){1, 2}` in C++ (`q4x.cpp:5` value, `:8` assign) | the same as C: `is_compound_literal`, no `explicit_cast`, no `has_temporary_lifetime`; `S s = (S){1, 2}` (`:6`) folded (H2) |
+| `&(S){1, 2}` in C++ (`q4x.cpp:7`, `:11`) | **accepted without a diagnostic**, the IL of C (H3) |
+| C23 `(static int){5}` (`q4b.c:1`) | **EDG refuses, both modes**: `error #80: a storage class may not be specified here` (exit 2) |
+| C23 `(constexpr int){5}` (`q4c.c:1`) | **EDG refuses**: C23 `#20 identifier "constexpr" is undefined`, `#18`, `#65` (this EDG configuration has no C23 `constexpr`, plan.md M8's entry); C++20 `#2386 "constexpr" is not valid here` |
+| file scope `int *gp = &(int){5};` (`q4d.c:1`) | accepted; H5 (a static compiler-generated variable); `struct S gs = (struct S){1, 2};` (`q4e.c:2`) accepted, a plain aggregate |
+| where it is in a block | H4: the literal is a child of the enclosing statement's expression (`stmk_expr.expr`, `stmk_decl`'s `stmk_init.dynamic_init`, `stmk_if/while/for.expr`, `stmk_for.increment`, `stmk_return.expr`/`return_dynamic_init`); `a_variable` none; no scope node |
+
+No element is lost: `q2c.c:5` `{a++, a++}` keeps both `post_incr` elements as `dyn(dik_expression: post_incr(var a))` in written order; `q2c.c:4` keeps `desig(.y)`; `q3.c:11` keeps the nested `aggr{1, aggr{2}}` (EDG builds the inner aggregate).
+
+#### 5. C++ temporaries as initializers and values: PASS (H6, H7)
+
+`q5x.cpp:2` `S s = S{1, 2};` `init_kind=initk_dynamic ... DYN[dik_constant: aggr{const[int 1], const[int 2]}[S explicit_braces_on_aggregate implicit_cast explicit_cast_applied]]` (**no `temp_init`**, P65's `explicit_cast_applied` confirmed);
+`:3` `S s = S();` `dik_constant is_explicit_cast: aggr{const[int 0]{int null_pointer_constant_ruled_out}, const[int 0]{...}}[S explicit_cast_applied]`; `:4` `S s = S{};` `dik_constant is_partially_initialized: aggr{}[S explicit_braces_on_aggregate is_partially_initialized implicit_cast explicit_cast_applied]`;
+`:9`/`:10` `S s{1, 2}` / `S s = {1, 2}` plain `dik_constant is_braced_initializer: aggr{1, 2}`. The assignments: `:5` `t = S{1, 2};`
+`assign(var t{S:L}, temp_init[dik_constant is_braced_initializer is_explicit_cast has_temporary_lifetime: aggr{1, 2}[S ... explicit_cast_applied] is_functional_notation_cast source.type=S]{S<-same}){S:Lu}`;
+`:6` `t = S();` `temp_init[dik_zero ...]`; `:7` `t = {1, 2};` `temp_init[dik_constant is_braced_initializer has_temporary_lifetime: aggr{1, 2}]{S<-same:}` (no position); `:8` `t = S{a, a++};` `temp_init[dik_nonconstant_aggregate ... non_constant is_explicit_cast has_temporary_lifetime: aggr{dyn(var a), dyn(post_incr(var a))}]`;
+`:12` `S s = S{a, a++};` is `dik_nonconstant_aggregate is_braced_initializer non_constant is_explicit_cast` (an initializer, no `temp_init`); `:11` `t = S{};` `temp_init[dik_constant ... is_partially_initialized is_explicit_cast has_temporary_lifetime: aggr{}]`.
+
+#### 6. Global and `static` struct initializers: PASS (`q6.c` both modes, `q6x.cpp`, `q6b.c`; `gv.py`)
+
+| Source (`q6.c` line) | `init_kind`; constant or dynamic initializer (C23; differences marked) |
+|---|---|
+| `struct S g1 = {1, 2};` (:6) | `initk_static`, `aggr{1, 2}[struct S explicit_braces_on_aggregate]`, `has_explicit_initializer`; linkage `C` (C++: `C++`) |
+| `{0}` (:7), `{}` (:17), `{1}` (:24) | `aggr{const[int 0]{int is_simple_zero}}[... is_partially_initialized]` (trailing members absent), `aggr{}[... is_partially_initialized]`, `aggr{const 1}[... is_partially_initialized]` |
+| `{.y = 2}` (:8), `{.y = 1, .x = 2}` (:18) | C: `aggr{desig(.y), 2}` (`x` absent), `aggr{desig(.y), 1, desig(.x), 2}` (source order, `#2904-D` warning); C++: `aggr{const[int 0]{int}, desig(.y), 2}` (the filler of P65 H1) |
+| nested (:9, :10) | `aggr{1, aggr{2, 3}[struct S ...]}[struct T ...]`; `{.s = {.y = 4}}` `aggr{desig(.s), aggr{desig(.y), 4}}` (C++ adds a filler in each level) |
+| pointer leaf `{&h, 1}` (:11) | `aggr{const[addr abk_variable h off=0]{int *}, const[int 1]{int}}`: **`ck_address`**, `address.kind abk_variable`, `variable` the target, no `subobject_path` |
+| `{&h2.x, 1}` (:12), `int *gp16 = &h2.y` (:23) | `ck_address` with `variable h2`, `off=0` / `off=4`, **`subobject_path` non-NULL**, type `int *` `implicit_cast` (H9) |
+| `{0, 1}` (:13), `{(int *)0, 1}` (:19) | `const[int 0]{int * is_simple_zero implicit_cast ...}` (a `ck_integer` of pointer type, P63 H4; the second also `explicit_cast_applied`) |
+| `{1, 1 + 1}` (:21) | folded: `aggr{1, 2}` (C++ flags the `2` with `null_pointer_constant_ruled_out`) |
+| tentative `struct S g9;` (:14) | `storage_class: sc_unspecified`, `init_kind: initk_none`, `declared_type: struct S`, linkage `C` (C++: `C++`; P63 A1's scalar rows hold for structs); `static struct S g10;` (:15) `sc_static initk_none link=internal`; `static struct S g11 = {5, 6};` (:16) `sc_static initk_static aggr{5, 6}` |
+| `extern struct S ge;` alone (`q6b.c:2`) | `storage_class: sc_extern`, `declared_type: NULL`, `initk_none`, linkage `C`; `extern struct S gu; struct S gu = {3, 4};` (`:5-6`) one variable, `initk_static`, `declared_type: struct S`; `struct S gt; struct S gt;` (`:3-4`) one variable in C23, **error `#3369 already defined` in C++20** |
+| `static struct S c = {1, 2};` in a function (`q6.c:22`) | `storage_class: sc_static`, `init_kind: initk_function_local` on the variable; a `local-static-variable-init` entry: `variable: c`, `init_kind: initk_static`, `constant: {1, 2}` = `aggr{1, 2}` (P63 H6; `a_local_static_variable_init` `il_def.h:11074`); `static struct S d;` `initk_none`; `static struct P e = {&h, 2};` entry `initk_static`, `aggr{const[addr abk_variable h off=0], 2}` |
+| C++ `S g2 = S{1, 2};` (`q6x.cpp:7`) | `initk_static`, `aggr{1, 2}[S explicit_braces_on_aggregate implicit_cast explicit_cast_applied]` (no `temp_init`); `S g3 = S();` (:8) `initk_static aggr{const[int 0], const[int 0]}[S explicit_cast_applied]` |
+| C++ `S g4 = {f(), 2};` (`q6x.cpp:9`) | **`init_kind: initk_dynamic`**, `dynamic: dik_nonconstant_aggregate is_braced_initializer non_constant: aggr{dyn(dik_expression: call(routine f)), const 2}[S ... has_dynamic_init_component]`; `constexpr` call `{cf(), 2}` (:12) folds to `aggr{const[int 4], 2}` `initk_static` (P63 H7) |
+| C++ `static S e = {f(), 2};` in a function (`q6x.cpp:16`) | entry `init_kind: initk_dynamic`, `dynamic: dik_nonconstant_aggregate ...`; `static S k = S{1, 2};` entry `initk_static`, `aggr{1, 2}[... implicit_cast explicit_cast_applied]` |
+| `extern "C" S g9 = {1, 2};` (`q6x.cpp:14-15`) | linkage `C` in C++20 |
+
+The leaf index of a `ck_address` initializer is positional in `aggr{...}` as in P65 item 4; `init_kind` (`il_def.h:11747`), `a_variable.declared_type` `:11814`, `a_constant.kind ck_address` `:3645`, `ck_aggregate` `:3661`.
+
+#### 7. `decreases(p->x)` and `decreases(g.x)`: PASS
+
+`q7.c:7` `CERASTES_DECREASES(p->x)` (a pointer parameter `struct S *p`): `points_to_field(param_ref 1 up=0{struct S *<-same}, field x{int}){int:L}`; `q7.c:12` `decreases(g.x)`: `dot_field(var g{struct S:L}, field x{int}){int:L}`; `q7.c:16` `decreases(s.x)` (by value): `dot_field(param_ref 1 up=0{struct S:L}, field x{int}){int:L}`. The measure operand is an **lvalue** (`{int:L}`),
+while the same member in a `requires` is a value `{int<-same}` (`q7.c:5`, `:10`, `:15`: `ge(points_to_field(param_ref 1 up=0, field x){int<-same}, const 0)`, `ge(dot_field(var g{struct S:L}, field x){int<-same}, 0)`). `owns(g)` is `call(routine cerastes_owns, var g{struct S<-same})` (an rvalue `var g`, `q7.c:10`);
+`owns(*p)` is `call(routine cerastes_owns, indirect(param_ref 1 up=0{struct S *<-same}){struct S<-same})`. Same in both modes except the `bool` types.
+
+#### Notes
+
+- **N1.** `ilsum.py` ran into a cycle on `switch` bodies (the case statements point back); `_seen` and a depth cap were added; nothing in the IL is affected.
+- **N2.** `(int){5}` as a value is `temp_init` over a `ck_integer` and under `&` is an lvalue `{int:L}` (item 4); a literal in an initializer of a local `int` in C++ is folded to the constant (`q4.c:14` `x = 11`).
+- **N3.** `struct S gs = (struct S){1, 2};` at file scope is accepted by EDG although ISO C requires a constant initializer, and it is an ordinary `initk_static` aggregate (H5); record 0044 item 7 rejects file-scope literals, so the global reader must reject a `ck_aggregate` constant with `is_compound_literal: TRUE` (raw field, set here; `ilsum` does not print it) and the `&(int){5}` form (a `ck_address` whose `variable` has `is_compound_literal`), or it accepts both as plain initial values.
+- **N4.** Expression positions (`@Lline:col`) of a `temp_init` are those of the opening `(` or of the type name of the literal; a C++ `{1, 2}` in an argument or assignment has no position (`{S:}`), so a message about it falls back to the enclosing statement.
+- **N5.** Not probed: a literal inside a lambda or a statement expression, `static`/`thread_local` struct locals in C++ with a dynamic initializer beyond `q6x.cpp:16`, and `restrict` by-value structs (no IL content).
+
+### P69: the invariant heap-read gap (record 0044 item 12) **no wrong verdict, no exit 3; `p->q->x`, `*p->q` and `*gp` are accepted today and every twin fails for the right reason; `**pp` is rejected (exit 2); recommendation: accept and pin**
+
+Evidence in `build/m4.5c2a/p69/` (not committed): the generators `gen.py` (the 24 programs of the plan's matrix), `gen2.py` (tautology twins for the unheld cases), `gen3.py` (vacuity pairs, first alias traps), `gen4.py` (bounded alias traps that repoint the loaded pointer) -
+44 programs in all, each `.c`, never edited after generation; `run.sh <probe.c>...` (runs the **baseline** `m4.5c2a-base/build/cerastes verify <probe> --std=c23|c++20 --keep-vpr=out/<probe>.<mode>.vpr`, appends `results.tsv`: name, mode, exit status,
+wall seconds, first line); `summarize.sh` (every error category with its line, from `out/*.out`). All runs 2026-11-02 with the baseline build (the session's starting commit), both modes on every program, 90 runs (one program twice): exit 0 x20, exit 1 x66, exit 2 x4, **exit 3 x0**. The
+verdicts were identical in both modes in every program. Times 7-21 s each (up to 40 s for `a_trap2` C23) while the baseline suite and two other runs were using the machine. The category names are the tool's: `invariant-entry` (the plan wrote `invariant-established`),
+`invariant-preserved`, `permission`, `termination`, `check`, `postcondition`, `overflow`.
+
+Shapes (`CERASTES_INVARIANT` = inv, `CERASTES_DECREASES` = dec). The target of a loaded pointer is held by a **local** the function takes the address of (`struct L t; struct L s = {&t, 0}; struct L *p = &s;`), or by a static global in `main`.
+
+| Shape | Program | Clause | Verdict (both modes) |
+|---|---|---|---|
+| **(a) `p->q->x`**, `struct L { struct L *q; int x; }` | `a_inv_pos` | inv `... p == &s && p->q == &t && p->q->x == i` (body `t.x += 1`) | **verified** (exit 0) |
+| | `a_vac_ok` / `a_vac_bad` | the same loop, `ensures r == n` / `r == n + 1` (`return t.x`) | verified / **error `postcondition`** @ L21 (not vacuous) |
+| | `a_inv_val_est` | inv claims `p->q->x == i + 1` | **`invariant-entry`** @ L15 |
+| | `a_inv_val_pres` | inv claims `p->q->x == 0`, body increments `t.x` | **`invariant-preserved`** @ L15 |
+| | `a_inv_unheld` | `owns(*p)` only; inv `p->q->x == 0` | `invariant-entry` and **`permission`** @ L12 ("this loop invariant reads `(p->q)->x`, which this loop does not hold") |
+| | `a_inv_unheld_taut`, `_nonull` | the same with the tautology `p->q->x == p->q->x` (and `p->q != 0` required) | **`permission`** @ L12 only |
+| | `a_check_unheld` | a `CERASTES_CHECK(p->q->x == p->q->x)` outside any loop, for comparison | `permission` @ L11 ("reads `(p->q)->x` without owning it") |
+| | `a_dec_pos` | dec `p->q->x - i` (`t.x == n`, body empty) | **verified** |
+| | `a_dec_val` | dec `p->q->x` (constant) | **`termination`** @ L16 |
+| | `a_dec_unheld` | dec `n - i + p->q->x * 0`, `owns(*p)` only | **`permission`** @ L13 ("this loop measure reads `(p->q)->x`") |
+| | `a_trap` (unbounded `+=`) | inv `p->q->x == t.x`, `p` not pinned past `p == &s` | `overflow` @ L20 and `postcondition` @ L23 (an artifact of unbounded `int`; see `a_trap2`) |
+| | `a_trap2` | the loop repoints `p->q = &u; u.x = 3`; inv `p->q->x == t.x` leaves the pointer free | **`invariant-preserved`** @ L17 (correct) |
+| **(b) `*p->q`**, `struct P { int *q; }` | `b_inv_pos` | inv `... p == &s && p->q == &x && *p->q == i` | **verified** |
+| | `b_vac_ok` / `b_vac_bad` | `ensures r == n` / `r == n + 1` | verified / **`postcondition`** @ L20 |
+| | `b_inv_val_est` / `b_inv_val_pres` | `*p->q == i + 1` / `*p->q == 0` | **`invariant-entry`** @ L14 / **`invariant-preserved`** @ L14 |
+| | `b_inv_unheld`, `b_inv_unheld_taut` | `owns(*p) && p->q != 0`; inv `*p->q == 0` / `*p->q == *p->q` | **`permission`** @ L11 only ("reads `*p->q`, which this loop does not hold") |
+| | `b_dec_pos` / `b_dec_val` / `b_dec_unheld` | dec `*p->q - i` / `*p->q` / `n - i + *p->q * 0` | verified / **`termination`** @ L15 / **`permission`** @ L12 |
+| | `b_trap` (unbounded) / `b_trap2` | as `a_trap`/`a_trap2` with `p->q = py; y = 3` | `overflow` + `postcondition` / **`invariant-preserved`** @ L16 |
+| **(c) `*gp`**, `static int *gp = &h;` in `main` | `c_inv_pos` | inv `... gp == &h && *gp == i` (body `h += 1`) | **verified** |
+| | `c_vac_ok` / `c_vac_bad` | the same loop then `CHECK(h == 10)` / `CHECK(h == 11)` | verified / **`check`** @ L15 |
+| | `c_inv_val_est` / `c_inv_val_pres` | `*gp == i + 1` / `*gp == 0` | **`invariant-entry`** @ L9 / **`invariant-preserved`** @ L9 |
+| | `c_inv_unheld` (`f` with `owns(gp)`, `h` not held) | inv `gp != 0 && *gp == 0` | `invariant-entry` and **`permission`** @ L11 ("reads `*gp`, which this loop does not hold") |
+| | `c_inv_unheld_taut`, `c_inv_unheld_taut2` | inv `... *gp == *gp` (the second requires `gp != 0`, no `gp != 0` in the invariant) | `invariant-entry` + `permission` / **`permission`** @ L11 only |
+| | `c_dec_pos` / `c_dec_val` / `c_dec_unheld` | dec `*gp - i` / `*gp` / `n - i + *gp * 0` | verified / **`termination`** @ L10 / **`permission`** @ L12 |
+| | `c_trap` (unbounded) | inv `*gp == h` | `overflow` @ L13 and `check` @ L16 (artifact) |
+| | `c_trap_dec` | inv `h == 10 - i && *gp >= 0`, dec `*gp`; the loop never writes `gp` | **verified**: correct, not a trap (nothing in the loop writes `gp`, so it keeps `&h`, as `global_loop.c` pins for `g`) |
+| | `c_trap2` / `c_trap2_dec` | the loop writes `gp = &k; k = 3`; inv `*gp == h` / dec `*gp` with `gp` unpinned | **`invariant-preserved`** @ L10 / **`termination`** @ L11 (correct) |
+| **(d) `**pp`** (comparison) | `d_inv_pos` (inv `... **pp == i`), `d_dec_pos` (dec `n - i + **pp * 0`) | | **rejected, exit 2**: `error #cerastes-unsupported_expression: a read of `**pp` in a loop invariant or measure (a place reached through a heap read: M4.5c2, decision 0040 item 6)` at the clause's line (L11 / L12) |
+
+**Findings.**
+1. **No wrong verdict.** Every positive verifies (not vacuously: the postcondition or `check` twins fail), every value twin and every alias trap (the loop repoints the loaded pointer, or the invariant leaves it free) is an `error`, every unheld twin is a `permission` error at the clause's line, with the target named in source terms (`(p->q)->x`, `*p->q`, `*gp`). There is no exit 3 and no `internal_inconsistency`.
+2. **The unheld twin is a `permission` error in all three shapes, but in (a) and (c) with a value claim it is a second error beside `invariant-entry`** (`a_inv_unheld`, `c_inv_unheld`); a test pinning only the permission failure needs a tautological claim (`p->q->x == p->q->x`, `*gp == *gp` with `gp != 0` required): `a_inv_unheld_taut`, `b_inv_unheld_taut`, `c_inv_unheld_taut2`.
+3. **A loaded pointer the loop does not write keeps its value** (`c_trap_dec`): an invariant or a measure may read through it without pinning it, which is sound and agrees with 0041 item 10; one the loop writes is unknown at the start of an iteration unless the invariant pins it (`a_trap2`, `b_trap2`, `c_trap2`).
+4. **The rejection of `**pp` stays syntactic:** `encode.cpp:3827` (`is_indirect_node(peel_place(ops[0]))`) fires for `**pp` in both clauses; the other three shapes reach `inv_deref` chains and are handled by the same held-place check as `*p` (its message names the chain). Item 12's "all verdicts right" branch applies: accept and pin the shapes below, extending 0040 item 5's N2 argument.
+5. **Suggested pins** (each in both modes, one `expect:` each): `a_inv_pos` + `a_inv_val_pres` + `a_inv_unheld_taut` (`permission` @ L12); `b_inv_pos` + `b_inv_val_pres` + `b_inv_unheld_taut` (`@ L11`); `c_inv_pos` + `c_inv_val_pres` + `c_inv_unheld_taut2` (`@ L11`); the same three for a measure (`a_dec_pos`/`a_dec_val`/`a_dec_unheld`, `b_*`, `c_*`) and the alias traps `a_trap2`, `b_trap2`, `c_trap2`, `c_trap2_dec` (the traps are the probes that would catch an unsound accept; `c_trap_dec` as a positive that keeps `*gp` through an unwritten pointer).
+6. **Not covered:** a loaded pointer to a heap block or to a caller's cell passed in (M4.5d2 has no `malloc` yet; `owns(*p->q)` atoms are M4.5c2b); `*s.q` of a by-value parameter (the shape item 12 says c2a makes reachable) was not probed here because the baseline rejects by-value struct parameters; it needs the c2a build.
+
+### S34: the Silicon facts record 0044 relies on (struct results, by-value entry copies, struct global facts and rows, `static` struct locals, hidden literals, H8) **PASS for (a)-(f): 31 fixtures, no Silicon failure of its own (no exit 3, no parse error), every vacuity clone fails as it must; two fixtures' expectations were wrong and were edited by hand (below); H8 is resolved without a new fact**
+
+Evidence: `tests/viper-smoke/memory/s34_*.vpr` (31 files, generator `build/m4.5c2a/s34/gen.py`, never rerun), run in the session worktree with
+`python3 scripts/run_tests.py -v tests/viper-smoke/memory/s34_*` (log `build/m4.5c2a/s34/run1.log`), 2026-11-02, Silicon 1.1-SNAPSHOT `6b540aa4`, Z3 4.16.0. First run: 29 passed, 2 failed (both
+fixture-expectation errors, not tool errors). After the two hand edits: 31 passed. Timings 4-7 s per fixture.
+
+| Group | Positive | `_fail` / `_uninit_fail` / other twins | Vacuity clone |
+|---|---|---|---|
+| (a) results: one result per leaf, multi-target call, `WF` of a pointer leaf, per-leaf case split | `s34_a_result`, `s34_a_ptr_result` verified | `s34_a_result_fail` error @ L121 (the wrong ensures); `s34_a_result_uninit_fail` error @ L76 (`return s` with an unset leaf); `s34_a_ptr_result_fail` errors @ L170 (liveness of the unrelated result: `lifetime`), L187, L197 (see edit 1) | `s34_a_result_vacuity_fail`, `s34_a_ptr_result_vacuity_fail`: 3 errors each, as expected |
+| (b) by-value entry copy, `return s`, an `ensures` over the entry formal after the body changes `s.x` | `s34_b_param` verified | `s34_b_param_fail` @ L98; `s34_b_param_uninit_fail` @ L121 | `s34_b_vacuity_fail` |
+| (c) struct global facts and `program_start` row, `owns(g)`, `&g.x` to a `WF`-only callee | `s34_c_global` verified | `s34_c_global_fail` @ L164; `s34_c_global_nolens_fail` @ L74 (without the member lengths `WF(&g.x)` fails); `s34_c_global_noperm_fail` @ L72 | `s34_c_global_vacuity_fail` |
+| (d) scalar and struct global in `main`'s loop; `&g.x != &h` (H8) | `s34_d_loop`, `s34_d_compare` verified | `s34_d_loop_fail` @ L154 | `s34_d_loop_vacuity_fail`, `s34_d_compare_vacuity_fail` |
+| (e) `static` struct local through a recursive caller | `s34_e_static_struct` verified | `s34_e_static_struct_fail` @ L194 | `s34_e_vacuity_fail` |
+| (f) hidden literal: allocation, `StoreE` in an argument, the scope exit per iteration | `s34_f_literal` verified | `s34_f_literal_deref_fail` @ L113, `_if_fail` @ L111, `_iter_fail` @ L118, `_lifetime_fail` @ L111 (a use after the block / the `if` / the iteration) | `s34_f_literal_vacuity_fail` |
+
+**H8 (record 0044 item 8): no `parent_of(GB_x()) == null` fact is needed.** `s34_d_loop` (its facts are exactly today's scalar facts plus the member lengths and slot facts; no `parent_of`) verifies, and so does `s34_d_compare_nofact` (the program of `s34_d_compare` with the `parent_of` conjuncts of `GFACTS` removed): `member(loc(GB_g,0),0) == GB_h` would give `lvloc(GB_h) == lvloc(block_of(loc(GB_g,0))) == lvloc(GB_g)` by `member_lv`, so `loc(GB_h,-2) == loc(GB_g,-2)` by the existing global fact `lvloc(GB_x()) == loc(GB_x(), -2)` (already in every baseline program with a global, `global_loop.c.c23.vpr:32`), so `GB_h == GB_g` by `loc_inv`, contradicting the two `unique` blocks. The facts row already separates a struct global's member blocks from every other global block; item 8's alternative branch (record the gap as a completeness note, no new fact) applies.
+
+**Hand edits (each reported; the generator was not rerun):**
+1. `s34_a_ptr_result_fail.vpr`: the author expected one error @ L168. Silicon reports the same cause in the same branch three times: the liveness assert of the unrelated result (first use, `lifetime`), then the permission of `*x` and the unprovable `check`. Added two `// expect:` lines for the consequences and shifted all three line numbers by the two inserted lines (L170, L187, L197); the comment says so. The cause is unchanged and is the first error.
+2. `s34_d_compare_nofact_fail.vpr` renamed `s34_d_compare_nofact.vpr`: it expected an error without the `parent_of` facts and verified. Its expectation was wrong (H8 above), so it is now a positive (`// expect: verified`) with a comment giving the argument; its `<- fails` marker removed.
+
+**The author's choices, checked:** `s34_a_ptr_result_fail` fails at the liveness assert (`lifetime`) before the permission one, as noted; `s34_d_loop` has one liveness row per global and no 0038 guard, and verifies; ghost amounts passed inline as `perm(...)/2` parse and verify; the static local block named `GB_next__c__1` verifies (`s34_e_*`); the zero-arity `define GFACTS (...)` is accepted by the Viper parser (used in (c), (d)).
+
+**NOTE.** The vacuity clones each carry three expected errors; they fail at those lines and nowhere else (the harness matches the set), so each positive's asserts are reached.

@@ -1,0 +1,119 @@
+// expect: error assert:assertion.false @ L118
+// S34 (f) twin of s34_f_literal.vpr (H3): a pointer to the literal of a loop iteration used after the loop: every iteration's object ended with its body, so the liveness assert fails (`lifetime`).
+// Hand-written in the emitted style (see the positive fixture).
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0043 items 3, 9; record 0044 items 3-5, 8): WF; a leaf's range; a leaf at allocation (uninitialized); a leaf owned (full permission, flag set, range); one liveness fraction
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNG(c) ((-2147483648) <= c.v_int && c.v_int <= 2147483647)
+define RNGV(v) ((-2147483648) <= v && v <= 2147483647)
+define LEAFU(c) (acc(c.v_int) && acc(c.d_int) && !c.d_int)
+define LEAF(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNG(c))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+// struct S { int x; int y; }: member 0 is x, member 1 is y; struct T { struct S s; int z; }: member 0 is the slot of the nested S, member 1 is z
+define MX(s) loc(member(s, 0), 0)
+define MY(s) loc(member(s, 1), 0)
+define TS(t) loc(member(t, 0), 0)
+define TZ(t) loc(member(t, 1), 0)
+define SLEN(s) (len(member(s, 0)) == 1 && len(member(s, 1)) == 1)
+define SOWN(s) (SLEN(s) && LEAF(MX(s)) && LEAF(MY(s)))
+define TLEN(t) (len(member(t, 0)) == 1 && len(member(t, 1)) == 1)
+define TOWN(t) (TLEN(t) && SOWN(TS(t)) && LEAF(TZ(t)))
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+define OWNI(p, a) (ROOT(p) && LEAF(p) && LVF(p, a))
+
+
+// cerastes:trusted-contract allocation of a struct S local: a one-slot block; each member is a block of length 1 whose leaf is uninitialized with full permission; the liveness token is the root block's (record 0043 item 4)
+method alloc_struct_0_S() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures len(member(r, 0)) == 1 && acc(loc(member(r, 0), 0).v_int) && acc(loc(member(r, 0), 0).d_int) && !loc(member(r, 0), 0).d_int
+  ensures len(member(r, 1)) == 1 && acc(loc(member(r, 1), 0).v_int) && acc(loc(member(r, 1), 0).d_int) && !loc(member(r, 1), 0).d_int
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// void set_s(struct S *s) [owns(*s)]: s->x = 7; ensures s->x == 7 && s->y == old(s->y)
+method f_set_s__0(s: Ref, a_s: Perm)
+  requires none < a_s && a_s < write
+  requires WF(s)
+  requires ROOT(s) && SOWN(s) && LVF(s, a_s)
+  ensures ROOT(s) && SOWN(s) && LVF(s, a_s) && MX(s).v_int == 7 && MY(s).v_int == old(MY(s).v_int)
+  decreases
+{
+  var oy: Int := loc(member(s, 1), 0).v_int
+  assert loc(member(s, 0), 0) != null
+  assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+  loc(member(s, 0), 0).v_int := 7
+  loc(member(s, 0), 0).d_int := true
+  assert s != null
+  assert WF(s)
+  assert offset_of(s) < len(block_of(s))
+  assert len(member(s, 0)) == 1 && len(member(s, 1)) == 1
+  assert perm(loc(member(s, 0), 0).v_int) == write && perm(loc(member(s, 0), 0).d_int) == write
+  assert loc(member(s, 0), 0).d_int
+  assert RNG(loc(member(s, 0), 0))
+  assert perm(loc(member(s, 1), 0).v_int) == write && perm(loc(member(s, 1), 0).d_int) == write
+  assert loc(member(s, 1), 0).d_int
+  assert RNG(loc(member(s, 1), 0))
+  assert perm(lvloc(block_of(s)).lv) >= a_s
+  assert loc(member(s, 0), 0).v_int == 7
+  assert loc(member(s, 1), 0).v_int == oy
+}
+
+// void dangle(void) { struct S *p = NULL; for (int i = 0; i < 3; i++) { p = &(struct S){1, 2}; } use(p); }   (the hidden object ends with each iteration: the use after the loop fails: lifetime)
+method f_dangle__1()
+  decreases
+{
+  var v_i: Int
+  var cl_1: Ref
+  var p: Ref
+  p := null
+  v_i := 0
+  while (v_i < 3)
+    invariant RNGV(v_i)
+    invariant 0 <= v_i && v_i <= 3
+    decreases 3 - v_i
+  {
+    cl_1 := alloc_struct_0_S()
+    // the literal's leaves are stored inside the expression (value, then flag)
+    assert loc(member(cl_1, 0), 0) != null
+    assert perm(loc(member(cl_1, 0), 0).v_int) == write && perm(loc(member(cl_1, 0), 0).d_int) == write
+    loc(member(cl_1, 0), 0).v_int := 1
+    loc(member(cl_1, 0), 0).d_int := true
+    assert loc(member(cl_1, 1), 0) != null
+    assert perm(loc(member(cl_1, 1), 0).v_int) == write && perm(loc(member(cl_1, 1), 0).d_int) == write
+    loc(member(cl_1, 1), 0).v_int := 2
+    loc(member(cl_1, 1), 0).d_int := true
+    assert perm(lvloc(block_of(cl_1)).lv) > none
+    p := cl_1
+    assert perm(loc(member(cl_1, 0), 0).v_int) == write && perm(loc(member(cl_1, 0), 0).d_int) == write
+    assert perm(loc(member(cl_1, 1), 0).v_int) == write && perm(loc(member(cl_1, 1), 0).d_int) == write
+    assert perm(lvloc(block_of(cl_1)).lv) == write
+    exhale acc(loc(member(cl_1, 0), 0).v_int) && acc(loc(member(cl_1, 0), 0).d_int) && acc(loc(member(cl_1, 1), 0).v_int) && acc(loc(member(cl_1, 1), 0).d_int) && acc(lvloc(block_of(cl_1)).lv)
+    assert !((((v_i + 1) < (-2147483648)) || (2147483647 < (v_i + 1))))
+    v_i := v_i + 1
+  }
+  // the pointer of the last iteration is used after the loop
+  assert p != null ==> perm(lvloc(block_of(p)).lv) > none // <- fails
+}

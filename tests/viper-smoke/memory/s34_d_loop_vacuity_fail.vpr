@@ -1,0 +1,452 @@
+// expect: error assert:assertion.false @ L179
+// expect: error assert:assertion.false @ L278
+// expect: error assert:assertion.false @ L451
+// S34 (d) vacuity: s34_d_loop.vpr with an `assert false` at the start of each method, after each allocation, after each call and at the end of each body, one per cloned method (Silicon reports only the first failing `assert false` on a path): every one must FAIL, so no trusted contract, axiom or fact makes the state contradictory.
+// Hand-written in the emitted style (see the positive fixture).
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  unique function GB_g__1(): Block
+  unique function GB_h__2(): Block
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0043 items 3, 9; record 0044 items 3-5, 8): WF; a leaf's range; a leaf at allocation (uninitialized); a leaf owned (full permission, flag set, range); one liveness fraction
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNG(c) ((-2147483648) <= c.v_int && c.v_int <= 2147483647)
+define RNGV(v) ((-2147483648) <= v && v <= 2147483647)
+define LEAFU(c) (acc(c.v_int) && acc(c.d_int) && !c.d_int)
+define LEAF(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNG(c))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+// struct S { int x; int y; }: member 0 is x, member 1 is y; struct T { struct S s; int z; }: member 0 is the slot of the nested S, member 1 is z
+define MX(s) loc(member(s, 0), 0)
+define MY(s) loc(member(s, 1), 0)
+define TS(t) loc(member(t, 0), 0)
+define TZ(t) loc(member(t, 1), 0)
+define SLEN(s) (len(member(s, 0)) == 1 && len(member(s, 1)) == 1)
+define SOWN(s) (SLEN(s) && LEAF(MX(s)) && LEAF(MY(s)))
+define TLEN(t) (len(member(t, 0)) == 1 && len(member(t, 1)) == 1)
+define TOWN(t) (TLEN(t) && SOWN(TS(t)) && LEAF(TZ(t)))
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+define OWNI(p, a) (ROOT(p) && LEAF(p) && LVF(p, a))
+
+// the unit's globals: `static struct S g = {0, 5};` (GB_g__1) and `static int h = 7;` (GB_h__2); the facts have NO separation of member(...GB_g...) from GB_h (hazard H8)
+define GSLOT loc(GB_g__1(), 0)
+define GFACTS (len(GB_g__1()) == 1 && lvloc(GB_g__1()) == loc(GB_g__1(), -2) && SLEN(GSLOT) && len(GB_h__2()) == 1 && lvloc(GB_h__2()) == loc(GB_h__2(), -2))
+
+
+// cerastes:trusted-contract program start (record 0041 item 4, record 0044 item 8): g = {0, 5}, h = 7; the pure facts first
+method program_start()
+  ensures GFACTS
+  ensures (acc(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) && acc(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) && loc(member(loc(GB_g__1(), 0), 0), 0).d_int && loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 0) && (acc(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) && acc(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) && loc(member(loc(GB_g__1(), 0), 1), 0).d_int && loc(member(loc(GB_g__1(), 0), 1), 0).v_int == 5) && acc(lvloc(GB_g__1()).lv)
+  ensures (acc(loc(GB_h__2(), 0).v_int) && acc(loc(GB_h__2(), 0).d_int) && loc(GB_h__2(), 0).d_int && loc(GB_h__2(), 0).v_int == 7) && acc(lvloc(GB_h__2()).lv)
+  decreases _
+
+// int main(void) { for (int i = 0; i < 3; i++) { g.x = 1; } check(g.x == 1 && g.y == 5 && h == 7); }   (H8: Silicon must keep g's member cells and h apart from their permissions alone)
+method f_main__0()
+  decreases
+{
+  var v_i__0: Int
+  var kv_gx: Perm
+  var kd_gx: Perm
+  var vs_gx: Int
+  var ds_gx: Bool
+  var kv_gy: Perm
+  var kd_gy: Perm
+  var vs_gy: Int
+  var ds_gy: Bool
+  var kv_h: Perm
+  var kd_h: Perm
+  var vs_h: Int
+  var ds_h: Bool
+  var kl_g: Perm
+  var kl_h: Perm
+  program_start()
+  // int i = 0;  (the loop: while (i < 3) invariant(0 <= i && i <= 3 && (i == 0 || g.x == 1)) { g.x = 1; i++; })
+  v_i__0 := 0
+  kl_g := perm(lvloc(block_of(loc(GB_g__1(), 0))).lv)
+  kl_h := perm(lvloc(block_of(loc(GB_h__2(), 0))).lv)
+  kv_gx := perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int)
+  kd_gx := perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int)
+  ds_gx := false
+  if (kd_gx > none) {
+    ds_gx := loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  }
+  if (kv_gx > none) {
+    vs_gx := loc(member(loc(GB_g__1(), 0), 0), 0).v_int
+  }
+  kv_gy := perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int)
+  kd_gy := perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int)
+  ds_gy := false
+  if (kd_gy > none) {
+    ds_gy := loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  }
+  if (kv_gy > none) {
+    vs_gy := loc(member(loc(GB_g__1(), 0), 1), 0).v_int
+  }
+  kv_h := perm(loc(GB_h__2(), 0).v_int)
+  kd_h := perm(loc(GB_h__2(), 0).d_int)
+  ds_h := false
+  if (kd_h > none) {
+    ds_h := loc(GB_h__2(), 0).d_int
+  }
+  if (kv_h > none) {
+    vs_h := loc(GB_h__2(), 0).v_int
+  }
+  while (v_i__0 < 3)
+    invariant RNGV(v_i__0)
+    invariant acc(loc(member(loc(GB_g__1(), 0), 0), 0).v_int, kv_gx) && acc(loc(member(loc(GB_g__1(), 0), 0), 0).d_int, kd_gx)
+    invariant (kv_gx > none && kd_gx > none && loc(member(loc(GB_g__1(), 0), 0), 0).d_int) ==> RNG(loc(member(loc(GB_g__1(), 0), 0), 0))
+    invariant (kd_gx > none && ds_gx) ==> loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+    invariant ((none < kv_gx) && (kv_gx < write)) ==> (loc(member(loc(GB_g__1(), 0), 0), 0).v_int == vs_gx)
+    invariant acc(loc(member(loc(GB_g__1(), 0), 1), 0).v_int, kv_gy) && acc(loc(member(loc(GB_g__1(), 0), 1), 0).d_int, kd_gy)
+    invariant (kv_gy > none && kd_gy > none && loc(member(loc(GB_g__1(), 0), 1), 0).d_int) ==> RNG(loc(member(loc(GB_g__1(), 0), 1), 0))
+    invariant (kd_gy > none && ds_gy) ==> loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+    invariant (kv_gy > none) ==> (loc(member(loc(GB_g__1(), 0), 1), 0).v_int == vs_gy)
+    invariant acc(loc(GB_h__2(), 0).v_int, kv_h) && acc(loc(GB_h__2(), 0).d_int, kd_h)
+    invariant (kv_h > none && kd_h > none && loc(GB_h__2(), 0).d_int) ==> RNG(loc(GB_h__2(), 0))
+    invariant (kd_h > none && ds_h) ==> loc(GB_h__2(), 0).d_int
+    invariant (kv_h > none) ==> (loc(GB_h__2(), 0).v_int == vs_h)
+    invariant acc(lvloc(block_of(loc(GB_g__1(), 0))).lv, kl_g)
+    invariant acc(lvloc(block_of(loc(GB_h__2(), 0))).lv, kl_h)
+    invariant 0 <= v_i__0 && v_i__0 <= 3
+    invariant (v_i__0 > 0) ==> (loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 1)
+    decreases 3 - v_i__0
+  {
+    // g.x = 1;
+    assert loc(member(loc(GB_g__1(), 0), 0), 0) != null
+    assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) == write
+    loc(member(loc(GB_g__1(), 0), 0), 0).v_int := 1
+    loc(member(loc(GB_g__1(), 0), 0), 0).d_int := true
+    assert !((((v_i__0 + 1) < (-2147483648)) || (2147483647 < (v_i__0 + 1))))
+    v_i__0 := v_i__0 + 1
+    assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) >= kv_gx && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) >= kd_gx
+    assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) >= kv_gy && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) >= kd_gy
+    assert perm(loc(GB_h__2(), 0).v_int) >= kv_h && perm(loc(GB_h__2(), 0).d_int) >= kd_h
+    assert perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) >= kl_g
+    assert perm(lvloc(block_of(loc(GB_h__2(), 0))).lv) >= kl_h
+  }
+  // check(g.x == 1 && g.y == 5 && h == 7): g.y and h keep their values through the loop's automatic places
+  assert loc(member(loc(GB_g__1(), 0), 0), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert loc(GB_h__2(), 0) != null
+  assert perm(loc(GB_h__2(), 0).v_int) > none && perm(loc(GB_h__2(), 0).d_int) > none
+  assert loc(GB_h__2(), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 1 && loc(member(loc(GB_g__1(), 0), 1), 0).v_int == 5 && loc(GB_h__2(), 0).v_int == 7
+}
+
+// int main(void) { for (int i = 0; i < 3; i++) { g.x = 1; } check(g.x == 1 && g.y == 5 && h == 7); }   (H8: Silicon must keep g's member cells and h apart from their permissions alone)
+method f_main__0_v0()
+  decreases
+{
+  var v_i__0: Int
+  var kv_gx: Perm
+  var kd_gx: Perm
+  var vs_gx: Int
+  var ds_gx: Bool
+  var kv_gy: Perm
+  var kd_gy: Perm
+  var vs_gy: Int
+  var ds_gy: Bool
+  var kv_h: Perm
+  var kd_h: Perm
+  var vs_h: Int
+  var ds_h: Bool
+  var kl_g: Perm
+  var kl_h: Perm
+  assert false // <- fails: vacuity
+  program_start()
+  // int i = 0;  (the loop: while (i < 3) invariant(0 <= i && i <= 3 && (i == 0 || g.x == 1)) { g.x = 1; i++; })
+  v_i__0 := 0
+  kl_g := perm(lvloc(block_of(loc(GB_g__1(), 0))).lv)
+  kl_h := perm(lvloc(block_of(loc(GB_h__2(), 0))).lv)
+  kv_gx := perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int)
+  kd_gx := perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int)
+  ds_gx := false
+  if (kd_gx > none) {
+    ds_gx := loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  }
+  if (kv_gx > none) {
+    vs_gx := loc(member(loc(GB_g__1(), 0), 0), 0).v_int
+  }
+  kv_gy := perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int)
+  kd_gy := perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int)
+  ds_gy := false
+  if (kd_gy > none) {
+    ds_gy := loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  }
+  if (kv_gy > none) {
+    vs_gy := loc(member(loc(GB_g__1(), 0), 1), 0).v_int
+  }
+  kv_h := perm(loc(GB_h__2(), 0).v_int)
+  kd_h := perm(loc(GB_h__2(), 0).d_int)
+  ds_h := false
+  if (kd_h > none) {
+    ds_h := loc(GB_h__2(), 0).d_int
+  }
+  if (kv_h > none) {
+    vs_h := loc(GB_h__2(), 0).v_int
+  }
+  while (v_i__0 < 3)
+    invariant RNGV(v_i__0)
+    invariant acc(loc(member(loc(GB_g__1(), 0), 0), 0).v_int, kv_gx) && acc(loc(member(loc(GB_g__1(), 0), 0), 0).d_int, kd_gx)
+    invariant (kv_gx > none && kd_gx > none && loc(member(loc(GB_g__1(), 0), 0), 0).d_int) ==> RNG(loc(member(loc(GB_g__1(), 0), 0), 0))
+    invariant (kd_gx > none && ds_gx) ==> loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+    invariant ((none < kv_gx) && (kv_gx < write)) ==> (loc(member(loc(GB_g__1(), 0), 0), 0).v_int == vs_gx)
+    invariant acc(loc(member(loc(GB_g__1(), 0), 1), 0).v_int, kv_gy) && acc(loc(member(loc(GB_g__1(), 0), 1), 0).d_int, kd_gy)
+    invariant (kv_gy > none && kd_gy > none && loc(member(loc(GB_g__1(), 0), 1), 0).d_int) ==> RNG(loc(member(loc(GB_g__1(), 0), 1), 0))
+    invariant (kd_gy > none && ds_gy) ==> loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+    invariant (kv_gy > none) ==> (loc(member(loc(GB_g__1(), 0), 1), 0).v_int == vs_gy)
+    invariant acc(loc(GB_h__2(), 0).v_int, kv_h) && acc(loc(GB_h__2(), 0).d_int, kd_h)
+    invariant (kv_h > none && kd_h > none && loc(GB_h__2(), 0).d_int) ==> RNG(loc(GB_h__2(), 0))
+    invariant (kd_h > none && ds_h) ==> loc(GB_h__2(), 0).d_int
+    invariant (kv_h > none) ==> (loc(GB_h__2(), 0).v_int == vs_h)
+    invariant acc(lvloc(block_of(loc(GB_g__1(), 0))).lv, kl_g)
+    invariant acc(lvloc(block_of(loc(GB_h__2(), 0))).lv, kl_h)
+    invariant 0 <= v_i__0 && v_i__0 <= 3
+    invariant (v_i__0 > 0) ==> (loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 1)
+    decreases 3 - v_i__0
+  {
+    // g.x = 1;
+    assert loc(member(loc(GB_g__1(), 0), 0), 0) != null
+    assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) == write
+    loc(member(loc(GB_g__1(), 0), 0), 0).v_int := 1
+    loc(member(loc(GB_g__1(), 0), 0), 0).d_int := true
+    assert !((((v_i__0 + 1) < (-2147483648)) || (2147483647 < (v_i__0 + 1))))
+    v_i__0 := v_i__0 + 1
+    assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) >= kv_gx && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) >= kd_gx
+    assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) >= kv_gy && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) >= kd_gy
+    assert perm(loc(GB_h__2(), 0).v_int) >= kv_h && perm(loc(GB_h__2(), 0).d_int) >= kd_h
+    assert perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) >= kl_g
+    assert perm(lvloc(block_of(loc(GB_h__2(), 0))).lv) >= kl_h
+  }
+  // check(g.x == 1 && g.y == 5 && h == 7): g.y and h keep their values through the loop's automatic places
+  assert loc(member(loc(GB_g__1(), 0), 0), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert loc(GB_h__2(), 0) != null
+  assert perm(loc(GB_h__2(), 0).v_int) > none && perm(loc(GB_h__2(), 0).d_int) > none
+  assert loc(GB_h__2(), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 1 && loc(member(loc(GB_g__1(), 0), 1), 0).v_int == 5 && loc(GB_h__2(), 0).v_int == 7
+}
+
+// int main(void) { for (int i = 0; i < 3; i++) { g.x = 1; } check(g.x == 1 && g.y == 5 && h == 7); }   (H8: Silicon must keep g's member cells and h apart from their permissions alone)
+method f_main__0_v1()
+  decreases
+{
+  var v_i__0: Int
+  var kv_gx: Perm
+  var kd_gx: Perm
+  var vs_gx: Int
+  var ds_gx: Bool
+  var kv_gy: Perm
+  var kd_gy: Perm
+  var vs_gy: Int
+  var ds_gy: Bool
+  var kv_h: Perm
+  var kd_h: Perm
+  var vs_h: Int
+  var ds_h: Bool
+  var kl_g: Perm
+  var kl_h: Perm
+  program_start()
+  assert false // <- fails: vacuity
+  // int i = 0;  (the loop: while (i < 3) invariant(0 <= i && i <= 3 && (i == 0 || g.x == 1)) { g.x = 1; i++; })
+  v_i__0 := 0
+  kl_g := perm(lvloc(block_of(loc(GB_g__1(), 0))).lv)
+  kl_h := perm(lvloc(block_of(loc(GB_h__2(), 0))).lv)
+  kv_gx := perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int)
+  kd_gx := perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int)
+  ds_gx := false
+  if (kd_gx > none) {
+    ds_gx := loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  }
+  if (kv_gx > none) {
+    vs_gx := loc(member(loc(GB_g__1(), 0), 0), 0).v_int
+  }
+  kv_gy := perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int)
+  kd_gy := perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int)
+  ds_gy := false
+  if (kd_gy > none) {
+    ds_gy := loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  }
+  if (kv_gy > none) {
+    vs_gy := loc(member(loc(GB_g__1(), 0), 1), 0).v_int
+  }
+  kv_h := perm(loc(GB_h__2(), 0).v_int)
+  kd_h := perm(loc(GB_h__2(), 0).d_int)
+  ds_h := false
+  if (kd_h > none) {
+    ds_h := loc(GB_h__2(), 0).d_int
+  }
+  if (kv_h > none) {
+    vs_h := loc(GB_h__2(), 0).v_int
+  }
+  while (v_i__0 < 3)
+    invariant RNGV(v_i__0)
+    invariant acc(loc(member(loc(GB_g__1(), 0), 0), 0).v_int, kv_gx) && acc(loc(member(loc(GB_g__1(), 0), 0), 0).d_int, kd_gx)
+    invariant (kv_gx > none && kd_gx > none && loc(member(loc(GB_g__1(), 0), 0), 0).d_int) ==> RNG(loc(member(loc(GB_g__1(), 0), 0), 0))
+    invariant (kd_gx > none && ds_gx) ==> loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+    invariant ((none < kv_gx) && (kv_gx < write)) ==> (loc(member(loc(GB_g__1(), 0), 0), 0).v_int == vs_gx)
+    invariant acc(loc(member(loc(GB_g__1(), 0), 1), 0).v_int, kv_gy) && acc(loc(member(loc(GB_g__1(), 0), 1), 0).d_int, kd_gy)
+    invariant (kv_gy > none && kd_gy > none && loc(member(loc(GB_g__1(), 0), 1), 0).d_int) ==> RNG(loc(member(loc(GB_g__1(), 0), 1), 0))
+    invariant (kd_gy > none && ds_gy) ==> loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+    invariant (kv_gy > none) ==> (loc(member(loc(GB_g__1(), 0), 1), 0).v_int == vs_gy)
+    invariant acc(loc(GB_h__2(), 0).v_int, kv_h) && acc(loc(GB_h__2(), 0).d_int, kd_h)
+    invariant (kv_h > none && kd_h > none && loc(GB_h__2(), 0).d_int) ==> RNG(loc(GB_h__2(), 0))
+    invariant (kd_h > none && ds_h) ==> loc(GB_h__2(), 0).d_int
+    invariant (kv_h > none) ==> (loc(GB_h__2(), 0).v_int == vs_h)
+    invariant acc(lvloc(block_of(loc(GB_g__1(), 0))).lv, kl_g)
+    invariant acc(lvloc(block_of(loc(GB_h__2(), 0))).lv, kl_h)
+    invariant 0 <= v_i__0 && v_i__0 <= 3
+    invariant (v_i__0 > 0) ==> (loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 1)
+    decreases 3 - v_i__0
+  {
+    // g.x = 1;
+    assert loc(member(loc(GB_g__1(), 0), 0), 0) != null
+    assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) == write
+    loc(member(loc(GB_g__1(), 0), 0), 0).v_int := 1
+    loc(member(loc(GB_g__1(), 0), 0), 0).d_int := true
+    assert !((((v_i__0 + 1) < (-2147483648)) || (2147483647 < (v_i__0 + 1))))
+    v_i__0 := v_i__0 + 1
+    assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) >= kv_gx && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) >= kd_gx
+    assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) >= kv_gy && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) >= kd_gy
+    assert perm(loc(GB_h__2(), 0).v_int) >= kv_h && perm(loc(GB_h__2(), 0).d_int) >= kd_h
+    assert perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) >= kl_g
+    assert perm(lvloc(block_of(loc(GB_h__2(), 0))).lv) >= kl_h
+  }
+  // check(g.x == 1 && g.y == 5 && h == 7): g.y and h keep their values through the loop's automatic places
+  assert loc(member(loc(GB_g__1(), 0), 0), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert loc(GB_h__2(), 0) != null
+  assert perm(loc(GB_h__2(), 0).v_int) > none && perm(loc(GB_h__2(), 0).d_int) > none
+  assert loc(GB_h__2(), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 1 && loc(member(loc(GB_g__1(), 0), 1), 0).v_int == 5 && loc(GB_h__2(), 0).v_int == 7
+}
+
+// int main(void) { for (int i = 0; i < 3; i++) { g.x = 1; } check(g.x == 1 && g.y == 5 && h == 7); }   (H8: Silicon must keep g's member cells and h apart from their permissions alone)
+method f_main__0_v2()
+  decreases
+{
+  var v_i__0: Int
+  var kv_gx: Perm
+  var kd_gx: Perm
+  var vs_gx: Int
+  var ds_gx: Bool
+  var kv_gy: Perm
+  var kd_gy: Perm
+  var vs_gy: Int
+  var ds_gy: Bool
+  var kv_h: Perm
+  var kd_h: Perm
+  var vs_h: Int
+  var ds_h: Bool
+  var kl_g: Perm
+  var kl_h: Perm
+  program_start()
+  // int i = 0;  (the loop: while (i < 3) invariant(0 <= i && i <= 3 && (i == 0 || g.x == 1)) { g.x = 1; i++; })
+  v_i__0 := 0
+  kl_g := perm(lvloc(block_of(loc(GB_g__1(), 0))).lv)
+  kl_h := perm(lvloc(block_of(loc(GB_h__2(), 0))).lv)
+  kv_gx := perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int)
+  kd_gx := perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int)
+  ds_gx := false
+  if (kd_gx > none) {
+    ds_gx := loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  }
+  if (kv_gx > none) {
+    vs_gx := loc(member(loc(GB_g__1(), 0), 0), 0).v_int
+  }
+  kv_gy := perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int)
+  kd_gy := perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int)
+  ds_gy := false
+  if (kd_gy > none) {
+    ds_gy := loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  }
+  if (kv_gy > none) {
+    vs_gy := loc(member(loc(GB_g__1(), 0), 1), 0).v_int
+  }
+  kv_h := perm(loc(GB_h__2(), 0).v_int)
+  kd_h := perm(loc(GB_h__2(), 0).d_int)
+  ds_h := false
+  if (kd_h > none) {
+    ds_h := loc(GB_h__2(), 0).d_int
+  }
+  if (kv_h > none) {
+    vs_h := loc(GB_h__2(), 0).v_int
+  }
+  while (v_i__0 < 3)
+    invariant RNGV(v_i__0)
+    invariant acc(loc(member(loc(GB_g__1(), 0), 0), 0).v_int, kv_gx) && acc(loc(member(loc(GB_g__1(), 0), 0), 0).d_int, kd_gx)
+    invariant (kv_gx > none && kd_gx > none && loc(member(loc(GB_g__1(), 0), 0), 0).d_int) ==> RNG(loc(member(loc(GB_g__1(), 0), 0), 0))
+    invariant (kd_gx > none && ds_gx) ==> loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+    invariant ((none < kv_gx) && (kv_gx < write)) ==> (loc(member(loc(GB_g__1(), 0), 0), 0).v_int == vs_gx)
+    invariant acc(loc(member(loc(GB_g__1(), 0), 1), 0).v_int, kv_gy) && acc(loc(member(loc(GB_g__1(), 0), 1), 0).d_int, kd_gy)
+    invariant (kv_gy > none && kd_gy > none && loc(member(loc(GB_g__1(), 0), 1), 0).d_int) ==> RNG(loc(member(loc(GB_g__1(), 0), 1), 0))
+    invariant (kd_gy > none && ds_gy) ==> loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+    invariant (kv_gy > none) ==> (loc(member(loc(GB_g__1(), 0), 1), 0).v_int == vs_gy)
+    invariant acc(loc(GB_h__2(), 0).v_int, kv_h) && acc(loc(GB_h__2(), 0).d_int, kd_h)
+    invariant (kv_h > none && kd_h > none && loc(GB_h__2(), 0).d_int) ==> RNG(loc(GB_h__2(), 0))
+    invariant (kd_h > none && ds_h) ==> loc(GB_h__2(), 0).d_int
+    invariant (kv_h > none) ==> (loc(GB_h__2(), 0).v_int == vs_h)
+    invariant acc(lvloc(block_of(loc(GB_g__1(), 0))).lv, kl_g)
+    invariant acc(lvloc(block_of(loc(GB_h__2(), 0))).lv, kl_h)
+    invariant 0 <= v_i__0 && v_i__0 <= 3
+    invariant (v_i__0 > 0) ==> (loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 1)
+    decreases 3 - v_i__0
+  {
+    // g.x = 1;
+    assert loc(member(loc(GB_g__1(), 0), 0), 0) != null
+    assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) == write && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) == write
+    loc(member(loc(GB_g__1(), 0), 0), 0).v_int := 1
+    loc(member(loc(GB_g__1(), 0), 0), 0).d_int := true
+    assert !((((v_i__0 + 1) < (-2147483648)) || (2147483647 < (v_i__0 + 1))))
+    v_i__0 := v_i__0 + 1
+    assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) >= kv_gx && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) >= kd_gx
+    assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) >= kv_gy && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) >= kd_gy
+    assert perm(loc(GB_h__2(), 0).v_int) >= kv_h && perm(loc(GB_h__2(), 0).d_int) >= kd_h
+    assert perm(lvloc(block_of(loc(GB_g__1(), 0))).lv) >= kl_g
+    assert perm(lvloc(block_of(loc(GB_h__2(), 0))).lv) >= kl_h
+  }
+  // check(g.x == 1 && g.y == 5 && h == 7): g.y and h keep their values through the loop's automatic places
+  assert loc(member(loc(GB_g__1(), 0), 0), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 1), 0) != null
+  assert perm(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) > none && perm(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) > none
+  assert loc(member(loc(GB_g__1(), 0), 1), 0).d_int
+  assert loc(GB_h__2(), 0) != null
+  assert perm(loc(GB_h__2(), 0).v_int) > none && perm(loc(GB_h__2(), 0).d_int) > none
+  assert loc(GB_h__2(), 0).d_int
+  assert loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 1 && loc(member(loc(GB_g__1(), 0), 1), 0).v_int == 5 && loc(GB_h__2(), 0).v_int == 7
+  assert false // <- fails: vacuity
+}

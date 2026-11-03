@@ -1,0 +1,204 @@
+// expect: error assert:assertion.false @ L194
+// S34 (e) twin of s34_e_static_struct.vpr: `bad` calls `next` without the implicit atom in its own contract: the first permission assert of the call's `owns(c)` fails (`permission`; the only error).
+// Hand-written in the emitted style (see the positive fixture).
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  unique function GB_next__c__1(): Block
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0043 items 3, 9; record 0044 items 3-5, 8): WF; a leaf's range; a leaf at allocation (uninitialized); a leaf owned (full permission, flag set, range); one liveness fraction
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNG(c) ((-2147483648) <= c.v_int && c.v_int <= 2147483647)
+define RNGV(v) ((-2147483648) <= v && v <= 2147483647)
+define LEAFU(c) (acc(c.v_int) && acc(c.d_int) && !c.d_int)
+define LEAF(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNG(c))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+// struct S { int x; int y; }: member 0 is x, member 1 is y; struct T { struct S s; int z; }: member 0 is the slot of the nested S, member 1 is z
+define MX(s) loc(member(s, 0), 0)
+define MY(s) loc(member(s, 1), 0)
+define TS(t) loc(member(t, 0), 0)
+define TZ(t) loc(member(t, 1), 0)
+define SLEN(s) (len(member(s, 0)) == 1 && len(member(s, 1)) == 1)
+define SOWN(s) (SLEN(s) && LEAF(MX(s)) && LEAF(MY(s)))
+define TLEN(t) (len(member(t, 0)) == 1 && len(member(t, 1)) == 1)
+define TOWN(t) (TLEN(t) && SOWN(TS(t)) && LEAF(TZ(t)))
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+define OWNI(p, a) (ROOT(p) && LEAF(p) && LVF(p, a))
+
+// the unit's static local `c` of next (record 0044 item 9, 0041 item 12): `static struct S c;` (GB_next__c__1), zero-initialized; its implicit owns(c) is in the requires and ensures of next and of every transitive caller
+define CSLOT loc(GB_next__c__1(), 0)
+define GF (len(GB_next__c__1()) == 1 && lvloc(GB_next__c__1()) == loc(GB_next__c__1(), -2) && SLEN(CSLOT))
+define CROWN(a) (ROOT(CSLOT) && SOWN(CSLOT) && LVF(CSLOT, a))
+
+
+// cerastes:trusted-contract program start: the static struct local c holds its initial value {0, 0} with full permission and its liveness cell (record 0041 item 4, record 0044 item 9)
+method program_start()
+  ensures GF
+  ensures (acc(loc(member(loc(GB_next__c__1(), 0), 0), 0).v_int) && acc(loc(member(loc(GB_next__c__1(), 0), 0), 0).d_int) && loc(member(loc(GB_next__c__1(), 0), 0), 0).d_int && loc(member(loc(GB_next__c__1(), 0), 0), 0).v_int == 0) && (acc(loc(member(loc(GB_next__c__1(), 0), 1), 0).v_int) && acc(loc(member(loc(GB_next__c__1(), 0), 1), 0).d_int) && loc(member(loc(GB_next__c__1(), 0), 1), 0).d_int && loc(member(loc(GB_next__c__1(), 0), 1), 0).v_int == 0) && acc(lvloc(GB_next__c__1()).lv)
+  decreases _
+
+// int next(void) { static struct S c; if (c.x < 100) c.x++; return c.x; }   (the implicit atom owns(c) in requires and ensures)
+method f_next__0(amt_0: Perm) returns (res: Int)
+  requires GF
+  requires none < amt_0 && amt_0 < write
+  requires CROWN(amt_0)
+  ensures RNGV(res)
+  ensures CROWN(amt_0)
+  decreases
+{
+  // if (c.x < 100) c.x++;
+  assert loc(member(loc(GB_next__c__1(), 0), 0), 0) != null
+  assert perm(loc(member(loc(GB_next__c__1(), 0), 0), 0).v_int) > none && perm(loc(member(loc(GB_next__c__1(), 0), 0), 0).d_int) > none
+  assert loc(member(loc(GB_next__c__1(), 0), 0), 0).d_int
+  if (loc(member(loc(GB_next__c__1(), 0), 0), 0).v_int < 100) {
+    assert loc(member(loc(GB_next__c__1(), 0), 0), 0) != null
+    assert perm(loc(member(loc(GB_next__c__1(), 0), 0), 0).v_int) > none && perm(loc(member(loc(GB_next__c__1(), 0), 0), 0).d_int) > none
+    assert loc(member(loc(GB_next__c__1(), 0), 0), 0).d_int
+    assert !(((loc(member(loc(GB_next__c__1(), 0), 0), 0).v_int + 1) < (-2147483648)) || (2147483647 < (loc(member(loc(GB_next__c__1(), 0), 0), 0).v_int + 1)))
+    assert loc(member(loc(GB_next__c__1(), 0), 0), 0) != null
+    assert perm(loc(member(loc(GB_next__c__1(), 0), 0), 0).v_int) == write && perm(loc(member(loc(GB_next__c__1(), 0), 0), 0).d_int) == write
+    loc(member(loc(GB_next__c__1(), 0), 0), 0).v_int := loc(member(loc(GB_next__c__1(), 0), 0), 0).v_int + 1
+    loc(member(loc(GB_next__c__1(), 0), 0), 0).d_int := true
+  }
+  // return c.x
+  assert loc(member(loc(GB_next__c__1(), 0), 0), 0) != null
+  assert perm(loc(member(loc(GB_next__c__1(), 0), 0), 0).v_int) > none && perm(loc(member(loc(GB_next__c__1(), 0), 0), 0).d_int) > none
+  assert loc(member(loc(GB_next__c__1(), 0), 0), 0).d_int
+  res := loc(member(loc(GB_next__c__1(), 0), 0), 0).v_int
+  assert RNGV(res)
+  assert loc(GB_next__c__1(), 0) != null
+  assert WF(loc(GB_next__c__1(), 0))
+  assert offset_of(loc(GB_next__c__1(), 0)) < len(block_of(loc(GB_next__c__1(), 0)))
+  assert len(member(loc(GB_next__c__1(), 0), 0)) == 1 && len(member(loc(GB_next__c__1(), 0), 1)) == 1
+  assert perm(loc(member(loc(GB_next__c__1(), 0), 0), 0).v_int) == write && perm(loc(member(loc(GB_next__c__1(), 0), 0), 0).d_int) == write
+  assert loc(member(loc(GB_next__c__1(), 0), 0), 0).d_int
+  assert RNG(loc(member(loc(GB_next__c__1(), 0), 0), 0))
+  assert perm(loc(member(loc(GB_next__c__1(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_next__c__1(), 0), 1), 0).d_int) == write
+  assert loc(member(loc(GB_next__c__1(), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(GB_next__c__1(), 0), 1), 0))
+  assert perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) >= amt_0
+}
+
+// void rec(int n) requires(0 <= n && n <= 10) decreases(n) { if (n > 0) { next(); rec(n - 1); } }   (reaches next, so it gets the implicit atom)
+method f_rec__1(p_n: Int, amt_0: Perm)
+  requires GF
+  requires RNGV(p_n)
+  requires none < amt_0 && amt_0 < write
+  requires 0 <= p_n && p_n <= 10
+  requires CROWN(amt_0)
+  ensures CROWN(amt_0)
+  decreases p_n
+{
+  var t__1: Int
+  if (p_n > 0) {
+    // next();
+    assert loc(GB_next__c__1(), 0) != null
+    assert WF(loc(GB_next__c__1(), 0))
+    assert offset_of(loc(GB_next__c__1(), 0)) < len(block_of(loc(GB_next__c__1(), 0)))
+    assert len(member(loc(GB_next__c__1(), 0), 0)) == 1 && len(member(loc(GB_next__c__1(), 0), 1)) == 1
+    assert perm(loc(member(loc(GB_next__c__1(), 0), 0), 0).v_int) == write && perm(loc(member(loc(GB_next__c__1(), 0), 0), 0).d_int) == write
+    assert loc(member(loc(GB_next__c__1(), 0), 0), 0).d_int
+    assert RNG(loc(member(loc(GB_next__c__1(), 0), 0), 0))
+    assert perm(loc(member(loc(GB_next__c__1(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_next__c__1(), 0), 1), 0).d_int) == write
+    assert loc(member(loc(GB_next__c__1(), 0), 1), 0).d_int
+    assert RNG(loc(member(loc(GB_next__c__1(), 0), 1), 0))
+    assert perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) > none
+    assert none < (perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) / 2) && (perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) / 2) < write
+    assert perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) >= (perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) / 2)
+    t__1 := f_next__0((perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) / 2))
+    // rec(n - 1);
+    assert RNGV(p_n - 1)
+    assert loc(GB_next__c__1(), 0) != null
+    assert WF(loc(GB_next__c__1(), 0))
+    assert offset_of(loc(GB_next__c__1(), 0)) < len(block_of(loc(GB_next__c__1(), 0)))
+    assert len(member(loc(GB_next__c__1(), 0), 0)) == 1 && len(member(loc(GB_next__c__1(), 0), 1)) == 1
+    assert perm(loc(member(loc(GB_next__c__1(), 0), 0), 0).v_int) == write && perm(loc(member(loc(GB_next__c__1(), 0), 0), 0).d_int) == write
+    assert loc(member(loc(GB_next__c__1(), 0), 0), 0).d_int
+    assert RNG(loc(member(loc(GB_next__c__1(), 0), 0), 0))
+    assert perm(loc(member(loc(GB_next__c__1(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_next__c__1(), 0), 1), 0).d_int) == write
+    assert loc(member(loc(GB_next__c__1(), 0), 1), 0).d_int
+    assert RNG(loc(member(loc(GB_next__c__1(), 0), 1), 0))
+    assert perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) > none
+    assert none < (perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) / 2) && (perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) / 2) < write
+    assert perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) >= (perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) / 2)
+    assert 0 <= (p_n - 1) && (p_n - 1) <= 10
+    f_rec__1(p_n - 1, (perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) / 2))
+  }
+  assert loc(GB_next__c__1(), 0) != null
+  assert WF(loc(GB_next__c__1(), 0))
+  assert offset_of(loc(GB_next__c__1(), 0)) < len(block_of(loc(GB_next__c__1(), 0)))
+  assert len(member(loc(GB_next__c__1(), 0), 0)) == 1 && len(member(loc(GB_next__c__1(), 0), 1)) == 1
+  assert perm(loc(member(loc(GB_next__c__1(), 0), 0), 0).v_int) == write && perm(loc(member(loc(GB_next__c__1(), 0), 0), 0).d_int) == write
+  assert loc(member(loc(GB_next__c__1(), 0), 0), 0).d_int
+  assert RNG(loc(member(loc(GB_next__c__1(), 0), 0), 0))
+  assert perm(loc(member(loc(GB_next__c__1(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_next__c__1(), 0), 1), 0).d_int) == write
+  assert loc(member(loc(GB_next__c__1(), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(GB_next__c__1(), 0), 1), 0))
+  assert perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) >= amt_0
+}
+
+// int main(void) { rec(3); }   (main holds the static local from program_start)
+method f_main__2()
+  decreases
+{
+  program_start()
+  // rec(3);
+  assert loc(GB_next__c__1(), 0) != null
+  assert WF(loc(GB_next__c__1(), 0))
+  assert offset_of(loc(GB_next__c__1(), 0)) < len(block_of(loc(GB_next__c__1(), 0)))
+  assert len(member(loc(GB_next__c__1(), 0), 0)) == 1 && len(member(loc(GB_next__c__1(), 0), 1)) == 1
+  assert perm(loc(member(loc(GB_next__c__1(), 0), 0), 0).v_int) == write && perm(loc(member(loc(GB_next__c__1(), 0), 0), 0).d_int) == write
+  assert loc(member(loc(GB_next__c__1(), 0), 0), 0).d_int
+  assert RNG(loc(member(loc(GB_next__c__1(), 0), 0), 0))
+  assert perm(loc(member(loc(GB_next__c__1(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_next__c__1(), 0), 1), 0).d_int) == write
+  assert loc(member(loc(GB_next__c__1(), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(GB_next__c__1(), 0), 1), 0))
+  assert perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) > none
+  assert none < (perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) / 2) && (perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) / 2) < write
+  assert perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) >= (perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) / 2)
+  assert 0 <= 3 && 3 <= 10
+  f_rec__1(3, (perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) / 2))
+}
+
+// void bad(void) { next(); }   declared WITHOUT the implicit atom (the twin: the call's owns(c) is not held)
+method f_bad__3()
+  requires GF
+  decreases
+{
+  var t__1: Int
+  // next();   (this function has no owns(c) in its contract: nothing is held)
+  assert loc(GB_next__c__1(), 0) != null
+  assert WF(loc(GB_next__c__1(), 0))
+  assert offset_of(loc(GB_next__c__1(), 0)) < len(block_of(loc(GB_next__c__1(), 0)))
+  assert len(member(loc(GB_next__c__1(), 0), 0)) == 1 && len(member(loc(GB_next__c__1(), 0), 1)) == 1
+  assert perm(loc(member(loc(GB_next__c__1(), 0), 0), 0).v_int) == write && perm(loc(member(loc(GB_next__c__1(), 0), 0), 0).d_int) == write // <- fails
+  assert loc(member(loc(GB_next__c__1(), 0), 0), 0).d_int
+  assert RNG(loc(member(loc(GB_next__c__1(), 0), 0), 0))
+  assert perm(loc(member(loc(GB_next__c__1(), 0), 1), 0).v_int) == write && perm(loc(member(loc(GB_next__c__1(), 0), 1), 0).d_int) == write
+  assert loc(member(loc(GB_next__c__1(), 0), 1), 0).d_int
+  assert RNG(loc(member(loc(GB_next__c__1(), 0), 1), 0))
+  assert perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) > none
+  assert none < (perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) / 2) && (perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) / 2) < write
+  assert perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) >= (perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) / 2)
+  t__1 := f_next__0((perm(lvloc(block_of(loc(GB_next__c__1(), 0))).lv) / 2))
+}

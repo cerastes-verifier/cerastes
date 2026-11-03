@@ -1,0 +1,76 @@
+// expect: error assert:assertion.false @ L74
+// S34 (c) twin of s34_c_global.vpr: the facts have only the scalar `len(GB_g__1()) == 1` and the liveness cell, not the member lengths: `WF(&g.x)` at the call fails on its conjunct `offset_of(q) <= len(block_of(q))` (the prelude has no `len >= 0`, so the member length is what record 0044 item 8's facts add).
+// Hand-written in the emitted style (see the positive fixture).
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  unique function GB_g__1(): Block
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0043 items 3, 9; record 0044 items 3-5, 8): WF; a leaf's range; a leaf at allocation (uninitialized); a leaf owned (full permission, flag set, range); one liveness fraction
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNG(c) ((-2147483648) <= c.v_int && c.v_int <= 2147483647)
+define RNGV(v) ((-2147483648) <= v && v <= 2147483647)
+define LEAFU(c) (acc(c.v_int) && acc(c.d_int) && !c.d_int)
+define LEAF(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNG(c))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+// struct S { int x; int y; }: member 0 is x, member 1 is y; struct T { struct S s; int z; }: member 0 is the slot of the nested S, member 1 is z
+define MX(s) loc(member(s, 0), 0)
+define MY(s) loc(member(s, 1), 0)
+define TS(t) loc(member(t, 0), 0)
+define TZ(t) loc(member(t, 1), 0)
+define SLEN(s) (len(member(s, 0)) == 1 && len(member(s, 1)) == 1)
+define SOWN(s) (SLEN(s) && LEAF(MX(s)) && LEAF(MY(s)))
+define TLEN(t) (len(member(t, 0)) == 1 && len(member(t, 1)) == 1)
+define TOWN(t) (TLEN(t) && SOWN(TS(t)) && LEAF(TZ(t)))
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+define OWNI(p, a) (ROOT(p) && LEAF(p) && LVF(p, a))
+
+// the unit's global (record 0044 item 8) with ONLY the scalar facts: the member lengths of a struct global are missing
+define GSLOT loc(GB_g__1(), 0)
+define GFACTS (len(GB_g__1()) == 1 && lvloc(GB_g__1()) == loc(GB_g__1(), -2))
+define LIVE(a) (a != null ==> (perm(lvloc(block_of(a)).lv) > none || lvloc(block_of(a)) == lvloc(GB_g__1())))
+
+
+// cerastes:trusted-contract program start with only the scalar facts (the member lengths are what this twin removes)
+method program_start()
+  ensures GFACTS
+  ensures (acc(loc(member(loc(GB_g__1(), 0), 0), 0).v_int) && acc(loc(member(loc(GB_g__1(), 0), 0), 0).d_int) && loc(member(loc(GB_g__1(), 0), 0), 0).d_int && loc(member(loc(GB_g__1(), 0), 0), 0).v_int == 0) && (acc(loc(member(loc(GB_g__1(), 0), 1), 0).v_int) && acc(loc(member(loc(GB_g__1(), 0), 1), 0).d_int) && loc(member(loc(GB_g__1(), 0), 1), 0).d_int && loc(member(loc(GB_g__1(), 0), 1), 0).v_int == 0) && acc(lvloc(GB_g__1()).lv)
+  decreases _
+
+// void wfonly(int *p) { }
+method f_wfonly__0(p: Ref)
+  requires GFACTS
+  requires WF(p)
+  decreases
+{
+}
+
+// void pass(void) { wfonly(&g.x); }   (holds nothing; the facts have no member length, so WF(&g.x) cannot be shown)
+method f_pass__1()
+  requires GFACTS
+  decreases
+{
+  assert LIVE(loc(member(loc(GB_g__1(), 0), 0), 0))
+  assert WF(loc(member(loc(GB_g__1(), 0), 0), 0)) // <- fails
+  f_wfonly__0(loc(member(loc(GB_g__1(), 0), 0), 0))
+}
