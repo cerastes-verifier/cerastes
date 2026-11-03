@@ -382,6 +382,43 @@ The markers of <<initialization>> work on structures: `cerastes::uninit` on a
 structure local, and `cerastes::ref_to_uninit` and `cerastes::must_init` on a
 pointer to a structure, where `must_init` promises every member.
 
+*Passing and returning structures.* A structure can be passed and returned by
+value. In a contract a parameter's members (`p.x`) are their values on entry,
+like any parameter, and a result's members are named through the result
+(`r.x`); a member of a call's result is read directly (`make(4, 0).y`):
+
+[source,c]
+----
+include::example$memory/struct_by_value.c[tag=source]
+----
+
+Passing or returning a structure copies it, so every member must have a value:
+a member without one is reported as
+xref:error-messages.adoc#_uninitialized[`uninitialized`] at the call or the
+`return`, as at a copy. A contract reads a structure value only member by member
+(`p == q` and `cerastes_old(p)` are rejected: C has no `==` on structures), and
+the object a pointer member of a parameter points to (`+*p.next+`) is not
+supported in a contract yet; since a contract cannot yet say that such an object
+exists (`+cerastes_live(p.next)+`), the function cannot use the pointer member's
+value either (`return p.next;` is reported as
+xref:error-messages.adoc#_lifetime[`lifetime`]).
+
+*Compound literals.* In C, `(struct point){1, 2}` is a value wherever a structure
+value is: an initializer, an assignment, an argument, a returned value.
+`&(struct point){1, 2}` (and `+&(int){5}+`) is the address of an object that lives
+until the end of the block the literal is in, like a local declared there: after
+the block a pointer to it is dangling (<<_lifetimes_and_dangling_pointers>>):
+
+[source,c]
+----
+include::example$memory/compound_literal.c[tag=source]
+----
+
+The elements of a compound literal are evaluated before any member is stored,
+in no particular order, as the elements of an initializer are. In pass:[C++],
+where compound literals are a compiler extension creating temporaries, they are
+accepted as values only, and so are `S{1, 2}` and `S()`.
+
 Not supported yet, each rejected with a diagnostic: unions, bit-fields, array
 members, `const`, `volatile` and `_Atomic` members, anonymous members, members
 that are `void *` or pointers to functions, `packed` structures, structures
@@ -391,7 +428,10 @@ constructors, base classes, access control, `static` members, default member
 initializers). Passing or returning a structure by value, structure globals,
 initializers that elide the braces of an inner structure
 (`struct line l = {1, 2, 3, 4};`) and, in C, designators out of declaration
-order are rejected too.
+order are rejected too, and so are a structure `?:`, comma or assignment used as
+a value (`t = c ? a : b;`), the address of a `const` compound literal, a compound
+literal in a loop's condition or step, and a compound literal used as an object
+without `&` (`(struct point){1, 2}.x = 3;`).
 
 [#globals]
 == Global variables
@@ -431,9 +471,20 @@ only one that can set it:
 The rest of the program is assumed to keep to this file's contracts: code that
 runs before `main` in another file calls none of this file's functions, and a
 function of another file declared here changes only what its contract names
-(xref:verifying.adoc#one-unit[one translation unit]). Globals of other files
-(`extern int count;` with no definition here), arrays and structures are not
-supported yet.
+(xref:verifying.adoc#one-unit[one translation unit]). A structure global
+follows the same rules member by member: each member starts with the
+initializer's value, zero (or null) for the members it does not name, and a
+contract names the whole object (`cerastes_owns(stats)`) or one member
+(`+cerastes_owns(stats.hits)+`):
+
+[source,c]
+----
+include::example$memory/struct_global.c[tag=source]
+----
+
+Globals of other files (`extern int count;` with no definition here) and arrays
+are not supported yet, nor is a structure global initialized with the address of
+another global's member (`&h.x`).
 
 [#static-locals]
 == `static` local variables
@@ -453,7 +504,8 @@ include::example$memory/static_local.c[tag=source]
 Since every caller holds the variable across the call, two calls that both
 reach the function and that C does not order (`next_id() + next_id()`) are
 reported as xref:error-messages.adoc#_unsequenced[`unsequenced`]: the result
-depends on which runs first. A function may return the address of its
+depends on which runs first. A `static` local may be a structure; the function
+and its callers then hold every member. A function may return the address of its
 `static` local, but its callers cannot use the pointer yet (it is reported as
 xref:error-messages.adoc#_lifetime[`lifetime`]). A `static const` local is not
 supported yet.
@@ -596,13 +648,13 @@ These are rejected with a diagnostic, never approximated
 * `owns` or `reads` of the object of a pointer result (`*r`), and contracts
   that name objects other than those the parameters point to and the global
   variables (`+cerastes_owns(*gp)+` through a pointer global included);
-* globals defined in another file, `volatile`, `_Atomic` and thread-local
-  globals, `static const` locals, and global arrays and structures;
-* structures passed or returned by value, structure globals and `static`
-  structure locals, and the structure features listed in <<structures>>;
-* `owns`, `reads` and `live` of a structure's member in a loop invariant, a
-  member of an object reached through a pointer member (`+p->q->x+`) in a
-  contract, and a function's `decreases` that reads a member;
+* globals defined in another file, `volatile`, `_Atomic`, `const` structure and
+  thread-local globals, `static const` locals, and global arrays;
+* the structure features listed in <<structures>>;
+* `owns`, `reads` and `live` of a structure or a structure's member in a loop
+  invariant, and in a contract a member of an object reached through a pointer
+  member (`+p->q->x+`) or the object a by-value parameter's pointer member points
+  to (`+*p.next+`);
 * `owns`, `reads` and `live` in a `do … while (0)` invariant or a measure, and on
   a pointer variable whose own address is taken;
 * the attribute `cerastes::owning` on anything but a parameter (on a structure's

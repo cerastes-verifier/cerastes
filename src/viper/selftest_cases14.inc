@@ -375,19 +375,7 @@ void define_struct_objects() {
     k.fail("unsequenced", seq(k, true)->loc);
   });
 
-  // ---- the backstop rejections of check_program (item 3: a struct value exists nowhere else in VIR) ----
-  rc("struct_param_by_value", "struct", [=](Kit& k) {
-    StructType* S = mk_s(k);
-    Function* f = k.fn("f", k.vd, {{"s", k.st(S)}});
-    f->body = k.blk({});
-    k.done(f);
-  });
-  rc("struct_result_by_value", "struct", [=](Kit& k) {
-    StructType* S = mk_s(k);
-    Function* f = k.fn("f", k.st(S));
-    f->body = k.blk({});
-    k.done(f);
-  });
+  // ---- the backstop rejections of check_program (the by-value parameter and result rejections were retired for lowering cases in selftest_cases15.inc, decision 0044 item 18, question 101) ----
   rc("struct_local_not_a_cell", "address", [=](Kit& k) {
     StructType* S = mk_s(k);
     Function* f = k.fn("f", k.vd);

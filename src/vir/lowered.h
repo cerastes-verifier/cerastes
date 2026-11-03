@@ -121,6 +121,7 @@ struct LStmt {
   Check termination;           // Call: that check (decision 0013 item 8)
   std::vector<E> args;         // Call
   std::string target;          // Call: the result variable, or empty
+  std::vector<std::string> targets;  // Call: one variable per leaf of a struct result, in order (decision 0044 item 4); `target` is then empty
   std::vector<LStmt> then_body, else_body;  // If; While uses then_body as the loop body
   std::vector<LInvariant> invariants;       // While
   std::vector<E> decreases;                 // While: the termination measure, one line `decreases e1, e2` (always at least one)
@@ -148,7 +149,7 @@ struct LMethod {
   std::string name;
   std::string comment;                   // a `//` line above the method (the C/C++ function it stands for)
   std::vector<LVar> formals;
-  std::vector<LVar> results;             // zero or one
+  std::vector<LVar> results;             // zero or one; one per leaf for a struct result (decision 0044 item 4)
   std::vector<LClause> requires_;
   std::vector<LClause> ensures_;
   // `decreases e1, ...` (decision 0013): printed on every method; empty for a function outside any recursion cycle and

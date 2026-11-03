@@ -356,6 +356,7 @@ class Checker {
     ok_members_.clear();
     struct_pos_.clear();
     field_base_.clear();
+    literal_stores_.clear();
     scopes_.emplace_back();
     for (const auto& v : f.locals())
       if (v->is_param_copy) scopes_.back().insert(v->id);
@@ -1176,6 +1177,9 @@ class Checker {
     }
     switch (e.kind) {
       case Expr::Kind::Call: case Expr::Kind::Field: break;
+      case Expr::Kind::StoreE:  // only a compound literal's own store (registered by the Comma that holds it)
+        if (literal_stores_.count(&e) == 0) err(e.loc, "a write of a struct value used as a value (decision 0044 item 5: a struct assignment used as a value is M8)");
+        break;
       case Expr::Kind::Aggregate:
         if (contract) err(e.loc, "an aggregate in a contract (decision 0044 item 2: a contract reads the members of a struct parameter or result)");
         break;
@@ -1294,6 +1298,10 @@ class Checker {
       return;
     }
     if (e.c->type.pointee != nullptr && e.c->type.pointee->is_struct()) {
+      if (literal_stores_.count(&e) != 0) {  // a compound literal's object (decision 0044 item 7)
+        if (e.type != *e.c->type.pointee || e.a->type != *e.c->type.pointee) err(e.loc, "a compound literal's store whose value is not of the literal's struct type");
+        return;
+      }
       err(e.loc, "a write of a struct value through a " + e.c->type.str() + " used as a value (decision 0044 item 5: a struct assignment used as a value is M8)");
       return;
     }
@@ -1319,6 +1327,13 @@ class Checker {
     }
     if (e.a == nullptr || e.b == nullptr) { err(e.loc, "a comma with a missing operand"); return; }
     if (!seen_effects_.insert(&e).second) err(e.loc, "a comma that is reachable twice (its effects would run twice)");
+    // Decision 0044 item 7: the discarded left operand may be a compound literal's struct store, `StoreE(&cl, Aggregate)` of its hidden object.
+    if (e.a->kind == Expr::Kind::StoreE && e.a->type.is_struct() && e.a->c != nullptr && e.a->c->kind == Expr::Kind::AddrOf && e.a->c->var != nullptr &&
+        e.a->c->var->compound_literal && e.a->a != nullptr && e.a->a->kind == Expr::Kind::Aggregate) {
+      literal_stores_.insert(e.a);
+      struct_pos_.insert(e.a);
+      struct_pos_.insert(e.a->a);
+    }
     expr(*e.a, ctx, true);
     expr(*e.b, ctx, false);
     if (e.type != e.b->type) err(e.loc, "a comma has the wrong type");
@@ -1461,6 +1476,7 @@ class Checker {
   std::set<const Expr*> ok_members_;  // the MemberAddr nodes that stand in the place of a Deref or an Atom of a contract (decision 0043 item 9)
   std::unordered_set<const StructType*> structs_;  // the program's struct types
   std::set<const Expr*> struct_pos_;  // the struct-typed nodes a consumer allows (call argument, return, struct Store, expression statement, Field operand; decision 0044 item 2)
+  std::set<const Expr*> literal_stores_;  // the struct StoreE nodes of a compound literal's object: `Comma(StoreE(&cl, Aggregate), &cl)` (decision 0044 item 7)
   std::set<const Expr*> field_base_;  // the struct-typed nodes that are the operand of a Field (or of an Old under one) in a contract: a Formal, the Result or an Old may stand there
   std::set<const Expr*> shared_addrs_;  // the address nodes of the stores being checked: a compound store's Deref shares its address (0039 item 5)
   struct Target {

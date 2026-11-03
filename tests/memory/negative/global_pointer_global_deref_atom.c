@@ -1,7 +1,7 @@
 // expect: rejected cerastes-unsupported_annotation @ L11
 // mode: c23, c++20
 // twin: tests/memory/global_pointer_global.c
-// Pins: 0041 item 7 (0040 item 6, question 74), record 0043 item 15 (re-messaged by M4.5c1): owns(*gp) names a place reached through a heap read: rejected until M4.5c2
+// Pins: 0041 item 7 (0040 item 6, question 74), record 0043 item 15 (re-messaged by M4.5c1): owns(*gp) names a place reached through a heap read: rejected until M4.5c2b (record 0044 item 1)
 #include <cerastes.h>
 
 static int h = 7;

@@ -145,7 +145,13 @@ void stmt(Printer& p, const low::LStmt& s, int indent) {
       for (size_t i = 0; i < s.args.size(); ++i) args += (i != 0 ? ", " : "") + expr(s.args[i], true);
       std::vector<low::Check> checks = {s.check};
       if (s.has_termination) checks.push_back(s.termination);
-      p.line(indent, (s.target.empty() ? "" : s.target + " := ") + s.name + "(" + args + ")", checks);
+      std::string lhs = s.target.empty() ? "" : s.target + " := ";
+      if (!s.targets.empty()) {  // a struct result: one target per leaf (decision 0044 item 4)
+        lhs.clear();
+        for (size_t i = 0; i < s.targets.size(); ++i) lhs += (i != 0 ? ", " : "") + s.targets[i];
+        lhs += " := ";
+      }
+      p.line(indent, lhs + s.name + "(" + args + ")", checks);
       break;
     }
     case K::If:

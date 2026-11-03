@@ -365,6 +365,10 @@ struct Var {
   SrcLoc loc;                // the declaration
   std::string c_type_name;   // the C/C++ spelling of the type, for messages (empty: use type.str())
   bool is_param_copy = false;  // the local copy of a parameter (0012 item 2)
+  // The hidden object of a compound literal `&(T){...}` (decision 0044 item 7): a cell the encoder declares at the start of the block that holds the literal and
+  // writes with a StoreE inside the expression `Comma(StoreE(&cl, value), &cl)`.  `name` is how messages spell the literal (`(struct S){...}`), never an internal
+  // name.  check_program admits a struct StoreE only at such a variable, with an Aggregate, as the discarded left operand of a Comma.
+  bool compound_literal = false;
   int param_index = -1;        // for a parameter copy
   // The program takes this variable's address (EDG's `address_taken`, decision 0032 item 4): the variable is a CELL, an object in a
   // one-slot block that a pointer may reach.  Set with Function::mark_address_taken.  Assign, Decl and AssignE of it keep their kinds (the

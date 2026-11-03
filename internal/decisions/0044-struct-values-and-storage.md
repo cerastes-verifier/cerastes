@@ -1,13 +1,17 @@
 # 0044 — Struct values and struct storage (M4.5c2a)
 
-- **Status:** draft for M4.5c2a (2026-11-02), written before code (invariant 6), revised after P67 (the IL: PASS, hazards
+- **Status:** accepted for M4.5c2a (2026-11-02), written before code (invariant 6), revised after P67 (the IL: PASS, hazards
   H1–H9, items 4, 6–8), P68 (the compiler matrix: only `h2(s, s = t)` warns, item 5), P69 (the invariant heap-read gap: no
   wrong verdict, item 12) and audit round 1 (Opus, on the draft: B1 the elements of `&(T){…}` stay unsequenced and B2 a
   `const` literal may share its object, item 7; should-fix S1 the literal's block for `for`/`switch`/`else`, S2 literals used
   as lvalues, S3 element writes through aliases, S4 side-effect bases beyond arguments, S5 item 12's argument, S6 the
   rejections of item 15, S7 the lint's `Addr` leaf, S8 item 11's wording; notes N1–N7; all taken; `build/m4.5c2a/audit1.md`);
-  and S34 (Silicon: PASS for (a)–(f), every vacuity clone failing; H8 needs no fact, item 8). During the session the owner answered question 101 (two VIR self-test rejection cases retired for
-  lowering cases, item 18). Owner decisions (M4.5c2a
+  and S34 (Silicon: PASS for (a)–(f), every vacuity clone failing; H8 needs no fact, item 8), and audit round 2 (on the code: no blocking item; S1 `volatile` and `_Atomic` literal values, item
+  7; S2 and S3 pins; S4 the lint's `Addr` rule, item 13; S5 `u = mk().t;`, item 5; notes N6–N10 taken or in the handoff;
+  `build/m4.5c2a/audit2.md`), and one re-audit (no blocking item; S1 the global-leaf write rule outside `main`, item 8;
+  N1 a C++ initializer context, item 6; `build/m4.5c2a/audit3.md`). During the session the owner answered question 101 (two VIR self-test rejection cases retired for
+  lowering cases, item 18) and question 102 (the expectations of new tests corrected after their first run, each listed
+  in the status entry). Owner decisions (M4.5c2a
   planning, 2026-11-02; plan `.claude/plans/m4-5c2a-struct-values.md`; handoff questions 95–100, each the
   recommendation):
   - **95:** M4.5c2 is two sessions: this record's struct values and struct storage, and M4.5c2b's places reached through
@@ -100,7 +104,7 @@ results, `f().x`, temporaries (`S{…}`, `S()`, compound literals), and struct o
      source (`return *get();`) and a struct `Store`'s destination (`get()->t = f();`, `(*pp)->t = f();`, where `f` could
      write `*pp`, which C leaves indeterminately sequenced with the call). C++'s `g({1, 2})` is a value (P67 H7).
    - **Results used:** `S s = f();`, `t = f();`, `*p = f();`, `p->t = f();`, `g(f())`, `return f();`, `f().x`, `f().t.y`,
-     and `f();` discarded. A struct `Store` writes every destination leaf after the value exists: the base's null check,
+     `u = f().t;` and `struct T u = f().t;` (a nested member of a result), and `f();` discarded. A struct `Store` writes every destination leaf after the value exists: the base's null check,
      then per leaf its permission at `write` (with `WF` for a pointer leaf) and its flag set.
    - **Sequencing:** a struct-valued call is one call (0021, 0039 item 4), its leaves one dependency set; the leaf reads of
      an object argument are reads of each leaf's key (0043 item 12); a struct `Store` writes every destination leaf's key;
@@ -125,7 +129,11 @@ results, `f().x`, temporaries (`S{…}`, `S()`, compound literals), and struct o
    their elements with zero leaves for the members they do not name (P67 H6: C++ writes zero fillers into designated
    lists, and `S()` as a value is `dik_zero` with no aggregate: every leaf zero; H7: as an initializer or a return the list
    is a plain aggregate, as an argument or an assignment source a `temp_init`). `S s(1, 2)` and `S(1, 2)` stay M7, and so
-   does `t = {1, 2};` (a call of `operator=` with a braced list).
+   does `t = {1, 2};` (a call of `operator=` with a braced list). A C++20 designated list that skips a nested struct
+   member (`T{.z = 1}`: EDG fills the member with zeros without braces, P65 H1) stays rejected as 0043 item 6 rejects it
+   in an initializer (M8), and so does a temporary with a nested struct member as an argument inside a variable's
+   initializer (`int r = get(T{{1, 2}, 3});`: EDG folds it there and drops its braces flags, so it cannot be told from
+   brace elision; M8, re-audit N1); as an assignment's or a statement's call it is accepted.
 7. **Compound literals** (question 96).
    - **As values** (both modes): `(struct S){…}` used as a copy source, an argument, a return value or a member read is an
      `Aggregate` of its elements (0043 item 6's element rules: each an assignment conversion, overrides rejected, in C
@@ -154,7 +162,8 @@ results, `f().x`, temporaries (`S{…}`, `S()`, compound literals), and struct o
      `(int){1}++`, `(int){1} += 2`, `(struct S){0} = t;`; M8); file-scope literals (static storage: EDG makes `&(int){5}`
      a compiler-generated static variable and `struct S gs = (struct S){1, 2};` an aggregate flagged
      `is_compound_literal`, P67 H5; also as a `static` local's initializer); array literals (M4.5e1). C23 storage-class
-     literals (`(static int){5}`, `(constexpr int){5}`) never reach cerastes: EDG refuses them (P67, P68).
+     literals (`(static int){5}`, `(constexpr int){5}`) never reach cerastes: EDG refuses them (P67, P68). A `volatile` or
+     `_Atomic` literal is rejected as a value too (M8, as 0043 item 2's qualified members; audit round 2, S1).
    - **Unevaluated operands** (`sizeof`, `typeof`, `_Generic`, `alignof`) create no hidden object and store nothing.
 8. **Struct globals** (amends 0041 items 2–5, 7, 10, 11).
    - **Layout:** a struct global's block `GB_g()` holds the slot `loc(GB_g(), 0)` with its member blocks (0043 item 3).
@@ -179,7 +188,17 @@ results, `f().x`, temporaries (`S{…}`, `S()`, compound literals), and struct o
      reads of `g.x`, `old(g.x)` and `decreases(g.x)`, with 0043 item 9's overlap rule per root (a global's root is its
      block) and 0041 item 7's rule of one atom of a kind per place.
    - **Loops:** a held struct global (every global in `main`) gives every leaf as an automatic place (0041 item 10, 0043
-     item 11), one liveness row per root.
+     item 11), one liveness row per root. A write by name to a member of a global (`g.x = …`, `g.t = …`: an address that
+     is a member chain over the global's address, with no load) reaches exactly the leaves it names, as a write to a
+     scalar global by name reaches only that global (amends 0038 item 3's rule that a write reaches every place of its
+     field), **where the function holds those leaves of `g` as its own automatic places** (in `main`, or under a
+     `requires` atom on `g` covering them): its write permission then keeps every other place apart (another leaf of `g`
+     is another member block, another global another block, a local another block). Elsewhere — a function that reaches
+     `g` through a parameter's atom (`owns(*s)` with `s == &g`) or a written atom on a reassigned parameter — the write
+     stays field-wide (re-audit S1: those places may hold the leaf). A missed reach could only strengthen a row Silicon
+     checks, never assume a value. A write through a pointer stays field-wide, and so do writes to the members of struct
+     locals (0043 item 11, unchanged: more precise, but it would change the Viper of programs accepted before this
+     record).
    - **Hazard H8, closed by S34 (d):** two globals' blocks are told apart without a new fact. If a member block of
      `g`'s slot were `GB_h()`, `member_lv` would give it `g`'s liveness cell `lvloc(GB_g()) == loc(GB_g(), -2)` (0041
      item 4's fact), while `h`'s fact gives `lvloc(GB_h()) == loc(GB_h(), -2)`; `loc_inv` then makes `GB_g() == GB_h()`,
@@ -212,13 +231,18 @@ results, `f().x`, temporaries (`S{…}`, `S()`, compound literals), and struct o
 13. **The lint** (`lint_viper.py`).
     - `program_start`'s row of a struct global is pinned by its shape, as `alloc_struct_*`'s is (0043 item 13): every
       chain canonical and rooted at `loc(GB_g(), 0)`, each leaf once and no leaf's chain a prefix of another's, the value
-      grammar per leaf, exactly one `lv` on `lvloc(GB_g())`, nothing else; an `Addr` value only on a pointer leaf whose
-      field names the target's own type (`ptr_struct_<n>_<tag>` of the target struct, `ptr_int` of an `int` target).
+      grammar per leaf, exactly one `lv` on `lvloc(GB_g())`, nothing else; an `Addr` value from a scalar pointer field
+      only to a scalar global and from a `ptr_struct_*` field only to a struct global, and one field's targets all of one
+      row shape. The `.vpr` names no struct type on a global, so a target of another struct type with the same shape
+      lints clean (audit round 2, S4): the type match is the encoder's and `check_program`'s (the leaf's pointee type
+      equals the target global's), and Viper's field typing makes a wrong target unusable.
     - The facts row is exactly the scalar facts, the member lengths of the unit's struct globals and their slot pairs (and
       nothing else; S34 (d) showed H8 needs no `parent_of` fact).
     - `lint_perm_locals` sees every target of a multi-target call (closing a standing gap).
-14. **Categories:** none new. Messages name leaves in source terms: "passes `s`, whose member `s.y` may not have a
-    value" (`uninitialized` at a call), "returns `s`, whose member `s.y` …" (at a return), `r.x`, `g.t.y`.
+14. **Categories:** none new. Messages name leaves in source terms, as 0043 item 7's copies do: a member without a value
+    passed or returned is "`s.y` may be read here before it is given a value", reported at the call or the `return`;
+    `r.x`, `g.t.y` likewise. (0043 item 7 and the Error messages page quoted "copies `s`, whose member `s.y` may not have
+    a value", a text the tool never printed; the page is corrected to the printed message.)
 15. **Still rejected** (fail closed; each pinned): item 1's c2b, d2, e1, M4.6, M4.5f1, M7 and M8 rows; item 3's and item
     4's rejected contract forms (whole struct values, `old(r.x)`, atoms on by-value members, `*s.q`, `live(s.q)`,
     `reads(*s.q)`, `live(r.q)`); item 5's values and bases; item 7's literals; item 8's initializers; item 9's `static`

@@ -7048,6 +7048,86 @@ while the same member in a `requires` is a value `{int<-same}` (`q7.c:5`, `:10`,
 - **N4.** Expression positions (`@Lline:col`) of a `temp_init` are those of the opening `(` or of the type name of the literal; a C++ `{1, 2}` in an argument or assignment has no position (`{S:}`), so a message about it falls back to the enclosing statement.
 - **N5.** Not probed: a literal inside a lambda or a statement expression, `static`/`thread_local` struct locals in C++ with a dynamic initializer beyond `q6x.cpp:16`, and `restrict` by-value structs (no IL content).
 
+### P68: compiler matrix of struct-value shapes (record 0044 items 5-7, 9; test-mutator)
+
+Evidence: `build/m4.5c2a/p68/` (`gen.py` regenerates `src/`, `raw/<shape>.<compiler-mode>.<tier>.<syntax|O2>.txt`, `raw/<shape>.EDG-<c|cpp>.txt` and `results.json`; `table.py` builds `table.md` below from `results.json`).
+Versions: Apple clang 21.0.0 (clang-2100.3.34.2, `/Library/Developer/CommandLineTools/usr/bin/clang` and `clang++`), arm64-apple-darwin27.0.0; Homebrew GCC 16.2.0 (`gcc-16`, `g++-16`); EDG: the stock `build/edg/bin/cpfe` through `scripts/cpfe.sh` (`--c23` / `--c++20 --no_code_gen`).
+Method as P66: modes `-std=c23` (C) and `-std=c++20` (C++), tiers D (no flag), A (`-Wall`), E (`-Wall -Wextra`), each with `-fsyntax-only` and with `-O2 -c -o /dev/null` (the flow warnings): 900 compiler runs. A shape valid in both languages is the same source in both modes (`struct S` spelled out; C++ only shapes use `S{...}`/`(S){...}`). Shapes that only one language accepts are `-` in the other column.
+Cell = the first tier at which any diagnostic appears, with the flag (`-O2 only` = silent under `-fsyntax-only`); `ERROR` = the compiler refuses; `silent` = nothing at any tier, either way of running. Declarations: `struct S { int x; int y; }; struct T { struct S t; int z; };`, `get(struct S)`, `h(struct S, int)`, `h2(struct S, struct S)`; M-like shapes are `int r = <expr>; (void)s; return r;` with `struct S s = {0, 0};`.
+The union rule of 0020 item 5 / 0039 item 3 (rejected like the compilers): a warning at tier D or A, `-fsyntax-only`, in some compiler and mode.
+
+#### For the owner
+
+- **Sequencing with a struct argument.** Only `h2(s, s = t)` (Q4: the argument `s` and the assignment `s = t` name the whole object) warns: clang `-Wunsequenced` at no flag (C only; clang++ is silent), GCC `-Wsequence-point` from `-Wall` in both modes. By the union rule Q4 is an `unsequenced_modification` rejection. `get(s) + (s.y = 1)`, `get(s) + s.x++`, `h(s, s.x = 1)` and `h(s, s.y++)` (Q1, Q2, Q3, Q5) are silent in every compiler, mode and tier (a by-value argument is a read of the whole `s`, which the compilers do not connect to a member write): they are accepted by the union rule. they are accepted by the compiler union rule. Record 0044 item 5 rejects them anyway (`unsequenced_modification`, 0039 item 3's static rule, question 70): a by-value argument reads every leaf of `s` (question 97), so each shape reads and writes one leaf, which C leaves undefined (C23 6.5p2), although no compiler connects the member write to the whole-object argument.
+- **Compound literal assignments** (L1-L6): silent everywhere, in both languages and at every tier, including `s = (struct S){s.x++, 0}` and `s = (struct S){.x = (s.y = 1), .y = 2}` and C++'s `s = S{s.x++, 0}`: no compiler diagnoses an element that writes the destination, so the C rule of record 0044 item 6 (a destination no element names, whose address is not taken) is cerastes's own, not "like the compilers"; the harmless swap `s = (struct S){s.y, s.x}` is silent too. Nothing here is a union-rule rejection.
+- **`-Wmissing-field-initializers`** is `-Wextra`-only in every compiler and mode (W1-W4, W6): `(struct S){1}`, `struct S g = {1};`, `return (struct S){1};` and `S{1}` warn from tier E, never at D or A; accepted by the union rule. `{0}` is silent in C but warns in C++ with both compilers (W5: `missing initializer for member 'S::y'`); `S{}` is silent (W7).
+- **C++ compound literals** `(S){1, 2}` as a value, an initializer, an argument or an assignment source (K1, K2, K4) are silent in clang++ and g++ at every tier (they warn only under `-pedantic`, not measured). **`&(S){1, 2}` is an error in both** (K3, R1-R5, C3, C4 in C++): clang `-Waddress-of-temporary` (an error by default) or `cannot take the address of an rvalue of type 'int'`, GCC `taking address of rvalue [-fpermissive]` or `lvalue required as unary '&' operand`. **EDG accepts them silently** in C++ (K3, C3, C4; R1/R3 only warn `returning pointer to local temporary`), so cerastes must reject `&(S){...}` in C++ itself (the two new C++ pins of the flips).
+- **Escaping a compound literal's address** in C: `return &(int){5};` (R1, R3) warns in clang at no flag (`-Wreturn-stack-address`) and in GCC only with `-O2` (`-Wreturn-local-addr`; silent under `-fsyntax-only`): already 0039 item 6's R14. Through a pointer variable (R2 block, R4 loop, R5 `if` condition) clang is silent at every tier and GCC warns only with `-O2` from `-Wall` (`-Wdangling-pointer=`, plus a `-Wuninitialized` on the literal); not a union-rule rejection under `-fsyntax-only`, so these are cerastes's `lifetime` errors (the H3 twins), not rejections. EDG warns only on the direct `return` (R1, R3).
+- **C23 storage-class literals and file-scope literals:** `(static int){5}` and `(constexpr int){5}` (C1, C2, C5): **clang 21 refuses both** (`expected expression`), **GCC 16 accepts both silently**, and **EDG refuses both** (`a storage class may not be specified here`; `constexpr` is an undefined identifier, as handoff 8's C23 `constexpr` entry says): record 0044 item 7's rejection of them is unreachable, the front end errors first (a `frontend-error`-style outcome). File-scope `int *gp = &(int){5};` and `struct S *gq = &(struct S){1, 2};` (C3, C4) are accepted silently by clang, GCC and EDG in C (static storage), errors in C++ (above): cerastes rejects them as a file-scope literal in both modes (item 7), by its own rule, not the compilers'.
+- **Partly initialized struct by value:** `struct S s; s.x = 1; get(s);` (U1), `return s;` (U2) and the copy (U3) are silent in every compiler, mode, tier and `-O2`; only passing a struct with nothing set (U4) warns, in clang C at `-Wall` (`-Wuninitialized`; clang++ and GCC are silent) and in EDG (`variable "s" is used before its value is set`, both modes). cerastes's `uninitialized` at the call or return (question 97) is stricter than every compiler on U1 and U2 (an error category, not a rejection: the union rule does not apply).
+- **Struct-valued calls in sequencing** (A1-A4: `h2(mk(), mk())`, `mk().x + mk().x`, `get(mk()) + g1`, `mk().x + (g1 = 3)` with `mk` writing the global `g1`): silent in every compiler, mode and tier (the calls are indeterminately sequenced, not unsequenced): accepted; cerastes's call-sequencing rules (0021, 0039) decide them as for scalar results.
+- **C++ temporaries** (X1-X5: `S s = S{1, 2};`, `S s = S();`, `get(S{1, 2})`, `return S{};`, `mk().x`): silent everywhere.
+- **EDG itself** is silent on every shape except `returning pointer to local temporary` (R1, R3, both modes), `#549` on U4 (both modes), the C23 refusals above; it accepts `&(S){...}` in C++ (clang and GCC do not).
+- **Rejected by the union rule:** only Q4 (`h2(s, s = t)`, `unsequenced_modification`). By cerastes's own rule (record 0044 item 5) also Q1, Q2, Q3, Q5 and the named-destination literal shapes L1, L2, L5, L6; every other shape is accepted or is a path-precise error.
+
+#### Matrix
+
+| Shape | Source | clang-C | clang-C++ | gcc-C | gcc-C++ | EDG (stock) |
+|---|---|---|---|---|---|---|
+| Q1 | `get(s) + (s.y = 1)` | silent | silent | silent | silent | C: silent; C++: silent |
+| Q2 | `get(s) + s.x++` | silent | silent | silent | silent | C: silent; C++: silent |
+| Q3 | `h(s, s.x = 1)` | silent | silent | silent | silent | C: silent; C++: silent |
+| Q4 | `h2(s, s = t)` | -Wunsequenced from D | silent | -Wsequence-point from A | -Wsequence-point from A | C: silent; C++: silent |
+| Q5 | `h(s, s.y++)  (control: the argument is read before? y is not read by h)` | silent | silent | silent | silent | C: silent; C++: silent |
+| L1 | `s = (struct S){s.x++, 0};` | silent | silent | silent | silent | C: silent; C++: silent |
+| L2 | `s = (struct S){.x = (s.y = 1), .y = 2};` | silent | silent | silent | silent | C: silent; C++: silent |
+| L3 | `s = (struct S){s.y, s.x};  (the harmless swap)` | silent | silent | silent | silent | C: silent; C++: silent |
+| L4 | `s = S{s.y, s.x};` | - | silent | - | silent | C++: silent |
+| L5 | `s = S{s.x++, 0};` | - | silent | - | silent | C++: silent |
+| L6 | `s = S{.x = (s.y = 1), .y = 2};` | - | silent | - | silent | C++: silent |
+| W1 | `(struct S){1} as a local initializer` | -Wmissing-field-initializers from E | -Wmissing-field-initializers from E | -Wmissing-field-initializers from E | -Wmissing-field-initializers from E | C: silent; C++: silent |
+| W2 | `global struct S g = {1};` | -Wmissing-field-initializers from E | -Wmissing-field-initializers from E | -Wmissing-field-initializers from E | -Wmissing-field-initializers from E | C: silent; C++: silent |
+| W3 | `return (struct S){1};` | -Wmissing-field-initializers from E | -Wmissing-field-initializers from E | -Wmissing-field-initializers from E | -Wmissing-field-initializers from E | C: silent; C++: silent |
+| W4 | `local struct S s = {1}; (control)` | -Wmissing-field-initializers from E | -Wmissing-field-initializers from E | -Wmissing-field-initializers from E | -Wmissing-field-initializers from E | C: silent; C++: silent |
+| W5 | `local struct S s = {0}; (control: no warning by design)` | silent | -Wmissing-field-initializers from E | silent | -Wmissing-field-initializers from E | C: silent; C++: silent |
+| W6 | `S s = S{1};` | - | -Wmissing-field-initializers from E | - | -Wmissing-field-initializers from E | C++: silent |
+| W7 | `S s = S{};  (control)` | - | silent | - | silent | C++: silent |
+| K1 | `S s = (S){1, 2};` | - | silent | - | silent | C++: silent |
+| K2 | `get((S){1, 2})` | - | silent | - | silent | C++: silent |
+| K3 | `const S *p = &(S){1, 2};` | - | ERROR -Waddress-of-temporary taking the address of a temporary object of type 'S' (from D) | - | ERROR -fpermissive taking address of rvalue (from D) | C++: silent |
+| K4 | `s = (S){1, 2};` | - | silent | - | silent | C++: silent |
+| R1 | `return &(int){5};` | -Wreturn-stack-address from D | ERROR cannot take the address of an rvalue of type 'int' (from D) | -Wreturn-local-addr from D (-O2 only) | ERROR lvalue required as unary '&' operand (from D) | C: warning: returning pointer to local; C++: warning: returning pointer to local |
+| R2 | `int *p; { p = &(int){5}; } return *p;` | silent | ERROR cannot take the address of an rvalue of type 'int' (from D) | -Wdangling-pointer=,-Wuninitialized from A (-O2 only) | ERROR lvalue required as unary '&' operand (from D) | C: silent; C++: silent |
+| R3 | `return &(struct S){1, 2};` | -Wreturn-stack-address from D | ERROR -Waddress-of-temporary taking the address of a temporary object of type 'struct S' (from D) | -Wreturn-local-addr from D (-O2 only) | ERROR -fpermissive taking address of rvalue (from D) | C: warning: returning pointer to local; C++: warning: returning pointer to local |
+| R4 | `for (...) { p = &(int){i}; } return *p;` | silent | ERROR cannot take the address of an rvalue of type 'int' (from D) | -Wdangling-pointer=,-Wuninitialized from A (-O2 only) | ERROR lvalue required as unary '&' operand (from D) | C: silent; C++: silent |
+| R5 | `if ((p = &(int){5}) != 0) {} return *p;` | silent | ERROR cannot take the address of an rvalue of type 'int' (from D) | -Wdangling-pointer=,-Wuninitialized from A (-O2 only) | ERROR lvalue required as unary '&' operand (from D) | C: silent; C++: silent |
+| C1 | `(static int){5}` | ERROR expected expression (from D) | - | silent | - | C: error: a storage class may not be |
+| C2 | `(constexpr int){5}` | ERROR expected expression (from D) | - | silent | - | C: error: identifier "constexpr" is / error: expected a ")" |
+| C3 | `file scope: int *gp = &(int){5};` | silent | ERROR cannot take the address of an rvalue of type 'int' (from D) | silent | ERROR lvalue required as unary '&' operand (from D) | C: silent; C++: silent |
+| C4 | `file scope: struct S *gq = &(struct S){1, 2};` | silent | ERROR -Waddress-of-temporary taking the address of a temporary object of type 'struct S' (from D) | silent | ERROR -fpermissive taking address of rvalue (from D) | C: silent; C++: silent |
+| C5 | `(static int){5} with an address: int *p = &(static int){5};` | ERROR expected expression (from D) | - | silent | - | C: error: a storage class may not be |
+| U1 | `struct S s; s.x = 1; get(s);` | silent | silent | silent | silent | C: silent; C++: silent |
+| U2 | `struct S s; s.x = 1; return s;  (by value result)` | silent | silent | silent | silent | C: silent; C++: silent |
+| U3 | `struct S s; s.x = 1; struct S t = s;  (copy, as P66 U2)` | silent | silent | silent | silent | C: silent; C++: silent |
+| U4 | `struct S s; get(s);  (nothing set)` | -Wuninitialized from A | silent | silent | silent | C: warning: variable "s" is used before; C++: warning: variable "s" is used |
+| U5 | `struct S s; s.x = 1; s.y = 2; get(s);  (control: fully set)` | silent | silent | silent | silent | C: silent; C++: silent |
+| A1 | `h2(f(), f()) with f writing a global` | silent | silent | silent | silent | C: silent; C++: silent |
+| A2 | `f().x + f().x` | silent | silent | silent | silent | C: silent; C++: silent |
+| A3 | `get(f()) + g1` | silent | silent | silent | silent | C: silent; C++: silent |
+| A4 | `f().x + (g1 = 3)` | silent | silent | silent | silent | C: silent; C++: silent |
+| X1 | `S s = S{1, 2};` | - | silent | - | silent | C++: silent |
+| X2 | `S s = S();` | - | silent | - | silent | C++: silent |
+| X3 | `get(S{1, 2})` | - | silent | - | silent | C++: silent |
+| X4 | `return S{};` | - | silent | - | silent | C++: silent |
+| X5 | `mk().x` | - | silent | - | silent | C++: silent |
+
+#### Classification
+
+- **Reject (`unsequenced_modification`):** Q4 by the union rule (clang C at no flag, GCC from `-Wall`); Q1, Q2, Q3, Q5 and L1, L2, L5, L6 by cerastes's own rule (no compiler warns).
+- **Accept:** L3, L4 (the swap), W1-W4, W6 (`-Wextra` only), K1, K2, K4 (C++ compound literals as values), A1-A4, X1-X5, C3, C4 in C.
+- **Errors, not rejections:** U1-U4 (`uninitialized`, question 97, stricter than every compiler on U1 and U2); R2, R4, R5 (`lifetime`); R1, R3 (R14, `return_local_address`).
+- **Rejected by cerastes itself (the front end or compilers disagree):** C++ `&(S){...}` and `&(int){5}` (K3, R1-R5, C3, C4 in C++: clang and GCC error, EDG accepts); C23 storage-class literals (C1, C2, C5: EDG errors first, clang errors, GCC accepts); file-scope literals in both modes (C3, C4).
+
 ### P69: the invariant heap-read gap (record 0044 item 12) **no wrong verdict, no exit 3; `p->q->x`, `*p->q` and `*gp` are accepted today and every twin fails for the right reason; `**pp` is rejected (exit 2); recommendation: accept and pin**
 
 Evidence in `build/m4.5c2a/p69/` (not committed): the generators `gen.py` (the 24 programs of the plan's matrix), `gen2.py` (tautology twins for the unheld cases), `gen3.py` (vacuity pairs, first alias traps), `gen4.py` (bounded alias traps that repoint the loaded pointer) -

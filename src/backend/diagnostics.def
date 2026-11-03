@@ -149,7 +149,7 @@ CERASTES_DIAG(enumerator_not_handled, error,
 // -Wall warn about, which are rejected like errors.
 CERASTES_DIAG(unsequenced_modification, error,
               "\"%s\" is modified in this expression and also read or modified elsewhere in it with no sequence point "
-              "between: the behavior is undefined (decision 0020)")
+              "between: %s (decision 0020)")
 CERASTES_DIAG(assignment_as_condition, error,
               "an assignment is used as a condition without extra parentheses: write \"((x = e))\" or compare the value "
               "(\"(x = e) != 0\"), as -Wparentheses asks (decision 0020)")
