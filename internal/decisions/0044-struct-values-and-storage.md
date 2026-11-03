@@ -10,8 +10,8 @@
   7; S2 and S3 pins; S4 the lint's `Addr` rule, item 13; S5 `u = mk().t;`, item 5; notes N6–N10 taken or in the handoff;
   `build/m4.5c2a/audit2.md`), and one re-audit (no blocking item; S1 the global-leaf write rule outside `main`, item 8;
   N1 a C++ initializer context, item 6; `build/m4.5c2a/audit3.md`). During the session the owner answered question 101 (two VIR self-test rejection cases retired for
-  lowering cases, item 18) and question 102 (the expectations of new tests corrected after their first run, each listed
-  in the status entry). Owner decisions (M4.5c2a
+  lowering cases, item 18) question 102 (the expectations of new tests corrected after their first run, each listed
+  in the status entry) and question 103 (one more new VIR case's row index). Owner decisions (M4.5c2a
   planning, 2026-11-02; plan `.claude/plans/m4-5c2a-struct-values.md`; handoff questions 95–100, each the
   recommendation):
   - **95:** M4.5c2 is two sessions: this record's struct values and struct storage, and M4.5c2b's places reached through

@@ -258,7 +258,7 @@ void define_struct_globals() {
     return cf->loc;
   };
   lc("sglob_static_recursion", "the static struct local c of f is held by f and by r (which calls f and itself) as an implicit owns of every leaf, and by main from program_start", [=](Kit& k) { statics(k, 0); });
-  lc("sglob_static_unheld", "r without the implicit atom holds no permission to c: permission at its call of f", [=](Kit& k) { k.fail_only("permission", statics(k, 1), 13, 0); });
+  lc("sglob_static_unheld", "r without the implicit atom holds no permission to c: permission at its call of f", [=](Kit& k) { k.fail_only("permission", statics(k, 1), 13, 3); });
 
   // a nested struct global: struct T { struct S s; int z; } t; main reads t.s.y and writes t.z
   lc("sglob_nested", "a nested struct global: the slot facts and the member lengths of the nested slot are in the facts; main reads a nested leaf and writes another", [=](Kit& k) {
