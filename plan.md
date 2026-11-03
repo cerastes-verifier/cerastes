@@ -9,7 +9,7 @@ it was ≤ 4 h from 2026-10-20): M4.1, M4.5a, M5a, …. Each session starts from
 `internal/status.md` updated so the next session can start cold.
 
 This file was trimmed to what is live at the end of M4.4c (owner, 2026-10-26), and is reconciled with the handoff at
-each session's start (the last: M4.5c2b, 2026-11-03): the plans of the finished milestones, the superseded text and the
+each session's start (the last: M4.5d1, 2026-11-03): the plans of the finished milestones, the superseded text and the
 appendices are in `git show 1fcc43b:plan.md`. The milestones were renumbered on 2026-10-20
 (the rest of C became M4; generic templates M5, concepts M6, C++ memory M7, inventory M8, evaluation M9); history
 entries keep the numbers they were written with.
@@ -167,7 +167,7 @@ and owning fields move to M4.5d2 with the rest of P4418R0's invalidation profile
 
 | Session | Scope | Needs |
 |---|---|---|
-| **M4.5d1 vlibc** | the repository (the owner creates `cerastes-verifier/vlibc`), its layout, license and CI; the submodule pin; explicit and transparent includes; the trust rule; `abort`/`exit`/`_Exit` moved out of the encoder's table | M4.5a (any time) |
+| **M4.5d1 vlibc** | the repository (`cerastes-verifier/vlibc`: its layout, license and CI, done in vlibc's `5962865`); the submodule pin; explicit and transparent includes; the library class and the trust rule; reserved names; `abort`/`exit`/`_Exit` moved out of the encoder's table; d2's preparation (plan `.claude/plans/m4-5d1-vlibc.md`, questions 113–115) | M4.5a (any time) |
 | **M4.5d2 `malloc` and `free`** | vlibc's contracts for `malloc`, `calloc`, `realloc`, `free`; heap blocks; the free checks; leaks (a record; `forperm`); owning locals and globals; `[[cerastes::ref_to_uninit]]` on locals and functions (targets `v`, `r`); owning results (from b1c, owner 2026-10-29: `[[cerastes::owning]]` on functions, target `r`; `owns_block`; `owns(*result)`; `ensures` atoms with no `requires` partner, `live(r.q)` of a struct result's pointer member from M4.5c2b, question 106); `invalid-free`, `leak`; non-recursive owning fields (`[[cerastes::owning]]` target `d`, from M4.5c, question 91); the rest of P4418R0's invalidation profile (owner, 2026-11-02, question 91: its guarantees, `[[owner]]`'s transfer rules, `[[not_invalidating]]`, `no_dangling()`; spellings and meaning decided at its planning; C++'s parts are M7's) | M4.5c2b, M4.5d1 |
 | **M4.5e1 Arrays** | local arrays, `a[i]`, array parameters, `owns_range` and quantified permissions, `forall` in C (0029 item 4), sum and max; P38's braced initializers over 1000 elements; M4.4b2's types computed from constants; inner arrays and arrays of structs on M4.5c1's member blocks | M4.5c1 |
 | **M4.5e2 Pointer arithmetic** | `p + i`, `p - q`, comparisons within one object, one-past-the-end, `malloc(n * sizeof(T))`; `out-of-bounds`; relational comparisons and `p - q` under `pointer-comparison` | M4.5e1, M4.5d2 |
