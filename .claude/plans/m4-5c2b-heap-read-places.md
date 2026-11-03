@@ -76,6 +76,12 @@ Size: about 1,500–2,500 changed source lines (c2a: ~2,700; encoder ~300, VIR ~
   body, by 0038 item 3's havoc rule), a loop-entry ghost `Ref` (`lb`, what the path designates when the loop starts,
   taken under the inner cells being held, else `null`) as a second automatic place. Where nothing can write the inner
   cells the two are one object and only `eb` is emitted. Duplicate places are handled by the existing guards.
+- **111, a call beside an access** (during the session, the recommendation): a call whose contract names a place
+  reached through a load, in one expression with another access (`y = x + inc2(&p);`), is accepted: each such callee
+  place is snapshotted before the call and 0039 item 4's checks compare against the snapshot.
+- **112, post-run expectations** (during the session, the recommendation; as question 102 in c2a): nine new must-fail
+  twins also report a second (one: third) legitimate `permission` error at their expected line (sibling liveness rows of
+  places that may share a block); duplicate expect lines added, no line number changed.
 
 **Standing:** 77 (a session fits one context), 69 (the EDG merge waits for the box session; no fork work here), 78
 (`const` objects are M4.6's), 91 (owning fields are M4.5d2's), 99 (written struct atoms in invariants are this
@@ -255,7 +261,7 @@ Any question from an agent, or of mine, stops that work and goes to the owner.
 | `**pp` in an invariant and a measure (P69's shapes extended) | value → `invariant-preserved`; unheld → `permission`; a trap that moves `*pp` → `invariant-preserved` |
 | `restrict`: a positive beside heap-read atoms that cannot form a `T*` | **rejected:** `restrict int *p` beside `owns(**pp)`, `live(*pp)`, `owns(*gp)`, `owns(*s.q)`, `owns(p->q->x)` (each through `restrict_hazard`) |
 | ports: VeriFast `tests/issue310.c` (`s_data **ps`, `owns(*ps) && owns((*ps)->data)`, `(*f)->data -= 1`) and the struct half of `examples/globals.c` (`static struct counter *c`, `owns(c) && owns(c->f)`; `malloc` in `main` replaced by a `static struct counter`, noted in the header; `leak` left out, M4.5d2) | issue310: `ensures` `d - 2` → `postcondition`; globals: `c->f` without `owns(c->f)` → `permission` |
-| — | **rejected (pins):** `live(r.q)` (question 106: M4.5d2); `owns(*r.q)`, `owns(**r)` (M4.5d2); `*old(*pp)` and `old` inside a path (M8, listed); a marker or `owning` whose reads go through a load (`ref_to_uninit` on `pp` with `owns(**pp)` in the `requires`); `owns` of a `const` place at any level (`const int **pp`, `int *const *pp` with `owns(**pp)`); an atom under `!`, inside `==` or as an argument (positions, unchanged); an atom through a `void *` or a function pointer |
+| — | **rejected (pins):** `live(r.q)` (question 106: M4.5d2); `owns(*r.q)`, `owns(**r)` (M4.5d2); `*old(*pp)` and `old` inside a path (M8, listed); a marker or `owning` whose reads go through a load (`ref_to_uninit` on `pp` with `owns(**pp)` in the `requires`); `owns` of a `const` place at its own level (`owns(**pp)` with `const int **pp`, `owns(*pp)` with `int *const *pp`; `owns(**pp)` with `int *const *pp` is accepted, the `int` not being `const`: corrected during the session); an atom under `!`, inside `==` or as an argument (positions, unchanged); an atom through a `void *` or a function pointer |
 
 Expected sizes, from c2a's: about 30 positives, 50 twins and 20 pins; S35 about 25 fixtures; VIR cases16 about 30.
 

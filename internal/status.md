@@ -8,107 +8,91 @@ history table; the full log up to M4.4c is `git show 1fcc43b:internal/status.md`
 `git show bdc6bd0:internal/status.md`, M4.5b1b's `git show 8003dca:internal/status.md`, M4.5b1c1's
 `git show eab4058:internal/status.md`, M4.5b1c2's `git show a5e3e30:internal/status.md`, M4.5b1c3's
 `git show 5ffb1a2:internal/status.md`, M4.5b2a's `git show 38877b4:internal/status.md`, M4.5b2b's
-`git show 1bfa705:internal/status.md`, and M4.5c1's `git show cbdcce5:internal/status.md`.
+`git show 1bfa705:internal/status.md`, M4.5c1's `git show cbdcce5:internal/status.md`, and M4.5c2a's
+`git show 7f11706:internal/status.md`.
 
-## M4.5c2a — struct values and struct storage (2026-11-02/03): done on branch `m4.5c2a-struct-values`
+## M4.5c2b — places reached through a heap read (2026-11-03): done on branch `m4.5c2b-heap-read-places`
 
-Plan: `.claude/plans/m4-5c2a-struct-values.md`. Read `internal/handoff.md` next: §2 (owner steps: reset the local `main`
-to `origin/main`, then push this branch and open its PR), §3 (notes by session; "M4.5c2b" first), §4.2 (M4.5c2b), §8 (no
-question open).
+Plan: `.claude/plans/m4-5c2b-heap-read-places.md`. Read `internal/handoff.md` next: §2 (owner steps: PR #25 first, then
+this branch's PR), §3 (notes by session), §4.2 (M4.5d1, M4.5d2), §8 (no question open).
 
-**Owner decisions (2026-11-02):** at planning, M4.5c2 is two sessions, c2a struct values and struct storage now, c2b places
-through a heap read next (question 95); compound literals are C objects and C++ values (96); passing and returning by
-value read every member (97); c2a's flips (98); written struct atoms in loop invariants move to c2b (99); struct `?:`,
-comma and assignment values stay rejected naming M8 (100). During the session: two VIR self-test rejection cases retired
-for lowering cases (101); the expectations of new tests corrected after their first run (102: `struct_value_seq_calls.c`
-`error unsequenced`, `struct_value_result_pointer_unrelated.c` `lifetime`, S34's two fixtures, the `&h.x`/`&(int){5}`
-global-initializer rejections as `unsupported_expression`, the constexpr-element pin's two lines, four twins rewritten to
-fail for one reason, the static-local twin `unsequenced`, the `return &(…)` pins' front-end warning,
-`call_in_struct_init_check.c`'s line, two VIR cases); one more new VIR case's row index after the last `check.sh` (103).
-PR #24 (M4.5c1) merged during the session. The session ran in the
-worktree `.claude/worktrees/m4.5c2a` (branched from c1's tip `cbdcce5`) with its baseline in a detached one,
-`.claude/worktrees/m4.5c2a-base`.
+**Owner decisions (2026-11-03):** at planning, an `ensures` place through a load is the object on return, `old(**pp)` the
+entry value of the entry object (question 104); heap-read `requires` places are automatic loop places by a snapshot
+(105); `live(r.q)` moves to M4.5d2 (106); c2b's flips (107). After the design review: amounts follow objects (108, not the
+recommendation); guards that read the heap accepted now (109, not the recommendation); both snapshots, method entry and
+loop entry, where they can differ (110). During the session: a call with a load-rooted contract beside another access in
+one expression accepted with a pre-call snapshot (111); written atoms done in this session, not cut (the pre-agreed cut
+point); nine new twins gain duplicate same-line `permission` expect lines (112, as 102 in c2a). The session ran in the
+worktree `.claude/worktrees/m4.5c2b` (from c2a's tip `7f11706`, stacked on PR #25) with its baseline in the detached
+`.claude/worktrees/m4.5c2b-base`. The first test-mutator was stopped by the owner after it went idle on a finished
+background task; a fresh one finished from a recovery brief (nothing lost but its per-file run log).
 
 **Done**
-- **Record 0044** (accepted; revised after P67, P68, P69, S34, audit round 1 on the record (blocking B1 the elements of
-  `&(T){…}` unsequenced, B2 a `const` literal's address; S1–S8, N1–N7 taken), audit round 2 on the code (no blocking item;
-  S1 `volatile`/`_Atomic` literal values, S2/S3 pins, S4 the lint's `Addr` rule reworded, S5 `u = mk().t;`; N6–N8 taken)
-  and one re-audit (no blocking item; S1 the global-leaf loop rule outside `main`, N1 a C++ initializer context kept
-  rejected)), amending 0012 item 2, 0037 items 2–3, 0038 item 3 (for globals), 0039 items 2–4 and 8, 0041 items 2–5, 7,
-  10–12 and 0043 items 1, 5–9, 15: struct values as tuples of leaves between fixed producers and consumers; by-value
-  parameters (leaf formals, the copy a struct block) and results (one result per leaf, multi-target calls, per-leaf result
-  splits); object arguments and `return s;` reading every member; struct stores of calls, call members and aggregates;
-  `f().x`; C++ temporaries; compound literals (values; in C `&(T){…}` a hidden local of its block, every element first);
-  struct globals and `static` struct locals (per-leaf initial values by linkage, member lengths in the global facts,
-  `program_start` rows per leaf; H8 needs no fact); member measures; `restrict` beside by-value structs; invariant reads
-  through a loaded pointer accepted and pinned (P69).
-- **Code:** `src/vir/vir.{h,cpp}` (`Field`, `Aggregate`, `GlobalLeaf`, `Var::compound_literal`, `restrict_hazard`),
-  `check.cpp` (struct positions, the literal `StoreE`, the Sequencer's struct cases), `src/backend/encode.cpp`
-  (`struct_value`, `aggregate_value`, `return_struct`, struct-global initializers, hidden literal locals, the
-  rejections), `diagnostics.def`, `src/vir/lower.cpp` + `lowered.h` + `src/viper/emit.cpp` (leaf formals and results,
-  `Env`/`LV` leaves, entry copies, multi-target calls, `struct_store`, `struct_cell_write`, the global facts and rows,
-  loop places and the global-leaf write rule); `scripts/lint_viper.py` and its self-tests.
-- **Tests:** `tests/memory` 40 positives (ports `verifast/call_in_struct_init.c` and `verifast/struct_assignment.c`), 71
-  error twins and 66 rejection pins; S34's 31 fixtures (`tests/viper-smoke/memory/s34_*`); VIR self-test
-  `selftest_cases15.inc` (`VIR_CASES_MIN` 1468); lint self-tests (374); 3 doc examples.
-- **Docs:** Memory and ownership (passing and returning structures, compound literals, structure globals and `static`
-  locals, the not-yet list), Annotations (member measures and places), Error messages (the copy message corrected to the
-  printed one; calls and returns; a literal's lifetime), Verifying (the rejected list); `internal/encoding.md`;
-  `il-inventory.md` P67, P68, P69, S34.
+- **Record 0045** (accepted; revised after P70, audit round 1 on the draft (blocking B1 a contract without a body
+  returning a permission it never took, B2 the state of a `requires` atom's guard and place read outside the entry state;
+  S3-S7, N8-N12 taken), S35, question 111, audit round 2 on the code (no blocking item; should-fix 1-3, notes 4, 5, 7
+  taken) and one re-audit (nothing blocking)): places as access paths (root, steps to the base, member tail), the
+  entry-state rule, the post-state reading, `f__wf` over ghost bases, call/entry/return rows with pass 0, amounts that
+  follow objects, bodiless ties, measures, by-value leaves and `*r.q`, `eb`/`lb` loop places, heap-reading guards,
+  written atoms through loads and on struct places, the encoder's rules over loads, `restrict` over load roots.
+- **Code** (`fcb2d09`; the VIR block `f4dea4c`): `src/vir/vir.{h,cpp}` (`PlaceKey{root, via, path}`, `place_root`,
+  disjoint key ranges with `is_*_site_key`, `guard_ok`, `restrict_hazard`'s walk, `user_spelling`), `check.cpp` (the place
+  grammar), `src/backend/encode.cpp` (`place_pointer`, every former rejection site, `finish_atoms` by full key, markers,
+  `owning` and `const` over load roots, `spell_loaded_place`), `src/vir/lower.cpp` (derived keys and everything above);
+  `scripts/lint_viper.py` (`lint_ghost_refs`).
+- **Tests:** S35's 61 fixtures (`tests/viper-smoke/memory/s35_*`; three contrast fixtures verified on purpose, each with
+  its must-fail twin); `tests/memory` 53 positives (ports `verifast/issue310.c` and `verifast/globals_struct.c`) and 95
+  twins and pins; 4 doc examples; VIR self-test `selftest_cases16.inc` (25 cases; `VIR_CASES_MIN` 1493); 389 lint
+  self-tests.
+- **Docs:** Memory and ownership (pointers to pointers, contracts, structures, globals, loops, the not-yet list),
+  Annotations (places, `old`, guards, invariant atoms; a stale sentence corrected), Error messages (`permission`'s new
+  messages), Verifying (the rejected list); `internal/encoding.md` (§3 and §8 paragraphs); `il-inventory.md` P70 and S35.
 
-**Flips (pre-approved, questions 98, 99, 101):** `reject_struct_by_value_param.c`, `reject_struct_by_value_result.c`,
-`reject_struct_temporary_init.cpp`, `reject_struct_init_compound_literal.cpp`, `reject_struct_static_local.c`,
-`reject_struct_decreases_member.c`, `global_struct.c`, `reject_struct_compound_literal.c` and
-`reject_compound_literal_address.c` retired for positives of the same shape (the last two also get C++ pins); seven c2b
-pins re-messaged (`Pins:` only, `expect:` lines kept); the self-test cases `struct_param_by_value` and
-`struct_result_by_value` retired. No existing `expect:` line changed.
+**Flips (pre-approved, question 107; 112):** ten pins retired for positives of the same shape
+(`reject_owns_double_deref.c`, `reject_read_double_deref.c`, `reject_read_double_deref_invariant.c`,
+`reject_atom_on_cell_pointer.c`, `global_pointer_global_deref_atom.c`, `reject_struct_member_chain_contract.c`,
+`reject_struct_atom_in_invariant.c`, `reject_struct_value_deref_member.c`, `reject_struct_value_reads_member.c`,
+`reject_struct_value_live_member.c`); `reject_struct_value_live_result.c` re-messaged naming M4.5d2 (expect line kept);
+`Pins:` comments only in `global_pointer_global_unowned.c`, `struct_init_pointers.c`, `verifast/globals.c`. No existing
+`expect:` line changed. Question 112 added duplicate expect lines to nine NEW twins only.
 
 **Acceptance**
-- The baseline (`cbdcce5`, detached worktree): 8416 passed, 0 failed, 1 skipped; VIR self-test 1448.
-- **Viper against the baseline** (`build/m4.5c2a/regen/regen.sh`, every kept program regenerated): all 3180 `.vpr` and
-  their `.map` byte-identical, none missing, 207 programs added; the VIR self-test's 1448 old cases byte-identical, 20
-  added; every regenerated `.vpr` (3387) lint clean.
-- `check.sh` (the full check, `CERASTES_CHECK_BASE` unset), run twice: the first stopped at the tests (one new twin,
-  `struct_global_loop_frame.c`, had EDG warnings #550/#177 for globals it no longer read; fixed by reading them after the
-  loop, its expect line kept); the second passed every step through the tests and the Viper lint — harness self-test
-  1044 tests, 79, lint self-test 374, mutate self-test 292; tests **8872 passed, 0 failed, 1 skipped** (native-ok runs:
-  Apple clang 1661, GCC 1661); Viper lint 3377 files clean — and stopped at the VIR self-test on one new case,
-  `sglob_static_unheld`, whose expected row index was wrong (question 103: 0 → 3, the same reason at the same line). With
-  the owner's approval the remaining steps were then run singly instead of a third full run: the VIR self-test **1468**
-  lowering and 251 rejection cases, 0 problems, all 1468 through Silicon (1468 passed) and lint clean; walker oracle 136
-  goldens, 1924 facts, 0 failed; `build_docs.sh` without warnings and `check_doc_examples.py --html` 0 problems.
-- No Linux run (CI covers it).
+- The baseline (`7f11706`, detached worktree): 8872 passed, 0 failed, 1 skipped; VIR self-test 1468.
+- **Viper against the baseline** (`build/m4.5c2b/regen/regen.sh`): all 3377 kept `.vpr` and `.map` byte-identical, none
+  missing, after the last lowering change; the VIR self-test's 1468 old cases byte-identical, 25 added.
+- The session's new and changed tests together (149 files, both modes): 545 passed, 0 failed; `tests/viper-smoke/memory`
+  206 passed; `test_run_tests.py` 1044; `test_lint_viper.py` 389; `--check-headers` 3478.
+- `check.sh` (the full check, `CERASTES_CHECK_BASE` unset), green on the first run: harness self-test 1044 tests, 79,
+  lint self-test 389, mutate self-test 292; tests **9434 passed, 0 failed, 1 skipped** (native-ok runs: Apple clang 1779,
+  GCC 1779); Viper lint 3643 files clean; VIR self-test **1493** lowering and 253 rejection cases, 0 problems, all 1493
+  through Silicon and lint clean; walker oracle 136 goldens, 1924 facts, 0 failed; docs green; EDG tree clean at
+  `f0ed5525`.
+- `build_docs.sh` and `check_doc_examples.py --html` (212 code blocks, 0 problems). No Linux run (CI covers it).
 
 **Surprises**
-- The loop-invariant rejection of `**pp` was by spelling only: `p->q->x`, `*p->q` and `*gp` had always reached invariant
-  and measure read chains, unpinned. P69 (44 programs, both modes) and audit round 1 found every verdict right; record
-  0044 item 12 states the argument (guarded read chains, framing asserts for every recorded read) and pins them.
-- H8 resolved itself: the existing liveness facts, `member_lv`, `loc_inv` and the `unique` `GB_` functions already tell a
-  struct global's member blocks from another global's block (S34 (d)).
-- C++ folds a constant compound literal to a plain constant or aggregate (P67 H2), and folds a struct temporary inside a
-  variable's initializer so its braces vanish: `int r = get(T{{1, 2}, 3});` cannot be told from brace elision and stays
-  rejected (re-audit N1).
-- The global-leaf write rule (a loop writing `g.x` keeps `g.y` and `h`) was first applied outside `main` too; the re-audit
-  showed it exits 3 on correct programs whose parameter atoms hold the leaf; it is now limited to leaves the function
-  holds by name. Struct locals keep the field-wide rule (a completeness gap; changing it would change existing Viper).
-- Record 0043 item 7 and the Error messages page quoted a copy message the tool never printed; the page now quotes the
-  printed one.
-- An agent's rebuild replaced `build/cerastes` while the first suite run was starting; that run's results were treated as
-  provisional and every disagreement re-checked on the final build.
+- The design review found that every place-keyed mechanism rebuilt its root from an integer key in every state; a
+  derived key per (root, via) let the existing consumers treat a load-rooted base as one more root, keeping every
+  load-free program's Viper byte-identical.
+- Audit round 1's two blocking items were both consequences of the post-state reading: a trusted contract could return
+  an object it never took, and a framing disjunct read in the wrong state verified a wrong body (both reproduced in
+  Silicon, both pinned).
+- Fractional liveness amounts make two places of one block indistinguishable, so some keeper twins legitimately report a
+  sibling place's row too (question 112); no assumed fact can remove it (invariant 4).
+- A loop moving a global pointer between two parameters' objects hits 0040 item 5's swap false alarm (amounts); the pin
+  moves it between locals.
 
-**Decision records added:** 0044-struct-values-and-storage.
+**Decision records added:** 0045-places-through-a-heap-read.
 
-**First step for the next session (M4.5c2b).** Confirm the owner merged this branch's PR with both CI jobs green; then
-plan M4.5c2b from handoff §4.2 and §3 "M4.5c2b" (places reached through a heap read: `owns(**pp)`, `reads(**pp)`,
-`live(*pp)`, `**pp`, `*gp`, `owns(*gp)`, `p->q->x`, `*s->q`, atoms on cell pointers and through a by-value struct's pointer
-member; written struct atoms in loop invariants; the `restrict` re-check), saving the plan as
-`.claude/plans/m4-5c2b-<topic>.md`.
+**First step for the next session.** Confirm the owner merged PR #25 (M4.5c2a) and this branch's PR with both CI jobs
+green; then M4.5d1 if the vlibc repository exists, else plan M4.5d2 from handoff §4.2 and §3 "M4.5d2" (`live(r.q)` and
+every partnerless `ensures` atom are there now, question 106), saving the plan as `.claude/plans/m4-5d2-<topic>.md`.
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 
 | Session | Date | Branch, merge | Records | Outcome |
 |---|---|---|---|---|
-| M4.5c2a Struct values and struct storage | 2026-11-02/03 | `m4.5c2a-struct-values` | 0044 | by-value struct parameters and results as tuples of leaves, `f().x`, C++ temporaries, compound literals (C objects, C++ values), struct globals and `static` struct locals, member measures, `restrict` beside by-value structs; invariant reads through a loaded pointer pinned; M4.5c2 split, heap-read places and written struct atoms to M4.5c2b |
+| M4.5c2b Places through a heap read | 2026-11-03 | `m4.5c2b-heap-read-places` | 0045 | contract and invariant places through loads (`**pp`, `*gp`, `p->q->x`, `*s.q`, `*r.q`) with the entry-state rule, the post-state reading, amounts that follow objects, bodiless ties, heap-reading guards, `eb`/`lb` loop places, written atoms through loads and on struct places, `restrict` over load roots; `live(r.q)` to M4.5d2 |
+| M4.5c2a Struct values and struct storage | 2026-11-02/03 | `m4.5c2a-struct-values`, PR #25 | 0044 | by-value struct parameters and results as tuples of leaves, `f().x`, C++ temporaries, compound literals (C objects, C++ values), struct globals and `static` struct locals, member measures, `restrict` beside by-value structs; invariant reads through a loaded pointer pinned; M4.5c2 split, heap-read places and written struct atoms to M4.5c2b |
 | M4.5c1 Struct objects | 2026-11-02 | `m4.5c1-struct-objects`, PR #24 `8f45843` | 0043 | C structures with member blocks, struct locals as blocks, `.`/`->`, pointers to members, initializers, copies, `struct S *` objects with `WF_S`, contract atoms on struct places with overlap per leaf cell, markers per leaf; `restrict` closed beside loaded pointers (a hole since 0037); M4.5c split, owning fields and P4418R0 to M4.5d2 |
 | M4.5b2b Initialization through pointers | 2026-11-02 | `m4.5b2b-init-markers` | 0042 | P4222's markers (`uninit` on locals, `ref_to_uninit`/`must_init` on pointer parameters), every call flag row `uninitialized`, `--strict-init` with the `// verify-options:` header, the loop row on every loop place (question 89, fixing 0038's nested-loop exit 3); M4.5b2 complete |
 | M4.5b2a Globals and `static` locals | 2026-10-30 | `m4.5b2a-globals`, PR #22 `38877b4` | 0041 | mutable globals and `static` locals as `unique` blocks, `program_start` for `main` with initial values by linkage, frames through `owns(g)`/`reads(g)`, implicit atoms for `static` locals; M4.5b2 split, the markers to M4.5b2b |

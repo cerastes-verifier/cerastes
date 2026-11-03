@@ -1,4 +1,4 @@
-# Handoff at M4.5c2b's start — places reached through a heap read (record 0045) (2026-11-03)
+# Handoff after M4.5c2b — places reached through a heap read (record 0045) (2026-11-03)
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
@@ -15,9 +15,13 @@ plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session cons
   `.claude/plans/m4-5c2a-struct-values.md`) is PR #25 (`m4.5c2a-struct-values`, tip `7f11706`), open with CI pending at
   M4.5c2b's start. The local `main` `68b6b54` is a local merge of `origin/main` and `7f11706`.
 - **M4.5c2b** (places reached through a heap read; record 0045; plan `.claude/plans/m4-5c2b-heap-read-places.md`,
-  approved 2026-11-03 with questions 104–107) runs on branch `m4.5c2b-heap-read-places` from `7f11706` (so its PR stacks
-  on PR #25) in the worktree `.claude/worktrees/m4.5c2b`, with its baseline in the detached
-  `.claude/worktrees/m4.5c2b-base` (at `7f11706`).
+  questions 104–112) is done on branch `m4.5c2b-heap-read-places` (local commits from `7f11706`, so its PR stacks on PR
+  #25) in the worktree `.claude/worktrees/m4.5c2b`; its baseline worktree `.claude/worktrees/m4.5c2b-base` (detached at
+  `7f11706`) is no longer needed. Result in `internal/status.md`.
+- **Audits:** round 1 on record 0045 (two blocking items, B1 bodiless contracts returning what they never took and B2 the
+  entry state of `requires` contributions, both reproduced in Silicon and taken; five should-fix items taken), round 2 on
+  the code (no blocking item; three should-fix items and three notes taken), one re-audit (nothing blocking). Reports in
+  the worktree's `build/m4.5c2b/audit{1,2,3}.md`. What was not taken is in §3.
 
 The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits behind upstream `main` (§4.1).
 
@@ -29,7 +33,7 @@ The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits beh
 2. **At the end of M4.5c2b:** push `m4.5c2b-heap-read-places` and open its PR against `main` (its base `7f11706` is
    PR #25's tip, so after #25 merges the PR shows only c2b's commits); then fast-forward `main` and remove
    `.claude/worktrees/m4.5c2b` and `m4.5c2b-base`.
-3. Then M4.5d1 once the vlibc repository exists, or M4.5d2's planning.
+3. Then M4.5d1 once the vlibc repository exists, or M4.5d2's planning (§4.2).
 
 ## 3. Open notes, by the session that consumes them
 
@@ -37,9 +41,6 @@ One line per note, its origin in brackets (session and audit item); the full wor
 Notes that a session consumes move into its plan's "Inputs" (M4.5b2b took the call's flag row, the registration rule for
 P4222's markers, P54 and the b2b design points).
 
-**M4.5c2b Places through a heap read:** every note (the heap-read places, `T**` callees, `p->q->x`, `*s.q`, written struct
-atoms, the `restrict` re-check, `live(s.q)`, the invariant `**pp` spelling rule) moved into its plan's "Inputs from the
-handoff" at its start (2026-11-03).
 
 **M4.5d1 vlibc**
 - P55: the attribute allow-list rejects a system declaration's attributes (`[[const]]`, `[[alloc_size]]`, `[[__cold__]]`)
@@ -85,6 +86,11 @@ function-pointer typedef (`typedef void (*fp)(int *p CERASTES_MUST_INIT);`) reac
 (or rejected) when calls through pointers arrive [b2b audit 2 S4].
 
 **M4.8 C parity close-out**
+- Exit 3 beside a correct error, pre-existing (reproduced on the baseline `7f11706`): in a function WITH a body, an `ensures`
+  atom whose guard differs from its `requires` partner's (`requires(owns(*p) && (c == 0 || owns(*q)))`,
+  `ensures(owns(*p) && (c != 0 || owns(*q)))`) is reported by `f__wf`'s partner row (`permission`), and the return's
+  internal row "a pointer parameter points into its block" also fails (exit 3); guard that row by the partner's path, or
+  make it a `permission` row [c2b test-mutator; the c2b pins use bodiless functions].
 - The cost of aliasing `reads`/`live` parameters (question 66): the cell splits at calls were checked by timing, not
   re-audited (four and five parameters 5.7 s and 22 s, six time out with exit 3, documented) [b1b]; entry case splits
   multiply loop verification (one guarded parameter and one cell 2.7 s, two and three 37 s; four aliasing `reads` with a
@@ -168,6 +174,15 @@ function-pointer typedef (`typedef void (*fp)(int *p CERASTES_MUST_INIT);`) reac
   (fine on macOS, Linux unchecked) [b2a audit 2 N5].
 
 **Standing** (no session; act when the code is next touched)
+- *From M4.5c2b:* call-site messages for a load-rooted callee place use the callee's spelling (`**pp`), not the
+  argument's (`*p` for `&p`); `need_lb` is conservative (any by-name cell write gives every loading place a loop-entry
+  snapshot: more case splits, no verdict); a loop moving a pointer between two parameters' objects through a global root
+  (`gp`) hits 0040 item 5's swap false alarm like a local pointer does (question 79, M4.8); the existing `.map` texts keep
+  `(p->q)->x` for invariant reads through a pointer member (P69's pins), while new load-rooted contract places are spelled
+  as written (`Expr::user_spelling`); three S35 contrast fixtures expect `verified` of an unsound form on purpose
+  (`s35_n_bodiless_retarget_nocheck`, `s35_o_old_chain_state_postdisjunct`, `s35_f_reads_fact_unguarded`), each beside its
+  must-fail twin; `site_guard` reached in a loop annotation with a heap-reading guard is an internal error (unreachable:
+  `resolve_written` lowers those guards) [c2b audit 2 N4–N6].
 - *From M4.5c2a:* a write by name to a member of a struct LOCAL or a by-value parameter's copy in a loop still reaches
   every automatic place of its field (0043 item 11); globals got the precise rule (record 0044 item 8), locals would change
   existing programs' Viper (completeness only) [c2a]. The lint's `Addr` rule for struct-global rows cannot tell two struct
@@ -326,7 +341,7 @@ plan `.claude/plans/m4-5c2a-struct-values.md`) is done: by-value struct paramete
 leaves), `f().x`, C++ `S{…}`/`S()` as values, compound literals (question 96), struct globals and `static` struct locals,
 `decreases(p->x)`, `restrict` beside by-value structs; ports `call_in_struct_init.c` and `struct_assignment.c`.
 **M4.5c2b** (places through a heap read; record 0045; plan `.claude/plans/m4-5c2b-heap-read-places.md`, questions
-104–107): `owns(**pp)`, `reads(**pp)`, `live(*pp)` and reads of `**pp`, `*gp` and `owns(*gp)`, `p->q->x` and `*p->q`
+104–112) is done: `owns(**pp)`, `reads(**pp)`, `live(*pp)` and reads of `**pp`, `*gp` and `owns(*gp)`, `p->q->x` and `*p->q`
 through a pointer member, an atom on `*q` where `q` is a cell, atoms and reads through a by-value struct's pointer member,
 `*r.q`, written struct atoms in loop invariants (question 99), the `restrict` re-check; `live(r.q)` moved to M4.5d2
 (question 106). M4.5d2 needs it (owning fields point through a heap read).
@@ -688,6 +703,9 @@ object), 105 (places the `requires` reaches through a heap read are automatic pl
 `Ref` snapshot), 106 (`live(r.q)` moves to M4.5d2 with every `ensures` atom without a `requires` partner), 107 (c2b's flips). The same
 day, after the design review: 108 (amounts follow objects: an `ensures` atom through a load returns the amount of the
 `requires` atom whose entry place equals its return place; not the recommendation), 109 (guards that read the heap are
-accepted in c2b; not the recommendation), 110 (both snapshots, at method entry and at loop entry, where they can differ).
+accepted in c2b; not the recommendation), 110 (both snapshots, at method entry and at loop entry, where they can differ). During
+the session: 111 (a call whose contract names a place reached through a load, beside another access in one expression,
+is accepted with a pre-call snapshot of the place), 112 (nine new twins gain duplicate same-line `permission` expect
+lines for sibling liveness rows).
 
 No question is open.
