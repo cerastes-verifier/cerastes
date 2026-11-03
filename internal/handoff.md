@@ -685,6 +685,9 @@ expectations of new tests corrected after their first run, listed in the status 
 At M4.5c2b's planning (2026-11-03, each the recommendation; recorded in its plan and record 0045): 104 (a place reached
 through a heap read in an `ensures` is the object the path designates on return; `old(**pp)` the entry value of the entry
 object), 105 (places the `requires` reaches through a heap read are automatic places of every loop, addressed by a ghost
-`Ref` snapshot), 106 (`live(r.q)` moves to M4.5d2 with every `ensures` atom without a `requires` partner), 107 (c2b's flips).
+`Ref` snapshot), 106 (`live(r.q)` moves to M4.5d2 with every `ensures` atom without a `requires` partner), 107 (c2b's flips). The same
+day, after the design review: 108 (amounts follow objects: an `ensures` atom through a load returns the amount of the
+`requires` atom whose entry place equals its return place; not the recommendation), 109 (guards that read the heap are
+accepted in c2b; not the recommendation), 110 (both snapshots, at method entry and at loop entry, where they can differ).
 
 No question is open.

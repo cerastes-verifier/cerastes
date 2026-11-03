@@ -1,6 +1,6 @@
 # Plan: M4.5c2b — places reached through a heap read (record 0045)
 
-Approved by the owner on 2026-11-03 (planning in plan mode; questions 104–107 answered, each with the recommendation: 104 the post-state reading of an `ensures` place; 105 heap-read `requires` places as automatic loop places by a snapshot; 106 `live(r.q)` to M4.5d2; 107 the flips).
+Approved by the owner on 2026-11-03 (planning in plan mode; questions 104–107 answered, each with the recommendation: 104 the post-state reading of an `ensures` place; 105 heap-read `requires` places as automatic loop places by a snapshot; 106 `live(r.q)` to M4.5d2; 107 the flips). Addendum the same day, after the design review (questions 108–110): 108 amounts follow objects now; 109 guards that read the heap accepted now; 110 both snapshots, method entry and loop entry, where they can differ (108 and 109 not the recommendation; 110 the recommendation).
 
 - **Branch:** `m4.5c2b-heap-read-places`, from c2a's tip `7f11706` (pushed as `origin/m4.5c2a-struct-values`, PR #25
   open with CI pending), so c2b's PR stacks on PR #25 as c2a's stacked on PR #24.
@@ -53,6 +53,29 @@ Size: about 1,500–2,500 changed source lines (c2a: ~2,700; encoder ~300, VIR ~
   partner; `reject_struct_value_live_result.c` is re-messaged naming M4.5d2, its `expect:` line kept. `*r.q` as a value
   (framed like `*result`, 0040 item 4) lands here.
 - **107, flips:** pre-approved as listed under Flips; nothing else may change.
+
+**Addendum (2026-11-03, after the design review; questions 108–110):**
+- **108, amounts follow objects** (not the recommendation, which was to pin the false alarm): an `ensures` atom whose
+  place is reached through a load returns the ghost amount of the `requires` atom of its kind whose **entry** place
+  equals its **return** place, `ite(q_post == q1_pre, a_1, ite(q_post == q2_pre, a_2, … a_partner))` over the `requires`
+  atoms of the same kind and leaf field (the partner by key last). A callee that moves `*pp` to another object it was
+  given therefore returns that object at the amount it was given, and `owns(**pp)` after a move verifies. Places
+  without a load keep today's amounts and Viper. The return sums, the call's view (Viper inhales the `ensures` with the
+  `ite` amount) and `f__wf`'s partner rows (0039 item 7) follow; S35 confirms first.
+- **109, guards that read the heap** (not the recommendation, which was to keep them rejected): an atom's guard may
+  read through a pointer (`*pp == NULL || owns(**pp)`, `p->q == NULL || owns(*p->q)`, `c ? owns(*p->q) : …` with a heap
+  condition), in contracts and in loop invariants. The guard's loads are contract reads framed per path by the atoms
+  before them (chain-guarded in the method, the call and the return; ghost values with framing asserts in `f__wf`;
+  through the automatic places' chains in an invariant). `AtomCollector` and `site_guard` (today forced to `Wf` mode)
+  change accordingly; `atom_guard_shape`'s `NullCheck` stays the `Formal == NULL` shape only (`owning`'s merge and
+  `restrict_backed` unchanged). No existing pin rejects such a guard (checked at planning).
+- **110, both snapshots where they can differ** (the recommendation): every `requires` place reached through a load gets
+  a method-entry ghost `Ref` (`eb`, the object the `requires` named, as a formal is the entry value), which every loop
+  uses as an automatic place and which also serves `result_splits` and the splits at calls; and, when the function may
+  write a cell of a loaded field of the path (`ptr_T` for `**pp`: a store or a call reaching that field anywhere in the
+  body, by 0038 item 3's havoc rule), a loop-entry ghost `Ref` (`lb`, what the path designates when the loop starts,
+  taken under the inner cells being held, else `null`) as a second automatic place. Where nothing can write the inner
+  cells the two are one object and only `eb` is emitted. Duplicate places are handled by the existing guards.
 
 **Standing:** 77 (a session fits one context), 69 (the EDG merge waits for the box session; no fork work here), 78
 (`const` objects are M4.6's), 91 (owning fields are M4.5d2's), 99 (written struct atoms in invariants are this
@@ -136,21 +159,25 @@ Written before code (invariant 6) while P70 and S35 run; audit round 1 on the dr
    splits at calls against the caller's `reads` places, the entry splits), a load-rooted place has no formal: its
    address is snapshotted once at the method's entry into a ghost `Ref` (`pe_<site>`, assigned under the atom's guard
    from the `requires`-framed read, `null` otherwise) and used there; a `Ref` read of the heap in a split condition
-   would not be well-defined where the inner cell is no longer held. The record decides whether item 9's loop places
-   reuse these entry snapshots (the objects a function holds are its entry places, its cells and its globals while no
-   `ensures` atom lacks a partner) or take their own at each loop's entry as question 105 states; S35 (f) runs both.
+   would not be well-defined where the inner cell is no longer held. Item 9's loop places reuse these entry snapshots, plus a
+   loop-entry snapshot where they can differ (question 110).
+   **Return order, pass 0** (design review): before the return's separation rows, for each `ensures` atom whose cells
+   frame the base of a load-rooted `ensures` place, `g_j ==> perm(cell) > none` in clause order with that atom's message,
+   emitted only when an `ensures` place has a load.
 7. **Measures.** A function's `decreases(**pp)`, `decreases(*gp)`, `decreases(p->q->x)` through 0039 item 8 (framing in
    `f__wf`, the chain-guarded method measure, the explicit check at the caller).
 8. **By-value leaves and results.** `owns(*s.q)`, `reads(*s.q)`, `live(s.q)`, `*s.q`, `s.q->x`, `old(*s.q)`: the root is
    the leaf formal (a fixed value, the entry value in an `ensures`, as `*p` of a pointer parameter); `*r.q` is framed
    as `*result` is (0040 item 4). `live(r.q)` and every atom on a result member stay M4.5d2's (question 106).
-9. **Loops** (question 105). Each `requires` place reached through a heap read is an automatic place of every loop:
-   right before the loop (after the existing case splits), a ghost `Ref` local `pr_<site>__<loop> := null`, then
-   `if (<inner cells held>) { pr := <the place's address> }`; `pr` then stands where a formal stands in `loop_places`,
-   `key_cells`, the guards (`pr != null` and distinct from the earlier places of its field and from every cell), the
-   splits, snapshots, rows and back-edge checks; nothing assigns `pr` in the loop, so it is as fixed as a formal. A
-   loop that moves `*pp` keeps the entry object (the place held), and `**pp` after the move reads whatever the chains
-   frame. The `Ref` locals get a lint rule (assigned only `null` or a guarded read at the loop's entry). Written atoms
+9. **Loops** (questions 105, 110). Each `requires` place reached through a heap read is an automatic place of every
+   loop through its method-entry `eb` (item 6), and, where the function may write a loaded field of its path, also
+   through a loop-entry `lb_<site>__<loop>` (`:= null`, then `if (<inner cells held>) { lb := <the place's address> }`
+   right before the loop, after the existing case splits). `eb`/`lb` stand where a formal stands in `loop_places`
+   (derived keys, as the design review proposed: per-function keys `kDerivedKeyBase + n` for each distinct (root, via)
+   so the int-keyed consumers treat a base as one more root; load-free places never get one), `key_cells`, the guards
+   (non-null, distinct from the earlier places of their field and from every cell), the splits, snapshots, rows and
+   back-edge checks; nothing assigns them in the loop. The `Ref` locals get a lint rule (assigned once, from `null` or a
+   guarded read, at method entry or right before their loop). Written atoms
    on heap-read places
    (`owns(**pp)`, an atom on `*q` of a cell, `owns(*p->q)`, `owns(*s.q)`, `owns(*gp)`), their `q` the place's `Ref`
    read at each iteration start through the automatic places' chains (in the invariant) and, for the body's splits
@@ -173,18 +200,26 @@ Written before code (invariant 6) while P70 and S35 run; audit round 1 on the dr
 13. **Facts relied on:** P70, S35. 14. **Tests and docs** (below). 15. **Flips** (below).
 
 **S35** (test-mutator writes, il-analyst runs; `tests/viper-smoke/memory/s35_*`, each with a `_fail` twin and a
-`vacuity_fail` clone, hand-written in the emitted style):
-- (a) a method with `owns(*pp) && owns(**pp)` in both clause lists, the chain-guarded receiver, a body that writes
-  `**pp`, and one that moves `*pp` to another owned object (the post-state `ensures`);
-- (b) its `f__wf`: ghost `Ref`s for the inner reads, the atom's own framing assert, distinctness and equal-ghost facts
-  across depths, the guarded `reads` post = pre fact;
-- (c) a caller: rows in clause order (`perm(a.v_ptr_int)` before `perm(a.v_ptr_int.v_int)`), separation of `owns(*q)`
-  and `owns(**pp)`, amounts and sums, the splits; Silicon after a failed earlier row;
-- (d) `live(*pp)` at entry and at the return (the escape twin);
-- (e) `owns(gp) && owns(*gp)` and `owns(*p) && owns(p->q->x)` with `WF_S` of the loaded struct pointer;
-- (f) a loop over a heap-read `requires` place (question 105's encoding) and a written `owns(**pp)` with `NOTAUTO`;
-- (g) a written struct atom `owns(*q)` per leaf, walking two struct objects;
-- (h) `decreases(**pp)` recursion.
+`vacuity_fail` clone whose `assert false` must fail, hand-written in the emitted style, from the record draft):
+- (a) `pp_contract`: `owns(*pp) && owns(**pp)` on both sides, `ensures(**pp == old(**pp) + 1)` with the nested `old`;
+- (b) `pp_guarded`: an `acc(ite(…).v_int)` receiver framed only on one path: `f__wf` fails, the method and the caller
+  report no Silicon error of their own;
+- (c) `pp_call`: the caller's rows in clause order; alias twin `q == *pp` with `owns(*q)` → the separation row;
+- (d) `pp_return`: a callee that gives `*pp` away → the pass-0 row fails (and once without pass 0, showing the exit 3
+  it prevents); `live(*pp)` at entry and return (the escape twin);
+- (e) `pp_move`: a callee moving `*pp` to an object it was given, the `ite` amount of question 108; a swap of two
+  targets; twin: a move to an object given only by `live`;
+- (f) `pp_reads_fact`: `reads` at both levels, the guarded post = pre fact; twin: `owns(*pp)` moves `*pp`;
+- (g) `heap_guard`: `*pp == NULL || owns(**pp)` (question 109) in a method, its `f__wf`, a call and a return; twin:
+  the guard unframed;
+- (h) `gp` and `member_chain`: `reads(gp) && owns(*gp)` from `main`; `owns(*p) && owns(p->next->x)` with `WF_S` of the
+  loaded pointer; twin: `p->next == p`;
+- (i) `byvalue_leaf` and `result_leaf`: `owns(*s.q)`, `live(s.q)`, `return s.q`; `*r.q` with the result-root fact;
+- (j) `decreases_pp`: recursive `decreases(**pp)`;
+- (k) `loop_eb_lb`: `eb` and `lb` places (question 110), `*pp = &x` before and in the loop, a callee keeping `**pp` →
+  back-edge row, a `return` in the loop;
+- (l) `written_pp` and `written_cellptr`: a chained `q`, the moved case, the unframed case (framing assert first);
+- (m) `written_struct`: per-leaf rows; separation of `owns(*q)` and `owns(r->x)` when `r == q`.
 
 ## Team (disjoint files; three Sonnet agents and one Opus reviewer from `.claude/agents/`)
 
@@ -204,7 +239,9 @@ Any question from an agent, or of mine, stops that work and goes to the owner.
 |---|---|
 | `void set(int **pp)` `requires(owns(*pp) && owns(**pp))` `ensures(owns(*pp) && *pp == old(*pp) && owns(**pp) && **pp == 5)`, body `**pp = 5` | a wrong value → `postcondition`; `owns(**pp)` without `owns(*pp)` before it → `permission` at the contract ("reads `*pp` without owning it") |
 | `live(*pp)` in `requires` and `ensures`; the callee compares and passes `*pp` | the old `ptrptr_callee_escape.c` shape with `ensures(live(*pp))` → `permission` at the return (the stored `&local` dies) |
-| a callee that moves `*pp` to another owned object, `ensures(owns(**pp))` names the new one (question 104) | the caller relies on the old object after the call → `permission`; `ensures(**pp == old(**pp))` after a move → `postcondition` |
+| a callee that moves `*pp` to another owned object, `ensures(owns(**pp))` names the new one at the amount it was given (questions 104, 108); a swap of two `int **` targets | the caller relies on the old object after the call → `permission`; `ensures(**pp == old(**pp))` after a move → `postcondition`; a move to an object given only by `live(q)` with `ensures(owns(**pp))` → `permission` at the return |
+| heap-reading guards (question 109): `requires(owns(*pp) && (*pp == NULL \|\| owns(**pp)))`, `p->q == NULL \|\| owns(*p->q)`, a `?:` arm under a heap condition, and the same in a loop invariant | the guard's `*pp` unframed → `permission` at the contract; a caller with `*pp != NULL` not owning `**pp` → `permission` at the call; a body writing `**pp` when `*pp` may be null → `null-dereference` |
+| loops with a move before the loop (question 110): `int *old = *pp; *pp = q;` then a loop using both `*old` and `**pp` | a callee in the loop keeping either object → `permission` at the back edge |
 | `reads(**pp)`, `old(**pp)`, `decreases(**pp)` recursion | a write under `reads` → `permission`; a measure that does not decrease → `termination` |
 | the caller of a heap-read contract: `int x; int *p = &x; set(&p); check(x == 5);` | the caller does not own `x` → `permission` at the call; `set2(&p, &x)` with `owns(**pp) && owns(*q)` → `permission` (separation: one object twice) |
 | `***ppp` at depth 3 | a wrong value → `postcondition` |
@@ -218,7 +255,7 @@ Any question from an agent, or of mine, stops that work and goes to the owner.
 | `**pp` in an invariant and a measure (P69's shapes extended) | value → `invariant-preserved`; unheld → `permission`; a trap that moves `*pp` → `invariant-preserved` |
 | `restrict`: a positive beside heap-read atoms that cannot form a `T*` | **rejected:** `restrict int *p` beside `owns(**pp)`, `live(*pp)`, `owns(*gp)`, `owns(*s.q)`, `owns(p->q->x)` (each through `restrict_hazard`) |
 | ports: VeriFast `tests/issue310.c` (`s_data **ps`, `owns(*ps) && owns((*ps)->data)`, `(*f)->data -= 1`) and the struct half of `examples/globals.c` (`static struct counter *c`, `owns(c) && owns(c->f)`; `malloc` in `main` replaced by a `static struct counter`, noted in the header; `leak` left out, M4.5d2) | issue310: `ensures` `d - 2` → `postcondition`; globals: `c->f` without `owns(c->f)` → `permission` |
-| — | **rejected (pins):** `live(r.q)` (question 106: M4.5d2); `owns(*r.q)`, `owns(**r)` (M4.5d2); `*old(*pp)` and `old` inside a path (M8, listed); a marker or `owning` whose reads go through a load (`ref_to_uninit` on `pp` with `owns(**pp)` in the `requires`); `owns` of a `const` place at any level (`const int **pp`, `int *const *pp` with `owns(**pp)`); a guard that reads through a load where 0037 item 5 forbids heap reads; an atom through a `void *` or a function pointer |
+| — | **rejected (pins):** `live(r.q)` (question 106: M4.5d2); `owns(*r.q)`, `owns(**r)` (M4.5d2); `*old(*pp)` and `old` inside a path (M8, listed); a marker or `owning` whose reads go through a load (`ref_to_uninit` on `pp` with `owns(**pp)` in the `requires`); `owns` of a `const` place at any level (`const int **pp`, `int *const *pp` with `owns(**pp)`); an atom under `!`, inside `==` or as an argument (positions, unchanged); an atom through a `void *` or a function pointer |
 
 Expected sizes, from c2a's: about 30 positives, 50 twins and 20 pins; S35 about 25 fixtures; VIR cases16 about 30.
 
@@ -273,7 +310,8 @@ cases.
 
 **The pre-agreed cut**, if context runs short after commit 3: written struct atoms in loop invariants (question 99) move
 to the next session, with `reject_struct_atom_in_invariant.c` re-messaged instead of retired (ask the owner first: it
-changes a flip). The `restrict` re-check and the marker/`owning`/`const` rules over load roots are never cut.
+changes a flip). Questions 108–110 add about 400–600 lines to the estimate; heap-reading guards in loop invariants are
+the second cut candidate (ask first). The `restrict` re-check and the marker/`owning`/`const` rules over load roots are never cut.
 
 ## Stop and ask
 
