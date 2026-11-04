@@ -28,7 +28,10 @@ warnings). The owner ended the session at 08:00 (travel): the second `check.sh` 
 - **Record 0047** (written before code; audit round 1 on the draft: B1 leaks missed in loops, B2 view calls skipping
   0046 item 8's redirection check, B3 block sites invisible to sequencing, S1–S8, N1–N14, all taken; P72 PASS on macOS and
   glibc; S36 PASS, 64 fixtures; audit round 2 on the code: no blocking item, S1–S5 taken, notes to §3; a re-audit of the
-  loops and round 2's fixes was running at the end, its report not received).
+  loops and round 2's fixes, `build/m4.5d2a/audit3.md`: no wrong verdict; **one blocking item not fixed (B1: exit 3 on
+  correct programs whose loop heap places may alias a block held another way, e.g. `int *x = &s->b;` in a loop, then
+  `free(s)`), S1 a timeout regression (parameter copies as heap places), S2 an unpinned exemption, S3 the `WF` row's
+  category** — the owner ended the session first; they are the next session's first work, handoff §2 and §3).
 - **vlibc** `35e9b6f` (local `main`, NOT YET PUSHED; three commits on `5962865`: the malloc family's trusted contracts with
   reserved identifiers, run tests, `CERASTES_COMMIT` → `f59e4b2`, `CLAUDE.md` with the owner's directive; the note below
   `_Exit` so earlier lines stay; `<stddef.h>` for `size_t`/`NULL`). vlibc's `check.sh` green on macOS (both compilers, 24).
@@ -73,8 +76,9 @@ fifteen existing pins (M4.5d2b, M4.7/M8).
 
 **Decision records added:** 0047-the-heap (amends 0011, 0028, 0029, 0030, 0031, 0038, 0039, 0042, 0046).
 
-**First step for the next session.** Check CI on this branch's PR (both jobs): green → no further action for d2a; red → fix
-first (handoff §2). Then M4.5d2v (vlibc's allocator, handoff §3 and §4.2), planned in vlibc's repository.
+**First step for the next session.** Check CI on this branch's PR (both jobs): red → fix first (handoff §2). Then, before
+M4.5d2v, fix the re-audit's B1 and S1 in `src/vir/lower.cpp` (and S2, S3; `build/m4.5d2a/audit3.md`, handoff §3 "M4.5d2a
+follow-up"), on this branch or a follow-up branch, with the five pins; then M4.5d2v (vlibc's allocator, handoff §3 and §4.2).
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 

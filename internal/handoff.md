@@ -20,9 +20,8 @@ plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session cons
   `main` at `35e9b6f` (three commits on `5962865`), pinned through the submodule's `local` remote (`NOT YET PUSHED`).
   Result in `internal/status.md`. **The owner ended the session at 08:00 (travel): the second `check.sh` and the Linux
   rerun of the final tip were not run; CI decides (§2).** Audit reports: `build/m4.5d2a/audit{1,2}.md` in the worktree; a
-  re-audit of the loops and of round 2's fixes was running at the end (its report, if any, is not in this handoff:
-  re-run it on the PR's diff `250a2af..` for `src/vir/lower.cpp` item 10 and `e645a20`'s fixes if CI is green and time
-  allows, or at M4.5d2b's start).
+  re-audit of the loops and of round 2's fixes (`build/m4.5d2a/audit3.md`) found no wrong verdict but one blocking item
+  (B1, exit 3) and three should-fix items, not fixed before the session ended: §3 "M4.5d2a follow-up".
 - **The Linux host** `matt@clang4.cpp.al` cannot bootstrap natively (no root; no libc++ 21, JDK 17, GCC 16 there): runs
   go in a container built from a clean `ubuntu:26.04` with the S5 recipe (`cerastes-m4.5d1:runner`, container
   `cerastes-m4.5d1-p71`, checkout `~/cerastes-m4.5d1/cerastes`; reused by d2a).
@@ -43,6 +42,9 @@ The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits beh
    since the PR tier runs only the changed tests). Known unknowns CI settles: the Linux behaviour of the heap and vlibc
    tests at the final tip (glibc's `nothrow`/`malloc` attributes on the family, C++'s lost `noexcept`), and the full suite
    after the last fixes (the last full run on macOS, at `250a2af`, had 19 failures, all fixed or re-expected since).
+   **Even with CI green**, the re-audit's B1 and S1 (§3, "M4.5d2a follow-up") are the next session's first work, before
+   M4.5d2v: they are exit 3 on correct programs and a timeout regression, not wrong verdicts, and no committed test hits
+   them.
 
 ## 3. Open notes, by the session that consumes them
 
@@ -53,6 +55,23 @@ P4222's markers, P54 and the b2b design points).
 
 *M4.5d1's notes (P55's allow-list, 0031 item 9's exemption) moved into its plan's Inputs. M4.5d2's notes moved into
 M4.5d2a's plan's Inputs (`.claude/plans/m4-5d2a-heap.md`); those d2a hands on are below.*
+
+**M4.5d2a follow-up** (the re-audit, `build/m4.5d2a/audit3.md`; the first work of the next session)
+- **B1 (blocking, exit 3):** heap-place snapshots in loops (record 0047 item 10; `src/vir/lower.cpp:6036-6093`, splits
+  `:6618-6631`) lack case splits Silicon needs: `block_of(hb_i) == block_of(hb_j)` between token places, and splits (cell,
+  `lvloc`, `block_of`) against every pointer local and formal declared before the loop (used or not) and every `requires`
+  block-site formal; plus a catch-all `if (k > none) { }` after each heap snapshot for holders reached through loads. Repros
+  t22 (`calloc`'d `s`, `int *x = &s->b;`, a loop writing `*x`, then `free(s)`), t16, t11, t19, t23/t24, t25, t21 in the
+  auditor's scratch (`/private/tmp/claude-501/-Users-mattborland-Documents-cerastes-cerastes/10e100ed-0977-4a3f-bd2b-28d149d810d5/scratchpad/a3/`,
+  may be gone: rebuild from the report); the confirmed fixes are listed there. Pin t22, t16, t19, t23, t25.
+- **S1:** a pointer parameter's local copy becomes a heap place that is always guarded off (`v_a__0 != p_a__0`), so a file
+  that calls `malloc` anywhere multiplies the splits of unrelated functions (30 → 100 in t28; 186 s → timeout): skip the
+  copy of a parameter with an atom place that the function never assigns (`lower.cpp:6039`).
+- **S2:** pin the back-edge exemption's precision (t34: carries `p`, leaks `q = malloc(…)` each iteration → `leak`).
+- **S3:** the block row's `WF` check at a call became `permission` (`lower.cpp:1885`), turning an encoder precision loss
+  into a user message; add an automatic `internal` invariant `flag ==> WF(v)` for pointer locals a loop assigns and restore
+  `internal`, or fix record 0047 item 6 and the docs. Notes N1–N6 in the report (a must-fail for `writes_in_expr`, record
+  item 10's wording, two code tidiness items, `Call` in `heap_guard` with M4.5f1, the textual `void *` check).
 
 **M4.5d2v vlibc's allocator** (question 121, the model; record 0047)
 - vlibc replaces the platform's allocator under the standard names: a portable C23 core (free lists over regions), pages
