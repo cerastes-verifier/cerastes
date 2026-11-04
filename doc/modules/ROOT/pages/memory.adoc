@@ -716,8 +716,8 @@ converted at once to `T *`: in an initializer or assignment
 (`int *p = malloc(sizeof *p);`, C), a `return`, an argument, or a cast
 (`(int *)malloc(sizeof(int))`, which pass:[C++] needs). The object then has
 type `T` for its whole life. `calloc(1, sizeof(T))` gives an object whose
-members are all zero, null for a pointer member; `malloc`'s object has no value
-until the program gives it one (reading it first is
+members are all zero, null for a pointer member; the object from `malloc` has no
+value until the program gives it one (reading it first is
 xref:error-messages.adoc#_uninitialized[`uninitialized`]). Arrays of objects
 (`n * sizeof(T)`) and `realloc` are planned with arrays.
 
@@ -800,7 +800,7 @@ These are rejected with a diagnostic, never approximated
   global (<<heap>>);
 * `restrict` except on a C parameter whose contract owns its object;
 * `void *` other than an allocation's result converted at once to `T *` and
-  `free`'s argument (<<heap>>), and pointers to unions, to functions and to
+  the argument of `free` (<<heap>>), and pointers to unions, to functions and to
   structures that are not supported;
 * `restrict` beside a parameter or global that can hold a pointer of the same
   type (a pointer to a pointer, a structure with a pointer member, a pointer

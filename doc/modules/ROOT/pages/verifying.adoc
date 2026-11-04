@@ -941,7 +941,7 @@ The constructs that are rejected in this version are:
   that vlibc covers (`annotation_reserved_library`).
 * *Types:* pointers other than those xref:memory.adoc[Memory and ownership]
   describes (`void *` other than an allocation's result converted at once and
-  `free`'s argument, `restrict` other than on a C parameter the contract owns,
+  the argument of `free`, `restrict` other than on a C parameter the contract owns,
   and pointers to unions, to functions and to structures that are not supported
   are rejected, and so are
   pointer conversions other than adding `const` to the object pointed to; its
