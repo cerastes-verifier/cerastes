@@ -676,6 +676,58 @@ class Encoder {
     return false;
   }
 
+  // Whether a contract of `r` calls `owns_block` or `zeroed` (decision 0047 item 4): such a declaration is encoded though nothing calls it, so that the forms
+  // it rejects are reported (function_of is lazy).
+  static bool mentions_block_spec(an_expr_node_ptr e) {
+    if (e == nullptr || e->kind != enk_operation) return false;
+    if (a_routine_ptr c = direct_callee(e); c != nullptr) {
+      const SpecFn fn = spec_fn(c);
+      if (fn == SpecFn::owns_block || fn == SpecFn::zeroed) return true;
+    }
+    for (an_expr_node_ptr o = e->variant.operation.operands; o != nullptr; o = o->next)
+      if (mentions_block_spec(o)) return true;
+    return false;
+  }
+  static bool contract_names_block_atom(a_routine_ptr r) {
+    for (an_attribute_ptr a : contracts_of(r))
+      for (const AnnotArg& g : arguments_of(a))
+        if (g.kind == AnnotArg::Kind::expression && mentions_block_spec(g.expr)) return true;
+    return false;
+  }
+
+  // Decision 0047 item 5 (audit S5): target `r` is read on a function declared or defined in a verified file that is no member, template (or instance), lambda
+  // or `predicate`/`pure` function, and that no system header declares first.  On any other routine the program wrote a marker that nothing would read: rejected.
+  void reject_unread_function_markers(a_routine_ptr r) {
+    an_attribute_ptr m = nullptr;
+    for (an_attribute_ptr a = r->source_corresp.attributes; a != nullptr && m == nullptr; a = a->next)
+      if (is_registered_cerastes(a) && is_param_marker(classify(a)) && written_by_program(a->position)) m = a;
+    if (m == nullptr) return;
+    const char* what = nullptr;
+    if (r->is_lambda_body) what = "a lambda's call operator";
+    else if (r->is_template_function || r->assoc_template != nullptr || r->is_prototype_instantiation) what = "a function template or one of its instances";
+    else if (r->source_corresp.is_class_member) what = "a member function";
+    else if (is_spec_routine(r)) what = "a `predicate` or `pure` function (M4.5f1 decides the markers in specification functions)";
+    if (what == nullptr) {
+      bool system_first = r->source_corresp.decl_position.seq != 0 && !in_verified_file(r->source_corresp.decl_position);
+      if (ents_ != nullptr)
+        if (auto sd = ents_->secondary_decls.find(r); sd != ents_->secondary_decls.end())
+          for (const IlEntities::SecondaryDecl& q : sd->second)
+            if (q.position.seq != 0 && !in_verified_file(q.position)) system_first = true;
+      if (!system_first) return;
+      reject(Diag::unsupported_annotation, m->position,
+             "\"cerastes::" + std::string(m->name) + "\" on a redeclaration of `" + rname(r) + "`, which a system header declares first (its contract is the header's, decision 0047 item 5)");
+      return;
+    }
+    reject(Diag::unsupported_annotation, m->position, "\"cerastes::" + std::string(m->name) + "\" on " + what + " (decision 0047 item 5: target `r` is read on a plain function only)");
+  }
+
+  // `owning` or `ref_to_uninit` written by the program on the function itself (decision 0047 item 5).
+  static bool has_function_marker(a_routine_ptr r) {
+    for (an_attribute_ptr a = r->source_corresp.attributes; a != nullptr; a = a->next)
+      if (is_registered_cerastes(a) && is_param_marker(classify(a)) && written_by_program(a->position)) return true;
+    return false;
+  }
+
   static bool is_main(a_routine_ptr r) {
     return r->source_corresp.name != nullptr && std::strcmp(r->source_corresp.name, "main") == 0 &&
            !r->source_corresp.is_class_member;
@@ -705,7 +757,9 @@ class Encoder {
     bool ok = true;
     // Attributes are held to the allow-list only on what this run verifies: a callee declared in a system
     // header keeps whatever it carries.
-    const bool ours = in_verified_file(r->source_corresp.decl_position) || verified_body(r) != nullptr;
+    // Decision 0047 item 3: a routine trusted from vlibc is read like the program's own (its markers, by library position), though the platform's
+    // declaration (C) may be the one `decl_position` names.
+    const bool ours = in_verified_file(r->source_corresp.decl_position) || verified_body(r) != nullptr || lib_trust(r).ok;
     a_routine_type_supplement_ptr x = routine_supplement(r);
     if (x == nullptr) {
       reject(Diag::unsupported_declaration, at, "a function whose type cannot be read");
@@ -798,11 +852,16 @@ class Encoder {
       Encoder* e; bool c, a;
       ~Restore() { e->cx_.contract = c; e->cx_.annotation = a; }
     } restore{this, saved_contract, saved_annotation};
+    // Decision 0047 item 3: a routine trusted from vlibc reads the markers vlibc wrote, by their library positions: the platform's declarations carry
+    // none (so the all-or-none rule of the redeclarations is over vlibc's declarations alone) and a `void *` pointee is the heap shapes' (the routine
+    // never reaches check_signature).  A program's own marker on a library routine is check_reserved_library's.
+    const bool lib = lib_trust(r).ok;
     std::vector<std::vector<an_attribute_ptr>> nodes;  // per parameter, without repeats
     // The lists of one declaration's parameters may hold copies of one spelling's node (the routine's type, the definition's declarator, the
     // definition's variables): a spelling is one node, found by its position.
     auto add_node = [&](size_t k, an_attribute_ptr a) {
       if (!is_registered_cerastes(a) || classify(a) != kind) return;
+      if (lib && !in_library_file(a->position)) return;
       if (nodes.size() <= k) nodes.resize(k + 1);
       for (an_attribute_ptr o : nodes[k])
         if (o == a || same_spelling(o->position, a->position)) return;
@@ -864,6 +923,8 @@ class Encoder {
           decls.erase(decls.begin() + static_cast<long>(i));
           break;
         }
+    if (lib)  // vlibc's declarations only (decision 0047 item 3)
+      decls.erase(std::remove_if(decls.begin(), decls.end(), [](const Decl& d) { return !in_library_file(d.pos); }), decls.end());
     std::stable_sort(decls.begin(), decls.end(), [&](const Decl& a, const Decl& b) { return before(a.pos, b.pos); });
     // Two declarations that sit at one position (both written by one macro invocation) cannot be told apart.
     for (size_t i = 1; i < decls.size(); ++i)
@@ -908,7 +969,7 @@ class Encoder {
             reject(Diag::unsupported_annotation, ns[0]->position, "\"" + an + "\" on parameter " + pname + " (a pointer to a function: M4.7)");
             reported_types->insert(k);
             bad = true;
-          } else if (pe != nullptr && pe->kind == tk_void) {
+          } else if (pe != nullptr && pe->kind == tk_void && !lib) {
             reject(Diag::unsupported_annotation, ns[0]->position, "\"" + an + "\" on parameter " + pname + " (a `void *`: a pointer to an untyped object)");
             reported_types->insert(k);
             bad = true;
@@ -1033,6 +1094,8 @@ class Encoder {
         if (st.atom->atom == vir::AtomKind::Owns) (st.in_ensures ? owns_out : owns_in) = true;
         else if (st.atom->atom == vir::AtomKind::Reads) reads_beside = true;
       }
+      for (const vir::AtomSite& st : vir::contract_block_atoms(*f))  // decision 0047 item 4: the whole block is `owns(*p)` and more
+        if (st.atom->a != nullptr && st.atom->a->kind == Expr::Kind::Formal && st.atom->a->index == m.index) (st.in_ensures ? owns_out : owns_in) = true;
       if (contract_rejected) continue;
       if (member_beside) {
         reject(Diag::unsupported_annotation, m.pos,
@@ -1084,7 +1147,112 @@ class Encoder {
   // `ensures`, unless that list already holds `owns(*p)` as a top-level conjunct or `p == NULL || owns(*p)` (question 75: the explicit atom
   // implies it, and the place keeps its one atom); `reads(*p)`, `live(p)` or an `owns(*p)` under another guard of that list is rejected.  It runs
   // before the atoms are numbered and before `restrict` is checked.
+  // Decision 0047 item 5: `[[cerastes::owning]]` and `[[cerastes::ref_to_uninit]]` on a function (target `r`), written by the program.  `owning` is
+  // `ensures(r == NULL || owns_block(r))` (merged with an identical explicit clause); `ref_to_uninit` needs an `ensures` `owns_block` on the result and
+  // drops that atom's flags (`result_init`).  Both need a pointer result.
+  void apply_function_markers(a_routine_ptr r, vir::Function* f) {
+    const an_attribute_ptr none = nullptr;
+    an_attribute_ptr owning = none, uninit = none;
+    for (an_attribute_ptr a = r->source_corresp.attributes; a != nullptr; a = a->next) {
+      if (!is_registered_cerastes(a) || !written_by_program(a->position)) continue;
+      if (classify(a) == Annot::owning && owning == nullptr) owning = a;
+      else if (classify(a) == Annot::ref_to_uninit && uninit == nullptr) uninit = a;
+    }
+    if (owning == nullptr && uninit == nullptr) return;
+    const bool saved_contract = cx_.contract, saved_annotation = cx_.annotation;
+    cx_.contract = cx_.annotation = false;
+    struct Restore {
+      Encoder* e; bool c, a;
+      ~Restore() { e->cx_.contract = c; e->cx_.annotation = a; }
+    } restore{this, saved_contract, saved_annotation};
+    auto marker = [&](an_attribute_ptr a) { return std::string("\"cerastes::") + a->name + "\""; };
+    for (an_attribute_ptr a : {owning, uninit}) {
+      if (a == nullptr) continue;
+      if (!arguments_of(a).empty()) {
+        reject(Diag::unsupported_annotation, a->position, marker(a) + " with an argument on a function (an owned range: M4.5e1)");
+        return;
+      }
+      if (!f->ret.is_ptr()) {
+        reject(Diag::unsupported_annotation, a->position,
+               marker(a) + " on a function that returns no pointer (`owning` and `ref_to_uninit` on a function describe the object its pointer result owns, decision 0047 item 5)");
+        return;
+      }
+      if (f->noreturn) {
+        reject(Diag::unsupported_annotation, a->position, marker(a) + " on a function declared not to return (it has no result)");
+        return;
+      }
+    }
+    auto result_sites = [&]() {
+      std::vector<vir::AtomSite> out;
+      for (const vir::AtomSite& st : vir::contract_block_atoms(*f))
+        if (st.in_ensures && vir::atom_place(*st.atom).root == vir::kResultSiteKey) out.push_back(st);
+      return out;
+    };
+    if (owning != nullptr) {
+      const std::vector<vir::AtomSite> have = result_sites();
+      bool merge = false, bad = false;
+      for (const vir::AtomSite& st : have) {
+        // the explicit clause is `r == NULL || owns_block(r)` (the guard: `r == NULL` being false)
+        if (st.guards.size() == 1 && !st.guards[0].holds) {
+          const Expr* c = st.guards[0].cond;
+          while (c != nullptr && (c->kind == Expr::Kind::ToBool || c->kind == Expr::Kind::BoolToInt)) c = c->a;
+          const Expr* l = c != nullptr && c->kind == Expr::Kind::Binary && c->bop == vir::BinaryOp::Eq ? c->a : nullptr;
+          const Expr* rr = l != nullptr ? c->b : nullptr;
+          if (l != nullptr && l->kind == Expr::Kind::Null) std::swap(l, rr);
+          if (l != nullptr && rr != nullptr && l->kind == Expr::Kind::Result && rr->kind == Expr::Kind::Null) merge = true;
+          else bad = true;
+        } else {
+          bad = true;
+        }
+      }
+      if (bad) {
+        reject(Diag::unsupported_annotation, owning->position,
+               marker(owning) + " on `" + f->c_name + "` beside an `ensures` `owns_block` of the result that is not `r == NULL || owns_block(r)` (the function's contract already holds it)");
+        return;
+      }
+      if (!merge) {
+        const SrcLoc l = loc_of(owning->position);
+        const Expr* res = b_.result(*f, l);
+        b_.text(res, "the result");
+        const Expr* eq = b_.binary(vir::BinaryOp::Eq, res, b_.null_const(f->ret, l), l);
+        const Expr* atom = b_.atom(vir::AtomKind::OwnsBlock, b_.result(*f, l), -1, l);
+        atom_pos_[atom] = owning->position;
+        f->ensures_.insert(f->ensures_.begin(), vir::Clause{b_.binary(vir::BinaryOp::LOr, eq, atom, l), l});
+      }
+    }
+    if (uninit != nullptr) {
+      if (result_sites().empty()) {
+        reject(Diag::unsupported_annotation, uninit->position,
+               marker(uninit) + " on `" + f->c_name + "` without `owns_block` of the result in its `ensures` (the marker says the block it hands over holds no value: write "
+               "`CERASTES_ENSURES(r, r == NULL || cerastes_owns_block(r))` or mark the function `cerastes::owning` too, decision 0047 item 5)");
+        return;
+      }
+      // Decision 0042 item 6 extended (audit N7): the result's block holds no value on return, so this function's own `ensures` may not read its cells.
+      std::function<const Expr*(const Expr*)> read_of_result = [&](const Expr* x) -> const Expr* {
+        if (x == nullptr) return nullptr;
+        if (x->kind == Expr::Kind::Deref) {
+          const Expr* root = vir::place_root(x->a);
+          if (root != nullptr && root->kind == Expr::Kind::Result) return x;
+        }
+        for (const Expr* y : {x->a, x->b, x->c})
+          if (const Expr* z = read_of_result(y)) return z;
+        for (const Expr* y : x->args)
+          if (const Expr* z = read_of_result(y)) return z;
+        return nullptr;
+      };
+      for (const vir::Clause& c : f->ensures_)
+        if (const Expr* rd = read_of_result(c.expr)) {
+          reject_loc(Diag::unsupported_annotation, rd->loc.known() ? rd->loc : c.loc,
+                     "a postcondition that reads the result's object, which `cerastes::ref_to_uninit` on `" + f->c_name +
+                         "` says may hold no value (decisions 0042 item 6, 0047 item 5)");
+          return;
+        }
+      f->result_init = vir::InitMarker::RefToUninit;
+    }
+  }
+
   void apply_owning(a_routine_ptr r, vir::Function* f) {
+    apply_function_markers(r, f);
     auto it = owning_.find(r);
     if (it == owning_.end()) return;
     const bool saved_contract = cx_.contract, saved_annotation = cx_.annotation;
@@ -2719,6 +2887,7 @@ class Encoder {
     if (sd == ents_->secondary_decls.end()) return;
     for (const IlEntities::SecondaryDecl& q : sd->second) {
       if (q.position.seq == 0 || !in_verified_file(q.position)) continue;
+      if (in_library_file(q.position)) continue;  // vlibc's own declaration: its markers are lib_trust's and the heap shapes' (decision 0047 item 3)
       an_attribute_ptr a = first_param_marker(q.declared_type);
       if (a == nullptr) continue;
       reject(Diag::unsupported_annotation, q.position,
@@ -3323,12 +3492,23 @@ class Encoder {
     return m;
   }
 
-  enum class SpecFn { none, owns, reads, live, old_c, unsupported };
+  enum class SpecFn { none, owns, reads, live, old_c, unsupported, owns_block, zeroed };
+  // The routine is one of the functions <cerastes.h> declares (decision 0047, audit N6: `owns_block` and `zeroed` are entities, not names).
+  static bool declared_in_cerastes_header(a_routine_ptr r) {
+    a_routine_ptr root = root_routine(r);
+    const a_source_position p = (root != nullptr ? root : r)->source_corresp.decl_position;
+    const std::string& h = verify_config().cerastes_header;
+    return p.seq != 0 && !h.empty() && physical_path(p) == h;
+  }
+
   static SpecFn spec_fn(a_routine_ptr r) {
     const std::string n = rname(r);
+    if ((n == "cerastes::owns_block" || n == "cerastes_owns_block" || n == "cerastes_zeroed") && !declared_in_cerastes_header(r)) return SpecFn::none;
     if (n == "cerastes::owns" || n == "cerastes_owns") return SpecFn::owns;
     if (n == "cerastes::reads" || n == "cerastes_reads") return SpecFn::reads;
     if (n == "cerastes::live" || n == "cerastes_live") return SpecFn::live;
+    if (n == "cerastes::owns_block" || n == "cerastes_owns_block") return SpecFn::owns_block;  // decision 0047 item 4
+    if (n == "cerastes_zeroed") return SpecFn::zeroed;
     if (n == "cerastes_old_") return SpecFn::old_c;
     if (n == "cerastes::forall" || n == "cerastes::owns_range") return SpecFn::unsupported;
     return SpecFn::none;
@@ -3383,7 +3563,7 @@ class Encoder {
       if (addr == nullptr) return nullptr;
       const Expr* rootE = vir::place_root(addr);
       if (rootE->kind == Expr::Kind::Result) {
-        reject(Diag::unsupported_annotation, e->position, "\"" + name + "\" of a member of `*result` or of a place reached from the result (an atom on the result, an owning result: M4.5d2)");
+        reject(Diag::unsupported_annotation, e->position, "\"" + name + "\" of a member of `*result` or of a place reached from the result (an atom on the result, an owning result: M4.5d2b)");
         return nullptr;
       }
       if (rootE->kind != Expr::Kind::Formal && rootE->kind != Expr::Kind::GlobalAddr) {
@@ -3421,7 +3601,7 @@ class Encoder {
       } else {
         reject(Diag::unsupported_annotation, e->position,
                "\"" + name + "\" of a place other than `*P` of a pointer P read from a parameter, a global or the result, or a member of one (`*local` or an element: M4.5e1; "
-               "an element of the result: M4.5d2)");
+               "an element of the result: M4.5d2b)");
         return nullptr;
       }
     }
@@ -3431,7 +3611,7 @@ class Encoder {
     const Expr* rootE = vir::place_root(pf);
     if (rootE->kind == Expr::Kind::Result) {
       reject(Diag::unsupported_annotation, e->position,
-             "\"" + name + "\" of a place through the result (`live(r.q)`, `owns(*r.q)`, `owns(**r)`, an atom on `*result`: an owning result, M4.5d2)");
+             "\"" + name + "\" of a place through the result (`live(r.q)`, `owns(*r.q)`, `owns(**r)`, an atom on `*result`: an owning result, M4.5d2b)");
       return nullptr;
     }
     if (fn == SpecFn::owns && pn->type != nullptr) {  // decision 0040 item 2 (re-audit of B1): a contract may not give write permission to a const place
@@ -3687,8 +3867,10 @@ class Encoder {
     for (const vir::Clause& c : f->requires_) collect(c.expr);
     for (const vir::Clause& c : f->ensures_) collect(c.expr);
     const std::vector<vir::AtomSite> sites = vir::contract_atoms(*f);
+    const std::vector<vir::AtomSite> block_sites = vir::contract_block_atoms(*f);  // decision 0047 item 4: no ghost amount, no partner
     std::set<const Expr*> placed;
     for (const vir::AtomSite& st : sites) placed.insert(st.atom);
+    for (const vir::AtomSite& st : block_sites) placed.insert(st.atom);
     auto pos_of = [&](const Expr* atom) {
       auto it = atom_pos_.find(atom);
       return it != atom_pos_.end() ? it->second : cx_.stmt_pos;
@@ -3698,6 +3880,7 @@ class Encoder {
         case vir::AtomKind::Owns: return "owns";
         case vir::AtomKind::Reads: return "reads";
         case vir::AtomKind::Live: return "live";
+        case vir::AtomKind::OwnsBlock: return "owns_block";
       }
       return "?";
     };
@@ -3745,7 +3928,7 @@ class Encoder {
         reject(Diag::unsupported_annotation, pos_of(st.atom),
                std::string("an `ensures` \"") + spelling(st.atom) + "\" with no \"" + spelling(st.atom) + "\" of the same " +
                    atom_word(*st.atom) +
-                   " in the `requires` (a permission a function creates, such as an owning result, is M4.5d2)");
+                   " in the `requires` (a permission a function creates, such as a pointee result, is M4.5d2b)");
         continue;
       }
       if (!used.insert(partner).second) {
@@ -3754,6 +3937,39 @@ class Encoder {
         continue;
       }
       const_cast<Expr*>(st.atom)->amount = partner;
+    }
+    // Decision 0047 item 4: the rules of the `owns_block` atoms (check_program repeats them).  The operand's key is the parameter's index, or the result's.
+    for (size_t i = 0; i < block_sites.size(); ++i) {
+      const vir::AtomSite& b = block_sites[i];
+      const int key = vir::atom_place(*b.atom).root;
+      if (key == vir::kNoPlaceKey) continue;
+      bool dup = false;
+      for (size_t j = 0; j < i; ++j)
+        if (block_sites[j].in_ensures == b.in_ensures && vir::atom_place(*block_sites[j].atom).root == key) dup = true;
+      if (dup) {
+        reject(Diag::unsupported_annotation, pos_of(b.atom), "\"owns_block\" of the same pointer twice in " + std::string(b.in_ensures ? "an `ensures`" : "a `requires`") + " (decision 0047 item 4)");
+        continue;
+      }
+      bool beside = false;
+      for (const vir::AtomSite& o : sites) {
+        const vir::PlaceKey ok = vir::atom_place(*o.atom);
+        if (ok.root == key && ok.via.empty()) beside = true;
+      }
+      // `owns(*r)` on the result is refused by spec_atom (an owning result), so only a parameter's atoms can be beside.
+      if (beside) {
+        reject(Diag::unsupported_annotation, pos_of(b.atom),
+               "\"owns_block\" beside \"owns\", \"reads\" or \"live\" of the same pointer (the block already holds every cell and its liveness; decision 0047 item 4)");
+        continue;
+      }
+      if (b.in_ensures && key >= 0) {
+        bool taken = false;
+        for (const vir::AtomSite& r : block_sites)
+          if (!r.in_ensures && vir::atom_place(*r.atom).root == key) taken = true;
+        if (!taken)
+          reject(Diag::unsupported_annotation, pos_of(b.atom),
+                 "an `ensures` \"owns_block\" of a parameter with no \"owns_block\" of it in the `requires` (the call cannot make the caller's pointer own a block it did not "
+                 "have: a partnerless permission is M4.5d2b, decision 0047 item 4)");
+      }
     }
   }
 
@@ -3781,6 +3997,10 @@ class Encoder {
   const Expr* pointer_conversion(an_expr_node_ptr e, an_expr_node_ptr operand) {
     const bool to_ptr = is_pointer_type(e->type);
     const bool from_ptr = is_pointer_type(operand->type);
+    // Decision 0047 item 2: the direct operand is a call of an allocation routine (a vlibc contract of shape (A)): a typed view.
+    if (to_ptr && from_ptr && !cx_.contract && !cx_.annotation && cx_.const_depth == 0)
+      if (a_routine_ptr ar = direct_callee(operand); ar != nullptr)
+        if (const HeapShape* hs = heap_shape_of(ar); hs != nullptr && hs->allocation) return allocation_view(e, operand, ar, *hs);
     VType to;
     if (to_ptr && !value_type(e->type, e->position, &to, true)) return nullptr;
     if (to_ptr && !from_ptr) {
@@ -3904,6 +4124,12 @@ class Encoder {
       // item 10); before 0006's rejection of every other call.
       const SpecFn fn = spec_fn(callee);
       if (fn == SpecFn::owns || fn == SpecFn::reads || fn == SpecFn::live) return spec_atom(e, fn, name, ops);
+      if (fn == SpecFn::owns_block) return spec_block_atom(e, name, ops);
+      if (fn == SpecFn::zeroed) {
+        reject(Diag::unsupported_annotation, e->position,
+               "\"" + name + "\" is the contract language of vlibc's `calloc` (its block holds zeros): a program's contract cannot say it (decision 0047 item 4)");
+        return nullptr;
+      }
       if (fn == SpecFn::unsupported) {
         reject(Diag::unsupported_annotation, e->position, "\"" + name + "\" (a range or a quantifier over memory: M4.5e1)");
         return nullptr;
@@ -3917,6 +4143,7 @@ class Encoder {
       reject(Diag::spec_call_in_code, e->position, name);
       return nullptr;
     }
+    if (const HeapShape* hs = heap_shape_of(callee)) return heap_call(e, callee, *hs, ops);  // decision 0047 item 2
     vir::Function* f = callee_for_call(callee, e->position);
     if (f == nullptr) return nullptr;
     if (f->ret.is_struct() && cx_.struct_call_ok.count(e) == 0) {  // decision 0044 item 2: only a consumer that takes a struct value may call it
@@ -3961,6 +4188,10 @@ class Encoder {
     }
     if (!ok) return nullptr;
     if (verify_config().strict_init) strict_init_arguments(f, args, name, e->position);
+    if (verify_config().strict_init && f->result_init == vir::InitMarker::RefToUninit) {  // decision 0047 item 8 (audit S6)
+      reject_strict_uninit_result(f, e->position);
+      return nullptr;
+    }
     const Expr* c = b_.call(f, std::move(args), loc_of(e->position));
     VType nt = signature_vtype(e->type);
     if (!nt.ok || nt.t != f->ret) {
@@ -5139,6 +5370,248 @@ class Encoder {
     return intact;
   }
 
+  // The registered markers (`owning`, `ref_to_uninit`, `must_init`) written in a library file on `r` itself (target `r`, the routine's attribute list) or on a
+  // parameter of any of its declarations, one node per spelling (decision 0047 item 3).
+  std::vector<an_attribute_ptr> library_markers(a_routine_ptr r) {
+    std::vector<an_attribute_ptr> out;
+    auto add = [&](an_attribute_ptr a) {
+      if (!is_registered_cerastes(a) || !is_param_marker(classify(a)) || !in_library_file(a->position)) return;
+      for (an_attribute_ptr o : out)
+        if (o == a || same_spelling(o->position, a->position)) return;
+      out.push_back(a);
+    };
+    for (an_attribute_ptr a = r->source_corresp.attributes; a != nullptr; a = a->next) add(a);
+    auto params = [&](a_type_ptr t) {
+      a_type_ptr rt = t != nullptr ? skip_typerefs(t) : nullptr;
+      if (rt == nullptr || rt->kind != tk_routine || rt->variant.routine.extra_info == nullptr) return;
+      for (a_param_type_ptr p = rt->variant.routine.extra_info->param_type_list; p != nullptr; p = p->next)
+        for (an_attribute_ptr a = p->attributes; a != nullptr; a = a->next) add(a);
+    };
+    params(r->type);
+    params(r->declared_type);
+    if (ents_ != nullptr)
+      if (auto sd = ents_->secondary_decls.find(r); sd != ents_->secondary_decls.end())
+        for (const IlEntities::SecondaryDecl& q : sd->second) {
+          params(q.declared_type);
+          for (an_attribute_ptr a = q.attributes; a != nullptr; a = a->next) add(a);
+        }
+    return out;
+  }
+
+  // ---- vlibc's heap shapes (decision 0047 item 2) ------------------------------------------------------------------------------------
+  // A routine trusted from vlibc whose signature mentions `void *` has one of two contracts, read from the EDG expression trees (VIR never holds `void *`):
+  //  (A) allocation: a `void *` result, integer parameters, no `requires`, one `ensures(B, B == NULL || owns_block(B, S) [&& zeroed(B)])` with S a parameter or
+  //      the product of two (calloc's `nmemb * size`); `ref_to_uninit` on the routine (malloc) or none;
+  //  (D) deallocation: a void result, one `void *` parameter marked `ref_to_uninit`, one `requires(P == NULL || owns_block(P))`, no `ensures`.
+  // Anything else is an internal error (exit status 3).  The routine is then never read by check_signature or function_of: a call is a typed view (`void*` to `T*`).
+  struct HeapShape {
+    bool allocation = true;      // (A); else (D)
+    bool zeroed = false;         // (A): `zeroed(B)` beside the block (calloc)
+    bool result_uninit = false;  // (A): `ref_to_uninit` on the routine (malloc: the block's contents are indeterminate)
+    std::vector<int> size_params;  // (A): the 0-based parameters whose product is the size S
+    std::string reason;          // vlibc's tag: "vlibc: <name> <reason>"
+    a_source_position pos{};     // vlibc's declaration
+  };
+  std::map<a_routine_ptr, HeapShape> heap_shapes_;
+
+  // A pointer type (at any depth) whose innermost pointee is `void`.
+  static bool is_void_pointer_type(a_type_ptr t) {
+    t = t != nullptr ? skip_typerefs(t) : nullptr;
+    int depth = 0;
+    while (t != nullptr && t->kind == tk_pointer && !t->variant.pointer.is_reference && depth < 16) {
+      a_type_ptr e = t->variant.pointer.type != nullptr ? skip_typerefs(t->variant.pointer.type) : nullptr;
+      if (e != nullptr && e->kind == tk_void) return true;
+      t = e;
+      ++depth;
+    }
+    return false;
+  }
+
+  static bool mentions_void_pointer(a_routine_ptr r) {
+    if (is_void_pointer_type(return_type(r))) return true;
+    a_routine_type_supplement_ptr x = routine_supplement(r);
+    if (x != nullptr)
+      for (a_param_type_ptr p = x->param_type_list; p != nullptr; p = p->next)
+        if (is_void_pointer_type(p->type)) return true;
+    return false;
+  }
+
+  // The nodes of an expression that change no value (the front end's implicit conversions, its bool conversion of a condition, an lvalue wrapper).
+  static an_expr_node_ptr heap_peel(an_expr_node_ptr e) {
+    for (int guard = 0; e != nullptr && e->kind == enk_operation && guard < 16; ++guard) {
+      const an_expr_operator_kind k = e->variant.operation.kind;
+      an_expr_node_ptr o = e->variant.operation.operands;
+      if (o == nullptr || o->next != nullptr) break;
+      if (k == eok_bool_cast || k == eok_lvalue_adjust || k == eok_reference_to || (k == eok_cast && e->compiler_generated)) e = o;
+      else break;
+    }
+    return e;
+  }
+
+  static bool heap_is_null(an_expr_node_ptr e) {
+    e = heap_peel(e);
+    if (e == nullptr || e->kind != enk_constant || e->variant.constant.ptr == nullptr) return false;
+    a_constant_ptr c = e->variant.constant.ptr;
+    return c->kind == ck_integer && decimal_value(c) == "0";
+  }
+
+  // The operation `kind` of `e` (after peeling) with exactly `n` operands, or an empty list.
+  static std::vector<an_expr_node_ptr> heap_operation(an_expr_node_ptr e, an_expr_operator_kind kind, size_t n) {
+    e = heap_peel(e);
+    if (e == nullptr || e->kind != enk_operation || e->variant.operation.kind != kind) return {};
+    std::vector<an_expr_node_ptr> ops = operands_of(e);
+    return ops.size() == n ? ops : std::vector<an_expr_node_ptr>();
+  }
+
+  // A call of the specification function `name` (a C spelling of <cerastes.h>) with `n` arguments: the argument nodes, or an empty list.
+  static std::vector<an_expr_node_ptr> heap_call(an_expr_node_ptr e, const char* name, size_t n) {
+    e = heap_peel(e);
+    a_routine_ptr callee = direct_callee(e);
+    if (callee == nullptr || rname(callee) != name || !declared_in_cerastes_header(callee)) return {};
+    std::vector<an_expr_node_ptr> ops = operands_of(e);
+    if (ops.size() != n + 1) return {};
+    ops.erase(ops.begin());
+    return ops;
+  }
+
+  // A reference to the routine's parameter (`kind` param, `*num` its 1-based number) or, in an `ensures` with a binder, to the result.
+  static ParamRef::Kind heap_param_ref(an_expr_node_ptr e, Annot annot, bool binder, unsigned* num) {
+    e = heap_peel(e);
+    if (e == nullptr || e->kind != enk_param_ref) return ParamRef::Kind::unmapped;
+    const ParamRef r = interpret_param_ref(e, annot, binder, 0);
+    *num = r.num;
+    return r.kind;
+  }
+
+  // `B == NULL` (either order) where B is the result binder (`binder`) or parameter `param` (1-based, for a `requires`).
+  bool heap_null_test(an_expr_node_ptr e, Annot annot, bool binder, unsigned param) {
+    const std::vector<an_expr_node_ptr> ops = heap_operation(e, eok_eq, 2);
+    if (ops.empty()) return false;
+    for (int i = 0; i < 2; ++i) {
+      unsigned num = 0;
+      const ParamRef::Kind k = heap_param_ref(ops[static_cast<size_t>(i)], annot, binder, &num);
+      if (!heap_is_null(ops[static_cast<size_t>(1 - i)])) continue;
+      if (binder ? (k == ParamRef::Kind::binder) : (k == ParamRef::Kind::param && num == param)) return true;
+    }
+    return false;
+  }
+
+  // The size of an allocation: a parameter, or the product of two (0-based indices in `*out`).
+  bool heap_size(an_expr_node_ptr e, size_t nparams, std::vector<int>* out) {
+    unsigned num = 0;
+    if (heap_param_ref(e, Annot::ensures, true, &num) == ParamRef::Kind::param) {
+      if (num < 1 || num > nparams) return false;
+      out->push_back(static_cast<int>(num) - 1);
+      return true;
+    }
+    const std::vector<an_expr_node_ptr> m = heap_operation(e, eok_multiply, 2);
+    if (m.empty()) return false;
+    return heap_size(m[0], nparams, out) && out->size() == 1 && heap_size(m[1], nparams, out) && out->size() == 2;
+  }
+
+  // Reads the shape of the vlibc-trusted routine `r` whose signature mentions `void *`; an internal error (exit status 3) when it has neither.
+  void recognize_heap_shape(a_routine_ptr r) {
+    const LibTrust& lt = lib_trust(r);
+    const std::string name = r->source_corresp.name != nullptr ? r->source_corresp.name : "?";
+    bool failed = false;
+    auto fail = [&](const std::string& why) {
+      if (!failed) lib_internal_error(lt.decl, "vlibc declares `" + name + "` with a `void *` but its contract is neither an allocation (`ensures(r, r == NULL || owns_block(r, size)[ && zeroed(r)])`, a void * result, integer parameters) "
+                                              "nor a deallocation (`requires(p == NULL || owns_block(p))` on the one void * parameter, marked `ref_to_uninit`): " + why + " (decision 0047 item 2)");
+      failed = true;
+    };
+    a_routine_type_supplement_ptr x = routine_supplement(r);
+    if (x == nullptr) return fail("its type cannot be read");
+    if (x->has_ellipsis || !x->prototyped) return fail("a variadic or unprototyped declaration");
+    std::vector<a_param_type_ptr> params;
+    for (a_param_type_ptr p = x->param_type_list; p != nullptr; p = p->next) params.push_back(p);
+    // The markers vlibc wrote: on a parameter (read like every other, by library position) and on the routine itself (the result).
+    std::set<size_t> reported;
+    for (Annot k : {Annot::owning, Annot::ref_to_uninit, Annot::must_init})
+      if (!read_marker(r, x, k, &reported)) return;  // reported by read_marker
+    bool result_uninit = false;
+    for (an_attribute_ptr a = r->source_corresp.attributes; a != nullptr; a = a->next) {
+      if (!is_registered_cerastes(a) || !in_library_file(a->position)) continue;
+      const Annot k = classify(a);
+      if (k == Annot::ref_to_uninit) result_uninit = true;
+      else if (is_param_marker(k)) return fail("`" + std::string(a->name) + "` on the routine");
+    }
+    std::vector<an_attribute_ptr> requires_, ensures_;
+    for (an_attribute_ptr a : contracts_of(r)) {
+      if (classify(a) == Annot::requires_) requires_.push_back(a);
+      else if (classify(a) == Annot::ensures) ensures_.push_back(a);
+      else return fail("a `decreases`");
+    }
+    auto only_expression = [&](an_attribute_ptr a, an_expr_node_ptr* out) {
+      int exprs = 0;
+      for (const AnnotArg& g : arguments_of(a)) {
+        if (g.kind == AnnotArg::Kind::expression) {
+          *out = g.expr;
+          ++exprs;
+        } else if (g.kind != AnnotArg::Kind::binder) {
+          return false;
+        }
+      }
+      return exprs == 1 && *out != nullptr;
+    };
+    HeapShape sh;
+    sh.pos = lt.decl;
+    sh.reason = lt.reason;
+    a_type_ptr ret = return_type(r);
+    a_type_ptr ret_s = ret != nullptr ? skip_typerefs(ret) : nullptr;
+    if (is_void_pointer_type(ret) && ret_s != nullptr && ret_s->kind == tk_pointer && ret_s->variant.pointer.type != nullptr &&
+        skip_typerefs(ret_s->variant.pointer.type)->kind == tk_void) {
+      // (A)
+      for (a_param_type_ptr p : params) {
+        a_type_ptr pt = p->type != nullptr ? skip_typerefs(p->type) : nullptr;
+        if (pt == nullptr || pt->kind != tk_integer || pt->variant.integer.enum_type) return fail("a parameter that is not an integer");
+      }
+      if (auto mk = markers_.find(r); mk != markers_.end() && !mk->second.empty()) return fail("a marker on a parameter of an allocation");
+      if (!requires_.empty() || ensures_.size() != 1) return fail("an allocation has no `requires` and exactly one `ensures`");
+      an_attribute_ptr en = ensures_[0];
+      an_expr_node_ptr e = nullptr;
+      if (!only_expression(en, &e) || !has_binder(en)) return fail("the `ensures` has no result name");
+      const std::vector<an_expr_node_ptr> lor = heap_operation(e, eok_lor, 2);
+      if (lor.empty() || !heap_null_test(lor[0], Annot::ensures, true, 0)) return fail("the `ensures` is not `r == NULL || ...`");
+      std::vector<an_expr_node_ptr> owns = heap_call(lor[1], "cerastes_owns_block", 2);
+      if (owns.empty()) {
+        const std::vector<an_expr_node_ptr> land = heap_operation(lor[1], eok_land, 2);
+        if (!land.empty()) {
+          owns = heap_call(land[0], "cerastes_owns_block", 2);
+          const std::vector<an_expr_node_ptr> zr = heap_call(land[1], "cerastes_zeroed", 1);
+          unsigned num = 0;
+          if (owns.empty() || zr.empty() || heap_param_ref(zr[0], Annot::ensures, true, &num) != ParamRef::Kind::binder) return fail("the `ensures` after `r == NULL ||` is not `owns_block(r, size)` or `owns_block(r, size) && zeroed(r)`");
+          sh.zeroed = true;
+        }
+      }
+      unsigned num = 0;
+      if (owns.empty() || heap_param_ref(owns[0], Annot::ensures, true, &num) != ParamRef::Kind::binder) return fail("the `ensures` after `r == NULL ||` is not `owns_block(r, size)` or `owns_block(r, size) && zeroed(r)`");
+      if (!heap_size(owns[1], params.size(), &sh.size_params)) return fail("the size is not a parameter or the product of two");
+      if (sh.zeroed == result_uninit) return fail(sh.zeroed ? "`ref_to_uninit` beside `zeroed`" : "neither `ref_to_uninit` nor `zeroed` (the flags would be set over unspecified values)");
+      sh.allocation = true;
+      sh.result_uninit = result_uninit;
+    } else if (ret_s != nullptr && ret_s->kind == tk_void) {
+      // (D)
+      if (result_uninit) return fail("`ref_to_uninit` on the routine of a deallocation");
+      if (params.size() != 1 || !is_void_pointer_type(params[0]->type) || !ensures_.empty() || requires_.size() != 1)
+        return fail("a deallocation has one `void *` parameter, one `requires` and no `ensures`");
+      auto mk = markers_.find(r);
+      if (mk == markers_.end() || mk->second.size() != 1 || mk->second[0].index != 0 || mk->second[0].kind != vir::InitMarker::RefToUninit)
+        return fail("the parameter is not marked `ref_to_uninit`");
+      an_expr_node_ptr e = nullptr;
+      if (!only_expression(requires_[0], &e) || has_binder(requires_[0])) return fail("the `requires` is not `p == NULL || owns_block(p)`");
+      const std::vector<an_expr_node_ptr> lor = heap_operation(e, eok_lor, 2);
+      if (lor.empty() || !heap_null_test(lor[0], Annot::requires_, false, 1)) return fail("the `requires` is not `p == NULL || owns_block(p)`");
+      const std::vector<an_expr_node_ptr> owns = heap_call(lor[1], "cerastes_owns_block", 1);
+      unsigned num = 0;
+      if (owns.empty() || heap_param_ref(owns[0], Annot::requires_, false, &num) != ParamRef::Kind::param || num != 1)
+        return fail("the `requires` is not `p == NULL || owns_block(p)`");
+      sh.allocation = false;
+    } else {
+      return fail("neither a `void *` result nor a void result");
+    }
+    if (!failed) heap_shapes_[r] = sh;
+  }
+
   // Whether a contract of `r` is written in a library file and, if so, whether vlibc's rules make it trusted (decision 0046 item 4); reports
   // each failure once.  The memoized result is read by function_of and callee_for_call.
   const LibTrust& lib_trust(a_routine_ptr r) {
@@ -5153,6 +5626,9 @@ class Encoder {
       if (in_library_file(a->position)) lib_attrs.push_back(a);
       else elsewhere = true;
     }
+    // Decision 0047 item 3: a marker written in a library file (on the routine or on a parameter) counts as a contract of the routine, so that a
+    // declaration with markers only still needs its tag and passes the reserved-name and macro checks.
+    for (an_attribute_ptr a : library_markers(r)) lib_attrs.push_back(a);
     if (lib_attrs.empty()) return lib_trust_.emplace(r, t).first->second;
     const a_source_position at = lib_attrs[0]->position;
     const std::string name = r->source_corresp.name != nullptr ? r->source_corresp.name : "?";
@@ -5201,6 +5677,13 @@ class Encoder {
             for (an_attribute_ptr x = q.attributes; x != nullptr; x = x->next)
               for (an_attribute_ptr a : lib_attrs)
                 if (same_position(x->position, a->position) && classify(x) == classify(a)) holds = true;
+            // A marker on a parameter lives in the declaration's own parameter list (P52).
+            if (a_type_ptr dt = q.declared_type != nullptr ? skip_typerefs(q.declared_type) : nullptr;
+                dt != nullptr && dt->kind == tk_routine && dt->variant.routine.extra_info != nullptr)
+              for (a_param_type_ptr pp = dt->variant.routine.extra_info->param_type_list; pp != nullptr; pp = pp->next)
+                for (an_attribute_ptr x = pp->attributes; x != nullptr; x = x->next)
+                  for (an_attribute_ptr a : lib_attrs)
+                    if (same_position(x->position, a->position) && classify(x) == classify(a)) holds = true;
             if (holds) decls.push_back(q.position);
           }
       }
@@ -5218,7 +5701,9 @@ class Encoder {
           lib_internal_error(decls[0], "the tag above the declaration of `" + name + "` names `" + tag_name + "`");
         } else {
           bool intact = true;
-          for (an_attribute_ptr a : lib_attrs) intact = library_contract_text_intact(a) && intact;
+          // A marker's text is its macro or attribute name, which are protected names (is_protected_macro_name): only contracts carry other identifiers.
+          for (an_attribute_ptr a : lib_attrs)
+            if (is_contract(classify(a))) intact = library_contract_text_intact(a) && intact;
           if (intact) {
             t.ok = true;
             t.reason = "vlibc: " + tag_name + " " + reason;
@@ -5315,6 +5800,255 @@ class Encoder {
   }
 
   // The callee's VIR function for a call, or null after a rejection (0011 item 5).
+  // ---- the heap's typed views (decision 0047 item 2) ----------------------------------------------------------------------------------
+  const HeapShape* heap_shape_of(a_routine_ptr r) const {
+    auto it = heap_shapes_.find(r);
+    return it == heap_shapes_.end() ? nullptr : &it->second;
+  }
+
+  // The checks `callee_for_call` makes of a trusted routine, before a view's contract is used (decision 0047 item 2, audit B2): the reserved-name
+  // rejection, lib_trust's verdict and 0046 item 8's redirections.  False after a rejection.
+  bool heap_routine_usable(a_routine_ptr r, const a_source_position& at) {
+    if (reserved_rejected_.count(r) != 0) return false;
+    const LibTrust& lt = lib_trust(r);
+    if (!lt.has || !lt.ok) return false;  // rejected there
+    return !reject_redirected_call(r, at);
+  }
+
+  struct HeapView {
+    a_routine_ptr routine;
+    vir::Type pointee;
+    vir::Function* fn;
+  };
+  std::vector<HeapView> heap_views_;
+
+  // `T *` for the zero test of one leaf of calloc's block: the leaf at `path` of the struct (or the object itself) under the result.
+  const Expr* heap_zero_clause(vir::Function* f, const std::vector<int>& path, const vir::Type& leaf, const SrcLoc& l) {
+    const Expr* addr = b_.result(*f, l);
+    for (int k : path) addr = b_.member_addr(addr, k, l);
+    const Expr* value = b_.deref(addr, l);
+    const Expr* zero = leaf.is_bool() ? b_.bool_const(false, l) : leaf.is_ptr() ? b_.null_const(leaf, l) : b_.int_const(leaf, "0", l);
+    return b_.binary(vir::BinaryOp::Eq, value, zero, l);
+  }
+
+  // The view of the allocation routine `r` (shape `sh`) for one object of VIR type `pointee` (`edg_pointee` its front-end type, for the size), or of the
+  // deallocation routine for a pointer to `pointee`: bodiless, trusted from vlibc's tag, one per (routine, type).
+  vir::Function* heap_view(a_routine_ptr r, const HeapShape& sh, const vir::Type& pointee, a_type_ptr edg_pointee) {
+    for (const HeapView& v : heap_views_)
+      if (v.routine == r && v.pointee == pointee) return v.fn;
+    const SrcLoc l = loc_of(sh.pos);
+    const vir::Type pty = prog_.pointer_to(pointee);
+    vir::Function* f = prog_.add_function(rname(r), sh.allocation ? pty : vir::Type::void_type(), l, l);
+    f->trusted_reason = sh.reason + "; typed view: one " + pointee.str() + " (" + std::to_string(static_cast<unsigned long long>(size_of_type(skip_typerefs(edg_pointee)))) +
+                        " bytes), decision 0047";
+    if (sh.allocation) {
+      // ensures r == NULL || owns_block(r) [&& every leaf is zero]
+      const Expr* res = b_.result(*f, l);
+      b_.text(res, "r");
+      const Expr* isnull = b_.binary(vir::BinaryOp::Eq, res, b_.null_const(pty, l), l);
+      const Expr* rhs = b_.atom(vir::AtomKind::OwnsBlock, b_.result(*f, l), -1, l);
+      if (sh.zeroed) {
+        if (pointee.is_struct()) {
+          for (const vir::StructLeaf& lf : vir::struct_leaves(*pointee.struct_type)) rhs = b_.binary(vir::BinaryOp::LAnd, rhs, heap_zero_clause(f, lf.path, lf.type, l), l);
+        } else {
+          rhs = b_.binary(vir::BinaryOp::LAnd, rhs, heap_zero_clause(f, {}, pointee, l), l);
+        }
+      }
+      f->ensures_.push_back(vir::Clause{b_.binary(vir::BinaryOp::LOr, isnull, rhs, l), l});
+      if (sh.result_uninit) f->result_init = vir::InitMarker::RefToUninit;
+    } else {
+      // requires p == NULL || owns_block(p); the parameter is `ref_to_uninit`: free takes the storage whatever it holds
+      const int k = f->add_param("ptr", pty, l);
+      f->params[static_cast<size_t>(k)].c_type_name = pty.str();
+      f->params[static_cast<size_t>(k)].init = vir::InitMarker::RefToUninit;
+      const Expr* p0 = b_.formal(*f, k, l);
+      b_.text(p0, "ptr");
+      const Expr* isnull = b_.binary(vir::BinaryOp::Eq, p0, b_.null_const(pty, l), l);
+      const Expr* p1 = b_.formal(*f, k, l);
+      b_.text(p1, "ptr");
+      f->requires_.push_back(vir::Clause{b_.binary(vir::BinaryOp::LOr, isnull, b_.atom(vir::AtomKind::OwnsBlock, p1, -1, l), l), l});
+      f->deallocates = true;
+    }
+    heap_views_.push_back(HeapView{r, pointee, f});
+    return f;
+  }
+
+  static bool pointee_qualified(a_type_ptr pointer_type) {
+    a_type_ptr t = pointer_type != nullptr ? skip_typerefs(pointer_type) : nullptr;
+    if (t == nullptr || t->kind != tk_pointer || t->variant.pointer.type == nullptr) return false;
+    return (f_get_type_qualifiers(t->variant.pointer.type, TRUE) & (TQ_CONST | TQ_VOLATILE)) != 0;
+  }
+
+  // The conversion `cast` (to `T *`) of the direct call `call` of the allocation routine `r`: the call of the view for `T`.  The size arguments must be
+  // integer constants whose product is `sizeof(T)`.
+  const Expr* allocation_view(an_expr_node_ptr cast, an_expr_node_ptr call, a_routine_ptr r, const HeapShape& sh) {
+    const std::string name = rname(r);
+    if (!heap_routine_usable(r, call->position)) return nullptr;
+    a_type_ptr ct = skip_typerefs(cast->type);
+    a_type_ptr pt = ct->variant.pointer.type != nullptr ? skip_typerefs(ct->variant.pointer.type) : nullptr;
+    if (pt == nullptr || pt->kind == tk_void) {
+      reject(Diag::unsupported_expression, cast->position,
+             "the result of `" + name + "` converted to `void *`, or to a pointer to nothing a type describes: only a conversion to a pointer to the object's type is "
+             "supported (decision 0047 item 11; `void *` objects: M4.7, M8)");
+      return nullptr;
+    }
+    if (pointee_qualified(cast->type)) {
+      reject(Diag::unsupported_expression, cast->position,
+             "the result of `" + name + "` converted to a pointer to a `const` or `volatile` object (decision 0047 item 2: `const` objects are M4.6)");
+      return nullptr;
+    }
+    VType to;
+    if (!value_type(cast->type, cast->position, &to, true)) return nullptr;
+    if (!to.t.is_ptr() || to.t.pointee == nullptr) {
+      reject(Diag::unsupported_expression, cast->position, "an allocation converted to something that is not a pointer to an object");
+      return nullptr;
+    }
+    // The size: the product of the size parameters' arguments, each an integer constant the front end folded, equal to sizeof(T).  Every argument is
+    // also encoded through its original expression (as any folded constant is), so its own checks stay (0022's no-wrap check, 0020 item 5, 0024); its value
+    // is discarded (audit S1).
+    const std::vector<an_expr_node_ptr> ops = operands_of(call);
+    std::vector<const Expr*> checked;
+    for (size_t i = 1; i < ops.size(); ++i) {
+      const Expr* a = expr(ops[i]);
+      if (a == nullptr) return nullptr;
+      checked.push_back(a);
+    }
+    unsigned long long product = 1;
+    for (int k : sh.size_params) {
+      const size_t at = static_cast<size_t>(k) + 1;
+      if (at >= ops.size() || ops[at]->kind != enk_constant || ops[at]->variant.constant.ptr == nullptr || ops[at]->variant.constant.ptr->kind != ck_integer) {
+        reject(Diag::unsupported_expression, call->position,
+               "an allocation whose size is not a constant (`n * sizeof(T)`, a variable): `" + name + "` is supported for one object, `sizeof(T)` bytes, until M4.5e2 (decision 0047 item 2)");
+        return nullptr;
+      }
+      const std::string d = decimal_value(ops[at]->variant.constant.ptr);
+      unsigned long long v = 0;
+      bool bad = d.empty() || d.size() > 19;
+      for (char c : d) bad = bad || c < '0' || c > '9';
+      if (!bad) v = std::stoull(d);
+      if (bad || __builtin_mul_overflow(product, v, &product)) {
+        reject(Diag::unsupported_expression, call->position, "an allocation size that is not a small non-negative constant (decision 0047 item 2)");
+        return nullptr;
+      }
+    }
+    const unsigned long long want = static_cast<unsigned long long>(size_of_type(pt));
+    if (product != want) {
+      reject(Diag::unsupported_expression, call->position,
+             "an allocation of " + std::to_string(product) + " bytes converted to a pointer to `" + render_type(pt) + "` (" + std::to_string(want) +
+                 " bytes): only `sizeof(T)` bytes for a `T *` is supported until M4.5e2 (decision 0047 item 2)");
+      return nullptr;
+    }
+    vir::Function* v = heap_view(r, sh, *to.t.pointee, pt);
+    if (verify_config().strict_init && v->result_init == vir::InitMarker::RefToUninit) {  // decision 0047 item 8 (audit S6)
+      reject_strict_uninit_result(v, call->position);
+      return nullptr;
+    }
+    const Expr* c = b_.call(v, {}, loc_of(call->position));
+    for (auto it = checked.rbegin(); it != checked.rend(); ++it)
+      if ((*it)->kind != Expr::Kind::Const) c = b_.comma(*it, c, loc_of(call->position));  // a plain constant has no check to keep
+    return c;
+  }
+
+  // Decision 0047 item 8 (audit S6): under `--strict-init` every call of a function whose result is `ref_to_uninit` is rejected, wherever it stands
+  // (P4222R3 and P4416R0 require the receiving pointer to be marked: target `v`, a marked result or parameter, which M4.5d2b decides).
+  void reject_strict_uninit_result(const vir::Function* f, const a_source_position& at) {
+    reject(Diag::unsupported_annotation, at,
+           "under `--strict-init` the result of `" + f->c_name + "` holds no value (`ref_to_uninit`): P4222R3 and P4416R0 require the pointer that receives it "
+           "to be marked (a local `ref_to_uninit`, a marked result or parameter: M4.5d2b, decision 0047 item 8)");
+  }
+
+  // A call of a heap routine that is not the direct operand of a conversion: an allocation not converted at once (rejected), or the deallocation `free`
+  // (its argument must be the conversion of a `T *`).
+  const Expr* heap_call(an_expr_node_ptr e, a_routine_ptr callee, const HeapShape& sh, const std::vector<an_expr_node_ptr>& ops) {
+    const std::string name = rname(callee);
+    if (!heap_routine_usable(callee, e->position)) return nullptr;  // decision 0047 item 2 (audit B2): lib_trust's verdict, the reserved-name rule, 0046 item 8
+    if (sh.allocation) {
+      reject(Diag::unsupported_expression, e->position,
+             "the result of `" + name + "` is not converted directly to a pointer to the object it allocates (`void *m = " + name + "(4)`, a discarded or tested result, an argument "
+             "to a `void *` parameter): write `(T *)" + name + "(sizeof(T))` (decision 0047 item 11; `void *` objects: M4.7, M8)");
+      return nullptr;
+    }
+    if (ops.size() != 2) {
+      reject(Diag::unsupported_expression, e->position, "a call whose arguments do not match the declaration of \"" + name + "\"");
+      return nullptr;
+    }
+    an_expr_node_ptr arg = ops[1];
+    // The front end folds `(void *)&g` (the address of a global or a static object) into a constant of its own; the conversion is in its original expression.
+    if (arg->kind == enk_constant && arg->variant.constant.ptr != nullptr && arg->variant.constant.ptr->kind == ck_address)
+      if (an_expr_node_ptr orig = expr_node_from_constant(arg->variant.constant.ptr); orig != nullptr) arg = orig;
+    if (arg->kind != enk_operation || arg->variant.operation.kind != eok_cast || !is_void_pointer_type(arg->type) || arg->variant.operation.operands == nullptr ||
+        arg->variant.operation.operands->next != nullptr || !is_pointer_type(arg->variant.operation.operands->type)) {
+      reject(Diag::unsupported_expression, e->position,
+             "`" + name + "` of an argument that is not a typed pointer converted to `void *` (`free(NULL)`, a `void *` operand): the layout of the block comes from the "
+             "pointer's static type (decision 0047 item 2, 0028 item 6)");
+      return nullptr;
+    }
+    an_expr_node_ptr operand = arg->variant.operation.operands;
+    a_type_ptr ot = skip_typerefs(operand->type);
+    a_type_ptr pt = ot->variant.pointer.type != nullptr ? skip_typerefs(ot->variant.pointer.type) : nullptr;
+    if (pt == nullptr || pt->kind == tk_void) {
+      reject(Diag::unsupported_expression, e->position, "`" + name + "` of a `void *` operand: the layout of the block comes from the pointer's static type (decision 0047 item 2)");
+      return nullptr;
+    }
+    if (pointee_qualified(operand->type)) {
+      reject(Diag::unsupported_expression, e->position, "`" + name + "` of a pointer to a `const` or `volatile` object (decision 0047 item 2: `const` objects are M4.6)");
+      return nullptr;
+    }
+    VType from;
+    if (!value_type(operand->type, operand->position, &from, true)) return nullptr;
+    const Expr* a = expr(operand);
+    if (a == nullptr) return nullptr;
+    if (a->type != from.t || !from.t.is_ptr() || from.t.pointee == nullptr) {
+      reject(Diag::unsupported_expression, e->position, "a conversion whose operand has another type than the IL says");
+      return nullptr;
+    }
+    vir::Function* v = heap_view(callee, sh, *from.t.pointee, pt);
+    return b_.call(v, {a}, loc_of(e->position));
+  }
+
+  // `cerastes_owns_block(p)` / `cerastes::owns_block(p)` in a contract (decision 0047 item 4): an atom on a pointer parameter or, in an `ensures`, the result.
+  const Expr* spec_block_atom(an_expr_node_ptr e, const std::string& name, const std::vector<an_expr_node_ptr>& ops) {
+    if (!cx_.contract) {
+      reject(Diag::unsupported_annotation, e->position,
+             "\"" + name + "\" in a loop invariant or a termination measure (decision 0047 item 4: M4.5d2b)");
+      return nullptr;
+    }
+    if (cx_.annot == Annot::decreases) {
+      reject(Diag::unsupported_expression, e->position, "a permission atom (\"" + name + "\") in a termination measure (a measure holds no permission atom, decision 0038 item 10)");
+      return nullptr;
+    }
+    if (ops.size() != 2) {
+      reject(Diag::unsupported_annotation, e->position,
+             "\"" + name + "\" with a size or other than one argument (the two-argument form is vlibc's own, decision 0047 item 4)");
+      return nullptr;
+    }
+    if (cx_.old_depth > 0) {
+      reject(Diag::unsupported_annotation, e->position, "\"" + name + "\" under \"old\" (decision 0047 item 4: M4.5d2b)");
+      return nullptr;
+    }
+    an_expr_node_ptr a = peel_place(ops[1]);
+    if (a == nullptr || a->kind != enk_param_ref) {
+      reject(Diag::unsupported_annotation, e->position,
+             "\"" + name + "\" of something other than a pointer parameter or, in an `ensures`, the result: a place reached through a load, a member or a global is M4.5d2b "
+             "(decision 0047 item 4)");
+      return nullptr;
+    }
+    const Expr* p = expr(a);
+    if (p == nullptr) return nullptr;
+    if ((p->kind != Expr::Kind::Formal && p->kind != Expr::Kind::Result) || !p->type.is_ptr()) {
+      reject(Diag::unsupported_annotation, e->position, "\"" + name + "\" of something that is not a pointer parameter or the result (decision 0047 item 4)");
+      return nullptr;
+    }
+    if (pointee_qualified(a->type)) {
+      reject(Diag::unsupported_annotation, e->position,
+             "\"" + name + "\" of a pointer to a `const` object (a function that only reads it takes `reads`, decision 0040 item 2)");
+      return nullptr;
+    }
+    const Expr* atom = b_.atom(vir::AtomKind::OwnsBlock, p, -1, loc_of(e->position));
+    atom_pos_[atom] = e->position;
+    return atom;
+  }
+
   vir::Function* callee_for_call(a_routine_ptr callee, const a_source_position& at) {
     if (is_main(callee)) {
       // C allows it; nothing here relies on `main`'s special rules, so the call is rejected in both modes (M8).
@@ -9353,6 +10087,15 @@ void Encoder::run(const IlEntities& ents) {
     lib_trust(r);
     if (reserved_rejected_.count(r) != 0) continue;  // rejected for its reserved name: nothing else about it
     check_routine_attributes(r);
+    reject_unread_function_markers(r);  // decision 0047 item 5 (audit S5)
+    // Decision 0047 item 2: a routine trusted from vlibc whose signature mentions `void *` (the malloc family) has a shape, read once here, called or not;
+    // it is never read by check_signature or function_of (a call is a typed view).  One whose trust failed was reported by lib_trust.
+    if (body == nullptr && mentions_void_pointer(r)) {
+      if (const LibTrust& lt = lib_trust(r); lt.has) {
+        if (lt.ok) recognize_heap_shape(r);
+        continue;
+      }
+    }
     const bool declared_here = decl.seq != 0 && in_verified_file(decl);
     if (body == nullptr && !declared_here) {
       cx_ = Ctx();
@@ -9417,7 +10160,7 @@ void Encoder::run(const IlEntities& ents) {
     if (!check_signature(r, decl)) continue;
     // Decision 0042 item 4: function_of is lazy, so a declaration with a `ref_to_uninit` or `must_init` parameter that nothing calls would never have its
     // marker rules checked (an `owns(*p)` atom, `must_init`'s partner in the `ensures`, the contract reads).  Force it for exactly those routines.
-    if (body == nullptr && (markers_.count(r) != 0 || has_struct_pointer_param(r))) function_of(r, false, decl);  // decision 0043: also its member atoms (the const struct pointee rule)
+    if (body == nullptr && (markers_.count(r) != 0 || has_struct_pointer_param(r) || has_function_marker(r) || contract_names_block_atom(r))) function_of(r, false, decl);  // decision 0043: also its member atoms (the const struct pointee rule)
     if (a_routine_type_supplement_ptr nx = routine_supplement(r); nx != nullptr && nx->does_not_return && !is_library_routine(r)) {
       // Also for a function that is declared and never called (function_of is lazy): decision 0015 item 4.
       for (an_attribute_ptr a : contracts_of(r))

@@ -432,6 +432,7 @@ const Expr* Builder::atom(AtomKind kind, const Expr* ptr, int amount, SrcLoc loc
       case AtomKind::Owns: e->c_text = "owns(*" + ptr->c_text + ")"; break;
       case AtomKind::Reads: e->c_text = "reads(*" + ptr->c_text + ")"; break;
       case AtomKind::Live: e->c_text = "live(" + ptr->c_text + ")"; break;
+      case AtomKind::OwnsBlock: e->c_text = "owns_block(" + ptr->c_text + ")"; break;
     }
   }
   return e;
@@ -449,6 +450,7 @@ const Expr* Builder::global_atom(AtomKind kind, const Expr* global_addr, int amo
       case AtomKind::Owns: e->c_text = "owns(" + n + ")"; break;
       case AtomKind::Reads: e->c_text = "reads(" + n + ")"; break;
       case AtomKind::Live: e->c_text = "live(&" + n + ")"; break;
+      case AtomKind::OwnsBlock: break;  // never on a global (decision 0047 item 4: d2b); check_program refuses it
     }
   }
   return e;
@@ -888,6 +890,12 @@ const Expr* place_root(const Expr* e, std::vector<int>* steps) {
 PlaceKey atom_place(const Expr& atom) {
   PlaceKey k;
   if (atom.a == nullptr) return k;
+  if (atom.atom == AtomKind::OwnsBlock) {
+    // Decision 0047 item 4: the pointer itself, a Formal or the Result, with no steps and no member path (anything else is a check_program error).
+    if (atom.a->kind == Expr::Kind::Formal) k.root = atom.a->index;
+    else if (atom.a->kind == Expr::Kind::Result) k.root = kResultSiteKey;
+    return k;
+  }
   const Expr* base = member_root(atom.a, &k.path);
   std::vector<int> steps;
   const Expr* root = place_root(base, &steps);
@@ -900,7 +908,7 @@ PlaceKey atom_place(const Expr& atom) {
       if (root->global != nullptr) k.root = kGlobalSiteBase + root->global->id;
       break;
     case Expr::Kind::Result:
-      // Only a place reached from the result by a step (`*r.q`, `**r`; an atom on the result itself or on a member of it, `owns(r->x)`, stays keyless: M4.5d2).
+      // Only a place reached from the result by a step (`*r.q`, `**r`; an atom on the result itself or on a member of it, `owns(r->x)`, stays keyless: M4.5d2b).
       if (!k.via.empty()) k.root = kResultSiteKey;
       break;
     case Expr::Kind::Local:
@@ -926,17 +934,29 @@ std::string place_text(const Expr& addr) {
   return addr.c_text.empty() ? std::string() : "*" + addr.c_text;
 }
 
-std::vector<AtomSite> contract_atoms(const Function& f) {
+namespace {
+std::vector<AtomSite> collect_contract_atoms(const Function& f, bool blocks) {
+  std::vector<AtomSite> all;
+  for (size_t k = 0; k < f.requires_.size(); ++k) AtomCollector(all, false, static_cast<int>(k)).walk(f.requires_[k].expr);
+  for (size_t k = 0; k < f.ensures_.size(); ++k) AtomCollector(all, true, static_cast<int>(k)).walk(f.ensures_[k].expr);
   std::vector<AtomSite> out;
-  for (size_t k = 0; k < f.requires_.size(); ++k) AtomCollector(out, false, static_cast<int>(k)).walk(f.requires_[k].expr);
-  for (size_t k = 0; k < f.ensures_.size(); ++k) AtomCollector(out, true, static_cast<int>(k)).walk(f.ensures_[k].expr);
+  for (AtomSite& s : all)
+    if ((s.atom->atom == AtomKind::OwnsBlock) == blocks) out.push_back(std::move(s));
   return out;
 }
+}  // namespace
+
+std::vector<AtomSite> contract_atoms(const Function& f) { return collect_contract_atoms(f, false); }
+
+std::vector<AtomSite> contract_block_atoms(const Function& f) { return collect_contract_atoms(f, true); }
 
 std::vector<AtomSite> loop_atoms(const Stmt& s) {
-  std::vector<AtomSite> out;
+  std::vector<AtomSite> all, out;
   if (s.kind != Stmt::Kind::While || s.form == LoopForm::DoOnce) return out;
-  for (size_t k = 0; k < s.invariants.size(); ++k) AtomCollector(out, false, static_cast<int>(k)).walk(s.invariants[k].expr);
+  for (size_t k = 0; k < s.invariants.size(); ++k) AtomCollector(all, false, static_cast<int>(k)).walk(s.invariants[k].expr);
+  // An OwnsBlock atom of an invariant (decision 0047 item 4: d2b) is never listed; check_program refuses it.
+  for (AtomSite& a : all)
+    if (a.atom->atom != AtomKind::OwnsBlock) out.push_back(std::move(a));
   return out;
 }
 

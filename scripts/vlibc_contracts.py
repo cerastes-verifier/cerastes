@@ -33,6 +33,14 @@ Fail closed: any doubt is an error `file:line: message` and exit status 1.
     directives lose its place (audit round 3, note 5);
   * a trusted declaration holds no comment (a `)` in one would end the reading of the
     contract's identifiers, audit round 2, note 11);
+  * every identifier in an argument of a contract macro (`CERASTES_REQUIRES(...)`,
+    `CERASTES_ENSURES(...)`, any `CERASTES_*(...)` or `[[cerastes::...(...)]]`) is reserved
+    (starts with `__` or `cerastes_`) or one of `NULL`, `false`, `true` (decision 0047
+    item 1): a program's macro over a name such as `size` could otherwise change what a
+    trusted contract says, so a contract names its parameters `__size`, its result `__r`
+    and uses `cerastes_*` spec functions;
+  * a bare marker (`CERASTES_REF_TO_UNINIT`, `CERASTES_OWNING`, ...) after a declarator, or
+    after a parameter's declarator-id, is not a contract group and hides no name;
   * the shim directory holds only `*.h` files (no subdirectory, no other file), and its parent
     `<vlibc>/include` holds nothing but the shim directory (decision 0046 item 3: that directory is
     the library class, and every file under it is trusted by path).
@@ -390,6 +398,51 @@ def strip_groups(text: str) -> str:
     return "".join(out)
 
 
+ALLOWED_PLAIN_IDENTIFIERS = frozenset({"NULL", "false", "true"})
+CONTRACT_GROUP_RE = re.compile(r"(?<![A-Za-z0-9_])CERASTES_[A-Z0-9_]+\s*\(|\[\[\s*cerastes\s*::\s*[A-Za-z_][A-Za-z0-9_]*\s*\(")
+TOKEN_RE = re.compile(r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|\.?[0-9](?:[eEpP][+-]|[A-Za-z0-9_.])*|[A-Za-z_][A-Za-z0-9_]*")
+
+
+def contract_arguments(text: str) -> list[tuple[int, str]]:
+    """The argument text of every contract group of a declaration (`CERASTES_X(...)`, `[[cerastes::x(...)]]`), with
+    its offset in `text`.  A group that does not close is read to the end of the text."""
+    out: list[tuple[int, str]] = []
+    pos = 0
+    while True:
+        m = CONTRACT_GROUP_RE.search(text, pos)
+        if not m:
+            return out
+        start = m.end()
+        depth, j, n = 1, start, len(text)
+        while j < n and depth:
+            c = text[j]
+            if c in "\"'":
+                k = j + 1
+                while k < n and text[k] != c:
+                    k += 2 if text[k] == "\\" else 1
+                j = k + 1
+                continue
+            depth += (c == "(") - (c == ")")
+            j += 1
+        out.append((start, text[start:j - 1 if depth == 0 else j]))
+        pos = j
+
+
+def unreserved_identifiers(text: str) -> list[tuple[int, str]]:
+    """The identifiers of the contract arguments of `text` that are not reserved (decision 0047 item 1), each with
+    its offset in `text`."""
+    bad = []
+    for start, arg in contract_arguments(text):
+        for m in TOKEN_RE.finditer(arg):
+            tok = m.group(0)
+            if not (tok[0].isalpha() or tok[0] == "_"):
+                continue        # a number or a string or character literal
+            if tok.startswith("__") or tok.startswith("cerastes_") or tok in ALLOWED_PLAIN_IDENTIFIERS:
+                continue
+            bad.append((start + m.start(), tok))
+    return bad
+
+
 def declarator_name(text: str) -> str | None:
     t = strip_groups(text)
     k = t.find("(")
@@ -480,6 +533,14 @@ def read_header(path: Path, shown: str, problems: Problems) -> list[Trusted]:
         if any((st.start, st.start_col) < c0 and c1 <= (st.end, st.end_col) for c0, c1 in comments):
             problems.add(shown, st.start, f"a comment inside the trusted declaration of `{tag.name}`: a `)` in "
                                           "it would end the reading of the contract's identifiers")
+            continue
+        unreserved = unreserved_identifiers(st.text)
+        for off, ident in unreserved:
+            problems.add(shown, st.start + st.text.count("\n", 0, off),
+                         f"the identifier `{ident}` in the contract of `{tag.name}` is not reserved: a contract "
+                         "names its parameters `__name`, its result `__r` and uses `cerastes_*` functions, "
+                         "`NULL`, `false` or `true` only (decision 0047 item 1)")
+        if unreserved:
             continue
         result.append(Trusted(tag.name, Path(shown).name, collapse(st.text), tag.reason, shown, tag.line))
 

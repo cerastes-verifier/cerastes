@@ -1,7 +1,7 @@
 // expect: rejected cerastes-unsupported_annotation @ L12
 // mode: c23, c++20
 // twin: tests/memory/struct_value_result.c
-// Pins: 0044 item 4, 0045 item 1 (question 106): live(r.q) of a pointer member of the result: rejected until M4.5d2 (with owns(*r.q) and every ensures atom without a requires partner)
+// Pins: 0044 item 4, 0045 item 1 (question 106): live(r.q) of a pointer member of the result: rejected until M4.5d2b (with owns(*r.q) and every ensures atom without a requires partner)
 #include <cerastes.h>
 
 struct Q {

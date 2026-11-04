@@ -38,7 +38,8 @@ std::string prelude_text(const std::set<std::string>& used);
 // `v_<t>`, `d_<t>` for each cell type `<t>` (the key; the value is the Viper type of `v_<t>`: "Int", "Bool" or "Ref"), `field lv: Bool`
 // (the liveness cell), and `domain Block` with its eight functions and its four axioms (records 0033 to 0036), each tagged for the lint
 // (`// cerastes:domain-ok 0028`, `// cerastes:axiom-ok <record>`).  The fields come in the sorted order of the keys.
-std::string memory_prelude_text(const std::map<std::string, std::string>& cell_types, const std::vector<std::string>& globals = {});
+// `heap` (decision 0047 item 7): a heap program also declares `field tok: Bool` (the free token of a heap block at slot -1), right before `field lv`; no other program has it.
+std::string memory_prelude_text(const std::map<std::string, std::string>& cell_types, const std::vector<std::string>& globals = {}, bool heap = false);
 
 // The prelude functions that `name` calls.
 std::set<std::string> prelude_closure(const std::set<std::string>& used);

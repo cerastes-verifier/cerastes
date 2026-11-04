@@ -1,0 +1,187 @@
+// expect: verified
+// S36 (l): timing and scale: five heap blocks live at once (three ints, two structs), all written, summed, freed in a different order with every row, and no leak: all of them are chunks of the same field `tok`, which the leak row's forperm ranges over.
+// Hand-written in the emitted style (explicit atomic asserts before every access, call, return and free, record 0028 item 11; the views, record 0047 item 2). A failed assert whose assumption contradicts the held permissions ends its path, so each twin reports exactly one error.
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field v_bool: Bool
+field d_bool: Bool
+field v_E: Int
+field d_E: Bool
+field tok: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms as macros over the emitted shapes.  ONE definition of owns_block (record 0047 item 4, audit S2): the block part HEAD (p != null, WF,
+// offset 0, the token at slot -1, the liveness equation, the full liveness cell) with len and the member lengths (0043's slot facts), and for each leaf
+// exactly what `owns` of that leaf gives except its liveness fraction: full permission to the value and the flag cell and `flag ==> range` (an integer's
+// range, a pointer leaf's WF).  BLKx is the ref_to_uninit form (no flag value: malloc's view, free's parameter); OWNx adds the flags set (an unmarked
+// ensures or requires: calloc's view, a user's owning result).
+// int: one cell.  S { int x; int y; }: two member blocks.  C { int x; bool b; int *p; enum E e; }: four member blocks (calloc's view).
+// N { int a; struct S in; }: a nested struct: member 1 is the block whose slot is the nested object, whose members are blocks of their own.
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNGV(v) ((-2147483648) <= v && v <= 2147483647)
+define HEAD(p) (p != null && WF(p) && offset_of(p) == 0 && acc(loc(block_of(p), -1).tok) && loc(block_of(p), -1).tok && lvloc(block_of(p)) == loc(block_of(p), -2) && acc(lvloc(block_of(p)).lv))
+define LEAFI(c) (acc(c.v_int) && acc(c.d_int) && (c.d_int ==> RNGV(c.v_int)))
+define LEAFB(c) (acc(c.v_bool) && acc(c.d_bool))
+define LEAFP(c) (acc(c.v_ptr_int) && acc(c.d_ptr_int) && (c.d_ptr_int ==> WF(c.v_ptr_int)))
+define LEAFE(c) (acc(c.v_E) && acc(c.d_E) && (c.d_E ==> (0 <= c.v_E && c.v_E <= 1)))
+define BLKI(p) (HEAD(p) && len(block_of(p)) == 1 && LEAFI(p))
+define OWNI(p) (BLKI(p) && p.d_int)
+define MX(s) loc(member(s, 0), 0)
+define MY(s) loc(member(s, 1), 0)
+define SLEN(s) (len(member(s, 0)) == 1 && len(member(s, 1)) == 1)
+define BLKS(p) (HEAD(p) && len(block_of(p)) == 1 && SLEN(p) && LEAFI(MX(p)) && LEAFI(MY(p)))
+define OWNS(p) (BLKS(p) && MX(p).d_int && MY(p).d_int)
+define MC0(s) loc(member(s, 0), 0)
+define MC1(s) loc(member(s, 1), 0)
+define MC2(s) loc(member(s, 2), 0)
+define MC3(s) loc(member(s, 3), 0)
+define CLEN(s) (len(member(s, 0)) == 1 && len(member(s, 1)) == 1 && len(member(s, 2)) == 1 && len(member(s, 3)) == 1)
+define BLKC(p) (HEAD(p) && len(block_of(p)) == 1 && CLEN(p) && LEAFI(MC0(p)) && LEAFB(MC1(p)) && LEAFP(MC2(p)) && LEAFE(MC3(p)))
+define OWNC(p) (BLKC(p) && MC0(p).d_int && MC1(p).d_bool && MC2(p).d_ptr_int && MC3(p).d_E)
+define ZEROC(p) (MC0(p).v_int == 0 && !MC1(p).v_bool && MC2(p).v_ptr_int == null && MC3(p).v_E == 0)
+define NA(r) loc(member(r, 0), 0)
+define NI(r) loc(member(r, 1), 0)
+define NIX(r) loc(member(NI(r), 0), 0)
+define NIY(r) loc(member(NI(r), 1), 0)
+define NLEN(r) (len(member(r, 0)) == 1 && len(member(r, 1)) == 1 && len(member(NI(r), 0)) == 1 && len(member(NI(r), 1)) == 1)
+define BLKN(p) (HEAD(p) && len(block_of(p)) == 1 && NLEN(p) && LEAFI(NA(p)) && LEAFI(NIX(p)) && LEAFI(NIY(p)))
+define OWNN(p) (BLKN(p) && NA(p).d_int && NIX(p).d_int && NIY(p).d_int)
+
+// cerastes:trusted-contract vlibc: malloc returns NULL or the start of a new allocation of size bytes, its contents indeterminate (C23 7.24.3.6); typed view: one int (4 bytes), decision 0047
+method f_malloc__0() returns (res: Ref)
+  ensures res != null ==> BLKI(res)
+  decreases _
+
+// cerastes:trusted-contract vlibc: malloc returns NULL or the start of a new allocation of size bytes, its contents indeterminate (C23 7.24.3.6); typed view: one struct S (8 bytes), decision 0047
+method f_malloc__1() returns (res: Ref)
+  ensures res != null ==> BLKS(res)
+  decreases _
+
+// cerastes:trusted-contract vlibc: free ends the allocation ptr is the start of; free(NULL) does nothing (C23 7.24.3.3); typed view: the argument is an int *, decision 0047
+method f_free__4(p: Ref)
+  requires p != null ==> BLKI(p)
+  decreases _
+
+// cerastes:trusted-contract vlibc: free ends the allocation ptr is the start of; free(NULL) does nothing (C23 7.24.3.3); typed view: the argument is a struct S *, decision 0047
+method f_free__5(p: Ref)
+  requires p != null ==> BLKS(p)
+  decreases _
+
+
+method five_blocks()
+{
+  var a: Ref
+  var b: Ref
+  var c: Ref
+  var s: Ref
+  var u: Ref
+  a := f_malloc__0()
+  if (a != null) {
+  b := f_malloc__0()
+  if (b != null) {
+    c := f_malloc__0()
+    if (c != null) {
+      s := f_malloc__1()
+      if (s != null) {
+        u := f_malloc__1()
+        if (u != null) {
+          assert a != null
+          assert perm(a.v_int) == write && perm(a.d_int) == write
+          a.v_int := 1
+          a.d_int := true
+          assert b != null
+          assert perm(b.v_int) == write && perm(b.d_int) == write
+          b.v_int := 2
+          b.d_int := true
+          assert c != null
+          assert perm(c.v_int) == write && perm(c.d_int) == write
+          c.v_int := 3
+          c.d_int := true
+          assert perm(MX(s).v_int) == write && perm(MX(s).d_int) == write
+          MX(s).v_int := 4
+          MX(s).d_int := true
+          assert perm(MY(s).v_int) == write && perm(MY(s).d_int) == write
+          MY(s).v_int := 14
+          MY(s).d_int := true
+          assert perm(MX(u).v_int) == write && perm(MX(u).d_int) == write
+          MX(u).v_int := 5
+          MX(u).d_int := true
+          assert perm(MY(u).v_int) == write && perm(MY(u).d_int) == write
+          MY(u).v_int := 15
+          MY(u).d_int := true
+          assert a.v_int + b.v_int + c.v_int + MX(s).v_int + MY(s).v_int + MX(u).v_int + MY(u).v_int == 1 + 2 + 3 + 4 + 14 + 5 + 15
+          //V
+          assert u == null || offset_of(u) == 0 // invalid-free: not at the start of an allocation (its C test comes with e2)
+          assert u == null || (perm(loc(block_of(u), -1).tok) == write && loc(block_of(u), -1).tok) // invalid-free: no token: a double free, a local, a global or a member
+          assert u == null || lvloc(block_of(u)) == loc(block_of(u), -2) // internal
+          assert u == null || perm(lvloc(block_of(u)).lv) == write // invalid-free: a pointer may still be in use
+          assert u == null || (len(block_of(u)) == 1 && SLEN(u)) // internal
+          assert u == null || (perm(MX(u).v_int) == write && perm(MX(u).d_int) == write)
+          assert u == null || (MX(u).d_int ==> RNGV(MX(u).v_int)) // internal: the range of the value under its flag
+          assert u == null || (perm(MY(u).v_int) == write && perm(MY(u).d_int) == write)
+          assert u == null || (MY(u).d_int ==> RNGV(MY(u).v_int)) // internal: the range of the value under its flag
+          f_free__5(u)
+        }
+        assert s == null || offset_of(s) == 0 // invalid-free: not at the start of an allocation (its C test comes with e2)
+        assert s == null || (perm(loc(block_of(s), -1).tok) == write && loc(block_of(s), -1).tok) // invalid-free: no token: a double free, a local, a global or a member
+        assert s == null || lvloc(block_of(s)) == loc(block_of(s), -2) // internal
+        assert s == null || perm(lvloc(block_of(s)).lv) == write // invalid-free: a pointer may still be in use
+        assert s == null || (len(block_of(s)) == 1 && SLEN(s)) // internal
+        assert s == null || (perm(MX(s).v_int) == write && perm(MX(s).d_int) == write)
+        assert s == null || (MX(s).d_int ==> RNGV(MX(s).v_int)) // internal: the range of the value under its flag
+        assert s == null || (perm(MY(s).v_int) == write && perm(MY(s).d_int) == write)
+        assert s == null || (MY(s).d_int ==> RNGV(MY(s).v_int)) // internal: the range of the value under its flag
+        f_free__5(s)
+      }
+      assert c == null || offset_of(c) == 0 // invalid-free: not at the start of an allocation (its C test comes with e2)
+      assert c == null || (perm(loc(block_of(c), -1).tok) == write && loc(block_of(c), -1).tok) // invalid-free: no token: a double free, a local, a global or a member
+      assert c == null || lvloc(block_of(c)) == loc(block_of(c), -2) // internal
+      assert c == null || perm(lvloc(block_of(c)).lv) == write // invalid-free: a pointer may still be in use
+      assert c == null || len(block_of(c)) == 1 // internal
+      assert c == null || (perm(c.v_int) == write && perm(c.d_int) == write)
+      assert c == null || (c.d_int ==> RNGV(c.v_int)) // internal: the range of the value under its flag
+      f_free__4(c)
+    }
+    assert b == null || offset_of(b) == 0 // invalid-free: not at the start of an allocation (its C test comes with e2)
+    assert b == null || (perm(loc(block_of(b), -1).tok) == write && loc(block_of(b), -1).tok) // invalid-free: no token: a double free, a local, a global or a member
+    assert b == null || lvloc(block_of(b)) == loc(block_of(b), -2) // internal
+    assert b == null || perm(lvloc(block_of(b)).lv) == write // invalid-free: a pointer may still be in use
+    assert b == null || len(block_of(b)) == 1 // internal
+    assert b == null || (perm(b.v_int) == write && perm(b.d_int) == write)
+    assert b == null || (b.d_int ==> RNGV(b.v_int)) // internal: the range of the value under its flag
+    f_free__4(b)
+  }
+  assert a == null || offset_of(a) == 0 // invalid-free: not at the start of an allocation (its C test comes with e2)
+  assert a == null || (perm(loc(block_of(a), -1).tok) == write && loc(block_of(a), -1).tok) // invalid-free: no token: a double free, a local, a global or a member
+  assert a == null || lvloc(block_of(a)) == loc(block_of(a), -2) // internal
+  assert a == null || perm(lvloc(block_of(a)).lv) == write // invalid-free: a pointer may still be in use
+  assert a == null || len(block_of(a)) == 1 // internal
+  assert a == null || (perm(a.v_int) == write && perm(a.d_int) == write)
+  assert a == null || (a.d_int ==> RNGV(a.v_int)) // internal: the range of the value under its flag
+  f_free__4(a)
+  }
+  label end
+  assert forperm t: Ref [t.tok] :: false // leak
+}

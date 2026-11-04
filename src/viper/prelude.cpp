@@ -131,12 +131,13 @@ std::set<std::string> prelude_closure(const std::set<std::string>& used) {
   return all;
 }
 
-std::string memory_prelude_text(const std::map<std::string, std::string>& cell_types, const std::vector<std::string>& globals) {
+std::string memory_prelude_text(const std::map<std::string, std::string>& cell_types, const std::vector<std::string>& globals, bool heap) {
   std::string t = "\n// the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell\n";
   for (const auto& [suffix, type] : cell_types) {
     t += "field v_" + suffix + ": " + type + "\n";
     t += "field d_" + suffix + ": Bool\n";
   }
+  if (heap) t += "field tok: Bool\n";  // decision 0047 item 7: the free token of a heap block (loc(b, -1).tok), only in a heap program
   t += "field lv: Bool\n";
   t += R"(
 // cerastes:domain-ok 0028

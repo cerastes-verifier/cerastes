@@ -1,0 +1,18 @@
+// Emitted by cerastes verify (M4.5d2a) for scripts/test_lint_viper.py: the typed view `f_calloc__1`, with the fields of its program.
+field v_bool: Bool
+field d_bool: Bool
+field v_enum_1_enum_x20color: Int
+field d_enum_1_enum_x20color: Bool
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field tok: Bool
+field lv: Bool
+
+// C/C++ function `calloc`
+// cerastes:trusted-contract vlibc: calloc returns NULL or the start of a new allocation of nmemb * size bytes, all zero (C23 7.24.3.2); typed view: one struct cfg (24 bytes), decision 0047
+method f_calloc__1() returns (res: Ref)
+  ensures ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res))))) && (((res != null) && (offset_of(res) < len(block_of(res)))) ==> ((((len(member(res, 0)) == 1) && (len(member(res, 1)) == 1)) && (len(member(res, 2)) == 1)) && (len(member(res, 3)) == 1)))
+  ensures (!(res == null)) ==> (((((((((((((((((((((((((((res != null) && ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res)))))) && (offset_of(res) == 0)) && acc(loc(block_of(res), (-1)).tok)) && loc(block_of(res), (-1)).tok) && (lvloc(block_of(res)) == loc(block_of(res), (-2)))) && acc(lvloc(block_of(res)).lv)) && ((len(block_of(res)) == 1) && ((((len(member(res, 0)) == 1) && (len(member(res, 1)) == 1)) && (len(member(res, 2)) == 1)) && (len(member(res, 3)) == 1)))) && acc(loc(member(res, 0), 0).v_int)) && acc(loc(member(res, 0), 0).d_int)) && (loc(member(res, 0), 0).d_int ==> (((-2147483648) <= loc(member(res, 0), 0).v_int) && (loc(member(res, 0), 0).v_int <= 2147483647)))) && acc(loc(member(res, 1), 0).v_bool)) && acc(loc(member(res, 1), 0).d_bool)) && acc(loc(member(res, 2), 0).v_ptr_int)) && acc(loc(member(res, 2), 0).d_ptr_int)) && (loc(member(res, 2), 0).d_ptr_int ==> ((loc(member(res, 2), 0).v_ptr_int == null) || (((loc(member(res, 2), 0).v_ptr_int == loc(block_of(loc(member(res, 2), 0).v_ptr_int), offset_of(loc(member(res, 2), 0).v_ptr_int))) && (0 <= offset_of(loc(member(res, 2), 0).v_ptr_int))) && (offset_of(loc(member(res, 2), 0).v_ptr_int) <= len(block_of(loc(member(res, 2), 0).v_ptr_int))))))) && acc(loc(member(res, 3), 0).v_enum_1_enum_x20color)) && acc(loc(member(res, 3), 0).d_enum_1_enum_x20color)) && (loc(member(res, 3), 0).d_enum_1_enum_x20color ==> ((0 <= loc(member(res, 3), 0).v_enum_1_enum_x20color) && (loc(member(res, 3), 0).v_enum_1_enum_x20color <= 1)))) && loc(member(res, 0), 0).d_int) && loc(member(res, 1), 0).d_bool) && loc(member(res, 2), 0).d_ptr_int) && loc(member(res, 3), 0).d_enum_1_enum_x20color) && (loc(member(res, 0), 0).v_int == 0)) && (loc(member(res, 1), 0).v_bool == false)) && (loc(member(res, 2), 0).v_ptr_int == null)) && (loc(member(res, 3), 0).v_enum_1_enum_x20color == 0))
+  decreases _

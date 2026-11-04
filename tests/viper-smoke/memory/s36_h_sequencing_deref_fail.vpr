@@ -1,0 +1,118 @@
+// expect: error assert:assertion.false @ L94
+// S36 (h) twin: `(free(p), 0) + *p` (q is p): the cell read conflicts with free(p)'s write: the row `q != p` fails (category unsequenced).
+// Hand-written in the emitted style (explicit atomic asserts before every access, call, return and free, record 0028 item 11; the views, record 0047 item 2). A failed assert whose assumption contradicts the held permissions ends its path, so each twin reports exactly one error.
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field v_bool: Bool
+field d_bool: Bool
+field v_E: Int
+field d_E: Bool
+field tok: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms as macros over the emitted shapes.  ONE definition of owns_block (record 0047 item 4, audit S2): the block part HEAD (p != null, WF,
+// offset 0, the token at slot -1, the liveness equation, the full liveness cell) with len and the member lengths (0043's slot facts), and for each leaf
+// exactly what `owns` of that leaf gives except its liveness fraction: full permission to the value and the flag cell and `flag ==> range` (an integer's
+// range, a pointer leaf's WF).  BLKx is the ref_to_uninit form (no flag value: malloc's view, free's parameter); OWNx adds the flags set (an unmarked
+// ensures or requires: calloc's view, a user's owning result).
+// int: one cell.  S { int x; int y; }: two member blocks.  C { int x; bool b; int *p; enum E e; }: four member blocks (calloc's view).
+// N { int a; struct S in; }: a nested struct: member 1 is the block whose slot is the nested object, whose members are blocks of their own.
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNGV(v) ((-2147483648) <= v && v <= 2147483647)
+define HEAD(p) (p != null && WF(p) && offset_of(p) == 0 && acc(loc(block_of(p), -1).tok) && loc(block_of(p), -1).tok && lvloc(block_of(p)) == loc(block_of(p), -2) && acc(lvloc(block_of(p)).lv))
+define LEAFI(c) (acc(c.v_int) && acc(c.d_int) && (c.d_int ==> RNGV(c.v_int)))
+define LEAFB(c) (acc(c.v_bool) && acc(c.d_bool))
+define LEAFP(c) (acc(c.v_ptr_int) && acc(c.d_ptr_int) && (c.d_ptr_int ==> WF(c.v_ptr_int)))
+define LEAFE(c) (acc(c.v_E) && acc(c.d_E) && (c.d_E ==> (0 <= c.v_E && c.v_E <= 1)))
+define BLKI(p) (HEAD(p) && len(block_of(p)) == 1 && LEAFI(p))
+define OWNI(p) (BLKI(p) && p.d_int)
+define MX(s) loc(member(s, 0), 0)
+define MY(s) loc(member(s, 1), 0)
+define SLEN(s) (len(member(s, 0)) == 1 && len(member(s, 1)) == 1)
+define BLKS(p) (HEAD(p) && len(block_of(p)) == 1 && SLEN(p) && LEAFI(MX(p)) && LEAFI(MY(p)))
+define OWNS(p) (BLKS(p) && MX(p).d_int && MY(p).d_int)
+define MC0(s) loc(member(s, 0), 0)
+define MC1(s) loc(member(s, 1), 0)
+define MC2(s) loc(member(s, 2), 0)
+define MC3(s) loc(member(s, 3), 0)
+define CLEN(s) (len(member(s, 0)) == 1 && len(member(s, 1)) == 1 && len(member(s, 2)) == 1 && len(member(s, 3)) == 1)
+define BLKC(p) (HEAD(p) && len(block_of(p)) == 1 && CLEN(p) && LEAFI(MC0(p)) && LEAFB(MC1(p)) && LEAFP(MC2(p)) && LEAFE(MC3(p)))
+define OWNC(p) (BLKC(p) && MC0(p).d_int && MC1(p).d_bool && MC2(p).d_ptr_int && MC3(p).d_E)
+define ZEROC(p) (MC0(p).v_int == 0 && !MC1(p).v_bool && MC2(p).v_ptr_int == null && MC3(p).v_E == 0)
+define NA(r) loc(member(r, 0), 0)
+define NI(r) loc(member(r, 1), 0)
+define NIX(r) loc(member(NI(r), 0), 0)
+define NIY(r) loc(member(NI(r), 1), 0)
+define NLEN(r) (len(member(r, 0)) == 1 && len(member(r, 1)) == 1 && len(member(NI(r), 0)) == 1 && len(member(NI(r), 1)) == 1)
+define BLKN(p) (HEAD(p) && len(block_of(p)) == 1 && NLEN(p) && LEAFI(NA(p)) && LEAFI(NIX(p)) && LEAFI(NIY(p)))
+define OWNN(p) (BLKN(p) && NA(p).d_int && NIX(p).d_int && NIY(p).d_int)
+
+// cerastes:trusted-contract vlibc: malloc returns NULL or the start of a new allocation of size bytes, its contents indeterminate (C23 7.24.3.6); typed view: one int (4 bytes), decision 0047
+method f_malloc__0() returns (res: Ref)
+  ensures res != null ==> BLKI(res)
+  decreases _
+
+// cerastes:trusted-contract vlibc: free ends the allocation ptr is the start of; free(NULL) does nothing (C23 7.24.3.3); typed view: the argument is an int *, decision 0047
+method f_free__4(p: Ref)
+  requires p != null ==> BLKI(p)
+  decreases _
+
+
+method deref_alias()
+{
+  var p: Ref
+  var q: Ref
+  p := f_malloc__0()
+  q := p
+  if (p != null) {
+  assert p != null
+  assert perm(p.v_int) == write && perm(p.d_int) == write
+  p.v_int := 1
+  p.d_int := true
+  assert q != p
+  assert perm(q.v_int) > none
+  var t0: Int := q.v_int
+  assert p == null || offset_of(p) == 0 // invalid-free: not at the start of an allocation (its C test comes with e2)
+  assert p == null || (perm(loc(block_of(p), -1).tok) == write && loc(block_of(p), -1).tok) // invalid-free: no token: a double free, a local, a global or a member
+  assert p == null || lvloc(block_of(p)) == loc(block_of(p), -2) // internal
+  assert p == null || perm(lvloc(block_of(p)).lv) == write // invalid-free: a pointer may still be in use
+  assert p == null || len(block_of(p)) == 1 // internal
+  assert p == null || (perm(p.v_int) == write && perm(p.d_int) == write)
+  assert p == null || (p.d_int ==> RNGV(p.v_int)) // internal: the range of the value under its flag
+  f_free__4(p)
+  }
+}
+
+// a callee that borrows the liveness cell (live(q)): a fraction in, the same fraction out
+method use_live(q: Ref, a: Perm)
+  requires none < a && a < write
+  requires q != null && WF(q) && acc(lvloc(block_of(q)).lv, a)
+  ensures acc(lvloc(block_of(q)).lv, a)
+
+// a callee that only reads *q
+method use_cell(q: Ref, a: Perm)
+  requires none < a && a < write
+  requires q != null && WF(q) && offset_of(q) < len(block_of(q)) && acc(q.v_int, a) && acc(q.d_int, a) && q.d_int
+  ensures acc(q.v_int, a) && acc(q.d_int, a)

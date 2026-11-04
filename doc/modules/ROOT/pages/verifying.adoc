@@ -134,11 +134,18 @@ There are two ways to reach it:
 include::example$verifying/vlibc_explicit.c[tag=source]
 ----
 
-vlibc's contracts for functions that cannot be written in C are *trusted*:
-cerastes verifies the calls against them, never the functions. In this version
-vlibc covers `abort`, `exit` and `_Exit`, whose contract is that they do not
-return (`CERASTES_ENSURES(false)`). Every other function of the C library has no
-contract yet, and a call of one is rejected (`call_without_contract`).
+In this version vlibc covers `abort`, `exit` and `_Exit`, whose contract is
+that they do not return (`CERASTES_ENSURES(false)`), and `malloc`, `calloc` and
+`free`, whose contracts say what an allocation is and that `free` takes the
+whole of one (xref:memory.adoc#heap[Allocated memory]). Every other function of
+the C library has no contract yet, and a call of one is rejected
+(`call_without_contract`); `realloc` gets its contract with arrays.
+
+These contracts are *trusted*: cerastes verifies the calls against them, never
+the functions, which in your build are the platform's. vlibc is meant to hold
+complete implementations of the functions it covers, usable without cerastes and
+verified as cerastes becomes able to verify them; until then their contracts
+stay trusted.
 
 Because `exit` does not return, the path that calls it ends, and a postcondition
 only has to hold on the paths that return:
@@ -150,7 +157,7 @@ include::example$verifying/vlibc_exit.c[tag=source]
 
 The names vlibc covers are *reserved*: their contract comes from vlibc only. A
 contract written on another declaration of such a function is rejected
-(xref:error-messages.adoc#_annotation_reserved_library[`annotation_reserved_library`]),
+(xref:annotations.adoc#_declarations_that_repeat_a_contract[`annotation_reserved_library`]),
 whether or not your file includes the header, and even if it repeats vlibc's
 contract word for word. A function of your own with the same name in a
 namespace, or with pass:[C++] linkage, is not the library's and is an ordinary
@@ -168,7 +175,7 @@ midpoint_overflow.cpp:10: error: overflow: signed `int` addition may overflow
 
 The file is written as you gave it on the command line (or as the include
 resolved, for a header), the line is the line of the C or pass:[C++] source,
-and the category is one of eleven names that
+and the category is one of twenty names that
 xref:error-messages.adoc[Error messages] explains. Errors are sorted by file,
 then line, then category, and each is printed once. A program with errors
 exits with status 1.
@@ -933,7 +940,8 @@ The constructs that are rejected in this version are:
 * *Contracts on the C library:* a contract on another declaration of a function
   that vlibc covers (`annotation_reserved_library`).
 * *Types:* pointers other than those xref:memory.adoc[Memory and ownership]
-  describes (`void *`, `restrict` other than on a C parameter the contract owns,
+  describes (`void *` other than an allocation's result converted at once and
+  `free`'s argument, `restrict` other than on a C parameter the contract owns,
   and pointers to unions, to functions and to structures that are not supported
   are rejected, and so are
   pointer conversions other than adding `const` to the object pointed to; its

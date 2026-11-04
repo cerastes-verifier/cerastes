@@ -4,7 +4,7 @@
 // Port of the scalar half of VeriFast's examples/globals.c (38 lines; ~/Documents/verifast at 0fb63506) to cerastes (decision 0041, M4.5b2a).
 // Adaptation: `requires x |-> 7` / `ensures x |-> 8` become `cerastes_owns(x) && x == 7` / `cerastes_owns(x) && x == 8`; main: `open_module()` and the `module` ghost are gone
 // (main receives x from program_start, 0041 item 4), `assert(x0 == 0)` is the zero-initialization check as a CERASTES_CHECK, and the check after m() reads x.
-// Left out: `struct counter *c` with `c->f`: the struct half is the port tests/memory/verifast/globals_struct.c (M4.5c2b); its `malloc`, `free` and the final `leak` are M4.5d2, and `if (ctr == 0) abort();`.
+// Left out: `struct counter *c` with `c->f`: the struct half is the port tests/memory/verifast/globals_struct.c (M4.5c2b); its `malloc`, `free` and `if (ctr == 0) abort();` are the port tests/memory/verifast/globals_heap.c (M4.5d2a; a global is no allocation, so the final `leak` has nothing to leave).
 // Line map (this file : VeriFast's):  11 : 3   13 : 11   17 : 15   18 : 16   19 : 18   21 : 20   23 : 25   24 : 26   25 : 27   26 : 32   28 : 34
 #include <cerastes.h>
 

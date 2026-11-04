@@ -1,7 +1,7 @@
 // expect: rejected wrong_entity_for_attribute @ L11
 // mode: c23, c++20
 // twin: tests/memory/owning_param.c
-// Pins: 0040 item 3: owning on a local: EDG's own diagnostic (target p only; P62), re-expected by M4.5d2
+// Pins: 0040 item 3: owning on a local: EDG's own diagnostic (target p only; P62), re-expected by M4.5d2b (M4.5d2a registers target r only)
 #include <cerastes.h>
 #include <stddef.h>
 

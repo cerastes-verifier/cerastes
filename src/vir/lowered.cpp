@@ -111,6 +111,13 @@ E old_(E a) {
   return e;
 }
 
+E for_perm(E body) {
+  auto e = make(LExpr::Kind::ForPerm);
+  e->text = "t";
+  e->a = std::move(body);
+  return e;
+}
+
 E perm_div(E a, int divisor) {
   if (divisor <= 0) throw std::logic_error("a permission is divided by a positive literal");
   return bin(BinOp::PermDiv, std::move(a), int_lit(std::to_string(divisor)));

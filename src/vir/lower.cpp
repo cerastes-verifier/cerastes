@@ -524,6 +524,11 @@ class Lowerer {
 
   LowerResult run() {
     compute_cycles();
+    heap_ = is_heap_program();  // decision 0047 item 7: any view call or block site in any contract
+    if (heap_) {
+      out_.memory = true;
+      out_.heap = true;
+    }
     for (const Function& f : prog_.functions()) function(f);
     for (const Function& f : prog_.functions())
       if (!f.requires_.empty() || !f.ensures_.empty() || !f.decreases_.empty()) wf_method(f);
@@ -931,6 +936,12 @@ class Lowerer {
     bool live = true;
     std::vector<int> mpath;
     std::vector<std::pair<Type, E>> slots;
+    // Decision 0047 item 10 (heap places): the object a pointer VARIABLE designates at the loop's entry, through its base `lroot` (the variable, or its entry ghost).
+    // The first leaf (`live`) also carries the block's free token: the snapshot `kt` of its permission, guarded by `gt`, and `tptr` is the pointee type.
+    bool heap = false;
+    std::string kt;
+    E gt;
+    Type ptee;
   };
   static E lv_of(const Place& pl) { return pl.lroot ? pl.lroot : pl.recv; }
   // A written atom of a loop invariant (decision 0040 item 5): `owns(*q)`, `reads(*q)` or `live(q)` of a pointer variable `q`, with its ghost
@@ -1449,6 +1460,18 @@ class Lowerer {
   void ptr_use(const Expr& operand, const LV& v, const E& guard, const Deps& gdep, Full& full, bool with_wf = false, const SrcLoc* at = nullptr) {
     if (cmode_ != CMode::None) return;  // a contract has no heap and no liveness to check (decision 0037 item 7)
     if (address_or_null(operand)) return;
+    if (heap_ && track_mem()) {
+      // Decision 0047 item 9: a pointer use reads the liveness cell of its block; a call that ends the block (free, a consuming `owns_block` site) writes it, so the
+      // two in one full expression are unsequenced unless the pointers name different blocks (a row `lvloc(block_of(p)) != lvloc(block_of(q))`).
+      Acc a;
+      a.key = -1000000 - (++next_other_key_);
+      a.field = "lv";
+      a.place = live_cell(v.e);
+      a.text = operand.c_text;
+      a.dep = join(gdep, v.dep);
+      a.loc = at != nullptr ? *at : operand.loc;
+      register_access(std::move(a), full, guard);
+    }
     E live = low::bin(low::BinOp::Gt, live_perm(v.e), low::no_perm());
     // A unit with globals: a pointer into a global's block is live whatever the function holds (decision 0041 item 6).
     if (const E g = global_live_disjunct(v.e)) live = low::bin(low::BinOp::Or, live, g);
@@ -1661,20 +1684,270 @@ class Lowerer {
     return atoms_.emplace(&f, std::move(fa)).first->second;
   }
 
+  // ---- the heap (decision 0047, M4.5d2a) ----
+
+  // The `OwnsBlock` sites of a function's contract (`contract_block_atoms`: the `requires` ones first); they have no ghost amount and are not in FnAtoms.
+  struct FnBlocks {
+    std::vector<AtomSite> sites;
+    std::map<const Expr*, size_t> index;
+    int nreq = 0;  // the `requires` sites come first
+  };
+  const FnBlocks& blocks_of(const Function& f) {
+    const auto it = blocks_.find(&f);
+    if (it != blocks_.end()) return it->second;
+    FnBlocks fb;
+    fb.sites = contract_block_atoms(f);
+    for (size_t i = 0; i < fb.sites.size(); ++i) {
+      fb.index[fb.sites[i].atom] = i;
+      site_fn_[fb.sites[i].atom] = &f;
+      if (!fb.sites[i].in_ensures) ++fb.nreq;
+    }
+    return blocks_.emplace(&f, std::move(fb)).first->second;
+  }
+  // The position of the first block site at or after clause `clause` of the requires (`ens` false) or ensures list (first_site's twin).
+  static size_t first_block_site(const FnBlocks& fb, bool ens, int clause) {
+    for (size_t i = 0; i < fb.sites.size(); ++i) {
+      const AtomSite& s = fb.sites[i];
+      if (s.in_ensures == ens && s.clause >= clause) return i;
+      if (s.in_ensures && !ens) return i;
+    }
+    return fb.sites.size();
+  }
+  // A heap program (item 7, audit S8): some function's contract holds an `owns_block` site (a view's, an owning function's, a consumer's), called or not.
+  bool is_heap_program() {
+    for (const Function& f : prog_.functions())
+      if (!blocks_of(f).sites.empty()) return true;
+    return false;
+  }
+  // The key of a block site's pointer: the formal's index, or kResultSiteKey.
+  static int block_key(const AtomSite& s) { return atom_place(*s.atom).root; }
+  static const Type& block_ptr_type(const AtomSite& s) { return s.atom->a->type; }
+  static const Type& block_pointee(const AtomSite& s) { return *s.atom->a->type.pointee; }
+  E block_ptr(const AtomSite& s, const Env& env) const { return place_of(env, block_key(s)); }
+  // P4222's marker of the pointer a block site names: a parameter's, or the result's (`result_init`).
+  static InitMarker block_marker(const Function& f, const AtomSite& s) {
+    const int k = block_key(s);
+    if (k < 0) return f.result_init;
+    return static_cast<size_t>(k) < f.params.size() ? f.params[static_cast<size_t>(k)].init : InitMarker::None;
+  }
+  // The `requires` block site on the same formal as the `ensures` site `s` (its partner: the block is borrowed), or null.
+  const AtomSite* block_partner(const Function& f, const AtomSite& s) {
+    if (!s.in_ensures || block_key(s) < 0) return nullptr;
+    const FnBlocks& fb = blocks_of(f);
+    for (int i = 0; i < fb.nreq; ++i)
+      if (block_key(fb.sites[static_cast<size_t>(i)]) == block_key(s)) return &fb.sites[static_cast<size_t>(i)];
+    return nullptr;
+  }
+  // A consuming site: a `requires` block site without an `ensures` partner (the function frees the block or hands it on).
+  bool block_consumes(const Function& f, const AtomSite& s) {
+    if (s.in_ensures) return false;
+    for (const AtomSite& o : blocks_of(f).sites)
+      if (o.in_ensures && block_key(o) == block_key(s)) return false;
+    return true;
+  }
+  // The leaf cells of the block `p` points to (the pointee of `pt`): the leaves of a struct (`p->x`), or the one cell of a scalar (`*p`).  `text` is the pointer's spelling.
+  std::vector<Cell> block_cells(const E& p, const Type& pt, const std::string& text) {
+    const Type& t = *pt.pointee;
+    if (t.is_struct()) return leaf_cells(p, *t.struct_type, text, true);
+    return {Cell{p, t, text.empty() ? std::string() : "*" + text, {}, ""}};
+  }
+  std::vector<Cell> block_cells(const AtomSite& s, const E& p) { return block_cells(p, block_ptr_type(s), s.atom->a->c_text); }
+  // `loc(block_of(p), -1)`: the slot of a block's free token (decision 0028 item 6).
+  E tok_slot(const E& p) { return low::dom("loc", {block_of(p), low::int_lit("-1")}); }
+  E tok_loc_slot(const E& p) { return low::dom("loc", {block_of(p), low::int_lit("-2")}); }
+  // `len(block_of(p)) == 1`, and for a structure 0043's member lengths and slot facts.
+  E block_lens(const E& p, const Type& t) {
+    E r = low::bin(low::BinOp::Eq, low::dom("len", {block_of(p)}), low::int_lit("1"));
+    if (t.is_struct()) r = low::and_(r, struct_lens(p, *t.struct_type));
+    return r;
+  }
+  // The block part of `owns_block(p)` (item 4), pure facts only: `p != null`, WF, offset 0, the liveness cell at `loc(b, -2)`, the lengths.
+  E block_pure(const E& p, const Type& pt) {
+    E r = low::bin(low::BinOp::Ne, p, low::null_());
+    r = low::and_(r, wf_expr(p));
+    r = low::and_(r, low::bin(low::BinOp::Eq, low::dom("offset_of", {p}), low::int_lit("0")));
+    r = low::and_(r, low::bin(low::BinOp::Eq, live_cell(p), tok_loc_slot(p)));
+    r = low::and_(r, block_lens(p, *pt.pointee));
+    return r;
+  }
+  // The range (or WF, for a pointer) of a leaf's value; null for a bool.
+  E leaf_range(const Cell& c) {
+    if (c.type.is_ptr()) return wf_expr(cell_value(c.recv, c.type), &c.type);
+    return c.type.is_bool() ? E() : range_check(cell_value(c.recv, c.type), *c.type.int_type);
+  }
+  // `owns_block(p)` as a conjunction, in the shape S36 verified: the block part (`block_head`: the token, the liveness cell at full permission), the lengths, then per leaf
+  // full permission to the value and the flag and `flag ==> range`, then (`Plain`) the flags.  `Uninit`: no flag (a `ref_to_uninit` pointer's block: malloc's and free's);
+  // `Kept`: an `ensures` site on a `ref_to_uninit` formal: a flag that was set on entry (under the partner's guard `kept_guard`) is still set.
+  enum class BlockMode { Plain, Uninit, Kept };
+  E block_conj(const E& p, const Type& pt, const std::string& text, BlockMode mode, const E& kept_guard) {
+    E r = low::bin(low::BinOp::Ne, p, low::null_());
+    r = low::and_(r, wf_expr(p));
+    r = low::and_(r, low::bin(low::BinOp::Eq, low::dom("offset_of", {p}), low::int_lit("0")));
+    r = low::and_(r, low::acc(tok_slot(p), "tok"));
+    r = low::and_(r, low::field(tok_slot(p), "tok"));
+    r = low::and_(r, low::bin(low::BinOp::Eq, live_cell(p), tok_loc_slot(p)));
+    r = low::and_(r, low::acc(live_cell(p), "lv"));
+    r = low::and_(r, block_lens(p, *pt.pointee));
+    const std::vector<Cell> cells = block_cells(p, pt, text);
+    for (const Cell& c : cells) {
+      const std::string sfx = use_cell_type(c.type);
+      r = low::and_(r, low::acc(c.recv, "v_" + sfx));
+      r = low::and_(r, low::acc(c.recv, "d_" + sfx));
+      if (mode == BlockMode::Kept) {
+        E kept = low::old_(cell_flag(c.recv, c.type));
+        if (kept_guard) kept = low::and_(old_entry(kept_guard), kept);
+        r = low::and_(r, low::implies(kept, cell_flag(c.recv, c.type)));
+      }
+      if (const E range = leaf_range(c)) r = low::and_(r, low::implies(cell_flag(c.recv, c.type), range));
+    }
+    if (mode == BlockMode::Plain)
+      for (const Cell& c : cells) r = low::and_(r, cell_flag(c.recv, c.type));
+    return r;
+  }
+  // The mode of a block site: a `requires` site on a marked pointer, and the result's when `result_init` is set, have no flags; an `ensures` site on a `ref_to_uninit`
+  // formal keeps a set flag; every other site (including `must_init`'s `ensures`) states the flags.
+  BlockMode block_mode(const Function& f, const AtomSite& s) {
+    const InitMarker mk = block_marker(f, s);
+    if (mk == InitMarker::None) return BlockMode::Plain;
+    if (s.in_ensures) {
+      if (block_key(s) < 0) return BlockMode::Uninit;
+      return mk == InitMarker::MustInit ? BlockMode::Plain : BlockMode::Kept;
+    }
+    return BlockMode::Uninit;
+  }
+
+  // An `owns_block` atom in the context being lowered (item 4).  Method: the whole conjunction; Wf: its pure facts (no heap); Call and Ret: `true`, the rows were asserted
+  // one by one at the call or the return.
+  LV block_atom(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full* full) {
+    (void)guard; (void)gdep; (void)full;
+    const FnBlocks& fb = blocks_of(*cf_);
+    const auto it = fb.index.find(&e);
+    if (it == fb.index.end()) {
+      internal_error(e.loc, "an owns_block atom in a position the contract rules forbid reached lowering");
+      return {low::bool_lit(true), {}};
+    }
+    cbseen_ = std::max(cbseen_, it->second + 1);
+    if (cmode_ == CMode::Call || cmode_ == CMode::Ret) return {low::bool_lit(true), {}};
+    const AtomSite& site = fb.sites[it->second];
+    const E p = block_ptr(site, env);
+    if (cmode_ == CMode::Wf) return {block_pure(p, block_ptr_type(site)), {}};
+    E kept;
+    if (const AtomSite* partner = block_partner(*cf_, site)) kept = site_guard(*partner, env);
+    return {block_conj(p, block_ptr_type(site), e.a->c_text, block_mode(*cf_, site), kept), {}};
+  }
+
+  // `perm(loc(b, -1).tok) == write && loc(b, -1).tok` as ONE atomic assertion (Silicon reports each conjunct of an asserted `&&` as its own error).
+  E token_held(const E& p) {
+    return low::not_(low::bin(low::BinOp::Or, low::bin(low::BinOp::Ne, low::perm_of(tok_slot(p), "tok"), low::write_perm()), low::not_(low::field(tok_slot(p), "tok"))));
+  }
+
+  // The rows of one block site at a call (`ret` false: item 6's free rows when the callee `deallocates`, else `permission` rows) or at a return (`ret` true, the `ensures`
+  // site of this function): one explicit assertion per part of `owns_block(p)`, atomic, in the order of S36: the null test, WF, the offset, the token, the liveness
+  // equation, the whole liveness cell, the lengths, then per leaf the write permission, the flag and the range.  A part whose failure is a bug of the encoder is
+  // `internal`.  `add(category, cond, message)` makes the row (under the site's guard, which the caller applies).
+  void block_rows(const E& p, const Type& pt, const std::string& text, BlockMode mode, bool dealloc,
+                  const std::function<void(const char*, E, const std::string&)>& add, const std::string& who_needs, bool at_return) {
+    const Type& t = *pt.pointee;
+    const std::string pl = text.empty() ? std::string("the pointer") : "`" + text + "`";
+    const char* cat = dealloc ? "invalid-free" : "permission";
+    const std::string whole = at_return ? "returns without owning the whole allocation " + pl + " points to, which its contract promises"
+                                         : who_needs + " to own the whole allocation " + pl + " points to, without owning it";
+    if (!dealloc) add("permission", low::bin(low::BinOp::Ne, p, low::null_()), whole);
+    // WF of the pointer: `internal` at a return (the contract's own pointers), a user row at a call (a pointer reassigned in a loop whose invariant says nothing about it
+    // may not be well-formed, as in call_atoms' WF row; its own category, so the free rows' groups keep their size)
+    add(at_return ? "internal" : "permission", wf_expr(p), dealloc ? "frees " + pl + ", which may not point to an allocation" : whole);
+    // The token row first (it ends its path when the token is not held: a double free, a local, a global, a member, a borrowed pointer), then the offset: a pointer
+    // that is not known to point to the start of its block (`drop(struct S *s) requires(owns(*s))`) is one error, the token's, not two.
+    add(cat, token_held(p),
+        dealloc ? "frees " + pl + ", which may already be freed or may not be an allocation (a local, a global or a member)" : whole);
+    add(cat, low::bin(low::BinOp::Eq, low::dom("offset_of", {p}), low::int_lit("0")),
+        dealloc ? "frees " + pl + ", which may not be the start of an allocation" : whole);
+    add("internal", low::bin(low::BinOp::Eq, live_cell(p), tok_loc_slot(p)), "the liveness cell of a block is at slot -2");
+    add(cat, low::bin(low::BinOp::Eq, live_perm(p), low::write_perm()),
+        dealloc ? "frees " + pl + " while a pointer to it may still be in use elsewhere" : whole);
+    add("internal", block_lens(p, t), "the lengths of a block");
+    for (const Cell& c : block_cells(p, pt, text)) {
+      const std::string part = c.text.empty() ? pl : "`" + c.text + "`";
+      add(cat, may_write(c.recv, c.type, false),
+          dealloc ? "frees " + pl + " without owning all of it: " + part + " is not owned here" : whole);
+      if (mode == BlockMode::Plain) {
+        add("uninitialized", cell_flag(c.recv, c.type),
+            at_return ? "returns " + part + " without a value, but its contract promises the whole allocation with its contents" : who_needs + " " + part + " to have a value; it may not have one here");
+      }
+      if (const E r = leaf_range(c)) add("internal", low::implies(cell_flag(c.recv, c.type), r), "the range of the value under its flag");
+    }
+  }
+
+  // The rows of a call's `requires` block sites (item 6), before the call: first the separation of every block site from every other site of the callee's `requires`
+  // (`lvloc` rows: two sites never name one block, S36 finding 6; a failed row ends its path, so Silicon's own check of the call never fails first), then each block site's
+  // rows.  Obligations of the call with the exact set PRE(c), like call_atoms'.
+  void block_call_rows(const Expr& e, const Function& callee, const Env& cenv, const std::vector<LV>& args, const Deps& pre, Full& full) {
+    const FnBlocks& fb = blocks_of(callee);
+    if (fb.nreq == 0) return;
+    Deps adep;
+    for (const LV& a : args) adep = join(adep, a.dep);
+    CtxSave call_ctx(*this);
+    cmode_ = CMode::Call;
+    cf_ = &callee;
+    cens_ = false;
+    cold_ = false;
+    struct B {
+      const AtomSite* site;
+      E ptr, g;
+      std::string text;
+    };
+    std::vector<B> bs;
+    for (int i = 0; i < fb.nreq; ++i) {
+      const AtomSite& s = fb.sites[static_cast<size_t>(i)];
+      B b;
+      b.site = &s;
+      b.ptr = block_ptr(s, cenv);
+      b.g = site_guard(s, cenv);
+      const Expr& arg = *e.args[static_cast<size_t>(block_key(s))];
+      b.text = arg.c_text;
+      bs.push_back(std::move(b));
+    }
+    auto row = [&](const char* category, const E& guard, E cond, const std::string& message) {
+      obl(full, guard, adep, std::move(cond), {}, meta(category, e.loc, message), &pre.ex);
+    };
+    // separation: block against block, and block against every other `requires` atom's root
+    const FnAtoms& fa = atoms_of(callee);
+    for (size_t i = 0; i < bs.size(); ++i) {
+      for (size_t j = i + 1; j < bs.size(); ++j)
+        row("permission", low::and_(bs[i].g, bs[j].g), low::bin(low::BinOp::Ne, live_cell(bs[i].ptr), live_cell(bs[j].ptr)),
+            "passes " + (bs[i].text.empty() ? std::string("a pointer") : "`" + bs[i].text + "`") + " and " + (bs[j].text.empty() ? std::string("a pointer") : "`" + bs[j].text + "`") +
+                " to `" + callee.c_name + "`, which needs to own the whole allocation of both, but they may be the same object");
+      for (int j = 0; j < fa.nreq; ++j) {
+        const AtomSite& o = fa.sites[static_cast<size_t>(j)];
+        const E og = site_guard(o, cenv);
+        const E oroot = site_root(o, cenv);
+        row("permission", low::and_(bs[i].g, og), low::bin(low::BinOp::Ne, live_cell(bs[i].ptr), live_cell(oroot)),
+            "passes " + (bs[i].text.empty() ? std::string("a pointer") : "`" + bs[i].text + "`") + " and " + quoted(site_call_text(o, e), "another object") + " to `" +
+                callee.c_name + "`, which needs to own the whole allocation of the first, but they may be the same object");
+      }
+    }
+    for (const B& b : bs) {
+      const std::string who = "calls `" + callee.c_name + "`, which needs";
+      block_rows(b.ptr, block_ptr_type(*b.site), b.text, block_mode(callee, *b.site), callee.deallocates,
+                 [&](const char* category, E cond, const std::string& message) { row(category, b.g, std::move(cond), message); }, who, false);
+    }
+  }
+
   // Restores the contract context at the end of a scope.
   struct CtxSave {
     Lowerer& l;
     CMode mode;
     const Function* f;
     bool ens, old;
-    size_t seen;
-    explicit CtxSave(Lowerer& lw) : l(lw), mode(lw.cmode_), f(lw.cf_), ens(lw.cens_), old(lw.cold_), seen(lw.cseen_) {}
+    size_t seen, bseen;
+    explicit CtxSave(Lowerer& lw) : l(lw), mode(lw.cmode_), f(lw.cf_), ens(lw.cens_), old(lw.cold_), seen(lw.cseen_), bseen(lw.cbseen_) {}
     ~CtxSave() {
       l.cmode_ = mode;
       l.cf_ = f;
       l.cens_ = ens;
       l.cold_ = old;
       l.cseen_ = seen;
+      l.cbseen_ = bseen;
     }
   };
 
@@ -1694,6 +1967,7 @@ class Lowerer {
     cens_ = ens;
     cold_ = false;
     cseen_ = first_site(atoms_of(f), ens, clause);
+    cbseen_ = first_block_site(blocks_of(f), ens, clause);
   }
 
   static std::string amount_name(int k) { return "amt_" + std::to_string(k); }
@@ -1901,7 +2175,9 @@ class Lowerer {
       cf_ = sf;
       cens_ = s.in_ensures;
       cold_ = false;
-      cseen_ = atoms_of(*sf).index.at(s.atom);
+      const FnAtoms& sfa = atoms_of(*sf);
+      if (const auto si = sfa.index.find(s.atom); si != sfa.index.end()) cseen_ = si->second;
+      else internal_error(s.atom->loc, "an owns_block site whose guard reads the heap reached lowering");
     } else {
       cmode_ = CMode::Wf;
     }
@@ -1970,6 +2246,7 @@ class Lowerer {
   // An atom (decision 0037 items 5 and 6) in the context being lowered.
   LV atom(const Expr& e, const Env& env, const E& guard = nullptr, const Deps& gdep = Deps{}, Full* full = nullptr) {
     using low::BinOp;
+    if (e.atom == AtomKind::OwnsBlock) return block_atom(e, env, guard, gdep, full);
     const FnAtoms& fa = atoms_of(*cf_);
     const auto it = fa.index.find(&e);
     if (it == fa.index.end()) {
@@ -2234,6 +2511,27 @@ class Lowerer {
         ds.push_back(d);
       }
     }
+    {  // decision 0047 item 4: an `owns_block` site frames the reads of the cells of its block (`r->balance == 0` after `owns_block(r)`), as an `owns` atom does
+      const FnBlocks& fb = blocks_of(*cf_);
+      for (size_t i = 0; i < fb.sites.size(); ++i) {
+        const AtomSite& s = fb.sites[i];
+        if (post) {
+          if (!s.in_ensures || i >= cbseen_) continue;
+        } else {
+          if (s.in_ensures) continue;
+          if (!cens_ && i >= cbseen_) continue;
+        }
+        // as 0042 item 5: a marked pointer's block never covers a read of the pre-state, and covers one of the post-state only for `must_init` (the result's: never)
+        if (const InitMarker mk = block_marker(*cf_, s); mk != InitMarker::None && !(post && mk == InitMarker::MustInit && block_key(s) >= 0)) continue;
+        const E g = site_guard(s, env);
+        for (const Cell& c : block_cells(s, block_ptr(s, env))) {
+          if (cell_suffix(c.type) != sfx) continue;
+          E d = g;
+          if (!(block_key(s) == k && c.path == path)) d = low::and_(d, low::bin(BinOp::Eq, c.recv, p));
+          ds.push_back(d);
+        }
+      }
+    }
     bool trivial = false;
     for (const E& d : ds)
       // Under the one outer `old` the disjunct (a requires atom's, read plain) and the guard (in the return state) are in different states: spelling alike proves nothing (audit 2).
@@ -2372,6 +2670,16 @@ class Lowerer {
           r.insert(fkey(t));
         }
       }
+    // decision 0047 item 9: a `requires` block site holds every leaf cell of its block at full permission (audit B3)
+    for (const AtomSite& s : blocks_of(callee).sites) {
+      if (s.in_ensures) continue;
+      const Type& t = block_pointee(s);
+      if (t.is_struct()) {
+        for (const StructLeaf& l : struct_leaves(*t.struct_type)) r.insert(fkey(l.type));
+      } else {
+        r.insert(fkey(t));
+      }
+    }
     return r;
   }
 
@@ -2507,8 +2815,10 @@ class Lowerer {
           if (k.field != x.field) continue;
           if (!k.owns && !x.write) continue;
           const std::string callee = quoted(c.callee, "a function");
-          const std::string what = x.write ? "writes " + quoted(x.text, "the object `*(...)` designates") + ", which the call to " + callee + (k.owns ? " may change, " : " reads, ")
-                                           : "accesses " + quoted(x.text, "the object `*(...)` designates") + ", which the call to " + callee + " may change, ";
+          std::string what = x.write ? "writes " + quoted(x.text, "the object `*(...)` designates") + ", which the call to " + callee + (k.owns ? " may change, " : " reads, ")
+                                     : "accesses " + quoted(x.text, "the object `*(...)` designates") + ", which the call to " + callee + " may change, ";
+          if (x.field == "lv")  // decision 0047 item 9: a use of a pointer beside a call that may end the lifetime of its object
+            what = "uses " + quoted(x.text, "a pointer") + ", whose object the call to " + callee + " may end, ";
           emit(low::bin(low::BinOp::Ne, x.place, k.place), low::and_(low::and_(x.guard, k.guard), c.guard), what + "in an order C leaves unspecified", b, &x.loc);  // at the access
         }
       } else {
@@ -2516,8 +2826,9 @@ class Lowerer {
           for (const Acc::Atom& k2 : a.atoms) {
             if (k1.field != k2.field || (!k1.owns && !k2.owns)) continue;
             emit(low::bin(low::BinOp::Ne, k1.place, k2.place), low::and_(low::and_(k1.guard, k2.guard), g_ab),
-                 "the calls to " + quoted(b.callee, "a function") + " and " + quoted(a.callee, "a function") + " may both access " +
-                     quoted(k2.text.empty() ? k1.text : k2.text, "the same object") + ", in an order C leaves unspecified",
+                 "the calls to " + quoted(b.callee, "a function") + " and " + quoted(a.callee, "a function") + " may both " +
+                     (k1.field == "lv" ? "use or end the lifetime of the object " : "access ") + quoted(k2.text.empty() ? k1.text : k2.text, "the same object") +
+                     ", in an order C leaves unspecified",
                  b);
           }
       }
@@ -3262,6 +3573,7 @@ class Lowerer {
                                                                : "`" + arg.c_text + "`";
           return "calls `" + callee.c_name + "`, which needs " + who + " to point to a live object";
         }
+        case AtomKind::OwnsBlock: break;  // never a site of contract_atoms (decision 0047 item 4: contract_block_atoms lists it)
       }
       return std::string();
     };
@@ -3467,8 +3779,11 @@ class Lowerer {
     const bool saved_both = call_pre_both_;
     call_pre_both_ = args_write_cell;  // audit S3: the arguments write a cell, so the checks of the call follow the write in both halves
     std::vector<E> amounts = call_atoms(e, callee, args, cenv, pre, full);
+    block_call_rows(e, callee, cenv, args, pre, full);  // decision 0047 item 6: the free rows, or the rows of the `owns_block` sites the callee takes
     for (size_t k = 0; k < e.args.size(); ++k) {
-      if (e.args[k]->type.is_ptr()) ptr_use(*e.args[k], args[k], nullptr, {}, full);  // a pointer argument is a use (decision 0032 item 6)
+      // A pointer argument is a use (decision 0032 item 6), except the pointer a `free` takes: its token and liveness rows check more, so a second free is `invalid-free`
+      // (decision 0047 item 6); any other use inside the argument (`free(q = p)`, a call) keeps its own checks.
+      if (e.args[k]->type.is_ptr() && !(callee.deallocates && !has_effect(*e.args[k]))) ptr_use(*e.args[k], args[k], nullptr, {}, full);
       // A struct argument built by an aggregate had each pointer leaf used when it was lowered; one a call returned has not (decision 0044 item 5).
       if (e.args[k]->type.is_struct() && !is_aggregate_value(*e.args[k])) struct_ptr_uses(*e.args[k], args[k], nullptr, {}, full, false);
     }
@@ -3540,7 +3855,12 @@ class Lowerer {
       item.target = "t__" + std::to_string(fn_.ntemp++);
       fn_.temps.push_back(low::LVar{item.target, ltype(callee.ret)});
       value = low::var(item.target);
-      if (callee.ret.is_ptr()) result_splits(callee.ret, value, item.after);
+      // A result that is a fresh block (an `ensures` `owns_block` on it: a view, an owning function) needs no split: Silicon derives from the chunks it inhales that it
+      // differs from every cell the caller holds (S36 (k)); the splits would multiply the paths of every allocation.
+      bool block_result = false;
+      for (const AtomSite& bs : blocks_of(callee).sites)
+        if (bs.in_ensures && block_key(bs) < 0) block_result = true;
+      if (callee.ret.is_ptr() && !block_result) result_splits(callee.ret, value, item.after);
     }
     Effect fx;
     fx.kind = Effect::Kind::Call;
@@ -3548,7 +3868,11 @@ class Lowerer {
     fx.fixed = id;
     fx.deps = pre;
     fx.seq = full.next_seq++;
-    if (track_mem() && !mfields.empty()) {
+    bool ends_lifetime = false;  // a call with a consuming `owns_block` site (free's view included) ends the lifetime of a block (decision 0047 item 9)
+    if (heap_)
+      for (const AtomSite& bs : blocks_of(callee).sites)
+        if (block_consumes(callee, bs)) ends_lifetime = true;
+    if (track_mem() && (!mfields.empty() || ends_lifetime)) {
       // A memory call is an access to the cells of its atoms (decision 0039 item 4): an `owns` atom may write, a `reads` atom reads.
       Acc ca;
       ca.call = true;
@@ -3599,6 +3923,44 @@ class Lowerer {
           k.text = c.rel.empty() || base_text.empty() ? base_text : (base_text[0] == '*' ? base_text.substr(1) + "->" + c.rel : base_text + "." + c.rel);
           fx.tags.push_back(MemTag{0, k.field, true, k.owns, path_, {}});
           ca.atoms.push_back(std::move(k));
+        }
+      }
+      // decision 0047 item 9: a `requires` block site is full permission to every leaf cell of its block (the pair checks of 0039 item 4 compare the cells), and a
+      // consuming one also writes its liveness cell (a use of any pointer beside it reads it)
+      {
+        const FnBlocks& fb = blocks_of(callee);
+        for (int i = 0; i < fb.nreq; ++i) {
+          const AtomSite& site = fb.sites[static_cast<size_t>(i)];
+          E guard_of_site, ptr;
+          {
+            CtxSave call_ctx(*this);
+            cmode_ = CMode::Call;
+            cf_ = &callee;
+            cens_ = false;
+            cold_ = false;
+            guard_of_site = site_guard(site, cenv);
+            ptr = block_ptr(site, cenv);
+          }
+          const std::string base_text = e.args[static_cast<size_t>(block_key(site))]->c_text;
+          for (const Cell& c : block_cells(site, ptr)) {
+            Acc::Atom k;
+            k.place = c.recv;
+            k.guard = guard_of_site;
+            k.owns = true;
+            k.field = fkey(c.type);
+            k.text = c.rel.empty() || base_text.empty() ? (base_text.empty() ? std::string() : "*" + base_text) : base_text + "->" + c.rel;
+            fx.tags.push_back(MemTag{0, k.field, true, true, path_, {}});
+            ca.atoms.push_back(std::move(k));
+          }
+          if (block_consumes(callee, site)) {
+            Acc::Atom k;
+            k.place = live_cell(ptr);
+            k.guard = guard_of_site;
+            k.owns = true;
+            k.field = "lv";
+            k.text = base_text;
+            ca.atoms.push_back(std::move(k));
+          }
         }
       }
       ca.field = ca.atoms.empty() ? std::string() : ca.atoms.front().field;
@@ -4878,6 +5240,8 @@ class Lowerer {
     // A pointer parameter without an atom of its own may be the place an atom names: split on each one of the same field (a slot, for a struct pointer).
     std::set<int> with_atom;
     for (size_t i = 0; i < n; ++i) with_atom.insert(site_key(fa.sites[i]));
+    for (const AtomSite& bs : blocks_of(f).sites)
+      if (!bs.in_ensures) with_atom.insert(block_key(bs));  // a pointer that owns its block needs no split against another's cells (decision 0047 item 4)
     for (size_t k = 0; k < f.params.size(); ++k) {
       const Type& t = f.params[k].type;
       if (!t.is_ptr() || with_atom.count(static_cast<int>(k)) != 0 || t.pointee == nullptr || t.pointee->is_void()) continue;
@@ -5070,11 +5434,106 @@ class Lowerer {
     }
   }
 
+  // The exemption of the leak row (item 7): the tokens a function hands back, `g && t == loc(block_of(q), -1)` for each `ensures` block site (`g` its guard as written, `q`
+  // its pointer: the result, or a borrowed formal, which never changes), or `false` without one.
+  E leak_exemption(const Function& f, const Env& env) {
+    E r;
+    CtxSave save(*this);
+    for (const AtomSite& s : blocks_of(f).sites) {
+      if (!s.in_ensures) continue;
+      E term = low::bin(low::BinOp::Eq, low::var("t"), tok_slot(block_ptr(s, env)));
+      if (const E g = site_guard(s, env)) term = low::and_(g, term);
+      r = r ? low::bin(low::BinOp::Or, r, term) : term;
+    }
+    return r ? r : low::bool_lit(false);
+  }
+  // The one leak row of a method (item 7), after the end label where every return and the fall-through land.
+  void leak_row(const Function& f, std::vector<low::LStmt>& out) {
+    if (!heap_ || f.noreturn) return;
+    const Env env = contract_env();
+    emit_assert(out, low::for_perm(leak_exemption(f, env)),
+                meta("leak", f.end_loc, "`" + f.c_name + "` may return while it still owns an allocation that its `ensures` does not hand back"));
+  }
+
+  // The method entry's distinctness of the blocks (item 4, an `internal` row: provable from the `requires`, as Silicon derives it when two full liveness cells are inhaled).
+  void block_entry_checks(const Function& f, std::vector<low::LStmt>& out) {
+    const FnBlocks& fb = blocks_of(f);
+    if (fb.nreq == 0) return;
+    const Env env = contract_env();
+    const FnAtoms& fa = atoms_of(f);
+    std::vector<E> g, ptr;
+    for (int i = 0; i < fb.nreq; ++i) {
+      g.push_back(site_guard(fb.sites[static_cast<size_t>(i)], env));
+      ptr.push_back(block_ptr(fb.sites[static_cast<size_t>(i)], env));
+    }
+    for (size_t i = 0; i < g.size(); ++i) {
+      for (size_t j = i + 1; j < g.size(); ++j)
+        emit_assert(out, low::implies(low::and_(g[i], g[j]), low::bin(low::BinOp::Ne, live_cell(ptr[i]), live_cell(ptr[j]))),
+                    meta("internal", f.loc, "internal check: two blocks the contract of `" + f.c_name + "` owns are different"));
+      for (int j = 0; j < fa.nreq; ++j) {
+        const AtomSite& o = fa.sites[static_cast<size_t>(j)];
+        emit_assert(out, low::implies(low::and_(g[i], site_guard(o, env)), low::bin(low::BinOp::Ne, live_cell(ptr[i]), live_cell(site_root(o, env)))),
+                    meta("internal", f.loc, "internal check: a block and a place the contract of `" + f.c_name + "` owns are different"));
+      }
+    }
+  }
+
+  // The rows of the `ensures` block sites at a return (item 4; 0037 item 10), after atom_returns' rows: the separation of every `ensures` block site from every other
+  // `ensures` site (`lvloc` rows, audit S4: `return p` with owns_block(p) and owns_block(r) fails here, never in Silicon's own postcondition check), then each site's rows.
+  void block_returns(const SrcLoc& at, std::vector<low::LStmt>& out, const Env& env) {
+    const Function& f = *fn_.f;
+    const FnBlocks& fb = blocks_of(f);
+    const FnAtoms& fa = atoms_of(f);
+    struct R {
+      const AtomSite* site;
+      E ptr, g;
+    };
+    std::vector<R> rs;
+    CtxSave ret_ctx(*this);
+    cmode_ = CMode::Ret;
+    cf_ = &f;
+    cens_ = true;
+    cold_ = false;
+    for (size_t i = static_cast<size_t>(fb.nreq); i < fb.sites.size(); ++i) {
+      const AtomSite& s = fb.sites[i];
+      rs.push_back(R{&s, block_ptr(s, env), site_guard(s, env)});
+    }
+    if (rs.empty()) return;
+    auto note = [&](low::Meta m, const AtomSite& s) {
+      const Clause& cl = f.ensures_[static_cast<size_t>(s.clause)];
+      if (cl.loc.known()) {
+        m.has_note = true;
+        m.note_loc = cl.loc;
+        m.note_text = "this is the postcondition";
+      }
+      return m;
+    };
+    auto name = [&](const R& r) { return r.site->atom->a->c_text.empty() ? std::string("a pointer") : "`" + r.site->atom->a->c_text + "`"; };
+    for (size_t i = 0; i < rs.size(); ++i) {
+      for (size_t j = i + 1; j < rs.size(); ++j)
+        emit_assert(out, low::implies(low::and_(rs[i].g, rs[j].g), low::bin(low::BinOp::Ne, live_cell(rs[i].ptr), live_cell(rs[j].ptr))),
+                    note(meta("permission", at, "returns " + name(rs[i]) + " and " + name(rs[j]) + " as owned allocations, but they may be the same object"), *rs[i].site));
+      for (const AtomSite& o : fa.sites) {
+        if (!o.in_ensures) continue;
+        emit_assert(out, low::implies(low::and_(rs[i].g, site_guard(o, env)), low::bin(low::BinOp::Ne, live_cell(rs[i].ptr), live_cell(site_root(o, env)))),
+                    note(meta("permission", at, "returns " + name(rs[i]) + " as an owned allocation and " + quoted(site_text(o), "another object") + " as an owned place, but they may be the same object"), *rs[i].site));
+      }
+    }
+    for (const R& r : rs) {
+      block_rows(r.ptr, block_ptr_type(*r.site), r.site->atom->a->c_text, block_mode(f, *r.site), false,
+                 [&](const char* category, E cond, const std::string& message) {
+                   emit_assert(out, low::implies(r.g, std::move(cond)), note(meta(category, at, message), *r.site));
+                 },
+                 std::string(), true);
+    }
+  }
+
   // Assert each user `ensures` at the point where the function returns (0012 item 9), after the permissions it promises (decision 0037 item 10).
   void postconditions(const SrcLoc& at, std::vector<low::LStmt>& out) {
     const Function& f = *fn_.f;
     const Env env = contract_env();
     atom_returns(at, out, env);
+    block_returns(at, out, env);  // decision 0047 item 4: the `owns_block` sites of the `ensures`
     if (f.ret.is_ptr()) emit_assert(out, wf_expr(env.result, &f.ret), meta("internal", at, "internal check: the pointer a function returns is well-formed"));
     if (f.ret.is_struct()) {
       const std::vector<StructLeaf> ls = struct_leaves(*f.ret.struct_type);
@@ -5234,6 +5693,16 @@ class Lowerer {
         else
           for (const std::string& f : site_fields(site)) w.fields.insert(f);  // every leaf field of a struct atom (decision 0043 item 11)
       }
+    if (e->kind == Expr::Kind::Call && e->callee != nullptr)  // decision 0047 item 10: a `requires` block site owns every leaf cell of its block, so the callee may write them
+      for (const AtomSite& site : blocks_of(*e->callee).sites) {
+        if (site.in_ensures) continue;
+        const Type& t = block_pointee(site);
+        if (t.is_struct()) {
+          for (const StructLeaf& l : struct_leaves(*t.struct_type)) w.fields.insert(cell_suffix(l.type));
+        } else {
+          w.fields.insert(cell_suffix(t));
+        }
+      }
     for (const Expr* x : {e->a, e->b, e->c}) writes_in_expr(x, w);
     for (const Expr* x : e->args) writes_in_expr(x, w);
   }
@@ -5377,8 +5846,10 @@ class Lowerer {
   // The places a loop frames (decision 0038 item 3), in order: the parameters' places (the formal's value and flag cells of an `owns`/`reads` atom of
   // the `requires`, and one liveness cell per parameter with an atom) of the parameters the function never assigns, then every cell of every open
   // block.  `with_atoms` lists every parameter with an atom (assigned or not), for the case splits.
-  std::vector<Place> loop_places(int loop_number, const LoopWrites& writes, std::vector<int>* with_atoms) {
+  std::vector<Place> loop_places(int loop_number, const LoopWrites& writes, std::vector<int>* with_atoms, const Stmt* loop = nullptr,
+                                 const std::set<int>* assigned = nullptr, const std::set<int>* declared = nullptr) {
     std::vector<Place> places;
+    heap_entry_.clear();
     const Function& f = *fn_.f;
     const FnAtoms& fa = atoms_of(f);
     const std::string suffix_of_loop = "__" + std::to_string(loop_number);
@@ -5530,6 +6001,66 @@ class Lowerer {
           push(ref, cell->type, cell->name, {}, true);
         }
       }
+    // Decision 0047 item 10 (heap functions only): the object each pointer variable the loop uses designates at its entry is a place of the loop, with its leaf cells,
+    // its liveness cell and its free token: a block held through a local (`p = malloc(..)`) survives the loop and can be freed after it.
+    if (heap_ && loop != nullptr && assigned != nullptr && declared != nullptr) {
+      std::set<int> used;
+      collect_local_uses(loop, used);
+      for (const auto& vp : f.locals()) {
+        const Var& v = *vp;
+        if (!v.type.is_ptr() || v.type.pointee == nullptr || v.type.pointee->is_void() || v.address_taken || v.compound_literal) continue;
+        if (used.count(v.id) == 0 || declared->count(v.id) != 0) continue;
+        if (v.loc.known() && loop->loc.known() && v.loc.file == loop->loc.file &&
+            (v.loc.line > loop->loc.line || (v.loc.line == loop->loc.line && v.loc.column > loop->loc.column)))
+          continue;  // declared after the loop
+        const Type& pt = *v.type.pointee;
+        const std::string tag = "h" + std::to_string(v.id);
+        E hb = low::var(var_name(v));
+        if (assigned->count(v.id) != 0) {  // the loop moves the variable: its entry value is the base
+          const std::string g = "hb_" + var_name(v) + suffix_of_loop;
+          fn_.snapshots.push_back(low::LVar{g, low::LType::Ref});
+          assign(heap_entry_, g, hb);
+          hb = low::var(g);
+        }
+        std::vector<Cell> cells = pt.is_struct() ? leaf_cells(hb, *pt.struct_type, v.name, true) : std::vector<Cell>{Cell{hb, pt, "*" + v.name, {}, ""}};
+        const E gnull = low::bin(low::BinOp::Ne, hb, low::null_());
+        const size_t first_of_var = places.size();
+        for (size_t ci = 0; ci < cells.size(); ++ci) {
+          const Cell& c = cells[ci];
+          Place pl;
+          pl.heap = true;
+          pl.param = kHeapPlaceBase - static_cast<int>(places.size());
+          pl.recv = c.recv;
+          pl.lroot = hb;
+          pl.type = c.type;
+          pl.ptee = pt;
+          pl.value = true;
+          pl.suffix = cell_suffix(c.type);
+          pl.label = c.text;
+          pl.live = ci == 0;
+          pl.mpath = c.path;
+          name(pl, tag + join_path(c.path));
+          pl.gv = gnull;
+          if (pl.live) pl.gl = gnull;
+          for (size_t j = 0; j < places.size(); ++j) {
+            const Place& o = places[j];
+            if (o.cell || (o.heap && same_expr(o.lroot, hb))) continue;
+            if (o.value && o.suffix == pl.suffix) pl.gv = low::and_(pl.gv, low::bin(low::BinOp::Ne, pl.recv, o.recv));
+            if (pl.live && o.live)
+              pl.gl = low::and_(pl.gl, low::implies(low::bin(low::BinOp::Ne, lv_of(o), low::null_()), low::bin(low::BinOp::Ne, live_cell(lv_of(pl)), live_cell(lv_of(o)))));
+          }
+          if (pl.live) {  // the token place of the block: one per variable, apart from every other heap place's block
+            pl.kt = "kt_" + tag + suffix_of_loop;
+            pl.gt = gnull;
+            for (const Place& o : places)
+              if (o.heap && !o.kt.empty() && !same_expr(o.lroot, hb)) pl.gt = low::and_(pl.gt, low::bin(low::BinOp::Ne, block_of(hb), block_of(o.lroot)));
+            if (pt.is_struct()) pl.slots.emplace_back(pt, hb);
+          }
+          places.push_back(std::move(pl));
+        }
+        (void)first_of_var;
+      }
+    }
     // A parameter place whose atom can be false (`c == 0 || owns(*p)`) holds nothing on that path, and nothing tells Silicon that `p` is not a cell:
     // its snapshot would pick up the cell's permission and the invariant would demand it twice.  A parameter place is therefore counted only when it
     // is no cell (when it is one, the cell's own conjunct holds it); audit round 2, B1.
@@ -5910,7 +6441,7 @@ class Lowerer {
     LoopWrites writes;
     writes_in(&s, writes);
     std::vector<int> atom_params;
-    std::vector<Place> places = loop_places(loop_number, writes, &atom_params);
+    std::vector<Place> places = loop_places(loop_number, writes, &atom_params, &s, &assigned, &declared);
     bool frame = stmt_touches(&s);
     if (!frame && !places.empty()) {
       bool has_return = false;
@@ -5923,6 +6454,9 @@ class Lowerer {
       frame = has_return || outward;
     }
     if (!frame) places.clear();
+    std::vector<low::LStmt> hbstmts = std::move(heap_entry_);  // decision 0047 item 10: `hb := v` for each heap place whose variable the loop assigns
+    heap_entry_.clear();
+    if (places.empty()) hbstmts.clear();
     std::vector<WAtom> wats = written_atoms(s, loop_number, assigned, declared, writes);  // decision 0040 item 5
     resolve_written(wats, places);
     std::vector<low::LStmt> wsplits, bsplits;
@@ -6045,11 +6579,26 @@ class Lowerer {
         }
       for (const Place* a : pparams)
         for (int k : atom_params) {
+          if (is_heap_param(a->param)) continue;  // a heap place's own splits are below
           if (k == a->param || (key_is_global(k) && key_is_global(a->param))) continue;
           const std::pair<int, int> key{std::min(a->param, k), std::max(a->param, k)};
           if (split_lives.insert(key).second)
             case_split(entry, low::bin(BinOp::Eq, live_cell(kref(key.second)), live_cell(kref(key.first))));
         }
+      // Decision 0047 item 10: a heap place against every parameter place and every earlier heap place: Silicon must branch on which liveness cells and which cells are one.
+      for (size_t i = 0; i < pparams.size(); ++i) {
+        const Place* a = pparams[i];
+        if (!is_heap_param(a->param)) continue;
+        if (a->live)
+          for (int k : atom_params)
+            case_split(entry, low::bin(BinOp::Eq, live_cell(kref(k)), live_cell(lv_of(*a))));
+        for (size_t j = 0; j < i; ++j) {
+          const Place* b = pparams[j];
+          if (!b->heap || same_expr(b->lroot, a->lroot)) continue;
+          if (a->live && b->live) case_split(entry, low::bin(BinOp::Eq, live_cell(lv_of(*b)), live_cell(lv_of(*a))));
+          if (a->suffix == b->suffix && (!(a->ptee == b->ptee && a->ptee.is_struct()) || a->mpath == b->mpath)) case_split(entry, low::bin(BinOp::Eq, b->recv, a->recv));
+        }
+      }
       // A parameter place against each cell (B1): its snapshot must not pick up a cell's permission.
       for (const Place* a : pparams)
         for (const Place& c : places) {
@@ -6063,6 +6612,10 @@ class Lowerer {
         if (pl.live) {
           fn_.snapshots.push_back(low::LVar{pl.kl, low::LType::Perm});
           assign(entry, pl.kl, live_perm(lv_of(pl)));
+        }
+        if (!pl.kt.empty()) {  // the block's free token (decision 0047 item 10)
+          fn_.snapshots.push_back(low::LVar{pl.kt, low::LType::Perm});
+          assign(entry, pl.kt, low::perm_of(tok_slot(pl.lroot), "tok"));
         }
         if (!pl.value) continue;
         fn_.snapshots.push_back(low::LVar{pl.kv, low::LType::Perm});
@@ -6091,6 +6644,10 @@ class Lowerer {
           w.invariants.push_back(auto_invariant(low::implies(pl.gv, acc), s.loc));
         }
         if (pl.live) w.invariants.push_back(auto_invariant(low::implies(pl.gl, low::acc(live_cell(lv_of(pl)), "lv", low::var(pl.kl))), s.loc));
+        if (!pl.kt.empty()) {
+          w.invariants.push_back(auto_invariant(low::implies(pl.gt, low::acc(tok_slot(pl.lroot), "tok", low::var(pl.kt))), s.loc));
+          w.invariants.push_back(auto_invariant(low::implies(low::and_(pl.gt, low::bin(BinOp::Gt, low::var(pl.kt), none)), low::field(tok_slot(pl.lroot), "tok")), s.loc));
+        }
       }
       for (const Place& pl : places) {
         if (!pl.value) continue;
@@ -6247,6 +6804,7 @@ class Lowerer {
     // The framing of the invariants and the measure, asserted right after the snapshots (decision 0038 item 6).
     for (const Framing& f : framings) emit_assert(entry, f.cond, f.meta);
     entry.insert(entry.begin(), lbstmts.begin(), lbstmts.end());
+    entry.insert(entry.begin(), hbstmts.begin(), hbstmts.end());
     for (low::LStmt& st : entry) out.push_back(std::move(st));
 
     std::set<int> breaks, continues;
@@ -6301,8 +6859,18 @@ class Lowerer {
         }
         if (pl.live && (!one || !pl.value))
           emit_assert(w.then_body, low::implies(pl.gl, low::not_(lacks(live_perm(lv_of(pl)), pl.kl))), meta("permission", at, msg));
+        if (!pl.kt.empty())  // the block's token (decision 0047 item 10): a body that frees the block the loop holds fails here, before Viper exhales the invariant
+          emit_assert(w.then_body, low::implies(pl.gt, low::not_(lacks(low::perm_of(tok_slot(pl.lroot), "tok"), pl.kt))),
+                      meta("permission", at, "an iteration of this loop ends without the allocation " + quoted(pl.label, "an object") + " that it began with"));
       }
     }
+    // Decision 0047 item 7 (audit B1 (a)): a block allocated in an iteration and not freed would be dropped by the loop's invariant exhale at the back edge, with no row.
+    // One `leak` row at the end of the body, where the fall-through and every `continue` have landed (`l_cont__` is inside the body): exempt exactly the tokens the
+    // invariant carries.  Only a loop whose body can make a token has the row (a call of a function with an `ensures` block site: a view, an owning function).
+    if (heap_ && loop_may_allocate(s))
+      emit_assert(w.then_body, low::for_perm(loop_token_exemption(places)),
+                  meta("leak", s.body != nullptr && s.body->end_loc.known() ? s.body->end_loc : s.loc,
+                       "an iteration of this loop may end while it still owns an allocation that the loop does not carry to the next iteration"));
     if (!wats.empty()) written_checks(wats, places, true, s.body != nullptr && s.body->end_loc.known() ? s.body->end_loc : s.loc, w.then_body);
     for (const Framing& f : framings) emit_assert(w.then_body, f.cond, f.meta);  // also when the loop has no place: the read is then unframed
     out.push_back(std::move(w));
@@ -6313,6 +6881,50 @@ class Lowerer {
     active_w_.resize(active_before);
     active_lbs_.resize(lbs_before);
     cur_loop_ = saved_loop;
+  }
+
+  static constexpr int kHeapPlaceBase = -2000000;  // the `param` of a heap place (decision 0047 item 10): never a real key
+  static bool is_heap_param(int k) { return k <= kHeapPlaceBase; }
+  std::vector<low::LStmt> heap_entry_;  // `hb := v` of the loop being lowered (loop_places fills it)
+  // The locals (Var ids) a statement or expression reads or writes by name.
+  static void collect_local_uses_expr(const Expr* e, std::set<int>& out) {
+    if (e == nullptr) return;
+    if (e->var != nullptr) out.insert(e->var->id);
+    for (const Expr* x : {e->a, e->b, e->c}) collect_local_uses_expr(x, out);
+    for (const Expr* x : e->args) collect_local_uses_expr(x, out);
+  }
+  static void collect_local_uses(const Stmt* s, std::set<int>& out) {
+    if (s == nullptr) return;
+    if (s->var != nullptr) out.insert(s->var->id);
+    collect_local_uses_expr(s->expr, out);
+    collect_local_uses_expr(s->addr, out);
+    for (const Clause& c : s->invariants) collect_local_uses_expr(c.expr, out);
+    for (const Clause& c : s->measure) collect_local_uses_expr(c.expr, out);
+    collect_local_uses(s->then_body, out);
+    collect_local_uses(s->else_body, out);
+    collect_local_uses(s->body, out);
+    collect_local_uses(s->step, out);
+    for (const Stmt* c : s->stmts) collect_local_uses(c, out);
+  }
+  // Whether a loop's body (condition and step included) can call a function that hands out a block (an `ensures` block site).
+  bool loop_may_allocate(const Stmt& s) {
+    std::vector<const Function*> cs;
+    calls_in_stmt(&s, cs, false);
+    for (const Function* c : cs)
+      for (const AtomSite& b : blocks_of(*c).sites)
+        if (b.in_ensures) return true;
+    return false;
+  }
+  // The tokens the loop's invariant carries (item 10: the token places of the loop's places), or `false`.
+  E loop_token_exemption(const std::vector<Place>& places) {
+    E r;
+    for (const Place& pl : places) {
+      if (!pl.heap || pl.kt.empty()) continue;
+      E term = low::and_(pl.gt, low::bin(low::BinOp::Gt, low::var(pl.kt), low::no_perm()));
+      term = low::and_(term, low::bin(low::BinOp::Eq, low::var("t"), tok_slot(pl.lroot)));
+      r = r ? low::bin(low::BinOp::Or, r, term) : term;
+    }
+    return r ? r : low::bool_lit(false);
   }
 
   // The range of a cell's value as an invariant conjunct (none for `bool`).
@@ -6696,6 +7308,7 @@ class Lowerer {
     if (!param_cells.empty()) fn_.scopes.push_back(Fn::Scope{param_cells, f.end_loc});
     entry_snapshots(f, m.body, cenv);
     entry_checks(f, m.body);
+    block_entry_checks(f, m.body);  // decision 0047 item 4
     prologue(m.body, &f);
     user_targets_.clear();
     user_names_.clear();
@@ -6719,6 +7332,7 @@ class Lowerer {
     end.kind = low::LStmt::Kind::Label;
     end.name = kEndLabel;
     m.body.push_back(std::move(end));
+    leak_row(f, m.body);  // decision 0047 item 7: one row after the end label
     for (const auto& v : f.locals()) {
       // A cell's Viper local holds the Ref of its one-slot block (decision 0032 item 4).
       m.locals.push_back(low::LVar{fn_.var_names[static_cast<size_t>(v->id)], v->address_taken ? low::LType::Ref : ltype(v->type)});
@@ -6742,6 +7356,7 @@ class Lowerer {
     cens_ = post;
     cold_ = false;
     cseen_ = atoms_of(*d.f).sites.size();
+    cbseen_ = blocks_of(*d.f).sites.size();
     Full scratch;
     return chain_ref(lower(*d.base, env, nullptr, Deps{}, scratch).e, path);
   }
@@ -6906,7 +7521,10 @@ class Lowerer {
   int old_depth_ = 0;  // the number of contract reads under `old` being lowered (decision 0045: one `old(...)` per chain)
   bool cmeasure_ = false;  // the contract expression is a function's termination measure (decision 0039 item 8)
   size_t cseen_ = 0;
+  size_t cbseen_ = 0;  // the same for the `owns_block` sites of `cf_` (decision 0047 item 4)
   std::map<const Function*, FnAtoms> atoms_;
+  std::map<const Function*, FnBlocks> blocks_;
+  bool heap_ = false;  // a heap program (decision 0047 item 7): a view call or an owns_block site anywhere
   std::deque<Derived> derived_;                                    // decision 0045: the derived keys (a deque: references to entries stay valid)
   std::map<std::tuple<const Function*, int, std::vector<int>>, int> derived_index_;
   std::map<const Function*, int> derived_count_;

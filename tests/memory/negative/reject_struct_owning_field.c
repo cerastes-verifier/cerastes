@@ -1,7 +1,7 @@
 // expect: rejected wrong_entity_for_attribute @ L13
 // mode: c23, c++20
 // twin: tests/memory/struct_local.c
-// Pins: 0043 item 15, question 91: owning on a field is EDG's own refusal (registration target p); owning fields are M4.5d2
+// Pins: 0043 item 15, question 91: owning on a field is EDG's own refusal (registration target p); owning fields are M4.5d2b
 #include <cerastes.h>
 
 struct S {
