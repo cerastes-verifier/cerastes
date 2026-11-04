@@ -62,15 +62,24 @@ std::string physical_path(const a_source_position& p) {
   return canonical_path(f->full_name);
 }
 
-bool in_verified_file(const a_source_position& p) {
-  if (p.seq == 0) return false;  // no position: compiler-generated
-  a_source_file_ptr f = physical_file(p.seq);
+bool in_verified_file(const a_source_position& p) { return seq_in_verified_file(p.seq); }
+
+bool seq_in_verified_file(a_seq_number seq) {
+  if (seq == 0) return false;  // no position: compiler-generated
+  a_source_file_ptr f = physical_file(seq);
   // A file that cannot be placed is a verified file, never a system file (decision 0011 item 4: fail closed).
   if (f == nullptr || f->full_name == nullptr) return true;
-  const std::string c = canonical_path(f->full_name);
-  if (c.empty()) return true;
-  const VerifyConfig& cfg = verify_config();
-  return !is_system_file(cfg.system_dirs, cfg.cerastes_header, c, cfg.library_dirs);
+  // One answer per file record (the configuration is fixed for the run; every position of a header asks).
+  static std::map<a_source_file_ptr, bool> cache;
+  auto it = cache.find(f);
+  if (it != cache.end()) return it->second;
+  bool verified = true;
+  if (const std::string c = canonical_path(f->full_name); !c.empty()) {
+    const VerifyConfig& cfg = verify_config();
+    verified = !is_system_file(cfg.system_dirs, cfg.cerastes_header, c, cfg.library_dirs);
+  }
+  cache.emplace(f, verified);
+  return verified;
 }
 
 bool seq_in_library_file(a_seq_number seq) {
@@ -105,7 +114,7 @@ void collect_entry(char* entry, an_il_entry_kind kind) {
     case iek_type: g_collect_out->types.push_back(reinterpret_cast<a_type_ptr>(entry)); break;
     case iek_src_seq_secondary_decl: {
       auto sd = reinterpret_cast<a_src_seq_secondary_decl_ptr>(entry);
-      if (sd->entity.kind == iek_routine) g_collect_out->secondary_decls[reinterpret_cast<a_routine_ptr>(sd->entity.ptr)].push_back({sd->decl_position, sd->declared_type});
+      if (sd->entity.kind == iek_routine) g_collect_out->secondary_decls[reinterpret_cast<a_routine_ptr>(sd->entity.ptr)].push_back({sd->decl_position, sd->declared_type, sd->attributes});
       if (sd->entity.kind == iek_variable) g_collect_out->variable_secondary_decls[reinterpret_cast<a_variable_ptr>(sd->entity.ptr)].push_back(sd->decl_position);
       break;
     }

@@ -52,6 +52,8 @@ python3 scripts/mutate.py --validate
 step "edg configuration"
 scripts/check_edg_config.sh
 scripts/check_edg_options.sh
+# vlibc's headers compiled as ordinary (non-system) headers with the driver's flags, no diagnostic (decision 0046 item 3)
+scripts/check_vlibc_headers.sh
 
 step "harness self-test"
 # The self-tests that need the real front end must fail, not skip, here.

@@ -49,6 +49,9 @@ namespace {
 
 constexpr const char kVersion[] = "cerastes (M3 development build)";
 
+// `--version`: the build, and the vlibc commit it was configured with (decision 0046 item 1; "unknown" when vlibc is not a git tree).
+void print_version() { std::printf("%s; vlibc %s\n", kVersion, CERASTES_TOOL_VLIBC_COMMIT); }
+
 constexpr const char kUsage[] =
     "usage: cerastes verify <file> [options]\n"
     "       cerastes --help | --version\n"
@@ -146,7 +149,7 @@ int parse_args(int argc, char** argv, Args& a) {
       std::fputs(kUsage, stdout);
       return -1;
     } else if (s == "--version") {
-      std::printf("%s\n", kVersion);
+      print_version();
       return -1;
     } else if (s.rfind("--std=", 0) == 0) {
       std::string v = s.substr(6);
@@ -174,6 +177,9 @@ int parse_args(int argc, char** argv, Args& a) {
       std::string dir;
       if (int rc = value_of("-I", &dir)) return rc;
       if (dir.empty()) return refuse("-I needs a directory");
+      // `-I-` makes every directory before it quote-only, which would take the shim and the platform's headers out of reach of
+      // `#include <...>`; a value that starts with `-` is no directory (decision 0046 item 2).
+      if (dir[0] == '-') return refuse("-I" + dir + " is not supported (an include directory cannot start with `-`; `-I-` is refused: decision 0046)");
       a.includes.push_back(dir);
     } else if (s.rfind("-D", 0) == 0 || s.rfind("-U", 0) == 0) {
       std::string v;
@@ -294,39 +300,54 @@ bool has_internal_error(const std::string& text) {
   return std::regex_search(text, re);
 }
 
-int verify_command(int argc, char** argv) {
-  Args a;
-  if (int rc = parse_args(argc, argv, a)) return rc < 0 ? 0 : rc;
+// The EDG command line of a verify run (without the source file and the diagnostics file), the library directories and the platform's system
+// include directories (decision 0011 item 2).
+struct EdgCommand {
+  std::vector<std::string> edg;
+  std::vector<std::string> sys_includes;
+  std::vector<std::string> library_dirs;
+  int rc = 0;  // nonzero: a refusal or a tool failure was printed, this is the exit status
+};
 
-  cerastes::SiliconTools tools{CERASTES_TOOL_JAVA, CERASTES_TOOL_SILICON_JAR, CERASTES_TOOL_Z3};
-  for (const std::string* t : {&tools.java, &tools.jar, &tools.z3}) {
-    if (!readable(t->c_str(), t == &tools.jar ? R_OK : X_OK)) {
-      std::fprintf(stderr, "cerastes: error: the tool %s is missing: run scripts/bootstrap.sh\n", t->c_str());
-      return 3;
-    }
-  }
-
+EdgCommand build_edg_command(const Args& a, bool probe) {
+  EdgCommand out;
   const bool c_mode = a.std_mode == "c23";
-  const std::vector<std::string> sys_includes =
-      split_colons(c_mode ? CERASTES_TOOL_C_SYS_INCLUDES : CERASTES_TOOL_CXX_SYS_INCLUDES);
+  out.sys_includes = split_colons(c_mode ? CERASTES_TOOL_C_SYS_INCLUDES : CERASTES_TOOL_CXX_SYS_INCLUDES);
+  const std::vector<std::string>& sys_includes = out.sys_includes;
 
   // The EDG command line: ours entirely (0011 item 2).
-  std::vector<std::string> edg = {
+  std::vector<std::string>& edg = out.edg;
+  edg = {
       "cerastes",
       "-D__CERASTES__=1",  // before the user's options (0008)
       std::string("--clang_version=") + CERASTES_TOOL_CLANG_VERSION,
   };
-  // The library_fixture hook (decision 0046 item 10): the fixture directory is a library directory, ahead of the platform's.
-  std::vector<std::string> library_dirs;
-  if (const std::string vlibc = cerastes::canonical_path(CERASTES_TOOL_VLIBC_INCLUDE_DIR); !vlibc.empty())
-    library_dirs.push_back(vlibc);
+  // Decision 0046: the library directory is <vlibc>/include/vlibc (the shim); <vlibc>/include is searched too, for <vlibc/...>.  Both come
+  // before the platform's directories, so a bare <stdlib.h> (the program's, or a system header's) reaches the shim, whose
+  // `#include_next` continues with the platform's header; EDG flags both as system, cerastes decides by path (item 3).  The
+  // library_fixture hook (item 10) adds its fixture directory, first.
+  const std::string vlibc_include = cerastes::canonical_path(CERASTES_TOOL_VLIBC_INCLUDE_DIR);
+  const std::string vlibc_shim = cerastes::canonical_path(std::string(CERASTES_TOOL_VLIBC_INCLUDE_DIR) + "/vlibc");
+  if (vlibc_include.empty() || vlibc_shim.empty()) {
+    std::fprintf(stderr, "cerastes: error: vlibc is missing (%s): run scripts/bootstrap.sh\n", CERASTES_TOOL_VLIBC_INCLUDE_DIR);
+    out.rc = 3;
+    return out;
+  }
+  std::vector<std::string>& library_dirs = out.library_dirs;
+  library_dirs.push_back(vlibc_shim);
   if (a.hook == "library_fixture") {
     const std::string fixture = cerastes::canonical_path(CERASTES_TOOL_LIBRARY_FIXTURE_DIR);
-    if (fixture.empty())
-      return refuse(std::string("the library_fixture hook needs the directory ") + CERASTES_TOOL_LIBRARY_FIXTURE_DIR);
+    if (fixture.empty()) {
+      out.rc = refuse(std::string("the library_fixture hook needs the directory ") + CERASTES_TOOL_LIBRARY_FIXTURE_DIR);
+      return out;
+    }
     library_dirs.push_back(fixture);
     edg.push_back("--sys_include=" + fixture);
   }
+  // `probe` (`--cerastes_print_edg_command`, for scripts/check_vlibc_headers.sh): the two vlibc directories are plain include directories in the
+  // same places, so that the shim is not a system directory and EDG's own relaxations for system files do not apply to vlibc's text.
+  edg.push_back((probe ? "-I" : "--sys_include=") + vlibc_shim);
+  edg.push_back((probe ? "-I" : "--sys_include=") + vlibc_include);
   for (const std::string& d : sys_includes) edg.push_back("--sys_include=" + d);
   // include/ holds <cerastes.h>; as a system include directory, diagnostics for macros used in the caller's file
   // still point at the caller's file (as scripts/cerastes-fe.sh does).
@@ -381,6 +402,26 @@ int verify_command(int argc, char** argv) {
   else edg.push_back("--diag_error=144,167");
   for (const std::string& d : a.includes) edg.push_back("-I" + d);
   for (const std::string& m : a.macro_options) edg.push_back(m);
+  return out;
+}
+
+int verify_command(int argc, char** argv) {
+  Args a;
+  if (int rc = parse_args(argc, argv, a)) return rc < 0 ? 0 : rc;
+
+  cerastes::SiliconTools tools{CERASTES_TOOL_JAVA, CERASTES_TOOL_SILICON_JAR, CERASTES_TOOL_Z3};
+  for (const std::string* t : {&tools.java, &tools.jar, &tools.z3}) {
+    if (!readable(t->c_str(), t == &tools.jar ? R_OK : X_OK)) {
+      std::fprintf(stderr, "cerastes: error: the tool %s is missing: run scripts/bootstrap.sh\n", t->c_str());
+      return 3;
+    }
+  }
+
+  EdgCommand cmd = build_edg_command(a, /*probe=*/false);
+  if (cmd.rc != 0) return cmd.rc;
+  std::vector<std::string> edg = std::move(cmd.edg);
+  const std::vector<std::string>& sys_includes = cmd.sys_includes;
+  const std::vector<std::string>& library_dirs = cmd.library_dirs;
   edg.push_back(a.file);
   // EDG's diagnostics go to a file of ours first, so that the driver can tell an internal error from a missing
   // source file; they are copied to standard error as they are.
@@ -412,6 +453,7 @@ int verify_command(int argc, char** argv) {
   cfg.hook = a.hook;
   cfg.strict_init = a.strict_init;
   cfg.library_dirs = library_dirs;
+  // The vlibc directories are not among the platform's: system_dirs is the platform's only (a file below a library directory is never system).
   cfg.system_dirs = cerastes::system_directories(sys_includes, a.includes, library_dirs);
   cfg.cerastes_header = cerastes::canonical_path(std::string(CERASTES_TOOL_INCLUDE_DIR) + "/cerastes.h");
 
@@ -489,6 +531,7 @@ int verify_command(int argc, char** argv) {
   // Every hook but library_fixture injects a fault: a run with one never ends in `verified` (pipeline.cpp, 0011 item 13).
   // library_fixture only adds a library directory, so its runs end as any other.
   po.hook = a.hook == "library_fixture" ? std::string() : a.hook;
+  po.note = a.hook == "library_fixture" ? "self-test hook library_fixture" : "";  // the success line names it (decision 0046 item 11)
   po.timeout_seconds = a.hook == "silicon_timeout" ? 0 : a.timeout;
   po.primary_file = a.file;
   po.functions = cfg.out.functions;
@@ -542,7 +585,7 @@ int main(int argc, char** argv) {
     return 0;
   }
   if (cmd == "--version") {
-    std::printf("%s\n", kVersion);
+    print_version();
     return 0;
   }
   if (cmd == "--selftest") {
@@ -555,6 +598,17 @@ int main(int argc, char** argv) {
     static char a0[] = "cerastes", a1[] = "--dump_configuration";
     char* v[] = {a0, a1, nullptr};
     return edg_main(2, v);
+  }
+  if (cmd == "--cerastes_print_edg_command" && argc == 3) {
+    // For scripts/check_vlibc_headers.sh: the EDG arguments `cerastes verify` would pass for <c23|c++20> (one per line, the program name and the
+    // source file left out), with vlibc's directories as plain include directories (decision 0046 item 3's check).
+    Args a;
+    a.std_mode = argv[2];
+    if (a.std_mode != "c23" && a.std_mode != "c++20") return refuse("--cerastes_print_edg_command needs c23 or c++20");
+    EdgCommand c = build_edg_command(a, /*probe=*/true);
+    if (c.rc != 0) return c.rc;
+    for (size_t i = 1; i < c.edg.size(); ++i) std::printf("%s\n", c.edg[i].c_str());
+    return 0;
   }
   if (cmd == "--cerastes_classify_silicon" && argc == 4) return classify_command(argv[2], argv[3]);
   if (cmd == "verify") {

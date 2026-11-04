@@ -30,6 +30,12 @@ if(CERASTES_JAVA AND CERASTES_SILICON_JAR AND CERASTES_Z3_EXE AND CERASTES_CLANG
   # The fixture directory is the second library directory of the `library_fixture` self-test hook (item 10); it is
   # compiled in as a path and need not exist.
   set(CERASTES_VLIBC_INCLUDE_DIR "${CERASTES_VLIBC_DIR}/include")
+  execute_process(COMMAND git -C "${CERASTES_VLIBC_DIR}" rev-parse --short HEAD
+                  RESULT_VARIABLE CERASTES_VLIBC_GIT_STATUS OUTPUT_VARIABLE CERASTES_VLIBC_COMMIT
+                  OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+  if(NOT CERASTES_VLIBC_GIT_STATUS EQUAL 0 OR NOT CERASTES_VLIBC_COMMIT)
+    set(CERASTES_VLIBC_COMMIT "unknown")
+  endif()
   set(CERASTES_LIBRARY_FIXTURE_DIR "${CMAKE_SOURCE_DIR}/scripts/testdata/library_fixture/include")
   configure_file(tool_paths.h.in "${CMAKE_CURRENT_BINARY_DIR}/tool_paths.h" @ONLY)
   add_executable(cerastes

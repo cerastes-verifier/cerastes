@@ -94,10 +94,67 @@ through a contract; its body is never read.
 A directory you give with `-I` is a user directory, even if it holds
 library code.
 
+A third kind of file is a *library file*: a header of the
+<<vlibc,C library contracts>> that cerastes is built with. It is used like
+a system header (its declarations carry the contracts of the C library) but
+checked like your own code: a body in it is verified, and nothing in it is
+checked less than in your files.
+
 The bodies of functions marked `CERASTES_PREDICATE` and `CERASTES_PURE` are
 specification and are not verified. In this version a call of one of them in
 executable code is rejected, and in a contract only `cerastes::old` may be
 called.
+
+[#vlibc]
+== The C library: vlibc
+
+The C library's functions have no contracts in the system headers, so cerastes
+takes them from *vlibc*, a library of contract headers
+(https://github.com/cerastes-verifier/vlibc[cerastes-verifier/vlibc]) that
+cerastes is built with. A vlibc header has the name of a C standard header,
+includes the system's header of that name, and then declares the functions it
+covers again, each with its contract. With an ordinary compiler the contracts
+expand to nothing, so the same header works in your normal build.
+
+There are two ways to reach it:
+
+* *Without changing your code.* When cerastes verifies a file, a bare
+  `#include <stdlib.h>` reaches vlibc's `<stdlib.h>`, which includes the
+  system's. That also holds when a system header includes `<stdlib.h>` itself,
+  as the pass:[C++] library's `<cstdlib>`, `<array>` and `<exception>` do. Your
+  ordinary build is unchanged.
+* *Explicitly.* `#include <vlibc/stdlib.h>` names vlibc's header in every build.
+  Add vlibc's `include/` directory to your include path (see
+  xref:ordinary-compilers.adoc#_the_include_path[Building annotated code with ordinary compilers]).
+  When cerastes verifies the file, this always reads the copy of vlibc that
+  cerastes was built with, even if your `-I` names another one.
+
+[source,c]
+----
+include::example$verifying/vlibc_explicit.c[tag=source]
+----
+
+vlibc's contracts for functions that cannot be written in C are *trusted*:
+cerastes verifies the calls against them, never the functions. In this version
+vlibc covers `abort`, `exit` and `_Exit`, whose contract is that they do not
+return (`CERASTES_ENSURES(false)`). Every other function of the C library has no
+contract yet, and a call of one is rejected (`call_without_contract`).
+
+Because `exit` does not return, the path that calls it ends, and a postcondition
+only has to hold on the paths that return:
+
+[source,c]
+----
+include::example$verifying/vlibc_exit.c[tag=source]
+----
+
+The names vlibc covers are *reserved*: their contract comes from vlibc only. A
+contract written on another declaration of such a function is rejected
+(xref:error-messages.adoc#_annotation_reserved_library[`annotation_reserved_library`]),
+whether or not your file includes the header, and even if it repeats vlibc's
+contract word for word. A function of your own with the same name in a
+namespace, or with pass:[C++] linkage, is not the library's and is an ordinary
+function.
 
 == The output
 
@@ -603,10 +660,11 @@ closing brace of its body can be reached, and reports one that can as a
 `noreturn` error. A call of such a function ends the path of its caller, so what
 would follow it is not checked.
 
-`abort`, `exit` and `_Exit` from `<stdlib.h>` are known not to return. They are
-the only functions of the C library that cerastes knows so far; `quick_exit`,
-`+__builtin_trap+`, `+__builtin_unreachable+` (and C23's `unreachable()`) and
-`std::terminate` are rejected.
+`abort`, `exit` and `_Exit` from `<stdlib.h>` do not return: their contract in
+<<vlibc,vlibc>> says so. That comes from vlibc's contract, not from the system
+header's own attributes. `quick_exit`, `+__builtin_trap+`,
+`+__builtin_unreachable+` (and C23's `unreachable()`) and `std::terminate` are
+rejected.
 
 [source,c]
 ----
@@ -869,9 +927,11 @@ The constructs that are rejected in this version are:
   `main` declared not to return, and `CERASTES_ENSURES` on a function declared
   not to return.
 * *Calls:* of a function with no body in the file and no contract, among them
-  the functions of the C library other than `abort`, `exit` and `_Exit` (for
+  the functions of the C library that <<vlibc,vlibc>> does not cover yet (for
   example `quick_exit`, `+__builtin_trap+`, `+__builtin_unreachable+` and
   `std::terminate`).
+* *Contracts on the C library:* a contract on another declaration of a function
+  that vlibc covers (`annotation_reserved_library`).
 * *Types:* pointers other than those xref:memory.adoc[Memory and ownership]
   describes (`void *`, `restrict` other than on a C parameter the contract owns,
   and pointers to unions, to functions and to structures that are not supported

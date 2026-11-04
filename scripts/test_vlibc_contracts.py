@@ -204,7 +204,7 @@ class Rules(Base):
     def test_multi_line_declaration(self) -> None:
         self.header("// cerastes:trusted-contract vlibc: copy copies n bytes (C23 7.26.2.1)\n"
                     "void *copy(void *dst,\n"
-                    "           const void *src,   /* the source */\n"
+                    "           const void *src,\n"
                     "           unsigned long n)\n"
                     "    CERASTES_REQUIRES(n > 0)\n"
                     "    CERASTES_ENSURES(true);\n")
@@ -280,9 +280,10 @@ class NotDeclarations(Base):
         self.assertEqual(self.list_(), (0, "", ""))
 
     def test_contract_in_a_preprocessor_line_does_not_count(self) -> None:
-        self.header("#define F void f(void) CERASTES_ENSURES(false);\n"
-                    "#define G(x) \\\n    void g(x) CERASTES_ENSURES(false);\n"
-                    "  #  define H CERASTES_REQUIRES(1)\n"
+        # (a `#define` is refused in a shim header, below; `#error` and `#include` lines are allowed and blanked)
+        self.header('#error void f(void) CERASTES_ENSURES(false);\n'
+                    "#error void g(void) \\\n    CERASTES_ENSURES(false);\n"
+                    '  #  include "void h(void) CERASTES_REQUIRES(1)"\n'
                     "void k(void);\n")
         self.assertEqual(self.list_(), (0, "", ""))
 
@@ -320,11 +321,68 @@ class NotDeclarations(Base):
         self.assertEqual((code, err), (0, ""))
         self.assertTrue(out.startswith("abort | x.h |"))
 
-    def test_only_h_files_in_the_directory_are_read(self) -> None:
+    def test_a_subdirectory_of_the_shim_directory_is_an_error(self) -> None:
+        # decision 0046 item 3: the library class is this directory and its headers are the ones read
         self.header(HEADER)
-        (self.inc / "notes.txt").write_text("void zzz(void) CERASTES_ENSURES(false);\n")
         (self.inc / "sub").mkdir()
         (self.inc / "sub" / "y.h").write_text("void zzz(void) CERASTES_ENSURES(false);\n")
+        code, out, err = self.list_()
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("a subdirectory of the shim directory", err)
+        self.assertIn("sub:0:", err)
+
+    def test_an_empty_subdirectory_is_an_error_too(self) -> None:
+        self.header(HEADER)
+        (self.inc / "empty").mkdir()
+        code, out, err = self.list_()
+        self.assertEqual(code, 1)
+        self.assertIn("a subdirectory of the shim directory", err)
+
+    def test_a_file_that_is_not_a_header_is_an_error(self) -> None:
+        # twin: notes.txt next to the header would be harmless to ordinary compilers, but a file named like a C++
+        # header (`array`) shadows it for the front end
+        self.header(HEADER)
+        for name in ("notes.txt", "array", "stdlib.hpp"):
+            with self.subTest(name=name):
+                f = self.inc / name
+                f.write_text("x\n")
+                code, out, err = self.list_()
+                self.assertEqual((code, out), (1, ""))
+                self.assertIn("not a *.h header", err)
+                f.unlink()
+        code, out, err = self.list_()
+        self.assertEqual((code, err), (0, ""))
+
+    def test_a_header_elsewhere_under_the_include_directory_is_an_error(self) -> None:
+        self.header(HEADER)
+        for name, make in (("stray.h", lambda p: p.write_text("int f(void);\n")),
+                           ("other", lambda p: p.mkdir())):
+            with self.subTest(name=name):
+                p = self.inc.parent / name
+                make(p)
+                code, out, err = self.list_()
+                self.assertEqual((code, out), (1, ""))
+                self.assertIn(f"under {self.inc.resolve().parent} other than vlibc/", err)
+                self.assertIn(name, err)
+                if p.is_dir():
+                    p.rmdir()
+                else:
+                    p.unlink()
+        code, out, err = self.list_()   # twin: with nothing else there it passes
+        self.assertEqual((code, err), (0, ""))
+
+    def test_the_check_subcommand_and_names_refuse_them_too(self) -> None:
+        self.header(HEADER)
+        (self.inc.parent / "stray.h").write_text("int f(void);\n")
+        committed = self.tmp / "c.txt"
+        committed.write_text("")
+        self.assertEqual(run(["check", "--include-dir", str(self.inc), "--list", str(committed)])[0], 1)
+        out = self.tmp / "n.inc"
+        self.assertEqual(run(["names", "--include-dir", str(self.inc), "--out", str(out)])[0], 1)
+        self.assertFalse(out.exists())
+
+    def test_only_h_files_of_the_directory_are_read(self) -> None:
+        self.header(HEADER)
         code, out, err = self.list_()
         self.assertEqual((code, err), (0, ""))
         self.assertEqual([ln.split(" | ")[0] for ln in out.splitlines()], ["abort", "exit"])
@@ -341,6 +399,140 @@ class NotDeclarations(Base):
         err = self.assertFails("void a(void) CERASTES_ENSURES(false);\n"
                                "void b(void) CERASTES_ENSURES(false);\n", "x.h:1:", "x.h:2:")
         self.assertEqual(err.count("a contract without"), 2)
+
+
+class Directives(Base):
+    """Decision 0046 item 3 (audit round 2, S1): a shim header's only `#define` is its own include guard, and it has no
+    `#undef`, `#pragma`, `#line`, linemarker, `_Pragma` or digraph/trigraph `#`.  Each refusal has the guard-only header
+    as its twin (it passes), so dropping a rule fails here."""
+
+    GUARDED = ("#ifndef VLIBC_X_H\n#define VLIBC_X_H\n#include <cerastes.h>\n"
+               "// cerastes:trusted-contract vlibc: abort never returns\n"
+               "void abort(void) CERASTES_ENSURES(false);\n#endif\n")
+
+    def test_the_guard_alone_passes(self) -> None:
+        self.header(self.GUARDED)
+        code, out, err = self.list_()
+        self.assertEqual((code, err), (0, ""))
+        self.assertTrue(out.startswith("abort | x.h |"))
+
+    def test_a_define_other_than_the_guard_is_an_error(self) -> None:
+        for what in ("#define false 1\n", "#define VLIBC_X_H\n", "#define NULL ((void *) 0)\n",
+                     "#define F(x) x\n", "#  define  false  1\n", "#define G \\\n    1\n"):
+            with self.subTest(what=what):
+                err = self.assertFails(self.GUARDED.replace("#include", what + "#include", 1),
+                                       "other than its own include guard")
+                self.assertIn("x.h:3:", err)
+
+    def test_the_guard_with_a_value_or_without_its_ifndef_is_an_error(self) -> None:
+        self.assertFails(self.GUARDED.replace("#define VLIBC_X_H\n", "#define VLIBC_X_H 1\n"),
+                         "x.h:2:", "other than its own include guard")
+        self.assertFails(self.GUARDED.replace("#ifndef VLIBC_X_H\n", ""), "x.h:1:",
+                         "other than its own include guard")
+        self.assertFails(self.GUARDED.replace("#ifndef VLIBC_X_H\n", "#ifndef VLIBC_Y_H\n"), "x.h:2:",
+                         "other than its own include guard")
+        self.assertFails(self.GUARDED.replace("VLIBC_X_H", "X_H"), "other than its own include guard")
+        # a second define of the guard is not the guard
+        self.assertFails(self.GUARDED.replace("#include <cerastes.h>\n", "#define VLIBC_X_H\n"),
+                         "x.h:3:", "other than its own include guard")
+
+    def test_a_second_guard_pair_is_not_the_guard(self) -> None:
+        self.assertFails(self.GUARDED.replace("#include <cerastes.h>\n",
+                                              "#ifndef VLIBC_X_H\n#define VLIBC_X_H\n#include <cerastes.h>\n", 1),
+                         "x.h:4:", "other than its own include guard")
+
+    def test_a_guard_define_with_a_line_continuation_is_still_the_guard(self) -> None:
+        # twin of the refusals: the continuation is joined, so the define is still `#define VLIBC_X_H` alone
+        self.header(self.GUARDED.replace("#define VLIBC_X_H\n", "#define VLIBC_X_H \\\n\n"))
+        self.assertEqual(self.list_()[0], 0)
+
+    def test_a_directive_on_the_last_line_without_a_newline_is_read(self) -> None:
+        self.assertFails(self.GUARDED + "#define false 1", "x.h:7:", "other than its own include guard")
+        self.assertFails(self.GUARDED + "#pragma once", "x.h:7:", "a `#pragma`")
+
+    def test_an_undef_is_an_error(self) -> None:
+        for what in ("#undef false\n", "#  undef NULL\n"):
+            with self.subTest(what=what):
+                self.assertFails(self.GUARDED.replace("#include", what + "#include", 1), "x.h:3:", "an `#undef`")
+
+    def test_a_pragma_is_an_error(self) -> None:
+        for what in ("#pragma once\n", "#pragma GCC system_header\n", "# pragma weak abort\n"):
+            with self.subTest(what=what):
+                self.assertFails(self.GUARDED.replace("#include", what + "#include", 1), "x.h:3:", "a `#pragma`")
+
+    def test_the_pragma_operator_is_an_error(self) -> None:
+        for what in ('_Pragma("once")\n', "int x = 0; __pragma(weak)\n"):
+            with self.subTest(what=what):
+                self.assertFails(self.GUARDED.replace("void abort", what + "void abort", 1),
+                                 "a `_Pragma` operator")
+
+    def test_a_line_directive_or_linemarker_is_an_error(self) -> None:
+        for what in ("#line 10\n", '#line 10 "other.h"\n', '# 12 "other.h"\n', "#  7\n"):
+            with self.subTest(what=what):
+                self.assertFails(self.GUARDED.replace("#include", what + "#include", 1), "x.h:3:",
+                                 "a `#line` or linemarker")
+
+    def test_digraph_and_trigraph_hashes_are_an_error(self) -> None:
+        for what in ("%:define false 1\n", "??=define false 1\n"):
+            with self.subTest(what=what):
+                self.assertFails(self.GUARDED.replace("#include", what + "#include", 1), "x.h:3:",
+                                 "digraph or trigraph")
+
+    def test_a_directive_inside_a_comment_is_not_a_directive(self) -> None:
+        # twin of the refusals: text that only looks like a directive is a comment or a string
+        self.header(self.GUARDED.replace("#include", "// #define false 1\n/* #pragma once */\n#include", 1))
+        self.assertEqual(self.list_()[0], 0)
+
+    def test_conditionals_and_includes_are_allowed(self) -> None:
+        self.header("#ifndef VLIBC_X_H\n#define VLIBC_X_H\n#include_next <stdlib.h>\n#include <cerastes.h>\n"
+                    '#ifdef __cplusplus\nextern "C" {\n#endif\n'
+                    "// cerastes:trusted-contract vlibc: abort never returns\n"
+                    "void abort(void) CERASTES_ENSURES(false);\n"
+                    "#ifdef __cplusplus\n}\n#endif\n#endif\n")
+        code, out, err = self.list_()
+        self.assertEqual((code, err), (0, ""))
+
+    def test_check_and_names_refuse_them_too(self) -> None:
+        self.header(self.GUARDED.replace("#include", "#define false 1\n#include", 1))
+        committed = self.tmp / "c.txt"
+        committed.write_text("")
+        self.assertEqual(run(["check", "--include-dir", str(self.inc), "--list", str(committed)])[0], 1)
+        out = self.tmp / "n.inc"
+        self.assertEqual(run(["names", "--include-dir", str(self.inc), "--out", str(out)])[0], 1)
+        self.assertFalse(out.exists())
+
+
+class CommentsInTrusted(Base):
+    """Audit round 2, note 11: a comment inside a trusted declaration is refused (a `)` in one would end the reading of
+    the contract's identifiers); a comment before or after the declaration is fine."""
+
+    TAG = "// cerastes:trusted-contract vlibc: f x\n"
+
+    def test_a_comment_inside_a_declaration_is_an_error(self) -> None:
+        for decl in ("void f(int a, /* the status */ int b) CERASTES_ENSURES(false);\n",
+                     "void f(int a) CERASTES_ENSURES(false /* ) */);\n",
+                     "void f(int a) // note\n    CERASTES_ENSURES(false);\n",
+                     "void f(int a)\n    /* two\n       lines */\n    CERASTES_ENSURES(false);\n",
+                     "void f(int a) CERASTES_ENSURES(false) /* before the semicolon */;\n"):
+            with self.subTest(decl=decl):
+                err = self.assertFails(self.TAG + decl, "a comment inside the trusted declaration of `f`")
+                self.assertIn("x.h:2:", err)
+
+    def test_comments_around_a_declaration_are_fine(self) -> None:
+        # twins: before the tag, between the tag's declaration and the next, after the semicolon, and a comment
+        # inside an untagged declaration without a contract
+        self.header("/* a block comment */ // and a line one\n" + self.TAG +
+                    "  /* before it on its line */ void f(int a) CERASTES_ENSURES(false); // after the semicolon\n"
+                    "/* between */\nvoid k(int a /* plain */, int b);\n")
+        code, out, err = self.list_()
+        self.assertEqual((code, err), (0, ""))
+        self.assertTrue(out.startswith("f | x.h | void f(int a) CERASTES_ENSURES(false); | x"))
+
+    def test_the_real_header_comment_style_passes(self) -> None:
+        # vlibc's own header has comments before the tag and after the declarations
+        self.header(HEADER.replace("void exit(int status) CERASTES_ENSURES(false);",
+                                   "void exit(int status) CERASTES_ENSURES(false);  // trailing"))
+        self.assertEqual(self.list_()[0], 0)
 
 
 class Check(Base):
@@ -417,7 +609,7 @@ class Names(Base):
         self.assertEqual(run(["names", "--include-dir", str(self.inc), "--out", str(out)])[0], 0)
         self.assertEqual(out.read_text(),
                          f"// Generated by scripts/vlibc_contracts.py from {self.inc}; do not edit.\n"
-                         '"_Exit",\n"exit",\n')
+                         '{"_Exit", "x.h"},\n{"exit", "x.h"},\n')
 
     def test_unchanged_output_is_not_rewritten_and_changed_output_is(self) -> None:
         self.header(HEADER)
@@ -438,7 +630,8 @@ class Names(Base):
                                              "void _Exit(int s) CERASTES_ENSURES(false);\n#endif"))
         self.assertEqual(run(args)[0], 0)
         self.assertNotEqual(out.stat().st_mtime_ns, before)
-        self.assertEqual(out.read_text().splitlines()[1:], ['"_Exit",', '"abort",', '"exit",'])
+        self.assertEqual(out.read_text().splitlines()[1:],
+                         ['{"_Exit", "x.h"},', '{"abort", "x.h"},', '{"exit", "x.h"},'])
 
     def test_a_header_error_writes_nothing_and_leaves_an_old_file(self) -> None:
         out = self.tmp / "vlibc_names.inc"
@@ -448,6 +641,14 @@ class Names(Base):
         self.assertEqual(code, 1)
         self.assertEqual(out.read_text(), "old\n")
         self.assertIn("a contract without", err)
+
+    def test_each_name_carries_its_own_header_file_name(self) -> None:
+        self.header(HEADER.replace("abort", "zzz"), "a.h")
+        self.header(HEADER.replace("abort", "bbb").replace("exit", "yyy"), "b.h")
+        out = self.tmp / "n.inc"
+        self.assertEqual(run(["names", "--include-dir", str(self.inc), "--out", str(out)])[0], 0)
+        self.assertEqual(out.read_text().splitlines()[1:],
+                         ['{"bbb", "b.h"},', '{"exit", "a.h"},', '{"yyy", "b.h"},', '{"zzz", "a.h"},'])
 
     def test_only_tagged_names_are_reserved(self) -> None:
         self.header(HEADER + "void plain(void);\n")

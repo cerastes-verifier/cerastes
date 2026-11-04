@@ -65,6 +65,24 @@ g++ -std=c++20 -Wall -Wextra -Werror -I path/to/cerastes/include -c sum_to.cpp
 `scripts/cerastes-fe.sh` adds the same directory for you, as a system include
 directory, so it needs no option.
 
+If your code includes vlibc's headers by name (`#include <vlibc/stdlib.h>`, see
+xref:verifying.adoc#vlibc[The C library: vlibc]), add vlibc's `include/`
+directory too, from your own checkout of
+https://github.com/cerastes-verifier/vlibc[vlibc] or from cerastes's
+`third_party/vlibc`. A vlibc header includes the system's header of the same
+name, so your build sees the same declarations as before, and the contracts
+expand to nothing:
+
+[source,sh]
+----
+clang -std=c23 -Wall -Wextra -Werror -I path/to/cerastes/include -I path/to/vlibc/include -c leave.c
+----
+
+To have a bare `#include <stdlib.h>` reach vlibc's header in your build as it
+does in `cerastes verify`, put vlibc's `include/vlibc` directory first:
+`-I path/to/vlibc/include/vlibc`. That is optional: it changes nothing an
+ordinary compiler does.
+
 == Predicates and pure functions
 
 `CERASTES_PREDICATE` and `CERASTES_PURE` expand to the attribute and `inline`

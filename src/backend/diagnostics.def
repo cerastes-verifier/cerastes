@@ -73,6 +73,11 @@ CERASTES_DIAG(spec_marker_on_special_member, error,
 CERASTES_DIAG(spec_marker_in_system_file, error,
               "\"cerastes::%s\" cannot be applied to \"%s\": it is declared in a system file or built in, and "
               "specification functions are your own")
+// Decision 0046 (items 4 and 6): a C library function that vlibc declares with a contract (a reserved name, generated from the pinned
+// headers) given a contract, a `noreturn` mark or a definition by the program; and a contract written in a library file on a routine
+// that vlibc does not cover.  `%s` says which.
+CERASTES_DIAG(annotation_reserved_library, error,
+              "%s (decision 0046)")
 CERASTES_DIAG(annotation_macro_changed, error,
               "the macro \"%s\" cannot be %s here: the annotations and <cerastes.h> depend on it (decision 0008)")
 

@@ -1,7 +1,7 @@
-// expect: verified
+// expect: rejected cerastes-annotation_reserved_library @ L7
 // expect: native-ok
-// Pins: 0015 item 5 (C++ only: C compilers know abort and exit as builtins, so a C file could not be native-ok): the libc table applies only to the library's functions; a user abort() is an ordinary function
-// This abort returns (its contract is `true`), so nothing is known after the call beyond the code before it.
+// Pins: 0046 item 6 and question 117 (was 0015 item 5: a user abort() in C++ was an ordinary function; C++ only, as C compilers know abort as a builtin): a global abort is the library's name, so a contract and a definition of it are rejected
+// abort's contract comes from vlibc's <stdlib.h> only (a user's own `ensures(true)` here is refused, with or without the header).
 #include <cerastes.h>
 
 void abort(void) CERASTES_ENSURES(true)

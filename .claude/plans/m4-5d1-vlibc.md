@@ -86,6 +86,17 @@ The Viper of today's `abort`/`exit`/`_Exit` tests stays unchanged except for an 
   `annotation_reserved_library`. This amends 0030 item 4's "a user may redeclare with the same contract". A *different*
   contract with vlibc's header present is EDG's must-match error first, as today.
 
+**During the session (2026-11-03, after audit round 1 on the record; both the recommendation):**
+- **116:** an identical contract on a redeclaration *after* vlibc's header is accepted. The front end discards a later
+  equivalent must-match list (`attribute.c:4199-4227`), so it leaves no trace (audit B2); question 115 holds in every
+  other case.
+- **117:** a definition of a reserved name, or a contract on any declaration of one, is rejected for C language linkage
+  in any namespace and, in C++, for any linkage in the global namespace (C23 7.1.3, C++ `[extern.names]`/4). The four
+  pins `noreturn_user_abort.cpp`, `noreturn_user_abort_after.cpp`, `noreturn_other_signature.cpp` and
+  `noreturn_other_signature_after.cpp` are re-expected `rejected cerastes-annotation_reserved_library` (pre-approved).
+- Audit B1 (taken, record item 8): a bodiless routine with a trusted contract is refused when its calls may reach other
+  code (an asm label, `#pragma redefine_extname`, an alias, `ifunc`, `weak`/`weakref`). This hole predates vlibc.
+
 **Standing:**
 - 69: the EDG upstream merge waits for the box session.
 - 77: one context per session.
@@ -287,7 +298,7 @@ Any question from an agent, or of mine, stops that work and goes to the owner.
 - `LibraryFixtureTests` (record item 10).
 - `driver/selftest.cpp`'s library-path cases.
 
-**Flips:** none expected. If one becomes necessary, stop and ask.
+**Flips:** only the four pins of question 117 (pre-approved). Any other, stop and ask.
 
 ## Docs (invariant 8; every example is a test)
 

@@ -26,7 +26,7 @@ execute_process(
 if(NOT VLIBC_NAMES_STATUS EQUAL 0)
   message(FATAL_ERROR "scripts/vlibc_contracts.py names failed for ${VLIBC_SHIM_DIR} (status ${VLIBC_NAMES_STATUS}):\n${VLIBC_NAMES_OUTPUT}")
 endif()
-file(GLOB_RECURSE VLIBC_HEADERS "${CERASTES_VLIBC_DIR}/include/*")
+file(GLOB_RECURSE VLIBC_HEADERS CONFIGURE_DEPENDS "${CERASTES_VLIBC_DIR}/include/*")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
              ${VLIBC_HEADERS} "${CMAKE_SOURCE_DIR}/scripts/vlibc_contracts.py")
 

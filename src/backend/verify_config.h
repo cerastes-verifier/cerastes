@@ -33,8 +33,8 @@ struct VerifyConfig {
   // Canonical (realpath) system directories: the driver's own system include directories, without
   // /usr/local/include (a user directory).  A file under one of them is a system file.
   std::vector<std::string> system_dirs;
-  // Canonical library directories (decision 0046 item 3): vlibc's include/ (the shim directory vlibc/ and <vlibc/...> are below
-  // it) and, with the `library_fixture` self-test hook, the harness's fixture directory.  A file below one is a library file: a
+  // Canonical library directories (decision 0046 item 3): vlibc's include/vlibc (the shim directory, which is also what `<vlibc/...>` resolves
+  // to) and, with the `library_fixture` self-test hook, the harness's fixture directory.  A file below one is a library file: a
   // verified file, never a system file, whatever EDG's own flag says (the directories are system include directories of the front
   // end, so that macros used in the caller's file still point there); its contracts are trusted by the encoder (item 4).
   std::vector<std::string> library_dirs;

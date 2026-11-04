@@ -20,6 +20,7 @@
 #include <cstring>
 #include <fstream>
 #include <functional>
+#include <initializer_list>
 #include <map>
 #include <set>
 #include <string>
@@ -58,6 +59,29 @@ struct VType {
   bool restrict_q = false;           // ok, a pointer parameter's own `restrict` (allow_restrict): decision 0037 item 2 decides whether it is accepted
   a_type_ptr computed_at = nullptr;  // !ok because this typeref has a non-type template argument (0024 item 6): reported once per function
 };
+
+// The names vlibc's headers declare with a contract (decision 0046 item 6), each with the header that declares it: generated at configure time by
+// scripts/vlibc_contracts.py from the pinned headers, a fragment of `{"name", "header"},` pairs sorted by name.
+struct VlibcName {
+  const char* name;
+  const char* header;
+};
+const VlibcName kVlibcReserved[] = {
+#include "vlibc_names.inc"
+    {nullptr, nullptr}};
+
+bool vlibc_reserved(const char* name) {
+  for (const VlibcName* n = kVlibcReserved; n->name != nullptr; ++n)
+    if (std::strcmp(n->name, name) == 0) return true;
+  return false;
+}
+
+// The header of a reserved name, for the messages ("stdlib.h"); "" for any other name.
+std::string vlibc_header_of(const char* name) {
+  for (const VlibcName* n = kVlibcReserved; n->name != nullptr; ++n)
+    if (std::strcmp(n->name, name) == 0) return n->header;
+  return "";
+}
 
 // The attributes a verified file may carry besides cerastes's own (decision 0011 item 7), by name.
 bool allowed_attribute_name(std::string n) {
@@ -612,10 +636,14 @@ class Encoder {
   }
 
   // ---- attributes (decision 0011 item 7) -----------------------------------------------------------------------
-  void check_attributes(an_attribute_ptr list, bool on_noreturn_routine = false) {
+  // An entry written in a system file is the platform's own (decision 0046 item 7): cerastes uses only a routine's contract and its type, and a
+  // platform attribute is the platform's claim about its own function.  `skip_unplaced` also skips an entry with no position (the compiler's
+  // own, on a routine it declares), which the routine-level check of every declaration needs.
+  void check_attributes(an_attribute_ptr list, bool on_noreturn_routine = false, bool skip_unplaced = false) {
     for (an_attribute_ptr a = list; a != nullptr; a = a->next) {
       if (is_registered_cerastes(a)) continue;
       if (a->kind == ak_empty_attr) continue;
+      if (a->position.seq != 0 ? !in_verified_file(a->position) : skip_unplaced) continue;
       // `noreturn`, `gnu::noreturn`, `__attribute__((noreturn))` and C23 `[[_Noreturn]]` (decision 0015 item 1, P21): they set
       // the function type's "does not return" flag, which check_signature reads.  `[[_Noreturn]]` in C++ is unrecognized.
       // Only on a routine whose type carries the flag (the caller says so); anywhere else it is rejected below.
@@ -1111,13 +1139,25 @@ class Encoder {
   vir::Function* function_of(a_routine_ptr r, bool has_body_here, const a_source_position& at) {
     auto it = fns_.find(r);
     if (it != fns_.end()) return it->second;
+    // Decision 0046: a bodiless routine whose contract is written in a library file is trusted when vlibc's rules hold (lib_trust), and then
+    // its location, its parameters' and its method's reason are vlibc's declaration; one that fails them, or whose reserved name was given
+    // a contract by the program, is dropped after the rejection.
+    const LibTrust* lib = nullptr;
+    if (!has_body_here) {
+      const LibTrust& lt = lib_trust(r);
+      if ((lt.has && !lt.ok) || reserved_rejected_.count(r) != 0) {
+        fns_[r] = nullptr;
+        return nullptr;
+      }
+      if (lt.has) lib = &lt;
+    }
     if (!check_signature(r, at)) {
       fns_[r] = nullptr;
       return nullptr;
     }
     VType ret = signature_vtype(return_type(r));
     a_routine_type_supplement_ptr x = routine_supplement(r);
-    const a_source_position decl = r->source_corresp.decl_position;
+    const a_source_position decl = lib != nullptr ? lib->decl : r->source_corresp.decl_position;
     SrcLoc end = loc_of(decl);
     if (has_body_here) {
       a_scope_ptr sp = body_scope(r);
@@ -1146,13 +1186,17 @@ class Encoder {
         restricted.push_back(k);
       }
     }
-    f->noreturn = x->does_not_return != 0;  // decision 0015 item 4
+    // Decision 0015 item 4; decision 0046 item 5: for a routine trusted from vlibc the flag (the platform's `__dead2`, `__noreturn__`) is ignored,
+    // and "never returns" is vlibc's own `ensures(false)`.
+    f->noreturn = x->does_not_return != 0 && lib == nullptr;
     // Decision 0042 item 4: the initialization markers, set before the contract is read so that a written read of the pointee is rejected there.
     if (auto mk = markers_.find(r); mk != markers_.end())
       for (const MarkerParam& m : mk->second)
         if (static_cast<size_t>(m.index) < f->params.size() && f->params[static_cast<size_t>(m.index)].type.is_ptr())
           f->params[static_cast<size_t>(m.index)].init = m.kind;
-    if (!has_body_here) {
+    if (lib != nullptr) {
+      f->trusted_reason = lib->reason;
+    } else if (!has_body_here) {
       f->trusted_reason = in_verified_file(decl) ? (f->noreturn ? "declared noreturn here, defined in another unit"
                                                                  : "declared here, defined in another unit")
                                                   : "trusted, never verified: declared in a system file";
@@ -4819,6 +4863,7 @@ class Encoder {
   bool user_declared_noreturn(a_routine_ptr r) {
     a_routine_type_supplement_ptr x = routine_supplement(r);
     if (x == nullptr || !x->does_not_return) return false;
+    if (is_library_routine(r)) return false;  // "does not return" of a C library function is vlibc's (decision 0046 item 5), never the program's
     const a_source_position decl = r->source_corresp.decl_position;
     if (decl.seq == 0 || physical_path(decl).empty() || !in_verified_file(decl)) return false;
     for (an_attribute_ptr a = r->source_corresp.attributes; a != nullptr; a = a->next)
@@ -4827,33 +4872,384 @@ class Encoder {
     return true;
   }
 
-  // The trusted C library table (decision 0015 item 5): `void abort(void)`, `void exit(int)` and `void _Exit(int)`, declared
-  // only in system files, with C linkage and EDG's "does not return" flag.  Returns the tag for the emitted Viper (a
-  // `libc:` reason; the lint requires a tag on every bodyless method), or null for any other routine: `quick_exit`, the builtins, `std::terminate` and a user's own
-  // function of the same name keep their ordinary treatment.
-  const char* trusted_libc_reason(a_routine_ptr r) {
-    a_routine_type_supplement_ptr x = routine_supplement(r);
-    if (x == nullptr || !x->does_not_return || !x->prototyped || x->has_ellipsis) return nullptr;
-    const a_source_position decl = r->source_corresp.decl_position;
-    if (decl.seq == 0 || in_verified_file(decl)) return nullptr;  // builtins have no position
-    if (r->source_corresp.name == nullptr || r->source_corresp.is_class_member) return nullptr;
-    if (r->source_corresp.name_linkage != nlk_external) return nullptr;  // C linkage (P21)
-    if (r->is_template_function || r->assoc_template != nullptr || r->is_prototype_instantiation) return nullptr;
-    a_type_ptr rt = return_type(r);
-    if (rt == nullptr || skip_typerefs(rt)->kind != tk_void) return nullptr;
-    size_t nparams = 0;
-    bool first_is_int = false;
-    for (a_param_type_ptr p = x->param_type_list; p != nullptr; p = p->next, ++nparams) {
-      a_type_ptr t = p->type ? skip_typerefs(p->type) : nullptr;
-      if (nparams == 0)
-        first_is_int = t != nullptr && t->kind == tk_integer && !t->variant.integer.enum_type &&
-                       !t->variant.integer.bool_type && t->variant.integer.int_kind == ik_int;
-    }
-    const std::string n = r->source_corresp.name;
-    if (n == "abort" && nparams == 0) return "libc: abort never returns (C23 7.24.4.1)";
-    if (n == "exit" && nparams == 1 && first_is_int) return "libc: exit never returns (C23 7.24.4.4)";
-    if (n == "_Exit" && nparams == 1 && first_is_int) return "libc: _Exit never returns (C23 7.24.4.5)";
+  // ---- vlibc (decision 0046) -----------------------------------------------------------------------------------------------
+  // The routine is the C library's: its name is reserved (a name vlibc declares with a contract), it is no member and no template, and it has C
+  // language linkage in any namespace (`namespace n { extern "C" void exit(int); }` is `::exit`) or, in C++, is declared in the global namespace
+  // whatever its linkage (`[extern.names]`/4, question 117).  In C a `static` function named `exit` has internal linkage: it is an ordinary
+  // function (C23 7.1.3 reserves the name only as an identifier with external linkage).
+  static bool is_library_routine(a_routine_ptr r) {
+    const char* n = r->source_corresp.name;
+    if (n == nullptr || r->source_corresp.is_class_member) return false;
+    if (r->is_template_function || r->assoc_template != nullptr || r->is_prototype_instantiation) return false;
+    if (!vlibc_reserved(n)) return false;
+    if (r->source_corresp.name_linkage == nlk_external) return true;
+    if (il_header.source_language == sl_C) return false;
+    a_scope_ptr ps = r->source_corresp.parent_scope;
+    return ps == nullptr || !(ps->kind == sck_namespace || ps->kind == sck_namespace_extension || ps->kind == sck_namespace_reactivation ||
+                              ps->kind == sck_class_struct_union || ps->kind == sck_class_reactivation);
+  }
+
+  // Where a program wrote an attribute or a body: a placed position in a verified file that is not a library file.
+  static bool written_by_program(const a_source_position& p) { return p.seq != 0 && in_verified_file(p) && !in_library_file(p); }
+
+  // What a call of a bodiless routine would reach other than its declared function (decision 0046 item 8): an asm label (also
+  // `#pragma redefine_extname`), a GNU alias (EDG's own `implicit_alias`, a builtin counterpart, is not one), an ifunc, a weak declaration.
+  // A cause that a program-written attribute entry shows is already rejected as `unsupported_attribute` by the allow-list (item 7); item 8 reports
+  // what no such entry shows: an asm label, `#pragma redefine_extname`, `#pragma weak`, and an entry written in a library or system file.
+  static bool shown_by_program_entry(a_routine_ptr r, std::initializer_list<int> kinds) {
+    for (an_attribute_ptr a = r->source_corresp.attributes; a != nullptr; a = a->next)
+      for (int k : kinds)
+        if (static_cast<int>(a->kind) == k && written_by_program(a->position)) return true;
+    return false;
+  }
+
+  static const char* redirection(a_routine_ptr r) {
+    if (r->is_gnu_alias && !shown_by_program_entry(r, {ak_alias})) return "an alias (the `alias` attribute)";
+    if (r->is_ifunc && !shown_by_program_entry(r, {ak_ifunc})) return "an ifunc";
+    if ((r->is_weak || r->is_weakref) && !shown_by_program_entry(r, {ak_weak, ak_weakref}))
+      return "a weak declaration (another definition may replace it at link time)";
+    if (r->gnu_extra_info != nullptr && r->gnu_extra_info->asm_name != nullptr)
+      return "an asm label (also `#pragma redefine_extname`)";
     return nullptr;
+  }
+
+  // Where a redirection is reported: the program's own declaration of the routine (the first written in a user file, which carries the alias or
+  // the label when it is the only one), else the call (`#pragma weak` and `#pragma redefine_extname` are no declaration).
+  a_source_position redirection_position(a_routine_ptr r, const a_source_position& call) const {
+    if (ents_ != nullptr) {
+      auto sd = ents_->secondary_decls.find(r);
+      if (sd != ents_->secondary_decls.end())
+        for (const IlEntities::SecondaryDecl& q : sd->second)
+          if (written_by_program(q.position)) return q.position;
+    }
+    return written_by_program(r->source_corresp.decl_position) ? r->source_corresp.decl_position : call;
+  }
+
+  // The result of lib_trust: whether a contract of the routine is written in a library file (`has`), and whether it is trusted from vlibc
+  // (`ok`; the rejection was reported when not), the tag's text for the emitted method and the declaration that carries the contract.
+  struct LibTrust {
+    bool has = false;
+    bool ok = false;
+    std::string reason;
+    a_source_position decl{};
+  };
+  std::map<a_routine_ptr, LibTrust> lib_trust_;
+  std::set<a_routine_ptr> reserved_rejected_;  // a library routine to which the program gave a contract, a mark or a body: never trusted or called
+
+  void lib_internal_error(const a_source_position& p, const std::string& why) {
+    verify_config().out.internal_inconsistency = true;  // a tool failure, exit status 3 (decision 0022 item 12)
+    reject(Diag::internal_inconsistency, p, why);
+  }
+
+  static bool same_position(const a_source_position& a, const a_source_position& b) { return a.seq == b.seq && a.column == b.column; }
+
+  // The lines of a physical file (`\r` stripped); false when it cannot be read.
+  static bool file_lines(const std::string& path, std::vector<std::string>* out) {
+    static std::map<std::string, std::vector<std::string>> cache;
+    auto it = cache.find(path);
+    if (it == cache.end()) {
+      std::ifstream in(path, std::ios::binary);
+      if (!in) return false;
+      std::vector<std::string> lines;
+      std::string line;
+      while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        lines.push_back(line);
+      }
+      it = cache.emplace(path, std::move(lines)).first;
+    }
+    *out = it->second;
+    return true;
+  }
+
+  // The physical file and 1-based line of sequence number `seq` (what `#line` could not change).
+  static bool physical_place(a_seq_number seq, std::string* path, unsigned long* line) {
+    if (seq == 0) return false;
+    a_source_file_ptr f = nullptr;
+    a_line_number ln = 0;
+    a_boolean at_end = FALSE;
+    conv_seq_to_physical_file_and_line(seq, &f, &ln, &at_end);
+    if (f == nullptr || f->full_name == nullptr) return false;
+    *path = f->full_name;
+    *line = ln;
+    return true;
+  }
+
+  static std::string trimmed(const std::string& s) {
+    size_t b = 0, e = s.size();
+    while (b < e && (s[b] == ' ' || s[b] == '\t')) ++b;
+    while (e > b && (s[e - 1] == ' ' || s[e - 1] == '\t')) --e;
+    return s.substr(b, e - b);
+  }
+
+  // `// cerastes:trusted-contract vlibc: <name> <reason>`: true with the name and the reason.
+  static bool parse_tag(const std::string& line, std::string* name, std::string* reason) {
+    std::string s = trimmed(line);
+    if (s.compare(0, 2, "//") != 0) return false;
+    s = trimmed(s.substr(2));
+    static const char kTag[] = "cerastes:trusted-contract";
+    if (s.compare(0, sizeof kTag - 1, kTag) != 0) return false;
+    s = s.substr(sizeof kTag - 1);
+    if (s.empty() || (s[0] != ' ' && s[0] != '\t')) return false;
+    s = trimmed(s);
+    if (s.compare(0, 6, "vlibc:") != 0) return false;
+    s = s.substr(6);
+    if (s.empty() || (s[0] != ' ' && s[0] != '\t')) return false;
+    s = trimmed(s);
+    size_t e = 0;
+    while (e < s.size() && (std::isalnum(static_cast<unsigned char>(s[e])) || s[e] == '_')) ++e;
+    if (e == 0) return false;
+    *name = s.substr(0, e);
+    *reason = trimmed(s.substr(e));
+    return !reason->empty() && (e == s.size() || s[e] == ' ' || s[e] == '\t');
+  }
+
+  // The tag of the declaration whose declarator is on 1-based `line`: the comment line directly above it, over the lines that continue the
+  // declaration (no `;`, `{`, `}`, blank or comment line) when it spans several.  Anything else is "no tag".
+  static bool find_tag(const std::vector<std::string>& lines, unsigned long line, std::string* name, std::string* reason) {
+    if (line < 2 || line - 1 > lines.size()) return false;
+    for (unsigned long i = line - 1, steps = 0; i > 0 && steps < 8; --i, ++steps) {  // lines[i - 1] is 1-based line i
+      const std::string s = trimmed(lines[i - 1]);
+      if (s.empty()) return false;
+      if (s.compare(0, 2, "//") == 0) return parse_tag(s, name, reason);
+      if (s.find_first_of(";{}") != std::string::npos) return false;
+    }
+    return false;
+  }
+
+  // The identifiers of the source text of the attribute written at `pos` (the use site of its macro or of `[[`): up to the bracket that closes it.
+  // False when the text cannot be read (fail closed).
+  static bool attribute_identifiers(const a_source_position& pos, std::set<std::string>* ids) {
+    std::string path;
+    unsigned long line = 0;
+    std::vector<std::string> lines;
+    if (!physical_place(pos.seq, &path, &line) || !file_lines(path, &lines) || line == 0 || line > lines.size() || pos.column == 0) return false;
+    int depth = 0;
+    bool opened = false;
+    for (unsigned long l = line - 1; l < lines.size() && l < line - 1 + 40; ++l) {
+      const std::string& s = lines[l];
+      size_t i = l == line - 1 ? pos.column - 1 : 0;
+      if (i > s.size()) return false;
+      // The column must be where the attribute's own text starts (a tab or a wide character could move it): otherwise the text read is not the contract's.
+      if (l == line - 1 && s.compare(i, 9, "CERASTES_") != 0 && s.compare(i, 2, "[[") != 0) return false;
+      for (; i < s.size(); ++i) {
+        const char c = s[i];
+        if (c == '/' && i + 1 < s.size() && s[i + 1] == '/') break;  // a comment to the end of the line
+        if (c == '"' || c == '\'') {                                  // a literal: its text names nothing
+          const char q = c;
+          for (++i; i < s.size() && s[i] != q; ++i)
+            if (s[i] == '\\') ++i;
+          continue;
+        }
+        if (std::isdigit(static_cast<unsigned char>(c))) {  // a number (`0x1f`, `1e5`) names nothing
+          while (i + 1 < s.size() && (std::isalnum(static_cast<unsigned char>(s[i + 1])) || s[i + 1] == '_' || s[i + 1] == '.' || s[i + 1] == '\'')) ++i;
+          continue;
+        }
+        if (std::isalpha(static_cast<unsigned char>(c)) || c == '_') {
+          size_t e = i;
+          while (e < s.size() && (std::isalnum(static_cast<unsigned char>(s[e])) || s[e] == '_')) ++e;
+          ids->insert(s.substr(i, e - i));
+          i = e - 1;
+          continue;
+        }
+        if (c == '(' || c == '[') {
+          ++depth;
+          opened = true;
+        } else if (c == ')' || c == ']') {
+          if (--depth <= 0 && opened) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  static std::string macro_directive_name(a_macro_ptr m) {
+    if (m->source_corresp.name != nullptr) return m->source_corresp.name;
+    if (m->text == nullptr) return "";
+    const char* t = m->text;
+    t += std::strncmp(t, "#undef", 6) == 0 ? 6 : std::strncmp(t, "#define", 7) == 0 ? 7 : 0;
+    while (*t == ' ' || *t == '\t') ++t;
+    const char* e = t;
+    while (std::isalnum(static_cast<unsigned char>(*e)) || *e == '_') ++e;
+    return std::string(t, e);
+  }
+
+  // Decision 0046 item 4: no identifier of a library contract's source text may be a macro that the program defines or undefines (a directive
+  // in a user file, or `-D`/`-U`): `#define false 1` before `<stdlib.h>` would rewrite vlibc's `ensures(false)`.  Reports and returns false then.
+  bool library_contract_text_intact(an_attribute_ptr a) {
+    std::set<std::string> ids;
+    if (!attribute_identifiers(a->position, &ids)) {
+      lib_internal_error(a->position, "the source text of a contract in a library file cannot be read");
+      return false;
+    }
+    bool intact = true;
+    for (a_macro_ptr m = il_header.macros; m != nullptr; m = m->next) {
+      if (m->is_predefined && !m->is_undef) continue;  // the compiler's own definition
+      const std::string n = macro_directive_name(m);
+      if (n.empty() || ids.count(n) == 0) continue;
+      // Every directive of the program or of a library file counts (a `#define false 1` in vlibc's own header too: the include guard, which no
+      // contract names, is the only one a header has); the system files' and <cerastes.h>'s do not.
+      if (!m->is_command_line_definition && !in_verified_file(m->source_corresp.decl_position)) continue;
+      reject_args(Diag::annotation_macro_changed, m->source_corresp.decl_position, {n, m->is_undef ? "undefined" : "defined"});
+      intact = false;
+    }
+    return intact;
+  }
+
+  // Whether a contract of `r` is written in a library file and, if so, whether vlibc's rules make it trusted (decision 0046 item 4); reports
+  // each failure once.  The memoized result is read by function_of and callee_for_call.
+  const LibTrust& lib_trust(a_routine_ptr r) {
+    auto it = lib_trust_.find(r);
+    if (it != lib_trust_.end()) return it->second;
+    LibTrust t;
+    // A routine with a body in a verified file (a library file's `inline` helper included) is verified like user code, its contract checked and
+    // used as written: trust and the reserved-name rule of a contract in a library file are for routines without one (decision 0046 items 3-4).
+    if (verified_body(r) != nullptr) return lib_trust_.emplace(r, t).first->second;
+    std::vector<an_attribute_ptr> lib_attrs;
+    bool elsewhere = false;  // a requires/ensures/decreases not written in a library file
+    for (an_attribute_ptr a : contracts_of(r)) {
+      if (in_library_file(a->position)) lib_attrs.push_back(a);
+      else elsewhere = true;
+    }
+    if (lib_attrs.empty()) return lib_trust_.emplace(r, t).first->second;
+    t.has = true;
+    const a_source_position at = lib_attrs[0]->position;
+    const std::string name = r->source_corresp.name != nullptr ? r->source_corresp.name : "?";
+    a_scope_ptr bsp = body_scope(r);
+    const bool has_body = bsp != nullptr && bsp->assoc_block != nullptr;
+    // Trust needs C language linkage too (item 4): with the platform's header skipped by a guard macro, vlibc's declaration is the first one and has C++ linkage.
+    if (!is_library_routine(r) || r->source_corresp.name_linkage != nlk_external) {
+      reject(Diag::annotation_reserved_library, at,
+             "a contract in vlibc's headers on `" + name + "`, which vlibc does not cover or which has no C language linkage (a macro may have renamed it, or the platform's declaration was skipped)");
+    } else if (elsewhere || has_body || reserved_rejected_.count(r) != 0) {
+      // The program's own contract or definition on the library's routine is reported by check_reserved_library; nothing is trusted beside it.
+      // Anything else that keeps trust away (a contract positioned in neither a library nor a program file, a body in a library file) must say so
+      // here: a caller that gets no function after "a rejection" assumes there was one.
+      if (reserved_rejected_.count(r) == 0)
+        reject(Diag::annotation_reserved_library, at,
+               "a contract of `" + name + "` in a library file beside another source of contract or a body (the routine is not trusted from vlibc)");
+    } else {
+      // The declaration that carries the contract: the secondary declaration whose own attributes hold it (P71: each has its own list).
+      std::vector<a_source_position> decls;
+      if (ents_ != nullptr) {
+        auto sd = ents_->secondary_decls.find(r);
+        if (sd != ents_->secondary_decls.end())
+          for (const IlEntities::SecondaryDecl& q : sd->second) {
+            bool holds = false;
+            for (an_attribute_ptr x = q.attributes; x != nullptr; x = x->next)
+              for (an_attribute_ptr a : lib_attrs)
+                if (same_position(x->position, a->position) && classify(x) == classify(a)) holds = true;
+            if (holds) decls.push_back(q.position);
+          }
+      }
+      if (decls.empty()) {
+        lib_internal_error(at, "no declaration of `" + name + "` carries its contract written in a library file");
+      } else if (decls.size() != 1) {
+        lib_internal_error(at, "the contract of `" + name + "` in a library file is spread over several declarations");
+      } else {
+        std::string path, tag_name, reason;
+        unsigned long line = 0;
+        std::vector<std::string> lines;
+        if (!physical_place(decls[0].seq, &path, &line) || !file_lines(path, &lines) || !find_tag(lines, line, &tag_name, &reason)) {
+          lib_internal_error(decls[0], "the declaration of `" + name + "` in a library file has no `cerastes:trusted-contract vlibc:` tag on the line above it");
+        } else if (tag_name != name) {
+          lib_internal_error(decls[0], "the tag above the declaration of `" + name + "` names `" + tag_name + "`");
+        } else {
+          bool intact = true;
+          for (an_attribute_ptr a : lib_attrs) intact = library_contract_text_intact(a) && intact;
+          if (intact) {
+            t.ok = true;
+            t.reason = "vlibc: " + tag_name + " " + reason;
+            t.decl = decls[0];
+          }
+        }
+      }
+    }
+    return lib_trust_.emplace(r, t).first->second;
+  }
+
+  // Decision 0046 item 6: the C library's routine, outside a library file, gets no contract, no mark and no definition from the program.  Reports
+  // each and records the routine (reserved_rejected_); true when it reported anything.  `[[noreturn]]` and the like leave an attribute entry, `_Noreturn`
+  // only the routine type's flag: that one counts when no platform or library declaration explains it.
+  bool check_reserved_library(a_routine_ptr r) {
+    if (!is_library_routine(r)) return false;
+    const std::string n = r->source_corresp.name;
+    bool any = false;
+    auto reject_lib = [&](const a_source_position& p, const std::string& what) {
+      reject(Diag::annotation_reserved_library, p, "`" + n + "` is a function of the C library: its contract comes only from vlibc's <" + vlibc_header_of(n.c_str()) + ">, so a program cannot " + what + " (C23 7.1.3)");
+      any = true;
+    };
+    for (an_attribute_ptr a = r->source_corresp.attributes; a != nullptr; a = a->next) {
+      if (!written_by_program(a->position)) continue;
+      if (is_registered_cerastes(a)) reject_lib(a->position, "give it \"cerastes::" + std::string(a->name ? a->name : "?") + "\"");
+      else if (a->kind == ak_noreturn) reject_lib(a->position, "declare it `noreturn`");
+    }
+    auto marks = [&](a_type_ptr t) {
+      a_type_ptr rt = t != nullptr ? skip_typerefs(t) : nullptr;
+      if (rt == nullptr || rt->kind != tk_routine || rt->variant.routine.extra_info == nullptr) return;
+      for (a_param_type_ptr p = rt->variant.routine.extra_info->param_type_list; p != nullptr; p = p->next)
+        for (an_attribute_ptr a = p->attributes; a != nullptr; a = a->next)
+          if (is_registered_cerastes(a) && written_by_program(a->position)) reject_lib(a->position, "mark a parameter with \"cerastes::" + std::string(a->name ? a->name : "?") + "\"");
+    };
+    marks(r->type);
+    marks(r->declared_type);
+    bool platform_decl = r->source_corresp.decl_position.seq == 0 || !written_by_program(r->source_corresp.decl_position);
+    if (ents_ != nullptr) {
+      auto sd = ents_->secondary_decls.find(r);
+      if (sd != ents_->secondary_decls.end())
+        for (const IlEntities::SecondaryDecl& q : sd->second) {
+          marks(q.declared_type);
+          platform_decl = platform_decl || !written_by_program(q.position);
+        }
+    }
+    if (a_scope_ptr bs = body_scope(r)) {
+      for (a_variable_ptr v = bs->variant.routine.parameters; v != nullptr; v = v->next) {
+        if (!v->is_parameter || v->is_this_parameter || v->variant.assoc_param_type == nullptr) continue;
+        for (an_attribute_ptr a = v->variant.assoc_param_type->attributes; a != nullptr; a = a->next)
+          if (is_registered_cerastes(a) && written_by_program(a->position)) reject_lib(a->position, "mark a parameter with \"cerastes::" + std::string(a->name ? a->name : "?") + "\"");
+      }
+      if (bs->assoc_block != nullptr && written_by_program(bs->assoc_block->position)) reject_lib(r->source_corresp.decl_position, "define it");
+    }
+    a_routine_type_supplement_ptr x = routine_supplement(r);
+    if (x != nullptr && x->does_not_return && !platform_decl) reject_lib(r->source_corresp.decl_position, "declare it `noreturn` (`_Noreturn`)");
+    if (any) reserved_rejected_.insert(r);
+    return any;
+  }
+
+  // Item 7: every attribute entry of a routine's merged list, of each declaration's parameters and of its parameter variables, whether the routine
+  // is declared here or not and called or not, is held to the allow-list unless it is written in a system file (check_attributes skips those).
+  void check_routine_attributes(a_routine_ptr r) {
+    a_routine_type_supplement_ptr rx = routine_supplement(r);
+    check_attributes(r->source_corresp.attributes, rx != nullptr && rx->does_not_return, true);
+    auto params = [&](a_type_ptr t) {
+      a_type_ptr rt = t != nullptr ? skip_typerefs(t) : nullptr;
+      if (rt == nullptr || rt->kind != tk_routine || rt->variant.routine.extra_info == nullptr) return;
+      for (a_param_type_ptr p = rt->variant.routine.extra_info->param_type_list; p != nullptr; p = p->next) check_attributes(p->attributes, false, true);
+    };
+    params(r->type);
+    params(r->declared_type);
+    if (ents_ != nullptr) {
+      auto sd = ents_->secondary_decls.find(r);
+      if (sd != ents_->secondary_decls.end())
+        for (const IlEntities::SecondaryDecl& q : sd->second) {
+          params(q.declared_type);
+          check_attributes(q.attributes, rx != nullptr && rx->does_not_return, true);
+        }
+    }
+    if (a_scope_ptr bs = body_scope(r))
+      for (a_variable_ptr v = bs->variant.routine.parameters; v != nullptr; v = v->next)
+        if (v->is_parameter && !v->is_this_parameter && v->variant.assoc_param_type != nullptr)
+          check_attributes(v->variant.assoc_param_type->attributes, false, true);
+  }
+
+  // Item 8 at a call of a bodiless routine whose contract is used: reports and returns true when the call may reach other code.
+  bool reject_redirected_call(a_routine_ptr callee, const a_source_position& at) {
+    const char* why = redirection(callee);
+    if (why == nullptr) return false;
+    reject(Diag::unsupported_declaration, redirection_position(callee, at),
+           "`" + rname(callee) + "`, declared with " + why + (lib_trust(callee).has ? " (a call may reach other code than vlibc's contract describes; decision 0046 item 8)"
+                                                                               : " and with a contract (a call may reach other code than the contract describes; decision 0046 item 8)"));
+    return true;
   }
 
   // The callee's VIR function for a call, or null after a rejection (0011 item 5).
@@ -4864,17 +5260,22 @@ class Encoder {
       return nullptr;
     }
     auto it = fns_.find(callee);
-    if (it != fns_.end() && it->second != nullptr) return it->second;
+    if (it != fns_.end() && it->second != nullptr) {
+      // A function made early (the run loop forces one for a struct parameter or a marker) is a contract all the same: item 8 holds at every call.
+      if (verified_body(callee) == nullptr && reject_redirected_call(callee, at)) return nullptr;
+      return it->second;
+    }
     const bool has_body_here = verified_body(callee) != nullptr;
     if (has_body_here) {
       // Defined in a verified file: created when its turn comes; created here if the call is first.
       vir::Function* f = function_of(callee, true, at);
       return f;
     }
-    if (const char* why = trusted_libc_reason(callee)) {
-      vir::Function* f = function_of(callee, false, at);
-      if (f != nullptr) f->trusted_reason = why;
-      return f;
+    if (reserved_rejected_.count(callee) != 0) return nullptr;  // the program's contract, mark or definition on the library's routine was rejected
+    if (const LibTrust& lib = lib_trust(callee); lib.has) {
+      if (!lib.ok) return nullptr;  // rejected there
+      if (reject_redirected_call(callee, at)) return nullptr;
+      return function_of(callee, false, at);
     }
     bool has_contract = false;  // a `decreases` alone is not a contract (0011 item 5)
     for (an_attribute_ptr a : contracts_of(callee)) {
@@ -4899,6 +5300,7 @@ class Encoder {
       reject(Diag::unsupported_expression, at, "a call of the function template \"" + rname(callee) + "\"");
       return nullptr;
     }
+    if (reject_redirected_call(callee, at)) return nullptr;  // decision 0046 item 8: the contract is trusted, so the call must reach the declared function
     return function_of(callee, false, at);
   }
 
@@ -6001,6 +6403,14 @@ class Encoder {
       if (k == nullptr || k->expr == nullptr || k->local_expr_ref) return nullptr;
       an_expr_node_ptr original = expr_node_from_constant(k);
       if (original == nullptr || original->kind != enk_sizeof) return nullptr;
+      // ... and its operand is the macro's call of glibc's `__assert_single_arg` (decision 0031 item 10, 0046): a hand-written `sizeof (x++)` is not
+      // the macro's, and a call of another function there is not either.
+      const auto& si = original->variant.sizeof_info;
+      if (si.is_type || si.variant.expr == nullptr || si.variant.expr->kind != enk_operation || si.variant.expr->variant.operation.kind != eok_call) return nullptr;
+      a_routine_ptr single = direct_callee(si.variant.expr);
+      if (single == nullptr || single->source_corresp.name == nullptr || std::strcmp(single->source_corresp.name, "__assert_single_arg") != 0 ||
+          single->source_corresp.decl_position.seq == 0 || in_verified_file(single->source_corresp.decl_position))
+        return nullptr;
       return c[1];
     }
     if (is_operation(cond, eok_bool_cast, 1) || (is_operation(cond, eok_cast, 1) && is_bool_type(skip_typerefs(cond->type))))
@@ -8869,6 +9279,13 @@ void Encoder::run(const IlEntities& ents) {
   for (a_routine_ptr r : ents.routines) {
     a_statement_ptr body = verified_body(r);
     const a_source_position decl = r->source_corresp.decl_position;
+    // Decision 0046: the C library's routines (items 4-6) and every routine's attributes by where they are written (item 7), declared here or not.
+    cx_ = Ctx();
+    cx_.routine = r;
+    cx_.stmt_pos = decl;
+    if (check_reserved_library(r)) continue;
+    lib_trust(r);
+    check_routine_attributes(r);
     const bool declared_here = decl.seq != 0 && in_verified_file(decl);
     if (body == nullptr && !declared_here) {
       cx_ = Ctx();
@@ -8910,7 +9327,7 @@ void Encoder::run(const IlEntities& ents) {
       if (body != nullptr) reject_globals_in_spec_body(r);
       continue;
     }
-    if (r->is_weak || r->is_weakref) {
+    if ((r->is_weak || r->is_weakref) && !(in_library_file(decl) && body == nullptr)) {  // vlibc's own declaration (C++ moves decl_position there) is judged at a call: redirection()
       // `#pragma weak f` sets the flag without an attribute entry: another unit's definition replaces this one at link time.
       reject(Diag::unsupported_declaration, decl, "a weak function (another unit may replace its definition)");
       continue;
@@ -8934,7 +9351,7 @@ void Encoder::run(const IlEntities& ents) {
     // Decision 0042 item 4: function_of is lazy, so a declaration with a `ref_to_uninit` or `must_init` parameter that nothing calls would never have its
     // marker rules checked (an `owns(*p)` atom, `must_init`'s partner in the `ensures`, the contract reads).  Force it for exactly those routines.
     if (body == nullptr && (markers_.count(r) != 0 || has_struct_pointer_param(r))) function_of(r, false, decl);  // decision 0043: also its member atoms (the const struct pointee rule)
-    if (a_routine_type_supplement_ptr nx = routine_supplement(r); nx != nullptr && nx->does_not_return) {
+    if (a_routine_type_supplement_ptr nx = routine_supplement(r); nx != nullptr && nx->does_not_return && !is_library_routine(r)) {
       // Also for a function that is declared and never called (function_of is lazy): decision 0015 item 4.
       for (an_attribute_ptr a : contracts_of(r))
         if (classify(a) == Annot::ensures) reject(Diag::ensures_on_noreturn, a->position, "");

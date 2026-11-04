@@ -23,13 +23,22 @@ Fail closed: any doubt is an error `file:line: message` and exit status 1.
     an error (M4.6's verified implementations will get a marker of their own);
   * a tag whose prefix is not exactly `vlibc:`, a name tagged twice (in any
     header) and a tag with no reason are errors;
-  * comments and preprocessor lines are not declarations.
+  * comments and preprocessor lines are not declarations;
+  * a shim header has no `#define` or `#undef` but its own include guard
+    (`#ifndef VLIBC_<NAME>_H` directly followed by `#define VLIBC_<NAME>_H`, no value), no
+    `#pragma` or `_Pragma`, no `#line` or linemarker and no digraph or trigraph spelling of
+    `#`: a macro in vlibc's own header could rewrite its contracts (audit round 2, S1);
+  * a trusted declaration holds no comment (a `)` in one would end the reading of the
+    contract's identifiers, audit round 2, note 11);
+  * the shim directory holds only `*.h` files (no subdirectory, no other file), and its parent
+    `<vlibc>/include` holds nothing but the shim directory (decision 0046 item 3: that directory is
+    the library class, and every file under it is trusted by path).
 
 Subcommands:
 
   names --include-dir DIR --out FILE
-        write a C++ fragment for the encoder, one string literal per reserved
-        name, sorted (reproducible: no timestamp, and the file is rewritten only
+        write a C++ fragment for the encoder, one `{"<name>", "<header file
+        name>"},` initializer per reserved name, sorted by name (reproducible: no timestamp, and the file is rewritten only
         when its contents change, since CMake runs this at configure time).
   list --include-dir DIR
         print the canonical listing of every trusted declaration, one line each,
@@ -76,6 +85,8 @@ class Statement:
     text: str          # comments and preprocessor lines blanked, whitespace not yet collapsed
     term: str          # ';' or '}' (a function body)
     has_top_comma: bool
+    start_col: int = 0   # the column of its first character on line `start`
+    end_col: int = 0     # the column of its terminator on line `end`
 
 
 @dataclasses.dataclass
@@ -107,12 +118,19 @@ class Problems:
 # Lexing: comments, preprocessor lines, tags
 
 
-def scan(text: str, file: str, problems: Problems) -> tuple[list[str], list[tuple[int, str]]]:
+def scan(text: str, file: str, problems: Problems):
     """Blank the comments and the preprocessor lines of `text`.  Returns the code
-    lines (same line numbering, comments and preprocessor lines replaced by
-    spaces) and the tag lines found: (line number, text after `//`)."""
+    lines (same line numbering and columns, comments and preprocessor lines replaced by
+    spaces), the tag lines found (line number, text after `//`), the preprocessor
+    directives (line number of its `#`, its text without comments and continuations) and
+    the comments ((line, column) of its start and of its end)."""
     lines: list[list[str]] = [[]]
     tags: list[tuple[int, str]] = []
+    directives: list[tuple[int, str]] = []
+    comments: list[tuple[tuple[int, int], tuple[int, int]]] = []
+    cur_dir: list[str] = []
+    dir_line = 0
+    block_start = (0, 0)
     i, n = 0, len(text)
     lineno = 1
     in_block = False
@@ -135,6 +153,7 @@ def scan(text: str, file: str, problems: Problems) -> tuple[list[str], list[tupl
                 in_block = False
                 emit(" ")
                 emit(" ")
+                comments.append((block_start, (lineno, len(lines[-1]))))
                 i += 2
             elif c == "\n":
                 newline()
@@ -147,6 +166,9 @@ def scan(text: str, file: str, problems: Problems) -> tuple[list[str], list[tupl
             # a preprocessor line ends at a newline not preceded by a backslash
             if preproc and not (i > 0 and text[i - 1] == "\\"):
                 preproc = False
+                directives.append((dir_line, "".join(cur_dir)))
+            elif preproc and cur_dir and cur_dir[-1] == "\\":
+                cur_dir.pop()
             newline()
             i += 1
             continue
@@ -154,6 +176,7 @@ def scan(text: str, file: str, problems: Problems) -> tuple[list[str], list[tupl
             j = text.find("\n", i)
             j = n if j < 0 else j
             comment = text[i + 2:j].rstrip("\r")
+            comments.append(((lineno, len(lines[-1])), (lineno, len(lines[-1]) + (j - i))))
             if not line_has_code and not preproc:
                 m = TAG_LINE_RE.match("//" + comment)
                 if m:
@@ -170,13 +193,17 @@ def scan(text: str, file: str, problems: Problems) -> tuple[list[str], list[tupl
                     problems.add(file, lineno, "a cerastes:trusted-contract tag must be a `//` comment "
                                                "alone on its line")
             in_block = True
+            block_start = (lineno, len(lines[-1]))
             emit(" ")
             emit(" ")
             i += 2
             continue
         if c == "#" and not line_has_code and not preproc:
             preproc = True
+            dir_line = lineno
+            cur_dir = []
         if preproc:
+            cur_dir.append(c)
             emit(" ")
             i += 1
             continue
@@ -201,7 +228,40 @@ def scan(text: str, file: str, problems: Problems) -> tuple[list[str], list[tupl
         i += 1
     if in_block:
         problems.add(file, lineno, "unterminated /* comment")
-    return ["".join(ln) for ln in lines], tags
+    if preproc:
+        directives.append((dir_line, "".join(cur_dir)))
+    return ["".join(ln) for ln in lines], tags, directives, comments
+
+
+GUARD_RE = re.compile(r"^VLIBC_[A-Z0-9_]+_H$")
+DIRECTIVE_RE = re.compile(r"^#\s*([A-Za-z_][A-Za-z0-9_]*|[0-9]+)?(.*)$", re.S)
+
+
+def check_directives(directives: list[tuple[int, str]], file: str, problems: Problems) -> None:
+    """A shim header's preprocessor lines (decision 0046 item 3, audit round 2 S1): conditionals and includes only,
+    and the header's own include guard as its one `#define`.  A macro, a pragma or a `#line` in vlibc's own header
+    would rewrite the contracts cerastes trusts."""
+    guard_seen = False
+    prev = ("", "")
+    for line, text in directives:
+        m = DIRECTIVE_RE.match(text.strip())
+        name = (m.group(1) or "") if m else ""
+        rest = (m.group(2) if m else "").strip()
+        words = rest.split()
+        if name == "define":
+            if not guard_seen and len(words) == 1 and GUARD_RE.match(words[0]) and prev == ("ifndef", words[0]):
+                guard_seen = True
+            else:
+                problems.add(file, line, "a `#define` in a shim header other than its own include guard "
+                                         "(`#ifndef VLIBC_<NAME>_H` directly followed by `#define "
+                                         "VLIBC_<NAME>_H`): a macro could rewrite vlibc's contracts")
+        elif name == "undef":
+            problems.add(file, line, "an `#undef` in a shim header: a macro could rewrite vlibc's contracts")
+        elif name == "pragma":
+            problems.add(file, line, "a `#pragma` in a shim header")
+        elif name == "line" or name.isdigit():
+            problems.add(file, line, "a `#line` or linemarker in a shim header")
+        prev = (name, words[0] if words else "")
 
 
 # ---------------------------------------------------------------------------
@@ -224,12 +284,14 @@ def split_statements(code_lines: list[str], file: str, problems: Problems) -> li
     def text() -> str:
         return "".join(cur)
 
+    start_col = 0
     for lineno, line in enumerate(code_lines, 1):
-        for c in line + "\n":
+        for col, c in enumerate(line + "\n"):
             if not cur and c.isspace():
                 continue
             if not cur:
                 start = lineno
+                start_col = col
             if c == "{":
                 if brace == 0 and paren == 0:
                     pre = re.sub(r"\s+", " ", text().strip())
@@ -254,7 +316,7 @@ def split_statements(code_lines: list[str], file: str, problems: Problems) -> li
                 brace -= 1
                 cur.append(c)
                 if brace == 0 and paren == 0 and fn_body:
-                    out.append(Statement(start, lineno, text(), "}", top_comma))
+                    out.append(Statement(start, lineno, text(), "}", top_comma, start_col, col))
                     reset()
                 continue
             if c in "([":
@@ -265,7 +327,7 @@ def split_statements(code_lines: list[str], file: str, problems: Problems) -> li
                 top_comma = True
             elif c == ";" and paren == 0 and brace == 0:
                 cur.append(c)
-                out.append(Statement(start, lineno, text(), ";", top_comma))
+                out.append(Statement(start, lineno, text(), ";", top_comma, start_col, col))
                 reset()
                 continue
             cur.append(c)
@@ -333,7 +395,15 @@ def read_header(path: Path, shown: str, problems: Problems) -> list[Trusted]:
         problems.add(shown, 1, f"cannot read the header: {e}")
         return []
     text = text.replace("\r\n", "\n")
-    code, raw_tags = scan(text, shown, problems)
+    code, raw_tags, directives, comments = scan(text, shown, problems)
+    check_directives(directives, shown, problems)
+    # spellings of `#` and of the pragma operator that the line reader above would not see as directives
+    for n, line in enumerate(text.split("\n"), 1):
+        if "%:" in line or "??=" in line:
+            problems.add(shown, n, "a digraph or trigraph spelling of `#` in a shim header")
+    for n, line in enumerate(code, 1):
+        if re.search(r"\b_Pragma\b|\b__pragma\b", line):
+            problems.add(shown, n, "a `_Pragma` operator in a shim header")
     statements = split_statements(code, shown, problems)
 
     tags: list[Tag] = []
@@ -388,6 +458,10 @@ def read_header(path: Path, shown: str, problems: Problems) -> list[Trusted]:
             problems.add(shown, st.start, f"the declaration of `{tag.name}` is tagged trusted but carries "
                                           "no contract")
             continue
+        if any((st.start, st.start_col) < c0 and c1 <= (st.end, st.end_col) for c0, c1 in comments):
+            problems.add(shown, st.start, f"a comment inside the trusted declaration of `{tag.name}`: a `)` in "
+                                          "it would end the reading of the contract's identifiers")
+            continue
         result.append(Trusted(tag.name, Path(shown).name, collapse(st.text), tag.reason, shown, tag.line))
 
     for st in statements:
@@ -406,6 +480,24 @@ def read_dir(include_dir: Path, problems: Problems) -> list[Trusted]:
     if not headers:
         problems.add(str(include_dir), 0, "no *.h files: not vlibc's shim directory?")
         return []
+    # The library class is exactly this directory (decision 0046 item 3): cerastes trusts every file under
+    # `<vlibc>/include/vlibc`, and a bare `<name>` reaches any file of it, so nothing else may be there.  A
+    # subdirectory would put headers behind `<name/...>`; a file without the `.h` suffix could shadow a C++ header
+    # such as `<array>`; and a header elsewhere under `<vlibc>/include` is reachable as `<vlibc/..>`'s sibling
+    # without being read here (audit S1).
+    for p in sorted(include_dir.iterdir()):
+        if p.is_dir():
+            problems.add(str(p), 0, "a subdirectory of the shim directory: every file there is a library file "
+                                    "and only the headers of this directory are read")
+        elif p.suffix != ".h":
+            problems.add(str(p), 0, "a file of the shim directory that is not a *.h header (it could shadow a "
+                                    "standard header such as <array>)")
+    real = include_dir.resolve()
+    for p in sorted(real.parent.iterdir()):
+        if p.name != real.name:
+            problems.add(str(p), 0, f"a file or directory under {real.parent} other than {real.name}/: every "
+                                    f"file under the vlibc include directory is a library file, and only "
+                                    f"{real.name}/ is read")
     trusted: list[Trusted] = []
     seen: dict[str, Trusted] = {}
     for h in headers:
@@ -448,7 +540,7 @@ def cmd_list(args) -> int:
 
 def names_fragment(trusted: list[Trusted], include_dir: str) -> str:
     out = [f"// Generated by scripts/vlibc_contracts.py from {include_dir}; do not edit.\n"]
-    out += [f'"{t.name}",\n' for t in trusted]
+    out += [f'{{"{t.name}", "{t.header}"}},\n' for t in trusted]
     return "".join(out)
 
 

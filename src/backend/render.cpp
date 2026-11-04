@@ -9,6 +9,7 @@
 #include "diagnostics.h"
 #include "il_names.h"
 #include "il_query.h"
+#include "verify_config.h"
 
 namespace cerastes {
 namespace {
@@ -116,7 +117,8 @@ std::string SrcPos::str() const {
 }
 
 bool seq_is_in_system_file(a_seq_number seq) {
-  return seq_is_in_system_header(seq) && !seq_in_library_file(seq);
+  if (verify_config().on) return seq != 0 && !seq_in_verified_file(seq);
+  return seq_is_in_system_header(seq);
 }
 
 SrcPos resolve(const a_source_position& p) {

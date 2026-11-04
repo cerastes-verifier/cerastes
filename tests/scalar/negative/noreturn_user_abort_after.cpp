@@ -1,7 +1,7 @@
-// expect: error check @ L18
-// twin: tests/scalar/noreturn_user_abort.cpp
-// Pins: 0015 item 5 (C++ only: C compilers know abort and exit as builtins, so a C file could not be native-ok): code after a call of a user abort() is reachable, so its check is made
-// A library abort() would make the path unreachable and the check would hold vacuously.
+// expect: rejected cerastes-annotation_reserved_library @ L7
+// twin: tests/vlibc/abort_shim.c
+// Pins: 0046 item 6 and question 117 (was 0015 item 5: code after a call of a user abort() was reachable): the global abort is the library's name, so its user definition is rejected before any call is looked at
+// The library abort() ends the path (tests/vlibc/abort_shim.c); a user one with a contract is refused.
 #include <cerastes.h>
 
 void abort(void) CERASTES_ENSURES(true)

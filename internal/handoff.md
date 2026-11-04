@@ -38,6 +38,15 @@ P4222's markers, P54 and the b2b design points).
 *M4.5d1's notes (P55's allow-list, 0031 item 9's exemption) moved into its plan's Inputs.*
 
 **M4.5d2 `malloc` and `free`**
+- vlibc's markers in C: `check_signature`'s `ours` is keyed on `decl_position` (`encode.cpp:~708`), which C keeps at the
+  platform's declaration, so `owning`/`ref_to_uninit`/`must_init` on a vlibc declaration would not be read in C; and
+  `lib_trust` sees only `contracts_of`, so a library declaration with only `owning` skips the tag, reserved-name and
+  macro checks (record 0046) [d1 audit 2 notes 3, 4].
+- The contract macro scan (record 0046 item 4) reads only the contract's own identifiers (a system macro such as `NULL`
+  is not followed) and refuses any program macro of the same name wherever it is defined: with `free(void *p)` and
+  `malloc(size_t n)` that rejects reasonable programs (`#define n 10`); give vlibc's parameters reserved names
+  (`__p`?) or count only directives before the contract's position [d1 audit 2 note 5].
+- d2's twins of trusted contracts must violate the `requires` (record 0046 item 9) [d1 audit 1 N8].
 - The rejection of a marker (`owning`, `must_init`, `ref_to_uninit`) on a user redeclaration of a system function reads
   only secondary declarations in verified files (`encode.cpp:2668`): revisit it when vlibc's own headers carry markers
   (`malloc`'s `ref_to_uninit` result) [b2b; handed on by M4.5d1, whose headers carry none].
@@ -66,6 +75,10 @@ reported, since members are different blocks [M4.5a].
 - A list traversal's truth tests need liveness inside f2's predicates; `forperm` sees only top-level tokens [M4.5a].
 
 **M4.6 Chars and strings**
+- The SDK's `__DARWIN_ALIAS(sym)` asm labels (`_stdlib.h:189`, `_string.h:95`, `strtod`, `strerror`) and glibc's C23
+  `__isoc23_*` redirects: record 0046 item 8 refuses every trusted contract on such a function; a record must tell the
+  platform's own labels from a user's before vlibc covers them [d1 audit 2 note 7]. vlibc's first body in a header
+  re-examines EDG's discretionary errors in system files (record 0046 item 3).
 - `main(int, char **)` in a unit with globals is not the entry and fails closed, but its message asks for `reads(g)` in a
   contract on `main`, which is rejected; M4.6 makes `main(argc, argv)` the entry [b2a audit 2 N3].
 - `const` objects as cells (question 78, §4.3); `c | 0x20` case bits (0027).
@@ -189,7 +202,10 @@ function-pointer typedef (`typedef void (*fp)(int *p CERASTES_MUST_INIT);`) reac
   modes [b2a N9, b1c3 N4]; `return p = &x;` and `int *r = &x; return r;` stay accepted (the caller's first use fails
   `lifetime`; questions 65, 70) and EDG's #1056 prints beside an R14 rejection [b1c2]; in an invariant `==` is identity
   with no liveness check [b1c1 note 7].
-- *Messages:* `int *volatile gp` is named "volatile int *" [b2a N7]; an `annotation_mismatch` between declarations written
+- *Messages:* `-Dfalse=1` (a program macro over vlibc's contract text) is reported three times, at the platform's
+  declarations of `abort`/`exit`/`_Exit`, as "cannot be defined here"; it should point at the command line [d1 audit 2
+  note 6]; a `#line` in a vlibc header is reported with the `#pragma GCC system_header` message (record 0046 item 3) [d1].
+  `int *volatile gp` is named "volatile int *" [b2a N7]; an `annotation_mismatch` between declarations written
   by one macro names the parameter by position [b1c3]; `cerastes_old(*p)` in a loop invariant is rejected in C as "a
   conversion to or from a pointer type", in C++ as `old_outside_ensures` [b1c1]; rejection texts end "(decision 0012)" or
   "(decision 0037)" where a later record decides them, and the type message still says "only integer types, bool and the
@@ -720,6 +736,9 @@ At M4.5d1's planning (2026-11-03, each the recommendation; recorded in its plan 
 d2's preparation: the malloc family's platform declarations measured and d2's dependency map with a d2a/d2b proposal in
 §4.2; d2 not rolled in), 114 (reserved names are generated from the pinned vlibc headers: the names they declare with a
 contract), 115 (a contract on a reserved name outside vlibc is always rejected, `annotation_reserved_library`, even when
-identical to vlibc's; amends 0030 item 4).
+identical to vlibc's; amends 0030 item 4). During the session, after audit round 1: 116 (an identical contract after
+vlibc's header is accepted: the front end discards it), 117 (definitions of reserved names and contracts on them are
+rejected for C linkage in any namespace and, in C++, any linkage in the global namespace; four pins of 0015 item 5
+re-expected).
 
 No question is open.

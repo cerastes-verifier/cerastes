@@ -13781,22 +13781,52 @@ LIBRARY_PROGRAM = """#include %(header)s
 #include <cerastes.h>
 
 int use(int x)
-    CERASTES_REQUIRES(%(pre)s)
+    CERASTES_REQUIRES(%(pre)s)%(post)s
 {
 %(body)s
 }
 """
 
+# The names of the C standard headers (C23 7.1.2) and of the C++ headers that wrap them: a fixture header named like
+# one would shadow a system header in every unit that runs under the hook (decision 0046 item 11, audit S7).
+STANDARD_HEADER_STEMS = frozenset("""
+assert complex ctype errno fenv float inttypes iso646 limits locale math setjmp signal stdalign stdarg stdatomic
+stdbit stdbool stdckdint stddef stdint stdio stdlib stdnoreturn string tgmath threads time uchar wchar wctype
+cassert ccomplex cctype cerrno cfenv cfloat cinttypes ciso646 climits clocale cmath csetjmp csignal cstdalign
+cstdarg cstdbool cstddef cstdint cstdio cstdlib cstring ctgmath ctime cuchar cwchar cwctype
+algorithm any array atomic bit bitset charconv chrono compare concepts condition_variable coroutine deque exception
+execution expected filesystem format forward_list fstream functional future initializer_list iomanip ios iosfwd
+iostream istream iterator latch limits list locale map memory memory_resource mutex new numbers numeric optional
+ostream queue random ranges ratio regex scoped_allocator semaphore set shared_mutex source_location span sstream
+stack stdexcept stop_token streambuf string string_view strstream syncstream system_error thread tuple typeindex
+typeinfo type_traits unordered_map unordered_set utility valarray variant vector version
+unistd malloc sys fcntl pthread dlfcn strings
+""".split())
+
+
+def fixture_name_problems(names):
+    """What is wrong with the names of the fixture headers: each must be `lib_*.h`, and none may be (or, before
+    its suffix, contain as its whole stem) the name of a standard or system header."""
+    problems = []
+    for name in names:
+        stem = name[:-2] if name.endswith(".h") else name
+        if not re.fullmatch(r"lib_[a-z0-9_]+\.h", name):
+            problems.append(f"{name}: a fixture header is named lib_<something>.h")
+        if stem in STANDARD_HEADER_STEMS or name in STANDARD_HEADER_STEMS:
+            problems.append(f"{name}: named like a standard header")
+    return problems
+
 
 @e2e_gate(_real_verifier_available() and _real_silicon_available(),
           "CERASTES_VERIFY, Java, Silicon or Z3 missing; run scripts/bootstrap.sh")
 class LibraryFixtureTests(unittest.TestCase):
-    """Decision 0046 item 10: `--cerastes_verify_selftest=library_fixture` makes scripts/testdata/library_fixture/include a
+    """Decision 0046 item 11: `--cerastes_verify_selftest=library_fixture` makes scripts/testdata/library_fixture/include a
     second library directory (the only one besides vlibc's), so what vlibc does not hold yet is tested here: a `predicate`
-    and a `pure` function in a library header, a body verified there (and the twin that fails), a trusted contract with
-    its tag repeated in the Viper (and the twin without a tag, exit 3), a predefined macro redefined, a `#line` and a
-    `#pragma GCC system_header`.  Every case runs in both modes and has a twin that differs in one thing, so that a
-    check that was switched off fails here."""
+    and a `pure` function in a library header, a body verified there (and the twin that fails), a trusted contract of
+    a reserved name with its tag repeated in the Viper (and its twins: no tag or another name's tag, exit 3, and a name
+    vlibc does not reserve, rejected), a predefined macro redefined, a `#line` and a `#pragma GCC system_header`.
+    Every case runs in both modes and has a twin that differs in one thing, so that a check that was switched off
+    fails here."""
 
     HOOK = "--cerastes_verify_selftest=library_fixture"
 
@@ -13807,10 +13837,11 @@ class LibraryFixtureTests(unittest.TestCase):
         cls.addClassCleanup(tmp.cleanup)
         cls.tmp = Path(tmp.name)
 
-    def run_program(self, header, pre="x >= 0", body="  return x;", mode="c++20", hook=True, name="p.c"):
+    def run_program(self, header, pre="x >= 0", body="  return x;", post="", mode="c++20", hook=True, name="p.c"):
         src = self.tmp / name
         spec = header if header.startswith('"') else f"<{header}>"
-        src.write_text(LIBRARY_PROGRAM % {"header": spec, "pre": pre, "body": body})
+        ensures = f"\n    CERASTES_ENSURES(r, {post})" if post else ""
+        src.write_text(LIBRARY_PROGRAM % {"header": spec, "pre": pre, "post": ensures, "body": body})
         out = self.tmp / f"{name}.{mode}.vpr"
         args = ["verify", str(src), rt.VERIFY_STD_OPTIONS[mode], f"--keep-vpr={out}"] + ([self.HOOK] if hook else [])
         run = subprocess.run([self.env["CERASTES_VERIFY"], *args], capture_output=True, text=True, env=self.env,
@@ -13824,13 +13855,28 @@ class LibraryFixtureTests(unittest.TestCase):
     def modes(self):
         return ("c23", "c++20")
 
+    ABORT_BODY = "  if (x > 5) {\n    abort();\n  }\n  return x;"
+
     def test_the_fixture_headers_exist_and_each_is_used_by_a_test(self):
         names = sorted(p.name for p in LIBRARY_FIXTURE_DIR.glob("*.h"))
         self.assertEqual(names, ["lib_body.h", "lib_body_bad.h", "lib_line.h", "lib_macro.h", "lib_macro_ok.h",
-                                 "lib_pragma.h", "lib_spec.h", "lib_trusted.h", "lib_untagged.h"])
+                                 "lib_nonreserved.h", "lib_pragma.h", "lib_pragma_bad.h", "lib_spec.h",
+                                 "lib_trusted.h", "lib_untagged.h", "lib_weak.h", "lib_wrongtag.h"])
         source = Path(__file__).read_text()
         for name in names:
             self.assertGreaterEqual(source.count(f'"{name}"'), 2, f"{name} is used by no test")
+        # the directory holds nothing but those headers and the README (no subdirectory: a library file is a file
+        # of this directory)
+        self.assertEqual(sorted(p.name for p in LIBRARY_FIXTURE_DIR.iterdir() if p.name not in names), ["README"])
+
+    def test_no_fixture_header_is_named_like_a_standard_header(self):
+        names = sorted(p.name for p in LIBRARY_FIXTURE_DIR.glob("*.h"))
+        self.assertEqual(fixture_name_problems(names), [])
+        # twin: the check finds what it is for
+        for bad in ("stdlib.h", "lib_x.hpp", "array", "string.h", "Lib_a.h", "cstdlib.h", "lib-a.h"):
+            with self.subTest(bad):
+                self.assertTrue(fixture_name_problems([bad]), bad)
+        self.assertEqual(fixture_name_problems(["lib_ok.h", "lib_nonreserved.h"]), [])
 
     def test_without_the_hook_the_fixture_is_not_on_the_include_path(self):
         # twin of every case below: the same program with no hook cannot see the header at all
@@ -13839,6 +13885,21 @@ class LibraryFixtureTests(unittest.TestCase):
                 run, _ = self.run_program("lib_spec.h", hook=False, mode=mode)
                 self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
                 self.assertIn("lib_spec.h", run.stderr)
+
+    def test_the_success_line_names_the_hook(self):
+        # decision 0046 item 11 (audit S7): a run under the one hook that injects no fault may end `verified`, and
+        # says it ran with the hook; the same program without it (the header is a system one) does not
+        for mode in self.modes():
+            with self.subTest(mode):
+                run, _ = self.run_program("lib_spec.h", mode=mode)
+                self.assertEqual((run.returncode, run.stderr), (0, ""), run.stdout)
+                self.assertIn("library_fixture", run.stdout)
+                plain = self.tmp / "plain.c"
+                plain.write_text("#include <cerastes.h>\nint use(int x) CERASTES_REQUIRES(x >= 0) { return x; }\n")
+                ok = subprocess.run([self.env["CERASTES_VERIFY"], "verify", str(plain), rt.VERIFY_STD_OPTIONS[mode]],
+                                    capture_output=True, text=True, env=self.env, timeout=rt.VERIFY_TIMEOUT_S)
+                self.assertEqual((ok.returncode, ok.stderr), (0, ""), ok.stdout)
+                self.assertNotIn("library_fixture", ok.stdout)
 
     def test_a_predicate_and_a_pure_function_in_a_library_header_are_accepted(self):
         for mode in self.modes():
@@ -13862,35 +13923,54 @@ class LibraryFixtureTests(unittest.TestCase):
                 self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
                 self.assertRegex(run.stdout, rf"lib_body_bad\.h:{line}: error: postcondition")
 
-    def test_a_trusted_contract_repeats_its_tag_in_the_viper(self):
-        tag = "// cerastes:trusted-contract vlibc: lib_triple triples its argument (fixture)"
+    def test_a_trusted_contract_repeats_its_tag_in_the_viper_and_is_used(self):
+        tag = "// cerastes:trusted-contract vlibc: abort never returns (fixture)"
         for mode in self.modes():
             with self.subTest(mode):
-                run, vpr = self.run_program("lib_trusted.h", pre="0 <= x && x <= 10",
-                                            body="  int y = lib_triple(x);\n  CERASTES_CHECK(y == 3 * x);\n  return x;",
-                                            mode=mode)
+                run, vpr = self.run_program("lib_trusted.h", pre="0 <= x && x <= 10", post="r == x && x <= 5",
+                                            body=self.ABORT_BODY, mode=mode)
                 self.assertEqual((run.returncode, run.stderr), (0, ""), run.stdout)
-                text = vpr.read_text()
-                self.assertEqual(text.count(tag + "\n"), 1, text)
-
-    def test_a_trusted_contract_is_used_by_callers(self):
-        # twin of the test above: a call that breaks the precondition fails at the call
-        for mode in self.modes():
-            with self.subTest(mode):
-                run, _ = self.run_program("lib_trusted.h", pre="0 <= x && x <= 10",
-                                          body="  int y = lib_triple(1000);\n  CERASTES_CHECK(y == 3000);\n  return x;",
-                                          mode=mode)
+                self.assertEqual(vpr.read_text().count(tag + "\n"), 1, vpr.read_text())
+                # twin: without the call the path of x > 5 returns, and the postcondition fails at the return
+                run, _ = self.run_program("lib_trusted.h", pre="0 <= x && x <= 10", post="r == x && x <= 5",
+                                          body="  if (x > 5) {\n  }\n  return x;", mode=mode)
                 self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
-                self.assertRegex(run.stdout, r"p\.c:\d+: error: precondition")
+                self.assertRegex(run.stdout, r"p\.c:\d+: error: postcondition")
 
     def test_a_library_contract_without_a_tag_is_an_internal_error(self):
-        # twin: lib_trusted.h, the same shape with its tag, verifies (test_a_trusted_contract_repeats_its_tag_in_the_viper)
+        # twin: lib_trusted.h, the same shape with its tag, verifies (test_a_trusted_contract_repeats_its_tag...)
         for mode in self.modes():
             with self.subTest(mode):
-                run, _ = self.run_program("lib_untagged.h", pre="0 <= x && x <= 10",
-                                          body="  int y = lib_untagged(x);\n  CERASTES_CHECK(y == x);\n  return x;", mode=mode)
+                run, _ = self.run_program("lib_untagged.h", pre="0 <= x && x <= 10", post="r == x && x <= 5",
+                                          body="  if (x > 5) {\n    _Exit(1);\n  }\n  return x;", mode=mode)
                 self.assertEqual(run.returncode, 3, run.stdout + run.stderr)
                 self.assertEqual(run.stdout, "")
+                # the message of the tag check itself, naming the routine and the file: not any exit 3
+                self.assertIn("the declaration of `_Exit` in a library file has no `cerastes:trusted-contract vlibc:` "
+                              "tag on the line above it", run.stderr)
+                self.assertIn("lib_untagged.h", run.stderr)
+
+    def test_a_tag_that_names_another_function_is_an_internal_error(self):
+        for mode in self.modes():
+            with self.subTest(mode):
+                run, _ = self.run_program("lib_wrongtag.h", pre="0 <= x && x <= 10", post="r == x && x <= 5",
+                                          body="  if (x > 5) {\n    _Exit(1);\n  }\n  return x;", mode=mode)
+                self.assertEqual(run.returncode, 3, run.stdout + run.stderr)
+                self.assertEqual(run.stdout, "")
+                self.assertIn("the tag above the declaration of `_Exit` names `exit`", run.stderr)
+                self.assertIn("lib_wrongtag.h", run.stderr)
+
+    def test_a_library_contract_on_a_name_vlibc_does_not_reserve_is_rejected(self):
+        # trust needs a reserved name: a library file cannot make any name trusted.  Twin: the same shape on `abort`
+        # (test_a_trusted_contract_repeats_its_tag_in_the_viper_and_is_used) verifies
+        for mode in self.modes():
+            with self.subTest(mode):
+                run, _ = self.run_program("lib_nonreserved.h", pre="0 <= x && x <= 10",
+                                          body="  int y = lib_triple(x);\n  CERASTES_CHECK(y == 3 * x);\n  return x;",
+                                          mode=mode)
+                self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+                self.assertIn("lib_triple", run.stderr)
+                self.assertIn("lib_nonreserved.h", run.stderr)
 
     def test_a_predefined_macro_redefined_in_a_library_header_is_rejected(self):
         for mode in self.modes():
@@ -13908,28 +13988,54 @@ class LibraryFixtureTests(unittest.TestCase):
             with self.subTest(mode):
                 run, _ = self.run_program("lib_line.h", mode=mode)
                 self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
-                self.assertIn("a #line directive or linemarker is not allowed", run.stderr)
+                # record 0046 item 3: a `#line` that keeps the file's name is reported with the pragma's message in a
+                # library file (both records carry EDG's flag); the two messages share their wording
+                self.assertRegex(run.stderr, r"error #cerastes-(line_directive|system_header_pragma)_in_verify: ")
+                self.assertIn('is not allowed in a file that "cerastes verify" checks', run.stderr)
                 self.assertIn("lib_line.h", run.stderr)
 
-    def test_a_system_header_pragma_in_a_library_header_is_rejected(self):
+    def test_a_system_header_pragma_in_a_library_header_is_a_no_op(self):
+        # decision 0046 item 3 (amended): the library directory is already a --sys_include directory for EDG, so the
+        # pragma makes no new record, and cerastes decides by path: the run verifies, and what follows the pragma is
+        # still verified like user code.  Twin: the same header whose function breaks its contract fails there.
+        line = self.header_line("lib_pragma_bad.h", "return x;")
         for mode in self.modes():
             with self.subTest(mode):
-                run, _ = self.run_program("lib_pragma.h", mode=mode)
+                run, _ = self.run_program("lib_pragma.h", pre="x > 0", body="  return lib_after_pragma(x);", mode=mode)
+                self.assertEqual((run.returncode, run.stderr), (0, ""), run.stdout)
+                self.assertIn(": verified (", run.stdout)
+                bad, _ = self.run_program("lib_pragma_bad.h", pre="x > 0", body="  return lib_after_pragma_bad(x);",
+                                          mode=mode)
+                self.assertEqual(bad.returncode, 1, bad.stdout + bad.stderr)
+                self.assertRegex(bad.stdout, rf"lib_pragma_bad\.h:{line}: error: postcondition")
+
+    def test_a_weak_pragma_on_a_library_body_is_rejected(self):
+        # decision 0046 item 8 (audit round 2, S2): only a library routine without a body is exempt from the
+        # redirection checks; another definition may replace a weak one at link time, so its verified body says
+        # nothing about the calls.  Twin: lib_body.h, the same shape without the pragma, is the library body that
+        # verifies (test_a_body_in_a_library_header_is_verified_and_its_contract_used)
+        for mode in self.modes():
+            with self.subTest(mode):
+                run, _ = self.run_program("lib_weak.h", pre="x > 0", body="  return lib_weak_id(x);", mode=mode)
                 self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
-                self.assertIn("system_header", run.stderr)
-                self.assertIn("lib_pragma.h", run.stderr)
+                self.assertIn("error #cerastes-unsupported_declaration: ", run.stderr)
+                self.assertIn("lib_weak_id", run.stderr)
+                self.assertIn("lib_weak.h", run.stderr)
 
     def test_only_the_fixture_directory_is_given_library_trust(self):
-        # a copy of a fixture header in the program's own directory is a user header: its untagged contract is not
-        # a library contract, so the call is the ordinary rule (a contract written in a user file is trusted as
-        # 0011 item 5 says), never exit 3
+        # a copy of a fixture header in the program's own directory is a user header, not a library file: its
+        # contract on a reserved name is refused as any user's (annotation_reserved_library, exit 2), never the
+        # internal error of a library file without a tag (twin: test_a_library_contract_without_a_tag...)
         shutil.copy(LIBRARY_FIXTURE_DIR / "lib_untagged.h", self.tmp / "user_untagged.h")
         for mode in self.modes():
             with self.subTest(mode):
                 run, _ = self.run_program('"user_untagged.h"', pre="0 <= x && x <= 10",
-                                          body="  int y = lib_untagged(x);\n  CERASTES_CHECK(y == x);\n  return x;", mode=mode,
+                                          body="  if (x > 5) {\n    _Exit(1);\n  }\n  return x;", mode=mode,
                                           hook=False, name="user.c")
-                self.assertNotEqual(run.returncode, 3, run.stdout + run.stderr)
+                # exactly the rejection of any user's contract on a reserved name, never the library-file internal error
+                self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+                self.assertIn("error #cerastes-annotation_reserved_library: ", run.stderr)
+                self.assertIn("user_untagged.h", run.stderr)
 
 
 # The fewest checks `cerastes --selftest` may run (it printed 94 when this was written).  Raise it
@@ -14143,6 +14249,19 @@ class RealDriverTests(unittest.TestCase):
         run = self.run_driver("verify", "loop.cpp", "--cerastes_verify_selftest=weaken_invariant")
         self.assertEqual(run.returncode, 3, run.stdout + run.stderr)
         self.assertIn("loop.cpp:5: internal check: automatic range invariant of `i`", run.stderr)
+
+    def test_the_include_option_that_would_defeat_the_include_order_is_refused(self):
+        # decision 0046 item 2 (audit S6): `-I-` makes every directory before it quote-only, which would put
+        # vlibc's shim out of reach of `<stdlib.h>`, and an `-I` value starting with `-` is refused as the same
+        # attempt; each is exit 2 with one `cerastes: error:` line naming `-I`
+        for args in (["-I-"], ["-I", "-"], ["-I-x"], ["-I", "-x"]):
+            with self.subTest(args):
+                self.refusal(self.run_driver("verify", "one.cpp", *args), "-I")
+        # twin: ordinary `-I` spellings are accepted, joined and separate
+        for args in (["-I."], ["-I", "."], ["-I./"]):
+            with self.subTest(ok=args):
+                run = self.run_driver("verify", "one.cpp", *args)
+                self.assertEqual((run.returncode, run.stderr), (0, ""), run.stdout)
 
     def test_a_folded_constant_without_its_expression_is_rejected(self):
         # the hook treats a folded constant as having no `expr`: a program with one is not accepted

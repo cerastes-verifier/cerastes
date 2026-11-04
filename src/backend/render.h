@@ -25,9 +25,10 @@ struct SrcPos {
 };
 SrcPos resolve(const a_source_position& p);
 
-// EDG's system-header flag of sequence number `seq`, except in verify mode, where a library file (decision 0046 item 3: vlibc's headers,
-// which are system include directories of the front end) is not a system file.  Every use of the flag outside this function is by
-// path (is_system_file, in_verified_file) or reads a file record's own flag for a directive (annotation_checks.cpp).
+// Whether sequence number `seq` lies in a system file: EDG's own flag in walk mode; in verify mode "not a verified file" by canonical path
+// (decision 0046 item 3: a library file is not a system file, and neither is a user header that a system header includes, which EDG
+// flags).  Every use of the flag outside this function is by path (is_system_file, in_verified_file) or reads a file record's own flag
+// for a directive (annotation_checks.cpp).
 bool seq_is_in_system_file(a_seq_number seq);
 
 // "L<line>:<col>" of a position that is part of an annotation or names a lambda,
