@@ -2,7 +2,8 @@
 // converted to `T *` is a call of a bodiless TYPED VIEW (no parameters, result `Ptr(T)`, `ensures r == NULL || owns_block(r)`, the flags unknown for malloc
 // through `result_init`, zero value clauses for calloc), a `free(p)` is a call of a view `(Ptr(T)) -> void` with `requires p == NULL || owns_block(p)` and
 // `deallocates` (items 2, 4); the checks are the free rows (`invalid-free`, item 6) and the leak row at every normal exit (`leak`, item 7).  The cases build
-// those views by hand as the encoder does (`alloc_view`, `free_view`), so a lowering that handles them handles the encoder's.
+// those views by hand as the encoder does (`alloc_view`, `free_view`), so a lowering that handles them handles the encoder's.  Their tags carry the
+// encoder's `; typed view: one <T>` (without the size, which the cases do not know), so `lint_viper.py` pins their text as it pins the encoder's views.
 //
 // The categories and the node each position names come from the record: a free's rows at the call, a leak at the `return` (or the closing brace of a function
 // that falls off its end), `null-dereference` / `permission` / `uninitialized` at the store or the check that reads, `unsequenced` at the later-created access.
@@ -14,7 +15,7 @@ namespace {
 Function* heap_alloc_view(Kit& k, const char* name, Type pointee, bool zeroed) {
   const Type pt = k.ptr(pointee);
   Function* f = k.fn(name, pt);
-  k.trusted(f, std::string("vlibc: ") + name + " returns NULL or one new block (typed view, decision 0047)");
+  k.trusted(f, std::string("vlibc: ") + name + " returns NULL or one new block; typed view: one " + pointee.str() + ", decision 0047");
   const Expr* is_null = k.eq(k.R(f), k.nul(pt));
   const Expr* rhs = k.b.atom(AtomKind::OwnsBlock, k.R(f), -1, k.at());
   auto zero_of = [&](const Type& t) -> const Expr* { return t.is_bool() ? k.no() : t.is_ptr() ? k.nul(t) : k.num(t, "0"); };
@@ -41,7 +42,7 @@ Function* heap_free_view(Kit& k, Type pointee) {
   const Type pt = k.ptr(pointee);
   Function* f = k.fn("free", k.vd, {{"ptr", pt}});
   f->params[0].init = InitMarker::RefToUninit;
-  k.trusted(f, "vlibc: free ends the allocation (typed view, decision 0047)");
+  k.trusted(f, "vlibc: free ends the allocation; typed view: one " + pointee.str() + ", decision 0047");
   k.req(f, k.lor(k.eq(k.b.text(k.F(f, 0), "ptr"), k.nul(pt)), k.b.atom(AtomKind::OwnsBlock, k.b.text(k.F(f, 0), "ptr"), -1, k.at())));
   f->deallocates = true;
   k.done(f);
