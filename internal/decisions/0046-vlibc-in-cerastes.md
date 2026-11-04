@@ -27,6 +27,9 @@
   - **118** (after the first run of the new tests): the two alias pins `reject_redirect_alias.c` and
     `reject_redirect_alias_cpp.cpp`, written before the code, are re-expected `unsupported_attribute` (item 7 reports a
     user-written alias; item 8 then stays silent, one error per cause).
+  - **119** (after the first Linux run): the three glibc `assert` near misses, written before their first run, also
+    expect `side_effect_not_evaluated` at their line: once the expansion is not recognised, its copied
+    `sizeof (__assert_single_arg (e))` operand is rejected too (0020).
   - Earlier decisions this record carries out: 0030 (the repository, both ways in, trust by path, the pin), 0031 item 10
     (P55's glibc half, `reject_quick_exit_user_declared.c`'s glibc twin, question 59's near misses and the `sizeof`
     operand come with d1).

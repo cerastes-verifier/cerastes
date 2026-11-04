@@ -298,7 +298,9 @@ Any question from an agent, or of mine, stops that work and goes to the owner.
 - `LibraryFixtureTests` (record item 10).
 - `driver/selftest.cpp`'s library-path cases.
 
-**Flips:** only the four pins of question 117 (pre-approved). Any other, stop and ask.
+**Flips:** only the four pins of question 117 (pre-approved). Any other, stop and ask. During the session: question 118
+(the two new alias pins re-expected `unsupported_attribute`) and 119 (three new glibc `assert` near misses gain a
+`side_effect_not_evaluated` line).
 
 ## Docs (invariant 8; every example is a test)
 

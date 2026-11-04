@@ -1,4 +1,4 @@
-# Handoff during M4.5d1 — vlibc in cerastes (record 0046) (2026-11-03)
+# Handoff after M4.5d1 — vlibc in cerastes (record 0046) (2026-11-03)
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
@@ -14,10 +14,18 @@ plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session cons
 - **On `origin/main`** (`37f6dda`): everything through M4.5c2a (PR #25). **M4.5c2b** (record 0045; plan
   `.claude/plans/m4-5c2b-heap-read-places.md`) is PR #26 (`m4.5c2b-heap-read-places`, tip `d26a87c`), open at M4.5d1's
   start. The local `main` `00fe5a2` is a local merge of `origin/main` and `d26a87c`.
-- **M4.5d1** (vlibc in cerastes; record 0046; plan `.claude/plans/m4-5d1-vlibc.md`, questions 113–115) is in progress on
-  branch `m4.5d1-vlibc` (from `d26a87c`, so its PR stacks on PR #26) in the worktree `.claude/worktrees/m4.5d1`, with its
-  baseline in the detached worktree `.claude/worktrees/m4.5d1-base`. vlibc's half (layout, license, CI,
-  `<vlibc/stdlib.h>`) is vlibc's `5962865`, pushed.
+- **M4.5d1** (vlibc in cerastes; record 0046; plan `.claude/plans/m4-5d1-vlibc.md`, questions 113–118) is done on
+  branch `m4.5d1-vlibc` (local commits from `d26a87c`, so its PR stacks on PR #26) in the worktree
+  `.claude/worktrees/m4.5d1`; its baseline worktree `.claude/worktrees/m4.5d1-base` (detached at `d26a87c`) is no longer
+  needed. vlibc's half is vlibc's `5962865`, already pushed: nothing to push in vlibc. Result in `internal/status.md`.
+- **Audits:** round 1 on the record (B1 redirected trusted calls, B2 question 116), round 2 on the code (B1 C++ linkage
+  after a guard-skipped header, B2 early-created functions), one re-audit (symbol stealing by asm labels; `static` before
+  the header): every blocking item reproduced natively and fixed. Reports in the worktree's `build/m4.5d1/audit{1,2,3}.md`.
+  What was not taken is in §3.
+- **The Linux host** `matt@clang4.cpp.al` (key accepted by the owner during this session) cannot bootstrap natively (no
+  root; no libc++ 21, JDK 17, GCC 16 there): runs go in a container built from a clean `ubuntu:26.04` with the S5 recipe
+  (`cerastes-m4.5d1:runner`, container `cerastes-m4.5d1-p71`, checkout `~/cerastes-m4.5d1/cerastes`; kept for the next
+  session or removable).
 
 The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits behind upstream `main` (§4.1).
 
@@ -26,7 +34,12 @@ The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits beh
 1. **PR #26 (M4.5c2b), after CI:** merge it; then in the main checkout `git reset --keep origin/main` on `main` (the local
    merge `00fe5a2` and PR #26's merge have the same two parents), and `git worktree remove` `.claude/worktrees/m4.5c2b`,
    `m4.5c2b-base`, and the older `m4.5b2b-base`, `m4.5c1`, `m4.5c1-base`, `m4.5c2a`, `m4.5c2a-base`.
-2. At the end of M4.5d1: the steps the session's status entry names.
+2. **M4.5d1:** push `m4.5d1-vlibc` and open its PR against `main` (its base `d26a87c` is PR #26's tip, so after #26 merges
+   the PR shows only d1's commits). The PR adds the submodule `third_party/vlibc` (CI's recursive checkout fetches it);
+   then fast-forward `main` and remove `.claude/worktrees/m4.5d1` and `m4.5d1-base`.
+3. vlibc's CI pins cerastes `234ede3` for `<cerastes.h>`; moving it to a commit on cerastes's `main` is vlibc's own step
+   (`CERASTES_COMMIT` in vlibc's `ci.yml`), not needed for d1.
+4. Then M4.5d2's planning (§4.2).
 
 ## 3. Open notes, by the session that consumes them
 
@@ -351,10 +364,9 @@ through a pointer member, an atom on `*q` where `q` is a cell, atoms and reads t
 `*r.q`, written struct atoms in loop invariants (question 99), the `restrict` re-check; `live(r.q)` moved to M4.5d2
 (question 106). M4.5d2 needs it (owning fields point through a heap read).
 
-**M4.5d1 vlibc** (record 0046; plan `.claude/plans/m4-5d1-vlibc.md`, questions 113–115): in progress. vlibc's half is
-done in vlibc's `5962865` (layout, license, CI, `<vlibc/stdlib.h>` with `abort`/`exit`/`_Exit`); cerastes's half is the
-pin, the include order, the library class, trust from vlibc's tags, reserved names, attributes by position and
-`trusted_libc_reason` retired; d2 is not rolled in (question 113), but d1 prepares it (below).
+**M4.5d1 vlibc** (record 0046; plan `.claude/plans/m4-5d1-vlibc.md`, questions 113–118) is done: the pin, the
+include order, the library class, trust from vlibc's tags, reserved names, attributes by position, the redirection
+rules; d2 is not rolled in (question 113), its preparation is below.
 
 **M4.5d2 `malloc` and `free`.** vlibc's contracts (`malloc` `ref_to_uninit`, `calloc` initialized, `realloc`, `free`),
 heap blocks with the slot −1 token, the free checks (`invalid-free`), the leak rule by `forperm` and a record on `main`'s
@@ -739,6 +751,7 @@ contract), 115 (a contract on a reserved name outside vlibc is always rejected, 
 identical to vlibc's; amends 0030 item 4). During the session, after audit round 1: 116 (an identical contract after
 vlibc's header is accepted: the front end discards it), 117 (definitions of reserved names and contracts on them are
 rejected for C linkage in any namespace and, in C++, any linkage in the global namespace; four pins of 0015 item 5
-re-expected).
+re-expected); after the first runs of the new tests: 118 (the two alias pins re-expected `unsupported_attribute`), 119
+(the three glibc `assert` near misses also expect `side_effect_not_evaluated`).
 
 No question is open.
