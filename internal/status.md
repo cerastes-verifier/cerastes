@@ -15,7 +15,7 @@ history table; the full log up to M4.4c is `git show 1fcc43b:internal/status.md`
 ## M4.5d2a — the heap (2026-11-03/04): done on branch `m4.5d2a-heap`, the final check left to CI
 
 Plan: `.claude/plans/m4-5d2a-heap.md`. Read `internal/handoff.md` next: §2 (owner steps: PR #27 first, then push vlibc's
-`main`, then this branch's PR, and CI decides, below), §3 (M4.5d2v's and M4.5d2b's notes), §8 (questions 120–127).
+`main`, then this branch's PR, and CI decides, below), §3 (M4.5d2v's and M4.5d2b's notes), §8 (questions 120–130).
 
 **Owner decisions:** at planning, 120 (d2 split: d2a the heap, `realloc` to M4.5e2, loops the first cut), 121 (vlibc holds
 complete implementations of what it covers, verified as cerastes becomes able to; the allocator replaces the platform's,
@@ -23,6 +23,9 @@ amending 0030 item 2), 122 (that allocator is M4.5d2v, next), 123 (blocks held w
 session: 124 (`reject_owning_function.c` expects `lifetime @ L8`, not the plan's `permission`), 125–127 (new pins re-expected
 to what they can reach: a template, a lambda, two member functions with two lines each, the discarded `malloc` with EDG's two
 warnings). The owner ended the session at 08:00 (travel): the second `check.sh` and the Linux rerun are CI's (below).
+After the session (2026-11-04): 128 (vlibc's and vlibm's implementations are named `vlibc_<name>`/`vlibm_<name>`,
+declared beside the standard names with the same contracts; question 121's replacement under the standard names is
+dropped; record 0048, with questions 129–130 open for d2v's planning, handoff §8).
 
 **Done**
 - **Record 0047** (written before code; audit round 1 on the draft: B1 leaks missed in loops, B2 view calls skipping
@@ -88,7 +91,8 @@ fifteen existing pins (M4.5d2b, M4.7/M8).
 
 **First step for the next session.** Check CI on this branch's PR (both jobs): red → fix first (handoff §2). Then, before
 M4.5d2v, fix the re-audit's B1 and S1 in `src/vir/lower.cpp` (and S2, S3; `build/m4.5d2a/audit3.md`, handoff §3 "M4.5d2a
-follow-up"), on this branch or a follow-up branch, with the five pins; then M4.5d2v (vlibc's allocator, handoff §3 and §4.2).
+follow-up"), on this branch or a follow-up branch, with the five pins; then M4.5d2v (vlibc's allocator under `vlibc_`
+names, record 0048; handoff §3, §4.2 and §8's questions 129–130).
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 

@@ -285,3 +285,8 @@ Three facts from this session's planning (the surveys behind the plan; P71 confi
 - A trusted contract's calls must reach the declared function: aliases, asm labels and weak declarations are refused
   beside every trusted contract, closing a hole that predates vlibc (item 8).
 - A user's own `abort` in the global namespace, or a definition of any reserved name, is refused (question 117).
+
+*2026-11-04, amended by 0048 (question 128): items 4 and 6 — a `vlibc_<name>` that vlibc declares with a contract (the
+same contract as `<name>`'s, inside `extern "C"`) is a reserved name like the standard ones, generated from the pinned
+headers and trusted by the same rule; vlibc's own `src/` defines only `vlibc_` names, so the rule that will verify it
+(M4.6) exempts no standard name from item 6.*

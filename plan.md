@@ -155,7 +155,7 @@ history of `internal/status.md`).
 | Session | Scope | Needs |
 |---|---|---|
 | **M4.5 Pointers** (sessions b1–f3, below) | the memory model for C (records 0028–0030) | M4.5a, S5 (done) |
-| **M4.6 Chars and strings** | string literals as read-only arrays, `char` buffers, vlibc's `<string.h>` (`strlen`/`memcpy`/`memcmp`/`strcmp` contracts and verified implementations), `main(argc, argv)`; `const` objects as cells held below `write` after their initializer, lifting record 0040 item 2's contract rules across `const` (owner, 2026-10-30, handoff question 78) | M4.5e2, M4.5f3 |
+| **M4.6 Chars and strings** | string literals as read-only arrays, `char` buffers, vlibc's `<string.h>` (contracts on `strlen`/`memcpy`/`memcmp`/`strcmp`, and their verified implementations `vlibc_strlen`, `vlibc_memcpy`, `vlibc_memcmp`, `vlibc_strcmp`, record 0048; the rule that verifies vlibc's own `src/`, 0048 item 5), `main(argc, argv)`; `const` objects as cells held below `write` after their initializer, lifting record 0040 item 2's contract rules across `const` (owner, 2026-10-30, handoff question 78) | M4.5e2, M4.5f3 |
 | **M4.7 Function pointers** | contracts on function types, calls through pointers ("the pointer satisfies the type") | M4.5b1b |
 | **M4.8 C parity close-out** | the VeriFast C differential set, the M4 mutation run, the Memory and ownership page complete, M4's acceptance, the deferred list for M8; the cost of aliasing `reads`/`live` parameters (handoff question 66: fixed here), with the false alarm of written atoms on moved pointers (question 79) | all |
 
@@ -167,10 +167,12 @@ M4.5b1c planning: `owns_block` needs the heap token and a whole-block permission
 and owning fields move to M4.5d2 with the rest of P4418R0's invalidation profile (question 91); M4.5c2 is two sessions again
 (question 95: about 3,500 changed lines), struct values and storage first. M4.5d2 is three sessions (owner, 2026-11-03,
 questions 120–122): d2a the heap, d2v vlibc's allocator, d2b results, owning locals, globals and fields and P4418R0.
+vlibc's and vlibm's implementations are named `vlibc_<name>` and `vlibm_<name>`, declared beside the standard names with
+the same contracts; neither library replaces a standard name (owner, 2026-11-04, question 128, record 0048).
 
 | Session | Scope | Needs |
 |---|---|---|
-| **M4.5d2v vlibc's allocator** | in vlibc's repository (owner, 2026-11-03, questions 121–122: vlibc holds complete implementations of the functions it covers, usable without cerastes, verified as cerastes becomes able to): a replacement allocator under the standard names, a portable C23 core over regions, pages from `mmap`, glibc's documented replacement set, a default malloc zone on macOS, thread-safe; run tests and CI on both platforms with both compilers; the contracts stay trusted until cerastes verifies the core (after M4.6: arrays, pointer arithmetic, predicates, char storage; the page and zone glue stay trusted) | M4.5d2a |
+| **M4.5d2v vlibc's allocator** | in vlibc's repository, with cerastes's half (owner, 2026-11-03/04, questions 121, 122 and 128, record 0048: vlibc holds complete implementations of the functions it covers, usable without cerastes, verified as cerastes becomes able to, under vlibc's own names): a complete, thread-safe allocator, `vlibc_malloc`, `vlibc_calloc`, `vlibc_realloc`, `vlibc_free`, `vlibc_aligned_alloc`, `vlibc_free_sized`, `vlibc_free_aligned_sized`, over a portable C23 core (free lists over regions) and pages from `mmap`, built as `libvlibc` for C and C++ callers; declared in `<vlibc/stdlib.h>` beside the standard names with their contracts (no replacement of `malloc`: no malloc zone, no glibc replacement set); run tests with threads and under ASan/UBSan in vlibc's CI on both platforms with both compilers. cerastes's half: the pin move, the pairing check in `vlibc_contracts.py`, heap blocks that know their allocator (`free(vlibc_malloc(n))` is `invalid-free`), must-verify/must-fail pairs, docs. The contracts stay trusted until cerastes verifies the core (after M4.6: arrays, pointer arithmetic, predicates, char storage; the page glue stays trusted). Its planning may split the two halves | M4.5d2a |
 | **M4.5d2b Results, owning locals, globals and fields** | `ensures` atoms with no `requires` partner (an output ghost amount: `owns(*result)`, `live(r.q)` from M4.5c2b, question 106, `owns(**r)`); owning locals and globals (`[[cerastes::owning]]` target `v`: `leak` at lifetime end and on reassignment); `[[cerastes::ref_to_uninit]]` on locals (target `v`) and P4222R3's strict rules; non-recursive owning fields (target `d`, from M4.5c, question 91); the rest of P4418R0's invalidation profile (owner, 2026-11-02, question 91: its guarantees, `[[owner]]`'s rules, `[[not_invalidating]]`, `no_dangling()`; spellings decided at its planning, P4417R0's transfer-on-parameter against 0029's borrow; C++'s parts are M7's) | M4.5d2a |
 | **M4.5e1 Arrays** | local arrays, `a[i]`, array parameters, `owns_range` and quantified permissions, `forall` in C (0029 item 4), sum and max; P38's braced initializers over 1000 elements; M4.4b2's types computed from constants; inner arrays and arrays of structs on M4.5c1's member blocks | M4.5c1 |
 | **M4.5e2 Pointer arithmetic** | `p + i`, `p - q`, comparisons within one object, one-past-the-end, `malloc(n * sizeof(T))` and `calloc(n, sizeof(T))`, `realloc` (from M4.5d2a, question 120); `out-of-bounds`; relational comparisons and `p - q` under `pointer-comparison` | M4.5e1, M4.5d2a |
@@ -183,9 +185,9 @@ encoding is the reference for M4.5 (summary in `internal/handoff.md`). Ideas onl
 pointer prelude rests on axioms; cerastes copies no files, and any axiom it adopts gets its own decision record and
 lint tag (invariant 4).
 
-**Deferred beyond M4** (entries of M8's inventory, each with its reason): unions (effective types), floating point,
-`volatile`/`_Atomic`/`_BitInt`/vector types, variadic functions and `printf`, several translation units (the contract
-manifest, M6), concurrency.
+**Deferred beyond M4** (entries of M8's inventory, each with its reason): unions (effective types), floating point
+(with vlibm's `<math.h>`: `vlibm_<name>` implementations, record 0048), `volatile`/`_Atomic`/`_BitInt`/vector types,
+variadic functions and `printf`, several translation units (the contract manifest, M6), concurrency.
 
 **Docs:** each session extends "Verifying a program", "Annotations" and "Error messages" (one section per new error
 category); from M4.5, a "Memory and ownership" page: `owns`/`reads`/`old` in C, structs, `malloc`/`free`, arrays and
