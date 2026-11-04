@@ -4,7 +4,13 @@
   the draft: three blocking items — B1 leaks missed inside loops, a block dropped at a back edge and a `return` inside a
   loop that sees only the invariant, reproduced with Silicon, item 7; B2 view calls skipping 0046 item 8's redirection
   check, item 2; B3 block sites invisible to the sequencing rules, item 9 — and S1–S8, N1–N14, taken in items 2–10;
-  `build/m4.5d2a/audit1.md`); revised after P72 (PASS on macOS and glibc: EDG accepts vlibc's three declarations in both modes, the `void*` conversion and the folded `sizeof` survive in the IL, no platform macro collides with a reserved name, no platform asm label, weak, alias or ifunc on the three; items 2, 5) and S36 (PASS, 64 fixtures; findings in items 4, 6, 7, 9, 10). Owner decisions (M4.5d2a planning, 2026-11-03; plan `.claude/plans/m4-5d2a-heap.md`;
+  `build/m4.5d2a/audit1.md`); revised after P72 (PASS on macOS and glibc: EDG accepts vlibc's three declarations in both modes, the `void*` conversion and the folded `sizeof` survive in the IL, no platform macro collides with a reserved name, no platform asm label, weak, alias or ifunc on the three; items 2, 5) and S36 (PASS, 64 fixtures; findings in items 4, 6, 7, 9, 10); and audit round 2 (Opus, on `250a2af` and the vlibc pin `5962865` → `0f5de92`: no blocking item; S1 the
+  lint's view pin in programs with globals, S2 a block site's guard reading the heap (exit 3), S3 places framed only by a
+  block site (exit 3 and false alarms), S4 two missing pairs, S5 the shape check `vlibc_contracts.py` lacked; notes N1–N9;
+  all taken in items 2, 4, 7 and 10 or the handoff; `build/m4.5d2a/audit2.md`; the pin audit found the three contracts
+  correct against C23 7.24.3 and the platforms' attributes). During the session the owner answered questions 124
+  (`reject_owning_function.c` expects `lifetime @ L8`, the liveness of its unframed `p`, instead of the plan's
+  `permission`) and 125 (two new pins re-expected to what they can reach: a template, a lambda). Owner decisions (M4.5d2a planning, 2026-11-03; plan `.claude/plans/m4-5d2a-heap.md`;
   handoff questions 120–123, each the recommendation):
   - **120:** M4.5d2 is three sessions: d2a the heap (this record), d2v vlibc's allocator, d2b results, owning locals,
     globals and fields and P4418R0. `realloc` moves to M4.5e2 (it needs `n * sizeof(T)` and a block's contents); blocks
@@ -67,6 +73,11 @@ Three facts shape this record (the planning surveys; P72 confirms them):
      (`__size`, `__nmemb`, `__ptr`, the result binder `__r`, `cerastes_*`) or one of `NULL`, `false`, `true`;
      `scripts/vlibc_contracts.py` refuses any other. The macro scan of 0046 item 4 is unchanged: a program that defines
      `__size` as a macro is already undefined (C23 7.1.3), and the scan still refuses it.
+   - **Shapes in vlibc's script** (audit round 2 S5): `vlibc_contracts.py` refuses a declaration with `void*` in its
+     signature whose contract is neither of item 2's shapes, so such a header cannot be pinned.
+   - **`calloc`'s product** `__nmemb * __size` is read as the exact product (audit round 2 N5): C23 7.24.3.2 returns
+     null when the size cannot be represented, so a wrapping `size_t` product is never the allocation's size; the
+     encoder computes it exactly and rejects a size that does not equal `sizeof(T)`.
    - **`free`'s parameter is `ref_to_uninit`.** Without it P4222's default ("a pointer points to something
      initialized", 0028 item 14) would make `free` of a block never written `uninitialized`; `free` takes the storage
      whatever it holds.
@@ -186,6 +197,13 @@ Three facts shape this record (the planning surveys; P72 confirms them):
      a measure or in a loop invariant (d2b); beside `owns`/`reads`/`live` on the same root, or twice in one clause list;
      on a pointer to a `const` or `volatile` type (audit N12: 0040 item 2 rejects `owns` of a `const` place, and such a
      block could never be freed without a cast that drops the qualifier).
+   - **A block site's own guard** may not read the heap, a global or an entry value (audit round 2 S2: `owns(*q) &&
+     (*q > 0 ? owns_block(p) : true)`, `g > 0 ? owns_block(r) : r == NULL`): rejected `unsupported_annotation`, naming
+     M4.5d2b; the leak row's exemption repeats the guard, which must be a pure fact of the formals and the result.
+     `owning` on a function returning a pointer to a `const` or `volatile` type is rejected as the atom is (N1).
+   - **Places framed by a block site** (audit round 2 S3): a place or guard reached through a load (`owns(*p->q)` after
+     `owns_block(p)`) is framed by the block sites before it in evaluation order, as by the atoms before it, in the
+     method, at calls, at returns and in the loop snapshots.
 5. **Target `r`** (amends 0029 item 1's registration phasing). Registration becomes `owning` `"r|p"` and
    `ref_to_uninit` `"r|p"`, both `RAF_ENTITY_ATTACHED` (P72 (e)); `v` and `d` stay unregistered (EDG keeps refusing
    locals and fields until d2b).
@@ -252,7 +270,9 @@ Three facts shape this record (the planning surveys; P72 confirms them):
    - **The lint** (audit S7): `field tok: Bool` only in heap programs; `tok` only in a view's or a block site's
      conjunction, an explicit row, a loop place's snapshot or invariant, and a `forperm` header; no `exhale` of a `tok`
      place and no assignment to `tok`; `forperm` only as a `leak` row's assertion; the view methods' text pinned exactly,
-     as `alloc_<t>` and `program_start` are (a view with an extra clause would be an unchecked assumption).
+     as `alloc_<t>` and `program_start` are (a view with an extra clause would be an unchecked assumption); a view in a
+     program with globals carries 0041's global-facts `requires` first, pinned equal to the other methods' (audit round 2
+     S1); a bodyless method with vlibc's allocation tag but no `typed view:` reason is refused (N3).
    - **`main`** (question 123) is checked like every function: blocks it still holds when it returns are leaks. A path
      that ends in a call that does not return (`abort`, `exit`, `_Exit`, a user `noreturn` function) has no exit and is
      not checked: `exit()` is C's explicit way to end with blocks allocated. That differs from C23 5.1.2.3.4 (returning
@@ -290,7 +310,7 @@ Three facts shape this record (the planning surveys; P72 confirms them):
      `borrow(p) + (p != q)` would be a false `unsequenced`). Full expressions without such a call keep their Viper.
    - (Cut 3: a fail-closed `unsequenced_calls` for any full expression holding a block call beside another memory call
      or a pointer use.)
-10. **Loops** (amends 0038 item 3; heap functions only; the session's first cut). A loop that touches memory takes, as
+10. **Loops** (amends 0038 item 3; heap programs only; landed). A loop that touches memory takes, as
     automatic places, the object each pointer variable that is not a cell designates at the loop's entry, through its
     base `hb` — the variable itself when the loop does not assign it, else a loop-entry ghost `hb := q` (0045 item 10's
     `lb`) — : its cells (with 0042's `held && flag ==> range` row), its liveness cell and its token cell (a new place
@@ -298,9 +318,13 @@ Three facts shape this record (the planning surveys; P72 confirms them):
     value `kt > none ==> loc(block_of(hb), −1).tok`, back-edge `permission` row `perm(loc(block_of(hb), −1).tok) >= kt`;
     audit N9). Guards add `block_of(hb_i) != block_of(hb_j)` for token cells. A `requires` block site's places gain the
     token too. Item 7's back-edge leak row exempts exactly these token places. A written `owns_block` in an invariant is
-    rejected, naming d2b. *If cut:* item 7's back-edge row exempts nothing, the false alarm on a block held through a
-    local across a loop is pinned (`negative/heap_loop_local_false_alarm.c`), the docs give the workaround (the loop in a
-    helper with `owns(*p)`), and d2b lands the rule.
+    rejected, naming d2b. The pointer variable must be declared before the loop and not be a cell. Two more rules came
+    with it: a call whose `requires` has a block site writes every leaf field of that block (0038 item 3's havoc rule;
+    without it a loop calling a borrowing function exited 3), and a block row's `WF` check at a call is a `permission`
+    row, so a pointer a loop reassigns gives a user error, never exit 3. **A pinned false alarm:** two block pointers
+    swapped inside a loop (`negative/heap_loop_swap_false_alarm.c`): the places are the blocks the variables held at
+    entry, and after the loop nothing says which variable holds which block, until written `owns_block` atoms in
+    invariants (M4.5d2b).
 11. **Still rejected** (fail closed; one pin each, the message naming the session): an allocation size other than
     `sizeof(T)` (M4.5e2); an (A) call not converted directly to `T*` (`void *m = malloc(4)`, a discarded or tested
     result, `free(malloc(4))`; M4.7, M8); `void*` objects, parameters and results in user code and every other `void*`

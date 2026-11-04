@@ -536,7 +536,10 @@ separation rows first; a (D) call's rows are `invalid-free` and replace the argu
 program (any view or block site) every method ends, after `label l_end`, with `assert forperm t: Ref [t.tok] :: E`
 (`leak`, at the closing brace; `E` the `ensures` block sites' tokens, or `false`), and every loop back edge with a row
 exempting the loop's token places. A block site counts as a full-permission atom on every leaf for 0039 item 4's
-sequencing rules; consuming sites and (D) views register writes of the liveness and token cells.
+sequencing rules; consuming sites and (D) views register a write of the liveness cell (pseudo-field `lv`). In a heap
+program a loop's automatic places also hold, for each pointer variable declared before it, the object it designates at
+entry (the variable, or a ghost `hb := v` when the loop assigns it): leaf cells, liveness cell and the free token (`kt`
+snapshot, back-edge `perm(tok) >= kt`), which the back-edge leak row exempts.
 
 ## 4. Viper shape
 

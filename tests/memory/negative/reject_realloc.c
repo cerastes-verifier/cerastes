@@ -8,6 +8,8 @@
 
 int f(void)
 {
-  (void)realloc(NULL, 4);  // <- here
+  if (realloc(NULL, 4) != NULL) {  // <- here
+    return 1;
+  }
   return 0;
 }

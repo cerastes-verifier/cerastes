@@ -1681,6 +1681,7 @@ class Lowerer {
     for (const Clause& c : f.requires_) collect_derived(f, c.expr);
     for (const Clause& c : f.ensures_) collect_derived(f, c.expr);
     for (const Clause& c : f.decreases_) collect_derived(f, c.expr);
+    index_block_order(f);
     return atoms_.emplace(&f, std::move(fa)).first->second;
   }
 
@@ -1703,6 +1704,32 @@ class Lowerer {
       if (!fb.sites[i].in_ensures) ++fb.nreq;
     }
     return blocks_.emplace(&f, std::move(fb)).first->second;
+  }
+  // One evaluation order over both site lists (decision 0047 item 4; audit round 2, S3): for each permission atom of `f`'s contract, the number of `owns_block` sites before
+  // it, which is the position in `blocks_of(f).sites` of the first block site after it.  The walk is vir.cpp's AtomCollector's (`&&`; `||` and `?:` into their arms), the
+  // requires clauses first and then the ensures; a place or a guard of an atom that is read through a load is framed by the atoms before it, block sites included.
+  void index_block_order(const Function& f) {
+    const FnBlocks& fb = blocks_of(f);
+    size_t n = 0;
+    std::function<void(const Expr*)> walk = [&](const Expr* e) {
+      if (e == nullptr) return;
+      if (e->kind == Expr::Kind::Atom) {
+        if (fb.index.count(e) != 0) ++n;
+        else blocks_before_[e] = n;
+      } else if (e->kind == Expr::Kind::Binary && (e->bop == BinaryOp::LAnd || e->bop == BinaryOp::LOr)) {
+        walk(e->a);
+        walk(e->b);
+      } else if (e->kind == Expr::Kind::Cond) {
+        walk(e->b);
+        walk(e->c);
+      }
+    };
+    for (const Clause& c : f.requires_) walk(c.expr);
+    for (const Clause& c : f.ensures_) walk(c.expr);
+  }
+  size_t block_sites_before(const Expr* atom) const {
+    const auto it = blocks_before_.find(atom);
+    return it == blocks_before_.end() ? 0 : it->second;
   }
   // The position of the first block site at or after clause `clause` of the requires (`ens` false) or ensures list (first_site's twin).
   static size_t first_block_site(const FnBlocks& fb, bool ens, int clause) {
@@ -2036,6 +2063,7 @@ class Lowerer {
     cens_ = s.in_ensures;
     cold_ = false;
     cseen_ = fa.index.at(s.atom);
+    cbseen_ = block_sites_before(s.atom);  // audit round 2, S3: the block sites before the atom frame its loads too
     return lower(*s.base, env, guard, gdep, fl).e;
   }
   E site_ref(const AtomSite& s, const Env& env, const E& guard = nullptr, const Deps& gdep = Deps{}, Full* full = nullptr) {
@@ -2176,8 +2204,10 @@ class Lowerer {
       cens_ = s.in_ensures;
       cold_ = false;
       const FnAtoms& sfa = atoms_of(*sf);
-      if (const auto si = sfa.index.find(s.atom); si != sfa.index.end()) cseen_ = si->second;
-      else internal_error(s.atom->loc, "an owns_block site whose guard reads the heap reached lowering");
+      if (const auto si = sfa.index.find(s.atom); si != sfa.index.end()) {
+        cseen_ = si->second;
+        cbseen_ = block_sites_before(s.atom);
+      } else internal_error(s.atom->loc, "an owns_block site whose guard reads the heap reached lowering");
     } else {
       cmode_ = CMode::Wf;
     }
@@ -7524,6 +7554,7 @@ class Lowerer {
   size_t cbseen_ = 0;  // the same for the `owns_block` sites of `cf_` (decision 0047 item 4)
   std::map<const Function*, FnAtoms> atoms_;
   std::map<const Function*, FnBlocks> blocks_;
+  std::map<const Expr*, size_t> blocks_before_;  // a permission atom -> the number of block sites before it (index_block_order)
   bool heap_ = false;  // a heap program (decision 0047 item 7): a view call or an owns_block site anywhere
   std::deque<Derived> derived_;                                    // decision 0045: the derived keys (a deque: references to entries stay valid)
   std::map<std::tuple<const Function*, int, std::vector<int>>, int> derived_index_;

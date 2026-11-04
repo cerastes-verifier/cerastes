@@ -1,0 +1,28 @@
+// expect: error uninitialized @ L25
+// mode: c23, c++20
+// twin: tests/memory/heap_ref_to_uninit_param.c
+// Pins: 0047 item 8 (audit S4): the call keeps the flag as the caller had it: the caller never wrote the cell, so its read after the call is uninitialized
+// Pre-registered from record 0047 item 8: uninitialized at the caller's read; re-registered after audit round 1 (record 0047 item 4): audit round 2 S4: BlockMode::Kept and an owns_block borrow on a must_init parameter had no pair
+#include <cerastes.h>
+#include <stdlib.h>
+
+int touch(int *p CERASTES_REF_TO_UNINIT)
+    CERASTES_REQUIRES(cerastes_owns_block(p))
+    CERASTES_ENSURES(r, cerastes_owns_block(p) && r == 5)
+{
+  *p = 5;
+  return *p;
+}
+
+int use(void)
+    CERASTES_ENSURES(r, r == 0 || r == -1)
+{
+  int *p = (int *)malloc(sizeof(int));
+  if (p == NULL) {
+    return -1;
+  }
+  int t = touch(p);
+  int v = *p;  // <- here
+  free(p);
+  return v - v + t - t;
+}

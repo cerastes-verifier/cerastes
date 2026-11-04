@@ -8,6 +8,8 @@
 
 int f(void)
 {
-  (void)aligned_alloc(16, 16);  // <- here
+  if (aligned_alloc(16, 16) != NULL) {  // <- here
+    return 1;
+  }
   return 0;
 }

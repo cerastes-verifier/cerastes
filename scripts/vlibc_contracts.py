@@ -39,6 +39,12 @@ Fail closed: any doubt is an error `file:line: message` and exit status 1.
     item 1): a program's macro over a name such as `size` could otherwise change what a
     trusted contract says, so a contract names its parameters `__size`, its result `__r`
     and uses `cerastes_*` spec functions;
+  * a trusted declaration with `void *` in its signature has exactly one of the two contract shapes of decision 0047 item 2 (the
+    encoder reads no other, audit S5), checked textually: (A) an allocation `void *f(<integer __params>)` whose contract is one
+    `CERASTES_ENSURES(__r, __r == NULL || cerastes_owns_block(__r, S))` with `CERASTES_REF_TO_UNINIT` after the declarator, or
+    `CERASTES_ENSURES(__r, __r == NULL || (cerastes_owns_block(__r, S) && cerastes_zeroed(__r)))` without it (exactly one of the
+    two), `S` a parameter or a product of parameters, and no `requires`; (D) a deallocation `void f(void *__p CERASTES_REF_TO_UNINIT)`
+    with `CERASTES_REQUIRES(__p == NULL || cerastes_owns_block(__p))` and nothing else;
   * a bare marker (`CERASTES_REF_TO_UNINIT`, `CERASTES_OWNING`, ...) after a declarator, or
     after a parameter's declarator-id, is not a contract group and hides no name;
   * the shim directory holds only `*.h` files (no subdirectory, no other file), and its parent
@@ -443,6 +449,46 @@ def unreserved_identifiers(text: str) -> list[tuple[int, str]]:
     return bad
 
 
+VOID_POINTER_RE = re.compile(r"\bvoid\s*\*")
+_INT_TYPE = r"(?:size_t|(?:unsigned |signed )?(?:char|short|int|long|long long))"
+_ALLOC_PARAM = rf"{_INT_TYPE} __[A-Za-z0-9_]+"
+ALLOC_SHAPE_RE = re.compile(
+    rf"^void \*(?P<name>[A-Za-z_][A-Za-z0-9_]*)\((?P<params>{_ALLOC_PARAM}(?:, {_ALLOC_PARAM}){{0,2}})\)"
+    r"(?P<marker> CERASTES_REF_TO_UNINIT)? CERASTES_ENSURES\(__r, __r == NULL \|\| (?P<body>.*)\);$")
+ALLOC_OWNS_RE = re.compile(r"cerastes_owns_block\(__r, (?P<size>__[A-Za-z0-9_]+(?: \* __[A-Za-z0-9_]+)*)\)")
+DEALLOC_SHAPE_RE = re.compile(
+    r"^void (?P<name>[A-Za-z_][A-Za-z0-9_]*)\(void \*(?P<p>__[A-Za-z0-9_]+) CERASTES_REF_TO_UNINIT\) "
+    r"CERASTES_REQUIRES\((?P=p) == NULL \|\| cerastes_owns_block\((?P=p)\)\);$")
+
+
+def void_pointer_problem(declaration: str) -> str | None:
+    """Decision 0047 item 2 (audit S5): the reason why a declaration with `void *` in its signature is neither the (A) allocation shape
+    nor the (D) deallocation shape, or None (also None when the signature has no `void *`)."""
+    if not VOID_POINTER_RE.search(strip_groups(declaration)):
+        return None
+    m = DEALLOC_SHAPE_RE.match(declaration)
+    if m:
+        return None
+    m = ALLOC_SHAPE_RE.match(declaration)
+    if m:
+        params = [p.split()[-1] for p in m.group("params").split(", ")]
+        body = m.group("body")
+        marker = m.group("marker") is not None
+        zeroed = re.fullmatch(r"\((?P<owns>cerastes_owns_block\(__r, [^()]*\)) && cerastes_zeroed\(__r\)\)", body)
+        owns = ALLOC_OWNS_RE.fullmatch(zeroed.group("owns") if zeroed else body)
+        if owns is None:
+            return "its `ensures` is not `__r == NULL || cerastes_owns_block(__r, <size>)` (optionally `&& cerastes_zeroed(__r)` in parentheses)"
+        if marker == bool(zeroed):
+            return ("an allocation carries exactly one of `CERASTES_REF_TO_UNINIT` (contents indeterminate) and `cerastes_zeroed(__r)` "
+                    "(contents zero): with neither the flags would be set over unspecified values")
+        if not all(n in params for n in re.findall(r"__[A-Za-z0-9_]+", owns.group("size"))):
+            return "the size is not a parameter or a product of parameters"
+        return None
+    return ("`void *` in its signature, but its contract is neither (A) `void *f(<integer __params>) [CERASTES_REF_TO_UNINIT] "
+            "CERASTES_ENSURES(__r, __r == NULL || ...)` nor (D) `void f(void *__p CERASTES_REF_TO_UNINIT) CERASTES_REQUIRES(__p == NULL || "
+            "cerastes_owns_block(__p))` (decision 0047 item 2: the encoder reads those two shapes only)")
+
+
 def declarator_name(text: str) -> str | None:
     t = strip_groups(text)
     k = t.find("(")
@@ -541,6 +587,10 @@ def read_header(path: Path, shown: str, problems: Problems) -> list[Trusted]:
                          "names its parameters `__name`, its result `__r` and uses `cerastes_*` functions, "
                          "`NULL`, `false` or `true` only (decision 0047 item 1)")
         if unreserved:
+            continue
+        shape = void_pointer_problem(collapse(st.text))
+        if shape is not None:
+            problems.add(shown, st.start, f"`{tag.name}`: {shape}")
             continue
         result.append(Trusted(tag.name, Path(shown).name, collapse(st.text), tag.reason, shown, tag.line))
 
