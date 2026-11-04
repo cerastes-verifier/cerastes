@@ -3,43 +3,37 @@
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
 rediscover, and holds only what is live (owner, 2026-10-26; consolidated again at M4.5b2b's start, 2026-11-02: §3 is
-regrouped by the session that consumes each note; updated at M4.5c1's, M4.5c2a's, M4.5c2b's and M4.5d1's starts). The text before
-M4.5d1 is `git show d26a87c:internal/handoff.md`, before M4.5c2b `git show 7f11706:internal/handoff.md`, before M4.5c2a `git show cbdcce5:internal/handoff.md`, before M4.5c1
+regrouped by the session that consumes each note; updated at M4.5c1's, M4.5c2a's, M4.5c2b's, M4.5d1's and M4.5d2a's starts). The text
+before M4.5d2a is `git show 9d98fe8:internal/handoff.md`, before M4.5d1 `git show d26a87c:internal/handoff.md`, before M4.5c2b `git show 7f11706:internal/handoff.md`, before M4.5c2a `git show cbdcce5:internal/handoff.md`, before M4.5c1
 `git show 1bfa705:internal/handoff.md`, and before M4.5b2b `git show 38877b4:internal/handoff.md`, whose header names
 every earlier version (each note below keeps its origin in brackets, so its full wording can be found there). Session
 plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session consumes move into its plan.
 
 ## 1. State
 
-- **On `origin/main`** (`37f6dda`): everything through M4.5c2a (PR #25). **M4.5c2b** (record 0045; plan
-  `.claude/plans/m4-5c2b-heap-read-places.md`) is PR #26 (`m4.5c2b-heap-read-places`, tip `d26a87c`), open at M4.5d1's
-  start. The local `main` `00fe5a2` is a local merge of `origin/main` and `d26a87c`.
-- **M4.5d1** (vlibc in cerastes; record 0046; plan `.claude/plans/m4-5d1-vlibc.md`, questions 113–118) is done on
-  branch `m4.5d1-vlibc` (local commits from `d26a87c`, so its PR stacks on PR #26) in the worktree
-  `.claude/worktrees/m4.5d1`; its baseline worktree `.claude/worktrees/m4.5d1-base` (detached at `d26a87c`) is no longer
-  needed. vlibc's half is vlibc's `5962865`, already pushed: nothing to push in vlibc. Result in `internal/status.md`.
-- **Audits:** round 1 on the record (B1 redirected trusted calls, B2 question 116), round 2 on the code (B1 C++ linkage
-  after a guard-skipped header, B2 early-created functions), one re-audit (symbol stealing by asm labels; `static` before
-  the header): every blocking item reproduced natively and fixed. Reports in the worktree's `build/m4.5d1/audit{1,2,3}.md`.
-  What was not taken is in §3.
-- **The Linux host** `matt@clang4.cpp.al` (key accepted by the owner during this session) cannot bootstrap natively (no
-  root; no libc++ 21, JDK 17, GCC 16 there): runs go in a container built from a clean `ubuntu:26.04` with the S5 recipe
-  (`cerastes-m4.5d1:runner`, container `cerastes-m4.5d1-p71`, checkout `~/cerastes-m4.5d1/cerastes`; kept for the next
-  session or removable).
+- **On `origin/main`** (`f59e4b2`): everything through M4.5c2b (PR #26). **M4.5d1** (vlibc in cerastes; record 0046;
+  plan `.claude/plans/m4-5d1-vlibc.md`) is PR #27 (`m4.5d1-vlibc`, tip `9d98fe8`), open at M4.5d2a's start; the local
+  `main` `38eb115` is a local merge of it. vlibc's half of d1 is vlibc's `5962865` (pushed).
+- **M4.5d2a** (the heap; record 0047; plan `.claude/plans/m4-5d2a-heap.md`, questions 120–123) is in progress on branch
+  `m4.5d2a-heap` (from `9d98fe8`, so its PR stacks on PR #27) in the worktree `.claude/worktrees/m4.5d2a`. Its baseline
+  is the d1 worktree `.claude/worktrees/m4.5d1` (clean at `9d98fe8`, used read-only), copied into
+  `build/m4.5d2a-baseline-{vpr,vir}`. vlibc's half of d2a is a commit on vlibc's local `main`, pinned through the
+  submodule's `local` remote (`NOT YET PUSHED`) until the owner pushes vlibc.
+- **The Linux host** `matt@clang4.cpp.al` cannot bootstrap natively (no root; no libc++ 21, JDK 17, GCC 16 there): runs
+  go in a container built from a clean `ubuntu:26.04` with the S5 recipe (`cerastes-m4.5d1:runner`, container
+  `cerastes-m4.5d1-p71`, checkout `~/cerastes-m4.5d1/cerastes`; reused by d2a).
 
 The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits behind upstream `main` (§4.1).
 
 ## 2. Owner steps
 
-1. **PR #26 (M4.5c2b), after CI:** merge it; then in the main checkout `git reset --keep origin/main` on `main` (the local
-   merge `00fe5a2` and PR #26's merge have the same two parents), and `git worktree remove` `.claude/worktrees/m4.5c2b`,
-   `m4.5c2b-base`, and the older `m4.5b2b-base`, `m4.5c1`, `m4.5c1-base`, `m4.5c2a`, `m4.5c2a-base`.
-2. **M4.5d1:** push `m4.5d1-vlibc` and open its PR against `main` (its base `d26a87c` is PR #26's tip, so after #26 merges
-   the PR shows only d1's commits). The PR adds the submodule `third_party/vlibc` (CI's recursive checkout fetches it);
-   then fast-forward `main` and remove `.claude/worktrees/m4.5d1` and `m4.5d1-base`.
-3. vlibc's CI pins cerastes `234ede3` for `<cerastes.h>`; moving it to a commit on cerastes's `main` is vlibc's own step
-   (`CERASTES_COMMIT` in vlibc's `ci.yml`), not needed for d1.
-4. Then M4.5d2's planning (§4.2).
+1. **PR #27 (M4.5d1), after CI:** merge it; then in the main checkout `git reset --keep origin/main` on `main` (the local
+   merge `38eb115` and PR #27's merge have the same two parents), and `git worktree remove` the older session worktrees
+   (`m4.5c2b`, `m4.5c2b-base`, `m4.5b2b-base`, `m4.5c1`, `m4.5c1-base`, `m4.5c2a`, `m4.5c2a-base`, `m4.5d1-base`; keep
+   `m4.5d1` until d2a ends, it is d2a's baseline).
+2. **M4.5d2a, at its end:** push vlibc's `main` first (the d2a commit: the malloc family's contracts and
+   `CERASTES_COMMIT` moved to `f59e4b2`), then push `m4.5d2a-heap` and open its PR against `main` (after #27 merges it
+   shows only d2a's commits).
 
 ## 3. Open notes, by the session that consumes them
 
@@ -48,35 +42,47 @@ Notes that a session consumes move into its plan's "Inputs" (M4.5b2b took the ca
 P4222's markers, P54 and the b2b design points).
 
 
-*M4.5d1's notes (P55's allow-list, 0031 item 9's exemption) moved into its plan's Inputs.*
+*M4.5d1's notes (P55's allow-list, 0031 item 9's exemption) moved into its plan's Inputs. M4.5d2's notes moved into
+M4.5d2a's plan's Inputs (`.claude/plans/m4-5d2a-heap.md`); those d2a hands on are below.*
 
-**M4.5d2 `malloc` and `free`**
-- vlibc's markers in C: `check_signature`'s `ours` is keyed on `decl_position` (`encode.cpp:~708`), which C keeps at the
-  platform's declaration, so `owning`/`ref_to_uninit`/`must_init` on a vlibc declaration would not be read in C; and
-  `lib_trust` sees only `contracts_of`, so a library declaration with only `owning` skips the tag, reserved-name and
-  macro checks (record 0046) [d1 audit 2 notes 3, 4].
-- The contract macro scan (record 0046 item 4) reads only the contract's own identifiers (a system macro such as `NULL`
-  is not followed) and refuses any program macro of the same name wherever it is defined: with `free(void *p)` and
-  `malloc(size_t n)` that rejects reasonable programs (`#define n 10`); give vlibc's parameters reserved names
-  (`__p`?) or count only directives before the contract's position [d1 audit 2 note 5].
-- d2's twins of trusted contracts must violate the `requires` (record 0046 item 9) [d1 audit 1 N8].
-- The rejection of a marker (`owning`, `must_init`, `ref_to_uninit`) on a user redeclaration of a system function reads
-  only secondary declarations in verified files (`encode.cpp:2668`): revisit it when vlibc's own headers carry markers
-  (`malloc`'s `ref_to_uninit` result) [b2b; handed on by M4.5d1, whose headers carry none].
-- Register `owning`'s `r`, `v` and `d` (owning fields moved here, question 91) and `ref_to_uninit`'s `v` and `r` here, in
-  the commit that handles them; `check_attributes` skips registered attributes [M4.5a, b2b, c1 planning].
-- Records 0029 and 0042 cite P4222R2 (2026-07-11); P4418R0 cites P4222R3 (2026-10-22): check R3 against them at d2's
-  planning [c1 planning].
-- `malloc(sizeof(struct S))`: `sizeof` folds to EDG's ABI size, not the model's member blocks; d2's typed view of an
-  allocated struct must give the member lengths and the slot facts of record 0043 items 4 and 8 (`WF_S` is an invariant of
-  every trusted method) [c1 P65 N5].
+**M4.5d2v vlibc's allocator** (question 121, the model; record 0047)
+- vlibc replaces the platform's allocator under the standard names: a portable C23 core (free lists over regions), pages
+  from `mmap` on both platforms, glibc's documented replacement set (`malloc`, `free`, `calloc`, `realloc`,
+  `aligned_alloc`, `free_sized`, `free_aligned_sized`, `malloc_usable_size`, `memalign`, `posix_memalign`, `valloc`,
+  `pvalloc`; https://sourceware.org/glibc/manual/latest/html_node/Replacing-malloc.html: `max_align_t` alignment, `free`
+  leaves `errno`, initial-exec TLS, `realloc(p, 0)` frees and returns NULL), on macOS a malloc zone made the default zone
+  so libSystem's own allocations (`strdup`, `getline`) use vlibc too (a static `malloc` rebinds only the program's own
+  calls: ld(1)'s two-level namespace; mimalloc and jemalloc do the same), thread-safe (C23 7.24.3p2's total order). Compile
+  the core with `-fno-builtin` (no loop turned into a call back into vlibc). C23 7.1.3/6.4.2.1p8: a library outside the
+  implementation defining `malloc` is undefined behaviour except under a platform's documented replacement; record 0046
+  item 6 (question 117) refuses user definitions of reserved names, so vlibc's own `src/` is verified later under a rule of
+  its own (vlibc's sources are not user code). Run tests in vlibc's CI on both platforms with both compilers (`test/`
+  links nothing today; cerastes's native runs compile only). [M4.5d2a planning]
+
+**M4.5d2b results, owning locals, globals and fields, P4418R0** (from M4.5d2a's planning, the check of P4222R3 the
+handoff asked for; sources: P4222R3, P4416R0 (its wording), P4418R0, P4417R0 (its wording), all 2026-10-22; open-std's
+`p4222r1.pdf` holds the July "R2" that 0029 cites, `p4222r2.pdf` the August R1)
+- P4222R3 and P4416R0 require a local receiving `malloc`'s result to be marked `ref_to_uninit` (`int *s
+  [[ref_to_uninit]] = buffer(4); // OK`, an unmarked one an error): d2a rejects that shape under `--strict-init`, naming
+  d2b (target `v`); d2b decides the strict rules for marked locals, returns (P4416 `[profiles.init.ref]` p6: a marked
+  function's returns "shall refer to uninitialized objects", null "refers to initialized objects"), the null argument to a
+  `ref_to_uninit` parameter (R3 rejects it, P4416 (2.3) accepts it; 0042 item 8's strict rejection agrees with R3), `free`
+  (unmarked in P4416: an exemption), and `void*` markers (R3 allows them; 0042 item 4 rejects them on parameters). The
+  marker stays on the pointer until `now_init` in the papers; cerastes keeps the flag on the cell (more programs accepted,
+  path-precise). P4416 treats `x = 1; x = 2;` as a double initialization (a drafting slip: not copied) and analyses
+  syntactic paths (cerastes: feasible paths, so `--strict-init` is P4222's static form only up to that).
+- P4417R0's `[[owner]]` on a parameter is a **transfer** (the callee must delete), where 0029 item 1 made
+  `cerastes::owning` on a parameter a **borrow**; P4418 exempts static owners where 0029 item 1 has an owning global freed
+  by the end of `main`. `[[not_invalidating]]` (a pointer parameter whose function does not invalidate, checked at the
+  definition) and `no_dangling()` (a suppression, `std::forward` in P4417 8.4) are what d2b spells in `cerastes::`;
+  P4417 keeps raw storage (`malloc`) out of the invalidation profile. C applies: raw pointers, structs with pointer
+  members as containers, the escape rules, `[[owner]]` on variables, parameters, fields and results, `not_invalidating`
+  on pointer parameters; references, iterators, smart pointers and `new`/`delete` are M7's.
 - `alloc_<t>` does not ensure `block_of(r) != GB_g()`, so `&x != &g` is not proved in a function that holds nothing of
-  `g` [b2a audit 1 N3].
+  `g`; d2a's typed views do not state it either (one rule; adding it changes the lint-pinned text and every program with
+  cells and globals) [b2a audit 1 N3; to M4.8 if d2b does not need it].
 - `return &s;` of a `static` local leaves the caller only `WF(r)`, so its uses are `lifetime`
-  (`static_local_return_address_use.c`) until `ensures` atoms land [b2a].
-- Record 0042's `internal` row for `ref_to_uninit` (`(g_r && old(flag)) ==> flag`) can fail after a real `permission`
-  error only where another chunk may hold the same place, which nothing creates today; re-check it once a cell can be
-  reached through a fresh heap chunk (`malloc` after `keep(p)`) [b2b audit 1 N1].
+  (`static_local_return_address_use.c`) until partnerless `ensures` atoms land (`live(r)`) [b2a].
 
 **M4.5e1/e2 Arrays and pointer arithmetic:** P38's braced initializers (§4.2); signed/unsigned and enumeration variants
 through `void*` cannot be written [M4.5a]; accepted completeness gap for e2's relational comparisons: `&s.x < &s.y` is
@@ -300,7 +306,7 @@ not taken go to §3); single-file runs while working (`build/cerastes verify` di
 builds serialized (`lockf build/<session>/build.lock cmake --build build/cmake`); `check.sh` at most twice; the EDG
 suites on the x86-64 host are their own session, but any x86-64 test run a session needs goes to `matt@clang4.cpp.al`
 automatically (owner, 2026-10-29: not Docker multi-arch on the Mac, which is only the fallback when the host is down).
-Record numbers are the next free ones when written (0046 is M4.5d1's, 0047 the next free one). The
+Record numbers are the next free ones when written (0047 is M4.5d2a's, 0048 the next free one). The
 approved plan is saved as `.claude/plans/<milestone>-<topic>.md` (plan.md, "Session protocol").
 
 Finished sessions: their plans are in `.claude/plans/` (from M4.5b1a on), their results in `internal/status.md` and the
@@ -367,6 +373,16 @@ through a pointer member, an atom on `*q` where `q` is a cell, atoms and reads t
 **M4.5d1 vlibc** (record 0046; plan `.claude/plans/m4-5d1-vlibc.md`, questions 113–118) is done: the pin, the
 include order, the library class, trust from vlibc's tags, reserved names, attributes by position, the redirection
 rules; d2 is not rolled in (question 113), its preparation is below.
+
+**M4.5d2 is three sessions** (owner, 2026-11-03, questions 120–122). **M4.5d2a** (the heap; record 0047; plan
+`.claude/plans/m4-5d2a-heap.md`) is in progress: vlibc's contracts for `malloc`, `calloc` and `free`, `void*` at an
+allocation and at `free` only, one object per allocation (a typed view, size `sizeof(T)`), heap blocks with the slot −1
+token, `invalid-free`, leaks by `forperm` (`leak`; `main`'s return included, question 123), `owns_block` in contracts,
+`owning` and `ref_to_uninit` on functions (target `r`), two calls ordered over liveness and token cells, blocks held
+through locals across loops (the first cut); `realloc` to M4.5e2. **M4.5d2v** (vlibc's allocator, in vlibc's repository,
+right after d2a): the replacement allocator of question 121 (§3). **M4.5d2b** (after d2v): the rest of the paragraph
+below that d2a does not take (`ensures` atoms with no partner, owning locals, globals and fields, `ref_to_uninit` on
+locals, P4418R0, P4222R3's strict rules; §3). The original d2 paragraph and its dependency map follow.
 
 **M4.5d2 `malloc` and `free`.** vlibc's contracts (`malloc` `ref_to_uninit`, `calloc` initialized, `realloc`, `free`),
 heap blocks with the slot −1 token, the free checks (`invalid-free`), the leak rule by `forperm` and a record on `main`'s
@@ -753,5 +769,12 @@ vlibc's header is accepted: the front end discards it), 117 (definitions of rese
 rejected for C linkage in any namespace and, in C++, any linkage in the global namespace; four pins of 0015 item 5
 re-expected); after the first runs of the new tests: 118 (the two alias pins re-expected `unsupported_attribute`), 119
 (the three glibc `assert` near misses also expect `side_effect_not_evaluated`).
+
+At M4.5d2a's planning (2026-11-03, each the recommendation; recorded in its plan and record 0047): 120 (d2 is split: d2a
+the heap now, `realloc` to M4.5e2, loops the first cut), 121 (vlibc replaces the platform's allocator: standard names, a
+portable C23 core, pages from `mmap`, glibc's replacement set, a default malloc zone on macOS, thread-safe; the owner's
+directive that vlibc holds complete implementations of the functions it covers, verified as cerastes becomes able to,
+amending 0030 item 2), 122 (that allocator is M4.5d2v, a session of its own right after d2a), 123 (blocks still held when
+`main` returns are leaks, like VeriFast; a path ending in a call that never returns is not checked).
 
 No question is open.
