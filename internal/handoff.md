@@ -4,13 +4,18 @@ The next session reads this file after `CLAUDE.md`, its own section in `plan.md`
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
 rediscover, and holds only what is live (owner, 2026-10-26; consolidated again at M4.5b2b's start, 2026-11-02: §3 is
 regrouped by the session that consumes each note; updated at M4.5c1's, M4.5c2a's, M4.5c2b's, M4.5d1's and M4.5d2a's starts, and
-by S6, a docs session that changed no code: its additions are marked "S6"). The text before S6 is
+by S6, a docs session that changed no code: its additions are marked "S6"; and at M4.5d2v's start, 2026-11-04). The text before M4.5d2v is `git show 9255b93:internal/handoff.md`, before S6
 `git show bb41d55:internal/handoff.md`, before M4.5d2a `git show 9d98fe8:internal/handoff.md`, before M4.5d1 `git show d26a87c:internal/handoff.md`, before M4.5c2b `git show 7f11706:internal/handoff.md`, before M4.5c2a `git show cbdcce5:internal/handoff.md`, before M4.5c1
 `git show 1bfa705:internal/handoff.md`, and before M4.5b2b `git show 38877b4:internal/handoff.md`, whose header names
 every earlier version (each note below keeps its origin in brackets, so its full wording can be found there). Session
 plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session consumes move into its plan.
 
 ## 1. State
+
+- **M4.5d2v** (2026-11-04; record 0050; plan `.claude/plans/m4-5d2v-allocator.md`, questions 129, 130 and 134–142):
+  in progress on branch `m4.5d2v-allocator` (from `origin/main` `9255b93`, S6 merged) in the worktree
+  `.claude/worktrees/m4.5d2v`; the baseline in `.claude/worktrees/m4.5d2v-base`. First the M4.5d2a re-audit's B1–S3, then
+  vlibc's allocator (in `~/Documents/cerastes/vlibc`, local `main`) with cerastes's half.
 
 - **S6** (2026-11-04; record 0049; plan `.claude/plans/s6-tutorial.md`, questions 131–133): a tutorial
   (`doc/modules/ROOT/pages/tutorial/`, seven chapters) and a developer guide (`pages/dev/`, eight pages) as sections of
@@ -84,22 +89,7 @@ P4222's markers, P54 and the b2b design points).
 *M4.5d1's notes (P55's allow-list, 0031 item 9's exemption) moved into its plan's Inputs. M4.5d2's notes moved into
 M4.5d2a's plan's Inputs (`.claude/plans/m4-5d2a-heap.md`); those d2a hands on are below.*
 
-**M4.5d2a follow-up** (the re-audit, `build/m4.5d2a/audit3.md`; the first work of the next session)
-- **B1 (blocking, exit 3):** heap-place snapshots in loops (record 0047 item 10; `src/vir/lower.cpp:6036-6093`, splits
-  `:6618-6631`) lack case splits Silicon needs: `block_of(hb_i) == block_of(hb_j)` between token places, and splits (cell,
-  `lvloc`, `block_of`) against every pointer local and formal declared before the loop (used or not) and every `requires`
-  block-site formal; plus a catch-all `if (k > none) { }` after each heap snapshot for holders reached through loads. Repros
-  t22 (`calloc`'d `s`, `int *x = &s->b;`, a loop writing `*x`, then `free(s)`), t16, t11, t19, t23/t24, t25, t21 in the
-  auditor's scratch (`/private/tmp/claude-501/-Users-mattborland-Documents-cerastes-cerastes/10e100ed-0977-4a3f-bd2b-28d149d810d5/scratchpad/a3/`,
-  may be gone: rebuild from the report); the confirmed fixes are listed there. Pin t22, t16, t19, t23, t25.
-- **S1:** a pointer parameter's local copy becomes a heap place that is always guarded off (`v_a__0 != p_a__0`), so a file
-  that calls `malloc` anywhere multiplies the splits of unrelated functions (30 → 100 in t28; 186 s → timeout): skip the
-  copy of a parameter with an atom place that the function never assigns (`lower.cpp:6039`).
-- **S2:** pin the back-edge exemption's precision (t34: carries `p`, leaks `q = malloc(…)` each iteration → `leak`).
-- **S3:** the block row's `WF` check at a call became `permission` (`lower.cpp:1885`), turning an encoder precision loss
-  into a user message; add an automatic `internal` invariant `flag ==> WF(v)` for pointer locals a loop assigns and restore
-  `internal`, or fix record 0047 item 6 and the docs. Notes N1–N6 in the report (a must-fail for `writes_in_expr`, record
-  item 10's wording, two code tidiness items, `Call` in `heap_guard` with M4.5f1, the textual `void *` check).
+*M4.5d2a's follow-up (B1, S1, S2, S3) moved into M4.5d2v's plan's Inputs (`.claude/plans/m4-5d2v-allocator.md`).*
 
 **S6 notes** (record 0049)
 - **The claims audit is not done** (owner, 2026-11-04: "I can have the soundness auditor run in a different session"):
@@ -120,27 +110,7 @@ M4.5d2a's plan's Inputs (`.claude/plans/m4-5d2a-heap.md`); those d2a hands on ar
 - **`examples/dev/`** is in the policy lists but has no files: the developer guide quotes test headers in `text` blocks
   (0049 item 5). [S6]
 
-**M4.5d2v vlibc's allocator** (questions 121, 122 and 128; record 0048, which replaces question 121's design)
-- vlibc's allocator is named `vlibc_malloc`, `vlibc_calloc`, `vlibc_realloc`, `vlibc_free`, `vlibc_aligned_alloc`,
-  `vlibc_free_sized`, `vlibc_free_aligned_sized` (C23 7.24.3), complete and usable without cerastes: a portable C23 core
-  (free lists over regions), pages from `mmap` on both platforms (trusted glue), `max_align_t` alignment, thread-safe
-  (7.24.3p2's total order; the lock is chosen at planning), built as `libvlibc` and declared in `<vlibc/stdlib.h>` after
-  the standard names, inside `extern "C"` for C++, each with its standard name's contract token for token and its own
-  tag (0048 items 1, 2, 6). Run tests in vlibc's CI on both platforms with both compilers, with threads and under ASan
-  and UBSan (`test/` links nothing today; cerastes's native runs compile only). What POSIX adds (`errno` = `ENOMEM`) and
-  `realloc(p, 0)` are decided at planning. [0048; M4.5d2a planning]
-- Nothing replaces the standard names: no malloc zone, no `malloc_type_*` entry points (macOS's `_MALLOC_TYPED`, d2a
-  audit 2 N4, concerns only `malloc` itself, which stays the platform's), no glibc replacement set, no `-fno-builtin`
-  requirement (0048 item 6). Replacing the platform's allocator is an M8 inventory entry (0048 item 7). [0048]
-- cerastes's half (0048 items 2, 4, 6): `vlibc_contracts.py` learns the `extern "C"` block and the pairing check (a
-  `vlibc_<name>` whose contract differs from `<name>`'s is refused); heap blocks know their allocator, a mismatch is
-  `invalid-free` (question 129); the pin moves only with that rule; the four functions whose standard names have no
-  contract yet are declared without one (question 130), checked to leave programs that do not call them unchanged;
-  must-verify/must-fail pairs, a must-fail per new trusted contract, the docs. The planning may split the halves
-  (question 77). [0048]
-- d2a's contracts are trusted; the allocator's own verification comes after M4.6 (plan.md's d2v row), under the rule for
-  vlibc's `src/` that M4.6 decides (0048 item 5). vlibc's `<stdlib.h>` already includes `<stddef.h>` for `size_t`/`NULL`
-  (`35e9b6f`) [d2a].
+*M4.5d2v's notes moved into its plan's Inputs (`.claude/plans/m4-5d2v-allocator.md`).*
 
 **M4.5d2b results, owning locals, globals and fields, P4418R0** (from M4.5d2a's planning, the check of P4222R3 the
 handoff asked for; sources: P4222R3, P4416R0 (its wording), P4418R0, P4417R0 (its wording), all 2026-10-22; open-std's
@@ -397,7 +367,7 @@ not taken go to §3); single-file runs while working (`build/cerastes verify` di
 builds serialized (`lockf build/<session>/build.lock cmake --build build/cmake`); `check.sh` at most twice; the EDG
 suites on the x86-64 host are their own session, but any x86-64 test run a session needs goes to `matt@clang4.cpp.al`
 automatically (owner, 2026-10-29: not Docker multi-arch on the Mac, which is only the fallback when the host is down).
-Record numbers are the next free ones when written (0047 is M4.5d2a's, 0048 the next free one). The
+Record numbers are the next free ones when written (0047 is M4.5d2a's, 0048 and 0049 are taken, 0050 is M4.5d2v's). The
 approved plan is saved as `.claude/plans/<milestone>-<topic>.md` (plan.md, "Session protocol").
 
 Finished sessions: their plans are in `.claude/plans/` (from M4.5b1a on), their results in `internal/status.md` and the
@@ -887,16 +857,16 @@ lands with the session that completes its concept; every session keeps the exist
 also agreed to the layout (the tutorial and the developer guide in this repository's `doc/`, the website the front door)
 and, during the session, asked for the examples only, not the full suite.
 
-**Open, for M4.5d2v's planning** (each with the recommended answer, record 0048):
-
-129. **Blocks know their allocator.** With identical contracts, cerastes cannot tell a block of `malloc` from one of
-     `vlibc_malloc`, so it would accept `free(vlibc_malloc(n))`, undefined behaviour at run time. *Recommended:* the
-     model records each heap block's allocator, set by the allocating routine's name class (a standard name: the
-     platform's; a `vlibc_` name: vlibc's) and required by the deallocating one, a mismatch reported `invalid-free`;
-     `owns_block(p)` in a user's contract keeps meaning a block of the standard allocator (every test keeps its meaning),
-     and a spelling for a vlibc block is decided with d2b's owning results; the pin moves to a vlibc declaring the
-     `vlibc_` allocation functions with contracts only together with this rule.
-130. **Functions implemented before their standard name has a contract** (`vlibc_realloc` until M4.5e2;
-     `vlibc_aligned_alloc`, `vlibc_free_sized`, `vlibc_free_aligned_sized`). *Recommended:* declared in `<vlibc/stdlib.h>`
-     without a contract and untagged, so a verified program's call is `call_without_contract`; contracts come with
-     their standard names' (realloc in M4.5e2; `free_sized` needs a deallocation shape with a size).
+At M4.5d2v's planning (2026-11-04, each the recommendation; recorded in its plan and record 0050): 129 (blocks know
+their allocator: set by the allocating routine's name class, required by the deallocating one, a mismatch `invalid-free`;
+`owns_block` keeps meaning the standard allocator; the pin moves only with the rule), 130 (the four functions whose standard
+names have no contract are declared contract-less and untagged; cerastes skips such a library routine unless called, a call
+`call_without_contract`), 134 (the M4.5d2a re-audit's B1–S3 first), 135 (S3 fix A: an automatic `internal` loop invariant
+keeps assigned pointer locals well-formed in heap programs, the free row's `WF` `internal` again;
+`heap_loop_swap_false_alarm.c` loses exactly `error permission @ L38` and `@ L39`, pre-approved), 136 (one session, split
+point: vlibc's run, thread and sanitizer tests not green once cerastes's half passed its audit → ask), 137 (one global
+`pthread_mutex_t` in the trusted glue), 138 (`vlibc_malloc(0)` a unique block; `vlibc_realloc(p, 0)` NULL, `p` kept), 139
+(errno as POSIX.1-2024: `ENOMEM`, `EINVAL` for an unsupported alignment and `realloc(p, 0)`, frees keep errno), 140 (vlibc
+allocation views rejected in C++ until M7: [intro.object]/10–13 create objects only for `std::malloc` and its family), 141
+(`vlibc_free_sized`/`vlibc_free_aligned_sized` always check and abort on a mismatch), 142 (macOS GCC: UBSan only if its
+ASan does not run).
