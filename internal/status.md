@@ -64,9 +64,19 @@ fifteen existing pins (M4.5d2b, M4.7/M8).
 - **Full runs:** at `250a2af` 9903 passed, 19 failed (all since fixed or re-expected); `check.sh` at `e645a20` stopped in
   the harness self-test (six failures: doc markup and the guard-skipped fixture, fixed in `ad691eb`); after that the harness
   self-test 1108 OK, walker-oracle, lint (432), mutate and vlibc-contracts self-tests OK, `check_doc_examples` (and
-  `--html`) 0 problems. The last full run (started after `ad691eb`) was stopped at the session's end: FULL2_PARTIAL.
-- **Not run (owner, 08:00):** a second `check.sh`, and the Linux rerun of the final tip (P72's glibc half ran; the box run of
-  `e645a20` was in progress, its result not received): CI's two jobs on the PR are the check (§2).
+  `--html`) 0 problems. The last full run (started after `ad691eb`) was stopped at the session's end: its printed part (1634 passing runs, through `tests/memory/init_*`) failed only `heap_block_then_load.c`'s native compile (fixed in `889c974`).
+- **Linux** (`matt@clang4.cpp.al`, container `cerastes-m4.5d1-p71`, glibc 2.43, clang 21 over libc++ 21, gcc-16; clean
+  bootstrap at `e645a20`/vlibc `0f5de92`, then `ad691eb`/vlibc `35e9b6f`): `tests/vlibc` 134 passed, 0 failed (the 8
+  `platform: linux` tests ran); `check_vlibc_headers.sh` clean; `vlibc_contracts.py check` clean; the doc examples 32 passed;
+  vlibc's own `check.sh` 24/24 with gcc-16 and clang-21; the heap group 450 passed, 7 failed: `heap_block_then_load.c`'s
+  native compile (fixed in `889c974`), `reject_malloc_discarded.c` (glibc gives no result-use warning: split into a
+  `platform: macos` pin and a `platform: linux` sibling `reject_malloc_discarded_glibc.c`, the same rejection at L13,
+  untested on Linux), and **`reject_owning_system_redeclaration.c [c23]`, not fixed**: on glibc C23 `strtol` carries the
+  asm label `__isoc23_strtol`, so record 0046 item 8's asm-label rejection (`unsupported_declaration @ L9`) comes before
+  the pinned marker rejection (`unsupported_annotation @ L9`); a pre-existing pin (M4.5b2b) that d1's Linux run of
+  `tests/memory` (at `45f655b`) passed, so likely changed by d1's late asm-label rule (`26e4deb`) — CI's Linux full run
+  will show it red (handoff §2).
+- **Not run (owner, 08:00):** a second `check.sh` (macOS) on the final tip: CI's two jobs on the PR are the check (§2).
 
 **Surprises**
 - A double free would have been `lifetime` (the argument's liveness use check first): the `invalid-free` rows replace it.

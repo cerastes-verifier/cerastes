@@ -42,6 +42,13 @@ The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits beh
    since the PR tier runs only the changed tests). Known unknowns CI settles: the Linux behaviour of the heap and vlibc
    tests at the final tip (glibc's `nothrow`/`malloc` attributes on the family, C++'s lost `noexcept`), and the full suite
    after the last fixes (the last full run on macOS, at `250a2af`, had 19 failures, all fixed or re-expected since).
+   **Expected red on Linux:** `tests/memory/negative/reject_owning_system_redeclaration.c [c23]` (glibc's C23 asm label on
+   `strtol` makes record 0046 item 8's `unsupported_declaration @ L9` come before the pinned `unsupported_annotation @ L9`;
+   the box run at `ad691eb`); the PR tier may skip it (it runs changed tests and a sample), the nightly full check will
+   not, and PR #27 may show it too if d1's `26e4deb` changed it. Fix by choosing a system function with a pointer
+   parameter and no asm label on either platform for the pin (an owner-approved code change, or ask), or by reporting
+   both rejections (then the pin gains a line: ask). The new `reject_malloc_discarded_glibc.c` (`platform: linux`) never
+   ran on Linux; its expectation is the box run's observation of the macOS pin's rejection line.
    **Even with CI green**, the re-audit's B1 and S1 (§3, "M4.5d2a follow-up") are the next session's first work, before
    M4.5d2v: they are exit 3 on correct programs and a timeout regression, not wrong verdicts, and no committed test hits
    them.
