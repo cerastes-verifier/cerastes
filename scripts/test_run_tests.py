@@ -6655,7 +6655,8 @@ class NativePolicyTests(RootedCase):
              "doc/modules/ROOT/examples/annotations",
              "doc/modules/ROOT/examples/ordinary-compilers",
              "doc/modules/ROOT/examples/verifying", "doc/modules/ROOT/examples/error-messages",
-             "doc/modules/ROOT/examples/integer-semantics", "doc/modules/ROOT/examples/memory"])
+             "doc/modules/ROOT/examples/integer-semantics", "doc/modules/ROOT/examples/memory",
+             "doc/modules/ROOT/examples/tutorial", "doc/modules/ROOT/examples/dev"])
         self.assertEqual(rt.POSITIVE_KINDS, ("golden", "verified"))
 
     def test_a_positive_test_in_a_policy_directory_needs_native_ok(self):
@@ -12842,7 +12843,8 @@ class DualModeTests(RootedCase):
             "tests/scalar", "tests/memory", "tests/vlibc", "doc/modules/ROOT/examples/verifying",
             "doc/modules/ROOT/examples/error-messages",
             "doc/modules/ROOT/examples/integer-semantics",
-            "doc/modules/ROOT/examples/memory"])
+            "doc/modules/ROOT/examples/memory", "doc/modules/ROOT/examples/tutorial",
+            "doc/modules/ROOT/examples/dev"])
 
     def test_the_documentation_examples_of_the_m3_pages_are_covered(self):
         for page in ("verifying", "error-messages", "integer-semantics"):

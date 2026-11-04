@@ -381,7 +381,7 @@ never run). `--check-headers` reports both.
 ### `.c` tests run in both languages
 
 A `.c` test under `tests/scalar/`, under `tests/memory/` and under the example directories of the M3
-pages and of the Memory and ownership page (`DUAL_MODE_DIRS`; the documentation examples are tests too) lists both modes,
+pages, of the Memory and ownership page and of the tutorial and developer guide (`DUAL_MODE_DIRS`; the documentation examples are tests too) lists both modes,
 `// mode: c23, c++20`, because the code is valid C and C++ and the dual run is what
 checks it. A test that is only C says why: `// c-only: <reason>` (`.c` files only;
 not with `c++20` in `mode:`). Negative tests are covered too.
@@ -567,7 +567,8 @@ directories listed in `NATIVE_POLICY_DIRS` in `scripts/run_tests.py`:
 `doc/modules/ROOT/examples/ordinary-compilers` and the examples of the M3 pages,
 `doc/modules/ROOT/examples/verifying`, `doc/modules/ROOT/examples/error-messages` and
 `doc/modules/ROOT/examples/integer-semantics`, and the examples of the Memory and ownership page,
-`doc/modules/ROOT/examples/memory` (with their subdirectories), and
+`doc/modules/ROOT/examples/memory` (with their subdirectories), and the examples of the tutorial and the developer guide,
+`doc/modules/ROOT/examples/tutorial` and `doc/modules/ROOT/examples/dev` (decision 0049), and
 of every positive test, wherever it is, whose source has an
 `#include <cerastes.h>` (or `"cerastes.h"`) line. Negative tests are exempt. `expect: frontend-ok` is a header error in these
 directories (stock cpfe does not define `__CERASTES__`, so the annotations

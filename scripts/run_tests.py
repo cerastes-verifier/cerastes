@@ -353,7 +353,10 @@ NATIVE_POLICY_DIRS = (Path("tests/annotations"),
                       Path("doc/modules/ROOT/examples/error-messages"),
                       Path("doc/modules/ROOT/examples/integer-semantics"),
                       # the Memory and ownership page (decision 0032)
-                      Path("doc/modules/ROOT/examples/memory"))
+                      Path("doc/modules/ROOT/examples/memory"),
+                      # the tutorial and the developer guide (decision 0049)
+                      Path("doc/modules/ROOT/examples/tutorial"),
+                      Path("doc/modules/ROOT/examples/dev"))
 NEGATIVE_DIR = Path("tests/annotations/negative")
 SCALAR_NEGATIVE_DIR = Path("tests/scalar/negative")
 MEMORY_NEGATIVE_DIR = Path("tests/memory/negative")
@@ -660,7 +663,10 @@ DUAL_MODE_DIRS = (Path("tests/scalar"),
                   Path("doc/modules/ROOT/examples/verifying"),
                   Path("doc/modules/ROOT/examples/error-messages"),
                   Path("doc/modules/ROOT/examples/integer-semantics"),
-                  Path("doc/modules/ROOT/examples/memory"))
+                  Path("doc/modules/ROOT/examples/memory"),
+                  # the tutorial and the developer guide (decision 0049)
+                  Path("doc/modules/ROOT/examples/tutorial"),
+                  Path("doc/modules/ROOT/examples/dev"))
 
 
 def policy_problem(path: Path, text: str, exp: Expectation) -> str | None:
