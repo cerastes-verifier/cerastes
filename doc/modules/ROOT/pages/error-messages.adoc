@@ -479,7 +479,13 @@ right is missing:
   points to) where no `owns` or `reads` of that object comes before it, at a contract that both owns and reads `*p` on one path, at
   an `ensures` that gives back `*p` on a path where the `requires` did not take
   it, and at a termination measure that reads `*p` without owning it
-  (xref:memory.adoc#contracts[Memory and ownership]);
+  (xref:memory.adoc#contracts[Memory and ownership]); also at a contract that
+  names an object through a pointer it does not hold first (`+owns(**pp)+`
+  without `owns(*pp)`: "the contract of `f` reads `*pp` without owning it"), and
+  at a contract without a body whose `ensures` names, through a pointer, an
+  object it does not tie to one its `requires` took ("the contract of `f` returns
+  `+**pp+` without saying it is the object its `requires` took")
+  (xref:memory.adoc#pointers-to-pointers[Pointers to pointers]);
 * at the closing brace of a loop's body, when an iteration ends without an
   object the loop started with (a function called in the loop kept it), and at
   a loop invariant or measure that reads an object the loop does not hold

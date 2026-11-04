@@ -513,7 +513,7 @@ class Checker {
     for (const AtomSite& s : sites) placed.insert(s.atom);
     for (const Expr* a : all)
       if (placed.count(a) == 0)
-        err(a->loc, "a permission atom in a position decision 0037 item 5 does not allow (a top-level conjunct, the right of `||` or an arm of `?:` whose condition reads no heap)");
+        err(a->loc, "a permission atom in a position decision 0037 item 5 does not allow (a top-level conjunct, the right of `||` or an arm of `?:` whose condition holds no atom, call or side effect)");
     if (placed.size() != sites.size()) err(f.loc, "a permission atom reachable twice in the contract of '" + f.c_name + "'");
     // Requires atoms are numbered in evaluation order; no two of one kind on one parameter (the partner would be ambiguous).
     std::vector<const AtomSite*> req;
@@ -624,7 +624,7 @@ class Checker {
     if (s.form == LoopForm::DoOnce) return;  // refused one by one in expr()
     for (const Expr* a : all)
       if (placed.count(a) == 0)
-        err(a->loc, "a permission atom in a position decision 0037 item 5 does not allow (a top-level conjunct, the right of `||` or an arm of `?:` whose condition reads no heap)");
+        err(a->loc, "a permission atom in a position decision 0037 item 5 does not allow (a top-level conjunct, the right of `||` or an arm of `?:` whose condition holds no atom, call or side effect)");
     if (placed.size() != sites.size()) err(s.loc, "a permission atom of an invariant reachable twice");
     for (size_t k = 0; k < sites.size(); ++k) {
       const Expr& a = *sites[k].atom;
@@ -634,6 +634,14 @@ class Checker {
         if (b.a != nullptr && b.a->kind == Expr::Kind::Local && b.atom == a.atom && b.a->var == a.a->var)
           err(a.loc, "the same permission atom twice in the invariant of a loop (decision 0040 item 5)");
       }
+    }
+    // Decision 0045 item 2: the places with a key of their own (a cell, a member or a load; a plain pointer variable is compared above).
+    for (size_t k = 0; k < sites.size(); ++k) {
+      const PlaceKey ka = atom_place(*sites[k].atom);
+      if (!ka.valid()) continue;
+      for (size_t j = 0; j < k; ++j)
+        if (sites[j].atom->atom == sites[k].atom->atom && atom_place(*sites[j].atom) == ka)
+          err(sites[k].atom->loc, "the same permission atom twice in the invariant of a loop (decision 0040 item 5)");
     }
   }
 
@@ -1056,12 +1064,13 @@ class Checker {
         if (!e.a->type.is_ptr()) err(e.loc, "a dereference of a " + e.a->type.str() + ", not a pointer");
         else if (e.a->type.pointee == nullptr || e.type != *e.a->type.pointee) err(e.loc, "a dereference whose type is not the pointee's");
         {
-          // In a contract the place is `*p`, `*result`, `g` or, decision 0043 item 9, a member of one of them (`p->x`, `r->t.y`): strip the MemberAddrs.
-          const Expr* root = member_root(e.a);
+          // In a contract the place is `*p`, `*result`, `g` or, decision 0043 item 9, a member of one of them (`p->x`, `r->t.y`) or, decision 0045 item 2,
+          // any of those reached through loads and pointer leaves (`**pp`, `*gp`, `p->q->x`, `*s.q`, `*r.q`): the root under MemberAddr, Deref and Field nodes.
+          const Expr* root = place_root(e.a);
           if ((ctx == Ctx::Requires || ctx == Ctx::Ensures) && root->kind != Expr::Kind::Formal && root->kind != Expr::Kind::GlobalAddr &&
               !(ctx == Ctx::Ensures && root->kind == Expr::Kind::Result))
-            err(e.loc, "a dereference in a contract of something other than a pointer parameter, a global or, in an `ensures`, the result, or a member of one of them "
-                       "(decisions 0037 item 5, 0040 items 4 and 6, 0041 item 7, 0043 item 9)");
+            err(e.loc, "a dereference in a contract of something other than a pointer parameter, a global or, in an `ensures`, the result, or a member of one of them, "
+                       "or a place reached from one of them through loads (decisions 0037 item 5, 0040 items 4 and 6, 0041 item 7, 0043 item 9, 0045 item 2)");
           else if ((ctx == Ctx::Requires || ctx == Ctx::Ensures) && root->kind == Expr::Kind::GlobalAddr && root->global != nullptr && root->global->owner != nullptr)
             err(e.loc, "a read of the `static` local '" + root->global->c_name + "' in a contract (its name is not in scope there, decision 0041 item 12)");
         }
@@ -1081,25 +1090,37 @@ class Checker {
         if (!sub(e.a)) break;
         {
           // The place of the atom (decision 0043 item 9): the pointer `a` itself (`owns(*p)`, `live(p)`) or a member address under it (`owns(p->x)`).
+          // Decision 0045 item 2: the place of the atom is `member_root(a)` (the base pointer) under any number of loads and pointer leaves; `steps` are
+          // the steps from the root to the base (the member tail comes last in place_root's steps and is not one of them).
           const Expr* root = member_root(e.a);
           const bool member = root != e.a;
+          std::vector<int> steps;
+          const Expr* place = place_root(e.a, &steps);
+          const bool stepped = steps.size() > atom_place(e).path.size();  // the base pointer is reached through a load or a pointer leaf
           if (e.implicit_atom && !(e.atom == AtomKind::Owns && !member && e.a->kind == Expr::Kind::GlobalAddr && e.a->global != nullptr && e.a->global->owner != nullptr))
             err(e.loc, "an implicit atom that is not the `owns` of a `static` local (decision 0041 item 12)");
-          if (in_invariant_ && root->kind == Expr::Kind::GlobalAddr) {
+          if (in_invariant_ && place->kind == Expr::Kind::GlobalAddr && !stepped) {
             err(e.loc, "a permission atom on a global in a loop invariant (decision 0041 item 10: the globals the function holds are in every loop's invariant already)");
             break;
           }
-          if (in_invariant_ ? e.a->kind != Expr::Kind::Local : (root->kind != Expr::Kind::Formal && root->kind != Expr::Kind::GlobalAddr))
-            err(e.loc, in_invariant_ ? "a permission atom of an invariant of something other than a pointer variable (decision 0040 item 5)"
-                                     : "a permission atom of something other than a pointer parameter or a global, or a member of one (decisions 0037 item 5, 0041 item 7, 0043 item 9)");
+          // A contract's place has a Formal, a global or (an `ensures`, through a step: an atom on the result itself is M4.5d2's) the result for its root; an
+          // invariant's a pointer variable, the address of a cell or (through a load) a global.
+          const bool root_ok = in_invariant_ ? (place->kind == Expr::Kind::Local || place->kind == Expr::Kind::AddrOf || (place->kind == Expr::Kind::GlobalAddr && stepped))
+                                             : (place->kind == Expr::Kind::Formal || place->kind == Expr::Kind::GlobalAddr ||
+                                                (ctx == Ctx::Ensures && place->kind == Expr::Kind::Result && stepped));
+          // A load that is not of a pointer (`owns(*(*p))` of an `int *p`) is no place's address: the operand must be a pointer unless it is the root itself.
+          if (!root_ok || (place != e.a && !e.a->type.is_ptr()))
+            err(e.loc, in_invariant_ ? "a permission atom of an invariant of something other than a pointer variable, a cell or a place reached from one (decisions 0040 item 5, 0045 item 2)"
+                                     : "a permission atom of something other than a pointer parameter or a global, or a member of one, or a place reached from one through loads "
+                                       "(decisions 0037 item 5, 0041 item 7, 0043 item 9, 0045 item 2)");
           else if (!accepted_pointer(e.a->type))
             err(e.loc, "a permission atom of something that is not a pointer to a bool, an integer, a struct or a pointer");
           else if (member && e.atom == AtomKind::Live)
             err(e.loc, "`live` of the address of a member (decision 0043 item 9: `live(p)` names the pointer)");
-          else if (root->kind == Expr::Kind::GlobalAddr && e.atom == AtomKind::Live)
+          else if (place->kind == Expr::Kind::GlobalAddr && !stepped && e.atom == AtomKind::Live)
             err(e.loc, "`live` of the address of a global (decision 0041 item 7: a global's liveness is never in doubt)");
-          else if (root->kind == Expr::Kind::GlobalAddr && root->global != nullptr && root->global->owner != nullptr && !e.implicit_atom)
-            err(e.loc, "a permission atom the user wrote on the `static` local '" + root->global->c_name + "' (its name is not in scope in a contract, decision 0041 item 12)");
+          else if (place->kind == Expr::Kind::GlobalAddr && place->global != nullptr && place->global->owner != nullptr && !e.implicit_atom)
+            err(e.loc, "a permission atom the user wrote on the `static` local '" + place->global->c_name + "' (its name is not in scope in a contract, decision 0041 item 12)");
         }
         break;
       case Expr::Kind::MemberAddr: {
@@ -1119,9 +1140,10 @@ class Checker {
         if (!e.type.is_ptr() || e.type.pointee == nullptr || *e.type.pointee != st.members[static_cast<size_t>(e.index)].type)
           err(e.loc, "the address of the member '" + st.members[static_cast<size_t>(e.index)].name + "' of " + st.c_name + " has the wrong type");
         if (ctx == Ctx::Requires || ctx == Ctx::Ensures) {
-          const Expr* root = member_root(&e);
+          const Expr* root = place_root(&e);  // decision 0045 item 2: under loads and pointer leaves too (`p->q->x`)
           if (root->kind != Expr::Kind::Formal && root->kind != Expr::Kind::GlobalAddr && !(ctx == Ctx::Ensures && root->kind == Expr::Kind::Result))
-            err(e.loc, "a member address in a contract that is not rooted at a pointer parameter, a global or, in an `ensures`, the result (decision 0043 item 9)");
+            err(e.loc, "a member address in a contract that is not rooted at a pointer parameter, a global or, in an `ensures`, the result, or reached from one through loads "
+                       "(decisions 0043 item 9, 0045 item 2)");
         }
         break;
       }
@@ -1238,9 +1260,10 @@ class Checker {
 
   // In a contract: the place expression `a` of a Deref or an Atom, a chain of MemberAddr nodes over a root, is allowed (decision 0043 item 9); a
   // GlobalAddr root is the read of `g` (decision 0041 item 7).
+  // Decision 0045 item 2: the chain runs through loads (Deref) and pointer leaves (Field) too, so every MemberAddr of it is marked (`p->q->x`).
   void mark_contract_place(const Expr* a) {
-    while (a != nullptr && a->kind == Expr::Kind::MemberAddr) {
-      ok_members_.insert(a);
+    while (a != nullptr && (a->kind == Expr::Kind::MemberAddr || a->kind == Expr::Kind::Deref || a->kind == Expr::Kind::Field)) {
+      if (a->kind == Expr::Kind::MemberAddr) ok_members_.insert(a);
       a = a->a;
     }
     if (a != nullptr && a->kind == Expr::Kind::GlobalAddr) ok_globals_.insert(a);

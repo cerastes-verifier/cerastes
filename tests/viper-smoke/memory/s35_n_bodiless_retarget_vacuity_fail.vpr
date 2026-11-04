@@ -1,0 +1,110 @@
+// expect: error assert:assertion.false @ L73
+// expect: error assert:assertion.false @ L109
+// S35 (n) vacuity of s35_n_bodiless_retarget.vpr: `assert false` at the end of each method must FAIL (record 0045 item 5)
+// Hand-written in the emitted style (see the positive fixture).
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0037 items 6-7, 0040 item 2): WF; an int range; a cell owned (root, full permission, flag set, range or WF of the pointer, the liveness amount); live
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNGV(v) ((-2147483648) <= v && v <= 2147483647)
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+define CI(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNGV(c.v_int))
+define CP(c) (acc(c.v_ptr_int) && acc(c.d_ptr_int) && c.d_ptr_int && WF(c.v_ptr_int))
+define OWNI(p, a) (ROOT(p) && CI(p) && LVF(p, a))
+define OWNP(p, a) (ROOT(p) && CP(p) && LVF(p, a))
+define LIVE(p, a) (p != null && WF(p) && LVF(p, a))
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_int() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(r.v_int) && acc(r.d_int) && !r.d_int && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract allocation of an address-taken local of type int*: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_ptr_int() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(r.v_ptr_int) && acc(r.d_ptr_int) && !r.d_ptr_int && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// void retarget(int **pp, int *q) requires(owns(*pp) && live(*pp)) ensures(owns(*pp) && *pp == old(*pp) && live(*pp));   -- NO BODY (a trusted contract; in C `*pp = q;` meets the untied one)
+// the ensures atom live(*pp) is the object *pp designates on return; nothing proves that it is the object the requires took
+method f_retarget__0(p_pp: Ref, p_q: Ref, a0: Perm, a1: Perm)
+  requires (none < a0) && (a0 < write)
+  requires (none < a1) && (a1 < write)
+  requires WF(p_pp) && WF(p_q)
+  requires OWNP(p_pp, a0) && LIVE(p_pp.v_ptr_int, a1)
+  ensures OWNP(p_pp, a0) && p_pp.v_ptr_int == old(p_pp.v_ptr_int) && LIVE(p_pp.v_ptr_int, (p_pp.v_ptr_int == old(p_pp.v_ptr_int) ? a1 : a1))
+  decreases _
+
+// well-formedness of the contract of retarget: a function without a body (audit B1): for each ensures atom whose place loads, prior ==> (g_ens ==> q_post == q_partner_pre) (`permission`: write `*pp == old(*pp)`)
+method f_retarget__0__wf(p_pp: Ref, p_q: Ref, a0: Perm, a1: Perm, hv_0_pre: Ref, hv_0_post: Ref)
+  requires (none < a0) && (a0 < write)
+  requires (none < a1) && (a1 < write)
+  requires WF(p_pp) && WF(p_q)
+  requires WF(hv_0_pre) && WF(hv_0_post)
+  decreases
+{
+  assert (hv_0_post == hv_0_pre) ==> (true ==> hv_0_post == hv_0_pre)
+  assert false // <- vacuity
+}
+
+// int x, y; int *p = &x; retarget(&p, &y); check(p != &y);   (a Viper-level caller with its three objects as parameters, so that no scope exit needs x's liveness back)
+method f_main__1(p_x: Ref, p_y: Ref, p_p: Ref)
+  requires WF(p_x) && WF(p_y) && WF(p_p)
+  requires LIVE(p_x, write) && LIVE(p_y, write) && OWNP(p_p, write)
+  requires p_x != p_y
+  decreases
+{
+  assert !((perm(p_p.v_ptr_int) != write) || (perm(p_p.d_ptr_int) != write))
+  p_p.v_ptr_int := p_x
+  p_p.d_ptr_int := true
+  // retarget(&p, &y): the per-atom rows, the splits, the amounts (a third of each liveness cell), the call
+  assert p_p != null
+  assert WF(p_p)
+  assert offset_of(p_p) < len(block_of(p_p))
+  assert perm(p_p.v_ptr_int) == write
+  assert perm(p_p.d_ptr_int) == write
+  assert p_p.d_ptr_int
+  assert WF(p_p.v_ptr_int)
+  assert p_p.v_ptr_int != null
+  assert WF(p_p.v_ptr_int)
+  if (lvloc(block_of(p_p)) == lvloc(block_of(p_p.v_ptr_int))) { }
+  if (lvloc(block_of(p_p)) == lvloc(block_of(p_y))) { }
+  if (lvloc(block_of(p_p.v_ptr_int)) == lvloc(block_of(p_y))) { }
+  assert none < (perm(lvloc(block_of(p_p)).lv) / 3)
+  assert (perm(lvloc(block_of(p_p)).lv) / 3) < write
+  assert none < (perm(lvloc(block_of(p_p.v_ptr_int)).lv) / 3)
+  assert (perm(lvloc(block_of(p_p.v_ptr_int)).lv) / 3) < write
+  assert perm(lvloc(block_of(p_p)).lv) >= ((perm(lvloc(block_of(p_p)).lv) / 3) + ((lvloc(block_of(p_p)) == lvloc(block_of(p_p.v_ptr_int))) ? (perm(lvloc(block_of(p_p.v_ptr_int)).lv) / 3) : none))
+  assert perm(lvloc(block_of(p_p.v_ptr_int)).lv) >= ((perm(lvloc(block_of(p_p.v_ptr_int)).lv) / 3) + ((lvloc(block_of(p_p.v_ptr_int)) == lvloc(block_of(p_p))) ? (perm(lvloc(block_of(p_p)).lv) / 3) : none))
+  f_retarget__0(p_p, p_y, perm(lvloc(block_of(p_p)).lv) / 3, perm(lvloc(block_of(p_p.v_ptr_int)).lv) / 3)
+  assert perm(p_p.v_ptr_int) > none
+  assert p_p.d_ptr_int
+  assert p_p.v_ptr_int == p_x
+  assert false // <- vacuity
+}

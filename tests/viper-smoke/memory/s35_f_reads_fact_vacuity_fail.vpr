@@ -1,0 +1,117 @@
+// expect: error assert:assertion.false @ L101
+// expect: error assert:assertion.false @ L116
+// S35 (f) vacuity of s35_f_reads_fact.vpr: `assert false` at the end of each method must FAIL (record 0045 item 5)
+// Hand-written in the emitted style (see the positive fixture).
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0037 items 6-7, 0040 item 2): WF; an int range; a cell owned (root, full permission, flag set, range or WF of the pointer, the liveness amount); live
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNGV(v) ((-2147483648) <= v && v <= 2147483647)
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+define CI(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNGV(c.v_int))
+define CP(c) (acc(c.v_ptr_int) && acc(c.d_ptr_int) && c.d_ptr_int && WF(c.v_ptr_int))
+define OWNI(p, a) (ROOT(p) && CI(p) && LVF(p, a))
+define OWNP(p, a) (ROOT(p) && CP(p) && LVF(p, a))
+define LIVE(p, a) (p != null && WF(p) && LVF(p, a))
+
+// reads atoms: the cell at a fraction (wildcard permission is not used by this fixture: the amount is the ghost a)
+define RDI(p, a) (ROOT(p) && acc(p.v_int, a) && acc(p.d_int, a) && p.d_int && RNGV(p.v_int) && LVF(p, a))
+define RDP(p, a) (ROOT(p) && acc(p.v_ptr_int, a) && acc(p.d_ptr_int, a) && p.d_ptr_int && WF(p.v_ptr_int) && LVF(p, a))
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_int() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(r.v_int) && acc(r.d_int) && !r.d_int && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract allocation of an address-taken local of type int*: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_ptr_int() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(r.v_ptr_int) && acc(r.d_ptr_int) && !r.d_ptr_int && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// int peek2(int **pp) requires(reads(*pp) && reads(**pp) && **pp < 100) ensures(r, reads(*pp) && reads(**pp) && r == **pp + 1) { return **pp + 1; }
+// the ensures reads **pp in the return state: the object *pp designates on return
+method f_peek2__0(p_pp: Ref, a0: Perm, a1: Perm) returns (res: Int)
+  requires (none < a0) && (a0 < write)
+  requires (none < a1) && (a1 < write)
+  requires WF(p_pp)
+  requires RDP(p_pp, a0) && RDI(p_pp.v_ptr_int, a1) && p_pp.v_ptr_int.v_int < 100
+  ensures RNGV(res)
+  ensures RDP(p_pp, a0) && RDI(p_pp.v_ptr_int, a1) && res == p_pp.v_ptr_int.v_int + 1
+  decreases
+{
+  var eb_1: Ref
+  var t0: Ref
+  eb_1 := p_pp.v_ptr_int
+  if (lvloc(block_of(p_pp)) == lvloc(block_of(eb_1))) { }
+  assert p_pp != null
+  assert perm(p_pp.v_ptr_int) > none
+  assert p_pp.d_ptr_int
+  t0 := p_pp.v_ptr_int
+  assert t0 != null
+  assert perm(t0.v_int) > none
+  assert t0.d_int
+  assert !((t0.v_int + 1 < (-2147483648)) || (2147483647 < t0.v_int + 1))
+  res := t0.v_int + 1
+  // return rows: pass 0, the per-atom rows (reads rows: perm >= the amount) with the liveness sums, the user's ensures
+  assert perm(p_pp.v_ptr_int) > none
+  assert p_pp != null
+  assert WF(p_pp)
+  assert offset_of(p_pp) < len(block_of(p_pp))
+  assert perm(p_pp.v_ptr_int) >= a0
+  assert perm(p_pp.d_ptr_int) >= a0
+  assert p_pp.d_ptr_int
+  assert WF(p_pp.v_ptr_int)
+  assert perm(lvloc(block_of(p_pp)).lv) >= (a0 + ((lvloc(block_of(p_pp)) == lvloc(block_of(p_pp.v_ptr_int))) ? a1 : none))
+  assert p_pp.v_ptr_int != null
+  assert WF(p_pp.v_ptr_int)
+  assert offset_of(p_pp.v_ptr_int) < len(block_of(p_pp.v_ptr_int))
+  assert perm(p_pp.v_ptr_int.v_int) >= a1
+  assert perm(p_pp.v_ptr_int.d_int) >= a1
+  assert p_pp.v_ptr_int.d_int
+  assert RNGV(p_pp.v_ptr_int.v_int)
+  assert perm(lvloc(block_of(p_pp.v_ptr_int)).lv) >= (a1 + ((lvloc(block_of(p_pp.v_ptr_int)) == lvloc(block_of(p_pp))) ? a0 : none))
+  assert res == p_pp.v_ptr_int.v_int + 1
+  assert false // <- vacuity
+}
+
+// well-formedness of the contract of peek2: the ghost values of the loads in both states, the facts a `reads` place gives (a reads place is not written: post == pre; the value of **pp only under the same object, since a callee that moves *pp names another one), and the contract's own arithmetic
+method f_peek2__0__wf(p_pp: Ref, a0: Perm, a1: Perm, res: Int, hv_0_pre: Ref, hv_0_post: Ref, hv_1_pre: Int, hv_1_post: Int)
+  requires (none < a0) && (a0 < write)
+  requires (none < a1) && (a1 < write)
+  requires WF(p_pp)
+  requires RNGV(res) && WF(hv_0_pre) && WF(hv_0_post) && RNGV(hv_1_pre) && RNGV(hv_1_post)
+  requires hv_0_post == hv_0_pre
+  requires (hv_0_post == hv_0_pre) ==> (hv_1_post == hv_1_pre)
+  decreases
+{
+  // the ensures reads **pp + 1 in the return state: overflow-free under the requires (**pp < 100 in the entry state)
+  assert (hv_1_pre < 100) ==> (!((hv_1_post + 1 < (-2147483648)) || (2147483647 < hv_1_post + 1)))
+  assert false // <- vacuity
+}

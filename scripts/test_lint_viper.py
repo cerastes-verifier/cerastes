@@ -3577,6 +3577,127 @@ class StructGlobalTests(unittest.TestCase):
         self.assertTrue(any("must take the global facts" in p for p in probs), probs)
 
 
+class GhostRefTests(unittest.TestCase):
+    """Decision 0045 item 14: the ghost `Ref` locals of places reached through a heap read.  `eb_<N>` is assigned once, outside
+    every loop, from `null`, a read of a pointer cell or a conditional of those; `lb_<N>__<L>` is assigned `null` and then at
+    most one plain read, only before its loop; `aw_q<j>__<L>` is assigned once, from a read or a conditional of reads, in the
+    leading statements of a loop body.  Each rule has a twin that breaks exactly it."""
+
+    EB = "  eb_1 := x.v_ptr_int"
+    LB = ["  lb_2__0 := null", "  if (perm(x.v_ptr_int) > none) { lb_2__0 := x.v_ptr_int }"]
+    AW = "    aw_q0__0 := (perm(x.v_ptr_int) > none) ? x.v_ptr_int : null"
+
+    @staticmethod
+    def strict(lines):
+        return lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+
+    def fixture(self, entry=None, before=None, body=None, locals_=None):
+        return [
+            "field v_int: Int",
+            "field v_ptr_int: Ref",
+            "method f__1(x: Ref, n: Int)",
+            Check("  requires n >= 0", WF, "internal"),
+            "  decreases",
+            "{",
+            *(locals_ if locals_ is not None else ["  var eb_1: Ref", "  var lb_2__0: Ref", "  var aw_q0__0: Ref", "  var i: Int"]),
+            *(entry if entry is not None else [self.EB]),
+            "  i := 0",
+            *(before if before is not None else self.LB),
+            "  while (i < n)",
+            Check("    invariant n >= 0", INV, "internal"),
+            Check("    decreases n - i", "termination.failed", "termination"),
+            "  {",
+            *(body if body is not None else [self.AW, "    i := i + 1"]),
+            "  }",
+            "}",
+        ]
+
+    def test_the_emitters_shape_is_clean(self):
+        self.assertEqual(self.strict(self.fixture()), [])
+
+    def test_the_allowed_entry_values(self):
+        for rhs in ("x.v_ptr_int", "null", "(perm(x.v_ptr_int) > none) ? x.v_ptr_int : null",
+                    "(x != null) ? ((x.v_ptr_int != null) ? x.v_ptr_int.v_ptr_int : null) : null",
+                    "((x.v_int == 0) ? x : null).v_ptr_int"):
+            with self.subTest(rhs=rhs):
+                self.assertEqual(self.strict(self.fixture(entry=[f"  eb_1 := {rhs}"])), [])
+
+    def test_an_entry_snapshot_of_anything_else_is_a_problem(self):
+        for rhs in ("x", "x.v_int", "(i > 0) ? x : null", "x.v_ptr_int == null ? x : null"):
+            with self.subTest(rhs=rhs):
+                probs = self.strict(self.fixture(entry=[f"  eb_1 := {rhs}"]))
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("ghost `Ref` local `eb_1` is assigned", probs[0])
+                self.assertIn("decision 0045 item 14", probs[0])
+
+    def test_an_entry_snapshot_assigned_twice_is_a_problem(self):
+        probs = self.strict(self.fixture(entry=[self.EB, "  eb_1 := null"]))
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`eb_1` is assigned 2 times", probs[0])
+
+    def test_an_entry_snapshot_never_assigned_is_a_problem(self):
+        probs = self.strict(self.fixture(entry=[]))
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`eb_1` is assigned 0 times", probs[0])
+
+    def test_an_entry_snapshot_assigned_in_a_loop_is_a_problem(self):
+        probs = self.strict(self.fixture(body=[self.AW, "    eb_1 := x.v_ptr_int", "    i := i + 1"]))
+        self.assertTrue(any("`eb_1` is assigned inside a loop" in p for p in probs), probs)
+
+    def test_a_loop_entry_snapshot_is_null_then_a_plain_read(self):
+        self.assertEqual(self.strict(self.fixture(before=["  lb_2__0 := null"])), [])
+        probs = self.strict(self.fixture(before=["  lb_2__0 := x.v_ptr_int"]))
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`null` first", probs[0])
+
+    def test_a_loop_entry_snapshot_never_takes_a_conditional(self):
+        probs = self.strict(self.fixture(before=["  lb_2__0 := null",
+                                                 "  lb_2__0 := (perm(x.v_ptr_int) > none) ? x.v_ptr_int : null"]))
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`lb_2__0` is assigned", probs[0])
+
+    def test_a_loop_entry_snapshot_assigned_three_times_or_in_the_loop_is_a_problem(self):
+        probs = self.strict(self.fixture(before=[*self.LB, "  lb_2__0 := x.v_ptr_int"]))
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`lb_2__0` is assigned 3 times", probs[0])
+        probs = self.strict(self.fixture(body=[self.AW, "    lb_2__0 := null", "    i := i + 1"]))
+        self.assertTrue(any("`lb_2__0` is assigned inside a loop" in p for p in probs), probs)
+
+    def test_a_written_atoms_object_is_the_first_statement_of_a_loop_body(self):
+        two = ["  var eb_1: Ref", "  var lb_2__0: Ref", "  var aw_q0__0: Ref", "  var aw_q1__0: Ref", "  var i: Int"]
+        body = [self.AW, "    aw_q1__0 := x.v_ptr_int", "    i := i + 1"]
+        self.assertEqual(self.strict(self.fixture(locals_=two, body=body)), [])
+
+    def test_a_written_atoms_object_after_another_statement_is_a_problem(self):
+        probs = self.strict(self.fixture(body=["    i := i + 1", self.AW]))
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`aw_q0__0` is assigned after other statements of the loop body", probs[0])
+
+    def test_a_written_atoms_object_outside_a_loop_or_twice_is_a_problem(self):
+        probs = self.strict(self.fixture(before=[*self.LB, "  aw_q0__0 := x.v_ptr_int"], body=["    i := i + 1"]))
+        self.assertTrue(any("`aw_q0__0` is assigned outside a loop body" in p for p in probs), probs)
+        probs = self.strict(self.fixture(body=[self.AW, self.AW, "    i := i + 1"]))
+        self.assertTrue(any("`aw_q0__0` is assigned 2 times" in p for p in probs), probs)
+
+    def test_a_written_atoms_object_of_another_shape_is_a_problem(self):
+        probs = self.strict(self.fixture(body=["    aw_q0__0 := x", "    i := i + 1"]))
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`aw_q0__0` is assigned `x`", probs[0])
+
+    def test_a_struct_atoms_leaf_cell_is_a_written_atoms_object(self):
+        leaf = "    aw_q0__0 := loc(member((perm(x.v_ptr_int) > none) ? x.v_ptr_int : null, 1), 0)"
+        self.assertEqual(self.strict(self.fixture(body=[leaf, "    i := i + 1"])), [])
+        bad = "    aw_q0__0 := loc(member(x, 1), 0)"
+        probs = self.strict(self.fixture(body=[bad, "    i := i + 1"]))
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`aw_q0__0` is assigned", probs[0])
+
+    def test_other_ref_locals_are_not_ghosts(self):
+        locals_ = ["  var eb_1: Ref", "  var lb_2__0: Ref", "  var aw_q0__0: Ref", "  var t__0: Ref", "  var i: Int"]
+        body = [self.AW, "    t__0 := x", "    i := i + 1"]
+        self.assertEqual(self.strict(self.fixture(locals_=locals_, body=body)), [])
+
+
 class SelfTestHygieneTests(unittest.TestCase):
     """A test method defined twice in one class replaces the first, which then never runs (it happened here:
     two `test_labels_followed_by_no_deletable_statement_give_no_mutant`)."""

@@ -1,0 +1,174 @@
+// expect: verified
+// S35 (k) loop_eb_lb: `bump_n(int **pp, int n)` with `owns(*pp) && owns(**pp)` and a loop `**pp += 1`: the entry snapshot `eb := p_pp.v_ptr_int` is the loop's automatic place for the object (kv/kd/kl snapshots, the invariant conjuncts, the back-edge checks exactly as for a parameter place) next to the cell `*pp`; the invariant reads `**pp` through the chain over the places (record 0045 item 10)
+// Hand-written in the emitted style: explicit atomic asserts before every access, call and return (0028 item 11), ghost Perm amounts (0037 item 6), the four axioms with their tags; the allocation methods are the trusted ones (record 0032 item 4).
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0037 items 6-7, 0040 item 2): WF; an int range; a cell owned (root, full permission, flag set, range or WF of the pointer, the liveness amount); live
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNGV(v) ((-2147483648) <= v && v <= 2147483647)
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+define CI(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNGV(c.v_int))
+define CP(c) (acc(c.v_ptr_int) && acc(c.d_ptr_int) && c.d_ptr_int && WF(c.v_ptr_int))
+define OWNI(p, a) (ROOT(p) && CI(p) && LVF(p, a))
+define OWNP(p, a) (ROOT(p) && CP(p) && LVF(p, a))
+define LIVE(p, a) (p != null && WF(p) && LVF(p, a))
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_int() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(r.v_int) && acc(r.d_int) && !r.d_int && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract allocation of an address-taken local of type int*: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_ptr_int() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(r.v_ptr_int) && acc(r.d_ptr_int) && !r.d_ptr_int && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// void bump_n(int **pp, int n) requires(owns(*pp) && owns(**pp) && 0 <= n && n <= 100 && **pp == 0) ensures(owns(*pp) && *pp == old(*pp) && owns(**pp) && **pp == n) { int i = 0; while (i < n) { **pp += 1; i += 1; } }
+//   loop invariant: 0 <= i && i <= n && *pp == old(*pp) && **pp == i
+// the loop's automatic places (every place held, 0038 item 3): the cell *pp (the formal p_pp) and the object it designates, through the entry snapshot eb; the invariant's reads of **pp go through their chains
+method f_bump_n__0(p_pp: Ref, p_n: Int, a0: Perm, a1: Perm)
+  requires RNGV(p_n)
+  requires (none < a0) && (a0 < write)
+  requires (none < a1) && (a1 < write)
+  requires WF(p_pp)
+  requires OWNP(p_pp, a0) && OWNI(p_pp.v_ptr_int, a1) && (0 <= p_n) && (p_n <= 100) && p_pp.v_ptr_int.v_int == 0
+  ensures OWNP(p_pp, a0) && p_pp.v_ptr_int == old(p_pp.v_ptr_int) && OWNI(p_pp.v_ptr_int, a1) && p_pp.v_ptr_int.v_int == p_n
+  decreases
+{
+  var v_pp: Ref
+  var v_n: Int
+  var v_i: Int
+  var eb_1: Ref
+  var t0: Ref
+  var t1: Ref
+  var kl_pp: Perm
+  var kv_pp: Perm
+  var kd_pp: Perm
+  var vs_pp: Ref
+  var ds_pp: Bool
+  var kl_eb: Perm
+  var kv_eb: Perm
+  var kd_eb: Perm
+  var vs_eb: Int
+  var ds_eb: Bool
+  v_pp := p_pp
+  v_n := p_n
+  v_i := 0
+  eb_1 := p_pp.v_ptr_int   // method entry: the object the requires named (framed by owns(*pp))
+  if (lvloc(block_of(p_pp)) == lvloc(block_of(eb_1))) { }
+  assert true // (entry separation of the int places: one place)
+  // the loop's entry (audit S6): the loop-entry snapshot first, then the case splits of the snapshots against the cells, the formals' places and the liveness cells, then the perm snapshots
+  if (eb_1 == p_pp) { }
+  kl_pp := perm(lvloc(block_of(p_pp)).lv)
+  kv_pp := perm(p_pp.v_ptr_int)
+  kd_pp := perm(p_pp.d_ptr_int)
+  ds_pp := false
+  if (kd_pp > none) {
+    ds_pp := p_pp.d_ptr_int
+  }
+  if (kv_pp > none) {
+    vs_pp := p_pp.v_ptr_int
+  }
+  kl_eb := perm(lvloc(block_of(eb_1)).lv)
+  kv_eb := perm(eb_1.v_int)
+  kd_eb := perm(eb_1.d_int)
+  ds_eb := false
+  if (kd_eb > none) {
+    ds_eb := eb_1.d_int
+  }
+  if (kv_eb > none) {
+    vs_eb := eb_1.v_int
+  }
+  // the framing of the invariant's reads (before the loop and at the end of the body)
+  assert ((0 <= v_i) && (v_i <= v_n)) ==> ((v_pp == p_pp) && (kv_pp > none))
+  assert (((0 <= v_i) && (v_i <= v_n)) && ((v_pp == p_pp) && (kv_pp > none))) ==> ((((((v_pp == p_pp) && (kv_pp > none)) ? v_pp.v_ptr_int : null) == eb_1) && (kv_eb > none)))
+  assert (((0 <= v_i) && (v_i <= v_n)) && ((v_pp == p_pp) && (kv_pp > none))) ==> ((((v_pp == p_pp) && (kv_pp > none)) ? v_pp.v_ptr_int : null) == eb_1)
+  while (v_i < v_n)
+    invariant RNGV(v_i)
+    invariant ((p_pp != null)) ==> (acc(p_pp.v_ptr_int, kv_pp) && acc(p_pp.d_ptr_int, kd_pp))
+    invariant ((p_pp != null)) ==> (acc(lvloc(block_of(p_pp)).lv, kl_pp))
+    invariant (((p_pp != null)) && ((none < kv_pp) && (kv_pp < write))) ==> (p_pp.v_ptr_int == vs_pp)
+    invariant (((p_pp != null)) && ((kv_pp > none) && (kd_pp > none) && p_pp.d_ptr_int)) ==> (WF(p_pp.v_ptr_int))
+    invariant (((p_pp != null)) && ((kd_pp > none) && ds_pp)) ==> (p_pp.d_ptr_int)
+    invariant ((eb_1 != null)) ==> (acc(eb_1.v_int, kv_eb) && acc(eb_1.d_int, kd_eb))
+    invariant ((eb_1 != null) && ((p_pp != null) ==> (lvloc(block_of(eb_1)) != lvloc(block_of(p_pp))))) ==> (acc(lvloc(block_of(eb_1)).lv, kl_eb))
+    invariant (((eb_1 != null)) && ((none < kv_eb) && (kv_eb < write))) ==> (eb_1.v_int == vs_eb)
+    invariant (((eb_1 != null)) && ((kv_eb > none) && (kd_eb > none) && eb_1.d_int)) ==> (RNGV(eb_1.v_int))
+    invariant (((eb_1 != null)) && ((kd_eb > none) && ds_eb)) ==> (eb_1.d_int)
+    invariant ((0 <= v_i) && (v_i <= v_n)) ==> ((v_pp == p_pp) && (kd_pp > none) ? v_pp.d_ptr_int : false)
+    invariant ((0 <= v_i) && (v_i <= v_n)) ==> ((((v_pp == p_pp) && (kv_pp > none)) ? v_pp.v_ptr_int : null) == eb_1)
+    invariant ((0 <= v_i) && (v_i <= v_n)) ==> (((((((v_pp == p_pp) && (kv_pp > none)) ? v_pp.v_ptr_int : null) == eb_1) && (kd_eb > none)) ? (((v_pp == p_pp) && (kv_pp > none)) ? v_pp.v_ptr_int : null).d_int : false))
+    invariant ((0 <= v_i) && (v_i <= v_n)) && (((((((v_pp == p_pp) && (kv_pp > none)) ? v_pp.v_ptr_int : null) == eb_1) && (kv_eb > none)) ? (((v_pp == p_pp) && (kv_pp > none)) ? v_pp.v_ptr_int : null).v_int : 0) == v_i)
+    decreases v_n - v_i
+  {
+    assert v_pp != null
+    assert perm(v_pp.v_ptr_int) > none
+    assert v_pp.d_ptr_int
+    t1 := v_pp.v_ptr_int
+    if (t1 == eb_1) { }
+    assert t1 != null
+    assert perm(t1.v_int) > none
+    assert t1.d_int
+    assert !((t1.v_int + 1 < (-2147483648)) || (2147483647 < t1.v_int + 1))
+    assert !((perm(t1.v_int) != write) || (perm(t1.d_int) != write))
+    t1.v_int := t1.v_int + 1
+    t1.d_int := true
+
+    assert !((v_i + 1 < (-2147483648)) || (2147483647 < v_i + 1))
+    v_i := v_i + 1
+    assert ((p_pp != null)) ==> (!((perm(p_pp.v_ptr_int) < kv_pp) || (perm(p_pp.d_ptr_int) < kd_pp)))
+    assert ((p_pp != null)) ==> (!(perm(lvloc(block_of(p_pp)).lv) < kl_pp))
+    assert ((eb_1 != null)) ==> (!((perm(eb_1.v_int) < kv_eb) || (perm(eb_1.d_int) < kd_eb)))
+    assert ((eb_1 != null) && ((p_pp != null) ==> (lvloc(block_of(eb_1)) != lvloc(block_of(p_pp))))) ==> (!(perm(lvloc(block_of(eb_1)).lv) < kl_eb))
+    assert ((0 <= v_i) && (v_i <= v_n)) ==> ((v_pp == p_pp) && (kv_pp > none))
+    assert (((0 <= v_i) && (v_i <= v_n)) && ((v_pp == p_pp) && (kv_pp > none))) ==> ((((((v_pp == p_pp) && (kv_pp > none)) ? v_pp.v_ptr_int : null) == eb_1) && (kv_eb > none)))
+    assert (((0 <= v_i) && (v_i <= v_n)) && ((v_pp == p_pp) && (kv_pp > none))) ==> ((((v_pp == p_pp) && (kv_pp > none)) ? v_pp.v_ptr_int : null) == eb_1)
+  }
+  // return rows: pass 0, atom 1, the tie, atom 2, the user's value
+  assert perm(p_pp.v_ptr_int) > none
+  assert p_pp != null
+  assert WF(p_pp)
+  assert offset_of(p_pp) < len(block_of(p_pp))
+  assert perm(p_pp.v_ptr_int) == write
+  assert perm(p_pp.d_ptr_int) == write
+  assert p_pp.d_ptr_int
+  assert WF(p_pp.v_ptr_int)
+  assert perm(lvloc(block_of(p_pp)).lv) >= (a0 + ((lvloc(block_of(p_pp)) == lvloc(block_of(p_pp.v_ptr_int))) ? a1 : none))
+  assert p_pp.v_ptr_int == old(p_pp.v_ptr_int)
+  assert p_pp.v_ptr_int != null
+  assert WF(p_pp.v_ptr_int)
+  assert offset_of(p_pp.v_ptr_int) < len(block_of(p_pp.v_ptr_int))
+  assert perm(p_pp.v_ptr_int.v_int) == write
+  assert perm(p_pp.v_ptr_int.d_int) == write
+  assert p_pp.v_ptr_int.d_int
+  assert RNGV(p_pp.v_ptr_int.v_int)
+  assert perm(lvloc(block_of(p_pp.v_ptr_int)).lv) >= (a1 + ((lvloc(block_of(p_pp.v_ptr_int)) == lvloc(block_of(p_pp))) ? a0 : none))
+  assert p_pp.v_ptr_int.v_int == p_n
+}

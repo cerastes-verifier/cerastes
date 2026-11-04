@@ -126,6 +126,31 @@ Two uses of one such object that C does not order, one of them a write
 `-Wsequence-point` warns about them
 (xref:verifying.adoc#side-effects[Side effects in expressions]).
 
+A contract can name every object along the way. `cerastes_owns(*pp)` holds the
+pointer `pp` points to; `+cerastes_owns(**pp)+` (or `+cerastes_reads(**pp)+`)
+holds the object that pointer points to, and `cerastes_live(*pp)` says only that
+it points to a live object. An atom reached through a pointer read needs an
+earlier atom that holds that pointer: `+cerastes_owns(**pp)+` needs
+`cerastes_owns(*pp)` or `cerastes_reads(*pp)` before it, or the contract is
+reported as reading `*pp` without owning it:
+
+[source,c]
+----
+include::example$memory/pointer_to_pointer_contract.c[tag=source]
+----
+
+In a `requires`, `+**pp+` is the object `*pp` points to on entry; in an
+`ensures`, the one it points to on return. A function that may change `*pp`
+says whether it did: `*pp == cerastes_old(*pp)` when it does not, or names the
+new object. `+cerastes_old(**pp)+` is the value, on entry, of the object `*pp`
+pointed to on entry. A function may move `*pp` to another object it was given
+and promise `+cerastes_owns(**pp)+` for it; a function declared without a body
+must say which object its `ensures` names (`*pp == cerastes_old(*pp)`, or
+`*pp == q` for an object it was given), since nothing checks such a contract
+against code. The same holds at any depth (`+***ppp+`) and through a pointer
+member (`+p->q->x+`, <<structures>>) or a pointer global (`+*gp+`,
+<<globals>>).
+
 [#contracts]
 == Pointer parameters and contracts
 
@@ -213,10 +238,11 @@ A few more rules:
   q)`), and its object read as `*r` where an `owns` or `reads` of that object
   comes before it (`ensures(r, r == p && cerastes_owns(*p) && *r == 0)`).
 * A parameter of type `+int **+` may own the pointer it points to
-  (`cerastes_owns(*pp)`), and its contract may say where that pointer points
-  (`*pp == q`, `cerastes_old(*pp)`). A contract cannot yet say that the object
-  `*pp` points to exists, so the function can store into `*pp` but can use the
-  pointer it reads from `*pp` only when it is null.
+  (`cerastes_owns(*pp)`), say where that pointer points (`*pp == q`,
+  `cerastes_old(*pp)`), and own, read or require the liveness of the object
+  behind it (`+cerastes_owns(**pp)+`, `cerastes_live(*pp)`;
+  <<pointers-to-pointers>>). A guard may read through a pointer too:
+  `+*pp == NULL || cerastes_owns(**pp)+`, after an atom that holds `*pp`.
 * A contract may not compare pointers whose objects differ in `const`
   (`r == v` for `int *r` and `const int *v`, or `*pp == v`), nor convert a
   pointer to one whose object differs in `const` (`(const int *)r`), nor own an
@@ -396,12 +422,25 @@ Passing or returning a structure copies it, so every member must have a value:
 a member without one is reported as
 xref:error-messages.adoc#_uninitialized[`uninitialized`] at the call or the
 `return`, as at a copy. A contract reads a structure value only member by member
-(`p == q` and `cerastes_old(p)` are rejected: C has no `==` on structures), and
-the object a pointer member of a parameter points to (`+*p.next+`) is not
-supported in a contract yet; since a contract cannot yet say that such an object
-exists (`+cerastes_live(p.next)+`), the function cannot use the pointer member's
-value either (`return p.next;` is reported as
-xref:error-messages.adoc#_lifetime[`lifetime`]).
+(`p == q` and `cerastes_old(p)` are rejected: C has no `==` on structures).
+
+A contract can follow a pointer member: `+cerastes_owns(p->q->x)+` names the
+member `x` of the object `p->q` points to (after an atom that holds `p->q`, such
+as `cerastes_owns(*p)`), `+cerastes_owns(*s.q)+` and `+cerastes_live(s.q)+` the
+object a by-value parameter's pointer member points to, and in an `ensures`
+`+*r.q+` the object a returned structure's pointer member points to, after an
+atom on that object (`+r.q == p && cerastes_owns(*p) && *r.q == 1+`). Without
+`+cerastes_live(s.q)+` a function cannot use the member's value (`return s.q;` is
+reported as xref:error-messages.adoc#_lifetime[`lifetime`]):
+
+[source,c]
+----
+include::example$memory/struct_pointer_member.c[tag=source]
+----
+
+`+cerastes_live(r.q)+` and `+cerastes_owns(*r.q)+` of a returned structure are not
+supported yet: they hand the caller something the function's `requires` did not
+take.
 
 *Compound literals.* In C, `(struct point){1, 2}` is a value wherever a structure
 value is: an initializer, an assignment, an argument, a returned value.
@@ -482,6 +521,15 @@ contract names the whole object (`cerastes_owns(stats)`) or one member
 include::example$memory/struct_global.c[tag=source]
 ----
 
+A contract can name the object a pointer global points to,
+`+cerastes_owns(*gp)+`, after an atom that holds the global itself
+(`cerastes_owns(gp)` or `cerastes_reads(gp)`):
+
+[source,c]
+----
+include::example$memory/pointer_global_target.c[tag=source]
+----
+
 Globals of other files (`extern int count;` with no definition here) and arrays
 are not supported yet, nor is a structure global initialized with the address of
 another global's member (`&h.x`).
@@ -550,9 +598,13 @@ A loop may use pointers and objects in memory like any other code. Its body
 gets, without any annotation, every object in memory the function holds when
 the loop starts: the local variables whose address is taken (in every block
 that is open there, including those declared later in it), the parameters whose
-address is taken, and the object each pointer parameter points to, when the
-function never assigns that parameter. As for a local variable that the loop
-assigns, the loop's invariant states what the loop does to their values:
+address is taken, the object each pointer parameter points to, when the
+function never assigns that parameter, and every object the contract names
+through a pointer read (`+**pp+`, `+*gp+`, `+p->q->x+`, `+*s.q+`): the object the
+`requires` named, and, when the function may change the pointer before the loop,
+also the object the pointer points to when the loop starts. As for a local
+variable that the loop assigns, the loop's invariant states what the loop does
+to their values:
 
 [source,c]
 ----
@@ -600,7 +652,9 @@ code takes that address too.
 A pointer that the function assigns (a pointer local, or a parameter it
 reassigns) takes nothing into a loop by itself. The invariant says what the loop
 holds through it, with `cerastes_owns(*q)`, `cerastes_reads(*q)` or
-`cerastes_live(q)` as in a contract: the loop must hold it when it starts and at
+`cerastes_live(q)` as in a contract, also through a pointer read
+(`+cerastes_owns(**pp)+`, `+cerastes_owns(*p->q)+`, `+cerastes_owns(*gp)+`, and
+`cerastes_owns(*q)` where the address of `q` itself is taken): the loop must hold it when it starts and at
 the end of every iteration, and gives it back after the loop. Without it, an
 access inside the loop is reported as
 xref:error-messages.adoc#_permission[`permission`]:
@@ -617,7 +671,16 @@ ends without it. When the loop moves such a pointer
 (`q = &y;`), the invariant must also say where it may point
 (`q == &x || q == &y`), and what the loop held comes back after the loop only for
 the object `q` points to then. Two `owns` of objects that may be one are
-reported too. A loop that moves an owned pointer from the object of one pointer
+reported too. For a pointer to a structure, `cerastes_owns(*q)` and
+`cerastes_reads(*q)` hold every member of the structure `q` points to, and
+`+cerastes_owns(q->x)+` one member:
+
+[source,c]
+----
+include::example$memory/loop_written_struct.c[tag=source]
+----
+
+A loop that moves an owned pointer from the object of one pointer
 parameter to the object of another may be reported at the end of an iteration
 even when it is correct, since the share of each object's lifetime that the
 caller lends may differ; keep one pointer per parameter in such loops. An `owns`, `reads` or `live` in a `do … while (0)` invariant, which
@@ -642,21 +705,21 @@ include::example$memory/leave_block.c[tag=source]
 These are rejected with a diagnostic, never approximated
 (xref:verifying.adoc#not-supported[the full list]):
 
-* `owns`, `reads` or `live` of an object reached through a pointer read from
-  memory (`+cerastes_owns(**pp)+`, `cerastes_live(*pp)`), and `+**pp+` in a contract
-  or an invariant;
-* `owns` or `reads` of the object of a pointer result (`*r`), and contracts
-  that name objects other than those the parameters point to and the global
-  variables (`+cerastes_owns(*gp)+` through a pointer global included);
+* `owns`, `reads` or `live` of the object of a pointer result or of a returned
+  structure's pointer member (`*r`, `+*r.q+`, `+cerastes_live(r.q)+`, `+**r+`):
+  they give the caller something the `requires` did not take (planned with
+  `malloc` and `free`), and contracts that name objects other than those reached
+  from the parameters and the global variables;
+* `cerastes_old` inside the path of a place (`+*cerastes_old(*pp)+`, the object
+  `*pp` pointed to on entry, read on return; `+cerastes_old(p)->q->x+`), and
+  `cerastes_old` in a loop invariant (copy the value into a local before the
+  loop);
 * globals defined in another file, `volatile`, `_Atomic`, `const` structure and
   thread-local globals, `static const` locals, and global arrays;
 * the structure features listed in <<structures>>;
-* `owns`, `reads` and `live` of a structure or a structure's member in a loop
-  invariant, and in a contract a member of an object reached through a pointer
-  member (`+p->q->x+`) or the object a by-value parameter's pointer member points
-  to (`+*p.next+`);
-* `owns`, `reads` and `live` in a `do … while (0)` invariant or a measure, and on
-  a pointer variable whose own address is taken;
+* `owns`, `reads` and `live` in a `do … while (0)` invariant or a measure, and of
+  a global itself in an invariant (`cerastes_owns(g)`: the loop holds it
+  already);
 * the attribute `cerastes::owning` on anything but a parameter (on a structure's
   member, it is planned with `malloc` and `free`), and `owning(n)`;
 * `cerastes::ref_to_uninit` on a local or a function (a function returning an object

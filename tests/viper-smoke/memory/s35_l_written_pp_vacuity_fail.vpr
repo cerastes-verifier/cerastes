@@ -1,0 +1,196 @@
+// expect: error assert:assertion.false @ L195
+// S35 (l) vacuity of s35_l_written_pp.vpr: `assert false` at the end of the method must FAIL (record 0045 item 10)
+// Hand-written in the emitted style (see the positive fixture).
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0037 items 6-7, 0040 item 2): WF; an int range; a cell owned (root, full permission, flag set, range or WF of the pointer, the liveness amount); live
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNGV(v) ((-2147483648) <= v && v <= 2147483647)
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+define CI(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNGV(c.v_int))
+define CP(c) (acc(c.v_ptr_int) && acc(c.d_ptr_int) && c.d_ptr_int && WF(c.v_ptr_int))
+define OWNI(p, a) (ROOT(p) && CI(p) && LVF(p, a))
+define OWNP(p, a) (ROOT(p) && CP(p) && LVF(p, a))
+define LIVE(p, a) (p != null && WF(p) && LVF(p, a))
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_int() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(r.v_int) && acc(r.d_int) && !r.d_int && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract allocation of an address-taken local of type int*: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_ptr_int() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(r.v_ptr_int) && acc(r.d_ptr_int) && !r.d_ptr_int && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// int walk2(int n) requires(0 <= n && n <= 100) ensures(r, r == 1) { int x = 1; int *p = &x; int **pp = &p; int i = 0; while (i < n) { i += 1; } return **pp; }
+//   loop invariant: 0 <= i && i <= n && pp == &p && *pp == &x && owns(**pp) && **pp == 1
+// a WRITTEN atom on a place reached through a load: owns(**pp) with pp a local pointer to the address-taken cell p. The atom's object q is the chained read of *pp through the automatic places (here the cell p); its amounts aw_* are ghost snapshots taken where the loop is entered; the rows NOTAUTO (the object is not an automatic place) and the "it is an automatic place, held in full" rows tie it to the places; a ghost Ref gq holds q at the top of each iteration for the body's splits
+method f_walk2__0(p_n: Int) returns (res: Int)
+  requires RNGV(p_n)
+  requires (0 <= p_n) && (p_n <= 100)
+  ensures RNGV(res)
+  ensures res == 1
+  decreases
+{
+  var v_n: Int
+  var v_i: Int
+  var v_x: Ref
+  var v_p: Ref
+  var v_pp: Ref
+  var aw_v0: Perm
+  var aw_d0: Perm
+  var aw_l0: Perm
+  var gq: Ref
+  var t0: Ref
+  var kl_p: Perm
+  var kv_p: Perm
+  var kd_p: Perm
+  var vs_p: Ref
+  var ds_p: Bool
+  var kl_x: Perm
+  var kv_x: Perm
+  var kd_x: Perm
+  var vs_x: Int
+  var ds_x: Bool
+  v_n := p_n
+  v_x := alloc_int()
+  v_p := alloc_ptr_int()
+  assert !((perm(v_x.v_int) != write) || (perm(v_x.d_int) != write))
+  v_x.v_int := 1
+  v_x.d_int := true
+  assert !((perm(v_p.v_ptr_int) != write) || (perm(v_p.d_ptr_int) != write))
+  v_p.v_ptr_int := v_x
+  v_p.d_ptr_int := true
+  v_pp := v_p
+  v_i := 0
+  // the loop's entry: the splits of the snapshots, the perm snapshots, the written atom's amounts and its rows
+  if (lvloc(block_of(v_p)) == lvloc(block_of(v_x))) { }
+  if (v_pp == v_p) { }
+  kl_p := perm(lvloc(block_of(v_p)).lv)
+  kv_p := perm(v_p.v_ptr_int)
+  kd_p := perm(v_p.d_ptr_int)
+  ds_p := false
+  if (kd_p > none) {
+    ds_p := v_p.d_ptr_int
+  }
+  if (kv_p > none) {
+    vs_p := v_p.v_ptr_int
+  }
+  kl_x := perm(lvloc(block_of(v_x)).lv)
+  kv_x := perm(v_x.v_int)
+  kd_x := perm(v_x.d_int)
+  ds_x := false
+  if (kd_x > none) {
+    ds_x := v_x.d_int
+  }
+  if (kv_x > none) {
+    vs_x := v_x.v_int
+  }
+  aw_v0 := write
+  aw_d0 := write
+  aw_l0 := perm(lvloc(block_of((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null))).lv)
+  assert (((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null) != null
+  assert WF((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null))
+  assert offset_of((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null)) < len(block_of((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null)))
+  assert perm((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null).v_int) == write
+  assert perm((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null).d_int) == write
+  assert (((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null).d_int
+  assert RNGV((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null).v_int)
+  assert (((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null) != v_x)) ==> ((aw_v0 > none) && (aw_d0 > none))
+  assert perm(lvloc(block_of((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null))).lv) > none
+  assert ((lvloc(block_of((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null))) != lvloc(block_of(v_p))) && (lvloc(block_of((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null))) != lvloc(block_of(v_x)))) ==> (aw_l0 > none)
+  assert ((0 <= v_i) && (v_i <= v_n)) ==> ((v_pp == v_p) && (kv_p > none))
+  assert (((0 <= v_i) && (v_i <= v_n)) && ((v_pp == v_p) && (kv_p > none))) ==> ((((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null) == v_x) && (kv_x > none)) || (aw_v0 > none))
+  while (v_i < v_n)
+    invariant RNGV(v_i)
+    invariant acc(v_p.v_ptr_int, kv_p) && acc(v_p.d_ptr_int, kd_p)
+    invariant acc(lvloc(block_of(v_p)).lv, kl_p)
+    invariant ((none < kv_p) && (kv_p < write)) ==> (v_p.v_ptr_int == vs_p)
+    invariant ((kv_p > none) && (kd_p > none) && v_p.d_ptr_int) ==> (WF(v_p.v_ptr_int))
+    invariant ((kd_p > none) && ds_p) ==> (v_p.d_ptr_int)
+    invariant acc(v_x.v_int, kv_x) && acc(v_x.d_int, kd_x)
+    invariant ((lvloc(block_of(v_x)) != lvloc(block_of(v_p)))) ==> (acc(lvloc(block_of(v_x)).lv, kl_x))
+    invariant ((none < kv_x) && (kv_x < write)) ==> (v_x.v_int == vs_x)
+    invariant ((kv_x > none) && (kd_x > none) && v_x.d_int) ==> (RNGV(v_x.v_int))
+    invariant ((kd_x > none) && ds_x) ==> (v_x.d_int)
+    invariant ((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null) != null) && WF((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null)) && (offset_of((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null)) < len(block_of((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null))))
+    invariant (((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null) != v_x)) ==> ((aw_v0 > none) && (aw_d0 > none))
+    invariant (((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null) != v_x)) ==> (((acc((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null).v_int, aw_v0) && acc((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null).d_int, aw_d0)) && (((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null).d_int) && RNGV((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null).v_int))
+    invariant ((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null) == v_x) ==> ((kv_x == write) && (kd_x == write))
+    invariant ((lvloc(block_of((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null))) != lvloc(block_of(v_p))) && (lvloc(block_of((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null))) != lvloc(block_of(v_x)))) ==> (aw_l0 > none)
+    invariant ((lvloc(block_of((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null))) != lvloc(block_of(v_p))) && (lvloc(block_of((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null))) != lvloc(block_of(v_x)))) ==> acc(lvloc(block_of((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null))).lv, aw_l0)
+    invariant (lvloc(block_of((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null))) == lvloc(block_of(v_p))) ==> (kl_p > none)
+    invariant (lvloc(block_of((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null))) == lvloc(block_of(v_x))) ==> (kl_x > none)
+    invariant ((0 <= v_i) && (v_i <= v_n)) ==> ((v_pp == v_p) && (kd_p > none) ? v_pp.d_ptr_int : false)
+    invariant ((0 <= v_i) && (v_i <= v_n)) ==> (((((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null) == v_x) && (kd_x > none)) ? (((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null).d_int : ((aw_d0 > none) ? (((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null).d_int : false)))
+    invariant ((0 <= v_i) && (v_i <= v_n)) && (v_pp == v_p)
+    invariant ((0 <= v_i) && (v_i <= v_n)) && ((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null) == v_x) && ((((((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null) == v_x) && (kv_x > none)) ? (((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null).v_int : ((aw_v0 > none) ? (((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null).v_int : 0))) == 1)
+    decreases v_n - v_i
+  {
+    gq := (((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null)  // the atom's object at the top of the iteration: the body's splits use this ghost, never a heap read
+    if (gq == v_x) { }
+    if (lvloc(block_of(gq)) == lvloc(block_of(v_x))) { }
+    assert !((v_i + 1 < (-2147483648)) || (2147483647 < v_i + 1))
+    v_i := v_i + 1
+    assert !((perm(v_p.v_ptr_int) < kv_p) || (perm(v_p.d_ptr_int) < kd_p))
+    assert !(perm(lvloc(block_of(v_p)).lv) < kl_p)
+    assert !((perm(v_x.v_int) < kv_x) || (perm(v_x.d_int) < kd_x))
+    assert ((lvloc(block_of(v_x)) != lvloc(block_of(v_p)))) ==> (!(perm(lvloc(block_of(v_x)).lv) < kl_x))
+    // the written atom's checks at the back edge: its object's permission against the ghost amounts
+    assert (((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null) != null
+    assert WF((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null))
+    assert offset_of((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null)) < len(block_of((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null)))
+    assert perm((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null).v_int) >= aw_v0
+    assert perm((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null).d_int) >= aw_d0
+    assert (((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null).d_int
+    assert RNGV((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null).v_int)
+    assert (((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null) != v_x)) ==> ((aw_v0 > none) && (aw_d0 > none))
+    assert perm(lvloc(block_of((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null))).lv) >= aw_l0
+    assert ((lvloc(block_of((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null))) != lvloc(block_of(v_p))) && (lvloc(block_of((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null))) != lvloc(block_of(v_x)))) ==> (aw_l0 > none)
+    assert ((0 <= v_i) && (v_i <= v_n)) ==> ((v_pp == v_p) && (kv_p > none))
+    assert (((0 <= v_i) && (v_i <= v_n)) && ((v_pp == v_p) && (kv_p > none))) ==> ((((((v_pp == v_p) && (kv_p > none)) ? v_pp.v_ptr_int : null) == v_x) && (kv_x > none)) || (aw_v0 > none))
+  }
+  // return **pp
+  assert v_pp != null
+  assert perm(v_pp.v_ptr_int) > none
+  assert v_pp.d_ptr_int
+  t0 := v_pp.v_ptr_int
+  if (t0 == v_x) { }
+  assert t0 != null
+  assert perm(t0.v_int) > none
+  assert t0.d_int
+  res := t0.v_int
+  assert !(((perm(v_p.v_ptr_int) != write) || (perm(v_p.d_ptr_int) != write)) || (perm(lvloc(block_of(v_p)).lv) != write))
+  exhale (acc(v_p.v_ptr_int) && acc(v_p.d_ptr_int)) && acc(lvloc(block_of(v_p)).lv)
+  assert !(((perm(v_x.v_int) != write) || (perm(v_x.d_int) != write)) || (perm(lvloc(block_of(v_x)).lv) != write))
+  exhale (acc(v_x.v_int) && acc(v_x.d_int)) && acc(lvloc(block_of(v_x)).lv)
+  assert false // <- vacuity
+}

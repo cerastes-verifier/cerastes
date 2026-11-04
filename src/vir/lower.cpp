@@ -945,6 +945,19 @@ class Lowerer {
     std::string av, ad, al;     // the ghost amounts
     std::string vs;             // the value snapshot (decision 0040 item 5, "Values"); empty: none (the loop assigns q, or Live)
     bool reach = false;         // a write in the loop can reach the value
+    // Decision 0045 item 12.  An atom on a place reached through a load is read in the invariant through the loop's places (`q` is that chain); the body names it by a ghost
+    // Ref taken at the top of each iteration (`qb`).  A struct atom is one entry per leaf cell (`q` the leaf's Ref, `lq` the struct slot, `lpt` its pointer type): the
+    // first entry carries the atom's one liveness amount and its basic row (`first`); `atom_id` numbers the atom for the separation of entries of one atom.
+    E qb;                       // the body's name of `q` (the same as `q` unless the atom loads)
+    E lq;                       // the pointer the atom is on (the slot of a struct atom): its liveness cell, its basic row
+    Type lpt;                   // its type
+    bool first = true;
+    int atom_id = 0;
+    bool loads = false;
+    const Expr* atom = nullptr;
+    std::vector<AtomGuard> guards;
+    std::vector<int> lpath;     // a struct atom's leaf: the member path from the slot
+    std::string aq;             // the ghost Ref of `qb` (empty unless the atom loads)
   };
   // A heap read of an invariant or a measure, for the explicit framing assert (decision 0038 item 6).
   struct InvRead {
@@ -1289,6 +1302,10 @@ class Lowerer {
 
   // The loop's places and the heap reads recorded so far, set by loop() around the lowering of an invariant or a measure.
   const std::vector<Place>* inv_places_ = nullptr;
+  // The loop-entry snapshots of the loops being lowered (decision 0045 item 10): a `requires` site and the Ref of its place through `lb`; the body's loads are split
+  // against them like against every automatic place.
+  struct LbPlace { const AtomSite* site; E ref; };
+  std::vector<LbPlace> active_lbs_;
   std::vector<const WAtom*> active_w_;  // the written atoms of the loops being lowered, outermost first
   std::vector<InvRead> inv_reads_;
   std::string inv_what_ = "invariant";  // "invariant" or "measure": the word of the messages
@@ -1569,6 +1586,65 @@ class Lowerer {
     int nreq = 0;                              // the number of requires atoms (the ghost amounts)
   };
 
+  // Decision 0045 item 2 (places reached through loads or pointer leaves): every distinct (root, via) of a contract place gets a per-function DERIVED key
+  // `kDerivedKeyBase + n` (n global to the lowering; `local` is the function's own number, which names the ghosts and the entry snapshots), so the integer-keyed
+  // consumers treat a base as one more root.  `base` is the base pointer expression of the first place that named it; lowering it in the current contract mode
+  // gives the base pointer's value (a chain-guarded read, a ghost value or an argument's read), so a derived key's `Ref` is never a variable.
+  struct Derived {
+    const Function* f = nullptr;
+    PlaceKey key;               // root and via; the path is empty
+    const Expr* base = nullptr; // the base pointer (a Deref, a Field, ...)
+    Type base_type;             // its type (a pointer)
+    bool has_load = false;      // the steps contain a heap read
+    int local = 0;              // the function's own number of this entry
+    int lb_of = -1;             // >= 0: this key is the LOOP-ENTRY snapshot `lb` of the derived key `lb_of` (decision 0045 item 10)
+  };
+  static bool is_derived_key(int k) { return k >= kDerivedKeyBase; }
+  const Derived& derived_of(int k) const { return derived_[static_cast<size_t>(k - kDerivedKeyBase)]; }
+  // The key of the place (`root`, `via`) in `f`, created in evaluation order the first time.
+  int derived_key(const Function& f, int root, const std::vector<int>& via, const Expr* base) {
+    const auto id = std::make_tuple(&f, root, via);
+    const auto it = derived_index_.find(id);
+    if (it != derived_index_.end()) return it->second;
+    Derived d;
+    d.f = &f;
+    d.key.root = root;
+    d.key.via = via;
+    d.base = base;
+    d.base_type = base->type;
+    d.has_load = steps_have_load(via);
+    d.local = derived_count_[&f]++;
+    derived_.push_back(d);
+    return derived_index_[id] = kDerivedKeyBase + static_cast<int>(derived_.size()) - 1;
+  }
+  static int root_key_of(const Expr* root) {
+    if (root == nullptr) return kNoPlaceKey;
+    switch (root->kind) {
+      case Expr::Kind::Formal: return root->index;
+      case Expr::Kind::GlobalAddr: return root->global != nullptr ? kGlobalSiteBase + root->global->id : kNoPlaceKey;
+      case Expr::Kind::Result: return kResultSiteKey;
+      default: return kNoPlaceKey;
+    }
+  }
+  // The derived entries of a contract expression in evaluation order: every atom whose place has steps, every read through a load or a pointer leaf.
+  void collect_derived(const Function& f, const Expr* e) {
+    if (e == nullptr) return;
+    if (e->kind == Expr::Kind::Atom && e->a != nullptr) {
+      const PlaceKey pk = atom_place(*e);
+      if (!pk.via.empty() && pk.valid()) {
+        const Expr* base = member_root(e->a);
+        derived_of_atom_[e] = derived_key(f, pk.root, pk.via, base);
+      }
+    } else if (e->kind == Expr::Kind::Deref && e->a != nullptr) {
+      std::vector<int> path, via;
+      const Expr* base = member_root(e->a, &path);
+      const Expr* root = place_root(base, &via);
+      if (!via.empty() && root_key_of(root) != kNoPlaceKey) derived_key(f, root_key_of(root), via, base);
+    }
+    for (const Expr* x : {e->a, e->b, e->c}) collect_derived(f, x);
+    for (const Expr* x : e->args) collect_derived(f, x);
+  }
+
   const FnAtoms& atoms_of(const Function& f) {
     const auto it = atoms_.find(&f);
     if (it != atoms_.end()) return it->second;
@@ -1576,8 +1652,12 @@ class Lowerer {
     fa.sites = contract_atoms(f);
     for (size_t i = 0; i < fa.sites.size(); ++i) {
       fa.index[fa.sites[i].atom] = i;
+      site_fn_[fa.sites[i].atom] = &f;
       if (!fa.sites[i].in_ensures) ++fa.nreq;
     }
+    for (const Clause& c : f.requires_) collect_derived(f, c.expr);
+    for (const Clause& c : f.ensures_) collect_derived(f, c.expr);
+    for (const Clause& c : f.decreases_) collect_derived(f, c.expr);
     return atoms_.emplace(&f, std::move(fa)).first->second;
   }
 
@@ -1651,20 +1731,58 @@ class Lowerer {
   // key - kGlobalKeyBase), whose receiver is `loc(GB_g(), 0)`.
   static constexpr int kGlobalKeyBase = kGlobalSiteBase;  // vir.h: the keys of global places start here
   // Decision 0043 item 9: a place is a root (the key) and a member path (`AtomSite::path`); `site_key` is the root whatever the path is.
-  static int site_key(const AtomSite& s) { return atom_place(*s.atom).root; }
-  static bool site_is_global(const AtomSite& s) { return site_key(s) >= kGlobalKeyBase; }
+  int site_key(const AtomSite& s) const {
+    if (!s.via.empty()) {  // decision 0045: a place with steps has its function's derived key
+      const auto it = derived_of_atom_.find(s.atom);
+      if (it != derived_of_atom_.end()) return it->second;
+    }
+    return atom_place(*s.atom).root;
+  }
+  bool site_is_global(const AtomSite& s) const { return key_is_global(site_key(s)); }
   // One member path is a prefix of the other (an atom on `p->t` holds the cells of `p->t.x`).
   static bool paths_nested(const std::vector<int>& a, const std::vector<int>& b) {
     const size_t n = std::min(a.size(), b.size());
     return std::equal(a.begin(), a.begin() + static_cast<std::ptrdiff_t>(n), b.begin());
   }
   // Two atoms name one place: one root, one path.
-  static bool same_place(const AtomSite& a, const AtomSite& b) { return site_key(a) == site_key(b) && a.path == b.path; }
+  bool same_place(const AtomSite& a, const AtomSite& b) const { return site_key(a) == site_key(b) && a.path == b.path; }
   // The root pointer in `env` (a global's is its address, not a formal), and the place's own address (the root's member chain).
-  E site_root(const AtomSite& s, const Env& env) const { return place_of(env, site_key(s)); }
-  E site_ref(const AtomSite& s, const Env& env) { return chain_ref(site_root(s, env), s.path); }
-  // The same as a variable of the function being lowered (its own formals; a global's address).
+  // Decision 0045: a site with steps has a BASE pointer (`s.base`) that is lowered in the current contract mode, framed by the atoms before the site: a
+  // chain-guarded read (Method, Call, Ret), a ghost value with its framing obligation in `full` (Wf), the argument's read at a call.  Outside a contract (the
+  // body) it is the entry snapshot `eb_N` of a loading `requires` place, or the leaf formal itself (a pointer leaf of a by-value parameter reads no heap).
+  E site_root(const AtomSite& s, const Env& env, const E& guard = nullptr, const Deps& gdep = Deps{}, Full* full = nullptr) {
+    if (s.via.empty()) return place_of(env, site_key(s));
+    Full scratch;
+    Full& fl = full != nullptr ? *full : scratch;
+    if (cmode_ == CMode::None || cmode_ == CMode::Inv) return derived_body_root(s, env);
+    const Function* sf = site_fn_.at(s.atom);
+    const FnAtoms& fa = atoms_of(*sf);
+    CtxSave save(*this);
+    cf_ = sf;
+    cens_ = s.in_ensures;
+    cold_ = false;
+    cseen_ = fa.index.at(s.atom);
+    return lower(*s.base, env, guard, gdep, fl).e;
+  }
+  E site_ref(const AtomSite& s, const Env& env, const E& guard = nullptr, const Deps& gdep = Deps{}, Full* full = nullptr) {
+    return chain_ref(site_root(s, env, guard, gdep, full), s.path);
+  }
+  std::string lb_name(const Derived& d) const { return "lb_" + std::to_string(d.f->params.size() + static_cast<size_t>(d.local)) + "__" + std::to_string(cur_loop_); }
+  static std::string eb_name(const Derived& d) { return "eb_" + std::to_string(d.f->params.size() + static_cast<size_t>(d.local)); }
+  // The base of a `requires` site in the body: the entry snapshot of a loading place, the leaf formal otherwise.
+  E derived_body_root(const AtomSite& s, const Env& env) {
+    const int k = site_key(s);
+    if (!is_derived_key(k)) return place_of(env, k);
+    const Derived& d = derived_of(k);
+    if (d.has_load) return low::var(eb_name(d));
+    CtxSave save(*this);
+    cmode_ = CMode::Wf;  // no heap is read: the leaf formal or the result's leaf
+    Full scratch;
+    return lower(*s.base, env, nullptr, Deps{}, scratch).e;
+  }
+  // The same as a variable of the function being lowered (its own formals; a global's address; a derived place's entry snapshot).
   E site_var(const AtomSite& s) {
+    if (!s.via.empty()) return chain_ref(derived_body_root(s, contract_env()), s.path);
     return chain_ref(site_is_global(s) ? place_of(Env{}, site_key(s)) : low::var(formal_name(*fn_.f, site_key(s))), s.path);
   }
   // The cells of a site, over `place` (its own address): the leaves of a struct place, or the one cell of a scalar place.  `text` of each is its spelling for messages.
@@ -1715,9 +1833,9 @@ class Lowerer {
     return out;
   }
   // The argument of a call that a site's pointer parameter receives (a global site has none).
-  static const Expr& site_arg(const AtomSite& s, const Expr& call) { return *call.args[static_cast<size_t>(site_key(s))]; }
+  const Expr& site_arg(const AtomSite& s, const Expr& call) const { return *call.args[static_cast<size_t>(site_key(s))]; }
   // The user's spelling of the place a site names in the contract: `*p` for a parameter's pointee (empty if unknown), `g` for a global.
-  static std::string site_text(const AtomSite& s) {
+  std::string site_text(const AtomSite& s) const {
     if (site_is_global(s)) return s.atom->a->global != nullptr ? s.atom->a->global->c_name : std::string();
     if (!s.path.empty()) return place_text(*s.atom->a);  // `p->x`, `p->t.x`
     const std::string& c = s.atom->a->c_text;
@@ -1731,8 +1849,8 @@ class Lowerer {
     return quoted_text;
   }
   // The same, from the argument a call passes: `x` for `&x`, `*q` for `q`.
-  static std::string site_call_text(const AtomSite& s, const Expr& call) {
-    if (site_is_global(s)) return site_text(s);  // a global's call text is its own name
+  std::string site_call_text(const AtomSite& s, const Expr& call) const {
+    if (site_is_global(s) || !s.via.empty()) return site_text(s);  // a global's call text is its own name, a place reached through steps is the callee's spelling (decision 0045)
     const std::string& txt = site_arg(s, call).c_text;
     const std::string base = txt.empty() ? std::string() : (txt[0] == '&' ? txt.substr(1) : "*" + txt);
     if (s.path.empty() || base.empty()) return base;
@@ -1759,9 +1877,9 @@ class Lowerer {
   }
   // The initialization marker (decision 0042 item 4) a site carries: the `owns(*p)` atom of a parameter `p` of `f` that is marked `ref_to_uninit` or
   // `must_init`.  Every other site (a `reads` or `live` atom, a global's, `*result`'s) is unmarked.
-  static InitMarker site_marker(const Function& f, const AtomSite& s) {
+  InitMarker site_marker(const Function& f, const AtomSite& s) const {
     const int k = site_key(s);
-    if (k < 0 || k >= kGlobalKeyBase || !s.path.empty() || s.atom->atom != AtomKind::Owns || static_cast<size_t>(k) >= f.params.size()) return InitMarker::None;
+    if (k < 0 || k >= kGlobalSiteBase || !s.path.empty() || s.atom->atom != AtomKind::Owns || static_cast<size_t>(k) >= f.params.size()) return InitMarker::None;
     return f.params[static_cast<size_t>(k)].init;
   }
 
@@ -1769,7 +1887,24 @@ class Lowerer {
   E site_guard(const AtomSite& s, const Env& env) {
     E g;
     CtxSave save(*this);
-    cmode_ = CMode::Wf;  // a guard is lowered as a pure contract expression whatever the context (a pointer `?:` is an ite, never an effect)
+    // A guard that reads the heap (decision 0045 item 9, question 109) is lowered in the contract mode of the caller with its loads framed like any contract
+    // read, by the atoms before the site; one that does not is a pure contract expression whatever the context (a pointer `?:` is an ite, never an effect).
+    bool reads = false;
+    for (const AtomGuard& x : s.guards) reads = reads || reads_heap(*x.cond);
+    if (reads && cmode_ == CMode::Inv) {
+      internal_error(s.atom->loc, "a guard that reads the heap reached site_guard in a loop annotation (decision 0045 item 11: written atoms lower their own)");
+      return nullptr;
+    }
+    if (reads && (cmode_ == CMode::Method || cmode_ == CMode::Call || cmode_ == CMode::Ret || cmode_ == CMode::Wf || cmode_ == CMode::None)) {
+      if (cmode_ == CMode::None) cmode_ = CMode::Method;
+      const Function* sf = site_fn_.at(s.atom);
+      cf_ = sf;
+      cens_ = s.in_ensures;
+      cold_ = false;
+      cseen_ = atoms_of(*sf).index.at(s.atom);
+    } else {
+      cmode_ = CMode::Wf;
+    }
     for (const AtomGuard& x : s.guards) {
       Full scratch;
       LV v = lower(*x.cond, env, nullptr, {}, scratch);
@@ -1786,8 +1921,54 @@ class Lowerer {
     return shares_field(a, b);  // a cell of one field in both (decision 0043 item 9: the leaves of a struct atom count, not its pointee type)
   }
 
+  // Decision 0045 item 7 (owner question 108): the amount an `ensures` atom returns.  Places without a load return the amount of their `requires` partner (decision
+  // 0037 item 6); a place reached through a load follows the OBJECT: `ite(q_post == q_1pre, a_1, ite(q_post == q_2pre, a_2, ... a_partner))` over the `requires`
+  // atoms of its kind and a field it shares, `q_ipre` each one's entry place (`entry_place`), the partner last.
+  E ens_amount(const FnAtoms& fa, const AtomSite& site, const E& q_post, const std::function<E(const AtomSite&)>& entry_place, const Env& env) {
+    E r = low::var(amount_name(site.atom->amount));
+    if (!site.in_ensures || site.via.empty() || !is_derived_key(site_key(site)) || !derived_of(site_key(site)).has_load) return r;
+    if (site.atom->amount < 0 || site.atom->amount >= fa.nreq) return r;
+    // The object a `requires` atom took, in the return heap's terms: its guard in the entry state, and the same object as `q_post`: the leaf cells of one field
+    // coincide (the places when both name objects of one type), a struct atom matches only an atom of its own type, a `live` atom by liveness cell (audit S4).
+    auto cond_of = [&](const AtomSite& rs) -> E {
+      E same;
+      if (!site_takes_cell(site)) {
+        same = low::bin(low::BinOp::Eq, live_cell(q_post), live_cell(entry_place(rs)));
+      } else {
+        if ((site_pointee(rs).is_struct() || site_pointee(site).is_struct()) && !(site_pointee(rs) == site_pointee(site))) return nullptr;
+        for (const auto& [x, y] : overlap_pairs(site, q_post, rs, entry_place(rs))) {
+          const E eq = low::bin(low::BinOp::Eq, x, y);
+          same = same ? low::bin(low::BinOp::Or, same, eq) : eq;
+        }
+      }
+      if (!same) return nullptr;
+      const E g = site_guard(rs, env);
+      return g ? low::and_(old_entry(g), same) : same;
+    };
+    const int partner = site.atom->amount;
+    for (int i = fa.nreq - 1; i >= 0; --i) {
+      if (i == partner) continue;
+      const AtomSite& rs = fa.sites[static_cast<size_t>(i)];
+      if (rs.atom->atom != site.atom->atom || site_takes_cell(rs) != site_takes_cell(site) || (site_takes_cell(rs) && !shares_field(rs, site))) continue;
+      if (const E c = cond_of(rs)) r = low::ite(c, low::var(amount_name(i)), r);
+    }
+    // The partner first (and, as the else of the others, last): a callee that kept the object keeps the amount it was given for it.
+    if (!(r->kind == low::LExpr::Kind::Var))
+      if (const E c = cond_of(fa.sites[static_cast<size_t>(partner)])) r = low::ite(c, low::var(amount_name(partner)), r);
+    return r;
+  }
+
+  static bool guards_read_heap(const AtomSite& a, const AtomSite& b) {
+    for (const AtomSite* x : {&a, &b})
+      for (const AtomGuard& g : x->guards)
+        if (reads_heap(*g.cond)) return true;
+    return false;
+  }
+  // Whether a site's place is reached through a heap read.
+  bool site_loads(const AtomSite& s) const { return !s.via.empty() && is_derived_key(site_key(s)) && derived_of(site_key(s)).has_load; }
+
   // An atom (decision 0037 items 5 and 6) in the context being lowered.
-  LV atom(const Expr& e, const Env& env) {
+  LV atom(const Expr& e, const Env& env, const E& guard = nullptr, const Deps& gdep = Deps{}, Full* full = nullptr) {
     using low::BinOp;
     const FnAtoms& fa = atoms_of(*cf_);
     const auto it = fa.index.find(&e);
@@ -1799,11 +1980,12 @@ class Lowerer {
     cseen_ = std::max(cseen_, idx + 1);
     if (cmode_ == CMode::Call || cmode_ == CMode::Ret) return {low::bool_lit(true), {}};  // asserted one by one at the call or the return
     const AtomSite& site = fa.sites[idx];
-    const E p = site_ref(site, env);
-    const Type& t = site_pointee(site);
     // The facts about the ROOT pointer (decision 0043 item 9: each atom, a member atom too, gives `root != null`, `WF_S(root)` and `offset_of(root) < len(block_of(root))`);
-    // for a place without a path the root is the place.
-    const E root = site_root(site, env);
+    // for a place without a path the root is the place.  A derived place's root is its lowered base (decision 0045): the loads of the atom's own place are read
+    // once here, framed by the atoms before it (in the well-formedness method with their framing obligations).
+    const E root = site_root(site, env, guard, gdep, full);
+    const E p = chain_ref(root, site.path);
+    const Type& t = site_pointee(site);
     E pure = low::and_(low::bin(BinOp::Ne, root, low::null_()), wf_expr(root, &member_root(site.atom->a)->type));
     if (needs_root_block(site)) pure = low::and_(pure, in_block(root));
     if (cmode_ == CMode::Wf) {
@@ -1815,16 +1997,56 @@ class Lowerer {
           if (o.in_ensures != site.in_ensures || o.atom->atom != AtomKind::Owns || site_key(o) == site_key(site)) continue;
           if (site_is_global(o) && site_is_global(site)) continue;  // `unique` blocks
           if (!shares_field(o, site)) continue;
+          // Decision 0045 item 5 (audit B1): the `ensures` atoms of a function WITHOUT a body are promises nothing checks, so their distinctness is not a fact but an
+          // assertion (`f__wf`) when one of the two places is reached through a load.
+          if (site.in_ensures && cf_->body == nullptr && (site_loads(o) || site_loads(site))) continue;
           for (const auto& [x, y] : overlap_pairs(o, site_ref(o, env), site, p))
             pure = low::and_(pure, low::implies(site_guard(o, env), low::bin(BinOp::Ne, x, y)));
         }
+      // Decision 0045 item 5 (audit B1): a function without a body is trusted, nothing checks what its `ensures` returns.  An atom whose place is reached through a load
+      // must say it is the object its `requires` partner took (`q_post == q_partner_pre`, the user's `*pp == old(*pp)`), and two `owns` atoms one of which loads must
+      // name different objects.  Both are obligations at the atom's position, under the path condition (the earlier conjuncts of its clause count) and the clauses before.
+      // Decision 0045 item 3 (audit B2, completeness): when either guard of a pair reads the heap, 0039 item 7's partner row is an obligation here too (the earlier conjuncts
+      // of the clause, the user's ties `*pp == old(*pp)`, count); guards that read no heap keep the row of `f__wf` as it was.
+      if (full != nullptr && site.in_ensures && e.amount >= 0 && e.amount < fa.nreq && guards_read_heap(site, fa.sites[static_cast<size_t>(e.amount)])) {
+        const AtomSite& partner = fa.sites[static_cast<size_t>(e.amount)];
+        if (const E gp = site_guard(partner, env)) {
+          const std::string txt = e.a != nullptr ? site_text(site) : std::string();
+          obl(*full, guard, gdep, gp, {}, meta("permission", e.loc, "the contract of `" + cf_->c_name + "` returns " + quoted(txt, "an object") + " on a path where its `requires` did not take it"));
+        }
+      }
+      if (full != nullptr && site.in_ensures && cf_->body == nullptr) {
+        if (site_loads(site) && e.amount >= 0 && e.amount < fa.nreq) {
+          const AtomSite& partner = fa.sites[static_cast<size_t>(e.amount)];
+          const std::string base = e.a != nullptr ? e.a->c_text : std::string();
+          const E same = site_takes_cell(site) ? low::bin(BinOp::Eq, p, site_ref(partner, env))
+                                                : low::bin(BinOp::Eq, live_cell(p), live_cell(site_ref(partner, env)));
+          obl(*full, guard, gdep, same, {},
+              meta("permission", e.loc,
+                   "the contract of `" + cf_->c_name + "` returns " + quoted(site_takes_cell(site) ? site_text(site) : base, "an object") +
+                       " without saying it is the object its `requires` took" + (base.empty() ? std::string() : " (write `" + base + " == old(" + base + ")`)")));
+        }
+        if (e.atom == AtomKind::Owns)
+          for (size_t i = 0; i < idx; ++i) {
+            const AtomSite& o = fa.sites[i];
+            if (!o.in_ensures || o.atom->atom != AtomKind::Owns || site_key(o) == site_key(site) || !(site_loads(o) || site_loads(site)) || !shares_field(o, site)) continue;
+            const E go_ = site_guard(o, env);
+            for (const auto& [x, y] : overlap_pairs(o, site_ref(o, env), site, p))
+              obl(*full, guard, gdep, go_ ? low::implies(go_, low::bin(BinOp::Ne, x, y)) : low::bin(BinOp::Ne, x, y), {},
+                  meta("permission", e.loc,
+                       "the contract of `" + cf_->c_name + "` returns " + quoted(site_text(o), "an object") + " and " + quoted(site_text(site), "an object") +
+                           " as owned places, but they may be the same object"));
+          }
+      }
       return {pure, {}};
     }
     if (e.amount < 0) {
       internal_error(e.loc, "a permission atom without its ghost amount reached lowering");
       return {low::bool_lit(true), {}};
     }
-    const E amount = low::var(amount_name(e.amount));
+    const E amount = cmode_ == CMode::Method && site.in_ensures
+                         ? ens_amount(fa, site, p, [&](const AtomSite& rs) { return rs.via.empty() ? site_ref(rs, env) : low::old_(site_ref(rs, env)); }, env)
+                         : low::var(amount_name(e.amount));
     E r = pure;
     if (site_takes_cell(site)) {
       const bool owns = e.atom == AtomKind::Owns;
@@ -1841,7 +2063,7 @@ class Lowerer {
         r = low::and_(r, owns ? low::acc(c.recv, "d_" + sfx) : low::acc(c.recv, "d_" + sfx, amount));
         if (!plain && site.in_ensures && e.amount >= 0 && e.amount < atoms_of(*cf_).nreq) {
           E kept = low::old_(cell_flag(c.recv, c.type));
-          if (const E gp = site_guard(atoms_of(*cf_).sites[static_cast<size_t>(e.amount)], env)) kept = low::and_(gp, kept);
+          if (const E gp = site_guard(atoms_of(*cf_).sites[static_cast<size_t>(e.amount)], env)) kept = low::and_(old_entry(gp), kept);  // the partner's guard in the entry state (audit B2)
           r = low::and_(r, low::implies(kept, cell_flag(c.recv, c.type)));
         }
         if (plain) r = low::and_(r, cell_flag(c.recv, c.type));
@@ -1873,18 +2095,35 @@ class Lowerer {
     }
   }
 
+  // Whether a lowered expression reads the heap (a field read, a `perm`, an `acc`).
+  static bool lreads_heap(const E& e) {
+    if (e == nullptr) return false;
+    if (e->kind == low::LExpr::Kind::Field || e->kind == low::LExpr::Kind::PermOf || e->kind == low::LExpr::Kind::Acc) return true;
+    if (lreads_heap(e->a) || lreads_heap(e->b) || lreads_heap(e->c)) return true;
+    for (const E& x : e->args)
+      if (lreads_heap(x)) return true;
+    return false;
+  }
+  // Decision 0045 item 3 (audit B2): a requires atom's guard (or place) that the contract uses outside the entry state is read in the entry state, as ONE
+  // `old(...)` over the whole expression; an expression that reads no heap stays as it is.
+  static E old_entry(const E& e) { return lreads_heap(e) ? low::old_(e) : e; }
+
   // The ghost value of a read of `*p` for parameter `p`, or (param -1) of `*result` (decision 0040 item 4).
   // A ghost value of `f__wf` is keyed by its root, its member path and its state (decision 0043 item 9, audit S1): `p->x` and `p->y` are two.
   using GKey = std::tuple<int, std::vector<int>, bool>;
-  static std::string ghost_name(int param, const std::vector<int>& path, bool post) {
+  std::string ghost_name(int param, const std::vector<int>& path, bool post) const {
     std::string mem;
     for (int k : path) mem += "_m" + std::to_string(k);
-    if (param >= kGlobalKeyBase) return "hv_g" + std::to_string(param - kGlobalKeyBase) + mem + (post ? "_post" : "_pre");  // a global's read (decision 0041)
+    if (is_derived_key(param)) {  // decision 0045: a read through a load or a pointer leaf, numbered after the function's parameters
+      const Derived& d = derived_of(param);
+      return "hv_" + std::to_string(d.f->params.size() + static_cast<size_t>(d.local)) + mem + (post ? "_post" : "_pre");
+    }
+    if (key_is_global(param)) return "hv_g" + std::to_string(param - kGlobalKeyBase) + mem + (post ? "_post" : "_pre");  // a global's read (decision 0041)
     return param < 0 ? "hv_r" + mem + "_post" : "hv_" + std::to_string(param) + mem + (post ? "_post" : "_pre");
   }
-  static std::string ghost_name(const GKey& k) { return ghost_name(std::get<0>(k), std::get<1>(k), std::get<2>(k)); }
+  std::string ghost_name(const GKey& k) const { return ghost_name(std::get<0>(k), std::get<1>(k), std::get<2>(k)); }
   E place_of(const Env& env, int k) const {
-    if (k >= kGlobalKeyBase) return global_ref(k - kGlobalKeyBase);
+    if (key_is_global(k)) return global_ref(k - kGlobalKeyBase);
     return k < 0 ? env.result : env.formals[static_cast<size_t>(k)];
   }
 
@@ -1922,28 +2161,52 @@ class Lowerer {
   }
   // The type of the place a site key names: a parameter's pointee, or a global's own type.
   Type key_pointee(int k) const {
-    if (k >= kGlobalKeyBase) return prog_.globals()[static_cast<size_t>(k - kGlobalKeyBase)].type;
+    if (is_derived_key(k)) return *derived_of(k).base_type.pointee;
+    if (key_is_global(k)) return prog_.globals()[static_cast<size_t>(k - kGlobalKeyBase)].type;
     return *fn_.f->params[static_cast<size_t>(k)].type.pointee;
   }
-  static bool key_is_global(int k) { return k >= kGlobalKeyBase; }
+  static bool key_is_global(int k) { return is_global_site_key(k); }  // a derived key is never a global (decision 0045 item 2)
 
   // A read of `*p` in a contract (decision 0037 item 7).  Wf: a ghost value formal, and the framing obligation; otherwise the heap read, guarded
   // by itself: the chain `(D_1 ? read : (D_2 ? read : ... : dummy))` over the framing disjuncts of the earlier atoms of the same field, or the
   // plain read when the framing is trivial (an unconditional atom on the same place) or implied by the guard the read is evaluated under.
   LV contract_read(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full) {
     using low::BinOp;
+    // Under `old` (Method, Ret) the OUTERMOST read decides how it is written: everything inside it (the base's own loads, the disjuncts' places and guards) is lowered
+    // plain, and when any of it reads the heap the whole chain is ONE `old(...)` (audit B2: `old` around the last read only would use the return heap for the
+    // framing); a read whose chain reads no heap keeps `old` around the read alone, as before decision 0045.
+    const bool old_state = cold_ && (cmode_ == CMode::Method || cmode_ == CMode::Ret);
+    const bool outer_old = old_state && old_depth_ == 0;
+    struct DepthGuard {
+      int& d;
+      bool on;
+      DepthGuard(int& dd, bool o) : d(dd), on(o) { if (on) ++d; }
+      ~DepthGuard() { if (on) --d; }
+    } depth_guard(old_depth_, old_state);
     std::vector<int> path;  // decision 0043 item 9: a place is a root and a member path
     const Expr* root = e.a == nullptr ? nullptr : member_root(e.a, &path);
-    if (root == nullptr || (root->kind != Expr::Kind::Formal && root->kind != Expr::Kind::Result && root->kind != Expr::Kind::GlobalAddr)) {
-      internal_error(e.loc, "a dereference in a contract of anything but a pointer parameter, a global or the result (or a member of one) reached lowering");
-      return {low::int_lit("0"), {}};
+    int k = kNoPlaceKey;
+    E p;
+    if (root != nullptr && (root->kind == Expr::Kind::Formal || root->kind == Expr::Kind::Result || root->kind == Expr::Kind::GlobalAddr)) {
+      // -1: the place `result` (decision 0040 item 4); a global is a place of its own (decision 0041 item 7)
+      k = root->kind == Expr::Kind::Result ? -1 : (root->kind == Expr::Kind::GlobalAddr ? kGlobalKeyBase + root->global->id : root->index);
+      p = chain_ref(place_of(env, k), path);
+    } else {
+      // Decision 0045 item 2: a place reached through loads or pointer leaves; its base pointer is lowered in this mode (a ghost value, a chain-guarded read)
+      std::vector<int> via;
+      const Expr* r = root == nullptr ? nullptr : place_root(root, &via);
+      if (root == nullptr || via.empty() || root_key_of(r) == kNoPlaceKey) {
+        internal_error(e.loc, "a dereference in a contract of anything but a pointer parameter, a global or the result (or a member of one) reached lowering");
+        return {low::int_lit("0"), {}};
+      }
+      k = derived_key(*cf_, root_key_of(r), via, root);
+      const LV b = lower(*root, env, guard, gdep, full);
+      p = chain_ref(b.e, path);
     }
-    // -1: the place `result` (decision 0040 item 4); a global is a place of its own (decision 0041 item 7)
-    const int k = root->kind == Expr::Kind::Result ? -1 : (root->kind == Expr::Kind::GlobalAddr ? kGlobalKeyBase + root->global->id : root->index);
-    const E p = chain_ref(place_of(env, k), path);
     const Type& t = e.type;
     const bool post = cens_ && !cold_;
     const FnAtoms& fa = atoms_of(*cf_);
+
     const std::string sfx = use_cell_type(t);
     std::vector<E> ds;  // the framing disjuncts D_i; a null one is `true`
     for (size_t i = 0; i < fa.sites.size(); ++i) {
@@ -1973,7 +2236,8 @@ class Lowerer {
     }
     bool trivial = false;
     for (const E& d : ds)
-      if (!d || implied_by(d, guard)) trivial = true;
+      // Under the one outer `old` the disjunct (a requires atom's, read plain) and the guard (in the return state) are in different states: spelling alike proves nothing (audit 2).
+      if (!d || (!(old_state && lreads_heap(d)) && implied_by(d, guard))) trivial = true;
     if (cmode_ == CMode::Wf) {
       const GKey key{k, path, post};
       wf_ghosts_[key] = t;
@@ -1991,11 +2255,16 @@ class Lowerer {
       return {low::var(ghost_name(key)), {}};
     }
     E read = cell_value(p, t);
-    if (cold_ && (cmode_ == CMode::Method || cmode_ == CMode::Ret)) read = low::old_(read);
-    if (trivial) return {read, {}};
+    bool wrap_whole = false;
+    if (outer_old) {
+      wrap_whole = lreads_heap(p);
+      for (const E& d : ds) wrap_whole = wrap_whole || lreads_heap(d);
+      if (!wrap_whole) read = low::old_(read);
+    }
+    if (trivial) return {wrap_whole ? low::old_(read) : read, {}};
     E v = inv_dummy(t);
     for (size_t i = ds.size(); i-- > 0;) v = low::ite(ds[i], read, v);
-    return {v, {}};
+    return {wrap_whole ? low::old_(v) : v, {}};
   }
 
 
@@ -2014,7 +2283,7 @@ class Lowerer {
     SrcLoc loc;
     std::vector<Path> after;        // see MemTag::after
     const void* owner = nullptr;    // the Full the access was recorded in; a closed branch's accesses move to the enclosing one
-    struct Atom { E place, guard; bool owns = false; std::string field, text; };
+    struct Atom { E place, guard; bool owns = false; std::string field, text; bool loads = false; };  // `loads`: the place is reached through a heap read (decision 0045)
     std::string callee;
     std::vector<Atom> atoms;        // a memory call's atoms
   };
@@ -2602,13 +2871,16 @@ class Lowerer {
       case Expr::Kind::Field: return field_of(e, env, guard, gdep, full);
       case Expr::Kind::Aggregate: return aggregate(e, env, guard, gdep, full);
       case Expr::Kind::Atom:
-        if (cmode_ == CMode::Inv) return {low::bool_lit(true), {}};  // a written atom's rows are the loop's own (decision 0040 item 5)
+        if (cmode_ == CMode::Inv) {  // a written atom's rows are the loop's own (decision 0040 item 5); its own loads are reads of the invariant, framed like any (decision 0045 item 12)
+          if (e.a != nullptr && reads_heap(*e.a)) lower(*e.a, env, guard, gdep, full);
+          return {low::bool_lit(true), {}};
+        }
         if (cmode_ == CMode::None) {
           internal_error(e.loc, "a permission atom outside a contract reached lowering");
           return {low::bool_lit(true), {}};
         }
         {
-          LV r = atom(e, env);
+          LV r = atom(e, env, guard, gdep, &full);
           if (cmode_ == CMode::Wf) overlap_obligations(e, env, guard, gdep, full);
           return r;
         }
@@ -2959,11 +3231,17 @@ class Lowerer {
       std::vector<Cell> cells;    // the leaf cells of a struct place, or the one cell (decision 0043 item 9)
     };
     std::vector<S> ss;
+    // The callee's places reached through loads are read in the caller's current heap (decision 0045 item 6): the contract mode of a call, over the arguments.
+    CtxSave call_ctx(*this);
+    cmode_ = CMode::Call;
+    cf_ = &callee;
+    cens_ = false;
+    cold_ = false;
     for (size_t i = 0; i < n; ++i) {  // the requires atoms come first in `sites`
       S x;
       x.site = &fa.sites[i];
-      x.p = site_ref(*x.site, cenv);
       x.root = site_root(*x.site, cenv);
+      x.p = chain_ref(x.root, x.site->path);
       x.root_ptr = member_root(x.site->atom->a)->type;
       x.g = site_guard(*x.site, cenv);
       x.t = &site_pointee(*x.site);
@@ -2977,6 +3255,7 @@ class Lowerer {
         case AtomKind::Owns: return "calls `" + callee.c_name + "`, which needs to own " + pl + ", without owning it";
         case AtomKind::Reads: return "calls `" + callee.c_name + "`, which needs to read " + pl + ", without the permission to read it";
         case AtomKind::Live: {
+          if (!x.site->via.empty()) return "calls `" + callee.c_name + "`, which needs `" + x.site->atom->a->c_text + "` to point to a live object";  // decision 0045
           const Expr& arg = site_arg(*x.site, e);
           const std::string who = arg.kind == Expr::Kind::Null ? std::string("the null pointer")
                                   : arg.c_text.empty()         ? std::string("the pointer")
@@ -3000,6 +3279,8 @@ class Lowerer {
     auto uninit_text = [&](const S& x, const Cell& c) {
       if (site_is_global(*x.site))
         return "calls `" + callee.c_name + "`, which needs " + site_phrase(*x.site, quoted(x.place, "a global")) + " to have a value";
+      if (!x.site->via.empty())  // decision 0045: a place reached through steps, in the callee's spelling
+        return "calls `" + callee.c_name + "`, which needs " + quoted(x.place, "the object it points to") + " to have a value; it may not have one here";
       const Expr& arg = site_arg(*x.site, e);
       const std::string who = arg.kind == Expr::Kind::Null ? std::string("the null pointer")
                               : arg.c_text.empty()         ? std::string("a pointer")
@@ -3095,13 +3376,13 @@ class Lowerer {
         // the same against the `reads` places of the enclosing loops' written atoms (decision 0040 item 5, audit N4)
         for (const WAtom* a : active_w_)
           for (const Cell& c : x.cells) {
-            if (a->kind != AtomKind::Reads || a->sfx != cell_suffix(c.type) || same_expr(c.recv, a->q)) continue;
+            if (a->kind != AtomKind::Reads || a->sfx != cell_suffix(c.type) || same_expr(c.recv, a->qb)) continue;
             bool seen = false;
             for (const auto& d : done)
-              if (same_expr(d.first, c.recv) && same_expr(d.second, a->q)) seen = true;
+              if (same_expr(d.first, c.recv) && same_expr(d.second, a->qb)) seen = true;
             if (seen) continue;
-            done.emplace_back(c.recv, a->q);
-            split(low::bin(BinOp::Eq, c.recv, a->q));
+            done.emplace_back(c.recv, a->qb);
+            split(low::bin(BinOp::Eq, c.recv, a->qb));
           }
       }
     }
@@ -3278,12 +3559,40 @@ class Lowerer {
       for (int i = 0; i < fa.nreq; ++i) {
         const AtomSite& site = fa.sites[static_cast<size_t>(i)];
         if (!site_takes_cell(site)) continue;
-        const E guard_of_site = site_guard(site, cenv);
+        // The callee's places are read in the contract mode of a call, over the arguments (decision 0045 item 6).
+        E guard_of_site;
+        std::vector<Cell> site_cs;
+        {
+          CtxSave call_ctx(*this);
+          cmode_ = CMode::Call;
+          cf_ = &callee;
+          cens_ = false;
+          cold_ = false;
+          guard_of_site = site_guard(site, cenv);
+          site_cs = site_cells(site, site_ref(site, cenv));
+        }
         const std::string base_text = site_call_text(site, e);
         // One access per cell of the atom (decision 0043 items 9 and 12): a struct atom is a memory call on every leaf field, with an obligation per leaf.
-        for (const Cell& c : site_cells(site, site_ref(site, cenv))) {
+        for (const Cell& c : site_cs) {
           Acc::Atom k;
-          k.place = c.recv;
+          k.loads = site_loads(site);
+          E place_now = c.recv;
+          if (k.loads) {
+            // Decision 0045 item 6 (owner question 111): the callee's place is read in the caller's heap after the arguments are evaluated and the call rows have
+            // checked its cells (a snapshot of the cell's Ref, chain-guarded like the rows), so the pair checks of 0039 item 4 compare the objects the call is about
+            // to take, not what the heap names after the call.
+            const std::string snap = new_temp(low::LType::Ref);
+            Effect sx;
+            sx.kind = Effect::Kind::Snapshot;
+            sx.name = snap;
+            sx.value = c.recv;
+            sx.deps = pre;
+            sx.seq = full.next_seq++;
+            full.effects.push_back(std::move(sx));
+            place_now = low::var(snap);
+            ca.dep = join(ca.dep, pre);  // the pair checks that name it follow the snapshot
+          }
+          k.place = place_now;
           k.guard = guard_of_site;
           k.owns = site.atom->atom == AtomKind::Owns;
           k.field = fkey(c.type);
@@ -4496,7 +4805,7 @@ class Lowerer {
         for (const E& c : cands) split(c);
       }
     for (const WAtom* a : active_w_)
-      if (a->kind != AtomKind::Live && a->sfx == sfx) split(a->q);  // the places of the enclosing loops' written atoms (decision 0040 item 5)
+      if (a->kind != AtomKind::Live && a->sfx == sfx) split(a->qb);  // the places of the enclosing loops' written atoms (decision 0040 item 5)
     const FnAtoms& fa = atoms_of(*fn_.f);
     std::set<std::pair<int, std::vector<int>>> done;
     for (int i = 0; i < fa.nreq; ++i) {
@@ -4505,6 +4814,11 @@ class Lowerer {
       std::vector<E> cands;
       split_candidates(site_var(site), site_pointee(site), target, cands);
       if (cands.empty() || !done.insert({site_key(site), site.path}).second) continue;
+      for (const E& c : cands) split(c);
+    }
+    for (const LbPlace& l : active_lbs_) {  // the places of the enclosing loops' loop-entry snapshots (decision 0045 item 10)
+      std::vector<E> cands;
+      split_candidates(l.ref, site_pointee(*l.site), target, cands);
       for (const E& c : cands) split(c);
     }
     // The entry function holds every global (program_start): a pointer it obtained may be any of them (decision 0041 item 10).
@@ -4516,6 +4830,29 @@ class Lowerer {
         if (!cands.empty() && done.insert({kGlobalKeyBase + g.id, {}}).second)
           for (const E& c : cands) split(c);
       }
+  }
+
+  // Decision 0045 item 6 (entry): right after the `requires`, the base of each loading `requires` place is snapshotted into a ghost `Ref` (`eb_N`) from the
+  // `requires`-framed chain; the body, the entry splits and the call splits name the place by it (a read of the heap in a split condition would not be
+  // well-defined where the inner cell is no longer held).
+  void entry_snapshots(const Function& f, std::vector<low::LStmt>& out, const Env& env) {
+    const FnAtoms& fa = atoms_of(f);
+    std::set<int> done;
+    for (int i = 0; i < fa.nreq; ++i) {
+      const AtomSite& s = fa.sites[static_cast<size_t>(i)];
+      if (s.via.empty()) continue;
+      const int k = site_key(s);
+      if (!is_derived_key(k) || !derived_of(k).has_load || !done.insert(k).second) continue;
+      E chain;
+      {
+        CtxSave save(*this);
+        cmode_ = CMode::Method;
+        chain = site_root(s, env);
+      }
+      const Derived& d = derived_of(k);
+      fn_.snapshots.push_back(low::LVar{eb_name(d), low::LType::Ref});
+      assign(out, eb_name(d), chain);
+    }
   }
 
   // The entry of a method with atoms (decision 0037 item 9): the case splits on the liveness cells of every pair of atoms of the `requires`, and
@@ -4582,12 +4919,25 @@ class Lowerer {
     for (size_t i = 0; i < fa.sites.size(); ++i)
       if (fa.sites[i].in_ensures) ens.push_back(i);
     if (ens.empty()) return;
+    // The places of the `ensures` are read in the return heap (decision 0045 item 3): a place reached through a load is the object its path designates on return.
+    CtxSave ret_ctx(*this);
+    cmode_ = CMode::Ret;
+    cf_ = &f;
+    cens_ = true;
+    cold_ = false;
     std::vector<E> g, p, root;
     for (size_t i : ens) {
       g.push_back(site_guard(fa.sites[i], env));
-      p.push_back(site_ref(fa.sites[i], env));
       root.push_back(site_root(fa.sites[i], env));
+      p.push_back(chain_ref(root.back(), fa.sites[i].path));
     }
+    auto loads = [&](size_t k) {
+      const AtomSite& x = fa.sites[ens[k]];
+      return !x.via.empty() && is_derived_key(site_key(x)) && derived_of(site_key(x)).has_load;
+    };
+    auto amt_of = [&](size_t k) {
+      return ens_amount(fa, fa.sites[ens[k]], p[k], [&](const AtomSite& rs) { return site_var(rs); }, env);
+    };
     auto name = [&](size_t k) {  // the user's spelling of the place, for messages
       return site_text(fa.sites[ens[k]]);
     };
@@ -4609,6 +4959,31 @@ class Lowerer {
       return m;
     };
     const E none = low::no_perm(), write = low::write_perm();
+    // Pass 0 (decision 0045 item 6, audit S3): when an `ensures` place is reached through a load, or an `ensures` guard reads the heap, each earlier atom that holds the
+    // cells they read is checked held first, in clause order (a pointer cell for a load, any cell for a guard), so that no later row reads through a load before the
+    // row that checks the cell it reads (else Silicon's own well-definedness check would fail first).
+    {
+      std::set<std::pair<size_t, size_t>> asserted;  // (atom, cell) already checked
+      for (size_t k = 0; k < ens.size(); ++k) {
+        bool guard_reads = false;
+        for (const AtomGuard& x : fa.sites[ens[k]].guards) guard_reads = guard_reads || reads_heap(*x.cond);
+        if (!loads(k) && !guard_reads) continue;
+        for (size_t j = 0; j < k; ++j) {
+          const AtomSite& fj = fa.sites[ens[j]];
+          if (!site_takes_cell(fj)) continue;
+          const std::vector<Cell> cs = site_cells(fj, p[j]);
+          const bool owns_j = fj.atom->atom == AtomKind::Owns;
+          const std::string plj = site_phrase(fj, quoted(name(j), "the object the pointer points to"));
+          const std::string mj = owns_j ? "returns without owning " + plj + ", which its contract promises"
+                                        : "returns without the permission to read " + plj + ", which it borrowed";
+          for (size_t ci = 0; ci < cs.size(); ++ci) {
+            const Cell& c = cs[ci];
+            if (!(guard_reads || c.type.is_ptr()) || !asserted.insert({j, ci}).second) continue;
+            emit_assert(out, low::implies(g[j], low::bin(BinOp::Gt, value_perm(c.recv, c.type), none)), perm_meta(mj, j));
+          }
+        }
+      }
+    }
     for (size_t a = 0; a < ens.size(); ++a)
       for (size_t b = a + 1; b < ens.size(); ++b) {
         if (!exclusive_pair(fa.sites[ens[a]], fa.sites[ens[b]])) continue;
@@ -4627,7 +5002,7 @@ class Lowerer {
     for (size_t k = 0; k < ens.size(); ++k) {
       const AtomSite& site = fa.sites[ens[k]];
       const Type& t = site_pointee(site);
-      const E amt = low::var(amount_name(site.atom->amount));
+      const E amt = amt_of(k);
       const bool owns = site.atom->atom == AtomKind::Owns, reads = site.atom->atom == AtomKind::Reads;
       const std::string pl = site_phrase(site, quoted(name(k), "the object the pointer points to"));
       const std::string msg = owns ? "returns without owning " + pl + ", which its contract promises"
@@ -4637,7 +5012,8 @@ class Lowerer {
       const Type& root_ptr = member_root(site.atom->a)->type;
       add(low::bin(BinOp::Ne, root[k], low::null_()), perm_meta(msg, k));
       add(wf_expr(root[k], &root_ptr), internal("WF of a pointer parameter"));
-      if (needs_root_block(site)) add(in_block(root[k]), internal("a pointer parameter points into its block"));
+      // A pointer loaded from memory need not point into an object the function owns (a callee that moves `*pp` to a pointer it was not given an object for): its row is a user's, not internal.
+      if (needs_root_block(site)) add(in_block(root[k]), loads(k) ? perm_meta(msg, k) : internal("a pointer parameter points into its block"));
       if (site_takes_cell(site)) {
         // Decision 0042 item 5.  `must_init`: the flag row is the promise (`postcondition`) and the range holds under it, so a missing write is reported
         // once.  `ref_to_uninit`: a flag that was set on entry is still set (`internal`: nothing makes a held cell indeterminate again), and the range holds
@@ -4657,7 +5033,7 @@ class Lowerer {
                   if (cell_suffix(cj.type) != cell_suffix(c.type)) continue;
                   if (one_type && cj.path != c.path) continue;  // leaves of two objects of one struct type share a cell only at one path
                   E same = same_expr(c.recv, cj.recv) ? nullptr : low::bin(BinOp::Eq, c.recv, cj.recv);
-                  total = low::bin(BinOp::Add, total, term(low::and_(g[j], same), low::var(amount_name(fa.sites[ens[j]].atom->amount))));
+                  total = low::bin(BinOp::Add, total, term(low::and_(g[j], same), amt_of(j)));
                 }
               }
               add(low::bin(BinOp::Ge, flag ? flag_perm(c.recv, c.type) : value_perm(c.recv, c.type), total), perm_meta(msg, k));
@@ -4677,7 +5053,7 @@ class Lowerer {
             } else {
               E kept = low::old_(cell_flag(c.recv, c.type));
               if (site.atom->amount >= 0 && site.atom->amount < fa.nreq)
-                if (const E gp = site_guard(fa.sites[static_cast<size_t>(site.atom->amount)], env)) kept = low::and_(gp, kept);
+                if (const E gp = site_guard(fa.sites[static_cast<size_t>(site.atom->amount)], env)) kept = low::and_(old_entry(gp), kept);  // the partner's guard in the entry state (audit B2)
               add(low::implies(kept, cell_flag(c.recv, c.type)), internal("a pointee that had a value on entry keeps it"));
             }
             if (const E r = cell_range(c.recv, c.type)) add(low::implies(cell_flag(c.recv, c.type), r), perm_meta(msg, k));
@@ -4688,7 +5064,7 @@ class Lowerer {
       for (size_t j = 0; j < ens.size(); ++j) {
         if (j == k) continue;
         E same = same_expr(root[k], root[j]) ? nullptr : low::bin(BinOp::Eq, live_cell(root[k]), live_cell(root[j]));
-        total = low::bin(BinOp::Add, total, term(low::and_(g[j], same), low::var(amount_name(fa.sites[ens[j]].atom->amount))));
+        total = low::bin(BinOp::Add, total, term(low::and_(g[j], same), amt_of(j)));
       }
       add(low::bin(BinOp::Ge, live_perm(root[k]), total), perm_meta(msg, k));
     }
@@ -4900,6 +5276,83 @@ class Lowerer {
     }
   }
 
+  // Whether `site` (a `requires` atom) names the place key `k`: its own key, or the loop-entry snapshot of its derived key.
+  bool key_has_site(const AtomSite& site, int k) const {
+    const int sk = site_key(site);
+    return sk == k || (is_derived_key(k) && derived_of(k).lb_of >= 0 && derived_of(k).lb_of == sk);
+  }
+  // The loop-entry snapshot key of the derived key `k` (created the first time).
+  int lb_key_of(int k) {
+    const auto it = lb_keys_.find(k);
+    if (it != lb_keys_.end()) return it->second;
+    Derived d = derived_of(k);
+    d.lb_of = k;
+    d.local = derived_count_[d.f]++;
+    derived_.push_back(d);
+    const int lk = kDerivedKeyBase + static_cast<int>(derived_.size()) - 1;
+    lb_keys_[k] = lk;
+    return lk;
+  }
+  // Decision 0045 item 10: a derived place needs a loop-entry snapshot where the function may write a cell of a loaded field of its path anywhere in its body (a
+  // store or a call reaching that field, by the havoc rule), a cell by name, or the global its root is: what the path designates when the loop starts may differ from
+  // what the `requires` named.
+  bool need_lb(int k) {
+    const Derived& d = derived_of(k);
+    if (!d.has_load || fn_.f->body == nullptr) return false;
+    LoopWrites w;
+    writes_in(fn_.f->body, w);
+    if (!w.cells.empty()) return true;
+    if (key_is_global(d.key.root) && w.globals.count(d.key.root - kGlobalKeyBase) != 0) return true;
+    if (key_is_global(d.key.root))
+      for (const auto& gl : w.gleaves)
+        if (gl.first == d.key.root - kGlobalKeyBase) return true;
+    for (const Expr* x = d.base; x != nullptr; x = x->a) {
+      if (x->kind == Expr::Kind::Deref && w.fields.count(cell_suffix(x->type)) != 0) return true;
+      if (x->kind != Expr::Kind::Deref && x->kind != Expr::Kind::MemberAddr && x->kind != Expr::Kind::Field) break;
+    }
+    return false;
+  }
+  // A base expression read in the CURRENT heap with no framing, and the condition (accumulated in `cond`) that every load on the way is held (the loop-entry snapshot).
+  E lb_chain(const Expr* e, E& cond) {
+    switch (e->kind) {
+      case Expr::Kind::Formal: return contract_env().formals[static_cast<size_t>(e->index)];
+      case Expr::Kind::GlobalAddr: return global_ref(e->global->id);
+      case Expr::Kind::MemberAddr: return member_ref(lb_chain(e->a, cond), e->index);
+      case Expr::Kind::Deref: {
+        const E a = lb_chain(e->a, cond);
+        cond = low::and_(cond, low::bin(low::BinOp::Gt, value_perm(a, e->type), low::no_perm()));
+        return cell_value(a, e->type);
+      }
+      default: {
+        CtxSave save(*this);
+        cmode_ = CMode::Wf;  // a by-value parameter's leaf: a fixed value
+        Full scratch;
+        return lower(*e, contract_env(), nullptr, Deps{}, scratch).e;
+      }
+    }
+  }
+  // The root `Ref` a site key stands for in the body: a formal, a global's address, or (decision 0045 item 10) a derived place's base: its entry snapshot `eb_N`
+  // when it loads, the leaf formal otherwise (a by-value parameter's pointer member is a fixed value).
+  E key_root_ref(int k) {
+    if (key_is_global(k)) return global_ref(k - kGlobalKeyBase);
+    if (is_derived_key(k) && derived_of(k).lb_of >= 0) return low::var(lb_name(derived_of(k)));
+    if (is_derived_key(k)) {
+      const FnAtoms& fa = atoms_of(*fn_.f);
+      for (int i = 0; i < fa.nreq; ++i)
+        if (site_key(fa.sites[static_cast<size_t>(i)]) == k) return derived_body_root(fa.sites[static_cast<size_t>(i)], contract_env());
+      internal_error(fn_.f->loc, "a derived key without a requires site reached the loop places");
+      return low::null_();
+    }
+    return low::var(formal_name(*fn_.f, k));
+  }
+  // The name a place's snapshots carry in a loop (the formal's, the global's or the derived place's).
+  std::string key_tag(int k) {
+    if (key_is_global(k)) return prog_.globals()[static_cast<size_t>(k - kGlobalKeyBase)].viper_name();
+    if (is_derived_key(k) && derived_of(k).lb_of >= 0) return lb_name(derived_of(k));
+    if (is_derived_key(k)) return eb_name(derived_of(k));
+    return formal_name(*fn_.f, k);
+  }
+
   // The places the function holds on entry that a loop frames: the parameters (and globals) with an atom in the `requires`, and in the entry function
   // every global and `static` local of the unit (it holds them from program_start, decision 0041 item 10); `value_keys`: those whose value cells are held.
   void held_keys(std::set<int>& atom_keys, std::set<int>& value_keys) {
@@ -4908,6 +5361,11 @@ class Lowerer {
       const AtomSite& site = fa.sites[static_cast<size_t>(i)];
       atom_keys.insert(site_key(site));
       if (site_takes_cell(site)) value_keys.insert(site_key(site));
+      if (is_derived_key(site_key(site)) && derived_of(site_key(site)).lb_of < 0 && need_lb(site_key(site))) {  // decision 0045 item 10: also through the loop-entry snapshot
+        const int lk = lb_key_of(site_key(site));
+        atom_keys.insert(lk);
+        if (site_takes_cell(site)) value_keys.insert(lk);
+      }
     }
     if (fn_.f == prog_.entry())
       for (const Global& g : prog_.globals()) {
@@ -4944,17 +5402,22 @@ class Lowerer {
     for (int k : atom_params) {
       const bool global = key_is_global(k);
       if (!global && fn_.assigned_params.count(k) != 0) continue;
-      if (!global && f.params[static_cast<size_t>(k)].type.pointee == nullptr) continue;
-      const E rootref = global ? global_ref(k - kGlobalKeyBase) : low::var(formal_name(f, k));
+      const bool derived = is_derived_key(k);
+      if (!global && !derived && f.params[static_cast<size_t>(k)].type.pointee == nullptr) continue;
+      const E rootref = key_root_ref(k);
       // The place's label as the user spells it (`*p`, or `g`): the first atom of the key that has a spelling.
       std::string label;
       if (global) {
         label = prog_.globals()[static_cast<size_t>(k - kGlobalKeyBase)].c_name;
+      } else if (derived) {
+        label.clear();
+        for (const AtomSite& site : fa.sites)
+          if (key_has_site(site, k) && !site_text(site).empty()) { label = site_text(site); break; }
       } else {
         const std::string& c = f.params[static_cast<size_t>(k)].name;
         label = c.empty() ? std::string() : "*" + c;
         for (const AtomSite& site : fa.sites)
-          if (site_key(site) == k && !site_text(site).empty()) { label = site_text(site); break; }
+          if (key_has_site(site, k) && !site_text(site).empty()) { label = site_text(site); break; }
       }
       // The value cells the key's atoms take, each once (decision 0043 items 9 and 11): a struct atom's leaves, a member atom's leaf, a scalar place's cell.
       struct VCell { Cell c; std::vector<int> full; };
@@ -4962,7 +5425,7 @@ class Lowerer {
       std::vector<std::pair<Type, E>> slots;
       for (int i = 0; i < fa.nreq; ++i) {
         const AtomSite& site = fa.sites[static_cast<size_t>(i)];
-        if (site_key(site) != k) continue;
+        if (!key_has_site(site, k)) continue;
         if (site_pointee(site).is_struct()) {
           bool seen = false;
           for (const auto& sl : slots) seen = seen || same_expr(sl.second, chain_ref(rootref, site.path));
@@ -4999,7 +5462,7 @@ class Lowerer {
         pl.live = live;
         pl.mpath = mpath;
         pl.suffix = cell_suffix(pl.type);
-        name(pl, (global ? prog_.globals()[static_cast<size_t>(k - kGlobalKeyBase)].viper_name() : formal_name(f, k)) + join_path(mpath));
+        name(pl, key_tag(k) + join_path(mpath));
         // A global's address is never null: no guard of its own (decision 0041 item 10); the guards below keep it apart from a parameter's place.
         if (!global) {
           pl.gv = low::bin(low::BinOp::Ne, rootref, low::null_());
@@ -5019,7 +5482,7 @@ class Lowerer {
       if (vcells.empty()) {  // only a `live` atom: the liveness place, as before
         Place pl;
         pl.recv = rootref;
-        pl.type = global ? key_pointee(k) : *f.params[static_cast<size_t>(k)].type.pointee;
+        pl.type = (global || derived) ? key_pointee(k) : *f.params[static_cast<size_t>(k)].type.pointee;
         pl.value = false;
         pl.label = label;
         add_place(std::move(pl), {}, true);
@@ -5112,26 +5575,132 @@ class Lowerer {
 
   std::vector<WAtom> written_atoms(const Stmt& s, int loop_number, const std::set<int>& assigned, const std::set<int>& declared, const LoopWrites& writes) {
     std::vector<WAtom> out;
+    int atom_id = 0;
     for (const AtomSite& site : loop_atoms(s)) {
-      WAtom a;
-      a.kind = site.atom->atom;
       const Expr& qa = *site.atom->a;
-      a.q = qa.kind == Expr::Kind::Local && qa.var != nullptr ? low::var(var_name(*qa.var)) : lower_pure(qa);
-      a.g = site_guard(site, body_env());
-      a.pt = *qa.type.pointee;
-      a.sfx = a.kind == AtomKind::Live ? std::string() : cell_suffix(a.pt);
-      a.text = a.kind == AtomKind::Live ? qa.c_text : "*" + qa.c_text;
-      a.loc = site.atom->loc;
-      const std::string tag = std::to_string(out.size()) + "__" + std::to_string(loop_number);
-      a.av = "aw_v" + tag;
-      a.ad = "aw_d" + tag;
-      a.al = "aw_l" + tag;
-      const bool moved = qa.var != nullptr && assigned.count(qa.var->id) != 0 && declared.count(qa.var->id) == 0;
-      if (a.kind != AtomKind::Live && !moved) a.vs = "aw_s" + tag;
-      a.reach = a.kind != AtomKind::Live && (writes.fields.count(a.sfx) != 0 || !writes.cells.empty());
-      out.push_back(std::move(a));
+      const AtomKind kind = site.atom->atom;
+      const Type& pt = *qa.type.pointee;
+      const bool loads = reads_heap(qa) || (qa.kind == Expr::Kind::Local && qa.var != nullptr && qa.var->address_taken);
+      // `moved` (no value snapshot): the loop assigns the pointer variable the place hangs from, writes a cell of the path by name, or writes a loaded field of it.
+      bool moved = false;
+      {
+        const Expr* root = member_root(&qa, nullptr);
+        bool under_load = false;  // a global the place hangs from by a load (`*gp`): the loop moves the place when it writes the global
+        for (const Expr* x = root; x != nullptr; x = (x->kind == Expr::Kind::Deref || x->kind == Expr::Kind::Field || x->kind == Expr::Kind::MemberAddr) ? x->a : nullptr) {
+          if (x->kind == Expr::Kind::Local && x->var != nullptr && assigned.count(x->var->id) != 0 && declared.count(x->var->id) == 0) moved = true;
+          if (x->kind == Expr::Kind::Deref && writes.fields.count(cell_suffix(x->type)) != 0) moved = true;
+          if (x->kind == Expr::Kind::Deref) under_load = true;
+          if (x->kind == Expr::Kind::GlobalAddr && x->global != nullptr && under_load) {
+            if (writes.globals.count(x->global->id) != 0) moved = true;
+            for (const auto& gl : writes.gleaves)
+              if (gl.first == x->global->id) moved = true;
+          }
+        }
+        if (loads && !writes.cells.empty()) moved = true;
+      }
+      // The entries: one for a scalar or `live` atom, one per leaf cell for a struct atom.
+      std::vector<std::pair<std::vector<int>, Cell>> entries;
+      if (kind != AtomKind::Live && pt.is_struct()) {
+        for (Cell& c : leaf_cells(low::null_(), *pt.struct_type, qa.c_text, true)) entries.emplace_back(c.path, std::move(c));
+      } else {
+        entries.emplace_back(std::vector<int>{}, Cell{nullptr, pt, std::string(), {}, ""});
+      }
+      bool first = true;
+      for (auto& [lpath, leaf] : entries) {
+        WAtom a;
+        a.kind = kind;
+        a.atom = site.atom;
+        a.guards = site.guards;
+        a.loads = loads;
+        a.atom_id = atom_id;
+        a.first = first;
+        a.lpath = lpath;
+        a.lpt = qa.type;
+        a.pt = kind != AtomKind::Live && pt.is_struct() ? leaf.type : pt;
+        a.sfx = kind == AtomKind::Live ? std::string() : cell_suffix(a.pt);
+        a.text = kind == AtomKind::Live ? qa.c_text : (pt.is_struct() ? leaf.text : "*" + qa.c_text);
+        a.loc = site.atom->loc;
+        const std::string tag = std::to_string(out.size()) + "__" + std::to_string(loop_number);
+        a.av = "aw_v" + tag;
+        a.ad = "aw_d" + tag;
+        a.al = "aw_l" + tag;
+        if (loads) a.aq = "aw_q" + tag;
+        if (kind != AtomKind::Live && !moved) a.vs = "aw_s" + tag;
+        a.reach = kind != AtomKind::Live && (writes.fields.count(a.sfx) != 0 || !writes.cells.empty());
+        out.push_back(std::move(a));
+        first = false;
+      }
+      ++atom_id;
     }
     return out;
+  }
+
+  // The pointers of the written atoms, once the loop's places are known (decision 0045 item 12): an atom that loads is read in the invariant through the loop's places and
+  // the earlier written atoms (chains framed by their `acc`s); the guards the same when they read the heap.  Each entry then gets its leaf `Ref`, and the body's ghost.
+  void resolve_written(std::vector<WAtom>& w, const std::vector<Place>& places) {
+    std::vector<Place> all = places;
+    const std::vector<Place>* saved = inv_places_;
+    inv_places_ = &all;
+    E slot, slot_g;
+    for (size_t j = 0; j < w.size(); ++j) {
+      WAtom& a = w[j];
+      if (a.first) {
+        const Expr& qa = *a.atom->a;
+        if (a.loads) {
+          CtxSave save(*this);
+          cmode_ = CMode::Inv;
+          cf_ = fn_.f;
+          inv_reads_.clear();
+          inv_what_ = "invariant";
+          Full scratch;
+          slot = lower(qa, body_env(), nullptr, {}, scratch).e;
+          inv_reads_.clear();
+        } else if (qa.kind == Expr::Kind::Local && qa.var != nullptr) {
+          slot = low::var(var_name(*qa.var));
+        } else {
+          slot = lower_pure(qa);
+        }
+        AtomSite site;  // the guards only
+        site.atom = a.atom;
+        site.guards = a.guards;
+        bool guard_reads = false;
+        for (const AtomGuard& x : a.guards) guard_reads = guard_reads || reads_heap(*x.cond);
+        if (guard_reads) {
+          CtxSave save(*this);
+          cmode_ = CMode::Inv;
+          cf_ = fn_.f;
+          inv_reads_.clear();
+          E g;
+          for (const AtomGuard& x : a.guards) {
+            Full scratch;
+            const LV v = lower(*x.cond, body_env(), nullptr, {}, scratch);
+            g = low::and_(g, x.holds ? v.e : low::not_(v.e));
+          }
+          inv_reads_.clear();
+          slot_g = g;
+        } else {
+          slot_g = site_guard(site, body_env());
+        }
+      }
+      a.lq = slot;
+      a.g = slot_g;
+      a.q = chain_ref(slot, a.lpath);
+      a.qb = a.loads ? low::var(a.aq) : a.q;
+      if (a.loads) fn_.snapshots.push_back(low::LVar{a.aq, low::LType::Ref});
+      if (a.kind != AtomKind::Live) {
+        Place wp;
+        wp.recv = a.q;
+        wp.type = a.pt;
+        wp.value = true;
+        wp.suffix = a.sfx;
+        wp.kv = a.av;
+        wp.kd = a.ad;
+        wp.kl = a.al;
+        wp.wg = a.g;
+        all.push_back(std::move(wp));
+      }
+    }
+    inv_places_ = saved;
   }
 
   E lower_pure(const Expr& x) {
@@ -5151,7 +5720,7 @@ class Lowerer {
       if (pl.value && pl.suffix == a.sfx) r = low::and_(r, low::implies(pl.gv, low::bin(BinOp::Ne, a.q, pl.recv)));
     if (a.kind == AtomKind::Reads)
       for (size_t k = 0; k < j; ++k)
-        if (w[k].kind != AtomKind::Live && w[k].sfx == a.sfx) r = low::and_(r, low::implies(w[k].g, low::bin(BinOp::Ne, a.q, w[k].q)));
+        if (w[k].kind != AtomKind::Live && w[k].sfx == a.sfx && w[k].atom_id != a.atom_id) r = low::and_(r, low::implies(w[k].g, low::bin(BinOp::Ne, a.q, w[k].q)));
     return r;
   }
   // NOTAUTO for the liveness cell: its block is no automatic place's (a true `gl`), nor an earlier atom's (a true guard).
@@ -5160,24 +5729,29 @@ class Lowerer {
     const WAtom& a = w[j];
     E r;
     for (const Place& pl : places)
-      if (pl.live) r = low::and_(r, low::implies(pl.gl, low::bin(BinOp::Ne, live_cell(a.q), live_cell(lv_of(pl)))));
-    for (size_t k = 0; k < j; ++k) r = low::and_(r, low::implies(w[k].g, low::bin(BinOp::Ne, live_cell(a.q), live_cell(w[k].q))));
+      if (pl.live) r = low::and_(r, low::implies(pl.gl, low::bin(BinOp::Ne, live_cell(a.lq), live_cell(lv_of(pl)))));
+    for (size_t k = 0; k < j; ++k)
+      if (w[k].first && w[k].atom_id != a.atom_id) r = low::and_(r, low::implies(w[k].g, low::bin(BinOp::Ne, live_cell(a.lq), live_cell(w[k].lq))));
     return r;
   }
 
   // The no-op case splits (S28 P8): the atom's place against every automatic place of its field and against an earlier atom's, and its liveness cell
   // against every other liveness cell.
-  void written_splits(const std::vector<WAtom>& w, const std::vector<Place>& places, std::vector<low::LStmt>& out) {
+  void written_splits(const std::vector<WAtom>& w, const std::vector<Place>& places, std::vector<low::LStmt>& out, bool body = false) {
     using low::BinOp;
+    // `body`: the splits at the top of an iteration name an atom that loads by its ghost Ref (`qb`), never by a heap read.
+    auto qn = [&](const WAtom& a) { return body ? a.qb : a.q; };
+    auto ln = [&](const WAtom& a) { return body && a.loads ? a.qb : a.lq; };  // the slot's ghost is the leaf's for a scalar atom; a struct atom's slot is read like q
     for (size_t j = 0; j < w.size(); ++j) {
       const WAtom& a = w[j];
       for (const Place& pl : places) {
-        if (a.kind != AtomKind::Live && pl.value && pl.suffix == a.sfx) case_split(out, low::bin(BinOp::Eq, a.q, pl.recv));
-        if (pl.live) case_split(out, low::bin(BinOp::Eq, live_cell(a.q), live_cell(lv_of(pl))));
+        if (a.kind != AtomKind::Live && pl.value && pl.suffix == a.sfx) case_split(out, low::bin(BinOp::Eq, qn(a), pl.recv));
+        if (pl.live && a.first) case_split(out, low::bin(BinOp::Eq, live_cell(ln(a)), live_cell(lv_of(pl))));
       }
       for (size_t k = 0; k < j; ++k) {
-        if (a.kind != AtomKind::Live && w[k].kind != AtomKind::Live && w[k].sfx == a.sfx) case_split(out, low::bin(BinOp::Eq, a.q, w[k].q));
-        case_split(out, low::bin(BinOp::Eq, live_cell(a.q), live_cell(w[k].q)));
+        if (a.atom_id == w[k].atom_id) continue;
+        if (a.kind != AtomKind::Live && w[k].kind != AtomKind::Live && w[k].sfx == a.sfx) case_split(out, low::bin(BinOp::Eq, qn(a), qn(w[k])));
+        if (a.first && w[k].first) case_split(out, low::bin(BinOp::Eq, live_cell(ln(a)), live_cell(ln(w[k]))));
       }
     }
   }
@@ -5191,8 +5765,9 @@ class Lowerer {
         assign(out, a.av, a.kind == AtomKind::Owns ? low::write_perm() : value_perm(a.q, a.pt));
         assign(out, a.ad, a.kind == AtomKind::Owns ? low::write_perm() : flag_perm(a.q, a.pt));
       }
+      if (!a.first) continue;
       fn_.snapshots.push_back(low::LVar{a.al, low::LType::Perm});
-      assign(out, a.al, live_perm(a.q));
+      assign(out, a.al, live_perm(a.lq));
     }
   }
   // The value snapshots (decision 0040 item 5, "Values"): the value the place holds at the entry, when it is held there.  Taken after the splits
@@ -5217,9 +5792,11 @@ class Lowerer {
     for (size_t j = 0; j < w.size(); ++j) {
       const WAtom& a = w[j];
       const bool live = a.kind == AtomKind::Live, owns = a.kind == AtomKind::Owns;
-      E basic = low::and_(low::bin(BinOp::Ne, a.q, low::null_()), wf_expr(a.q));
-      if (!live) basic = low::and_(basic, in_block(a.q));
-      out.push_back(auto_invariant(low::implies(a.g, basic), at));
+      if (a.first) {  // the atom's basic row (WF_S and the member lengths for a struct atom), once
+        E basic = low::and_(low::bin(BinOp::Ne, a.lq, low::null_()), wf_expr(a.lq, &a.lpt));
+        if (!live || (a.lpt.pointee != nullptr && a.lpt.pointee->is_struct())) basic = low::and_(basic, in_block(a.lq));
+        out.push_back(auto_invariant(low::implies(a.g, basic), at));
+      }
       const E nv = low::and_(a.g, written_notauto_v(w, j, places)), nl = low::and_(a.g, written_notauto_l(w, j, places));
       if (!live) {
         out.push_back(auto_invariant(low::implies(nv, low::and_(low::bin(BinOp::Gt, low::var(a.av), none), low::bin(BinOp::Gt, low::var(a.ad), none))), at));
@@ -5238,8 +5815,9 @@ class Lowerer {
           out.push_back(auto_invariant(low::implies(low::and_(low::and_(a.g, pl.gv), low::bin(BinOp::Eq, a.q, pl.recv)), hold), at));
         }
       }
+      if (!a.first) continue;  // one liveness amount per atom
       out.push_back(auto_invariant(low::implies(nl, low::bin(BinOp::Gt, low::var(a.al), none)), at));
-      out.push_back(auto_invariant(low::implies(nl, low::acc(live_cell(a.q), "lv", low::var(a.al))), at));
+      out.push_back(auto_invariant(low::implies(nl, low::acc(live_cell(a.lq), "lv", low::var(a.al))), at));
       for (const Place& pl : places)
         if (pl.live)
           out.push_back(auto_invariant(
@@ -5261,9 +5839,11 @@ class Lowerer {
                                    : "enters this loop without " + what + ", which its invariant needs";
       const SrcLoc where = back ? at : a.loc;
       auto add = [&](E cond) { emit_assert(out, low::implies(a.g, std::move(cond)), meta("permission", where, msg)); };
-      add(low::bin(BinOp::Ne, a.q, low::null_()));
-      add(wf_expr(a.q));
-      if (!live) add(in_block(a.q));
+      if (a.first) {
+        add(low::bin(BinOp::Ne, a.lq, low::null_()));
+        add(wf_expr(a.lq, &a.lpt));
+        if (!live || (a.lpt.pointee != nullptr && a.lpt.pointee->is_struct())) add(in_block(a.lq));
+      }
       if (!live) {
         if (back) {
           add(low::bin(BinOp::Ge, value_perm(a.q, a.pt), low::var(a.av)));
@@ -5281,14 +5861,16 @@ class Lowerer {
                                       low::and_(low::bin(BinOp::Gt, low::var(a.av), none), low::bin(BinOp::Gt, low::var(a.ad), none))),
                     meta("permission", where, msg));
       }
-      add(back ? low::bin(BinOp::Ge, live_perm(a.q), low::var(a.al)) : low::bin(BinOp::Gt, live_perm(a.q), none));
-      emit_assert(out, low::implies(low::and_(a.g, written_notauto_l(w, j, places)), low::bin(BinOp::Gt, low::var(a.al), none)), meta("permission", where, msg));
+      if (a.first) {
+        add(back ? low::bin(BinOp::Ge, live_perm(a.lq), low::var(a.al)) : low::bin(BinOp::Gt, live_perm(a.lq), none));
+        emit_assert(out, low::implies(low::and_(a.g, written_notauto_l(w, j, places)), low::bin(BinOp::Gt, low::var(a.al), none)), meta("permission", where, msg));
+      }
     }
     for (size_t j = 0; j < w.size(); ++j)
       for (size_t k = 0; k < j; ++k) {
         const WAtom& a = w[j];
         const WAtom& b = w[k];
-        if (a.kind == AtomKind::Live || b.kind == AtomKind::Live || a.sfx != b.sfx) continue;
+        if (a.kind == AtomKind::Live || b.kind == AtomKind::Live || a.sfx != b.sfx || a.atom_id == b.atom_id) continue;
         if (a.kind != AtomKind::Owns && b.kind != AtomKind::Owns) continue;
         emit_assert(out, low::implies(low::and_(a.g, b.g), low::bin(BinOp::Ne, a.q, b.q)),
                     meta("permission", back ? at : a.loc,
@@ -5323,6 +5905,8 @@ class Lowerer {
     // Decision 0038 item 3: a loop that touches memory, or whose body leaves the function or a block that holds a place while the function holds
     // one, carries every place the function holds.
     const int loop_number = fn_.nloop++;
+    const int saved_loop = cur_loop_;
+    cur_loop_ = loop_number;
     LoopWrites writes;
     writes_in(&s, writes);
     std::vector<int> atom_params;
@@ -5340,9 +5924,33 @@ class Lowerer {
     }
     if (!frame) places.clear();
     std::vector<WAtom> wats = written_atoms(s, loop_number, assigned, declared, writes);  // decision 0040 item 5
-    std::vector<low::LStmt> wsplits;
+    resolve_written(wats, places);
+    std::vector<low::LStmt> wsplits, bsplits;
     const size_t active_before = active_w_.size();
     for (const WAtom& a : wats) active_w_.push_back(&a);
+    // Decision 0045 item 10 (owner question 110, audit S6): the loop-entry snapshot of each place that needs one, assigned FIRST (`lb := null; if (<every inner cell held>)
+    // { lb := <its base> }`), before the case splits against it and the `perm` snapshots.
+    const size_t lbs_before = active_lbs_.size();
+    std::vector<low::LStmt> lbstmts;
+    if (!places.empty()) {
+      const FnAtoms& lfa = atoms_of(*fn_.f);
+      for (int k : atom_params) {
+        if (!is_derived_key(k) || derived_of(k).lb_of < 0) continue;
+        const Derived& d = derived_of(k);
+        const std::string nm = lb_name(d);
+        fn_.snapshots.push_back(low::LVar{nm, low::LType::Ref});
+        assign(lbstmts, nm, low::null_());
+        E cond;
+        const E val = lb_chain(derived_of(d.lb_of).base, cond);
+        low::LStmt ifs;
+        ifs.kind = low::LStmt::Kind::If;
+        ifs.expr = cond ? cond : low::bool_lit(true);
+        assign(ifs.then_body, nm, val);
+        lbstmts.push_back(std::move(ifs));
+        for (int i = 0; i < lfa.nreq; ++i)
+          if (key_has_site(lfa.sites[static_cast<size_t>(i)], k)) active_lbs_.push_back(LbPlace{&lfa.sites[static_cast<size_t>(i)], chain_ref(low::var(nm), lfa.sites[static_cast<size_t>(i)].path)});
+      }
+    }
 
     // A condition with a side effect, a call or a memory access is evaluated inside the body, at the top (the `do` shape of 0014 item 5 moved
     // up): the invariants and the measure stay where C evaluates the condition, and its obligations are asserted at every evaluation.
@@ -5394,7 +6002,7 @@ class Lowerer {
       std::vector<const Place*> pparams;
       for (const Place& pl : places)
         if (!pl.cell) pparams.push_back(&pl);
-      auto kref = [&](int k) { return key_is_global(k) ? global_ref(k - kGlobalKeyBase) : low::var(formal_name(*fn_.f, k)); };
+      auto kref = [&](int k) { return key_root_ref(k); };
       std::set<int> held_atoms, value_params;
       held_keys(held_atoms, value_params);
       // The value cells of the key `k`'s atoms (assigned parameters included), each with its member path: what a parameter place may be one of (decision 0043 item 11).
@@ -5412,7 +6020,7 @@ class Lowerer {
         const FnAtoms& fa2 = atoms_of(*fn_.f);
         for (int i = 0; i < fa2.nreq; ++i) {
           const AtomSite& site = fa2.sites[static_cast<size_t>(i)];
-          if (site_key(site) != k || !site_takes_cell(site)) continue;
+          if (!key_has_site(site, k) || !site_takes_cell(site)) continue;
           for (Cell& c : site_cells(site, chain_ref(kref(k), site.path))) {
             std::vector<int> full = site.path;
             full.insert(full.end(), c.path.begin(), c.path.end());
@@ -5515,6 +6123,7 @@ class Lowerer {
     std::vector<Place> inv_all = places;  // the loop's places, then the written atoms' (the framing chains of decision 0038 item 6)
     if (!wats.empty()) {
       written_splits(wats, places, wsplits);
+      written_splits(wats, places, bsplits, true);
       entry.insert(entry.begin(), wsplits.begin(), wsplits.end());
       written_amounts(wats, entry);
       written_values(wats, places, entry);
@@ -5637,12 +6246,16 @@ class Lowerer {
 
     // The framing of the invariants and the measure, asserted right after the snapshots (decision 0038 item 6).
     for (const Framing& f : framings) emit_assert(entry, f.cond, f.meta);
+    entry.insert(entry.begin(), lbstmts.begin(), lbstmts.end());
     for (low::LStmt& st : entry) out.push_back(std::move(st));
 
     std::set<int> breaks, continues;
     collect_jumps(*s.body, breaks, continues);
     const std::string n = std::to_string(s.jump_id);
-    for (const low::LStmt& st : wsplits) w.then_body.push_back(st);
+    // The ghost of each written atom that loads, taken at the top of the iteration (decision 0045 item 12): the body's splits name the atom's object by it.
+    for (const WAtom& a : wats)
+      if (a.loads) assign(w.then_body, a.aq, a.q);
+    for (const low::LStmt& st : bsplits) w.then_body.push_back(st);
     for (const low::LStmt& st : splits) w.then_body.push_back(st);
     if (top_test) {
       w.expr = low::bool_lit(true);
@@ -5698,6 +6311,8 @@ class Lowerer {
     for (const low::LStmt& st : wsplits) out.push_back(st);
     for (low::LStmt& st : splits) out.push_back(std::move(st));
     active_w_.resize(active_before);
+    active_lbs_.resize(lbs_before);
+    cur_loop_ = saved_loop;
   }
 
   // The range of a cell's value as an invariant conjunct (none for `bool`).
@@ -6079,6 +6694,7 @@ class Lowerer {
       }
     }
     if (!param_cells.empty()) fn_.scopes.push_back(Fn::Scope{param_cells, f.end_loc});
+    entry_snapshots(f, m.body, cenv);
     entry_checks(f, m.body);
     prologue(m.body, &f);
     user_targets_.clear();
@@ -6114,6 +6730,22 @@ class Lowerer {
     out_.methods.push_back(std::move(m));
   }
 
+  // A key names the result's place: the result itself or a place whose innermost root is the result (`*r.q`, decision 0045).
+  bool is_result_key(int k) const { return k < 0 || (is_derived_key(k) && derived_of(k).key.root == kResultSiteKey); }
+  // The `Ref` of the place (key, path) in the well-formedness method in a state: the ghost-built chain for a derived key (the base lowered in Wf mode), else the root's chain.
+  E wf_place(const Env& env, int k, const std::vector<int>& path, bool post) {
+    if (!is_derived_key(k)) return chain_ref(place_of(env, k), path);
+    const Derived& d = derived_of(k);
+    CtxSave save(*this);
+    cmode_ = CMode::Wf;
+    cf_ = d.f;
+    cens_ = post;
+    cold_ = false;
+    cseen_ = atoms_of(*d.f).sites.size();
+    Full scratch;
+    return chain_ref(lower(*d.base, env, nullptr, Deps{}, scratch).e, path);
+  }
+
   // The contract's well-formedness method (0010 item 11, 0012 item 10): the obligations of each clause, asserted
   // under the clauses before it, in a method whose only assumptions are the type ranges.
   void wf_method(const Function& f) {
@@ -6143,9 +6775,12 @@ class Lowerer {
       if (ens) {
         // Partners by path (decision 0039 item 7, owner question 72): an `ensures` atom returns what its partner `requires` atom took, on every path
         // where it is returned: `prior ==> (g_ens ==> g_partner)`.  Nothing is written where the partner is unconditional or has the very guard.
+        CtxSave guard_ctx(*this);
+        cmode_ = CMode::Wf;  // the guards over ghosts: the `ensures` atom's over the post-state ghosts, the partner's over the pre-state ones (decision 0045, audit B2)
         for (const AtomSite& site : fa.sites) {
           if (!site.in_ensures || site.clause != idx || site.atom->amount < 0 || site.atom->amount >= fa.nreq) continue;
           const AtomSite& partner = fa.sites[static_cast<size_t>(site.atom->amount)];
+          if (guards_read_heap(site, partner)) continue;  // an obligation at the atom (decision 0045 item 3)
           const E ge = site_guard(site, env), gp = site_guard(partner, env);
           if (!gp || same_expr(ge, gp)) continue;
           const std::string txt = site.atom->a != nullptr ? site_text(site) : std::string();
@@ -6182,6 +6817,59 @@ class Lowerer {
     }
     // The formals and what the method assumes: the parameters, the ghost amounts, the result, the ghost values of the reads of the contract.
     const std::string what = f.c_name + " (well-formedness)";
+    // Facts Silicon derives that the ghost values must not lack (decision 0037 item 7): two places that are one cell have one value in a state,
+    // and a cell a `reads` atom borrows, returned by a `reads` atom, has the value it had.  Per place, root plus path (decision 0043 item 9, audit S1).
+    // Computed before the formals are listed: the base of a place reached through a load (decision 0045) is lowered again here and must not add a ghost late.
+    std::vector<low::E> facts_;
+    {
+    CtxSave facts_ctx(*this);
+    cmode_ = CMode::Wf;  // every guard and place below is over ghosts (the ensures' over the post-state ones)
+    const std::map<GKey, Type> ghosts_now = wf_ghosts_;
+    for (auto a = ghosts_now.begin(); a != ghosts_now.end(); ++a)
+      for (auto b = std::next(a); b != ghosts_now.end(); ++b) {
+        if (std::get<2>(a->first) != std::get<2>(b->first) || cell_suffix(a->second) != cell_suffix(b->second)) continue;
+        if (key_is_global(std::get<0>(a->first)) && key_is_global(std::get<0>(b->first))) continue;  // two globals are two blocks
+        if (std::get<0>(a->first) == std::get<0>(b->first)) continue;                                    // one root: two member paths are two cells (one derived key: one base)
+        const E pa = wf_place(env, std::get<0>(a->first), std::get<1>(a->first), std::get<2>(a->first));
+        const E pb = wf_place(env, std::get<0>(b->first), std::get<1>(b->first), std::get<2>(b->first));
+        facts_.push_back(low::implies(low::bin(low::BinOp::Eq, pa, pb), low::bin(low::BinOp::Eq, low::var(ghost_name(a->first)), low::var(ghost_name(b->first)))));
+      }
+    // The first `reads` atom of the `requires` (`ens` false) or the `ensures` that covers the place (root, path): its guard.
+    auto first_reads = [&](int root, const std::vector<int>& path, bool ens, E& guard) {
+      for (const AtomSite& s : fa.sites) {
+        if (s.atom->atom != AtomKind::Reads || site_key(s) != root || s.in_ensures != ens) continue;
+        if (s.path.size() > path.size() || !std::equal(s.path.begin(), s.path.end(), path.begin())) continue;  // the atom's place contains the read's
+        guard = site_guard(s, env);
+        return true;
+      }
+      return false;
+    };
+    for (const auto& [key, t] : ghosts_now) {
+      const int kr = std::get<0>(key);
+      const std::vector<int>& path = std::get<1>(key);
+      if (is_result_key(kr) && std::get<2>(key)) {
+        // The result's post-state ghost against the pre-state ghost of a `reads` place the function borrows and returns (audit S4, decision 0040
+        // item 4): `g_r && g_e && result == q ==> h_result == h_q_pre`.  Decision 0045: the result's place may be `r.q`'s base (the innermost root is the result).
+        for (const auto& [k2, t2] : ghosts_now) {
+          if (is_result_key(std::get<0>(k2)) || std::get<2>(k2) || cell_suffix(t2) != cell_suffix(t)) continue;
+          E gr2, ge2;
+          if (!first_reads(std::get<0>(k2), std::get<1>(k2), false, gr2) || !first_reads(std::get<0>(k2), std::get<1>(k2), true, ge2)) continue;
+          facts_.push_back(
+              low::implies(low::and_(low::and_(gr2, ge2), low::bin(low::BinOp::Eq, is_derived_key(kr) ? wf_place(env, kr, path, true) : chain_ref(env.result, path),
+                                                                   wf_place(env, std::get<0>(k2), std::get<1>(k2), false))),
+                           low::bin(low::BinOp::Eq, low::var(ghost_name(key)), low::var(ghost_name(k2)))));
+        }
+        continue;
+      }
+      if (!std::get<2>(key) || ghosts_now.count(GKey{kr, path, false}) == 0) continue;
+      E gr, ge;
+      if (!first_reads(kr, path, false, gr) || !first_reads(kr, path, true, ge)) continue;
+      E cond = low::and_(gr, ge);
+      // A place reached through a load names another object when the loaded pointer moved: the value survives only under `q_post == q_pre` (decision 0045 item 5).
+      if (is_derived_key(kr) && derived_of(kr).has_load) cond = low::and_(cond, low::bin(low::BinOp::Eq, wf_place(env, kr, path, true), wf_place(env, kr, path, false)));
+      facts_.push_back(low::implies(cond, low::bin(low::BinOp::Eq, low::var(ghost_name(kr, path, true)), low::var(ghost_name(kr, path, false)))));
+    }
+    }
     for (size_t k = 0; k < f.params.size(); ++k)
       for (const LeafVar& lv : param_vars(f, static_cast<int>(k))) m.formals.push_back(low::LVar{lv.name, ltype(lv.type)});
     for (int k = 0; k < fa.nreq; ++k) m.formals.push_back(low::LVar{amount_name(k), low::LType::Perm});
@@ -6205,53 +6893,7 @@ class Lowerer {
       else if (!t.is_bool())
         m.requires_.push_back(clause_checks(range_check(low::var(ghost_name(key)), *t.int_type), f.loc, false, what));
     }
-    // Facts Silicon derives that the ghost values must not lack (decision 0037 item 7): two places that are one cell have one value in a state,
-    // and a cell a `reads` atom borrows, returned by a `reads` atom, has the value it had.  Per place, root plus path (decision 0043 item 9, audit S1).
-    for (auto a = wf_ghosts_.begin(); a != wf_ghosts_.end(); ++a)
-      for (auto b = std::next(a); b != wf_ghosts_.end(); ++b) {
-        if (std::get<2>(a->first) != std::get<2>(b->first) || cell_suffix(a->second) != cell_suffix(b->second)) continue;
-        if (key_is_global(std::get<0>(a->first)) && key_is_global(std::get<0>(b->first))) continue;  // two globals are two blocks
-        if (std::get<0>(a->first) == std::get<0>(b->first)) continue;                                    // one root: two member paths are two cells
-        const E pa = chain_ref(place_of(env, std::get<0>(a->first)), std::get<1>(a->first));
-        const E pb = chain_ref(place_of(env, std::get<0>(b->first)), std::get<1>(b->first));
-        m.requires_.push_back(clause_checks(
-            low::implies(low::bin(low::BinOp::Eq, pa, pb), low::bin(low::BinOp::Eq, low::var(ghost_name(a->first)), low::var(ghost_name(b->first)))),
-            f.loc, false, what));
-      }
-    // The first `reads` atom of the `requires` (`ens` false) or the `ensures` that covers the place (root, path): its guard.
-    auto first_reads = [&](int root, const std::vector<int>& path, bool ens, E& guard) {
-      for (const AtomSite& s : fa.sites) {
-        if (s.atom->atom != AtomKind::Reads || site_key(s) != root || s.in_ensures != ens) continue;
-        if (s.path.size() > path.size() || !std::equal(s.path.begin(), s.path.end(), path.begin())) continue;  // the atom's place contains the read's
-        guard = site_guard(s, env);
-        return true;
-      }
-      return false;
-    };
-    for (const auto& [key, t] : wf_ghosts_) {
-      const int kr = std::get<0>(key);
-      const std::vector<int>& path = std::get<1>(key);
-      if (kr < 0 && std::get<2>(key)) {
-        // The result's post-state ghost against the pre-state ghost of a `reads` place the function borrows and returns (audit S4, decision 0040
-        // item 4): `g_r && g_e && result == q ==> h_result == h_q_pre`.
-        for (const auto& [k2, t2] : wf_ghosts_) {
-          if (std::get<0>(k2) < 0 || std::get<2>(k2) || cell_suffix(t2) != cell_suffix(t)) continue;
-          E gr2, ge2;
-          if (!first_reads(std::get<0>(k2), std::get<1>(k2), false, gr2) || !first_reads(std::get<0>(k2), std::get<1>(k2), true, ge2)) continue;
-          m.requires_.push_back(clause_checks(
-              low::implies(low::and_(low::and_(gr2, ge2), low::bin(low::BinOp::Eq, chain_ref(env.result, path), chain_ref(place_of(env, std::get<0>(k2)), std::get<1>(k2)))),
-                           low::bin(low::BinOp::Eq, low::var(ghost_name(key)), low::var(ghost_name(k2)))),
-              f.loc, false, what));
-        }
-        continue;
-      }
-      if (!std::get<2>(key) || wf_ghosts_.count(GKey{kr, path, false}) == 0) continue;
-      E gr, ge;
-      if (!first_reads(kr, path, false, gr) || !first_reads(kr, path, true, ge)) continue;
-      m.requires_.push_back(clause_checks(
-          low::implies(low::and_(gr, ge), low::bin(low::BinOp::Eq, low::var(ghost_name(kr, path, true)), low::var(ghost_name(kr, path, false)))),
-          f.loc, false, what));
-    }
+    for (const E& fact : facts_) m.requires_.push_back(clause_checks(fact, f.loc, false, what));
     out_.methods.push_back(std::move(m));
   }
 
@@ -6261,9 +6903,17 @@ class Lowerer {
   const Function* cf_ = nullptr;
   bool cens_ = false;
   bool cold_ = false;
+  int old_depth_ = 0;  // the number of contract reads under `old` being lowered (decision 0045: one `old(...)` per chain)
   bool cmeasure_ = false;  // the contract expression is a function's termination measure (decision 0039 item 8)
   size_t cseen_ = 0;
   std::map<const Function*, FnAtoms> atoms_;
+  std::deque<Derived> derived_;                                    // decision 0045: the derived keys (a deque: references to entries stay valid)
+  std::map<std::tuple<const Function*, int, std::vector<int>>, int> derived_index_;
+  std::map<const Function*, int> derived_count_;
+  std::map<int, int> lb_keys_;                                      // a derived key -> its loop-entry snapshot key
+  int cur_loop_ = 0;                                                // the number of the loop being lowered (the lb snapshots' names)
+  std::map<const Expr*, int> derived_of_atom_;                      // an Atom node whose place has steps -> its derived key
+  std::map<const Expr*, const Function*> site_fn_;                  // an Atom node -> the function whose contract holds it
   std::map<GKey, Type> wf_ghosts_;  // the ghost value formals of the `__wf` method being built: (root, member path, post-state) -> the place's type
   const Program& prog_;
   LowerOptions opt_;

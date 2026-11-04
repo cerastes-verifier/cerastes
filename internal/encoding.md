@@ -503,6 +503,22 @@ lengths and slot facts (`struct_lens`; S34: no `parent_of` fact is needed to tel
 `program_start` has one row per struct global (every leaf's permissions, flag and value, then one `lv`); in `main` its
 leaves are loop places; a `static` struct local is such a global with an implicit struct `owns`.
 
+**Places reached through a heap read (M4.5c2b, decision 0045).** A contract place is a root, the steps to its base pointer
+and a member tail (`vir::PlaceKey{root, via, path}`; `via` holds members, `kLoadStep` and by-value `field_step(k)`).
+Lowering gives each distinct (root, via) with a step a per-function derived key (`kDerivedKeyBase + n`, built eagerly over
+`requires`, `ensures` and `decreases`) and lowers its base in the current mode: chain-guarded over the atoms before it in the
+method and at calls (Call mode over the arguments), ghost values `hv_<N>_pre/_post` with `WF`/`WF_S` in `f__wf`, the
+current heap at returns; every use of a `requires` atom's guard, place or framing disjuncts outside the entry state is one
+`old(...)` over the whole chain. Load-free places keep their int keys and Viper. In the body a loading `requires` place is
+`eb_<N>` (assigned at method entry from the `requires`-framed chain), an automatic place of every loop, with a loop-entry
+`lb_<N>__<L>` where the body may write a loaded field; returns run pass 0 (the inner cells held) before the separation rows;
+an `ensures` atom through a load returns `ite(old(g_p) && q_post == q_ppre, a_p, ite(old(g_i) && …, a_i, a_p))` (amounts
+follow objects), and a function without a body must tie it to its partner's place in `f__wf`. Guards may read the heap
+(framed like any read). A memory call with a load-rooted contract snapshots each such place (`t__k`) before the call for
+0039 item 4's checks. Written atoms on places through loads read their place through the automatic places' chains, with a
+per-iteration ghost `aw_q<j>__<L>` for the body's splits; struct written atoms are 0040 item 5's rows per leaf with one
+liveness amount and `WF_S`.
+
 ## 4. Viper shape
 
 ```
@@ -779,7 +795,7 @@ address-taken cells, and `pointer_conversion` accepts a conversion only when the
 qualifiers added at its top level (`qualifiers_only_added` only chooses the message: GCC's `-Wincompatible-pointer-types`
 in C, C++'s multi-level qualification conversion in C++); the driver makes #144 and #167 errors in both modes.
 `contract_read` accepts `*r` of the result binder in an `ensures` (`old(*r)` rejected); `owns(**pp)`, `live(*pp)` and
-`**pp` reads in contracts, invariants and measures are rejected naming M4.5c2 (since M4.5c1).
+`**pp` reads in contracts, invariants and measures were rejected naming M4.5c2 until M4.5c2b.
 Since M4.5c1 (0043) `vtype` accepts verified structures as cell types and pointees at any depth; `eok_dot_field` and
 `eok_points_to_field` build `MemberAddr` chains (`c_text` such as `p->t.x`); braced initializers expand to one store per
 leaf (each element an assignment conversion read under EDG's fold; in C every element into a temporary first;
@@ -802,6 +818,16 @@ read in `declaration()` (`uninit_initialized`; `Ctx::uninit_marked`). Under `Ver
 `call()` accepts only `AddrOf` of a marked local or the caller's marked parameter's copy, settled after the body with
 `vir::assigned_params` (`uninit_ref_initialized`). `Sequencer::object_of` keys each depth of `*…*v`
 of one pointer variable as its own object (P62 A8).
+
+Since M4.5c2b (0045) one builder, `place_pointer`, turns a contract place's IL into its VIR pointer by shape (never by the
+lvalue flag; `(*p->q).x` and `p->q->x` are one place; the C promotion cast of a narrow place peeled), every load an ordinary
+`contract_read` (so 0042 item 6's marked-read rule applies to each); `old_call`/`old_c` read `old_(X)` as the place `*X`
+(or `Y` for `address_of(Y)`, P70 H1) under one `Old`; `spec_atom` and `invariant_atom` accept atoms through loads and on
+struct places; the `const` rule is the place's own qualifier (below C++'s binding `lvalue_adjust`, `orig_lvalue_type` in C);
+`finish_atoms` pairs and de-duplicates by the full `PlaceKey`; `check_marker_atoms` and `apply_owning` walk the path with
+`place_root`; `AtomCollector`'s `guard_ok` admits guards that read the heap but hold no atom, call or side effect;
+`restrict_hazard` walks every atom's place to its innermost root. Still rejected: atoms on the result or its members
+(M4.5d2), `old` inside a place's path (M8).
 
 **Statements.** Allow-list: blocks (compiler-generated blocks are flattened, so a `for` initialization stays in
 scope), declarations with their `stmk_init`, expression statements (assignment, compound assignment and `++`/`--` of

@@ -1,0 +1,370 @@
+// expect: verified
+// S35 (e) pp_move: a callee that moves `*pp` to `q` (`*pp = q`) and returns `owns(*pp) && *pp == q && owns(**pp)` with the liveness amount that follows the object (`ite(post == old(*pp), a1, ite(post == q, a2, a1))`), a caller that gives x's cell away and keeps using y's, and a swap of two `int**` targets whose ensures atoms on `**a` and `**b` return the amounts of the objects they now designate (record 0045 item 7)
+// Hand-written in the emitted style: explicit atomic asserts before every access, call and return (0028 item 11), ghost Perm amounts (0037 item 6), the four axioms with their tags; the allocation methods are the trusted ones (record 0032 item 4).
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// the contract atoms, as macros over the emitted shapes (record 0037 items 6-7, 0040 item 2): WF; an int range; a cell owned (root, full permission, flag set, range or WF of the pointer, the liveness amount); live
+define WF(p) (p == null || (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p))))
+define RNGV(v) ((-2147483648) <= v && v <= 2147483647)
+define ROOT(p) (p != null && WF(p) && offset_of(p) < len(block_of(p)))
+define LVF(p, a) acc(lvloc(block_of(p)).lv, a)
+define CI(c) (acc(c.v_int) && acc(c.d_int) && c.d_int && RNGV(c.v_int))
+define CP(c) (acc(c.v_ptr_int) && acc(c.d_ptr_int) && c.d_ptr_int && WF(c.v_ptr_int))
+define OWNI(p, a) (ROOT(p) && CI(p) && LVF(p, a))
+define OWNP(p, a) (ROOT(p) && CP(p) && LVF(p, a))
+define LIVE(p, a) (p != null && WF(p) && LVF(p, a))
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_int() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(r.v_int) && acc(r.d_int) && !r.d_int && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract allocation of an address-taken local of type int*: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_ptr_int() returns (r: Ref)
+  ensures r != null && r == loc(block_of(r), 0) && len(block_of(r)) == 1
+  ensures lvloc(block_of(r)) == loc(block_of(r), -2) && acc(r.v_ptr_int) && acc(r.d_ptr_int) && !r.d_ptr_int && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// void move(int **pp, int *q) requires(owns(*pp) && owns(**pp) && owns(*q)) ensures(owns(*pp) && *pp == q && owns(**pp) && **pp == old(*q)) { *pp = q; }
+// the ensures atom on **pp is the object on return (q): its liveness amount is the amount of the requires atom of its kind whose entry place is that object (decision 108): ite(post == old(*pp), a1, ite(post == q, a2, a1))
+method f_move__0(p_pp: Ref, p_q: Ref, a0: Perm, a1: Perm, a2: Perm)
+  requires (none < a0) && (a0 < write)
+  requires (none < a1) && (a1 < write)
+  requires (none < a2) && (a2 < write)
+  requires WF(p_pp) && WF(p_q)
+  requires OWNP(p_pp, a0) && OWNI(p_pp.v_ptr_int, a1) && OWNI(p_q, a2)
+  ensures OWNP(p_pp, a0) && p_pp.v_ptr_int == p_q && OWNI(p_pp.v_ptr_int, (p_pp.v_ptr_int == old(p_pp.v_ptr_int) ? a1 : (p_pp.v_ptr_int == p_q ? a2 : a1))) && p_pp.v_ptr_int.v_int == old(p_q.v_int)
+  decreases
+{
+  var eb_1: Ref
+  eb_1 := p_pp.v_ptr_int
+  if (lvloc(block_of(p_pp)) == lvloc(block_of(eb_1))) { }
+  if (lvloc(block_of(p_pp)) == lvloc(block_of(p_q))) { }
+  if (lvloc(block_of(eb_1)) == lvloc(block_of(p_q))) { }
+  assert p_q != eb_1
+  // *pp = q (no load: the pointer cell is stored to)
+  assert p_pp != null
+  assert !((perm(p_pp.v_ptr_int) != write) || (perm(p_pp.d_ptr_int) != write))
+  p_pp.v_ptr_int := p_q
+  p_pp.d_ptr_int := true
+  // return rows: pass 0, then the per-atom rows in clause order with the liveness sums inside (the amount of **pp is the three-way ite)
+  assert perm(p_pp.v_ptr_int) > none
+  assert p_pp != null
+  assert WF(p_pp)
+  assert offset_of(p_pp) < len(block_of(p_pp))
+  assert perm(p_pp.v_ptr_int) == write
+  assert perm(p_pp.d_ptr_int) == write
+  assert p_pp.d_ptr_int
+  assert WF(p_pp.v_ptr_int)
+  assert perm(lvloc(block_of(p_pp)).lv) >= (a0 + ((lvloc(block_of(p_pp)) == lvloc(block_of(p_pp.v_ptr_int))) ? (p_pp.v_ptr_int == old(p_pp.v_ptr_int) ? a1 : (p_pp.v_ptr_int == p_q ? a2 : a1)) : none))
+  assert p_pp.v_ptr_int == p_q
+  assert p_pp.v_ptr_int != null
+  assert WF(p_pp.v_ptr_int)
+  assert offset_of(p_pp.v_ptr_int) < len(block_of(p_pp.v_ptr_int))
+  assert perm(p_pp.v_ptr_int.v_int) == write
+  assert perm(p_pp.v_ptr_int.d_int) == write
+  assert p_pp.v_ptr_int.d_int
+  assert RNGV(p_pp.v_ptr_int.v_int)
+  assert perm(lvloc(block_of(p_pp.v_ptr_int)).lv) >= ((p_pp.v_ptr_int == old(p_pp.v_ptr_int) ? a1 : (p_pp.v_ptr_int == p_q ? a2 : a1)) + ((lvloc(block_of(p_pp.v_ptr_int)) == lvloc(block_of(p_pp))) ? a0 : none))
+  assert p_pp.v_ptr_int.v_int == old(p_q.v_int)
+}
+
+// int use(int *x) requires(owns(*x)) ensures(r, r == 5) { int y = 5; int *p = x; move(&p, &y); check(p == &y); check(*p == 5); return *p; }
+// the call hands x's cell to the callee for good (the ensures returns the object *pp designates on return, y's, at the amount it was given): the caller keeps using y and its scope exit takes y's cell and its whole liveness token back
+method f_use__1(p_x: Ref, b0: Perm) returns (res: Int)
+  requires (none < b0) && (b0 < write)
+  requires WF(p_x)
+  requires OWNI(p_x, b0)
+  ensures RNGV(res)
+  ensures res == 5
+  decreases
+{
+  var v_y: Ref
+  var v_p: Ref
+  var t0: Ref
+  v_y := alloc_int()
+  v_p := alloc_ptr_int()
+  assert !((perm(v_y.v_int) != write) || (perm(v_y.d_int) != write))
+  v_y.v_int := 5
+  v_y.d_int := true
+  assert !((perm(v_p.v_ptr_int) != write) || (perm(v_p.d_ptr_int) != write))
+  v_p.v_ptr_int := p_x
+  v_p.d_ptr_int := true
+  // move(&p, &y)
+  assert v_p != null
+  assert WF(v_p)
+  assert offset_of(v_p) < len(block_of(v_p))
+  assert perm(v_p.v_ptr_int) == write
+  assert perm(v_p.d_ptr_int) == write
+  assert v_p.d_ptr_int
+  assert WF(v_p.v_ptr_int)
+  assert v_p.v_ptr_int != null
+  assert WF(v_p.v_ptr_int)
+  assert offset_of(v_p.v_ptr_int) < len(block_of(v_p.v_ptr_int))
+  assert perm(v_p.v_ptr_int.v_int) == write
+  assert perm(v_p.v_ptr_int.d_int) == write
+  assert v_p.v_ptr_int.d_int
+  assert RNGV(v_p.v_ptr_int.v_int)
+  assert v_y != null
+  assert WF(v_y)
+  assert offset_of(v_y) < len(block_of(v_y))
+  assert perm(v_y.v_int) == write
+  assert perm(v_y.d_int) == write
+  assert v_y.d_int
+  assert RNGV(v_y.v_int)
+  assert v_p.v_ptr_int != v_y
+  if (lvloc(block_of(v_p)) == lvloc(block_of(v_p.v_ptr_int))) { }
+  if (lvloc(block_of(v_p)) == lvloc(block_of(v_y))) { }
+  if (lvloc(block_of(v_p.v_ptr_int)) == lvloc(block_of(v_y))) { }
+  assert none < (perm(lvloc(block_of(v_p)).lv) / 4)
+  assert (perm(lvloc(block_of(v_p)).lv) / 4) < write
+  assert none < (perm(lvloc(block_of(v_p.v_ptr_int)).lv) / 4)
+  assert (perm(lvloc(block_of(v_p.v_ptr_int)).lv) / 4) < write
+  assert none < (perm(lvloc(block_of(v_y)).lv) / 4)
+  assert (perm(lvloc(block_of(v_y)).lv) / 4) < write
+  assert perm(lvloc(block_of(v_p)).lv) >= ((perm(lvloc(block_of(v_p)).lv) / 4) + ((lvloc(block_of(v_p)) == lvloc(block_of(v_p.v_ptr_int))) ? (perm(lvloc(block_of(v_p.v_ptr_int)).lv) / 4) : none) + ((lvloc(block_of(v_p)) == lvloc(block_of(v_y))) ? (perm(lvloc(block_of(v_y)).lv) / 4) : none))
+  assert perm(lvloc(block_of(v_p.v_ptr_int)).lv) >= ((perm(lvloc(block_of(v_p.v_ptr_int)).lv) / 4) + ((lvloc(block_of(v_p.v_ptr_int)) == lvloc(block_of(v_p))) ? (perm(lvloc(block_of(v_p)).lv) / 4) : none) + ((lvloc(block_of(v_p.v_ptr_int)) == lvloc(block_of(v_y))) ? (perm(lvloc(block_of(v_y)).lv) / 4) : none))
+  assert perm(lvloc(block_of(v_y)).lv) >= ((perm(lvloc(block_of(v_y)).lv) / 4) + ((lvloc(block_of(v_y)) == lvloc(block_of(v_p))) ? (perm(lvloc(block_of(v_p)).lv) / 4) : none) + ((lvloc(block_of(v_y)) == lvloc(block_of(v_p.v_ptr_int))) ? (perm(lvloc(block_of(v_p.v_ptr_int)).lv) / 4) : none))
+  f_move__0(v_p, v_y, perm(lvloc(block_of(v_p)).lv) / 4, perm(lvloc(block_of(v_p.v_ptr_int)).lv) / 4, perm(lvloc(block_of(v_y)).lv) / 4)
+  // check(p == &y), check(*p == 5), return *p
+  assert perm(v_p.v_ptr_int) > none
+  assert v_p.d_ptr_int
+  assert v_p.v_ptr_int == v_y
+  assert v_p != null
+  assert perm(v_p.v_ptr_int) > none
+  assert v_p.d_ptr_int
+  t0 := v_p.v_ptr_int
+  if (t0 == p_x) { }
+  if (t0 == v_y) { }
+  assert t0 != null
+  assert perm(t0.v_int) > none
+  assert t0.d_int
+  assert t0.v_int == 5
+  res := t0.v_int
+  assert !(((perm(v_p.v_ptr_int) != write) || (perm(v_p.d_ptr_int) != write)) || (perm(lvloc(block_of(v_p)).lv) != write))
+  exhale (acc(v_p.v_ptr_int) && acc(v_p.d_ptr_int)) && acc(lvloc(block_of(v_p)).lv)
+  assert !(((perm(v_y.v_int) != write) || (perm(v_y.d_int) != write)) || (perm(lvloc(block_of(v_y)).lv) != write))
+  exhale (acc(v_y.v_int) && acc(v_y.d_int)) && acc(lvloc(block_of(v_y)).lv)
+  assert res == 5
+}
+
+// void swap_targets(int **a, int **b) requires(owns(*a) && owns(*b) && owns(**a) && owns(**b))
+//   ensures(owns(*a) && owns(*b) && *a == old(*b) && *b == old(*a) && owns(**a) && owns(**b) && **a == old(**b) && **b == old(**a)) { int *t = *a; *a = *b; *b = t; }
+// the two int atoms of the ensures are reached through the swapped pointers: each returns the amount of the object it now designates: ite(post_a == old(*a), a2, ite(post_a == old(*b), a3, a2)) and the same for b (partner first and last, audit S4)
+method f_swap_targets__2(p_a: Ref, p_b: Ref, a0: Perm, a1: Perm, a2: Perm, a3: Perm)
+  requires (none < a0) && (a0 < write)
+  requires (none < a1) && (a1 < write)
+  requires (none < a2) && (a2 < write)
+  requires (none < a3) && (a3 < write)
+  requires WF(p_a) && WF(p_b)
+  requires OWNP(p_a, a0) && OWNP(p_b, a1) && OWNI(p_a.v_ptr_int, a2) && OWNI(p_b.v_ptr_int, a3)
+  ensures OWNP(p_a, a0) && OWNP(p_b, a1) && p_a.v_ptr_int == old(p_b.v_ptr_int) && p_b.v_ptr_int == old(p_a.v_ptr_int) && OWNI(p_a.v_ptr_int, (p_a.v_ptr_int == old(p_a.v_ptr_int) ? a2 : (p_a.v_ptr_int == old(p_b.v_ptr_int) ? a3 : a2))) && OWNI(p_b.v_ptr_int, (p_b.v_ptr_int == old(p_b.v_ptr_int) ? a3 : (p_b.v_ptr_int == old(p_a.v_ptr_int) ? a2 : a3))) && p_a.v_ptr_int.v_int == old(p_b.v_ptr_int.v_int) && p_b.v_ptr_int.v_int == old(p_a.v_ptr_int.v_int)
+  decreases
+{
+  var eb_2: Ref
+  var eb_3: Ref
+  var v_t: Ref
+  var t0: Ref
+  var t1: Ref
+  eb_2 := p_a.v_ptr_int
+  eb_3 := p_b.v_ptr_int
+  if (lvloc(block_of(p_a)) == lvloc(block_of(p_b))) { }
+  if (lvloc(block_of(eb_2)) == lvloc(block_of(eb_3))) { }
+  assert p_a != p_b
+  assert eb_2 != eb_3
+  // int *t = *a; *a = *b; *b = t;
+  assert p_a != null
+  assert perm(p_a.v_ptr_int) > none
+  assert p_a.d_ptr_int
+  t0 := p_a.v_ptr_int
+  v_t := t0
+  assert p_b != null
+  assert perm(p_b.v_ptr_int) > none
+  assert p_b.d_ptr_int
+  t1 := p_b.v_ptr_int
+  assert p_a != null
+  assert !((perm(p_a.v_ptr_int) != write) || (perm(p_a.d_ptr_int) != write))
+  p_a.v_ptr_int := t1
+  p_a.d_ptr_int := true
+  assert p_b != null
+  assert !((perm(p_b.v_ptr_int) != write) || (perm(p_b.d_ptr_int) != write))
+  p_b.v_ptr_int := v_t
+  p_b.d_ptr_int := true
+  // return rows: pass 0 for both bases, the separation rows (the int places, then the pointer cells), the per-atom rows in clause order with the sums
+  assert perm(p_a.v_ptr_int) > none
+  assert perm(p_b.v_ptr_int) > none
+  assert p_a != p_b
+  assert p_a.v_ptr_int != p_b.v_ptr_int
+  assert p_a != null
+  assert WF(p_a)
+  assert offset_of(p_a) < len(block_of(p_a))
+  assert perm(p_a.v_ptr_int) == write
+  assert perm(p_a.d_ptr_int) == write
+  assert p_a.d_ptr_int
+  assert WF(p_a.v_ptr_int)
+  assert perm(lvloc(block_of(p_a)).lv) >= (a0 + ((lvloc(block_of(p_a)) == lvloc(block_of(p_b))) ? a1 : none) + ((lvloc(block_of(p_a)) == lvloc(block_of(p_a.v_ptr_int))) ? (p_a.v_ptr_int == old(p_a.v_ptr_int) ? a2 : (p_a.v_ptr_int == old(p_b.v_ptr_int) ? a3 : a2)) : none) + ((lvloc(block_of(p_a)) == lvloc(block_of(p_b.v_ptr_int))) ? (p_b.v_ptr_int == old(p_b.v_ptr_int) ? a3 : (p_b.v_ptr_int == old(p_a.v_ptr_int) ? a2 : a3)) : none))
+  assert p_b != null
+  assert WF(p_b)
+  assert offset_of(p_b) < len(block_of(p_b))
+  assert perm(p_b.v_ptr_int) == write
+  assert perm(p_b.d_ptr_int) == write
+  assert p_b.d_ptr_int
+  assert WF(p_b.v_ptr_int)
+  assert perm(lvloc(block_of(p_b)).lv) >= (a1 + ((lvloc(block_of(p_b)) == lvloc(block_of(p_a))) ? a0 : none) + ((lvloc(block_of(p_b)) == lvloc(block_of(p_a.v_ptr_int))) ? (p_a.v_ptr_int == old(p_a.v_ptr_int) ? a2 : (p_a.v_ptr_int == old(p_b.v_ptr_int) ? a3 : a2)) : none) + ((lvloc(block_of(p_b)) == lvloc(block_of(p_b.v_ptr_int))) ? (p_b.v_ptr_int == old(p_b.v_ptr_int) ? a3 : (p_b.v_ptr_int == old(p_a.v_ptr_int) ? a2 : a3)) : none))
+  assert p_a.v_ptr_int == old(p_b.v_ptr_int)
+  assert p_b.v_ptr_int == old(p_a.v_ptr_int)
+  assert p_a.v_ptr_int != null
+  assert WF(p_a.v_ptr_int)
+  assert offset_of(p_a.v_ptr_int) < len(block_of(p_a.v_ptr_int))
+  assert perm(p_a.v_ptr_int.v_int) == write
+  assert perm(p_a.v_ptr_int.d_int) == write
+  assert p_a.v_ptr_int.d_int
+  assert RNGV(p_a.v_ptr_int.v_int)
+  assert perm(lvloc(block_of(p_a.v_ptr_int)).lv) >= ((p_a.v_ptr_int == old(p_a.v_ptr_int) ? a2 : (p_a.v_ptr_int == old(p_b.v_ptr_int) ? a3 : a2)) + ((lvloc(block_of(p_a.v_ptr_int)) == lvloc(block_of(p_a))) ? a0 : none) + ((lvloc(block_of(p_a.v_ptr_int)) == lvloc(block_of(p_b))) ? a1 : none) + ((lvloc(block_of(p_a.v_ptr_int)) == lvloc(block_of(p_b.v_ptr_int))) ? (p_b.v_ptr_int == old(p_b.v_ptr_int) ? a3 : (p_b.v_ptr_int == old(p_a.v_ptr_int) ? a2 : a3)) : none))
+  assert p_b.v_ptr_int != null
+  assert WF(p_b.v_ptr_int)
+  assert offset_of(p_b.v_ptr_int) < len(block_of(p_b.v_ptr_int))
+  assert perm(p_b.v_ptr_int.v_int) == write
+  assert perm(p_b.v_ptr_int.d_int) == write
+  assert p_b.v_ptr_int.d_int
+  assert RNGV(p_b.v_ptr_int.v_int)
+  assert perm(lvloc(block_of(p_b.v_ptr_int)).lv) >= ((p_b.v_ptr_int == old(p_b.v_ptr_int) ? a3 : (p_b.v_ptr_int == old(p_a.v_ptr_int) ? a2 : a3)) + ((lvloc(block_of(p_b.v_ptr_int)) == lvloc(block_of(p_a))) ? a0 : none) + ((lvloc(block_of(p_b.v_ptr_int)) == lvloc(block_of(p_b))) ? a1 : none) + ((lvloc(block_of(p_b.v_ptr_int)) == lvloc(block_of(p_a.v_ptr_int))) ? (p_a.v_ptr_int == old(p_a.v_ptr_int) ? a2 : (p_a.v_ptr_int == old(p_b.v_ptr_int) ? a3 : a2)) : none))
+  assert p_a.v_ptr_int.v_int == old(p_b.v_ptr_int.v_int)
+  assert p_b.v_ptr_int.v_int == old(p_a.v_ptr_int.v_int)
+}
+
+// int use_swap(void) ensures(r, r == 12) { int x = 1; int y = 2; int *p = &x; int *q = &y; swap_targets(&p, &q); check(*p == 2 && *q == 1); return x * 10 + y; }
+method f_use_swap__3() returns (res: Int)
+  ensures RNGV(res)
+  ensures res == 12
+  decreases
+{
+  var v_x: Ref
+  var v_y: Ref
+  var v_p: Ref
+  var v_q: Ref
+  var t0: Ref
+  var t1: Ref
+  v_x := alloc_int()
+  v_y := alloc_int()
+  v_p := alloc_ptr_int()
+  v_q := alloc_ptr_int()
+  assert !((perm(v_x.v_int) != write) || (perm(v_x.d_int) != write))
+  v_x.v_int := 1
+  v_x.d_int := true
+  assert !((perm(v_y.v_int) != write) || (perm(v_y.d_int) != write))
+  v_y.v_int := 2
+  v_y.d_int := true
+  assert !((perm(v_p.v_ptr_int) != write) || (perm(v_p.d_ptr_int) != write))
+  v_p.v_ptr_int := v_x
+  v_p.d_ptr_int := true
+  assert !((perm(v_q.v_ptr_int) != write) || (perm(v_q.d_ptr_int) != write))
+  v_q.v_ptr_int := v_y
+  v_q.d_ptr_int := true
+  // swap_targets(&p, &q)
+  assert v_p != null
+  assert WF(v_p)
+  assert offset_of(v_p) < len(block_of(v_p))
+  assert perm(v_p.v_ptr_int) == write
+  assert perm(v_p.d_ptr_int) == write
+  assert v_p.d_ptr_int
+  assert WF(v_p.v_ptr_int)
+  assert v_q != null
+  assert WF(v_q)
+  assert offset_of(v_q) < len(block_of(v_q))
+  assert perm(v_q.v_ptr_int) == write
+  assert perm(v_q.d_ptr_int) == write
+  assert v_q.d_ptr_int
+  assert WF(v_q.v_ptr_int)
+  assert v_p.v_ptr_int != null
+  assert WF(v_p.v_ptr_int)
+  assert offset_of(v_p.v_ptr_int) < len(block_of(v_p.v_ptr_int))
+  assert perm(v_p.v_ptr_int.v_int) == write
+  assert perm(v_p.v_ptr_int.d_int) == write
+  assert v_p.v_ptr_int.d_int
+  assert RNGV(v_p.v_ptr_int.v_int)
+  assert v_q.v_ptr_int != null
+  assert WF(v_q.v_ptr_int)
+  assert offset_of(v_q.v_ptr_int) < len(block_of(v_q.v_ptr_int))
+  assert perm(v_q.v_ptr_int.v_int) == write
+  assert perm(v_q.v_ptr_int.d_int) == write
+  assert v_q.v_ptr_int.d_int
+  assert RNGV(v_q.v_ptr_int.v_int)
+  assert v_p != v_q
+  assert v_p.v_ptr_int != v_q.v_ptr_int
+  if (lvloc(block_of(v_p)) == lvloc(block_of(v_q))) { }
+  if (lvloc(block_of(v_p)) == lvloc(block_of(v_p.v_ptr_int))) { }
+  if (lvloc(block_of(v_p)) == lvloc(block_of(v_q.v_ptr_int))) { }
+  if (lvloc(block_of(v_q)) == lvloc(block_of(v_p.v_ptr_int))) { }
+  if (lvloc(block_of(v_q)) == lvloc(block_of(v_q.v_ptr_int))) { }
+  if (lvloc(block_of(v_p.v_ptr_int)) == lvloc(block_of(v_q.v_ptr_int))) { }
+  assert none < (perm(lvloc(block_of(v_p)).lv) / 5)
+  assert (perm(lvloc(block_of(v_p)).lv) / 5) < write
+  assert none < (perm(lvloc(block_of(v_q)).lv) / 5)
+  assert (perm(lvloc(block_of(v_q)).lv) / 5) < write
+  assert none < (perm(lvloc(block_of(v_p.v_ptr_int)).lv) / 5)
+  assert (perm(lvloc(block_of(v_p.v_ptr_int)).lv) / 5) < write
+  assert none < (perm(lvloc(block_of(v_q.v_ptr_int)).lv) / 5)
+  assert (perm(lvloc(block_of(v_q.v_ptr_int)).lv) / 5) < write
+  assert perm(lvloc(block_of(v_p)).lv) >= ((perm(lvloc(block_of(v_p)).lv) / 5) + ((lvloc(block_of(v_p)) == lvloc(block_of(v_q))) ? (perm(lvloc(block_of(v_q)).lv) / 5) : none) + ((lvloc(block_of(v_p)) == lvloc(block_of(v_p.v_ptr_int))) ? (perm(lvloc(block_of(v_p.v_ptr_int)).lv) / 5) : none) + ((lvloc(block_of(v_p)) == lvloc(block_of(v_q.v_ptr_int))) ? (perm(lvloc(block_of(v_q.v_ptr_int)).lv) / 5) : none))
+  assert perm(lvloc(block_of(v_q)).lv) >= ((perm(lvloc(block_of(v_q)).lv) / 5) + ((lvloc(block_of(v_q)) == lvloc(block_of(v_p))) ? (perm(lvloc(block_of(v_p)).lv) / 5) : none) + ((lvloc(block_of(v_q)) == lvloc(block_of(v_p.v_ptr_int))) ? (perm(lvloc(block_of(v_p.v_ptr_int)).lv) / 5) : none) + ((lvloc(block_of(v_q)) == lvloc(block_of(v_q.v_ptr_int))) ? (perm(lvloc(block_of(v_q.v_ptr_int)).lv) / 5) : none))
+  assert perm(lvloc(block_of(v_p.v_ptr_int)).lv) >= ((perm(lvloc(block_of(v_p.v_ptr_int)).lv) / 5) + ((lvloc(block_of(v_p.v_ptr_int)) == lvloc(block_of(v_p))) ? (perm(lvloc(block_of(v_p)).lv) / 5) : none) + ((lvloc(block_of(v_p.v_ptr_int)) == lvloc(block_of(v_q))) ? (perm(lvloc(block_of(v_q)).lv) / 5) : none) + ((lvloc(block_of(v_p.v_ptr_int)) == lvloc(block_of(v_q.v_ptr_int))) ? (perm(lvloc(block_of(v_q.v_ptr_int)).lv) / 5) : none))
+  assert perm(lvloc(block_of(v_q.v_ptr_int)).lv) >= ((perm(lvloc(block_of(v_q.v_ptr_int)).lv) / 5) + ((lvloc(block_of(v_q.v_ptr_int)) == lvloc(block_of(v_p))) ? (perm(lvloc(block_of(v_p)).lv) / 5) : none) + ((lvloc(block_of(v_q.v_ptr_int)) == lvloc(block_of(v_q))) ? (perm(lvloc(block_of(v_q)).lv) / 5) : none) + ((lvloc(block_of(v_q.v_ptr_int)) == lvloc(block_of(v_p.v_ptr_int))) ? (perm(lvloc(block_of(v_p.v_ptr_int)).lv) / 5) : none))
+  f_swap_targets__2(v_p, v_q, perm(lvloc(block_of(v_p)).lv) / 5, perm(lvloc(block_of(v_q)).lv) / 5, perm(lvloc(block_of(v_p.v_ptr_int)).lv) / 5, perm(lvloc(block_of(v_q.v_ptr_int)).lv) / 5)
+  // check(*p == 2 && *q == 1)
+  assert v_p != null
+  assert perm(v_p.v_ptr_int) > none
+  assert v_p.d_ptr_int
+  t0 := v_p.v_ptr_int
+  assert t0 != null
+  assert perm(t0.v_int) > none
+  assert t0.d_int
+  assert v_q != null
+  assert perm(v_q.v_ptr_int) > none
+  assert v_q.d_ptr_int
+  t1 := v_q.v_ptr_int
+  assert t1 != null
+  assert perm(t1.v_int) > none
+  assert t1.d_int
+  assert t0.v_int == 2 && t1.v_int == 1
+  assert perm(v_x.v_int) > none
+  assert v_x.d_int
+  assert perm(v_y.v_int) > none
+  assert v_y.d_int
+  assert !((10 * v_x.v_int + v_y.v_int < (-2147483648)) || (2147483647 < 10 * v_x.v_int + v_y.v_int))
+  res := v_x.v_int * 10 + v_y.v_int
+  assert !(((perm(v_q.v_ptr_int) != write) || (perm(v_q.d_ptr_int) != write)) || (perm(lvloc(block_of(v_q)).lv) != write))
+  exhale (acc(v_q.v_ptr_int) && acc(v_q.d_ptr_int)) && acc(lvloc(block_of(v_q)).lv)
+  assert !(((perm(v_p.v_ptr_int) != write) || (perm(v_p.d_ptr_int) != write)) || (perm(lvloc(block_of(v_p)).lv) != write))
+  exhale (acc(v_p.v_ptr_int) && acc(v_p.d_ptr_int)) && acc(lvloc(block_of(v_p)).lv)
+  assert !(((perm(v_y.v_int) != write) || (perm(v_y.d_int) != write)) || (perm(lvloc(block_of(v_y)).lv) != write))
+  exhale (acc(v_y.v_int) && acc(v_y.d_int)) && acc(lvloc(block_of(v_y)).lv)
+  assert !(((perm(v_x.v_int) != write) || (perm(v_x.d_int) != write)) || (perm(lvloc(block_of(v_x)).lv) != write))
+  exhale (acc(v_x.v_int) && acc(v_x.d_int)) && acc(lvloc(block_of(v_x)).lv)
+  assert res == 12
+}
