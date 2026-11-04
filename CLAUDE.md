@@ -3,7 +3,9 @@
 Plan: @plan.md   Status: internal/status.md (session log; read when needed)
 Session plans: .claude/plans/<milestone>-<topic>.md (the approved plan of each session, e.g.
   m4-5b1b-pointer-params.md; from M4.5b1b)
-User docs: doc/ (Antora) → https://cerastes.dev/cerastes/doc/ (decision 0004)
+User docs: doc/ (Antora) → https://cerastes.dev/cerastes/doc/ (decision 0004): a tutorial
+  (pages/tutorial/), the reference pages and a developer guide (pages/dev/) (decision 0049); the
+  session that completes a concept adds its tutorial chapter (0049 item 4)
 
 ## Commands
 - Bootstrap: scripts/bootstrap.sh   (idempotent; macOS on Apple silicon)

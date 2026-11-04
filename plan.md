@@ -46,7 +46,7 @@ Cerastes/
   plan.md                   # this file
   doc/                      # user documentation: Antora component, published at https://cerastes.dev/cerastes/doc/ (M1.5+)
     antora.yml  local-playbook.yml  package.json  ui/
-    modules/ROOT/           # nav.adoc, pages/, examples/ (every example is a test), images/
+    modules/ROOT/           # nav.adoc, pages/ (tutorial/, the reference, dev/: record 0049), examples/ (every example is a test), images/
   internal/                     # developer documentation (not published)
     status.md               # session handoff log (updated every session)
     decisions/NNNN-*.md     # one record per non-obvious decision
@@ -136,6 +136,7 @@ Every test file starts with expectation lines that `scripts/run_tests.py` checks
 | M4.5c2b Places through a heap read | 2026-11-03 | 0045 | contract and invariant places reached through loads at any depth (`owns(**pp)`, `live(*pp)`, `*gp`, `p->q->x`, `*s.q`, `*r.q`, `old(**pp)`, measures): the entry-state rule, the post-state reading of `ensures` places, amounts that follow objects (question 108), bodiless contracts tied to their partners, heap-reading guards (109), method- and loop-entry snapshots as automatic loop places (105, 110), a call beside an access with a pre-call snapshot (111), written atoms through loads and written struct atoms (question 99), `restrict` over load roots; `live(r.q)` to M4.5d2 (106); ports `issue310.c`, `globals.c`'s struct half (questions 104–112; plan `.claude/plans/m4-5c2b-heap-read-places.md`) |
 | M4.5d1 vlibc in cerastes | 2026-11-03 | 0046 | `third_party/vlibc` pinned and guarded (`vlibc_tree.py`); vlibc's shim first in verify mode (`--sys_include`); library files by path (verified like user code); trust from vlibc's tags, "does not return" from vlibc, reserved names generated from vlibc's headers (questions 114–117), attributes checked by their own position; three routes redirecting trusted calls closed (aliases and pragmas, early-created functions, asm labels; older than vlibc); `trusted_libc_reason` gone; d2's dependency map (plan `.claude/plans/m4-5d1-vlibc.md`, questions 113–119) |
 | M4.5d2a The heap | 2026-11-03/04 | 0047 | vlibc's trusted `malloc`, `calloc` and `free` (reserved identifiers; trusted by the contract's shape, not the name); typed views at `void*` → `T*` (one object, `sizeof(T)`); heap blocks with the slot −1 token; `invalid-free`; leaks by `forperm` after `l_end` and at loop back edges (`main` included, question 123); `owns_block` in contracts; `owning`/`ref_to_uninit` on functions; sequencing over block sites; loops over blocks held through locals; the owner's directive that vlibc implements what it covers (question 121) and d2's split into d2a, d2v, d2b (plan `.claude/plans/m4-5d2a-heap.md`, questions 120–127; final check by CI, owner 2026-11-04) |
+| S6 Tutorial and developer guide | 2026-11-04 | 0049 | a VerCors-style tutorial (seven chapters: a first proof, integers, loops, calls, pointers, structures, the heap; every program verified in both modes, every failure shown at its line) and a developer guide (architecture, building, testing, soundness, adding a feature, the EDG fork, writing documentation) as sections of the one site, with the reference between them; the overview rewritten; the website's landing page; a chapter per concept from now on (questions 131–133; plan `.claude/plans/s6-tutorial.md`) |
 
 The finished milestones' plans (goals, tasks, acceptance) are in the commit named above; `internal/status.md` has a
 row per session.
@@ -191,7 +192,9 @@ variadic functions and `printf`, several translation units (the contract manifes
 
 **Docs:** each session extends "Verifying a program", "Annotations" and "Error messages" (one section per new error
 category); from M4.5, a "Memory and ownership" page: `owns`/`reads`/`old` in C, structs, `malloc`/`free`, arrays and
-`owns_range`, `forall`, predicates and pure functions, `fold`/`unfold`, and the rejected constructs.
+`owns_range`, `forall`, predicates and pure functions, `fold`/`unfold`, and the rejected constructs. The tutorial gains a
+chapter in the session that completes its concept (record 0049 item 4): arrays and quantifiers in M4.5e1, extended by
+pointer arithmetic in M4.5e2, predicates and a linked list in M4.5f2, strings in M4.6, function pointers in M4.7.
 
 **Acceptance (checked in M4.8):** pass/fail pairs for every construct, including swap, a struct field update, a
 linked list (push/pop/length with a recursive predicate), array sum/max with a quantifier, and an aliasing trap that
@@ -238,6 +241,7 @@ Also before M5 (owner, 2026-10-27, handoff §8 question 11): `mutate.py`'s class
   - the eligibility rules in user terms;
   - what falls back to per-instantiation verification, and how that is reported;
   - the model of an integral `T`.
+- A tutorial chapter on generic templates (record 0049 item 4): a template verified once, and one that falls back.
 
 **Sessions** (owner, 2026-10-20; designed in the M4.1 session, details in `internal/handoff.md`). The critical path
 is M5a → M5c → M5d → M5e → M5f → M5g; M5b needs the box and can run any time before M5g, best just before it.
@@ -283,7 +287,7 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
 - An overload whose selection depends on scope or ADL, where the obligation must be checked against the overload actually chosen.
 - A hidden friend, overloads differing only in constraints, and a requirement satisfied by a builtin operator.
 
-**Docs:** a "Concept requirement contracts" page with the syntax chosen in that record and how obligation failures are reported.
+**Docs:** a "Concept requirement contracts" page with the syntax chosen in that record and how obligation failures are reported; a tutorial chapter on requirement contracts (record 0049 item 4).
 
 **Acceptance:** all pairs pass; the mutation run is clean; the error messages name the requirement, the selected overload and the instantiation site.
 
@@ -305,7 +309,7 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
 
 **Gate G2's deferred parts** (owner, 2026-10-20): `generic_body`'s `assign` and `same_ref`, and `function_template_general_contract`, ported and compared with VeriFast, recorded in `internal/differential.md`.
 
-**Docs:** the "Memory and ownership" page gains references, `new`/`delete`, classes and the C++ forms of the spec functions; the list of rejected constructs with their diagnostics.
+**Docs:** the "Memory and ownership" page gains references, `new`/`delete`, classes and the C++ forms of the spec functions; the list of rejected constructs with their diagnostics; tutorial chapters on references and on classes (record 0049 item 4).
 
 **Acceptance:** pass/fail pairs for references, `new`/`delete`, a class with constructor and destructor contracts, and a member predicate; the deferred G2 tests agree with VeriFast or the disagreement is explained in a decision record.
 

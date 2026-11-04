@@ -1,15 +1,24 @@
-# Handoff after M4.5d2a — the heap (record 0047) (2026-11-04)
+# Handoff after S6 — a tutorial and a developer guide (record 0049), and M4.5d2a — the heap (record 0047) (2026-11-04)
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
 rediscover, and holds only what is live (owner, 2026-10-26; consolidated again at M4.5b2b's start, 2026-11-02: §3 is
-regrouped by the session that consumes each note; updated at M4.5c1's, M4.5c2a's, M4.5c2b's, M4.5d1's and M4.5d2a's starts). The text
-before M4.5d2a is `git show 9d98fe8:internal/handoff.md`, before M4.5d1 `git show d26a87c:internal/handoff.md`, before M4.5c2b `git show 7f11706:internal/handoff.md`, before M4.5c2a `git show cbdcce5:internal/handoff.md`, before M4.5c1
+regrouped by the session that consumes each note; updated at M4.5c1's, M4.5c2a's, M4.5c2b's, M4.5d1's and M4.5d2a's starts, and
+by S6, a docs session that changed no code: its additions are marked "S6"). The text before S6 is
+`git show bb41d55:internal/handoff.md`, before M4.5d2a `git show 9d98fe8:internal/handoff.md`, before M4.5d1 `git show d26a87c:internal/handoff.md`, before M4.5c2b `git show 7f11706:internal/handoff.md`, before M4.5c2a `git show cbdcce5:internal/handoff.md`, before M4.5c1
 `git show 1bfa705:internal/handoff.md`, and before M4.5b2b `git show 38877b4:internal/handoff.md`, whose header names
 every earlier version (each note below keeps its origin in brackets, so its full wording can be found there). Session
 plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session consumes move into its plan.
 
 ## 1. State
+
+- **S6** (2026-11-04; record 0049; plan `.claude/plans/s6-tutorial.md`, questions 131–133): a tutorial
+  (`doc/modules/ROOT/pages/tutorial/`, seven chapters) and a developer guide (`pages/dev/`, eight pages) as sections of
+  the one docs site, the overview rewritten, and the website's landing page; done on branch `s6-tutorial` (from
+  `origin/main` `bb41d55`, which holds PRs #27, #28, #29 and #30: M4.5d1, M4.5d2a and record 0048) in the worktree
+  `.claude/worktrees/s6`. No code changed; the M4.5d2a follow-up below is still the next code work. The owner asked for
+  the examples only, not the full suite (status has what ran). The website's commit is `cerastes-verifier.github.io`'s
+  local `main` `45a3d2f` (§2 step 5).
 
 - **On `origin/main`** (`f59e4b2`): everything through M4.5c2b (PR #26). **M4.5d1** (vlibc in cerastes; record 0046;
   plan `.claude/plans/m4-5d1-vlibc.md`) is PR #27 (`m4.5d1-vlibc`, tip `9d98fe8`), open at M4.5d2a's start; the local
@@ -60,6 +69,10 @@ The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits beh
    them.
 4. **vlibc and vlibm (record 0048):** push vlibc's and vlibm's `main` (each one commit: `CLAUDE.md` rewritten for the
    `vlibc_`/`vlibm_` names). No header changed, so cerastes's vlibc pin stays at `35e9b6f`.
+5. **S6 (record 0049):** push `s6-tutorial` and open its PR (docs, the policy lists and project files only; CI's PR tier
+   runs the doc examples). After it merges and the docs workflow deploys, push `cerastes-verifier.github.io`'s `main`
+   (`45a3d2f`): its links (`…/doc/tutorial/index.html`, `…/doc/dev/index.html`) exist only after that deploy. Then
+   `git worktree remove .claude/worktrees/s6`.
 
 ## 3. Open notes, by the session that consumes them
 
@@ -87,6 +100,25 @@ M4.5d2a's plan's Inputs (`.claude/plans/m4-5d2a-heap.md`); those d2a hands on ar
   into a user message; add an automatic `internal` invariant `flag ==> WF(v)` for pointer locals a loop assigns and restore
   `internal`, or fix record 0047 item 6 and the docs. Notes N1–N6 in the report (a must-fail for `writes_in_expr`, record
   item 10's wording, two code tidiness items, `Call` in `heap_guard` with M4.5f1, the textual `void *` check).
+
+**S6 notes** (record 0049)
+- **The claims audit is not done** (owner, 2026-11-04: "I can have the soundness auditor run in a different session"):
+  a read-only soundness-auditor pass over `bb41d55..s6-tutorial`'s pages (`pages/tutorial/`, `pages/dev/`,
+  `overview.adoc`), the policy-list diff and the website's paragraph, for statements that are false or overclaim about
+  behaviour, trust or a result's meaning; its fixes are doc edits plus a rerun of the changed examples. [S6]
+- **Tutorial upkeep** (0049 item 4): M4.5e1 owes the arrays chapter (and quantifiers), M4.5e2 extends it with pointer
+  arithmetic, M4.5f2 owes predicates and a linked list, M4.6 strings, M4.7 function pointers, M5 generic templates, M6
+  requirement contracts, M7 references and classes. Every session that changes a message, a category or an accepted
+  construct a chapter shows updates its prose and `console` blocks: the blocks are copied from a run in
+  `doc/modules/ROOT/examples/tutorial/` (`../../../../../build/cerastes verify <file>`), and only review checks them. A
+  check that reruns each shown command and compares the output is possible later work (0049, Consequences). [S6]
+- **Stale facts found, not fixed** (no code changes in S6): `src/backend/register_attributes.h`'s header comment says
+  "eight attributes" (it registers more: `decreases`, `owning`, `uninit`, `ref_to_uninit`, `must_init`, …); `plan.md` §0
+  and the M5 plan name `internal/soundness/`, which does not exist (the developer guide says so; the arguments are in
+  the decision records and `internal/encoding.md` §3); 0005 item 5 still describes the upstream-only submodule guard that
+  0009 superseded. [S6]
+- **`examples/dev/`** is in the policy lists but has no files: the developer guide quotes test headers in `text` blocks
+  (0049 item 5). [S6]
 
 **M4.5d2v vlibc's allocator** (questions 121, 122 and 128; record 0048, which replaces question 121's design)
 - vlibc's allocator is named `vlibc_malloc`, `vlibc_calloc`, `vlibc_realloc`, `vlibc_free`, `vlibc_aligned_alloc`,
@@ -848,6 +880,12 @@ After M4.5d2a (2026-11-04; record 0048): 128 (vlibc's and vlibm's implementation
 `vlibm_<name>`, declared beside the standard names with the same contracts: reading (a), the contract shared, not (b), a
 `#define` or link-time rename of the standard names; question 121's replacement allocator, malloc zone and replacement set
 are dropped).
+
+S6 (2026-11-04; record 0049): 131 (the docs session runs before the M4.5d2a re-audit's B1/S1 fixes; it touches no
+encoder code), 132 (a minimal landing page on the website: one paragraph and links, no code), 133 (a tutorial chapter
+lands with the session that completes its concept; every session keeps the existing chapters true). At planning the owner
+also agreed to the layout (the tutorial and the developer guide in this repository's `doc/`, the website the front door)
+and, during the session, asked for the examples only, not the full suite.
 
 **Open, for M4.5d2v's planning** (each with the recommended answer, record 0048):
 
