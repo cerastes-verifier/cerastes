@@ -106,3 +106,8 @@ any implementation.
 - The encoder loses its only name-keyed trust table; trust comes from where a declaration is, as for system files.
 - A user's ordinary build and cerastes read the same contracts when the user writes `<vlibc/…>`.
 - M4.5d1 is the first session that needs the repository; it can run any time after M4.5a.
+
+*2026-11-04, amended by 0048 (question 128): item 2 — vlibc's implementations are named `vlibc_<name>` (`vlibc_strlen`,
+`vlibc_memcpy`, `vlibc_malloc`), declared beside the standard name with the same contract; `libvlibc` defines no name of
+the standard library (C23 7.1.3). A program that calls `strlen` uses the platform's implementation under vlibc's contract;
+one that calls `vlibc_strlen` links `libvlibc`. vlibm's are named `vlibm_<name>` the same way.*

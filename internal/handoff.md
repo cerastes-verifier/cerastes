@@ -26,6 +26,12 @@ plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session cons
   go in a container built from a clean `ubuntu:26.04` with the S5 recipe (`cerastes-m4.5d1:runner`, container
   `cerastes-m4.5d1-p71`, checkout `~/cerastes-m4.5d1/cerastes`; reused by d2a).
 
+- **After the session** (2026-11-04): the owner chose vlibc's and vlibm's own names for their implementations
+  (`vlibc_malloc`, `vlibc_strlen`, `vlibm_sqrt`), declared beside the standard names with the same contracts, instead of
+  question 121's replacement allocator under the standard names (question 128, record 0048, accepted before d2v's code).
+  §3's d2v notes, §4.2, §4.3's M4.6, `plan.md`'s d2v and M4.6 rows and vlibc's and vlibm's `CLAUDE.md` follow it; two
+  recommendations of the record are open (§8, questions 129 and 130).
+
 The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits behind upstream `main` (§4.1).
 
 ## 2. Owner steps
@@ -52,6 +58,8 @@ The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits beh
    **Even with CI green**, the re-audit's B1 and S1 (§3, "M4.5d2a follow-up") are the next session's first work, before
    M4.5d2v: they are exit 3 on correct programs and a timeout regression, not wrong verdicts, and no committed test hits
    them.
+4. **vlibc and vlibm (record 0048):** push vlibc's and vlibm's `main` (each one commit: `CLAUDE.md` rewritten for the
+   `vlibc_`/`vlibm_` names). No header changed, so cerastes's vlibc pin stays at `35e9b6f`.
 
 ## 3. Open notes, by the session that consumes them
 
@@ -80,24 +88,27 @@ M4.5d2a's plan's Inputs (`.claude/plans/m4-5d2a-heap.md`); those d2a hands on ar
   `internal`, or fix record 0047 item 6 and the docs. Notes N1–N6 in the report (a must-fail for `writes_in_expr`, record
   item 10's wording, two code tidiness items, `Call` in `heap_guard` with M4.5f1, the textual `void *` check).
 
-**M4.5d2v vlibc's allocator** (question 121, the model; record 0047)
-- vlibc replaces the platform's allocator under the standard names: a portable C23 core (free lists over regions), pages
-  from `mmap` on both platforms, glibc's documented replacement set (`malloc`, `free`, `calloc`, `realloc`,
-  `aligned_alloc`, `free_sized`, `free_aligned_sized`, `malloc_usable_size`, `memalign`, `posix_memalign`, `valloc`,
-  `pvalloc`; https://sourceware.org/glibc/manual/latest/html_node/Replacing-malloc.html: `max_align_t` alignment, `free`
-  leaves `errno`, initial-exec TLS, `realloc(p, 0)` frees and returns NULL), on macOS a malloc zone made the default zone
-  so libSystem's own allocations (`strdup`, `getline`) use vlibc too (a static `malloc` rebinds only the program's own
-  calls: ld(1)'s two-level namespace; mimalloc and jemalloc do the same), thread-safe (C23 7.24.3p2's total order). Compile
-  the core with `-fno-builtin` (no loop turned into a call back into vlibc). C23 7.1.3/6.4.2.1p8: a library outside the
-  implementation defining `malloc` is undefined behaviour except under a platform's documented replacement; record 0046
-  item 6 (question 117) refuses user definitions of reserved names, so vlibc's own `src/` is verified later under a rule of
-  its own (vlibc's sources are not user code). Run tests in vlibc's CI on both platforms with both compilers (`test/`
-  links nothing today; cerastes's native runs compile only). [M4.5d2a planning]
-- macOS's SDK marks `malloc`/`calloc` `_MALLOC_TYPED`: under Apple clang's `-ftyped-memory-operations` native builds call
-  `malloc_type_malloc`/`malloc_type_calloc`, so the replacement must cover those entry points too (EDG sees an empty macro)
-  [d2a audit 2 N4].
-- d2a's contracts are trusted; the allocator's own verification comes after M4.6 (plan.md's d2v row). vlibc's
-  `<stdlib.h>` already includes `<stddef.h>` for `size_t`/`NULL` (`35e9b6f`) [d2a].
+**M4.5d2v vlibc's allocator** (questions 121, 122 and 128; record 0048, which replaces question 121's design)
+- vlibc's allocator is named `vlibc_malloc`, `vlibc_calloc`, `vlibc_realloc`, `vlibc_free`, `vlibc_aligned_alloc`,
+  `vlibc_free_sized`, `vlibc_free_aligned_sized` (C23 7.24.3), complete and usable without cerastes: a portable C23 core
+  (free lists over regions), pages from `mmap` on both platforms (trusted glue), `max_align_t` alignment, thread-safe
+  (7.24.3p2's total order; the lock is chosen at planning), built as `libvlibc` and declared in `<vlibc/stdlib.h>` after
+  the standard names, inside `extern "C"` for C++, each with its standard name's contract token for token and its own
+  tag (0048 items 1, 2, 6). Run tests in vlibc's CI on both platforms with both compilers, with threads and under ASan
+  and UBSan (`test/` links nothing today; cerastes's native runs compile only). What POSIX adds (`errno` = `ENOMEM`) and
+  `realloc(p, 0)` are decided at planning. [0048; M4.5d2a planning]
+- Nothing replaces the standard names: no malloc zone, no `malloc_type_*` entry points (macOS's `_MALLOC_TYPED`, d2a
+  audit 2 N4, concerns only `malloc` itself, which stays the platform's), no glibc replacement set, no `-fno-builtin`
+  requirement (0048 item 6). Replacing the platform's allocator is an M8 inventory entry (0048 item 7). [0048]
+- cerastes's half (0048 items 2, 4, 6): `vlibc_contracts.py` learns the `extern "C"` block and the pairing check (a
+  `vlibc_<name>` whose contract differs from `<name>`'s is refused); heap blocks know their allocator, a mismatch is
+  `invalid-free` (question 129); the pin moves only with that rule; the four functions whose standard names have no
+  contract yet are declared without one (question 130), checked to leave programs that do not call them unchanged;
+  must-verify/must-fail pairs, a must-fail per new trusted contract, the docs. The planning may split the halves
+  (question 77). [0048]
+- d2a's contracts are trusted; the allocator's own verification comes after M4.6 (plan.md's d2v row), under the rule for
+  vlibc's `src/` that M4.6 decides (0048 item 5). vlibc's `<stdlib.h>` already includes `<stddef.h>` for `size_t`/`NULL`
+  (`35e9b6f`) [d2a].
 
 **M4.5d2b results, owning locals, globals and fields, P4418R0** (from M4.5d2a's planning, the check of P4222R3 the
 handoff asked for; sources: P4222R3, P4416R0 (its wording), P4418R0, P4417R0 (its wording), all 2026-10-22; open-std's
@@ -428,7 +439,7 @@ allocation and at `free` only, one object per allocation (a typed view, size `si
 token, `invalid-free`, leaks by `forperm` (`leak`; `main`'s return included, question 123), `owns_block` in contracts,
 `owning` and `ref_to_uninit` on functions (target `r`), two calls ordered over liveness and token cells, blocks held
 through locals across loops (landed; one pinned false alarm, §3); `realloc` to M4.5e2. **M4.5d2v** (vlibc's allocator, in vlibc's repository,
-right after d2a): the replacement allocator of question 121 (§3). **M4.5d2b** (after d2v): the rest of the paragraph
+right after d2a, with cerastes's half): the allocator under vlibc's own names of record 0048 (question 128; §3). **M4.5d2b** (after d2v): the rest of the paragraph
 below that d2a does not take (`ensures` atoms with no partner, owning locals, globals and fields, `ref_to_uninit` on
 locals, P4418R0, P4222R3's strict rules; §3). The original d2 paragraph and its dependency map follow.
 
@@ -502,7 +513,9 @@ are needed for content specifications: `strlen`'s zero-terminated string, `memcp
 ### 4.3 M4.6–M4.8
 
 **M4.6 Chars and strings:** string literals as read-only arrays, `char` buffers, vlibc's `<string.h>` (`strlen`,
-`memcpy`, `memcmp`, `strcmp`: contracts, and implementations verified in vlibc's CI), `main(argc, argv)`; character
+`memcpy`, `memcmp`, `strcmp`: contracts on the standard names, and implementations `vlibc_strlen`, `vlibc_memcpy`,
+`vlibc_memcmp`, `vlibc_strcmp` verified in vlibc's CI, record 0048; M4.6 decides the rule that verifies vlibc's `src/`,
+0048 item 5), `main(argc, argv)`; character
 access to other objects stays rejected (0028 item 1); `c | 0x20`-style case bits are decided (0027). Ports:
 `strlen.c`, `memcpy.c`, `memcmp.c`. Open point: a zero-terminated buffer of unknown length needs a recursive predicate or a
 built-in notion (M4.5f3 decides). **`const` objects in the model** (owner, 2026-10-30, question 78, the recommendation):
@@ -831,4 +844,21 @@ also expects `unsupported_annotation @ L8`; the discarded-`malloc` pin lists EDG
 warnings, its rejection at L13; the member-function pins `unsupported_declaration @ L7`), 127 (and `unsupported_annotation
 @ L9`); and at 07:15 that the session ends at 08:00 with CI as the final check.
 
-No question is open.
+After M4.5d2a (2026-11-04; record 0048): 128 (vlibc's and vlibm's implementations are named `vlibc_<name>` and
+`vlibm_<name>`, declared beside the standard names with the same contracts: reading (a), the contract shared, not (b), a
+`#define` or link-time rename of the standard names; question 121's replacement allocator, malloc zone and replacement set
+are dropped).
+
+**Open, for M4.5d2v's planning** (each with the recommended answer, record 0048):
+
+129. **Blocks know their allocator.** With identical contracts, cerastes cannot tell a block of `malloc` from one of
+     `vlibc_malloc`, so it would accept `free(vlibc_malloc(n))`, undefined behaviour at run time. *Recommended:* the
+     model records each heap block's allocator, set by the allocating routine's name class (a standard name: the
+     platform's; a `vlibc_` name: vlibc's) and required by the deallocating one, a mismatch reported `invalid-free`;
+     `owns_block(p)` in a user's contract keeps meaning a block of the standard allocator (every test keeps its meaning),
+     and a spelling for a vlibc block is decided with d2b's owning results; the pin moves to a vlibc declaring the
+     `vlibc_` allocation functions with contracts only together with this rule.
+130. **Functions implemented before their standard name has a contract** (`vlibc_realloc` until M4.5e2;
+     `vlibc_aligned_alloc`, `vlibc_free_sized`, `vlibc_free_aligned_sized`). *Recommended:* declared in `<vlibc/stdlib.h>`
+     without a contract and untagged, so a verified program's call is `call_without_contract`; contracts come with
+     their standard names' (realloc in M4.5e2; `free_sized` needs a deallocation shape with a size).

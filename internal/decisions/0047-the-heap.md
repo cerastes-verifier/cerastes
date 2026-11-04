@@ -21,7 +21,9 @@
     cannot implement"). For the allocation functions: a replacement allocator under the standard names — a portable C23
     core over memory regions, pages from `mmap`, glibc's documented replacement set, on macOS a malloc zone made the
     default zone (so libSystem's own allocations use vlibc too), thread-safe. Its contracts stay trusted until cerastes
-    verifies the core; the page and zone glue stay trusted.
+    verifies the core; the page and zone glue stay trusted. *(Amended by 0048, question 128, 2026-11-04: the allocator is
+    `vlibc_malloc`, `vlibc_free`, … under vlibc's own names, with the standard names' contracts; nothing replaces the
+    standard names, and there is no malloc zone, replacement set or zone glue.)*
   - **122:** that allocator is M4.5d2v, a session of its own in vlibc's repository right after d2a.
   - **123:** blocks still held when `main` returns are leaks, like VeriFast (item 7).
 - **Milestone:** M4.5d2a (2026-11-03).
@@ -359,4 +361,6 @@ Three facts shape this record (the planning surveys; P72 confirms them):
 - `void*` appears only at an allocation's conversion and at `free`'s argument; VIR never holds it.
 - A heap program's Viper gains `field tok` and `forperm` rows; every other program's Viper is unchanged.
 - vlibc's allocation contracts are trusted until M4.5d2v's allocator is verified (after M4.6); the platform's allocator
-  stands behind them until a user links vlibc's.
+  stands behind them until a user links vlibc's. *(Amended by 0048 item 3, 2026-11-04: the platform's allocator stands
+  behind `malloc`'s contract for good; vlibc's verified allocator is `vlibc_malloc`, which a program calls by that name.
+  Item 2's shapes are read per allocator, and a block freed by the other allocator is `invalid-free` (0048 item 4).)*
