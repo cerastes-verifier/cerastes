@@ -539,7 +539,13 @@ exempting the loop's token places. A block site counts as a full-permission atom
 sequencing rules; consuming sites and (D) views register a write of the liveness cell (pseudo-field `lv`). In a heap
 program a loop's automatic places also hold, for each pointer variable declared before it, the object it designates at
 entry (the variable, or a ghost `hb := v` when the loop assigns it): leaf cells, liveness cell and the free token (`kt`
-snapshot, back-edge `perm(tok) >= kt`), which the back-edge leak row exempts.
+snapshot, back-edge `perm(tok) >= kt`), which the back-edge leak row exempts. Silicon is made to branch on the
+guards (0047 item 10, amended at M4.5d2v): an empty `if (k > none) { }` after each heap snapshot, `block_of` splits
+between token places, and `block_of`/`lvloc`/receiver (member-cell, for a structure) splits against each pointer
+variable declared before the loop that it does not use and each block-site formal; the copy of an unassigned parameter
+with an `owns`/`reads`/`live` atom is not a heap place; every pointer local a loop assigns (declared outside it) gets an
+automatic `internal` invariant `flag ==> WF(v)` (`WF(v)` without a flag), so the free and call rows' `WF` check is
+`internal`.
 
 ## 4. Viper shape
 

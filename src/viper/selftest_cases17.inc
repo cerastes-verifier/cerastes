@@ -303,6 +303,109 @@ void define_heap() {
   lc("hl_loop_return_clear", "the block is freed before the loop: the return inside it holds nothing", [=](Kit& k) { leak_in_loop(k, 0); });
   lc("hl_loop_return_leak", "the block is freed after the loop: the return inside it leaks (leak, reported at the closing brace)", [=](Kit& k) { k.fail("leak", leak_in_loop(k, 1)); });
 
+  // ======== the loop rule's follow-up (re-audit B1, S1, S3; record 0047 item 10, amended in M4.5d2v) ========
+  // A member alias: struct S { int x; int y; };  void f(void) { struct S *s = malloc(); if (s != NULL) { s->x = 0; s->y = 0; int *x = &s->y; int i = 0;
+  //   while (i < 3) { *x = i; i = i + 1; } free(s); [free(s);] } }   the pointer local x designates a member of the block the loop never names
+  //   mode 0 verifies; 1: a second free of s (invalid-free); 2: no free (leak at the closing brace)
+  const auto member_alias = [=](Kit& k, int mode) -> SrcLoc {
+    StructType* S = k.strukt("S", {{"x", k.i32}, {"y", k.i32}});
+    const Type SP = k.ptr(k.st(S));
+    Function* m = heap_alloc_view(k, "malloc", k.st(S), false);
+    Function* fr = heap_free_view(k, k.st(S));
+    Function* f = k.fn("f", k.vd);
+    Var* s = k.local(f, "s", SP);
+    Var* x = k.local(f, "x", PT(k));
+    Var* i = k.local(f, "i", k.i32);
+    const Stmt* lp = k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))}, {k.cl(k.sub(N(k, "3"), k.v(i)))},
+                           k.blk({k.store(k.pn(x), k.v(i)), k.asg(i, k.add(k.v(i), N(k, "1")))}));
+    std::vector<const Stmt*> in{k.lstore(k.pn(s), 0, N(k, "0")), k.lstore(k.pn(s), 1, N(k, "0")), k.decl(x, k.mem(k.pn(s), 1)), k.decl(i, N(k, "0")), lp};
+    SrcLoc where;
+    if (mode != 2) in.push_back(k.es(k.call(fr, {k.pn(s)})));
+    if (mode == 1) {
+      const Expr* again = k.call(fr, {k.pn(s)});
+      where = again->loc;
+      in.push_back(k.es(again));
+    }
+    f->body = k.blk({k.decl(s, k.call(m, {})), k.iff(notnull(k, s, SP), k.blk(in))});
+    k.done(f);
+    return mode == 2 ? f->end_loc : where;
+  };
+  lc("hl_member_alias", "a loop writes through x = &s->y and does not name s: the block s holds is kept across the loop and freed after it", [=](Kit& k) { member_alias(k, 0); });
+  lc("hl_member_alias_double_free", "the same, with a second free(s) after the first: invalid-free at the second", [=](Kit& k) {
+    k.fail_only("invalid-free", member_alias(k, 1), 5, 0);  // a struct of two ints: the token, the offset, the liveness cell and the two leaves; the token row ends the path
+  });
+  lc("hl_member_alias_leak", "the same, without any free(s): the block is held at the return (leak)", [=](Kit& k) { k.fail("leak", member_alias(k, 2)); });
+
+  // A parameter that owns a block, and a member alias of it: void f(struct S *s) requires(owns_block(s)) { int *x = &s->y; int i = 0; while (i < 3) { *x = i; i++; } [free(s);] }
+  //   mode 0 verifies; 1: no free (leak at the closing brace)
+  const auto param_member_alias = [=](Kit& k, int mode) -> SrcLoc {
+    StructType* S = k.strukt("S", {{"x", k.i32}, {"y", k.i32}});
+    const Type SP = k.ptr(k.st(S));
+    Function* fr = heap_free_view(k, k.st(S));
+    Function* f = k.fn("f", k.vd, {{"s", SP}});
+    k.req(f, block(k, FP(k, f, 0)));
+    Var* x = k.local(f, "x", PT(k));
+    Var* i = k.local(f, "i", k.i32);
+    const Stmt* lp = k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))}, {k.cl(k.sub(N(k, "3"), k.v(i)))},
+                           k.blk({k.store(k.pn(x), k.v(i)), k.asg(i, k.add(k.v(i), N(k, "1")))}));
+    std::vector<const Stmt*> body{k.decl(x, k.mem(k.pn(f->param_var(0)), 1)), k.decl(i, N(k, "0")), lp};
+    if (mode == 0) body.push_back(k.es(k.call(fr, {k.pn(f->param_var(0))})));
+    f->body = k.blk(body);
+    k.done(f);
+    return f->end_loc;
+  };
+  lc("hl_param_member_alias", "a parameter owns the block s points to, the loop writes through &s->y and does not name s: s is freed after the loop", [=](Kit& k) { param_member_alias(k, 0); });
+  lc("hl_param_member_alias_leak", "the same without the free: the block the parameter owns is held at the return (leak)", [=](Kit& k) { k.fail("leak", param_member_alias(k, 1)); });
+
+  // A cursor parameter the loop reassigns beside a block the loop does not name: int f(int *t) { int *p = malloc(); if (p != NULL) { *p = 0; int i = 0;
+  //   while (i < 3) { t = NULL; i++; } [free(p);] } }   the entry value of t may be anything, in particular p
+  //   mode 0 verifies; 1: no free (leak at the closing brace)
+  const auto cursor = [=](Kit& k, int mode) -> SrcLoc {
+    Function* m = heap_alloc_view(k, "malloc", k.i32, false);
+    Function* fr = heap_free_view(k, k.i32);
+    Function* f = k.fn("f", k.vd, {{"t", PT(k)}});
+    Var* p = k.local(f, "p", PT(k));
+    Var* i = k.local(f, "i", k.i32);
+    const Stmt* lp = k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))}, {k.cl(k.sub(N(k, "3"), k.v(i)))},
+                           k.blk({k.asg(f->param_var(0), k.nul(PT(k))), k.asg(i, k.add(k.v(i), N(k, "1")))}));
+    std::vector<const Stmt*> in{k.store(k.pn(p), N(k, "0")), k.decl(i, N(k, "0")), lp};
+    if (mode == 0) in.push_back(k.es(k.call(fr, {k.pn(p)})));
+    f->body = k.blk({k.decl(p, k.call(m, {})), k.iff(notnull(k, p, PT(k)), k.blk(in))});
+    k.done(f);
+    return f->end_loc;
+  };
+  lc("hl_cursor_param", "a loop reassigns the parameter t beside the block p holds and never names: p is freed after the loop", [=](Kit& k) { cursor(k, 0); });
+  lc("hl_cursor_param_leak", "the same without the free: the block is held at the return (leak)", [=](Kit& k) { k.fail("leak", cursor(k, 1)); });
+
+  // A pointer local the loop assigns, beside the block it was copied from: void f(void) { int *p = malloc(); if (p != NULL) { *p = 0; int *q = p; int i = 0;
+  //   while (i < 3) { q = p; *q = i; i++; } free(p | q); } }   the loop keeps q well-formed (S3: the automatic invariant `WF(q)`), so no row after the loop
+  //   fails for the pointer's form; what the loop does not tell (that q is p again) is the pinned false alarm of heap_loop_swap_false_alarm.c
+  //   mode 0 verifies (free(p)); 1: free(q): the token row and the offset row fail at the call (invalid-free) and the block p holds leaks at the closing brace
+  const auto reassigned = [=](Kit& k, int mode, SrcLoc* end = nullptr) -> SrcLoc {
+    Function* m = heap_alloc_view(k, "malloc", k.i32, false);
+    Function* fr = heap_free_view(k, k.i32);
+    Function* f = k.fn("f", k.vd);
+    Var* p = k.local(f, "p", PT(k));
+    Var* q = k.local(f, "q", PT(k));
+    Var* i = k.local(f, "i", k.i32);
+    const Stmt* lp = k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))}, {k.cl(k.sub(N(k, "3"), k.v(i)))},
+                           k.blk({k.asg(q, k.pn(p)), k.store(k.pn(q), k.v(i)), k.asg(i, k.add(k.v(i), N(k, "1")))}));
+    const Expr* rel = k.call(fr, {k.pn(mode == 0 ? p : q)});
+    std::vector<const Stmt*> in{k.store(k.pn(p), N(k, "0")), k.decl(q, k.pn(p)), k.decl(i, N(k, "0")), lp, k.es(rel)};
+    f->body = k.blk({k.decl(p, k.call(m, {})), k.iff(notnull(k, p, PT(k)), k.blk(in))});
+    k.done(f);
+    if (end != nullptr) *end = f->end_loc;
+    return rel->loc;
+  };
+  lc("hl_reassigned_free", "a loop assigns q = p; the block is freed through p after it", [=](Kit& k) { reassigned(k, 0); });
+  lc("hl_reassigned_free_through_q", "the same, freeing q: the loop does not say q is p again (invalid-free at the call, token and offset rows), and the block leaks", [=](Kit& k) {
+    SrcLoc end;
+    const SrcLoc at = reassigned(k, 1, &end);
+    k.fail_only("invalid-free", at, 4, 0);  // the token row and the offset row fail; the liveness and leaf rows sit behind them
+    k.fail_only("invalid-free", at, 4, 1);
+    k.fail("leak", end);
+  });
+
   // ======== leaks and the exemption of a result and of a borrowed parameter ========
   // int *make(void) ensures(r == NULL || owns_block(r)) { int *p = malloc(); [return p | return NULL] }   the block is handed to the caller, not a leak
   const auto give_result = [=](Kit& k, bool drop) -> SrcLoc {

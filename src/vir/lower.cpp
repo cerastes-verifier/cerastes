@@ -1880,9 +1880,9 @@ class Lowerer {
     const std::string whole = at_return ? "returns without owning the whole allocation " + pl + " points to, which its contract promises"
                                          : who_needs + " to own the whole allocation " + pl + " points to, without owning it";
     if (!dealloc) add("permission", low::bin(low::BinOp::Ne, p, low::null_()), whole);
-    // WF of the pointer: `internal` at a return (the contract's own pointers), a user row at a call (a pointer reassigned in a loop whose invariant says nothing about it
-    // may not be well-formed, as in call_atoms' WF row; its own category, so the free rows' groups keep their size)
-    add(at_return ? "internal" : "permission", wf_expr(p), dealloc ? "frees " + pl + ", which may not point to an allocation" : whole);
+    // WF of the pointer: `internal` (record 0047 item 10, re-audit S3): the contract's own pointers at a return, and at a call a pointer variable a loop reassigned,
+    // which the loop's automatic invariant `flag ==> WF(v)` keeps well-formed
+    add("internal", wf_expr(p), dealloc ? "frees " + pl + ", which may not point to an allocation" : whole);
     // The token row first (it ends its path when the token is not held: a double free, a local, a global, a member, a borrowed pointer), then the offset: a pointer
     // that is not known to point to the start of its block (`drop(struct S *s) requires(owns(*s))`) is one error, the token's, not two.
     add(cat, token_held(p),
@@ -5880,6 +5880,7 @@ class Lowerer {
                                  const std::set<int>* assigned = nullptr, const std::set<int>* declared = nullptr) {
     std::vector<Place> places;
     heap_entry_.clear();
+    heap_holders_.clear();
     const Function& f = *fn_.f;
     const FnAtoms& fa = atoms_of(f);
     const std::string suffix_of_loop = "__" + std::to_string(loop_number);
@@ -6039,10 +6040,20 @@ class Lowerer {
       for (const auto& vp : f.locals()) {
         const Var& v = *vp;
         if (!v.type.is_ptr() || v.type.pointee == nullptr || v.type.pointee->is_void() || v.address_taken || v.compound_literal) continue;
-        if (used.count(v.id) == 0 || declared->count(v.id) != 0) continue;
+        if (declared->count(v.id) != 0) continue;
         if (v.loc.known() && loop->loc.known() && v.loc.file == loop->loc.file &&
             (v.loc.line > loop->loc.line || (v.loc.line == loop->loc.line && v.loc.column > loop->loc.column)))
           continue;  // declared after the loop
+        if (used.count(v.id) == 0) {  // a holder beside the loop's places (B1 item 3)
+          const Type& ht = *v.type.pointee;
+          const E h = low::var(var_name(v));
+          heap_holders_.push_back(HeapHolder{h, ht, ht.is_struct() ? leaf_cells(h, *ht.struct_type, v.name, true) : std::vector<Cell>{Cell{h, ht, "*" + v.name, {}, ""}}});
+          continue;
+        }
+        // Record 0047 item 10 (re-audit S1): the local copy of a pointer parameter that has an atom place and that the function never assigns is the parameter's
+        // own place (its `acc`s, the liveness and the token cell are the parameter place's); a second place on the copy has a guard that is false at once
+        // (`v_a != p_a`) and multiplies the case splits of every unrelated function of a file that calls `malloc`.
+        if (v.is_param_copy && atom_params.count(v.param_index) != 0 && fn_.assigned_params.count(v.param_index) == 0) continue;
         const Type& pt = *v.type.pointee;
         const std::string tag = "h" + std::to_string(v.id);
         E hb = low::var(var_name(v));
@@ -6091,6 +6102,18 @@ class Lowerer {
         (void)first_of_var;
       }
     }
+    if (heap_ && loop != nullptr)
+      for (int k : atom_params) {
+        if (key_is_global(k) || is_derived_key(k)) continue;
+        const Param& pa = f.params[static_cast<size_t>(k)];
+        if (pa.type.pointee == nullptr || pa.type.pointee->is_void()) continue;
+        bool block_site = false;
+        for (const AtomSite& site : fa.sites) block_site = block_site || (key_has_site(site, k) && site.atom->atom == AtomKind::OwnsBlock);
+        if (!block_site) continue;
+        const E h = key_root_ref(k);
+        const Type& ht = *pa.type.pointee;
+        heap_holders_.push_back(HeapHolder{h, ht, ht.is_struct() ? leaf_cells(h, *ht.struct_type, pa.name, true) : std::vector<Cell>{Cell{h, ht, "*" + pa.name, {}, ""}}});
+      }
     // A parameter place whose atom can be false (`c == 0 || owns(*p)`) holds nothing on that path, and nothing tells Silicon that `p` is not a cell:
     // its snapshot would pick up the cell's permission and the invariant would demand it twice.  A parameter place is therefore counted only when it
     // is no cell (when it is one, the cell's own conjunct holds it); audit round 2, B1.
@@ -6484,6 +6507,8 @@ class Lowerer {
       frame = has_return || outward;
     }
     if (!frame) places.clear();
+    std::vector<HeapHolder> holders = std::move(heap_holders_);  // B1 item 3: the pointer variables that hold blocks beside the loop's heap places
+    heap_holders_.clear();
     std::vector<low::LStmt> hbstmts = std::move(heap_entry_);  // decision 0047 item 10: `hb := v` for each heap place whose variable the loop assigns
     heap_entry_.clear();
     if (places.empty()) hbstmts.clear();
@@ -6556,6 +6581,28 @@ class Lowerer {
       if (!opt_.drop_snapshot_invariant) w.invariants.push_back(std::move(inv));
     }
 
+    // Record 0047 item 10 (re-audit S3; heap programs only): a pointer variable the loop assigns and that is declared outside it stays well-formed.  Viper havocs
+    // it at the loop head, and the rows after the loop (a `free`'s `WF` row, a block site's at a call) read it: without this conjunct they fail for a correct
+    // program, and the free row's `WF` row (`block_rows`) is `internal` again.  Every assignment of a pointer is well-formed by construction (a view's or a
+    // contract's result, `&` of a place, a load under the WF of its place, another pointer variable), a variable with a flag only once it has a value.
+    if (heap_)
+      for (int id : assigned) {
+        if (declared.count(id) != 0) continue;
+        const Var& v = *fn_.f->locals()[static_cast<size_t>(id)];
+        if (!v.type.is_ptr() || v.address_taken || v.compound_literal) continue;
+        E wf = wf_expr(low::var(var_name(v)));
+        low::LInvariant inv;
+        inv.expr = fn_.flagged.count(id) != 0 ? low::implies(low::var(flag_name(v)), std::move(wf)) : std::move(wf);
+        for (const char* id2 : {"invariant.not.established", "invariant.not.preserved"}) {
+          low::Meta m;
+          m.category = "internal";
+          m.loc = s.loc;
+          m.message = "internal check: the loop keeps `" + v.name + "` well-formed";
+          inv.checks.push_back(low::Check{id2, std::move(m)});
+        }
+        w.invariants.push_back(std::move(inv));
+      }
+
     // The loop's places (decision 0038 item 3): the case splits, the snapshots, then the conjuncts.
     std::vector<low::LStmt> entry;  // right before the Viper loop
     std::vector<Framing> framings;
@@ -6626,7 +6673,20 @@ class Lowerer {
           const Place* b = pparams[j];
           if (!b->heap || same_expr(b->lroot, a->lroot)) continue;
           if (a->live && b->live) case_split(entry, low::bin(BinOp::Eq, live_cell(lv_of(*b)), live_cell(lv_of(*a))));
+          // B1 (re-audit): two token places are one block or two; the token invariants are guarded by `block_of(hb_i) != block_of(hb_j)`
+          if (!a->kt.empty() && !b->kt.empty()) case_split(entry, low::bin(BinOp::Eq, block_of(b->lroot), block_of(a->lroot)));
           if (a->suffix == b->suffix && (!(a->ptee == b->ptee && a->ptee.is_struct()) || a->mpath == b->mpath)) case_split(entry, low::bin(BinOp::Eq, b->recv, a->recv));
+        }
+      }
+      // B1 item 3: a heap place against each holder: its liveness cell, its block (for the token) and its cells.
+      for (const Place* a : pparams) {
+        if (!is_heap_param(a->param)) continue;
+        for (const HeapHolder& h : holders) {
+          if (a->live) case_split(entry, low::bin(BinOp::Eq, live_cell(lv_of(*a)), live_cell(h.ref)));
+          if (!a->kt.empty()) case_split(entry, low::bin(BinOp::Eq, block_of(a->lroot), block_of(h.ref)));
+          if (!a->value) continue;
+          for (const Cell& c : h.cells)
+            if (a->suffix == cell_suffix(c.type) && (!(a->ptee == h.pointee && a->ptee.is_struct()) || a->mpath == c.path)) case_split(entry, low::bin(BinOp::Eq, c.recv, a->recv));
         }
       }
       // A parameter place against each cell (B1): its snapshot must not pick up a cell's permission.
@@ -6638,14 +6698,22 @@ class Lowerer {
       for (const Place* a : pparams)
         for (const Place& c : places)
           if (c.cell && a->live && c.live) case_split(entry, low::bin(BinOp::Eq, live_cell(lv_of(*a)), live_cell(lv_of(c))));
+      // Record 0047 item 10 (re-audit B1): a heap place's snapshot holds a symbolic permission, and Silicon cannot decide `k == none` for a holder it never
+      // branched on (a member address `&s->b`, a pointer reached through a load, a cursor parameter): the invariant's `acc(.., k)` then fails on entry
+      // ("insufficient permission") for a correct program.  A catch-all `if (k > none) { }` after each heap snapshot gives it the branch.
+      auto catch_all = [&](const Place& pl, const std::string& k) {
+        if (pl.heap) case_split(entry, low::bin(BinOp::Gt, low::var(k), low::no_perm()));
+      };
       for (const Place& pl : places) {
         if (pl.live) {
           fn_.snapshots.push_back(low::LVar{pl.kl, low::LType::Perm});
           assign(entry, pl.kl, live_perm(lv_of(pl)));
+          catch_all(pl, pl.kl);
         }
         if (!pl.kt.empty()) {  // the block's free token (decision 0047 item 10)
           fn_.snapshots.push_back(low::LVar{pl.kt, low::LType::Perm});
           assign(entry, pl.kt, low::perm_of(tok_slot(pl.lroot), "tok"));
+          catch_all(pl, pl.kt);
         }
         if (!pl.value) continue;
         fn_.snapshots.push_back(low::LVar{pl.kv, low::LType::Perm});
@@ -6653,7 +6721,9 @@ class Lowerer {
         fn_.snapshots.push_back(low::LVar{pl.vs, ltype(pl.type)});
         fn_.snapshots.push_back(low::LVar{pl.ds, low::LType::Bool});
         assign(entry, pl.kv, value_perm(pl.recv, pl.type));
+        catch_all(pl, pl.kv);
         assign(entry, pl.kd, flag_perm(pl.recv, pl.type));
+        catch_all(pl, pl.kd);
         assign(entry, pl.ds, low::bool_lit(false));
         low::LStmt fl;
         fl.kind = low::LStmt::Kind::If;
@@ -6916,6 +6986,15 @@ class Lowerer {
   static constexpr int kHeapPlaceBase = -2000000;  // the `param` of a heap place (decision 0047 item 10): never a real key
   static bool is_heap_param(int k) { return k <= kHeapPlaceBase; }
   std::vector<low::LStmt> heap_entry_;  // `hb := v` of the loop being lowered (loop_places fills it)
+  // Record 0047 item 10 (re-audit B1, item 3): a pointer variable that holds a block (or a member of one) beside a loop's heap places without being one of them: a local
+  // declared before the loop that the loop does not use, and the formal of a parameter with an `owns_block` site.  Silicon must branch on whether a heap place is
+  // one of its cells, its liveness cell or its block before it reads the place's permissions; the places' own splits cover only the places.
+  struct HeapHolder {
+    E ref;
+    Type pointee;
+    std::vector<Cell> cells;
+  };
+  std::vector<HeapHolder> heap_holders_;  // loop_places fills it for the loop being lowered
   // The locals (Var ids) a statement or expression reads or writes by name.
   static void collect_local_uses_expr(const Expr* e, std::set<int>& out) {
     if (e == nullptr) return;

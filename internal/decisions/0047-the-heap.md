@@ -1,6 +1,8 @@
 # 0047 — The heap: vlibc's allocation functions, typed views, free and leaks (M4.5d2a)
 
-- **Status:** accepted for M4.5d2a (2026-11-04; the session's final check is CI's, and the re-audit of item 10 and of audit
+- **Status:** accepted for M4.5d2a; **amended at M4.5d2v** (2026-11-04, handoff questions 134 and 135, after the
+  re-audit of item 10 and of audit round 2's fixes, `build/m4.5d2a/audit3.md`: items 6 and 10, marked *(M4.5d2v)*; record
+  0050 reads items 2, 6, 7 and 10 per allocator). For M4.5d2a (2026-11-04; the session's final check is CI's, and the re-audit of item 10 and of audit
   round 2's fixes had not reported when the owner ended the session: handoff §1), written before code (invariant 6); revised after audit round 1 (Opus, on
   the draft: three blocking items — B1 leaks missed inside loops, a block dropped at a back edge and a `return` inside a
   loop that sees only the invariant, reproduced with Silicon, item 7; B2 view calls skipping 0046 item 8's redirection
@@ -236,6 +238,9 @@ Three facts shape this record (the planning surveys; P72 confirms them):
    may still be in use elsewhere"); `len(b) == 1` and the member lengths (`internal`); `perm(c) == write` for every leaf
    value and flag cell ("… without owning all of it"). Then the call consumes the block; any later use of `p` is
    `lifetime` (0028 item 3a) and any access `permission`.
+   *(M4.5d2v: the `WF(p)` row is `internal` at calls and returns again; item 10 had made it `permission` at calls, and
+   item 10's amendment keeps the pointers a loop assigns well-formed instead. Record 0050 splits the token row in a
+   program that uses vlibc's allocator: the permission, then the value naming the allocator.)*
    - **The argument's use check** (0028 item 3a: every pointer value passed as an argument is checked live first) is
      not written for a (D) call's argument when the argument is the pointer itself (a variable, a member read, a
      `T*`-typed expression without effects): the rows above check more (the token, then the whole liveness cell), so
@@ -328,6 +333,23 @@ Three facts shape this record (the planning surveys; P72 confirms them):
     swapped inside a loop (`negative/heap_loop_swap_false_alarm.c`): the places are the blocks the variables held at
     entry, and after the loop nothing says which variable holds which block, until written `owns_block` atoms in
     invariants (M4.5d2b).
+    *(M4.5d2v, 2026-11-04, after the re-audit (question 134). **B1:** the guards above say what holds; Silicon must also be
+    made to branch on it, or a correct program exits 3 (`int *x = &s->b;` written in a loop, then `free(s)`): after each
+    heap snapshot (`kl`, `kt`, `kv`, `kd`) an empty `if (k > none) { }`, and between two token places a split on
+    `block_of(hb_i) == block_of(hb_j)`; and against each pointer variable declared before the loop that the loop does
+    not use (parameter copies included) and each formal with a block site, splits on `block_of`, on `lvloc` and on the
+    receiver (`hb == x`; for a structure holder, each of its member cells `hb == loc(member(s, i), 0)`): the catch-alls
+    alone leave a cursor parameter beside two holders, or beside a member alias of a held structure, at exit 3 (S37 (c)'s
+    `*_catchall_only_fail` fixtures). **S1:** the copy of a pointer parameter that has an `owns`, `reads` or `live`
+    atom in the `requires` and is never assigned is not a heap place: under the atom's guard it equals the formal, whose
+    places frame it (a parameter whose only atom is a block site keeps its copy's heap place, which carries its token), and as a place guarded off by
+    `v != p` it only multiplied the splits of every function in a file that allocates (a timeout). **S3:** the block
+    row's `WF` check at a call is `internal` again, as item 6 says: every pointer local a loop assigns and that is declared
+    before it gets an automatic `internal` invariant `flag ==> WF(v)` (`WF(v)` when it has no flag), so a reassigned
+    pointer stays well-formed and an encoder precision loss is no longer a user message; `heap_loop_swap_false_alarm.c`
+    loses its two `permission` lines (question 135, pre-approved). **S2:** the back-edge exemption is exact for the token
+    places; a pointer carried by the loop beside one allocated in each iteration and dropped is a `leak`
+    (`negative/heap_loop_carry_and_leak.c`). Facts: S37 (c), (d).)*
 11. **Still rejected** (fail closed; one pin each, the message naming the session): an allocation size other than
     `sizeof(T)` (M4.5e2); an (A) call not converted directly to `T*` (`void *m = malloc(4)`, a discarded or tested
     result, `free(malloc(4))`; M4.7, M8); `void*` objects, parameters and results in user code and every other `void*`

@@ -1,10 +1,10 @@
 // expect: error lifetime @ L33
 // expect: error lifetime @ L34
 // expect: error invalid-free @ L38
-// expect: error permission @ L38
+// (M4.5d2v, question 135: the WF row at L38 is internal again, kept true by the automatic loop invariant)
 // expect: error invalid-free @ L39
 // expect: error invalid-free @ L39
-// expect: error permission @ L39
+// (M4.5d2v, question 135: likewise at L39)
 // expect: error leak @ L41
 // mode: c23, c++20
 // twin: tests/memory/heap_loop_two_blocks.c
