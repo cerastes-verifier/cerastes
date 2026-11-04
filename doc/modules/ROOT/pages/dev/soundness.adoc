@@ -1,0 +1,102 @@
+= Soundness
+:gh: https://github.com/cerastes-verifier/cerastes/blob/main
+:ght: https://github.com/cerastes-verifier/cerastes/tree/main
+
+A verifier's one job is that "verified" can be believed. This page lists the mechanisms that protect that, and the
+places where the verdict rests on something that is trusted rather than checked. Each mechanism has a rule in
+{gh}/CLAUDE.md[`CLAUDE.md`] or a decision record; the page summarises and points.
+
+== Reject, never approximate
+
+Invariant 3: a construct cerastes does not model is rejected with a diagnostic, never approximated. A program that
+`cerastes verify` accepts is one whose every construct the encoder understands. Concretely:
+
+* The encoder works from allow-lists. A construct that is not listed is rejected at its source line
+  (`src/backend/encode.cpp`; the diagnostics are in `src/backend/diagnostics.def`).
+* VIR's type checker fails closed: a conversion the front end left implicit, or an operand of the wrong type, is
+  rejected instead of being computed in the wrong type (`src/vir/check.cpp`).
+* The driver's command line is an allow-list too, so no EDG option such as `--diag_suppress` can reach the front end.
+* Rejections are tested with `rejected` tests, and the harness self-test requires every back-end diagnostic to be named by a test, with a short list of
+  reasoned exceptions ("Every back-end diagnostic has a test" in {gh}/tests/README.md[`tests/README.md`]).
+
+The reference lists what is rejected today: xref:verifying.adoc[Verifying a program] and
+xref:memory.adoc[Memory and ownership].
+
+== No unchecked assumptions in the emitted Viper
+
+Invariant 4: no `inhale` or `assume` appears in emitted Viper without a comment `// cerastes:inhale-ok <reason>` on its
+line. Those are the places where an encoder becomes unsound, so each one has a written reason, and
+`scripts/lint_viper.py` fails the build otherwise. The lint runs over the Viper of every verify test and every VIR
+self-test case, and goes further than `inhale`: its docstring lists the rules, among them
+
+* a bodyless Viper method must carry a `cerastes:trusted-contract` tag;
+* every `assert`, `requires`, `ensures` and `invariant` line and every call of a method needs a position-map entry, so
+  no failure can be reported without a source position;
+* termination: every method and loop needs a `decreases` clause, and the unchecked forms (`decreases *`, backward
+  `goto`, labels that carry invariants) are refused;
+* `wildcard` permission amounts, which Silicon chooses, are refused.
+
+`scripts/test_lint_viper.py` tests the lint, so a rule cannot decay unnoticed.
+
+== The memory model's axioms
+
+The one Viper domain cerastes emits is `Block`, the model of blocks of memory and pointers into them (decision
+{gh}/internal/decisions/0028-memory-model.md[0028], item 2). An axiom is an assumption Silicon cannot check, so each
+one is recorded and linted:
+
+* There are exactly four, `loc_inv`, `loc_nonnull`, `member_inv` and `member_lv`. Each has its own record, with the
+  reason it is needed and a model in which it holds
+  (decisions {gh}/internal/decisions/0033-axiom-loc-inv.md[0033],
+  {gh}/internal/decisions/0034-axiom-loc-nonnull.md[0034],
+  {gh}/internal/decisions/0035-axiom-member-inv.md[0035] and
+  {gh}/internal/decisions/0036-axiom-member-lv.md[0036]).
+* The lint accepts the domain only directly under a `cerastes:domain-ok` tag, and an axiom only with its exact text and
+  a `cerastes:axiom-ok` tag naming its record. A fifth axiom, or a changed one, fails the lint until it has a record.
+* The trusted methods that create or end objects (`alloc_<type>` for an address-taken local, `program_start` for the
+  globals, and the typed views of vlibc's `malloc`, `calloc` and `free`) are assumptions too: the lint pins the text of
+  each one's contract to the shape its decision record justifies.
+
+Adding an axiom needs its own decision record and lint tag first.
+
+== Trusted contracts
+
+Some results rest on a contract that nothing here verifies.
+
+* *The single-unit assumption.* A contract declared for a function defined in another file is trusted; callers in this
+  unit are verified against it and nothing checks the definition. See
+  xref:verifying.adoc#one-unit[the single-unit assumption].
+* *vlibc.* The contracts of `abort`, `exit`, `malloc`, `free` and the rest of what vlibc declares are trusted
+  (decisions {gh}/internal/decisions/0030-vlibc.md[0030] and
+  {gh}/internal/decisions/0046-vlibc-in-cerastes.md[0046]). The safeguards: every trusted declaration carries a
+  `cerastes:trusted-contract vlibc:` tag with a reason; the committed list
+  {gh}/tests/vlibc/trusted_contracts.txt[`tests/vlibc/trusted_contracts.txt`] holds every one, and
+  `scripts/vlibc_contracts.py` compares it with the headers on every `check.sh`, so moving the vlibc pin to a commit
+  that changes a trusted contract fails until the list changes, and changing the list is a golden change (invariant 1)
+  that gets an audit. Trust is by the declaration's path and shape, and the encoder rejects a user program that
+  redirects a trusted function to other code, for example with an alias or an assembler label.
+* *The front end's IL.* The IL facts the back end relies on are recorded with their evidence in
+  {gh}/internal/il-inventory.md[`internal/il-inventory.md`], and the walker's goldens are cross-checked against an
+  independent print of the IL (`scripts/walker_oracle.py`).
+
+== Audits
+
+Every change to `src/backend`, `src/vir` or `src/viper` gets an independent review for unsoundness before it is
+committed. `plan.md` ("During the session") makes it part of the process, and
+{gh}/.claude/agents/soundness-auditor.md[`.claude/agents/soundness-auditor.md`] holds the checklist the project's
+reviewer uses; it is a good one for a human reviewer too. It asks, for a diff:
+
+* is any `inhale`, `assume` or axiom added without a tag and a justification;
+* is any C or pass:[C++] operation encoded without the checks its semantics require (overflow, division by zero, shift
+  range, conversions, permissions);
+* is any construct silently accepted that should be rejected;
+* does every encoding rule have a must-fail test;
+* and for test infrastructure: can a test pass vacuously (an empty golden, a skipped file counted as passed, an
+  expectation never checked).
+
+The decision records name the audit rounds a change went through and what each found.
+
+== Where the arguments are
+
+`plan.md` describes a directory `internal/soundness/` for the arguments the encoder relies on. It does not exist yet.
+Today an argument lives in the decision record of the rule it justifies, and in section 3 of
+{gh}/internal/encoding.md[`internal/encoding.md`] for integer lowering.

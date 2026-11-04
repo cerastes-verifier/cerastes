@@ -1,0 +1,158 @@
+= Testing
+:gh: https://github.com/cerastes-verifier/cerastes/blob/main
+:ght: https://github.com/cerastes-verifier/cerastes/tree/main
+
+How tests are written, what the harness checks and what `scripts/check.sh` and CI run. The grammar of a test file and
+every rule of the harness are in {gh}/tests/README.md[`tests/README.md`]; this page is the map.
+
+== A test file
+
+A test is a source file whose first lines are `//` comments. The `expect:` and `mode:` lines among them are the
+expectations; the rest explain the test. An `expect:`, `mode:` or `twin:` line after the first line of code is an
+error, so an expectation cannot be silently ignored. Here is the header of a test that must verify
+(`tests/scalar/abs_value.c`):
+
+[source,text]
+----
+// expect: verified
+// expect: native-ok
+// mode: c23, c++20
+// Pins: 0010 item 3 and 0012 item 5: the conditional operator checks its branch only when taken
+#include <cerastes.h>
+----
+
+and of its must-fail twin (`tests/scalar/negative/abs_value_over.c`), which names it and the one error it must
+produce:
+
+[source,text]
+----
+// expect: error overflow @ L11
+// mode: c23, c++20
+// twin: tests/scalar/abs_value.c
+// Pins: 0010 item 3: -a is checked on the branch where a < 0
+// Without the requires, a = INT_MIN takes the negating branch.
+#include <cerastes.h>
+----
+
+`@ L11` is a line of the test file itself. The test passes only if the reported errors are exactly the expected ones:
+the harness says whether a miss was the wrong line, the wrong category, a missing error or an unexpected one.
+
+== Outcome kinds
+
+[cols="2,5"]
+|===
+|`expect:` |What it checks
+
+|`verified`
+|`cerastes verify` succeeds with no errors.
+
+|`error <category> @ L<n>`
+|Verification fails with exactly these errors, each with that category at that line.
+
+|`rejected <diag> @ L<n>`
+|`cerastes verify` does not accept the program and prints exactly these diagnostics (an EDG tag, or `cerastes-` and the
+tag of a back-end diagnostic).
+
+|`golden`
+|The IL walker's listing (`--cerastes_walk`) equals the committed golden file, byte for byte.
+
+|`native-ok`
+|Also: clang, and GCC when installed, accept the file with `-Wall -Wextra -Werror` and without `+__CERASTES__+`, so
+the annotations are inert in an ordinary build.
+
+|`frontend-ok`, `frontend-error`, `frontend-warning`
+|What the EDG front end alone says about the file.
+|===
+
+`.c` tests run in both languages where the directory says so (`mode: c23, pass:[c++20]`). Files with the suffix `.vpr` are
+hand-written Viper programs that go straight to Silicon (`tests/viper-smoke/`).
+{gh}/tests/README.md[`tests/README.md`] has the whole grammar, including `verify-options:` and the rules for tests whose
+errors are in a header.
+
+== Must-fail twins
+
+Every encoding rule has at least one test that must verify and one that must fail for the right reason at the right
+line (invariant 2). In `tests/annotations/`, `tests/scalar/` and `tests/memory/` the harness enforces it: a test under
+that area's `negative/` directory names its positive test with `twin:`, and a positive test that no negative test names
+is a header error unless it says why with `twin-exempt:`. See "Twins" in `tests/README.md`.
+
+== Golden files are expectations
+
+A golden file is the committed output of the IL walker for a `golden` test. It is an expectation, so invariant 1
+applies: never edit an `expect:` line, and never regenerate a golden file to make a test pass. When a change
+intentionally alters a golden, regenerate it only for that change, read the diff line by line and state the reason in
+the commit message:
+
+[source,sh]
+----
+python3 scripts/run_tests.py --update-golden path/to/test.cpp
+----
+
+`check.sh` never uses `--update-golden`, and the harness self-test fails if a script does.
+
+== Running tests
+
+[source,sh]
+----
+python3 scripts/run_tests.py                    # tests/ and the documentation examples
+python3 scripts/run_tests.py tests/scalar       # a directory
+python3 scripts/run_tests.py -v path/to/test.c  # full diffs and tool output for failures
+python3 scripts/test_run_tests.py               # the harness's own self-test
+----
+
+With no paths the harness runs `tests/` and `doc/modules/ROOT/examples/`. The exit status is 0 when every selected
+test passes, 1 when one fails and 2 on a usage or environment error. `-j` sets the parallelism (default: `CERASTES_JOBS`,
+else half the CPUs). Solver timeouts, crashes and messages the harness cannot classify always fail a test.
+
+== Mutation testing
+
+`python3 scripts/mutate.py [paths ...]` changes each `verified` test one place at a time (a relational operator, a
+literal, a dropped conjunct, a deleted statement and so on) and verifies the mutant. A mutant that still verifies means
+the test would not notice the change: strengthen the test, or list the mutant with a reason in
+`tests/mutants-equivalent.txt`. A full run over `tests/scalar` takes a long time, so it is an acceptance step rather than
+part of `check.sh`, which only runs `scripts/mutate.py --validate`. The classes of mutation and the rules for survivors
+are in `tests/README.md`.
+
+== The Viper lint
+
+`python3 scripts/lint_viper.py` reads the Viper that the verify tests left in `build/vpr` and enforces the rules about
+what the emitted program may contain: every `inhale` and `assume` carries a `cerastes:inhale-ok` reason, the only
+domain and axioms are the tagged ones, every checked line has a position-map entry and so on
+(xref:dev/soundness.adoc[Soundness]). The docstring at the top of the script lists every rule, and
+`scripts/test_lint_viper.py` tests the lint.
+
+[#check]
+== The full check
+
+`scripts/check.sh` must be green before a change is done. It requires a prior `scripts/bootstrap.sh`. In order, it:
+
+. checks the EDG and vlibc trees (`scripts/edg_tree.py`, `scripts/vlibc_tree.py`);
+. rebuilds with `bootstrap.sh --build-only`;
+. lints: the shell scripts (`bash -n`, ShellCheck), the Python scripts, the test headers and the documentation examples,
+  the list of vlibc's trusted contracts and the mutants;
+. checks the EDG configuration;
+. runs the self-tests of the harness, the lint, the mutation tool and the contract checker;
+. runs every test, then lints the Viper they produced;
+. runs the VIR self-test through Silicon and the lint;
+. runs the walker oracle;
+. builds the documentation and checks the rendered pages.
+
+It ends with `check.sh: all green`. The script is the authority; read it for the current list.
+
+[#ci]
+== Continuous integration
+
+{gh}/.github/workflows/ci.yml[`.github/workflows/ci.yml`] runs `scripts/ci.sh`, which asserts that the runner has the
+toolchain the expectations were made on and bootstraps, and then `scripts/check.sh`. There are two jobs: macOS on
+GitHub's `xcode-27` image, and `check-linux` on `ubuntu-26.04` x86-64, set up by `scripts/ci-linux.sh` (decision
+{gh}/internal/decisions/0031-linux-ci.md[0031]); every test must give the same outcome on both.
+
+Two tiers (decision {gh}/internal/decisions/0016-ci.md[0016], item 14):
+
+* Pull requests and pushes to `main` run the PR tier. Tests that reach Silicon run only if they changed relative to
+  the base, are documentation examples, or fall in a fixed one-in-eight sample; everything else runs. You can rehearse it
+  with `CERASTES_CHECK_BASE=main scripts/check.sh`, which ends with `check.sh: green in the PR tier (not the full check)`.
+* The nightly run (07:00 UTC) and manual dispatch run the full check.
+
+The documentation has its own workflow, {gh}/.github/workflows/docs.yml[`.github/workflows/docs.yml`], which builds
+and lints the pages on pull requests and deploys them from `main` (xref:dev/documentation.adoc[Writing documentation]).

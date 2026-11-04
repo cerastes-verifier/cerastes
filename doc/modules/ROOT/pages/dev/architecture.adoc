@@ -1,0 +1,147 @@
+= Architecture
+:gh: https://github.com/cerastes-verifier/cerastes/blob/main
+:ght: https://github.com/cerastes-verifier/cerastes/tree/main
+
+This page follows a program through `cerastes verify`, one stage at a time, and names the source directory of each
+stage. The specification of the encoding itself is {gh}/internal/encoding.md[`internal/encoding.md`], and the first
+section of that file has the same pipeline drawn as a diagram.
+
+[source,text]
+----
+C/C++ source, cerastes attributes, <cerastes.h>
+   EDG front end (cerastes configuration), registered attributes
+   back end: IL walk and encoder        src/backend
+   VIR: check, lower                    src/vir
+   Viper text and position map          src/viper
+   Silicon, Z3                          src/driver runs them
+   errors mapped back to C/C++ lines    src/driver
+----
+
+== The EDG front end in the cerastes configuration
+
+cerastes reads the program through EDG's front end, after it has parsed and type-checked it. EDG is not built as a
+library by its own CMake, so cerastes compiles EDG's front-end sources itself, in
+{gh}/cmake/EdgFrontEnd.cmake[`cmake/EdgFrontEnd.cmake`], with the configuration macros the back end needs. The
+decision is {gh}/internal/decisions/0002-backend-integration.md[0002].
+
+* The macros live in one CMake target, `edg_config`. Every target that includes an EDG header links it, because the
+  layout of the IL structures depends on those macros. Among them: the IL is not lowered, prototype instantiations
+  of templates and all template information stay in the IL, unrecognized attributes are recorded and nothing unused
+  is pruned.
+* EDG is built twice. The stock build, in `build/edg`, gives `cpfe` (`scripts/cpfe.sh`) and the generated headers
+  (error tables) that cerastes reuses. The cerastes configuration is compiled by cerastes's own CMake, producing
+  `build/cerastes-fe` and `build/cerastes`. The stock build is how a front-end question is checked against unmodified
+  EDG behaviour. `cmake/EdgFrontEnd.cmake` refuses generated headers that come from a different EDG tree.
+* `cerastes-fe` runs the front end and the back end without verifying; `cerastes verify` is the verifier. The
+  driver refuses options it cannot support, such as C before C23 and GNU emulation, before EDG runs (the list is at the
+  top of {gh}/src/driver/main.cpp[`src/driver/main.cpp`]).
+
+EDG's own source is not in this repository: it is the submodule `third_party/edg`, a fork, described in
+xref:dev/edg.adoc[The EDG fork].
+
+== Annotations: registration through the fork
+
+The contracts are attributes in the closed namespace `cerastes`, which the back end registers with EDG before it
+runs ({gh}/src/backend/register_attributes.cpp[`src/backend/register_attributes.cpp`]). EDG parses and type-checks
+their arguments as expressions, so a contract is typed C or pass:[C++] code. That needs a general registration
+mechanism in EDG, which is why the cerastes series exists on the fork (decisions
+{gh}/internal/decisions/0006-annotation-language-v0.md[0006] to
+{gh}/internal/decisions/0009-edg-fork-pin.md[0009]). The checks EDG does not make, such as where an attribute may
+appear, are in {gh}/src/backend/annotation_checks.cpp[`src/backend/annotation_checks.cpp`].
+
+Programs write the annotations through the macros of {gh}/include/cerastes.h[`include/cerastes.h`], which expand to the
+attributes under the cerastes front end and to nothing under any other compiler, so the same file builds
+xref:ordinary-compilers.adoc[with ordinary compilers]. The user-facing meaning is in
+xref:annotations.adoc[Annotations].
+
+== The back end: from the IL to VIR
+
+EDG calls the global function `back_end()` after the front end finishes without errors
+({gh}/src/backend/back_end.cpp[`src/backend/back_end.cpp`]). Nothing is written to a file: the back end reads the IL in
+memory. It does one of two things:
+
+* With `--cerastes_walk`, it prints a deterministic listing of the IL (`src/backend/walker.cpp`). These listings are
+  the golden tests of `tests/il/`, and `scripts/walker_oracle.py` checks each against an independent print of the
+  same IL (`--il_display`).
+* In verify mode it checks the annotations and calls `verify_encode()` ({gh}/src/backend/encode.cpp[`src/backend/encode.cpp`]),
+  which builds a VIR program.
+
+`encode.cpp` is where the meaning of the C and pass:[C++] program is decided: which constructs are accepted, and the rejection
+of every other with a diagnostic (the diagnostics are listed in `src/backend/diagnostics.def`). The other files of
+`src/backend` are helpers around it: `il_query` and `il_names` read the IL, `expr_tree` reads contract expressions,
+`render` prints entities, `verify_config` holds the state of a verify run and the classification of files into
+verified and system files by path (decision {gh}/internal/decisions/0011-verify-driver.md[0011] item 4).
+
+To look at the IL yourself, two commands show it, both after `scripts/bootstrap.sh`:
+
+[source,sh]
+----
+scripts/cerastes-fe.sh --c++20 --cerastes_walk path/to/file.cpp
+scripts/cerastes-fe.sh --c++20 --il_display path/to/file.cpp
+----
+
+The first is the walker's listing, the second EDG's own dump. What each IL fact means to the back end is in
+{gh}/internal/il-inventory.md[`internal/il-inventory.md`].
+
+== VIR
+
+VIR is the small verification IR that the encoder builds ({gh}/src/vir/vir.h[`src/vir/vir.h`]). It is independent of
+EDG: `src/vir` and `src/viper` include no EDG header and do not link `edg_config`. Its types are `bool`, the
+integer types (a value is a mathematical integer in the range of its C type), pointers and structures, and every node
+carries the source position it came from, so an obligation can be reported at the right line.
+
+* `check.cpp` type-checks a program and fails closed: an operand type that is not exactly what an operation requires
+  is rejected rather than silently converted.
+* `lower.cpp` gives the program its integer semantics (decision {gh}/internal/decisions/0010-integer-semantics.md[0010])
+  and produces the lowered program (`lowered.h`): the overflow, division and conversion checks become explicit
+  obligations here.
+
+`encode.cpp` and `lower.cpp` hold all the C and pass:[C++] meaning; the emitter decides nothing.
+
+== Viper text and the position map
+
+`src/viper` prints the lowered program as Viper text (`emit.cpp`) with the small prelude of functions it needs
+(`prelude.cpp`), and writes the position map (`posmap.cpp`). The map says, for each line of Viper that can fail, which
+source position and which error category it stands for; its format is section 5 of the encoding specification. Each
+check is on its own line so that it has an entry.
+
+To keep the Viper of a run:
+
+[source,sh]
+----
+build/cerastes verify path/to/file.c --keep-vpr
+----
+
+This writes `<stem>.vpr` and `<stem>.vpr.map` in the current directory, where `<stem>` is the source file's name without
+its directory and suffix (or `<path>` and `<path>.map` with `--keep-vpr=<path>`).
+`build/cerastes-vir-selftest <dir>` builds VIR programs by hand and writes the Viper for them, which
+`scripts/check.sh` verifies; it tests lowering and the emitter before any front end is involved.
+
+== The driver
+
+{gh}/src/driver/verify_main.cpp[`src/driver/verify_main.cpp`] implements `cerastes verify <file> [options]` (`cerastes
+--help` lists them: include and macro options, `--std=pass:[c++20]|c23`, `--keep-vpr`, `--timeout`, `--strict-init`). It runs
+EDG in process, lets the back end encode, then runs Silicon as a child process (`silicon.cpp`) and reports.
+
+* The tools are fixed when the build is configured: the paths of the JDK 17, `silicon.jar` and Z3 are compiled in from
+  what `scripts/bootstrap.sh` found ({gh}/src/driver/tool_paths.h.in[`tool_paths.h.in`]), so a stray environment
+  variable cannot change a result.
+* `silicon_output.cpp` reads Silicon's output; `report.cpp` matches each Silicon error to its position-map entry and
+  prints it as a line of the form `<file>:<line>: error: <category>: <message>`. Errors are always reported at source
+  lines, never at lines of the Viper (invariant 7).
+* Exit status: 0 verified, 1 verification errors, 2 the program is not accepted (a front-end error or a rejection),
+  3 a tool failure. Decision {gh}/internal/decisions/0011-verify-driver.md[0011] has the rest of the contract.
+
+`cerastes --selftest` runs the driver's own unit tests.
+
+== vlibc
+
+A call is checked against the callee's contract, and a system header's functions have none. `third_party/vlibc`
+(`cerastes-verifier/vlibc`, a submodule) supplies them: contract headers that cerastes puts first in the search path in
+verify mode, so a plain `<stdlib.h>` reads vlibc's declarations of `abort`, `exit`, `malloc`, `free` and the like. A
+declaration there is trusted if it carries a `cerastes:trusted-contract` tag. Decisions
+{gh}/internal/decisions/0030-vlibc.md[0030],
+{gh}/internal/decisions/0046-vlibc-in-cerastes.md[0046] and
+{gh}/internal/decisions/0048-vlibc-and-vlibm-names.md[0048] say how it is pinned and trusted, and
+xref:dev/soundness.adoc[Soundness] summarises what that means for a verdict. The user-facing side is
+xref:verifying.adoc#vlibc[vlibc in the verifying page].

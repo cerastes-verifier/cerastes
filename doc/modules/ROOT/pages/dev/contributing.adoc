@@ -1,0 +1,101 @@
+= Adding a feature
+:gh: https://github.com/cerastes-verifier/cerastes/blob/main
+:ght: https://github.com/cerastes-verifier/cerastes/tree/main
+
+The life of an encoding rule, from the question "what should this construct mean?" to a merged change. The steps are the
+same whether the change is a new accepted construct, a new kind of error or a changed rule. The rules behind them are the
+invariants in {gh}/CLAUDE.md[`CLAUDE.md`]; this page puts them in order.
+
+== 1. Read what exists
+
+Start from the roadmap entry in {gh}/plan.md[`plan.md`], the decision records that the area already has
+({ght}/internal/decisions[`internal/decisions/`]), the encoding specification
+({gh}/internal/encoding.md[`internal/encoding.md`]) and the tests of the neighbouring constructs. Find the most
+similar construct that is already supported and read its record, its encoder code and its tests: a new rule usually
+extends one of those.
+
+== 2. Write the decision record first
+
+If the semantics are not obvious, write a decision record before any code (invariant 6). "Not obvious" covers any choice
+a reader could have made differently: what an operation checks, what a type means in a contract, what is rejected and
+what is accepted, and any new axiom or trusted contract.
+
+A record is `internal/decisions/NNNN-short-name.md`, numbered with the next free number. Read two recent ones, such as
+{gh}/internal/decisions/0047-the-heap.md[0047] and {gh}/internal/decisions/0048-vlibc-and-vlibm-names.md[0048], for the
+shape:
+
+* a title line with the number;
+* `Status` (accepted, by whom and when, and what changed it since), `Milestone`, and where relevant what the record
+  implements or amends;
+* `Context`: what is being decided, why, and what was measured;
+* `Decision`: numbered items, each one a rule, with its reason. Later text refers to "item 7", so keep the numbers;
+* `Consequences`: what changes elsewhere (tests that move, pages that change, work left for later).
+
+A record states facts it checked. Where a claim depends on how EDG or Silicon behaves, say which probe or run showed it.
+
+== 3. Write the tests first
+
+Every rule lands with at least one test that must verify and one that must fail for the right reason at the right line
+(invariant 2). Write them before the encoder, with the expectation you believe the record implies:
+
+* the positive test under `tests/<area>/`, with `// expect: verified`, and `// expect: native-ok` when it should also
+  compile with ordinary compilers;
+* the twin under that area's `negative/` directory with `// expect: error <category> @ L<n>` (or `rejected`), and a
+  `// twin:` line naming the positive;
+* a `rejected` test for every new construct you refuse.
+
+If the new check is a new error category, the harness, the driver, the error-messages page and the tests all change
+together, and the harness self-test pins the set. See xref:dev/testing.adoc[Testing].
+
+Then implement. When a test fails, fix the code. Never edit an `expect:` line to make a test pass (invariant 1): if the
+expectation looks wrong, stop and discuss it, because a changed expectation is a changed meaning.
+
+== 4. The encoder change
+
+The code belongs where {gh}/internal/encoding.md[`internal/encoding.md`] and
+xref:dev/architecture.adoc[Architecture] put it: what the program says is read in `src/backend/encode.cpp`, what an
+operation means is decided in `src/vir/lower.cpp`, and the emitter prints and decides nothing. Three habits keep a
+change sound (xref:dev/soundness.adoc[Soundness]):
+
+* reject what you do not model, with a diagnostic at the source line, rather than approximating (invariant 3);
+* introduce no `inhale` or `assume` without a `cerastes:inhale-ok` reason (invariant 4);
+* report errors at C or pass:[C++] source lines (invariant 7); a new check needs its position-map entry.
+
+If you need to see the Viper of a program, `build/cerastes verify <file> --keep-vpr`; to see the IL,
+`scripts/cerastes-fe.sh --pass:[c++20] --cerastes_walk <file>`.
+
+== 5. Audit
+
+Before a change that touches `src/backend`, `src/vir` or `src/viper` is committed, have it reviewed for unsoundness by
+someone who did not write it, using the checklist in
+{gh}/.claude/agents/soundness-auditor.md[`.claude/agents/soundness-auditor.md`]. A review finding that is blocking is
+fixed and re-reviewed. Record in the decision record which rounds the change went through and what they found.
+
+== 6. Document it
+
+User-visible behaviour lands with its documentation in the same change (invariants 8 and 9): the reference page for the
+feature, the error-messages page for a new category, and the annotation or command-line text for a new option. Every
+code example is a test, so it passes the same harness (xref:dev/documentation.adoc[Writing documentation]).
+
+When the change completes a concept that the tutorial teaches, or one it does not yet teach, its chapter lands in the
+same change (decision {gh}/internal/decisions/0049-tutorial-and-developer-guide.md[0049]; the chapters are in
+`pages/tutorial/`). Every change also keeps the existing chapters true: a message, a category or an accepted construct
+a chapter shows is updated with the change.
+
+== 7. Check and commit
+
+[source,sh]
+----
+scripts/check.sh
+----
+
+must end with `check.sh: all green` (the full check). For a quicker loop, run the tests you touched with
+`python3 scripts/run_tests.py <file|dir>`; after a green full check, targeted runs are enough for later test edits.
+
+Commit conventions that matter to a contributor:
+
+* A commit has a message that says what changed and why, and names the milestone or record it belongs to.
+* A golden file or a trusted-contract list that changes is a change of an expectation: give the reason in the commit
+  message and review the diff line by line.
+* EDG source is never edited in `third_party/edg`; changes to EDG go through the fork (xref:dev/edg.adoc[The EDG fork]).
+* Pull requests run CI's PR tier (xref:dev/testing.adoc#ci[CI]); the nightly full check covers `main`.

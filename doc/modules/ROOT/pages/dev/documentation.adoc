@@ -1,0 +1,120 @@
+= Writing documentation
+:gh: https://github.com/cerastes-verifier/cerastes/blob/main
+:ght: https://github.com/cerastes-verifier/cerastes/tree/main
+
+How these pages are built, how a code example becomes a test, and the markup traps that break the build or the lints.
+The decision is {gh}/internal/decisions/0004-docs-site.md[0004], amended by
+{gh}/internal/decisions/0049-tutorial-and-developer-guide.md[0049]; the lint's full rules are in the docstring of
+`scripts/check_doc_examples.py` and in {gh}/tests/README.md[`tests/README.md`] ("Documentation examples").
+
+== Layout
+
+The documentation is an Antora component in `doc/`: `doc/antora.yml` names it, `doc/local-playbook.yml` builds it, and
+there is one module, `ROOT`, under `doc/modules/ROOT/`.
+
+[cols="2,5"]
+|===
+|Path |What it holds
+
+|`nav.adoc`
+|The navigation, in three lists: Tutorial, Reference and Developer guide.
+
+|`pages/*.adoc`
+|The reference pages.
+
+|`pages/tutorial/`
+|The tutorial chapters.
+
+|`pages/dev/`
+|This guide.
+
+|`examples/`
+|The code examples, which are test files (below), in a subdirectory per section or page.
+|===
+
+The site's start page is `overview.adoc`. Everything else about the site (title, UI, search) is in the playbook and in
+{ght}/doc/ui[`doc/ui/`]; the site uses the default Antora UI with the project's styles, vendored and checked against a
+checksum by the build script. A second Antora module is refused by the lint: new pages go under `ROOT`.
+
+== Building
+
+[source,sh]
+----
+scripts/build_docs.sh
+----
+
+writes the site to `build/doc/`; open `build/doc/index.html`. It needs the Node tools that `scripts/bootstrap.sh`
+installs, and it fails on any Antora warning: a broken cross-reference, include or attribute. Fix the warning; do not
+silence it. `scripts/check.sh` runs the build, and the docs workflow
+({gh}/.github/workflows/docs.yml[`.github/workflows/docs.yml`]) builds it on pull requests and deploys it from `main`
+to https://cerastes.dev/cerastes/doc/.
+
+Link another page with `+xref:name.adoc[Text]+`; Antora resolves the page name relative to `pages/`, so a page in `dev/`
+links a sibling as `+xref:dev/testing.adoc[Testing]+`. Link a file of the repository on GitHub with an absolute URL.
+
+== Examples are tests
+
+Invariant 8: every code example is a test. A code example is a source block in C, pass:[C++] or Viper. It does not hold
+the code itself. It holds one line, an include of a tagged region of a test file under `doc/modules/ROOT/examples/`, in
+the form `include::example$installation/hello.cpp[tag=hello]`, inside a `[source,cpp]` block. The example file has an
+`// expect:` header like any test, then `// tag::hello[]` and `// end::hello[]` comment lines around the part the
+page shows, so the header never appears on the page. `scripts/run_tests.py` runs the examples by default, so a page
+cannot show code that does not verify as claimed. `.c` examples of the tutorial and of this guide's directory run in both
+language modes and compile with ordinary compilers, like the scalar tests (see xref:dev/testing.adoc[Testing]).
+
+Two checks guard this, and they complement each other because a line reader cannot know every AsciiDoc form:
+
+[cols="2,5"]
+|===
+|Command |What it catches
+
+|`python3 scripts/check_doc_examples.py`
+|The source lint, over `nav.adoc` and the pages. Code in a cerastes language that is not a tagged include; code or text
+with no declared language; an include with no tag, a missing tag or a tag that sits in dead code; an example that no page
+uses; source files elsewhere under `doc/`; literal blocks, passthrough blocks and `subs=` overrides; and the inline
+markup traps below.
+
+|`python3 scripts/check_doc_examples.py --html build/doc`
+|The backstop, over the built site (run `scripts/build_docs.sh` first). Every preformatted block must be a cerastes
+language equal to a tagged region of a test, or an allowed non-code block; anything else is an error. It also finds
+rendered text with broken inline markup.
+|===
+
+A block that is not code in a cerastes language is allowed, and is not tested:
+
+* `[source,sh]`, `[source,console]` and `[source,text]` blocks hold commands, program output and quotations, such as a
+  test header or a directory listing. Check every command and option you write against the script's usage text, since
+  review is the only check.
+* A listing of the IL walker's output is allowed only as the include of a test's `.golden` file.
+
+== Markup pitfalls
+
+These come from Asciidoctor's rules and each has cost a build.
+
+* *The name of the language.* Write it through the `pass:[...]` macro: the macro around the letters of the name, and
+  likewise around a version and around option spellings that contain it. Bare plus-plus pairs, in prose or in backticks,
+  open a passthrough that silently swallows the text up to the next pair. The source of any page of this guide shows the
+  form.
+* *Doubled marks.* A doubled `__`, `**` or `##` in one paragraph formats everything between the pair. Put such a code
+  span in a literal span: `+...+`.
+* *Attribute names.* `[[x]]` in prose is an anchor, so a `cerastes::owning` or `noreturn` attribute is named without its
+  brackets, and the example shows the brackets.
+* *Code spans.* A name that starts with two underscores in backticks needs `+...+`. A backtick next to a double quote can
+  turn into a curved quote and break the span. A possessive after a code span can break the next span.
+* *Raw HTML.* `pass:[...]` holding `<` or `>` is refused; write `+...+`.
+* *No counts.* Do not write how many categories, decision records or constructs there are; the number rots, and an
+  earlier page was wrong in exactly that way. Say what the thing is and link the list.
+* *Describe what exists.* Pages do not describe future features (decision 0004, item 8). A page may say what is not
+  supported yet and link the reference list; the roadmap is {gh}/plan.md[`plan.md`].
+
+The source lint reports most of these with the line number, and `scripts/build_docs.sh` and the `--html` check catch
+the rest.
+
+== A new page, in order
+
+. Put the page in `pages/` (or a section's subdirectory) and give it a `= Title` and a first paragraph that says what
+  the page is for.
+. Add it to `nav.adoc` under the right list.
+. For each code example, write a test file in `examples/`, run it with
+  `python3 scripts/run_tests.py doc/modules/ROOT/examples/<file>`, and include its tagged region from the page.
+. Run `scripts/build_docs.sh`, then `python3 scripts/check_doc_examples.py --html build/doc`.

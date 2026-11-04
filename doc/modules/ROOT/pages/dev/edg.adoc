@@ -1,0 +1,69 @@
+= The EDG fork
+:gh: https://github.com/cerastes-verifier/cerastes/blob/main
+:ght: https://github.com/cerastes-verifier/cerastes/tree/main
+
+cerastes reads programs through the EDG C and pass:[C++] front end, and runs on a fork of it. This page says what the
+fork is, how it is pinned, how an EDG change is made and how bugs in upstream EDG are written up. The decisions are
+{gh}/internal/decisions/0003-edg-fork-branch.md[0003],
+{gh}/internal/decisions/0005-edg-source-override.md[0005] and
+{gh}/internal/decisions/0009-edg-fork-pin.md[0009]; where 0009 supersedes part of 0003 or 0005, 0009 is current.
+
+== What is pinned
+
+`third_party/edg` is a git submodule whose URL is the maintainer's fork, https://github.com/mborland/compiler.
+It is pinned to a commit of the fork's branch `cerastes`. That branch is upstream `edgcpp/compiler` `main` plus the
+cerastes series: a small set of commits that make EDG usable as the front end of a verifier. Invariant 5 in
+{gh}/CLAUDE.md[`CLAUDE.md`] states the rule.
+
+The series is built from general mechanisms rather than anything tool-specific. Its core registers an attribute
+namespace and its attributes from the embedding program, with typed arguments and with the attribute attached to the
+function rather than to a declaration's type (decision
+{gh}/internal/decisions/0007-edg-attribute-registration.md[0007]). The record's point is that EDG needs no cerastes-specific code: cerastes registers its own attributes through that
+interface.
+
+== How cerastes uses EDG
+
+EDG has no library build of its own, so cerastes compiles the front-end sources in its own CMake project, under one
+configuration (the `edg_config` target), and links its back end in. The reasons and the integration are in decision
+{gh}/internal/decisions/0002-backend-integration.md[0002]; xref:dev/architecture.adoc[Architecture] has the overview.
+What the IL contains and which facts the back end relies on is
+{gh}/internal/il-inventory.md[`internal/il-inventory.md`], whose introduction lists the configuration macros and the
+command that produces its evidence:
+
+[source,sh]
+----
+scripts/cerastes-fe.sh --c++20 --il_display <file>
+----
+
+(only `build/cerastes-fe` shows the IL: the stock `cpfe` lowers it.)
+
+== Making an EDG change
+
+* *Never edit `third_party/edg`.* `scripts/check.sh` fails if it is not clean and at its recorded commit.
+* *Work on the fork's `cerastes` branch*, in a clone of https://github.com/mborland/compiler. Each change is a small
+  commit with a test that fails on its parent and passes on it, in EDG's own style (EDG's `CONTRIBUTING.md`), and stays
+  upstreamable: prefer a general mechanism to something specific to cerastes.
+* *Try it before it is committed* by building cerastes against that checkout
+  (xref:dev/building.adoc[Building], `CERASTES_EDG_SRC`). `check.sh` refuses that on `main`, so the final check always
+  runs against the pin.
+* *Move the pin* to the new commit of the branch. `scripts/edg_tree.py check`, run by `check.sh`, requires the pinned
+  commit to be contained in the fork's `cerastes` branch (the pushed `origin/cerastes`, or a local remote, which it
+  reports as not yet pushed). A change in what EDG puts in the IL then shows up as a reviewed golden diff.
+
+The fork's `cerastes` branch is brought up to date with upstream `main` by fast-forward or by merge, never by rebase or
+force-push: older cerastes commits pin commits of the fork, and rewriting them would break clones of those commits.
+
+== Bugs in upstream EDG
+
+A real bug in upstream EDG, reproduced on an unmodified upstream build, gets a file
+`internal/edg_bugs/NNNN-short-name.md`, in the format of
+https://github.com/edgcpp/compiler/issues/252[edgcpp/compiler#252]: a title, labels, and sections Summary,
+Reproducer (with Actual and Expected), Confirmation, Suggested fix and Impact on cerastes, under a header that says where it
+was found and its status. {ght}/internal/edg_bugs[`internal/edg_bugs/`] holds them and its README gives the format.
+A bug in the cerastes series itself is fixed in the series and gets no file.
+
+Once a bug is fixed, the fix is one discrete commit with its test on a branch of the fork named with the bug's number,
+based on upstream `main`, ready for upstream.
+
+Reports to upstream are filed by the maintainer, not by contributors: write the bug file and leave the filing to the
+maintainer.

@@ -1,0 +1,116 @@
+= Building
+:gh: https://github.com/cerastes-verifier/cerastes/blob/main
+:ght: https://github.com/cerastes-verifier/cerastes/tree/main
+
+How the toolchain is built, what is pinned and where everything ends up. The steps to follow on a fresh machine are on
+the xref:installation.adoc[Installation] page, which this page does not repeat.
+
+== One script
+
+`scripts/bootstrap.sh` builds everything and is idempotent: running it again changes nothing that is current. It
+supports macOS on Apple silicon and x86-64 Linux (decision
+{gh}/internal/decisions/0031-linux-ci.md[0031]); on any other system it stops. The comment at the top of
+{gh}/scripts/bootstrap.sh[`scripts/bootstrap.sh`] lists what it does, in order: prerequisites (installed with Homebrew
+on macOS, only checked on Linux), the submodules, EDG's stock build, the cerastes configuration of EDG with the back
+end (`build/cerastes-fe`) and the driver (`build/cerastes`), Silicon, Z3, the documentation tools and `build/env.sh`.
+
+Two options:
+
+* `--build-only` skips Homebrew, the downloads and `npm ci`, and rebuilds what is out of date. `scripts/check.sh` uses
+  it, so a check rebuilds the tools first.
+* `--force-silicon` rebuilds `silicon.jar` even when its build stamp is current.
+
+== The pins
+
+Every external component is pinned to an exact version or commit, and the reasons are recorded in decision
+{gh}/internal/decisions/0001-toolchain-pins.md[0001]. `scripts/bootstrap.sh` is the executable form of that record;
+a pin changes in both together. The ones a contributor trips over:
+
+* *Silicon needs JDK 17.* The sbt version Silicon pins cannot run on newer JDKs. Use `$CERASTES_JAVA`, not the
+  `java` on your `PATH`.
+* *Z3 is 4.16.0*, the version Silicon's own CI tests against, downloaded into `build/tools` and checked against a
+  SHA-256. Do not substitute a system Z3.
+* *EDG is the maintainer's fork*, a submodule pinned to a commit of its `cerastes` branch
+  (xref:dev/edg.adoc[The EDG fork]).
+* *vlibc* is a submodule too, pinned to a commit of its `main`.
+* *The host compiler matters.* EDG emulates the installed clang and parses its system headers, so the expected
+  results of some tests (the goldens) depend on the compiler and SDK. CI asserts the exact toolchain
+  (`scripts/ci.sh`, decision {gh}/internal/decisions/0016-ci.md[0016]).
+
+The scripts that guard the submodules are `scripts/edg_tree.py` and `scripts/vlibc_tree.py`; `check.sh` runs both
+first.
+
+== The layout of `build/`
+
+`build/` is generated and ignored by git. The parts to know:
+
+[cols="2,5"]
+|===
+|Path |What it is
+
+|`build/edg`
+|EDG's stock build, which gives `build/edg/bin/cpfe` and the generated headers that the cerastes build reuses.
+
+|`build/cmake`
+|The build directory of cerastes's own CMake project, which compiles EDG's front-end sources in the cerastes
+configuration together with the back end and the driver.
+
+|`build/cerastes-fe`
+|The front end with the back end linked in; used through `scripts/cerastes-fe.sh`.
+
+|`build/cerastes`
+|The verifier: `build/cerastes verify <file>`.
+
+|`build/cerastes-vir-selftest`
+|The self-test generator of VIR and the Viper emitter.
+
+|`build/tools`
+|The downloaded tools: Z3 and, on Linux, sbt.
+
+|`build/env.sh`
+|The pinned tool locations, written by `bootstrap.sh`.
+
+|`build/vpr`
+|The Viper that the verify tests keep, which `scripts/lint_viper.py` then lints.
+
+|`build/doc`
+|The documentation site (xref:dev/documentation.adoc[Writing documentation]).
+
+|`build/override`
+|The same builds for another EDG tree (below).
+|===
+
+== The pinned tools in your shell
+
+[source,sh]
+----
+. build/env.sh
+----
+
+`build/env.sh` exports, among others, `Z3_EXE`, `SILICON_JAR`, `CERASTES_JAVA`, `CPFE` (the stock front end),
+`CERASTES_FE` (the cerastes front end), `CERASTES_VERIFY` (the driver) and `CERASTES_VLIBC_DIR`. The scripts
+`scripts/cpfe.sh`, `scripts/cerastes-fe.sh` and the test harness read it themselves, so you need it only to run the tools
+by hand. Note that `cerastes verify` does not read `Z3_EXE` or `SILICON_JAR` at run time: their paths were compiled in
+when the driver was configured, so that a stray variable cannot change a result.
+
+== Building against another EDG tree
+
+To try an EDG change that is not committed to the fork yet, point the build at a checkout of the fork with the
+environment variable `CERASTES_EDG_SRC`, set to an absolute path:
+
+[source,sh]
+----
+CERASTES_EDG_SRC=/absolute/path/to/compiler scripts/bootstrap.sh
+CERASTES_EDG_SRC=/absolute/path/to/compiler scripts/check.sh
+CERASTES_EDG_SRC=/absolute/path/to/compiler python3 scripts/run_tests.py
+----
+
+This builds into `build/override/` and never touches the pinned build; `build/env.sh` records which tree it was
+written for, and the scripts stop if the variable you set selects another. `scripts/check.sh` refuses the override on
+branch `main` (and on a detached `HEAD`), so the final check always runs against the pin. The mechanism is decision
+{gh}/internal/decisions/0005-edg-source-override.md[0005]; `CERASTES_VLIBC_SRC` does the same for vlibc (decision
+{gh}/internal/decisions/0046-vlibc-in-cerastes.md[0046]).
+
+== Parallelism
+
+`CERASTES_JOBS` sets the default parallelism of the test harness (`-j` overrides it; the default is half the CPUs).

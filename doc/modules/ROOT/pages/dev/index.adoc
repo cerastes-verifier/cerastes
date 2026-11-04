@@ -1,0 +1,112 @@
+= Developer guide
+:gh: https://github.com/cerastes-verifier/cerastes/blob/main
+:ght: https://github.com/cerastes-verifier/cerastes/tree/main
+
+This guide is for people who want to understand, build, test or extend cerastes, and for reviewers of such changes.
+It summarises how the project works and links the files where each rule is kept. It does not restate those rules:
+when a page here and a source file disagree, the source file is right and the page is a bug.
+
+== Repository layout
+
+[cols="2,5"]
+|===
+|Path |What it holds
+
+|`src/backend`
+|The in-process back end: it walks EDG's intermediate language and builds VIR (xref:dev/architecture.adoc[Architecture]).
+
+|`src/vir`
+|VIR, the small verification IR that knows nothing about EDG, its type checker and its lowering.
+
+|`src/viper`
+|Printing the lowered program as Viper text, and the position map.
+
+|`src/driver`
+|The `cerastes` and `cerastes-fe` programs: options, running Silicon, mapping errors back to source lines.
+
+|`include/cerastes.h`
+|The annotation macros and specification functions that programs include.
+
+|`third_party/`
+|`edg` (the EDG front end, the maintainer's fork: xref:dev/edg.adoc[The EDG fork]), `silicon` (Silicon and Silver) and `vlibc` (the C library's contracts).
+
+|`tests/`
+|The test suite, one directory per area; the format is in {gh}/tests/README.md[`tests/README.md`].
+
+|`scripts/`
+|Bootstrap, the test harness, the lints, the mutation tool and `check.sh`.
+
+|`doc/`
+|These pages (xref:dev/documentation.adoc[Writing documentation]).
+
+|`internal/`
+|Developer documentation that is not published: decision records, the encoding specification, the IL inventory and the session log.
+
+|`cmake/`, `CMakeLists.txt`
+|The build of EDG in the cerastes configuration, and of the back end and driver.
+
+|`.github/workflows/`
+|CI and documentation publishing (xref:dev/testing.adoc#ci[CI]).
+
+|`build/`
+|Everything the build produces; not in version control.
+|===
+
+== The canonical sources
+
+Each rule has one home. Read it there.
+
+[cols="2,5"]
+|===
+|Source |What it holds
+
+|{gh}/CLAUDE.md[`CLAUDE.md`]
+|The invariants, the commands and the conventions.
+
+|{gh}/plan.md[`plan.md`]
+|The roadmap: the milestones, what each covers and the global invariants with their reasons.
+
+|{ght}/internal/decisions[`internal/decisions/`]
+|One record per non-obvious decision, numbered. A record says what was decided, why, and what it changes.
+
+|{gh}/internal/encoding.md[`internal/encoding.md`]
+|The specification of the C and pass:[C++] to Viper encoding: VIR, lowering, the Viper shape, the position map.
+
+|{gh}/internal/il-inventory.md[`internal/il-inventory.md`]
+|What the EDG IL contains and which fields the back end relies on, with the evidence.
+
+|{gh}/tests/README.md[`tests/README.md`]
+|The grammar of a test file and what each outcome kind checks.
+
+|{gh}/internal/status.md[`internal/status.md`]
+|The session log: what each finished session did and where the next one starts.
+|===
+
+`plan.md` also describes a directory of soundness arguments, `internal/soundness/`. It does not exist yet; see
+xref:dev/soundness.adoc[Soundness] for where the arguments are kept today.
+
+== How work is organised
+
+The roadmap is cut into milestones, and a milestone that does not fit one working session is split into sessions.
+Each session starts from `CLAUDE.md`, the milestone's section of `plan.md`, the session log and the decision records,
+and ends with `scripts/check.sh` green and the log updated, so that the next session can start from the repository
+alone ({gh}/plan.md[`plan.md`], "Session protocol").
+
+Two habits matter to anyone changing the verifier:
+
+* A decision record comes before code whenever the semantics are not obvious (invariant 6).
+* A change lands with its tests and its documentation (invariants 2, 8 and 9).
+
+xref:dev/contributing.adoc[Adding a feature] walks through both.
+
+== Pages of this guide
+
+* xref:dev/architecture.adoc[Architecture]: the pipeline from source to verdict, stage by stage.
+* xref:dev/building.adoc[Building]: the toolchain, its pins and the layout of `build/`.
+* xref:dev/testing.adoc[Testing]: the test format, the harness, the lints, `check.sh` and CI.
+* xref:dev/soundness.adoc[Soundness]: what keeps a verified verdict trustworthy.
+* xref:dev/contributing.adoc[Adding a feature]: the life of an encoding rule.
+* xref:dev/edg.adoc[The EDG fork]: how the front end is pinned, changed and kept up to date.
+* xref:dev/documentation.adoc[Writing documentation]: the Antora layout, examples as tests and the markup pitfalls.
+
+The reference pages these refer to start at xref:overview.adoc[Overview].
