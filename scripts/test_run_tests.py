@@ -1986,7 +1986,7 @@ class ErrorMessagesPageTests(DocLintCase):
             "precondition", "postcondition", "check", "invariant-entry", "invariant-preserved",
             "overflow", "division-by-zero", "shift", "conversion", "missing-return", "termination",
             "noreturn", "uninitialized", "null-dereference", "permission", "lifetime",
-            "pointer-comparison", "unsequenced"]))
+            "pointer-comparison", "unsequenced", "invalid-free", "leak"]))
 
     def test_it_is_inactive_without_the_page_and_without_verify_tests(self):
         self.assertEqual(self.messages(), [])
@@ -10648,7 +10648,7 @@ class VerifyHeaderTests(unittest.TestCase):
             "precondition", "postcondition", "check", "invariant-entry", "invariant-preserved",
             "overflow", "division-by-zero", "shift", "conversion", "missing-return", "termination",
             "noreturn", "uninitialized", "null-dereference", "permission", "lifetime",
-            "pointer-comparison", "unsequenced"}))
+            "pointer-comparison", "unsequenced", "invalid-free", "leak"}))
         self.assertEqual(rt.VERIFY_KINDS, ("verified", "error", "rejected"))
 
     def test_every_category_parses_in_c_and_cpp(self):

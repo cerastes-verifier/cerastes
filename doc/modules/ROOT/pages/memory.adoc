@@ -10,8 +10,9 @@ This version covers pointers to integers, `bool` and enumerations, and
 pointers to such pointers (<<pointers-to-pointers>>): in local variables, as
 parameters and as results, with contracts that say which objects
 a function may read or write (<<contracts>>), in loops (<<loops>>) and across
-jumps (<<leaving>>); and global and `static` local variables (<<globals>>,
-<<static-locals>>). <<not-yet>> lists what is still rejected.
+jumps (<<leaving>>); global and `static` local variables (<<globals>>,
+<<static-locals>>); and memory from `malloc`, `calloc` and `free` (<<heap>>).
+<<not-yet>> lists what is still rejected.
 
 == Objects whose address is taken
 
@@ -699,6 +700,68 @@ xref:error-messages.adoc#_lifetime[`lifetime`]:
 include::example$memory/leave_block.c[tag=source]
 ----
 
+[#heap]
+== Allocated memory: `malloc`, `calloc` and `free`
+
+`malloc`, `calloc` and `free` come with contracts in
+xref:verifying.adoc#vlibc[vlibc], cerastes's C library headers. An
+allocation is a new object that the function now owns entirely; `free` ends it.
+cerastes proves that every allocation is tested against null before it is used,
+that only what was allocated is freed, and only once, and that nothing allocated
+is forgotten (a _leak_).
+
+*One object per allocation.* In this version an allocation holds one object: its
+size must be `sizeof(T)` (`sizeof *p` is the same), and its result must be
+converted at once to `T *`: in an initializer or assignment
+(`int *p = malloc(sizeof *p);`, C), a `return`, an argument, or a cast
+(`(int *)malloc(sizeof(int))`, which pass:[C++] needs). The object then has
+type `T` for its whole life. `calloc(1, sizeof(T))` gives an object whose
+members are all zero, null for a pointer member; `malloc`'s object has no value
+until the program gives it one (reading it first is
+xref:error-messages.adoc#_uninitialized[`uninitialized`]). Arrays of objects
+(`n * sizeof(T)`) and `realloc` are planned with arrays.
+
+[source,c]
+----
+include::example$memory/heap_struct.c[tag=source]
+----
+
+*Freeing.* `free(p)` needs the whole allocation that `p` points to the start
+of. Freeing it twice, freeing a local or global object or a structure's member,
+freeing an object the function only borrows, or freeing while a function it
+called may still hold a pointer to it is
+xref:error-messages.adoc#_invalid_free[`invalid-free`]. After `free(p)`, any use
+of `p` is xref:error-messages.adoc#_lifetime[`lifetime`] and any access through
+it xref:error-messages.adoc#_permission[`permission`]. `free(NULL)` does nothing,
+but it must be written with a typed pointer: a bare `free(NULL)` is rejected.
+
+*Leaks.* A function that ends while it still owns an allocation it does not hand
+to its caller is reported at its closing brace as
+xref:error-messages.adoc#_leak[`leak`], and so is `main` (as VeriFast does): free
+everything before `main` returns. A path that ends in `exit`, `abort` or
+`_Exit` is not checked, since it does not return. An iteration of a loop that
+ends while it owns an allocation the loop does not carry to the next iteration
+is a leak too, reported at the end of the loop's body.
+
+*Handing an allocation over.* `cerastes_owns_block(p)` (`cerastes::owns_block`
+in pass:[C++]) in a contract is ownership of the whole allocation `p` points to
+the start of, everything `free` needs. In a `requires` alone, the function takes
+the allocation (it frees it, or hands it on); in an `ensures` about the result,
+the caller receives it; in both, about a parameter, the function borrows it and
+gives it back. `cerastes::owning` written on a function means the same as
+`ensures(r == NULL || owns_block(r))`, and `cerastes::ref_to_uninit` on such a
+function says the caller receives an object without a value, as from `malloc`:
+
+[source,c]
+----
+include::example$memory/heap_cell.c[tag=source]
+----
+
+In this version a function can hand over only the allocation of its result, or
+the allocation a parameter points to: `owns_block` of an object reached through
+another pointer (`+*pp+`, `p->next`) or of a global, and owning local variables,
+globals and structure members, are planned for the next version.
+
 [#not-yet]
 == What is not supported yet
 
@@ -707,9 +770,10 @@ These are rejected with a diagnostic, never approximated
 
 * `owns`, `reads` or `live` of the object of a pointer result or of a returned
   structure's pointer member (`*r`, `+*r.q+`, `+cerastes_live(r.q)+`, `+**r+`):
-  they give the caller something the `requires` did not take (planned with
-  `malloc` and `free`), and contracts that name objects other than those reached
-  from the parameters and the global variables;
+  they give the caller something the `requires` did not take (planned for the
+  next version; `cerastes_owns_block(r)` hands over a whole allocation already),
+  and contracts that name objects other than those reached from the parameters
+  and the global variables;
 * `cerastes_old` inside the path of a place (`+*cerastes_old(*pp)+`, the object
   `*pp` pointed to on entry, read on return; `+cerastes_old(p)->q->x+`), and
   `cerastes_old` in a loop invariant (copy the value into a local before the
@@ -720,13 +784,18 @@ These are rejected with a diagnostic, never approximated
 * `owns`, `reads` and `live` in a `do … while (0)` invariant or a measure, and of
   a global itself in an invariant (`cerastes_owns(g)`: the loop holds it
   already);
-* the attribute `cerastes::owning` on anything but a parameter (on a structure's
-  member, it is planned with `malloc` and `free`), and `owning(n)`;
-* `cerastes::ref_to_uninit` on a local or a function (a function returning an object
-  without a value, such as `malloc`), and `cerastes::uninit` on anything but a local;
+* the attribute `cerastes::owning` on a local or global variable or a
+  structure's member (planned for the next version), and `owning(n)`;
+* `cerastes::ref_to_uninit` on a local, and `cerastes::uninit` on anything but a
+  local; under `--strict-init`, a call of a function whose result has no value
+  (`malloc`);
+* allocations of more than one object (`n * sizeof(T)`), `realloc`, and
+  `cerastes_owns_block` of an object reached through another pointer or of a
+  global (<<heap>>);
 * `restrict` except on a C parameter whose contract owns its object;
-* `void *`, and pointers to unions, to functions and to structures that are not
-  supported;
+* `void *` other than an allocation's result converted at once to `T *` and
+  `free`'s argument (<<heap>>), and pointers to unions, to functions and to
+  structures that are not supported;
 * `restrict` beside a parameter or global that can hold a pointer of the same
   type (a pointer to a pointer, a structure with a pointer member, a pointer
   global), and on a pointer to a structure;

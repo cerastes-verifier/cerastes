@@ -3698,6 +3698,340 @@ class GhostRefTests(unittest.TestCase):
         self.assertEqual(self.strict(self.fixture(locals_=locals_, body=body)), [])
 
 
+class HeapTokenTests(unittest.TestCase):
+    """Decision 0047 items 6, 7 and 10 (audit S7): the free token of a heap block.  `field tok: Bool` is declared exactly in a
+    program that uses it; `tok` appears only as `loc(block_of(...), -1).tok` and only in the conjunction of a view or a block
+    site, an explicit row, a loop place's invariant or the `perm(...)` of its snapshot; nothing in a body exhales, assigns or
+    tests it; `forperm` is only `assert forperm t: Ref [t.tok] :: <E>` on a `leak` row.  Each rule has a twin that breaks
+    exactly it."""
+
+    SLOT = "loc(block_of(p), (-1)).tok"
+    BLOCK = f"p != null ==> acc({SLOT}) && {SLOT}"
+    ROW = f"  assert p == null || (perm({SLOT}) == write && {SLOT})"
+    LEAK = "  assert forperm t: Ref [t.tok] :: false"
+
+    @staticmethod
+    def strict(lines):
+        return lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+
+    def fixture(self, field="field tok: Bool", body=None, leak_category="leak", extra_top=None, requires=None):
+        return [
+            "field v_int: Int",
+            *([field] if field else []),
+            *(extra_top or []),
+            "// cerastes:trusted-contract vlibc: free ends the allocation; typed view: the argument is an int *, decision 0047",
+            "method f_free__1(p: Ref)",
+            Check(f"  requires {requires or self.BLOCK}", WF, "internal"),
+            "  decreases _",
+            "method f__2(p: Ref)",
+            Check(f"  requires {requires or self.BLOCK}", WF, "internal"),
+            "  decreases",
+            "{",
+            "  var kt: Perm",
+            f"  kt := perm({self.SLOT})",
+            *(body if body is not None else [
+                Check(self.ROW, A, "invalid-free"),
+                Check("  f_free__1(p)", PRE, "invalid-free"),
+                Check(self.LEAK, A, leak_category),
+            ]),
+            "}",
+        ]
+
+    def test_the_emitters_shape_is_clean(self):
+        self.assertEqual(self.strict(self.fixture()), [])
+
+    def test_a_minus_one_slot_without_parentheses_is_clean_too(self):
+        lines = self.fixture(requires="p != null ==> acc(loc(block_of(p), -1).tok) && loc(block_of(p), -1).tok")
+        self.assertEqual(self.strict(lines), [])
+
+    def test_a_loop_place_snapshot_invariant_and_back_edge_row_are_clean(self):
+        body = [
+            "  var i: Int := 0",
+            "  while (i < 3)",
+            Check(f"    invariant p != null ==> acc({self.SLOT}, kt)", INV, "internal"),
+            Check(f"    invariant kt > none ==> {self.SLOT}", INV, "internal"),
+            Check("    decreases 3 - i", "termination.failed", "termination"),
+            "  {",
+            "    i := i + 1",
+            Check(f"    assert perm({self.SLOT}) >= kt", A, "permission"),
+            "  }",
+            Check(self.LEAK, A, "leak"),
+        ]
+        self.assertEqual(self.strict(self.fixture(body=body)), [])
+
+    def test_an_identifier_that_only_starts_with_tok_is_not_the_token(self):
+        body = ["  var token: Int := 0", "  var toks: Int := 1", "  token := toks"]
+        self.assertEqual(self.strict(self.fixture(body=body)), [])
+
+    def test_field_tok_in_a_program_that_never_uses_it_is_a_problem(self):
+        lines = self.fixture(body=[], requires="p != null")
+        lines[lines.index(f"  kt := perm({self.SLOT})")] = "  kt := none"
+        probs = self.strict(lines)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`field tok: Bool` in a program that never uses a token", probs[0])
+
+    def test_field_tok_of_another_type_is_a_problem(self):
+        probs = self.strict(self.fixture(field="field tok: Int"))
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`field tok` must be exactly `field tok: Bool`", probs[0])
+
+    def test_tok_without_its_field_is_a_problem(self):
+        probs = self.strict(self.fixture(field=None))
+        self.assertTrue(any("`tok` is used but `field tok: Bool` is not declared" in p for p in probs), probs)
+
+    def test_tok_at_another_slot_or_receiver_is_a_problem(self):
+        for slot in ("loc(block_of(p), 0).tok", "p.tok", "loc(block_of(p), (-2)).tok", "lvloc(block_of(p)).tok",
+                     "loc(block_of(p), 1).tok"):
+            with self.subTest(slot=slot):
+                probs = self.strict(self.fixture(body=[Check(f"  assert {slot}", A, "invalid-free"),
+                                                       Check(self.LEAK, A, "leak")]))
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("`tok` outside the token slot of a block", probs[0])
+
+    def test_exhale_of_a_token_is_a_problem(self):
+        for stmt in (f"  exhale acc({self.SLOT})", f"  exhale {self.SLOT}"):
+            with self.subTest(stmt=stmt):
+                probs = self.strict(self.fixture(body=[stmt, Check(self.LEAK, A, "leak")]))
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("`exhale` of a `tok` place", probs[0])
+
+    def test_an_assignment_to_a_token_is_a_problem(self):
+        probs = self.strict(self.fixture(body=[f"  {self.SLOT} := false", Check(self.LEAK, A, "leak")]))
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("assignment to `tok`", probs[0])
+
+    def test_an_inhale_of_a_token_is_a_problem_even_with_its_tag(self):
+        stmt = f"  inhale acc({self.SLOT}) // cerastes:inhale-ok a token made from nothing"
+        probs = self.strict(self.fixture(body=[stmt, Check(self.LEAK, A, "leak")]))
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("`tok` in `inhale`", probs[0])
+
+    def test_a_token_in_a_condition_or_a_variable_or_a_fold_is_a_problem(self):
+        for stmt in (f"  if ({self.SLOT}) {{ }}", f"  while ({self.SLOT}) {{ }}", "  var tok: Bool", f"  unfold q({self.SLOT})"):
+            with self.subTest(stmt=stmt):
+                probs = self.strict(self.fixture(body=[stmt, Check(self.LEAK, A, "leak")]))
+                self.assertTrue(any("`tok`" in x for x in probs), probs)
+
+    def test_a_token_in_an_assignment_beyond_a_perm_snapshot_is_a_problem(self):
+        for rhs in (f"{self.SLOT} ? write : none", f"perm({self.SLOT}) + (({self.SLOT}) ? write : none)"):
+            with self.subTest(rhs=rhs):
+                probs = self.strict(self.fixture(body=[f"  kt := {rhs}", Check(self.LEAK, A, "leak")]))
+                self.assertTrue(any("right-hand side of an assignment" in x for x in probs), probs)
+
+    def test_a_snapshot_of_perm_of_a_token_is_the_one_allowed_assignment(self):
+        body = [f"  kt := perm({self.SLOT})", f"  kt := kt > none ? perm({self.SLOT}) : none",
+                Check(self.LEAK, A, "leak")]
+        self.assertEqual(self.strict(self.fixture(body=body)), [])
+
+    def test_forperm_must_have_the_leak_shape(self):
+        for row in ("  assert forperm t: Ref [t.lv] :: false",
+                    "  assert forperm t: Ref [u.tok] :: false",
+                    "  assert forperm t: Int [t.tok] :: false",
+                    "  assert forperm t: Ref [t.tok] ::",
+                    f"  assert forperm t: Ref [t.tok] :: t == loc(block_of(p), (-1)) || {self.SLOT}",
+                    "  exhale forperm t: Ref [t.tok] :: false",
+                    "  assert (forperm t: Ref [t.tok] :: false)",
+                    "  var b: Bool := forperm t: Ref [t.tok] :: false"):
+            with self.subTest(row=row):
+                probs = self.strict(self.fixture(body=[Check(row, A, "leak")]))
+                self.assertTrue(probs, row)
+
+    def test_forperm_with_an_exemption_is_clean(self):
+        row = "  assert forperm t: Ref [t.tok] :: t == loc(block_of(res), (-1)) || (p != null && t == loc(block_of(p), (-1)))"
+        self.assertEqual(self.strict(self.fixture(body=[Check(row, A, "leak")])), [])
+
+    def test_forperm_must_be_a_leak_row(self):
+        for category in ("overflow", "permission", "invalid-free", "internal"):
+            with self.subTest(category=category):
+                probs = self.strict(self.fixture(leak_category=category))
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("`forperm` is only a `leak` row", probs[0])
+
+    def test_a_forperm_without_a_map_entry_is_the_missing_entry_problem(self):
+        text, map_text = build(self.fixture())
+        lines = map_text.rstrip("\n").split("\n")
+        n = text.split("\n").index(self.LEAK) + 1
+        kept = "\n".join(l for l in lines if l.split("\t")[0] != str(n)) + "\n"
+        probs = lv.lint_vpr(text, kept, "t.vpr", "t.vpr.map")
+        self.assertTrue(any("`assert` line has no entry in the position map" in p for p in probs), probs)
+
+    def test_the_heap_rules_leave_programs_without_a_token_alone(self):
+        self.assertEqual(lint(), [])
+
+
+class HeapViewTests(unittest.TestCase):
+    """Decision 0047 items 2, 4 and 7 (audit S7): the typed views of `malloc`, `calloc` and `free` are bodyless trusted methods
+    (an assumption: invariant 4), so their text is pinned as `alloc_<t>`'s is, rebuilt from the type's leaves.  The fixtures in
+    scripts/testdata/heap_views are views that `cerastes verify` emitted for an int, a structure with nested structures, a
+    structure with a pointer to itself, and structures of every leaf type; each mutation of one of them adds, drops or changes one
+    clause and must be reported once."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "heap_views"
+    NAMES = ("malloc_int", "free_int", "calloc_int", "malloc_struct_nested", "free_struct_nested", "calloc_struct_node",
+             "calloc_struct_all", "calloc_struct_cfg", "free_struct_cfg")
+
+    def text(self, name):
+        return (self.DATA / f"{name}.vpr").read_text()
+
+    @staticmethod
+    def problems(text):
+        src = lv.split_source(text)
+        out = []
+        lv.lint_views(src, lv.declarations(src), lambda n, why: out.append(why))
+        return out
+
+    def one(self, text, fragment=None):
+        probs = self.problems(text)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("is not the trusted typed view of decision 0047", probs[0])
+        if fragment:
+            self.assertIn(fragment, probs[0])
+
+    def edit(self, name, old, new, count=1):
+        text = self.text(name)
+        self.assertEqual(text.count(old), count, (name, old, text.count(old)))
+        return text.replace(old, new)
+
+    def test_every_emitted_view_is_clean(self):
+        for name in self.NAMES:
+            with self.subTest(name=name):
+                self.assertEqual(self.problems(self.text(name)), [])
+
+    def test_the_fixtures_are_the_emitters_not_a_made_up_shape(self):
+        for name in self.NAMES:
+            text = self.text(name)
+            self.assertIn("typed view: one ", text)
+            self.assertEqual(text.count("decreases _"), 1)
+
+    def test_a_view_is_found_by_its_tag_and_a_method_without_it_is_not_a_view(self):
+        # the same text with an extra clause but another reason is an ordinary trusted method: this rule does not apply
+        text = self.edit("malloc_int", "typed view: one int (4 bytes), decision 0047", "something else").replace(
+            "  decreases _", "  ensures false\n  decreases _")
+        self.assertEqual(self.problems(text), [])
+        self.one(self.edit("malloc_int", "  decreases _", "  ensures false\n  decreases _"))
+
+    def test_an_extra_clause_or_a_missing_one_is_reported(self):
+        for name in self.NAMES:
+            kw = "requires" if name.startswith("free") else "ensures"
+            with self.subTest(name=name, what="extra"):
+                self.one(self.edit(name, "  decreases _", f"  {kw} false\n  decreases _"), "two `" + kw + "` clauses")
+            with self.subTest(name=name, what="missing"):
+                lines = self.text(name).split("\n")
+                k = max(i for i, l in enumerate(lines) if l.startswith(f"  {kw} "))
+                self.one("\n".join(lines[:k] + lines[k + 1:]), "two `" + kw + "` clauses")
+            with self.subTest(name=name, what="no decreases _"):
+                self.one(self.edit(name, "  decreases _", "  decreases"))
+
+    def test_an_extra_conjunct_in_the_block_part_is_reported(self):
+        for name in self.NAMES:
+            lines = self.text(name).split("\n")
+            kw = "requires" if name.startswith("free") else "ensures"
+            k = max(i for i, l in enumerate(lines) if l.startswith(f"  {kw} "))
+            with self.subTest(name=name):
+                lines[k] = lines[k] + " && false"
+                self.one("\n".join(lines))
+
+    def test_the_pieces_of_the_token_and_the_liveness_cell_are_each_needed(self):
+        for old in ("acc(loc(block_of(res), (-1)).tok)) && loc(block_of(res), (-1)).tok", "acc(lvloc(block_of(res)).lv)",
+                    "lvloc(block_of(res)) == loc(block_of(res), (-2))", "offset_of(res) == 0"):
+            with self.subTest(old=old):
+                text = self.text("malloc_int")
+                self.assertEqual(text.count(old), 1, old)
+                self.one(text.replace(old, "true"))
+        # a second token
+        self.one(self.edit("malloc_int", "acc(lvloc(block_of(res)).lv)", "acc(lvloc(block_of(res)).lv) && acc(loc(block_of(res), (-1)).tok)"))
+
+    def test_the_token_slot_is_minus_one(self):
+        self.one(self.edit("malloc_int", "acc(loc(block_of(res), (-1)).tok)", "acc(loc(block_of(res), (-2)).tok)"))
+        self.one(self.edit("malloc_int", "acc(loc(block_of(res), (-1)).tok)", "acc(loc(block_of(res), 0).tok)"))
+
+    def test_a_malloc_view_states_no_flag_and_no_value(self):
+        self.one(self.edit("malloc_int", "&& acc(res.d_int)", "&& acc(res.d_int) && res.d_int"), "exactly what its type's leaves give")
+        self.one(self.edit("malloc_int", "&& acc(res.d_int)", "&& acc(res.d_int) && res.v_int == 0"), "exactly what its type's leaves give")
+        self.one(self.edit("malloc_int", "&& acc(res.d_int)", "&& acc(res.d_int) && !res.d_int"), "exactly what its type's leaves give")
+
+    def test_a_calloc_view_needs_its_flags_and_zero_values_and_nothing_more(self):
+        for name, flag, zero in (("calloc_int", " && res.d_int)", " && (res.v_int == 0))"),):
+            with self.subTest(name=name, what="no zero"):
+                self.one(self.edit(name, zero, ")"), "adds the flags and then the zero values")
+            with self.subTest(name=name, what="no flag"):
+                self.one(self.edit(name, flag, ")"), "adds the flags and then the zero values")
+            with self.subTest(name=name, what="wrong zero"):
+                self.one(self.edit(name, "(res.v_int == 0)", "(res.v_int == 1)"), "adds the flags and then the zero values")
+        self.one(self.edit("calloc_struct_cfg", "(loc(member(res, 1), 0).v_bool == false)", "(loc(member(res, 1), 0).v_bool == true)"))
+        self.one(self.edit("calloc_struct_cfg", "(loc(member(res, 2), 0).v_ptr_int == null)", "true"))
+        self.one(self.edit("calloc_struct_cfg", "(loc(member(res, 3), 0).v_enum_1_enum_x20color == 0)", "(loc(member(res, 3), 0).v_enum_1_enum_x20color == 1)"))
+
+    def test_a_range_is_the_range_of_its_fields_type(self):
+        self.one(self.edit("malloc_int", "(res.v_int <= 2147483647)", "(res.v_int <= 2147483648)"), "not the range of its field `int`")
+        self.one(self.edit("malloc_int", "((-2147483648) <= res.v_int)", "((-2147483649) <= res.v_int)"), "not the range of its field `int`")
+        self.one(self.edit("calloc_struct_all", "(0 <= loc(member(res, 2), 0).v_uint)", "((-1) <= loc(member(res, 2), 0).v_uint)"),
+                 "not the range of its field `uint`")
+        self.one(self.edit("calloc_struct_all", "<= 255)", "<= 256)"), "not the range of its field `uchar`")
+
+    def test_an_enumerations_range_must_hold_zero(self):
+        self.one(self.edit("calloc_struct_cfg", "(0 <= loc(member(res, 3), 0).v_enum_1_enum_x20color)", "(1 <= loc(member(res, 3), 0).v_enum_1_enum_x20color)"),
+                 "not the range of its field")
+
+    def test_leaves_are_in_member_order_with_their_cells(self):
+        text = self.text("calloc_struct_cfg")
+        swapped = text.replace("loc(member(res, 0), 0)", "TMP").replace("loc(member(res, 1), 0)", "loc(member(res, 0), 0)").replace("TMP", "loc(member(res, 1), 0)")
+        self.one(swapped)
+
+    def test_an_undeclared_field_suffix_is_reported(self):
+        self.one(self.edit("malloc_int", "field v_int: Int\n", ""), "is not declared")
+        self.one(self.edit("malloc_int", "field d_int: Bool\n", ""), "is not declared")
+
+    def test_the_header_and_the_name_are_pinned(self):
+        self.one(self.edit("malloc_int", "method f_malloc__4() returns (res: Ref)", "method f_free__4() returns (res: Ref)"), "its name")
+        self.one(self.edit("malloc_int", "method f_malloc__4() returns (res: Ref)", "method f_malloc__4() returns (res: Ref, x: Int)"), "header")
+        self.one(self.edit("free_int", "method f_free__5(p_ptr__0: Ref)", "method f_free__5(q: Ref)"), "header")
+        self.one(self.edit("malloc_int", "f_malloc__4", "g_malloc__4", 1), "its name")
+
+    def test_a_view_with_a_body_is_reported(self):
+        self.one(self.edit("malloc_int", "  decreases _", "  decreases _\n{\n}"), "it has a body")
+
+    def test_the_first_clause_is_the_pointers_wellformedness(self):
+        first = "(res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res))))"
+        self.one(self.edit("malloc_int", "  ensures " + first + "\n", "  ensures true\n"), "first clause")
+        self.one(self.edit("malloc_int", "  ensures " + first + "\n", "  ensures " + first + " && res != null\n"), "first clause")
+
+    def test_a_structures_member_blocks_and_slot_facts_are_pinned(self):
+        name = "malloc_struct_nested"
+        text = self.text(name)
+        self.assertIn("(len(member(res, 0)) == 1)", text)
+        # a member block dropped, twice, or a slot fact dropped, in the body and in the first clause alike
+        self.one(text.replace("(len(member(res, 0)) == 1) && ", "", 2))
+        self.one(text.replace("(len(member(res, 0)) == 1)", "(len(member(res, 0)) == 1) && (len(member(res, 0)) == 1)", 1))
+        self.one(text.replace(" && (res != loc(member(res, 1), 0))", "", 2))
+        self.one(text.replace("(len(member(res, 0)) == 1)", "(len(member(res, 0)) == 2)", 1))
+
+    def test_a_pointers_pointee_member_blocks_are_pinned(self):
+        name = "calloc_struct_node"
+        text = self.text(name)
+        self.assertIn("len(member(loc(member(res, 0), 0).v_ptr_struct_2_node, 1)) == 1", text)
+        self.one(text.replace(" && (len(member(loc(member(res, 0), 0).v_ptr_struct_2_node, 1)) == 1)", "", 1), "pointee")
+        self.one(text.replace("(len(member(loc(member(res, 0), 0).v_ptr_struct_2_node, 1)) == 1)", "(len(member(loc(member(res, 0), 0).v_ptr_struct_2_node, 1)) == 0)", 1))
+
+    def test_a_pointer_leaf_needs_its_wellformedness(self):
+        wf = "(loc(member(res, 2), 0).v_ptr_int == null) || (((loc(member(res, 2), 0).v_ptr_int == loc(block_of(loc(member(res, 2), 0).v_ptr_int), offset_of(loc(member(res, 2), 0).v_ptr_int))) && (0 <= offset_of(loc(member(res, 2), 0).v_ptr_int))) && (offset_of(loc(member(res, 2), 0).v_ptr_int) <= len(block_of(loc(member(res, 2), 0).v_ptr_int))))"
+        self.one(self.edit("calloc_struct_cfg", wf, "true"))
+
+    def test_a_free_view_takes_exactly_what_owns_block_gives(self):
+        self.one(self.edit("free_int", "acc(p_ptr__0.d_int)", "true"))
+        self.one(self.edit("free_struct_cfg", "acc(loc(member(p_ptr__0, 1), 0).d_bool)", "true"))
+
+    def test_lint_vpr_runs_the_view_rule(self):
+        with mock.patch.object(lv, "lint_views") as m:
+            lv.lint_vpr(*build(good_lines()), "t.vpr", "t.vpr.map")
+        self.assertTrue(m.called)
+        text, map_text = build(good_lines())
+        text = self.text("malloc_int") + text.replace("field", "// field")
+        text = text.replace("  decreases _", "  ensures false\n  decreases _", 1)
+        probs = lv.lint_vpr(text, "", "t.vpr", "t.vpr.map")
+        self.assertTrue(any("is not the trusted typed view" in x for x in probs), probs)
+
+
 class SelfTestHygieneTests(unittest.TestCase):
     """A test method defined twice in one class replaces the first, which then never runs (it happened here:
     two `test_labels_followed_by_no_deletable_statement_give_no_mutant`)."""

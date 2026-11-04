@@ -73,7 +73,9 @@
 // The C spellings of the specification functions (decisions 0029 item 3, 0037 item 5), declared in C and in C++ alike so that a header shared
 // by both writes one spelling.  Declared, never defined, like the C++ forms below: a call that reaches run time is a link error naming a
 // cerastes_ function.  Each takes a place (`cerastes_owns(*p)`, `cerastes_reads(*p)`) or a pointer (`cerastes_live(p)`) through C23's
-// variadic declaration without a named parameter.  `cerastes_old(e)` takes a place and is a macro over `__typeof__` (accepted by clang,
+// variadic declaration without a named parameter.  `cerastes_owns_block(p)` takes a pointer: the whole heap block `p` starts, with write
+// permission (decision 0047 item 4).  `cerastes_owns_block(p, size)` and `cerastes_zeroed(p)` are vlibc's own (the allocation
+// contracts of `malloc` and `calloc`; the front end rejects them in a program's contracts).  `cerastes_old(e)` takes a place and is a macro over `__typeof__` (accepted by clang,
 // gcc and the front end in both languages); it is only ever expanded inside a contract macro, which expands to nothing in another
 // compiler.
 #ifdef __cplusplus
@@ -81,12 +83,16 @@ extern "C" {
 bool cerastes_owns(...) noexcept;
 bool cerastes_reads(...) noexcept;
 bool cerastes_live(...) noexcept;
+bool cerastes_owns_block(...) noexcept;
+bool cerastes_zeroed(...) noexcept;
 const void* cerastes_old_(const void*) noexcept;
 }
 #else
 _Bool cerastes_owns(...);
 _Bool cerastes_reads(...);
 _Bool cerastes_live(...);
+_Bool cerastes_owns_block(...);
+_Bool cerastes_zeroed(...);
 const void* cerastes_old_(const void*);
 #endif
 #define cerastes_old(e) (*(__typeof__(e)*)cerastes_old_(&(e)))
@@ -100,6 +106,10 @@ template <class T> bool owns(const T& place) noexcept;
 template <class T> bool reads(const T& place) noexcept;
 // live(p): `p` points into an object whose lifetime has not ended (decision 0028 item 3a); implies p != NULL.
 template <class T> bool live(const T* pointer) noexcept;
+// owns_block(p): `p` is the start of a heap block and the function owns the whole block, with write permission (decision 0047 item 4).
+// The two-argument form (a size in bytes) is vlibc's own and is rejected in a program's contracts.
+template <class T> bool owns_block(const T* pointer) noexcept;
+template <class T> bool owns_block(const T* pointer, decltype(sizeof 0) size) noexcept;
 template <class T> const T& old(const T& value) noexcept;
 // forall(body, free...): body's first parameter is the quantified variable and
 // its remaining parameters receive the trailing arguments, in order

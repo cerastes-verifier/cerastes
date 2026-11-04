@@ -521,6 +521,23 @@ follow objects), and a function without a body must tie it to its partner's plac
 per-iteration ghost `aw_q<j>__<L>` for the body's splits; struct written atoms are 0040 item 5's rows per leaf with one
 liveness amount and `WF_S`.
 
+**The heap (M4.5d2a, decision 0047).** vlibc's `malloc`, `calloc` and `free` are trusted from vlibc by their contract's
+*shape*, not their name: (A) a `void*` result with `ensures(B == NULL || owns_block(B, S) [&& zeroed(B)])` and exactly one
+of `ref_to_uninit` and `zeroed`, (D) one `void*` parameter marked `ref_to_uninit` with `requires(P == NULL ||
+owns_block(P))`. The encoder diverts such routines before `check_signature` and turns each call into a cached **view**:
+an (A) call converted at once to `T*` (a cast, or C's implicit conversion) whose constant size equals `sizeof(T)` becomes a
+bodiless, parameterless `Function` with result `Ptr(T)` and `ensures r == NULL || owns_block(r)` (calloc: one zero value
+clause per leaf; malloc: `result_init = RefToUninit`); a (D) call over a `T*` argument becomes a `(Ptr(T)) -> void` view
+with `deallocates`. The arguments are still encoded for their checks (a `Comma` before the call); VIR never holds
+`void*`. `owns_block` is `AtomKind::OwnsBlock`, listed apart (`contract_block_atoms`), with no ghost amount: the block
+part (offset 0, the token `loc(b, -1).tok`, `lvloc(b) == loc(b, -2)`, full `lv`, `len` and member lengths) plus, per
+leaf, what `owns` gives except its liveness fraction. Calls and returns check it one row per conjunct, with `lvloc`
+separation rows first; a (D) call's rows are `invalid-free` and replace the argument's liveness use check. In a heap
+program (any view or block site) every method ends, after `label l_end`, with `assert forperm t: Ref [t.tok] :: E`
+(`leak`, at the closing brace; `E` the `ensures` block sites' tokens, or `false`), and every loop back edge with a row
+exempting the loop's token places. A block site counts as a full-permission atom on every leaf for 0039 item 4's
+sequencing rules; consuming sites and (D) views register writes of the liveness and token cells.
+
 ## 4. Viper shape
 
 ```
@@ -561,6 +578,8 @@ With globals (0041 item 4), the domain also holds one `unique function GB_<name>
 methods in every unit with a global: its first `ensures` row is the global facts, then one row per global, positioned at
 its declaration (`acc` of the value and flag cells, the flag, the value or a range/`WF` row for an unknown one, `acc` of
 the liveness cell), ending in `decreases _`; `lint_viper.py`'s `lint_globals` pins it.
+A heap program (decision 0047) adds `field tok: Bool` and its views, bodiless methods tagged with vlibc's reason
+followed by `; typed view: one <T> (<n> bytes), decision 0047`.
 
 Names: every identifier has a prefix that says what it is: functions `f_<name>__<id>` (and `...__wf`), formals
 `p_<name>__<k>`, locals `v_<name>__<id>`, temporaries `t__<k>`, the result `res`, labels `l_end`, prelude
@@ -596,7 +615,10 @@ One line per check, tab-separated, UTF-8, `\n`-terminated:
 
 Fails on: `inhale`/`assume` without `// cerastes:inhale-ok <reason>` (invariant 4); a bodyless method without
 `// cerastes:trusted-contract <reason>` (0012 item 1); any `domain`, `axiom` or bodyless `function`; an `assert`,
-`requires`, `ensures`, `invariant` or method-call line with no position-map entry; an empty input set.
+`requires`, `ensures`, `invariant` or method-call line with no position-map entry; an empty input set. From M4.5d2a
+(`lint_heap_token`): `field tok: Bool` exactly when `tok` is used; `tok` only as `loc(block_of(…), -1).tok` in a
+`requires`, `ensures`, `invariant` or `assert` line or a snapshot's `perm(…)`, never in an `exhale`, `inhale`, assignment,
+condition or `var`; `forperm` only as `assert forperm t: Ref [t.tok] :: <E>` on a `leak` row.
 
 ## 7. Matching IL to VIR *(M3-1, M3-4)*
 

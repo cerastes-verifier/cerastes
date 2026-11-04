@@ -227,8 +227,8 @@ include::example$annotations/lambda_once.cpp[tag=once]
 ----
 
 The functions of the C library that
-xref:verifying.adoc#vlibc[vlibc] covers (in this version `abort`, `exit` and
-`_Exit`) are an exception: their contract comes from vlibc's header only. A
+xref:verifying.adoc#vlibc[vlibc] covers (in this version `abort`, `exit`,
+`_Exit`, `malloc`, `calloc` and `free`) are an exception: their contract comes from vlibc's header only. A
 contract on any other declaration of one of them, a `noreturn` attribute and
 an ownership or initialization marker included, is
 `cerastes-annotation_reserved_library`, even when it repeats vlibc's contract and
@@ -284,9 +284,17 @@ its name (`CERASTES_OWNING` is the macro form), is the contract
 may be given a null pointer, and otherwise owns the object and gives it back
 (xref:memory.adoc#contracts[Memory and ownership]). Every declaration of the
 function must carry the same `owning` attributes; one that differs is
-`annotation_mismatch`. The attribute applies only to parameters (elsewhere the
-front end reports that it does not apply), and only to pointers to objects
-that are not `const`; `owning(n)` is not supported yet.
+`annotation_mismatch`. The attribute applies to parameters, and only to
+pointers to objects that are not `const`; `owning(n)` is not supported yet.
+
+On a function that returns a pointer, `cerastes::owning` is the contract
+`ensures(r == NULL || owns_block(r))`: the caller receives the whole allocation
+the result points to, or a null pointer (xref:memory.adoc#heap[Allocated
+memory]). It is read on a function declared in your files; on a member function,
+a template, a `predicate` or `pure` function, or a redeclaration of a function a
+system header declares, it is `cerastes-unsupported_annotation`, and on a local,
+a global or a structure's member the front end reports that it does not apply
+(planned for the next version).
 
 === Initialization markers
 
@@ -312,7 +320,9 @@ Three attributes from the pass:[C++] initialization profile (P4222), in the
 | `cerastes::ref_to_uninit`
 | `CERASTES_REF_TO_UNINIT`
 | On a pointer parameter whose contract owns its object: the object may have no
-  value on entry; on return an object that had a value still has one.
+  value on entry; on return an object that had a value still has one. On a
+  function whose `ensures` hands over an allocation (`cerastes_owns_block(r)`):
+  the caller receives an object without a value, as from `malloc`.
 |===
 
 The parameter attributes go before the parameter's declaration or after its name,
@@ -321,7 +331,7 @@ as `owning` does, and every declaration of the function carries the same ones
 `--strict-init` asks for them as P4222 does (xref:verifying.adoc#strict-init[The
 strict initialization mode]). Elsewhere (`uninit` on a global, a `static` local or
 a parameter; the parameter attributes on a local or a function) the front end
-reports that they do not apply.
+reports that they do not apply (`ref_to_uninit` on a function is read as above).
 
 === Members, constructors and destructors
 
@@ -539,7 +549,8 @@ included, even if argument-dependent lookup would find a function of yours:
 qualify your own functions there (this errs on the side of rejecting). A sixth,
 `live`, is declared for pointers. C has no namespaces, so `<cerastes.h>` also
 declares the C spellings `cerastes_owns`, `cerastes_reads`, `cerastes_live` and
-`cerastes_old` (a macro), in C and in pass:[C++] alike. The functions:
+`cerastes_old` (a macro), in C and in pass:[C++] alike, and `owns_block` with its C
+spelling `cerastes_owns_block` for allocations. The functions:
 
 [cols="2,2,5"]
 |===
@@ -560,6 +571,12 @@ one member (xref:memory.adoc#structures[Structures])
 | `live(p)`
 | `cerastes_live(p)`
 | `p` is not null and points into an object that still exists
+
+| `owns_block(p)`
+| `cerastes_owns_block(p)`
+| `p` is not null and points to the start of an allocation that the function
+owns entirely, everything `free` needs; on a pointer parameter or, in an
+`ensures`, on the result (xref:memory.adoc#heap[Allocated memory])
 
 | `old(e)`
 | `cerastes_old(e)`

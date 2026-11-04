@@ -79,6 +79,26 @@ status 1) on:
   the snapshot is what the method holds), and is never assigned inside a loop whose invariant mentions it (a
   havocked amount could exceed `write` and make the body vacuous); `acc(x.f, k)` with such an amount is allowed in
   an invariant, `perm(...)` in an invariant is refused (Viper refuses it; the snapshot is the way);
+* the heap's free token (decision 0047 items 6, 7 and 10): `field tok: Bool` is declared exactly in a program that uses it (a heap
+  program, which has a view call or a block site: a file that declares it and never uses it, uses it undeclared or declares it
+  with another type is a problem); `tok` appears only as `<slot>.tok` where the slot is `loc(block_of(...), -1)` (the token's slot
+  of 0028 item 6), and only in a `requires`, `ensures`, `invariant` or `assert` line (the conjunction of a view or a block site, an
+  explicit row, a loop place's invariant or its back-edge row) or inside the `perm(...)` of a snapshot `kt := perm(...)` (a loop
+  place's amount); never in an `exhale`, an assignment to `<slot>.tok`, a condition, a `var`, a `fold` or any other statement
+  (a token is created only by a view's or a function's postcondition and consumed only by a call whose `requires` has the block
+  site: nothing in the body may make or take one); `forperm` appears only as the statement `assert forperm t: Ref [t.tok] :: <E>`
+  (one binder, the field `tok`, no `tok` in `<E>`) whose position-map entries are all category `leak`: the one assertion that
+  reads every token the method holds (the rest of the heap rule is not checked here: the exemption `<E>` is the encoder's);
+* the typed views of the allocation functions (decision 0047 items 2, 4 and 7): a bodyless method whose trusted-contract tag is
+  vlibc's `malloc`, `calloc` or `free` with `typed view:` in its reason is the trusted view of one allocation type, and its text is
+  pinned as `alloc_<t>`'s is, built from the type's leaves: `method f_<routine>__<n>() returns (res: Ref)` (`(p_ptr__0: Ref)` for
+  `free`), exactly two clauses and `decreases _`; the first clause the well-formedness of the pointer (and, for a structure, its member
+  lengths under `offset_of < len`), the second `!(res == null) ==>` the block part (the pointer, its well-formedness, offset 0, the
+  token `acc(loc(block_of(res), -1).tok) && ...tok`, the liveness equation and cell, `len == 1` with the structure's member blocks and
+  slot facts in the grammar of decision 0043 item 8, then for each leaf, in member order, its value and flag permissions and the facts
+  `owns` states under the flag: an integer's range of its field's type, a pointer's well-formedness (with the pointee's member blocks),
+  nothing for a `bool`) and, for `calloc` only, the flags and then the values 0, `false` or `null` of every leaf, and for no view a
+  clause more or fewer: a view with an extra clause would be an unchecked assumption;
 * an empty input set, and a MANIFEST that names a file which is not there.  The
   manifest is the set of files scripts/run_tests.py expects: its first line is
   `# run-id: <id>` (printed by the run), then one file per line.  Fewer files
@@ -1494,6 +1514,336 @@ def lint_perm_locals(src: Source, decls: list[Decl], add: Callable[[int, str], N
                             "amount: the loop head havocs what the body assigns (decision 0038 item 9)")
 
 
+# The heap's free token (decision 0047 items 6, 7 and 10).  `field tok: Bool` is the ghost token of a heap block at slot -1: held at
+# `write` and true by whoever owns the allocation.  It is created by a view's postcondition (a bodyless trusted method) or a
+# function's `ensures`, consumed by a call whose `requires` has the block site (`free`), and read by the leak rows `forperm`.  Nothing
+# in a method body may make or take one, so the lint refuses every statement form that could: an `exhale`, an assignment, an `inhale`,
+# a condition.  The text of the view methods themselves is not pinned here yet (their emitted shape follows the lowering).
+TOK_WORD_RE = re.compile(r"(?<![\w$'])tok(?![\w$'])")
+FORPERM_WORD_RE = re.compile(r"(?<![\w$'])forperm(?![\w$'])")
+FORPERM_LINE_RE = re.compile(r"^\s*assert\s+forperm\s+(?P<v>[A-Za-z_$][\w$']*)\s*:\s*Ref\s*\[\s*(?P=v)\.tok\s*\]\s*::\s*(?P<body>\S.*)$")
+TOKEN_SLOT_RE = re.compile(r"loc\(\s*block_of\(.*\)\s*,\s*\(?\s*-\s*1\s*\)?\s*\)$", re.S)
+TOK_FIELD_DECL = "field tok: Bool"
+TOK_STATEMENT_RE = re.compile(r"^\s*(?P<kw>assert|requires|ensures|invariant)\b")
+
+
+def strip_perm_calls(text: str) -> str:
+    """`text` without its `perm(...)` calls (balanced), for a snapshot's right-hand side."""
+    out = []
+    i = 0
+    while i < len(text):
+        m = PERM_CALL_RE.match(text, i)
+        if m:
+            depth = 1
+            j = m.end()
+            while j < len(text) and depth:
+                depth += (text[j] == "(") - (text[j] == ")")
+                j += 1
+            out.append(" ")
+            i = j
+            continue
+        out.append(text[i])
+        i += 1
+    return "".join(out)
+
+
+# The typed views of the allocation functions (decision 0047 items 2, 4 and 7).  A view is a bodyless trusted method, so its contract is
+# an assumption (invariant 4): it is pinned as `alloc_<t>` is, by rebuilding the expected clauses from the type's leaves, which are read
+# from the text itself (a leaf is an `acc(C.v_t)` and `acc(C.d_t)` pair in member order; the member blocks and slot facts of a
+# structure are checked with `struct_wf_lens_problem`).  Whatever is added to, missing from or reordered in what the rebuilt text says
+# (a `true`-ed flag on a `malloc` cell, `ensures false`, a second token, a wider range) makes the two texts differ.
+VIEW_TAG_RE = re.compile(r"vlibc:\s+(?P<routine>malloc|calloc|free)\b[^\n]*;\s*typed view:")
+VIEW_NAME_RE = re.compile(r"^f_(?P<routine>malloc|calloc|free)__[0-9]+$")
+VIEW_INT_RANGES = {
+    "schar": (-128, 127), "uchar": (0, 255), "short": (-32768, 32767), "ushort": (0, 65535),
+    "int": (-2**31, 2**31 - 1), "uint": (0, 2**32 - 1), "long": (-2**63, 2**63 - 1), "ulong": (0, 2**64 - 1),
+}
+VIEW_STANDARD_RANGES = {(-(2**(n - 1)), 2**(n - 1) - 1) for n in (8, 16, 32, 64, 128)} | {(0, 2**n - 1) for n in (8, 16, 32, 64, 128)}
+
+
+def _group_end(text: str, start: int) -> int:
+    """The index of the `)` matching the `(` at `start`, or -1."""
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "(":
+            depth += 1
+        elif text[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
+def _strip_wrap(text: str) -> str:
+    text = text.strip()
+    while text.startswith("(") and _group_end(text, 0) == len(text) - 1:
+        text = text[1:-1].strip()
+    return text
+
+
+def _split_top(text: str, op: str) -> list[str]:
+    parts, depth, start, i = [], 0, 0, 0
+    while i < len(text):
+        c = text[i]
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+        elif depth == 0 and text.startswith(op, i):
+            parts.append(text[start:i])
+            start = i + len(op)
+            i += len(op)
+            continue
+        i += 1
+    parts.append(text[start:])
+    return parts
+
+
+def _flatten_and(text: str) -> list[str]:
+    """The conjuncts of a fully parenthesized `&&` chain, as raw text (an operand with `||` or `==>` stays whole)."""
+    text = _strip_wrap(text)
+    parts = _split_top(text, "&&")
+    if len(parts) == 1:
+        return [text]
+    if len(_split_top(text, "||")) > 1 or len(_split_top(text, "==>")) > 1:
+        raise ValueError("an unparenthesized mix of `&&` with `||` or `==>`")
+    out: list[str] = []
+    for part in parts:
+        out += _flatten_and(part)
+    return out
+
+
+def _view_wf(x: str) -> str:
+    return f"({x} == null) || ((({x} == loc(block_of({x}), offset_of({x}))) && (0 <= offset_of({x}))) && (offset_of({x}) <= len(block_of({x}))))"
+
+
+def _chain_cell(chain: tuple[int, ...], root: str) -> str:
+    cell = root
+    for k in chain:
+        cell = f"loc(member({cell}, {k}), 0)"
+    return cell
+
+
+def _lens_members(parts: list[str], root: str) -> tuple[list[tuple[int, ...]], str | None]:
+    why = struct_wf_lens_problem(parts, root)
+    if why is not None:
+        return [], why
+    keys = []
+    for part in parts:
+        m = re.fullmatch(r"len\((?P<m>.*)\)==1", part)
+        if m:
+            keys.append(parse_struct_member(m.group("m"), root))
+    return keys, None
+
+
+def _leaf_kind(t: str) -> str:
+    if t == "bool":
+        return "bool"
+    if t.startswith("ptr_"):
+        return "ptr"
+    if t.startswith("enum_"):
+        return "enum"
+    return "int"
+
+
+def view_problem(src: Source, d: Decl, routine: str, declared: dict[str, set[str]]) -> str | None:
+    """The reason why the view method `d` is not the text decision 0047 gives its allocation type, or None."""
+    if d.has_body:
+        return "it has a body"
+    name_m = VIEW_NAME_RE.match(d.name)
+    if name_m is None or name_m.group("routine") != routine:
+        return f"its name is not `f_{routine}__<n>`"
+    lines = [" ".join(src.code[n - 1].split()) for n in range(d.line, d.end_line + 1) if src.code[n - 1].strip()]
+    root = "p_ptr__0" if routine == "free" else "res"
+    keyword = "requires" if routine == "free" else "ensures"
+    header = f"method {d.name}(p_ptr__0: Ref)" if routine == "free" else f"method {d.name}() returns (res: Ref)"
+    if len(lines) != 4 or lines[0] != header or lines[3] != "decreases _":
+        return f"its header, its two `{keyword}` clauses and `decreases _` are not the emitter's"
+    if not (lines[1].startswith(keyword + " ") and lines[2].startswith(keyword + " ")):
+        return f"its two clauses are not both `{keyword}`"
+    first, second = lines[1][len(keyword) + 1:], lines[2][len(keyword) + 1:]
+    try:
+        implies = _split_top(_strip_wrap(second), "==>")
+        if len(implies) != 2 or norm_viper(implies[0]) != norm_viper(f"!({root} == null)"):
+            return f"its second clause is not `!({root} == null) ==> <the block>`"
+        raw = _flatten_and(implies[1])
+        first_atoms = _flatten_and(first)
+    except ValueError as e:
+        return str(e)
+    atoms = [norm_viper(a) for a in raw]
+    prefix = [f"{root} != null", _view_wf(root), f"offset_of({root}) == 0", f"acc(loc(block_of({root}), (-1)).tok)",
+              f"loc(block_of({root}), (-1)).tok", f"lvloc(block_of({root})) == loc(block_of({root}), (-2))",
+              f"acc(lvloc(block_of({root})).lv)", f"len(block_of({root})) == 1"]
+    if atoms[:len(prefix)] != [norm_viper(a) for a in prefix]:
+        return "the block part does not begin with the pointer, its well-formedness, offset 0, the token, the liveness equation and cell and `len == 1`"
+    i = len(prefix)
+    lens: list[str] = []
+    while i < len(atoms) and not atoms[i].startswith("acc("):
+        lens.append(atoms[i])
+        i += 1
+    members: list[tuple[int, ...]] = []
+    if lens:
+        members, why = _lens_members(lens, root)
+        if why is not None:
+            return f"the structure's member blocks: {why}"
+    structs = {k for k in members if any(o[:-1] == k for o in members)}
+    leaf_chains = sorted(k for k in members if k not in structs) if lens else [()]
+    # the leaves, in the text: `acc(C.v_t)`, `acc(C.d_t)` and the facts under the flag
+    leaves: list[tuple[tuple[int, ...], str, str]] = []  # chain, suffix, the rebuilt facts
+    for chain in leaf_chains:
+        cell = _chain_cell(chain, root)
+        m = re.fullmatch(r"acc\((?P<c>.*)\.v_(?P<t>[A-Za-z0-9_$']+)\)", atoms[i]) if i < len(atoms) else None
+        if m is None or m.group("c") != norm_viper(cell):
+            return f"leaf {chain or 'res'}: `acc({cell}.v_<t>)` is expected here"
+        t = m.group("t")
+        if t not in declared["v"] or t not in declared["d"]:
+            return f"the field suffix `{t}` is not declared (`field v_{t}` and `field d_{t}`)"
+        if i + 1 >= len(atoms) or atoms[i + 1] != norm_viper(f"acc({cell}.d_{t})"):
+            return f"leaf {chain or 'res'}: `acc({cell}.d_{t})` is expected after its value permission"
+        i += 2
+        kind = _leaf_kind(t)
+        value, flag = f"{cell}.v_{t}", f"{cell}.d_{t}"
+        if kind == "bool":
+            facts = ""
+        elif kind == "ptr":
+            fact_raw = raw[i] if i < len(raw) else ""
+            rhs = _split_top(_strip_wrap(fact_raw), "==>")
+            if len(rhs) != 2 or norm_viper(rhs[0]) != norm_viper(flag):
+                return f"leaf {chain or 'res'}: the pointer's facts are not `{flag} ==> ...`"
+            sub = _flatten_and(rhs[1])
+            if len(sub) == 1:
+                facts = f"{flag} ==> ({_view_wf(value)})"
+            elif len(sub) == 2:
+                g = _split_top(_strip_wrap(sub[1]), "==>")
+                if len(g) != 2:
+                    return f"leaf {chain or 'res'}: the pointee's member blocks are not `guard ==> lens`"
+                pointee = [norm_viper(a) for a in _flatten_and(g[1])]
+                _members, why = _lens_members(pointee, norm_viper(value))
+                if why is not None:
+                    return f"leaf {chain or 'res'}: the pointee's member blocks: {why}"
+                facts = (f"{flag} ==> (({_view_wf(value)}) && (({value} != null && offset_of({value}) < len(block_of({value}))) "
+                         f"==> ({' && '.join(pointee)})))")
+            else:
+                return f"leaf {chain or 'res'}: the pointer's facts are not its well-formedness and its pointee's member blocks"
+            i += 1
+        else:
+            fact = atoms[i] if i < len(atoms) else ""
+            m2 = re.fullmatch(re.escape(norm_viper(flag)) + r"==>(?P<lo>-?[0-9]+)<=" + re.escape(norm_viper(value)) + "&&"
+                              + re.escape(norm_viper(value)) + r"<=(?P<hi>-?[0-9]+)", fact)
+            if m2 is None:
+                return f"leaf {chain or 'res'}: the facts under its flag are not `{flag} ==> lo <= value && value <= hi`"
+            lo, hi = int(m2.group("lo")), int(m2.group("hi"))
+            if kind == "enum":
+                ok = lo <= 0 <= hi
+            elif t in VIEW_INT_RANGES:
+                ok = (lo, hi) == VIEW_INT_RANGES[t]
+            else:
+                ok = (lo, hi) in VIEW_STANDARD_RANGES
+            if not ok:
+                return f"leaf {chain or 'res'}: the range [{lo}, {hi}] is not the range of its field `{t}` (decision 0018)"
+            facts = f"{flag} ==> (({lo}) <= {value} && {value} <= {hi})"
+            i += 1
+        leaves.append((chain, t, facts))
+    # rebuild the whole text
+    body = [*prefix, *lens]
+    for chain, t, facts in leaves:
+        cell = _chain_cell(chain, root)
+        body += [f"acc({cell}.v_{t})", f"acc({cell}.d_{t})"] + ([facts] if facts else [])
+    if routine == "calloc":
+        zero = {"bool": "false", "ptr": "null"}
+        body += [f"{_chain_cell(c, root)}.d_{t}" for c, t, _ in leaves]
+        body += [f"{_chain_cell(c, root)}.v_{t} == {zero.get(_leaf_kind(t), '0')}" for c, t, _ in leaves]
+    expected_second = f"!({root} == null) ==> ({' && '.join(body)})"
+    if norm_viper(second) != norm_viper(expected_second):
+        return ("the block part is not exactly what its type's leaves give" +
+                (" (a `calloc` view adds the flags and then the zero values of every leaf, and nothing else)" if routine == "calloc"
+                 else " (a `malloc` view states no flag and no value, a `free` view only what `owns_block` takes)"))
+    expected_first = _view_wf(root)
+    if lens:
+        expected_first += f" && (({root} != null && offset_of({root}) < len(block_of({root}))) ==> ({' && '.join(lens)}))"
+    if norm_viper(first) != norm_viper(expected_first):
+        return "its first clause is not the pointer's well-formedness (and the member block lengths of a structure under `offset_of < len`)"
+    return None
+
+
+def lint_views(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    declared = {"v": set(), "d": set()}
+    for line in src.code:
+        m = FIELD_ANY_RE.match(line)
+        if m:
+            declared[m.group("kind")].add(m.group("suffix"))
+    for d in decls:
+        if d.kind != "method" or d.has_body and not VIEW_NAME_RE.match(d.name):
+            continue
+        tag = trusted_tag(src, d.line)
+        vt = VIEW_TAG_RE.search(tag.group(0)) if tag else None
+        if vt is None:
+            continue
+        why = view_problem(src, d, vt.group("routine"), declared)
+        if why is not None:
+            add(d.line, f"`method {d.name}` is not the trusted typed view of decision 0047 items 2 and 4: {why}")
+
+
+def lint_heap_token(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> set[int]:
+    """The rules of the free token (see above).  Returns the lines of the `forperm` assertions, whose map entries the caller
+    checks against the category `leak`."""
+    forperm_lines: set[int] = set()
+    decl_lines = {d.line for d in decls if d.kind == "field" and d.name == "tok"}
+    used: list[int] = []
+    for lineno, code in enumerate(src.code, start=1):
+        if lineno in decl_lines:
+            if " ".join(code.split()) != TOK_FIELD_DECL:
+                add(lineno, f"`field tok` must be exactly `{TOK_FIELD_DECL}` (the free token of a heap block, decision 0047)")
+            continue
+        has_forperm = bool(FORPERM_WORD_RE.search(code))
+        tok_hits = list(TOK_WORD_RE.finditer(code))
+        if not has_forperm and not tok_hits:
+            continue
+        used.append(lineno)
+        if has_forperm:
+            m = FORPERM_LINE_RE.match(code)
+            if m is None:
+                add(lineno, "`forperm` is only the statement `assert forperm t: Ref [t.tok] :: <exemption>` of a `leak` row "
+                            "(decision 0047 item 7)")
+                continue
+            if TOK_WORD_RE.search(m.group("body")):
+                add(lineno, "the exemption of a `forperm` leak row does not mention `tok`: it names the places the method "
+                            "hands back (decision 0047 item 7)")
+            forperm_lines.add(lineno)
+            continue
+        for h in tok_hits:
+            before = code[:h.start()]
+            if not before.endswith(".") or not TOKEN_SLOT_RE.search(before[:-1]):
+                add(lineno, "`tok` outside the token slot of a block: it is only `loc(block_of(...), -1).tok` (decision 0047 "
+                            "item 4)")
+                break
+        else:
+            stripped = code.strip()
+            if re.match(r"^exhale\b", stripped):
+                add(lineno, "`exhale` of a `tok` place: a token is consumed only by a call whose `requires` has the block "
+                            "site (decision 0047 item 6)")
+            elif re.search(r"\.tok\s*:=", code):
+                add(lineno, "assignment to `tok`: a token is created only by a postcondition (decision 0047 item 2)")
+            elif TOK_STATEMENT_RE.match(code):
+                pass  # a conjunct of a view, a block site, an explicit row or a loop place
+            elif re.match(r"^\s*(?:var\s+)?[A-Za-z_$][\w$']*\s*(?::\s*Perm\s*)?:=", code):
+                rhs = code.split(":=", 1)[1]
+                if TOK_WORD_RE.search(strip_perm_calls(rhs)):
+                    add(lineno, "`tok` in the right-hand side of an assignment beyond the `perm(...)` snapshot of a loop "
+                                "place's amount (decision 0047 item 10)")
+            else:
+                add(lineno, f"`tok` in `{stripped.split()[0] if stripped else ''}`: it is only a conjunct of a `requires`, "
+                            "`ensures`, `invariant` or `assert`, or inside the `perm(...)` of a snapshot (decision 0047 items "
+                            "4, 7 and 10)")
+    if decl_lines and not used:
+        add(min(decl_lines), "`field tok: Bool` in a program that never uses a token: only a heap program (one with a view "
+                             "call or a block site) declares it (decision 0047 item 7)")
+    if used and not decl_lines:
+        add(used[0], "`tok` is used but `field tok: Bool` is not declared")
+    return forperm_lines
+
+
+
 def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
              map_name: str | None = None) -> list[str]:
     """Problems of one Viper file with its position map (None: the map is missing)."""
@@ -1581,6 +1931,8 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     lint_ghost_amounts(src, decls, add)
     lint_perm_locals(src, decls, add)
     lint_ghost_refs(src, decls, add)
+    forperm_lines = lint_heap_token(src, decls, add)
+    lint_views(src, decls, add)
 
     if map_text is None:
         problems.append(f"{name}: no position map ({map_name or name + MAP_SUFFIX})")
@@ -1601,6 +1953,11 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
                                 f"{name} line {lineno} has the Viper error id `{e.error_id}`, "
                                 f"which a `{kind}` line cannot produce (expected "
                                 + " or ".join(f"`{i}`" for i in sorted(allowed)) + ")")
+    for lineno in sorted(forperm_lines):
+        for e in by_line.get(lineno, []):
+            if e.category != "leak":
+                problems.append(f"{map_name or name + MAP_SUFFIX}:{e.map_line}: the entry for {name} line {lineno}, a `forperm` "
+                                f"assertion, has the category `{e.category}`: `forperm` is only a `leak` row (decision 0047 item 7)")
     nlines = len(src.code) - (1 if src.code and src.code[-1] == "" and text.endswith("\n") else 0)
     for lineno, group in sorted(by_line.items()):
         if lineno > nlines or not src.code[lineno - 1].strip():

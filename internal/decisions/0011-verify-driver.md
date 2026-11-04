@@ -148,6 +148,8 @@ Decision 0002 fixed the integration: EDG's front end compiled into our binary, w
     | `lifetime` | a pointer is used after its object may have ended, or an object's address may still be in use when its lifetime ends (decision 0032) | the use; the closing brace or `return` that ends the lifetime |
     | `pointer-comparison` | `==` or `!=` compares pointers that may point into different objects, one of them one past its end (decision 0037) | the operator |
     | `unsequenced` | two accesses to one object, at least one a write, that C does not order, or an access and a call that may change the object, in an order C leaves open (decisions 0028, 0039) | the later access, or the later call |
+    | `invalid-free` | `free` may be given what is not the start of an allocation the function owns entirely: a block already freed, a local, a global, a member, or a block a callee may still hold a pointer to (decision 0047) | the call of `free` |
+    | `leak` | a function may return while it still owns an allocation its `ensures` does not hand back, `main`'s return included; or an iteration of a loop may end while it owns an allocation the loop does not carry (decision 0047) | the function's closing brace; for an iteration, the loop body's closing brace |
 
 11. **Silicon** is run as `java -Xss128m -jar silicon.jar --z3Exe <z3> --numberOfErrorsToReport 0 <file.vpr>`
     (the same command the harness uses for `.vpr` tests), from a private temporary directory. Its verdict is

@@ -9,7 +9,7 @@ at the line of the C or pass:[C++] source that causes it:
 <file>:<line>: note: <what the note says>
 ----
 
-The *category* names what could not be proved. There are eighteen, and each has a
+The *category* names what could not be proved. There are twenty, and each has a
 section below. A *note* line follows an error when a second place matters: the
 clause of a contract that failed, or the callee's clause that a call does not
 meet. Errors are sorted by file, line and category, and the exit status is 1
@@ -626,4 +626,72 @@ different objects:
 [source,c]
 ----
 include::example$error-messages/unsequenced_fixed.c[tag=source]
+----
+
+== invalid-free
+
+`free` may be given something that is not the start of an allocation the
+function owns entirely. It is reported at the call of `free`:
+
+* an allocation already freed (a _double free_);
+* the address of a local or global variable, or of a structure's member (the
+  member of an allocated structure is not the allocation, even when it is the
+  first member and has the same address);
+* an object the function only borrows (its contract `owns` it, or `owns_block`
+  it in both its `requires` and its `ensures`, so it must give it back);
+* an allocation that a function it called may still hold a pointer to, or part
+  of which it gave away (xref:memory.adoc#heap[Allocated memory]).
+
+Each of these is undefined behaviour in C and pass:[C++]. `free(NULL)` does
+nothing and is not an error.
+
+[source,c]
+----
+include::example$error-messages/invalid_free_error.c[tag=source]
+----
+
+[source,console]
+----
+invalid_free_error.c:15: error: invalid-free: frees `p`, which may already be freed or may not be an allocation (a local, a global or a member)
+----
+
+*How to fix it.* Free each allocation once, after its last use, and only what
+`malloc` or `calloc` returned; a function that takes an allocation from its
+caller says so with `cerastes_owns_block(p)` in its `requires`:
+
+[source,c]
+----
+include::example$error-messages/invalid_free_fixed.c[tag=source]
+----
+
+== leak
+
+A function may end while it still owns an allocation that its `ensures` does
+not hand to its caller: nothing can free it any more. It is reported at the
+function's closing brace, whichever `return` leaks it, as VeriFast reports
+leaks; `main` is checked like every other function, so free everything before
+it returns. A path that ends in `exit`, `abort` or `_Exit` is not checked.
+
+An iteration of a loop that ends while it owns an allocation made in it (and
+not carried by the loop to its next iteration) is reported at the loop body's
+closing brace.
+
+[source,c]
+----
+include::example$error-messages/leak_error.c[tag=source]
+----
+
+[source,console]
+----
+leak_error.c:15: error: leak: `stash` may return while it still owns an allocation that its `ensures` does not hand back
+----
+
+*How to fix it.* Free the allocation on every path before the function returns,
+or hand it to the caller: an `ensures` with `cerastes_owns_block(r)` gives the
+caller the allocation the function returns
+(xref:memory.adoc#heap[Allocated memory]):
+
+[source,c]
+----
+include::example$error-messages/leak_fixed.c[tag=source]
 ----

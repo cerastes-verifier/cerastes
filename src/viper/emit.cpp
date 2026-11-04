@@ -74,6 +74,7 @@ std::string expr(const E& e, bool top = false) {
     case LExpr::Kind::NoPerm: return "none";
     case LExpr::Kind::Acc: return "acc(" + expr(e->a) + "." + e->text + (e->b ? ", " + expr(e->b, true) : std::string()) + ")";
     case LExpr::Kind::Old: return "old(" + expr(e->a, true) + ")";
+    case LExpr::Kind::ForPerm: return "forperm " + e->text + ": Ref [" + e->text + ".tok] :: " + expr(e->a, true);  // decision 0047 item 7: only ever the whole condition of an assert
   }
   return "?";
 }
@@ -229,7 +230,7 @@ Emitted emit(const low::LProgram& program, const EmitOptions& options) {
   if (program.memory) {
     std::map<std::string, std::string> cells;
     for (const auto& [suffix, t] : program.cell_types) cells[suffix] = type_name(t);
-    p.raw(memory_prelude_text(cells, program.globals));
+    p.raw(memory_prelude_text(cells, program.globals, program.heap));
   }
   const std::string prelude = prelude_text(program.prelude_used);
   p.raw(prelude);

@@ -57,16 +57,17 @@ const an_attr_registration kAttributes[] = {
     // later redeclaration does not stop an earlier use (first-declaration gap, M5b; decision 0007).
     // owning (decisions 0029 item 1 and 0040 item 3): on a parameter, with no argument list or `owning(n)` (an unevaluated expression, M4.5e1:
     // the encoder rejects it today).  The attribute lands on the parameter's `param_type.attributes` (P52); registration accepts a non-pointer
-    // parameter and a duplicate, and does not honour RAF_MUST_MATCH there, so the encoder checks every declaration.  Target `p` only: a
-    // function, a local, a global and a field wait for M4.5d2 and M4.5c, and EDG refuses them itself until then.
-    {"owning", "?(X)", "p", RAF_NO_FLAGS},
+    // parameter and a duplicate, and does not honour RAF_MUST_MATCH there, so the encoder checks every declaration.  A
+    // function (target `r`, M4.5d2a, decision 0047 item 5; RAF_ENTITY_ATTACHED, so its position is after the parameter list or in the leading
+    // attribute list) is accepted; a local, a global and a field wait for M4.5d2b, and EDG refuses them itself until then.
+    {"owning", "?(X)", "r|p", RAF_ENTITY_ATTACHED},
     // The initialization markers (decision 0042 item 2; P4222's markers in the cerastes spelling; P54, P64).  `uninit` is a declaration
     // attribute on the definition of an automatic local (`v:+a!`, like `invariant`'s `s:+i!`: EDG itself refuses it on a global, a static
     // local (#1862), a parameter, a field and a function (#1835)).  `ref_to_uninit` and `must_init` are parameter markers like `owning`
-    // (`p`, no flags: RAF_ENTITY_ATTACHED with `p` alone aborts EDG at startup); the attributes accumulate over redeclarations and
-    // registration accepts a non-pointer parameter, a duplicate and both markers on one parameter, so the encoder checks each declaration.
+    // (`r|p` with RAF_ENTITY_ATTACHED from M4.5d2a: `p` alone with the flag aborts EDG at startup, `r|p` works, P52;
+    // `v` and `d` stay unregistered, so EDG refuses a local and a field); the attributes accumulate over redeclarations and registration accepts a non-pointer parameter, a duplicate and both markers on one parameter, so the encoder checks each declaration.
     {"uninit", "", "v:+a!", RAF_NO_FLAGS},
-    {"ref_to_uninit", "", "p", RAF_NO_FLAGS},
+    {"ref_to_uninit", "", "r|p", RAF_ENTITY_ATTACHED},
     {"must_init", "", "p", RAF_NO_FLAGS},
     {"predicate", "", "r", RAF_ENTITY_ATTACHED | RAF_NO_CONSTANT_EVALUATION},
     {"pure", "", "r", RAF_ENTITY_ATTACHED | RAF_NO_CONSTANT_EVALUATION},

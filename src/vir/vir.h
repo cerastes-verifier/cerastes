@@ -166,8 +166,11 @@ enum class BinaryOp {
 };
 
 // The permission an `Atom` stands for (decision 0037 item 6).  `Owns` and `Reads` take a place `*p` (p a pointer parameter) and `Live` the
-// pointer `p`.
-enum class AtomKind { Owns, Reads, Live };
+// pointer `p`.  `OwnsBlock` (decision 0047 item 4; appended) takes the pointer `p` (a pointer `Formal`, or in an `ensures` the `Result`) and stands
+// for the whole heap block `p` starts, with write permission: offset 0, the free token, the liveness cell, the length and every leaf cell.  It has no
+// ghost amount (`amount` stays -1, requires_atom_count and contract_atoms skip it) and no partner rule: in a `requires` alone the function takes
+// the block, in an `ensures` alone (on the `Result`) it hands the block to the caller, in both on one `Formal` it borrows and returns it.
+enum class AtomKind { Owns, Reads, Live, OwnsBlock };
 
 struct Expr {
   enum class Kind {
@@ -496,6 +499,15 @@ struct Function {
   // closing brace are `noreturn` errors and the method ensures `false`; without one it is a trusted contract that ensures `false`
   // (`trusted_reason` required).  It has no user `ensures`.
   bool noreturn = false;
+  // Decision 0047 items 2 and 5: P4222's `ref_to_uninit` on the RESULT (a pointer): the block the result owns (the `ensures` holds an `OwnsBlock` atom on
+  // `Result`) has no value on return (its flags are unknown, `uninitialized` on a read before a write).  `None` (every function until M4.5d2a) or
+  // `RefToUninit`; `MustInit` is refused (the encoder never sets it).  check_program: a `RefToUninit` needs a pointer result and an `ensures` `OwnsBlock`
+  // on the `Result`.
+  InitMarker result_init = InitMarker::None;
+  // Decision 0047 item 2 (D): the function ends the allocation its one pointer parameter starts (the typed view of `free`): the `requires` holds an
+  // `OwnsBlock` atom on parameter 0 (guarded `p == NULL ||`) that the `ensures` does not return, and the lowering adds the free checks (`invalid-free`).
+  // check_program: a void function of exactly one pointer parameter, a `requires` `OwnsBlock` on it, no `ensures` `OwnsBlock` on it.
+  bool deallocates = false;
 
   bool verified() const { return body != nullptr; }
 
@@ -672,6 +684,11 @@ struct AtomSite {
 // operand first; the arms of `?:` then-arm first).  An Atom in a position the record forbids (under `!`, inside `==`, as an argument, on
 // the left of `||`, under `Old`, ...) is not listed: check_program reports it.  The k-th `requires` site's `amount` is k.
 std::vector<AtomSite> contract_atoms(const Function& f);
+// The `OwnsBlock` atoms of `f`'s contract (decision 0047 item 4), the `requires` first and then the `ensures`, in evaluation order, with the same guards
+// and positions as contract_atoms (an OwnsBlock in a position the record forbids is not listed: check_program reports it).  contract_atoms never lists
+// them, so every loop over its sites, the numbering of the ghost amounts and every `nreq` stay as they were.  `AtomSite::clause`/`in_ensures` say where
+// the atom is written, `atom->a` is the pointer it names (a `Formal` or the `Result`), `path`/`via` are empty, `base` is `atom->a`.
+std::vector<AtomSite> contract_block_atoms(const Function& f);
 // The atoms of the `invariant` clauses of loop `s` (a `While` statement) in the positions of decision 0037 item 5 (decision 0040 item 5): in
 // clause order, each clause in evaluation order, with the same guards (their `cond`s hold no atom, call or side effect, and may read memory
 // like a contract's, decision 0045 item 9).  `AtomSite::clause` is the index in `s.invariants`, `in_ensures` is false, `atom->amount` is -1.  An atom of an invariant elsewhere

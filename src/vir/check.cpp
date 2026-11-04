@@ -509,12 +509,15 @@ class Checker {
     for (const Clause& c : f.ensures_) collect_atoms(c.expr, all);
     for (const Clause& c : f.decreases_) collect_atoms(c.expr, all);
     const std::vector<AtomSite> sites = contract_atoms(f);
+    const std::vector<AtomSite> block_sites = contract_block_atoms(f);  // decision 0047 item 4: no ghost amount, no partner
     std::set<const Expr*> placed;
     for (const AtomSite& s : sites) placed.insert(s.atom);
+    for (const AtomSite& s : block_sites) placed.insert(s.atom);
     for (const Expr* a : all)
       if (placed.count(a) == 0)
         err(a->loc, "a permission atom in a position decision 0037 item 5 does not allow (a top-level conjunct, the right of `||` or an arm of `?:` whose condition holds no atom, call or side effect)");
-    if (placed.size() != sites.size()) err(f.loc, "a permission atom reachable twice in the contract of '" + f.c_name + "'");
+    if (placed.size() != sites.size() + block_sites.size()) err(f.loc, "a permission atom reachable twice in the contract of '" + f.c_name + "'");
+    block_atoms(f, sites, block_sites);
     // Requires atoms are numbered in evaluation order; no two of one kind on one parameter (the partner would be ambiguous).
     std::vector<const AtomSite*> req;
     for (const AtomSite& s : sites)
@@ -558,7 +561,51 @@ class Checker {
       if (f.params[k].is_restrict && !restrict_backed(f, static_cast<int>(k)))
         err(f.params[k].loc, "parameter " + std::to_string(k + 1) + " of '" + f.c_name +
                                  "' is `restrict` without `owns(*p)` in its `requires` and `ensures` (decision 0037 item 2)");
-    init_markers(f, sites);
+    init_markers(f, sites, block_sites);
+  }
+
+  // Decision 0047 items 2, 4 and 5: the rules of the `owns_block` atoms (the encoder reports each first with its own message; this is the backstop).
+  // An atom names a pointer parameter or the result; at most one per operand per clause list; none beside an `owns`/`reads`/`live` of the same
+  // root; an `ensures` atom on a parameter needs one in the `requires` on the same parameter (it borrows and returns); none on the result in a
+  // `requires` (an `Expr::Kind::Result` is not allowed there).  `result_init` and `deallocates` need the atoms they stand for.
+  void block_atoms(const Function& f, const std::vector<AtomSite>& sites, const std::vector<AtomSite>& block_sites) {
+    auto operand_key = [](const AtomSite& s) { return atom_place(*s.atom).root; };
+    for (size_t i = 0; i < block_sites.size(); ++i) {
+      const AtomSite& a = block_sites[i];
+      const int key = operand_key(a);
+      if (key == kNoPlaceKey) continue;  // refused in expr()
+      for (size_t j = 0; j < i; ++j)
+        if (block_sites[j].in_ensures == a.in_ensures && operand_key(block_sites[j]) == key)
+          err(a.atom->loc, "the same `owns_block` atom twice in one contract list (decision 0047 item 4)");
+      for (const AtomSite& o : sites)
+        if (atom_place(*o.atom).root == key && atom_place(*o.atom).via.empty())
+          err(a.atom->loc, "an `owns_block` atom beside `owns`, `reads` or `live` of the same pointer (decision 0047 item 4)");
+      if (a.in_ensures && key >= 0) {
+        bool taken = false;
+        for (const AtomSite& r : block_sites)
+          if (!r.in_ensures && operand_key(r) == key) taken = true;
+        if (!taken) err(a.atom->loc, "an `ensures` `owns_block` of a parameter without one in the `requires` (it would return a block it never took; decision 0047 item 4)");
+      }
+    }
+    if (f.result_init != InitMarker::None) {
+      bool on_result = false;
+      for (const AtomSite& s : block_sites)
+        if (s.in_ensures && operand_key(s) == kResultSiteKey) on_result = true;
+      if (f.result_init != InitMarker::RefToUninit) err(f.loc, "'" + f.c_name + "' has a result marker that is not `ref_to_uninit` (decision 0047 item 5)");
+      else if (!f.ret.is_ptr()) err(f.loc, "'" + f.c_name + "' is `ref_to_uninit` on its result but does not return a pointer (decision 0047 item 5)");
+      else if (!on_result) err(f.loc, "'" + f.c_name + "' is `ref_to_uninit` on its result without `owns_block` of the result in its `ensures` (decision 0047 item 5)");
+    }
+    if (f.deallocates) {
+      bool taken = false, returned = false;
+      for (const AtomSite& s : block_sites) {
+        if (operand_key(s) != 0) continue;
+        (s.in_ensures ? returned : taken) = true;
+      }
+      if (!f.ret.is_void() || f.params.size() != 1 || !f.params[0].type.is_ptr())
+        err(f.loc, "'" + f.c_name + "' deallocates but is not a void function of exactly one pointer parameter (decision 0047 item 2)");
+      else if (!taken || returned)
+        err(f.loc, "'" + f.c_name + "' deallocates but its `requires` does not take `owns_block` of its parameter, or its `ensures` returns it (decision 0047 item 2)");
+    }
   }
 
   // The reads `*p` (`Deref(Formal k)`) of a contract expression, each with whether it stands under `Old`.
@@ -575,7 +622,7 @@ class Checker {
   // The initialization markers (decision 0042 item 4), repeated as a backstop of the encoder: a marker on a pointer parameter whose `requires`
   // owns `*p` (and, for `must_init`, whose `ensures` does), no `reads(*p)` beside it, `must_init` not on a `noreturn` function, and none of the
   // contract reads of item 6.
-  void init_markers(const Function& f, const std::vector<AtomSite>& sites) {
+  void init_markers(const Function& f, const std::vector<AtomSite>& sites, const std::vector<AtomSite>& block_sites) {
     for (size_t i = 0; i < f.params.size(); ++i) {
       const Param& pr = f.params[i];
       if (pr.init == InitMarker::None) continue;
@@ -597,6 +644,9 @@ class Checker {
         if (s.atom->atom == AtomKind::Owns && pk.path.empty()) (s.in_ensures ? owns_out : owns_in) = true;
         else if (s.atom->atom == AtomKind::Reads) reads_any = true;
       }
+      // Decision 0047 item 4: `owns_block(p)` is the whole block, with the flags unless the parameter is marked: it takes the place of `owns(*p)`.
+      for (const AtomSite& s : block_sites)
+        if (s.atom->a != nullptr && s.atom->a->kind == Expr::Kind::Formal && s.atom->a->index == k) (s.in_ensures ? owns_out : owns_in) = true;
       if (!owns_in) err(pr.loc, who + " is marked `ref_to_uninit` or `must_init` without `owns(*p)` in its `requires` (decision 0042 item 4)");
       if (pr.init == InitMarker::MustInit && !owns_out) err(pr.loc, who + " is `must_init` without `owns(*p)` in its `ensures` (decision 0042 item 4)");
       if (reads_any) err(pr.loc, who + " is marked `ref_to_uninit` or `must_init` beside `reads(*p)` (decision 0042 item 4)");
@@ -623,7 +673,7 @@ class Checker {
     for (const AtomSite& st : sites) placed.insert(st.atom);
     if (s.form == LoopForm::DoOnce) return;  // refused one by one in expr()
     for (const Expr* a : all)
-      if (placed.count(a) == 0)
+      if (placed.count(a) == 0 && a->atom != AtomKind::OwnsBlock)  // an `owns_block` of an invariant is refused in expr() (decision 0047 item 4)
         err(a->loc, "a permission atom in a position decision 0037 item 5 does not allow (a top-level conjunct, the right of `||` or an arm of `?:` whose condition holds no atom, call or side effect)");
     if (placed.size() != sites.size()) err(s.loc, "a permission atom of an invariant reachable twice");
     for (size_t k = 0; k < sites.size(); ++k) {
@@ -1086,6 +1136,20 @@ class Checker {
         }
         if (old_depth_ > 0) { err(e.loc, "a permission atom under `old`"); break; }
         if (!e.type.is_bool()) err(e.loc, "a permission atom is not a bool");
+        if (e.atom == AtomKind::OwnsBlock) {
+          // Decision 0047 item 4: `owns_block(p)` of a pointer parameter or, in an `ensures`, the result: the whole heap block, with no ghost amount.
+          // In an invariant (d2b), on a global, a member, a load or a pointer variable it is refused.
+          if (in_invariant_) { err(e.loc, "an `owns_block` atom in a loop invariant (decision 0047 item 4: M4.5d2b)"); break; }
+          if (e.implicit_atom || e.amount != -1) err(e.loc, "an `owns_block` atom with a ghost amount or marked implicit (decision 0047 item 4)");
+          if (e.a == nullptr || !sub(e.a)) break;
+          const bool formal = e.a->kind == Expr::Kind::Formal;
+          const bool result = e.a->kind == Expr::Kind::Result && ctx == Ctx::Ensures;
+          if (!formal && !result)
+            err(e.loc, "an `owns_block` atom of something other than a pointer parameter or, in an `ensures`, the result (decision 0047 item 4: a place reached through a load, a global, `old`: M4.5d2b)");
+          else if (!accepted_pointer(e.a->type))
+            err(e.loc, "an `owns_block` atom of something that is not a pointer to a bool, an integer, a struct or a pointer");
+          break;
+        }
         if (e.a != nullptr && !in_invariant_) mark_contract_place(e.a);  // `owns(g)` / `reads(g)` / `owns(p->x)` of a contract
         if (!sub(e.a)) break;
         {
@@ -1103,7 +1167,7 @@ class Checker {
             err(e.loc, "a permission atom on a global in a loop invariant (decision 0041 item 10: the globals the function holds are in every loop's invariant already)");
             break;
           }
-          // A contract's place has a Formal, a global or (an `ensures`, through a step: an atom on the result itself is M4.5d2's) the result for its root; an
+          // A contract's place has a Formal, a global or (an `ensures`, through a step: an atom on the result itself is M4.5d2b's) the result for its root; an
           // invariant's a pointer variable, the address of a cell or (through a load) a global.
           const bool root_ok = in_invariant_ ? (place->kind == Expr::Kind::Local || place->kind == Expr::Kind::AddrOf || (place->kind == Expr::Kind::GlobalAddr && stepped))
                                              : (place->kind == Expr::Kind::Formal || place->kind == Expr::Kind::GlobalAddr ||

@@ -1,0 +1,16 @@
+// Emitted by cerastes verify (M4.5d2a) for scripts/test_lint_viper.py: the typed view `f_free__4`, with the fields of its program.
+field v_bool: Bool
+field d_bool: Bool
+field v_int: Int
+field d_int: Bool
+field v_ptr_struct_2_node: Ref
+field d_ptr_struct_2_node: Bool
+field tok: Bool
+field lv: Bool
+
+// C/C++ function `free`
+// cerastes:trusted-contract vlibc: free ends the allocation ptr is the start of; free(NULL) does nothing (C23 7.24.3.3); typed view: one struct out (20 bytes), decision 0047
+method f_free__4(p_ptr__0: Ref)
+  requires ((p_ptr__0 == null) || (((p_ptr__0 == loc(block_of(p_ptr__0), offset_of(p_ptr__0))) && (0 <= offset_of(p_ptr__0))) && (offset_of(p_ptr__0) <= len(block_of(p_ptr__0))))) && (((p_ptr__0 != null) && (offset_of(p_ptr__0) < len(block_of(p_ptr__0)))) ==> (((((((((len(member(p_ptr__0, 0)) == 1) && (len(member(loc(member(p_ptr__0, 0), 0), 0)) == 1)) && (len(member(loc(member(p_ptr__0, 0), 0), 1)) == 1)) && (len(member(p_ptr__0, 1)) == 1)) && (len(member(p_ptr__0, 2)) == 1)) && (len(member(loc(member(p_ptr__0, 2), 0), 0)) == 1)) && (len(member(loc(member(p_ptr__0, 2), 0), 1)) == 1)) && (p_ptr__0 != loc(member(p_ptr__0, 0), 0))) && (p_ptr__0 != loc(member(p_ptr__0, 2), 0))))
+  requires (!(p_ptr__0 == null)) ==> (((((((((((((((((((((p_ptr__0 != null) && ((p_ptr__0 == null) || (((p_ptr__0 == loc(block_of(p_ptr__0), offset_of(p_ptr__0))) && (0 <= offset_of(p_ptr__0))) && (offset_of(p_ptr__0) <= len(block_of(p_ptr__0)))))) && (offset_of(p_ptr__0) == 0)) && acc(loc(block_of(p_ptr__0), (-1)).tok)) && loc(block_of(p_ptr__0), (-1)).tok) && (lvloc(block_of(p_ptr__0)) == loc(block_of(p_ptr__0), (-2)))) && acc(lvloc(block_of(p_ptr__0)).lv)) && ((len(block_of(p_ptr__0)) == 1) && (((((((((len(member(p_ptr__0, 0)) == 1) && (len(member(loc(member(p_ptr__0, 0), 0), 0)) == 1)) && (len(member(loc(member(p_ptr__0, 0), 0), 1)) == 1)) && (len(member(p_ptr__0, 1)) == 1)) && (len(member(p_ptr__0, 2)) == 1)) && (len(member(loc(member(p_ptr__0, 2), 0), 0)) == 1)) && (len(member(loc(member(p_ptr__0, 2), 0), 1)) == 1)) && (p_ptr__0 != loc(member(p_ptr__0, 0), 0))) && (p_ptr__0 != loc(member(p_ptr__0, 2), 0))))) && acc(loc(member(loc(member(p_ptr__0, 0), 0), 0), 0).v_int)) && acc(loc(member(loc(member(p_ptr__0, 0), 0), 0), 0).d_int)) && (loc(member(loc(member(p_ptr__0, 0), 0), 0), 0).d_int ==> (((-2147483648) <= loc(member(loc(member(p_ptr__0, 0), 0), 0), 0).v_int) && (loc(member(loc(member(p_ptr__0, 0), 0), 0), 0).v_int <= 2147483647)))) && acc(loc(member(loc(member(p_ptr__0, 0), 0), 1), 0).v_bool)) && acc(loc(member(loc(member(p_ptr__0, 0), 0), 1), 0).d_bool)) && acc(loc(member(p_ptr__0, 1), 0).v_int)) && acc(loc(member(p_ptr__0, 1), 0).d_int)) && (loc(member(p_ptr__0, 1), 0).d_int ==> (((-2147483648) <= loc(member(p_ptr__0, 1), 0).v_int) && (loc(member(p_ptr__0, 1), 0).v_int <= 2147483647)))) && acc(loc(member(loc(member(p_ptr__0, 2), 0), 0), 0).v_int)) && acc(loc(member(loc(member(p_ptr__0, 2), 0), 0), 0).d_int)) && (loc(member(loc(member(p_ptr__0, 2), 0), 0), 0).d_int ==> (((-2147483648) <= loc(member(loc(member(p_ptr__0, 2), 0), 0), 0).v_int) && (loc(member(loc(member(p_ptr__0, 2), 0), 0), 0).v_int <= 2147483647)))) && acc(loc(member(loc(member(p_ptr__0, 2), 0), 1), 0).v_bool)) && acc(loc(member(loc(member(p_ptr__0, 2), 0), 1), 0).d_bool))
+  decreases _

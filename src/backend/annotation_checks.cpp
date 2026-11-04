@@ -120,7 +120,8 @@ a_constant_ptr unknown_callee_constant(a_constant_ptr c) {
 // The specification functions of <cerastes.h> (namespace cerastes).
 bool is_spec_name(const char* n) {
   return n != nullptr && (std::strcmp(n, "old") == 0 || std::strcmp(n, "owns") == 0 || std::strcmp(n, "reads") == 0 ||
-                          std::strcmp(n, "live") == 0 || std::strcmp(n, "forall") == 0 || std::strcmp(n, "owns_range") == 0);
+                          std::strcmp(n, "live") == 0 || std::strcmp(n, "forall") == 0 || std::strcmp(n, "owns_range") == 0 ||
+                          std::strcmp(n, "owns_block") == 0);
 }
 
 // Whether `ns` (an alias resolved) is the namespace cerastes declared in the
@@ -1007,7 +1008,8 @@ bool is_protected_macro_name(const std::string& n, const std::set<std::string>& 
                                       "fold",      "unfold",   "predicate", "pure",     "decreases", "old",
                                       "owns",      "reads",    "live",    "forall",  "owns_range", "CERASTES_H",
                                       "owning",    "uninit",   "ref_to_uninit", "must_init",
-                                      "cerastes_owns", "cerastes_reads", "cerastes_live", "cerastes_old_", "cerastes_old"};
+                                      "cerastes_owns", "cerastes_reads", "cerastes_live", "cerastes_old_", "cerastes_old",
+                                      "owns_block", "cerastes_owns_block", "cerastes_zeroed"};
   for (const char* f : fixed)
     if (n == f) return true;
   if (n.compare(0, 9, "CERASTES_") == 0) return true;

@@ -31,8 +31,10 @@ struct LExpr {
   // Null, Field, PermOf, Write, NoPerm, Acc and Dom are the memory model's (decision 0032 item 5; decision 0028 item 2); they appear only in
   // a program that has a cell or a pointer, and `LProgram::memory` says so.  Old (decision 0037 items 6-7) is Viper's `old(a)`, in an
   // `ensures` and in a method body (the state at entry).  Acc has an optional amount in `b` (a Perm expression; null: full permission), and
-  // Ite, PermOf, Write, NoPerm and PermDiv are the Perm-valued expressions (`LType::Perm` variables hold them).
-  enum class Kind { IntLit, BoolLit, Var, Un, Bin, Ite, Fn, ModPow2, DivPow2, Null, Field, PermOf, Write, NoPerm, Acc, Dom, Old } kind = Kind::IntLit;
+  // Ite, PermOf, Write, NoPerm and PermDiv are the Perm-valued expressions (`LType::Perm` variables hold them).  ForPerm (decision 0047 item 7) is
+  // `forperm t: Ref [t.tok] :: a`, the one assertion that every free token the method holds satisfies `a` (a leak row's); `a` is in `a` and mentions the
+  // binder `t`, never `tok`; it appears only in a heap program (`LProgram::heap`), as the whole condition of an `Assert`.
+  enum class Kind { IntLit, BoolLit, Var, Un, Bin, Ite, Fn, ModPow2, DivPow2, Null, Field, PermOf, Write, NoPerm, Acc, Dom, Old, ForPerm } kind = Kind::IntLit;
   std::string text;          // IntLit: a decimal (possibly negative); Var: the name; Fn: the prelude function; ModPow2, DivPow2: the divisor, 2^k, a decimal;
                              // Field, PermOf, Acc: the Viper field (`v_int`, `d_int`, `lv`); Dom: the domain function (`loc`, `len`, ...)
   bool bool_value = false;   // BoolLit
@@ -59,6 +61,7 @@ E no_perm();                                // `none`
 E acc(E recv, std::string field_name);      // `acc(recv.field)`, in an `exhale` or a contract
 E acc(E recv, std::string field_name, E amount);  // `acc(recv.field, amount)`, a contract clause (decision 0037 item 6)
 E old_(E a);                                // `old(a)`: the value in the state at entry (an `ensures`, or the body of a method)
+E for_perm(E body);                         // `forperm t: Ref [t.tok] :: body` (decision 0047 item 7), body over the binder `t` (`var("t")`)
 E perm_div(E a, int divisor);               // `a / divisor`, a Perm over a positive Int literal (decision 0037 item 6)
 // An application of one of the Block domain's functions (`loc`, `len`, `block_of`, `offset_of`, `member`, `parent_of`, `index_of`,
 // `lvloc`) or a global's block constant (`GB_<...>`, no arguments, decision 0041); any other name is refused (std::logic_error), so lowering
@@ -169,6 +172,9 @@ struct LProgram {
   // The memory prelude (decision 0032 item 5), emitted only when `memory` is set: the fields `v_<t>: <type>` and `d_<t>: Bool` of each cell
   // type `<t>` (the key; the value is the type of `v_<t>`), `field lv: Bool`, and the Block domain with its four axioms.
   bool memory = false;
+  // Decision 0047 item 7: a heap program (a view call or an `owns_block` site in some contract) declares `field tok: Bool`, the free token of a block at
+  // slot -1; every other program has no `tok` and its Viper is as it was before M4.5d2a.  Implies `memory`.
+  bool heap = false;
   std::map<std::string, LType> cell_types;
   // The Viper names of the globals' block constants, `GB_<name>__<id>` (decision 0041 item 4), in declaration order: declared `unique function
   // GB_...(): Block` inside the Block domain (only with `memory`).

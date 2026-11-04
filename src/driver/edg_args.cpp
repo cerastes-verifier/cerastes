@@ -79,7 +79,7 @@ bool is_reserved_identifier(std::string_view n) {
 bool is_cerastes_name(std::string_view n) {
   static constexpr std::string_view names[] = {"cerastes", "requires", "ensures", "invariant", "check",
                                                "fold",     "unfold",   "predicate", "pure",     "old",
-                                               "owns",     "reads",    "forall",    "owns_range", "CERASTES_H"};
+                                               "owns",     "reads",    "forall",    "owns_range", "owns_block", "CERASTES_H"};
   for (std::string_view x : names)
     if (n == x) return true;
   return n.substr(0, 9) == "CERASTES_";
