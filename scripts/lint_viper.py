@@ -1667,7 +1667,6 @@ def view_problem(src: Source, d: Decl, routine: str, declared: dict[str, set[str
         if len(implies) != 2 or norm_viper(implies[0]) != norm_viper(f"!({root} == null)"):
             return f"its second clause is not `!({root} == null) ==> <the block>`"
         raw = _flatten_and(implies[1])
-        first_atoms = _flatten_and(first)
     except ValueError as e:
         return str(e)
     atoms = [norm_viper(a) for a in raw]
