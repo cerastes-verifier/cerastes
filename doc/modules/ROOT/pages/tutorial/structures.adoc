@@ -1,0 +1,81 @@
+= Structures
+
+A C structure is a group of objects, and cerastes treats it that way: each
+member is an object of its own, which a contract can own or read separately.
+This chapter updates a structure through a pointer, owning just the member it
+writes, and then passes structures by value.
+
+== Owning one member
+
+[source,c]
+----
+include::example$tutorial/structures_point.c[tag=source]
+----
+
+[source,console]
+----
+structures_point.c: verified (2 functions; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+`move_right` writes only `+p->x+`, so its contract owns only `+p->x+`. The
+caller keeps `pt.y`, and the check after the call shows what that buys: `pt.y`
+is still 7, because `move_right` had no right to change it.
+
+The precondition also bounds `dx` and `+p->x+` so that the addition cannot
+overflow. It is written so that nothing in it overflows either: `INT_MAX - dx`
+is safe because `dx` is not negative.
+
+`cerastes_owns(*p)` of a pointer to a structure owns every member at once. Owning
+exactly the members a function touches is more work to write, and it tells each
+caller more.
+
+== Writing what you do not own
+
+Write the other member too, and the contract no longer covers the body:
+
+[source,c]
+----
+include::example$tutorial/structures_point_write_y_error.c[tag=source]
+----
+
+[source,console]
+----
+structures_point_write_y_error.c:19: error: permission: writes `p->y` without owning it: the object it points to may have ended
+----
+
+As with any pointer, the fix is either in the contract, if the function is meant
+to change `+p->y+`, or in the body, if it is not.
+
+== Structures as values
+
+A structure can also be passed and returned by value. It is then a value, not an
+object in memory, and its contract names its members directly:
+
+[source,c]
+----
+include::example$tutorial/structures_copy.c[tag=source]
+----
+
+[source,console]
+----
+structures_copy.c: verified (2 functions; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+In the postcondition, `r` is the returned structure and `r.x` its member. The
+braced initializer gives every member a value; a structure local declared
+without an initializer has none, and reading one of its members first is an
+`uninitialized` error.
+
+== What you have learned
+
+* Each member of a structure is a separate object: a contract can own or read
+  `+p->x+` alone, and the caller keeps the rest.
+* `cerastes_owns(*p)` of a structure owns all of its members.
+* Structures passed and returned by value are described member by member.
+
+== Where to read more
+
+* xref:memory.adoc#structures[Structures] on Memory and ownership, with nested
+  structures, pointer members and initializers
+* xref:error-messages.adoc#_permission[permission] and
+  xref:error-messages.adoc#_uninitialized[uninitialized]

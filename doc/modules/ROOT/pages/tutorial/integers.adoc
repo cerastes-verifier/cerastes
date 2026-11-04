@@ -1,0 +1,162 @@
+= Integers do not wrap
+
+In C, a signed overflow is undefined behaviour, an unsigned one silently wraps
+around, and a conversion to a narrower type may change the value. cerastes
+treats every one of these as an error, so a verified function computes with
+the integers you meant. This chapter shows the four checks you will meet most:
+overflow, unsigned overflow, conversions and division.
+
+== Overflow
+
+The average of two numbers is a classic place for a hidden overflow:
+
+[source,c]
+----
+include::example$tutorial/integers_average_overflow_error.c[tag=source]
+----
+
+[source,console]
+----
+integers_average_overflow_error.c:12: error: overflow: signed `int` addition may overflow
+----
+
+The result would fit in an `int`, but `a + b` might not: for two large
+arguments the sum exceeds `INT_MAX` before the division brings it back. Tests
+rarely find this; cerastes considers the largest inputs as readily as small
+ones.
+
+One fix is to compute the distance first, which stays small when the arguments
+are ordered and not negative:
+
+[source,c]
+----
+include::example$tutorial/integers_average.c[tag=source]
+----
+
+[source,console]
+----
+integers_average.c: verified (1 function; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+The precondition `0 <= a && a <= b` is what makes `b - a` safe. Another way is
+to widen: compute in `long long`, where the sum of two `int` values always fits,
+and convert back.
+
+== Unsigned arithmetic is checked too
+
+Unsigned arithmetic does not overflow in C; it wraps modulo 2^N^. A wrapped
+result is almost never what the program meant, so cerastes checks it like a
+signed one:
+
+[source,c]
+----
+include::example$tutorial/integers_unsigned_no_requires_error.c[tag=source]
+----
+
+[source,console]
+----
+integers_unsigned_no_requires_error.c:9: error: overflow: unsigned `unsigned int` subtraction may overflow (cerastes does not wrap)
+integers_unsigned_no_requires_error.c:11: error: overflow: unsigned `unsigned int` subtraction may overflow (cerastes does not wrap)
+----
+
+With `a < b`, `a - b` would wrap to a huge number. It is reported twice: in
+the body, and in the postcondition `r == a - b`, which subtracts too. The
+precondition says it cannot happen:
+
+[source,c]
+----
+include::example$tutorial/integers_unsigned.c[tag=source]
+----
+
+The postcondition is `r == a - b`, not the `r + b == a` you might write first.
+A contract is checked for every value it could be about, before the body is
+considered, so in a postcondition `r` may be any `unsigned` value, and
+`r + b` can wrap:
+
+[source,c]
+----
+include::example$tutorial/integers_unsigned_ensures_error.c[tag=source]
+----
+
+[source,console]
+----
+integers_unsigned_ensures_error.c:10: error: overflow: unsigned `unsigned int` addition may overflow (cerastes does not wrap)
+----
+
+When you do want arithmetic modulo 2^N^, write the reduction yourself, with
+`%` or a mask in a wider type
+(xref:integer-semantics.adoc#modular[Modular arithmetic,
+written out]).
+
+== Conversions
+
+A conversion to a type that cannot hold the value is an error, whether you
+write the cast or C inserts it:
+
+[source,c]
+----
+include::example$tutorial/integers_conversion_no_requires_error.c[tag=source]
+----
+
+[source,console]
+----
+integers_conversion_no_requires_error.c:12: error: conversion: the value may not fit in `short` (a conversion to a signed type must be exact)
+----
+
+A cast does not make a conversion safe; it only makes it visible. The fix is to
+know that the value fits:
+
+[source,c]
+----
+include::example$tutorial/integers_conversion.c[tag=source]
+----
+
+== Division
+
+Division has two traps: a zero divisor, and `INT_MIN / -1`, whose result is
+one more than `INT_MAX`.
+
+[source,c]
+----
+include::example$tutorial/integers_division_no_nonzero_error.c[tag=source]
+----
+
+[source,console]
+----
+integers_division_no_nonzero_error.c:11: error: division-by-zero: the divisor may be zero
+integers_division_no_nonzero_error.c:13: error: division-by-zero: the divisor may be zero
+----
+
+Again the contract's own `a / b` is reported with the body's. The precondition
+of the verified version excludes both traps:
+
+[source,c]
+----
+include::example$tutorial/integers_division.c[tag=source]
+----
+
+== Contracts are C expressions too
+
+Arithmetic in a contract means what it means in C, and it is checked the same
+way: a precondition such as `x + 1 > 0` overflows for `INT_MAX`, and cerastes
+reports it at the contract's line. Write such conditions so that nothing in them
+can overflow (`x < INT_MAX` rather than `x + 1 > x`), or widen the operands
+(xref:integer-semantics.adoc#_annotations_mean_their_c_value[Annotations mean
+their C value]).
+
+== What you have learned
+
+* Signed overflow, unsigned wrapping, a conversion that changes a value, a
+  division by zero and `INT_MIN / -1` are all errors, at the line of the
+  operation.
+* A precondition is the usual way to rule out the inputs a function cannot
+  handle; rewriting the computation or widening it are the others.
+* The same rules apply inside contracts.
+
+== Where to read more
+
+* xref:integer-semantics.adoc[Integer semantics]: the types, promotions,
+  shifts, bitwise operators and enumerations
+* xref:error-messages.adoc#_overflow[overflow],
+  xref:error-messages.adoc#_conversion[conversion] and
+  xref:error-messages.adoc#_division_by_zero[division-by-zero]

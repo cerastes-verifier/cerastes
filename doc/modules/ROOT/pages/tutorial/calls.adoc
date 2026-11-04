@@ -1,0 +1,133 @@
+= Calls and contracts
+
+cerastes verifies one function at a time. When a function calls another, the
+caller is verified against the callee's *contract*, never its body. This makes
+verification scale, because each function is proved once, and it makes the
+contract the whole interface: what the contract does not say, the caller does
+not know. This chapter shows what that means for a contract, for functions
+defined elsewhere, and for functions that do not return.
+
+== The caller sees only the contract
+
+`clamp` limits a value to a range, and its contract says exactly what the result
+is in each of the three cases:
+
+[source,c]
+----
+include::example$tutorial/calls_clamp.c[tag=source]
+----
+
+[source,console]
+----
+calls_clamp.c: verified (2 functions; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+C has no "implies" operator, so the contract writes "if the condition, then the
+result" as `!(condition) || result`. `use_clamp` is verified from these clauses
+alone: the first call is in the range, so `a == 5`; the second is below it, so
+`b == 0`.
+
+Now weaken the contract to the property most people would write first, that the
+result is in the range. The body of `clamp` is unchanged, and `clamp` still
+verifies:
+
+[source,c]
+----
+include::example$tutorial/calls_clamp_weak_ensures_error.c[tag=source]
+----
+
+[source,console]
+----
+calls_clamp_weak_ensures_error.c:26: error: postcondition: the postcondition of `use_clamp` may not hold
+calls_clamp_weak_ensures_error.c:22: note: this is the postcondition
+----
+
+The failure is in the caller. Knowing only that the results are between 0 and
+10, `use_clamp` cannot show that it returns 5. Nothing is wrong with either
+body; the contract does not say enough. When a caller fails to verify, look at
+the contracts it relies on before you look at its own code.
+
+== Functions defined elsewhere
+
+A function can have a contract and no body in the file, because it is defined in
+another file or a library. cerastes uses its contract at every call, as for any
+other function:
+
+[source,c]
+----
+include::example$tutorial/calls_declared.c[tag=source]
+----
+
+[source,console]
+----
+calls_declared.c: verified (1 function; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+Nothing in this file checks that `next_id` keeps its promise: its contract is
+*trusted*. That is what the end of every result line says: one translation unit
+is verified, on the assumption that the functions defined elsewhere satisfy the
+contracts declared here. The definition is checked when the file that defines
+it is verified; a library function that is never verified is trusted for good
+(xref:verifying.adoc#one-unit[The single-unit assumption]).
+
+A function with neither a body nor a contract cannot be used at all: a call of
+it is rejected, because cerastes would have nothing to verify the call against.
+The functions of the C library get their contracts from vlibc, the contract
+library cerastes is built with
+(xref:verifying.adoc#vlibc[The C library: vlibc]).
+
+== Functions that do not return
+
+Some functions never return: `abort` and `exit` end the program. A path that
+calls one simply ends, and a postcondition only has to hold on the paths that
+return:
+
+[source,c]
+----
+include::example$tutorial/calls_abort.c[tag=source]
+----
+
+[source,console]
+----
+calls_abort.c: verified (1 function; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+The postcondition says that `n` was even. After the test, the verifier knows
+it, because the odd case never gets past `abort()`. Without the test, an odd `n`
+reaches the `return`:
+
+[source,c]
+----
+include::example$tutorial/calls_abort_no_abort_error.c[tag=source]
+----
+
+[source,console]
+----
+calls_abort_no_abort_error.c:12: error: postcondition: the postcondition of `checked_half` may not hold
+calls_abort_no_abort_error.c:10: note: this is the postcondition
+----
+
+A function of your own declared not to return, with the `noreturn` attribute
+or `_Noreturn` in C, is checked too: cerastes proves that no path through it
+reaches a `return` or its closing brace
+(xref:verifying.adoc#no-return[Functions that do not
+return]).
+
+== What you have learned
+
+* A call is verified against the callee's contract; the caller learns only what
+  the postcondition says.
+* A contract too weak for its callers is a failure in the callers, with a
+  correct callee.
+* A function declared with a contract and defined elsewhere is trusted, and a
+  result is for one translation unit.
+* A call of a function that does not return ends its path.
+
+== Where to read more
+
+* xref:verifying.adoc#calls[Calls in expressions] and
+  xref:verifying.adoc#one-unit[The single-unit assumption]
+* xref:annotations.adoc#_declarations_that_repeat_a_contract[Declarations that
+  repeat a contract]
+* xref:error-messages.adoc#_precondition[precondition] and
+  xref:error-messages.adoc#_noreturn[noreturn]

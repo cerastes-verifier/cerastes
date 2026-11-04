@@ -1,0 +1,90 @@
+= Tutorial: verifying C with cerastes
+
+This tutorial teaches you to verify C programs with cerastes, one idea per
+chapter. You need no background in formal methods, only C. Each chapter shows a
+program that verifies, changes it in one place so that it does not, shows what
+cerastes says and why, and fixes it. The xref:verifying.adoc[reference pages]
+hold the full rules; each chapter ends with links into them.
+
+== What verification gives you
+
+A test runs your function on the inputs you thought of. A verifier proves a
+property for *every* input at once, without running the program. You state the
+property as a *contract*: what the function needs from its caller (a
+precondition) and what it promises in return (a postcondition). cerastes reads
+the contract and the function's body, and either proves that every path through
+the body keeps the promise, or names the line where it cannot.
+
+On the way it also proves the things C leaves undefined or surprising: that no
+integer operation overflows, nothing divides by zero, no variable is read before
+it is written, no pointer is dereferenced when it may be null or dangling, and
+every allocation is freed. You do not write contracts for those; they are
+checked everywhere.
+
+A proof is only as good as its contract. A function that verifies does what its
+contract says, which may be less than you meant. Much of verification is
+learning to say what you mean, and this tutorial spends most of its time there.
+
+== How you will work
+
+The cycle is the same in every chapter:
+
+. Write a function and its contract.
+. Run `cerastes verify` on the file.
+. Read the error, if there is one: it names a category (what could not be
+  proved) and the line of your source where it happens.
+. Fix the code, or the contract, or give the verifier a fact it is missing,
+  and run it again.
+
+An error means that cerastes could not exclude a problem with the information it
+had, not that a run will reach it. Often the program is right and the verifier
+needs one more fact, such as a loop invariant. The chapters show how to tell the
+two apart.
+
+== Before you start
+
+Build cerastes as xref:installation.adoc[Installation] describes, and run the
+first example there. The programs of this tutorial are in
+`doc/modules/ROOT/examples/tutorial/` of the cerastes checkout, and the output
+on these pages was produced by running the tool in that directory:
+
+[source,sh]
+----
+cd doc/modules/ROOT/examples/tutorial
+../../../../../build/cerastes verify first_proof_max.c
+----
+
+Each file begins with a few comment lines that tell cerastes's test suite what
+to expect; the pages leave them out. The line numbers in the messages are lines
+of the whole file, so the text says which line it means.
+
+Every program is C23 and also valid pass:[C++]20, and cerastes verifies each
+one in both languages. The contracts are written with the macros of
+`<cerastes.h>`, such as `CERASTES_REQUIRES`, which expand to nothing for an
+ordinary compiler, so each program that verifies also builds with clang or GCC
+(xref:ordinary-compilers.adoc[Building with ordinary compilers]).
+
+Every program on these pages is a test of cerastes: its test suite runs each
+one and checks that it verifies, or fails with the error and at the line the
+text says. The messages in the output blocks are copied from a run.
+
+== Chapters
+
+. xref:tutorial/first-proof.adoc[A first proof]: postconditions,
+  preconditions, and checks in the middle of a function.
+. xref:tutorial/integers.adoc[Integers do not wrap]: overflow, unsigned
+  arithmetic, conversions and division.
+. xref:tutorial/loops.adoc[Loops]: invariants, and proving that loops and
+  recursion end.
+. xref:tutorial/calls.adoc[Calls and contracts]: why a caller sees only the
+  contract, and functions defined elsewhere.
+. xref:tutorial/pointers.adoc[Pointers and ownership]: `owns`, `reads` and
+  `old`, null pointers and dangling ones.
+. xref:tutorial/structures.adoc[Structures]: members through pointers, and
+  structures as values.
+. xref:tutorial/heap.adoc[The heap]: `malloc`, `free` and leaks.
+
+Arrays, predicates over linked structures, and pass:[C++] templates are not
+supported yet; each gets its chapter in the version that supports it. Until
+then, cerastes rejects them with a diagnostic rather than verifying them
+partly (xref:verifying.adoc#not-supported[What is not supported yet]).

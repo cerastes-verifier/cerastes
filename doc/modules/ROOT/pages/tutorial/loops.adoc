@@ -1,0 +1,161 @@
+= Loops
+
+A loop runs a number of times that the verifier cannot see in advance, so it
+cannot follow the loop turn by turn as it follows a branch. You tell it what
+stays true on every turn, the *loop invariant*, and what shrinks on every turn,
+the *measure* that proves the loop ends. This chapter writes both for a small
+loop, breaks each, and then does the same for recursion.
+
+== A loop and its invariant
+
+This function adds the numbers from 1 to `n`:
+
+[source,c]
+----
+include::example$tutorial/loops_sum.c[tag=source]
+----
+
+[source,console]
+----
+loops_sum.c: verified (1 function; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+`CERASTES_INVARIANT` and `CERASTES_DECREASES` go right before the loop. The
+invariant is checked each time the loop condition is about to be tested: before
+the first turn, and after every turn. When the condition is false and the loop
+ends, the verifier knows the invariant and the negated condition, here
+`i <= n`, `!(i < n)` and `s == i * (i + 1) / 2`. Together they say `i == n`, so
+`s == n * (n + 1) / 2`, which is the postcondition.
+
+To prove the invariant, cerastes proves two things:
+
+* it holds when the loop is first reached;
+* if it holds at the start of a turn and the condition is true, it holds again
+  at the end of that turn.
+
+Then, by induction, it holds at every test. Notice that this argument never
+says how many turns there are: that is why it works for every `n` at once.
+
+== Why the invariant must say enough
+
+At the end of a turn, the verifier forgets everything about the loop's
+variables except what the invariant says. An invariant that is true but too
+weak leaves it without the fact it needs afterwards. Drop the relation between
+`s` and `i`:
+
+[source,c]
+----
+include::example$tutorial/loops_sum_weak_invariant_error.c[tag=source]
+----
+
+[source,console]
+----
+loops_sum_weak_invariant_error.c:18: error: overflow: signed `int` addition may overflow
+loops_sum_weak_invariant_error.c:20: error: postcondition: the postcondition of `sum_to` may not hold
+loops_sum_weak_invariant_error.c:10: note: this is the postcondition
+----
+
+The program has not changed and it is still correct, but the proof fails
+twice. Nothing bounds `s` any more, so `s += i` may overflow; and after the loop
+`s` could be anything as far as the verifier knows, so the postcondition does
+not follow. This is the most common failure when you start, and the fix is
+always the same: say in the invariant what the loop accomplishes so far.
+
+== An invariant that does not hold
+
+An invariant can also be wrong. When it is false before the first turn, the
+error is `invariant-entry`; here `s` starts at 1:
+
+[source,c]
+----
+include::example$tutorial/loops_sum_entry_error.c[tag=source]
+----
+
+[source,console]
+----
+loops_sum_entry_error.c:14: error: invariant-entry: this loop invariant may not hold on entry
+----
+
+When it holds on entry but a turn can break it, the error is
+`invariant-preserved`, at the line of the invariant; here the body adds the
+wrong value:
+
+[source,c]
+----
+include::example$tutorial/loops_sum_preserved_error.c[tag=source]
+----
+
+[source,console]
+----
+loops_sum_preserved_error.c:14: error: invariant-preserved: this loop invariant may not be preserved by an iteration
+----
+
+Both point at the invariant, because the verifier cannot know whether the
+invariant or the body is wrong. You decide which to change.
+
+== Proving that the loop ends
+
+A verified function also terminates: cerastes proves *total* correctness.
+`CERASTES_DECREASES(n - i)` gives a measure, an integer expression that every
+turn makes smaller and that never goes below zero while the loop runs. A
+measure that does not decrease is reported as `termination`:
+
+[source,c]
+----
+include::example$tutorial/loops_sum_measure_error.c[tag=source]
+----
+
+[source,console]
+----
+loops_sum_measure_error.c:15: error: termination: the measure of this loop may not decrease, or may not be bounded below by zero
+----
+
+== Recursion
+
+A recursive function needs a measure for the same reason: each call must be
+closer to the end than its caller. `CERASTES_DECREASES` on the function names
+it, and cerastes checks it at every recursive call:
+
+[source,c]
+----
+include::example$tutorial/loops_recursion.c[tag=source]
+----
+
+[source,console]
+----
+loops_recursion.c: verified (1 function; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+The recursive call `sum_to(n - 1)` is verified like any other call, against the
+contract of `sum_to`, which the proof may already use: this is induction again.
+A call that does not get closer to the end is reported at the call:
+
+[source,c]
+----
+include::example$tutorial/loops_recursion_measure_error.c[tag=source]
+----
+
+[source,console]
+----
+loops_recursion_measure_error.c:16: error: termination: the recursion through this call to `sum_to` may not terminate: its measure may not decrease, or may not be bounded below by zero
+loops_recursion_measure_error.c:10: note: this is the measure of `sum_to`
+----
+
+== What you have learned
+
+* A loop needs an invariant that holds on entry, is kept by every turn, and is
+  strong enough to prove what follows the loop.
+* After a loop, the verifier knows about the variables the loop changes only
+  what the invariant says, and that the condition is false.
+* A measure proves that a loop or a recursion ends; a verified function always
+  terminates.
+
+== Where to read more
+
+* xref:annotations.adoc#_loop_invariants[Loop invariants] and
+  xref:annotations.adoc#_termination_measures_decreases[Termination measures]
+* xref:verifying.adoc#_loops_and_termination[Loops and termination], and
+  `break`, `continue`, `do`, `switch` and `goto` on the same page
+* xref:error-messages.adoc#_invariant_entry[invariant-entry],
+  xref:error-messages.adoc#_invariant_preserved[invariant-preserved] and
+  xref:error-messages.adoc#_termination[termination]

@@ -1,0 +1,183 @@
+= A first proof
+
+This chapter verifies three small functions. Along the way it introduces the
+three annotations you will use most: a postcondition (`CERASTES_ENSURES`), a
+precondition (`CERASTES_REQUIRES`) and a check in the middle of a function
+(`CERASTES_CHECK`).
+
+== A postcondition
+
+Here is a function that returns the larger of two numbers, with a contract that
+says what "larger" means:
+
+[source,c]
+----
+include::example$tutorial/first_proof_max.c[tag=source]
+----
+
+`CERASTES_ENSURES(r, ...)` is a *postcondition*: a promise about the moment the
+function returns. Its first argument, `r`, names the returned value, and the
+rest is an ordinary C expression over `r` and the parameters. This one says that
+the result is at least `a`, at least `b`, and one of the two. A function that
+returned `a + b`, or `INT_MAX`, would meet the first half and not the second.
+
+The contract goes between the parameter list and the body. `<cerastes.h>`
+defines the macro; an ordinary compiler sees nothing there.
+
+Verify it, in the examples directory
+(xref:tutorial/index.adoc#_before_you_start[Before you start]):
+
+[source,sh]
+----
+../../../../../build/cerastes verify first_proof_max.c
+----
+
+[source,console]
+----
+first_proof_max.c: verified (1 function; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+cerastes considered every pair of `int` values at once, followed both branches,
+and showed that each `return` meets the postcondition. The rest of the line is a
+reminder of what the result rests on; xref:tutorial/calls.adoc[Calls and
+contracts] explains it.
+
+== When the proof fails
+
+Now make a mistake: the last `return` gives `a` instead of `b`.
+
+[source,c]
+----
+include::example$tutorial/first_proof_max_wrong_branch_error.c[tag=source]
+----
+
+[source,console]
+----
+first_proof_max_wrong_branch_error.c:14: error: postcondition: the postcondition of `max_of` may not hold
+first_proof_max_wrong_branch_error.c:9: note: this is the postcondition
+----
+
+An error has three parts. The *line* is where the problem happens: here the
+`return` whose value breaks the promise. The *category*, `postcondition`, says
+what kind of thing could not be proved; every category is described on
+xref:error-messages.adoc[Error messages]. The *note* points at the second place
+that matters, the clause of the contract that does not hold.
+
+cerastes does not tell you which inputs go wrong; you work that out from the
+line and the clause. That `return` is reached when `a <= b`, and then `a` may be
+smaller than `b`.
+
+== A precondition
+
+The absolute value of an `int` looks simpler still. Here is a first attempt,
+with a contract that says the result is not negative and is `x` or `-x`:
+
+[source,c]
+----
+include::example$tutorial/first_proof_abs_no_requires_error.c[tag=source]
+----
+
+[source,console]
+----
+first_proof_abs_no_requires_error.c:10: error: overflow: negating the smallest value of `int` overflows
+first_proof_abs_no_requires_error.c:13: error: overflow: negating the smallest value of `int` overflows
+----
+
+The most negative `int`, `INT_MIN`, has no positive counterpart in two's
+complement, so `-x` overflows for it, which is undefined behaviour in C.
+cerastes checks every integer operation for overflow, whether or not a contract
+mentions it (xref:tutorial/integers.adoc[the next chapter] is about this), and
+it reports two: the `return -x` in the body, and the `-x` in the postcondition,
+which is C arithmetic too and is checked for every `x`.
+
+A function that cannot handle an input says so with a *precondition*:
+
+[source,c]
+----
+include::example$tutorial/first_proof_abs.c[tag=source]
+----
+
+[source,console]
+----
+first_proof_abs.c: verified (2 functions; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+`CERASTES_REQUIRES(x != INT_MIN)` is a promise the *caller* makes. Inside
+`abs_value`, and in its postcondition, cerastes may rely on it, so both
+negations are safe. At every call, cerastes
+checks that the promise is kept.
+
+The caller, `distance_from_zero`, is verified too, and this shows how a caller
+sees a function. cerastes does not look into the body of `abs_value`. It checks that
+`-5` meets the precondition, then knows only what the postcondition says:
+the result is not negative, and is `-5` or `5`. That is enough to prove that
+it is `5`.
+
+A caller that breaks the precondition is reported at the call:
+
+[source,c]
+----
+include::example$tutorial/first_proof_abs_min_caller_error.c[tag=source]
+----
+
+[source,console]
+----
+first_proof_abs_min_caller_error.c:22: error: precondition: the precondition of `abs_value` may not hold
+first_proof_abs_min_caller_error.c:10: note: this is the requirement of `abs_value`
+----
+
+The error is in `distance_from_zero`, not in `abs_value`: the caller broke its
+side of the contract. The note shows the requirement it did not meet.
+
+== Checking a fact on the way
+
+`CERASTES_CHECK` states a fact at a point in the body. cerastes proves it there,
+and from then on may use it. It is useful to find out what the verifier knows
+when a proof fails, and to document a step of an argument:
+
+[source,c]
+----
+include::example$tutorial/first_proof_check.c[tag=source]
+----
+
+[source,console]
+----
+first_proof_check.c: verified (1 function; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+A check that does not hold is reported at its line:
+
+[source,c]
+----
+include::example$tutorial/first_proof_check_false_check_error.c[tag=source]
+----
+
+[source,console]
+----
+first_proof_check_false_check_error.c:14: error: check: this `check` may not hold
+----
+
+A check is never executed: like the other annotations it expands to nothing for
+an ordinary compiler. The C `assert` macro is checked in the same way by
+cerastes, and also runs in your build
+(xref:verifying.adoc#assert[assert]).
+
+== What you have learned
+
+* A contract is written between the parameters and the body: `CERASTES_REQUIRES`
+  for what the caller must make true, `CERASTES_ENSURES(r, ...)` for what the
+  function makes true when it returns.
+* cerastes proves the postcondition on every path, assuming the precondition;
+  it proves the precondition at every call.
+* Overflow is checked everywhere, without a contract asking for it.
+* An error names a category and a line, and a note points at the clause
+  involved.
+
+== Where to read more
+
+* xref:annotations.adoc#_contracts_requires_and_ensures[Contracts: requires and
+  ensures] and xref:annotations.adoc#_check[check]
+* xref:error-messages.adoc#_postcondition[postcondition],
+  xref:error-messages.adoc#_precondition[precondition],
+  xref:error-messages.adoc#_check[check] and
+  xref:error-messages.adoc#_overflow[overflow]

@@ -1,0 +1,120 @@
+= The heap
+
+Memory from `malloc` is the hardest kind to get right in C. An allocation can
+fail, it must be freed exactly once, and only by someone who owns it, and every
+allocation must be freed. cerastes proves all of these. This chapter allocates a
+single object, hands it from one function to another, and shows the three
+mistakes cerastes catches.
+
+== An allocation and its owner
+
+[source,c]
+----
+include::example$tutorial/heap_cell.c[tag=source]
+----
+
+[source,console]
+----
+heap_cell.c: verified (3 functions; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+`malloc` can return `NULL`, and `make_cell` tests for it before it writes.
+`cerastes_owns_block(r)` in its postcondition hands the whole allocation to
+the caller: everything `free` needs, not just the right to read and write
+`*r`. `drop_cell` takes it back with the same words in its precondition and
+frees it. `main` tests the result, uses it, and passes it on.
+
+`malloc` and `free` get their contracts from vlibc, the C library contracts
+cerastes is built with. An allocation is one object of the type the result is
+converted to, at once: `(int *)malloc(sizeof(int))`.
+
+== Forgetting the null test
+
+Leave out the test in `make_cell`, and the write may go through a null
+pointer:
+
+[source,c]
+----
+include::example$tutorial/heap_cell_no_null_test_error.c[tag=source]
+----
+
+[source,console]
+----
+heap_cell_no_null_test_error.c:13: error: null-dereference: dereferences `p`, which may be null
+----
+
+== Forgetting to free
+
+A function that still owns an allocation when it returns, and does not hand it
+to its caller, has lost it for good. That is a `leak`, reported at the closing
+brace, and `main` is no exception:
+
+[source,c]
+----
+include::example$tutorial/heap_cell_no_free_error.c[tag=source]
+----
+
+[source,console]
+----
+heap_cell_no_free_error.c:34: error: leak: `main` may return while it still owns an allocation that its `ensures` does not hand back
+----
+
+== Freeing twice
+
+After `free`, the allocation is gone and nobody owns it. Hand it to `drop_cell`
+a second time:
+
+[source,c]
+----
+include::example$tutorial/heap_cell_double_free_error.c[tag=source]
+----
+
+[source,console]
+----
+heap_cell_double_free_error.c:34: error: permission: calls `drop_cell`, which needs to own the whole allocation `p` points to, without owning it
+----
+
+The second `drop_cell(p)` asks for the whole allocation, and `main` gave it
+away in the first call: a `permission` error at the call. Two calls of `free(p)`
+in one function are reported as `invalid-free` at the second one, since the
+allocation may already be freed.
+
+== A structure on the heap
+
+An allocated structure works the same way, and its members are objects like
+those of any structure:
+
+[source,c]
+----
+include::example$tutorial/heap_struct.c[tag=source]
+----
+
+[source,console]
+----
+heap_struct.c: verified (2 functions; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+Here `main` frees the allocation itself: owning the whole block, from
+the postcondition of `make_point`, is what allows it.
+
+== What you have learned
+
+* The result of `malloc` must be tested against `NULL` before it is used.
+* `cerastes_owns_block(p)` is ownership of a whole allocation; a contract uses
+  it to hand an allocation to the caller or to take one.
+* Every allocation is freed exactly once by its owner; one that is not is a
+  `leak`, at the end of the function that loses it.
+
+That is the end of the tutorial for this version. The
+xref:memory.adoc#heap[reference on allocated memory] covers `calloc`, loops
+over allocations and the attribute `cerastes::owning`, and
+xref:memory.adoc#not-yet[What is not supported yet] says what is still
+rejected: arrays and pointer arithmetic among it.
+
+== Where to read more
+
+* xref:memory.adoc#heap[Allocated memory: malloc, calloc and free]
+* xref:verifying.adoc#vlibc[The C library: vlibc]
+* xref:error-messages.adoc#_null_dereference[null-dereference],
+  xref:error-messages.adoc#_leak[leak] and
+  xref:error-messages.adoc#_invalid_free[invalid-free]

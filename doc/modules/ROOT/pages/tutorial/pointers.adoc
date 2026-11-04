@@ -1,0 +1,169 @@
+= Pointers and ownership
+
+With a pointer, a function can read and write memory that belongs to its
+caller. To verify such code, cerastes must know which objects a function may
+touch, so that it can prove each access defined and tell the caller what kept
+its value. You say it with *ownership*: a contract states which objects the
+function owns, or may only read, while it runs. This chapter writes such
+contracts for `swap`, a reader, and a pointer that may be null, and shows what
+happens to a pointer whose object has gone.
+
+== Owning an object: swap
+
+[source,c]
+----
+include::example$tutorial/pointers_swap.c[tag=source]
+----
+
+[source,console]
+----
+pointers_swap.c: verified (2 functions; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+`cerastes_owns(*p)` in the precondition says three things: `p` is not null, it
+points to an object that exists and holds a value, and `swap` may read and write
+that object. The caller hands the object over for the duration of the call. The
+same `cerastes_owns(*p)` in the postcondition hands it back.
+
+`cerastes_old(*q)` is the value `*q` had when the function was entered, so the
+postcondition says that the two values were exchanged. In `use_swap`, `a` and
+`b` become objects in memory as soon as their addresses are taken, and after the
+call the caller knows their new values from the postcondition alone.
+
+Ownership is also what lets the verifier reason about everything else. An object
+the caller holds and the callee's contract does not name keeps its value across
+the call; the callee had no right to touch it.
+
+== Touching what you do not own
+
+Give `swap` only the right to read `*q`, with `cerastes_reads`, which the next
+section introduces:
+
+[source,c]
+----
+include::example$tutorial/pointers_swap_reads_q_error.c[tag=source]
+----
+
+[source,console]
+----
+pointers_swap_reads_q_error.c:15: error: permission: writes `*q` without owning it: the object it points to may have ended
+----
+
+`swap` writes `*q` without the right to, and the error is `permission`, at the
+write. A `permission` error usually means that the contract is missing an
+`owns` or a `reads`, or that the function accesses an object it should not.
+
+== Only reading
+
+A function that only reads takes `cerastes_reads`. The caller lends the right to
+read, and keeps the object's value:
+
+[source,c]
+----
+include::example$tutorial/pointers_reads.c[tag=source]
+----
+
+[source,console]
+----
+pointers_reads.c: verified (2 functions; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+In an `ensures`, `*p` is the value when the function returns, so the
+postcondition repeats `cerastes_reads(*p)` before it mentions `*p`. The caller's
+check after the call shows the point of `reads`: `x` is still 9, because a
+function that may only read cannot have changed it.
+
+A write under `reads` is a `permission` error. (With the `const int *` of the
+verified version, the compiler would refuse the write first, so this version
+takes an `int *`.)
+
+[source,c]
+----
+include::example$tutorial/pointers_reads_write_error.c[tag=source]
+----
+
+[source,console]
+----
+pointers_reads_write_error.c:12: error: permission: writes `*p` without owning it: the object it points to may have ended
+----
+
+== Null pointers
+
+A pointer that may be null is described by a condition in the contract, and the
+function tests it before the access. cerastes follows the test like any branch:
+
+[source,c]
+----
+include::example$tutorial/pointers_null.c[tag=source]
+----
+
+[source,console]
+----
+pointers_null.c: verified (1 function; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+Without the test, the read may be through a null pointer:
+
+[source,c]
+----
+include::example$tutorial/pointers_null_no_test_error.c[tag=source]
+----
+
+[source,console]
+----
+pointers_null_no_test_error.c:13: error: null-dereference: dereferences `p`, which may be null
+----
+
+== Pointers to objects that have ended
+
+A local variable ends when its block ends, and a pointer to it then dangles.
+While the variable exists, a pointer to it is as good as its name:
+
+[source,c]
+----
+include::example$tutorial/pointers_scope.c[tag=source]
+----
+
+[source,console]
+----
+pointers_scope.c: verified (1 function; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+Use the pointer after the block, and cerastes reports it:
+
+[source,c]
+----
+include::example$tutorial/pointers_scope_after_block_error.c[tag=source]
+----
+
+[source,console]
+----
+pointers_scope_after_block_error.c:19: error: permission: reads `*p` without owning it: the object it points to may have ended
+----
+
+Reading through `p` after the block is a `permission` error: the object `x`
+has ended, so nobody holds it any more. Any other use of the dangling pointer,
+even comparing or copying it, is reported as `lifetime`, because C makes the
+value of such a pointer indeterminate.
+
+== What you have learned
+
+* `cerastes_owns(*p)` in a precondition gives a function the right to read and
+  write `*p`, and in the postcondition gives it back; `cerastes_reads(*p)` gives
+  the right to read only.
+* `cerastes_old(*p)` is the value on entry, for postconditions that describe a
+  change.
+* An object the callee does not own keeps its value across the call.
+* Accesses without the right are `permission` errors; accesses through a
+  pointer that may be null are `null-dereference` errors.
+
+== Where to read more
+
+* xref:memory.adoc[Memory and ownership], in particular
+  xref:memory.adoc#contracts[Pointer parameters and contracts] and
+  xref:memory.adoc#_lifetimes_and_dangling_pointers[Lifetimes and dangling
+  pointers]
+* xref:annotations.adoc#_specification_functions[Specification functions]
+* xref:error-messages.adoc#_permission[permission],
+  xref:error-messages.adoc#_null_dereference[null-dereference] and
+  xref:error-messages.adoc#_lifetime[lifetime]
