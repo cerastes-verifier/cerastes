@@ -9,99 +9,78 @@ history table; the full log up to M4.4c is `git show 1fcc43b:internal/status.md`
 `git show eab4058:internal/status.md`, M4.5b1c2's `git show a5e3e30:internal/status.md`, M4.5b1c3's
 `git show 5ffb1a2:internal/status.md`, M4.5b2a's `git show 38877b4:internal/status.md`, M4.5b2b's
 `git show 1bfa705:internal/status.md`, M4.5c1's `git show cbdcce5:internal/status.md`, and M4.5c2a's
-`git show 7f11706:internal/status.md`, and M4.5c2b's `git show d26a87c:internal/status.md`.
+`git show 7f11706:internal/status.md`, M4.5c2b's `git show d26a87c:internal/status.md`, and M4.5d1's
+`git show 9d98fe8:internal/status.md`.
 
-## M4.5d1 — vlibc in cerastes (2026-11-03): done on branch `m4.5d1-vlibc`
+## M4.5d2a — the heap (2026-11-03/04): done on branch `m4.5d2a-heap`, the final check left to CI
 
-Plan: `.claude/plans/m4-5d1-vlibc.md`. Read `internal/handoff.md` next: §2 (owner steps: PR #26 first, then this branch's
-PR), §3 (notes by session; d2's new notes), §4.2 (M4.5d2: the dependency map and the d2a/d2b proposal), §8 (no question
-open).
+Plan: `.claude/plans/m4-5d2a-heap.md`. Read `internal/handoff.md` next: §2 (owner steps: PR #27 first, then push vlibc's
+`main`, then this branch's PR, and CI decides, below), §3 (M4.5d2v's and M4.5d2b's notes), §8 (questions 120–127).
 
-**Owner decisions (2026-11-03):** at planning, d1 alone with d2's preparation (question 113), reserved names generated from
-the pinned vlibc headers (114), a contract on a reserved name outside vlibc rejected even when identical (115). After audit
-round 1: an identical contract after vlibc's header accepted, the front end discarding it (116); definitions of reserved
-names and contracts on them rejected for C linkage in any namespace and C++'s global namespace, four pins re-expected
-(117). After the first run of the new tests: the two alias pins re-expected `unsupported_attribute` (118); after the first
-Linux run, the three glibc `assert` near misses gain a `side_effect_not_evaluated` expect line at their line (119). The owner
-accepted the Linux host's key during the session. The session ran in the worktree `.claude/worktrees/m4.5d1` (from
-c2b's tip `d26a87c`, stacked on PR #26), its baseline in the detached `.claude/worktrees/m4.5d1-base`; vlibc's half was
-already vlibc's `5962865` (pushed).
+**Owner decisions:** at planning, 120 (d2 split: d2a the heap, `realloc` to M4.5e2, loops the first cut), 121 (vlibc holds
+complete implementations of what it covers, verified as cerastes becomes able to; the allocator replaces the platform's,
+amending 0030 item 2), 122 (that allocator is M4.5d2v, next), 123 (blocks held when `main` returns are leaks). During the
+session: 124 (`reject_owning_function.c` expects `lifetime @ L8`, not the plan's `permission`), 125–127 (new pins re-expected
+to what they can reach: a template, a lambda, two member functions with two lines each, the discarded `malloc` with EDG's two
+warnings). The owner ended the session at 08:00 (travel): the second `check.sh` and the Linux rerun are CI's (below).
 
 **Done**
-- **Record 0046** (accepted; written before code, revised after P71, audit round 1 on the draft (B1 trusted calls
-  redirected by aliases, asm labels and pragmas, a hole that predates vlibc; B2 question 116; S1–S9, N1–N12), audit
-  round 2 on the code (B1 vlibc's contract trusted on a C++-linkage `::exit` after a guard-skipped header, B2 the
-  redirection check skipped for functions created early; S1–S3, notes), and one re-audit (one more blocking item: a
-  definition or variable taking a trusted routine's symbol by an asm label; a `static` function before the header);
-  every blocking item reproduced natively and fixed): the pin, the include order, the library class by path, trust from
-  vlibc's tags, "does not return" from vlibc, reserved names, attributes by position, redirections.
-- **Code:** `third_party/vlibc` at `5962865` with `scripts/vlibc_tree.py` (the pin guard) and `CERASTES_VLIBC_SRC`;
-  `scripts/vlibc_contracts.py` (the reserved `{name, header}` table generated at configure time; `check` against
-  `tests/vlibc/trusted_contracts.txt`, the pin audit as a check; shim headers refused if they hold directives other than
-  the guard, comments in trusted declarations or forms its scanner does not model); `scripts/check_vlibc_headers.sh`
-  (vlibc's headers through `cerastes-fe` as non-system headers with the driver's own arguments, from the hidden
-  `--cerastes_print_edg_command`); the driver (vlibc's directories first as `--sys_include`, `-I-` refused, `--version`
-  names vlibc, the `library_fixture` self-test hook); the backend (`VerifyConfig::library_dirs`, `in_library_file`,
-  `SrcPos::in_system` by path in verify mode; in `encode.cpp` `lib_trust`, `check_reserved_library`,
-  `check_routine_attributes`, `reject_redirected_call`, `reject_asm_label_declaration`, the tag reader and the contract
-  macro scan; `trusted_libc_reason` removed); the glibc `assert` matcher's `sizeof` operand (0031 item 10).
-- **Tests:** `tests/vlibc` (positives and twins; pins for reserved names in every order and mode, definitions, a
-  namespace's `extern "C"`, every redirection form, symbol stealing, `static` before the header, macros, the guard
-  defined, the Linux items); `LibraryFixtureTests`, `VlibcTreeToolTests`, the check.sh wiring model and the real-driver
-  `-I-` and guard-skip tests in `test_run_tests.py`; `test_vlibc_contracts.py`; 3 doc examples.
-- **Docs:** Verifying a program ("The C library: vlibc", library files), Annotations (reserved names), Building annotated
-  code with ordinary compilers (vlibc's include path), Installation; `internal/encoding.md`; `il-inventory.md` P71 (macOS
-  and Linux; P55's `-I` reasoning corrected).
-- **d2's preparation** (question 113): handoff §4.2's dependency map and d2a/d2b proposal; P71 (d), the allocation
-  functions as both platforms declare them.
+- **Record 0047** (written before code; audit round 1 on the draft: B1 leaks missed in loops, B2 view calls skipping
+  0046 item 8's redirection check, B3 block sites invisible to sequencing, S1–S8, N1–N14, all taken; P72 PASS on macOS and
+  glibc; S36 PASS, 64 fixtures; audit round 2 on the code: no blocking item, S1–S5 taken, notes to §3; a re-audit of the
+  loops and round 2's fixes was running at the end, its report not received).
+- **vlibc** `35e9b6f` (local `main`, NOT YET PUSHED; three commits on `5962865`: the malloc family's trusted contracts with
+  reserved identifiers, run tests, `CERASTES_COMMIT` → `f59e4b2`, `CLAUDE.md` with the owner's directive; the note below
+  `_Exit` so earlier lines stay; `<stddef.h>` for `size_t`/`NULL`). vlibc's `check.sh` green on macOS (both compilers, 24).
+- **Encoder:** registration `owning`/`ref_to_uninit` `r|p`; `cerastes_owns_block`, `cerastes_zeroed`, `cerastes::owns_block`;
+  library markers; the (A)/(D) shape recognizer and the diversion; typed views at `void*` → `T*` conversions (size a constant
+  equal to `sizeof(T)`, arguments kept for their checks, the call's trust and redirection checks), `free`'s `T*` argument;
+  `owns_block` in contracts (consume, give, borrow; framing; rejections); target `r`; `--strict-init` rejecting
+  `ref_to_uninit` results. **VIR:** `AtomKind::OwnsBlock`, `contract_block_atoms`, `result_init`, `deallocates`, backstops.
+  **Lowering:** heap programs (`field tok`), views, block sites in contracts, `__wf`, calls (`invalid-free` rows, separation
+  first, token before offset), returns, entry, the leak `forperm` after `l_end` and at back edges, sequencing over block
+  sites and liveness, loops over blocks held through locals (record item 10, landed), the S3 framing order.
+- **Categories** `invalid-free` and `leak` (twenty) in the five copies. **Lint:** `lint_heap_token`, the views' text pinned
+  (`lint_views`, with programs with globals). **`vlibc_contracts.py`:** reserved identifiers, the two shapes.
+- **Tests:** about 130 new files (heap positives and twins, pins, ports `account.c`, `deposit.c`, `swap_main.c`,
+  `globals_heap.c`, `malloc_block_free_local.c`, vlibc tests), `selftest_cases17.inc` (47 lowering, 19 rejection cases;
+  `VIR_CASES_MIN` 1540), 64 S36 fixtures.
+- **Docs:** Memory and ownership ("Allocated memory", the not-yet list), Annotations (`owns_block`, target `r`), Error messages
+  (`invalid-free`, `leak`), Verifying (vlibc's allocation functions); `encoding.md`; il-inventory P72, S36; record 0011's
+  table and 0031 (null is all bits zero).
 
-**Flips (questions 117, 118):** `noreturn_user_abort.cpp`, `noreturn_user_abort_after.cpp`, `noreturn_other_signature.cpp`,
-`noreturn_other_signature_after.cpp` re-expected `rejected cerastes-annotation_reserved_library` (and their 17 entries
-removed from `tests/mutants-equivalent.txt`); the new `reject_redirect_alias.c` and `reject_redirect_alias_cpp.cpp`
-re-expected `unsupported_attribute`; the new `reject_assert_glibc_{callee,sizeof_operand,third}.c` gain a second expect
-line (question 119). No other `expect:` line changed.
+**Flips and expectation changes:** `reject_ref_to_uninit_function.c` → `unsupported_annotation @ L7` (plan);
+`reject_owning_function.c` → `lifetime @ L8` (q124); new pins re-expected (q125–127); every heap test re-registered once
+after audit round 1 before its first run (`// Pre-registered … re-registered after audit round 1`); Pins comments only in
+fifteen existing pins (M4.5d2b, M4.7/M8).
 
-**Acceptance**
-- The baseline (`d26a87c`, detached worktree): 9434 passed, 0 failed, 1 skipped; 3643 kept programs; VIR self-test 1493.
-- **Viper against the baseline** (`build/m4.5d1/vprdiff.py`, after the trust change): 7170 files identical; 108 allowed
-  (the 54 programs calling `abort`/`exit`/`_Exit`: the tag `libc:` → `vlibc:`, their methods' `.map` rows at vlibc's
-  lines, one well-formedness method each); 0 unexpected; 8 missing (the four re-expected pins); 44 added. VIR self-test
-  byte-identical (1493 cases).
-- `check.sh` (the full check, `CERASTES_CHECK_BASE` unset), green on the first run at `31ee820`: vlibc tree clean at
-  `5962865`; vlibc's headers through `cerastes-fe` as non-system headers clean (4 compilations); harness self-test 1108
-  tests, 79, lint self-test 389, mutate self-test 292, vlibc contracts self-test 82; tests **9540 passed, 0 failed, 9
-  skipped** (8 `platform: linux`; native-ok runs: Apple clang 1795, GCC 1795); Viper lint 3667 files clean; VIR self-test
-  **1493** lowering and 253 rejection cases, 0 problems, all through Silicon and lint clean; walker oracle 136 goldens,
-  1924 facts, 0 failed; docs green (215 code blocks); EDG tree clean at `f0ed5525`. The Linux test fixes after it
-  (`0ce70e9`, test files only): the changed files re-run on macOS, 8 passed, `--check-headers` 3535 ok.
-- **Linux** (`matt@clang4.cpp.al`, container `cerastes-m4.5d1-p71` from a clean `ubuntu:26.04` with S5's recipe: glibc
-  2.43, clang 21.1.8 over libc++ 21, gcc-16; clean bootstrap at `45f655b`): P71's Linux half; at `45f655b`
-  `tests/memory` 3229 passed, `tests/scalar` and the doc examples all passed; at `0ce70e9` `tests/vlibc` **111 passed,
-  0 failed** (the `platform: linux` tests included), `check_vlibc_headers.sh` clean (#541 suppressed in C++),
-  `vlibc_contracts.py check` clean, `LibraryFixtureTests` and `VlibcTreeToolTests` 53 OK. The first Linux run of the new
-  tests (at `31ee820`) found 9 failures, all in the tests (a missing glibc `noexcept`, a wrong twin, question 119),
-  fixed in `0ce70e9`.
+**Acceptance** (at `ad691eb` and the fix after it)
+- **Viper against the baseline** (`9d98fe8`; 9540 passed, 0 failed): every existing kept program's `.vpr`/`.map`
+  byte-identical (the il-analyst's regeneration of all 3667 programs: 7334 files identical, 0 different, 0 missing, after
+  vlibc's lines were kept); the VIR self-test's 2986 old files byte-identical, 1540 cases 0 problems.
+- **Full runs:** at `250a2af` 9903 passed, 19 failed (all since fixed or re-expected); `check.sh` at `e645a20` stopped in
+  the harness self-test (six failures: doc markup and the guard-skipped fixture, fixed in `ad691eb`); after that the harness
+  self-test 1108 OK, walker-oracle, lint (432), mutate and vlibc-contracts self-tests OK, `check_doc_examples` (and
+  `--html`) 0 problems. The last full run (started after `ad691eb`) was stopped at the session's end: FULL2_PARTIAL.
+- **Not run (owner, 08:00):** a second `check.sh`, and the Linux rerun of the final tip (P72's glibc half ran; the box run of
+  `e645a20` was in progress, its result not received): CI's two jobs on the PR are the check (§2).
 
 **Surprises**
-- P55's "only a leading `--sys_include` shadows `<stdlib.h>`" was the driver's own argument order; but a `-I` shim would
-  be system in some C++ units and not others (EDG flags what a system header includes), so `--sys_include` stayed.
-- In C++ EDG moves a routine's declaration position to a later non-defining redeclaration with a parameter (and keeps the
-  later exception specification: glibc's `exit` loses `noexcept`), so trust is keyed on each contract attribute's own
-  position.
-- The audits found three ways to send a trusted call to code that returns (aliases and pragmas; an early-created
-  function; a definition or variable taking the symbol by an asm label), all older than vlibc, all reproduced natively.
-- EDG silently discards an identical later contract, so question 115 could not be enforced in that one order (116).
+- A double free would have been `lifetime` (the argument's liveness use check first): the `invalid-free` rows replace it.
+- Viper is affine: a `return` inside a loop sees only the invariant, so the leak row went after `l_end` (audit B1).
+- vlibc's header comment shifted the `abort`/`exit` lines and 66 `.map` files; the comment moved below `_Exit`.
+- EDG folds `(void*)&g` into one address constant: the encoder reads its original expression.
 
-**Decision records added:** 0046-vlibc-in-cerastes.
+**Decision records added:** 0047-the-heap (amends 0011, 0028, 0029, 0030, 0031, 0038, 0039, 0042, 0046).
 
-**First step for the next session.** Confirm the owner merged PR #26 (M4.5c2b) and this branch's PR with both CI jobs
-green; then plan M4.5d2 from handoff §4.2 (the dependency map and the d2a/d2b proposal, P71 (d)) and §3 "M4.5d2",
-checking P4222R3 against records 0029 and 0042, saving the plan as `.claude/plans/m4-5d2-<topic>.md`.
+**First step for the next session.** Check CI on this branch's PR (both jobs): green → no further action for d2a; red → fix
+first (handoff §2). Then M4.5d2v (vlibc's allocator, handoff §3 and §4.2), planned in vlibc's repository.
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 
 | Session | Date | Branch, merge | Records | Outcome |
 |---|---|---|---|---|
+| M4.5d2a The heap | 2026-11-03/04 | `m4.5d2a-heap` | 0047 | vlibc's `malloc`, `calloc`, `free` (trusted, reserved identifiers, shapes not names); typed views at `void*` → `T*` (one object, `sizeof(T)`); heap blocks with the free token; `invalid-free`; leaks by `forperm` (after `l_end`, at back edges; `main` included); `owns_block`; `owning`/`ref_to_uninit` on functions; sequencing over block sites; loops over blocks held through locals; d2 split (d2v allocator, d2b) |
 | M4.5d1 vlibc in cerastes | 2026-11-03 | `m4.5d1-vlibc` | 0046 | `third_party/vlibc` pinned and guarded; vlibc's shim first in verify mode; library files by path; trust from vlibc's tags, "does not return" from vlibc, reserved names, attributes by position; three routes redirecting trusted calls closed (older than vlibc); `trusted_libc_reason` gone; d2's dependency map |
 | M4.5c2b Places through a heap read | 2026-11-03 | `m4.5c2b-heap-read-places`, PR #26 | 0045 | contract and invariant places through loads (`**pp`, `*gp`, `p->q->x`, `*s.q`, `*r.q`) with the entry-state rule, the post-state reading, amounts that follow objects, bodiless ties, heap-reading guards, `eb`/`lb` loop places, written atoms through loads and on struct places, `restrict` over load roots; `live(r.q)` to M4.5d2 |
 | M4.5c2a Struct values and struct storage | 2026-11-02/03 | `m4.5c2a-struct-values`, PR #25 | 0044 | by-value struct parameters and results as tuples of leaves, `f().x`, C++ temporaries, compound literals (C objects, C++ values), struct globals and `static` struct locals, member measures, `restrict` beside by-value structs; invariant reads through a loaded pointer pinned; M4.5c2 split, heap-read places and written struct atoms to M4.5c2b |

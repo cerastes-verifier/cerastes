@@ -1,6 +1,7 @@
 # 0047 — The heap: vlibc's allocation functions, typed views, free and leaks (M4.5d2a)
 
-- **Status:** draft for M4.5d2a (2026-11-03), written before code (invariant 6); revised after audit round 1 (Opus, on
+- **Status:** accepted for M4.5d2a (2026-11-04; the session's final check is CI's, and the re-audit of item 10 and of audit
+  round 2's fixes had not reported when the owner ended the session: handoff §1), written before code (invariant 6); revised after audit round 1 (Opus, on
   the draft: three blocking items — B1 leaks missed inside loops, a block dropped at a back edge and a `return` inside a
   loop that sees only the invariant, reproduced with Silicon, item 7; B2 view calls skipping 0046 item 8's redirection
   check, item 2; B3 block sites invisible to the sequencing rules, item 9 — and S1–S8, N1–N14, taken in items 2–10;

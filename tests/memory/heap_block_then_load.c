@@ -21,6 +21,7 @@ int guarded(struct N *p)
     CERASTES_REQUIRES(cerastes_owns_block(p) && (p->q != NULL ? cerastes_owns(*p->q) : true))
     CERASTES_ENSURES(r, cerastes_owns_block(p) && p->q == cerastes_old(p->q) && (p->q != NULL ? cerastes_owns(*p->q) : true) && r == 0)
 {
+  (void)p;
   return 0;
 }
 
@@ -36,5 +37,5 @@ int use_it(void)
   int r = through_block(n);
   CERASTES_CHECK(r == x);
   free(n);
-  return 0;
+  return r == 5 ? 0 : 1;
 }
