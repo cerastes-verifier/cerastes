@@ -9,89 +9,101 @@ history table; the full log up to M4.4c is `git show 1fcc43b:internal/status.md`
 `git show eab4058:internal/status.md`, M4.5b1c2's `git show a5e3e30:internal/status.md`, M4.5b1c3's
 `git show 5ffb1a2:internal/status.md`, M4.5b2a's `git show 38877b4:internal/status.md`, M4.5b2b's
 `git show 1bfa705:internal/status.md`, M4.5c1's `git show cbdcce5:internal/status.md`, and M4.5c2a's
-`git show 7f11706:internal/status.md`.
+`git show 7f11706:internal/status.md`, and M4.5c2b's `git show d26a87c:internal/status.md`.
 
-## M4.5c2b — places reached through a heap read (2026-11-03): done on branch `m4.5c2b-heap-read-places`
+## M4.5d1 — vlibc in cerastes (2026-11-03): done on branch `m4.5d1-vlibc`
 
-Plan: `.claude/plans/m4-5c2b-heap-read-places.md`. Read `internal/handoff.md` next: §2 (owner steps: PR #25 first, then
-this branch's PR), §3 (notes by session), §4.2 (M4.5d1, M4.5d2), §8 (no question open).
+Plan: `.claude/plans/m4-5d1-vlibc.md`. Read `internal/handoff.md` next: §2 (owner steps: PR #26 first, then this branch's
+PR), §3 (notes by session; d2's new notes), §4.2 (M4.5d2: the dependency map and the d2a/d2b proposal), §8 (no question
+open).
 
-**Owner decisions (2026-11-03):** at planning, an `ensures` place through a load is the object on return, `old(**pp)` the
-entry value of the entry object (question 104); heap-read `requires` places are automatic loop places by a snapshot
-(105); `live(r.q)` moves to M4.5d2 (106); c2b's flips (107). After the design review: amounts follow objects (108, not the
-recommendation); guards that read the heap accepted now (109, not the recommendation); both snapshots, method entry and
-loop entry, where they can differ (110). During the session: a call with a load-rooted contract beside another access in
-one expression accepted with a pre-call snapshot (111); written atoms done in this session, not cut (the pre-agreed cut
-point); nine new twins gain duplicate same-line `permission` expect lines (112, as 102 in c2a). The session ran in the
-worktree `.claude/worktrees/m4.5c2b` (from c2a's tip `7f11706`, stacked on PR #25) with its baseline in the detached
-`.claude/worktrees/m4.5c2b-base`. The first test-mutator was stopped by the owner after it went idle on a finished
-background task; a fresh one finished from a recovery brief (nothing lost but its per-file run log).
+**Owner decisions (2026-11-03):** at planning, d1 alone with d2's preparation (question 113), reserved names generated from
+the pinned vlibc headers (114), a contract on a reserved name outside vlibc rejected even when identical (115). After audit
+round 1: an identical contract after vlibc's header accepted, the front end discarding it (116); definitions of reserved
+names and contracts on them rejected for C linkage in any namespace and C++'s global namespace, four pins re-expected
+(117). After the first run of the new tests: the two alias pins re-expected `unsupported_attribute` (118); after the first
+Linux run, the three glibc `assert` near misses gain a `side_effect_not_evaluated` expect line at their line (119). The owner
+accepted the Linux host's key during the session. The session ran in the worktree `.claude/worktrees/m4.5d1` (from
+c2b's tip `d26a87c`, stacked on PR #26), its baseline in the detached `.claude/worktrees/m4.5d1-base`; vlibc's half was
+already vlibc's `5962865` (pushed).
 
 **Done**
-- **Record 0045** (accepted; revised after P70, audit round 1 on the draft (blocking B1 a contract without a body
-  returning a permission it never took, B2 the state of a `requires` atom's guard and place read outside the entry state;
-  S3-S7, N8-N12 taken), S35, question 111, audit round 2 on the code (no blocking item; should-fix 1-3, notes 4, 5, 7
-  taken) and one re-audit (nothing blocking)): places as access paths (root, steps to the base, member tail), the
-  entry-state rule, the post-state reading, `f__wf` over ghost bases, call/entry/return rows with pass 0, amounts that
-  follow objects, bodiless ties, measures, by-value leaves and `*r.q`, `eb`/`lb` loop places, heap-reading guards,
-  written atoms through loads and on struct places, the encoder's rules over loads, `restrict` over load roots.
-- **Code** (`fcb2d09`; the VIR block `f4dea4c`): `src/vir/vir.{h,cpp}` (`PlaceKey{root, via, path}`, `place_root`,
-  disjoint key ranges with `is_*_site_key`, `guard_ok`, `restrict_hazard`'s walk, `user_spelling`), `check.cpp` (the place
-  grammar), `src/backend/encode.cpp` (`place_pointer`, every former rejection site, `finish_atoms` by full key, markers,
-  `owning` and `const` over load roots, `spell_loaded_place`), `src/vir/lower.cpp` (derived keys and everything above);
-  `scripts/lint_viper.py` (`lint_ghost_refs`).
-- **Tests:** S35's 61 fixtures (`tests/viper-smoke/memory/s35_*`; three contrast fixtures verified on purpose, each with
-  its must-fail twin); `tests/memory` 53 positives (ports `verifast/issue310.c` and `verifast/globals_struct.c`) and 95
-  twins and pins; 4 doc examples; VIR self-test `selftest_cases16.inc` (25 cases; `VIR_CASES_MIN` 1493); 389 lint
-  self-tests.
-- **Docs:** Memory and ownership (pointers to pointers, contracts, structures, globals, loops, the not-yet list),
-  Annotations (places, `old`, guards, invariant atoms; a stale sentence corrected), Error messages (`permission`'s new
-  messages), Verifying (the rejected list); `internal/encoding.md` (§3 and §8 paragraphs); `il-inventory.md` P70 and S35.
+- **Record 0046** (accepted; written before code, revised after P71, audit round 1 on the draft (B1 trusted calls
+  redirected by aliases, asm labels and pragmas, a hole that predates vlibc; B2 question 116; S1–S9, N1–N12), audit
+  round 2 on the code (B1 vlibc's contract trusted on a C++-linkage `::exit` after a guard-skipped header, B2 the
+  redirection check skipped for functions created early; S1–S3, notes), and one re-audit (one more blocking item: a
+  definition or variable taking a trusted routine's symbol by an asm label; a `static` function before the header);
+  every blocking item reproduced natively and fixed): the pin, the include order, the library class by path, trust from
+  vlibc's tags, "does not return" from vlibc, reserved names, attributes by position, redirections.
+- **Code:** `third_party/vlibc` at `5962865` with `scripts/vlibc_tree.py` (the pin guard) and `CERASTES_VLIBC_SRC`;
+  `scripts/vlibc_contracts.py` (the reserved `{name, header}` table generated at configure time; `check` against
+  `tests/vlibc/trusted_contracts.txt`, the pin audit as a check; shim headers refused if they hold directives other than
+  the guard, comments in trusted declarations or forms its scanner does not model); `scripts/check_vlibc_headers.sh`
+  (vlibc's headers through `cerastes-fe` as non-system headers with the driver's own arguments, from the hidden
+  `--cerastes_print_edg_command`); the driver (vlibc's directories first as `--sys_include`, `-I-` refused, `--version`
+  names vlibc, the `library_fixture` self-test hook); the backend (`VerifyConfig::library_dirs`, `in_library_file`,
+  `SrcPos::in_system` by path in verify mode; in `encode.cpp` `lib_trust`, `check_reserved_library`,
+  `check_routine_attributes`, `reject_redirected_call`, `reject_asm_label_declaration`, the tag reader and the contract
+  macro scan; `trusted_libc_reason` removed); the glibc `assert` matcher's `sizeof` operand (0031 item 10).
+- **Tests:** `tests/vlibc` (positives and twins; pins for reserved names in every order and mode, definitions, a
+  namespace's `extern "C"`, every redirection form, symbol stealing, `static` before the header, macros, the guard
+  defined, the Linux items); `LibraryFixtureTests`, `VlibcTreeToolTests`, the check.sh wiring model and the real-driver
+  `-I-` and guard-skip tests in `test_run_tests.py`; `test_vlibc_contracts.py`; 3 doc examples.
+- **Docs:** Verifying a program ("The C library: vlibc", library files), Annotations (reserved names), Building annotated
+  code with ordinary compilers (vlibc's include path), Installation; `internal/encoding.md`; `il-inventory.md` P71 (macOS
+  and Linux; P55's `-I` reasoning corrected).
+- **d2's preparation** (question 113): handoff §4.2's dependency map and d2a/d2b proposal; P71 (d), the allocation
+  functions as both platforms declare them.
 
-**Flips (pre-approved, question 107; 112):** ten pins retired for positives of the same shape
-(`reject_owns_double_deref.c`, `reject_read_double_deref.c`, `reject_read_double_deref_invariant.c`,
-`reject_atom_on_cell_pointer.c`, `global_pointer_global_deref_atom.c`, `reject_struct_member_chain_contract.c`,
-`reject_struct_atom_in_invariant.c`, `reject_struct_value_deref_member.c`, `reject_struct_value_reads_member.c`,
-`reject_struct_value_live_member.c`); `reject_struct_value_live_result.c` re-messaged naming M4.5d2 (expect line kept);
-`Pins:` comments only in `global_pointer_global_unowned.c`, `struct_init_pointers.c`, `verifast/globals.c`. No existing
-`expect:` line changed. Question 112 added duplicate expect lines to nine NEW twins only.
+**Flips (questions 117, 118):** `noreturn_user_abort.cpp`, `noreturn_user_abort_after.cpp`, `noreturn_other_signature.cpp`,
+`noreturn_other_signature_after.cpp` re-expected `rejected cerastes-annotation_reserved_library` (and their 17 entries
+removed from `tests/mutants-equivalent.txt`); the new `reject_redirect_alias.c` and `reject_redirect_alias_cpp.cpp`
+re-expected `unsupported_attribute`; the new `reject_assert_glibc_{callee,sizeof_operand,third}.c` gain a second expect
+line (question 119). No other `expect:` line changed.
 
 **Acceptance**
-- The baseline (`7f11706`, detached worktree): 8872 passed, 0 failed, 1 skipped; VIR self-test 1468.
-- **Viper against the baseline** (`build/m4.5c2b/regen/regen.sh`): all 3377 kept `.vpr` and `.map` byte-identical, none
-  missing, after the last lowering change; the VIR self-test's 1468 old cases byte-identical, 25 added.
-- The session's new and changed tests together (149 files, both modes): 545 passed, 0 failed; `tests/viper-smoke/memory`
-  206 passed; `test_run_tests.py` 1044; `test_lint_viper.py` 389; `--check-headers` 3478.
-- `check.sh` (the full check, `CERASTES_CHECK_BASE` unset), green on the first run: harness self-test 1044 tests, 79,
-  lint self-test 389, mutate self-test 292; tests **9434 passed, 0 failed, 1 skipped** (native-ok runs: Apple clang 1779,
-  GCC 1779); Viper lint 3643 files clean; VIR self-test **1493** lowering and 253 rejection cases, 0 problems, all 1493
-  through Silicon and lint clean; walker oracle 136 goldens, 1924 facts, 0 failed; docs green; EDG tree clean at
-  `f0ed5525`.
-- `build_docs.sh` and `check_doc_examples.py --html` (212 code blocks, 0 problems). No Linux run (CI covers it).
+- The baseline (`d26a87c`, detached worktree): 9434 passed, 0 failed, 1 skipped; 3643 kept programs; VIR self-test 1493.
+- **Viper against the baseline** (`build/m4.5d1/vprdiff.py`, after the trust change): 7170 files identical; 108 allowed
+  (the 54 programs calling `abort`/`exit`/`_Exit`: the tag `libc:` → `vlibc:`, their methods' `.map` rows at vlibc's
+  lines, one well-formedness method each); 0 unexpected; 8 missing (the four re-expected pins); 44 added. VIR self-test
+  byte-identical (1493 cases).
+- `check.sh` (the full check, `CERASTES_CHECK_BASE` unset), green on the first run at `31ee820`: vlibc tree clean at
+  `5962865`; vlibc's headers through `cerastes-fe` as non-system headers clean (4 compilations); harness self-test 1108
+  tests, 79, lint self-test 389, mutate self-test 292, vlibc contracts self-test 82; tests **9540 passed, 0 failed, 9
+  skipped** (8 `platform: linux`; native-ok runs: Apple clang 1795, GCC 1795); Viper lint 3667 files clean; VIR self-test
+  **1493** lowering and 253 rejection cases, 0 problems, all through Silicon and lint clean; walker oracle 136 goldens,
+  1924 facts, 0 failed; docs green (215 code blocks); EDG tree clean at `f0ed5525`. The Linux test fixes after it
+  (`0ce70e9`, test files only): the changed files re-run on macOS, 8 passed, `--check-headers` 3535 ok.
+- **Linux** (`matt@clang4.cpp.al`, container `cerastes-m4.5d1-p71` from a clean `ubuntu:26.04` with S5's recipe: glibc
+  2.43, clang 21.1.8 over libc++ 21, gcc-16; clean bootstrap at `45f655b`): P71's Linux half; at `45f655b`
+  `tests/memory` 3229 passed, `tests/scalar` and the doc examples all passed; at `0ce70e9` `tests/vlibc` **111 passed,
+  0 failed** (the `platform: linux` tests included), `check_vlibc_headers.sh` clean (#541 suppressed in C++),
+  `vlibc_contracts.py check` clean, `LibraryFixtureTests` and `VlibcTreeToolTests` 53 OK. The first Linux run of the new
+  tests (at `31ee820`) found 9 failures, all in the tests (a missing glibc `noexcept`, a wrong twin, question 119),
+  fixed in `0ce70e9`.
 
 **Surprises**
-- The design review found that every place-keyed mechanism rebuilt its root from an integer key in every state; a
-  derived key per (root, via) let the existing consumers treat a load-rooted base as one more root, keeping every
-  load-free program's Viper byte-identical.
-- Audit round 1's two blocking items were both consequences of the post-state reading: a trusted contract could return
-  an object it never took, and a framing disjunct read in the wrong state verified a wrong body (both reproduced in
-  Silicon, both pinned).
-- Fractional liveness amounts make two places of one block indistinguishable, so some keeper twins legitimately report a
-  sibling place's row too (question 112); no assumed fact can remove it (invariant 4).
-- A loop moving a global pointer between two parameters' objects hits 0040 item 5's swap false alarm (amounts); the pin
-  moves it between locals.
+- P55's "only a leading `--sys_include` shadows `<stdlib.h>`" was the driver's own argument order; but a `-I` shim would
+  be system in some C++ units and not others (EDG flags what a system header includes), so `--sys_include` stayed.
+- In C++ EDG moves a routine's declaration position to a later non-defining redeclaration with a parameter (and keeps the
+  later exception specification: glibc's `exit` loses `noexcept`), so trust is keyed on each contract attribute's own
+  position.
+- The audits found three ways to send a trusted call to code that returns (aliases and pragmas; an early-created
+  function; a definition or variable taking the symbol by an asm label), all older than vlibc, all reproduced natively.
+- EDG silently discards an identical later contract, so question 115 could not be enforced in that one order (116).
 
-**Decision records added:** 0045-places-through-a-heap-read.
+**Decision records added:** 0046-vlibc-in-cerastes.
 
-**First step for the next session.** Confirm the owner merged PR #25 (M4.5c2a) and this branch's PR with both CI jobs
-green; then M4.5d1 if the vlibc repository exists, else plan M4.5d2 from handoff §4.2 and §3 "M4.5d2" (`live(r.q)` and
-every partnerless `ensures` atom are there now, question 106), saving the plan as `.claude/plans/m4-5d2-<topic>.md`.
+**First step for the next session.** Confirm the owner merged PR #26 (M4.5c2b) and this branch's PR with both CI jobs
+green; then plan M4.5d2 from handoff §4.2 (the dependency map and the d2a/d2b proposal, P71 (d)) and §3 "M4.5d2",
+checking P4222R3 against records 0029 and 0042, saving the plan as `.claude/plans/m4-5d2-<topic>.md`.
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 
 | Session | Date | Branch, merge | Records | Outcome |
 |---|---|---|---|---|
-| M4.5c2b Places through a heap read | 2026-11-03 | `m4.5c2b-heap-read-places` | 0045 | contract and invariant places through loads (`**pp`, `*gp`, `p->q->x`, `*s.q`, `*r.q`) with the entry-state rule, the post-state reading, amounts that follow objects, bodiless ties, heap-reading guards, `eb`/`lb` loop places, written atoms through loads and on struct places, `restrict` over load roots; `live(r.q)` to M4.5d2 |
+| M4.5d1 vlibc in cerastes | 2026-11-03 | `m4.5d1-vlibc` | 0046 | `third_party/vlibc` pinned and guarded; vlibc's shim first in verify mode; library files by path; trust from vlibc's tags, "does not return" from vlibc, reserved names, attributes by position; three routes redirecting trusted calls closed (older than vlibc); `trusted_libc_reason` gone; d2's dependency map |
+| M4.5c2b Places through a heap read | 2026-11-03 | `m4.5c2b-heap-read-places`, PR #26 | 0045 | contract and invariant places through loads (`**pp`, `*gp`, `p->q->x`, `*s.q`, `*r.q`) with the entry-state rule, the post-state reading, amounts that follow objects, bodiless ties, heap-reading guards, `eb`/`lb` loop places, written atoms through loads and on struct places, `restrict` over load roots; `live(r.q)` to M4.5d2 |
 | M4.5c2a Struct values and struct storage | 2026-11-02/03 | `m4.5c2a-struct-values`, PR #25 | 0044 | by-value struct parameters and results as tuples of leaves, `f().x`, C++ temporaries, compound literals (C objects, C++ values), struct globals and `static` struct locals, member measures, `restrict` beside by-value structs; invariant reads through a loaded pointer pinned; M4.5c2 split, heap-read places and written struct atoms to M4.5c2b |
 | M4.5c1 Struct objects | 2026-11-02 | `m4.5c1-struct-objects`, PR #24 `8f45843` | 0043 | C structures with member blocks, struct locals as blocks, `.`/`->`, pointers to members, initializers, copies, `struct S *` objects with `WF_S`, contract atoms on struct places with overlap per leaf cell, markers per leaf; `restrict` closed beside loaded pointers (a hole since 0037); M4.5c split, owning fields and P4418R0 to M4.5d2 |
 | M4.5b2b Initialization through pointers | 2026-11-02 | `m4.5b2b-init-markers` | 0042 | P4222's markers (`uninit` on locals, `ref_to_uninit`/`must_init` on pointer parameters), every call flag row `uninitialized`, `--strict-init` with the `// verify-options:` header, the loop row on every loop place (question 89, fixing 0038's nested-loop exit 3); M4.5b2 complete |

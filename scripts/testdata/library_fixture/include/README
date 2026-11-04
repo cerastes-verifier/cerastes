@@ -1,0 +1,6 @@
+These headers are the fixture of the `library_fixture` self-test hook of `cerastes verify` (decision 0046 item 10):
+the driver compiles this directory in as a second library directory, ahead of the platform's include path, so
+`#include <lib_*.h>` finds them, and they are verified like user code, not skipped like system headers.  They
+exist to test what vlibc does not hold yet (predicates, pure functions, bodies, an untagged contract).  The tests
+are `LibraryFixtureTests` in scripts/test_run_tests.py; they are not under tests/, so the harness's helper-header
+rules do not apply.  Do not add a header here that a test does not use.

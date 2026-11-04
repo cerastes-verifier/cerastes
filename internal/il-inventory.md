@@ -4793,7 +4793,7 @@ expression; `owning()` is a syntax error, #29), `{"uninit", "", "v", ...}`, `{"r
   must-match across redeclarations. A macro spelling works in every position.
 
 **P55: can a vlibc shim come before the system headers (record 0030).**
-- **Only `--sys_include` order does it.** The driver and `scripts/cerastes-fe.sh` pass every system directory as `--sys_include=<dir>` in the scraped order (`verify_main.cpp`:300-312; C: `/usr/local/include`, the clang
+- **Only `--sys_include` order does it.** *(Corrected by P71: it is a position before the platform's directories, since EDG keeps `-I` and `--sys_include` in one ordered list; a leading `-I` shadows the header too, and a `-I` after them does not. P71 also records that `#include <vlibc/stdlib.h>` through `-I<vlibc>/include` fails with `#1696` under the driver's order.)* The driver and `scripts/cerastes-fe.sh` pass every system directory as `--sys_include=<dir>` in the scraped order (`verify_main.cpp`:300-312; C: `/usr/local/include`, the clang
   resource dir, the SDK `usr/include`, the CLT `usr/include`; C++ adds libc++ second), then `include/`, then the user's `-I` dirs. A directory with `stdlib.h` containing `#error shim-found` is hit when passed first as
   `--sys_include` and not hit as `-I<dir>` (EDG searches `-I` after the system directories for `<...>`), so `cerastes verify -I<shim>` cannot shadow `<stdlib.h>`; the driver must prepend a `--sys_include=<vlibc>/shim`.
   `<vlibc/stdlib.h>` (explicit, through `-I<vlibc-root>`) works as a user header.
@@ -7415,3 +7415,125 @@ Fixtures `tests/viper-smoke/memory/s35_<letter>_<topic>[_<reason>_fail | _vacuit
 9. An unframed guard read leaves the method verifying (the chain's dummy): only `f__wf`'s framing assert reports it, with no well-formedness error.
 
 **Expectations corrected after a first run (reported, none silently):** (e)'s first positive (fixture faults: missing call liveness splits, finding 1; a caller losing an amount, finding 2; a wrong arithmetic expectation), `_live_target_fail` (two legitimate errors; confirmed by three direct Silicon runs), (k) `_keep_fail` (a second legitimate error), (o) and (m) (finding 5; a user value invariant). No existing test was touched.
+
+### P71: include mechanics and IL facts for vlibc's `<stdlib.h>` shim (record 0046; macOS and Linux, both modes) **PASS for (a)-(f) on both platforms; no stop condition of the plan (EDG accepts every redeclaration, the shim is reached by every route that matters, the contract's declaration is findable from the IL); one correction of P55, seven findings the encoder must meet and the glibc facts (the `__THROW` exception specification, `__nothrow__` in C, the `#541-D` warning that the system flag hides)**
+
+Evidence in `build/m4.5d1/p71/` (not committed): `p71.sh` (the single runner; it writes its probes and its two IL readers, `ilq.py` and `srcflags.py`, itself), `mac/report.txt` (the run quoted below), `mac/out/` (every `--il_display`, include trace and diagnostic file), `mac/probes/`, `mac/f/` (the Viper), `mac/shims/` (the other copy of vlibc and the throwaway malloc shim), `P71.md` (the same with more excerpts). Tools: the snapshot `build/m4.5d1/p71/bin/cerastes-fe` and `cerastes` (built at `d26a87c`, before any M4.5d1 change); the EDG command line is `verify_main.cpp:305-370` by hand; vlibc `5962865`; macOS 27 SDK, clang 21 scrape. Routes: `sys` (the PLANNED order: `--sys_include=<vlibc>/include/vlibc`, `--sys_include=<vlibc>/include`, the platform's directories, `include/`), `sysi` (`sys` plus a user `-I` of another copy), `incfirst` (the shim as `-I` before the system directories on the command line), `inc` (as `-I` after them, the driver's order for a user `-I`). **The Linux half** (Ubuntu 26.04.1, x86-64, glibc 2.43-2ubuntu2.4, clang 21.1.8 over libc++ 21, EDG scrape version 210108) ran `linux.sh` (the same runner) inside the container `cerastes-m4.5d1-p71` (`ubuntu:26.04` image `cerastes-m4.5d1:runner`, `scripts/ci-linux.sh` then `bootstrap.sh`, cerastes at `7ae05ec`, `cerastes-fe` built clean there) on `matt@clang4.cpp.al`; evidence `build/m4.5d1/p71/linux/report.txt` (a copy of `~/cerastes-m4.5d1/cerastes/build/p71-linux/` on the host, where `out/` holds every listing). Its facts are in "The Linux half" below.
+
+**P55 corrected.** P55 said "only `--sys_include` order does it" because the driver passes the `-I`s after the system directories. EDG keeps `-I` and `--sys_include` in one ordered list (`cmd_line.c:10840-10853`), so the rule is a position before the platform's directories: a leading `-I<vlibc>/include/vlibc` shadows `<stdlib.h>` too (`incfirst`: `<stdlib.h>`, `<cstdlib>`, `<array>`, `<exception>` all open the shim), while `-I` after the system directories does not reach the shim from `<stdlib.h>` in either mode (`inc`). The shim's file record is flagged system by EDG only when a system directory (or a system header that includes it) found it (e). Record 0030 item 3's `--sys_include` is kept for that reason.
+
+**Finding F1 (`#1696` through `-I` under today's order).** `#include <vlibc/stdlib.h>` with `-I<vlibc>/include` (the `inc` route; also `bin/cerastes verify a_explicit.c -I<vlibc>/include`) fails in both modes: `vlibc/stdlib.h, line 17: catastrophic error #1696: cannot open source file "stdlib.h"` at the shim's `#include_next <stdlib.h>`. `#include_next` continues after the directory the file was found in, and the system directories come before `-I`. Under the planned order vlibc's `include/` is itself before the platform's, so `#include_next` continues into them (`sys`, `sysi`: exit 0, no diagnostic).
+
+#### (a) The shim is reached; `<vlibc/stdlib.h>` is the pin
+
+`sys`, `mac/report.txt` section (a) (`--trace_includes`, indentation = include depth):
+
+| program | trace (abridged) |
+|---|---|
+| `a_stdlib.c` (C23) | `<vlibc>/include/vlibc/stdlib.h` (1), ` <SDK>/usr/include/stdlib.h` (2, its `#include_next`), ` include/cerastes.h` (150) |
+| `a_stdlib.cpp` (C++20) | vlibc (1), ` <SDK>/usr/include/c++/v1/stdlib.h` (2, libc++'s wrapper), `  <SDK>/usr/include/stdlib.h` (24, the wrapper's own `#include_next`) |
+| `a_cstdlib.cpp` | `c++/v1/cstdlib` (1), ` vlibc` (25), `  c++/v1/stdlib.h` (26), `   usr/include/stdlib.h` (28) |
+| `a_array.cpp` | vlibc at trace line 1489, a child of `<stdexcept>` (same depth as `<__verbose_abort>`), then the libc++ wrapper and the SDK |
+| `a_exception.cpp` | vlibc at 199 through `<cstdlib>`, again at 660 through `<__new/exceptions.h>` |
+| `a_explicit.{c,cpp}` (`#include <vlibc/stdlib.h>`) | the same as `a_stdlib` |
+
+No diagnostic in any of them (exit 0, 0 bytes). With a user `-I<other copy>` (a file that is an `#error`), `sysi` opens `<vlibc>/include/vlibc/stdlib.h` and never the other copy, for `<vlibc/stdlib.h>` and for `<stdlib.h>`, both modes.
+
+#### (b) EDG accepts the redeclarations
+
+`b_noreturn_libc.{c,cpp}` (the `abort`/`exit`/`_Exit` of `tests/scalar/noreturn_libc.c`) and every (a) probe: exit 0 and 0 bytes of diagnostics on `sys` **and on `incfirst`**, where the shim included directly is not a system file, so EDG's warning suppression and downgrades of discretionary errors (`error.c:3621`, `:3651`, `:3701`) do not hide anything. The macOS SDK declares `abort` with `__cold__` and `__noreturn__`, `exit` and `_Exit` with `__noreturn__`, with no exception specification (`exception_specification: (none)`). glibc's `__THROW` (`noexcept(true)` in C++) is in "The Linux half" below. `decls.c:9796-9807` (gpp_mode, a routine with at least one parameter first declared in a system header, no body yet): EDG replaces the routine type's `exception_specification` by the later declaration's, so on the box vlibc's `void exit(int status)` (no `noexcept`) after glibc's `exit(int) noexcept(true)` loses it; (measured on Linux, below).
+
+#### (c) `abort`, `exit`, `_Exit` in the IL (`ilq.py` over `--il_display`; `sys`)
+
+Fields: `source_corresp.decl_position` (`il_def.h:3332`, in `a_source_correspondence` 3266), `source_corresp.attributes` (`il_def.h:3614`), `source_corresp.name_linkage` (`il_def.h:3388`), the routine type's `does_not_return` (`il_def.h:7540`), `routine_name_linkage` (`:7503`) and `routine_name_linkage_is_explicit` (`:7518`), the secondary declaration `a_src_seq_secondary_decl` (`il_def.h:2131`; `attributes` `:2164`, `first_declaration` `:2214`), an attribute's `position` (`:3250`) and `namespace_name` (`:3226`).
+
+**`decl_position`** (`mac/report.txt` (c); `decls.c:9802-9813` moves it in C++ for a routine with at least one parameter):
+
+| routine | C23 | C++20 |
+|---|---|---|
+| `abort(void)` | `<SDK>/usr/include/_abort.h:33:7` | `<SDK>/usr/include/_abort.h:33:7` (no parameter: not moved) |
+| `exit(int)` | `<SDK>/usr/include/_stdlib.h:165:7` | `<vlibc>/include/vlibc/stdlib.h:30:6` (moved) |
+| `_Exit(int)` | `<SDK>/usr/include/_stdlib.h:215:6` | `<vlibc>/include/vlibc/stdlib.h:33:6` (moved) |
+
+It moves again while it is in a system-flagged file: `c_user_extc_after.cpp` (`#include <stdlib.h>` then a user `extern "C" void exit(int);`) gives `exit` `decl_position = c_user_extc_after.cpp:3:17`, its contract still at vlibc's line; `abort` stays at `_abort.h:33:7`. C23 never moves it: `c_user_after.c` (`void abort(void); void exit(int);` after `<stdlib.h>`) keeps the SDK's position and adds the secondary declarations `c_user_after.c:2:6`, `:3:6`. **The contract's declaration therefore cannot be read from `decl_position`.**
+
+**Attribute entries** (the routine's merged `source_corresp.attributes`, in declaration order; identical in both modes):
+- `abort`: `kind=cold family=gnu name=__cold__ @ _abort.h:33:19`; `kind=noreturn family=gnu name=__noreturn__ @ _abort.h:33:26`; `kind=registered family=std namespace_name=cerastes name=ensures syntactic_location=post func @ <vlibc>/include/vlibc/stdlib.h:27:18`.
+- `exit`: `noreturn __noreturn__ @ _stdlib.h:165:17`; `ensures @ stdlib.h:30:23`. `_Exit`: `noreturn @ _stdlib.h:215:17`; `ensures @ stdlib.h:33:24`.
+- An attribute's `position` is the macro use site (the `CERASTES_ENSURES` on the declaration's line); `orig_seq` is the macro's definition in `cerastes.h`. `does_not_return` is TRUE on the type of all three in both modes, with vlibc present.
+
+**Where the contract's declaration is (the plan's stop condition: findable).** Two ways, both from the IL:
+1. Each attribute entry in the routine's list has its own `position`, and its file is the declaring file (`in_verified_file(a->position)` or the library rule). This works in both modes, and for a declaration that was moved or redeclared.
+2. Each `a_src_seq_secondary_decl` has its own `attributes`: entry `#1` is the SDK's (`first_declaration=TRUE`, the SDK's attributes only), entry `#2` is vlibc's (`stdlib.h:27:6`, `30:6`, `33:6`; `ensures` only). **Note (`IlEntities::secondary_decls`, `il_query.h:77-84`):** the collector keeps every secondary entry, **including the first declaration** (`first_declaration=TRUE`; its comment, "other than the one `decl_position` names", is not what the IL shows: in C++ exit's entry `#2` is equal to `decl_position`), and `SecondaryDecl` keeps `position` and `declared_type` only, not the declaration's `attributes`. Way 2 needs that field added; way 1 needs nothing.
+
+**Language linkage** (`name_linkage` prints `C` for `nlk_external` and `C++` for `nlk_cplusplus_external`; `parent_scope.kind`):
+
+| declaration | `name_linkage` | type's `routine_name_linkage` (`_is_explicit`) | `parent_scope` | `does_not_return` |
+|---|---|---|---|---|
+| `std::exit`/`std::abort`/`std::_Exit` via `<cstdlib>` | `C` | `C` (TRUE) | `sck_file` | TRUE |
+| `std::exit(0)` and `::exit(1)` in one program | one routine entity (both calls name the same `routine@...`; `c_std_exit_calls.cpp`) | | | |
+| user `extern "C" void abort(void);`, no `<stdlib.h>` | `C` | `C` (TRUE) | `sck_file` | absent (FALSE), no attributes |
+| the same after `<stdlib.h>` | `C` (the library entity, three secondary declarations) | `C` | `sck_file` | TRUE, vlibc's `ensures` present |
+| user plain `void abort(void);` after `<stdlib.h>` (C++) | `C` (the redeclaration inherits the linkage: one entity) | `C` | `sck_file` | TRUE |
+| user plain `void abort(void);`, no header, C++ | `C++` | `C++` (`-`) | `sck_file` | absent |
+| user `void abort(void) ensures(true) {}`, no header, C++ | `C++`, `defined=TRUE` | `C++` | `sck_file` | absent; `ensures @ the user's file` |
+| `namespace n { void exit(int); }` | `C++` | `C++` | `sck_namespace`, `assoc_namespace n` | absent |
+| user plain `void abort(void);`, no header, C23 | `C` | `C` (`-`) | `sck_file` | absent |
+
+So a C++-linkage `abort` can only exist without the library header. **Parameter names do not change:** the routine type's `param-type` of `exit`/`_Exit` has no `name:` field with the shim present, in either mode (the SDK's declaration is unnamed; vlibc's `status` does not enter it; the probe `h_pname.c` shows a later declaration's name does not fill an earlier unnamed parameter), so the Viper formal stays `p_arg__0` (glibc's `__status` stays `p___status__0`, record 0031 item 6).
+
+#### (d) `malloc`, `calloc`, `realloc`, `free` as the platform declares them (for M4.5d2's planning)
+
+`<SDK>/usr/include/malloc/_malloc.h:56-59` in both modes, C linkage (C++: `routine_name_linkage_is_explicit` TRUE, from the `extern "C"` block), no `does_not_return`, no exception specification on macOS:
+
+| routine | type | `decl_position` | attribute entries (kind, name, position) |
+|---|---|---|---|
+| `malloc` | `void *(size_t)` | `_malloc.h:56:35` | `warn_unused_result` (`__warn_unused_result__`, 56:57); `alloc_size` (56:76) |
+| `calloc` | `void *(size_t, size_t)` | `_malloc.h:57:45` | `warn_unused_result` (57:83); `alloc_size` (57:102) |
+| `realloc` | `void *(void *, size_t)` | `_malloc.h:59:35` | `warn_unused_result` (59:91); `alloc_size` (59:110) |
+| `free` | `void (void *)` | `_malloc.h:58:7` | none |
+
+`__sized_by_or_null` and `_MALLOC_TYPED` leave no attribute entry. With a throwaway shim (`mac/shims/dshim/include/vlibc/stdlib.h`: vlibc's file plus trivial `ensures(r, true)` on the first three and `requires(true)` on `free`, after the SDK's): EDG accepts, both modes, as a system directory (`dshim`) and not (`dshimnon`): exit 0, 0 bytes. `decl_position`: C23 stays at the SDK for all four; **C++20 moves all four to the shim** (`stdlib.h:37:7`, `39:7`, `41:7`, `43:6`; each has at least one parameter). The SDK's `alloc_size` stays on the routine's attribute list, and `alloc_size` is not on the allow-list (`encode.cpp:63`; `warn_unused_result` is), so once a vlibc declaration of these is a verified file's, `check_attributes` (`encode.cpp:8905`) rejects it in C++ unless attributes are checked by their own position (record 0046 item 7). glibc's declarations are in "The Linux half" below.
+
+#### (e) EDG's system flag per vlibc file record (`from_system_include_dir`, `il_def.h:218`; `seq_is_in_system_header` is this flag, `il.c:4871`; `lexical.c:8159` sets it for a file a system header includes)
+
+| route | `<stdlib.h>` / `<vlibc/stdlib.h>` included by the user | through `<cstdlib>`, `<array>`, `<exception>` | `<cstdlib>` then `<stdlib.h>` | `<stdlib.h>` then `<cstdlib>` |
+|---|---|---|---|---|
+| `sys` (planned) | TRUE | TRUE | TRUE | TRUE |
+| `incfirst` (`-I` before the system directories) | FALSE | TRUE | TRUE | FALSE |
+
+`cerastes.h` is TRUE on every route (`--sys_include`). Under `sys` EDG's relaxations (warnings dropped, discretionary errors downgraded, the first-declaration rules of `decls.c:2443`, `:4634`, `:9802`) apply to vlibc's text, and with `-I` the flag depends on which header was included first, so the library class must be decided by path (record 0046 item 3). `SrcPos::in_system` after that change cannot be measured yet.
+
+#### (f) The Viper of `abort`/`exit`/`_Exit` today (`mac/f/`, `tests/scalar/noreturn_libc.c`, both modes; the baseline of `vprdiff.py`)
+
+Both modes verify; the two `.vpr` differ only in the contract's expression text (the `? 1 : 0` wrappers of C23) and the `.map` files are byte-identical.
+- **Tags** (`.vpr` lines 40, 46, 53): `// cerastes:trusted-contract libc: abort never returns (C23 7.24.4.1)`, `... libc: exit never returns (C23 7.24.4.4)`, `... libc: _Exit never returns (C23 7.24.4.5)`.
+- **Methods:** `method f_abort__1()` with `ensures false` and `decreases _`; `method f_exit__2(p_arg__0: Int)` with `requires ((-2147483648) <= p_arg__0) && (p_arg__0 <= 2147483647)`, `ensures false`, `decreases _`; `f__Exit__3` likewise. The calls are `f_abort__1()` (30), `f_exit__2(2)` (32), `f__Exit__3(3)` (34), then `assert false` (35).
+- **`.map` rows** of the three methods (fields: Viper line, id, category, file, line, column, message): `42 not.wellformed internal <SDK>/_abort.h 33 7`, `42 postcondition.violated ... _abort.h 33 7`; `48 not.wellformed`, `49 not.wellformed`, `49 postcondition.violated ... _stdlib.h 165 7`; `55`, `56`, `56` the same at `_stdlib.h 215 6`. Every row is at the declaration's `decl_position` (the baseline has no vlibc). Reading `encode.cpp:1120-1141`, the method and its parameters take `loc_of(decl_position)`; the owner's decision (M4.5d1, P71 review) is that the encoder pins the location of a vlibc-trusted routine to the vlibc declaration that carries the contract, in both modes, so those rows move to `stdlib.h:27`, `:30`, `:33` in C and C++ alike (`build/m4.5d1/vprdiff.py` allows exactly this).
+- **Today's encoder on the shim's three lines written in a user file** (`f_redecl.{c,cpp}`): three `error #cerastes-ensures_on_noreturn` (`encode.cpp:1254`, `:8940`) in both modes, because `does_not_return` is TRUE from the SDK's attribute: record 0046 item 5 (ignore the flag for a library contract) is required in both modes.
+
+**Findings for the encoder:**
+1. Key a library contract by each contract attribute's own `position`, never by `decl_position` (it is the SDK's in C and for C++ `abort`, vlibc's for C++ `exit`/`_Exit`/the malloc family, and a later user redeclaration's after that).
+2. In C++ `exit`/`_Exit` (and the malloc family) become "declared here" once vlibc is a verified file, so they reach `check_attributes` (the SDK's `__noreturn__` passes only with `on_noreturn_routine`; `alloc_size` fails), `check_signature` and the `ensures_on_noreturn` site (`encode.cpp:8940`): item 5 and item 7 of the record cover these.
+3. `IlEntities::secondary_decls` holds the first declaration too and no attributes; use the attribute positions, or extend `SecondaryDecl`.
+4. A user redeclaration of the three after `<stdlib.h>` is the same routine entity with vlibc's contract attached (linkage `C` also for a plain C++ redeclaration), which is what record 0046 item 6's reserved-name rule must reject; a C++-linkage `abort`/`exit` exists only without the header, and `n::exit` has `sck_namespace`.
+
+#### The Linux half (glibc 2.43, libc++ 21; `build/m4.5d1/p71/linux/report.txt`)
+
+Same probes, same routes, same readers. Everything in (a), (b), (c) and (e) agrees with macOS except what is listed here.
+
+- **(a) Reached.** `sys`, C23: `a_stdlib.c` trace: `<vlibc>/include/vlibc/stdlib.h` (1), ` /usr/include/stdlib.h` (2, glibc, no wrapper), ` include/cerastes.h` (33). C++20: vlibc (1), ` /usr/lib/llvm-21/include/c++/v1/stdlib.h` (2, libc++'s wrapper), `  /usr/include/stdlib.h` (29). `<cstdlib>`: `c++/v1/cstdlib` (1), ` vlibc` (30), then the wrapper and glibc. `<array>`: vlibc at trace line 1434 under `c++/v1/cstdlib` (1431); `<exception>`: vlibc at 79 under `cstdlib` (76). With a user `-I<other copy>` (`sysi`) the pinned copy is opened for `<vlibc/stdlib.h>` and `<stdlib.h>`, never the other copy, both modes. `incfirst` reaches the shim from all four headers.
+- **F1 on Linux.** `inc` (`-I<vlibc>/include` after the system directories): `<stdlib.h>` does not reach the shim (both modes), and `#include <vlibc/stdlib.h>` fails at the shim's `#include_next` with `catastrophic error #182: could not open source file "stdlib.h" (no directories in search list)` (macOS: `#1696: cannot open source file`): the same cause, a different EDG message.
+- **(b) The system flag hides a warning.** `sys`: exit 0 and 0 bytes of diagnostics in both modes for every probe. **`incfirst`** (the shim not a system file when included directly) **in C++20 gives three warnings, one per redeclaration**: `vlibc/stdlib.h, line 27: warning #541-D: allowing all exceptions is incompatible with previous function "abort" (declared at line 752 of "/usr/include/stdlib.h")`, line 30 for `exit` (glibc line 778), line 33 for `_Exit` (790), 834 bytes (`out/b_incfirst.c++20.b_noreturn_libc.cpp.out` on the host); C23: none. They do not appear under `sys` because EDG drops warnings in system headers (`--sys_include` flags the shim). The throwaway malloc shim gives the same warning for all seven functions on `dshimnon` in C++ (2111 bytes), none on `dshim`. So vlibc's own CI (gcc-16 and clang-21 after glibc 2.43) is the only place where those redeclarations without `noexcept` are held to a compiler's rules; cerastes's verify mode never shows the warning.
+- **(c) glibc's exception specification and attributes** (`decls.c:9796-9807`, confirmed): in C++ `abort` (no parameter) keeps `exception_specification: is_noexcept=TRUE noexcept_arg: true` (type `void () noexcept(true)`); **`exit` and `_Exit` (one parameter) lose it** after vlibc's redeclaration (`exception_specification: (none)`; the secondary declaration `#1` still has `declared_type=void (int) noexcept(true)`), and likewise `malloc`, `calloc`, `realloc`, `free` after the throwaway shim. `abort`'s secondary `#2` (vlibc) has `declared_type=void ()` with no `noexcept`, while the routine's type keeps `noexcept(true)`.
+  - `decl_position` (glibc `<stdlib.h>`; the same rule as macOS): C23 `abort` `/usr/include/stdlib.h:752:13`, `exit` `:778:13`, `_Exit` `:790:13`, never moved in C23. C++20: `abort` `stdlib.h:752:13` (no parameter, not moved), `exit` and `_Exit` `<vlibc>/include/vlibc/stdlib.h:30:6` and `:33:6`; after a later user `extern "C" void exit(int);` `exit` is `c_user_extc_after.cpp:3:17` and `abort` stays.
+  - Attribute entries: C23 `abort`: `kind=nothrow __nothrow__ @ stdlib.h:752:26`, `noreturn __noreturn__ @ :752:50`, `cold __cold__ @ :752:65`, then vlibc's `ensures @ stdlib.h:27:18`; `exit`: `nothrow @ 778:33`, `noreturn @ 778:57`, `ensures @ 30:23`; `_Exit`: `nothrow @ 790:34`, `noreturn @ 790:58`, `ensures @ 33:24`. **C++20 has no `nothrow` attribute entry** (the `noexcept(true)` is the type's): `abort`: `noreturn`, `cold`, `ensures`; `exit`/`_Exit`: `noreturn`, `ensures`. `does_not_return` TRUE in both modes. Linkage `C`, `name_linkage_explicit` TRUE in C++ (glibc's `extern "C"` block), `-` in C23; the user-declaration rows of the macOS table are the same on Linux (the user-file probes carry no platform attribute).
+  - So on glibc `nothrow` (C23, on all three and on the malloc family) is not on `allowed_attribute_name` (`encode.cpp:63`); in C `decl_position` stays in the system file, so `check_attributes` does not run on them today, and after record 0046 item 7 (attributes by position) the platform's entries are skipped in both modes.
+- **(d) glibc's malloc family** (`/usr/include/stdlib.h`): `malloc` `:676:14`, `calloc` `:679:14`, `realloc` `:687:14`, `free` `:691:13`. C23: attribute entries `nothrow` and `malloc` (`__malloc__`) on `malloc` and `calloc`, `nothrow` and `warn_unused_result` on `realloc`, `nothrow` alone on `free`; no `alloc_size` entry is recorded (glibc's `__attribute_alloc_size__` leaves none in this configuration). C++20: type `noexcept(true)` for all four, entries `malloc` (`malloc`, `calloc`), `warn_unused_result` (`realloc`), none (`free`). With the throwaway shim: accepted in both modes (`dshim` and `dshimnon`, exit 0; the C++ `dshimnon` warnings are the `#541-D` ones above), C23 `decl_position` unchanged, **C++20 moved to the shim for all four** (`stdlib.h:37:7`, `39:7`, `41:7`, `43:6`), and the four lose `noexcept`.
+- **(e) EDG's flag** (`from_system_include_dir`): `sys`: TRUE in all nine programs. `incfirst`: `a_stdlib.c`, `a_explicit.c`, `a_stdlib.cpp`, `a_explicit.cpp` FALSE; `a_cstdlib.cpp`, `a_array.cpp`, `a_exception.cpp` TRUE; `<cstdlib>` then `<stdlib.h>` TRUE; `<stdlib.h>` then `<cstdlib>` FALSE: the macOS table exactly.
+- **(f) The Viper today on glibc** (`cerastes verify tests/scalar/noreturn_libc.c` at `7ae05ec`, both modes verified, `.map` identical across modes): the tags are the same `libc:` lines; the trusted methods take the system declaration's parameter name: `method f_exit__2(p___status__0: Int)` (macOS `p_arg__0`; record 0031 item 6). The `.map` rows of the three methods are at the system declaration: `42 ... /usr/include/stdlib.h 752 13` (abort), `48`/`49 ... stdlib.h 778 13` (exit), `55`/`56 ... stdlib.h 790 13` (_Exit), column 13 where macOS has `33 7`, `165 7`, `215 6`. The three-line user-file copy of the shim gives the three `ensures_on_noreturn` errors in both modes, as on macOS.
+
+**Findings for the encoder (Linux).**
+5. The `#541-D` warning is silent only because EDG flags vlibc a system file; moving vlibc out of `--sys_include` (or a user `-I` copy with the shim first) would print three warnings per C++ unit that includes `<stdlib.h>`.
+6. In C++ `exit`/`_Exit` and the malloc family lose glibc's `noexcept(true)` in the IL after vlibc's redeclaration; cerastes reads no exception specification today (C++ exceptions are rejected, M7), so this is a note for M7 and d2, not a verdict risk.
+7. The pin audit must read glibc's attributes as well: in C23 `nothrow` (and `malloc`) appear on every entry, in C++ they do not. The `.map` rows pinned to vlibc's lines (owner decision, above) make the Linux and macOS `.map` rows equal, where today they differ (`stdlib.h:752` against `_abort.h:33`).

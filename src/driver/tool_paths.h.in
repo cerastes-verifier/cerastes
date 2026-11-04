@@ -15,5 +15,12 @@
 #define CERASTES_TOOL_C_SYS_INCLUDES "@CERASTES_C_SYS_INCLUDES@"
 // cerastes's own include/ (it holds <cerastes.h>).
 #define CERASTES_TOOL_INCLUDE_DIR "@CERASTES_INCLUDE_DIR@"
+// vlibc's include/ (decision 0046): the shim is its subdirectory vlibc/; <vlibc/...> resolves in include/ itself.
+#define CERASTES_TOOL_VLIBC_INCLUDE_DIR "@CERASTES_VLIBC_INCLUDE_DIR@"
+// The short commit of the vlibc checkout the build was configured with, "unknown" when it is not a git tree (`cerastes --version`).
+#define CERASTES_TOOL_VLIBC_COMMIT "@CERASTES_VLIBC_COMMIT@"
+// The fixed directory of the `library_fixture` self-test hook (decision 0046 item 10): a second library directory
+// for the harness's own tests; no other directory can be given library trust.
+#define CERASTES_TOOL_LIBRARY_FIXTURE_DIR "@CERASTES_LIBRARY_FIXTURE_DIR@"
 // EDG's data directory (EDG reads it from the environment variable EDG_BASE; the driver sets that itself).
 #define CERASTES_TOOL_EDG_BASE "@CERASTES_EDG_BASE@"

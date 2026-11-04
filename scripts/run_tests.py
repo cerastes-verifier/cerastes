@@ -344,6 +344,7 @@ POSITIVE_KINDS = ("golden", "verified")
 NATIVE_POLICY_DIRS = (Path("tests/annotations"),
                       Path("tests/scalar"),
                       Path("tests/memory"),
+                      Path("tests/vlibc"),
                       Path("doc/modules/ROOT/examples/annotations"),
                       Path("doc/modules/ROOT/examples/ordinary-compilers"),
                       # the examples of the M3 pages (verifying, error messages, integer
@@ -356,19 +357,21 @@ NATIVE_POLICY_DIRS = (Path("tests/annotations"),
 NEGATIVE_DIR = Path("tests/annotations/negative")
 SCALAR_NEGATIVE_DIR = Path("tests/scalar/negative")
 MEMORY_NEGATIVE_DIR = Path("tests/memory/negative")
+VLIBC_NEGATIVE_DIR = Path("tests/vlibc/negative")
 # Every directory of must-fail twins; a test under one needs `twin:` and must
 # expect an error.
-NEGATIVE_DIRS = (NEGATIVE_DIR, SCALAR_NEGATIVE_DIR, MEMORY_NEGATIVE_DIR)
+NEGATIVE_DIRS = (NEGATIVE_DIR, SCALAR_NEGATIVE_DIR, MEMORY_NEGATIVE_DIR, VLIBC_NEGATIVE_DIR)
 # The twin rule of invariant 2 in the other direction, per area: every
 # positive test under the first directory (outside the second) is the `twin:`
 # of a test under the second, or says why not with `twin-exempt:`.
 TWIN_AREAS = ((Path("tests/annotations"), NEGATIVE_DIR),
               (Path("tests/scalar"), SCALAR_NEGATIVE_DIR),
-              (Path("tests/memory"), MEMORY_NEGATIVE_DIR))
+              (Path("tests/memory"), MEMORY_NEGATIVE_DIR),
+              (Path("tests/vlibc"), VLIBC_NEGATIVE_DIR))
 # In these areas a positive test needs a twin that expects an `error` (a runtime
 # verification failure of the encoding rule it exercises): a `rejected` twin shows
 # that a construct is refused, not that the rule is checked, so it does not count.
-ERROR_TWIN_AREAS = (Path("tests/scalar"), Path("tests/memory"))
+ERROR_TWIN_AREAS = (Path("tests/scalar"), Path("tests/memory"), Path("tests/vlibc"))
 _CERASTES_H_RE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*[<"]cerastes\.h[>"]', re.MULTILINE)
 
 
@@ -653,6 +656,7 @@ def _under(path: Path, directory: Path) -> bool:
 # unless they carry `// c-only: <reason>`.
 DUAL_MODE_DIRS = (Path("tests/scalar"),
                   Path("tests/memory"),
+                  Path("tests/vlibc"),
                   Path("doc/modules/ROOT/examples/verifying"),
                   Path("doc/modules/ROOT/examples/error-messages"),
                   Path("doc/modules/ROOT/examples/integer-semantics"),
@@ -1965,6 +1969,9 @@ class NativeCompiler:
 @dataclasses.dataclass
 class NativeSetup:
     include_dir: str
+    # vlibc's `include/` (never `include/vlibc`, the shim directory, which would put vlibc's headers in front of the
+    # system ones): `#include <vlibc/stdlib.h>` builds with ordinary compilers (decision 0046)
+    vlibc_include_dir: str
     compilers: list[NativeCompiler]
     # canary problems, by (family, language); a compiler whose canary failed
     # fails every native-ok run instead of vouching for the files
@@ -1974,11 +1981,24 @@ class NativeSetup:
     note: str | None = None
 
 
-def native_command(exe: str, lang: str, mode: str, include_dir: str, path: str) -> list[str]:
+def vlibc_include_dir(env: dict[str, str]) -> str:
+    """vlibc's `include/` directory for ordinary compilers: under CERASTES_VLIBC_DIR (build/env.sh: the pinned
+    checkout, or CERASTES_VLIBC_SRC's), else third_party/vlibc.  A directory without `vlibc/` is a usage error."""
+    root = env.get("CERASTES_VLIBC_DIR") or str(ROOT / "third_party" / "vlibc")
+    include = Path(root) / "include"
+    if not (include / "vlibc").is_dir():
+        raise UsageError(f"{include} has no vlibc/ directory (is third_party/vlibc initialized? "
+                         "run scripts/bootstrap.sh)")
+    return str(include)
+
+
+def native_command(exe: str, lang: str, mode: str, include_dir: str, vlibc_include: str,
+                   path: str) -> list[str]:
     """The ordinary-compiler check of one file in one mode.  `__CERASTES__` is
-    undefined so that <cerastes.h> expands the annotations to nothing."""
+    undefined so that <cerastes.h> expands the annotations to nothing.  vlibc's
+    `include/` is on the path for `<vlibc/...>`; the shim directory is not."""
     return [exe, "-x", lang, f"-std={NATIVE_STD[mode]}", "-Wall", "-Wextra", "-Werror",
-            "-U__CERASTES__", "-I", include_dir, "-c", "-o", "/dev/null", path]
+            "-U__CERASTES__", "-I", include_dir, "-I", vlibc_include, "-c", "-o", "/dev/null", path]
 
 
 @functools.lru_cache(maxsize=1)
@@ -2020,7 +2040,7 @@ def banner_problem(family: str, version_output: str) -> str | None:
 
 
 def native_canary(comp: NativeCompiler, lang: str, mode: str, setup_env: dict[str, str],
-                  include_dir: str) -> list[str]:
+                  include_dir: str, vlibc_include: str) -> list[str]:
     """Anti-vacuity canary for one compiler and language: its banner is the
     expected family, a snippet that is fine compiles silently, and a snippet
     with an unused variable and one with an unknown scoped attribute are
@@ -2043,7 +2063,7 @@ def native_canary(comp: NativeCompiler, lang: str, mode: str, setup_env: dict[st
                               ("canary_attribute", CANARY_ATTRIBUTE)):
             f = Path(tmp) / (name + suffix)
             f.write_text(snippet)
-            run = run_tool(native_command(exe, lang, mode, include_dir, str(f)), cenv,
+            run = run_tool(native_command(exe, lang, mode, include_dir, vlibc_include, str(f)), cenv,
                            NATIVE_TIMEOUT_S)
             if run.returncode is None:
                 return [f"{comp.family} ({lang}): canary {run.error}"]
@@ -2074,7 +2094,7 @@ def prepare_native(env: dict[str, str],
     compilers = [NativeCompiler(CLANG_FAMILY, env["CERASTES_CLANG_CC"],
                                 env["CERASTES_CLANG_CXX"])]
     gcc_cc, gcc_cxx = env["CERASTES_GCC_CC"], env["CERASTES_GCC_CXX"]
-    setup = NativeSetup(env["CERASTES_INCLUDE_DIR"], compilers)
+    setup = NativeSetup(env["CERASTES_INCLUDE_DIR"], vlibc_include_dir(env), compilers)
     if gcc_cc and gcc_cxx:
         compilers.append(NativeCompiler("GCC", gcc_cc, gcc_cxx))
     elif gcc_cc or gcc_cxx:
@@ -2086,7 +2106,7 @@ def prepare_native(env: dict[str, str],
     outcomes = []
     for comp in compilers:
         for lang, mode in sorted(used):
-            problems = native_canary(comp, lang, mode, env, setup.include_dir)
+            problems = native_canary(comp, lang, mode, env, setup.include_dir, setup.vlibc_include_dir)
             setup.canary[(comp.family, lang)] = problems
             outcomes.append(Outcome(f"canary native-ok [{comp.family}, {lang}]", problems))
     return setup, outcomes
@@ -2105,7 +2125,7 @@ def run_native(path: Path, exp: Expectation, env: dict[str, str],
                 continue
             with setup.lock:
                 setup.runs[comp.family] = setup.runs.get(comp.family, 0) + 1
-            cmd = native_command(comp.exe(lang), lang, mode, setup.include_dir, rel(path))
+            cmd = native_command(comp.exe(lang), lang, mode, setup.include_dir, setup.vlibc_include_dir, rel(path))
             run = run_tool(cmd, native_env(env, comp.family), NATIVE_TIMEOUT_S)
             output = run.stdout + run.stderr
             problems = []

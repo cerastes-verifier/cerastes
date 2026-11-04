@@ -52,6 +52,13 @@ std::string physical_path(const a_source_position& p);
 // 0011 item 4: the position lies in a file that `cerastes verify` verifies (known, and not a system file by
 // canonical physical path).
 bool in_verified_file(const a_source_position& p);
+bool seq_in_verified_file(a_seq_number seq);  // the same for a sequence number (false for 0)
+
+// Decision 0046 item 3: sequence number `seq` / the position lies in a library file (a file below vlibc's include/vlibc, or the harness's
+// fixture directory with the `library_fixture` hook), by canonical physical path.  Always false outside a verify run and for an unknown
+// or unplaceable position.  A library file is a verified file and never a system file.
+bool seq_in_library_file(a_seq_number seq);
+bool in_library_file(const a_source_position& p);
 
 // The positions of the EDG diagnostic pragmas (`#pragma diag_suppress` and the like, `diagnostic push/pop`, also through
 // `_Pragma` and macros) the front end processed, recorded by the hook install_diag_pragma_recorder() (register_attributes.h)
@@ -74,12 +81,15 @@ struct IlEntities {
   // Decision 0025 item 5: the static assertions each function memory region holds (block scope), with the region's number, in
   // region order and then in the walk's order.
   std::vector<std::pair<a_memory_region_number, a_static_assertion_ptr>> region_static_assertions;
-  // The declarations of a routine other than the one `source_corresp.decl_position` names (a_src_seq_secondary_decl entries whose entity is the routine, il_def.h:2131), in the
-  // order the walk reports them; its first declaration is `source_corresp.decl_position`.  Decision 0040 item 3: where each declaration's parameters
-  // lie, to check that every declaration of a parameter carries the same `cerastes::owning`.
+  // The declarations of a routine (a_src_seq_secondary_decl entries whose entity is the routine, il_def.h:2131), in the order the walk
+  // reports them.  The list holds EVERY declaration, the first included (P71: its entry has `first_declaration` TRUE, and in C++ a later
+  // declaration's position can equal `source_corresp.decl_position`, which `decls.c:9802` moves).  Decision 0040 item 3: where each
+  // declaration's parameters lie, to check that every declaration of a parameter carries the same `cerastes::owning`.  Decision 0046:
+  // each declaration's own `attributes` (copies of the entries on the routine, il_def.h:2164), to find the declaration that carries a contract.
   struct SecondaryDecl {
     a_source_position position;
     a_type_ptr declared_type = nullptr;  // the type as the declaration wrote it (a typedef'd function type stays a typeref)
+    an_attribute_ptr attributes = nullptr;
   };
   std::map<a_routine_ptr, std::vector<SecondaryDecl>> secondary_decls;
   // Decision 0041 item 2: the other declarations of a file-scope variable (a_src_seq_secondary_decl entries whose entity is the variable): one in a

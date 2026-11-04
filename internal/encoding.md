@@ -303,8 +303,10 @@ function without such a local lowers exactly as before.
 the clause), and jumps to `l_end`. The end of the body appends `assert false` (`missing-return`) for a
 non-`void` function and the `ensures` asserts for a `void` one, then `label l_end`. A function declared not to return
 (M4.2a) asserts `false` with category `noreturn` at each `return` and at the end of its body instead, and its method
-has `ensures false` (implied by those asserts; a bodyless one, from the C library table or declared here and defined
-elsewhere, carries the trusted tag, `libc: …` or `declared noreturn here, defined in another unit`). A call of such a function is an
+has `ensures false` (implied by those asserts; a bodyless one declared here and defined elsewhere carries the trusted
+tag `declared noreturn here, defined in another unit`). The C library's `abort`, `exit` and `_Exit` are not
+`Function::noreturn` (M4.5d1, 0046 item 5): their `ensures false` is vlibc's own `ensures(false)` clause, and their tag
+is vlibc's (`vlibc: abort never returns (C23 7.24.4.1)`). A call of such a function is an
 ordinary call: its `ensures false` ends the path.
 
 **Well-formedness.** Each function with a contract also gets `f__wf`, a method with only the type ranges as
@@ -659,7 +661,9 @@ obligation that comes from a default argument at the call, with a note at the de
 (4) the bodies; (5) `check_program`, `lower_program`, `emit`. Only when nothing was rejected does a program exist.
 
 **What is verified.** A file is verified unless its canonical physical path is under a system directory or is exactly
-`include/cerastes.h` (0011 item 4). A file that cannot be placed is verified (`in_verified_file`, `is_system_file`):
+`include/cerastes.h` (0011 item 4). A file under vlibc's `include/` is a library file (0046 item 3): verified, and not
+system for `SrcPos::in_system` either, although EDG flags it (the driver passes vlibc's directories with
+`--sys_include`, first). A file that cannot be placed is verified (`in_verified_file`, `is_system_file`):
 fail closed. Positions of nodes are mapped through `diag_position` (0006 item 10).
 
 **Declarations (rejected with `unsupported_declaration`, at the declaration's first line).** In a verified file: a
@@ -716,9 +720,11 @@ with a body becomes a VIR function with a body, created before any body is encod
 Routines that are templates, instances of templates, members of classes, compiler-generated or lambda bodies are not
 encoded (the template or class declaration is what is rejected); a call of a template instance is rejected. A callee without one is
 a trusted contract when a declaration carries a `requires` or `ensures` or the function is declared not to return
-(M4.2a), or when it is one of the C library functions of 0015 item 5 (`abort`, `exit`, `_Exit`: name, system file,
-C linkage, signature and the "does not return" flag all checked), else `call_without_contract`; its reason is
-"declared here, defined in another unit" or "trusted, never verified: declared in a system file". `predicate`/`pure`
+(M4.2a), else `call_without_contract`; its reason is "declared here, defined in another unit" or "trusted, never
+verified: declared in a system file", and for a contract written in a library file vlibc's own tag (0046 item 4: the
+comment line above the declaration; 0015 item 5's table is gone). A name vlibc declares with a contract is reserved: a
+contract on it outside a library file is `annotation_reserved_library` (0046 item 6). Attributes written in a system
+file are not held to the allow-list (0046 item 7). `predicate`/`pure`
 routines and the spec functions are skipped (their bodies are not encoded); a call of one from code is
 `spec_call_in_code`. `requires` on `main` is `contract_on_main`. Attributes are held to the allow-list of 0011 item 7
 on routines, parameters, locals and statements of verified code (`unsupported_attribute`, `unrecognized_attribute`).

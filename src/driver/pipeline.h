@@ -18,6 +18,7 @@ struct PipelineOptions {
   std::string primary_file;  // the verdict line names it
   int functions = 0;         // how many functions were verified or used through a contract (the verdict line says so)
   std::string hook;          // the self-test hook of a hooked run (decision 0011 item 13); "" for none
+  std::string note;          // a hook that injects no fault (library_fixture, decision 0046 item 11): the verdict line names it
 };
 
 struct PipelineResult {

@@ -1,7 +1,7 @@
-// expect: verified
+// expect: rejected cerastes-annotation_reserved_library @ L8
 // expect: native-ok
-// Pins: 0015 item 5 (C++ only: C compilers know abort and exit as builtins, so a C file could not be native-ok): the table needs the exact signature: exit(void) is not exit(int)
-// A user exit with another signature is an ordinary function.
+// Pins: 0046 item 6 and question 117 (was 0015 item 5: exit(void) is not exit(int), an ordinary function; C++ only): the global name exit is reserved whatever the signature, so its user contract is rejected
+// A C++ program may not declare ::exit with a contract of its own, whatever its parameter list.
 #include <cerastes.h>
 
 void exit(void)

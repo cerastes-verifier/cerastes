@@ -1,7 +1,7 @@
-// expect: error check @ L16
-// twin: tests/scalar/noreturn_other_signature.cpp
-// Pins: 0015 item 5 (C++ only: C compilers know abort and exit as builtins, so a C file could not be native-ok): code after a call of exit(void) is reachable, so its check is made
-// exit(int) from the library would end the path.
+// expect: rejected cerastes-annotation_reserved_library @ L8
+// twin: tests/vlibc/exit_explicit.c
+// Pins: 0046 item 6 and question 117 (was 0015 item 5: code after a call of exit(void) was reachable): the global exit is the library's name, so a user contract on it is rejected before any call is looked at
+// The library exit(int) ends the path (tests/vlibc/exit_explicit.c); a user exit(void) with a contract is refused.
 #include <cerastes.h>
 
 void exit(void)

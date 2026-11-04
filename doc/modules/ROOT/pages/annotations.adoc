@@ -226,6 +226,23 @@ one:
 include::example$annotations/lambda_once.cpp[tag=once]
 ----
 
+The functions of the C library that
+xref:verifying.adoc#vlibc[vlibc] covers (in this version `abort`, `exit` and
+`_Exit`) are an exception: their contract comes from vlibc's header only. A
+contract on any other declaration of one of them, a `noreturn` attribute and
+an ownership or initialization marker included, is
+`cerastes-annotation_reserved_library`, even when it repeats vlibc's contract and
+whether or not the file includes the header:
+
+[source,c]
+----
+include::example$annotations/errors/reserved_library.c[tag=bad]
+----
+
+Include the header instead. A function of your own with the same name in a
+namespace, or with pass:[C++] linkage, is a different function and takes a
+contract like any other.
+
 An explicit specialization of a function template follows the same rule with
 respect to the primary template. It may repeat the primary template's
 contract, or carry none, in which case it has the primary's. It may not have a
@@ -668,8 +685,9 @@ an overloaded `operator=` (or any other overloaded operator), which is a call.
 `cerastes verify` rejects every call in an annotation other than
 `cerastes::old` (`cerastes-call_in_annotation`), the implicit ones included.
 
-Every annotation is checked, in whatever file it is: a header, a system header
-or a directory given with `--sys_include` is not exempt.
+Every annotation is checked, in whatever file it is: a header, a system header,
+a header of xref:verifying.adoc#vlibc[vlibc] or a directory given with
+`--sys_include` is not exempt.
 
 An error inside the argument of a macro such as `CERASTES_REQUIRES` is
 reported at the argument's own line and column, even when the macro
@@ -872,7 +890,9 @@ and a `pure` function that returns `void` is `cerastes-pure_returns_void`.
 The marker goes on a function of your own. On a constructor, a destructor or an
 assignment operator (which have effects, defaulted or not) it is
 `cerastes-spec_marker_on_special_member`, and a marker written in a system header is
-`cerastes-spec_marker_in_system_file`. Do not mark a library function that you
+`cerastes-spec_marker_in_system_file` (a header of
+xref:verifying.adoc#vlibc[vlibc] is not a system header: its predicates and pure
+functions are read like yours). Do not mark a library function that you
 redeclare, and write the marker on the first declaration of a function: cerastes
 does not check either yet, and a use that comes before the marker is not refused
 by the front end's constant evaluation (see above).

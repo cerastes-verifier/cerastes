@@ -79,7 +79,8 @@ PipelineResult run_pipeline(const PipelineOptions& options, const std::string& v
   }
   r.out += options.primary_file + ": verified (" + std::to_string(options.functions) +
            (options.functions == 1 ? " function" : " functions") +
-           "; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)\n";
+           "; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here" +
+           (options.note.empty() ? std::string() : "; " + options.note) + ")\n";
   r.exit_code = 0;
   return r;
 }

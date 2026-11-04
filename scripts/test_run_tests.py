@@ -3183,6 +3183,27 @@ def check_sh_problems(text):
     verify = index(r"^\s*python3 scripts/edg_tree\.py describe --verify-build\s*$",
                    "the build verification")
     green = index(r"all green", "the final green line")
+    # decision 0046 items 1 and 8: the vlibc pin is checked right after the EDG tree and before the build; the trusted
+    # contracts of vlibc's headers are compared with the committed list (and the script's self-test runs) before the
+    # tests; the pin is described last, like the EDG tree
+    vlibc_tree = index(r"^\s*python3 scripts/vlibc_tree\.py check\s*$", "the vlibc tree guard")
+    vlibc_resolve = index(r'^\s*vlibc_dir="\$\(python3 scripts/vlibc_tree\.py resolve\)"\s*$',
+                          "the vlibc tree resolution")
+    vlibc_contracts = index(r'^\s*python3 scripts/vlibc_contracts\.py check --include-dir '
+                            r'"\$\{vlibc_dir#\* \}/include/vlibc" --list tests/vlibc/trusted_contracts\.txt\s*$',
+                            "the trusted-contract check")
+    vlibc_test = index(r"^\s*python3 scripts/test_vlibc_contracts\.py\s*$",
+                       "the trusted-contract script self-test")
+    vlibc_describe = index(r"^\s*python3 scripts/vlibc_tree\.py describe\s*$", "the vlibc tree report")
+    if None not in (edg, vlibc_tree, boot) and not edg < vlibc_tree < boot:
+        problems.append("order must be: the EDG tree guard, the vlibc tree guard, the build")
+    if None not in (vlibc_resolve, vlibc_contracts, tests) and not vlibc_resolve < vlibc_contracts < tests:
+        problems.append("the trusted-contract check must run after the resolution of the vlibc tree and "
+                        "before the tests")
+    if None not in (vlibc_test, tests) and not vlibc_test < tests:
+        problems.append("the trusted-contract script self-test must run before the tests")
+    if None not in (tests, vlibc_describe, green) and not tests < vlibc_describe < green:
+        problems.append("the vlibc tree report must run after the tests and before the final green line")
     # decision 0016 item 14: the tier
     pr_base = index(r"^" + re.escape(CHECK_SH_PR_BASE) + r"$", "the reading of CERASTES_CHECK_BASE")
     for l in lines:
@@ -3338,9 +3359,13 @@ if [[ -n "$pr_base" ]]; then
 fi
 step "edg tree"
 python3 scripts/edg_tree.py check
+step "vlibc tree"
+python3 scripts/vlibc_tree.py check
 step "build"
 scripts/bootstrap.sh --build-only
 python3 scripts/check_doc_examples.py
+vlibc_dir="$(python3 scripts/vlibc_tree.py resolve)"
+python3 scripts/vlibc_contracts.py check --include-dir "${vlibc_dir#* }/include/vlibc" --list tests/vlibc/trusted_contracts.txt
 python3 scripts/mutate.py --validate
 step "harness self-test"
 export CERASTES_REQUIRE_E2E=1
@@ -3348,6 +3373,7 @@ python3 scripts/test_run_tests.py
 python3 scripts/test_walker_oracle.py
 python3 scripts/test_lint_viper.py
 python3 scripts/test_mutate.py
+python3 scripts/test_vlibc_contracts.py
 step "tests"
 python3 scripts/run_tests.py --pr-base="$pr_base"
 step "viper lint"
@@ -3371,6 +3397,7 @@ step "docs"
 scripts/build_docs.sh
 python3 scripts/check_doc_examples.py --html build/doc
 python3 scripts/edg_tree.py describe --verify-build
+python3 scripts/vlibc_tree.py describe
 if [[ -n "$pr_base" ]]; then
   printf '\\ncheck.sh: green in the PR tier (not the full check)\\n'
 else
@@ -3472,6 +3499,47 @@ jobs:
             with self.subTest(what):
                 self.assertNotEqual(text, self.SH, "mutation did not apply")
                 self.assertTrue(check_sh_problems(text), what)
+
+    def test_vlibc_wiring_mutations_are_found(self):
+        # decision 0046: the vlibc pin guard, the trusted-contract check and the self-test of its script each fail
+        # check.sh when switched off, and sit where they must
+        tree = "python3 scripts/vlibc_tree.py check\n"
+        resolve = 'vlibc_dir="$(python3 scripts/vlibc_tree.py resolve)"\n'
+        contracts = ('python3 scripts/vlibc_contracts.py check --include-dir "${vlibc_dir#* }/include/vlibc" '
+                     '--list tests/vlibc/trusted_contracts.txt\n')
+        test = "python3 scripts/test_vlibc_contracts.py\n"
+        describe = "python3 scripts/vlibc_tree.py describe\n"
+        boot = "scripts/bootstrap.sh --build-only\n"
+        edg = "python3 scripts/edg_tree.py check\n"
+        tests = 'python3 scripts/run_tests.py --pr-base="$pr_base"\n'
+        mutations = {}
+        for name, line in (("tree guard", tree), ("resolution", resolve), ("contract check", contracts),
+                           ("script self-test", test), ("report", describe)):
+            mutations[f"{name} removed"] = self.SH.replace(line, "")
+            mutations[f"{name} commented out"] = self.SH.replace(line, "# " + line)
+        for name, line in (("tree guard", tree), ("contract check", contracts), ("script self-test", test),
+                           ("report", describe)):
+            mutations[f"{name} || true"] = self.SH.replace(line, line[:-1] + " || true\n")
+            mutations[f"{name} in the background"] = self.SH.replace(line, line[:-1] + " &\n")
+        mutations.update({
+            "tree guard without the subcommand": self.SH.replace(tree, "python3 scripts/vlibc_tree.py\n"),
+            "tree guard describes instead": self.SH.replace(tree, describe),
+            "tree guard before the EDG tree guard": self.SH.replace(tree, "").replace(edg, tree + edg),
+            "tree guard after the build": self.SH.replace(tree, "").replace(boot, boot + tree),
+            "contract check of another list": self.SH.replace("tests/vlibc/trusted_contracts.txt",
+                                                              "tests/vlibc/other.txt"),
+            "contract check without the subcommand": self.SH.replace("vlibc_contracts.py check", "vlibc_contracts.py list"),
+            "contract check after the tests": self.SH.replace(contracts, "").replace(tests, tests + contracts),
+            "contract check before its resolution": self.SH.replace(resolve, "").replace(contracts, contracts + resolve),
+            "script self-test after the tests": self.SH.replace(test, "").replace(tests, tests + test),
+            "report before the tests": self.SH.replace(describe, "").replace(tests, describe + tests),
+        })
+        for what, text in mutations.items():
+            with self.subTest(what):
+                self.assertNotEqual(text, self.SH, "mutation did not apply")
+                self.assertTrue(check_sh_problems(text), what)
+        # the real check.sh has all of them (it is not only the fixture that is right)
+        self.assertEqual(check_sh_problems((REAL_ROOT / "scripts" / "check.sh").read_text()), [])
 
     def test_tier_wiring_mutations_are_found(self):
         # decision 0016 item 14: the full check unless CERASTES_CHECK_BASE is set, and `all green`
@@ -6583,7 +6651,8 @@ class NativePolicyTests(RootedCase):
         # Dropping a directory would let its tests skip the ordinary compilers.
         self.assertEqual(
             [str(d) for d in rt.NATIVE_POLICY_DIRS],
-            ["tests/annotations", "tests/scalar", "tests/memory", "doc/modules/ROOT/examples/annotations",
+            ["tests/annotations", "tests/scalar", "tests/memory", "tests/vlibc",
+             "doc/modules/ROOT/examples/annotations",
              "doc/modules/ROOT/examples/ordinary-compilers",
              "doc/modules/ROOT/examples/verifying", "doc/modules/ROOT/examples/error-messages",
              "doc/modules/ROOT/examples/integer-semantics", "doc/modules/ROOT/examples/memory"])
@@ -7763,12 +7832,37 @@ class BannerTests(unittest.TestCase):
 
 class NativeCommandTests(unittest.TestCase):
     def test_the_flags(self):
-        cmd = rt.native_command("/x/clang++", "c++", "c++20", "/inc", "t/a.cpp")
+        cmd = rt.native_command("/x/clang++", "c++", "c++20", "/inc", "/vlibc/include", "t/a.cpp")
         self.assertEqual(cmd, ["/x/clang++", "-x", "c++", "-std=c++20", "-Wall", "-Wextra",
-                               "-Werror", "-U__CERASTES__", "-I", "/inc", "-c", "-o",
+                               "-Werror", "-U__CERASTES__", "-I", "/inc", "-I", "/vlibc/include", "-c", "-o",
                                "/dev/null", "t/a.cpp"])
-        cmd = rt.native_command("/x/clang", "c", "c23", "/inc", "t/a.c")
+        cmd = rt.native_command("/x/clang", "c", "c23", "/inc", "/vlibc/include", "t/a.c")
         self.assertEqual(cmd[1:4], ["-x", "c", "-std=c23"])
+
+    def test_vlibcs_include_directory_is_on_the_path_and_its_shim_directory_is_not(self):
+        # decision 0046: `<vlibc/stdlib.h>` must build natively; `include/vlibc` (the shim directory) on the path
+        # would make a bare `<stdlib.h>` reach vlibc's header in front of the system's
+        cmd = rt.native_command("/x/clang", "c", "c23", "/inc", "/vlibc/include", "t/a.c")
+        self.assertIn("/vlibc/include", cmd)
+        self.assertEqual([cmd[i + 1] for i, a in enumerate(cmd) if a == "-I"], ["/inc", "/vlibc/include"])
+        self.assertFalse(any(a.endswith("include/vlibc") for a in cmd))
+
+    def test_the_vlibc_include_directory_comes_from_the_environment_or_the_submodule(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "include" / "vlibc").mkdir(parents=True)
+            self.assertEqual(rt.vlibc_include_dir({"CERASTES_VLIBC_DIR": str(root)}), str(root / "include"))
+            # twin: a directory without include/vlibc is a usage error, not a path that silently finds nothing
+            (root / "bare" / "include").mkdir(parents=True)
+            with self.assertRaises(rt.UsageError):
+                rt.vlibc_include_dir({"CERASTES_VLIBC_DIR": str(root / "bare")})
+            # unset: the submodule of the repository
+            with mock.patch.object(rt, "ROOT", root / "repo"):
+                (root / "repo" / "third_party" / "vlibc" / "include" / "vlibc").mkdir(parents=True)
+                self.assertEqual(rt.vlibc_include_dir({}),
+                                 str(root / "repo" / "third_party" / "vlibc" / "include"))
+                self.assertEqual(rt.vlibc_include_dir({"CERASTES_VLIBC_DIR": ""}),
+                                 str(root / "repo" / "third_party" / "vlibc" / "include"))
 
     def test_the_canary_snippets(self):
         # valid C and C++; one of them is rejected only by the warning flags
@@ -7794,7 +7888,12 @@ class NativeCase(FakeFrontEndCase):
                 exe.chmod(0o755)
                 self.bin[family, kind] = str(exe)
         self.log = self.dir.parent / "compiler.log"
-        self.set_env(CERASTES_CLANG_CC=self.bin["clang", "cc"],
+        # vlibc's include/ for ordinary compilers (decision 0046): a fake checkout with its vlibc/ directory
+        self.vlibc_root = self.dir.parent / "vlibc_fake"
+        (self.vlibc_root / "include" / "vlibc").mkdir(parents=True)
+        self.vlibc_inc = str(self.vlibc_root / "include")
+        self.set_env(CERASTES_VLIBC_DIR=str(self.vlibc_root),
+                     CERASTES_CLANG_CC=self.bin["clang", "cc"],
                      CERASTES_CLANG_CXX=self.bin["clang", "cxx"],
                      CERASTES_GCC_CC=self.bin["gcc", "cc"],
                      CERASTES_GCC_CXX=self.bin["gcc", "cxx"],
@@ -7841,7 +7940,7 @@ class NativeRunTests(NativeCase):
         self.assertTrue(self.summary(out).endswith(f"native-ok runs: {rt.CLANG_FAMILY} 1, GCC 1"),
                         self.summary(out))
         flags = ("-x c++ -std=c++20 -Wall -Wextra -Werror -U__CERASTES__ -I /fake/include "
-                 f"-c -o /dev/null {rt.rel(t)}")
+                 f"-I {self.vlibc_inc} -c -o /dev/null {rt.rel(t)}")
         self.assertEqual(self.compiles_of(t), [
             f"fake_clang_cxx SDKROOT={self.CLANG_SDK} {flags}", f"fake_gcc_cxx SDKROOT=- {flags}"])
 
@@ -7850,7 +7949,7 @@ class NativeRunTests(NativeCase):
         status, out, _ = self.run_harness(t)
         self.assertEqual(status, 0, out)
         flags = ("-x c -std=c23 -Wall -Wextra -Werror -U__CERASTES__ -I /fake/include "
-                 f"-c -o /dev/null {rt.rel(t)}")
+                 f"-I {self.vlibc_inc} -c -o /dev/null {rt.rel(t)}")
         self.assertEqual(self.compiles_of(t), [
             f"fake_clang_cc SDKROOT={self.CLANG_SDK} {flags}", f"fake_gcc_cc SDKROOT=- {flags}"])
         self.assertIn(f"native-ok: {rt.CLANG_FAMILY}", out)
@@ -8094,7 +8193,7 @@ class NativeEnvironmentTests(NativeCase):
                 "CERASTES_CLANG_CC": self.bin["clang", "cc"],
                 "CERASTES_CLANG_CXX": self.bin["clang", "cxx"],
                 "CERASTES_GCC_CC": "", "CERASTES_GCC_CXX": "",
-                "CERASTES_INCLUDE_DIR": "/fake/include"}
+                "CERASTES_INCLUDE_DIR": "/fake/include", "CERASTES_VLIBC_DIR": str(self.vlibc_root)}
 
     def test_the_complete_environment_works(self):
         status, out, _ = self.run_with_env(self.base_env())
@@ -9108,6 +9207,400 @@ class EdgTreeToolTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# scripts/vlibc_tree.py against its command-line contract (decision 0046 item 1)
+# ---------------------------------------------------------------------------
+
+VLIBC_TREE = REAL_ROOT / "scripts" / "vlibc_tree.py"
+VLIBC_URL = "https://github.com/cerastes-verifier/vlibc.git"
+VLIBC_OTHER_URL = "https://github.com/example/vlibc.git"
+VLIBC_PUSHED = "refs/remotes/origin/main"
+VLIBC_LOCAL = "refs/remotes/local/main"
+
+
+@e2e_gate(shutil.which("git") is not None and VLIBC_TREE.is_file(),
+          "git or scripts/vlibc_tree.py missing")
+class VlibcTreeToolTests(unittest.TestCase):
+    """Runs `python3 scripts/vlibc_tree.py --root DIR <command>` on temporary repositories: a root with a
+    nested repository at third_party/vlibc and a fake gitlink, and override trees.  Each case is a twin of a
+    guard: weaken the guard and its case fails (decision 0046 item 1)."""
+
+    @staticmethod
+    def make_env():
+        env = EdgTreeToolTests.make_env()
+        env.pop("CERASTES_VLIBC_SRC", None)
+        return env
+
+    @classmethod
+    def build_fixture(cls, base):
+        def git(cwd, *args):
+            cwd.mkdir(parents=True, exist_ok=True)
+            run = subprocess.run(["git", "-c", "commit.gpgsign=false", "-c",
+                                  "core.hooksPath=/dev/null", "-c", "maintenance.auto=false", "-c",
+                                  "gc.auto=0", *args], cwd=cwd, env=cls.env,
+                                 capture_output=True, text=True)
+            assert run.returncode == 0, (args, run.stderr)
+            return run.stdout.strip()
+
+        def write(path, text):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+
+        root, sub, override = base / "repo", base / "repo" / "third_party" / "vlibc", base / "override"
+        git(root, "init", "-q", "-b", "main")
+        write(root / ".gitmodules",
+              f'[submodule "third_party/vlibc"]\n\tpath = third_party/vlibc\n\turl = {VLIBC_URL}\n')
+        write(root / "README", "root\n")
+        git(root, "add", ".gitmodules", "README")
+        git(root, "commit", "-q", "-m", "root")
+        git(sub, "init", "-q", "-b", "main")
+        git(sub, "remote", "add", "origin", VLIBC_URL)
+        write(sub / "include" / "vlibc" / "stdlib.h", "// shim\n")
+        git(sub, "add", "-A")
+        git(sub, "commit", "-q", "-m", "pin")
+        pin = git(sub, "rev-parse", "HEAD")
+        git(sub, "update-ref", VLIBC_PUSHED, pin)    # what the submodule last fetched
+        git(root, "update-index", "--add", "--cacheinfo", f"160000,{pin},third_party/vlibc")
+        # an override tree: the pin plus two commits, on a topic branch
+        git(base, "clone", "-q", str(sub), str(override))
+        git(override, "switch", "-q", "-c", "vlibc-topic")
+        for n in (1, 2):
+            write(override / "include" / f"x{n}.h", f"{n}\n")
+            git(override, "add", "-A")
+            git(override, "commit", "-q", "-m", f"c{n}")
+        return pin
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._template_tmp = tempfile.TemporaryDirectory()
+        cls.template = Path(cls._template_tmp.name).resolve()
+        cls.env = cls.make_env()
+        cls.pin = cls.build_fixture(cls.template)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._template_tmp.cleanup()
+        super().tearDownClass()
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name).resolve()
+        EdgTreeToolTests.copy_template(self.template, self.tmp)
+        self.root = self.tmp / "repo"
+        self.sub = self.root / "third_party" / "vlibc"
+        self.override = self.tmp / "override"
+        self.env = dict(self.__class__.env)
+
+    def write(self, path, text):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+
+    def git(self, cwd, *args):
+        cwd.mkdir(parents=True, exist_ok=True)
+        run = subprocess.run(["git", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
+                              "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=cwd,
+                             env=self.env, capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, (args, run.stderr))
+        return run.stdout.strip()
+
+    def tool(self, *args, override=None, extra_env=None):
+        env = dict(self.env)
+        env.update(extra_env or {})
+        if override is not None:
+            env["CERASTES_VLIBC_SRC"] = str(override)
+        run = subprocess.run([sys.executable, str(VLIBC_TREE), "--root", str(self.root), *args],
+                             env=env, capture_output=True, text=True, timeout=120)
+        return run.returncode, run.stdout, run.stderr
+
+    def topic(self):
+        self.git(self.root, "switch", "-q", "-c", "topic")
+
+    def check_fails(self, needle, override=None):
+        status, out, err = self.tool("check", override=override)
+        self.assertEqual(status, 1, (out, err))
+        self.assertIn("error: ", err)
+        self.assertIn(needle, err)
+        self.assertEqual(out, "")
+
+    def new_commit(self):
+        self.write(self.sub / "include" / "vlibc" / "stdlib.h", "// next\n")
+        self.git(self.sub, "commit", "-q", "-am", "next")
+        commit = self.git(self.sub, "rev-parse", "HEAD")
+        self.git(self.root, "update-index", "--cacheinfo", f"160000,{commit},third_party/vlibc")
+        return commit
+
+    # --- check: the pin ---
+
+    def test_the_fixture_repositories_run_no_automatic_maintenance(self):
+        for repo in (self.root, self.sub, self.override):
+            for key, want in (("maintenance.auto", "false"), ("gc.auto", "0")):
+                self.assertEqual(self.git(repo, "config", "--get", key), want, (repo, key))
+
+    def test_a_clean_pin_passes_and_reports(self):
+        status, out, err = self.tool("check")
+        self.assertEqual((status, err), (0, ""), out)
+        self.assertEqual(out, f"vlibc tree: third_party/vlibc @ {self.pin[:8]} (gitlink, clean)\n")
+
+    def test_a_modified_tracked_file_fails(self):
+        self.write(self.sub / "include" / "vlibc" / "stdlib.h", "// changed\n")
+        self.check_fails("third_party/vlibc is not clean")
+
+    def test_an_untracked_file_fails(self):
+        self.write(self.sub / "include" / "vlibc" / "new.h", "x\n")
+        self.check_fails("third_party/vlibc is not clean")
+
+    def test_an_uninitialized_submodule_fails(self):
+        shutil.rmtree(self.sub / ".git")
+        self.check_fails("is not an initialized submodule")
+
+    def test_head_other_than_the_gitlink_fails(self):
+        # the submodule moved on (a commit on both refs) but the index still records the old pin
+        self.write(self.sub / "include" / "vlibc" / "stdlib.h", "// next\n")
+        self.git(self.sub, "commit", "-q", "-am", "next")
+        head = self.git(self.sub, "rev-parse", "HEAD")
+        self.git(self.sub, "update-ref", VLIBC_PUSHED, head)
+        self.check_fails(f"third_party/vlibc is at {head[:8]} but the index records {self.pin[:8]}")
+        # twin: the index follows the submodule and it passes
+        self.git(self.root, "update-index", "--cacheinfo", f"160000,{head},third_party/vlibc")
+        status, out, err = self.tool("check")
+        self.assertEqual((status, err), (0, ""), out)
+        self.assertIn(head[:8], out)
+
+    def test_a_pin_on_neither_ref_fails_and_says_how_to_fetch_it(self):
+        commit = self.new_commit()
+        self.check_fails("not contained in origin/main or in the `local` remote's main")
+        self.check_fails("git -C third_party/vlibc fetch origin")
+        self.check_fails("git -C third_party/vlibc fetch local")
+        self.git(self.sub, "update-ref", VLIBC_PUSHED, commit)
+        status, out, err = self.tool("check")
+        self.assertEqual((status, err), (0, ""), out)
+        self.assertNotIn("NOT YET PUSHED", out)
+
+    def test_a_commit_only_in_the_local_clone_passes_with_a_warning(self):
+        commit = self.new_commit()
+        self.git(self.sub, "update-ref", VLIBC_LOCAL, commit)
+        status, out, err = self.tool("check")
+        self.assertEqual(status, 0, (out, err))
+        self.assertEqual(out, f"vlibc tree: third_party/vlibc @ {commit[:8]} (gitlink, clean, "
+                              "NOT YET PUSHED to origin/main)\n")
+        self.assertIn(f"warning: the pin {commit[:8]} is contained only in the `local` remote's main: "
+                      "the owner must push vlibc's main before cerastes main", err)
+        status, out, err = self.tool("describe")
+        self.assertEqual(status, 0, (out, err))
+        self.assertIn("NOT YET PUSHED to origin/main", out)
+        self.assertIn("must push", err)
+
+    def test_pushed_wins_over_local(self):
+        commit = self.new_commit()
+        self.git(self.sub, "update-ref", VLIBC_LOCAL, commit)
+        self.git(self.sub, "update-ref", VLIBC_PUSHED, commit)
+        status, out, err = self.tool("check")
+        self.assertEqual((status, err), (0, ""), out)
+        self.assertNotIn("NOT YET PUSHED", out)
+
+    def test_other_branches_and_other_remotes_do_not_count(self):
+        # the pin has to be a commit of vlibc's main: the EDG fork's branch names, another branch of origin and
+        # another remote's main are not good enough
+        commit = self.new_commit()
+        for ref in ("refs/remotes/origin/cerastes", "refs/remotes/fork-local/cerastes",
+                    "refs/remotes/origin/other", "refs/remotes/local/other",
+                    "refs/remotes/upstream/main"):
+            self.git(self.sub, "update-ref", ref, commit)
+        self.check_fails("not contained in origin/main or in the `local` remote's main")
+
+    def test_missing_refs_fail(self):
+        self.git(self.sub, "update-ref", "-d", VLIBC_PUSHED)
+        self.check_fails("fetch origin")
+
+    def test_a_wrong_url_in_gitmodules_fails(self):
+        self.write(self.root / ".gitmodules", (self.root / ".gitmodules").read_text().replace(
+            "cerastes-verifier/vlibc", "example/vlibc"))
+        self.check_fails(".gitmodules URL of third_party/vlibc is")
+        self.check_fails(VLIBC_URL)
+
+    def test_a_missing_gitmodules_entry_fails(self):
+        (self.root / ".gitmodules").write_text("")
+        self.check_fails(".gitmodules URL of third_party/vlibc is <missing>")
+
+    def test_a_wrong_origin_fails(self):
+        self.git(self.sub, "remote", "set-url", "origin", VLIBC_OTHER_URL)
+        self.check_fails("remote.origin.url of third_party/vlibc is")
+        self.check_fails(VLIBC_URL)
+
+    def test_no_origin_fails(self):
+        self.git(self.sub, "remote", "remove", "origin")
+        self.check_fails("remote.origin.url of third_party/vlibc is <missing>")
+
+    def test_all_violations_are_listed(self):
+        self.write(self.sub / "stray", "x\n")
+        self.git(self.sub, "remote", "set-url", "origin", VLIBC_OTHER_URL)
+        status, out, err = self.tool("check")
+        self.assertEqual(status, 1)
+        self.assertEqual(sum(l.startswith("error: ") for l in err.splitlines()), 2, err)
+
+    def test_the_pin_is_checked_with_an_override_too(self):
+        self.topic()
+        self.write(self.sub / "stray", "x\n")
+        self.check_fails("third_party/vlibc is not clean", override=self.override)
+
+    def test_the_edg_variable_is_not_the_vlibc_variable(self):
+        # CERASTES_EDG_SRC names an EDG tree: it must not select a vlibc tree
+        status, out, err = self.tool("check", extra_env={"CERASTES_EDG_SRC": str(self.override)})
+        self.assertEqual((status, err), (0, ""), out)
+        self.assertIn("third_party/vlibc @", out)
+
+    # --- check: the override ---
+
+    def test_an_override_on_main_fails(self):
+        self.check_fails("CERASTES_VLIBC_SRC is set on branch main; check.sh on main runs against the pin",
+                         override=self.override)
+
+    def test_an_override_on_a_topic_branch_is_reported(self):
+        self.topic()
+        status, out, err = self.tool("check", override=self.override)
+        self.assertEqual((status, err), (0, ""), out)
+        head = self.git(self.override, "rev-parse", "HEAD")[:8]
+        self.assertEqual(out, f"vlibc tree: OVERRIDE {self.override} @ {head} (branch vlibc-topic, "
+                              f"2 commits on top of pin {self.pin[:8]}, 0 modified, 0 untracked)\n")
+
+    def test_the_report_counts_modified_and_untracked(self):
+        self.topic()
+        self.write(self.override / "include" / "x1.h", "edited\n")
+        self.write(self.override / "include" / "n1.h", "n\n")
+        self.write(self.override / "include" / "n2.h", "n\n")
+        status, out, err = self.tool("check", override=self.override)
+        self.assertEqual(status, 0, (out, err))
+        self.assertIn("1 modified, 2 untracked)", out)
+
+    def test_an_unrelated_override_warns(self):
+        self.topic()
+        other = self.tmp / "unrelated"
+        self.git(other, "init", "-q", "-b", "vlibc-topic")
+        self.write(other / "include" / "vlibc" / "stdlib.h", "x\n")
+        self.git(other, "add", "-A")
+        self.git(other, "commit", "-q", "-m", "u")
+        status, out, err = self.tool("check", override=other)
+        self.assertEqual(status, 0, (out, err))
+        self.assertIn("warning: the pin", err)
+        self.assertIn("not an ancestor", err)
+
+    def test_an_override_that_is_the_submodule_fails(self):
+        self.topic()
+        self.check_fails("is, or is inside", override=self.sub)
+
+    def test_an_override_inside_the_submodule_fails(self):
+        self.topic()
+        inner = self.sub / "vendor" / "vlibc"
+        self.git(inner, "init", "-q", "-b", "vlibc-topic")
+        self.write(inner / "include" / "vlibc" / "stdlib.h", "x\n")
+        self.check_fails("is, or is inside", override=inner)
+
+    def test_a_missing_override_fails(self):
+        self.topic()
+        self.check_fails("is not a directory", override=self.tmp / "nowhere")
+
+    def test_an_override_without_include_vlibc_fails(self):
+        self.topic()
+        bare = self.tmp / "bare"
+        self.git(bare, "init", "-q")
+        self.check_fails("has no include/vlibc", override=bare)
+
+    def test_an_override_that_is_not_a_repository_fails(self):
+        self.topic()
+        plain = self.tmp / "plain"
+        self.write(plain / "include" / "vlibc" / "stdlib.h", "x\n")
+        self.check_fails("is not the root of a git work tree", override=plain)
+
+    def test_a_subdirectory_of_a_repository_is_not_a_tree_root(self):
+        self.topic()
+        nested = self.override / "nested"
+        self.write(nested / "include" / "vlibc" / "stdlib.h", "x\n")
+        self.check_fails("is not the root of a git work tree", override=nested)
+
+    def test_an_override_with_a_detached_head_fails(self):
+        self.git(self.root, "switch", "-q", "--detach")
+        self.check_fails("CERASTES_VLIBC_SRC is set with a detached HEAD", override=self.override)
+        self.assertEqual(self.tool("check")[0], 0)   # the pin has no such requirement
+
+    def test_a_relative_override_is_refused_everywhere(self):
+        self.topic()
+        relative = os.path.relpath(self.override, os.getcwd())
+        for command in (("resolve",), ("check",), ("describe",)):
+            with self.subTest(command):
+                status, out, err = self.tool(*command, override=relative)
+                self.assertEqual(status, 2, (out, err))
+                self.assertIn("is a relative path", err)
+                self.assertEqual(out, "")
+        self.assertEqual(self.tool("check", override=self.override)[0], 0)
+        self.assertEqual(self.tool("resolve", override="~/x")[0], 2)
+
+    def test_an_empty_override_means_the_pin(self):
+        status, out, err = self.tool("check", override="")
+        self.assertEqual(status, 0, (out, err))
+        self.assertIn("third_party/vlibc @", out)
+
+    def test_git_redirecting_variables_are_ignored(self):
+        self.topic()
+        decoy = self.tmp / "decoy"
+        self.git(decoy, "init", "-q", "-b", "other")
+        self.write(decoy / "include" / "vlibc" / "stdlib.h", "decoy\n")
+        self.git(decoy, "add", "-A")
+        self.git(decoy, "commit", "-q", "-m", "decoy")
+        poison = {"GIT_DIR": str(decoy / ".git"), "GIT_WORK_TREE": str(decoy),
+                  "GIT_INDEX_FILE": str(decoy / ".git" / "index"),
+                  "GIT_OBJECT_DIRECTORY": str(decoy / ".git" / "objects"),
+                  "GIT_COMMON_DIR": str(decoy / ".git")}
+        for command, override in ((("check",), None), (("check",), self.override),
+                                  (("resolve",), self.override), (("describe",), self.override)):
+            with self.subTest(command=command, override=override):
+                clean = self.tool(*command, override=override)
+                poisoned = self.tool(*command, override=override, extra_env=poison)
+                self.assertEqual(poisoned, clean)
+                self.assertEqual(clean[0], 0, clean)
+
+    # --- resolve, describe ---
+
+    def test_resolve(self):
+        status, out, err = self.tool("resolve")
+        self.assertEqual((status, out, err), (0, f"pinned {self.sub}\n", ""))
+        status, out, err = self.tool("resolve", override=self.override)
+        self.assertEqual((status, out, err), (0, f"override {self.override}\n", ""))
+        link = self.tmp / "link"
+        link.symlink_to(self.override)
+        status, out, _ = self.tool("resolve", override=link)
+        self.assertEqual((status, out), (0, f"override {self.override}\n"))
+
+    def test_resolve_refuses_a_bad_override(self):
+        bare = self.tmp / "bare"
+        self.git(bare, "init", "-q")
+        plain = self.tmp / "plain"
+        self.write(plain / "include" / "vlibc" / "stdlib.h", "x\n")
+        for what, path, needle in (("missing", self.tmp / "nowhere", "is not a directory"),
+                                   ("no include/vlibc", bare, "has no include/vlibc"),
+                                   ("not a repository", plain, "not the root of a git work tree"),
+                                   ("the submodule", self.sub, "is, or is inside")):
+            with self.subTest(what):
+                status, out, err = self.tool("resolve", override=path)
+                self.assertEqual(status, 2, (out, err))
+                self.assertEqual(out, "")
+                self.assertIn(needle, err)
+
+    def test_describe_reports_the_pin_and_an_override(self):
+        status, out, err = self.tool("describe")
+        self.assertEqual((status, err), (0, ""), out)
+        self.assertEqual(out, f"vlibc tree: third_party/vlibc @ {self.pin[:8]} (gitlink, clean)\n")
+        status, out, err = self.tool("describe", override=self.override)
+        self.assertEqual((status, err), (0, ""), out)
+        self.assertIn("OVERRIDE", out)
+        # describe does not enforce the guards (check does): a dirty pin is reported DIRTY
+        self.write(self.sub / "stray", "x\n")
+        status, out, err = self.tool("describe")
+        self.assertEqual(status, 0, (out, err))
+        self.assertIn("DIRTY", out)
+
+
+# ---------------------------------------------------------------------------
 # The real front end and the real compilers
 # ---------------------------------------------------------------------------
 
@@ -9288,18 +9781,18 @@ class RealNativeTests(MemoisedStamp, unittest.TestCase):
         return status, out.getvalue()
 
     def test_the_real_canaries_pass(self):
-        setup = rt.NativeSetup(self.env["CERASTES_INCLUDE_DIR"], [])
+        setup = rt.NativeSetup(self.env["CERASTES_INCLUDE_DIR"], rt.vlibc_include_dir(self.env), [])
         for comp, lang, mode in (
                 (rt.NativeCompiler(rt.CLANG_FAMILY, self.env["CERASTES_CLANG_CC"],
                                    self.env["CERASTES_CLANG_CXX"]), "c++", "c++20"),
                 (rt.NativeCompiler(rt.CLANG_FAMILY, self.env["CERASTES_CLANG_CC"],
                                    self.env["CERASTES_CLANG_CXX"]), "c", "c23")):
-            self.assertEqual(rt.native_canary(comp, lang, mode, self.env, setup.include_dir), [])
+            self.assertEqual(rt.native_canary(comp, lang, mode, self.env, setup.include_dir, setup.vlibc_include_dir), [])
         if self.env.get("CERASTES_GCC_CC"):
             gcc = rt.NativeCompiler("GCC", self.env["CERASTES_GCC_CC"], self.env["CERASTES_GCC_CXX"])
             for lang, mode in (("c++", "c++20"), ("c", "c23")):
                 self.assertEqual(rt.native_canary(gcc, lang, mode, self.env,
-                                                  setup.include_dir), [])
+                                                  setup.include_dir, setup.vlibc_include_dir), [])
 
     def test_an_ordinary_file_passes_with_every_installed_compiler(self):
         status, out = self.run_test("ok.cpp", "#include <cstdio>\n"
@@ -9356,7 +9849,8 @@ class RealNativeTests(MemoisedStamp, unittest.TestCase):
                 else rt.NativeCompiler("GCC", self.env["CERASTES_GCC_CC"],
                                        self.env["CERASTES_GCC_CXX"]))
         return rt.run_tool(rt.native_command(comp.exe(lang), lang, mode,
-                                             self.env["CERASTES_INCLUDE_DIR"], str(path)),
+                                             self.env["CERASTES_INCLUDE_DIR"],
+                                             rt.vlibc_include_dir(self.env), str(path)),
                            rt.native_env(self.env, family), rt.NATIVE_TIMEOUT_S)
 
     UNDEFINED_ERROR = "#ifndef __CERASTES__\n#error __CERASTES__ is not defined\n#endif\n"
@@ -12091,9 +12585,9 @@ class VerifyNativeTests(VerifierMixin, NativeCase):
         calls = self.compiles_of(t)
         self.assertEqual(len(calls), 4, calls)
         cxx = ("-x c++ -std=c++20 -Wall -Wextra -Werror -U__CERASTES__ -I /fake/include "
-               f"-c -o /dev/null {rt.rel(t)}")
+               f"-I {self.vlibc_inc} -c -o /dev/null {rt.rel(t)}")
         c = ("-x c -std=c23 -Wall -Wextra -Werror -U__CERASTES__ -I /fake/include "
-             f"-c -o /dev/null {rt.rel(t)}")
+             f"-I {self.vlibc_inc} -c -o /dev/null {rt.rel(t)}")
         self.assertEqual(sorted(x.split(" SDKROOT=")[0] + " " + x.split(" ", 2)[2] for x in calls),
                          sorted([f"fake_clang_cxx {cxx}", f"fake_gcc_cxx {cxx}",
                                  f"fake_clang_cc {c}", f"fake_gcc_cc {c}"]))
@@ -12144,11 +12638,14 @@ class ScalarAreaTests(RootedCase):
     def test_the_areas_are_pinned(self):
         self.assertEqual(str(rt.SCALAR_NEGATIVE_DIR), "tests/scalar/negative")
         self.assertEqual(str(rt.MEMORY_NEGATIVE_DIR), "tests/memory/negative")
-        self.assertEqual(rt.NEGATIVE_DIRS, (rt.NEGATIVE_DIR, rt.SCALAR_NEGATIVE_DIR, rt.MEMORY_NEGATIVE_DIR))
+        self.assertEqual(str(rt.VLIBC_NEGATIVE_DIR), "tests/vlibc/negative")
+        self.assertEqual(rt.NEGATIVE_DIRS, (rt.NEGATIVE_DIR, rt.SCALAR_NEGATIVE_DIR, rt.MEMORY_NEGATIVE_DIR,
+                                            rt.VLIBC_NEGATIVE_DIR))
         self.assertEqual([(str(a), str(n)) for a, n in rt.TWIN_AREAS],
                          [("tests/annotations", "tests/annotations/negative"),
                           ("tests/scalar", "tests/scalar/negative"),
-                          ("tests/memory", "tests/memory/negative")])
+                          ("tests/memory", "tests/memory/negative"),
+                          ("tests/vlibc", "tests/vlibc/negative")])
 
     def test_a_positive_scalar_test_needs_native_ok(self):
         for directory in ("tests/scalar", "tests/scalar/sub/deeper"):
@@ -12342,7 +12839,7 @@ class DualModeTests(RootedCase):
 
     def test_the_directories_are_pinned(self):
         self.assertEqual([str(d) for d in rt.DUAL_MODE_DIRS], [
-            "tests/scalar", "tests/memory", "doc/modules/ROOT/examples/verifying",
+            "tests/scalar", "tests/memory", "tests/vlibc", "doc/modules/ROOT/examples/verifying",
             "doc/modules/ROOT/examples/error-messages",
             "doc/modules/ROOT/examples/integer-semantics",
             "doc/modules/ROOT/examples/memory"])
@@ -12437,6 +12934,74 @@ class MemoryAreaTests(RootedCase):
         self.put("tests/memory/a.c", self.POSITIVE)
         err = self.header(f"{self.NEG}/m.c", "// expect: verified\n// expect: native-ok\n"
                                              "// mode: c23, c++20\n// twin: tests/memory/a.c\n")
+        self.assertIsInstance(err, rt.HeaderError)
+        self.assertIn("must expect at least one error", str(err))
+
+
+class VlibcAreaTests(RootedCase):
+    """tests/vlibc (decision 0046) is an area like tests/scalar: its `.c` tests run in both languages, its
+    positives need native-ok and a must-fail twin that expects an `error` in every mode, and its twins live in
+    tests/vlibc/negative.  Each rule has a twin here that fails if the area is dropped from the harness's tables."""
+
+    POSITIVE = "// expect: verified\n// expect: native-ok\n// mode: c23, c++20\nint f(void);\n"
+    NEG = "tests/vlibc/negative"
+
+    def header(self, rel, text):
+        return rt.read_header(self.put(rel, text))
+
+    def problems(self):
+        return {str(f.relative_to(self.root)): m for f, m in rt.cross_file_problems()}
+
+    def test_a_vlibc_c_test_runs_in_both_modes(self):
+        self.put("tests/vlibc/p.c", self.POSITIVE)
+        for rel in ("tests/vlibc/a.c", f"{self.NEG}/a.c"):
+            with self.subTest(rel):
+                err = self.header(rel, "// expect: error check @ L9\n// twin: tests/vlibc/p.c\n")
+                self.assertIsInstance(err, rt.HeaderError)
+                self.assertIn("must run in both modes", str(err))
+
+    def test_a_positive_vlibc_test_needs_native_ok(self):
+        for rel in ("tests/vlibc/a.c", "tests/vlibc/sub/a.c"):
+            with self.subTest(rel):
+                err = self.header(rel, "// expect: verified\n// mode: c23, c++20\n")
+                self.assertIsInstance(err, rt.HeaderError)
+                self.assertIn("native-ok", str(err))
+
+    def test_a_vlibc_positive_needs_an_error_twin_in_the_vlibc_negative_directory(self):
+        self.put("tests/vlibc/a.c", self.POSITIVE)
+        found = self.problems()
+        self.assertEqual(list(found), ["tests/vlibc/a.c"])
+        self.assertIn("under tests/vlibc/negative/", found["tests/vlibc/a.c"])
+        self.put(f"{self.NEG}/e.c", "// expect: error null-dereference @ L9\n// mode: c23, c++20\n"
+                                    "// twin: tests/vlibc/a.c\nint g(void);\n")
+        self.assertEqual(self.problems(), {})
+
+    def test_a_rejected_twin_is_not_an_error_twin_in_the_vlibc_area(self):
+        self.put("tests/vlibc/a.c", self.POSITIVE)
+        self.put(f"{self.NEG}/r.c", "// expect: rejected cerastes-unsupported_type @ L9\n"
+                                    "// mode: c23, c++20\n// twin: tests/vlibc/a.c\nint g(void);\n")
+        found = self.problems()
+        self.assertIn("it has only a `rejected` twin", found["tests/vlibc/a.c"])
+
+    def test_an_error_twin_of_the_vlibc_area_must_run_in_both_modes(self):
+        self.put("tests/vlibc/a.c", self.POSITIVE)
+        self.put(f"{self.NEG}/e.c", "// expect: error permission @ L9\n// c-only: test\n"
+                                    "// twin: tests/vlibc/a.c\nint g(void);\n")
+        self.assertIn("no `error` twin runs in c++20", self.problems()["tests/vlibc/a.c"])
+
+    def test_the_memory_negative_directory_is_not_the_vlibc_twin_directory(self):
+        self.put("tests/vlibc/a.c", self.POSITIVE)
+        self.put("tests/memory/negative/e.c", "// expect: error check @ L9\n// mode: c23, c++20\n"
+                                              "// twin: tests/vlibc/a.c\nint g(void);\n")
+        self.assertEqual(list(self.problems()), ["tests/vlibc/a.c"])
+
+    def test_a_vlibc_negative_test_needs_a_twin_and_an_error(self):
+        err = self.header(f"{self.NEG}/n.c", "// expect: error check @ L9\n// mode: c23, c++20\n")
+        self.assertIsInstance(err, rt.HeaderError)
+        self.assertIn("needs `// twin:", str(err))
+        self.put("tests/vlibc/a.c", self.POSITIVE)
+        err = self.header(f"{self.NEG}/m.c", "// expect: verified\n// expect: native-ok\n"
+                                             "// mode: c23, c++20\n// twin: tests/vlibc/a.c\n")
         self.assertIsInstance(err, rt.HeaderError)
         self.assertIn("must expect at least one error", str(err))
 
@@ -12541,7 +13106,7 @@ class ErrorTwinTests(RootedCase):
         self.assertEqual(self.problems(), {})
 
     def test_the_areas_are_pinned(self):
-        self.assertEqual([str(a) for a in rt.ERROR_TWIN_AREAS], ["tests/scalar", "tests/memory"])
+        self.assertEqual([str(a) for a in rt.ERROR_TWIN_AREAS], ["tests/scalar", "tests/memory", "tests/vlibc"])
 
     def test_the_acceptance_count_counts_error_twins_only(self):
         for name in "abcd":
@@ -13210,6 +13775,324 @@ class UninitMarkerEmitsNothingTests(unittest.TestCase):
                 self.assertNotEqual(self.vpr("other.c", other, mode)[0], base[0])
 
 
+LIBRARY_FIXTURE_DIR = REAL_ROOT / "scripts" / "testdata" / "library_fixture" / "include"
+
+LIBRARY_PROGRAM = """#include %(header)s
+#include <cerastes.h>
+
+int use(int x)
+    CERASTES_REQUIRES(%(pre)s)%(post)s
+{
+%(body)s
+}
+"""
+
+# The names of the C standard headers (C23 7.1.2) and of the C++ headers that wrap them: a fixture header named like
+# one would shadow a system header in every unit that runs under the hook (decision 0046 item 11, audit S7).
+STANDARD_HEADER_STEMS = frozenset("""
+assert complex ctype errno fenv float inttypes iso646 limits locale math setjmp signal stdalign stdarg stdatomic
+stdbit stdbool stdckdint stddef stdint stdio stdlib stdnoreturn string tgmath threads time uchar wchar wctype
+cassert ccomplex cctype cerrno cfenv cfloat cinttypes ciso646 climits clocale cmath csetjmp csignal cstdalign
+cstdarg cstdbool cstddef cstdint cstdio cstdlib cstring ctgmath ctime cuchar cwchar cwctype
+algorithm any array atomic bit bitset charconv chrono compare concepts condition_variable coroutine deque exception
+execution expected filesystem format forward_list fstream functional future initializer_list iomanip ios iosfwd
+iostream istream iterator latch limits list locale map memory memory_resource mutex new numbers numeric optional
+ostream queue random ranges ratio regex scoped_allocator semaphore set shared_mutex source_location span sstream
+stack stdexcept stop_token streambuf string string_view strstream syncstream system_error thread tuple typeindex
+typeinfo type_traits unordered_map unordered_set utility valarray variant vector version
+unistd malloc sys fcntl pthread dlfcn strings
+""".split())
+
+
+def fixture_name_problems(names):
+    """What is wrong with the names of the fixture headers: each must be `lib_*.h`, and none may be (or, before
+    its suffix, contain as its whole stem) the name of a standard or system header."""
+    problems = []
+    for name in names:
+        stem = name[:-2] if name.endswith(".h") else name
+        if not re.fullmatch(r"lib_[a-z0-9_]+\.h", name):
+            problems.append(f"{name}: a fixture header is named lib_<something>.h")
+        if stem in STANDARD_HEADER_STEMS or name in STANDARD_HEADER_STEMS:
+            problems.append(f"{name}: named like a standard header")
+    return problems
+
+
+@e2e_gate(_real_verifier_available() and _real_silicon_available(),
+          "CERASTES_VERIFY, Java, Silicon or Z3 missing; run scripts/bootstrap.sh")
+class LibraryFixtureTests(unittest.TestCase):
+    """Decision 0046 item 11: `--cerastes_verify_selftest=library_fixture` makes scripts/testdata/library_fixture/include a
+    second library directory (the only one besides vlibc's), so what vlibc does not hold yet is tested here: a `predicate`
+    and a `pure` function in a library header, a body verified there (and the twin that fails), a trusted contract of
+    a reserved name with its tag repeated in the Viper (and its twins: no tag or another name's tag, exit 3, and a name
+    vlibc does not reserve, rejected), a predefined macro redefined, a `#line` and a `#pragma GCC system_header`.
+    Every case runs in both modes and has a twin that differs in one thing, so that a check that was switched off
+    fails here."""
+
+    HOOK = "--cerastes_verify_selftest=library_fixture"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.env = rt.load_env()
+        tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(tmp.cleanup)
+        cls.tmp = Path(tmp.name)
+
+    def run_program(self, header, pre="x >= 0", body="  return x;", post="", mode="c++20", hook=True, name="p.c"):
+        src = self.tmp / name
+        spec = header if header.startswith('"') else f"<{header}>"
+        ensures = f"\n    CERASTES_ENSURES(r, {post})" if post else ""
+        src.write_text(LIBRARY_PROGRAM % {"header": spec, "pre": pre, "post": ensures, "body": body})
+        out = self.tmp / f"{name}.{mode}.vpr"
+        args = ["verify", str(src), rt.VERIFY_STD_OPTIONS[mode], f"--keep-vpr={out}"] + ([self.HOOK] if hook else [])
+        run = subprocess.run([self.env["CERASTES_VERIFY"], *args], capture_output=True, text=True, env=self.env,
+                             timeout=rt.VERIFY_TIMEOUT_S)
+        return run, out
+
+    def header_line(self, header, needle):
+        lines = (LIBRARY_FIXTURE_DIR / header).read_text().splitlines()
+        return next(i for i, l in enumerate(lines, 1) if needle in l)
+
+    def modes(self):
+        return ("c23", "c++20")
+
+    ABORT_BODY = "  if (x > 5) {\n    abort();\n  }\n  return x;"
+
+    def test_the_fixture_headers_exist_and_each_is_used_by_a_test(self):
+        names = sorted(p.name for p in LIBRARY_FIXTURE_DIR.glob("*.h"))
+        self.assertEqual(names, ["lib_body.h", "lib_body_bad.h", "lib_line.h", "lib_macro.h", "lib_macro_contract.h",
+                                 "lib_macro_ok.h", "lib_nonreserved.h", "lib_pragma.h", "lib_pragma_bad.h", "lib_spec.h",
+                                 "lib_trusted.h", "lib_untagged.h", "lib_weak.h", "lib_wrongtag.h"])
+        source = Path(__file__).read_text()
+        for name in names:
+            self.assertGreaterEqual(source.count(f'"{name}"'), 2, f"{name} is used by no test")
+        # the directory holds nothing but those headers and the README (no subdirectory: a library file is a file
+        # of this directory)
+        self.assertEqual(sorted(p.name for p in LIBRARY_FIXTURE_DIR.iterdir() if p.name not in names), ["README"])
+
+    def test_no_fixture_header_is_named_like_a_standard_header(self):
+        names = sorted(p.name for p in LIBRARY_FIXTURE_DIR.glob("*.h"))
+        self.assertEqual(fixture_name_problems(names), [])
+        # twin: the check finds what it is for
+        for bad in ("stdlib.h", "lib_x.hpp", "array", "string.h", "Lib_a.h", "cstdlib.h", "lib-a.h"):
+            with self.subTest(bad):
+                self.assertTrue(fixture_name_problems([bad]), bad)
+        self.assertEqual(fixture_name_problems(["lib_ok.h", "lib_nonreserved.h"]), [])
+
+    def test_without_the_hook_the_fixture_is_not_on_the_include_path(self):
+        # twin of every case below: the same program with no hook cannot see the header at all
+        for mode in self.modes():
+            with self.subTest(mode):
+                run, _ = self.run_program("lib_spec.h", hook=False, mode=mode)
+                self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+                self.assertIn("lib_spec.h", run.stderr)
+
+    def test_the_success_line_names_the_hook(self):
+        # decision 0046 item 11 (audit S7): a run under the one hook that injects no fault may end `verified`, and
+        # says it ran with the hook; the same program without it (the header is a system one) does not
+        for mode in self.modes():
+            with self.subTest(mode):
+                run, _ = self.run_program("lib_spec.h", mode=mode)
+                self.assertEqual((run.returncode, run.stderr), (0, ""), run.stdout)
+                self.assertIn("library_fixture", run.stdout)
+                plain = self.tmp / "plain.c"
+                plain.write_text("#include <cerastes.h>\nint use(int x) CERASTES_REQUIRES(x >= 0) { return x; }\n")
+                ok = subprocess.run([self.env["CERASTES_VERIFY"], "verify", str(plain), rt.VERIFY_STD_OPTIONS[mode]],
+                                    capture_output=True, text=True, env=self.env, timeout=rt.VERIFY_TIMEOUT_S)
+                self.assertEqual((ok.returncode, ok.stderr), (0, ""), ok.stdout)
+                self.assertNotIn("library_fixture", ok.stdout)
+
+    def test_a_predicate_and_a_pure_function_in_a_library_header_are_accepted(self):
+        for mode in self.modes():
+            with self.subTest(mode):
+                run, _ = self.run_program("lib_spec.h", mode=mode)
+                self.assertEqual((run.returncode, run.stderr), (0, ""), run.stdout)
+                self.assertIn(": verified (", run.stdout)
+
+    def test_a_body_in_a_library_header_is_verified_and_its_contract_used(self):
+        for mode in self.modes():
+            with self.subTest(mode):
+                run, _ = self.run_program("lib_body.h", pre="x >= -1000 && x <= 1000",
+                                          body="  return lib_clamp0(x);", mode=mode)
+                self.assertEqual((run.returncode, run.stderr), (0, ""), run.stdout)
+
+    def test_a_body_in_a_library_header_that_breaks_its_contract_fails_at_the_header(self):
+        line = self.header_line("lib_body_bad.h", "return x;")
+        for mode in self.modes():
+            with self.subTest(mode):
+                run, _ = self.run_program("lib_body_bad.h", pre="x > 0", body="  return lib_bad_one(x);", mode=mode)
+                self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+                self.assertRegex(run.stdout, rf"lib_body_bad\.h:{line}: error: postcondition")
+
+    def test_a_trusted_contract_repeats_its_tag_in_the_viper_and_is_used(self):
+        tag = "// cerastes:trusted-contract vlibc: abort never returns (fixture)"
+        for mode in self.modes():
+            with self.subTest(mode):
+                run, vpr = self.run_program("lib_trusted.h", pre="0 <= x && x <= 10", post="r == x && x <= 5",
+                                            body=self.ABORT_BODY, mode=mode)
+                self.assertEqual((run.returncode, run.stderr), (0, ""), run.stdout)
+                self.assertEqual(vpr.read_text().count(tag + "\n"), 1, vpr.read_text())
+                # twin: without the call the path of x > 5 returns, and the postcondition fails at the return
+                run, _ = self.run_program("lib_trusted.h", pre="0 <= x && x <= 10", post="r == x && x <= 5",
+                                          body="  if (x > 5) {\n  }\n  return x;", mode=mode)
+                self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+                self.assertRegex(run.stdout, r"p\.c:\d+: error: postcondition")
+
+    def test_a_library_contract_without_a_tag_is_an_internal_error(self):
+        # twin: lib_trusted.h, the same shape with its tag, verifies (test_a_trusted_contract_repeats_its_tag...)
+        for mode in self.modes():
+            with self.subTest(mode):
+                run, _ = self.run_program("lib_untagged.h", pre="0 <= x && x <= 10", post="r == x && x <= 5",
+                                          body="  if (x > 5) {\n    _Exit(1);\n  }\n  return x;", mode=mode)
+                self.assertEqual(run.returncode, 3, run.stdout + run.stderr)
+                self.assertEqual(run.stdout, "")
+                # the message of the tag check itself, naming the routine and the file: not any exit 3
+                self.assertIn("the declaration of `_Exit` in a library file has no `cerastes:trusted-contract vlibc:` "
+                              "tag on the line above it", run.stderr)
+                self.assertIn("lib_untagged.h", run.stderr)
+
+    def test_a_tag_that_names_another_function_is_an_internal_error(self):
+        for mode in self.modes():
+            with self.subTest(mode):
+                run, _ = self.run_program("lib_wrongtag.h", pre="0 <= x && x <= 10", post="r == x && x <= 5",
+                                          body="  if (x > 5) {\n    _Exit(1);\n  }\n  return x;", mode=mode)
+                self.assertEqual(run.returncode, 3, run.stdout + run.stderr)
+                self.assertEqual(run.stdout, "")
+                self.assertIn("the tag above the declaration of `_Exit` names `exit`", run.stderr)
+                self.assertIn("lib_wrongtag.h", run.stderr)
+
+    def test_a_library_contract_on_a_name_vlibc_does_not_reserve_is_rejected(self):
+        # trust needs a reserved name: a library file cannot make any name trusted.  Twin: the same shape on `abort`
+        # (test_a_trusted_contract_repeats_its_tag_in_the_viper_and_is_used) verifies
+        for mode in self.modes():
+            with self.subTest(mode):
+                run, _ = self.run_program("lib_nonreserved.h", pre="0 <= x && x <= 10",
+                                          body="  int y = lib_triple(x);\n  CERASTES_CHECK(y == 3 * x);\n  return x;",
+                                          mode=mode)
+                self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+                self.assertIn("error #cerastes-annotation_reserved_library: ", run.stderr)
+                self.assertIn("lib_triple", run.stderr)
+                self.assertIn("lib_nonreserved.h", run.stderr)
+
+    def test_a_predefined_macro_redefined_in_a_library_header_is_rejected(self):
+        for mode in self.modes():
+            with self.subTest(mode):
+                run, _ = self.run_program("lib_macro.h", mode=mode)
+                self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+                self.assertIn("__CHAR_BIT__", run.stderr)
+                self.assertIn("cannot be", run.stderr)
+                # twin: a macro of its own name is fine
+                ok, _ = self.run_program("lib_macro_ok.h", mode=mode)
+                self.assertEqual((ok.returncode, ok.stderr), (0, ""), ok.stdout)
+
+    def test_a_line_directive_in_a_library_header_is_rejected(self):
+        for mode in self.modes():
+            with self.subTest(mode):
+                run, _ = self.run_program("lib_line.h", mode=mode)
+                self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+                # record 0046 item 3: a `#line` that keeps the file's name is reported with the pragma's message in a
+                # library file (both records carry EDG's flag); the two messages share their wording
+                self.assertRegex(run.stderr, r"error #cerastes-(line_directive|system_header_pragma)_in_verify: ")
+                self.assertIn('is not allowed in a file that "cerastes verify" checks', run.stderr)
+                self.assertIn("lib_line.h", run.stderr)
+
+    def test_a_system_header_pragma_in_a_library_header_is_a_no_op(self):
+        # decision 0046 item 3 (amended): the library directory is already a --sys_include directory for EDG, so the
+        # pragma makes no new record, and cerastes decides by path: the run verifies, and what follows the pragma is
+        # still verified like user code.  Twin: the same header whose function breaks its contract fails there.
+        line = self.header_line("lib_pragma_bad.h", "return x;")
+        for mode in self.modes():
+            with self.subTest(mode):
+                run, _ = self.run_program("lib_pragma.h", pre="x > 0", body="  return lib_after_pragma(x);", mode=mode)
+                self.assertEqual((run.returncode, run.stderr), (0, ""), run.stdout)
+                self.assertIn(": verified (", run.stdout)
+                bad, _ = self.run_program("lib_pragma_bad.h", pre="x > 0", body="  return lib_after_pragma_bad(x);",
+                                          mode=mode)
+                self.assertEqual(bad.returncode, 1, bad.stdout + bad.stderr)
+                self.assertRegex(bad.stdout, rf"lib_pragma_bad\.h:{line}: error: postcondition")
+
+    def test_a_macro_defined_in_a_library_header_over_a_contract_identifier_is_rejected(self):
+        # decision 0046 item 4 (audit round 2, S1, the encoder half): the macro scan counts the directives of library
+        # files too, apart from a header's own include guard.  Twin: lib_trusted.h, the same declaration with the
+        # contract written out, verifies (test_a_trusted_contract_repeats_its_tag_in_the_viper_and_is_used)
+        for mode in self.modes():
+            with self.subTest(mode):
+                run, _ = self.run_program("lib_macro_contract.h", pre="0 <= x && x <= 10", post="r == x && x <= 5",
+                                          body=self.ABORT_BODY, mode=mode)
+                self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+                self.assertIn("error #cerastes-annotation_macro_changed: ", run.stderr)
+                self.assertIn("LIB_FALSE", run.stderr)
+                self.assertIn("lib_macro_contract.h", run.stderr)
+
+    GUARD_SKIPPED = """%(defines)s#include <stdlib.h>
+#include <cerastes.h>
+
+int f(int x)
+    CERASTES_REQUIRES(0 <= x && x <= 10)
+    CERASTES_ENSURES(r, r == 1)
+{
+  exit(x);
+  return 0;
+}
+"""
+    GUARD_DEFINES = "#define _STDLIB_H_\n#define _STDLIB_H\n#define _LIBCPP_STDLIB_H\n"
+
+    def test_vlibcs_contracts_are_rejected_when_the_platforms_header_is_skipped_in_cpp(self):
+        # decision 0046 item 4 (audit round 2, B1): with the platform's guards defined (the SDK's `_STDLIB_H_`,
+        # glibc's `_STDLIB_H`, libc++'s `_LIBCPP_STDLIB_H`) vlibc's declarations come first with C++ linkage, which
+        # is not the library's `exit`: every library contract without C linkage is rejected, called or not, at its
+        # own line of the ACTIVE vlibc's header (the harness cannot name a line of a header outside the repository,
+        # so this is a driver test, not an `expect:` test).  Twin: the same program without the three #defines
+        # verifies, since the call of exit ends the path and the ensures relies on it.
+        header = Path(self.env.get("CERASTES_VLIBC_DIR") or REAL_ROOT / "third_party" / "vlibc") / "include" / "vlibc" / "stdlib.h"
+        lines = header.read_text().splitlines()
+        want = [next(i for i, l in enumerate(lines, 1) if l.startswith(f"void {name}(")) for name in ("abort", "exit")]
+        src = self.tmp / "guard_skipped.cpp"
+        src.write_text(self.GUARD_SKIPPED % {"defines": self.GUARD_DEFINES})
+        run = subprocess.run([self.env["CERASTES_VERIFY"], "verify", str(src), rt.VERIFY_STD_OPTIONS["c++20"]],
+                             capture_output=True, text=True, env=self.env, timeout=rt.VERIFY_TIMEOUT_S)
+        self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+        self.assertEqual(run.stdout, "")
+        found = re.findall(r'^"([^"]*vlibc/stdlib\.h)", line (\d+): error #cerastes-annotation_reserved_library: ',
+                           run.stderr, re.M)
+        self.assertEqual([int(n) for _, n in found], want, run.stderr)
+        self.assertEqual(run.stderr.count("error #"), 2, run.stderr)
+        # twin
+        ok = self.tmp / "guard_not_skipped.cpp"
+        ok.write_text(self.GUARD_SKIPPED % {"defines": ""})
+        run = subprocess.run([self.env["CERASTES_VERIFY"], "verify", str(ok), rt.VERIFY_STD_OPTIONS["c++20"]],
+                             capture_output=True, text=True, env=self.env, timeout=rt.VERIFY_TIMEOUT_S)
+        self.assertEqual((run.returncode, run.stderr), (0, ""), run.stdout)
+        self.assertIn(": verified (", run.stdout)
+
+    def test_a_weak_pragma_on_a_library_body_is_rejected(self):
+        # decision 0046 item 8 (audit round 2, S2): only a library routine without a body is exempt from the
+        # redirection checks; another definition may replace a weak one at link time, so its verified body says
+        # nothing about the calls.  Twin: lib_body.h, the same shape without the pragma, is the library body that
+        # verifies (test_a_body_in_a_library_header_is_verified_and_its_contract_used)
+        for mode in self.modes():
+            with self.subTest(mode):
+                run, _ = self.run_program("lib_weak.h", pre="x > 0", body="  return lib_weak_id(x);", mode=mode)
+                self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+                self.assertIn("error #cerastes-unsupported_declaration: ", run.stderr)
+                self.assertIn("lib_weak_id", run.stderr)
+                self.assertIn("lib_weak.h", run.stderr)
+
+    def test_only_the_fixture_directory_is_given_library_trust(self):
+        # a copy of a fixture header in the program's own directory is a user header, not a library file: its
+        # contract on a reserved name is refused as any user's (annotation_reserved_library, exit 2), never the
+        # internal error of a library file without a tag (twin: test_a_library_contract_without_a_tag...)
+        shutil.copy(LIBRARY_FIXTURE_DIR / "lib_untagged.h", self.tmp / "user_untagged.h")
+        for mode in self.modes():
+            with self.subTest(mode):
+                run, _ = self.run_program('"user_untagged.h"', pre="0 <= x && x <= 10",
+                                          body="  if (x > 5) {\n    _Exit(1);\n  }\n  return x;", mode=mode,
+                                          hook=False, name="user.c")
+                # exactly the rejection of any user's contract on a reserved name, never the library-file internal error
+                self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+                self.assertIn("error #cerastes-annotation_reserved_library: ", run.stderr)
+                self.assertIn("user_untagged.h", run.stderr)
+
+
 # The fewest checks `cerastes --selftest` may run (it printed 94 when this was written).  Raise it
 # with the driver's own tests; a driver whose self-test silently runs fewer fails here.
 DRIVER_SELFTEST_MIN = 94
@@ -13421,6 +14304,19 @@ class RealDriverTests(unittest.TestCase):
         run = self.run_driver("verify", "loop.cpp", "--cerastes_verify_selftest=weaken_invariant")
         self.assertEqual(run.returncode, 3, run.stdout + run.stderr)
         self.assertIn("loop.cpp:5: internal check: automatic range invariant of `i`", run.stderr)
+
+    def test_the_include_option_that_would_defeat_the_include_order_is_refused(self):
+        # decision 0046 item 2 (audit S6): `-I-` makes every directory before it quote-only, which would put
+        # vlibc's shim out of reach of `<stdlib.h>`, and an `-I` value starting with `-` is refused as the same
+        # attempt; each is exit 2 with one `cerastes: error:` line naming `-I`
+        for args in (["-I-"], ["-I", "-"], ["-I-x"], ["-I", "-x"]):
+            with self.subTest(args):
+                self.refusal(self.run_driver("verify", "one.cpp", *args), "-I")
+        # twin: ordinary `-I` spellings are accepted, joined and separate
+        for args in (["-I."], ["-I", "."], ["-I./"]):
+            with self.subTest(ok=args):
+                run = self.run_driver("verify", "one.cpp", *args)
+                self.assertEqual((run.returncode, run.stderr), (0, ""), run.stdout)
 
     def test_a_folded_constant_without_its_expression_is_rejected(self):
         # the hook treats a folded constant as having no `expr`: a program with one is not accepted

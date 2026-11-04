@@ -33,6 +33,11 @@ struct VerifyConfig {
   // Canonical (realpath) system directories: the driver's own system include directories, without
   // /usr/local/include (a user directory).  A file under one of them is a system file.
   std::vector<std::string> system_dirs;
+  // Canonical library directories (decision 0046 item 3): vlibc's include/vlibc (the shim directory, which is also what `<vlibc/...>` resolves
+  // to) and, with the `library_fixture` self-test hook, the harness's fixture directory.  A file below one is a library file: a
+  // verified file, never a system file, whatever EDG's own flag says (the directories are system include directories of the front
+  // end, so that macros used in the caller's file still point there); its contracts are trusted by the encoder (item 4).
+  std::vector<std::string> library_dirs;
   // Canonical path of cerastes's own include/cerastes.h: the one file of that directory that is a system file.
   std::string cerastes_header;
   VerifyOutput out;
@@ -54,15 +59,24 @@ bool path_is_under(const std::string& path, const std::string& dir);
 
 // The canonicalized, de-duplicated system directories out of the driver's include directories: each is
 // made canonical (a missing one is dropped), and `/usr/local/include` and anything the caller names in
-// `user_dirs` is left out, as a user directory.
+// `user_dirs` is left out, as a user directory.  A directory equal to or below one of `library_dirs` (canonical) is left out too: a
+// library file is never a system file (decision 0046 item 3).
 std::vector<std::string> system_directories(const std::vector<std::string>& dirs,
-                                            const std::vector<std::string>& user_dirs);
+                                            const std::vector<std::string>& user_dirs,
+                                            const std::vector<std::string>& library_dirs = {});
+
+// Decision 0046 item 3: a library file is one below a library directory (canonical `library_dirs`), decided by canonical path.  A file
+// that does not exist is not a library file.
+bool is_library_file(const std::vector<std::string>& library_dirs, const std::string& path);
+
+// Convenience: is_library_file with the configuration of this run.
+bool is_library_file(const std::string& path);
 
 // 0011 item 4: a system file is one under a system directory, or exactly the cerastes header; decided by
 // canonical path.  A file that does not exist (so that it cannot be canonicalized) is not a system file:
-// it is verified, or the run fails when the front end could not read it.
+// it is verified, or the run fails when the front end could not read it.  A library file (0046 item 3) is never a system file.
 bool is_system_file(const std::vector<std::string>& system_dirs, const std::string& cerastes_header,
-                    const std::string& path);
+                    const std::string& path, const std::vector<std::string>& library_dirs = {});
 
 // Convenience: is_system_file with the configuration of this run.
 bool is_system_file(const std::string& path);

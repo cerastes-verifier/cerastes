@@ -37,7 +37,8 @@ scripts/bootstrap.sh
 . installs any missing prerequisite with Homebrew: CMake, Ninja, Python,
   ShellCheck (if they are not already on your `PATH`), Node (if `node` or
   `npm` is not on your `PATH`), and `sbt` and `openjdk@17`;
-. initializes the git submodules (EDG and Silicon, which carries Silver) that
+. initializes the git submodules (EDG, Silicon, which carries Silver, and
+  xref:verifying.adoc#vlibc[vlibc], the C library's contract headers) that
   are not yet checked out, and leaves a submodule that is already checked out
   where it is;
 . builds EDG's stock front end, `cpfe`, in `build/edg`;
@@ -225,3 +226,5 @@ include. The code examples on these pages are test files, which
 * *The system headers are not pinned.* EDG reads the headers of the Command
   Line Tools that are installed on your machine (on Linux, those of glibc and
   pass:[libc++]), so a different SDK or library version can change what parses.
+  The contracts of the C library are pinned: they come from vlibc's headers,
+  the submodule `third_party/vlibc`.

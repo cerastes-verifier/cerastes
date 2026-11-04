@@ -25,6 +25,10 @@ fi
 step "edg tree"
 python3 scripts/edg_tree.py check
 
+step "vlibc tree"
+# decision 0046: third_party/vlibc is clean, at its gitlink, a commit of vlibc's main; an override only off main
+python3 scripts/vlibc_tree.py check
+
 step "build"
 scripts/bootstrap.sh --build-only
 
@@ -37,6 +41,10 @@ shellcheck scripts/*.sh
 python3 -m py_compile scripts/*.py
 python3 scripts/run_tests.py --check-headers
 python3 scripts/check_doc_examples.py
+# the contracts vlibc's headers trust are the committed list (decision 0046 item 8): a pin move that changes one
+# fails here until tests/vlibc/trusted_contracts.txt is changed and audited
+vlibc_dir="$(python3 scripts/vlibc_tree.py resolve)"
+python3 scripts/vlibc_contracts.py check --include-dir "${vlibc_dir#* }/include/vlibc" --list tests/vlibc/trusted_contracts.txt
 # the mutants of the must-verify tests generate, and the equivalence list is current
 # (the full mutation run, with the verifier, is an acceptance step)
 python3 scripts/mutate.py --validate
@@ -44,6 +52,8 @@ python3 scripts/mutate.py --validate
 step "edg configuration"
 scripts/check_edg_config.sh
 scripts/check_edg_options.sh
+# vlibc's headers compiled as ordinary (non-system) headers with the driver's flags, no diagnostic (decision 0046 item 3)
+scripts/check_vlibc_headers.sh
 
 step "harness self-test"
 # The self-tests that need the real front end must fail, not skip, here.
@@ -52,6 +62,7 @@ python3 scripts/test_run_tests.py
 python3 scripts/test_walker_oracle.py
 python3 scripts/test_lint_viper.py
 python3 scripts/test_mutate.py
+python3 scripts/test_vlibc_contracts.py
 
 step "tests"
 python3 scripts/run_tests.py --pr-base="$pr_base"
@@ -88,6 +99,7 @@ scripts/build_docs.sh
 python3 scripts/check_doc_examples.py --html build/doc
 
 python3 scripts/edg_tree.py describe --verify-build
+python3 scripts/vlibc_tree.py describe
 if [[ -n "$pr_base" ]]; then
   printf '\ncheck.sh: green in the PR tier (not the full check)\n'
 else

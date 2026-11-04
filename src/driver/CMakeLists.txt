@@ -26,6 +26,17 @@ set(CERASTES_EDG_BASE "" CACHE PATH "EDG_BASE: the directory with EDG's lib/ dat
 if(CERASTES_JAVA AND CERASTES_SILICON_JAR AND CERASTES_Z3_EXE AND CERASTES_CLANG_VERSION
    AND CERASTES_CXX_SYS_INCLUDES AND CERASTES_C_SYS_INCLUDES AND CERASTES_EDG_BASE)
   set(CERASTES_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/include")
+  # vlibc (decision 0046): its include/ holds the shim directory vlibc/ (which shadows <stdlib.h>) and <vlibc/...>.
+  # The fixture directory is the second library directory of the `library_fixture` self-test hook (item 10); it is
+  # compiled in as a path and need not exist.
+  set(CERASTES_VLIBC_INCLUDE_DIR "${CERASTES_VLIBC_DIR}/include")
+  execute_process(COMMAND git -C "${CERASTES_VLIBC_DIR}" rev-parse --short HEAD
+                  RESULT_VARIABLE CERASTES_VLIBC_GIT_STATUS OUTPUT_VARIABLE CERASTES_VLIBC_COMMIT
+                  OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+  if(NOT CERASTES_VLIBC_GIT_STATUS EQUAL 0 OR NOT CERASTES_VLIBC_COMMIT)
+    set(CERASTES_VLIBC_COMMIT "unknown")
+  endif()
+  set(CERASTES_LIBRARY_FIXTURE_DIR "${CMAKE_SOURCE_DIR}/scripts/testdata/library_fixture/include")
   configure_file(tool_paths.h.in "${CMAKE_CURRENT_BINARY_DIR}/tool_paths.h" @ONLY)
   add_executable(cerastes
     verify_main.cpp edg_args.cpp silicon.cpp silicon_output.cpp report.cpp pipeline.cpp selftest.cpp)
