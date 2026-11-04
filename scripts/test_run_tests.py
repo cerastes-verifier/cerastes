@@ -14045,7 +14045,10 @@ int f(int x)
         # verifies, since the call of exit ends the path and the ensures relies on it.
         header = Path(self.env.get("CERASTES_VLIBC_DIR") or REAL_ROOT / "third_party" / "vlibc") / "include" / "vlibc" / "stdlib.h"
         lines = header.read_text().splitlines()
-        want = [next(i for i, l in enumerate(lines, 1) if l.startswith(f"void {name}(")) for name in ("abort", "exit")]
+        # decision 0047: the malloc family's contracts too (vlibc's <stdlib.h> takes size_t and NULL from <stddef.h>, so
+        # they are declared, with C++ linkage, when the platform's header is skipped)
+        want = [next(i for i, l in enumerate(lines, 1) if re.match(rf"void \*?{name}\(", l))
+                for name in ("abort", "exit", "malloc", "calloc", "free")]
         src = self.tmp / "guard_skipped.cpp"
         src.write_text(self.GUARD_SKIPPED % {"defines": self.GUARD_DEFINES})
         run = subprocess.run([self.env["CERASTES_VERIFY"], "verify", str(src), rt.VERIFY_STD_OPTIONS["c++20"]],
@@ -14055,7 +14058,7 @@ int f(int x)
         found = re.findall(r'^"([^"]*vlibc/stdlib\.h)", line (\d+): error #cerastes-annotation_reserved_library: ',
                            run.stderr, re.M)
         self.assertEqual([int(n) for _, n in found], want, run.stderr)
-        self.assertEqual(run.stderr.count("error #"), 2, run.stderr)
+        self.assertEqual(run.stderr.count("error #"), len(want), run.stderr)
         # twin
         ok = self.tmp / "guard_not_skipped.cpp"
         ok.write_text(self.GUARD_SKIPPED % {"defines": ""})

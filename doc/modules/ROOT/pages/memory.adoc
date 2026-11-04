@@ -716,8 +716,8 @@ converted at once to `T *`: in an initializer or assignment
 (`int *p = malloc(sizeof *p);`, C), a `return`, an argument, or a cast
 (`(int *)malloc(sizeof(int))`, which pass:[C++] needs). The object then has
 type `T` for its whole life. `calloc(1, sizeof(T))` gives an object whose
-members are all zero, null for a pointer member; `malloc`'s object has no value
-until the program gives it one (reading it first is
+members are all zero, null for a pointer member; the object from `malloc` has no
+value until the program gives it one (reading it first is
 xref:error-messages.adoc#_uninitialized[`uninitialized`]). Arrays of objects
 (`n * sizeof(T)`) and `realloc` are planned with arrays.
 
@@ -742,6 +742,12 @@ everything before `main` returns. A path that ends in `exit`, `abort` or
 `_Exit` is not checked, since it does not return. An iteration of a loop that
 ends while it owns an allocation the loop does not carry to the next iteration
 is a leak too, reported at the end of the loop's body.
+
+*Loops.* A loop may use an allocation made before it, through a pointer variable
+declared before the loop: the loop keeps the allocation as it found it, and may
+read, write or free it. Two pointers to allocations that the loop swaps are not
+supported yet: after the loop nothing says which variable holds which
+allocation, and the program is reported (planned for the next version).
 
 *Handing an allocation over.* `cerastes_owns_block(p)` (`cerastes::owns_block`
 in pass:[C++]) in a contract is ownership of the whole allocation `p` points to
@@ -794,7 +800,7 @@ These are rejected with a diagnostic, never approximated
   global (<<heap>>);
 * `restrict` except on a C parameter whose contract owns its object;
 * `void *` other than an allocation's result converted at once to `T *` and
-  `free`'s argument (<<heap>>), and pointers to unions, to functions and to
+  the argument of `free` (<<heap>>), and pointers to unions, to functions and to
   structures that are not supported;
 * `restrict` beside a parameter or global that can hold a pointer of the same
   type (a pointer to a pointer, a structure with a pointer member, a pointer

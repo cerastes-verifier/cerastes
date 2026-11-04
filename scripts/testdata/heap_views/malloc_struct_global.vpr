@@ -1,0 +1,45 @@
+// Emitted by cerastes verify (M4.5d2a) for scripts/test_lint_viper.py: the typed view `f_malloc__2` of tests/memory/verifast/globals_heap.c, in a program with two globals (the global facts as its first requires), with the fields, the domain and `program_start` of that program.
+// the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell
+field v_int: Int
+field d_int: Bool
+field v_ptr_struct_0_counter: Ref
+field d_ptr_struct_0_counter: Bool
+field tok: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  unique function GB_x__0(): Block
+  unique function GB_c__1(): Block
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// cerastes:trusted-contract program start: every global and static local holds its initial value with full permission, and its liveness cell (decision 0041 item 4); the pure facts first
+method program_start()
+  ensures ((len(GB_x__0()) == 1) && (lvloc(GB_x__0()) == loc(GB_x__0(), (-2)))) && ((len(GB_c__1()) == 1) && (lvloc(GB_c__1()) == loc(GB_c__1(), (-2))))
+  ensures (((acc(loc(GB_x__0(), 0).v_int) && acc(loc(GB_x__0(), 0).d_int)) && loc(GB_x__0(), 0).d_int) && (loc(GB_x__0(), 0).v_int == 0)) && acc(lvloc(GB_x__0()).lv)
+  ensures (((acc(loc(GB_c__1(), 0).v_ptr_struct_0_counter) && acc(loc(GB_c__1(), 0).d_ptr_struct_0_counter)) && loc(GB_c__1(), 0).d_ptr_struct_0_counter) && (loc(GB_c__1(), 0).v_ptr_struct_0_counter == null)) && acc(lvloc(GB_c__1()).lv)
+  decreases _
+
+// C/C++ function `malloc`
+// cerastes:trusted-contract vlibc: malloc returns NULL or the start of a new allocation of size bytes, its contents indeterminate (C23 7.24.3.6); typed view: one struct counter (4 bytes), decision 0047
+method f_malloc__2() returns (res: Ref)
+  requires ((len(GB_x__0()) == 1) && (lvloc(GB_x__0()) == loc(GB_x__0(), (-2)))) && ((len(GB_c__1()) == 1) && (lvloc(GB_c__1()) == loc(GB_c__1(), (-2))))
+  ensures ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res))))) && (((res != null) && (offset_of(res) < len(block_of(res)))) ==> (len(member(res, 0)) == 1))
+  ensures (!(res == null)) ==> (((((((((((res != null) && ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res)))))) && (offset_of(res) == 0)) && acc(loc(block_of(res), (-1)).tok)) && loc(block_of(res), (-1)).tok) && (lvloc(block_of(res)) == loc(block_of(res), (-2)))) && acc(lvloc(block_of(res)).lv)) && ((len(block_of(res)) == 1) && (len(member(res, 0)) == 1))) && acc(loc(member(res, 0), 0).v_int)) && acc(loc(member(res, 0), 0).d_int)) && (loc(member(res, 0), 0).d_int ==> (((-2147483648) <= loc(member(res, 0), 0).v_int) && (loc(member(res, 0), 0).v_int <= 2147483647))))
+  decreases _

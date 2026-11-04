@@ -3719,7 +3719,7 @@ class HeapTokenTests(unittest.TestCase):
             "field v_int: Int",
             *([field] if field else []),
             *(extra_top or []),
-            "// cerastes:trusted-contract vlibc: free ends the allocation; typed view: the argument is an int *, decision 0047",
+            "// cerastes:trusted-contract a function defined elsewhere that takes the block (a block site in its requires)",
             "method f_free__1(p: Ref)",
             Check(f"  requires {requires or self.BLOCK}", WF, "internal"),
             "  decreases _",
@@ -3868,7 +3868,7 @@ class HeapViewTests(unittest.TestCase):
 
     DATA = Path(__file__).resolve().parent / "testdata" / "heap_views"
     NAMES = ("malloc_int", "free_int", "calloc_int", "malloc_struct_nested", "free_struct_nested", "calloc_struct_node",
-             "calloc_struct_all", "calloc_struct_cfg", "free_struct_cfg")
+             "calloc_struct_all", "calloc_struct_cfg", "free_struct_cfg", "malloc_struct_global", "free_struct_global")
 
     def text(self, name):
         return (self.DATA / f"{name}.vpr").read_text()
@@ -3876,8 +3876,10 @@ class HeapViewTests(unittest.TestCase):
     @staticmethod
     def problems(text):
         src = lv.split_source(text)
+        decls = lv.declarations(src)
+        has_globals, facts = lv.lint_globals(src, decls, lambda n, why: None)
         out = []
-        lv.lint_views(src, lv.declarations(src), lambda n, why: out.append(why))
+        lv.lint_views(src, decls, lambda n, why: out.append(why), has_globals, facts)
         return out
 
     def one(self, text, fragment=None):
@@ -3886,6 +3888,12 @@ class HeapViewTests(unittest.TestCase):
         self.assertIn("is not the trusted typed view of decision 0047", probs[0])
         if fragment:
             self.assertIn(fragment, probs[0])
+
+    def edit_last(self, name, old, new):
+        text = self.text(name)
+        head, sep, tail = text.rpartition(old)
+        self.assertTrue(sep, (name, old))
+        return head + new + tail
 
     def edit(self, name, old, new, count=1):
         text = self.text(name)
@@ -3901,26 +3909,61 @@ class HeapViewTests(unittest.TestCase):
         for name in self.NAMES:
             text = self.text(name)
             self.assertIn("typed view: one ", text)
-            self.assertEqual(text.count("decreases _"), 1)
+            self.assertEqual(text.count("typed view: one "), 1)
 
     def test_a_view_is_found_by_its_tag_and_a_method_without_it_is_not_a_view(self):
         # the same text with an extra clause but another reason is an ordinary trusted method: this rule does not apply
-        text = self.edit("malloc_int", "typed view: one int (4 bytes), decision 0047", "something else").replace(
-            "  decreases _", "  ensures false\n  decreases _")
+        text = self.edit("malloc_int", "vlibc: malloc returns NULL or the start of a new allocation of size bytes, its contents indeterminate (C23 7.24.3.6); typed view: one int (4 bytes), decision 0047",
+                         "a user routine that allocates").replace("  decreases _", "  ensures false\n  decreases _")
         self.assertEqual(self.problems(text), [])
         self.one(self.edit("malloc_int", "  decreases _", "  ensures false\n  decreases _"))
+
+    def test_a_vlibc_allocation_tag_without_typed_view_is_reported(self):
+        # audit N3: a bodyless method tagged as vlibc's malloc, calloc or free must be a view
+        for name in ("malloc_int", "calloc_int", "free_int"):
+            with self.subTest(name=name):
+                text = self.text(name)
+                k = text.index("; typed view:")
+                end = text.index("\n", k)
+                probs = self.problems(text[:k] + text[end:])
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("tagged as vlibc's malloc, calloc or free but not as a typed view", probs[0])
+
+    def test_the_global_facts_of_a_program_with_globals_are_the_one_leading_requires(self):
+        for name in ("malloc_struct_global", "free_struct_global"):
+            text = self.text(name)
+            facts_line = next(l for l in text.split("\n") if l.startswith("  requires ((len(GB_x__0())"))
+            with self.subTest(name=name, what="dropped"):
+                self.one(text.replace(facts_line + "\n", ""), "exactly one leading `requires`")
+            with self.subTest(name=name, what="twice"):
+                self.one(text.replace(facts_line + "\n", facts_line + "\n" + facts_line + "\n"))
+            with self.subTest(name=name, what="a fact dropped"):
+                self.one(text.replace(facts_line, "  requires (len(GB_x__0()) == 1) && (lvloc(GB_x__0()) == loc(GB_x__0(), (-2)))"),
+                         "global facts of the program")
+            with self.subTest(name=name, what="an extra fact"):
+                self.one(text.replace(facts_line, facts_line + " && false"), "global facts of the program")
+            with self.subTest(name=name, what="not the first clause"):
+                lines = text.split("\n")
+                i = lines.index(facts_line)
+                lines[i], lines[i + 1] = lines[i + 1], lines[i]
+                self.assertTrue(self.problems("\n".join(lines)))
+
+    def test_a_program_without_globals_has_no_leading_requires_on_a_view(self):
+        facts = "  requires ((len(GB_x__0()) == 1) && (lvloc(GB_x__0()) == loc(GB_x__0(), (-2))))\n"
+        self.one(self.edit("malloc_int", "method f_malloc__4() returns (res: Ref)\n", "method f_malloc__4() returns (res: Ref)\n" + facts))
+        self.one(self.edit("free_int", "method f_free__5(p_ptr__0: Ref)\n", "method f_free__5(p_ptr__0: Ref)\n" + facts.replace("GB_x__0()", "GB_x__0()")))
 
     def test_an_extra_clause_or_a_missing_one_is_reported(self):
         for name in self.NAMES:
             kw = "requires" if name.startswith("free") else "ensures"
             with self.subTest(name=name, what="extra"):
-                self.one(self.edit(name, "  decreases _", f"  {kw} false\n  decreases _"), "two `" + kw + "` clauses")
+                self.one(self.edit_last(name, "  decreases _", f"  {kw} false\n  decreases _"))
             with self.subTest(name=name, what="missing"):
                 lines = self.text(name).split("\n")
                 k = max(i for i, l in enumerate(lines) if l.startswith(f"  {kw} "))
-                self.one("\n".join(lines[:k] + lines[k + 1:]), "two `" + kw + "` clauses")
+                self.one("\n".join(lines[:k] + lines[k + 1:]))
             with self.subTest(name=name, what="no decreases _"):
-                self.one(self.edit(name, "  decreases _", "  decreases"))
+                self.one(self.edit_last(name, "  decreases _", "  decreases"))
 
     def test_an_extra_conjunct_in_the_block_part_is_reported(self):
         for name in self.NAMES:
@@ -3946,9 +3989,9 @@ class HeapViewTests(unittest.TestCase):
         self.one(self.edit("malloc_int", "acc(loc(block_of(res), (-1)).tok)", "acc(loc(block_of(res), 0).tok)"))
 
     def test_a_malloc_view_states_no_flag_and_no_value(self):
-        self.one(self.edit("malloc_int", "&& acc(res.d_int)", "&& acc(res.d_int) && res.d_int"), "exactly what its type's leaves give")
-        self.one(self.edit("malloc_int", "&& acc(res.d_int)", "&& acc(res.d_int) && res.v_int == 0"), "exactly what its type's leaves give")
-        self.one(self.edit("malloc_int", "&& acc(res.d_int)", "&& acc(res.d_int) && !res.d_int"), "exactly what its type's leaves give")
+        self.one(self.edit("malloc_int", "&& acc(res.d_int)", "&& acc(res.d_int) && res.d_int"))
+        self.one(self.edit("malloc_int", "&& acc(res.d_int)", "&& acc(res.d_int) && res.v_int == 0"))
+        self.one(self.edit("malloc_int", "&& acc(res.d_int)", "&& acc(res.d_int) && !res.d_int"))
 
     def test_a_calloc_view_needs_its_flags_and_zero_values_and_nothing_more(self):
         for name, flag, zero in (("calloc_int", " && res.d_int)", " && (res.v_int == 0))"),):
@@ -3959,7 +4002,10 @@ class HeapViewTests(unittest.TestCase):
             with self.subTest(name=name, what="wrong zero"):
                 self.one(self.edit(name, "(res.v_int == 0)", "(res.v_int == 1)"), "adds the flags and then the zero values")
         self.one(self.edit("calloc_struct_cfg", "(loc(member(res, 1), 0).v_bool == false)", "(loc(member(res, 1), 0).v_bool == true)"))
-        self.one(self.edit("calloc_struct_cfg", "(loc(member(res, 2), 0).v_ptr_int == null)", "true"))
+        text = self.text("calloc_struct_cfg")
+        zero = "(loc(member(res, 2), 0).v_ptr_int == null)"
+        head, _, tail = text.rpartition(zero)
+        self.one(head + "true" + tail)
         self.one(self.edit("calloc_struct_cfg", "(loc(member(res, 3), 0).v_enum_1_enum_x20color == 0)", "(loc(member(res, 3), 0).v_enum_1_enum_x20color == 1)"))
 
     def test_a_range_is_the_range_of_its_fields_type(self):
@@ -3986,7 +4032,7 @@ class HeapViewTests(unittest.TestCase):
         self.one(self.edit("malloc_int", "method f_malloc__4() returns (res: Ref)", "method f_free__4() returns (res: Ref)"), "its name")
         self.one(self.edit("malloc_int", "method f_malloc__4() returns (res: Ref)", "method f_malloc__4() returns (res: Ref, x: Int)"), "header")
         self.one(self.edit("free_int", "method f_free__5(p_ptr__0: Ref)", "method f_free__5(q: Ref)"), "header")
-        self.one(self.edit("malloc_int", "f_malloc__4", "g_malloc__4", 1), "its name")
+        self.one(self.edit("malloc_int", "method f_malloc__4", "method g_malloc__4"), "its name")
 
     def test_a_view_with_a_body_is_reported(self):
         self.one(self.edit("malloc_int", "  decreases _", "  decreases _\n{\n}"), "it has a body")
@@ -4003,14 +4049,13 @@ class HeapViewTests(unittest.TestCase):
         # a member block dropped, twice, or a slot fact dropped, in the body and in the first clause alike
         self.one(text.replace("(len(member(res, 0)) == 1) && ", "", 2))
         self.one(text.replace("(len(member(res, 0)) == 1)", "(len(member(res, 0)) == 1) && (len(member(res, 0)) == 1)", 1))
-        self.one(text.replace(" && (res != loc(member(res, 1), 0))", "", 2))
+        self.one(text.replace(" && (res != loc(member(res, 0), 0))", "", 2))
         self.one(text.replace("(len(member(res, 0)) == 1)", "(len(member(res, 0)) == 2)", 1))
 
     def test_a_pointers_pointee_member_blocks_are_pinned(self):
         name = "calloc_struct_node"
         text = self.text(name)
         self.assertIn("len(member(loc(member(res, 0), 0).v_ptr_struct_2_node, 1)) == 1", text)
-        self.one(text.replace(" && (len(member(loc(member(res, 0), 0).v_ptr_struct_2_node, 1)) == 1)", "", 1), "pointee")
         self.one(text.replace("(len(member(loc(member(res, 0), 0).v_ptr_struct_2_node, 1)) == 1)", "(len(member(loc(member(res, 0), 0).v_ptr_struct_2_node, 1)) == 0)", 1))
 
     def test_a_pointer_leaf_needs_its_wellformedness(self):

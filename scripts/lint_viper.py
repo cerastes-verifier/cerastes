@@ -977,7 +977,7 @@ def global_facts_atoms_of(names: list[str], structs: dict[str, list[tuple[tuple[
     return sorted(atoms)
 
 
-def lint_globals(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+def lint_globals(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> tuple[bool, list[str] | None]:
     ok_domains = [d for d in decls if d.kind == "domain" and lint_domain(src, d, lambda _l, _w: None)]
     in_domain: set[int] = set()
     for d in ok_domains:
@@ -1002,7 +1002,7 @@ def lint_globals(src: Source, decls: list[Decl], add: Callable[[int, str], None]
         for d in ps:
             add(d.line, "`method program_start` in a program with no `unique function GB_...`: it exists only for globals "
                         "(decision 0041 item 4)")
-        return
+        return False, None
     if len(ps) != 1:
         add(min(gbs.values()), "a program with globals (`unique function GB_...`) has exactly one `method program_start()` "
                                f"(decision 0041 item 4), found {len(ps)}")
@@ -1129,6 +1129,7 @@ def lint_globals(src: Source, decls: list[Decl], add: Callable[[int, str], None]
                 f"`method {d.name}` of a program with globals must take the global facts as its first `requires` "
                 "(`len(GB_x()) == 1 && lvloc(GB_x()) == loc(GB_x(), -2)` for each global, before the amounts' rows; "
                 "decision 0041 item 4)")
+    return True, facts_atoms
 
 
 # The ghost amounts (decision 0037 items 6 and 14): a method's `Perm` formals are the amounts of the atoms of its contract.
@@ -1518,7 +1519,7 @@ def lint_perm_locals(src: Source, decls: list[Decl], add: Callable[[int, str], N
 # `write` and true by whoever owns the allocation.  It is created by a view's postcondition (a bodyless trusted method) or a
 # function's `ensures`, consumed by a call whose `requires` has the block site (`free`), and read by the leak rows `forperm`.  Nothing
 # in a method body may make or take one, so the lint refuses every statement form that could: an `exhale`, an assignment, an `inhale`,
-# a condition.  The text of the view methods themselves is not pinned here yet (their emitted shape follows the lowering).
+# a condition.  The text of the view methods themselves is pinned by `lint_views` (above).
 TOK_WORD_RE = re.compile(r"(?<![\w$'])tok(?![\w$'])")
 FORPERM_WORD_RE = re.compile(r"(?<![\w$'])forperm(?![\w$'])")
 FORPERM_LINE_RE = re.compile(r"^\s*assert\s+forperm\s+(?P<v>[A-Za-z_$][\w$']*)\s*:\s*Ref\s*\[\s*(?P=v)\.tok\s*\]\s*::\s*(?P<body>\S.*)$")
@@ -1646,8 +1647,11 @@ def _leaf_kind(t: str) -> str:
     return "int"
 
 
-def view_problem(src: Source, d: Decl, routine: str, declared: dict[str, set[str]]) -> str | None:
-    """The reason why the view method `d` is not the text decision 0047 gives its allocation type, or None."""
+def view_problem(src: Source, d: Decl, routine: str, declared: dict[str, set[str]], has_globals: bool = False,
+                 global_facts: list[str] | None = None) -> str | None:
+    """The reason why the view method `d` is not the text decision 0047 gives its allocation type, or None.  In a program with
+    globals every method takes the global facts as its first `requires` (decision 0041 item 4), views included: exactly one such
+    leading `requires`, equal to the facts of the program (`global_facts`, from `program_start`), and no other."""
     if d.has_body:
         return "it has a body"
     name_m = VIEW_NAME_RE.match(d.name)
@@ -1657,6 +1661,13 @@ def view_problem(src: Source, d: Decl, routine: str, declared: dict[str, set[str
     root = "p_ptr__0" if routine == "free" else "res"
     keyword = "requires" if routine == "free" else "ensures"
     header = f"method {d.name}(p_ptr__0: Ref)" if routine == "free" else f"method {d.name}() returns (res: Ref)"
+    if has_globals and len(lines) == 5 and lines[1].startswith("requires "):
+        facts_line = lines[1][len("requires "):]
+        if global_facts is not None and sorted(norm_viper(facts_line).split("&&")) != global_facts:
+            return "its leading `requires` is not the global facts of the program (`len(GB_x()) == 1 && lvloc(GB_x()) == loc(GB_x(), -2)` for each global, as every method takes them)"
+        lines = lines[:1] + lines[2:]
+    elif has_globals:
+        return "a view in a program with globals takes exactly one leading `requires`, the global facts of the program (decision 0041 item 4)"
     if len(lines) != 4 or lines[0] != header or lines[3] != "decreases _":
         return f"its header, its two `{keyword}` clauses and `decreases _` are not the emitter's"
     if not (lines[1].startswith(keyword + " ") and lines[2].startswith(keyword + " ")):
@@ -1667,7 +1678,6 @@ def view_problem(src: Source, d: Decl, routine: str, declared: dict[str, set[str
         if len(implies) != 2 or norm_viper(implies[0]) != norm_viper(f"!({root} == null)"):
             return f"its second clause is not `!({root} == null) ==> <the block>`"
         raw = _flatten_and(implies[1])
-        first_atoms = _flatten_and(first)
     except ValueError as e:
         return str(e)
     atoms = [norm_viper(a) for a in raw]
@@ -1766,7 +1776,11 @@ def view_problem(src: Source, d: Decl, routine: str, declared: dict[str, set[str
     return None
 
 
-def lint_views(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+VIEW_ROUTINE_TAG_RE = re.compile(r"vlibc:\s+(?:malloc|calloc|free)\b")
+
+
+def lint_views(src: Source, decls: list[Decl], add: Callable[[int, str], None], has_globals: bool = False,
+               global_facts: list[str] | None = None) -> None:
     declared = {"v": set(), "d": set()}
     for line in src.code:
         m = FIELD_ANY_RE.match(line)
@@ -1776,10 +1790,15 @@ def lint_views(src: Source, decls: list[Decl], add: Callable[[int, str], None]) 
         if d.kind != "method" or d.has_body and not VIEW_NAME_RE.match(d.name):
             continue
         tag = trusted_tag(src, d.line)
-        vt = VIEW_TAG_RE.search(tag.group(0)) if tag else None
-        if vt is None:
+        if tag is None:
             continue
-        why = view_problem(src, d, vt.group("routine"), declared)
+        vt = VIEW_TAG_RE.search(tag.group(0))
+        if vt is None:
+            if not d.has_body and VIEW_ROUTINE_TAG_RE.search(tag.group(0)):
+                add(d.line, f"`method {d.name}` is tagged as vlibc's malloc, calloc or free but not as a typed view (`; typed view:` in the "
+                            "reason): the allocation functions are trusted only as the views of decision 0047 items 2 and 4, whose text is pinned")
+            continue
+        why = view_problem(src, d, vt.group("routine"), declared, has_globals, global_facts)
         if why is not None:
             add(d.line, f"`method {d.name}` is not the trusted typed view of decision 0047 items 2 and 4: {why}")
 
@@ -1927,12 +1946,12 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     lint_flags(src, add)
     lint_remainders(src, decls, add)
     lint_allocations(src, decls, add)
-    lint_globals(src, decls, add)
+    has_globals, global_facts = lint_globals(src, decls, add)
     lint_ghost_amounts(src, decls, add)
     lint_perm_locals(src, decls, add)
     lint_ghost_refs(src, decls, add)
     forperm_lines = lint_heap_token(src, decls, add)
-    lint_views(src, decls, add)
+    lint_views(src, decls, add, has_globals, global_facts)
 
     if map_text is None:
         problems.append(f"{name}: no position map ({map_name or name + MAP_SUFFIX})")

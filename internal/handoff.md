@@ -1,4 +1,4 @@
-# Handoff after M4.5d1 — vlibc in cerastes (record 0046) (2026-11-03)
+# Handoff after M4.5d2a — the heap (record 0047) (2026-11-04)
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
@@ -14,11 +14,14 @@ plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session cons
 - **On `origin/main`** (`f59e4b2`): everything through M4.5c2b (PR #26). **M4.5d1** (vlibc in cerastes; record 0046;
   plan `.claude/plans/m4-5d1-vlibc.md`) is PR #27 (`m4.5d1-vlibc`, tip `9d98fe8`), open at M4.5d2a's start; the local
   `main` `38eb115` is a local merge of it. vlibc's half of d1 is vlibc's `5962865` (pushed).
-- **M4.5d2a** (the heap; record 0047; plan `.claude/plans/m4-5d2a-heap.md`, questions 120–123) is in progress on branch
-  `m4.5d2a-heap` (from `9d98fe8`, so its PR stacks on PR #27) in the worktree `.claude/worktrees/m4.5d2a`. Its baseline
-  is the d1 worktree `.claude/worktrees/m4.5d1` (clean at `9d98fe8`, used read-only), copied into
-  `build/m4.5d2a-baseline-{vpr,vir}`. vlibc's half of d2a is a commit on vlibc's local `main`, pinned through the
-  submodule's `local` remote (`NOT YET PUSHED`) until the owner pushes vlibc.
+- **M4.5d2a** (the heap; record 0047; plan `.claude/plans/m4-5d2a-heap.md`, questions 120–127) is done on branch
+  `m4.5d2a-heap` (from `9d98fe8`, so its PR stacks on PR #27) in the worktree `.claude/worktrees/m4.5d2a`; the loops were
+  built on `m4.5d2a-loops` (worktree `.claude/worktrees/m4.5d2a-loops`, merged; removable). vlibc's half is vlibc's local
+  `main` at `35e9b6f` (three commits on `5962865`), pinned through the submodule's `local` remote (`NOT YET PUSHED`).
+  Result in `internal/status.md`. **The owner ended the session at 08:00 (travel): the second `check.sh` and the Linux
+  rerun of the final tip were not run; CI decides (§2).** Audit reports: `build/m4.5d2a/audit{1,2}.md` in the worktree; a
+  re-audit of the loops and of round 2's fixes (`build/m4.5d2a/audit3.md`) found no wrong verdict but one blocking item
+  (B1, exit 3) and three should-fix items, not fixed before the session ended: §3 "M4.5d2a follow-up".
 - **The Linux host** `matt@clang4.cpp.al` cannot bootstrap natively (no root; no libc++ 21, JDK 17, GCC 16 there): runs
   go in a container built from a clean `ubuntu:26.04` with the S5 recipe (`cerastes-m4.5d1:runner`, container
   `cerastes-m4.5d1-p71`, checkout `~/cerastes-m4.5d1/cerastes`; reused by d2a).
@@ -27,13 +30,28 @@ The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits beh
 
 ## 2. Owner steps
 
-1. **PR #27 (M4.5d1), after CI:** merge it; then in the main checkout `git reset --keep origin/main` on `main` (the local
-   merge `38eb115` and PR #27's merge have the same two parents), and `git worktree remove` the older session worktrees
-   (`m4.5c2b`, `m4.5c2b-base`, `m4.5b2b-base`, `m4.5c1`, `m4.5c1-base`, `m4.5c2a`, `m4.5c2a-base`, `m4.5d1-base`; keep
-   `m4.5d1` until d2a ends, it is d2a's baseline).
-2. **M4.5d2a, at its end:** push vlibc's `main` first (the d2a commit: the malloc family's contracts and
-   `CERASTES_COMMIT` moved to `f59e4b2`), then push `m4.5d2a-heap` and open its PR against `main` (after #27 merges it
-   shows only d2a's commits).
+1. **PR #27 (M4.5d1), after CI:** merge it; then in the main checkout `git reset --keep origin/main` on `main`, and
+   `git worktree remove` the older session worktrees (`m4.5c2b`, `m4.5c2b-base`, `m4.5b2b-base`, `m4.5c1`, `m4.5c1-base`,
+   `m4.5c2a`, `m4.5c2a-base`, `m4.5d1-base`, `m4.5d1`).
+2. **vlibc:** push vlibc's `main` (`35e9b6f`: the malloc family's contracts, `CERASTES_COMMIT` → `f59e4b2`); its CI runs the
+   header and run tests on both platforms.
+3. **M4.5d2a:** push `m4.5d2a-heap` and open its PR against `main` (after #27 merges it shows only d2a's commits). **CI is
+   the final check of this session** (owner, 2026-11-04): if both jobs (`check` on macOS, `check-linux` on ubuntu-26.04) are
+   green, no further action is needed for d2a — merge it and remove `.claude/worktrees/m4.5d2a` and `m4.5d2a-loops`; if one is
+   red, the next session fixes it first (the full check also runs nightly and on dispatch, which is worth triggering once,
+   since the PR tier runs only the changed tests). Known unknowns CI settles: the Linux behaviour of the heap and vlibc
+   tests at the final tip (glibc's `nothrow`/`malloc` attributes on the family, C++'s lost `noexcept`), and the full suite
+   after the last fixes (the last full run on macOS, at `250a2af`, had 19 failures, all fixed or re-expected since).
+   **Expected red on Linux:** `tests/memory/negative/reject_owning_system_redeclaration.c [c23]` (glibc's C23 asm label on
+   `strtol` makes record 0046 item 8's `unsupported_declaration @ L9` come before the pinned `unsupported_annotation @ L9`;
+   the box run at `ad691eb`); the PR tier may skip it (it runs changed tests and a sample), the nightly full check will
+   not, and PR #27 may show it too if d1's `26e4deb` changed it. Fix by choosing a system function with a pointer
+   parameter and no asm label on either platform for the pin (an owner-approved code change, or ask), or by reporting
+   both rejections (then the pin gains a line: ask). The new `reject_malloc_discarded_glibc.c` (`platform: linux`) never
+   ran on Linux; its expectation is the box run's observation of the macOS pin's rejection line.
+   **Even with CI green**, the re-audit's B1 and S1 (§3, "M4.5d2a follow-up") are the next session's first work, before
+   M4.5d2v: they are exit 3 on correct programs and a timeout regression, not wrong verdicts, and no committed test hits
+   them.
 
 ## 3. Open notes, by the session that consumes them
 
@@ -44,6 +62,23 @@ P4222's markers, P54 and the b2b design points).
 
 *M4.5d1's notes (P55's allow-list, 0031 item 9's exemption) moved into its plan's Inputs. M4.5d2's notes moved into
 M4.5d2a's plan's Inputs (`.claude/plans/m4-5d2a-heap.md`); those d2a hands on are below.*
+
+**M4.5d2a follow-up** (the re-audit, `build/m4.5d2a/audit3.md`; the first work of the next session)
+- **B1 (blocking, exit 3):** heap-place snapshots in loops (record 0047 item 10; `src/vir/lower.cpp:6036-6093`, splits
+  `:6618-6631`) lack case splits Silicon needs: `block_of(hb_i) == block_of(hb_j)` between token places, and splits (cell,
+  `lvloc`, `block_of`) against every pointer local and formal declared before the loop (used or not) and every `requires`
+  block-site formal; plus a catch-all `if (k > none) { }` after each heap snapshot for holders reached through loads. Repros
+  t22 (`calloc`'d `s`, `int *x = &s->b;`, a loop writing `*x`, then `free(s)`), t16, t11, t19, t23/t24, t25, t21 in the
+  auditor's scratch (`/private/tmp/claude-501/-Users-mattborland-Documents-cerastes-cerastes/10e100ed-0977-4a3f-bd2b-28d149d810d5/scratchpad/a3/`,
+  may be gone: rebuild from the report); the confirmed fixes are listed there. Pin t22, t16, t19, t23, t25.
+- **S1:** a pointer parameter's local copy becomes a heap place that is always guarded off (`v_a__0 != p_a__0`), so a file
+  that calls `malloc` anywhere multiplies the splits of unrelated functions (30 → 100 in t28; 186 s → timeout): skip the
+  copy of a parameter with an atom place that the function never assigns (`lower.cpp:6039`).
+- **S2:** pin the back-edge exemption's precision (t34: carries `p`, leaks `q = malloc(…)` each iteration → `leak`).
+- **S3:** the block row's `WF` check at a call became `permission` (`lower.cpp:1885`), turning an encoder precision loss
+  into a user message; add an automatic `internal` invariant `flag ==> WF(v)` for pointer locals a loop assigns and restore
+  `internal`, or fix record 0047 item 6 and the docs. Notes N1–N6 in the report (a must-fail for `writes_in_expr`, record
+  item 10's wording, two code tidiness items, `Call` in `heap_guard` with M4.5f1, the textual `void *` check).
 
 **M4.5d2v vlibc's allocator** (question 121, the model; record 0047)
 - vlibc replaces the platform's allocator under the standard names: a portable C23 core (free lists over regions), pages
@@ -58,6 +93,11 @@ M4.5d2a's plan's Inputs (`.claude/plans/m4-5d2a-heap.md`); those d2a hands on ar
   item 6 (question 117) refuses user definitions of reserved names, so vlibc's own `src/` is verified later under a rule of
   its own (vlibc's sources are not user code). Run tests in vlibc's CI on both platforms with both compilers (`test/`
   links nothing today; cerastes's native runs compile only). [M4.5d2a planning]
+- macOS's SDK marks `malloc`/`calloc` `_MALLOC_TYPED`: under Apple clang's `-ftyped-memory-operations` native builds call
+  `malloc_type_malloc`/`malloc_type_calloc`, so the replacement must cover those entry points too (EDG sees an empty macro)
+  [d2a audit 2 N4].
+- d2a's contracts are trusted; the allocator's own verification comes after M4.6 (plan.md's d2v row). vlibc's
+  `<stdlib.h>` already includes `<stddef.h>` for `size_t`/`NULL` (`35e9b6f`) [d2a].
 
 **M4.5d2b results, owning locals, globals and fields, P4418R0** (from M4.5d2a's planning, the check of P4222R3 the
 handoff asked for; sources: P4222R3, P4416R0 (its wording), P4418R0, P4417R0 (its wording), all 2026-10-22; open-std's
@@ -83,6 +123,14 @@ handoff asked for; sources: P4222R3, P4416R0 (its wording), P4418R0, P4417R0 (it
   cells and globals) [b2a audit 1 N3; to M4.8 if d2b does not need it].
 - `return &s;` of a `static` local leaves the caller only `WF(r)`, so its uses are `lifetime`
   (`static_local_return_address_use.c`) until partnerless `ensures` atoms land (`live(r)`) [b2a].
+- From M4.5d2a (record 0047): a block site whose own guard reads memory, a global or `old` is rejected (audit 2 S2), and
+  written `owns_block` in loop invariants is rejected: both d2b's; the pinned false alarm of two block pointers swapped
+  in a loop (`tests/memory/negative/heap_loop_swap_false_alarm.c`, about 40 s per mode) needs written `owns_block` atoms;
+  a block allocated in an iteration and kept in a pointer declared outside the loop is a `leak` at the back edge until
+  owning variables (target `v`); an `owning` parameter beside `owns_block` in both lists is rejected as "beside" although
+  `encode.cpp`'s merge treats a block site as `owns` (dead merge or an over-strict rule), and `restrict` beside a block-only
+  parameter says "does not own or read `*q`" [audit 2 N7]; `two((free(p), 0), p)` is reported `permission`, not
+  `unsequenced` [audit 2 N8]; strict-init rejects every `ref_to_uninit` result call (record 0047 item 8) until marked locals.
 
 **M4.5e1/e2 Arrays and pointer arithmetic:** P38's braced initializers (§4.2); signed/unsigned and enumeration variants
 through `void*` cannot be written [M4.5a]; accepted completeness gap for e2's relational comparisons: `&s.x < &s.y` is
@@ -375,11 +423,11 @@ include order, the library class, trust from vlibc's tags, reserved names, attri
 rules; d2 is not rolled in (question 113), its preparation is below.
 
 **M4.5d2 is three sessions** (owner, 2026-11-03, questions 120–122). **M4.5d2a** (the heap; record 0047; plan
-`.claude/plans/m4-5d2a-heap.md`) is in progress: vlibc's contracts for `malloc`, `calloc` and `free`, `void*` at an
+`.claude/plans/m4-5d2a-heap.md`) is done (questions 120–127; the final check is CI's, §2): vlibc's contracts for `malloc`, `calloc` and `free`, `void*` at an
 allocation and at `free` only, one object per allocation (a typed view, size `sizeof(T)`), heap blocks with the slot −1
 token, `invalid-free`, leaks by `forperm` (`leak`; `main`'s return included, question 123), `owns_block` in contracts,
 `owning` and `ref_to_uninit` on functions (target `r`), two calls ordered over liveness and token cells, blocks held
-through locals across loops (the first cut); `realloc` to M4.5e2. **M4.5d2v** (vlibc's allocator, in vlibc's repository,
+through locals across loops (landed; one pinned false alarm, §3); `realloc` to M4.5e2. **M4.5d2v** (vlibc's allocator, in vlibc's repository,
 right after d2a): the replacement allocator of question 121 (§3). **M4.5d2b** (after d2v): the rest of the paragraph
 below that d2a does not take (`ensures` atoms with no partner, owning locals, globals and fields, `ref_to_uninit` on
 locals, P4418R0, P4222R3's strict rules; §3). The original d2 paragraph and its dependency map follow.
@@ -775,6 +823,12 @@ the heap now, `realloc` to M4.5e2, loops the first cut), 121 (vlibc replaces the
 portable C23 core, pages from `mmap`, glibc's replacement set, a default malloc zone on macOS, thread-safe; the owner's
 directive that vlibc holds complete implementations of the functions it covers, verified as cerastes becomes able to,
 amending 0030 item 2), 122 (that allocator is M4.5d2v, a session of its own right after d2a), 123 (blocks still held when
-`main` returns are leaks, like VeriFast; a path ending in a call that never returns is not checked).
+`main` returns are leaks, like VeriFast; a path ending in a call that never returns is not checked). During the session: 124
+(`reject_owning_function.c` expects `error lifetime @ L8`: its `p` has no contract, so returning it fails the liveness
+check before the missing token; the plan had pre-approved `permission`), 125 (two new pins re-expected to what they can
+reach: a function template `unsupported_declaration`, a lambda EDG's `wrong_entity_for_attribute`), 126 (the template pin
+also expects `unsupported_annotation @ L8`; the discarded-`malloc` pin lists EDG's two `call_result_should_be_used`
+warnings, its rejection at L13; the member-function pins `unsupported_declaration @ L7`), 127 (and `unsupported_annotation
+@ L9`); and at 07:15 that the session ends at 08:00 with CI as the final check.
 
 No question is open.

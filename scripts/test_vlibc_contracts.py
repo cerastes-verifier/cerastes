@@ -19,6 +19,7 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -205,28 +206,28 @@ class Rules(Base):
 
     def test_multi_line_declaration(self) -> None:
         self.header("// cerastes:trusted-contract vlibc: copy copies n bytes (C23 7.26.2.1)\n"
-                    "void *copy(void *dst,\n"
-                    "           const void *src,\n"
+                    "char *copy(char *dst,\n"
+                    "           const char *src,\n"
                     "           unsigned long __n)\n"
                     "    CERASTES_REQUIRES(__n > 0)\n"
                     "    CERASTES_ENSURES(true);\n")
         code, out, err = self.list_()
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual(out, "copy | x.h | void *copy(void *dst, const void *src, unsigned long __n) "
+        self.assertEqual(out, "copy | x.h | char *copy(char *dst, const char *src, unsigned long __n) "
                               "CERASTES_REQUIRES(__n > 0) CERASTES_ENSURES(true); "
                               "| copies n bytes (C23 7.26.2.1)\n")
 
     def test_multi_line_declaration_with_the_contract_on_a_later_line_needs_the_tag(self) -> None:
-        self.assertFails("void *copy(void *dst,\n"
+        self.assertFails("char *copy(char *dst,\n"
                          "           unsigned long n)\n"
                          "    CERASTES_ENSURES(true);\n", "x.h:1:", "a contract without")
 
     def test_leading_contract_group_does_not_hide_the_name(self) -> None:
         self.header("// cerastes:trusted-contract vlibc: f x\n"
-                    "[[nodiscard]] CERASTES_OWNING void *f(unsigned __n) CERASTES_REQUIRES(__n > 0);\n")
+                    "[[nodiscard]] CERASTES_OWNING char *f(unsigned __n) CERASTES_REQUIRES(__n > 0);\n")
         code, out, err = self.list_()
         self.assertEqual((code, err), (0, ""))
-        self.assertTrue(out.startswith("f | x.h | [[nodiscard]] CERASTES_OWNING void *f"))
+        self.assertTrue(out.startswith("f | x.h | [[nodiscard]] CERASTES_OWNING char *f"))
 
     def test_tag_not_directly_above(self) -> None:
         for between in ("\n", "// a comment\n", "/* c */\n", "#define X 1\n"):
@@ -626,15 +627,16 @@ class ReservedIdentifiers(Base):
         self.assertTrue(out.startswith("free | x.h |"))
 
     def test_a_bare_marker_before_the_declaration_does_not_hide_the_name(self) -> None:
-        out = self.ok(self.FREE.replace("void free(", "CERASTES_OWNING void free("))
-        self.assertTrue(out.startswith("free | x.h | CERASTES_OWNING void free("))
+        out = self.ok("// cerastes:trusted-contract vlibc: f x\n"
+                      "CERASTES_OWNING int *f(int *__ptr) CERASTES_REQUIRES(__ptr == NULL);\n")
+        self.assertTrue(out.startswith("f | x.h | CERASTES_OWNING int *f("))
 
     def test_a_marker_only_declaration_is_a_trusted_declaration_and_needs_its_tag(self) -> None:
         # a bare marker is a CERASTES_ name: the declaration counts as carrying a contract (decision 0047 item 3)
         out = self.ok("// cerastes:trusted-contract vlibc: free x\n"
-                      "void free(void *__ptr CERASTES_REF_TO_UNINIT);\n")
-        self.assertTrue(out.startswith("free | x.h | void free(void *__ptr CERASTES_REF_TO_UNINIT);"))
-        self.assertFails("void free(void *__ptr CERASTES_REF_TO_UNINIT);\n", "x.h:1:",
+                      "int free(int *__ptr CERASTES_REF_TO_UNINIT);\n")
+        self.assertTrue(out.startswith("free | x.h | int free(int *__ptr CERASTES_REF_TO_UNINIT);"))
+        self.assertFails("int free(int *__ptr CERASTES_REF_TO_UNINIT);\n", "x.h:1:",
                          "a contract without a cerastes:trusted-contract tag")
 
     def test_a_non_reserved_parameter_name_is_an_error(self) -> None:
@@ -661,11 +663,11 @@ class ReservedIdentifiers(Base):
 
     def test_null_false_and_true_are_the_only_plain_identifiers(self) -> None:
         self.ok("// cerastes:trusted-contract vlibc: f x\n"
-                "void f(void *__p) CERASTES_REQUIRES(__p == NULL || true) CERASTES_ENSURES(false);\n")
+                "void f(int *__p) CERASTES_REQUIRES(__p == NULL || true) CERASTES_ENSURES(false);\n")
         for word in ("nullptr", "size", "True", "sizeof", "int"):
             with self.subTest(word=word):
                 self.assertFails("// cerastes:trusted-contract vlibc: f x\n"
-                                 f"void f(void *__p) CERASTES_REQUIRES({word} == __p);\n",
+                                 f"void f(int *__p) CERASTES_REQUIRES({word} == __p);\n",
                                  f"the identifier `{word}`")
 
     def test_numbers_and_literals_are_not_identifiers(self) -> None:
@@ -683,7 +685,7 @@ class ReservedIdentifiers(Base):
 
     def test_the_attribute_spelling_is_read_too(self) -> None:
         self.ok("// cerastes:trusted-contract vlibc: f x\n"
-                "void f(void *__p) [[cerastes::requires(__p == NULL)]];\n")
+                "void f(int *__p) [[cerastes::requires(__p == NULL)]];\n")
         self.assertFails("// cerastes:trusted-contract vlibc: f x\n"
                          "void f(void *p) [[cerastes::requires(p == NULL)]];\n", "the identifier `p`")
 
@@ -692,12 +694,12 @@ class ReservedIdentifiers(Base):
                       "CERASTES_CHECK"):
             with self.subTest(macro=macro):
                 self.assertFails("// cerastes:trusted-contract vlibc: f x\n"
-                                 f"void f(void *__p) CERASTES_ENSURES(true) {macro}(q == 0);\n",
+                                 f"void f(int *__p) CERASTES_ENSURES(true) {macro}(q == 0);\n",
                                  "the identifier `q`")
 
     def test_a_non_reserved_identifier_in_a_nested_call_or_parenthesis_is_read(self) -> None:
         self.assertFails("// cerastes:trusted-contract vlibc: f x\n"
-                         "void f(void *__p) CERASTES_REQUIRES(((cerastes_live(__p) && (n))));\n",
+                         "void f(int *__p) CERASTES_REQUIRES(((cerastes_live(__p) && (n))));\n",
                          "the identifier `n`")
 
     def test_an_identifier_outside_the_contract_groups_is_not_checked(self) -> None:
@@ -707,7 +709,7 @@ class ReservedIdentifiers(Base):
 
     def test_the_line_of_the_error_is_the_line_of_the_identifier(self) -> None:
         err = self.assertFails("// cerastes:trusted-contract vlibc: f x\n"
-                               "void f(void *__p,\n"
+                               "void f(int *__p,\n"
                                "       unsigned long __n)\n"
                                "    CERASTES_REQUIRES(__n > 0)\n"
                                "    CERASTES_ENSURES(bad > 0);\n", "the identifier `bad`")
@@ -730,6 +732,111 @@ class ReservedIdentifiers(Base):
         err = self.assertFails(self.FREE.replace("__ptr", "ptr") + self.MALLOC.replace("__r", "r"),
                                "the identifier `ptr`", "the identifier `r`")
         self.assertNotIn("malloc | x.h", err)
+
+
+class VoidPointerShapes(Base):
+    """Decision 0047 item 2 (audit S5): a trusted declaration with `void *` in its signature is the (A) allocation or the (D)
+    deallocation shape and nothing else, checked textually."""
+
+    A_MALLOC = ("void *malloc(size_t __size) CERASTES_REF_TO_UNINIT "
+                "CERASTES_ENSURES(__r, __r == NULL || cerastes_owns_block(__r, __size));")
+    A_CALLOC = ("void *calloc(size_t __nmemb, size_t __size) CERASTES_ENSURES(__r, __r == NULL || "
+                "(cerastes_owns_block(__r, __nmemb * __size) && cerastes_zeroed(__r)));")
+    D_FREE = "void free(void *__ptr CERASTES_REF_TO_UNINIT) CERASTES_REQUIRES(__ptr == NULL || cerastes_owns_block(__ptr));"
+
+    def listing(self, declaration, name="f"):
+        self.header(f"// cerastes:trusted-contract vlibc: {name} x\n{declaration}\n")
+        return self.list_()
+
+    def assertShape(self, declaration, name="f"):
+        code, out, err = self.listing(declaration, name)
+        self.assertEqual(code, 1, (declaration, out))
+        self.assertIn("x.h:2:", err)
+        self.assertEqual(out, "")
+        return err
+
+    def test_the_three_real_declarations_pass(self):
+        for name, decl in (("malloc", self.A_MALLOC), ("calloc", self.A_CALLOC), ("free", self.D_FREE)):
+            with self.subTest(name=name):
+                self.assertEqual(self.listing(decl, name)[::2], (0, ""))
+
+    def test_another_allocation_of_the_two_shapes_passes(self):
+        for name, decl in (("aligned", "void *aligned(size_t __a, size_t __size) CERASTES_REF_TO_UNINIT CERASTES_ENSURES(__r, __r == NULL || cerastes_owns_block(__r, __size));"),
+                           ("one", "void *one(int __n) CERASTES_ENSURES(__r, __r == NULL || (cerastes_owns_block(__r, __n) && cerastes_zeroed(__r)));"),
+                           ("cube", "void *cube(size_t __a, size_t __b, size_t __c) CERASTES_REF_TO_UNINIT CERASTES_ENSURES(__r, __r == NULL || cerastes_owns_block(__r, __a * __b * __c));")):
+            with self.subTest(name=name):
+                self.assertEqual(self.listing(decl, name)[::2], (0, ""))
+
+    def test_no_void_pointer_no_shape(self):
+        # a signature without `void *` is not read by this rule at all
+        self.assertEqual(self.listing("char *f(char *__p, unsigned long __n) CERASTES_REQUIRES(__n > 0 && __p == NULL);")[::2], (0, ""))
+
+    def test_an_allocation_needs_exactly_one_of_the_marker_and_zeroed(self):
+        self.assertShape(self.A_MALLOC.replace(" CERASTES_REF_TO_UNINIT", ""), "malloc")
+        self.assertShape(self.A_CALLOC.replace("(cerastes_owns_block(__r, __nmemb * __size) && cerastes_zeroed(__r))", "cerastes_owns_block(__r, __nmemb * __size)"), "calloc")
+        both = self.A_CALLOC.replace("void *calloc(size_t __nmemb, size_t __size)", "void *calloc(size_t __nmemb, size_t __size) CERASTES_REF_TO_UNINIT")
+        self.assertShape(both, "calloc")
+
+    def test_an_allocation_has_one_ensures_of_the_form_and_no_requires(self):
+        self.assertShape(self.A_MALLOC.replace("__r == NULL || ", ""), "malloc")
+        self.assertShape(self.A_MALLOC.replace("__r == NULL || cerastes_owns_block(__r, __size)", "true"), "malloc")
+        self.assertShape(self.A_MALLOC.replace("CERASTES_ENSURES", "CERASTES_REQUIRES(__size > 0) CERASTES_ENSURES"), "malloc")
+        self.assertShape(self.A_MALLOC[:-1] + " CERASTES_ENSURES(__r == NULL);", "malloc")
+        self.assertShape(self.A_MALLOC.replace("(__r, __r == NULL", "(__r, __r != NULL"), "malloc")
+
+    def test_an_allocations_size_is_a_parameter_or_a_product_of_parameters(self):
+        self.assertShape(self.A_MALLOC.replace("cerastes_owns_block(__r, __size)", "cerastes_owns_block(__r, 4)"), "malloc")
+        self.assertShape(self.A_MALLOC.replace("cerastes_owns_block(__r, __size)", "cerastes_owns_block(__r, __other)"), "malloc")
+        self.assertShape(self.A_MALLOC.replace("cerastes_owns_block(__r, __size)", "cerastes_owns_block(__r, __size + 1)"), "malloc")
+        self.assertShape(self.A_MALLOC.replace("cerastes_owns_block(__r, __size)", "cerastes_owns_block(__r)"), "malloc")
+
+    def test_an_allocations_parameters_are_integers(self):
+        self.assertShape(self.A_MALLOC.replace("size_t __size", "double __size"), "malloc")
+        self.assertShape(self.A_MALLOC.replace("size_t __size", "char *__size"), "malloc")
+        self.assertShape(self.A_MALLOC.replace("size_t __size", "void *__size"), "malloc")
+        self.assertShape(self.A_MALLOC.replace("(size_t __size)", "(void)"), "malloc")
+
+    def test_an_allocation_returns_void_pointer(self):
+        self.assertShape(self.A_MALLOC.replace("void *malloc", "const void *malloc"), "malloc")
+        self.assertShape(self.A_MALLOC.replace("void *malloc", "void **malloc"), "malloc")
+
+    def test_a_deallocation_has_the_marker_on_its_parameter_and_one_requires(self):
+        self.assertShape(self.D_FREE.replace(" CERASTES_REF_TO_UNINIT", ""), "free")
+        self.assertShape(self.D_FREE.replace("void *__ptr CERASTES_REF_TO_UNINIT)", "void *__ptr) CERASTES_REF_TO_UNINIT"), "free")
+        self.assertShape(self.D_FREE.replace("__ptr == NULL || ", ""), "free")
+        self.assertShape(self.D_FREE[:-1] + " CERASTES_ENSURES(true);", "free")
+        self.assertShape(self.D_FREE.replace("void free", "int free"), "free")
+        self.assertShape(self.D_FREE.replace("(void *__ptr", "(void *__ptr, int __n").replace("CERASTES_REF_TO_UNINIT)", "CERASTES_REF_TO_UNINIT)"), "free")
+
+    def test_any_other_void_pointer_signature_is_refused(self):
+        for decl in ("void *copy(void *__dst, const void *__src, size_t __n) CERASTES_ENSURES(__r, __r == __dst);",
+                     "void f(const void *__p) CERASTES_REQUIRES(__p == NULL);",
+                     "void *f(void) CERASTES_ENSURES(false);",
+                     "int f(void *__p) CERASTES_REQUIRES(__p == NULL);",
+                     "void f(void * __p CERASTES_REF_TO_UNINIT) CERASTES_REQUIRES(__p == NULL);",
+                     "void f(void **__pp) CERASTES_REQUIRES(__pp == NULL);"):
+            with self.subTest(decl=decl):
+                name = re.search(r"([A-Za-z_]+)\(", decl.replace("void *", "", 1) if decl.startswith("void *") else decl).group(1)
+                err = self.assertShape(decl, name)
+                self.assertIn("neither (A)", err)
+
+    def test_check_and_names_refuse_it_too(self):
+        self.header("// cerastes:trusted-contract vlibc: f x\nvoid *f(void) CERASTES_ENSURES(false);\n")
+        committed = self.tmp / "c.txt"
+        committed.write_text("# nothing\n")
+        out = self.tmp / "n.inc"
+        for argv in (["check", "--include-dir", str(self.inc), "--list", str(committed)],
+                     ["names", "--include-dir", str(self.inc), "--out", str(out)]):
+            with self.subTest(cmd=argv[0]):
+                code, so, err = run(argv)
+                self.assertEqual(code, 1)
+                self.assertIn("decision 0047 item 2", err)
+        self.assertFalse(out.exists())
+
+    def test_the_real_vlibc_header_has_the_shapes(self):
+        if not VLIBC_DIR.is_dir():
+            self.skipTest("vlibc is not checked out next to cerastes")
+        self.assertEqual(run(["list", "--include-dir", str(VLIBC_DIR)])[::2], (0, ""))
 
 
 class Check(Base):

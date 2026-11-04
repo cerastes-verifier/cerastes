@@ -8,3 +8,5 @@
 static int *gp;
 
 void f(void) CERASTES_REQUIRES(cerastes_owns(gp) && cerastes_owns_block(gp));  // <- here
+
+int *g(void) { return gp; }

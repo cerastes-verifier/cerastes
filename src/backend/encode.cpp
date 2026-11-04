@@ -1168,6 +1168,11 @@ class Encoder {
     auto marker = [&](an_attribute_ptr a) { return std::string("\"cerastes::") + a->name + "\""; };
     for (an_attribute_ptr a : {owning, uninit}) {
       if (a == nullptr) continue;
+      if (pointee_qualified(return_type(r))) {  // audit 2 N1, like owns_block's N12: a block of a const or volatile object could never be freed without a cast
+        reject(Diag::unsupported_annotation, a->position,
+               marker(a) + " on a function that returns a pointer to a `const` or `volatile` object (an owned block is writable: a function that only lends it reads, decision 0040 item 2)");
+        return;
+      }
       if (!arguments_of(a).empty()) {
         reject(Diag::unsupported_annotation, a->position, marker(a) + " with an argument on a function (an owned range: M4.5e1)");
         return;
@@ -3948,6 +3953,24 @@ class Encoder {
         if (block_sites[j].in_ensures == b.in_ensures && vir::atom_place(*block_sites[j].atom).root == key) dup = true;
       if (dup) {
         reject(Diag::unsupported_annotation, pos_of(b.atom), "\"owns_block\" of the same pointer twice in " + std::string(b.in_ensures ? "an `ensures`" : "a `requires`") + " (decision 0047 item 4)");
+        continue;
+      }
+      // Audit 2 S2: a guard of a block site that reads memory, a global or `old` would make the block depend on the heap; the lowering has no place for it.
+      std::function<bool(const Expr*)> heap_guard = [&](const Expr* x) -> bool {
+        if (x == nullptr) return false;
+        if (x->kind == Expr::Kind::Deref || x->kind == Expr::Kind::Atom || x->kind == Expr::Kind::Old || x->kind == Expr::Kind::GlobalAddr) return true;
+        for (const Expr* y : {x->a, x->b, x->c})
+          if (heap_guard(y)) return true;
+        for (const Expr* y : x->args)
+          if (heap_guard(y)) return true;
+        return false;
+      };
+      bool guarded_by_heap = false;
+      for (const vir::AtomGuard& g : b.guards) guarded_by_heap = guarded_by_heap || heap_guard(g.cond);
+      if (guarded_by_heap) {
+        reject(Diag::unsupported_annotation, pos_of(b.atom),
+               "an \"owns_block\" whose guard reads memory, a global or `old` (`*q > 0 ? owns_block(p) : true`): whether a function owns a block may depend on its arguments only "
+               "(a guard over the heap is M4.5d2b, decision 0047 item 4)");
         continue;
       }
       bool beside = false;

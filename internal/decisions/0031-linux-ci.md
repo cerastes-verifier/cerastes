@@ -215,3 +215,7 @@ Facts checked while planning (2026-10-28):
   header in a test is checked on both platforms by CI.
 - A drift in either image stops the work as in 0016 item 10; the Linux job's expected values change with this record
   and 0001, never alone.
+
+*2026-11-04, amended by 0047 (M4.5d2a; audit round 2 N6): a target fact the heap relies on — a null pointer is all bits
+zero on both supported targets (arm64 macOS, x86-64 Linux), so `calloc`'s typed view gives a pointer member the value
+null (C23 7.24.3.2 does not promise it). A new target must confirm it before `calloc`'s view is trusted there.*
