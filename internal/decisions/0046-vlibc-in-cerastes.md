@@ -7,7 +7,10 @@
   the handoff; `build/m4.5d1/audit1.md`), and audit round 2 (on the code: two blocking items, both reproduced with a
   linked binary that returns — B1 vlibc's contract trusted on a C++-linkage `::exit` after a guard-skipped platform
   header, B2 item 8 skipped for a function the encoder created before its first call — and S1–S3, notes 1–14; all
-  taken in items 3, 4, 6–9 and 11 or the handoff; `build/m4.5d1/audit2.md`). Owner decisions (M4.5d1 planning, 2026-11-03; plan
+  taken in items 3, 4, 6–9 and 11 or the handoff; `build/m4.5d1/audit2.md`), and one re-audit of those fixes (one
+  more blocking item, the same guarantee by another route — a definition or a variable taking a trusted routine's
+  symbol by an asm label — and a `static` function before the header taking vlibc's contract; both taken, items 6 and
+  8; `build/m4.5d1/audit3.md`). Owner decisions (M4.5d1 planning, 2026-11-03; plan
   `.claude/plans/m4-5d1-vlibc.md`; handoff questions 113–117, each the recommendation):
   - **113:** M4.5d1 alone, with M4.5d2's preparation (the allocation functions' platform declarations measured in P71,
     d2's dependency map and a d2a/d2b proposal in the handoff); d2 is not rolled in.
@@ -141,8 +144,9 @@ Three facts from this session's planning (the surveys behind the plan; P71 confi
      `<cerastes.h>` defines or undefines, or that `-D`/`-U` names (audit round 1 S1: `#define false 1` before
      `<stdlib.h>` would rewrite vlibc's contract; `#define NULL p` would empty M4.5d2's `free`). Library files count
      too (audit round 2 S1: a `#define false 1` inside vlibc's own header), and `vlibc_contracts.py` refuses in a shim
-     header every `#define`/`#undef` but its include guard, every `#pragma` and `#line`, and a comment inside a
-     trusted declaration, so such a header cannot be pinned. The scan reads only the contract's own identifiers: it
+     header every `#define`/`#undef` but its include guard, every `#pragma` and `#line`, a comment inside a trusted
+     declaration, and the lexical forms its scanner does not model (a `'` outside a character literal, as in C23's
+     digit separators, and raw string literals; re-audit note 5), so such a header cannot be pinned. The scan reads only the contract's own identifiers: it
      does not follow a system macro (`NULL`), and any program macro of the same name is refused, wherever it is
      defined — strict, and to revisit when M4.5d2's contracts name parameters (audit round 2 note 5).
 
@@ -187,8 +191,11 @@ Three facts from this session's planning (the surveys behind the plan; P71 confi
    (`noreturn_user_abort.cpp`, `noreturn_other_signature.cpp` and their `_after` twins) are re-expected
    `rejected cerastes-annotation_reserved_library` (question 117). A plain declaration with no contract stays allowed
    (C 7.1.4p2), and a call of it without the header is `call_without_contract` as before. A `static` function named
-   `exit` in C is not the library's (internal linkage; C23 7.1.3 allows it when the header is not included, and with
-   the header EDG refuses the `static` redeclaration itself) and is an ordinary function (audit round 2 note 2).
+   `exit` in C is not the library's (internal linkage; C23 7.1.3 allows it when the header is not included) and is an
+   ordinary function (audit round 2 note 2). With the header *after* it, EDG accepts the program and the header's
+   declaration inherits internal linkage, so vlibc's contract would attach to the program's function: a routine with
+   internal linkage whose contract is written in a library file is rejected `annotation_reserved_library`, with or
+   without a body (re-audit; the header first is EDG's own error #172).
 7. **Attributes by their own position** (P55; audit S3). For every routine — declared here or not, called or not —
    every attribute entry of its merged list, of each secondary declaration and of its parameters is held to the
    allow-list unless it is written in a system file (as the type path already does, `encode.cpp:8793`). The filter is
@@ -208,7 +215,12 @@ Three facts from this session's planning (the surveys behind the plan; P71 confi
    first call (one with a structure parameter or result, or a marker; audit round 2 B2). A redirection a
    program-written attribute shows (`alias`, `ifunc`, `weak`, `weakref`) is already `unsupported_attribute` by item 7
    and is not reported twice (question 118). A routine with a body in a library file is checked for `weak` like user
-   code (audit round 2 S2). Before this record these were accepted, and a call of `exit` redirected to a function
+   code (audit round 2 S2). The other route to the same symbol is closed too (re-audit): a routine with or without a
+   body, or a variable, declared in a verified file with an asm label (or renamed by `#pragma redefine_extname`) is
+   rejected `unsupported_declaration` at that declaration, called or not — otherwise `void my_exit(int) __asm__("_exit")`
+   with a body takes `exit`'s symbol and a call of `exit` runs it (reproduced: verified, and natively the call returns
+   into the program). A routine declared only in system files keeps its labels (the platform's own; item 8's call check
+   applies when it is trusted). Before this record these were accepted, and a call of `exit` redirected to a function
    that returns was trusted not to return (reproduced in C23 and C++20). Fail closed: a platform declaration with an asm
    label (glibc's C23 `strtol` → `__isoc23_strtol`) makes that function untrustable until a later record tells the
    platform's labels from a user's; P71 checks that `abort`, `exit` and `_Exit` carry none on either platform.

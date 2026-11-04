@@ -502,6 +502,56 @@ class Directives(Base):
         self.assertFalse(out.exists())
 
 
+class Literals(Base):
+    """Audit round 3, note 5: C23 digit separators and raw strings could make the reader lose its place (a `'` after a
+    number starts a "character literal" that swallows a quote and hides a comment opener); they are refused, and so is
+    an unterminated literal.  Ordinary character and string literals, with quotes inside, are the twins."""
+
+    GUARDED = Directives.GUARDED
+
+    def with_line(self, line: str) -> str:
+        return self.GUARDED.replace("#include <cerastes.h>\n", "#include <cerastes.h>\n" + line + "\n", 1)
+
+    def test_the_audits_trick_header_is_refused(self) -> None:
+        # the header of audit round 3: the separator desyncs the reader so `#define false 1` and a comment opener hide
+        self.header("#ifndef VLIBC_STDLIB_H\n#define VLIBC_STDLIB_H\n\n#include_next <stdlib.h>\n\n#include <cerastes.h>\n\n"
+                    "enum { VLIBC_K = 1'2 + sizeof \"a'/*\" };\n#define false 1\nenum { VLIBC_J = sizeof \"*/\" };\n\n"
+                    "// cerastes:trusted-contract vlibc: abort never returns (C23 7.24.4.1)\n"
+                    "void abort(void) CERASTES_ENSURES(false);\n\n#endif  // VLIBC_STDLIB_H\n")
+        code, out, err = self.list_()
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("x.h:8:", err)
+        self.assertIn("a C23 digit separator", err)
+
+    def test_a_digit_separator_is_an_error(self) -> None:
+        for lit in ("enum { A = 1'000 };", "enum { B = 0x1'F };", "enum { C = 1'0 + 2 };", "int x'y;"):
+            with self.subTest(lit=lit):
+                self.assertFails(self.with_line(lit), "x.h:4:", "a C23 digit separator")
+
+    def test_ordinary_character_literals_are_fine(self) -> None:
+        for lit in ("enum { A = 'a' };", "enum { B = '\\'' };", "enum { C = '\"' };", "enum { D = L'a' };",
+                    "enum { E = u8'a' };", "enum { F = u'a' };", "enum { G = U'a' };", "enum { H = ('a') };",
+                    "enum { I = 1 + 'a' };", 'const char *s = "it\'s a \'string\'";', "enum { J = '\\\\' };"):
+            with self.subTest(lit=lit):
+                self.header(self.with_line(lit))
+                code, out, err = self.list_()
+                self.assertEqual((code, err), (0, ""))
+
+    def test_a_raw_string_literal_is_an_error(self) -> None:
+        for lit in ('const char *s = R"(a)";', 'const char *s = u8R"(a)";', 'const char *s = LR"x(a)x";'):
+            with self.subTest(lit=lit):
+                self.assertFails(self.with_line(lit), "x.h:4:", "a raw string literal")
+
+    def test_an_identifier_ending_in_r_before_a_string_is_not_a_raw_string(self) -> None:
+        self.header(self.with_line('const char *s = bar "x";'))
+        self.assertEqual(self.list_()[0], 0)
+
+    def test_an_unterminated_literal_is_an_error(self) -> None:
+        for lit in ('const char *s = "abc;', "enum { A = 'a };"):
+            with self.subTest(lit=lit):
+                self.assertFails(self.with_line(lit), "x.h:4:", "an unterminated string or character literal")
+
+
 class CommentsInTrusted(Base):
     """Audit round 2, note 11: a comment inside a trusted declaration is refused (a `)` in one would end the reading of
     the contract's identifiers); a comment before or after the declaration is fine."""

@@ -28,6 +28,9 @@ Fail closed: any doubt is an error `file:line: message` and exit status 1.
     (`#ifndef VLIBC_<NAME>_H` directly followed by `#define VLIBC_<NAME>_H`, no value), no
     `#pragma` or `_Pragma`, no `#line` or linemarker and no digraph or trigraph spelling of
     `#`: a macro in vlibc's own header could rewrite its contracts (audit round 2, S1);
+  * a shim header has no C23 digit separator (`1'2`), no raw string literal (`R"`) and no
+    unterminated string or character literal: each could make the reading of comments and
+    directives lose its place (audit round 3, note 5);
   * a trusted declaration holds no comment (a `)` in one would end the reading of the
     contract's identifiers, audit round 2, note 11);
   * the shim directory holds only `*.h` files (no subdirectory, no other file), and its parent
@@ -208,15 +211,31 @@ def scan(text: str, file: str, problems: Problems):
             i += 1
             continue
         if c == '"' or c == "'":
-            # a string or character literal stays as code
+            # A string or character literal stays as code.  What would make the reading above lose its place is
+            # refused instead (audit round 3, note 5): a C23 digit separator (`1'2`, a `'` after an identifier or
+            # number that is not an encoding prefix) would start a "character literal" that swallows a quote and
+            # hides a comment opener, and a raw string literal has no closing quote on its line.
+            k = i
+            while k > 0 and (text[k - 1].isalnum() or text[k - 1] == "_"):
+                k -= 1
+            before = text[k:i]
+            if c == "'" and before and before not in ("u8", "u", "U", "L"):
+                problems.add(file, lineno, "a `'` after an identifier or number (a C23 digit separator?): only "
+                                           "character literals are read in a shim header")
+            if c == '"' and before in ("R", "u8R", "uR", "UR", "LR"):
+                problems.add(file, lineno, "a raw string literal in a shim header")
             j = i + 1
             while j < n and text[j] != c and text[j] != "\n":
                 j += 2 if text[j] == "\\" else 1
             end = min(j + 1, n)
+            terminated = j < n and text[j] == c
             for k in range(i, end):
                 if text[k] == "\n":      # an unterminated literal: do not swallow lines
                     end = k
+                    terminated = False
                     break
+            if not terminated:
+                problems.add(file, lineno, "an unterminated string or character literal in a shim header")
             for k in range(i, end):
                 emit(text[k])
             line_has_code = True

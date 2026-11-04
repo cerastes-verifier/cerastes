@@ -13859,8 +13859,8 @@ class LibraryFixtureTests(unittest.TestCase):
 
     def test_the_fixture_headers_exist_and_each_is_used_by_a_test(self):
         names = sorted(p.name for p in LIBRARY_FIXTURE_DIR.glob("*.h"))
-        self.assertEqual(names, ["lib_body.h", "lib_body_bad.h", "lib_line.h", "lib_macro.h", "lib_macro_ok.h",
-                                 "lib_nonreserved.h", "lib_pragma.h", "lib_pragma_bad.h", "lib_spec.h",
+        self.assertEqual(names, ["lib_body.h", "lib_body_bad.h", "lib_line.h", "lib_macro.h", "lib_macro_contract.h",
+                                 "lib_macro_ok.h", "lib_nonreserved.h", "lib_pragma.h", "lib_pragma_bad.h", "lib_spec.h",
                                  "lib_trusted.h", "lib_untagged.h", "lib_weak.h", "lib_wrongtag.h"])
         source = Path(__file__).read_text()
         for name in names:
@@ -13969,6 +13969,7 @@ class LibraryFixtureTests(unittest.TestCase):
                                           body="  int y = lib_triple(x);\n  CERASTES_CHECK(y == 3 * x);\n  return x;",
                                           mode=mode)
                 self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+                self.assertIn("error #cerastes-annotation_reserved_library: ", run.stderr)
                 self.assertIn("lib_triple", run.stderr)
                 self.assertIn("lib_nonreserved.h", run.stderr)
 
@@ -14008,6 +14009,60 @@ class LibraryFixtureTests(unittest.TestCase):
                                           mode=mode)
                 self.assertEqual(bad.returncode, 1, bad.stdout + bad.stderr)
                 self.assertRegex(bad.stdout, rf"lib_pragma_bad\.h:{line}: error: postcondition")
+
+    def test_a_macro_defined_in_a_library_header_over_a_contract_identifier_is_rejected(self):
+        # decision 0046 item 4 (audit round 2, S1, the encoder half): the macro scan counts the directives of library
+        # files too, apart from a header's own include guard.  Twin: lib_trusted.h, the same declaration with the
+        # contract written out, verifies (test_a_trusted_contract_repeats_its_tag_in_the_viper_and_is_used)
+        for mode in self.modes():
+            with self.subTest(mode):
+                run, _ = self.run_program("lib_macro_contract.h", pre="0 <= x && x <= 10", post="r == x && x <= 5",
+                                          body=self.ABORT_BODY, mode=mode)
+                self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+                self.assertIn("error #cerastes-annotation_macro_changed: ", run.stderr)
+                self.assertIn("LIB_FALSE", run.stderr)
+                self.assertIn("lib_macro_contract.h", run.stderr)
+
+    GUARD_SKIPPED = """%(defines)s#include <stdlib.h>
+#include <cerastes.h>
+
+int f(int x)
+    CERASTES_REQUIRES(0 <= x && x <= 10)
+    CERASTES_ENSURES(r, r == 1)
+{
+  exit(x);
+  return 0;
+}
+"""
+    GUARD_DEFINES = "#define _STDLIB_H_\n#define _STDLIB_H\n#define _LIBCPP_STDLIB_H\n"
+
+    def test_vlibcs_contracts_are_rejected_when_the_platforms_header_is_skipped_in_cpp(self):
+        # decision 0046 item 4 (audit round 2, B1): with the platform's guards defined (the SDK's `_STDLIB_H_`,
+        # glibc's `_STDLIB_H`, libc++'s `_LIBCPP_STDLIB_H`) vlibc's declarations come first with C++ linkage, which
+        # is not the library's `exit`: every library contract without C linkage is rejected, called or not, at its
+        # own line of the ACTIVE vlibc's header (the harness cannot name a line of a header outside the repository,
+        # so this is a driver test, not an `expect:` test).  Twin: the same program without the three #defines
+        # verifies, since the call of exit ends the path and the ensures relies on it.
+        header = Path(self.env.get("CERASTES_VLIBC_DIR") or REAL_ROOT / "third_party" / "vlibc") / "include" / "vlibc" / "stdlib.h"
+        lines = header.read_text().splitlines()
+        want = [next(i for i, l in enumerate(lines, 1) if l.startswith(f"void {name}(")) for name in ("abort", "exit")]
+        src = self.tmp / "guard_skipped.cpp"
+        src.write_text(self.GUARD_SKIPPED % {"defines": self.GUARD_DEFINES})
+        run = subprocess.run([self.env["CERASTES_VERIFY"], "verify", str(src), rt.VERIFY_STD_OPTIONS["c++20"]],
+                             capture_output=True, text=True, env=self.env, timeout=rt.VERIFY_TIMEOUT_S)
+        self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+        self.assertEqual(run.stdout, "")
+        found = re.findall(r'^"([^"]*vlibc/stdlib\.h)", line (\d+): error #cerastes-annotation_reserved_library: ',
+                           run.stderr, re.M)
+        self.assertEqual([int(n) for _, n in found], want, run.stderr)
+        self.assertEqual(run.stderr.count("error #"), 2, run.stderr)
+        # twin
+        ok = self.tmp / "guard_not_skipped.cpp"
+        ok.write_text(self.GUARD_SKIPPED % {"defines": ""})
+        run = subprocess.run([self.env["CERASTES_VERIFY"], "verify", str(ok), rt.VERIFY_STD_OPTIONS["c++20"]],
+                             capture_output=True, text=True, env=self.env, timeout=rt.VERIFY_TIMEOUT_S)
+        self.assertEqual((run.returncode, run.stderr), (0, ""), run.stdout)
+        self.assertIn(": verified (", run.stdout)
 
     def test_a_weak_pragma_on_a_library_body_is_rejected(self):
         # decision 0046 item 8 (audit round 2, S2): only a library routine without a body is exempt from the

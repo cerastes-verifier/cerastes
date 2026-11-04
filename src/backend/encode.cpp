@@ -1139,6 +1139,10 @@ class Encoder {
   vir::Function* function_of(a_routine_ptr r, bool has_body_here, const a_source_position& at) {
     auto it = fns_.find(r);
     if (it != fns_.end()) return it->second;
+    if (reserved_rejected_.count(r) != 0) {  // rejected for its reserved name (check_reserved_library, lib_trust): never encoded
+      fns_[r] = nullptr;
+      return nullptr;
+    }
     // Decision 0046: a bodiless routine whose contract is written in a library file is trusted when vlibc's rules hold (lib_trust), and then
     // its location, its parameters' and its method's reason are vlibc's declaration; one that fails them, or whose reserved name was given
     // a contract by the program, is dropped after the rejection.
@@ -4889,6 +4893,45 @@ class Encoder {
                               ps->kind == sck_class_struct_union || ps->kind == sck_class_reactivation);
   }
 
+  // An asm label (also what `#pragma redefine_extname` sets) gives a routine or a variable another symbol (decision 0046 item 8).
+  static bool has_asm_label(a_routine_ptr r) { return r->gnu_extra_info != nullptr && r->gnu_extra_info->asm_name != nullptr; }
+  static bool has_asm_label(a_variable_ptr v) { return v->asm_name_is_valid && v->asm_name_or_reg.name != nullptr; }
+
+  // Item 8, the other route: a routine or a variable declared in the program's own files with an asm label may be bound to the symbol of a
+  // function whose contract is trusted (`void my_exit(int) __asm__("_exit"); void my_exit(int s) {}`: a call of `exit` runs this body).  Rejected at
+  // the declaration whether or not anything calls it.  Routines declared only in system or library files keep the rule at calls (redirection()).
+  void reject_asm_label_declaration(a_routine_ptr r) {
+    if (!has_asm_label(r)) return;
+    // At the program's FIRST declaration (where the label is written, usually), not its definition (which `decl_position` names).
+    a_source_position at{};
+    auto consider = [&](const a_source_position& p) {
+      if (written_by_program(p) && (at.seq == 0 || p.seq < at.seq || (p.seq == at.seq && p.column < at.column))) at = p;
+    };
+    consider(r->source_corresp.decl_position);
+    if (ents_ != nullptr)
+      if (auto sd = ents_->secondary_decls.find(r); sd != ents_->secondary_decls.end())
+        for (const IlEntities::SecondaryDecl& q : sd->second) consider(q.position);
+    if (at.seq == 0) return;
+    reject(Diag::unsupported_declaration, at,
+           "a declaration of `" + rname(r) + "` with an asm label (also `#pragma redefine_extname`): the symbol of a function whose contract is trusted could be taken, so a call would reach other code (decision 0046 item 8)");
+  }
+
+  void reject_asm_label_declaration(a_variable_ptr v) {
+    if (!has_asm_label(v)) return;
+    a_source_position at{};
+    auto consider = [&](const a_source_position& p) {
+      if (at.seq == 0 && in_verified_file(p)) at = p;
+    };
+    consider(v->source_corresp.decl_position);
+    if (ents_ != nullptr)
+      if (auto sd = ents_->variable_secondary_decls.find(v); sd != ents_->variable_secondary_decls.end())
+        for (const a_source_position& p : sd->second) consider(p);
+    if (at.seq == 0) return;
+    reject(Diag::unsupported_declaration, at,
+           "a declaration of the variable `" + std::string(v->source_corresp.name ? v->source_corresp.name : "?") +
+               "` with an asm label (also `#pragma redefine_extname`): the symbol of a function whose contract is trusted could be taken (decision 0046 item 8)");
+  }
+
   // Where a program wrote an attribute or a body: a placed position in a verified file that is not a library file.
   static bool written_by_program(const a_source_position& p) { return p.seq != 0 && in_verified_file(p) && !in_library_file(p); }
 
@@ -5104,7 +5147,6 @@ class Encoder {
     LibTrust t;
     // A routine with a body in a verified file (a library file's `inline` helper included) is verified like user code, its contract checked and
     // used as written: trust and the reserved-name rule of a contract in a library file are for routines without one (decision 0046 items 3-4).
-    if (verified_body(r) != nullptr) return lib_trust_.emplace(r, t).first->second;
     std::vector<an_attribute_ptr> lib_attrs;
     bool elsewhere = false;  // a requires/ensures/decreases not written in a library file
     for (an_attribute_ptr a : contracts_of(r)) {
@@ -5112,9 +5154,29 @@ class Encoder {
       else elsewhere = true;
     }
     if (lib_attrs.empty()) return lib_trust_.emplace(r, t).first->second;
-    t.has = true;
     const a_source_position at = lib_attrs[0]->position;
     const std::string name = r->source_corresp.name != nullptr ? r->source_corresp.name : "?";
+    // A reserved name that has internal linkage here (`static void exit(int);` before the header: the header's declaration inherits it) is the
+    // program's own function, and vlibc's contract would attach to it (C23 7.1.3), with a body or without.  Any other library routine with a
+    // body is verified like user code (items 3-4).
+    if (r->source_corresp.name != nullptr && vlibc_reserved(r->source_corresp.name) && r->source_corresp.name_linkage == nlk_internal) {
+      t.has = true;
+      // At the program's own `static` declaration or definition (the user's line), the first one written in a program file.
+      a_source_position own{};
+      auto earliest = [&](const a_source_position& p) {
+        if (written_by_program(p) && (own.seq == 0 || p.seq < own.seq || (p.seq == own.seq && p.column < own.column))) own = p;
+      };
+      earliest(r->source_corresp.decl_position);
+      if (ents_ != nullptr)
+        if (auto sd = ents_->secondary_decls.find(r); sd != ents_->secondary_decls.end())
+          for (const IlEntities::SecondaryDecl& q : sd->second) earliest(q.position);
+      reject(Diag::annotation_reserved_library, own.seq != 0 ? own : at,
+             "`" + name + "` is declared `static` by the program, so vlibc's contract on it would attach to the program's own function (a C library function has external linkage: C23 7.1.3)");
+      reserved_rejected_.insert(r);  // one error for the cause: nothing else is reported for it (no `ensures_on_noreturn`)
+      return lib_trust_.emplace(r, t).first->second;
+    }
+    if (verified_body(r) != nullptr) return lib_trust_.emplace(r, t).first->second;
+    t.has = true;
     a_scope_ptr bsp = body_scope(r);
     const bool has_body = bsp != nullptr && bsp->assoc_block != nullptr;
     // Trust needs C language linkage too (item 4): with the platform's header skipped by a guard macro, vlibc's declaration is the first one and has C++ linkage.
@@ -5265,6 +5327,7 @@ class Encoder {
       if (verified_body(callee) == nullptr && reject_redirected_call(callee, at)) return nullptr;
       return it->second;
     }
+    if (reserved_rejected_.count(callee) != 0) return nullptr;  // rejected for its reserved name
     const bool has_body_here = verified_body(callee) != nullptr;
     if (has_body_here) {
       // Defined in a verified file: created when its turn comes; created here if the call is first.
@@ -5417,6 +5480,7 @@ class Encoder {
       a_variable_ptr v = reinterpret_cast<a_variable_ptr>(t.ptr);
       const a_source_position at = v->source_corresp.decl_position;
       check_attributes(v->source_corresp.attributes);
+      reject_asm_label_declaration(v);  // a block-scope `extern int x __asm__("_exit");` (decision 0046 item 8)
       // Decision 0041 item 12 (P63 A6): a `static` local of an accepted type is a block of the program; its declaration emits nothing.
       if (v->storage_class == sc_static && !v->is_thread_local && v->source_corresp.enclosing_routine != nullptr) {
         static_local_decl(v, at);
@@ -9248,7 +9312,8 @@ void Encoder::declaration_level_checks(const IlEntities& ents) {
     }
     struct_info(u);  // decision 0043: a verified structure is accepted, anything else is rejected here, once
   }
-  // File-scope variables are classified by encode_named_constants (decision 0017).
+  // File-scope variables are classified by encode_named_constants (decision 0017).  An asm label on one takes another symbol (decision 0046 item 8).
+  for (a_variable_ptr v : ents.variables) reject_asm_label_declaration(v);
   for (an_asm_entry_ptr a : ents.asm_entries) {
     const a_source_position p = a->source_corresp.decl_position;
     if (p.seq == 0 || !in_verified_file(p)) continue;
@@ -9283,8 +9348,10 @@ void Encoder::run(const IlEntities& ents) {
     cx_ = Ctx();
     cx_.routine = r;
     cx_.stmt_pos = decl;
+    reject_asm_label_declaration(r);
     if (check_reserved_library(r)) continue;
     lib_trust(r);
+    if (reserved_rejected_.count(r) != 0) continue;  // rejected for its reserved name: nothing else about it
     check_routine_attributes(r);
     const bool declared_here = decl.seq != 0 && in_verified_file(decl);
     if (body == nullptr && !declared_here) {
