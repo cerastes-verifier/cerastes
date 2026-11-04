@@ -198,7 +198,8 @@ The line is the line of the source, and the exit status is 1: when `lo` and
 `hi` are both large, their sum does not fit in an `int`. The precondition allows
 that, so the verifier cannot exclude it. xref:verifying.adoc[Verifying a
 program] describes the command, and xref:error-messages.adoc[Error messages]
-explains every category.
+explains every category. The xref:tutorial/index.adoc[tutorial] goes on from
+here: contracts, loops, calls, pointers and the heap, one chapter at a time.
 
 == Build this documentation
 

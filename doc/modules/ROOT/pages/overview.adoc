@@ -1,103 +1,97 @@
 = Overview
 
-cerastes is a deductive verifier for C and pass:[C++]. It is in development.
-Today `cerastes verify` verifies functions over the integer types and `bool`,
-against contracts you write in the source, and pointers to such values inside one
-function; templates, pointer parameters, classes and the rest of the languages
-are not verified yet. This page says what it is
-meant to be and what exists today.
+cerastes is a deductive verifier for C and pass:[C++], in development. You write
+contracts in your source: what a function requires, what it ensures, what holds
+at each turn of a loop. `cerastes verify` then proves that every function meets
+its contract on every input the contract allows, or reports the line where it
+cannot. This page says what cerastes is meant to be, what it does today and
+where to start reading.
+
+== Where to start
+
+* *New to cerastes, or to verification:* the xref:tutorial/index.adoc[tutorial]
+  builds the ideas one chapter at a time, from a first proof to pointers and the
+  heap. Every program in it is checked by the verifier.
+* *Looking up a rule:* the reference pages, starting with
+  xref:verifying.adoc[Verifying a program] and xref:annotations.adoc[Annotations],
+  say exactly what is accepted, what is checked and what every message means.
+* *Building, testing or extending cerastes:* the
+  xref:dev/index.adoc[developer guide].
 
 == Design
 
-You will write contracts (preconditions, postconditions, loop invariants and
-assertions) as `+[[cerastes::...]]+` attributes in your C or pass:[C++] source. The
-EDG front end parses them as ordinary pass:[C++] expressions. cerastes translates the
-program and its contracts into Viper, a verification language. The Silicon
-verifier, which uses the Z3 solver, then checks them, and cerastes reports
-every failure against a line of your C or pass:[C++] source, not against generated
-code.
+You write contracts (preconditions, postconditions, loop invariants and
+assertions) as `+[[cerastes::...]]+` attributes in your C or pass:[C++] source, usually
+through the macros of `<cerastes.h>`, so that the same source still builds with
+an ordinary compiler (xref:ordinary-compilers.adoc[Building with ordinary
+compilers]). The EDG front end parses them as ordinary pass:[C++] expressions.
+cerastes translates the program and its contracts into Viper, a verification
+language. The Silicon verifier, which uses the Z3 solver, then checks them, and
+cerastes reports every failure against a line of your C or pass:[C++] source, not
+against generated code.
 
 The distinguishing goal is to verify templates generically. A function
 template is meant to be proved once, against the properties that its template
 parameters are required to have, and the result is meant to hold for every
 instantiation that meets those requirements. None of this works yet:
-`cerastes verify` rejects function templates.
+`cerastes verify` rejects function templates. The C language comes first.
 
 == Pipeline
-
-The pipeline is described below. The marks show what exists today.
 
 [source,text]
 ----
 C/C++ source + contracts
         |
         v
-  EDG front end            built, in the cerastes configuration; parses
-        |                  C and C++ and the cerastes annotations
+  EDG front end            parses C23 and C++20 and the cerastes
+        |                  annotations, in the cerastes configuration
         v
   Back end                 checks the rules EDG cannot check for the
-        |                  annotations, then encodes functions over
-        |                  integers and bool into a small internal IR
+        |                  annotations, rejects what it cannot verify,
+        |                  and encodes the rest into a small internal IR
         v
   Viper text (.vpr)        written, with a map back to your source lines
         |
         v
-  Silicon, Z3              run on the Viper text
+  Silicon, Z3              prove each check or report it
         |
         v
   Errors at C/C++ lines    reported, with a category and a note
 ----
 
-== Current status
+The xref:dev/architecture.adoc[architecture page] of the developer guide
+describes each stage.
 
-`cerastes verify` is the command (xref:verifying.adoc[Verifying a program]). What
-it verifies and what it does not:
+== What it verifies today
 
-* *Verified:* functions over `bool` and the integer types in C23 and in
-  pass:[C++]20, with locals (with or without an initializer: a read before the
-  first assignment is an error), arithmetic, comparisons and logical operators,
-  assignments and `pass:[++]`/`--` used as values and the comma operator,
-  `?:` with `void` arms as a statement,
-  `if`/`else`, `switch`, `while`, `do` and `for` loops with invariants and
-  termination measures, `break` and `continue`, forward `goto`, recursion with
-  measures, `return`, named constants (`const` globals), global and `static` local variables through contracts, enumerations and their constants, calls of functions that
-  have a contract or a body in the
-  same file (anywhere in an expression, also in guarded operands and loop
-  conditions, when C's order of calls cannot hide a check), functions that do not return (`+[[noreturn]]+`, `abort`, `exit`),
-  `assert` and `check`, the bitwise operators, and static assertions, whose
-  conditions are checked with the same rules.
-  The integer rules (overflow is an error, signed or unsigned: nothing wraps; a
-  conversion must be exact; a value of an enumeration is one of its values) are on
-  xref:integer-semantics.adoc[Integer semantics].
-* *Pointers inside one function:* pointers to local variables, `&`, `*`, null
-  pointers, `==` and `!=`, with null dereferences and dangling pointers reported
+A verified function terminates and satisfies its contract, and nothing in it
+overflows, divides by zero, reads a value it never wrote, or touches memory it
+does not own. Today that covers, in C23 and in pass:[C++]20:
+
+* *Integers and `bool`:* arithmetic in which nothing wraps, signed or unsigned,
+  exact conversions, bitwise operators, enumerations and named constants
+  (xref:integer-semantics.adoc[Integer semantics]).
+* *Control flow:* `if`, `switch`, the loops with invariants and termination
+  measures, `break`, `continue`, forward `goto`, recursion, functions that do
+  not return, `assert` and `check`
+  (xref:verifying.adoc[Verifying a program]).
+* *Calls:* each call is checked against the callee's contract, and the caller
+  knows only what that contract ensures. A function declared with a contract and
+  defined elsewhere is trusted
+  (xref:verifying.adoc#one-unit[the single-unit assumption]).
+* *Memory:* pointers to local and global variables, pointer parameters and
+  results with ownership contracts (`owns`, `reads`, `old`), pointers to
+  pointers, C structures, and single objects allocated with `malloc` and
+  `calloc` and released with `free`, with leaks reported
   (xref:memory.adoc[Memory and ownership]).
-* *Reported:* sixteen kinds of error, each at a line of your source, with what it
-  means and how to fix it on xref:error-messages.adoc[Error messages].
-* *Rejected with a diagnostic, never approximated:* everything else, among it
-  pointer parameters and results, references, classes, templates, a backward `goto`,
-  floating point, and the shapes the compilers warn about
-  (xref:verifying.adoc#not-supported[the list]).
-* *Parsed and checked, not verified:* the annotations beyond `requires`,
-  `ensures`, `invariant`, `decreases` and `check`: `fold`, `unfold`, predicates, pure
-  functions and the specification functions (xref:annotations.adoc[Annotations]).
-* *Results are for one translation unit and mean total correctness:* a
-  verified function terminates and satisfies its contract. A contract declared
-  for a function defined elsewhere is trusted, termination included.
 
-What supports it:
+Every message the tool prints is on xref:error-messages.adoc[Error messages].
 
-* A bootstrap script that builds the whole toolchain on macOS with Apple
-  silicon and on x86-64 Linux (xref:installation.adoc[Installation]).
-* A test harness that runs `cerastes verify`, the front end and Viper files, and
-  checks the errors they report, including the line.
-* The annotation layer: nine annotations, written with the macros of
-  `<cerastes.h>`, parsed and type-checked by the EDG front end, with the rules it
-  cannot check made by cerastes. See xref:annotations.adoc[Annotations], and
-  xref:ordinary-compilers.adoc[Building annotated code with ordinary compilers]
-  for building the same source with clang or GCC.
-* `scripts/cerastes-fe.sh`, a developer tool that runs the front end with
-  cerastes's checks and prints a listing of EDG's intermediate language.
+Anything else is rejected with a diagnostic at its line, never approximated:
+among it arrays, pointer arithmetic, floating point, references, classes and
+templates. The lists are on xref:verifying.adoc#not-supported[Verifying a
+program] and xref:memory.adoc#not-yet[Memory and ownership]. Results are for
+one translation unit.
 
 == Following progress
 

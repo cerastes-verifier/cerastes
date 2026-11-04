@@ -1,8 +1,30 @@
 * xref:overview.adoc[Overview]
 * xref:installation.adoc[Installation]
+
+.Tutorial
+* xref:tutorial/index.adoc[Introduction]
+* xref:tutorial/first-proof.adoc[A first proof]
+* xref:tutorial/integers.adoc[Integers do not wrap]
+* xref:tutorial/loops.adoc[Loops]
+* xref:tutorial/calls.adoc[Calls and contracts]
+* xref:tutorial/pointers.adoc[Pointers and ownership]
+* xref:tutorial/structures.adoc[Structures]
+* xref:tutorial/heap.adoc[The heap]
+
+.Reference
 * xref:annotations.adoc[Annotations]
 * xref:ordinary-compilers.adoc[Building with ordinary compilers]
 * xref:verifying.adoc[Verifying a program]
 * xref:integer-semantics.adoc[Integer semantics]
 * xref:memory.adoc[Memory and ownership]
 * xref:error-messages.adoc[Error messages]
+
+.Developer guide
+* xref:dev/index.adoc[Introduction]
+* xref:dev/architecture.adoc[Architecture]
+* xref:dev/building.adoc[Building from source]
+* xref:dev/testing.adoc[Testing]
+* xref:dev/soundness.adoc[Soundness]
+* xref:dev/contributing.adoc[Adding a feature]
+* xref:dev/edg.adoc[The EDG front end]
+* xref:dev/documentation.adoc[Writing documentation]
