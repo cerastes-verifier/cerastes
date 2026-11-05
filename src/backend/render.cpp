@@ -19,23 +19,29 @@ namespace {
 // construction.
 std::string* g_target = nullptr;
 an_il_to_str_output_control_block* g_octl = nullptr;
-bool g_in_type = false;  // rendering through form_type (see name_hook)
+bool g_in_type = false; // rendering through form_type (see name_hook)
 
-void sink(a_const_char* s, an_il_to_str_output_control_block_ptr) {
-  if (g_target) g_target->append(s);
+void sink(a_const_char* s, an_il_to_str_output_control_block_ptr)
+{
+    if (g_target)
+    {
+        g_target->append(s);
+    }
 }
 
 // Closure class of a lambda (a_class_type_supplement.is_lambda_closure_class).
 // Decided from the IL flag, never from the printed name.
-bool is_closure_class(a_type_ptr t) {
-  return is_immediate_class_type(t) && class_type_supp(t)->is_lambda_closure_class;
+bool is_closure_class(a_type_ptr t)
+{
+    return is_immediate_class_type(t) && class_type_supp(t)->is_lambda_closure_class;
 }
 
 // EDG prints a closure as "lambda [] type at line <seq>, col. <c>", where
 // <seq> is its internal sequence number, not a line (il_to_str.c:951-960).
 // Print "<lambda@L<line>:<col>>" with the resolved position instead.
-void put_closure(a_type_ptr t) {
-  g_octl->output_str(("<lambda@" + position_label(t->source_corresp.decl_position) + ">").c_str(), g_octl);
+void put_closure(a_type_ptr t)
+{
+    g_octl->output_str(("<lambda@" + position_label(t->source_corresp.decl_position) + ">").c_str(), g_octl);
 }
 
 // output_name hook: closure classes get our spelling (and no qualifier, as in
@@ -46,272 +52,389 @@ void put_closure(a_type_ptr t) {
 // form_name otherwise.  Names nested inside that default output (for example a
 // closure used as a template argument) are therefore rendered by EDG's
 // default, not by this hook.
-void name_hook(char* entry, an_il_entry_kind kind) {
-  auto saved = g_octl->output_name;
-  if (kind == iek_type) {
-    auto t = reinterpret_cast<a_type_ptr>(entry);
-    if (is_closure_class(t)) {
-      put_closure(t);
-      return;
+void name_hook(char* entry, an_il_entry_kind kind)
+{
+    auto saved = g_octl->output_name;
+    if (kind == iek_type)
+    {
+        auto t = reinterpret_cast<a_type_ptr>(entry);
+        if (is_closure_class(t))
+        {
+            put_closure(t);
+            return;
+        }
+        g_octl->output_name = nullptr;
+        if (g_in_type)
+        {
+            form_type(t, g_octl);
+        }
+        else
+        {
+            form_name(&t->source_corresp, kind, g_octl);
+        }
     }
-    g_octl->output_name = nullptr;
-    if (g_in_type)
-      form_type(t, g_octl);
     else
-      form_name(&t->source_corresp, kind, g_octl);
-  } else {
-    g_octl->output_name = nullptr;
-    form_name(reinterpret_cast<a_source_correspondence*>(entry), kind, g_octl);
-  }
-  g_octl->output_name = saved;
+    {
+        g_octl->output_name = nullptr;
+        form_name(reinterpret_cast<a_source_correspondence*>(entry), kind, g_octl);
+    }
+    g_octl->output_name = saved;
 }
 
 // output_class_qualifier hook: a member of a closure class (operator(), the
 // conversion function, ...) is qualified by "<lambda@L:C>::".
-void class_qualifier_hook(a_type_ptr type, a_boolean for_ptr_to_data_member) {
-  if (is_closure_class(type)) {
-    put_closure(type);
-    g_octl->output_str("::", g_octl);
-    return;
-  }
-  auto saved = g_octl->output_class_qualifier;
-  g_octl->output_class_qualifier = nullptr;
-  a_parent_class_or_namespace parent;
-  parent.class_type = type;
-  (void)for_ptr_to_data_member;  // only true for pointer-to-member types
-  form_class_or_namespace_qualifier(TRUE, parent, g_octl);
-  g_octl->output_class_qualifier = saved;
+void class_qualifier_hook(a_type_ptr type, a_boolean for_ptr_to_data_member)
+{
+    if (is_closure_class(type))
+    {
+        put_closure(type);
+        g_octl->output_str("::", g_octl);
+        return;
+    }
+    auto saved = g_octl->output_class_qualifier;
+    g_octl->output_class_qualifier = nullptr;
+    a_parent_class_or_namespace parent;
+    parent.class_type = type;
+    (void)for_ptr_to_data_member; // only true for pointer-to-member types
+    form_class_or_namespace_qualifier(TRUE, parent, g_octl);
+    g_octl->output_class_qualifier = saved;
 }
 
 // Run `fn` with a fresh output control block that appends to a string.
 template <class Fn>
-std::string capture(Fn fn) {
-  std::string out;
-  std::string* saved = g_target;
-  an_il_to_str_output_control_block* saved_octl = g_octl;
-  g_target = &out;
-  an_il_to_str_output_control_block octl;
-  clear_il_to_str_output_control_block(&octl);
-  octl.output_str = sink;
-  octl.output_name = name_hook;
-  octl.output_class_qualifier = class_qualifier_hook;
-  octl.gen_pcc_code = il_header.pcc_compatibility_mode;
-  g_octl = &octl;
-  fn(&octl);
-  g_octl = saved_octl;
-  g_target = saved;
-  return out;
+std::string capture(Fn fn)
+{
+    std::string out;
+    std::string* saved = g_target;
+    an_il_to_str_output_control_block* saved_octl = g_octl;
+    g_target = &out;
+    an_il_to_str_output_control_block octl;
+    clear_il_to_str_output_control_block(&octl);
+    octl.output_str = sink;
+    octl.output_name = name_hook;
+    octl.output_class_qualifier = class_qualifier_hook;
+    octl.gen_pcc_code = il_header.pcc_compatibility_mode;
+    g_octl = &octl;
+    fn(&octl);
+    g_octl = saved_octl;
+    g_target = saved;
+    return out;
 }
 
-}  // namespace
+} // namespace
 
-std::string position_label(const a_source_position& p) {
-  DiagPos d = diag_position(p);
-  if (!d.known) return "-";
-  std::string s = "L" + std::to_string(d.line) + ":" + std::to_string(d.col);
-  return d.in_primary ? s : d.file + ":" + s;
+std::string position_label(const a_source_position& p)
+{
+    DiagPos d = diag_position(p);
+    if (!d.known)
+    {
+        return "-";
+    }
+    std::string s = "L" + std::to_string(d.line) + ":" + std::to_string(d.col);
+    return d.in_primary ? s : d.file + ":" + s;
 }
 
-std::string SrcPos::str() const {
-  return "L" + std::to_string(line) + ":" + std::to_string(col);
+std::string SrcPos::str() const
+{
+    return "L" + std::to_string(line) + ":" + std::to_string(col);
 }
 
-bool seq_is_in_system_file(a_seq_number seq) {
-  if (verify_config().on) return seq != 0 && !seq_in_verified_file(seq);
-  return seq_is_in_system_header(seq);
+bool seq_is_in_system_file(a_seq_number seq)
+{
+    if (verify_config().on)
+    {
+        return seq != 0 && !seq_in_verified_file(seq);
+    }
+    return seq_is_in_system_header(seq);
 }
 
-SrcPos resolve(const a_source_position& p) {
-  SrcPos r;
-  if (p.seq == 0) return r;
-  r.known = true;
-  r.col = p.column;
-  a_const_char* file = nullptr;
-  a_const_char* full = nullptr;
-  a_line_number line = 0;
-  a_boolean at_end = FALSE;
-  conv_seq_to_file_and_line(p.seq, &file, &full, &line, &at_end);
-  r.line = line;
-  r.file = file ? file : "";
-  r.in_primary = !seq_is_in_include_file(p.seq);
-  r.in_system = seq_is_in_system_file(p.seq);
-  return r;
+SrcPos resolve(const a_source_position& p)
+{
+    SrcPos r;
+    if (p.seq == 0)
+    {
+        return r;
+    }
+    r.known = true;
+    r.col = p.column;
+    a_const_char* file = nullptr;
+    a_const_char* full = nullptr;
+    a_line_number line = 0;
+    a_boolean at_end = FALSE;
+    conv_seq_to_file_and_line(p.seq, &file, &full, &line, &at_end);
+    r.line = line;
+    r.file = file ? file : "";
+    r.in_primary = !seq_is_in_include_file(p.seq);
+    r.in_system = seq_is_in_system_file(p.seq);
+    return r;
 }
 
-std::string render_type(a_type_ptr t) {
-  if (t == nullptr) return "<null>";
-  bool saved = g_in_type;
-  g_in_type = true;
-  std::string s = capture([&](an_il_to_str_output_control_block_ptr o) { form_type(t, o); });
-  g_in_type = saved;
-  // EDG's formatter prints exactly "<unnamed>" for a type it cannot name
-  // (dependent expression types).  Show the type's kind instead, which is the
-  // fact the IL checks care about: tk_template_param subkind
-  // (il_def.h:9286-9321) or tk_*.  An unnamed class inside a larger type
-  // ("struct <unnamed> &") is a real unnamed tag and is left to EDG.
-  if (s == "<unnamed>") {
-    a_type_ptr u = skip_typerefs(t);
-    s = std::string("<") +
-        (u->kind == tk_template_param ? name_of(u->variant.template_param.kind) : name_of(u->kind)) + ">";
-  }
-  return s;
+std::string render_type(a_type_ptr t)
+{
+    if (t == nullptr)
+    {
+        return "<null>";
+    }
+    bool saved = g_in_type;
+    g_in_type = true;
+    std::string s = capture(
+        [&](an_il_to_str_output_control_block_ptr o)
+        {
+            form_type(t, o);
+        });
+    g_in_type = saved;
+    // EDG's formatter prints exactly "<unnamed>" for a type it cannot name
+    // (dependent expression types).  Show the type's kind instead, which is the
+    // fact the IL checks care about: tk_template_param subkind
+    // (il_def.h:9286-9321) or tk_*.  An unnamed class inside a larger type
+    // ("struct <unnamed> &") is a real unnamed tag and is left to EDG.
+    if (s == "<unnamed>")
+    {
+        a_type_ptr u = skip_typerefs(t);
+        s = std::string("<") +
+            (u->kind == tk_template_param ? name_of(u->variant.template_param.kind) : name_of(u->kind)) + ">";
+    }
+    return s;
 }
 
-std::string render_name(a_source_correspondence* scp, an_il_entry_kind kind) {
-  return capture([&](an_il_to_str_output_control_block_ptr o) { form_name(scp, kind, o); });
+std::string render_name(a_source_correspondence* scp, an_il_entry_kind kind)
+{
+    return capture(
+        [&](an_il_to_str_output_control_block_ptr o)
+        {
+            form_name(scp, kind, o);
+        });
 }
 
 // Template arguments contain types, so they render through form_type's paths
 // (g_in_type): an unnamed struct/enum keeps its keyword as in EDG's default.
-std::string render_template_arg(a_template_arg_ptr a) {
-  bool saved = g_in_type;
-  g_in_type = true;
-  std::string s = capture([&](an_il_to_str_output_control_block_ptr o) { form_a_template_arg(a, o); });
-  g_in_type = saved;
-  return s;
+std::string render_template_arg(a_template_arg_ptr a)
+{
+    bool saved = g_in_type;
+    g_in_type = true;
+    std::string s = capture(
+        [&](an_il_to_str_output_control_block_ptr o)
+        {
+            form_a_template_arg(a, o);
+        });
+    g_in_type = saved;
+    return s;
 }
 
 namespace {
-std::string template_param_name(a_template_parameter_ptr tp, int index) {
-  if (tp && tp->source_corresp.name) return tp->source_corresp.name;
-  return "#" + std::to_string(index);
+std::string template_param_name(a_template_parameter_ptr tp, int index)
+{
+    if (tp && tp->source_corresp.name)
+    {
+        return tp->source_corresp.name;
+    }
+    return "#" + std::to_string(index);
 }
-}  // namespace
+} // namespace
 
 // A pack is shown as "Ts=pack{int, long}" (tak_start_of_pack_expansion opens
 // it, following is_pack_element arguments belong to it; il_def.h:7683-7790).
-std::string render_template_args(a_template_ptr tmpl, a_template_arg_ptr list) {
-  if (list == nullptr) return "none";
-  a_template_parameter_ptr tp =
-      (tmpl && tmpl->template_decl) ? tmpl->template_decl->param_list : nullptr;
-  std::vector<std::string> parts;
-  std::vector<std::string> pack;
-  std::string pack_name;
-  bool in_pack = false;
-  int index = 0;
-  auto flush_pack = [&] {
-    if (!in_pack) return;
-    std::string s = pack_name + "=pack{";
-    for (size_t i = 0; i < pack.size(); ++i) s += (i ? ", " : "") + pack[i];
-    parts.push_back(s + "}");
-    in_pack = false;
-    pack.clear();
-  };
-  for (a_template_arg_ptr a = list; a; a = a->next) {
-    if (a->kind == tak_start_of_pack_expansion) {
-      flush_pack();
-      in_pack = true;
-      pack_name = template_param_name(tp, index);
-      if (tp) tp = tp->next;
-      ++index;
-      continue;
+std::string render_template_args(a_template_ptr tmpl, a_template_arg_ptr list)
+{
+    if (list == nullptr)
+    {
+        return "none";
     }
-    if (in_pack && a->is_pack_element) {
-      pack.push_back(render_template_arg(a));
-      continue;
+    a_template_parameter_ptr tp = (tmpl && tmpl->template_decl) ? tmpl->template_decl->param_list : nullptr;
+    std::vector<std::string> parts;
+    std::vector<std::string> pack;
+    std::string pack_name;
+    bool in_pack = false;
+    int index = 0;
+    auto flush_pack = [&]
+    {
+        if (!in_pack)
+        {
+            return;
+        }
+        std::string s = pack_name + "=pack{";
+        for (size_t i = 0; i < pack.size(); ++i)
+        {
+            s += (i ? ", " : "") + pack[i];
+        }
+        parts.push_back(s + "}");
+        in_pack = false;
+        pack.clear();
+    };
+    for (a_template_arg_ptr a = list; a; a = a->next)
+    {
+        if (a->kind == tak_start_of_pack_expansion)
+        {
+            flush_pack();
+            in_pack = true;
+            pack_name = template_param_name(tp, index);
+            if (tp)
+            {
+                tp = tp->next;
+            }
+            ++index;
+            continue;
+        }
+        if (in_pack && a->is_pack_element)
+        {
+            pack.push_back(render_template_arg(a));
+            continue;
+        }
+        flush_pack();
+        parts.push_back(template_param_name(tp, index) + "=" + render_template_arg(a));
+        if (tp)
+        {
+            tp = tp->next;
+        }
+        ++index;
     }
     flush_pack();
-    parts.push_back(template_param_name(tp, index) + "=" + render_template_arg(a));
-    if (tp) tp = tp->next;
-    ++index;
-  }
-  flush_pack();
-  std::string s;
-  for (size_t i = 0; i < parts.size(); ++i) s += (i ? ", " : "") + parts[i];
-  return s;
-}
-
-std::string render_constant(a_constant_ptr c) {
-  if (c == nullptr) return "<null>";
-  if (c->kind == ck_integer) {
-    a_type_ptr t = c->type ? skip_typerefs(c->type) : nullptr;
-    // A null pointer constant of type std::nullptr_t is `nullptr`, a bool `true` or
-    // `false`; anything else its plain decimal value as diagnostics print it
-    // (const_ints.h), without suffix or cast.
-    if (t != nullptr && is_nullptr_type(t)) return "nullptr";
-    a_number_buffer b = decimal_str_for_integer_constant(c);
-    if (t != nullptr && is_bool_type(t)) return std::string(b.as_temp_characters()) == "0" ? "false" : "true";
-    return b.as_temp_characters();
-  }
-  if (c->kind == ck_float || c->kind == ck_address) {
-    // EDG's own formatter: the value of a floating constant, or the address of an
-    // entity (&x, a string literal, a function).
-    return capture([&](an_il_to_str_output_control_block_ptr o) { form_constant(c, /*need_parens=*/FALSE, o); });
-  }
-  return std::string("<") + name_of(c->kind) + ">";
-}
-
-std::string render_attribute(an_attribute_ptr a) {
-  // namespace_name: as written ([[ns::name]]); NULL when none (il_def.h:3206).
-  std::string s = "[[";
-  if (a->namespace_name) {
-    s += a->namespace_name;
-    s += "::";
-  }
-  s += a->name ? a->name : "<unnamed>";
-  if (a->arguments) {
-    // Arguments: aak_raw_token / aak_token carry text (il_def.h:2747-2837);
-    // aak_raw_token sequences are terminated by an aak_empty entry, which is
-    // not text.  Recognized attributes with other argument kinds are shown by
-    // kind.
-    std::string args;
-    bool first = true;
-    for (an_attribute_arg_ptr g = a->arguments; g; g = g->next) {
-      std::string piece;
-      switch (g->kind) {
-        case aak_empty: continue;
-        case aak_raw_token:
-        case aak_token: piece = g->variant.token ? g->variant.token : ""; break;
-        case aak_constant: piece = "<aak_constant>"; break;
-        case aak_type: piece = "<aak_type>"; break;
-        case aak_expression: piece = "<aak_expression>"; break;
-        default: piece = "<aak?>"; break;
-      }
-      if (!first) args += ' ';
-      args += piece;
-      first = false;
+    std::string s;
+    for (size_t i = 0; i < parts.size(); ++i)
+    {
+        s += (i ? ", " : "") + parts[i];
     }
-    s += "(" + args + ")";
-  }
-  s += "]]";
-  return s;
+    return s;
 }
 
-std::string render_constraint(an_expr_node_ptr e) {
-  if (e == nullptr) return "<null>";
-  switch (e->kind) {
-    case enk_concept_id: {
-      // il_def.h:15710-15718.  For a type constraint (is_type_constraint) the
-      // first template argument is implicit and absent from `args`.
-      auto& c = e->variant.concept_id;
-      std::string s = render_name(&c.concept_template->source_corresp, iek_template);
-      if (c.args) {
-        bool saved = g_in_type;
-        g_in_type = true;  // see render_template_arg
-        s += capture([&](an_il_to_str_output_control_block_ptr o) {
-          form_template_args(c.args, nullptr, o);
-        });
-        g_in_type = saved;
-      }
-      return s;
+std::string render_constant(a_constant_ptr c)
+{
+    if (c == nullptr)
+    {
+        return "<null>";
     }
-    case enk_operation: {
-      auto& op = e->variant.operation;
-      if ((op.kind == eok_land || op.kind == eok_lor) && op.operands && op.operands->next) {
-        auto side = [&](an_expr_node_ptr n) {
-          std::string r = render_constraint(n);
-          bool other = n->kind == enk_operation &&
-                       (n->variant.operation.kind == eok_land || n->variant.operation.kind == eok_lor) &&
-                       n->variant.operation.kind != op.kind;
-          return other ? "(" + r + ")" : r;
-        };
-        return side(op.operands) + (op.kind == eok_land ? " && " : " || ") + side(op.operands->next);
-      }
-      return std::string("<expr:") + name_of(op.kind) + ">";
+    if (c->kind == ck_integer)
+    {
+        a_type_ptr t = c->type ? skip_typerefs(c->type) : nullptr;
+        // A null pointer constant of type std::nullptr_t is `nullptr`, a bool `true` or
+        // `false`; anything else its plain decimal value as diagnostics print it
+        // (const_ints.h), without suffix or cast.
+        if (t != nullptr && is_nullptr_type(t))
+        {
+            return "nullptr";
+        }
+        a_number_buffer b = decimal_str_for_integer_constant(c);
+        if (t != nullptr && is_bool_type(t))
+        {
+            return std::string(b.as_temp_characters()) == "0" ? "false" : "true";
+        }
+        return b.as_temp_characters();
     }
-    default:
-      return std::string("<expr:") + name_of(static_cast<an_expr_node_kind>(e->kind)) + ">";
-  }
+    if (c->kind == ck_float || c->kind == ck_address)
+    {
+        // EDG's own formatter: the value of a floating constant, or the address of an
+        // entity (&x, a string literal, a function).
+        return capture(
+            [&](an_il_to_str_output_control_block_ptr o)
+            {
+                form_constant(c, /*need_parens=*/FALSE, o);
+            });
+    }
+    return std::string("<") + name_of(c->kind) + ">";
 }
 
-}  // namespace cerastes
+std::string render_attribute(an_attribute_ptr a)
+{
+    // namespace_name: as written ([[ns::name]]); NULL when none (il_def.h:3206).
+    std::string s = "[[";
+    if (a->namespace_name)
+    {
+        s += a->namespace_name;
+        s += "::";
+    }
+    s += a->name ? a->name : "<unnamed>";
+    if (a->arguments)
+    {
+        // Arguments: aak_raw_token / aak_token carry text (il_def.h:2747-2837);
+        // aak_raw_token sequences are terminated by an aak_empty entry, which is
+        // not text.  Recognized attributes with other argument kinds are shown by
+        // kind.
+        std::string args;
+        bool first = true;
+        for (an_attribute_arg_ptr g = a->arguments; g; g = g->next)
+        {
+            std::string piece;
+            switch (g->kind)
+            {
+                case aak_empty:
+                    continue;
+                case aak_raw_token:
+                case aak_token:
+                    piece = g->variant.token ? g->variant.token : "";
+                    break;
+                case aak_constant:
+                    piece = "<aak_constant>";
+                    break;
+                case aak_type:
+                    piece = "<aak_type>";
+                    break;
+                case aak_expression:
+                    piece = "<aak_expression>";
+                    break;
+                default:
+                    piece = "<aak?>";
+                    break;
+            }
+            if (!first)
+            {
+                args += ' ';
+            }
+            args += piece;
+            first = false;
+        }
+        s += "(" + args + ")";
+    }
+    s += "]]";
+    return s;
+}
+
+std::string render_constraint(an_expr_node_ptr e)
+{
+    if (e == nullptr)
+    {
+        return "<null>";
+    }
+    switch (e->kind)
+    {
+        case enk_concept_id:
+        {
+            // il_def.h:15710-15718.  For a type constraint (is_type_constraint) the
+            // first template argument is implicit and absent from `args`.
+            auto& c = e->variant.concept_id;
+            std::string s = render_name(&c.concept_template->source_corresp, iek_template);
+            if (c.args)
+            {
+                bool saved = g_in_type;
+                g_in_type = true; // see render_template_arg
+                s += capture(
+                    [&](an_il_to_str_output_control_block_ptr o)
+                    {
+                        form_template_args(c.args, nullptr, o);
+                    });
+                g_in_type = saved;
+            }
+            return s;
+        }
+        case enk_operation:
+        {
+            auto& op = e->variant.operation;
+            if ((op.kind == eok_land || op.kind == eok_lor) && op.operands && op.operands->next)
+            {
+                auto side = [&](an_expr_node_ptr n)
+                {
+                    std::string r = render_constraint(n);
+                    bool other = n->kind == enk_operation &&
+                                 (n->variant.operation.kind == eok_land || n->variant.operation.kind == eok_lor) &&
+                                 n->variant.operation.kind != op.kind;
+                    return other ? "(" + r + ")" : r;
+                };
+                return side(op.operands) + (op.kind == eok_land ? " && " : " || ") + side(op.operands->next);
+            }
+            return std::string("<expr:") + name_of(op.kind) + ">";
+        }
+        default:
+            return std::string("<expr:") + name_of(static_cast<an_expr_node_kind>(e->kind)) + ">";
+    }
+}
+
+} // namespace cerastes

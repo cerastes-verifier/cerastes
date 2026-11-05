@@ -10,4 +10,4 @@ namespace cerastes {
 // tests in tests/il/.
 void walk_il_and_print();
 
-}  // namespace cerastes
+} // namespace cerastes

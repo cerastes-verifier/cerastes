@@ -12,35 +12,37 @@
 namespace cerastes {
 
 // What the encoder produced (set by verify_encode(), read by the driver after edg_main returns).
-struct VerifyOutput {
-  bool encoded = false;  // the encoder ran to the end without rejecting anything
-  std::string vpr;       // the Viper program
-  std::string map;       // its position map (internal/encoding.md section 5)
-  int functions = 0;     // functions whose bodies were verified
-  // Decision 0022 item 12: lowering's internal errors, the emitter's problems or the encoder's "encoded twice" guard fired.  The
-  // diagnostics are shown as usual, but the run is a tool failure (exit status 3), never a rejection (2).
-  bool internal_inconsistency = false;
+struct VerifyOutput
+{
+    bool encoded = false; // the encoder ran to the end without rejecting anything
+    std::string vpr;      // the Viper program
+    std::string map;      // its position map (internal/encoding.md section 5)
+    int functions = 0;    // functions whose bodies were verified
+    // Decision 0022 item 12: lowering's internal errors, the emitter's problems or the encoder's "encoded twice" guard fired.  The
+    // diagnostics are shown as usual, but the run is a tool failure (exit status 3), never a rejection (2).
+    bool internal_inconsistency = false;
 };
 
-struct VerifyConfig {
-  bool on = false;
-  // The self-test hook of 0011 item 13 ("" for none): the names and what each does are listed above is_hook in
-  // src/driver/verify_main.cpp, the one place that accepts them.
-  std::string hook;
-  // `--strict-init` (decision 0042 item 8): every local without an initializer must carry `[[cerastes::uninit]]`, and an argument of a
-  // `ref_to_uninit`/`must_init` parameter must be `&x` of such a local or the caller's own marked parameter passed unchanged.
-  bool strict_init = false;
-  // Canonical (realpath) system directories: the driver's own system include directories, without
-  // /usr/local/include (a user directory).  A file under one of them is a system file.
-  std::vector<std::string> system_dirs;
-  // Canonical library directories (decision 0046 item 3): vlibc's include/vlibc (the shim directory, which is also what `<vlibc/...>` resolves
-  // to) and, with the `library_fixture` self-test hook, the harness's fixture directory.  A file below one is a library file: a
-  // verified file, never a system file, whatever EDG's own flag says (the directories are system include directories of the front
-  // end, so that macros used in the caller's file still point there); its contracts are trusted by the encoder (item 4).
-  std::vector<std::string> library_dirs;
-  // Canonical path of cerastes's own include/cerastes.h: the one file of that directory that is a system file.
-  std::string cerastes_header;
-  VerifyOutput out;
+struct VerifyConfig
+{
+    bool on = false;
+    // The self-test hook of 0011 item 13 ("" for none): the names and what each does are listed above is_hook in
+    // src/driver/verify_main.cpp, the one place that accepts them.
+    std::string hook;
+    // `--strict-init` (decision 0042 item 8): every local without an initializer must carry `[[cerastes::uninit]]`, and an argument of a
+    // `ref_to_uninit`/`must_init` parameter must be `&x` of such a local or the caller's own marked parameter passed unchanged.
+    bool strict_init = false;
+    // Canonical (realpath) system directories: the driver's own system include directories, without
+    // /usr/local/include (a user directory).  A file under one of them is a system file.
+    std::vector<std::string> system_dirs;
+    // Canonical library directories (decision 0046 item 3): vlibc's include/vlibc (the shim directory, which is also what `<vlibc/...>` resolves
+    // to) and, with the `library_fixture` self-test hook, the harness's fixture directory.  A file below one is a library file: a
+    // verified file, never a system file, whatever EDG's own flag says (the directories are system include directories of the front
+    // end, so that macros used in the caller's file still point there); its contracts are trusted by the encoder (item 4).
+    std::vector<std::string> library_dirs;
+    // Canonical path of cerastes's own include/cerastes.h: the one file of that directory that is a system file.
+    std::string cerastes_header;
+    VerifyOutput out;
 };
 VerifyConfig& verify_config();
 
@@ -81,4 +83,4 @@ bool is_system_file(const std::vector<std::string>& system_dirs, const std::stri
 // Convenience: is_system_file with the configuration of this run.
 bool is_system_file(const std::string& path);
 
-}  // namespace cerastes
+} // namespace cerastes

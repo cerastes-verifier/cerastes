@@ -12,4 +12,4 @@ namespace cerastes {
 // every run; the caller prints the diagnostics with flush_diagnostics().
 void check_annotations();
 
-}  // namespace cerastes
+} // namespace cerastes

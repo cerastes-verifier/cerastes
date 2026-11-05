@@ -3,8 +3,9 @@
 #include "options.h"
 
 namespace cerastes {
-Options& options() {
-  static Options o;
-  return o;
+Options& options()
+{
+    static Options o;
+    return o;
 }
-}  // namespace cerastes
+} // namespace cerastes

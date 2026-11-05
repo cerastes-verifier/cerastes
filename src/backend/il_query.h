@@ -52,7 +52,7 @@ std::string physical_path(const a_source_position& p);
 // 0011 item 4: the position lies in a file that `cerastes verify` verifies (known, and not a system file by
 // canonical physical path).
 bool in_verified_file(const a_source_position& p);
-bool seq_in_verified_file(a_seq_number seq);  // the same for a sequence number (false for 0)
+bool seq_in_verified_file(a_seq_number seq); // the same for a sequence number (false for 0)
 
 // Decision 0046 item 3: sequence number `seq` / the position lies in a library file (a file below vlibc's include/vlibc, or the harness's
 // fixture directory with the `library_fixture` hook), by canonical physical path.  Always false outside a verify run and for an unknown
@@ -67,38 +67,41 @@ const std::vector<a_source_position>& diag_pragma_sites();
 
 // The entities of the translation unit that the verify-mode encoder looks at, each once, in the order the
 // IL walk reports them (file scope first, then the routine-scope regions in region order).
-struct IlEntities {
-  std::vector<a_routine_ptr> routines;
-  std::vector<a_template_ptr> templates;
-  std::vector<a_variable_ptr> variables;  // those not declared inside a routine
-  std::vector<a_type_ptr> types;
-  std::vector<an_asm_entry_ptr> asm_entries;  // file-scope asm declarations (not the asm statements of bodies)
-  // Decision 0024 item 2: the static assertions of the file scope's source sequence list (file, namespace, `extern "C"` and
-  // class scope, in source order, every header's included), and those the file-scope walk reached that are not on it (a
-  // fail-closed cross-check: the encoder reports one in a verified file).
-  std::vector<a_static_assertion_ptr> static_assertions;
-  std::vector<a_static_assertion_ptr> other_static_assertions;
-  // Decision 0025 item 5: the static assertions each function memory region holds (block scope), with the region's number, in
-  // region order and then in the walk's order.
-  std::vector<std::pair<a_memory_region_number, a_static_assertion_ptr>> region_static_assertions;
-  // The declarations of a routine (a_src_seq_secondary_decl entries whose entity is the routine, il_def.h:2131), in the order the walk
-  // reports them.  The list holds EVERY declaration, the first included (P71: its entry has `first_declaration` TRUE, and in C++ a later
-  // declaration's position can equal `source_corresp.decl_position`, which `decls.c:9802` moves).  Decision 0040 item 3: where each
-  // declaration's parameters lie, to check that every declaration of a parameter carries the same `cerastes::owning`.  Decision 0046:
-  // each declaration's own `attributes` (copies of the entries on the routine, il_def.h:2164), to find the declaration that carries a contract.
-  struct SecondaryDecl {
-    a_source_position position;
-    a_type_ptr declared_type = nullptr;  // the type as the declaration wrote it (a typedef'd function type stays a typeref)
-    an_attribute_ptr attributes = nullptr;
-  };
-  std::map<a_routine_ptr, std::vector<SecondaryDecl>> secondary_decls;
-  // Decision 0041 item 2: the other declarations of a file-scope variable (a_src_seq_secondary_decl entries whose entity is the variable): one in a
-  // system file makes the variable shared with the runtime (`environ`), which is rejected.
-  std::map<a_variable_ptr, std::vector<a_source_position>> variable_secondary_decls;
-  // Decision 0041 item 5 (P63 H6): the initializer of a `static` local whose `init_kind` is `initk_function_local` is the
-  // local-static-variable-init entry of its scope, not the variable's own; the entries by variable.
-  std::map<a_variable_ptr, a_local_static_variable_init_ptr> static_local_inits;
+struct IlEntities
+{
+    std::vector<a_routine_ptr> routines;
+    std::vector<a_template_ptr> templates;
+    std::vector<a_variable_ptr> variables; // those not declared inside a routine
+    std::vector<a_type_ptr> types;
+    std::vector<an_asm_entry_ptr> asm_entries; // file-scope asm declarations (not the asm statements of bodies)
+    // Decision 0024 item 2: the static assertions of the file scope's source sequence list (file, namespace, `extern "C"` and
+    // class scope, in source order, every header's included), and those the file-scope walk reached that are not on it (a
+    // fail-closed cross-check: the encoder reports one in a verified file).
+    std::vector<a_static_assertion_ptr> static_assertions;
+    std::vector<a_static_assertion_ptr> other_static_assertions;
+    // Decision 0025 item 5: the static assertions each function memory region holds (block scope), with the region's number, in
+    // region order and then in the walk's order.
+    std::vector<std::pair<a_memory_region_number, a_static_assertion_ptr>> region_static_assertions;
+    // The declarations of a routine (a_src_seq_secondary_decl entries whose entity is the routine, il_def.h:2131), in the order the walk
+    // reports them.  The list holds EVERY declaration, the first included (P71: its entry has `first_declaration` TRUE, and in C++ a later
+    // declaration's position can equal `source_corresp.decl_position`, which `decls.c:9802` moves).  Decision 0040 item 3: where each
+    // declaration's parameters lie, to check that every declaration of a parameter carries the same `cerastes::owning`.  Decision 0046:
+    // each declaration's own `attributes` (copies of the entries on the routine, il_def.h:2164), to find the declaration that carries a contract.
+    struct SecondaryDecl
+    {
+        a_source_position position;
+        a_type_ptr declared_type =
+            nullptr; // the type as the declaration wrote it (a typedef'd function type stays a typeref)
+        an_attribute_ptr attributes = nullptr;
+    };
+    std::map<a_routine_ptr, std::vector<SecondaryDecl>> secondary_decls;
+    // Decision 0041 item 2: the other declarations of a file-scope variable (a_src_seq_secondary_decl entries whose entity is the variable): one in a
+    // system file makes the variable shared with the runtime (`environ`), which is rejected.
+    std::map<a_variable_ptr, std::vector<a_source_position>> variable_secondary_decls;
+    // Decision 0041 item 5 (P63 H6): the initializer of a `static` local whose `init_kind` is `initk_function_local` is the
+    // local-static-variable-init entry of its scope, not the variable's own; the entries by variable.
+    std::map<a_variable_ptr, a_local_static_variable_init_ptr> static_local_inits;
 };
 IlEntities collect_entities();
 
-}  // namespace cerastes
+} // namespace cerastes

@@ -12,20 +12,22 @@
 
 namespace cerastes::viper {
 
-struct EmitOptions {
-  // Text written before everything else (for a harness `// expect:` header); it should end with a newline.
-  // The lines it contains count in the position map.
-  std::string header;
+struct EmitOptions
+{
+    // Text written before everything else (for a harness `// expect:` header); it should end with a newline.
+    // The lines it contains count in the position map.
+    std::string header;
 };
 
-struct Emitted {
-  std::string vpr;  // the Viper program
-  std::string map;  // the position map (posmap.h)
-  // Internal inconsistencies found while printing (a map entry without a C/C++ position); empty for a sound
-  // program.  A caller treats any as a failure of the encoder.
-  std::vector<std::string> problems;
+struct Emitted
+{
+    std::string vpr; // the Viper program
+    std::string map; // the position map (posmap.h)
+    // Internal inconsistencies found while printing (a map entry without a C/C++ position); empty for a sound
+    // program.  A caller treats any as a failure of the encoder.
+    std::vector<std::string> problems;
 };
 
 Emitted emit(const low::LProgram& program, const EmitOptions& options = {});
 
-}  // namespace cerastes::viper
+} // namespace cerastes::viper

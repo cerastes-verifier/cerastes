@@ -7,81 +7,162 @@
 
 namespace cerastes {
 
-VerifyConfig& verify_config() {
-  static VerifyConfig c;
-  return c;
+VerifyConfig& verify_config()
+{
+    static VerifyConfig c;
+    return c;
 }
 
-int front_end_exit_status(const VerifyOutput& out, int edg_status) {
-  if (out.internal_inconsistency) return 3;
-  return edg_status != 0 ? 2 : 0;
+int front_end_exit_status(const VerifyOutput& out, int edg_status)
+{
+    if (out.internal_inconsistency)
+    {
+        return 3;
+    }
+    return edg_status != 0 ? 2 : 0;
 }
 
-std::string canonical_path(const std::string& path) {
-  if (path.empty()) return "";
-  char buf[PATH_MAX];
-  if (::realpath(path.c_str(), buf) == nullptr) return "";
-  return buf;
+std::string canonical_path(const std::string& path)
+{
+    if (path.empty())
+    {
+        return "";
+    }
+    char buf[PATH_MAX];
+    if (::realpath(path.c_str(), buf) == nullptr)
+    {
+        return "";
+    }
+    return buf;
 }
 
-bool path_is_under(const std::string& path, const std::string& dir) {
-  if (dir.empty() || path.size() <= dir.size()) return false;
-  if (path.compare(0, dir.size(), dir) != 0) return false;
-  // Whole components: the next character must start a new one, unless the directory is "/" itself.
-  return dir.back() == '/' || path[dir.size()] == '/';
+bool path_is_under(const std::string& path, const std::string& dir)
+{
+    if (dir.empty() || path.size() <= dir.size())
+    {
+        return false;
+    }
+    if (path.compare(0, dir.size(), dir) != 0)
+    {
+        return false;
+    }
+    // Whole components: the next character must start a new one, unless the directory is "/" itself.
+    return dir.back() == '/' || path[dir.size()] == '/';
 }
 
 std::vector<std::string> system_directories(const std::vector<std::string>& dirs,
                                             const std::vector<std::string>& user_dirs,
-                                            const std::vector<std::string>& library_dirs) {
-  std::vector<std::string> users;
-  users.push_back(canonical_path("/usr/local/include"));
-  for (const std::string& u : user_dirs) users.push_back(canonical_path(u));
-  std::vector<std::string> out;
-  for (const std::string& d : dirs) {
-    std::string c = canonical_path(d);
-    if (c.empty()) continue;
-    bool user = false;
-    for (const std::string& u : users)
-      if (!u.empty() && u == c) user = true;
-    if (user) continue;
-    bool library = false;
-    for (const std::string& l : library_dirs)
-      if (!l.empty() && (l == c || path_is_under(c, l))) library = true;
-    if (library) continue;
-    bool seen = false;
-    for (const std::string& o : out)
-      if (o == c) seen = true;
-    if (!seen) out.push_back(c);
-  }
-  return out;
+                                            const std::vector<std::string>& library_dirs)
+{
+    std::vector<std::string> users;
+    users.push_back(canonical_path("/usr/local/include"));
+    for (const std::string& u : user_dirs)
+    {
+        users.push_back(canonical_path(u));
+    }
+    std::vector<std::string> out;
+    for (const std::string& d : dirs)
+    {
+        std::string c = canonical_path(d);
+        if (c.empty())
+        {
+            continue;
+        }
+        bool user = false;
+        for (const std::string& u : users)
+        {
+            if (!u.empty() && u == c)
+            {
+                user = true;
+            }
+        }
+        if (user)
+        {
+            continue;
+        }
+        bool library = false;
+        for (const std::string& l : library_dirs)
+        {
+            if (!l.empty() && (l == c || path_is_under(c, l)))
+            {
+                library = true;
+            }
+        }
+        if (library)
+        {
+            continue;
+        }
+        bool seen = false;
+        for (const std::string& o : out)
+        {
+            if (o == c)
+            {
+                seen = true;
+            }
+        }
+        if (!seen)
+        {
+            out.push_back(c);
+        }
+    }
+    return out;
 }
 
-bool is_library_file(const std::vector<std::string>& library_dirs, const std::string& path) {
-  std::string c = canonical_path(path);
-  if (c.empty()) return false;
-  for (const std::string& d : library_dirs)
-    if (path_is_under(c, d)) return true;
-  return false;
+bool is_library_file(const std::vector<std::string>& library_dirs, const std::string& path)
+{
+    std::string c = canonical_path(path);
+    if (c.empty())
+    {
+        return false;
+    }
+    for (const std::string& d : library_dirs)
+    {
+        if (path_is_under(c, d))
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
-bool is_library_file(const std::string& path) { return is_library_file(verify_config().library_dirs, path); }
+bool is_library_file(const std::string& path)
+{
+    return is_library_file(verify_config().library_dirs, path);
+}
 
 bool is_system_file(const std::vector<std::string>& system_dirs, const std::string& cerastes_header,
-                    const std::string& path, const std::vector<std::string>& library_dirs) {
-  std::string c = canonical_path(path);
-  if (c.empty()) return false;  // cannot be resolved: not a system file (fail closed)
-  for (const std::string& d : library_dirs)
-    if (path_is_under(c, d)) return false;  // a library file is verified (decision 0046 item 3)
-  if (!cerastes_header.empty() && c == cerastes_header) return true;
-  for (const std::string& d : system_dirs)
-    if (path_is_under(c, d)) return true;
-  return false;
+                    const std::string& path, const std::vector<std::string>& library_dirs)
+{
+    std::string c = canonical_path(path);
+    if (c.empty())
+    {
+        return false; // cannot be resolved: not a system file (fail closed)
+    }
+    for (const std::string& d : library_dirs)
+    {
+        if (path_is_under(c, d))
+        {
+            return false; // a library file is verified (decision 0046 item 3)
+        }
+    }
+    if (!cerastes_header.empty() && c == cerastes_header)
+    {
+        return true;
+    }
+    for (const std::string& d : system_dirs)
+    {
+        if (path_is_under(c, d))
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
-bool is_system_file(const std::string& path) {
-  const VerifyConfig& c = verify_config();
-  return is_system_file(c.system_dirs, c.cerastes_header, path, c.library_dirs);
+bool is_system_file(const std::string& path)
+{
+    const VerifyConfig& c = verify_config();
+    return is_system_file(c.system_dirs, c.cerastes_header, path, c.library_dirs);
 }
 
-}  // namespace cerastes
+} // namespace cerastes

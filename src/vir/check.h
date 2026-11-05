@@ -15,13 +15,14 @@ namespace cerastes::vir {
 
 // One violation: where (the offending node) and why.  The encoder reports it as `unsupported_expression`
 // (or `unsupported_statement` for a statement-level reason) at `loc`.
-struct Diag {
-  SrcLoc loc;
-  std::string reason;
+struct Diag
+{
+    SrcLoc loc;
+    std::string reason;
 };
 
 // Checks every function of the program; returns all violations in a deterministic order (functions in
 // definition order, nodes in evaluation order).  An empty result means `lower_program` may be called.
 std::vector<Diag> check_program(const Program& program);
 
-}  // namespace cerastes::vir
+} // namespace cerastes::vir

@@ -37,23 +37,24 @@
 // macro below would expand to nothing and the contracts would silently vanish (for example after `-U__cplusplus`
 // or `#undef __cplusplus` before this include).  Ordinary compilers never define __CERASTES__.
 #if defined(__CERASTES__) && !defined(CERASTES_ATTRIBUTES_)
-#  error "cerastes.h: the cerastes front end is running (__CERASTES__ is defined) but the cerastes attributes are not available (check that __cplusplus, __STDC_VERSION__ and __has_cpp_attribute / __has_c_attribute were not changed); contracts would be dropped"
+#  error \
+    "cerastes.h: the cerastes front end is running (__CERASTES__ is defined) but the cerastes attributes are not available (check that __cplusplus, __STDC_VERSION__ and __has_cpp_attribute / __has_c_attribute were not changed); contracts would be dropped"
 #endif
 
 #ifdef CERASTES_ATTRIBUTES_
-#  define CERASTES_REQUIRES(...)  [[cerastes::requires(__VA_ARGS__)]]
-#  define CERASTES_ENSURES(...)   [[cerastes::ensures(__VA_ARGS__)]]
+#  define CERASTES_REQUIRES(...) [[cerastes::requires(__VA_ARGS__)]]
+#  define CERASTES_ENSURES(...) [[cerastes::ensures(__VA_ARGS__)]]
 #  define CERASTES_INVARIANT(...) [[cerastes::invariant(__VA_ARGS__)]]
 #  define CERASTES_DECREASES(...) [[cerastes::decreases(__VA_ARGS__)]]
-#  define CERASTES_CHECK(...)     [[cerastes::check(__VA_ARGS__)]]
-#  define CERASTES_FOLD(...)      [[cerastes::fold(__VA_ARGS__)]]
-#  define CERASTES_UNFOLD(...)    [[cerastes::unfold(__VA_ARGS__)]]
-#  define CERASTES_PREDICATE      [[cerastes::predicate]] inline
-#  define CERASTES_PURE           [[cerastes::pure]] inline
-#  define CERASTES_OWNING         [[cerastes::owning]]
-#  define CERASTES_UNINIT         [[cerastes::uninit]]
-#  define CERASTES_REF_TO_UNINIT  [[cerastes::ref_to_uninit]]
-#  define CERASTES_MUST_INIT      [[cerastes::must_init]]
+#  define CERASTES_CHECK(...) [[cerastes::check(__VA_ARGS__)]]
+#  define CERASTES_FOLD(...) [[cerastes::fold(__VA_ARGS__)]]
+#  define CERASTES_UNFOLD(...) [[cerastes::unfold(__VA_ARGS__)]]
+#  define CERASTES_PREDICATE [[cerastes::predicate]] inline
+#  define CERASTES_PURE [[cerastes::pure]] inline
+#  define CERASTES_OWNING [[cerastes::owning]]
+#  define CERASTES_UNINIT [[cerastes::uninit]]
+#  define CERASTES_REF_TO_UNINIT [[cerastes::ref_to_uninit]]
+#  define CERASTES_MUST_INIT [[cerastes::must_init]]
 #else
 #  define CERASTES_REQUIRES(...)
 #  define CERASTES_ENSURES(...)
@@ -62,8 +63,8 @@
 #  define CERASTES_CHECK(...)
 #  define CERASTES_FOLD(...)
 #  define CERASTES_UNFOLD(...)
-#  define CERASTES_PREDICATE      inline
-#  define CERASTES_PURE           inline
+#  define CERASTES_PREDICATE inline
+#  define CERASTES_PURE inline
 #  define CERASTES_OWNING
 #  define CERASTES_UNINIT
 #  define CERASTES_REF_TO_UNINIT
@@ -102,21 +103,29 @@ const void* cerastes_old_(const void*);
 // annotations and in the bodies of predicate and pure functions; a call that
 // reaches run time is a link error naming a cerastes:: function.
 namespace cerastes {
-template <class T> bool owns(const T& place) noexcept;
-template <class T> bool reads(const T& place) noexcept;
+template <class T>
+bool owns(const T& place) noexcept;
+template <class T>
+bool reads(const T& place) noexcept;
 // live(p): `p` points into an object whose lifetime has not ended (decision 0028 item 3a); implies p != NULL.
-template <class T> bool live(const T* pointer) noexcept;
+template <class T>
+bool live(const T* pointer) noexcept;
 // owns_block(p): `p` is the start of a heap block and the function owns the whole block, with write permission (decision 0047 item 4).
 // The two-argument form (a size in bytes) is vlibc's own and is rejected in a program's contracts.
-template <class T> bool owns_block(const T* pointer) noexcept;
-template <class T> bool owns_block(const T* pointer, decltype(sizeof 0) size) noexcept;
-template <class T> const T& old(const T& value) noexcept;
+template <class T>
+bool owns_block(const T* pointer) noexcept;
+template <class T>
+bool owns_block(const T* pointer, decltype(sizeof 0) size) noexcept;
+template <class T>
+const T& old(const T& value) noexcept;
 // forall(body, free...): body's first parameter is the quantified variable and
 // its remaining parameters receive the trailing arguments, in order
 // (decision 0006 item 9).
-template <class F, class... Free> bool forall(F body, const Free&... free) noexcept;
-template <class T> bool owns_range(const T* first, decltype(sizeof 0) count) noexcept;
-}  // namespace cerastes
+template <class F, class... Free>
+bool forall(F body, const Free&... free) noexcept;
+template <class T>
+bool owns_range(const T* first, decltype(sizeof 0) count) noexcept;
+} // namespace cerastes
 #endif
 
-#endif  // CERASTES_H
+#endif // CERASTES_H

@@ -38,6 +38,8 @@ for script in scripts/*.sh; do
 done
 command -v shellcheck >/dev/null || { echo "check.sh: shellcheck missing; run scripts/bootstrap.sh" >&2; exit 1; }
 shellcheck scripts/*.sh
+# the tool code keeps the owner's Boost style (decision 0051), checked with the pinned clang-format
+scripts/format.sh --check
 python3 -m py_compile scripts/*.py
 python3 scripts/run_tests.py --check-headers
 python3 scripts/check_doc_examples.py

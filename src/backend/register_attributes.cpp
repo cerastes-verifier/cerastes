@@ -23,10 +23,11 @@
 #include "error.h"
 #include "pragma.h"
 
-extern a_function_pointer function_pointers[];  // EDG's table of handler functions (see install_diag_pragma_recorder)
+extern a_function_pointer function_pointers[]; // EDG's table of handler functions (see install_diag_pragma_recorder)
 
 #if !EDG_ATTRIBUTE_REGISTRATION
-#error "cerastes M2 needs EDG attribute registration: set CERASTES_EDG_SRC (decision 0005) or pin the EDG fork (decision 0009)"
+#error \
+    "cerastes M2 needs EDG attribute registration: set CERASTES_EDG_SRC (decision 0005) or pin the EDG fork (decision 0009)"
 #endif
 
 namespace cerastes {
@@ -76,9 +77,12 @@ const an_attr_registration kAttributes[] = {
 
 an_attr_namespace_registration g_namespace = {"cerastes", RANF_CLOSED, kAttributes, nullptr};
 
-}  // namespace
+} // namespace
 
-void register_cerastes_annotations() { register_attribute_namespace(&g_namespace); }
+void register_cerastes_annotations()
+{
+    register_attribute_namespace(&g_namespace);
+}
 
 // EDG's handlers for the diagnostic pragmas are reached through the function_pointers table (mem_manage.h: an index in
 // a_pragma_kind_description, so that PCH files survive ASLR).  The table is a plain (non-const) array, filled statically
@@ -87,26 +91,38 @@ void register_cerastes_annotations() { register_attribute_namespace(&g_namespace
 namespace {
 std::vector<a_source_position> g_diag_pragma_sites;
 
-void record_diag_pragma(a_pending_pragma_ptr ppp) {
-  a_source_position p = ppp->pragma_position;  // the start of the directive (for _Pragma, its string literal is id_position)
-  if (p.seq == 0) p = ppp->id_position;
-  g_diag_pragma_sites.push_back(p);
+void record_diag_pragma(a_pending_pragma_ptr ppp)
+{
+    a_source_position p =
+        ppp->pragma_position; // the start of the directive (for _Pragma, its string literal is id_position)
+    if (p.seq == 0)
+    {
+        p = ppp->id_position;
+    }
+    g_diag_pragma_sites.push_back(p);
 }
-void diag_pragma_recorder(a_pending_pragma_ptr ppp) {
-  record_diag_pragma(ppp);
-  diag_pragma(ppp);  // EDG's handler, unchanged
+void diag_pragma_recorder(a_pending_pragma_ptr ppp)
+{
+    record_diag_pragma(ppp);
+    diag_pragma(ppp); // EDG's handler, unchanged
 }
-void diagnostic_pragma_recorder(a_pending_pragma_ptr ppp) {
-  record_diag_pragma(ppp);
-  diagnostic_pragma(ppp);
+void diagnostic_pragma_recorder(a_pending_pragma_ptr ppp)
+{
+    record_diag_pragma(ppp);
+    diagnostic_pragma(ppp);
 }
-}  // namespace
+} // namespace
 
-void install_diag_pragma_recorder() {
-  function_pointers[fn_for_function(diag_pragma)] = reinterpret_cast<a_function_pointer>(&diag_pragma_recorder);
-  function_pointers[fn_for_function(diagnostic_pragma)] = reinterpret_cast<a_function_pointer>(&diagnostic_pragma_recorder);
+void install_diag_pragma_recorder()
+{
+    function_pointers[fn_for_function(diag_pragma)] = reinterpret_cast<a_function_pointer>(&diag_pragma_recorder);
+    function_pointers[fn_for_function(diagnostic_pragma)] =
+        reinterpret_cast<a_function_pointer>(&diagnostic_pragma_recorder);
 }
 
-const std::vector<a_source_position>& diag_pragma_sites() { return g_diag_pragma_sites; }
+const std::vector<a_source_position>& diag_pragma_sites()
+{
+    return g_diag_pragma_sites;
+}
 
-}  // namespace cerastes
+} // namespace cerastes

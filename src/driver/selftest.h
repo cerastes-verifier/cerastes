@@ -13,4 +13,4 @@ namespace cerastes {
 // Runs every check; prints a line for each failure and a summary.  Returns 0 when all pass, 1 otherwise.
 int run_selftest(const SiliconTools& tools);
 
-}  // namespace cerastes
+} // namespace cerastes

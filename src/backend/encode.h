@@ -12,4 +12,4 @@ namespace cerastes {
 // its position map are in verify_config().out.
 void verify_encode();
 
-}  // namespace cerastes
+} // namespace cerastes

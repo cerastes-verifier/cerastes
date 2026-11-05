@@ -19,7 +19,7 @@
 // basics.h, il_def.h, il.h, il_to_str.h, mem_tables.h, types.h, ...  Including
 // the individual headers by hand misses prerequisites (check_assertion,
 // a_string_view, ...).
-#include "basic_hdrs.h"   // first: basics.h, lang_feat.h, host_envir.h (rule 2)
+#include "basic_hdrs.h" // first: basics.h, lang_feat.h, host_envir.h (rule 2)
 #include "fe_common.h"
 #include "il_walk.h"
 
@@ -29,7 +29,7 @@
 // EDG pin, the IL layout or content would silently differ.  The same values
 // are checked on the built binary by scripts/check_edg_config.sh.
 #define CERASTES_REQUIRE_(macro, value) \
-  static_assert((macro) == (value), #macro " must be " #value " (see cmake/EdgFrontEnd.cmake)")
+    static_assert((macro) == (value), #macro " must be " #value " (see cmake/EdgFrontEnd.cmake)")
 CERASTES_REQUIRE_(BACK_END_IS_C_GEN_BE, 0);
 CERASTES_REQUIRE_(BACK_END_IS_CP_GEN_BE, 0);
 CERASTES_REQUIRE_(DO_IL_LOWERING, 0);

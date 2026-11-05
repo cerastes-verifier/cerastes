@@ -19,24 +19,32 @@ namespace cerastes {
 // no line for, a parameter reference that the convention does not explain, a
 // node reached twice, a tree deeper than the cap, a lambda whose body is not a
 // single `return <expression>;`.
-struct TreeProblem {
-  a_source_position at;
-  std::string what;
-  // The problem is explained by the side-effect diagnostic when the annotation
-  // has one (a lambda body of several statements that assigns): the check does not
-  // report it a second time.
-  bool explained_by_side_effect = false;
+struct TreeProblem
+{
+    a_source_position at;
+    std::string what;
+    // The problem is explained by the side-effect diagnostic when the annotation
+    // has one (a lambda body of several statements that assigns): the check does not
+    // report it a second time.
+    bool explained_by_side_effect = false;
 };
 
-struct TreeWalk {
-  std::vector<TreeProblem> problems;
-  // The parameter references of the tree in order, as `P<k>` (parameter k), `R`
-  // (the named result) and `T` (this): what a root template and its instance must
-  // agree on.
-  std::vector<std::string> references;
+struct TreeWalk
+{
+    std::vector<TreeProblem> problems;
+    // The parameter references of the tree in order, as `P<k>` (parameter k), `R`
+    // (the named result) and `T` (this): what a root template and its instance must
+    // agree on.
+    std::vector<std::string> references;
 };
 
-enum class TreeMode { print, check, signature, signature_renumbered };
+enum class TreeMode
+{
+    print,
+    check,
+    signature,
+    signature_renumbered
+};
 
 // Walks every argument of the registered attribute `a`.  With TreeMode::print
 // the lines are appended to *out (see print_annotation_args); in the other modes
@@ -44,8 +52,7 @@ enum class TreeMode { print, check, signature, signature_renumbered };
 // names parameter references and the result), or null for a statement.  The
 // self-test hook (--cerastes_checks_selftest) acts on the first tree of the
 // print mode and of the check mode, separately.
-TreeWalk annotation_tree(an_attribute_ptr a, a_routine_ptr owner, TreeMode mode, std::string* out,
-                         int indent);
+TreeWalk annotation_tree(an_attribute_ptr a, a_routine_ptr owner, TreeMode mode, std::string* out, int indent);
 
 // Whether the contract of `r` (an instance, a specialization or a member-template
 // prototype) agrees with that of its root template `root`: the same
@@ -67,4 +74,4 @@ std::string annotation_position(const a_source_position& p);
 // tree is indented two more per level.  The output ends with a newline.
 void print_annotation_args(std::string& out, an_attribute_ptr a, a_routine_ptr owner, int indent);
 
-}  // namespace cerastes
+} // namespace cerastes

@@ -19,4 +19,4 @@ void register_cerastes_annotations();
 // pragma in a verified file (diagnostic_pragma_in_verify).
 void install_diag_pragma_recorder();
 
-}  // namespace cerastes
+} // namespace cerastes
