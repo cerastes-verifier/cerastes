@@ -18,6 +18,7 @@ in both places.
 | Silicon | `viperproject/silicon` tag `v.26.08-release` = `6b540aa45e5af214f4727b7be463ce84b328fabd` | submodule `third_party/silicon`; `sbt assembly` → `target/scala-2.13/silicon.jar` |
 | Silver | `viperproject/silver` `f02e7010639f314447d74732146644565aa8d135` (`v.26.08-release`, the commit Silicon's tag records) | nested submodule `third_party/silicon/silver` |
 | Z3 | 4.16.0, `z3-4.16.0-arm64-osx-15.7.3.zip`, SHA-256 `41828fa07d5cb77bfaee326e8e6dac074f26329c09c633f9e66012bb917cf8ae`; on x86-64 Linux (S5, decision 0031) `z3-4.16.0-x64-glibc-2.39.zip`, SHA-256 `7288c49a5bd6dbafd7b0b0d1f65956b91672da24b08f09242919af159be3418e` | downloaded from the Z3 GitHub release into `build/tools/`, checksum verified |
+| clang-format (the code style, S7, decision 0051) | 23.1.3, PyPI's `clang_format` wheel: macOS arm64 `clang_format-23.1.3-py2.py3-none-macosx_11_0_arm64.whl`, SHA-256 `79f53ac55434af6dda88eb90eeb65d903ff920c910f78041de41e3ca666dfba5`; x86-64 Linux `clang_format-23.1.3-py2.py3-none-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl`, SHA-256 `58bf1804216501669832a39f2415e14284337438a062ff564729792adec664ac` (the newest release at least two weeks old; Homebrew's LLVM floats and Ubuntu 26.04 has only 21, so the jobs would disagree) | downloaded from PyPI into `build/tools/`, checksum verified, `clang_format/data/bin/clang-format` unpacked into `build/tools/clang-format-23.1.3/`; `scripts/format.sh` uses it |
 | JDK | Homebrew `openjdk@17` (17.0.20.1); on Linux the JDK 17 that `JAVA_HOME_17_X64` names (GitHub's image: Temurin 17.0.20+1), else `/usr/lib/jvm/java-17-openjdk-amd64` | `brew install openjdk@17`; on Linux the image's or `apt` |
 | sbt | 1.6.2 (Silicon's `project/build.properties`), started by the Homebrew `sbt` 2.0.10 launcher; on Linux the same 2.0.10 launcher, `sbt-2.0.10.zip`, SHA-256 `6ff28e1dea38d1de48ea3d4e903f0380b85b19f945a103e30ec4298717c90cd7` | `brew install sbt`; on Linux downloaded from sbt's GitHub release into `build/tools/`, checksum verified |
 | Scala | 2.13.18 (silver's `build.sbt`) | fetched by sbt |
@@ -248,6 +249,9 @@ Silicon 1.1-SNAPSHOT (6b540aa4@(detached))
 
 $ $Z3_EXE --version
 Z3 version 4.16.0 - 64 bit
+
+$ $CERASTES_CLANG_FORMAT --version
+clang-format version 23.1.3
 
 $ $CERASTES_JAVA -version
 openjdk version "17.0.20.1" 2026-08-18

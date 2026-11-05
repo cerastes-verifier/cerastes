@@ -1,0 +1,3 @@
+# EDG, Silicon and vlibc are other projects (invariant 5): never formatted from here.
+DisableFormat: true
+SortIncludes: Never

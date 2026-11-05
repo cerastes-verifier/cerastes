@@ -63,6 +63,7 @@ python3 scripts/test_walker_oracle.py
 python3 scripts/test_lint_viper.py
 python3 scripts/test_mutate.py
 python3 scripts/test_vlibc_contracts.py
+python3 scripts/test_object_identity.py
 
 step "tests"
 python3 scripts/run_tests.py --pr-base="$pr_base"

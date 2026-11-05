@@ -1,0 +1,8 @@
+# Read by clang-format 18 and later: paths (relative to this file) it must never format.
+# scripts/format.sh also takes its file list from git, minus these generated files.
+tests/
+doc/
+third_party/
+src/driver/edg_options.inc
+src/backend/diagnostics.def
+src/driver/tool_paths.h.in
