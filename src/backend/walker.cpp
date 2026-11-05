@@ -95,8 +95,8 @@ std::set<an_attribute_ptr> g_printed; // attributes already in the output
 // with GENERATE_SOURCE_SEQUENCE_LISTS (decision 0024) EDG records each attribute of a secondary declaration twice,
 // once on the entity and once here (decls.c, wrapup_sse_for_simple_decl).  The entity's list is what is printed.
 std::set<an_attribute_ptr> g_secondary_copies;
-std::set<an_attribute_ptr>
-    g_fn_type_attrs; // unrecognized attributes of a redeclaration's function type (see `collect`)
+// unrecognized attributes of a redeclaration's function type (see `collect`)
+std::set<an_attribute_ptr> g_fn_type_attrs;
 
 // Register the attributes of an owner.  Attribute entries are allocated in the
 // file-scope region but may be reachable only from function-region entries
@@ -437,9 +437,10 @@ void add_constraints(std::string& out, a_routine_ptr r, a_template_ptr tmpl)
             out += std::string("  constraint ") + (tp->is_abbreviated ? "abbreviated" : "type-constraint") + " " +
                    param_name(tp, index) + " " + render_constraint(x->constraint.type_constraint) + "\n";
         }
-#if MICROSOFT_EXTENSIONS_ALLOWED
+
+        #if MICROSOFT_EXTENSIONS_ALLOWED
         if (!d->is_generic)
-#endif
+        #endif
             if (d->constraint.requires_clause) // il_def.h:17234
             {
                 out += "  constraint requires " + render_constraint(d->constraint.requires_clause->constraint) + "\n";

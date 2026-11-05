@@ -180,13 +180,13 @@ void scan_assigned(const Stmt& s, std::set<int>& assigned, std::set<int>& declar
                 scan_assigned(*c, assigned, declared);
             }
             break;
-        case Stmt::Kind::
-            Store: // `*addr = expr`: either operand may hold an assignment (`*(p = q) = 1`, `*p = (q = r, 1)`)
+        // `*addr = expr`: either operand may hold an assignment (`*(p = q) = 1`, `*p = (q = r, 1)`)
+        case Stmt::Kind::Store:
             scan_assigned_expr(s.addr, assigned);
             scan_assigned_expr(s.expr, assigned);
             break;
-        case Stmt::Kind::
-            Case: // a constant (or none): no assignment, scanned so that every Stmt kind with an expression is covered
+        // a constant (or none): no assignment, scanned so that every Stmt kind with an expression is covered
+        case Stmt::Kind::Case:
             scan_assigned_expr(s.expr, assigned);
             break;
         case Stmt::Kind::Break:
@@ -1047,8 +1047,8 @@ const Expr* Builder::inc_dec_store_expr(const Expr* addr, bool increment, bool p
 {
     const IntType* c_int = p_.int_type_of(p_.c_int_bits(), true);
     const Expr* one = int_const(Type::integer(c_int), "1", loc);
-    const Expr* old_value =
-        deref(addr, loc); // one node: the stored value and (for (*p)++) the node's value share it; it shares `addr`
+    // one node: the stored value and (for (*p)++) the node's value share it; it shares `addr`
+    const Expr* old_value = deref(addr, loc);
     const Expr* value = compound_value(old_value->type, old_value, increment ? BinaryOp::Add : BinaryOp::Sub, one, loc);
     Expr* e = const_cast<Expr*>(store_expr(addr, value, std::move(loc)));
     if (post)
@@ -1220,8 +1220,8 @@ bool steps_have_load(const std::vector<int>& via)
 const Expr* place_root(const Expr* e, std::vector<int>* steps)
 {
     std::vector<int> rev;
-    bool under_field =
-        false; // the node above `e` is a Field: only there is an `Old` of a Formal the Formal (decision 0044 item 3: `old(s).x`)
+    // the node above `e` is a Field: only there is an `Old` of a Formal the Formal (decision 0044 item 3: `old(s).x`)
+    bool under_field = false;
     while (e != nullptr)
     {
         if (e->kind == Expr::Kind::MemberAddr)

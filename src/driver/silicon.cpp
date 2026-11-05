@@ -95,7 +95,8 @@ SiliconRun run_silicon(const SiliconTools& tools, const std::string& vpr, int ti
     posix_spawn_file_actions_addopen(&fa, 0, "/dev/null", O_RDONLY, 0);
     posix_spawn_file_actions_adddup2(&fa, fds[1], 1);
     posix_spawn_file_actions_adddup2(&fa, fds[1], 2);
-#if defined(__APPLE__)
+
+    #if defined(__APPLE__)
     // addchdir_np is deprecated from macOS 26 in favour of addchdir.
     if (__builtin_available(macOS 26.0, *))
     {
@@ -103,15 +104,15 @@ SiliconRun run_silicon(const SiliconTools& tools, const std::string& vpr, int ti
     }
     else
     {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wdeprecated-declarations"
         posix_spawn_file_actions_addchdir_np(&fa, dir.path.c_str());
-#pragma clang diagnostic pop
+        #pragma clang diagnostic pop
     }
-#else
+    #else
     // glibc has addchdir_np from 2.29 (decision 0031 item 4); its result is checked when the child starts, as on macOS.
     posix_spawn_file_actions_addchdir_np(&fa, dir.path.c_str());
-#endif
+    #endif
 
     posix_spawnattr_t attr;
     posix_spawnattr_init(&attr);

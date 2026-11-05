@@ -229,8 +229,8 @@ void define_pointer_cells()
        [=](Kit& k)
        {
            const Expr* c = set_caller(k, true);
-           k.fail_only("permission", c->loc, 16,
-                       2); // the bound of pp's block (live alone does not give it) and the write permission fail
+           // the bound of pp's block (live alone does not give it) and the write permission fail
+           k.fail_only("permission", c->loc, 16, 2);
            k.fail_only("permission", c->loc, 16, 3);
        });
 
@@ -638,21 +638,27 @@ void define_written_atoms()
 
     // ---- an atom on an automatic place (p is never assigned): it takes nothing twice ----
     // void fill(int *p, int n) requires([owns|reads](*p) && range) ensures([owns|reads](*p) [&& *p == n]) { i = 0; while (i < n) inv i <= n && owns(*p) { *p = i; i += 1; } }
-    const auto fill = [=](Kit& k, int mode) -> SrcLoc {  // 0 verifies; 1: ensures *p == n; 2: the function holds only reads(*p)
-    Function* f = k.fn("fill", k.vd, {{"p", PT(k)}, {"n", k.i32}});
-    const Expr* r = k.range(k.F(f, 1), k.i32, "0", "100");
-    k.req(f, k.land(mode == 2 ? reads(k, f, 0, 0) : owns(k, f, 0, 0), r));
-    k.ens(f, mode == 1 ? k.land(owns(k, f, 0, 0), k.eq(star(k, f, 0), k.F(f, 1))) : (mode == 2 ? reads(k, f, 0, 0) : owns(k, f, 0, 0)));
-    Var* i = k.local(f, "i", k.i32);
-    const Var* p = f->param_var(0);
-    const SrcLoc al = k.at();
-    const Expr* atom = watom(k, AtomKind::Owns, p, 0, al);
-    f->body = k.blk({k.decl(i, N(k, "0")),
-                     k.whl(k.lt(k.v(i), k.pv(f, 1)), {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.le(k.v(i), k.pv(f, 1))), k.cl(atom)},
-                           {k.cl(k.sub(k.pv(f, 1), k.v(i)))}, k.blk({mode == 2 ? k.es(N(k, "0")) : k.store(k.pn(p), k.v(i)), k.asg(i, k.add(k.v(i), N(k, "1")))}))});
-    k.done(f);
-    return mode == 1 ? f->end_loc : al;
-  };
+    // 0 verifies; 1: ensures *p == n; 2: the function holds only reads(*p)
+    const auto fill = [=](Kit& k, int mode) -> SrcLoc
+    {
+        Function* f = k.fn("fill", k.vd, {{"p", PT(k)}, {"n", k.i32}});
+        const Expr* r = k.range(k.F(f, 1), k.i32, "0", "100");
+        k.req(f, k.land(mode == 2 ? reads(k, f, 0, 0) : owns(k, f, 0, 0), r));
+        k.ens(f, mode == 1 ? k.land(owns(k, f, 0, 0), k.eq(star(k, f, 0), k.F(f, 1)))
+                           : (mode == 2 ? reads(k, f, 0, 0) : owns(k, f, 0, 0)));
+        Var* i = k.local(f, "i", k.i32);
+        const Var* p = f->param_var(0);
+        const SrcLoc al = k.at();
+        const Expr* atom = watom(k, AtomKind::Owns, p, 0, al);
+        f->body = k.blk({k.decl(i, N(k, "0")),
+                         k.whl(k.lt(k.v(i), k.pv(f, 1)),
+                               {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.le(k.v(i), k.pv(f, 1))), k.cl(atom)},
+                               {k.cl(k.sub(k.pv(f, 1), k.v(i)))},
+                               k.blk({mode == 2 ? k.es(N(k, "0")) : k.store(k.pn(p), k.v(i)),
+                                      k.asg(i, k.add(k.v(i), N(k, "1")))}))});
+        k.done(f);
+        return mode == 1 ? f->end_loc : al;
+    };
     lc("mem_atom_automatic",
        "owns(*p) written on an automatic place (p is never assigned): the atom takes nothing twice (was mem_rej_atom_in_loop_invariant)",
        [=](Kit& k)

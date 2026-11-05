@@ -143,8 +143,8 @@ void define_heap_read_places()
        [=](Kit& k)
        {
            Function* f = make_keep(k, true);
-           k.fail_only("permission", f->end_loc, 9,
-                       8); // the liveness row of live(*pp); the rows of owns(*pp) and the root rows hold
+           // the liveness row of live(*pp); the rows of owns(*pp) and the root rows hold
+           k.fail_only("permission", f->end_loc, 9, 8);
        });
 
     // ---- a move: *pp = q, the ensures names the object on return and its amount follows the object (items 3, 7) ----

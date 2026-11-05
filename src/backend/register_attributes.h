@@ -8,9 +8,9 @@
 
 namespace cerastes {
 
-// Registers the closed namespace `cerastes` and its eight attributes:
-// requires, ensures, invariant, check, fold, unfold, predicate, pure.  The
-// table is static, so this may be called more than once.
+// Registers the closed namespace `cerastes` and the attributes of its table in
+// register_attributes.cpp (the contracts, the proof statements, the ownership and initialization markers, predicate and
+// pure).  The table is static, so this may be called more than once.
 void register_cerastes_annotations();
 
 // Verify mode only (decision 0017 item 2): puts a recorder in front of EDG's handlers of the diagnostic pragmas

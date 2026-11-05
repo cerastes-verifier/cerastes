@@ -26,8 +26,10 @@
 extern a_function_pointer function_pointers[]; // EDG's table of handler functions (see install_diag_pragma_recorder)
 
 #if !EDG_ATTRIBUTE_REGISTRATION
-#error \
-    "cerastes M2 needs EDG attribute registration: set CERASTES_EDG_SRC (decision 0005) or pin the EDG fork (decision 0009)"
+// A #error message is one line, over 120 columns here: the formatter would continue it after a backslash.
+// clang-format off
+#error "cerastes M2 needs EDG attribute registration: set CERASTES_EDG_SRC (decision 0005) or pin the EDG fork (decision 0009)"
+// clang-format on
 #endif
 
 namespace cerastes {
@@ -93,8 +95,8 @@ std::vector<a_source_position> g_diag_pragma_sites;
 
 void record_diag_pragma(a_pending_pragma_ptr ppp)
 {
-    a_source_position p =
-        ppp->pragma_position; // the start of the directive (for _Pragma, its string literal is id_position)
+    // the start of the directive (for _Pragma, its string literal is id_position)
+    a_source_position p = ppp->pragma_position;
     if (p.seq == 0)
     {
         p = ppp->id_position;

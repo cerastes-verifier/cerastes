@@ -18,8 +18,8 @@ struct SrcPos
 {
     bool known = false;
     bool in_primary = false; // not in an include file (system headers included)
-    bool in_system =
-        false; // in a system header: EDG's own notion, except that in verify mode a library file (0046 item 3) is not one
+    // in a system header: EDG's own notion, except that in verify mode a library file (0046 item 3) is not one
+    bool in_system = false;
     std::string file; // display file name of the position, "" if unknown
     unsigned long line = 0;
     unsigned long col = 0;

@@ -114,8 +114,8 @@ std::string expr(const E& e, bool top = false)
         case LExpr::Kind::Old:
             return "old(" + expr(e->a, true) + ")";
         case LExpr::Kind::ForPerm:
-            return "forperm " + e->text + ": Ref [" + e->text +
-                   ".tok] :: " + expr(e->a, true); // decision 0047 item 7: only ever the whole condition of an assert
+            // decision 0047 item 7: only ever the whole condition of an assert
+            return "forperm " + e->text + ": Ref [" + e->text + ".tok] :: " + expr(e->a, true);
     }
     return "?";
 }
@@ -262,8 +262,8 @@ void stmt(Printer& p, const low::LStmt& s, int indent)
                 {
                     measure += (i != 0 ? ", " : "") + expr(s.decreases[i], true);
                 }
-                p.line(indent + 1, "decreases " + measure,
-                       {s.decreases_check}); // one line: Silicon reports it at the measure
+                // one line: Silicon reports it at the measure
+                p.line(indent + 1, "decreases " + measure, {s.decreases_check});
             }
             p.line(indent, "{");
             stmts(p, s.then_body, indent + 1);

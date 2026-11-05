@@ -195,8 +195,8 @@ std::string memory_prelude_text(const std::map<std::string, std::string>& cell_t
     }
     if (heap)
     {
-        t +=
-            "field tok: Bool\n"; // decision 0047 item 7: the free token of a heap block (loc(b, -1).tok), only in a heap program
+        // decision 0047 item 7: the free token of a heap block (loc(b, -1).tok), only in a heap program
+        t += "field tok: Bool\n";
     }
     t += "field lv: Bool\n";
     t += R"(
@@ -326,8 +326,8 @@ std::string prelude_text(const std::set<std::string>& used)
         }
         else if (f.is_unsigned)
         {
-            body = "((a % " + pk + ") + (" + dec::pow2(f.width) + " - " + pk + ")) - " +
-                   high; // (L + (2^N - 2^k)) - 2^k * H
+            // (L + (2^N - 2^k)) - 2^k * H
+            body = "((a % " + pk + ") + (" + dec::pow2(f.width) + " - " + pk + ")) - " + high;
         }
         else
         {

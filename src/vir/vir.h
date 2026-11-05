@@ -159,8 +159,9 @@ struct Type
     {
         return !(*this == o);
     }
-    std::string str()
-        const; // "bool", "void", the int type's name, the struct's C name ("struct S"), or the pointee's followed by "*" ("int*", "bool**")
+    // "bool", "void", the int type's name, the struct's C name ("struct S"), or the pointee's followed by "*" ("int*",
+    // "bool**")
+    std::string str() const;
 };
 
 // A member of a C structure, in declaration order (decision 0043 item 2): `type` is a Bool or Int (an enumeration included), an accepted
@@ -179,10 +180,12 @@ struct StructMember
 struct StructType
 {
     int id = 0; // the index in Program::structs(); part of the Viper name
-    std::string
-        tag; // the C tag (`S` of `struct S`); may be empty for an untagged struct (named by its typedef: the encoder sets `tag` then)
-    std::string
-        name; // the unique display and cell name, written like an enumeration's `enum_<n>_<name>`: `struct_<id>_<tag>` with every character
+    // the C tag (`S` of `struct S`); may be empty for an untagged struct (named by its typedef: the encoder sets `tag`
+    // then)
+    std::string tag;
+    // the unique display and cell name, written like an enumeration's `enum_<n>_<name>`: `struct_<id>_<tag>` with every
+    // character
+    std::string name;
     // that is not a letter, digit or underscore of the tag written `_`.  Always a valid Viper identifier part, unique in the Program
     std::string c_name; // the C type name for messages ("struct S"; the encoder sets what the program spells)
     SrcLoc loc;         // the definition
@@ -282,78 +285,105 @@ struct Expr
         BoolToInt, // `a` (Bool) as 0 or 1 of Int type `type`
         Call,      // `callee`(`args`...): type = callee's return type
         ReportAt,  // `a`, but obligations inside it are reported at `loc` with a note at their own position
-        AssignE, // an assignment used as a value (decision 0020): `var` := `a` (already of `var`'s type); the value of the node is `a`
-        // (the new value, `type` = `var`'s type), or, when `yields_old`, the old value `b` (x++, x--).  `b` is null or the one
-        // `Local var` node that `a` also uses for the old value: the lowering reads it once.  Allowed in code and in a loop
-        // condition, never in an annotation; reachable once per function; see `sequence_problems`.  `var` may be a cell (an
-        // address-taken local; decision 0039 item 2): the write is then a write effect of the full expression with the
-        // permission and flag obligations of a cell write, and a read of `var` is a place read (E3 for memory).
-        Comma, // `a`, then `b` (decision 0020): `type` = `b`'s type, never void; `a` may be a void call; a sequence point between them
+        // an assignment used as a value (decision 0020): `var` := `a` (already of `var`'s type); the value of the node
+        // is `a` (the new value, `type` = `var`'s type), or, when `yields_old`, the old value `b` (x++, x--).  `b` is
+        // null or the one `Local var` node that `a` also uses for the old value: the lowering reads it once.  Allowed
+        // in code and in a loop condition, never in an annotation; reachable once per function; see
+        // `sequence_problems`.  `var` may be a cell (an address-taken local; decision 0039 item 2): the write is then a
+        // write effect of the full expression with the permission and flag obligations of a cell write, and a read of
+        // `var` is a place read (E3 for memory).
+        AssignE,
+        // `a`, then `b` (decision 0020): `type` = `b`'s type, never void; `a` may be a void call; a sequence point
+        // between them
+        Comma,
         // ---- pointers (decision 0032; appended, so every earlier kind keeps its place) ----
-        Null, // the null pointer constant: `type` is a Ptr.  In `==`/`!=` and as an arm of `?:` it takes the other operand's type: check_program
-        // accepts a Null of any pointer type there (decision 0032 item 7), and the value is `null` whatever the type.
-        AddrOf, // `&var`: type = Ptr(var's type); `var` must be a local of this function with `address_taken` (a cell, decision 0032 item 4;
-                // check_program refuses anything else).  A pointer value: no obligation of its own.
-        Deref, // `*a` used as a READ (a: a Ptr; type = the pointee).  Obligations: the null check, the permission check and the flag
-        // (decision 0032 item 6).  A write through a pointer is the statement Stmt::Store, never a Deref.
-        // In a CONTRACT (decision 0037 item 5; Ctx::Requires/Ensures): `a` is a `Formal` of pointer type or, in an `ensures`, the `Result`
-        // of a function returning a pointer (decision 0040 item 4: `*result` as a value), or a GlobalAddr of a file-scope global (decision 0041 item 7:
-        // the read of `g`), or (decision 0045 item 2) a place reached through loads and pointer leaves from one of those (`**pp`: Deref(Deref(Formal pp));
-        // `*gp`: Deref(GlobalAddr gp); `p->q->x`; `*s.q`: Deref(Field(Formal s, q)); `*r.q`), and nothing else (a local, `Old` inside the place).  In a `requires` it reads the cell's value on entry, in an `ensures` its value on
-        // return, and `Old(Deref(Formal p))` its value on entry; `Old(Deref(Result))` is a check_program error (the result has no value on
-        // entry).  Lowering frames each read per path (item 7), keyed by the place `p` or `result`.  The value of `*pp` of a `T **`
-        // parameter is a pointer (a Ptr-typed Deref).
+        // the null pointer constant: `type` is a Ptr.  In `==`/`!=` and as an arm of `?:` it takes the other operand's
+        // type: check_program accepts a Null of any pointer type there (decision 0032 item 7), and the value is `null`
+        // whatever the type.
+        Null,
+        // `&var`: type = Ptr(var's type); `var` must be a local of this function with `address_taken` (a cell, decision
+        // 0032 item 4; check_program refuses anything else).  A pointer value: no obligation of its own.
+        AddrOf,
+        // `*a` used as a READ (a: a Ptr; type = the pointee).  Obligations: the null check, the permission check and
+        // the flag (decision 0032 item 6).  A write through a pointer is the statement Stmt::Store, never a Deref. In a
+        // CONTRACT (decision 0037 item 5; Ctx::Requires/Ensures): `a` is a `Formal` of pointer type or, in an
+        // `ensures`, the `Result` of a function returning a pointer (decision 0040 item 4: `*result` as a value), or a
+        // GlobalAddr of a file-scope global (decision 0041 item 7: the read of `g`), or (decision 0045 item 2) a place
+        // reached through loads and pointer leaves from one of those (`**pp`: Deref(Deref(Formal pp)); `*gp`:
+        // Deref(GlobalAddr gp); `p->q->x`; `*s.q`: Deref(Field(Formal s, q)); `*r.q`), and nothing else (a local, `Old`
+        // inside the place).  In a `requires` it reads the cell's value on entry, in an `ensures` its value on return,
+        // and `Old(Deref(Formal p))` its value on entry; `Old(Deref(Result))` is a check_program error (the result has
+        // no value on entry).  Lowering frames each read per path (item 7), keyed by the place `p` or `result`.  The
+        // value of `*pp` of a `T **` parameter is a pointer (a Ptr-typed Deref).
+        Deref,
         // ---- permissions in contracts (decision 0037 item 5; appended) ----
-        Atom, // `atom` of the pointer `a` (a Ptr `Formal`: the parameter whose pointee is meant; in an `ensures` its entry value), a Bool;
-        // in a contract, never inside `Old`; and, from decision 0040 item 5, in the `invariant` clauses of a `While` or `DoWhile` loop,
-        // where `a` is a `Local` of pointer type (a pointer variable, read at each iteration's start; see loop_atoms).  A measure, a
-        // `check`, code and the invariant of a `DoOnce` loop hold none (check_program errors).
-        // Owns: `owns(*p)`, Reads: `reads(*p)` (a pointee that is a Bool, an Int or a pointer), Live: `live(p)`.  `amount`
-        // names its ghost permission amount (item 6): the atoms of the `requires`, in evaluation order (contract_atoms), are
-        // numbered 0, 1, ...; an atom of an `ensures` carries the number of the `requires` atom it returns (the same kind and the
-        // same parameter, each partner at most once).  An invariant atom's `amount` is unused (-1; lowering numbers its own).
-        // Positions (item 5): contract_atoms and loop_atoms collect exactly the allowed ones; any other Atom is a check_program error.
-        // Decision 0041: in a contract `a` may also be a GlobalAddr (`owns(g)`, `reads(g)`; the Owns of a `static` local's implicit atom has
-        // `implicit_atom`).  An atom pairs with its `requires` partner by place (atom_place_key), not by the parameter's index.
+        // `atom` of the pointer `a` (a Ptr `Formal`: the parameter whose pointee is meant; in an `ensures` its entry
+        // value), a Bool; in a contract, never inside `Old`; and, from decision 0040 item 5, in the `invariant` clauses
+        // of a `While` or `DoWhile` loop, where `a` is a `Local` of pointer type (a pointer variable, read at each
+        // iteration's start; see loop_atoms).  A measure, a `check`, code and the invariant of a `DoOnce` loop hold
+        // none (check_program errors). Owns: `owns(*p)`, Reads: `reads(*p)` (a pointee that is a Bool, an Int or a
+        // pointer), Live: `live(p)`.  `amount` names its ghost permission amount (item 6): the atoms of the `requires`,
+        // in evaluation order (contract_atoms), are numbered 0, 1, ...; an atom of an `ensures` carries the number of
+        // the `requires` atom it returns (the same kind and the same parameter, each partner at most once).  An
+        // invariant atom's `amount` is unused (-1; lowering numbers its own). Positions (item 5): contract_atoms and
+        // loop_atoms collect exactly the allowed ones; any other Atom is a check_program error. Decision 0041: in a
+        // contract `a` may also be a GlobalAddr (`owns(g)`, `reads(g)`; the Owns of a `static` local's implicit atom
+        // has `implicit_atom`).  An atom pairs with its `requires` partner by place (atom_place_key), not by the
+        // parameter's index.
+        Atom,
         // ---- a write through a pointer used as a value (decision 0039 item 2; appended) ----
-        StoreE, // `*c := a` as a value: `c` is the address (a Ptr), `a` the stored value (already of the pointee's type); the value of the
-        // node is `a` (the new value, `type` = the pointee's type), or, when `yields_old`, the old value `b` (`(*p)++`, `(*p)--`).
-        // `b` is null or the one `Deref` node of `c` that `a` also reads for the old value, so the pointer is lowered once, as for
-        // Stmt::Store (Builder::compound_store_expr, inc_dec_store_expr share the `c` node).  Allowed wherever AssignE is (code and
-        // a loop condition), never in an annotation; reachable once per function; see `sequence_problems`.  A write effect of
-        // the full expression: the null, permission and flag obligations of a write through `c`.  The spelling of the target for
-        // messages is "*" + c->c_text.
+        // `*c := a` as a value: `c` is the address (a Ptr), `a` the stored value (already of the pointee's type); the
+        // value of the node is `a` (the new value, `type` = the pointee's type), or, when `yields_old`, the old value
+        // `b` (`(*p)++`, `(*p)--`). `b` is null or the one `Deref` node of `c` that `a` also reads for the old value,
+        // so the pointer is lowered once, as for Stmt::Store (Builder::compound_store_expr, inc_dec_store_expr share
+        // the `c` node).  Allowed wherever AssignE is (code and a loop condition), never in an annotation; reachable
+        // once per function; see `sequence_problems`.  A write effect of the full expression: the null, permission and
+        // flag obligations of a write through `c`.  The spelling of the target for messages is "*" + c->c_text.
+        StoreE,
         // ---- globals (decision 0041; appended) ----
-        GlobalAddr, // `&g` of the mutable global or `static` local `global` (Program::globals()): type = Ptr(global->type); a pointer value with no obligation
-        // (a global's block is allocated for the whole run: no allocation, no scope exit).  A read of `g` is `Deref(GlobalAddr)`, a write
-        // `Store`/`StoreE` with a GlobalAddr address, an atom `Atom(owns/reads, GlobalAddr)`; `*&g` is the same tree.  In CODE it stands where
-        // AddrOf does (a pointer value, the address of a Deref/Store/StoreE); a `static` local's GlobalAddr only in its owner function.  In a CONTRACT
-        // (Ctx::Requires/Ensures) it is a pointer value like any other (`p == &g`, `r == &g`, decision 0041 item 7), the operand of a Deref (the read
-        // of `g`) or of an Atom (`owns(g)`, `reads(g)`); a static local's address stays out of contracts except as its implicit atom (Owns with
-        // `implicit_atom`).  In a loop's invariant or measure and a function's `decreases` it is accepted like any pointer node (decision 0038 item 6: `g >= 0`, `gp == &g`
-        // read the loop's places, framed by lowering); in a named constant, a global's initializer or a case value it is a check_program error (no_ptr_).
-        // `Atom(Live, GlobalAddr)` and a GlobalAddr atom in a loop's invariant are check_program errors (the encoder reports them first).
+        // `&g` of the mutable global or `static` local `global` (Program::globals()): type = Ptr(global->type); a
+        // pointer value with no obligation (a global's block is allocated for the whole run: no allocation, no scope
+        // exit).  A read of `g` is `Deref(GlobalAddr)`, a write `Store`/`StoreE` with a GlobalAddr address, an atom
+        // `Atom(owns/reads, GlobalAddr)`; `*&g` is the same tree.  In CODE it stands where AddrOf does (a pointer
+        // value, the address of a Deref/Store/StoreE); a `static` local's GlobalAddr only in its owner function.  In a
+        // CONTRACT (Ctx::Requires/Ensures) it is a pointer value like any other (`p == &g`, `r == &g`, decision 0041
+        // item 7), the operand of a Deref (the read of `g`) or of an Atom (`owns(g)`, `reads(g)`); a static local's
+        // address stays out of contracts except as its implicit atom (Owns with `implicit_atom`).  In a loop's
+        // invariant or measure and a function's `decreases` it is accepted like any pointer node (decision 0038 item 6:
+        // `g >= 0`, `gp == &g` read the loop's places, framed by lowering); in a named constant, a global's initializer
+        // or a case value it is a check_program error (no_ptr_). `Atom(Live, GlobalAddr)` and a GlobalAddr atom in a
+        // loop's invariant are check_program errors (the encoder reports them first).
+        GlobalAddr,
         // ---- structures (decision 0043; appended) ----
-        MemberAddr, // `&a->m`: `a` is a pointer to a struct, `index` the member k of that struct (Type::struct_type->members[k]); type = Ptr(the member's type)
-        // (a nested struct member gives a pointer to that struct: `&p->t` is the slot of `t`; `p->t.x` is MemberAddr(MemberAddr(p, t), x)).
-        // Lowering: `loc(member(a, k), 0)`.  c_text: "&" + the member's place spelling (Builder::member_addr: `&p->x`, `&s.x`, `&s.t.x`);
-        // Builder::deref of it spells "p->x" (without the "&").  A struct place is always reached through this node.
-        // PLACE versus VALUE (a convention, no flag; lowering reads the context): a MemberAddr that is the operand `a` of a Deref, the `addr`
-        // of a Stmt::Store, the `c` of a StoreE or the operand `a` of another MemberAddr that is itself in one of those positions is a PLACE
-        // ACCESS (`p->x`, `s.t.x`, a read or write of a leaf): it checks `a != null` (null-dereference) and the leaf's permission and flag, and
-        // nothing about the liveness of `a`'s pointer variable (decision 0032 item 6: a member access is not a use of `p`'s value).  Any
-        // other MemberAddr is an address used as a VALUE (`&p->x` as an argument, an initializer, a comparison operand): arithmetic on `a`
-        // (decision 0028 item 3a), checking `a != null` and `a`'s liveness.  In a CONTRACT only as a place (the operand of a Deref or an Atom,
-        // through further MemberAddrs) rooted at a Formal, or at the Result in an `ensures` read; atoms and values of struct places are written
-        // `Atom(owns, MemberAddr(Formal p, k))` and `Deref(MemberAddr(Formal p, k))`.  No obligation of its own.
+        // `&a->m`: `a` is a pointer to a struct, `index` the member k of that struct (Type::struct_type->members[k]);
+        // type = Ptr(the member's type) (a nested struct member gives a pointer to that struct: `&p->t` is the slot of
+        // `t`; `p->t.x` is MemberAddr(MemberAddr(p, t), x)). Lowering: `loc(member(a, k), 0)`.  c_text: "&" + the
+        // member's place spelling (Builder::member_addr: `&p->x`, `&s.x`, `&s.t.x`); Builder::deref of it spells "p->x"
+        // (without the "&").  A struct place is always reached through this node. PLACE versus VALUE (a convention, no
+        // flag; lowering reads the context): a MemberAddr that is the operand `a` of a Deref, the `addr` of a
+        // Stmt::Store, the `c` of a StoreE or the operand `a` of another MemberAddr that is itself in one of those
+        // positions is a PLACE ACCESS (`p->x`, `s.t.x`, a read or write of a leaf): it checks `a != null`
+        // (null-dereference) and the leaf's permission and flag, and nothing about the liveness of `a`'s pointer
+        // variable (decision 0032 item 6: a member access is not a use of `p`'s value).  Any other MemberAddr is an
+        // address used as a VALUE (`&p->x` as an argument, an initializer, a comparison operand): arithmetic on `a`
+        // (decision 0028 item 3a), checking `a != null` and `a`'s liveness.  In a CONTRACT only as a place (the operand
+        // of a Deref or an Atom, through further MemberAddrs) rooted at a Formal, or at the Result in an `ensures`
+        // read; atoms and values of struct places are written `Atom(owns, MemberAddr(Formal p, k))` and
+        // `Deref(MemberAddr(Formal p, k))`.  No obligation of its own.
+        MemberAddr,
         // ---- struct values (decision 0044 item 2; appended) ----
-        Field, // member `index` of the struct VALUE `a` (`a.m`): type = the member's type (a nested struct member is a struct value again: `a.t.y` is
-        // Field(Field(a, t), y)).  `a` is a struct-typed producer: a Call, an Aggregate, another Field or, in a contract, a Formal or the Result
-        // (an `Old` of a Formal or of a Field chain over one, in an `ensures`) directly under the Field.  c_text: `a`'s followed by `.m` when `a` has one.
-        // Lowering reads the member's leaf (or leaves, for a nested struct) of the value's tuple; the node adds no obligation of its own.
-        Aggregate // a struct value built from its leaves: `type` is a Struct; `args` holds one expression per leaf of the struct in struct_leaves order (depth
-        // first), each exactly the leaf's VIR type (a pointer leaf's Null has that pointer type).  Allowed in code only (never in a contract).
-        // The arguments are unsequenced siblings, like the arguments of a call but without a sequence point after them.
+        // member `index` of the struct VALUE `a` (`a.m`): type = the member's type (a nested struct member is a struct
+        // value again: `a.t.y` is Field(Field(a, t), y)).  `a` is a struct-typed producer: a Call, an Aggregate,
+        // another Field or, in a contract, a Formal or the Result (an `Old` of a Formal or of a Field chain over one,
+        // in an `ensures`) directly under the Field.  c_text: `a`'s followed by `.m` when `a` has one. Lowering reads
+        // the member's leaf (or leaves, for a nested struct) of the value's tuple; the node adds no obligation of its
+        // own.
+        Field,
+        // a struct value built from its leaves: `type` is a Struct; `args` holds one expression per leaf of the struct
+        // in struct_leaves order (depth first), each exactly the leaf's VIR type (a pointer leaf's Null has that
+        // pointer type).  Allowed in code only (never in a contract). The arguments are unsequenced siblings, like the
+        // arguments of a call but without a sequence point after them.
+        Aggregate
     };
     Kind kind = Kind::Const;
     Type type; // the type of the value (Void only for a Call of a void function)
@@ -385,9 +415,9 @@ struct Expr
     int amount = -1;                  // Atom: the number of the atom's ghost amount (see Kind::Atom)
     bool yields_old = false;          // AssignE, StoreE: the value is the old value `b` (x++, x--), not the new one
     const Global* global = nullptr;   // GlobalAddr (decision 0041): the global; owned by the Program
-    bool implicit_atom =
-        false; // Atom: added by the encoder for a `static` local (decision 0041 item 12), not written by the user: an Owns
-               // of a GlobalAddr whose global has an `owner`; messages say "the `static` local `s` of `f`"
+    // Atom: added by the encoder for a `static` local (decision 0041 item 12), not written by the user: an Owns of a
+    // GlobalAddr whose global has an `owner`; messages say "the `static` local `s` of `f`"
+    bool implicit_atom = false;
 };
 
 // ---- statements ------------------------------------------------------------------------------------------------
@@ -417,26 +447,32 @@ struct Stmt
 {
     enum class Kind
     {
-        Decl, // `var` = `expr` (the type of `expr` is the type of `var`); `expr == nullptr`: declared WITHOUT an initializer, so `var`
-        // holds no value until an Assign gives it one (decision 0019: reading it before is an `uninitialized` error)
+        // `var` = `expr` (the type of `expr` is the type of `var`); `expr == nullptr`: declared WITHOUT an initializer,
+        // so `var` holds no value until an Assign gives it one (decision 0019: reading it before is an `uninitialized`
+        // error)
+        Decl,
         Assign,   // `var` = `expr` (same type)
         ExprStmt, // evaluate `expr` (a call, a discarded value, a `(void)e`): only its obligations and effects count
         If,       // if (`expr`) then_body [else else_body]; either body may be null
-        While, // a loop (see `form`): while (`expr`) invariants body [step]; `expr` may have calls and side effects (decisions 0020, 0021), except a `DoOnce` condition (check.h)
+        // a loop (see `form`): while (`expr`) invariants body [step]; `expr` may have calls and side effects (decisions
+        // 0020, 0021), except a `DoOnce` condition (check.h)
+        While,
         Return, // return [`expr`]: expr's type is the function's return type, absent iff the function is void
         Check,  // check(`expr`): a Bool, asserted (category `check`)
         Block,  // `stmts`
         Switch, // switch (`expr`) body; `expr` is the (promoted) controlling Int expression, `body` a Block; `jump_id`
-        Case, // a `case value:` / `default:` marker inside a Switch's own body Block: `expr` is the value (an Int Const of
-              // the scrutinee's type) or null for `default`
+        // a `case value:` / `default:` marker inside a Switch's own body Block: `expr` is the value (an Int Const of
+        // the scrutinee's type) or null for `default`
+        Case,
         Break,    // break: leaves the loop or switch whose `jump_id` is `jump_id`
         Continue, // continue: goes to the end of the iteration of the loop whose `jump_id` is `jump_id`
         Goto,     // goto: a user `goto` to the Label whose `jump_id` is `jump_id` (decision 0015 item 2; goto_problems)
         Label,    // a user label `label_name:` with id `jump_id` (a direct statement of a Block)
-        Store // `*addr = expr` (decision 0032): a write through a pointer.  `addr` is a Ptr expression, `expr` has the pointee's type.  The
-        // two are unsequenced operands (sequence_problems).  `*p op= e`, `++*p` and `(*p)--` are Stores whose `expr` reads a Deref that
-        // SHARES the `addr` node (Builder::compound_store, inc_dec_store): the lowering evaluates the pointer once.  The target's
-        // spelling for messages is "*" + addr->c_text.
+        // `*addr = expr` (decision 0032): a write through a pointer.  `addr` is a Ptr expression, `expr` has the
+        // pointee's type.  The two are unsequenced operands (sequence_problems).  `*p op= e`, `++*p` and `(*p)--` are
+        // Stores whose `expr` reads a Deref that SHARES the `addr` node (Builder::compound_store, inc_dec_store): the
+        // lowering evaluates the pointer once.  The target's spelling for messages is "*" + addr->c_text.
+        Store
     };
     Kind kind = Kind::Block;
     SrcLoc loc;
@@ -453,9 +489,9 @@ struct Stmt
     const Stmt* body = nullptr;      // While
     std::vector<const Stmt*> stmts;  // Block
     LoopForm form = LoopForm::While; // While
-    const Stmt* step =
-        nullptr;              // While: a `for` loop's increment (an Assign or ExprStmt, or a Block of them: a discarded
-                              // comma `i++, j--`), run after the body and after each `continue`; may be null
+    // While: a `for` loop's increment (an Assign or ExprStmt, or a Block of them: a discarded comma `i++, j--`), run
+    // after the body and after each `continue`; may be null
+    const Stmt* step = nullptr;
     int jump_id = 0;          // While, Switch: this construct's id (> 0 when a Break or Continue may name it;
                               // unique within a Function, Builder::jump_id()); Break, Continue, Goto: the target's id;
                               // Label: its own id
@@ -473,8 +509,9 @@ struct Var
 {
     int id = 0;       // unique within its function
     std::string name; // the C/C++ name (for messages and generated identifiers)
-    Type
-        type; // Bool, Int, a pointer or (decision 0043 item 4) a struct: a struct local is ALWAYS a cell (`address_taken`, set by the
+    // Bool, Int, a pointer or (decision 0043 item 4) a struct: a struct local is ALWAYS a cell (`address_taken`, set by
+    // the
+    Type type;
     // encoder; check_program refuses a struct Var without it), declared without an initializer (`Decl` with a null `expr`: its
     // leaves are written by Stores, initializers and copies being expanded by the encoder); `AddrOf` of it is the slot
     SrcLoc loc;                 // the declaration
@@ -538,8 +575,8 @@ enum class GlobalInit
 struct GlobalLeaf
 {
     GlobalInit kind = GlobalInit::Value;
-    const Expr* init =
-        nullptr; // Value, Unknown: the element as written (closed, call-free, exactly the leaf's type), or null
+    // Value, Unknown: the element as written (closed, call-free, exactly the leaf's type), or null
+    const Expr* init = nullptr;
     std::string value = "0";        // Value: EDG's value, a decimal literal of the leaf's type ("0"/"1" for bool)
     const Global* target = nullptr; // Addr: another Global of the program
     SrcLoc loc;
@@ -559,11 +596,12 @@ struct Global
     using Init = GlobalInit;
     int id = 0;         // the index in Program::globals(); unique in the Program; part of the Viper name
     std::string c_name; // the C/C++ name as messages say it (`g`, `count`, `ns::g`)
-    Type
-        type; // Bool, Int (an enumeration included), an accepted pointer or (decision 0044 item 8) a struct of the Program
+    // Bool, Int (an enumeration included), an accepted pointer or (decision 0044 item 8) a struct of the Program
+    Type type;
     SrcLoc loc; // the defining declaration (the position of its `program_start` row)
-    const Function* owner =
-        nullptr; // a `static` local: the function whose body names it (decision 0041 item 12); null for a file/namespace-scope global
+    // a `static` local: the function whose body names it (decision 0041 item 12); null for a file/namespace-scope
+    // global
+    const Function* owner = nullptr;
     Init init_kind = Init::Value;
     const Expr* init = nullptr;     // Init::Value: the initializer as written, or null
     std::string value = "0";        // Init::Value: EDG's value
@@ -604,8 +642,9 @@ enum class Allocator
 struct Param
 {
     std::string name; // may be empty (unnamed parameter)
-    Type
-        type; // Bool, Int, a pointer to one of them (decision 0037 item 2) or, by value, a struct of the Program (decision 0044 item 3)
+    // Bool, Int, a pointer to one of them (decision 0037 item 2) or, by value, a struct of the Program (decision 0044
+    // item 3)
+    Type type;
     SrcLoc loc;
     std::string c_type_name; // the C/C++ spelling of the type, for messages (empty: use type.str())
     // `T *restrict p` (decision 0037 item 2): accepted only when the `requires` holds `owns(*p)` as a top-level conjunct or as `p == NULL ||
@@ -622,8 +661,9 @@ struct Function
     std::string c_name; // for messages and generated identifiers
     SrcLoc loc;         // the declaration (what a precondition note points at when a clause has no loc)
     SrcLoc end_loc;     // the closing brace of the body (missing-return, void postconditions)
-    Type ret = Type::
-        void_type(); // Void, Bool, Int, a pointer to Bool/Int (decision 0037 item 3: `ensures WF(result)` from lowering) or a struct by value (0044 item 4)
+    // Void, Bool, Int, a pointer to Bool/Int (decision 0037 item 3: `ensures WF(result)` from lowering) or a struct by
+    // value (0044 item 4)
+    Type ret = Type::void_type();
     std::vector<Param> params;
     std::vector<Clause> requires_; // the user's `requires`, in order; mention Formal parameters only
     std::vector<Clause> ensures_;  // the user's `ensures`, in order; Formal, Result and Old
@@ -867,8 +907,8 @@ struct AtomSite
     bool in_ensures = false;
     int clause = 0; // the index in Function::requires_ or ensures_
     std::vector<AtomGuard> guards;
-    std::vector<int>
-        path; // the member path of the atom's place (decision 0043; empty for `*p`, a global, a Local): atom_place(*atom).path
+    // the member path of the atom's place (decision 0043; empty for `*p`, a global, a Local): atom_place(*atom).path
+    std::vector<int> path;
     // Decision 0045 item 2 (places reached through loads): `via` is the steps from the root to the BASE pointer (atom_place(*atom).via; empty for every place of
     // decisions 0037-0044), `base` the base pointer expression itself, `member_root(atom->a)`: the Formal, the GlobalAddr or the Result for a place without
     // steps, otherwise a Deref or a Field node (`**pp`: base `*pp`, via {load}; `p->q->x`: base `p->q` as a loaded pointer, via {q, load}, path {x}).  Lowering
@@ -977,8 +1017,8 @@ bool steps_have_load(const std::vector<int>& via);
 struct PlaceKey
 {
     int root = kNoPlaceKey;
-    std::vector<int>
-        via; // the steps from the root to the base pointer (see above); empty for every place without a load or a pointer leaf
+    // the steps from the root to the base pointer (see above); empty for every place without a load or a pointer leaf
+    std::vector<int> via;
     std::vector<int> path; // the member indices from the base pointer's pointee; >= 0 only
     bool valid() const
     {
@@ -1116,8 +1156,8 @@ public:
     const Stmt* loop(const Expr* c, std::vector<Clause> invariants, std::vector<Clause> measure, const Stmt* body,
                      const Stmt* step, LoopForm form, int jump_id, SrcLoc loc);
     const Stmt* switch_stmt(const Expr* scrutinee, const Stmt* body, int jump_id, SrcLoc loc);
-    const Stmt* case_label(const Expr* value_or_null,
-                           SrcLoc loc); // null: `default`; a value needs the folded form below
+    // null: `default`; a value needs the folded form below
+    const Stmt* case_label(const Expr* value_or_null, SrcLoc loc);
     // `value` is the label as written (obligations checked in the prologue); `folded` is the front end's value (decision 0017 item 5).
     const Stmt* case_label(const Expr* value, std::string folded, SrcLoc loc);
     const Stmt* break_stmt(int target_jump_id, SrcLoc loc);

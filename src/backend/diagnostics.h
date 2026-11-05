@@ -17,9 +17,9 @@ namespace cerastes {
 
 enum class Diag
 {
-#define CERASTES_DIAG(tag, severity, message) tag,
-#include "diagnostics.def"
-#undef CERASTES_DIAG
+    #define CERASTES_DIAG(tag, severity, message) tag,
+    #include "diagnostics.def"
+    #undef CERASTES_DIAG
 };
 
 // The tag of a diagnostic, as tests name it (without the `cerastes-` prefix).

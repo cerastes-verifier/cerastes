@@ -734,8 +734,8 @@ int verify_command(int argc, char** argv)
     // Every hook but library_fixture injects a fault: a run with one never ends in `verified` (pipeline.cpp, 0011 item 13).
     // library_fixture only adds a library directory, so its runs end as any other.
     po.hook = a.hook == "library_fixture" ? std::string() : a.hook;
-    po.note = a.hook == "library_fixture" ? "self-test hook library_fixture"
-                                          : ""; // the success line names it (decision 0046 item 11)
+    // the success line names it (decision 0046 item 11)
+    po.note = a.hook == "library_fixture" ? "self-test hook library_fixture" : "";
     po.timeout_seconds = a.hook == "silicon_timeout" ? 0 : a.timeout;
     po.primary_file = a.file;
     po.functions = cfg.out.functions;

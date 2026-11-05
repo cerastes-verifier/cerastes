@@ -256,8 +256,8 @@ void define_pointer_contracts()
            k.ens(f, reads(k, f, 0, 0));
            f->body = k.blk({k.es(k.call(consume, {k.pn(f->param_var(0))}))});
            k.done(f);
-           k.fail_only("permission", f->end_loc, 6,
-                       1); // of the 6 rows of the return check, the cell's value fraction: perm(p.v_int) >= amt
+           // of the 6 rows of the return check, the cell's value fraction: perm(p.v_int) >= amt
+           k.fail_only("permission", f->end_loc, 6, 1);
        });
 
     // ---- p == NULL || owns(*p): a guarded atom (items 5, 6) ----

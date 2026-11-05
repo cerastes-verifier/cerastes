@@ -1139,7 +1139,8 @@ void check_attribute(an_attribute_ptr a, a_routine_ptr owner, a_statement_ptr st
     }
     if (k == Annot::owning)
     {
-        return; // a parameter's marker (decision 0040 item 3): the encoder reads it; its argument is no annotation expression
+        // a parameter's marker (decision 0040 item 3): the encoder reads it; its argument is no annotation expression
+        return;
     }
     // The initialization markers (decision 0042): no argument list; the encoder reads them on the parameter or the local.
     if (k == Annot::uninit || k == Annot::ref_to_uninit || k == Annot::must_init)
@@ -1742,8 +1743,8 @@ bool file_starts_between(a_source_file_ptr f, a_seq_number after, a_seq_number b
 void check_macros_in_il()
 {
     std::set<std::string> predefined;
-    std::map<std::string, a_macro_ptr>
-        predefinition; // the last predefinition of each name: the state user code starts in
+    // the last predefinition of each name: the state user code starts in
+    std::map<std::string, a_macro_ptr> predefinition;
     for (a_macro_ptr m = il_header.macros; m != nullptr; m = m->next)
     {
         if (m->is_predefined && !m->is_undef)

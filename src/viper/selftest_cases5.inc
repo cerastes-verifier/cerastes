@@ -130,8 +130,8 @@ void define_bitwise_masks()
                                 }
                                 else
                                 {
-                                    k.ens(f, wrong ? k.eq(R(), X())
-                                                   : k.eq(R(), k.rem(X(), pow2(kk)))); // x & (2^k-1) == x % 2^k
+                                    // x & (2^k-1) == x % 2^k
+                                    k.ens(f, wrong ? k.eq(R(), X()) : k.eq(R(), k.rem(X(), pow2(kk))));
                                 }
                             }
                             else

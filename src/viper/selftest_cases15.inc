@@ -111,9 +111,9 @@ void define_struct_values()
            {
                return k.b.aggregate(k.st(S), {N(k, a), N(k, b)}, k.at());
            };
+           // t = c ? {1, 2} : {3, 4}: a struct ?: (M8)
            f->body = k.blkc({k.decl(t, nullptr),
-                             k.store(k.addr(t), k.cond(k.ne(k.pv(f, 0), N(k, "0")), agg("1", "2"),
-                                                       agg("3", "4")))}); // t = c ? {1, 2} : {3, 4}: a struct ?: (M8)
+                             k.store(k.addr(t), k.cond(k.ne(k.pv(f, 0), N(k, "0")), agg("1", "2"), agg("3", "4")))});
            k.done(f);
        });
 }

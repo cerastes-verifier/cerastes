@@ -14,8 +14,8 @@ namespace cerastes {
 
 struct SiliconError
 {
-    std::string
-        viper_id; // Viper's error id ("assert.failed"), "unknown" for a message that is not a verification error
+    // Viper's error id ("assert.failed"), "unknown" for a message that is not a verification error
+    std::string viper_id;
     std::string category; // the harness name of the kind ("assert", "postcondition", ...), "unknown"
     std::string reason;   // the Viper reason id, "timeout" for a solver timeout, "unknown"
     std::string file;     // the file of the position Silicon printed ("" when it printed none)

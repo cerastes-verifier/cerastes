@@ -341,19 +341,27 @@ void define_loops_and_jumps()
 
     // ---- item 4: the iteration check at the back edge ----
     // while (i > 0) { <body>; i -= 1; }   the body is `inc(&x)` (a callee that owns and gives back: the permission is found again), or `dispose(&x)`
-    const auto back_edge = [=](Kit& k, int mode) -> SrcLoc {  // 0: inc, 1: dispose
-    SrcLoc at;
-    Function* callee = mode == 0 ? make_inc(k) : make_dispose(k);
-    cell_fn(k, "0", [&](Kit& k, Function* f, Var* x, Var*, Var* i) {
-      std::vector<Clause> extra;
-      if (mode == 0){ extra.push_back(k.cl(k.eq(k.add(k.v(x), k.v(i)), k.pv(f, 0))));  // x + i == n
-}
-      const Stmt* body = k.blkc({k.es(k.call(callee, {k.addr(x)})), step(k, i)});
-      at = body->end_loc;
-      return std::vector<const Stmt*>{count_down(k, i, extra, body), k.ret(N(k, "0"))};
-    }, nullptr);
-    return at;
-  };
+    // 0: inc, 1: dispose
+    const auto back_edge = [=](Kit& k, int mode) -> SrcLoc
+    {
+        SrcLoc at;
+        Function* callee = mode == 0 ? make_inc(k) : make_dispose(k);
+        cell_fn(
+            k, "0",
+            [&](Kit& k, Function* f, Var* x, Var*, Var* i)
+            {
+                std::vector<Clause> extra;
+                if (mode == 0)
+                {
+                    extra.push_back(k.cl(k.eq(k.add(k.v(x), k.v(i)), k.pv(f, 0)))); // x + i == n
+                }
+                const Stmt* body = k.blkc({k.es(k.call(callee, {k.addr(x)})), step(k, i)});
+                at = body->end_loc;
+                return std::vector<const Stmt*> {count_down(k, i, extra, body), k.ret(N(k, "0"))};
+            },
+            nullptr);
+        return at;
+    };
     lc("mem_loop_back_edge_found",
        "inc(&x) in a loop: the callee owns the cell and gives it back, the iteration ends with the permission it began with",
        [=](Kit& k)
@@ -445,8 +453,8 @@ void define_loops_and_jumps()
        "dispose(p) in a loop: the iteration ends without the permission to *p it began with, at the body's closing brace",
        [=](Kit& k)
        {
-           k.fail_only("permission", param_dispose(k, true), 2,
-                       0); // of the 2 rows of the check (value and flag, then the liveness cell), the first fails
+           // of the 2 rows of the check (value and flag, then the liveness cell), the first fails
+           k.fail_only("permission", param_dispose(k, true), 2, 0);
        });
 
     // ---- item 3: the values a loop keeps and the ones a write havocs ----
@@ -512,22 +520,32 @@ void define_loops_and_jumps()
 
     // ---- item 6: a cell in an invariant and in a measure, with the framing ----
     // int x = 0; [dispose(&x);] while (i > 0) invariant x == <v> { i -= 1; } return 0;
-    const auto cell_invariant = [=](Kit& k, int mode) -> SrcLoc {  // 0: x == 0, 1: x == 1 (wrong on entry), 2: x consumed before the loop (unframed)
-    SrcLoc at;
-    Function* dispose = make_dispose(k);
-    cell_fn(k, "0", [&](Kit& k, Function*, Var* x, Var* p, Var* i) {
-      const Expr* read = k.v(x);  // the framing row (mode 2) is at the read; in C source the read and its clause share a line
-      Clause c = k.cl(k.eq(read, N(k, mode == 1 ? "1" : "0")));
-      at = mode == 2 ? read->loc : c.loc;
-      std::vector<const Stmt*> out;
-      if (mode == 2){ out.push_back(k.es(k.call(dispose, {k.pn(p)})));
-}
-      out.push_back(k.whl(k.gt(k.v(i), N(k, "0")), {k.cl(k.range(k.v(i), k.i32, "0", "100")), c}, {k.cl(k.v(i))}, k.blk({step(k, i)})));
-      out.push_back(k.ret(N(k, "0")));
-      return out;
-    }, mode == 1 ? nullptr : "0");
-    return at;
-  };
+    // 0: x == 0, 1: x == 1 (wrong on entry), 2: x consumed before the loop (unframed)
+    const auto cell_invariant = [=](Kit& k, int mode) -> SrcLoc
+    {
+        SrcLoc at;
+        Function* dispose = make_dispose(k);
+        cell_fn(
+            k, "0",
+            [&](Kit& k, Function*, Var* x, Var* p, Var* i)
+            {
+                // the framing row (mode 2) is at the read; in C source the read and its clause share a line
+                const Expr* read = k.v(x);
+                Clause c = k.cl(k.eq(read, N(k, mode == 1 ? "1" : "0")));
+                at = mode == 2 ? read->loc : c.loc;
+                std::vector<const Stmt*> out;
+                if (mode == 2)
+                {
+                    out.push_back(k.es(k.call(dispose, {k.pn(p)})));
+                }
+                out.push_back(k.whl(k.gt(k.v(i), N(k, "0")), {k.cl(k.range(k.v(i), k.i32, "0", "100")), c},
+                                    {k.cl(k.v(i))}, k.blk({step(k, i)})));
+                out.push_back(k.ret(N(k, "0")));
+                return out;
+            },
+            mode == 1 ? nullptr : "0");
+        return at;
+    };
     lc("mem_loop_cell_in_invariant", "a cell in a loop invariant: a fact about the value the place keeps",
        [=](Kit& k)
        {
@@ -583,8 +601,8 @@ void define_loops_and_jumps()
            Var* c = k.cell(f, "k", k.i32);
            Var* p = k.local(f, "p", PT(k));
            Var* i = k.local(f, "i", k.i32);
-           const Expr* read =
-               k.v(c); // the framing row is at the read (in C source it shares a line with the decreases clause)
+           // the framing row is at the read (in C source it shares a line with the decreases clause)
+           const Expr* read = k.v(c);
            Clause m = k.cl(k.add(k.sub(k.pv(f, 0), k.v(i)), read));
            f->body = k.blkc({k.decl(c, N(k, "5")), k.decl(p, k.addr(c)), k.es(k.call(dispose, {k.pn(p)})),
                              k.decl(i, N(k, "0")),
@@ -593,9 +611,8 @@ void define_loops_and_jumps()
                                    k.blk({k.asg(i, k.add(k.v(i), N(k, "1")))})),
                              k.ret(k.v(i))});
            k.done(f);
-           k.fail_only(
-               "permission", read->loc, 2,
-               0); // the entry row fails (the back-edge row sits on the body path that the entry failure does not reach)
+           // the entry row fails (the back-edge row sits on the body path that the entry failure does not reach)
+           k.fail_only("permission", read->loc, 2, 0);
        });
 
     // ---- item 2: a condition that reads memory (top-test shape), its checks as obligations at the condition's read ----
@@ -615,20 +632,23 @@ void define_loops_and_jumps()
                 k.ret(k.v(x))});
            k.done(f);
        });
-    const auto bad_condition = [=](Kit& k, int mode) -> SrcLoc {  // 0: p is null, 1: x never written
-    Function* f = k.fn("f", k.i32, {{"n", k.i32}});
-    k.req(f, k.range(k.F(f, 0), k.i32, "0", "100"));
-    Var* x = k.cell(f, "x", k.i32);
-    Var* p = k.local(f, "p", PT(k));
-    Var* i = k.local(f, "i", k.i32);
-    const Expr* read = mode == 0 ? rd(k, p) : k.v(x);
-    f->body = k.blkc({k.decl(x, nullptr), k.decl(p, mode == 0 ? k.nul(PT(k)) : k.addr(x)), k.decl(i, N(k, "0")),
-                      k.whl(k.land(k.lt(k.v(i), k.pv(f, 0)), k.lt(read, k.pv(f, 0))), {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.le(k.v(i), k.pv(f, 0)))}, {k.cl(k.sub(k.pv(f, 0), k.v(i)))},
-                            k.blk({k.asg(i, k.add(k.v(i), N(k, "1")))})),
-                      k.ret(k.v(i))});
-    k.done(f);
-    return read->loc;
-  };
+    // 0: p is null, 1: x never written
+    const auto bad_condition = [=](Kit& k, int mode) -> SrcLoc
+    {
+        Function* f = k.fn("f", k.i32, {{"n", k.i32}});
+        k.req(f, k.range(k.F(f, 0), k.i32, "0", "100"));
+        Var* x = k.cell(f, "x", k.i32);
+        Var* p = k.local(f, "p", PT(k));
+        Var* i = k.local(f, "i", k.i32);
+        const Expr* read = mode == 0 ? rd(k, p) : k.v(x);
+        f->body = k.blkc({k.decl(x, nullptr), k.decl(p, mode == 0 ? k.nul(PT(k)) : k.addr(x)), k.decl(i, N(k, "0")),
+                          k.whl(k.land(k.lt(k.v(i), k.pv(f, 0)), k.lt(read, k.pv(f, 0))),
+                                {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.le(k.v(i), k.pv(f, 0)))},
+                                {k.cl(k.sub(k.pv(f, 0), k.v(i)))}, k.blk({k.asg(i, k.add(k.v(i), N(k, "1")))})),
+                          k.ret(k.v(i))});
+        k.done(f);
+        return read->loc;
+    };
     lc("mem_loop_condition_null", "while (*p < n) with p == NULL: the condition's own check is an obligation",
        [=](Kit& k)
        {
@@ -642,33 +662,42 @@ void define_loops_and_jumps()
 
     // ---- item 7: a body cell, continue and break ----
     // while (i < n) { int x = 1; int *p = &x; i += 1; if (i == 7) { total += *p; [dispose(p);] continue; } total += *p; } return total;   ensures r == n
-    const auto body_cell = [=](Kit& k, int mode, SrcLoc* at) {  // 0: fine, 1: consumed before the continue, 2: consumed before the closing brace
-    Function* dispose = make_dispose(k);
-    Function* f = k.fn("f", k.i32, {{"n", k.i32}});
-    k.req(f, k.range(k.F(f, 0), k.i32, "0", "100"));
-    k.ens(f, k.eq(k.R(f), k.F(f, 0)));
-    Var* total = k.local(f, "total", k.i32);
-    Var* i = k.local(f, "i", k.i32);
-    Var* x = k.cell(f, "x", k.i32);
-    Var* p = k.local(f, "p", PT(k));
-    const int id = k.jid();
-    const Stmt* cont = k.cnt(id);
-    std::vector<const Stmt*> then = {k.asg(total, k.add(k.v(total), rd(k, p)))};
-    if (mode == 1){ then.push_back(k.es(k.call(dispose, {k.pn(p)})));
-}
-    then.push_back(cont);
-    std::vector<const Stmt*> inner = {k.decl(x, N(k, "1")), k.decl(p, k.addr(x)), k.asg(i, k.add(k.v(i), N(k, "1"))),
-                                      k.iff(k.eq(k.v(i), N(k, "7")), k.blk(then)), k.asg(total, k.add(k.v(total), rd(k, p)))};
-    if (mode == 2){ inner.push_back(k.es(k.call(dispose, {k.pn(p)})));
-}
-    const Stmt* body = k.blkc(inner);
-    *at = mode == 1 ? cont->loc : body->end_loc;
-    f->body = k.blk({k.decl(total, N(k, "0")), k.decl(i, N(k, "0")),
-                     k.loop(k.lt(k.v(i), k.pv(f, 0)), {k.cl(k.land(k.range(k.v(i), k.i32, "0", "100"), k.land(k.le(k.v(i), k.pv(f, 0)), k.eq(k.v(total), k.v(i)))))},
-                            {k.cl(k.sub(k.pv(f, 0), k.v(i)))}, body, nullptr, LF::While, id),
-                     k.ret(k.v(total))});
-    k.done(f);
-  };
+    // 0: fine, 1: consumed before the continue, 2: consumed before the closing brace
+    const auto body_cell = [=](Kit& k, int mode, SrcLoc* at)
+    {
+        Function* dispose = make_dispose(k);
+        Function* f = k.fn("f", k.i32, {{"n", k.i32}});
+        k.req(f, k.range(k.F(f, 0), k.i32, "0", "100"));
+        k.ens(f, k.eq(k.R(f), k.F(f, 0)));
+        Var* total = k.local(f, "total", k.i32);
+        Var* i = k.local(f, "i", k.i32);
+        Var* x = k.cell(f, "x", k.i32);
+        Var* p = k.local(f, "p", PT(k));
+        const int id = k.jid();
+        const Stmt* cont = k.cnt(id);
+        std::vector<const Stmt*> then = {k.asg(total, k.add(k.v(total), rd(k, p)))};
+        if (mode == 1)
+        {
+            then.push_back(k.es(k.call(dispose, {k.pn(p)})));
+        }
+        then.push_back(cont);
+        std::vector<const Stmt*> inner = {
+            k.decl(x, N(k, "1")), k.decl(p, k.addr(x)), k.asg(i, k.add(k.v(i), N(k, "1"))),
+            k.iff(k.eq(k.v(i), N(k, "7")), k.blk(then)), k.asg(total, k.add(k.v(total), rd(k, p)))};
+        if (mode == 2)
+        {
+            inner.push_back(k.es(k.call(dispose, {k.pn(p)})));
+        }
+        const Stmt* body = k.blkc(inner);
+        *at = mode == 1 ? cont->loc : body->end_loc;
+        f->body = k.blk({k.decl(total, N(k, "0")), k.decl(i, N(k, "0")),
+                         k.loop(k.lt(k.v(i), k.pv(f, 0)),
+                                {k.cl(k.land(k.range(k.v(i), k.i32, "0", "100"),
+                                             k.land(k.le(k.v(i), k.pv(f, 0)), k.eq(k.v(total), k.v(i)))))},
+                                {k.cl(k.sub(k.pv(f, 0), k.v(i)))}, body, nullptr, LF::While, id),
+                         k.ret(k.v(total))});
+        k.done(f);
+    };
     lc("mem_loop_body_cell_continue",
        "a cell declared in the loop body is a new block per iteration; a continue leaves it",
        [=](Kit& k)
@@ -769,8 +798,8 @@ void define_loops_and_jumps()
        "the callee kept *p before the return: the return does not give back what its ensures promises",
        [=](Kit& k)
        {
-           k.fail_only("permission", return_owns(k, true), 6,
-                       1); // of the 6 rows of the return check, the value: perm(p.v_int) == write
+           // of the 6 rows of the return check, the value: perm(p.v_int) == write
+           k.fail_only("permission", return_owns(k, true), 6, 1);
        });
     // int pass(int a, int n) { int *pa = &a; i = 0; while (i < n) { if (i == 5) { [dispose(pa);] return i; } i += 1; } return *pa; }   (a &param cell)
     const auto return_param_cell = [=](Kit& k, bool consumed) -> SrcLoc
@@ -780,9 +809,8 @@ void define_loops_and_jumps()
         k.req(f, k.land(k.range(k.F(f, 0), k.i32, "0", "100"), k.range(k.F(f, 1), k.i32, "0", "100")));
         if (!consumed)
         {
-            k.ens(f,
-                  k.range(k.R(f), k.i32, "0",
-                          "100")); // a callee that owns an int cell havocs the cell: the twin states nothing about it
+            // a callee that owns an int cell havocs the cell: the twin states nothing about it
+            k.ens(f, k.range(k.R(f), k.i32, "0", "100"));
         }
         f->mark_address_taken(f->param_var(0));
         Var* pa = k.local(f, "pa", PT(k));
@@ -850,33 +878,43 @@ void define_loops_and_jumps()
 
     // ---- item 3 and 6: a pointer the loop assigns ----
     // int x = 1; int y = 2; int *p = &x; while (i > 0) invariant [p == &x || p == &y] { s += *p; p = (i % 2 == 0) ? &y : &x; i -= 1; } return *p;   ensures r == 1 || r == 2
-    const auto pick = [=](Kit& k, int mode, std::vector<SrcLoc>* at) {  // mode 0: no clause on p, 1: p == &x || p == &y, 2: p == &x
-    Function* f = k.fn("f", k.i32, {{"n", k.i32}});
-    k.req(f, k.range(k.F(f, 0), k.i32, "0", "100"));
-    k.ens(f, k.lor(k.eq_c(k.R(f), k.i32, "1"), k.eq_c(k.R(f), k.i32, "2")));
-    Var* x = k.cell(f, "x", k.i32);
-    Var* y = k.cell(f, "y", k.i32);
-    Var* p = k.local(f, "p", PT(k));
-    Var* s = k.local(f, "s", k.i32);
-    Var* i = k.local(f, "i", k.i32);
-    const Expr* in_body = rd(k, p);
-    const Expr* after = rd(k, p);
-    at->push_back(in_body->loc);
-    at->push_back(after->loc);
-    std::vector<Clause> extra = {k.cl(k.land(k.ge_c(k.v(s), k.i32, "0"), k.le(k.v(s), k.mul(N(k, "2"), k.sub(k.pv(f, 0), k.v(i)))))) };
-    // s <= 2 * (n - i): the sum so far (an invariant that holds by the steps below)
-    if (mode == 1){ extra.push_back(k.cl(k.lor(k.eq(k.pn(p), k.addr(x)), k.eq(k.pn(p), k.addr(y)))));
-}
-    if (mode == 2) {
-      extra.push_back(k.cl(k.eq(k.pn(p), k.addr(x))));
-      at->push_back(extra.back().loc);
-    }
-    f->body = k.blkc({k.decl(x, N(k, "1")), k.decl(y, N(k, "2")), k.decl(p, k.addr(x)), k.decl(s, N(k, "0")), k.decl(i, k.pv(f, 0)),
-                      count_down(k, i, extra,
-                                 k.blk({k.asg(s, k.add(k.v(s), in_body)), k.asg(p, k.cond(k.eq(k.rem(k.v(i), N(k, "2")), N(k, "0")), k.addr(y), k.addr(x))), step(k, i)})),
-                      k.ret(after)});
-    k.done(f);
-  };
+    // mode 0: no clause on p, 1: p == &x || p == &y, 2: p == &x
+    const auto pick = [=](Kit& k, int mode, std::vector<SrcLoc>* at)
+    {
+        Function* f = k.fn("f", k.i32, {{"n", k.i32}});
+        k.req(f, k.range(k.F(f, 0), k.i32, "0", "100"));
+        k.ens(f, k.lor(k.eq_c(k.R(f), k.i32, "1"), k.eq_c(k.R(f), k.i32, "2")));
+        Var* x = k.cell(f, "x", k.i32);
+        Var* y = k.cell(f, "y", k.i32);
+        Var* p = k.local(f, "p", PT(k));
+        Var* s = k.local(f, "s", k.i32);
+        Var* i = k.local(f, "i", k.i32);
+        const Expr* in_body = rd(k, p);
+        const Expr* after = rd(k, p);
+        at->push_back(in_body->loc);
+        at->push_back(after->loc);
+        std::vector<Clause> extra = {
+            k.cl(k.land(k.ge_c(k.v(s), k.i32, "0"), k.le(k.v(s), k.mul(N(k, "2"), k.sub(k.pv(f, 0), k.v(i))))))};
+        // s <= 2 * (n - i): the sum so far (an invariant that holds by the steps below)
+        if (mode == 1)
+        {
+            extra.push_back(k.cl(k.lor(k.eq(k.pn(p), k.addr(x)), k.eq(k.pn(p), k.addr(y)))));
+        }
+        if (mode == 2)
+        {
+            extra.push_back(k.cl(k.eq(k.pn(p), k.addr(x))));
+            at->push_back(extra.back().loc);
+        }
+        f->body =
+            k.blkc({k.decl(x, N(k, "1")), k.decl(y, N(k, "2")), k.decl(p, k.addr(x)), k.decl(s, N(k, "0")),
+                    k.decl(i, k.pv(f, 0)),
+                    count_down(k, i, extra,
+                               k.blk({k.asg(s, k.add(k.v(s), in_body)),
+                                      k.asg(p, k.cond(k.eq(k.rem(k.v(i), N(k, "2")), N(k, "0")), k.addr(y), k.addr(x))),
+                                      step(k, i)})),
+                    k.ret(after)});
+        k.done(f);
+    };
     lc("mem_loop_pick_pointer",
        "a pointer the loop assigns, used before the reassignment and after the loop, with p == &x || p == &y in the invariant",
        [=](Kit& k)

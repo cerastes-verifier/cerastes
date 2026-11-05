@@ -133,8 +133,9 @@ bool has_pointer_leaf(const Type& t)
     }
     return false;
 }
-const char* kPoison =
-    "__struct_value__"; // the E of a struct-typed LV: a value of a struct is its `leaves`; one that reaches another consumer prints this (decision 0044 item 2)
+// the E of a struct-typed LV: a value of a struct is its `leaves`; one that reaches another consumer prints this
+// (decision 0044 item 2)
+const char* kPoison = "__struct_value__";
 // The Viper type of a VIR type: a pointer is a Ref (decision 0032 item 5).
 // A struct has no value of its own (decision 0043 item 3); its only Viper variable is the Ref of its slot, which is what a struct local holds.
 low::LType ltype(const Type& t)
@@ -638,10 +639,10 @@ struct OblCore
     E cond;
     low::Meta meta;
     size_t seq = 0; // creation order within the Full (items of one slot keep it)
-    int term_of =
-        -1; // the fixed point (a call) whose explicit termination check this is (decision 0021 item 4), else -1
-    int flag_of =
-        -1; // the local (Var id) whose `uninitialized` flag this reads, else -1: a read of that local (decision 0025 item 1)
+    // the fixed point (a call) whose explicit termination check this is (decision 0021 item 4), else -1
+    int term_of = -1;
+    // the local (Var id) whose `uninitialized` flag this reads, else -1: a read of that local (decision 0025 item 1)
+    int flag_of = -1;
     // Non-empty: a statement item (a case split, decision 0037 item 8), emitted in the item's place instead of an assert; `cond` and `meta` are unused.
     std::vector<low::LStmt> stmts;
 };
@@ -655,14 +656,14 @@ struct CallItem
 {
     std::string method;
     std::string target; // empty for a void call
-    std::vector<std::string>
-        targets; // a struct result: one target per leaf (decision 0044 item 4); `target` is then empty
+    // a struct result: one target per leaf (decision 0044 item 4); `target` is then empty
+    std::vector<std::string> targets;
     std::vector<E> args;
     low::Check check;
     bool has_termination = false;
     low::Check termination;
-    std::vector<low::LStmt>
-        after; // emitted right after the call: the case splits on a pointer result (decision 0037 item 3)
+    // emitted right after the call: the case splits on a pointer result (decision 0037 item 3)
+    std::vector<low::LStmt> after;
 };
 
 // One effect of a full expression (decision 0020 items 5 and 7, decision 0021 item 3, decision 0025 item 2).  The FIXED POINTS are the
@@ -678,9 +679,13 @@ enum class EffectKind
 {
     Call,  // a call (CallItem): a fixed point
     Write, // `name := value`, then `flag := true` when `flag` is set: an assignment used as a value
-    Snapshot, // `name := value` where `name` is a fresh temporary and `value` the current value of a local this expression writes
-    Branch, // `stmts`: the guarded operand of `&&`, `||` or `?:` with its own effects, as an `if`, assigning a temporary
-    Store // `stmts`: a write of a cell used as a value (decision 0039 item 2): the receiver copy and the two field writes; movable like a Write
+    // `name := value` where `name` is a fresh temporary and `value` the current value of a local this expression writes
+    Snapshot,
+    // `stmts`: the guarded operand of `&&`, `||` or `?:` with its own effects, as an `if`, assigning a temporary
+    Branch,
+    // `stmts`: a write of a cell used as a value (decision 0039 item 2): the receiver copy and the two field writes;
+    // movable like a Write
+    Store
 };
 
 // The position of an access in the expression tree: the nodes from the root of its full expression to the node that makes the access, each with
@@ -696,8 +701,8 @@ struct MemTag
     bool call = false;
     bool write = false;
     Path path;
-    std::vector<Path>
-        after; // the access reads through values computed at these nodes (a shared address): it follows what is inside them
+    // the access reads through values computed at these nodes (a shared address): it follows what is inside them
+    std::vector<Path> after;
 };
 
 struct EffectCore
@@ -711,10 +716,11 @@ struct EffectCore
     std::vector<low::LStmt> stmts;
     int fixed = -1; // the id of the fixed point (a Call, or a Branch with a call); -1 for the movable items
     size_t seq = 0; // creation order within the Full
-    std::set<int> reads,
-        writes; // the locals (Var ids) a snapshot or write, or a branch's inner effects, read and write; the keys (< 0) of cell accesses
-    std::vector<MemTag>
-        tags; // the cell accesses and memory calls of the effect, or of a branch's inner effects (decision 0039 item 4)
+    // the locals (Var ids) a snapshot or write, or a branch's inner effects, read and write; the keys (< 0) of cell
+    // accesses
+    std::set<int> reads, writes;
+    // the cell accesses and memory calls of the effect, or of a branch's inner effects (decision 0039 item 4)
+    std::vector<MemTag> tags;
 };
 template <class S>
 struct BasicEffect : EffectCore
@@ -784,8 +790,8 @@ FlatFull project(const Full& full, Half h)
 // How Local/Formal/Result are read.
 struct Env
 {
-    std::vector<E>
-        formals; // Formal(k): a name (contract of the function itself) or an argument value (null for a by-value struct parameter)
+    // Formal(k): a name (contract of the function itself) or an argument value (null for a by-value struct parameter)
+    std::vector<E> formals;
     std::vector<Deps> formal_dep; // the set of each (empty: none)
     E result;                     // Result (null for a struct result)
     // Decision 0044 items 3-4: the leaves of each by-value struct parameter (empty for the others), and of a struct result.
@@ -1022,7 +1028,9 @@ private:
                                              low::bin(BinOp::And, low::bin(BinOp::Ne, r, low::null_()),
                                                       low::bin(BinOp::Eq, r, low::dom("loc", {b, low::int_lit("0")}))),
                                              low::bin(BinOp::Eq, low::dom("len", {b}), low::int_lit("1")))));
-        { // the slot facts, right after the root facts: one clause per pair `X != Y`, the root's pairs first, then each nested slot's, depth first (S33 (i))
+        // the slot facts, right after the root facts: one clause per pair `X != Y`, the root's pairs first, then each
+        // nested slot's, depth first (S33 (i))
+        {
             std::vector<std::pair<E, E>> pairs;
             slot_pairs(r, st, pairs);
             for (const auto& [x, y] : pairs)
@@ -1099,8 +1107,10 @@ private:
         {
             const E recv = global_ref(g.id);
             const Type& t = g.type;
+            // decision 0044 item 8: one row, a conjunct per leaf (each with its own initial value), then the one
+            // liveness cell
             if (t.is_struct())
-            { // decision 0044 item 8: one row, a conjunct per leaf (each with its own initial value), then the one liveness cell
+            {
                 E all;
                 const std::vector<StructLeaf> ls = struct_leaves(*t.struct_type);
                 for (size_t i = 0; i < ls.size(); ++i)
@@ -1438,8 +1448,9 @@ private:
         // The first leaf (`live`) also carries the block's free token: the snapshot `kt` of its permission, guarded by `gt`, and `tptr` is the pointee type.
         bool heap = false;
         std::string kt;
-        std::string
-            ktv; // decision 0050 item 5 (a vlibc heap program): the snapshot of the token's value, taken when `kt > none` (false otherwise); empty: none
+        // decision 0050 item 5 (a vlibc heap program): the snapshot of the token's value, taken when `kt > none` (false
+        // otherwise); empty: none
+        std::string ktv;
         E gt;
         Type ptee;
     };
@@ -1458,8 +1469,8 @@ private:
         std::string text; // `*q`, or `q` for Live
         SrcLoc loc;
         std::string av, ad, al; // the ghost amounts
-        std::string
-            vs; // the value snapshot (decision 0040 item 5, "Values"); empty: none (the loop assigns q, or Live)
+        // the value snapshot (decision 0040 item 5, "Values"); empty: none (the loop assigns q, or Live)
+        std::string vs;
         bool reach = false; // a write in the loop can reach the value
         // Decision 0045 item 12.  An atom on a place reached through a load is read in the invariant through the loop's places (`q` is that chain); the body names it by a ghost
         // Ref taken at the top of each iteration (`qb`).  A struct atom is one entry per leaf cell (`q` the leaf's Ref, `lq` the struct slot, `lpt` its pointer type): the
@@ -1507,8 +1518,8 @@ private:
     {
         switch (s.kind)
         {
-            case Stmt::Kind::
-                Decl: // a cell's flag is a field of the cell (decision 0032 item 4, 0019 item 13), not a local
+            // a cell's flag is a field of the cell (decision 0032 item 4, 0019 item 13), not a local
+            case Stmt::Kind::Decl:
                 if (s.expr == nullptr && s.var != nullptr && !s.var->address_taken)
                 {
                     out.insert(s.var->id);
@@ -1619,15 +1630,15 @@ private:
         o.guard = guard;
         o.cond = std::move(cond);
         o.meta = std::move(m);
-        o.dep = join(join(gdep, cdep),
-                     floor_); // floor_: after the left operand of a comma, what it depends on came first (E6)
+        // floor_: after the left operand of a comma, what it depends on came first (E6)
+        o.dep = join(join(gdep, cdep), floor_);
         if (exact_set != nullptr)
         {
             o.dep.ex = join(o.dep.ex, *exact_set);
             if (call_pre_both_)
             {
-                o.dep.base =
-                    join(o.dep.base, *exact_set); // decision 0039 item 2 (audit S3): the arguments write a cell
+                // decision 0039 item 2 (audit S3): the arguments write a cell
+                o.dep.base = join(o.dep.base, *exact_set);
             }
         }
         o.seq = full.next_seq++;
@@ -1654,14 +1665,13 @@ private:
     {
         if (t.is_ptr())
         {
-            return "ptr_" +
-                   cell_suffix(
-                       *t.pointee); // a pointer-typed object: its field is named by its pointee, at any depth (decision 0040 item 2)
+            // a pointer-typed object: its field is named by its pointee, at any depth (decision 0040 item 2)
+            return "ptr_" + cell_suffix(*t.pointee);
         }
         if (t.is_struct())
         {
-            return struct_suffix(
-                *t.struct_type); // a pointer to a struct: `ptr_struct_<n>_<tag>` (decision 0043 item 3); a struct has no cell of its own
+            // a pointer to a struct: `ptr_struct_<n>_<tag>` (decision 0043 item 3); a struct has no cell of its own
+            return struct_suffix(*t.struct_type);
         }
         if (t.is_bool())
         {
@@ -1958,8 +1968,10 @@ private:
         {
             const Var& x = *cells[k];
             const E r = low::var(var_name(x));
+            // decision 0043 item 4: every leaf, then the liveness cell, checked at `write` (one atomic assertion each)
+            // and exhaled together
             if (x.type.is_struct())
-            { // decision 0043 item 4: every leaf, then the liveness cell, checked at `write` (one atomic assertion each) and exhaled together
+            {
                 E gone;
                 for (const Cell& c : leaf_cells(r, *x.type.struct_type, x.name, false))
                 {
@@ -2225,8 +2237,8 @@ private:
         {
             return contract_read(e, env, guard, gdep, full);
         }
-        const bool member =
-            e.a->kind == Expr::Kind::MemberAddr; // `p->x`: the null check is the chain's, on its root pointer
+        // `p->x`: the null check is the chain's, on its root pointer
+        const bool member = e.a->kind == Expr::Kind::MemberAddr;
         if (member)
         {
             place_nodes_[e.a] = e.loc;
@@ -2301,8 +2313,8 @@ private:
         }
         if (with_wf)
         {
-            live = low::not_(low::bin(low::BinOp::Or, low::not_(live),
-                                      low::not_(wf_expr(v.e, &operand.type)))); // one atomic assertion
+            // one atomic assertion
+            live = low::not_(low::bin(low::BinOp::Or, low::not_(live), low::not_(wf_expr(v.e, &operand.type))));
         }
         obl(full, guard, gdep, low::implies(low::bin(low::BinOp::Ne, v.e, low::null_()), live), v.dep,
             meta("lifetime", at != nullptr ? *at : operand.loc,
@@ -2370,9 +2382,8 @@ private:
         target.addr = s.addr;
         target.loc = s.loc;
         target.st = &st;
-        const bool member =
-            s.addr->kind ==
-            Expr::Kind::MemberAddr; // `p->t = f();`: the null check is the chain's (decision 0043 item 5)
+        // `p->t = f();`: the null check is the chain's (decision 0043 item 5)
+        const bool member = s.addr->kind == Expr::Kind::MemberAddr;
         if (member)
         {
             place_nodes_[s.addr] = s.loc;
@@ -2437,13 +2448,13 @@ private:
             struct_store(s, out);
             return;
         }
-        const bool compound = shares_node(
-            *s.expr, s.addr); // the value reads `*addr` through the same node: the pointer is evaluated once
+        // the value reads `*addr` through the same node: the pointer is evaluated once
+        const bool compound = shares_node(*s.expr, s.addr);
         StoreTarget target;
         target.addr = s.addr;
         target.loc = s.loc;
-        const bool member =
-            s.addr->kind == Expr::Kind::MemberAddr; // `p->x = e;`: the null check is the chain's (decision 0043 item 5)
+        // `p->x = e;`: the null check is the chain's (decision 0043 item 5)
+        const bool member = s.addr->kind == Expr::Kind::MemberAddr;
         if (member)
         {
             place_nodes_[s.addr] = s.loc;
@@ -2512,8 +2523,8 @@ private:
         Type base_type;             // its type (a pointer)
         bool has_load = false;      // the steps contain a heap read
         int local = 0;              // the function's own number of this entry
-        int lb_of =
-            -1; // >= 0: this key is the LOOP-ENTRY snapshot `lb` of the derived key `lb_of` (decision 0045 item 10)
+        // >= 0: this key is the LOOP-ENTRY snapshot `lb` of the derived key `lb_of` (decision 0045 item 10)
+        int lb_of = -1;
     };
     static bool is_derived_key(int k)
     {
@@ -3465,8 +3476,9 @@ private:
     {
         if (site_is_global(s) || !s.via.empty())
         {
-            return site_text(
-                s); // a global's call text is its own name, a place reached through steps is the callee's spelling (decision 0045)
+            // a global's call text is its own name, a place reached through steps is the callee's spelling (decision
+            // 0045)
+            return site_text(s);
         }
         const std::string& txt = site_arg(s, call).c_text;
         const std::string base = txt.empty() ? std::string() : (txt[0] == '&' ? txt.substr(1) : "*" + txt);
@@ -3591,9 +3603,8 @@ private:
         {
             return false; // two globals are two `unique` blocks (decision 0041 item 8)
         }
-        return shares_field(
-            a,
-            b); // a cell of one field in both (decision 0043 item 9: the leaves of a struct atom count, not its pointee type)
+        // a cell of one field in both (decision 0043 item 9: the leaves of a struct atom count, not its pointee type)
+        return shares_field(a, b);
     }
 
     // Decision 0045 item 7 (owner question 108): the amount an `ensures` atom returns.  Places without a load return the amount of their `requires` partner (decision
@@ -3843,10 +3854,8 @@ private:
             const bool plain = mk == InitMarker::None || (mk == InitMarker::MustInit && site.in_ensures);
             if (t.is_struct())
             {
-                r = low::and_(
-                    r,
-                    struct_lens(
-                        p, *t.struct_type)); // the member blocks have length 1 (a leaf's address is then in its block)
+                // the member blocks have length 1 (a leaf's address is then in its block)
+                r = low::and_(r, struct_lens(p, *t.struct_type));
             }
             for (const Cell& c : site_cells(site, p))
             {
@@ -3964,8 +3973,8 @@ private:
         }
         if (key_is_global(param))
         {
-            return "hv_g" + std::to_string(param - kGlobalKeyBase) + mem +
-                   (post ? "_post" : "_pre"); // a global's read (decision 0041)
+            // a global's read (decision 0041)
+            return "hv_g" + std::to_string(param - kGlobalKeyBase) + mem + (post ? "_post" : "_pre");
         }
         return param < 0 ? "hv_r" + mem + "_post" : "hv_" + std::to_string(param) + mem + (post ? "_post" : "_pre");
     }
@@ -4170,7 +4179,9 @@ private:
                 ds.push_back(d);
             }
         }
-        { // decision 0047 item 4: an `owns_block` site frames the reads of the cells of its block (`r->balance == 0` after `owns_block(r)`), as an `owns` atom does
+        // decision 0047 item 4: an `owns_block` site frames the reads of the cells of its block (`r->balance == 0`
+        // after `owns_block(r)`), as an `owns` atom does
+        {
             const FnBlocks& fb = blocks_of(*cf_);
             for (size_t i = 0; i < fb.sites.size(); ++i)
             {
@@ -4291,8 +4302,8 @@ private:
         Path path;
         SrcLoc loc;
         std::vector<Path> after; // see MemTag::after
-        const void* owner =
-            nullptr; // the Full the access was recorded in; a closed branch's accesses move to the enclosing one
+        // the Full the access was recorded in; a closed branch's accesses move to the enclosing one
+        const void* owner = nullptr;
         struct Atom
         {
             E place, guard;
@@ -4426,8 +4437,10 @@ private:
         {
             return key_id("v:" + std::to_string(a.var->id));
         }
+        // decision 0043 item 12: a member of a local or global object is the object `root.path` (`s.x` twice is one
+        // object, `s.x` and `s.y` two)
         if (a.kind == Expr::Kind::MemberAddr)
-        { // decision 0043 item 12: a member of a local or global object is the object `root.path` (`s.x` twice is one object, `s.x` and `s.y` two)
+        {
             std::vector<int> path;
             const Expr* root = member_root(&a, &path);
             std::string k;
@@ -4622,8 +4635,8 @@ private:
     // a sequence point between them, as 0020 item 4's stored-expression rule has it: the value computations are ordered, the side effects are not.
     static int order_rel(const Path& p, bool pw, const Path& q, bool qw, const std::vector<Path>& q_after)
     {
-        for (const Path& u :
-             q_after) // `q` reads through a value computed at u: what is inside u comes first (audit S2)
+        // `q` reads through a value computed at u: what is inside u comes first (audit S2)
+        for (const Path& u : q_after)
         {
             if (u.size() <= p.size() && std::equal(u.begin(), u.end(), p.begin()))
             {
@@ -4779,8 +4792,8 @@ private:
                                                      (k.owns ? " may change, " : " reads, ")
                                                : "accesses " + quoted(x.text, "the object `*(...)` designates") +
                                                      ", which the call to " + callee + " may change, ";
-                    if (x.field ==
-                        "lv") // decision 0047 item 9: a use of a pointer beside a call that may end the lifetime of its object
+                    // decision 0047 item 9: a use of a pointer beside a call that may end the lifetime of its object
+                    if (x.field == "lv")
                     {
                         what = "uses " + quoted(x.text, "a pointer") + ", whose object the call to " + callee +
                                " may end, ";
@@ -4861,9 +4874,8 @@ private:
         fx.value = guard ? low::ite(guard, value, inv_dummy(t)) : value;
         if (t.is_ptr())
         {
-            result_splits(
-                t, low::var(tmp),
-                fx.stmts); // a pointer loaded from a cell is split like a call's pointer result (decision 0040 item 2, audit B1)
+            // a pointer loaded from a cell is split like a call's pointer result (decision 0040 item 2, audit B1)
+            result_splits(t, low::var(tmp), fx.stmts);
         }
         fx.deps = slot;
         fx.seq = full.next_seq++;
@@ -5063,9 +5075,8 @@ private:
         }
         if (t.is_ptr())
         {
-            ptr_use(
-                *e.a, stored, guard, gdep, full,
-                true); // a pointer stored in a cell is a use of its value, and must be well-formed (decision 0040 item 2)
+            // a pointer stored in a cell is a use of its value, and must be well-formed (decision 0040 item 2)
+            ptr_use(*e.a, stored, guard, gdep, full, true);
         }
         const Deps operands = since(full, effect_from, obl_from);
         const auto la = full.last_access.find(key);
@@ -5080,8 +5091,9 @@ private:
         acc.write = true;
         acc.place = addr.e;
         acc.text = text;
-        acc.dep =
-            addr.dep; // what the place value uses, not the value computation: an obligation naming this write must not follow the stored value's calls (0021 item 4)
+        // what the place value uses, not the value computation: an obligation naming this write must not follow the
+        // stored value's calls (0021 item 4)
+        acc.dep = addr.dep;
         acc.loc = e.loc;
         register_access(std::move(acc), full, nullptr);
         if (store && !member)
@@ -5193,8 +5205,8 @@ private:
                 {
                     return snapshot(e, guard, gdep, full);
                 }
-                if (flagged(
-                        *e.var)) // a read of a local declared without an initializer: its flag must be set (decision 0019 item 4)
+                // a read of a local declared without an initializer: its flag must be set (decision 0019 item 4)
+                if (flagged(*e.var))
                 {
                     obl(full, guard, gdep, low::var(flag_name(*e.var)), {},
                         meta("uninitialized", e.loc,
@@ -5308,8 +5320,8 @@ private:
             }
             case Expr::Kind::MemberAddr:
                 return member_addr(e, env, guard, gdep, full);
-            case Expr::Kind::
-                GlobalAddr: // `&g`: the address of the global's cell, a pointer value with no obligation (decision 0041 item 6)
+            // `&g`: the address of the global's cell, a pointer value with no obligation (decision 0041 item 6)
+            case Expr::Kind::GlobalAddr:
                 if (e.global == nullptr)
                 {
                     internal_error(e.loc, "the address of a global without a global reached lowering");
@@ -5323,8 +5335,10 @@ private:
             case Expr::Kind::Aggregate:
                 return aggregate(e, env, guard, gdep, full);
             case Expr::Kind::Atom:
+                // a written atom's rows are the loop's own (decision 0040 item 5); its own loads are reads of the
+                // invariant, framed like any (decision 0045 item 12)
                 if (cmode_ == CMode::Inv)
-                { // a written atom's rows are the loop's own (decision 0040 item 5); its own loads are reads of the invariant, framed like any (decision 0045 item 12)
+                {
                     if (e.a != nullptr && reads_heap(*e.a))
                     {
                         lower(*e.a, env, guard, gdep, full);
@@ -5421,8 +5435,8 @@ private:
     {
         const auto pn = place_nodes_.find(&e);
         const bool place = pn != place_nodes_.end();
-        const SrcLoc at =
-            place ? pn->second : e.loc; // a place access is reported at its consumer (the read, the store), as `*p` is
+        // a place access is reported at its consumer (the read, the store), as `*p` is
+        const SrcLoc at = place ? pn->second : e.loc;
         if (place)
         {
             place_nodes_.erase(pn);
@@ -5565,8 +5579,8 @@ private:
             ptr_use(*e.b, b, guard, gdep, full);
             if (cmode_ == CMode::None)
             {
-                one_past_end(e, a, b, guard, gdep, dep,
-                             full); // in a contract `==` is identity in the model (decision 0037 item 12)
+                // in a contract `==` is identity in the model (decision 0037 item 12)
+                one_past_end(e, a, b, guard, gdep, dep, full);
             }
         }
         switch (e.bop)
@@ -6003,8 +6017,10 @@ private:
                 const std::string pl = quoted(ss[i].place, "the object the pointer points to");
                 if (site_key(*ss[i].site) == site_key(*ss[j].site))
                 { // one parameter under two atoms: their guards must exclude each other (decision 0039 item 7)
+                    // two member places of one root are two cells, unless one holds the other (the checker refuses
+                    // that: audit B1)
                     if (!same_place(*ss[i].site, *ss[j].site))
-                    { // two member places of one root are two cells, unless one holds the other (the checker refuses that: audit B1)
+                    {
                         if (paths_nested(ss[i].site->path, ss[j].site->path))
                         {
                             internal_error(e.loc,
@@ -6258,12 +6274,11 @@ private:
             args_write_cell = args_write_cell || writes_cell(a);
         }
         const bool saved_both = call_pre_both_;
-        call_pre_both_ =
-            args_write_cell; // audit S3: the arguments write a cell, so the checks of the call follow the write in both halves
+        // audit S3: the arguments write a cell, so the checks of the call follow the write in both halves
+        call_pre_both_ = args_write_cell;
         std::vector<E> amounts = call_atoms(e, callee, args, cenv, pre, full);
-        block_call_rows(
-            e, callee, cenv, args, pre,
-            full); // decision 0047 item 6: the free rows, or the rows of the `owns_block` sites the callee takes
+        // decision 0047 item 6: the free rows, or the rows of the `owns_block` sites the callee takes
+        block_call_rows(e, callee, cenv, args, pre, full);
         for (size_t k = 0; k < e.args.size(); ++k)
         {
             // A pointer argument is a use (decision 0032 item 6), except the pointer a `free` takes: its token and liveness rows check more, so a second free is `invalid-free`
@@ -6418,8 +6433,9 @@ private:
         fx.fixed = id;
         fx.deps = pre;
         fx.seq = full.next_seq++;
-        bool ends_lifetime =
-            false; // a call with a consuming `owns_block` site (free's view included) ends the lifetime of a block (decision 0047 item 9)
+        // a call with a consuming `owns_block` site (free's view included) ends the lifetime of a block (decision 0047
+        // item 9)
+        bool ends_lifetime = false;
         if (heap_)
         {
             for (const AtomSite& bs : blocks_of(callee).sites)
@@ -6589,8 +6605,9 @@ private:
             }
             if (with_wf)
             {
-                live = low::not_(low::bin(low::BinOp::Or, low::not_(live),
-                                          low::not_(wf_expr(v.leaves[i], &ls[i].type)))); // one atomic assertion
+                // one atomic assertion
+                live =
+                    low::not_(low::bin(low::BinOp::Or, low::not_(live), low::not_(wf_expr(v.leaves[i], &ls[i].type))));
             }
             const std::string text = operand.c_text.empty() ? std::string() : operand.c_text + "." + ls[i].text;
             obl(full, guard, gdep, low::implies(low::bin(low::BinOp::Ne, v.leaves[i], low::null_()), live), v.dep,
@@ -6737,12 +6754,8 @@ private:
                 meta("uninitialized", e.loc, "`" + e.var->name + "` may be read here before it is given a value"));
             Obl& check = full.obls.back();
             check.flag_of = id;
-            touch(
-                full, id,
-                opt_.drop_flag_access
-                    ? slot
-                    : check
-                          .dep); // gdep + slot + floor_: every later access follows the check (hook: only the snapshot's)
+            // gdep + slot + floor_: every later access follows the check (hook: only the snapshot's)
+            touch(full, id, opt_.drop_flag_access ? slot : check.dep);
         }
         else
         {
@@ -7307,8 +7320,8 @@ private:
         FlatFull flat = project(full, Half::Exact);
         std::vector<Ids> sets = family(flat);
         size_t broken = first_break(sets);
-        const bool exact_chain =
-            broken == kChain && !opt_.force_base_sets; // self-test hook force_base_sets: skip step 1
+        // self-test hook force_base_sets: skip step 1
+        const bool exact_chain = broken == kChain && !opt_.force_base_sets;
         if (!exact_chain)
         {
             flat = project(full, Half::Base);
@@ -7862,8 +7875,8 @@ private:
         const Var* var = nullptr;   // a cell by name
         const Expr* addr = nullptr; // or the address of `*addr = ...`, the first root
         SrcLoc loc;
-        const StructType* st =
-            nullptr; // the struct of a struct store (decision 0044 item 5): `addr` is its slot, and every leaf is a write
+        // the struct of a struct store (decision 0044 item 5): `addr` is its slot, and every leaf is a write
+        const StructType* st = nullptr;
     };
     std::vector<LV> full_exprs(const std::vector<const Expr*>& es, std::vector<low::LStmt>& out,
                                const Expr* copy_of = nullptr, bool share_first = false,
@@ -7962,9 +7975,8 @@ private:
         }
         if (use_second != nullptr)
         {
-            ptr_use(
-                *use_second, vs[1], nullptr, {}, full,
-                true); // a pointer stored through a pointer is a use, and must be well-formed (decision 0040 item 2)
+            // a pointer stored through a pointer is a use, and must be well-formed (decision 0040 item 2)
+            ptr_use(*use_second, vs[1], nullptr, {}, full, true);
         }
         in_full_ = saved_in_full;
         written_ = saved_written;
@@ -8404,8 +8416,8 @@ private:
         }
         else if (s.expr != nullptr)
         {
-            LV v = full_expr(*s.expr, out,
-                             s.expr->type.is_ptr()); // a returned pointer is a use of its value (decision 0037 item 3)
+            // a returned pointer is a use of its value (decision 0037 item 3)
+            LV v = full_expr(*s.expr, out, s.expr->type.is_ptr());
             assign(out, kResult, v.e);
         }
         // Leaving every open block that holds cells: innermost first (decision 0032 item 8), after the value and before the postconditions.
@@ -8550,8 +8562,8 @@ private:
         {
             for (const Global& g : prog_.globals())
             {
-                std::vector<E>
-                    cands; // a struct global: its slots and leaf cells, as an object of its type (decision 0043 item 9)
+                // a struct global: its slots and leaf cells, as an object of its type (decision 0043 item 9)
+                std::vector<E> cands;
                 split_candidates(global_ref(g.id), g.type, target, cands);
                 if (!cands.empty() && done.insert({kGlobalKeyBase + g.id, {}}).second)
                 {
@@ -8647,8 +8659,8 @@ private:
         {
             if (!bs.in_ensures)
             {
-                with_atom.insert(block_key(
-                    bs)); // a pointer that owns its block needs no split against another's cells (decision 0047 item 4)
+                // a pointer that owns its block needs no split against another's cells (decision 0047 item 4)
+                with_atom.insert(block_key(bs));
             }
         }
         for (size_t k = 0; k < f.params.size(); ++k)
@@ -8758,9 +8770,11 @@ private:
                 },
                 env);
         };
-        auto name = [&](size_t k) {  // the user's spelling of the place, for messages
-      return site_text(fa.sites[ens[k]]);
-    };
+        // the user's spelling of the place, for messages
+        auto name = [&](size_t k)
+        {
+            return site_text(fa.sites[ens[k]]);
+        };
         auto perm_meta = [&](const std::string& message, size_t k)
         {
             low::Meta m = meta("permission", at, message);
@@ -8837,7 +8851,9 @@ private:
                 }
                 if (same_expr(p[a], p[b]))
                 {
-                    continue; // one parameter's owns and reads: `f__wf` asserts their guards exclude each other (decision 0039 item 7)
+                    // one parameter's owns and reads: `f__wf` asserts their guards exclude each other (decision 0039
+                    // item 7)
+                    continue;
                 }
                 if (site_key(fa.sites[ens[a]]) == site_key(fa.sites[ens[b]]))
                 { // two member places of one root are two cells (nested ones are the checker's)
@@ -8918,7 +8934,8 @@ private:
                                     }
                                     if (one_type && cj.path != c.path)
                                     {
-                                        continue; // leaves of two objects of one struct type share a cell only at one path
+                                        // leaves of two objects of one struct type share a cell only at one path
+                                        continue;
                                     }
                                     E same =
                                         same_expr(c.recv, cj.recv) ? nullptr : low::bin(BinOp::Eq, c.recv, cj.recv);
@@ -8960,8 +8977,8 @@ private:
                             {
                                 if (const E gp = site_guard(fa.sites[static_cast<size_t>(site.atom->amount)], env))
                                 {
-                                    kept = low::and_(old_entry(gp),
-                                                     kept); // the partner's guard in the entry state (audit B2)
+                                    // the partner's guard in the entry state (audit B2)
+                                    kept = low::and_(old_entry(gp), kept);
                                 }
                             }
                             add(low::implies(kept, cell_flag(c.recv, c.type)),
@@ -9359,8 +9376,9 @@ private:
     {
         std::set<std::string> fields;
         std::set<int> cells;
-        std::set<int>
-            globals; // the globals (ids) written by name, or owned by a callee's atom (decision 0041 item 10): a write through any other pointer is by field
+        // the globals (ids) written by name, or owned by a callee's atom (decision 0041 item 10): a write through any
+        // other pointer is by field
+        std::set<int> globals;
         // A member of a struct global written by name (`g.x = e`, `g.t = f()`; decision 0044 item 8): (global id, the leaf's member path from the global's slot).  The
         // address is a fixed term (`loc(member(...loc(GB_g(), 0)...), 0)`, no load), so only the place of that very leaf is reached; every other automatic place is another
         // leaf (distinct member blocks), another global (`unique` blocks) or an object of another block, and a write through a pointer is `fields` as before.
@@ -9487,9 +9505,9 @@ private:
                 }
             }
         }
-        if (e->kind == Expr::Kind::Call &&
-            e->callee !=
-                nullptr) // decision 0047 item 10: a `requires` block site owns every leaf cell of its block, so the callee may write them
+        // decision 0047 item 10: a `requires` block site owns every leaf cell of its block, so the callee may write
+        // them
+        if (e->kind == Expr::Kind::Call && e->callee != nullptr)
         {
             for (const AtomSite& site : blocks_of(*e->callee).sites)
             {
@@ -10271,8 +10289,8 @@ private:
             bool moved = false;
             {
                 const Expr* root = member_root(&qa, nullptr);
-                bool under_load =
-                    false; // a global the place hangs from by a load (`*gp`): the loop moves the place when it writes the global
+                // a global the place hangs from by a load (`*gp`): the loop moves the place when it writes the global
+                bool under_load = false;
                 for (const Expr* x = root; x != nullptr;
                      x = (x->kind == Expr::Kind::Deref || x->kind == Expr::Kind::Field ||
                           x->kind == Expr::Kind::MemberAddr)
@@ -10771,8 +10789,8 @@ private:
     // condition that touches memory is tested at the top of the body, like one with a side effect.
     void loop(const Stmt& s, std::vector<low::LStmt>& out)
     {
-        fn_.jump_depth[s.jump_id] =
-            fn_.scopes.size(); // a break or continue leaves every scope opened inside the loop (decision 0038 item 7)
+        // a break or continue leaves every scope opened inside the loop (decision 0038 item 7)
+        fn_.jump_depth[s.jump_id] = fn_.scopes.size();
         if (s.form == LoopForm::DoOnce)
         {
             do_once(s, out);
@@ -10820,11 +10838,11 @@ private:
         {
             places.clear();
         }
-        std::vector<HeapHolder> holders =
-            std::move(heap_holders_); // B1 item 3: the pointer variables that hold blocks beside the loop's heap places
+        // B1 item 3: the pointer variables that hold blocks beside the loop's heap places
+        std::vector<HeapHolder> holders = std::move(heap_holders_);
         heap_holders_.clear();
-        std::vector<low::LStmt> hbstmts = std::move(
-            heap_entry_); // decision 0047 item 10: `hb := v` for each heap place whose variable the loop assigns
+        // decision 0047 item 10: `hb := v` for each heap place whose variable the loop assigns
+        std::vector<low::LStmt> hbstmts = std::move(heap_entry_);
         heap_entry_.clear();
         if (places.empty())
         {
@@ -11308,8 +11326,8 @@ private:
             }
         }
 
-        std::vector<Place> inv_all =
-            places; // the loop's places, then the written atoms' (the framing chains of decision 0038 item 6)
+        // the loop's places, then the written atoms' (the framing chains of decision 0038 item 6)
+        std::vector<Place> inv_all = places;
         if (!wats.empty())
         {
             written_splits(wats, places, wsplits);
@@ -11595,8 +11613,9 @@ private:
                     row(low::implies(pl.gl, low::not_(lacks(live_perm(lv_of(pl)), pl.kl))),
                         meta("permission", at, msg));
                 }
-                if (!pl.kt
-                         .empty()) // the block's token (decision 0047 item 10): a body that frees the block the loop holds fails here, before Viper exhales the invariant
+                // the block's token (decision 0047 item 10): a body that frees the block the loop holds fails here,
+                // before Viper exhales the invariant
+                if (!pl.kt.empty())
                 {
                     row(low::implies(
                             pl.gt,
@@ -11686,8 +11705,8 @@ private:
         cur_loop_ = saved_loop;
     }
 
-    static constexpr int kHeapPlaceBase =
-        -2000000; // the `param` of a heap place (decision 0047 item 10): never a real key
+    // the `param` of a heap place (decision 0047 item 10): never a real key
+    static constexpr int kHeapPlaceBase = -2000000;
     static bool is_heap_param(int k)
     {
         return k <= kHeapPlaceBase;
@@ -12211,8 +12230,8 @@ private:
         }
         for (int k = 0; k < fa.nreq; ++k)
         {
-            m.formals.push_back(
-                low::LVar {amount_name(k), low::LType::Perm}); // the ghost amounts (decision 0037 item 6)
+            // the ghost amounts (decision 0037 item 6)
+            m.formals.push_back(low::LVar {amount_name(k), low::LType::Perm});
         }
         for (const LeafVar& lv : result_vars(f))
         {
@@ -12269,8 +12288,10 @@ private:
             pure_full(scratch, *c.expr, "a precondition");
             m.requires_.push_back(clause_checks(v.e, c.loc.known() ? c.loc : f.loc, false, f.c_name));
         }
+        // the range of the result, or of each integer leaf of a struct result, and WF of each pointer (decision 0044
+        // item 4)
         for (const LeafVar& lv : result_vars(f))
-        { // the range of the result, or of each integer leaf of a struct result, and WF of each pointer (decision 0044 item 4)
+        {
             if (lv.type.is_int())
             {
                 m.ensures_.push_back(clause_checks(range_check(lv.var, *lv.type.int_type), f.loc, true, f.c_name));
@@ -12478,10 +12499,9 @@ private:
         m.name = fn_.method + "__wf";
         m.comment = "well-formedness of the contract of C/C++ function `" + f.c_name + "`";
         m.has_body = true;
-        prologue(
-            m.body,
-            &f); // the same checks as the function's own method (the driver removes identical reports); a function whose
-                 // `requires` is unsatisfiable never reaches its own prologue
+        // the same checks as the function's own method (the driver removes identical reports); a function whose
+        // `requires` is unsatisfiable never reaches its own prologue
+        prologue(m.body, &f);
         const Env env = contract_env();
         E prior;
         auto go = [&](const Clause& c, bool ens, int idx)
@@ -12503,8 +12523,9 @@ private:
                 // Partners by path (decision 0039 item 7, owner question 72): an `ensures` atom returns what its partner `requires` atom took, on every path
                 // where it is returned: `prior ==> (g_ens ==> g_partner)`.  Nothing is written where the partner is unconditional or has the very guard.
                 CtxSave guard_ctx(*this);
-                cmode_ = CMode::
-                    Wf; // the guards over ghosts: the `ensures` atom's over the post-state ghosts, the partner's over the pre-state ones (decision 0045, audit B2)
+                // the guards over ghosts: the `ensures` atom's over the post-state ghosts, the partner's over the
+                // pre-state ones (decision 0045, audit B2)
+                cmode_ = CMode::Wf;
                 for (const AtomSite& site : fa.sites)
                 {
                     if (!site.in_ensures || site.clause != idx || site.atom->amount < 0 || site.atom->amount >= fa.nreq)
@@ -12545,8 +12566,10 @@ private:
             Full full;
             {
                 CtxSave save(*this);
+                // decision 0039 item 8: the heap reads of a measure are framed by the requires atoms, over the
+                // pre-state ghosts
                 if (reads_heap(*c.expr))
-                { // decision 0039 item 8: the heap reads of a measure are framed by the requires atoms, over the pre-state ghosts
+                {
                     set_ctx(f, CMode::Wf, false, static_cast<int>(f.requires_.size()));
                     cmeasure_ = true;
                 }
@@ -12749,17 +12772,18 @@ private:
     const Function* cf_ = nullptr;
     bool cens_ = false;
     bool cold_ = false;
-    int old_depth_ =
-        0; // the number of contract reads under `old` being lowered (decision 0045: one `old(...)` per chain)
+    // the number of contract reads under `old` being lowered (decision 0045: one `old(...)` per chain)
+    int old_depth_ = 0;
     bool cmeasure_ = false; // the contract expression is a function's termination measure (decision 0039 item 8)
     size_t cseen_ = 0;
     size_t cbseen_ = 0; // the same for the `owns_block` sites of `cf_` (decision 0047 item 4)
     std::map<const Function*, FnAtoms> atoms_;
     std::map<const Function*, FnBlocks> blocks_;
-    std::map<const Expr*, size_t>
-        blocks_before_; // a permission atom -> the number of block sites before it (index_block_order)
-    bool vlibc_heap_ =
-        false; // a vlibc heap program (decision 0050 item 4): some view of vlibc's allocator, an allocation or a deallocation, is in the program
+    // a permission atom -> the number of block sites before it (index_block_order)
+    std::map<const Expr*, size_t> blocks_before_;
+    // a vlibc heap program (decision 0050 item 4): some view of vlibc's allocator, an allocation or a deallocation, is
+    // in the program
+    bool vlibc_heap_ = false;
     bool heap_ = false;           // a heap program (decision 0047 item 7): a view call or an owns_block site anywhere
     std::deque<Derived> derived_; // decision 0045: the derived keys (a deque: references to entries stay valid)
     std::map<std::tuple<const Function*, int, std::vector<int>>, int> derived_index_;
@@ -12768,8 +12792,8 @@ private:
     int cur_loop_ = 0;                               // the number of the loop being lowered (the lb snapshots' names)
     std::map<const Expr*, int> derived_of_atom_;     // an Atom node whose place has steps -> its derived key
     std::map<const Expr*, const Function*> site_fn_; // an Atom node -> the function whose contract holds it
-    std::map<GKey, Type>
-        wf_ghosts_; // the ghost value formals of the `__wf` method being built: (root, member path, post-state) -> the place's type
+    // the ghost value formals of the `__wf` method being built: (root, member path, post-state) -> the place's type
+    std::map<GKey, Type> wf_ghosts_;
     const Program& prog_;
     LowerOptions opt_;
     low::LProgram out_;
@@ -12792,15 +12816,15 @@ private:
     // and its memory calls by field (E3's trigger), the memory calls whose arguments are being lowered (a read in them is no snapshot's reason), the
     // conditions of the E5 branches around the node, the full being filled and the branches open around it (their extra sets, audit S5).
     Path path_;
-    std::map<const Expr*, Path>
-        shared_path_; // where a shared node (a compound store's address) was lowered the first time
+    // where a shared node (a compound store's address) was lowered the first time
+    std::map<const Expr*, Path> shared_path_;
     std::vector<Acc> accs_;
     std::set<std::string> mem_w_;
     std::map<std::string, int> mem_calls_, mem_depth_;
     std::vector<E> branch_guards_;
     std::vector<BranchCtx> branch_ctx_;
-    bool call_pre_both_ =
-        false; // PRE(c) goes into both halves of the call's permission and heap-reading checks (audit S3)
+    // PRE(c) goes into both halves of the call's permission and heap-reading checks (audit S3)
+    bool call_pre_both_ = false;
     std::map<std::string, int> key_ids_;
     int next_other_key_ = 0;
     std::map<int, std::string> user_names_; // the user's name of each label of the current function, by id
@@ -12809,13 +12833,15 @@ private:
     // used, and where the first address-taken declaration of each type is (the map rows of its `alloc_<t>`).
     std::map<const IntType*, std::string> enum_suffix_;
     std::map<std::string, Type> cell_type_of_;
-    std::map<std::string, const StructType*>
-        struct_alloc_; // the struct locals' allocations, by `struct_suffix` (a key of alloc_at_ too)
-    std::map<const Expr*, SrcLoc>
-        place_nodes_; // MemberAddr nodes the consumer lowers as a place access (decision 0043 item 5), with the consumer's position: see member_addr
+    // the struct locals' allocations, by `struct_suffix` (a key of alloc_at_ too)
+    std::map<std::string, const StructType*> struct_alloc_;
+    // MemberAddr nodes the consumer lowers as a place access (decision 0043 item 5), with the consumer's position: see
+    // member_addr
+    std::map<const Expr*, SrcLoc> place_nodes_;
     std::map<std::string, SrcLoc> alloc_at_;
-    bool agg_wf_ =
-        false; // the aggregate about to be lowered is the value of a struct store: its pointer leaves must be well-formed (decision 0044 item 5)
+    // the aggregate about to be lowered is the value of a struct store: its pointer leaves must be well-formed
+    // (decision 0044 item 5)
+    bool agg_wf_ = false;
 };
 
 } // namespace

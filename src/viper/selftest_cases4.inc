@@ -513,8 +513,8 @@ void define_calls_in_expressions()
                                          k2.call(g, {k2.add(k2.pv(g, 0), i1("1"))}));
                },
                0, &second);
-           k.fail_only("termination", second->loc, 2,
-                       0); // the explicit assert (first row), not Silicon's own check at the call
+           // the explicit assert (first row), not Silicon's own check at the call
+           k.fail_only("termination", second->loc, 2, 0);
        });
     lc("calls_termination_pair_ok",
        "g(n - 1) + g(n - 2) in a g that does not return: both decrease; the explicit check of the second call is written and holds",

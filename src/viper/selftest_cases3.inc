@@ -569,34 +569,50 @@ void define_side_effects()
        });
 
     // while (i++ < n) { c++ } and its twins (S17).
-    auto while_incr = [=](Kit& k, int variant) {  // 0 ok, 1 entry, 2 preserved, 3 termination, 4 last-evaluation overflow, 5 postcondition
-    Function* f = k.fn("f", k.i32, {{"n", k.i32}});
-    if (variant == 4){ k.req(f, k.ge_c(k.F(f, 0), k.i32, "0"));
-}
-    else{ k.req(f, k.range(k.F(f, 0), k.i32, "0", "100"));
-}
-    k.ens(f, k.eq(k.R(f), variant == 5 ? k.add(k.F(f, 0), I(k, "1")) : k.F(f, 0)));
-    Var* i = k.local(f, "i", k.i32);
-    Var* c = k.local(f, "c", k.i32);
-    Clause inv = k.cl(k.land(k.land(k.eq(k.v(i), k.v(c)), k.ge_c(k.v(c), k.i32, "0")), k.le(k.v(c), k.pv(f, 0))));
-    const Expr* inc = k.incE(i);
-    Clause m = k.cl(variant == 3 ? k.cv(k.i64, k.pv(f, 0)) : k.gap(k.pv(f, 0), k.v(i)));
-    const Stmt* body = k.blk({variant == 2 ? k.asg(c, k.add(k.v(c), I(k, "2"))) : plus1(k, c)});
-    const Stmt* w = k.loop(k.lt(inc, k.pv(f, 0)), {inv}, {m}, body, nullptr, LF::While, k.jid());
-    const Stmt* r = k.ret(k.v(c));
-    f->body = k.blk({k.decl(i, I(k, variant == 1 ? "1" : "0")), k.decl(c, I(k, "0")), w, r});
-    k.done(f);
-    if (variant == 1){ k.fail("invariant-entry", inv.loc);
-}
-    if (variant == 2){ k.fail("invariant-preserved", inv.loc);
-}
-    if (variant == 3){ k.fail("termination", m.loc);
-}
-    if (variant == 4){ k.fail("overflow", inc->loc);
-}
-    if (variant == 5){ k.fail("postcondition", r->loc);
-}
-  };
+    // 0 ok, 1 entry, 2 preserved, 3 termination, 4 last-evaluation overflow, 5 postcondition
+    auto while_incr = [=](Kit& k, int variant)
+    {
+        Function* f = k.fn("f", k.i32, {{"n", k.i32}});
+        if (variant == 4)
+        {
+            k.req(f, k.ge_c(k.F(f, 0), k.i32, "0"));
+        }
+        else
+        {
+            k.req(f, k.range(k.F(f, 0), k.i32, "0", "100"));
+        }
+        k.ens(f, k.eq(k.R(f), variant == 5 ? k.add(k.F(f, 0), I(k, "1")) : k.F(f, 0)));
+        Var* i = k.local(f, "i", k.i32);
+        Var* c = k.local(f, "c", k.i32);
+        Clause inv = k.cl(k.land(k.land(k.eq(k.v(i), k.v(c)), k.ge_c(k.v(c), k.i32, "0")), k.le(k.v(c), k.pv(f, 0))));
+        const Expr* inc = k.incE(i);
+        Clause m = k.cl(variant == 3 ? k.cv(k.i64, k.pv(f, 0)) : k.gap(k.pv(f, 0), k.v(i)));
+        const Stmt* body = k.blk({variant == 2 ? k.asg(c, k.add(k.v(c), I(k, "2"))) : plus1(k, c)});
+        const Stmt* w = k.loop(k.lt(inc, k.pv(f, 0)), {inv}, {m}, body, nullptr, LF::While, k.jid());
+        const Stmt* r = k.ret(k.v(c));
+        f->body = k.blk({k.decl(i, I(k, variant == 1 ? "1" : "0")), k.decl(c, I(k, "0")), w, r});
+        k.done(f);
+        if (variant == 1)
+        {
+            k.fail("invariant-entry", inv.loc);
+        }
+        if (variant == 2)
+        {
+            k.fail("invariant-preserved", inv.loc);
+        }
+        if (variant == 3)
+        {
+            k.fail("termination", m.loc);
+        }
+        if (variant == 4)
+        {
+            k.fail("overflow", inc->loc);
+        }
+        if (variant == 5)
+        {
+            k.fail("postcondition", r->loc);
+        }
+    };
     lc("fx_while_incr_condition", "while (i++ < n) c++ with invariant i == c <= n: returns n",
        [=](Kit& k)
        {
@@ -756,25 +772,32 @@ void define_side_effects()
        });
 
     // A local that only the condition writes (decision 0019 with the top-test shape).
-    auto cond_only_flag = [=](Kit& k, int variant) {  // 0 ok, 1 read of x before the loop
-    Function* f = fn_n(k, k.i32);
-    k.ens(f, k.eq_c(k.R(f), k.i32, "0"));
-    Var* x = k.local(f, "x", k.i32);
-    Var* c = k.local(f, "c", k.i32);
-    Clause inv = k.cl(k.land(k.ge_c(k.v(c), k.i32, "0"), k.le(k.v(c), k.pv(f, 0))));
-    const Expr* rd = k.v(x);
-    const Stmt* w = k.loop(k.gt(k.asgE(x, k.sub(k.pv(f, 0), k.v(c))), I(k, "0")), {inv}, {k.cl(k.gap(k.pv(f, 0), k.v(c)))}, k.blk({plus1(k, c)}),
-                           nullptr, LF::While, k.jid());
-    std::vector<const Stmt*> top = {k.decl(x, nullptr), k.decl(c, I(k, "0"))};
-    if (variant == 1){ top.push_back(k.chk(k.eq(rd, rd)));
-}
-    top.push_back(w);
-    top.push_back(k.ret(k.v(x)));
-    f->body = k.blk(top);
-    k.done(f);
-    if (variant == 1){ k.fail_only("uninitialized", rd->loc, 2, 0);  // two reads of x; after the first fails Silicon assumes its flag
-}
-  };
+    // 0 ok, 1 read of x before the loop
+    auto cond_only_flag = [=](Kit& k, int variant)
+    {
+        Function* f = fn_n(k, k.i32);
+        k.ens(f, k.eq_c(k.R(f), k.i32, "0"));
+        Var* x = k.local(f, "x", k.i32);
+        Var* c = k.local(f, "c", k.i32);
+        Clause inv = k.cl(k.land(k.ge_c(k.v(c), k.i32, "0"), k.le(k.v(c), k.pv(f, 0))));
+        const Expr* rd = k.v(x);
+        const Stmt* w = k.loop(k.gt(k.asgE(x, k.sub(k.pv(f, 0), k.v(c))), I(k, "0")), {inv},
+                               {k.cl(k.gap(k.pv(f, 0), k.v(c)))}, k.blk({plus1(k, c)}), nullptr, LF::While, k.jid());
+        std::vector<const Stmt*> top = {k.decl(x, nullptr), k.decl(c, I(k, "0"))};
+        if (variant == 1)
+        {
+            top.push_back(k.chk(k.eq(rd, rd)));
+        }
+        top.push_back(w);
+        top.push_back(k.ret(k.v(x)));
+        f->body = k.blk(top);
+        k.done(f);
+        if (variant == 1)
+        {
+            // two reads of x; after the first fails Silicon assumes its flag
+            k.fail_only("uninitialized", rd->loc, 2, 0);
+        }
+    };
     lc("fx_while_assign_condition",
        "int x; while ((x = n - c) > 0) c++; return x: the condition ran at least once, so x has a value; x == 0 at the end",
        [=](Kit& k)
@@ -788,29 +811,41 @@ void define_side_effects()
        });
 
     // A local written only under && in the condition: its flag and range cross iterations (S17c).
-    auto and_cond = [=](Kit& k, int variant) {  // 0 ok, 1 x not assigned before the loop, 2 the range invariants weakened (a hook)
-    Function* f = fn_n(k, k.i32);
-    Var* x = k.local(f, "x", k.i32);
-    Var* c = k.local(f, "c", k.i32);
-    std::vector<Clause> inv = {k.cl(k.land(k.ge_c(k.v(c), k.i32, "0"), k.le(k.v(c), k.pv(f, 0))))};
-    if (variant == 0){ inv.push_back(k.cl(k.eq(k.v(x), k.v(c))));
-}
-    if (variant == 0){ k.ens(f, k.eq(k.R(f), k.F(f, 0)));
-}
-    const Expr* rd = k.v(x);
-    const Stmt* w = k.loop(k.land(k.lt(k.v(c), k.pv(f, 0)), k.gt(k.asgE(x, k.add(k.v(c), I(k, "1"))), I(k, "0"))), inv,
-                           {k.cl(k.gap(k.pv(f, 0), k.v(c)))}, k.blk({plus1(k, c)}), nullptr, LF::While, k.jid());
-    std::vector<const Stmt*> top = {variant == 1 ? k.decl(x, nullptr) : k.decl(x, I(k, "0")), k.decl(c, I(k, "0")), w};
-    top.push_back(k.ret(variant == 1 ? rd : k.v(x)));
-    f->body = k.blk(top);
-    k.done(f);
-    if (variant == 1){ k.fail("uninitialized", rd->loc);
-}
-    if (variant == 2) {
-      k.lower_options.weaken_auto_invariant = true;
-      k.fail_only("internal", w->loc, 4, 0);  // x and c, entry and preservation: Silicon stops at the first invariant that fails
-    }
-  };
+    // 0 ok, 1 x not assigned before the loop, 2 the range invariants weakened (a hook)
+    auto and_cond = [=](Kit& k, int variant)
+    {
+        Function* f = fn_n(k, k.i32);
+        Var* x = k.local(f, "x", k.i32);
+        Var* c = k.local(f, "c", k.i32);
+        std::vector<Clause> inv = {k.cl(k.land(k.ge_c(k.v(c), k.i32, "0"), k.le(k.v(c), k.pv(f, 0))))};
+        if (variant == 0)
+        {
+            inv.push_back(k.cl(k.eq(k.v(x), k.v(c))));
+        }
+        if (variant == 0)
+        {
+            k.ens(f, k.eq(k.R(f), k.F(f, 0)));
+        }
+        const Expr* rd = k.v(x);
+        const Stmt* w =
+            k.loop(k.land(k.lt(k.v(c), k.pv(f, 0)), k.gt(k.asgE(x, k.add(k.v(c), I(k, "1"))), I(k, "0"))), inv,
+                   {k.cl(k.gap(k.pv(f, 0), k.v(c)))}, k.blk({plus1(k, c)}), nullptr, LF::While, k.jid());
+        std::vector<const Stmt*> top = {variant == 1 ? k.decl(x, nullptr) : k.decl(x, I(k, "0")), k.decl(c, I(k, "0")),
+                                        w};
+        top.push_back(k.ret(variant == 1 ? rd : k.v(x)));
+        f->body = k.blk(top);
+        k.done(f);
+        if (variant == 1)
+        {
+            k.fail("uninitialized", rd->loc);
+        }
+        if (variant == 2)
+        {
+            k.lower_options.weaken_auto_invariant = true;
+            // x and c, entry and preservation: Silicon stops at the first invariant that fails
+            k.fail_only("internal", w->loc, 4, 0);
+        }
+    };
     lc("fx_while_and_condition_write",
        "x = 0; while (c < n && (x = c + 1) > 0) c++; return x: the write under && crosses iterations (x == n)",
        [=](Kit& k)
@@ -831,26 +866,39 @@ void define_side_effects()
        });
 
     // ---- guarded operands with effects (branch lowering) ----
-    auto and_assign = [=](Kit& k, int variant) {  // 0 ok, 1 wrong value, 2 read x after (untaken path), 3 the same with n > 0 required
-    Function* f = fn_n(k, k.i32);
-    Var* x = k.local(f, "x", k.i32);
-    Var* y = k.local(f, "y", k.i32);
-    if (variant == 3){ k.req(f, k.gt(k.F(f, 0), I(k, "0")));
-}
-    if (variant <= 1){ k.ens(f, k.eq(k.R(f), k.cond(k.gt(k.F(f, 0), I(k, variant == 1 ? "2" : "1")), I(k, "1"), I(k, "0"))));
-}
-    const Expr* rd = k.v(x);
-    const Stmt* r = k.ret(variant >= 2 ? rd : k.v(y));
-    if (variant == 3){ k.ens(f, k.eq(k.R(f), k.F(f, 0)));
-}
-    f->body = k.blk({variant >= 2 ? k.decl(x, nullptr) : k.decl(x, I(k, "0")), k.decl(y, I(k, "0")),
-                     k.asg(y, k.bi(k.i32, k.land(k.gt(k.pv(f, 0), I(k, "0")), k.gt(k.asgE(x, k.pv(f, 0)), I(k, "1"))))), r});
-    k.done(f);
-    if (variant == 1){ k.fail("postcondition", r->loc);
-}
-    if (variant == 2){ k.fail("uninitialized", rd->loc);
-}
-  };
+    // 0 ok, 1 wrong value, 2 read x after (untaken path), 3 the same with n > 0 required
+    auto and_assign = [=](Kit& k, int variant)
+    {
+        Function* f = fn_n(k, k.i32);
+        Var* x = k.local(f, "x", k.i32);
+        Var* y = k.local(f, "y", k.i32);
+        if (variant == 3)
+        {
+            k.req(f, k.gt(k.F(f, 0), I(k, "0")));
+        }
+        if (variant <= 1)
+        {
+            k.ens(f, k.eq(k.R(f), k.cond(k.gt(k.F(f, 0), I(k, variant == 1 ? "2" : "1")), I(k, "1"), I(k, "0"))));
+        }
+        const Expr* rd = k.v(x);
+        const Stmt* r = k.ret(variant >= 2 ? rd : k.v(y));
+        if (variant == 3)
+        {
+            k.ens(f, k.eq(k.R(f), k.F(f, 0)));
+        }
+        f->body = k.blk(
+            {variant >= 2 ? k.decl(x, nullptr) : k.decl(x, I(k, "0")), k.decl(y, I(k, "0")),
+             k.asg(y, k.bi(k.i32, k.land(k.gt(k.pv(f, 0), I(k, "0")), k.gt(k.asgE(x, k.pv(f, 0)), I(k, "1"))))), r});
+        k.done(f);
+        if (variant == 1)
+        {
+            k.fail("postcondition", r->loc);
+        }
+        if (variant == 2)
+        {
+            k.fail("uninitialized", rd->loc);
+        }
+    };
     lc("fx_and_assign", "y = n > 0 && (x = n) > 1: the write happens only when n > 0; y == (n > 1)",
        [=](Kit& k)
        {
@@ -925,25 +973,35 @@ void define_side_effects()
              k.done(f);
              return r;
          });
-    auto cond_arms = [=](Kit& k, int variant) {  // 0 ok, 1 wrong value, 2 one arm leaves x unassigned and x is read after, 3 the same without the read
-    Function* f = fn_n(k, k.i32);
-    Var* x = k.local(f, "x", k.i32);
-    Var* y = k.local(f, "y", k.i32);
-    const Expr* second = variant >= 2 ? I(k, "0") : k.asgE(x, I(k, "2"));
-    if (variant <= 1){ k.ens(f, k.eq(k.R(f), k.cond(k.gt(k.F(f, 0), I(k, "5")), I(k, "2"), I(k, variant == 1 ? "5" : "4"))));
-}
-    if (variant == 3){ k.ens(f, k.eq(k.R(f), k.cond(k.gt(k.F(f, 0), I(k, "5")), I(k, "1"), I(k, "0"))));
-}
-    const Expr* rd = k.v(x);
-    const Stmt* r = k.ret(variant == 2 ? k.add(rd, k.v(y)) : (variant == 3 ? k.v(y) : k.add(k.v(x), k.v(y))));
-    f->body = k.blk({variant == 2 ? k.decl(x, nullptr) : k.decl(x, I(k, "0")), k.decl(y, I(k, "0")),
-                     k.asg(y, k.cond(k.gt(k.pv(f, 0), I(k, "5")), k.asgE(x, I(k, "1")), second)), r});
-    k.done(f);
-    if (variant == 1){ k.fail("postcondition", r->loc);
-}
-    if (variant == 2){ k.fail("uninitialized", rd->loc);
-}
-  };
+    // 0 ok, 1 wrong value, 2 one arm leaves x unassigned and x is read after, 3 the same without the read
+    auto cond_arms = [=](Kit& k, int variant)
+    {
+        Function* f = fn_n(k, k.i32);
+        Var* x = k.local(f, "x", k.i32);
+        Var* y = k.local(f, "y", k.i32);
+        const Expr* second = variant >= 2 ? I(k, "0") : k.asgE(x, I(k, "2"));
+        if (variant <= 1)
+        {
+            k.ens(f, k.eq(k.R(f), k.cond(k.gt(k.F(f, 0), I(k, "5")), I(k, "2"), I(k, variant == 1 ? "5" : "4"))));
+        }
+        if (variant == 3)
+        {
+            k.ens(f, k.eq(k.R(f), k.cond(k.gt(k.F(f, 0), I(k, "5")), I(k, "1"), I(k, "0"))));
+        }
+        const Expr* rd = k.v(x);
+        const Stmt* r = k.ret(variant == 2 ? k.add(rd, k.v(y)) : (variant == 3 ? k.v(y) : k.add(k.v(x), k.v(y))));
+        f->body = k.blk({variant == 2 ? k.decl(x, nullptr) : k.decl(x, I(k, "0")), k.decl(y, I(k, "0")),
+                         k.asg(y, k.cond(k.gt(k.pv(f, 0), I(k, "5")), k.asgE(x, I(k, "1")), second)), r});
+        k.done(f);
+        if (variant == 1)
+        {
+            k.fail("postcondition", r->loc);
+        }
+        if (variant == 2)
+        {
+            k.fail("uninitialized", rd->loc);
+        }
+    };
     lc("fx_cond_assign_arms", "y = n > 5 ? (x = 1) : (x = 2); return x + y: the value of an arm is the stored value",
        [=](Kit& k)
        {
@@ -980,31 +1038,46 @@ void define_side_effects()
          });
 
     // ---- read snapshots (E3) ----
-    auto snapshot = [=](Kit& k, int variant) {  // 0 ok, 1 overflow of y + x, 2 x unassigned at the first read, 3 read after the write only (ok), 4 wrong value
-    Function* f = k.fn("f", k.i32, {{"p", k.i32}});
-    if (variant == 0 || variant == 4){ k.req(f, k.range(k.F(f, 0), k.i32, "0", "100"));
-}
-    if (variant == 0){ k.ens(f, k.eq(k.R(f), k.add(k.F(f, 0), I(k, "1"))));
-}
-    if (variant == 4){ k.ens(f, k.eq(k.R(f), k.F(f, 0)));
-}
-    Var* x = k.local(f, "x", k.i32);
-    Var* y = k.local(f, "y", k.i32);
-    Var* r = k.local(f, "r", k.i32);
-    const Expr* rd = k.v(x);
-    const Expr* sum = k.add(k.v(y), k.v(x));
-    const Expr* value = variant == 3 ? k.comma(k.asgE(x, I(k, "5")), k.add(k.v(x), I(k, "1")))
-                                     : k.comma(k.comma(k.asgE(y, rd), k.asgE(x, I(k, "1"))), sum);
-    const Stmt* ret = k.ret(k.v(r));
-    f->body = k.blk({variant == 2 ? k.decl(x, nullptr) : k.decl(x, k.pv(f, 0)), k.decl(y, I(k, "0")), k.decl(r, I(k, "0")), k.asg(r, value), ret});
-    k.done(f);
-    if (variant == 1){ k.fail("overflow", sum->loc);
-}
-    if (variant == 2){ k.fail("uninitialized", rd->loc);
-}
-    if (variant == 4){ k.fail("postcondition", ret->loc);
-}
-  };
+    // 0 ok, 1 overflow of y + x, 2 x unassigned at the first read, 3 read after the write only (ok), 4 wrong value
+    auto snapshot = [=](Kit& k, int variant)
+    {
+        Function* f = k.fn("f", k.i32, {{"p", k.i32}});
+        if (variant == 0 || variant == 4)
+        {
+            k.req(f, k.range(k.F(f, 0), k.i32, "0", "100"));
+        }
+        if (variant == 0)
+        {
+            k.ens(f, k.eq(k.R(f), k.add(k.F(f, 0), I(k, "1"))));
+        }
+        if (variant == 4)
+        {
+            k.ens(f, k.eq(k.R(f), k.F(f, 0)));
+        }
+        Var* x = k.local(f, "x", k.i32);
+        Var* y = k.local(f, "y", k.i32);
+        Var* r = k.local(f, "r", k.i32);
+        const Expr* rd = k.v(x);
+        const Expr* sum = k.add(k.v(y), k.v(x));
+        const Expr* value = variant == 3 ? k.comma(k.asgE(x, I(k, "5")), k.add(k.v(x), I(k, "1")))
+                                         : k.comma(k.comma(k.asgE(y, rd), k.asgE(x, I(k, "1"))), sum);
+        const Stmt* ret = k.ret(k.v(r));
+        f->body = k.blk({variant == 2 ? k.decl(x, nullptr) : k.decl(x, k.pv(f, 0)), k.decl(y, I(k, "0")),
+                         k.decl(r, I(k, "0")), k.asg(r, value), ret});
+        k.done(f);
+        if (variant == 1)
+        {
+            k.fail("overflow", sum->loc);
+        }
+        if (variant == 2)
+        {
+            k.fail("uninitialized", rd->loc);
+        }
+        if (variant == 4)
+        {
+            k.fail("postcondition", ret->loc);
+        }
+    };
     lc("fx_snapshot_old_value", "r = (y = x, x = 1, y + x): y is the old x, the second read of x sees 1: r == p + 1",
        [=](Kit& k)
        {

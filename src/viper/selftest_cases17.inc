@@ -364,9 +364,8 @@ void define_heap()
         {
             Function* m = heap_alloc_view(k, "malloc", k.i32, false);
             Function* other = k.fn(mode == 4 ? "keep" : "give", k.vd, {{"p", PT(k)}});
-            k.req(other, mode == 4 ? live(k, FP(k, other, 0), 0)
-                                   : owns(k, FP(k, other, 0),
-                                          0)); // takes a fraction of the liveness, or the cell, and returns nothing
+            // takes a fraction of the liveness, or the cell, and returns nothing
+            k.req(other, mode == 4 ? live(k, FP(k, other, 0), 0) : owns(k, FP(k, other, 0), 0));
             k.trusted(other);
             f = k.fn("f", k.vd);
             Var* p = k.local(f, "p", PT(k));
@@ -558,9 +557,9 @@ void define_heap()
     lc("hl_member_alias_double_free", "the same, with a second free(s) after the first: invalid-free at the second",
        [=](Kit& k)
        {
-           k.fail_only(
-               "invalid-free", member_alias(k, 1), 5,
-               0); // a struct of two ints: the token, the offset, the liveness cell and the two leaves; the token row ends the path
+           // a struct of two ints: the token, the offset, the liveness cell and the two leaves; the token row ends the
+           // path
+           k.fail_only("invalid-free", member_alias(k, 1), 5, 0);
        });
     lc("hl_member_alias_leak", "the same, without any free(s): the block is held at the return (leak)",
        [=](Kit& k)
@@ -675,8 +674,8 @@ void define_heap()
        {
            SrcLoc end;
            const SrcLoc at = reassigned(k, 1, &end);
-           k.fail_only("invalid-free", at, 4,
-                       0); // the token row and the offset row fail; the liveness and leaf rows sit behind them
+           // the token row and the offset row fail; the liveness and leaf rows sit behind them
+           k.fail_only("invalid-free", at, 4, 0);
            k.fail_only("invalid-free", at, 4, 1);
            k.fail("leak", end);
        });
@@ -743,28 +742,37 @@ void define_heap()
 
     // struct A { int bal; };  struct A *open(void) ensures(r == NULL || (owns_block(r) && r->bal == [0|1])) { s = malloc(); if (s) s->bal = 0; return s; }
     // then the caller:  struct A *a = open(); if (a != NULL) { check(a->bal == 0); [free(a);] }
-    const auto give = [=](Kit& k, int mode) -> SrcLoc {  // 0 verifies; 1: the ensures promises 1 (postcondition at the return); 2: the caller does not free (leak)
-    StructType* A = k.strukt("A", {{"bal", k.i32}});
-    const Type AP = k.ptr(k.st(A));
-    Function* m = heap_alloc_view(k, "malloc", k.st(A), false);
-    Function* fr = heap_free_view(k, k.st(A));
-    Function* open = k.fn("open", AP);
-    k.ens(open, k.lor(k.eq(k.R(open), k.nul(AP)), k.land(block(k, k.R(open)), k.eq_c(k.leaf(k.R(open), 0), k.i32, mode == 1 ? "1" : "0"))));
-    Var* s = k.local(open, "s", AP);
-    const Stmt* r = k.ret(k.pn(s));
-    open->body = k.blk({k.decl(s, k.call(m, {})), k.iff(notnull(k, s, AP), k.blk({k.lstore(k.pn(s), 0, N(k, "0"))})), r});
-    k.done(open);
-    Function* f = k.fn("f", k.vd);
-    Var* a = k.local(f, "a", AP);
-    std::vector<const Stmt*> in;
-    if (mode != 1){ in.push_back(k.chk(k.eq_c(k.leaf(k.pn(a), 0), k.i32, "0")));  // mode 1: the callee's ensures promises 1, a check of 0 would contradict it
-}
-    if (mode != 2){ in.push_back(k.es(k.call(fr, {k.pn(a)})));
-}
-    f->body = k.blk({k.decl(a, k.call(open, {})), k.iff(notnull(k, a, AP), k.blk(in))});
-    k.done(f);
-    return mode == 1 ? r->loc : f->end_loc;
-  };
+    // 0 verifies; 1: the ensures promises 1 (postcondition at the return); 2: the caller does not free (leak)
+    const auto give = [=](Kit& k, int mode) -> SrcLoc
+    {
+        StructType* A = k.strukt("A", {{"bal", k.i32}});
+        const Type AP = k.ptr(k.st(A));
+        Function* m = heap_alloc_view(k, "malloc", k.st(A), false);
+        Function* fr = heap_free_view(k, k.st(A));
+        Function* open = k.fn("open", AP);
+        k.ens(open, k.lor(k.eq(k.R(open), k.nul(AP)),
+                          k.land(block(k, k.R(open)), k.eq_c(k.leaf(k.R(open), 0), k.i32, mode == 1 ? "1" : "0"))));
+        Var* s = k.local(open, "s", AP);
+        const Stmt* r = k.ret(k.pn(s));
+        open->body =
+            k.blk({k.decl(s, k.call(m, {})), k.iff(notnull(k, s, AP), k.blk({k.lstore(k.pn(s), 0, N(k, "0"))})), r});
+        k.done(open);
+        Function* f = k.fn("f", k.vd);
+        Var* a = k.local(f, "a", AP);
+        std::vector<const Stmt*> in;
+        if (mode != 1)
+        {
+            // mode 1: the callee's ensures promises 1, a check of 0 would contradict it
+            in.push_back(k.chk(k.eq_c(k.leaf(k.pn(a), 0), k.i32, "0")));
+        }
+        if (mode != 2)
+        {
+            in.push_back(k.es(k.call(fr, {k.pn(a)})));
+        }
+        f->body = k.blk({k.decl(a, k.call(open, {})), k.iff(notnull(k, a, AP), k.blk(in))});
+        k.done(f);
+        return mode == 1 ? r->loc : f->end_loc;
+    };
     lc("ho_give",
        "open() returns a block with bal == 0 and the caller frees it: the postcondition reads r->bal through owns_block(r)",
        [=](Kit& k)

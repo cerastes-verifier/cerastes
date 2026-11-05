@@ -75,8 +75,9 @@ struct LExpr
         Old,
         ForPerm
     } kind = Kind::IntLit;
-    std::string
-        text; // IntLit: a decimal (possibly negative); Var: the name; Fn: the prelude function; ModPow2, DivPow2: the divisor, 2^k, a decimal;
+    // IntLit: a decimal (possibly negative); Var: the name; Fn: the prelude function; ModPow2, DivPow2: the divisor,
+    // 2^k, a decimal;
+    std::string text;
     // Field, PermOf, Acc: the Viper field (`v_int`, `d_int`, `lv`); Dom: the domain function (`loc`, `len`, ...)
     bool bool_value = false; // BoolLit
     UnOp un = UnOp::Neg;
@@ -175,18 +176,18 @@ struct LStmt
         CaseSplit
     } kind = Kind::Block;
     // CaseSplit (decision 0037 items 8-9): the no-op `if (<expr>) { }`, one line, that makes Silicon branch on whether two terms are equal.
-    std::string
-        name; // Assign: target; Call: the method; Goto, Label: the label; Comment: the text; FieldAssign: the receiver variable
+    // Assign: target; Call: the method; Goto, Label: the label; Comment: the text; FieldAssign: the receiver variable
+    std::string name;
     std::string field; // FieldAssign: the field written
     E expr;            // Assign: value; Assert: the condition; If, While: the condition
     Check check;       // Assert; Call (its call.precondition backstop)
-    bool has_termination =
-        false;           // Call: the callee has a termination measure, so Silicon may report termination.failed here
+    // Call: the callee has a termination measure, so Silicon may report termination.failed here
+    bool has_termination = false;
     Check termination;   // Call: that check (decision 0013 item 8)
     std::vector<E> args; // Call
     std::string target;  // Call: the result variable, or empty
-    std::vector<std::string>
-        targets; // Call: one variable per leaf of a struct result, in order (decision 0044 item 4); `target` is then empty
+    // Call: one variable per leaf of a struct result, in order (decision 0044 item 4); `target` is then empty
+    std::vector<std::string> targets;
     std::vector<LStmt> then_body, else_body; // If; While uses then_body as the loop body
     std::vector<LInvariant> invariants;      // While
     std::vector<E> decreases; // While: the termination measure, one line `decreases e1, e2` (always at least one)

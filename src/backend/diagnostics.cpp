@@ -37,11 +37,14 @@ const char* template_of(Diag d)
 {
     switch (d)
     {
-#define CERASTES_DIAG(tag, severity, message) \
-    case Diag::tag:                           \
-        return message;
-#include "diagnostics.def"
-#undef CERASTES_DIAG
+        // The formatter lays an indented #define's body out from column 0, so the macro's lines stay as written.
+        // clang-format off
+        #define CERASTES_DIAG(tag, severity, message) \
+            case Diag::tag:                           \
+                return message;
+        // clang-format on
+        #include "diagnostics.def"
+        #undef CERASTES_DIAG
     }
     return "";
 }
@@ -205,11 +208,14 @@ const char* tag_of(Diag d)
 {
     switch (d)
     {
-#define CERASTES_DIAG(tag, severity, message) \
-    case Diag::tag:                           \
-        return #tag;
-#include "diagnostics.def"
-#undef CERASTES_DIAG
+        // The formatter lays an indented #define's body out from column 0, so the macro's lines stay as written.
+        // clang-format off
+        #define CERASTES_DIAG(tag, severity, message) \
+            case Diag::tag:                           \
+                return #tag;
+        // clang-format on
+        #include "diagnostics.def"
+        #undef CERASTES_DIAG
     }
     return "?";
 }

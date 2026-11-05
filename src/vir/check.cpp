@@ -564,8 +564,8 @@ private:
                     break;
                 }
                 no_ptr_ = true;
-                expr(*init, Ctx::Annot,
-                     false); // call-free, closed; a pointer node (a read of another global) is refused by no_ptr_
+                // call-free, closed; a pointer node (a read of another global) is refused by no_ptr_
+                expr(*init, Ctx::Annot, false);
                 no_ptr_ = false;
                 if (init->type != type)
                 {
@@ -989,8 +989,8 @@ private:
             collect_atoms(c.expr, all);
         }
         const std::vector<AtomSite> sites = contract_atoms(f);
-        const std::vector<AtomSite> block_sites =
-            contract_block_atoms(f); // decision 0047 item 4: no ghost amount, no partner
+        // decision 0047 item 4: no ghost amount, no partner
+        const std::vector<AtomSite> block_sites = contract_block_atoms(f);
         std::set<const Expr*> placed;
         for (const AtomSite& s : sites)
         {
@@ -1029,8 +1029,8 @@ private:
             {
                 err(a.loc, "the permission atoms of the `requires` are not numbered in order (decision 0037 item 6)");
             }
-            const PlaceKey place = atom_place(
-                a); // a parameter's index or a global's key (decision 0041 item 8) and the member path (decision 0043 item 9)
+            // a parameter's index or a global's key (decision 0041 item 8) and the member path (decision 0043 item 9)
+            const PlaceKey place = atom_place(a);
             if (!place.valid())
             {
                 continue;
@@ -1372,9 +1372,8 @@ private:
         }
         for (const Expr* a : all)
         {
-            if (placed.count(a) == 0 &&
-                a->atom !=
-                    AtomKind::OwnsBlock) // an `owns_block` of an invariant is refused in expr() (decision 0047 item 4)
+            // an `owns_block` of an invariant is refused in expr() (decision 0047 item 4)
+            if (placed.count(a) == 0 && a->atom != AtomKind::OwnsBlock)
             {
                 err(a->loc,
                     "a permission atom in a position decision 0037 item 5 does not allow (a top-level conjunct, the right of `||` or an arm of `?:` whose condition holds no atom, call or side effect)");
@@ -2395,9 +2394,8 @@ private:
                     const bool member = root != e.a;
                     std::vector<int> steps;
                     const Expr* place = place_root(e.a, &steps);
-                    const bool stepped =
-                        steps.size() >
-                        atom_place(e).path.size(); // the base pointer is reached through a load or a pointer leaf
+                    // the base pointer is reached through a load or a pointer leaf
+                    const bool stepped = steps.size() > atom_place(e).path.size();
                     if (e.implicit_atom &&
                         !(e.atom == AtomKind::Owns && !member && e.a->kind == Expr::Kind::GlobalAddr &&
                           e.a->global != nullptr && e.a->global->owner != nullptr))
@@ -2480,8 +2478,8 @@ private:
                 }
                 if (ctx == Ctx::Requires || ctx == Ctx::Ensures)
                 {
-                    const Expr* root =
-                        place_root(&e); // decision 0045 item 2: under loads and pointer leaves too (`p->q->x`)
+                    // decision 0045 item 2: under loads and pointer leaves too (`p->q->x`)
+                    const Expr* root = place_root(&e);
                     if (root->kind != Expr::Kind::Formal && root->kind != Expr::Kind::GlobalAddr &&
                         !(ctx == Ctx::Ensures && root->kind == Expr::Kind::Result))
                     {
@@ -3218,23 +3216,27 @@ private:
     std::unordered_set<const Function*> functions_;
     const Function* fn_ = nullptr;
     std::set<int> declared_;
-    std::set<const Expr*>
-        seen_effects_; // the AssignE, StoreE, Comma and Call nodes met in the current function (each may be reachable once)
-    bool in_invariant_ =
-        false; // checking a loop invariant clause: a permission atom of a pointer variable is accepted (decision 0040 item 5)
-    std::set<const Expr*>
-        ok_globals_; // the GlobalAddr nodes that stand under a Deref or an Atom of a contract: where a `static` local's address may appear (its implicit atom; decision 0041 items 7, 12)
-    std::set<const Expr*>
-        ok_members_; // the MemberAddr nodes that stand in the place of a Deref or an Atom of a contract (decision 0043 item 9)
+    // the AssignE, StoreE, Comma and Call nodes met in the current function (each may be reachable once)
+    std::set<const Expr*> seen_effects_;
+    // checking a loop invariant clause: a permission atom of a pointer variable is accepted (decision 0040 item 5)
+    bool in_invariant_ = false;
+    // the GlobalAddr nodes that stand under a Deref or an Atom of a contract: where a `static` local's address may
+    // appear (its implicit atom; decision 0041 items 7, 12)
+    std::set<const Expr*> ok_globals_;
+    // the MemberAddr nodes that stand in the place of a Deref or an Atom of a contract (decision 0043 item 9)
+    std::set<const Expr*> ok_members_;
     std::unordered_set<const StructType*> structs_; // the program's struct types
-    std::set<const Expr*>
-        struct_pos_; // the struct-typed nodes a consumer allows (call argument, return, struct Store, expression statement, Field operand; decision 0044 item 2)
-    std::set<const Expr*>
-        literal_stores_; // the struct StoreE nodes of a compound literal's object: `Comma(StoreE(&cl, Aggregate), &cl)` (decision 0044 item 7)
-    std::set<const Expr*>
-        field_base_; // the struct-typed nodes that are the operand of a Field (or of an Old under one) in a contract: a Formal, the Result or an Old may stand there
-    std::set<const Expr*>
-        shared_addrs_; // the address nodes of the stores being checked: a compound store's Deref shares its address (0039 item 5)
+    // the struct-typed nodes a consumer allows (call argument, return, struct Store, expression statement, Field
+    // operand; decision 0044 item 2)
+    std::set<const Expr*> struct_pos_;
+    // the struct StoreE nodes of a compound literal's object: `Comma(StoreE(&cl, Aggregate), &cl)` (decision 0044 item
+    // 7)
+    std::set<const Expr*> literal_stores_;
+    // the struct-typed nodes that are the operand of a Field (or of an Old under one) in a contract: a Formal, the
+    // Result or an Old may stand there
+    std::set<const Expr*> field_base_;
+    // the address nodes of the stores being checked: a compound store's Deref shares its address (0039 item 5)
+    std::set<const Expr*> shared_addrs_;
     struct Target
     {
         int id;
@@ -3243,8 +3245,9 @@ private:
     std::set<int> jump_ids_;
     std::vector<Target> targets_; // the loops and switches around the statement being checked, innermost last
     std::vector<std::set<int>> scopes_;
-    bool no_ptr_ =
-        false; // checking a function's measure, a constant or a case value: no pointer node (a contract clause or a loop's invariant or measure may hold some, decisions 0037 and 0038)
+    // checking a function's measure, a constant or a case value: no pointer node (a contract clause or a loop's
+    // invariant or measure may hold some, decisions 0037 and 0038)
+    bool no_ptr_ = false;
     int old_depth_ = 0; // inside an `Old`
     std::vector<Diag> diags_;
 };
@@ -3270,8 +3273,8 @@ struct GotoWalk
     {
         const Stmt* stmt = nullptr;
         int order = 0;
-        std::vector<Pos>
-            path; // the enclosing Blocks, outermost first, with the index of the child holding the statement
+        // the enclosing Blocks, outermost first, with the index of the child holding the statement
+        std::vector<Pos> path;
         const Stmt* parent_block = nullptr; // Label: the Block it is a direct statement of (null: not direct)
         size_t index = 0;
     };
@@ -3605,8 +3608,9 @@ private:
             case Expr::Kind::Null:
             case Expr::Kind::AddrOf:
                 break; // an address is no access to the object (decision 0032)
-            case Expr::Kind::
-                MemberAddr: // an address of a member is no access to it either; the operand's own reads and writes count (`(*pp)->x`, `(p = q)->x`)
+            // an address of a member is no access to it either; the operand's own reads and writes count (`(*pp)->x`,
+            // `(p = q)->x`)
+            case Expr::Kind::MemberAddr:
                 absorb(out, expr(e->a), false);
                 break;
             case Expr::Kind::GlobalAddr:
@@ -3840,8 +3844,8 @@ private:
                 // `*addr = value`: the two are unsequenced operands (decision 0032 item 9), as the operands of a Binary are, so `*p = (p = q, 1)`
                 // is a conflict like any other Viper-local one; and the stored value may not write a local the address reads.
                 const Wr a = expr(s->addr);
-                shared_.insert(
-                    s->addr); // a compound store's value reads a Deref sharing the address node (decision 0039 item 5)
+                // a compound store's value reads a Deref sharing the address node (decision 0039 item 5)
+                shared_.insert(s->addr);
                 const Wr v = expr(s->expr);
                 shared_.erase(s->addr);
                 pair(a, v);
@@ -3887,12 +3891,12 @@ private:
     }
 
     const Function& f_;
-    std::set<const Expr*>
-        shared_; // the address nodes of the stores being walked: their Deref reads count the address once
+    // the address nodes of the stores being walked: their Deref reads count the address once
+    std::set<const Expr*> shared_;
     std::vector<SequenceProblem> out_;
     std::map<int, std::string> gnames_; // a global's object key -> its name
-    std::map<std::pair<int, std::vector<int>>, int>
-        member_keys_;                   // (base object key, member path) -> the member object's key
+    // (base object key, member path) -> the member object's key
+    std::map<std::pair<int, std::vector<int>>, int> member_keys_;
     std::map<int, std::string> mnames_; // a member object's key -> its spelling (`s.x`, `p->t.y`)
     std::set<std::pair<const Expr*, int>> reported_;
 };

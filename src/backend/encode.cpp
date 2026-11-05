@@ -57,10 +57,10 @@ struct VType
     std::string name;                   // the type as the program spells it, for messages
     Diag diag = Diag::unsupported_type; // the diagnostic when !ok
     bool silent = false; // !ok and already reported at the declaration (an enumeration, decision 0018 item 2)
-    bool restrict_q =
-        false; // ok, a pointer parameter's own `restrict` (allow_restrict): decision 0037 item 2 decides whether it is accepted
-    a_type_ptr computed_at =
-        nullptr; // !ok because this typeref has a non-type template argument (0024 item 6): reported once per function
+    // ok, a pointer parameter's own `restrict` (allow_restrict): decision 0037 item 2 decides whether it is accepted
+    bool restrict_q = false;
+    // !ok because this typeref has a non-type template argument (0024 item 6): reported once per function
+    a_type_ptr computed_at = nullptr;
 };
 
 // The names vlibc's headers declare with a contract (decision 0046 item 6), each with the header that declares it: generated at configure time by
@@ -225,16 +225,17 @@ private:
         // Annotation mode (a `requires` or `ensures` of the routine):
         bool contract = false;
         bool annotation = false; // a `check` or an `invariant` of a statement
-        bool check_clause =
-            false; // ... and it is a `check`: evaluated like code where it stands, so `&x` and `*p` are allowed (decision 0032)
-        bool loop_clause =
-            false; // ... or a loop's `invariant` or `decreases` (decision 0038 item 6): `&x` and `*p` allowed as in a `check`
-        bool loop_invariant =
-            false; // ... and it is an `invariant` (not a measure): selects the message of a permission atom's rejection
-        bool invariant_atoms_ok =
-            false; // ... of a loop that is not a `do ... while (0)`: a permission atom of a pointer variable is accepted (decision 0040 item 5)
-        std::string
-            binder_name; // the name of the result in the `ensures` being encoded ("" when it has none), for the messages of `*result`
+        // ... and it is a `check`: evaluated like code where it stands, so `&x` and `*p` are allowed (decision 0032)
+        bool check_clause = false;
+        // ... or a loop's `invariant` or `decreases` (decision 0038 item 6): `&x` and `*p` allowed as in a `check`
+        bool loop_clause = false;
+        // ... and it is an `invariant` (not a measure): selects the message of a permission atom's rejection
+        bool loop_invariant = false;
+        // ... of a loop that is not a `do ... while (0)`: a permission atom of a pointer variable is accepted (decision
+        // 0040 item 5)
+        bool invariant_atoms_ok = false;
+        // the name of the result in the `ensures` being encoded ("" when it has none), for the messages of `*result`
+        std::string binder_name;
         Annot annot = Annot::none;
         bool binder_present = false;
         int old_depth = 0;
@@ -253,16 +254,18 @@ private:
         // User labels: one VIR id per label entity (decision 0015 item 2); the C/C++ position of each user `goto`, for the
         // diagnostics of vir::goto_problems.
         bool in_for_step = false; // encoding the increment of a `for` loop
-        std::set<an_expr_node_ptr>
-            struct_call_ok; // the IL call nodes of a struct-returning function that a consumer takes (decision 0044 item 2): an argument, a return, a copy source, a member operand, an expression statement
-        std::vector<vir::Var*>
-            literal_pending; // the hidden objects of compound literals met since the enclosing block's last statement began (decision 0044 item 7)
-        bool in_loop_cond =
-            false; // encoding a loop's condition: evaluated at every iteration, outside the body's block
-        bool struct_param_ok =
-            false; // a by-value struct parameter or result is read as the operand of a member in a contract (decision 0044 item 3)
-        int in_conditional_arm =
-            0; // inside an arm of a `void` `?:` statement: a struct copy there is rejected (decision 0043 item 7, audit B3)
+        // the IL call nodes of a struct-returning function that a consumer takes (decision 0044 item 2): an argument, a
+        // return, a copy source, a member operand, an expression statement
+        std::set<an_expr_node_ptr> struct_call_ok;
+        // the hidden objects of compound literals met since the enclosing block's last statement began (decision 0044
+        // item 7)
+        std::vector<vir::Var*> literal_pending;
+        // encoding a loop's condition: evaluated at every iteration, outside the body's block
+        bool in_loop_cond = false;
+        // a by-value struct parameter or result is read as the operand of a member in a contract (decision 0044 item 3)
+        bool struct_param_ok = false;
+        // inside an arm of a `void` `?:` statement: a struct copy there is rejected (decision 0043 item 7, audit B3)
+        int in_conditional_arm = 0;
         // Decision 0041 item 6 (audit B2): while the original expression of a folded address constant is encoded (const_depth is raised with it), `&g`
         // inside it is read as `GlobalAddr`; `addr_const` counts those levels.
         int addr_const = 0;
@@ -276,8 +279,8 @@ private:
             a_constant_ptr c = nullptr; // the initializer's constant (the declaration's `dik_constant`, P23)
             a_source_position at {};    // the declaration
         };
-        std::map<a_variable_ptr, ConstInit>
-            local_const_inits; // const locals declared so far with a constant initializer
+        // const locals declared so far with a constant initializer
+        std::map<a_variable_ptr, ConstInit> local_const_inits;
         struct ConstValue
         {
             vir::Type type;
@@ -306,8 +309,8 @@ private:
     std::set<a_routine_ptr> signature_checked_;
     std::map<a_routine_ptr, std::set<a_routine_ptr>> edges_; // calls between verified functions (decision 0013 item 4)
     std::set<std::tuple<int, std::string, unsigned long>> rejected_; // (diagnostic, file, line)
-    std::set<std::pair<a_routine_ptr, a_type_ptr>>
-        computed_reported_; // typerefs reported by reject_type, per function (0024 item 6)
+    // typerefs reported by reject_type, per function (0024 item 6)
+    std::set<std::pair<a_routine_ptr, a_type_ptr>> computed_reported_;
     Ctx cx_;
     // Named constants (decision 0017): the file-scope `const` objects of verified files that are encoded, by variable.
     struct NamedInfo
@@ -316,8 +319,8 @@ private:
         std::string value; // EDG's value, decimal ("0"/"1" for bool)
     };
     std::map<a_variable_ptr, NamedInfo> named_;
-    std::set<a_variable_ptr>
-        rejected_globals_; // file-scope variables rejected at their declaration: uses are not diagnosed again
+    // file-scope variables rejected at their declaration: uses are not diagnosed again
+    std::set<a_variable_ptr> rejected_globals_;
     a_variable_ptr encoding_named_ = nullptr; // the named constant whose initializer is being encoded
 
     // Mutable globals and `static` locals (decision 0041): the variables that are blocks of the program, by variable.
@@ -429,9 +432,8 @@ private:
         VType r = struct_vtype(type);
         if (!r.ok && r.silent)
         {
-            return vtype(
-                type, true, allow_restrict,
-                extra_quals); // a rejected struct is reported again where a signature uses it (as before decision 0044)
+            // a rejected struct is reported again where a signature uses it (as before decision 0044)
+            return vtype(type, true, allow_restrict, extra_quals);
         }
         if (r.ok && ((f_get_type_qualifiers(type, TRUE) | extra_quals) & TQ_CONST) != 0)
         {
@@ -1194,8 +1196,8 @@ private:
             reject(Diag::unsupported_declaration, at, "a \"main\" declared not to return");
             ok = false;
         }
-        VType ret = signature_vtype(
-            return_type(r)); // decision 0037 item 3: a pointer result; decision 0044 item 4: a struct result
+        // decision 0037 item 3: a pointer result; decision 0044 item 4: a struct result
+        VType ret = signature_vtype(return_type(r));
         if (!ret.ok)
         {
             reject_type(ret, at);
@@ -1234,11 +1236,8 @@ private:
         size_t pk = 0;
         for (a_param_type_ptr p = x->param_type_list; p != nullptr; p = p->next, ++pk)
         {
-            VType pt = signature_vtype(
-                p->type, true,
-                p->qualifiers |
-                    (pk < var_quals.size() ? var_quals[pk]
-                                           : 0)); // decision 0037 item 2: a pointer parameter; 0044 item 3: a struct
+            // decision 0037 item 2: a pointer parameter; 0044 item 3: a struct
+            VType pt = signature_vtype(p->type, true, p->qualifiers | (pk < var_quals.size() ? var_quals[pk] : 0));
             if (pt.ok && (p->qualifiers & TQ_VOLATILE) != 0)
             {
                 pt.ok = false;
@@ -1269,8 +1268,8 @@ private:
     }
     std::set<a_routine_ptr> signature_ok_;
     vir::Var literal_sentinel_; // names a compound literal in a `return_local_address` message
-    std::map<const vir::Function*, a_source_position>
-        restrict_at_; // where function_of was asked for each function: the place a `restrict` rejection is reported
+    // where function_of was asked for each function: the place a `restrict` rejection is reported
+    std::map<const vir::Function*, a_source_position> restrict_at_;
 
     // ---- `[[cerastes::owning]]` on parameters (decisions 0029 item 1, 0040 item 3; P52) --------------------------------------------------
     struct OwningParam
@@ -1278,8 +1277,8 @@ private:
         int index = 0;         // the parameter (0-based)
         a_source_position pos; // the attribute (its first node, in source order)
     };
-    std::map<a_routine_ptr, std::vector<OwningParam>>
-        owning_; // the owning parameters of the routines whose signatures were read
+    // the owning parameters of the routines whose signatures were read
+    std::map<a_routine_ptr, std::vector<OwningParam>> owning_;
     // The initialization markers of the parameters (decision 0042 item 4), read like `owning`: the marked parameters of the routines whose
     // signatures were read, in index order.  `function_of` sets `vir::Param::init` from it before the contract is read.
     struct MarkerParam
@@ -1353,8 +1352,8 @@ private:
             }
             nodes[k].push_back(a);
         };
-        std::vector<std::string>
-            names; // a parameter's name from any declaration that gives it (an unnamed one in the first does not hide it)
+        // a parameter's name from any declaration that gives it (an unnamed one in the first does not hide it)
+        std::vector<std::string> names;
         auto note_name = [&](size_t k, const char* n)
         {
             if (n == nullptr || *n == '\0')
@@ -1640,8 +1639,8 @@ private:
             }
             if (decls.size() > 1)
             {
-                size_t with = decls.size(),
-                       without = decls.size(); // the first declaration that has it, and the first that has not
+                // the first declaration that has it, and the first that has not
+                size_t with = decls.size(), without = decls.size();
                 for (size_t i = 0; i < decls.size(); ++i)
                 {
                     if (count[i] > 0 && with == decls.size())
@@ -1785,8 +1784,8 @@ private:
                     reads_beside = true;
                 }
             }
-            for (const vir::AtomSite& st :
-                 vir::contract_block_atoms(*f)) // decision 0047 item 4: the whole block is `owns(*p)` and more
+            // decision 0047 item 4: the whole block is `owns(*p)` and more
+            for (const vir::AtomSite& st : vir::contract_block_atoms(*f))
             {
                 if (st.atom->a != nullptr && st.atom->a->kind == Expr::Kind::Formal && st.atom->a->index == m.index)
                 {
@@ -1921,8 +1920,10 @@ private:
             {
                 continue;
             }
+            // audit 2 N1, like owns_block's N12: a block of a const or volatile object could never be freed without a
+            // cast
             if (pointee_qualified(return_type(r)))
-            { // audit 2 N1, like owns_block's N12: a block of a const or volatile object could never be freed without a cast
+            {
                 reject(
                     Diag::unsupported_annotation, a->position,
                     marker(a) +
@@ -2236,8 +2237,8 @@ private:
             const_cast<vir::Var*>(f->param_var(k))->c_type_name = pt.name;
             if (pt.t.is_struct())
             {
-                f->mark_address_taken(f->param_var(
-                    k)); // decision 0044 item 3: the copy of a by-value struct is a block, like every struct local
+                // decision 0044 item 3: the copy of a by-value struct is a block, like every struct local
+                f->mark_address_taken(f->param_var(k));
             }
             if (pt.restrict_q)
             {
@@ -2303,7 +2304,9 @@ private:
                        "a `restrict` parameter `" + pname(k) + "` whose contract does not own `*" + pname(k) +
                            "` in its `requires` and its `ensures`");
             }
-            else // permissions follow cells, not provenance: another pointer to the cell could be written through (decision 0037 item 2)
+            // permissions follow cells, not provenance: another pointer to the cell could be written through (decision
+            // 0037 item 2)
+            else
             {
                 reject(Diag::unsupported_annotation, at,
                        "a `restrict` parameter `" + pname(k) + "` beside `" + pname(other) +
@@ -2374,9 +2377,9 @@ private:
         }
         // C gives a logical operation the type `int`: `a && b` reaches here as `bool_to_int(a && b)`.  A contract that holds atoms or reads `*p` keeps
         // its Bool tree, so that the position rule of decision 0037 item 5 sees the conjuncts; programs without such nodes keep their shape.
-        if ((cx_.contract || (cx_.loop_invariant && holds_atom(*x))) && x->type.is_int() &&
-            vir::reads_heap(
-                *x)) // a loop invariant too, only when it holds an atom (decision 0040 item 5): every other clause keeps its old shape
+        // a loop invariant too, only when it holds an atom (decision 0040 item 5): every other clause keeps its old
+        // shape
+        if ((cx_.contract || (cx_.loop_invariant && holds_atom(*x))) && x->type.is_int() && vir::reads_heap(*x))
         {
             if (const Expr* t = contract_truth(x))
             {
@@ -2502,8 +2505,8 @@ private:
         }
         else
         {
-            measure_rejected_.insert(
-                cx_.routine); // the user wrote a measure and it was rejected: no second report that it is missing
+            // the user wrote a measure and it was rejected: no second report that it is missing
+            measure_rejected_.insert(cx_.routine);
         }
     }
     std::set<a_routine_ptr> measure_rejected_; // functions whose `decreases` was rejected
@@ -2659,20 +2662,26 @@ private:
             return v;
         }
         const vir::dec::Range r = vir::dec::range_of(*t.int_type);
-        auto inc = [](const std::string& a) {  // a + 1 for a non-negative decimal
-      std::string s = a;
-      size_t i = s.size();
-      while (i > 0) {
-        --i;
-        if (s[i] == '9') {
-          s[i] = '0';
-        } else {
-          ++s[i];
-          return s;
-        }
-      }
-      return "1" + s;
-    };
+        // a + 1 for a non-negative decimal
+        auto inc = [](const std::string& a)
+        {
+            std::string s = a;
+            size_t i = s.size();
+            while (i > 0)
+            {
+                --i;
+                if (s[i] == '9')
+                {
+                    s[i] = '0';
+                }
+                else
+                {
+                    ++s[i];
+                    return s;
+                }
+            }
+            return "1" + s;
+        };
         if (vir::dec::cmp(v, r.lo) <= 0)
         { // at the minimum: +1
             if (vir::dec::negative(r.lo))
@@ -3197,8 +3206,8 @@ private:
                 truth_context(o);
             }
         }
-        cx_.case_value =
-            true; // the case-value path: a named local constant is its value (0017 item 6), a variable is noted
+        // the case-value path: a named local constant is its value (0017 item 6), a variable is noted
+        cx_.case_value = true;
         cx_.case_var.clear();
         ++cx_.const_depth; // a constant expression: no calls (`call` rejects them)
         const Expr* x = constant_initializer(c, sa->position);
@@ -3619,8 +3628,8 @@ private:
             return;
         }
         // The type first, so that the message names the real reason (an array of const is not "not const").
-        const bool mutable_obj =
-            !is_const_object(v); // decision 0041: a mutable global is a block of the program, a pointer one included
+        // decision 0041: a mutable global is a block of the program, a pointer one included
+        const bool mutable_obj = !is_const_object(v);
         VType vt = global_vtype(v, mutable_obj);
         if (!vt.ok && !mutable_obj && is_pointer_type(v->type) && !vt.silent)
         {
@@ -4045,7 +4054,8 @@ private:
                         return false;
                     }
                 }
-                ++cx_.const_depth; // a constant expression: no calls (`call` rejects them, also those the front end folded, P63 H7)
+                // a constant expression: no calls (`call` rejects them, also those the front end folded, P63 H7)
+                ++cx_.const_depth;
                 const Expr* init = constant_initializer(c, p);
                 --cx_.const_depth;
                 if (init == nullptr)
@@ -4108,8 +4118,8 @@ private:
         for (size_t k = 0; k < leaves.size(); ++k)
         {
             index[leaves[k].path] = k;
-            g->leaves[k].kind = leaves[k].type.is_ptr() ? vir::GlobalInit::Null
-                                                        : vir::GlobalInit::Value; // an unmentioned leaf is zero or null
+            // an unmentioned leaf is zero or null
+            g->leaves[k].kind = leaves[k].type.is_ptr() ? vir::GlobalInit::Null : vir::GlobalInit::Value;
             g->leaves[k].value = "0";
         }
         std::vector<InitElem> elems;
@@ -4212,7 +4222,8 @@ private:
                         return false;
                     }
                 }
-                ++cx_.const_depth; // a constant expression: no calls (`call` rejects them, also those the front end folded, P63 H7)
+                // a constant expression: no calls (`call` rejects them, also those the front end folded, P63 H7)
+                ++cx_.const_depth;
                 const Expr* init = constant_initializer(ec, el.at);
                 --cx_.const_depth;
                 if (init == nullptr)
@@ -4678,7 +4689,8 @@ private:
             }
             if (in_library_file(q.position))
             {
-                continue; // vlibc's own declaration: its markers are lib_trust's and the heap shapes' (decision 0047 item 3)
+                // vlibc's own declaration: its markers are lib_trust's and the heap shapes' (decision 0047 item 3)
+                continue;
             }
             an_attribute_ptr a = first_param_marker(q.declared_type);
             if (a == nullptr)
@@ -5304,10 +5316,10 @@ private:
     // `ensures`, and the same over any pointer place_pointer reads (`p->q->x`, `(*pp)->x`, `(**pp).x`, `gp->x`, `s.q->x`, `*p->q`): the base pointer is the
     // read, the members are MemberAddr steps (P70 H3: `dot_field(indirect(X), m)` and `points_to_field(X, m)` are one place).  Null (reported) otherwise.
     // `old(*p).x` is rejected with a pointer to `old(p->x)`.
-    a_type_ptr place_base_type_ =
-        nullptr; // the IL type of the pointer the last contract_place_address started its member chain from (the `const` rule)
-    std::set<std::pair<const vir::Function*, std::string>>
-        const_member_owns_reported_; // (function, root and steps) whose `owns` of a member of a const struct was reported
+    // the IL type of the pointer the last contract_place_address started its member chain from (the `const` rule)
+    a_type_ptr place_base_type_ = nullptr;
+    // (function, root and steps) whose `owns` of a member of a const struct was reported
+    std::set<std::pair<const vir::Function*, std::string>> const_member_owns_reported_;
     const Expr* contract_place_address(an_expr_node_ptr n, int depth = 0)
     {
         n = peel_place(n);
@@ -5877,8 +5889,8 @@ private:
         }
         if (fn == SpecFn::owns && pn->type != nullptr)
         { // decision 0040 item 2 (re-audit of B1): a contract may not give write permission to a const place
-            a_type_ptr pt = skip_typerefs(
-                pn->type); // the pointer's own type: its pointee is the place, whose qualifier is the innermost level (P70 H5)
+            // the pointer's own type: its pointee is the place, whose qualifier is the innermost level (P70 H5)
+            a_type_ptr pt = skip_typerefs(pn->type);
             if (pt != nullptr && pt->kind == tk_pointer && pt->variant.pointer.type != nullptr &&
                 (f_get_type_qualifiers(pt->variant.pointer.type, TRUE) & TQ_CONST) != 0)
             {
@@ -6285,8 +6297,8 @@ private:
             collect(c.expr);
         }
         const std::vector<vir::AtomSite> sites = vir::contract_atoms(*f);
-        const std::vector<vir::AtomSite> block_sites =
-            vir::contract_block_atoms(*f); // decision 0047 item 4: no ghost amount, no partner
+        // decision 0047 item 4: no ghost amount, no partner
+        const std::vector<vir::AtomSite> block_sites = vir::contract_block_atoms(*f);
         std::set<const Expr*> placed;
         for (const vir::AtomSite& st : sites)
         {
@@ -6625,8 +6637,10 @@ private:
                     const a_type_qualifier_set fq = f_get_type_qualifiers(fp, TRUE);
                     if ((fq & ~tq) == 0)
                     {
+                        // decision 0040 item 2 (re-audit of B1): a contract may not add or drop a pointee qualifier, in
+                        // any conversion
                         if (cx_.contract && tq != fq)
-                        { // decision 0040 item 2 (re-audit of B1): a contract may not add or drop a pointee qualifier, in any conversion
+                        {
                             reject(
                                 Diag::unsupported_expression, e->position,
                                 "a conversion in a contract that adds or drops a qualifier of the pointee (`int *` to `const int *`): the contract would equate a "
@@ -6713,8 +6727,8 @@ private:
         }
         if (to.t.is_bool() && !from.t.is_bool())
         {
-            truth_context(ops[0], /*conversion_to_bool=*/truth_operands_.count(e) ==
-                                      0); // decision 0025 item 6, R7: a conversion to bool is a truth context
+            // decision 0025 item 6, R7: a conversion to bool is a truth context
+            truth_context(ops[0], /*conversion_to_bool=*/truth_operands_.count(e) == 0);
         }
         const Expr* x = expr(ops[0]);
         if (x == nullptr)
@@ -6876,8 +6890,8 @@ private:
         {
             allow_enum_conversion(ops[i]); // decision 0018 item 6 (iii)
             const vir::Type& pty = f->params[i - 1].type;
-            const Expr* a = pty.is_struct() ? struct_value(ops[i], pty)
-                                            : expr(ops[i]); // decision 0044 item 5: a struct argument passes its leaves
+            // decision 0044 item 5: a struct argument passes its leaves
+            const Expr* a = pty.is_struct() ? struct_value(ops[i], pty) : expr(ops[i]);
             if (a == nullptr)
             {
                 ok = false;
@@ -7204,8 +7218,10 @@ private:
     const Expr* struct_value_node(an_expr_node_ptr n)
     {
         const bool is_call = n->kind == enk_operation && n->variant.operation.kind == eok_call;
+        // a call says why itself (a call in an annotation, a call folded to a constant); a folded `S{1, 2}.x` is read
+        // as written (P67 H2)
         if (!is_call && cx_.contract)
-        { // a call says why itself (a call in an annotation, a call folded to a constant); a folded `S{1, 2}.x` is read as written (P67 H2)
+        {
             reject(
                 Diag::unsupported_expression, n->position,
                 "a struct value in a contract (a contract reads the members of a struct parameter or of the result)");
@@ -7500,8 +7516,8 @@ private:
         {
             return nullptr;
         }
-        vir::Var* cl = cx_.fn->new_local("(" + vt.name + "){...}", vt.t,
-                                         l); // messages spell the literal, never an internal name (invariant 7)
+        // messages spell the literal, never an internal name (invariant 7)
+        vir::Var* cl = cx_.fn->new_local("(" + vt.name + "){...}", vt.t, l);
         cl->c_type_name = vt.name;
         cl->compound_literal = true;
         cx_.fn->mark_address_taken(cl);
@@ -7575,8 +7591,8 @@ private:
         if (agg != nullptr)
         {
             bool compound = false;
-            agg = unfold_aggregate(
-                agg, &compound); // a compound literal's list is a list like any other (decision 0044 item 7)
+            // a compound literal's list is a list like any other (decision 0044 item 7)
+            agg = unfold_aggregate(agg, &compound);
             if (agg->kind != ck_aggregate)
             {
                 reject(Diag::unsupported_expression, at, "a struct initializer that is not a braced list");
@@ -7683,8 +7699,10 @@ private:
             }
             if (vir::Global* gl = global_of(v))
             { // a struct global or `static` struct local (decision 0044 items 8-9): its address is the global's
+                // the original expression of a folded address constant (`&g.x`) is read; any other constant expression
+                // is not
                 if (cx_.const_depth > cx_.addr_const)
-                { // the original expression of a folded address constant (`&g.x`) is read; any other constant expression is not
+                {
                     reject(Diag::unsupported_expression, e->position,
                            "the value of the variable \"" + gl->c_name +
                                "\" in a constant expression (a mutable variable is never one)");
@@ -7859,8 +7877,10 @@ private:
 
     const Expr* contract_member_read(an_expr_node_ptr e)
     {
+        // a function's `decreases(p->x)` is the attribute argument itself, unevaluated: an lvalue read as the value
+        // (decision 0039 item 8)
         if (e->is_lvalue && cx_.annot != Annot::decreases)
-        { // a function's `decreases(p->x)` is the attribute argument itself, unevaluated: an lvalue read as the value (decision 0039 item 8)
+        {
             reject(Diag::unsupported_expression, e->position, "a member access used as anything but a value");
             return nullptr;
         }
@@ -8239,8 +8259,8 @@ private:
                 {
                     return nullptr;
                 }
-                truth_context(ops[0], /*conversion_to_bool=*/truth_operands_.count(e) ==
-                                          0); // a condition's own bool conversion is no conversion
+                // a condition's own bool conversion is no conversion
+                truth_context(ops[0], /*conversion_to_bool=*/truth_operands_.count(e) == 0);
                 const Expr* a = as_bool(expr(ops[0]), ops[0]->position);
                 return logical_result(e, a);
             }
@@ -8362,7 +8382,8 @@ private:
         }
         if (is_library_routine(r))
         {
-            return false; // "does not return" of a C library function is vlibc's (decision 0046 item 5), never the program's
+            // "does not return" of a C library function is vlibc's (decision 0046 item 5), never the program's
+            return false;
         }
         const a_source_position decl = r->source_corresp.decl_position;
         if (decl.seq == 0 || physical_path(decl).empty() || !in_verified_file(decl))
@@ -8581,8 +8602,8 @@ private:
         a_source_position decl {};
     };
     std::map<a_routine_ptr, LibTrust> lib_trust_;
-    std::set<a_routine_ptr>
-        reserved_rejected_; // a library routine to which the program gave a contract, a mark or a body: never trusted or called
+    // a library routine to which the program gave a contract, a mark or a body: never trusted or called
+    std::set<a_routine_ptr> reserved_rejected_;
 
     void lib_internal_error(const a_source_position& p, const std::string& why)
     {
@@ -8939,13 +8960,13 @@ private:
     {
         bool allocation = true; // (A); else (D)
         bool zeroed = false;    // (A): `zeroed(B)` beside the block (calloc)
-        bool result_uninit =
-            false; // (A): `ref_to_uninit` on the routine (malloc: the block's contents are indeterminate)
+        // (A): `ref_to_uninit` on the routine (malloc: the block's contents are indeterminate)
+        bool result_uninit = false;
         std::vector<int> size_params; // (A): the 0-based parameters whose product is the size S
         std::string reason;           // vlibc's tag: "vlibc: <name> <reason>"
         a_source_position pos {};     // vlibc's declaration
-        vir::Allocator allocator = vir::Allocator::
-            Platform; // the routine's name class (decision 0050 item 3): a standard name or a `vlibc_` name
+        // the routine's name class (decision 0050 item 3): a standard name or a `vlibc_` name
+        vir::Allocator allocator = vir::Allocator::Platform;
     };
     std::map<a_routine_ptr, HeapShape> heap_shapes_;
 
@@ -9396,8 +9417,8 @@ private:
                           "` is declared `static` by the program, so vlibc's contract on it would attach to the program's own function (vlibc's own function has external linkage: decision 0048 item 5)"
                     : "`" + name +
                           "` is declared `static` by the program, so vlibc's contract on it would attach to the program's own function (a C library function has external linkage: C23 7.1.3)");
-            reserved_rejected_.insert(
-                r); // one error for the cause: nothing else is reported for it (no `ensures_on_noreturn`)
+            // one error for the cause: nothing else is reported for it (no `ensures_on_noreturn`)
+            reserved_rejected_.insert(r);
             return lib_trust_.emplace(r, t).first->second;
         }
         if (verified_body(r) != nullptr)
@@ -10252,7 +10273,8 @@ private:
         }
         if (reject_redirected_call(callee, at))
         {
-            return nullptr; // decision 0046 item 8: the contract is trusted, so the call must reach the declared function
+            // decision 0046 item 8: the contract is trusted, so the call must reach the declared function
+            return nullptr;
         }
         return function_of(callee, false, at);
     }
@@ -10346,8 +10368,8 @@ private:
                 continue;
             }
             cx_.annotation = true;
-            cx_.loop_clause =
-                true; // decision 0038 item 6: cells by name, `*q`, `&x`, pointer `==`/`!=` and NULL are allowed
+            // decision 0038 item 6: cells by name, `*q`, `&x`, pointer `==`/`!=` and NULL are allowed
+            cx_.loop_clause = true;
             cx_.loop_invariant = true;
             cx_.invariant_atoms_ok = atoms_ok;
             truth_context(arg); // decision 0023 item 5: `invariant(x | 4)`
@@ -10364,8 +10386,8 @@ private:
             }
             invariants.push_back(vir::Clause {c, clause_loc});
         }
-        cx_.annotation =
-            true; // positions of the arguments of a CERASTES_* macro are the user's own (decision 0006 item 10)
+        // positions of the arguments of a CERASTES_* macro are the user's own (decision 0006 item 10)
+        cx_.annotation = true;
         if (!check_invariant_atoms(invariants))
         {
             ok = false;
@@ -10669,8 +10691,9 @@ private:
         size_t cursor = 0;
         bool ok = true;
         bool after_designator = false;
-        long last_member =
-            -1; // the member the previous element initialized (a designator must not go back: out of declaration order, both modes)
+        // the member the previous element initialized (a designator must not go back: out of declaration order, both
+        // modes)
+        long last_member = -1;
         for (a_constant_ptr c = agg->variant.aggregate.first_constant; c != nullptr; c = c->next)
         {
             const a_source_position cp =
@@ -10729,8 +10752,8 @@ private:
                     const bool elision = !c->explicit_braces_on_aggregate && !by_designator;
                     if (elision && !(agg->variant.aggregate.first_constant == c && c->next == nullptr))
                     {
-                        if (!agg->explicit_braces_on_aggregate &&
-                            agg->explicit_cast_applied) // the folded form of a struct temporary in an initializer's call: no braces flags at any level
+                        // the folded form of a struct temporary in an initializer's call: no braces flags at any level
+                        if (!agg->explicit_braces_on_aggregate && agg->explicit_cast_applied)
                         {
                             reject(
                                 Diag::unsupported_expression, cp,
@@ -10934,7 +10957,9 @@ private:
                 "a struct assigned a value through a pointer read from memory (`(*pp)->t = f();`: the call could change that pointer, and C leaves the order open: M8, decision 0044 item 5)");
             return;
         }
-        { // C++ `t = {1, 2};` is a call of `operator=` with a braced list (P67: a `temp_init` that is neither a cast nor a functional notation)
+        // C++ `t = {1, 2};` is a call of `operator=` with a braced list (P67: a `temp_init` that is neither a cast nor
+        // a functional notation)
+        {
             an_expr_node_ptr vn = peel_value(value_node);
             if (vn != nullptr && vn->kind == enk_temp_init && vn->variant.init.dynamic_init != nullptr &&
                 !vn->variant.init.dynamic_init->is_explicit_cast &&
@@ -11107,8 +11132,10 @@ private:
                 reject(Diag::unsupported_declaration, at, "a struct initializer that is not a braced list");
                 return;
             }
+            // `S s(1, 2)` is told by its parentheses flag, never by a missing braces flag (a braced list may lack it);
+            // `S s = S{...}` and `S()` are the list (decision 0044 item 6)
             if (agg->explicit_parentheses_on_aggregate)
-            { // `S s(1, 2)` is told by its parentheses flag, never by a missing braces flag (a braced list may lack it); `S s = S{...}` and `S()` are the list (decision 0044 item 6)
+            {
                 if (agg->explicit_cast_applied) // `S s = S(1, 2);`: `S(1, 2)` as a value
                 {
                     reject(Diag::unsupported_expression, at,
@@ -13565,8 +13592,10 @@ private:
                         last = last->next;
                     }
                     SrcLoc end = end_of(s->end_position);
+                    // the statement the block wraps: not the compiler's break label that follows a `switch` or a loop
+                    // (P13)
                     if (!end.known())
-                    { // the statement the block wraps: not the compiler's break label that follows a `switch` or a loop (P13)
+                    {
                         for (a_statement_ptr c = first; c != nullptr; c = c->next)
                         {
                             if (c->kind != stmk_label && c->kind != stmk_empty)
@@ -16125,8 +16154,8 @@ const Encoder::EnumInfo& Encoder::enum_info(a_type_ptr t)
         refuse(p, "a scoped enumeration whose underlying type is not int"); // [dcl.enum]/5
     }
     // The attributes of the type itself are held to the allow-list by declaration_level_checks.
-    vir::IntType
-        underlying; // the underlying (C++) or compatible (C) type, for the fixed range and the containment check
+    // the underlying (C++) or compatible (C) type, for the fixed range and the containment check
+    vir::IntType underlying;
     underlying.bits = bits;
     underlying.is_signed = is_signed;
     vir::IntType c_int;
@@ -16584,8 +16613,8 @@ const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t)
 
 void Encoder::declaration_level_checks(const IlEntities& ents)
 {
-    std::set<std::pair<std::string, a_scope_ptr>>
-        defined_tags; // the struct tags defined so far, per scope (decision 0043 item 2)
+    // the struct tags defined so far, per scope (decision 0043 item 2)
+    std::set<std::pair<std::string, a_scope_ptr>> defined_tags;
     // Types, variables and templates declared in verified files (0012 item 12).
     for (a_type_ptr t : ents.types)
     {

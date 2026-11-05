@@ -37,8 +37,10 @@
 // macro below would expand to nothing and the contracts would silently vanish (for example after `-U__cplusplus`
 // or `#undef __cplusplus` before this include).  Ordinary compilers never define __CERASTES__.
 #if defined(__CERASTES__) && !defined(CERASTES_ATTRIBUTES_)
-#  error \
-    "cerastes.h: the cerastes front end is running (__CERASTES__ is defined) but the cerastes attributes are not available (check that __cplusplus, __STDC_VERSION__ and __has_cpp_attribute / __has_c_attribute were not changed); contracts would be dropped"
+// A #error message is one line, over 120 columns here: the formatter would continue it after a backslash.
+// clang-format off
+#  error "cerastes.h: the cerastes front end is running (__CERASTES__ is defined) but the cerastes attributes are not available (check that __cplusplus, __STDC_VERSION__ and __has_cpp_attribute / __has_c_attribute were not changed); contracts would be dropped"
+// clang-format on
 #endif
 
 #ifdef CERASTES_ATTRIBUTES_

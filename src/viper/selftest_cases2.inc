@@ -179,8 +179,8 @@ void define_calls()
            Function* d = k.fn("d", k.vd, {{"x", k.i32}});
            k.trusted(d);
            Function* f = k.fn("f", k.vd);
-           const Expr* inner =
-               k.add(k.num(k.i32, kIntMax), k.num(k.i32, "1")); // at the declaration of the default argument
+           // at the declaration of the default argument
+           const Expr* inner = k.add(k.num(k.i32, kIntMax), k.num(k.i32, "1"));
            const Expr* at_call = k.b.report_at(inner, k.at());
            f->body = k.blk({k.es(k.call(d, {at_call}))});
            k.done(f);
@@ -353,11 +353,11 @@ void define_loops()
            Function* f = k.fn("f", k.vd, {{"d", k.i32}});
            k.req(f, k.gt(k.F(f, 0), k.num(k.i32, "0")));
            const Var* d = f->param_var(0);
-           f->body = k.blk(
-               {k.whl(k.lt(k.v(d), k.num(k.i32, "0")),
-                      {k.cl(k.gt(k.v(d), k.num(k.i32, "0"))),
-                       k.cl(k.ge(k.div(k.num(k.i32, "100"), k.v(d)), k.num(k.i32, "0")))},
-                      {k.cl(k.cv(k.i64, k.v(d)))}, k.blk({}))}); // the invariant d > 0 makes the empty body unreachable
+           // the invariant d > 0 makes the empty body unreachable
+           f->body = k.blk({k.whl(k.lt(k.v(d), k.num(k.i32, "0")),
+                                  {k.cl(k.gt(k.v(d), k.num(k.i32, "0"))),
+                                   k.cl(k.ge(k.div(k.num(k.i32, "100"), k.v(d)), k.num(k.i32, "0")))},
+                                  {k.cl(k.cv(k.i64, k.v(d)))}, k.blk({}))});
            k.done(f);
        });
     lc("loop_invariant_obligation_unguarded", "invariants 100 / d >= 0 and d > 0: the division comes first, unguarded",
@@ -377,8 +377,8 @@ void define_loops()
        [](Kit& k)
        {
            Function* f = k.fn("f", k.vd, {{"n", k.i32}});
-           k.req(f,
-                 k.ge_c(k.F(f, 0), k.i32, "1")); // s grows, so the loop terminates (the overflow of s + n is the point)
+           // s grows, so the loop terminates (the overflow of s + n is the point)
+           k.req(f, k.ge_c(k.F(f, 0), k.i32, "1"));
            Var* s = k.local(f, "s", k.i32);
            const Expr* a = k.add(k.v(s), k.pv(f, 0));
            f->body = k.blk({k.decl(s, k.num(k.i32, "0")),
@@ -852,8 +852,8 @@ void define_compound_assignment()
            f->body =
                k.blk({k.decl(i, k.num(k.i32, "-1")), k.b.compound_assign(i, BinaryOp::Add, k.num(k.u32, "1"), l)});
            k.done(f);
-           k.fail_only("conversion", l, 2,
-                       0); // the second, from the sum back to int, is vacuous on the path that ended
+           // the second, from the sum back to int, is vacuous on the path that ended
+           k.fail_only("conversion", l, 2, 0);
        });
     lc("ca_u8_mul_exact", "unsigned char uc = 15; uc *= uc;  uc == 225",
        [](Kit& k)
@@ -1807,8 +1807,8 @@ void define_control_flow()
                      k.blk({k.cs(k.num(k.i32, "2")), k.ret(k.num(k.i32, "1")), bad, k.ret(k.num(k.i32, "2"))}), id),
                 k.ret(k.num(k.i32, "0"))});
            k.done(f);
-           k.fail("shift", bad->loc, 1, "",
-                  "shift count"); // the later obligations of the same case value hold vacuously after it
+           // the later obligations of the same case value hold vacuously after it
+           k.fail("shift", bad->loc, 1, "", "shift count");
        });
     lc("cf_switch_case_value_expression_ok",
        "case 1 << 3 and case (2 + 3): obligations hold, values used in the dispatch",
@@ -2138,11 +2138,18 @@ void define_control_flow()
     rc("cf_case_inside_a_loop_in_the_switch", "not directly in the body of its switch",
        [in_fn](Kit& k)
        {
-           in_fn(k, [](Kit& k, Function* f) {  // Duff's device
-      const int s = k.jid();
-      const int l = k.jid();
-      return k.sw(k.pv(f, 0), k.blk({k.cs(k.num(k.i32, "0")), k.loop(k.no(), {}, {k.cl(k.num(k.i32, "0"))}, k.blk({k.cs(k.num(k.i32, "1"))}), nullptr, LoopForm::While, l)}), s);
-    });
+           // Duff's device
+           in_fn(k,
+                 [](Kit& k, Function* f)
+                 {
+                     const int s = k.jid();
+                     const int l = k.jid();
+                     return k.sw(k.pv(f, 0),
+                                 k.blk({k.cs(k.num(k.i32, "0")),
+                                        k.loop(k.no(), {}, {k.cl(k.num(k.i32, "0"))}, k.blk({k.cs(k.num(k.i32, "1"))}),
+                                               nullptr, LoopForm::While, l)}),
+                                 s);
+                 });
        });
     rc("cf_duplicate_case_value", "appears twice",
        [in_fn](Kit& k)
@@ -2370,31 +2377,43 @@ void define_goto_noreturn_assert()
        });
 
     // S11b: a continue-like goto to a later label of a loop body.
-    auto cont_like = [=](Kit& k, int variant) {  // 0 ok, 1 breaks an invariant, 2 skips the step
-    Function* f = fn_n(k, k.i32);
-    Var* i = k.local(f, "i", k.i32);
-    Var* r = k.local(f, "r", k.i32);
-    const int L = k.jid();
-    Clause inv = k.cl(k.land(k.ge_c(k.v(r), k.i32, "0"), k.le(k.v(r), k.v(i))));
-    Clause m = k.cl(k.gap(k.pv(f, 0), k.v(i)));
-    const Stmt* jump = variant == 1 ? k.blk({k.asg(r, k.add(k.v(r), k.num(k.i32, "5"))), k.go(L)}) : k.blk({k.go(L)});
-    std::vector<const Stmt*> body = {k.iff(k.eq_c(k.v(i), k.i32, "3"), jump), k.asg(r, k.add(k.v(r), k.num(k.i32, "1")))};
-    if (variant == 2) {
-      body.push_back(plus1(k, i));
-      body.push_back(k.lab(L));
-    } else {
-      body.push_back(k.lab(L));
-      body.push_back(plus1(k, i));
-    }
-    const Stmt* w = k.loop(k.lt(k.v(i), k.pv(f, 0)), {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.le(k.v(i), k.pv(f, 0))), inv}, {m},
-                           k.blk(body), nullptr, LF::While, k.jid());
-    f->body = k.blk({k.decl(i, k.num(k.i32, "0")), k.decl(r, k.num(k.i32, "0")), w, k.ret(k.v(r))});
-    k.done(f);
-    if (variant == 1){ k.fail("invariant-preserved", inv.loc);
-}
-    if (variant == 2){ k.fail("termination", m.loc);
-}
-  };
+    // 0 ok, 1 breaks an invariant, 2 skips the step
+    auto cont_like = [=](Kit& k, int variant)
+    {
+        Function* f = fn_n(k, k.i32);
+        Var* i = k.local(f, "i", k.i32);
+        Var* r = k.local(f, "r", k.i32);
+        const int L = k.jid();
+        Clause inv = k.cl(k.land(k.ge_c(k.v(r), k.i32, "0"), k.le(k.v(r), k.v(i))));
+        Clause m = k.cl(k.gap(k.pv(f, 0), k.v(i)));
+        const Stmt* jump =
+            variant == 1 ? k.blk({k.asg(r, k.add(k.v(r), k.num(k.i32, "5"))), k.go(L)}) : k.blk({k.go(L)});
+        std::vector<const Stmt*> body = {k.iff(k.eq_c(k.v(i), k.i32, "3"), jump),
+                                         k.asg(r, k.add(k.v(r), k.num(k.i32, "1")))};
+        if (variant == 2)
+        {
+            body.push_back(plus1(k, i));
+            body.push_back(k.lab(L));
+        }
+        else
+        {
+            body.push_back(k.lab(L));
+            body.push_back(plus1(k, i));
+        }
+        const Stmt* w = k.loop(k.lt(k.v(i), k.pv(f, 0)),
+                               {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.le(k.v(i), k.pv(f, 0))), inv}, {m},
+                               k.blk(body), nullptr, LF::While, k.jid());
+        f->body = k.blk({k.decl(i, k.num(k.i32, "0")), k.decl(r, k.num(k.i32, "0")), w, k.ret(k.v(r))});
+        k.done(f);
+        if (variant == 1)
+        {
+            k.fail("invariant-preserved", inv.loc);
+        }
+        if (variant == 2)
+        {
+            k.fail("termination", m.loc);
+        }
+    };
     lc("goto_continue_like",
        "a goto to a later label of the loop body (like continue): the invariants hold at the end of the body",
        [=](Kit& k)
@@ -2576,19 +2595,25 @@ void define_goto_noreturn_assert()
        });
 
     // ---- assert ----
-    auto div_assert = [=](Kit& k, int variant) {  // 0 ok, 1 asserted fact false, 2 divisor may be 0
-    Function* f = k.fn("f", k.vd, {{"a", k.i32}, {"b", k.i32}});
-    k.req(f, k.range(k.F(f, 0), k.i32, "0", "100"));
-    k.req(f, k.range(k.F(f, 1), k.i32, variant == 2 ? "0" : "1", "100"));
-    const Expr* d = k.div(k.pv(f, 0), k.pv(f, 1));
-    const Stmt* a = k.asrt(k.ge_c(d, k.i32, variant == 1 ? "1" : "0"));
-    f->body = k.blk({a});
-    k.done(f);
-    if (variant == 1){ k.fail("check", a->loc, 1, "", "assert");
-}
-    if (variant == 2){ k.fail("division-by-zero", d->loc);
-}
-  };
+    // 0 ok, 1 asserted fact false, 2 divisor may be 0
+    auto div_assert = [=](Kit& k, int variant)
+    {
+        Function* f = k.fn("f", k.vd, {{"a", k.i32}, {"b", k.i32}});
+        k.req(f, k.range(k.F(f, 0), k.i32, "0", "100"));
+        k.req(f, k.range(k.F(f, 1), k.i32, variant == 2 ? "0" : "1", "100"));
+        const Expr* d = k.div(k.pv(f, 0), k.pv(f, 1));
+        const Stmt* a = k.asrt(k.ge_c(d, k.i32, variant == 1 ? "1" : "0"));
+        f->body = k.blk({a});
+        k.done(f);
+        if (variant == 1)
+        {
+            k.fail("check", a->loc, 1, "", "assert");
+        }
+        if (variant == 2)
+        {
+            k.fail("division-by-zero", d->loc);
+        }
+    };
     lc("assert_with_division_ok", "assert(a / b >= 0) with b >= 1",
        [=](Kit& k)
        {
@@ -2764,8 +2789,8 @@ void define_named_constants()
            Function* f = k.fn("f", k.vd);
            f->body = k.blk({});
            k.done(f);
-           k.fail("conversion", init->loc, 1, "",
-                  "the value may not fit in `unsigned int`"); // one method, no contract: no __wf
+           // one method, no contract: no __wf
+           k.fail("conversion", init->loc, 1, "", "the value may not fit in `unsigned int`");
        });
     lc("nc_unsigned_conversion_holds",
        "const unsigned K = (unsigned)5; the constant is inside unsigned int: no obligation, the internal guard holds",
@@ -3709,8 +3734,8 @@ void define_enumeration_rejections()
        [](Kit& k)
        {
            const Type e = k.en("E8", 8, false, "0", "255");
-           k.nc("BAD", e, k.cv(e, k.num(k.i32, "300")),
-                "300"); // the front end wraps (E8)300 to 44: 300 is never its value
+           // the front end wraps (E8)300 to 44: 300 is never its value
+           k.nc("BAD", e, k.cv(e, k.num(k.i32, "300")), "300");
            Function* f = k.fn("f", k.vd);
            f->body = k.blk({});
            k.done(f);
@@ -4251,20 +4276,27 @@ void define_uninitialized()
 
     // ---- jumps past a declaration ----
     // if (n > 5) goto L; int y; y = 2; L: <tail>
-    auto goto_past = [=](Kit& k, int variant) {  // 0: read at the label, 1: assign then read after the label, 2: nothing read
-    Function* f = fn_n(k, k.i32);
-    Var* y = k.local(f, "y", k.i32);
-    const int L = k.jid();
-    const Expr* r = k.v(y);
-    std::vector<const Stmt*> top = {k.iff(gt_c(k, f, "5"), k.blk({k.go(L)})), k.decl(y, nullptr), k.asg(y, k.num(k.i32, "2")), k.lab(L)};
-    if (variant == 1){ top.push_back(k.asg(y, k.num(k.i32, "3")));
-}
-    top.push_back(k.ret(variant == 2 ? k.pv(f, 0) : r));
-    f->body = k.blk(top);
-    k.done(f);
-    if (variant == 0){ k.fail("uninitialized", r->loc);
-}
-  };
+    // 0: read at the label, 1: assign then read after the label, 2: nothing read
+    auto goto_past = [=](Kit& k, int variant)
+    {
+        Function* f = fn_n(k, k.i32);
+        Var* y = k.local(f, "y", k.i32);
+        const int L = k.jid();
+        const Expr* r = k.v(y);
+        std::vector<const Stmt*> top = {k.iff(gt_c(k, f, "5"), k.blk({k.go(L)})), k.decl(y, nullptr),
+                                        k.asg(y, k.num(k.i32, "2")), k.lab(L)};
+        if (variant == 1)
+        {
+            top.push_back(k.asg(y, k.num(k.i32, "3")));
+        }
+        top.push_back(k.ret(variant == 2 ? k.pv(f, 0) : r));
+        f->body = k.blk(top);
+        k.done(f);
+        if (variant == 0)
+        {
+            k.fail("uninitialized", r->loc);
+        }
+    };
     lc("uninit_goto_past_declaration_read", "a goto past int y; reads y at the label: y has no value on the goto path",
        [=](Kit& k)
        {

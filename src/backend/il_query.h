@@ -90,8 +90,8 @@ struct IlEntities
     struct SecondaryDecl
     {
         a_source_position position;
-        a_type_ptr declared_type =
-            nullptr; // the type as the declaration wrote it (a typedef'd function type stays a typeref)
+        // the type as the declaration wrote it (a typedef'd function type stays a typeref)
+        a_type_ptr declared_type = nullptr;
         an_attribute_ptr attributes = nullptr;
     };
     std::map<a_routine_ptr, std::vector<SecondaryDecl>> secondary_decls;

@@ -68,8 +68,8 @@ void define_vlibc_heap()
        "the same with malloc and free in a program that also has the vlibc views (the platform's rows hold: the value is true)",
        [=](Kit& k)
        {
-           Function* vm = heap_alloc_view(k, "vlibc_malloc", k.i32, false,
-                                          V); // present, unused: the program is a vlibc heap program
+           // present, unused: the program is a vlibc heap program
+           Function* vm = heap_alloc_view(k, "vlibc_malloc", k.i32, false, V);
            (void)vm;
            life(k, P, P, false, false);
        });
@@ -134,9 +134,8 @@ void define_vlibc_heap()
        "the body frees the vlibc block the loop holds: the back edge's rows fail (permission) before any internal row, never exit 3",
        [=](Kit& k)
        {
-           k.fail_only(
-               "permission", vloop(k, 1), 6,
-               0); // the first row (the cells' permission) fails and ends the path; the token row behind it is the same loss
+           // the first row (the cells' permission) fails and ends the path; the token row behind it is the same loss
+           k.fail_only("permission", vloop(k, 1), 6, 0);
        });
 
     // ======== owns_block consumers take the platform's allocator ========
