@@ -87,7 +87,8 @@ third_party/edg (EDG: the owner's fork, decision 0009) · third_party/silicon (S
   commit, here or in the EDG fork (owner, 2026-10-16).
 - C++20 for tool code, in the owner's Boost style (0051): Allman (lambda bodies too), braces on every
   control statement, 4 spaces, `T* p`, `U` on unsigned literals, brace initialization (lambdas keep `=`),
-  one declarator per declaration; `scripts/format.sh` lays it out. EDG code follows EDG's own style in
+  one declarator per declaration, no comment on a line with a brace (`{ // …`, `} // …`: the comment goes
+  on its own line; owner, 2026-11-05); `scripts/format.sh` lays it out. EDG code follows EDG's own style in
   third_party/edg; tests and doc examples are never formatted.
 - Test files start with `// expect:` lines; grammar and categories in
   tests/README.md (see also plan.md §0).

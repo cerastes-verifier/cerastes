@@ -1,11 +1,12 @@
-# Handoff after S7 — cerastes's tool code in the owner's Boost style (record 0051) (2026-11-05)
+# Handoff at M4.5d2b1's planning — partnerless results, owning locals, marked locals (record 0052) (2026-11-05)
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
 rediscover, and holds only what is live (owner, 2026-10-26; consolidated again at M4.5b2b's start, 2026-11-02: §3 is
 regrouped by the session that consumes each note; updated at M4.5c1's, M4.5c2a's, M4.5c2b's, M4.5d1's and M4.5d2a's starts, and
 by S6, a docs session that changed no code: its additions are marked "S6"; at M4.5d2v's start, 2026-11-04; at S7's
-planning, 2026-11-05; and at S7's end, the same day: §1, §2, §3's "From S7", §8). The text before S7 is
+planning, 2026-11-05; at S7's end, the same day: §1, §2, §3's "From S7", §8; and at M4.5d2b1's planning, the same
+day: §1, §2, §3, §4.2, §8). The text before M4.5d2b1 is `git show a660abc:internal/handoff.md`, before S7
 `git show c2bc48d:internal/handoff.md`, before M4.5d2v is `git show 9255b93:internal/handoff.md`, before S6
 `git show bb41d55:internal/handoff.md`, before M4.5d2a `git show 9d98fe8:internal/handoff.md`, before M4.5d1 `git show d26a87c:internal/handoff.md`, before M4.5c2b `git show 7f11706:internal/handoff.md`, before M4.5c2a `git show cbdcce5:internal/handoff.md`, before M4.5c1
 `git show 1bfa705:internal/handoff.md`, and before M4.5b2b `git show 38877b4:internal/handoff.md`, whose header names
@@ -13,6 +14,12 @@ every earlier version (each note below keeps its origin in brackets, so its full
 plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session consumes move into its plan.
 
 ## 1. State
+
+- **M4.5d2b1** (planning 2026-11-05; record 0052; plan `.claude/plans/m4-5d2b1-results-locals.md`, questions
+  152–155): in progress on branch `m4.5d2b1-results-locals`, from S7's tip `a660abc` (S7 is not merged yet and the
+  owner was away: "make your next branch on top of the current one"), in the worktree `.claude/worktrees/m4.5d2b`.
+  M4.5d2b is split (question 152): d2b1 now, d2b2 next (§4.2). The planning surveys are `build/m4.5d2b/survey-{encoder,tests}.md`
+  and `build/m4.5d2b/p74.md` in the worktree; the baseline is S7's (`build/m4.5d2b/baseline`).
 
 - **S7** (2026-11-05; record 0051; plan `.claude/plans/s7-code-style.md`, questions 146–149): done on branch
   `s7-code-style` (from local `main` `c2bc48d`, the planning commit) in the worktree `.claude/worktrees/s7`; result in
@@ -22,7 +29,7 @@ plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session cons
   self-test byte-identical to the baseline); `scripts/format.sh --check` keeps the layout in `check.sh`;
   `scripts/object_identity.py` stays for later refactors. The baseline ran in a second worktree (detached at C1),
   removed at the end; its outputs are in `build/s7/baseline/`. Audit reports `build/s7/audit{1,2}.md` and the evidence `build/s7/evidence/` in
-  the worktree. **The next session is M4.5d2b's planning (§4.2), after S7 merges.**
+  the worktree. M4.5d2b1 stacks on it (below).
 
 - **M4.5d2v** (2026-11-04/05; record 0050, 0047 amended; plan `.claude/plans/m4-5d2v-allocator.md`, questions 129, 130,
   134–145): done on branch `m4.5d2v-allocator` (from `origin/main` `9255b93`) in the worktree `.claude/worktrees/m4.5d2v`;
@@ -72,7 +79,8 @@ done yet still apply.
    without it). **vlibm:** push its `main` (`1e6982e`, the code style in `CLAUDE.md`; independent of cerastes).
 2. **M4.5d2v** (done, seen at S7's planning, 2026-11-05): merged into `origin/main` (`aa488d8`), and its worktree and
    branch are gone.
-3. **S7** (`s7-code-style`, its planning commit `c2bc48d` included): push the branch and open its PR. The PR tier
+3. **S7** (`s7-code-style`, its planning commit `c2bc48d` included; `m4.5d2b1-results-locals` stacks on it: merge S7
+   first): push the branch and open its PR. The PR tier
    selects no Silicon tests by `src/` changes, so dispatch the full check once (both jobs: the Linux job fetches the
    manylinux clang-format wheel for the first time). Merge it before M4.5d2b branches: its diff touches every line of
    `src/`. Then `git config blame.ignoreRevsFile .git-blame-ignore-revs` locally (GitHub reads the file on its own).
@@ -98,9 +106,12 @@ P4222's markers, P54 and the b2b design points).
 - **Dependabot's npm bumps:** after one, check that `doc/package-lock.json` has one hoisted `@antora/logger` (`npm ls
   @antora/logger`); nested copies silently stop `build_docs.sh` from failing on warnings (`DocBuildWarningsTests`
   catches it). [S7, `9cff0ad`]
-- **Not done by S7** (questions 150, 151): about 2,500 lines of `src/` stay over 120 columns, almost all whole-line
-  comments (`ReflowComments: IndentOnly` never re-wraps) and long string literals; 132 `{ // comment` brace lines. A
-  `for`-init with two declarators (`encode.cpp`, the line-scanning loop) is the rule's one exception. [S7]
+- **Not done by S7** (questions 150, 151, answered 2026-11-05 with the recommendations): about 2,500 lines of `src/`
+  over 120 columns (almost all whole-line comments and long string literals) are re-wrapped as they are touched; the
+  132 `{ // comment` brace lines stay until touched, and **no new or touched line puts a comment on a line with a
+  brace** (`{ // …`, `} // …`; owner: "in the future I don't want comments on the same lines as braces"; `CLAUDE.md`,
+  the developer guide's "Code style"). A `for`-init with two declarators (`encode.cpp`, the line-scanning loop) is the
+  declarator rule's one exception. [S7]
 - `include/cerastes.h`'s fail-closed `#error` (the cerastes front end without its attributes, record 0008 item 2) is
   one line again under `clang-format off`, now at line 42 (was 40); no test reaches it (reviewer round 1 S3). [S7]
 
@@ -110,11 +121,8 @@ M4.5d2a's plan's Inputs (`.claude/plans/m4-5d2a-heap.md`); those d2a hands on ar
 *M4.5d2a's follow-up (B1, S1, S2, S3) moved into M4.5d2v's plan's Inputs (`.claude/plans/m4-5d2v-allocator.md`).*
 
 **From M4.5d2v** (record 0050, audits `build/m4.5d2v/audit{1,2,3}.md`)
+- *The d2b note (a vlibc block's spelling, the loop false alarms) moved into M4.5d2b1's plan's Inputs.*
 - *The cerastes code style (question 146) moved into S7's plan (`.claude/plans/s7-code-style.md`).*
-- **For M4.5d2b:** a spelling for a vlibc block in contracts (`owns_block` and `owning` name the platform's allocator
-  only; a vlibc block handed over through them is `permission`); the false alarm of a block allocated in an iteration and
-  kept in a variable declared outside the loop, now reported in user terms (`heap_loop_replace_false_alarm.c`,
-  `vlibc_alloc_loop_replace_false_alarm.c`), lifted by owning variables. [d2v]
 - **Costs to watch:** B1's splits against outside holders grow the paths exponentially with the number of holders (S37's
   adversarial fixture 93 s); a function with several pointer variables beside a heap loop may time out [audit 2 N10].
 - **For M7:** vlibc's allocations are rejected in C++ ([intro.object]/10–13 create objects only for `std::malloc` and its
@@ -146,18 +154,10 @@ M4.5d2a's plan's Inputs (`.claude/plans/m4-5d2a-heap.md`); those d2a hands on ar
 
 *M4.5d2v's notes moved into its plan's Inputs (`.claude/plans/m4-5d2v-allocator.md`).*
 
-**M4.5d2b results, owning locals, globals and fields, P4418R0** (from M4.5d2a's planning, the check of P4222R3 the
-handoff asked for; sources: P4222R3, P4416R0 (its wording), P4418R0, P4417R0 (its wording), all 2026-10-22; open-std's
-`p4222r1.pdf` holds the July "R2" that 0029 cites, `p4222r2.pdf` the August R1)
-- P4222R3 and P4416R0 require a local receiving `malloc`'s result to be marked `ref_to_uninit` (`int *s
-  [[ref_to_uninit]] = buffer(4); // OK`, an unmarked one an error): d2a rejects that shape under `--strict-init`, naming
-  d2b (target `v`); d2b decides the strict rules for marked locals, returns (P4416 `[profiles.init.ref]` p6: a marked
-  function's returns "shall refer to uninitialized objects", null "refers to initialized objects"), the null argument to a
-  `ref_to_uninit` parameter (R3 rejects it, P4416 (2.3) accepts it; 0042 item 8's strict rejection agrees with R3), `free`
-  (unmarked in P4416: an exemption), and `void*` markers (R3 allows them; 0042 item 4 rejects them on parameters). The
-  marker stays on the pointer until `now_init` in the papers; cerastes keeps the flag on the cell (more programs accepted,
-  path-precise). P4416 treats `x = 1; x = 2;` as a double initialization (a drafting slip: not copied) and analyses
-  syntactic paths (cerastes: feasible paths, so `--strict-init` is P4222's static form only up to that).
+**M4.5d2b2 owning globals, `static` locals and fields, P4418R0** (from M4.5d2a's planning; sources: P4222R3, P4416R0,
+P4418R0, P4417R0, all 2026-10-22, read again at M4.5d2b1's planning; question 152 gives d2b2's planning the P4418
+spellings, borrow against transfer on parameters and static owners at `main`'s end; d2b1's notes moved into its plan's
+Inputs)
 - P4417R0's `[[owner]]` on a parameter is a **transfer** (the callee must delete), where 0029 item 1 made
   `cerastes::owning` on a parameter a **borrow**; P4418 exempts static owners where 0029 item 1 has an owning global freed
   by the end of `main`. `[[not_invalidating]]` (a pointer parameter whose function does not invalidate, checked at the
@@ -168,16 +168,15 @@ handoff asked for; sources: P4222R3, P4416R0 (its wording), P4418R0, P4417R0 (it
 - `alloc_<t>` does not ensure `block_of(r) != GB_g()`, so `&x != &g` is not proved in a function that holds nothing of
   `g`; d2a's typed views do not state it either (one rule; adding it changes the lint-pinned text and every program with
   cells and globals) [b2a audit 1 N3; to M4.8 if d2b does not need it].
-- `return &s;` of a `static` local leaves the caller only `WF(r)`, so its uses are `lifetime`
-  (`static_local_return_address_use.c`) until partnerless `ensures` atoms land (`live(r)`) [b2a].
-- From M4.5d2a (record 0047): a block site whose own guard reads memory, a global or `old` is rejected (audit 2 S2), and
-  written `owns_block` in loop invariants is rejected: both d2b's; the pinned false alarm of two block pointers swapped
-  in a loop (`tests/memory/negative/heap_loop_swap_false_alarm.c`, about 40 s per mode) needs written `owns_block` atoms;
-  a block allocated in an iteration and kept in a pointer declared outside the loop is a `leak` at the back edge until
-  owning variables (target `v`); an `owning` parameter beside `owns_block` in both lists is rejected as "beside" although
-  `encode.cpp`'s merge treats a block site as `owns` (dead merge or an over-strict rule), and `restrict` beside a block-only
-  parameter says "does not own or read `*q`" [audit 2 N7]; `two((free(p), 0), p)` is reported `permission`, not
-  `unsequenced` [audit 2 N8]; strict-init rejects every `ref_to_uninit` result call (record 0047 item 8) until marked locals.
+- P4417R0's wording, read at d2b1's planning ([profiles.inval.owner]): p3 owner-to-owner transfers and leaves an alias,
+  owner-to-non-owner aliases, an owner parameter takes the object, an owner result gives it; p4 an allocation's (there:
+  `new`'s) or a call's owning result must initialize or be assigned to an owner, or be deleted, in its full-expression;
+  p5 an automatic owner deletes or transfers on every path to its block's end (a static owner need not, Note 3); p6
+  only an owner is deleted; p7 every alias of a transferred object is invalid. §8.2's drafting note keeps raw storage
+  (`allocator::deallocate`) out of the profile. `not_invalidating` (9.13.u) appertains to a pointer parameter or a
+  member function and is verified at the definition ([profiles.inval.verify]); `std::no_dangling(x)` returns
+  `std::forward<T>(x)` and waives the escape rules for its result. d2b1 gives owning automatic locals 0029's meaning
+  (a path-precise `leak`), which agrees with p5. [d2b1 planning]
 
 **M4.5e1/e2 Arrays and pointer arithmetic:** P38's braced initializers (§4.2); signed/unsigned and enumeration variants
 through `void*` cannot be written [M4.5a]; accepted completeness gap for e2's relational comparisons: `&s.x < &s.y` is
@@ -401,7 +400,7 @@ not taken go to §3); single-file runs while working (`build/cerastes verify` di
 builds serialized (`lockf build/<session>/build.lock cmake --build build/cmake`); `check.sh` at most twice; the EDG
 suites on the x86-64 host are their own session, but any x86-64 test run a session needs goes to `matt@clang4.cpp.al`
 automatically (owner, 2026-10-29: not Docker multi-arch on the Mac, which is only the fallback when the host is down).
-Record numbers are the next free ones when written (0047 is M4.5d2a's, 0048 and 0049 are taken, 0050 is M4.5d2v's, 0051 is S7's). The
+Record numbers are the next free ones when written (0047 is M4.5d2a's, 0048 and 0049 are taken, 0050 is M4.5d2v's, 0051 is S7's, 0052 is M4.5d2b1's). The
 approved plan is saved as `.claude/plans/<milestone>-<topic>.md` (plan.md, "Session protocol").
 
 Finished sessions: their plans are in `.claude/plans/` (from M4.5b1a on), their results in `internal/status.md` and the
@@ -476,8 +475,18 @@ token, `invalid-free`, leaks by `forperm` (`leak`; `main`'s return included, que
 `owning` and `ref_to_uninit` on functions (target `r`), two calls ordered over liveness and token cells, blocks held
 through locals across loops (landed; one pinned false alarm, §3); `realloc` to M4.5e2. **M4.5d2v** (vlibc's allocator, in vlibc's repository,
 right after d2a, with cerastes's half): the allocator under vlibc's own names of record 0048 (question 128; §3). **M4.5d2b** (after d2v): the rest of the paragraph
-below that d2a does not take (`ensures` atoms with no partner, owning locals, globals and fields, `ref_to_uninit` on
-locals, P4418R0, P4222R3's strict rules; §3). The original d2 paragraph and its dependency map follow.
+below that d2a does not take, **split in two** at its planning (owner, 2026-11-05, question 152; the surveys measured
+4,500–7,000 changed lines). **M4.5d2b1** (record 0052; plan `.claude/plans/m4-5d2b1-results-locals.md`): `ensures`
+atoms with no `requires` partner, covered by a returned atom or given with an output amount (`owns(*r)`, `live(r)`,
+`live(r.q)`, `owns(**r)`, a block site on a formal); owning automatic locals (`leak` at lifetime end and on
+reassignment; the loop false alarms lifted for owning variables); `ref_to_uninit` on automatic locals and P4222R3's
+strict rules (questions 154, 155); the d2a/d2v leftovers (written `owns_block` in loop invariants, block-site guards that
+read the heap, `owning` beside `owns_block`, `restrict` beside a block-only parameter, `two((free(p), 0), p)`);
+`cerastes_owns_vlibc_block` (question 153). **M4.5d2b2** (after d2b1): block sites through loads and on globals, owning
+globals, `static` locals and address-taken locals, acyclic owning fields (target `d`), and the rest of P4418R0 (its
+planning decides the `cerastes::` spellings of `not_invalidating` and `no_dangling`, a strict profile mode, borrow
+against transfer on parameters, and static owners at `main`'s end; §3). The ports this paragraph names were all done by
+d2a. The original d2 paragraph and its dependency map follow.
 
 **M4.5d2 `malloc` and `free`.** vlibc's contracts (`malloc` `ref_to_uninit`, `calloc` initialized, `realloc`, `free`),
 heap blocks with the slot −1 token, the free checks (`invalid-free`), the leak rule by `forperm` and a record on `main`'s
@@ -929,10 +938,15 @@ During S7: no question was put to the owner. The reviewer's items and their disp
 `build/s7/audit{1,2}.md`; the plan's acceptance was worded as the proof stands (`encode.cpp`'s objects differ by the
 two `__LINE__` immediates EDG's assertions receive, so its IR is compared; no `-DNDEBUG`).
 
-**Open, for the next session** (each with its recommendation):
-- **150.** Lines over 120 columns: about 2,500 in `src/`, nearly all whole-line comments and long string literals.
-  Re-wrap them in a follow-up (`ReflowComments: Always` once, reviewed, then back to `IndentOnly`), or as each is
-  touched? *Recommended:* as touched; a one-off re-wrap of 2,100 comment lines is a large diff with no behaviour, and
-  some comments are hand-laid tables.
-- **151.** The 132 `{ // comment` lines (a comment after an Allman brace): move each comment above its statement now,
-  or leave them? *Recommended:* leave them; clang-format keeps them, and they read as the block's heading.
+At M4.5d2b1's planning (2026-11-05, each the recommendation; recorded in its plan and record 0052): 150 (lines over
+120 columns are re-wrapped as they are touched), 151 (the 132 `{ // comment` lines stay until touched; the owner added:
+"in the future I don't want comments on the same lines as braces": no new or touched line puts a comment on a line with
+a brace, `CLAUDE.md` and the developer guide's "Code style"), 152 (M4.5d2b is split: d2b1 partnerless results, owning
+automatic locals, marked locals, P4222R3's strict rules, the d2a/d2v leftovers and the vlibc spelling; d2b2 block sites
+through loads, owning globals, `static` locals and fields, and P4418R0, whose planning decides its spellings, borrow
+against transfer and static owners), 153 (`cerastes_owns_vlibc_block(p)`, C only: a block of vlibc's allocator; `owns_block`
+and `owning` keep naming the platform's), 154 (under `--strict-init` a `ref_to_uninit` function returns a marked local, a
+`ref_to_uninit` call or a null pointer constant; anything else is rejected; null departs from P4416 p6), 155 (`must_init`
+stays parameter-only; EDG keeps refusing it on a local). The owner also asked for the branch on top of S7's (not merged
+yet), three Sonnet agents and one Opus agent from `.claude/agents/`, and a stop for any question.
+
