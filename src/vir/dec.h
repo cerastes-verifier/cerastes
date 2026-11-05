@@ -123,7 +123,8 @@ inline int cmp(const std::string& a, const std::string& b)
 
 struct Range
 {
-    std::string lo, hi;
+    std::string lo;
+    std::string hi;
 };
 
 // The values of an integer type: [-2^(bits-1), 2^(bits-1)-1] or [0, 2^bits-1]; of an enumeration, its value

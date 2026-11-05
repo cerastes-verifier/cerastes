@@ -297,7 +297,8 @@ private:
         {
             int param {0}; // the caller's parameter index
             a_source_position at;
-            std::string callee, callee_param;
+            std::string callee;
+            std::string callee_param;
         };
         std::vector<StrictPass> strict_pass;
     };
@@ -1317,7 +1318,8 @@ private:
         struct Restore
         {
             Encoder* e;
-            bool c, a;
+            bool c;
+            bool a;
             ~Restore()
             {
                 e->cx_.contract = c;
@@ -1912,7 +1914,8 @@ private:
         struct Restore
         {
             Encoder* e;
-            bool c, a;
+            bool c;
+            bool a;
             ~Restore()
             {
                 e->cx_.contract = c;

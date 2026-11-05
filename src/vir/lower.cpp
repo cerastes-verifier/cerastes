@@ -591,7 +591,8 @@ using Ids = std::set<int>;
 // checks it).  `flush` chooses the half per full expression and projects.
 struct Deps
 {
-    Ids ex, base;
+    Ids ex;
+    Ids base;
     void add(int id)
     {
         ex.insert(id);
@@ -721,7 +722,8 @@ struct EffectCore
     size_t seq {0U}; // creation order within the Full
     // the locals (Var ids) a snapshot or write, or a branch's inner effects, read and write; the keys (< 0) of cell
     // accesses
-    std::set<int> reads, writes;
+    std::set<int> reads;
+    std::set<int> writes;
     // the cell accesses and memory calls of the effect, or of a branch's inner effects (decision 0039 item 4)
     std::vector<MemTag> tags;
 };
@@ -1440,10 +1442,17 @@ private:
         bool value {false};       // the value and flag cells are held (a cell; a parameter with an owns/reads atom)
         std::string suffix;       // the cell field suffix of `type`
         std::string label;        // the user's spelling, for messages: `x` or `*p`
-        E gv, gl;                 // the guards of the value/flag and of the liveness conjuncts (null: true)
-        std::string kv, kd, kl, vs, ds; // the ghost snapshots
-        bool reach {false};             // a write in the loop can reach the value
-        E wg;                           // a written atom's place (decision 0040 item 5): the atom's guard (null: true)
+        // the guards of the value/flag and of the liveness conjuncts (null: true)
+        E gv;
+        E gl;
+        // the ghost snapshots
+        std::string kv;
+        std::string kd;
+        std::string kl;
+        std::string vs;
+        std::string ds;
+        bool reach {false}; // a write in the loop can reach the value
+        E wg;               // a written atom's place (decision 0040 item 5): the atom's guard (null: true)
         // Decision 0043 item 11: a struct object's leaves are places of their own.  `lroot` is the pointer whose liveness cell the place's row is (null: `recv`: a scalar
         // place); `live` whether this place carries the liveness row (the first leaf of each root: one row per liveness cell, never one per leaf); `mpath` the member path
         // of the leaf from the root; `slots` the struct objects (type, Ref) the place is the first leaf of (what a pointer to a struct may equal).
@@ -1470,12 +1479,16 @@ private:
     struct WAtom
     {
         AtomKind kind {AtomKind::Owns};
-        E q, g;           // the pointer variable, and the atom's guard (null: true)
+        E q;              // the pointer variable
+        E g;              // the atom's guard (null: true)
         Type pt;          // q's pointee
         std::string sfx;  // the cell field suffix of the pointee (not for Live)
         std::string text; // `*q`, or `q` for Live
         SrcLoc loc;
-        std::string av, ad, al; // the ghost amounts
+        // the ghost amounts
+        std::string av;
+        std::string ad;
+        std::string al;
         // the value snapshot (decision 0040 item 5, "Values"); empty: none (the loop assigns q, or Live)
         std::string vs;
         bool reach {false}; // a write in the loop can reach the value
@@ -3101,7 +3114,8 @@ private:
         struct B
         {
             const AtomSite* site;
-            E ptr, g;
+            E ptr;
+            E g;
             std::string text;
         };
         std::vector<B> bs;
@@ -3164,8 +3178,10 @@ private:
         Lowerer& l;
         CMode mode;
         const Function* f;
-        bool ens, old;
-        size_t seen, bseen;
+        bool ens;
+        bool old;
+        size_t seen;
+        size_t bseen;
         explicit CtxSave(Lowerer& lw)
             : l(lw), mode(lw.cmode_), f(lw.cf_), ens(lw.cens_), old(lw.cold_), seen(lw.cseen_), bseen(lw.cbseen_)
         {}
@@ -4313,9 +4329,11 @@ private:
         const void* owner {nullptr};
         struct Atom
         {
-            E place, guard;
+            E place;
+            E guard;
             bool owns {false};
-            std::string field, text;
+            std::string field;
+            std::string text;
             bool loads {false};
         }; // `loads`: the place is reached through a heap read (decision 0045)
         std::string callee;
@@ -5876,7 +5894,8 @@ private:
         struct S
         {
             const AtomSite* site {nullptr};
-            E p, g;
+            E p;
+            E g;
             E root;        // the root pointer (the place's own address when its path is empty)
             Type root_ptr; // its type
             const Type* t {nullptr};
@@ -9123,7 +9142,8 @@ private:
         struct R
         {
             const AtomSite* site;
-            E ptr, g;
+            E ptr;
+            E g;
         };
         std::vector<R> rs;
         CtxSave ret_ctx(*this);
@@ -12871,7 +12891,8 @@ private:
     std::map<const Expr*, Path> shared_path_;
     std::vector<Acc> accs_;
     std::set<std::string> mem_w_;
-    std::map<std::string, int> mem_calls_, mem_depth_;
+    std::map<std::string, int> mem_calls_;
+    std::map<std::string, int> mem_depth_;
     std::vector<E> branch_guards_;
     std::vector<BranchCtx> branch_ctx_;
     // PRE(c) goes into both halves of the call's permission and heap-reading checks (audit S3)

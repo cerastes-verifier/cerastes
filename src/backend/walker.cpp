@@ -331,7 +331,8 @@ bool is_function_template(a_template_ptr t)
 
 struct Item
 {
-    unsigned long line {0U}, col {0U};
+    unsigned long line {0U};
+    unsigned long col {0U};
     int order {0};
     std::string key;  // stable tie-break
     std::string text; // complete, newline-terminated

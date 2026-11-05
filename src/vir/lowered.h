@@ -82,7 +82,10 @@ struct LExpr
     bool bool_value {false}; // BoolLit
     UnOp un {UnOp::Neg};
     BinOp bin {BinOp::Add};
-    E a, b, c; // operands; Ite: condition, then, else; Field, PermOf, Acc: the receiver (a Ref expression in `a`)
+    // operands; Ite: condition, then, else; Field, PermOf, Acc: the receiver (a Ref expression in `a`)
+    E a;
+    E b;
+    E c;
     std::vector<E> args; // Fn, Dom
 };
 
@@ -188,8 +191,9 @@ struct LStmt
     std::string target;  // Call: the result variable, or empty
     // Call: one variable per leaf of a struct result, in order (decision 0044 item 4); `target` is then empty
     std::vector<std::string> targets;
-    std::vector<LStmt> then_body, else_body; // If; While uses then_body as the loop body
-    std::vector<LInvariant> invariants;      // While
+    std::vector<LStmt> then_body; // If; While uses then_body as the loop body
+    std::vector<LStmt> else_body;
+    std::vector<LInvariant> invariants; // While
     std::vector<E> decreases; // While: the termination measure, one line `decreases e1, e2` (always at least one)
     Check decreases_check;    // While: what a termination.failed at that line means
     std::vector<LStmt> stmts; // Block

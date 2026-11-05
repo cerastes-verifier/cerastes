@@ -1510,7 +1510,10 @@ namespace {
 struct MapRow
 {
     int vpr_line {0};
-    std::string id, category, file, msg;
+    std::string id;
+    std::string category;
+    std::string file;
+    std::string msg;
     int line {0};
     int note_line {-1}; // -1: no note
 };

@@ -60,7 +60,9 @@ struct IntType
     bool is_signed {false};
     bool is_enum {false};   // an enumeration type (Program::enum_type)
     bool is_scoped {false}; // a C++ scoped enumeration
-    std::string lo, hi;     // an enumeration's value range, decimal (dec::range_of)
+    // an enumeration's value range, decimal (dec::range_of)
+    std::string lo;
+    std::string hi;
 };
 
 struct StructType;
