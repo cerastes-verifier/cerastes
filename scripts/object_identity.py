@@ -4,35 +4,54 @@
 """Prove that a refactor of cerastes's tool code (src/, include/) changed no behaviour (session S7).
 
     scripts/object_identity.py --before <rev|dir> [--after <rev|dir>] [-j N] [--tu <path> ...]
+                               [--tokens {off,none,braces}] [--no-compile]
 
-Each side is exported into build/s7/<side>-<label>/tree/ (a rev by `git archive`; a directory by copying its src/
-and include/; the default `--after`, the working tree, by copying the files git lists in it).  Every cerastes
-translation unit's command is taken from build/cmake/compile_commands.json, with the repository root rewritten
-to the exported tree for paths under src/ and include/ only (EDG's headers and the headers generated into build/
-stay where they are), and compiled for both sides with the same compiler, twice:
+Each side is exported into build/s7/<side>-<label>/tree/: src/, include/, cmake/ and every CMakeLists.txt (a rev by
+`git archive`; a directory by copying them; the default `--after`, the working tree, by copying the files git lists
+in it).  Every cerastes translation unit's command is taken from build/cmake/compile_commands.json (both sides use
+the working tree's database and generated headers), with the repository root rewritten to the exported tree for
+paths under src/ and include/ only, and compiled for both sides with the same compiler, three times with `-g0`
+(what ships: no -DNDEBUG; nothing in src/ calls `assert` and no TU reads <assert.h>, measured):
 
-  * an object: the build's flags, then `-g0 -DNDEBUG -MD -MF <dep> -o <side>/<tu>.o`;
-  * LLVM IR: `-S -emit-llvm -femit-all-decls -g0 -DNDEBUG` (the build's -O0), with the `; ModuleID` and
-    `source_filename` lines normalised.  At -O0 machine code can hide a semantic change (`x - 1` becoming
-    `x - 1U` on an `int` is the same instruction, `sub nsw` against `sub` in the IR); the IR keeps it.
+  * an object: the build's flags, `-MD -MF <dep> -o <side>/<tu>.o`;
+  * LLVM IR of the build (`-S -emit-llvm`, its -O0).  At -O0 machine code can hide a semantic change (`x - 1`
+    becoming `x - 1U` on an `int` is the same instruction, `sub nsw` against `sub` in the IR); the IR keeps it;
+  * the same IR with `-femit-all-decls`, which also emits inline functions nobody calls.
 
-A TU is identical when its IR is identical and its object is byte-identical.  When only the object bytes differ the
-`objdump -d -r -s` text is compared and the TU is reported as "identical by objdump" (a warning, never silent).
+A TU is identical when its IR is identical, its all-decls IR is identical (see compare_extended for the one
+leniency) and its object is byte-identical.  When only the object bytes differ the `objdump -d -r -s` text is
+compared and the TU is reported as "identical by objdump".  EDG's assertion macros embed `__LINE__` of their use in
+cerastes's own files (`assertion_failed(__FILE__, __LINE__, ...)`, 2 sites in encode.cpp): a reformat moves them.
+Only the line argument of calls to `assertion_failed` whose first argument is a string naming a file of the tree is
+normalised; such a TU is reported "identical modulo N line immediates" and its objects are NOT compared byte for
+byte (they differ by the immediates; the summary names those TUs).
+
+`--tokens none|braces` adds a token pass over every file of both exports, whatever the compile passes see: the token
+streams of .cpp, .h, .hpp, .inc and .def files are compared, ignoring comments, whitespace and backslash-newline
+splices, keeping directive boundaries (a directive is one logical line: a token moving into or out of one is a
+difference) and not splitting `>>`.  `none` allows no difference; `braces` allows only inserted `{` and `}` tokens
+(balanced; each `{` after `)`, `else` or `do`, each `}` after `;` or `}`).  Any other file (CMakeLists.txt,
+cmake/*, *.in) must be byte-identical.  It finds token edits in code no build compiles (an inactive `#if` branch,
+the other platform), compile-time-only code that gives the same IR (`static_assert`, `= delete`, `explicit`,
+access specifiers, uninstantiated templates) and include/cerastes.h.  `--no-compile` runs it alone.
 
 This is a proof, so it refuses to pass vacuously (exit status 2, "proof invalid"):
   1. after rewriting, no argument names <root>/src or <root>/include (but the one `-DCERASTES_SOURCE_INCLUDE_DIR`
      string, a path the tool reads at run time, which stays so that both sides carry the same string);
-  2. the dependency file of every compile is read: every header taken from src/ or include/ must come from that
-     side's exported tree, never from the working tree or the other side (otherwise both sides would read one
-     header and agree trivially);
-  3. the tracked headers (.h, .inc, .def) that no TU reads are listed; an unread one that differs between the sides
-     and is not on --allow-uncovered (default: include/cerastes.h, which only verified programs include and which
-     the suite's .vpr/.map identity covers instead) is an error;
+  2. the dependency file of every compile is read and each dependency must be on an allow-list: the side's own
+     exported tree, third_party/edg, build/ (the generated headers) outside the scratch directory, or the
+     toolchain (the compiler's implicit system search directories and its SDK root).  Anything else (the working
+     tree's src/, the other side, the main checkout) is invalid, so both sides cannot agree vacuously;
+  3. every file of either export that is neither a compiled .cpp nor a header some TU reads (CMakeLists.txt, cmake/*,
+     *.in, an unread header) is listed; one that differs between the sides (or exists on one only) and is not on
+     --allow-uncovered (default: include/cerastes.h, which only verified programs include and which the suite's
+     .vpr/.map identity covers instead) is an error;
   4. every src/**/*.cpp of both sides appears in compile_commands.json and the number of cerastes TUs equals the
      expected constants (EXPECTED_TU_ENTRIES, EXPECTED_TU_FILES; a new TU makes the tool fail until they are
      updated with it).
 
-Exit status: 0 every selected TU identical; 1 a difference or a compile failure; 2 the proof is not valid.
+Exit status: 0 every selected TU identical (and the token pass, if asked, clean); 1 a difference or a compile
+failure; 2 the proof is not valid.
 """
 
 import argparse
@@ -64,7 +83,7 @@ KEEP_DEFINES = ("-DCERASTES_SOURCE_INCLUDE_DIR=",)
 DROP_WITH_ARG = ("-o", "-MF", "-MT", "-MQ")
 DROP_PLAIN = ("-c", "-MD", "-MMD", "-M", "-MM", "-MG", "-MP")
 
-HEADER_SUFFIXES = (".h", ".hpp", ".inc", ".def")
+TOKEN_SUFFIXES = (".cpp", ".h", ".hpp", ".inc", ".def")
 DEFAULT_ALLOW_UNCOVERED = ("include/cerastes.h",)
 
 WORKTREE = "<working tree>"
@@ -158,36 +177,53 @@ def _git(root, *a, **kw):
     return subprocess.run(["git", "-C", str(root), *a], check=True, capture_output=True, **kw)
 
 
+EXTRA_TOPS = ("cmake",)
+SKIP_DIRS = ("build", "third_party", ".git", ".claude", "node_modules", "tests", "doc")
+
+
+def _is_input(path):
+    """The files of an export: src/, include/, cmake/ and any CMakeLists.txt."""
+    return path.split("/")[0] in ("src", "include") + EXTRA_TOPS or os.path.basename(path) == "CMakeLists.txt"
+
+
 def export_side(spec, root, dest):
-    """Export src/ and include/ of `spec` into dest (a fresh directory).  Returns the label."""
+    """Export the inputs of `spec` (src/, include/, cmake/, CMakeLists.txt files) into dest (a fresh directory).
+    Returns the label."""
     if dest.exists():
         shutil.rmtree(dest)
     dest.mkdir(parents=True)
     if spec == WORKTREE:
         # the tracked files as they are in the working tree, plus untracked and not ignored ones (a new header
         # must be seen: a missing one is a compile error, never a silent fallback)
-        names = _git(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "src",
-                     "include").stdout.split(b"\0")
+        names = _git(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard").stdout.split(b"\0")
         for n in names:
             if not n:
                 continue
             n = n.decode()
             s = Path(root) / n
-            if s.is_file():
+            if _is_input(n) and s.is_file():
                 (dest / n).parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(s, dest / n)
         return "worktree"
     if os.path.isdir(spec):
-        for top in ("src", "include"):
+        for top in ("src", "include") + EXTRA_TOPS:
             s = Path(spec) / top
             if s.is_dir():
                 shutil.copytree(s, dest / top)
+        for dirpath, dirnames, filenames in os.walk(spec):
+            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+            if "CMakeLists.txt" in filenames:
+                rel = os.path.relpath(os.path.join(dirpath, "CMakeLists.txt"), spec)
+                (dest / rel).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(os.path.join(dirpath, "CMakeLists.txt"), dest / rel)
         return re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(os.path.abspath(spec)))
     try:
         sha = _git(root, "rev-parse", "--verify", spec + "^{commit}").stdout.decode().strip()
     except subprocess.CalledProcessError:
         raise ProofInvalid(f"{spec!r} is neither a directory nor a revision")
-    arch = subprocess.run(["git", "-C", str(root), "archive", "--format=tar", sha, "src", "include"],
+    listed = _git(root, "ls-tree", "-r", "-z", "--name-only", sha).stdout.decode().split("\0")
+    paths = [n for n in listed if n and _is_input(n)]
+    arch = subprocess.run(["git", "-C", str(root), "archive", "--format=tar", sha, "--", *paths],
                           check=True, capture_output=True).stdout
     subprocess.run(["tar", "-x", "-C", str(dest)], input=arch, check=True)
     return re.sub(r"[^A-Za-z0-9._-]", "_", spec) + "-" + sha[:8]
@@ -220,7 +256,7 @@ def compile_job(side, tu, kind, base, out_dir, cwd):
     `base` is the rewritten command plus path_flags."""
     d = out_dir / tu.target
     d.mkdir(parents=True, exist_ok=True)
-    dep = ["-g0", "-DNDEBUG", "-MD", "-MF", str(d / (tu.stem + "." + kind + ".d")), "-o"]
+    dep = ["-g0", "-MD", "-MF", str(d / (tu.stem + "." + kind + ".d")), "-o"]
     if kind == "obj":
         argv = base + ["-c"] + dep + [str(d / (tu.stem + ".o"))]
     elif kind == "ir":
@@ -261,24 +297,69 @@ def parse_depfile(text):
     return deps
 
 
-def check_deps(deps, tu_file_in_tree, root, tree, scratch):
-    """Classify one TU's dependencies.  Returns (read, violations, generated): `read` the src/include files of this
-    side's tree (relative to the tree), `violations` the headers taken from the working tree or the other side,
-    `generated` the headers under <root>/build (outside the scratch directory)."""
+def search_dirs(args, tu_file):
+    """The compiler's implicit system search directories for a command (`-E -v`), and the SDK roots they lie in.  The
+    directories the command names itself (-I, -isystem, ...) are not among them: they are the project's, and are
+    classified by where they are."""
+    probe = [a for a in args if a != tu_file and not a.startswith("-D")]
+    r = subprocess.run(probe + ["-E", "-v", "-x", "c++", "-"], input="", capture_output=True, text=True)
+    lines, on = [], False
+    for l in r.stderr.splitlines():
+        if l.startswith("#include <...> search starts here"):
+            on = True
+        elif l.startswith("End of search list"):
+            on = False
+        elif on:
+            lines.append(re.sub(r" \((framework directory|headermap)\)$", "", l.strip()))
+    explicit = set()
+    for i, a in enumerate(probe):
+        for opt in ("-I", "-isystem", "-iquote", "-idirafter", "-F", "-iframework"):
+            if a == opt and i + 1 < len(probe):
+                explicit.add(os.path.realpath(probe[i + 1]))
+            elif a.startswith(opt) and len(a) > len(opt):
+                explicit.add(os.path.realpath(a[len(opt):]))
+    out = set()
+    for d in lines:
+        rd = os.path.realpath(d)
+        if rd in explicit:
+            continue
+        out.add(rd)
+        m = re.match(r"(.*?\.sdk)(/|$)", rd)
+        if m:
+            out.add(m.group(1))
+    if not out:
+        raise ProofInvalid(f"cannot read the system search directories of {probe[0]} (-E -v printed none)")
+    return sorted(out)
+
+
+def check_deps(deps, tu_file_in_tree, root, tree, scratch, toolchain):
+    """Classify one TU's dependencies against an allow-list.  Allowed: the side's own tree (these are returned as
+    `read`, relative to the tree), <root>/third_party/edg, <root>/build outside the scratch directory (returned as
+    `generated`), and the toolchain's directories (`toolchain`, realpaths).  Everything else is a violation: the
+    working tree's src/ and include/, the other side, another checkout, any other file."""
     rroot = os.path.realpath(root)
     rtree = os.path.realpath(tree)
     rscratch = os.path.realpath(scratch)
+
+    def under(p, d):
+        return p == d or p.startswith(d + os.sep)
+
     read, viol, gen = set(), [], set()
     for d in deps:
         p = os.path.realpath(os.path.join(rroot, d) if not os.path.isabs(d) else d)
-        if p == rtree or p.startswith(rtree + os.sep):
+        if under(p, rtree):
             read.add(os.path.relpath(p, rtree))
-        elif p.startswith(os.path.join(rroot, "src") + os.sep) or p.startswith(os.path.join(rroot, "include") + os.sep):
+        elif under(p, rscratch):
             viol.append(p)
-        elif p.startswith(rscratch + os.sep):
+        elif under(p, rroot):
+            if under(p, os.path.join(rroot, "third_party", "edg")):
+                continue
+            if under(p, os.path.join(rroot, "build")):
+                gen.add(p)
+            else:
+                viol.append(p)
+        elif not any(under(p, t) for t in toolchain):
             viol.append(p)
-        elif p.startswith(os.path.join(rroot, "build") + os.sep):
-            gen.add(p)
     # the TU itself must be the exported file (clang may list other files, SDKSettings.json, before it)
     if os.path.relpath(os.path.realpath(tu_file_in_tree), rtree) not in read:
         viol.append(f"the exported {tu_file_in_tree} is not among the dependencies of its own compile")
@@ -322,8 +403,10 @@ def normalize_lines(ir, root):
     """EDG's assertion macros (`is_typeref_kind` with EXPENSIVE_CHECKING, `check_assertion`) pass `__FILE__` and
     `__LINE__` of their use to `assertion_failed`, so a use in a cerastes file embeds that file's line numbers:
     reformatting moves them.  The `i32` line argument of a call whose first argument is a string constant that holds
-    a path under <root>/src or <root>/include (the exported file, mapped back by -fmacro-prefix-map) becomes 0.
-    Calls from EDG's own headers keep theirs.  Returns (text, number of sites)."""
+    a path under <root>/src or <root>/include (the exported file, mapped back by -fmacro-prefix-map) becomes 0, for
+    calls of `assertion_failed` only (EDG's, third_party/edg/src/checking.h: `_Z16assertion_failedPKciS0_S0_S0_`):
+    `log(__FILE__, __LINE__)`, `assertion_failed` called with another string, and the calls of EDG's own headers
+    keep their numbers.  Returns (text, number of sites)."""
     own = set(m.group(1) for m in re.finditer(
         r'^(@\.str[.\d]*) = [^\n]*c"' + re.escape(root) + r'/(?:src|include)/[^"\\]*\\00"', ir, re.M))
     n = 0
@@ -335,7 +418,7 @@ def normalize_lines(ir, root):
             return m.group(1) + "0"
         return m.group(0)
 
-    out = re.sub(r"(\b(?:call|invoke)\b[^\n]*?\(ptr (?:noundef )?(@\.str[.\d]*), i32 (?:noundef )?)(\d+)", sub, ir)
+    out = re.sub(r"(\b(?:call|invoke)\b[^\n]*?@(?:_Z\d+)?assertion_failed\w*\(ptr (?:noundef )?(@\.str[.\d]*), i32 (?:noundef )?)(\d+)", sub, ir)
     return out, n
 
 
@@ -356,7 +439,12 @@ def _fix_line(l, attrs, strs):
 def ir_entities(text):
     """The top-level entities of a module (functions, declarations, globals by name; type definitions), with
     attribute-group, metadata and string-constant numbers replaced by what they stand for, so that adding or removing
-    an unrelated entity does not renumber the others.  Returns (kinds, bodies, misc)."""
+    an unrelated entity does not renumber the others.  Returns (kinds, bodies, misc).  Dropped, deliberately: blank
+    lines, `;` comments, `attributes #N = ...` groups (resolved into their users), `source_filename`, numbered
+    metadata definitions `!N = ...` (their numbers are erased in the users; the plain-IR pass, which is leniency-free,
+    compares them) and string constants `@.str*` (compared by content in their users).  Everything else at top level
+    that is not a function, declaration, global or type (target triple, datalayout, `module asm`, comdats, named
+    metadata such as !llvm.module.flags) goes to `misc` and is compared."""
     lines = text.splitlines()
     attrs, strs = {}, {}
     for l in lines:
@@ -392,7 +480,7 @@ def ir_entities(text):
         elif l.startswith("%"):
             name = l.split(" ", 1)[0]
             kinds[name], bodies[name] = "type", _fix_line(l, attrs, strs)
-        elif l.startswith(("attributes ", ";", "!", "source_filename", "")) and not l.startswith("!llvm"):
+        elif l == "" or l.startswith(("attributes ", ";", "source_filename")) or re.match(r"!\d+ = ", l):
             continue
         else:
             misc.append(_fix_line(l, attrs, strs))
@@ -426,24 +514,9 @@ def compare_extended(tb, ta):
 
 
 
-def arch_flags(args):
-    """The target options of a command, for compiling an .ll file with the same target."""
-    out, i = [], 0
-    while i < len(args):
-        a = args[i]
-        if a in ("-arch", "-target", "--target", "-isysroot") and i + 1 < len(args):
-            out += [a, args[i + 1]]
-            i += 2
-            continue
-        if a.startswith(("--target=", "-m")) and not a.startswith("-mmacos"):
-            out.append(a)
-        i += 1
-    return out
-
-
 def compare_tu(tu, sides, kinds, scratch, root, cmds, results):
     entry = {"tu": tu.key, "obj": None, "ir": None, "ir_ext": None, "ext_noise": 0, "objdump": None,
-             "verdict": None, "notes": [], "line_sites": 0}
+             "verdict": None, "notes": [], "line_sites": 0, "obj_compared": True}
     out = {n: sides[n]["out"] / tu.target for n in sides}
     for k in kinds:
         for name in sides:
@@ -497,28 +570,12 @@ def compare_tu(tu, sides, kinds, scratch, root, cmds, results):
         entry["verdict"] = "DIFFERS"
         return entry
     if modulo:
-        # the objects may differ in the line immediates; compare objects built from the normalised IR instead
-        cxx = cmds[("before", tu.key)][0]
-        flags = arch_flags(cmds[("before", tu.key)])
-        objs = []
-        for n, txt in (("before", nb), ("after", na)):
-            ll = out[n] / (tu.stem + ".norm.ll")
-            ll.write_text(txt)
-            o = out[n] / (tu.stem + ".norm.o")
-            r = subprocess.run([cxx, *flags, "-x", "ir", "-c", "-g0", str(ll), "-o", str(o)], capture_output=True,
-                               text=True)
-            if r.returncode:
-                entry["notes"].append(f"{n}: compiling the normalised IR failed: {r.stderr[-500:]}")
-                entry["verdict"] = "DIFFERS"
-                return entry
-            objs.append(o)
-        if filecmp.cmp(objs[0], objs[1], shallow=False):
-            entry["verdict"] = "identical-modulo-lines"
-            entry["notes"].append(f"{entry['line_sites']} assertion sites embed a line of this TU's own sources; "
-                                  f"the IR agrees with those numbers replaced and so do the objects built from it")
-        else:
-            entry["verdict"] = "DIFFERS"
-            entry["notes"].append("the objects built from the line-normalised IR differ")
+        # the object bytes differ by the line immediates of those sites and cannot be compared; the IR was
+        entry["obj_compared"] = False
+        entry["verdict"] = "identical-modulo-lines"
+        entry["notes"].append(f"identical modulo {entry['line_sites']} line immediates of EDG assertion sites in this "
+                              f"TU's own sources (IR compared with them normalised; object bytes differ and are not "
+                              f"compared)")
         return entry
     if entry["obj"]:
         entry["verdict"] = "identical"
@@ -534,32 +591,161 @@ def compare_tu(tu, sides, kinds, scratch, root, cmds, results):
     return entry
 
 
+# ---------------------------------------------------------------- the token pass (--tokens)
+
+_PUNCT = ["%:%:", "...", "<=>", "->*", "<<=", ">>=", "::", "->", "++", "--", "<<", ">>", "<=", ">=", "==", "!=", "&&",
+          "||", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", ".*", "##"]
+_TOKEN = re.compile(r"""
+ (?P<ws>[ \t\f\v]+)
+|(?P<nl>\n)
+|(?P<lc>//[^\n]*)
+|(?P<bc>/\*.*?\*/)
+|(?P<raw>(?:u8|u|U|L)?R"(?P<d>[^ ()\\\t\v\f\n]{0,16})\((?:.*?)\)(?P=d)")
+|(?P<str>(?:u8|u|U|L)?"(?:[^"\\\n]|\\.)*"(?:[A-Za-z_]\w*)?)
+|(?P<chr>(?:u8|u|U|L)?'(?:[^'\\\n]|\\.)*')
+|(?P<num>\.?\d(?:[eEpP][+-]|[\w.']|)*)
+|(?P<id>[A-Za-z_]\w*)
+|(?P<p>""" + "|".join(re.escape(p) for p in _PUNCT) + r"""|[^\sA-Za-z_0-9])
+""", re.S | re.X)
+EOD = "<end of directive>"
+
+
+def tokenize(text):
+    """The preprocessing tokens of a C++ file in translation phases 2 and 3: backslash-newline splices removed (a
+    `//` comment continued by one swallows the next line), comments and whitespace dropped, every directive closed by
+    an EOD token at its logical line's end.  `>>` stays one token.  Raises ProofInvalid on text it cannot lex."""
+    text = text.replace("\r\n", "\n")
+    # splices: removed everywhere; their positions in the result tell whether one lay inside a raw string literal,
+    # where C++ reverts the splice and this lexer would be wrong
+    cuts = [m.start() - 2 * k for k, m in enumerate(re.finditer(r"\\\n", text))]
+    text = text.replace("\\\n", "")
+    out, i, at_bol, in_dir = [], 0, True, False
+    while i < len(text):
+        m = _TOKEN.match(text, i)
+        if not m:
+            raise ProofInvalid(f"the token pass cannot lex {text[i:i + 40]!r}")
+        s = m.group(0)
+        if m.group("raw") and any(i < c < m.end() for c in cuts):
+            raise ProofInvalid("a backslash-newline inside a raw string literal: the token pass does not model it")
+        i = m.end()
+        if m.group("ws") or m.group("lc") or m.group("bc"):
+            continue
+        if m.group("nl"):
+            if in_dir:
+                out.append(EOD)
+                in_dir = False
+            at_bol = True
+            continue
+        if at_bol and s == "#":
+            in_dir = True
+        at_bol = False
+        out.append(s)
+    if in_dir:
+        out.append(EOD)
+    return out
+
+
+def compare_tokens(ta, tb, mode):
+    """Compare two token streams.  Returns (problems, inserted braces).  `none` allows no difference; `braces` allows
+    inserted `{` and `}` tokens only, as many of one as of the other, each `{` after `)`, `else` or `do` (the places
+    clang-format's InsertBraces puts them) and each `}` after `;` or `}`."""
+    if ta == tb:
+        return [], 0
+    i = j = 0
+    opens = closes = 0
+    while i < len(ta) or j < len(tb):
+        if i < len(ta) and j < len(tb) and ta[i] == tb[j]:
+            i += 1
+            j += 1
+            continue
+        ctx = f"before: {' '.join(ta[max(0, i - 6):i + 4])!r}  after: {' '.join(tb[max(0, j - 6):j + 4])!r}"
+        if mode == "braces" and j < len(tb) and tb[j] in ("{", "}"):
+            prev = tb[j - 1] if j else ""
+            if tb[j] == "{" and prev not in (")", "else", "do"):
+                return [f"an inserted `{{` after {prev!r}: {ctx}"], opens + closes
+            if tb[j] == "}" and prev not in (";", "}"):
+                return [f"an inserted `}}` after {prev!r}: {ctx}"], opens + closes
+            opens += tb[j] == "{"
+            closes += tb[j] == "}"
+            j += 1
+            continue
+        return [f"token {i} / {j}: {ctx}"], opens + closes
+    if opens != closes:
+        return [f"{opens} `{{` and {closes} `}}` inserted"], opens + closes
+    return [], opens + closes
+
+
+def token_pass(sides, mode):
+    """Compare every file of the two exports.  Returns {relative path: {"status", "inserted", "detail"}}; status is
+    "same", "braces" (only inserted braces, in `braces` mode) or "DIFFERS"."""
+    trees = {n: Path(s["tree"]) for n, s in sides.items()}
+    files = {n: {str(p.relative_to(t)) for p in t.rglob("*") if p.is_file()} for n, t in trees.items()}
+    result = {}
+    for f in sorted(set().union(*files.values())):
+        gone = [n for n in trees if f not in files[n]]
+        if gone:
+            result[f] = {"status": "DIFFERS", "inserted": 0, "detail": f"only on {'/'.join(n for n in trees if n not in gone)}"}
+            continue
+        a, b = (trees[n] / f for n in ("before", "after"))
+        if f.endswith(TOKEN_SUFFIXES):
+            ta = tokenize(a.read_text(errors="surrogateescape"))
+            tb = tokenize(b.read_text(errors="surrogateescape"))
+            problems, ins = compare_tokens(ta, tb, mode)
+            if problems:
+                result[f] = {"status": "DIFFERS", "inserted": ins, "detail": problems[0]}
+            else:
+                result[f] = {"status": "braces" if ins else "same", "inserted": ins, "detail": ""}
+        elif filecmp.cmp(a, b, shallow=False):
+            result[f] = {"status": "same", "inserted": 0, "detail": ""}
+        else:
+            result[f] = {"status": "DIFFERS", "inserted": 0, "detail": "not a C++ source file and not byte-identical"}
+    return result
+
+
+def report_tokens(res, mode):
+    bad = [f for f, r in res.items() if r["status"] == "DIFFERS"]
+    for f, r in res.items():
+        if r["status"] == "DIFFERS":
+            print(f"  TOKENS DIFFER  {f}: {r['detail']}")
+        elif r["status"] == "braces":
+            print(f"  tokens ok      {f}: {r['inserted']} inserted brace tokens, nothing else")
+    ins = sum(r["inserted"] for r in res.values() if r["status"] == "braces")
+    print(f"tokens ({mode}): {len(res)} files compared: {sum(r['status'] == 'same' for r in res.values())} identical, "
+          f"{sum(r['status'] == 'braces' for r in res.values())} with only inserted braces ({ins} tokens), "
+          f"{len(bad)} DIFFER")
+    return len(bad)
+
+
 def run(opts):
     root = os.path.realpath(opts.root)
     cc_path = opts.compile_commands or os.path.join(root, "build/cmake/compile_commands.json")
     scratch = Path(opts.scratch or os.path.join(root, "build/s7"))
     scratch.mkdir(parents=True, exist_ok=True)
-    if not os.path.isfile(cc_path):
-        raise ProofInvalid(f"{cc_path} does not exist (run scripts/bootstrap.sh)")
+    if opts.no_compile and opts.tokens == "off":
+        raise ProofInvalid("--no-compile with --tokens off compares nothing")
 
     t0 = time.time()
-    tus = load_tus(cc_path, root)
-    files = sorted({t.rel for t in tus})
-    # check 4, the constants
-    if len(tus) != opts.expected_tus or len(files) != opts.expected_files:
-        raise ProofInvalid(
-            f"{cc_path} has {len(tus)} cerastes TU entries over {len(files)} files, expected {opts.expected_tus} "
-            f"over {opts.expected_files} (EXPECTED_TU_ENTRIES/EXPECTED_TU_FILES in scripts/object_identity.py: a new "
-            f"or removed TU must be added there, with its reason)")
-    selected = tus
-    if opts.tu:
-        selected = []
-        for want in opts.tu:
-            w = want.strip("/")
-            hit = [t for t in tus if t.rel == w or t.key == w or t.rel.endswith("/" + w)]
-            if not hit:
-                raise ProofInvalid(f"--tu {want}: no cerastes TU of that name (see {cc_path})")
-            selected += [t for t in hit if t not in selected]
+    tus, files, selected = [], [], []
+    if not opts.no_compile:
+        if not os.path.isfile(cc_path):
+            raise ProofInvalid(f"{cc_path} does not exist (run scripts/bootstrap.sh)")
+        tus = load_tus(cc_path, root)
+        files = sorted({t.rel for t in tus})
+        # check 4, the constants
+        if len(tus) != opts.expected_tus or len(files) != opts.expected_files:
+            raise ProofInvalid(
+                f"{cc_path} has {len(tus)} cerastes TU entries over {len(files)} files, expected {opts.expected_tus} "
+                f"over {opts.expected_files} (EXPECTED_TU_ENTRIES/EXPECTED_TU_FILES in scripts/object_identity.py: a "
+                f"new or removed TU must be added there, with its reason)")
+        selected = tus
+        if opts.tu:
+            selected = []
+            for want in opts.tu:
+                w = want.strip("/")
+                hit = [t for t in tus if t.rel == w or t.key == w or t.rel.endswith("/" + w)]
+                if not hit:
+                    raise ProofInvalid(f"--tu {want}: no cerastes TU of that name (see {cc_path})")
+                selected += [t for t in hit if t not in selected]
 
     sides = {}
     for name, spec in (("before", opts.before), ("after", opts.after)):
@@ -573,6 +759,19 @@ def run(opts):
         tree_tmp.rename(tree)
         sides[name] = {"spec": spec, "label": label, "dir": final, "tree": str(os.path.realpath(tree)),
                        "out": final / "out"}
+    print(f"object_identity: before: {opts.before} -> {sides['before']['dir']}", flush=True)
+    print(f"                 after:  {opts.after} -> {sides['after']['dir']}", flush=True)
+
+    # the token pass
+    tok_res, tok_bad = None, 0
+    if opts.tokens != "off":
+        tok_res = token_pass(sides, opts.tokens)
+        tok_bad = report_tokens(tok_res, opts.tokens)
+        if opts.json and opts.no_compile:
+            Path(opts.json).write_text(json.dumps({"tokens": tok_res}, indent=1))
+    if opts.no_compile:
+        return 1 if tok_bad else 0
+
     # check 4: the exported .cpp files and the database agree, on both sides
     for name, s in sides.items():
         have = {str(p.relative_to(s["tree"])) for p in Path(s["tree"], "src").rglob("*.cpp")} \
@@ -601,8 +800,15 @@ def run(opts):
     jobs = [(name, tu, kind) for name in sides for tu in selected for kind in kinds]
     print(f"object_identity: {len(selected)} of {len(tus)} TUs, 2 sides, {len(jobs)} compiles, -j{opts.jobs}; "
           f"compiler: {banner}", flush=True)
-    print(f"  before: {opts.before} -> {sides['before']['dir']}", flush=True)
-    print(f"  after:  {opts.after} -> {sides['after']['dir']}", flush=True)
+    # the toolchain's directories, per distinct command (compiler and flags), for the dependency allow-list
+    toolchain = {}
+    for (name, key), args in cmds.items():
+        tu = next(t for t in selected if t.key == key)
+        ck = tuple(a for a in args if not a.startswith("-D") and a != os.path.join(sides[name]["tree"], tu.rel)
+                   and not a.startswith("-fmacro-prefix-map"))
+        if ck not in toolchain:
+            toolchain[ck] = search_dirs(args, os.path.join(sides[name]["tree"], tu.rel))
+        toolchain[(name, key)] = toolchain[ck]
 
     results = {}
     t1 = time.time()
@@ -627,13 +833,14 @@ def run(opts):
                     continue
                 dp = s["out"] / tu.target / (tu.stem + "." + kind + ".d")
                 deps = parse_depfile(dp.read_text())
-                read, viol, gen = check_deps(deps, in_tree, root, s["tree"], scratch)
+                read, viol, gen = check_deps(deps, in_tree, root, s["tree"], scratch, toolchain[(name, tu.key)])
                 read_by_side[name] |= read
                 generated |= gen
                 violations += [f"{name} {tu.key} ({kind}): {v}" for v in viol]
     if violations:
-        raise ProofInvalid("headers read from the wrong place (the working tree or the other side), so both sides "
-                           "could agree vacuously:\n  " + "\n  ".join(violations[:20]))
+        raise ProofInvalid("dependencies outside the allow-list (the side's own tree, third_party/edg, build/, the "
+                           "toolchain: the working tree, the other side or another checkout would let both sides "
+                           "agree vacuously):\n  " + "\n  ".join(violations[:20]))
 
     # the generated headers: do they include src/ headers?
     gen_inc = {}
@@ -654,6 +861,7 @@ def run(opts):
     ir_bytes = ext_bytes = 0
     ext_noise = {}
     line_sites = {}
+    not_byte_compared = []
     for tu in selected:
         entry = compare_tu(tu, sides, kinds, scratch, root, cmds, results)
         ir_bytes += entry.pop("ir_bytes", 0)
@@ -662,6 +870,8 @@ def run(opts):
         if entry.get("line_sites"):
             line_sites[tu.key] = entry["line_sites"]
         v = entry["verdict"]
+        if not entry["obj_compared"]:
+            not_byte_compared.append(tu.key)
         n_ident += v == "identical"
         n_objdump += v == "identical-by-objdump"
         n_lines += v == "identical-modulo-lines"
@@ -669,17 +879,19 @@ def run(opts):
         n_fail += v == "COMPILE-FAILED"
         report.append(entry)
 
-    # check 3: tracked headers that no TU reads
+    # check 3: files no compile reads (CMakeLists.txt, cmake/*, *.in, unread headers)
     unread_msgs, uncovered_err = [], []
     full = not opts.tu and not n_fail
     if full:
         allow = set(opts.allow_uncovered)
         tracked = {}
-        for name, s in sides.items():
-            tr = Path(s["tree"])
-            tracked[name] = {str(p.relative_to(tr)) for p in tr.rglob("*") if p.is_file()
-                             and p.suffix in HEADER_SUFFIXES}
+        for name, sd in sides.items():
+            tr = Path(sd["tree"])
+            tracked[name] = {str(p.relative_to(tr)) for p in tr.rglob("*") if p.is_file()}
+        compiled = set(files)
         for h in sorted(set().union(*tracked.values())):
+            if h in compiled:
+                continue
             unread_by = [n for n in sides if h in tracked[n] and h not in read_by_side[n]]
             missing = [n for n in sides if h not in tracked[n]]
             if not unread_by and not (missing and any(h in read_by_side[n] for n in sides)):
@@ -710,6 +922,9 @@ def run(opts):
     print(f"summary: {len(report)} TUs: {n_ident} identical, {n_lines} identical modulo the lines of EDG assertion "
           f"sites in cerastes's own files, {n_objdump} identical by objdump only (object bytes differ, IR and "
           f"disassembly agree), {n_diff} DIFFER, {n_fail} failed to compile")
+    print(f"objects compared byte for byte: {len(report) - len(not_byte_compared)} of {len(report)} TUs"
+          + (f"; NOT compared (they differ by line immediates, the IR was compared): {', '.join(not_byte_compared)}"
+             if not_byte_compared else ""))
     print(f"timing: compiles {t_compile:.1f} s, total {time.time() - t0:.1f} s; IR {ir_bytes / 1e6:.1f} MB per side"
           + ("" if opts.no_emit_all_decls or opts.no_ir else f", with -femit-all-decls {ext_bytes / 1e6:.1f} MB "
              f"({100.0 * (ext_bytes - ir_bytes) / max(ir_bytes, 1):+.0f}%)"))
@@ -726,13 +941,14 @@ def run(opts):
           "none (so nothing in build/ can pull a header past the per-side tree; any that did would be caught by "
           "the dependency check)"))
     if unread_msgs:
-        print("headers no TU reads (edits not covered by object/IR identity): " + "; ".join(unread_msgs))
+        print("files no compile reads (edits not covered by object/IR identity; --tokens covers them): "
+              + "; ".join(unread_msgs))
     if opts.json:
-        Path(opts.json).write_text(json.dumps({"tus": report, "unread": unread_msgs}, indent=1))
+        Path(opts.json).write_text(json.dumps({"tus": report, "unread": unread_msgs, "tokens": tok_res}, indent=1))
     if uncovered_err:
-        raise ProofInvalid("tracked headers that no TU reads differ between the sides and are not allowed "
-                           f"(--allow-uncovered): {uncovered_err}")
-    if n_diff or n_fail:
+        raise ProofInvalid("files that no compile reads differ between the sides and are not allowed "
+                           f"(--allow-uncovered; --tokens covers C++ sources): {uncovered_err}")
+    if n_diff or n_fail or tok_bad:
         return 1
     return 0
 
@@ -746,9 +962,13 @@ def parse(argv):
                     help="restrict to this TU (path under src/, e.g. src/vir/check.cpp; repeatable); the coverage "
                          "checks that need every TU are skipped")
     ap.add_argument("--allow-uncovered", action="append", default=list(DEFAULT_ALLOW_UNCOVERED), metavar="PATH",
-                    help="a header no TU reads that may differ (default: include/cerastes.h)")
+                    help="a file no compile reads that may differ (default: include/cerastes.h)")
     ap.add_argument("--json", help="write per-TU results here")
     ap.add_argument("--no-emit-all-decls", action="store_true", help="IR without -femit-all-decls")
+    ap.add_argument("--tokens", choices=("off", "none", "braces"), default="off",
+                    help="compare the token streams of every file of both exports: none = no difference, braces = "
+                         "only inserted balanced { } (default: off)")
+    ap.add_argument("--no-compile", action="store_true", help="skip the compile passes (with --tokens)")
     ap.add_argument("--no-ir", action="store_true", help="objects only (a weaker proof)")
     # for the self-test's fixtures
     ap.add_argument("--root", default=str(REPO), help=argparse.SUPPRESS)

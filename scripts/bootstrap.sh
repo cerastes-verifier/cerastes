@@ -43,7 +43,8 @@ case "$PLATFORM" in
     Z3_ASSET=z3-4.16.0-arm64-osx-15.7.3
     Z3_SHA256=41828fa07d5cb77bfaee326e8e6dac074f26329c09c633f9e66012bb917cf8ae
     CLANG_FORMAT_URL=https://files.pythonhosted.org/packages/47/a5/2007b7a7a53dfe417e66d0a6b38b2f87f16391bfe6fe522d436d1e50be1c/clang_format-23.1.3-py2.py3-none-macosx_11_0_arm64.whl
-    CLANG_FORMAT_SHA256=79f53ac55434af6dda88eb90eeb65d903ff920c910f78041de41e3ca666dfba5 ;;
+    CLANG_FORMAT_SHA256=79f53ac55434af6dda88eb90eeb65d903ff920c910f78041de41e3ca666dfba5
+    CLANG_FORMAT_BIN_SHA256=5fd9412265516d41a7d0147c18254f78fffbc57554539be1497e4c33d82ee70c ;;
   Linux-x86_64)
     # decision 0031: EDG's Linux preset in Clang emulation, built and scraped with
     # clang-$LINUX_CLANG_MAJOR over libc++ (the C++ library macOS has); JDK 17 and the
@@ -54,6 +55,7 @@ case "$PLATFORM" in
     Z3_SHA256=7288c49a5bd6dbafd7b0b0d1f65956b91672da24b08f09242919af159be3418e
     CLANG_FORMAT_URL=https://files.pythonhosted.org/packages/11/d1/658d3da4dcbca98620956868c7cf6f4ba19fccecbdfc30cc055e19c9d4a7/clang_format-23.1.3-py2.py3-none-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
     CLANG_FORMAT_SHA256=58bf1804216501669832a39f2415e14284337438a062ff564729792adec664ac
+    CLANG_FORMAT_BIN_SHA256=5f4faeae3aadb096e72aad1fc9d36324e26bfaf7715e277637efd1da249e028f
     SBT_VERSION=2.0.10
     SBT_SHA256=6ff28e1dea38d1de48ea3d4e903f0380b85b19f945a103e30ec4298717c90cd7
     SBT_URL="https://github.com/sbt/sbt/releases/download/v$SBT_VERSION/sbt-$SBT_VERSION.zip" ;;
@@ -308,7 +310,11 @@ if [[ ! -x "$CLANG_FORMAT_EXE" ]]; then
   chmod +x "$CLANG_FORMAT_EXE"
   rm -f "$whl"
 fi
-"$CLANG_FORMAT_EXE" --version | grep -q "clang-format version $CLANG_FORMAT_VERSION" \
+# The binary itself is pinned too (CLANG_FORMAT_BIN_SHA256, the wheel member's digest), checked on every
+# run: the wheel is deleted after unpacking, so a later run can still tell the binary is the pinned one.
+[[ "$(sha256_of "$CLANG_FORMAT_EXE")" == "$CLANG_FORMAT_BIN_SHA256" ]] \
+  || die "$CLANG_FORMAT_EXE is not the pinned binary (SHA-256 mismatch); delete $CLANG_FORMAT_DIR and run scripts/bootstrap.sh"
+"$CLANG_FORMAT_EXE" --version | grep -q "^clang-format version $CLANG_FORMAT_VERSION\$" \
   || die "$CLANG_FORMAT_EXE is not clang-format $CLANG_FORMAT_VERSION"
 
 # ---- 5b. Documentation dependencies (doc/node_modules) ------------------------

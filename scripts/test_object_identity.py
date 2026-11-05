@@ -3,19 +3,38 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 """Self-test for scripts/object_identity.py (session S7, decision 0051): a twin for the harness itself.
 
-Each case is one translation unit of a fixture tree, written in a "before" and an "after" form; the tool compares
-the two trees in one run and its per-TU verdicts are checked.  The must-pass cases are the edits the restyle makes
-(whitespace, braces around a statement, `U` on an unsigned literal, brace initialization, one declarator per
-declaration); the must-fail cases are the edits that change behaviour and that a weak comparison would miss.  Each
-must-fail case names the pass that is expected to catch it:
+25 compile cases and 18 token cases, plus the guard tests (31 tests in all).
 
-  * `obj`  - the object bytes differ (and the IR does);
-  * `ir`   - only the LLVM IR differs (at -O0 the machine code of `int y = x - 1U;` is the instruction of
-             `x - 1`, the IR keeps `sub` against `sub nsw`): weakening the tool to objects only fails this test.
+Compile cases.  Each is one translation unit of a fixture tree, written in a "before" and an "after" form; the tool
+compares the two trees in one run and its per-TU verdicts are checked.
+  * Must pass (the edits the restyle makes): whitespace; braces around statements; `U` on a `std::size_t` compare
+    and on a shift count; brace initialization (scalar and aggregate); split declarators; `T* p`; a macro that embeds
+    `__FILE__`/`__LINE__` of EDG's `assertion_failed` with a blank line above ("identical modulo lines": the objects
+    differ by the line immediate and are not compared, the case asserts that); a library template instantiated for
+    another literal type (counted noise, not a failure under libc++).
+  * Must fail, and which pass catches it: `obj` (object bytes and IR differ): a changed literal, `x - 1 < 0` with
+    `1U`, `vector v(3, 0)` against `{3, 0}`, an `initializer_list` constructor taken by brace-init, an `explicit`
+    constructor only direct-list-initialization may pick (`W(long)` against `explicit W(int)`), an `else` rebound,
+    a backslash-continued comment, `log_line(__FILE__, __LINE__)` and an `assertion_failed` call's other argument
+    (the line normalisation is for `assertion_failed`'s line argument only), a non-own-file line;
+    `ir` only (machine code identical): `int y = x - 1U;` (`sub` against `sub nsw`), so an objects-only tool fails;
+    `ext` only (-femit-all-decls IR): an unused inline function changed or removed, so a tool without that pass fails;
+    a header edit seen only when the header is read from the side's own tree.
 
-The tool's own guards have twins too: a header read from the wrong tree (the include-path rewrite and the
-dependency check), a source file that names its header by absolute path, a tracked .cpp or a TU count the compile
-database does not match, a header no TU reads that changes, the same tree exported twice into two directories.
+Token cases (`--tokens none|braces --no-compile`): a comment and whitespace change and a splice added inside a
+directive pass under both modes; inserted braces (a statement, an else chain, nested ifs) pass under `braces` and
+fail under `none`; an inserted scope, an unclosed brace and braces with another change fail under both; a dropped token
+in a `static_assert`, a changed token in an `#if 0` and in an inactive branch, a token moved into or before a directive,
+`= delete` dropped, an access specifier, `> >` against `>>` (the lexer does not split `>>`), a swallowed-comment line, a
+changed CMakeLists.txt and an added file fail under both.
+
+Guards (each exits 2 where it must): a source naming its header by the working tree's absolute path; a header of
+the other side's export; a header outside the root and the toolchain (another checkout), found by absolute path and
+by an explicit -I; system headers allowed; an unlisted src .cpp; wrong TU-count constants; a changed unread header,
+CMakeLists.txt, cmake/ file or `.in` file (allowed only by --allow-uncovered, include/cerastes.h by default); `--tu`;
+a compile failure is not a pass; the same tree exported twice into two directories; the token pass beside the
+compile passes; `--no-compile` needs a token mode; the command rewrite, the line normaliser, the tokenizer and the
+dependency-file parser on their own.
 
 The compiler is $CXX, `c++` or `clang++`, else $CERASTES_CLANG_CXX or build/env.sh's CERASTES_CLANG_CXX
 (check.sh does not source env.sh, and on Linux `c++` is GCC and clang is only clang++-21): the first that is
@@ -108,8 +127,10 @@ case("pointer_style", "int f(int *p, int &r) { return *p + r; }\n", "int f(int* 
 case("std_instantiation_name", "#include <string>\nstd::string f(char v) { return std::string(1, v); }\n",
      "#include <string>\nstd::string f(char v) { return std::string(1U, v); }\n", "noise")
 # a macro that embeds __FILE__ and __LINE__ (as EDG's check_assertion does): a blank line above moves the line
-HDR_MACRO = ("extern void fail(const char*, int);\n#define CHECK(c) ((c) ? (void)0 : fail(__FILE__, __LINE__))\n"
-             "int f(int a)\n{\n%sCHECK(a > 0);\n    return a;\n}\n")
+ASSERTION_FAILED = ("extern void assertion_failed(const char*, int, const char*, const char*, const char*);\n"
+                    "#define CHECK(c) ((c) ? (void)0 : assertion_failed(__FILE__, __LINE__, __func__, %s, nullptr))\n"
+                    "int f(int a)\n{\n%sCHECK(a > 0);\n    return a;\n}\n")
+HDR_MACRO = ASSERTION_FAILED % ("nullptr", "%s")
 case("line_macro", HDR_MACRO % "", HDR_MACRO % "\n\n    // a comment\n", "lines")
 
 # ---- must fail: what changes behaviour
@@ -140,6 +161,16 @@ case("line_not_own_file", "extern void fail(const char*, int);\nint f(int a) {\n
      "extern void fail(const char*, int);\n\nint f(int a) {\n  if (a < 0) fail(\"x.cpp\", __LINE__);\n  return a;\n}\n",
      "obj")
 case("line_macro_and_literal", HDR_MACRO % "", (HDR_MACRO % "\n").replace("return a;", "return a + 1;"), "obj")
+# the normalisation is for EDG's `assertion_failed` only: another callee that is given __FILE__ and __LINE__ must see
+# its line change, and so must another argument of an `assertion_failed` call
+LOG = ("extern void log_line(const char*, int);\n#define LOG() log_line(__FILE__, __LINE__)\n"
+       "int f(int a)\n{\n%sLOG();\n    return a;\n}\n")
+case("line_other_callee", LOG % "", LOG % "\n\n    // a comment\n", "obj")
+MSG = ASSERTION_FAILED % ('"%s"', "%s")
+case("line_other_argument", MSG % ("a", ""), MSG % ("b", "\n\n    // a comment\n"), "obj")
+# an explicit constructor that only direct-list-initialization may pick (copy-initialization skips it)
+EXPL = "struct W {\n    W(long) : r(1) {}\n    explicit W(int) : r(2) {}\n    int r;\n};\n"
+case("explicit_only", EXPL + "int f() { W w = 5; return w.r; }\n", EXPL + "int f() { W w {5}; return w.r; }\n", "obj")
 # the header edit is seen only if the header is read from the side's own tree (root/src/hdr.h holds the old text)
 case("header_edit", '#include "hdr.h"\nint f() { return hv(); }\n', '#include "hdr.h"\nint f() { return hv(); }\n', "obj")
 
@@ -254,6 +285,9 @@ class ObjectIdentityCases(unittest.TestCase):
                 elif expect == "lines":
                     self.assertEqual(e["verdict"], "identical-modulo-lines", e)
                     self.assertGreaterEqual(e["line_sites"], 1)
+                    # the objects differ by the line immediates: they are NOT compared, and the report says so
+                    self.assertFalse(e["obj_compared"], e)
+                    self.assertFalse(e["obj"], e)
                 else:
                     self.assertEqual(e["verdict"], "DIFFERS", e)
                     # which pass catches it: the object bytes, or only the IR
@@ -302,7 +336,7 @@ class ObjectIdentityGuards(unittest.TestCase):
         fx = Fixture(tmp.name, cases, HEADERS)
         rc, res, out, err = fx.run(n=1, files=1)
         self.assertEqual(rc, 2, out + err)
-        self.assertIn("wrong place", err)
+        self.assertIn("allow-list", err)
 
     def test_header_of_the_other_side_is_caught(self):
         # before names a header that exists only in the AFTER export (found through the scratch directory)
@@ -315,7 +349,7 @@ class ObjectIdentityGuards(unittest.TestCase):
         write(fx.v2 / "src" / "o.h", "// only in the after tree\n")
         rc, res, out, err = fx.run(n=1, files=1)
         self.assertEqual(rc, 2, out + err)
-        self.assertIn("wrong place", err)
+        self.assertIn("allow-list", err)
 
     def test_unlisted_cpp_is_refused(self):
         fx = self.fixture({"ws": CASES["ws"]})
@@ -404,14 +438,220 @@ class DepFile(unittest.TestCase):
 
 
 class LineNormalisation(unittest.TestCase):
+    AF = "@_Z16assertion_failedPKciS0_S0_S0_"
     IR = ('@.str = private constant [8 x i8] c"/r/src/a.cpp\\00"\n@.str.1 = private constant [6 x i8] c"x.cpp\\00"\n'
-          "  call void @fail(ptr noundef @.str, i32 noundef 12)\n  call void @fail(ptr noundef @.str.1, i32 noundef 13)\n")
+          f"  call void {AF}(ptr noundef @.str, i32 noundef 12, ptr noundef null)\n"
+          f"  call void {AF}(ptr noundef @.str.1, i32 noundef 13, ptr noundef null)\n"
+          "  call void @_Z8log_linePKci(ptr noundef @.str, i32 noundef 14)\n"
+          f"  invoke void {AF}(ptr noundef @.str, i32 noundef 15, ptr noundef null)\n")
 
-    def test_only_own_file_calls_are_normalised(self):
+    def test_only_own_file_assertion_failed_calls_are_normalised(self):
         out, n = oi.normalize_lines(self.IR, "/r")
-        self.assertEqual(n, 1)
-        self.assertIn("@.str, i32 noundef 0", out)
-        self.assertIn("@.str.1, i32 noundef 13", out)
+        self.assertEqual(n, 2)
+        self.assertIn(f"call void {self.AF}(ptr noundef @.str, i32 noundef 0, ptr noundef null)", out)
+        self.assertIn("@.str.1, i32 noundef 13", out)      # not the file of the tree
+        self.assertIn("@_Z8log_linePKci(ptr noundef @.str, i32 noundef 14)", out)    # not assertion_failed
+        self.assertIn("invoke void " + self.AF + "(ptr noundef @.str, i32 noundef 0", out)
+
+
+@unittest.skipIf(CXX is None, "no clang++ found")
+class ObjectIdentityAllowList(unittest.TestCase):
+    """Check 2 is an allow-list, and check 3 covers every input of the build, not only headers."""
+
+    def fixture(self, cases, headers=None, **kw):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        return Fixture(tmp.name, cases, headers if headers is not None else {}, **kw)
+
+    def test_header_outside_the_root_and_the_toolchain_is_caught(self):
+        # another checkout: not under the root (the worktree sits inside the main checkout), not a toolchain
+        # directory; found by absolute path, so no rewrite of the command can redirect it
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        other = Path(tmp.name).resolve() / "other_checkout" / "src"
+        write(other / "o.h", "inline int ov() { return 1; }\n")
+        text = f'#include "{other}/o.h"\nint f() {{ return ov(); }}\n'
+        fx = Fixture(tmp.name, {"t": (text, text, "same")}, {})
+        rc, res, out, err = fx.run(n=1, files=1)
+        self.assertEqual(rc, 2, out + err)
+        self.assertIn("allow-list", err)
+        self.assertIn("other_checkout", err)
+
+    def test_explicit_include_directory_outside_the_root_is_not_toolchain(self):
+        # a directory the command itself names with -I is the project's, so it is not allowed because it is a
+        # search directory
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        other = Path(tmp.name).resolve() / "other_checkout" / "inc"
+        write(other / "o.h", "inline int ov() { return 1; }\n")
+        text = '#include "o.h"\nint f() { return ov(); }\n'
+        fx = Fixture(tmp.name, {"t": (text, text, "same")}, {}, extra_cmd=f"-I{other}")
+        rc, res, out, err = fx.run(n=1, files=1)
+        self.assertEqual(rc, 2, out + err)
+        self.assertIn("allow-list", err)
+
+    def test_system_headers_are_allowed(self):
+        fx = self.fixture({"s": ("#include <vector>\nint f() { return 1; }\n", "#include <vector>\nint f() { return 1; }\n",
+                                 "same")})
+        rc, res, out, err = fx.run(n=1, files=1)
+        self.assertEqual(rc, 0, out + err)
+
+    def test_cmake_and_cmakelists_are_inputs(self):
+        for rel in ("cmake/Gen.cmake", "CMakeLists.txt", "src/sub/CMakeLists.txt", "src/driver/tool_paths.h.in"):
+            with self.subTest(file=rel):
+                fx = self.fixture({"ws": CASES["ws"]})
+                write(fx.v1 / rel, "a\n")
+                write(fx.v2 / rel, "b\n")
+                rc, res, out, err = fx.run(n=1, files=1)
+                self.assertEqual(rc, 2, out + err)
+                self.assertIn(os.path.basename(rel), err)
+                # unchanged, they are only listed
+                write(fx.v2 / rel, "a\n")
+                rc, res, out, err = fx.run(n=1, files=1)
+                self.assertEqual(rc, 0, out + err)
+                self.assertIn(f"{rel} (unchanged)", out)
+
+    def test_changed_cmake_file_can_be_allowed(self):
+        fx = self.fixture({"ws": CASES["ws"]})
+        write(fx.v1 / "CMakeLists.txt", "a\n")
+        write(fx.v2 / "CMakeLists.txt", "b\n")
+        rc, res, out, err = fx.run(n=1, files=1, extra=["--allow-uncovered", "CMakeLists.txt"])
+        self.assertEqual(rc, 0, out + err)
+
+
+# token-pass cases: name -> (file, before, after, status under `none`, status under `braces`); a before of None is
+# a file that exists on the after side only.  "same" / "braces" (only inserted braces) / "DIFFERS".
+TOKEN_CASES = {
+    "comment_and_whitespace": ("a.cpp", "int f(int a) { return a + 1; } // one\n",
+                               "/* two */\nint f(int a)\n{\n    return a +\n        1;\n}\n", "same", "same"),
+    "splice_in_a_directive": ("b.h", "#define M(a) ((a) + 1)\n", "#define M(a) \\\n    ((a) + 1)\n", "same", "same"),
+    "braces_around_statements": ("c.cpp", "int f(int a) { if (a) return 1; else return 2; }\n",
+                                 "int f(int a)\n{\n    if (a)\n    {\n        return 1;\n    }\n    else\n    {\n"
+                                 "        return 2;\n    }\n}\n", "DIFFERS", "braces"),
+    "braces_nested": ("d.cpp", "void g(int a, int b) { if (a) if (b) h(); else k(); }\n",
+                      "void g(int a, int b) { if (a) { if (b) { h(); } else { k(); } } }\n", "DIFFERS", "braces"),
+    "scope_inserted": ("e.cpp", "void g() { int x = 1; use(x); }\n", "void g() { { int x = 1; } use(x); }\n",
+                       "DIFFERS", "DIFFERS"),
+    "brace_not_closed": ("f.cpp", "void g(int a) { if (a) h(); }\n", "void g(int a) { if (a) { h(); }\n",
+                         "DIFFERS", "DIFFERS"),
+    "braces_and_a_change": ("g.cpp", "int f(int a) { if (a) return 1; return 2; }\n",
+                            "int f(int a) { if (a) { return 1; } return 3; }\n", "DIFFERS", "DIFFERS"),
+    "static_assert_token_dropped": ("h.h", "static_assert(sizeof(int) == 4 && sizeof(long) == 8);\n",
+                                    "static_assert(sizeof(int) == 4);\n", "DIFFERS", "DIFFERS"),
+    "if0_branch_changed": ("i.cpp", "#if 0\nint a = 1;\n#endif\n", "#if 0\nint a = 2;\n#endif\n", "DIFFERS",
+                           "DIFFERS"),
+    "inactive_platform_branch": ("j.cpp", "#ifdef NO_SUCH_MACRO\nint a = f(1);\n#endif\n",
+                                 "#ifdef NO_SUCH_MACRO\nint a = f(1U);\n#endif\n", "DIFFERS", "DIFFERS"),
+    "token_moved_across_a_directive": ("k.h", "#define A 1\nint x;\n", "#define A 1 int\nx;\n", "DIFFERS", "DIFFERS"),
+    "token_moved_before_a_directive": ("l.h", "#if X\nint a;\n#endif\n", "int\n#if X\na;\n#endif\n", "DIFFERS",
+                                       "DIFFERS"),
+    "deleted_member": ("m.h", "struct S { S(const S&) = delete; int x; };\n", "struct S { S(const S&); int x; };\n",
+                       "DIFFERS", "DIFFERS"),
+    "access_specifier": ("n.h", "class C { public: int x; };\n", "class C { private: int x; };\n", "DIFFERS", "DIFFERS"),
+    "right_shift_not_split": ("o.h", "A<B<int> > x;\n", "A<B<int>> x;\n", "DIFFERS", "DIFFERS"),
+    "comment_continuation": ("p.cpp", "void g() {\n  int x = 1; // set x \\\n  x = 2;\n}\n",
+                             "void g()\n{\n    int x = 1; // set x\n    x = 2;\n}\n", "DIFFERS", "DIFFERS"),
+    "cmake_file_changed": ("CMakeLists.txt", "add_library(a a.cpp)\n", "add_library(a b.cpp)\n", "DIFFERS", "DIFFERS"),
+    "file_added": ("q.h", None, "int q;\n", "DIFFERS", "DIFFERS"),
+}
+
+
+class TokenPass(unittest.TestCase):
+    """--tokens none|braces over fixture trees, with --no-compile (no compiler, no database)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        t = Path(cls.tmp.name)
+        for name, (f, b, a, _, _) in TOKEN_CASES.items():
+            if b is not None:
+                write(t / "v1" / "src" / f, b)
+            write(t / "v2" / "src" / f, a)
+        cls.root = t / "root"
+        cls.root.mkdir()
+        cls.results = {}
+        for mode in ("none", "braces"):
+            cls.results[mode] = cls.run_tokens(t, mode)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    @classmethod
+    def run_tokens(cls, t, mode, extra=()):
+        js = t / f"tok-{mode}.json"
+        out, err = io.StringIO(), io.StringIO()
+        argv = ["--before", str(t / "v1"), "--after", str(t / "v2"), "--root", str(cls.root), "--scratch",
+                str(t / f"scratch-{mode}"), "--tokens", mode, "--no-compile", "--json", str(js), *extra]
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = oi.main(argv)
+        res = json.loads(js.read_text())["tokens"] if js.exists() else {}
+        return rc, res, out.getvalue(), err.getvalue()
+
+    def test_every_case(self):
+        for mode, idx in (("none", 3), ("braces", 4)):
+            rc, res, out, err = self.results[mode]
+            self.assertEqual(rc, 1, out + err)       # some case differs in each mode
+            for name, spec in TOKEN_CASES.items():
+                with self.subTest(case=name, mode=mode):
+                    self.assertEqual(res["src/" + spec[0] if spec[0] != "CMakeLists.txt" else spec[0]]["status"]
+                                     if False else res[("src/" + spec[0])]["status"], spec[idx], out)
+
+    def test_the_report_names_each_differing_file(self):
+        out = self.results["none"][2]
+        self.assertIn("TOKENS DIFFER  src/h.h", out)
+        self.assertIn("tokens (none):", out)
+
+    def test_pure_mode_passes_when_only_clean_cases_exist(self):
+        t = Path(self.tmp.name) / "clean"
+        for name in ("comment_and_whitespace", "splice_in_a_directive"):
+            f, b, a, _, _ = TOKEN_CASES[name]
+            write(t / "v1" / "src" / f, b)
+            write(t / "v2" / "src" / f, a)
+        rc, res, out, err = self.run_tokens(t, "none")
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual({r["status"] for r in res.values()}, {"same"})
+
+    def test_braces_mode_alone_passes_and_none_fails(self):
+        t = Path(self.tmp.name) / "braced"
+        f, b, a, _, _ = TOKEN_CASES["braces_around_statements"]
+        write(t / "v1" / "src" / f, b)
+        write(t / "v2" / "src" / f, a)
+        self.assertEqual(self.run_tokens(t, "braces")[0], 0)
+        self.assertEqual(self.run_tokens(t, "none")[0], 1)
+
+    def test_no_compile_needs_a_token_mode(self):
+        t = Path(self.tmp.name) / "clean"
+        rc, res, out, err = self.run_tokens(t, "off")
+        self.assertEqual(rc, 2, out + err)
+
+    def test_token_pass_with_the_compile_passes(self):
+        # identical object code but inserted braces: rc 0 with `braces`, 1 with `none`
+        if CXX is None:
+            self.skipTest("no clang++")
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        fx = Fixture(tmp.name, {k: CASES[k] for k in ("braces", "ws")}, {})
+        rc, res, out, err = fx.run(n=2, files=2, extra=["--tokens", "braces"])
+        self.assertEqual(rc, 0, out + err)
+        rc, res, out, err = fx.run(n=2, files=2, extra=["--tokens", "none"])
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual({e["verdict"] for e in res.values()}, {"identical"}, "the compile passes see no difference")
+        self.assertIn("TOKENS DIFFER", out)
+
+    def test_tokenizer(self):
+        self.assertEqual(oi.tokenize("a >> b; // c\n/* d */ e\\\nf"), ["a", ">>", "b", ";", "ef"])
+        self.assertEqual(oi.tokenize("#define X 1 \\\n + 2\nint y;"),
+                         ["#", "define", "X", "1", "+", "2", oi.EOD, "int", "y", ";"])
+        self.assertEqual(oi.tokenize('x = R"(a\\nb)"; y'), ["x", "=", 'R"(a\\nb)"', ";", "y"])
+
+
+class CaseCount(unittest.TestCase):
+    def test_the_docstring_counts_the_cases(self):
+        n = len(CASES) + len(TOKEN_CASES)
+        self.assertIn(f"{len(CASES)} compile cases and {len(TOKEN_CASES)} token cases", __doc__, f"{n} cases in all")
+        loader = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
+        self.assertIn(f"({loader.countTestCases()} tests in all)", __doc__)
 
 
 if __name__ == "__main__":

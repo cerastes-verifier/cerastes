@@ -2,15 +2,16 @@
 # Part of cerastes, under the Apache License v2.0 with LLVM Exceptions.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #
-# The code style of cerastes's tool code (decision 0051): applies, or with --check only checks, the root
-# .clang-format with the pinned clang-format (scripts/bootstrap.sh downloads PyPI's 23.1.3 wheel into
+# The code style of cerastes's tool code (decision 0051): applies, or with --check only checks, the style of
+# src/.clang-format with the pinned clang-format (scripts/bootstrap.sh downloads PyPI's 23.1.3 wheel into
 # build/tools; build/env.sh names it in CERASTES_CLANG_FORMAT).
 #
 # The files are the tracked ones of src/ (.cpp, .h, .inc) and include/cerastes.h, less the files that are not
 # C++ source we write: src/driver/edg_options.inc is generated (scripts/check_edg_options.sh compares it byte
 # for byte), src/backend/diagnostics.def is an X-macro table that scripts/run_tests.py reads with a regular
-# expression, and src/driver/tool_paths.h.in is a CMake template.  tests/, doc/ and third_party/ are never
-# formatted (their .clang-format files say DisableFormat, invariant 1).
+# expression, and src/driver/tool_paths.h.in is a CMake template.  The style is src/.clang-format and
+# include/.clang-format (byte-identical, compared here); the root .clang-format says DisableFormat, so nothing else
+# is ever formatted, tests/, doc/ and third_party/ included (invariant 1).
 #
 # Usage: scripts/format.sh [--check]
 #   (no option)  format the files in place.
@@ -41,6 +42,13 @@ CF="${CERASTES_CLANG_FORMAT:-}"
   || { echo "format.sh: $CF is not clang-format $WANT; run scripts/bootstrap.sh" >&2; exit 2; }
 
 cd "$ROOT"
+# The style is src/.clang-format and include/.clang-format, byte-identical; the root .clang-format disables
+# formatting everywhere else (fail-closed: tests, doc examples, fixtures and the submodules are never touched).
+for style in src/.clang-format include/.clang-format; do
+  [[ -f "$style" ]] || { echo "format.sh: $style is missing (the style lives there, decision 0051)" >&2; exit 2; }
+done
+cmp -s src/.clang-format include/.clang-format \
+  || { echo "format.sh: src/.clang-format and include/.clang-format differ; they must be byte-identical" >&2; exit 2; }
 files=()
 while IFS= read -r f; do
   case "$f" in

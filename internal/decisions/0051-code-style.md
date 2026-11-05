@@ -31,17 +31,24 @@ initialization admits, an `initializer_list` constructor that braces prefer, an 
    `switch (` with a space and none after a function's name. Three rules clang-format cannot apply, written by the
    sweep (item 5): brace initialization (`T x {e};`, `T x {};`, for-init included; lambdas keep `=`, as in decimal),
    `U` on unsigned literals, one declarator per declaration.
-2. **The configuration** is `.clang-format` at the root (S7 settles its options against the exemplars; each non-default
-   option is explained there). The only option that changes tokens is `InsertBraces`; `SortIncludes: Never` (EDG's
-   headers depend on include order), `SortUsingDeclarations: Never`, `BreakStringLiterals: false` and
-   `ReflowComments: IndentOnly` keep strings, comments and order as written.
+2. **The configuration** is `src/.clang-format`, with a byte-identical copy in `include/.clang-format`
+   (`scripts/format.sh` refuses to run when they differ); each non-default option is explained there, checked against
+   the exemplars. The only option that changes code tokens is `InsertBraces`; three can change comment text, never
+   code: `FixNamespaceComments` (`} // namespace x`), `SpacesInLineCommentPrefix` (`//x` becomes `// x`) and
+   `ReflowComments: IndentOnly` (re-indents, never re-wraps). `SortIncludes: Never` (EDG's headers depend on include
+   order), `SortUsingDeclarations: Never` (LLVM style sorts them) and `BreakStringLiterals: false` keep order and
+   strings as written. `SpaceBeforeCpp11BracedList: true` gives `T x {e};`, as the exemplars' declarations have it;
+   clang-format has one switch for declarations and temporaries, so a braced temporary is spelled `T {e}` too, where
+   the exemplars mostly write `T{e}`: an accepted difference.
 3. **What is formatted:** the tracked `src/**/*.{cpp,h,inc}` and `include/cerastes.h`, listed by `scripts/format.sh`
    from `git ls-files`. Excluded: `src/driver/edg_options.inc` (generated, compared byte for byte by
    `check_edg_options.sh`), `src/backend/diagnostics.def` (an X-macro table that `run_tests.py` reads by regular
-   expression), `src/driver/tool_paths.h.in` (a CMake template) and the `CMakeLists.txt` files. **Never formatted:**
-   `tests/`, `doc/` and `third_party/`, guarded by a `.clang-format` with `DisableFormat: true` in each and by
-   `.clang-format-ignore`, so formatting a test, a doc example or an EDG or vlibc file from any editor changes nothing
-   (test lines are expectations, invariant 1).
+   expression), `src/driver/tool_paths.h.in` (a CMake template) and the `CMakeLists.txt` files. **Fail-closed
+   guards:** the root `.clang-format` is `DisableFormat: true`, so a C or C++ file anywhere but `src/` and `include/`
+   (tests, doc examples, `scripts/testdata/`'s fixtures, `internal/`'s probes, EDG, vlibc, a directory added later) is
+   never formatted by an editor or by `clang-format -i`: test lines are expectations (invariant 1). The root
+   `.clang-format-ignore` lists `tests/**`, `doc/**` and `third_party/**` as a second guard (in 23.1.3 only the `/**`
+   form matches a directory) and the three excluded files of `src/`.
 4. **The pin** (148): PyPI's official `clang_format` wheel 23.1.3, one per platform (macOS arm64, manylinux x86-64),
    downloaded by `bootstrap.sh` with a SHA-256 like Z3 and unpacked to `build/tools/clang-format-23.1.3/`;
    `build/env.sh` exports `CERASTES_CLANG_FORMAT`. Not Homebrew's llvm, which floats, and not Ubuntu's, which has only
@@ -58,36 +65,54 @@ initialization admits, an `initializer_list` constructor that braces prefer, an 
      declarations in a condition (`if (T x = e)`; an init-statement is braced). A narrowing error is fixed with
      `static_cast<T>(e)` inside the braces, the conversion the copy-initialization made.
    Sites the helper skips (macros, disagreeing instantiations) keep their spelling and are listed in S7's status entry.
-6. **The proof** has two levels, at every commit of the restyle:
-   - **Objects and IR** (`scripts/object_identity.py --before <rev> [--after <rev>]`): every cerastes TU of
-     `compile_commands.json` is compiled from an export of each side with its own command plus `-g0 -DNDEBUG`
-     (`-fmacro-prefix-map` spelling `__FILE__` alike on both sides) three ways, and all three must agree:
-     - the object file, byte for byte;
-     - the `-O0` LLVM IR (its module-name lines dropped). The IR is the stronger half: at `-O0` the machine code of
-       `x - 1` and `x - 1U` on an `int` is the same instruction, and the IR's `nsw` tells them apart;
-     - the IR with `-femit-all-decls`, which also emits inline functions no TU calls, compared entity by entity. Only
-       libc++ entities present on one side are counted rather than failed: `std::string(1U, c)` instantiates a libc++
-       helper for `unsigned` where `(1, c)` did for `int`, and the call sites themselves are compared strictly by the
-       plain IR.
-     **Line numbers.** `encode.cpp` passes `__FILE__` and `__LINE__` to EDG's assertion routine (through EDG's
-     checking macros), so a restyle changes those immediates. The tool zeroes, in the IR only, the line argument of a
-     call whose first argument is a path inside `src/` or `include/`, compares objects built from that IR, and reports
-     the TU as "identical modulo lines". What changes is the line an EDG internal assertion would name, never a result.
-     The tool fails with "proof invalid" when an argument still names the working tree's `src/` or `include/` after the
-     rewrite, when a TU reads a cerastes header from outside its own side's export (from its dependency file), when a
-     tracked header no TU reads differs (only `include/cerastes.h` is allowed, see below), when a tracked `.cpp` is
-     missing from the compile database, or when the TU count changes. Its self-test (`scripts/test_object_identity.py`,
-     in `check.sh`) has the must-pass and must-fail cases of S7's plan and says which pass catches each.
+6. **The proof** has three levels, at every commit of the restyle (`scripts/object_identity.py --before <rev>
+   [--after <rev>] [--tokens none|braces]`, with its self-test `scripts/test_object_identity.py` in `check.sh`):
+   - **Tokens** (`--tokens`): every file under `src/`, `include/` and `cmake/` and every `CMakeLists.txt` of the two
+     sides, C and C++ files as token streams (comments, whitespace and backslash-newline splices dropped, each
+     directive closed by an end marker, `>>` kept whole), the others byte for byte. `none` allows no difference (C3,
+     the hand fixups); `braces` allows only inserted, balanced `{`/`}` after `)`, `else` or `do` and before nothing but
+     `;` or `}` (C2, `InsertBraces`). This is the only level that sees code no build compiles (an inactive `#if`
+     branch, `include/cerastes.h`) and code that leaves no trace in the IR (`static_assert`, `= delete`, `explicit`,
+     an access specifier, an uninstantiated template). The sweep (item 5) changes tokens by design, so its commits
+     rely on the next two levels and on review.
+   - **Objects and IR:** every cerastes TU of `compile_commands.json` is compiled from an export of each side with
+     its own command (`-O0`, as the build) plus `-g0`, and `-fmacro-prefix-map` spelling `__FILE__` alike on both
+     sides, three ways, and all three must agree: the object file byte for byte; the LLVM IR, which is the stronger
+     half (at `-O0` the machine code of `x - 1` and `x - 1U` on an `int` is the same instruction, and the IR's `nsw`
+     tells them apart); and the IR with `-femit-all-decls`, which also emits inline functions no TU calls, compared
+     entity by entity, where only libc++ entities present on one side are counted rather than failed
+     (`std::string(1U, c)` instantiates a libc++ helper for `unsigned` where `(1, c)` did for `int`; the call sites
+     themselves are compared strictly by the plain IR). No `-DNDEBUG`: the shipped build has none, and nothing in
+     `src/` calls `assert`.
+     **Line numbers.** `encode.cpp` passes `__FILE__` and `__LINE__` to EDG's `assertion_failed` (two sites, through
+     EDG's checking macros under `EXPENSIVE_CHECKING`), so a restyle changes those immediates. For calls of
+     `assertion_failed` whose first argument names a file of the tree, and only those, the tool zeroes the line
+     argument in the IR and reports the TU as "identical modulo N line immediates": its IR is compared with them
+     normalised, and its object bytes differ and are not compared. What changes is the line an EDG internal assertion
+     would name, never a result. So "byte-identical objects" holds for every TU but `encode.cpp`, whose evidence is
+     its IR.
+     The tool fails with "proof invalid" when an argument still names the working tree's `src/` or `include/` after
+     the rewrite; when a TU reads a header from anywhere but its own side's export, `third_party/edg`, `build/` or the
+     toolchain (an allow-list over its dependency file); when a tracked file under `src/`, `include/` or `cmake/` or a
+     `CMakeLists.txt` differs and is neither a compiled `.cpp` nor a header some TU reads (only `include/cerastes.h`
+     is allowed: its tokens are checked by the first level and its use by the third); when a tracked `.cpp` is
+     missing from the compile database; or when the TU count changes.
    - **Output** over the whole suite and the VIR self-test: `build/vpr` and `build/vir-selftest` of a full `check.sh`
      at the end of S7 are byte-identical to the baseline's (the `MANIFEST` run-id line aside).
-   Code that no TU compiles on macOS (`!__APPLE__` in `silicon.cpp`) is covered by the same tool run on the Linux box
-   with clang 21. `include/cerastes.h` is read only by verified programs, so the output identity covers it.
+   Code that only Linux compiles (the `#else` of `__APPLE__` in `silicon.cpp`) is covered by the same tool on the Linux
+   box with clang 21. `MICROSOFT_EXTENSIONS_ALLOWED` is 1 in cerastes's EDG configuration, so both sides of
+   `walker.cpp`'s `#if` on it are covered: the first by compiling, the second by the token level.
 7. **Enforcement:** `scripts/format.sh --check` runs in `check.sh`'s lint step on both platforms. New code is written in
-   the style; the three sweep rules are review rules, not checked by a tool.
+   the style. These rules are review rules, not checked by a tool: the three sweep rules (item 5), and preprocessor
+   directives inside a function or a class indented to the code's level with a blank line around them where the
+   formatter keeps one (`IndentPPDirectives: Leave` keeps what is written). `// clang-format off` is used only where
+   the formatter cannot lay a construct out (a `#define` body inside a function, a `#error` line longer than the
+   limit), each with its reason beside it.
 8. **History:** `.git-blame-ignore-revs` lists the restyle's commits (GitHub reads it; locally
-   `git config blame.ignoreRevsFile .git-blame-ignore-revs`). Line citations of cerastes source in decision records
-   written before S7 (`encode.cpp:1462`) refer to the layout before S7 and are kept as history; the live citations in
-   `internal/handoff.md` were updated.
+   `git config blame.ignoreRevsFile .git-blame-ignore-revs`). Line citations of cerastes source written before S7
+   (`encode.cpp:1462`) refer to the layout of `aa488d8` and are kept as history: in decision records, in
+   `internal/il-inventory.md` (M1's gate evidence, about 70 citations, which says so at its head) and in the handoff's
+   older notes; the handoff's live citations name functions instead of lines.
 
 ## Consequences
 

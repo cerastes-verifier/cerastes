@@ -1,3 +1,0 @@
-# Tests are expectations (invariant 1): no formatter touches them.
-DisableFormat: true
-SortIncludes: Never

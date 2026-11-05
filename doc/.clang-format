@@ -1,3 +1,0 @@
-# Every example in doc/ is a test with expect: lines: no formatter touches them.
-DisableFormat: true
-SortIncludes: Never
