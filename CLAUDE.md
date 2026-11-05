@@ -30,6 +30,9 @@ User docs: doc/ (Antora) → https://cerastes.dev/cerastes/doc/ (decision 0004):
 - Mutants: python3 scripts/mutate.py <dir>   (from M3)
 - Verify one file: build/cerastes verify <file> --keep-vpr   (from M3)
 - User docs: scripts/build_docs.sh   (from M1.5; builds doc/ into build/doc, fails on warnings)
+- Format: scripts/format.sh [--check]   (the pinned clang-format over src/ and include/cerastes.h; decision 0051)
+- Behaviour-neutral refactor: python3 scripts/object_identity.py --before <rev> [--tokens none|braces]
+  (same objects and IR for every TU; decision 0051)
 
 ## Invariants (non-negotiable)
 1. Never edit an `expect:` line to make a test pass; stop and ask instead.
@@ -82,7 +85,10 @@ third_party/edg (EDG: the owner's fork, decision 0009) · third_party/silicon (S
   change the owner asks for). Never push; the owner pushes.
 - No `Co-Authored-By: Claude` (or any Claude attribution) trailer on any
   commit, here or in the EDG fork (owner, 2026-10-16).
-- C++20 for tool code; EDG code follows EDG's own style in third_party/edg.
+- C++20 for tool code, in the owner's Boost style (0051): Allman (lambda bodies too), braces on every
+  control statement, 4 spaces, `T* p`, `U` on unsigned literals, brace initialization (lambdas keep `=`),
+  one declarator per declaration; `scripts/format.sh` lays it out. EDG code follows EDG's own style in
+  third_party/edg; tests and doc examples are never formatted.
 - Test files start with `// expect:` lines; grammar and categories in
   tests/README.md (see also plan.md §0).
 - Annotation names: never `assert` (macro collision); use `check`.

@@ -7,6 +7,10 @@ All excerpts below come from `build/cerastes-fe` with
 `ALL_TEMPLATE_INFO_IN_IL 1`, `RECORD_UNRECOGNIZED_ATTRIBUTES 1`
 (`--dump_configuration`).
 
+**Line citations of cerastes's own source** (`src/…`, for example `walker.cpp:631-660` or `encode.cpp:56`) refer to
+the layout before S7's restyle, commit `aa488d8` (`git show aa488d8:src/backend/walker.cpp`); S7 moved every line
+of `src/` (record 0051 item 8). Citations of EDG's files (`il_def.h:…`) are unaffected.
+
 ## Purpose
 
 Gate G1 asks whether EDG's prototype-instantiation IL carries what the generic

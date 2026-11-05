@@ -99,3 +99,36 @@ Commit conventions that matter to a contributor:
   message and review the diff line by line.
 * EDG source is never edited in `third_party/edg`; changes to EDG go through the fork (xref:dev/edg.adoc[The EDG fork]).
 * Pull requests run CI's PR tier (xref:dev/testing.adoc#ci[CI]); the nightly full check covers `main`.
+
+[#style]
+== Code style
+
+The tool code (`src/` and `include/cerastes.h`) is written in the maintainer's Boost libraries' style (decision
+{gh}/internal/decisions/0051-code-style.md[0051]):
+
+* Allman braces everywhere, lambda bodies included, and braces around every controlled statement, even one line long;
+  `else` and `catch` start their own line;
+* four spaces, no tabs; `case` labels indented one level; `public:` at the class's column; about 120 columns;
+* the pointer and reference marks on the type (`+T* p+`, `+const char* first+`, `+T& r+`), one declarator per declaration;
+* brace initialization (`+std::size_t n {0U};+`, `+T x {e};+`), except that a lambda keeps `=`
+  (`+const auto put = [&](int v) { … };+`);
+* `U` on literals that are unsigned by their context (`n == 0U` for a `std::size_t n`, `1U << 20U`);
+* preprocessor directives inside a function indented to the code's level.
+
+The layout is clang-format's, with the configuration in `src/.clang-format` (and a byte-identical copy in
+`include/.clang-format`) and a pinned clang-format that `scripts/bootstrap.sh` installs:
+
+[source,sh]
+----
+scripts/format.sh          # format the tool code in place
+scripts/format.sh --check  # what check.sh runs: name each file that differs
+----
+
+Brace initialization, `U` and one declarator per declaration are review rules: no tool checks them. Tests and
+documentation examples are never formatted: their lines are expectations, and the root `.clang-format` disables
+formatting everywhere but `src/` and `include/`, so an editor's format-on-save leaves them alone. EDG's code in
+`third_party/edg` keeps EDG's own style.
+
+A change meant to change nothing (a rename, a restyle, a moved function) can be checked long before a full check:
+`python3 scripts/object_identity.py --before <base>` compiles every translation unit from both sides and requires the
+same object files and the same LLVM IR (xref:dev/testing.adoc#identity[Testing]).

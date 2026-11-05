@@ -128,16 +128,38 @@ domain and axioms are the tagged ones, every checked line has a position-map ent
 
 . checks the EDG and vlibc trees (`scripts/edg_tree.py`, `scripts/vlibc_tree.py`);
 . rebuilds with `bootstrap.sh --build-only`;
-. lints: the shell scripts (`bash -n`, ShellCheck), the Python scripts, the test headers and the documentation examples,
-  the list of vlibc's trusted contracts and the mutants;
+. lints: the shell scripts (`bash -n`, ShellCheck), the code style of `src/` (`scripts/format.sh --check`), the Python
+  scripts, the test headers and the documentation examples, the list of vlibc's trusted contracts and the mutants;
 . checks the EDG configuration;
-. runs the self-tests of the harness, the lint, the mutation tool and the contract checker;
+. runs the self-tests of the harness, the lint, the mutation tool, the contract checker and the object-identity tool;
 . runs every test, then lints the Viper they produced;
 . runs the VIR self-test through Silicon and the lint;
 . runs the walker oracle;
 . builds the documentation and checks the rendered pages.
 
 It ends with `check.sh: all green`. The script is the authority; read it for the current list.
+
+[#identity]
+== Refactors that change nothing
+
+A change that should not change behaviour (a restyle, a rename, a function moved between files) is checked by
+`scripts/object_identity.py` before the full check:
+
+[source,sh]
+----
+python3 scripts/object_identity.py --before <base> [--after <rev>] [--tokens none|braces]
+----
+
+It exports `src/`, `include/`, `cmake/` and the CMake files of both sides, compiles every translation unit of the
+compile database from each export with the build's own command, and requires the object files and the LLVM IR to be
+identical, including the inline functions no translation unit calls. `--tokens` also compares the token streams of
+every source file, which covers code that no build compiles (an inactive `#if` branch, `include/cerastes.h`) and code
+that leaves no trace in the IR (a `static_assert`, `= delete`). It refuses ("proof invalid") when a translation unit
+could read a header from outside its own side, when a file it does not compile has changed, or when a source file is
+missing from the compile database. A line number that the code itself passes on (EDG's internal assertions in
+`encode.cpp` pass `+__LINE__+`) is reported, not hidden. S7's restyle was proved this way, then by the full check's
+`.vpr` and `.map` files, byte for byte (decision {gh}/internal/decisions/0051-code-style.md[0051]). Its self-test,
+`scripts/test_object_identity.py`, runs in the full check.
 
 [#ci]
 == Continuous integration

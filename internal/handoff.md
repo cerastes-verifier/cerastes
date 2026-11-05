@@ -574,9 +574,10 @@ template argument's conversion at the place where it is written (the template-id
 that are not literals, decided in M5a's record.
 
 The M3 handoff §6 still holds: VIR's `IntType` needs a type form for `T`; templates in verified files are rejected
-today (`encode.cpp:1462-1467` declarations, `:1495-1497` routines, `:926-929` calls); generic proofs read contracts
+today (in `encode.cpp`: declarations in `Encoder::declaration_level_checks`, routines in `Encoder::run` through
+`template_declared_here`, calls in `callee_for_call`; S7 replaced the line numbers, record 0051 item 8); generic proofs read contracts
 from the root template; contracts can use lambdas naming `T`. Latent hazard: a template instance whose body is in a
-verified file takes `callee_for_call`'s has-body path (`encode.cpp:911-915`) and would become a bodyless VIR
+verified file takes `callee_for_call`'s has-body path (`encode.cpp`) and would become a bodyless VIR
 function with no `trusted_reason`; only the declaration-level rejection keeps it unreachable today — M5e must handle
 instances before that rejection is lifted.
 
@@ -624,7 +625,7 @@ refusing an accumulating attribute that first appears on a later declaration (ch
 `ec_comparison_defaulted_in_class_must_be_first_decl`, `decls.c:10631`; `first_decl` is set on namespace-scope
 paths — check member and template paths; GH tests in `tests/tests/changes/GH-*.sft.cpp` with an `-ok` companion,
 `src/Changes`, `doc/source/ext_intf.rst`); cerastes registers it for `predicate`/`pure`
-(`register_attributes.cpp:51-52`). Fork commit R: EDG diagnoses series L's silent error node for a `decltype(p)`
+(the `predicate` and `pure` rows of `register_attributes.cpp`'s table). Fork commit R: EDG diagnoses series L's silent error node for a `decltype(p)`
 lambda parameter (§3, "M5.0 and M5"); the `decltype` tests move from `cerastes-annotation_substitution_error` to EDG's diagnostic
 at the same line (owner's rule). Plus the close-out audit B's missing tests (§3, "M5.0 and M5"). Fail-before/pass-after,
 Opus audit, the full box suites (baseline mismatches `cwg1835`, `cwg2881`), pin move, 0006/0007 and the upstream
@@ -647,7 +648,8 @@ VeriFast's linear constraints as method `requires` (`127 <= T_MAX <= 2^128-1`, `
 `T_MAX <= PT_MAX`, `INT_MAX <= PT_MAX <= 2^128-1`, `-PT_MAX-1 <= PT_MIN <= T_MIN`; INT_MAX from EDG's target): no
 domain, no axiom, no assume. Signedness unknown: every symbolic operation is checked as signed against symbolic
 bounds (sound for unsigned instances: a result in range means the wrap is the identity); M3's shortcuts that assume
-symmetric ranges (`lower.cpp:236` unary minus `a != lo`, `:301` division `!(a == lo && b == -1)`) are not reused —
+symmetric ranges (in `lower.cpp`, `unary`'s `Neg` obligation `a != lo` and `binary`'s division
+`!(a == lo && b == -1)`) are not reused —
 the general range check on the result instead. `promoted(T) = PT`, `usual_arithmetic(PT, int) = PT` computed by
 cerastes (the IL types dependent operations `tptk_unknown`). `cerastes --selftest` checks every target integer type
 except `bool` satisfies the constraints; the `consistent` must-fail test (`check(false)`) shows they are not

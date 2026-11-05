@@ -1,0 +1,14 @@
+# Commits that only restyled cerastes's tool code (S7, decision 0051): git blame skips them.
+# GitHub reads this file; locally: git config blame.ignoreRevsFile .git-blame-ignore-revs
+# S7 C2: the layout pass: scripts/format.sh over src/ and include/cerastes.h with the pinned clang-for
+8f2befffa8b6446c809392c14993fd210bd028d2
+# S7 C3: hand fixups after the layout pass (comments, whitespace and directive indentation only; token
+52a72940e7119b4a1cf3e27a8eb8bab6f139f52a
+# S7: walker.cpp's one control statement InsertBraces could not reach (an #endif between the if and it
+5ce98fa02241370957a19187b1f4ae808363f514
+# S7 C4a: the sweep in src/backend and src/driver (record 0051 item 5): one declarator per declaration
+e667747e561fc50fed30f422858f72c40e056f92
+# S7 C4b: the sweep in src/vir (record 0051 item 5): one declarator per declaration (55), U on unsigne
+6c76572318e5197e98648d980ea5209ac6f960dc
+# S7 C4c: the sweep in src/viper (record 0051 item 5): one declarator per declaration (12), U on unsig
+b762747d6e0c6c67dcc432ad53b73b74cedb065d

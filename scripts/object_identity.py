@@ -719,7 +719,8 @@ def report_tokens(res, mode):
 def run(opts):
     root = os.path.realpath(opts.root)
     cc_path = opts.compile_commands or os.path.join(root, "build/cmake/compile_commands.json")
-    scratch = Path(opts.scratch or os.path.join(root, "build/s7"))
+    # absolute: the compiles run from each entry's own directory, so a relative --scratch would name the wrong place
+    scratch = Path(os.path.abspath(opts.scratch or os.path.join(root, "build/s7")))
     scratch.mkdir(parents=True, exist_ok=True)
     if opts.no_compile and opts.tokens == "off":
         raise ProofInvalid("--no-compile with --tokens off compares nothing")
