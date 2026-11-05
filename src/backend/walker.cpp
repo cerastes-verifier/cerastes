@@ -441,10 +441,12 @@ void add_constraints(std::string& out, a_routine_ptr r, a_template_ptr tmpl)
         #if MICROSOFT_EXTENSIONS_ALLOWED
         if (!d->is_generic)
         #endif
+        {
             if (d->constraint.requires_clause) // il_def.h:17234
             {
                 out += "  constraint requires " + render_constraint(d->constraint.requires_clause->constraint) + "\n";
             }
+        }
     }
     if (r->trailing_requires_clause) // il_def.h:13107
     {
