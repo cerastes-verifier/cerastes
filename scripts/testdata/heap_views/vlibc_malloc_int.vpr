@@ -1,0 +1,12 @@
+// PROVISIONAL: hand-derived from the platform fixture of the same name (decision 0050 item 3: the token conjunct is `!tok`), not emitted by cerastes verify yet; replace it with the emitted view when the encoder lands (M4.5d2v). Emitted by cerastes verify (M4.5d2a) for scripts/test_lint_viper.py: the typed view `f_vlibc_malloc__4`, with the fields of its program.
+field v_int: Int
+field d_int: Bool
+field tok: Bool
+field lv: Bool
+
+// C/C++ function `vlibc_malloc`
+// cerastes:trusted-contract vlibc: vlibc_malloc returns NULL or the start of a new allocation of size bytes, its contents indeterminate (C23 7.24.3.6); typed view: one int (4 bytes), decision 0047
+method f_vlibc_malloc__4() returns (res: Ref)
+  ensures (res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res))))
+  ensures (!(res == null)) ==> (((((((((((res != null) && ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res)))))) && (offset_of(res) == 0)) && acc(loc(block_of(res), (-1)).tok)) && !loc(block_of(res), (-1)).tok) && (lvloc(block_of(res)) == loc(block_of(res), (-2)))) && acc(lvloc(block_of(res)).lv)) && (len(block_of(res)) == 1)) && acc(res.v_int)) && acc(res.d_int)) && (res.d_int ==> (((-2147483648) <= res.v_int) && (res.v_int <= 2147483647))))
+  decreases _

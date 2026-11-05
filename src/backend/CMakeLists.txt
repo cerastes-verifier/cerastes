@@ -12,8 +12,9 @@ add_custom_command(
   COMMENT "Generating il_names.inc")
 
 # The names the pinned vlibc headers give a contract (decision 0046 item 6: reserved names), generated at configure
-# time into vlibc_names.inc (a fragment of sorted string literals; encode.cpp includes it, the build directory is
-# on the back end's private include path).  The script rewrites the file only when its content changes.  A pin move
+# time into vlibc_names.inc (a fragment of sorted {name, header, paired} initializers, `paired` the standard name a
+# `vlibc_` entry is paired with and "" for a standard name; encode.cpp includes it, the build directory is on the back
+# end's private include path).  The script rewrites the file only when its content changes.  A pin move
 # changes the headers, which re-runs the configure (CMAKE_CONFIGURE_DEPENDS); a script failure fails the configure.
 set(VLIBC_SHIM_DIR "${CERASTES_VLIBC_DIR}/include/vlibc")
 set(VLIBC_NAMES_INC "${CMAKE_CURRENT_BINARY_DIR}/vlibc_names.inc")

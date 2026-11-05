@@ -1526,6 +1526,14 @@ FORPERM_LINE_RE = re.compile(r"^\s*assert\s+forperm\s+(?P<v>[A-Za-z_$][\w$']*)\s
 TOKEN_SLOT_RE = re.compile(r"loc\(\s*block_of\(.*\)\s*,\s*\(?\s*-\s*1\s*\)?\s*\)$", re.S)
 TOK_FIELD_DECL = "field tok: Bool"
 TOK_STATEMENT_RE = re.compile(r"^\s*(?P<kw>assert|requires|ensures|invariant)\b")
+# The loop value snapshot of decision 0050 item 5: `ktv_<n> := loc(block_of(...), -1).tok`, taken when the loop's `kt_<n> > none`
+# (one line `if (kt_<n> > none) { ktv_<n> := ... }`, or the assignment alone on a line right below `if (kt_<n> > none) {`).  It is the
+# only read of a token's value that is stored: a local `Bool` that the loop's invariant and back-edge row compare with the cell.
+KTV_ASSIGN = r"(?P<v>ktv_[\w$']*)\s*:=\s*(?P<slot>loc\(.*\))\.tok"
+KTV_IF = r"if\s*\(\s*kt(?:_[\w$']*)?\s*>\s*none\s*\)\s*\{"
+KTV_ONE_LINE_RE = re.compile(rf"^\s*{KTV_IF}\s*{KTV_ASSIGN}\s*\}}\s*$", re.S)
+KTV_ALONE_RE = re.compile(rf"^\s*{KTV_ASSIGN}\s*$", re.S)
+KTV_IF_LINE_RE = re.compile(rf"^\s*{KTV_IF}\s*$")
 
 
 def strip_perm_calls(text: str) -> str:
@@ -1553,8 +1561,10 @@ def strip_perm_calls(text: str) -> str:
 # from the text itself (a leaf is an `acc(C.v_t)` and `acc(C.d_t)` pair in member order; the member blocks and slot facts of a
 # structure are checked with `struct_wf_lens_problem`).  Whatever is added to, missing from or reordered in what the rebuilt text says
 # (a `true`-ed flag on a `malloc` cell, `ensures false`, a second token, a wider range) makes the two texts differ.
-VIEW_TAG_RE = re.compile(r"vlibc:\s+(?P<routine>malloc|calloc|free)\b[^\n]*;\s*typed view:")
-VIEW_NAME_RE = re.compile(r"^f_(?P<routine>malloc|calloc|free)__[0-9]+$")
+# Record 0050 item 9 (M4.5d2v): a view of vlibc's own `vlibc_malloc`, `vlibc_calloc` or `vlibc_free` has the same text with the
+# token's value `false` (`!loc(block_of(...), -1).tok`): the block belongs to vlibc's heap (item 3), not the platform's.
+VIEW_TAG_RE = re.compile(r"vlibc:\s+(?P<routine>(?:vlibc_)?(?:malloc|calloc|free))\b[^\n]*;\s*typed view:")
+VIEW_NAME_RE = re.compile(r"^f_(?P<routine>(?:vlibc_)?(?:malloc|calloc|free))__[0-9]+$")
 VIEW_INT_RANGES = {
     "schar": (-128, 127), "uchar": (0, 255), "short": (-32768, 32767), "ushort": (0, 65535),
     "int": (-2**31, 2**31 - 1), "uint": (0, 2**32 - 1), "long": (-2**63, 2**63 - 1), "ulong": (0, 2**64 - 1),
@@ -1648,15 +1658,18 @@ def _leaf_kind(t: str) -> str:
 
 
 def view_problem(src: Source, d: Decl, routine: str, declared: dict[str, set[str]], has_globals: bool = False,
-                 global_facts: list[str] | None = None) -> str | None:
+                 global_facts: list[str] | None = None, vlibc: bool = False) -> str | None:
     """The reason why the view method `d` is not the text decision 0047 gives its allocation type, or None.  In a program with
     globals every method takes the global facts as its first `requires` (decision 0041 item 4), views included: exactly one such
-    leading `requires`, equal to the facts of the program (`global_facts`, from `program_start`), and no other."""
+    leading `requires`, equal to the facts of the program (`global_facts`, from `program_start`), and no other.  `routine` is the
+    base name (`malloc`, `calloc`, `free`); `vlibc` says the view is of the `vlibc_` routine, whose token conjunct is `!tok`
+    (decision 0050 items 3 and 9)."""
     if d.has_body:
         return "it has a body"
+    shown = ("vlibc_" if vlibc else "") + routine
     name_m = VIEW_NAME_RE.match(d.name)
-    if name_m is None or name_m.group("routine") != routine:
-        return f"its name is not `f_{routine}__<n>`"
+    if name_m is None or name_m.group("routine") != shown:
+        return f"its name is not `f_{shown}__<n>`"
     lines = [" ".join(src.code[n - 1].split()) for n in range(d.line, d.end_line + 1) if src.code[n - 1].strip()]
     root = "p_ptr__0" if routine == "free" else "res"
     keyword = "requires" if routine == "free" else "ensures"
@@ -1681,11 +1694,14 @@ def view_problem(src: Source, d: Decl, routine: str, declared: dict[str, set[str
     except ValueError as e:
         return str(e)
     atoms = [norm_viper(a) for a in raw]
+    token_value = ("!" if vlibc else "") + f"loc(block_of({root}), (-1)).tok"
     prefix = [f"{root} != null", _view_wf(root), f"offset_of({root}) == 0", f"acc(loc(block_of({root}), (-1)).tok)",
-              f"loc(block_of({root}), (-1)).tok", f"lvloc(block_of({root})) == loc(block_of({root}), (-2))",
+              token_value, f"lvloc(block_of({root})) == loc(block_of({root}), (-2))",
               f"acc(lvloc(block_of({root})).lv)", f"len(block_of({root})) == 1"]
     if atoms[:len(prefix)] != [norm_viper(a) for a in prefix]:
-        return "the block part does not begin with the pointer, its well-formedness, offset 0, the token, the liveness equation and cell and `len == 1`"
+        return ("the block part does not begin with the pointer, its well-formedness, offset 0, the token and its value "
+                f"({'`!tok`: a block of vlibc\'s heap' if vlibc else '`tok`: a block of the platform\'s heap'}), the liveness equation "
+                "and cell and `len == 1`")
     i = len(prefix)
     lens: list[str] = []
     while i < len(atoms) and not atoms[i].startswith("acc("):
@@ -1776,7 +1792,8 @@ def view_problem(src: Source, d: Decl, routine: str, declared: dict[str, set[str
     return None
 
 
-VIEW_ROUTINE_TAG_RE = re.compile(r"vlibc:\s+(?:malloc|calloc|free)\b")
+TYPED_VIEW_WORD_RE = re.compile(r";\s*typed view:")
+VIEW_ROUTINE_TAG_RE = re.compile(r"vlibc:\s+(?:vlibc_)?(?:malloc|calloc|free)\b")
 
 
 def lint_views(src: Source, decls: list[Decl], add: Callable[[int, str], None], has_globals: bool = False,
@@ -1795,10 +1812,18 @@ def lint_views(src: Source, decls: list[Decl], add: Callable[[int, str], None], 
         vt = VIEW_TAG_RE.search(tag.group(0))
         if vt is None:
             if not d.has_body and VIEW_ROUTINE_TAG_RE.search(tag.group(0)):
-                add(d.line, f"`method {d.name}` is tagged as vlibc's malloc, calloc or free but not as a typed view (`; typed view:` in the "
-                            "reason): the allocation functions are trusted only as the views of decision 0047 items 2 and 4, whose text is pinned")
+                add(d.line, f"`method {d.name}` is tagged as vlibc's malloc, calloc or free but not as a typed view "
+                            "(`; typed view:` in the reason): the allocation functions, and the `vlibc_` ones of decision 0050 item 3, are "
+                            "trusted only as the views of decision 0047 items 2 and 4, whose text is pinned")
+            elif not d.has_body and TYPED_VIEW_WORD_RE.search(tag.group(0)):
+                # decision 0050 item 9: a method whose tag claims to be a typed view that no pattern above recognises was skipped
+                add(d.line, f"`method {d.name}` is tagged `; typed view:` but is not a view of `malloc`, `calloc`, `free` or their "
+                            "`vlibc_` forms (decision 0047 items 2 and 4, decision 0050 item 3): a bodyless method may not claim to "
+                            "be a pinned view without being one")
             continue
-        why = view_problem(src, d, vt.group("routine"), declared, has_globals, global_facts)
+        routine = vt.group("routine")
+        vlibc = routine.startswith("vlibc_")
+        why = view_problem(src, d, routine[len("vlibc_"):] if vlibc else routine, declared, has_globals, global_facts, vlibc)
         if why is not None:
             add(d.line, f"`method {d.name}` is not the trusted typed view of decision 0047 items 2 and 4: {why}")
 
@@ -1841,6 +1866,13 @@ def lint_heap_token(src: Source, decls: list[Decl], add: Callable[[int, str], No
             if re.match(r"^exhale\b", stripped):
                 add(lineno, "`exhale` of a `tok` place: a token is consumed only by a call whose `requires` has the block "
                             "site (decision 0047 item 6)")
+            elif (km := KTV_ONE_LINE_RE.match(code) or KTV_ALONE_RE.match(code)) is not None:
+                alone = KTV_ONE_LINE_RE.match(code) is None
+                above = next((c for c in reversed(src.code[:lineno - 1]) if c.strip()), "")
+                # (the slot itself is the loop above's check: any `.tok` not at `loc(block_of(...), -1)` is reported there)
+                if alone and KTV_IF_LINE_RE.match(above) is None:
+                    add(lineno, f"`{km.group('v')} := ....tok` outside `if (kt_<n> > none) {{ ... }}`: the loop value snapshot is taken "
+                                "only where the loop holds the token (decision 0050 item 5)")
             elif re.search(r"\.tok\s*:=", code):
                 add(lineno, "assignment to `tok`: a token is created only by a postcondition (decision 0047 item 2)")
             elif TOK_STATEMENT_RE.match(code):

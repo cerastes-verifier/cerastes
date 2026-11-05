@@ -7720,7 +7720,7 @@ Both modes, exit 2, four errors, none of them at the program's lines: `stdlib.h:
 
 #### (6) glibc: no asm label or weak attribute on any `vlibc_` name
 
-Pending: the Linux box (the `ubuntu:26.04` container recipe). On macOS none of the seven routines has an asm label, `is_weak`, an alias or an ifunc (`ilr.py`: `asm_name None`, `is_weak None`).
+PASS on glibc 2.43 (the x86-64 box, container from `cerastes-m4.5d1:runner`, vlibc `cbd7515`, whose `include/` is V1's; gcc-16 16.0.1 and clang 21.1.8, C23 and C++20 with libstdc++ and libc++, also `-O2 -D_FORTIFY_SOURCE=3`): after the shim, `-E -dD` shows exactly the seven `vlibc_` declarations, from vlibc's `stdlib.h` (inside one `extern "C"` block in C++), with no attribute, `__asm__` label, alias, `weak` or `__REDIRECT`, and no `#define`/`#undef` of a `vlibc_` name; glibc declares nothing named `vlibc_*`. `nm` of the built `libvlibc.a`: only the seven public `T` symbols and the `vlibc_glue_*` helpers are external, no weak or alias symbols. On macOS none of the seven routines has an asm label, `is_weak`, an alias or an ifunc (`ilr.py`: `asm_name None`, `is_weak None`).
 
 **Findings for the encoder and the pin:**
 1. The seven routines have one position each, in vlibc's file, in both modes, and each has a secondary declaration with its own attributes: `lib_trust` needs no change for a routine declared once.

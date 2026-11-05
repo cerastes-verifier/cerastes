@@ -3823,6 +3823,52 @@ class HeapTokenTests(unittest.TestCase):
                 Check(self.LEAK, A, "leak")]
         self.assertEqual(self.strict(self.fixture(body=body)), [])
 
+    # Decision 0050 item 5 (M4.5d2v): the loop value snapshot `ktv_<n>`, the one stored read of a token's value.
+    def test_a_loop_value_snapshot_under_its_guard_is_clean(self):
+        for body in ([f"  var ktv_h1: Bool := false", f"  if (kt > none) {{ ktv_h1 := {self.SLOT} }}", Check(self.LEAK, A, "leak")],
+                     [f"  var ktv_h1: Bool := false", "  if (kt > none) {", f"    ktv_h1 := {self.SLOT}", "  }", Check(self.LEAK, A, "leak")],
+                     [f"  var ktv_h1: Bool := false", "  if (kt_h1__0 > none) {", f"    ktv_h1 := {self.SLOT}", "  }", Check(self.LEAK, A, "leak")]):
+            with self.subTest(body=body):
+                self.assertEqual(self.strict(self.fixture(body=body)), [])
+
+    def test_the_value_invariant_and_back_edge_row_over_the_snapshot_are_clean(self):
+        body = [
+            "  var i: Int := 0",
+            "  var ktv_h1: Bool := false",
+            f"  if (kt > none) {{ ktv_h1 := {self.SLOT} }}",
+            "  while (i < 3)",
+            Check(f"    invariant p != null ==> acc({self.SLOT}, kt)", INV, "internal"),
+            Check(f"    invariant (kt > none) ==> {self.SLOT} == ktv_h1", INV, "internal"),
+            Check("    decreases 3 - i", "termination.failed", "termination"),
+            "  {",
+            "    i := i + 1",
+            Check(f"    assert !(perm({self.SLOT}) < kt || (kt > none && {self.SLOT} != ktv_h1))", A, "permission"),
+            "  }",
+            Check(self.LEAK, A, "leak"),
+        ]
+        self.assertEqual(self.strict(self.fixture(body=body)), [])
+
+    def test_a_stray_value_snapshot_is_a_problem(self):
+        cases = {
+            "not under the guard": [f"  ktv_h1 := {self.SLOT}"],
+            "under another condition (one line)": [f"  if (i > 0) {{ ktv_h1 := {self.SLOT} }}"],
+            "under another condition (two lines)": ["  if (i > 0) {", f"    ktv_h1 := {self.SLOT}", "  }"],
+            "a guard that is not a loop snapshot": ["  if (ktv_h1 > none) {", f"    ktv_h1 := {self.SLOT}", "  }"],
+            "not named ktv_": [f"  if (kt > none) {{ kx := {self.SLOT} }}"],
+            "a negated read": [f"  if (kt > none) {{ ktv_h1 := !{self.SLOT} }}"],
+            "another slot": ["  if (kt > none) { ktv_h1 := loc(block_of(p), 0).tok }"],
+            "the value of a condition": [f"  if (kt > none) {{ ktv_h1 := {self.SLOT} ? true : false }}"],
+        }
+        for what, body in cases.items():
+            with self.subTest(what=what):
+                probs = self.strict(self.fixture(body=[*body, Check(self.LEAK, A, "leak")]))
+                self.assertTrue(probs, what)
+
+    def test_a_snapshot_is_not_a_way_to_assign_a_token(self):
+        body = [f"  if (kt > none) {{ {self.SLOT} := ktv_h1 }}", Check(self.LEAK, A, "leak")]
+        probs = self.strict(self.fixture(body=body))
+        self.assertTrue(probs, probs)
+
     def test_forperm_must_have_the_leak_shape(self):
         for row in ("  assert forperm t: Ref [t.lv] :: false",
                     "  assert forperm t: Ref [u.tok] :: false",
@@ -4033,6 +4079,89 @@ class HeapViewTests(unittest.TestCase):
         self.one(self.edit("malloc_int", "method f_malloc__4() returns (res: Ref)", "method f_malloc__4() returns (res: Ref, x: Int)"), "header")
         self.one(self.edit("free_int", "method f_free__5(p_ptr__0: Ref)", "method f_free__5(q: Ref)"), "header")
         self.one(self.edit("malloc_int", "method f_malloc__4", "method g_malloc__4"), "its name")
+
+    # Decision 0050 items 3 and 9 (M4.5d2v): the views of vlibc's `vlibc_malloc`, `vlibc_calloc` and `vlibc_free` are pinned like
+    # `malloc`'s, with the token's value false.  PROVISIONAL fixtures: scripts/testdata/heap_views/vlibc_*.vpr are hand-derived from the
+    # platform fixtures to the record's shape until `cerastes verify` emits them; replace them with emitted views then.
+    def vlibc_text(self, name):
+        return self.text("vlibc_" + name)
+
+    def test_every_vlibc_view_is_clean(self):
+        for name in self.NAMES:
+            with self.subTest(name=name):
+                text = self.vlibc_text(name)
+                self.assertIn("PROVISIONAL", text)
+                self.assertEqual(self.problems(text), [])
+
+    def test_a_vlibc_view_has_a_false_token_and_a_platform_view_a_true_one(self):
+        for name in self.NAMES:
+            slot_not = "!loc(block_of(" in self.vlibc_text(name)
+            self.assertTrue(slot_not, name)
+            self.assertNotIn("!loc(block_of(", self.text(name))
+
+    def test_a_vlibc_view_with_a_true_token_is_reported(self):
+        for name in self.NAMES:
+            with self.subTest(name=name):
+                text = self.vlibc_text(name)
+                self.assertEqual(text.count("!loc(block_of("), 1)
+                self.one(text.replace("!loc(block_of(", "loc(block_of("), "`!tok`: a block of vlibc's heap")
+
+    def test_a_platform_view_with_a_false_token_is_reported(self):
+        for name in self.NAMES:
+            with self.subTest(name=name):
+                text = self.text(name)
+                needle = next(l for l in text.split("\n") if " && acc(loc(block_of(" in l)
+                import re as _re
+                changed = _re.sub(r"(acc\(loc\(block_of\((\w+)\), \(-1\)\)\.tok\)\) && )(loc\(block_of\(\2\), \(-1\)\)\.tok)\)",
+                                  r"\1!\3)", text)
+                self.assertNotEqual(changed, text)
+                self.one(changed, "`tok`: a block of the platform's heap")
+
+    def test_a_vlibc_view_needs_its_own_name_and_tag(self):
+        # the routine in the tag, the method's name and the token's value must agree
+        for name in ("malloc_int", "free_int", "calloc_int"):
+            with self.subTest(name=name, what="the name of a platform view"):
+                text = self.vlibc_text(name).replace("method f_vlibc_", "method f_", 1)
+                self.one(text, "its name is not `f_vlibc_")
+            with self.subTest(name=name, what="the name of a vlibc view on a platform tag"):
+                text = self.text(name).replace("method f_", "method f_vlibc_", 1)
+                self.one(text, "its name is not `f_")
+            with self.subTest(name=name, what="the tag of a platform view on a vlibc method"):
+                text = self.vlibc_text(name).replace("vlibc: vlibc_", "vlibc: ", 1)
+                self.one(text, "its name is not")
+
+    def test_a_vlibc_view_is_pinned_like_a_platform_view(self):
+        text = self.vlibc_text("calloc_int")
+        self.one(text.replace("  decreases _", "  ensures false\n  decreases _", 1))
+        self.one(self.vlibc_text("malloc_int").replace("  decreases _", "  decreases _\n{\n}"), "it has a body")
+        self.one(self.vlibc_text("free_int").replace("acc(p_ptr__0.d_int)", "true"))
+        self.one(self.vlibc_text("malloc_struct_nested").replace("(len(member(res, 0)) == 1) && ", "", 2))
+
+    def test_a_vlibc_allocation_tag_without_typed_view_is_reported_too(self):
+        for name in ("malloc_int", "calloc_int", "free_int"):
+            with self.subTest(name=name):
+                text = self.vlibc_text(name)
+                k = text.index("; typed view:")
+                end = text.index("\n", k)
+                probs = self.problems(text[:k] + text[end:])
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("tagged as vlibc's malloc, calloc or free but not as a typed view", probs[0])
+
+    def test_a_typed_view_tag_of_an_unknown_routine_is_reported_not_skipped(self):
+        # decision 0050 item 9: such a method was skipped silently, and its contract is an assumption
+        for name in ("malloc_int", "free_int"):
+            for old, new in (("vlibc: malloc ", "vlibc: realloc "), ("vlibc: malloc ", "vlibc: vlibc_realloc "), ("vlibc: free ", "vlibc: aligned_alloc "),
+                             ("vlibc: malloc ", "vlibc: vlibc_free_sized ")):
+                text = self.text(name)
+                if old not in text:
+                    continue
+                with self.subTest(name=name, new=new):
+                    probs = self.problems(text.replace(old, new, 1))
+                    self.assertEqual(len(probs), 1, probs)
+                    self.assertIn("is tagged `; typed view:` but is not a view of", probs[0])
+        # a method that is not tagged as a view at all is still no view
+        text = self.text("malloc_int").replace("; typed view: one int (4 bytes), decision 0047", "")
+        self.assertEqual([x for x in self.problems(text) if "typed view" in x and "not as a typed view" not in x], [])
 
     def test_a_view_with_a_body_is_reported(self):
         self.one(self.edit("malloc_int", "  decreases _", "  decreases _\n{\n}"), "it has a body")

@@ -61,10 +61,13 @@ struct VType {
 };
 
 // The names vlibc's headers declare with a contract (decision 0046 item 6), each with the header that declares it: generated at configure time by
-// scripts/vlibc_contracts.py from the pinned headers, a fragment of `{"name", "header"},` pairs sorted by name.
+// scripts/vlibc_contracts.py from the pinned headers, a fragment of `{"name", "header", "paired"},` rows sorted by name.  `paired` is the standard name
+// a `vlibc_` entry pairs with (`vlibc_malloc`: "malloc"); a standard name's is null or "" (decision 0050 item 2).  A fragment of two-field rows (an older
+// generator) leaves it null.
 struct VlibcName {
   const char* name;
   const char* header;
+  const char* paired = nullptr;
 };
 const VlibcName kVlibcReserved[] = {
 #include "vlibc_names.inc"
@@ -74,6 +77,32 @@ bool vlibc_reserved(const char* name) {
   for (const VlibcName* n = kVlibcReserved; n->name != nullptr; ++n)
     if (std::strcmp(n->name, name) == 0) return true;
   return false;
+}
+
+// vlibc's own name for a standard function (`vlibc_malloc`), as its generated entry says: a `vlibc_` name is told from a standard name by the pairing the
+// script checked, never by a table or a prefix test here (decision 0048 item 4, 0050 item 2).
+bool vlibc_own_name(const char* name) {
+  for (const VlibcName* n = kVlibcReserved; n->name != nullptr; ++n)
+    if (std::strcmp(n->name, name) == 0) return n->paired != nullptr && n->paired[0] != '\0';
+  return false;
+}
+
+// Why the name class of a reserved name is not what the generator's `paired` field says it must be, or "" when it is (audit S2: the class fails closed).
+// A name starts with `vlibc_` exactly when its entry pairs it with the rest of the name; a standard name's `paired` is null or empty.  A missing or empty
+// field on a `vlibc_` name must never read as the platform's allocator, so lib_trust reports this as an internal library error (exit status 3).
+std::string vlibc_class_problem(const char* name) {
+  for (const VlibcName* n = kVlibcReserved; n->name != nullptr; ++n) {
+    if (std::strcmp(n->name, name) != 0) continue;
+    const bool own = std::strncmp(name, "vlibc_", 6) == 0;
+    const bool has_pair = n->paired != nullptr && n->paired[0] != '\0';
+    if (own && (!has_pair || std::strcmp(n->paired, name + 6) != 0))
+      return "vlibc's list of names (scripts/vlibc_contracts.py names) does not pair `" + std::string(name) + "` with `" + std::string(name + 6) +
+             "`: the field is " + (has_pair ? "`" + std::string(n->paired) + "`" : std::string("missing or empty")) + " (decision 0050 item 2)";
+    if (!own && has_pair)
+      return "vlibc's list of names pairs `" + std::string(name) + "`, which does not start with `vlibc_`, with `" + std::string(n->paired) + "` (decision 0050 item 2)";
+    return "";
+  }
+  return "";
 }
 
 // The header of a reserved name, for the messages ("stdlib.h"); "" for any other name.
@@ -4024,6 +4053,11 @@ class Encoder {
     if (to_ptr && from_ptr && !cx_.contract && !cx_.annotation && cx_.const_depth == 0)
       if (a_routine_ptr ar = direct_callee(operand); ar != nullptr)
         if (const HeapShape* hs = heap_shape_of(ar); hs != nullptr && hs->allocation) return allocation_view(e, operand, ar, *hs);
+    // Decision 0050 item 6 (question 130): the direct operand is a call of a routine with a `void *` result, no contract, no body and no vlibc trust
+    // (`(int *)vlibc_realloc(p, 4)`, `(int *)realloc(p, 4)`): `call_without_contract` at the call, not a conversion from `void *` (`unsupported_type`).
+    if (to_ptr && from_ptr && !cx_.contract && !cx_.annotation && cx_.const_depth == 0 && is_void_pointer_type(operand->type))
+      if (a_routine_ptr ar = direct_callee(operand); ar != nullptr && verified_body(ar) == nullptr && !lib_trust(ar).has && !routine_has_contract(ar))
+        if (callee_for_call(ar, operand->position) == nullptr) return nullptr;
     VType to;
     if (to_ptr && !value_type(e->type, e->position, &to, true)) return nullptr;
     if (to_ptr && !from_ptr) {
@@ -5141,6 +5175,9 @@ class Encoder {
     if (r->is_template_function || r->assoc_template != nullptr || r->is_prototype_instantiation) return false;
     if (!vlibc_reserved(n)) return false;
     if (r->source_corresp.name_linkage == nlk_external) return true;
+    // Decision 0050 item 8 (audit N8): the C++ rule below rests on [extern.names]/4, which reserves the standard library's names only; a `vlibc_` name has
+    // the C language linkage rule alone, so a C++-linkage `int vlibc_malloc(int)` is an ordinary function.
+    if (vlibc_own_name(n)) return false;
     if (il_header.source_language == sl_C) return false;
     a_scope_ptr ps = r->source_corresp.parent_scope;
     return ps == nullptr || !(ps->kind == sck_namespace || ps->kind == sck_namespace_extension || ps->kind == sck_namespace_reactivation ||
@@ -5434,6 +5471,7 @@ class Encoder {
     std::vector<int> size_params;  // (A): the 0-based parameters whose product is the size S
     std::string reason;          // vlibc's tag: "vlibc: <name> <reason>"
     a_source_position pos{};     // vlibc's declaration
+    vir::Allocator allocator = vir::Allocator::Platform;  // the routine's name class (decision 0050 item 3): a standard name or a `vlibc_` name
   };
   std::map<a_routine_ptr, HeapShape> heap_shapes_;
 
@@ -5579,6 +5617,7 @@ class Encoder {
     HeapShape sh;
     sh.pos = lt.decl;
     sh.reason = lt.reason;
+    sh.allocator = vlibc_own_name(name.c_str()) ? vir::Allocator::Vlibc : vir::Allocator::Platform;
     a_type_ptr ret = return_type(r);
     a_type_ptr ret_s = ret != nullptr ? skip_typerefs(ret) : nullptr;
     if (is_void_pointer_type(ret) && ret_s != nullptr && ret_s->kind == tk_pointer && ret_s->variant.pointer.type != nullptr &&
@@ -5670,7 +5709,9 @@ class Encoder {
         if (auto sd = ents_->secondary_decls.find(r); sd != ents_->secondary_decls.end())
           for (const IlEntities::SecondaryDecl& q : sd->second) earliest(q.position);
       reject(Diag::annotation_reserved_library, own.seq != 0 ? own : at,
-             "`" + name + "` is declared `static` by the program, so vlibc's contract on it would attach to the program's own function (a C library function has external linkage: C23 7.1.3)");
+             vlibc_own_name(name.c_str())
+                 ? "`" + name + "` is declared `static` by the program, so vlibc's contract on it would attach to the program's own function (vlibc's own function has external linkage: decision 0048 item 5)"
+                 : "`" + name + "` is declared `static` by the program, so vlibc's contract on it would attach to the program's own function (a C library function has external linkage: C23 7.1.3)");
       reserved_rejected_.insert(r);  // one error for the cause: nothing else is reported for it (no `ensures_on_noreturn`)
       return lib_trust_.emplace(r, t).first->second;
     }
@@ -5724,6 +5765,10 @@ class Encoder {
           lib_internal_error(decls[0], "the tag above the declaration of `" + name + "` names `" + tag_name + "`");
         } else {
           bool intact = true;
+          if (const std::string bad = vlibc_class_problem(name.c_str()); !bad.empty()) {
+            lib_internal_error(decls[0], bad);
+            intact = false;
+          }
           // A marker's text is its macro or attribute name, which are protected names (is_protected_macro_name): only contracts carry other identifiers.
           for (an_attribute_ptr a : lib_attrs)
             if (is_contract(classify(a))) intact = library_contract_text_intact(a) && intact;
@@ -5746,7 +5791,10 @@ class Encoder {
     const std::string n = r->source_corresp.name;
     bool any = false;
     auto reject_lib = [&](const a_source_position& p, const std::string& what) {
-      reject(Diag::annotation_reserved_library, p, "`" + n + "` is a function of the C library: its contract comes only from vlibc's <" + vlibc_header_of(n.c_str()) + ">, so a program cannot " + what + " (C23 7.1.3)");
+      if (vlibc_own_name(n.c_str()))  // decision 0050 item 8: vlibc's own function, not C23 7.1.3's reservation
+        reject(Diag::annotation_reserved_library, p, "`" + n + "` is vlibc's own function: its contract comes only from vlibc's <" + vlibc_header_of(n.c_str()) + ">, so a program cannot " + what + " (decision 0048 item 5)");
+      else
+        reject(Diag::annotation_reserved_library, p, "`" + n + "` is a function of the C library: its contract comes only from vlibc's <" + vlibc_header_of(n.c_str()) + ">, so a program cannot " + what + " (C23 7.1.3)");
       any = true;
     };
     for (an_attribute_ptr a = r->source_corresp.attributes; a != nullptr; a = a->next) {
@@ -5862,6 +5910,7 @@ class Encoder {
     const SrcLoc l = loc_of(sh.pos);
     const vir::Type pty = prog_.pointer_to(pointee);
     vir::Function* f = prog_.add_function(rname(r), sh.allocation ? pty : vir::Type::void_type(), l, l);
+    f->allocator = sh.allocator;
     f->trusted_reason = sh.reason + "; typed view: one " + pointee.str() + " (" + std::to_string(static_cast<unsigned long long>(size_of_type(skip_typerefs(edg_pointee)))) +
                         " bytes), decision 0047";
     if (sh.allocation) {
@@ -5907,6 +5956,14 @@ class Encoder {
   const Expr* allocation_view(an_expr_node_ptr cast, an_expr_node_ptr call, a_routine_ptr r, const HeapShape& sh) {
     const std::string name = rname(r);
     if (!heap_routine_usable(r, call->position)) return nullptr;
+    if (sh.allocator == vir::Allocator::Vlibc && il_header.source_language != sl_C) {
+      // Decision 0050 item 7 (question 140): C++20 creates objects implicitly only in the storage of the operations it lists (`std::malloc` and its family,
+      // [c.malloc]/4, [intro.object]/10-13); `vlibc_malloc`'s storage comes from `mmap` inside a C library, so a typed view has no object to name.
+      reject(Diag::unsupported_expression, call->position,
+             "`" + name + "` in C++: C++20 creates objects implicitly only in the storage of `std::malloc` and its family ([intro.object]/10-13, [c.malloc]/4), so "
+             "an object in vlibc's allocation has no lifetime by the standard's letter; a typed view of it needs placement `new` (M7; C programs are supported; decision 0050 item 7)");
+      return nullptr;
+    }
     a_type_ptr ct = skip_typerefs(cast->type);
     a_type_ptr pt = ct->variant.pointer.type != nullptr ? skip_typerefs(ct->variant.pointer.type) : nullptr;
     if (pt == nullptr || pt->kind == tk_void) {
@@ -6072,6 +6129,49 @@ class Encoder {
     return atom;
   }
 
+  // Whether a registered marker (`owning`, `ref_to_uninit`, `must_init`) is written on `r` itself or on a parameter of any of its declarations, wherever.
+  bool carries_marker(a_routine_ptr r) {
+    auto marked = [&](an_attribute_ptr list) {
+      for (an_attribute_ptr a = list; a != nullptr; a = a->next)
+        if (is_registered_cerastes(a) && is_param_marker(classify(a))) return true;
+      return false;
+    };
+    auto params = [&](a_type_ptr t) {
+      a_type_ptr rt = t != nullptr ? skip_typerefs(t) : nullptr;
+      if (rt == nullptr || rt->kind != tk_routine || rt->variant.routine.extra_info == nullptr) return false;
+      for (a_param_type_ptr p = rt->variant.routine.extra_info->param_type_list; p != nullptr; p = p->next)
+        if (marked(p->attributes)) return true;
+      return false;
+    };
+    if (marked(r->source_corresp.attributes) || params(r->type) || params(r->declared_type)) return true;
+    if (ents_ != nullptr)
+      if (auto sd = ents_->secondary_decls.find(r); sd != ents_->secondary_decls.end())
+        for (const IlEntities::SecondaryDecl& q : sd->second)
+          if (params(q.declared_type) || marked(q.attributes)) return true;
+    return false;
+  }
+
+  // Whether `r` has a contract a call can use (decision 0011 item 5): a `requires` or an `ensures` (a `decreases` alone is not one), "does not return" the
+  // program declared, or an `owning` parameter.  Shared by callee_for_call and the run loop's skip of contract-less library routines (decision 0050 item 6).
+  bool routine_has_contract(a_routine_ptr r) {
+    bool has_contract = false;
+    for (an_attribute_ptr a : contracts_of(r)) {
+      const Annot k = classify(a);
+      if (k == Annot::requires_ || k == Annot::ensures) has_contract = true;
+    }
+    // A function declared not to return, in a verified file, counts as a contract: it ensures `false` (decision 0015 item 4,
+    // amending 0011 item 5).  It is a user contract, trusted like a user's `ensures`, even when a system header declares
+    // the function too (EDG keeps only the first declaration's position).  But the flag must be the user's: see
+    // user_declared_noreturn.
+    if (user_declared_noreturn(r)) has_contract = true;
+    // An owning parameter is a contract (decision 0040 item 3: it stands for `p == NULL || owns(*p)` in both lists).
+    if (a_routine_type_supplement_ptr cx = routine_supplement(r))
+      for (a_param_type_ptr p = cx->param_type_list; p != nullptr && !has_contract; p = p->next)
+        for (an_attribute_ptr at = p->attributes; at != nullptr; at = at->next)
+          if (classify(at) == Annot::owning) has_contract = true;
+    return has_contract;
+  }
+
   vir::Function* callee_for_call(a_routine_ptr callee, const a_source_position& at) {
     if (is_main(callee)) {
       // C allows it; nothing here relies on `main`'s special rules, so the call is rejected in both modes (M8).
@@ -6097,22 +6197,7 @@ class Encoder {
       if (reject_redirected_call(callee, at)) return nullptr;
       return function_of(callee, false, at);
     }
-    bool has_contract = false;  // a `decreases` alone is not a contract (0011 item 5)
-    for (an_attribute_ptr a : contracts_of(callee)) {
-      const Annot k = classify(a);
-      if (k == Annot::requires_ || k == Annot::ensures) has_contract = true;
-    }
-    // A function declared not to return, in a verified file, counts as a contract: it ensures `false` (decision 0015 item 4,
-    // amending 0011 item 5).  It is a user contract, trusted like a user's `ensures`, even when a system header declares
-    // the function too (EDG keeps only the first declaration's position).  But the flag must be the user's: see
-    // user_declared_noreturn.
-    if (user_declared_noreturn(callee)) has_contract = true;
-    // An owning parameter is a contract (decision 0040 item 3: it stands for `p == NULL || owns(*p)` in both lists).
-    if (a_routine_type_supplement_ptr cx = routine_supplement(callee))
-      for (a_param_type_ptr p = cx->param_type_list; p != nullptr && !has_contract; p = p->next)
-        for (an_attribute_ptr at = p->attributes; at != nullptr; at = at->next)
-          if (classify(at) == Annot::owning) has_contract = true;
-    if (!has_contract) {
+    if (!routine_has_contract(callee)) {
       reject(Diag::call_without_contract, at, rname(callee));
       return nullptr;
     }
@@ -10119,6 +10204,11 @@ void Encoder::run(const IlEntities& ents) {
         continue;
       }
     }
+    // Decision 0050 item 6 (question 130): a bodiless routine declared in a library file with no contract and no marker (`vlibc_realloc`, which has a `void *`
+    // signature and no contract until its standard name has one) is read like a routine a system header declares: nothing about it is encoded, and a
+    // call is `call_without_contract` (callee_for_call).  A contract or marker the program wrote on it keeps it here, to be read like any declaration.
+    // A `decreases` alone is no contract, but it is a library annotation (lib_trust(r).has): such a routine keeps reaching check_signature (audit N9).
+    if (body == nullptr && decl.seq != 0 && in_library_file(decl) && !lib_trust(r).has && !routine_has_contract(r) && !carries_marker(r)) continue;
     const bool declared_here = decl.seq != 0 && in_verified_file(decl);
     if (body == nullptr && !declared_here) {
       cx_ = Ctx();
@@ -10180,7 +10270,19 @@ void Encoder::run(const IlEntities& ents) {
       for (an_attribute_ptr a : contracts_of(r))
         if (classify(a) == Annot::requires_) reject(Diag::contract_on_main, a->position, "");
     }
-    if (!check_signature(r, decl)) continue;
+    // A declaration the program writes with a contract on a routine a library file declares first (EDG keeps the first declaration's position): the
+    // signature is rejected at the program's own line (invariant 7), never at the library's.
+    a_source_position sig_at = decl;
+    if (in_library_file(decl)) {
+      a_source_position own{};
+      auto earliest = [&](const a_source_position& q) {
+        if (written_by_program(q) && (own.seq == 0 || q.seq < own.seq || (q.seq == own.seq && q.column < own.column))) own = q;
+      };
+      if (auto sd = ents.secondary_decls.find(r); sd != ents.secondary_decls.end())
+        for (const IlEntities::SecondaryDecl& q : sd->second) earliest(q.position);
+      if (own.seq != 0) sig_at = own;
+    }
+    if (!check_signature(r, sig_at)) continue;
     // Decision 0042 item 4: function_of is lazy, so a declaration with a `ref_to_uninit` or `must_init` parameter that nothing calls would never have its
     // marker rules checked (an `owns(*p)` atom, `must_init`'s partner in the `ensures`, the contract reads).  Force it for exactly those routines.
     if (body == nullptr && (markers_.count(r) != 0 || has_struct_pointer_param(r) || has_function_marker(r) || contract_names_block_atom(r))) function_of(r, false, decl);  // decision 0043: also its member atoms (the const struct pointee rule)

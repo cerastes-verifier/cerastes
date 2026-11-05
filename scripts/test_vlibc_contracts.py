@@ -35,6 +35,7 @@ ROOT = HERE.parent
 VLIBC_DIR = Path(os.environ.get("CERASTES_VLIBC_INCLUDE_DIR",
                                 str(Path.home() / "Documents/cerastes/vlibc/include/vlibc")))
 COMMITTED = ROOT / "tests/vlibc/trusted_contracts.txt"
+PIN_DIR = ROOT / "third_party/vlibc/include/vlibc"
 
 HEADER = """\
 // SPDX-License-Identifier: BSL-1.0 OR Apache-2.0 WITH LLVM-exception
@@ -92,23 +93,36 @@ class Base(unittest.TestCase):
 
 class RealHeader(unittest.TestCase):
     @unittest.skipUnless(VLIBC_DIR.is_dir(), "vlibc is not checked out next to cerastes")
-    def test_real_vlibc_lists_the_six_names(self) -> None:
+    def test_real_vlibc_lists_the_nine_names(self) -> None:
+        # the six standard names and the three `vlibc_` ones of decision 0048 (the clone at V1 or later); the four
+        # contract-less functions (vlibc_realloc, ...) are untagged and not listed
         code, out, err = run(["list", "--include-dir", str(VLIBC_DIR)])
         self.assertEqual((code, err), (0, ""))
         self.assertEqual([ln.split(" | ")[0] for ln in out.splitlines()],
-                         ["_Exit", "abort", "calloc", "exit", "free", "malloc"])
+                         ["_Exit", "abort", "calloc", "exit", "free", "malloc",
+                          "vlibc_calloc", "vlibc_free", "vlibc_malloc"])
 
     @unittest.skipUnless(VLIBC_DIR.is_dir(), "vlibc is not checked out next to cerastes")
-    def test_real_vlibc_matches_the_committed_list(self) -> None:
-        code, out, err = run(["check", "--include-dir", str(VLIBC_DIR), "--list", str(COMMITTED)])
+    def test_real_vlibc_pairs_are_recorded(self) -> None:
+        problems = vc.Problems()
+        trusted = vc.read_dir(VLIBC_DIR, problems)
+        self.assertFalse(problems, problems.items)
+        self.assertEqual({t.name: t.paired for t in trusted if t.paired},
+                         {"vlibc_calloc": "calloc", "vlibc_free": "free", "vlibc_malloc": "malloc"})
+        self.assertTrue(all(t.extern_c for t in trusted if t.paired))
+
+    @unittest.skipUnless(PIN_DIR.is_dir(), "third_party/vlibc is not checked out")
+    def test_the_pinned_vlibc_matches_the_committed_list(self) -> None:
+        # the committed list is what the pinned vlibc declares (check.sh runs the same check); it changes with the
+        # pin, as a golden change (invariant 1)
+        code, out, err = run(["check", "--include-dir", str(PIN_DIR), "--list", str(COMMITTED)])
         self.assertEqual((code, err), (0, ""))
 
-    def test_committed_list_has_the_six_names_and_a_header(self) -> None:
+    def test_committed_list_has_a_header_and_four_columns(self) -> None:
         lines = COMMITTED.read_text().splitlines()
         self.assertTrue(lines[0].startswith("#"))
         body = [ln for ln in lines if ln and not ln.startswith("#")]
-        self.assertEqual([ln.split(" | ")[0] for ln in body],
-                         ["_Exit", "abort", "calloc", "exit", "free", "malloc"])
+        self.assertGreaterEqual(len(body), 6)
         for ln in body:
             self.assertEqual(len(ln.split(" | ")), 4, ln)
 
@@ -272,6 +286,244 @@ class Rules(Base):
 
     def test_unbalanced_close_brace(self) -> None:
         self.assertFails("}\n", "x.h:1:", "unbalanced")
+
+
+class Pairing(Base):
+    """Decision 0048 item 2 (M4.5d2v): a trusted `vlibc_<X>` is the pair of the trusted `<X>` of its header: the same
+    declaration with the name substituted, inside an `extern "C" { }` block."""
+
+    MALLOC = ("// cerastes:trusted-contract vlibc: malloc a new block (C23 7.24.3.6)\n"
+              "void *malloc(size_t __size) CERASTES_REF_TO_UNINIT CERASTES_ENSURES(__r, __r == NULL || cerastes_owns_block(__r, __size));\n")
+    VMALLOC = ("// cerastes:trusted-contract vlibc: vlibc_malloc a new block in vlibc's heap (C23 7.24.3.6)\n"
+               "void *vlibc_malloc(size_t __size) CERASTES_REF_TO_UNINIT CERASTES_ENSURES(__r, __r == NULL || cerastes_owns_block(__r, __size));\n")
+    CALLOC = ("// cerastes:trusted-contract vlibc: calloc zeroed (C23 7.24.3.2)\n"
+              "void *calloc(size_t __nmemb, size_t __size) CERASTES_ENSURES(__r, __r == NULL || (cerastes_owns_block(__r, __nmemb * __size) && cerastes_zeroed(__r)));\n")
+    VCALLOC = ("// cerastes:trusted-contract vlibc: vlibc_calloc zeroed (C23 7.24.3.2)\n"
+               "void *vlibc_calloc(size_t __nmemb, size_t __size) CERASTES_ENSURES(__r, __r == NULL || (cerastes_owns_block(__r, __nmemb * __size) && cerastes_zeroed(__r)));\n")
+    # declarations the pairing rule sees without the allocation shapes (no `void *` in them)
+    FOO = ("// cerastes:trusted-contract vlibc: foo a block (x)\n"
+           "int *foo(int __n) CERASTES_REF_TO_UNINIT CERASTES_ENSURES(__r, __r == NULL || cerastes_owns(*__r));\n")
+    VFOO = FOO.replace("vlibc: foo", "vlibc: vlibc_foo").replace("int *foo", "int *vlibc_foo")
+    BAR = ("// cerastes:trusted-contract vlibc: bar zero (x)\n"
+           "int *bar(void) CERASTES_ENSURES(__r, __r == NULL || cerastes_zeroed(__r));\n")
+    VBAR = BAR.replace("vlibc: bar", "vlibc: vlibc_bar").replace("int *bar", "int *vlibc_bar")
+    OPEN = '#ifdef __cplusplus\nextern "C" {\n#endif\n\n'
+    CLOSE = '\n#ifdef __cplusplus\n}\n#endif\n'
+
+    def unit(self, std: str, vl: str, *, std_name_inside: bool = False) -> str:
+        return std + "\n" + self.OPEN + vl + self.CLOSE
+
+    def read(self):
+        problems = vc.Problems()
+        trusted = vc.read_dir(self.inc, problems)
+        return trusted, problems
+
+    def test_an_identical_pair_passes_and_both_are_listed(self) -> None:
+        self.header(self.unit(self.MALLOC, self.VMALLOC))
+        code, out, err = self.list_()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual([ln.split(" | ")[0] for ln in out.splitlines()], ["malloc", "vlibc_malloc"])
+        trusted, problems = self.read()
+        self.assertFalse(problems, problems.items)
+        self.assertEqual({t.name: (t.paired, t.extern_c) for t in trusted},
+                         {"malloc": ("", False), "vlibc_malloc": ("malloc", True)})
+
+    def test_the_calloc_pair_passes(self) -> None:
+        self.header(self.unit(self.CALLOC, self.VCALLOC))
+        self.assertEqual(self.list_()[::2], (0, ""))
+
+    def test_a_differing_token_is_refused(self) -> None:
+        # a renamed parameter that the contract follows: the shapes hold, the pair differs
+        bad = self.VMALLOC.replace("__size", "__n")
+        err = self.assertFails(self.unit(self.MALLOC, bad), "x.h:", "`vlibc_malloc`", "not `malloc`'s")
+        self.assertIn("token for token", err)
+        # a different size in the contract
+        self.assertFails(self.unit(self.CALLOC, self.VCALLOC.replace("__nmemb * __size", "__size * __nmemb")),
+                         "`vlibc_calloc`", "not `calloc`'s")
+        # a second contract group that the standard name does not have
+        self.assertFails(self.unit(self.FOO, self.VFOO.replace("CERASTES_ENSURES", "CERASTES_REQUIRES(__n > 0) CERASTES_ENSURES")),
+                         "`vlibc_foo`", "not `foo`'s")
+        # a different return type
+        self.assertFails(self.unit(self.FOO, self.VFOO.replace("int *vlibc_foo", "char *vlibc_foo")),
+                         "`vlibc_foo`", "not `foo`'s")
+
+    def test_a_missing_marker_is_refused(self) -> None:
+        self.assertFails(self.unit(self.FOO, self.VFOO.replace(" CERASTES_REF_TO_UNINIT", "")), "`vlibc_foo`", "not `foo`'s")
+        # the standard name's marker missing instead
+        self.assertFails(self.unit(self.FOO.replace(" CERASTES_REF_TO_UNINIT", ""), self.VFOO), "`vlibc_foo`", "not `foo`'s")
+        # the real allocation shapes refuse it too (the shape rule fires before the pairing)
+        self.assertFails(self.unit(self.MALLOC, self.VMALLOC.replace(" CERASTES_REF_TO_UNINIT", "")), "`vlibc_malloc`")
+
+    def test_a_missing_zeroed_is_refused(self) -> None:
+        self.assertFails(self.unit(self.BAR, self.VBAR.replace(" || cerastes_zeroed(__r)", "")), "`vlibc_bar`", "not `bar`'s")
+        self.assertFails(self.unit(self.BAR, self.VBAR.replace("cerastes_zeroed", "cerastes_owns")), "`vlibc_bar`", "not `bar`'s")
+        # the real calloc shape: without `cerastes_zeroed(__r)` (nor the marker) the shape rule refuses it first
+        no_zero = self.VCALLOC.replace(" && cerastes_zeroed(__r))", ")").replace("(cerastes_owns_block", "cerastes_owns_block")
+        self.assertFails(self.unit(self.CALLOC, no_zero), "`vlibc_calloc`")
+
+    def test_a_vlibc_name_without_its_standard_name_is_refused(self) -> None:
+        err = self.assertFails(self.OPEN + self.VMALLOC + self.CLOSE, "x.h:", "`vlibc_malloc`", "no trusted `malloc`")
+        self.assertIn("pair it with", err)
+
+    def test_a_vlibc_name_whose_standard_name_is_in_another_header_is_refused(self) -> None:
+        self.header(self.MALLOC, "a.h")
+        err = self.assertFails(self.OPEN + self.VMALLOC + self.CLOSE, "`vlibc_malloc`", "in x.h", "tagged in a.h",
+                               name="x.h")
+        self.assertIn("a pair is declared in one header", err)
+
+    def test_a_pair_written_with_different_star_spellings_is_refused(self) -> None:
+        # the shapes tolerate the space around `*`, the pairing compares the declarations exactly: `void *` against `void*`
+        star_type = self.VMALLOC.replace("void *vlibc_malloc", "void* vlibc_malloc")
+        err = self.assertFails(self.unit(self.MALLOC, star_type), "`vlibc_malloc`", "not `malloc`'s")
+        self.assertIn("token for token", err)
+        both = self.unit(self.MALLOC.replace("void *malloc", "void* malloc"), star_type)
+        self.header(both)
+        self.assertEqual(self.list_()[::2], (0, ""))
+        self.assertFails(self.unit(self.MALLOC.replace("void *malloc", "void* malloc"), self.VMALLOC), "`vlibc_malloc`", "not `malloc`'s")
+
+    def test_a_vlibc_name_declared_before_its_standard_name_is_refused(self) -> None:
+        err = self.assertFails(self.OPEN + self.VMALLOC + self.CLOSE + "\n" + self.MALLOC, "x.h:", "`vlibc_malloc`",
+                               "is declared before its pair `malloc`")
+        self.assertIn("after the standard name's redeclaration", err)
+        # the order is by position, so the right order passes (test_an_identical_pair_passes...) and so does a gap
+        self.header(self.MALLOC + "\nint unrelated;\n" + self.OPEN + self.VMALLOC + self.CLOSE)
+        self.assertEqual(self.list_()[::2], (0, ""))
+
+    def test_a_vlibc_name_outside_extern_c_is_refused(self) -> None:
+        err = self.assertFails(self.MALLOC + "\n" + self.VMALLOC, "`vlibc_malloc`", 'is not inside an `extern "C"')
+        self.assertIn("C language linkage", err)
+        # after the block has closed
+        self.assertFails(self.MALLOC + "\n" + self.OPEN + self.CLOSE + "\n" + self.VMALLOC, "`vlibc_malloc`", 'is not inside an `extern "C"')
+        # in a namespace, an `extern "C++"` block, a block that does not contain it
+        self.assertFails(self.MALLOC + "\nnamespace n {\n" + self.VMALLOC + "}\n", "`vlibc_malloc`", 'is not inside an `extern "C"')
+        self.assertFails(self.MALLOC + '\nextern "C++" {\n' + self.VMALLOC + "}\n", "`vlibc_malloc`", 'is not inside an `extern "C"')
+
+    def test_a_vlibc_name_in_extern_c_inside_a_namespace_or_nested_passes(self) -> None:
+        self.header(self.MALLOC + '\nnamespace n {\nextern "C" {\n' + self.VMALLOC + "}\n}\n")
+        self.assertEqual(self.list_()[::2], (0, ""))
+        self.header(self.MALLOC + '\nextern "C" {\nnamespace n {\n' + self.VMALLOC + "}\n}\n")
+        self.assertEqual(self.list_()[::2], (0, ""))
+
+    def test_the_one_line_extern_form_is_refused(self) -> None:
+        one = self.VMALLOC.replace("void *vlibc_malloc", 'extern "C" void *vlibc_malloc')
+        err = self.assertFails(self.MALLOC + "\n" + one, "x.h:", "begins with `extern`", 'extern "C" { }')
+        self.assertIn("pairing check reads the block", err)
+        # also when it sits inside the block, and for a plain `extern`
+        self.assertFails(self.unit(self.MALLOC, one), "begins with `extern`")
+        self.assertFails(self.unit(self.MALLOC, self.VMALLOC.replace("void *vlibc_malloc", "extern void *vlibc_malloc")),
+                         "begins with `extern`")
+        # and for a standard name
+        self.assertFails(self.MALLOC.replace("void *malloc", 'extern "C" void *malloc'), "begins with `extern`")
+
+    def test_a_contract_less_untagged_declaration_is_accepted_and_unlisted(self) -> None:
+        extra = ("void *vlibc_realloc(void *__ptr, size_t __size);\n"
+                 "void *vlibc_aligned_alloc(size_t __alignment, size_t __size);\n"
+                 "void vlibc_free_sized(void *__ptr, size_t __size);\n"
+                 "void vlibc_free_aligned_sized(void *__ptr, size_t __alignment, size_t __size);\n")
+        self.header(self.unit(self.MALLOC, self.VMALLOC + "\n" + extra))
+        code, out, err = self.list_()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual([ln.split(" | ")[0] for ln in out.splitlines()], ["malloc", "vlibc_malloc"])
+        # outside the block too: nothing reads it
+        self.header(self.unit(self.MALLOC, self.VMALLOC) + "\n" + extra)
+        self.assertEqual(self.list_()[::2], (0, ""))
+
+    def test_an_untagged_vlibc_declaration_with_a_contract_is_refused(self) -> None:
+        err = self.assertFails(self.unit(self.MALLOC, self.VMALLOC + "\nvoid *vlibc_realloc(void *__ptr, size_t __size) "
+                                         "CERASTES_ENSURES(__r, __r == NULL);\n"),
+                               "a contract without a cerastes:trusted-contract tag")
+        self.assertNotIn("pair", err)
+
+    def test_names_output_carries_the_pair_as_a_third_field(self) -> None:
+        # the encoder's name class is the paired name: "" for a standard name, the standard name for a vlibc_ one
+        self.header(self.unit(self.MALLOC + "\n" + self.CALLOC, self.VMALLOC + "\n" + self.VCALLOC))
+        out = self.tmp / "n.inc"
+        self.assertEqual(run(["names", "--include-dir", str(self.inc), "--out", str(out)])[0], 0)
+        self.assertEqual(out.read_text().splitlines()[1:],
+                         ['{"calloc", "x.h", ""},', '{"malloc", "x.h", ""},',
+                          '{"vlibc_calloc", "x.h", "calloc"},', '{"vlibc_malloc", "x.h", "malloc"},'])
+
+    def test_a_pair_with_a_different_reason_passes(self) -> None:
+        # the tags' reasons may differ (they name the allocator); the declarations may not
+        self.header(self.unit(self.MALLOC, self.VMALLOC.replace("in vlibc's heap", "somewhere else")))
+        self.assertEqual(self.list_()[::2], (0, ""))
+
+
+class Conditionals(Base):
+    """Decision 0050 item 2 (audit round 1 S5): the reader takes every branch of a conditional as live, so a shim header has
+    only two conditionals, the include guard and `#ifdef __cplusplus` around exactly an `extern "C" {` line or its closing `}`
+    line.  Anything else could hide a tagged contract (`#if 0`) or put another declaration in an `#else`."""
+
+    MALLOC = Pairing.MALLOC
+    VMALLOC = Pairing.VMALLOC
+    OPEN = Pairing.OPEN
+    CLOSE = Pairing.CLOSE
+    LESS = "void *vlibc_malloc(size_t __size);\n"
+    WHY = "only conditionals are the include guard"
+
+    def test_the_guard_and_the_extern_c_wrappers_pass(self) -> None:
+        self.header("#ifndef VLIBC_X_H\n#define VLIBC_X_H\n#include <cerastes.h>\n" + self.MALLOC + "\n" + self.OPEN + self.VMALLOC
+                    + self.CLOSE + "#endif  // VLIBC_X_H\n")
+        code, out, err = self.list_()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual([ln.split(" | ")[0] for ln in out.splitlines()], ["malloc", "vlibc_malloc"])
+
+    def test_a_comment_in_a_wrapper_or_on_its_directive_is_nothing(self) -> None:
+        self.header(self.MALLOC + '\n#ifdef __cplusplus  // C++ only\n/* the block */\nextern "C" {\n#endif\n\n' + self.VMALLOC
+                    + "\n#ifdef __cplusplus\n}  // extern\n#endif\n")
+        self.assertEqual(self.list_()[::2], (0, ""))
+
+    def test_a_tagged_contract_under_if_0_with_a_contractless_else_is_refused(self) -> None:
+        # the auditor's case: the tagged declaration is never compiled, the untagged one is, and the reader would list the first
+        err = self.assertFails(self.MALLOC + "\n" + self.OPEN + "#if 0\n" + self.VMALLOC + "#else\n" + self.LESS + "#endif\n" + self.CLOSE,
+                               "x.h:", "a `#if`", "a `#else`", self.WHY)
+        self.assertIn("listed as trusted", err)
+
+    def test_other_conditionals_are_refused(self) -> None:
+        cases = {
+            "#if": "#if 1\n#endif\n",
+            "#if defined": "#if defined(__cplusplus)\n#endif\n",
+            "#ifdef other": "#ifdef FOO\n#endif\n",
+            "#ifndef other": "#ifndef FOO\n#endif\n",
+            "#else": "#ifdef __cplusplus\n#else\n#endif\n",
+            "#elif": "#if 1\n#elif 2\n#endif\n",
+            "#elifdef": "#ifdef FOO\n#elifdef BAR\n#endif\n",
+            "#ifdef __cplusplus >= 201103": "#ifdef __cplusplus >= 201103\n#endif\n",
+            "a second guard": "#ifndef VLIBC_Y_H\n#define VLIBC_Y_H\n#endif\n",
+        }
+        for what, text in cases.items():
+            with self.subTest(what=what):
+                self.assertFails(HEADER + text, "x.h:", self.WHY)
+
+    def test_a_guard_must_be_followed_directly_by_its_define(self) -> None:
+        self.assertFails("#ifndef VLIBC_X_H\n#include <cerastes.h>\n#define VLIBC_X_H\n#endif\n", "x.h:1:", "not the include guard")
+        self.assertFails("#ifndef VLIBC_X_H\n#define VLIBC_Y_H\n#endif\n", "x.h:1:", "not the include guard")
+        self.assertFails("#ifndef NOT_A_GUARD_NAME\n#define NOT_A_GUARD_NAME\n#endif\n", "x.h:1:", "not the include guard")
+
+    def test_an_ifdef_cplusplus_around_anything_else_is_refused(self) -> None:
+        bad = {
+            "a declaration": "#ifdef __cplusplus\n" + self.VMALLOC + "#endif\n",
+            "the block and a declaration": '#ifdef __cplusplus\nextern "C" {\n' + self.VMALLOC + "#endif\n",
+            "both wrappers in one": '#ifdef __cplusplus\nextern "C" {\n}\n#endif\n',
+            "nothing": "#ifdef __cplusplus\n#endif\n",
+            "extern C++": '#ifdef __cplusplus\nextern "C++" {\n#endif\n',
+            "a namespace": "#ifdef __cplusplus\nnamespace n {\n#endif\n",
+            "a declaration after the block on its line": '#ifdef __cplusplus\nextern "C" { void g(void);\n#endif\n',
+        }
+        for what, text in bad.items():
+            with self.subTest(what=what):
+                self.assertFails(self.MALLOC + "\n" + text, "x.h:", "around something other than exactly")
+
+    def test_an_unclosed_or_unopened_conditional_is_refused(self) -> None:
+        self.assertFails(self.MALLOC + '\n#ifdef __cplusplus\nextern "C" {\n', "x.h:", "never closed")
+        self.assertFails(self.MALLOC + "\n#endif\n", "x.h:", "an `#endif` with no conditional")
+
+    def test_the_real_vlibc_header_passes_the_rule(self) -> None:
+        if not VLIBC_DIR.is_dir():
+            self.skipTest("vlibc is not checked out next to cerastes")
+        problems = vc.Problems()
+        vc.read_dir(VLIBC_DIR, problems)
+        self.assertFalse(problems, problems.items)
 
 
 class NotDeclarations(Base):
@@ -760,6 +1012,29 @@ class VoidPointerShapes(Base):
             with self.subTest(name=name):
                 self.assertEqual(self.listing(decl, name)[::2], (0, ""))
 
+    def test_the_space_around_the_star_is_free(self):
+        # vlibc's Boost style puts the pointer on the type (`void* malloc(...)`, `void* __ptr`): the same shapes
+        for spelling in ("void* ", "void * ", "void*"):
+            for name, decl, old in (("malloc", self.A_MALLOC, "void *malloc"), ("calloc", self.A_CALLOC, "void *calloc"),
+                                    ("free", self.D_FREE, "void *__ptr")):
+                new = spelling + old[len("void *"):]
+                spelled = decl.replace(old, new)
+                with self.subTest(name=name, spelling=spelling):
+                    self.assertNotEqual(spelled, decl)
+                    self.assertEqual(self.listing(spelled, name)[::2], (0, ""), spelled)
+
+    def test_the_star_spellings_do_not_loosen_the_shapes(self):
+        # only whitespace is free: a second star, a missing marker and a changed contract are still refused
+        for spelled in (self.A_MALLOC.replace("void *malloc", "void** malloc"),
+                        self.A_MALLOC.replace("void *malloc", "void* malloc").replace(" CERASTES_REF_TO_UNINIT", ""),
+                        self.A_MALLOC.replace("void *malloc", "void* malloc").replace("__r == NULL", "__r != NULL"),
+                        self.D_FREE.replace("void *__ptr", "void* __ptr").replace(" CERASTES_REF_TO_UNINIT", ""),
+                        self.D_FREE.replace("void *__ptr", "void** __ptr")):
+            with self.subTest(spelled=spelled):
+                name = "malloc" if "malloc" in spelled else "free"
+                code, out, err = self.listing(spelled, name)
+                self.assertEqual(code, 1, spelled)
+
     def test_another_allocation_of_the_two_shapes_passes(self):
         for name, decl in (("aligned", "void *aligned(size_t __a, size_t __size) CERASTES_REF_TO_UNINIT CERASTES_ENSURES(__r, __r == NULL || cerastes_owns_block(__r, __size));"),
                            ("one", "void *one(int __n) CERASTES_ENSURES(__r, __r == NULL || (cerastes_owns_block(__r, __n) && cerastes_zeroed(__r)));"),
@@ -913,7 +1188,7 @@ class Names(Base):
         self.assertEqual(run(["names", "--include-dir", str(self.inc), "--out", str(out)])[0], 0)
         self.assertEqual(out.read_text(),
                          f"// Generated by scripts/vlibc_contracts.py from {self.inc}; do not edit.\n"
-                         '{"_Exit", "x.h"},\n{"exit", "x.h"},\n')
+                         '{"_Exit", "x.h", ""},\n{"exit", "x.h", ""},\n')
 
     def test_unchanged_output_is_not_rewritten_and_changed_output_is(self) -> None:
         self.header(HEADER)
@@ -935,7 +1210,7 @@ class Names(Base):
         self.assertEqual(run(args)[0], 0)
         self.assertNotEqual(out.stat().st_mtime_ns, before)
         self.assertEqual(out.read_text().splitlines()[1:],
-                         ['{"_Exit", "x.h"},', '{"abort", "x.h"},', '{"exit", "x.h"},'])
+                         ['{"_Exit", "x.h", ""},', '{"abort", "x.h", ""},', '{"exit", "x.h", ""},'])
 
     def test_a_header_error_writes_nothing_and_leaves_an_old_file(self) -> None:
         out = self.tmp / "vlibc_names.inc"
@@ -952,7 +1227,7 @@ class Names(Base):
         out = self.tmp / "n.inc"
         self.assertEqual(run(["names", "--include-dir", str(self.inc), "--out", str(out)])[0], 0)
         self.assertEqual(out.read_text().splitlines()[1:],
-                         ['{"bbb", "b.h"},', '{"exit", "a.h"},', '{"yyy", "b.h"},', '{"zzz", "a.h"},'])
+                         ['{"bbb", "b.h", ""},', '{"exit", "a.h", ""},', '{"yyy", "b.h", ""},', '{"zzz", "a.h", ""},'])
 
     def test_only_tagged_names_are_reserved(self) -> None:
         self.header(HEADER + "void plain(void);\n")

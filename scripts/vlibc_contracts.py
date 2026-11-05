@@ -40,13 +40,19 @@ Fail closed: any doubt is an error `file:line: message` and exit status 1.
     trusted contract says, so a contract names its parameters `__size`, its result `__r`
     and uses `cerastes_*` spec functions;
   * a trusted declaration with `void *` in its signature has exactly one of the two contract shapes of decision 0047 item 2 (the
-    encoder reads no other, audit S5), checked textually: (A) an allocation `void *f(<integer __params>)` whose contract is one
+    encoder reads no other, audit S5), checked textually: (A) an allocation `void *f(<integer __params>)` (or `void* f(...)`: the space around the `*` is free) whose contract is one
     `CERASTES_ENSURES(__r, __r == NULL || cerastes_owns_block(__r, S))` with `CERASTES_REF_TO_UNINIT` after the declarator, or
     `CERASTES_ENSURES(__r, __r == NULL || (cerastes_owns_block(__r, S) && cerastes_zeroed(__r)))` without it (exactly one of the
     two), `S` a parameter or a product of parameters, and no `requires`; (D) a deallocation `void f(void *__p CERASTES_REF_TO_UNINIT)`
     with `CERASTES_REQUIRES(__p == NULL || cerastes_owns_block(__p))` and nothing else;
   * a bare marker (`CERASTES_REF_TO_UNINIT`, `CERASTES_OWNING`, ...) after a declarator, or
     after a parameter's declarator-id, is not a contract group and hides no name;
+  * the pairing (decision 0048 item 2, M4.5d2v): a trusted `vlibc_<X>` has a trusted `<X>` in the same header, its declaration
+    is `<X>`'s token for token once the declarator name is substituted (so the contract, the markers and the parameter
+    names are the same), it is declared after `<X>` in the header, and it sits inside an `extern "C" { }` block of the header (the platform's declaration gives it
+    no C language linkage); a tagged declaration that itself begins with `extern` (the one-line `extern "C" void *f(...)`
+    form) is refused, since the block is what the check reads.  A declaration with no contract and no tag
+    (`vlibc_realloc`, decision 0048 question 130) is not read and not listed;
   * the shim directory holds only `*.h` files (no subdirectory, no other file), and its parent
     `<vlibc>/include` holds nothing but the shim directory (decision 0046 item 3: that directory is
     the library class, and every file under it is trusted by path).
@@ -55,7 +61,8 @@ Subcommands:
 
   names --include-dir DIR --out FILE
         write a C++ fragment for the encoder, one `{"<name>", "<header file
-        name>"},` initializer per reserved name, sorted by name (reproducible: no timestamp, and the file is rewritten only
+        name>", "<paired>"},` initializer per reserved name (`<paired>`: the standard name a `vlibc_` entry is paired with,
+        `""` for a standard name; the encoder's name class is what the pairing check read, decision 0050 item 2), sorted by name (reproducible: no timestamp, and the file is rewritten only
         when its contents change, since CMake runs this at configure time).
   list --include-dir DIR
         print the canonical listing of every trusted declaration, one line each,
@@ -104,6 +111,7 @@ class Statement:
     has_top_comma: bool
     start_col: int = 0   # the column of its first character on line `start`
     end_col: int = 0     # the column of its terminator on line `end`
+    extern_c: bool = False   # inside an `extern "C" { }` block (any depth)
 
 
 @dataclasses.dataclass
@@ -114,6 +122,8 @@ class Trusted:
     reason: str
     file: str
     line: int
+    paired: str = ""       # the standard name a `vlibc_<X>` is paired with ("X"), "" for any other name
+    extern_c: bool = False  # declared inside an `extern "C" { }` block
 
 
 class Problems:
@@ -270,13 +280,28 @@ GUARD_RE = re.compile(r"^VLIBC_[A-Z0-9_]+_H$")
 DIRECTIVE_RE = re.compile(r"^#\s*([A-Za-z_][A-Za-z0-9_]*|[0-9]+)?(.*)$", re.S)
 
 
-def check_directives(directives: list[tuple[int, str]], file: str, problems: Problems) -> None:
+def check_directives(directives: list[tuple[int, str]], file: str, problems: Problems,
+                     code_lines: list[str] | None = None) -> None:
     """A shim header's preprocessor lines (decision 0046 item 3, audit round 2 S1): conditionals and includes only,
     and the header's own include guard as its one `#define`.  A macro, a pragma or a `#line` in vlibc's own header
-    would rewrite the contracts cerastes trusts."""
+    would rewrite the contracts cerastes trusts.
+
+    Only two conditionals are allowed (decision 0050 item 2, audit round 1 S5): the include guard (`#ifndef VLIBC_<NAME>_H`
+    directly followed by `#define VLIBC_<NAME>_H`, closed by an `#endif`), and `#ifdef __cplusplus` ... `#endif` wrapped
+    exactly around one line, `extern "C" {` or `}` (`code_lines`: the header's code, comments and directives blanked).
+    This reader takes every branch as live, so any other conditional (`#if 0` hiding a tagged contract, an `#else` with
+    another declaration) would list a contract the compiler never sees: it is refused."""
     guard_seen = False
     prev = ("", "")
-    for line, text in directives:
+    stack: list[tuple[str, int]] = []   # ("guard" | "cxx", line of the opening directive)
+
+    def refuse_conditional(line: int, what: str) -> None:
+        problems.add(file, line, f"{what} in a shim header: the only conditionals are the include guard (`#ifndef "
+                                 "VLIBC_<NAME>_H` then `#define`) and `#ifdef __cplusplus` around exactly the `extern \"C\" {` "
+                                 "line or its closing `}` line, since every branch is read as live and a hidden or "
+                                 "alternative declaration would be listed as trusted (decision 0050 item 2)")
+
+    for k, (line, text) in enumerate(directives):
         m = DIRECTIVE_RE.match(text.strip())
         name = (m.group(1) or "") if m else ""
         rest = (m.group(2) if m else "").strip()
@@ -294,7 +319,39 @@ def check_directives(directives: list[tuple[int, str]], file: str, problems: Pro
             problems.add(file, line, "a `#pragma` in a shim header")
         elif name == "line" or name.isdigit():
             problems.add(file, line, "a `#line` or linemarker in a shim header")
+        elif name == "ifndef":
+            nm = DIRECTIVE_RE.match(directives[k + 1][1].strip()) if k + 1 < len(directives) else None
+            define_next = (nm is not None and nm.group(1) == "define" and nm.group(2).split() == words)
+            if not guard_seen and not stack and len(words) == 1 and GUARD_RE.match(words[0]) and define_next:
+                stack.append(("guard", line))
+            else:
+                refuse_conditional(line, "a `#ifndef` that is not the include guard")
+                stack.append(("other", line))
+        elif name == "ifdef":
+            if words == ["__cplusplus"]:
+                stack.append(("cxx", line))
+            else:
+                refuse_conditional(line, "an `#ifdef` that is not `#ifdef __cplusplus`")
+                stack.append(("other", line))
+        elif name in ("if", "elif", "elifdef", "elifndef", "else"):
+            refuse_conditional(line, f"a `#{name}`")
+            if name == "if":
+                stack.append(("other", line))
+        elif name == "endif":
+            if not stack:
+                problems.add(file, line, "an `#endif` with no conditional before it in a shim header")
+            else:
+                kind, opened = stack.pop()
+                if kind == "cxx":
+                    inside = [(i, c.strip()) for i, c in enumerate((code_lines or [])[opened:line - 1], opened + 1) if c.strip()]
+                    flat = [re.sub(r"\s+", " ", c) for _i, c in inside]
+                    if code_lines is not None and flat not in (['extern "C" {'], ["}"]):
+                        refuse_conditional(opened, "an `#ifdef __cplusplus` around something other than exactly the `extern \"C\" {` "
+                                                   "line or its closing `}` line")
         prev = (name, words[0] if words else "")
+    for kind, opened in stack:
+        if kind != "other":
+            refuse_conditional(opened, "a conditional that is never closed")
 
 
 # ---------------------------------------------------------------------------
@@ -306,7 +363,7 @@ def split_statements(code_lines: list[str], file: str, problems: Problems) -> li
     cur: list[str] = []
     start = 0
     paren = brace = 0
-    transparent = 0
+    blocks: list[bool] = []     # the open transparent blocks: True for `extern "C"`, False for the rest
     fn_body = False
     top_comma = False
 
@@ -329,7 +386,7 @@ def split_statements(code_lines: list[str], file: str, problems: Problems) -> li
                 if brace == 0 and paren == 0:
                     pre = re.sub(r"\s+", " ", text().strip())
                     if LINKAGE_BLOCK_RE.match(pre) or NAMESPACE_BLOCK_RE.match(pre):
-                        transparent += 1
+                        blocks.append(bool(re.fullmatch(r'extern "C"', pre)))
                         reset()
                         continue
                     fn_body = pre.endswith(")")
@@ -340,8 +397,8 @@ def split_statements(code_lines: list[str], file: str, problems: Problems) -> li
                 if brace == 0:
                     if cur and text().strip():
                         problems.add(file, lineno, "`}` inside a declaration that is not closed")
-                    elif transparent > 0:
-                        transparent -= 1
+                    elif blocks:
+                        blocks.pop()
                     else:
                         problems.add(file, lineno, "unbalanced `}`")
                     reset()
@@ -349,7 +406,7 @@ def split_statements(code_lines: list[str], file: str, problems: Problems) -> li
                 brace -= 1
                 cur.append(c)
                 if brace == 0 and paren == 0 and fn_body:
-                    out.append(Statement(start, lineno, text(), "}", top_comma, start_col, col))
+                    out.append(Statement(start, lineno, text(), "}", top_comma, start_col, col, any(blocks)))
                     reset()
                 continue
             if c in "([":
@@ -360,7 +417,7 @@ def split_statements(code_lines: list[str], file: str, problems: Problems) -> li
                 top_comma = True
             elif c == ";" and paren == 0 and brace == 0:
                 cur.append(c)
-                out.append(Statement(start, lineno, text(), ";", top_comma, start_col, col))
+                out.append(Statement(start, lineno, text(), ";", top_comma, start_col, col, any(blocks)))
                 reset()
                 continue
             cur.append(c)
@@ -453,11 +510,11 @@ VOID_POINTER_RE = re.compile(r"\bvoid\s*\*")
 _INT_TYPE = r"(?:size_t|(?:unsigned |signed )?(?:char|short|int|long|long long))"
 _ALLOC_PARAM = rf"{_INT_TYPE} __[A-Za-z0-9_]+"
 ALLOC_SHAPE_RE = re.compile(
-    rf"^void \*(?P<name>[A-Za-z_][A-Za-z0-9_]*)\((?P<params>{_ALLOC_PARAM}(?:, {_ALLOC_PARAM}){{0,2}})\)"
+    rf"^void ?\* ?(?P<name>[A-Za-z_][A-Za-z0-9_]*)\((?P<params>{_ALLOC_PARAM}(?:, {_ALLOC_PARAM}){{0,2}})\)"
     r"(?P<marker> CERASTES_REF_TO_UNINIT)? CERASTES_ENSURES\(__r, __r == NULL \|\| (?P<body>.*)\);$")
 ALLOC_OWNS_RE = re.compile(r"cerastes_owns_block\(__r, (?P<size>__[A-Za-z0-9_]+(?: \* __[A-Za-z0-9_]+)*)\)")
 DEALLOC_SHAPE_RE = re.compile(
-    r"^void (?P<name>[A-Za-z_][A-Za-z0-9_]*)\(void \*(?P<p>__[A-Za-z0-9_]+) CERASTES_REF_TO_UNINIT\) "
+    r"^void (?P<name>[A-Za-z_][A-Za-z0-9_]*)\(void ?\* ?(?P<p>__[A-Za-z0-9_]+) CERASTES_REF_TO_UNINIT\) "
     r"CERASTES_REQUIRES\((?P=p) == NULL \|\| cerastes_owns_block\((?P=p)\)\);$")
 
 
@@ -514,7 +571,7 @@ def read_header(path: Path, shown: str, problems: Problems) -> list[Trusted]:
         return []
     text = text.replace("\r\n", "\n")
     code, raw_tags, directives, comments = scan(text, shown, problems)
-    check_directives(directives, shown, problems)
+    check_directives(directives, shown, problems, code)
     # spellings of `#` and of the pragma operator that the line reader above would not see as directives
     for n, line in enumerate(text.split("\n"), 1):
         if "%:" in line or "??=" in line:
@@ -567,6 +624,11 @@ def read_header(path: Path, shown: str, problems: Problems) -> list[Trusted]:
             problems.add(shown, st.start, f"the declaration under the tag of `{tag.name}` has more "
                                           "than one declarator")
             continue
+        if re.match(r"extern\b", st.text.lstrip()):
+            problems.add(shown, st.start, f"the declaration of `{tag.name}` begins with `extern`: declare it inside "
+                                          "the header's `extern \"C\" { }` block under `#ifdef __cplusplus`, "
+                                          "not with a one-line `extern` (the pairing check reads the block)")
+            continue
         got = declarator_name(st.text)
         if got != tag.name:
             problems.add(shown, st.start, f"the tag names `{tag.name}` but the declaration below it "
@@ -592,7 +654,8 @@ def read_header(path: Path, shown: str, problems: Problems) -> list[Trusted]:
         if shape is not None:
             problems.add(shown, st.start, f"`{tag.name}`: {shape}")
             continue
-        result.append(Trusted(tag.name, Path(shown).name, collapse(st.text), tag.reason, shown, tag.line))
+        result.append(Trusted(tag.name, Path(shown).name, collapse(st.text), tag.reason, shown, tag.line,
+                              extern_c=st.extern_c))
 
     for st in statements:
         if id(st) not in tagged and CONTRACT_RE.search(st.text):
@@ -639,7 +702,43 @@ def read_dir(include_dir: Path, problems: Problems) -> list[Trusted]:
                 continue
             seen[t.name] = t
             trusted.append(t)
+    check_pairing(trusted, seen, problems)
     return sorted(trusted, key=lambda t: t.name)
+
+
+def check_pairing(trusted: list[Trusted], seen: dict[str, Trusted], problems: Problems) -> None:
+    """Decision 0048 item 2: every trusted `vlibc_<X>` has the contract of the trusted `<X>` of its header, and C linkage."""
+    for t in trusted:
+        if not t.name.startswith("vlibc_"):
+            continue
+        base = t.name[len("vlibc_"):]
+        std = seen.get(base)
+        if std is None:
+            problems.add(t.file, t.line, f"`{t.name}` is tagged trusted but vlibc has no trusted `{base}` to pair it "
+                                         f"with (decision 0048 item 2: a function implemented before its standard name "
+                                         f"has a contract is declared without a contract and without a tag)")
+            continue
+        if std.header != t.header:
+            problems.add(t.file, t.line, f"`{t.name}` is in {t.header} but its pair `{base}` is tagged in {std.header} "
+                                         f"({std.file}:{std.line}): a pair is declared in one header")
+            continue
+        if t.line < std.line:
+            problems.add(t.file, t.line, f"`{t.name}` is declared before its pair `{base}` ({std.file}:{std.line}): a pair "
+                                         f"is declared after the standard name's redeclaration (decision 0048 item 2)")
+            continue
+        pattern = rf"(?<![A-Za-z0-9_]){re.escape(t.name)}(?![A-Za-z0-9_])"
+        substituted = re.sub(pattern, base, t.declaration, count=1)
+        if substituted != std.declaration:
+            problems.add(t.file, t.line, f"the declaration of `{t.name}` is not `{base}`'s ({std.file}:{std.line}) with "
+                                         f"the name substituted: a pair carries the same contract token for token "
+                                         f"(decision 0048 item 2); `{t.name}` reads `{t.declaration}`, "
+                                         f"`{base}` reads `{std.declaration}`")
+            continue
+        if not t.extern_c:
+            problems.add(t.file, t.line, f"`{t.name}` is not inside an `extern \"C\" {{ }}` block: it has no platform "
+                                         "declaration to give it C language linkage in C++ (decision 0048 item 2)")
+            continue
+        t.paired = base
 
 
 def listing(trusted: list[Trusted]) -> list[str]:
@@ -670,7 +769,7 @@ def cmd_list(args) -> int:
 
 def names_fragment(trusted: list[Trusted], include_dir: str) -> str:
     out = [f"// Generated by scripts/vlibc_contracts.py from {include_dir}; do not edit.\n"]
-    out += [f'{{"{t.name}", "{t.header}"}},\n' for t in trusted]
+    out += [f'{{"{t.name}", "{t.header}", "{t.paired}"}},\n' for t in trusted]
     return "".join(out)
 
 

@@ -465,6 +465,10 @@ struct Global {
 // in the `requires`, and MustInit one in the `ensures` as well (check_program repeats the rule as a backstop; the encoder reports it first).
 enum class InitMarker { None, RefToUninit, MustInit };
 
+// Which allocator a heap view belongs to (decision 0050 item 3, M4.5d2v): the platform's (`malloc`, `calloc`, `free`: the standard names) or vlibc's own
+// (`vlibc_malloc` and the rest: a `vlibc_` name).  Set by the encoder from the routine's name class, on the typed views of allocations and deallocations only.
+enum class Allocator { Platform, Vlibc };
+
 struct Param {
   std::string name;  // may be empty (unnamed parameter)
   Type type;         // Bool, Int, a pointer to one of them (decision 0037 item 2) or, by value, a struct of the Program (decision 0044 item 3)
@@ -508,6 +512,9 @@ struct Function {
   // `OwnsBlock` atom on parameter 0 (guarded `p == NULL ||`) that the `ensures` does not return, and the lowering adds the free checks (`invalid-free`).
   // check_program: a void function of exactly one pointer parameter, a `requires` `OwnsBlock` on it, no `ensures` `OwnsBlock` on it.
   bool deallocates = false;
+  // Decision 0050 item 3: the allocator of a heap view (an allocation, or a deallocation with `deallocates`).  `Platform` for every other function.
+  // check_program accepts `Vlibc` only on a bodiless, trusted allocation or deallocation view.
+  Allocator allocator = Allocator::Platform;
 
   bool verified() const { return body != nullptr; }
 
