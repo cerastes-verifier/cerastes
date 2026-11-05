@@ -16,8 +16,8 @@ plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session cons
   134–145): done on branch `m4.5d2v-allocator` (from `origin/main` `9255b93`) in the worktree `.claude/worktrees/m4.5d2v`;
   result in `internal/status.md`. vlibc's half is vlibc's local `main` `bba61ae..6e41fbe` (the allocator, its tests and CI,
   the Boost style), pushed by the owner (2026-11-05: the pin is in vlibc's `origin/main`); vlibm's `main` `1e6982e` (the
-  code style in `CLAUDE.md`, NOT pushed). Audit reports `build/m4.5d2v/audit{1,2,3}.md` in the worktree; probe worktrees
-  `.claude/worktrees/m4.5d2v-base` (the baseline), `m4.5d2v-p73` and `m4.5d2v-eb` (V1 builds), removable.
+  code style in `CLAUDE.md`, NOT pushed). Audit reports `build/m4.5d2v/audit{1,2,3}.md` in the worktree (the probe worktrees
+  were removed at the session's end; `m4.5d2v-allocator` is the one branch).
 
 - **S6** (2026-11-04; record 0049; plan `.claude/plans/s6-tutorial.md`, questions 131–133): a tutorial
   (`doc/modules/ROOT/pages/tutorial/`, seven chapters) and a developer guide (`pages/dev/`, eight pages) as sections of
@@ -60,8 +60,8 @@ done yet still apply.
    without it). **vlibm:** push its `main` (`1e6982e`, the code style in `CLAUDE.md`; independent of cerastes).
 2. **M4.5d2v:** push `m4.5d2v-allocator` and open its PR (CI's PR tier runs the changed tests; the full check runs nightly
    or on dispatch, worth triggering once). Its vlibc pin `6e41fbe` is in vlibc's `origin/main`.
-3. **Clean up** after the merge: `git worktree remove` `.claude/worktrees/m4.5d2v`, `m4.5d2v-base`, `m4.5d2v-p73`,
-   `m4.5d2v-eb`, and delete the local branches `m4.5d2v-p73`, `m4.5d2v-eb`.
+3. **Clean up** after the merge: `git worktree remove .claude/worktrees/m4.5d2v` (the session's probe worktrees and
+   branches, `m4.5d2v-base`, `m4.5d2v-p73`, `m4.5d2v-eb`, are already removed).
 
 ## 3. Open notes, by the session that consumes them
 
