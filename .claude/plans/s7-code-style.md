@@ -49,7 +49,8 @@ These are verified at planning.
     time only.
 - **Nothing in the code depends on its own line positions:**
   - `src/` uses no `__LINE__`, `__FILE__`, `source_location`, `__DATE__` or `__TIME__`.
-  - The 19 `assert(` calls are removed by `-DNDEBUG`.
+  - The 19 `assert(` calls are removed by `-DNDEBUG`. *[Amended in the session, review round 1 S5: the 19 hits are
+    comments and strings; nothing in `src/` calls `assert`, the build has no `-DNDEBUG`, and the tool dropped it.]*
   - The one platform conditional is `src/driver/silicon.cpp:86` (`__APPLE__`).
   - Every tool target builds with `-Wall -Wextra -Werror`, so brace-init narrowing is a compile error, not a silent change.
 - **A trial with Homebrew's clang-format 23.1.1** (stdout only): 44,304 lines become about 69,100. The lines over 120
@@ -133,7 +134,9 @@ S2, the proof tool. **`scripts/object_identity.py --before <rev|dir> [--after <r
 - It exports `src/` and `include/` of each side with `git archive` into `build/s7/<rev>/`.
 - It takes each cerastes TU's command from `build/cmake/compile_commands.json`, with the repository root rewritten to the
   exported tree. EDG paths and generated headers stay where they are.
-- It appends `-g0 -DNDEBUG -o <side>/<tu>.o` and compiles both sides with the same compiler.
+- It appends `-g0 -DNDEBUG -o <side>/<tu>.o` and compiles both sides with the same compiler. *[Amended: `-g0` only
+  (round 1 S5); the IR and the `-femit-all-decls` IR are compared too, and a token pass was added (record 0051
+  item 6).]*
 - It requires the objects to be byte-identical. As a fallback for a difference that is not in the code, it compares
   `llvm-objdump -d -r -s` output. It names every TU that differs.
 - It must cover every TU. If the count of TUs in `compile_commands.json` that are under `src/` changes, the tool fails.
@@ -187,7 +190,9 @@ C1 also holds record **0051-code-style.md** (a draft). It covers:
 
 1. Run `scripts/format.sh`. Nothing else goes in C2. Gates:
    - `format.sh --check` is green;
-   - `object_identity.py --before C1` reports **every TU identical**;
+   - `object_identity.py --before C1` reports **every TU identical**; *[amended, round 2 S2: `encode.cpp` is
+     "identical modulo 2 line immediates" (EDG's `assertion_failed` receives `__LINE__`): its IR is compared with
+     them normalised, its objects are not; record 0051 item 6]*
    - the build passes.
    - If any object differs, **stop**: find the cause (for example `InsertBraces` inside a macro), and do not edit
      around it.
@@ -260,7 +265,9 @@ A re-audit covers the blocking fixes only.
    python3 scripts/test_object_identity.py
    python3 scripts/object_identity.py --before C1 --after HEAD
    ```
-   The last command must report every TU byte-identical with `-g0 -DNDEBUG`.
+   The last command must report every TU byte-identical with `-g0 -DNDEBUG`. *[Amended, rounds 1–2: with `-g0`,
+   29 TUs byte-identical and `encode.cpp` identical modulo its 2 `assertion_failed` line immediates (IR compared,
+   objects not); record 0051 item 6.]*
 2. **`check.sh` run 2** (full) at the final tip, on a quiet machine. All green.
 3. **Output identity:** `diff -r build/s7/baseline/vpr build/vpr` and the same for `vir-selftest`, with the `MANIFEST`
    run-id line ignored. **Zero differences over the whole suite and the VIR self-test.** This is the handoff's proof.

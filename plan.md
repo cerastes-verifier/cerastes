@@ -153,7 +153,8 @@ row per session.
   - one declarator per declaration.
 - **Enforcement:** the pinned clang-format is PyPI's wheel 23.1.3 on both platforms, and a `check.sh` step keeps the
   style.
-- **Proof:** every commit has byte-identical object files (`-g0 -DNDEBUG`), and `.vpr`/`.map` are byte-identical over
+- **Proof:** every commit has byte-identical object files (`-g0`; `encode.cpp` identical modulo the `__LINE__` its EDG
+  assertions receive, its IR compared, record 0051 item 6), and `.vpr`/`.map` are byte-identical over
   the whole suite and the VIR self-test.
 - **Unchanged:** no test, expectation or user-visible behaviour.
 - **When:** S7 merges before M4.5d2b branches.

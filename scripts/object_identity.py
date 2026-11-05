@@ -4,13 +4,14 @@
 """Prove that a refactor of cerastes's tool code (src/, include/) changed no behaviour (session S7).
 
     scripts/object_identity.py --before <rev|dir> [--after <rev|dir>] [-j N] [--tu <path> ...]
-                               [--tokens {off,none,braces}] [--no-compile]
+                               [--tokens {off,none,braces}] [--formatted-by CLANG_FORMAT] [--no-compile]
 
-Each side is exported into build/s7/<side>-<label>/tree/: src/, include/, cmake/ and every CMakeLists.txt (a rev by
-`git archive`; a directory by copying them; the default `--after`, the working tree, by copying the files git lists
-in it).  Every cerastes translation unit's command is taken from build/cmake/compile_commands.json (both sides use
-the working tree's database and generated headers), with the repository root rewritten to the exported tree for
-paths under src/ and include/ only, and compiled for both sides with the same compiler, three times with `-g0`
+Each side is exported into build/s7/<side>-<label>/tree/: src/, include/, cmake/, every CMakeLists.txt and the root
+.clang-format (a rev by `git archive`; a directory by copying them; the default `--after`, the working tree, by copying
+the files git lists in it).  Every cerastes translation unit's command is taken from
+build/cmake/compile_commands.json (both sides use the working tree's database and generated headers), with the
+repository root rewritten to the exported tree for paths under src/ and include/ only, and compiled for both sides
+with the same compiler, three times with `-g0`
 (what ships: no -DNDEBUG; nothing in src/ calls `assert` and no TU reads <assert.h>, measured):
 
   * an object: the build's flags, `-MD -MF <dep> -o <side>/<tu>.o`;
@@ -35,6 +36,19 @@ cmake/*, *.in) must be byte-identical.  It finds token edits in code no build co
 the other platform), compile-time-only code that gives the same IR (`static_assert`, `= delete`, `explicit`,
 access specifiers, uninstantiated templates) and include/cerastes.h.  `--no-compile` runs it alone.
 
+The limit of `braces`: it proves "inserted balanced braces at plausible positions", not where they close.
+`if (a) if (b) x(); else y();` becoming `if (a) { if (b) { x(); } } else { y(); }` (an `else` rebound) and
+`if (a) x(); y();` becoming `if (a) { x(); y(); }` both pass it (they are in the self-test as passing, to document
+that).  So `braces` is evidence only beside the compile passes (which see both: the code differs), or, for a pure
+layout commit, beside `--formatted-by <clang-format>`: every C++ file that differs between the sides must be exactly
+that clang-format's output of its before version under the after side's nearest .clang-format, so the brace
+positions are the formatter's and not an editor's.
+
+Inputs outside the exports are shared by the two sides: both compile against the working tree's third_party/* and
+the headers generated into build/.  Check 5 therefore requires the `third_party/*` gitlinks and
+scripts/vlibc_contracts.py to be the same for the two revisions (a directory side stands for HEAD, the working tree
+for its index and files; the report says which).
+
 This is a proof, so it refuses to pass vacuously (exit status 2, "proof invalid"):
   1. after rewriting, no argument names <root>/src or <root>/include (but the one `-DCERASTES_SOURCE_INCLUDE_DIR`
      string, a path the tool reads at run time, which stays so that both sides carry the same string);
@@ -45,10 +59,12 @@ This is a proof, so it refuses to pass vacuously (exit status 2, "proof invalid"
   3. every file of either export that is neither a compiled .cpp nor a header some TU reads (CMakeLists.txt, cmake/*,
      *.in, an unread header) is listed; one that differs between the sides (or exists on one only) and is not on
      --allow-uncovered (default: include/cerastes.h, which only verified programs include and which the suite's
-     .vpr/.map identity covers instead) is an error;
+     .vpr/.map identity covers instead) is an error; formatter configuration (any `.clang-format`) is not a compile
+     input and is only compared byte for byte by `--tokens`;
   4. every src/**/*.cpp of both sides appears in compile_commands.json and the number of cerastes TUs equals the
      expected constants (EXPECTED_TU_ENTRIES, EXPECTED_TU_FILES; a new TU makes the tool fail until they are
-     updated with it).
+     updated with it);
+  5. the external inputs agree between the two sides (see above).
 
 Exit status: 0 every selected TU identical (and the token pass, if asked, clean); 1 a difference or a compile
 failure; 2 the proof is not valid.
@@ -182,8 +198,9 @@ SKIP_DIRS = ("build", "third_party", ".git", ".claude", "node_modules", "tests",
 
 
 def _is_input(path):
-    """The files of an export: src/, include/, cmake/ and any CMakeLists.txt."""
-    return path.split("/")[0] in ("src", "include") + EXTRA_TOPS or os.path.basename(path) == "CMakeLists.txt"
+    """The files of an export: src/, include/, cmake/, any CMakeLists.txt and the root .clang-format."""
+    return (path.split("/")[0] in ("src", "include") + EXTRA_TOPS or os.path.basename(path) == "CMakeLists.txt"
+            or path == ".clang-format")
 
 
 def export_side(spec, root, dest):
@@ -210,6 +227,8 @@ def export_side(spec, root, dest):
             s = Path(spec) / top
             if s.is_dir():
                 shutil.copytree(s, dest / top)
+        if (Path(spec) / ".clang-format").is_file():
+            shutil.copy2(Path(spec) / ".clang-format", dest / ".clang-format")
         for dirpath, dirnames, filenames in os.walk(spec):
             dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
             if "CMakeLists.txt" in filenames:
@@ -227,6 +246,69 @@ def export_side(spec, root, dest):
                           check=True, capture_output=True).stdout
     subprocess.run(["tar", "-x", "-C", str(dest)], input=arch, check=True)
     return re.sub(r"[^A-Za-z0-9._-]", "_", spec) + "-" + sha[:8]
+
+
+# ---------------------------------------------------------------- inputs outside the exports (check 5)
+
+# Both sides compile against the working tree's third_party/* (EDG's headers) and the headers generated into build/
+# (vlibc_names.inc from scripts/vlibc_contracts.py over third_party/vlibc, il_names.inc from cmake/gen_enum_names.py
+# over EDG's il_def.h, tool_paths.h): they are the same files for both sides, so they must also be the same for the
+# two revisions the sides stand for, or the comparison would credit one side with the other's inputs.
+EXTERNAL_PATHS = ("third_party", "scripts/vlibc_contracts.py")
+
+
+def _parse_tree(out):
+    state = {}
+    for rec in out.decode().split("\0"):
+        if not rec:
+            continue
+        meta, _, path = rec.partition("\t")
+        f = meta.split()
+        # ls-tree: mode type sha; ls-files -s: mode sha stage
+        state[path] = (f[0], f[2] if f[1] in ("commit", "blob") else f[1])
+    # third_party/*'s gitlinks (the submodule pins) and the generator script; a plain file of third_party/ is not an
+    # input of the compile
+    return {p: v for p, v in state.items() if v[0] == "160000" or p == "scripts/vlibc_contracts.py"}
+
+
+def external_state(spec, root):
+    """The pinned external inputs of a side: {path: (mode, object id)} and how it was obtained, or None when root is
+    not a git repository.  A revision: its tree.  The working tree: the index's entries, with scripts/vlibc_contracts.py
+    hashed as it is on disk, and a submodule checked out at another commit than the index's recorded as such.  A
+    directory has no git state: HEAD's tree, and the report says so."""
+    if subprocess.run(["git", "-C", str(root), "rev-parse", "--git-dir"], capture_output=True).returncode:
+        return None
+    if spec == WORKTREE:
+        st = _parse_tree(_git(root, "ls-files", "-s", "-z", "--", *EXTERNAL_PATHS).stdout)
+        f = Path(root) / "scripts/vlibc_contracts.py"
+        if f.is_file():
+            st["scripts/vlibc_contracts.py"] = ("100644", _git(root, "hash-object", str(f)).stdout.decode().strip())
+        try:
+            status = _git(root, "submodule", "status").stdout.decode().splitlines()
+        except subprocess.CalledProcessError:       # no .gitmodules: no submodule checkouts to compare
+            status = []
+        for line in status:
+            if line[:1] in ("+", "U"):
+                st[line.split()[1] + " (checked out)"] = ("commit", line[1:].split()[0])
+        return st, "the working tree's index and files"
+    if os.path.isdir(spec):
+        sha, how = "HEAD", "HEAD (a directory has no git state)"
+    else:
+        sha, how = spec, f"revision {spec}"
+    return _parse_tree(_git(root, "ls-tree", "-r", "-z", sha, "--", *EXTERNAL_PATHS).stdout), how
+
+
+def check_external_inputs(before, after, root):
+    """Check 5.  Returns the report line, or raises ProofInvalid when the two sides' pinned external inputs differ."""
+    sb, sa = external_state(before, root), external_state(after, root)
+    if sb is None or sa is None:
+        return "external inputs (third_party pins, scripts/vlibc_contracts.py): not checked, not a git repository"
+    (stb, hb), (sta, ha) = sb, sa
+    diff = sorted(p for p in set(stb) | set(sta) if stb.get(p) != sta.get(p))
+    if diff:
+        raise ProofInvalid("both sides compile against the working tree's third_party/* and generated headers, so "
+                           f"their pinned inputs must agree; they differ ({hb} against {ha}): {diff}")
+    return f"external inputs (third_party pins, scripts/vlibc_contracts.py) agree: {hb} against {ha}"
 
 
 # ---------------------------------------------------------------- compiling
@@ -487,8 +569,21 @@ def ir_entities(text):
     return kinds, bodies, sorted(misc)
 
 
+def demangle(entries):
+    """`side: @_Z...` entries with the name demangled by c++filt or llvm-cxxfilt when one is installed."""
+    tool = shutil.which("c++filt") or shutil.which("llvm-cxxfilt")
+    if not tool or not entries:
+        return list(entries)
+    names = [e.split(": @", 1)[1] for e in entries]
+    r = subprocess.run([tool], input="\n".join(names) + "\n", capture_output=True, text=True)
+    out = r.stdout.splitlines()
+    if r.returncode or len(out) != len(entries):
+        return list(entries)
+    return [f"{e.split(': @', 1)[0]}: {d}" for e, d in zip(entries, out)]
+
+
 def compare_extended(tb, ta):
-    """Compare two -femit-all-decls modules.  Returns (fatal reasons, number of library-only entities).
+    """Compare two -femit-all-decls modules.  Returns (fatal reasons, the library-only entities as "side: @name").
     Fatal: module-level text differs; an entity on both sides with different text; a function or global on one
     side only that is not a libc++ (std) instantiation.  Not fatal: std instantiations on one side only (a literal
     that changes type, 0 to 0U, instantiates `std::is_integral_v<unsigned>` where it was `<int>`: a name, no
@@ -496,7 +591,7 @@ def compare_extended(tb, ta):
     only (their users differ), string constants (compared by content in their users)."""
     kb, bb, mb = ir_entities(tb)
     ka, ba, ma = ir_entities(ta)
-    fatal, noise = [], 0
+    fatal, noise = [], []
     if mb != ma:
         fatal.append("module-level text differs")
     for n in sorted(set(kb) & set(ka)):
@@ -507,7 +602,7 @@ def compare_extended(tb, ta):
             if kinds[n] in ("declare", "type"):
                 continue
             if STD_NAME.match(n):
-                noise += 1
+                noise.append(f"{side}: {n}")
             else:
                 fatal.append(f"{n} exists only {side}")
     return fatal, noise
@@ -515,7 +610,7 @@ def compare_extended(tb, ta):
 
 
 def compare_tu(tu, sides, kinds, scratch, root, cmds, results):
-    entry = {"tu": tu.key, "obj": None, "ir": None, "ir_ext": None, "ext_noise": 0, "objdump": None,
+    entry = {"tu": tu.key, "obj": None, "ir": None, "ir_ext": None, "ext_noise": 0, "ext_noise_names": [], "objdump": None,
              "verdict": None, "notes": [], "line_sites": 0, "obj_compared": True}
     out = {n: sides[n]["out"] / tu.target for n in sides}
     for k in kinds:
@@ -557,7 +652,8 @@ def compare_tu(tu, sides, kinds, scratch, root, cmds, results):
         entry["ir_ext"] = True
         if xb != xa:
             fatal, noise = compare_extended(normalize_lines(xb, root)[0], normalize_lines(xa, root)[0])
-            entry["ext_noise"] = noise
+            entry["ext_noise"] = len(noise)
+            entry["ext_noise_names"] = demangle(noise)
             if fatal:
                 entry["ir_ext"] = False
                 d = short_diff(xb, xa, tu.stem + ".all.ll")
@@ -716,14 +812,65 @@ def report_tokens(res, mode):
     return len(bad)
 
 
+def formatted_pass(sides, clang_format):
+    """`--formatted-by`: every C++ file that differs between the sides must be exactly `clang-format
+    --style=file:<nearest .clang-format of the after side's tree> --assume-filename=<path>` applied to its before
+    version.  This is what makes `--tokens braces` evidence for a pure layout commit: the brace positions are then the
+    formatter's, not an editor's.  Returns {path: {"status": "same"|"formatted"|"DIFFERS", "detail"}}."""
+    trees = {n: Path(s["tree"]) for n, s in sides.items()}
+    files = {n: {str(p.relative_to(t)) for p in t.rglob("*") if p.is_file()} for n, t in trees.items()}
+    res = {}
+    for f in sorted(set().union(*files.values())):
+        if not f.endswith(TOKEN_SUFFIXES):
+            continue
+        if not all(f in files[n] for n in trees):
+            res[f] = {"status": "DIFFERS", "detail": "exists on one side only"}
+            continue
+        a, b = (trees[n] / f for n in ("before", "after"))
+        if filecmp.cmp(a, b, shallow=False):
+            continue
+        cfg = None
+        d = (trees["after"] / f).parent
+        while True:
+            if (d / ".clang-format").is_file():
+                cfg = d / ".clang-format"
+                break
+            if d == trees["after"] or d.parent == d:
+                break
+            d = d.parent
+        if cfg is None:
+            raise ProofInvalid(f"--formatted-by: no .clang-format in the after export for {f}")
+        r = subprocess.run([clang_format, f"--style=file:{cfg}", f"--assume-filename={f}"], input=a.read_bytes(),
+                           capture_output=True)
+        if r.returncode:
+            raise ProofInvalid(f"--formatted-by: {clang_format} failed on {f}: {r.stderr.decode()[-300:]}")
+        if r.stdout == b.read_bytes():
+            res[f] = {"status": "formatted", "detail": ""}
+        else:
+            ol, nl = r.stdout.decode(errors="replace").splitlines(), b.read_text(errors="replace").splitlines()
+            k = next((i for i, (x, y) in enumerate(zip(ol, nl)) if x != y), min(len(ol), len(nl)))
+            res[f] = {"status": "DIFFERS", "detail": f"line {k + 1}: formatter gives {ol[k] if k < len(ol) else '<end>'!r}"
+                                                       f", file has {nl[k] if k < len(nl) else '<end>'!r}"}
+    return res
+
+
+def report_formatted(res):
+    bad = [f for f, r in res.items() if r["status"] == "DIFFERS"]
+    for f in bad:
+        print(f"  NOT FORMATTER OUTPUT  {f}: {res[f]['detail']}")
+    print(f"formatted-by: {len(res)} changed C++ files: {sum(r['status'] == 'formatted' for r in res.values())} are "
+          f"the formatter's output of their before version, {len(bad)} are not")
+    return len(bad)
+
+
 def run(opts):
     root = os.path.realpath(opts.root)
     cc_path = opts.compile_commands or os.path.join(root, "build/cmake/compile_commands.json")
     # absolute: the compiles run from each entry's own directory, so a relative --scratch would name the wrong place
     scratch = Path(os.path.abspath(opts.scratch or os.path.join(root, "build/s7")))
     scratch.mkdir(parents=True, exist_ok=True)
-    if opts.no_compile and opts.tokens == "off":
-        raise ProofInvalid("--no-compile with --tokens off compares nothing")
+    if opts.no_compile and opts.tokens == "off" and not opts.formatted_by:
+        raise ProofInvalid("--no-compile with --tokens off and no --formatted-by compares nothing")
 
     t0 = time.time()
     tus, files, selected = [], [], []
@@ -763,6 +910,9 @@ def run(opts):
     print(f"object_identity: before: {opts.before} -> {sides['before']['dir']}", flush=True)
     print(f"                 after:  {opts.after} -> {sides['after']['dir']}", flush=True)
 
+    if not opts.no_compile:
+        print(check_external_inputs(opts.before, opts.after, root), flush=True)
+
     # the token pass
     tok_res, tok_bad = None, 0
     if opts.tokens != "off":
@@ -770,8 +920,14 @@ def run(opts):
         tok_bad = report_tokens(tok_res, opts.tokens)
         if opts.json and opts.no_compile:
             Path(opts.json).write_text(json.dumps({"tokens": tok_res}, indent=1))
+    fmt_res, fmt_bad = None, 0
+    if opts.formatted_by:
+        fmt_res = formatted_pass(sides, opts.formatted_by)
+        fmt_bad = report_formatted(fmt_res)
+        if opts.json and opts.no_compile:
+            Path(opts.json).write_text(json.dumps({"tokens": tok_res, "formatted": fmt_res}, indent=1))
     if opts.no_compile:
-        return 1 if tok_bad else 0
+        return 1 if tok_bad or fmt_bad else 0
 
     # check 4: the exported .cpp files and the database agree, on both sides
     for name, s in sides.items():
@@ -861,6 +1017,7 @@ def run(opts):
     n_ident = n_objdump = n_lines = n_diff = n_fail = 0
     ir_bytes = ext_bytes = 0
     ext_noise = {}
+    noise_names = {}
     line_sites = {}
     not_byte_compared = []
     for tu in selected:
@@ -868,6 +1025,8 @@ def run(opts):
         ir_bytes += entry.pop("ir_bytes", 0)
         ext_bytes += entry.pop("ir_ext_bytes", 0)
         ext_noise[tu.key] = entry["ext_noise"]
+        if entry["ext_noise_names"]:
+            noise_names[tu.key] = entry["ext_noise_names"]
         if entry.get("line_sites"):
             line_sites[tu.key] = entry["line_sites"]
         v = entry["verdict"]
@@ -901,7 +1060,8 @@ def run(opts):
                                                 shallow=False))
             tag = "unchanged" if same else ("CHANGED" if not missing else f"absent on {missing}")
             unread_msgs.append(f"{h} ({tag})")
-            if not same and h not in allow:
+            # formatter configuration is not a compile input; --tokens compares it byte for byte
+            if not same and h not in allow and os.path.basename(h) != ".clang-format":
                 uncovered_err.append(h)
     else:
         unread_msgs.append("(not computed: --tu selects a subset, or a TU failed to compile)")
@@ -934,6 +1094,9 @@ def run(opts):
         print("-femit-all-decls IR: libc++ instantiations that exist on one side only (names of unused template "
               "instantiations that follow a literal's type, not behaviour; counted, not failed): "
               + ", ".join(f"{k} ({n})" for k, n in noisy.items()))
+        for k, names in noise_names.items():
+            for nm in names:
+                print(f"    {k}: {nm}")
     if line_sites:
         print("TUs with EDG assertion sites (`check_assertion`, `is_typeref_kind` under EXPENSIVE_CHECKING) in their own "
               "sources, which pass `__LINE__`: " + ", ".join(f"{k} ({n})" for k, n in line_sites.items()))
@@ -945,11 +1108,11 @@ def run(opts):
         print("files no compile reads (edits not covered by object/IR identity; --tokens covers them): "
               + "; ".join(unread_msgs))
     if opts.json:
-        Path(opts.json).write_text(json.dumps({"tus": report, "unread": unread_msgs, "tokens": tok_res}, indent=1))
+        Path(opts.json).write_text(json.dumps({"tus": report, "unread": unread_msgs, "tokens": tok_res, "formatted": fmt_res}, indent=1))
     if uncovered_err:
         raise ProofInvalid("files that no compile reads differ between the sides and are not allowed "
                            f"(--allow-uncovered; --tokens covers C++ sources): {uncovered_err}")
-    if n_diff or n_fail or tok_bad:
+    if n_diff or n_fail or tok_bad or fmt_bad:
         return 1
     return 0
 
@@ -969,6 +1132,9 @@ def parse(argv):
     ap.add_argument("--tokens", choices=("off", "none", "braces"), default="off",
                     help="compare the token streams of every file of both exports: none = no difference, braces = "
                          "only inserted balanced { } (default: off)")
+    ap.add_argument("--formatted-by", metavar="CLANG_FORMAT",
+                    help="every C++ file that differs between the sides must be this clang-format's output of its "
+                         "before version, with the after side's nearest .clang-format")
     ap.add_argument("--no-compile", action="store_true", help="skip the compile passes (with --tokens)")
     ap.add_argument("--no-ir", action="store_true", help="objects only (a weaker proof)")
     # for the self-test's fixtures

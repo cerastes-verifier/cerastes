@@ -152,12 +152,17 @@ python3 scripts/object_identity.py --before <base> [--after <rev>] [--tokens non
 
 It exports `src/`, `include/`, `cmake/` and the CMake files of both sides, compiles every translation unit of the
 compile database from each export with the build's own command, and requires the object files and the LLVM IR to be
-identical, including the inline functions no translation unit calls. `--tokens` also compares the token streams of
-every source file, which covers code that no build compiles (an inactive `#if` branch, `include/cerastes.h`) and code
-that leaves no trace in the IR (a `static_assert`, `= delete`). It refuses ("proof invalid") when a translation unit
-could read a header from outside its own side, when a file it does not compile has changed, or when a source file is
-missing from the compile database. A line number that the code itself passes on (EDG's internal assertions in
-`encode.cpp` pass `+__LINE__+`) is reported, not hidden. S7's restyle was proved this way, then by the full check's
+identical; a second IR, with `-femit-all-decls`, adds the inline functions no translation unit calls, where a pass:[libc++]
+instantiation present on one side only is named and counted rather than failed (a literal's new type can instantiate a
+library trait for another argument). It compiles only what the running platform compiles, so a refactor that touches
+platform code is checked on both. `--tokens` also compares the token streams of every source file, which covers code
+that no build compiles (an inactive `#if` branch, `include/cerastes.h`) and code that leaves no trace in the IR (a
+`static_assert`, `= delete`); `--tokens braces` accepts inserted brace pairs without checking where they close, so it
+is evidence only beside the compile passes. The tool refuses ("proof invalid") when a translation unit could read a
+header from outside its own side, when a file it does not compile has changed, when the sides pin different
+submodules, or when a source file is missing from the compile database. EDG's internal assertions in `encode.cpp`
+receive `+__LINE__+`, so a change of layout changes two immediates in that object: the tool zeroes exactly those in
+the IR, compares the IR, and reports that the objects were not compared. S7's restyle was proved this way, then by the full check's
 `.vpr` and `.map` files, byte for byte (decision {gh}/internal/decisions/0051-code-style.md[0051]). Its self-test,
 `scripts/test_object_identity.py`, runs in the full check.
 

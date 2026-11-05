@@ -112,7 +112,8 @@ The tool code (`src/` and `include/cerastes.h`) is written in the maintainer's B
 * the pointer and reference marks on the type (`+T* p+`, `+const char* first+`, `+T& r+`), one declarator per declaration;
 * brace initialization (`+std::size_t n {0U};+`, `+T x {e};+`), except that a lambda keeps `=`
   (`+const auto put = [&](int v) { … };+`);
-* `U` on literals that are unsigned by their context (`n == 0U` for a `std::size_t n`, `1U << 20U`);
+* `U` on literals that an unsigned type receives (`n == 0U` for a `std::size_t n`) and on every shift count
+  (`x << 3U`; the shifted literal only when its type is unsigned);
 * preprocessor directives inside a function indented to the code's level.
 
 The layout is clang-format's, with the configuration in `src/.clang-format` (and a byte-identical copy in
@@ -131,4 +132,5 @@ formatting everywhere but `src/` and `include/`, so an editor's format-on-save l
 
 A change meant to change nothing (a rename, a restyle, a moved function) can be checked long before a full check:
 `python3 scripts/object_identity.py --before <base>` compiles every translation unit from both sides and requires the
-same object files and the same LLVM IR (xref:dev/testing.adoc#identity[Testing]).
+same LLVM IR and, but for the line numbers EDG's assertions receive, the same object files, on the platform it runs on
+(xref:dev/testing.adoc#identity[Testing]).
