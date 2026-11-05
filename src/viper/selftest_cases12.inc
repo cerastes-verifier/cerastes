@@ -28,7 +28,7 @@ void define_globals()
     auto glob = [](Kit& k, const char* name, const char* v, const Function* owner = nullptr,
                    bool unknown = false) -> Global*
     {
-        Global* g = k.prog.add_global(name, k.i32, k.at(), owner);
+        Global* g {k.prog.add_global(name, k.i32, k.at(), owner)};
         if (unknown)
         {
             g->init_kind = Global::Init::Unknown;
@@ -73,12 +73,12 @@ void define_globals()
     // static int g = 3, h = 7; int main() { check(g == 3 && h == 7); g = 10; check(g == [10|11] && &g != &h); return 0; }
     const auto start_main = [=](Kit& k, bool wrong) -> SrcLoc
     {
-        Global* g = glob(k, "g", "3");
-        Global* h = glob(k, "h", "7");
-        Function* m = k.fn("main", k.i32);
-        const Stmt* c1 = k.chk(k.land(k.eq_c(rd(k, g), k.i32, "3"), k.eq_c(rd(k, h), k.i32, "7")));
-        const Stmt* w = wr(k, g, N(k, "10"));
-        const Stmt* c2 = k.chk(k.land(k.eq_c(rd(k, g), k.i32, wrong ? "11" : "10"), k.ne(ga(k, g), ga(k, h))));
+        Global* g {glob(k, "g", "3")};
+        Global* h {glob(k, "h", "7")};
+        Function* m {k.fn("main", k.i32)};
+        const Stmt* c1 {k.chk(k.land(k.eq_c(rd(k, g), k.i32, "3"), k.eq_c(rd(k, h), k.i32, "7")))};
+        const Stmt* w {wr(k, g, N(k, "10"))};
+        const Stmt* c2 {k.chk(k.land(k.eq_c(rd(k, g), k.i32, wrong ? "11" : "10"), k.ne(ga(k, g), ga(k, h))))};
         m->body = k.blk({c1, w, c2, k.ret(N(k, "0"))});
         k.done(m);
         k.prog.set_entry(m);
@@ -99,11 +99,11 @@ void define_globals()
     // int distinct() ensures(r == [1|0]) { return &g != &h; }   (holds no permission: the facts, unique blocks, the liveness disjunct)
     const auto distinct = [=](Kit& k, bool wrong) -> SrcLoc
     {
-        Global* g = glob(k, "g", "3");
-        Global* h = glob(k, "h", "7");
-        Function* f = k.fn("distinct", k.i32);
+        Global* g {glob(k, "g", "3")};
+        Global* h {glob(k, "h", "7")};
+        Function* f {k.fn("distinct", k.i32)};
         k.ens(f, k.eq_c(k.R(f), k.i32, wrong ? "0" : "1"));
-        const Stmt* r = k.ret(k.bi(k.i32, k.ne(ga(k, g), ga(k, h))));
+        const Stmt* r {k.ret(k.bi(k.i32, k.ne(ga(k, g), ga(k, h))))};
         f->body = k.blk({r});
         k.done(f);
         return r->loc;
@@ -124,9 +124,9 @@ void define_globals()
     // void bump() requires(owns(g) && g < 100) ensures(owns(g) && g == old(g) [+ 1]) { g += 1; }
     const auto make_bump = [=](Kit& k, Global* g, bool wrong) -> Function*
     {
-        Function* f = k.fn("bump", k.vd);
+        Function* f {k.fn("bump", k.vd)};
         k.req(f, k.land(gatom(k, AtomKind::Owns, g, 0), k.lt(rd(k, g), N(k, "100"))));
-        const Expr* want = wrong ? k.old(rd(k, g)) : k.add(k.old(rd(k, g)), N(k, "1"));
+        const Expr* want {wrong ? k.old(rd(k, g)) : k.add(k.old(rd(k, g)), N(k, "1"))};
         k.ens(f, k.land(gatom(k, AtomKind::Owns, g, 0), k.eq(rd(k, g), want)));
         f->body = k.blk({k.cstore(ga(k, g), BinaryOp::Add, N(k, "1"))});
         k.done(f);
@@ -135,16 +135,16 @@ void define_globals()
     // int main() { check(g == 3); bump(); check(g == [4|3]); g = [10|100]; bump(); check(g == 11); }   mode 0 verifies, 1: the wrong check, 3: g = 100 first
     const auto owns_call = [=](Kit& k, int mode) -> SrcLoc
     {
-        Global* g = glob(k, "g", "3");
-        Function* bump = make_bump(k, g, false);
-        Function* m = k.fn("main", k.i32);
-        const Stmt* c0 = k.chk(k.eq_c(rd(k, g), k.i32, "3"));
-        const Stmt* b1 = call0(k, bump);
-        const Stmt* c1 = k.chk(k.eq_c(rd(k, g), k.i32, mode == 1 ? "3" : "4"));
-        const Stmt* w = wr(k, g, N(k, mode == 3 ? "100" : "10"));
-        const Expr* c2e = k.call(bump, {});
-        const Stmt* b2 = k.es(c2e);
-        const Stmt* c2 = k.chk(k.eq_c(rd(k, g), k.i32, "11"));
+        Global* g {glob(k, "g", "3")};
+        Function* bump {make_bump(k, g, false)};
+        Function* m {k.fn("main", k.i32)};
+        const Stmt* c0 {k.chk(k.eq_c(rd(k, g), k.i32, "3"))};
+        const Stmt* b1 {call0(k, bump)};
+        const Stmt* c1 {k.chk(k.eq_c(rd(k, g), k.i32, mode == 1 ? "3" : "4"))};
+        const Stmt* w {wr(k, g, N(k, mode == 3 ? "100" : "10"))};
+        const Expr* c2e {k.call(bump, {})};
+        const Stmt* b2 {k.es(c2e)};
+        const Stmt* c2 {k.chk(k.eq_c(rd(k, g), k.i32, "11"))};
         m->body = k.blk({c0, b1, c1, w, b2, c2, k.ret(N(k, "0"))});
         k.done(m);
         k.prog.set_entry(m);
@@ -169,8 +169,8 @@ void define_globals()
     lc("glob_old_post", "bump claims g == old(g) but adds 1: postcondition at the closing brace",
        [=](Kit& k)
        {
-           Global* g = glob(k, "g", "3");
-           Function* f = make_bump(k, g, true);
+           Global* g {glob(k, "g", "3")};
+           Function* f {make_bump(k, g, true)};
            k.fail("postcondition", f->end_loc);
        });
     // void helper() { bump(); }   (names no global: it holds no permission to g)
@@ -178,20 +178,20 @@ void define_globals()
        "helper's contract names no global, so it does not own g: the call of bump needs owns(g): permission at the call",
        [=](Kit& k)
        {
-           Global* g = glob(k, "g", "3");
-           Function* bump = make_bump(k, g, false);
-           Function* f = k.fn("helper", k.vd);
-           const Expr* c = k.call(bump, {});
+           Global* g {glob(k, "g", "3")};
+           Function* bump {make_bump(k, g, false)};
+           Function* f {k.fn("helper", k.vd)};
+           const Expr* c {k.call(bump, {})};
            f->body = k.blk({k.es(c)});
            k.done(f);
-           k.fail_only("permission", c->loc, 10, 3); // the write permission of g: the checks before it pass
+           k.fail_only("permission", c->loc, 10U, 3U); // the write permission of g: the checks before it pass
        });
     lc("glob_unowned_write", "a function whose contract names no global writes g: permission at the store",
        [=](Kit& k)
        {
-           Global* g = glob(k, "g", "3");
-           Function* f = k.fn("poke", k.vd);
-           const Stmt* w = wr(k, g, N(k, "5"));
+           Global* g {glob(k, "g", "3")};
+           Function* f {k.fn("poke", k.vd)};
+           const Stmt* w {wr(k, g, N(k, "5"))};
            f->body = k.blk({w});
            k.done(f);
            k.fail("permission", w->loc);
@@ -199,9 +199,9 @@ void define_globals()
     lc("glob_unowned_read", "a function whose contract names no global reads g: permission at the read",
        [=](Kit& k)
        {
-           Global* g = glob(k, "g", "3");
-           Function* f = k.fn("peek", k.i32);
-           const Expr* r = rd(k, g);
+           Global* g {glob(k, "g", "3")};
+           Function* f {k.fn("peek", k.i32)};
+           const Expr* r {rd(k, g)};
            f->body = k.blk({k.ret(r)});
            k.done(f);
            k.fail("permission", r->loc);
@@ -212,27 +212,27 @@ void define_globals()
     // int main() { int a = peek(); frame(); check(a == 3 && g == 3 && h == 7); [clobber(); check(g == 3);] }
     const auto reads_frame = [=](Kit& k, bool clobber) -> SrcLoc
     {
-        Global* g = glob(k, "g", "3");
-        Global* h = glob(k, "h", "7");
-        Function* peek = k.fn("peek", k.i32);
+        Global* g {glob(k, "g", "3")};
+        Global* h {glob(k, "h", "7")};
+        Function* peek {k.fn("peek", k.i32)};
         k.req(peek, gatom(k, AtomKind::Reads, g, 0));
         k.ens(peek, k.land(gatom(k, AtomKind::Reads, g, 0), k.eq(k.R(peek), rd(k, g))));
         peek->body = k.blk({k.ret(rd(k, g))});
         k.done(peek);
-        Function* frame = k.fn("frame", k.vd);
+        Function* frame {k.fn("frame", k.vd)};
         frame->body = k.blk({});
         k.done(frame);
-        Function* cl = k.fn("clobber", k.vd);
+        Function* cl {k.fn("clobber", k.vd)};
         k.req(cl, gatom(k, AtomKind::Owns, g, 0));
         k.ens(cl, gatom(k, AtomKind::Owns, g, 0));
         cl->body = k.blk({});
         k.done(cl);
-        Function* m = k.fn("main", k.i32);
-        Var* a = k.local(m, "a", k.i32);
-        std::vector<const Stmt*> s = {k.decl(a, k.call(peek, {})), call0(k, frame),
-                                      k.chk(k.land(k.land(k.eq_c(k.v(a), k.i32, "3"), k.eq_c(rd(k, g), k.i32, "3")),
-                                                   k.eq_c(rd(k, h), k.i32, "7")))};
-        const Stmt* last = nullptr;
+        Function* m {k.fn("main", k.i32)};
+        Var* a {k.local(m, "a", k.i32)};
+        std::vector<const Stmt*> s {k.decl(a, k.call(peek, {})), call0(k, frame),
+                                    k.chk(k.land(k.land(k.eq_c(k.v(a), k.i32, "3"), k.eq_c(rd(k, g), k.i32, "3")),
+                                                 k.eq_c(rd(k, h), k.i32, "7")))};
+        const Stmt* last {nullptr};
         if (clobber)
         {
             s.push_back(call0(k, cl));
@@ -259,11 +259,11 @@ void define_globals()
     lc("glob_reads_write", "a callee with only reads(g) writes g: permission at the store",
        [=](Kit& k)
        {
-           Global* g = glob(k, "g", "3");
-           Function* f = k.fn("poke", k.vd);
+           Global* g {glob(k, "g", "3")};
+           Function* f {k.fn("poke", k.vd)};
            k.req(f, gatom(k, AtomKind::Reads, g, 0));
            k.ens(f, gatom(k, AtomKind::Reads, g, 0));
-           const Stmt* w = wr(k, g, N(k, "5"));
+           const Stmt* w {wr(k, g, N(k, "5"))};
            f->body = k.blk({w});
            k.done(f);
            k.fail("permission", w->loc);
@@ -274,16 +274,16 @@ void define_globals()
     // int main() { int x = 0; two(&[x|g]); check(...); }
     const auto two = [=](Kit& k, bool alias) -> const Expr*
     {
-        Global* g = glob(k, "g", "3");
-        Function* f = k.fn("two", k.vd, {{"p", PT(k)}});
+        Global* g {glob(k, "g", "3")};
+        Function* f {k.fn("two", k.vd, {{"p", PT(k)}})};
         k.req(f, k.land(pown(k, f, 0, 0), gatom(k, AtomKind::Owns, g, 1)));
         k.ens(f, k.land(k.land(pown(k, f, 0, 0), gatom(k, AtomKind::Owns, g, 1)),
                         k.land(k.eq_c(k.deref(FP(k, f, 0)), k.i32, "1"), k.eq_c(rd(k, g), k.i32, "2"))));
         f->body = k.blk({k.store(k.pn(f->param_var(0)), N(k, "1")), wr(k, g, N(k, "2"))});
         k.done(f);
-        Function* m = k.fn("main", k.i32);
-        Var* x = k.cell(m, "x", k.i32);
-        const Expr* c = k.call(f, {alias ? ga(k, g) : k.addr(x)});
+        Function* m {k.fn("main", k.i32)};
+        Var* x {k.cell(m, "x", k.i32)};
+        const Expr* c {k.call(f, {alias ? ga(k, g) : k.addr(x)})};
         if (alias)
         {
             m->body = k.blkc({k.decl(x, N(k, "0")), k.es(c), k.ret(N(k, "0"))});
@@ -308,24 +308,24 @@ void define_globals()
        "two(&g) passes g's cell as *p and as g: the separation p != &g fails at the call (the aliasing trap)",
        [=](Kit& k)
        {
-           const Expr* c = two(k, true);
-           k.fail_only("permission", c->loc, 21, 14); // the separation row: the others pass
+           const Expr* c {two(k, true)};
+           k.fail_only("permission", c->loc, 21U, 14U); // the separation row: the others pass
        });
 
     // ---- item 10: loops ----
     // int main() { int i = 0; while (i < 10) inv 0 <= i <= 10 [&& h == 7 + i | && h <= 7 + i] { h++; i++; } check(g == 3 && h == 17); }
     const auto loop_main = [=](Kit& k, bool weak) -> SrcLoc
     {
-        Global* g = glob(k, "g", "3");
-        Global* h = glob(k, "h", "7");
-        Function* m = k.fn("main", k.i32);
-        Var* i = k.local(m, "i", k.i32);
-        const Expr* bound = k.range(k.v(i), k.i32, "0", "10");
-        const Expr* hv = weak ? k.le(rd(k, h), k.add(N(k, "7"), k.v(i))) : k.eq(rd(k, h), k.add(N(k, "7"), k.v(i)));
-        const Stmt* body = k.blk({k.idstore(ga(k, h), true), k.asg(i, k.add(k.v(i), N(k, "1")))});
-        const Stmt* lp =
-            k.whl(k.lt(k.v(i), N(k, "10")), {k.cl(bound), k.cl(hv)}, {k.cl(k.sub(N(k, "10"), k.v(i)))}, body);
-        const Stmt* c = k.chk(k.land(k.eq_c(rd(k, g), k.i32, "3"), k.eq_c(rd(k, h), k.i32, "17")));
+        Global* g {glob(k, "g", "3")};
+        Global* h {glob(k, "h", "7")};
+        Function* m {k.fn("main", k.i32)};
+        Var* i {k.local(m, "i", k.i32)};
+        const Expr* bound {k.range(k.v(i), k.i32, "0", "10")};
+        const Expr* hv {weak ? k.le(rd(k, h), k.add(N(k, "7"), k.v(i))) : k.eq(rd(k, h), k.add(N(k, "7"), k.v(i)))};
+        const Stmt* body {k.blk({k.idstore(ga(k, h), true), k.asg(i, k.add(k.v(i), N(k, "1")))})};
+        const Stmt* lp {
+            k.whl(k.lt(k.v(i), N(k, "10")), {k.cl(bound), k.cl(hv)}, {k.cl(k.sub(N(k, "10"), k.v(i)))}, body)};
+        const Stmt* c {k.chk(k.land(k.eq_c(rd(k, g), k.i32, "3"), k.eq_c(rd(k, h), k.i32, "17")))};
         m->body = k.blk({k.decl(i, N(k, "0")), lp, c, k.ret(N(k, "0"))});
         k.done(m);
         k.prog.set_entry(m);
@@ -347,14 +347,14 @@ void define_globals()
     // { int i = 0; while (i < 10) inv 0 <= i <= 10 [&& g == 5] { *p = i; i++; } }
     const auto loop_ptr = [=](Kit& k, bool invariant) -> SrcLoc
     {
-        Global* g = glob(k, "g", "5");
-        Function* f = k.fn("fill", k.vd, {{"p", PT(k)}});
+        Global* g {glob(k, "g", "5")};
+        Function* f {k.fn("fill", k.vd, {{"p", PT(k)}})};
         k.req(f, k.land(k.land(pown(k, f, 0, 0), gatom(k, AtomKind::Owns, g, 1)), k.eq_c(rd(k, g), k.i32, "5")));
         k.ens(f, k.land(k.land(pown(k, f, 0, 0), gatom(k, AtomKind::Owns, g, 1)), k.eq_c(rd(k, g), k.i32, "5")));
-        Var* i = k.local(f, "i", k.i32);
-        const Expr* bound = k.range(k.v(i), k.i32, "0", "10");
-        const Expr* inv = invariant ? k.land(bound, k.eq_c(rd(k, g), k.i32, "5")) : bound;
-        const Stmt* body = k.blk({k.store(k.pn(f->param_var(0)), k.v(i)), k.asg(i, k.add(k.v(i), N(k, "1")))});
+        Var* i {k.local(f, "i", k.i32)};
+        const Expr* bound {k.range(k.v(i), k.i32, "0", "10")};
+        const Expr* inv {invariant ? k.land(bound, k.eq_c(rd(k, g), k.i32, "5")) : bound};
+        const Stmt* body {k.blk({k.store(k.pn(f->param_var(0)), k.v(i)), k.asg(i, k.add(k.v(i), N(k, "1")))})};
         f->body = k.blk({k.decl(i, N(k, "0")),
                          k.whl(k.lt(k.v(i), N(k, "10")), {k.cl(inv)}, {k.cl(k.sub(N(k, "10"), k.v(i)))}, body)});
         k.done(f);
@@ -378,14 +378,14 @@ void define_globals()
     // int main() { f(); r(3); }      mode 0 verifies, 1: f without its bound (overflow), 2: r without the implicit atom (permission at its call of f)
     const auto statics = [=](Kit& k, int mode) -> SrcLoc
     {
-        Function* f = k.fn("f", k.vd);
-        Global* s = glob(k, "count", "0", f);
+        Function* f {k.fn("f", k.vd)};
+        Global* s {glob(k, "count", "0", f)};
         k.req(f, gatom(k, AtomKind::Owns, s, 0, true));
         k.ens(f, gatom(k, AtomKind::Owns, s, 0, true));
         SrcLoc bad;
         if (mode == 1)
         {
-            const Stmt* inc = k.idstore(ga(k, s), true);
+            const Stmt* inc {k.idstore(ga(k, s), true)};
             bad = inc->loc;
             f->body = k.blk({inc});
         }
@@ -394,7 +394,7 @@ void define_globals()
             f->body = k.blk({k.iff(k.lt(rd(k, s), N(k, "100")), k.blk({k.idstore(ga(k, s), true)}))});
         }
         k.done(f);
-        Function* r = k.fn("r", k.vd, {{"n", k.i32}});
+        Function* r {k.fn("r", k.vd, {{"n", k.i32}})};
         k.req(r, k.range(k.F(r, 0), k.i32, "0", "10"));
         if (mode != 2)
         {
@@ -402,7 +402,7 @@ void define_globals()
             k.ens(r, gatom(k, AtomKind::Owns, s, 0, true));
         }
         k.dec(r, k.F(r, 0));
-        const Expr* cf = k.call(f, {});
+        const Expr* cf {k.call(f, {})};
         if (mode == 2)
         {
             bad = cf->loc;
@@ -410,7 +410,7 @@ void define_globals()
         r->body = k.blk(
             {k.iff(k.gt(k.pv(r, 0), N(k, "0")), k.blk({k.es(cf), k.es(k.call(r, {k.sub(k.pv(r, 0), N(k, "1"))}))}))});
         k.done(r);
-        Function* m = k.fn("main", k.i32);
+        Function* m {k.fn("main", k.i32)};
         m->body = k.blk({call0(k, f), k.es(k.call(r, {N(k, "3")})), k.ret(N(k, "0"))});
         k.done(m);
         k.prog.set_entry(m);
@@ -430,23 +430,23 @@ void define_globals()
     lc("glob_static_unheld", "r without the implicit atom holds no permission to count: permission at its call of f",
        [=](Kit& k)
        {
-           k.fail_only("permission", statics(k, 2), 10, 3);
+           k.fail_only("permission", statics(k, 2), 10U, 3U);
        });
 
     // ---- item 11: g + f() with f owning g ----
     // int bumpr() requires(owns(g) && g < 100) ensures(owns(g)) { return 1; }   int main() { int s = [g|h] + bumpr(); return 0; }
     const auto beside_call = [=](Kit& k, bool same) -> const Expr*
     {
-        Global* g = glob(k, "g", "3");
-        Global* h = glob(k, "h", "7");
-        Function* f = k.fn("bumpr", k.i32);
+        Global* g {glob(k, "g", "3")};
+        Global* h {glob(k, "h", "7")};
+        Function* f {k.fn("bumpr", k.i32)};
         k.req(f, k.land(gatom(k, AtomKind::Owns, g, 0), k.lt(rd(k, g), N(k, "100"))));
         k.ens(f, k.land(gatom(k, AtomKind::Owns, g, 0), k.eq_c(k.R(f), k.i32, "1")));
         f->body = k.blk({k.ret(N(k, "1"))});
         k.done(f);
-        Function* m = k.fn("main", k.i32);
-        Var* s = k.local(m, "s", k.i32);
-        const Expr* r = rd(k, same ? g : h);
+        Function* m {k.fn("main", k.i32)};
+        Var* s {k.local(m, "s", k.i32)};
+        const Expr* r {rd(k, same ? g : h)};
         m->body = k.blk({k.decl(s, k.add(r, k.call(f, {}))), k.ret(N(k, "0"))});
         k.done(m);
         k.prog.set_entry(m);
@@ -469,10 +469,10 @@ void define_globals()
     // int g (external linkage in C++: unknown); int main() { [check(g == 0);] g = 6; check(g == 6); }
     const auto unknown_init = [=](Kit& k, bool relies) -> SrcLoc
     {
-        Global* g = glob(k, "g", "0", nullptr, true);
-        Function* m = k.fn("main", k.i32);
+        Global* g {glob(k, "g", "0", nullptr, true)};
+        Function* m {k.fn("main", k.i32)};
         std::vector<const Stmt*> s;
-        const Stmt* c0 = k.chk(k.eq_c(rd(k, g), k.i32, "0"));
+        const Stmt* c0 {k.chk(k.eq_c(rd(k, g), k.i32, "0"))};
         if (relies)
         {
             s.push_back(c0);
@@ -500,13 +500,13 @@ void define_globals()
     // static int h = 7; static int *gp = &h; int main() { if (gp) *gp = 5; check(h == [5|7]); }
     const auto ptr_global = [=](Kit& k, bool wrong) -> SrcLoc
     {
-        Global* h = glob(k, "h", "7");
-        Global* gp = k.prog.add_global("gp", PT(k), k.at());
+        Global* h {glob(k, "h", "7")};
+        Global* gp {k.prog.add_global("gp", PT(k), k.at())};
         gp->init_kind = Global::Init::Addr;
         gp->target = h;
-        Function* m = k.fn("main", k.i32);
-        const Stmt* st = k.store(rd(k, gp), N(k, "5"));
-        const Stmt* c = k.chk(k.eq_c(rd(k, h), k.i32, wrong ? "7" : "5"));
+        Function* m {k.fn("main", k.i32)};
+        const Stmt* st {k.store(rd(k, gp), N(k, "5"))};
+        const Stmt* c {k.chk(k.eq_c(rd(k, h), k.i32, wrong ? "7" : "5"))};
         m->body = k.blk({k.iff(k.ne(rd(k, gp), k.nul(PT(k))), k.blk({st})), c, k.ret(N(k, "0"))});
         k.done(m);
         k.prog.set_entry(m);
@@ -527,9 +527,9 @@ void define_globals()
     // int cmp(int *p) requires(owns(*p)) ensures(owns(*p)) { return &g == p; }   (nothing about g is held)   mode 1: no atom for p, 2: live(p) only
     const auto cmp_param = [=](Kit& k, int mode) -> std::pair<SrcLoc, SrcLoc>
     { // (the use of p, the comparison)
-        Global* g = glob(k, "g", "3");
+        Global* g {glob(k, "g", "3")};
         glob(k, "h", "7");
-        Function* f = k.fn("cmp", k.i32, {{"p", PT(k)}});
+        Function* f {k.fn("cmp", k.i32, {{"p", PT(k)}})};
         if (mode == 0)
         {
             k.req(f, pown(k, f, 0, 0));
@@ -540,8 +540,8 @@ void define_globals()
             k.req(f, plive(k, f, 0, 0));
             k.ens(f, plive(k, f, 0, 0));
         }
-        const Expr* pe = k.pn(f->param_var(0));
-        const Expr* e = k.eq(ga(k, g), pe);
+        const Expr* pe {k.pn(f->param_var(0))};
+        const Expr* e {k.eq(ga(k, g), pe)};
         f->body = k.blk({k.ret(k.bi(k.i32, e))});
         k.done(f);
         return {pe->loc, e->loc};
@@ -556,7 +556,7 @@ void define_globals()
        "the same with no atom for p: p may have ended: lifetime at its use (and the comparison, which Silicon goes on to check, may compare a one-past pointer)",
        [=](Kit& k)
        {
-           const auto at = cmp_param(k, 1);
+           const auto at {cmp_param(k, 1)};
            k.fail("lifetime", at.first);
            k.fail("pointer-comparison", at.second);
        });

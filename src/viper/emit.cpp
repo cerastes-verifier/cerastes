@@ -59,43 +59,43 @@ std::string expr(const E& e, bool top = false)
     switch (e->kind)
     {
         case LExpr::Kind::IntLit:
-            return (!e->text.empty() && e->text[0] == '-') ? "(" + e->text + ")" : e->text;
+            return (!e->text.empty() && e->text[0U] == '-') ? "(" + e->text + ")" : e->text;
         case LExpr::Kind::BoolLit:
             return e->bool_value ? "true" : "false";
         case LExpr::Kind::Var:
             return e->text;
         case LExpr::Kind::Un:
         {
-            std::string s = std::string(e->un == low::UnOp::Neg ? "-" : "!") + expr(e->a);
+            std::string s {std::string(e->un == low::UnOp::Neg ? "-" : "!") + expr(e->a)};
             return top ? s : "(" + s + ")";
         }
         case LExpr::Kind::Bin:
         {
-            std::string s = expr(e->a) + " " + bin_text(e->bin) + " " + expr(e->b);
+            std::string s {expr(e->a) + " " + bin_text(e->bin) + " " + expr(e->b)};
             return top ? s : "(" + s + ")";
         }
         case LExpr::Kind::Ite:
         {
-            std::string s = expr(e->a) + " ? " + expr(e->b) + " : " + expr(e->c);
+            std::string s {expr(e->a) + " ? " + expr(e->b) + " : " + expr(e->c)};
             return top ? s : "(" + s + ")";
         }
         case LExpr::Kind::ModPow2:
         { // decision 0026 item 7: `a % 2^k`, the divisor a positive power-of-two literal
-            std::string s = expr(e->a) + " % " + e->text;
+            std::string s {expr(e->a) + " % " + e->text};
             return top ? s : "(" + s + ")";
         }
         case LExpr::Kind::DivPow2:
         { // decision 0026 item 7: `a \ 2^k`, the divisor a positive power-of-two literal
-            std::string s = expr(e->a) + " \\ " + e->text;
+            std::string s {expr(e->a) + " \\ " + e->text};
             return top ? s : "(" + s + ")";
         }
         case LExpr::Kind::Fn:
         case LExpr::Kind::Dom:
         { // a prelude function, or a function of the Block domain (decision 0028 item 2)
-            std::string s = e->text + "(";
-            for (size_t i = 0; i < e->args.size(); ++i)
+            std::string s {e->text + "("};
+            for (size_t i {0U}; i < e->args.size(); ++i)
             {
-                s += (i != 0 ? ", " : "") + expr(e->args[i], true);
+                s += (i != 0U ? ", " : "") + expr(e->args[i], true);
             }
             return s + ")";
         }
@@ -143,7 +143,7 @@ public:
     // One line of Viper, with the checks that a failure on it can mean.
     void line(int indent, const std::string& text, const std::vector<low::Check>& checks = {})
     {
-        out_ += std::string(static_cast<size_t>(indent) * 2, ' ') + text + "\n";
+        out_ += std::string(static_cast<size_t>(indent) * 2U, ' ') + text + "\n";
         for (const low::Check& c : checks)
         {
             MapEntry m;
@@ -177,7 +177,7 @@ public:
 
 private:
     std::string out_;
-    int line_ = 1;
+    int line_ {1};
     std::vector<MapEntry> map_;
 };
 
@@ -218,22 +218,22 @@ void stmt(Printer& p, const low::LStmt& s, int indent)
         case K::Call:
         {
             std::string args;
-            for (size_t i = 0; i < s.args.size(); ++i)
+            for (size_t i {0U}; i < s.args.size(); ++i)
             {
-                args += (i != 0 ? ", " : "") + expr(s.args[i], true);
+                args += (i != 0U ? ", " : "") + expr(s.args[i], true);
             }
-            std::vector<low::Check> checks = {s.check};
+            std::vector<low::Check> checks {s.check};
             if (s.has_termination)
             {
                 checks.push_back(s.termination);
             }
-            std::string lhs = s.target.empty() ? "" : s.target + " := ";
+            std::string lhs {s.target.empty() ? "" : s.target + " := "};
             if (!s.targets.empty())
             { // a struct result: one target per leaf (decision 0044 item 4)
                 lhs.clear();
-                for (size_t i = 0; i < s.targets.size(); ++i)
+                for (size_t i {0U}; i < s.targets.size(); ++i)
                 {
-                    lhs += (i != 0 ? ", " : "") + s.targets[i];
+                    lhs += (i != 0U ? ", " : "") + s.targets[i];
                 }
                 lhs += " := ";
             }
@@ -258,9 +258,9 @@ void stmt(Printer& p, const low::LStmt& s, int indent)
             }
             {
                 std::string measure;
-                for (size_t i = 0; i < s.decreases.size(); ++i)
+                for (size_t i {0U}; i < s.decreases.size(); ++i)
                 {
-                    measure += (i != 0 ? ", " : "") + expr(s.decreases[i], true);
+                    measure += (i != 0U ? ", " : "") + expr(s.decreases[i], true);
                 }
                 // one line: Silicon reports it at the measure
                 p.line(indent + 1, "decreases " + measure, {s.decreases_check});
@@ -312,18 +312,18 @@ void method(Printer& p, const low::LMethod& m)
     {
         p.line(0, "// cerastes:trusted-contract " + m.trusted_reason);
     }
-    std::string head = "method " + m.name + "(";
-    for (size_t i = 0; i < m.formals.size(); ++i)
+    std::string head {"method " + m.name + "("};
+    for (size_t i {0U}; i < m.formals.size(); ++i)
     {
-        head += (i != 0 ? ", " : "") + decl(m.formals[i]);
+        head += (i != 0U ? ", " : "") + decl(m.formals[i]);
     }
     head += ")";
     if (!m.results.empty())
     {
         head += " returns (";
-        for (size_t i = 0; i < m.results.size(); ++i)
+        for (size_t i {0U}; i < m.results.size(); ++i)
         {
-            head += (i != 0 ? ", " : "") + decl(m.results[i]);
+            head += (i != 0U ? ", " : "") + decl(m.results[i]);
         }
         head += ")";
     }
@@ -344,9 +344,9 @@ void method(Printer& p, const low::LMethod& m)
     else
     {
         std::string measure;
-        for (size_t i = 0; i < m.decreases_.size(); ++i)
+        for (size_t i {0U}; i < m.decreases_.size(); ++i)
         {
-            measure += (i != 0 ? ", " : " ") + expr(m.decreases_[i], true);
+            measure += (i != 0U ? ", " : " ") + expr(m.decreases_[i], true);
         }
         std::vector<low::Check> checks;
         if (!m.decreases_.empty())
@@ -383,7 +383,7 @@ Emitted emit(const low::LProgram& program, const EmitOptions& options)
         }
         p.raw(memory_prelude_text(cells, program.globals, program.heap));
     }
-    const std::string prelude = prelude_text(program.prelude_used);
+    const std::string prelude {prelude_text(program.prelude_used)};
     p.raw(prelude);
     for (const low::LMethod& m : program.methods)
     {

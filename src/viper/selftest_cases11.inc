@@ -45,7 +45,7 @@ void define_pointer_cells()
     };
     auto cell_init = [=](Kit& k, Function* f, const char* name, const char* v)
     {
-        Var* x = k.cell(f, name, k.i32);
+        Var* x {k.cell(f, name, k.i32)};
         return std::make_pair(x, k.decl(x, N(k, v)));
     };
 
@@ -53,20 +53,20 @@ void define_pointer_cells()
     // int store(void) ensures(r == 5) { int x = 0; int *p = &x; int **pp = &p; [*pp = NULL;] **pp = 5; check(x == 5); return x; }
     const auto store = [=](Kit& k, bool null_first) -> SrcLoc
     {
-        Function* f = k.fn("store", k.i32);
+        Function* f {k.fn("store", k.i32)};
         if (!null_first)
         {
             k.ens(f, k.eq_c(k.R(f), k.i32, "5"));
         }
         auto [x, dx] = cell_init(k, f, "x", "0");
-        Var* p = k.cell(f, "p", PT(k));
-        Var* pp = k.local(f, "pp", PP(k));
-        std::vector<const Stmt*> s = {dx, k.decl(p, k.addr(x)), k.decl(pp, k.addr(p))};
+        Var* p {k.cell(f, "p", PT(k))};
+        Var* pp {k.local(f, "pp", PP(k))};
+        std::vector<const Stmt*> s {dx, k.decl(p, k.addr(x)), k.decl(pp, k.addr(p))};
         if (null_first)
         {
             s.push_back(k.store(k.pn(pp), k.nul(PT(k))));
         }
-        const Stmt* w = k.store(k.deref(k.pn(pp)), N(k, "5"));
+        const Stmt* w {k.store(k.deref(k.pn(pp)), N(k, "5"))};
         s.push_back(w);
         s.push_back(k.chk(k.eq_c(k.v(x), k.i32, "5")));
         s.push_back(k.ret(k.v(x)));
@@ -88,13 +88,13 @@ void define_pointer_cells()
     // int retarget(void) ensures(r == 7) { int x = 1, y = 7; int *p = &x; int **pp = &p; *pp = &y; check(p == [&y|&x]); return *p; }
     const auto retarget = [=](Kit& k, bool wrong) -> SrcLoc
     {
-        Function* f = k.fn("retarget", k.i32);
+        Function* f {k.fn("retarget", k.i32)};
         k.ens(f, k.eq_c(k.R(f), k.i32, "7"));
         auto [x, dx] = cell_init(k, f, "x", "1");
         auto [y, dy] = cell_init(k, f, "y", "7");
-        Var* p = k.cell(f, "p", PT(k));
-        Var* pp = k.local(f, "pp", PP(k));
-        const Stmt* ck = k.chk(k.eq(k.pn(p), k.addr(wrong ? x : y)));
+        Var* p {k.cell(f, "p", PT(k))};
+        Var* pp {k.local(f, "pp", PP(k))};
+        const Stmt* ck {k.chk(k.eq(k.pn(p), k.addr(wrong ? x : y)))};
         f->body = k.blkc({dx, dy, k.decl(p, k.addr(x)), k.decl(pp, k.addr(p)), k.store(k.pn(pp), k.addr(y)), ck,
                           k.ret(k.deref(k.pn(p)))});
         k.done(f);
@@ -114,23 +114,23 @@ void define_pointer_cells()
     // int depth3(void) ensures(r == 9) { int x = 1; int *p = &x; int **pp = &p; int ***ppp = &pp; [*ppp = NULL;] ***ppp = 9; return x; }
     const auto depth3 = [=](Kit& k, bool null_middle) -> SrcLoc
     {
-        Function* f = k.fn("depth3", k.i32);
+        Function* f {k.fn("depth3", k.i32)};
         if (!null_middle)
         {
             k.ens(f, k.eq_c(k.R(f), k.i32, "9"));
         }
         auto [x, dx] = cell_init(k, f, "x", "1");
-        Var* p = k.cell(f, "p", PT(k));
-        Var* pp = k.cell(f, "pp", PP(k));
-        Var* ppp = k.local(f, "ppp", k.ptr(PP(k)));
-        std::vector<const Stmt*> s = {dx, k.decl(p, k.addr(x)), k.decl(pp, k.addr(p)), k.decl(ppp, k.addr(pp))};
+        Var* p {k.cell(f, "p", PT(k))};
+        Var* pp {k.cell(f, "pp", PP(k))};
+        Var* ppp {k.local(f, "ppp", k.ptr(PP(k)))};
+        std::vector<const Stmt*> s {dx, k.decl(p, k.addr(x)), k.decl(pp, k.addr(p)), k.decl(ppp, k.addr(pp))};
         if (null_middle)
         {
             s.push_back(k.store(k.pn(ppp), k.nul(PP(k))));
         }
-        const Expr* inner = k.deref(k.pn(ppp));
-        const Expr* outer = k.deref(inner);
-        const Stmt* w = k.store(outer, N(k, "9"));
+        const Expr* inner {k.deref(k.pn(ppp))};
+        const Expr* outer {k.deref(inner)};
+        const Stmt* w {k.store(outer, N(k, "9"))};
         s.push_back(w);
         s.push_back(k.ret(k.v(x)));
         f->body = k.blkc(s);
@@ -153,9 +153,9 @@ void define_pointer_cells()
     lc("mem_ptrcell_null_compare", "int **pp = 0; return pp == 0 (was mem_rej_pointer_to_pointer)",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.i32);
+           Function* f {k.fn("f", k.i32)};
            k.ens(f, k.eq_c(k.R(f), k.i32, "1"));
-           Var* pp = k.local(f, "pp", PP(k));
+           Var* pp {k.local(f, "pp", PP(k))};
            f->body = k.blk({k.decl(pp, k.nul(PP(k))), k.ret(k.bi(k.i32, k.eq(k.pn(pp), k.nul(PP(k)))))});
            k.done(f);
        });
@@ -163,8 +163,8 @@ void define_pointer_cells()
        "a pointer local whose address is taken is a cell, released at the end (was mem_rej_address_of_pointer_variable)",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
-           Var* p = k.cell(f, "p", PT(k));
+           Function* f {k.fn("f", k.vd)};
+           Var* p {k.cell(f, "p", PT(k))};
            f->body = k.blkc({k.decl(p, k.nul(PT(k)))});
            k.done(f);
        });
@@ -172,7 +172,7 @@ void define_pointer_cells()
     // void set(int **pp, int *q) requires(owns(*pp) && live(q)) ensures(owns(*pp) && [*pp == q | *pp == old(*pp)] && live(q)) { *pp = q; }
     const auto make_set = [=](Kit& k, bool wrong) -> Function*
     {
-        Function* f = k.fn("set", k.vd, {{"pp", PP(k)}, {"q", PT(k)}});
+        Function* f {k.fn("set", k.vd, {{"pp", PP(k)}, {"q", PT(k)}})};
         k.req(f, k.land(owns(k, f, 0, 0), live(k, f, 1, 1)));
         k.ens(f, k.land(k.land(owns(k, f, 0, 0), k.eq(star(k, f, 0), wrong ? old_star(k, f, 0) : k.F(f, 1))),
                         live(k, f, 1, 1)));
@@ -189,13 +189,13 @@ void define_pointer_cells()
     lc("mem_ptrcell_param_set_post", "the contract says *pp keeps its old value, the body stores q",
        [=](Kit& k)
        {
-           Function* f = make_set(k, true);
+           Function* f {make_set(k, true)};
            k.fail("postcondition", f->end_loc);
        });
     const auto set_caller = [=](Kit& k, bool unowned) -> const Expr*
     {
-        Function* set = make_set(k, false);
-        Function* f = unowned ? k.fn("use", k.vd, {{"pp", PP(k)}}) : k.fn("use", k.i32);
+        Function* set {make_set(k, false)};
+        Function* f {unowned ? k.fn("use", k.vd, {{"pp", PP(k)}}) : k.fn("use", k.i32)};
         if (!unowned)
         {
             k.ens(f, k.eq_c(k.R(f), k.i32, "4"));
@@ -207,15 +207,15 @@ void define_pointer_cells()
         if (unowned)
         {
             auto [y, dy] = cell_init(k, f, "y", "4");
-            const Expr* c = k.call(set, {k.pn(f->param_var(0)), k.addr(y)});
+            const Expr* c {k.call(set, {k.pn(f->param_var(0)), k.addr(y)})};
             f->body = k.blkc({dy, k.es(c)});
             k.done(f);
             return c;
         }
         auto [x, dx] = cell_init(k, f, "x", "1");
         auto [y, dy] = cell_init(k, f, "y", "4");
-        Var* p = k.cell(f, "p", PT(k));
-        const Expr* c = k.call(set, {k.addr(p), k.addr(y)});
+        Var* p {k.cell(f, "p", PT(k))};
+        const Expr* c {k.call(set, {k.addr(p), k.addr(y)})};
         f->body = k.blkc({dx, dy, k.decl(p, k.addr(x)), k.es(c), k.ret(k.deref(k.pn(p)))});
         k.done(f);
         return c;
@@ -228,21 +228,21 @@ void define_pointer_cells()
     lc("mem_ptrcell_param_set_unowned", "the caller holds only live(pp): set's requires owns(*pp) fails at the call",
        [=](Kit& k)
        {
-           const Expr* c = set_caller(k, true);
+           const Expr* c {set_caller(k, true)};
            // the bound of pp's block (live alone does not give it) and the write permission fail
-           k.fail_only("permission", c->loc, 16, 2);
-           k.fail_only("permission", c->loc, 16, 3);
+           k.fail_only("permission", c->loc, 16U, 2U);
+           k.fail_only("permission", c->loc, 16U, 3U);
        });
 
     // ---- item 4: *result as a value ----
     // int *pick(int *p) requires(owns(*p) [&& *p < INT_MAX]) ensures(r == p && owns(*p) && *r == old(*p) [+ 1]) { return p; }   (mode 2: *r read with only live(p))
     const auto make_pick = [=](Kit& k, int mode, SrcLoc* read_loc = nullptr) -> Function*
     { // 0: right, 1: *r == old(*p) + 1, 2: unframed (live only)
-        Function* f = k.fn("pick", PT(k), {{"p", PT(k)}});
+        Function* f {k.fn("pick", PT(k), {{"p", PT(k)}})};
         if (mode == 2)
         {
             k.req(f, live(k, f, 0, 0));
-            const Expr* rd = k.deref(k.R(f));
+            const Expr* rd {k.deref(k.R(f))};
             if (read_loc != nullptr)
             {
                 *read_loc = rd->loc;
@@ -252,7 +252,7 @@ void define_pointer_cells()
         else
         {
             k.req(f, mode == 1 ? k.land(owns(k, f, 0, 0), k.lt(star(k, f, 0), N(k, "2147483647"))) : owns(k, f, 0, 0));
-            const Expr* want = mode == 1 ? k.add(old_star(k, f, 0), N(k, "1")) : old_star(k, f, 0);
+            const Expr* want {mode == 1 ? k.add(old_star(k, f, 0), N(k, "1")) : old_star(k, f, 0)};
             k.ens(f, k.land(k.land(k.eq(k.R(f), FP(k, f, 0)), owns(k, f, 0, 0)), k.eq(k.deref(k.R(f)), want)));
         }
         f->body = k.blk({k.ret(k.pn(f->param_var(0)))});
@@ -267,26 +267,26 @@ void define_pointer_cells()
     lc("mem_result_value_wrong", "*r is old(*p), not old(*p) + 1: the postcondition fails at the return",
        [=](Kit& k)
        {
-           Function* f = make_pick(k, 1);
-           k.fail("postcondition", f->body->stmts[0]->loc);
+           Function* f {make_pick(k, 1)};
+           k.fail("postcondition", f->body->stmts[0U]->loc);
        });
     lc("mem_result_value_unframed",
        "*r read with only live(p): no earlier atom frames it, permission at the clause (and the chain's dummy value fails the postcondition)",
        [=](Kit& k)
        {
            SrcLoc rl;
-           Function* f = make_pick(k, 2, &rl);
+           Function* f {make_pick(k, 2, &rl)};
            k.fail("permission", rl);
-           k.fail("postcondition", f->body->stmts[0]->loc);
+           k.fail("postcondition", f->body->stmts[0U]->loc);
        });
     lc("mem_result_value_caller", "int x = 7; int *q = pick(&x); return *q: the caller learns *r through the call",
        [=](Kit& k)
        {
-           Function* pick = make_pick(k, 0);
-           Function* f = k.fn("use", k.i32);
+           Function* pick {make_pick(k, 0)};
+           Function* f {k.fn("use", k.i32)};
            k.ens(f, k.eq_c(k.R(f), k.i32, "7"));
            auto [x, dx] = cell_init(k, f, "x", "7");
-           Var* q = k.local(f, "q", PT(k));
+           Var* q {k.local(f, "q", PT(k))};
            f->body = k.blkc({dx, k.decl(q, k.call(pick, {k.addr(x)})), k.ret(k.deref(k.pn(q)))});
            k.done(f);
        });
@@ -333,14 +333,14 @@ void define_written_atoms()
     };
     auto make_dispose = [=](Kit& k) -> Function*
     {
-        Function* d = k.fn("dispose", k.vd, {{"p", PT(k)}});
+        Function* d {k.fn("dispose", k.vd, {{"p", PT(k)}})};
         k.req(d, owns(k, d, 0, 0));
         k.trusted(d);
         return d;
     };
     const auto cell_init = [=](Kit& k, Function* f, const char* name, const char* v)
     {
-        Var* x = k.cell(f, name, k.i32);
+        Var* x {k.cell(f, name, k.i32)};
         return std::make_pair(x, k.decl(x, N(k, v)));
     };
 
@@ -350,19 +350,19 @@ void define_written_atoms()
     const auto touch = [=](Kit& k, int mode) -> SrcLoc
     {
         SrcLoc where;
-        Function* dispose = mode == 2 ? make_dispose(k) : nullptr;
-        Function* f = k.fn("touch", k.vd, {{"p", PT(k)}, {"n", k.i32}});
+        Function* dispose {mode == 2 ? make_dispose(k) : nullptr};
+        Function* f {k.fn("touch", k.vd, {{"p", PT(k)}, {"n", k.i32}})};
         k.req(f, k.land(mode == 1 ? live(k, f, 0, 0) : owns(k, f, 0, 0), k.range(k.F(f, 1), k.i32, "0", "100")));
         k.ens(f, mode == 1 ? live(k, f, 0, 0) : owns(k, f, 0, 0));
-        Var* q = k.local(f, "q", PT(k));
-        Var* i = k.local(f, "i", k.i32);
-        const Var* p = f->param_var(0);
-        const SrcLoc al = k.at();
-        const Expr* atom = watom(k, AtomKind::Owns, p, 0, al);
+        Var* q {k.local(f, "q", PT(k))};
+        Var* i {k.local(f, "i", k.i32)};
+        const Var* p {f->param_var(0)};
+        const SrcLoc al {k.at()};
+        const Expr* atom {watom(k, AtomKind::Owns, p, 0, al)};
         std::vector<const Stmt*> inner;
         inner.push_back(mode == 2 ? k.es(k.call(dispose, {k.pn(p)})) : k.store(k.pn(p), k.v(i)));
         inner.push_back(k.asg(i, k.add(k.v(i), N(k, "1"))));
-        const Stmt* body = k.blkc(inner);
+        const Stmt* body {k.blkc(inner)};
         if (mode == 1)
         {
             where = al;
@@ -389,16 +389,16 @@ void define_written_atoms()
        [=](Kit& k)
        {
            {
-               const SrcLoc al = touch(k, 1);
-               k.fail_only("permission", al, 10, 2); // the bound of the block and the write permission
-               k.fail_only("permission", al, 10, 3);
+               const SrcLoc al {touch(k, 1)};
+               k.fail_only("permission", al, 10U, 2U); // the bound of the block and the write permission
+               k.fail_only("permission", al, 10U, 3U);
            };
        });
     lc("mem_atom_param_consume",
        "dispose(p) in the body: an iteration ends without owning *p, reported at the body's closing brace",
        [=](Kit& k)
        {
-           k.fail_only("permission", touch(k, 2), 10, 3);
+           k.fail_only("permission", touch(k, 2), 10U, 3U);
        });
 
     // ---- a pointer local walking two cells, with the user's tie in the invariant ----
@@ -406,20 +406,20 @@ void define_written_atoms()
     // { int y = 1; int *q = p; i = 0; while (i < n) inv i <= n && (q == p || q == &y) && owns(*q) && *q == 1 { q = (q == p) ? &y : p; i += 1; } return *q; }
     const auto walk = [=](Kit& k, bool wrong) -> SrcLoc
     {
-        Function* f = k.fn("walk", k.i32, {{"p", PT(k)}, {"n", k.i32}});
+        Function* f {k.fn("walk", k.i32, {{"p", PT(k)}, {"n", k.i32}})};
         k.req(f, k.land(k.land(owns(k, f, 0, 0), k.eq_c(star(k, f, 0), k.i32, "1")),
                         k.range(k.F(f, 1), k.i32, "0", "100")));
         k.ens(f, k.land(owns(k, f, 0, 0), k.eq_c(k.R(f), k.i32, wrong ? "2" : "1")));
         auto [y, dy] = cell_init(k, f, "y", "1");
-        Var* q = k.local(f, "q", PT(k));
-        Var* i = k.local(f, "i", k.i32);
-        const Var* p = f->param_var(0);
-        const Expr* atom = watom(k, AtomKind::Owns, q, 0, k.at());
-        const Expr* inv = k.land(
+        Var* q {k.local(f, "q", PT(k))};
+        Var* i {k.local(f, "i", k.i32)};
+        const Var* p {f->param_var(0)};
+        const Expr* atom {watom(k, AtomKind::Owns, q, 0, k.at())};
+        const Expr* inv {k.land(
             k.land(k.land(k.le(k.v(i), k.pv(f, 1)), k.lor(k.eq(k.pn(q), k.pn(p)), k.eq(k.pn(q), k.addr(y)))), atom),
-            k.eq_c(rd(k, q), k.i32, "1"));
-        const Stmt* step = k.asg(q, k.cond(k.eq(k.pn(q), k.pn(p)), k.addr(y), k.pn(p)));
-        const Stmt* r = k.ret(rd(k, q));
+            k.eq_c(rd(k, q), k.i32, "1"))};
+        const Stmt* step {k.asg(q, k.cond(k.eq(k.pn(q), k.pn(p)), k.addr(y), k.pn(p)))};
+        const Stmt* r {k.ret(rd(k, q))};
         f->body = k.blkc({dy, k.decl(q, k.pn(p)), k.decl(i, N(k, "0")),
                           k.whl(k.lt(k.v(i), k.pv(f, 1)), {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(inv)},
                                 {k.cl(k.sub(k.pv(f, 1), k.v(i)))}, k.blk({step, k.asg(i, k.add(k.v(i), N(k, "1")))})),
@@ -442,21 +442,21 @@ void define_written_atoms()
     // int tie(int *p, int n) requires(owns(*p) && range) ensures(owns(*p)) { q = p; i = 0; while (i < n) inv i <= n && [p == q &&] live(q) && owns(*p) { *p = i; p = q; i += 1; } return i; }
     const auto tie = [=](Kit& k, bool with_tie, SrcLoc* back_edge) -> SrcLoc
     {
-        Function* f = k.fn("tie", k.i32, {{"p", PT(k)}, {"n", k.i32}});
+        Function* f {k.fn("tie", k.i32, {{"p", PT(k)}, {"n", k.i32}})};
         k.req(f, k.land(owns(k, f, 0, 0), k.range(k.F(f, 1), k.i32, "0", "100")));
         k.ens(f, owns(k, f, 0, 0));
-        Var* q = k.local(f, "q", PT(k));
-        Var* i = k.local(f, "i", k.i32);
-        const Var* p = f->param_var(0);
-        const Expr* la = watom(k, AtomKind::Live, q, 0, k.at());
-        const Expr* oa = watom(k, AtomKind::Owns, p, 1, k.at());
-        const Expr* inv = k.land(k.land(k.le(k.v(i), k.pv(f, 1)), la), oa);
+        Var* q {k.local(f, "q", PT(k))};
+        Var* i {k.local(f, "i", k.i32)};
+        const Var* p {f->param_var(0)};
+        const Expr* la {watom(k, AtomKind::Live, q, 0, k.at())};
+        const Expr* oa {watom(k, AtomKind::Owns, p, 1, k.at())};
+        const Expr* inv {k.land(k.land(k.le(k.v(i), k.pv(f, 1)), la), oa)};
         if (with_tie)
         {
             inv = k.land(k.land(k.le(k.v(i), k.pv(f, 1)), k.eq(k.pn(p), k.pn(q))), k.land(la, oa));
         }
-        const Stmt* body = k.blkc({k.store(k.pn(p), k.v(i)), k.asg(p, k.pn(q)), k.asg(i, k.add(k.v(i), N(k, "1")))});
-        const Stmt* r = k.ret(k.v(i));
+        const Stmt* body {k.blkc({k.store(k.pn(p), k.v(i)), k.asg(p, k.pn(q)), k.asg(i, k.add(k.v(i), N(k, "1")))})};
+        const Stmt* r {k.ret(k.v(i))};
         f->body = k.blk({k.decl(q, k.pn(p)), k.decl(i, N(k, "0")),
                          k.whl(k.lt(k.v(i), k.pv(f, 1)), {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(inv)},
                                {k.cl(k.sub(k.pv(f, 1), k.v(i)))}, body),
@@ -478,9 +478,9 @@ void define_written_atoms()
        [=](Kit& k)
        {
            SrcLoc be;
-           const SrcLoc ret = tie(k, false, &be);
-           k.fail_only("permission", be, 14, 7);
-           k.fail_only("permission", ret, 6, 1);
+           const SrcLoc ret {tie(k, false, &be)};
+           k.fail_only("permission", be, 14U, 7U);
+           k.fail_only("permission", ret, 6U, 1U);
        });
 
     // ---- reads(*p) and live(p) written in an invariant ----
@@ -489,22 +489,22 @@ void define_written_atoms()
     const auto total = [=](Kit& k, bool write) -> SrcLoc
     {
         SrcLoc where;
-        Function* f = k.fn("total", k.i32, {{"p", PT(k)}, {"n", k.i32}});
+        Function* f {k.fn("total", k.i32, {{"p", PT(k)}, {"n", k.i32}})};
         k.req(f, k.land(k.land(reads(k, f, 0, 0), k.range(star(k, f, 0), k.i32, "0", "10")),
                         k.range(k.F(f, 1), k.i32, "0", "100")));
         k.ens(f, k.land(reads(k, f, 0, 0), k.range(k.R(f), k.i32, "0", "1000")));
-        Var* q = k.local(f, "q", PT(k));
-        Var* s = k.local(f, "s", k.i32);
-        Var* i = k.local(f, "i", k.i32);
-        const Var* p = f->param_var(0);
-        const Expr* atom = watom(k, AtomKind::Reads, p, 0, k.at());
-        const Expr* inv = k.land(k.land(k.land(k.le(k.v(i), k.pv(f, 1)), k.range(k.v(s), k.i32, "0", "1000")),
-                                        k.le(k.v(s), k.mul(N(k, "10"), k.v(i)))),
-                                 k.land(atom, k.range(rd(k, p), k.i32, "0", "10")));
-        std::vector<const Stmt*> inner = {k.asg(s, k.add(k.v(s), rd(k, p)))};
+        Var* q {k.local(f, "q", PT(k))};
+        Var* s {k.local(f, "s", k.i32)};
+        Var* i {k.local(f, "i", k.i32)};
+        const Var* p {f->param_var(0)};
+        const Expr* atom {watom(k, AtomKind::Reads, p, 0, k.at())};
+        const Expr* inv {k.land(k.land(k.land(k.le(k.v(i), k.pv(f, 1)), k.range(k.v(s), k.i32, "0", "1000")),
+                                       k.le(k.v(s), k.mul(N(k, "10"), k.v(i)))),
+                                k.land(atom, k.range(rd(k, p), k.i32, "0", "10")))};
+        std::vector<const Stmt*> inner {k.asg(s, k.add(k.v(s), rd(k, p)))};
         if (write)
         {
-            const Stmt* w = k.store(k.pn(p), N(k, "0"));
+            const Stmt* w {k.store(k.pn(p), N(k, "0"))};
             where = w->loc;
             inner.push_back(w);
         }
@@ -531,16 +531,16 @@ void define_written_atoms()
     // int live_loop(int *p, int n) requires([live(p) &&] range) ensures([live(p) &&] r == n) { q = p; p = q; i = 0; while (i < n) inv i <= n && live(p) { i += 1; } return i; }
     const auto live_loop = [=](Kit& k, bool held) -> SrcLoc
     {
-        Function* f = k.fn("live_loop", k.i32, {{"p", PT(k)}, {"n", k.i32}});
-        const Expr* r = k.range(k.F(f, 1), k.i32, "0", "100");
+        Function* f {k.fn("live_loop", k.i32, {{"p", PT(k)}, {"n", k.i32}})};
+        const Expr* r {k.range(k.F(f, 1), k.i32, "0", "100")};
         k.req(f, held ? k.land(live(k, f, 0, 0), r) : r);
-        const Expr* e = k.eq(k.R(f), k.F(f, 1));
+        const Expr* e {k.eq(k.R(f), k.F(f, 1))};
         k.ens(f, held ? k.land(live(k, f, 0, 0), e) : e);
-        Var* q = k.local(f, "q", PT(k));
-        Var* i = k.local(f, "i", k.i32);
-        const Var* p = f->param_var(0);
-        const SrcLoc al = k.at();
-        const Expr* atom = watom(k, AtomKind::Live, p, 0, al);
+        Var* q {k.local(f, "q", PT(k))};
+        Var* i {k.local(f, "i", k.i32)};
+        const Var* p {f->param_var(0)};
+        const SrcLoc al {k.at()};
+        const Expr* atom {watom(k, AtomKind::Live, p, 0, al)};
         std::vector<const Stmt*> pre;
         if (held)
         { // q = p; p = q (the copy is a use of p, which needs live(p))
@@ -566,9 +566,9 @@ void define_written_atoms()
        "nothing says p points to a live object: the loop enters without the liveness its invariant needs",
        [=](Kit& k)
        {
-           const SrcLoc al = live_loop(k, false);
-           k.fail_only("permission", al, 4, 0); // the null check and the liveness permission
-           k.fail_only("permission", al, 4, 2);
+           const SrcLoc al {live_loop(k, false)};
+           k.fail_only("permission", al, 4U, 0U); // the null check and the liveness permission
+           k.fail_only("permission", al, 4U, 2U);
        });
 
     // ---- two written atoms: owns(*q) && owns(*s) ----
@@ -576,19 +576,19 @@ void define_written_atoms()
     //   while (i < n) inv i <= n && owns(*q) && owns(*s) { *q = i; *s = i; i += 1; } }
     const auto two = [=](Kit& k, bool may_alias) -> SrcLoc
     {
-        Function* f = k.fn("two", k.vd, {{"p", PT(k)}, {"r", PT(k)}, {"n", k.i32}});
+        Function* f {k.fn("two", k.vd, {{"p", PT(k)}, {"r", PT(k)}, {"n", k.i32}})};
         k.req(f, k.land(k.land(owns(k, f, 0, 0), owns(k, f, 1, 1)), k.range(k.F(f, 2), k.i32, "0", "10")));
-        Var* a = k.local(f, "a", PT(k));
-        Var* b = k.local(f, "b", PT(k));
-        Var* q = k.local(f, "q", PT(k));
-        Var* s = k.local(f, "s", PT(k));
-        Var* i = k.local(f, "i", k.i32);
-        const Var* p = f->param_var(0);
-        const Var* r = f->param_var(1);
-        const Expr* a1 = watom(k, AtomKind::Owns, q, 0, k.at());
-        const SrcLoc l2 = k.at();
-        const Expr* a2 = watom(k, AtomKind::Owns, s, 1, l2);
-        const Expr* sv = may_alias ? k.cond(k.eq(k.pv(f, 2), N(k, "5")), k.pn(p), k.pn(r)) : k.pn(r);
+        Var* a {k.local(f, "a", PT(k))};
+        Var* b {k.local(f, "b", PT(k))};
+        Var* q {k.local(f, "q", PT(k))};
+        Var* s {k.local(f, "s", PT(k))};
+        Var* i {k.local(f, "i", k.i32)};
+        const Var* p {f->param_var(0)};
+        const Var* r {f->param_var(1)};
+        const Expr* a1 {watom(k, AtomKind::Owns, q, 0, k.at())};
+        const SrcLoc l2 {k.at()};
+        const Expr* a2 {watom(k, AtomKind::Owns, s, 1, l2)};
+        const Expr* sv {may_alias ? k.cond(k.eq(k.pv(f, 2), N(k, "5")), k.pn(p), k.pn(r)) : k.pn(r)};
         f->body = k.blk(
             {k.decl(a, k.pn(p)), k.decl(b, k.pn(r)), k.asg(p, k.pn(a)), k.asg(r, k.pn(b)), k.decl(q, k.pn(p)),
              k.decl(s, sv), k.decl(i, N(k, "0")),
@@ -607,7 +607,7 @@ void define_written_atoms()
     lc("mem_atom_two_sep", "s may be q (n == 5): two owns atoms on one place, the separation fails at the later atom",
        [=](Kit& k)
        {
-           k.fail_only("permission", two(k, true), 11, 10);
+           k.fail_only("permission", two(k, true), 11U, 10U);
        });
 
     // ---- an atom whose guard is false at entry and true after q = p ----
@@ -617,23 +617,23 @@ void define_written_atoms()
        "the guard q == NULL || owns(*q) is false at entry, so the loop holds nothing of p's place; q = p makes it true and the back edge cannot show it",
        [=](Kit& k)
        {
-           Function* f = k.fn("flip", k.i32, {{"p", PT(k)}, {"n", k.i32}});
+           Function* f {k.fn("flip", k.i32, {{"p", PT(k)}, {"n", k.i32}})};
            k.req(f, k.land(owns(k, f, 0, 0), k.range(k.F(f, 1), k.i32, "0", "10")));
            k.ens(f, k.land(owns(k, f, 0, 0), k.lor(k.eq_c(k.R(f), k.i32, "0"), k.eq(k.R(f), k.F(f, 1)))));
-           Var* a = k.local(f, "a", PT(k));
-           Var* q = k.local(f, "q", PT(k));
-           Var* i = k.local(f, "i", k.i32);
-           const Var* p = f->param_var(0);
-           const Expr* la = watom(k, AtomKind::Live, p, 0, k.at());
-           const Expr* oa = watom(k, AtomKind::Owns, q, 1, k.at());
-           const Expr* inv = k.land(k.land(k.le(k.v(i), k.pv(f, 1)), la), k.lor(k.eq(k.pn(q), k.nul(PT(k))), oa));
-           const Stmt* body = k.blkc({k.asg(q, k.pn(p)), k.asg(i, k.add(k.v(i), N(k, "1")))});
+           Var* a {k.local(f, "a", PT(k))};
+           Var* q {k.local(f, "q", PT(k))};
+           Var* i {k.local(f, "i", k.i32)};
+           const Var* p {f->param_var(0)};
+           const Expr* la {watom(k, AtomKind::Live, p, 0, k.at())};
+           const Expr* oa {watom(k, AtomKind::Owns, q, 1, k.at())};
+           const Expr* inv {k.land(k.land(k.le(k.v(i), k.pv(f, 1)), la), k.lor(k.eq(k.pn(q), k.nul(PT(k))), oa))};
+           const Stmt* body {k.blkc({k.asg(q, k.pn(p)), k.asg(i, k.add(k.v(i), N(k, "1")))})};
            f->body = k.blk({k.decl(a, k.pn(p)), k.asg(p, k.pn(a)), k.decl(q, k.nul(PT(k))), k.decl(i, N(k, "0")),
                             k.whl(k.lt(k.v(i), k.pv(f, 1)), {k.cl(k.range(k.v(i), k.i32, "0", "10")), k.cl(inv)},
                                   {k.cl(k.sub(k.pv(f, 1), k.v(i)))}, body),
                             k.ret(k.cond(k.eq(k.pn(q), k.nul(PT(k))), N(k, "0"), k.pv(f, 1)))});
            k.done(f);
-           k.fail_only("permission", body->end_loc, 14, 7);
+           k.fail_only("permission", body->end_loc, 14U, 7U);
        });
 
     // ---- an atom on an automatic place (p is never assigned): it takes nothing twice ----
@@ -641,15 +641,15 @@ void define_written_atoms()
     // 0 verifies; 1: ensures *p == n; 2: the function holds only reads(*p)
     const auto fill = [=](Kit& k, int mode) -> SrcLoc
     {
-        Function* f = k.fn("fill", k.vd, {{"p", PT(k)}, {"n", k.i32}});
-        const Expr* r = k.range(k.F(f, 1), k.i32, "0", "100");
+        Function* f {k.fn("fill", k.vd, {{"p", PT(k)}, {"n", k.i32}})};
+        const Expr* r {k.range(k.F(f, 1), k.i32, "0", "100")};
         k.req(f, k.land(mode == 2 ? reads(k, f, 0, 0) : owns(k, f, 0, 0), r));
         k.ens(f, mode == 1 ? k.land(owns(k, f, 0, 0), k.eq(star(k, f, 0), k.F(f, 1)))
                            : (mode == 2 ? reads(k, f, 0, 0) : owns(k, f, 0, 0)));
-        Var* i = k.local(f, "i", k.i32);
-        const Var* p = f->param_var(0);
-        const SrcLoc al = k.at();
-        const Expr* atom = watom(k, AtomKind::Owns, p, 0, al);
+        Var* i {k.local(f, "i", k.i32)};
+        const Var* p {f->param_var(0)};
+        const SrcLoc al {k.at()};
+        const Expr* atom {watom(k, AtomKind::Owns, p, 0, al)};
         f->body = k.blk({k.decl(i, N(k, "0")),
                          k.whl(k.lt(k.v(i), k.pv(f, 1)),
                                {k.cl(k.range(k.v(i), k.i32, "0", "100")), k.cl(k.le(k.v(i), k.pv(f, 1))), k.cl(atom)},
@@ -674,7 +674,7 @@ void define_written_atoms()
        "owns(*p) written on an automatic place the function holds only as reads(*p): fails at entry",
        [=](Kit& k)
        {
-           k.fail_only("permission", fill(k, 2), 10, 3);
+           k.fail_only("permission", fill(k, 2), 10U, 3U);
        });
 
     // ---- item 3: the clause owning desugars to: p == NULL || owns(*p) in the requires and the ensures ----
@@ -682,18 +682,18 @@ void define_written_atoms()
     // mode 0 verifies; 1: no test (null-dereference); 2: keep(p) consumes the cell (permission at the end)
     const auto owning = [=](Kit& k, int mode) -> SrcLoc
     {
-        Function* keep = nullptr;
+        Function* keep {nullptr};
         if (mode == 2)
         {
             keep = k.fn("keep", k.vd, {{"p", PT(k)}});
             k.req(keep, owns(k, keep, 0, 0));
             k.trusted(keep);
         }
-        Function* f = k.fn("set_one", k.vd, {{"p", PT(k)}});
+        Function* f {k.fn("set_one", k.vd, {{"p", PT(k)}})};
         k.req(f, k.lor(k.eq(k.F(f, 0), k.nul(PT(k))), owns(k, f, 0, 0)));
         k.ens(f, k.lor(k.eq(k.F(f, 0), k.nul(PT(k))), owns(k, f, 0, 0)));
-        const Var* p = f->param_var(0);
-        const Stmt* act = mode == 2 ? k.es(k.call(keep, {k.pn(p)})) : k.store(k.pn(p), N(k, "1"));
+        const Var* p {f->param_var(0)};
+        const Stmt* act {mode == 2 ? k.es(k.call(keep, {k.pn(p)})) : k.store(k.pn(p), N(k, "1"))};
         f->body = k.blk({mode == 1 ? act : k.iff(k.ne(k.pn(p), k.nul(PT(k))), k.blk({act}))});
         k.done(f);
         return mode == 1 ? act->loc : f->end_loc;
@@ -711,16 +711,16 @@ void define_written_atoms()
     lc("mem_owning_clause_kept", "keep(p) consumes the cell: the ensures p == NULL || owns(*p) fails at the end",
        [=](Kit& k)
        {
-           k.fail_only("permission", owning(k, 2), 6, 1);
+           k.fail_only("permission", owning(k, 2), 6U, 1U);
        });
     lc("mem_owning_clause_caller", "set_one(&x); set_one(NULL); x = 3",
        [=](Kit& k)
        {
-           Function* g = k.fn("set_one", k.vd, {{"p", PT(k)}});
+           Function* g {k.fn("set_one", k.vd, {{"p", PT(k)}})};
            k.req(g, k.lor(k.eq(k.F(g, 0), k.nul(PT(k))), owns(k, g, 0, 0)));
            k.ens(g, k.lor(k.eq(k.F(g, 0), k.nul(PT(k))), owns(k, g, 0, 0)));
            k.trusted(g);
-           Function* f = k.fn("use", k.i32);
+           Function* f {k.fn("use", k.i32)};
            k.ens(f, k.eq_c(k.R(f), k.i32, "3"));
            auto [x, dx] = cell_init(k, f, "x", "0");
            f->body = k.blkc(

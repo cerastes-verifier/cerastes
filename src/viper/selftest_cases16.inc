@@ -47,13 +47,13 @@ void define_heap_read_places()
     };
     auto reqc = [](Kit& k, Function* f, const Expr* e)
     {
-        Clause c = k.cl(e);
+        Clause c {k.cl(e)};
         f->requires_.push_back(c);
         return c.loc;
     };
     auto cell_init = [=](Kit& k, Function* f, const char* name, const char* v)
     {
-        Var* x = k.cell(f, name, k.i32);
+        Var* x {k.cell(f, name, k.i32)};
         return std::make_pair(x, k.decl(x, N(k, v)));
     };
 
@@ -61,7 +61,7 @@ void define_heap_read_places()
     // void set(int **pp) requires(owns(*pp) && owns(**pp)) ensures(owns(*pp) && *pp == old(*pp) && owns(**pp) && **pp == 5) { **pp = 5; }
     const auto make_set = [=](Kit& k, const char* val) -> Function*
     {
-        Function* f = k.fn("set", k.vd, {{"pp", PPT(k)}});
+        Function* f {k.fn("set", k.vd, {{"pp", PPT(k)}})};
         k.req(f, k.land(owns(k, FP(k, f, 0), 0), owns(k, inner(k, f, 0), 1)));
         k.ens(f, k.land(k.land(k.land(owns(k, FP(k, f, 0), 0), k.eq(inner(k, f, 0), k.old(inner(k, f, 0)))),
                                owns(k, inner(k, f, 0), 1)),
@@ -84,8 +84,8 @@ void define_heap_read_places()
        "owns(**pp) written before owns(*pp): the contract reads *pp without owning it, reported at the read of *pp",
        [=](Kit& k)
        {
-           Function* f = k.fn("set", k.vd, {{"pp", PPT(k)}});
-           const Expr* load = inner(k, f, 0); // the contract's read of *pp: the node the framing check is reported at
+           Function* f {k.fn("set", k.vd, {{"pp", PPT(k)}})};
+           const Expr* load {inner(k, f, 0)}; // the contract's read of *pp: the node the framing check is reported at
            reqc(k, f, k.land(owns(k, load, 0), owns(k, FP(k, f, 0), 1)));
            f->body = k.blk({});
            k.done(f);
@@ -94,11 +94,11 @@ void define_heap_read_places()
     // int use(void) ensures(r == 5) { int x = 0; int *p = &x; set(&p); check(x == [5|6]); return x; }
     const auto use_set = [=](Kit& k, bool wrong) -> SrcLoc
     {
-        Function* set = make_set(k, "5");
-        Function* f = k.fn("use", k.i32);
+        Function* set {make_set(k, "5")};
+        Function* f {k.fn("use", k.i32)};
         auto [x, dx] = cell_init(k, f, "x", "0");
-        Var* p = k.cell(f, "p", PT(k));
-        const Stmt* c = k.chk(k.eq_c(k.v(x), k.i32, wrong ? "6" : "5"));
+        Var* p {k.cell(f, "p", PT(k))};
+        const Stmt* c {k.chk(k.eq_c(k.v(x), k.i32, wrong ? "6" : "5"))};
         f->body = k.blkc({dx, k.decl(p, k.addr(x)), k.es(k.call(set, {k.addr(p)})), c, k.ret(k.v(x))});
         k.done(f);
         return c->loc;
@@ -118,13 +118,13 @@ void define_heap_read_places()
     // void keep(int **pp) requires(owns(*pp) && live(*pp)) ensures(owns(*pp) && *pp == old(*pp) && live(*pp)) { [int local = 1; *pp = &local;] }
     const auto make_keep = [=](Kit& k, bool escape) -> Function*
     {
-        Function* f = k.fn("keep", k.vd, {{"pp", PPT(k)}});
+        Function* f {k.fn("keep", k.vd, {{"pp", PPT(k)}})};
         k.req(f, k.land(owns(k, FP(k, f, 0), 0), live(k, inner(k, f, 0), 1)));
         k.ens(f, k.land(k.land(owns(k, FP(k, f, 0), 0), k.eq(inner(k, f, 0), k.old(inner(k, f, 0)))),
                         live(k, inner(k, f, 0), 1)));
         if (escape)
         {
-            Var* local = k.cell(f, "local", k.i32);
+            Var* local {k.cell(f, "local", k.i32)};
             f->body = k.blkc({k.decl(local, N(k, "1")), k.store(k.pn(f->param_var(0)), k.addr(local))});
         }
         else
@@ -142,9 +142,9 @@ void define_heap_read_places()
     lc("hr_live_escape", "*pp = &local: the local dies at the scope exit, so the return does not give back live(*pp)",
        [=](Kit& k)
        {
-           Function* f = make_keep(k, true);
+           Function* f {make_keep(k, true)};
            // the liveness row of live(*pp); the rows of owns(*pp) and the root rows hold
-           k.fail_only("permission", f->end_loc, 9, 8);
+           k.fail_only("permission", f->end_loc, 9U, 8U);
        });
 
     // ---- a move: *pp = q, the ensures names the object on return and its amount follows the object (items 3, 7) ----
@@ -152,9 +152,9 @@ void define_heap_read_places()
     //   ensures(owns(*pp) && *pp == q && owns(**pp) && **pp == [old(*q)|old(**pp)]) { *pp = q; }
     const auto make_move = [=](Kit& k, bool keeps_value) -> Function*
     {
-        Function* f = k.fn("move", k.vd, {{"pp", PPT(k)}, {"q", PT(k)}});
+        Function* f {k.fn("move", k.vd, {{"pp", PPT(k)}, {"q", PT(k)}})};
         k.req(f, k.land(k.land(owns(k, FP(k, f, 0), 0), owns(k, inner(k, f, 0), 1)), owns(k, FP(k, f, 1), 2)));
-        const Expr* value = keeps_value ? k.old(inner2(k, f, 0)) : k.old(k.deref(FP(k, f, 1)));
+        const Expr* value {keeps_value ? k.old(inner2(k, f, 0)) : k.old(k.deref(FP(k, f, 1)))};
         k.ens(f, k.land(k.land(k.land(owns(k, FP(k, f, 0), 0), k.eq(inner(k, f, 0), FP(k, f, 1))),
                                owns(k, inner(k, f, 0), 1)),
                         k.eq(inner2(k, f, 0), value)));
@@ -179,14 +179,14 @@ void define_heap_read_places()
        "a heap-reading guard: the atom on **pp holds where *pp is not null, the body writes under the same test",
        [=](Kit& k)
        {
-           Function* f = k.fn("h", k.vd, {{"pp", PPT(k)}});
+           Function* f {k.fn("h", k.vd, {{"pp", PPT(k)}})};
            auto guarded = [&](Kit& kk)
            {
                return kk.lor(kk.eq(inner(kk, f, 0), kk.nul(PT(kk))), owns(kk, inner(kk, f, 0), 1));
            };
            k.req(f, k.land(owns(k, FP(k, f, 0), 0), guarded(k)));
            k.ens(f, k.land(k.land(owns(k, FP(k, f, 0), 0), k.eq(inner(k, f, 0), k.old(inner(k, f, 0)))), guarded(k)));
-           const Var* pp = f->param_var(0);
+           const Var* pp {f->param_var(0)};
            f->body = k.blk({k.iff(k.ne(k.deref(k.pn(pp)), k.nul(PT(k))), k.store(k.deref(k.pn(pp)), N(k, "1")))});
            k.done(f);
        });
@@ -194,8 +194,8 @@ void define_heap_read_places()
        "the guard *pp == NULL is written before owns(*pp): nothing frames its read of *pp (reported at the clause)",
        [=](Kit& k)
        {
-           Function* f = k.fn("h", k.vd, {{"pp", PPT(k)}});
-           const Expr* load = inner(k, f, 0); // the guard's read of *pp
+           Function* f {k.fn("h", k.vd, {{"pp", PPT(k)}})};
+           const Expr* load {inner(k, f, 0)}; // the guard's read of *pp
            reqc(k, f, k.land(k.lor(k.eq(load, k.nul(PT(k))), owns(k, inner(k, f, 0), 0)), owns(k, FP(k, f, 0), 1)));
            f->body = k.blk({});
            k.done(f);
@@ -206,14 +206,14 @@ void define_heap_read_places()
     // int peek(int **pp) requires(reads(*pp) && reads(**pp) && **pp < 100) ensures(reads(*pp) && reads(**pp) && r == **pp + 1) { return **pp + 1; }
     const auto make_peek = [=](Kit& k, bool write) -> const Stmt*
     {
-        Function* f = k.fn("peek", k.i32, {{"pp", PPT(k)}});
+        Function* f {k.fn("peek", k.i32, {{"pp", PPT(k)}})};
         k.req(f, k.land(k.land(reads(k, FP(k, f, 0), 0), reads(k, inner(k, f, 0), 1)),
                         k.lt(inner2(k, f, 0), N(k, "100"))));
         k.ens(f, k.land(k.land(reads(k, FP(k, f, 0), 0), reads(k, inner(k, f, 0), 1)),
                         k.eq(k.R(f), k.add(inner2(k, f, 0), N(k, "1")))));
-        const Var* pp = f->param_var(0);
-        const Stmt* w = k.store(k.deref(k.pn(pp)), N(k, "0"));
-        const Stmt* r = k.ret(k.add(k.deref(k.deref(k.pn(pp))), N(k, "1")));
+        const Var* pp {f->param_var(0)};
+        const Stmt* w {k.store(k.deref(k.pn(pp)), N(k, "0"))};
+        const Stmt* r {k.ret(k.add(k.deref(k.deref(k.pn(pp))), N(k, "1")))};
         f->body = k.blk(write ? std::vector<const Stmt*> {w, r} : std::vector<const Stmt*> {r});
         k.done(f);
         return w;
@@ -234,15 +234,15 @@ void define_heap_read_places()
     // { if (**pp > 0) { [**pp -= 1;] countdown(pp); } }
     const auto make_countdown = [=](Kit& k, bool decrease) -> SrcLoc
     {
-        Function* f = k.fn("countdown", k.vd, {{"pp", PPT(k)}});
+        Function* f {k.fn("countdown", k.vd, {{"pp", PPT(k)}})};
         k.req(f,
               k.land(k.land(owns(k, FP(k, f, 0), 0), owns(k, inner(k, f, 0), 1)), k.ge_c(inner2(k, f, 0), k.i32, "0")));
         k.ens(f, k.land(k.land(k.land(owns(k, FP(k, f, 0), 0), k.eq(inner(k, f, 0), k.old(inner(k, f, 0)))),
                                owns(k, inner(k, f, 0), 1)),
                         k.eq_c(inner2(k, f, 0), k.i32, "0")));
         k.dec(f, inner2(k, f, 0));
-        const Var* pp = f->param_var(0);
-        const Expr* call = k.call(f, {k.pn(pp)});
+        const Var* pp {f->param_var(0)};
+        const Expr* call {k.call(f, {k.pn(pp)})};
         std::vector<const Stmt*> then;
         if (decrease)
         {
@@ -270,18 +270,18 @@ void define_heap_read_places()
     // { int i = 0; while (i < n) invariant 0 <= i <= n && **pp == [i|0] { **pp += 1; i += 1; } }
     const auto make_loop = [=](Kit& k, bool wrong) -> SrcLoc
     {
-        Function* f = k.fn("bump_n", k.vd, {{"pp", PPT(k)}, {"n", k.i32}});
+        Function* f {k.fn("bump_n", k.vd, {{"pp", PPT(k)}, {"n", k.i32}})};
         k.req(f, k.land(k.land(k.land(owns(k, FP(k, f, 0), 0), owns(k, inner(k, f, 0), 1)),
                                k.range(k.F(f, 1), k.i32, "0", "100")),
                         k.eq_c(inner2(k, f, 0), k.i32, "0")));
         k.ens(f, k.land(k.land(owns(k, FP(k, f, 0), 0), k.eq(inner(k, f, 0), k.old(inner(k, f, 0)))),
                         owns(k, inner(k, f, 0), 1)));
-        Var* i = k.local(f, "i", k.i32);
-        const Var* pp = f->param_var(0);
-        const SrcLoc where = k.at();
-        const Expr* inv = k.eq(k.deref(k.deref(k.pn(pp))), wrong ? N(k, "0") : k.v(i));
-        const Stmt* body = k.blk({k.store(k.deref(k.pn(pp)), k.add(k.deref(k.deref(k.pn(pp))), N(k, "1"))),
-                                  k.asg(i, k.add(k.v(i), N(k, "1")))});
+        Var* i {k.local(f, "i", k.i32)};
+        const Var* pp {f->param_var(0)};
+        const SrcLoc where {k.at()};
+        const Expr* inv {k.eq(k.deref(k.deref(k.pn(pp))), wrong ? N(k, "0") : k.v(i))};
+        const Stmt* body {k.blk({k.store(k.deref(k.pn(pp)), k.add(k.deref(k.deref(k.pn(pp))), N(k, "1"))),
+                                 k.asg(i, k.add(k.v(i), N(k, "1")))})};
         f->body = k.blk({k.decl(i, N(k, "0")), k.whl(k.lt(k.v(i), k.pv(f, 1)),
                                                      {k.cl(k.range(k.v(i), k.i32, "0", "100")),
                                                       k.cl(k.le(k.v(i), k.pv(f, 1))), Clause {inv, where}},
@@ -306,7 +306,7 @@ void define_heap_read_places()
     //   while (i < 3) invariant i <= 3 && pp == &p && *pp == &x && owns(**pp) && **pp == 1 { i += 1; } return **pp; }
     const auto make_walk2 = [=](Kit& k, bool give_away) -> SrcLoc
     {
-        Function* dispose = nullptr;
+        Function* dispose {nullptr};
         if (give_away)
         {
             dispose = k.fn("dispose", k.vd, {{"p", PT(k)}});
@@ -314,26 +314,26 @@ void define_heap_read_places()
             k.trusted(dispose);
             k.done(dispose);
         }
-        Function* f = k.fn("walk2", k.i32);
+        Function* f {k.fn("walk2", k.i32)};
         k.ens(f, k.eq_c(k.R(f), k.i32, "1"));
         auto [x, dx] = cell_init(k, f, "x", "1");
-        Var* p = k.cell(f, "p", PT(k));
-        Var* pp = k.local(f, "pp", PPT(k));
-        Var* i = k.local(f, "i", k.i32);
-        const SrcLoc where = k.at();
-        const Expr* atom = k.b.atom(AtomKind::Owns, k.deref(k.pn(pp)), 0, where);
-        const Expr* inv = k.land(k.land(k.land(k.land(k.le_c(k.v(i), k.i32, "3"), k.eq(k.pn(pp), k.addr(p))),
-                                               k.eq(k.deref(k.pn(pp)), k.addr(x))),
-                                        atom),
-                                 k.eq_c(k.deref(k.deref(k.pn(pp))), k.i32, "1"));
+        Var* p {k.cell(f, "p", PT(k))};
+        Var* pp {k.local(f, "pp", PPT(k))};
+        Var* i {k.local(f, "i", k.i32)};
+        const SrcLoc where {k.at()};
+        const Expr* atom {k.b.atom(AtomKind::Owns, k.deref(k.pn(pp)), 0, where)};
+        const Expr* inv {k.land(k.land(k.land(k.land(k.le_c(k.v(i), k.i32, "3"), k.eq(k.pn(pp), k.addr(p))),
+                                              k.eq(k.deref(k.pn(pp)), k.addr(x))),
+                                       atom),
+                                k.eq_c(k.deref(k.deref(k.pn(pp))), k.i32, "1"))};
         std::vector<const Stmt*> inner_body;
         if (give_away)
         {
             inner_body.push_back(k.es(k.call(dispose, {k.addr(x)})));
         }
         inner_body.push_back(k.asg(i, k.add(k.v(i), N(k, "1"))));
-        const Stmt* body = k.blkc(inner_body);
-        const Stmt* ret = k.ret(k.deref(k.deref(k.pn(pp))));
+        const Stmt* body {k.blkc(inner_body)};
+        const Stmt* ret {k.ret(k.deref(k.deref(k.pn(pp))))};
         f->body = k.blkc({dx, k.decl(p, k.addr(x)), k.decl(pp, k.addr(p)), k.decl(i, N(k, "0")),
                           k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3")), Clause {inv, where}},
                                 {k.cl(k.sub(N(k, "3"), k.v(i)))}, body),
@@ -351,7 +351,7 @@ void define_heap_read_places()
        "an iteration gives x away: the back-edge row of the atom fails at the body's closing brace",
        [=](Kit& k)
        {
-           k.fail_only("permission", make_walk2(k, true), 12, 0);
+           k.fail_only("permission", make_walk2(k, true), 12U, 0U);
        });
 
     // ---- a member chain p->q->x and a by-value parameter's pointer member (items 3, 9) ----
@@ -359,10 +359,10 @@ void define_heap_read_places()
     //   ensures(owns(*p) && p->q == old(p->q) && owns(p->q->x) && p->q->x == old(p->q->x) + [1|2]) { p->q->x += 1; }
     const auto make_chain = [=](Kit& k, const char* delta) -> Function*
     {
-        StructType* L = k.prog.add_struct("L", "struct L", k.at());
+        StructType* L {k.prog.add_struct("L", "struct L", k.at())};
         k.prog.add_member(L, "q", k.ptr(Type::structure(L)), k.at());
         k.prog.add_member(L, "x", k.i32, k.at());
-        Function* f = k.fn("inc", k.vd, {{"p", k.ptr(Type::structure(L))}});
+        Function* f {k.fn("inc", k.vd, {{"p", k.ptr(Type::structure(L))}})};
         auto q_of = [&](Kit& kk)
         {
             return kk.deref(kk.mem(FP(kk, f, 0), 0));
@@ -378,8 +378,8 @@ void define_heap_read_places()
         k.req(f, k.land(k.land(owns(k, FP(k, f, 0), 0), owns(k, x_cell(k), 1)), k.lt(x_val(k), N(k, "100"))));
         k.ens(f, k.land(k.land(k.land(owns(k, FP(k, f, 0), 0), k.eq(q_of(k), k.old(q_of(k)))), owns(k, x_cell(k), 1)),
                         k.eq(x_val(k), k.add(k.old(x_val(k)), N(k, delta)))));
-        const Var* p = f->param_var(0);
-        const Expr* cell = k.mem(k.deref(k.mem(k.pn(p), 0)), 1);
+        const Var* p {f->param_var(0)};
+        const Expr* cell {k.mem(k.deref(k.mem(k.pn(p), 0)), 1)};
         f->body = k.blk({k.store(cell, k.add(k.deref(k.mem(k.deref(k.mem(k.pn(p), 0)), 1)), N(k, "1")))});
         k.done(f);
         return f;
@@ -399,10 +399,10 @@ void define_heap_read_places()
     // int main(void) { bump(); check(h == [8|9]); return 0; }
     const auto make_gbump = [=](Kit& k, bool wrong) -> SrcLoc
     {
-        Global* h = k.prog.add_global("h", k.i32, k.at());
+        Global* h {k.prog.add_global("h", k.i32, k.at())};
         h->init = k.num(k.i32, "7");
         h->value = "7";
-        Global* gp = k.prog.add_global("gp", PT(k), k.at());
+        Global* gp {k.prog.add_global("gp", PT(k), k.at())};
         gp->init_kind = Global::Init::Addr;
         gp->target = h;
         auto ga = [&](Kit& kk, const Global* g)
@@ -413,7 +413,7 @@ void define_heap_read_places()
         {
             return kk.deref(ga(kk, g));
         };
-        Function* bump = k.fn("bump", k.vd);
+        Function* bump {k.fn("bump", k.vd)};
         k.req(bump, k.land(k.land(k.b.global_atom(AtomKind::Owns, ga(k, gp), 0, k.at()), owns(k, gread(k, gp), 1)),
                            k.lt(k.deref(gread(k, gp)), N(k, "100"))));
         k.ens(bump, k.land(k.land(k.land(k.b.global_atom(AtomKind::Owns, ga(k, gp), 0, k.at()),
@@ -422,8 +422,8 @@ void define_heap_read_places()
                            k.eq(k.deref(gread(k, gp)), k.add(k.old(k.deref(gread(k, gp))), N(k, "1")))));
         bump->body = k.blk({k.store(gread(k, gp), k.add(k.deref(gread(k, gp)), N(k, "1")))});
         k.done(bump);
-        Function* m = k.fn("main", k.i32);
-        const Stmt* c = k.chk(k.eq_c(k.deref(ga(k, h)), k.i32, wrong ? "9" : "8"));
+        Function* m {k.fn("main", k.i32)};
+        const Stmt* c {k.chk(k.eq_c(k.deref(ga(k, h)), k.i32, wrong ? "9" : "8"))};
         m->body = k.blk({k.es(k.call(bump, {})), c, k.ret(N(k, "0"))});
         k.done(m);
         k.prog.set_entry(m);
@@ -445,8 +445,8 @@ void define_heap_read_places()
     // struct P { int *q; };  int get(struct P s) requires(owns(*s.q) && *s.q == 3) ensures(owns(*s.q) && r == [3|4]) { return *s.q; }
     const auto make_leaf = [=](Kit& k, bool wrong) -> const Stmt*
     {
-        StructType* P = k.strukt("P", {{"q", PT(k)}});
-        Function* get = k.fn("get", k.i32, {{"s", k.st(P)}});
+        StructType* P {k.strukt("P", {{"q", PT(k)}})};
+        Function* get {k.fn("get", k.i32, {{"s", k.st(P)}})};
         get->mark_address_taken(get->param_var(0));
         auto sq = [&](Kit& kk)
         {
@@ -454,7 +454,7 @@ void define_heap_read_places()
         }; // s.q, the entry value of the leaf
         k.req(get, k.land(owns(k, sq(k), 0), k.eq_c(k.deref(sq(k)), k.i32, "3")));
         k.ens(get, k.land(owns(k, sq(k), 0), k.eq_c(k.R(get), k.i32, wrong ? "4" : "3")));
-        const Stmt* ret = k.ret(k.deref(k.leaf(k.addr(get->param_var(0)), 0)));
+        const Stmt* ret {k.ret(k.deref(k.leaf(k.addr(get->param_var(0)), 0)))};
         get->body = k.blkc({ret});
         k.done(get);
         return ret;
@@ -490,8 +490,8 @@ void define_heap_read_place_rejections()
     rc("hr_rej_result_member_atom", "without a `requires` atom",
        [=](Kit& k)
        {
-           StructType* S = k.strukt("S", {{"q", PT(k)}});
-           Function* f = k.fn("f", Type::structure(S), {{"p", PT(k)}});
+           StructType* S {k.strukt("S", {{"q", PT(k)}})};
+           Function* f {k.fn("f", Type::structure(S), {{"p", PT(k)}})};
            k.ens(f, owns(k, k.b.field(k.R(f), 0, k.at()), 0));
            f->body = k.blk({});
            k.done(f);
@@ -500,7 +500,7 @@ void define_heap_read_place_rejections()
     rc("hr_rej_result_double_deref", "without a `requires` atom",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", PPT(k));
+           Function* f {k.fn("f", PPT(k))};
            k.ens(f, owns(k, k.deref(k.R(f)), 0));
            f->body = k.blk({k.ret(k.nul(PPT(k)))});
            k.done(f);

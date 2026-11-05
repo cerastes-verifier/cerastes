@@ -49,12 +49,12 @@ void define_init_markers()
     // A cell `x` of a caller with and without an initializer.
     auto cell_init = [=](Kit& k, Function* f, const char* name, const char* v)
     {
-        Var* x = k.cell(f, name, k.i32);
+        Var* x {k.cell(f, name, k.i32)};
         return std::make_pair(x, k.decl(x, N(k, v)));
     };
     auto cell_bare = [=](Kit& k, Function* f, const char* name)
     {
-        Var* x = k.cell(f, name, k.i32);
+        Var* x {k.cell(f, name, k.i32)};
         return std::make_pair(x, k.decl(x, nullptr));
     };
 
@@ -62,16 +62,16 @@ void define_init_markers()
     // void init(int *p [must_init][, int c]) requires(owns(*p)) ensures(owns(*p) [&& *p == 0]) { [if (c != 0)] *p = 0; }   (mode 1: the write is conditional)
     const auto make_init = [=](Kit& k, int mode) -> Function*
     {
-        std::vector<Kit::P> ps = {{"p", PT(k)}};
+        std::vector<Kit::P> ps {{"p", PT(k)}};
         if (mode == 1)
         {
             ps.push_back({"c", k.i32});
         }
-        Function* f = k.fn("init", k.vd, ps);
+        Function* f {k.fn("init", k.vd, ps)};
         mark(f, 0, InitMarker::MustInit);
         k.req(f, owns(k, f, 0, 0));
         k.ens(f, mode == 1 ? owns(k, f, 0, 0) : k.land(owns(k, f, 0, 0), k.eq_c(star(k, f, 0), k.i32, "0")));
-        const Stmt* w = k.store(k.pn(f->param_var(0)), N(k, "0"));
+        const Stmt* w {k.store(k.pn(f->param_var(0)), N(k, "0"))};
         f->body = k.blk({mode == 1 ? k.iff(k.ne(k.pv(f, 1), N(k, "0")), w) : w});
         k.done(f);
         return f;
@@ -86,7 +86,7 @@ void define_init_markers()
        "the write is under `if (c != 0)`: the flag row at the closing brace is the postcondition `must_init` promises",
        [=](Kit& k)
        {
-           Function* f = make_init(k, 1);
+           Function* f {make_init(k, 1)};
            k.fail("postcondition", f->end_loc);
        });
 
@@ -94,15 +94,15 @@ void define_init_markers()
     // int use([int c]) ensures(r == 0) { int x; [if (c != 0)] init(&x); return x; }   (mode 1: the call is conditional)
     const auto use_init = [=](Kit& k, int mode) -> const Expr*
     {
-        Function* init = make_init(k, 0);
-        Function* f = mode == 1 ? k.fn("use", k.i32, {{"c", k.i32}}) : k.fn("use", k.i32);
+        Function* init {make_init(k, 0)};
+        Function* f {mode == 1 ? k.fn("use", k.i32, {{"c", k.i32}}) : k.fn("use", k.i32)};
         if (mode == 0)
         {
             k.ens(f, k.eq_c(k.R(f), k.i32, "0"));
         }
         auto [x, dx] = cell_bare(k, f, "x");
-        const Stmt* call = k.es(k.call(init, {k.addr(x)}));
-        const Expr* rd = k.v(x);
+        const Stmt* call {k.es(k.call(init, {k.addr(x)}))};
+        const Expr* rd {k.v(x)};
         f->body = k.blkc({dx, mode == 1 ? k.iff(k.ne(k.pv(f, 0), N(k, "0")), call) : call, k.ret(rd)});
         k.done(f);
         return rd;
@@ -123,11 +123,11 @@ void define_init_markers()
     // int fill(int *p [ref_to_uninit]) requires(owns(*p)) ensures(r, owns(*p) && r == 7) { [*p = 7;] return *p; }   (mode 1: no write, the read is first)
     const auto make_fill = [=](Kit& k, int mode) -> const Expr*
     {
-        Function* f = k.fn("fill", k.i32, {{"p", PT(k)}});
+        Function* f {k.fn("fill", k.i32, {{"p", PT(k)}})};
         mark(f, 0, InitMarker::RefToUninit);
         k.req(f, owns(k, f, 0, 0));
         k.ens(f, mode == 1 ? owns(k, f, 0, 0) : k.land(owns(k, f, 0, 0), k.eq_c(k.R(f), k.i32, "7")));
-        const Expr* rd = k.deref(k.pn(f->param_var(0)));
+        const Expr* rd {k.deref(k.pn(f->param_var(0)))};
         f->body = k.blk({mode == 1 ? k.ret(rd) : k.blk({k.store(k.pn(f->param_var(0)), N(k, "7")), k.ret(rd)})});
         k.done(f);
         return rd;
@@ -147,7 +147,7 @@ void define_init_markers()
     // void leave(int *p [ref_to_uninit]) requires(owns(*p)) ensures(owns(*p)) { }   and its caller `int x; leave(&x); [return x;]`
     const auto make_leave = [=](Kit& k) -> Function*
     {
-        Function* f = k.fn("leave", k.vd, {{"p", PT(k)}});
+        Function* f {k.fn("leave", k.vd, {{"p", PT(k)}})};
         mark(f, 0, InitMarker::RefToUninit);
         k.req(f, owns(k, f, 0, 0));
         k.ens(f, owns(k, f, 0, 0));
@@ -157,10 +157,10 @@ void define_init_markers()
     };
     const auto use_leave = [=](Kit& k, bool read) -> const Expr*
     {
-        Function* leave = make_leave(k);
-        Function* f = read ? k.fn("use", k.i32) : k.fn("use", k.vd);
+        Function* leave {make_leave(k)};
+        Function* f {read ? k.fn("use", k.i32) : k.fn("use", k.vd)};
         auto [x, dx] = cell_bare(k, f, "x");
-        const Expr* rd = read ? k.v(x) : nullptr;
+        const Expr* rd {read ? k.v(x) : nullptr};
         f->body = k.blkc({dx, k.es(k.call(leave, {k.addr(x)})), read ? k.ret(rd) : k.es(N(k, "0"))});
         k.done(f);
         return rd;
@@ -182,7 +182,7 @@ void define_init_markers()
     // int keep(int c) { int x [= 1]; maybe(&x, c); return x; }
     const auto make_maybe = [=](Kit& k) -> Function*
     {
-        Function* f = k.fn("maybe", k.vd, {{"p", PT(k)}, {"c", k.i32}});
+        Function* f {k.fn("maybe", k.vd, {{"p", PT(k)}, {"c", k.i32}})};
         mark(f, 0, InitMarker::RefToUninit);
         k.req(f, owns(k, f, 0, 0));
         k.ens(f, owns(k, f, 0, 0));
@@ -192,10 +192,10 @@ void define_init_markers()
     };
     const auto keep = [=](Kit& k, bool initialized) -> const Expr*
     {
-        Function* maybe = make_maybe(k);
-        Function* f = k.fn("keep", k.i32, {{"c", k.i32}});
+        Function* maybe {make_maybe(k)};
+        Function* f {k.fn("keep", k.i32, {{"c", k.i32}})};
         auto [x, dx] = initialized ? cell_init(k, f, "x", "1") : cell_bare(k, f, "x");
-        const Expr* rd = k.v(x);
+        const Expr* rd {k.v(x)};
         f->body = k.blkc({dx, k.es(k.call(maybe, {k.addr(x), k.pv(f, 0)})), k.ret(rd)});
         k.done(f);
         return rd;
@@ -215,7 +215,7 @@ void define_init_markers()
     // void set(int *p) requires(owns(*p)) ensures(owns(*p)) { *p = 1; }   int look(int *p) requires(reads(*p)) ensures(reads(*p) && r == *p)   (trusted)
     const auto make_set = [=](Kit& k) -> Function*
     {
-        Function* d = k.fn("set", k.vd, {{"p", PT(k)}});
+        Function* d {k.fn("set", k.vd, {{"p", PT(k)}})};
         k.req(d, owns(k, d, 0, 0));
         k.ens(d, owns(k, d, 0, 0));
         k.trusted(d);
@@ -223,7 +223,7 @@ void define_init_markers()
     };
     const auto make_look = [=](Kit& k) -> Function*
     {
-        Function* d = k.fn("look", k.i32, {{"p", PT(k)}});
+        Function* d {k.fn("look", k.i32, {{"p", PT(k)}})};
         k.req(d, reads(k, d, 0, 0));
         k.ens(d, k.land(reads(k, d, 0, 0), k.eq(k.R(d), star(k, d, 0))));
         k.trusted(d);
@@ -231,10 +231,10 @@ void define_init_markers()
     };
     const auto use_unmarked = [=](Kit& k, bool owns_param, bool initialized) -> const Expr*
     {
-        Function* callee = owns_param ? make_set(k) : make_look(k);
-        Function* f = k.fn("use", k.i32);
+        Function* callee {owns_param ? make_set(k) : make_look(k)};
+        Function* f {k.fn("use", k.i32)};
         auto [x, dx] = initialized ? cell_init(k, f, "x", "1") : cell_bare(k, f, "x");
-        const Expr* c = k.call(callee, {k.addr(x)});
+        const Expr* c {k.call(callee, {k.addr(x)})};
         f->body = k.blkc({dx, owns_param ? k.es(c) : k.es(c), k.ret(N(k, "0"))});
         k.done(f);
         return c;
@@ -266,41 +266,41 @@ void define_init_markers()
        "a call that needs owns(g): its flag row is category `uninitialized` (never failing for a global), one row at the call",
        [=](Kit& k)
        {
-           Global* g = k.prog.add_global("g", k.i32, k.at(), nullptr);
+           Global* g {k.prog.add_global("g", k.i32, k.at(), nullptr)};
            g->init = N(k, "3");
            g->value = "3";
            auto ga = [&]()
            {
                return k.b.global_addr(g, k.at());
            };
-           Function* bump = k.fn("bump", k.vd);
+           Function* bump {k.fn("bump", k.vd)};
            k.req(bump, k.b.global_atom(AtomKind::Owns, ga(), 0, k.at(), false));
            k.ens(bump, k.b.global_atom(AtomKind::Owns, ga(), 0, k.at(), false));
            bump->body = k.blk({k.store(ga(), N(k, "1"))});
            k.done(bump);
-           Function* f = k.fn("use", k.vd);
+           Function* f {k.fn("use", k.vd)};
            k.req(f, k.b.global_atom(AtomKind::Owns, ga(), 0, k.at(), false));
            k.ens(f, k.b.global_atom(AtomKind::Owns, ga(), 0, k.at(), false));
-           const Expr* c = k.call(bump, {});
+           const Expr* c {k.call(bump, {})};
            f->body = k.blk({k.es(c)});
            k.done(f);
-           k.rows("uninitialized", c->loc, 1);
+           k.rows("uninitialized", c->loc, 1U);
        });
 
     // ---- pointer cells (item 4: a marker on T **pp covers the cell *pp, its range being WF) ----
     // void make(int **pp [must_init]) requires(owns(*pp)) ensures(owns(*pp) && *pp == NULL) { [if (c)] *pp = NULL; }
     const auto make_make = [=](Kit& k, bool conditional) -> Function*
     {
-        std::vector<Kit::P> ps = {{"pp", PP(k)}};
+        std::vector<Kit::P> ps {{"pp", PP(k)}};
         if (conditional)
         {
             ps.push_back({"c", k.i32});
         }
-        Function* f = k.fn("make", k.vd, ps);
+        Function* f {k.fn("make", k.vd, ps)};
         mark(f, 0, InitMarker::MustInit);
         k.req(f, owns(k, f, 0, 0));
         k.ens(f, conditional ? owns(k, f, 0, 0) : k.land(owns(k, f, 0, 0), k.eq(star(k, f, 0), k.nul(PT(k)))));
-        const Stmt* w = k.store(k.pn(f->param_var(0)), k.nul(PT(k)));
+        const Stmt* w {k.store(k.pn(f->param_var(0)), k.nul(PT(k)))};
         f->body = k.blk({conditional ? k.iff(k.ne(k.pv(f, 1), N(k, "0")), w) : w});
         k.done(f);
         return f;
@@ -319,10 +319,10 @@ void define_init_markers()
     lc("init_ptrptr_caller", "int *q; make(&q); return q == NULL: the pointer cell has a value after the call",
        [=](Kit& k)
        {
-           Function* make = make_make(k, false);
-           Function* f = k.fn("use", k.i32);
+           Function* make {make_make(k, false)};
+           Function* f {k.fn("use", k.i32)};
            k.ens(f, k.eq_c(k.R(f), k.i32, "1"));
-           Var* q = k.cell(f, "q", PT(k));
+           Var* q {k.cell(f, "q", PT(k))};
            f->body = k.blkc({k.decl(q, nullptr), k.es(k.call(make, {k.addr(q)})),
                              k.ret(k.cond(k.eq(k.pn(q), k.nul(PT(k))), N(k, "1"), N(k, "0")))});
            k.done(f);
@@ -332,12 +332,12 @@ void define_init_markers()
     // void init_twice(int *p [must_init]) requires(owns(*p)) ensures(owns(*p) && *p == 0) { init(p) or set(p); }
     const auto pass_on = [=](Kit& k, bool to_marked) -> const Expr*
     {
-        Function* callee = to_marked ? make_init(k, 0) : make_set(k);
-        Function* f = k.fn("init_twice", k.vd, {{"p", PT(k)}});
+        Function* callee {to_marked ? make_init(k, 0) : make_set(k)};
+        Function* f {k.fn("init_twice", k.vd, {{"p", PT(k)}})};
         mark(f, 0, InitMarker::MustInit);
         k.req(f, owns(k, f, 0, 0));
         k.ens(f, to_marked ? k.land(owns(k, f, 0, 0), k.eq_c(star(k, f, 0), k.i32, "0")) : owns(k, f, 0, 0));
-        const Expr* c = k.call(callee, {k.pn(f->param_var(0))});
+        const Expr* c {k.call(callee, {k.pn(f->param_var(0))})};
         f->body = k.blk({k.es(c)});
         k.done(f);
         return c;
@@ -358,18 +358,18 @@ void define_init_markers()
     // void fill(int *p [must_init], int n) requires(owns(*p) && 0 <= n <= 100) ensures(owns(*p) [&& *p == n]) { int i = 0; [*p = 0;] while (i < n) inv ... { *p [+]= ...; i += 1; } }
     const auto loop_fill = [=](Kit& k, bool write_before) -> SrcLoc
     {
-        Function* f = k.fn("fill", k.vd, {{"p", PT(k)}, {"n", k.i32}});
+        Function* f {k.fn("fill", k.vd, {{"p", PT(k)}, {"n", k.i32}})};
         mark(f, 0, InitMarker::MustInit);
         k.req(f, k.land(owns(k, f, 0, 0), k.range(k.F(f, 1), k.i32, "0", "100")));
         k.ens(f, write_before ? k.land(owns(k, f, 0, 0), k.eq(star(k, f, 0), k.F(f, 1))) : owns(k, f, 0, 0));
-        Var* i = k.local(f, "i", k.i32);
-        const Var* p = f->param_var(0);
-        const Expr* inv = write_before ? k.land(k.land(k.ge_c(k.v(i), k.i32, "0"), k.le(k.v(i), k.pv(f, 1))),
-                                                k.eq(k.deref(k.pn(p)), k.v(i)))
-                                       : k.land(k.ge_c(k.v(i), k.i32, "0"), k.le(k.v(i), k.pv(f, 1)));
-        const Stmt* upd = write_before ? k.cstore(k.pn(p), BinaryOp::Add, N(k, "1")) : k.store(k.pn(p), k.v(i));
-        const Stmt* body = k.blk({upd, k.asg(i, k.add(k.v(i), N(k, "1")))});
-        std::vector<const Stmt*> ss = {k.decl(i, N(k, "0"))};
+        Var* i {k.local(f, "i", k.i32)};
+        const Var* p {f->param_var(0)};
+        const Expr* inv {write_before ? k.land(k.land(k.ge_c(k.v(i), k.i32, "0"), k.le(k.v(i), k.pv(f, 1))),
+                                               k.eq(k.deref(k.pn(p)), k.v(i)))
+                                      : k.land(k.ge_c(k.v(i), k.i32, "0"), k.le(k.v(i), k.pv(f, 1)))};
+        const Stmt* upd {write_before ? k.cstore(k.pn(p), BinaryOp::Add, N(k, "1")) : k.store(k.pn(p), k.v(i))};
+        const Stmt* body {k.blk({upd, k.asg(i, k.add(k.v(i), N(k, "1")))})};
+        std::vector<const Stmt*> ss {k.decl(i, N(k, "0"))};
         if (write_before)
         {
             ss.push_back(k.store(k.pn(p), N(k, "0")));
@@ -399,18 +399,18 @@ void define_init_markers()
     // places, and the case would pass with or without the row `held && flag ==> range`).
     const auto after_loop = [=](Kit& k, bool read) -> const Expr*
     {
-        Function* leave = make_leave(k);
-        Function* f = k.fn("after", k.i32, {{"q", PT(k)}, {"n", k.i32}});
+        Function* leave {make_leave(k)};
+        Function* f {k.fn("after", k.i32, {{"q", PT(k)}, {"n", k.i32}})};
         k.req(f, k.land(reads(k, f, 0, 0), k.range(k.F(f, 1), k.i32, "0", "10")));
         k.ens(f, reads(k, f, 0, 0));
         auto [x, dx] = cell_bare(k, f, "x");
-        Var* i = k.local(f, "i", k.i32);
-        Var* s = k.local(f, "s", k.i32);
-        const Stmt* body = k.blk({k.asg(s, k.deref(k.pn(f->param_var(0)))), k.asg(i, k.add(k.v(i), N(k, "1")))});
-        const Stmt* loop =
-            k.whl(k.lt(k.v(i), k.pv(f, 1)), {k.cl(k.land(k.ge_c(k.v(i), k.i32, "0"), k.le(k.v(i), k.pv(f, 1))))},
-                  {k.cl(k.sub(k.pv(f, 1), k.v(i)))}, body);
-        const Expr* rd = k.v(x);
+        Var* i {k.local(f, "i", k.i32)};
+        Var* s {k.local(f, "s", k.i32)};
+        const Stmt* body {k.blk({k.asg(s, k.deref(k.pn(f->param_var(0)))), k.asg(i, k.add(k.v(i), N(k, "1")))})};
+        const Stmt* loop {k.whl(k.lt(k.v(i), k.pv(f, 1)),
+                                {k.cl(k.land(k.ge_c(k.v(i), k.i32, "0"), k.le(k.v(i), k.pv(f, 1))))},
+                                {k.cl(k.sub(k.pv(f, 1), k.v(i)))}, body)};
+        const Expr* rd {k.v(x)};
         f->body = k.blkc({dx, k.decl(s, N(k, "0")), k.decl(i, N(k, "0")), loop, k.es(k.call(leave, {k.addr(x)})),
                           k.ret(read ? rd : k.v(i))});
         k.done(f);
@@ -432,13 +432,13 @@ void define_init_markers()
        "a ref_to_uninit callee whose loop reads *q and never writes *p: the return rows flag ==> range and old(flag) ==> flag hold after it",
        [=](Kit& k)
        {
-           Function* f = k.fn("spin", k.vd, {{"p", PT(k)}, {"q", PT(k)}, {"n", k.i32}});
+           Function* f {k.fn("spin", k.vd, {{"p", PT(k)}, {"q", PT(k)}, {"n", k.i32}})};
            mark(f, 0, InitMarker::RefToUninit);
            k.req(f, k.land(k.land(owns(k, f, 0, 0), reads(k, f, 1, 1)), k.range(k.F(f, 2), k.i32, "0", "10")));
            k.ens(f, k.land(owns(k, f, 0, 0), reads(k, f, 1, 1)));
-           Var* i = k.local(f, "i", k.i32);
-           Var* s = k.local(f, "s", k.i32);
-           const Stmt* body = k.blk({k.asg(s, k.deref(k.pn(f->param_var(1)))), k.asg(i, k.add(k.v(i), N(k, "1")))});
+           Var* i {k.local(f, "i", k.i32)};
+           Var* s {k.local(f, "s", k.i32)};
+           const Stmt* body {k.blk({k.asg(s, k.deref(k.pn(f->param_var(1)))), k.asg(i, k.add(k.v(i), N(k, "1")))})};
            f->body = k.blk(
                {k.decl(s, N(k, "0")), k.decl(i, N(k, "0")),
                 k.whl(k.lt(k.v(i), k.pv(f, 2)), {k.cl(k.land(k.ge_c(k.v(i), k.i32, "0"), k.le(k.v(i), k.pv(f, 2))))},
@@ -450,12 +450,12 @@ void define_init_markers()
        "a completeness cost, pinned: the write is only in a loop that always runs, and the loop keeps only ds ==> flag: postcondition at the closing brace",
        [=](Kit& k)
        {
-           Function* f = k.fn("fill", k.vd, {{"p", PT(k)}});
+           Function* f {k.fn("fill", k.vd, {{"p", PT(k)}})};
            mark(f, 0, InitMarker::MustInit);
            k.req(f, owns(k, f, 0, 0));
            k.ens(f, owns(k, f, 0, 0));
-           Var* i = k.local(f, "i", k.i32);
-           const Stmt* body = k.blk({k.store(k.pn(f->param_var(0)), k.v(i)), k.asg(i, k.add(k.v(i), N(k, "1")))});
+           Var* i {k.local(f, "i", k.i32)};
+           const Stmt* body {k.blk({k.store(k.pn(f->param_var(0)), k.v(i)), k.asg(i, k.add(k.v(i), N(k, "1")))})};
            f->body = k.blk(
                {k.decl(i, N(k, "0")),
                 k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.land(k.ge_c(k.v(i), k.i32, "0"), k.le_c(k.v(i), k.i32, "3")))},
@@ -469,23 +469,23 @@ void define_init_markers()
     // void f(int *p [ref_to_uninit]) requires(owns(*p) && p == &g) ensures(owns(*p)) { [*p = 1;] h(); }
     const auto via_param = [=](Kit& k, bool write_first) -> const Expr*
     {
-        Global* g = k.prog.add_global("g", k.i32, k.at(), nullptr);
+        Global* g {k.prog.add_global("g", k.i32, k.at(), nullptr)};
         g->init = N(k, "0");
         g->value = "0";
         auto ga = [&]()
         {
             return k.b.global_addr(g, k.at());
         };
-        Function* h = k.fn("h", k.vd);
+        Function* h {k.fn("h", k.vd)};
         k.req(h, k.b.global_atom(AtomKind::Owns, ga(), 0, k.at(), false));
         k.ens(h, k.b.global_atom(AtomKind::Owns, ga(), 0, k.at(), false));
         h->body = k.blk({k.store(ga(), N(k, "1"))});
         k.done(h);
-        Function* f = k.fn("f", k.vd, {{"p", PT(k)}});
+        Function* f {k.fn("f", k.vd, {{"p", PT(k)}})};
         mark(f, 0, InitMarker::RefToUninit);
         k.req(f, k.land(owns(k, f, 0, 0), k.eq(FP(k, f, 0), ga())));
         k.ens(f, owns(k, f, 0, 0));
-        const Expr* c = k.call(h, {});
+        const Expr* c {k.call(h, {})};
         f->body = k.blk({write_first ? k.store(k.pn(f->param_var(0)), N(k, "1")) : k.es(N(k, "0")), k.es(c)});
         k.done(f);
         return c;
@@ -509,9 +509,9 @@ void define_init_markers()
     // The accepted twins are lowering cases above: init_must_init has *p == 0 in its must_init ensures, and every marked callee owns *p in both lists.
     const auto marked = [=](Kit& k, int shape)
     {
-        const bool ref_only = shape == 1 || shape == 3 || shape == 5 || shape == 6 || shape == 8;
-        const InitMarker m = ref_only ? InitMarker::RefToUninit : InitMarker::MustInit;
-        Function* f = k.fn("f", k.vd, {{"p", shape == 0 ? k.i32 : PT(k)}});
+        const bool ref_only {shape == 1 || shape == 3 || shape == 5 || shape == 6 || shape == 8};
+        const InitMarker m {ref_only ? InitMarker::RefToUninit : InitMarker::MustInit};
+        Function* f {k.fn("f", k.vd, {{"p", shape == 0 ? k.i32 : PT(k)}})};
         mark(f, 0, m);
         if (shape == 4)
         {

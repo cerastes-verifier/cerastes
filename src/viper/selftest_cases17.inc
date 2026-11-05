@@ -14,13 +14,13 @@ namespace {
 // malloc's or calloc's view for one object of `pointee`: `Ptr(T) malloc(void) ensures(r == NULL || owns_block(r) [&& every leaf is zero])`.
 Function* heap_alloc_view(Kit& k, const char* name, Type pointee, bool zeroed, Allocator al = Allocator::Platform)
 {
-    const Type pt = k.ptr(pointee);
-    Function* f = k.fn(name, pt);
+    const Type pt {k.ptr(pointee)};
+    Function* f {k.fn(name, pt)};
     f->allocator = al; // decision 0050 item 3: a `vlibc_` view's token has the value false
     k.trusted(f, std::string("vlibc: ") + name + " returns NULL or one new block; typed view: one " + pointee.str() +
                      ", decision 0047");
-    const Expr* is_null = k.eq(k.R(f), k.nul(pt));
-    const Expr* rhs = k.b.atom(AtomKind::OwnsBlock, k.R(f), -1, k.at());
+    const Expr* is_null {k.eq(k.R(f), k.nul(pt))};
+    const Expr* rhs {k.b.atom(AtomKind::OwnsBlock, k.R(f), -1, k.at())};
     auto zero_of = [&](const Type& t) -> const Expr*
     {
         return t.is_bool() ? k.no() : t.is_ptr() ? k.nul(t) : k.num(t, "0");
@@ -31,7 +31,7 @@ Function* heap_alloc_view(Kit& k, const char* name, Type pointee, bool zeroed, A
         {
             for (const StructLeaf& lf : struct_leaves(*pointee.struct_type))
             {
-                const Expr* addr = k.R(f);
+                const Expr* addr {k.R(f)};
                 for (int idx : lf.path)
                 {
                     addr = k.mem(addr, idx);
@@ -56,10 +56,10 @@ Function* heap_alloc_view(Kit& k, const char* name, Type pointee, bool zeroed, A
 // free's view for a pointer to `pointee`: `void free(T *ptr) requires(ptr == NULL || owns_block(ptr))`, `deallocates`, the parameter `ref_to_uninit`.
 Function* heap_free_view(Kit& k, Type pointee, Allocator al = Allocator::Platform)
 {
-    const Type pt = k.ptr(pointee);
-    Function* f = k.fn(al == Allocator::Vlibc ? "vlibc_free" : "free", k.vd, {{"ptr", pt}});
+    const Type pt {k.ptr(pointee)};
+    Function* f {k.fn(al == Allocator::Vlibc ? "vlibc_free" : "free", k.vd, {{"ptr", pt}})};
     f->allocator = al;
-    f->params[0].init = InitMarker::RefToUninit;
+    f->params[0U].init = InitMarker::RefToUninit;
     k.trusted(f, std::string("vlibc: ") + f->c_name + " ends the allocation" +
                      (al == Allocator::Vlibc ? " in vlibc's heap" : "") + "; typed view: one " + pointee.str() +
                      ", decision 0047"); // the tag names the routine as the lint pins it
@@ -107,16 +107,16 @@ void define_heap()
     //   3: a second free (invalid-free at it); 4: a write after the free (permission at the store); 5: p == q after the free (lifetime at the use of p)
     const auto int_life = [=](Kit& k, int mode) -> SrcLoc
     {
-        Function* m = heap_alloc_view(k, "malloc", k.i32, false);
-        Function* fr = heap_free_view(k, k.i32);
-        Function* f = k.fn("f", k.vd);
-        Var* p = k.local(f, "p", PT(k));
-        Var* q = k.local(f, "q", PT(k));
+        Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+        Function* fr {heap_free_view(k, k.i32)};
+        Function* f {k.fn("f", k.vd)};
+        Var* p {k.local(f, "p", PT(k))};
+        Var* q {k.local(f, "q", PT(k))};
         SrcLoc where;
         std::vector<const Stmt*> in;
         if (mode != 2)
         {
-            const Stmt* w = k.store(k.pn(p), N(k, "5"));
+            const Stmt* w {k.store(k.pn(p), N(k, "5"))};
             if (mode == 1)
             {
                 where = w->loc;
@@ -127,27 +127,27 @@ void define_heap()
         else
         {
             // the read before any write, into a local nothing checks: the one error is the read of the cell with no value
-            Var* x = k.local(f, "x", k.i32);
-            const Expr* rd = k.deref(k.pn(p));
+            Var* x {k.local(f, "x", k.i32)};
+            const Expr* rd {k.deref(k.pn(p))};
             where = rd->loc;
             in.push_back(k.decl(x, rd));
         }
         in.push_back(k.es(k.call(fr, {k.pn(p)})));
         if (mode == 3)
         {
-            const Expr* again = k.call(fr, {k.pn(p)});
+            const Expr* again {k.call(fr, {k.pn(p)})};
             where = again->loc;
             in.push_back(k.es(again));
         }
         else if (mode == 4)
         {
-            const Stmt* w = k.store(k.pn(p), N(k, "6"));
+            const Stmt* w {k.store(k.pn(p), N(k, "6"))};
             where = w->loc;
             in.push_back(w);
         }
         else if (mode == 5)
         {
-            const Expr* use = k.pn(p);
+            const Expr* use {k.pn(p)};
             where = use->loc;
             in.push_back(k.chk(k.eq(use, k.pn(q))));
         }
@@ -177,7 +177,7 @@ void define_heap()
        "free(p) twice: the second one finds no token (invalid-free: may already be freed; the token is row 0 of the four rows of a free of an int)",
        [=](Kit& k)
        {
-           k.fail_only("invalid-free", int_life(k, 3), 4, 0);
+           k.fail_only("invalid-free", int_life(k, 3), 4U, 0U);
        });
     lc("hv_int_write_after_free", "*p = 6 after free(p): the cell is gone (permission)",
        [=](Kit& k)
@@ -193,12 +193,12 @@ void define_heap()
     // struct S { int x; int y; };  void f(void) { struct S *s = malloc(); if (s != NULL) { s->x = 1; [s->y = 2;] check(s->x + s->y == 3); free(s); } }
     const auto struct_life = [=](Kit& k, bool skip_y) -> SrcLoc
     {
-        StructType* S = k.strukt("S", {{"x", k.i32}, {"y", k.i32}});
-        const Type SP = k.ptr(k.st(S));
-        Function* m = heap_alloc_view(k, "malloc", k.st(S), false);
-        Function* fr = heap_free_view(k, k.st(S));
-        Function* f = k.fn("f", k.vd);
-        Var* s = k.local(f, "s", SP);
+        StructType* S {k.strukt("S", {{"x", k.i32}, {"y", k.i32}})};
+        const Type SP {k.ptr(k.st(S))};
+        Function* m {heap_alloc_view(k, "malloc", k.st(S), false)};
+        Function* fr {heap_free_view(k, k.st(S))};
+        Function* f {k.fn("f", k.vd)};
+        Var* s {k.local(f, "s", SP)};
         std::vector<const Stmt*> in {k.lstore(k.pn(s), 0, N(k, "1"))};
         SrcLoc where;
         if (!skip_y)
@@ -209,8 +209,8 @@ void define_heap()
         else
         {
             // y is read into a local nothing checks: the one error is the read of the member cell with no value
-            Var* t = k.local(f, "t", k.i32);
-            const Expr* rd = k.leaf(k.pn(s), 1);
+            Var* t {k.local(f, "t", k.i32)};
+            const Expr* rd {k.leaf(k.pn(s), 1)};
             where = rd->loc;
             in.push_back(k.decl(t, rd));
         }
@@ -234,18 +234,18 @@ void define_heap()
     // void f(void) { struct Out *o = malloc(); if (o != NULL) { o->k = 1; o->in.a = 2; o->q = NULL; check(o->in.a == 2); free(o); } }
     const auto nested_life = [=](Kit& k, bool wrong) -> SrcLoc
     {
-        StructType* In = k.strukt("In", {{"a", k.i32}});
-        StructType* Out = k.strukt("Out", {{"k", k.i32}, {"in", k.st(In)}, {"q", PT(k)}});
-        const Type OP = k.ptr(k.st(Out));
-        Function* m = heap_alloc_view(k, "malloc", k.st(Out), false);
-        Function* fr = heap_free_view(k, k.st(Out));
-        Function* f = k.fn("f", k.vd);
-        Var* o = k.local(f, "o", OP);
+        StructType* In {k.strukt("In", {{"a", k.i32}})};
+        StructType* Out {k.strukt("Out", {{"k", k.i32}, {"in", k.st(In)}, {"q", PT(k)}})};
+        const Type OP {k.ptr(k.st(Out))};
+        Function* m {heap_alloc_view(k, "malloc", k.st(Out), false)};
+        Function* fr {heap_free_view(k, k.st(Out))};
+        Function* f {k.fn("f", k.vd)};
+        Var* o {k.local(f, "o", OP)};
         auto in_a = [&]()
         {
             return k.mem(k.mem(k.pn(o), 1), 0);
         };
-        const Stmt* c = k.chk(k.eq_c(k.deref(in_a()), k.i32, wrong ? "3" : "2"));
+        const Stmt* c {k.chk(k.eq_c(k.deref(in_a()), k.i32, wrong ? "3" : "2"))};
         f->body = k.blk(
             {k.decl(o, k.call(m, {})),
              k.iff(notnull(k, o, OP), k.blk({k.lstore(k.pn(o), 0, N(k, "1")), k.store(in_a(), N(k, "2")),
@@ -269,11 +269,11 @@ void define_heap()
     // int *p = calloc(); if (p != NULL) { check(*p == [0|1]); free(p); }
     const auto calloc_int = [=](Kit& k, bool wrong) -> SrcLoc
     {
-        Function* m = heap_alloc_view(k, "calloc", k.i32, true);
-        Function* fr = heap_free_view(k, k.i32);
-        Function* f = k.fn("f", k.vd);
-        Var* p = k.local(f, "p", PT(k));
-        const Stmt* c = k.chk(k.eq_c(k.deref(k.pn(p)), k.i32, wrong ? "1" : "0"));
+        Function* m {heap_alloc_view(k, "calloc", k.i32, true)};
+        Function* fr {heap_free_view(k, k.i32)};
+        Function* f {k.fn("f", k.vd)};
+        Var* p {k.local(f, "p", PT(k))};
+        const Stmt* c {k.chk(k.eq_c(k.deref(k.pn(p)), k.i32, wrong ? "1" : "0"))};
         f->body =
             k.blk({k.decl(p, k.call(m, {})), k.iff(notnull(k, p, PT(k)), k.blk({c, k.es(k.call(fr, {k.pn(p)}))}))});
         k.done(f);
@@ -293,17 +293,17 @@ void define_heap()
     // enum color { 0..2 };  struct Z { int n; bool b; int *q; enum color c; };   mode 0: every leaf is zero; 1: check(z->b) fails
     const auto calloc_struct = [=](Kit& k, bool wrong) -> SrcLoc
     {
-        const Type color = k.en("color", 32, true, "0", "2");
-        StructType* Z = k.strukt("Z", {{"n", k.i32}, {"b", k.bl}, {"q", PT(k)}, {"c", color}});
-        const Type ZP = k.ptr(k.st(Z));
-        Function* m = heap_alloc_view(k, "calloc", k.st(Z), true);
-        Function* fr = heap_free_view(k, k.st(Z));
-        Function* f = k.fn("f", k.vd);
-        Var* z = k.local(f, "z", ZP);
-        const Expr* all =
+        const Type color {k.en("color", 32, true, "0", "2")};
+        StructType* Z {k.strukt("Z", {{"n", k.i32}, {"b", k.bl}, {"q", PT(k)}, {"c", color}})};
+        const Type ZP {k.ptr(k.st(Z))};
+        Function* m {heap_alloc_view(k, "calloc", k.st(Z), true)};
+        Function* fr {heap_free_view(k, k.st(Z))};
+        Function* f {k.fn("f", k.vd)};
+        Var* z {k.local(f, "z", ZP)};
+        const Expr* all {
             k.land(k.land(k.eq_c(k.leaf(k.pn(z), 0), k.i32, "0"), k.lnot(k.leaf(k.pn(z), 1))),
-                   k.land(k.eq(k.leaf(k.pn(z), 2), k.nul(PT(k))), k.eq(k.leaf(k.pn(z), 3), k.num(color, "0"))));
-        const Stmt* c = k.chk(wrong ? k.leaf(k.pn(z), 1) : all);
+                   k.land(k.eq(k.leaf(k.pn(z), 2), k.nul(PT(k))), k.eq(k.leaf(k.pn(z), 3), k.num(color, "0"))))};
+        const Stmt* c {k.chk(wrong ? k.leaf(k.pn(z), 1) : all)};
         f->body = k.blk({k.decl(z, k.call(m, {})), k.iff(notnull(k, z, ZP), k.blk({c, k.es(k.call(fr, {k.pn(z)}))}))});
         k.done(f);
         return c->loc;
@@ -324,19 +324,19 @@ void define_heap()
     // liveness; 5: a callee took the cell.   Each is invalid-free at the call (item 6: no token, or liveness not whole, or a cell not held).
     const auto free_kind = [=](Kit& k, int mode) -> SrcLoc
     {
-        Function* fr = heap_free_view(k, k.i32);
-        Function* f = nullptr;
-        const Expr* bad = nullptr;
+        Function* fr {heap_free_view(k, k.i32)};
+        Function* f {nullptr};
+        const Expr* bad {nullptr};
         if (mode == 0)
         {
             f = k.fn("f", k.vd);
-            Var* x = k.cell(f, "x", k.i32);
+            Var* x {k.cell(f, "x", k.i32)};
             bad = k.call(fr, {k.addr(x)});
             f->body = k.blkc({k.decl(x, N(k, "0")), k.es(bad)});
         }
         else if (mode == 1)
         {
-            Global* g = k.prog.add_global("g", k.i32, k.at(), nullptr);
+            Global* g {k.prog.add_global("g", k.i32, k.at(), nullptr)};
             g->init = N(k, "3");
             g->value = "3";
             f = k.fn("f", k.vd);
@@ -345,10 +345,10 @@ void define_heap()
         }
         else if (mode == 2)
         {
-            StructType* S = k.strukt("S", {{"x", k.i32}, {"y", k.i32}});
-            Function* m = heap_alloc_view(k, "malloc", k.st(S), false);
+            StructType* S {k.strukt("S", {{"x", k.i32}, {"y", k.i32}})};
+            Function* m {heap_alloc_view(k, "malloc", k.st(S), false)};
             f = k.fn("f", k.vd);
-            Var* s = k.local(f, "s", k.ptr(k.st(S)));
+            Var* s {k.local(f, "s", k.ptr(k.st(S)))};
             bad = k.call(fr, {k.mem(k.pn(s), 1)});
             f->body = k.blk({k.decl(s, k.call(m, {})), k.iff(notnull(k, s, k.ptr(k.st(S))), k.blk({k.es(bad)}))});
         }
@@ -362,13 +362,13 @@ void define_heap()
         }
         else
         {
-            Function* m = heap_alloc_view(k, "malloc", k.i32, false);
-            Function* other = k.fn(mode == 4 ? "keep" : "give", k.vd, {{"p", PT(k)}});
+            Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+            Function* other {k.fn(mode == 4 ? "keep" : "give", k.vd, {{"p", PT(k)}})};
             // takes a fraction of the liveness, or the cell, and returns nothing
             k.req(other, mode == 4 ? live(k, FP(k, other, 0), 0) : owns(k, FP(k, other, 0), 0));
             k.trusted(other);
             f = k.fn("f", k.vd);
-            Var* p = k.local(f, "p", PT(k));
+            Var* p {k.local(f, "p", PT(k))};
             bad = k.call(fr, {k.pn(p)});
             f->body = k.blk({k.decl(p, k.call(m, {})),
                              k.iff(notnull(k, p, PT(k)),
@@ -381,34 +381,34 @@ void define_heap()
     lc("hf_local", "free(&x) of a local's cell: the cell has no free token (invalid-free, row 0)",
        [=](Kit& k)
        {
-           k.fail_only("invalid-free", free_kind(k, 0), 4, 0);
+           k.fail_only("invalid-free", free_kind(k, 0), 4U, 0U);
        });
     lc("hf_global", "free(&g) of a global: no token (invalid-free, row 0)",
        [=](Kit& k)
        {
-           k.fail_only("invalid-free", free_kind(k, 1), 4, 0);
+           k.fail_only("invalid-free", free_kind(k, 1), 4U, 0U);
        });
     lc("hf_member", "free(&s->y) of a member of an allocation: the member's block has no token (invalid-free, row 0)",
        [=](Kit& k)
        {
-           k.fail_only("invalid-free", free_kind(k, 2), 4, 0);
+           k.fail_only("invalid-free", free_kind(k, 2), 4U, 0U);
        });
     lc("hf_borrowed",
        "free(p) of a parameter the function only borrows (owns(*p), no block): no token (invalid-free, row 0)",
        [=](Kit& k)
        {
-           k.fail_only("invalid-free", free_kind(k, 3), 4, 0);
+           k.fail_only("invalid-free", free_kind(k, 3), 4U, 0U);
        });
     lc("hf_keeper",
        "keep(p) takes a fraction of p's liveness and never returns it: the liveness is not whole, free fails (invalid-free, row 2)",
        [=](Kit& k)
        {
-           k.fail_only("invalid-free", free_kind(k, 4), 4, 2);
+           k.fail_only("invalid-free", free_kind(k, 4), 4U, 2U);
        });
     lc("hf_cell_given", "give(p) takes the cell *p: free finds the liveness not whole (invalid-free, row 2)",
        [=](Kit& k)
        {
-           k.fail_only("invalid-free", free_kind(k, 5), 4, 2);
+           k.fail_only("invalid-free", free_kind(k, 5), 4U, 2U);
        });
 
     // ======== leaks ========
@@ -420,10 +420,10 @@ void define_heap()
     //   4: if (p != NULL) { if (c != 0) return; free(p); }    leak at the early return
     const auto leaks = [=](Kit& k, int mode) -> SrcLoc
     {
-        Function* m = heap_alloc_view(k, "malloc", k.i32, false);
-        Function* fr = heap_free_view(k, k.i32);
-        Function* f = k.fn("f", k.vd, {{"c", k.i32}});
-        Var* p = k.local(f, "p", PT(k));
+        Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+        Function* fr {heap_free_view(k, k.i32)};
+        Function* f {k.fn("f", k.vd, {{"c", k.i32}})};
+        Var* p {k.local(f, "p", PT(k))};
         std::vector<const Stmt*> body {k.decl(p, k.call(m, {}))};
         if (mode == 0)
         {
@@ -440,7 +440,7 @@ void define_heap()
         }
         else if (mode == 4)
         {
-            const Stmt* r = k.b.return_stmt(nullptr, k.at());
+            const Stmt* r {k.b.return_stmt(nullptr, k.at())};
             body.push_back(k.iff(notnull(k, p, PT(k)),
                                  k.blk({k.iff(k.ne(k.pv(f, 0), N(k, "0")), k.blk({r})), k.es(k.call(fr, {k.pn(p)}))})));
         }
@@ -478,16 +478,16 @@ void define_heap()
     //   mode 0: the block is freed before the loop (verifies); 1: freed after it, so the return in the loop leaks it
     const auto leak_in_loop = [=](Kit& k, int mode) -> SrcLoc
     {
-        Function* m = heap_alloc_view(k, "malloc", k.i32, false);
-        Function* fr = heap_free_view(k, k.i32);
-        Function* f = k.fn("f", k.vd);
-        Var* p = k.local(f, "p", PT(k));
-        Var* i = k.local(f, "i", k.i32);
-        const Stmt* r = k.b.return_stmt(nullptr, k.at());
-        const Stmt* lp =
+        Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+        Function* fr {heap_free_view(k, k.i32)};
+        Function* f {k.fn("f", k.vd)};
+        Var* p {k.local(f, "p", PT(k))};
+        Var* i {k.local(f, "i", k.i32)};
+        const Stmt* r {k.b.return_stmt(nullptr, k.at())};
+        const Stmt* lp {
             k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))}, {k.cl(k.sub(N(k, "3"), k.v(i)))},
-                  k.blk({k.iff(k.eq_c(k.v(i), k.i32, "1"), k.blk({r})), k.asg(i, k.add(k.v(i), N(k, "1")))}));
-        const Stmt* release = k.iff(notnull(k, p, PT(k)), k.blk({k.es(k.call(fr, {k.pn(p)}))}));
+                  k.blk({k.iff(k.eq_c(k.v(i), k.i32, "1"), k.blk({r})), k.asg(i, k.add(k.v(i), N(k, "1")))}))};
+        const Stmt* release {k.iff(notnull(k, p, PT(k)), k.blk({k.es(k.call(fr, {k.pn(p)}))}))};
         std::vector<const Stmt*> body {k.decl(p, k.call(m, {})), k.decl(i, N(k, "0"))};
         if (mode == 0)
         {
@@ -520,17 +520,17 @@ void define_heap()
     //   mode 0 verifies; 1: a second free of s (invalid-free); 2: no free (leak at the closing brace)
     const auto member_alias = [=](Kit& k, int mode) -> SrcLoc
     {
-        StructType* S = k.strukt("S", {{"x", k.i32}, {"y", k.i32}});
-        const Type SP = k.ptr(k.st(S));
-        Function* m = heap_alloc_view(k, "malloc", k.st(S), false);
-        Function* fr = heap_free_view(k, k.st(S));
-        Function* f = k.fn("f", k.vd);
-        Var* s = k.local(f, "s", SP);
-        Var* x = k.local(f, "x", PT(k));
-        Var* i = k.local(f, "i", k.i32);
-        const Stmt* lp =
-            k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))}, {k.cl(k.sub(N(k, "3"), k.v(i)))},
-                  k.blk({k.store(k.pn(x), k.v(i)), k.asg(i, k.add(k.v(i), N(k, "1")))}));
+        StructType* S {k.strukt("S", {{"x", k.i32}, {"y", k.i32}})};
+        const Type SP {k.ptr(k.st(S))};
+        Function* m {heap_alloc_view(k, "malloc", k.st(S), false)};
+        Function* fr {heap_free_view(k, k.st(S))};
+        Function* f {k.fn("f", k.vd)};
+        Var* s {k.local(f, "s", SP)};
+        Var* x {k.local(f, "x", PT(k))};
+        Var* i {k.local(f, "i", k.i32)};
+        const Stmt* lp {k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))},
+                              {k.cl(k.sub(N(k, "3"), k.v(i)))},
+                              k.blk({k.store(k.pn(x), k.v(i)), k.asg(i, k.add(k.v(i), N(k, "1")))}))};
         std::vector<const Stmt*> in {k.lstore(k.pn(s), 0, N(k, "0")), k.lstore(k.pn(s), 1, N(k, "0")),
                                      k.decl(x, k.mem(k.pn(s), 1)), k.decl(i, N(k, "0")), lp};
         SrcLoc where;
@@ -540,7 +540,7 @@ void define_heap()
         }
         if (mode == 1)
         {
-            const Expr* again = k.call(fr, {k.pn(s)});
+            const Expr* again {k.call(fr, {k.pn(s)})};
             where = again->loc;
             in.push_back(k.es(again));
         }
@@ -559,7 +559,7 @@ void define_heap()
        {
            // a struct of two ints: the token, the offset, the liveness cell and the two leaves; the token row ends the
            // path
-           k.fail_only("invalid-free", member_alias(k, 1), 5, 0);
+           k.fail_only("invalid-free", member_alias(k, 1), 5U, 0U);
        });
     lc("hl_member_alias_leak", "the same, without any free(s): the block is held at the return (leak)",
        [=](Kit& k)
@@ -571,16 +571,16 @@ void define_heap()
     //   mode 0 verifies; 1: no free (leak at the closing brace)
     const auto param_member_alias = [=](Kit& k, int mode) -> SrcLoc
     {
-        StructType* S = k.strukt("S", {{"x", k.i32}, {"y", k.i32}});
-        const Type SP = k.ptr(k.st(S));
-        Function* fr = heap_free_view(k, k.st(S));
-        Function* f = k.fn("f", k.vd, {{"s", SP}});
+        StructType* S {k.strukt("S", {{"x", k.i32}, {"y", k.i32}})};
+        const Type SP {k.ptr(k.st(S))};
+        Function* fr {heap_free_view(k, k.st(S))};
+        Function* f {k.fn("f", k.vd, {{"s", SP}})};
         k.req(f, block(k, FP(k, f, 0)));
-        Var* x = k.local(f, "x", PT(k));
-        Var* i = k.local(f, "i", k.i32);
-        const Stmt* lp =
-            k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))}, {k.cl(k.sub(N(k, "3"), k.v(i)))},
-                  k.blk({k.store(k.pn(x), k.v(i)), k.asg(i, k.add(k.v(i), N(k, "1")))}));
+        Var* x {k.local(f, "x", PT(k))};
+        Var* i {k.local(f, "i", k.i32)};
+        const Stmt* lp {k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))},
+                              {k.cl(k.sub(N(k, "3"), k.v(i)))},
+                              k.blk({k.store(k.pn(x), k.v(i)), k.asg(i, k.add(k.v(i), N(k, "1")))}))};
         std::vector<const Stmt*> body {k.decl(x, k.mem(k.pn(f->param_var(0)), 1)), k.decl(i, N(k, "0")), lp};
         if (mode == 0)
         {
@@ -608,14 +608,14 @@ void define_heap()
     //   mode 0 verifies; 1: no free (leak at the closing brace)
     const auto cursor = [=](Kit& k, int mode) -> SrcLoc
     {
-        Function* m = heap_alloc_view(k, "malloc", k.i32, false);
-        Function* fr = heap_free_view(k, k.i32);
-        Function* f = k.fn("f", k.vd, {{"t", PT(k)}});
-        Var* p = k.local(f, "p", PT(k));
-        Var* i = k.local(f, "i", k.i32);
-        const Stmt* lp =
-            k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))}, {k.cl(k.sub(N(k, "3"), k.v(i)))},
-                  k.blk({k.asg(f->param_var(0), k.nul(PT(k))), k.asg(i, k.add(k.v(i), N(k, "1")))}));
+        Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+        Function* fr {heap_free_view(k, k.i32)};
+        Function* f {k.fn("f", k.vd, {{"t", PT(k)}})};
+        Var* p {k.local(f, "p", PT(k))};
+        Var* i {k.local(f, "i", k.i32)};
+        const Stmt* lp {k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))},
+                              {k.cl(k.sub(N(k, "3"), k.v(i)))},
+                              k.blk({k.asg(f->param_var(0), k.nul(PT(k))), k.asg(i, k.add(k.v(i), N(k, "1")))}))};
         std::vector<const Stmt*> in {k.store(k.pn(p), N(k, "0")), k.decl(i, N(k, "0")), lp};
         if (mode == 0)
         {
@@ -643,16 +643,16 @@ void define_heap()
     //   mode 0 verifies (free(p)); 1: free(q): the token row and the offset row fail at the call (invalid-free) and the block p holds leaks at the closing brace
     const auto reassigned = [=](Kit& k, int mode, SrcLoc* end = nullptr) -> SrcLoc
     {
-        Function* m = heap_alloc_view(k, "malloc", k.i32, false);
-        Function* fr = heap_free_view(k, k.i32);
-        Function* f = k.fn("f", k.vd);
-        Var* p = k.local(f, "p", PT(k));
-        Var* q = k.local(f, "q", PT(k));
-        Var* i = k.local(f, "i", k.i32);
-        const Stmt* lp =
+        Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+        Function* fr {heap_free_view(k, k.i32)};
+        Function* f {k.fn("f", k.vd)};
+        Var* p {k.local(f, "p", PT(k))};
+        Var* q {k.local(f, "q", PT(k))};
+        Var* i {k.local(f, "i", k.i32)};
+        const Stmt* lp {
             k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))}, {k.cl(k.sub(N(k, "3"), k.v(i)))},
-                  k.blk({k.asg(q, k.pn(p)), k.store(k.pn(q), k.v(i)), k.asg(i, k.add(k.v(i), N(k, "1")))}));
-        const Expr* rel = k.call(fr, {k.pn(mode == 0 ? p : q)});
+                  k.blk({k.asg(q, k.pn(p)), k.store(k.pn(q), k.v(i)), k.asg(i, k.add(k.v(i), N(k, "1")))}))};
+        const Expr* rel {k.call(fr, {k.pn(mode == 0 ? p : q)})};
         std::vector<const Stmt*> in {k.store(k.pn(p), N(k, "0")), k.decl(q, k.pn(p)), k.decl(i, N(k, "0")), lp,
                                      k.es(rel)};
         f->body = k.blk({k.decl(p, k.call(m, {})), k.iff(notnull(k, p, PT(k)), k.blk(in))});
@@ -673,10 +673,10 @@ void define_heap()
        [=](Kit& k)
        {
            SrcLoc end;
-           const SrcLoc at = reassigned(k, 1, &end);
+           const SrcLoc at {reassigned(k, 1, &end)};
            // the token row and the offset row fail; the liveness and leaf rows sit behind them
-           k.fail_only("invalid-free", at, 4, 0);
-           k.fail_only("invalid-free", at, 4, 1);
+           k.fail_only("invalid-free", at, 4U, 0U);
+           k.fail_only("invalid-free", at, 4U, 1U);
            k.fail("leak", end);
        });
 
@@ -684,11 +684,11 @@ void define_heap()
     // int *make(void) ensures(r == NULL || owns_block(r)) { int *p = malloc(); [return p | return NULL] }   the block is handed to the caller, not a leak
     const auto give_result = [=](Kit& k, bool drop) -> SrcLoc
     {
-        Function* m = heap_alloc_view(k, "malloc", k.i32, false);
-        Function* f = k.fn("make", PT(k));
+        Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+        Function* f {k.fn("make", PT(k))};
         k.ens(f, k.lor(k.eq(k.R(f), k.nul(PT(k))), block(k, k.R(f))));
-        Var* p = k.local(f, "p", PT(k));
-        const Stmt* r = k.ret(drop ? k.nul(PT(k)) : k.pn(p));
+        Var* p {k.local(f, "p", PT(k))};
+        const Stmt* r {k.ret(drop ? k.nul(PT(k)) : k.pn(p))};
         // the unmarked ensures owns_block(r) includes the flags: the cell is written before the block is handed over
         f->body =
             k.blk({k.decl(p, k.call(m, {})), k.iff(notnull(k, p, PT(k)), k.blk({k.store(k.pn(p), N(k, "0"))})), r});
@@ -710,7 +710,7 @@ void define_heap()
     lc("hl_borrowed_exempt", "a borrowed block (the same atom in both lists) is exempt: the function returns it",
        [=](Kit& k)
        {
-           Function* f = k.fn("use", k.vd, {{"p", PT(k)}});
+           Function* f {k.fn("use", k.vd, {{"p", PT(k)}})};
            k.req(f, block(k, FP(k, f, 0)));
            k.ens(f, block(k, FP(k, f, 0)));
            f->body = k.blk({k.store(k.pn(f->param_var(0)), N(k, "1"))});
@@ -721,8 +721,8 @@ void define_heap()
     // void eat(int *p) requires(owns_block(p)) { [free(p);] }   a consuming parameter must free its block
     const auto consume = [=](Kit& k, bool do_free) -> SrcLoc
     {
-        Function* fr = heap_free_view(k, k.i32);
-        Function* f = k.fn("eat", k.vd, {{"p", PT(k)}});
+        Function* fr {heap_free_view(k, k.i32)};
+        Function* f {k.fn("eat", k.vd, {{"p", PT(k)}})};
         k.req(f, block(k, FP(k, f, 0)));
         f->body =
             k.blk({do_free ? k.es(k.call(fr, {k.pn(f->param_var(0))})) : k.store(k.pn(f->param_var(0)), N(k, "1"))});
@@ -745,20 +745,20 @@ void define_heap()
     // 0 verifies; 1: the ensures promises 1 (postcondition at the return); 2: the caller does not free (leak)
     const auto give = [=](Kit& k, int mode) -> SrcLoc
     {
-        StructType* A = k.strukt("A", {{"bal", k.i32}});
-        const Type AP = k.ptr(k.st(A));
-        Function* m = heap_alloc_view(k, "malloc", k.st(A), false);
-        Function* fr = heap_free_view(k, k.st(A));
-        Function* open = k.fn("open", AP);
+        StructType* A {k.strukt("A", {{"bal", k.i32}})};
+        const Type AP {k.ptr(k.st(A))};
+        Function* m {heap_alloc_view(k, "malloc", k.st(A), false)};
+        Function* fr {heap_free_view(k, k.st(A))};
+        Function* open {k.fn("open", AP)};
         k.ens(open, k.lor(k.eq(k.R(open), k.nul(AP)),
                           k.land(block(k, k.R(open)), k.eq_c(k.leaf(k.R(open), 0), k.i32, mode == 1 ? "1" : "0"))));
-        Var* s = k.local(open, "s", AP);
-        const Stmt* r = k.ret(k.pn(s));
+        Var* s {k.local(open, "s", AP)};
+        const Stmt* r {k.ret(k.pn(s))};
         open->body =
             k.blk({k.decl(s, k.call(m, {})), k.iff(notnull(k, s, AP), k.blk({k.lstore(k.pn(s), 0, N(k, "0"))})), r});
         k.done(open);
-        Function* f = k.fn("f", k.vd);
-        Var* a = k.local(f, "a", AP);
+        Function* f {k.fn("f", k.vd)};
+        Var* a {k.local(f, "a", AP)};
         std::vector<const Stmt*> in;
         if (mode != 1)
         {
@@ -794,16 +794,16 @@ void define_heap()
     // caller: p = malloc(); if (p != NULL) { *p = 0; bump(p); free(p); }
     const auto borrow = [=](Kit& k, bool callee_frees) -> SrcLoc
     {
-        Function* fr = heap_free_view(k, k.i32);
-        Function* bump = k.fn("bump", k.vd, {{"p", PT(k)}});
+        Function* fr {heap_free_view(k, k.i32)};
+        Function* bump {k.fn("bump", k.vd, {{"p", PT(k)}})};
         k.req(bump, block(k, FP(k, bump, 0)));
         k.ens(bump, block(k, FP(k, bump, 0)));
         bump->body = k.blk({callee_frees ? k.es(k.call(fr, {k.pn(bump->param_var(0))}))
                                          : k.store(k.pn(bump->param_var(0)), N(k, "1"))});
         k.done(bump);
-        Function* m = heap_alloc_view(k, "malloc", k.i32, false);
-        Function* f = k.fn("f", k.vd);
-        Var* p = k.local(f, "p", PT(k));
+        Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+        Function* f {k.fn("f", k.vd)};
+        Var* p {k.local(f, "p", PT(k))};
         f->body = k.blk({k.decl(p, k.call(m, {})),
                          k.iff(notnull(k, p, PT(k)), k.blk({k.store(k.pn(p), N(k, "0")), k.es(k.call(bump, {k.pn(p)})),
                                                             k.es(k.call(fr, {k.pn(p)}))}))});
@@ -819,7 +819,7 @@ void define_heap()
        "the callee frees what it promised to return: its ensures owns_block(p) does not hold (permission at its closing brace: five rows, row 1)",
        [=](Kit& k)
        {
-           k.fail_only("permission", borrow(k, true), 5, 1);
+           k.fail_only("permission", borrow(k, true), 5U, 1U);
        });
 
     // the caller of a consuming function may not use the block afterwards, nor pass one it only borrows
@@ -828,10 +828,10 @@ void define_heap()
     //   2: void g(int *q) requires(owns_block(q)) ensures(owns_block(q)) { eat(q); }  (permission at the call: the block is gone on return)
     const auto eat_caller = [=](Kit& k, int mode) -> SrcLoc
     {
-        Function* eat = k.fn("eat", k.vd, {{"p", PT(k)}});
+        Function* eat {k.fn("eat", k.vd, {{"p", PT(k)}})};
         k.req(eat, block(k, FP(k, eat, 0)));
         k.trusted(eat);
-        Function* f = nullptr;
+        Function* f {nullptr};
         SrcLoc where;
         if (mode == 2)
         {
@@ -842,13 +842,13 @@ void define_heap()
             k.done(f);
             return f->end_loc;
         }
-        Function* m = heap_alloc_view(k, "malloc", k.i32, false);
+        Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
         f = k.fn("f", k.vd);
-        Var* p = k.local(f, "p", PT(k));
+        Var* p {k.local(f, "p", PT(k))};
         std::vector<const Stmt*> in {k.store(k.pn(p), N(k, "0")), k.es(k.call(eat, {k.pn(p)}))};
         if (mode == 1)
         {
-            const Stmt* w = k.store(k.pn(p), N(k, "1"));
+            const Stmt* w {k.store(k.pn(p), N(k, "1"))};
             where = w->loc;
             in.push_back(w);
         }
@@ -870,7 +870,7 @@ void define_heap()
        "g borrows q (owns_block in both lists) and passes it to eat: g returns without the block it promised (permission at its closing brace: five rows, row 1)",
        [=](Kit& k)
        {
-           k.fail_only("permission", eat_caller(k, 2), 5, 1);
+           k.fail_only("permission", eat_caller(k, 2), 5U, 1U);
        });
 
     // S4: the returns' separation rows.  int *f(int *p) requires(owns_block(p)) ensures(owns_block(p)) ensures(r == NULL || owns_block(r)) { return p; }
@@ -879,14 +879,14 @@ void define_heap()
        "returning the borrowed block as the result: owns_block(p) and owns_block(r) would name one block (permission at the return)",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", PT(k), {{"p", PT(k)}});
+           Function* f {k.fn("f", PT(k), {{"p", PT(k)}})};
            k.req(f, block(k, FP(k, f, 0)));
            k.ens(f, block(k, FP(k, f, 0)));
            k.ens(f, k.lor(k.eq(k.R(f), k.nul(PT(k))), block(k, k.R(f))));
-           const Stmt* r = k.ret(k.pn(f->param_var(0)));
+           const Stmt* r {k.ret(k.pn(f->param_var(0)))};
            f->body = k.blk({r});
            k.done(f);
-           k.fail_only("permission", r->loc, 11, 0);
+           k.fail_only("permission", r->loc, 11U, 0U);
        });
 
     // ======== sequencing: free(p) beside another use of p (item 9) ========
@@ -894,32 +894,32 @@ void define_heap()
     //   mode 0: use_live(q); 1: use_live(p) (unsequenced); 2: use_live(p) first, then the free (unsequenced); 3: (p != q); 4: *p; 5: *p first, then the free
     const auto beside_free = [=](Kit& k, int mode) -> SrcLoc
     {
-        Function* fr = heap_free_view(k, k.i32);
-        Function* ul = k.fn("use_live", k.i32, {{"x", PT(k)}});
+        Function* fr {heap_free_view(k, k.i32)};
+        Function* ul {k.fn("use_live", k.i32, {{"x", PT(k)}})};
         k.req(ul, live(k, FP(k, ul, 0), 0));
         k.ens(ul, live(k, FP(k, ul, 0), 0));
         k.trusted(ul);
-        Function* f = k.fn("f", k.i32, {{"p", PT(k)}, {"q", PT(k)}});
+        Function* f {k.fn("f", k.i32, {{"p", PT(k)}, {"q", PT(k)}})};
         k.req(f, k.land(block(k, FP(k, f, 0)), block(k, FP(k, f, 1))));
         k.ens(f, block(k, FP(k, f, 1))); // q is borrowed and returned
-        const Var* p = f->param_var(0);
-        const Var* q = f->param_var(1);
-        const Expr* freed = k.comma(k.call(fr, {k.pn(p)}), N(k, "0"));
-        const Expr* other = nullptr;
-        const Expr* flagged = nullptr; // the node the unsequenced report names (the later-created access or call)
+        const Var* p {f->param_var(0)};
+        const Var* q {f->param_var(1)};
+        const Expr* freed {k.comma(k.call(fr, {k.pn(p)}), N(k, "0"))};
+        const Expr* other {nullptr};
+        const Expr* flagged {nullptr}; // the node the unsequenced report names (the later-created access or call)
         if (mode == 0)
         {
             other = k.call(ul, {k.pn(q)});
         }
         else if (mode == 1 || mode == 2)
         {
-            const Expr* pa = k.pn(p); // the report names the use of p: the argument node
+            const Expr* pa {k.pn(p)}; // the report names the use of p: the argument node
             other = k.call(ul, {pa});
             flagged = pa;
         }
         else if (mode == 3)
         {
-            const Expr* pa = k.pn(p);
+            const Expr* pa {k.pn(p)};
             other = k.bi(k.i32, k.ne(pa, k.pn(q)));
             flagged = pa;
         }
@@ -928,8 +928,8 @@ void define_heap()
             other = k.deref(k.pn(p));
             flagged = other;
         }
-        const Expr* sum = (mode == 2 || mode == 5) ? k.add(other, freed) : k.add(freed, other);
-        const Stmt* r = k.ret(sum);
+        const Expr* sum {(mode == 2 || mode == 5) ? k.add(other, freed) : k.add(freed, other)};
+        const Stmt* r {k.ret(sum)};
         f->body = k.blk({r});
         k.done(f);
         return flagged != nullptr ? flagged->loc : SrcLoc {};
@@ -996,9 +996,9 @@ void define_heap_rejections()
     rc("hb_rej_invariant", "an `owns_block` atom in a loop invariant",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.vd, {{"p", PT(k)}});
-           Var* q = k.local(f, "q", PT(k));
-           Var* i = k.local(f, "i", k.i32);
+           Function* f {k.fn("f", k.vd, {{"p", PT(k)}})};
+           Var* q {k.local(f, "q", PT(k))};
+           Var* i {k.local(f, "i", k.i32)};
            f->body = k.blk({k.decl(q, k.pn(f->param_var(0))), k.decl(i, N(k, "1")),
                             k.whl(k.gt(k.v(i), N(k, "0")), {k.cl(block(k, k.pn(q)))}, {k.cl(k.v(i))},
                                   k.blk({k.asg(i, k.sub(k.v(i), N(k, "1")))}))});
@@ -1008,7 +1008,7 @@ void define_heap_rejections()
     rc("hb_rej_load", "something other than a pointer parameter or",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.vd, {{"pp", PPT(k)}});
+           Function* f {k.fn("f", k.vd, {{"pp", PPT(k)}})};
            k.req(f, block(k, k.deref(FP(k, f, 0))));
            f->body = k.blk({});
            k.done(f);
@@ -1017,10 +1017,10 @@ void define_heap_rejections()
     rc("hb_rej_global", "something other than a pointer parameter or",
        [=](Kit& k)
        {
-           Global* g = k.prog.add_global("g", k.i32, k.at(), nullptr);
+           Global* g {k.prog.add_global("g", k.i32, k.at(), nullptr)};
            g->init = N(k, "0");
            g->value = "0";
-           Function* f = k.fn("f", k.vd);
+           Function* f {k.fn("f", k.vd)};
            k.req(f, block(k, k.b.global_addr(g, k.at())));
            f->body = k.blk({});
            k.done(f);
@@ -1029,7 +1029,7 @@ void define_heap_rejections()
     rc("hb_rej_result_in_requires", "the result outside an `ensures`",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", PT(k));
+           Function* f {k.fn("f", PT(k))};
            k.req(f, block(k, k.R(f)));
            f->body = k.blk({k.ret(k.nul(PT(k)))});
            k.done(f);
@@ -1038,7 +1038,7 @@ void define_heap_rejections()
     rc("hb_rej_in_code", "a permission atom outside a contract",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.vd, {{"p", PT(k)}});
+           Function* f {k.fn("f", k.vd, {{"p", PT(k)}})};
            k.req(f, block(k, FP(k, f, 0)));
            f->body = k.blk({k.chk(block(k, k.pn(f->param_var(0))))});
            k.done(f);
@@ -1047,7 +1047,7 @@ void define_heap_rejections()
     rc("hb_rej_under_old", "a permission atom under `old`",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.vd, {{"p", PT(k)}});
+           Function* f {k.fn("f", k.vd, {{"p", PT(k)}})};
            k.req(f, block(k, FP(k, f, 0)));
            k.ens(f, k.old(block(k, FP(k, f, 0))));
            f->body = k.blk({});
@@ -1057,7 +1057,7 @@ void define_heap_rejections()
     rc("hb_rej_amount", "a ghost amount or marked implicit",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.vd, {{"p", PT(k)}});
+           Function* f {k.fn("f", k.vd, {{"p", PT(k)}})};
            k.req(f, k.b.atom(AtomKind::OwnsBlock, FP(k, f, 0), 0, k.at()));
            f->body = k.blk({});
            k.done(f);
@@ -1066,7 +1066,7 @@ void define_heap_rejections()
     rc("hb_rej_void_pointer", "pointer to void",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.vd, {{"p", k.ptr(k.vd)}});
+           Function* f {k.fn("f", k.vd, {{"p", k.ptr(k.vd)}})};
            k.req(f, block(k, FP(k, f, 0)));
            f->body = k.blk({});
            k.done(f);
@@ -1075,7 +1075,7 @@ void define_heap_rejections()
     rc("hb_rej_twice", "the same `owns_block` atom twice",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.vd, {{"p", PT(k)}});
+           Function* f {k.fn("f", k.vd, {{"p", PT(k)}})};
            k.req(f, k.land(block(k, FP(k, f, 0)), block(k, FP(k, f, 0))));
            f->body = k.blk({});
            k.done(f);
@@ -1084,7 +1084,7 @@ void define_heap_rejections()
     rc("hb_rej_beside_owns", "beside `owns`, `reads` or `live`",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.vd, {{"p", PT(k)}});
+           Function* f {k.fn("f", k.vd, {{"p", PT(k)}})};
            k.req(f, k.land(block(k, FP(k, f, 0)), k.b.atom(AtomKind::Owns, FP(k, f, 0), 0, k.at())));
            f->body = k.blk({});
            k.done(f);
@@ -1092,7 +1092,7 @@ void define_heap_rejections()
     rc("hb_rej_beside_live", "beside `owns`, `reads` or `live`",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.vd, {{"p", PT(k)}});
+           Function* f {k.fn("f", k.vd, {{"p", PT(k)}})};
            k.req(f, k.land(block(k, FP(k, f, 0)), k.b.atom(AtomKind::Live, FP(k, f, 0), 0, k.at())));
            f->body = k.blk({});
            k.done(f);
@@ -1101,7 +1101,7 @@ void define_heap_rejections()
     rc("hb_rej_ensures_without_requires", "without one in the `requires`",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.vd, {{"p", PT(k)}});
+           Function* f {k.fn("f", k.vd, {{"p", PT(k)}})};
            k.ens(f, block(k, FP(k, f, 0)));
            f->body = k.blk({});
            k.done(f);
@@ -1110,7 +1110,7 @@ void define_heap_rejections()
     rc("hb_rej_result_init_no_atom", "without `owns_block` of the result",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", PT(k));
+           Function* f {k.fn("f", PT(k))};
            f->result_init = InitMarker::RefToUninit;
            f->body = k.blk({k.ret(k.nul(PT(k)))});
            k.done(f);
@@ -1118,7 +1118,7 @@ void define_heap_rejections()
     rc("hb_rej_result_init_not_pointer", "does not return a pointer",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.i32);
+           Function* f {k.fn("f", k.i32)};
            f->result_init = InitMarker::RefToUninit;
            f->body = k.blk({k.ret(N(k, "0"))});
            k.done(f);
@@ -1126,7 +1126,7 @@ void define_heap_rejections()
     rc("hb_rej_result_init_must_init", "not `ref_to_uninit`",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", PT(k));
+           Function* f {k.fn("f", PT(k))};
            k.ens(f, k.lor(k.eq(k.R(f), k.nul(PT(k))), block(k, k.R(f))));
            f->result_init = InitMarker::MustInit;
            f->body = k.blk({k.ret(k.nul(PT(k)))});
@@ -1136,7 +1136,7 @@ void define_heap_rejections()
     rc("hb_rej_deallocates_result", "is not a void function",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"p", PT(k)}});
+           Function* f {k.fn("f", k.i32, {{"p", PT(k)}})};
            k.req(f, block(k, FP(k, f, 0)));
            f->deallocates = true;
            f->body = k.blk({k.ret(N(k, "0"))});
@@ -1145,7 +1145,7 @@ void define_heap_rejections()
     rc("hb_rej_deallocates_two_params", "is not a void function of exactly one pointer parameter",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.vd, {{"p", PT(k)}, {"q", PT(k)}});
+           Function* f {k.fn("f", k.vd, {{"p", PT(k)}, {"q", PT(k)}})};
            k.req(f, block(k, FP(k, f, 0)));
            f->deallocates = true;
            f->body = k.blk({});
@@ -1154,7 +1154,7 @@ void define_heap_rejections()
     rc("hb_rej_deallocates_no_requires", "does not take `owns_block` of its parameter",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.vd, {{"p", PT(k)}});
+           Function* f {k.fn("f", k.vd, {{"p", PT(k)}})};
            f->deallocates = true;
            f->body = k.blk({});
            k.done(f);
@@ -1162,7 +1162,7 @@ void define_heap_rejections()
     rc("hb_rej_deallocates_returns_it", "or its `ensures` returns it",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.vd, {{"p", PT(k)}});
+           Function* f {k.fn("f", k.vd, {{"p", PT(k)}})};
            k.req(f, block(k, FP(k, f, 0)));
            k.ens(f, block(k, FP(k, f, 0)));
            f->deallocates = true;

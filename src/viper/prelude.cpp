@@ -15,8 +15,8 @@ namespace {
 // n <= 0 ? 1 : (n == 1 ? 2 : (n == 2 ? 4 : ... (n == 127 ? 2^127 : 2^128)))
 std::string pow2_table()
 {
-    std::string out = cerastes::vir::dec::pow2(128);
-    for (int n = 127; n >= 1; --n)
+    std::string out {cerastes::vir::dec::pow2(128)};
+    for (int n {127}; n >= 1; --n)
     {
         out = "(n == " + std::to_string(n) + " ? " + cerastes::vir::dec::pow2(n) + " : " + out + ")";
     }
@@ -30,8 +30,8 @@ std::string pow2_table()
 struct BitFn
 {
     std::string op;
-    int width = 0;
-    bool is_unsigned = false;
+    int width {0};
+    bool is_unsigned {false};
 };
 
 std::string bit_fn_name(const std::string& op, int width, bool is_unsigned)
@@ -45,12 +45,12 @@ bool parse_bit_fn(const std::string& name, BitFn& f)
     {
         for (const bool u : {false, true})
         {
-            const std::string prefix = std::string("c_") + (u ? "u" : "") + op + "_";
-            if (name.compare(0, prefix.size(), prefix) != 0)
+            const std::string prefix {std::string("c_") + (u ? "u" : "") + op + "_"};
+            if (name.compare(0U, prefix.size(), prefix) != 0)
             {
                 continue;
             }
-            const std::string w = name.substr(prefix.size());
+            const std::string w {name.substr(prefix.size())};
             for (const int width : {32, 64, 128})
             {
                 if (w == std::to_string(width))
@@ -69,25 +69,26 @@ bool parse_bit_fn(const std::string& name, BitFn& f)
 // sum of the per-bit results weighted by 2^k, the top weight being -2^(W-1) for the signed functions.
 std::string bit_leaf_body(const BitFn& f)
 {
-    const int W = f.width;
+    const int W {f.width};
     auto q = [](char v, int i)
     {
-        return i == 0 ? std::string(1, v) : std::string("q") + v + std::to_string(i);
+        return i == 0 ? std::string(1U, v) : std::string("q") + v + std::to_string(i);
     };
-    std::string chain, sum;
-    for (int k = 1; k <= W; ++k)
+    std::string chain;
+    std::string sum;
+    for (int k {1}; k <= W; ++k)
     {
         chain += "let qa" + std::to_string(k) + " == (" + q('a', k - 1) + " \\ 2) in let qb" + std::to_string(k) +
                  " == (" + q('b', k - 1) + " \\ 2) in ";
     }
-    for (int k = 0; k < W; ++k)
+    for (int k {0}; k < W; ++k)
     {
-        const std::string ba = "(" + q('a', k) + " - 2 * qa" + std::to_string(k + 1) + ")";
-        const std::string bb = "(" + q('b', k) + " - 2 * qb" + std::to_string(k + 1) + ")";
-        const std::string test = f.op == "and" ? " == 2" : (f.op == "or" ? " >= 1" : " == 1");
-        const std::string t = "((" + ba + " + " + bb + test + ") ? 1 : 0)";
-        const std::string w =
-            (k == W - 1 && !f.is_unsigned) ? "(-" + cerastes::vir::dec::pow2(k) + ")" : cerastes::vir::dec::pow2(k);
+        const std::string ba {"(" + q('a', k) + " - 2 * qa" + std::to_string(k + 1) + ")"};
+        const std::string bb {"(" + q('b', k) + " - 2 * qb" + std::to_string(k + 1) + ")"};
+        const std::string test {f.op == "and" ? " == 2" : (f.op == "or" ? " >= 1" : " == 1")};
+        const std::string t {"((" + ba + " + " + bb + test + ") ? 1 : 0)"};
+        const std::string w {(k == W - 1 && !f.is_unsigned) ? "(-" + cerastes::vir::dec::pow2(k) + ")"
+                                                            : cerastes::vir::dec::pow2(k)};
         if (k != 0)
         {
             sum += " + ";
@@ -101,8 +102,8 @@ std::string bit_leaf_body(const BitFn& f)
 // signedness of the function.
 std::string bit_composite_body(const BitFn& f)
 {
-    const int h = f.width / 2;
-    const std::string p = cerastes::vir::dec::pow2(h);
+    const int h {f.width / 2};
+    const std::string p {cerastes::vir::dec::pow2(h)};
     return bit_fn_name(f.op, h, true) + "(a, b) + " + p + " * " + bit_fn_name(f.op, h, f.is_unsigned) + "(a \\ " + p +
            ", b \\ " + p + ")";
 }
@@ -116,10 +117,10 @@ std::string bit_composite_body(const BitFn& f)
 // the argument, so the function is total and has no `requires`.
 struct XorMaskFn
 {
-    bool complement = false;
-    int width = 0;
-    int k = 0;
-    bool is_unsigned = false;
+    bool complement {false};
+    int width {0};
+    int k {0};
+    bool is_unsigned {false};
 };
 
 bool parse_xor_mask_fn(const std::string& name, XorMaskFn& f)
@@ -128,20 +129,21 @@ bool parse_xor_mask_fn(const std::string& name, XorMaskFn& f)
     {
         for (const bool c : {false, true})
         {
-            const std::string prefix = std::string("c_") + (u ? "u" : "") + "xor_" + (c ? "cmask" : "mask") + "_";
-            if (name.compare(0, prefix.size(), prefix) != 0)
+            const std::string prefix {std::string("c_") + (u ? "u" : "") + "xor_" + (c ? "cmask" : "mask") + "_"};
+            if (name.compare(0U, prefix.size(), prefix) != 0)
             {
                 continue;
             }
-            const size_t us = name.find('_', prefix.size());
+            const size_t us {name.find('_', prefix.size())};
             if (us == std::string::npos)
             {
                 return false;
             }
-            const std::string w = name.substr(prefix.size(), us - prefix.size()), k = name.substr(us + 1);
+            const std::string w {name.substr(prefix.size(), us - prefix.size())};
+            const std::string k {name.substr(us + 1U)};
             for (const int width : {32, 64, 128})
             {
-                if (w == std::to_string(width) && !k.empty() && k.size() <= 3 &&
+                if (w == std::to_string(width) && !k.empty() && k.size() <= 3U &&
                     k.find_first_not_of("0123456789") == std::string::npos)
                 {
                     f = XorMaskFn {c, width, std::atoi(k.c_str()), u};
@@ -157,8 +159,8 @@ bool parse_xor_mask_fn(const std::string& name, XorMaskFn& f)
 
 std::set<std::string> prelude_closure(const std::set<std::string>& used)
 {
-    std::set<std::string> all = used;
-    if (all.count("c_shr") != 0)
+    std::set<std::string> all {used};
+    if (all.count("c_shr") != 0U)
     {
         all.insert("c_pow2");
     }
@@ -186,8 +188,8 @@ std::set<std::string> prelude_closure(const std::set<std::string>& used)
 std::string memory_prelude_text(const std::map<std::string, std::string>& cell_types,
                                 const std::vector<std::string>& globals, bool heap)
 {
-    std::string t =
-        "\n// the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell\n";
+    std::string t {
+        "\n// the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell\n"};
     for (const auto& [suffix, type] : cell_types)
     {
         t += "field v_" + suffix + ": " + type + "\n";
@@ -226,44 +228,44 @@ domain Block {
     {
         gb += "  unique function " + g + "(): Block\n";
     }
-    const size_t at = t.find("@GLOBALS@");
-    t.replace(at, 9, gb);
+    const size_t at {t.find("@GLOBALS@")};
+    t.replace(at, 9U, gb);
     return t;
 }
 
 std::string prelude_text(const std::set<std::string>& used)
 {
-    const std::set<std::string> all = prelude_closure(used);
+    const std::set<std::string> all {prelude_closure(used)};
     std::string t;
     auto fn = [&](const std::string& head, const std::string& body)
     {
         t += "function " + head + "\n{\n  " + body + "\n}\n";
     };
-    if (all.count("c_pow2") != 0)
+    if (all.count("c_pow2") != 0U)
     {
         fn("c_pow2(n: Int): Int", pow2_table());
     }
-    if (all.count("c_shr") != 0)
+    if (all.count("c_shr") != 0U)
     {
         fn("c_shr(a: Int, n: Int): Int", "(a \\ c_pow2(n))");
     }
     // Signed division and remainder: four explicit cases, so that Z3 can bound the result without nonlinear help.
-    if (all.count("c_div") != 0)
+    if (all.count("c_div") != 0U)
     {
         fn("c_div(a: Int, b: Int): Int",
            "(b == 0 ? 0 : (a >= 0 ? (b > 0 ? (a \\ b) : (-(a \\ (-b)))) : (b > 0 ? (-((-a) \\ b)) : ((-a) \\ (-b)))))");
     }
-    if (all.count("c_rem") != 0)
+    if (all.count("c_rem") != 0U)
     {
         fn("c_rem(a: Int, b: Int): Int",
            "(b == 0 ? 0 : (a >= 0 ? (b > 0 ? (a % b) : (a % (-b))) : (b > 0 ? (-((-a) % b)) : (-((-a) % (-b))))))");
     }
     // Unsigned operands are never negative: plain Euclidean division is C's division.
-    if (all.count("c_udiv") != 0)
+    if (all.count("c_udiv") != 0U)
     {
         fn("c_udiv(a: Int, b: Int): Int", "((a >= 0 && b > 0) ? (a \\ b) : 0)");
     }
-    if (all.count("c_urem") != 0)
+    if (all.count("c_urem") != 0U)
     {
         fn("c_urem(a: Int, b: Int): Int", "((a >= 0 && b > 0) ? (a % b) : 0)");
     }
@@ -297,9 +299,9 @@ std::string prelude_text(const std::set<std::string>& used)
     for (const BitFn& f : bit_fns)
     {
         namespace dec = cerastes::vir::dec;
-        const dec::Range r = f.is_unsigned
-                                 ? dec::Range {"0", dec::dec1(dec::pow2(f.width))}
-                                 : dec::Range {dec::neg(dec::pow2(f.width - 1)), dec::dec1(dec::pow2(f.width - 1))};
+        const dec::Range r {f.is_unsigned
+                                ? dec::Range {"0", dec::dec1(dec::pow2(f.width))}
+                                : dec::Range {dec::neg(dec::pow2(f.width - 1)), dec::dec1(dec::pow2(f.width - 1))}};
         fn(bit_fn_name(f.op, f.width, f.is_unsigned) + "(a: Int, b: Int): Int\n  ensures " +
                (dec::negative(r.lo) ? "(" + r.lo + ")" : r.lo) + " <= result && result <= " + r.hi,
            f.width != 128 ? bit_leaf_body(f) : bit_composite_body(f));
@@ -313,12 +315,12 @@ std::string prelude_text(const std::set<std::string>& used)
         {
             continue;
         }
-        const dec::Range r = f.is_unsigned
-                                 ? dec::Range {"0", dec::dec1(dec::pow2(f.width))}
-                                 : dec::Range {dec::neg(dec::pow2(f.width - 1)), dec::dec1(dec::pow2(f.width - 1))};
-        const std::string lo = dec::negative(r.lo) ? "(" + r.lo + ")" : r.lo;
-        const std::string pk = dec::pow2(f.k);
-        const std::string high = "(" + pk + " * (a \\ " + pk + "))"; // x with its low k bits cleared
+        const dec::Range r {f.is_unsigned
+                                ? dec::Range {"0", dec::dec1(dec::pow2(f.width))}
+                                : dec::Range {dec::neg(dec::pow2(f.width - 1)), dec::dec1(dec::pow2(f.width - 1))}};
+        const std::string lo {dec::negative(r.lo) ? "(" + r.lo + ")" : r.lo};
+        const std::string pk {dec::pow2(f.k)};
+        const std::string high {"(" + pk + " * (a \\ " + pk + "))"}; // x with its low k bits cleared
         std::string body;
         if (!f.complement)
         {

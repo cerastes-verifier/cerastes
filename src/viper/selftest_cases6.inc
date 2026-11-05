@@ -18,7 +18,7 @@ const Stmt* or_xor_body(Kit& k, Function* f, Type t, BinaryOp op, const std::str
         return k.num(t, v);
     };
     std::vector<const Stmt*> body;
-    const Stmt* r = nullptr;
+    const Stmt* r {nullptr};
     switch (variant)
     {
         case 0:
@@ -29,7 +29,7 @@ const Stmt* or_xor_body(Kit& k, Function* f, Type t, BinaryOp op, const std::str
             break;
         case 2:
         {
-            Var* y = k.local(f, "y", t);
+            Var* y {k.local(f, "y", t)};
             body.push_back(k.decl(y, k.pv(f, 0)));
             body.push_back(k.b.compound_assign(y, op, N(mT), k.at()));
             r = k.ret(k.v(y));
@@ -50,9 +50,9 @@ const Stmt* or_xor_body(Kit& k, Function* f, Type t, BinaryOp op, const std::str
 
 void define_bitwise_or_xor_masks()
 {
-    const int widths[] = {32, 64, 128};
-    const BinaryOp ops[] = {BinaryOp::BitOr, BinaryOp::BitXor};
-    int variant_counter = 0;
+    const int widths[] {32, 64, 128};
+    const BinaryOp ops[] {BinaryOp::BitOr, BinaryOp::BitXor};
+    int variant_counter {0};
 
     // ---- symbolic operand, the identities of 0027 item 2 in terms of the 0026 forms of `&`: with low = 2^k - 1 and high = ~low,
     //   x | low  == (x & high) + low                      x ^ low  == (x & high) + (low - (x & low))
@@ -67,20 +67,22 @@ void define_bitwise_or_xor_masks()
             {
                 for (const bool comp : {false, true})
                 {
-                    const std::vector<int> ks =
-                        comp ? std::vector<int> {0, 8, bits - 1} : std::vector<int> {1, 8, sg ? bits - 1 : bits};
+                    const std::vector<int> ks {comp ? std::vector<int> {0, 8, bits - 1}
+                                                    : std::vector<int> {1, 8, sg ? bits - 1 : bits}};
                     for (const int kk : ks)
                     {
-                        const int variant = variant_counter++ % 5;
+                        const int variant {variant_counter++ % 5};
                         auto build = [=](Kit& k, bool wrong) -> SrcLoc
                         {
-                            const Type t = bit_type(k, bits, sg);
-                            const BitU128 M = bit_mask(bits);
-                            const BitU128 low = kk == 128 ? M : ((BitU128(1) << kk) - 1); // 2^kk - 1
-                            const BitU128 high = (~low) & M;                              // ~(2^kk - 1)
-                            const std::string lowT = bit_text(low, bits, sg), highT = bit_text(high, bits, sg);
-                            const std::string mT = comp ? highT : lowT, altT = comp ? lowT : highT;
-                            Function* f = k.fn("f", t, {{"x", t}});
+                            const Type t {bit_type(k, bits, sg)};
+                            const BitU128 M {bit_mask(bits)};
+                            const BitU128 low {kk == 128 ? M : ((BitU128(1U) << kk) - 1U)}; // 2^kk - 1
+                            const BitU128 high {(~low) & M};                                // ~(2^kk - 1)
+                            const std::string lowT {bit_text(low, bits, sg)};
+                            const std::string highT {bit_text(high, bits, sg)};
+                            const std::string mT {comp ? highT : lowT};
+                            const std::string altT {comp ? lowT : highT};
+                            Function* f {k.fn("f", t, {{"x", t}})};
                             auto N = [&](const std::string& v)
                             {
                                 return k.num(t, v);
@@ -97,7 +99,7 @@ void define_bitwise_or_xor_masks()
                             {
                                 return k.band(X(), N(m));
                             }; // x & m: a mask of 0026
-                            const Expr* claim = nullptr;
+                            const Expr* claim {nullptr};
                             if (op == BinaryOp::BitOr)
                             {
                                 if (!comp)
@@ -125,14 +127,13 @@ void define_bitwise_or_xor_masks()
                             k.ens(f, claim);
                             return or_xor_body(k, f, t, op, mT, altT, variant)->loc;
                         };
-                        const std::string name = std::string("bit_") + bit_op_name(op) + "_mask_" +
-                                                 (comp ? "cmpl" : "low") + (sg ? "_s" : "_u") + std::to_string(bits) +
-                                                 "_k" + std::to_string(kk) + "_v" + std::to_string(variant);
-                        const std::string doc = std::string("x ") + bit_op_sym(op) + (comp ? " ~(2^k-1)" : " (2^k-1)") +
-                                                " with k = " + std::to_string(kk) + " on a symbolic " +
-                                                (sg ? "signed " : "unsigned ") + std::to_string(bits) +
-                                                "-bit x (form " + std::to_string(variant) +
-                                                "): the identity with & holds";
+                        const std::string name {std::string("bit_") + bit_op_name(op) + "_mask_" +
+                                                (comp ? "cmpl" : "low") + (sg ? "_s" : "_u") + std::to_string(bits) +
+                                                "_k" + std::to_string(kk) + "_v" + std::to_string(variant)};
+                        const std::string doc {std::string("x ") + bit_op_sym(op) + (comp ? " ~(2^k-1)" : " (2^k-1)") +
+                                               " with k = " + std::to_string(kk) + " on a symbolic " +
+                                               (sg ? "signed " : "unsigned ") + std::to_string(bits) + "-bit x (form " +
+                                               std::to_string(variant) + "): the identity with & holds"};
                         lc(name, doc,
                            [=](Kit& k)
                            {
@@ -141,7 +142,7 @@ void define_bitwise_or_xor_masks()
                         lc(name + "_wrong", doc + " (a false claim, refuted by Z3)",
                            [=](Kit& k)
                            {
-                               const SrcLoc l = build(k, true);
+                               const SrcLoc l {build(k, true)};
                                k.fail("postcondition", l);
                            });
                     }
@@ -161,15 +162,16 @@ void define_bitwise_or_xor_masks()
             {
                 for (const int kk : {8, bits / 2})
                 {
-                    const int variant = variant_counter++ % 5;
+                    const int variant {variant_counter++ % 5};
                     auto build = [=](Kit& k, bool wrong) -> SrcLoc
                     {
-                        const Type t = bit_type(k, bits, sg);
-                        const BitU128 low = (BitU128(1) << kk) - 1;
-                        const std::string lowT = bit_text(low, bits, sg), lowM1 = bit_text(low - 1, bits, sg),
-                                          pT = bit_text(BitU128(1) << kk, bits, sg);
-                        const std::string altT = bit_text((~low) & bit_mask(bits), bits, sg);
-                        Function* f = k.fn("f", t, {{"x", t}});
+                        const Type t {bit_type(k, bits, sg)};
+                        const BitU128 low {(BitU128(1U) << kk) - 1U};
+                        const std::string lowT {bit_text(low, bits, sg)};
+                        const std::string lowM1 {bit_text(low - 1U, bits, sg)};
+                        const std::string pT {bit_text(BitU128(1U) << kk, bits, sg)};
+                        const std::string altT {bit_text((~low) & bit_mask(bits), bits, sg)};
+                        Function* f {k.fn("f", t, {{"x", t}})};
                         auto N = [&](const std::string& v)
                         {
                             return k.num(t, v);
@@ -180,10 +182,10 @@ void define_bitwise_or_xor_masks()
                         };
                         auto L = [&]() -> const Expr*
                         {
-                            const Expr* m = k.rem(X(), N(pT));
+                            const Expr* m {k.rem(X(), N(pT))};
                             return sg ? k.rem(k.add(m, N(pT)), N(pT)) : m;
                         };
-                        const Expr* claim = nullptr;
+                        const Expr* claim {nullptr};
                         if (op == BinaryOp::BitOr)
                         {
                             claim = k.eq(k.R(f), k.add(k.sub(X(), L()), N(wrong ? lowM1 : lowT)));
@@ -196,13 +198,13 @@ void define_bitwise_or_xor_masks()
                         k.ens(f, claim);
                         return or_xor_body(k, f, t, op, lowT, altT, variant)->loc;
                     };
-                    const std::string name = std::string("bit_") + bit_op_name(op) + "_remainder" + (sg ? "_s" : "_u") +
-                                             std::to_string(bits) + "_k" + std::to_string(kk) + "_v" +
-                                             std::to_string(variant);
-                    const std::string doc = std::string("x ") + bit_op_sym(op) + " (2^" + std::to_string(kk) +
-                                            "-1) on a symbolic " + (sg ? "signed " : "unsigned ") +
-                                            std::to_string(bits) +
-                                            "-bit x: " + (op == BinaryOp::BitOr ? "x - L + m" : "(x - L) + (m - L)");
+                    const std::string name {std::string("bit_") + bit_op_name(op) + "_remainder" + (sg ? "_s" : "_u") +
+                                            std::to_string(bits) + "_k" + std::to_string(kk) + "_v" +
+                                            std::to_string(variant)};
+                    const std::string doc {std::string("x ") + bit_op_sym(op) + " (2^" + std::to_string(kk) +
+                                           "-1) on a symbolic " + (sg ? "signed " : "unsigned ") +
+                                           std::to_string(bits) +
+                                           "-bit x: " + (op == BinaryOp::BitOr ? "x - L + m" : "(x - L) + (m - L)")};
                     lc(name, doc,
                        [=](Kit& k)
                        {
@@ -212,7 +214,7 @@ void define_bitwise_or_xor_masks()
                        doc + (op == BinaryOp::BitOr ? " (the constant is m - 1)" : " (the low bits are not flipped)"),
                        [=](Kit& k)
                        {
-                           const SrcLoc l = build(k, true);
+                           const SrcLoc l {build(k, true)};
                            k.fail("postcondition", l);
                        });
                 }
@@ -230,44 +232,44 @@ void define_bitwise_or_xor_masks()
             {
                 auto build = [=](Kit& k, bool wrong) -> SrcLoc
                 {
-                    const Type t = bit_type(k, bits, sg);
-                    const BitU128 M = bit_mask(bits);
-                    const BitU128 top = BitU128(1) << (bits - 1);
-                    const BitU128 patX = sg ? ((~BitU128(1000) + 1) & M) : BitU128(1000);
+                    const Type t {bit_type(k, bits, sg)};
+                    const BitU128 M {bit_mask(bits)};
+                    const BitU128 top {BitU128(1U) << (bits - 1)};
+                    const BitU128 patX {sg ? ((~BitU128(1000U) + 1U) & M) : BitU128(1000U)};
                     auto N = [&](const std::string& v)
                     {
                         return k.num(t, v);
                     };
-                    Function* f = k.fn("f", k.vd);
+                    Function* f {k.fn("f", k.vd)};
                     std::vector<const Stmt*> body;
                     SrcLoc last;
                     auto add = [&](const Expr* mask, BitU128 maskPattern, bool left, bool is_last)
                     {
-                        BitU128 want = bit_apply(op, patX, maskPattern) & M;
+                        BitU128 want {bit_apply(op, patX, maskPattern) & M};
                         if (wrong && is_last)
                         {
-                            want ^= 1;
+                            want ^= 1U;
                         }
-                        const Expr* x = N(sg ? "-1000" : "1000");
-                        const Stmt* c =
-                            k.chk(k.eq(left ? k.bin(op, mask, x) : k.bin(op, x, mask), N(bit_text(want, bits, sg))));
+                        const Expr* x {N(sg ? "-1000" : "1000")};
+                        const Stmt* c {
+                            k.chk(k.eq(left ? k.bin(op, mask, x) : k.bin(op, x, mask), N(bit_text(want, bits, sg))))};
                         last = c->loc;
                         body.push_back(c);
                     };
-                    add(N("255"), 255, false, false);
-                    add(k.bnot(N("15")), (~BitU128(15)) & M, true, false);
+                    add(N("255"), 255U, false, false);
+                    add(k.bnot(N("15")), (~BitU128(15U)) & M, true, false);
                     add(N(sg ? "-1" : bit_text(M, bits, false)), M, false, false);
-                    add(N("0"), 0, true, false);
-                    add(N(bit_text(top - 1, bits, sg)), top - 1, false, true);
+                    add(N("0"), 0U, true, false);
+                    add(N(bit_text(top - 1U, bits, sg)), top - 1U, false, true);
                     f->body = k.blk(body);
                     k.done(f);
                     return last;
                 };
-                const std::string name =
-                    std::string("bit_") + bit_op_name(op) + "_mask_closed" + (sg ? "_s" : "_u") + std::to_string(bits);
-                const std::string doc = std::string(sg ? "-1000 " : "1000 ") + bit_op_sym(op) +
-                                        " 255, ~15, all ones, 0 and the maximum on " + (sg ? "signed " : "unsigned ") +
-                                        std::to_string(bits) + " bits: five exact closed results";
+                const std::string name {std::string("bit_") + bit_op_name(op) + "_mask_closed" + (sg ? "_s" : "_u") +
+                                        std::to_string(bits)};
+                const std::string doc {std::string(sg ? "-1000 " : "1000 ") + bit_op_sym(op) +
+                                       " 255, ~15, all ones, 0 and the maximum on " + (sg ? "signed " : "unsigned ") +
+                                       std::to_string(bits) + " bits: five exact closed results"};
                 lc(name, doc,
                    [=](Kit& k)
                    {
@@ -276,7 +278,7 @@ void define_bitwise_or_xor_masks()
                 lc(name + "_wrong", doc + " (the last claim is off by one)",
                    [=](Kit& k)
                    {
-                       const SrcLoc l = build(k, true);
+                       const SrcLoc l {build(k, true)};
                        k.fail("check", l);
                    });
             }
@@ -297,7 +299,7 @@ void define_bitwise_or_xor_masks()
     {
         for (const bool sg : {true, false})
         {
-            const std::vector<std::pair<std::string, std::vector<Link>>> chains = {
+            const std::vector<std::pair<std::string, std::vector<Link>>> chains {
                 {"pairs", {{"255", false}, {"255", false}, {"15", false}, {"15", false}}},
                 {"complements", {{"15", true}, {"255", false}, {"15", true}, {"255", false}}},
                 {"eight_range",
@@ -311,15 +313,15 @@ void define_bitwise_or_xor_masks()
                   {"15", false}}}};
             for (const auto& ch : chains)
             {
-                const bool range_only = ch.first == "eight_range";
+                const bool range_only {ch.first == "eight_range"};
                 auto build = [=](Kit& k, bool wrong) -> SrcLoc
                 {
-                    const Type t = bit_type(k, bits, sg);
+                    const Type t {bit_type(k, bits, sg)};
                     auto N = [&](const std::string& v)
                     {
                         return k.num(t, v);
                     };
-                    Function* f = k.fn("f", t, {{"x", t}});
+                    Function* f {k.fn("f", t, {{"x", t}})};
                     if (range_only)
                     {
                         // 0 <= x <= 1000 gives 0 <= r <= 1023 (the eight masks cancel in pairs, so r == x and r <= 1000 holds too); the twin claims r <= 999, false for x = 1000
@@ -330,24 +332,24 @@ void define_bitwise_or_xor_masks()
                     {
                         k.ens(f, k.eq(k.R(f), k.F(f, 0)));
                     }
-                    const Expr* acc = k.pv(f, 0);
-                    const size_t n = ch.second.size() - ((wrong && !range_only) ? 1 : 0);
-                    for (size_t i = 0; i < n; ++i)
+                    const Expr* acc {k.pv(f, 0)};
+                    const size_t n {ch.second.size() - ((wrong && !range_only) ? 1 : 0)};
+                    for (size_t i {0U}; i < n; ++i)
                     {
-                        const Link& l = ch.second[i];
+                        const Link& l {ch.second[i]};
                         acc = k.bxor(acc, l.complement ? k.bnot(N(l.text)) : N(l.text));
                     }
-                    const Stmt* r = k.ret(acc);
+                    const Stmt* r {k.ret(acc)};
                     f->body = k.blk({r});
                     k.done(f);
                     return r->loc;
                 };
-                const std::string name =
-                    std::string("bit_xor_chain_") + ch.first + (sg ? "_s" : "_u") + std::to_string(bits);
-                const std::string doc =
+                const std::string name {std::string("bit_xor_chain_") + ch.first + (sg ? "_s" : "_u") +
+                                        std::to_string(bits)};
+                const std::string doc {
                     std::string("a chain of ") + std::to_string(ch.second.size()) + " ^ masks (" + ch.first +
                     ") on a " + (sg ? "signed " : "unsigned ") + std::to_string(bits) + "-bit x: " +
-                    (range_only ? "0 <= x <= 1000 gives 0 <= r <= 1023" : "cancels in pairs, the result is x");
+                    (range_only ? "0 <= x <= 1000 gives 0 <= r <= 1023" : "cancels in pairs, the result is x")};
                 lc(name, doc,
                    [=](Kit& k)
                    {
@@ -358,7 +360,7 @@ void define_bitwise_or_xor_masks()
                                      : " (the last mask is left out, one is unpaired)"),
                    [=](Kit& k)
                    {
-                       const SrcLoc l = build(k, true);
+                       const SrcLoc l {build(k, true)};
                        k.fail("postcondition", l);
                    });
             }
@@ -372,33 +374,33 @@ void define_bitwise_or_xor_masks()
         {
             auto build = [=](Kit& k, bool wrong) -> SrcLoc
             {
-                const Type t = bit_type(k, bits, sg);
+                const Type t {bit_type(k, bits, sg)};
                 auto N = [&](const std::string& v)
                 {
                     return k.num(t, v);
                 };
-                Function* f1 = k.fn("or_then_xor", t, {{"x", t}});
+                Function* f1 {k.fn("or_then_xor", t, {{"x", t}})};
                 k.ens(f1, k.eq(k.R(f1), wrong ? k.F(f1, 0) : k.band(k.F(f1, 0), k.bnot(N("255")))));
-                const Stmt* r1 = k.ret(k.bxor(k.bor(k.pv(f1, 0), N("255")), N("255")));
+                const Stmt* r1 {k.ret(k.bxor(k.bor(k.pv(f1, 0), N("255")), N("255")))};
                 f1->body = k.blk({r1});
                 k.done(f1);
-                Function* f2 = k.fn("xor_then_or", t, {{"x", t}});
+                Function* f2 {k.fn("xor_then_or", t, {{"x", t}})};
                 k.ens(f2, k.eq(k.R(f2), k.bor(k.F(f2, 0), N("255"))));
-                const Stmt* r2 = k.ret(k.bor(k.bxor(k.pv(f2, 0), N("255")), N("255")));
+                const Stmt* r2 {k.ret(k.bor(k.bxor(k.pv(f2, 0), N("255")), N("255")))};
                 f2->body = k.blk({r2});
                 k.done(f2);
-                Function* f3 = k.fn("clear_then_xor", t, {{"x", t}});
+                Function* f3 {k.fn("clear_then_xor", t, {{"x", t}})};
                 k.ens(f3, k.eq(k.R(f3), k.bor(k.F(f3, 0), N("255"))));
-                const Stmt* r3 = k.ret(k.bxor(k.band(k.pv(f3, 0), k.bnot(N("255"))), N("255")));
+                const Stmt* r3 {k.ret(k.bxor(k.band(k.pv(f3, 0), k.bnot(N("255"))), N("255")))};
                 f3->body = k.blk({r3});
                 k.done(f3);
                 return r1->loc;
             };
-            const std::string name = std::string("bit_or_xor_mixed") + (sg ? "_s" : "_u") + std::to_string(bits);
-            const std::string doc =
+            const std::string name {std::string("bit_or_xor_mixed") + (sg ? "_s" : "_u") + std::to_string(bits)};
+            const std::string doc {
                 std::string(
                     "(x | 255) ^ 255 == x & ~255, (x ^ 255) | 255 == x | 255 and (x & ~255) ^ 255 == x | 255 on a ") +
-                (sg ? "signed " : "unsigned ") + std::to_string(bits) + "-bit x";
+                (sg ? "signed " : "unsigned ") + std::to_string(bits) + "-bit x"};
             lc(name, doc,
                [=](Kit& k)
                {
@@ -407,7 +409,7 @@ void define_bitwise_or_xor_masks()
             lc(name + "_wrong", doc + " (the first claims (x | 255) ^ 255 == x)",
                [=](Kit& k)
                {
-                   const SrcLoc l = build(k, true);
+                   const SrcLoc l {build(k, true)};
                    k.fail("postcondition", l);
                });
         }
@@ -423,31 +425,31 @@ void define_bitwise_or_xor_masks()
             {
                 auto build = [=](Kit& k, bool wrong) -> SrcLoc
                 {
-                    const Type t = bit_type(k, bits, sg);
-                    const BitU128 M = bit_mask(bits);
-                    const BitU128 patX = sg ? ((~BitU128(1000) + 1) & M) : BitU128(1000);
+                    const Type t {bit_type(k, bits, sg)};
+                    const BitU128 M {bit_mask(bits)};
+                    const BitU128 patX {sg ? ((~BitU128(1000U) + 1U) & M) : BitU128(1000U)};
                     auto N = [&](const std::string& v)
                     {
                         return k.num(t, v);
                     };
-                    Function* f = k.fn("f", k.vd);
-                    BitU128 want = bit_apply(op, patX, 255) & M;
+                    Function* f {k.fn("f", k.vd)};
+                    BitU128 want {bit_apply(op, patX, 255U) & M};
                     if (wrong)
                     {
-                        want ^= 1;
+                        want ^= 1U;
                     }
-                    const Expr* mask = k.bin(op, N("240"), N("15"));
-                    const Stmt* c = k.chk(k.eq(k.bin(op, N(sg ? "-1000" : "1000"), mask), N(bit_text(want, bits, sg))));
+                    const Expr* mask {k.bin(op, N("240"), N("15"))};
+                    const Stmt* c {k.chk(k.eq(k.bin(op, N(sg ? "-1000" : "1000"), mask), N(bit_text(want, bits, sg))))};
                     f->body = k.blk({c});
                     k.done(f);
                     return c->loc;
                 };
-                const std::string name = std::string("bit_") + bit_op_name(op) + "_mask_nested_closed" +
-                                         (sg ? "_s" : "_u") + std::to_string(bits);
-                const std::string doc = std::string(sg ? "-1000 " : "1000 ") + bit_op_sym(op) + " (240 " +
-                                        bit_op_sym(op) + " 15) on " + (sg ? "signed " : "unsigned ") +
-                                        std::to_string(bits) +
-                                        " bits: the operand is 255 by value, lowered by its own rule";
+                const std::string name {std::string("bit_") + bit_op_name(op) + "_mask_nested_closed" +
+                                        (sg ? "_s" : "_u") + std::to_string(bits)};
+                const std::string doc {std::string(sg ? "-1000 " : "1000 ") + bit_op_sym(op) + " (240 " +
+                                       bit_op_sym(op) + " 15) on " + (sg ? "signed " : "unsigned ") +
+                                       std::to_string(bits) +
+                                       " bits: the operand is 255 by value, lowered by its own rule"};
                 lc(name, doc,
                    [=](Kit& k)
                    {
@@ -456,7 +458,7 @@ void define_bitwise_or_xor_masks()
                 lc(name + "_wrong", doc + " (the claim is off by one)",
                    [=](Kit& k)
                    {
-                       const SrcLoc l = build(k, true);
+                       const SrcLoc l {build(k, true)};
                        k.fail("check", l);
                    });
             }

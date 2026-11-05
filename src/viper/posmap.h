@@ -12,16 +12,16 @@ namespace cerastes::viper {
 
 struct MapEntry
 {
-    int vpr_line = 0;
+    int vpr_line {0};
     std::string viper_id; // the id of Silicon's error kind (scripts/run_tests.py table)
     std::string category; // a driver category (0011 item 10) or "internal"
     std::string file;
-    int line = 0;
-    int column = 0;
+    int line {0};
+    int column {0};
     std::string message;
-    bool has_note = false;
+    bool has_note {false};
     std::string note_file;
-    int note_line = 0;
+    int note_line {0};
     std::string note_text;
 };
 

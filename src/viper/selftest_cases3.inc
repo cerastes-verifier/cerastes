@@ -13,7 +13,7 @@ void define_side_effects()
     // f(n) with n in [0, 100].
     auto fn_n = [](Kit& k, Type ret)
     {
-        Function* f = k.fn("f", ret, {{"n", k.i32}});
+        Function* f {k.fn("f", ret, {{"n", k.i32}})};
         k.req(f, k.range(k.F(f, 0), k.i32, "0", "100"));
         return f;
     };
@@ -24,7 +24,7 @@ void define_side_effects()
     // A trusted `int g(int x)` with `ensures r == x` (and, when `positive`, `requires x > 0`).
     auto g_id = [](Kit& k, bool positive)
     {
-        Function* g = k.fn("g", k.i32, {{"x", k.i32}});
+        Function* g {k.fn("g", k.i32, {{"x", k.i32}})};
         if (positive)
         {
             k.req(g, k.gt(k.F(g, 0), k.num(k.i32, "0")));
@@ -36,7 +36,7 @@ void define_side_effects()
     // A trusted `void v(void)`.
     auto v_void = [](Kit& k)
     {
-        Function* v = k.fn("v", k.vd);
+        Function* v {k.fn("v", k.vd)};
         k.trusted(v);
         return v;
     };
@@ -53,7 +53,7 @@ void define_side_effects()
         lc(std::string(name) + "_wrong", std::string(doc) + " (with a wrong postcondition)",
            [build](Kit& k)
            {
-               const Stmt* r = build(k, true);
+               const Stmt* r {build(k, true)};
                k.fail("postcondition", r->loc);
            });
     };
@@ -61,11 +61,11 @@ void define_side_effects()
     // ---- assignments used as values ----
     auto assign_value = [=](Kit& k, bool wrong)
     {
-        Function* f = fn_n(k, k.i32);
-        Var* x = k.local(f, "x", k.i32);
-        Var* y = k.local(f, "y", k.i32);
+        Function* f {fn_n(k, k.i32)};
+        Var* x {k.local(f, "x", k.i32)};
+        Var* y {k.local(f, "y", k.i32)};
         k.ens(f, k.eq(k.R(f), k.add(k.mul(I(k, "2"), k.F(f, 0)), I(k, wrong ? "0" : "1"))));
-        const Stmt* r = k.ret(k.add(k.v(y), k.v(x)));
+        const Stmt* r {k.ret(k.add(k.v(y), k.v(x)))};
         f->body = k.blk({k.decl(x, I(k, "0")), k.decl(y, k.add(k.asgE(x, k.pv(f, 0)), I(k, "1"))), r});
         k.done(f);
         if (wrong)
@@ -85,11 +85,11 @@ void define_side_effects()
        });
     auto chained = [=](Kit& k, bool wrong)
     {
-        Function* f = fn_n(k, k.i32);
-        Var* x = k.local(f, "x", k.i32);
-        Var* y = k.local(f, "y", k.i32);
+        Function* f {fn_n(k, k.i32)};
+        Var* x {k.local(f, "x", k.i32)};
+        Var* y {k.local(f, "y", k.i32)};
         k.ens(f, k.eq(k.R(f), k.mul(I(k, wrong ? "3" : "2"), k.F(f, 0))));
-        const Stmt* r = k.ret(k.add(k.v(x), k.v(y)));
+        const Stmt* r {k.ret(k.add(k.v(x), k.v(y)))};
         f->body = k.blk({k.decl(x, I(k, "0")), k.decl(y, I(k, "0")), k.asg(y, k.asgE(x, k.pv(f, 0))), r});
         k.done(f);
         if (wrong)
@@ -109,14 +109,14 @@ void define_side_effects()
        });
     auto narrow = [=](Kit& k, bool bounded)
     {
-        Function* f = k.fn("f", k.i32, {{"v", k.i32}});
+        Function* f {k.fn("f", k.i32, {{"v", k.i32}})};
         if (bounded)
         {
             k.req(f, k.range(k.F(f, 0), k.i32, "-100", "100"));
         }
-        Var* s = k.local(f, "s", k.i16);
-        Var* i = k.local(f, "i", k.i32);
-        const Expr* c = k.cv(k.i16, k.pv(f, 0));
+        Var* s {k.local(f, "s", k.i16)};
+        Var* i {k.local(f, "i", k.i32)};
+        const Expr* c {k.cv(k.i16, k.pv(f, 0))};
         if (bounded)
         {
             k.ens(f, k.eq(k.R(f), k.mul(I(k, "2"), k.F(f, 0))));
@@ -142,8 +142,8 @@ void define_side_effects()
     lc("fx_assign_bool", "bool b; return (b = (n > 5)) as an int: the value of the assignment is the stored bool",
        [=](Kit& k)
        {
-           Function* f = fn_n(k, k.i32);
-           Var* b = k.local(f, "b", k.bl);
+           Function* f {fn_n(k, k.i32)};
+           Var* b {k.local(f, "b", k.bl)};
            k.ens(f, k.eq(k.R(f), k.cond(k.gt(k.F(f, 0), I(k, "5")), I(k, "1"), I(k, "0"))));
            f->body = k.blk({k.decl(b, k.no()), k.ret(k.bi(k.i32, k.asgE(b, k.gt(k.pv(f, 0), I(k, "5")))))});
            k.done(f);
@@ -151,10 +151,10 @@ void define_side_effects()
     lc("fx_assign_bool_wrong", "the same with the postcondition of n > 6",
        [=](Kit& k)
        {
-           Function* f = fn_n(k, k.i32);
-           Var* b = k.local(f, "b", k.bl);
+           Function* f {fn_n(k, k.i32)};
+           Var* b {k.local(f, "b", k.bl)};
            k.ens(f, k.eq(k.R(f), k.cond(k.gt(k.F(f, 0), I(k, "6")), I(k, "1"), I(k, "0"))));
-           const Stmt* r = k.ret(k.bi(k.i32, k.asgE(b, k.gt(k.pv(f, 0), I(k, "5")))));
+           const Stmt* r {k.ret(k.bi(k.i32, k.asgE(b, k.gt(k.pv(f, 0), I(k, "5")))))};
            f->body = k.blk({k.decl(b, k.no()), r});
            k.done(f);
            k.fail("postcondition", r->loc);
@@ -164,9 +164,9 @@ void define_side_effects()
     lc("fx_compound_value", "int y = (x += 2) * 3; return y + x with x = n: 4n + 8",
        [=](Kit& k)
        {
-           Function* f = fn_n(k, k.i32);
-           Var* x = k.local(f, "x", k.i32);
-           Var* y = k.local(f, "y", k.i32);
+           Function* f {fn_n(k, k.i32)};
+           Var* x {k.local(f, "x", k.i32)};
+           Var* y {k.local(f, "y", k.i32)};
            k.ens(f, k.eq(k.R(f), k.add(k.mul(I(k, "4"), k.F(f, 0)), I(k, "8"))));
            f->body = k.blk({k.decl(x, k.pv(f, 0)), k.decl(y, k.mul(k.cmpE(x, BinaryOp::Add, I(k, "2")), I(k, "3"))),
                             k.ret(k.add(k.v(y), k.v(x)))});
@@ -175,11 +175,11 @@ void define_side_effects()
     lc("fx_compound_value_wrong", "the same with 4n + 6",
        [=](Kit& k)
        {
-           Function* f = fn_n(k, k.i32);
-           Var* x = k.local(f, "x", k.i32);
-           Var* y = k.local(f, "y", k.i32);
+           Function* f {fn_n(k, k.i32)};
+           Var* x {k.local(f, "x", k.i32)};
+           Var* y {k.local(f, "y", k.i32)};
            k.ens(f, k.eq(k.R(f), k.add(k.mul(I(k, "4"), k.F(f, 0)), I(k, "6"))));
-           const Stmt* r = k.ret(k.add(k.v(y), k.v(x)));
+           const Stmt* r {k.ret(k.add(k.v(y), k.v(x)))};
            f->body =
                k.blk({k.decl(x, k.pv(f, 0)), k.decl(y, k.mul(k.cmpE(x, BinaryOp::Add, I(k, "2")), I(k, "3"))), r});
            k.done(f);
@@ -188,9 +188,9 @@ void define_side_effects()
     lc("fx_compound_overflow", "y = (x += 1) with any int x: overflows at INT_MAX",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"a", k.i32}});
-           Var* x = k.local(f, "x", k.i32);
-           const Expr* e = k.cmpE(x, BinaryOp::Add, I(k, "1"));
+           Function* f {k.fn("f", k.i32, {{"a", k.i32}})};
+           Var* x {k.local(f, "x", k.i32)};
+           const Expr* e {k.cmpE(x, BinaryOp::Add, I(k, "1"))};
            f->body = k.blk({k.decl(x, k.pv(f, 0)), k.ret(e)});
            k.done(f);
            k.fail("overflow", e->loc);
@@ -198,9 +198,9 @@ void define_side_effects()
     lc("fx_compound_div_zero", "return x /= d: d may be zero, and INT_MIN / -1 overflows",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"a", k.i32}, {"d", k.i32}});
-           Var* x = k.local(f, "x", k.i32);
-           const Expr* e = k.cmpE(x, BinaryOp::Div, k.pv(f, 1));
+           Function* f {k.fn("f", k.i32, {{"a", k.i32}, {"d", k.i32}})};
+           Var* x {k.local(f, "x", k.i32)};
+           const Expr* e {k.cmpE(x, BinaryOp::Div, k.pv(f, 1))};
            f->body = k.blk({k.decl(x, k.pv(f, 0)), k.ret(e)});
            k.done(f);
            k.fail("division-by-zero", e->loc);
@@ -209,9 +209,9 @@ void define_side_effects()
     lc("fx_compound_div_ok", "return x /= d with d in [1, 10]",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"a", k.i32}, {"d", k.i32}});
+           Function* f {k.fn("f", k.i32, {{"a", k.i32}, {"d", k.i32}})};
            k.req(f, k.range(k.F(f, 1), k.i32, "1", "10"));
-           Var* x = k.local(f, "x", k.i32);
+           Var* x {k.local(f, "x", k.i32)};
            f->body = k.blk({k.decl(x, k.pv(f, 0)), k.ret(k.cmpE(x, BinaryOp::Div, k.pv(f, 1)))});
            k.done(f);
        });
@@ -220,13 +220,13 @@ void define_side_effects()
     // y = x++ (post, old value), y = ++x (pre, new value), y = x-- and y = --x; `x` starts as n; returns y + x.
     auto incdec = [=](Kit& k, bool up, bool post, const char* ens_const)
     {
-        Function* f = fn_n(k, k.i32);
-        Var* x = k.local(f, "x", k.i32);
-        Var* y = k.local(f, "y", k.i32);
+        Function* f {fn_n(k, k.i32)};
+        Var* x {k.local(f, "x", k.i32)};
+        Var* y {k.local(f, "y", k.i32)};
         // post: y = n, x = n +- 1; pre: y = x = n +- 1
-        const Expr* sum = k.add(k.mul(I(k, "2"), k.F(f, 0)), I(k, ens_const));
+        const Expr* sum {k.add(k.mul(I(k, "2"), k.F(f, 0)), I(k, ens_const))};
         k.ens(f, k.eq(k.R(f), sum));
-        const Stmt* r = k.ret(k.add(k.v(y), k.v(x)));
+        const Stmt* r {k.ret(k.add(k.v(y), k.v(x)))};
         f->body =
             k.blk({k.decl(x, k.pv(f, 0)), k.decl(y, I(k, "0")), k.asg(y, up ? k.incE(x, post) : k.decE(x, post)), r});
         k.done(f);
@@ -255,33 +255,33 @@ void define_side_effects()
     lc("fx_incdec_post_decr_wrong", "y = x-- with the postcondition of --x",
        [=](Kit& k)
        {
-           const Stmt* r = incdec(k, false, true, "-2");
+           const Stmt* r {incdec(k, false, true, "-2")};
            k.fail("postcondition", r->loc);
        });
     lc("fx_incdec_pre_decr_wrong", "y = --x with the postcondition of x--",
        [=](Kit& k)
        {
-           const Stmt* r = incdec(k, false, false, "-1");
+           const Stmt* r {incdec(k, false, false, "-1")};
            k.fail("postcondition", r->loc);
        });
     lc("fx_incdec_post_incr_wrong", "y = x++ with the postcondition of ++x",
        [=](Kit& k)
        {
-           const Stmt* r = incdec(k, true, true, "2");
+           const Stmt* r {incdec(k, true, true, "2")};
            k.fail("postcondition", r->loc);
        });
     lc("fx_incdec_pre_incr_wrong", "y = ++x with the postcondition of x++",
        [=](Kit& k)
        {
-           const Stmt* r = incdec(k, true, false, "1");
+           const Stmt* r {incdec(k, true, false, "1")};
            k.fail("postcondition", r->loc);
        });
     lc("fx_incdec_overflow", "return x++ with any int x: overflows at INT_MAX",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"a", k.i32}});
-           Var* x = k.local(f, "x", k.i32);
-           const Expr* e = k.incE(x);
+           Function* f {k.fn("f", k.i32, {{"a", k.i32}})};
+           Var* x {k.local(f, "x", k.i32)};
+           const Expr* e {k.incE(x)};
            f->body = k.blk({k.decl(x, k.pv(f, 0)), k.ret(e)});
            k.done(f);
            k.fail("overflow", e->loc);
@@ -289,9 +289,9 @@ void define_side_effects()
     lc("fx_incdec_underflow", "return --x with any int x: overflows at INT_MIN",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"a", k.i32}});
-           Var* x = k.local(f, "x", k.i32);
-           const Expr* e = k.decE(x, false);
+           Function* f {k.fn("f", k.i32, {{"a", k.i32}})};
+           Var* x {k.local(f, "x", k.i32)};
+           const Expr* e {k.decE(x, false)};
            f->body = k.blk({k.decl(x, k.pv(f, 0)), k.ret(e)});
            k.done(f);
            k.fail("overflow", e->loc);
@@ -299,8 +299,8 @@ void define_side_effects()
     lc("fx_return_incdec", "int x = n; return x++: the result is n",
        [=](Kit& k)
        {
-           Function* f = fn_n(k, k.i32);
-           Var* x = k.local(f, "x", k.i32);
+           Function* f {fn_n(k, k.i32)};
+           Var* x {k.local(f, "x", k.i32)};
            k.ens(f, k.eq(k.R(f), k.F(f, 0)));
            f->body = k.blk({k.decl(x, k.pv(f, 0)), k.ret(k.incE(x))});
            k.done(f);
@@ -308,20 +308,20 @@ void define_side_effects()
     lc("fx_return_incdec_wrong", "int x = n; return ++x with the postcondition r == n",
        [=](Kit& k)
        {
-           Function* f = fn_n(k, k.i32);
-           Var* x = k.local(f, "x", k.i32);
+           Function* f {fn_n(k, k.i32)};
+           Var* x {k.local(f, "x", k.i32)};
            k.ens(f, k.eq(k.R(f), k.F(f, 0)));
-           const Stmt* r = k.ret(k.incE(x, false));
+           const Stmt* r {k.ret(k.incE(x, false))};
            f->body = k.blk({k.decl(x, k.pv(f, 0)), r});
            k.done(f);
            k.fail("postcondition", r->loc);
        });
     auto unsigned_exact = [=](Kit& k, bool wrong)
     {
-        Function* f = k.fn("f", k.vd);
-        Var* x = k.local(f, "x", k.u32);
-        Var* y = k.local(f, "y", k.u32);
-        const Stmt* c = k.chk(k.eq_c(k.v(x), k.u32, wrong ? "4294967294" : "4294967295"));
+        Function* f {k.fn("f", k.vd)};
+        Var* x {k.local(f, "x", k.u32)};
+        Var* y {k.local(f, "y", k.u32)};
+        const Stmt* c {k.chk(k.eq_c(k.v(x), k.u32, wrong ? "4294967294" : "4294967295"))};
         f->body = k.blk({k.decl(x, k.num(k.u32, "4294967294")), k.decl(y, k.incE(x)),
                          k.chk(k.eq_c(k.v(y), k.u32, "4294967294")), c});
         k.done(f);
@@ -344,23 +344,23 @@ void define_side_effects()
        "unsigned x = UINT_MAX; y = x++: the incremented value does not fit unsigned int (no wrap)",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
-           Var* x = k.local(f, "x", k.u32);
-           Var* y = k.local(f, "y", k.u32);
-           const Expr* inc = k.incE(x);
+           Function* f {k.fn("f", k.vd)};
+           Var* x {k.local(f, "x", k.u32)};
+           Var* y {k.local(f, "y", k.u32)};
+           const Expr* inc {k.incE(x)};
            f->body = k.blk({k.decl(x, k.num(k.u32, "4294967295")), k.decl(y, inc)});
            k.done(f);
            k.fail("overflow", inc->loc);
        });
     auto small = [=](Kit& k, bool bounded)
     {
-        Function* f = k.fn("f", k.i8, {{"c", k.i8}});
+        Function* f {k.fn("f", k.i8, {{"c", k.i8}})};
         if (bounded)
         {
             k.req(f, k.le_c(k.F(f, 0), k.i8, "126"));
         }
-        Var* x = k.local(f, "x", k.i8);
-        const Expr* e = k.incE(x);
+        Var* x {k.local(f, "x", k.i8)};
+        const Expr* e {k.incE(x)};
         f->body = k.blk({k.decl(x, k.pv(f, 0)), k.ret(e)});
         k.done(f);
         if (!bounded)
@@ -380,13 +380,13 @@ void define_side_effects()
        });
     auto argument = [=](Kit& k, bool positive)
     {
-        Function* g = g_id(k, true);
-        Function* f = k.fn("f", k.i32, {{"a", k.i32}});
+        Function* g {g_id(k, true)};
+        Function* f {k.fn("f", k.i32, {{"a", k.i32}})};
         k.req(f, k.range(k.F(f, 0), k.i32, positive ? "1" : "0", "100"));
         k.ens(f, k.eq(k.R(f), k.F(f, 0)));
-        Var* x = k.local(f, "x", k.i32);
-        Var* y = k.local(f, "y", k.i32);
-        const Expr* c = k.call(g, {k.incE(x)});
+        Var* x {k.local(f, "x", k.i32)};
+        Var* y {k.local(f, "y", k.i32)};
+        const Expr* c {k.call(g, {k.incE(x)})};
         f->body = k.blk(
             {k.decl(x, k.pv(f, 0)), k.decl(y, c), k.chk(k.eq(k.v(x), k.add(k.pv(f, 0), I(k, "1")))), k.ret(k.v(y))});
         k.done(f);
@@ -407,19 +407,19 @@ void define_side_effects()
        });
     auto switch_inc = [=](Kit& k, bool wrong)
     {
-        Function* f = fn_n(k, k.i32);
-        Var* x = k.local(f, "x", k.i32);
-        Var* r = k.local(f, "r", k.i32);
-        const int id = k.jid();
+        Function* f {fn_n(k, k.i32)};
+        Var* x {k.local(f, "x", k.i32)};
+        Var* r {k.local(f, "r", k.i32)};
+        const int id {k.jid()};
         k.ens(f, k.implies(k.eq_c(k.F(f, 0), k.i32, "0"), k.eq_c(k.R(f), k.i32, "10")));
         k.ens(f, k.implies(k.ne(k.F(f, 0), I(k, "0")), k.eq(k.R(f), wrong ? k.F(f, 0) : k.add(k.F(f, 0), I(k, "1")))));
-        const Stmt* body = k.blk({k.cs(I(k, "0")), k.asg(r, I(k, "10")), k.brk(id), k.dflt(), k.asg(r, k.v(x))});
-        const Stmt* rt = k.ret(k.v(r));
+        const Stmt* body {k.blk({k.cs(I(k, "0")), k.asg(r, I(k, "10")), k.brk(id), k.dflt(), k.asg(r, k.v(x))})};
+        const Stmt* rt {k.ret(k.v(r))};
         f->body = k.blk({k.decl(x, k.pv(f, 0)), k.decl(r, I(k, "0")), k.sw(k.incE(x), body, id), rt});
         k.done(f);
         if (wrong)
         {
-            k.fail_only("postcondition", rt->loc, 2, 1); // two ensures clauses; the second is the one that fails
+            k.fail_only("postcondition", rt->loc, 2U, 1U); // two ensures clauses; the second is the one that fails
         }
     };
     lc("fx_switch_incdec", "switch (x++): the cases compare the old value; the default sees the new one",
@@ -437,8 +437,8 @@ void define_side_effects()
     lc("fx_comma_value", "return (x = n, x + 1): the value is that of the right operand, after the assignment",
        [=](Kit& k)
        {
-           Function* f = fn_n(k, k.i32);
-           Var* x = k.local(f, "x", k.i32);
+           Function* f {fn_n(k, k.i32)};
+           Var* x {k.local(f, "x", k.i32)};
            k.ens(f, k.eq(k.R(f), k.add(k.F(f, 0), I(k, "1"))));
            f->body = k.blk({k.decl(x, I(k, "0")), k.ret(k.comma(k.asgE(x, k.pv(f, 0)), k.add(k.v(x), I(k, "1"))))});
            k.done(f);
@@ -446,10 +446,10 @@ void define_side_effects()
     lc("fx_comma_value_wrong", "the same with the postcondition r == n",
        [=](Kit& k)
        {
-           Function* f = fn_n(k, k.i32);
-           Var* x = k.local(f, "x", k.i32);
+           Function* f {fn_n(k, k.i32)};
+           Var* x {k.local(f, "x", k.i32)};
            k.ens(f, k.eq(k.R(f), k.F(f, 0)));
-           const Stmt* r = k.ret(k.comma(k.asgE(x, k.pv(f, 0)), k.add(k.v(x), I(k, "1"))));
+           const Stmt* r {k.ret(k.comma(k.asgE(x, k.pv(f, 0)), k.add(k.v(x), I(k, "1"))))};
            f->body = k.blk({k.decl(x, I(k, "0")), r});
            k.done(f);
            k.fail("postcondition", r->loc);
@@ -457,25 +457,25 @@ void define_side_effects()
     twin("fx_comma_void_call_left", "y = (v(), i++): a void call as the left operand, then the increment",
          [=](Kit& k, bool wrong)
          {
-             Function* v = v_void(k);
-             Function* f = fn_n(k, k.i32);
-             Var* i = k.local(f, "i", k.i32);
-             Var* y = k.local(f, "y", k.i32);
+             Function* v {v_void(k)};
+             Function* f {fn_n(k, k.i32)};
+             Var* i {k.local(f, "i", k.i32)};
+             Var* y {k.local(f, "y", k.i32)};
              k.ens(f, k.eq(k.R(f), k.add(k.mul(I(k, "2"), k.F(f, 0)), I(k, wrong ? "2" : "1"))));
-             const Stmt* r = k.ret(k.add(k.v(y), k.v(i)));
+             const Stmt* r {k.ret(k.add(k.v(y), k.v(i)))};
              f->body = k.blk({k.decl(i, k.pv(f, 0)), k.decl(y, k.comma(k.call(v, {}), k.incE(i))), r});
              k.done(f);
              return r;
          });
     auto comma_calls = [=](Kit& k, bool wrong)
     {
-        Function* h = k.fn("h", k.i32, {{"x", k.i32}});
+        Function* h {k.fn("h", k.i32, {{"x", k.i32}})};
         k.req(h, k.range(k.F(h, 0), k.i32, "0", "100"));
         k.ens(h, k.eq(k.R(h), k.add(k.F(h, 0), I(k, "1"))));
         k.trusted(h);
-        Function* f = k.fn("f", k.vd);
-        Var* y = k.local(f, "y", k.i32);
-        const Stmt* c = k.chk(k.eq(k.v(y), I(k, wrong ? "2" : "3")));
+        Function* f {k.fn("f", k.vd)};
+        Var* y {k.local(f, "y", k.i32)};
+        const Stmt* c {k.chk(k.eq(k.v(y), I(k, wrong ? "2" : "3")))};
         f->body = k.blk({k.decl(y, k.comma(k.call(h, {I(k, "1")}), k.call(h, {I(k, "2")}))), c});
         k.done(f);
         if (wrong)
@@ -497,9 +497,9 @@ void define_side_effects()
        "(g(0), g(1)) with g requiring x > 0: only the first call's precondition fails",
        [=](Kit& k)
        {
-           Function* g = g_id(k, true);
-           Function* f = k.fn("f", k.i32);
-           const Expr* first = k.call(g, {I(k, "0")});
+           Function* g {g_id(k, true)};
+           Function* f {k.fn("f", k.i32)};
+           const Expr* first {k.call(g, {I(k, "0")})};
            f->body = k.blk({k.ret(k.comma(first, k.call(g, {I(k, "1")})))});
            k.done(f);
            k.fail("precondition", first->loc);
@@ -508,17 +508,17 @@ void define_side_effects()
        "return (abort(), 1 / d): the division check follows the call that ends the program, so it holds for any d",
        [=](Kit& k)
        {
-           Function* a = k.abort_fn();
-           Function* f = k.fn("f", k.i32, {{"d", k.i32}});
+           Function* a {k.abort_fn()};
+           Function* f {k.fn("f", k.i32, {{"d", k.i32}})};
            f->body = k.blk({k.ret(k.comma(k.call(a, {}), k.div(I(k, "1"), k.pv(f, 0))))});
            k.done(f);
        });
     lc("fx_comma_returning_call_division", "return (v(), 1 / d): v returns, so d may be zero",
        [=](Kit& k)
        {
-           Function* v = v_void(k);
-           Function* f = k.fn("f", k.i32, {{"d", k.i32}});
-           const Expr* d = k.div(I(k, "1"), k.pv(f, 0));
+           Function* v {v_void(k)};
+           Function* f {k.fn("f", k.i32, {{"d", k.i32}})};
+           const Expr* d {k.div(I(k, "1"), k.pv(f, 0))};
            f->body = k.blk({k.ret(k.comma(k.call(v, {}), d))});
            k.done(f);
            k.fail("division-by-zero", d->loc);
@@ -527,9 +527,9 @@ void define_side_effects()
        "return (abort(), 0) + 100 / d: the other operand of + is unsequenced with the comma, so its check comes first",
        [=](Kit& k)
        {
-           Function* a = k.abort_fn();
-           Function* f = k.fn("f", k.i32, {{"d", k.i32}});
-           const Expr* d = k.div(I(k, "100"), k.pv(f, 0));
+           Function* a {k.abort_fn()};
+           Function* f {k.fn("f", k.i32, {{"d", k.i32}})};
+           const Expr* d {k.div(I(k, "100"), k.pv(f, 0))};
            f->body = k.blk({k.ret(k.add(k.comma(k.call(a, {}), I(k, "0")), d))});
            k.done(f);
            k.fail("division-by-zero", d->loc);
@@ -538,11 +538,11 @@ void define_side_effects()
     // ---- conditions with effects ----
     auto cond_write = [=](Kit& k, bool read_before)
     {
-        Function* f = fn_n(k, k.i32);
-        Var* x = k.local(f, "x", k.i32);
+        Function* f {fn_n(k, k.i32)};
+        Var* x {k.local(f, "x", k.i32)};
         k.ens(f, k.eq(k.R(f), k.sub(k.F(f, 0), I(k, "1"))));
-        const Expr* rd = k.v(x);
-        std::vector<const Stmt*> body = {k.decl(x, nullptr)};
+        const Expr* rd {k.v(x)};
+        std::vector<const Stmt*> body {k.decl(x, nullptr)};
         if (read_before)
         {
             body.push_back(k.es(rd));
@@ -572,7 +572,7 @@ void define_side_effects()
     // 0 ok, 1 entry, 2 preserved, 3 termination, 4 last-evaluation overflow, 5 postcondition
     auto while_incr = [=](Kit& k, int variant)
     {
-        Function* f = k.fn("f", k.i32, {{"n", k.i32}});
+        Function* f {k.fn("f", k.i32, {{"n", k.i32}})};
         if (variant == 4)
         {
             k.req(f, k.ge_c(k.F(f, 0), k.i32, "0"));
@@ -582,14 +582,14 @@ void define_side_effects()
             k.req(f, k.range(k.F(f, 0), k.i32, "0", "100"));
         }
         k.ens(f, k.eq(k.R(f), variant == 5 ? k.add(k.F(f, 0), I(k, "1")) : k.F(f, 0)));
-        Var* i = k.local(f, "i", k.i32);
-        Var* c = k.local(f, "c", k.i32);
-        Clause inv = k.cl(k.land(k.land(k.eq(k.v(i), k.v(c)), k.ge_c(k.v(c), k.i32, "0")), k.le(k.v(c), k.pv(f, 0))));
-        const Expr* inc = k.incE(i);
-        Clause m = k.cl(variant == 3 ? k.cv(k.i64, k.pv(f, 0)) : k.gap(k.pv(f, 0), k.v(i)));
-        const Stmt* body = k.blk({variant == 2 ? k.asg(c, k.add(k.v(c), I(k, "2"))) : plus1(k, c)});
-        const Stmt* w = k.loop(k.lt(inc, k.pv(f, 0)), {inv}, {m}, body, nullptr, LF::While, k.jid());
-        const Stmt* r = k.ret(k.v(c));
+        Var* i {k.local(f, "i", k.i32)};
+        Var* c {k.local(f, "c", k.i32)};
+        Clause inv {k.cl(k.land(k.land(k.eq(k.v(i), k.v(c)), k.ge_c(k.v(c), k.i32, "0")), k.le(k.v(c), k.pv(f, 0))))};
+        const Expr* inc {k.incE(i)};
+        Clause m {k.cl(variant == 3 ? k.cv(k.i64, k.pv(f, 0)) : k.gap(k.pv(f, 0), k.v(i)))};
+        const Stmt* body {k.blk({variant == 2 ? k.asg(c, k.add(k.v(c), I(k, "2"))) : plus1(k, c)})};
+        const Stmt* w {k.loop(k.lt(inc, k.pv(f, 0)), {inv}, {m}, body, nullptr, LF::While, k.jid())};
+        const Stmt* r {k.ret(k.v(c))};
         f->body = k.blk({k.decl(i, I(k, variant == 1 ? "1" : "0")), k.decl(c, I(k, "0")), w, r});
         k.done(f);
         if (variant == 1)
@@ -647,11 +647,11 @@ void define_side_effects()
     // continue and break with a condition that has an effect (the exit jump and the continue label coexist).
     auto top_jump = [=](Kit& k, bool is_break, bool bad)
     {
-        Function* f = k.fn("f", k.i32, {{"n", k.i32}});
+        Function* f {k.fn("f", k.i32, {{"n", k.i32}})};
         k.req(f, k.range(k.F(f, 0), k.i32, "0", "100"));
-        Var* i = k.local(f, "i", k.i32);
-        Var* c = k.local(f, "c", k.i32);
-        const int id = k.jid();
+        Var* i {k.local(f, "i", k.i32)};
+        Var* c {k.local(f, "c", k.i32)};
+        const int id {k.jid()};
         Clause inv;
         const Expr* post;
         if (!is_break)
@@ -671,11 +671,11 @@ void define_side_effects()
                          k.land(k.ge(k.F(f, 0), I(k, "4")), k.eq_c(k.R(f), k.i32, bad ? "5" : "4")));
         }
         k.ens(f, post);
-        const Stmt* body = is_break ? k.blk({k.iff(k.eq_c(k.v(i), k.i32, "5"), k.blk({k.brk(id)})), plus1(k, c)})
-                                    : k.blk({k.iff(k.le_c(k.v(i), k.i32, "2"), k.blk({k.cnt(id)})), plus1(k, c)});
-        const Stmt* w =
-            k.loop(k.lt(k.incE(i), k.pv(f, 0)), {inv}, {k.cl(k.gap(k.pv(f, 0), k.v(i)))}, body, nullptr, LF::While, id);
-        const Stmt* r = k.ret(k.v(c));
+        const Stmt* body {is_break ? k.blk({k.iff(k.eq_c(k.v(i), k.i32, "5"), k.blk({k.brk(id)})), plus1(k, c)})
+                                   : k.blk({k.iff(k.le_c(k.v(i), k.i32, "2"), k.blk({k.cnt(id)})), plus1(k, c)})};
+        const Stmt* w {k.loop(k.lt(k.incE(i), k.pv(f, 0)), {inv}, {k.cl(k.gap(k.pv(f, 0), k.v(i)))}, body, nullptr,
+                              LF::While, id)};
+        const Stmt* r {k.ret(k.v(c))};
         f->body = k.blk({k.decl(i, I(k, "0")), k.decl(c, I(k, "0")), w, r});
         k.done(f);
         if (bad && !is_break)
@@ -712,14 +712,14 @@ void define_side_effects()
     // do { c++ } while (i++ < n): the condition's effect after the body.
     auto do_incr = [=](Kit& k, bool wrong)
     {
-        Function* f = fn_n(k, k.i32);
+        Function* f {fn_n(k, k.i32)};
         k.ens(f, k.eq(k.R(f), wrong ? k.F(f, 0) : k.add(k.F(f, 0), I(k, "1"))));
-        Var* i = k.local(f, "i", k.i32);
-        Var* c = k.local(f, "c", k.i32);
-        Clause inv = k.cl(k.land(k.land(k.eq(k.v(i), k.v(c)), k.ge_c(k.v(c), k.i32, "0")), k.le(k.v(c), k.pv(f, 0))));
-        const Stmt* w = k.loop(k.lt(k.incE(i), k.pv(f, 0)), {inv}, {k.cl(k.gap(k.pv(f, 0), k.v(c)))},
-                               k.blk({plus1(k, c)}), nullptr, LF::DoWhile, k.jid());
-        const Stmt* r = k.ret(k.v(c));
+        Var* i {k.local(f, "i", k.i32)};
+        Var* c {k.local(f, "c", k.i32)};
+        Clause inv {k.cl(k.land(k.land(k.eq(k.v(i), k.v(c)), k.ge_c(k.v(c), k.i32, "0")), k.le(k.v(c), k.pv(f, 0))))};
+        const Stmt* w {k.loop(k.lt(k.incE(i), k.pv(f, 0)), {inv}, {k.cl(k.gap(k.pv(f, 0), k.v(c)))},
+                              k.blk({plus1(k, c)}), nullptr, LF::DoWhile, k.jid())};
+        const Stmt* r {k.ret(k.v(c))};
         f->body = k.blk({k.decl(i, I(k, "0")), k.decl(c, I(k, "0")), w, r});
         k.done(f);
         if (wrong)
@@ -741,16 +741,16 @@ void define_side_effects()
     // for (i = 0, j = n; i < j; i++, j--) c++: the statements of the comma in the init and the step.
     auto for_comma = [=](Kit& k, bool wrong)
     {
-        Function* f = fn_n(k, k.i32);
+        Function* f {fn_n(k, k.i32)};
         k.ens(f, k.eq(k.R(f), k.div(wrong ? k.F(f, 0) : k.add(k.F(f, 0), I(k, "1")), I(k, "2"))));
-        Var* i = k.local(f, "i", k.i32);
-        Var* j = k.local(f, "j", k.i32);
-        Var* c = k.local(f, "c", k.i32);
-        Clause inv = k.cl(k.land(k.land(k.eq(k.v(i), k.v(c)), k.eq(k.add(k.v(i), k.v(j)), k.pv(f, 0))),
-                                 k.land(k.ge_c(k.v(i), k.i32, "0"), k.le(k.v(i), k.add(k.v(j), I(k, "1"))))));
-        const Stmt* w = k.loop(k.lt(k.v(i), k.v(j)), {inv}, {k.cl(k.gap(k.v(j), k.v(i)))}, k.blk({plus1(k, c)}),
-                               k.blk({k.incS(i), k.decS(j)}), LF::While, k.jid());
-        const Stmt* r = k.ret(k.v(c));
+        Var* i {k.local(f, "i", k.i32)};
+        Var* j {k.local(f, "j", k.i32)};
+        Var* c {k.local(f, "c", k.i32)};
+        Clause inv {k.cl(k.land(k.land(k.eq(k.v(i), k.v(c)), k.eq(k.add(k.v(i), k.v(j)), k.pv(f, 0))),
+                                k.land(k.ge_c(k.v(i), k.i32, "0"), k.le(k.v(i), k.add(k.v(j), I(k, "1"))))))};
+        const Stmt* w {k.loop(k.lt(k.v(i), k.v(j)), {inv}, {k.cl(k.gap(k.v(j), k.v(i)))}, k.blk({plus1(k, c)}),
+                              k.blk({k.incS(i), k.decS(j)}), LF::While, k.jid())};
+        const Stmt* r {k.ret(k.v(c))};
         f->body = k.blk({k.decl(i, I(k, "0")), k.decl(j, I(k, "0")), k.decl(c, I(k, "0")), k.asg(i, I(k, "0")),
                          k.asg(j, k.pv(f, 0)), w, r});
         k.done(f);
@@ -775,15 +775,15 @@ void define_side_effects()
     // 0 ok, 1 read of x before the loop
     auto cond_only_flag = [=](Kit& k, int variant)
     {
-        Function* f = fn_n(k, k.i32);
+        Function* f {fn_n(k, k.i32)};
         k.ens(f, k.eq_c(k.R(f), k.i32, "0"));
-        Var* x = k.local(f, "x", k.i32);
-        Var* c = k.local(f, "c", k.i32);
-        Clause inv = k.cl(k.land(k.ge_c(k.v(c), k.i32, "0"), k.le(k.v(c), k.pv(f, 0))));
-        const Expr* rd = k.v(x);
-        const Stmt* w = k.loop(k.gt(k.asgE(x, k.sub(k.pv(f, 0), k.v(c))), I(k, "0")), {inv},
-                               {k.cl(k.gap(k.pv(f, 0), k.v(c)))}, k.blk({plus1(k, c)}), nullptr, LF::While, k.jid());
-        std::vector<const Stmt*> top = {k.decl(x, nullptr), k.decl(c, I(k, "0"))};
+        Var* x {k.local(f, "x", k.i32)};
+        Var* c {k.local(f, "c", k.i32)};
+        Clause inv {k.cl(k.land(k.ge_c(k.v(c), k.i32, "0"), k.le(k.v(c), k.pv(f, 0))))};
+        const Expr* rd {k.v(x)};
+        const Stmt* w {k.loop(k.gt(k.asgE(x, k.sub(k.pv(f, 0), k.v(c))), I(k, "0")), {inv},
+                              {k.cl(k.gap(k.pv(f, 0), k.v(c)))}, k.blk({plus1(k, c)}), nullptr, LF::While, k.jid())};
+        std::vector<const Stmt*> top {k.decl(x, nullptr), k.decl(c, I(k, "0"))};
         if (variant == 1)
         {
             top.push_back(k.chk(k.eq(rd, rd)));
@@ -795,7 +795,7 @@ void define_side_effects()
         if (variant == 1)
         {
             // two reads of x; after the first fails Silicon assumes its flag
-            k.fail_only("uninitialized", rd->loc, 2, 0);
+            k.fail_only("uninitialized", rd->loc, 2U, 0U);
         }
     };
     lc("fx_while_assign_condition",
@@ -814,10 +814,10 @@ void define_side_effects()
     // 0 ok, 1 x not assigned before the loop, 2 the range invariants weakened (a hook)
     auto and_cond = [=](Kit& k, int variant)
     {
-        Function* f = fn_n(k, k.i32);
-        Var* x = k.local(f, "x", k.i32);
-        Var* c = k.local(f, "c", k.i32);
-        std::vector<Clause> inv = {k.cl(k.land(k.ge_c(k.v(c), k.i32, "0"), k.le(k.v(c), k.pv(f, 0))))};
+        Function* f {fn_n(k, k.i32)};
+        Var* x {k.local(f, "x", k.i32)};
+        Var* c {k.local(f, "c", k.i32)};
+        std::vector<Clause> inv {k.cl(k.land(k.ge_c(k.v(c), k.i32, "0"), k.le(k.v(c), k.pv(f, 0))))};
         if (variant == 0)
         {
             inv.push_back(k.cl(k.eq(k.v(x), k.v(c))));
@@ -826,12 +826,12 @@ void define_side_effects()
         {
             k.ens(f, k.eq(k.R(f), k.F(f, 0)));
         }
-        const Expr* rd = k.v(x);
-        const Stmt* w =
-            k.loop(k.land(k.lt(k.v(c), k.pv(f, 0)), k.gt(k.asgE(x, k.add(k.v(c), I(k, "1"))), I(k, "0"))), inv,
-                   {k.cl(k.gap(k.pv(f, 0), k.v(c)))}, k.blk({plus1(k, c)}), nullptr, LF::While, k.jid());
-        std::vector<const Stmt*> top = {variant == 1 ? k.decl(x, nullptr) : k.decl(x, I(k, "0")), k.decl(c, I(k, "0")),
-                                        w};
+        const Expr* rd {k.v(x)};
+        const Stmt* w {k.loop(k.land(k.lt(k.v(c), k.pv(f, 0)), k.gt(k.asgE(x, k.add(k.v(c), I(k, "1"))), I(k, "0"))),
+                              inv, {k.cl(k.gap(k.pv(f, 0), k.v(c)))}, k.blk({plus1(k, c)}), nullptr, LF::While,
+                              k.jid())};
+        std::vector<const Stmt*> top {variant == 1 ? k.decl(x, nullptr) : k.decl(x, I(k, "0")), k.decl(c, I(k, "0")),
+                                      w};
         top.push_back(k.ret(variant == 1 ? rd : k.v(x)));
         f->body = k.blk(top);
         k.done(f);
@@ -843,7 +843,7 @@ void define_side_effects()
         {
             k.lower_options.weaken_auto_invariant = true;
             // x and c, entry and preservation: Silicon stops at the first invariant that fails
-            k.fail_only("internal", w->loc, 4, 0);
+            k.fail_only("internal", w->loc, 4U, 0U);
         }
     };
     lc("fx_while_and_condition_write",
@@ -869,9 +869,9 @@ void define_side_effects()
     // 0 ok, 1 wrong value, 2 read x after (untaken path), 3 the same with n > 0 required
     auto and_assign = [=](Kit& k, int variant)
     {
-        Function* f = fn_n(k, k.i32);
-        Var* x = k.local(f, "x", k.i32);
-        Var* y = k.local(f, "y", k.i32);
+        Function* f {fn_n(k, k.i32)};
+        Var* x {k.local(f, "x", k.i32)};
+        Var* y {k.local(f, "y", k.i32)};
         if (variant == 3)
         {
             k.req(f, k.gt(k.F(f, 0), I(k, "0")));
@@ -880,8 +880,8 @@ void define_side_effects()
         {
             k.ens(f, k.eq(k.R(f), k.cond(k.gt(k.F(f, 0), I(k, variant == 1 ? "2" : "1")), I(k, "1"), I(k, "0"))));
         }
-        const Expr* rd = k.v(x);
-        const Stmt* r = k.ret(variant >= 2 ? rd : k.v(y));
+        const Expr* rd {k.v(x)};
+        const Stmt* r {k.ret(variant >= 2 ? rd : k.v(y))};
         if (variant == 3)
         {
             k.ens(f, k.eq(k.R(f), k.F(f, 0)));
@@ -922,12 +922,12 @@ void define_side_effects()
     twin("fx_or_assign", "y = n == 0 || (x = n) > 1: the write happens only when n != 0",
          [=](Kit& k, bool wrong)
          {
-             Function* f = fn_n(k, k.i32);
-             Var* x = k.local(f, "x", k.i32);
-             Var* y = k.local(f, "y", k.i32);
+             Function* f {fn_n(k, k.i32)};
+             Var* x {k.local(f, "x", k.i32)};
+             Var* y {k.local(f, "y", k.i32)};
              k.ens(f, k.eq(k.R(f), k.cond(k.gt(k.F(f, 0), I(k, "1")), I(k, "1"),
                                           k.cond(k.eq_c(k.F(f, 0), k.i32, "0"), I(k, wrong ? "0" : "1"), I(k, "0")))));
-             const Stmt* r = k.ret(k.v(y));
+             const Stmt* r {k.ret(k.v(y))};
              f->body = k.blk(
                  {k.decl(x, I(k, "0")), k.decl(y, I(k, "0")),
                   k.asg(y, k.bi(k.i32, k.lor(k.eq_c(k.pv(f, 0), k.i32, "0"), k.gt(k.asgE(x, k.pv(f, 0)), I(k, "1"))))),
@@ -937,9 +937,9 @@ void define_side_effects()
          });
     auto and_div = [=](Kit& k, bool strict)
     {
-        Function* f = fn_n(k, k.i32);
-        Var* x = k.local(f, "x", k.i32);
-        const Expr* d = k.div(I(k, "100"), k.asgE(x, k.pv(f, 0)));
+        Function* f {fn_n(k, k.i32)};
+        Var* x {k.local(f, "x", k.i32)};
+        const Expr* d {k.div(I(k, "100"), k.asgE(x, k.pv(f, 0)))};
         f->body = k.blk({k.decl(x, I(k, "0")),
                          k.ret(k.bi(k.i32, k.land(k.bin(strict ? BinaryOp::Gt : BinaryOp::Ge, k.pv(f, 0), I(k, "0")),
                                                   k.gt(d, I(k, "1")))))});
@@ -963,12 +963,12 @@ void define_side_effects()
     twin("fx_nested_branches", "n > 0 && (n > 5 || (x = 1) > 0): a branch inside a branch",
          [=](Kit& k, bool wrong)
          {
-             Function* f = fn_n(k, k.i32);
-             Var* x = k.local(f, "x", k.i32);
+             Function* f {fn_n(k, k.i32)};
+             Var* x {k.local(f, "x", k.i32)};
              k.ens(f, k.eq(k.R(f), k.cond(k.gt(k.F(f, 0), I(k, wrong ? "5" : "0")), I(k, "1"), I(k, "0"))));
-             const Stmt* r =
+             const Stmt* r {
                  k.ret(k.bi(k.i32, k.land(k.gt(k.pv(f, 0), I(k, "0")),
-                                          k.lor(k.gt(k.pv(f, 0), I(k, "5")), k.gt(k.asgE(x, I(k, "1")), I(k, "0"))))));
+                                          k.lor(k.gt(k.pv(f, 0), I(k, "5")), k.gt(k.asgE(x, I(k, "1")), I(k, "0"))))))};
              f->body = k.blk({k.decl(x, I(k, "0")), r});
              k.done(f);
              return r;
@@ -976,10 +976,10 @@ void define_side_effects()
     // 0 ok, 1 wrong value, 2 one arm leaves x unassigned and x is read after, 3 the same without the read
     auto cond_arms = [=](Kit& k, int variant)
     {
-        Function* f = fn_n(k, k.i32);
-        Var* x = k.local(f, "x", k.i32);
-        Var* y = k.local(f, "y", k.i32);
-        const Expr* second = variant >= 2 ? I(k, "0") : k.asgE(x, I(k, "2"));
+        Function* f {fn_n(k, k.i32)};
+        Var* x {k.local(f, "x", k.i32)};
+        Var* y {k.local(f, "y", k.i32)};
+        const Expr* second {variant >= 2 ? I(k, "0") : k.asgE(x, I(k, "2"))};
         if (variant <= 1)
         {
             k.ens(f, k.eq(k.R(f), k.cond(k.gt(k.F(f, 0), I(k, "5")), I(k, "2"), I(k, variant == 1 ? "5" : "4"))));
@@ -988,8 +988,8 @@ void define_side_effects()
         {
             k.ens(f, k.eq(k.R(f), k.cond(k.gt(k.F(f, 0), I(k, "5")), I(k, "1"), I(k, "0"))));
         }
-        const Expr* rd = k.v(x);
-        const Stmt* r = k.ret(variant == 2 ? k.add(rd, k.v(y)) : (variant == 3 ? k.v(y) : k.add(k.v(x), k.v(y))));
+        const Expr* rd {k.v(x)};
+        const Stmt* r {k.ret(variant == 2 ? k.add(rd, k.v(y)) : (variant == 3 ? k.v(y) : k.add(k.v(x), k.v(y))))};
         f->body = k.blk({variant == 2 ? k.decl(x, nullptr) : k.decl(x, I(k, "0")), k.decl(y, I(k, "0")),
                          k.asg(y, k.cond(k.gt(k.pv(f, 0), I(k, "5")), k.asgE(x, I(k, "1")), second)), r});
         k.done(f);
@@ -1025,12 +1025,12 @@ void define_side_effects()
     twin("fx_cond_incdec_arms", "y = n > 5 ? x++ : x--: either arm; y + x == 2n + 1 or 2n - 1",
          [=](Kit& k, bool wrong)
          {
-             Function* f = fn_n(k, k.i32);
-             Var* x = k.local(f, "x", k.i32);
-             Var* y = k.local(f, "y", k.i32);
+             Function* f {fn_n(k, k.i32)};
+             Var* x {k.local(f, "x", k.i32)};
+             Var* y {k.local(f, "y", k.i32)};
              k.ens(f, k.eq(k.R(f), k.cond(k.gt(k.F(f, 0), I(k, "5")), k.add(k.mul(I(k, "2"), k.F(f, 0)), I(k, "1")),
                                           k.sub(k.mul(I(k, "2"), k.F(f, 0)), I(k, wrong ? "2" : "1")))));
-             const Stmt* r = k.ret(k.add(k.v(y), k.v(x)));
+             const Stmt* r {k.ret(k.add(k.v(y), k.v(x)))};
              f->body = k.blk({k.decl(x, k.pv(f, 0)), k.decl(y, I(k, "0")),
                               k.asg(y, k.cond(k.gt(k.pv(f, 0), I(k, "5")), k.incE(x), k.decE(x))), r});
              k.done(f);
@@ -1041,7 +1041,7 @@ void define_side_effects()
     // 0 ok, 1 overflow of y + x, 2 x unassigned at the first read, 3 read after the write only (ok), 4 wrong value
     auto snapshot = [=](Kit& k, int variant)
     {
-        Function* f = k.fn("f", k.i32, {{"p", k.i32}});
+        Function* f {k.fn("f", k.i32, {{"p", k.i32}})};
         if (variant == 0 || variant == 4)
         {
             k.req(f, k.range(k.F(f, 0), k.i32, "0", "100"));
@@ -1054,14 +1054,14 @@ void define_side_effects()
         {
             k.ens(f, k.eq(k.R(f), k.F(f, 0)));
         }
-        Var* x = k.local(f, "x", k.i32);
-        Var* y = k.local(f, "y", k.i32);
-        Var* r = k.local(f, "r", k.i32);
-        const Expr* rd = k.v(x);
-        const Expr* sum = k.add(k.v(y), k.v(x));
-        const Expr* value = variant == 3 ? k.comma(k.asgE(x, I(k, "5")), k.add(k.v(x), I(k, "1")))
-                                         : k.comma(k.comma(k.asgE(y, rd), k.asgE(x, I(k, "1"))), sum);
-        const Stmt* ret = k.ret(k.v(r));
+        Var* x {k.local(f, "x", k.i32)};
+        Var* y {k.local(f, "y", k.i32)};
+        Var* r {k.local(f, "r", k.i32)};
+        const Expr* rd {k.v(x)};
+        const Expr* sum {k.add(k.v(y), k.v(x))};
+        const Expr* value {variant == 3 ? k.comma(k.asgE(x, I(k, "5")), k.add(k.v(x), I(k, "1")))
+                                        : k.comma(k.comma(k.asgE(y, rd), k.asgE(x, I(k, "1"))), sum)};
+        const Stmt* ret {k.ret(k.v(r))};
         f->body = k.blk({variant == 2 ? k.decl(x, nullptr) : k.decl(x, k.pv(f, 0)), k.decl(y, I(k, "0")),
                          k.decl(r, I(k, "0")), k.asg(r, value), ret});
         k.done(f);
@@ -1101,20 +1101,20 @@ void define_side_effects()
     lc("fx_snapshot_after_write", "r = (x = 5, x + 1) is 6: the read after the write sees the new value",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"p", k.i32}});
+           Function* f {k.fn("f", k.i32, {{"p", k.i32}})};
            k.ens(f, k.eq_c(k.R(f), k.i32, "6"));
-           Var* x = k.local(f, "x", k.i32);
+           Var* x {k.local(f, "x", k.i32)};
            f->body = k.blk({k.decl(x, k.pv(f, 0)), k.ret(k.comma(k.asgE(x, I(k, "5")), k.add(k.v(x), I(k, "1"))))});
            k.done(f);
        });
     lc("fx_snapshot_after_write_wrong", "the same with the postcondition r == p + 1: the old value is gone",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"p", k.i32}});
+           Function* f {k.fn("f", k.i32, {{"p", k.i32}})};
            k.req(f, k.range(k.F(f, 0), k.i32, "0", "100"));
            k.ens(f, k.eq(k.R(f), k.add(k.F(f, 0), I(k, "1"))));
-           Var* x = k.local(f, "x", k.i32);
-           const Stmt* r = k.ret(k.comma(k.asgE(x, I(k, "5")), k.add(k.v(x), I(k, "1"))));
+           Var* x {k.local(f, "x", k.i32)};
+           const Stmt* r {k.ret(k.comma(k.asgE(x, I(k, "5")), k.add(k.v(x), I(k, "1"))))};
            f->body = k.blk({k.decl(x, k.pv(f, 0)), r});
            k.done(f);
            k.fail("postcondition", r->loc);
@@ -1124,10 +1124,10 @@ void define_side_effects()
     twin("fx_seq_store_reads_target", "return x = x + 1: a read of the target in the stored value is no conflict",
          [=](Kit& k, bool wrong)
          {
-             Function* f = fn_n(k, k.i32);
-             Var* x = k.local(f, "x", k.i32);
+             Function* f {fn_n(k, k.i32)};
+             Var* x {k.local(f, "x", k.i32)};
              k.ens(f, k.eq(k.R(f), k.add(k.F(f, 0), I(k, wrong ? "2" : "1"))));
-             const Stmt* r = k.ret(k.asgE(x, k.add(k.v(x), I(k, "1"))));
+             const Stmt* r {k.ret(k.asgE(x, k.add(k.v(x), I(k, "1"))))};
              f->body = k.blk({k.decl(x, k.pv(f, 0)), r});
              k.done(f);
              return r;
@@ -1135,10 +1135,10 @@ void define_side_effects()
     twin("fx_seq_comma_before_read", "return (x = 1, x) + 1: the comma sequences the write before the read",
          [=](Kit& k, bool wrong)
          {
-             Function* f = fn_n(k, k.i32);
-             Var* x = k.local(f, "x", k.i32);
+             Function* f {fn_n(k, k.i32)};
+             Var* x {k.local(f, "x", k.i32)};
              k.ens(f, k.eq_c(k.R(f), k.i32, wrong ? "3" : "2"));
-             const Stmt* r = k.ret(k.add(k.comma(k.asgE(x, I(k, "1")), k.v(x)), I(k, "1")));
+             const Stmt* r {k.ret(k.add(k.comma(k.asgE(x, I(k, "1")), k.v(x)), I(k, "1")))};
              f->body = k.blk({k.decl(x, k.pv(f, 0)), r});
              k.done(f);
              return r;
@@ -1146,11 +1146,11 @@ void define_side_effects()
     twin("fx_seq_and_reads_after_write", "return x++ != 0 && x > 0: && sequences the increment before the read",
          [=](Kit& k, bool wrong)
          {
-             Function* f = fn_n(k, k.i32);
-             Var* x = k.local(f, "x", k.i32);
+             Function* f {fn_n(k, k.i32)};
+             Var* x {k.local(f, "x", k.i32)};
              k.ens(f,
                    k.eq(k.R(f), k.cond(k.ne(k.F(f, 0), I(k, "0")), I(k, wrong ? "0" : "1"), I(k, wrong ? "1" : "0"))));
-             const Stmt* r = k.ret(k.bi(k.i32, k.land(k.ne(k.incE(x), I(k, "0")), k.gt(k.v(x), I(k, "0")))));
+             const Stmt* r {k.ret(k.bi(k.i32, k.land(k.ne(k.incE(x), I(k, "0")), k.gt(k.v(x), I(k, "0")))))};
              f->body = k.blk({k.decl(x, k.pv(f, 0)), r});
              k.done(f);
              return r;
@@ -1158,10 +1158,10 @@ void define_side_effects()
     twin("fx_seq_comma_incr_then_read", "return (x++, x): the value is n + 1",
          [=](Kit& k, bool wrong)
          {
-             Function* f = fn_n(k, k.i32);
-             Var* x = k.local(f, "x", k.i32);
+             Function* f {fn_n(k, k.i32)};
+             Var* x {k.local(f, "x", k.i32)};
              k.ens(f, k.eq(k.R(f), k.add(k.F(f, 0), I(k, wrong ? "2" : "1"))));
-             const Stmt* r = k.ret(k.comma(k.incE(x), k.v(x)));
+             const Stmt* r {k.ret(k.comma(k.incE(x), k.v(x)))};
              f->body = k.blk({k.decl(x, k.pv(f, 0)), r});
              k.done(f);
              return r;
@@ -1169,10 +1169,10 @@ void define_side_effects()
     twin("fx_seq_store_comma_shields", "x = (x++, 2): the comma sequences the increment before the store: x == 2",
          [=](Kit& k, bool wrong)
          {
-             Function* f = fn_n(k, k.i32);
-             Var* x = k.local(f, "x", k.i32);
+             Function* f {fn_n(k, k.i32)};
+             Var* x {k.local(f, "x", k.i32)};
              k.ens(f, k.eq_c(k.R(f), k.i32, wrong ? "3" : "2"));
-             const Stmt* r = k.ret(k.v(x));
+             const Stmt* r {k.ret(k.v(x))};
              f->body = k.blk({k.decl(x, k.pv(f, 0)), k.asg(x, k.comma(k.incE(x), I(k, "2"))), r});
              k.done(f);
              return r;
@@ -1180,11 +1180,11 @@ void define_side_effects()
     twin("fx_seq_store_call_shields", "return x = g(x++): the call sequences the increment before the store",
          [=](Kit& k, bool wrong)
          {
-             Function* g = g_id(k, false);
-             Function* f = fn_n(k, k.i32);
-             Var* x = k.local(f, "x", k.i32);
+             Function* g {g_id(k, false)};
+             Function* f {fn_n(k, k.i32)};
+             Var* x {k.local(f, "x", k.i32)};
              k.ens(f, k.eq(k.R(f), wrong ? k.add(k.F(f, 0), I(k, "1")) : k.F(f, 0)));
-             const Stmt* r = k.ret(k.asgE(x, k.call(g, {k.incE(x)})));
+             const Stmt* r {k.ret(k.asgE(x, k.call(g, {k.incE(x)})))};
              f->body = k.blk({k.decl(x, k.pv(f, 0)), r});
              k.done(f);
              return r;
@@ -1193,11 +1193,11 @@ void define_side_effects()
          "x = (x++ != 0 && 1 > 0): the first operand of && is sequenced before the store",
          [=](Kit& k, bool wrong)
          {
-             Function* f = fn_n(k, k.i32);
-             Var* x = k.local(f, "x", k.i32);
+             Function* f {fn_n(k, k.i32)};
+             Var* x {k.local(f, "x", k.i32)};
              k.ens(f,
                    k.eq(k.R(f), k.cond(k.ne(k.F(f, 0), I(k, "0")), I(k, wrong ? "0" : "1"), I(k, wrong ? "1" : "0"))));
-             const Stmt* r = k.ret(k.v(x));
+             const Stmt* r {k.ret(k.v(x))};
              f->body =
                  k.blk({k.decl(x, k.pv(f, 0)),
                         k.asg(x, k.bi(k.i32, k.land(k.ne(k.incE(x), I(k, "0")), k.gt(I(k, "1"), I(k, "0"))))), r});
@@ -1207,11 +1207,11 @@ void define_side_effects()
     twin("fx_seq_decl_of_assign_value", "int y = x = x + 1: y and x are both n + 1",
          [=](Kit& k, bool wrong)
          {
-             Function* f = fn_n(k, k.i32);
-             Var* x = k.local(f, "x", k.i32);
-             Var* y = k.local(f, "y", k.i32);
+             Function* f {fn_n(k, k.i32)};
+             Var* x {k.local(f, "x", k.i32)};
+             Var* y {k.local(f, "y", k.i32)};
              k.ens(f, k.eq(k.R(f), k.add(k.mul(I(k, "2"), k.F(f, 0)), I(k, wrong ? "3" : "2"))));
-             const Stmt* r = k.ret(k.add(k.v(x), k.v(y)));
+             const Stmt* r {k.ret(k.add(k.v(x), k.v(y)))};
              f->body = k.blk({k.decl(x, k.pv(f, 0)), k.decl(y, k.asgE(x, k.add(k.v(x), I(k, "1")))), r});
              k.done(f);
              return r;
@@ -1219,11 +1219,11 @@ void define_side_effects()
     twin("fx_seq_comma_then_postincr", "y = (x = 2, x++): y == 2 and x == 3",
          [=](Kit& k, bool wrong)
          {
-             Function* f = fn_n(k, k.i32);
-             Var* x = k.local(f, "x", k.i32);
-             Var* y = k.local(f, "y", k.i32);
+             Function* f {fn_n(k, k.i32)};
+             Var* x {k.local(f, "x", k.i32)};
+             Var* y {k.local(f, "y", k.i32)};
              k.ens(f, k.eq_c(k.R(f), k.i32, wrong ? "6" : "5"));
-             const Stmt* r = k.ret(k.add(k.v(x), k.v(y)));
+             const Stmt* r {k.ret(k.add(k.v(x), k.v(y)))};
              f->body = k.blk({k.decl(x, k.pv(f, 0)), k.decl(y, k.comma(k.asgE(x, I(k, "2")), k.incE(x))), r});
              k.done(f);
              return r;
@@ -1232,10 +1232,10 @@ void define_side_effects()
          "return (x = 1) != 0 ? x : 0: the condition is sequenced before the arms",
          [=](Kit& k, bool wrong)
          {
-             Function* f = fn_n(k, k.i32);
-             Var* x = k.local(f, "x", k.i32);
+             Function* f {fn_n(k, k.i32)};
+             Var* x {k.local(f, "x", k.i32)};
              k.ens(f, k.eq_c(k.R(f), k.i32, wrong ? "0" : "1"));
-             const Stmt* r = k.ret(k.cond(k.ne(k.asgE(x, I(k, "1")), I(k, "0")), k.v(x), I(k, "0")));
+             const Stmt* r {k.ret(k.cond(k.ne(k.asgE(x, I(k, "1")), I(k, "0")), k.v(x), I(k, "0")))};
              f->body = k.blk({k.decl(x, k.pv(f, 0)), r});
              k.done(f);
              return r;
@@ -1244,11 +1244,11 @@ void define_side_effects()
          "return (x = 1) + (y = 2): two writes of different variables are unsequenced but independent",
          [=](Kit& k, bool wrong)
          {
-             Function* f = fn_n(k, k.i32);
-             Var* x = k.local(f, "x", k.i32);
-             Var* y = k.local(f, "y", k.i32);
+             Function* f {fn_n(k, k.i32)};
+             Var* x {k.local(f, "x", k.i32)};
+             Var* y {k.local(f, "y", k.i32)};
              k.ens(f, k.eq_c(k.R(f), k.i32, wrong ? "4" : "3"));
-             const Stmt* r = k.ret(k.add(k.asgE(x, I(k, "1")), k.asgE(y, I(k, "2"))));
+             const Stmt* r {k.ret(k.add(k.asgE(x, I(k, "1")), k.asgE(y, I(k, "2"))))};
              f->body = k.blk({k.decl(x, k.pv(f, 0)), k.decl(y, k.pv(f, 0)), r});
              k.done(f);
              return r;
@@ -1256,11 +1256,11 @@ void define_side_effects()
     twin("fx_seq_cond_arms_not_checked_against_each_other", "return n > 3 ? x++ : (x = 2): at most one arm runs",
          [=](Kit& k, bool wrong)
          {
-             Function* f = fn_n(k, k.i32);
-             Var* x = k.local(f, "x", k.i32);
+             Function* f {fn_n(k, k.i32)};
+             Var* x {k.local(f, "x", k.i32)};
              k.ens(f, k.eq(k.R(f), k.cond(k.gt(k.F(f, 0), I(k, "3")), wrong ? k.add(k.F(f, 0), I(k, "1")) : k.F(f, 0),
                                           I(k, "2"))));
-             const Stmt* r = k.ret(k.cond(k.gt(k.pv(f, 0), I(k, "3")), k.incE(x), k.asgE(x, I(k, "2"))));
+             const Stmt* r {k.ret(k.cond(k.gt(k.pv(f, 0), I(k, "3")), k.incE(x), k.asgE(x, I(k, "2"))))};
              f->body = k.blk({k.decl(x, k.pv(f, 0)), r});
              k.done(f);
              return r;
@@ -1272,7 +1272,7 @@ void define_side_effects()
     // is dead after it and holds.
     auto never_returns = [=](Kit& k)
     {
-        Function* nr = k.fn("nr", k.i32, {{"x", k.i32}});
+        Function* nr {k.fn("nr", k.i32, {{"x", k.i32}})};
         k.req(nr, k.ge_c(k.F(nr, 0), k.i32, "0"));
         k.ens(nr, k.no());
         k.trusted(nr);
@@ -1282,11 +1282,11 @@ void define_side_effects()
        "return nr(0) + 100 / y++ for any y: y == 0, and y++ at INT_MAX, are errors C may reach before the call",
        [=](Kit& k)
        {
-           Function* nr = never_returns(k);
-           Function* f = k.fn("f", k.i32, {{"y0", k.i32}});
-           Var* y = k.local(f, "y", k.i32);
-           const Expr* inc = k.incE(y);
-           const Expr* d = k.div(I(k, "100"), inc);
+           Function* nr {never_returns(k)};
+           Function* f {k.fn("f", k.i32, {{"y0", k.i32}})};
+           Var* y {k.local(f, "y", k.i32)};
+           const Expr* inc {k.incE(y)};
+           const Expr* d {k.div(I(k, "100"), inc)};
            f->body = k.blk({k.decl(y, k.pv(f, 0)), k.ret(k.add(k.call(nr, {I(k, "0")}), d))});
            k.done(f);
            k.fail("division-by-zero", d->loc);
@@ -1296,10 +1296,10 @@ void define_side_effects()
        "the same with y in [1, 100]: nothing before the call can fail, and the rest depends on the call",
        [=](Kit& k)
        {
-           Function* nr = never_returns(k);
-           Function* f = k.fn("f", k.i32, {{"y0", k.i32}});
+           Function* nr {never_returns(k)};
+           Function* f {k.fn("f", k.i32, {{"y0", k.i32}})};
            k.req(f, k.range(k.F(f, 0), k.i32, "1", "100"));
-           Var* y = k.local(f, "y", k.i32);
+           Var* y {k.local(f, "y", k.i32)};
            f->body =
                k.blk({k.decl(y, k.pv(f, 0)), k.ret(k.add(k.call(nr, {I(k, "0")}), k.div(I(k, "100"), k.incE(y))))});
            k.done(f);
@@ -1308,10 +1308,10 @@ void define_side_effects()
        "int y; return nr(0) + y++: the read of y comes before the call in some order",
        [=](Kit& k)
        {
-           Function* nr = never_returns(k);
-           Function* f = k.fn("f", k.i32);
-           Var* y = k.local(f, "y", k.i32);
-           const Expr* inc = k.incE(y);
+           Function* nr {never_returns(k)};
+           Function* f {k.fn("f", k.i32)};
+           Var* y {k.local(f, "y", k.i32)};
+           const Expr* inc {k.incE(y)};
            f->body = k.blk({k.decl(y, nullptr), k.ret(k.add(k.call(nr, {I(k, "0")}), inc))});
            k.done(f);
            k.fail("uninitialized", inc->loc);
@@ -1320,11 +1320,11 @@ void define_side_effects()
        "return nr(0) + (y++, 100 / d): the comma's left operand does not depend on the call, so neither does the check",
        [=](Kit& k)
        {
-           Function* nr = never_returns(k);
-           Function* f = k.fn("f", k.i32, {{"y0", k.i32}, {"d", k.i32}});
+           Function* nr {never_returns(k)};
+           Function* f {k.fn("f", k.i32, {{"y0", k.i32}, {"d", k.i32}})};
            k.req(f, k.range(k.F(f, 0), k.i32, "0", "100"));
-           Var* y = k.local(f, "y", k.i32);
-           const Expr* d = k.div(I(k, "100"), k.pv(f, 1));
+           Var* y {k.local(f, "y", k.i32)};
+           const Expr* d {k.div(I(k, "100"), k.pv(f, 1))};
            f->body = k.blk({k.decl(y, k.pv(f, 0)), k.ret(k.add(k.call(nr, {I(k, "0")}), k.comma(k.incE(y), d)))});
            k.done(f);
            k.fail("division-by-zero", d->loc);
@@ -1333,10 +1333,10 @@ void define_side_effects()
        "return nr(0) + (c && (x = 100 / d) > 1): the branch does not depend on the call; the division inside it is checked first",
        [=](Kit& k)
        {
-           Function* nr = never_returns(k);
-           Function* f = k.fn("f", k.i32, {{"c", k.bl}, {"d", k.i32}});
-           Var* x = k.local(f, "x", k.i32);
-           const Expr* div = k.div(I(k, "100"), k.pv(f, 1));
+           Function* nr {never_returns(k)};
+           Function* f {k.fn("f", k.i32, {{"c", k.bl}, {"d", k.i32}})};
+           Var* x {k.local(f, "x", k.i32)};
+           const Expr* div {k.div(I(k, "100"), k.pv(f, 1))};
            f->body = k.blk(
                {k.decl(x, I(k, "0")), k.ret(k.add(k.call(nr, {I(k, "0")}),
                                                   k.bi(k.i32, k.land(k.pv(f, 0), k.gt(k.asgE(x, div), I(k, "1"))))))});
@@ -1347,14 +1347,14 @@ void define_side_effects()
        "h((nr0(), 1), y++) with a callee h: the write of y and its checks come before the calls",
        [=](Kit& k)
        {
-           Function* nr0 = k.fn("nr0", k.vd);
+           Function* nr0 {k.fn("nr0", k.vd)};
            k.ens(nr0, k.no());
            k.trusted(nr0);
-           Function* h = k.fn("h", k.i32, {{"a", k.i32}, {"b", k.i32}});
+           Function* h {k.fn("h", k.i32, {{"a", k.i32}, {"b", k.i32}})};
            k.trusted(h);
-           Function* f = k.fn("f", k.i32, {{"y0", k.i32}});
-           Var* y = k.local(f, "y", k.i32);
-           const Expr* inc = k.incE(y);
+           Function* f {k.fn("f", k.i32, {{"y0", k.i32}})};
+           Var* y {k.local(f, "y", k.i32)};
+           const Expr* inc {k.incE(y)};
            f->body = k.blk({k.decl(y, k.pv(f, 0)), k.ret(k.call(h, {k.comma(k.call(nr0, {}), I(k, "1")), inc}))});
            k.done(f);
            k.fail("overflow", inc->loc);
@@ -1362,8 +1362,8 @@ void define_side_effects()
     lc("fx_noreturn_dependent_check_is_dead", "return 100 / nr(nr(0)): every check depends on a call, so none can fail",
        [=](Kit& k)
        {
-           Function* nr = never_returns(k);
-           Function* f = k.fn("f", k.i32);
+           Function* nr {never_returns(k)};
+           Function* f {k.fn("f", k.i32)};
            f->body = k.blk({k.ret(k.div(I(k, "100"), k.call(nr, {k.call(nr, {I(k, "0")})})))});
            k.done(f);
        });
@@ -1371,8 +1371,8 @@ void define_side_effects()
        "return (nr(0), 100 / d): the comma sequences the division after the call: holds for any d",
        [=](Kit& k)
        {
-           Function* nr = never_returns(k);
-           Function* f = k.fn("f", k.i32, {{"d", k.i32}});
+           Function* nr {never_returns(k)};
+           Function* f {k.fn("f", k.i32, {{"d", k.i32}})};
            f->body = k.blk({k.ret(k.comma(k.call(nr, {I(k, "0")}), k.div(I(k, "100"), k.pv(f, 0))))});
            k.done(f);
        });
@@ -1380,9 +1380,9 @@ void define_side_effects()
        "return (nr(0), y++ / 1) with any y: the increment is sequenced after the call, so its overflow cannot fail",
        [=](Kit& k)
        {
-           Function* nr = never_returns(k);
-           Function* f = k.fn("f", k.i32, {{"y0", k.i32}});
-           Var* y = k.local(f, "y", k.i32);
+           Function* nr {never_returns(k)};
+           Function* f {k.fn("f", k.i32, {{"y0", k.i32}})};
+           Var* y {k.local(f, "y", k.i32)};
            f->body = k.blk({k.decl(y, k.pv(f, 0)), k.ret(k.comma(k.call(nr, {I(k, "0")}), k.incE(y)))});
            k.done(f);
        });
@@ -1392,13 +1392,13 @@ void define_side_effects()
 
 void define_side_effect_rejections()
 {
-    const char* kUnseq = "unsequenced modification";
+    const char* kUnseq {"unsequenced modification"};
     // A function f(c: bool, a: int) with locals x and y (both int, x = y = a); `body_of` builds the statement of the shape.
     auto shape = [](Kit& k, const std::function<const Stmt*(Kit&, Function*, Var*, Var*)>& body_of)
     {
-        Function* f = k.fn("f", k.vd, {{"c", k.bl}, {"a", k.i32}});
-        Var* x = k.local(f, "x", k.i32);
-        Var* y = k.local(f, "y", k.i32);
+        Function* f {k.fn("f", k.vd, {{"c", k.bl}, {"a", k.i32}})};
+        Var* x {k.local(f, "x", k.i32)};
+        Var* y {k.local(f, "y", k.i32)};
         f->body = k.blk({k.decl(x, k.pv(f, 1)), k.decl(y, k.pv(f, 1)), body_of(k, f, x, y)});
         k.done(f);
     };
@@ -1416,13 +1416,13 @@ void define_side_effect_rejections()
     };
     auto g1 = [](Kit& k)
     {
-        Function* g = k.fn("g", k.i32, {{"p", k.i32}});
+        Function* g {k.fn("g", k.i32, {{"p", k.i32}})};
         k.trusted(g);
         return g;
     };
     auto g2 = [](Kit& k)
     {
-        Function* g = k.fn("g2", k.i32, {{"p", k.i32}, {"q", k.i32}});
+        Function* g {k.fn("g2", k.i32, {{"p", k.i32}, {"q", k.i32}})};
         k.trusted(g);
         return g;
     };
@@ -1547,7 +1547,7 @@ void define_side_effect_rejections()
     rc("fx_unseq_call_arguments", kUnseq,
        [=](Kit& k)
        {
-           Function* g = g2(k);
+           Function* g {g2(k)};
            expr_shape(k,
                       [=](Kit& k2, Function*, Var* x, Var*)
                       {
@@ -1632,14 +1632,14 @@ void define_side_effect_rejections()
            shape(k,
                  [=](Kit& k2, Function* f, Var* x, Var*)
                  {
-                     Var* z = k2.local(f, "z", k2.i32);
+                     Var* z {k2.local(f, "z", k2.i32)};
                      return k2.decl(z, k2.add(k2.incE(x), k2.v(x)));
                  });
        });
     rc("fx_unseq_call_result_plus_read", kUnseq,
        [=](Kit& k)
        {
-           Function* g = g1(k);
+           Function* g {g1(k)};
            expr_shape(k,
                       [=](Kit& k2, Function*, Var* x, Var*)
                       {
@@ -1676,7 +1676,7 @@ void define_side_effect_rejections()
     rc("fx_unseq_calls_with_assigns", kUnseq,
        [=](Kit& k)
        {
-           Function* g = g1(k);
+           Function* g {g1(k)};
            expr_shape(k,
                       [=](Kit& k2, Function*, Var* x, Var*)
                       {
@@ -1705,8 +1705,8 @@ void define_side_effect_rejections()
     rc("fx_unseq_in_return", kUnseq,
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"a", k.i32}});
-           Var* x = k.local(f, "x", k.i32);
+           Function* f {k.fn("f", k.i32, {{"a", k.i32}})};
+           Var* x {k.local(f, "x", k.i32)};
            f->body = k.blk({k.decl(x, k.pv(f, 0)), k.ret(k.add(k.incE(x), k.v(x)))});
            k.done(f);
        });
@@ -1753,8 +1753,8 @@ void define_side_effect_rejections()
     rc("fx_rej_effect_in_ensures", "side effect",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"a", k.i32}});
-           Var* x = k.local(f, "x", k.i32);
+           Function* f {k.fn("f", k.i32, {{"a", k.i32}})};
+           Var* x {k.local(f, "x", k.i32)};
            k.ens(f, k.ne(k.asgE(x, I(k, "1")), I(k, "0")));
            f->body = k.blk({k.decl(x, k.pv(f, 0)), k.ret(I(k, "0"))});
            k.done(f);
@@ -1765,7 +1765,7 @@ void define_side_effect_rejections()
            shape(k,
                  [=](Kit& k2, Function* f, Var* x, Var*)
                  {
-                     const int id = k2.jid();
+                     const int id {k2.jid()};
                      return k2.sw(k2.pv(f, 1), k2.blk({k2.cs(k2.asgE(x, I(k2, "1")), "1")}), id);
                  });
        });
@@ -1794,7 +1794,7 @@ void define_side_effect_rejections()
            shape(k,
                  [=](Kit& k2, Function*, Var* x, Var*)
                  {
-                     const Expr* e = k2.asgE(x, I(k2, "1"));
+                     const Expr* e {k2.asgE(x, I(k2, "1"))};
                      return k2.blk({k2.es(e), k2.es(e)});
                  });
        });
@@ -1804,18 +1804,18 @@ void define_side_effect_rejections()
            expr_shape(k,
                       [=](Kit& k2, Function*, Var* x, Var*)
                       {
-                          const Expr* e = k2.incE(x);
+                          const Expr* e {k2.incE(x)};
                           return k2.add(e, e);
                       });
        });
     rc("fx_rej_call_reachable_twice", "call that is reachable twice",
        [=](Kit& k)
        {
-           Function* g = g1(k);
+           Function* g {g1(k)};
            shape(k,
                  [=](Kit& k2, Function*, Var*, Var*)
                  {
-                     const Expr* c = k2.call(g, {I(k2, "1")});
+                     const Expr* c {k2.call(g, {I(k2, "1")})};
                      return k2.blk({k2.es(c), k2.es(c)});
                  });
        });
@@ -1825,7 +1825,7 @@ void define_side_effect_rejections()
            shape(k,
                  [=](Kit& k2, Function*, Var* x, Var*)
                  {
-                     const Expr* c = k2.comma(k2.incE(x), I(k2, "1"));
+                     const Expr* c {k2.comma(k2.incE(x), I(k2, "1"))};
                      return k2.blk({k2.es(c), k2.es(c)});
                  });
        });
@@ -1835,7 +1835,7 @@ void define_side_effect_rejections()
            expr_shape(k,
                       [=](Kit& k2, Function*, Var* x, Var* y)
                       {
-                          Expr* e = const_cast<Expr*>(k2.incE(x));
+                          Expr* e {const_cast<Expr*>(k2.incE(x))};
                           e->b = k2.v(y);
                           return e;
                       });
@@ -1846,7 +1846,7 @@ void define_side_effect_rejections()
            expr_shape(k,
                       [=](Kit& k2, Function*, Var* x, Var*)
                       {
-                          Expr* e = const_cast<Expr*>(k2.incE(x));
+                          Expr* e {const_cast<Expr*>(k2.incE(x))};
                           e->b = k2.v(x);
                           return e;
                       });
@@ -1857,7 +1857,7 @@ void define_side_effect_rejections()
            expr_shape(k,
                       [=](Kit& k2, Function*, Var* x, Var*)
                       {
-                          Expr* e = const_cast<Expr*>(k2.asgE(x, I(k2, "1")));
+                          Expr* e {const_cast<Expr*>(k2.asgE(x, I(k2, "1")))};
                           e->yields_old = true;
                           return e;
                       });
@@ -1865,8 +1865,8 @@ void define_side_effect_rejections()
     rc("fx_rej_assign_to_variable_out_of_scope", "not declared here",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.vd, {{"a", k.i32}});
-           Var* z = k.local(f, "z", k.i32);
+           Function* f {k.fn("f", k.vd, {{"a", k.i32}})};
+           Var* z {k.local(f, "z", k.i32)};
            f->body = k.blk({k.blk({k.decl(z, k.pv(f, 0))}), k.es(k.asgE(z, I(k, "1")))});
            k.done(f);
        });
@@ -1882,7 +1882,7 @@ void define_side_effect_rejections()
     rc("fx_rej_comma_void", "comma of type void",
        [=](Kit& k)
        {
-           Function* v = k.fn("v", k.vd);
+           Function* v {k.fn("v", k.vd)};
            k.trusted(v);
            shape(k,
                  [=](Kit& k2, Function*, Var*, Var*)

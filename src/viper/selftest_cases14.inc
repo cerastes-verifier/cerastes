@@ -59,7 +59,7 @@ void define_struct_objects()
     // A struct local with its declaration.
     auto local_s = [](Kit& k, Function* f, const char* name, StructType* s)
     {
-        Var* v = k.scell(f, name, s);
+        Var* v {k.scell(f, name, s)};
         return std::make_pair(v, k.decl(v, nullptr));
     };
 
@@ -67,15 +67,15 @@ void define_struct_objects()
     // int second(void) ensures(r == 4) { struct S s; s.x = 3; [s.y = 4;] return s.y; }   (mode 1: s.y is never written)
     const auto second = [=](Kit& k, int mode) -> const Expr*
     {
-        StructType* S = mk_s(k);
-        Function* f = k.fn("second", k.i32);
+        StructType* S {mk_s(k)};
+        Function* f {k.fn("second", k.i32)};
         if (mode == 0)
         {
             k.ens(f, k.eq_c(k.R(f), k.i32, "4"));
         }
         auto [s, ds] = local_s(k, f, "s", S);
-        const Expr* rd = k.leaf(k.addr(s), 1);
-        std::vector<const Stmt*> body = {ds, k.lstore(k.addr(s), 0, N(k, "3"))};
+        const Expr* rd {k.leaf(k.addr(s), 1)};
+        std::vector<const Stmt*> body {ds, k.lstore(k.addr(s), 0, N(k, "3"))};
         if (mode == 0)
         {
             body.push_back(k.lstore(k.addr(s), 1, N(k, "4")));
@@ -101,14 +101,14 @@ void define_struct_objects()
     // void bump(struct S *p) requires(owns(*p) && p->x < 100) ensures(owns(*p) && p->x == old(p->x) + 1 && p->y == old(p->y) [+ 1]) { p->x = p->x + 1; }
     const auto bump = [=](Kit& k, bool wrong) -> Function*
     {
-        StructType* S = mk_s(k);
-        Function* f = k.fn("bump", k.vd, {{"p", PS(k, S)}});
+        StructType* S {mk_s(k)};
+        Function* f {k.fn("bump", k.vd, {{"p", PS(k, S)}})};
         k.req(f,
               k.land(owns(k, f, 0, 0), k.land(k.lt(fm(k, f, 0, 0), N(k, "100")), k.lt(fm(k, f, 0, 1), N(k, "100")))));
-        const Expr* y_post = wrong ? k.add(old_fm(k, f, 0, 1), N(k, "1")) : old_fm(k, f, 0, 1);
+        const Expr* y_post {wrong ? k.add(old_fm(k, f, 0, 1), N(k, "1")) : old_fm(k, f, 0, 1)};
         k.ens(f, k.land(owns(k, f, 0, 0), k.land(k.eq(fm(k, f, 0, 0), k.add(old_fm(k, f, 0, 0), N(k, "1"))),
                                                  k.eq(fm(k, f, 0, 1), y_post))));
-        const Expr* pv = k.pn(f->param_var(0));
+        const Expr* pv {k.pn(f->param_var(0))};
         f->body = k.blk({k.lstore(pv, 0, k.add(k.leaf(k.pn(f->param_var(0)), 0), N(k, "1")))});
         k.done(f);
         return f;
@@ -122,15 +122,15 @@ void define_struct_objects()
     lc("struct_owns_param_post", "the ensures also claims p->y grew: postcondition at the closing brace",
        [=](Kit& k)
        {
-           Function* f = bump(k, true);
+           Function* f {bump(k, true)};
            k.fail("postcondition", f->end_loc);
        });
 
     // void put(struct S *p) [no atom | reads(*p) | owns(p->x)] { p->x = 1 | p->y = 5 }
     const auto put = [=](Kit& k, int mode) -> const Stmt*
     {
-        StructType* S = mk_s(k);
-        Function* f = k.fn("put", k.vd, {{"p", PS(k, S)}});
+        StructType* S {mk_s(k)};
+        Function* f {k.fn("put", k.vd, {{"p", PS(k, S)}})};
         if (mode == 0)
         {
             k.req(f, k.ne(FP(k, f, 0), k.nul(PS(k, S))));
@@ -145,7 +145,7 @@ void define_struct_objects()
             k.req(f, owns_m(k, f, 0, 0, 0));
             k.ens(f, owns_m(k, f, 0, 0, 0));
         }
-        const Stmt* st = k.lstore(k.pn(f->param_var(0)), mode == 3 ? 1 : 0, N(k, mode == 3 ? "5" : "1"));
+        const Stmt* st {k.lstore(k.pn(f->param_var(0)), mode == 3 ? 1 : 0, N(k, mode == 3 ? "5" : "1"))};
         f->body = k.blk({st});
         k.done(f);
         return st;
@@ -175,15 +175,15 @@ void define_struct_objects()
     // void put(struct S *p) requires(p == NULL || owns(*p)) ensures(same) { [if (p != NULL)] p->x = 1; }
     const auto guarded = [=](Kit& k, bool guard) -> const Stmt*
     {
-        StructType* S = mk_s(k);
-        Function* f = k.fn("put", k.vd, {{"p", PS(k, S)}});
+        StructType* S {mk_s(k)};
+        Function* f {k.fn("put", k.vd, {{"p", PS(k, S)}})};
         const auto atoms = [&]()
         {
             return k.lor(k.eq(FP(k, f, 0), k.nul(PS(k, S))), owns(k, f, 0, 0));
         };
         k.req(f, atoms());
         k.ens(f, atoms());
-        const Stmt* st = k.lstore(k.pn(f->param_var(0)), 0, N(k, "1"));
+        const Stmt* st {k.lstore(k.pn(f->param_var(0)), 0, N(k, "1"))};
         f->body = k.blk({guard ? k.iff(k.ne(k.pn(f->param_var(0)), k.nul(PS(k, S))), st) : st});
         k.done(f);
         return st;
@@ -203,17 +203,17 @@ void define_struct_objects()
     // void sink(int *q);   void touch(struct S *p) requires(owns(*p) | p == NULL || owns(*p)) ensures(same) { sink(&p->x); }
     const auto touch = [=](Kit& k, bool maybe_null) -> const Expr*
     {
-        StructType* S = mk_s(k);
-        Function* sink = k.fn("sink", k.vd, {{"q", k.ptr(k.i32)}});
+        StructType* S {mk_s(k)};
+        Function* sink {k.fn("sink", k.vd, {{"q", k.ptr(k.i32)}})};
         k.trusted(sink);
-        Function* f = k.fn("touch", k.vd, {{"p", PS(k, S)}});
+        Function* f {k.fn("touch", k.vd, {{"p", PS(k, S)}})};
         const auto atoms = [&]()
         {
             return maybe_null ? k.lor(k.eq(FP(k, f, 0), k.nul(PS(k, S))), owns(k, f, 0, 0)) : owns(k, f, 0, 0);
         };
         k.req(f, atoms());
         k.ens(f, atoms());
-        const Expr* ma = k.mem(k.pn(f->param_var(0)), 0);
+        const Expr* ma {k.mem(k.pn(f->param_var(0)), 0)};
         f->body = k.blk({k.es(k.call(sink, {ma}))});
         k.done(f);
         return ma;
@@ -232,18 +232,18 @@ void define_struct_objects()
     // struct S *p; { struct S s = ...; p = &s; } [sink(&p->x) inside the block | after it]
     const auto dangling = [=](Kit& k, bool after) -> const Expr*
     {
-        StructType* S = mk_s(k);
-        Function* sink = k.fn("sink", k.vd, {{"q", k.ptr(k.i32)}});
+        StructType* S {mk_s(k)};
+        Function* sink {k.fn("sink", k.vd, {{"q", k.ptr(k.i32)}})};
         k.trusted(sink);
-        Function* f = k.fn("f", k.vd);
-        Var* p = k.local(f, "p", PS(k, S));
+        Function* f {k.fn("f", k.vd)};
+        Var* p {k.local(f, "p", PS(k, S))};
         auto [s, ds] = local_s(k, f, "s", S);
-        const Expr* ma = k.mem(k.v(p), 0);
-        const Stmt* call = k.es(k.call(sink, {ma}));
-        const Stmt* inner = after ? k.blkc({ds, k.lstore(k.addr(s), 0, N(k, "1")), k.lstore(k.addr(s), 1, N(k, "2")),
-                                            k.asg(p, k.addr(s))})
-                                  : k.blkc({ds, k.lstore(k.addr(s), 0, N(k, "1")), k.lstore(k.addr(s), 1, N(k, "2")),
-                                            k.asg(p, k.addr(s)), call});
+        const Expr* ma {k.mem(k.v(p), 0)};
+        const Stmt* call {k.es(k.call(sink, {ma}))};
+        const Stmt* inner {after ? k.blkc({ds, k.lstore(k.addr(s), 0, N(k, "1")), k.lstore(k.addr(s), 1, N(k, "2")),
+                                           k.asg(p, k.addr(s))})
+                                 : k.blkc({ds, k.lstore(k.addr(s), 0, N(k, "1")), k.lstore(k.addr(s), 1, N(k, "2")),
+                                           k.asg(p, k.addr(s)), call})};
         f->body = k.blkc({k.decl(p, nullptr), inner, after ? call : k.es(N(k, "0"))});
         k.done(f);
         return ma;
@@ -263,16 +263,16 @@ void define_struct_objects()
     // void f(struct S *s, int *q) requires(owns(*s) && owns(*q)) ensures(same) { }   use: f(&s, &t.x) | f(&s, &s.x)
     const auto trap = [=](Kit& k, bool alias) -> const Expr*
     {
-        StructType* S = mk_s(k);
-        Function* f = k.fn("f", k.vd, {{"s", PS(k, S)}, {"q", k.ptr(k.i32)}});
+        StructType* S {mk_s(k)};
+        Function* f {k.fn("f", k.vd, {{"s", PS(k, S)}, {"q", k.ptr(k.i32)}})};
         k.req(f, k.land(owns(k, f, 0, 0), owns(k, f, 1, 1)));
         k.ens(f, k.land(owns(k, f, 0, 0), owns(k, f, 1, 1)));
         f->body = k.blk({});
         k.done(f);
-        Function* u = k.fn("use", k.vd);
+        Function* u {k.fn("use", k.vd)};
         auto [s, ds] = local_s(k, u, "s", S);
         auto [t, dt] = local_s(k, u, "t", S);
-        const Expr* c = k.call(f, {k.addr(s), alias ? k.mem(k.addr(s), 0) : k.mem(k.addr(t), 0)});
+        const Expr* c {k.call(f, {k.addr(s), alias ? k.mem(k.addr(s), 0) : k.mem(k.addr(t), 0)})};
         u->body = k.blkc({ds, dt, k.lstore(k.addr(s), 0, N(k, "5")), k.lstore(k.addr(s), 1, N(k, "6")),
                           k.lstore(k.addr(t), 0, N(k, "7")), k.lstore(k.addr(t), 1, N(k, "8")), k.es(c)});
         k.done(u);
@@ -287,30 +287,30 @@ void define_struct_objects()
        "f(&s, &s.x): &s.x is a leaf of *s, so the atoms share it whatever their pointee types: permission at the call",
        [=](Kit& k)
        {
-           k.fail_only("permission", trap(k, true)->loc, 2, 0, "twice");
+           k.fail_only("permission", trap(k, true)->loc, 2U, 0U, "twice");
        });
 
     // void g(struct T *t, struct S *s) requires(owns(*t) && owns(*s)) ensures(same) { }   use: g(&t, &u.s) | g(&t, &t.s)
     const auto nested_trap = [=](Kit& k, bool alias) -> const Expr*
     {
-        StructType* S = mk_s(k);
-        StructType* T = mk_t(k, S);
-        Function* g = k.fn("g", k.vd, {{"t", PS(k, T)}, {"s", PS(k, S)}});
+        StructType* S {mk_s(k)};
+        StructType* T {mk_t(k, S)};
+        Function* g {k.fn("g", k.vd, {{"t", PS(k, T)}, {"s", PS(k, S)}})};
         k.req(g, k.land(owns(k, g, 0, 0), owns(k, g, 1, 1)));
         k.ens(g, k.land(owns(k, g, 0, 0), owns(k, g, 1, 1)));
         g->body = k.blk({});
         k.done(g);
-        Function* u = k.fn("use", k.vd);
+        Function* u {k.fn("use", k.vd)};
         auto [t, dt] = local_s(k, u, "t", T);
         auto [w, dw] = local_s(k, u, "u", T);
-        std::vector<const Stmt*> body = {dt, dw};
+        std::vector<const Stmt*> body {dt, dw};
         for (Var* v : {t, w})
         {
             body.push_back(k.lstore(k.mem(k.addr(v), 0), 0, N(k, "1")));
             body.push_back(k.lstore(k.mem(k.addr(v), 0), 1, N(k, "2")));
             body.push_back(k.lstore(k.addr(v), 1, N(k, "3")));
         }
-        const Expr* c = k.call(g, {k.addr(t), alias ? k.mem(k.addr(t), 0) : k.mem(k.addr(w), 0)});
+        const Expr* c {k.call(g, {k.addr(t), alias ? k.mem(k.addr(t), 0) : k.mem(k.addr(w), 0)})};
         body.push_back(k.es(c));
         u->body = k.blkc(body);
         k.done(u);
@@ -326,22 +326,22 @@ void define_struct_objects()
        "g(&t, &t.s): &t.s is the nested slot of *t, so the atoms share its leaves: permission at the call",
        [=](Kit& k)
        {
-           k.fail_only("permission", nested_trap(k, true)->loc, 6, 0, "twice");
+           k.fail_only("permission", nested_trap(k, true)->loc, 6U, 0U, "twice");
        });
 
     // reads over a nested struct beside an owns on an int that may be one of its leaves
     const auto mixed = [=](Kit& k, bool alias) -> const Expr*
     {
-        StructType* S = mk_s(k);
-        Function* f = k.fn("mixed", k.vd, {{"s", PS(k, S)}, {"q", k.ptr(k.i32)}});
+        StructType* S {mk_s(k)};
+        Function* f {k.fn("mixed", k.vd, {{"s", PS(k, S)}, {"q", k.ptr(k.i32)}})};
         k.req(f, k.land(reads(k, f, 0, 0), owns(k, f, 1, 1)));
         k.ens(f, k.land(reads(k, f, 0, 0), owns(k, f, 1, 1)));
         f->body = k.blk({});
         k.done(f);
-        Function* u = k.fn("use", k.vd);
+        Function* u {k.fn("use", k.vd)};
         auto [s, ds] = local_s(k, u, "s", S);
         auto [t, dt] = local_s(k, u, "t", S);
-        const Expr* c = k.call(f, {k.addr(s), alias ? k.mem(k.addr(s), 0) : k.mem(k.addr(t), 0)});
+        const Expr* c {k.call(f, {k.addr(s), alias ? k.mem(k.addr(s), 0) : k.mem(k.addr(t), 0)})};
         u->body = k.blkc({ds, dt, k.lstore(k.addr(s), 0, N(k, "1")), k.lstore(k.addr(s), 1, N(k, "2")),
                           k.lstore(k.addr(t), 0, N(k, "3")), k.lstore(k.addr(t), 1, N(k, "4")), k.es(c)});
         k.done(u);
@@ -356,15 +356,15 @@ void define_struct_objects()
        "mixed(&s, &s.x): a fraction of s.x and the whole of it name one cell: permission at the call",
        [=](Kit& k)
        {
-           k.fail_only("permission", mixed(k, true)->loc, 2, 0, "twice");
+           k.fail_only("permission", mixed(k, true)->loc, 2U, 0U, "twice");
        });
 
     // ---- item 4: scope exit and a callee that keeps a leaf ----
     // void dispose(struct S *p) requires(owns(p->x)) [ensures(owns(p->x))];   void leak(void) { struct S s; s.x = 1; s.y = 2; dispose(&s); }
     const auto leak = [=](Kit& k, bool keeps) -> Function*
     {
-        StructType* S = mk_s(k);
-        Function* d = k.fn("dispose", k.vd, {{"p", PS(k, S)}});
+        StructType* S {mk_s(k)};
+        Function* d {k.fn("dispose", k.vd, {{"p", PS(k, S)}})};
         k.req(d, owns_m(k, d, 0, 0, 0));
         if (!keeps)
         {
@@ -372,7 +372,7 @@ void define_struct_objects()
         }
         d->body = k.blk({});
         k.done(d);
-        Function* f = k.fn("leak", k.vd);
+        Function* f {k.fn("leak", k.vd)};
         auto [s, ds] = local_s(k, f, "s", S);
         f->body = k.blkc(
             {ds, k.lstore(k.addr(s), 0, N(k, "1")), k.lstore(k.addr(s), 1, N(k, "2")), k.es(k.call(d, {k.addr(s)}))});
@@ -388,8 +388,8 @@ void define_struct_objects()
     lc("struct_dispose_scope_exit", "dispose(&s) that keeps s.x: the scope exit fails (lifetime at the closing brace)",
        [=](Kit& k)
        {
-           Function* f = leak(k, true);
-           k.fail("lifetime", f->body->end_loc, 1, "", "`s.x`");
+           Function* f {leak(k, true)};
+           k.fail("lifetime", f->body->end_loc, 1U, "", "`s.x`");
        });
 
     // ---- item 11: loops over the leaves ----
@@ -397,20 +397,20 @@ void define_struct_objects()
     //   while (i < 10) invariant(0 <= i <= 10 && s.x == i && s.y == 2 * i [+ 1]) measure(10 - i) { s.x += 1; s.y += 2; i += 1; } return s.x + s.y; }
     const auto loop_members = [=](Kit& k, bool wrong) -> SrcLoc
     {
-        StructType* S = mk_s(k);
-        Function* f = k.fn("loop_members", k.i32);
+        StructType* S {mk_s(k)};
+        Function* f {k.fn("loop_members", k.i32)};
         k.ens(f, k.eq_c(k.R(f), k.i32, wrong ? "31" : "30"));
         auto [s, ds] = local_s(k, f, "s", S);
-        Var* i = k.local(f, "i", k.i32);
-        Clause bound = k.cl(k.land(k.ge_c(k.v(i), k.i32, "0"), k.le_c(k.v(i), k.i32, "10")));
-        Clause xi = k.cl(k.eq(k.leaf(k.addr(s), 0), k.v(i)));
-        Clause yi = k.cl(
-            k.eq(k.leaf(k.addr(s), 1), wrong ? k.add(k.mul(N(k, "2"), k.v(i)), N(k, "1")) : k.mul(N(k, "2"), k.v(i))));
-        Clause measure = k.cl(k.sub(N(k, "10"), k.v(i)));
-        const Stmt* body =
-            k.blk({k.lstore(k.addr(s), 0, k.add(k.leaf(k.addr(s), 0), N(k, "1"))),
-                   k.lstore(k.addr(s), 1, k.add(k.leaf(k.addr(s), 1), N(k, "2"))), k.asg(i, k.add(k.v(i), N(k, "1")))});
-        const Stmt* w = k.whl(k.lt(k.v(i), N(k, "10")), {bound, xi, yi}, {measure}, body);
+        Var* i {k.local(f, "i", k.i32)};
+        Clause bound {k.cl(k.land(k.ge_c(k.v(i), k.i32, "0"), k.le_c(k.v(i), k.i32, "10")))};
+        Clause xi {k.cl(k.eq(k.leaf(k.addr(s), 0), k.v(i)))};
+        Clause yi {k.cl(
+            k.eq(k.leaf(k.addr(s), 1), wrong ? k.add(k.mul(N(k, "2"), k.v(i)), N(k, "1")) : k.mul(N(k, "2"), k.v(i))))};
+        Clause measure {k.cl(k.sub(N(k, "10"), k.v(i)))};
+        const Stmt* body {k.blk({k.lstore(k.addr(s), 0, k.add(k.leaf(k.addr(s), 0), N(k, "1"))),
+                                 k.lstore(k.addr(s), 1, k.add(k.leaf(k.addr(s), 1), N(k, "2"))),
+                                 k.asg(i, k.add(k.v(i), N(k, "1")))})};
+        const Stmt* w {k.whl(k.lt(k.v(i), N(k, "10")), {bound, xi, yi}, {measure}, body)};
         f->body = k.blkc({ds, k.lstore(k.addr(s), 0, N(k, "0")), k.lstore(k.addr(s), 1, N(k, "0")),
                           k.decl(i, N(k, "0")), w, k.ret(k.add(k.leaf(k.addr(s), 0), k.leaf(k.addr(s), 1)))});
         k.done(f);
@@ -432,21 +432,21 @@ void define_struct_objects()
     // void fill(struct S *p, int n) requires(owns(*p) && 0 <= n <= 100) ensures(owns(*p) && p->x == n && p->y == 2 * n [| == n])
     const auto fill = [=](Kit& k, bool wrong) -> Function*
     {
-        StructType* S = mk_s(k);
-        Function* f = k.fn("fill", k.vd, {{"p", PS(k, S)}, {"n", k.i32}});
+        StructType* S {mk_s(k)};
+        Function* f {k.fn("fill", k.vd, {{"p", PS(k, S)}, {"n", k.i32}})};
         k.req(f, k.land(owns(k, f, 0, 0), k.range(k.F(f, 1), k.i32, "0", "100")));
         k.ens(f,
               k.land(owns(k, f, 0, 0), k.land(k.eq(fm(k, f, 0, 0), k.F(f, 1)),
                                               k.eq(fm(k, f, 0, 1), wrong ? k.F(f, 1) : k.mul(N(k, "2"), k.F(f, 1))))));
-        Var* i = k.local(f, "i", k.i32);
-        const Var* p = f->param_var(0);
-        Clause bound = k.cl(k.land(k.ge_c(k.v(i), k.i32, "0"), k.le(k.v(i), k.pv(f, 1))));
-        Clause xi = k.cl(k.eq(k.leaf(k.pn(p), 0), k.v(i)));
-        Clause yi = k.cl(k.eq(k.leaf(k.pn(p), 1), k.mul(N(k, "2"), k.v(i))));
-        Clause measure = k.cl(k.sub(k.pv(f, 1), k.v(i)));
-        const Stmt* body =
+        Var* i {k.local(f, "i", k.i32)};
+        const Var* p {f->param_var(0)};
+        Clause bound {k.cl(k.land(k.ge_c(k.v(i), k.i32, "0"), k.le(k.v(i), k.pv(f, 1))))};
+        Clause xi {k.cl(k.eq(k.leaf(k.pn(p), 0), k.v(i)))};
+        Clause yi {k.cl(k.eq(k.leaf(k.pn(p), 1), k.mul(N(k, "2"), k.v(i))))};
+        Clause measure {k.cl(k.sub(k.pv(f, 1), k.v(i)))};
+        const Stmt* body {
             k.blk({k.lstore(k.pn(p), 0, k.add(k.leaf(k.pn(p), 0), N(k, "1"))),
-                   k.lstore(k.pn(p), 1, k.add(k.leaf(k.pn(p), 1), N(k, "2"))), k.asg(i, k.add(k.v(i), N(k, "1")))});
+                   k.lstore(k.pn(p), 1, k.add(k.leaf(k.pn(p), 1), N(k, "2"))), k.asg(i, k.add(k.v(i), N(k, "1")))})};
         f->body = k.blk({k.decl(i, N(k, "0")), k.lstore(k.pn(p), 0, N(k, "0")), k.lstore(k.pn(p), 1, N(k, "0")),
                          k.whl(k.lt(k.v(i), k.pv(f, 1)), {bound, xi, yi}, {measure}, body)});
         k.done(f);
@@ -462,28 +462,28 @@ void define_struct_objects()
        "the ensures says p->y == n, the loop leaves 2 * n: postcondition at the closing brace",
        [=](Kit& k)
        {
-           Function* f = fill(k, true);
+           Function* f {fill(k, true)};
            k.fail("postcondition", f->end_loc);
        });
 
     // void both(struct S *p, struct S *q) requires(owns(*p) && owns(*q)) { while (...) { p->x += 1; q->y += 1; } }   use: both(&s, &t) | both(&s, &s)
     const auto both = [=](Kit& k, bool alias) -> const Expr*
     {
-        StructType* S = mk_s(k);
-        Function* f = k.fn("both", k.vd, {{"p", PS(k, S)}, {"q", PS(k, S)}});
+        StructType* S {mk_s(k)};
+        Function* f {k.fn("both", k.vd, {{"p", PS(k, S)}, {"q", PS(k, S)}})};
         k.req(f, k.land(owns(k, f, 0, 0), owns(k, f, 1, 1)));
         k.ens(f, k.land(owns(k, f, 0, 0), owns(k, f, 1, 1)));
-        Var* i = k.local(f, "i", k.i32);
-        Clause bound = k.cl(k.land(k.ge_c(k.v(i), k.i32, "0"), k.le_c(k.v(i), k.i32, "3")));
-        Clause measure = k.cl(k.sub(N(k, "3"), k.v(i)));
-        const Stmt* body = k.blk({k.lstore(k.pn(f->param_var(0)), 0, N(k, "1")),
-                                  k.lstore(k.pn(f->param_var(1)), 1, N(k, "2")), k.asg(i, k.add(k.v(i), N(k, "1")))});
+        Var* i {k.local(f, "i", k.i32)};
+        Clause bound {k.cl(k.land(k.ge_c(k.v(i), k.i32, "0"), k.le_c(k.v(i), k.i32, "3")))};
+        Clause measure {k.cl(k.sub(N(k, "3"), k.v(i)))};
+        const Stmt* body {k.blk({k.lstore(k.pn(f->param_var(0)), 0, N(k, "1")),
+                                 k.lstore(k.pn(f->param_var(1)), 1, N(k, "2")), k.asg(i, k.add(k.v(i), N(k, "1")))})};
         f->body = k.blk({k.decl(i, N(k, "0")), k.whl(k.lt(k.v(i), N(k, "3")), {bound}, {measure}, body)});
         k.done(f);
-        Function* u = k.fn("use", k.vd);
+        Function* u {k.fn("use", k.vd)};
         auto [s, ds] = local_s(k, u, "s", S);
         auto [t, dt] = local_s(k, u, "t", S);
-        const Expr* c = k.call(f, {k.addr(s), alias ? k.addr(s) : k.addr(t)});
+        const Expr* c {k.call(f, {k.addr(s), alias ? k.addr(s) : k.addr(t)})};
         u->body = k.blkc({ds, dt, k.lstore(k.addr(s), 0, N(k, "1")), k.lstore(k.addr(s), 1, N(k, "2")),
                           k.lstore(k.addr(t), 0, N(k, "3")), k.lstore(k.addr(t), 1, N(k, "4")), k.es(c)});
         k.done(u);
@@ -498,21 +498,21 @@ void define_struct_objects()
     lc("struct_loop_roots_alias", "both(&s, &s): the two owns atoms share the object: permission at the call",
        [=](Kit& k)
        {
-           k.fail("permission", both(k, true)->loc, 1, "", "twice");
+           k.fail("permission", both(k, true)->loc, 1U, "", "twice");
        });
 
     // ---- item 7: a copy is every source leaf read into a temporary, then every destination leaf written ----
     // struct S s; s.x = 1; [s.y = 2;] int a = s.x; int b = s.y; struct S t; t.x = a; t.y = b; return t.y;
     const auto copy = [=](Kit& k, bool unwritten) -> const Expr*
     {
-        StructType* S = mk_s(k);
-        Function* f = k.fn("copy", k.i32);
+        StructType* S {mk_s(k)};
+        Function* f {k.fn("copy", k.i32)};
         auto [s, ds] = local_s(k, f, "s", S);
         auto [t, dt] = local_s(k, f, "t", S);
-        Var* a = k.local(f, "a", k.i32);
-        Var* b = k.local(f, "b", k.i32);
-        const Expr* ry = k.leaf(k.addr(s), 1);
-        std::vector<const Stmt*> body = {ds, dt, k.lstore(k.addr(s), 0, N(k, "1"))};
+        Var* a {k.local(f, "a", k.i32)};
+        Var* b {k.local(f, "b", k.i32)};
+        const Expr* ry {k.leaf(k.addr(s), 1)};
+        std::vector<const Stmt*> body {ds, dt, k.lstore(k.addr(s), 0, N(k, "1"))};
         if (!unwritten)
         {
             body.push_back(k.lstore(k.addr(s), 1, N(k, "2")));
@@ -542,19 +542,19 @@ void define_struct_objects()
     // void init(struct S *p [must_init]) requires(owns(*p)) ensures(owns(*p) [&& p->y == 2]) { p->x = 1; [p->y = 2;] }   int use(void) { struct S s; init(&s); return s.x + s.y; }
     const auto must_init = [=](Kit& k, bool both_written) -> Function*
     {
-        StructType* S = mk_s(k);
-        Function* init = k.fn("init", k.vd, {{"p", PS(k, S)}});
+        StructType* S {mk_s(k)};
+        Function* init {k.fn("init", k.vd, {{"p", PS(k, S)}})};
         mark(init, 0, InitMarker::MustInit);
         k.req(init, owns(k, init, 0, 0));
         k.ens(init, owns(k, init, 0, 0));
-        std::vector<const Stmt*> w = {k.lstore(k.pn(init->param_var(0)), 0, N(k, "1"))};
+        std::vector<const Stmt*> w {k.lstore(k.pn(init->param_var(0)), 0, N(k, "1"))};
         if (both_written)
         {
             w.push_back(k.lstore(k.pn(init->param_var(0)), 1, N(k, "2")));
         }
         init->body = k.blk(w);
         k.done(init);
-        Function* f = k.fn("use", k.i32);
+        Function* f {k.fn("use", k.i32)};
         auto [s, ds] = local_s(k, f, "s", S);
         f->body = k.blkc({ds, k.es(k.call(init, {k.addr(s)})), k.ret(k.leaf(k.addr(s), 0))});
         k.done(f);
@@ -570,23 +570,23 @@ void define_struct_objects()
        "the callee never writes p->y, which must_init promises: postcondition at the closing brace",
        [=](Kit& k)
        {
-           Function* f = must_init(k, false);
-           k.fail("postcondition", f->end_loc, 1, "", "`p->y`");
+           Function* f {must_init(k, false)};
+           k.fail("postcondition", f->end_loc, 1U, "", "`p->y`");
        });
 
     // ---- item 12: sequencing on struct places ----
     // int two(struct S *p, struct S *q [, struct S *r, int c]) requires(owns(*p) && owns(*q) [&& owns(*r)] && p->x bounded) { [struct S *w = c ? p : r;] return p->x + (w->x = 1); }
     const auto seq = [=](Kit& k, bool alias) -> const Expr*
     {
-        StructType* S = mk_s(k);
-        std::vector<Kit::P> ps = {{"p", PS(k, S)}, {"q", PS(k, S)}};
+        StructType* S {mk_s(k)};
+        std::vector<Kit::P> ps {{"p", PS(k, S)}, {"q", PS(k, S)}};
         if (alias)
         {
             ps.push_back({"r", PS(k, S)});
             ps.push_back({"c", k.i32});
         }
-        Function* f = k.fn("two", k.i32, ps);
-        const Expr* bounded = k.land(k.gt(fm(k, f, 0, 0), k.neg(N(k, "100"))), k.lt(fm(k, f, 0, 0), N(k, "100")));
+        Function* f {k.fn("two", k.i32, ps)};
+        const Expr* bounded {k.land(k.gt(fm(k, f, 0, 0), k.neg(N(k, "100"))), k.lt(fm(k, f, 0, 0), N(k, "100")))};
         const auto atoms = [&]()
         {
             return alias ? k.land(owns(k, f, 0, 0), k.land(owns(k, f, 1, 1), owns(k, f, 2, 2)))
@@ -594,16 +594,16 @@ void define_struct_objects()
         };
         k.req(f, k.land(atoms(), bounded));
         k.ens(f, atoms());
-        const Expr* target = k.pn(f->param_var(1));
+        const Expr* target {k.pn(f->param_var(1))};
         std::vector<const Stmt*> body;
         if (alias)
         {
-            Var* w = k.local(f, "w", PS(k, S));
+            Var* w {k.local(f, "w", PS(k, S))};
             body.push_back(
                 k.decl(w, k.cond(k.ne(k.pv(f, 3), N(k, "0")), k.pn(f->param_var(0)), k.pn(f->param_var(2)))));
             target = k.pn(w);
         }
-        const Expr* se = k.b.store_expr(k.mem(target, 0), N(k, "1"), k.at());
+        const Expr* se {k.b.store_expr(k.mem(target, 0), N(k, "1"), k.at())};
         body.push_back(k.ret(k.add(k.leaf(k.pn(f->param_var(0)), 0), se)));
         f->body = k.blk(body);
         k.done(f);
@@ -626,24 +626,24 @@ void define_struct_objects()
     rc("struct_local_not_a_cell", "address",
        [=](Kit& k)
        {
-           StructType* S = mk_s(k);
-           Function* f = k.fn("f", k.vd);
-           Var* s = k.local(f, "s", k.st(S)); // a struct local that is not address-taken
+           StructType* S {mk_s(k)};
+           Function* f {k.fn("f", k.vd)};
+           Var* s {k.local(f, "s", k.st(S))}; // a struct local that is not address-taken
            f->body = k.blk({k.decl(s, nullptr)});
            k.done(f);
        });
     rc("struct_member_out_of_range", "member",
        [=](Kit& k)
        {
-           StructType* S = mk_s(k);
-           Function* f = k.fn("f", k.vd, {{"p", k.ptr(k.st(S))}});
+           StructType* S {mk_s(k)};
+           Function* f {k.fn("f", k.vd, {{"p", k.ptr(k.st(S))}})};
            f->body = k.blk({k.es(k.mem(k.pn(f->param_var(0)), 7))});
            k.done(f);
        });
     rc("struct_member_of_a_scalar_pointer", "struct",
        [=](Kit& k)
        {
-           Function* f = k.fn("f", k.vd, {{"p", k.ptr(k.i32)}});
+           Function* f {k.fn("f", k.vd, {{"p", k.ptr(k.i32)}})};
            f->body = k.blk({k.es(k.mem(k.pn(f->param_var(0)), 0))});
            k.done(f);
        });

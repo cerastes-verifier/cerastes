@@ -38,12 +38,12 @@ using namespace cerastes::vir;
 struct Expect
 {
     std::string category; // the position-map category (a driver category, or "internal")
-    int line = 0;         // the source line of the node (SrcLoc::line)
-    size_t count = 1;     // how many emitted checks must match (and must fail)
+    int line {0};         // the source line of the node (SrcLoc::line)
+    size_t count {1U};    // how many emitted checks must match (and must fail)
     std::string viper_id; // restrict to one Viper error id ("" = any)
     std::string msg;      // restrict to checks whose message contains this ("" = any)
-    int note_line = -1;   // when >= 0, the map entry must carry a note at this source line
-    int only_hit = -1;    // when >= 0: of the `count` matching checks (in Viper line order) only this one must fail
+    int note_line {-1};   // when >= 0, the map entry must carry a note at this source line
+    int only_hit {-1};    // when >= 0: of the `count` matching checks (in Viper line order) only this one must fail
 };
 
 // A kit for building programs: every node gets a fresh source line, so an expectation can name a node.
@@ -52,18 +52,18 @@ class Kit
 public:
     Program prog;
     Builder b {prog};
-    Type bl = Type::bool_type();
-    Type i8 = Type::integer(prog.int_type("signed char", 8, true));
-    Type u8 = Type::integer(prog.int_type("unsigned char", 8, false));
-    Type i16 = Type::integer(prog.int_type("short", 16, true));
-    Type u16 = Type::integer(prog.int_type("unsigned short", 16, false));
-    Type i32 = Type::integer(prog.int_type("int", 32, true));
-    Type u32 = Type::integer(prog.int_type("unsigned int", 32, false));
-    Type i64 = Type::integer(prog.int_type("long", 64, true));
-    Type u64 = Type::integer(prog.int_type("unsigned long", 64, false));
-    Type i128 = Type::integer(prog.int_type("__int128", 128, true));
-    Type u128 = Type::integer(prog.int_type("unsigned __int128", 128, false));
-    Type vd = Type::void_type();
+    Type bl {Type::bool_type()};
+    Type i8 {Type::integer(prog.int_type("signed char", 8, true))};
+    Type u8 {Type::integer(prog.int_type("unsigned char", 8, false))};
+    Type i16 {Type::integer(prog.int_type("short", 16, true))};
+    Type u16 {Type::integer(prog.int_type("unsigned short", 16, false))};
+    Type i32 {Type::integer(prog.int_type("int", 32, true))};
+    Type u32 {Type::integer(prog.int_type("unsigned int", 32, false))};
+    Type i64 {Type::integer(prog.int_type("long", 64, true))};
+    Type u64 {Type::integer(prog.int_type("unsigned long", 64, false))};
+    Type i128 {Type::integer(prog.int_type("__int128", 128, true))};
+    Type u128 {Type::integer(prog.int_type("unsigned __int128", 128, false))};
+    Type vd {Type::void_type()};
     // An enumeration type (decision 0018): `bits`/`is_signed` are the underlying (C++) or compatible (C) type's, [lo, hi] the
     // value range.  Every call makes a distinct type.
     Type en(const std::string& name, int bits, bool is_signed, const std::string& lo, const std::string& hi,
@@ -90,7 +90,7 @@ public:
         return SrcLoc {"t.c", ++line_, 3};
     }
 
-    void fail(const std::string& category, const SrcLoc& l, size_t count = 1, const std::string& id = "",
+    void fail(const std::string& category, const SrcLoc& l, size_t count = 1U, const std::string& id = "",
               const std::string& msg = "")
     {
         expects.push_back(Expect {category, l.line, count, id, msg});
@@ -108,7 +108,7 @@ public:
     // The same, and the entry's note (the position of the obligation inside a report_at node) must be at `note_line`.
     void fail_with_note(const std::string& category, const SrcLoc& l, int note_line)
     {
-        expects.push_back(Expect {category, l.line, 1, "", "", note_line});
+        expects.push_back(Expect {category, l.line, 1U, "", "", note_line});
     }
 
     struct P
@@ -118,7 +118,7 @@ public:
     };
     Function* fn(const std::string& name, Type ret, const std::vector<P>& params = {})
     {
-        Function* f = prog.add_function(name, ret, at(), SrcLoc {});
+        Function* f {prog.add_function(name, ret, at(), SrcLoc {})};
         for (const P& p : params)
         {
             f->add_param(p.name, p.type, at());
@@ -386,7 +386,7 @@ public:
     // value folds to "0" (the cases that give a non-constant value test the rejections of other rules).
     const Stmt* cs(const Expr* value, const std::string& folded = "")
     {
-        std::string f = folded;
+        std::string f {folded};
         if (f.empty())
         {
             f = value->kind == Expr::Kind::Const ? value->value : "0";
@@ -440,7 +440,7 @@ public:
     // A bodyless trusted function that does not return (what `abort` becomes).
     Function* abort_fn()
     {
-        Function* a = fn("abort", vd);
+        Function* a {fn("abort", vd)};
         a->noreturn = true;
         trusted(a, "libc: abort never returns");
         return a;
@@ -467,7 +467,7 @@ public:
     // A cell: a local whose address is taken (an object in a one-slot block).
     Var* cell(Function* f, const std::string& n, Type t)
     {
-        Var* x = f->new_local(n, t, at());
+        Var* x {f->new_local(n, t, at())};
         f->mark_address_taken(x);
         return x;
     }
@@ -487,7 +487,7 @@ public:
     // A C structure with the members (name, type) in declaration order; a member may be a pointer or another struct's type.
     StructType* strukt(const std::string& tag, const std::vector<P>& members)
     {
-        StructType* s = prog.add_struct(tag, "struct " + tag, at());
+        StructType* s {prog.add_struct(tag, "struct " + tag, at())};
         for (const P& m : members)
         {
             prog.add_member(s, m.name, m.type, at());
@@ -537,8 +537,8 @@ public:
     // A block with the position of its closing brace (needed when it declares a cell, decision 0032 item 8).
     const Stmt* blkc(std::vector<const Stmt*> s)
     {
-        const SrcLoc open = at();
-        const SrcLoc close = at();
+        const SrcLoc open {at()};
+        const SrcLoc close {at()};
         return b.block(std::move(s), open, close);
     }
 
@@ -560,7 +560,7 @@ public:
     }
 
 private:
-    int line_ = 0;
+    int line_ {0};
 };
 
 struct Case
@@ -586,7 +586,7 @@ struct Reject
         Check,
         Lower,
         Hook
-    } where = Where::Check;
+    } where {Where::Check};
 };
 std::vector<Reject>& reject_cases()
 {
@@ -620,13 +620,13 @@ void lc(std::string name, std::string doc, std::function<void(Kit&)> build)
 void binop_fn(Kit& k, Type t, BinaryOp op, const std::string& lo, const std::string& hi, bool bounded, bool want_fail,
               const char* category)
 {
-    Function* f = k.fn("f", t, {{"a", t}, {"b", t}});
+    Function* f {k.fn("f", t, {{"a", t}, {"b", t}})};
     if (bounded)
     {
         k.req(f, k.range(k.F(f, 0), t, lo, hi));
         k.req(f, k.range(k.F(f, 1), t, lo, hi));
     }
-    const Expr* e = k.bin(op, k.pv(f, 0), k.pv(f, 1));
+    const Expr* e {k.bin(op, k.pv(f, 0), k.pv(f, 1))};
     f->body = k.blk({k.ret(e)});
     k.done(f);
     if (want_fail)
@@ -690,8 +690,8 @@ void define_arithmetic()
     lc("neg_i32_unbounded", "-a on int: overflows for INT_MIN",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"a", k.i32}});
-           const Expr* e = k.neg(k.pv(f, 0));
+           Function* f {k.fn("f", k.i32, {{"a", k.i32}})};
+           const Expr* e {k.neg(k.pv(f, 0))};
            f->body = k.blk({k.ret(e)});
            k.done(f);
            k.fail("overflow", e->loc);
@@ -699,7 +699,7 @@ void define_arithmetic()
     lc("neg_i32_bounded", "-a on int with a > INT_MIN",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"a", k.i32}});
+           Function* f {k.fn("f", k.i32, {{"a", k.i32}})};
            k.req(f, k.ge_c(k.F(f, 0), k.i32, "-2147483647"));
            f->body = k.blk({k.ret(k.neg(k.pv(f, 0)))});
            k.done(f);
@@ -709,7 +709,7 @@ void define_arithmetic()
        "unsigned arithmetic with exact results: a + 1 for a < UINT_MAX, 5 - 3, -0, 65535 * 65537 == UINT_MAX",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.u32, {{"a", k.u32}});
+           Function* f {k.fn("f", k.u32, {{"a", k.u32}})};
            k.req(f, k.lt(k.F(f, 0), k.num(k.u32, "4294967295")));
            k.ens(f, k.eq(k.cv(k.u64, k.R(f)), k.add(k.cv(k.u64, k.F(f, 0)), k.num(k.u64, "1"))));
            f->body = k.blk({k.chk(k.eq_c(k.sub(k.num(k.u32, "5"), k.num(k.u32, "3")), k.u32, "2")),
@@ -731,11 +731,11 @@ void define_arithmetic()
     lc("u32_add_at_max", "UINT_MAX + 1u is an overflow, not 0",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
-           const Expr* e = k.add(k.num(k.u32, "4294967295"), k.num(k.u32, "1"));
+           Function* f {k.fn("f", k.vd)};
+           const Expr* e {k.add(k.num(k.u32, "4294967295"), k.num(k.u32, "1"))};
            f->body = k.blk({k.es(e)});
            k.done(f);
-           k.fail("overflow", e->loc, 1, "", "unsigned `unsigned int` addition may overflow (cerastes does not wrap)");
+           k.fail("overflow", e->loc, 1U, "", "unsigned `unsigned int` addition may overflow (cerastes does not wrap)");
        });
     lc("u32_sub_unbounded", "a - b on unsigned int: a < b is an overflow (it does not wrap)",
        [](Kit& k)
@@ -745,7 +745,7 @@ void define_arithmetic()
     lc("u32_sub_bounded", "a - b on unsigned int with b <= a",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.u32, {{"a", k.u32}, {"b", k.u32}});
+           Function* f {k.fn("f", k.u32, {{"a", k.u32}, {"b", k.u32}})};
            k.req(f, k.le(k.F(f, 1), k.F(f, 0)));
            k.ens(f, k.le(k.R(f), k.F(f, 0)));
            f->body = k.blk({k.ret(k.sub(k.pv(f, 0), k.pv(f, 1)))});
@@ -754,11 +754,11 @@ void define_arithmetic()
     lc("u32_sub_below_zero", "0u - 1u is an overflow, not UINT_MAX",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
-           const Expr* e = k.sub(k.num(k.u32, "0"), k.num(k.u32, "1"));
+           Function* f {k.fn("f", k.vd)};
+           const Expr* e {k.sub(k.num(k.u32, "0"), k.num(k.u32, "1"))};
            f->body = k.blk({k.es(e)});
            k.done(f);
-           k.fail("overflow", e->loc, 1, "",
+           k.fail("overflow", e->loc, 1U, "",
                   "unsigned `unsigned int` subtraction may overflow (cerastes does not wrap)");
        });
     lc("u32_mul_unbounded", "a * b on unsigned int: may overflow (it does not wrap)",
@@ -774,27 +774,27 @@ void define_arithmetic()
     lc("u32_mul_65536_squared", "65536u * 65536u is an overflow, not 0",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
-           const Expr* e = k.mul(k.num(k.u32, "65536"), k.num(k.u32, "65536"));
+           Function* f {k.fn("f", k.vd)};
+           const Expr* e {k.mul(k.num(k.u32, "65536"), k.num(k.u32, "65536"))};
            f->body = k.blk({k.es(e)});
            k.done(f);
-           k.fail("overflow", e->loc, 1, "",
+           k.fail("overflow", e->loc, 1U, "",
                   "unsigned `unsigned int` multiplication may overflow (cerastes does not wrap)");
        });
     lc("u32_neg_nonzero", "-a on unsigned int: a != 0 is an overflow, not 2^32 - a",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.u32, {{"a", k.u32}});
-           const Expr* e = k.neg(k.pv(f, 0));
+           Function* f {k.fn("f", k.u32, {{"a", k.u32}})};
+           const Expr* e {k.neg(k.pv(f, 0))};
            f->body = k.blk({k.ret(e)});
            k.done(f);
-           k.fail("overflow", e->loc, 1, "",
+           k.fail("overflow", e->loc, 1U, "",
                   "negating a nonzero `unsigned int` value overflows (cerastes does not wrap)");
        });
     lc("u32_neg_zero", "-a on unsigned int with a == 0 is 0",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.u32, {{"a", k.u32}});
+           Function* f {k.fn("f", k.u32, {{"a", k.u32}})};
            k.req(f, k.eq_c(k.F(f, 0), k.u32, "0"));
            k.ens(f, k.eq_c(k.R(f), k.u32, "0"));
            f->body = k.blk({k.ret(k.neg(k.pv(f, 0)))});
@@ -803,8 +803,8 @@ void define_arithmetic()
     lc("u32_neg_one", "-1u is an overflow, not UINT_MAX",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
-           const Expr* e = k.neg(k.num(k.u32, "1"));
+           Function* f {k.fn("f", k.vd)};
+           const Expr* e {k.neg(k.num(k.u32, "1"))};
            f->body = k.blk({k.es(e)});
            k.done(f);
            k.fail("overflow", e->loc);
@@ -812,9 +812,9 @@ void define_arithmetic()
     lc("u128_exact_arithmetic", "unsigned __int128 with exact results: (2^128 - 2) + 1 and 2^128 - 1 - (2^128 - 1)",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
-           const std::string max = "340282366920938463463374607431768211455",
-                             below = "340282366920938463463374607431768211454";
+           Function* f {k.fn("f", k.vd)};
+           const std::string max {"340282366920938463463374607431768211455"};
+           const std::string below {"340282366920938463463374607431768211454"};
            f->body = k.blk({k.chk(k.eq_c(k.add(k.num(k.u128, below), k.num(k.u128, "1")), k.u128, max)),
                             k.chk(k.eq_c(k.sub(k.num(k.u128, max), k.num(k.u128, max)), k.u128, "0"))});
            k.done(f);
@@ -822,8 +822,8 @@ void define_arithmetic()
     lc("u128_add_at_max", "unsigned __int128: (2^128 - 1) + 1 is an overflow, not 0",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
-           const Expr* e = k.add(k.num(k.u128, "340282366920938463463374607431768211455"), k.num(k.u128, "1"));
+           Function* f {k.fn("f", k.vd)};
+           const Expr* e {k.add(k.num(k.u128, "340282366920938463463374607431768211455"), k.num(k.u128, "1"))};
            f->body = k.blk({k.es(e)});
            k.done(f);
            k.fail("overflow", e->loc);
@@ -831,8 +831,8 @@ void define_arithmetic()
     lc("u128_sub_below_zero", "unsigned __int128: 0 - 1 is an overflow, not 2^128 - 1",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
-           const Expr* e = k.sub(k.num(k.u128, "0"), k.num(k.u128, "1"));
+           Function* f {k.fn("f", k.vd)};
+           const Expr* e {k.sub(k.num(k.u128, "0"), k.num(k.u128, "1"))};
            f->body = k.blk({k.es(e)});
            k.done(f);
            k.fail("overflow", e->loc);
@@ -840,9 +840,9 @@ void define_arithmetic()
     lc("signed_does_not_wrap", "int + 1 at INT_MAX is an overflow, not INT_MIN",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
-           const Expr* e = k.add(k.num(k.i32, "2147483647"), k.num(k.i32, "1"));
-           const Stmt* s = k.es(e);
+           Function* f {k.fn("f", k.vd)};
+           const Expr* e {k.add(k.num(k.i32, "2147483647"), k.num(k.i32, "1"))};
+           const Stmt* s {k.es(e)};
            f->body = k.blk({s});
            k.done(f);
            k.fail("overflow", e->loc);
@@ -851,8 +851,8 @@ void define_arithmetic()
     lc("div_unbounded", "a / b on int: b may be zero, and INT_MIN / -1 overflows",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"a", k.i32}, {"b", k.i32}});
-           const Expr* e = k.div(k.pv(f, 0), k.pv(f, 1));
+           Function* f {k.fn("f", k.i32, {{"a", k.i32}, {"b", k.i32}})};
+           const Expr* e {k.div(k.pv(f, 0), k.pv(f, 1))};
            f->body = k.blk({k.ret(e)});
            k.done(f);
            k.fail("division-by-zero", e->loc);
@@ -861,7 +861,7 @@ void define_arithmetic()
     lc("div_bounded", "a / b with b > 0 cannot fail",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"a", k.i32}, {"b", k.i32}});
+           Function* f {k.fn("f", k.i32, {{"a", k.i32}, {"b", k.i32}})};
            k.req(f, k.gt(k.F(f, 1), k.num(k.i32, "0")));
            f->body = k.blk({k.ret(k.div(k.pv(f, 0), k.pv(f, 1)))});
            k.done(f);
@@ -869,9 +869,9 @@ void define_arithmetic()
     lc("div_min_by_minus_one", "a / b with b != 0 still overflows for INT_MIN / -1",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"a", k.i32}, {"b", k.i32}});
+           Function* f {k.fn("f", k.i32, {{"a", k.i32}, {"b", k.i32}})};
            k.req(f, k.ne(k.F(f, 1), k.num(k.i32, "0")));
-           const Expr* e = k.div(k.pv(f, 0), k.pv(f, 1));
+           const Expr* e {k.div(k.pv(f, 0), k.pv(f, 1))};
            f->body = k.blk({k.ret(e)});
            k.done(f);
            k.fail("overflow", e->loc);
@@ -879,8 +879,8 @@ void define_arithmetic()
     lc("rem_unbounded", "a % b on int: zero divisor and INT_MIN % -1",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"a", k.i32}, {"b", k.i32}});
-           const Expr* e = k.rem(k.pv(f, 0), k.pv(f, 1));
+           Function* f {k.fn("f", k.i32, {{"a", k.i32}, {"b", k.i32}})};
+           const Expr* e {k.rem(k.pv(f, 0), k.pv(f, 1))};
            f->body = k.blk({k.ret(e)});
            k.done(f);
            k.fail("division-by-zero", e->loc);
@@ -889,7 +889,7 @@ void define_arithmetic()
     lc("rem_bounded", "a % b with b > 0",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"a", k.i32}, {"b", k.i32}});
+           Function* f {k.fn("f", k.i32, {{"a", k.i32}, {"b", k.i32}})};
            k.req(f, k.gt(k.F(f, 1), k.num(k.i32, "0")));
            k.ens(f, k.land(k.gt(k.R(f), k.neg(k.F(f, 1))), k.lt(k.R(f), k.F(f, 1))));
            f->body = k.blk({k.ret(k.rem(k.pv(f, 0), k.pv(f, 1)))});
@@ -898,8 +898,8 @@ void define_arithmetic()
     lc("u32_div_zero", "a / b on unsigned: only the zero divisor",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.u32, {{"a", k.u32}, {"b", k.u32}});
-           const Expr* e = k.div(k.pv(f, 0), k.pv(f, 1));
+           Function* f {k.fn("f", k.u32, {{"a", k.u32}, {"b", k.u32}})};
+           const Expr* e {k.div(k.pv(f, 0), k.pv(f, 1))};
            f->body = k.blk({k.ret(e)});
            k.done(f);
            k.fail("division-by-zero", e->loc);
@@ -908,7 +908,7 @@ void define_arithmetic()
        "unsigned / and % values: 7u / 2u == 3u, 7u % 2u == 1u, 4000000000u / 3u, 4000000000u % 3u",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
+           Function* f {k.fn("f", k.vd)};
            auto u = [&](const char* v)
            {
                return k.num(k.u32, v);
@@ -924,8 +924,8 @@ void define_arithmetic()
     lc("u32_div_value_wrong", "7u / 2u is 3u, not 4u",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
-           const Stmt* s = k.chk(k.eq_c(k.div(k.num(k.u32, "7"), k.num(k.u32, "2")), k.u32, "4"));
+           Function* f {k.fn("f", k.vd)};
+           const Stmt* s {k.chk(k.eq_c(k.div(k.num(k.u32, "7"), k.num(k.u32, "2")), k.u32, "4"))};
            f->body = k.blk({s});
            k.done(f);
            k.fail("check", s->loc);
@@ -933,8 +933,8 @@ void define_arithmetic()
     lc("u32_rem_value_wrong", "7u % 2u is 1u, not 0u",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
-           const Stmt* s = k.chk(k.eq_c(k.rem(k.num(k.u32, "7"), k.num(k.u32, "2")), k.u32, "0"));
+           Function* f {k.fn("f", k.vd)};
+           const Stmt* s {k.chk(k.eq_c(k.rem(k.num(k.u32, "7"), k.num(k.u32, "2")), k.u32, "0"))};
            f->body = k.blk({s});
            k.done(f);
            k.fail("check", s->loc);
@@ -942,13 +942,18 @@ void define_arithmetic()
     lc("div_rem_semantics", "C division truncates toward zero and % takes the sign of the dividend",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
+           Function* f {k.fn("f", k.vd)};
            auto c = [&](const char* a, const char* b)
            {
                return std::make_pair(k.num(k.i32, a), k.num(k.i32, b));
            };
-           auto p1 = c("-7", "2"), p2 = c("7", "-2"), p3 = c("-7", "2"), p4 = c("7", "-2"), p5 = c("-7", "-2"),
-                p6 = c("7", "2"), p7 = c("-1", "2");
+           auto p1 {c("-7", "2")};
+           auto p2 {c("7", "-2")};
+           auto p3 {c("-7", "2")};
+           auto p4 {c("7", "-2")};
+           auto p5 {c("-7", "-2")};
+           auto p6 {c("7", "2")};
+           auto p7 {c("-1", "2")};
            f->body = k.blk({k.chk(k.eq_c(k.div(p1.first, p1.second), k.i32, "-3")),
                             k.chk(k.eq_c(k.div(p2.first, p2.second), k.i32, "-3")),
                             k.chk(k.eq_c(k.rem(p3.first, p3.second), k.i32, "-1")),
@@ -964,8 +969,8 @@ void define_arithmetic()
     lc("div_semantics_wrong", "-7 / 2 is -3, not -4 (that would be floor division)",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
-           const Stmt* s = k.chk(k.eq_c(k.div(k.num(k.i32, "-7"), k.num(k.i32, "2")), k.i32, "-4"));
+           Function* f {k.fn("f", k.vd)};
+           const Stmt* s {k.chk(k.eq_c(k.div(k.num(k.i32, "-7"), k.num(k.i32, "2")), k.i32, "-4"))};
            f->body = k.blk({s});
            k.done(f);
            k.fail("check", s->loc);
@@ -973,8 +978,8 @@ void define_arithmetic()
     lc("rem_semantics_wrong", "-7 % 2 is -1, not 1",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
-           const Stmt* s = k.chk(k.eq_c(k.rem(k.num(k.i32, "-7"), k.num(k.i32, "2")), k.i32, "1"));
+           Function* f {k.fn("f", k.vd)};
+           const Stmt* s {k.chk(k.eq_c(k.rem(k.num(k.i32, "-7"), k.num(k.i32, "2")), k.i32, "1"))};
            f->body = k.blk({s});
            k.done(f);
            k.fail("check", s->loc);
@@ -986,16 +991,16 @@ void define_shifts()
     lc("shl_unbounded", "a << n on int: bad count, negative operand, and overflow of the result",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"a", k.i32}, {"n", k.i32}});
-           const Expr* e = k.shl(k.pv(f, 0), k.pv(f, 1));
+           Function* f {k.fn("f", k.i32, {{"a", k.i32}, {"n", k.i32}})};
+           const Expr* e {k.shl(k.pv(f, 0), k.pv(f, 1))};
            f->body = k.blk({k.ret(e)});
            k.done(f);
-           k.fail("shift", e->loc, 3);
+           k.fail("shift", e->loc, 3U);
        });
     lc("shl_bounded", "a << n with 0 <= a <= 1000 and 0 <= n <= 10",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"a", k.i32}, {"n", k.i32}});
+           Function* f {k.fn("f", k.i32, {{"a", k.i32}, {"n", k.i32}})};
            k.req(f, k.range(k.F(f, 0), k.i32, "0", "1000"));
            k.req(f, k.range(k.F(f, 1), k.i32, "0", "10"));
            f->body = k.blk({k.ret(k.shl(k.pv(f, 0), k.pv(f, 1)))});
@@ -1004,54 +1009,54 @@ void define_shifts()
     lc("shl_negative_operand", "a << n with a possibly negative",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"a", k.i32}, {"n", k.i32}});
+           Function* f {k.fn("f", k.i32, {{"a", k.i32}, {"n", k.i32}})};
            k.req(f, k.range(k.F(f, 0), k.i32, "-5", "5"));
            k.req(f, k.range(k.F(f, 1), k.i32, "0", "3"));
-           const Expr* e = k.shl(k.pv(f, 0), k.pv(f, 1));
+           const Expr* e {k.shl(k.pv(f, 0), k.pv(f, 1))};
            f->body = k.blk({k.ret(e)});
            k.done(f);
-           k.fail("shift", e->loc, 1, "", "left operand");
+           k.fail("shift", e->loc, 1U, "", "left operand");
        });
     lc("shl_result_does_not_fit", "a << n with a >= 0 but a * 2^n too big",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"a", k.i32}, {"n", k.i32}});
+           Function* f {k.fn("f", k.i32, {{"a", k.i32}, {"n", k.i32}})};
            k.req(f, k.ge_c(k.F(f, 0), k.i32, "0"));
            k.req(f, k.range(k.F(f, 1), k.i32, "0", "31"));
-           const Expr* e = k.shl(k.pv(f, 0), k.pv(f, 1));
+           const Expr* e {k.shl(k.pv(f, 0), k.pv(f, 1))};
            f->body = k.blk({k.ret(e)});
            k.done(f);
-           k.fail("shift", e->loc, 1, "", "may not fit");
+           k.fail("shift", e->loc, 1U, "", "may not fit");
        });
     lc("shl_into_sign_bit", "1 << 31 does not fit int (C23 6.5.8, used for C++ too)",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
-           const Expr* e = k.shl(k.num(k.i32, "1"), k.num(k.i32, "31"));
+           Function* f {k.fn("f", k.vd)};
+           const Expr* e {k.shl(k.num(k.i32, "1"), k.num(k.i32, "31"))};
            f->body = k.blk({k.es(e)});
            k.done(f);
-           k.fail("shift", e->loc, 1, "", "may not fit");
+           k.fail("shift", e->loc, 1U, "", "may not fit");
        });
     lc("shl_30_fits", "1 << 30 fits int, and means 2^30",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
+           Function* f {k.fn("f", k.vd)};
            f->body = k.blk({k.chk(k.eq_c(k.shl(k.num(k.i32, "1"), k.num(k.i32, "30")), k.i32, "1073741824"))});
            k.done(f);
        });
     lc("shl_count_too_big", "1 << 32 on int: the count is out of range",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
-           const Expr* e = k.shl(k.num(k.i32, "1"), k.num(k.i32, "32"));
+           Function* f {k.fn("f", k.vd)};
+           const Expr* e {k.shl(k.num(k.i32, "1"), k.num(k.i32, "32"))};
            f->body = k.blk({k.es(e)});
            k.done(f);
-           k.fail("shift", e->loc, 1, "", "shift count");
+           k.fail("shift", e->loc, 1U, "", "shift count");
        });
     lc("shr_semantics", "a >> n is floor(a / 2^n): -7 >> 1 == -4, 7 >> 1 == 3, -1 >> 31 == -1",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
+           Function* f {k.fn("f", k.vd)};
            f->body = k.blk({k.chk(k.eq_c(k.shr(k.num(k.i32, "-7"), k.num(k.i32, "1")), k.i32, "-4")),
                             k.chk(k.eq_c(k.shr(k.num(k.i32, "7"), k.num(k.i32, "1")), k.i32, "3")),
                             k.chk(k.eq_c(k.shr(k.num(k.i32, "-1"), k.num(k.i32, "31")), k.i32, "-1")),
@@ -1061,8 +1066,8 @@ void define_shifts()
     lc("shr_wrong", "-7 >> 1 is -4, not -3",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
-           const Stmt* s = k.chk(k.eq_c(k.shr(k.num(k.i32, "-7"), k.num(k.i32, "1")), k.i32, "-3"));
+           Function* f {k.fn("f", k.vd)};
+           const Stmt* s {k.chk(k.eq_c(k.shr(k.num(k.i32, "-7"), k.num(k.i32, "1")), k.i32, "-3"))};
            f->body = k.blk({s});
            k.done(f);
            k.fail("check", s->loc);
@@ -1070,16 +1075,16 @@ void define_shifts()
     lc("shr_count_unbounded", "a >> n with an unconstrained count",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"a", k.i32}, {"n", k.i32}});
-           const Expr* e = k.shr(k.pv(f, 0), k.pv(f, 1));
+           Function* f {k.fn("f", k.i32, {{"a", k.i32}, {"n", k.i32}})};
+           const Expr* e {k.shr(k.pv(f, 0), k.pv(f, 1))};
            f->body = k.blk({k.ret(e)});
            k.done(f);
-           k.fail("shift", e->loc, 1);
+           k.fail("shift", e->loc, 1U);
        });
     lc("shr_in_range", "a >> n stays within int for any a and 0 <= n < 32",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"a", k.i32}, {"n", k.i32}});
+           Function* f {k.fn("f", k.i32, {{"a", k.i32}, {"n", k.i32}})};
            k.req(f, k.range(k.F(f, 1), k.i32, "0", "31"));
            k.ens(f, k.le(k.R(f), k.cond(k.ge_c(k.F(f, 0), k.i32, "0"), k.F(f, 0), k.num(k.i32, "0"))));
            f->body = k.blk({k.ret(k.shr(k.pv(f, 0), k.pv(f, 1)))});
@@ -1088,7 +1093,7 @@ void define_shifts()
     lc("shl_u32_fits", "unsigned << whose result fits: 1u << 31 == 2^31, 3u << 30 == 3 * 2^30",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
+           Function* f {k.fn("f", k.vd)};
            f->body = k.blk({k.chk(k.eq_c(k.shl(k.num(k.u32, "1"), k.num(k.i32, "31")), k.u32, "2147483648")),
                             k.chk(k.eq_c(k.shl(k.num(k.u32, "3"), k.num(k.i32, "30")), k.u32, "3221225472"))});
            k.done(f);
@@ -1096,25 +1101,25 @@ void define_shifts()
     lc("shl_u32_loses_bits", "3u << 31 does not fit unsigned int (it does not wrap to 2^31)",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
-           const Expr* e = k.shl(k.num(k.u32, "3"), k.num(k.i32, "31"));
+           Function* f {k.fn("f", k.vd)};
+           const Expr* e {k.shl(k.num(k.u32, "3"), k.num(k.i32, "31"))};
            f->body = k.blk({k.es(e)});
            k.done(f);
-           k.fail("shift", e->loc, 1, "", "the result of `<<` may not fit in `unsigned int`");
+           k.fail("shift", e->loc, 1U, "", "the result of `<<` may not fit in `unsigned int`");
        });
     lc("shl_u32_unbounded", "a << 1 on unsigned int: the result may not fit",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.u32, {{"a", k.u32}});
-           const Expr* e = k.shl(k.pv(f, 0), k.num(k.i32, "1"));
+           Function* f {k.fn("f", k.u32, {{"a", k.u32}})};
+           const Expr* e {k.shl(k.pv(f, 0), k.num(k.i32, "1"))};
            f->body = k.blk({k.ret(e)});
            k.done(f);
-           k.fail("shift", e->loc, 1, "", "the result of `<<` may not fit");
+           k.fail("shift", e->loc, 1U, "", "the result of `<<` may not fit");
        });
     lc("shl_u32_bounded", "a << 1 on unsigned int with a <= 2147483647",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.u32, {{"a", k.u32}});
+           Function* f {k.fn("f", k.u32, {{"a", k.u32}})};
            k.req(f, k.le_c(k.F(f, 0), k.u32, "2147483647"));
            k.ens(f, k.eq(k.cv(k.u64, k.R(f)), k.mul(k.cv(k.u64, k.F(f, 0)), k.num(k.u64, "2"))));
            f->body = k.blk({k.ret(k.shl(k.pv(f, 0), k.num(k.i32, "1")))});
@@ -1125,16 +1130,16 @@ void define_shifts()
     lc("shl_u32_count_32", "1u << 32: the count is out of range",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
-           const Expr* e = k.shl(k.num(k.u32, "1"), k.num(k.i32, "32"));
+           Function* f {k.fn("f", k.vd)};
+           const Expr* e {k.shl(k.num(k.u32, "1"), k.num(k.i32, "32"))};
            f->body = k.blk({k.es(e)});
            k.done(f);
-           k.fail("shift", e->loc, 1, "", "shift count");
+           k.fail("shift", e->loc, 1U, "", "shift count");
        });
     lc("shl_u64_count_type_differs", "the count has its own type: 1ul << (unsigned char)40",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
+           Function* f {k.fn("f", k.vd)};
            f->body = k.blk({k.chk(k.eq_c(k.shl(k.num(k.u64, "1"), k.num(k.u8, "40")), k.u64, "1099511627776"))});
            k.done(f);
        });
@@ -1145,8 +1150,8 @@ void define_conversions()
     lc("conv_i32_to_i8_unbounded", "(signed char)a: may not fit",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.i8, {{"a", k.i32}});
-           const Expr* e = k.cv(k.i8, k.pv(f, 0));
+           Function* f {k.fn("f", k.i8, {{"a", k.i32}})};
+           const Expr* e {k.cv(k.i8, k.pv(f, 0))};
            f->body = k.blk({k.ret(e)});
            k.done(f);
            k.fail("conversion", e->loc);
@@ -1154,7 +1159,7 @@ void define_conversions()
     lc("conv_i32_to_i8_bounded", "(signed char)a with a in [-128, 127]",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.i8, {{"a", k.i32}});
+           Function* f {k.fn("f", k.i8, {{"a", k.i32}})};
            k.req(f, k.range(k.F(f, 0), k.i32, "-128", "127"));
            k.ens(f, k.eq(k.cv(k.i32, k.R(f)), k.F(f, 0)));
            f->body = k.blk({k.ret(k.cv(k.i8, k.pv(f, 0)))});
@@ -1163,9 +1168,9 @@ void define_conversions()
     lc("conv_i32_to_i8_off_by_one", "(signed char)a with a in [-128, 128]",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.i8, {{"a", k.i32}});
+           Function* f {k.fn("f", k.i8, {{"a", k.i32}})};
            k.req(f, k.range(k.F(f, 0), k.i32, "-128", "128"));
-           const Expr* e = k.cv(k.i8, k.pv(f, 0));
+           const Expr* e {k.cv(k.i8, k.pv(f, 0))};
            f->body = k.blk({k.ret(e)});
            k.done(f);
            k.fail("conversion", e->loc);
@@ -1175,7 +1180,7 @@ void define_conversions()
     lc("conv_to_unsigned_exact", "(unsigned)a for an int a >= 0: exact",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.u32, {{"a", k.i32}});
+           Function* f {k.fn("f", k.u32, {{"a", k.i32}})};
            k.req(f, k.ge_c(k.F(f, 0), k.i32, "0"));
            k.ens(f, k.eq(k.cv(k.i64, k.R(f)), k.cv(k.i64, k.F(f, 0))));
            f->body = k.blk({k.ret(k.cv(k.u32, k.pv(f, 0)))});
@@ -1185,27 +1190,27 @@ void define_conversions()
        "(unsigned)a for an unconstrained int a: a < 0 is a conversion error (it does not wrap to 2^32 + a)",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.u32, {{"a", k.i32}});
-           const Expr* e = k.cv(k.u32, k.pv(f, 0));
+           Function* f {k.fn("f", k.u32, {{"a", k.i32}})};
+           const Expr* e {k.cv(k.u32, k.pv(f, 0))};
            f->body = k.blk({k.ret(e)});
            k.done(f);
-           k.fail("conversion", e->loc, 1, "", "the value may not fit in `unsigned int` (a conversion must be exact)");
+           k.fail("conversion", e->loc, 1U, "", "the value may not fit in `unsigned int` (a conversion must be exact)");
        });
     lc("conv_negative_to_unsigned_explicit", "(unsigned)a written in the program: the same error",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.u32, {{"a", k.i32}});
-           const Expr* e = k.b.convert(k.u32, k.pv(f, 0), true, k.at());
+           Function* f {k.fn("f", k.u32, {{"a", k.i32}})};
+           const Expr* e {k.b.convert(k.u32, k.pv(f, 0), true, k.at())};
            f->body = k.blk({k.ret(e)});
            k.done(f);
-           k.fail("conversion", e->loc, 1, "", "the value may not fit in `unsigned int`");
+           k.fail("conversion", e->loc, 1U, "", "the value may not fit in `unsigned int`");
        });
     lc("conv_const_minus_one_to_unsigned", "unsigned u = -1: the constant -1 is outside unsigned int",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
-           Var* u = k.local(f, "u", k.u32);
-           const Expr* e = k.cv(k.u32, k.num(k.i32, "-1"));
+           Function* f {k.fn("f", k.vd)};
+           Var* u {k.local(f, "u", k.u32)};
+           const Expr* e {k.cv(k.u32, k.num(k.i32, "-1"))};
            f->body = k.blk({k.decl(u, e)});
            k.done(f);
            k.fail("conversion", e->loc);
@@ -1214,28 +1219,28 @@ void define_conversions()
        "(unsigned)5 and (unsigned char)255: constants inside the target emit no obligation (item 4)",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
-           const Expr* a = k.cv(k.u32, k.num(k.i32, "5"));
-           const Expr* b = k.cv(k.u8, k.num(k.i32, "255"));
+           Function* f {k.fn("f", k.vd)};
+           const Expr* a {k.cv(k.u32, k.num(k.i32, "5"))};
+           const Expr* b {k.cv(k.u8, k.num(k.i32, "255"))};
            f->body = k.blk({k.chk(k.eq_c(a, k.u32, "5")), k.chk(k.eq_c(b, k.u8, "255"))});
            k.done(f);
-           k.rows("conversion", a->loc, 0);
-           k.rows("conversion", b->loc, 0);
+           k.rows("conversion", a->loc, 0U);
+           k.rows("conversion", b->loc, 0U);
        });
     lc("conv_const_300_to_unsigned_char", "(unsigned char)300: the constant is outside unsigned char (it is not 44)",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
-           const Expr* e = k.cv(k.u8, k.num(k.i32, "300"));
+           Function* f {k.fn("f", k.vd)};
+           const Expr* e {k.cv(k.u8, k.num(k.i32, "300"))};
            f->body = k.blk({k.es(e)});
            k.done(f);
-           k.fail("conversion", e->loc, 1, "", "the value may not fit in `unsigned char`");
+           k.fail("conversion", e->loc, 1U, "", "the value may not fit in `unsigned char`");
        });
     lc("conv_u32_to_u8_unbounded", "(unsigned char)u for an unsigned int u: may not fit",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.u8, {{"u", k.u32}});
-           const Expr* e = k.cv(k.u8, k.pv(f, 0));
+           Function* f {k.fn("f", k.u8, {{"u", k.u32}})};
+           const Expr* e {k.cv(k.u8, k.pv(f, 0))};
            f->body = k.blk({k.ret(e)});
            k.done(f);
            k.fail("conversion", e->loc);
@@ -1243,7 +1248,7 @@ void define_conversions()
     lc("conv_u32_to_u8_bounded", "(unsigned char)u with u <= 255",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.u8, {{"u", k.u32}});
+           Function* f {k.fn("f", k.u8, {{"u", k.u32}})};
            k.req(f, k.le_c(k.F(f, 0), k.u32, "255"));
            k.ens(f, k.eq(k.cv(k.u32, k.R(f)), k.F(f, 0)));
            f->body = k.blk({k.ret(k.cv(k.u8, k.pv(f, 0)))});
@@ -1252,8 +1257,8 @@ void define_conversions()
     lc("conv_u32_to_i32_unbounded", "(int)u: may exceed INT_MAX",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"u", k.u32}});
-           const Expr* e = k.cv(k.i32, k.pv(f, 0));
+           Function* f {k.fn("f", k.i32, {{"u", k.u32}})};
+           const Expr* e {k.cv(k.i32, k.pv(f, 0))};
            f->body = k.blk({k.ret(e)});
            k.done(f);
            k.fail("conversion", e->loc);
@@ -1261,7 +1266,7 @@ void define_conversions()
     lc("conv_u32_to_i32_bounded", "(int)u with u <= INT_MAX",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"u", k.u32}});
+           Function* f {k.fn("f", k.i32, {{"u", k.u32}})};
            k.req(f, k.le_c(k.F(f, 0), k.u32, "2147483647"));
            f->body = k.blk({k.ret(k.cv(k.i32, k.pv(f, 0)))});
            k.done(f);
@@ -1269,7 +1274,7 @@ void define_conversions()
     lc("conv_widening_is_free", "int -> long, signed char -> int, unsigned -> long long: no obligation",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.i64, {{"a", k.i32}, {"c", k.i8}, {"u", k.u32}});
+           Function* f {k.fn("f", k.i64, {{"a", k.i32}, {"c", k.i8}, {"u", k.u32}})};
            k.ens(f, k.eq(k.R(f), k.add(k.add(k.cv(k.i64, k.F(f, 0)), k.cv(k.i64, k.cv(k.i32, k.F(f, 1)))),
                                        k.cv(k.i64, k.F(f, 2)))));
            f->body = k.blk({k.ret(
@@ -1279,8 +1284,8 @@ void define_conversions()
     lc("conv_u64_to_i64_unbounded", "(long)u on 64 bits",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.i64, {{"u", k.u64}});
-           const Expr* e = k.cv(k.i64, k.pv(f, 0));
+           Function* f {k.fn("f", k.i64, {{"u", k.u64}})};
+           const Expr* e {k.cv(k.i64, k.pv(f, 0))};
            f->body = k.blk({k.ret(e)});
            k.done(f);
            k.fail("conversion", e->loc);
@@ -1289,8 +1294,8 @@ void define_conversions()
        "(unsigned __int128)a for an unconstrained __int128 a: a < 0 is a conversion error",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.u128, {{"a", k.i128}});
-           const Expr* e = k.cv(k.u128, k.pv(f, 0));
+           Function* f {k.fn("f", k.u128, {{"a", k.i128}})};
+           const Expr* e {k.cv(k.u128, k.pv(f, 0))};
            f->body = k.blk({k.ret(e)});
            k.done(f);
            k.fail("conversion", e->loc);
@@ -1298,7 +1303,7 @@ void define_conversions()
     lc("conv_i128_to_u128_nonnegative", "(unsigned __int128)a for an __int128 a >= 0",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.u128, {{"a", k.i128}});
+           Function* f {k.fn("f", k.u128, {{"a", k.i128}})};
            k.req(f, k.ge_c(k.F(f, 0), k.i128, "0"));
            f->body = k.blk({k.ret(k.cv(k.u128, k.pv(f, 0)))});
            k.done(f);
@@ -1306,7 +1311,7 @@ void define_conversions()
     lc("conv_same_shape_is_identity", "unsigned -> unsigned of the same width needs nothing",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.u32, {{"u", k.u32}});
+           Function* f {k.fn("f", k.u32, {{"u", k.u32}})};
            k.ens(f, k.eq(k.R(f), k.F(f, 0)));
            f->body = k.blk({k.ret(k.cv(k.u32, k.pv(f, 0)))});
            k.done(f);
@@ -1318,7 +1323,7 @@ void define_bool_and_guards()
     lc("bool_conversions", "to_bool(a) is a != 0; bool_to_int(c) is 0 or 1",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"a", k.i32}, {"b", k.i32}});
+           Function* f {k.fn("f", k.i32, {{"a", k.i32}, {"b", k.i32}})};
            k.ens(f, k.lor(k.eq_c(k.R(f), k.i32, "0"), k.eq_c(k.R(f), k.i32, "1")));
            k.ens(f, k.eq(k.ne(k.R(f), k.num(k.i32, "0")), k.lt(k.F(f, 0), k.F(f, 1))));
            f->body = k.blk({k.chk(k.tb(k.num(k.i32, "5"))), k.chk(k.lnot(k.tb(k.num(k.i32, "0")))),
@@ -1328,8 +1333,8 @@ void define_bool_and_guards()
     lc("bool_to_int_wrong", "bool_to_int(true) is 1, not 2",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
-           const Stmt* s = k.chk(k.eq_c(k.bi(k.i32, k.yes()), k.i32, "2"));
+           Function* f {k.fn("f", k.vd)};
+           const Stmt* s {k.chk(k.eq_c(k.bi(k.i32, k.yes()), k.i32, "2"))};
            f->body = k.blk({s});
            k.done(f);
            k.fail("check", s->loc);
@@ -1337,16 +1342,16 @@ void define_bool_and_guards()
     lc("bool_params_and_results", "bool formals, locals and results",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.bl, {{"a", k.bl}, {"b", k.bl}});
+           Function* f {k.fn("f", k.bl, {{"a", k.bl}, {"b", k.bl}})};
            k.ens(f, k.eq(k.R(f), k.lor(k.F(f, 0), k.F(f, 1))));
-           Var* t = k.local(f, "t", k.bl);
+           Var* t {k.local(f, "t", k.bl)};
            f->body = k.blk({k.decl(t, k.lor(k.pv(f, 0), k.pv(f, 1))), k.ret(k.v(t))});
            k.done(f);
        });
     lc("and_guards_division", "a != 0 && 100 / a > 1: the division is evaluated only when a != 0",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.bl, {{"a", k.i32}});
+           Function* f {k.fn("f", k.bl, {{"a", k.i32}})};
            f->body = k.blk({k.ret(k.land(k.ne(k.pv(f, 0), k.num(k.i32, "0")),
                                          k.gt(k.div(k.num(k.i32, "100"), k.pv(f, 0)), k.num(k.i32, "1"))))});
            k.done(f);
@@ -1354,7 +1359,7 @@ void define_bool_and_guards()
     lc("or_guards_division", "a == 0 || 100 / a > 1",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.bl, {{"a", k.i32}});
+           Function* f {k.fn("f", k.bl, {{"a", k.i32}})};
            f->body = k.blk({k.ret(k.lor(k.eq_c(k.pv(f, 0), k.i32, "0"),
                                         k.gt(k.div(k.num(k.i32, "100"), k.pv(f, 0)), k.num(k.i32, "1"))))});
            k.done(f);
@@ -1362,8 +1367,8 @@ void define_bool_and_guards()
     lc("and_wrong_order", "100 / a > 1 && a != 0: the division comes first and is unguarded",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.bl, {{"a", k.i32}});
-           const Expr* d = k.div(k.num(k.i32, "100"), k.pv(f, 0));
+           Function* f {k.fn("f", k.bl, {{"a", k.i32}})};
+           const Expr* d {k.div(k.num(k.i32, "100"), k.pv(f, 0))};
            f->body = k.blk({k.ret(k.land(k.gt(d, k.num(k.i32, "1")), k.ne(k.pv(f, 0), k.num(k.i32, "0"))))});
            k.done(f);
            k.fail("division-by-zero", d->loc);
@@ -1371,16 +1376,16 @@ void define_bool_and_guards()
     lc("and_chain_guards", "a > 0 && a < 10 && 100 / a > 1",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.bl, {{"a", k.i32}});
-           const Expr* g = k.land(k.land(k.gt(k.pv(f, 0), k.num(k.i32, "0")), k.lt(k.pv(f, 0), k.num(k.i32, "10"))),
-                                  k.gt(k.div(k.num(k.i32, "100"), k.pv(f, 0)), k.num(k.i32, "1")));
+           Function* f {k.fn("f", k.bl, {{"a", k.i32}})};
+           const Expr* g {k.land(k.land(k.gt(k.pv(f, 0), k.num(k.i32, "0")), k.lt(k.pv(f, 0), k.num(k.i32, "10"))),
+                                 k.gt(k.div(k.num(k.i32, "100"), k.pv(f, 0)), k.num(k.i32, "1")))};
            f->body = k.blk({k.ret(g)});
            k.done(f);
        });
     lc("cond_guards_branches", "a != 0 ? 100 / a : 0",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"a", k.i32}});
+           Function* f {k.fn("f", k.i32, {{"a", k.i32}})};
            f->body = k.blk({k.ret(k.cond(k.ne(k.pv(f, 0), k.num(k.i32, "0")), k.div(k.num(k.i32, "100"), k.pv(f, 0)),
                                          k.num(k.i32, "0")))});
            k.done(f);
@@ -1388,8 +1393,8 @@ void define_bool_and_guards()
     lc("cond_wrong_branch", "a == 0 ? 100 / a : 0 divides in the wrong branch",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"a", k.i32}});
-           const Expr* d = k.div(k.num(k.i32, "100"), k.pv(f, 0));
+           Function* f {k.fn("f", k.i32, {{"a", k.i32}})};
+           const Expr* d {k.div(k.num(k.i32, "100"), k.pv(f, 0))};
            f->body = k.blk({k.ret(k.cond(k.eq_c(k.pv(f, 0), k.i32, "0"), d, k.num(k.i32, "0")))});
            k.done(f);
            k.fail("division-by-zero", d->loc);
@@ -1397,7 +1402,7 @@ void define_bool_and_guards()
     lc("cond_else_branch_guard", "a == 0 ? 0 : 100 / a: the else branch is guarded by !c",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.i32, {{"a", k.i32}});
+           Function* f {k.fn("f", k.i32, {{"a", k.i32}})};
            f->body = k.blk({k.ret(
                k.cond(k.eq_c(k.pv(f, 0), k.i32, "0"), k.num(k.i32, "0"), k.div(k.num(k.i32, "100"), k.pv(f, 0))))});
            k.done(f);
@@ -1405,8 +1410,8 @@ void define_bool_and_guards()
     lc("unguarded_division_in_comparison", "100 / a > 1 alone",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.bl, {{"a", k.i32}});
-           const Expr* d = k.div(k.num(k.i32, "100"), k.pv(f, 0));
+           Function* f {k.fn("f", k.bl, {{"a", k.i32}})};
+           const Expr* d {k.div(k.num(k.i32, "100"), k.pv(f, 0))};
            f->body = k.blk({k.ret(k.gt(d, k.num(k.i32, "1")))});
            k.done(f);
            k.fail("division-by-zero", d->loc);
@@ -1414,8 +1419,8 @@ void define_bool_and_guards()
     lc("or_guard_does_not_cover_left", "100 / a > 1 || a == 0: the left operand is unguarded",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.bl, {{"a", k.i32}});
-           const Expr* d = k.div(k.num(k.i32, "100"), k.pv(f, 0));
+           Function* f {k.fn("f", k.bl, {{"a", k.i32}})};
+           const Expr* d {k.div(k.num(k.i32, "100"), k.pv(f, 0))};
            f->body = k.blk({k.ret(k.lor(k.gt(d, k.num(k.i32, "1")), k.eq_c(k.pv(f, 0), k.i32, "0")))});
            k.done(f);
            k.fail("division-by-zero", d->loc);
@@ -1423,7 +1428,7 @@ void define_bool_and_guards()
     lc("comparison_semantics", "signed and unsigned comparisons and equality",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
+           Function* f {k.fn("f", k.vd)};
            f->body = k.blk({k.chk(k.lt(k.num(k.i32, "-1"), k.num(k.i32, "0"))),
                             k.chk(k.gt(k.num(k.u32, "4294967295"), k.num(k.u32, "0"))),
                             k.chk(k.le(k.num(k.i8, "-128"), k.num(k.i8, "-128"))),
@@ -1435,8 +1440,8 @@ void define_bool_and_guards()
     lc("comparison_wrong", "-1 < 0 is true, so check(-1 >= 0) fails",
        [](Kit& k)
        {
-           Function* f = k.fn("f", k.vd);
-           const Stmt* s = k.chk(k.ge(k.num(k.i32, "-1"), k.num(k.i32, "0")));
+           Function* f {k.fn("f", k.vd)};
+           const Stmt* s {k.chk(k.ge(k.num(k.i32, "-1"), k.num(k.i32, "0")))};
            f->body = k.blk({s});
            k.done(f);
            k.fail("check", s->loc);
@@ -1504,10 +1509,10 @@ namespace {
 
 struct MapRow
 {
-    int vpr_line = 0;
+    int vpr_line {0};
     std::string id, category, file, msg;
-    int line = 0;
-    int note_line = -1; // -1: no note
+    int line {0};
+    int note_line {-1}; // -1: no note
 };
 
 std::vector<MapRow> parse_map(const std::string& text)
@@ -1518,34 +1523,35 @@ std::vector<MapRow> parse_map(const std::string& text)
     while (std::getline(in, l))
     {
         std::vector<std::string> f;
-        size_t p = 0;
+        size_t p {0U};
         while (true)
         {
-            size_t q = l.find('\t', p);
+            size_t q {l.find('\t', p)};
             f.push_back(l.substr(p, q == std::string::npos ? std::string::npos : q - p));
             if (q == std::string::npos)
             {
                 break;
             }
-            p = q + 1;
+            p = q + 1U;
         }
-        if (f.size() < 7)
+        if (f.size() < 7U)
         {
             continue;
         }
         MapRow r;
-        r.vpr_line = std::stoi(f[0]);
-        r.id = f[1];
-        r.category = f[2];
-        r.file = f[3];
-        r.line = std::stoi(f[4]);
-        r.msg = f[6];
-        if (f.size() >= 8)
+        r.vpr_line = std::stoi(f[0U]);
+        r.id = f[1U];
+        r.category = f[2U];
+        r.file = f[3U];
+        r.line = std::stoi(f[4U]);
+        r.msg = f[6U];
+        if (f.size() >= 8U)
         {
-            const size_t a = f[7].find(':'), b = a == std::string::npos ? a : f[7].find(':', a + 1);
+            const size_t a {f[7U].find(':')};
+            const size_t b {a == std::string::npos ? a : f[7U].find(':', a + 1U)};
             if (b != std::string::npos)
             {
-                r.note_line = std::stoi(f[7].substr(a + 1, b - a - 1));
+                r.note_line = std::stoi(f[7U].substr(a + 1U, b - a - 1U));
             }
         }
         rows.push_back(r);
@@ -1555,14 +1561,14 @@ std::vector<MapRow> parse_map(const std::string& text)
 
 const char* harness_category(const std::string& viper_id)
 {
-    static const std::map<std::string, const char*> t = {{"assert.failed", "assert"},
-                                                         {"call.precondition", "precondition"},
-                                                         {"postcondition.violated", "postcondition"},
-                                                         {"invariant.not.established", "invariant-entry"},
-                                                         {"invariant.not.preserved", "invariant-preserved"},
-                                                         {"not.wellformed", "wellformedness"},
-                                                         {"termination.failed", "termination"}};
-    auto it = t.find(viper_id);
+    static const std::map<std::string, const char*> t {{"assert.failed", "assert"},
+                                                       {"call.precondition", "precondition"},
+                                                       {"postcondition.violated", "postcondition"},
+                                                       {"invariant.not.established", "invariant-entry"},
+                                                       {"invariant.not.preserved", "invariant-preserved"},
+                                                       {"not.wellformed", "wellformedness"},
+                                                       {"termination.failed", "termination"}};
+    auto it {t.find(viper_id)};
     return it == t.end() ? nullptr : it->second;
 }
 
@@ -1570,21 +1576,21 @@ bool run_lowering_case(const Case& c, const std::string& dir, std::string& probl
 {
     Kit k;
     c.build(k);
-    std::vector<Diag> diags = check_program(k.prog);
+    std::vector<Diag> diags {check_program(k.prog)};
     if (!diags.empty())
     {
-        problem = "check_program rejected the program: " + diags[0].reason + " (line " +
-                  std::to_string(diags[0].loc.line) + ")";
+        problem = "check_program rejected the program: " + diags[0U].reason + " (line " +
+                  std::to_string(diags[0U].loc.line) + ")";
         return false;
     }
-    LowerResult lr = lower_program(k.prog, k.lower_options);
+    LowerResult lr {lower_program(k.prog, k.lower_options)};
     if (!lr.errors.empty())
     {
-        problem = "lowering reported: " + lr.errors[0].reason;
+        problem = "lowering reported: " + lr.errors[0U].reason;
         return false;
     }
-    cerastes::viper::Emitted first = cerastes::viper::emit(lr.program);
-    const std::vector<MapRow> rows = parse_map(first.map);
+    cerastes::viper::Emitted first {cerastes::viper::emit(lr.program)};
+    const std::vector<MapRow> rows {parse_map(first.map)};
     if (std::getenv("CERASTES_SELFTEST_DUMP") != nullptr)
     { // debugging aid: keep the program of a case whose expectations do not match
         std::ofstream(dir + "/" + c.name + ".dump.vpr", std::ios::binary | std::ios::trunc) << first.vpr;
@@ -1608,21 +1614,21 @@ bool run_lowering_case(const Case& c, const std::string& dir, std::string& probl
         {
             problem = "expected " + std::to_string(e.count) + " check(s) of category " + e.category + " at line " +
                       std::to_string(e.line) + " in the position map, found " + std::to_string(hits.size());
-            for (size_t hi = 0; hi < hits.size() && hi < 40; ++hi)
+            for (size_t hi {0U}; hi < hits.size() && hi < 40U; ++hi)
             {
                 problem += "\n    [" + std::to_string(hi) + "] vpr line " + std::to_string(hits[hi]->vpr_line) + " " +
                            hits[hi]->id + ": " + hits[hi]->msg;
             }
             return false;
         }
-        for (size_t hi = 0; hi < hits.size(); ++hi)
+        for (size_t hi {0U}; hi < hits.size(); ++hi)
         {
-            const MapRow* r = hits[hi];
+            const MapRow* r {hits[hi]};
             if (e.only_hit >= 0 && static_cast<size_t>(e.only_hit) != hi)
             {
                 continue;
             }
-            const char* hc = harness_category(r->id);
+            const char* hc {harness_category(r->id)};
             if (hc == nullptr)
             {
                 problem = "no harness category for Viper error id " + r->id;
@@ -1633,7 +1639,7 @@ bool run_lowering_case(const Case& c, const std::string& dir, std::string& probl
     }
     for (const Kit::RowCount& want : k.row_counts)
     {
-        size_t n = 0;
+        size_t n {0U};
         for (const MapRow& r : rows)
         {
             if (r.category == want.category && r.line == want.line)
@@ -1650,7 +1656,7 @@ bool run_lowering_case(const Case& c, const std::string& dir, std::string& probl
     }
     for (const auto& [category, msg] : k.map_requires)
     {
-        bool found = false;
+        bool found {false};
         for (const MapRow& r : rows)
         {
             found = found || (r.category == category && r.msg.find(msg) != std::string::npos);
@@ -1664,8 +1670,8 @@ bool run_lowering_case(const Case& c, const std::string& dir, std::string& probl
     }
     std::sort(fails.begin(), fails.end());
     // The header: one doc line, then the expectations; its length shifts every line.
-    const size_t header_lines = 1 + std::max<size_t>(fails.size(), 1);
-    std::string header = "// " + c.doc + "\n";
+    const size_t header_lines {1U + std::max<size_t>(fails.size(), 1U)};
+    std::string header {"// " + c.doc + "\n"};
     if (fails.empty())
     {
         header += "// expect: verified\n";
@@ -1678,11 +1684,11 @@ bool run_lowering_case(const Case& c, const std::string& dir, std::string& probl
     // `// expect:` lines must come first in the leading comment block? The harness reads the whole block.
     cerastes::viper::EmitOptions eo;
     eo.header = header;
-    cerastes::viper::Emitted out = cerastes::viper::emit(lr.program, eo);
+    cerastes::viper::Emitted out {cerastes::viper::emit(lr.program, eo)};
     for (const auto& [suffix, text] : {std::pair<const char*, const std::string&> {".vpr", out.vpr},
                                        std::pair<const char*, const std::string&> {".vpr.map", out.map}})
     {
-        const std::string path = dir + "/" + c.name + suffix;
+        const std::string path {dir + "/" + c.name + suffix};
         std::ofstream f(path, std::ios::binary | std::ios::trunc);
         f << text;
         f.flush();
@@ -1704,7 +1710,7 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "usage: cerastes-vir-selftest <output-dir>\n");
         return 2;
     }
-    const std::string dir = argv[1];
+    const std::string dir {argv[1]};
     {
         std::error_code ec;
         std::filesystem::create_directories(dir, ec);
@@ -1750,7 +1756,7 @@ int main(int argc, char** argv)
     define_heap();
     define_heap_rejections();
     define_vlibc_heap();
-    int bad = 0;
+    int bad {0};
     for (const Case& c : lowering_cases())
     {
         std::string problem;
@@ -1764,10 +1770,10 @@ int main(int argc, char** argv)
     {
         Kit k;
         r.build(k);
-        const std::vector<Diag> d = check_program(k.prog);
+        const std::vector<Diag> d {check_program(k.prog)};
         if (r.where == Reject::Where::Check)
         {
-            bool ok = false;
+            bool ok {false};
             for (const Diag& x : d)
             {
                 if (x.reason.find(r.must_contain) != std::string::npos)
@@ -1779,7 +1785,7 @@ int main(int argc, char** argv)
             {
                 std::fprintf(stderr, "FAIL (rejection) %s: expected a diagnostic containing \"%s\", got %zu: %s\n",
                              r.name.c_str(), r.must_contain.c_str(), d.size(),
-                             d.empty() ? "(none)" : d[0].reason.c_str());
+                             d.empty() ? "(none)" : d[0U].reason.c_str());
                 ++bad;
             }
             continue;
@@ -1787,13 +1793,13 @@ int main(int argc, char** argv)
         if (!d.empty())
         {
             std::fprintf(stderr, "FAIL (rejection) %s: check_program rejected the program: %s\n", r.name.c_str(),
-                         d[0].reason.c_str());
+                         d[0U].reason.c_str());
             ++bad;
             continue;
         }
-        const LowerResult lr = lower_program(k.prog, k.lower_options);
-        const std::vector<Diag>& got = r.where == Reject::Where::Lower ? lr.rejections : lr.errors;
-        bool ok = false;
+        const LowerResult lr {lower_program(k.prog, k.lower_options)};
+        const std::vector<Diag>& got {r.where == Reject::Where::Lower ? lr.rejections : lr.errors};
+        bool ok {false};
         for (const Diag& x : got)
         {
             if (x.reason.find(r.must_contain) != std::string::npos)
@@ -1802,13 +1808,13 @@ int main(int argc, char** argv)
             }
         }
         // A refused program is refused for that reason alone: a rejection leaves no internal error behind, and an internal error no rejection.
-        const std::vector<Diag>& other = r.where == Reject::Where::Lower ? lr.errors : lr.rejections;
+        const std::vector<Diag>& other {r.where == Reject::Where::Lower ? lr.errors : lr.rejections};
         if (!ok || !other.empty())
         {
             std::fprintf(stderr, "FAIL (%s) %s: expected a %s containing \"%s\", got %zu: %s%s\n",
                          r.where == Reject::Where::Lower ? "lowering rejection" : "lowering hook", r.name.c_str(),
                          r.where == Reject::Where::Lower ? "rejection" : "internal error", r.must_contain.c_str(),
-                         got.size(), got.empty() ? "(none)" : got[0].reason.c_str(),
+                         got.size(), got.empty() ? "(none)" : got[0U].reason.c_str(),
                          other.empty() ? "" : " (and the other kind too)");
             ++bad;
         }
