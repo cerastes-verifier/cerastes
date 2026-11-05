@@ -9,7 +9,7 @@ it was ≤ 4 h from 2026-10-20): M4.1, M4.5a, M5a, …. Each session starts from
 `internal/status.md` updated so the next session can start cold.
 
 This file was trimmed to what is live at the end of M4.4c (owner, 2026-10-26), and is reconciled with the handoff at
-each session's start (the last: M4.5d2v, 2026-11-04): the plans of the finished milestones, the superseded text and the
+each session's start (the last: S7, 2026-11-05): the plans of the finished milestones, the superseded text and the
 appendices are in `git show 1fcc43b:plan.md`. The milestones were renumbered on 2026-10-20
 (the rest of C became M4; generic templates M5, concepts M6, C++ memory M7, inventory M8, evaluation M9); history
 entries keep the numbers they were written with.
@@ -138,26 +138,10 @@ Every test file starts with expectation lines that `scripts/run_tests.py` checks
 | M4.5d2a The heap | 2026-11-03/04 | 0047 | vlibc's trusted `malloc`, `calloc` and `free` (reserved identifiers; trusted by the contract's shape, not the name); typed views at `void*` → `T*` (one object, `sizeof(T)`); heap blocks with the slot −1 token; `invalid-free`; leaks by `forperm` after `l_end` and at loop back edges (`main` included, question 123); `owns_block` in contracts; `owning`/`ref_to_uninit` on functions; sequencing over block sites; loops over blocks held through locals; the owner's directive that vlibc implements what it covers (question 121) and d2's split into d2a, d2v, d2b (plan `.claude/plans/m4-5d2a-heap.md`, questions 120–127; final check by CI, owner 2026-11-04) |
 | S6 Tutorial and developer guide | 2026-11-04 | 0049 | a VerCors-style tutorial (seven chapters: a first proof, integers, loops, calls, pointers, structures, the heap; every program verified in both modes, every failure shown at its line) and a developer guide (architecture, building, testing, soundness, adding a feature, the EDG fork, writing documentation) as sections of the one site, with the reference between them; the overview rewritten; the website's landing page; a chapter per concept from now on (questions 131–133; plan `.claude/plans/s6-tutorial.md`) |
 | M4.5d2v vlibc's allocator | 2026-11-04/05 | 0050 (0047 amended) | first the M4.5d2a re-audit's B1–S3 (exit 3 and a timeout fixed); vlibc's allocator under its own names (`vlibc_malloc`, `vlibc_calloc`, `vlibc_realloc`, `vlibc_free`, `vlibc_aligned_alloc`, `vlibc_free_sized`, `vlibc_free_aligned_sized`: a portable C23 core over trusted POSIX glue, one mutex, `libvlibc`, run/stress/threaded tests under ASan/UBSan and TSan on both platforms); cerastes's half: the pairing check, blocks that know their allocator (the token's value; a mismatch is `invalid-free`), contract-less library routines skipped unless called, vlibc allocations rejected in C++ until M7, the pin; two older exit-3 holes fixed (ending back-edge rows, call-result splits); vlibc and vlibm in the owner's Boost style, cerastes's own refactor proposed as S7 (question 146) (plan `.claude/plans/m4-5d2v-allocator.md`, questions 129, 130, 134–146) |
+| S7 Code style | 2026-11-05 | 0051 | cerastes's tool code (`src/`, `include/cerastes.h`) in the owner's Boost style: clang-format's layout with a pinned 23.1.3 (PyPI's wheel on both platforms, `scripts/format.sh`, a `check.sh` step, fail-closed guards so tests and doc examples are never formatted), then the sweep (brace initialization, `U` on unsigned literals, one declarator per declaration, members included); proved behaviour-neutral at every commit by `scripts/object_identity.py` (object files and LLVM IR identical on macOS and x86-64 Linux, `encode.cpp` modulo the `__LINE__` its EDG assertions receive; a token pass for what no build compiles) and by `.vpr`/`.map` byte-identical over the whole suite and the VIR self-test; a lockfile fix that restores the docs' failure on warnings (questions 146–149; plan `.claude/plans/s7-code-style.md`) |
 
 The finished milestones' plans (goals, tasks, acceptance) are in the commit named above; `internal/status.md` has a
 row per session.
-
-## Next: S7 — Code style (before M4.5d2b)
-
-**Goal** (owner, 2026-11-05, handoff questions 146–149; plan `.claude/plans/s7-code-style.md`; record 0051 in the session):
-- **Scope:** cerastes's tool code (`src/`, `include/cerastes.h`) moves to the owner's Boost libraries' style, which
-  vlibc and vlibm already follow. The full sweep covers:
-  - clang-format's layout (Allman, braces on every control statement, 4 spaces, `T* p`, about 120 columns);
-  - brace initialization;
-  - `U` on unsigned literals;
-  - one declarator per declaration.
-- **Enforcement:** the pinned clang-format is PyPI's wheel 23.1.3 on both platforms, and a `check.sh` step keeps the
-  style.
-- **Proof:** every commit has byte-identical object files (`-g0`; `encode.cpp` identical modulo the `__LINE__` its EDG
-  assertions receive, its IR compared, record 0051 item 6), and `.vpr`/`.map` are byte-identical over
-  the whole suite and the VIR self-test.
-- **Unchanged:** no test, expectation or user-visible behaviour.
-- **When:** S7 merges before M4.5d2b branches.
 
 ## M4 — The rest of C
 

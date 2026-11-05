@@ -1,6 +1,11 @@
 # 0051 — cerastes's tool code in the owner's Boost style
 
-- **Status:** draft (2026-11-05, S7), written before the layout pass (invariant 6). Owner decisions: handoff questions
+- **Status:** accepted (2026-11-05, S7), drafted before the layout pass (invariant 6). Reviewed in two rounds by the
+  read-only soundness auditor (`build/s7/audit{1,2}.md` in the session's worktree): round 1, before the layout
+  landed, found one blocking item (hand edits invisible to object identity: the token level of item 6 answers it)
+  and nine should-fix items (fail-closed guards, the tool's coverage, its normalisation, wording); round 2 found no
+  blocking item and six should-fix items (members left multi-declarator, the `braces` level's limit, overclaims).
+  Every item was taken. Owner decisions: handoff questions
   146 (a code-style session of its own, after M4.5d2v and before M4.5d2b, proved behaviour-neutral), 147 (the full
   sweep: brace initialization, `U` on unsigned literals and one declarator per declaration as well as clang-format's
   layout), 148 (the pinned clang-format is PyPI's `clang_format` wheel 23.1.3 on both platforms) and 149 (lambda bodies

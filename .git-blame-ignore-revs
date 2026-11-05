@@ -12,3 +12,5 @@ e667747e561fc50fed30f422858f72c40e056f92
 6c76572318e5197e98648d980ea5209ac6f960dc
 # S7 C4c: the sweep in src/viper (record 0051 item 5): one declarator per declaration (12), U on unsig
 b762747d6e0c6c67dcc432ad53b73b74cedb065d
+# S7 C4d: one declarator per member declaration (reviewer round 2 S3: clang-tidy's isolate-declaration
+5dd303f98bc7c8f08dd5b9e33a699c1526f8d8d6

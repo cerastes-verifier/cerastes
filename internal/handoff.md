@@ -1,11 +1,12 @@
-# Handoff after S6 — a tutorial and a developer guide (record 0049), and M4.5d2a — the heap (record 0047) (2026-11-04)
+# Handoff after S7 — cerastes's tool code in the owner's Boost style (record 0051) (2026-11-05)
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
 rediscover, and holds only what is live (owner, 2026-10-26; consolidated again at M4.5b2b's start, 2026-11-02: §3 is
 regrouped by the session that consumes each note; updated at M4.5c1's, M4.5c2a's, M4.5c2b's, M4.5d1's and M4.5d2a's starts, and
-by S6, a docs session that changed no code: its additions are marked "S6"; at M4.5d2v's start, 2026-11-04; and at S7's
-planning, 2026-11-05). The text before M4.5d2v is `git show 9255b93:internal/handoff.md`, before S6
+by S6, a docs session that changed no code: its additions are marked "S6"; at M4.5d2v's start, 2026-11-04; at S7's
+planning, 2026-11-05; and at S7's end, the same day: §1, §2, §3's "From S7", §8). The text before S7 is
+`git show c2bc48d:internal/handoff.md`, before M4.5d2v is `git show 9255b93:internal/handoff.md`, before S6
 `git show bb41d55:internal/handoff.md`, before M4.5d2a `git show 9d98fe8:internal/handoff.md`, before M4.5d1 `git show d26a87c:internal/handoff.md`, before M4.5c2b `git show 7f11706:internal/handoff.md`, before M4.5c2a `git show cbdcce5:internal/handoff.md`, before M4.5c1
 `git show 1bfa705:internal/handoff.md`, and before M4.5b2b `git show 38877b4:internal/handoff.md`, whose header names
 every earlier version (each note below keeps its origin in brackets, so its full wording can be found there). Session
@@ -13,15 +14,15 @@ plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session cons
 
 ## 1. State
 
-- **S7, the next session** (planned 2026-11-05; plan `.claude/plans/s7-code-style.md`, questions 146–149; record 0051
-  next):
-  - **Scope:** cerastes's tool code (`src/`, `include/cerastes.h`) moves to the owner's Boost style, as the full sweep:
-    clang-format's layout, brace initialization, `U` on unsigned literals, one declarator per declaration.
-  - **Enforcement:** a pinned clang-format (PyPI's wheel 23.1.3) and a `check.sh` step.
-  - **Proof:** object files byte-identical with `-g0 -DNDEBUG` at every commit, then `.vpr`/`.map` byte-identical over
-    the whole suite and the VIR self-test.
-  - **Branch:** `s7-code-style` from local `main` at its planning commit.
-  - **When:** S7 runs and merges before M4.5d2b branches, since its diff touches every line of `src/`.
+- **S7** (2026-11-05; record 0051; plan `.claude/plans/s7-code-style.md`, questions 146–149): done on branch
+  `s7-code-style` (from local `main` `c2bc48d`, the planning commit) in the worktree `.claude/worktrees/s7`; result in
+  `internal/status.md`. cerastes's tool code is in the owner's Boost style (clang-format's layout with a pinned
+  23.1.3, then the sweep: brace initialization, `U`, one declarator per declaration), proved behaviour-neutral (object
+  files and IR identical at every commit on macOS and on the x86-64 box; `.vpr`/`.map` of the whole suite and the VIR
+  self-test byte-identical to the baseline); `scripts/format.sh --check` keeps the layout in `check.sh`;
+  `scripts/object_identity.py` stays for later refactors. The baseline ran in a second worktree (detached at C1),
+  removed at the end; its outputs are in `build/s7/baseline/`. Audit reports `build/s7/audit{1,2}.md` and the evidence `build/s7/evidence/` in
+  the worktree. **The next session is M4.5d2b's planning (§4.2), after S7 merges.**
 
 - **M4.5d2v** (2026-11-04/05; record 0050, 0047 amended; plan `.claude/plans/m4-5d2v-allocator.md`, questions 129, 130,
   134–145): done on branch `m4.5d2v-allocator` (from `origin/main` `9255b93`) in the worktree `.claude/worktrees/m4.5d2v`;
@@ -71,7 +72,13 @@ done yet still apply.
    without it). **vlibm:** push its `main` (`1e6982e`, the code style in `CLAUDE.md`; independent of cerastes).
 2. **M4.5d2v** (done, seen at S7's planning, 2026-11-05): merged into `origin/main` (`aa488d8`), and its worktree and
    branch are gone.
-3. **S7's planning commit** is on local `main`, and S7 branches from it. Push it with S7's branch, or before.
+3. **S7** (`s7-code-style`, its planning commit `c2bc48d` included): push the branch and open its PR. The PR tier
+   selects no Silicon tests by `src/` changes, so dispatch the full check once (both jobs: the Linux job fetches the
+   manylinux clang-format wheel for the first time). Merge it before M4.5d2b branches: its diff touches every line of
+   `src/`. Then `git config blame.ignoreRevsFile .git-blame-ignore-revs` locally (GitHub reads the file on its own).
+   The branch also holds `9cff0ad`, outside S7's plan: `doc/package-lock.json` deduplicated, since Dependabot's Antora
+   3.2.2 merge (`aa488d8`) had nested six copies of `@antora/logger` and broken `build_docs.sh`'s failure on warnings
+   (the harness self-test failed on `main`).
 
 ## 3. Open notes, by the session that consumes them
 
@@ -79,6 +86,23 @@ One line per note, its origin in brackets (session and audit item); the full wor
 Notes that a session consumes move into its plan's "Inputs" (M4.5b2b took the call's flag row, the registration rule for
 P4222's markers, P54 and the b2b design points).
 
+
+**From S7** (record 0051, audits `build/s7/audit{1,2}.md`)
+- **Every session:** new tool code in the style (`CLAUDE.md`'s conventions, the developer guide's "Code style");
+  `scripts/format.sh` before committing; brace initialization, `U` and one declarator per declaration are review rules.
+  A new `.cpp` under `src/` changes `object_identity.py`'s TU-count constants (`EXPECTED_TU_ENTRIES` 30,
+  `EXPECTED_TU_FILES` 29): update them in the same commit, or the tool refuses. [S7]
+- **Refactors:** `python3 scripts/object_identity.py --before <base>` (and `--tokens none|braces`, `--formatted-by`)
+  proves a behaviour-neutral change long before `check.sh`; it compiles only the running platform's code, so a refactor
+  of platform code also runs it on the x86-64 box. [S7]
+- **Dependabot's npm bumps:** after one, check that `doc/package-lock.json` has one hoisted `@antora/logger` (`npm ls
+  @antora/logger`); nested copies silently stop `build_docs.sh` from failing on warnings (`DocBuildWarningsTests`
+  catches it). [S7, `9cff0ad`]
+- **Not done by S7** (questions 150, 151): about 2,500 lines of `src/` stay over 120 columns, almost all whole-line
+  comments (`ReflowComments: IndentOnly` never re-wraps) and long string literals; 132 `{ // comment` brace lines. A
+  `for`-init with two declarators (`encode.cpp`, the line-scanning loop) is the rule's one exception. [S7]
+- `include/cerastes.h`'s fail-closed `#error` (the cerastes front end without its attributes, record 0008 item 2) is
+  one line again under `clang-format off`, now at line 42 (was 40); no test reaches it (reviewer round 1 S3). [S7]
 
 *M4.5d1's notes (P55's allow-list, 0031 item 9's exemption) moved into its plan's Inputs. M4.5d2's notes moved into
 M4.5d2a's plan's Inputs (`.claude/plans/m4-5d2a-heap.md`); those d2a hands on are below.*
@@ -901,4 +925,14 @@ At S7's planning (2026-11-05; recorded in its plan `.claude/plans/s7-code-style.
   not Homebrew's floating llvm. Ubuntu 26.04 has only clang-format-21, so the two CI jobs would disagree.
 - **149**: lambda bodies are Allman.
 
-**Open, for the next session:** none.
+During S7: no question was put to the owner. The reviewer's items and their dispositions are in
+`build/s7/audit{1,2}.md`; the plan's acceptance was worded as the proof stands (`encode.cpp`'s objects differ by the
+two `__LINE__` immediates EDG's assertions receive, so its IR is compared; no `-DNDEBUG`).
+
+**Open, for the next session** (each with its recommendation):
+- **150.** Lines over 120 columns: about 2,500 in `src/`, nearly all whole-line comments and long string literals.
+  Re-wrap them in a follow-up (`ReflowComments: Always` once, reviewed, then back to `IndentOnly`), or as each is
+  touched? *Recommended:* as touched; a one-off re-wrap of 2,100 comment lines is a large diff with no behaviour, and
+  some comments are hand-laid tables.
+- **151.** The 132 `{ // comment` lines (a comment after an Allman brace): move each comment above its statement now,
+  or leave them? *Recommended:* leave them; clang-format keeps them, and they read as the block's heading.
