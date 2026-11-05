@@ -142,10 +142,22 @@ the C library has no contract yet, and a call of one is rejected
 (`call_without_contract`); `realloc` gets its contract with arrays.
 
 These contracts are *trusted*: cerastes verifies the calls against them, never
-the functions, which in your build are the platform's. vlibc is meant to hold
-complete implementations of the functions it covers, usable without cerastes and
-verified as cerastes becomes able to verify them; until then their contracts
-stay trusted.
+the functions, which in your build are the platform's, and stay so.
+
+vlibc also holds implementations of its own, under their own names: in this
+version an allocator, `vlibc_malloc`, `vlibc_calloc`, `vlibc_realloc`,
+`vlibc_free`, `vlibc_aligned_alloc`, `vlibc_free_sized` and
+`vlibc_free_aligned_sized`, declared in vlibc's `<stdlib.h>` beside the standard
+functions and built as the library `libvlibc`, which your build links to call
+them (xref:ordinary-compilers.adoc#_the_include_path[Building annotated code with ordinary compilers]).
+`vlibc_malloc`, `vlibc_calloc` and `vlibc_free` carry the contracts of `malloc`,
+`calloc` and `free` word for word, and cerastes checks their calls the same way,
+with one more rule: each allocator frees only its own blocks
+(xref:memory.adoc#vlibc-allocator[vlibc's allocator]). The other four have no
+contract until their standard names have one, and a call of one is rejected
+(`call_without_contract`). vlibc's implementations are trusted too, until
+cerastes can verify them; vlibc's own tests run them on both platforms, also
+from many threads and under sanitizers.
 
 Because `exit` does not return, the path that calls it ends, and a postcondition
 only has to hold on the paths that return:
@@ -161,7 +173,10 @@ contract written on another declaration of such a function is rejected
 whether or not your file includes the header, and even if it repeats vlibc's
 contract word for word. A function of your own with the same name in a
 namespace, or with pass:[C++] linkage, is not the library's and is an ordinary
-function.
+function. The same holds for the `vlibc_` names declared with a contract
+(`vlibc_malloc`, `vlibc_calloc`, `vlibc_free`): a contract on one or a
+definition of one with C linkage is rejected, and a pass:[C++] function of
+that name with pass:[C++] linkage is an ordinary function.
 
 == The output
 

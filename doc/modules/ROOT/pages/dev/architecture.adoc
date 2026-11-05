@@ -143,5 +143,9 @@ declaration there is trusted if it carries a `cerastes:trusted-contract` tag. De
 {gh}/internal/decisions/0030-vlibc.md[0030],
 {gh}/internal/decisions/0046-vlibc-in-cerastes.md[0046] and
 {gh}/internal/decisions/0048-vlibc-and-vlibm-names.md[0048] say how it is pinned and trusted, and
+{gh}/internal/decisions/0050-vlibc-allocator.md[0050] how vlibc's own allocator (`vlibc_malloc` and the rest, in
+vlibc's `src/`, built as `libvlibc`) is read: `scripts/vlibc_contracts.py` checks that each `vlibc_` contract is its
+standard name's word for word and writes the pairing into the generated name list, from which the encoder takes a
+heap block's allocator (the token's value in the Viper); and
 xref:dev/soundness.adoc[Soundness] summarises what that means for a verdict. The user-facing side is
 xref:verifying.adoc#vlibc[vlibc in the verifying page].

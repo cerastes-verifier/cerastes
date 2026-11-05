@@ -1,12 +1,12 @@
-// PROVISIONAL: hand-derived from the platform fixture of the same name (decision 0050 item 3: the token conjunct is `!tok`), not emitted by cerastes verify yet; replace it with the emitted view when the encoder lands (M4.5d2v). Emitted by cerastes verify (M4.5d2a) for scripts/test_lint_viper.py: the typed view `f_vlibc_free__5`, with the fields of its program.
+// Emitted by cerastes verify (M4.5d2v) for scripts/test_lint_viper.py: the typed view `f_vlibc_free__4`, with the fields of its program (extracted from vlibc_alloc_mixed_loop.c).
 field v_int: Int
 field d_int: Bool
 field tok: Bool
 field lv: Bool
 
 // C/C++ function `vlibc_free`
-// cerastes:trusted-contract vlibc: vlibc_free ends the allocation ptr is the start of; free(NULL) does nothing (C23 7.24.3.3); typed view: one int (4 bytes), decision 0047
-method f_vlibc_free__5(p_ptr__0: Ref)
+// cerastes:trusted-contract vlibc: vlibc_free ends the allocation in vlibc's heap that ptr is the start of; vlibc_free(NULL) does nothing (C23 7.24.3.3); typed view: one int (4 bytes), decision 0047
+method f_vlibc_free__4(p_ptr__0: Ref)
   requires (p_ptr__0 == null) || (((p_ptr__0 == loc(block_of(p_ptr__0), offset_of(p_ptr__0))) && (0 <= offset_of(p_ptr__0))) && (offset_of(p_ptr__0) <= len(block_of(p_ptr__0))))
-  requires (!(p_ptr__0 == null)) ==> (((((((((((p_ptr__0 != null) && ((p_ptr__0 == null) || (((p_ptr__0 == loc(block_of(p_ptr__0), offset_of(p_ptr__0))) && (0 <= offset_of(p_ptr__0))) && (offset_of(p_ptr__0) <= len(block_of(p_ptr__0)))))) && (offset_of(p_ptr__0) == 0)) && acc(loc(block_of(p_ptr__0), (-1)).tok)) && !loc(block_of(p_ptr__0), (-1)).tok) && (lvloc(block_of(p_ptr__0)) == loc(block_of(p_ptr__0), (-2)))) && acc(lvloc(block_of(p_ptr__0)).lv)) && (len(block_of(p_ptr__0)) == 1)) && acc(p_ptr__0.v_int)) && acc(p_ptr__0.d_int)) && (p_ptr__0.d_int ==> (((-2147483648) <= p_ptr__0.v_int) && (p_ptr__0.v_int <= 2147483647))))
+  requires (!(p_ptr__0 == null)) ==> (((((((((((p_ptr__0 != null) && ((p_ptr__0 == null) || (((p_ptr__0 == loc(block_of(p_ptr__0), offset_of(p_ptr__0))) && (0 <= offset_of(p_ptr__0))) && (offset_of(p_ptr__0) <= len(block_of(p_ptr__0)))))) && (offset_of(p_ptr__0) == 0)) && acc(loc(block_of(p_ptr__0), (-1)).tok)) && (!loc(block_of(p_ptr__0), (-1)).tok)) && (lvloc(block_of(p_ptr__0)) == loc(block_of(p_ptr__0), (-2)))) && acc(lvloc(block_of(p_ptr__0)).lv)) && (len(block_of(p_ptr__0)) == 1)) && acc(p_ptr__0.v_int)) && acc(p_ptr__0.d_int)) && (p_ptr__0.d_int ==> (((-2147483648) <= p_ptr__0.v_int) && (p_ptr__0.v_int <= 2147483647))))
   decreases _

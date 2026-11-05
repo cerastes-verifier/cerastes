@@ -83,6 +83,12 @@ does in `cerastes verify`, put vlibc's `include/vlibc` directory first:
 `-I path/to/vlibc/include/vlibc`. That is optional: it changes nothing an
 ordinary compiler does.
 
+To call vlibc's own allocator (`vlibc_malloc` and the rest, see
+xref:memory.adoc#vlibc-allocator[vlibc's allocator]), also link vlibc's library
+`libvlibc`, which vlibc's CMake build makes (the target `vlibc::vlibc`). Programs
+that call only the standard functions need no library: vlibc's headers declare,
+they define nothing.
+
 == Predicates and pure functions
 
 `CERASTES_PREDICATE` and `CERASTES_PURE` expand to the attribute and `inline`

@@ -768,6 +768,31 @@ the allocation a parameter points to: `owns_block` of an object reached through
 another pointer (`+*pp+`, `p->next`) or of a global, and owning local variables,
 globals and structure members, are planned for the next version.
 
+[#vlibc-allocator]
+*vlibc's allocator.* vlibc also has an allocator of its own,
+`vlibc_malloc`, `vlibc_calloc` and `vlibc_free` (with `vlibc_realloc`,
+`vlibc_aligned_alloc`, `vlibc_free_sized` and `vlibc_free_aligned_sized`), in
+the library `libvlibc` (xref:verifying.adoc#vlibc[vlibc]). The first three have
+the contracts of `malloc`, `calloc` and `free`, and cerastes checks their calls
+the same way. Its blocks are a heap of their own: a block from `vlibc_malloc`
+or `vlibc_calloc` is freed with `vlibc_free`, a block from `malloc` or `calloc`
+with `free`, and freeing a block with the other allocator's function is
+xref:error-messages.adoc#_invalid_free[`invalid-free`]:
+
+[source,c]
+----
+include::example$memory/vlibc_alloc.c[tag=source]
+----
+
+A function can borrow the objects of a block of either allocator through
+`owns(*p)`, `reads(*p)` and `live(p)`. `cerastes_owns_block` and
+`cerastes::owning` name a block of `malloc` or `calloc` only, so handing a block
+of vlibc's over through them is reported (`permission`); a spelling for it is
+planned for the next version. vlibc's allocator is for C: in pass:[C++] a call of
+`vlibc_malloc` or `vlibc_calloc` is rejected, since pass:[C++] creates objects
+only in the storage `std::malloc` and its family return (placement `new` comes
+with classes).
+
 [#not-yet]
 == What is not supported yet
 
@@ -798,6 +823,11 @@ These are rejected with a diagnostic, never approximated
 * allocations of more than one object (`n * sizeof(T)`), `realloc`, and
   `cerastes_owns_block` of an object reached through another pointer or of a
   global (<<heap>>);
+* `vlibc_realloc`, `vlibc_aligned_alloc`, `vlibc_free_sized` and
+  `vlibc_free_aligned_sized`, which have no contract yet
+  (`call_without_contract`), a block of vlibc's allocator handed over through
+  `cerastes_owns_block` or `cerastes::owning`, and `vlibc_malloc` and
+  `vlibc_calloc` in pass:[C++] (<<vlibc-allocator,vlibc's allocator>>);
 * `restrict` except on a C parameter whose contract owns its object;
 * `void *` other than an allocation's result converted at once to `T *` and
   the argument of `free` (<<heap>>), and pointers to unions, to functions and to

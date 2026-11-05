@@ -525,6 +525,10 @@ class Lowerer {
   LowerResult run() {
     compute_cycles();
     heap_ = is_heap_program();  // decision 0047 item 7: any view call or block site in any contract
+    // Decision 0050 item 4: a vlibc heap program holds ANY function of vlibc's allocator, an allocation view or the deallocation view `vlibc_free`: only there are a block's
+    // allocator (the value of its token) checked and carried through loops; every other program's Viper is unchanged.
+    for (const Function& f : prog_.functions())
+      if (f.allocator == Allocator::Vlibc) vlibc_heap_ = true;
     if (heap_) {
       out_.memory = true;
       out_.heap = true;
@@ -940,6 +944,7 @@ class Lowerer {
     // The first leaf (`live`) also carries the block's free token: the snapshot `kt` of its permission, guarded by `gt`, and `tptr` is the pointee type.
     bool heap = false;
     std::string kt;
+    std::string ktv;  // decision 0050 item 5 (a vlibc heap program): the snapshot of the token's value, taken when `kt > none` (false otherwise); empty: none
     E gt;
     Type ptee;
   };
@@ -1806,12 +1811,13 @@ class Lowerer {
   // full permission to the value and the flag and `flag ==> range`, then (`Plain`) the flags.  `Uninit`: no flag (a `ref_to_uninit` pointer's block: malloc's and free's);
   // `Kept`: an `ensures` site on a `ref_to_uninit` formal: a flag that was set on entry (under the partner's guard `kept_guard`) is still set.
   enum class BlockMode { Plain, Uninit, Kept };
-  E block_conj(const E& p, const Type& pt, const std::string& text, BlockMode mode, const E& kept_guard) {
+  // `vlibc`: a view of vlibc's allocator (decision 0050 item 3): its token's value is `false`; every other `owns_block` states `true`, the platform's allocator.
+  E block_conj(const E& p, const Type& pt, const std::string& text, BlockMode mode, const E& kept_guard, bool vlibc) {
     E r = low::bin(low::BinOp::Ne, p, low::null_());
     r = low::and_(r, wf_expr(p));
     r = low::and_(r, low::bin(low::BinOp::Eq, low::dom("offset_of", {p}), low::int_lit("0")));
     r = low::and_(r, low::acc(tok_slot(p), "tok"));
-    r = low::and_(r, low::field(tok_slot(p), "tok"));
+    r = low::and_(r, vlibc ? low::not_(low::field(tok_slot(p), "tok")) : low::field(tok_slot(p), "tok"));
     r = low::and_(r, low::bin(low::BinOp::Eq, live_cell(p), tok_loc_slot(p)));
     r = low::and_(r, low::acc(live_cell(p), "lv"));
     r = low::and_(r, block_lens(p, *pt.pointee));
@@ -1860,10 +1866,12 @@ class Lowerer {
     if (cmode_ == CMode::Wf) return {block_pure(p, block_ptr_type(site)), {}};
     E kept;
     if (const AtomSite* partner = block_partner(*cf_, site)) kept = site_guard(*partner, env);
-    return {block_conj(p, block_ptr_type(site), e.a->c_text, block_mode(*cf_, site), kept), {}};
+    return {block_conj(p, block_ptr_type(site), e.a->c_text, block_mode(*cf_, site), kept, cf_->allocator == Allocator::Vlibc), {}};
   }
 
   // `perm(loc(b, -1).tok) == write && loc(b, -1).tok` as ONE atomic assertion (Silicon reports each conjunct of an asserted `&&` as its own error).
+  E token_perm(const E& p) { return low::bin(low::BinOp::Eq, low::perm_of(tok_slot(p), "tok"), low::write_perm()); }  // the permission part of token_held
+  E tok_value(const E& p) { return low::field(tok_slot(p), "tok"); }  // the token's value: true for a block of the platform's allocator, false for vlibc's
   E token_held(const E& p) {
     return low::not_(low::bin(low::BinOp::Or, low::bin(low::BinOp::Ne, low::perm_of(tok_slot(p), "tok"), low::write_perm()), low::not_(low::field(tok_slot(p), "tok"))));
   }
@@ -1872,8 +1880,11 @@ class Lowerer {
   // site of this function): one explicit assertion per part of `owns_block(p)`, atomic, in the order of S36: the null test, WF, the offset, the token, the liveness
   // equation, the whole liveness cell, the lengths, then per leaf the write permission, the flag and the range.  A part whose failure is a bug of the encoder is
   // `internal`.  `add(category, cond, message)` makes the row (under the site's guard, which the caller applies).
+  // Decision 0050 item 5 (a vlibc heap program only): the token row is two rows, the permission and then the token's VALUE, which names the allocator: `want` is the
+  // allocator the site requires (the callee's for a deallocation view, the platform's for every `owns_block` of a contract) and `routine` the freeing routine's name.
   void block_rows(const E& p, const Type& pt, const std::string& text, BlockMode mode, bool dealloc,
-                  const std::function<void(const char*, E, const std::string&)>& add, const std::string& who_needs, bool at_return) {
+                  const std::function<void(const char*, E, const std::string&)>& add, const std::string& who_needs, bool at_return,
+                  Allocator want = Allocator::Platform, const std::string& routine = std::string()) {
     const Type& t = *pt.pointee;
     const std::string pl = text.empty() ? std::string("the pointer") : "`" + text + "`";
     const char* cat = dealloc ? "invalid-free" : "permission";
@@ -1885,8 +1896,21 @@ class Lowerer {
     add("internal", wf_expr(p), dealloc ? "frees " + pl + ", which may not point to an allocation" : whole);
     // The token row first (it ends its path when the token is not held: a double free, a local, a global, a member, a borrowed pointer), then the offset: a pointer
     // that is not known to point to the start of its block (`drop(struct S *s) requires(owns(*s))`) is one error, the token's, not two.
-    add(cat, token_held(p),
+    add(cat, vlibc_heap_ ? token_perm(p) : token_held(p),
         dealloc ? "frees " + pl + ", which may already be freed or may not be an allocation (a local, a global or a member)" : whole);
+    if (vlibc_heap_) {
+      const E value = tok_value(p);
+      std::string why;
+      if (dealloc)
+        why = "frees " + pl + " with `" + routine + "`, but it may be a block of " + (want == Allocator::Vlibc ? "the platform's" : "vlibc's") + " allocator";
+      else if (at_return)
+        why = "returns " + pl + " as an `owns_block` allocation of the platform's allocator, but it may be a block of vlibc's, which a contract cannot name yet";
+      else
+        why = who_needs + " " + pl + " to be a block of the platform's allocator (`owns_block`); it may be a block of vlibc's, which a contract cannot name yet";
+      // read only under the permission (a pointer the loop reassigned may hold no token: the permission row fails without ending its path, and an unguarded read of `tok`
+      // would be Silicon's own permission error, an exit 3, instead of a row)
+      add(cat, low::implies(token_perm(p), want == Allocator::Vlibc ? low::not_(value) : value), why);
+    }
     add(cat, low::bin(low::BinOp::Eq, low::dom("offset_of", {p}), low::int_lit("0")),
         dealloc ? "frees " + pl + ", which may not be the start of an allocation" : whole);
     add("internal", low::bin(low::BinOp::Eq, live_cell(p), tok_loc_slot(p)), "the liveness cell of a block is at slot -2");
@@ -1956,7 +1980,8 @@ class Lowerer {
     for (const B& b : bs) {
       const std::string who = "calls `" + callee.c_name + "`, which needs";
       block_rows(b.ptr, block_ptr_type(*b.site), b.text, block_mode(callee, *b.site), callee.deallocates,
-                 [&](const char* category, E cond, const std::string& message) { row(category, b.g, std::move(cond), message); }, who, false);
+                 [&](const char* category, E cond, const std::string& message) { row(category, b.g, std::move(cond), message); }, who, false,
+                 callee.deallocates ? callee.allocator : Allocator::Platform, callee.c_name);
     }
   }
 
@@ -4361,6 +4386,17 @@ class Lowerer {
     if (assert_count_++ == opt_.drop_assert) return;  // self-test hook (0011 item 13)
     out.push_back(assert_stmt(std::move(cond), std::move(m)));
   }
+  // A row whose failure ENDS its path (decision 0047 item 10, amended in M4.5d2v): `if (!cond) { assert false }`.  A failed `assert cond` is assumed afterwards, and an assumption
+  // that the heap does not back leaves the path alive: Silicon then goes on to the automatic invariants of the loop, whose failure is an `internal` error, and reads a
+  // field it holds no permission to.  A failed `assert false` assumes false: the user's error is the path's last.  The check is the assert's own (category, message, position).
+  void emit_ending_assert(std::vector<low::LStmt>& out, const E& cond, low::Meta m) {
+    if (assert_count_++ == opt_.drop_assert) return;
+    low::LStmt ifs;
+    ifs.kind = low::LStmt::Kind::If;
+    ifs.expr = low::not_(cond);
+    ifs.then_body.push_back(assert_stmt(low::bool_lit(false), std::move(m)));
+    out.push_back(std::move(ifs));
+  }
 
   // What the items of F that have exactly the set `set` are: `term_call` is the recursive call whose explicit termination check has it as
   // PRE (-1 if none), `ordinary` whether any other item (an obligation, a branch) has it.  A write or a snapshot is not in F.
@@ -6092,6 +6128,7 @@ class Lowerer {
           }
           if (pl.live) {  // the token place of the block: one per variable, apart from every other heap place's block
             pl.kt = "kt_" + tag + suffix_of_loop;
+            if (vlibc_heap_) pl.ktv = "ktv_" + tag + suffix_of_loop;
             pl.gt = gnull;
             for (const Place& o : places)
               if (o.heap && !o.kt.empty() && !same_expr(o.lroot, hb)) pl.gt = low::and_(pl.gt, low::bin(low::BinOp::Ne, block_of(hb), block_of(o.lroot)));
@@ -6714,6 +6751,15 @@ class Lowerer {
           fn_.snapshots.push_back(low::LVar{pl.kt, low::LType::Perm});
           assign(entry, pl.kt, low::perm_of(tok_slot(pl.lroot), "tok"));
           catch_all(pl, pl.kt);
+          if (!pl.ktv.empty()) {  // decision 0050 item 5: the block's allocator (the token's value), when the token is held at all
+            fn_.snapshots.push_back(low::LVar{pl.ktv, low::LType::Bool});
+            assign(entry, pl.ktv, low::bool_lit(false));
+            low::LStmt tv;
+            tv.kind = low::LStmt::Kind::If;
+            tv.expr = low::bin(BinOp::Gt, low::var(pl.kt), low::no_perm());
+            assign(tv.then_body, pl.ktv, low::field(tok_slot(pl.lroot), "tok"));
+            entry.push_back(std::move(tv));
+          }
         }
         if (!pl.value) continue;
         fn_.snapshots.push_back(low::LVar{pl.kv, low::LType::Perm});
@@ -6746,7 +6792,10 @@ class Lowerer {
         if (pl.live) w.invariants.push_back(auto_invariant(low::implies(pl.gl, low::acc(live_cell(lv_of(pl)), "lv", low::var(pl.kl))), s.loc));
         if (!pl.kt.empty()) {
           w.invariants.push_back(auto_invariant(low::implies(pl.gt, low::acc(tok_slot(pl.lroot), "tok", low::var(pl.kt))), s.loc));
-          w.invariants.push_back(auto_invariant(low::implies(low::and_(pl.gt, low::bin(BinOp::Gt, low::var(pl.kt), none)), low::field(tok_slot(pl.lroot), "tok")), s.loc));
+          // 0047 item 10's conjunct is `tok`; in a vlibc heap program it is REPLACED (kept beside it, it fails on entry for a vlibc block, audit S1 of 0050) by the stable value
+          const E held = low::and_(pl.gt, low::bin(BinOp::Gt, low::var(pl.kt), none));
+          const E tok = low::field(tok_slot(pl.lroot), "tok");
+          w.invariants.push_back(auto_invariant(low::implies(held, pl.ktv.empty() ? tok : low::bin(BinOp::Eq, tok, low::var(pl.ktv))), s.loc));
         }
       }
       for (const Place& pl : places) {
@@ -6897,6 +6946,12 @@ class Lowerer {
           } else if (pl.suffix == sfx) {
             case_split(splits, low::bin(low::BinOp::Eq, low::var(var_name(v)), pl.recv));
           }
+          // Decision 0050 item 5 (a vlibc heap program): the value row of a free, a call or a back edge reads the token's value of a pointer the loop reassigned; Silicon
+          // must know which token place it is (or none) before the read, else the read is its own permission error (an exit 3 instead of a row).
+          if (vlibc_heap_ && pl.heap && !pl.kt.empty()) {
+            case_split(splits, low::bin(low::BinOp::Eq, low::var(var_name(v)), pl.lroot));
+            case_split(splits, low::bin(low::BinOp::Eq, block_of(low::var(var_name(v))), block_of(pl.lroot)));
+          }
         }
       }
     }
@@ -6952,16 +7007,42 @@ class Lowerer {
         const std::string msg = "an iteration of this loop ends without the permission to " + quoted(pl.label, "an object") + " that it began with";
         auto lacks = [&](const E& have, const std::string& amount) { return low::bin(BinOp::Lt, have, low::var(amount)); };
         const bool one = pl.live && !pl.gv && !pl.gl;
+        // A heap place's rows end their path (see emit_ending_assert); the other places' rows keep today's form.
+        auto row = [&](E cond, low::Meta m) {
+          if (pl.heap) emit_ending_assert(w.then_body, cond, std::move(m));
+          else emit_assert(w.then_body, std::move(cond), std::move(m));
+        };
         if (pl.value) {
           E bad = low::bin(BinOp::Or, lacks(value_perm(pl.recv, pl.type), pl.kv), lacks(flag_perm(pl.recv, pl.type), pl.kd));
           if (one) bad = low::bin(BinOp::Or, bad, lacks(live_perm(lv_of(pl)), pl.kl));
-          emit_assert(w.then_body, low::implies(pl.gv, low::not_(bad)), meta("permission", at, msg));
+          row(low::implies(pl.gv, low::not_(bad)), meta("permission", at, msg));
         }
         if (pl.live && (!one || !pl.value))
-          emit_assert(w.then_body, low::implies(pl.gl, low::not_(lacks(live_perm(lv_of(pl)), pl.kl))), meta("permission", at, msg));
+          row(low::implies(pl.gl, low::not_(lacks(live_perm(lv_of(pl)), pl.kl))), meta("permission", at, msg));
         if (!pl.kt.empty())  // the block's token (decision 0047 item 10): a body that frees the block the loop holds fails here, before Viper exhales the invariant
-          emit_assert(w.then_body, low::implies(pl.gt, low::not_(lacks(low::perm_of(tok_slot(pl.lroot), "tok"), pl.kt))),
-                      meta("permission", at, "an iteration of this loop ends without the allocation " + quoted(pl.label, "an object") + " that it began with"));
+          row(low::implies(pl.gt, low::not_(pl.ktv.empty() ? lacks(low::perm_of(tok_slot(pl.lroot), "tok"), pl.kt)
+                                                           // decision 0050 item 5: also a block of the OTHER allocator in the variable (the body freed it and allocated again)
+                                                           : low::bin(BinOp::Or, lacks(low::perm_of(tok_slot(pl.lroot), "tok"), pl.kt),
+                                                                      low::and_(low::bin(BinOp::Gt, low::var(pl.kt), low::no_perm()),
+                                                                                low::bin(BinOp::Ne, low::field(tok_slot(pl.lroot), "tok"), low::var(pl.ktv)))))),
+              meta("permission", at, "an iteration of this loop ends without the allocation " + quoted(pl.label, "an object") + " that it began with"));
+        // A heap place's VALUE invariants have a user row of their own (M4.5d2v, re-audit of 0047 item 10): the body may free the block and a later allocation may be
+        // the same block again (Silicon has no freshness), so the permission rows above hold and the place holds a different object; its flag, its value and its range
+        // are then not what the invariants (`internal`) say.  Each row mirrors one invariant, after the permission rows (which end their path when they fail, so a read
+        // here holds the permission the row before it checked).
+        if (pl.heap && pl.value) {
+          const E none = low::no_perm(), write = low::write_perm();
+          const E kv = low::var(pl.kv), kd = low::var(pl.kd);
+          const E v = cell_value(pl.recv, pl.type);
+          const std::string vmsg = "an iteration of this loop ends with " + quoted(pl.label, "an object") + " holding something other than what it began with";
+          emit_assert(w.then_body, low::implies(low::and_(pl.gv, low::and_(low::bin(BinOp::Gt, kd, none), low::var(pl.ds))), cell_flag(pl.recv, pl.type)), meta("permission", at, vmsg));
+          const E part = pl.reach ? low::and_(low::bin(BinOp::Lt, none, kv), low::bin(BinOp::Lt, kv, write)) : low::bin(BinOp::Gt, kv, none);
+          emit_assert(w.then_body, low::implies(low::and_(pl.gv, part), low::bin(BinOp::Eq, v, low::var(pl.vs))), meta("permission", at, vmsg));
+          if (const E range = cell_range_inv(pl.recv, pl.type)) {
+            const E held = low::and_(low::and_(low::bin(BinOp::Gt, kv, none), low::bin(BinOp::Gt, kd, none)), cell_flag(pl.recv, pl.type));
+            emit_assert(w.then_body, low::implies(low::and_(pl.gv, held), range), meta("permission", at, vmsg));
+          }
+        }
       }
     }
     // Decision 0047 item 7 (audit B1 (a)): a block allocated in an iteration and not freed would be dropped by the loop's invariant exhale at the back edge, with no row.
@@ -7634,6 +7715,7 @@ class Lowerer {
   std::map<const Function*, FnAtoms> atoms_;
   std::map<const Function*, FnBlocks> blocks_;
   std::map<const Expr*, size_t> blocks_before_;  // a permission atom -> the number of block sites before it (index_block_order)
+  bool vlibc_heap_ = false;  // a vlibc heap program (decision 0050 item 4): some view of vlibc's allocator, an allocation or a deallocation, is in the program
   bool heap_ = false;  // a heap program (decision 0047 item 7): a view call or an owns_block site anywhere
   std::deque<Derived> derived_;                                    // decision 0045: the derived keys (a deque: references to entries stay valid)
   std::map<std::tuple<const Function*, int, std::vector<int>>, int> derived_index_;

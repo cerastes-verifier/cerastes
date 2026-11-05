@@ -641,6 +641,20 @@ function owns entirely. It is reported at the call of `free`:
   it in both its `requires` and its `ensures`, so it must give it back);
 * an allocation that a function it called may still hold a pointer to, or part
   of which it gave away (xref:memory.adoc#heap[Allocated memory]).
+* a block of the other allocator: a block of `vlibc_malloc` or `vlibc_calloc`
+  given to `free`, or one of `malloc` or `calloc` given to `vlibc_free`
+  (xref:memory.adoc#vlibc-allocator[vlibc's allocator]); the message names the
+  heap the block may belong to:
++
+[source,c]
+----
+include::example$memory/vlibc_alloc_mismatch.c[tag=source]
+----
++
+[source,console]
+----
+vlibc_alloc_mismatch.c:14: error: invalid-free: frees `p` with `free`, but it may be a block of vlibc's allocator
+----
 
 Each of these is undefined behaviour in C and pass:[C++]. `free(NULL)` does
 nothing and is not an error.

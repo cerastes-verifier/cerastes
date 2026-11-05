@@ -1,0 +1,12 @@
+// Emitted by cerastes verify (M4.5d2v) for scripts/test_lint_viper.py: the typed view `f_vlibc_free__3`, with the fields of its program (extracted from vlibc_alloc_borrow_owns.c).
+field v_int: Int
+field d_int: Bool
+field tok: Bool
+field lv: Bool
+
+// C/C++ function `vlibc_free`
+// cerastes:trusted-contract vlibc: vlibc_free ends the allocation in vlibc's heap that ptr is the start of; vlibc_free(NULL) does nothing (C23 7.24.3.3); typed view: one struct account (4 bytes), decision 0047
+method f_vlibc_free__3(p_ptr__0: Ref)
+  requires ((p_ptr__0 == null) || (((p_ptr__0 == loc(block_of(p_ptr__0), offset_of(p_ptr__0))) && (0 <= offset_of(p_ptr__0))) && (offset_of(p_ptr__0) <= len(block_of(p_ptr__0))))) && (((p_ptr__0 != null) && (offset_of(p_ptr__0) < len(block_of(p_ptr__0)))) ==> (len(member(p_ptr__0, 0)) == 1))
+  requires (!(p_ptr__0 == null)) ==> (((((((((((p_ptr__0 != null) && ((p_ptr__0 == null) || (((p_ptr__0 == loc(block_of(p_ptr__0), offset_of(p_ptr__0))) && (0 <= offset_of(p_ptr__0))) && (offset_of(p_ptr__0) <= len(block_of(p_ptr__0)))))) && (offset_of(p_ptr__0) == 0)) && acc(loc(block_of(p_ptr__0), (-1)).tok)) && (!loc(block_of(p_ptr__0), (-1)).tok)) && (lvloc(block_of(p_ptr__0)) == loc(block_of(p_ptr__0), (-2)))) && acc(lvloc(block_of(p_ptr__0)).lv)) && ((len(block_of(p_ptr__0)) == 1) && (len(member(p_ptr__0, 0)) == 1))) && acc(loc(member(p_ptr__0, 0), 0).v_int)) && acc(loc(member(p_ptr__0, 0), 0).d_int)) && (loc(member(p_ptr__0, 0), 0).d_int ==> (((-2147483648) <= loc(member(p_ptr__0, 0), 0).v_int) && (loc(member(p_ptr__0, 0), 0).v_int <= 2147483647))))
+  decreases _

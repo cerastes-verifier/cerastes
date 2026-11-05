@@ -1534,6 +1534,20 @@ KTV_IF = r"if\s*\(\s*kt(?:_[\w$']*)?\s*>\s*none\s*\)\s*\{"
 KTV_ONE_LINE_RE = re.compile(rf"^\s*{KTV_IF}\s*{KTV_ASSIGN}\s*\}}\s*$", re.S)
 KTV_ALONE_RE = re.compile(rf"^\s*{KTV_ASSIGN}\s*$", re.S)
 KTV_IF_LINE_RE = re.compile(rf"^\s*{KTV_IF}\s*$")
+# The ending rows of a heap place's back edge (decision 0047 item 10 as amended at M4.5d2v): `if (!(<row>)) {`, then `assert false`, then
+# `}` stands for `assert <row>` whose failure ends the path (so the rows after it assume it).  The row is read like an assert's
+# conjuncts (a `tok` in it only as `loc(block_of(...), -1).tok`); an `if` with anything else in its body, or a condition that is not
+# the negation of one parenthesised row, is an ordinary `if` and may not read `tok`.
+ENDING_IF_RE = re.compile(r"^\s*if\s*\(\s*!\s*(?P<row>\(.*\))\s*\)\s*\{\s*$", re.S)
+
+
+def is_ending_row(src: Source, lineno: int) -> bool:
+    """The line `lineno` (1-based) is `if (!(<row>)) {` and the next two lines are exactly `assert false` and `}`."""
+    m = ENDING_IF_RE.match(src.code[lineno - 1])
+    if m is None or _group_end(m.group("row"), 0) != len(m.group("row")) - 1:
+        return False
+    rest = [c.strip() for c in src.code[lineno:lineno + 2]]
+    return rest == ["assert false", "}"]
 
 
 def strip_perm_calls(text: str) -> str:
@@ -1866,6 +1880,8 @@ def lint_heap_token(src: Source, decls: list[Decl], add: Callable[[int, str], No
             if re.match(r"^exhale\b", stripped):
                 add(lineno, "`exhale` of a `tok` place: a token is consumed only by a call whose `requires` has the block "
                             "site (decision 0047 item 6)")
+            elif is_ending_row(src, lineno):
+                pass  # an ending back-edge row: the token rules above have read its `tok`s as an assert's
             elif (km := KTV_ONE_LINE_RE.match(code) or KTV_ALONE_RE.match(code)) is not None:
                 alone = KTV_ONE_LINE_RE.match(code) is None
                 above = next((c for c in reversed(src.code[:lineno - 1]) if c.strip()), "")

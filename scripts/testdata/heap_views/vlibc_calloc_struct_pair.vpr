@@ -1,0 +1,12 @@
+// Emitted by cerastes verify (M4.5d2v) for scripts/test_lint_viper.py: the typed view `f_vlibc_calloc__4`, with the fields of its program (extracted from vlibc_calloc_zero.c).
+field v_int: Int
+field d_int: Bool
+field tok: Bool
+field lv: Bool
+
+// C/C++ function `vlibc_calloc`
+// cerastes:trusted-contract vlibc: vlibc_calloc returns NULL or the start of a new allocation of nmemb * size bytes in vlibc's heap, all zero (C23 7.24.3.2); typed view: one struct pair (8 bytes), decision 0047
+method f_vlibc_calloc__4() returns (res: Ref)
+  ensures ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res))))) && (((res != null) && (offset_of(res) < len(block_of(res)))) ==> ((len(member(res, 0)) == 1) && (len(member(res, 1)) == 1)))
+  ensures (!(res == null)) ==> ((((((((((((((((((res != null) && ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res)))))) && (offset_of(res) == 0)) && acc(loc(block_of(res), (-1)).tok)) && (!loc(block_of(res), (-1)).tok)) && (lvloc(block_of(res)) == loc(block_of(res), (-2)))) && acc(lvloc(block_of(res)).lv)) && ((len(block_of(res)) == 1) && ((len(member(res, 0)) == 1) && (len(member(res, 1)) == 1)))) && acc(loc(member(res, 0), 0).v_int)) && acc(loc(member(res, 0), 0).d_int)) && (loc(member(res, 0), 0).d_int ==> (((-2147483648) <= loc(member(res, 0), 0).v_int) && (loc(member(res, 0), 0).v_int <= 2147483647)))) && acc(loc(member(res, 1), 0).v_int)) && acc(loc(member(res, 1), 0).d_int)) && (loc(member(res, 1), 0).d_int ==> (((-2147483648) <= loc(member(res, 1), 0).v_int) && (loc(member(res, 1), 0).v_int <= 2147483647)))) && loc(member(res, 0), 0).d_int) && loc(member(res, 1), 0).d_int) && (loc(member(res, 0), 0).v_int == 0)) && (loc(member(res, 1), 0).v_int == 0))
+  decreases _

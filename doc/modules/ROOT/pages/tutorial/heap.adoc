@@ -107,7 +107,9 @@ the postcondition of `make_point`, is what allows it.
 
 That is the end of the tutorial for this version. The
 xref:memory.adoc#heap[reference on allocated memory] covers `calloc`, loops
-over allocations and the attribute `cerastes::owning`, and
+over allocations, the attribute `cerastes::owning` and
+xref:memory.adoc#vlibc-allocator[vlibc's own allocator] (`vlibc_malloc` and
+`vlibc_free`, a heap of its own whose blocks only `vlibc_free` frees), and
 xref:memory.adoc#not-yet[What is not supported yet] says what is still
 rejected: arrays and pointer arithmetic among it.
 

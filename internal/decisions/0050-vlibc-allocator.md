@@ -100,7 +100,8 @@ same contracts, and left two recommendations for this session (questions 129, 13
    Silicon's own precondition check, exit 3; or, had the view taken the platform's conjunct, verified.)
 5. **Rows and loops in a vlibc heap program.**
    - **The token row** (0047 item 6, and the call and return rows of 0047 item 4) becomes two rows: the permission
-     (today's category and message), then the value. At a deallocation the value row is `invalid-free`: "frees `p` with
+     (today's category and message), then the value, guarded by the permission (`perm(tok) == write ==> value`: a value
+     read must be framed even on the path where the permission row failed). At a deallocation the value row is `invalid-free`: "frees `p` with
      `free`, but it may be a block of vlibc's allocator" or "frees `p` with `vlibc_free`, but it may be a block of the
      platform's allocator" (the freeing routine's name is the callee's; the allocators are named by class, so no table
      of routine names is needed, audit N6); at a call to a function whose contract has `owns_block` it is `permission`
@@ -110,8 +111,10 @@ same contracts, and left two recommendations for this session (questions 129, 13
    - **Loops** (0047 item 10): each token place gains a snapshot `ktv := loc(block_of(hb), −1).tok` taken when `kt >
      none` (`false` otherwise); the `internal` invariant `(g && kt > none) ==> loc(block_of(hb), −1).tok == ktv`
      **replaces** 0047's `(g && kt > none) ==> loc(block_of(hb), −1).tok` (kept beside it, it fails on entry for a vlibc
-     block: audit S1); and its back-edge row becomes `g ==> !(perm(tok) < kt || (kt > none && tok != ktv))`, `permission` as before: a body that
-     frees the block and allocates another in its variable fails that user-category row before any `internal` row can.
+     block: audit S1); and its back-edge row becomes `g ==> !(perm(tok) < kt || (kt > none && tok != ktv))`, `permission` as
+     before, written as an ending row (0047 item 10 as amended: `if (!cond) { assert false }`, so a failed row ends its
+     path). The loop body of a vlibc heap program also splits each pointer variable it assigns against each token place
+     (`v == hb`, `block_of(v) == block_of(hb)`), without which the value row's read of the token could not be framed.
    - **A vlibc block at a call** to a function whose contract names its cells (`owns(*p)`, `reads(*p)`) works as any
      block does: the cells, the liveness fraction and the flags pass and come back. Only `owns_block` and `owning` need
      the platform's value. A spelling for a vlibc block in a contract is d2b's (with owning results).

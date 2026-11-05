@@ -12,9 +12,10 @@
 namespace {
 
 // malloc's or calloc's view for one object of `pointee`: `Ptr(T) malloc(void) ensures(r == NULL || owns_block(r) [&& every leaf is zero])`.
-Function* heap_alloc_view(Kit& k, const char* name, Type pointee, bool zeroed) {
+Function* heap_alloc_view(Kit& k, const char* name, Type pointee, bool zeroed, Allocator al = Allocator::Platform) {
   const Type pt = k.ptr(pointee);
   Function* f = k.fn(name, pt);
+  f->allocator = al;  // decision 0050 item 3: a `vlibc_` view's token has the value false
   k.trusted(f, std::string("vlibc: ") + name + " returns NULL or one new block; typed view: one " + pointee.str() + ", decision 0047");
   const Expr* is_null = k.eq(k.R(f), k.nul(pt));
   const Expr* rhs = k.b.atom(AtomKind::OwnsBlock, k.R(f), -1, k.at());
@@ -38,9 +39,10 @@ Function* heap_alloc_view(Kit& k, const char* name, Type pointee, bool zeroed) {
 }
 
 // free's view for a pointer to `pointee`: `void free(T *ptr) requires(ptr == NULL || owns_block(ptr))`, `deallocates`, the parameter `ref_to_uninit`.
-Function* heap_free_view(Kit& k, Type pointee) {
+Function* heap_free_view(Kit& k, Type pointee, Allocator al = Allocator::Platform) {
   const Type pt = k.ptr(pointee);
-  Function* f = k.fn("free", k.vd, {{"ptr", pt}});
+  Function* f = k.fn(al == Allocator::Vlibc ? "vlibc_free" : "free", k.vd, {{"ptr", pt}});
+  f->allocator = al;
   f->params[0].init = InitMarker::RefToUninit;
   k.trusted(f, "vlibc: free ends the allocation; typed view: one " + pointee.str() + ", decision 0047");
   k.req(f, k.lor(k.eq(k.b.text(k.F(f, 0), "ptr"), k.nul(pt)), k.b.atom(AtomKind::OwnsBlock, k.b.text(k.F(f, 0), "ptr"), -1, k.at())));

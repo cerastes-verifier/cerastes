@@ -228,7 +228,8 @@ include::example$annotations/lambda_once.cpp[tag=once]
 
 The functions of the C library that
 xref:verifying.adoc#vlibc[vlibc] covers (in this version `abort`, `exit`,
-`_Exit`, `malloc`, `calloc` and `free`) are an exception: their contract comes from vlibc's header only. A
+`_Exit`, `malloc`, `calloc` and `free`, and vlibc's own `vlibc_malloc`,
+`vlibc_calloc` and `vlibc_free`) are an exception: their contract comes from vlibc's header only. A
 contract on any other declaration of one of them, a `noreturn` attribute and
 an ownership or initialization marker included, is
 `cerastes-annotation_reserved_library`, even when it repeats vlibc's contract and

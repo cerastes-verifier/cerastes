@@ -945,6 +945,7 @@ void define_heap_rejections();
 #include "selftest_cases15.inc"
 #include "selftest_cases16.inc"
 #include "selftest_cases17.inc"
+#include "selftest_cases18.inc"
 
 namespace {
 
@@ -1133,6 +1134,7 @@ int main(int argc, char** argv) {
   define_heap_read_place_rejections();
   define_heap();
   define_heap_rejections();
+  define_vlibc_heap();
   int bad = 0;
   for (const Case& c : lowering_cases()) {
     std::string problem;

@@ -606,6 +606,17 @@ class Checker {
       else if (!taken || returned)
         err(f.loc, "'" + f.c_name + "' deallocates but its `requires` does not take `owns_block` of its parameter, or its `ensures` returns it (decision 0047 item 2)");
     }
+    // Decision 0050 item 9: vlibc's allocator names only a bodiless, trusted typed view: an allocation (no parameter, a pointer result with an `ensures` `owns_block`
+    // of it and `ref_to_uninit` or not) or a deallocation (`deallocates`).
+    if (f.allocator == Allocator::Vlibc) {
+      bool on_result = false;
+      for (const AtomSite& s : block_sites)
+        if (s.in_ensures && operand_key(s) == kResultSiteKey) on_result = true;
+      if (f.body != nullptr || f.trusted_reason.empty())
+        err(f.loc, "'" + f.c_name + "' belongs to vlibc's allocator but is not a bodiless, trusted view (decision 0050 item 9)");
+      else if (f.deallocates ? on_result : !(f.ret.is_ptr() && on_result && f.params.empty()))
+        err(f.loc, "'" + f.c_name + "' belongs to vlibc's allocator but is neither a deallocation view nor an allocation view (a pointer result owned by its `ensures`, no parameter; decision 0050 item 9)");
+    }
   }
 
   // The reads `*p` (`Deref(Formal k)`) of a contract expression, each with whether it stands under `Old`.

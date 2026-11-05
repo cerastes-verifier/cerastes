@@ -349,7 +349,17 @@ Three facts shape this record (the planning surveys; P72 confirms them):
     pointer stays well-formed and an encoder precision loss is no longer a user message; `heap_loop_swap_false_alarm.c`
     loses its two `permission` lines (question 135, pre-approved). **S2:** the back-edge exemption is exact for the token
     places; a pointer carried by the loop beside one allocated in each iteration and dropped is a `leak`
-    (`negative/heap_loop_carry_and_leak.c`). Facts: S37 (c), (d).)*
+    (`negative/heap_loop_carry_and_leak.c`). **Ending rows** (question 144, after the first runs: a body that frees a
+    held block and allocates another into its variable exited 3, on 9255b93 too): a heap place's back-edge permission,
+    liveness and token rows are written `if (!cond) { assert false }`, with the row's category, message and position, so
+    a failed row ends its path (a failed `assert cond` is assumed and the path goes on to the automatic invariant, which
+    then fails as `internal`); and each heap place's flag, value and range invariants get a `permission` back-edge row
+    mirroring them ("an iteration of this loop ends with `*p` holding something other than what it began with"):
+    Silicon cannot tell a new allocation from a freed block (a real allocator may return the same address), so the
+    permissions a free consumed can come back with unknown contents. They mirror invariants that held before, so no
+    correct program that verified gains an error; the shape itself is the pinned false alarm of a block allocated in an
+    iteration and kept in a variable declared outside the loop (`heap_loop_replace_false_alarm.c`, M4.5d2b). Facts:
+    S37 (c), (d), (e).)*
 11. **Still rejected** (fail closed; one pin each, the message naming the session): an allocation size other than
     `sizeof(T)` (M4.5e2); an (A) call not converted directly to `T*` (`void *m = malloc(4)`, a discarded or tested
     result, `free(malloc(4))`; M4.7, M8); `void*` objects, parameters and results in user code and every other `void*`
