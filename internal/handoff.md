@@ -4,13 +4,24 @@ The next session reads this file after `CLAUDE.md`, its own section in `plan.md`
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
 rediscover, and holds only what is live (owner, 2026-10-26; consolidated again at M4.5b2b's start, 2026-11-02: §3 is
 regrouped by the session that consumes each note; updated at M4.5c1's, M4.5c2a's, M4.5c2b's, M4.5d1's and M4.5d2a's starts, and
-by S6, a docs session that changed no code: its additions are marked "S6"; and at M4.5d2v's start, 2026-11-04). The text before M4.5d2v is `git show 9255b93:internal/handoff.md`, before S6
+by S6, a docs session that changed no code: its additions are marked "S6"; at M4.5d2v's start, 2026-11-04; and at S7's
+planning, 2026-11-05). The text before M4.5d2v is `git show 9255b93:internal/handoff.md`, before S6
 `git show bb41d55:internal/handoff.md`, before M4.5d2a `git show 9d98fe8:internal/handoff.md`, before M4.5d1 `git show d26a87c:internal/handoff.md`, before M4.5c2b `git show 7f11706:internal/handoff.md`, before M4.5c2a `git show cbdcce5:internal/handoff.md`, before M4.5c1
 `git show 1bfa705:internal/handoff.md`, and before M4.5b2b `git show 38877b4:internal/handoff.md`, whose header names
 every earlier version (each note below keeps its origin in brackets, so its full wording can be found there). Session
 plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session consumes move into its plan.
 
 ## 1. State
+
+- **S7, the next session** (planned 2026-11-05; plan `.claude/plans/s7-code-style.md`, questions 146–149; record 0051
+  next):
+  - **Scope:** cerastes's tool code (`src/`, `include/cerastes.h`) moves to the owner's Boost style, as the full sweep:
+    clang-format's layout, brace initialization, `U` on unsigned literals, one declarator per declaration.
+  - **Enforcement:** a pinned clang-format (PyPI's wheel 23.1.3) and a `check.sh` step.
+  - **Proof:** object files byte-identical with `-g0 -DNDEBUG` at every commit, then `.vpr`/`.map` byte-identical over
+    the whole suite and the VIR self-test.
+  - **Branch:** `s7-code-style` from local `main` at its planning commit.
+  - **When:** S7 runs and merges before M4.5d2b branches, since its diff touches every line of `src/`.
 
 - **M4.5d2v** (2026-11-04/05; record 0050, 0047 amended; plan `.claude/plans/m4-5d2v-allocator.md`, questions 129, 130,
   134–145): done on branch `m4.5d2v-allocator` (from `origin/main` `9255b93`) in the worktree `.claude/worktrees/m4.5d2v`;
@@ -58,10 +69,9 @@ done yet still apply.
 1. **vlibc** (done, 2026-11-05): `main` `6e41fbe` pushed; check its CI on both platforms (Linux needs
    `libclang-rt-21-dev` and the `vm.mmap_rnd_bits` step; the x86-64 box passed all six configurations in a container
    without it). **vlibm:** push its `main` (`1e6982e`, the code style in `CLAUDE.md`; independent of cerastes).
-2. **M4.5d2v:** push `m4.5d2v-allocator` and open its PR (CI's PR tier runs the changed tests; the full check runs nightly
-   or on dispatch, worth triggering once). Its vlibc pin `6e41fbe` is in vlibc's `origin/main`.
-3. **Clean up** after the merge: `git worktree remove .claude/worktrees/m4.5d2v` (the session's probe worktrees and
-   branches, `m4.5d2v-base`, `m4.5d2v-p73`, `m4.5d2v-eb`, are already removed).
+2. **M4.5d2v** (done, seen at S7's planning, 2026-11-05): merged into `origin/main` (`aa488d8`), and its worktree and
+   branch are gone.
+3. **S7's planning commit** is on local `main`, and S7 branches from it. Push it with S7's branch, or before.
 
 ## 3. Open notes, by the session that consumes them
 
@@ -76,7 +86,7 @@ M4.5d2a's plan's Inputs (`.claude/plans/m4-5d2a-heap.md`); those d2a hands on ar
 *M4.5d2a's follow-up (B1, S1, S2, S3) moved into M4.5d2v's plan's Inputs (`.claude/plans/m4-5d2v-allocator.md`).*
 
 **From M4.5d2v** (record 0050, audits `build/m4.5d2v/audit{1,2,3}.md`)
-- **The cerastes code style** (owner, 2026-11-04): question 146; vlibc and vlibm already follow it (their `CLAUDE.md`).
+- *The cerastes code style (question 146) moved into S7's plan (`.claude/plans/s7-code-style.md`).*
 - **For M4.5d2b:** a spelling for a vlibc block in contracts (`owns_block` and `owning` name the platform's allocator
   only; a vlibc block handed over through them is `permission`); the false alarm of a block allocated in an iteration and
   kept in a variable declared outside the loop, now reported in user terms (`heap_loop_replace_false_alarm.c`,
@@ -102,7 +112,7 @@ M4.5d2a's plan's Inputs (`.claude/plans/m4-5d2a-heap.md`); those d2a hands on ar
   construct a chapter shows updates its prose and `console` blocks: the blocks are copied from a run in
   `doc/modules/ROOT/examples/tutorial/` (`../../../../../build/cerastes verify <file>`), and only review checks them. A
   check that reruns each shown command and compares the output is possible later work (0049, Consequences). [S6]
-- **Stale facts found, not fixed** (no code changes in S6): `src/backend/register_attributes.h`'s header comment says
+- **Stale facts found, not fixed** (no code changes in S6; S7's Part 3 fixes the first): `src/backend/register_attributes.h`'s header comment says
   "eight attributes" (it registers more: `decreases`, `owning`, `uninit`, `ref_to_uninit`, `must_init`, …); `plan.md` §0
   and the M5 plan name `internal/soundness/`, which does not exist (the developer guide says so; the arguments are in
   the decision records and `internal/encoding.md` §3); 0005 item 5 still describes the upstream-only submodule guard that
@@ -367,7 +377,7 @@ not taken go to §3); single-file runs while working (`build/cerastes verify` di
 builds serialized (`lockf build/<session>/build.lock cmake --build build/cmake`); `check.sh` at most twice; the EDG
 suites on the x86-64 host are their own session, but any x86-64 test run a session needs goes to `matt@clang4.cpp.al`
 automatically (owner, 2026-10-29: not Docker multi-arch on the Mac, which is only the fallback when the host is down).
-Record numbers are the next free ones when written (0047 is M4.5d2a's, 0048 and 0049 are taken, 0050 is M4.5d2v's). The
+Record numbers are the next free ones when written (0047 is M4.5d2a's, 0048 and 0049 are taken, 0050 is M4.5d2v's, 0051 is S7's). The
 approved plan is saved as `.claude/plans/<milestone>-<topic>.md` (plan.md, "Session protocol").
 
 Finished sessions: their plans are in `.claude/plans/` (from M4.5b1a on), their results in `internal/status.md` and the
@@ -877,12 +887,16 @@ ending back-edge rows and value rows; not the recommendation, which was to defer
 false alarm with the encoder's errors, plus the platform twin). Also, as directives: vlibc's and vlibm's code follows the
 owner's Boost libraries' style (int128, decimal, charconv), and cerastes's own refactor "may need its own session" (146).
 
-**Open, for the next session:**
+At S7's planning (2026-11-05; recorded in its plan `.claude/plans/s7-code-style.md` and, in the session, record 0051):
+- **146**, the cerastes code-style session: "Follow recommendation". It is a session of its own (S7), after M4.5d2v
+  merged and before M4.5d2b. It is proved behaviour-neutral by byte-identical `.vpr`/`.map` over the whole suite and the
+  VIR self-test, a `check.sh` step keeps it, and `CLAUDE.md` and the developer guide are updated.
+- **147** widened 146's "mechanical": the full style sweep. It adds brace initialization (lambdas keep `=`, as in
+  decimal), `U` on unsigned literals and one declarator per declaration to clang-format's layout. Each commit is proved
+  by byte-identical object files (`-g0 -DNDEBUG`). This was not the recommendation, which was the layout plus
+  declarators, with `U` and braces for new code only.
+- **148**: the pinned clang-format is PyPI's `clang_format` wheel 23.1.3 on both platforms, with a SHA-256 for each,
+  not Homebrew's floating llvm. Ubuntu 26.04 has only clang-format-21, so the two CI jobs would disagree.
+- **149**: lambda bodies are Allman.
 
-146. **The cerastes code-style session.** cerastes's tool code (about 44,000 lines in `src/` and `include/`, 2-space K&R
-     with unbraced one-line `if`s) moves to the owner's Boost style. *Recommended:* a session of its own (S7), right after
-     M4.5d2v merges and before M4.5d2b: mechanical, with Homebrew LLVM's pinned `clang-format` (`BreakBeforeBraces:
-     Allman`, `InsertBraces: true`, `IndentWidth: 4`, `PointerAlignment: Left`, `IndentCaseLabels: true`, about 120
-     columns), `third_party/edg` excluded (EDG's style); proved behaviour-neutral by byte-identical `.vpr`/`.map` over the
-     whole suite and the VIR self-test; a `check.sh` step keeps it; the developer guide's code quotes and `CLAUDE.md`
-     updated.
+**Open, for the next session:** none.

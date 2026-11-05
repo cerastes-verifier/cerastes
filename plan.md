@@ -142,6 +142,22 @@ Every test file starts with expectation lines that `scripts/run_tests.py` checks
 The finished milestones' plans (goals, tasks, acceptance) are in the commit named above; `internal/status.md` has a
 row per session.
 
+## Next: S7 — Code style (before M4.5d2b)
+
+**Goal** (owner, 2026-11-05, handoff questions 146–149; plan `.claude/plans/s7-code-style.md`; record 0051 in the session):
+- **Scope:** cerastes's tool code (`src/`, `include/cerastes.h`) moves to the owner's Boost libraries' style, which
+  vlibc and vlibm already follow. The full sweep covers:
+  - clang-format's layout (Allman, braces on every control statement, 4 spaces, `T* p`, about 120 columns);
+  - brace initialization;
+  - `U` on unsigned literals;
+  - one declarator per declaration.
+- **Enforcement:** the pinned clang-format is PyPI's wheel 23.1.3 on both platforms, and a `check.sh` step keeps the
+  style.
+- **Proof:** every commit has byte-identical object files (`-g0 -DNDEBUG`), and `.vpr`/`.map` are byte-identical over
+  the whole suite and the VIR self-test.
+- **Unchanged:** no test, expectation or user-visible behaviour.
+- **When:** S7 merges before M4.5d2b branches.
+
 ## M4 — The rest of C
 
 **Goal:** every C23 construct that VeriFast verifies in C is verified by cerastes, or deliberately deferred with a
