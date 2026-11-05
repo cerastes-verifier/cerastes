@@ -1530,7 +1530,7 @@ TOK_STATEMENT_RE = re.compile(r"^\s*(?P<kw>assert|requires|ensures|invariant)\b"
 # (one line `if (kt_<n> > none) { ktv_<n> := ... }`, or the assignment alone on a line right below `if (kt_<n> > none) {`).  It is the
 # only read of a token's value that is stored: a local `Bool` that the loop's invariant and back-edge row compare with the cell.
 KTV_ASSIGN = r"(?P<v>ktv_[\w$']*)\s*:=\s*(?P<slot>loc\(.*\))\.tok"
-KTV_IF = r"if\s*\(\s*kt(?:_[\w$']*)?\s*>\s*none\s*\)\s*\{"
+KTV_IF = r"if\s*\(\s*(?P<g>kt(?:_[\w$']*)?)\s*>\s*none\s*\)\s*\{"
 KTV_ONE_LINE_RE = re.compile(rf"^\s*{KTV_IF}\s*{KTV_ASSIGN}\s*\}}\s*$", re.S)
 KTV_ALONE_RE = re.compile(rf"^\s*{KTV_ASSIGN}\s*$", re.S)
 KTV_IF_LINE_RE = re.compile(rf"^\s*{KTV_IF}\s*$")
@@ -1883,12 +1883,18 @@ def lint_heap_token(src: Source, decls: list[Decl], add: Callable[[int, str], No
             elif is_ending_row(src, lineno):
                 pass  # an ending back-edge row: the token rules above have read its `tok`s as an assert's
             elif (km := KTV_ONE_LINE_RE.match(code) or KTV_ALONE_RE.match(code)) is not None:
-                alone = KTV_ONE_LINE_RE.match(code) is None
                 above = next((c for c in reversed(src.code[:lineno - 1]) if c.strip()), "")
+                guard = km.group("g") if "g" in km.groupdict() else None
+                if guard is None and (gm := KTV_IF_LINE_RE.match(above)) is not None:
+                    guard = gm.group("g")
                 # (the slot itself is the loop above's check: any `.tok` not at `loc(block_of(...), -1)` is reported there)
-                if alone and KTV_IF_LINE_RE.match(above) is None:
+                if guard is None:
                     add(lineno, f"`{km.group('v')} := ....tok` outside `if (kt_<n> > none) {{ ... }}`: the loop value snapshot is taken "
                                 "only where the loop holds the token (decision 0050 item 5)")
+                elif not guard.startswith("kt_") or km.group("v") != "ktv" + guard[2:]:
+                    add(lineno, f"`{km.group('v')}` is taken under the guard of `{guard}`: the snapshot of a place's value is taken where "
+                                "that same place's `kt_<n>` is held, so its name is `ktv_<n>` for the guard `kt_<n> > none` "
+                                "(decision 0050 item 5)")
             elif re.search(r"\.tok\s*:=", code):
                 add(lineno, "assignment to `tok`: a token is created only by a postcondition (decision 0047 item 2)")
             elif TOK_STATEMENT_RE.match(code):

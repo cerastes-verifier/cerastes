@@ -5,7 +5,7 @@
 # soundness-auditor read the diff (record 0030 item 5). Never regenerate it to make the check pass.
 # Regenerate (after the audit): python3 scripts/vlibc_contracts.py list --include-dir third_party/vlibc/include/vlibc
 # and keep these '#' lines on top. Lines starting with '#' and blank lines are ignored by `check`.
-# Written from vlibc at 44cb520 (cerastes M4.5d2v: the vlibc_ allocator declared beside the malloc family, decision 0050; pointers on the type, the owner's code style).
+# Written from vlibc at 6e41fbe (its include/ is 44cb520's) (cerastes M4.5d2v: the vlibc_ allocator declared beside the malloc family, decision 0050; pointers on the type, the owner's code style).
 _Exit | stdlib.h | void _Exit(int status) CERASTES_ENSURES(false); | never returns (C23 7.24.4.5)
 abort | stdlib.h | void abort(void) CERASTES_ENSURES(false); | never returns (C23 7.24.4.1)
 calloc | stdlib.h | void* calloc(size_t __nmemb, size_t __size) CERASTES_ENSURES(__r, __r == NULL || (cerastes_owns_block(__r, __nmemb * __size) && cerastes_zeroed(__r))); | returns NULL or the start of a new allocation of nmemb * size bytes, all zero (C23 7.24.3.2)

@@ -3879,17 +3879,32 @@ class HeapTokenTests(unittest.TestCase):
 
     # Decision 0050 item 5 (M4.5d2v): the loop value snapshot `ktv_<n>`, the one stored read of a token's value.
     def test_a_loop_value_snapshot_under_its_guard_is_clean(self):
-        for body in ([f"  var ktv_h1: Bool := false", f"  if (kt > none) {{ ktv_h1 := {self.SLOT} }}", Check(self.LEAK, A, "leak")],
-                     [f"  var ktv_h1: Bool := false", "  if (kt > none) {", f"    ktv_h1 := {self.SLOT}", "  }", Check(self.LEAK, A, "leak")],
-                     [f"  var ktv_h1: Bool := false", "  if (kt_h1__0 > none) {", f"    ktv_h1 := {self.SLOT}", "  }", Check(self.LEAK, A, "leak")]):
+        for body in ([f"  var ktv_h1: Bool := false", f"  if (kt_h1 > none) {{ ktv_h1 := {self.SLOT} }}", Check(self.LEAK, A, "leak")],
+                     [f"  var ktv_h1: Bool := false", "  if (kt_h1 > none) {", f"    ktv_h1 := {self.SLOT}", "  }", Check(self.LEAK, A, "leak")],
+                     [f"  var ktv_h1__0: Bool := false", "  if (kt_h1__0 > none) {", f"    ktv_h1__0 := {self.SLOT}", "  }", Check(self.LEAK, A, "leak")]):
             with self.subTest(body=body):
                 self.assertEqual(self.strict(self.fixture(body=body)), [])
+
+    def test_a_snapshot_under_another_places_guard_is_a_problem(self):
+        # audit round 2 N8: `ktv_<n>` is taken under its own `kt_<n>`, not under the guard of another place
+        cases = {
+            "another place (one line)": [f"  if (kt_h2 > none) {{ ktv_h1 := {self.SLOT} }}"],
+            "another place (two lines)": ["  if (kt_h2 > none) {", f"    ktv_h1 := {self.SLOT}", "  }"],
+            "a longer suffix": ["  if (kt_h1__0 > none) {", f"    ktv_h1 := {self.SLOT}", "  }"],
+            "a shorter suffix": ["  if (kt_h1 > none) {", f"    ktv_h1__0 := {self.SLOT}", "  }"],
+            "the unnamed guard": [f"  if (kt > none) {{ ktv_h1 := {self.SLOT} }}"],
+        }
+        for what, body in cases.items():
+            with self.subTest(what=what):
+                probs = self.strict(self.fixture(body=[*body, Check(self.LEAK, A, "leak")]))
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("is taken under the guard of", probs[0])
 
     def test_the_value_invariant_and_back_edge_row_over_the_snapshot_are_clean(self):
         body = [
             "  var i: Int := 0",
             "  var ktv_h1: Bool := false",
-            f"  if (kt > none) {{ ktv_h1 := {self.SLOT} }}",
+            f"  if (kt_h1 > none) {{ ktv_h1 := {self.SLOT} }}",
             "  while (i < 3)",
             Check(f"    invariant p != null ==> acc({self.SLOT}, kt)", INV, "internal"),
             Check(f"    invariant (kt > none) ==> {self.SLOT} == ktv_h1", INV, "internal"),

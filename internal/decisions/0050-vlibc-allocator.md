@@ -1,6 +1,8 @@
 # 0050 — vlibc's allocator: `vlibc_malloc` and its family, blocks that know their allocator (M4.5d2v)
 
-- **Status:** draft (2026-11-04), written before code (invariant 6); revised after audit round 1 (Opus, on the draft:
+- **Status:** accepted (2026-11-05, M4.5d2v; revised after audit round 2 — B1, the token row's read, item 5 — and its
+  re-audit — B1, the result split against the call's own arguments, 0047 item 6 — `build/m4.5d2v/audit{2,3}.md`),
+  written before code (invariant 6); revised after audit round 1 (Opus, on the draft:
   B1 — the value rows gated on vlibc allocations alone left `vlibc_free` without its value row in programs that allocate
   only with the platform (every C++ program), item 4; S1 — the loop value invariant replaces 0047's conjunct, item 5; S2 —
   the encoder's class fails closed, item 2; S3–S5 tests and the header's conditionals, items 2 and 11; N1–N14, taken in
@@ -62,8 +64,9 @@ same contracts, and left two recommendations for this session (questions 129, 13
 2. **Declarations and the pairing check** (0048 item 2 as built). `<vlibc/stdlib.h>` declares, after `free` and inside
    `#ifdef __cplusplus extern "C" { #endif … }`, `vlibc_malloc`, `vlibc_calloc` and `vlibc_free` with `malloc`'s,
    `calloc`'s and `free`'s contracts token for token, each under its own tag, and the four functions of item 6 with no
-   contract, untagged, with reserved parameter names. Lines 1–52 of the header are unchanged, so every existing `.map`
-   row that points into it stays. `scripts/vlibc_contracts.py` refuses a tagged `vlibc_X` whose `X` is not tagged in the
+   contract, untagged, with reserved parameter names. The header's line numbers are unchanged (vlibc `44cb520` respells its
+   pointers on the type, the owner's code style, a whitespace-only change of the six old trusted rows), so every existing
+   `.map` row that points into it stays. `scripts/vlibc_contracts.py` refuses a tagged `vlibc_X` whose `X` is not tagged in the
    same header, whose declaration differs from `X`'s once the name is substituted, or that is not inside an `extern "C"`
    block, and refuses a tagged declaration written with a one-line `extern "C"` (its shape could not be read). The
    generated `vlibc_names.inc` gains a third field, the standard name a `vlibc_` entry pairs with, so the encoder's name
@@ -99,9 +102,14 @@ same contracts, and left two recommendations for this session (questions 129, 13
    on allocation views alone left `vlibc_free` of a platform block — every C++ program's only vlibc call, item 7 — to
    Silicon's own precondition check, exit 3; or, had the view taken the platform's conjunct, verified.)
 5. **Rows and loops in a vlibc heap program.**
-   - **The token row** (0047 item 6, and the call and return rows of 0047 item 4) becomes two rows: the permission
-     (today's category and message), then the value, guarded by the permission (`perm(tok) == write ==> value`: a value
-     read must be framed even on the path where the permission row failed). At a deallocation the value row is `invalid-free`: "frees `p` with
+   - **The token row** (0047 item 6, and the call and return rows of 0047 item 4) becomes two rows that each **read**
+     the token under its permission: `!(perm(tok) != write || tok != tok)` (today's category and message), then
+     `!(perm(tok) != write || <the other allocator's value>)` (the mismatch). An assertion on `perm(tok)` alone, or
+     `perm(tok) == write ==> value`, can leave Silicon unable to tell which held token the pointer designates, and the next
+     read of the token is then Silicon's own permission error (exit 3 on a correct program; audit round 2, B1): the read
+     in each row resolves it for a pointer from an allocation and for a loaded pointer (S37 (f)); in general a case split
+     on the candidate receivers resolves it, which is why a call's pointer result is split against its own pointer
+     arguments (0047 item 6 as amended; audit round 3, S2). At a deallocation the value row is `invalid-free`: "frees `p` with
      `free`, but it may be a block of vlibc's allocator" or "frees `p` with `vlibc_free`, but it may be a block of the
      platform's allocator" (the freeing routine's name is the callee's; the allocators are named by class, so no table
      of routine names is needed, audit N6); at a call to a function whose contract has `owns_block` it is `permission`

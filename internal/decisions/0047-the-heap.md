@@ -240,7 +240,11 @@ Three facts shape this record (the planning surveys; P72 confirms them):
    `lifetime` (0028 item 3a) and any access `permission`.
    *(M4.5d2v: the `WF(p)` row is `internal` at calls and returns again; item 10 had made it `permission` at calls, and
    item 10's amendment keeps the pointers a loop assigns well-formed instead. Record 0050 splits the token row in a
-   program that uses vlibc's allocator: the permission, then the value naming the allocator.)*
+   program that uses vlibc's allocator into two rows that each read the token: the permission, then the value naming
+   the allocator. In a heap program a call's pointer result (not a view's) is split against the call's own pointer
+   arguments (`if (r == a) { }`): without it a correct program freeing a result that may be one of its arguments' blocks
+   exited 3 (audit round 2 S4, older than d2v; `heap_pick_live.c`); a split against every earlier pointer local made the
+   paths grow with the square of the calls and timed out correct programs (audit round 3 B1; `heap_call_results_many.c`).)*
    - **The argument's use check** (0028 item 3a: every pointer value passed as an argument is checked live first) is
      not written for a (D) call's argument when the argument is the pointer itself (a variable, a member read, a
      `T*`-typed expression without effects): the rows above check more (the token, then the whole liveness cell), so
@@ -358,7 +362,8 @@ Three facts shape this record (the planning surveys; P72 confirms them):
     Silicon cannot tell a new allocation from a freed block (a real allocator may return the same address), so the
     permissions a free consumed can come back with unknown contents. They mirror invariants that held before, so no
     correct program that verified gains an error; the shape itself is the pinned false alarm of a block allocated in an
-    iteration and kept in a variable declared outside the loop (`heap_loop_replace_false_alarm.c`, M4.5d2b). Facts:
+    iteration and kept in a variable declared outside the loop (`heap_loop_replace_false_alarm.c`, M4.5d2b; with the
+    platform's allocator the reallocated `q` may also alias `p` after the loop head, so `*p`'s rows are reported too). Facts:
     S37 (c), (d), (e).)*
 11. **Still rejected** (fail closed; one pin each, the message naming the session): an allocation size other than
     `sizeof(T)` (M4.5e2); an (A) call not converted directly to `T*` (`void *m = malloc(4)`, a discarded or tested

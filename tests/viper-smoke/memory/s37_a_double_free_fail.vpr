@@ -110,8 +110,8 @@ method free_twice()
   assert perm(p.v_int) == write && perm(p.d_int) == write
   p.v_int := 1
   p.d_int := true
-  assert perm(loc(block_of(p), -1).tok) == write // invalid-free: no token: a double free, a local, a global or a member
-  assert !loc(block_of(p), -1).tok // invalid-free: the block is the other allocator's
+  assert !((perm(loc(block_of(p), -1).tok) != write) || (loc(block_of(p), -1).tok != loc(block_of(p), -1).tok)) // invalid-free: no token: a double free, a local, a global or a member
+  assert !((perm(loc(block_of(p), -1).tok) != write) || loc(block_of(p), -1).tok) // invalid-free: the block is the other allocator's
   assert offset_of(p) == 0 // invalid-free: not at the start of an allocation
   assert lvloc(block_of(p)) == loc(block_of(p), -2) // internal
   assert perm(lvloc(block_of(p)).lv) == write // invalid-free: a pointer may still be in use
@@ -119,8 +119,8 @@ method free_twice()
   assert perm(p.v_int) == write && perm(p.d_int) == write
   assert p.d_int ==> RNGV(p.v_int) // internal: the range of the value under its flag
   f_vlibc_free__3(p)
-  assert perm(loc(block_of(p), -1).tok) == write // invalid-free: no token: a double free, a local, a global or a member
-  assert !loc(block_of(p), -1).tok // invalid-free: the block is the other allocator's
+  assert !((perm(loc(block_of(p), -1).tok) != write) || (loc(block_of(p), -1).tok != loc(block_of(p), -1).tok)) // invalid-free: no token: a double free, a local, a global or a member
+  assert !((perm(loc(block_of(p), -1).tok) != write) || loc(block_of(p), -1).tok) // invalid-free: the block is the other allocator's
   assert offset_of(p) == 0 // invalid-free: not at the start of an allocation
   assert lvloc(block_of(p)) == loc(block_of(p), -2) // internal
   assert perm(lvloc(block_of(p)).lv) == write // invalid-free: a pointer may still be in use

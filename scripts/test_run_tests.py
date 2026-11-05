@@ -14048,8 +14048,9 @@ int f(int x)
         header = Path(self.env.get("CERASTES_VLIBC_DIR") or REAL_ROOT / "third_party" / "vlibc") / "include" / "vlibc" / "stdlib.h"
         lines = header.read_text().splitlines()
         # decision 0047: the malloc family's contracts too (vlibc's <stdlib.h> takes size_t and NULL from <stddef.h>, so
-        # they are declared, with C++ linkage, when the platform's header is skipped)
-        want = [next(i for i, l in enumerate(lines, 1) if re.match(rf"void \*?{name}\(", l))
+        # they are declared, with C++ linkage, when the platform's header is skipped); `void *` or `void*` (vlibc 44cb520,
+        # pointers on the type); vlibc's own vlibc_ functions have C linkage (extern "C", decision 0050) and are not here
+        want = [next(i for i, l in enumerate(lines, 1) if re.match(rf"void ?\*? ?{name}\(", l))
                 for name in ("abort", "exit", "malloc", "calloc", "free")]
         src = self.tmp / "guard_skipped.cpp"
         src.write_text(self.GUARD_SKIPPED % {"defines": self.GUARD_DEFINES})

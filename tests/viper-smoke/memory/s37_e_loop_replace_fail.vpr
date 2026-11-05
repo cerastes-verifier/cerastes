@@ -1,14 +1,14 @@
-// expect: error assert:assertion.false @ L176
-// expect: error assert:insufficient.permission @ L177
-// expect: error assert:assertion.false @ L177
-// expect: error assert:assertion.false @ L203
-// expect: error assert:assertion.false @ L211
-// expect: error assert:assertion.false @ L214
-// expect: error assert:assertion.false @ L229
-// expect: error assert:assertion.false @ L231
-// expect: error assert:assertion.false @ L242
-// S37 (e), record 0047 item 10 as amended in M4.5d2v (the free-and-reallocate shape, owner 2026-11-05): the body frees the vlibc block q the loop holds (vlibc_free(q); q = vlibc_malloc(...)) beside a second held block p. The back-edge rows of the automatic heap places are written `if (!cond) { assert false }` (a failed row ends its path) and every heap place's flag, value and range invariants have a row of their own; so every error is a user category (permission, leak, invalid-free) and Silicon never reaches an `internal` invariant or reads a token it holds no permission to. Without them this program was exit 3.
-// Emitted by the lowering at this commit from the C program named below (build/cerastes verify --keep-vpr), reduced by hand: the emitted banner and the contracts' well-formedness methods are dropped. Each fixture is a fact about Silicon, independent of the lowering that wrote it (record 0047 item 10, M4.5d2v Part 1). Program: int mixed(int n): p = malloc(int); q = vlibc_malloc(int); *p = 0; *q = 0; while (i < n) { *p = i; vlibc_free(q); q = vlibc_malloc(int); i++; } free(p); vlibc_free(q)  (tests/vlibc/negative/vlibc_alloc_loop_replace.c).
+// expect: error assert:assertion.false @ L178
+// expect: error assert:assertion.false @ L179
+// expect: error assert:assertion.false @ L180
+// expect: error assert:assertion.false @ L205
+// expect: error assert:assertion.false @ L213
+// expect: error assert:assertion.false @ L216
+// expect: error assert:assertion.false @ L233
+// expect: error assert:assertion.false @ L235
+// expect: error assert:assertion.false @ L246
+// S37 (e), record 0047 item 10 as amended in M4.5d2v (the free-and-reallocate shape, owner 2026-11-05), the program of tests/vlibc/negative/vlibc_alloc_loop_replace_false_alarm.c as the lowering emits it at this commit: the body frees the vlibc block q the loop holds and allocates again (vlibc_free(q); q = vlibc_malloc(...)) beside a second held block p. The back-edge rows of the automatic heap places are written `if (!cond) { assert false }` (a failed row ends its path), every heap place's flag, value and range invariants have a row of their own, and the loop body begins with the splits of the reassigned q against the token places (`q == p`, `block_of(q) == block_of(p)`, `block_of(q) == block_of(hb_q)`) so that the value row's read of q's token is resolved: every error is a user category and Silicon never reaches an `internal` invariant. Without the rows this was exit 3 (also with malloc and free, at 9255b93).
+// Emitted by the lowering at this commit from the C program named below (build/cerastes verify --keep-vpr), reduced by hand: the emitted banner and the contracts' well-formedness methods are dropped. Each fixture is a fact about Silicon, independent of the lowering that wrote it (record 0047 item 10, M4.5d2v Part 1). Program: int mixed(int n): p = malloc(int); q = vlibc_malloc(int); *p = 0; *q = 0; while (i < n) { *p = i; vlibc_free(q); q = vlibc_malloc(int); i++; } free(p); vlibc_free(q)  (tests/vlibc/negative/vlibc_alloc_loop_replace_false_alarm.c).
 
 // the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell
 field v_int: Int
@@ -81,8 +81,8 @@ method f_mixed__0(p_n__0: Int) returns (res: Int)
   assert (v_q__2 != null) ==> (perm(lvloc(block_of(v_q__2)).lv) > none)
   if (((v_q__2 == null) ? 1 : 0) != 0) {
     assert (!(v_p__1 == null)) ==> ((v_p__1 == null) || (((v_p__1 == loc(block_of(v_p__1), offset_of(v_p__1))) && (0 <= offset_of(v_p__1))) && (offset_of(v_p__1) <= len(block_of(v_p__1)))))
-    assert (!(v_p__1 == null)) ==> (perm(loc(block_of(v_p__1), (-1)).tok) == write)
-    assert (!(v_p__1 == null)) ==> ((perm(loc(block_of(v_p__1), (-1)).tok) == write) ==> loc(block_of(v_p__1), (-1)).tok)
+    assert (!(v_p__1 == null)) ==> (!((perm(loc(block_of(v_p__1), (-1)).tok) != write) || (loc(block_of(v_p__1), (-1)).tok != loc(block_of(v_p__1), (-1)).tok)))
+    assert (!(v_p__1 == null)) ==> (!((perm(loc(block_of(v_p__1), (-1)).tok) != write) || (!loc(block_of(v_p__1), (-1)).tok)))
     assert (!(v_p__1 == null)) ==> (offset_of(v_p__1) == 0)
     assert (!(v_p__1 == null)) ==> (lvloc(block_of(v_p__1)) == loc(block_of(v_p__1), (-2)))
     assert (!(v_p__1 == null)) ==> (perm(lvloc(block_of(v_p__1)).lv) == write)
@@ -167,14 +167,16 @@ method f_mixed__0(p_n__0: Int) returns (res: Int)
     decreases v_n__0 - v_i__3
   {
     if (v_q__2 == v_p__1) { }
+    if (block_of(v_q__2) == block_of(v_p__1)) { }
     if (v_q__2 == hb_v_q__2__0) { }
+    if (block_of(v_q__2) == block_of(hb_v_q__2__0)) { }
     assert v_p__1 != null
     assert !((perm(v_p__1.v_int) != write) || (perm(v_p__1.d_int) != write))
     v_p__1.v_int := v_i__3
     v_p__1.d_int := true
     assert (!(v_q__2 == null)) ==> ((v_q__2 == null) || (((v_q__2 == loc(block_of(v_q__2), offset_of(v_q__2))) && (0 <= offset_of(v_q__2))) && (offset_of(v_q__2) <= len(block_of(v_q__2)))))
-    assert (!(v_q__2 == null)) ==> (perm(loc(block_of(v_q__2), (-1)).tok) == write)
-    assert (!(v_q__2 == null)) ==> ((perm(loc(block_of(v_q__2), (-1)).tok) == write) ==> (!loc(block_of(v_q__2), (-1)).tok))
+    assert (!(v_q__2 == null)) ==> (!((perm(loc(block_of(v_q__2), (-1)).tok) != write) || (loc(block_of(v_q__2), (-1)).tok != loc(block_of(v_q__2), (-1)).tok)))
+    assert (!(v_q__2 == null)) ==> (!((perm(loc(block_of(v_q__2), (-1)).tok) != write) || loc(block_of(v_q__2), (-1)).tok))
     assert (!(v_q__2 == null)) ==> (offset_of(v_q__2) == 0)
     assert (!(v_q__2 == null)) ==> (lvloc(block_of(v_q__2)) == loc(block_of(v_q__2), (-2)))
     assert (!(v_q__2 == null)) ==> (perm(lvloc(block_of(v_q__2)).lv) == write)
@@ -214,10 +216,12 @@ method f_mixed__0(p_n__0: Int) returns (res: Int)
     assert forperm t: Ref [t.tok] :: (((v_p__1 != null) && (kt_h1__0 > none)) && (t == loc(block_of(v_p__1), (-1)))) || ((((hb_v_q__2__0 != null) && (block_of(hb_v_q__2__0) != block_of(v_p__1))) && (kt_h2__0 > none)) && (t == loc(block_of(hb_v_q__2__0), (-1))))
   }
   if (v_q__2 == v_p__1) { }
+  if (block_of(v_q__2) == block_of(v_p__1)) { }
   if (v_q__2 == hb_v_q__2__0) { }
+  if (block_of(v_q__2) == block_of(hb_v_q__2__0)) { }
   assert (!(v_p__1 == null)) ==> ((v_p__1 == null) || (((v_p__1 == loc(block_of(v_p__1), offset_of(v_p__1))) && (0 <= offset_of(v_p__1))) && (offset_of(v_p__1) <= len(block_of(v_p__1)))))
-  assert (!(v_p__1 == null)) ==> (perm(loc(block_of(v_p__1), (-1)).tok) == write)
-  assert (!(v_p__1 == null)) ==> ((perm(loc(block_of(v_p__1), (-1)).tok) == write) ==> loc(block_of(v_p__1), (-1)).tok)
+  assert (!(v_p__1 == null)) ==> (!((perm(loc(block_of(v_p__1), (-1)).tok) != write) || (loc(block_of(v_p__1), (-1)).tok != loc(block_of(v_p__1), (-1)).tok)))
+  assert (!(v_p__1 == null)) ==> (!((perm(loc(block_of(v_p__1), (-1)).tok) != write) || (!loc(block_of(v_p__1), (-1)).tok)))
   assert (!(v_p__1 == null)) ==> (offset_of(v_p__1) == 0)
   assert (!(v_p__1 == null)) ==> (lvloc(block_of(v_p__1)) == loc(block_of(v_p__1), (-2)))
   assert (!(v_p__1 == null)) ==> (perm(lvloc(block_of(v_p__1)).lv) == write)
@@ -226,8 +230,8 @@ method f_mixed__0(p_n__0: Int) returns (res: Int)
   assert (!(v_p__1 == null)) ==> (v_p__1.d_int ==> (((-2147483648) <= v_p__1.v_int) && (v_p__1.v_int <= 2147483647)))
   f_free__3(v_p__1)
   assert (!(v_q__2 == null)) ==> ((v_q__2 == null) || (((v_q__2 == loc(block_of(v_q__2), offset_of(v_q__2))) && (0 <= offset_of(v_q__2))) && (offset_of(v_q__2) <= len(block_of(v_q__2)))))
-  assert (!(v_q__2 == null)) ==> (perm(loc(block_of(v_q__2), (-1)).tok) == write)
-  assert (!(v_q__2 == null)) ==> ((perm(loc(block_of(v_q__2), (-1)).tok) == write) ==> (!loc(block_of(v_q__2), (-1)).tok))
+  assert (!(v_q__2 == null)) ==> (!((perm(loc(block_of(v_q__2), (-1)).tok) != write) || (loc(block_of(v_q__2), (-1)).tok != loc(block_of(v_q__2), (-1)).tok)))
+  assert (!(v_q__2 == null)) ==> (!((perm(loc(block_of(v_q__2), (-1)).tok) != write) || loc(block_of(v_q__2), (-1)).tok))
   assert (!(v_q__2 == null)) ==> (offset_of(v_q__2) == 0)
   assert (!(v_q__2 == null)) ==> (lvloc(block_of(v_q__2)) == loc(block_of(v_q__2), (-2)))
   assert (!(v_q__2 == null)) ==> (perm(lvloc(block_of(v_q__2)).lv) == write)

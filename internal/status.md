@@ -10,72 +10,95 @@ history table; the full log up to M4.4c is `git show 1fcc43b:internal/status.md`
 `git show 5ffb1a2:internal/status.md`, M4.5b2a's `git show 38877b4:internal/status.md`, M4.5b2b's
 `git show 1bfa705:internal/status.md`, M4.5c1's `git show cbdcce5:internal/status.md`, and M4.5c2a's
 `git show 7f11706:internal/status.md`, M4.5c2b's `git show d26a87c:internal/status.md`, and M4.5d1's
-`git show 9d98fe8:internal/status.md`, and M4.5d2a's `git show bb41d55:internal/status.md`.
+`git show 9d98fe8:internal/status.md`, M4.5d2a's `git show bb41d55:internal/status.md`, and S6's `git show 9255b93:internal/status.md`.
 
-## S6 — a tutorial and a developer guide (2026-11-04): done on branch `s6-tutorial`
+## M4.5d2v — vlibc's allocator, with the M4.5d2a re-audit's B1–S3 (2026-11-04/05): done on branch `m4.5d2v-allocator`
 
-Plan: `.claude/plans/s6-tutorial.md`. Record 0049. Read `internal/handoff.md` next: §2 (owner steps: this branch's PR, then
-the website), §3 ("M4.5d2a follow-up" is still the next code work; "S6 notes"), §8 (questions 131–133).
+Plan: `.claude/plans/m4-5d2v-allocator.md`. Record 0050; 0047 amended (items 6, 10). Read `internal/handoff.md` next: §2 (owner
+steps: vlibc is pushed; vlibm, then this branch's PR), §3, §8 (question 146, the cerastes code-style session).
 
-**Owner decisions:** at planning (2026-11-04), the layout (the tutorial and the developer guide in this repository's
-`doc/`, the website the front door: "I agree this is the right approach"), 131 (S6 runs before the M4.5d2a re-audit's
-fixes), 132 (a minimal landing page on the website), 133 (a tutorial chapter lands with the session that completes its
-concept); three Sonnet implementers. During the session: no full test suite, only the examples ("You don't need to run
-the full testing suite. Just the examples so that you can insert their information").
+**Owner decisions:** at planning (2026-11-04, each the recommendation): 129, 130, 134–142 (handoff §8). During the session:
+143 (two new Part 1 twins redesigned to one cause after their first run), 144 (the free-and-reallocate exit 3, older than
+d2v, fixed here, not pinned), 145 (its correct program pinned as a false alarm with the encoder's errors), and the code style
+of vlibc and vlibm: the owner's Boost libraries' (Allman braces, braces on every control statement, 4 spaces, `T* p`;
+cerastes's own refactor is a session of its own, question 146).
 
 **Done**
-- **Record 0049** (amends 0004): one site, three sections of the one `ROOT` module (`pages/tutorial/`, the reference,
-  `pages/dev/`), so the doc lint's `ROOT`-only rule and every 0004 item 7 check apply unchanged; the nav's three titled
-  lists; the tutorial's form; the upkeep rule (question 133, item 4: the chapters owed by M4.5e1, M4.5f2, M4.6, M4.7, M5,
-  M6, M7); the developer guide summarises and links; the website has links and no code.
-- **Tutorial** (`doc/modules/ROOT/pages/tutorial/`, VerCors-style): an introduction and seven chapters (a first proof,
-  integers, loops, calls, pointers, structures, the heap); 20 verified programs and 24 failing variants in
-  `examples/tutorial/` (`<positive>_<what>_error.c`), every `.c` in both modes, the positives `native-ok`; the `console`
-  blocks copied from runs at the tip (`build/s6/out/`, run in the examples directory; c23 and c++20 print the same).
-- **Developer guide** (`pages/dev/`, eight pages): architecture, building, testing, soundness, adding a feature, the EDG
-  fork, writing documentation; links to the canonical sources on GitHub; no `examples/dev/` files yet (the directory is in
-  the policy lists for later).
-- **Reference touch-ups:** `overview.adoc` rewritten (its status said pointer parameters were rejected and counted
-  sixteen categories; now a summary without counts and "Where to start"); Installation links the tutorial; the nav.
-- **Harness:** `examples/tutorial` and `examples/dev` in `DUAL_MODE_DIRS` and `NATIVE_POLICY_DIRS`, pinned in the
-  self-test; `tests/README.md` names them.
-- **Website** (`cerastes-verifier.github.io`, local `main` `45a3d2f`, not pushed): a paragraph on what cerastes does and
-  three links (Tutorial, Reference, Developer guide) in place of "Under construction"; `npm run build` OK.
-- `CLAUDE.md`'s user-docs line and `plan.md` (the S6 row, M4's Docs paragraph, the tutorial lines of M5, M6, M7).
+- **Part 1, the M4.5d2a re-audit** (0047 item 10 amended): B1's catch-all splits, `block_of` splits between token places and
+  splits against outside holders (needed, S37 (c)); S1's skip of unassigned parameter copies with an atom (t28: timeout →
+  31 s); S3's automatic `internal` `flag ==> WF(v)` invariant and the free row's `WF` `internal` again
+  (`heap_loop_swap_false_alarm.c` lost its two `permission` lines, pre-approved); S2 pinned. Suite after Part 1: 10291
+  passed, 0 failed; only the 18 heap-loop programs' Viper changed.
+- **vlibc's half** (`~/Documents/cerastes/vlibc`, local `main`, `bba61ae..6e41fbe`, pushed by the owner 2026-11-05): `vlibc_malloc`,
+  `vlibc_calloc`, `vlibc_realloc`, `vlibc_free`, `vlibc_aligned_alloc`, `vlibc_free_sized`, `vlibc_free_aligned_sized` over a
+  portable C23 core (size classes in 1 MiB regions, large blocks in their own mappings) and trusted POSIX glue (one mutex,
+  `mmap`, errno); `libvlibc` static; run, stress and threaded tests (80 per configuration) green under ASan/UBSan and TSan
+  on macOS (gcc, clang, gcc-asan, clang-asan, clang-tsan) and on the x86-64 box (all six); CI matrix configurations;
+  `CERASTES_COMMIT` → `9255b93`; restyled to the owner's Boost style; `<stdlib.h>` declares the seven beside the standard
+  names (three with contracts token for token, four contract-less), pointers on the type. vlibm: its `CLAUDE.md` gains the
+  code style (`1e6982e`, NOT pushed).
+- **cerastes's half** (record 0050): the pairing check (`vlibc_contracts.py`: token for token, inside `extern "C"`, after the
+  standard name; conditionals other than the guard and `#ifdef __cplusplus` refused; a third field in `vlibc_names.inc`);
+  a block's allocator as its token's value (`free(vlibc_malloc(n))` and `vlibc_free(malloc(n))` are `invalid-free`;
+  `owns_block` keeps meaning the platform's), gated on any `vlibc_` view; split token rows that each read the token;
+  loop value snapshots; vlibc allocations rejected in C++ (M7); contract-less library routines skipped unless called;
+  `vlibc_` reserved names for C linkage only; the pin `35e9b6f → 6e41fbe`; `trusted_contracts.txt`
+  (three rows added, the six respelled by whitespace).
+- **Two older exit-3 holes fixed** (questions 144, audit round 2 S4): heap places' back-edge rows end their path
+  (`if (!c) { assert false }`) and their value invariants have `permission` rows; a call's pointer result is split against
+  earlier pointer locals in heap programs. Their correct programs are pinned (`heap_loop_replace_false_alarm.c` and the vlibc
+  twin as false alarms until d2b; `heap_pick_live.c` verifies).
+- **Tests and fixtures:** about 60 new tests (Part 1, the vlibc allocator, the audits' gaps), S37 (a)–(f) (70 fixtures);
+  VIR self-test 1561 (`VIR_CASES_MIN`); the lint pins `vlibc_` views from emitted fixtures, reads ending rows, ties `ktv_` to
+  its guard, and reports unknown typed views (it skipped them silently).
+- **Docs:** "vlibc's allocator" in Memory and ownership; Verifying's vlibc section (stale since 0048) rewritten; the
+  `invalid-free` mismatch with its console line; Annotations, Building with ordinary compilers (`libvlibc`), the developer
+  guide's architecture and soundness pages, the tutorial's heap chapter (a pointer); `internal/encoding.md`.
 
-**Checks run** (the owner asked for the examples only, so no `check.sh` and no full self-test):
-`run_tests.py doc/modules/ROOT/examples/tutorial` 172 passed, 0 failed (native-ok: Apple clang 40, GCC 40);
-`check_doc_examples.py` 0 problems (25 pages, 265 source blocks); `build_docs.sh` clean; `--html build/doc` 0 problems;
-every xref fragment of the pages exists in the built HTML (a scratch check); `run_tests.py --check-headers` 3788 ok; the
-self-test classes `NativePolicyTests`, `DualModeTests`, `DocBuildWarningsTests`, `RealDocTreeTests`,
-`WalkerFingerprintTests` 35 OK (a full self-test run mid-session, before the pages included every example, failed only
-in the doc-tree classes). **Not done:** the planned claims audit (started, stopped when the owner ended the session for a
-flight; the owner runs it in another session, handoff §3 "S6 notes"). The lead reviewed the developer guide against the
-code and fixed six claims (VIR's types, the native compilers, the trusted methods, two broken links, a dangling xref).
+**Checks run**
+- `check.sh` (full, `CERASTES_CHECK_BASE` unset), twice. Run 1 stopped in the harness self-test: one test's pattern still
+  expected `void *malloc(` after vlibc's restyle (fixed). Run 2: harness self-test 1108 OK; suite 10424 passed, 0 failed,
+  10 skipped (native-ok Apple clang 1941, GCC 1941); lint 4029 files clean; VIR self-test 1561 cases, 1561 passed;
+  walker oracle and docs OK; its last step, the lint of the VIR self-test's Viper, found 10 problems (the `vl_` cases'
+  views carried `free`'s tag text under `vlibc_free`; fixed after).
+- After run 2 (the re-audit's argument-only result split, the self-test tag fix; delta checks, memory
+  `verify-delta-not-full-check`): `run_tests.py tests/memory tests/vlibc tests/viper-smoke/memory doc/modules/ROOT/examples`
+  5078 passed, 0 failed, 9 skipped (Linux-only); VIR self-test 1561 passed and its lint 1561 files clean; `lint_viper.py`
+  over `build/vpr` 2112 clean; their Viper against the previous full run: 0 changed. The re-audit's probes: the stress
+  programs verify in 2–5 s (one had run over 270 s), and every shape of the old S4 family verifies, none exits 3.
+- Linux (the x86-64 box, container from `cerastes-m4.5d1:runner`, at `b0a86d0`): the same four directories 5030 passed,
+  0 failed; `vlibc_contracts.py check`, its self-test, `test_lint_viper.py`, `lint_viper.py` (2091 clean) OK. vlibc
+  `check.sh all` there (at `cbd7515`): gcc, clang, gcc-asan, clang-asan, gcc-tsan, clang-tsan 76/76 each.
+- vlibc on macOS at `6e41fbe`: `check.sh all` 80/80 in gcc, clang, gcc-asan, clang-asan, clang-tsan.
+- Not run on Linux at the final tip: cerastes's changes after `b0a86d0` and vlibc's `6e41fbe` (CI's).
+- Audits: round 1 on the records (B1, S1–S5: `build/m4.5d2v/audit1.md`), round 2 on the code, the pin and the allocator
+  (B1 an unframed token read, S1–S5: `audit2.md`), the re-audit of round 2's fixes (B1 the quadratic result split, S1–S4:
+  `audit3.md`); every blocking and should-fix item taken. The re-audit's blocking fix (the split against the call's own
+  arguments, the auditor's recommendation, checked on its probes) was not audited again (the cap).
 
 **Surprises**
-- A contract is checked for every value it is about before the body: in an `ensures`, `r` is any value of its type, so
-  `2 * r == n` and `r + b == a` overflow at the contract's line. The examples write `r == n / 2`, `r == a - b`; the
-  integers chapter teaches it (`integers_unsigned_ensures_error.c`).
-- Several variants report two errors: the contract's own `-x`, `a - b` or `a / b` beside the body's.
-- `owns(*q)` dropped from `requires` alone leaves `ensures owns(*q)` rejected (`unsupported_annotation`), so the swap
-  variant uses `reads(*q)`; a double `drop_cell(p)` is `permission` at the call (a direct double `free` is
-  `invalid-free`); a dangling read is `permission`, not `lifetime`.
-- `internal/soundness/`, which `plan.md` §0 and the M5 plan name, does not exist; `src/backend/register_attributes.h`'s
-  header comment still says "eight attributes".
+- Silicon has no freshness: a new allocation may be a freed block (a real allocator reuses addresses), so permissions a
+  free consumed come back with unknown contents; an assertion on `perm(tok)` alone does not resolve which held token a
+  pointer designates, and the next read of it is Silicon's own error (exit 3). Rows now read what they test.
+- Two exit-3 holes older than d2v (free-and-reallocate in a loop; freeing a call's result that may be one of several
+  blocks) were found by this session's tests and audits, not by d2a's. The first fix of the second (splitting a result
+  against every earlier pointer local) timed out correct programs that no suite test exercised: the re-audit's stress
+  probes found it; `heap_call_results_many.c` now pins the cost.
+- The baseline at `9255b93` ran under load 150–240: 80 Silicon timeouts (no wrong outcome); the Part 1 run on a quiet
+  machine had none. Time-sensitive runs need a quiet machine.
+- `void* malloc` and `void *malloc` put the declarator at the same column, so the header restyle left every `.map` row as
+  it was.
 
-**Decision records added:** 0049-tutorial-and-developer-guide (amends 0004).
+**Decision records added:** 0050-vlibc-allocator (amends 0047, 0048, 0046); 0047 amended (items 6, 10).
 
-**First step for the next session.** The M4.5d2a follow-up, unchanged by S6: check CI on `main` (the nightly full check
-after PR #28; the expected Linux red `reject_owning_system_redeclaration.c [c23]`, handoff §2), then fix the re-audit's B1
-and S1 in `src/vir/lower.cpp` (and S2, S3; handoff §3 "M4.5d2a follow-up" holds them: `build/m4.5d2a/audit3.md` went with the removed worktree),
-then M4.5d2v (record 0048; questions 129–130). M4.5d2v owes no tutorial chapter (record 0049 item 4); M4.5e1 owes the
-arrays chapter.
+**First step for the next session.** The owner pushes vlibm's `main` and this branch (vlibc's `main` is pushed; handoff §2); CI decides.
+Then the cerastes code-style session (question 146, if the owner agrees) before M4.5d2b's planning (handoff §4.2).
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 
 | Session | Date | Branch, merge | Records | Outcome |
 |---|---|---|---|---|
+| M4.5d2v vlibc's allocator | 2026-11-04/05 | `m4.5d2v-allocator` | 0050 (0047 amended) | the M4.5d2a re-audit's B1–S3; vlibc's allocator (`vlibc_malloc` and six more, a C23 core over trusted glue, sanitized and threaded tests); blocks know their allocator (the token's value); the pairing check; contract-less library routines; vlibc allocations rejected in C++; two older exit-3 holes fixed; vlibc and vlibm in the owner's Boost style |
 | S6 Tutorial and developer guide | 2026-11-04 | `s6-tutorial` | 0049 | a VerCors-style tutorial (seven chapters, 20 verified programs and 24 failing variants, both modes) and a developer guide (eight pages) as sections of the one site; the overview rewritten; the website's landing page; a chapter per concept from now on (questions 131–133) |
 | M4.5d2a The heap | 2026-11-03/04 | `m4.5d2a-heap` | 0047 | vlibc's `malloc`, `calloc`, `free` (trusted, reserved identifiers, shapes not names); typed views at `void*` → `T*` (one object, `sizeof(T)`); heap blocks with the free token; `invalid-free`; leaks by `forperm` (after `l_end`, at back edges; `main` included); `owns_block`; `owning`/`ref_to_uninit` on functions; sequencing over block sites; loops over blocks held through locals; d2 split (d2v allocator, d2b) |
 | M4.5d1 vlibc in cerastes | 2026-11-03 | `m4.5d1-vlibc` | 0046 | `third_party/vlibc` pinned and guarded; vlibc's shim first in verify mode; library files by path; trust from vlibc's tags, "does not return" from vlibc, reserved names, attributes by position; three routes redirecting trusted calls closed (older than vlibc); `trusted_libc_reason` gone; d2's dependency map |

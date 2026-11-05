@@ -44,7 +44,7 @@ Function* heap_free_view(Kit& k, Type pointee, Allocator al = Allocator::Platfor
   Function* f = k.fn(al == Allocator::Vlibc ? "vlibc_free" : "free", k.vd, {{"ptr", pt}});
   f->allocator = al;
   f->params[0].init = InitMarker::RefToUninit;
-  k.trusted(f, "vlibc: free ends the allocation; typed view: one " + pointee.str() + ", decision 0047");
+  k.trusted(f, std::string("vlibc: ") + f->c_name + " ends the allocation" + (al == Allocator::Vlibc ? " in vlibc's heap" : "") + "; typed view: one " + pointee.str() + ", decision 0047");  // the tag names the routine as the lint pins it
   k.req(f, k.lor(k.eq(k.b.text(k.F(f, 0), "ptr"), k.nul(pt)), k.b.atom(AtomKind::OwnsBlock, k.b.text(k.F(f, 0), "ptr"), -1, k.at())));
   f->deallocates = true;
   k.done(f);

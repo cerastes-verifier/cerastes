@@ -12,10 +12,12 @@ plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session cons
 
 ## 1. State
 
-- **M4.5d2v** (2026-11-04; record 0050; plan `.claude/plans/m4-5d2v-allocator.md`, questions 129, 130 and 134–142):
-  in progress on branch `m4.5d2v-allocator` (from `origin/main` `9255b93`, S6 merged) in the worktree
-  `.claude/worktrees/m4.5d2v`; the baseline in `.claude/worktrees/m4.5d2v-base`. First the M4.5d2a re-audit's B1–S3, then
-  vlibc's allocator (in `~/Documents/cerastes/vlibc`, local `main`) with cerastes's half.
+- **M4.5d2v** (2026-11-04/05; record 0050, 0047 amended; plan `.claude/plans/m4-5d2v-allocator.md`, questions 129, 130,
+  134–145): done on branch `m4.5d2v-allocator` (from `origin/main` `9255b93`) in the worktree `.claude/worktrees/m4.5d2v`;
+  result in `internal/status.md`. vlibc's half is vlibc's local `main` `bba61ae..6e41fbe` (the allocator, its tests and CI,
+  the Boost style), pushed by the owner (2026-11-05: the pin is in vlibc's `origin/main`); vlibm's `main` `1e6982e` (the
+  code style in `CLAUDE.md`, NOT pushed). Audit reports `build/m4.5d2v/audit{1,2,3}.md` in the worktree; probe worktrees
+  `.claude/worktrees/m4.5d2v-base` (the baseline), `m4.5d2v-p73` and `m4.5d2v-eb` (V1 builds), removable.
 
 - **S6** (2026-11-04; record 0049; plan `.claude/plans/s6-tutorial.md`, questions 131–133): a tutorial
   (`doc/modules/ROOT/pages/tutorial/`, seven chapters) and a developer guide (`pages/dev/`, eight pages) as sections of
@@ -50,34 +52,16 @@ The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits beh
 
 ## 2. Owner steps
 
-1. **PR #27 (M4.5d1), after CI:** merge it; then in the main checkout `git reset --keep origin/main` on `main`, and
-   `git worktree remove` the older session worktrees (`m4.5c2b`, `m4.5c2b-base`, `m4.5b2b-base`, `m4.5c1`, `m4.5c1-base`,
-   `m4.5c2a`, `m4.5c2a-base`, `m4.5d1-base`, `m4.5d1`).
-2. **vlibc:** push vlibc's `main` (`35e9b6f`: the malloc family's contracts, `CERASTES_COMMIT` → `f59e4b2`); its CI runs the
-   header and run tests on both platforms.
-3. **M4.5d2a:** push `m4.5d2a-heap` and open its PR against `main` (after #27 merges it shows only d2a's commits). **CI is
-   the final check of this session** (owner, 2026-11-04): if both jobs (`check` on macOS, `check-linux` on ubuntu-26.04) are
-   green, no further action is needed for d2a — merge it and remove `.claude/worktrees/m4.5d2a` and `m4.5d2a-loops`; if one is
-   red, the next session fixes it first (the full check also runs nightly and on dispatch, which is worth triggering once,
-   since the PR tier runs only the changed tests). Known unknowns CI settles: the Linux behaviour of the heap and vlibc
-   tests at the final tip (glibc's `nothrow`/`malloc` attributes on the family, C++'s lost `noexcept`), and the full suite
-   after the last fixes (the last full run on macOS, at `250a2af`, had 19 failures, all fixed or re-expected since).
-   **Expected red on Linux:** `tests/memory/negative/reject_owning_system_redeclaration.c [c23]` (glibc's C23 asm label on
-   `strtol` makes record 0046 item 8's `unsupported_declaration @ L9` come before the pinned `unsupported_annotation @ L9`;
-   the box run at `ad691eb`); the PR tier may skip it (it runs changed tests and a sample), the nightly full check will
-   not, and PR #27 may show it too if d1's `26e4deb` changed it. Fix by choosing a system function with a pointer
-   parameter and no asm label on either platform for the pin (an owner-approved code change, or ask), or by reporting
-   both rejections (then the pin gains a line: ask). The new `reject_malloc_discarded_glibc.c` (`platform: linux`) never
-   ran on Linux; its expectation is the box run's observation of the macOS pin's rejection line.
-   **Even with CI green**, the re-audit's B1 and S1 (§3, "M4.5d2a follow-up") are the next session's first work, before
-   M4.5d2v: they are exit 3 on correct programs and a timeout regression, not wrong verdicts, and no committed test hits
-   them.
-4. **vlibc and vlibm (record 0048):** push vlibc's and vlibm's `main` (each one commit: `CLAUDE.md` rewritten for the
-   `vlibc_`/`vlibm_` names). No header changed, so cerastes's vlibc pin stays at `35e9b6f`.
-5. **S6 (record 0049):** push `s6-tutorial` and open its PR (docs, the policy lists and project files only; CI's PR tier
-   runs the doc examples). After it merges and the docs workflow deploys, push `cerastes-verifier.github.io`'s `main`
-   (`45a3d2f`): its links (`…/doc/tutorial/index.html`, `…/doc/dev/index.html`) exist only after that deploy. Then
-   `git worktree remove .claude/worktrees/s6`.
+The steps before M4.5d2v (PRs #27–#30, S6's website push) are in `git show 9255b93:internal/handoff.md` §2; the ones not
+done yet still apply.
+
+1. **vlibc** (done, 2026-11-05): `main` `6e41fbe` pushed; check its CI on both platforms (Linux needs
+   `libclang-rt-21-dev` and the `vm.mmap_rnd_bits` step; the x86-64 box passed all six configurations in a container
+   without it). **vlibm:** push its `main` (`1e6982e`, the code style in `CLAUDE.md`; independent of cerastes).
+2. **M4.5d2v:** push `m4.5d2v-allocator` and open its PR (CI's PR tier runs the changed tests; the full check runs nightly
+   or on dispatch, worth triggering once). Its vlibc pin `6e41fbe` is in vlibc's `origin/main`.
+3. **Clean up** after the merge: `git worktree remove` `.claude/worktrees/m4.5d2v`, `m4.5d2v-base`, `m4.5d2v-p73`,
+   `m4.5d2v-eb`, and delete the local branches `m4.5d2v-p73`, `m4.5d2v-eb`.
 
 ## 3. Open notes, by the session that consumes them
 
@@ -90,6 +74,22 @@ P4222's markers, P54 and the b2b design points).
 M4.5d2a's plan's Inputs (`.claude/plans/m4-5d2a-heap.md`); those d2a hands on are below.*
 
 *M4.5d2a's follow-up (B1, S1, S2, S3) moved into M4.5d2v's plan's Inputs (`.claude/plans/m4-5d2v-allocator.md`).*
+
+**From M4.5d2v** (record 0050, audits `build/m4.5d2v/audit{1,2,3}.md`)
+- **The cerastes code style** (owner, 2026-11-04): question 146; vlibc and vlibm already follow it (their `CLAUDE.md`).
+- **For M4.5d2b:** a spelling for a vlibc block in contracts (`owns_block` and `owning` name the platform's allocator
+  only; a vlibc block handed over through them is `permission`); the false alarm of a block allocated in an iteration and
+  kept in a variable declared outside the loop, now reported in user terms (`heap_loop_replace_false_alarm.c`,
+  `vlibc_alloc_loop_replace_false_alarm.c`), lifted by owning variables. [d2v]
+- **Costs to watch:** B1's splits against outside holders grow the paths exponentially with the number of holders (S37's
+  adversarial fixture 93 s); a function with several pointer variables beside a heap loop may time out [audit 2 N10].
+- **For M7:** vlibc's allocations are rejected in C++ ([intro.object]/10–13 create objects only for `std::malloc` and its
+  family); placement `new` (and C++23's `start_lifetime_as`) lift it [0050 item 7].
+- **For M4.5e2 / later:** `vlibc_realloc`, `vlibc_aligned_alloc`, `vlibc_free_sized`, `vlibc_free_aligned_sized` get
+  contracts with their standard names'; `free_sized` needs a deallocation shape with a size [0050 item 6].
+- **vlibc's core** is written to be verified after M4.6 (arrays, pointer arithmetic, char storage); the glue stays trusted.
+  vlibc's run test of an allocating SIGABRT handler calls a function that is not async-signal-safe (test-only) [d2v].
+- **S6's claims audit** is still not done (§3 "S6 notes").
 
 **S6 notes** (record 0049)
 - **The claims audit is not done** (owner, 2026-11-04: "I can have the soundness auditor run in a different session"):
@@ -870,3 +870,19 @@ point: vlibc's run, thread and sanitizer tests not green once cerastes's half pa
 allocation views rejected in C++ until M7: [intro.object]/10–13 create objects only for `std::malloc` and its family), 141
 (`vlibc_free_sized`/`vlibc_free_aligned_sized` always check and abort on a mismatch), 142 (macOS GCC: UBSan only if its
 ASan does not run).
+
+During M4.5d2v (2026-11-04/05): 143 (the two Part 1 twins redesigned to fail for one cause after their first run, the
+expectations then set from the redesigned runs), 144 (the free-and-reallocate exit 3, older than d2v, fixed in the session:
+ending back-edge rows and value rows; not the recommendation, which was to defer it), 145 (its correct program pinned as a
+false alarm with the encoder's errors, plus the platform twin). Also, as directives: vlibc's and vlibm's code follows the
+owner's Boost libraries' style (int128, decimal, charconv), and cerastes's own refactor "may need its own session" (146).
+
+**Open, for the next session:**
+
+146. **The cerastes code-style session.** cerastes's tool code (about 44,000 lines in `src/` and `include/`, 2-space K&R
+     with unbraced one-line `if`s) moves to the owner's Boost style. *Recommended:* a session of its own (S7), right after
+     M4.5d2v merges and before M4.5d2b: mechanical, with Homebrew LLVM's pinned `clang-format` (`BreakBeforeBraces:
+     Allman`, `InsertBraces: true`, `IndentWidth: 4`, `PointerAlignment: Left`, `IndentCaseLabels: true`, about 120
+     columns), `third_party/edg` excluded (EDG's style); proved behaviour-neutral by byte-identical `.vpr`/`.map` over the
+     whole suite and the VIR self-test; a `check.sh` step keeps it; the developer guide's code quotes and `CLAUDE.md`
+     updated.

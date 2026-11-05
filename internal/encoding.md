@@ -547,12 +547,15 @@ with an `owns`/`reads`/`live` atom is not a heap place; every pointer local a lo
 automatic `internal` invariant `flag ==> WF(v)` (`WF(v)` without a flag), so the free and call rows' `WF` check is
 `internal`.
 A heap place's back-edge permission, liveness and token rows are ending rows (`if (!cond) { assert false }`, so a failed
-row ends its path), and its flag, value and range invariants have `permission` back-edge rows of their own. **vlibc's
+row ends its path), and its flag, value and range invariants have `permission` back-edge rows of their own. In a heap program
+a call's pointer result (not a view's) is split against the call's own pointer arguments (`if (r == a) { }`), so a
+free of a result that may be one of its arguments' blocks is resolved. **vlibc's
 allocator** (record 0050): a block's allocator is its token's value, `loc(b, -1).tok` true for the platform's and false
 for vlibc's; a `vlibc_` view ensures `!tok` (`Function::allocator`, from the generated name list's pairing field), a
 user's `owns_block` keeps `tok`; in a program whose VIR holds any `vlibc_` view the token row is split (the permission,
 then the guarded value naming the heap) and each loop token place carries its value (`ktv`), the internal invariant
-`tok == ktv` replacing `tok`; every other program's Viper is unchanged.
+`tok == ktv` replacing `tok`; a program that calls no `vlibc_` routine has none of this (its Viper is 0047's, with
+the ending and mirror rows above in its loops).
 
 ## 4. Viper shape
 

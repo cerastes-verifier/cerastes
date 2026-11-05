@@ -1,0 +1,149 @@
+// expect: error assert:assertion.false @ L82
+// S37 (f) twin: `free(r)` of a block of vlibc's heap: exactly one error, the heap mismatch row (invalid-free: frees r with free, but it may be a block of vlibc's allocator); it ends its path.
+// Emitted by the lowering at this commit from the C program named below (build/cerastes verify --keep-vpr), reduced by hand: the emitted banner and the contracts' well-formedness methods are dropped. Each fixture is a fact about Silicon, independent of the lowering that wrote it (record 0047 item 10, M4.5d2v Part 1). Program: the same program with free(r) in place of vlibc_free(r).
+
+// the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell
+field v_int: Int
+field d_int: Bool
+field tok: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// C/C++ function `f`
+method f_f__0(p_c__0: Int) returns (res: Int)
+  requires ((-2147483648) <= p_c__0) && (p_c__0 <= 2147483647)
+  ensures ((-2147483648) <= res) && (res <= 2147483647)
+  decreases
+{
+  var v_c__0: Int
+  var v_p__1: Ref
+  var v_q__2: Ref
+  var v_r__3: Ref
+  var t__0: Ref
+  var t__1: Ref
+  var t__2: Ref
+  v_c__0 := p_c__0
+  t__0 := f_vlibc_malloc__1()
+  assert (t__0 != null) ==> (perm(lvloc(block_of(t__0)).lv) > none)
+  v_p__1 := t__0
+  assert (v_p__1 != null) ==> (perm(lvloc(block_of(v_p__1)).lv) > none)
+  if (((v_p__1 == null) ? 1 : 0) != 0) {
+    assert 1 != (-2147483648)
+    res := -1
+    goto l_end
+  }
+  t__1 := f_vlibc_malloc__1()
+  assert (t__1 != null) ==> (perm(lvloc(block_of(t__1)).lv) > none)
+  v_q__2 := t__1
+  assert (v_q__2 != null) ==> (perm(lvloc(block_of(v_q__2)).lv) > none)
+  if (((v_q__2 == null) ? 1 : 0) != 0) {
+    assert (!(v_p__1 == null)) ==> ((v_p__1 == null) || (((v_p__1 == loc(block_of(v_p__1), offset_of(v_p__1))) && (0 <= offset_of(v_p__1))) && (offset_of(v_p__1) <= len(block_of(v_p__1)))))
+    assert (!(v_p__1 == null)) ==> (!((perm(loc(block_of(v_p__1), (-1)).tok) != write) || (loc(block_of(v_p__1), (-1)).tok != loc(block_of(v_p__1), (-1)).tok)))
+    assert (!(v_p__1 == null)) ==> (!((perm(loc(block_of(v_p__1), (-1)).tok) != write) || loc(block_of(v_p__1), (-1)).tok))
+    assert (!(v_p__1 == null)) ==> (offset_of(v_p__1) == 0)
+    assert (!(v_p__1 == null)) ==> (lvloc(block_of(v_p__1)) == loc(block_of(v_p__1), (-2)))
+    assert (!(v_p__1 == null)) ==> (perm(lvloc(block_of(v_p__1)).lv) == write)
+    assert (!(v_p__1 == null)) ==> (len(block_of(v_p__1)) == 1)
+    assert (!(v_p__1 == null)) ==> (!((perm(v_p__1.v_int) != write) || (perm(v_p__1.d_int) != write)))
+    assert (!(v_p__1 == null)) ==> (v_p__1.d_int ==> (((-2147483648) <= v_p__1.v_int) && (v_p__1.v_int <= 2147483647)))
+    f_vlibc_free__2(v_p__1)
+    assert 1 != (-2147483648)
+    res := -1
+    goto l_end
+  }
+  assert (v_p__1 != null) ==> (perm(lvloc(block_of(v_p__1)).lv) > none)
+  assert (v_q__2 != null) ==> (perm(lvloc(block_of(v_q__2)).lv) > none)
+  t__2 := f_pick__3(v_p__1, v_q__2, v_c__0)
+  if (t__2 == v_p__1) { }
+  if (t__2 == v_q__2) { }
+  assert (t__2 != null) ==> (perm(lvloc(block_of(t__2)).lv) > none)
+  v_r__3 := t__2
+  assert (!(v_r__3 == null)) ==> ((v_r__3 == null) || (((v_r__3 == loc(block_of(v_r__3), offset_of(v_r__3))) && (0 <= offset_of(v_r__3))) && (offset_of(v_r__3) <= len(block_of(v_r__3)))))
+  assert (!(v_r__3 == null)) ==> (!((perm(loc(block_of(v_r__3), (-1)).tok) != write) || (loc(block_of(v_r__3), (-1)).tok != loc(block_of(v_r__3), (-1)).tok)))
+  assert (!(v_r__3 == null)) ==> (!((perm(loc(block_of(v_r__3), (-1)).tok) != write) || (!loc(block_of(v_r__3), (-1)).tok)))
+  assert (!(v_r__3 == null)) ==> (offset_of(v_r__3) == 0)
+  assert (!(v_r__3 == null)) ==> (lvloc(block_of(v_r__3)) == loc(block_of(v_r__3), (-2)))
+  assert (!(v_r__3 == null)) ==> (perm(lvloc(block_of(v_r__3)).lv) == write)
+  assert (!(v_r__3 == null)) ==> (len(block_of(v_r__3)) == 1)
+  assert (!(v_r__3 == null)) ==> (!((perm(v_r__3.v_int) != write) || (perm(v_r__3.d_int) != write)))
+  assert (!(v_r__3 == null)) ==> (v_r__3.d_int ==> (((-2147483648) <= v_r__3.v_int) && (v_r__3.v_int <= 2147483647)))
+  f_free__4(v_r__3)
+  if (((v_c__0 != 0) ? 1 : 0) != 0) {
+    assert (!(v_q__2 == null)) ==> ((v_q__2 == null) || (((v_q__2 == loc(block_of(v_q__2), offset_of(v_q__2))) && (0 <= offset_of(v_q__2))) && (offset_of(v_q__2) <= len(block_of(v_q__2)))))
+    assert (!(v_q__2 == null)) ==> (!((perm(loc(block_of(v_q__2), (-1)).tok) != write) || (loc(block_of(v_q__2), (-1)).tok != loc(block_of(v_q__2), (-1)).tok)))
+    assert (!(v_q__2 == null)) ==> (!((perm(loc(block_of(v_q__2), (-1)).tok) != write) || loc(block_of(v_q__2), (-1)).tok))
+    assert (!(v_q__2 == null)) ==> (offset_of(v_q__2) == 0)
+    assert (!(v_q__2 == null)) ==> (lvloc(block_of(v_q__2)) == loc(block_of(v_q__2), (-2)))
+    assert (!(v_q__2 == null)) ==> (perm(lvloc(block_of(v_q__2)).lv) == write)
+    assert (!(v_q__2 == null)) ==> (len(block_of(v_q__2)) == 1)
+    assert (!(v_q__2 == null)) ==> (!((perm(v_q__2.v_int) != write) || (perm(v_q__2.d_int) != write)))
+    assert (!(v_q__2 == null)) ==> (v_q__2.d_int ==> (((-2147483648) <= v_q__2.v_int) && (v_q__2.v_int <= 2147483647)))
+    f_vlibc_free__2(v_q__2)
+  } else {
+    assert (!(v_p__1 == null)) ==> ((v_p__1 == null) || (((v_p__1 == loc(block_of(v_p__1), offset_of(v_p__1))) && (0 <= offset_of(v_p__1))) && (offset_of(v_p__1) <= len(block_of(v_p__1)))))
+    assert (!(v_p__1 == null)) ==> (!((perm(loc(block_of(v_p__1), (-1)).tok) != write) || (loc(block_of(v_p__1), (-1)).tok != loc(block_of(v_p__1), (-1)).tok)))
+    assert (!(v_p__1 == null)) ==> (!((perm(loc(block_of(v_p__1), (-1)).tok) != write) || loc(block_of(v_p__1), (-1)).tok))
+    assert (!(v_p__1 == null)) ==> (offset_of(v_p__1) == 0)
+    assert (!(v_p__1 == null)) ==> (lvloc(block_of(v_p__1)) == loc(block_of(v_p__1), (-2)))
+    assert (!(v_p__1 == null)) ==> (perm(lvloc(block_of(v_p__1)).lv) == write)
+    assert (!(v_p__1 == null)) ==> (len(block_of(v_p__1)) == 1)
+    assert (!(v_p__1 == null)) ==> (!((perm(v_p__1.v_int) != write) || (perm(v_p__1.d_int) != write)))
+    assert (!(v_p__1 == null)) ==> (v_p__1.d_int ==> (((-2147483648) <= v_p__1.v_int) && (v_p__1.v_int <= 2147483647)))
+    f_vlibc_free__2(v_p__1)
+  }
+  res := 0
+  goto l_end
+  assert false
+  label l_end
+  assert forperm t: Ref [t.tok] :: false
+}
+
+// C/C++ function `vlibc_malloc`
+// cerastes:trusted-contract vlibc: vlibc_malloc returns NULL or the start of a new allocation of size bytes in vlibc's heap, its contents indeterminate (C23 7.24.3.6); typed view: one int (4 bytes), decision 0047
+method f_vlibc_malloc__1() returns (res: Ref)
+  ensures (res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res))))
+  ensures (!(res == null)) ==> (((((((((((res != null) && ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res)))))) && (offset_of(res) == 0)) && acc(loc(block_of(res), (-1)).tok)) && (!loc(block_of(res), (-1)).tok)) && (lvloc(block_of(res)) == loc(block_of(res), (-2)))) && acc(lvloc(block_of(res)).lv)) && (len(block_of(res)) == 1)) && acc(res.v_int)) && acc(res.d_int)) && (res.d_int ==> (((-2147483648) <= res.v_int) && (res.v_int <= 2147483647))))
+  decreases _
+
+// C/C++ function `vlibc_free`
+// cerastes:trusted-contract vlibc: vlibc_free ends the allocation in vlibc's heap that ptr is the start of; vlibc_free(NULL) does nothing (C23 7.24.3.3); typed view: one int (4 bytes), decision 0047
+method f_vlibc_free__2(p_ptr__0: Ref)
+  requires (p_ptr__0 == null) || (((p_ptr__0 == loc(block_of(p_ptr__0), offset_of(p_ptr__0))) && (0 <= offset_of(p_ptr__0))) && (offset_of(p_ptr__0) <= len(block_of(p_ptr__0))))
+  requires (!(p_ptr__0 == null)) ==> (((((((((((p_ptr__0 != null) && ((p_ptr__0 == null) || (((p_ptr__0 == loc(block_of(p_ptr__0), offset_of(p_ptr__0))) && (0 <= offset_of(p_ptr__0))) && (offset_of(p_ptr__0) <= len(block_of(p_ptr__0)))))) && (offset_of(p_ptr__0) == 0)) && acc(loc(block_of(p_ptr__0), (-1)).tok)) && (!loc(block_of(p_ptr__0), (-1)).tok)) && (lvloc(block_of(p_ptr__0)) == loc(block_of(p_ptr__0), (-2)))) && acc(lvloc(block_of(p_ptr__0)).lv)) && (len(block_of(p_ptr__0)) == 1)) && acc(p_ptr__0.v_int)) && acc(p_ptr__0.d_int)) && (p_ptr__0.d_int ==> (((-2147483648) <= p_ptr__0.v_int) && (p_ptr__0.v_int <= 2147483647))))
+  decreases _
+
+// C/C++ function `pick`
+// cerastes:trusted-contract declared here, defined in another unit
+method f_pick__3(p_a__0: Ref, p_b__1: Ref, p_c__2: Int) returns (res: Ref)
+  requires ((-2147483648) <= p_c__2) && (p_c__2 <= 2147483647)
+  requires (p_a__0 == null) || (((p_a__0 == loc(block_of(p_a__0), offset_of(p_a__0))) && (0 <= offset_of(p_a__0))) && (offset_of(p_a__0) <= len(block_of(p_a__0))))
+  requires (p_b__1 == null) || (((p_b__1 == loc(block_of(p_b__1), offset_of(p_b__1))) && (0 <= offset_of(p_b__1))) && (offset_of(p_b__1) <= len(block_of(p_b__1))))
+  ensures (res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res))))
+  ensures ((((((((p_c__2 != 0) ? 1 : 0) != 0) && (((res == p_a__0) ? 1 : 0) != 0)) ? 1 : 0) != 0) || ((((((p_c__2 == 0) ? 1 : 0) != 0) && (((res == p_b__1) ? 1 : 0) != 0)) ? 1 : 0) != 0)) ? 1 : 0) != 0
+  decreases _
+
+// C/C++ function `free`
+// cerastes:trusted-contract vlibc: free ends the allocation ptr is the start of; free(NULL) does nothing (C23 7.24.3.3); typed view: one int (4 bytes), decision 0047
+method f_free__4(p_ptr__0: Ref)
+  requires (p_ptr__0 == null) || (((p_ptr__0 == loc(block_of(p_ptr__0), offset_of(p_ptr__0))) && (0 <= offset_of(p_ptr__0))) && (offset_of(p_ptr__0) <= len(block_of(p_ptr__0))))
+  requires (!(p_ptr__0 == null)) ==> (((((((((((p_ptr__0 != null) && ((p_ptr__0 == null) || (((p_ptr__0 == loc(block_of(p_ptr__0), offset_of(p_ptr__0))) && (0 <= offset_of(p_ptr__0))) && (offset_of(p_ptr__0) <= len(block_of(p_ptr__0)))))) && (offset_of(p_ptr__0) == 0)) && acc(loc(block_of(p_ptr__0), (-1)).tok)) && loc(block_of(p_ptr__0), (-1)).tok) && (lvloc(block_of(p_ptr__0)) == loc(block_of(p_ptr__0), (-2)))) && acc(lvloc(block_of(p_ptr__0)).lv)) && (len(block_of(p_ptr__0)) == 1)) && acc(p_ptr__0.v_int)) && acc(p_ptr__0.d_int)) && (p_ptr__0.d_int ==> (((-2147483648) <= p_ptr__0.v_int) && (p_ptr__0.v_int <= 2147483647))))
+  decreases _

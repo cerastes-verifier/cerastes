@@ -111,8 +111,8 @@ method give_platform_block()
   p.v_int := 1
   p.d_int := true
   assert p != null && WF(p) // permission: the pointer is a block of the platform's allocator?
-  assert perm(loc(block_of(p), -1).tok) == write // permission: the token is held
-  assert loc(block_of(p), -1).tok // permission: the block is the platform's (owns_block; vlibc's blocks cannot be named in a contract yet)
+  assert !((perm(loc(block_of(p), -1).tok) != write) || (loc(block_of(p), -1).tok != loc(block_of(p), -1).tok)) // permission: the token is held
+  assert !((perm(loc(block_of(p), -1).tok) != write) || !loc(block_of(p), -1).tok) // permission: the block is the platform's (owns_block; vlibc's blocks cannot be named in a contract yet)
   assert offset_of(p) == 0 && perm(lvloc(block_of(p)).lv) == write && perm(p.v_int) == write && perm(p.d_int) == write
   eat(p)
   assert false

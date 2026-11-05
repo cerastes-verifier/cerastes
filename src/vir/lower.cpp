@@ -1870,7 +1870,6 @@ class Lowerer {
   }
 
   // `perm(loc(b, -1).tok) == write && loc(b, -1).tok` as ONE atomic assertion (Silicon reports each conjunct of an asserted `&&` as its own error).
-  E token_perm(const E& p) { return low::bin(low::BinOp::Eq, low::perm_of(tok_slot(p), "tok"), low::write_perm()); }  // the permission part of token_held
   E tok_value(const E& p) { return low::field(tok_slot(p), "tok"); }  // the token's value: true for a block of the platform's allocator, false for vlibc's
   E token_held(const E& p) {
     return low::not_(low::bin(low::BinOp::Or, low::bin(low::BinOp::Ne, low::perm_of(tok_slot(p), "tok"), low::write_perm()), low::not_(low::field(tok_slot(p), "tok"))));
@@ -1896,7 +1895,15 @@ class Lowerer {
     add("internal", wf_expr(p), dealloc ? "frees " + pl + ", which may not point to an allocation" : whole);
     // The token row first (it ends its path when the token is not held: a double free, a local, a global, a member, a borrowed pointer), then the offset: a pointer
     // that is not known to point to the start of its block (`drop(struct S *s) requires(owns(*s))`) is one error, the token's, not two.
-    add(cat, vlibc_heap_ ? token_perm(p) : token_held(p),
+    // In a vlibc heap program the token row is two rows that each READ the token under the permission (record 0050 item 5, audit rounds 2 and 3): `!(perm != write || tok != tok)`
+    // keeps today's message and category, and `!(perm != write || <the other allocator's value>)` is the heap mismatch.  What the read buys is shape-specific: for a pointer
+    // from an allocation (a local, a call's result tied to its arguments once split against them) and for a pointer loaded from a cell, a row that reads `tok` makes Silicon
+    // resolve which held token chunk the pointer designates, where an assertion on `perm(tok)` only, or `perm == write ==> value`, leaves it unresolved and the next read of
+    // `tok` is Silicon's own permission error (an exit 3 on a correct program).  In general it does not: a pointer that may be any of several held receivers (a member's
+    // address, a one-line function's parameters) needs a case split on the candidate receivers, as the loop bodies and the call results have.
+    add(cat, vlibc_heap_ ? low::not_(low::bin(low::BinOp::Or, low::bin(low::BinOp::Ne, low::perm_of(tok_slot(p), "tok"), low::write_perm()),
+                                              low::bin(low::BinOp::Ne, tok_value(p), tok_value(p))))
+                         : token_held(p),
         dealloc ? "frees " + pl + ", which may already be freed or may not be an allocation (a local, a global or a member)" : whole);
     if (vlibc_heap_) {
       const E value = tok_value(p);
@@ -1907,9 +1914,10 @@ class Lowerer {
         why = "returns " + pl + " as an `owns_block` allocation of the platform's allocator, but it may be a block of vlibc's, which a contract cannot name yet";
       else
         why = who_needs + " " + pl + " to be a block of the platform's allocator (`owns_block`); it may be a block of vlibc's, which a contract cannot name yet";
-      // read only under the permission (a pointer the loop reassigned may hold no token: the permission row fails without ending its path, and an unguarded read of `tok`
-      // would be Silicon's own permission error, an exit 3, instead of a row)
-      add(cat, low::implies(token_perm(p), want == Allocator::Vlibc ? low::not_(value) : value), why);
+      // `perm != write` first: a pointer that holds no token fails the row above and passes this one (the read of `tok` is under the permission)
+      add(cat, low::not_(low::bin(low::BinOp::Or, low::bin(low::BinOp::Ne, low::perm_of(tok_slot(p), "tok"), low::write_perm()),
+                                  want == Allocator::Vlibc ? value : low::not_(value))),
+          why);
     }
     add(cat, low::bin(low::BinOp::Eq, low::dom("offset_of", {p}), low::int_lit("0")),
         dealloc ? "frees " + pl + ", which may not be the start of an allocation" : whole);
@@ -3915,7 +3923,18 @@ class Lowerer {
       bool block_result = false;
       for (const AtomSite& bs : blocks_of(callee).sites)
         if (bs.in_ensures && block_key(bs) < 0) block_result = true;
-      if (callee.ret.is_ptr() && !block_result) result_splits(callee.ret, value, item.after);
+      if (callee.ret.is_ptr() && !block_result) {
+        // The pointer arguments of the callee's result type: a result the callee's contract ties to its arguments (`r == a || r == b`) may be any of them.
+        std::vector<E> same_type;
+        for (size_t i = 0; i < args.size() && i < callee.params.size(); ++i) {
+          const Type& pt = callee.params[i].type;
+          if (!pt.is_ptr() || pt.pointee == nullptr || callee.ret.pointee == nullptr || !(*pt.pointee == *callee.ret.pointee) || !args[i].leaves.empty() || args[i].e == nullptr) continue;
+          bool dup = false;
+          for (const E& x : same_type) dup = dup || same_expr(x, args[i].e);
+          if (!dup) same_type.push_back(args[i].e);
+        }
+        result_splits(callee.ret, value, item.after, &same_type);
+      }
     }
     Effect fx;
     fx.kind = Effect::Kind::Call;
@@ -5216,7 +5235,11 @@ class Lowerer {
     }
   }
 
-  void result_splits(const Type& ptr_type, const E& r, std::vector<low::LStmt>& out) {
+  // `args`: the call's own pointer arguments of the result's type (a call's own result only; audit round 2 S4 and round 3 B1): in a heap program a result the contract
+  // ties to its arguments (`r == a || r == b`) is one of the blocks the caller passed, and Silicon cannot resolve which token a later `free(r)` reads
+  // (`int *r = pick(p, q, c); free(r);` was an exit 3 also at 9255b93): one split of the result against each such argument.  Against every pointer local of the type it
+  // was quadratic (k locals, m calls: a timeout on programs that verified before).
+  void result_splits(const Type& ptr_type, const E& r, std::vector<low::LStmt>& out, const std::vector<E>* args = nullptr) {
     if (ptr_type.pointee == nullptr || ptr_type.pointee->is_void()) return;
     const Type& target = *ptr_type.pointee;
     const std::string sfx = cell_suffix(target);
@@ -5234,6 +5257,8 @@ class Lowerer {
       }
     for (const WAtom* a : active_w_)
       if (a->kind != AtomKind::Live && a->sfx == sfx) split(a->qb);  // the places of the enclosing loops' written atoms (decision 0040 item 5)
+    if (heap_ && args != nullptr)
+      for (const E& x : *args) split(x);
     const FnAtoms& fa = atoms_of(*fn_.f);
     std::set<std::pair<int, std::vector<int>>> done;
     for (int i = 0; i < fa.nreq; ++i) {
@@ -6185,6 +6210,12 @@ class Lowerer {
     return inv;
   }
 
+  // A case split that `out` does not hold yet (audit round 2, N9: `v == p` came twice when the place's receiver is its base).
+  void case_split_once(std::vector<low::LStmt>& out, E cond) {
+    for (const low::LStmt& st : out)
+      if (st.kind == low::LStmt::Kind::CaseSplit && same_expr(st.expr, cond)) return;
+    case_split(out, std::move(cond));
+  }
   void case_split(std::vector<low::LStmt>& out, E cond) {
     low::LStmt st;
     st.kind = low::LStmt::Kind::CaseSplit;
@@ -6949,8 +6980,8 @@ class Lowerer {
           // Decision 0050 item 5 (a vlibc heap program): the value row of a free, a call or a back edge reads the token's value of a pointer the loop reassigned; Silicon
           // must know which token place it is (or none) before the read, else the read is its own permission error (an exit 3 instead of a row).
           if (vlibc_heap_ && pl.heap && !pl.kt.empty()) {
-            case_split(splits, low::bin(low::BinOp::Eq, low::var(var_name(v)), pl.lroot));
-            case_split(splits, low::bin(low::BinOp::Eq, block_of(low::var(var_name(v))), block_of(pl.lroot)));
+            case_split_once(splits, low::bin(low::BinOp::Eq, low::var(var_name(v)), pl.lroot));
+            case_split_once(splits, low::bin(low::BinOp::Eq, block_of(low::var(var_name(v))), block_of(pl.lroot)));
           }
         }
       }
