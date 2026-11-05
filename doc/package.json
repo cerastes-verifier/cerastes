@@ -7,9 +7,9 @@
     "node": ">=26"
   },
   "devDependencies": {
-    "@antora/cli": "3.2.1",
+    "@antora/cli": "3.2.2",
     "@antora/lunr-extension": "1.0.0-alpha.13",
-    "@antora/site-generator": "3.2.1",
-    "antora": "3.2.1"
+    "@antora/site-generator": "3.2.2",
+    "antora": "3.2.2"
   }
 }
